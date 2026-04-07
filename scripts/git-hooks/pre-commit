@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# Pre-commit hook: block commits containing likely secrets or credentials.
+# Installed automatically by `npm ci` / `npm install` via the prepare script.
+# Bypass with `git commit --no-verify` only when you are certain the match
+# is a false positive.
+
+set -euo pipefail
+
+# High-confidence secret patterns (minimise false positives)
+PATTERNS=(
+  'sk-[a-zA-Z0-9]{20,}'                          # OpenAI / generic API keys
+  'sk-ant-[a-zA-Z0-9]{20,}'                       # Anthropic keys
+  'ghp_[a-zA-Z0-9]{36}'                           # GitHub PATs (classic)
+  'gho_[a-zA-Z0-9]{36}'                           # GitHub OAuth tokens
+  'github_pat_[a-zA-Z0-9_]{80,}'                  # GitHub fine-grained PATs
+  'AKIA[0-9A-Z]{16}'                              # AWS access key IDs
+  'xox[bpsa]-[a-zA-Z0-9./-]{10,}'                 # Slack tokens
+  'SG\.[a-zA-Z0-9_-]{22}\.[a-zA-Z0-9_-]{43}'     # SendGrid API keys
+  '-----BEGIN[[:space:]]+(RSA |EC |DSA |OPENSSH )?PRIVATE KEY' # Private keys
+)
+
+# Files that legitimately discuss secret patterns (docs, examples, this hook)
+SKIP_RE='\.(example|sample|template)$|/pre-commit$'
+
+STAGED=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null || true)
+if [ -z "$STAGED" ]; then
+  exit 0
+fi
+
+FOUND=0
+
+for file in $STAGED; do
+  # Skip exempted files
+  if echo "$file" | grep -qE "$SKIP_RE"; then
+    continue
+  fi
+
+  content=$(git show ":$file" 2>/dev/null || true)
+  if [ -z "$content" ]; then
+    continue
+  fi
+
+  for pattern in "${PATTERNS[@]}"; do
+    if echo "$content" | grep -qE -- "$pattern"; then
+      echo "BLOCKED: Potential secret in $file (pattern: $pattern)"
+      FOUND=1
+      break  # one match per file is enough
+    fi
+  done
+done
+
+if [ "$FOUND" -ne 0 ]; then
+  echo ""
+  echo "Commit blocked: staged files appear to contain secrets or credentials."
+  echo "If this is a false positive, use 'git commit --no-verify' to bypass."
+  exit 1
+fi
+
+exit 0

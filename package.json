@@ -59,6 +59,7 @@
   "main": "main.js",
   "name": "systemsculpt-ai",
   "scripts": {
+    "prepare": "node scripts/install-git-hooks.mjs",
     "build": "node esbuild.config.mjs production",
     "check": "npm run check:plugin",
     "lint:css": "node scripts/lint-css.mjs",
