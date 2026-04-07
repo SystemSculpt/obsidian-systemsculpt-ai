@@ -111,42 +111,82 @@ jobs:
           Add-Type -AssemblyName System.Windows.Forms
           Add-Type -AssemblyName UIAutomationClient
           Add-Type -AssemblyName UIAutomationTypes
-          $deadline = (Get-Date).AddSeconds(30)
+          $shell = New-Object -ComObject WScript.Shell
           $buttonName = 'Trust author and enable plugins'
-          $clicked = $false
-          while ((Get-Date) -lt $deadline -and -not $clicked) {
-            $root = [System.Windows.Automation.AutomationElement]::RootElement
-            if ($root) {
-              $button = $root.FindFirst(
-                [System.Windows.Automation.TreeScope]::Descendants,
-                (New-Object System.Windows.Automation.PropertyCondition(
-                  [System.Windows.Automation.AutomationElement]::NameProperty,
-                  $buttonName
-                ))
-              )
-              if ($button) {
-                try {
-                  $pattern = $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
-                  $pattern.Invoke()
-                  $clicked = $true
-                  Write-Host "Trust prompt dismissed via InvokePattern"
-                } catch {
-                  $shell = New-Object -ComObject WScript.Shell
-                  if ($shell.AppActivate('Obsidian')) {
-                    Start-Sleep -Milliseconds 250
-                    [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
-                    $clicked = $true
-                    Write-Host "Trust prompt dismissed via SendKeys"
-                  }
-                }
-              }
+          $dismissed = $false
+          $method = 'none'
+
+          # Wait for Obsidian process to exist
+          $procDeadline = (Get-Date).AddSeconds(20)
+          $obs = $null
+          while ((Get-Date) -lt $procDeadline) {
+            $obs = Get-Process -Name Obsidian -ErrorAction SilentlyContinue
+            if ($obs) {
+              Write-Host "Obsidian process detected (PID: $($obs[0].Id))"
+              break
             }
-            if (-not $clicked) { Start-Sleep -Milliseconds 500 }
+            Start-Sleep -Seconds 1
           }
-          if ($clicked) {
-            Start-Sleep -Seconds 2
+          if (-not $obs) {
+            throw "Obsidian process not found within 20s of launch"
+          }
+
+          # Allow the Electron window and Chromium-rendered trust dialog to render
+          Write-Host "Waiting 8s for trust dialog to render..."
+          Start-Sleep -Seconds 8
+
+          # Attempt 1: UI Automation (works if Obsidian exposes native controls)
+          $root = [System.Windows.Automation.AutomationElement]::RootElement
+          if ($root) {
+            $button = $root.FindFirst(
+              [System.Windows.Automation.TreeScope]::Descendants,
+              (New-Object System.Windows.Automation.PropertyCondition(
+                [System.Windows.Automation.AutomationElement]::NameProperty,
+                $buttonName
+              ))
+            )
+            if ($button) {
+              try {
+                $pattern = $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
+                $pattern.Invoke()
+                $dismissed = $true
+                $method = 'UIAutomation-InvokePattern'
+              } catch {
+                Write-Host "InvokePattern failed: $_"
+              }
+            } else {
+              Write-Host "UI Automation cannot see trust button (expected with Electron)"
+            }
+          }
+
+          # Attempt 2: Keyboard dismissal (Electron fallback)
+          if (-not $dismissed) {
+            if ($shell.AppActivate('Obsidian')) {
+              Start-Sleep -Milliseconds 500
+              [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+              $dismissed = $true
+              $method = 'AppActivate-Enter'
+            } else {
+              Write-Host "AppActivate('Obsidian') returned false"
+            }
+          }
+
+          # Attempt 3: Retry keyboard after brief wait
+          if (-not $dismissed) {
+            Start-Sleep -Seconds 3
+            if ($shell.AppActivate('Obsidian')) {
+              Start-Sleep -Milliseconds 500
+              [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+              $dismissed = $true
+              $method = 'AppActivate-Enter-retry'
+            }
+          }
+
+          if ($dismissed) {
+            Write-Host "Trust prompt dismissed via $method"
+            Start-Sleep -Seconds 5
           } else {
-            Write-Host "Trust prompt not found within 30s (may already be trusted)"
+            Write-Host "WARNING: Could not dismiss trust prompt (bridge may not start)"
           }
 
       - name: Wait for desktop automation bridge
