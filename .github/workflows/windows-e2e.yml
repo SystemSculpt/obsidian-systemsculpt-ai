@@ -109,14 +109,55 @@ jobs:
         shell: pwsh
         run: |
           Add-Type -AssemblyName System.Windows.Forms
-          Add-Type -AssemblyName UIAutomationClient
-          Add-Type -AssemblyName UIAutomationTypes
-          $shell = New-Object -ComObject WScript.Shell
-          $buttonName = 'Trust author and enable plugins'
-          $dismissed = $false
-          $method = 'none'
 
-          # Wait for Obsidian process to exist
+          # Win32 P/Invoke for direct window input (works when AppActivate does not)
+          Add-Type @"
+            using System;
+            using System.Collections.Generic;
+            using System.Runtime.InteropServices;
+
+            public class WinInput {
+              [DllImport("user32.dll")]
+              [return: MarshalAs(UnmanagedType.Bool)]
+              public static extern bool SetForegroundWindow(IntPtr hWnd);
+
+              [DllImport("user32.dll")]
+              public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+              [DllImport("user32.dll")]
+              public static extern bool PostMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+
+              [DllImport("user32.dll")]
+              public static extern bool EnumWindows(EnumWindowsProc enumProc, IntPtr lParam);
+
+              [DllImport("user32.dll")]
+              public static extern bool IsWindowVisible(IntPtr hWnd);
+
+              [DllImport("user32.dll")]
+              public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+
+              public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+              public static int SendEnterToProcessWindows(int pid) {
+                var sent = 0;
+                EnumWindows((hWnd, lParam) => {
+                  uint procId;
+                  GetWindowThreadProcessId(hWnd, out procId);
+                  if ((int)procId == pid && IsWindowVisible(hWnd)) {
+                    ShowWindow(hWnd, 9);
+                    SetForegroundWindow(hWnd);
+                    PostMessage(hWnd, 0x0100, (IntPtr)0x0D, IntPtr.Zero);
+                    PostMessage(hWnd, 0x0101, (IntPtr)0x0D, IntPtr.Zero);
+                    sent++;
+                  }
+                  return true;
+                }, IntPtr.Zero);
+                return sent;
+              }
+            }
+          "@
+
+          # Wait for Obsidian process
           $procDeadline = (Get-Date).AddSeconds(20)
           $obs = $null
           while ((Get-Date) -lt $procDeadline) {
@@ -128,65 +169,30 @@ jobs:
             Start-Sleep -Seconds 1
           }
           if (-not $obs) {
-            throw "Obsidian process not found within 20s of launch"
+            throw "Obsidian process not found within 20s"
           }
 
-          # Allow the Electron window and Chromium-rendered trust dialog to render
-          Write-Host "Waiting 8s for trust dialog to render..."
-          Start-Sleep -Seconds 8
+          # Wait for Electron to render the trust dialog
+          Write-Host "Waiting 10s for trust dialog to render..."
+          Start-Sleep -Seconds 10
 
-          # Attempt 1: UI Automation (works if Obsidian exposes native controls)
-          $root = [System.Windows.Automation.AutomationElement]::RootElement
-          if ($root) {
-            $button = $root.FindFirst(
-              [System.Windows.Automation.TreeScope]::Descendants,
-              (New-Object System.Windows.Automation.PropertyCondition(
-                [System.Windows.Automation.AutomationElement]::NameProperty,
-                $buttonName
-              ))
-            )
-            if ($button) {
-              try {
-                $pattern = $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
-                $pattern.Invoke()
-                $dismissed = $true
-                $method = 'UIAutomation-InvokePattern'
-              } catch {
-                Write-Host "InvokePattern failed: $_"
-              }
-            } else {
-              Write-Host "UI Automation cannot see trust button (expected with Electron)"
+          # Send Enter key via PostMessage to all visible Obsidian windows
+          # (Electron spawns multiple processes; hit them all)
+          $totalSent = 0
+          $allObs = Get-Process -Name Obsidian -ErrorAction SilentlyContinue
+          foreach ($p in $allObs) {
+            $n = [WinInput]::SendEnterToProcessWindows($p.Id)
+            if ($n -gt 0) {
+              Write-Host "PostMessage Enter sent to PID $($p.Id) ($n visible windows)"
             }
+            $totalSent += $n
           }
 
-          # Attempt 2: Keyboard dismissal (Electron fallback)
-          if (-not $dismissed) {
-            if ($shell.AppActivate('Obsidian')) {
-              Start-Sleep -Milliseconds 500
-              [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
-              $dismissed = $true
-              $method = 'AppActivate-Enter'
-            } else {
-              Write-Host "AppActivate('Obsidian') returned false"
-            }
-          }
-
-          # Attempt 3: Retry keyboard after brief wait
-          if (-not $dismissed) {
-            Start-Sleep -Seconds 3
-            if ($shell.AppActivate('Obsidian')) {
-              Start-Sleep -Milliseconds 500
-              [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
-              $dismissed = $true
-              $method = 'AppActivate-Enter-retry'
-            }
-          }
-
-          if ($dismissed) {
-            Write-Host "Trust prompt dismissed via $method"
+          if ($totalSent -gt 0) {
+            Write-Host "Trust prompt dismissal: Enter sent to $totalSent window(s) via PostMessage"
             Start-Sleep -Seconds 5
           } else {
-            Write-Host "WARNING: Could not dismiss trust prompt (bridge may not start)"
+            Write-Host "WARNING: No visible Obsidian windows found for PostMessage"
           }
 
       - name: Wait for desktop automation bridge
