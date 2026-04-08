@@ -747,6 +747,73 @@ export class SystemSculptService {
     return body;
   }
 
+  /**
+   * Vercel serverless functions enforce a hard 4.5 MB request-body limit
+   * (`FUNCTION_PAYLOAD_TOO_LARGE`).  When a conversation includes base64
+   * images the payload can easily exceed this.
+   *
+   * This method strips `image_url` blocks from older messages (oldest first)
+   * until the serialised body fits within the budget.  The most-recent user
+   * message's images are stripped only as a last resort.
+   *
+   * @returns `true` if any images were removed.
+   */
+  private trimPayloadImages(body: Record<string, any>): boolean {
+    const BUDGET = 3_500_000; // 3.5 MB -- leaves ~1 MB headroom for headers/overhead
+
+    if (JSON.stringify(body).length <= BUDGET) {
+      return false;
+    }
+
+    const messages: any[] | undefined = body.messages;
+    if (!Array.isArray(messages)) return false;
+
+    // Locate the last user message so we can preserve its images longest.
+    let lastUserIndex = -1;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i]?.role === "user") {
+        lastUserIndex = i;
+        break;
+      }
+    }
+
+    const stripImagesFromMessage = (msg: any): boolean => {
+      if (!Array.isArray(msg.content)) return false;
+      const hasImage = msg.content.some((p: any) => p?.type === "image_url");
+      if (!hasImage) return false;
+
+      const textParts = msg.content.filter((p: any) => p?.type !== "image_url");
+      textParts.push({ type: "text", text: "[image omitted to reduce message size]" });
+
+      // Flatten to plain string when only text remains.
+      const allText = textParts.every((p: any) => p?.type === "text");
+      msg.content = allText
+        ? textParts.map((p: any) => String(p?.text ?? "")).join("\n")
+        : textParts;
+      return true;
+    };
+
+    let trimmed = false;
+
+    // Pass 1: strip images from history messages (oldest first), skip latest user msg.
+    for (let i = 0; i < messages.length; i++) {
+      if (i === lastUserIndex) continue;
+      if (stripImagesFromMessage(messages[i])) {
+        trimmed = true;
+        if (JSON.stringify(body).length <= BUDGET) break;
+      }
+    }
+
+    // Pass 2: if still over budget, strip the latest user message's images too.
+    if (JSON.stringify(body).length > BUDGET && lastUserIndex >= 0) {
+      if (stripImagesFromMessage(messages[lastUserIndex])) {
+        trimmed = true;
+      }
+    }
+
+    return trimmed;
+  }
+
   private buildLocalPiRequestPreview(options: {
     prepared: PreparedChatRequest;
     sessionFile?: string;
@@ -1344,6 +1411,14 @@ export class SystemSculptService {
         reasoningEffort,
         webSearchEnabled,
       });
+
+      if (this.trimPayloadImages(requestBody)) {
+        new Notice(
+          "Some images were removed from older messages to fit within the server's request size limit.",
+          8000,
+        );
+      }
+
       const transport = PlatformContext.get().preferredTransport({ endpoint });
 
       debug?.onRequest?.({
