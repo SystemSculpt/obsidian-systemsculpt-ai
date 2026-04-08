@@ -97,21 +97,26 @@ jobs:
           echo '{}' > "${vault_path}/.obsidian/app.json"
           echo '{}' > "${vault_path}/.obsidian/appearance.json"
           echo '["systemsculpt-ai"]' > "${vault_path}/.obsidian/community-plugins.json"
+          # Core plugins config (standard defaults)
+          echo '{"file-explorer":true,"global-search":true,"switcher":true,"command-palette":true,"editor-status":true}' > "${vault_path}/.obsidian/core-plugins.json"
           echo '# SystemSculpt macOS QA' > "${vault_path}/Welcome.md"
 
           # Seed plugin settings with hosted auth
           node --input-type=module -e "
             import fs from 'node:fs';
+            import crypto from 'node:crypto';
             const settings = {
               settingsMode: 'advanced',
               selectedModelId: 'systemsculpt@@systemsculpt/ai-agent',
+              desktopAutomationBridgeEnabled: true,
+              vaultInstanceId: crypto.randomUUID(),
             };
             const licenseKey = process.env.SYSTEMSCULPT_RUNTIME_SMOKE_LICENSE_KEY || '';
             const serverUrl = process.env.SYSTEMSCULPT_RUNTIME_SMOKE_SERVER_URL || '';
             if (licenseKey) settings.licenseKey = licenseKey;
             if (serverUrl) settings.systemSculptServerUrl = serverUrl;
             fs.writeFileSync('${plugin_dir}/data.json', JSON.stringify(settings, null, 2));
-            console.log('Plugin settings seeded');
+            console.log('Plugin settings seeded (bridge enabled)');
           "
 
           echo "Vault prepared at ${vault_path}"
