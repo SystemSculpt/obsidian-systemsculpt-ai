@@ -108,7 +108,7 @@ describe("ListSelectionModal favorites filter button", () => {
     expect(btn!.classList.contains("is-active")).toBe(false);
   });
 
-  it("clicking the button calls toggleShowFavoritesOnly", () => {
+  it("clicking the button calls toggleShowFavoritesOnly", async () => {
     const favoritesService = makeFavoritesService(false) as any;
     const modal = new ListSelectionModal(app, makeItems(), {
       title: "Test",
@@ -122,12 +122,20 @@ describe("ListSelectionModal favorites filter button", () => {
     expect(btn).not.toBeNull();
 
     btn.click();
+    await Promise.resolve();
 
     expect(favoritesService.toggleShowFavoritesOnly).toHaveBeenCalledTimes(1);
   });
 
-  it("clicking the button toggles the is-active class", () => {
+  it("clicking the button toggles the is-active class", async () => {
     const favoritesService = makeFavoritesService(false) as any;
+    // Each click should flip getShowFavoritesOnly
+    let showFavoritesOnly = false;
+    favoritesService.toggleShowFavoritesOnly.mockImplementation(async () => {
+      showFavoritesOnly = !showFavoritesOnly;
+      favoritesService.getShowFavoritesOnly.mockReturnValue(showFavoritesOnly);
+    });
+
     const modal = new ListSelectionModal(app, makeItems(), {
       title: "Test",
       favoritesService,
@@ -140,9 +148,48 @@ describe("ListSelectionModal favorites filter button", () => {
     expect(btn.classList.contains("is-active")).toBe(false);
 
     btn.click();
+    await Promise.resolve();
     expect(btn.classList.contains("is-active")).toBe(true);
 
     btn.click();
+    await Promise.resolve();
     expect(btn.classList.contains("is-active")).toBe(false);
+  });
+
+  it("filters list to show only favorites when active", async () => {
+    const favoritesService = makeFavoritesService(false) as any;
+    // When toggle is called, flip getShowFavoritesOnly to true
+    favoritesService.toggleShowFavoritesOnly.mockImplementation(async () => {
+      favoritesService.getShowFavoritesOnly.mockReturnValue(true);
+    });
+
+    const items: ListItem[] = [
+      { id: "m1", title: "Model A", metadata: { isFavorite: true } },
+      { id: "m2", title: "Model B", metadata: { isFavorite: false } },
+      { id: "m3", title: "Model C", metadata: { isFavorite: true } },
+    ];
+
+    const modal = new ListSelectionModal(app, items, {
+      title: "Select",
+      favoritesService,
+    });
+    modal.open();
+
+    // All 3 items should be visible initially
+    const allItems = modal.contentEl.querySelectorAll(".ss-modal__item");
+    expect(allItems.length).toBe(3);
+
+    // Click the filter button (async handler: toggle resolves, then handleSearch runs)
+    const filterBtn = modal.contentEl.querySelector(
+      ".systemsculpt-favorites-filter"
+    ) as HTMLElement;
+    filterBtn.click();
+
+    // Wait for the async toggle to resolve
+    await Promise.resolve();
+
+    // After filtering, only the 2 favorites should be visible
+    const visibleItems = modal.contentEl.querySelectorAll(".ss-modal__item");
+    expect(visibleItems.length).toBe(2);
   });
 });

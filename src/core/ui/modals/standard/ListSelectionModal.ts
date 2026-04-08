@@ -212,9 +212,9 @@ export class ListSelectionModal extends StandardModal {
     }
 
     // Click handler: toggle filter and update button state
-    this.registerDomEvent(this.favoritesFilterButton, "click", () => {
+    this.registerDomEvent(this.favoritesFilterButton, "click", async () => {
       if (!this.favoritesService || !this.favoritesFilterButton) return;
-      this.favoritesService.toggleShowFavoritesOnly();
+      await this.favoritesService.toggleShowFavoritesOnly();
       this.favoritesFilterButton.classList.toggle("is-active");
       this.handleSearch(this.searchInput?.value ?? "");
     });
@@ -259,12 +259,19 @@ export class ListSelectionModal extends StandardModal {
         this.filteredItems = [...this.items];
       } else {
         const lowerQuery = query.toLowerCase();
-        this.filteredItems = this.items.filter(item => 
-          item.title.toLowerCase().includes(lowerQuery) || 
+        this.filteredItems = this.items.filter(item =>
+          item.title.toLowerCase().includes(lowerQuery) ||
           (item.description && item.description.toLowerCase().includes(lowerQuery))
         );
       }
-      
+
+      // Apply favorites filter if active
+      if (this.favoritesService && this.favoritesService.getShowFavoritesOnly()) {
+        this.filteredItems = this.filteredItems.filter(
+          item => item.metadata?.isFavorite === true
+        );
+      }
+
       this.renderItems();
       
       // Update keyboard navigation item count
