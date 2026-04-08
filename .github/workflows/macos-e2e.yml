@@ -148,6 +148,47 @@ jobs:
           open /Applications/Obsidian.app --args "${vault_path}"
           echo "Obsidian launched with vault ${vault_path}"
 
+      - name: Dismiss trust prompt
+        run: |
+          echo "Waiting 10s for Obsidian trust dialog to render..."
+          sleep 10
+
+          # Try AppleScript keystroke first (sends Enter to frontmost app)
+          # The trust dialog has "Trust author and enable plugins" as the
+          # default button, so Enter/Return dismisses it.
+          for attempt in 1 2 3; do
+            osascript -e '
+              tell application "Obsidian" to activate
+              delay 1
+              tell application "System Events"
+                keystroke return
+              end tell
+            ' 2>&1 || echo "AppleScript attempt ${attempt} failed (expected if accessibility not granted)"
+            sleep 3
+          done
+
+          # Fallback: if AppleScript cannot send keystrokes due to GHA
+          # accessibility restrictions, try clicking the button directly
+          # via AppleScript UI scripting
+          osascript -e '
+            tell application "System Events"
+              tell process "Obsidian"
+                set frontmost to true
+                delay 0.5
+                try
+                  click button "Trust author and enable plugins" of window 1
+                on error
+                  try
+                    click button 1 of sheet 1 of window 1
+                  end try
+                end try
+              end tell
+            end tell
+          ' 2>&1 || echo "UI scripting fallback attempted"
+
+          echo "Trust prompt dismissal complete, waiting 5s for plugin load..."
+          sleep 5
+
       - name: Wait for desktop automation bridge
         run: |
           discovery_dir="${HOME}/.systemsculpt/obsidian-automation"
