@@ -132,42 +132,17 @@ async function main() {
     console.log("WARNING: Trust button not found — vault may already be trusted");
   }
 
-  // On Windows, Obsidian's loadPlugin() calls pathToFileURL(manifest.dir)
-  // but manifest.dir is a RELATIVE path (e.g. ".obsidian\plugins\foo"),
-  // causing "File URL path must be absolute".  This breaks both Obsidian's
-  // auto-load after trust AND our explicit loadPlugin() call.
-  //
-  // Fix: monkeypatch url.pathToFileURL in the renderer to resolve relative
-  // paths against the vault basePath before passing to the original.
-  console.log("Patching pathToFileURL for Windows relative-path compatibility...");
-  await cdp.send("Runtime.evaluate", {
-    expression: `(() => {
-      try {
-        const url = require('url');
-        const path = require('path');
-        if (url.__origPathToFileURL) return 'already-patched';
-        url.__origPathToFileURL = url.pathToFileURL;
-        url.pathToFileURL = function(p) {
-          if (typeof p === 'string') {
-            const isAbs = /^[A-Za-z]:[/\\\\]/.test(p) || p.startsWith('/');
-            if (!isAbs) {
-              const bp = globalThis.app?.vault?.adapter?.basePath || '';
-              if (bp) p = path.resolve(bp, p);
-            }
-          }
-          return url.__origPathToFileURL(p);
-        };
-        return 'patched';
-      } catch (e) { return 'patch-error: ' + e.message; }
-    })()`,
-    returnByValue: true,
-  });
-
-  // Now wait for Obsidian to process trust and auto-load plugins.
-  // With the patch in place, loadPlugin() should succeed on retry.
+  // Wait for Obsidian to process trust acceptance.
   console.log("Waiting 8s for Obsidian to process trust...");
   await sleep(8000);
 
+  // On Windows, Obsidian's loadPlugin() has an unsolvable contradiction:
+  //   - pathToFileURL(manifest.dir) needs an absolute dir
+  //   - adapter.read(manifest.dir + '/...') needs a RELATIVE dir
+  // Making dir absolute fixes pathToFileURL but breaks the adapter (doubled
+  // path), and vice versa.  So we skip loadPlugin() entirely on Windows and
+  // load the plugin ourselves via require(), after patching Module resolution
+  // so that externalized imports (obsidian, electron, @codemirror/*) resolve.
   let pluginLoaded = false;
   const EVAL_TIMEOUT = 60000;
 
@@ -182,30 +157,59 @@ async function main() {
         const manifest = plugins.manifests?.[id];
         if (!manifest) return { ready: false, reason: 'no-manifest' };
 
-        // Resolve relative manifest.dir to absolute so that Obsidian's
-        // internal pathToFileURL() call receives a valid absolute path.
-        const origDir = manifest.dir;
-        if (manifest.dir && typeof require === 'function') {
-          try {
-            const nodePath = require('path');
-            if (!nodePath.isAbsolute(manifest.dir)) {
-              const bp = globalThis.app?.vault?.adapter?.basePath || '';
-              if (bp) manifest.dir = nodePath.resolve(bp, manifest.dir);
+        // Enable the plugin in Obsidian's config
+        if (!plugins.enabledPlugins?.has?.(id)) {
+          try { await plugins.enablePluginAndSave(id); } catch {}
+        }
+
+        // Try loadPlugin() first (works on macOS, may work on some Windows)
+        try {
+          await plugins.loadPlugin(id);
+          if (plugins.plugins?.[id]) return { ready: true, action: 'loadPlugin' };
+        } catch {}
+
+        // --- Windows fallback: manual require() with module resolution ---
+        const nodePath = require('path');
+        const bp = globalThis.app?.vault?.adapter?.basePath || '';
+        const absDir = bp ? nodePath.resolve(bp, manifest.dir) : manifest.dir;
+        const mainPath = nodePath.join(absDir, 'main.js');
+
+        // Patch Module._resolveFilename so externalized deps resolve
+        const Module = require('module');
+        if (!Module.__cdpPatched) {
+          Module.__cdpPatched = true;
+          const origResolve = Module._resolveFilename;
+          // Cache references to externalized modules from the renderer
+          const externalCache = {};
+          ['obsidian', 'electron'].forEach(name => {
+            try { externalCache[name] = require.resolve(name); } catch {}
+          });
+          Module._resolveFilename = function(request, parent) {
+            if (externalCache[request]) return externalCache[request];
+            if (request.startsWith('@codemirror/') || request.startsWith('@lezer/')) {
+              try { return origResolve.call(this, request, null); } catch {}
             }
-          } catch {}
+            return origResolve.apply(this, arguments);
+          };
         }
 
         try {
-          if (!plugins.enabledPlugins?.has?.(id)) await plugins.enablePluginAndSave(id);
-          if (!plugins.plugins?.[id]) await plugins.loadPlugin(id);
-          return {
-            ready: Boolean(plugins.plugins?.[id]),
-            action: plugins.plugins?.[id] ? 'loaded' : 'load-pending',
-            origDir,
-            dir: manifest.dir,
-          };
+          // Clear stale cache
+          Object.keys(require.cache).forEach(k => {
+            if (k.includes('systemsculpt-ai')) delete require.cache[k];
+          });
+          const mod = require(mainPath);
+          const Cls = mod.default || mod;
+          if (typeof Cls !== 'function') {
+            return { ready: false, reason: 'no-constructor', type: typeof Cls, mainPath };
+          }
+          const inst = new Cls(globalThis.app, manifest);
+          plugins.plugins[id] = inst;
+          let onloadErr = null;
+          try { await inst.onload(); } catch (e) { onloadErr = e.message; }
+          return { ready: true, action: 'manual-require', onloadErr, mainPath };
         } catch (e) {
-          return { ready: false, error: e.message, origDir, dir: manifest.dir };
+          return { ready: false, reason: 'require-failed', error: e.message, mainPath };
         }
       })()`,
       returnByValue: true,
