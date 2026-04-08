@@ -215,9 +215,11 @@ jobs:
 
       - name: Run desktop baselines
         run: |
+          # Create sync config pointing to the CI vault plugin directory
+          echo '{"pluginTargets":[{"path":"'"${HOME}/Documents/SystemSculptMacQA/.obsidian/plugins/systemsculpt-ai"'"}]}' \
+            > systemsculpt-sync.config.json
           node testing/native/desktop-automation/run.mjs \
             --case managed-baseline \
-            --vault-path "${HOME}/Documents/SystemSculptMacQA" \
             --no-reload
 
       # ---- Failure diagnostics ----
