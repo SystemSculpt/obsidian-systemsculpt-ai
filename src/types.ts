@@ -241,6 +241,15 @@ export interface SystemSculptSettings {
 
   favoritesFilterSettings: FavoritesFilterSettings;
 
+  /**
+   * Whether agent mode is enabled in the chat UI.
+   * When false, the AI behaves as a plain chat assistant without tool access.
+   * Defaults to true to preserve existing always-on behavior.
+   */
+  agentModeEnabled: boolean;
+
+  lastUsedPromptPath: string;
+
   favoriteChats: string[];
   favoriteStudioSessions: string[];
 
@@ -570,6 +579,9 @@ Raw transcript:`,
   favoriteModels: [],
 
   favoritesFilterSettings: DEFAULT_FAVORITES_FILTER_SETTINGS,
+
+  agentModeEnabled: true,
+  lastUsedPromptPath: "",
 
   favoriteChats: [],
   favoriteStudioSessions: [],

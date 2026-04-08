@@ -167,4 +167,30 @@ describe("createChatComposer", () => {
     composer.micButton.buttonEl.click();
     expect(handleMicClick).toHaveBeenCalled();
   });
+
+  it("creates an agent mode toggle button", () => {
+    const root = document.createElement("div");
+    const onToggleAgentMode = jest.fn();
+    const composer = createChatComposer(root, {
+      onOpenChatSettings: jest.fn(),
+      onAddContextFile: jest.fn(),
+      onSend: jest.fn(),
+      onStop: jest.fn(),
+      registerDomEvent: (el, type, cb) => el.addEventListener(type as any, cb as any),
+      onKeyDown: jest.fn(),
+      onInput: jest.fn(),
+      onPaste: jest.fn(),
+      handleMicClick: jest.fn(),
+      hasProLicense: () => true,
+      onToggleAgentMode,
+      isAgentModeEnabled: () => true,
+    });
+
+    expect(composer.agentModeButton).toBeDefined();
+    expect(composer.agentModeButton.buttonEl.tagName).toBe("BUTTON");
+    expect(composer.agentModeButton.buttonEl.classList.contains("ss-active")).toBe(true);
+
+    composer.agentModeButton.buttonEl.click();
+    expect(onToggleAgentMode).toHaveBeenCalled();
+  });
 });

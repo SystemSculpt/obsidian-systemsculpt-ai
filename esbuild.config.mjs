@@ -281,9 +281,11 @@ const buildOptions = {
 	external: [
 		"obsidian",
 		"electron",
-		// Node-only transitive deps from pi-coding-agent that crash on Obsidian
-		// mobile WebView. Desktop resolves them at runtime via Node.js; mobile
-		// never reaches the code paths that use them.
+		// Node-only transitive deps from pi-coding-agent that crash on mobile
+		// WebView (graceful-fs accesses Node.js 'stream' module at load time).
+		// Externalized here; the safeNodeExternals plugin below wraps the
+		// emitted require() calls in try/catch so they degrade gracefully on
+		// mobile while still resolving on desktop Electron.
 		"proper-lockfile",
 		"graceful-fs",
 		"@mariozechner/pi-tui",
@@ -313,6 +315,29 @@ const buildOptions = {
 	},
 	plugins: [
 		...createPiSdkBuildFixPlugins(),
+		{
+			// Wrap externalized Node-only modules in try/catch so they degrade
+			// gracefully on mobile (no Node.js) while still resolving on desktop
+			// (Electron has Node.js).  Runs as onEnd to post-process the bundle.
+			name: "safe-node-externals",
+			setup(build) {
+				const safeExternals = ["proper-lockfile", "graceful-fs"];
+				build.onEnd(async () => {
+					const { readFileSync, writeFileSync } = await import("fs");
+					const outfile = build.initialOptions.outfile || "main.js";
+					let code = readFileSync(outfile, "utf8");
+					for (const mod of safeExternals) {
+						const escaped = mod.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+						const pattern = new RegExp(`\\brequire\\("${escaped}"\\)`, "g");
+						code = code.replace(
+							pattern,
+							`(() => { try { return require("${mod}"); } catch { return {}; } })()`
+						);
+					}
+					writeFileSync(outfile, code);
+				});
+			}
+		},
 		{
 			name: "build-reporter",
 			setup(build) {

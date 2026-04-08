@@ -23,6 +23,9 @@ import { ERROR_CODES } from "../../utils/errors";
 import { showPopup } from "../../core/ui/";
 
 import { createChatComposer } from "./ui/createInputUI";
+import { createPromptChip, updatePromptChip } from "./PromptSelector";
+import { PromptService } from "../../services/PromptService";
+import { ListSelectionModal, type ListItem } from "../../core/ui/modals/standard/ListSelectionModal";
 import {
   getEffectiveChatModelId,
   type ChatModelSetupPromptOverrides,
@@ -88,6 +91,12 @@ export class InputHandler extends Component {
   private attachmentPillsByKey: Map<string, HTMLElement> = new Map();
   private isGenerating = false;
   private webSearchEnabled = false;
+  private agentModeEnabled: boolean;
+  private agentModeButtonEl: HTMLElement | null = null;
+  private selectedPromptPath: string | null = null;
+  private selectedPromptName: string | null = null;
+  private promptChip: HTMLElement | null = null;
+  private promptService!: PromptService;
   private automationApprovalMode: AutomationApprovalMode = "interactive";
   private automationRequestDepth = 0;
   private renderTimeout: NodeJS.Timeout | null = null;
@@ -163,6 +172,15 @@ export class InputHandler extends Component {
     this.getChatId = options.getChatId;
     this.notifyModelChange = options.onModelChange || (() => {});
     this.chatView = options.chatView;
+    this.agentModeEnabled = this.plugin.settings.agentModeEnabled ?? true;
+    this.selectedPromptPath = this.plugin.settings.lastUsedPromptPath || null;
+    this.promptService = new PromptService(
+      this.app,
+      this.plugin.settings.systemPromptsDirectory || "SystemSculpt/System Prompts"
+    );
+    if (this.selectedPromptPath) {
+      this.selectedPromptName = this.selectedPromptPath.split("/").pop()?.replace(/\.md$/, "") || null;
+    }
     this.modelSelectionController = new ChatModelSelectionController({
       app: this.app,
       container: this.container,
@@ -276,6 +294,16 @@ export class InputHandler extends Component {
 
     const contextFiles = includeContextFiles ? this.chatView.contextManager.getContextFiles() : new Set<string>();
     const selectedModelId = this.getSelectedModelIdForChat();
+
+    // Read the selected prompt content if one is active
+    let systemPromptOverride: string | undefined;
+    if (this.selectedPromptPath) {
+      const content = await this.promptService.readPromptContent(this.selectedPromptPath);
+      if (content) {
+        systemPromptOverride = content;
+      }
+    }
+
     const stream = this.aiService.streamMessage({
       messages: this.getMessages(),
       model: selectedModelId,
@@ -287,6 +315,8 @@ export class InputHandler extends Component {
           this.chatView?.setPiSessionState?.(session);
         },
         webSearchEnabled: this.webSearchEnabled,
+        ...(this.agentModeEnabled ? {} : { allowTools: false }),
+        ...(systemPromptOverride ? { systemPromptOverride } : {}),
       debug: this.chatView.getDebugLogService?.()?.createStreamLogger({
         chatId: this.getChatId(),
         assistantMessageId: messageId,
@@ -599,6 +629,12 @@ export class InputHandler extends Component {
       hasProLicense: () => !!(this.plugin.settings.licenseKey?.trim() && this.plugin.settings.licenseValid),
       onToggleWebSearch: () => { this.webSearchEnabled = !this.webSearchEnabled; },
       isWebSearchEnabled: () => this.webSearchEnabled,
+      onToggleAgentMode: () => {
+        this.agentModeEnabled = !this.agentModeEnabled;
+        this.plugin.settings.agentModeEnabled = this.agentModeEnabled;
+        void this.plugin.saveSettings();
+      },
+      isAgentModeEnabled: () => this.agentModeEnabled,
     });
 
     this.input = composer.input;
@@ -609,11 +645,21 @@ export class InputHandler extends Component {
     this.stopButton = composer.stopButton;
     this.settingsButton = composer.settingsButton;
     this.attachButton = composer.attachButton;
+    this.agentModeButtonEl = composer.agentModeButton?.buttonEl || null;
     this.modelSelectionController.ensureHost({
       modelSlot: (composer as any).modelSlot,
       toolbar: (composer as any).toolbar,
     });
     this.modelSelectionController.render();
+
+    // Render prompt selector chip
+    const promptSlot = (composer as any).promptSlot as HTMLDivElement;
+    if (promptSlot) {
+      this.promptChip = createPromptChip(promptSlot, {
+        currentPromptName: this.selectedPromptName,
+        onClick: () => this.openPromptSelector(),
+      });
+    }
 
     // Initialize states that depend on runtime conditions
     this.updateSendButtonState();
@@ -1261,11 +1307,106 @@ export class InputHandler extends Component {
     this.automationApprovalMode = mode;
   }
 
+  public isAgentModeEnabled(): boolean {
+    return this.agentModeEnabled;
+  }
+
+  public setAgentModeEnabled(enabled: boolean): void {
+    this.agentModeEnabled = enabled;
+    this.syncAgentModeButton();
+  }
+
+  private syncAgentModeButton(): void {
+    if (!this.agentModeButtonEl) return;
+    this.agentModeButtonEl.classList.toggle("ss-active", this.agentModeEnabled);
+  }
+
+  public getSelectedPromptPath(): string | null {
+    return this.selectedPromptPath;
+  }
+
+  public setSelectedPromptPath(path: string | null): void {
+    this.selectedPromptPath = path;
+    this.selectedPromptName = path
+      ? path.split("/").pop()?.replace(/\.md$/, "") || null
+      : null;
+    if (this.promptChip) {
+      updatePromptChip(this.promptChip, this.selectedPromptName);
+    }
+  }
+
   public resetForFreshChat(): void {
     this.pendingLargeTextContent = null;
     this.webSearchEnabled = false;
+    this.agentModeEnabled = this.plugin.settings.agentModeEnabled ?? true;
+    this.syncAgentModeButton();
+    this.selectedPromptPath = this.plugin.settings.lastUsedPromptPath || null;
+    this.selectedPromptName = this.selectedPromptPath
+      ? this.selectedPromptPath.split("/").pop()?.replace(/\.md$/, "") || null
+      : null;
+    if (this.promptChip) {
+      updatePromptChip(this.promptChip, this.selectedPromptName);
+    }
     this.automationApprovalMode = "interactive";
     this.setValue("", { focus: false });
+  }
+
+  private async openPromptSelector(): Promise<void> {
+    const prompts = await this.promptService.listPrompts();
+
+    const items: ListItem[] = [
+      { id: "__none__", title: "None", description: "No custom system prompt", icon: "x" },
+      ...prompts.map((p) => ({
+        id: p.path,
+        title: p.name,
+        description: p.description,
+        icon: p.icon || "scroll-text",
+        selected: p.path === this.selectedPromptPath,
+      })),
+      { id: "__create__", title: "Create new prompt...", icon: "plus" },
+    ];
+
+    const modal = new ListSelectionModal(this.app, items, {
+      title: "System Prompt",
+      placeholder: "Search prompts...",
+    });
+
+    const selected = await modal.openAndGetSelection();
+    if (!selected.length) return;
+
+    const item = selected[0];
+    if (item.id === "__none__") {
+      this.selectedPromptPath = null;
+      this.selectedPromptName = null;
+    } else if (item.id === "__create__") {
+      void this.createNewPrompt();
+      return;
+    } else {
+      this.selectedPromptPath = item.id;
+      this.selectedPromptName = item.title;
+    }
+
+    if (this.promptChip) {
+      updatePromptChip(this.promptChip, this.selectedPromptName);
+    }
+
+    this.plugin.settings.lastUsedPromptPath = this.selectedPromptPath || "";
+    void this.plugin.saveSettings();
+  }
+
+  private async createNewPrompt(): Promise<void> {
+    const { path, name } = await this.promptService.createPrompt("New Prompt");
+    this.selectedPromptPath = path;
+    this.selectedPromptName = name;
+    if (this.promptChip) {
+      updatePromptChip(this.promptChip, this.selectedPromptName);
+    }
+    this.plugin.settings.lastUsedPromptPath = path;
+    void this.plugin.saveSettings();
+    const file = this.app.vault.getAbstractFileByPath(path);
+    if (file) {
+      await this.app.workspace.openLinkText(path, "", true);
+    }
   }
 
   private disposeLocalResources(): void {

@@ -68,6 +68,7 @@ export class ListSelectionModal extends StandardModal {
   private keyboardNavService: KeyboardNavigationService;
   private customSearchHandler: ((query: string) => Promise<ListItem[]>) | null = null;
   private favoritesService: FavoritesService | null = null;
+  private favoritesFilterButton: HTMLElement | null = null;
 
   constructor(app: App, items: ListItem[], options: ListSelectionOptions) {
     super(app);
@@ -126,6 +127,11 @@ export class ListSelectionModal extends StandardModal {
       );
     }
     
+    // Add favorites filter button if favoritesService is provided
+    if (this.favoritesService) {
+      this.renderFavoritesFilterButton();
+    }
+
     // Add filters if enabled
     if (this.options.withFilters && this.options.filters && this.options.filters.length > 0) {
       this.addFilterButtons(
@@ -189,6 +195,32 @@ export class ListSelectionModal extends StandardModal {
   }
 
   /**
+   * Render the favorites filter button that toggles "show favorites only" mode.
+   * Only called when this.favoritesService is present.
+   */
+  private renderFavoritesFilterButton() {
+    if (!this.favoritesService) return;
+
+    this.favoritesFilterButton = this.contentEl.createDiv("systemsculpt-favorites-filter");
+
+    // Add star icon
+    setIcon(this.favoritesFilterButton, "star");
+
+    // Set initial active state based on current filter state
+    if (this.favoritesService.getShowFavoritesOnly()) {
+      this.favoritesFilterButton.classList.add("is-active");
+    }
+
+    // Click handler: toggle filter and update button state
+    this.registerDomEvent(this.favoritesFilterButton, "click", async () => {
+      if (!this.favoritesService || !this.favoritesFilterButton) return;
+      await this.favoritesService.toggleShowFavoritesOnly();
+      this.favoritesFilterButton.classList.toggle("is-active");
+      this.handleSearch(this.searchInput?.value ?? "");
+    });
+  }
+
+  /**
    * Handle search input changes
    * - If a custom search handler is set, use that
    * - Otherwise, use the default filtering
@@ -227,12 +259,19 @@ export class ListSelectionModal extends StandardModal {
         this.filteredItems = [...this.items];
       } else {
         const lowerQuery = query.toLowerCase();
-        this.filteredItems = this.items.filter(item => 
-          item.title.toLowerCase().includes(lowerQuery) || 
+        this.filteredItems = this.items.filter(item =>
+          item.title.toLowerCase().includes(lowerQuery) ||
           (item.description && item.description.toLowerCase().includes(lowerQuery))
         );
       }
-      
+
+      // Apply favorites filter if active
+      if (this.favoritesService && this.favoritesService.getShowFavoritesOnly()) {
+        this.filteredItems = this.filteredItems.filter(
+          item => item.metadata?.isFavorite === true
+        );
+      }
+
       this.renderItems();
       
       // Update keyboard navigation item count

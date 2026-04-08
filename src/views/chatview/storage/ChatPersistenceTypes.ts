@@ -24,6 +24,8 @@ export interface ChatMetadata {
   // Legacy only. New chat saves do not persist client-side prompt selection metadata.
   systemMessage?: ChatSystemMessageMetadata;
   chatFontSize?: "small" | "medium" | "large";
+  selectedPromptPath?: string;
+  agentModeEnabled?: boolean;
   chatBackend?: ChatBackend;
   piSessionFile?: string;
   piSessionId?: string;

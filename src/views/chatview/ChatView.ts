@@ -291,6 +291,8 @@ export class ChatView extends ItemView {
           contextFiles: this.contextManager?.getContextFiles() || new Set(),
           title: this.chatTitle,
           chatFontSize: this.chatFontSize,
+          selectedPromptPath: this.inputHandler?.getSelectedPromptPath?.() || "",
+          agentModeEnabled: this.inputHandler?.isAgentModeEnabled?.(),
           piSessionFile: this.piSessionFile,
           piSessionId: this.piSessionId,
           piLastEntryId: this.piLastEntryId,
@@ -1296,6 +1298,14 @@ export class ChatView extends ItemView {
         // Load chat font size from chat data
         this.chatFontSize = chatData.chatFontSize || this.plugin.settings.chatFontSize || "medium";
         this.scheduleChatFontSizeClassSync(100);
+
+        // Restore selected prompt and agent mode for this chat
+        if (this.inputHandler) {
+          this.inputHandler.setSelectedPromptPath(chatData.selectedPromptPath || null);
+          if (typeof chatData.agentModeEnabled === "boolean") {
+            this.inputHandler.setAgentModeEnabled(chatData.agentModeEnabled);
+          }
+        }
 
         // Restore context files without blocking first render.
         if (this.contextManager) {
