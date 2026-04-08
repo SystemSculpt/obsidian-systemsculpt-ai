@@ -207,8 +207,14 @@ async function main() {
           const manifest = plugins.manifests?.[id];
           if (!manifest) return { ready: false, reason: 'no-manifest' };
 
-          // Construct a valid file URL from the Windows backslash path
-          let dir = manifest.dir.replace(/\\\\/g, '/');
+          // manifest.dir is often relative (e.g. ".obsidian/plugins/foo").
+          // Resolve against vault basePath, then construct a valid file URL.
+          let dir = manifest.dir;
+          const basePath = globalThis.app?.vault?.adapter?.basePath || '';
+          if (basePath && !dir.match(/^[A-Za-z]:/) && !dir.startsWith('/')) {
+            dir = basePath + '/' + dir;
+          }
+          dir = dir.replace(/\\\\/g, '/');
           if (/^[A-Za-z]:/.test(dir)) dir = '/' + dir;
           const fileUrl = 'file://' + dir + '/main.js';
 
