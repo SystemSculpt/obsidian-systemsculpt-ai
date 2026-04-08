@@ -98,13 +98,26 @@ jobs:
           # Copy externalized Node deps that the plugin build does not bundle
           # (they're external so mobile never loads them, but desktop needs them).
           # proper-lockfile also needs: graceful-fs, retry, signal-exit
-          plugin_nm="${plugin_dir}/node_modules"
-          mkdir -p "${plugin_nm}"
+          mkdir -p "${plugin_dir}/node_modules"
           for dep in proper-lockfile graceful-fs retry signal-exit; do
-            if [ -d "node_modules/${dep}" ]; then
-              cp -R "node_modules/${dep}" "${plugin_nm}/${dep}"
+            src="node_modules/${dep}"
+            dest="${plugin_dir}/node_modules/${dep}"
+            if [ -d "${src}" ]; then
+              cp -R "${src}" "${dest}"
+              echo "Copied ${dep} to plugin node_modules"
+            else
+              echo "WARNING: ${src} not found, searching..."
+              found=$(find node_modules -maxdepth 4 -type d -name "${dep}" | head -1)
+              if [ -n "${found}" ]; then
+                cp -R "${found}" "${dest}"
+                echo "Copied ${dep} from ${found}"
+              else
+                echo "ERROR: ${dep} not found anywhere in node_modules"
+              fi
             fi
           done
+          echo "Plugin node_modules contents:"
+          ls -la "${plugin_dir}/node_modules/" 2>/dev/null || echo "(empty)"
           echo '{}' > "${vault_path}/.obsidian/app.json"
           echo '{}' > "${vault_path}/.obsidian/appearance.json"
           echo '["systemsculpt-ai"]' > "${vault_path}/.obsidian/community-plugins.json"
