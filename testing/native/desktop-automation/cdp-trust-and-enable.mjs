@@ -182,16 +182,30 @@ async function main() {
         const manifest = plugins.manifests?.[id];
         if (!manifest) return { ready: false, reason: 'no-manifest' };
 
+        // Resolve relative manifest.dir to absolute so that Obsidian's
+        // internal pathToFileURL() call receives a valid absolute path.
+        const origDir = manifest.dir;
+        if (manifest.dir && typeof require === 'function') {
+          try {
+            const nodePath = require('path');
+            if (!nodePath.isAbsolute(manifest.dir)) {
+              const bp = globalThis.app?.vault?.adapter?.basePath || '';
+              if (bp) manifest.dir = nodePath.resolve(bp, manifest.dir);
+            }
+          } catch {}
+        }
+
         try {
           if (!plugins.enabledPlugins?.has?.(id)) await plugins.enablePluginAndSave(id);
           if (!plugins.plugins?.[id]) await plugins.loadPlugin(id);
           return {
             ready: Boolean(plugins.plugins?.[id]),
             action: plugins.plugins?.[id] ? 'loaded' : 'load-pending',
+            origDir,
             dir: manifest.dir,
           };
         } catch (e) {
-          return { ready: false, error: e.message, dir: manifest.dir };
+          return { ready: false, error: e.message, origDir, dir: manifest.dir };
         }
       })()`,
       returnByValue: true,
