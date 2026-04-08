@@ -248,6 +248,8 @@ export interface SystemSculptSettings {
    */
   agentModeEnabled: boolean;
 
+  lastUsedPromptPath: string;
+
   favoriteChats: string[];
   favoriteStudioSessions: string[];
 
@@ -579,6 +581,7 @@ Raw transcript:`,
   favoritesFilterSettings: DEFAULT_FAVORITES_FILTER_SETTINGS,
 
   agentModeEnabled: true,
+  lastUsedPromptPath: "",
 
   favoriteChats: [],
   favoriteStudioSessions: [],
