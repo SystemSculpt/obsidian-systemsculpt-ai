@@ -247,6 +247,10 @@ export class SettingsManager {
       migratedSettings.hideSystemMessagesInChat = DEFAULT_SETTINGS.hideSystemMessagesInChat;
     }
 
+    if (typeof migratedSettings.agentModeEnabled !== "boolean") {
+      migratedSettings.agentModeEnabled = DEFAULT_SETTINGS.agentModeEnabled;
+    }
+
     if (typeof migratedSettings.studioDefaultProjectsFolder !== "string" || !migratedSettings.studioDefaultProjectsFolder.trim()) {
       migratedSettings.studioDefaultProjectsFolder = DEFAULT_SETTINGS.studioDefaultProjectsFolder;
     }

@@ -72,6 +72,7 @@ jest.mock("../../../types", () => ({
     agentLoopBehavior: "manual",
     agentShowReasoningToggle: false,
     agentShowReasoningDefault: false,
+    agentModeEnabled: true,
     selectedModelId: null,
   },
   createDefaultWorkflowEngineSettings: jest.fn().mockReturnValue({
@@ -260,6 +261,11 @@ describe("SettingsManager", () => {
     });
 
     describe("boolean migrations", () => {
+      it("defaults agentModeEnabled to true", () => {
+        const result = migrateSettings({} as any);
+        expect(result.agentModeEnabled).toBe(true);
+      });
+
       it("initializes missing debugMode", () => {
         const result = migrateSettings({});
         expect(result.debugMode).toBe(false);
