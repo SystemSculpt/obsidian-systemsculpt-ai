@@ -153,6 +153,22 @@ jobs:
 
       # ---- Failure diagnostics ----
 
+      - name: Print CDP diagnostics on failure
+        if: failure()
+        shell: bash
+        run: |
+          echo "=== CDP trust output ==="
+          cat cdp-trust-output.log 2>/dev/null || echo "(no CDP log found)"
+          echo ""
+          echo "=== Obsidian process check ==="
+          tasklist 2>/dev/null | grep -i obsidian || echo "(no Obsidian process)"
+          echo ""
+          echo "=== CDP port probe ==="
+          curl -s http://127.0.0.1:9222/json/version 2>&1 || echo "(CDP not reachable)"
+          echo ""
+          echo "=== Plugin dir listing ==="
+          ls -la "$USERPROFILE/Documents/SystemSculptWindowsQA/.obsidian/plugins/systemsculpt-ai/" 2>/dev/null || echo "(plugin dir not found)"
+
       - name: Capture screenshot on failure
         if: failure()
         shell: pwsh
