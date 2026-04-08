@@ -1301,6 +1301,14 @@ export class InputHandler extends Component {
     this.automationApprovalMode = mode;
   }
 
+  public isAgentModeEnabled(): boolean {
+    return this.agentModeEnabled;
+  }
+
+  public setAgentModeEnabled(enabled: boolean): void {
+    this.agentModeEnabled = enabled;
+  }
+
   public getSelectedPromptPath(): string | null {
     return this.selectedPromptPath;
   }

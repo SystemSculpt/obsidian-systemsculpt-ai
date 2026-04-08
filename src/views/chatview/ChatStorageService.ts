@@ -21,6 +21,7 @@ type LoadedChatRecord = {
   context_files?: string[];
   chatFontSize?: "small" | "medium" | "large";
   selectedPromptPath?: string;
+  agentModeEnabled?: boolean;
   chatPath: string;
   chatBackend: ChatBackend;
   piSessionFile?: string;
@@ -35,6 +36,7 @@ type SaveChatOptions = {
   title?: string;
   chatFontSize?: "small" | "medium" | "large";
   selectedPromptPath?: string;
+  agentModeEnabled?: boolean;
   piSessionFile?: string;
   piSessionId?: string;
   piLastEntryId?: string;
@@ -187,6 +189,7 @@ export class ChatStorageService {
         version: newVersion,
         chatFontSize: options.chatFontSize || "medium",
         selectedPromptPath: options.selectedPromptPath || existingMetadata?.selectedPromptPath || undefined,
+        agentModeEnabled: typeof options.agentModeEnabled === "boolean" ? options.agentModeEnabled : existingMetadata?.agentModeEnabled,
         piSessionFile: piState.sessionFile,
         piSessionId: piState.sessionId,
         piLastEntryId: piState.lastEntryId || getLastMessagePiEntryId(messages),
@@ -470,6 +473,7 @@ export class ChatStorageService {
       context_files: metadata.context_files?.map((f) => f.path) || [],
       chatFontSize: metadata.chatFontSize,
       selectedPromptPath: metadata.selectedPromptPath,
+      agentModeEnabled: metadata.agentModeEnabled,
       chatPath: filePath || `${this.chatDirectory}/${metadata.id}.md`,
       chatBackend,
       piSessionFile: piState.sessionFile,
