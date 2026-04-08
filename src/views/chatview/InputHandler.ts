@@ -289,6 +289,7 @@ export class InputHandler extends Component {
           this.chatView?.setPiSessionState?.(session);
         },
         webSearchEnabled: this.webSearchEnabled,
+        ...(this.agentModeEnabled ? {} : { allowTools: false }),
       debug: this.chatView.getDebugLogService?.()?.createStreamLogger({
         chatId: this.getChatId(),
         assistantMessageId: messageId,

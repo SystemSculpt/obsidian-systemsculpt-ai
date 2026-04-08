@@ -656,7 +656,7 @@ export class SystemSculptService {
     const finalSystemPrompt =
       typeof systemPromptOverride === "string" && systemPromptOverride.trim().length > 0
         ? systemPromptOverride.trim()
-        : modelSource === "systemsculpt"
+        : (modelSource === "systemsculpt" && options.allowTools !== false)
           ? AGENT_PRESET.systemPrompt
         : undefined;
 
