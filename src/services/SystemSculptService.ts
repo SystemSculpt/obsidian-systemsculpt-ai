@@ -20,6 +20,7 @@ import { SystemSculptEnvironment } from "./api/SystemSculptEnvironment";
 import { SYSTEMSCULPT_API_ENDPOINTS } from "../constants/api";
 import { SYSTEMSCULPT_WEBSITE } from "../constants/externalServices";
 import { AGENT_PRESET } from "../constants/prompts";
+import { AGENT_TOOL_INSTRUCTIONS } from "../constants/prompts/agent";
 
 // Import the new service classes
 import { StreamingService } from "./StreamingService";
@@ -653,12 +654,20 @@ export class SystemSculptService {
         }
     }
 
-    const finalSystemPrompt =
-      typeof systemPromptOverride === "string" && systemPromptOverride.trim().length > 0
-        ? systemPromptOverride.trim()
-        : (modelSource === "systemsculpt" && options.allowTools !== false)
-          ? AGENT_PRESET.systemPrompt
-        : undefined;
+    let finalSystemPrompt: string | undefined;
+    if (typeof systemPromptOverride === "string" && systemPromptOverride.trim().length > 0) {
+      if (options.allowTools !== false && modelSource === "systemsculpt") {
+        // Agent mode ON + custom prompt: compose with tool instructions
+        finalSystemPrompt = `${systemPromptOverride.trim()}\n\n${AGENT_TOOL_INSTRUCTIONS}`;
+      } else {
+        // Agent mode OFF + custom prompt: just the custom prompt
+        finalSystemPrompt = systemPromptOverride.trim();
+      }
+    } else if (modelSource === "systemsculpt" && options.allowTools !== false) {
+      // No custom prompt, agent mode ON: full agent preset
+      finalSystemPrompt = AGENT_PRESET.systemPrompt;
+    }
+    // else: no custom prompt, agent mode OFF: no system prompt (undefined)
 
     let tools: OpenAITool[] = [];
     if (

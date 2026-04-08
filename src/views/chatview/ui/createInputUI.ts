@@ -19,6 +19,7 @@ export interface ChatComposerDeps {
   isWebSearchEnabled?: () => boolean;
   onToggleAgentMode?: () => void;
   isAgentModeEnabled?: () => boolean;
+  onOpenPromptSelector?: () => void;
 }
 
 export interface ChatComposerElements {
@@ -32,6 +33,7 @@ export interface ChatComposerElements {
   attachButton: ButtonComponent;
   webSearchButton: ButtonComponent;
   agentModeButton: ButtonComponent;
+  promptSlot: HTMLDivElement;
   sendButton: ButtonComponent;
   stopButton: ButtonComponent;
   micButton: ButtonComponent;
@@ -45,6 +47,11 @@ export function createChatComposer(parent: HTMLElement, deps: ChatComposerDeps):
   const modelSlot = toolbar.createDiv({
     cls: "systemsculpt-chat-composer-toolbar-center systemsculpt-model-indicator-section inline systemsculpt-chat-composer-chips",
   });
+
+  const promptSlot = toolbar.createDiv({
+    cls: "systemsculpt-prompt-chip-slot",
+  });
+  modelSlot.after(promptSlot);
 
   const rightGroup = toolbar.createDiv({ cls: "systemsculpt-chat-composer-toolbar-group mod-right" });
 
@@ -173,6 +180,7 @@ export function createChatComposer(parent: HTMLElement, deps: ChatComposerDeps):
     root,
     toolbar,
     modelSlot,
+    promptSlot,
     attachments,
     inputWrap,
     input: input as HTMLTextAreaElement,
