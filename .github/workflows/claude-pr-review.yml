@@ -60,6 +60,22 @@ jobs:
           COMMENT_ID=$(echo "$COMMENT_URL" | grep -o '[0-9]*$')
           echo "comment_id=$COMMENT_ID" >> "$GITHUB_OUTPUT"
 
+      - name: Capture PR diff
+        id: diff
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
+        run: |
+          BASE=${{ github.event.pull_request.base.sha || '' }}
+          HEAD=${{ github.event.pull_request.head.sha || 'HEAD' }}
+          if [ -z "$BASE" ]; then
+            BASE=$(gh pr view "$PR_NUMBER" --json baseRefName --jq '.baseRefName')
+            BASE="origin/$BASE"
+          fi
+          git diff "$BASE"..."$HEAD" > /tmp/pr-diff.txt
+          echo "diff_file=/tmp/pr-diff.txt" >> "$GITHUB_OUTPUT"
+          echo "Captured diff: $(wc -l < /tmp/pr-diff.txt) lines"
+
       - uses: anthropics/claude-code-action@6e2bd52842c65e914eba5c8badd17560bd26b5de # v1
         id: claude
         with:
@@ -68,7 +84,7 @@ jobs:
           prompt: |
             You are reviewing PR #${{ github.event.pull_request.number || github.event.issue.number }} for **SystemSculpt AI**, an Obsidian plugin (TypeScript, esbuild, Jest).
 
-            Review the PR diff against these criteria:
+            The PR diff has been saved to `${{ steps.diff.outputs.diff_file }}`. Read that file first to see all changes, then review against these criteria:
 
             **TypeScript & type safety**
             - Strict mode compliance -- no untyped `any` without justification
