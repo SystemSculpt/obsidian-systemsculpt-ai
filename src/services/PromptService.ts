@@ -51,11 +51,18 @@ export class PromptService {
     }
   }
 
-  async createPrompt(name: string): Promise<string> {
+  async createPrompt(name: string): Promise<{ path: string; name: string }> {
     await this.ensureFolder();
-    const filePath = `${this.folderPath}/${name}.md`;
+    let finalName = name;
+    let filePath = `${this.folderPath}/${finalName}.md`;
+    let counter = 2;
+    while (this.app.vault.getAbstractFileByPath(filePath)) {
+      finalName = `${name} ${counter}`;
+      filePath = `${this.folderPath}/${finalName}.md`;
+      counter++;
+    }
     await this.app.vault.create(filePath, `---\ndescription: ""\n---\n\n`);
-    return filePath;
+    return { path: filePath, name: finalName };
   }
 
   private async readFrontmatter(file: TFile): Promise<Record<string, string> | null> {

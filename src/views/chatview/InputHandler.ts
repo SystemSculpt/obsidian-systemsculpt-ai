@@ -1374,8 +1374,7 @@ export class InputHandler extends Component {
   }
 
   private async createNewPrompt(): Promise<void> {
-    const name = "New Prompt";
-    const path = await this.promptService.createPrompt(name);
+    const { path, name } = await this.promptService.createPrompt("New Prompt");
     this.selectedPromptPath = path;
     this.selectedPromptName = name;
     if (this.promptChip) {

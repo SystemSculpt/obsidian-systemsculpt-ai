@@ -251,6 +251,10 @@ export class SettingsManager {
       migratedSettings.agentModeEnabled = DEFAULT_SETTINGS.agentModeEnabled;
     }
 
+    if (typeof migratedSettings.lastUsedPromptPath !== "string") {
+      migratedSettings.lastUsedPromptPath = DEFAULT_SETTINGS.lastUsedPromptPath;
+    }
+
     if (typeof migratedSettings.studioDefaultProjectsFolder !== "string" || !migratedSettings.studioDefaultProjectsFolder.trim()) {
       migratedSettings.studioDefaultProjectsFolder = DEFAULT_SETTINGS.studioDefaultProjectsFolder;
     }
@@ -600,6 +604,10 @@ export class SettingsManager {
 
     if (typeof validatedSettings.agentModeEnabled !== "boolean") {
       validatedSettings.agentModeEnabled = defaultSettings.agentModeEnabled;
+    }
+
+    if (typeof validatedSettings.lastUsedPromptPath !== "string") {
+      validatedSettings.lastUsedPromptPath = defaultSettings.lastUsedPromptPath;
     }
 
     if (
