@@ -1,7 +1,18 @@
 describe("PiTextAuth", () => {
+  let supportsDesktopOnlyFeaturesMock: jest.Mock<boolean, []>;
+
   beforeEach(() => {
     jest.resetModules();
     jest.clearAllMocks();
+    supportsDesktopOnlyFeaturesMock = jest.fn(() => true);
+
+    jest.doMock("../../PlatformContext", () => ({
+      PlatformContext: {
+        get: jest.fn(() => ({
+          supportsDesktopOnlyFeatures: supportsDesktopOnlyFeaturesMock,
+        })),
+      },
+    }));
   });
 
   it("stays import-safe when desktop auth storage is unavailable", () => {
@@ -69,5 +80,49 @@ describe("PiTextAuth", () => {
         hasAnyAuth: true,
       })
     );
+  });
+
+  it("reads mobile provider auth records instead of short-circuiting on non-desktop", async () => {
+    supportsDesktopOnlyFeaturesMock.mockReturnValue(false);
+
+    const listStudioPiProviderAuthRecords = jest.fn().mockResolvedValue([
+      {
+        provider: "openrouter",
+        hasAnyAuth: true,
+      },
+    ]);
+
+    jest.doMock("../../../studio/piAuth/StudioPiAuthInventory", () => ({
+      listStudioPiProviderAuthRecords,
+    }));
+
+    jest.doMock("../../../studio/piAuth/StudioPiAuthStorage", () => ({
+      resolveStudioPiProviderApiKey: jest.fn().mockResolvedValue("sk-or-mobile"),
+    }));
+
+    let loadPiTextProviderAuth: typeof import("../PiTextAuth").loadPiTextProviderAuth;
+    let hasPiTextProviderAuth: typeof import("../PiTextAuth").hasPiTextProviderAuth;
+    let resolvePiTextProviderCredential: typeof import("../PiTextAuth").resolvePiTextProviderCredential;
+    jest.isolateModules(() => {
+      ({
+        loadPiTextProviderAuth,
+        hasPiTextProviderAuth,
+        resolvePiTextProviderCredential,
+      } = require("../PiTextAuth"));
+    });
+
+    const records = await loadPiTextProviderAuth!(["openrouter"]);
+
+    expect(listStudioPiProviderAuthRecords).toHaveBeenCalledWith({ providerHints: ["openrouter"] });
+    expect(records.get("openrouter")).toEqual(
+      expect.objectContaining({
+        provider: "openrouter",
+        hasAnyAuth: true,
+      }),
+    );
+    await expect(hasPiTextProviderAuth!("openrouter")).resolves.toBe(true);
+    await expect(resolvePiTextProviderCredential!("openrouter")).resolves.toEqual({
+      apiKey: "sk-or-mobile",
+    });
   });
 });

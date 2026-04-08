@@ -1,4 +1,5 @@
 import type SystemSculptPlugin from "../../main";
+import type { CustomProvider } from "../../types/llm";
 import type {
   AuthCredential,
   PiAuthStorageInstance,
@@ -59,6 +60,19 @@ function normalizeStoredAuthData(value: unknown): StoredAuthData {
     : {};
 }
 
+function getPluginStoredApiKey(
+  provider: string,
+  plugin?: SystemSculptPlugin | null,
+): string {
+  const customProviders = Array.isArray(plugin?.settings?.customProviders)
+    ? (plugin!.settings.customProviders as CustomProvider[])
+    : [];
+  const found = customProviders.find(
+    (entry) => normalizeStudioPiProviderHint(entry.id || entry.name) === provider,
+  );
+  return String(found?.apiKey || "").trim();
+}
+
 function resolveInventoryAuthStorage(
   context: StudioPiAuthInventoryContext = {},
 ): PiAuthStorageInstance | null {
@@ -110,11 +124,17 @@ function hasStoredCredential(
   provider: string,
   credential: StoredAuthCredential | undefined,
   storage: PiAuthStorageInstance | null = null,
+  plugin?: SystemSculptPlugin | null,
 ): boolean {
   if (storage && typeof storage.has === "function") {
-    return storage.has(provider);
+    if (storage.has(provider)) {
+      return true;
+    }
   }
-  return Boolean(credential && typeof credential === "object" && !Array.isArray(credential));
+  return Boolean(
+    (credential && typeof credential === "object" && !Array.isArray(credential)) ||
+      getPluginStoredApiKey(provider, plugin),
+  );
 }
 
 function getOAuthExpiry(
@@ -148,11 +168,14 @@ function resolveHasAnyAuth(
   provider: string,
   credential: StoredAuthCredential | undefined,
   storage: PiAuthStorageInstance | null = null,
+  plugin?: SystemSculptPlugin | null,
 ): boolean {
   if (storage && typeof storage.hasAuth === "function") {
-    return storage.hasAuth(provider);
+    if (storage.hasAuth(provider)) {
+      return true;
+    }
   }
-  return hasStoredCredential(provider, credential, storage) || hasEnvironmentApiKey(provider);
+  return hasStoredCredential(provider, credential, storage, plugin) || hasEnvironmentApiKey(provider);
 }
 
 export function listStudioPiOAuthProviders(
@@ -201,8 +224,9 @@ export async function listStudioPiProviderAuthRecords(
 
   for (const provider of providerIds) {
     const credential = authData[provider];
-    const hasAnyAuth = resolveHasAnyAuth(provider, credential, storage);
-    const credentialType = normalizeCredentialType(credential?.type);
+    const pluginStoredApiKey = getPluginStoredApiKey(provider, options.plugin);
+    const hasAnyAuth = resolveHasAnyAuth(provider, credential, storage, options.plugin);
+    const credentialType = normalizeCredentialType(credential?.type || (pluginStoredApiKey ? "api_key" : undefined));
     const oauthExpiresAt = getOAuthExpiry(credential);
 
     records.push({
@@ -213,8 +237,11 @@ export async function listStudioPiProviderAuthRecords(
         undefined,
       supportsOAuth: supportsOAuthLogin(provider, oauthById),
       hasAnyAuth,
-      hasStoredCredential: hasStoredCredential(provider, credential, storage),
-      source: normalizeAuthSource(credential?.type, hasAnyAuth),
+      hasStoredCredential: hasStoredCredential(provider, credential, storage, options.plugin),
+      source: normalizeAuthSource(
+        credential?.type || (pluginStoredApiKey ? "api_key" : undefined),
+        hasAnyAuth,
+      ),
       credentialType,
       oauthExpiresAt,
     });
@@ -239,10 +266,11 @@ export async function readStudioPiProviderAuthState(
   const storage = resolveInventoryAuthStorage(context);
   const authData = loadStoredAuthData(context, storage);
   const credential = authData[provider];
-  const hasAnyAuth = resolveHasAnyAuth(provider, credential, storage);
+  const pluginStoredApiKey = getPluginStoredApiKey(provider, context.plugin);
+  const hasAnyAuth = resolveHasAnyAuth(provider, credential, storage, context.plugin);
   return {
     provider,
     hasAnyAuth,
-    source: normalizeAuthSource(credential?.type, hasAnyAuth),
+    source: normalizeAuthSource(credential?.type || (pluginStoredApiKey ? "api_key" : undefined), hasAnyAuth),
   };
 }

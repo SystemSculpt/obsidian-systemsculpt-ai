@@ -7,6 +7,7 @@
 
 import { Platform } from "obsidian";
 import type SystemSculptPlugin from "../../main";
+import type { CustomProvider } from "../../types/llm";
 import {
   createPiAuthStorage,
   withPiDesktopFetchShim,
@@ -84,10 +85,96 @@ type StudioPiAuthStorageContext = {
   storage?: StudioPiAuthStorageInstance;
 };
 
+function tryGetAuthStorage(
+  context: StudioPiAuthStorageContext = {},
+): StudioPiAuthStorageInstance | null {
+  if (context.storage) {
+    return context.storage;
+  }
+
+  try {
+    return createPiAuthStorage({ plugin: context.plugin });
+  } catch {
+    return null;
+  }
+}
+
+function getCustomProviders(plugin?: SystemSculptPlugin | null): CustomProvider[] {
+  return Array.isArray(plugin?.settings?.customProviders)
+    ? (plugin!.settings.customProviders as CustomProvider[])
+    : [];
+}
+
+async function upsertPluginStoredApiKey(
+  provider: string,
+  key: string,
+  plugin?: SystemSculptPlugin | null,
+): Promise<void> {
+  if (!plugin) {
+    return;
+  }
+
+  const existing = getCustomProviders(plugin);
+  const next = [...existing];
+  const index = next.findIndex((entry) => normalizeStudioPiProviderHint(entry.id || entry.name) === provider);
+  const previous = index >= 0 ? next[index] : undefined;
+  const entry: CustomProvider = {
+    id: previous?.id || provider,
+    name: previous?.name || provider,
+    endpoint: previous?.endpoint || "",
+    apiKey: key,
+    isEnabled: previous?.isEnabled !== false,
+    cachedModels: previous?.cachedModels,
+    lastFailureTime: previous?.lastFailureTime,
+    lastHealthyAt: previous?.lastHealthyAt,
+    lastHealthyConfigHash: previous?.lastHealthyConfigHash,
+    lastTested: previous?.lastTested,
+    failureCount: previous?.failureCount,
+  };
+  if (index >= 0) {
+    next[index] = entry;
+  } else {
+    next.push(entry);
+  }
+  await plugin.getSettingsManager().updateSettings({ customProviders: next });
+}
+
+async function clearPluginStoredApiKey(
+  provider: string,
+  plugin?: SystemSculptPlugin | null,
+): Promise<void> {
+  if (!plugin) {
+    return;
+  }
+
+  const existing = getCustomProviders(plugin);
+  let changed = false;
+  const next = existing.map((entry) => {
+    if (normalizeStudioPiProviderHint(entry.id || entry.name) !== provider) {
+      return entry;
+    }
+    if (!String(entry.apiKey || "").trim()) {
+      return entry;
+    }
+    changed = true;
+    return {
+      ...entry,
+      apiKey: "",
+    };
+  });
+  if (changed) {
+    await plugin.getSettingsManager().updateSettings({ customProviders: next });
+  }
+}
+
 function getAuthStorage(
   context: StudioPiAuthStorageContext = {},
 ): StudioPiAuthStorageInstance {
-  return context.storage ?? createPiAuthStorage({ plugin: context.plugin });
+  const storage = tryGetAuthStorage(context);
+  if (storage) {
+    return storage;
+  }
+  throw new Error("Pi auth storage is unavailable.");
 }
 
 function normalizeAuthSource(
@@ -108,17 +195,53 @@ function normalizeCredentialType(credentialType: unknown): StudioPiAuthCredentia
 }
 
 async function resolveProviderApiKey(
-  storage: StudioPiAuthStorageInstance,
+  storage: StudioPiAuthStorageInstance | null,
   provider: string,
+  plugin?: SystemSculptPlugin | null,
 ): Promise<string> {
-  if (typeof storage.getApiKey !== "function") return "";
-  try {
-    return await withPiDesktopFetchShim(async () =>
-      String((await storage.getApiKey(provider)) || "").trim()
-    );
-  } catch {
+  // Plugin settings is the authoritative source for credential state. If a
+  // provider entry exists there with an empty apiKey, the user has explicitly
+  // cleared it. We must not shadow that decision with a potentially stale Pi
+  // storage value (Pi storage removal can fail silently on mobile).
+  const pluginEntry = getCustomProviders(plugin).find(
+    (entry) => normalizeStudioPiProviderHint(entry.id || entry.name) === provider,
+  );
+  const fromPluginSettings = String(pluginEntry?.apiKey || "").trim();
+
+  // If plugin settings knows about this provider but the key is empty, the
+  // user cleared it. Return empty regardless of what Pi storage holds.
+  if (pluginEntry && !fromPluginSettings) {
     return "";
   }
+
+  if (storage && typeof storage.getApiKey === "function") {
+    try {
+      const fromStorage = await withPiDesktopFetchShim(async () =>
+        String((await storage.getApiKey(provider)) || "").trim()
+      );
+      if (fromStorage) {
+        return fromStorage;
+      }
+    } catch {
+      // fall through to plugin settings fallback
+    }
+  }
+
+  return fromPluginSettings;
+}
+
+function resolvePluginStoredCredential(
+  provider: string,
+  plugin?: SystemSculptPlugin | null,
+): { type: "api_key"; key: string } | undefined {
+  const found = getCustomProviders(plugin).find(
+    (entry) => normalizeStudioPiProviderHint(entry.id || entry.name) === provider,
+  );
+  const key = String(found?.apiKey || "").trim();
+  if (!key) {
+    return undefined;
+  }
+  return { type: "api_key", key };
 }
 
 function hasStoredCredential(
@@ -220,8 +343,17 @@ export async function setStudioPiProviderApiKey(
   const key = String(apiKey || "").trim();
   if (!provider) throw new Error("Select a valid provider before saving an API key.");
   if (!key) throw new Error("API key cannot be empty.");
-  const storage = getAuthStorage(context);
-  storage.set(provider, { type: "api_key", key } as any);
+  await upsertPluginStoredApiKey(provider, key, context.plugin);
+  const storage = tryGetAuthStorage(context);
+  if (!storage) {
+    return;
+  }
+  try {
+    storage.set(provider, { type: "api_key", key } as any);
+  } catch {
+    // Mobile and other restricted runtimes may not support Pi auth storage writes.
+    // The plugin-settings mirror above remains the source of truth in that case.
+  }
 }
 
 export async function clearStudioPiProviderAuth(
@@ -230,8 +362,22 @@ export async function clearStudioPiProviderAuth(
 ): Promise<void> {
   const provider = normalizeStudioPiProviderHint(providerHint);
   if (!provider) throw new Error("Select a valid provider before clearing credentials.");
-  const storage = getAuthStorage(context);
-  storage.remove(provider);
+  await clearPluginStoredApiKey(provider, context.plugin);
+  const storage = tryGetAuthStorage(context);
+  if (!storage) {
+    return;
+  }
+  try {
+    storage.remove(provider);
+  } catch (err) {
+    // Plugin-settings fallback is already cleared above. Log a warning so the
+    // discrepancy is visible: resolveProviderApiKey prefers Pi storage, so a
+    // stale entry there could shadow the cleared plugin-settings value.
+    console.warn(
+      `[StudioPiAuthStorage] Failed to remove ${provider} from Pi auth storage; plugin-settings entry was cleared but Pi storage may retain stale credentials.`,
+      err,
+    );
+  }
 }
 
 export async function readStudioPiProviderAuthState(
@@ -240,9 +386,30 @@ export async function readStudioPiProviderAuthState(
 ): Promise<StudioPiAuthState> {
   const provider = normalizeStudioPiProviderHint(providerHint);
   if (!provider) return { provider: "", hasAnyAuth: false, source: "none" };
-  const storage = getAuthStorage(context);
-  const credType = storage.get(provider)?.type;
-  const hasAuth = storage.hasAuth(provider);
+  const pluginCredential = resolvePluginStoredCredential(provider, context.plugin);
+  const storage = tryGetAuthStorage(context);
+  const storageCredential = (() => {
+    if (!storage) {
+      return undefined;
+    }
+    try {
+      return storage.get(provider);
+    } catch {
+      return undefined;
+    }
+  })();
+  const storageHasAuth = (() => {
+    if (!storage) {
+      return false;
+    }
+    try {
+      return storage.hasAuth(provider);
+    } catch {
+      return false;
+    }
+  })();
+  const credType = storageCredential?.type ?? pluginCredential?.type;
+  const hasAuth = storageHasAuth || Boolean(pluginCredential);
   return { provider, hasAnyAuth: hasAuth, source: normalizeAuthSource(credType, hasAuth) };
 }
 
@@ -252,6 +419,6 @@ export async function resolveStudioPiProviderApiKey(
 ): Promise<string | null> {
   const provider = normalizeStudioPiProviderHint(providerHint);
   if (!provider) return null;
-  const storage = getAuthStorage(context);
-  return (await resolveProviderApiKey(storage, provider)) || null;
+  const storage = tryGetAuthStorage(context);
+  return (await resolveProviderApiKey(storage, provider, context.plugin)) || null;
 }

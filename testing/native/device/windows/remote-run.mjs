@@ -9,8 +9,8 @@ import { build as buildWithEsbuild } from "esbuild";
 
 import { assertProductionPluginArtifacts, REQUIRED_PLUGIN_ARTIFACTS } from "../../../../scripts/plugin-artifacts.mjs";
 
-export const DEFAULT_WINDOWS_TRANSPORT = "parallels";
-export const DEFAULT_WINDOWS_SSH_HOST = "";
+export const DEFAULT_WINDOWS_TRANSPORT = "ssh";
+export const DEFAULT_WINDOWS_SSH_HOST = "tickblaze-kamatera";
 export const DEFAULT_WINDOWS_PARALLELS_VM_NAME = "Windows 11";
 export const DEFAULT_WINDOWS_PARALLELS_SHARE_DRIVE = "Y:";
 export const DEFAULT_WINDOWS_PARALLELS_NODE_EXE = "node";
@@ -79,7 +79,7 @@ export function resolveWindowsTransportOptions(options = {}, env = process.env) 
   return {
     transport,
     localRepoRoot,
-    sshHost: String(options.sshHost || env.SYSTEMSCULPT_WINDOWS_SSH_HOST || "").trim(),
+    sshHost: String(options.sshHost || env.SYSTEMSCULPT_WINDOWS_SSH_HOST || DEFAULT_WINDOWS_SSH_HOST).trim(),
     vmName: String(options.vmName || env.SYSTEMSCULPT_WINDOWS_VM_NAME || "").trim() || DEFAULT_WINDOWS_PARALLELS_VM_NAME,
     parallelsRepoRoot:
       normalizeWindowsPath(

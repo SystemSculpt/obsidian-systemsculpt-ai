@@ -11,7 +11,12 @@ jest.mock("../../pi/PiTextModels", () => ({
   listLocalPiTextModelsAsSystemModels: jest.fn(),
 }));
 
+jest.mock("../../providerRuntime/RemoteProviderCatalog", () => ({
+  listConfiguredRemoteProviderModels: jest.fn(() => []),
+}));
+
 const { listLocalPiTextModelsAsSystemModels } = jest.requireMock("../../pi/PiTextModels");
+const { listConfiguredRemoteProviderModels } = jest.requireMock("../../providerRuntime/RemoteProviderCatalog");
 
 describe("PiTextCatalog", () => {
   beforeEach(() => {
@@ -106,5 +111,33 @@ describe("PiTextCatalog", () => {
     expect(models.map((model) => model.id)).toEqual([
       "systemsculpt@@systemsculpt/ai-agent",
     ]);
+  });
+
+  it("includes configured remote provider models on mobile", async () => {
+    (PlatformContext.get as jest.Mock).mockReturnValue({
+      supportsDesktopOnlyFeatures: () => false,
+    });
+    listConfiguredRemoteProviderModels.mockReturnValue([
+      {
+        id: "openrouter@@openai/gpt-5.4-mini",
+        name: "GPT-5.4 Mini",
+        provider: "openrouter",
+        sourceMode: "custom_endpoint",
+        sourceProviderId: "openrouter",
+        piExecutionModelId: "openai/gpt-5.4-mini",
+        piRemoteAvailable: true,
+        piLocalAvailable: false,
+      },
+    ]);
+
+    const models = await listPiTextCatalogModels({
+      settings: { serverUrl: "http://localhost:3000", licenseKey: "license_test", licenseValid: true },
+    } as any);
+
+    expect(models.map((model) => model.id)).toEqual([
+      "systemsculpt@@systemsculpt/ai-agent",
+      "openrouter@@openai/gpt-5.4-mini",
+    ]);
+    expect(listLocalPiTextModelsAsSystemModels).not.toHaveBeenCalled();
   });
 });

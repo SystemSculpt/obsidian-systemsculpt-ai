@@ -104,16 +104,6 @@ export async function displayProvidersTabContent(
 
   const { plugin } = tabInstance;
 
-  // Desktop-only gate — this entire tab is hidden on mobile via the registry,
-  // but guard defensively in case it's rendered directly.
-  if (!PlatformContext.get().supportsDesktopOnlyFeatures()) {
-    containerEl.createEl("p", {
-      text: "Provider connections are managed on desktop. Mobile uses SystemSculpt.",
-      cls: "setting-item-description",
-    });
-    return;
-  }
-
   const state: TabState = {
     providers: [],
     loading: true,
@@ -198,7 +188,9 @@ function renderProvidersList(
 
   containerEl.createEl("h3", { text: "Providers" });
   containerEl.createEl("p", {
-    text: "Connect your own AI provider accounts or configure local Pi runtimes to use in Chat and Studio. Models from connected providers and configured local runtimes appear in the model picker.",
+    text: PlatformContext.get().supportsDesktopOnlyFeatures()
+      ? "Connect your own AI provider accounts or configure local Pi runtimes to use in Chat and Studio. Models from connected providers and configured local runtimes appear in the model picker."
+      : "Connect your own AI provider accounts to use remote models in Chat on mobile. Local Pi runtimes remain desktop-only.",
     cls: "setting-item-description",
   });
 

@@ -38,12 +38,20 @@ import type { ToolCall, ToolCallRequest, ToolCallResult } from "../types/toolCal
 export type { StreamDebugCallbacks } from "./StreamExecutionTypes";
 
 let localPiStreamExecutorModulePromise: Promise<typeof import("./LocalPiStreamExecutor")> | null = null;
+let remoteProviderStreamExecutorModulePromise: Promise<typeof import("./providerRuntime/OpenRouterRemoteStreamExecutor")> | null = null;
 
 async function loadLocalPiStreamExecutorModule(): Promise<typeof import("./LocalPiStreamExecutor")> {
   if (!localPiStreamExecutorModulePromise) {
     localPiStreamExecutorModulePromise = import("./LocalPiStreamExecutor");
   }
   return await localPiStreamExecutorModulePromise;
+}
+
+async function loadRemoteProviderStreamExecutorModule(): Promise<typeof import("./providerRuntime/OpenRouterRemoteStreamExecutor")> {
+  if (!remoteProviderStreamExecutorModulePromise) {
+    remoteProviderStreamExecutorModulePromise = import("./providerRuntime/OpenRouterRemoteStreamExecutor");
+  }
+  return await remoteProviderStreamExecutorModulePromise;
 }
 
 export type CreditsBalanceSnapshot = {
@@ -739,6 +747,80 @@ export class SystemSculptService {
     return body;
   }
 
+  /**
+   * Vercel serverless functions enforce a hard 4.5 MB request-body limit
+   * (`FUNCTION_PAYLOAD_TOO_LARGE`).  When a conversation includes base64
+   * images the payload can easily exceed this.
+   *
+   * This method strips `image_url` blocks from older messages (oldest first)
+   * until the serialised body fits within the budget.  The most-recent user
+   * message's images are stripped only as a last resort.
+   *
+   * @returns `true` if any images were removed.
+   */
+  private trimPayloadImages(body: Record<string, any>): boolean {
+    const BUDGET = 3_500_000; // 3.5 MB -- leaves ~1 MB headroom for headers/overhead
+
+    let currentSize = JSON.stringify(body).length;
+    if (currentSize <= BUDGET) {
+      return false;
+    }
+
+    const messages: any[] | undefined = body.messages;
+    if (!Array.isArray(messages)) return false;
+
+    // Locate the last user message so we can preserve its images longest.
+    let lastUserIndex = -1;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i]?.role === "user") {
+        lastUserIndex = i;
+        break;
+      }
+    }
+
+    const stripImagesFromMessage = (msg: any): number => {
+      if (!Array.isArray(msg.content)) return 0;
+      const hasImage = msg.content.some((p: any) => p?.type === "image_url");
+      if (!hasImage) return 0;
+
+      const beforeSize = JSON.stringify(msg.content).length;
+
+      const textParts = msg.content.filter((p: any) => p?.type !== "image_url");
+      textParts.push({ type: "text", text: "[image omitted to reduce message size]" });
+
+      // Flatten to plain string when only text remains.
+      const allText = textParts.every((p: any) => p?.type === "text");
+      msg.content = allText
+        ? textParts.map((p: any) => String(p?.text ?? "")).join("\n")
+        : textParts;
+
+      const afterSize = JSON.stringify(msg.content).length;
+      return beforeSize - afterSize;
+    };
+
+    let trimmed = false;
+
+    // Pass 1: strip images from history messages (oldest first), skip latest user msg.
+    for (let i = 0; i < messages.length; i++) {
+      if (i === lastUserIndex) continue;
+      const saved = stripImagesFromMessage(messages[i]);
+      if (saved > 0) {
+        trimmed = true;
+        currentSize -= saved;
+        if (currentSize <= BUDGET) break;
+      }
+    }
+
+    // Pass 2: if still over budget, strip the latest user message's images too.
+    if (currentSize > BUDGET && lastUserIndex >= 0) {
+      if (stripImagesFromMessage(messages[lastUserIndex]) > 0) {
+        trimmed = true;
+      }
+    }
+
+    return trimmed;
+  }
+
   private buildLocalPiRequestPreview(options: {
     prepared: PreparedChatRequest;
     sessionFile?: string;
@@ -1314,6 +1396,20 @@ export class SystemSculptService {
         return;
       }
 
+      if (prepared.modelSource === "custom_endpoint") {
+        const { executeOpenRouterRemoteStream } = await loadRemoteProviderStreamExecutorModule();
+        for await (const event of executeOpenRouterRemoteStream({
+          plugin: this.plugin,
+          prepared,
+          signal,
+          reasoningEffort,
+          debug,
+        })) {
+          yield event;
+        }
+        return;
+      }
+
       const endpoint = `${this.baseUrl}${SYSTEMSCULPT_API_ENDPOINTS.CHAT.COMPLETIONS}`;
       const requestBody = this.buildHostedChatRequestBody({
         prepared,
@@ -1322,6 +1418,14 @@ export class SystemSculptService {
         reasoningEffort,
         webSearchEnabled,
       });
+
+      if (this.trimPayloadImages(requestBody)) {
+        new Notice(
+          "Some images were removed from older messages to fit within the server's request size limit.",
+          8000,
+        );
+      }
+
       const transport = PlatformContext.get().preferredTransport({ endpoint });
 
       debug?.onRequest?.({

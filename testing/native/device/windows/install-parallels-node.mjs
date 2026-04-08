@@ -4,6 +4,7 @@ import process from "node:process";
 import { pathToFileURL } from "node:url";
 import {
   DEFAULT_WINDOWS_PARALLELS_VM_NAME,
+  DEFAULT_WINDOWS_SSH_HOST,
   runRemotePowerShellScript,
 } from "./remote-run.mjs";
 
@@ -219,7 +220,8 @@ export function buildInstallNodeScript(options = {}) {
 
 async function runParallelsScript(script, options = {}) {
   return await runRemotePowerShellScript(script, {
-    transport: "parallels",
+    transport: "ssh",
+    sshHost: options.sshHost || DEFAULT_WINDOWS_SSH_HOST,
     vmName: options.vmName,
     nodeExe: options.nodeExe,
   });

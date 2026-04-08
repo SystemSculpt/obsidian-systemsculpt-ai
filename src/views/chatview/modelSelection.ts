@@ -13,6 +13,7 @@ import {
   loadPiTextProviderAuth,
   piTextProviderRequiresAuth,
 } from "../../services/pi-native/PiTextAuth";
+import { PlatformContext } from "../../services/PlatformContext";
 import { normalizeStudioPiProviderId } from "../../studio/piAuth/StudioPiProviderAuthUtils";
 import {
   isStudioPiLocalProvider,
@@ -80,7 +81,7 @@ export function getChatModelSetupSurface(
       }
     : {
         targetTab: "providers",
-        title: "Finish Pi setup",
+        title: "Finish provider setup",
         primaryButton: "Open Providers",
       };
 }
@@ -91,13 +92,13 @@ export function getChatModelSetupMessage(
 ): string {
   const retrySuffix = options?.retryHint ? ", then try again." : ".";
   return targetTab === "providers"
-    ? `Open Settings -> Providers to connect the selected Pi provider${retrySuffix}`
+    ? `Open Settings -> Providers to connect the selected provider${retrySuffix}`
     : `Open Settings -> Account to activate your SystemSculpt license${retrySuffix}`;
 }
 
 export function getChatModelSetupNotice(targetTab: ChatModelSetupTab): string {
   return targetTab === "providers"
-    ? "Open Settings -> SystemSculpt AI -> Providers to finish Pi setup."
+    ? "Open Settings -> SystemSculpt AI -> Providers to finish provider setup."
     : "Open Settings -> SystemSculpt AI -> Account to finish SystemSculpt setup.";
 }
 
@@ -337,7 +338,9 @@ export async function loadChatModelPickerOptions(
   const desktopPlugin = plugin as SystemSculptPlugin;
   const [providerAuth, localProviderIds] = await Promise.all([
     loadPiTextProviderAuth(providerHints, desktopPlugin),
-    loadPiTextLocalProviderIds(desktopPlugin),
+    PlatformContext.get().supportsDesktopOnlyFeatures()
+      ? loadPiTextLocalProviderIds(desktopPlugin)
+      : Promise.resolve(new Set<string>()),
   ]);
 
   return models

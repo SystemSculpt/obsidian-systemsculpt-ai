@@ -158,6 +158,10 @@ export class StreamingErrorHandler {
           if (authFailure || authStatus) {
             errorCode = ERROR_CODES.INVALID_LICENSE;
             errorMessage = upstreamMessage || 'Invalid API key or authentication error.';
+          } else if (status === 413) {
+            errorCode = ERROR_CODES.STREAM_ERROR;
+            errorMessage =
+              'Message too large to send. Try starting a new conversation, or remove images/attachments to reduce the size.';
           } else if (status === 404 || (upstreamMessage.includes('model') && upstreamMessage.includes('does not exist'))) {
             errorCode = ERROR_CODES.MODEL_UNAVAILABLE;
             errorMessage = upstreamMessage || `Model ${model} is unavailable with this provider.`;
@@ -264,6 +268,18 @@ export class StreamingErrorHandler {
               statusCode: status,
               rawError: data.error,
               lockUntil: String((data.error as any)?.lock_until || ''),
+              ...(requestId ? { requestId } : {}),
+              ...(context?.endpoint ? { endpoint: context.endpoint } : {}),
+            };
+          } else if (status === 413 || normalizedUpstreamCode === 'function_payload_too_large') {
+            errorCode = ERROR_CODES.STREAM_ERROR;
+            errorMessage =
+              'Message too large to send. Try starting a new conversation, or remove images/attachments to reduce the size.';
+            metadata = {
+              model: data.model,
+              statusCode: status,
+              rawError: data.error,
+              payloadTooLarge: true,
               ...(requestId ? { requestId } : {}),
               ...(context?.endpoint ? { endpoint: context.endpoint } : {}),
             };

@@ -76,11 +76,17 @@ jobs:
           echo "diff_file=${{ github.workspace }}/pr-diff.txt" >> "$GITHUB_OUTPUT"
           echo "Captured diff: $(wc -l < ${{ github.workspace }}/pr-diff.txt) lines"
 
-      - uses: anthropics/claude-code-action@6e2bd52842c65e914eba5c8badd17560bd26b5de # v1
+      - uses: anthropics/claude-code-action@b2fdd80112e5f140e097b11d7a3d9edf0b226fd0 # v1 (latest main)
         id: claude
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           show_full_output: true
+          settings: |
+            {
+              "permissions": {
+                "allow": ["WebSearch", "WebFetch"]
+              }
+            }
           prompt: |
             You are reviewing PR #${{ github.event.pull_request.number || github.event.issue.number }} for **SystemSculpt AI**, an Obsidian plugin (TypeScript, esbuild, Jest).
 
@@ -114,6 +120,15 @@ jobs:
             **Security**
             - No API keys, tokens, or secrets in code
             - User data handling in chat/embeddings must be safe
+
+            ## Verification of external claims
+
+            You have access to WebSearch and WebFetch. When reviewing, if you encounter:
+            - Model IDs, API endpoint URLs, or SDK method names you don't recognize
+            - Claims about what third-party services support or don't support
+            - Version numbers or feature availability of external dependencies
+
+            **Verify before flagging.** Use web search to confirm whether a model ID, API, or library actually exists before claiming it's invalid. If you cannot verify, say "unable to verify" rather than asserting something doesn't exist. False positives waste review cycles.
 
             ## Output rules
 

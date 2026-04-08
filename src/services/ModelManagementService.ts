@@ -55,6 +55,21 @@ export class ModelManagementService {
       };
     }
 
+    if (
+      resolvedModel &&
+      resolvedModel.sourceMode === "custom_endpoint" &&
+      resolvedModel.piRemoteAvailable &&
+      resolvedModel.piExecutionModelId &&
+      !isManagedSystemSculptModelId(resolvedModel.id)
+    ) {
+      return {
+        isCustom: true,
+        modelSource: "custom_endpoint",
+        model: resolvedModel,
+        actualModelId: resolvedModel.piExecutionModelId,
+      };
+    }
+
     // Default: route through the managed SystemSculpt hosted model
     const managedModel = buildManagedSystemSculptModel(this.plugin);
     const baseModel = resolvedModel || managedModel;
