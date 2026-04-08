@@ -4,10 +4,8 @@ import { supportsImages, supportsTools } from "../../utils/modelUtils";
 import { PlatformContext } from "../PlatformContext";
 import { buildPiTextProviderSetupMessage, hasPiTextProviderAuth } from "../pi-native/PiTextAuth";
 import { assertPiTextExecutionReady } from "../pi-native/PiTextRuntime";
-import {
-  getConfiguredRemoteProviderApiKey,
-  resolveRemoteProviderEndpoint,
-} from "./RemoteProviderCatalog";
+import { resolveRemoteProviderEndpoint } from "./RemoteProviderCatalog";
+import { resolveStudioPiProviderApiKey } from "../../studio/piAuth/StudioPiAuthStorage";
 
 export type ProviderRuntimePlan = {
   mode: "local" | "remote";
@@ -50,10 +48,8 @@ export async function resolveProviderRuntimePlan(
       throw new Error(`Model "${model.id}" is missing a remote execution model id.`);
     }
     const providerId = normalizeProviderId(model, actualModelId);
-    const pluginStoredApiKey = plugin
-      ? getConfiguredRemoteProviderApiKey(plugin, providerId)
-      : "";
-    const hasAuth = pluginStoredApiKey.length > 0 || await hasPiTextProviderAuth(providerId, plugin);
+    const resolvedApiKey = await resolveStudioPiProviderApiKey(providerId, { plugin });
+    const hasAuth = (resolvedApiKey && resolvedApiKey.length > 0) || await hasPiTextProviderAuth(providerId, plugin);
     if (!hasAuth) {
       throw new Error(buildPiTextProviderSetupMessage(providerId, actualModelId));
     }

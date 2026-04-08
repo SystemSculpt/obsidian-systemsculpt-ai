@@ -26,6 +26,11 @@ jest.mock("../RemoteProviderCatalog", () => ({
   resolveRemoteProviderEndpoint: jest.fn(() => "https://openrouter.ai/api/v1"),
 }));
 
+const mockResolveStudioPiProviderApiKey = jest.fn<Promise<string | null>, any[]>();
+jest.mock("../../../studio/piAuth/StudioPiAuthStorage", () => ({
+  resolveStudioPiProviderApiKey: (...args: any[]) => mockResolveStudioPiProviderApiKey(...args),
+}));
+
 import {
   getConfiguredRemoteProviderApiKey,
   resolveRemoteProviderEndpoint,
@@ -44,6 +49,7 @@ describe("ProviderRuntime", () => {
       supportsDesktopOnlyFeatures,
     } as any);
     mockedGetApiKey.mockReturnValue("sk-test-key");
+    mockResolveStudioPiProviderApiKey.mockResolvedValue("sk-test-key");
     mockedResolveEndpoint.mockReturnValue("https://openrouter.ai/api/v1");
   });
 
@@ -128,6 +134,7 @@ describe("ProviderRuntime", () => {
 
     it("falls back to Pi provider auth when plugin has no stored key", async () => {
       mockedGetApiKey.mockReturnValue("");
+      mockResolveStudioPiProviderApiKey.mockResolvedValue(null);
       mockHasPiTextProviderAuth.mockResolvedValue(true);
 
       const model = makeRemoteModel();
@@ -143,6 +150,7 @@ describe("ProviderRuntime", () => {
 
     it("throws when neither plugin key nor Pi auth is available", async () => {
       mockedGetApiKey.mockReturnValue("");
+      mockResolveStudioPiProviderApiKey.mockResolvedValue(null);
       mockHasPiTextProviderAuth.mockResolvedValue(false);
 
       const model = makeRemoteModel();
@@ -173,6 +181,7 @@ describe("ProviderRuntime", () => {
 
     it("normalizes providerId from sourceProviderId, then provider, then model id prefix", async () => {
       mockedGetApiKey.mockReturnValue("sk-key");
+      mockResolveStudioPiProviderApiKey.mockResolvedValue("sk-key");
       mockedResolveEndpoint.mockReturnValue("https://example.com/v1");
       mockHasPiTextProviderAuth.mockResolvedValue(true);
 

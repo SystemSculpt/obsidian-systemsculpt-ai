@@ -357,8 +357,14 @@ export async function clearStudioPiProviderAuth(
   }
   try {
     storage.remove(provider);
-  } catch {
-    // Keep the plugin-settings fallback cleared even if runtime storage cannot be updated.
+  } catch (err) {
+    // Plugin-settings fallback is already cleared above. Log a warning so the
+    // discrepancy is visible: resolveProviderApiKey prefers Pi storage, so a
+    // stale entry there could shadow the cleared plugin-settings value.
+    console.warn(
+      `[StudioPiAuthStorage] Failed to remove ${provider} from Pi auth storage; plugin-settings entry was cleared but Pi storage may retain stale credentials.`,
+      err,
+    );
   }
 }
 

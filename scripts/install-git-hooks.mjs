@@ -41,7 +41,12 @@ for (const entry of fs.readdirSync(sourceDir)) {
     }
   }
 
-  const content = SENTINEL + "\n" + fs.readFileSync(src, "utf8");
+  const raw = fs.readFileSync(src, "utf8");
+  // Preserve the shebang on line 1 so the kernel can exec the hook on Linux.
+  const shebangMatch = raw.match(/^(#!.*\n)/);
+  const content = shebangMatch
+    ? shebangMatch[1] + SENTINEL + "\n" + raw.slice(shebangMatch[0].length)
+    : SENTINEL + "\n" + raw;
   fs.writeFileSync(dest, content, { mode: 0o755 });
   console.log(`[git-hooks] Installed ${entry}`);
 }

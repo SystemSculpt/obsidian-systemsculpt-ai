@@ -8,7 +8,6 @@ import {
   ensureProviderRuntimeReady,
   type ProviderRuntimePlan,
 } from "../../services/providerRuntime/ProviderRuntime";
-import { getConfiguredRemoteProviderApiKey } from "../../services/providerRuntime/RemoteProviderCatalog";
 import {
   hasManagedSystemSculptAccess,
   isManagedSystemSculptModelId,
@@ -231,19 +230,6 @@ export class ChatModelSelectionController extends Component {
         setupSurface,
       );
       return false;
-    }
-
-    if (
-      selectedModel.sourceMode === "custom_endpoint" &&
-      selectedModel.piRemoteAvailable &&
-      String(
-        getConfiguredRemoteProviderApiKey(
-          this.options.plugin,
-          String(selectedModel.sourceProviderId || selectedModel.provider || ""),
-        ),
-      ).trim().length > 0
-    ) {
-      return true;
     }
 
     let executionPlan: ProviderRuntimePlan;

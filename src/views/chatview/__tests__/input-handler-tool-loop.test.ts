@@ -793,10 +793,18 @@ describe("InputHandler hosted tool loop", () => {
       piRemoteAvailable: true,
       piExecutionModelId: "openai/gpt-5.4-mini",
     }));
-    (getConfiguredRemoteProviderApiKey as jest.Mock).mockReturnValue("sk-or-mobile");
+    (ensureProviderRuntimeReady as jest.Mock).mockResolvedValue({
+      mode: "remote",
+      actualModelId: "openai/gpt-5.4-mini",
+      providerId: "openrouter",
+      authMode: "byok",
+      endpoint: "https://openrouter.ai/api/v1",
+      supportsTools: true,
+      supportsImages: true,
+    });
 
     await expect((handler as any).ensureProviderReadyForChat()).resolves.toBe(true);
-    expect(ensureProviderRuntimeReady).not.toHaveBeenCalled();
+    expect(ensureProviderRuntimeReady).toHaveBeenCalled();
   });
 
   it("uses the selected model setup target when automation blocks a setup prompt without overrides", async () => {

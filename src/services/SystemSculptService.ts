@@ -761,7 +761,8 @@ export class SystemSculptService {
   private trimPayloadImages(body: Record<string, any>): boolean {
     const BUDGET = 3_500_000; // 3.5 MB -- leaves ~1 MB headroom for headers/overhead
 
-    if (JSON.stringify(body).length <= BUDGET) {
+    let currentSize = JSON.stringify(body).length;
+    if (currentSize <= BUDGET) {
       return false;
     }
 
@@ -777,10 +778,12 @@ export class SystemSculptService {
       }
     }
 
-    const stripImagesFromMessage = (msg: any): boolean => {
-      if (!Array.isArray(msg.content)) return false;
+    const stripImagesFromMessage = (msg: any): number => {
+      if (!Array.isArray(msg.content)) return 0;
       const hasImage = msg.content.some((p: any) => p?.type === "image_url");
-      if (!hasImage) return false;
+      if (!hasImage) return 0;
+
+      const beforeSize = JSON.stringify(msg.content).length;
 
       const textParts = msg.content.filter((p: any) => p?.type !== "image_url");
       textParts.push({ type: "text", text: "[image omitted to reduce message size]" });
@@ -790,7 +793,9 @@ export class SystemSculptService {
       msg.content = allText
         ? textParts.map((p: any) => String(p?.text ?? "")).join("\n")
         : textParts;
-      return true;
+
+      const afterSize = JSON.stringify(msg.content).length;
+      return beforeSize - afterSize;
     };
 
     let trimmed = false;
@@ -798,15 +803,17 @@ export class SystemSculptService {
     // Pass 1: strip images from history messages (oldest first), skip latest user msg.
     for (let i = 0; i < messages.length; i++) {
       if (i === lastUserIndex) continue;
-      if (stripImagesFromMessage(messages[i])) {
+      const saved = stripImagesFromMessage(messages[i]);
+      if (saved > 0) {
         trimmed = true;
-        if (JSON.stringify(body).length <= BUDGET) break;
+        currentSize -= saved;
+        if (currentSize <= BUDGET) break;
       }
     }
 
     // Pass 2: if still over budget, strip the latest user message's images too.
-    if (JSON.stringify(body).length > BUDGET && lastUserIndex >= 0) {
-      if (stripImagesFromMessage(messages[lastUserIndex])) {
+    if (currentSize > BUDGET && lastUserIndex >= 0) {
+      if (stripImagesFromMessage(messages[lastUserIndex]) > 0) {
         trimmed = true;
       }
     }

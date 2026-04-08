@@ -1,6 +1,6 @@
 import type SystemSculptPlugin from "../../main";
 import type { PreparedChatRequest, StreamDebugCallbacks } from "../StreamExecutionTypes";
-import type { StreamEvent } from "../../streaming/types";
+import type { StreamEvent, StreamPipelineDiagnostics } from "../../streaming/types";
 import { PlatformRequestClient } from "../PlatformRequestClient";
 import { StreamingErrorHandler } from "../StreamingErrorHandler";
 import { StreamingService } from "../StreamingService";
@@ -39,14 +39,14 @@ function serializeResponseHeaders(headers: unknown): Record<string, string> {
   return serialized;
 }
 
-function buildRemoteRequestBody(input: RemoteOpenRouterStreamInput): Record<string, any> {
+function buildRemoteRequestBody(input: RemoteOpenRouterStreamInput): Record<string, unknown> {
   const providerId = String(
     input.prepared.resolvedModel.sourceProviderId ||
       input.prepared.resolvedModel.provider ||
       "openrouter",
   ).trim();
   const endpoint = resolveRemoteProviderEndpoint(providerId);
-  const body: Record<string, any> = {
+  const body: Record<string, unknown> = {
     model: input.prepared.actualModelId,
     messages: input.prepared.preparedMessages.map((message) => ({
       role: message.role,
@@ -141,7 +141,7 @@ export async function* executeOpenRouterRemoteStream(
     });
   }
 
-  let diagnostics: any;
+  let diagnostics: StreamPipelineDiagnostics | undefined;
   for await (const event of streamingService.streamResponse(response, {
     model: input.prepared.actualModelId,
     isCustomProvider: true,
