@@ -161,7 +161,8 @@ jobs:
 
       - name: Dismiss trust prompt and enable plugin via CDP
         run: |
-          node testing/native/desktop-automation/cdp-trust-and-enable.mjs \
+          node --experimental-websocket \
+            testing/native/desktop-automation/cdp-trust-and-enable.mjs \
             --port 9222 \
             --plugin-id systemsculpt-ai
 

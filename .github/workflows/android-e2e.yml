@@ -164,7 +164,7 @@ jobs:
             done
 
             echo "--- Running runtime smoke tests ---"
-            node testing/native/runtime-smoke/run.mjs \
+            node --experimental-websocket testing/native/runtime-smoke/run.mjs \
               --mode android \
               --android-serial emulator-5554 \
               --android-forward-port 9333 \
