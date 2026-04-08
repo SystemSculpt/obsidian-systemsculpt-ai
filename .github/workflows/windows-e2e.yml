@@ -117,7 +117,8 @@ jobs:
           node --experimental-websocket \
             testing/native/desktop-automation/cdp-trust-and-enable.mjs \
             --port 9222 \
-            --plugin-id systemsculpt-ai
+            --plugin-id systemsculpt-ai \
+            2>&1 | tee cdp-trust-output.log
 
       - name: Wait for desktop automation bridge
         shell: pwsh
@@ -177,7 +178,8 @@ jobs:
           $sources = @(
             @{ Name = "obsidian-logs";       Path = Join-Path $env:APPDATA "Obsidian\logs" },
             @{ Name = "plugin-dir";          Path = Join-Path $env:USERPROFILE "Documents\SystemSculptWindowsQA\.obsidian\plugins\systemsculpt-ai" },
-            @{ Name = "bridge-discovery";    Path = Join-Path $env:USERPROFILE ".systemsculpt\obsidian-automation" }
+            @{ Name = "bridge-discovery";    Path = Join-Path $env:USERPROFILE ".systemsculpt\obsidian-automation" },
+            @{ Name = "cdp-trust-output";    Path = Join-Path $env:GITHUB_WORKSPACE "cdp-trust-output.log" }
           )
           foreach ($src in $sources) {
             if (Test-Path $src.Path) {
@@ -197,6 +199,7 @@ jobs:
           path: |
             failure-screenshot.png
             diagnostics/
+            cdp-trust-output.log
           retention-days: 7
           if-no-files-found: ignore
 

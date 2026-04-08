@@ -132,164 +132,129 @@ async function main() {
     console.log("WARNING: Trust button not found — vault may already be trusted");
   }
 
-  // Wait for Obsidian to process trust acceptance
-  console.log("Waiting 8s for Obsidian to process trust...");
-  await sleep(8000);
+  // Wait for Obsidian to process trust acceptance and auto-load plugins.
+  // On macOS this is usually enough; on Windows loadPlugin() often fails
+  // internally, so we give it extra time and then fall back to require().
+  console.log("Waiting 15s for Obsidian to process trust and auto-load plugins...");
+  await sleep(15000);
 
-  // Explicitly load the plugin — trust acceptance adds the ID to enabledPlugins
-  // but may not actually instantiate the plugin code on first run.
-  //
-  // On Windows, Obsidian's loadPlugin() fails with "File URL path must be
-  // absolute" because it passes backslash paths to pathToFileURL().  We first
-  // normalise manifest.dir (backslash → forward-slash) so the native loader
-  // succeeds.  If it still fails we fall back to a manual dynamic import.
+  // Check if plugin was auto-loaded by trust acceptance.  If not, try
+  // Obsidian's loadPlugin() once, then switch to require() for the rest.
   let pluginLoaded = false;
-  let triedPathFix = false;
-  for (let attempt = 1; attempt <= 15; attempt += 1) {
+  let loadPluginFailed = false;
+  const EVAL_TIMEOUT = 60000; // 60s — plugin onload can be slow
+
+  for (let attempt = 1; attempt <= 10; attempt += 1) {
+    // --- Step 1: check current state ---
     const result = await cdp.send("Runtime.evaluate", {
-      expression: `(async () => {
+      expression: `(() => {
         const plugins = globalThis.app?.plugins;
         if (!plugins) return { ready: false, reason: 'no-plugins-api' };
         const id = ${JSON.stringify(pluginId)};
-        const hasInstance = Boolean(plugins.plugins?.[id]);
-        const isEnabled = plugins.enabledPlugins?.has?.(id) || Array.from(plugins.enabledPlugins ?? []).includes(id);
-        const manifest = plugins.manifests?.[id];
-
-        // If already loaded, we're done
-        if (hasInstance) {
-          return { ready: true, action: 'already-loaded', hasInstance: true };
-        }
-
-        // Obsidian's loadPlugin() calls pathToFileURL(manifest.dir) which
-        // requires an absolute path.  On Windows the dir is often relative
-        // (e.g. ".obsidian\\plugins\\foo") and uses backslashes — fix both.
-        if (manifest?.dir) {
-          let dir = manifest.dir;
-          const basePath = globalThis.app?.vault?.adapter?.basePath || '';
-          if (basePath && !dir.match(/^[A-Za-z]:/) && !dir.startsWith('/')) {
-            dir = basePath + '/' + dir;
-          }
-          dir = dir.replace(/\\\\/g, '/');
-          manifest.dir = dir;
-        }
-
-        // Try to enable and load the plugin
-        try {
-          // First ensure it's enabled
-          if (!isEnabled) {
-            await plugins.enablePluginAndSave(id);
-          }
-          // Force load the plugin if it has a manifest but no instance
-          if (manifest && !plugins.plugins?.[id]) {
-            await plugins.loadPlugin(id);
-          }
-          // Check again after loading
-          const nowLoaded = Boolean(plugins.plugins?.[id]);
-          return {
-            ready: nowLoaded,
-            action: nowLoaded ? 'loaded' : 'load-pending',
-            hasInstance: nowLoaded,
-            hasManifest: Boolean(manifest),
-            isEnabled: plugins.enabledPlugins?.has?.(id) ?? false,
-            dir: manifest?.dir,
-            loadedIds: Object.keys(plugins.plugins ?? {}),
-          };
-        } catch (e) {
-          return {
-            ready: false,
-            reason: 'load-failed',
-            error: e.message,
-            hasManifest: Boolean(manifest),
-            isEnabled,
-            dir: manifest?.dir,
-            loadedIds: Object.keys(plugins.plugins ?? {}),
-          };
-        }
+        return {
+          ready: Boolean(plugins.plugins?.[id]),
+          hasManifest: Boolean(plugins.manifests?.[id]),
+          isEnabled: plugins.enabledPlugins?.has?.(id) ?? false,
+          dir: plugins.manifests?.[id]?.dir ?? null,
+          basePath: globalThis.app?.vault?.adapter?.basePath ?? null,
+          loadedIds: Object.keys(plugins.plugins ?? {}),
+          hasRequire: typeof require === 'function',
+        };
       })()`,
       returnByValue: true,
-      awaitPromise: true,
     });
     const state = result?.result?.value;
-    console.log(`Plugin state attempt ${attempt}: ${JSON.stringify(state)}`);
-    if (state?.ready && state?.hasInstance) {
+    console.log(`[attempt ${attempt}] state: ${JSON.stringify(state)}`);
+
+    if (state?.ready) {
       pluginLoaded = true;
+      console.log("Plugin already loaded by Obsidian");
       break;
     }
 
-    // Fallback: use Electron's require() to load the plugin when
-    // Obsidian's loadPlugin() keeps failing.  require() handles native
-    // Windows paths without needing file:// URL conversion.
-    if (attempt >= 2 && state?.reason === "load-failed" && state?.dir) {
-      if (!triedPathFix) {
-        triedPathFix = true;
-        console.log(`loadPlugin() failed: ${state.error} — trying require()...`);
-      }
-      const manualResult = await cdp.send("Runtime.evaluate", {
+    if (!state?.hasManifest) {
+      console.log("No manifest found — waiting for Obsidian to discover plugin...");
+      await sleep(3000);
+      continue;
+    }
+
+    // --- Step 2: try loadPlugin() once, then require() ---
+    if (!loadPluginFailed) {
+      console.log("Trying Obsidian's loadPlugin()...");
+      const loadResult = await cdp.send("Runtime.evaluate", {
         expression: `(async () => {
           const plugins = globalThis.app?.plugins;
           const id = ${JSON.stringify(pluginId)};
           const manifest = plugins.manifests?.[id];
-          if (!manifest) return { ready: false, reason: 'no-manifest' };
-
-          // Resolve dir to an absolute path using vault basePath if relative.
-          let dir = manifest.dir;
-          const basePath = globalThis.app?.vault?.adapter?.basePath || '';
-          if (basePath && !dir.match(/^[A-Za-z]:/) && !dir.startsWith('/')) {
-            dir = basePath + '/' + dir;
+          // Resolve relative path and normalise backslashes
+          if (manifest?.dir) {
+            let d = manifest.dir;
+            const bp = globalThis.app?.vault?.adapter?.basePath || '';
+            if (bp && !d.match(/^[A-Za-z]:/) && !d.startsWith('/')) d = bp + '/' + d;
+            manifest.dir = d.replace(/\\\\/g, '/');
           }
-          // Normalise separators — require() handles both on Windows
-          dir = dir.replace(/\\\\/g, '/');
-          const mainPath = dir + '/main.js';
-
           try {
-            // Clear module cache for a fresh load
-            if (typeof require !== 'undefined' && require.cache) {
-              Object.keys(require.cache).forEach(k => {
-                if (k.includes('systemsculpt-ai')) delete require.cache[k];
-              });
-            }
-
-            // Prefer require() — it handles native paths in Electron
-            let mod;
-            if (typeof require === 'function') {
-              mod = require(mainPath);
-            } else {
-              // Absolute fallback: dynamic import with file URL
-              let fileUrl = 'file://' + (dir.startsWith('/') ? '' : '/') + dir + '/main.js';
-              mod = await import(fileUrl);
-            }
-            const PluginClass = mod.default || mod;
-            if (typeof PluginClass !== 'function') {
-              return { ready: false, reason: 'no-constructor', mainPath, keys: Object.keys(mod || {}).slice(0, 10) };
-            }
-            const instance = new PluginClass(globalThis.app, manifest);
-            plugins.plugins[id] = instance;
-
-            // Run onload — log errors but still consider loaded.
-            let onloadError = null;
-            try { await instance.onload(); } catch (oe) { onloadError = oe; }
-
-            return {
-              ready: true,
-              action: onloadError ? 'require-onload-error' : 'require-loaded',
-              onloadError: onloadError?.message || null,
-              mainPath,
-            };
+            if (!plugins.enabledPlugins?.has?.(id)) await plugins.enablePluginAndSave(id);
+            if (!plugins.plugins?.[id]) await plugins.loadPlugin(id);
+            return { ok: Boolean(plugins.plugins?.[id]), dir: manifest?.dir };
           } catch (e) {
-            return { ready: false, reason: 'require-failed', error: e.message, stack: (e.stack || '').slice(0, 400), mainPath };
+            return { ok: false, error: e.message, dir: manifest?.dir };
           }
         })()`,
         returnByValue: true,
         awaitPromise: true,
-      });
-      const manualState = manualResult?.result?.value;
-      console.log(`Manual load result: ${JSON.stringify(manualState)}`);
-      if (manualState?.ready) {
-        pluginLoaded = true;
-        break;
-      }
+      }, EVAL_TIMEOUT);
+      const lr = loadResult?.result?.value;
+      console.log(`loadPlugin result: ${JSON.stringify(lr)}`);
+      if (lr?.ok) { pluginLoaded = true; break; }
+      loadPluginFailed = true;
+      console.log("loadPlugin() failed — switching to require() for remaining attempts");
     }
-    await sleep(2000);
+
+    // --- Step 3: require() fallback ---
+    console.log("Trying require() fallback...");
+    const reqResult = await cdp.send("Runtime.evaluate", {
+      expression: `(async () => {
+        const plugins = globalThis.app?.plugins;
+        const id = ${JSON.stringify(pluginId)};
+        const manifest = plugins.manifests?.[id];
+        if (!manifest) return { ok: false, reason: 'no-manifest' };
+
+        let dir = manifest.dir;
+        const bp = globalThis.app?.vault?.adapter?.basePath || '';
+        if (bp && !dir.match(/^[A-Za-z]:/) && !dir.startsWith('/')) dir = bp + '/' + dir;
+        dir = dir.replace(/\\\\/g, '/');
+        const mainPath = dir + '/main.js';
+
+        try {
+          // Clear cache
+          if (require.cache) {
+            Object.keys(require.cache).forEach(k => {
+              if (k.includes('systemsculpt-ai')) delete require.cache[k];
+            });
+          }
+          const mod = (typeof require === 'function') ? require(mainPath) : await import('file:///' + dir + '/main.js');
+          const Cls = mod.default || mod;
+          if (typeof Cls !== 'function') {
+            return { ok: false, reason: 'no-constructor', type: typeof Cls, keys: Object.keys(mod||{}).slice(0,5) };
+          }
+          const inst = new Cls(globalThis.app, manifest);
+          plugins.plugins[id] = inst;
+          let onloadErr = null;
+          try { await inst.onload(); } catch (e) { onloadErr = e.message; }
+          return { ok: true, action: 'require', onloadErr, mainPath };
+        } catch (e) {
+          return { ok: false, reason: 'require-error', error: e.message, stack: (e.stack||'').slice(0,500), mainPath };
+        }
+      })()`,
+      returnByValue: true,
+      awaitPromise: true,
+    }, EVAL_TIMEOUT);
+    const rr = reqResult?.result?.value;
+    console.log(`require() result: ${JSON.stringify(rr)}`);
+    if (rr?.ok) { pluginLoaded = true; break; }
+
+    await sleep(3000);
   }
 
   if (!pluginLoaded) {
