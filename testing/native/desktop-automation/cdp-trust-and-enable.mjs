@@ -98,6 +98,33 @@ async function main() {
   await cdp.send("Runtime.enable");
   console.log("Runtime.enable OK");
 
+  // Patch url.pathToFileURL BEFORE clicking trust so it's in place when
+  // Obsidian auto-loads plugins after trust acceptance.  On Windows,
+  // manifest.dir is relative (".obsidian/plugins/foo") which causes
+  // pathToFileURL to throw "File URL path must be absolute".
+  console.log("Patching pathToFileURL for relative-path support...");
+  const patchResult = await cdp.send("Runtime.evaluate", {
+    expression: `(() => {
+      try {
+        const url = require('url');
+        const nodePath = require('path');
+        if (url.__ptfuPatched) return 'already-patched';
+        const orig = url.pathToFileURL;
+        url.pathToFileURL = function(p) {
+          if (typeof p === 'string' && !nodePath.isAbsolute(p)) {
+            const bp = globalThis.app?.vault?.adapter?.basePath || '';
+            if (bp) p = nodePath.resolve(bp, p);
+          }
+          return orig(p);
+        };
+        url.__ptfuPatched = true;
+        return 'patched';
+      } catch (e) { return 'error: ' + e.message; }
+    })()`,
+    returnByValue: true,
+  });
+  console.log(`pathToFileURL patch: ${patchResult?.result?.value}`);
+
   // Poll for trust button and click it
   let trustClicked = false;
   for (let attempt = 1; attempt <= 30; attempt += 1) {
