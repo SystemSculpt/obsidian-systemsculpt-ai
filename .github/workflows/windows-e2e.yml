@@ -157,17 +157,31 @@ jobs:
         if: failure()
         shell: bash
         run: |
-          echo "=== CDP trust output ==="
-          cat cdp-trust-output.log 2>/dev/null || echo "(no CDP log found)"
-          echo ""
-          echo "=== Obsidian process check ==="
-          tasklist 2>/dev/null | grep -i obsidian || echo "(no Obsidian process)"
-          echo ""
-          echo "=== CDP port probe ==="
-          curl -s http://127.0.0.1:9222/json/version 2>&1 || echo "(CDP not reachable)"
-          echo ""
-          echo "=== Plugin dir listing ==="
-          ls -la "$USERPROFILE/Documents/SystemSculptWindowsQA/.obsidian/plugins/systemsculpt-ai/" 2>/dev/null || echo "(plugin dir not found)"
+          # Print to stdout AND to step summary so we can read it
+          diag=""
+          diag+="## Windows E2E — CDP Diagnostics"$'\n\n'
+
+          diag+="### CDP trust script output"$'\n```\n'
+          diag+="$(cat cdp-trust-output.log 2>/dev/null || echo '(no CDP log found)')"$'\n```\n\n'
+
+          diag+="### Obsidian process"$'\n```\n'
+          diag+="$(tasklist 2>/dev/null | grep -i obsidian || echo '(no Obsidian process)')"$'\n```\n\n'
+
+          diag+="### CDP port probe"$'\n```\n'
+          diag+="$(curl -s http://127.0.0.1:9222/json/version 2>&1 || echo '(CDP not reachable)')"$'\n```\n\n'
+
+          diag+="### Plugin dir"$'\n```\n'
+          diag+="$(ls -la "$USERPROFILE/Documents/SystemSculptWindowsQA/.obsidian/plugins/systemsculpt-ai/" 2>/dev/null || echo '(plugin dir not found)')"$'\n```\n\n'
+
+          diag+="### Obsidian config"$'\n```\n'
+          diag+="$(cat "$APPDATA/Obsidian/obsidian.json" 2>/dev/null || echo '(no obsidian.json)')"$'\n```\n'
+
+          echo "$diag"
+          echo "$diag" >> "$GITHUB_STEP_SUMMARY"
+
+          # Also emit a short annotation with the last 5 lines of CDP output
+          last_lines="$(tail -5 cdp-trust-output.log 2>/dev/null || echo 'no log')"
+          echo "::error title=CDP diagnostics::$last_lines"
 
       - name: Capture screenshot on failure
         if: failure()
