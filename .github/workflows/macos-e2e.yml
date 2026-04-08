@@ -217,6 +217,7 @@ jobs:
         run: |
           node testing/native/desktop-automation/run.mjs \
             --case managed-baseline \
+            --vault-path "${HOME}/Documents/SystemSculptMacQA" \
             --no-reload
 
       # ---- Failure diagnostics ----
