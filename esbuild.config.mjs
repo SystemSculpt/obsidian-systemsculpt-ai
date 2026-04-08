@@ -281,11 +281,10 @@ const buildOptions = {
 	external: [
 		"obsidian",
 		"electron",
-		// Node-only transitive deps from pi-coding-agent that crash on Obsidian
-		// mobile WebView. Desktop resolves them at runtime via Node.js; mobile
-		// never reaches the code paths that use them.
-		"proper-lockfile",
-		"graceful-fs",
+		// Node-only transitive deps from pi-coding-agent. pi-tui is a terminal
+		// UI that should never be bundled. proper-lockfile and graceful-fs are
+		// small (~40KB) and safe to bundle — they're dead code on mobile but
+		// required on desktop where Electron's renderer can't resolve externals.
 		"@mariozechner/pi-tui",
 		"@codemirror/autocomplete",
 		"@codemirror/collab",
