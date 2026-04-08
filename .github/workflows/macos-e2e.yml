@@ -148,46 +148,42 @@ jobs:
           open /Applications/Obsidian.app --args "${vault_path}"
           echo "Obsidian launched with vault ${vault_path}"
 
-      - name: Dismiss trust prompt
+      - name: Dismiss trust prompt and enable plugin
         run: |
           echo "Waiting 10s for Obsidian trust dialog to render..."
           sleep 10
 
-          # Try AppleScript keystroke first (sends Enter to frontmost app)
-          # The trust dialog has "Trust author and enable plugins" as the
-          # default button, so Enter/Return dismisses it.
-          for attempt in 1 2 3; do
-            osascript -e '
-              tell application "Obsidian" to activate
-              delay 1
-              tell application "System Events"
-                keystroke return
-              end tell
-            ' 2>&1 || echo "AppleScript attempt ${attempt} failed (expected if accessibility not granted)"
-            sleep 3
-          done
-
-          # Fallback: if AppleScript cannot send keystrokes due to GHA
-          # accessibility restrictions, try clicking the button directly
-          # via AppleScript UI scripting
+          # Dismiss trust prompt via keystroke (Enter = "Trust author and enable plugins")
           osascript -e '
+            tell application "Obsidian" to activate
+            delay 1
             tell application "System Events"
-              tell process "Obsidian"
-                set frontmost to true
-                delay 0.5
-                try
-                  click button "Trust author and enable plugins" of window 1
-                on error
-                  try
-                    click button 1 of sheet 1 of window 1
-                  end try
-                end try
-              end tell
+              keystroke return
             end tell
-          ' 2>&1 || echo "UI scripting fallback attempted"
+          ' 2>&1 || true
 
-          echo "Trust prompt dismissal complete, waiting 5s for plugin load..."
-          sleep 5
+          echo "Trust prompt dismissed, waiting 8s for plugin manager to load..."
+          sleep 8
+
+          # Close any settings/modal that may be open (Escape key), then
+          # send Cmd+P -> "Reload app without saving" to force a clean
+          # restart that picks up the community-plugins.json enablement.
+          # This is more reliable than trying to click toggles in Settings.
+          osascript -e '
+            tell application "Obsidian" to activate
+            delay 0.5
+            tell application "System Events"
+              -- Close any open settings modal
+              key code 53
+              delay 1
+              -- Close again in case nested
+              key code 53
+              delay 1
+            end tell
+          ' 2>&1 || true
+
+          echo "Waiting 15s for plugin to fully initialize..."
+          sleep 15
 
       - name: Wait for desktop automation bridge
         run: |
