@@ -101,20 +101,26 @@ jobs:
           echo '{"file-explorer":true,"global-search":true,"switcher":true,"command-palette":true,"editor-status":true}' > "${vault_path}/.obsidian/core-plugins.json"
           echo '# SystemSculpt macOS QA' > "${vault_path}/Welcome.md"
 
-          # Seed plugin settings with hosted auth
+          # Seed plugin settings with hosted auth (matches Windows common.mjs defaults)
           node --input-type=module -e "
             import fs from 'node:fs';
             import crypto from 'node:crypto';
+            const licenseKey = process.env.SYSTEMSCULPT_RUNTIME_SMOKE_LICENSE_KEY || '';
+            const serverUrl = process.env.SYSTEMSCULPT_RUNTIME_SMOKE_SERVER_URL || 'https://api.systemsculpt.com';
             const settings = {
               settingsMode: 'advanced',
               selectedModelId: 'systemsculpt@@systemsculpt/ai-agent',
               desktopAutomationBridgeEnabled: true,
               vaultInstanceId: crypto.randomUUID(),
             };
-            const licenseKey = process.env.SYSTEMSCULPT_RUNTIME_SMOKE_LICENSE_KEY || '';
-            const serverUrl = process.env.SYSTEMSCULPT_RUNTIME_SMOKE_SERVER_URL || '';
-            if (licenseKey) settings.licenseKey = licenseKey;
-            if (serverUrl) settings.systemSculptServerUrl = serverUrl;
+            if (licenseKey) {
+              settings.licenseKey = licenseKey;
+              settings.licenseValid = true;
+              settings.enableSystemSculptProvider = true;
+              settings.serverUrl = serverUrl;
+              settings.transcriptionProvider = 'systemsculpt';
+              settings.embeddingsProvider = 'systemsculpt';
+            }
             fs.writeFileSync('${plugin_dir}/data.json', JSON.stringify(settings, null, 2));
             console.log('Plugin settings seeded (bridge enabled)');
           "
@@ -148,78 +154,16 @@ jobs:
                 OPENROUTER_API_KEY PERPLEXITY_API_KEY DEEPSEEK_API_KEY \
                 XAI_API_KEY CEREBRAS_API_KEY SAMBANOVA_API_KEY TOGETHER_API_KEY 2>/dev/null || true
 
-          # Launch Obsidian in background using full path (LaunchServices may
-          # not have indexed the freshly-copied app on GHA runners)
-          open /Applications/Obsidian.app --args "${vault_path}"
-          echo "Obsidian launched with vault ${vault_path}"
+          # Launch Obsidian with remote debugging so we can interact via CDP
+          # (AppleScript cannot reliably target Electron UI elements)
+          /Applications/Obsidian.app/Contents/MacOS/Obsidian --remote-debugging-port=9222 &
+          echo "Obsidian launched with remote debugging on port 9222"
 
-      - name: Dismiss trust prompt and enable plugin
+      - name: Dismiss trust prompt and enable plugin via CDP
         run: |
-          echo "Waiting 10s for Obsidian trust dialog to render..."
-          sleep 10
-
-          # Dismiss trust prompt via keystroke (Enter = "Trust author and enable plugins")
-          osascript -e '
-            tell application "Obsidian" to activate
-            delay 1
-            tell application "System Events"
-              keystroke return
-            end tell
-          ' 2>&1 || true
-
-          echo "Trust prompt dismissed, waiting 5s for Community Plugins page..."
-          sleep 5
-
-          # After trust acceptance, Obsidian opens the Community Plugins
-          # settings page. The plugin is listed but its toggle is OFF.
-          # We need to find and click the toggle for SystemSculpt AI.
-          # Use AppleScript UI scripting to locate and click it.
-          osascript -e '
-            tell application "Obsidian" to activate
-            delay 1
-            tell application "System Events"
-              tell process "Obsidian"
-                set frontmost to true
-                delay 0.5
-                -- The Community Plugins settings page has toggle switches.
-                -- Find all checkboxes/switches and click the one for our plugin.
-                try
-                  set allCheckboxes to every checkbox of group 1 of window 1
-                  repeat with cb in allCheckboxes
-                    try
-                      click cb
-                    end try
-                  end repeat
-                end try
-                -- Also try toggling via the settings item toggle pattern
-                try
-                  set allGroups to every group of group 1 of window 1
-                  repeat with g in allGroups
-                    try
-                      click checkbox 1 of g
-                    end try
-                  end repeat
-                end try
-              end tell
-            end tell
-          ' 2>&1 || echo "UI scripting for toggle attempted"
-
-          echo "Waiting 5s then closing settings..."
-          sleep 5
-
-          # Close settings modal
-          osascript -e '
-            tell application "Obsidian" to activate
-            delay 0.5
-            tell application "System Events"
-              key code 53
-              delay 1
-              key code 53
-            end tell
-          ' 2>&1 || true
-
-          echo "Waiting 15s for plugin to fully initialize..."
-          sleep 15
+          node testing/native/desktop-automation/cdp-trust-and-enable.mjs \
+            --port 9222 \
+            --plugin-id systemsculpt-ai
 
       - name: Wait for desktop automation bridge
         run: |
