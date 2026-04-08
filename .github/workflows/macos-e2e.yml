@@ -167,23 +167,54 @@ jobs:
             end tell
           ' 2>&1 || true
 
-          echo "Trust prompt dismissed, waiting 8s for plugin manager to load..."
-          sleep 8
+          echo "Trust prompt dismissed, waiting 5s for Community Plugins page..."
+          sleep 5
 
-          # Close any settings/modal that may be open (Escape key), then
-          # send Cmd+P -> "Reload app without saving" to force a clean
-          # restart that picks up the community-plugins.json enablement.
-          # This is more reliable than trying to click toggles in Settings.
+          # After trust acceptance, Obsidian opens the Community Plugins
+          # settings page. The plugin is listed but its toggle is OFF.
+          # We need to find and click the toggle for SystemSculpt AI.
+          # Use AppleScript UI scripting to locate and click it.
+          osascript -e '
+            tell application "Obsidian" to activate
+            delay 1
+            tell application "System Events"
+              tell process "Obsidian"
+                set frontmost to true
+                delay 0.5
+                -- The Community Plugins settings page has toggle switches.
+                -- Find all checkboxes/switches and click the one for our plugin.
+                try
+                  set allCheckboxes to every checkbox of group 1 of window 1
+                  repeat with cb in allCheckboxes
+                    try
+                      click cb
+                    end try
+                  end repeat
+                end try
+                -- Also try toggling via the settings item toggle pattern
+                try
+                  set allGroups to every group of group 1 of window 1
+                  repeat with g in allGroups
+                    try
+                      click checkbox 1 of g
+                    end try
+                  end repeat
+                end try
+              end tell
+            end tell
+          ' 2>&1 || echo "UI scripting for toggle attempted"
+
+          echo "Waiting 5s then closing settings..."
+          sleep 5
+
+          # Close settings modal
           osascript -e '
             tell application "Obsidian" to activate
             delay 0.5
             tell application "System Events"
-              -- Close any open settings modal
               key code 53
               delay 1
-              -- Close again in case nested
               key code 53
-              delay 1
             end tell
           ' 2>&1 || true
 
