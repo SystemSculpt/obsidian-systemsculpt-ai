@@ -216,11 +216,13 @@ async function main() {
       break;
     }
 
-    // Fallback: manual dynamic import when loadPlugin keeps failing
+    // Fallback: use Electron's require() to load the plugin when
+    // Obsidian's loadPlugin() keeps failing.  require() handles native
+    // Windows paths without needing file:// URL conversion.
     if (attempt >= 2 && state?.reason === "load-failed" && state?.dir) {
       if (!triedPathFix) {
         triedPathFix = true;
-        console.log(`loadPlugin() failed: ${state.error} — trying manual import...`);
+        console.log(`loadPlugin() failed: ${state.error} — trying require()...`);
       }
       const manualResult = await cdp.send("Runtime.evaluate", {
         expression: `(async () => {
@@ -229,49 +231,59 @@ async function main() {
           const manifest = plugins.manifests?.[id];
           if (!manifest) return { ready: false, reason: 'no-manifest' };
 
-          // manifest.dir is often relative (e.g. ".obsidian/plugins/foo").
-          // Resolve against vault basePath, then construct a valid file URL.
+          // Resolve dir to an absolute path using vault basePath if relative.
           let dir = manifest.dir;
           const basePath = globalThis.app?.vault?.adapter?.basePath || '';
           if (basePath && !dir.match(/^[A-Za-z]:/) && !dir.startsWith('/')) {
             dir = basePath + '/' + dir;
           }
+          // Normalise separators — require() handles both on Windows
           dir = dir.replace(/\\\\/g, '/');
-          if (/^[A-Za-z]:/.test(dir)) dir = '/' + dir;
-          const fileUrl = 'file://' + encodeURI(dir).replace(/%3A/gi, ':') + '/main.js';
+          const mainPath = dir + '/main.js';
 
           try {
-            const mod = await import(fileUrl);
-            const PluginClass = mod.default;
+            // Clear module cache for a fresh load
+            if (typeof require !== 'undefined' && require.cache) {
+              Object.keys(require.cache).forEach(k => {
+                if (k.includes('systemsculpt-ai')) delete require.cache[k];
+              });
+            }
+
+            // Prefer require() — it handles native paths in Electron
+            let mod;
+            if (typeof require === 'function') {
+              mod = require(mainPath);
+            } else {
+              // Absolute fallback: dynamic import with file URL
+              let fileUrl = 'file://' + (dir.startsWith('/') ? '' : '/') + dir + '/main.js';
+              mod = await import(fileUrl);
+            }
+            const PluginClass = mod.default || mod;
             if (typeof PluginClass !== 'function') {
-              return { ready: false, reason: 'no-default-export', fileUrl };
+              return { ready: false, reason: 'no-constructor', mainPath, keys: Object.keys(mod || {}).slice(0, 10) };
             }
             const instance = new PluginClass(globalThis.app, manifest);
             plugins.plugins[id] = instance;
 
-            // Run onload — log errors but still consider loaded if the
-            // instance is registered (bridge may start asynchronously).
+            // Run onload — log errors but still consider loaded.
             let onloadError = null;
             try { await instance.onload(); } catch (oe) { onloadError = oe; }
 
-            if (onloadError) {
-              return {
-                ready: true,
-                action: 'manual-import-onload-error',
-                onloadError: onloadError.message,
-                fileUrl,
-              };
-            }
-            return { ready: true, action: 'manual-import', fileUrl };
+            return {
+              ready: true,
+              action: onloadError ? 'require-onload-error' : 'require-loaded',
+              onloadError: onloadError?.message || null,
+              mainPath,
+            };
           } catch (e) {
-            return { ready: false, reason: 'manual-import-failed', error: e.message, stack: (e.stack || '').slice(0, 400), fileUrl };
+            return { ready: false, reason: 'require-failed', error: e.message, stack: (e.stack || '').slice(0, 400), mainPath };
           }
         })()`,
         returnByValue: true,
         awaitPromise: true,
       });
       const manualState = manualResult?.result?.value;
-      console.log(`Manual import result: ${JSON.stringify(manualState)}`);
+      console.log(`Manual load result: ${JSON.stringify(manualState)}`);
       if (manualState?.ready) {
         pluginLoaded = true;
         break;
