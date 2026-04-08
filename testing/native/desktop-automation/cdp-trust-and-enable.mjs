@@ -139,7 +139,6 @@ async function main() {
   // Explicitly load the plugin — trust acceptance adds the ID to enabledPlugins
   // but may not actually instantiate the plugin code on first run.
   let pluginLoaded = false;
-  let needsReload = false;
   for (let attempt = 1; attempt <= 15; attempt += 1) {
     const result = await cdp.send("Runtime.evaluate", {
       expression: `(async () => {
@@ -182,6 +181,7 @@ async function main() {
             error: e.message,
             hasManifest: Boolean(manifest),
             isEnabled,
+            dir: manifest?.dir,
             loadedIds: Object.keys(plugins.plugins ?? {}),
           };
         }
@@ -196,46 +196,44 @@ async function main() {
       break;
     }
     // On Windows, Obsidian's loadPlugin() fails with "File URL path must be
-    // absolute" due to backslash path handling. After 3 failed attempts with
-    // this error, reload the page so Obsidian loads plugins from its
-    // enabledPlugins set during normal startup.
-    if (attempt >= 3 && state?.error?.includes("File URL path")) {
-      needsReload = true;
-      break;
+    // absolute" because it passes backslash paths to pathToFileURL().
+    // Bypass it by constructing the file URL ourselves and manually importing.
+    if (attempt >= 2 && state?.error?.includes("File URL path") && state?.dir) {
+      console.log("loadPlugin() failed (Windows path issue) — trying manual import...");
+      const manualResult = await cdp.send("Runtime.evaluate", {
+        expression: `(async () => {
+          const plugins = globalThis.app?.plugins;
+          const id = ${JSON.stringify(pluginId)};
+          const manifest = plugins.manifests?.[id];
+          if (!manifest) return { ready: false, reason: 'no-manifest' };
+
+          // Construct a valid file URL from the Windows backslash path
+          let dir = manifest.dir.replace(/\\\\/g, '/');
+          if (/^[A-Za-z]:/.test(dir)) dir = '/' + dir;
+          const fileUrl = 'file://' + dir + '/main.js';
+
+          try {
+            const mod = await import(fileUrl);
+            const PluginClass = mod.default;
+            const instance = new PluginClass(globalThis.app, manifest);
+            plugins.plugins[id] = instance;
+            try { await instance.onload(); } catch {}
+            return { ready: true, action: 'manual-import', fileUrl };
+          } catch (e) {
+            return { ready: false, reason: 'manual-import-failed', error: e.message, fileUrl };
+          }
+        })()`,
+        returnByValue: true,
+        awaitPromise: true,
+      });
+      const manualState = manualResult?.result?.value;
+      console.log(`Manual import result: ${JSON.stringify(manualState)}`);
+      if (manualState?.ready) {
+        pluginLoaded = true;
+        break;
+      }
     }
     await sleep(2000);
-  }
-
-  if (needsReload) {
-    console.log("loadPlugin() failed (Windows path issue) — reloading page...");
-    await cdp.send("Page.enable");
-    await cdp.send("Page.reload");
-    // Wait for page to reload and plugins to initialize
-    console.log("Waiting 20s for Obsidian to reload and load plugins...");
-    await sleep(20000);
-
-    // Reconnect CDP after reload (old target may be gone)
-    const newTargets = await waitForCdpTargets(baseUrl, 30000);
-    const newTarget = newTargets.find((t) => t.type === "page") || newTargets[0];
-    const cdp2 = createCdpConnection(newTarget.webSocketDebuggerUrl);
-    await cdp2.ready;
-    await cdp2.send("Runtime.enable");
-
-    // Verify plugin loaded after reload
-    const check = await cdp2.send("Runtime.evaluate", {
-      expression: `(() => {
-        const p = globalThis.app?.plugins;
-        return {
-          hasInstance: Boolean(p?.plugins?.[${JSON.stringify(pluginId)}]),
-          loadedIds: Object.keys(p?.plugins ?? {}),
-        };
-      })()`,
-      returnByValue: true,
-    });
-    const postReload = check?.result?.value;
-    console.log(`Post-reload plugin state: ${JSON.stringify(postReload)}`);
-    pluginLoaded = postReload?.hasInstance ?? false;
-    cdp2.close();
   }
 
   // Give the bridge time to start after plugin load
