@@ -19,8 +19,8 @@ jobs:
   clean-install-parity:
     runs-on: windows-latest
     timeout-minutes: 15
-    # Bridge startup is flaky on GHA Windows runners (pre-existing, failing on main)
-    continue-on-error: true
+    # Bridge startup was flaky on GHA Windows runners — path normalisation in
+    # cdp-trust-and-enable.mjs should fix the root cause.
     env:
       OBSIDIAN_VERSION: ${{ inputs.obsidian_version || '1.8.9' }}
       SYSTEMSCULPT_RUNTIME_SMOKE_LICENSE_KEY: ${{ secrets.SYSTEMSCULPT_E2E_LICENSE_KEY }}

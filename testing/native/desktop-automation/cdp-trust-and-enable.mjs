@@ -138,7 +138,13 @@ async function main() {
 
   // Explicitly load the plugin — trust acceptance adds the ID to enabledPlugins
   // but may not actually instantiate the plugin code on first run.
+  //
+  // On Windows, Obsidian's loadPlugin() fails with "File URL path must be
+  // absolute" because it passes backslash paths to pathToFileURL().  We first
+  // normalise manifest.dir (backslash → forward-slash) so the native loader
+  // succeeds.  If it still fails we fall back to a manual dynamic import.
   let pluginLoaded = false;
+  let triedPathFix = false;
   for (let attempt = 1; attempt <= 15; attempt += 1) {
     const result = await cdp.send("Runtime.evaluate", {
       expression: `(async () => {
@@ -152,6 +158,12 @@ async function main() {
         // If already loaded, we're done
         if (hasInstance) {
           return { ready: true, action: 'already-loaded', hasInstance: true };
+        }
+
+        // Normalise Windows backslash paths in manifest.dir so that
+        // Obsidian's internal pathToFileURL call receives a path it accepts.
+        if (manifest?.dir && manifest.dir.includes('\\\\')) {
+          manifest.dir = manifest.dir.replace(/\\\\/g, '/');
         }
 
         // Try to enable and load the plugin
@@ -172,6 +184,7 @@ async function main() {
             hasInstance: nowLoaded,
             hasManifest: Boolean(manifest),
             isEnabled: plugins.enabledPlugins?.has?.(id) ?? false,
+            dir: manifest?.dir,
             loadedIds: Object.keys(plugins.plugins ?? {}),
           };
         } catch (e) {
@@ -195,11 +208,13 @@ async function main() {
       pluginLoaded = true;
       break;
     }
-    // On Windows, Obsidian's loadPlugin() fails with "File URL path must be
-    // absolute" because it passes backslash paths to pathToFileURL().
-    // Bypass it by constructing the file URL ourselves and manually importing.
-    if (attempt >= 2 && state?.error?.includes("File URL path") && state?.dir) {
-      console.log("loadPlugin() failed (Windows path issue) — trying manual import...");
+
+    // Fallback: manual dynamic import when loadPlugin keeps failing
+    if (attempt >= 2 && state?.reason === "load-failed" && state?.dir) {
+      if (!triedPathFix) {
+        triedPathFix = true;
+        console.log(`loadPlugin() failed: ${state.error} — trying manual import...`);
+      }
       const manualResult = await cdp.send("Runtime.evaluate", {
         expression: `(async () => {
           const plugins = globalThis.app?.plugins;
@@ -216,17 +231,23 @@ async function main() {
           }
           dir = dir.replace(/\\\\/g, '/');
           if (/^[A-Za-z]:/.test(dir)) dir = '/' + dir;
-          const fileUrl = 'file://' + dir + '/main.js';
+          const fileUrl = 'file://' + encodeURI(dir).replace(/%3A/gi, ':') + '/main.js';
 
           try {
             const mod = await import(fileUrl);
             const PluginClass = mod.default;
+            if (typeof PluginClass !== 'function') {
+              return { ready: false, reason: 'no-default-export', fileUrl };
+            }
             const instance = new PluginClass(globalThis.app, manifest);
             plugins.plugins[id] = instance;
-            try { await instance.onload(); } catch {}
+
+            // Run onload — do NOT swallow errors so we get diagnostics
+            await instance.onload();
+
             return { ready: true, action: 'manual-import', fileUrl };
           } catch (e) {
-            return { ready: false, reason: 'manual-import-failed', error: e.message, fileUrl };
+            return { ready: false, reason: 'manual-import-failed', error: e.message, stack: (e.stack || '').slice(0, 400), fileUrl };
           }
         })()`,
         returnByValue: true,
@@ -242,10 +263,15 @@ async function main() {
     await sleep(2000);
   }
 
+  if (!pluginLoaded) {
+    console.error("ERROR: Plugin did not load after all attempts — bridge will not start.");
+    cdp.close();
+    process.exit(1);
+  }
+
   // Give the bridge time to start after plugin load
-  const waitTime = pluginLoaded ? 15000 : 5000;
-  console.log(`Waiting ${waitTime / 1000}s for bridge to initialize...`);
-  await sleep(waitTime);
+  console.log("Waiting 15s for bridge to initialize...");
+  await sleep(15000);
 
   cdp.close();
   console.log("CDP trust dismissal and plugin enable complete");
