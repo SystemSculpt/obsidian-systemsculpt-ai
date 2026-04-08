@@ -1,0 +1,39 @@
+.systemsculpt-prompt-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: var(--font-ui-smaller);
+  cursor: pointer;
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+  transition: background 0.15s ease;
+  max-width: 160px;
+  overflow: hidden;
+}
+
+.systemsculpt-prompt-chip:hover {
+  background: var(--background-modifier-active-hover);
+}
+
+.systemsculpt-prompt-chip.mod-empty {
+  color: var(--text-muted);
+}
+
+.systemsculpt-prompt-chip-icon {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.systemsculpt-prompt-chip-icon .svg-icon {
+  width: 14px;
+  height: 14px;
+}
+
+.systemsculpt-prompt-chip-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
