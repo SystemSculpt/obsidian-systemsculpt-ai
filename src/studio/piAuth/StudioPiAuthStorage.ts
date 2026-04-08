@@ -199,6 +199,21 @@ async function resolveProviderApiKey(
   provider: string,
   plugin?: SystemSculptPlugin | null,
 ): Promise<string> {
+  // Plugin settings is the authoritative source for credential state. If a
+  // provider entry exists there with an empty apiKey, the user has explicitly
+  // cleared it. We must not shadow that decision with a potentially stale Pi
+  // storage value (Pi storage removal can fail silently on mobile).
+  const pluginEntry = getCustomProviders(plugin).find(
+    (entry) => normalizeStudioPiProviderHint(entry.id || entry.name) === provider,
+  );
+  const fromPluginSettings = String(pluginEntry?.apiKey || "").trim();
+
+  // If plugin settings knows about this provider but the key is empty, the
+  // user cleared it. Return empty regardless of what Pi storage holds.
+  if (pluginEntry && !fromPluginSettings) {
+    return "";
+  }
+
   if (storage && typeof storage.getApiKey === "function") {
     try {
       const fromStorage = await withPiDesktopFetchShim(async () =>
@@ -212,10 +227,7 @@ async function resolveProviderApiKey(
     }
   }
 
-  const fromPluginSettings = getCustomProviders(plugin).find(
-    (entry) => normalizeStudioPiProviderHint(entry.id || entry.name) === provider,
-  );
-  return String(fromPluginSettings?.apiKey || "").trim();
+  return fromPluginSettings;
 }
 
 function resolvePluginStoredCredential(
