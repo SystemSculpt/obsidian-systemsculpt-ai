@@ -281,10 +281,13 @@ const buildOptions = {
 	external: [
 		"obsidian",
 		"electron",
-		// Node-only transitive deps from pi-coding-agent. pi-tui is a terminal
-		// UI that should never be bundled. proper-lockfile and graceful-fs are
-		// small (~40KB) and safe to bundle — they're dead code on mobile but
-		// required on desktop where Electron's renderer can't resolve externals.
+		// Node-only transitive deps from pi-coding-agent that crash on mobile
+		// WebView (graceful-fs accesses Node.js 'stream' module at load time).
+		// Externalized here; the safeNodeExternals plugin below wraps the
+		// emitted require() calls in try/catch so they degrade gracefully on
+		// mobile while still resolving on desktop Electron.
+		"proper-lockfile",
+		"graceful-fs",
 		"@mariozechner/pi-tui",
 		"@codemirror/autocomplete",
 		"@codemirror/collab",
@@ -312,6 +315,27 @@ const buildOptions = {
 	},
 	plugins: [
 		...createPiSdkBuildFixPlugins(),
+		{
+			// Wrap externalized Node-only modules in try/catch so they degrade
+			// gracefully on mobile (no Node.js) while still resolving on desktop
+			// (Electron has Node.js).  Runs as onEnd to post-process the bundle.
+			name: "safe-node-externals",
+			setup(build) {
+				const safeExternals = ["proper-lockfile", "graceful-fs"];
+				build.onEnd(async () => {
+					const { readFileSync, writeFileSync } = await import("fs");
+					const outfile = build.initialOptions.outfile || "main.js";
+					let code = readFileSync(outfile, "utf8");
+					for (const mod of safeExternals) {
+						code = code.replaceAll(
+							`require("${mod}")`,
+							`(() => { try { return require("${mod}"); } catch { return {}; } })()`
+						);
+					}
+					writeFileSync(outfile, code);
+				});
+			}
+		},
 		{
 			name: "build-reporter",
 			setup(build) {
