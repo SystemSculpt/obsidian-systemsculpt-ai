@@ -92,6 +92,7 @@ export class InputHandler extends Component {
   private isGenerating = false;
   private webSearchEnabled = false;
   private agentModeEnabled: boolean;
+  private agentModeButtonEl: HTMLElement | null = null;
   private selectedPromptPath: string | null = null;
   private selectedPromptName: string | null = null;
   private promptChip: HTMLElement | null = null;
@@ -628,7 +629,11 @@ export class InputHandler extends Component {
       hasProLicense: () => !!(this.plugin.settings.licenseKey?.trim() && this.plugin.settings.licenseValid),
       onToggleWebSearch: () => { this.webSearchEnabled = !this.webSearchEnabled; },
       isWebSearchEnabled: () => this.webSearchEnabled,
-      onToggleAgentMode: () => { this.agentModeEnabled = !this.agentModeEnabled; },
+      onToggleAgentMode: () => {
+        this.agentModeEnabled = !this.agentModeEnabled;
+        this.plugin.settings.agentModeEnabled = this.agentModeEnabled;
+        void this.plugin.saveSettings();
+      },
       isAgentModeEnabled: () => this.agentModeEnabled,
     });
 
@@ -640,6 +645,7 @@ export class InputHandler extends Component {
     this.stopButton = composer.stopButton;
     this.settingsButton = composer.settingsButton;
     this.attachButton = composer.attachButton;
+    this.agentModeButtonEl = composer.agentModeButton?.buttonEl || null;
     this.modelSelectionController.ensureHost({
       modelSlot: (composer as any).modelSlot,
       toolbar: (composer as any).toolbar,
@@ -1307,6 +1313,12 @@ export class InputHandler extends Component {
 
   public setAgentModeEnabled(enabled: boolean): void {
     this.agentModeEnabled = enabled;
+    this.syncAgentModeButton();
+  }
+
+  private syncAgentModeButton(): void {
+    if (!this.agentModeButtonEl) return;
+    this.agentModeButtonEl.classList.toggle("ss-active", this.agentModeEnabled);
   }
 
   public getSelectedPromptPath(): string | null {
@@ -1327,6 +1339,7 @@ export class InputHandler extends Component {
     this.pendingLargeTextContent = null;
     this.webSearchEnabled = false;
     this.agentModeEnabled = this.plugin.settings.agentModeEnabled ?? true;
+    this.syncAgentModeButton();
     this.selectedPromptPath = this.plugin.settings.lastUsedPromptPath || null;
     this.selectedPromptName = this.selectedPromptPath
       ? this.selectedPromptPath.split("/").pop()?.replace(/\.md$/, "") || null
@@ -1388,6 +1401,8 @@ export class InputHandler extends Component {
     if (this.promptChip) {
       updatePromptChip(this.promptChip, this.selectedPromptName);
     }
+    this.plugin.settings.lastUsedPromptPath = path;
+    void this.plugin.saveSettings();
     const file = this.app.vault.getAbstractFileByPath(path);
     if (file) {
       await this.app.workspace.openLinkText(path, "", true);

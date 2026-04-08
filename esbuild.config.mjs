@@ -327,8 +327,10 @@ const buildOptions = {
 					const outfile = build.initialOptions.outfile || "main.js";
 					let code = readFileSync(outfile, "utf8");
 					for (const mod of safeExternals) {
-						code = code.replaceAll(
-							`require("${mod}")`,
+						const escaped = mod.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+						const pattern = new RegExp(`\\brequire\\("${escaped}"\\)`, "g");
+						code = code.replace(
+							pattern,
 							`(() => { try { return require("${mod}"); } catch { return {}; } })()`
 						);
 					}
