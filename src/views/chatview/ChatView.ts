@@ -291,6 +291,7 @@ export class ChatView extends ItemView {
           contextFiles: this.contextManager?.getContextFiles() || new Set(),
           title: this.chatTitle,
           chatFontSize: this.chatFontSize,
+          selectedPromptPath: this.inputHandler?.getSelectedPromptPath?.() || "",
           piSessionFile: this.piSessionFile,
           piSessionId: this.piSessionId,
           piLastEntryId: this.piLastEntryId,
@@ -1296,6 +1297,11 @@ export class ChatView extends ItemView {
         // Load chat font size from chat data
         this.chatFontSize = chatData.chatFontSize || this.plugin.settings.chatFontSize || "medium";
         this.scheduleChatFontSizeClassSync(100);
+
+        // Restore selected prompt for this chat
+        if (this.inputHandler) {
+          this.inputHandler.setSelectedPromptPath(chatData.selectedPromptPath || null);
+        }
 
         // Restore context files without blocking first render.
         if (this.contextManager) {

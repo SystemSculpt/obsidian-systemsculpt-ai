@@ -1301,6 +1301,20 @@ export class InputHandler extends Component {
     this.automationApprovalMode = mode;
   }
 
+  public getSelectedPromptPath(): string | null {
+    return this.selectedPromptPath;
+  }
+
+  public setSelectedPromptPath(path: string | null): void {
+    this.selectedPromptPath = path;
+    this.selectedPromptName = path
+      ? path.split("/").pop()?.replace(/\.md$/, "") || null
+      : null;
+    if (this.promptChip) {
+      updatePromptChip(this.promptChip, this.selectedPromptName);
+    }
+  }
+
   public resetForFreshChat(): void {
     this.pendingLargeTextContent = null;
     this.webSearchEnabled = false;
