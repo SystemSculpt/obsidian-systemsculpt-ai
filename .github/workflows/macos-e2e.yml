@@ -40,6 +40,17 @@ jobs:
       - name: Build plugin
         run: npm run build
 
+      - name: Rebundle plugin for desktop CI
+        run: |
+          # The standard build externalizes proper-lockfile/graceful-fs (mobile compat).
+          # Obsidian's Electron module loader can't resolve them in CI without pi-agent.
+          # Re-bundle main.js to inline those deps, keeping only Obsidian-provided externals.
+          npx esbuild main.js --bundle --outfile=main.js --allow-overwrite \
+            --format=cjs --platform=node \
+            --external:obsidian --external:electron \
+            --external:@codemirror/* --external:@lezer/* \
+            --external:@mariozechner/pi-tui
+
       # ---- Install Obsidian ----
 
       - name: Cache Obsidian installer
@@ -94,30 +105,6 @@ jobs:
           rm -rf "${vault_path}"
           mkdir -p "${plugin_dir}"
           cp main.js manifest.json styles.css "${plugin_dir}/"
-
-          # Copy externalized Node deps that the plugin build does not bundle
-          # (they're external so mobile never loads them, but desktop needs them).
-          # proper-lockfile also needs: graceful-fs, retry, signal-exit
-          mkdir -p "${plugin_dir}/node_modules"
-          for dep in proper-lockfile graceful-fs retry signal-exit; do
-            src="node_modules/${dep}"
-            dest="${plugin_dir}/node_modules/${dep}"
-            if [ -d "${src}" ]; then
-              cp -R "${src}" "${dest}"
-              echo "Copied ${dep} to plugin node_modules"
-            else
-              echo "WARNING: ${src} not found, searching..."
-              found=$(find node_modules -maxdepth 4 -type d -name "${dep}" | head -1)
-              if [ -n "${found}" ]; then
-                cp -R "${found}" "${dest}"
-                echo "Copied ${dep} from ${found}"
-              else
-                echo "ERROR: ${dep} not found anywhere in node_modules"
-              fi
-            fi
-          done
-          echo "Plugin node_modules contents:"
-          ls -la "${plugin_dir}/node_modules/" 2>/dev/null || echo "(empty)"
           echo '{}' > "${vault_path}/.obsidian/app.json"
           echo '{}' > "${vault_path}/.obsidian/appearance.json"
           echo '["systemsculpt-ai"]' > "${vault_path}/.obsidian/community-plugins.json"

@@ -42,6 +42,10 @@ jobs:
       - name: Build plugin
         run: npm run build
 
+      - name: Rebundle plugin for desktop CI
+        run: |
+          npx esbuild main.js --bundle --outfile=main.js --allow-overwrite --format=cjs --platform=node --external:obsidian --external:electron --external:@codemirror/* --external:@lezer/* --external:@mariozechner/pi-tui
+
       # ---- Install Obsidian ----
 
       - name: Cache Obsidian installer
@@ -88,21 +92,6 @@ jobs:
         run: |
           node testing/native/device/windows/bootstrap.mjs `
             --reset-vault
-
-      - name: Copy externalized deps to plugin
-        shell: pwsh
-        run: |
-          # Copy Node deps that the plugin build externalizes (desktop needs them)
-          $pluginDir = Join-Path $env:USERPROFILE "Documents\SystemSculptWindowsQA\.obsidian\plugins\systemsculpt-ai"
-          $pluginNm = Join-Path $pluginDir "node_modules"
-          foreach ($dep in @("proper-lockfile", "graceful-fs", "retry", "signal-exit")) {
-            $src = Join-Path "node_modules" $dep
-            if (Test-Path $src) {
-              $dest = Join-Path $pluginNm $dep
-              Copy-Item -Path $src -Destination $dest -Recurse -Force
-            }
-          }
-          Write-Host "Externalized deps copied to plugin node_modules"
 
       - name: Launch Obsidian
         shell: pwsh
