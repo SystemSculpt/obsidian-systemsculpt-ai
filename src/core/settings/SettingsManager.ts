@@ -598,6 +598,10 @@ export class SettingsManager {
       validatedSettings.hideSystemMessagesInChat = defaultSettings.hideSystemMessagesInChat;
     }
 
+    if (typeof validatedSettings.agentModeEnabled !== "boolean") {
+      validatedSettings.agentModeEnabled = defaultSettings.agentModeEnabled;
+    }
+
     if (
       validatedSettings.studioJsonEditorDefaultMode !== "composer" &&
       validatedSettings.studioJsonEditorDefaultMode !== "raw"
