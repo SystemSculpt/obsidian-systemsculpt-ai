@@ -247,6 +247,10 @@ export class SettingsManager {
       migratedSettings.hideSystemMessagesInChat = DEFAULT_SETTINGS.hideSystemMessagesInChat;
     }
 
+    if (typeof migratedSettings.agentModeEnabled !== "boolean") {
+      migratedSettings.agentModeEnabled = DEFAULT_SETTINGS.agentModeEnabled;
+    }
+
     if (typeof migratedSettings.studioDefaultProjectsFolder !== "string" || !migratedSettings.studioDefaultProjectsFolder.trim()) {
       migratedSettings.studioDefaultProjectsFolder = DEFAULT_SETTINGS.studioDefaultProjectsFolder;
     }
@@ -592,6 +596,10 @@ export class SettingsManager {
 
     if (typeof validatedSettings.hideSystemMessagesInChat !== "boolean") {
       validatedSettings.hideSystemMessagesInChat = defaultSettings.hideSystemMessagesInChat;
+    }
+
+    if (typeof validatedSettings.agentModeEnabled !== "boolean") {
+      validatedSettings.agentModeEnabled = defaultSettings.agentModeEnabled;
     }
 
     if (

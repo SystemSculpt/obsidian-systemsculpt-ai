@@ -20,6 +20,7 @@ type LoadedChatRecord = {
   version?: number;
   context_files?: string[];
   chatFontSize?: "small" | "medium" | "large";
+  selectedPromptPath?: string;
   chatPath: string;
   chatBackend: ChatBackend;
   piSessionFile?: string;
@@ -33,6 +34,7 @@ type SaveChatOptions = {
   contextFiles?: Set<string>;
   title?: string;
   chatFontSize?: "small" | "medium" | "large";
+  selectedPromptPath?: string;
   piSessionFile?: string;
   piSessionId?: string;
   piLastEntryId?: string;
@@ -184,6 +186,7 @@ export class ChatStorageService {
         title: options.title || existingMetadata?.title || "Untitled Chat",
         version: newVersion,
         chatFontSize: options.chatFontSize || "medium",
+        selectedPromptPath: options.selectedPromptPath || existingMetadata?.selectedPromptPath || undefined,
         piSessionFile: piState.sessionFile,
         piSessionId: piState.sessionId,
         piLastEntryId: piState.lastEntryId || getLastMessagePiEntryId(messages),
@@ -408,6 +411,9 @@ export class ChatStorageService {
         context_files: processedContextFiles,
         systemMessage: legacySystemMessage,
         chatFontSize: parsed.chatFontSize as "small" | "medium" | "large" | undefined,
+        selectedPromptPath: typeof (parsed as any).selectedPromptPath === "string" && (parsed as any).selectedPromptPath.trim()
+          ? (parsed as any).selectedPromptPath.trim()
+          : undefined,
         chatBackend: resolveChatBackend({
           explicitBackend: (parsed as any).chatBackend,
           piSessionFile: piState.sessionFile,
@@ -463,6 +469,7 @@ export class ChatStorageService {
       version: metadata.version || 0,
       context_files: metadata.context_files?.map((f) => f.path) || [],
       chatFontSize: metadata.chatFontSize,
+      selectedPromptPath: metadata.selectedPromptPath,
       chatPath: filePath || `${this.chatDirectory}/${metadata.id}.md`,
       chatBackend,
       piSessionFile: piState.sessionFile,
