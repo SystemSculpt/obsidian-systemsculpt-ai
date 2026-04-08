@@ -154,9 +154,11 @@ jobs:
                 OPENROUTER_API_KEY PERPLEXITY_API_KEY DEEPSEEK_API_KEY \
                 XAI_API_KEY CEREBRAS_API_KEY SAMBANOVA_API_KEY TOGETHER_API_KEY 2>/dev/null || true
 
-          # Launch Obsidian with remote debugging so we can interact via CDP
-          # (AppleScript cannot reliably target Electron UI elements)
-          /Applications/Obsidian.app/Contents/MacOS/Obsidian --remote-debugging-port=9222 &
+          # Launch Obsidian with remote debugging so we can interact via CDP.
+          # NODE_PATH lets Obsidian's Electron resolve externalized deps
+          # (proper-lockfile, graceful-fs) from the project's node_modules.
+          NODE_PATH="${PWD}/node_modules" \
+            /Applications/Obsidian.app/Contents/MacOS/Obsidian --remote-debugging-port=9222 &
           echo "Obsidian launched with remote debugging on port 9222"
 
       - name: Dismiss trust prompt and enable plugin via CDP

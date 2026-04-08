@@ -104,8 +104,11 @@ jobs:
           foreach ($key in $piKeys) {
             if (Test-Path "Env:$key") { Remove-Item "Env:$key" -ErrorAction SilentlyContinue }
           }
+          # Set NODE_PATH so Obsidian's Electron can resolve externalized deps
+          # (proper-lockfile, graceful-fs) from the project's node_modules
+          $env:NODE_PATH = Join-Path (Get-Location) "node_modules"
           Start-Process -FilePath $exe -ArgumentList @($vault)
-          Write-Host "Obsidian launched from $exe with vault $vault"
+          Write-Host "Obsidian launched from $exe with vault $vault (NODE_PATH=$env:NODE_PATH)"
 
       - name: Dismiss trust prompt
         shell: pwsh
