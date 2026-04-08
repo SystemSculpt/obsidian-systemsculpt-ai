@@ -143,8 +143,9 @@ jobs:
                 OPENROUTER_API_KEY PERPLEXITY_API_KEY DEEPSEEK_API_KEY \
                 XAI_API_KEY CEREBRAS_API_KEY SAMBANOVA_API_KEY TOGETHER_API_KEY 2>/dev/null || true
 
-          # Launch Obsidian in background
-          open -a Obsidian "${vault_path}"
+          # Launch Obsidian in background using full path (LaunchServices may
+          # not have indexed the freshly-copied app on GHA runners)
+          open /Applications/Obsidian.app --args "${vault_path}"
           echo "Obsidian launched with vault ${vault_path}"
 
       - name: Wait for desktop automation bridge
