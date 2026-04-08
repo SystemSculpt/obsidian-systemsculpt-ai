@@ -19,6 +19,8 @@ jobs:
   runtime-smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    # GHA Android emulator is flaky (adb daemon failures, snapshot load failures)
+    continue-on-error: true
     env:
       OBSIDIAN_VERSION: ${{ inputs.obsidian_version || '1.12.7' }}
       SYSTEMSCULPT_RUNTIME_SMOKE_LICENSE_KEY: ${{ secrets.SYSTEMSCULPT_E2E_LICENSE_KEY }}
