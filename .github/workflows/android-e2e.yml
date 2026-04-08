@@ -59,7 +59,7 @@ jobs:
           mkdir -p ~/obsidian-installer
           url="https://github.com/obsidianmd/obsidian-releases/releases/download/v${OBSIDIAN_VERSION}/Obsidian-${OBSIDIAN_VERSION}.apk"
           echo "Downloading Obsidian ${OBSIDIAN_VERSION} from ${url}"
-          curl -L -o ~/obsidian-installer/Obsidian-${OBSIDIAN_VERSION}.apk "${url}"
+          curl -fL -o ~/obsidian-installer/Obsidian-${OBSIDIAN_VERSION}.apk "${url}"
           ls -lh ~/obsidian-installer/
 
       - name: Run Android smoke tests

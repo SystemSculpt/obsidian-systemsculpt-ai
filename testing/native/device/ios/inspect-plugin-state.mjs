@@ -2,14 +2,16 @@
 import process from "node:process";
 import { spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
+import {
+  IOS_RUNTIME_READY_DELAY_MS,
+  IOS_RUNTIME_ENABLE_ATTEMPTS,
+} from "../../shared/ios-runtime-constants.mjs";
 
 const DEFAULT_PORT = 9000;
 const DEFAULT_PLUGIN_ID = "systemsculpt-ai";
 const DEFAULT_TARGET_HINT = "Obsidian";
 const DEFAULT_HOST = "127.0.0.1";
 const ADAPTER_BOOT_TIMEOUT_MS = 15000;
-const IOS_RUNTIME_READY_DELAY_MS = 8000;
-const IOS_RUNTIME_ENABLE_ATTEMPTS = 3;
 
 function usage() {
   console.log(`Usage: node testing/native/device/ios/inspect-plugin-state.mjs [options]

@@ -1,7 +1,8 @@
 import { spawn, spawnSync } from "node:child_process";
-
-const IOS_RUNTIME_READY_DELAY_MS = 8000;
-const IOS_RUNTIME_ENABLE_ATTEMPTS = 3;
+import {
+  IOS_RUNTIME_READY_DELAY_MS,
+  IOS_RUNTIME_ENABLE_ATTEMPTS,
+} from "../shared/ios-runtime-constants.mjs";
 
 async function sleep(ms) {
   await new Promise((resolve) => setTimeout(resolve, ms));
