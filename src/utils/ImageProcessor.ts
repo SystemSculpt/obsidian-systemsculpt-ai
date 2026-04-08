@@ -20,12 +20,60 @@ export class ImageProcessor {
   ]);
 
   /**
+   * Load a Blob into a drawable image source with dimensions, using
+   * createImageBitmap where available and falling back to HTMLImageElement
+   * (matches the pattern in CanvasFlowRunner / StudioCaptionBoardComposition).
+   */
+  private static async loadImage(
+    blob: Blob,
+  ): Promise<{ source: CanvasImageSource; width: number; height: number; cleanup: () => void }> {
+    if (typeof createImageBitmap === "function") {
+      const bitmap = await createImageBitmap(blob);
+      return {
+        source: bitmap,
+        width: bitmap.width,
+        height: bitmap.height,
+        cleanup: () => {
+          try { bitmap.close(); } catch { /* noop */ }
+        },
+      };
+    }
+
+    if (typeof Image === "undefined" || typeof URL.createObjectURL !== "function") {
+      throw new SystemSculptError(
+        "Image decoding is unavailable in this environment",
+        "PROCESSING_ERROR",
+        500,
+      );
+    }
+
+    const objectUrl = URL.createObjectURL(blob);
+    try {
+      const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const el = new Image();
+        el.onload = () => resolve(el);
+        el.onerror = () => reject(new Error("Failed to decode image"));
+        el.src = objectUrl;
+      });
+      return {
+        source: img,
+        width: img.naturalWidth || img.width || 1,
+        height: img.naturalHeight || img.height || 1,
+        cleanup: () => URL.revokeObjectURL(objectUrl),
+      };
+    } catch (error) {
+      URL.revokeObjectURL(objectUrl);
+      throw error;
+    }
+  }
+
+  /**
    * Resize and JPEG-compress a Blob for vision-model consumption.
    * Returns a `data:image/jpeg;base64,...` string.
    */
   private static async optimizeForVision(blob: Blob): Promise<string> {
-    const bitmap = await createImageBitmap(blob);
-    let { width, height } = bitmap;
+    const image = await ImageProcessor.loadImage(blob);
+    let { width, height } = image;
 
     if (width > VISION_MAX_DIMENSION || height > VISION_MAX_DIMENSION) {
       const scale = VISION_MAX_DIMENSION / Math.max(width, height);
@@ -38,30 +86,35 @@ export class ImageProcessor {
     canvas.height = height;
     const ctx = canvas.getContext("2d");
     if (!ctx) {
-      bitmap.close();
+      image.cleanup();
       throw new SystemSculptError(
         "Failed to create canvas context for image optimization",
         "PROCESSING_ERROR",
         500,
       );
     }
-    ctx.drawImage(bitmap, 0, 0, width, height);
-    bitmap.close();
+    ctx.drawImage(image.source, 0, 0, width, height);
+    image.cleanup();
 
-    const optimized = await new Promise<Blob>((resolve, reject) => {
-      canvas.toBlob(
-        (b) => (b ? resolve(b) : reject(new Error("toBlob returned null"))),
-        "image/jpeg",
-        VISION_JPEG_QUALITY,
-      );
-    });
+    // Prefer toBlob, fall back to toDataURL (matches StudioCaptionBoardComposition)
+    if (typeof canvas.toBlob === "function") {
+      const optimized = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob(
+          (b) => (b ? resolve(b) : reject(new Error("toBlob returned null"))),
+          "image/jpeg",
+          VISION_JPEG_QUALITY,
+        );
+      });
 
-    return new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result as string);
-      reader.onerror = () => reject(reader.error);
-      reader.readAsDataURL(optimized);
-    });
+      return new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(optimized);
+      });
+    }
+
+    return canvas.toDataURL("image/jpeg", VISION_JPEG_QUALITY);
   }
 
   static async processImage(file: TFile, app: App): Promise<string> {
