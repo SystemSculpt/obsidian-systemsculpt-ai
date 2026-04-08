@@ -89,6 +89,19 @@ For the Windows-only release gate on the online Windows VM, run `npm run check:r
 
 `npm run check:release:native` is the canonical one-command wrapper for that matrix. It fails the release path if macOS, Windows, or Android are not green, and it only skips iOS when the host genuinely does not have a paired device plus WebKit adapter available.
 
+### CI workflows
+
+Automated E2E testing runs in GitHub Actions on every PR and push to main:
+
+| Workflow | Runner | What it proves |
+|----------|--------|----------------|
+| `ci.yml` | ubuntu-latest | Unit tests + fast plugin checks |
+| `windows-e2e.yml` | windows-latest | Fresh Obsidian install, plugin loads, bridge comes up, clean-install parity |
+| `macos-e2e.yml` | macos-latest | Obsidian .dmg install, vault bootstrap, bridge, managed baseline |
+| `android-e2e.yml` | ubuntu-latest + emulator | APK install on Android emulator, vault prep, WebView bridge, chat smoke |
+
+iOS is local-only: it requires a cable-connected physical iPad with Developer Mode. There is no simulator path for real Obsidian plugin QA. See `testing/native/device/ios/README.md`.
+
 ### 3. Mobile runtime smoke
 
 This is the shared Android and iOS real-runtime harness.

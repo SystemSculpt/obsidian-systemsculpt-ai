@@ -1,0 +1,259 @@
+name: macOS E2E
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      obsidian_version:
+        description: "Obsidian version to install"
+        required: false
+        default: "1.8.9"
+
+concurrency:
+  group: macos-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  desktop-baselines:
+    runs-on: macos-latest
+    timeout-minutes: 15
+    env:
+      OBSIDIAN_VERSION: ${{ inputs.obsidian_version || '1.8.9' }}
+      SYSTEMSCULPT_RUNTIME_SMOKE_LICENSE_KEY: ${{ secrets.SYSTEMSCULPT_E2E_LICENSE_KEY }}
+      SYSTEMSCULPT_RUNTIME_SMOKE_SERVER_URL: ${{ secrets.SYSTEMSCULPT_RUNTIME_SMOKE_SERVER_URL }}
+
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "20.x"
+          cache: "npm"
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Build plugin
+        run: npm run build
+
+      - name: Rebundle plugin for desktop CI
+        run: |
+          # The standard build externalizes proper-lockfile/graceful-fs (mobile compat).
+          # Obsidian's Electron module loader can't resolve them in CI without pi-agent.
+          # Re-bundle main.js to inline those deps, keeping only Obsidian-provided externals.
+          npx esbuild main.js --bundle --outfile=main.js --allow-overwrite \
+            --format=cjs --platform=node \
+            --external:obsidian --external:electron \
+            --external:@codemirror/* --external:@lezer/* \
+            --external:@mariozechner/pi-tui
+
+      # ---- Install Obsidian ----
+
+      - name: Cache Obsidian installer
+        id: obsidian-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/obsidian-installer
+          key: obsidian-dmg-${{ env.OBSIDIAN_VERSION }}
+
+      - name: Download Obsidian DMG
+        if: steps.obsidian-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/obsidian-installer
+          url="https://github.com/obsidianmd/obsidian-releases/releases/download/v${OBSIDIAN_VERSION}/Obsidian-${OBSIDIAN_VERSION}.dmg"
+          echo "Downloading Obsidian ${OBSIDIAN_VERSION} from ${url}"
+          curl -fL -o ~/obsidian-installer/Obsidian-${OBSIDIAN_VERSION}.dmg "${url}"
+          ls -lh ~/obsidian-installer/
+
+      - name: Install Obsidian
+        run: |
+          dmg_path="${HOME}/obsidian-installer/Obsidian-${OBSIDIAN_VERSION}.dmg"
+          echo "Mounting ${dmg_path}"
+          hdiutil attach "${dmg_path}" -nobrowse -quiet
+          # Volume names can contain spaces and version strings; grep for the
+          # full /Volumes/ path instead of relying on awk field splitting.
+          mount_point=$(hdiutil info | grep -o '/Volumes/[^\t]*' | grep -i obsidian | head -1 | sed 's/[[:space:]]*$//')
+          if [ -z "${mount_point}" ]; then
+            # Fallback: find any newly mounted Obsidian volume
+            mount_point=$(ls -d /Volumes/*bsidian* 2>/dev/null | head -1)
+          fi
+          if [ -z "${mount_point}" ]; then
+            echo "ERROR: Could not find Obsidian mount point"
+            hdiutil info
+            exit 1
+          fi
+          echo "Mount point: ${mount_point}"
+          ls "${mount_point}/"
+          echo "Copying Obsidian.app to /Applications"
+          cp -R "${mount_point}/Obsidian.app" /Applications/
+          hdiutil detach "${mount_point}" -quiet || true
+          echo "Obsidian installed at /Applications/Obsidian.app"
+          ls -la /Applications/Obsidian.app/Contents/MacOS/
+
+      # ---- Bootstrap vault and launch ----
+
+      - name: Prepare vault and launch Obsidian
+        run: |
+          vault_path="${HOME}/Documents/SystemSculptMacQA"
+          plugin_dir="${vault_path}/.obsidian/plugins/systemsculpt-ai"
+
+          # Create vault with plugin
+          rm -rf "${vault_path}"
+          mkdir -p "${plugin_dir}"
+          cp main.js manifest.json styles.css "${plugin_dir}/"
+          echo '{}' > "${vault_path}/.obsidian/app.json"
+          echo '{}' > "${vault_path}/.obsidian/appearance.json"
+          echo '["systemsculpt-ai"]' > "${vault_path}/.obsidian/community-plugins.json"
+          # Core plugins config (standard defaults)
+          echo '{"file-explorer":true,"global-search":true,"switcher":true,"command-palette":true,"editor-status":true}' > "${vault_path}/.obsidian/core-plugins.json"
+          echo '# SystemSculpt macOS QA' > "${vault_path}/Welcome.md"
+
+          # Seed plugin settings with hosted auth (matches Windows common.mjs defaults)
+          node --input-type=module -e "
+            import fs from 'node:fs';
+            import crypto from 'node:crypto';
+            const licenseKey = process.env.SYSTEMSCULPT_RUNTIME_SMOKE_LICENSE_KEY || '';
+            const serverUrl = process.env.SYSTEMSCULPT_RUNTIME_SMOKE_SERVER_URL || 'https://api.systemsculpt.com';
+            const settings = {
+              settingsMode: 'advanced',
+              selectedModelId: 'systemsculpt@@systemsculpt/ai-agent',
+              desktopAutomationBridgeEnabled: true,
+              vaultInstanceId: crypto.randomUUID(),
+            };
+            if (licenseKey) {
+              settings.licenseKey = licenseKey;
+              settings.licenseValid = true;
+              settings.enableSystemSculptProvider = true;
+              settings.serverUrl = serverUrl;
+              settings.transcriptionProvider = 'systemsculpt';
+              settings.embeddingsProvider = 'systemsculpt';
+            }
+            fs.writeFileSync('${plugin_dir}/data.json', JSON.stringify(settings, null, 2));
+            console.log('Plugin settings seeded (bridge enabled)');
+          "
+
+          echo "Vault prepared at ${vault_path}"
+
+          # Register vault in Obsidian's state
+          obsidian_config="${HOME}/Library/Application Support/obsidian"
+          mkdir -p "${obsidian_config}"
+          node --input-type=module -e "
+            import fs from 'node:fs';
+            import path from 'node:path';
+            import crypto from 'node:crypto';
+            const configPath = path.join(process.env.HOME, 'Library/Application Support/obsidian/obsidian.json');
+            const vaultPath = path.join(process.env.HOME, 'Documents/SystemSculptMacQA');
+            let state = {};
+            try { state = JSON.parse(fs.readFileSync(configPath, 'utf8')); } catch {}
+            if (!state.vaults) state.vaults = {};
+            const key = crypto.createHash('md5').update(vaultPath).digest('hex').slice(0, 16);
+            state.vaults[key] = { path: vaultPath, ts: Date.now(), open: true };
+            for (const [k, v] of Object.entries(state.vaults)) {
+              if (k !== key) v.open = false;
+            }
+            fs.writeFileSync(configPath, JSON.stringify(state, null, 2));
+            console.log('Registered vault:', key, '->', vaultPath);
+          "
+
+          # Clear Pi-related env vars for clean-install parity
+          unset PI_CODING_AGENT_DIR OPENAI_API_KEY ANTHROPIC_API_KEY \
+                GEMINI_API_KEY GOOGLE_API_KEY GROQ_API_KEY MISTRAL_API_KEY \
+                OPENROUTER_API_KEY PERPLEXITY_API_KEY DEEPSEEK_API_KEY \
+                XAI_API_KEY CEREBRAS_API_KEY SAMBANOVA_API_KEY TOGETHER_API_KEY 2>/dev/null || true
+
+          # Launch Obsidian with remote debugging so we can interact via CDP
+          /Applications/Obsidian.app/Contents/MacOS/Obsidian --remote-debugging-port=9222 &
+          echo "Obsidian launched with remote debugging on port 9222"
+
+      - name: Dismiss trust prompt and enable plugin via CDP
+        run: |
+          node --experimental-websocket \
+            testing/native/desktop-automation/cdp-trust-and-enable.mjs \
+            --port 9222 \
+            --plugin-id systemsculpt-ai
+
+      - name: Wait for desktop automation bridge
+        run: |
+          discovery_dir="${HOME}/.systemsculpt/obsidian-automation"
+          deadline=$(($(date +%s) + 120))
+          found=false
+
+          while [ "$(date +%s)" -lt "${deadline}" ]; do
+            if [ -d "${discovery_dir}" ]; then
+              for f in "${discovery_dir}"/*.json; do
+                [ -f "${f}" ] || continue
+                port=$(node --input-type=module -e "
+                  import fs from 'node:fs';
+                  try {
+                    const d = JSON.parse(fs.readFileSync('${f}','utf8'));
+                    if (d.pluginId === 'systemsculpt-ai' && d.port) {
+                      console.log(d.port);
+                    }
+                  } catch {}
+                " 2>/dev/null)
+                if [ -n "${port}" ]; then
+                  echo "Bridge discovered: port=${port}"
+                  found=true
+                  break 2
+                fi
+              done
+            fi
+            echo "Waiting for bridge discovery file..."
+            sleep 3
+          done
+
+          if [ "${found}" != "true" ]; then
+            echo "ERROR: Desktop automation bridge did not become ready within 120 seconds."
+            exit 1
+          fi
+
+      # ---- Run tests ----
+
+      - name: Run desktop baselines
+        run: |
+          # Create sync config pointing to the CI vault plugin directory
+          echo '{"pluginTargets":[{"path":"'"${HOME}/Documents/SystemSculptMacQA/.obsidian/plugins/systemsculpt-ai"'"}]}' \
+            > systemsculpt-sync.config.json
+          node testing/native/desktop-automation/run.mjs \
+            --case managed-baseline \
+            --no-reload
+
+      # ---- Failure diagnostics ----
+
+      - name: Capture screenshot on failure
+        if: failure()
+        run: |
+          screencapture -x failure-screenshot.png 2>/dev/null || true
+          echo "Screenshot saved to failure-screenshot.png"
+
+      - name: Collect logs on failure
+        if: failure()
+        run: |
+          mkdir -p diagnostics
+          cp -R "${HOME}/Library/Application Support/obsidian/logs" diagnostics/obsidian-logs 2>/dev/null || true
+          cp -R "${HOME}/Documents/SystemSculptMacQA/.obsidian/plugins/systemsculpt-ai" diagnostics/plugin-dir 2>/dev/null || true
+          cp -R "${HOME}/.systemsculpt/obsidian-automation" diagnostics/bridge-discovery 2>/dev/null || true
+          echo "Diagnostics collected"
+
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: macos-e2e-diagnostics
+          path: |
+            failure-screenshot.png
+            diagnostics/
+          retention-days: 7
+          if-no-files-found: ignore
+
+      # ---- Cleanup ----
+
+      - name: Stop Obsidian
+        if: always()
+        run: |
+          pkill -f Obsidian 2>/dev/null || true
+          echo "Obsidian processes stopped."

@@ -2,6 +2,10 @@
 import process from "node:process";
 import { spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
+import {
+  IOS_RUNTIME_READY_DELAY_MS,
+  IOS_RUNTIME_ENABLE_ATTEMPTS,
+} from "../../shared/ios-runtime-constants.mjs";
 
 const DEFAULT_PORT = 9000;
 const DEFAULT_PLUGIN_ID = "systemsculpt-ai";
@@ -124,6 +128,21 @@ async function resolveExpression(options) {
 
 async function sleep(ms) {
   await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function enableRuntimeWithSettle(inspector) {
+  let lastError = null;
+  for (let attempt = 1; attempt <= IOS_RUNTIME_ENABLE_ATTEMPTS; attempt += 1) {
+    await sleep(IOS_RUNTIME_READY_DELAY_MS);
+    try {
+      await inspector.send("Runtime.enable");
+      return;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error("Timed out enabling Runtime.");
 }
 
 async function fetchJson(url) {
@@ -413,7 +432,7 @@ async function main() {
       target = await waitForTarget(baseUrl, options.targetHint, ADAPTER_BOOT_TIMEOUT_MS);
       const inspector = await connectToTarget(target.webSocketDebuggerUrl);
       try {
-        await inspector.send("Runtime.enable");
+        await enableRuntimeWithSettle(inspector);
         const expression = customExpression
           || (options.communityToggle
             ? buildCommunityToggleExpression(options.pluginId)
