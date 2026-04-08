@@ -132,41 +132,70 @@ async function main() {
     console.log("WARNING: Trust button not found — vault may already be trusted");
   }
 
-  // Wait for Obsidian to process trust acceptance and load plugins
-  console.log("Waiting for plugin to load...");
-  await sleep(5000);
+  // Wait for Obsidian to process trust acceptance
+  console.log("Waiting 8s for Obsidian to process trust...");
+  await sleep(8000);
 
-  // Check plugin state and enable programmatically if needed
-  for (let attempt = 1; attempt <= 10; attempt += 1) {
+  // Explicitly load the plugin — trust acceptance adds the ID to enabledPlugins
+  // but may not actually instantiate the plugin code on first run.
+  for (let attempt = 1; attempt <= 15; attempt += 1) {
     const result = await cdp.send("Runtime.evaluate", {
       expression: `(async () => {
         const plugins = globalThis.app?.plugins;
         if (!plugins) return { ready: false, reason: 'no-plugins-api' };
-        const enabled = Array.from(plugins.enabledPlugins ?? []);
-        const loaded = Object.keys(plugins.plugins ?? {});
-        if (!enabled.includes(${JSON.stringify(pluginId)})) {
-          try {
-            await plugins.enablePluginAndSave(${JSON.stringify(pluginId)});
-            return { ready: true, action: 'enabled' };
-          } catch (e) {
-            return { ready: false, reason: 'enable-failed', error: e.message, loaded, enabled };
-          }
+        const id = ${JSON.stringify(pluginId)};
+        const hasInstance = Boolean(plugins.plugins?.[id]);
+        const isEnabled = plugins.enabledPlugins?.has?.(id) || Array.from(plugins.enabledPlugins ?? []).includes(id);
+        const manifest = plugins.manifests?.[id];
+
+        // If already loaded, we're done
+        if (hasInstance) {
+          return { ready: true, action: 'already-loaded', hasInstance: true };
         }
-        const hasInstance = Boolean(plugins.plugins?.[${JSON.stringify(pluginId)}]);
-        return { ready: true, action: 'already-enabled', hasInstance };
+
+        // Try to enable and load the plugin
+        try {
+          // First ensure it's enabled
+          if (!isEnabled) {
+            await plugins.enablePluginAndSave(id);
+          }
+          // Force load the plugin if it has a manifest but no instance
+          if (manifest && !plugins.plugins?.[id]) {
+            await plugins.loadPlugin(id);
+          }
+          // Check again after loading
+          const nowLoaded = Boolean(plugins.plugins?.[id]);
+          return {
+            ready: nowLoaded,
+            action: nowLoaded ? 'loaded' : 'load-pending',
+            hasInstance: nowLoaded,
+            hasManifest: Boolean(manifest),
+            isEnabled: plugins.enabledPlugins?.has?.(id) ?? false,
+            loadedIds: Object.keys(plugins.plugins ?? {}),
+          };
+        } catch (e) {
+          return {
+            ready: false,
+            reason: 'load-failed',
+            error: e.message,
+            hasManifest: Boolean(manifest),
+            isEnabled,
+            loadedIds: Object.keys(plugins.plugins ?? {}),
+          };
+        }
       })()`,
       returnByValue: true,
       awaitPromise: true,
     });
     const state = result?.result?.value;
     console.log(`Plugin state attempt ${attempt}: ${JSON.stringify(state)}`);
-    if (state?.ready) break;
+    if (state?.ready && state?.hasInstance) break;
     await sleep(2000);
   }
 
-  // Give the bridge time to start after plugin enable
-  console.log("Waiting 10s for bridge to initialize...");
-  await sleep(10000);
+  // Give the bridge time to start after plugin load
+  console.log("Waiting 15s for bridge to initialize...");
+  await sleep(15000);
 
   cdp.close();
   console.log("CDP trust dismissal and plugin enable complete");
