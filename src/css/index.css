@@ -48,6 +48,8 @@
 @import 'components/youtube-canvas.css';  /* YouTube Canvas modal */
 @import 'components/custom-endpoint.css';  /* Custom endpoint settings styles */
 @import 'components/favorite-toggle.css';  /* Favorite toggle component */
+@import 'components/prompt-selector.css';  /* Prompt selector chip */
+@import 'components/agent-toggle.css';  /* Agent mode toggle */
 @import 'components/daily-setup.css';  /* Daily note navigator styling */
 @import 'components/progress-modal.css';  /* Progress modal styling */
 @import 'components/model-indicator.css';  /* Model indicator component */

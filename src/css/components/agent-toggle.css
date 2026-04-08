@@ -1,0 +1,7 @@
+.systemsculpt-chat-composer-button[aria-label="Toggle agent mode"] {
+  transition: color 0.15s ease;
+}
+
+.systemsculpt-chat-composer-button[aria-label="Toggle agent mode"].ss-active {
+  color: var(--interactive-accent);
+}
