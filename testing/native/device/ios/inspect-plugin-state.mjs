@@ -8,6 +8,8 @@ const DEFAULT_PLUGIN_ID = "systemsculpt-ai";
 const DEFAULT_TARGET_HINT = "Obsidian";
 const DEFAULT_HOST = "127.0.0.1";
 const ADAPTER_BOOT_TIMEOUT_MS = 15000;
+const IOS_RUNTIME_READY_DELAY_MS = 8000;
+const IOS_RUNTIME_ENABLE_ATTEMPTS = 3;
 
 function usage() {
   console.log(`Usage: node testing/native/device/ios/inspect-plugin-state.mjs [options]
@@ -124,6 +126,21 @@ async function resolveExpression(options) {
 
 async function sleep(ms) {
   await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function enableRuntimeWithSettle(inspector) {
+  let lastError = null;
+  for (let attempt = 1; attempt <= IOS_RUNTIME_ENABLE_ATTEMPTS; attempt += 1) {
+    await sleep(IOS_RUNTIME_READY_DELAY_MS);
+    try {
+      await inspector.send("Runtime.enable");
+      return;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error("Timed out enabling Runtime.");
 }
 
 async function fetchJson(url) {
@@ -413,7 +430,7 @@ async function main() {
       target = await waitForTarget(baseUrl, options.targetHint, ADAPTER_BOOT_TIMEOUT_MS);
       const inspector = await connectToTarget(target.webSocketDebuggerUrl);
       try {
-        await inspector.send("Runtime.enable");
+        await enableRuntimeWithSettle(inspector);
         const expression = customExpression
           || (options.communityToggle
             ? buildCommunityToggleExpression(options.pluginId)

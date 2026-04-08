@@ -1,7 +1,30 @@
 import { spawn, spawnSync } from "node:child_process";
 
+const IOS_RUNTIME_READY_DELAY_MS = 8000;
+const IOS_RUNTIME_ENABLE_ATTEMPTS = 3;
+
 async function sleep(ms) {
   await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function enableRuntimeWithSettle(send, usePolledEvaluate) {
+  if (!usePolledEvaluate) {
+    await send("Runtime.enable", {}, 15000);
+    return;
+  }
+
+  let lastError = null;
+  for (let attempt = 1; attempt <= IOS_RUNTIME_ENABLE_ATTEMPTS; attempt += 1) {
+    await sleep(IOS_RUNTIME_READY_DELAY_MS);
+    try {
+      await send("Runtime.enable", {}, 20000);
+      return;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error("Timed out waiting for Runtime.enable");
 }
 
 export function run(command, args) {
@@ -281,7 +304,7 @@ export async function connectToRuntime(jsonUrl, targetHint) {
   for (let attempt = 1; attempt <= 4; attempt += 1) {
     try {
       await connectOnce();
-      await send("Runtime.enable", {}, 15000);
+      await enableRuntimeWithSettle(send, usePolledEvaluate);
       lastError = null;
       break;
     } catch (error) {
