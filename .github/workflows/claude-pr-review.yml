@@ -26,35 +26,39 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 0
+      - name: Post initial review comment
+        id: init_comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
+        run: |
+          BODY="**SystemSculpt AI -- PR Review**
+
+          Reviewing this PR now. Checking:
+          - TypeScript strict mode & type safety
+          - Plugin lifecycle (settings, bridge, hot-reload)
+          - Platform separation (desktop vs mobile)
+          - Build & bundle integrity
+          - Test coverage
+          - Security (no leaked keys, safe user data handling)
+
+          *This comment will be updated with findings shortly...*"
+
+          COMMENT_URL=$(gh pr comment "$PR_NUMBER" --body "$BODY" 2>&1 | grep -o 'https://[^ ]*')
+          COMMENT_ID=$(echo "$COMMENT_URL" | grep -o '[0-9]*$')
+          echo "comment_id=$COMMENT_ID" >> "$GITHUB_OUTPUT"
+          echo "Posted initial comment: $COMMENT_URL"
       - uses: anthropics/claude-code-action@6e2bd52842c65e914eba5c8badd17560bd26b5de # v1
+        id: claude
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           use_sticky_comment: true
           prompt: |
-            You are reviewing a PR for **SystemSculpt AI**, an Obsidian plugin (TypeScript, esbuild, Jest).
+            You are reviewing PR #${{ github.event.pull_request.number || github.event.issue.number }} for **SystemSculpt AI**, an Obsidian plugin (TypeScript, esbuild, Jest).
 
-            ## Step 1: Post initial comment
+            An initial "Reviewing..." comment has already been posted (comment ID: ${{ steps.init_comment.outputs.comment_id }}).
 
-            Immediately post a PR comment with this exact content:
-
-            ---
-            **SystemSculpt AI -- PR Review**
-
-            Reviewing this PR now. Checking:
-            - TypeScript strict mode & type safety
-            - Plugin lifecycle (settings, bridge, hot-reload)
-            - Platform separation (desktop vs mobile)
-            - Build & bundle integrity
-            - Test coverage
-            - Security (no leaked keys, safe user data handling)
-
-            *This comment will be updated with findings shortly...*
-
-            ---
-
-            ## Step 2: Perform the review
-
-            Analyze the PR diff thoroughly against these criteria:
+            ## Review criteria
 
             **TypeScript & type safety**
             - Strict mode compliance -- no untyped `any` without justification
@@ -85,11 +89,14 @@ jobs:
             - No API keys, tokens, or secrets in code
             - User data handling in chat/embeddings must be safe
 
-            ## Step 3: Update your comment with findings
+            ## Post your findings
 
-            Edit your initial comment (do NOT post a new one) and replace its content with a polished summary using this format:
+            After reviewing, you MUST update the initial comment by running this command:
 
-            ---
+            gh api repos/${{ github.repository }}/issues/comments/${{ steps.init_comment.outputs.comment_id }} -X PATCH -f body="<YOUR REVIEW>"
+
+            Format the review body as markdown:
+
             **SystemSculpt AI -- PR Review**
 
             ### Summary
@@ -97,7 +104,7 @@ jobs:
 
             ### Findings
 
-            If issues were found, list them grouped by severity:
+            If issues found, group by severity:
 
             **Critical** (must fix before merge)
             - <issue with file:line reference>
@@ -108,13 +115,11 @@ jobs:
             **Notes** (observations, not blocking)
             - <note>
 
-            If NO issues were found, write:
+            If NO issues found:
 
             > All clear -- no issues detected. Code looks good across type safety, plugin lifecycle, platform separation, build integrity, tests, and security.
 
             ### Files Reviewed
             <bullet list of key files touched in this PR>
 
-            ---
-
-            Be specific -- cite file paths and line numbers. Skip stylistic nits unless they affect readability significantly. Use inline PR comments for specific code concerns in addition to the summary.
+            Be specific -- cite file paths and line numbers. Skip stylistic nits unless they affect readability significantly.
