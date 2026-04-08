@@ -73,7 +73,7 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
           disable-animations: true
           script: |
-            set -euo pipefail
+            set -eu
 
             echo "--- Waiting for emulator boot ---"
             adb wait-for-device

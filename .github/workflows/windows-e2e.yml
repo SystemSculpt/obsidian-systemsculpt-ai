@@ -108,98 +108,16 @@ jobs:
           foreach ($key in $piKeys) {
             if (Test-Path "Env:$key") { Remove-Item "Env:$key" -ErrorAction SilentlyContinue }
           }
-          Start-Process -FilePath $exe -ArgumentList @($vault)
-          Write-Host "Obsidian launched from $exe with vault $vault"
+          Start-Process -FilePath $exe -ArgumentList @($vault, "--remote-debugging-port=9222")
+          Write-Host "Obsidian launched from $exe with vault $vault (CDP on port 9222)"
 
-      - name: Dismiss trust prompt
-        shell: pwsh
+      - name: Dismiss trust prompt and enable plugin via CDP
+        shell: bash
         run: |
-          Add-Type -AssemblyName System.Windows.Forms
-
-          # Win32 P/Invoke for direct window input (works when AppActivate does not)
-          Add-Type @"
-            using System;
-            using System.Collections.Generic;
-            using System.Runtime.InteropServices;
-
-            public class WinInput {
-              [DllImport("user32.dll")]
-              [return: MarshalAs(UnmanagedType.Bool)]
-              public static extern bool SetForegroundWindow(IntPtr hWnd);
-
-              [DllImport("user32.dll")]
-              public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
-
-              [DllImport("user32.dll")]
-              public static extern bool PostMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
-
-              [DllImport("user32.dll")]
-              public static extern bool EnumWindows(EnumWindowsProc enumProc, IntPtr lParam);
-
-              [DllImport("user32.dll")]
-              public static extern bool IsWindowVisible(IntPtr hWnd);
-
-              [DllImport("user32.dll")]
-              public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
-
-              public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
-
-              public static int SendEnterToProcessWindows(int pid) {
-                var sent = 0;
-                EnumWindows((hWnd, lParam) => {
-                  uint procId;
-                  GetWindowThreadProcessId(hWnd, out procId);
-                  if ((int)procId == pid && IsWindowVisible(hWnd)) {
-                    ShowWindow(hWnd, 9);
-                    SetForegroundWindow(hWnd);
-                    PostMessage(hWnd, 0x0100, (IntPtr)0x0D, IntPtr.Zero);
-                    PostMessage(hWnd, 0x0101, (IntPtr)0x0D, IntPtr.Zero);
-                    sent++;
-                  }
-                  return true;
-                }, IntPtr.Zero);
-                return sent;
-              }
-            }
-          "@
-
-          # Wait for Obsidian process
-          $procDeadline = (Get-Date).AddSeconds(20)
-          $obs = $null
-          while ((Get-Date) -lt $procDeadline) {
-            $obs = Get-Process -Name Obsidian -ErrorAction SilentlyContinue
-            if ($obs) {
-              Write-Host "Obsidian process detected (PID: $($obs[0].Id))"
-              break
-            }
-            Start-Sleep -Seconds 1
-          }
-          if (-not $obs) {
-            throw "Obsidian process not found within 20s"
-          }
-
-          # Wait for Electron to render the trust dialog
-          Write-Host "Waiting 10s for trust dialog to render..."
-          Start-Sleep -Seconds 10
-
-          # Send Enter key via PostMessage to all visible Obsidian windows
-          # (Electron spawns multiple processes; hit them all)
-          $totalSent = 0
-          $allObs = Get-Process -Name Obsidian -ErrorAction SilentlyContinue
-          foreach ($p in $allObs) {
-            $n = [WinInput]::SendEnterToProcessWindows($p.Id)
-            if ($n -gt 0) {
-              Write-Host "PostMessage Enter sent to PID $($p.Id) ($n visible windows)"
-            }
-            $totalSent += $n
-          }
-
-          if ($totalSent -gt 0) {
-            Write-Host "Trust prompt dismissal: Enter sent to $totalSent window(s) via PostMessage"
-            Start-Sleep -Seconds 5
-          } else {
-            Write-Host "WARNING: No visible Obsidian windows found for PostMessage"
-          }
+          node --experimental-websocket \
+            testing/native/desktop-automation/cdp-trust-and-enable.mjs \
+            --port 9222 \
+            --plugin-id systemsculpt-ai
 
       - name: Wait for desktop automation bridge
         shell: pwsh
