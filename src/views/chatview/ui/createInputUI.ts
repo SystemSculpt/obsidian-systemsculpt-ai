@@ -17,6 +17,8 @@ export interface ChatComposerDeps {
   hasProLicense: () => boolean;
   onToggleWebSearch?: () => void;
   isWebSearchEnabled?: () => boolean;
+  onToggleAgentMode?: () => void;
+  isAgentModeEnabled?: () => boolean;
 }
 
 export interface ChatComposerElements {
@@ -29,6 +31,7 @@ export interface ChatComposerElements {
   settingsButton: ButtonComponent;
   attachButton: ButtonComponent;
   webSearchButton: ButtonComponent;
+  agentModeButton: ButtonComponent;
   sendButton: ButtonComponent;
   stopButton: ButtonComponent;
   micButton: ButtonComponent;
@@ -73,6 +76,22 @@ export function createChatComposer(parent: HTMLElement, deps: ChatComposerDeps):
   webSearchButton.buttonEl.classList.add("systemsculpt-chat-composer-button");
   if (deps.isWebSearchEnabled?.()) {
     webSearchButton.buttonEl.classList.add("ss-active");
+  }
+
+  const agentModeButton = new ButtonComponent(leftGroup)
+    .setIcon("bot")
+    .setTooltip(deps.isAgentModeEnabled?.() ? "Agent mode (tools + file operations)" : "Chat only (no tools)")
+    .setClass("clickable-icon")
+    .onClick(() => {
+      deps.onToggleAgentMode?.();
+      const enabled = deps.isAgentModeEnabled?.() ?? true;
+      agentModeButton.buttonEl.classList.toggle("ss-active", enabled);
+      agentModeButton.setTooltip(enabled ? "Agent mode (tools + file operations)" : "Chat only (no tools)");
+    });
+  agentModeButton.buttonEl.setAttribute("aria-label", "Toggle agent mode");
+  agentModeButton.buttonEl.classList.add("systemsculpt-chat-composer-button");
+  if (deps.isAgentModeEnabled?.()) {
+    agentModeButton.buttonEl.classList.add("ss-active");
   }
 
   const settingsButton = new ButtonComponent(rightGroup)
@@ -160,6 +179,7 @@ export function createChatComposer(parent: HTMLElement, deps: ChatComposerDeps):
     settingsButton,
     attachButton,
     webSearchButton,
+    agentModeButton,
     sendButton,
     stopButton,
     micButton,

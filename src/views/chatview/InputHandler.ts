@@ -88,6 +88,7 @@ export class InputHandler extends Component {
   private attachmentPillsByKey: Map<string, HTMLElement> = new Map();
   private isGenerating = false;
   private webSearchEnabled = false;
+  private agentModeEnabled: boolean;
   private automationApprovalMode: AutomationApprovalMode = "interactive";
   private automationRequestDepth = 0;
   private renderTimeout: NodeJS.Timeout | null = null;
@@ -163,6 +164,7 @@ export class InputHandler extends Component {
     this.getChatId = options.getChatId;
     this.notifyModelChange = options.onModelChange || (() => {});
     this.chatView = options.chatView;
+    this.agentModeEnabled = this.plugin.settings.agentModeEnabled ?? true;
     this.modelSelectionController = new ChatModelSelectionController({
       app: this.app,
       container: this.container,
@@ -599,6 +601,8 @@ export class InputHandler extends Component {
       hasProLicense: () => !!(this.plugin.settings.licenseKey?.trim() && this.plugin.settings.licenseValid),
       onToggleWebSearch: () => { this.webSearchEnabled = !this.webSearchEnabled; },
       isWebSearchEnabled: () => this.webSearchEnabled,
+      onToggleAgentMode: () => { this.agentModeEnabled = !this.agentModeEnabled; },
+      isAgentModeEnabled: () => this.agentModeEnabled,
     });
 
     this.input = composer.input;
