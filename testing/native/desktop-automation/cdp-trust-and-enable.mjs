@@ -160,10 +160,17 @@ async function main() {
           return { ready: true, action: 'already-loaded', hasInstance: true };
         }
 
-        // Normalise Windows backslash paths in manifest.dir so that
-        // Obsidian's internal pathToFileURL call receives a path it accepts.
-        if (manifest?.dir && manifest.dir.includes('\\\\')) {
-          manifest.dir = manifest.dir.replace(/\\\\/g, '/');
+        // Obsidian's loadPlugin() calls pathToFileURL(manifest.dir) which
+        // requires an absolute path.  On Windows the dir is often relative
+        // (e.g. ".obsidian\\plugins\\foo") and uses backslashes — fix both.
+        if (manifest?.dir) {
+          let dir = manifest.dir;
+          const basePath = globalThis.app?.vault?.adapter?.basePath || '';
+          if (basePath && !dir.match(/^[A-Za-z]:/) && !dir.startsWith('/')) {
+            dir = basePath + '/' + dir;
+          }
+          dir = dir.replace(/\\\\/g, '/');
+          manifest.dir = dir;
         }
 
         // Try to enable and load the plugin
@@ -242,9 +249,19 @@ async function main() {
             const instance = new PluginClass(globalThis.app, manifest);
             plugins.plugins[id] = instance;
 
-            // Run onload — do NOT swallow errors so we get diagnostics
-            await instance.onload();
+            // Run onload — log errors but still consider loaded if the
+            // instance is registered (bridge may start asynchronously).
+            let onloadError = null;
+            try { await instance.onload(); } catch (oe) { onloadError = oe; }
 
+            if (onloadError) {
+              return {
+                ready: true,
+                action: 'manual-import-onload-error',
+                onloadError: onloadError.message,
+                fileUrl,
+              };
+            }
             return { ready: true, action: 'manual-import', fileUrl };
           } catch (e) {
             return { ready: false, reason: 'manual-import-failed', error: e.message, stack: (e.stack || '').slice(0, 400), fileUrl };
