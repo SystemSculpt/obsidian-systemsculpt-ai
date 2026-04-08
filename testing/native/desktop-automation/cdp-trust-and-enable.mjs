@@ -174,20 +174,50 @@ async function main() {
         const absDir = bp ? nodePath.resolve(bp, manifest.dir) : manifest.dir;
         const mainPath = nodePath.join(absDir, 'main.js');
 
-        // Patch Module._resolveFilename so externalized deps resolve
+        // Make externalized deps (obsidian, electron, etc.) resolvable.
+        // Obsidian bundles its API inside app.asar which isn't in standard
+        // module paths.  Find it in Module._cache or via createRequire.
         const Module = require('module');
         if (!Module.__cdpPatched) {
           Module.__cdpPatched = true;
+
+          // Strategy 1: search Module._cache for the obsidian module
+          // by looking for a cached module that exports Plugin + Notice
+          for (const [key, cached] of Object.entries(Module._cache)) {
+            const ex = cached?.exports;
+            if (ex && typeof ex.Plugin === 'function' && typeof ex.Notice === 'function') {
+              Module._cache['obsidian'] = cached;
+              break;
+            }
+          }
+
+          // Strategy 2: try createRequire from app.asar
+          if (!Module._cache['obsidian'] && process.resourcesPath) {
+            try {
+              const asarReq = Module.createRequire(
+                nodePath.join(process.resourcesPath, 'app.asar', 'dummy.js')
+              );
+              const obs = asarReq('obsidian');
+              Module._cache['obsidian'] = {
+                id: 'obsidian', filename: 'obsidian', loaded: true,
+                exports: obs, children: [], paths: [],
+              };
+            } catch {}
+          }
+
+          // Strategy 3: add app.asar to global module paths
+          if (process.resourcesPath) {
+            const asarPath = nodePath.join(process.resourcesPath, 'app.asar');
+            if (!Module.globalPaths.includes(asarPath)) {
+              Module.globalPaths.unshift(asarPath);
+            }
+          }
+
+          // Patch _resolveFilename as a final safety net
           const origResolve = Module._resolveFilename;
-          // Cache references to externalized modules from the renderer
-          const externalCache = {};
-          ['obsidian', 'electron'].forEach(name => {
-            try { externalCache[name] = require.resolve(name); } catch {}
-          });
           Module._resolveFilename = function(request, parent) {
-            if (externalCache[request]) return externalCache[request];
-            if (request.startsWith('@codemirror/') || request.startsWith('@lezer/')) {
-              try { return origResolve.call(this, request, null); } catch {}
+            if (request === 'obsidian' && Module._cache['obsidian']) {
+              return 'obsidian';
             }
             return origResolve.apply(this, arguments);
           };
