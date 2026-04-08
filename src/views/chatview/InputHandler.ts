@@ -1304,6 +1304,14 @@ export class InputHandler extends Component {
   public resetForFreshChat(): void {
     this.pendingLargeTextContent = null;
     this.webSearchEnabled = false;
+    this.agentModeEnabled = this.plugin.settings.agentModeEnabled ?? true;
+    this.selectedPromptPath = this.plugin.settings.lastUsedPromptPath || null;
+    this.selectedPromptName = this.selectedPromptPath
+      ? this.selectedPromptPath.split("/").pop()?.replace(/\.md$/, "") || null
+      : null;
+    if (this.promptChip) {
+      updatePromptChip(this.promptChip, this.selectedPromptName);
+    }
     this.automationApprovalMode = "interactive";
     this.setValue("", { focus: false });
   }

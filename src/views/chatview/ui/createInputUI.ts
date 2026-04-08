@@ -91,8 +91,12 @@ export function createChatComposer(parent: HTMLElement, deps: ChatComposerDeps):
     .setClass("clickable-icon")
     .onClick(() => {
       deps.onToggleAgentMode?.();
-      const enabled = deps.isAgentModeEnabled?.() ?? true;
-      agentModeButton.buttonEl.classList.toggle("ss-active", enabled);
+      if (deps.isAgentModeEnabled?.()) {
+        agentModeButton.buttonEl.classList.add("ss-active");
+      } else {
+        agentModeButton.buttonEl.classList.remove("ss-active");
+      }
+      const enabled = deps.isAgentModeEnabled?.() ?? false;
       agentModeButton.setTooltip(enabled ? "Agent mode (tools + file operations)" : "Chat only (no tools)");
     });
   agentModeButton.buttonEl.setAttribute("aria-label", "Toggle agent mode");
