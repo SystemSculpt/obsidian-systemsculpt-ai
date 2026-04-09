@@ -321,7 +321,7 @@ const buildOptions = {
 			// (Electron has Node.js).  Runs as onEnd to post-process the bundle.
 			name: "safe-node-externals",
 			setup(build) {
-				const safeExternals = ["proper-lockfile", "graceful-fs"];
+				const safeExternals = ["proper-lockfile", "graceful-fs", "@mariozechner/pi-tui"];
 				build.onEnd(async () => {
 					const { readFileSync, writeFileSync } = await import("fs");
 					const outfile = build.initialOptions.outfile || "main.js";
