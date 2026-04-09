@@ -4,7 +4,7 @@ SystemSculpt AI adds AI chat, vault-aware tools, semantic note search, transcrip
 
 ## Current release facts
 
-- Plugin version: `5.3.3`
+- Plugin version: `5.4.0`
 - Minimum Obsidian version: `1.4.0`
 - Platforms: desktop and mobile (`manifest.json` sets `isDesktopOnly: false`)
 - License: MIT
@@ -12,7 +12,10 @@ SystemSculpt AI adds AI chat, vault-aware tools, semantic note search, transcrip
 ## What you can do
 
 - Chat with your notes through SystemSculpt.
+- Toggle agent mode on/off to switch between tool-assisted and pure reasoning chat.
+- Select custom system prompts from vault markdown files per conversation.
 - Use built-in vault tools to read, search, edit, move, and organize notes.
+- Filter models by favorites in the model selection modal.
 - Find semantically similar notes with embeddings.
 - Record audio and transcribe notes.
 - Run capture-folder workflow automations.
@@ -81,6 +84,8 @@ npm run test:embeddings
 npm run test:leaks
 npm run test:native:desktop:extended
 npm run test:native:android:extended
+npm run check:pre-push              # full native gate (unit + build + Android + Windows)
+npm run check:pre-push:quick        # fast gate (unit + build only)
 ```
 
 Testing architecture docs:
