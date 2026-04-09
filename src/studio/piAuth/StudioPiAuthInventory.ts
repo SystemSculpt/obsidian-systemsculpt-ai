@@ -92,6 +92,20 @@ function resolveInventoryAuthStorage(
   return createBundledPiAuthStorage(authPath);
 }
 
+function readAuthJsonDirect(
+  context: StudioPiAuthInventoryContext = {},
+): StoredAuthData {
+  try {
+    const authPath = String(context.authPath ?? resolvePiAuthPath(context.plugin) ?? "").trim();
+    if (!authPath) return {};
+    const fs = require("fs");
+    if (!fs.existsSync(authPath)) return {};
+    return normalizeStoredAuthData(JSON.parse(fs.readFileSync(authPath, "utf-8")));
+  } catch {
+    return {};
+  }
+}
+
 function loadStoredAuthData(
   context: StudioPiAuthInventoryContext = {},
   storage: PiAuthStorageInstance | null = resolveInventoryAuthStorage(context),
@@ -100,7 +114,18 @@ function loadStoredAuthData(
     return normalizeStoredAuthData(context.authData);
   }
 
-  return storage ? normalizeStoredAuthData(storage.getAll()) : {};
+  // Try the SDK's AuthStorage first. If it returns empty data (e.g. because
+  // proper-lockfile failed during reload), fall back to reading auth.json
+  // directly. This handles the Electron case where lockfile operations can
+  // fail silently.
+  if (storage) {
+    const data = normalizeStoredAuthData(storage.getAll());
+    if (Object.keys(data).length > 0) {
+      return data;
+    }
+  }
+
+  return readAuthJsonDirect(context);
 }
 
 function normalizeCredentialType(credentialType: unknown): StudioPiAuthCredentialType {
