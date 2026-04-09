@@ -272,6 +272,7 @@ const buildOptions = {
 	bundle: true,
 	alias: {
 		"onnxruntime-node": "onnxruntime-web",
+		"@mariozechner/pi-tui": "./src/services/pi/pi-tui-shim.js",
 	},
 	define: {
 		// Resolve import.meta.url from the actual runtime bundle path so synced builds keep
@@ -288,7 +289,6 @@ const buildOptions = {
 		// mobile while still resolving on desktop Electron.
 		"proper-lockfile",
 		"graceful-fs",
-		"@mariozechner/pi-tui",
 		"@codemirror/autocomplete",
 		"@codemirror/collab",
 		"@codemirror/commands",
@@ -321,7 +321,7 @@ const buildOptions = {
 			// (Electron has Node.js).  Runs as onEnd to post-process the bundle.
 			name: "safe-node-externals",
 			setup(build) {
-				const safeExternals = ["proper-lockfile", "graceful-fs", "@mariozechner/pi-tui"];
+				const safeExternals = ["proper-lockfile", "graceful-fs"];
 				build.onEnd(async () => {
 					const { readFileSync, writeFileSync } = await import("fs");
 					const outfile = build.initialOptions.outfile || "main.js";
@@ -335,10 +335,10 @@ const buildOptions = {
 						);
 					}
 
-					// The Pi SDK's extensions loader uses resolveWorkspaceOrImport()
-					// which calls import.meta.resolve() for pi-tui. This fails in
-					// Electron because the module isn't installed. Wrap the alias
-					// entry so it returns undefined instead of crashing.
+					// The Pi SDK's extensions loader eagerly calls resolveWorkspaceOrImport()
+					// which uses import.meta.resolve(). This fails for pi-tui even though
+					// we alias it at build time — the extensions loader is a separate
+					// dynamic resolution path. Wrap the call so it degrades gracefully.
 					code = code.replace(
 						/"@mariozechner\/pi-tui":\s*resolveWorkspaceOrImport\([^)]+\)/g,
 						'"@mariozechner/pi-tui": (() => { try { return resolveWorkspaceOrImport("tui/dist/index.js", "@mariozechner/pi-tui"); } catch { return undefined; } })()'
