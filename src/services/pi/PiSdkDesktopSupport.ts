@@ -103,7 +103,13 @@ async function normalizeFetchBody(
   init: RequestInit | undefined,
 ): Promise<BodyInit | undefined> {
   if (init && Object.prototype.hasOwnProperty.call(init, "body")) {
-    return init.body ?? undefined;
+    const body = init.body;
+    // Electron's session.fetch doesn't auto-stringify URLSearchParams like
+    // browser fetch does. Convert to string so the form body is sent correctly.
+    if (typeof URLSearchParams !== "undefined" && body instanceof URLSearchParams) {
+      return body.toString();
+    }
+    return body ?? undefined;
   }
 
   if (!input || typeof input !== "object") {
