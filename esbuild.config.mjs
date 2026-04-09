@@ -272,6 +272,7 @@ const buildOptions = {
 	bundle: true,
 	alias: {
 		"onnxruntime-node": "onnxruntime-web",
+		"@mariozechner/pi-tui": "./src/services/pi/pi-tui-shim.js",
 	},
 	define: {
 		// Resolve import.meta.url from the actual runtime bundle path so synced builds keep
@@ -288,7 +289,6 @@ const buildOptions = {
 		// mobile while still resolving on desktop Electron.
 		"proper-lockfile",
 		"graceful-fs",
-		"@mariozechner/pi-tui",
 		"@codemirror/autocomplete",
 		"@codemirror/collab",
 		"@codemirror/commands",
@@ -334,6 +334,20 @@ const buildOptions = {
 							`(() => { try { return require("${mod}"); } catch { return {}; } })()`
 						);
 					}
+
+					// The Pi SDK's extensions loader eagerly calls resolveWorkspaceOrImport()
+					// which uses import.meta.resolve(). This fails for pi-tui even though
+					// we alias it at build time — the extensions loader is a separate
+					// dynamic resolution path. Wrap the call so it degrades gracefully.
+					const beforePiTuiPatch = code;
+					code = code.replace(
+						/"@mariozechner\/pi-tui":\s*resolveWorkspaceOrImport\([^)]+\)/g,
+						'"@mariozechner/pi-tui": (() => { try { return resolveWorkspaceOrImport("tui/dist/index.js", "@mariozechner/pi-tui"); } catch { return undefined; } })()'
+					);
+					if (code === beforePiTuiPatch) {
+						console.warn("[build] pi-tui resolveWorkspaceOrImport patch did not match — verify SDK output");
+					}
+
 					writeFileSync(outfile, code);
 				});
 			}

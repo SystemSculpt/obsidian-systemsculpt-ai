@@ -78,4 +78,44 @@ describe("PiSdkRuntime", () => {
     expect(clonedResponse.headers).toBeInstanceOf(Headers);
     expect(clonedResponse.headers.get("x-request-id")).toBe("req_123");
   });
+
+  it("stringifies URLSearchParams body for Electron session.fetch compatibility", async () => {
+    sessionFetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      headers: {},
+      text: jest.fn(async () => "ok"),
+      json: jest.fn(async () => ({})),
+    });
+
+    const restore = installPiDesktopFetchShim();
+    const params = new URLSearchParams({
+      grant_type: "authorization_code",
+      client_id: "test-client",
+      code: "abc123",
+    });
+
+    await global.fetch("https://auth.example.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: params,
+    });
+    restore();
+
+    expect(sessionFetchMock).toHaveBeenCalledWith(
+      "https://auth.example.com/token",
+      expect.objectContaining({
+        method: "POST",
+        body: params.toString(),
+      })
+    );
+
+    // Verify it's a string, not a URLSearchParams object
+    const actualBody = sessionFetchMock.mock.calls[0][1].body;
+    expect(typeof actualBody).toBe("string");
+    expect(actualBody).toContain("grant_type=authorization_code");
+    expect(actualBody).toContain("client_id=test-client");
+    expect(actualBody).toContain("code=abc123");
+  });
 });

@@ -332,6 +332,38 @@ export async function loginStudioPiProviderOAuth(
       signal: options.signal,
     });
   });
+
+  // After successful OAuth login, ensure the credential is persisted to auth.json.
+  // The SDK's persistProviderChange uses proper-lockfile which can silently fail
+  // in Electron. As a safety net, read the credential from the in-memory storage
+  // and write auth.json directly if the SDK's persist was lost.
+  try {
+    const credential = storage.get(providerId);
+    if (credential) {
+      const { resolvePiAuthPath } = await import("../../services/pi/PiSdkStoragePaths");
+      const authPath = resolvePiAuthPath(options.plugin);
+      if (authPath) {
+        const fs = require("fs");
+        const path = require("path");
+        const dir = path.dirname(authPath);
+        if (!fs.existsSync(dir)) {
+          fs.mkdirSync(dir, { recursive: true });
+        }
+        let existing: Record<string, unknown> = {};
+        try {
+          if (fs.existsSync(authPath)) {
+            existing = JSON.parse(fs.readFileSync(authPath, "utf-8"));
+          }
+        } catch {
+          // Corrupt auth.json — start fresh so the new credential is not lost.
+        }
+        existing[providerId] = credential;
+        fs.writeFileSync(authPath, JSON.stringify(existing, null, 2), "utf-8");
+      }
+    }
+  } catch {
+    // Best-effort — the login itself succeeded even if disk persist fails.
+  }
 }
 
 export async function setStudioPiProviderApiKey(

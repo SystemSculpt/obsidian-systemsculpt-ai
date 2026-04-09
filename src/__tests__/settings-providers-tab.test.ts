@@ -30,6 +30,16 @@ jest.mock("../core/ui/modals/PopupModal", () => ({
   showPopup: jest.fn(),
 }));
 
+jest.mock("../core/ui/modals/OAuthStatusModal", () => ({
+  OAuthStatusModal: jest.fn().mockImplementation(() => ({
+    showWaiting: jest.fn(),
+    showPasteFallback: jest.fn(),
+    showSuccess: jest.fn().mockResolvedValue(undefined),
+    open: jest.fn(),
+    close: jest.fn(),
+  })),
+}));
+
 jest.mock("../services/pi/PiTextModels", () => {
   return {
     collectSharedPiProviderHints: jest.fn(() => []),
@@ -295,5 +305,67 @@ describe("Providers tab provider states", () => {
     } finally {
       jest.useRealTimers();
     }
+  });
+
+  it("calls OAuth flow without onManualCodeInput for callback-server providers", async () => {
+    listStudioPiOAuthProvidersMock.mockResolvedValue([
+      {
+        id: "openai-codex",
+        name: "ChatGPT Plus/Pro (Codex Subscription)",
+        usesCallbackServer: true,
+      },
+    ]);
+    listStudioPiProviderAuthRecordsMock.mockResolvedValue([
+      {
+        provider: "openai-codex",
+        displayName: "ChatGPT Plus/Pro (Codex Subscription)",
+        supportsOAuth: true,
+        hasAnyAuth: false,
+        hasStoredCredential: false,
+        source: "none",
+        credentialType: "none",
+        oauthExpiresAt: null,
+      },
+    ]);
+
+    const { runStudioPiOAuthLoginFlow: runFlowMock } = jest.requireMock(
+      "../studio/piAuth/StudioPiOAuthLoginFlow"
+    ) as Record<string, jest.Mock>;
+    runFlowMock.mockResolvedValue({ sawAuthEvent: true, sawAuthUrl: true });
+
+    const plugin = {
+      app: new App(),
+      settings: { customProviders: [] },
+    } as any;
+    const tab = { plugin } as any;
+    const container = document.createElement("div");
+
+    await displayProvidersTabContent(container, tab);
+
+    // Click "Connect" to expand the provider
+    const connectButton = Array.from(container.querySelectorAll("button")).find(
+      (b) => b.textContent?.trim() === "Connect"
+    ) as HTMLButtonElement;
+    expect(connectButton).toBeDefined();
+    connectButton.click();
+    // Flush multiple microticks so async render completes
+    await new Promise((r) => setTimeout(r, 0));
+    await Promise.resolve();
+
+    // Click "Continue with..." to start OAuth
+    const loginButton = Array.from(container.querySelectorAll("button")).find(
+      (b) => b.textContent?.includes("Continue with")
+    ) as HTMLButtonElement;
+    expect(loginButton).toBeDefined();
+    loginButton.click();
+    await new Promise((r) => setTimeout(r, 0));
+    await Promise.resolve();
+
+    // Verify the flow was called without onManualCodeInput
+    expect(runFlowMock).toHaveBeenCalledTimes(1);
+    const flowOptions = runFlowMock.mock.calls[0][0];
+    expect(flowOptions.onManualCodeInput).toBeUndefined();
+    expect(flowOptions.onAuth).toBeDefined();
+    expect(flowOptions.onPrompt).toBeDefined();
   });
 });
