@@ -16,7 +16,7 @@ import {
 } from "../studio/piAuth/StudioPiProviderRegistry";
 import { openExternalUrlForOAuth } from "../utils/oauthUiHelpers";
 import { PlatformContext } from "../services/PlatformContext";
-import { showPopup } from "../core/ui/modals/PopupModal";
+import { OAuthStatusModal } from "../core/ui/modals/OAuthStatusModal";
 import {
   formatProviderStatusSummary,
   getProviderDisplayState,
@@ -610,6 +610,14 @@ function renderOAuthConnect(
     state.oauthAbortController = abortController;
     rerender();
 
+    const modal = new OAuthStatusModal(plugin.app, label);
+    modal.showWaiting(() => abortController.abort());
+    modal.open();
+
+    const usesCallbackServer = state.oauthProvidersById.get(
+      normalizeProviderId(providerId)
+    )?.usesCallbackServer ?? false;
+
     try {
       const { runStudioPiOAuthLoginFlow } = await loadStudioPiOAuthLoginFlowModule();
       await runStudioPiOAuthLoginFlow({
@@ -620,41 +628,26 @@ function renderOAuthConnect(
             await openExternalUrlForOAuth(info.url);
           }
         },
-        onPrompt: async (prompt) => {
-          const result = await showPopup(
-            plugin.app,
-            prompt.message || "Enter value:",
-            {
-              primaryButton: "Submit",
-              secondaryButton: "Cancel",
-              inputs: [{ type: "text", placeholder: prompt.placeholder || "" }],
-            }
-          );
-          if (!result?.confirmed || !result.inputs?.[0]) throw new Error("Login cancelled.");
-          return result.inputs[0];
+        onPrompt: async () => {
+          return await modal.showPasteFallback();
         },
         onProgress: () => {},
-        onManualCodeInput: async () => {
-          const result = await showPopup(
-            plugin.app,
-            "Paste the authorization code or redirect URL:",
-            {
-              primaryButton: "Submit",
-              secondaryButton: "Cancel",
-              inputs: [{ type: "text", placeholder: "https://…" }],
-            }
-          );
-          if (!result?.confirmed || !result.inputs?.[0]) throw new Error("Login cancelled.");
-          return result.inputs[0];
-        },
+        ...(usesCallbackServer
+          ? {}
+          : {
+              onManualCodeInput: async () => {
+                return await modal.showPasteFallback();
+              },
+            }),
         signal: abortController.signal,
       });
 
-      new Notice(`${label} connected successfully.`);
+      await modal.showSuccess();
       state.activeConnectProvider = null;
       state.activeConnectMethod = null;
       await refreshProviderList(state, plugin);
     } catch (error) {
+      modal.close();
       if (abortController.signal.aborted) return;
       new Notice(
         `${label} login failed: ${error instanceof Error ? error.message : String(error)}`
