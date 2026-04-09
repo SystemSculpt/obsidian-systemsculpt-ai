@@ -346,22 +346,26 @@ describe("Providers tab provider states", () => {
     const connectButton = Array.from(container.querySelectorAll("button")).find(
       (b) => b.textContent?.trim() === "Connect"
     ) as HTMLButtonElement;
-    connectButton?.click();
+    expect(connectButton).toBeDefined();
+    connectButton.click();
+    // Flush multiple microticks so async render completes
+    await new Promise((r) => setTimeout(r, 0));
     await Promise.resolve();
 
     // Click "Continue with..." to start OAuth
     const loginButton = Array.from(container.querySelectorAll("button")).find(
       (b) => b.textContent?.includes("Continue with")
     ) as HTMLButtonElement;
-    loginButton?.click();
+    expect(loginButton).toBeDefined();
+    loginButton.click();
+    await new Promise((r) => setTimeout(r, 0));
     await Promise.resolve();
 
     // Verify the flow was called without onManualCodeInput
-    if (runFlowMock.mock.calls.length > 0) {
-      const flowOptions = runFlowMock.mock.calls[0][0];
-      expect(flowOptions.onManualCodeInput).toBeUndefined();
-      expect(flowOptions.onAuth).toBeDefined();
-      expect(flowOptions.onPrompt).toBeDefined();
-    }
+    expect(runFlowMock).toHaveBeenCalledTimes(1);
+    const flowOptions = runFlowMock.mock.calls[0][0];
+    expect(flowOptions.onManualCodeInput).toBeUndefined();
+    expect(flowOptions.onAuth).toBeDefined();
+    expect(flowOptions.onPrompt).toBeDefined();
   });
 });

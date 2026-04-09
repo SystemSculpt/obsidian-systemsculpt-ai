@@ -611,8 +611,8 @@ function renderOAuthConnect(
     rerender();
 
     const modal = new OAuthStatusModal(plugin.app, label);
-    modal.showWaiting(() => abortController.abort());
     modal.open();
+    modal.showWaiting(() => abortController.abort());
 
     const usesCallbackServer = state.oauthProvidersById.get(
       normalizeProviderId(providerId)

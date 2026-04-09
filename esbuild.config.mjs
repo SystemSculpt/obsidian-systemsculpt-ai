@@ -339,10 +339,14 @@ const buildOptions = {
 					// which uses import.meta.resolve(). This fails for pi-tui even though
 					// we alias it at build time — the extensions loader is a separate
 					// dynamic resolution path. Wrap the call so it degrades gracefully.
+					const beforePiTuiPatch = code;
 					code = code.replace(
 						/"@mariozechner\/pi-tui":\s*resolveWorkspaceOrImport\([^)]+\)/g,
 						'"@mariozechner/pi-tui": (() => { try { return resolveWorkspaceOrImport("tui/dist/index.js", "@mariozechner/pi-tui"); } catch { return undefined; } })()'
 					);
+					if (code === beforePiTuiPatch) {
+						console.warn("[build] pi-tui resolveWorkspaceOrImport patch did not match — verify SDK output");
+					}
 
 					writeFileSync(outfile, code);
 				});

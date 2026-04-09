@@ -349,9 +349,14 @@ export async function loginStudioPiProviderOAuth(
         if (!fs.existsSync(dir)) {
           fs.mkdirSync(dir, { recursive: true });
         }
-        const existing = fs.existsSync(authPath)
-          ? JSON.parse(fs.readFileSync(authPath, "utf-8"))
-          : {};
+        let existing: Record<string, unknown> = {};
+        try {
+          if (fs.existsSync(authPath)) {
+            existing = JSON.parse(fs.readFileSync(authPath, "utf-8"));
+          }
+        } catch {
+          // Corrupt auth.json — start fresh so the new credential is not lost.
+        }
         existing[providerId] = credential;
         fs.writeFileSync(authPath, JSON.stringify(existing, null, 2), "utf-8");
       }
