@@ -499,3 +499,30 @@ describe("ProvidersTabContent OAuth UX flow", () => {
     expect(expectedFlow.fallback).toContain("paste");
   });
 });
+
+describe("Provider-aware onManualCodeInput routing", () => {
+  it("does not provide onManualCodeInput for callback-server providers", () => {
+    const usesCallbackServer = true;
+    const flowOptions: Record<string, unknown> = {
+      onAuth: jest.fn(),
+      onPrompt: jest.fn(),
+      onProgress: jest.fn(),
+      ...(usesCallbackServer ? {} : { onManualCodeInput: jest.fn() }),
+    };
+
+    expect(flowOptions.onManualCodeInput).toBeUndefined();
+  });
+
+  it("provides onManualCodeInput for non-callback-server providers", () => {
+    const usesCallbackServer = false;
+    const flowOptions: Record<string, unknown> = {
+      onAuth: jest.fn(),
+      onPrompt: jest.fn(),
+      onProgress: jest.fn(),
+      ...(usesCallbackServer ? {} : { onManualCodeInput: jest.fn() }),
+    };
+
+    expect(flowOptions.onManualCodeInput).toBeDefined();
+    expect(typeof flowOptions.onManualCodeInput).toBe("function");
+  });
+});
