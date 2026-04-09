@@ -133,4 +133,25 @@ describe("OAuthStatusModal", () => {
 
     await expect(resultPromise).rejects.toThrow("Login cancelled.");
   });
+
+  it("rejects paste-fallback promise when modal is closed externally (Escape)", async () => {
+    const modal = new OAuthStatusModal(new App(), "OpenAI");
+    modal.open();
+
+    const resultPromise = modal.showPasteFallback();
+    modal.close(); // simulates Escape or X button
+
+    await expect(resultPromise).rejects.toThrow("Login cancelled.");
+  });
+
+  it("resolves success promise when modal is closed externally (Escape)", async () => {
+    const modal = new OAuthStatusModal(new App(), "Anthropic");
+    modal.open();
+
+    const resultPromise = modal.showSuccess();
+    modal.close(); // simulates Escape or X button
+
+    await resultPromise;
+    // Promise resolved — no hang
+  });
 });

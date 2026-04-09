@@ -8,9 +8,10 @@ import { App, Modal } from "obsidian";
  * before drawing the new UI.
  */
 export class OAuthStatusModal extends Modal {
-  private providerName: string;
+  private readonly providerName: string;
   private pasteReject: ((reason: Error) => void) | null = null;
   private successResolve: (() => void) | null = null;
+  private listeners: { element: EventTarget; type: string; handler: EventListener }[] = [];
 
   constructor(app: App, providerName: string) {
     super(app);
@@ -32,7 +33,7 @@ export class OAuthStatusModal extends Modal {
       cls: "modal-button-container",
     });
     const cancelBtn = btnContainer.createEl("button", { text: "Cancel" });
-    cancelBtn.addEventListener("click", () => {
+    this.addListener(cancelBtn, "click", () => {
       onCancel();
     });
   }
@@ -59,7 +60,7 @@ export class OAuthStatusModal extends Modal {
       this.pasteReject = reject;
 
       const submitBtn = btnContainer.createEl("button", { text: "Submit", cls: "mod-cta" });
-      submitBtn.addEventListener("click", () => {
+      this.addListener(submitBtn, "click", () => {
         const value = textarea.value.trim();
         if (!value) return; // ignore empty submissions
         this.pasteReject = null;
@@ -68,7 +69,7 @@ export class OAuthStatusModal extends Modal {
       });
 
       const cancelBtn = btnContainer.createEl("button", { text: "Cancel" });
-      cancelBtn.addEventListener("click", () => {
+      this.addListener(cancelBtn, "click", () => {
         this.pasteReject = null;
         reject(new Error("Login cancelled."));
         this.close();
@@ -97,25 +98,29 @@ export class OAuthStatusModal extends Modal {
       const okBtn = btnContainer.createEl("button", { text: "OK", cls: "mod-cta" });
       okBtn.focus();
 
+      let finished = false;
       const finish = () => {
+        if (finished) return;
+        finished = true;
         this.successResolve = null;
         resolve();
         this.close();
       };
 
-      okBtn.addEventListener("click", finish);
+      this.addListener(okBtn, "click", finish);
 
-      this.contentEl.addEventListener("keydown", (e: KeyboardEvent) => {
+      this.addListener(this.contentEl, "keydown", ((e: KeyboardEvent) => {
         if (e.key === "Enter") {
           finish();
         }
-      });
+      }) as EventListener);
     });
   }
 
   // ── Lifecycle ──────────────────────────────────────────────────────
 
   onClose(): void {
+    this.removeAllListeners();
     // Handle Escape key or external close while in paste-fallback
     if (this.pasteReject) {
       const reject = this.pasteReject;
@@ -132,7 +137,20 @@ export class OAuthStatusModal extends Modal {
 
   // ── Helpers ────────────────────────────────────────────────────────
 
+  private addListener(element: EventTarget, type: string, handler: EventListener): void {
+    element.addEventListener(type, handler);
+    this.listeners.push({ element, type, handler });
+  }
+
+  private removeAllListeners(): void {
+    for (const { element, type, handler } of this.listeners) {
+      element.removeEventListener(type, handler);
+    }
+    this.listeners = [];
+  }
+
   private clearContent(): void {
+    this.removeAllListeners();
     this.titleEl.textContent = "";
     this.contentEl.textContent = "";
   }
