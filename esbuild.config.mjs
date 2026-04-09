@@ -334,6 +334,16 @@ const buildOptions = {
 							`(() => { try { return require("${mod}"); } catch { return {}; } })()`
 						);
 					}
+
+					// The Pi SDK's extensions loader uses resolveWorkspaceOrImport()
+					// which calls import.meta.resolve() for pi-tui. This fails in
+					// Electron because the module isn't installed. Wrap the alias
+					// entry so it returns undefined instead of crashing.
+					code = code.replace(
+						/"@mariozechner\/pi-tui":\s*resolveWorkspaceOrImport\([^)]+\)/g,
+						'"@mariozechner/pi-tui": (() => { try { return resolveWorkspaceOrImport("tui/dist/index.js", "@mariozechner/pi-tui"); } catch { return undefined; } })()'
+					);
+
 					writeFileSync(outfile, code);
 				});
 			}
