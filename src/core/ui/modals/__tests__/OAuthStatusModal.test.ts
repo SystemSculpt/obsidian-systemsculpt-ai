@@ -52,7 +52,7 @@ describe("OAuthStatusModal", () => {
     textarea!.value = "https://localhost/callback?code=abc123";
 
     const submitBtn = Array.from(
-      modal.contentEl.querySelectorAll("button")
+      modal.contentEl.querySelectorAll<HTMLButtonElement>("button")
     ).find((b) => b.textContent === "Submit");
     submitBtn?.click();
 
@@ -67,7 +67,7 @@ describe("OAuthStatusModal", () => {
     const resultPromise = modal.showPasteFallback();
 
     const cancelBtn = Array.from(
-      modal.contentEl.querySelectorAll("button")
+      modal.contentEl.querySelectorAll<HTMLButtonElement>("button")
     ).find((b) => b.textContent === "Cancel");
     cancelBtn?.click();
 
@@ -84,7 +84,7 @@ describe("OAuthStatusModal", () => {
     expect(modal.contentEl.textContent).toContain("Authentication successful.");
 
     const okBtn = Array.from(
-      modal.contentEl.querySelectorAll("button")
+      modal.contentEl.querySelectorAll<HTMLButtonElement>("button")
     ).find((b) => b.textContent === "OK");
     expect(okBtn).toBeTruthy();
 
@@ -121,13 +121,13 @@ describe("OAuthStatusModal", () => {
     // textarea value is empty by default
 
     const submitBtn = Array.from(
-      modal.contentEl.querySelectorAll("button")
+      modal.contentEl.querySelectorAll<HTMLButtonElement>("button")
     ).find((b) => b.textContent === "Submit");
     submitBtn?.click();
 
     // Submit should have been ignored; now cancel to end the test cleanly
     const cancelBtn = Array.from(
-      modal.contentEl.querySelectorAll("button")
+      modal.contentEl.querySelectorAll<HTMLButtonElement>("button")
     ).find((b) => b.textContent === "Cancel");
     cancelBtn?.click();
 
