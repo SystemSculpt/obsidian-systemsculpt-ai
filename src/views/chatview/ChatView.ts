@@ -24,6 +24,7 @@ import type { ChatExportOptions } from "../../types/chatExport";
 import type { ChatExportResult } from "./export/ChatExportTypes";
 import { removeGroupIfEmpty } from "./utils/MessageGrouping";
 import { classifyQuotaExceededError } from "./utils/quotaError";
+import { classifyStreamError } from "./utils/streamError";
 import type { ToolCall } from "../../types/toolCalls";
 import { tryCopyToClipboard } from "../../utils/clipboard";
 import { resolveAbsoluteVaultPath } from "../../utils/vaultPathUtils";
@@ -583,8 +584,14 @@ export class ChatView extends ItemView {
         10000
       );
     } else {
-      // Handle other types of errors
-      // Error already logged and Notice shown by errorLogger
+      // Catch-all: classify the error and always show feedback + clean up.
+      await this.resetFailedAssistantTurn();
+
+      if (!automationRequestActive) {
+        const classification = classifyStreamError(error);
+        const duration = classification.kind === "rate_limit" ? 12000 : 10000;
+        new Notice(classification.userMessage, duration);
+      }
     }
   }
 
