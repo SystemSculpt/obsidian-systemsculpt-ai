@@ -1133,7 +1133,7 @@ select.ss-pi-wizard__select { width: 100%; }
   position: absolute;
   width: 280px;
   border: 1px solid var(--ss-studio-border);
-  border-left: 3px solid transparent;
+  border-left: 3px solid var(--ss-studio-border);
   border-radius: var(--ss-radius-lg);
   background: var(--background-primary);
   padding: var(--ss-space-sm) var(--ss-space-10) var(--ss-space-10);
@@ -1146,26 +1146,93 @@ select.ss-pi-wizard__select { width: 100%; }
 }
 
 /* ── Content-tier nodes: chromeless (content IS the node) ── */
+/* These nodes display their content directly. No card frame. */
 .ss-studio-node-card[data-node-kind="studio.label"],
 .ss-studio-node-card[data-node-kind="studio.text"],
 .ss-studio-node-card[data-node-kind="studio.note"],
 .ss-studio-node-card[data-node-kind="studio.media_ingest"],
-.ss-studio-node-card[data-node-kind="studio.transcription"],
-.ss-studio-node-card[data-node-kind="studio.image_generation"] {
+.ss-studio-node-card[data-node-kind="studio.transcription"] {
   border: 1px solid transparent;
-  border-left: none;
+  border-left-width: 0;
   background: transparent;
   padding: 0;
 }
 
+/* Selection outline for content-tier nodes */
 .ss-studio-node-card[data-node-kind="studio.label"].is-selected,
 .ss-studio-node-card[data-node-kind="studio.text"].is-selected,
 .ss-studio-node-card[data-node-kind="studio.note"].is-selected,
 .ss-studio-node-card[data-node-kind="studio.media_ingest"].is-selected,
-.ss-studio-node-card[data-node-kind="studio.transcription"].is-selected,
-.ss-studio-node-card[data-node-kind="studio.image_generation"].is-selected {
+.ss-studio-node-card[data-node-kind="studio.transcription"].is-selected {
   border-color: var(--interactive-accent);
   box-shadow: 0 0 0 1px var(--interactive-accent);
+}
+
+/* ── Hide chrome elements inside content-tier nodes ── */
+/* Text editor labels (the "TEXT" / "TRANSCRIPT" header text) */
+.ss-studio-node-card[data-node-kind="studio.text"] .ss-studio-node-text-editor-label,
+.ss-studio-node-card[data-node-kind="studio.note"] .ss-studio-node-text-editor-label,
+.ss-studio-node-card[data-node-kind="studio.transcription"] .ss-studio-node-text-editor-label {
+  display: none;
+}
+
+/* Text editor controls (Raw/Rendered mode toggle) */
+.ss-studio-node-card[data-node-kind="studio.text"] .ss-studio-node-text-editor-controls,
+.ss-studio-node-card[data-node-kind="studio.note"] .ss-studio-node-text-editor-controls,
+.ss-studio-node-card[data-node-kind="studio.transcription"] .ss-studio-node-text-editor-controls {
+  display: none;
+}
+
+/* Hide config panel on media_ingest (sourcePath) — the image IS the node */
+.ss-studio-node-card[data-node-kind="studio.media_ingest"] .ss-studio-node-inline-config {
+  display: none;
+}
+
+/* Hide config panel on note nodes (preface/notes fields) — note IS the node */
+.ss-studio-node-card[data-node-kind="studio.note"] .ss-studio-node-inline-config {
+  display: none;
+}
+
+/* Hide collapsed visibility buttons on content-tier nodes */
+.ss-studio-node-card[data-node-kind="studio.text"] .ss-studio-node-collapsed-visibility,
+.ss-studio-node-card[data-node-kind="studio.note"] .ss-studio-node-collapsed-visibility,
+.ss-studio-node-card[data-node-kind="studio.transcription"] .ss-studio-node-collapsed-visibility,
+.ss-studio-node-card[data-node-kind="studio.media_ingest"] .ss-studio-node-collapsed-visibility {
+  display: none;
+}
+
+/* Hide resize handle on content-tier — use the label resize handle instead */
+.ss-studio-node-card[data-node-kind="studio.label"] > .ss-studio-node-resize-handle,
+.ss-studio-node-card[data-node-kind="studio.text"] > .ss-studio-node-resize-handle,
+.ss-studio-node-card[data-node-kind="studio.note"] > .ss-studio-node-resize-handle,
+.ss-studio-node-card[data-node-kind="studio.transcription"] > .ss-studio-node-resize-handle {
+  display: none;
+}
+
+/* Media ingest: image/video fills the node — strip all wrapper chrome */
+.ss-studio-node-card[data-node-kind="studio.media_ingest"] .ss-studio-node-media-preview {
+  margin: 0;
+  border: none;
+  border-radius: var(--ss-radius-md);
+  background: transparent;
+  overflow: hidden;
+  padding: 0;
+}
+
+.ss-studio-node-card[data-node-kind="studio.media_ingest"] .ss-studio-node-media-preview-img {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: none;
+  border-radius: var(--ss-radius-md);
+  object-fit: contain;
+}
+
+.ss-studio-node-card[data-node-kind="studio.media_ingest"] .ss-studio-node-media-preview-video {
+  display: block;
+  width: 100%;
+  max-height: none;
+  border-radius: var(--ss-radius-md);
 }
 
 .ss-studio-node-card.has-resize-handle {
@@ -1281,59 +1348,74 @@ select.ss-pi-wizard__select { width: 100%; }
 
 .ss-studio-node-title-input {
   width: 100%;
-  border: 1px solid color-mix(in srgb, var(--ss-studio-border) 90%, var(--ss-studio-accent-mid) 10%);
-  border-radius: var(--ss-radius-lg);
+  border: 1px solid var(--ss-studio-border);
+  border-radius: var(--ss-radius-md);
   padding: var(--ss-space-6) var(--ss-space-sm);
-  background: color-mix(in srgb, var(--background-primary) 95%, var(--ss-studio-bg-deep) 5%);
+  background: transparent;
   color: var(--text-normal);
   font-weight: 600;
   user-select: text;
   touch-action: auto;
 }
 
+.ss-studio-node-title-input:focus {
+  border-color: var(--interactive-accent);
+  outline: none;
+}
+
 .ss-studio-node-remove {
-  border: 1px solid color-mix(in srgb, var(--ss-studio-error) 65%, var(--ss-studio-border));
-  border-radius: var(--ss-radius-lg);
+  border: 1px solid var(--ss-studio-border);
+  border-radius: var(--ss-radius-md);
   width: 28px;
   height: 28px;
-  background: color-mix(in srgb, var(--ss-studio-error) 18%, var(--background-primary));
-  color: var(--ss-studio-error);
+  background: transparent;
+  color: var(--text-muted);
   font-size: 16px;
   line-height: 1;
 }
 
+.ss-studio-node-remove:hover {
+  color: var(--color-red, var(--ss-studio-error));
+  border-color: var(--color-red, var(--ss-studio-error));
+}
+
 .ss-studio-node-run {
-  border: 1px solid color-mix(in srgb, var(--ss-studio-accent-mid) 62%, var(--ss-studio-border));
-  border-radius: var(--ss-radius-lg);
+  border: 1px solid var(--ss-studio-border);
+  border-radius: var(--ss-radius-md);
   height: 28px;
   min-width: 48px;
   padding: 0 var(--ss-space-sm);
-  background: color-mix(in srgb, var(--ss-studio-accent-mid) 24%, var(--background-primary));
-  color: var(--ss-studio-surface-success);
+  background: transparent;
+  color: var(--color-green, var(--ss-studio-success-tint));
   font-size: 12px;
   font-weight: 600;
 }
 
+.ss-studio-node-run:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-green, var(--ss-studio-success-tint)) 12%, var(--background-primary));
+  border-color: var(--color-green, var(--ss-studio-success-tint));
+}
+
 .ss-studio-node-copy-prompt {
-  border: 1px solid color-mix(in srgb, var(--ss-studio-accent-mid) 64%, var(--ss-studio-border));
-  border-radius: var(--ss-radius-lg);
+  border: 1px solid var(--ss-studio-border);
+  border-radius: var(--ss-radius-md);
   height: 28px;
   min-width: 50px;
   padding: 0 var(--ss-space-sm);
-  background: color-mix(in srgb, var(--ss-studio-accent-mid) 20%, var(--background-primary));
-  color: var(--ss-studio-surface-success-light);
+  background: transparent;
+  color: var(--text-muted);
   font-size: 12px;
   font-weight: 600;
 }
 
 .ss-studio-node-lock-output {
-  border: 1px solid color-mix(in srgb, var(--ss-studio-error) 62%, var(--ss-studio-border));
-  border-radius: var(--ss-radius-lg);
+  border: 1px solid var(--ss-studio-border);
+  border-radius: var(--ss-radius-md);
   height: 28px;
   min-width: 58px;
   padding: 0 var(--ss-space-sm);
-  background: color-mix(in srgb, var(--ss-studio-bg-mid) 18%, var(--background-primary));
-  color: var(--ss-studio-error-muted);
+  background: transparent;
+  color: var(--text-muted);
   font-size: 12px;
   font-weight: 600;
 }
@@ -1622,6 +1704,18 @@ select.ss-pi-wizard__select { width: 100%; }
   display: flex;
   flex-direction: column;
   gap: var(--ss-space-5);
+}
+
+/* Content-tier text nodes: strip the text-editor-wrap chrome */
+.ss-studio-node-card[data-node-kind="studio.text"] .ss-studio-node-text-editor-wrap,
+.ss-studio-node-card[data-node-kind="studio.note"] .ss-studio-node-text-editor-wrap,
+.ss-studio-node-card[data-node-kind="studio.transcription"] .ss-studio-node-text-editor-wrap {
+  margin: 0;
+  border: 1px solid var(--ss-studio-border);
+  border-radius: var(--ss-radius-md);
+  background: var(--background-primary);
+  padding: var(--ss-space-sm);
+  gap: 0;
 }
 
 .ss-studio-node-text-editor-label {
@@ -2628,9 +2722,9 @@ select.ss-pi-wizard__select { width: 100%; }
 .ss-studio-node-inline-config,
 .ss-studio-node-image-config {
   margin: var(--ss-space-sm) 0 0;
-  border: 1px solid color-mix(in srgb, var(--ss-studio-accent) 26%, var(--ss-studio-border));
-  border-radius: var(--ss-radius-lg);
-  background: color-mix(in srgb, var(--ss-studio-bg-deep) 30%, var(--background-primary));
+  border: 1px solid var(--ss-studio-border);
+  border-radius: var(--ss-radius-md);
+  background: var(--background-secondary);
   padding: var(--ss-space-sm);
   display: grid;
   gap: var(--ss-space-sm);
@@ -3453,19 +3547,25 @@ select.ss-pi-wizard__select { width: 100%; }
 }
 
 .ss-studio-label-card {
-  border-style: dashed;
-  background: color-mix(in srgb, var(--background-primary) 88%, var(--ss-studio-bg-dark) 12%);
-  box-shadow:
-    inset 0 0 0 1px color-mix(in srgb, var(--ss-studio-info) 16%, transparent),
-    0 8px 24px color-mix(in srgb, var(--ss-studio-shadow) 20%, transparent);
+  border: none;
+  background: transparent;
+  box-shadow: none;
 }
 
+/* Label toolbar: show only on hover for progressive disclosure */
 .ss-studio-label-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--ss-space-6);
   margin-bottom: var(--ss-space-6);
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.ss-studio-label-card:hover .ss-studio-label-toolbar,
+.ss-studio-label-card.is-selected .ss-studio-label-toolbar {
+  opacity: 1;
 }
 
 .ss-studio-label-font-controls {
@@ -3476,12 +3576,12 @@ select.ss-pi-wizard__select { width: 100%; }
 
 .ss-studio-label-font-button,
 .ss-studio-label-remove {
-  border: 1px solid color-mix(in srgb, var(--ss-studio-info) 45%, var(--ss-studio-border) 55%);
-  border-radius: var(--ss-radius-lg);
-  background: color-mix(in srgb, var(--background-primary) 92%, var(--ss-studio-bg-mid) 8%);
-  color: var(--text-normal);
+  border: 1px solid var(--ss-studio-border);
+  border-radius: var(--ss-radius-md);
+  background: var(--background-primary);
+  color: var(--text-muted);
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 600;
   height: 24px;
   min-width: 30px;
   padding: 0 var(--ss-space-sm);
@@ -3503,10 +3603,10 @@ select.ss-pi-wizard__select { width: 100%; }
 .ss-studio-label-editor {
   width: 100%;
   height: 100%;
-  border-radius: var(--ss-radius-lg);
-  border: 1px solid color-mix(in srgb, var(--ss-studio-info) 26%, var(--ss-studio-border) 74%);
-  background: color-mix(in srgb, var(--ss-studio-bg-darker) 74%, var(--background-primary) 26%);
-  color: color-mix(in srgb, var(--ss-studio-surface-success-light) 90%, var(--text-normal) 10%);
+  border-radius: var(--ss-radius-md);
+  border: none;
+  background: transparent;
+  color: var(--text-normal);
   font-size: var(--ss-studio-label-font-size, inherit);
   line-height: 1.45;
 }
