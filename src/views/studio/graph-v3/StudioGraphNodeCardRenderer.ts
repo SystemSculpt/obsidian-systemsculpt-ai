@@ -303,11 +303,16 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
     onOpenMediaPreview,
   });
 
-  // For media_ingest: split chrome into two overlay panels.
+  // For media_ingest with a loaded preview: split chrome into two overlay panels.
   // Top panel: quick actions (above the image).
   // Bottom panel: ports, config, previews (below the image).
   // The image stays as the only in-flow child — it NEVER moves.
-  if (node.kind === "studio.media_ingest") {
+  // When no preview exists yet (empty source, failed load), skip the overlay
+  // pattern so the node renders as a normal card with all chrome visible.
+  if (
+    node.kind === "studio.media_ingest" &&
+    nodeEl.querySelector(".ss-studio-node-media-preview")
+  ) {
     const chromeTop = nodeEl.createDiv({
       cls: "ss-studio-node-chrome-overlay-top",
     });
@@ -315,7 +320,9 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
       cls: "ss-studio-node-chrome-overlay",
     });
 
-    // Move Run/Remove buttons into Quick Actions before reparenting
+    // Move Run/Remove buttons into Quick Actions before reparenting.
+    // In collapsed detail mode the actions container doesn't exist, so
+    // fall back to placing them directly in the bottom overlay.
     const header = nodeEl.querySelector(".ss-studio-node-header");
     const runBtn = header?.querySelector(".ss-studio-node-run");
     const removeBtn = header?.querySelector(".ss-studio-node-remove");
@@ -325,6 +332,11 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
     if (actionsContainer) {
       if (runBtn) actionsContainer.prepend(runBtn);
       if (removeBtn) actionsContainer.appendChild(removeBtn);
+    } else {
+      // Collapsed mode: no Quick Actions panel. Put buttons directly in
+      // the bottom overlay so they stay accessible (header is hidden).
+      if (runBtn) chromeBottom.appendChild(runBtn);
+      if (removeBtn) chromeBottom.appendChild(removeBtn);
     }
 
     // Sort children into top or bottom panel.
