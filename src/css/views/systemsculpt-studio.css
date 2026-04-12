@@ -1166,10 +1166,13 @@ select.ss-pi-wizard__select { width: 100%; }
   padding-bottom: 0;
 }
 
-/* Elevate on hover so revealed controls float above neighboring nodes */
+/* Elevate on hover; flatten bottom corners so overlay joins seamlessly */
 .ss-studio-node-card[data-node-kind="studio.media_ingest"]:hover,
 .ss-studio-node-card[data-node-kind="studio.media_ingest"].is-selected {
   z-index: 5;
+  border-bottom-color: transparent;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
 }
 
 /* Image/video: always visible, pinned to top of flex column */
@@ -1214,8 +1217,8 @@ select.ss-pi-wizard__select { width: 100%; }
 .ss-studio-node-chrome-overlay {
   position: absolute;
   top: 100%;
-  left: 0;
-  right: 0;
+  left: -3px;
+  right: -1px;
   display: flex;
   flex-direction: column;
   background: var(--background-primary);
