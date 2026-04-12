@@ -301,7 +301,7 @@ export class StudioGraphGroupController {
       elements.tagEl.style.top = `${bounds.top + bounds.height}px`;
       const displayedColor = this.resolveDisplayedGroupColor(group);
       elements.frameEl.style.setProperty("--ss-studio-group-accent", displayedColor);
-      elements.colorChipEl.style.background = displayedColor;
+      elements.colorChipEl.style.setProperty("--ss-studio-chip-color", displayedColor);
 
       if (this.editingGroupId !== group.id && elements.nameButtonEl) {
         elements.nameButtonEl.setText(normalizeGroupName(group.name) || nextDefaultGroupName(project));
@@ -580,7 +580,7 @@ export class StudioGraphGroupController {
           title: swatchColor,
         },
       });
-      swatchEl.style.background = swatchColor;
+      swatchEl.style.setProperty("--ss-studio-swatch-color", swatchColor);
       swatchEl.classList.toggle("is-active", swatchColor === selectedColor);
       swatchEl.addEventListener("pointerdown", (event) => {
         event.stopPropagation();
@@ -653,7 +653,7 @@ export class StudioGraphGroupController {
     }
     const displayedColor = this.resolveDisplayedGroupColor(group);
     elements.frameEl.style.setProperty("--ss-studio-group-accent", displayedColor);
-    elements.colorChipEl.style.background = displayedColor;
+    elements.colorChipEl.style.setProperty("--ss-studio-chip-color", displayedColor);
   }
 
   private alignGroup(groupId: string): void {

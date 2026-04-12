@@ -118,7 +118,7 @@ export function renderLabelNodeCard(options: RenderLabelNodeCardOptions): void {
   let textSurfaceEl: HTMLElement | HTMLTextAreaElement | null = null;
   const applyFontSize = (fontSize: number): void => {
     if (textSurfaceEl) {
-      textSurfaceEl.style.fontSize = `${fontSize}px`;
+      textSurfaceEl.style.setProperty("--ss-studio-label-font-size", `${fontSize}px`);
     }
   };
   const commitFontSize = (next: number): void => {
