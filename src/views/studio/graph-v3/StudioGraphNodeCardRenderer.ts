@@ -302,4 +302,22 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
     onRevealPathInFinder,
     onOpenMediaPreview,
   });
+
+  // For media_ingest: wrap chrome elements in an overlay panel.
+  // The image stays as the only in-flow child (card sizes to just the image).
+  // Chrome appears as a floating panel on hover — image NEVER moves.
+  if (node.kind === "studio.media_ingest") {
+    const chromeOverlay = nodeEl.createDiv({
+      cls: "ss-studio-node-chrome-overlay",
+    });
+    for (const child of Array.from(nodeEl.children)) {
+      if (
+        child !== chromeOverlay &&
+        !child.classList.contains("ss-studio-node-media-preview") &&
+        !child.classList.contains("ss-studio-node-resize-handle")
+      ) {
+        chromeOverlay.appendChild(child);
+      }
+    }
+  }
 }

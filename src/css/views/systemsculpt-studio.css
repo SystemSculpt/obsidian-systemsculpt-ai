@@ -1159,7 +1159,7 @@ select.ss-pi-wizard__select { width: 100%; }
   display: flex;
   flex-direction: column;
   padding: 0;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .ss-studio-node-card[data-node-kind="studio.media_ingest"].has-resize-handle {
@@ -1170,7 +1170,6 @@ select.ss-pi-wizard__select { width: 100%; }
 .ss-studio-node-card[data-node-kind="studio.media_ingest"]:hover,
 .ss-studio-node-card[data-node-kind="studio.media_ingest"].is-selected {
   z-index: 5;
-  overflow: visible;
 }
 
 /* Image/video: always visible, pinned to top of flex column */
@@ -1178,7 +1177,7 @@ select.ss-pi-wizard__select { width: 100%; }
   order: -1;
   margin: 0;
   border: none;
-  border-radius: var(--ss-radius-md);
+  border-radius: inherit;
   background: transparent;
   overflow: hidden;
 }
@@ -1196,90 +1195,58 @@ select.ss-pi-wizard__select { width: 100%; }
   display: block;
 }
 
-/* Chrome: pulled out of flow so card sizes to just the media */
-.ss-studio-node-card[data-node-kind="studio.media_ingest"] > .ss-studio-node-header,
-.ss-studio-node-card[data-node-kind="studio.media_ingest"] > .ss-studio-node-kind,
-.ss-studio-node-card[data-node-kind="studio.media_ingest"] > .ss-studio-node-run-status-row,
-.ss-studio-node-card[data-node-kind="studio.media_ingest"] > .ss-studio-node-ports,
-.ss-studio-node-card[data-node-kind="studio.media_ingest"] > .ss-studio-node-inline-config,
-.ss-studio-node-card[data-node-kind="studio.media_ingest"] > .ss-studio-node-collapsed-visibility,
-.ss-studio-node-card[data-node-kind="studio.media_ingest"] > .ss-studio-node-resize-handle,
-.ss-studio-node-card[data-node-kind="studio.media_ingest"] > .ss-studio-node-output-preview,
-.ss-studio-node-card[data-node-kind="studio.media_ingest"] > .ss-studio-node-config-preview {
-  position: absolute;
+/* Resize handle: hidden by default on media_ingest, visible on hover */
+.ss-studio-node-card[data-node-kind="studio.media_ingest"] > .ss-studio-node-resize-handle {
   visibility: hidden;
-  pointer-events: none;
   opacity: 0;
-  transform: translateY(-6px);
 }
 
-/* On hover/selected: chrome returns to flex flow below the image */
-/* (resize handle excluded — stays position:absolute, just becomes visible) */
-.ss-studio-node-card[data-node-kind="studio.media_ingest"]:hover > .ss-studio-node-header,
-.ss-studio-node-card[data-node-kind="studio.media_ingest"]:hover > .ss-studio-node-kind,
-.ss-studio-node-card[data-node-kind="studio.media_ingest"]:hover > .ss-studio-node-run-status-row,
-.ss-studio-node-card[data-node-kind="studio.media_ingest"]:hover > .ss-studio-node-ports,
-.ss-studio-node-card[data-node-kind="studio.media_ingest"]:hover > .ss-studio-node-inline-config,
-.ss-studio-node-card[data-node-kind="studio.media_ingest"]:hover > .ss-studio-node-collapsed-visibility,
-.ss-studio-node-card[data-node-kind="studio.media_ingest"]:hover > .ss-studio-node-output-preview,
-.ss-studio-node-card[data-node-kind="studio.media_ingest"]:hover > .ss-studio-node-config-preview,
-.ss-studio-node-card[data-node-kind="studio.media_ingest"].is-selected > .ss-studio-node-header,
-.ss-studio-node-card[data-node-kind="studio.media_ingest"].is-selected > .ss-studio-node-kind,
-.ss-studio-node-card[data-node-kind="studio.media_ingest"].is-selected > .ss-studio-node-run-status-row,
-.ss-studio-node-card[data-node-kind="studio.media_ingest"].is-selected > .ss-studio-node-ports,
-.ss-studio-node-card[data-node-kind="studio.media_ingest"].is-selected > .ss-studio-node-inline-config,
-.ss-studio-node-card[data-node-kind="studio.media_ingest"].is-selected > .ss-studio-node-collapsed-visibility,
-.ss-studio-node-card[data-node-kind="studio.media_ingest"].is-selected > .ss-studio-node-output-preview,
-.ss-studio-node-card[data-node-kind="studio.media_ingest"].is-selected > .ss-studio-node-config-preview {
-  position: static;
+.ss-studio-node-card[data-node-kind="studio.media_ingest"]:hover > .ss-studio-node-resize-handle,
+.ss-studio-node-card[data-node-kind="studio.media_ingest"].is-selected > .ss-studio-node-resize-handle {
   visibility: visible;
-  pointer-events: auto;
   opacity: 1;
+  transition: opacity 0.2s ease;
+}
+
+/* ── Chrome overlay panel ── */
+/* Always position:absolute, never enters flow. Floats below the image   */
+/* as a self-contained panel. Card layout is never affected.              */
+.ss-studio-node-chrome-overlay {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--background-primary);
+  border: 1px solid var(--ss-studio-border);
+  border-left: 3px solid var(--ss-studio-border);
+  border-top: none;
+  border-radius: 0 0 var(--ss-radius-lg) var(--ss-radius-lg);
+  padding: var(--ss-space-xs) 0;
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-4px);
+  z-index: 3;
+}
+
+.ss-studio-node-card[data-node-kind="studio.media_ingest"]:hover > .ss-studio-node-chrome-overlay,
+.ss-studio-node-card[data-node-kind="studio.media_ingest"].is-selected > .ss-studio-node-chrome-overlay {
+  visibility: visible;
+  opacity: 1;
+  pointer-events: auto;
   transform: translateY(0);
   transition: opacity 0.2s ease, transform 0.2s ease;
 }
 
-/* Resize handle: stays absolute, just toggle visibility */
-.ss-studio-node-card[data-node-kind="studio.media_ingest"]:hover > .ss-studio-node-resize-handle,
-.ss-studio-node-card[data-node-kind="studio.media_ingest"].is-selected > .ss-studio-node-resize-handle {
-  visibility: visible;
-  pointer-events: auto;
-  opacity: 1;
-  transform: none;
-  transition: opacity 0.2s ease;
-}
-
-/* Revealed chrome spacing — generous padding so controls aren't cramped */
-.ss-studio-node-card[data-node-kind="studio.media_ingest"]:hover > .ss-studio-node-header,
-.ss-studio-node-card[data-node-kind="studio.media_ingest"].is-selected > .ss-studio-node-header {
-  padding: var(--ss-space-sm) var(--ss-space-10) var(--ss-space-xs);
-}
-
-.ss-studio-node-card[data-node-kind="studio.media_ingest"]:hover > .ss-studio-node-inline-config,
-.ss-studio-node-card[data-node-kind="studio.media_ingest"].is-selected > .ss-studio-node-inline-config {
-  padding: var(--ss-space-sm) var(--ss-space-10);
-}
-
-.ss-studio-node-card[data-node-kind="studio.media_ingest"]:hover > .ss-studio-node-collapsed-visibility,
-.ss-studio-node-card[data-node-kind="studio.media_ingest"].is-selected > .ss-studio-node-collapsed-visibility {
-  padding: var(--ss-space-xs) var(--ss-space-10) var(--ss-space-sm);
-}
-
-.ss-studio-node-card[data-node-kind="studio.media_ingest"]:hover > .ss-studio-node-kind,
-.ss-studio-node-card[data-node-kind="studio.media_ingest"]:hover > .ss-studio-node-run-status-row,
-.ss-studio-node-card[data-node-kind="studio.media_ingest"]:hover > .ss-studio-node-ports,
-.ss-studio-node-card[data-node-kind="studio.media_ingest"].is-selected > .ss-studio-node-kind,
-.ss-studio-node-card[data-node-kind="studio.media_ingest"].is-selected > .ss-studio-node-run-status-row,
-.ss-studio-node-card[data-node-kind="studio.media_ingest"].is-selected > .ss-studio-node-ports {
+/* Chrome overlay children: comfortable padding */
+.ss-studio-node-chrome-overlay > * {
   padding: var(--ss-space-xs) var(--ss-space-10);
 }
 
-/* Revealed output/config previews */
-.ss-studio-node-card[data-node-kind="studio.media_ingest"]:hover > .ss-studio-node-output-preview,
-.ss-studio-node-card[data-node-kind="studio.media_ingest"]:hover > .ss-studio-node-config-preview,
-.ss-studio-node-card[data-node-kind="studio.media_ingest"].is-selected > .ss-studio-node-output-preview,
-.ss-studio-node-card[data-node-kind="studio.media_ingest"].is-selected > .ss-studio-node-config-preview {
-  padding: var(--ss-space-xs) var(--ss-space-10) var(--ss-space-sm);
+.ss-studio-node-chrome-overlay > .ss-studio-node-header {
+  padding: var(--ss-space-sm) var(--ss-space-10) var(--ss-space-xs);
 }
 
 .ss-studio-node-card.has-resize-handle {
