@@ -1146,9 +1146,114 @@ select.ss-pi-wizard__select { width: 100%; }
 }
 
 /* ── All nodes share the same base card frame above ── */
-/* No per-kind card frame overrides. Every node gets the same border,  */
-/* background, padding, and left status stripe from .ss-studio-node-card. */
-/* Content-prominent nodes simply make their content the dominant child. */
+/* Content-prominent nodes use hover-reveal: content is dominant by    */
+/* default, chrome (header, kind, status, config) appears on hover.    */
+
+/* ── Media ingest: hover-reveal pattern ── */
+/* Default: image/video fills the card. Chrome hidden. */
+.ss-studio-node-card[data-node-kind="studio.media_ingest"] {
+  padding: 0;
+  overflow: hidden;
+}
+
+.ss-studio-node-card[data-node-kind="studio.media_ingest"] > .ss-studio-node-header,
+.ss-studio-node-card[data-node-kind="studio.media_ingest"] > .ss-studio-node-kind,
+.ss-studio-node-card[data-node-kind="studio.media_ingest"] > .ss-studio-node-run-status-row,
+.ss-studio-node-card[data-node-kind="studio.media_ingest"] > .ss-studio-node-ports,
+.ss-studio-node-card[data-node-kind="studio.media_ingest"] > .ss-studio-node-inline-config,
+.ss-studio-node-card[data-node-kind="studio.media_ingest"] > .ss-studio-node-collapsed-visibility,
+.ss-studio-node-card[data-node-kind="studio.media_ingest"] > .ss-studio-node-resize-handle,
+.ss-studio-node-card[data-node-kind="studio.media_ingest"] > .ss-studio-node-output-preview,
+.ss-studio-node-card[data-node-kind="studio.media_ingest"] > .ss-studio-node-config-preview {
+  max-height: 0;
+  overflow: hidden;
+  opacity: 0;
+  margin: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  border-top-width: 0;
+  border-bottom-width: 0;
+  transition: max-height 0.2s ease, opacity 0.15s ease, margin 0.2s ease,
+    padding 0.2s ease;
+}
+
+/* On hover: reveal all chrome */
+.ss-studio-node-card[data-node-kind="studio.media_ingest"]:hover > .ss-studio-node-header,
+.ss-studio-node-card[data-node-kind="studio.media_ingest"]:hover > .ss-studio-node-kind,
+.ss-studio-node-card[data-node-kind="studio.media_ingest"]:hover > .ss-studio-node-run-status-row,
+.ss-studio-node-card[data-node-kind="studio.media_ingest"]:hover > .ss-studio-node-ports,
+.ss-studio-node-card[data-node-kind="studio.media_ingest"]:hover > .ss-studio-node-inline-config,
+.ss-studio-node-card[data-node-kind="studio.media_ingest"]:hover > .ss-studio-node-collapsed-visibility,
+.ss-studio-node-card[data-node-kind="studio.media_ingest"]:hover > .ss-studio-node-resize-handle,
+.ss-studio-node-card[data-node-kind="studio.media_ingest"]:hover > .ss-studio-node-output-preview,
+.ss-studio-node-card[data-node-kind="studio.media_ingest"]:hover > .ss-studio-node-config-preview {
+  max-height: 400px;
+  overflow: visible;
+  opacity: 1;
+}
+
+/* Restore proper spacing when revealed */
+.ss-studio-node-card[data-node-kind="studio.media_ingest"]:hover > .ss-studio-node-header {
+  padding: var(--ss-space-sm) var(--ss-space-10) 0;
+  margin-bottom: var(--ss-space-sm);
+}
+
+.ss-studio-node-card[data-node-kind="studio.media_ingest"]:hover > .ss-studio-node-inline-config {
+  margin: var(--ss-space-sm) var(--ss-space-10) 0;
+}
+
+.ss-studio-node-card[data-node-kind="studio.media_ingest"]:hover > .ss-studio-node-collapsed-visibility {
+  padding: var(--ss-space-sm) var(--ss-space-10);
+}
+
+/* Also reveal when selected (not just hover) */
+.ss-studio-node-card[data-node-kind="studio.media_ingest"].is-selected > .ss-studio-node-header,
+.ss-studio-node-card[data-node-kind="studio.media_ingest"].is-selected > .ss-studio-node-kind,
+.ss-studio-node-card[data-node-kind="studio.media_ingest"].is-selected > .ss-studio-node-run-status-row,
+.ss-studio-node-card[data-node-kind="studio.media_ingest"].is-selected > .ss-studio-node-ports,
+.ss-studio-node-card[data-node-kind="studio.media_ingest"].is-selected > .ss-studio-node-inline-config,
+.ss-studio-node-card[data-node-kind="studio.media_ingest"].is-selected > .ss-studio-node-collapsed-visibility,
+.ss-studio-node-card[data-node-kind="studio.media_ingest"].is-selected > .ss-studio-node-resize-handle,
+.ss-studio-node-card[data-node-kind="studio.media_ingest"].is-selected > .ss-studio-node-output-preview,
+.ss-studio-node-card[data-node-kind="studio.media_ingest"].is-selected > .ss-studio-node-config-preview {
+  max-height: 400px;
+  overflow: visible;
+  opacity: 1;
+}
+
+.ss-studio-node-card[data-node-kind="studio.media_ingest"].is-selected > .ss-studio-node-header {
+  padding: var(--ss-space-sm) var(--ss-space-10) 0;
+  margin-bottom: var(--ss-space-sm);
+}
+
+.ss-studio-node-card[data-node-kind="studio.media_ingest"].is-selected > .ss-studio-node-inline-config {
+  margin: var(--ss-space-sm) var(--ss-space-10) 0;
+}
+
+.ss-studio-node-card[data-node-kind="studio.media_ingest"].is-selected > .ss-studio-node-collapsed-visibility {
+  padding: var(--ss-space-sm) var(--ss-space-10);
+}
+
+/* Media preview: fills the card, no extra margin */
+.ss-studio-node-card[data-node-kind="studio.media_ingest"] .ss-studio-node-media-preview {
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+}
+
+.ss-studio-node-card[data-node-kind="studio.media_ingest"] .ss-studio-node-media-preview-img {
+  width: 100%;
+  max-height: none;
+  object-fit: contain;
+  display: block;
+}
+
+.ss-studio-node-card[data-node-kind="studio.media_ingest"] .ss-studio-node-media-preview-video {
+  width: 100%;
+  max-height: none;
+  display: block;
+}
 
 .ss-studio-node-card.has-resize-handle {
   padding-bottom: var(--ss-space-20);
