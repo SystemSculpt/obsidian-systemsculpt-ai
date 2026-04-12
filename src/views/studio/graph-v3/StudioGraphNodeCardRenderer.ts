@@ -303,32 +303,45 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
     onOpenMediaPreview,
   });
 
-  // For media_ingest: wrap chrome elements in an overlay panel.
-  // The image stays as the only in-flow child (card sizes to just the image).
-  // Chrome appears as a floating panel on hover — image NEVER moves.
+  // For media_ingest: split chrome into two overlay panels.
+  // Top panel: quick actions (above the image).
+  // Bottom panel: ports, config, previews (below the image).
+  // The image stays as the only in-flow child — it NEVER moves.
   if (node.kind === "studio.media_ingest") {
-    const chromeOverlay = nodeEl.createDiv({
+    const chromeTop = nodeEl.createDiv({
+      cls: "ss-studio-node-chrome-overlay-top",
+    });
+    const chromeBottom = nodeEl.createDiv({
       cls: "ss-studio-node-chrome-overlay",
     });
-    for (const child of Array.from(nodeEl.children)) {
-      if (
-        child !== chromeOverlay &&
-        !child.classList.contains("ss-studio-node-media-preview") &&
-        !child.classList.contains("ss-studio-node-resize-handle")
-      ) {
-        chromeOverlay.appendChild(child);
-      }
-    }
 
-    // Move Run/Remove buttons from header into Quick Actions toolbar
-    const runBtn = chromeOverlay.querySelector(".ss-studio-node-run");
-    const removeBtn = chromeOverlay.querySelector(".ss-studio-node-remove");
-    const actionsContainer = chromeOverlay.querySelector(
+    // Move Run/Remove buttons into Quick Actions before reparenting
+    const header = nodeEl.querySelector(".ss-studio-node-header");
+    const runBtn = header?.querySelector(".ss-studio-node-run");
+    const removeBtn = header?.querySelector(".ss-studio-node-remove");
+    const actionsContainer = nodeEl.querySelector(
       ".ss-studio-node-collapsed-visibility-buttons"
     );
     if (actionsContainer) {
       if (runBtn) actionsContainer.prepend(runBtn);
       if (removeBtn) actionsContainer.appendChild(removeBtn);
+    }
+
+    // Sort children into top or bottom panel
+    for (const child of Array.from(nodeEl.children)) {
+      if (
+        child === chromeTop ||
+        child === chromeBottom ||
+        child.classList.contains("ss-studio-node-media-preview") ||
+        child.classList.contains("ss-studio-node-resize-handle")
+      ) {
+        continue;
+      }
+      if (child.classList.contains("ss-studio-node-collapsed-visibility")) {
+        chromeTop.appendChild(child);
+      } else {
+        chromeBottom.appendChild(child);
+      }
     }
   }
 }
