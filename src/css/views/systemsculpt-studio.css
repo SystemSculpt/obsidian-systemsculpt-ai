@@ -1248,8 +1248,12 @@ select.ss-pi-wizard__select { width: 100%; }
   padding: var(--ss-space-xs) var(--ss-space-10);
 }
 
-.ss-studio-node-chrome-overlay > .ss-studio-node-header {
-  padding: var(--ss-space-sm) var(--ss-space-10) var(--ss-space-xs);
+/* Hide chrome that's useless for media_ingest: kind label, header (title  */
+/* input is gone, Run/Remove moved to Quick Actions), and idle status row. */
+.ss-studio-node-chrome-overlay > .ss-studio-node-header,
+.ss-studio-node-chrome-overlay > .ss-studio-node-kind,
+.ss-studio-node-chrome-overlay > .ss-studio-node-run-status-row {
+  display: none;
 }
 
 .ss-studio-node-card.has-resize-handle {

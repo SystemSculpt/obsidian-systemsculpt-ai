@@ -319,5 +319,16 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
         chromeOverlay.appendChild(child);
       }
     }
+
+    // Move Run/Remove buttons from header into Quick Actions toolbar
+    const runBtn = chromeOverlay.querySelector(".ss-studio-node-run");
+    const removeBtn = chromeOverlay.querySelector(".ss-studio-node-remove");
+    const actionsContainer = chromeOverlay.querySelector(
+      ".ss-studio-node-collapsed-visibility-buttons"
+    );
+    if (actionsContainer) {
+      if (runBtn) actionsContainer.prepend(runBtn);
+      if (removeBtn) actionsContainer.appendChild(removeBtn);
+    }
   }
 }
