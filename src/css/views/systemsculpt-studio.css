@@ -1211,55 +1211,11 @@ select.ss-pi-wizard__select { width: 100%; }
   transition: opacity 0.2s ease;
 }
 
-/* ── Chrome overlay panel ── */
-/* Always position:absolute, never enters flow. Floats below the image   */
-/* as a self-contained panel. Card layout is never affected.              */
-.ss-studio-node-chrome-overlay {
-  position: absolute;
-  top: 100%;
-  left: -3px;
-  right: -1px;
-  display: flex;
-  flex-direction: column;
-  background: var(--background-primary);
-  border: 1px solid var(--ss-studio-border);
-  border-left: 3px solid var(--ss-studio-border);
-  border-top: none;
-  border-radius: 0 0 var(--ss-radius-lg) var(--ss-radius-lg);
-  padding: var(--ss-space-xs) 0;
-  visibility: hidden;
-  opacity: 0;
-  pointer-events: none;
-  transform: translateY(-4px);
-  z-index: 3;
-}
-
-.ss-studio-node-card[data-node-kind="studio.media_ingest"]:hover > .ss-studio-node-chrome-overlay,
-.ss-studio-node-card[data-node-kind="studio.media_ingest"].is-selected > .ss-studio-node-chrome-overlay {
-  visibility: visible;
-  opacity: 1;
-  pointer-events: auto;
-  transform: translateY(0);
-  transition: opacity 0.2s ease, transform 0.2s ease;
-}
-
-/* Chrome overlay children: comfortable padding */
-.ss-studio-node-chrome-overlay > * {
-  padding: var(--ss-space-xs) var(--ss-space-10);
-}
-
-/* Hide chrome that's useless for media_ingest: kind label, header (title  */
-/* input is gone, Run/Remove moved to Quick Actions), and idle status row. */
-.ss-studio-node-chrome-overlay > .ss-studio-node-header,
-.ss-studio-node-chrome-overlay > .ss-studio-node-kind,
-.ss-studio-node-chrome-overlay > .ss-studio-node-run-status-row {
-  display: none;
-}
-
-/* ── Top chrome overlay: Quick Actions above the image ── */
+/* ── Chrome overlay panels (shared base) ── */
+/* Always position:absolute, never enters flow. Card layout unaffected.   */
+.ss-studio-node-chrome-overlay,
 .ss-studio-node-chrome-overlay-top {
   position: absolute;
-  bottom: 100%;
   left: -3px;
   right: -1px;
   display: flex;
@@ -1267,17 +1223,33 @@ select.ss-pi-wizard__select { width: 100%; }
   background: var(--background-primary);
   border: 1px solid var(--ss-studio-border);
   border-left: 3px solid var(--ss-studio-border);
-  border-bottom: none;
-  border-radius: var(--ss-radius-lg) var(--ss-radius-lg) 0 0;
   padding: var(--ss-space-xs) 0;
   visibility: hidden;
   opacity: 0;
   pointer-events: none;
-  transform: translateY(4px);
   z-index: 3;
 }
 
+/* Bottom panel: below image */
+.ss-studio-node-chrome-overlay {
+  top: 100%;
+  border-top: none;
+  border-radius: 0 0 var(--ss-radius-lg) var(--ss-radius-lg);
+  transform: translateY(-4px);
+}
+
+/* Top panel: above image */
+.ss-studio-node-chrome-overlay-top {
+  bottom: 100%;
+  border-bottom: none;
+  border-radius: var(--ss-radius-lg) var(--ss-radius-lg) 0 0;
+  transform: translateY(4px);
+}
+
+/* Shared hover reveal for both panels */
+.ss-studio-node-card[data-node-kind="studio.media_ingest"]:hover > .ss-studio-node-chrome-overlay,
 .ss-studio-node-card[data-node-kind="studio.media_ingest"]:hover > .ss-studio-node-chrome-overlay-top,
+.ss-studio-node-card[data-node-kind="studio.media_ingest"].is-selected > .ss-studio-node-chrome-overlay,
 .ss-studio-node-card[data-node-kind="studio.media_ingest"].is-selected > .ss-studio-node-chrome-overlay-top {
   visibility: visible;
   opacity: 1;
@@ -1286,12 +1258,20 @@ select.ss-pi-wizard__select { width: 100%; }
   transition: opacity 0.2s ease, transform 0.2s ease;
 }
 
-/* Top overlay children: comfortable padding */
+/* Both panels' children: comfortable padding */
+.ss-studio-node-chrome-overlay > *,
 .ss-studio-node-chrome-overlay-top > * {
   padding: var(--ss-space-xs) var(--ss-space-10);
 }
 
-/* Hide the "Quick Actions" title — the buttons speak for themselves */
+/* Hide chrome that's useless for media_ingest in the bottom panel */
+.ss-studio-node-chrome-overlay > .ss-studio-node-header,
+.ss-studio-node-chrome-overlay > .ss-studio-node-kind,
+.ss-studio-node-chrome-overlay > .ss-studio-node-run-status-row {
+  display: none;
+}
+
+/* Hide the "Quick Actions" title in the top panel */
 .ss-studio-node-chrome-overlay-top .ss-studio-node-collapsed-visibility-title {
   display: none;
 }

@@ -327,7 +327,10 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
       if (removeBtn) actionsContainer.appendChild(removeBtn);
     }
 
-    // Sort children into top or bottom panel
+    // Sort children into top or bottom panel.
+    // Denylist: media preview + resize handle stay on card; collapsed-visibility
+    // goes to top panel; everything else defaults to bottom panel (intentional —
+    // new elements should land in the bottom panel without needing an update here).
     for (const child of Array.from(nodeEl.children)) {
       if (
         child === chromeTop ||
