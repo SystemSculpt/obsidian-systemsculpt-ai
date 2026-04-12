@@ -284,6 +284,21 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
     showOutputPreview,
   });
 
+  // Global: consolidate header action buttons into Quick Actions toolbar.
+  // Leaves just the title input in the header for a cleaner look.
+  // In collapsed mode the toolbar doesn't exist — buttons stay in the header.
+  const globalActionsContainer = nodeEl.querySelector(
+    ".ss-studio-node-collapsed-visibility-buttons"
+  );
+  if (globalActionsContainer) {
+    const headerEl = nodeEl.querySelector(".ss-studio-node-header");
+    if (headerEl) {
+      for (const btn of Array.from(headerEl.querySelectorAll("button"))) {
+        globalActionsContainer.appendChild(btn);
+      }
+    }
+  }
+
   if (node.kind === "studio.media_ingest" && isPlaceholder) {
     const pendingPreviewEl = nodeEl.createDiv({ cls: "ss-studio-node-pending-preview is-media" });
     pendingPreviewEl.createDiv({
@@ -310,18 +325,6 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
     node.kind === "studio.media_ingest" &&
     nodeEl.querySelector(".ss-studio-node-media-preview")
   ) {
-    // Move Run/Remove into Quick Actions before overlay setup
-    const header = nodeEl.querySelector(".ss-studio-node-header");
-    const runBtn = header?.querySelector(".ss-studio-node-run");
-    const removeBtn = header?.querySelector(".ss-studio-node-remove");
-    const actionsContainer = nodeEl.querySelector(
-      ".ss-studio-node-collapsed-visibility-buttons"
-    );
-    if (actionsContainer) {
-      if (runBtn) actionsContainer.prepend(runBtn);
-      if (removeBtn) actionsContainer.appendChild(removeBtn);
-    }
-
     const { chromeBottom } = applyOverlayChromeLayout(nodeEl, {
       keepOnCard: [
         "ss-studio-node-media-preview",
@@ -330,11 +333,20 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
       topPanel: ["ss-studio-node-collapsed-visibility"],
     });
 
-    // Collapsed mode: no Quick Actions container, so place buttons
-    // directly in the bottom overlay (header is hidden by CSS).
-    if (!actionsContainer && chromeBottom) {
-      if (runBtn) chromeBottom.appendChild(runBtn);
-      if (removeBtn) chromeBottom.appendChild(removeBtn);
+    // Collapsed mode fallback: global button-move didn't run (no Quick
+    // Actions container), so buttons are still in the header which the
+    // overlay CSS hides. Extract them directly into the bottom overlay.
+    if (!globalActionsContainer && chromeBottom) {
+      const headerInOverlay = chromeBottom.querySelector(
+        ".ss-studio-node-header"
+      );
+      if (headerInOverlay) {
+        for (const btn of Array.from(
+          headerInOverlay.querySelectorAll("button")
+        )) {
+          chromeBottom.appendChild(btn);
+        }
+      }
     }
   }
 }

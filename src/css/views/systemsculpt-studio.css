@@ -1145,6 +1145,18 @@ select.ss-pi-wizard__select { width: 100%; }
   transition: border-color 0.15s ease, background 0.15s ease;
 }
 
+/* ── Global chrome cleanup (all node types) ── */
+/* Kind label (studio.text_generation@1.0.0) is dev metadata, not user-facing */
+.ss-studio-node-kind {
+  display: none;
+}
+
+/* Status row hidden when idle — status stripe (left border) handles state.    */
+/* Row reappears automatically when running/succeeded/failed via non-idle class */
+.ss-studio-node-run-status-row:has(.ss-studio-node-run-status.is-idle):not(:has(.ss-studio-node-run-message)):not(:has(.ss-studio-node-badge)) {
+  display: none;
+}
+
 /* ── All nodes share the same base card frame above ── */
 /* Content-prominent nodes use hover-reveal: content is dominant by    */
 /* default, chrome (header, kind, status, config) appears on hover.    */
@@ -1261,10 +1273,9 @@ select.ss-pi-wizard__select { width: 100%; }
   padding: var(--ss-space-xs) var(--ss-space-10);
 }
 
-/* Hide chrome that's useless for media_ingest in the bottom panel */
-.ss-studio-node-chrome-overlay > .ss-studio-node-header,
-.ss-studio-node-chrome-overlay > .ss-studio-node-kind,
-.ss-studio-node-chrome-overlay > .ss-studio-node-run-status-row {
+/* Hide the header in the overlay bottom panel (title input not useful for  */
+/* content-prominent nodes; buttons already moved to Quick Actions).        */
+.ss-studio-node-chrome-overlay > .ss-studio-node-header {
   display: none;
 }
 
