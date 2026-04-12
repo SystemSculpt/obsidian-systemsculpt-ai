@@ -304,51 +304,63 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
   });
 
   // ── Chrome layout: single entry point for ALL non-label nodes ──
-  // Functional nodes: top-only (Quick Actions hover-reveal, everything else stays)
-  // Content-prominent nodes: top + bottom (full overlay, content-only card sizing)
-  const isContentOverlay =
+  // Universal hierarchy:
+  //   Top overlay (hover):  Quick Actions + title input
+  //   Card (always):        Ports at top, then main content
+  //   Bottom overlay (hover): config panels, previews, metadata
+  // Content-prominent nodes additionally get data-chrome-layout="overlay"
+  // for zero-padding / flex-column card styling.
+  const contentFillsCard =
     node.kind === "studio.media_ingest" &&
     !!nodeEl.querySelector(".ss-studio-node-media-preview");
 
   applyChromeLayout(nodeEl, {
-    mode: isContentOverlay ? "full" : "top-only",
-    keepOnCard: isContentOverlay
-      ? ["ss-studio-node-media-preview", "ss-studio-node-resize-handle"]
-      : [],
-    topPanel: ["ss-studio-node-collapsed-visibility"],
+    contentFillsCard,
+    topPanel: [
+      "ss-studio-node-collapsed-visibility",
+      "ss-studio-node-header",
+    ],
+    bottomPanel: [
+      "ss-studio-node-inline-config",
+      "ss-studio-node-output-preview",
+      "ss-studio-node-config-preview",
+      "ss-studio-node-kind",
+      "ss-studio-node-run-status-row",
+    ],
   });
 }
 
 /**
- * Chrome layout policy — single source of truth for how chrome is
- * arranged on any node card.
+ * Chrome layout policy — single source of truth for every node card.
  *
- * - "top-only": Quick Actions in a hover-reveal top panel. Everything
- *   else stays on the card as normal in-flow content. Used by functional
- *   nodes (text_generation, input, cli_command, etc.).
+ * topPanel classes → hover-reveal panel above the card.
+ * bottomPanel classes → hover-reveal panel below the card.
+ * Everything else stays on the card (ports, content, resize handle).
  *
- * - "full": Top panel (Quick Actions) + bottom panel (remaining chrome).
- *   Only keepOnCard elements stay in-flow. Used by content-prominent
- *   nodes (media_ingest) where the primary content IS the card.
+ * contentFillsCard: if true, the card gets data-chrome-layout="overlay"
+ * for zero-padding / flex-column styling (content-prominent nodes).
  */
 interface ChromeLayoutPolicy {
-  mode: "top-only" | "full";
-  /** CSS classes of elements that remain as direct card children (full mode only) */
-  keepOnCard: string[];
-  /** CSS classes of elements routed to the top overlay panel */
+  contentFillsCard: boolean;
   topPanel: string[];
+  bottomPanel: string[];
 }
 
 /**
- * Single entry point for chrome layout on all node types. Moves header
- * buttons into Quick Actions, then arranges chrome into overlay panels
- * based on the policy mode. Sets data attributes so CSS can target
- * layout state generically.
+ * Single entry point for chrome layout on all node types.
+ * 1. Moves header buttons into Quick Actions
+ * 2. Creates top overlay (Quick Actions + title)
+ * 3. Creates bottom overlay (config, previews, metadata)
+ * 4. Leaves ports + main content on the card
  */
 function applyChromeLayout(
   nodeEl: HTMLElement,
   policy: ChromeLayoutPolicy
 ): void {
+  if (policy.contentFillsCard) {
+    nodeEl.dataset.chromeLayout = "overlay";
+  }
+
   // Move header action buttons into the Quick Actions toolbar
   const headerEl = nodeEl.querySelector(".ss-studio-node-header");
   const buttonsContainer = nodeEl.querySelector(
@@ -360,54 +372,42 @@ function applyChromeLayout(
     }
   }
 
-  // Create the top overlay panel and route topPanel elements into it
   const topSet = new Set(policy.topPanel);
+  const bottomSet = new Set(policy.bottomPanel);
+
+  // Create top overlay and route topPanel elements into it
   const chromeTop = nodeEl.createDiv({
     cls: "ss-studio-node-chrome-overlay-top",
   });
   for (const child of Array.from(nodeEl.children)) {
     if (child === chromeTop) continue;
-    if (
-      topSet.size > 0 &&
-      Array.from(child.classList).some((c) => topSet.has(c))
-    ) {
+    if (Array.from(child.classList).some((c) => topSet.has(c))) {
       chromeTop.appendChild(child);
     }
   }
 
-  // "full" mode: additionally create a bottom panel for remaining chrome
-  if (policy.mode === "full") {
-    nodeEl.dataset.chromeLayout = "overlay";
-    const keepSet = new Set([
-      ...policy.keepOnCard,
-      "ss-studio-node-chrome-overlay-top",
-    ]);
-    const chromeBottom = nodeEl.createDiv({
-      cls: "ss-studio-node-chrome-overlay",
-    });
-
-    for (const child of Array.from(nodeEl.children)) {
-      if (child === chromeTop || child === chromeBottom) continue;
-      const isKeep =
-        keepSet.size > 0 &&
-        Array.from(child.classList).some((c) => keepSet.has(c));
-      if (!isKeep) {
-        chromeBottom.appendChild(child);
-      }
+  // Create bottom overlay and route bottomPanel elements into it
+  const chromeBottom = nodeEl.createDiv({
+    cls: "ss-studio-node-chrome-overlay",
+  });
+  for (const child of Array.from(nodeEl.children)) {
+    if (child === chromeTop || child === chromeBottom) continue;
+    if (Array.from(child.classList).some((c) => bottomSet.has(c))) {
+      chromeBottom.appendChild(child);
     }
+  }
 
-    // Collapsed mode fallback: if buttons weren't moved (no Quick Actions
-    // container), extract them from the hidden header into the bottom panel.
-    if (!buttonsContainer && headerEl) {
-      const headerInBottom = chromeBottom.querySelector(
-        ".ss-studio-node-header"
-      );
-      if (headerInBottom) {
-        for (const btn of Array.from(
-          headerInBottom.querySelectorAll("button")
-        )) {
-          chromeBottom.appendChild(btn);
-        }
+  // Collapsed mode fallback: if buttons weren't moved (no Quick Actions
+  // container), extract them from the header so they stay accessible.
+  if (!buttonsContainer && headerEl) {
+    const headerInPanel =
+      chromeTop.querySelector(".ss-studio-node-header") ??
+      chromeBottom.querySelector(".ss-studio-node-header");
+    if (headerInPanel) {
+      for (const btn of Array.from(
+        headerInPanel.querySelectorAll("button")
+      )) {
+        chromeTop.appendChild(btn);
       }
     }
   }

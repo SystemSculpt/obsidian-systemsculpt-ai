@@ -1178,7 +1178,7 @@ select.ss-pi-wizard__select { width: 100%; }
   padding-bottom: 0;
 }
 
-/* Any card with a top overlay: flatten top corners on hover for seamless join */
+/* All cards: flatten corners + transparent borders on hover for seamless overlay joins */
 .ss-studio-node-card:has(> .ss-studio-node-chrome-overlay-top):hover,
 .ss-studio-node-card:has(> .ss-studio-node-chrome-overlay-top).is-selected {
   z-index: 5;
@@ -1187,17 +1187,16 @@ select.ss-pi-wizard__select { width: 100%; }
   border-top-color: transparent;
 }
 
-/* Full overlay cards: also flatten bottom for the bottom panel */
-.ss-studio-node-card[data-chrome-layout="overlay"]:hover,
-.ss-studio-node-card[data-chrome-layout="overlay"].is-selected {
+.ss-studio-node-card:has(> .ss-studio-node-chrome-overlay):hover,
+.ss-studio-node-card:has(> .ss-studio-node-chrome-overlay).is-selected {
+  z-index: 5;
   border-bottom-left-radius: 0;
   border-bottom-right-radius: 0;
   border-bottom-color: transparent;
 }
 
-/* Image/video: always visible, pinned to top of flex column */
+/* Image/video: fills the card, ports appear above it via DOM order */
 .ss-studio-node-card[data-chrome-layout="overlay"] .ss-studio-node-media-preview {
-  order: -1;
   margin: 0;
   border: none;
   border-radius: inherit;
@@ -1264,18 +1263,11 @@ select.ss-pi-wizard__select { width: 100%; }
   border-radius: var(--ss-radius-lg) var(--ss-radius-lg) 0 0;
 }
 
-/* Top panel: hover-reveal for ALL cards (Quick Actions) */
+/* Both panels: hover-reveal for ALL cards */
+.ss-studio-node-card:hover > .ss-studio-node-chrome-overlay,
 .ss-studio-node-card:hover > .ss-studio-node-chrome-overlay-top,
+.ss-studio-node-card.is-selected > .ss-studio-node-chrome-overlay,
 .ss-studio-node-card.is-selected > .ss-studio-node-chrome-overlay-top {
-  visibility: visible;
-  opacity: 1;
-  pointer-events: auto;
-  transition: opacity 0.2s ease;
-}
-
-/* Bottom panel: hover-reveal ONLY for full overlay-layout cards */
-.ss-studio-node-card[data-chrome-layout="overlay"]:hover > .ss-studio-node-chrome-overlay,
-.ss-studio-node-card[data-chrome-layout="overlay"].is-selected > .ss-studio-node-chrome-overlay {
   visibility: visible;
   opacity: 1;
   pointer-events: auto;
@@ -1288,13 +1280,12 @@ select.ss-pi-wizard__select { width: 100%; }
   padding: var(--ss-space-xs) var(--ss-space-10);
 }
 
-/* Hide the header in the overlay bottom panel (title input not useful for  */
-/* content-prominent nodes; buttons already moved to Quick Actions).        */
-.ss-studio-node-chrome-overlay > .ss-studio-node-header {
-  display: none;
+/* Top overlay ordering: Quick Actions first, then title input below */
+.ss-studio-node-chrome-overlay-top > .ss-studio-node-header {
+  order: 1;
 }
 
-/* Hide the "Quick Actions" title in the top panel */
+/* Hide the "Quick Actions" label — buttons are self-explanatory */
 .ss-studio-node-chrome-overlay-top .ss-studio-node-collapsed-visibility-title {
   display: none;
 }
