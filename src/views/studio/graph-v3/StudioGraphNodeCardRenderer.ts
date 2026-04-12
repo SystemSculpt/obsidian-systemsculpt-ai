@@ -284,19 +284,33 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
     showOutputPreview,
   });
 
-  // Global: consolidate header action buttons into Quick Actions toolbar.
-  // Leaves just the title input in the header for a cleaner look.
-  // In collapsed mode the toolbar doesn't exist — buttons stay in the header.
-  const globalActionsContainer = nodeEl.querySelector(
-    ".ss-studio-node-collapsed-visibility-buttons"
+  // ── Global chrome consolidation (all non-label nodes) ──
+  // 1. Move header buttons into Quick Actions toolbar
+  // 2. Wrap Quick Actions in a hover-reveal top overlay panel
+  // This gives EVERY node the same progressive-disclosure behavior:
+  // content visible by default, actions appear on hover.
+  const collapsedVis = nodeEl.querySelector(
+    ".ss-studio-node-collapsed-visibility"
   );
-  if (globalActionsContainer) {
+  if (collapsedVis) {
+    // Move all header buttons into Quick Actions
     const headerEl = nodeEl.querySelector(".ss-studio-node-header");
     if (headerEl) {
-      for (const btn of Array.from(headerEl.querySelectorAll("button"))) {
-        globalActionsContainer.appendChild(btn);
+      const buttonsContainer = collapsedVis.querySelector(
+        ".ss-studio-node-collapsed-visibility-buttons"
+      );
+      if (buttonsContainer) {
+        for (const btn of Array.from(headerEl.querySelectorAll("button"))) {
+          buttonsContainer.appendChild(btn);
+        }
       }
     }
+
+    // Wrap Quick Actions in a top overlay panel (hover-reveal)
+    const actionsOverlay = nodeEl.createDiv({
+      cls: "ss-studio-node-chrome-overlay-top",
+    });
+    actionsOverlay.appendChild(collapsedVis);
   }
 
   if (node.kind === "studio.media_ingest" && isPlaceholder) {
@@ -318,9 +332,8 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
     onOpenMediaPreview,
   });
 
-  // Apply overlay chrome layout for media_ingest with a loaded preview.
-  // When no preview exists (empty source, failed load), the node renders
-  // as a normal card with all chrome visible.
+  // Media_ingest with preview: additionally apply the full overlay pattern
+  // (bottom panel for ports/config/header, content-only card sizing).
   if (
     node.kind === "studio.media_ingest" &&
     nodeEl.querySelector(".ss-studio-node-media-preview")
@@ -329,14 +342,14 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
       keepOnCard: [
         "ss-studio-node-media-preview",
         "ss-studio-node-resize-handle",
+        "ss-studio-node-chrome-overlay-top",
       ],
-      topPanel: ["ss-studio-node-collapsed-visibility"],
+      topPanel: [],
     });
 
-    // Collapsed mode fallback: global button-move didn't run (no Quick
-    // Actions container), so buttons are still in the header which the
-    // overlay CSS hides. Extract them directly into the bottom overlay.
-    if (!globalActionsContainer && chromeBottom) {
+    // Collapsed mode fallback: if Quick Actions didn't exist (collapsed
+    // detail mode), buttons are still in the header. Extract them.
+    if (!collapsedVis && chromeBottom) {
       const headerInOverlay = chromeBottom.querySelector(
         ".ss-studio-node-header"
       );
@@ -379,9 +392,11 @@ function applyOverlayChromeLayout(
 ): { chromeTop: HTMLElement; chromeBottom: HTMLElement } {
   nodeEl.dataset.chromeLayout = "overlay";
 
-  const chromeTop = nodeEl.createDiv({
-    cls: "ss-studio-node-chrome-overlay-top",
-  });
+  // Reuse existing top overlay if global Quick Actions wrapping already created one
+  const chromeTop =
+    nodeEl.querySelector<HTMLElement>(
+      ":scope > .ss-studio-node-chrome-overlay-top"
+    ) ?? nodeEl.createDiv({ cls: "ss-studio-node-chrome-overlay-top" });
   const chromeBottom = nodeEl.createDiv({
     cls: "ss-studio-node-chrome-overlay",
   });
