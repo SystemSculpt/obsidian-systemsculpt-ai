@@ -303,26 +303,14 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
     onOpenMediaPreview,
   });
 
-  // For media_ingest with a loaded preview: split chrome into two overlay panels.
-  // Top panel: quick actions (above the image).
-  // Bottom panel: ports, config, previews (below the image).
-  // The image stays as the only in-flow child — it NEVER moves.
-  // When no preview exists yet (empty source, failed load), skip the overlay
-  // pattern so the node renders as a normal card with all chrome visible.
+  // Apply overlay chrome layout for media_ingest with a loaded preview.
+  // When no preview exists (empty source, failed load), the node renders
+  // as a normal card with all chrome visible.
   if (
     node.kind === "studio.media_ingest" &&
     nodeEl.querySelector(".ss-studio-node-media-preview")
   ) {
-    const chromeTop = nodeEl.createDiv({
-      cls: "ss-studio-node-chrome-overlay-top",
-    });
-    const chromeBottom = nodeEl.createDiv({
-      cls: "ss-studio-node-chrome-overlay",
-    });
-
-    // Move Run/Remove buttons into Quick Actions before reparenting.
-    // In collapsed detail mode the actions container doesn't exist, so
-    // fall back to placing them directly in the bottom overlay.
+    // Move Run/Remove into Quick Actions before overlay setup
     const header = nodeEl.querySelector(".ss-studio-node-header");
     const runBtn = header?.querySelector(".ss-studio-node-run");
     const removeBtn = header?.querySelector(".ss-studio-node-remove");
@@ -332,31 +320,76 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
     if (actionsContainer) {
       if (runBtn) actionsContainer.prepend(runBtn);
       if (removeBtn) actionsContainer.appendChild(removeBtn);
-    } else {
-      // Collapsed mode: no Quick Actions panel. Put buttons directly in
-      // the bottom overlay so they stay accessible (header is hidden).
+    }
+
+    const { chromeBottom } = applyOverlayChromeLayout(nodeEl, {
+      keepOnCard: [
+        "ss-studio-node-media-preview",
+        "ss-studio-node-resize-handle",
+      ],
+      topPanel: ["ss-studio-node-collapsed-visibility"],
+    });
+
+    // Collapsed mode: no Quick Actions container, so place buttons
+    // directly in the bottom overlay (header is hidden by CSS).
+    if (!actionsContainer && chromeBottom) {
       if (runBtn) chromeBottom.appendChild(runBtn);
       if (removeBtn) chromeBottom.appendChild(removeBtn);
     }
+  }
+}
 
-    // Sort children into top or bottom panel.
-    // Denylist: media preview + resize handle stay on card; collapsed-visibility
-    // goes to top panel; everything else defaults to bottom panel (intentional —
-    // new elements should land in the bottom panel without needing an update here).
-    for (const child of Array.from(nodeEl.children)) {
-      if (
-        child === chromeTop ||
-        child === chromeBottom ||
-        child.classList.contains("ss-studio-node-media-preview") ||
-        child.classList.contains("ss-studio-node-resize-handle")
-      ) {
-        continue;
-      }
-      if (child.classList.contains("ss-studio-node-collapsed-visibility")) {
-        chromeTop.appendChild(child);
-      } else {
-        chromeBottom.appendChild(child);
-      }
+/**
+ * Chrome overlay layout policy. Declares which element classes stay as
+ * direct card children (in-flow) and which go to the top overlay panel.
+ * Everything else defaults to the bottom panel.
+ */
+interface ChromeOverlayPolicy {
+  /** CSS classes of elements that remain as direct card children */
+  keepOnCard: string[];
+  /** CSS classes of elements routed to the top overlay panel */
+  topPanel: string[];
+}
+
+/**
+ * Splits a node card's children into two absolutely-positioned overlay
+ * panels (top + bottom) based on an explicit policy. Sets
+ * data-chrome-layout="overlay" so CSS can target overlay nodes
+ * generically, not per node kind.
+ *
+ * The in-flow content (keepOnCard) stays on the card and determines its
+ * size. Chrome in the overlays is hidden by default, revealed on hover.
+ * Port positions remain stable because overlays use no transforms.
+ */
+function applyOverlayChromeLayout(
+  nodeEl: HTMLElement,
+  policy: ChromeOverlayPolicy
+): { chromeTop: HTMLElement; chromeBottom: HTMLElement } {
+  nodeEl.dataset.chromeLayout = "overlay";
+
+  const chromeTop = nodeEl.createDiv({
+    cls: "ss-studio-node-chrome-overlay-top",
+  });
+  const chromeBottom = nodeEl.createDiv({
+    cls: "ss-studio-node-chrome-overlay",
+  });
+
+  const keepSet = new Set(policy.keepOnCard);
+  const topSet = new Set(policy.topPanel);
+
+  for (const child of Array.from(nodeEl.children)) {
+    if (child === chromeTop || child === chromeBottom) continue;
+
+    const isKeep = keepSet.size > 0 && Array.from(child.classList).some((c) => keepSet.has(c));
+    if (isKeep) continue;
+
+    const isTop = topSet.size > 0 && Array.from(child.classList).some((c) => topSet.has(c));
+    if (isTop) {
+      chromeTop.appendChild(child);
+    } else {
+      chromeBottom.appendChild(child);
     }
   }
+
+  return { chromeTop, chromeBottom };
 }

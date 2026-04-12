@@ -1155,20 +1155,20 @@ select.ss-pi-wizard__select { width: 100%; }
 /* media. On hover, chrome returns to flow below the image. Media preview  */
 /* is pinned to flex-start via order:-1 so it NEVER moves.                */
 
-.ss-studio-node-card[data-node-kind="studio.media_ingest"] {
+.ss-studio-node-card[data-chrome-layout="overlay"] {
   display: flex;
   flex-direction: column;
   padding: 0;
   overflow: visible;
 }
 
-.ss-studio-node-card[data-node-kind="studio.media_ingest"].has-resize-handle {
+.ss-studio-node-card[data-chrome-layout="overlay"].has-resize-handle {
   padding-bottom: 0;
 }
 
 /* Elevate on hover; flatten all corners so both overlays join seamlessly */
-.ss-studio-node-card[data-node-kind="studio.media_ingest"]:hover,
-.ss-studio-node-card[data-node-kind="studio.media_ingest"].is-selected {
+.ss-studio-node-card[data-chrome-layout="overlay"]:hover,
+.ss-studio-node-card[data-chrome-layout="overlay"].is-selected {
   z-index: 5;
   border-radius: 0;
   border-top-color: transparent;
@@ -1176,7 +1176,7 @@ select.ss-pi-wizard__select { width: 100%; }
 }
 
 /* Image/video: always visible, pinned to top of flex column */
-.ss-studio-node-card[data-node-kind="studio.media_ingest"] .ss-studio-node-media-preview {
+.ss-studio-node-card[data-chrome-layout="overlay"] .ss-studio-node-media-preview {
   order: -1;
   margin: 0;
   border: none;
@@ -1185,27 +1185,27 @@ select.ss-pi-wizard__select { width: 100%; }
   overflow: hidden;
 }
 
-.ss-studio-node-card[data-node-kind="studio.media_ingest"] .ss-studio-node-media-preview-img {
+.ss-studio-node-card[data-chrome-layout="overlay"] .ss-studio-node-media-preview-img {
   width: 100%;
   max-height: none;
   object-fit: contain;
   display: block;
 }
 
-.ss-studio-node-card[data-node-kind="studio.media_ingest"] .ss-studio-node-media-preview-video {
+.ss-studio-node-card[data-chrome-layout="overlay"] .ss-studio-node-media-preview-video {
   width: 100%;
   max-height: none;
   display: block;
 }
 
 /* Resize handle: hidden by default on media_ingest, visible on hover */
-.ss-studio-node-card[data-node-kind="studio.media_ingest"] > .ss-studio-node-resize-handle {
+.ss-studio-node-card[data-chrome-layout="overlay"] > .ss-studio-node-resize-handle {
   visibility: hidden;
   opacity: 0;
 }
 
-.ss-studio-node-card[data-node-kind="studio.media_ingest"]:hover > .ss-studio-node-resize-handle,
-.ss-studio-node-card[data-node-kind="studio.media_ingest"].is-selected > .ss-studio-node-resize-handle {
+.ss-studio-node-card[data-chrome-layout="overlay"]:hover > .ss-studio-node-resize-handle,
+.ss-studio-node-card[data-chrome-layout="overlay"].is-selected > .ss-studio-node-resize-handle {
   visibility: visible;
   opacity: 1;
   transition: opacity 0.2s ease;
@@ -1235,7 +1235,6 @@ select.ss-pi-wizard__select { width: 100%; }
   top: 100%;
   border-top: none;
   border-radius: 0 0 var(--ss-radius-lg) var(--ss-radius-lg);
-  transform: translateY(-4px);
 }
 
 /* Top panel: above image */
@@ -1243,19 +1242,17 @@ select.ss-pi-wizard__select { width: 100%; }
   bottom: 100%;
   border-bottom: none;
   border-radius: var(--ss-radius-lg) var(--ss-radius-lg) 0 0;
-  transform: translateY(4px);
 }
 
 /* Shared hover reveal for both panels */
-.ss-studio-node-card[data-node-kind="studio.media_ingest"]:hover > .ss-studio-node-chrome-overlay,
-.ss-studio-node-card[data-node-kind="studio.media_ingest"]:hover > .ss-studio-node-chrome-overlay-top,
-.ss-studio-node-card[data-node-kind="studio.media_ingest"].is-selected > .ss-studio-node-chrome-overlay,
-.ss-studio-node-card[data-node-kind="studio.media_ingest"].is-selected > .ss-studio-node-chrome-overlay-top {
+.ss-studio-node-card[data-chrome-layout="overlay"]:hover > .ss-studio-node-chrome-overlay,
+.ss-studio-node-card[data-chrome-layout="overlay"]:hover > .ss-studio-node-chrome-overlay-top,
+.ss-studio-node-card[data-chrome-layout="overlay"].is-selected > .ss-studio-node-chrome-overlay,
+.ss-studio-node-card[data-chrome-layout="overlay"].is-selected > .ss-studio-node-chrome-overlay-top {
   visibility: visible;
   opacity: 1;
   pointer-events: auto;
-  transform: translateY(0);
-  transition: opacity 0.2s ease, transform 0.2s ease;
+  transition: opacity 0.2s ease;
 }
 
 /* Both panels' children: comfortable padding */

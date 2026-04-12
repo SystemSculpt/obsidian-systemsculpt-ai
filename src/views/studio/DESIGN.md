@@ -40,17 +40,19 @@ Every node is a `.ss-studio-node-card` with:
 - No box-shadow
 - Status indicated by left border color via `:has()` selectors (running = accent, succeeded = green, failed = red, pending = yellow)
 
-### Content-prominent nodes (media_ingest)
+### Chrome overlay layout (`data-chrome-layout="overlay"`)
 
-Media nodes use the **chrome overlay pattern**:
+Content-prominent nodes (currently media_ingest, extensible to others) use the **chrome overlay pattern** via `applyOverlayChromeLayout()`:
 
-- The image/video is the **only in-flow child** of the card. The card sizes to just the media.
-- All chrome (header, kind, status, ports, config) lives in a `.ss-studio-node-chrome-overlay` wrapper div that is `position: absolute; top: 100%` — a floating panel below the image.
-- On hover/selection, the overlay fades in with `opacity` + `transform` transition. **No layout properties change. The image never moves.**
-- The card's bottom corners flatten on hover (`border-bottom-*-radius: 0`) and the bottom border becomes transparent so the overlay joins seamlessly.
-- The overlay's side borders align with the card's borders via `left: -3px; right: -1px`, creating one continuous visual container.
+- The renderer calls `applyOverlayChromeLayout(nodeEl, policy)` with an explicit `ChromeOverlayPolicy` that declares which elements stay in-flow (`keepOnCard`), which go to the top panel (`topPanel`), and everything else defaults to the bottom panel.
+- The function sets `data-chrome-layout="overlay"` on the card. **All overlay CSS targets this attribute, not node kind.** This makes the pattern reusable without per-kind CSS selectors.
+- The primary content (image, video, editor) is the **only in-flow child**. The card sizes to just the content.
+- Chrome lives in two absolutely-positioned overlay panels: `.ss-studio-node-chrome-overlay-top` (above) and `.ss-studio-node-chrome-overlay` (below).
+- On hover/selection, overlays fade in via `opacity` transition. **No transforms on overlay containers** — this keeps port positions stable for the connection engine's `getBoundingClientRect` calls.
+- Card corners flatten and borders go transparent on hover so overlays join seamlessly.
+- When no primary content exists (empty source, failed load), the overlay pattern is skipped and the node renders as a normal card.
 
-This pattern can extend to other content-prominent node types (labels, transcriptions) as needed.
+To apply this pattern to a new node kind, call `applyOverlayChromeLayout()` with the appropriate policy. No CSS changes needed.
 
 ### Functional nodes (text_generation, cli_command, http_request, etc.)
 
