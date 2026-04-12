@@ -1150,12 +1150,49 @@ select.ss-pi-wizard__select { width: 100%; }
 /* default, chrome (header, kind, status, config) appears on hover.    */
 
 /* ── Media ingest: hover-reveal pattern ── */
-/* Default: image/video fills the card. Chrome hidden. */
+/* Image pinned at top (order: -1), chrome expands BELOW on hover.     */
+/* Image never moves. Card grows downward. Elevated z-index on hover.  */
 .ss-studio-node-card[data-node-kind="studio.media_ingest"] {
   padding: 0;
+  overflow: visible;
+  transition: border-color 0.15s ease, background 0.15s ease, z-index 0s;
+}
+
+/* Elevate on hover so expanded chrome floats above neighbor nodes */
+.ss-studio-node-card[data-node-kind="studio.media_ingest"]:hover,
+.ss-studio-node-card[data-node-kind="studio.media_ingest"].is-selected {
+  z-index: 5;
+}
+
+/* Image/video always first visually — pinned at top */
+.ss-studio-node-card[data-node-kind="studio.media_ingest"] .ss-studio-node-media-preview {
+  order: -1;
+  margin: 0;
+  border: none;
+  border-radius: var(--ss-radius-lg) var(--ss-radius-lg) 0 0;
+  background: transparent;
   overflow: hidden;
 }
 
+.ss-studio-node-card[data-node-kind="studio.media_ingest"] .ss-studio-node-media-preview-img {
+  width: 100%;
+  max-height: none;
+  object-fit: contain;
+  display: block;
+}
+
+.ss-studio-node-card[data-node-kind="studio.media_ingest"] .ss-studio-node-media-preview-video {
+  width: 100%;
+  max-height: none;
+  display: block;
+}
+
+/* Pending preview also pinned at top */
+.ss-studio-node-card[data-node-kind="studio.media_ingest"] .ss-studio-node-pending-preview {
+  order: -1;
+}
+
+/* Chrome: collapsed by default, expands below the image on hover */
 .ss-studio-node-card[data-node-kind="studio.media_ingest"] > .ss-studio-node-header,
 .ss-studio-node-card[data-node-kind="studio.media_ingest"] > .ss-studio-node-kind,
 .ss-studio-node-card[data-node-kind="studio.media_ingest"] > .ss-studio-node-run-status-row,
@@ -1177,7 +1214,7 @@ select.ss-pi-wizard__select { width: 100%; }
     padding 0.2s ease;
 }
 
-/* On hover: reveal all chrome */
+/* On hover or selected: reveal chrome below the image */
 .ss-studio-node-card[data-node-kind="studio.media_ingest"]:hover > .ss-studio-node-header,
 .ss-studio-node-card[data-node-kind="studio.media_ingest"]:hover > .ss-studio-node-kind,
 .ss-studio-node-card[data-node-kind="studio.media_ingest"]:hover > .ss-studio-node-run-status-row,
@@ -1186,27 +1223,7 @@ select.ss-pi-wizard__select { width: 100%; }
 .ss-studio-node-card[data-node-kind="studio.media_ingest"]:hover > .ss-studio-node-collapsed-visibility,
 .ss-studio-node-card[data-node-kind="studio.media_ingest"]:hover > .ss-studio-node-resize-handle,
 .ss-studio-node-card[data-node-kind="studio.media_ingest"]:hover > .ss-studio-node-output-preview,
-.ss-studio-node-card[data-node-kind="studio.media_ingest"]:hover > .ss-studio-node-config-preview {
-  max-height: 400px;
-  overflow: visible;
-  opacity: 1;
-}
-
-/* Restore proper spacing when revealed */
-.ss-studio-node-card[data-node-kind="studio.media_ingest"]:hover > .ss-studio-node-header {
-  padding: var(--ss-space-sm) var(--ss-space-10) 0;
-  margin-bottom: var(--ss-space-sm);
-}
-
-.ss-studio-node-card[data-node-kind="studio.media_ingest"]:hover > .ss-studio-node-inline-config {
-  margin: var(--ss-space-sm) var(--ss-space-10) 0;
-}
-
-.ss-studio-node-card[data-node-kind="studio.media_ingest"]:hover > .ss-studio-node-collapsed-visibility {
-  padding: var(--ss-space-sm) var(--ss-space-10);
-}
-
-/* Also reveal when selected (not just hover) */
+.ss-studio-node-card[data-node-kind="studio.media_ingest"]:hover > .ss-studio-node-config-preview,
 .ss-studio-node-card[data-node-kind="studio.media_ingest"].is-selected > .ss-studio-node-header,
 .ss-studio-node-card[data-node-kind="studio.media_ingest"].is-selected > .ss-studio-node-kind,
 .ss-studio-node-card[data-node-kind="studio.media_ingest"].is-selected > .ss-studio-node-run-status-row,
@@ -1221,38 +1238,21 @@ select.ss-pi-wizard__select { width: 100%; }
   opacity: 1;
 }
 
+/* Restore spacing for revealed chrome */
+.ss-studio-node-card[data-node-kind="studio.media_ingest"]:hover > .ss-studio-node-header,
 .ss-studio-node-card[data-node-kind="studio.media_ingest"].is-selected > .ss-studio-node-header {
   padding: var(--ss-space-sm) var(--ss-space-10) 0;
-  margin-bottom: var(--ss-space-sm);
+  margin-bottom: var(--ss-space-xs);
 }
 
+.ss-studio-node-card[data-node-kind="studio.media_ingest"]:hover > .ss-studio-node-inline-config,
 .ss-studio-node-card[data-node-kind="studio.media_ingest"].is-selected > .ss-studio-node-inline-config {
-  margin: var(--ss-space-sm) var(--ss-space-10) 0;
+  margin: var(--ss-space-xs) var(--ss-space-10);
 }
 
+.ss-studio-node-card[data-node-kind="studio.media_ingest"]:hover > .ss-studio-node-collapsed-visibility,
 .ss-studio-node-card[data-node-kind="studio.media_ingest"].is-selected > .ss-studio-node-collapsed-visibility {
-  padding: var(--ss-space-sm) var(--ss-space-10);
-}
-
-/* Media preview: fills the card, no extra margin */
-.ss-studio-node-card[data-node-kind="studio.media_ingest"] .ss-studio-node-media-preview {
-  margin: 0;
-  border: none;
-  border-radius: 0;
-  background: transparent;
-}
-
-.ss-studio-node-card[data-node-kind="studio.media_ingest"] .ss-studio-node-media-preview-img {
-  width: 100%;
-  max-height: none;
-  object-fit: contain;
-  display: block;
-}
-
-.ss-studio-node-card[data-node-kind="studio.media_ingest"] .ss-studio-node-media-preview-video {
-  width: 100%;
-  max-height: none;
-  display: block;
+  padding: var(--ss-space-xs) var(--ss-space-10) var(--ss-space-sm);
 }
 
 .ss-studio-node-card.has-resize-handle {
