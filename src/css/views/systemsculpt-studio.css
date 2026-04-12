@@ -1,6 +1,6 @@
 .ss-studio-view {
-  --ss-studio-surface: color-mix(in srgb, var(--background-primary) 88%, var(--ss-studio-bg-dark) 12%);
-  --ss-studio-border: color-mix(in srgb, var(--background-modifier-border) 76%, var(--ss-studio-accent-mid) 24%);
+  --ss-studio-surface: var(--background-primary);
+  --ss-studio-border: var(--background-modifier-border);
   --ss-studio-warning: var(--ss-studio-error);
 
   min-height: 100%;
@@ -10,10 +10,7 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background:
-    radial-gradient(1200px 500px at 110% -10%, color-mix(in srgb, var(--ss-studio-accent-muted) 24%, transparent), transparent 70%),
-    radial-gradient(900px 420px at -10% 0%, color-mix(in srgb, var(--ss-studio-accent-light) 18%, transparent), transparent 75%),
-    linear-gradient(170deg, var(--ss-studio-surface) 0%, var(--background-primary) 62%);
+  background: var(--background-primary);
 }
 
 .ss-studio-warning {
@@ -707,82 +704,87 @@ select.ss-pi-wizard__select { width: 100%; }
 
 .ss-studio-graph-workspace-controls {
   position: absolute;
-  top: 14px;
-  right: 14px;
+  top: var(--ss-space-12);
+  left: 50%;
+  transform: translateX(-50%);
   z-index: 8;
-  display: grid;
-  gap: var(--ss-space-sm);
-  width: 112px;
-  pointer-events: none;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: var(--ss-space-xs);
+  padding: var(--ss-space-xs) var(--ss-space-sm);
+  border: 1px solid var(--ss-studio-border);
+  border-radius: var(--ss-radius-pill);
+  background: var(--background-primary);
+  pointer-events: auto;
 }
 
 .ss-studio-graph-workspace-control-button {
   pointer-events: auto;
-  min-height: 30px;
-  border: 1px solid color-mix(in srgb, var(--ss-studio-accent) 44%, var(--ss-studio-border) 56%);
-  border-radius: var(--ss-radius-lg);
-  background: color-mix(in srgb, var(--background-primary) 88%, var(--ss-studio-bg-dark) 12%);
-  color: color-mix(in srgb, var(--ss-studio-surface-success-light) 92%, var(--text-normal) 8%);
+  min-height: 28px;
+  padding: var(--ss-space-xs) var(--ss-space-sm);
+  border: 1px solid var(--ss-studio-border);
+  border-radius: var(--ss-radius-md);
+  background: transparent;
+  color: var(--text-muted);
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 600;
   line-height: 1;
   cursor: pointer;
-  transition:
-    border-color 120ms ease,
-    background 120ms ease,
-    transform 90ms ease;
+  transition: color 0.12s ease, background 0.12s ease, border-color 0.12s ease;
 }
 
 .ss-studio-graph-workspace-control-button:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--ss-studio-accent-bright) 64%, var(--ss-studio-border) 36%);
-  background: color-mix(in srgb, var(--background-primary) 82%, var(--ss-studio-bg-mid) 18%);
-  transform: translateY(-1px);
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
+  border-color: var(--background-modifier-border-hover);
 }
 
 .ss-studio-graph-workspace-control-button:active:not(:disabled) {
-  transform: translateY(0);
+  background: var(--background-modifier-active-hover, var(--background-modifier-hover));
 }
 
 .ss-studio-graph-workspace-control-button:disabled {
-  opacity: 0.62;
+  opacity: 0.5;
   cursor: not-allowed;
 }
 
 .ss-studio-graph-workspace-control-button.is-run {
-  border-color: color-mix(in srgb, var(--ss-studio-accent-muted) 56%, var(--ss-studio-border) 44%);
-  background: color-mix(in srgb, var(--ss-studio-bg-mid) 26%, var(--background-primary) 74%);
+  color: var(--color-green, var(--ss-studio-success-tint));
+  border-color: color-mix(in srgb, var(--color-green, var(--ss-studio-success-tint)) 40%, var(--ss-studio-border));
 }
 
 .ss-studio-graph-workspace-control-button.is-active {
-  border-color: color-mix(in srgb, var(--ss-studio-info) 66%, var(--ss-studio-border) 34%);
-  background: color-mix(in srgb, var(--ss-studio-bg-mid) 34%, var(--background-primary) 66%);
+  color: var(--interactive-accent);
+  border-color: var(--interactive-accent);
 }
 
 .ss-studio-graph-workspace-control-zoom-row {
   pointer-events: auto;
-  display: grid;
-  grid-template-columns: 30px 1fr 30px;
-  gap: var(--ss-space-6);
+  display: flex;
+  flex-direction: row;
   align-items: center;
+  gap: var(--ss-space-xxs);
 }
 
 .ss-studio-graph-workspace-control-zoom-label {
-  border: 1px solid color-mix(in srgb, var(--ss-studio-border) 88%, var(--ss-studio-accent-soft) 12%);
-  border-radius: var(--ss-radius-lg);
-  background: color-mix(in srgb, var(--background-primary) 90%, var(--ss-studio-bg-dark) 10%);
-  color: color-mix(in srgb, var(--ss-studio-surface-success) 90%, var(--text-normal) 10%);
-  min-height: 30px;
+  border: 1px solid var(--ss-studio-border);
+  border-radius: var(--ss-radius-md);
+  background: transparent;
+  color: var(--text-muted);
+  min-height: 28px;
+  min-width: 44px;
   display: grid;
   place-items: center;
   font-size: 10px;
-  font-weight: 700;
+  font-weight: 600;
   letter-spacing: 0.02em;
 }
 
 .ss-studio-empty-state {
-  border: 1px dashed color-mix(in srgb, var(--ss-studio-border) 85%, var(--ss-studio-accent-muted) 15%);
+  border: none;
   border-radius: 0;
-  background: color-mix(in srgb, var(--background-primary) 86%, var(--ss-studio-bg-dark) 14%);
+  background: var(--background-primary);
   min-height: 100%;
   display: grid;
   place-items: center;
@@ -816,8 +818,8 @@ select.ss-pi-wizard__select { width: 100%; }
   flex: 1;
   min-height: 0;
   background:
-    radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--ss-studio-border) 50%, transparent) 1px, transparent 0) 0 0 / 20px 20px,
-    linear-gradient(160deg, color-mix(in srgb, var(--background-primary) 94%, var(--ss-studio-bg-deep) 6%), color-mix(in srgb, var(--background-primary) 88%, var(--ss-studio-bg-dark) 12%));
+    radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--ss-studio-border) 30%, transparent) 0.5px, transparent 0) 0 0 / 20px 20px,
+    var(--background-primary);
 }
 
 .ss-studio-graph-surface {
@@ -851,12 +853,11 @@ select.ss-pi-wizard__select { width: 100%; }
 }
 
 .ss-studio-group-frame {
-  --ss-studio-group-accent: var(--ss-studio-accent);
+  --ss-studio-group-accent: var(--text-muted);
   position: absolute;
-  border: 1px solid color-mix(in srgb, var(--ss-studio-group-accent) 55%, var(--ss-studio-border) 45%);
+  border: 1px dashed var(--ss-studio-border);
   border-radius: var(--ss-radius-16);
-  background: color-mix(in srgb, var(--ss-studio-group-accent) 7%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ss-studio-group-accent) 20%, transparent);
+  background: transparent;
   transition: left 120ms ease, top 120ms ease, width 120ms ease, height 120ms ease;
   pointer-events: auto;
   cursor: grab;
@@ -996,19 +997,19 @@ select.ss-pi-wizard__select { width: 100%; }
 
 .ss-studio-link-path {
   fill: none;
-  stroke: color-mix(in srgb, var(--interactive-accent) 75%, var(--ss-studio-accent-muted) 25%);
-  stroke-width: 2.5;
+  stroke: var(--text-muted);
+  stroke-width: 1.5;
   stroke-linecap: round;
   stroke-linejoin: round;
   pointer-events: stroke;
   cursor: pointer;
-  opacity: 0.92;
-  transition: stroke 120ms ease, stroke-width 120ms ease, opacity 120ms ease;
+  opacity: 0.6;
+  transition: stroke 0.12s ease, stroke-width 0.12s ease, opacity 0.12s ease;
 }
 
 .ss-studio-link-path:hover {
-  stroke: color-mix(in srgb, var(--ss-studio-accent) 80%, var(--interactive-accent) 20%);
-  stroke-width: 3.5;
+  stroke: var(--interactive-accent);
+  stroke-width: 2;
   opacity: 1;
 }
 
@@ -1132,15 +1133,16 @@ select.ss-pi-wizard__select { width: 100%; }
   position: absolute;
   width: 280px;
   border: 1px solid var(--ss-studio-border);
-  border-radius: var(--ss-radius-12);
-  background: color-mix(in srgb, var(--background-primary) 90%, var(--ss-studio-bg-dark) 10%);
-  box-shadow: 0 8px 24px color-mix(in srgb, var(--ss-studio-shadow) 24%, transparent);
+  border-left: 3px solid transparent;
+  border-radius: var(--ss-radius-lg);
+  background: var(--background-primary);
   padding: var(--ss-space-sm) var(--ss-space-10) var(--ss-space-10);
   cursor: grab;
   touch-action: none;
   user-select: none;
   pointer-events: auto;
   will-change: transform;
+  transition: border-color 0.15s ease, background 0.15s ease;
 }
 
 .ss-studio-node-card.has-resize-handle {
@@ -1185,7 +1187,7 @@ select.ss-pi-wizard__select { width: 100%; }
 }
 
 .ss-studio-node-card.is-detail-collapsed {
-  background: color-mix(in srgb, var(--background-primary) 92%, var(--ss-studio-bg-dark) 8%);
+  background: var(--background-secondary);
 }
 
 .ss-studio-node-card:active {
@@ -1193,10 +1195,8 @@ select.ss-pi-wizard__select { width: 100%; }
 }
 
 .ss-studio-node-card.is-selected {
-  border-color: color-mix(in srgb, var(--ss-studio-accent) 72%, var(--ss-studio-border) 28%);
-  box-shadow:
-    0 8px 24px color-mix(in srgb, var(--ss-studio-shadow) 24%, transparent),
-    0 0 0 2px color-mix(in srgb, var(--ss-studio-accent) 42%, transparent);
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 1px var(--interactive-accent);
 }
 
 .ss-studio-node-card.is-managed-pending {
@@ -1390,6 +1390,21 @@ select.ss-pi-wizard__select { width: 100%; }
   border-color: color-mix(in srgb, var(--ss-studio-error) 65%, var(--ss-studio-border));
 }
 
+/* ── Left-edge status stripe on node cards ── */
+.ss-studio-node-card:has(.ss-studio-node-run-status.is-pending) {
+  border-left-color: var(--text-muted);
+}
+.ss-studio-node-card:has(.ss-studio-node-run-status.is-running) {
+  border-left-color: var(--interactive-accent);
+}
+.ss-studio-node-card:has(.ss-studio-node-run-status.is-cached),
+.ss-studio-node-card:has(.ss-studio-node-run-status.is-succeeded) {
+  border-left-color: var(--color-green, var(--ss-studio-success-tint));
+}
+.ss-studio-node-card:has(.ss-studio-node-run-status.is-failed) {
+  border-left-color: var(--color-red, var(--ss-studio-error));
+}
+
 .ss-studio-node-run-message {
   font-size: 10px;
   color: color-mix(in srgb, var(--text-normal) 74%, var(--ss-studio-accent-soft) 26%);
@@ -1456,32 +1471,39 @@ select.ss-pi-wizard__select { width: 100%; }
 }
 
 .ss-studio-port-pin {
-  width: 14px;
-  height: 14px;
+  width: 8px;
+  height: 8px;
   border-radius: var(--ss-radius-pill);
-  border: 1px solid color-mix(in srgb, var(--ss-studio-border) 80%, var(--ss-studio-accent-dim) 20%);
-  background: color-mix(in srgb, var(--background-primary) 80%, var(--ss-studio-bg-mid) 20%);
+  border: 1.5px solid var(--ss-studio-border);
+  background: transparent;
   padding: 0;
+  transition: transform 0.1s ease, box-shadow 0.1s ease;
 }
 
 .ss-studio-port-pin.is-input {
-  background: color-mix(in srgb, var(--ss-studio-info) 48%, var(--background-primary));
+  border-color: var(--interactive-accent);
 }
 
 .ss-studio-port-pin.is-output {
-  background: color-mix(in srgb, var(--ss-studio-accent-muted) 52%, var(--background-primary));
+  border-color: var(--color-green, var(--ss-studio-success-tint));
 }
 
-.ss-studio-port-pin.is-active {
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--ss-studio-accent-bright) 62%, transparent);
+.ss-studio-port-pin.is-active,
+.ss-studio-port-pin:hover {
+  transform: scale(1.25);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--interactive-accent) 25%, transparent);
 }
 
 .ss-studio-port-pin.is-linked {
-  border-color: color-mix(in srgb, var(--ss-studio-accent-bright) 52%, var(--ss-studio-border) 48%);
-  box-shadow:
-    inset 0 0 0 1px color-mix(in srgb, var(--ss-studio-accent-bright) 34%, transparent),
-    0 0 0 1px color-mix(in srgb, var(--ss-studio-accent-bright) 35%, transparent),
-    0 0 0 3px color-mix(in srgb, var(--ss-studio-accent-bright) 18%, transparent);
+  background: currentcolor;
+}
+
+.ss-studio-port-pin.is-linked.is-input {
+  color: var(--interactive-accent);
+}
+
+.ss-studio-port-pin.is-linked.is-output {
+  color: var(--color-green, var(--ss-studio-success-tint));
 }
 
 .ss-studio-port-label {
