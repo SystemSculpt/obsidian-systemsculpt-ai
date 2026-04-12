@@ -306,8 +306,10 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
   // ── Chrome layout: single entry point for ALL non-label nodes ──
   // Universal hierarchy:
   //   Top overlay (hover):  Quick Actions + title input
-  //   Card (always):        Ports at top, then main content
-  //   Bottom overlay (hover): config panels, previews, metadata
+  //   Card (always):        Ports, crucial inline config fields,
+  //                          output previews, media previews, text editors
+  //   Bottom overlay (hover): secondary config fields (model, reasoning,
+  //                          sourcePath), config preview text, kind, status
   // Content-prominent nodes additionally get data-chrome-layout="overlay"
   // for zero-padding / flex-column card styling.
   const contentFillsCard =
@@ -321,13 +323,16 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
       "ss-studio-node-header",
     ],
     bottomPanel: [
-      "ss-studio-node-inline-config",
-      "ss-studio-node-output-preview",
       "ss-studio-node-config-preview",
       "ss-studio-node-kind",
       "ss-studio-node-run-status-row",
     ],
   });
+
+  // ── Secondary field moves ──
+  // After layout, move secondary config fields into the bottom overlay.
+  // Crucial fields stay on the card; secondary fields appear on hover.
+  moveSecondaryFieldsToBottomOverlay(nodeEl, node.kind);
 }
 
 /**
@@ -410,5 +415,39 @@ function applyChromeLayout(
         chromeTop.appendChild(btn);
       }
     }
+  }
+}
+
+/**
+ * Moves secondary config fields from the card into the bottom overlay.
+ * Crucial fields stay on the card; secondary fields appear on hover.
+ *
+ * text_generation: systemPrompt stays → modelId, localModelId, reasoningEffort move down
+ * media_ingest:    media preview stays → sourcePath moves down
+ */
+const SECONDARY_FIELDS: Record<string, string[]> = {
+  "studio.text_generation": [
+    ".ss-studio-node-inline-config-field--modelid",
+    ".ss-studio-node-inline-config-field--localmodelid",
+    ".ss-studio-node-inline-config-field--reasoningeffort",
+  ],
+  "studio.media_ingest": [
+    ".ss-studio-node-inline-config-field--sourcepath",
+  ],
+};
+
+function moveSecondaryFieldsToBottomOverlay(
+  nodeEl: HTMLElement,
+  kind: string
+): void {
+  const selectors = SECONDARY_FIELDS[kind];
+  if (!selectors) return;
+
+  const chromeBottom = nodeEl.querySelector(".ss-studio-node-chrome-overlay");
+  if (!chromeBottom) return;
+
+  for (const sel of selectors) {
+    const el = nodeEl.querySelector(sel);
+    if (el) chromeBottom.appendChild(el);
   }
 }

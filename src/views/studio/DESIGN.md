@@ -8,7 +8,9 @@
 
 **Uniform base, specialized surface.** Every node shares the same base card frame (border, radius, background). No node type gets a fundamentally different container. Specialization happens through content rendering and progressive disclosure, not through card shape or structure.
 
-**Progressive disclosure.** Nodes show their essential content by default. Controls, configuration, ports, and metadata appear on hover or selection — like a context menu, not a permanent fixture. This keeps the canvas clean at rest and functional on interaction.
+**Progressive disclosure.** Nodes show their essential content by default. Controls, configuration, and metadata appear on hover or selection — like a context menu, not a permanent fixture. This keeps the canvas clean at rest and functional on interaction.
+
+**Crucial details visible.** Not all config is equal. Each node type has a few *crucial* fields that define what the node does at a glance — these stay visible on the card at rest. Secondary config (model selection, timeouts, advanced options) lives in the bottom overlay and appears on hover or selection. Example: a text_generation node always shows its system prompt (the creative intent) but model/reasoning config slides out from below on hover. An input node always shows its value. A media_ingest node shows its image but the source path is in the bottom overlay. Secondary fields are declared in `SECONDARY_FIELDS` in `StudioGraphNodeCardRenderer.ts` and moved to the bottom overlay after layout — extend by adding entries to that map.
 
 **Flat and minimal.** No shadows on cards. Hairline 1px borders. Muted colors from the Obsidian theme. The canvas should feel calm and professional, not decorated. Visual references: ComfyUI (technical clarity), Figma (clean professionalism), Linear (ultra-minimalism).
 
@@ -40,23 +42,27 @@ Every node is a `.ss-studio-node-card` with:
 - No box-shadow
 - Status indicated by left border color via `:has()` selectors (running = accent, succeeded = green, failed = red, pending = yellow)
 
-### Chrome overlay layout (`data-chrome-layout="overlay"`)
+### Chrome layout — universal hierarchy (`applyChromeLayout`)
 
-Content-prominent nodes (currently media_ingest, extensible to others) use the **chrome overlay pattern** via `applyOverlayChromeLayout()`:
+Every non-label node goes through `applyChromeLayout(nodeEl, policy)` — the **single source of truth** for chrome arrangement. The policy declares:
 
-- The renderer calls `applyOverlayChromeLayout(nodeEl, policy)` with an explicit `ChromeOverlayPolicy` that declares which elements stay in-flow (`keepOnCard`), which go to the top panel (`topPanel`), and everything else defaults to the bottom panel.
-- The function sets `data-chrome-layout="overlay"` on the card. **All overlay CSS targets this attribute, not node kind.** This makes the pattern reusable without per-kind CSS selectors.
-- The primary content (image, video, editor) is the **only in-flow child**. The card sizes to just the content.
-- Chrome lives in two absolutely-positioned overlay panels: `.ss-studio-node-chrome-overlay-top` (above) and `.ss-studio-node-chrome-overlay` (below).
-- On hover/selection, overlays fade in via `opacity` transition. **No transforms on overlay containers** — this keeps port positions stable for the connection engine's `getBoundingClientRect` calls.
-- Card corners flatten and borders go transparent on hover so overlays join seamlessly.
-- When no primary content exists (empty source, failed load), the overlay pattern is skipped and the node renders as a normal card.
+- `topPanel[]` — element classes routed to `.ss-studio-node-chrome-overlay-top` (hover-reveal above card). Contains Quick Actions toolbar + title input.
+- `bottomPanel[]` — element classes routed to `.ss-studio-node-chrome-overlay` (hover-reveal below card). Contains config preview, kind label, status row.
+- `contentFillsCard` — if true, sets `data-chrome-layout="overlay"` for zero-padding / flex-column card styling (content-prominent nodes like media_ingest with a loaded image).
 
-To apply this pattern to a new node kind, call `applyOverlayChromeLayout()` with the appropriate policy. No CSS changes needed.
+Everything not claimed by topPanel or bottomPanel stays on the card: ports, inline config panels, output previews, text editors, media previews.
+
+**Overlay panels** are `position: absolute`, never in flow. They use `visibility: hidden; opacity: 0; pointer-events: none` at rest and fade in on hover/selection. **No transforms on overlay containers** — this keeps port positions stable for the connection engine's `getBoundingClientRect` calls.
+
+**Field-level progressive disclosure** is handled purely in CSS, not by the layout function. Secondary config fields (e.g., model/reasoning on text_generation) are hidden by default and shown on card hover/selection via `display: none` / `display: grid` toggles. Extend by adding per-node-kind selectors in the CSS — no TS changes needed.
+
+### Content-prominent nodes (media_ingest with loaded media)
+
+When `contentFillsCard` is true: the image/video is the only in-flow child. Card sizes to just the content. Card corners flatten and borders go transparent on hover so overlays join seamlessly. When no primary content exists (empty source, failed load), the overlay pattern is skipped and the node renders as a normal card.
 
 ### Functional nodes (text_generation, cli_command, http_request, etc.)
 
-Show their full chrome by default — title input, config fields, ports, output preview. No hover-reveal. These are "working" nodes where the controls ARE the content.
+Show their crucial config fields by default — system prompt, command, URL, input value. Ports visible at top. Secondary config (model selection, timeouts, advanced options) hidden until hover/selection. Quick Actions and title input revealed via top overlay on hover.
 
 ## Canvas Surface
 
