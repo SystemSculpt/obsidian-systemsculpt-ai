@@ -6,6 +6,7 @@ import { StreamingErrorHandler } from "../StreamingErrorHandler";
 import { StreamingService } from "../StreamingService";
 import { resolveStudioPiProviderApiKey } from "../../studio/piAuth/StudioPiAuthStorage";
 import { transformToolsForModel } from "../../utils/tooling";
+import { toChatCompletionsMessages } from "../../utils/messages/toChatCompletionsMessages";
 import { resolveRemoteProviderEndpoint } from "./RemoteProviderCatalog";
 
 type RemoteOpenRouterStreamInput = {
@@ -48,13 +49,10 @@ function buildRemoteRequestBody(input: RemoteOpenRouterStreamInput): Record<stri
   const endpoint = resolveRemoteProviderEndpoint(providerId);
   const body: Record<string, unknown> = {
     model: input.prepared.actualModelId,
-    messages: input.prepared.preparedMessages.map((message) => ({
-      role: message.role,
-      content: message.content,
-      ...(message.tool_call_id ? { tool_call_id: message.tool_call_id } : {}),
-      ...(message.tool_calls ? { tool_calls: message.tool_calls } : {}),
-      ...(message.name ? { name: message.name } : {}),
-    })),
+    messages: toChatCompletionsMessages(input.prepared.preparedMessages, {
+      includeDocumentContext: false,
+      includeToolNameOnToolMessages: false,
+    }),
     stream: true,
   };
 

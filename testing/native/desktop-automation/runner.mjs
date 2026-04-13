@@ -182,6 +182,13 @@ function getAssistantToolCalls(message) {
   return [];
 }
 
+function getSnapshotAssistantToolCalls(snapshot) {
+  const messages = Array.isArray(snapshot?.messages) ? snapshot.messages : [];
+  return messages
+    .filter((message) => message?.role === "assistant")
+    .flatMap((message) => getAssistantToolCalls(message));
+}
+
 function assertIncludes(actual, expected, label) {
   if (!String(actual || "").includes(expected)) {
     throw new Error(`${label} did not contain "${expected}". Actual value: ${String(actual || "")}`);
@@ -1204,7 +1211,8 @@ async function runProviderConnectedFilesystemToolTurn(client, model, providerId,
           text: prompt,
           includeContextFiles: false,
           webSearchEnabled: false,
-          approvalMode: "interactive",
+          approvalMode: "auto-approve",
+          agentModeEnabled: true,
         });
       } catch (error) {
         const failedSnapshot = await getChatSelectionSnapshot(client).catch(() => null);
@@ -1250,7 +1258,7 @@ async function runProviderConnectedFilesystemToolTurn(client, model, providerId,
 
   const assistant = getLastAssistantMessage(snapshot);
   const assistantText = toMessageText(assistant?.content).trim();
-  const toolCalls = getAssistantToolCalls(assistant);
+  const toolCalls = getSnapshotAssistantToolCalls(snapshot);
   const relevantToolCalls = toolCalls.filter((call) =>
     isRelevantProviderToolCall(call, fixtureDir, outputPath)
   );

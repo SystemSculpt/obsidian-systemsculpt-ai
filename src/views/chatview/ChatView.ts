@@ -2210,11 +2210,20 @@ export class ChatView extends ItemView {
     this.inputHandler?.setAutomationApprovalMode?.(mode);
   }
 
+  public isAgentModeEnabled(): boolean {
+    return this.inputHandler?.isAgentModeEnabled?.() ?? false;
+  }
+
+  public setAgentModeEnabled(enabled: boolean): void {
+    this.inputHandler?.setAgentModeEnabled?.(enabled);
+  }
+
   public async sendAutomationMessage(options?: {
     text?: string | object;
     includeContextFiles?: boolean;
     approvalMode?: AutomationApprovalMode;
     webSearchEnabled?: boolean;
+    agentModeEnabled?: boolean;
   }): Promise<void> {
     if (!this.inputHandler) {
       throw new Error("Chat input is not ready yet.");
@@ -2222,6 +2231,10 @@ export class ChatView extends ItemView {
 
     if (typeof options?.webSearchEnabled === "boolean") {
       this.inputHandler.setWebSearchEnabled(options.webSearchEnabled);
+    }
+
+    if (typeof options?.agentModeEnabled === "boolean") {
+      this.inputHandler.setAgentModeEnabled(options.agentModeEnabled);
     }
 
     if (options && "text" in options && options.text !== undefined) {
@@ -2274,6 +2287,7 @@ export class ChatView extends ItemView {
         value: this.getInputText(),
         webSearchEnabled: this.isWebSearchEnabled(),
         approvalMode: this.getAutomationApprovalMode(),
+        agentModeEnabled: this.isAgentModeEnabled(),
       },
     };
   }

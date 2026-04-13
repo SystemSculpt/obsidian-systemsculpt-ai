@@ -32,6 +32,7 @@ jest.mock("../../StreamingErrorHandler", () => ({
 }));
 
 jest.mock("../../../utils/tooling", () => ({
+  ...jest.requireActual("../../../utils/tooling"),
   transformToolsForModel: jest.fn((_model: string, _endpoint: string, tools: any[]) => tools),
 }));
 
@@ -117,6 +118,75 @@ describe("OpenRouterRemoteStreamExecutor", () => {
 
     const body = mockRequest.mock.calls[0][0].body;
     expect(body.tools).toEqual(tools);
+  });
+
+  it("normalizes completed tool calls before sending continuation messages", async () => {
+    const input = makeInput();
+    input.prepared.preparedMessages = [
+      { role: "user", content: "Write the fixture", message_id: "user-1" },
+      {
+        role: "assistant",
+        content: "",
+        message_id: "assistant-1",
+        tool_calls: [
+          {
+            id: "functions.mcp-filesystem_write_file:0",
+            messageId: "assistant-1",
+            request: {
+              id: "functions.mcp-filesystem_write_file:0",
+              type: "function",
+              function: {
+                name: "mcp-filesystem_write_file",
+                arguments: "{\"path\":\"fixture.md\",\"content\":\"ok\"}",
+              },
+            },
+            state: "completed",
+            result: {
+              success: true,
+              data: { path: "fixture.md" },
+            },
+            timestamp: 123,
+          },
+        ],
+      },
+      {
+        role: "tool",
+        tool_call_id: "functions.mcp-filesystem_write_file:0",
+        name: "mcp-filesystem_write_file",
+        content: "{\"path\":\"fixture.md\"}",
+        message_id: "tool-1",
+      },
+    ];
+
+    mockRequest.mockResolvedValue({ ok: true, status: 200, headers: new Map() });
+    mockStreamResponse.mockReturnValue((async function* () {})());
+
+    const gen = executeOpenRouterRemoteStream(input);
+    for await (const _ of gen) {}
+
+    const messages = mockRequest.mock.calls[0][0].body.messages;
+    expect(messages).toEqual([
+      { role: "user", content: "Write the fixture" },
+      {
+        role: "assistant",
+        content: null,
+        tool_calls: [
+          {
+            id: expect.stringMatching(/^call_/),
+            type: "function",
+            function: {
+              name: "mcp-filesystem_write_file",
+              arguments: "{\"path\":\"fixture.md\",\"content\":\"ok\"}",
+            },
+          },
+        ],
+      },
+      {
+        role: "tool",
+        content: "{\"path\":\"fixture.md\"}",
+        tool_call_id: messages[1].tool_calls[0].id,
+      },
+    ]);
   });
 
   it("includes reasoning_effort when specified", async () => {

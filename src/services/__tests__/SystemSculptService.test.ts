@@ -2,6 +2,7 @@ import { App, TFile } from "obsidian";
 import { SystemSculptService } from "../SystemSculptService";
 import { SystemSculptEnvironment } from "../api/SystemSculptEnvironment";
 import { AGENT_PRESET } from "../../constants/prompts";
+import { AGENT_TOOL_INSTRUCTIONS } from "../../constants/prompts/agent";
 
 const licenseService = {
   validateLicense: jest.fn().mockResolvedValue(true),
@@ -325,8 +326,31 @@ describe("SystemSculptService", () => {
       model: "openai/gpt-5.4-mini",
       messages: [{ role: "user", content: "Hello remote" }],
       stream: true,
+      tools: [
+        {
+          type: "function",
+          function: {
+            name: "mcp-filesystem_read",
+            description: "Read a file from the vault",
+            parameters: {
+              type: "object",
+              properties: {
+                path: { type: "string" },
+              },
+              required: ["path"],
+            },
+          },
+        },
+      ],
     });
     expect(actualModelId).toBe("openai/gpt-5.4-mini");
+    expect(contextFileService.prepareMessagesWithContext).toHaveBeenCalledWith(
+      [{ role: "user", content: "Hello remote", message_id: "msg_remote_preview_1" }],
+      new Set(),
+      true,
+      AGENT_TOOL_INSTRUCTIONS
+    );
+    expect(mcpService.getAvailableTools).toHaveBeenCalledTimes(1);
   });
 
   it("keeps repeated hosted tool-call ids unique across continuation rounds", async () => {

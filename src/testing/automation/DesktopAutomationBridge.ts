@@ -666,6 +666,8 @@ export class DesktopAutomationBridge {
           approvalMode: parseApprovalMode(body.approvalMode),
           webSearchEnabled:
             typeof body.webSearchEnabled === "boolean" ? body.webSearchEnabled : undefined,
+          agentModeEnabled:
+            typeof body.agentModeEnabled === "boolean" ? body.agentModeEnabled : undefined,
         });
         this.sendJson(response, 200, {
           ok: true,
