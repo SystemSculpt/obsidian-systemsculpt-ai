@@ -1158,7 +1158,18 @@ select.ss-pi-wizard__select { width: 100%; }
   user-select: none;
   pointer-events: auto;
   transition: border-color 0.15s ease, background 0.15s ease;
+  contain: layout style paint;
+  content-visibility: auto;
+  contain-intrinsic-size: 280px 200px;
+}
+
+/* Overlays use bottom:100%/top:100% and overflow the card box, so paint
+   containment must be dropped on the one card the user is interacting with.
+   Off-screen cards keep content-visibility:auto and skip rendering entirely. */
+.ss-studio-node-card:hover,
+.ss-studio-node-card.is-selected {
   contain: layout style;
+  content-visibility: visible;
 }
 
 .ss-studio-node-card.is-dragging,
