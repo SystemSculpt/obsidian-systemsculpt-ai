@@ -191,47 +191,57 @@ describe("Providers tab provider states", () => {
   });
 
   it("shows Ollama as a local setup flow with models.json guidance", async () => {
-    listStudioPiOAuthProvidersMock.mockResolvedValue([]);
-    listStudioPiProviderAuthRecordsMock.mockResolvedValue([
-      {
-        provider: "ollama",
-        displayName: "Ollama",
-        supportsOAuth: false,
-        hasAnyAuth: false,
-        hasStoredCredential: false,
-        source: "none",
-        credentialType: "none",
-        oauthExpiresAt: null,
-      },
-    ]);
+    const previousPiAgentDir = process.env.PI_CODING_AGENT_DIR;
+    delete process.env.PI_CODING_AGENT_DIR;
+    try {
+      listStudioPiOAuthProvidersMock.mockResolvedValue([]);
+      listStudioPiProviderAuthRecordsMock.mockResolvedValue([
+        {
+          provider: "ollama",
+          displayName: "Ollama",
+          supportsOAuth: false,
+          hasAnyAuth: false,
+          hasStoredCredential: false,
+          source: "none",
+          credentialType: "none",
+          oauthExpiresAt: null,
+        },
+      ]);
 
-    const plugin = {
-      app: new App(),
-      settings: {
-        customProviders: [],
-      },
-    } as any;
-    const tab = { plugin } as any;
-    const container = document.createElement("div");
+      const plugin = {
+        app: new App(),
+        settings: {
+          customProviders: [],
+        },
+      } as any;
+      const tab = { plugin } as any;
+      const container = document.createElement("div");
 
-    await displayProvidersTabContent(container, tab);
+      await displayProvidersTabContent(container, tab);
 
-    expect(container.textContent).toContain("Set up locally via Pi models.json");
+      expect(container.textContent).toContain("Set up locally via Pi models.json");
 
-    const setupButton = Array.from(container.querySelectorAll("button")).find(
-      (button) => button.textContent?.trim() === "Set up"
-    ) as HTMLButtonElement | undefined;
-    expect(setupButton).toBeTruthy();
+      const setupButton = Array.from(container.querySelectorAll("button")).find(
+        (button) => button.textContent?.trim() === "Set up"
+      ) as HTMLButtonElement | undefined;
+      expect(setupButton).toBeTruthy();
 
-    setupButton?.click();
-    await Promise.resolve();
+      setupButton?.click();
+      await Promise.resolve();
 
-    const setupPanel = container.querySelector(".ss-provider-connect-panel");
-    expect(setupPanel?.textContent).toContain(".systemsculpt/pi-agent/models.json");
-    expect(setupPanel?.textContent).toContain("http://localhost:11434/v1");
-    expect(setupPanel?.textContent).toContain("openai-completions");
-    expect(setupPanel?.textContent).toContain("\"ollama\"");
-    expect(setupPanel?.textContent).not.toContain("No available connection method");
+      const setupPanel = container.querySelector(".ss-provider-connect-panel");
+      expect(setupPanel?.textContent).toContain(".systemsculpt/pi-agent/models.json");
+      expect(setupPanel?.textContent).toContain("http://localhost:11434/v1");
+      expect(setupPanel?.textContent).toContain("openai-completions");
+      expect(setupPanel?.textContent).toContain("\"ollama\"");
+      expect(setupPanel?.textContent).not.toContain("No available connection method");
+    } finally {
+      if (previousPiAgentDir === undefined) {
+        delete process.env.PI_CODING_AGENT_DIR;
+      } else {
+        process.env.PI_CODING_AGENT_DIR = previousPiAgentDir;
+      }
+    }
   });
 
   it("treats detected local providers as ready without showing disconnect actions", async () => {

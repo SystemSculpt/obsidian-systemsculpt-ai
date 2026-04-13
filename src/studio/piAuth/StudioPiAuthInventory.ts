@@ -89,7 +89,11 @@ function resolveInventoryAuthStorage(
     return null;
   }
 
-  return createBundledPiAuthStorage(authPath);
+  try {
+    return createBundledPiAuthStorage(authPath);
+  } catch {
+    return null;
+  }
 }
 
 function readAuthJsonDirect(
