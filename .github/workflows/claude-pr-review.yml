@@ -27,56 +27,96 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Clean stale review comments and post initial comment
-        id: init_comment
+      - name: Prepare review inputs
+        id: review_inputs
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
-          # Delete stale "Reviewing..." comments from previous crashed runs
-          gh api "repos/${{ github.repository }}/issues/$PR_NUMBER/comments" --paginate --jq \
-            '.[] | select(.body | test("SystemSculpt AI -- PR Review")) | select(.body | test("will be updated with findings")) | .id' \
-            | while read -r OLD_ID; do
-                gh api "repos/${{ github.repository }}/issues/comments/$OLD_ID" -X DELETE
-                echo "Deleted stale review comment $OLD_ID"
-              done
+          REVIEW_GUIDE="${{ github.workspace }}/.github/claude-review.md"
+          DIFF_FILE="${{ github.workspace }}/pr-diff.txt"
+          SKIPPED_FILE="${{ github.workspace }}/skipped-files.md"
+          INCLUDED_FILE="${{ github.workspace }}/reviewed-files.txt"
+          MAX_FILE_BYTES=200000
+          MAX_DIFF_LINES=1200
 
-          BODY=$(cat <<'COMMENT'
-          **SystemSculpt AI -- PR Review**
+          if [ ! -f "$REVIEW_GUIDE" ]; then
+            echo "Missing review guide: $REVIEW_GUIDE" >&2
+            exit 1
+          fi
 
-          Reviewing this PR now. Checking:
-          - TypeScript strict mode & type safety
-          - Plugin lifecycle (settings, bridge, hot-reload)
-          - Platform separation (desktop vs mobile)
-          - Build & bundle integrity
-          - Test coverage
-          - Security (no leaked keys, safe user data handling)
-
-          *This comment will be updated with findings shortly...*
-          COMMENT
-          )
-
-          COMMENT_URL=$(gh pr comment "$PR_NUMBER" --body "$BODY" 2>&1 | grep -o 'https://[^ ]*')
-          COMMENT_ID=$(echo "$COMMENT_URL" | grep -o '[0-9]*$')
-          echo "comment_id=$COMMENT_ID" >> "$GITHUB_OUTPUT"
-
-      - name: Capture PR diff
-        id: diff
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
-        run: |
           BASE=${{ github.event.pull_request.base.sha || '' }}
           HEAD=${{ github.event.pull_request.head.sha || 'HEAD' }}
-          if [ -z "$BASE" ]; then
+          if [ "$EVENT_NAME" = "issue_comment" ]; then
+            gh pr checkout "$PR_NUMBER"
+            BASE=$(gh pr view "$PR_NUMBER" --json baseRefName --jq '.baseRefName')
+            git fetch origin "$BASE" --depth=1
+            BASE="origin/$BASE"
+            HEAD="HEAD"
+          elif [ -z "$BASE" ]; then
             BASE=$(gh pr view "$PR_NUMBER" --json baseRefName --jq '.baseRefName')
             BASE="origin/$BASE"
           fi
-          git diff "$BASE"..."$HEAD" > ${{ github.workspace }}/pr-diff.txt
-          echo "diff_file=${{ github.workspace }}/pr-diff.txt" >> "$GITHUB_OUTPUT"
-          echo "Captured diff: $(wc -l < ${{ github.workspace }}/pr-diff.txt) lines"
 
-      - uses: anthropics/claude-code-action@b2fdd80112e5f140e097b11d7a3d9edf0b226fd0 # v1 (latest main)
+          mapfile -d '' changed_files < <(git diff --name-only -z "$BASE"..."$HEAD")
+          included_files=()
+          skipped_entries=()
+
+          for file in "${changed_files[@]}"; do
+            file="${file%$'\0'}"
+            [ -z "$file" ] && continue
+            reason=""
+            case "$file" in
+              package-lock.json|npm-shrinkwrap.json|pnpm-lock.yaml|yarn.lock|bun.lock|bun.lockb|Cargo.lock|Gemfile.lock|Pipfile.lock|poetry.lock|uv.lock|composer.lock|go.sum|go.work.sum|*.lock)
+                reason="lockfile"
+                ;;
+              *.snap|*.snapshot|*__snapshots__/*|*.generated.*|*.gen.*|*.min.js|*.min.css|*.map|dist/*|*/dist/*|build/*|*/build/*|coverage/*|*/coverage/*|.next/*|*/.next/*|out/*|*/out/*|generated/*|*/generated/*|src/generated/*|*/src/generated/*)
+                reason="generated or snapshot file"
+                ;;
+            esac
+
+            if [ -z "$reason" ]; then
+              bytes=$(git cat-file -s "$HEAD:$file" 2>/dev/null || echo 0)
+              diff_lines=$(git diff --numstat "$BASE"..."$HEAD" -- "$file" | awk '$1 ~ /^[0-9]+$/ && $2 ~ /^[0-9]+$/ {print $1 + $2; found=1} END {if (!found) print 0}')
+              if [ "$bytes" -gt "$MAX_FILE_BYTES" ]; then
+                reason="large file (${bytes} bytes)"
+              elif [ "$diff_lines" -gt "$MAX_DIFF_LINES" ]; then
+                reason="large diff (${diff_lines} changed lines)"
+              fi
+            fi
+
+            if [ -n "$reason" ]; then
+              skipped_entries+=("$file -- $reason")
+            else
+              included_files+=("$file")
+            fi
+          done
+
+          if [ "${#included_files[@]}" -gt 0 ]; then
+            git diff "$BASE"..."$HEAD" -- "${included_files[@]}" > "$DIFF_FILE"
+            printf '%s\n' "${included_files[@]}" > "$INCLUDED_FILE"
+          else
+            printf 'No reviewable files remained after filtering generated files, lockfiles, snapshots, and oversized files.\n' > "$DIFF_FILE"
+            : > "$INCLUDED_FILE"
+          fi
+
+          {
+            echo "# Skipped Files"
+            if [ "${#skipped_entries[@]}" -gt 0 ]; then
+              printf -- '- %s\n' "${skipped_entries[@]}"
+            else
+              echo "No files were skipped."
+            fi
+          } > "$SKIPPED_FILE"
+
+          echo "review_guide=$REVIEW_GUIDE" >> "$GITHUB_OUTPUT"
+          echo "diff_file=$DIFF_FILE" >> "$GITHUB_OUTPUT"
+          echo "skipped_file=$SKIPPED_FILE" >> "$GITHUB_OUTPUT"
+          echo "included_file=$INCLUDED_FILE" >> "$GITHUB_OUTPUT"
+          echo "Prepared filtered diff: ${#included_files[@]} included, ${#skipped_entries[@]} skipped"
+
+      - uses: anthropics/claude-code-action@b2fdd80112e5f140e097b11d7a3d9edf0b226fd0 # v1
         id: claude
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -88,56 +128,25 @@ jobs:
               }
             }
           prompt: |
-            You are reviewing PR #${{ github.event.pull_request.number || github.event.issue.number }} for **SystemSculpt AI**, an Obsidian plugin (TypeScript, esbuild, Jest).
+            You are reviewing PR #${{ github.event.pull_request.number || github.event.issue.number }} for `${{ github.repository }}`.
 
-            The PR diff has been saved to `${{ steps.diff.outputs.diff_file }}`. Read that file first to see all changes, then review against these criteria:
+            Read these files in order:
+            1. Review guide: `${{ steps.review_inputs.outputs.review_guide }}`
+            2. Filtered PR diff: `${{ steps.review_inputs.outputs.diff_file }}`
+            3. Skipped-file summary: `${{ steps.review_inputs.outputs.skipped_file }}`
 
-            **TypeScript & type safety**
-            - Strict mode compliance -- no untyped `any` without justification
-            - Proper use of Obsidian plugin API types
-
-            **Plugin lifecycle**
-            - Settings persistence correctness
-            - Bridge reconnection and hot-reload paths not broken
-            - onload/onunload cleanup (event listeners, intervals, MCP connections)
-
-            **Platform separation**
-            - Desktop vs mobile code paths must not bleed across
-            - MCP transport and tool registration isolated correctly
-
-            **Architecture**
-            - Source structure: `src/core` (plugin/UI), `src/services` (logic), `src/mcp-tools`, `src/settings`, `src/views`, `src/commands`
-            - Path alias: `@/*` maps to `Nexus/src/*`
-
-            **Build & bundle**
-            - esbuild config changes must not break CSS inlining or banner wrapping
-            - Plugin sync (multi-platform vault mirroring) impact if touched
-
-            **Tests**
-            - Jest with SWC; mocks for `obsidian`, `pi-coding-agent`, `pi-ai`
-            - Changes to services should have corresponding test coverage
-
-            **Security**
-            - No API keys, tokens, or secrets in code
-            - User data handling in chat/embeddings must be safe
-
-            ## Verification of external claims
-
-            You have access to WebSearch and WebFetch. When reviewing, if you encounter:
-            - Model IDs, API endpoint URLs, or SDK method names you don't recognize
-            - Claims about what third-party services support or don't support
-            - Version numbers or feature availability of external dependencies
-
-            **Verify before flagging.** Use web search to confirm whether a model ID, API, or library actually exists before claiming it's invalid. If you cannot verify, say "unable to verify" rather than asserting something doesn't exist. False positives waste review cycles.
+            The diff has already excluded generated files, lockfiles, snapshots, and oversized files. Review only the filtered diff. Mention skipped files only under Notes when the skipped summary itself is relevant to reviewer confidence or risk.
 
             ## Output rules
 
-            Your ENTIRE output must be ONLY the formatted review below. Do NOT include any preamble, conversational text, or introductory sentences. Start directly with the header line.
+            Your ENTIRE output must be ONLY the formatted review. Do NOT include any preamble, conversational text, or introductory sentences. Start directly with the exact review title from the review guide.
 
-            **SystemSculpt AI -- PR Review**
+            Required structure:
+
+            **<exact review title from .github/claude-review.md>**
 
             ### Summary
-            <One line: what the PR does and overall verdict, separated by semicolons. Example: "Adds bridge reconnect logic; refactors settings persistence; looks good, one suggestion below.">
+            <One line: what the PR does and overall verdict, separated by semicolons.>
 
             ### Findings
 
@@ -162,40 +171,161 @@ jobs:
 
             Omit any severity section that has no items. If NO issues found at all, write:
 
-            > All clear -- no issues detected. Code looks good across type safety, plugin lifecycle, platform separation, build integrity, tests, and security.
+            > All clear -- no issues detected. Code looks good across <list key review areas from the guide>.
 
             ### Files Reviewed
-            <bullet list of key files touched in this PR>
+            <bullet list of key files touched in this PR, based on the filtered diff>
 
             Be specific -- cite file paths and line numbers. Skip stylistic nits unless they affect readability significantly.
 
-      - name: Update review comment with findings
-        if: always() && steps.init_comment.outputs.comment_id
+      - name: Validate Claude review output
+        id: validate_initial
+        if: always() && steps.review_inputs.outcome == 'success'
         env:
-          GH_TOKEN: ${{ github.token }}
-          COMMENT_ID: ${{ steps.init_comment.outputs.comment_id }}
           EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
         run: |
-          if [ -f "$EXECUTION_FILE" ]; then
-            RESULT=$(jq -r '[.[] | select(.type == "result")] | last | .result // empty' "$EXECUTION_FILE" 2>/dev/null || echo "")
-            if [ -n "$RESULT" ]; then
-              gh api "repos/${{ github.repository }}/issues/comments/$COMMENT_ID" \
-                -X PATCH \
-                -f body="$RESULT"
-              echo "Updated comment with review findings"
-            else
-              gh api "repos/${{ github.repository }}/issues/comments/$COMMENT_ID" \
-                -X PATCH \
-                -f body="**SystemSculpt AI -- PR Review**
+          REVIEW_FILE="${{ github.workspace }}/claude-review-output.md"
+          REASON_FILE="${{ github.workspace }}/claude-review-validation.txt"
+          reasons=()
 
-          Review completed but no structured output was captured. Check the [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details."
-              echo "No result found in execution file, posted fallback"
+          if [ ! -f "$EXECUTION_FILE" ]; then
+            RESULT=""
+            reasons+=("No Claude execution file was produced.")
+          else
+            RESULT=$(jq -r '[.[] | select(.type == "result")] | last | .result // empty' "$EXECUTION_FILE" 2>/dev/null || echo "")
+          fi
+
+          printf '%s\n' "$RESULT" > "$REVIEW_FILE"
+
+          if [ -z "$RESULT" ]; then
+            reasons+=("Claude returned an empty review body.")
+          fi
+          if ! grep -qE '^\*\*.+ -- PR Review\*\*$' "$REVIEW_FILE"; then
+            reasons+=("Review must start with a bold '**... -- PR Review**' header.")
+          fi
+          if ! grep -q '^### Summary' "$REVIEW_FILE"; then
+            reasons+=("Review is missing the '### Summary' section.")
+          fi
+          if ! grep -q '^### Findings' "$REVIEW_FILE"; then
+            reasons+=("Review is missing the '### Findings' section.")
+          fi
+          if ! grep -q '^### Files Reviewed' "$REVIEW_FILE"; then
+            reasons+=("Review is missing the '### Files Reviewed' section.")
+          fi
+          if grep -qE '<(exact review title|One line|bullet list|list key review areas|One-sentence summary|file:line|PROJECT_NAME|short project description|WRITE)[^>]*>' "$REVIEW_FILE"; then
+            reasons+=("Review contains unreplaced template placeholder text.")
+          fi
+
+          echo "review_file=$REVIEW_FILE" >> "$GITHUB_OUTPUT"
+          echo "reason_file=$REASON_FILE" >> "$GITHUB_OUTPUT"
+
+          if [ "${#reasons[@]}" -eq 0 ]; then
+            echo "valid=true" >> "$GITHUB_OUTPUT"
+            printf 'Review output passed validation.\n' > "$REASON_FILE"
+          else
+            echo "valid=false" >> "$GITHUB_OUTPUT"
+            printf '%s\n' "${reasons[@]}" > "$REASON_FILE"
+            printf 'Review output failed validation:\n'
+            printf -- '- %s\n' "${reasons[@]}"
+          fi
+
+      - uses: anthropics/claude-code-action@b2fdd80112e5f140e097b11d7a3d9edf0b226fd0 # v1
+        id: claude_retry
+        if: always() && steps.review_inputs.outcome == 'success' && steps.validate_initial.outputs.valid != 'true'
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          show_full_output: true
+          settings: |
+            {
+              "permissions": {
+                "allow": ["WebSearch", "WebFetch"]
+              }
+            }
+          prompt: |
+            Your previous PR review output failed validation.
+
+            Read these files in order:
+            1. Validation reason: `${{ steps.validate_initial.outputs.reason_file }}`
+            2. Review guide: `${{ steps.review_inputs.outputs.review_guide }}`
+            3. Filtered PR diff: `${{ steps.review_inputs.outputs.diff_file }}`
+            4. Skipped-file summary: `${{ steps.review_inputs.outputs.skipped_file }}`
+
+            Produce a corrected review that satisfies the validation reason and follows the required structure exactly. Start directly with the exact review title from the review guide. Do not include any preamble or explanation of the retry.
+
+      - name: Post or update PR review
+        if: always() && steps.review_inputs.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
+          INITIAL_EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
+          RETRY_EXECUTION_FILE: ${{ steps.claude_retry.outputs.execution_file }}
+          MARKER: "<!-- claude-pr-review:managed -->"
+        run: |
+          validate_review_file() {
+            local review_file="$1"
+            local reasons=()
+
+            if ! grep -qE '^\*\*.+ -- PR Review\*\*$' "$review_file"; then
+              reasons+=("Review must start with a bold '**... -- PR Review**' header.")
+            fi
+            if ! grep -q '^### Summary' "$review_file"; then
+              reasons+=("Review is missing the '### Summary' section.")
+            fi
+            if ! grep -q '^### Findings' "$review_file"; then
+              reasons+=("Review is missing the '### Findings' section.")
+            fi
+            if ! grep -q '^### Files Reviewed' "$review_file"; then
+              reasons+=("Review is missing the '### Files Reviewed' section.")
+            fi
+            if grep -qE '<(exact review title|One line|bullet list|list key review areas|One-sentence summary|file:line|PROJECT_NAME|short project description|WRITE)[^>]*>' "$review_file"; then
+              reasons+=("Review contains unreplaced template placeholder text.")
+            fi
+
+            if [ "${#reasons[@]}" -gt 0 ]; then
+              printf 'Final review output failed validation; not posting a PR review.\n'
+              printf -- '- %s\n' "${reasons[@]}"
+              return 1
+            fi
+          }
+
+          EXECUTION_FILE="$INITIAL_EXECUTION_FILE"
+          if [ -n "$RETRY_EXECUTION_FILE" ] && [ -f "$RETRY_EXECUTION_FILE" ]; then
+            EXECUTION_FILE="$RETRY_EXECUTION_FILE"
+          fi
+
+          if [ ! -f "$EXECUTION_FILE" ]; then
+            echo "No Claude execution file found after retry; not posting a PR review."
+            exit 1
+          fi
+
+          RESULT=$(jq -r '[.[] | select(.type == "result")] | last | .result // empty' "$EXECUTION_FILE" 2>/dev/null || echo "")
+          if [ -z "$RESULT" ]; then
+            echo "No Claude review output captured after retry; not posting a PR review."
+            exit 1
+          fi
+
+          REVIEW_FILE="${{ github.workspace }}/final-claude-review.md"
+          BODY_FILE="${{ github.workspace }}/final-claude-review-body.md"
+          printf '%s\n' "$RESULT" > "$REVIEW_FILE"
+          validate_review_file "$REVIEW_FILE"
+
+          {
+            cat "$REVIEW_FILE"
+            printf '\n%s\n' "$MARKER"
+            printf '<!-- claude-pr-review-run:%s/%s/actions/runs/%s -->\n' "${{ github.server_url }}" "${{ github.repository }}" "${{ github.run_id }}"
+          } > "$BODY_FILE"
+
+          EXISTING_REVIEW_ID=$(gh api "repos/${{ github.repository }}/pulls/$PR_NUMBER/reviews" --paginate --jq ".[] | select(.body != null and (.body | contains(\"$MARKER\"))) | .id" | tail -n 1)
+
+          if [ -n "$EXISTING_REVIEW_ID" ]; then
+            BODY=$(cat "$BODY_FILE")
+            if gh api "repos/${{ github.repository }}/pulls/$PR_NUMBER/reviews/$EXISTING_REVIEW_ID" -X PUT -f body="$BODY" >/dev/null; then
+              echo "Updated existing managed PR review $EXISTING_REVIEW_ID"
+            else
+              echo "Failed to update managed PR review $EXISTING_REVIEW_ID; submitting a new review"
+              gh pr review "$PR_NUMBER" --comment --body-file "$BODY_FILE"
             fi
           else
-            gh api "repos/${{ github.repository }}/issues/comments/$COMMENT_ID" \
-              -X PATCH \
-              -f body="**SystemSculpt AI -- PR Review**
-
-          Review failed. Check the [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details."
-            echo "No execution file found, posted fallback"
+            gh pr review "$PR_NUMBER" --comment --body-file "$BODY_FILE"
+            echo "Submitted managed PR review"
           fi
