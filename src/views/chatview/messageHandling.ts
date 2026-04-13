@@ -1,7 +1,7 @@
 import { ChatView } from "./ChatView";
 import { ChatRole, MultiPartContent, ChatMessage, MessagePart, UrlCitation } from "../../types";
 import { ButtonComponent, Notice } from "obsidian";
-import { appendMessageToGroupedContainer, removeGroupIfEmpty } from "./utils/MessageGrouping";
+import { appendMessageToGroupedContainer, removeMessageElement } from "./utils/MessageGrouping";
 // Tool call rendering is fully status-driven from PI tool events.
 
 export const messageHandling = {
@@ -251,12 +251,7 @@ export const messageHandling = {
         chatView.messages.splice(index, 1);
         chatView.clearPiSessionState({ save: false });
         await chatView.saveChat();
-
-        const parentGroup = messageEl.parentElement as HTMLElement | null;
-        messageEl.remove();
-        if (parentGroup) {
-          removeGroupIfEmpty(parentGroup);
-        }
+        removeMessageElement(messageEl);
       }
     };
     

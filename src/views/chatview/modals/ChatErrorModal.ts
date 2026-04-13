@@ -13,9 +13,6 @@ export interface ChatErrorModalOptions {
   onPrimaryAction?: () => void | Promise<void>;
 }
 
-// Prominent dismissable modal for chat errors that the user needs to read at
-// their own pace (quota exhaustion, auth failure, model unavailable, etc).
-// Replaces transient Notices for any error that is too important to flash by.
 export class ChatErrorModal extends StandardModal {
   private readonly options: ChatErrorModalOptions;
 
@@ -50,7 +47,9 @@ export class ChatErrorModal extends StandardModal {
           this.close();
           try {
             await this.options.onPrimaryAction!();
-          } catch {}
+          } catch (err) {
+            console.warn("[ChatErrorModal] primary action failed", err);
+          }
         },
         true,
       );

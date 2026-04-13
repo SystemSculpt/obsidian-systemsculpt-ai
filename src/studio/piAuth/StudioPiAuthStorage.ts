@@ -334,35 +334,23 @@ export async function loginStudioPiProviderOAuth(
     });
   });
 
-  // After successful OAuth login, ensure the credential is persisted to auth.json.
-  // The SDK's persistProviderChange uses proper-lockfile which can silently fail
-  // in Electron. As a safety net, read the credential from the in-memory storage
-  // and write auth.json directly if the SDK's persist was lost.
+  // The SDK's proper-lockfile-backed persist can fail silently in Electron;
+  // mirror the credential to auth.json directly so login state survives a
+  // restart even when the SDK's write was lost.
   try {
     const credential = storage.get(providerId);
     if (credential) {
-      const authPath = resolvePiAuthPath(options.plugin);
-      if (authPath) {
-        const fs = require("fs");
-        const path = require("path");
-        const dir = path.dirname(authPath);
-        if (!fs.existsSync(dir)) {
-          fs.mkdirSync(dir, { recursive: true });
-        }
-        let existing: Record<string, unknown> = {};
-        try {
-          if (fs.existsSync(authPath)) {
-            existing = JSON.parse(fs.readFileSync(authPath, "utf-8"));
-          }
-        } catch {
-          // Corrupt auth.json — start fresh so the new credential is not lost.
-        }
-        existing[providerId] = credential;
-        fs.writeFileSync(authPath, JSON.stringify(existing, null, 2), "utf-8");
-      }
+      mutateAuthJsonFile(
+        options.plugin,
+        (data) => {
+          data[providerId] = credential;
+          return data;
+        },
+        { ensureDir: true, logLabel: `login ${providerId}` },
+      );
     }
   } catch {
-    // Best-effort — the login itself succeeded even if disk persist fails.
+    // Best-effort — login itself succeeded even if the disk mirror failed.
   }
 }
 
@@ -408,37 +396,56 @@ export async function clearStudioPiProviderAuth(
     }
   }
 
-  // The SDK's FileAuthStorageBackend uses proper-lockfile, which can fail
-  // silently in Obsidian's Electron renderer — and the in-memory fallback in
-  // createBundledPiAuthStorage explicitly sacrifices write-back. Either path
-  // leaves auth.json untouched, so a fresh refreshProviderList() re-reads the
-  // old credential and the UI pops back to "Disconnect". Rewriting auth.json
-  // directly is the only way to guarantee the credential is actually gone.
-  rewriteAuthJsonWithoutProvider(provider, context.plugin);
+  // The SDK's proper-lockfile path silently no-ops writes in Electron's
+  // renderer (and the inMemory fallback explicitly sacrifices write-back), so
+  // refreshProviderList would read the stale credential right back. Rewrite
+  // auth.json directly to guarantee the credential is actually gone.
+  mutateAuthJsonFile(
+    context.plugin,
+    (data) => {
+      if (!(provider in data)) return null;
+      delete data[provider];
+      return data;
+    },
+    { logLabel: `clear ${provider}` },
+  );
 }
 
-function rewriteAuthJsonWithoutProvider(
-  provider: string,
-  plugin?: SystemSculptPlugin | null,
+function mutateAuthJsonFile(
+  plugin: SystemSculptPlugin | null | undefined,
+  mutator: (data: Record<string, unknown>) => Record<string, unknown> | null,
+  options: { ensureDir?: boolean; logLabel: string },
 ): void {
   if (!Platform.isDesktopApp) return;
   const authPath = resolvePiAuthPath(plugin);
   if (!authPath) return;
   try {
     const fs = require("fs");
-    if (!fs.existsSync(authPath)) return;
-    const rawContent = fs.readFileSync(authPath, "utf-8");
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(rawContent);
-    } catch {
-      return;
+    if (options.ensureDir) {
+      const path = require("path");
+      const dir = path.dirname(authPath);
+      try {
+        fs.mkdirSync(dir, { recursive: true });
+      } catch {
+        // Directory already exists or cannot be created — let readFile/writeFile error surface below.
+      }
     }
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return;
-    const data = parsed as Record<string, unknown>;
-    if (!(provider in data)) return;
-    delete data[provider];
-    fs.writeFileSync(authPath, JSON.stringify(data, null, 2), "utf-8");
+    let existing: Record<string, unknown> = {};
+    try {
+      const rawContent = fs.readFileSync(authPath, "utf-8");
+      const parsed = JSON.parse(rawContent);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        existing = parsed as Record<string, unknown>;
+      }
+    } catch (err: any) {
+      if (err?.code !== "ENOENT") {
+        // Corrupt JSON or read failure — start from an empty object so the
+        // mutator can still write a fresh file rather than losing all state.
+      }
+    }
+    const next = mutator(existing);
+    if (!next) return;
+    fs.writeFileSync(authPath, JSON.stringify(next, null, 2), "utf-8");
     try {
       fs.chmodSync(authPath, 0o600);
     } catch {
@@ -446,7 +453,7 @@ function rewriteAuthJsonWithoutProvider(
     }
   } catch (err) {
     console.warn(
-      `[StudioPiAuthStorage] Direct fs rewrite of auth.json failed for ${provider}.`,
+      `[StudioPiAuthStorage] Direct fs auth.json mutate failed (${options.logLabel}).`,
       err,
     );
   }

@@ -22,9 +22,9 @@ import { AGENT_PRESET, GENERAL_USE_PRESET } from "../../constants/prompts";
 import { ChatExportService } from "./export/ChatExportService";
 import type { ChatExportOptions } from "../../types/chatExport";
 import type { ChatExportResult } from "./export/ChatExportTypes";
-import { removeGroupIfEmpty } from "./utils/MessageGrouping";
+import { removeMessageElement } from "./utils/MessageGrouping";
 import { classifyQuotaExceededError } from "./utils/quotaError";
-import { classifyStreamError } from "./utils/streamError";
+import { classifyStreamError, type StreamErrorKind } from "./utils/streamError";
 import { ChatErrorModal } from "./modals/ChatErrorModal";
 import type { ToolCall } from "../../types/toolCalls";
 import { tryCopyToClipboard } from "../../utils/clipboard";
@@ -603,16 +603,13 @@ export class ChatView extends ItemView {
 
       if (!automationRequestActive) {
         const classification = classifyStreamError(error);
-        // Transient categories (short rate limits, network blips, brief
-        // server outages) stay as small Notices so they don't interrupt the
-        // user. Hard limits / auth / unknown / model_not_found surface as a
-        // modal so the user can read at their own pace.
         if (classification.transient) {
           const duration = classification.kind === "rate_limit" ? 12000 : 10000;
           new Notice(classification.userMessage, duration);
         } else {
           const isHardRateLimit = classification.kind === "rate_limit";
           const isAuth = classification.kind === "auth";
+          const wantsProvidersAction = isAuth || isHardRateLimit;
           new ChatErrorModal({
             app: this.app,
             title: isHardRateLimit
@@ -622,22 +619,17 @@ export class ChatView extends ItemView {
               ? "alert-octagon"
               : this.iconForStreamErrorKind(classification.kind),
             message: classification.userMessage,
-            primaryActionLabel: isAuth
-              ? "Open Providers"
-              : isHardRateLimit
-                ? "Open Providers"
-                : undefined,
-            onPrimaryAction:
-              isAuth || isHardRateLimit
-                ? () => this.openSetupTab("providers")
-                : undefined,
+            primaryActionLabel: wantsProvidersAction ? "Open Providers" : undefined,
+            onPrimaryAction: wantsProvidersAction
+              ? () => this.openSetupTab("providers")
+              : undefined,
           }).open();
         }
       }
     }
   }
 
-  private titleForStreamErrorKind(kind: string): string {
+  private titleForStreamErrorKind(kind: StreamErrorKind): string {
     switch (kind) {
       case "auth":
         return "Authentication required";
@@ -645,13 +637,15 @@ export class ChatView extends ItemView {
         return "Model not available";
       case "server":
         return "Provider error";
+      case "rate_limit":
+      case "network":
       case "unknown":
       default:
         return "Chat request failed";
     }
   }
 
-  private iconForStreamErrorKind(kind: string): string {
+  private iconForStreamErrorKind(kind: StreamErrorKind): string {
     switch (kind) {
       case "auth":
         return "key-round";
@@ -659,6 +653,8 @@ export class ChatView extends ItemView {
         return "help-circle";
       case "server":
         return "server-crash";
+      case "rate_limit":
+      case "network":
       case "unknown":
       default:
         return "alert-triangle";
@@ -844,25 +840,11 @@ export class ChatView extends ItemView {
     }
     const lastGroup = this.chatContainer.querySelector(':scope > .systemsculpt-message-group:last-of-type') as HTMLElement | null;
     const lastMessage = lastGroup?.querySelector('.systemsculpt-message:last-of-type') as HTMLElement | null;
-    if (lastMessage) {
-      const parentGroup = lastMessage.parentElement as HTMLElement | null;
-      lastMessage.remove();
-      if (parentGroup) {
-        removeGroupIfEmpty(parentGroup);
-      }
-    }
+    removeMessageElement(lastMessage);
   }
 
   private async restoreLastUserMessageToComposer(): Promise<void> {
     if (!this.inputHandler) {
-      return;
-    }
-    // Prefer the raw text the user actually typed, captured at submit time.
-    // It survives removal of the failed message from this.messages and isn't
-    // affected by any later normalization or trimming.
-    const snapshot = this.inputHandler.consumeSubmittedInputSnapshot?.();
-    if (snapshot) {
-      this.inputHandler.setInputText(snapshot.rawText);
       return;
     }
     const lastUserMessage = [...this.messages].reverse().find((msg) => msg.role === "user");
@@ -886,19 +868,9 @@ export class ChatView extends ItemView {
     const node = this.chatContainer.querySelector(
       `.systemsculpt-message[data-message-id="${CSS.escape(messageId)}"]`,
     ) as HTMLElement | null;
-    if (!node) return;
-    const parentGroup = node.parentElement as HTMLElement | null;
-    node.remove();
-    if (parentGroup) {
-      removeGroupIfEmpty(parentGroup);
-    }
+    removeMessageElement(node);
   }
 
-  // Cleanup hook for the failed-submission path. Pulls the matching user
-  // message out of this.messages + DOM, runs the existing assistant-side
-  // cleanup, and restores the original input text via the InputHandler
-  // snapshot so the user can resend without having to retype. Returns true
-  // when a snapshot was applied so callers can skip the legacy restore path.
   public async removeFailedSubmissionTurn(): Promise<boolean> {
     const snapshot = this.inputHandler?.consumeSubmittedInputSnapshot?.() ?? null;
     if (snapshot) {
@@ -916,9 +888,6 @@ export class ChatView extends ItemView {
   private async resetFailedAssistantTurn(): Promise<void> {
     const restored = await this.removeFailedSubmissionTurn();
     if (!restored) {
-      // No snapshot available (legacy paths) — fall back to reading the
-      // last user message out of this.messages so we don't regress the
-      // restore behavior for callers that pre-date the snapshot field.
       await this.restoreLastUserMessageToComposer();
     }
   }

@@ -85,3 +85,12 @@ export function removeGroupIfEmpty(groupEl: HTMLElement): void {
     groupEl.remove();
   }
 }
+
+export function removeMessageElement(messageEl: HTMLElement | null): void {
+  if (!messageEl) return;
+  const parentGroup = messageEl.parentElement as HTMLElement | null;
+  messageEl.remove();
+  if (parentGroup) {
+    removeGroupIfEmpty(parentGroup);
+  }
+}

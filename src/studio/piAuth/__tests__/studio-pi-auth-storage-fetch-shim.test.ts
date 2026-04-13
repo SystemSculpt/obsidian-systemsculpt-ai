@@ -6,8 +6,8 @@ describe("StudioPiAuthStorage fetch shim integration", () => {
   beforeEach(() => {
     jest.resetModules();
     jest.clearAllMocks();
-    // Ensure any previous test's doMock calls do not bleed into this one.
-    // jest.resetModules() clears the module cache but not the doMock registry.
+    // jest.resetModules() clears the cache but not the doMock registry, so
+    // un-register module mocks each test or fs/path stubs leak.
     jest.dontMock("fs");
     jest.dontMock("../../../services/pi/PiSdkStoragePaths");
     jest.dontMock("../../../services/pi/PiSdkDesktopSupport");

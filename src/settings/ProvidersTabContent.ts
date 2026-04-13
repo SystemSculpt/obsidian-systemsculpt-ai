@@ -196,6 +196,31 @@ function optimisticDisconnectProviderRow(
   }
 }
 
+async function performProviderDisconnect(
+  state: TabState,
+  plugin: SystemSculptSettingTab["plugin"],
+  provider: string,
+  label: string,
+  rerender: () => void,
+): Promise<void> {
+  optimisticDisconnectProviderRow(state, provider);
+  state.actionRunning = true;
+  rerender();
+  try {
+    const { clearStudioPiProviderAuth } = await loadStudioPiAuthStorageModule();
+    await clearStudioPiProviderAuth(provider, { plugin });
+    new Notice(`Disconnected ${label}.`);
+  } catch (error) {
+    new Notice(
+      `Failed to disconnect ${label}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  } finally {
+    await refreshProviderList(state, plugin);
+    state.actionRunning = false;
+    rerender();
+  }
+}
+
 // ─── Render ─────────────────────────────────────────────────────────────────
 
 function renderProvidersList(
@@ -354,50 +379,17 @@ function renderProviderRow(
       text: "Disconnect",
     });
     disconnectBtn.disabled = state.actionRunning;
-    disconnectBtn.addEventListener("click", async () => {
-      optimisticDisconnectProviderRow(state, record.provider);
-      state.actionRunning = true;
-      rerender();
-      try {
-        const { clearStudioPiProviderAuth } = await loadStudioPiAuthStorageModule();
-        await clearStudioPiProviderAuth(record.provider, { plugin });
-        new Notice(`Disconnected ${label}.`);
-        await refreshProviderList(state, plugin);
-      } catch (error) {
-        new Notice(
-          `Failed to disconnect ${label}: ${error instanceof Error ? error.message : String(error)}`
-        );
-        await refreshProviderList(state, plugin);
-      } finally {
-        state.actionRunning = false;
-        rerender();
-      }
+    disconnectBtn.addEventListener("click", () => {
+      void performProviderDisconnect(state, plugin, record.provider, label, rerender);
     });
   } else if (connected) {
-    // Disconnect button
     const disconnectBtn = actions.createEl("button", {
       cls: "ss-provider-row__btn ss-provider-row__btn--disconnect",
       text: "Disconnect",
     });
     disconnectBtn.disabled = state.actionRunning;
-    disconnectBtn.addEventListener("click", async () => {
-      optimisticDisconnectProviderRow(state, record.provider);
-      state.actionRunning = true;
-      rerender();
-      try {
-        const { clearStudioPiProviderAuth } = await loadStudioPiAuthStorageModule();
-        await clearStudioPiProviderAuth(record.provider, { plugin });
-        new Notice(`Disconnected ${label}.`);
-        await refreshProviderList(state, plugin);
-      } catch (error) {
-        new Notice(
-          `Failed to disconnect ${label}: ${error instanceof Error ? error.message : String(error)}`
-        );
-        await refreshProviderList(state, plugin);
-      } finally {
-        state.actionRunning = false;
-        rerender();
-      }
+    disconnectBtn.addEventListener("click", () => {
+      void performProviderDisconnect(state, plugin, record.provider, label, rerender);
     });
   } else {
     // Connect button (toggle expand)

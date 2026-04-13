@@ -220,10 +220,8 @@ export class StreamingController extends Component {
         });
       } catch {}
 
-      // Always rethrow as a SystemSculptError so upstream catch blocks (and
-      // their `instanceof SystemSculptError` guards) recognize that this
-      // error has already been forwarded to ChatView.handleError, and do
-      // NOT call handleError a second time.
+      // Rethrow wrapped so upstream `instanceof SystemSculptError` guards know
+      // onError already fired and do not double-forward into handleError.
       const wrapped =
         err instanceof SystemSculptError
           ? err
