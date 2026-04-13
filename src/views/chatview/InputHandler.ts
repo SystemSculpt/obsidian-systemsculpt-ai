@@ -121,6 +121,9 @@ export class InputHandler extends Component {
   private getChatTitle: () => string;
   private addFileToContext: (file: TFile) => Promise<void>;
   private pendingLargeTextContent: string | null = null;
+  // Captured at submit time so failed submissions can restore the exact text the
+  // user typed, independent of this.messages cleanup.
+  private submittedInputSnapshot: { messageId: string; rawText: string } | null = null;
   private settingsButton: ButtonComponent;
   private attachButton: ButtonComponent;
   private micButton: ButtonComponent;
@@ -800,20 +803,26 @@ export class InputHandler extends Component {
 
     const includeContextFiles = overrides?.includeContextFiles ?? true;
 
+    const submittedRawText = this.input.value;
+
     try {
       await this.turnLifecycle.runTurn(async (signal) => {
         this.input.value = "";
         this.adjustInputHeight();
 
+        const messageId = this.generateMessageId();
+        this.submittedInputSnapshot = { messageId, rawText: submittedRawText };
+
         const userMessage: ChatMessage = {
           role: "user",
           content: messageText,
-          message_id: this.generateMessageId(),
+          message_id: messageId,
         } as any;
         await this.onMessageSubmit(userMessage);
 
         await this.runHostedAgentTurnLoop(signal, includeContextFiles);
         void this.chatView.refreshCreditsBalance();
+        this.submittedInputSnapshot = null;
       });
     } catch (err) {
       // StreamingController already forwards errors into ChatView.handleError via onError.
@@ -1526,6 +1535,14 @@ export class InputHandler extends Component {
     if (shouldFocus) {
       this.focus();
     }
+  }
+
+  // Snapshot accessor for the failure path. Returns and clears the captured
+  // raw text + message_id, so retries don't see a stale snapshot.
+  public consumeSubmittedInputSnapshot(): { messageId: string; rawText: string } | null {
+    const snapshot = this.submittedInputSnapshot;
+    this.submittedInputSnapshot = null;
+    return snapshot;
   }
 
   /**

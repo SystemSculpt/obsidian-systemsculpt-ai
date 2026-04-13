@@ -175,6 +175,27 @@ async function refreshProviderList(
   }
 }
 
+// Optimistically flip the in-memory record for a provider row to the
+// disconnected state so a synchronous rerender reflects the click immediately.
+// The async clear + refreshProviderList still runs afterwards and will
+// reconcile against the canonical state.
+function optimisticDisconnectProviderRow(
+  state: TabState,
+  provider: string,
+): void {
+  for (const providerState of state.providers) {
+    if (providerState.record.provider !== provider) continue;
+    providerState.record = {
+      ...providerState.record,
+      hasAnyAuth: false,
+      hasStoredCredential: false,
+      source: "none",
+      credentialType: "none",
+      oauthExpiresAt: null,
+    };
+  }
+}
+
 // ─── Render ─────────────────────────────────────────────────────────────────
 
 function renderProvidersList(
@@ -334,6 +355,7 @@ function renderProviderRow(
     });
     disconnectBtn.disabled = state.actionRunning;
     disconnectBtn.addEventListener("click", async () => {
+      optimisticDisconnectProviderRow(state, record.provider);
       state.actionRunning = true;
       rerender();
       try {
@@ -345,6 +367,7 @@ function renderProviderRow(
         new Notice(
           `Failed to disconnect ${label}: ${error instanceof Error ? error.message : String(error)}`
         );
+        await refreshProviderList(state, plugin);
       } finally {
         state.actionRunning = false;
         rerender();
@@ -358,6 +381,7 @@ function renderProviderRow(
     });
     disconnectBtn.disabled = state.actionRunning;
     disconnectBtn.addEventListener("click", async () => {
+      optimisticDisconnectProviderRow(state, record.provider);
       state.actionRunning = true;
       rerender();
       try {
@@ -369,6 +393,7 @@ function renderProviderRow(
         new Notice(
           `Failed to disconnect ${label}: ${error instanceof Error ? error.message : String(error)}`
         );
+        await refreshProviderList(state, plugin);
       } finally {
         state.actionRunning = false;
         rerender();

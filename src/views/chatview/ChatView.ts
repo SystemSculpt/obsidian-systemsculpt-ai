@@ -25,6 +25,7 @@ import type { ChatExportResult } from "./export/ChatExportTypes";
 import { removeGroupIfEmpty } from "./utils/MessageGrouping";
 import { classifyQuotaExceededError } from "./utils/quotaError";
 import { classifyStreamError } from "./utils/streamError";
+import { ChatErrorModal } from "./modals/ChatErrorModal";
 import type { ToolCall } from "../../types/toolCalls";
 import { tryCopyToClipboard } from "../../utils/clipboard";
 import { resolveAbsoluteVaultPath } from "../../utils/vaultPathUtils";
@@ -551,18 +552,24 @@ export class ChatView extends ItemView {
         return;
       }
 
-      new Notice(
-        "Usage quota is exhausted for your SystemSculpt account. Add credits or wait for the next reset.",
-        10000
-      );
+      await this.resetFailedAssistantTurn();
+      if (!automationRequestActive) {
+        new ChatErrorModal({
+          app: this.app,
+          title: "Usage limit reached",
+          icon: "alert-octagon",
+          message:
+            "Usage quota is exhausted for your SystemSculpt account. Add credits or wait for the next reset to continue using this provider.",
+          primaryActionLabel: "Open Account",
+          onPrimaryAction: () => this.openSetupTab("account"),
+        }).open();
+      }
+      return;
     }
 
-    const shouldRecoverFromQuotaBySwitching =
-      !!quotaClassification && !quotaClassification.isTransientRateLimit;
-    
     if (
       error instanceof SystemSculptError &&
-      (error.code === "MODEL_UNAVAILABLE" || error.code === "MODEL_REQUEST_ERROR" || shouldRecoverFromQuotaBySwitching)
+      (error.code === "MODEL_UNAVAILABLE" || error.code === "MODEL_REQUEST_ERROR")
     ) {
       const isManagedSelection = this.isManagedSelectedModel();
 
@@ -577,21 +584,73 @@ export class ChatView extends ItemView {
       }
 
       await this.resetFailedAssistantTurn();
-      new Notice(
-        isManagedSelection
-          ? "SystemSculpt could not complete this request right now. Please try again in a moment or check Account for license and account status."
-          : "The selected Pi model could not complete this request right now. Please try again in a moment or check Providers to confirm the selected model and provider are configured.",
-        10000
-      );
+      if (!automationRequestActive) {
+        new ChatErrorModal({
+          app: this.app,
+          title: isManagedSelection ? "SystemSculpt is unavailable" : "Selected model is unavailable",
+          icon: "alert-triangle",
+          message: isManagedSelection
+            ? "SystemSculpt could not complete this request right now. Try again in a moment, or check Account for license and account status."
+            : "The selected Pi model could not complete this request right now. Try again in a moment, or check Providers to confirm the selected model and provider are configured.",
+          primaryActionLabel: isManagedSelection ? "Open Account" : "Open Providers",
+          onPrimaryAction: () =>
+            this.openSetupTab(isManagedSelection ? "account" : "providers"),
+        }).open();
+      }
     } else {
       // Catch-all: classify the error and always show feedback + clean up.
       await this.resetFailedAssistantTurn();
 
       if (!automationRequestActive) {
         const classification = classifyStreamError(error);
-        const duration = classification.kind === "rate_limit" ? 12000 : 10000;
-        new Notice(classification.userMessage, duration);
+        // Transient/auto-recovering categories stay as small Notices so they
+        // don't interrupt the user. Everything else surfaces as a modal so the
+        // user can read the message at their own pace and dismiss it.
+        if (classification.kind === "rate_limit" || classification.kind === "network") {
+          const duration = classification.kind === "rate_limit" ? 12000 : 10000;
+          new Notice(classification.userMessage, duration);
+        } else {
+          new ChatErrorModal({
+            app: this.app,
+            title: this.titleForStreamErrorKind(classification.kind),
+            icon: this.iconForStreamErrorKind(classification.kind),
+            message: classification.userMessage,
+            primaryActionLabel: classification.kind === "auth" ? "Open Providers" : undefined,
+            onPrimaryAction:
+              classification.kind === "auth"
+                ? () => this.openSetupTab("providers")
+                : undefined,
+          }).open();
+        }
       }
+    }
+  }
+
+  private titleForStreamErrorKind(kind: string): string {
+    switch (kind) {
+      case "auth":
+        return "Authentication required";
+      case "model_not_found":
+        return "Model not available";
+      case "server":
+        return "Provider error";
+      case "unknown":
+      default:
+        return "Chat request failed";
+    }
+  }
+
+  private iconForStreamErrorKind(kind: string): string {
+    switch (kind) {
+      case "auth":
+        return "key-round";
+      case "model_not_found":
+        return "help-circle";
+      case "server":
+        return "server-crash";
+      case "unknown":
+      default:
+        return "alert-triangle";
     }
   }
 
@@ -787,6 +846,14 @@ export class ChatView extends ItemView {
     if (!this.inputHandler) {
       return;
     }
+    // Prefer the raw text the user actually typed, captured at submit time.
+    // It survives removal of the failed message from this.messages and isn't
+    // affected by any later normalization or trimming.
+    const snapshot = this.inputHandler.consumeSubmittedInputSnapshot?.();
+    if (snapshot) {
+      this.inputHandler.setInputText(snapshot.rawText);
+      return;
+    }
     const lastUserMessage = [...this.messages].reverse().find((msg) => msg.role === "user");
     if (!lastUserMessage) {
       return;
@@ -803,9 +870,46 @@ export class ChatView extends ItemView {
     }
   }
 
-  private async resetFailedAssistantTurn(): Promise<void> {
+  private removeUserMessageDomById(messageId: string): void {
+    if (!this.chatContainer) return;
+    const node = this.chatContainer.querySelector(
+      `.systemsculpt-message[data-message-id="${CSS.escape(messageId)}"]`,
+    ) as HTMLElement | null;
+    if (!node) return;
+    const parentGroup = node.parentElement as HTMLElement | null;
+    node.remove();
+    if (parentGroup) {
+      removeGroupIfEmpty(parentGroup);
+    }
+  }
+
+  // Cleanup hook for the failed-submission path. Pulls the matching user
+  // message out of this.messages + DOM, runs the existing assistant-side
+  // cleanup, and restores the original input text via the InputHandler
+  // snapshot so the user can resend without having to retype. Returns true
+  // when a snapshot was applied so callers can skip the legacy restore path.
+  public async removeFailedSubmissionTurn(): Promise<boolean> {
+    const snapshot = this.inputHandler?.consumeSubmittedInputSnapshot?.() ?? null;
+    if (snapshot) {
+      const idx = this.messages.findIndex((msg) => msg.message_id === snapshot.messageId);
+      if (idx >= 0) {
+        this.messages.splice(idx, 1);
+      }
+      this.removeUserMessageDomById(snapshot.messageId);
+      this.inputHandler?.setInputText(snapshot.rawText);
+    }
     this.removeLastAssistantMessageFromDom();
-    await this.restoreLastUserMessageToComposer();
+    return Boolean(snapshot);
+  }
+
+  private async resetFailedAssistantTurn(): Promise<void> {
+    const restored = await this.removeFailedSubmissionTurn();
+    if (!restored) {
+      // No snapshot available (legacy paths) — fall back to reading the
+      // last user message out of this.messages so we don't regress the
+      // restore behavior for callers that pre-date the snapshot field.
+      await this.restoreLastUserMessageToComposer();
+    }
   }
 
   public generateMessageId(): string {
