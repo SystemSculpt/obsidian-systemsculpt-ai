@@ -96,7 +96,7 @@ jobs:
           fi
 
           gh pr view "$PR_NUMBER" \
-            --json number,title,body,url,author,baseRefName,baseRefOid,headRefName,headRefOid,headRepository,headRepositoryOwner,isDraft,statusCheckRollup \
+            --json number,title,body,url,author,baseRefName,baseRefOid,headRefName,headRefOid,headRepository,headRepositoryOwner,isDraft \
             > "$PR_JSON"
 
           if [ "$(jq -r '.isDraft' "$PR_JSON")" = "true" ]; then
@@ -152,7 +152,18 @@ jobs:
             (.body // "")
           ' "$PR_JSON" > "$PR_CONTEXT_FILE"
 
-          jq '.statusCheckRollup // []' "$PR_JSON" > "$CI_CONTEXT_FILE"
+          {
+            echo '{'
+            echo '  "check_runs":'
+            gh api "repos/${{ github.repository }}/commits/$HEAD_SHA/check-runs" \
+              --jq '{total_count, check_runs: [.check_runs[]? | {name, status, conclusion, html_url, started_at, completed_at}]}' 2>/dev/null \
+              || echo '{"error":"check-runs unavailable"}'
+            echo '  ,"combined_status":'
+            gh api "repos/${{ github.repository }}/commits/$HEAD_SHA/status" \
+              --jq '{state, statuses: [.statuses[]? | {context, state, target_url, description, updated_at}]}' 2>/dev/null \
+              || echo '{"error":"combined status unavailable"}'
+            echo '}'
+          } > "$CI_CONTEXT_FILE"
 
           changed_files=()
           while IFS= read -r -d '' file; do
