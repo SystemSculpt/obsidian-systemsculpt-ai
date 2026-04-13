@@ -62,10 +62,14 @@ jobs:
           mapfile -d '' changed_files < <(git diff --name-only -z "$BASE"..."$HEAD")
           included_files=()
           skipped_entries=()
+          workflow_changed=false
 
           for file in "${changed_files[@]}"; do
             file="${file%$'\0'}"
             [ -z "$file" ] && continue
+            if [ "$file" = ".github/workflows/claude-pr-review.yml" ]; then
+              workflow_changed=true
+            fi
             reason=""
             case "$file" in
               package-lock.json|npm-shrinkwrap.json|pnpm-lock.yaml|yarn.lock|bun.lock|bun.lockb|Cargo.lock|Gemfile.lock|Pipfile.lock|poetry.lock|uv.lock|composer.lock|go.sum|go.work.sum|*.lock)
@@ -114,10 +118,15 @@ jobs:
           echo "diff_file=$DIFF_FILE" >> "$GITHUB_OUTPUT"
           echo "skipped_file=$SKIPPED_FILE" >> "$GITHUB_OUTPUT"
           echo "included_file=$INCLUDED_FILE" >> "$GITHUB_OUTPUT"
+          echo "workflow_changed=$workflow_changed" >> "$GITHUB_OUTPUT"
           echo "Prepared filtered diff: ${#included_files[@]} included, ${#skipped_entries[@]} skipped"
+          if [ "$workflow_changed" = "true" ]; then
+            echo "Claude review skipped because this PR changes .github/workflows/claude-pr-review.yml; claude-code-action requires the workflow file to match the default branch."
+          fi
 
       - uses: anthropics/claude-code-action@b2fdd80112e5f140e097b11d7a3d9edf0b226fd0 # v1
         id: claude
+        if: steps.review_inputs.outputs.workflow_changed != 'true'
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           show_full_output: true
@@ -180,7 +189,7 @@ jobs:
 
       - name: Validate Claude review output
         id: validate_initial
-        if: always() && steps.review_inputs.outcome == 'success'
+        if: always() && steps.review_inputs.outcome == 'success' && steps.review_inputs.outputs.workflow_changed != 'true'
         env:
           EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
         run: |
@@ -231,7 +240,7 @@ jobs:
 
       - uses: anthropics/claude-code-action@b2fdd80112e5f140e097b11d7a3d9edf0b226fd0 # v1
         id: claude_retry
-        if: always() && steps.review_inputs.outcome == 'success' && steps.validate_initial.outputs.valid != 'true'
+        if: always() && steps.review_inputs.outcome == 'success' && steps.review_inputs.outputs.workflow_changed != 'true' && steps.validate_initial.outputs.valid != 'true'
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           show_full_output: true
@@ -253,7 +262,7 @@ jobs:
             Produce a corrected review that satisfies the validation reason and follows the required structure exactly. Start directly with the exact review title from the review guide. Do not include any preamble or explanation of the retry.
 
       - name: Post or update PR review
-        if: always() && steps.review_inputs.outcome == 'success'
+        if: always() && steps.review_inputs.outcome == 'success' && steps.review_inputs.outputs.workflow_changed != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
