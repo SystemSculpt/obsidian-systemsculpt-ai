@@ -603,21 +603,32 @@ export class ChatView extends ItemView {
 
       if (!automationRequestActive) {
         const classification = classifyStreamError(error);
-        // Transient/auto-recovering categories stay as small Notices so they
-        // don't interrupt the user. Everything else surfaces as a modal so the
-        // user can read the message at their own pace and dismiss it.
-        if (classification.kind === "rate_limit" || classification.kind === "network") {
+        // Transient categories (short rate limits, network blips, brief
+        // server outages) stay as small Notices so they don't interrupt the
+        // user. Hard limits / auth / unknown / model_not_found surface as a
+        // modal so the user can read at their own pace.
+        if (classification.transient) {
           const duration = classification.kind === "rate_limit" ? 12000 : 10000;
           new Notice(classification.userMessage, duration);
         } else {
+          const isHardRateLimit = classification.kind === "rate_limit";
+          const isAuth = classification.kind === "auth";
           new ChatErrorModal({
             app: this.app,
-            title: this.titleForStreamErrorKind(classification.kind),
-            icon: this.iconForStreamErrorKind(classification.kind),
+            title: isHardRateLimit
+              ? "Provider usage limit reached"
+              : this.titleForStreamErrorKind(classification.kind),
+            icon: isHardRateLimit
+              ? "alert-octagon"
+              : this.iconForStreamErrorKind(classification.kind),
             message: classification.userMessage,
-            primaryActionLabel: classification.kind === "auth" ? "Open Providers" : undefined,
+            primaryActionLabel: isAuth
+              ? "Open Providers"
+              : isHardRateLimit
+                ? "Open Providers"
+                : undefined,
             onPrimaryAction:
-              classification.kind === "auth"
+              isAuth || isHardRateLimit
                 ? () => this.openSetupTab("providers")
                 : undefined,
           }).open();

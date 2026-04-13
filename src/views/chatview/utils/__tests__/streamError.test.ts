@@ -3,42 +3,58 @@ import { SystemSculptError, ERROR_CODES } from "../../../../utils/errors";
 
 describe("classifyStreamError", () => {
   describe("rate limit detection", () => {
-    it("detects ChatGPT usage limit with retry timing", () => {
+    it("detects ChatGPT usage limit with retry timing as a hard (non-transient) limit", () => {
       const result = classifyStreamError(
         "You have hit your ChatGPT usage limit (free plan). Try again in ~320 min.",
       );
       expect(result.kind).toBe("rate_limit");
       expect(result.retryAfterSeconds).toBe(320 * 60);
-      expect(result.userMessage).toContain("rate limit");
-      expect(result.userMessage).toContain("~5h");
+      expect(result.transient).toBe(false);
+      // Hard limits keep the original upstream message verbatim so the user
+      // sees the exact retry hint the provider returned.
+      expect(result.userMessage).toContain("ChatGPT usage limit");
+      expect(result.userMessage).toContain("~320 min");
     });
 
-    it("detects generic rate limit", () => {
+    it("detects generic rate limit as transient", () => {
       const result = classifyStreamError("Rate limit exceeded");
       expect(result.kind).toBe("rate_limit");
+      expect(result.transient).toBe(true);
     });
 
-    it("detects 429 status", () => {
+    it("detects 429 status as transient", () => {
       const result = classifyStreamError("HTTP 429 Too Many Requests");
       expect(result.kind).toBe("rate_limit");
+      expect(result.transient).toBe(true);
     });
 
-    it("detects quota exceeded", () => {
+    it("detects quota exceeded as transient (no hard markers, no long retry)", () => {
       const result = classifyStreamError("Quota exceeded for this model");
       expect(result.kind).toBe("rate_limit");
+      expect(result.transient).toBe(true);
     });
 
-    it("parses retry time in seconds", () => {
+    it("parses short retry time in seconds as transient", () => {
       const result = classifyStreamError("Rate limited. Try again in 30 seconds.");
       expect(result.kind).toBe("rate_limit");
       expect(result.retryAfterSeconds).toBe(30);
+      expect(result.transient).toBe(true);
       expect(result.userMessage).toContain("~30s");
     });
 
-    it("parses retry time in hours", () => {
+    it("parses retry time in hours as a hard limit", () => {
       const result = classifyStreamError("Usage limit. Try again in ~2 hours.");
       expect(result.retryAfterSeconds).toBe(7200);
-      expect(result.userMessage).toContain("~2h");
+      expect(result.transient).toBe(false);
+      // Original message preserved when it already contains the wait hint.
+      expect(result.userMessage).toContain("Usage limit");
+      expect(result.userMessage).toContain("2 hours");
+    });
+
+    it("flags free-plan exhaustion as a hard limit even with a short delay", () => {
+      const result = classifyStreamError("Free plan capacity reached.");
+      expect(result.kind).toBe("rate_limit");
+      expect(result.transient).toBe(false);
     });
   });
 

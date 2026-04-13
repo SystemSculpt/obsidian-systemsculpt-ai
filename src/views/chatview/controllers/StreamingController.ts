@@ -220,15 +220,24 @@ export class StreamingController extends Component {
         });
       } catch {}
 
+      // Always rethrow as a SystemSculptError so upstream catch blocks (and
+      // their `instanceof SystemSculptError` guards) recognize that this
+      // error has already been forwarded to ChatView.handleError, and do
+      // NOT call handleError a second time.
+      const wrapped =
+        err instanceof SystemSculptError
+          ? err
+          : new SystemSculptError(
+              err?.message || err?.toString?.() || "Unknown streaming error",
+              ERROR_CODES.STREAM_ERROR,
+              500,
+              { cause: err },
+            );
+
       if (onError) {
-        if (err instanceof SystemSculptError) {
-          onError(err);
-        } else {
-          const errorMessage = err?.message || err?.toString?.() || "Unknown streaming error";
-          onError(new SystemSculptError(errorMessage, ERROR_CODES.STREAM_ERROR, 500, { cause: err }));
-        }
+        onError(wrapped);
       }
-      throw err;
+      throw wrapped;
     } finally {
       if (ownsTracker) {
         metricsTracker.stop();
