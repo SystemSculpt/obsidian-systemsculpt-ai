@@ -47,11 +47,11 @@ SystemSculpt AI is an Obsidian plugin written in TypeScript with esbuild and Jes
 
 ### Verification of External Claims
 
-- When WebSearch or WebFetch is available, verify unfamiliar model IDs, API endpoint URLs, SDK method names, dependency version claims, and third-party feature availability before flagging them as invalid.
-- If verification is not possible, say "unable to verify" instead of asserting the claim is false.
+- External browsing tools are disabled in the review workflow by default.
+- If unfamiliar model IDs, API endpoint URLs, SDK method names, dependency version claims, or third-party feature availability cannot be verified from the supplied repository context, say "unable to verify" instead of asserting the claim is false.
 
 ## Extra Instructions
 
 - Prioritize bugs, regressions, security issues, and missing tests.
 - Skip stylistic nits unless they materially affect readability or maintainability.
-- Mention skipped generated, lock, snapshot, or oversized files only under Notes when relevant.
+- Mention skipped generated, lock, snapshot, oversized, binary, or vendored files only under Notes when relevant.
