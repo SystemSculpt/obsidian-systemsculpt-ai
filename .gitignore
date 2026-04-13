@@ -27,7 +27,6 @@ systemsculpt-sync.ios.json
 systemsculpt-sync.android.json
 systemsculpt-sync.android.appdata.json
 systemsculpt-sync.windows.generated.json
-run.sh
 /autoresearch*
 
 # OS / editors

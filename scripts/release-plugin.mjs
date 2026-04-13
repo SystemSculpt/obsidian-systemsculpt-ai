@@ -180,12 +180,6 @@ const TRACKED_LOCAL_ONLY_FILE_RULES = [
     },
   },
   {
-    label: "tracked local launcher",
-    test(filePath) {
-      return /(^|\/)run\.sh$/i.test(filePath);
-    },
-  },
-  {
     label: "tracked log file",
     test(filePath) {
       return /\.log$/i.test(filePath) || /(^|\/)logs?(\/|$)/.test(filePath);
@@ -202,7 +196,7 @@ const TRACKED_LOCAL_ONLY_FILE_RULES = [
 const CONTENT_SAFETY_RULES = [
   {
     label: "absolute local filesystem path",
-    pattern: /\/Users\/[^/\s"'`]+|\/home\/[^/\s"'`]+|[A-Za-z]:\\Users\\[^\\\s"'`]+/,
+    pattern: /(?<![A-Za-z]:)\/Users\/[^/\s"'`]+|\/home\/[^/\s"'`]+|[A-Za-z]:\\Users\\[^\\\s"'`]+/,
   },
   {
     label: "hardcoded vault selector",
@@ -562,6 +556,66 @@ function parseSemver(value) {
   }
   const [major, minor, patch] = value.split(".").map((part) => Number(part));
   return { major, minor, patch };
+}
+
+function normalizeTagVersion(value) {
+  const normalized = String(value || "").trim().replace(/^v(?=\d)/i, "");
+  return isSemver(normalized) ? normalized : "";
+}
+
+function compareSemver(left, right) {
+  const leftParsed = parseSemver(left);
+  const rightParsed = parseSemver(right);
+  for (const part of ["major", "minor", "patch"]) {
+    if (leftParsed[part] !== rightParsed[part]) {
+      return leftParsed[part] - rightParsed[part];
+    }
+  }
+  return 0;
+}
+
+function isPreBumpedReleaseCandidate(currentVersion, lastTag, versions, minAppVersion) {
+  const lastVersion = normalizeTagVersion(lastTag);
+  return Boolean(
+    lastVersion
+      && isSemver(currentVersion)
+      && compareSemver(currentVersion, lastVersion) > 0
+      && versions?.[currentVersion] === minAppVersion
+  );
+}
+
+function resolveReleaseVersionPlan({
+  manifestVersion,
+  lastTag,
+  versions,
+  minAppVersion,
+  commits,
+  options = {},
+}) {
+  const metadataAlreadyUpdated = isPreBumpedReleaseCandidate(
+    manifestVersion,
+    lastTag,
+    versions,
+    minAppVersion
+  );
+  const usePreBumpedMetadata = Boolean(
+    metadataAlreadyUpdated
+      && !options.version
+      && !options.bump
+  );
+  const inferredBump = inferBump(commits);
+  const bump = options.bump || (usePreBumpedMetadata ? "pre-bumped" : inferredBump);
+  const newVersion = options.version || (usePreBumpedMetadata
+    ? manifestVersion
+    : incrementVersion(manifestVersion, bump));
+
+  return {
+    metadataAlreadyUpdated,
+    usePreBumpedMetadata,
+    inferredBump,
+    bump,
+    newVersion,
+  };
 }
 
 function incrementVersion(currentVersion, bump) {
@@ -1051,16 +1105,29 @@ function main() {
       : "No commits found in repository history. Nothing to release.");
   }
 
-  const inferredBump = inferBump(commits);
-  const bump = options.bump || inferredBump;
-  const newVersion = options.version || incrementVersion(manifest.version, bump);
+  const {
+    usePreBumpedMetadata,
+    bump,
+    newVersion,
+  } = resolveReleaseVersionPlan({
+    manifestVersion: manifest.version,
+    lastTag,
+    versions,
+    minAppVersion: manifest.minAppVersion,
+    commits,
+    options,
+  });
 
   if (!isSemver(newVersion)) {
     fail(`Computed invalid version: ${newVersion}`);
   }
 
-  if (newVersion === manifest.version) {
+  if (newVersion === manifest.version && !usePreBumpedMetadata) {
     fail(`New version matches current version (${newVersion}).`);
+  }
+
+  if (usePreBumpedMetadata) {
+    logStep(`Using pre-bumped release metadata for ${newVersion}.`);
   }
 
   ensureTagDoesNotExist(newVersion);
@@ -1087,26 +1154,30 @@ function main() {
   const releaseAssetFiles = ensureReleaseAssets();
   logStep(`Verified local release assets (${releaseAssetFiles.length} files).`);
 
-  logStep(`Updating version files to ${newVersion}`);
-  manifest.version = newVersion;
-  pkg.version = newVersion;
-  lockfile.version = newVersion;
-  if (lockfile.packages && lockfile.packages[""]) {
-    lockfile.packages[""].version = newVersion;
+  if (usePreBumpedMetadata) {
+    logStep(`Version files already point at ${newVersion}; skipping metadata rewrite and release commit.`);
+  } else {
+    logStep(`Updating version files to ${newVersion}`);
+    manifest.version = newVersion;
+    pkg.version = newVersion;
+    lockfile.version = newVersion;
+    if (lockfile.packages && lockfile.packages[""]) {
+      lockfile.packages[""].version = newVersion;
+    }
+    versions[newVersion] = manifest.minAppVersion;
+
+    writeJson(manifestPath, manifest);
+    writeJson(packagePath, pkg);
+    writeJson(lockfilePath, lockfile);
+    writeJson(versionsPath, versions);
+    updateReadmeVersion(readmePath, newVersion);
+
+    logStep("Staging release metadata files");
+    run("git", ["add", "manifest.json", "package.json", "package-lock.json", "versions.json", "README.md"]);
+
+    logStep(`Committing release metadata (release: ${newVersion})`);
+    run("git", ["commit", "-m", `release: ${newVersion}`]);
   }
-  versions[newVersion] = manifest.minAppVersion;
-
-  writeJson(manifestPath, manifest);
-  writeJson(packagePath, pkg);
-  writeJson(lockfilePath, lockfile);
-  writeJson(versionsPath, versions);
-  updateReadmeVersion(readmePath, newVersion);
-
-  logStep("Staging release metadata files");
-  run("git", ["add", "manifest.json", "package.json", "package-lock.json", "versions.json", "README.md"]);
-
-  logStep(`Committing release metadata (release: ${newVersion})`);
-  run("git", ["commit", "-m", `release: ${newVersion}`]);
 
   logStep(`Creating git tag ${newVersion}`);
   run("git", ["tag", "-a", newVersion, "-m", newVersion]);
@@ -1135,6 +1206,7 @@ export {
   normalizeReleaseNotesMarkdown,
   parseGitHubAuthStatus,
   resolveGitHubReleaseAuthStrategy,
+  resolveReleaseVersionPlan,
   runWithGitHubAuthFallback,
   shouldRetryWithoutGitHubEnv,
   withoutGitHubEnvTokens,

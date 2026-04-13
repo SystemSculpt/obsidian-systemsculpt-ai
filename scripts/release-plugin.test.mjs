@@ -7,6 +7,7 @@ import {
   parseGitHubAuthStatus,
   normalizeReleaseNotesMarkdown,
   resolveGitHubReleaseAuthStrategy,
+  resolveReleaseVersionPlan,
   runWithGitHubAuthFallback,
   shouldRetryWithoutGitHubEnv,
   withoutGitHubEnvTokens,
@@ -110,6 +111,52 @@ Plain paragraph line one line two.
 `
   );
   assert.equal(fs.readFileSync(sourcePath, "utf8"), original);
+});
+
+test("resolveReleaseVersionPlan reuses pre-bumped metadata only without explicit overrides", () => {
+  const base = {
+    manifestVersion: "5.5.0",
+    lastTag: "5.4.0",
+    versions: { "5.5.0": "1.4.0" },
+    minAppVersion: "1.4.0",
+    commits: [{ subject: "feat: add canvas foundation" }],
+  };
+
+  assert.deepEqual(resolveReleaseVersionPlan(base), {
+    metadataAlreadyUpdated: true,
+    usePreBumpedMetadata: true,
+    inferredBump: "minor",
+    bump: "pre-bumped",
+    newVersion: "5.5.0",
+  });
+
+  assert.deepEqual(
+    resolveReleaseVersionPlan({
+      ...base,
+      options: { bump: "patch" },
+    }),
+    {
+      metadataAlreadyUpdated: true,
+      usePreBumpedMetadata: false,
+      inferredBump: "minor",
+      bump: "patch",
+      newVersion: "5.5.1",
+    }
+  );
+
+  assert.deepEqual(
+    resolveReleaseVersionPlan({
+      ...base,
+      options: { version: "5.6.0" },
+    }),
+    {
+      metadataAlreadyUpdated: true,
+      usePreBumpedMetadata: false,
+      inferredBump: "minor",
+      bump: "minor",
+      newVersion: "5.6.0",
+    }
+  );
 });
 
 test("resolveGitHubReleaseAuthStrategy prefers stored gh auth when env-token auth lacks workflow scope", (t) => {
