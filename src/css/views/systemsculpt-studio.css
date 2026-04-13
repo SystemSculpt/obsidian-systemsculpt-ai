@@ -1158,9 +1158,7 @@ select.ss-pi-wizard__select { width: 100%; }
   user-select: none;
   pointer-events: auto;
   transition: border-color 0.15s ease, background 0.15s ease;
-  contain: layout style paint;
-  content-visibility: auto;
-  contain-intrinsic-size: 280px 200px;
+  contain: layout style;
 }
 
 .ss-studio-node-card.is-dragging,
