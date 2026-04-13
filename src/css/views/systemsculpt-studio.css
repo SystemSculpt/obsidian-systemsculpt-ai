@@ -817,18 +817,33 @@ select.ss-pi-wizard__select { width: 100%; }
   overflow: auto;
   flex: 1;
   min-height: 0;
-  background:
-    radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--ss-studio-border) 30%, transparent) 0.5px, transparent 0) 0 0 / 20px 20px,
-    var(--background-primary);
+  background-color: var(--background-primary);
+  background-image:
+    radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--ss-studio-border) 45%, transparent) 1px, transparent 0),
+    radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--ss-studio-border) 25%, transparent) 0.75px, transparent 0);
+  background-size:
+    400px 400px,
+    40px 40px;
+  background-attachment: local, local;
+  background-repeat: repeat, repeat;
+  contain: layout style;
+}
+
+.ss-studio-graph-viewport.is-zoom-overview {
+  background-image:
+    radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--ss-studio-border) 55%, transparent) 2px, transparent 0);
+  background-size: 2000px 2000px;
 }
 
 .ss-studio-graph-surface {
   position: relative;
+  contain: layout style;
 }
 
 .ss-studio-graph-canvas {
   position: relative;
-  will-change: transform;
+  transform-origin: 0 0;
+  contain: layout style;
 }
 
 .ss-studio-edges-layer {
@@ -836,6 +851,7 @@ select.ss-pi-wizard__select { width: 100%; }
   inset: 0;
   z-index: 1;
   pointer-events: none;
+  contain: layout paint style;
 }
 
 .ss-studio-groups-layer {
@@ -1141,8 +1157,15 @@ select.ss-pi-wizard__select { width: 100%; }
   touch-action: none;
   user-select: none;
   pointer-events: auto;
-  will-change: transform;
   transition: border-color 0.15s ease, background 0.15s ease;
+  contain: layout style paint;
+  content-visibility: auto;
+  contain-intrinsic-size: 280px 200px;
+}
+
+.ss-studio-node-card.is-dragging,
+.ss-studio-node-card.is-selected {
+  will-change: transform;
 }
 
 /* ── Global chrome cleanup (all node types) ── */
@@ -1350,15 +1373,17 @@ select.ss-pi-wizard__select { width: 100%; }
   animation: ss-studio-pending-pulse 1.4s ease-in-out infinite;
 }
 
-.ss-studio-graph-viewport.is-interacting .ss-studio-node-card {
-  box-shadow: 0 4px 14px color-mix(in srgb, var(--ss-studio-shadow) 18%, transparent);
-}
-
 .ss-studio-graph-viewport.is-interacting .ss-studio-group-frame,
 .ss-studio-graph-viewport.is-interacting .ss-studio-link-path,
 .ss-studio-graph-viewport.is-interacting .ss-studio-link-preview,
 .ss-studio-graph-viewport.is-interacting .ss-studio-node-card {
   transition: none;
+  animation-play-state: paused;
+}
+
+.ss-studio-graph-viewport.is-interacting .ss-studio-link-path,
+.ss-studio-graph-viewport.is-interacting .ss-studio-link-preview {
+  pointer-events: none;
 }
 
 .ss-studio-graph-viewport.is-zoomed-far .ss-studio-node-card textarea,
@@ -1376,6 +1401,48 @@ select.ss-pi-wizard__select { width: 100%; }
 .ss-studio-graph-viewport.is-zoom-overview .ss-studio-node-card,
 .ss-studio-graph-viewport.is-zoom-overview .ss-studio-port-pin {
   pointer-events: none;
+}
+
+/* Micro-zoom: nodes are tiny dots — kill all internal rendering work.        */
+/* Each node becomes a flat colored block; text/inputs/ports/chrome hidden.   */
+.ss-studio-graph-viewport.is-zoomed-micro .ss-studio-node-card > * {
+  display: none !important;
+}
+
+.ss-studio-graph-viewport.is-zoomed-micro .ss-studio-node-card {
+  background: var(--ss-studio-border);
+  border-radius: 2px;
+  pointer-events: none;
+  contain: strict;
+  contain-intrinsic-size: 280px 200px;
+}
+
+.ss-studio-graph-viewport.is-zoomed-micro .ss-studio-link-path,
+.ss-studio-graph-viewport.is-zoomed-micro .ss-studio-link-preview {
+  display: none;
+}
+
+.ss-studio-graph-viewport.is-zoomed-micro .ss-studio-group-frame {
+  border-style: solid;
+  opacity: 0.4;
+}
+
+.ss-studio-graph-viewport.is-zoomed-micro .ss-studio-group-tag,
+.ss-studio-graph-viewport.is-zoomed-micro .ss-studio-group-tag-input {
+  display: none;
+}
+
+/* Extreme zoom: heavily simplified rendering.                                */
+.ss-studio-graph-viewport.is-zoomed-extreme .ss-studio-node-card textarea,
+.ss-studio-graph-viewport.is-zoomed-extreme .ss-studio-node-card input,
+.ss-studio-graph-viewport.is-zoomed-extreme .ss-studio-node-text-rendered,
+.ss-studio-graph-viewport.is-zoomed-extreme .ss-studio-node-output-preview,
+.ss-studio-graph-viewport.is-zoomed-extreme .ss-studio-node-inline-config-panel {
+  display: none;
+}
+
+.ss-studio-graph-viewport.is-zoomed-extreme .ss-studio-link-path {
+  stroke-width: 1px;
 }
 
 @keyframes ss-studio-pending-pulse {
@@ -3966,6 +4033,30 @@ select.ss-pi-wizard__select { width: 100%; }
 .ss-studio-graph-viewport.is-scrolling .ss-studio-link-context-menu,
 .ss-studio-graph-viewport.is-scrolling .ss-studio-node-inspector {
   backdrop-filter: none;
+  transition: none;
+}
+
+.ss-studio-graph-viewport.is-scrolling .ss-studio-node-card,
+.ss-studio-graph-viewport.is-scrolling .ss-studio-link-path,
+.ss-studio-graph-viewport.is-scrolling .ss-studio-link-preview,
+.ss-studio-graph-viewport.is-scrolling .ss-studio-group-frame {
+  transition: none;
+  animation-play-state: paused;
+}
+
+.ss-studio-graph-viewport.is-scrolling .ss-studio-link-path,
+.ss-studio-graph-viewport.is-scrolling .ss-studio-link-preview {
+  pointer-events: none;
+}
+
+.ss-studio-graph-viewport.is-scrolling .ss-studio-node-card {
+  cursor: default;
+}
+
+.ss-studio-graph-viewport.is-scrolling .ss-studio-node-card:hover > .ss-studio-node-chrome-overlay,
+.ss-studio-graph-viewport.is-scrolling .ss-studio-node-card:hover > .ss-studio-node-chrome-overlay-top {
+  visibility: hidden;
+  opacity: 0;
   transition: none;
 }
 

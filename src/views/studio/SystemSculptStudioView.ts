@@ -2810,8 +2810,9 @@ export class SystemSculptStudioView extends ItemView {
     }
     const zoom = normalizeGraphZoom(zoomOverride ?? this.graphInteraction.getGraphZoom());
     const mode = modeOverride ?? this.graphZoomMode;
-    this.graphViewportEl.classList.toggle("is-zoomed-far", zoom <= 0.56);
-    this.graphViewportEl.classList.toggle("is-zoomed-extreme", zoom <= 0.4);
+    this.graphViewportEl.classList.toggle("is-zoomed-far", zoom <= 0.5);
+    this.graphViewportEl.classList.toggle("is-zoomed-extreme", zoom <= 0.2);
+    this.graphViewportEl.classList.toggle("is-zoomed-micro", zoom <= 0.08);
     this.graphViewportEl.classList.toggle("is-zoom-overview", mode === "overview");
   }
 

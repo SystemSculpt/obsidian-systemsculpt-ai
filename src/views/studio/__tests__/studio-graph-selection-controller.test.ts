@@ -463,7 +463,7 @@ describe("StudioGraphSelectionController fit selection", () => {
             },
             {
               id: "node_b",
-              position: { x: 4800, y: 3100 },
+              position: { x: 80000, y: 60000 },
               kind: "studio.value",
               config: {},
             },
@@ -504,7 +504,7 @@ describe("StudioGraphSelectionController fit selection", () => {
 
     expect(fitted).toBe(true);
     expect(controller.getGraphZoomMode()).toBe("overview");
-    expect(controller.getGraphZoom()).toBeLessThan(0.4);
+    expect(controller.getGraphZoom()).toBeLessThan(0.02);
   });
 });
 
