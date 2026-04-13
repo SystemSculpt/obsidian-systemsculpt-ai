@@ -363,8 +363,12 @@ jobs:
             if ! jq -e '.files_reviewed | type == "array" and length > 0' "$OUTPUT_JSON" >/dev/null; then
               reasons+=("Structured files_reviewed must be a non-empty array.")
             fi
-            while IFS=$'\t' read -r severity file line summary; do
-              [ -z "$severity" ] && continue
+            while IFS= read -r finding_json; do
+              [ -z "$finding_json" ] && continue
+              severity=$(jq -r '.severity // ""' <<<"$finding_json")
+              file=$(jq -r '.file // ""' <<<"$finding_json")
+              line=$(jq -r 'if .line == null then "" else (.line | tostring) end' <<<"$finding_json")
+              summary=$(jq -r '.summary // ""' <<<"$finding_json")
               case "$severity" in critical|suggestion|note) ;; *) reasons+=("Finding has invalid severity: $severity");; esac
               if [ -n "$file" ] && ! grep -Fxq "$file" "$INCLUDED_FILE"; then
                 reasons+=("Finding references a file outside the filtered diff: $file")
@@ -375,7 +379,7 @@ jobs:
               if [ -z "$summary" ]; then
                 reasons+=("Finding for $file:$line is missing a summary.")
               fi
-            done < <(jq -r '.findings[]? | [.severity, (.file // ""), (.line // ""), .summary] | @tsv' "$OUTPUT_JSON")
+            done < <(jq -c '.findings[]?' "$OUTPUT_JSON")
           fi
 
           if [ ! -s "$REVIEW_FILE" ]; then
@@ -455,8 +459,12 @@ jobs:
             if ! jq -e '.files_reviewed | type == "array" and length > 0' "$OUTPUT_JSON" >/dev/null; then
               reasons+=("Structured files_reviewed must be a non-empty array.")
             fi
-            while IFS=$'\t' read -r severity file line summary; do
-              [ -z "$severity" ] && continue
+            while IFS= read -r finding_json; do
+              [ -z "$finding_json" ] && continue
+              severity=$(jq -r '.severity // ""' <<<"$finding_json")
+              file=$(jq -r '.file // ""' <<<"$finding_json")
+              line=$(jq -r 'if .line == null then "" else (.line | tostring) end' <<<"$finding_json")
+              summary=$(jq -r '.summary // ""' <<<"$finding_json")
               case "$severity" in critical|suggestion|note) ;; *) reasons+=("Finding has invalid severity: $severity");; esac
               if [ -n "$file" ] && ! grep -Fxq "$file" "$INCLUDED_FILE"; then
                 reasons+=("Finding references a file outside the filtered diff: $file")
@@ -467,7 +475,7 @@ jobs:
               if [ -z "$summary" ]; then
                 reasons+=("Finding for $file:$line is missing a summary.")
               fi
-            done < <(jq -r '.findings[]? | [.severity, (.file // ""), (.line // ""), .summary] | @tsv' "$OUTPUT_JSON")
+            done < <(jq -c '.findings[]?' "$OUTPUT_JSON")
           fi
 
           if [ ! -s "$REVIEW_FILE" ]; then
