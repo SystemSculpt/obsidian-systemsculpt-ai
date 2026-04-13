@@ -6,6 +6,12 @@ describe("StudioPiAuthStorage fetch shim integration", () => {
   beforeEach(() => {
     jest.resetModules();
     jest.clearAllMocks();
+    // Ensure any previous test's doMock calls do not bleed into this one.
+    // jest.resetModules() clears the module cache but not the doMock registry.
+    jest.dontMock("fs");
+    jest.dontMock("../../../services/pi/PiSdkStoragePaths");
+    jest.dontMock("../../../services/pi/PiSdkDesktopSupport");
+    jest.dontMock("../../../services/pi/PiSdkAuthStorage");
     Object.defineProperty(Platform, "isDesktopApp", {
       configurable: true,
       value: true,
@@ -259,6 +265,109 @@ describe("StudioPiAuthStorage fetch shim integration", () => {
     });
 
     await expect(resolveStudioPiProviderApiKey!("openrouter", { plugin })).resolves.toBeNull();
+  });
+
+  it("rewrites auth.json directly when disconnecting to bypass proper-lockfile silent writes", async () => {
+    const initialAuthJson = {
+      "openai-codex": {
+        type: "oauth",
+        tokens: { access: "tok-abc", refresh: "tok-xyz" },
+        expires: 1700000000000,
+      },
+      anthropic: {
+        type: "oauth",
+        tokens: { access: "claude-tok" },
+      },
+    };
+
+    const fsState = {
+      content: JSON.stringify(initialAuthJson, null, 2),
+      writes: [] as Array<{ path: string; content: string }>,
+    };
+
+    jest.doMock("fs", () => ({
+      existsSync: jest.fn((_path: string) => true),
+      readFileSync: jest.fn((_path: string, _encoding: string) => fsState.content),
+      writeFileSync: jest.fn((path: string, content: string) => {
+        fsState.writes.push({ path, content });
+        fsState.content = content;
+      }),
+      chmodSync: jest.fn(),
+    }));
+
+    jest.doMock("../../../services/pi/PiSdkStoragePaths", () => ({
+      resolvePiAuthPath: jest.fn(() => "/fake/vault/.systemsculpt/pi-agent/auth.json"),
+    }));
+
+    const storageRemove = jest.fn(() => {
+      // Simulate the SDK's silent-no-op: remove returns cleanly but nothing is
+      // written to disk, mirroring the proper-lockfile failure path in Electron.
+    });
+    jest.doMock("../../../services/pi/PiSdkDesktopSupport", () => ({
+      createPiAuthStorage: jest.fn(() => ({ remove: storageRemove })),
+      withPiDesktopFetchShim: jest.fn(async (callback: () => Promise<unknown>) => await callback()),
+    }));
+
+    let clearStudioPiProviderAuth: typeof import("../StudioPiAuthStorage").clearStudioPiProviderAuth;
+    jest.isolateModules(() => {
+      ({ clearStudioPiProviderAuth } = require("../StudioPiAuthStorage"));
+    });
+
+    const plugin = {
+      settings: { customProviders: [] },
+      getSettingsManager: () => ({
+        updateSettings: jest.fn(async () => {}),
+      }),
+    } as any;
+
+    await clearStudioPiProviderAuth!("openai-codex", { plugin });
+
+    expect(storageRemove).toHaveBeenCalledWith("openai-codex");
+    expect(fsState.writes).toHaveLength(1);
+    const [write] = fsState.writes;
+    expect(write.path).toBe("/fake/vault/.systemsculpt/pi-agent/auth.json");
+    const parsed = JSON.parse(write.content);
+    expect(parsed).not.toHaveProperty("openai-codex");
+    expect(parsed).toHaveProperty("anthropic");
+  });
+
+  it("skips direct fs rewrite when the provider is already absent from auth.json", async () => {
+    const fsState = {
+      content: JSON.stringify({ anthropic: { type: "oauth" } }, null, 2),
+      writes: [] as Array<{ path: string; content: string }>,
+    };
+
+    jest.doMock("fs", () => ({
+      existsSync: jest.fn(() => true),
+      readFileSync: jest.fn(() => fsState.content),
+      writeFileSync: jest.fn((path: string, content: string) => {
+        fsState.writes.push({ path, content });
+      }),
+      chmodSync: jest.fn(),
+    }));
+
+    jest.doMock("../../../services/pi/PiSdkStoragePaths", () => ({
+      resolvePiAuthPath: jest.fn(() => "/fake/vault/.systemsculpt/pi-agent/auth.json"),
+    }));
+
+    jest.doMock("../../../services/pi/PiSdkDesktopSupport", () => ({
+      createPiAuthStorage: jest.fn(() => ({ remove: jest.fn() })),
+      withPiDesktopFetchShim: jest.fn(async (callback: () => Promise<unknown>) => await callback()),
+    }));
+
+    let clearStudioPiProviderAuth: typeof import("../StudioPiAuthStorage").clearStudioPiProviderAuth;
+    jest.isolateModules(() => {
+      ({ clearStudioPiProviderAuth } = require("../StudioPiAuthStorage"));
+    });
+
+    await clearStudioPiProviderAuth!("openai-codex", {
+      plugin: {
+        settings: { customProviders: [] },
+        getSettingsManager: () => ({ updateSettings: jest.fn(async () => {}) }),
+      } as any,
+    });
+
+    expect(fsState.writes).toHaveLength(0);
   });
 
   it("uses plugin-stored API keys in inventory records when auth storage is unavailable", async () => {

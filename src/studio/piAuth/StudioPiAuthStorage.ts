@@ -13,6 +13,7 @@ import {
   withPiDesktopFetchShim,
 } from "../../services/pi/PiSdkDesktopSupport";
 import type { PiAuthStorageInstance } from "../../services/pi/PiSdkAuthStorage";
+import { resolvePiAuthPath } from "../../services/pi/PiSdkStoragePaths";
 import type {
   StudioPiAuthCredentialType,
   StudioPiAuthState,
@@ -340,7 +341,6 @@ export async function loginStudioPiProviderOAuth(
   try {
     const credential = storage.get(providerId);
     if (credential) {
-      const { resolvePiAuthPath } = await import("../../services/pi/PiSdkStoragePaths");
       const authPath = resolvePiAuthPath(options.plugin);
       if (authPath) {
         const fs = require("fs");
@@ -395,18 +395,58 @@ export async function clearStudioPiProviderAuth(
   const provider = normalizeStudioPiProviderHint(providerHint);
   if (!provider) throw new Error("Select a valid provider before clearing credentials.");
   await clearPluginStoredApiKey(provider, context.plugin);
+
   const storage = tryGetAuthStorage(context);
-  if (!storage) {
-    return;
+  if (storage) {
+    try {
+      storage.remove(provider);
+    } catch (err) {
+      console.warn(
+        `[StudioPiAuthStorage] SDK storage.remove failed for ${provider}; falling back to direct auth.json rewrite.`,
+        err,
+      );
+    }
   }
+
+  // The SDK's FileAuthStorageBackend uses proper-lockfile, which can fail
+  // silently in Obsidian's Electron renderer — and the in-memory fallback in
+  // createBundledPiAuthStorage explicitly sacrifices write-back. Either path
+  // leaves auth.json untouched, so a fresh refreshProviderList() re-reads the
+  // old credential and the UI pops back to "Disconnect". Rewriting auth.json
+  // directly is the only way to guarantee the credential is actually gone.
+  rewriteAuthJsonWithoutProvider(provider, context.plugin);
+}
+
+function rewriteAuthJsonWithoutProvider(
+  provider: string,
+  plugin?: SystemSculptPlugin | null,
+): void {
+  if (!Platform.isDesktopApp) return;
+  const authPath = resolvePiAuthPath(plugin);
+  if (!authPath) return;
   try {
-    storage.remove(provider);
+    const fs = require("fs");
+    if (!fs.existsSync(authPath)) return;
+    const rawContent = fs.readFileSync(authPath, "utf-8");
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(rawContent);
+    } catch {
+      return;
+    }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return;
+    const data = parsed as Record<string, unknown>;
+    if (!(provider in data)) return;
+    delete data[provider];
+    fs.writeFileSync(authPath, JSON.stringify(data, null, 2), "utf-8");
+    try {
+      fs.chmodSync(authPath, 0o600);
+    } catch {
+      // chmod is best-effort — some filesystems (e.g. exFAT) reject mode changes.
+    }
   } catch (err) {
-    // Plugin-settings fallback is already cleared above. Log a warning so the
-    // discrepancy is visible: resolveProviderApiKey prefers Pi storage, so a
-    // stale entry there could shadow the cleared plugin-settings value.
     console.warn(
-      `[StudioPiAuthStorage] Failed to remove ${provider} from Pi auth storage; plugin-settings entry was cleared but Pi storage may retain stale credentials.`,
+      `[StudioPiAuthStorage] Direct fs rewrite of auth.json failed for ${provider}.`,
       err,
     );
   }
