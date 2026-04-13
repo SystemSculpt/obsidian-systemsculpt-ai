@@ -14,7 +14,38 @@ export type StreamErrorClassification = {
   userMessage: string;
   /** Retry delay in seconds, if parseable from the error. */
   retryAfterSeconds: number;
+  /**
+   * True when the error is expected to clear on its own quickly — short
+   * provider rate limits, transient network blips. False when the user needs
+   * to take action (hard usage caps, multi-hour cooldowns, plan exhaustion).
+   * UI surfaces use this to choose Notice vs. modal.
+   */
+  transient: boolean;
 };
+
+const HARD_RATE_LIMIT_MARKERS = [
+  "usage limit",
+  "free plan",
+  "free tier",
+  "monthly limit",
+  "daily limit",
+  "exhausted",
+  "out of credits",
+  "billing",
+  "subscription",
+  "upgrade",
+];
+
+// Anything longer than this is treated as a hard limit the user has to deal
+// with manually, not a transient cooldown to wait out.
+const TRANSIENT_RATE_LIMIT_THRESHOLD_SECONDS = 60;
+
+function isHardRateLimit(combined: string, retryAfterSeconds: number): boolean {
+  if (retryAfterSeconds > TRANSIENT_RATE_LIMIT_THRESHOLD_SECONDS) {
+    return true;
+  }
+  return HARD_RATE_LIMIT_MARKERS.some((marker) => combined.includes(marker));
+}
 
 function includesAny(haystack: string, needles: string[]): boolean {
   return needles.some((needle) => haystack.includes(needle));
@@ -65,20 +96,51 @@ export function classifyStreamError(
 
   const retryAfterSeconds = parseRetryDelay(combined);
 
-  // Short-circuit on structured error codes when available.
-  if (code === ERROR_CODES.RATE_LIMIT_ERROR) {
+  const buildRateLimit = (): StreamErrorClassification => {
+    const hard = isHardRateLimit(combined, retryAfterSeconds);
     const wait = formatWaitTime(retryAfterSeconds);
     const suffix = wait ? ` Try again in ${wait}.` : " Please try again later.";
-    return { kind: "rate_limit", userMessage: `Provider rate limit reached.${suffix}`, retryAfterSeconds };
+    const messageHasRetryHint = /try again|retry|wait/i.test(message);
+    const userMessage = hard
+      ? messageHasRetryHint
+        ? message
+        : `${message || "Provider usage limit reached."}${suffix}`
+      : `Provider rate limit reached.${suffix}`;
+    return {
+      kind: "rate_limit",
+      userMessage,
+      retryAfterSeconds,
+      transient: !hard,
+    };
+  };
+
+  // Short-circuit on structured error codes when available.
+  if (code === ERROR_CODES.RATE_LIMIT_ERROR) {
+    return buildRateLimit();
   }
   if (code === ERROR_CODES.NETWORK_ERROR) {
-    return { kind: "network", userMessage: "Could not reach the provider. Check your internet connection and try again.", retryAfterSeconds: 0 };
+    return {
+      kind: "network",
+      userMessage: "Could not reach the provider. Check your internet connection and try again.",
+      retryAfterSeconds: 0,
+      transient: true,
+    };
   }
   if (code === ERROR_CODES.SERVICE_UNAVAILABLE) {
-    return { kind: "server", userMessage: "The provider is temporarily unavailable. Please try again in a moment.", retryAfterSeconds: 0 };
+    return {
+      kind: "server",
+      userMessage: "The provider is temporarily unavailable. Please try again in a moment.",
+      retryAfterSeconds: 0,
+      transient: true,
+    };
   }
   if (code === ERROR_CODES.MODEL_UNAVAILABLE) {
-    return { kind: "model_not_found", userMessage: "The selected model is not available. Try switching to a different model.", retryAfterSeconds: 0 };
+    return {
+      kind: "model_not_found",
+      userMessage: "The selected model is not available. Try switching to a different model.",
+      retryAfterSeconds: 0,
+      transient: false,
+    };
   }
 
   if (
@@ -94,9 +156,7 @@ export function classifyStreamError(
       "capacity",
     ])
   ) {
-    const wait = formatWaitTime(retryAfterSeconds);
-    const suffix = wait ? ` Try again in ${wait}.` : " Please try again later.";
-    return { kind: "rate_limit", userMessage: `Provider rate limit reached.${suffix}`, retryAfterSeconds };
+    return buildRateLimit();
   }
 
   if (isAuthFailureMessage(combined)) {
@@ -104,6 +164,7 @@ export function classifyStreamError(
       kind: "auth",
       userMessage: "Authentication failed for this provider. Check Settings \u2192 Providers to reconnect.",
       retryAfterSeconds: 0,
+      transient: false,
     };
   }
 
@@ -122,6 +183,7 @@ export function classifyStreamError(
       kind: "model_not_found",
       userMessage: "The selected model is not available. Try switching to a different model.",
       retryAfterSeconds: 0,
+      transient: false,
     };
   }
 
@@ -140,6 +202,7 @@ export function classifyStreamError(
       kind: "server",
       userMessage: "The provider is temporarily unavailable. Please try again in a moment.",
       retryAfterSeconds: 0,
+      transient: true,
     };
   }
 
@@ -159,6 +222,7 @@ export function classifyStreamError(
       kind: "network",
       userMessage: "Could not reach the provider. Check your internet connection and try again.",
       retryAfterSeconds: 0,
+      transient: true,
     };
   }
 
@@ -167,5 +231,6 @@ export function classifyStreamError(
     kind: "unknown",
     userMessage: trimmed || "An unexpected error occurred. Please try again.",
     retryAfterSeconds: 0,
+    transient: false,
   };
 }

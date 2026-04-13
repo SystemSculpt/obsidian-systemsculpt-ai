@@ -13,6 +13,7 @@ import {
   withPiDesktopFetchShim,
 } from "../../services/pi/PiSdkDesktopSupport";
 import type { PiAuthStorageInstance } from "../../services/pi/PiSdkAuthStorage";
+import { resolvePiAuthPath } from "../../services/pi/PiSdkStoragePaths";
 import type {
   StudioPiAuthCredentialType,
   StudioPiAuthState,
@@ -333,36 +334,23 @@ export async function loginStudioPiProviderOAuth(
     });
   });
 
-  // After successful OAuth login, ensure the credential is persisted to auth.json.
-  // The SDK's persistProviderChange uses proper-lockfile which can silently fail
-  // in Electron. As a safety net, read the credential from the in-memory storage
-  // and write auth.json directly if the SDK's persist was lost.
+  // The SDK's proper-lockfile-backed persist can fail silently in Electron;
+  // mirror the credential to auth.json directly so login state survives a
+  // restart even when the SDK's write was lost.
   try {
     const credential = storage.get(providerId);
     if (credential) {
-      const { resolvePiAuthPath } = await import("../../services/pi/PiSdkStoragePaths");
-      const authPath = resolvePiAuthPath(options.plugin);
-      if (authPath) {
-        const fs = require("fs");
-        const path = require("path");
-        const dir = path.dirname(authPath);
-        if (!fs.existsSync(dir)) {
-          fs.mkdirSync(dir, { recursive: true });
-        }
-        let existing: Record<string, unknown> = {};
-        try {
-          if (fs.existsSync(authPath)) {
-            existing = JSON.parse(fs.readFileSync(authPath, "utf-8"));
-          }
-        } catch {
-          // Corrupt auth.json — start fresh so the new credential is not lost.
-        }
-        existing[providerId] = credential;
-        fs.writeFileSync(authPath, JSON.stringify(existing, null, 2), "utf-8");
-      }
+      mutateAuthJsonFile(
+        options.plugin,
+        (data) => {
+          data[providerId] = credential;
+          return data;
+        },
+        { ensureDir: true, logLabel: `login ${providerId}` },
+      );
     }
   } catch {
-    // Best-effort — the login itself succeeded even if disk persist fails.
+    // Best-effort — login itself succeeded even if the disk mirror failed.
   }
 }
 
@@ -395,18 +383,77 @@ export async function clearStudioPiProviderAuth(
   const provider = normalizeStudioPiProviderHint(providerHint);
   if (!provider) throw new Error("Select a valid provider before clearing credentials.");
   await clearPluginStoredApiKey(provider, context.plugin);
+
   const storage = tryGetAuthStorage(context);
-  if (!storage) {
-    return;
+  if (storage) {
+    try {
+      storage.remove(provider);
+    } catch (err) {
+      console.warn(
+        `[StudioPiAuthStorage] SDK storage.remove failed for ${provider}; falling back to direct auth.json rewrite.`,
+        err,
+      );
+    }
   }
+
+  // The SDK's proper-lockfile path silently no-ops writes in Electron's
+  // renderer (and the inMemory fallback explicitly sacrifices write-back), so
+  // refreshProviderList would read the stale credential right back. Rewrite
+  // auth.json directly to guarantee the credential is actually gone.
+  mutateAuthJsonFile(
+    context.plugin,
+    (data) => {
+      if (!(provider in data)) return null;
+      delete data[provider];
+      return data;
+    },
+    { logLabel: `clear ${provider}` },
+  );
+}
+
+function mutateAuthJsonFile(
+  plugin: SystemSculptPlugin | null | undefined,
+  mutator: (data: Record<string, unknown>) => Record<string, unknown> | null,
+  options: { ensureDir?: boolean; logLabel: string },
+): void {
+  if (!Platform.isDesktopApp) return;
+  const authPath = resolvePiAuthPath(plugin);
+  if (!authPath) return;
   try {
-    storage.remove(provider);
+    const fs = require("fs");
+    if (options.ensureDir) {
+      const path = require("path");
+      const dir = path.dirname(authPath);
+      try {
+        fs.mkdirSync(dir, { recursive: true });
+      } catch {
+        // Directory already exists or cannot be created — let readFile/writeFile error surface below.
+      }
+    }
+    let existing: Record<string, unknown> = {};
+    try {
+      const rawContent = fs.readFileSync(authPath, "utf-8");
+      const parsed = JSON.parse(rawContent);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        existing = parsed as Record<string, unknown>;
+      }
+    } catch (err: any) {
+      if (err?.code !== "ENOENT") {
+        // Corrupt JSON or read failure — start from an empty object so the
+        // mutator can still write a fresh file rather than losing all state.
+      }
+    }
+    const next = mutator(existing);
+    if (!next) return;
+    fs.writeFileSync(authPath, JSON.stringify(next, null, 2), "utf-8");
+    try {
+      fs.chmodSync(authPath, 0o600);
+    } catch {
+      // chmod is best-effort — some filesystems (e.g. exFAT) reject mode changes.
+    }
   } catch (err) {
-    // Plugin-settings fallback is already cleared above. Log a warning so the
-    // discrepancy is visible: resolveProviderApiKey prefers Pi storage, so a
-    // stale entry there could shadow the cleared plugin-settings value.
     console.warn(
-      `[StudioPiAuthStorage] Failed to remove ${provider} from Pi auth storage; plugin-settings entry was cleared but Pi storage may retain stale credentials.`,
+      `[StudioPiAuthStorage] Direct fs auth.json mutate failed (${options.logLabel}).`,
       err,
     );
   }

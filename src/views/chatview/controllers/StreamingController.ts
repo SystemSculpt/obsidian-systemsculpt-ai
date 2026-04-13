@@ -220,15 +220,22 @@ export class StreamingController extends Component {
         });
       } catch {}
 
+      // Rethrow wrapped so upstream `instanceof SystemSculptError` guards know
+      // onError already fired and do not double-forward into handleError.
+      const wrapped =
+        err instanceof SystemSculptError
+          ? err
+          : new SystemSculptError(
+              err?.message || err?.toString?.() || "Unknown streaming error",
+              ERROR_CODES.STREAM_ERROR,
+              500,
+              { cause: err },
+            );
+
       if (onError) {
-        if (err instanceof SystemSculptError) {
-          onError(err);
-        } else {
-          const errorMessage = err?.message || err?.toString?.() || "Unknown streaming error";
-          onError(new SystemSculptError(errorMessage, ERROR_CODES.STREAM_ERROR, 500, { cause: err }));
-        }
+        onError(wrapped);
       }
-      throw err;
+      throw wrapped;
     } finally {
       if (ownsTracker) {
         metricsTracker.stop();

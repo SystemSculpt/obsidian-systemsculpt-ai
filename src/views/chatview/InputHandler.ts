@@ -121,6 +121,7 @@ export class InputHandler extends Component {
   private getChatTitle: () => string;
   private addFileToContext: (file: TFile) => Promise<void>;
   private pendingLargeTextContent: string | null = null;
+  private submittedInputSnapshot: { messageId: string; rawText: string } | null = null;
   private settingsButton: ButtonComponent;
   private attachButton: ButtonComponent;
   private micButton: ButtonComponent;
@@ -800,15 +801,20 @@ export class InputHandler extends Component {
 
     const includeContextFiles = overrides?.includeContextFiles ?? true;
 
+    const submittedRawText = messageText;
+
     try {
       await this.turnLifecycle.runTurn(async (signal) => {
         this.input.value = "";
         this.adjustInputHeight();
 
+        const messageId = this.generateMessageId();
+        this.submittedInputSnapshot = { messageId, rawText: submittedRawText };
+
         const userMessage: ChatMessage = {
           role: "user",
           content: messageText,
-          message_id: this.generateMessageId(),
+          message_id: messageId,
         } as any;
         await this.onMessageSubmit(userMessage);
 
@@ -838,6 +844,7 @@ export class InputHandler extends Component {
         throw new Error(String(err ?? "Unknown chat turn failure"));
       }
     } finally {
+      this.submittedInputSnapshot = null;
       if (overrides?.focusAfterSend !== false) {
         this.focus();
       }
@@ -1526,6 +1533,12 @@ export class InputHandler extends Component {
     if (shouldFocus) {
       this.focus();
     }
+  }
+
+  public consumeSubmittedInputSnapshot(): { messageId: string; rawText: string } | null {
+    const snapshot = this.submittedInputSnapshot;
+    this.submittedInputSnapshot = null;
+    return snapshot;
   }
 
   /**
