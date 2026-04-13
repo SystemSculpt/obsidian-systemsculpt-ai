@@ -121,8 +121,6 @@ export class InputHandler extends Component {
   private getChatTitle: () => string;
   private addFileToContext: (file: TFile) => Promise<void>;
   private pendingLargeTextContent: string | null = null;
-  // Captured at submit time so failed submissions can restore the exact text the
-  // user typed, independent of this.messages cleanup.
   private submittedInputSnapshot: { messageId: string; rawText: string } | null = null;
   private settingsButton: ButtonComponent;
   private attachButton: ButtonComponent;
@@ -803,7 +801,7 @@ export class InputHandler extends Component {
 
     const includeContextFiles = overrides?.includeContextFiles ?? true;
 
-    const submittedRawText = this.input.value;
+    const submittedRawText = messageText;
 
     try {
       await this.turnLifecycle.runTurn(async (signal) => {
@@ -822,7 +820,6 @@ export class InputHandler extends Component {
 
         await this.runHostedAgentTurnLoop(signal, includeContextFiles);
         void this.chatView.refreshCreditsBalance();
-        this.submittedInputSnapshot = null;
       });
     } catch (err) {
       // StreamingController already forwards errors into ChatView.handleError via onError.
@@ -847,6 +844,7 @@ export class InputHandler extends Component {
         throw new Error(String(err ?? "Unknown chat turn failure"));
       }
     } finally {
+      this.submittedInputSnapshot = null;
       if (overrides?.focusAfterSend !== false) {
         this.focus();
       }
@@ -1537,8 +1535,6 @@ export class InputHandler extends Component {
     }
   }
 
-  // Snapshot accessor for the failure path. Returns and clears the captured
-  // raw text + message_id, so retries don't see a stale snapshot.
   public consumeSubmittedInputSnapshot(): { messageId: string; rawText: string } | null {
     const snapshot = this.submittedInputSnapshot;
     this.submittedInputSnapshot = null;
