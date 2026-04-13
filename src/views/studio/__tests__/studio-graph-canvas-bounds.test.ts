@@ -67,7 +67,10 @@ describe("StudioGraphCanvasBounds", () => {
       kind: "studio.input",
       version: "1.0.0",
       title: "Far",
-      position: { x: 9600, y: 6400 },
+      position: {
+        x: STUDIO_GRAPH_CANVAS_BASE_WIDTH + 4000,
+        y: STUDIO_GRAPH_CANVAS_BASE_HEIGHT + 3000,
+      },
       config: {},
       continueOnError: false,
       disabled: false,
@@ -85,13 +88,15 @@ describe("StudioGraphCanvasBounds", () => {
       kind: "studio.input",
       version: "1.0.0",
       title: "Very Far",
-      position: { x: 50000, y: 40000 },
+      position: { x: 500000, y: 400000 },
       config: {},
       continueOnError: false,
       disabled: false,
     });
 
     const size = computeStudioGraphCanvasSize(project, {
+      minWidth: 1000,
+      minHeight: 1000,
       maxWidth: 12000,
       maxHeight: 9000,
     });

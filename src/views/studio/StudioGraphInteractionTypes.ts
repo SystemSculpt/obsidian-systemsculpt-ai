@@ -10,9 +10,9 @@ import {
 
 export const STUDIO_GRAPH_CANVAS_WIDTH = STUDIO_GRAPH_CANVAS_BASE_WIDTH;
 export const STUDIO_GRAPH_CANVAS_HEIGHT = STUDIO_GRAPH_CANVAS_BASE_HEIGHT;
-export const STUDIO_GRAPH_MIN_ZOOM = 0.4;
-export const STUDIO_GRAPH_OVERVIEW_MIN_ZOOM = 0.1;
-export const STUDIO_GRAPH_MAX_ZOOM = 2.4;
+export const STUDIO_GRAPH_MIN_ZOOM = 0.02;
+export const STUDIO_GRAPH_OVERVIEW_MIN_ZOOM = 0.005;
+export const STUDIO_GRAPH_MAX_ZOOM = 5;
 export const STUDIO_GRAPH_DEFAULT_ZOOM = 1;
 
 export type StudioGraphZoomMode = "interactive" | "overview";

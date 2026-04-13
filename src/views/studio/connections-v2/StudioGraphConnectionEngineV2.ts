@@ -38,6 +38,9 @@ export class StudioGraphConnectionEngineV2 {
   private graphCanvasEl: HTMLElement | null = null;
   private graphEdgesLayerEl: SVGSVGElement | null = null;
   private portElementsByKey = new Map<string, HTMLElement>();
+  private edgePathByEdgeId = new Map<string, SVGPathElement>();
+  private connectionPreviewPathEl: SVGPathElement | null = null;
+  private edgeLayerListenersBound = false;
   private suppressOutputClickKey: string | null = null;
   private autoCreateHintTimer: number | null = null;
   private autoCreateHintEl: HTMLElement | null = null;
@@ -76,6 +79,9 @@ export class StudioGraphConnectionEngineV2 {
     this.edgeContextMenu.destroy();
     this.resetPortVisualState();
     this.portElementsByKey.clear();
+    this.edgePathByEdgeId.clear();
+    this.connectionPreviewPathEl = null;
+    this.edgeLayerListenersBound = false;
   }
 
   onNodeRemoved(nodeId: string): void {
@@ -93,6 +99,27 @@ export class StudioGraphConnectionEngineV2 {
 
   registerEdgesLayerElement(layer: SVGSVGElement): void {
     this.graphEdgesLayerEl = layer;
+    this.edgePathByEdgeId.clear();
+    this.connectionPreviewPathEl = null;
+    this.edgeLayerListenersBound = false;
+    this.bindEdgeLayerListeners(layer);
+  }
+
+  private bindEdgeLayerListeners(layer: SVGSVGElement): void {
+    if (this.edgeLayerListenersBound) return;
+    const handle = (event: MouseEvent): void => {
+      const target = event.target as Element | null;
+      const path = target?.closest("path[data-edge-id]") as SVGPathElement | null;
+      if (!path) return;
+      const edgeId = path.dataset.edgeId;
+      if (!edgeId) return;
+      event.preventDefault();
+      event.stopPropagation();
+      this.openEdgeContextMenu(edgeId, event.clientX, event.clientY);
+    };
+    layer.addEventListener("click", handle);
+    layer.addEventListener("contextmenu", handle);
+    this.edgeLayerListenersBound = true;
   }
 
   clearPortElements(): void {
@@ -464,52 +491,54 @@ export class StudioGraphConnectionEngineV2 {
 
   renderEdgeLayer(): void {
     const project = this.host.getCurrentProject();
-    if (!project || !this.graphEdgesLayerEl || !this.graphCanvasEl) {
+    const layer = this.graphEdgesLayerEl;
+    if (!project || !layer || !this.graphCanvasEl) {
       this.closeEdgeContextMenu();
       this.hideAutoCreateHint();
       this.resetPortVisualState();
       return;
     }
 
-    this.graphEdgesLayerEl.textContent = "";
-
     const connectedInputKeys = new Set<string>();
     const connectedOutputKeys = new Set<string>();
+    const seenEdgeIds = new Set<string>();
 
     for (const edge of this.toLinkEdges(project)) {
       const sourceKey = this.portKey(edge.source.nodeId, edge.source.direction, edge.source.portId);
       const targetKey = this.portKey(edge.target.nodeId, edge.target.direction, edge.target.portId);
       const sourcePort = this.portElementsByKey.get(sourceKey);
       const targetPort = this.portElementsByKey.get(targetKey);
-      if (!sourcePort || !targetPort) {
-        continue;
-      }
+      if (!sourcePort || !targetPort) continue;
 
       connectedOutputKeys.add(sourceKey);
       connectedInputKeys.add(targetKey);
 
       const curve = this.computeCurve(sourcePort, targetPort);
-      if (!curve) {
-        continue;
-      }
+      if (!curve) continue;
 
-      const path = document.createElementNS(SVG_NS, "path");
-      path.setAttribute("d", curve.path);
-      path.setAttribute("class", "ss-studio-link-path");
-      const onEdgeMenuRequested = (event: MouseEvent): void => {
-        event.preventDefault();
-        event.stopPropagation();
-        this.openEdgeContextMenu(edge.id, event.clientX, event.clientY);
-      };
-      path.addEventListener("click", (event) => {
-        onEdgeMenuRequested(event);
-      });
-      path.addEventListener("contextmenu", (event) => {
-        onEdgeMenuRequested(event);
-      });
-      this.graphEdgesLayerEl.appendChild(path);
+      seenEdgeIds.add(edge.id);
+      let path = this.edgePathByEdgeId.get(edge.id);
+      if (!path) {
+        path = document.createElementNS(SVG_NS, "path");
+        path.setAttribute("class", "ss-studio-link-path");
+        path.dataset.edgeId = edge.id;
+        this.edgePathByEdgeId.set(edge.id, path);
+        layer.appendChild(path);
+      }
+      if (path.getAttribute("d") !== curve.path) {
+        path.setAttribute("d", curve.path);
+      }
     }
 
+    if (this.edgePathByEdgeId.size > seenEdgeIds.size) {
+      for (const [edgeId, path] of this.edgePathByEdgeId) {
+        if (seenEdgeIds.has(edgeId)) continue;
+        path.remove();
+        this.edgePathByEdgeId.delete(edgeId);
+      }
+    }
+
+    let previewPath = this.connectionPreviewPathEl;
     if (this.dragState?.active && this.pendingConnection) {
       const sourceKey = this.portKey(this.pendingConnection.fromNodeId, "out", this.pendingConnection.fromPortId);
       const sourcePort = this.portElementsByKey.get(sourceKey);
@@ -518,12 +547,21 @@ export class StudioGraphConnectionEngineV2 {
         const sourceAnchor = this.portAnchorPoint(sourcePort, "out");
         if (sourceAnchor) {
           const curve = buildCubicLinkCurve(sourceAnchor, cursorAnchor);
-          const preview = document.createElementNS(SVG_NS, "path");
-          preview.setAttribute("d", curve.path);
-          preview.setAttribute("class", "ss-studio-link-preview");
-          this.graphEdgesLayerEl.appendChild(preview);
+          if (!previewPath) {
+            previewPath = document.createElementNS(SVG_NS, "path");
+            previewPath.setAttribute("class", "ss-studio-link-preview");
+            this.connectionPreviewPathEl = previewPath;
+          }
+          if (previewPath.getAttribute("d") !== curve.path) {
+            previewPath.setAttribute("d", curve.path);
+          }
+          if (previewPath.parentNode !== layer) {
+            layer.appendChild(previewPath);
+          }
         }
       }
+    } else if (previewPath && previewPath.parentNode === layer) {
+      previewPath.remove();
     }
 
     this.applyConnectedPortVisuals(connectedInputKeys, connectedOutputKeys);

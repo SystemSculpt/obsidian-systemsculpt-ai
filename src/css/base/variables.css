@@ -43,10 +43,21 @@
   --ss-color-bg-hover: var(--background-modifier-hover);
   
   /* Spacing system */
+  --ss-space-1: 1px;
   --ss-space-xxs: 2px;
+  --ss-space-3: 3px;
   --ss-space-xs: 4px;
+  --ss-space-5: 5px;
+  --ss-space-6: 6px;
+  --ss-space-7: 7px;
   --ss-space-sm: 8px;
+  --ss-space-9: 9px;
+  --ss-space-10: 10px;
+  --ss-space-12: 12px;
+  --ss-space-14: 14px;
   --ss-space-md: 16px;
+  --ss-space-18: 18px;
+  --ss-space-20: 20px;
   --ss-space-lg: 24px;
   --ss-space-xl: 32px;
   --ss-space-xxl: 48px;
@@ -62,12 +73,45 @@
   --ss-font-weight-bold: 600;
   
   /* Borders & Radius */
+  --ss-radius-xs: 3px;
   --ss-radius-sm: 4px;
   --ss-radius-md: 6px;
+  --ss-radius-7: 7px;
   --ss-radius-lg: 8px;
+  --ss-radius-9: 9px;
+  --ss-radius-10: 10px;
+  --ss-radius-12: 12px;
+  --ss-radius-14: 14px;
+  --ss-radius-16: 16px;
+  --ss-radius-18: 18px;
+  --ss-radius-20: 20px;
+  --ss-radius-24: 24px;
+  --ss-radius-pill: 999px;
   --ss-radius-circle: 50%;
   --ss-border-width: 1px;
   
+  /* Studio-specific color palette */
+  --ss-studio-accent: #8de8bc;
+  --ss-studio-accent-bright: #9effd0;
+  --ss-studio-accent-light: #9deec8;
+  --ss-studio-accent-muted: #7bcda5;
+  --ss-studio-accent-soft: #89d6ad;
+  --ss-studio-accent-dim: #7fcfaa;
+  --ss-studio-accent-mid: #4f9f74;
+  --ss-studio-success-tint: #2ea043;
+  --ss-studio-bg-dark: #1f4a37;
+  --ss-studio-bg-darker: #0f251b;
+  --ss-studio-bg-mid: #2b5f48;
+  --ss-studio-bg-deep: #163627;
+  --ss-studio-surface-success: #d4f5e2;
+  --ss-studio-surface-success-light: #e0f8eb;
+  --ss-studio-error: #c14d3d;
+  --ss-studio-error-muted: #efb6a0;
+  --ss-studio-info: #8ec8e6;
+  --ss-studio-info-bright: #89d8f5;
+  --ss-studio-shadow: #000;
+  --ss-studio-highlight: #fff;
+
   /* Transitions */
   --ss-transition-fast: 0.15s ease;
   --ss-transition-normal: 0.2s ease;
