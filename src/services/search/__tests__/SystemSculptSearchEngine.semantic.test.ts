@@ -22,6 +22,7 @@ const makePlugin = (app: App, options: { embeddingsEnabled?: boolean; manager?: 
       },
     },
     vaultFileCache: undefined,
+    embeddingsManager: manager,
     getOrCreateEmbeddingsManager: jest.fn().mockReturnValue(manager),
   } as any;
 };
@@ -146,6 +147,7 @@ describe("SystemSculptSearchEngine semantic mode", () => {
       });
       const { app, plugin } = buildFixture({ manager: mockManager });
       const engine = new SystemSculptSearchEngine(app as any, plugin);
+      await engine.startIndexing();
 
       const res = await engine.search("learning", { mode: "smart", limit: 10 });
 
@@ -162,6 +164,7 @@ describe("SystemSculptSearchEngine semantic mode", () => {
       });
       const { app, plugin } = buildFixture({ manager: mockManager });
       const engine = new SystemSculptSearchEngine(app as any, plugin);
+      await engine.startIndexing();
 
       const res = await engine.search("machine learning", { mode: "smart", limit: 10 });
 
@@ -177,6 +180,7 @@ describe("SystemSculptSearchEngine semantic mode", () => {
       });
       const { app, plugin } = buildFixture({ manager: mockManager });
       const engine = new SystemSculptSearchEngine(app as any, plugin);
+      await engine.startIndexing();
 
       const res = await engine.search("machine", { mode: "smart", limit: 10 });
 
@@ -194,6 +198,7 @@ describe("SystemSculptSearchEngine semantic mode", () => {
       });
       const { app, plugin } = buildFixture({ manager: mockManager });
       const engine = new SystemSculptSearchEngine(app as any, plugin);
+      await engine.startIndexing();
 
       const res = await engine.search("machine learning", { mode: "smart", limit: 10 });
 
@@ -211,6 +216,7 @@ describe("SystemSculptSearchEngine semantic mode", () => {
       });
       const { app, plugin } = buildFixture({ manager: mockManager });
       const engine = new SystemSculptSearchEngine(app as any, plugin);
+      await engine.startIndexing();
 
       const res = await engine.search("machine learning", { mode: "smart", limit: 10 });
 
@@ -228,6 +234,7 @@ describe("SystemSculptSearchEngine semantic mode", () => {
       });
       const { app, plugin } = buildFixture({ manager: mockManager });
       const engine = new SystemSculptSearchEngine(app as any, plugin);
+      await engine.startIndexing();
 
       const res = await engine.search("learning", { mode: "smart", limit: 10 });
 
@@ -245,6 +252,7 @@ describe("SystemSculptSearchEngine semantic mode", () => {
       });
       const { app, plugin } = buildFixture({ manager: mockManager });
       const engine = new SystemSculptSearchEngine(app as any, plugin);
+      await engine.startIndexing();
 
       const res = await engine.search("learning", { mode: "smart", limit: 10 });
 
@@ -334,7 +342,7 @@ describe("SystemSculptSearchEngine semantic mode", () => {
       expect(res.embeddings.total).toBe(200);
     });
 
-    it("handles manager errors and returns reason", async () => {
+    it("does not instantiate embeddings just to report readiness", async () => {
       const { app } = buildFixture();
       const plugin = {
         app,
@@ -350,7 +358,8 @@ describe("SystemSculptSearchEngine semantic mode", () => {
 
       expect(res.embeddings.ready).toBe(false);
       expect(res.embeddings.available).toBe(false);
-      expect(res.embeddings.reason).toContain("Manager initialization failed");
+      expect(res.embeddings.reason).toContain("not initialized");
+      expect(plugin.getOrCreateEmbeddingsManager).not.toHaveBeenCalled();
     });
   });
 

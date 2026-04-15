@@ -94,6 +94,85 @@ describe("SystemSculptSearchEngine lexical mode", () => {
     expect(previews.get("notes/fresh-orange.md")).toContain("Orange harvest note");
   });
 
+  it("caches recent previews by path, mtime, and size", async () => {
+    const { app } = buildFixture();
+    const plugin = makePlugin(app);
+    const engine = new SystemSculptSearchEngine(app as any, plugin);
+
+    await engine.getRecentPreviews(["notes/fresh-orange.md"]);
+    await engine.getRecentPreviews(["notes/fresh-orange.md"]);
+
+    expect(app.vault.cachedRead).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns metadata hits for the first smart query without reading note bodies", async () => {
+    jest.useFakeTimers();
+    const { app } = buildFixture();
+    const plugin = makePlugin(app);
+    const engine = new SystemSculptSearchEngine(app as any, plugin);
+
+    const res = await engine.search("fresh", { mode: "smart", limit: 10 });
+
+    expect(res.results.map((r) => r.path)).toContain("notes/fresh-orange.md");
+    expect(res.stats.metadataOnly).toBe(true);
+    expect(res.stats.indexingPending).toBe(true);
+    expect(app.vault.cachedRead).not.toHaveBeenCalled();
+
+    engine.destroy();
+    jest.useRealTimers();
+  });
+
+  it("does not return unrelated recent notes for no-match lexical queries", async () => {
+    const { app } = buildFixture();
+    const plugin = makePlugin(app);
+    const engine = new SystemSculptSearchEngine(app as any, plugin);
+
+    const res = await engine.search("zzzz-not-a-note", { mode: "lexical", limit: 10 });
+
+    expect(res.results).toEqual([]);
+  });
+
+  it("clears the content index when search-affecting settings change", async () => {
+    jest.useFakeTimers();
+    const { app } = buildFixture();
+    const plugin = makePlugin(app);
+    const engine = new SystemSculptSearchEngine(app as any, plugin);
+
+    await engine.search("orange", { mode: "lexical", limit: 10 });
+    expect(app.vault.cachedRead).toHaveBeenCalled();
+
+    const settingsListener = (app.workspace.on as jest.Mock).mock.calls.find(([event]) => event === "systemsculpt:settings-updated")?.[1];
+    expect(settingsListener).toBeDefined();
+    settingsListener();
+
+    (app.vault.cachedRead as jest.Mock).mockClear();
+    const res = await engine.search("fresh", { mode: "smart", limit: 10 });
+
+    expect(res.stats.metadataOnly).toBe(true);
+    expect(app.vault.cachedRead).not.toHaveBeenCalled();
+
+    engine.destroy();
+    jest.useRealTimers();
+  });
+
+  it("does not mutate the cached vault file array when selecting recents", async () => {
+    const { app, files } = buildFixture();
+    const plugin = makePlugin(app);
+    plugin.vaultFileCache = {
+      getAllFilesView: jest.fn(() => files),
+    };
+    const engine = new SystemSculptSearchEngine(app as any, plugin);
+
+    await engine.getRecent(2);
+
+    expect(files.map((file) => file.path)).toEqual([
+      "notes/orange-juice.md",
+      "notes/fresh-orange.md",
+      "notes/research.canvas",
+      "notes/unrelated.md",
+    ]);
+  });
+
   it("prefers full term coverage over recent one-term matches", async () => {
     const { app } = buildFixture();
     const plugin = makePlugin(app);

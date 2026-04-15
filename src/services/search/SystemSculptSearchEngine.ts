@@ -37,6 +37,8 @@ export interface SearchStats {
   mode: SearchMode;
   usedEmbeddings: boolean;
   embeddingsEligible?: boolean;
+  indexingPending?: boolean;
+  metadataOnly?: boolean;
 }
 
 export interface SearchResponse {
@@ -68,6 +70,11 @@ interface QueryTerm {
   fuzzy: Set<string>;
 }
 
+interface CachedPreview {
+  key: string;
+  preview: string;
+}
+
 export class SystemSculptSearchEngine {
   private app: App;
   private plugin: SystemSculptPlugin;
@@ -75,15 +82,21 @@ export class SystemSculptSearchEngine {
   private tokenIndex: Map<string, Set<string>> = new Map();
   private tokenVocabulary: Set<string> = new Set();
   private recentHitsCache: { limit: number; hits: SearchHit[] } | null = null;
+  private recentPreviewCache: Map<string, CachedPreview> = new Map();
   private indexPromise: Promise<void> | null = null;
+  private contentIndexReady = false;
+  private indexGeneration = 0;
+  private scheduledIndexHandle: number | null = null;
   private dirtyPaths: Set<string> = new Set();
   private eventRefs: EventRef[] = [];
+  private workspaceEventRefs: EventRef[] = [];
   private readonly INDEXABLE_EXTENSIONS = new Set(["md", "markdown", "canvas"]);
   private readonly MAX_INDEX_CHARS = 6500;
   private readonly PREVIEW_CHARS = 240;
   private readonly CANDIDATE_LIMIT = 320;
   private readonly CONTENT_CONCURRENCY = 10;
   private readonly RECENT_PREVIEW_CONCURRENCY = 2;
+  private readonly MAX_RECENT_PREVIEW_FILE_BYTES = 1024 * 1024;
   private readonly SEMANTIC_TIMEOUT_MS = 1500;
   private lastLexicalInspect = 0;
 
@@ -96,10 +109,11 @@ export class SystemSculptSearchEngine {
   /**
    * Run a search across the vault
    */
-  async search(query: string, options?: { mode?: SearchMode; sort?: SortMode; limit?: number }): Promise<SearchResponse> {
+  async search(query: string, options?: { mode?: SearchMode; sort?: SortMode; limit?: number; signal?: AbortSignal }): Promise<SearchResponse> {
     const mode: SearchMode = options?.mode ?? "smart";
     const sort: SortMode = options?.sort ?? "relevance";
     const limit = options?.limit ?? 80;
+    const signal = options?.signal;
 
     const searchStart = performance.now();
     const normalizedQuery = query.trim().toLowerCase();
@@ -119,7 +133,34 @@ export class SystemSculptSearchEngine {
           usedEmbeddings: false,
           embeddingsEligible: false,
         },
-        embeddings: this.getEmbeddingsIndicator(),
+        embeddings: this.getPassiveEmbeddingsIndicator(),
+      };
+    }
+
+    if (signal?.aborted) {
+      throw new DOMException("Search aborted", "AbortError");
+    }
+
+    if (mode === "smart" && !this.contentIndexReady) {
+      const metadataStart = performance.now();
+      const metadataHits = this.runMetadataSearch(terms, phrase, limit, sort);
+      this.scheduleIndexing();
+      const totalMs = performance.now() - searchStart;
+      return {
+        results: metadataHits,
+        stats: {
+          totalMs,
+          lexMs: performance.now() - metadataStart,
+          indexMs: 0,
+          indexedCount: this.index.size,
+          inspectedCount: metadataHits.length,
+          mode,
+          usedEmbeddings: false,
+          embeddingsEligible: false,
+          indexingPending: true,
+          metadataOnly: true,
+        },
+        embeddings: this.getPassiveEmbeddingsIndicator(),
       };
     }
 
@@ -128,6 +169,10 @@ export class SystemSculptSearchEngine {
     await this.refreshDirtyIndex();
     const indexMs = performance.now() - indexStart;
     this.lastLexicalInspect = 0;
+
+    if (signal?.aborted) {
+      throw new DOMException("Search aborted", "AbortError");
+    }
 
     const lexStart = performance.now();
     const lexicalHits = this.runLexicalSearch(terms, phrase, limit, sort);
@@ -142,7 +187,7 @@ export class SystemSculptSearchEngine {
 
     if (embeddingsEligible) {
       const semStart = performance.now();
-      semanticHits = await this.runSemanticSearch(query, limit);
+      semanticHits = await this.runSemanticSearch(query, limit, signal);
       semMs = performance.now() - semStart;
       usedEmbeddings = semanticHits.length > 0;
     } else if (mode === "semantic" && (!embeddingsIndicator.enabled || !embeddingsIndicator.available)) {
@@ -196,18 +241,31 @@ export class SystemSculptSearchEngine {
     return this.recentHitsCache.hits.slice(0, limit);
   }
 
-  async getRecentPreviews(paths: string[], limit = 25): Promise<Map<string, string>> {
+  async getRecentPreviews(paths: string[], limit = 25, signal?: AbortSignal): Promise<Map<string, string>> {
     const previews = new Map<string, string>();
     const uniquePaths = Array.from(new Set(paths)).slice(0, limit);
     const tasks = uniquePaths.map((path) => async () => {
+      if (signal?.aborted) return;
       const file = this.app.vault.getAbstractFileByPath(path);
       if (!(file instanceof TFile) || !this.isEligible(file)) return;
+      const cacheKey = this.previewCacheKey(file);
+      const cached = this.recentPreviewCache.get(file.path);
+      if (cached?.key === cacheKey) {
+        previews.set(file.path, cached.preview);
+        return;
+      }
+
+      if ((file.stat?.size || 0) > this.MAX_RECENT_PREVIEW_FILE_BYTES) {
+        return;
+      }
 
       try {
         const content = await this.safeRead(file);
+        if (signal?.aborted) return;
         const preview = this.buildPreviewFromText(this.getIndexText(file, content));
         if (preview) {
           previews.set(path, preview);
+          this.recentPreviewCache.set(file.path, { key: cacheKey, preview });
         }
       } catch {
         // Skip failed preview hydration.
@@ -218,23 +276,35 @@ export class SystemSculptSearchEngine {
     return previews;
   }
 
-  async warmIndex(): Promise<void> {
-    try {
-      await this.ensureIndex();
-    } catch {
-      // Search can recover on the next explicit query.
-    }
+  startIndexing(): Promise<void> {
+    return this.ensureIndex();
+  }
+
+  async whenIndexReady(): Promise<void> {
+    await this.ensureIndex();
   }
 
   destroy(): void {
     this.eventRefs.forEach((ref) => this.app.vault.offref(ref));
     this.eventRefs = [];
+    const workspace = this.app.workspace as any;
+    this.workspaceEventRefs.forEach((ref) => {
+      if (typeof workspace.offref === "function") {
+        workspace.offref(ref);
+      } else if (typeof (ref as any)?.unload === "function") {
+        (ref as any).unload();
+      }
+    });
+    this.workspaceEventRefs = [];
+    this.clearScheduledIndexing();
     this.index.clear();
     this.tokenIndex.clear();
     this.tokenVocabulary.clear();
     this.recentHitsCache = null;
+    this.recentPreviewCache.clear();
     this.dirtyPaths.clear();
     this.indexPromise = null;
+    this.contentIndexReady = false;
   }
 
   private registerVaultWatchers() {
@@ -243,6 +313,7 @@ export class SystemSculptSearchEngine {
         if (file instanceof TFile && this.isEligible(file)) {
           this.dirtyPaths.add(file.path);
           this.recentHitsCache = null;
+          this.recentPreviewCache.delete(file.path);
         }
       })
     );
@@ -252,6 +323,7 @@ export class SystemSculptSearchEngine {
         if (file instanceof TFile && this.isEligible(file)) {
           this.dirtyPaths.add(file.path);
           this.recentHitsCache = null;
+          this.recentPreviewCache.delete(file.path);
         }
       })
     );
@@ -266,6 +338,7 @@ export class SystemSculptSearchEngine {
           this.index.delete(file.path);
           this.dirtyPaths.delete(file.path);
           this.recentHitsCache = null;
+          this.recentPreviewCache.delete(file.path);
         }
       })
     );
@@ -278,30 +351,76 @@ export class SystemSculptSearchEngine {
           this.removeFromTokenIndex(existing);
         }
         this.index.delete(oldPath);
+        this.recentPreviewCache.delete(oldPath);
         if (this.isEligible(file)) {
           this.dirtyPaths.add(file.path);
+          this.recentPreviewCache.delete(file.path);
         }
         this.recentHitsCache = null;
       })
     );
+
+    if (typeof this.app.workspace?.on === "function") {
+      this.workspaceEventRefs.push(
+        this.app.workspace.on("systemsculpt:settings-updated", () => {
+          this.clearIndexes();
+        })
+      );
+    }
   }
 
   private async ensureIndex(): Promise<void> {
+    if (this.contentIndexReady) return;
     if (this.indexPromise) {
       await this.indexPromise;
       return;
     }
 
+    const generation = this.indexGeneration;
     this.indexPromise = (async () => {
       const files = this.getEligibleFiles();
-      await this.buildIndex(files);
+      const built = await this.buildIndex(files, false, generation);
+      if (built && generation === this.indexGeneration) {
+        this.contentIndexReady = true;
+      }
     })();
 
     try {
       await this.indexPromise;
     } catch (error) {
       this.indexPromise = null;
+      this.contentIndexReady = false;
       throw error;
+    }
+  }
+
+  private clearIndexes(): void {
+    this.indexGeneration += 1;
+    this.clearScheduledIndexing();
+    this.index.clear();
+    this.tokenIndex.clear();
+    this.tokenVocabulary.clear();
+    this.recentHitsCache = null;
+    this.recentPreviewCache.clear();
+    this.dirtyPaths.clear();
+    this.indexPromise = null;
+    this.contentIndexReady = false;
+  }
+
+  private scheduleIndexing(): void {
+    if (this.contentIndexReady || this.indexPromise || this.scheduledIndexHandle !== null) return;
+    this.scheduledIndexHandle = window.setTimeout(() => {
+      this.scheduledIndexHandle = null;
+      void this.startIndexing().catch(() => {
+        // Explicit searches can retry indexing.
+      });
+    }, 0);
+  }
+
+  private clearScheduledIndexing(): void {
+    if (this.scheduledIndexHandle !== null) {
+      window.clearTimeout(this.scheduledIndexHandle);
+      this.scheduledIndexHandle = null;
     }
   }
 
@@ -318,44 +437,41 @@ export class SystemSculptSearchEngine {
       return;
     }
 
-    await this.buildIndex(filesToRefresh, true);
+    await this.buildIndex(filesToRefresh, true, this.indexGeneration);
   }
 
-  private async buildIndex(files: TFile[], incremental = false): Promise<void> {
+  private async buildIndex(files: TFile[], incremental = false, generation = this.indexGeneration): Promise<boolean> {
     if (!incremental) {
-      this.index.clear();
-      this.tokenIndex.clear();
-      this.tokenVocabulary.clear();
+      const nextIndex = new Map<string, IndexedDocument>();
+      const nextTokenIndex = new Map<string, Set<string>>();
+      const nextVocabulary = new Set<string>();
+
+      const tasks = files.map((file) => async () => {
+        try {
+          const doc = await this.indexFile(file);
+          if (!doc || generation !== this.indexGeneration) return;
+          nextIndex.set(file.path, doc);
+          this.addToTokenIndex(doc, nextTokenIndex, nextVocabulary);
+        } catch {
+          // Skip failed file
+        }
+      });
+
+      await this.runLimited(tasks, this.CONTENT_CONCURRENCY);
+      if (generation !== this.indexGeneration) return false;
+
+      this.index = nextIndex;
+      this.tokenIndex = nextTokenIndex;
+      this.tokenVocabulary = nextVocabulary;
       this.recentHitsCache = null;
+      return true;
     }
 
     const tasks = files.map((file) => async () => {
       try {
-        const content = await this.safeRead(file);
-        const extracted = this.getIndexText(file, content);
-        const rawBody = extracted.slice(0, this.MAX_INDEX_CHARS);
-        const body = rawBody.toLowerCase();
-        const preview = this.buildPreviewFromText(extracted);
-        const titleTokens = this.tokenizeSearchText(file.basename);
-        const pathTokens = this.tokenizeSearchText(file.path);
-        const bodyTokens = this.tokenizeSearchText(body);
-        const tokens = new Set([...titleTokens, ...pathTokens, ...bodyTokens]);
-
-        const doc: IndexedDocument = {
-          path: file.path,
-          title: file.basename,
-          lowerTitle: file.basename.toLowerCase(),
-          lowerPath: file.path.toLowerCase(),
-          titleTokens,
-          pathTokens,
-          bodyTokens,
-          tokens,
-          body,
-          rawBody,
-          preview,
-          mtime: file.stat?.mtime || 0,
-          size: file.stat?.size || 0,
-        };
+        if (generation !== this.indexGeneration) return;
+        const doc = await this.indexFile(file);
+        if (!doc || generation !== this.indexGeneration) return;
 
         const existing = this.index.get(file.path);
         if (existing) {
@@ -369,7 +485,37 @@ export class SystemSculptSearchEngine {
     });
 
     await this.runLimited(tasks, this.CONTENT_CONCURRENCY);
+    if (generation !== this.indexGeneration) return false;
     this.recentHitsCache = null;
+    return true;
+  }
+
+  private async indexFile(file: TFile): Promise<IndexedDocument | null> {
+    const content = await this.safeRead(file);
+    const extracted = this.getIndexText(file, content);
+    const rawBody = extracted.slice(0, this.MAX_INDEX_CHARS);
+    const body = rawBody.toLowerCase();
+    const preview = this.buildPreviewFromText(extracted);
+    const titleTokens = this.tokenizeSearchText(file.basename);
+    const pathTokens = this.tokenizeSearchText(file.path);
+    const bodyTokens = this.tokenizeSearchText(body);
+    const tokens = new Set([...titleTokens, ...pathTokens, ...bodyTokens]);
+
+    return {
+      path: file.path,
+      title: file.basename,
+      lowerTitle: file.basename.toLowerCase(),
+      lowerPath: file.path.toLowerCase(),
+      titleTokens,
+      pathTokens,
+      bodyTokens,
+      tokens,
+      body,
+      rawBody,
+      preview,
+      mtime: file.stat?.mtime || 0,
+      size: file.stat?.size || 0,
+    };
   }
 
   private async safeRead(file: TFile): Promise<string> {
@@ -381,16 +527,36 @@ export class SystemSculptSearchEngine {
   }
 
   private getEligibleFiles(): TFile[] {
-    const cached = this.plugin.vaultFileCache?.getAllFiles?.();
+    const cached = this.plugin.vaultFileCache?.getAllFilesView?.() ?? this.plugin.vaultFileCache?.getAllFiles?.();
     const files = Array.isArray(cached) ? cached : this.app.vault.getFiles();
-    return files.filter((f) => this.isEligible(f));
+    return Array.from(files).filter((f) => this.isEligible(f));
   }
 
   private selectRecentFiles(files: TFile[], limit: number): TFile[] {
     if (limit <= 0) return [];
-    return files
-      .sort((a, b) => (b.stat?.mtime || 0) - (a.stat?.mtime || 0))
-      .slice(0, limit);
+    const top: TFile[] = [];
+    for (const file of files) {
+      const mtime = file.stat?.mtime || 0;
+      if (top.length === 0) {
+        top.push(file);
+        continue;
+      }
+
+      let insertAt = top.findIndex((candidate) => mtime > (candidate.stat?.mtime || 0));
+      if (insertAt === -1) insertAt = top.length;
+
+      if (insertAt < limit) {
+        top.splice(insertAt, 0, file);
+        if (top.length > limit) top.pop();
+      } else if (top.length < limit) {
+        top.push(file);
+      }
+    }
+    return top;
+  }
+
+  private previewCacheKey(file: TFile): string {
+    return `${file.path}:${file.stat?.mtime || 0}:${file.stat?.size || 0}`;
   }
 
   private isEligible(file: TFile): boolean {
@@ -420,13 +586,18 @@ export class SystemSculptSearchEngine {
   private runLexicalSearch(terms: string[], phrase: string, limit: number, sort: SortMode): SearchHit[] {
     const queryTerms = this.buildQueryTerms(terms);
     const candidates = this.collectCandidateDocs(queryTerms, limit);
+    const directMetadataCandidates = this.collectDirectMetadataDocs(queryTerms, phrase, limit);
+    const candidateMap = new Map<string, IndexedDocument>();
 
-    this.lastLexicalInspect = candidates.length;
+    for (const doc of directMetadataCandidates) {
+      candidateMap.set(doc.path, doc);
+    }
+    for (const doc of candidates) {
+      candidateMap.set(doc.path, doc);
+    }
 
-    // Fallback to the first indexed docs if no indexed token can match the query at all.
-    const pool = candidates.length > 0
-      ? candidates
-      : Array.from(this.index.values()).slice(0, Math.min(this.CANDIDATE_LIMIT, this.index.size));
+    const pool = Array.from(candidateMap.values());
+    this.lastLexicalInspect = pool.length;
 
     const scored = pool
       .map((doc) => this.scoreDocument(doc, queryTerms, phrase))
@@ -445,6 +616,7 @@ export class SystemSculptSearchEngine {
     if (queryTerms.length === 0) return null;
     let total = 0;
     let matchedTerms = 0;
+    let phraseMatched = false;
 
     for (const term of queryTerms) {
       const fieldScore = this.scoreTermInDocument(doc, term);
@@ -455,16 +627,27 @@ export class SystemSculptSearchEngine {
     }
 
     if (phrase) {
-      if (doc.lowerTitle.includes(phrase)) total += 20;
-      if (doc.lowerPath.includes(phrase)) total += 10;
-      if (doc.body.includes(phrase)) total += 14;
+      if (doc.lowerTitle.includes(phrase)) {
+        total += 20;
+        phraseMatched = true;
+      }
+      if (doc.lowerPath.includes(phrase)) {
+        total += 10;
+        phraseMatched = true;
+      }
+      if (doc.body.includes(phrase)) {
+        total += 14;
+        phraseMatched = true;
+      }
     }
+
+    if (matchedTerms === 0 && !phraseMatched) return null;
 
     const coverageRatio = matchedTerms / queryTerms.length;
     const coverageBonus = matchedTerms > 0 ? coverageRatio * 16 : 0;
     total += coverageBonus;
 
-    total += this.computeRecencyBoost(doc.mtime) * Math.max(0.25, coverageRatio);
+    total += this.computeRecencyBoost(doc.mtime) * Math.max(0.15, coverageRatio);
 
     const maxPossible = queryTerms.length * 24 + 60;
     const score = Math.min(1, total / maxPossible);
@@ -532,26 +715,34 @@ export class SystemSculptSearchEngine {
     return new Set(tokens.filter((token) => token.length > 1));
   }
 
-  private addToTokenIndex(doc: IndexedDocument): void {
+  private addToTokenIndex(
+    doc: IndexedDocument,
+    tokenIndex: Map<string, Set<string>> = this.tokenIndex,
+    tokenVocabulary: Set<string> = this.tokenVocabulary
+  ): void {
     for (const token of doc.tokens) {
-      this.tokenVocabulary.add(token);
-      let paths = this.tokenIndex.get(token);
+      tokenVocabulary.add(token);
+      let paths = tokenIndex.get(token);
       if (!paths) {
         paths = new Set();
-        this.tokenIndex.set(token, paths);
+        tokenIndex.set(token, paths);
       }
       paths.add(doc.path);
     }
   }
 
-  private removeFromTokenIndex(doc: IndexedDocument): void {
+  private removeFromTokenIndex(
+    doc: IndexedDocument,
+    tokenIndex: Map<string, Set<string>> = this.tokenIndex,
+    tokenVocabulary: Set<string> = this.tokenVocabulary
+  ): void {
     for (const token of doc.tokens) {
-      const paths = this.tokenIndex.get(token);
+      const paths = tokenIndex.get(token);
       if (!paths) continue;
       paths.delete(doc.path);
       if (paths.size === 0) {
-        this.tokenIndex.delete(token);
-        this.tokenVocabulary.delete(token);
+        tokenIndex.delete(token);
+        tokenVocabulary.delete(token);
       }
     }
   }
@@ -569,6 +760,9 @@ export class SystemSculptSearchEngine {
       if (value.length >= 3) {
         for (const token of this.tokenVocabulary) {
           if (token === value) continue;
+          if (value.length >= 5 && Math.abs(token.length - value.length) > Math.max(2, Math.floor(value.length * 0.45))) {
+            continue;
+          }
           if (token.startsWith(value) || value.startsWith(token)) {
             prefix.add(token);
             continue;
@@ -611,6 +805,129 @@ export class SystemSculptSearchEngine {
     }
 
     return candidates.slice(0, Math.max(limit * 8, this.CANDIDATE_LIMIT));
+  }
+
+  private collectDirectMetadataDocs(queryTerms: QueryTerm[], phrase: string, limit: number): IndexedDocument[] {
+    const scored: Array<{ doc: IndexedDocument; score: number }> = [];
+    for (const doc of this.index.values()) {
+      const score = this.scoreMetadata(doc, queryTerms, phrase);
+      if (score > 0) {
+        scored.push({ doc, score });
+      }
+    }
+
+    return scored
+      .sort((a, b) => b.score - a.score || (b.doc.mtime || 0) - (a.doc.mtime || 0))
+      .slice(0, Math.max(limit * 4, this.CANDIDATE_LIMIT))
+      .map((entry) => entry.doc);
+  }
+
+  private runMetadataSearch(terms: string[], phrase: string, limit: number, sort: SortMode): SearchHit[] {
+    const queryTerms = terms.map((value) => ({
+      value,
+      exact: new Set([value]),
+      prefix: new Set<string>(),
+      fuzzy: new Set<string>(),
+    }));
+
+    const hits = this.getEligibleFiles()
+      .map((file) => this.scoreMetadataFile(file, queryTerms, phrase))
+      .filter((hit): hit is SearchHit => hit !== null)
+      .sort((a, b) => b.score - a.score || (b.updatedAt || 0) - (a.updatedAt || 0))
+      .slice(0, limit);
+
+    if (sort === "recency") {
+      hits.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0) || b.score - a.score);
+    }
+
+    return hits;
+  }
+
+  private scoreMetadataFile(file: TFile, queryTerms: QueryTerm[], phrase: string): SearchHit | null {
+    const title = file.basename;
+    const path = file.path;
+    const doc: IndexedDocument = {
+      path,
+      title,
+      lowerTitle: title.toLowerCase(),
+      lowerPath: path.toLowerCase(),
+      titleTokens: this.tokenizeSearchText(title),
+      pathTokens: this.tokenizeSearchText(path),
+      bodyTokens: new Set(),
+      tokens: new Set(),
+      body: "",
+      rawBody: "",
+      preview: "",
+      mtime: file.stat?.mtime || 0,
+      size: file.stat?.size || 0,
+    };
+    const metadataScore = this.scoreMetadata(doc, queryTerms, phrase);
+    if (metadataScore <= 0) return null;
+
+    const maxPossible = Math.max(24, queryTerms.length * 20 + 24);
+    const score = Math.min(1, metadataScore / maxPossible);
+    return {
+      path,
+      title,
+      score,
+      lexScore: score,
+      origin: "lexical",
+      updatedAt: file.stat?.mtime || 0,
+      size: file.stat?.size || 0,
+    };
+  }
+
+  private scoreMetadata(doc: IndexedDocument, queryTerms: QueryTerm[], phrase: string): number {
+    if (queryTerms.length === 0) return 0;
+    let score = 0;
+    let matchedTerms = 0;
+
+    for (const term of queryTerms) {
+      const value = term.value;
+      if (doc.lowerTitle === value) {
+        score += 20;
+        matchedTerms += 1;
+        continue;
+      }
+      if (doc.lowerTitle.includes(value)) {
+        score += 14;
+        matchedTerms += 1;
+        continue;
+      }
+      if (doc.lowerPath.includes(value)) {
+        score += 8;
+        matchedTerms += 1;
+        continue;
+      }
+
+      const fuzzyTitle = value.length >= 5
+        ? Array.from(doc.titleTokens).some((token) => {
+          const fuzzyScore = fuzzyMatchScore(value, token);
+          return fuzzyScore !== null && fuzzyScore <= Math.max(2, Math.floor(value.length * 0.45));
+        })
+        : false;
+      if (fuzzyTitle) {
+        score += 9;
+        matchedTerms += 1;
+      }
+    }
+
+    let phraseMatched = false;
+    if (phrase) {
+      if (doc.lowerTitle.includes(phrase)) {
+        score += 24;
+        phraseMatched = true;
+      }
+      if (doc.lowerPath.includes(phrase)) {
+        score += 10;
+        phraseMatched = true;
+      }
+    }
+
+    if (matchedTerms === 0 && !phraseMatched) return 0;
+    score += (matchedTerms / queryTerms.length) * 10;
+    score += this.computeRecencyBoost(doc.mtime) * 0.15;
+    return score;
   }
 
   private pathsForQueryTerm(term: QueryTerm): Set<string> {
@@ -679,38 +996,62 @@ export class SystemSculptSearchEngine {
     return `${prefix}${slice}${suffix}`;
   }
 
-  private async runSemanticSearch(query: string, limit: number): Promise<SearchHit[]> {
+  private async runSemanticSearch(query: string, limit: number, signal?: AbortSignal): Promise<SearchHit[]> {
     try {
-      const manager = this.plugin.getOrCreateEmbeddingsManager();
+      const manager = this.getExistingEmbeddingsManager();
+      if (!manager || signal?.aborted) return [];
       const semanticPromise = (async () => {
         // @ts-ignore awaitReady is public but not in types
         if (typeof (manager as any).awaitReady === "function") {
           await (manager as any).awaitReady();
         }
+        if (signal?.aborted) return [];
         const rawResults = await manager.searchSimilar(query, limit);
-        return rawResults.map((item: any) => ({
-          path: item.path,
-          title: this.extractTitle(item.path, item?.metadata?.title),
-          excerpt: item?.metadata?.excerpt,
-          score: Math.max(0, Math.min(1, item.score ?? 0)),
-          semScore: Math.max(0, Math.min(1, item.score ?? 0)),
-          origin: "semantic",
-          updatedAt: item?.metadata?.lastModified ?? 0,
-        } as SearchHit));
+        if (signal?.aborted) return [];
+        return rawResults
+          .map((item: any) => {
+            const file = this.app.vault.getAbstractFileByPath(item.path);
+            if (!(file instanceof TFile) || !this.isEligible(file)) return null;
+            const score = Math.max(0, Math.min(1, item.score ?? 0));
+            return {
+              path: item.path,
+              title: this.extractTitle(item.path, item?.metadata?.title),
+              excerpt: item?.metadata?.excerpt,
+              score,
+              semScore: score,
+              origin: "semantic",
+              updatedAt: item?.metadata?.lastModified ?? file.stat?.mtime ?? 0,
+              size: file.stat?.size || 0,
+            } as SearchHit;
+          })
+          .filter((hit: SearchHit | null): hit is SearchHit => hit !== null);
       })();
 
       // Avoid long stalls; apply a timeout without leaking a dangling timer.
       return await new Promise<SearchHit[]>((resolve, reject) => {
-        const timer = window.setTimeout(() => resolve([]), this.SEMANTIC_TIMEOUT_MS);
+        let settled = false;
+        const cleanup = () => {
+          window.clearTimeout(timer);
+          signal?.removeEventListener("abort", onAbort);
+        };
+        const finish = (results: SearchHit[]) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          resolve(results);
+        };
+        const fail = (error: unknown) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          reject(error);
+        };
+        const onAbort = () => finish([]);
+        const timer = window.setTimeout(() => finish([]), this.SEMANTIC_TIMEOUT_MS);
+        signal?.addEventListener("abort", onAbort, { once: true });
         semanticPromise.then(
-          (results) => {
-            window.clearTimeout(timer);
-            resolve(results);
-          },
-          (error) => {
-            window.clearTimeout(timer);
-            reject(error);
-          }
+          (results) => finish(results),
+          (error) => fail(error)
         );
       });
     } catch {
@@ -791,7 +1132,10 @@ export class SystemSculptSearchEngine {
     }
 
     try {
-      const manager = this.plugin.getOrCreateEmbeddingsManager();
+      const manager = this.getExistingEmbeddingsManager();
+      if (!manager) {
+        return { enabled, ready: false, available: false, reason: "Embeddings not initialized" };
+      }
       const ready = typeof (manager as any).isReady === "function" ? (manager as any).isReady() : true;
       const stats = typeof manager.getStats === "function" ? manager.getStats() : { total: 0, processed: 0, present: 0, needsProcessing: 0 };
       const available = typeof (manager as any).hasAnyEmbeddings === "function" ? (manager as any).hasAnyEmbeddings() : stats.present > 0;
@@ -800,13 +1144,21 @@ export class SystemSculptSearchEngine {
         enabled,
         ready,
         available,
-        processed: stats.present,
+        processed: stats.processed ?? stats.present ?? 0,
         total: stats.total,
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : "Embeddings unavailable";
       return { enabled, ready: false, available: false, reason: message };
     }
+  }
+
+  private getPassiveEmbeddingsIndicator(): EmbeddingsIndicator {
+    return this.getEmbeddingsIndicator();
+  }
+
+  private getExistingEmbeddingsManager(): any | null {
+    return (this.plugin as any).embeddingsManager ?? null;
   }
 
   private extractTitle(path: string, fallback?: string | null): string {
