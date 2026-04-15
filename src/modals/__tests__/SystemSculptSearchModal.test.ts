@@ -39,6 +39,7 @@ const createMockSearchResponse = (overrides: Partial<SearchResponse> = {}): Sear
 
 const createMockEngine = (overrides: Record<string, any> = {}) => ({
   search: jest.fn().mockResolvedValue(createMockSearchResponse()),
+  warmIndex: jest.fn(),
   getRecent: jest.fn().mockResolvedValue([
     { path: "notes/recent.md", title: "Recent Note", score: 1, origin: "recent" as const, updatedAt: Date.now() },
   ]),
@@ -83,14 +84,6 @@ describe("SystemSculptSearchModal", () => {
       expect(plugin.getSearchEngine).toHaveBeenCalled();
     });
 
-    it("defaults mode to 'smart'", () => {
-      expect((modal as any).mode).toBe("smart");
-    });
-
-    it("defaults sort to 'relevance'", () => {
-      expect((modal as any).sort).toBe("relevance");
-    });
-
     it("fetches initial embeddings indicator", () => {
       expect(plugin._testEngine.getEmbeddingsIndicator).toHaveBeenCalled();
     });
@@ -117,19 +110,10 @@ describe("SystemSculptSearchModal", () => {
       expect((modal as any).stateEl).not.toBeNull();
     });
 
-    it("creates mode buttons", () => {
+    it("does not render mode or sort controls", () => {
       modal.onOpen();
-      const modeButtons = (modal as any).modeButtons;
-      expect(modeButtons.lexical).toBeDefined();
-      expect(modeButtons.smart).toBeDefined();
-      expect(modeButtons.semantic).toBeDefined();
-    });
-
-    it("creates sort buttons", () => {
-      modal.onOpen();
-      const sortButtons = (modal as any).sortButtons;
-      expect(sortButtons.relevance).toBeDefined();
-      expect(sortButtons.recency).toBeDefined();
+      expect(modal.contentEl.querySelector("[data-mode]")).toBeNull();
+      expect(modal.contentEl.querySelector("[data-sort]")).toBeNull();
     });
 
     it("renders recent files on open", async () => {
@@ -137,6 +121,11 @@ describe("SystemSculptSearchModal", () => {
       jest.advanceTimersByTime(10);
       await Promise.resolve();
       expect(plugin._testEngine.getRecent).toHaveBeenCalledWith(25);
+    });
+
+    it("warms the content index in the background", () => {
+      modal.onOpen();
+      expect(plugin._testEngine.warmIndex).toHaveBeenCalled();
     });
   });
 
@@ -146,143 +135,6 @@ describe("SystemSculptSearchModal", () => {
       (modal as any).debounceHandle = 123;
       modal.onClose();
       expect((modal as any).debounceHandle).toBeNull();
-    });
-  });
-
-  describe("mode selection", () => {
-    it("defaults to 'smart' mode when embeddings available", () => {
-      modal.onOpen();
-      expect((modal as any).mode).toBe("smart");
-      expect((modal as any).modeButtons.smart?.classList.contains("is-active")).toBe(true);
-    });
-
-    it("disables semantic button when embeddings unavailable", () => {
-      plugin = createMockPlugin({
-        getEmbeddingsIndicator: jest.fn().mockReturnValue({
-          enabled: true,
-          ready: false,
-          available: false,
-        }),
-      });
-      modal = new SystemSculptSearchModal(plugin);
-      modal.onOpen();
-
-      expect((modal as any).modeButtons.semantic?.disabled).toBe(true);
-      expect((modal as any).modeButtons.semantic?.classList.contains("is-disabled")).toBe(true);
-    });
-
-    it("disables smart button when embeddings unavailable", () => {
-      plugin = createMockPlugin({
-        getEmbeddingsIndicator: jest.fn().mockReturnValue({
-          enabled: true,
-          ready: false,
-          available: false,
-        }),
-      });
-      modal = new SystemSculptSearchModal(plugin);
-      modal.onOpen();
-
-      expect((modal as any).modeButtons.smart?.disabled).toBe(true);
-    });
-
-    it("never disables lexical button", () => {
-      plugin = createMockPlugin({
-        getEmbeddingsIndicator: jest.fn().mockReturnValue({
-          enabled: false,
-          ready: false,
-          available: false,
-        }),
-      });
-      modal = new SystemSculptSearchModal(plugin);
-      modal.onOpen();
-
-      expect((modal as any).modeButtons.lexical?.disabled).toBe(false);
-    });
-
-    it("falls back to lexical when embeddings become unavailable", () => {
-      modal.onOpen();
-      (modal as any).mode = "smart";
-
-      const unavailableIndicator = {
-        enabled: false,
-        ready: false,
-        available: false,
-      };
-      (modal as any).syncModeAvailability(unavailableIndicator);
-
-      expect((modal as any).mode).toBe("lexical");
-    });
-
-    it("changes mode on button click", () => {
-      modal.onOpen();
-      const lexicalBtn = (modal as any).modeButtons.lexical;
-
-      lexicalBtn?.click();
-
-      expect((modal as any).mode).toBe("lexical");
-    });
-
-    it("triggers search on mode change", async () => {
-      modal.onOpen();
-      (modal as any).currentQuery = "test query";
-
-      const smartBtn = (modal as any).modeButtons.smart;
-      smartBtn?.click();
-
-      await Promise.resolve();
-      expect(plugin._testEngine.search).toHaveBeenCalled();
-    });
-
-    it("updates mode availability after each search", async () => {
-      modal.onOpen();
-
-      const response = createMockSearchResponse({
-        embeddings: { enabled: true, ready: false, available: false, processed: 0, total: 100 },
-      });
-      plugin._testEngine.search.mockResolvedValue(response);
-
-      await (modal as any).executeSearch("test");
-
-      expect((modal as any).modeButtons.semantic?.disabled).toBe(true);
-    });
-  });
-
-  describe("sort toggle", () => {
-    it("defaults to relevance sort", () => {
-      modal.onOpen();
-      expect((modal as any).sort).toBe("relevance");
-      expect((modal as any).sortButtons.relevance?.classList.contains("is-active")).toBe(true);
-    });
-
-    it("changes sort on button click", () => {
-      modal.onOpen();
-      const recencyBtn = (modal as any).sortButtons.recency;
-
-      recencyBtn?.click();
-
-      expect((modal as any).sort).toBe("recency");
-    });
-
-    it("triggers search on sort change", async () => {
-      modal.onOpen();
-      (modal as any).currentQuery = "test query";
-      plugin._testEngine.search.mockClear();
-
-      const recencyBtn = (modal as any).sortButtons.recency;
-      recencyBtn?.click();
-
-      await Promise.resolve();
-      expect(plugin._testEngine.search).toHaveBeenCalled();
-    });
-
-    it("updates active class on sort buttons", () => {
-      modal.onOpen();
-      const recencyBtn = (modal as any).sortButtons.recency;
-
-      recencyBtn?.click();
-
-      expect((modal as any).sortButtons.recency?.classList.contains("is-active")).toBe(true);
-      expect((modal as any).sortButtons.relevance?.classList.contains("is-active")).toBe(false);
     });
   });
 
@@ -352,38 +204,21 @@ describe("SystemSculptSearchModal", () => {
       expect(plugin._testEngine.getRecent).toHaveBeenCalled();
     });
 
-    it("passes mode and sort to search engine", async () => {
+    it("uses one adaptive search path", async () => {
       modal.onOpen();
-      (modal as any).mode = "semantic";
-      (modal as any).sort = "recency";
 
       await (modal as any).executeSearch("test");
 
       expect(plugin._testEngine.search).toHaveBeenCalledWith("test", {
-        mode: "semantic",
-        sort: "recency",
+        mode: "smart",
+        sort: "relevance",
         limit: 80,
       });
     });
   });
 
   describe("state messages", () => {
-    it("shows 'Fast – fastest path.' for lexical mode", async () => {
-      modal.onOpen();
-
-      const response = createMockSearchResponse({
-        stats: { ...createMockSearchResponse().stats, usedEmbeddings: false },
-      });
-      plugin._testEngine.search.mockResolvedValue(response);
-
-      (modal as any).mode = "lexical";
-      await (modal as any).executeSearch("test");
-
-      const stateText = (modal as any).stateTextFor(response);
-      expect(stateText).toBe("Fast – fastest path.");
-    });
-
-    it("shows smart blend message when embeddings contributed", async () => {
+    it("shows the embeddings message when embeddings contributed", async () => {
       modal.onOpen();
 
       const response = createMockSearchResponse({
@@ -391,11 +226,10 @@ describe("SystemSculptSearchModal", () => {
       });
       plugin._testEngine.search.mockResolvedValue(response);
 
-      (modal as any).mode = "smart";
       await (modal as any).executeSearch("test");
 
       const stateText = (modal as any).stateTextFor(response);
-      expect(stateText).toBe("Smart blend: embeddings contributed to these results.");
+      expect(stateText).toBe("Searching notes and embeddings.");
     });
 
     it("shows 'Embeddings off in settings' when disabled", () => {
@@ -406,12 +240,11 @@ describe("SystemSculptSearchModal", () => {
         embeddings: { enabled: false, ready: false, available: false, processed: 0, total: 0 },
       });
 
-      (modal as any).mode = "smart";
       const stateText = (modal as any).stateTextFor(response);
-      expect(stateText).toBe("Embeddings off in settings – running lexical search only.");
+      expect(stateText).toBe("Searching notes. Embeddings are off.");
     });
 
-    it("shows 'Embeddings unavailable' with reason when not available", () => {
+    it("shows embeddings unavailable with reason when not available", () => {
       modal.onOpen();
 
       const response = createMockSearchResponse({
@@ -426,22 +259,20 @@ describe("SystemSculptSearchModal", () => {
         },
       });
 
-      (modal as any).mode = "smart";
       const stateText = (modal as any).stateTextFor(response);
-      expect(stateText).toBe("Embeddings unavailable: No vectors generated yet");
+      expect(stateText).toBe("Searching notes. Embeddings unavailable: No vectors generated yet");
     });
 
-    it("shows generic message when embeddings ready but not used", () => {
+    it("shows progress message before embeddings are sufficiently indexed", () => {
       modal.onOpen();
 
       const response = createMockSearchResponse({
         stats: { ...createMockSearchResponse().stats, usedEmbeddings: false },
-        embeddings: { enabled: true, ready: true, available: true, processed: 80, total: 100 },
+        embeddings: { enabled: true, ready: true, available: true, processed: 60, total: 100 },
       });
 
-      (modal as any).mode = "smart";
       const stateText = (modal as any).stateTextFor(response);
-      expect(stateText).toBe("Embeddings ready but not used for this query (short query or no vectors).");
+      expect(stateText).toBe("Searching notes. Embeddings will join when more of the vault is indexed.");
     });
   });
 
@@ -459,7 +290,7 @@ describe("SystemSculptSearchModal", () => {
       expect(item?.getAttribute("data-path")).toBe("notes/test.md");
     });
 
-    it("renders origin badge", async () => {
+    it("does not render origin badges", async () => {
       modal.onOpen();
 
       const response = createMockSearchResponse({
@@ -472,7 +303,7 @@ describe("SystemSculptSearchModal", () => {
       await (modal as any).executeSearch("test");
 
       const badge = (modal as any).listEl?.querySelector(".ss-search__pill--semantic");
-      expect(badge).not.toBeNull();
+      expect(badge).toBeNull();
     });
 
     it("renders score as percentage", async () => {
@@ -552,7 +383,7 @@ describe("SystemSculptSearchModal", () => {
       expect(metricsEl?.textContent).toContain("Total 42 ms");
     });
 
-    it("renders lexMs metric", async () => {
+    it("renders notes metric", async () => {
       modal.onOpen();
 
       const response = createMockSearchResponse({
@@ -563,10 +394,10 @@ describe("SystemSculptSearchModal", () => {
       await (modal as any).executeSearch("test");
 
       const metricsEl = (modal as any).metricsEl;
-      expect(metricsEl?.textContent).toContain("Lex 15 ms");
+      expect(metricsEl?.textContent).toContain("Notes 15 ms");
     });
 
-    it("renders semantic metric when present", async () => {
+    it("renders embeddings metric when present", async () => {
       modal.onOpen();
 
       const response = createMockSearchResponse({
@@ -577,7 +408,7 @@ describe("SystemSculptSearchModal", () => {
       await (modal as any).executeSearch("test");
 
       const metricsEl = (modal as any).metricsEl;
-      expect(metricsEl?.textContent).toContain("Semantic 30 ms");
+      expect(metricsEl?.textContent).toContain("Embeddings 30 ms");
     });
 
     it("renders indexed count", async () => {
@@ -592,25 +423,6 @@ describe("SystemSculptSearchModal", () => {
 
       const metricsEl = (modal as any).metricsEl;
       expect(metricsEl?.textContent).toContain("250 indexed");
-    });
-  });
-
-  describe("label formatting", () => {
-    it("labelForOrigin returns correct labels", () => {
-      modal.onOpen();
-
-      expect((modal as any).labelForOrigin("semantic")).toBe("Semantic");
-      expect((modal as any).labelForOrigin("blend")).toBe("Blended");
-      expect((modal as any).labelForOrigin("recent")).toBe("Recent");
-      expect((modal as any).labelForOrigin("lexical")).toBe("Lexical");
-    });
-
-    it("labelForMode returns correct labels", () => {
-      modal.onOpen();
-
-      expect((modal as any).labelForMode("lexical")).toBe("Fast");
-      expect((modal as any).labelForMode("semantic")).toBe("Semantic first");
-      expect((modal as any).labelForMode("smart")).toBe("Smart blend");
     });
   });
 

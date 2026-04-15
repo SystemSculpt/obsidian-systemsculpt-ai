@@ -14,88 +14,6 @@
   min-height: 0;
 }
 
-/* Controls */
-.ss-search__controls {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: stretch;
-  gap: 8px;
-  padding: 4px 0 0;
-  border-bottom: 1px solid var(--background-modifier-border);
-}
-
-.ss-search__mode-group {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  flex: 1 1 220px;
-}
-
-.ss-search__sort {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  align-items: center;
-}
-
-.ss-search__pill {
-  appearance: none;
-  border: 1px solid var(--background-modifier-border);
-  background: var(--background-primary);
-  color: var(--text-normal);
-  border-radius: 6px;
-  padding: 10px 12px;
-  min-height: 40px;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 2px;
-  text-align: left;
-  font-size: 13px;
-  line-height: 1.3;
-  transition: border-color 120ms ease, background-color 120ms ease, color 120ms ease;
-  box-shadow: none;
-}
-
-.ss-search__pill:disabled,
-.ss-search__pill.is-disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-  background: var(--background-modifier-hover);
-}
-
-.ss-search__pill:hover {
-  border-color: var(--interactive-accent);
-  background: var(--background-modifier-hover);
-}
-
-.ss-search__pill.is-active {
-  border-color: var(--interactive-accent);
-  background: color-mix(in srgb, var(--interactive-accent) 14%, var(--background-primary));
-}
-
-.ss-search__pill-label {
-  font-weight: 600;
-  font-size: 13px;
-}
-
-.ss-search__pill-desc {
-  font-size: 12px;
-  color: var(--text-muted);
-  line-height: 1.35;
-}
-
-.ss-search__pill--chip {
-  flex-direction: row;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 6px 12px;
-  min-width: 0;
-  border-radius: 16px;
-  font-weight: 600;
-}
-
 /* Search bar */
 .ss-search__input-row {
   display: flex;
@@ -240,32 +158,6 @@ mark.ss-hl {
   color: var(--text-normal);
   padding: 0 2px;
   border-radius: 3px;
-}
-
-/* Result origin labels */
-.ss-search__pill--lexical,
-.ss-search__pill--blend,
-.ss-search__pill--semantic,
-.ss-search__pill--recent {
-  border-radius: 12px;
-  padding: 4px 8px;
-  min-height: 0;
-  font-weight: 600;
-  font-size: 12px;
-  line-height: 1.2;
-}
-
-.ss-search__pill--lexical,
-.ss-search__pill--recent {
-  background: var(--background-secondary);
-}
-
-.ss-search__pill--blend {
-  background: color-mix(in srgb, var(--interactive-accent) 14%, var(--background-secondary));
-}
-
-.ss-search__pill--semantic {
-  background: color-mix(in srgb, var(--interactive-accent) 24%, var(--background-secondary));
 }
 
 .ss-search__loading,

@@ -36,6 +36,7 @@ export interface SearchStats {
   inspectedCount: number;
   mode: SearchMode;
   usedEmbeddings: boolean;
+  embeddingsEligible?: boolean;
 }
 
 export interface SearchResponse {
@@ -73,7 +74,7 @@ export class SystemSculptSearchEngine {
   private index: Map<string, IndexedDocument> = new Map();
   private tokenIndex: Map<string, Set<string>> = new Map();
   private tokenVocabulary: Set<string> = new Set();
-  private recentDocsCache: IndexedDocument[] | null = null;
+  private recentHitsCache: SearchHit[] | null = null;
   private indexPromise: Promise<void> | null = null;
   private dirtyPaths: Set<string> = new Set();
   private eventRefs: EventRef[] = [];
@@ -100,12 +101,6 @@ export class SystemSculptSearchEngine {
     const limit = options?.limit ?? 80;
 
     const searchStart = performance.now();
-    const indexStart = performance.now();
-    await this.ensureIndex();
-    await this.refreshDirtyIndex();
-    const indexMs = performance.now() - indexStart;
-    this.lastLexicalInspect = 0;
-
     const normalizedQuery = query.trim().toLowerCase();
     const terms = normalizedQuery.split(/\s+/).filter(Boolean);
     const phrase = normalizedQuery;
@@ -116,15 +111,22 @@ export class SystemSculptSearchEngine {
         results: recents,
         stats: {
           totalMs: performance.now() - searchStart,
-          indexMs,
+          indexMs: 0,
           indexedCount: this.index.size,
           inspectedCount: 0,
           mode,
           usedEmbeddings: false,
+          embeddingsEligible: false,
         },
         embeddings: this.getEmbeddingsIndicator(),
       };
     }
+
+    const indexStart = performance.now();
+    await this.ensureIndex();
+    await this.refreshDirtyIndex();
+    const indexMs = performance.now() - indexStart;
+    this.lastLexicalInspect = 0;
 
     const lexStart = performance.now();
     const lexicalHits = this.runLexicalSearch(terms, phrase, limit, sort);
@@ -135,8 +137,9 @@ export class SystemSculptSearchEngine {
     let usedEmbeddings = false;
 
     const embeddingsIndicator = this.getEmbeddingsIndicator();
+    const embeddingsEligible = this.shouldUseEmbeddings(mode, embeddingsIndicator, terms);
 
-    if (mode !== "lexical" && embeddingsIndicator.enabled && embeddingsIndicator.ready && embeddingsIndicator.available) {
+    if (embeddingsEligible) {
       const semStart = performance.now();
       semanticHits = await this.runSemanticSearch(query, limit);
       semMs = performance.now() - semStart;
@@ -160,6 +163,7 @@ export class SystemSculptSearchEngine {
         inspectedCount: this.lastLexicalInspect,
         mode,
         usedEmbeddings,
+        embeddingsEligible,
       },
       embeddings: embeddingsIndicator,
     };
@@ -169,31 +173,39 @@ export class SystemSculptSearchEngine {
    * Recent files snapshot for empty queries
    */
   async getRecent(limit = 25): Promise<SearchHit[]> {
-    await this.ensureIndex();
-    await this.refreshDirtyIndex();
-
-    if (!this.recentDocsCache) {
-      this.recentDocsCache = Array.from(this.index.values())
-        .sort((a, b) => (b.mtime || 0) - (a.mtime || 0));
+    if (!this.recentHitsCache) {
+      this.recentHitsCache = this.getEligibleFiles()
+        .sort((a, b) => (b.stat?.mtime || 0) - (a.stat?.mtime || 0))
+        .map((file) => {
+          const indexed = this.index.get(file.path);
+          return {
+            path: file.path,
+            title: indexed?.title ?? file.basename,
+            excerpt: indexed?.preview,
+            score: 0.5,
+            origin: "recent" as const,
+            updatedAt: file.stat?.mtime || 0,
+            size: file.stat?.size || 0,
+          };
+        });
     }
 
-    const docs = this.recentDocsCache.slice(0, limit);
+    return this.recentHitsCache.slice(0, limit);
+  }
 
-    return docs.map((doc) => ({
-      path: doc.path,
-      title: doc.title,
-      excerpt: doc.preview,
-      score: 0.5,
-      origin: "recent",
-      updatedAt: doc.mtime,
-      size: doc.size,
-    }));
+  warmIndex(): void {
+    void this.ensureIndex().catch(() => {
+      // Search can recover on the next explicit query.
+    });
   }
 
   destroy(): void {
     this.eventRefs.forEach((ref) => this.app.vault.offref(ref));
     this.eventRefs = [];
     this.index.clear();
+    this.tokenIndex.clear();
+    this.tokenVocabulary.clear();
+    this.recentHitsCache = null;
     this.dirtyPaths.clear();
     this.indexPromise = null;
   }
@@ -203,6 +215,7 @@ export class SystemSculptSearchEngine {
       this.app.vault.on("modify", (file) => {
         if (file instanceof TFile && this.isEligible(file)) {
           this.dirtyPaths.add(file.path);
+          this.recentHitsCache = null;
         }
       })
     );
@@ -211,6 +224,7 @@ export class SystemSculptSearchEngine {
       this.app.vault.on("create", (file) => {
         if (file instanceof TFile && this.isEligible(file)) {
           this.dirtyPaths.add(file.path);
+          this.recentHitsCache = null;
         }
       })
     );
@@ -224,7 +238,7 @@ export class SystemSculptSearchEngine {
           }
           this.index.delete(file.path);
           this.dirtyPaths.delete(file.path);
-          this.recentDocsCache = null;
+          this.recentHitsCache = null;
         }
       })
     );
@@ -232,10 +246,15 @@ export class SystemSculptSearchEngine {
     this.eventRefs.push(
       this.app.vault.on("rename", (file, oldPath) => {
         if (!(file instanceof TFile)) return;
+        const existing = this.index.get(oldPath);
+        if (existing) {
+          this.removeFromTokenIndex(existing);
+        }
         this.index.delete(oldPath);
         if (this.isEligible(file)) {
           this.dirtyPaths.add(file.path);
         }
+        this.recentHitsCache = null;
       })
     );
   }
@@ -275,7 +294,7 @@ export class SystemSculptSearchEngine {
       this.index.clear();
       this.tokenIndex.clear();
       this.tokenVocabulary.clear();
-      this.recentDocsCache = null;
+      this.recentHitsCache = null;
     }
 
     const tasks = files.map((file) => async () => {
@@ -318,7 +337,7 @@ export class SystemSculptSearchEngine {
     });
 
     await this.runLimited(tasks, this.CONTENT_CONCURRENCY);
-    this.recentDocsCache = null;
+    this.recentHitsCache = null;
   }
 
   private async safeRead(file: TFile): Promise<string> {
@@ -658,6 +677,19 @@ export class SystemSculptSearchEngine {
     } catch {
       return [];
     }
+  }
+
+  private shouldUseEmbeddings(mode: SearchMode, indicator: EmbeddingsIndicator, terms: string[]): boolean {
+    if (mode === "lexical") return false;
+    if (!indicator.enabled || !indicator.ready || !indicator.available) return false;
+    if (mode === "semantic") return true;
+    if (terms.length === 0) return false;
+
+    const total = indicator.total ?? 0;
+    const processed = indicator.processed ?? 0;
+    if (total <= 0) return indicator.available;
+
+    return processed / total >= 0.75;
   }
 
   private mergeResults(lexical: SearchHit[], semantic: SearchHit[], limit: number, mode: SearchMode): SearchHit[] {

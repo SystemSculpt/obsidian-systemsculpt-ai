@@ -3,8 +3,6 @@ import type SystemSculptPlugin from "../main";
 import { StandardModal } from "../core/ui/modals/standard/StandardModal";
 import type {
   SystemSculptSearchEngine,
-  SearchMode,
-  SortMode,
   SearchHit,
   SearchResponse,
 } from "../services/search/SystemSculptSearchEngine";
@@ -16,12 +14,9 @@ export class SystemSculptSearchModal extends StandardModal {
   private listEl: HTMLElement | null = null;
   private metricsEl: HTMLElement | null = null;
   private stateEl: HTMLElement | null = null;
-  private modeButtons: Partial<Record<SearchMode, HTMLButtonElement>> = {};
-  private sortButtons: Partial<Record<SortMode, HTMLButtonElement>> = {};
   private embeddings: SearchResponse["embeddings"] | null = null;
 
-  private mode: SearchMode = "smart";
-  private sort: SortMode = "relevance";
+  private readonly SEARCH_LIMIT = 80;
   private currentQuery = "";
   private debounceHandle: number | null = null;
   private querySerial = 0;
@@ -40,14 +35,10 @@ export class SystemSculptSearchModal extends StandardModal {
 
     this.addTitle(
       "SystemSculpt Search",
-      "Fast lexical search with optional semantic lift. Mode indicators show exactly when embeddings are used."
+      "Search your notes. Embeddings join automatically when they are ready."
     );
 
     const shell = this.contentEl.createDiv({ cls: "ss-search" });
-
-    const controlRow = shell.createDiv({ cls: "ss-search__controls" });
-    this.buildModeSelector(controlRow);
-    this.buildSortToggle(controlRow);
 
     this.searchInputEl = this.buildSearchBar(shell, "Search your vault...", (value) => this.onSearchChange(value));
 
@@ -61,6 +52,7 @@ export class SystemSculptSearchModal extends StandardModal {
 
     setTimeout(() => this.searchInputEl?.focus(), 0);
     void this.renderRecents();
+    this.engine.warmIndex();
   }
 
   onClose() {
@@ -69,64 +61,6 @@ export class SystemSculptSearchModal extends StandardModal {
       this.debounceHandle = null;
     }
     super.onClose();
-  }
-
-  private buildModeSelector(container: HTMLElement) {
-    const group = container.createDiv({ cls: "ss-search__mode-group" });
-    const modes: Array<{ id: SearchMode; label: string; desc: string }> = [
-      { id: "lexical", label: "Fast", desc: "Pure lexical, zero embeddings" },
-      { id: "smart", label: "Smart", desc: "Lexical + embeddings when available" },
-      { id: "semantic", label: "Semantic", desc: "Embeddings first" },
-    ];
-
-    modes.forEach((mode) => {
-      const btn = group.createEl("button", {
-        cls: "ss-search__pill ss-search__pill--ghost",
-        attr: { "data-mode": mode.id },
-      });
-      btn.createSpan({ cls: "ss-search__pill-label", text: mode.label });
-      btn.createSpan({ cls: "ss-search__pill-desc", text: mode.desc });
-
-      this.registerDomEvent(btn, "click", () => {
-        if (btn.disabled) return;
-        this.mode = mode.id;
-        this.syncModeButtons();
-        void this.executeSearch(this.currentQuery);
-      });
-
-      this.modeButtons[mode.id] = btn;
-    });
-
-    this.syncModeButtons();
-    if (this.embeddings) {
-      this.syncModeAvailability(this.embeddings);
-    }
-  }
-
-  private buildSortToggle(container: HTMLElement) {
-    const sortWrap = container.createDiv({ cls: "ss-search__sort" });
-    const sorts: Array<{ id: SortMode; label: string }> = [
-      { id: "relevance", label: "Relevance" },
-      { id: "recency", label: "Recency" },
-    ];
-
-    sorts.forEach((sort) => {
-      const btn = sortWrap.createEl("button", {
-        cls: "ss-search__pill ss-search__pill--chip",
-        attr: { "data-sort": sort.id },
-        text: sort.label,
-      });
-
-      this.registerDomEvent(btn, "click", () => {
-        this.sort = sort.id;
-        this.syncSortButtons();
-        void this.executeSearch(this.currentQuery);
-      });
-
-      this.sortButtons[sort.id] = btn;
-    });
-
-    this.syncSortButtons();
   }
 
   private buildSearchBar(parent: HTMLElement, placeholder: string, onInput: (value: string) => void): HTMLInputElement {
@@ -178,12 +112,12 @@ export class SystemSculptSearchModal extends StandardModal {
       return;
     }
 
-    this.renderLoading("Indexing & searching...");
+    this.renderLoading("Searching...");
 
     const response = await this.engine.search(trimmed, {
-      mode: this.mode,
-      sort: this.sort,
-      limit: 80,
+      mode: "smart",
+      sort: "relevance",
+      limit: this.SEARCH_LIMIT,
     });
 
     if (serial < this.querySerial) return;
@@ -193,7 +127,7 @@ export class SystemSculptSearchModal extends StandardModal {
 
   private async renderRecents() {
     const serial = ++this.querySerial;
-    this.renderLoading("Pulling your newest notes...");
+    this.renderLoading("Opening recent notes...");
     const recents = await this.engine.getRecent(25);
     if (serial < this.querySerial) return;
     const indicator = this.engine.getEmbeddingsIndicator();
@@ -203,18 +137,16 @@ export class SystemSculptSearchModal extends StandardModal {
       totalMs: 0,
       indexedCount: recents.length,
       inspectedCount: recents.length,
-      mode: this.mode,
+      mode: "smart",
       usedEmbeddings: false,
     });
-    this.syncModeAvailability(indicator);
-    this.renderState("Showing your 25 most recent files.");
+    this.renderState(this.recentsStateText(indicator));
   }
 
   private renderResponse(response: SearchResponse) {
     this.embeddings = response.embeddings;
     this.renderMetrics(response.stats);
     this.renderState(this.stateTextFor(response));
-    this.syncModeAvailability(response.embeddings);
     this.renderResults(response.results);
   }
 
@@ -223,7 +155,7 @@ export class SystemSculptSearchModal extends StandardModal {
     this.listEl.empty();
 
     if (results.length === 0) {
-      this.renderEmpty("No matches yet. Try fewer words or switch modes.");
+      this.renderEmpty("No matches yet. Try fewer words.");
       return;
     }
 
@@ -237,11 +169,9 @@ export class SystemSculptSearchModal extends StandardModal {
       titleEl.innerHTML = this.getHighlightedText(result.title, this.currentQuery);
 
       const badges = header.createDiv({ cls: "ss-search__badges" });
-      badges.createSpan({
-        cls: `ss-search__pill ss-search__pill--${result.origin}`,
-        text: this.labelForOrigin(result.origin),
-      });
-      badges.createSpan({ cls: "ss-search__score", text: `${Math.round((result.score || 0) * 100)}%` });
+      if (result.origin !== "recent") {
+        badges.createSpan({ cls: "ss-search__score", text: `${Math.round((result.score || 0) * 100)}%` });
+      }
 
       const meta = item.createDiv({ cls: "ss-search__meta" });
       meta.setText(`${result.path} • ${this.formatUpdated(result.updatedAt)}${result.size ? ` • ${this.formatSize(result.size)}` : ""}`);
@@ -286,14 +216,13 @@ export class SystemSculptSearchModal extends StandardModal {
     if (!this.metricsEl) return;
     const parts: string[] = [];
     if (typeof stats.totalMs === "number") parts.push(`Total ${Math.round(stats.totalMs)} ms`);
-    if (typeof stats.lexMs === "number") parts.push(`Lex ${Math.round(stats.lexMs)} ms`);
-    if (typeof stats.semMs === "number") parts.push(`Semantic ${Math.round(stats.semMs)} ms`);
+    if (typeof stats.lexMs === "number") parts.push(`Notes ${Math.round(stats.lexMs)} ms`);
+    if (typeof stats.semMs === "number") parts.push(`Embeddings ${Math.round(stats.semMs)} ms`);
     if (typeof stats.indexMs === "number") parts.push(`Index ${Math.round(stats.indexMs)} ms`);
     if (typeof stats.indexedCount === "number") parts.push(`${stats.indexedCount} indexed`);
-    if (typeof stats.inspectedCount === "number") parts.push(`${stats.inspectedCount} scanned`);
+    if (typeof stats.inspectedCount === "number") parts.push(`${stats.inspectedCount} checked`);
 
-    const modeLabel = stats.mode ? this.labelForMode(stats.mode) : "";
-    this.metricsEl.setText(parts.length ? `${modeLabel} • ${parts.join(" • ")}` : modeLabel);
+    this.metricsEl.setText(parts.join(" • "));
   }
 
   private renderState(message: string) {
@@ -304,85 +233,39 @@ export class SystemSculptSearchModal extends StandardModal {
   private stateTextFor(response: SearchResponse): string {
     const usedEmbeddings = response.stats.usedEmbeddings;
     const emb = response.embeddings;
-    if (this.mode === "lexical") {
-      return "Fast – fastest path.";
-    }
     if (usedEmbeddings) {
-      return "Smart blend: embeddings contributed to these results.";
+      return "Searching notes and embeddings.";
     }
     if (!emb.enabled) {
-      return "Embeddings off in settings – running lexical search only.";
+      return "Searching notes. Embeddings are off.";
     }
-    if (!emb.available) {
-      return emb.reason ? `Embeddings unavailable: ${emb.reason}` : "Embeddings not ready yet; showing lexical results.";
+    if (!emb.ready || !emb.available) {
+      return emb.reason ? `Searching notes. Embeddings unavailable: ${emb.reason}` : "Searching notes. Embeddings are still preparing.";
     }
-    return "Embeddings ready but not used for this query (short query or no vectors).";
+    const processed = emb.processed ?? 0;
+    const total = emb.total ?? 0;
+    if (total > 0 && processed / total < 0.75) {
+      return "Searching notes. Embeddings will join when more of the vault is indexed.";
+    }
+    if (response.stats.embeddingsEligible) {
+      return "Searching notes. Embeddings checked in, but note matches won.";
+    }
+    return "Searching notes.";
   }
 
-  private syncModeButtons() {
-    Object.entries(this.modeButtons).forEach(([mode, btn]) => {
-      if (!btn) return;
-      if (mode === this.mode) {
-        btn.addClass("is-active");
-      } else {
-        btn.removeClass("is-active");
-      }
-    });
-  }
-
-  private syncModeAvailability(indicator: SearchResponse["embeddings"]) {
-    const embeddingsReady = indicator.enabled && indicator.ready && indicator.available;
-
-    Object.entries(this.modeButtons).forEach(([mode, btn]) => {
-      if (!btn) return;
-      if (mode === "lexical") {
-        btn.disabled = false;
-        btn.removeClass("is-disabled");
-        return;
-      }
-      btn.disabled = !embeddingsReady;
-      btn.toggleClass("is-disabled", !embeddingsReady);
-    });
-
-    if (!embeddingsReady && this.mode !== "lexical") {
-      this.mode = "lexical";
-      this.syncModeButtons();
+  private recentsStateText(indicator: SearchResponse["embeddings"]): string {
+    if (!indicator.enabled) {
+      return "Recent notes. Search will use note text.";
     }
-  }
-
-  private syncSortButtons() {
-    Object.entries(this.sortButtons).forEach(([sort, btn]) => {
-      if (!btn) return;
-      if (sort === this.sort) {
-        btn.addClass("is-active");
-      } else {
-        btn.removeClass("is-active");
-      }
-    });
-  }
-
-  private labelForOrigin(origin: SearchHit["origin"]): string {
-    switch (origin) {
-      case "semantic":
-        return "Semantic";
-      case "blend":
-        return "Blended";
-      case "recent":
-        return "Recent";
-      default:
-        return "Lexical";
+    const processed = indicator.processed ?? 0;
+    const total = indicator.total ?? 0;
+    if (!indicator.ready || !indicator.available) {
+      return "Recent notes. Embeddings are still preparing.";
     }
-  }
-
-  private labelForMode(mode: SearchMode): string {
-    switch (mode) {
-      case "lexical":
-        return "Fast";
-      case "semantic":
-        return "Semantic first";
-      default:
-        return "Smart blend";
+    if (total > 0 && processed / total < 0.75) {
+      return "Recent notes. Embeddings will join after more of the vault is indexed.";
     }
+    return "Recent notes. Embeddings are ready for detailed searches.";
   }
 
   private formatUpdated(ts?: number): string {

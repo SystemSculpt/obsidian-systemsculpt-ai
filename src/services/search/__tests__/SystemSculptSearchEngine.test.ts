@@ -61,6 +61,17 @@ describe("SystemSculptSearchEngine lexical mode", () => {
     expect(res.stats.usedEmbeddings).toBe(false);
   });
 
+  it("returns recent files without building the content index", async () => {
+    const { app } = buildFixture();
+    const plugin = makePlugin(app);
+    const engine = new SystemSculptSearchEngine(app as any, plugin);
+
+    const recents = await engine.getRecent(10);
+
+    expect(recents.map((r) => r.path)).toContain("notes/fresh-orange.md");
+    expect(app.vault.cachedRead).not.toHaveBeenCalled();
+  });
+
   it("prefers full term coverage over recent one-term matches", async () => {
     const { app } = buildFixture();
     const plugin = makePlugin(app);
