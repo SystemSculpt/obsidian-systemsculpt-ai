@@ -10,6 +10,7 @@ import {
   resolveReleaseVersionPlan,
   runWithGitHubAuthFallback,
   shouldRetryWithoutGitHubEnv,
+  validateAuthoredReleaseNotesFile,
   withoutGitHubEnvTokens,
   writeNotesFile,
 } from "./release-plugin.mjs";
@@ -155,6 +156,58 @@ test("resolveReleaseVersionPlan reuses pre-bumped metadata only without explicit
       inferredBump: "minor",
       bump: "minor",
       newVersion: "5.6.0",
+    }
+  );
+});
+
+test("validateAuthoredReleaseNotesFile requires canonical notes for real releases", () => {
+  assert.deepEqual(
+    validateAuthoredReleaseNotesFile({
+      version: "5.6.0",
+      dryRun: false,
+      notesFile: "docs/release-notes/5.6.0.md",
+      root: process.cwd(),
+    }),
+    {
+      ok: true,
+      expectedPath: "docs/release-notes/5.6.0.md",
+      relativePath: "docs/release-notes/5.6.0.md",
+      problem: "",
+    }
+  );
+
+  assert.match(
+    validateAuthoredReleaseNotesFile({
+      version: "5.6.0",
+      dryRun: false,
+      notesFile: "",
+      root: process.cwd(),
+    }).problem,
+    /Real releases require authored public notes/
+  );
+
+  assert.match(
+    validateAuthoredReleaseNotesFile({
+      version: "5.6.0",
+      dryRun: false,
+      notesFile: "notes.md",
+      root: process.cwd(),
+    }).problem,
+    /must be docs\/release-notes\/5\.6\.0\.md/
+  );
+
+  assert.deepEqual(
+    validateAuthoredReleaseNotesFile({
+      version: "5.6.0",
+      dryRun: true,
+      notesFile: "draft-notes.md",
+      root: process.cwd(),
+    }),
+    {
+      ok: true,
+      expectedPath: "docs/release-notes/5.6.0.md",
+      relativePath: "draft-notes.md",
+      problem: "",
     }
   );
 });

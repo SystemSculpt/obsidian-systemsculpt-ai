@@ -1183,8 +1183,8 @@ select.ss-pi-wizard__select { width: 100%; }
   display: none;
 }
 
-/* Status row hidden when idle — status stripe (left border) handles state.    */
-/* Row reappears automatically when running/succeeded/failed via non-idle class */
+/* Hide the status row when idle — there's nothing meaningful to show. It
+   reappears automatically when running/succeeded/failed via the non-idle class. */
 .ss-studio-node-run-status-row:has(.ss-studio-node-run-status.is-idle):not(:has(.ss-studio-node-run-message)):not(:has(.ss-studio-node-badge)) {
   display: none;
 }
@@ -1366,9 +1366,23 @@ select.ss-pi-wizard__select { width: 100%; }
   cursor: grabbing;
 }
 
+.ss-studio-node-card:hover,
 .ss-studio-node-card.is-selected {
   border-color: var(--interactive-accent);
-  box-shadow: 0 0 0 1px var(--interactive-accent);
+  filter:
+    drop-shadow(0 0 3px color-mix(in srgb, var(--interactive-accent) 75%, transparent))
+    drop-shadow(0 0 14px color-mix(in srgb, var(--interactive-accent) 32%, transparent));
+}
+
+/* Overlay panels adopt the accent border so the full composite edge reads
+   as a continuous accent line. The card's drop-shadow filter wraps the
+   composite automatically — overlays are absolute-positioned descendants
+   of the card, so the filter applies to the whole visual shape. */
+.ss-studio-node-card:hover > .ss-studio-node-chrome-overlay,
+.ss-studio-node-card:hover > .ss-studio-node-chrome-overlay-top,
+.ss-studio-node-card.is-selected > .ss-studio-node-chrome-overlay,
+.ss-studio-node-card.is-selected > .ss-studio-node-chrome-overlay-top {
+  border-color: var(--interactive-accent);
 }
 
 .ss-studio-node-card.is-managed-pending {
@@ -1393,6 +1407,13 @@ select.ss-pi-wizard__select { width: 100%; }
 .ss-studio-graph-viewport.is-interacting .ss-studio-link-path,
 .ss-studio-graph-viewport.is-interacting .ss-studio-link-preview {
   pointer-events: none;
+}
+
+/* Drop the halo only during active node drag — per-frame filter repaint
+   adds real cost there. Zoom/scroll is a pure transform composite and
+   keeps the halo visible. */
+.ss-studio-graph-viewport.is-interacting .ss-studio-node-card {
+  filter: none;
 }
 
 .ss-studio-graph-viewport.is-zoomed-far .ss-studio-node-card textarea,
@@ -1619,21 +1640,6 @@ select.ss-pi-wizard__select { width: 100%; }
 .ss-studio-node-run-status.is-failed {
   color: var(--ss-studio-error-muted);
   border-color: color-mix(in srgb, var(--ss-studio-error) 65%, var(--ss-studio-border));
-}
-
-/* ── Left-edge status stripe on node cards ── */
-.ss-studio-node-card:has(.ss-studio-node-run-status.is-pending) {
-  border-left-color: var(--text-muted);
-}
-.ss-studio-node-card:has(.ss-studio-node-run-status.is-running) {
-  border-left-color: var(--interactive-accent);
-}
-.ss-studio-node-card:has(.ss-studio-node-run-status.is-cached),
-.ss-studio-node-card:has(.ss-studio-node-run-status.is-succeeded) {
-  border-left-color: var(--color-green, var(--ss-studio-success-tint));
-}
-.ss-studio-node-card:has(.ss-studio-node-run-status.is-failed) {
-  border-left-color: var(--color-red, var(--ss-studio-error));
 }
 
 .ss-studio-node-run-message {

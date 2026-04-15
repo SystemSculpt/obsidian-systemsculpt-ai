@@ -6,6 +6,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { assertProductionPluginArtifacts } from "./plugin-artifacts.mjs";
+import { inspectReleaseSurfaces } from "./check-release-surfaces.mjs";
 
 const cwd = process.cwd();
 const args = process.argv.slice(2);
@@ -939,6 +940,73 @@ function ensureTagDoesNotExist(version) {
   }
 }
 
+function toRepoRelativePath(filePath, root = cwd) {
+  return path.relative(root, path.resolve(root, filePath)).split(path.sep).join("/");
+}
+
+function expectedReleaseNotesPath(version) {
+  return `docs/release-notes/${version}.md`;
+}
+
+function validateAuthoredReleaseNotesFile({
+  notesFile,
+  dryRun = false,
+  version,
+  root = cwd,
+} = {}) {
+  const expectedPath = expectedReleaseNotesPath(version);
+  if (!notesFile) {
+    return {
+      ok: Boolean(dryRun),
+      expectedPath,
+      relativePath: "",
+      problem: dryRun
+        ? ""
+        : `Real releases require authored public notes: --notes-file ${expectedPath}`,
+    };
+  }
+
+  const relativePath = toRepoRelativePath(notesFile, root);
+  if (dryRun) {
+    return {
+      ok: true,
+      expectedPath,
+      relativePath,
+      problem: "",
+    };
+  }
+
+  if (relativePath !== expectedPath) {
+    return {
+      ok: false,
+      expectedPath,
+      relativePath,
+      problem: `Release notes file must be ${expectedPath}; got ${relativePath}`,
+    };
+  }
+
+  return {
+    ok: true,
+    expectedPath,
+    relativePath,
+    problem: "",
+  };
+}
+
+function ensureAuthoredReleaseNotesFile(options, version) {
+  const validation = validateAuthoredReleaseNotesFile({
+    notesFile: options.notesFile,
+    dryRun: options.dryRun,
+    version,
+  });
+
+  if (!validation.ok) {
+    fail(validation.problem);
+  }
+
+  return validation;
+}
+
 function ensureGitHubCliReady() {
   return resolveGitHubReleaseAuthStrategy();
 }
@@ -1142,6 +1210,7 @@ function main() {
     githubAuthStrategyName: githubAuthStrategy.name,
   });
 
+  ensureAuthoredReleaseNotesFile(options, newVersion);
   const notesPath = writeNotesFile(newVersion, commits, options.notesFile);
   logStep(`Release notes preview file: ${notesPath}`);
 
@@ -1171,7 +1240,21 @@ function main() {
     writeJson(lockfilePath, lockfile);
     writeJson(versionsPath, versions);
     updateReadmeVersion(readmePath, newVersion);
+  }
 
+  const releaseSurfaceCheck = inspectReleaseSurfaces({
+    root: cwd,
+    version: newVersion,
+    notesFile: options.notesFile,
+    requireNotes: true,
+    checkArtifacts: true,
+  });
+  if (!releaseSurfaceCheck.ok) {
+    fail(`Release surface check failed:\n${releaseSurfaceCheck.problems.map((problem) => `- ${problem}`).join("\n")}`);
+  }
+  logStep("Release surfaces verified.");
+
+  if (!usePreBumpedMetadata) {
     logStep("Staging release metadata files");
     run("git", ["add", "manifest.json", "package.json", "package-lock.json", "versions.json", "README.md"]);
 
@@ -1207,6 +1290,7 @@ export {
   parseGitHubAuthStatus,
   resolveGitHubReleaseAuthStrategy,
   resolveReleaseVersionPlan,
+  validateAuthoredReleaseNotesFile,
   runWithGitHubAuthFallback,
   shouldRetryWithoutGitHubEnv,
   withoutGitHubEnvTokens,
