@@ -1371,6 +1371,20 @@ select.ss-pi-wizard__select { width: 100%; }
   box-shadow: 0 0 0 1px var(--interactive-accent);
 }
 
+/* When a selected card joins top/bottom overlay panels, extend the accent
+   ring across the full composite. The card's own 1px box-shadow would paint
+   across the seam (the card sits at z-index 5 above overlays at z-index 3),
+   so it's dropped and the overlay panels pick up the accent border. */
+.ss-studio-node-card:has(> .ss-studio-node-chrome-overlay).is-selected,
+.ss-studio-node-card:has(> .ss-studio-node-chrome-overlay-top).is-selected {
+  box-shadow: none;
+}
+
+.ss-studio-node-card.is-selected > .ss-studio-node-chrome-overlay,
+.ss-studio-node-card.is-selected > .ss-studio-node-chrome-overlay-top {
+  border-color: var(--interactive-accent);
+}
+
 .ss-studio-node-card.is-managed-pending {
   border-color: color-mix(in srgb, var(--ss-studio-info-bright) 58%, var(--ss-studio-border) 42%);
   box-shadow:
