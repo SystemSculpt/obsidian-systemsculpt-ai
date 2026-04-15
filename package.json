@@ -132,7 +132,8 @@
     "test:leaks": "node scripts/jest.mjs --config jest.config.cjs --maxWorkers=1 --openHandlesTimeout=200 --passWithNoTests",
     "test:embeddings": "node scripts/jest.mjs --config jest.embeddings.config.cjs --passWithNoTests",
     "test:embeddings:serial": "node scripts/jest.mjs --config jest.embeddings.config.cjs --runInBand --passWithNoTests",
-    "test:release-script": "node --test scripts/release-plugin.test.mjs",
+    "test:release-script": "node --test scripts/release-plugin.test.mjs scripts/check-release-surfaces.test.mjs",
+    "check:release-surfaces": "node scripts/check-release-surfaces.mjs",
     "release:plugin": "node scripts/release-plugin.mjs"
   },
   "ts-node": {

@@ -104,6 +104,7 @@ Desktop validation is attach-only to an already-open Obsidian vault. Keep live s
 ```bash
 npm run check:release:windows         # build + Windows 11 clean install + Windows baselines
 npm run check:release:native          # required native release matrix
+npm run check:release-surfaces -- --version <version> --require-notes
 npm run release:plugin                  # auto bump (major/minor/patch from commits)
 npm run release:plugin -- --dry-run    # preview next version + notes only
 npm run release:plugin -- --bump patch # force a specific bump
@@ -117,6 +118,7 @@ Use `npm run check:release:windows` when you want the fast Windows-only release 
 
 The old tag-triggered GitHub Actions release workflow is retired. Treat `npm run release:plugin` as the canonical publish path for this repo.
 That release path now packages the standard Obsidian plugin artifact set only: `manifest.json`, `main.js`, and `styles.css`.
+Before release, `npm run check:release-surfaces -- --version <version> --require-notes` verifies the exact version surfaces and release notes file. After a production build, add `--check-artifacts` to verify the release asset set too.
 Desktop validation is now bridge-based and no-focus by default; the old renderer-driving desktop lane is retired.
 When multiple synced desktop vaults exist, use `--vault-name <vault-name>` or `--vault-path <absolute-path>` to pin one explicitly. Otherwise the desktop runner prefers the latest live bridge target automatically.
 
