@@ -20,6 +20,7 @@ export class SystemSculptSearchModal extends StandardModal {
   private currentQuery = "";
   private debounceHandle: number | null = null;
   private querySerial = 0;
+  private isModalOpen = false;
 
   constructor(plugin: SystemSculptPlugin) {
     super(plugin.app);
@@ -31,6 +32,7 @@ export class SystemSculptSearchModal extends StandardModal {
 
   onOpen() {
     super.onOpen();
+    this.isModalOpen = true;
     this.contentEl.addClass("ss-search__content");
 
     this.addTitle(
@@ -52,10 +54,11 @@ export class SystemSculptSearchModal extends StandardModal {
 
     setTimeout(() => this.searchInputEl?.focus(), 0);
     void this.renderRecents();
-    this.engine.warmIndex();
+    void this.refreshRecentsAfterWarmIndex();
   }
 
   onClose() {
+    this.isModalOpen = false;
     if (this.debounceHandle) {
       window.clearTimeout(this.debounceHandle);
       this.debounceHandle = null;
@@ -104,6 +107,7 @@ export class SystemSculptSearchModal extends StandardModal {
   }
 
   private async executeSearch(query: string) {
+    this.currentQuery = query;
     const trimmed = query.trim();
     const serial = ++this.querySerial;
 
@@ -125,9 +129,11 @@ export class SystemSculptSearchModal extends StandardModal {
     this.renderResponse(response);
   }
 
-  private async renderRecents() {
+  private async renderRecents(options: { showLoading?: boolean } = {}) {
     const serial = ++this.querySerial;
-    this.renderLoading("Opening recent notes...");
+    if (options.showLoading !== false) {
+      this.renderLoading("Opening recent notes...");
+    }
     const recents = await this.engine.getRecent(25);
     if (serial < this.querySerial) return;
     const indicator = this.engine.getEmbeddingsIndicator();
@@ -141,6 +147,12 @@ export class SystemSculptSearchModal extends StandardModal {
       usedEmbeddings: false,
     });
     this.renderState(this.recentsStateText(indicator));
+  }
+
+  private async refreshRecentsAfterWarmIndex() {
+    await this.engine.warmIndex();
+    if (!this.isModalOpen || this.currentQuery.trim().length > 0) return;
+    await this.renderRecents({ showLoading: false });
   }
 
   private renderResponse(response: SearchResponse) {
@@ -176,11 +188,9 @@ export class SystemSculptSearchModal extends StandardModal {
       const meta = item.createDiv({ cls: "ss-search__meta" });
       meta.setText(`${result.path} • ${this.formatUpdated(result.updatedAt)}${result.size ? ` • ${this.formatSize(result.size)}` : ""}`);
 
-      const excerpt = item.createDiv({ cls: "ss-search__excerpt" });
       if (result.excerpt) {
+        const excerpt = item.createDiv({ cls: "ss-search__excerpt" });
         excerpt.innerHTML = this.getHighlightedText(result.excerpt, this.currentQuery);
-      } else {
-        excerpt.setText("No preview available");
       }
 
       this.registerDomEvent(item, "click", async () => {

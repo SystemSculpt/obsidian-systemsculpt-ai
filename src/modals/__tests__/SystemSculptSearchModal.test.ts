@@ -39,7 +39,7 @@ const createMockSearchResponse = (overrides: Partial<SearchResponse> = {}): Sear
 
 const createMockEngine = (overrides: Record<string, any> = {}) => ({
   search: jest.fn().mockResolvedValue(createMockSearchResponse()),
-  warmIndex: jest.fn(),
+  warmIndex: jest.fn().mockResolvedValue(undefined),
   getRecent: jest.fn().mockResolvedValue([
     { path: "notes/recent.md", title: "Recent Note", score: 1, origin: "recent" as const, updatedAt: Date.now() },
   ]),
@@ -126,6 +126,46 @@ describe("SystemSculptSearchModal", () => {
     it("warms the content index in the background", () => {
       modal.onOpen();
       expect(plugin._testEngine.warmIndex).toHaveBeenCalled();
+    });
+
+    it("refreshes recent previews after the background index warms", async () => {
+      let resolveWarmIndex!: () => void;
+      const warmIndex = new Promise<void>((resolve) => {
+        resolveWarmIndex = resolve;
+      });
+
+      plugin = createMockPlugin({
+        warmIndex: jest.fn().mockReturnValue(warmIndex),
+        getRecent: jest.fn()
+          .mockResolvedValueOnce([
+            { path: "notes/recent.md", title: "Recent Note", score: 1, origin: "recent" as const, updatedAt: Date.now() },
+          ])
+          .mockResolvedValueOnce([
+            {
+              path: "notes/recent.md",
+              title: "Recent Note",
+              excerpt: "Indexed preview text",
+              score: 1,
+              origin: "recent" as const,
+              updatedAt: Date.now(),
+            },
+          ]),
+      });
+      modal = new SystemSculptSearchModal(plugin);
+
+      modal.onOpen();
+      await Promise.resolve();
+
+      expect(plugin._testEngine.getRecent).toHaveBeenCalledTimes(1);
+      expect((modal as any).listEl?.textContent).toContain("Recent Note");
+      expect((modal as any).listEl?.textContent).not.toContain("No preview available");
+
+      resolveWarmIndex();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(plugin._testEngine.getRecent).toHaveBeenCalledTimes(2);
+      expect((modal as any).listEl?.textContent).toContain("Indexed preview text");
     });
   });
 
@@ -318,6 +358,17 @@ describe("SystemSculptSearchModal", () => {
 
       const scoreEl = (modal as any).listEl?.querySelector(".ss-search__score");
       expect(scoreEl?.textContent).toBe("86%");
+    });
+
+    it("does not show a missing-preview placeholder for metadata-only recents", async () => {
+      modal.onOpen();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      const listEl = (modal as any).listEl;
+      expect(listEl?.textContent).toContain("Recent Note");
+      expect(listEl?.textContent).not.toContain("No preview available");
+      expect(listEl?.querySelector(".ss-search__excerpt")).toBeNull();
     });
 
     it("shows 'No matches yet' for empty results", async () => {

@@ -193,10 +193,12 @@ export class SystemSculptSearchEngine {
     return this.recentHitsCache.slice(0, limit);
   }
 
-  warmIndex(): void {
-    void this.ensureIndex().catch(() => {
+  async warmIndex(): Promise<void> {
+    try {
+      await this.ensureIndex();
+    } catch {
       // Search can recover on the next explicit query.
-    });
+    }
   }
 
   destroy(): void {
@@ -270,7 +272,12 @@ export class SystemSculptSearchEngine {
       await this.buildIndex(files);
     })();
 
-    await this.indexPromise;
+    try {
+      await this.indexPromise;
+    } catch (error) {
+      this.indexPromise = null;
+      throw error;
+    }
   }
 
   private async refreshDirtyIndex(): Promise<void> {
