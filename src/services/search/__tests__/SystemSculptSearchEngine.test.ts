@@ -21,12 +21,14 @@ describe("SystemSculptSearchEngine lexical mode", () => {
     const app = new App();
     const files = [
       new TFile({ path: "notes/orange-juice.md", stat: { mtime: NOW - 1_000 } }),
+      new TFile({ path: "notes/fresh-orange.md", stat: { mtime: NOW - 100 } }),
       new TFile({ path: "notes/research.canvas", stat: { mtime: NOW - 1_500 } }),
       new TFile({ path: "notes/unrelated.md", stat: { mtime: NOW - 2_000 } }),
     ];
 
     const contents: Record<string, string> = {
       "notes/orange-juice.md": "Orange juice is delicious and bright. Fresh squeezed orange juice every day.",
+      "notes/fresh-orange.md": "Orange harvest note with no juice details.",
       "notes/research.canvas": JSON.stringify({
         nodes: [
           { id: "n1", type: "text", text: "Canvas note: yellow submarine" },
@@ -59,6 +61,16 @@ describe("SystemSculptSearchEngine lexical mode", () => {
     expect(res.stats.usedEmbeddings).toBe(false);
   });
 
+  it("prefers full term coverage over recent one-term matches", async () => {
+    const { app } = buildFixture();
+    const plugin = makePlugin(app);
+    const engine = new SystemSculptSearchEngine(app as any, plugin);
+
+    const res = await engine.search("orange juice", { mode: "lexical", limit: 10 });
+
+    expect(res.results[0]?.path).toBe("notes/orange-juice.md");
+  });
+
   it("indexes .canvas text nodes and finds matches", async () => {
     const { app } = buildFixture();
     const plugin = makePlugin(app);
@@ -68,6 +80,16 @@ describe("SystemSculptSearchEngine lexical mode", () => {
     const paths = res.results.map((r) => r.path);
 
     expect(paths).toContain("notes/research.canvas");
+  });
+
+  it("uses fuzzy token candidates for minor query typos", async () => {
+    const { app } = buildFixture();
+    const plugin = makePlugin(app);
+    const engine = new SystemSculptSearchEngine(app as any, plugin);
+
+    const res = await engine.search("yelow submarine", { mode: "lexical", limit: 10 });
+
+    expect(res.results[0]?.path).toBe("notes/research.canvas");
   });
 
   it("does not index JSON keys from .canvas files", async () => {
