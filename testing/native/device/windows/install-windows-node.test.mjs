@@ -4,19 +4,19 @@ import {
   buildFinalizeNodeInstallScript,
   buildResolveNodeReleaseScript,
   parseArgs,
-} from "./install-parallels-node.mjs";
+} from "./install-windows-node.mjs";
 
-test("parseArgs accepts Parallels node install overrides", () => {
+test("parseArgs accepts Windows node install overrides", () => {
   const parsed = parseArgs([
-    "--vm-name",
-    "Windows 11",
+    "--host",
+    "custom-windows-host",
     "--node-exe",
     "C:/Users/Public/SystemSculpt/nodejs/node.exe",
     "--major",
     "22",
   ]);
 
-  assert.equal(parsed.vmName, "Windows 11");
+  assert.equal(parsed.sshHost, "custom-windows-host");
   assert.equal(parsed.nodeExe, "C:/Users/Public/SystemSculpt/nodejs/node.exe");
   assert.equal(parsed.major, 22);
 });
@@ -25,6 +25,7 @@ test("buildResolveNodeReleaseScript queries the requested Node major", () => {
   const script = buildResolveNodeReleaseScript({ major: 20 });
 
   assert.match(script, /nodejs\.org\/dist\/index\.json/);
+  assert.match(script, /\$indexResponse -is \[array\]/);
   assert.match(script, /\$major = 20/);
   assert.match(script, /win-' \+ \$nodeArch \+ '-zip/);
 });

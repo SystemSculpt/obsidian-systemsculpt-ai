@@ -19,8 +19,7 @@ import {
   DEFAULT_YOUTUBE_URL,
 } from "../../runtime-smoke/constants.mjs";
 import {
-  DEFAULT_WINDOWS_PARALLELS_NODE_EXE,
-  DEFAULT_WINDOWS_PARALLELS_VM_NAME,
+  DEFAULT_WINDOWS_NODE_EXE,
   DEFAULT_WINDOWS_SSH_HOST,
   DEFAULT_WINDOWS_TRANSPORT,
   normalizeWindowsTransport,
@@ -61,11 +60,9 @@ export function parseArgs(argv) {
     allowSingleModelFallback: false,
     transport: String(process.env.SYSTEMSCULPT_WINDOWS_TRANSPORT || "").trim() || DEFAULT_WINDOWS_TRANSPORT,
     sshHost: String(process.env.SYSTEMSCULPT_WINDOWS_SSH_HOST || DEFAULT_WINDOWS_SSH_HOST).trim(),
-    vmName: String(process.env.SYSTEMSCULPT_WINDOWS_VM_NAME || "").trim() || DEFAULT_WINDOWS_PARALLELS_VM_NAME,
-    parallelsRepoRoot: String(process.env.SYSTEMSCULPT_WINDOWS_PARALLELS_REPO_ROOT || "").trim(),
     nodeExe:
-      String(process.env.SYSTEMSCULPT_WINDOWS_PARALLELS_NODE_EXE || "").trim() ||
-      DEFAULT_WINDOWS_PARALLELS_NODE_EXE,
+      String(process.env.SYSTEMSCULPT_WINDOWS_NODE_EXE || "").trim() ||
+      DEFAULT_WINDOWS_NODE_EXE,
     allowLocalPi: false,
     providerId: String(process.env.SYSTEMSCULPT_DESKTOP_PROVIDER_ID || "").trim(),
     providerApiKey: String(process.env.SYSTEMSCULPT_DESKTOP_PROVIDER_API_KEY || "").trim(),
@@ -144,16 +141,6 @@ export function parseArgs(argv) {
       index += 1;
       continue;
     }
-    if (arg === "--vm-name") {
-      options.vmName = String(argv[index + 1] || "").trim() || options.vmName;
-      index += 1;
-      continue;
-    }
-    if (arg === "--parallels-repo-root") {
-      options.parallelsRepoRoot = String(argv[index + 1] || "").trim() || options.parallelsRepoRoot;
-      index += 1;
-      continue;
-    }
     if (arg === "--node-exe") {
       options.nodeExe = String(argv[index + 1] || "").trim() || options.nodeExe;
       index += 1;
@@ -201,11 +188,9 @@ and forwarding the bridge locally on demand.
 
 Options:
   --case <name|all|extended|stress|soak>   Same cases as testing/native/desktop-automation/run.mjs
-  --transport <parallels|ssh>              Windows transport. Default: ${DEFAULT_WINDOWS_TRANSPORT}
-  --vm-name <name>                         Parallels VM name. Default: ${DEFAULT_WINDOWS_PARALLELS_VM_NAME}
-  --parallels-repo-root <path>             Windows repo root inside the Parallels guest
-  --node-exe <path>                        Windows Node executable for Parallels runs
-  --host <alias>                           SSH host alias for the optional remote fallback
+  --transport <ssh>                        Windows transport. Default: ${DEFAULT_WINDOWS_TRANSPORT}
+  --host <alias>                           SSH host alias. Default: SYSTEMSCULPT_WINDOWS_SSH_HOST
+  --node-exe <path>                        Windows Node executable. Default: ${DEFAULT_WINDOWS_NODE_EXE}
   --vault-name <name>                      Filter to one Windows vault name
   --vault-path <path>                      Filter to one Windows vault path
   --fixture-dir <path>                     Vault-relative fixture folder. Default: ${DEFAULT_FIXTURE_DIR}
@@ -509,7 +494,6 @@ function buildSyntheticTarget(baseOptions, ping) {
     vaultName,
     sshHost: baseOptions.sshHost,
     transport: baseOptions.transport,
-    vmName: baseOptions.vmName || null,
     remote: true,
   };
 }
@@ -606,56 +590,6 @@ export async function runWindowsDesktopAutomation(options, dependencies = {}) {
   const runWindowsNodeModuleRemotelyImpl =
     dependencies.runWindowsNodeModuleRemotelyImpl || runWindowsNodeModuleRemotely;
   const isLocalWindowsRuntime = process.platform === "win32";
-
-  if (!isLocalWindowsRuntime && connection.transport === "parallels") {
-    const remoteProviderConfig = resolveRemoteWindowsDesktopAutomationProviderConfig(options, process.env);
-    if (!options.allowLocalPi) {
-      assertNoLocalPiInstalled(
-        await readLatestWindowsLocalPiStatus({
-          ...connection,
-        })
-      );
-    }
-
-    const runtimeVersionRefresh = await ensureFreshRemoteWindowsPluginVersion(
-      {
-        ...connection,
-        vaultName: options.vaultName,
-        vaultPath: options.vaultPath,
-        artifactRoot: process.cwd(),
-      },
-      dependencies.runtimeVersionDependencies
-    );
-    if (runtimeVersionRefresh.relaunched) {
-      console.log(
-        `[windows-desktop-automation] Relaunched Windows Obsidian to refresh plugin version ${runtimeVersionRefresh.before.pluginVersion || "missing"} -> ${runtimeVersionRefresh.after.pluginVersion || "missing"}`
-      );
-    }
-
-    const stdout = await runWindowsNodeModuleRemotelyImpl(
-      path.resolve(process.cwd(), "testing/native/device/windows/run-desktop-automation.mjs"),
-      {
-        ...connection,
-        artifactRoot: process.cwd(),
-        args: buildRemoteWindowsDesktopAutomationArgs({
-          ...options,
-          ...remoteProviderConfig,
-        }),
-      }
-    );
-    const payload = parseJsonPayloadText(stdout, "the Windows desktop automation report");
-    const finalPayload = {
-      ...payload,
-      runtimeVersionRefresh: summarizeRuntimeVersionRefresh(runtimeVersionRefresh),
-    };
-
-    if (options.jsonOutput) {
-      await fs.mkdir(path.dirname(options.jsonOutput), { recursive: true });
-      await fs.writeFile(options.jsonOutput, `${JSON.stringify(finalPayload, null, 2)}\n`, "utf8");
-    }
-
-    return finalPayload;
-  }
 
   if (String(options.providerId || "").trim() && String(options.providerApiKey || "").trim()) {
     process.env.SYSTEMSCULPT_DESKTOP_PROVIDER_ID = String(options.providerId).trim();

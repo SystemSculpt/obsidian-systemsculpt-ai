@@ -287,6 +287,14 @@ export function inferVaultPathFromConfig(config = null) {
   return config.vaultPath.trim() || null;
 }
 
+export function inferAvdNameFromConfig(config = null) {
+  if (!config || typeof config.avdName !== "string") {
+    return null;
+  }
+
+  return config.avdName.trim() || null;
+}
+
 export function inferPluginIdFromConfig(config = null) {
   if (!config || typeof config.pluginId !== "string") {
     return DEFAULT_PLUGIN_ID;

@@ -7,6 +7,7 @@ import {
   DEFAULT_PACKAGE_ID,
   buildAndroidEnv,
   findAndroidDevice,
+  inferAvdNameFromConfig,
   inferPackageIdFromConfig,
   inferVaultNameFromConfig,
   listAndroidDevices,
@@ -36,6 +37,7 @@ Options:
   --package-id <id>       Android package id. Default: md.obsidian
   --vault <name>          Vault name for obsidian://open. Inferred from config when possible.
   --sync                  Run android:sync before relaunching.
+  --reset-vault           Recreate the configured vault during sync.
   --skip-build            When used with --sync, skip npm run build and reuse the current artifact set.
   --headless              Launch the emulator without a window and skip opening host apps.
   --skip-relaunch         Skip the adb relaunch step.
@@ -58,6 +60,7 @@ function parseArgs(argv) {
     packageId: DEFAULT_PACKAGE_ID,
     vaultName: null,
     sync: false,
+    resetVault: false,
     build: true,
     headless: false,
     relaunch: true,
@@ -95,6 +98,10 @@ function parseArgs(argv) {
     }
     if (arg === "--sync") {
       options.sync = true;
+      continue;
+    }
+    if (arg === "--reset-vault") {
+      options.resetVault = true;
       continue;
     }
     if (arg === "--skip-build") {
@@ -162,6 +169,11 @@ async function main() {
   const config = parseConfig(options.configPath);
   const packageId = options.packageId || inferPackageIdFromConfig(config) || DEFAULT_PACKAGE_ID;
   const vaultName = options.vaultName || inferVaultNameFromConfig(config);
+  const avdName =
+    options.avdName ||
+    inferAvdNameFromConfig(config) ||
+    String(process.env.SYSTEMSCULPT_ANDROID_AVD || "").trim() ||
+    null;
   const adbPath = resolveAdbPath();
   const selectedSerial = options.serial || config?.adbSerial || null;
 
@@ -171,10 +183,10 @@ async function main() {
     device = findAndroidDevice({ adbPath, serial: selectedSerial, preferEmulator: true });
   }
 
-  if (!device && options.avdName) {
+  if (!device && avdName) {
     const emulatorPath = resolveEmulatorPath();
-    console.log(`[android-debug] Launching AVD ${options.avdName}`);
-    const emulatorArgs = ["-avd", options.avdName];
+    console.log(`[android-debug] Launching AVD ${avdName}`);
+    const emulatorArgs = ["-avd", avdName];
     if (options.headless) {
       emulatorArgs.push("-no-window", "-no-boot-anim", "-gpu", "swiftshader_indirect", "-netfast");
     }
@@ -224,6 +236,9 @@ async function main() {
         options.configPath,
         "--serial",
         device.serial,
+        "--package-id",
+        packageId,
+        ...(options.resetVault ? ["--reset-vault"] : []),
         ...(options.build ? [] : ["--skip-build"]),
       ],
       {

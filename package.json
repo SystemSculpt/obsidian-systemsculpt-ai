@@ -77,7 +77,7 @@
     "test:native:desktop:chatview-stress": "node testing/native/desktop-automation/run.mjs --case chatview-stress --repeat 5 --pause-ms 750 --no-reload",
     "test:native:desktop:stress": "node testing/native/desktop-automation/run.mjs --case stress --repeat 5 --pause-ms 1500 --no-reload",
     "test:native:desktop:soak": "node testing/native/desktop-automation/run.mjs --case soak --repeat 25 --pause-ms 1500 --no-reload",
-    "test:native:windows:install-node": "node testing/native/device/windows/install-parallels-node.mjs",
+    "test:native:windows:install-node": "node testing/native/device/windows/install-windows-node.mjs",
     "test:native:windows:prepare": "node testing/native/device/windows/remote-run.mjs --entry ./testing/native/device/windows/bootstrap.mjs --",
     "test:native:windows:probe": "node testing/native/device/windows/probe-interactive.mjs",
     "test:native:windows:setup": "node testing/native/device/windows/run-desktop-automation.mjs --case setup-baseline --no-reload",
@@ -141,5 +141,5 @@
     "files": true
   },
   "type": "module",
-  "version": "5.5.0"
+  "version": "5.5.1"
 }

@@ -18,9 +18,7 @@ test("parseArgs accepts the Windows transport selectors and no-local-Pi override
     "--case",
     "chatview-stress",
     "--transport",
-    "parallels",
-    "--vm-name",
-    "Windows 11",
+    "ssh",
     "--host",
     "custom-windows-host",
     "--allow-local-pi",
@@ -32,8 +30,7 @@ test("parseArgs accepts the Windows transport selectors and no-local-Pi override
   ]);
 
   assert.equal(parsed.caseName, "chatview-stress");
-  assert.equal(parsed.transport, "parallels");
-  assert.equal(parsed.vmName, "Windows 11");
+  assert.equal(parsed.transport, "ssh");
   assert.equal(parsed.sshHost, "custom-windows-host");
   assert.equal(parsed.allowLocalPi, true);
   assert.equal(parsed.providerId, "openrouter");

@@ -4,7 +4,7 @@ SystemSculpt AI adds AI chat, vault-aware tools, semantic note search, transcrip
 
 ## Current release facts
 
-- Plugin version: `5.5.0`
+- Plugin version: `5.5.1`
 - Minimum Obsidian version: `1.4.0`
 - Platforms: desktop and mobile (`manifest.json` sets `isDesktopOnly: false`)
 - License: MIT
@@ -114,7 +114,7 @@ Release automation now runs fully on your local machine: it validates the plugin
 Before it tags anything, the release script now runs a safety preflight that blocks tracked local-only files, unignored local-only files that should probably go into `.gitignore`, hardcoded local paths, hardcoded desktop vault selectors, and secret-looking tokens.
 If `GITHUB_TOKEN` or `GH_TOKEN` is present but weaker than your stored `gh` login, the release script now automatically falls back to the stored auth for push and draft-release steps.
 The native release matrix is now explicit instead of implicit: macOS desktop baselines, Windows clean-install parity, Windows desktop baselines, and Android runtime smoke must all pass before release creation can continue. iOS runtime smoke is included automatically when a paired physical device is available on the host and is otherwise skipped honestly.
-Use `npm run check:release:windows` when you want the fast Windows-only release gate on the online Windows VM before running the full native matrix.
+Use `npm run check:release:windows` when you want the fast Windows-only release gate on the configured Windows SSH host before running the full native matrix.
 
 The old tag-triggered GitHub Actions release workflow is retired. Treat `npm run release:plugin` as the canonical publish path for this repo.
 That release path now packages the standard Obsidian plugin artifact set only: `manifest.json`, `main.js`, and `styles.css`.

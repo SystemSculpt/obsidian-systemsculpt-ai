@@ -10,9 +10,9 @@
     },
     {
       "type": "windows-ssh",
-      "host": "tickblaze-kamatera",
+      "host": "windows-ssh-host",
       "path": "C:/path/to/SystemSculptWindowsQA/.obsidian/plugins/systemsculpt-ai",
-      "label": "windows-vm"
+      "label": "windows-host"
     }
   ]
 }

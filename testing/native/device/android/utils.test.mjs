@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { resolveAndroidDeviceSelection } from "./utils.mjs";
+import { inferAvdNameFromConfig, resolveAndroidDeviceSelection } from "./utils.mjs";
 
 test("resolveAndroidDeviceSelection returns null for a missing configured serial when allowMissing is enabled", () => {
   const selected = resolveAndroidDeviceSelection(
@@ -41,4 +41,12 @@ test("resolveAndroidDeviceSelection ignores offline records when matching a seri
   );
 
   assert.deepEqual(selected, { serial: "emulator-5554", state: "device" });
+});
+
+test("inferAvdNameFromConfig returns a trimmed configured AVD name", () => {
+  assert.equal(
+    inferAvdNameFromConfig({ avdName: " SystemSculpt_Pixel_9_API_36_1 " }),
+    "SystemSculpt_Pixel_9_API_36_1"
+  );
+  assert.equal(inferAvdNameFromConfig({}), null);
 });

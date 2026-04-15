@@ -15,9 +15,7 @@ import {
 test("parseArgs accepts Windows transport selectors and provider auth options", () => {
   const parsed = parseArgs([
     "--transport",
-    "parallels",
-    "--vm-name",
-    "Windows 11",
+    "ssh",
     "--host",
     "custom-windows-host",
     "--provider-id",
@@ -29,8 +27,7 @@ test("parseArgs accepts Windows transport selectors and provider auth options", 
     "--require-provider",
   ]);
 
-  assert.equal(parsed.transport, "parallels");
-  assert.equal(parsed.vmName, "Windows 11");
+  assert.equal(parsed.transport, "ssh");
   assert.equal(parsed.sshHost, "custom-windows-host");
   assert.equal(parsed.providerId, "google");
   assert.deepEqual(parsed.preferredProviderModelIds, ["gemini-2.5-flash"]);

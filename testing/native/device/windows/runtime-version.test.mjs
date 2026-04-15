@@ -139,7 +139,7 @@ test("ensureFreshRemoteWindowsPluginVersion skips the relaunch when the bridge i
   assert.equal(result.after.pluginVersion, "5.3.2");
 });
 
-test("ensureFreshRemoteWindowsPluginVersion relaunches the Windows VM when the bridge version is stale", async () => {
+test("ensureFreshRemoteWindowsPluginVersion relaunches the Windows host when the bridge version is stale", async () => {
   const bridgeReads = [
     {
       pluginVersion: "5.3.1",

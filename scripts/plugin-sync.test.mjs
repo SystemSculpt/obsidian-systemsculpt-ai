@@ -38,7 +38,7 @@ function createSilentLogger() {
   };
 }
 
-test("loadConfiguredTargets includes local plugin targets, Parallels windows mirrors, and legacy env mirrors", (t) => {
+test("loadConfiguredTargets includes local plugin targets, Windows SSH mirrors, and legacy env mirrors", (t) => {
   const root = createTempRoot(t);
   const localPluginDir = path.join(root, "vault", ".obsidian", "plugins", "systemsculpt-ai");
   const localMirrorDir = path.join(root, "mirror");
@@ -47,10 +47,10 @@ test("loadConfiguredTargets includes local plugin targets, Parallels windows mir
     mirrorTargets: [
       { path: localMirrorDir, label: "local-mirror" },
       {
-        type: "windows-parallels",
-        vmName: "Windows 11",
+        type: "windows-ssh",
+        host: "windows-test-host",
         path: "C:/SystemSculptWindowsQA/.obsidian/plugins/systemsculpt-ai",
-        label: "windows-vm",
+        label: "windows-host",
       },
     ],
   });
@@ -69,11 +69,11 @@ test("loadConfiguredTargets includes local plugin targets, Parallels windows mir
   assert.equal(countConfiguredTargets({ root, configPath, env }), 4);
   assert.deepEqual(
     loaded.targets.map((target) => target.type),
-    ["local", "local", "windows-parallels", "local"]
+    ["local", "local", "windows-ssh", "local"]
   );
   assert.equal(
     formatSyncTarget(loaded.targets[2]),
-    "mirror: windows-vm -> Windows 11:C:/SystemSculptWindowsQA/.obsidian/plugins/systemsculpt-ai"
+    "mirror: windows-host -> windows-test-host:C:/SystemSculptWindowsQA/.obsidian/plugins/systemsculpt-ai"
   );
 });
 
@@ -142,40 +142,23 @@ test("syncConfiguredTargets drives windows ssh mirrors through ssh plus scp", (t
   assert.deepEqual(calls[1].args.slice(0, 1), ["-Cq"]);
 });
 
-test("syncConfiguredTargets drives windows Parallels mirrors through prlctl", (t) => {
+test("loadConfiguredTargets rejects unsupported Windows transports", (t) => {
   const root = createTempRoot(t);
-  writePluginArtifacts(root);
 
   const configPath = writeSyncConfig(root, {
     pluginTargets: [],
     mirrorTargets: [
       {
-        type: "windows-parallels",
-        vmName: "Windows 11",
-        repoRoot: "X:/repos/obsidian-systemsculpt-ai",
+        type: "windows-host",
         path: "C:/SystemSculptWindowsQA/.obsidian/plugins/systemsculpt-ai",
       },
     ],
   });
 
-  const calls = [];
-  const spawnSyncImpl = (command, args) => {
-    calls.push({ command, args });
-    return { status: 0, stdout: "", stderr: "" };
-  };
-
-  const result = syncConfiguredTargets({
-    root,
-    configPath,
-    logger: createSilentLogger(),
-    spawnSyncImpl,
-  });
-
-  assert.equal(result.succeeded.length, 1);
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0].command, "prlctl");
-  assert.deepEqual(calls[0].args.slice(0, 3), ["exec", "Windows 11", "--current-user"]);
-  assert.ok(calls[0].args.includes("-EncodedCommand"));
+  assert.throws(
+    () => loadConfiguredTargets({ root, configPath }),
+    /Unsupported Windows sync target type: windows-host/
+  );
 });
 
 test("createBuildSyncController hot reloads only after local plugin target success", async (t) => {

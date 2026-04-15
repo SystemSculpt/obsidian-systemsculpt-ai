@@ -3,8 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  DEFAULT_WINDOWS_PARALLELS_NODE_EXE,
-  DEFAULT_WINDOWS_PARALLELS_VM_NAME,
+  DEFAULT_WINDOWS_NODE_EXE,
   DEFAULT_WINDOWS_SSH_HOST,
   DEFAULT_WINDOWS_TRANSPORT,
   resolveWindowsTransportOptions,
@@ -353,9 +352,7 @@ export async function ensureFreshRemoteWindowsPluginVersion(options = {}, depend
   const connection = resolveWindowsTransportOptions({
     transport: options.transport || DEFAULT_WINDOWS_TRANSPORT,
     sshHost: options.sshHost || DEFAULT_WINDOWS_SSH_HOST,
-    vmName: options.vmName || DEFAULT_WINDOWS_PARALLELS_VM_NAME,
-    parallelsRepoRoot: options.parallelsRepoRoot || "",
-    nodeExe: options.nodeExe || DEFAULT_WINDOWS_PARALLELS_NODE_EXE,
+    nodeExe: options.nodeExe || DEFAULT_WINDOWS_NODE_EXE,
     artifactRoot: options.artifactRoot || process.cwd(),
   });
   const runtimeOptions = {

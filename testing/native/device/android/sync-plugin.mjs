@@ -5,7 +5,9 @@ import process from "node:process";
 import {
   DEFAULT_CONFIG_PATH,
   DEFAULT_PLUGIN_ID,
+  DEFAULT_PACKAGE_ID,
   inferPluginIdFromConfig,
+  inferPackageIdFromConfig,
   inferVaultPathFromConfig,
   parseConfig,
   resolveAdbPath,
@@ -32,8 +34,10 @@ device or emulator.
 Options:
   --config, -c <path>     Use a custom Android sync config. Default: ./systemsculpt-sync.android.json
   --serial <id>           adb serial to target. Auto-selects if only one device is present.
-  --vault-path <path>     Android shared-storage vault path. Overrides config.
+  --vault-path <path>     Android vault path. Overrides config.
   --plugin-id <id>        Plugin id. Default: systemsculpt-ai
+  --package-id <id>       Android package id. Default: md.obsidian
+  --reset-vault           Remove and recreate the configured vault before syncing.
   --skip-build            Reuse the current artifact set without running npm run build first.
   --help, -h              Show this help.`);
 }
@@ -49,6 +53,8 @@ function parseArgs(argv) {
     serial: null,
     vaultPath: null,
     pluginId: DEFAULT_PLUGIN_ID,
+    packageId: DEFAULT_PACKAGE_ID,
+    resetVault: false,
     build: true,
   };
 
@@ -72,6 +78,15 @@ function parseArgs(argv) {
     if (arg === "--plugin-id") {
       options.pluginId = String(argv[index + 1] || "").trim() || DEFAULT_PLUGIN_ID;
       index += 1;
+      continue;
+    }
+    if (arg === "--package-id") {
+      options.packageId = String(argv[index + 1] || "").trim() || DEFAULT_PACKAGE_ID;
+      index += 1;
+      continue;
+    }
+    if (arg === "--reset-vault") {
+      options.resetVault = true;
       continue;
     }
     if (arg === "--skip-build") {
@@ -111,6 +126,7 @@ if (!vaultPath) {
 }
 
 const pluginId = options.pluginId || inferPluginIdFromConfig(config) || DEFAULT_PLUGIN_ID;
+const packageId = options.packageId || inferPackageIdFromConfig(config) || DEFAULT_PACKAGE_ID;
 const pluginPath = `${vaultPath.replace(/\/$/, "")}/.obsidian/plugins/${pluginId}`;
 const artifactInspection = ensureAndroidReadyArtifacts({ build: options.build });
 
@@ -126,10 +142,26 @@ console.log(`[android-sync] Vault path: ${vaultPath}`);
 console.log(`[android-sync] Plugin path: ${pluginPath}`);
 console.log(`[android-sync] main.js size: ${artifactInspection.mainBundle.formattedSize}`);
 
+if (options.resetVault) {
+  console.log("[android-sync] Resetting Android QA vault");
+  runAdbShell(adbPath, device.serial, `am force-stop ${shellQuote(packageId)} || true`);
+  runAdbShell(
+    adbPath,
+    device.serial,
+    `rm -rf ${shellQuote(vaultPath)} && mkdir -p ${shellQuote(pluginPath)}`
+  );
+} else {
+  runAdbShell(
+    adbPath,
+    device.serial,
+    `mkdir -p ${shellQuote(`${vaultPath.replace(/\/$/, "")}/.obsidian/plugins`)} && rm -rf ${shellQuote(pluginPath)} && mkdir -p ${shellQuote(pluginPath)}`
+  );
+}
+
 runAdbShell(
   adbPath,
   device.serial,
-  `rm -rf ${shellQuote(pluginPath)} && mkdir -p ${shellQuote(pluginPath)}`,
+  `printf %s ${shellQuote(JSON.stringify([pluginId]))} > ${shellQuote(`${vaultPath.replace(/\/$/, "")}/.obsidian/community-plugins.json`)}`
 );
 
 for (const file of REQUIRED_FILES.concat(OPTIONAL_FILES)) {

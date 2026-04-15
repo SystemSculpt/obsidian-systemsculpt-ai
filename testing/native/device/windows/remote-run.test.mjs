@@ -6,7 +6,6 @@ import path from "node:path";
 import {
   buildWindowsNodeModuleWorkspace,
   buildRemoteWindowsNodeScript,
-  mapLocalPathToParallelsRepoPath,
   parseRemoteRunArgs,
   runWindowsNodeModuleRemotely,
   startWindowsLocalPortForward,
@@ -85,24 +84,12 @@ test("buildWindowsNodeModuleWorkspace bundles sibling imports and ships plugin a
   );
 });
 
-test("mapLocalPathToParallelsRepoPath keeps repo-relative structure", () => {
-  const repoRoot = path.join("/tmp", "obsidian-systemsculpt-ai");
-  const mapped = mapLocalPathToParallelsRepoPath(path.join(repoRoot, "testing/native/device/windows/bootstrap.mjs"), {
-    localRepoRoot: repoRoot,
-    parallelsRepoRoot: "X:/repos/obsidian-systemsculpt-ai",
-  });
-
-  assert.equal(mapped, "X:/repos/obsidian-systemsculpt-ai/testing/native/device/windows/bootstrap.mjs");
-});
-
 test("parseRemoteRunArgs keeps transport config and task args after --", () => {
   const parsed = parseRemoteRunArgs([
     "--entry",
     "./testing/native/device/windows/clean-install-parity.mjs",
     "--transport",
-    "parallels",
-    "--vm-name",
-    "Windows 11",
+    "ssh",
     "--host",
     "custom-host",
     "--",
@@ -110,14 +97,13 @@ test("parseRemoteRunArgs keeps transport config and task args after --", () => {
     "google",
   ]);
 
-  assert.equal(parsed.transport, "parallels");
-  assert.equal(parsed.vmName, "Windows 11");
+  assert.equal(parsed.transport, "ssh");
   assert.equal(parsed.sshHost, "custom-host");
   assert.ok(parsed.entryPath.endsWith("/testing/native/device/windows/clean-install-parity.mjs"));
   assert.deepEqual(parsed.taskArgs, ["--provider-id", "google"]);
 });
 
-test("runWindowsNodeModuleRemotely forwards task args for Parallels runs", async (t) => {
+test("runWindowsNodeModuleRemotely forwards task args for SSH runs", async (t) => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "windows-remote-run-"));
   const repoRoot = path.join(tempDir, "repo");
   const entryPath = path.join(repoRoot, "testing", "native", "device", "windows", "bootstrap.mjs");
@@ -131,13 +117,22 @@ test("runWindowsNodeModuleRemotely forwards task args for Parallels runs", async
   const result = await runWindowsNodeModuleRemotely(
     entryPath,
     {
-      transport: "parallels",
+      transport: "ssh",
+      sshHost: "custom-host",
       artifactRoot: repoRoot,
       localRepoRoot: repoRoot,
-      parallelsRepoRoot: "X:/repos/obsidian-systemsculpt-ai",
       args: ["--launch", "--timeout-ms", "123456"],
     },
     {
+      buildWindowsNodeModuleWorkspaceImpl: async () => ({
+        entryRelativePath: "entry.mjs",
+        workspaceFiles: [
+          {
+            relativePath: "entry.mjs",
+            sourceBase64: Buffer.from("console.log('ok');", "utf8").toString("base64"),
+          },
+        ],
+      }),
       runRemotePowerShellScriptImpl: async (script) => {
         capturedScript = script;
         return "ok";
@@ -150,17 +145,17 @@ test("runWindowsNodeModuleRemotely forwards task args for Parallels runs", async
   assert.match(capturedScript, /& \$nodeCommand \$scriptPath @scriptArgs/);
 });
 
-test("startWindowsLocalPortForward preserves remote port for Parallels runs", async () => {
+test("startWindowsLocalPortForward preserves remote port for SSH runs", async () => {
   let capturedOptions = null;
   const result = await startWindowsLocalPortForward(
     {
-      transport: "parallels",
-      vmName: "Windows 11",
+      transport: "ssh",
+      sshHost: "custom-host",
       remoteHost: "127.0.0.1",
       remotePort: 27124,
     },
     {
-      startParallelsLocalPortForwardImpl: async (options) => {
+      startSshLocalPortForwardImpl: async (options) => {
         capturedOptions = options;
         return { ok: true };
       },
@@ -168,8 +163,8 @@ test("startWindowsLocalPortForward preserves remote port for Parallels runs", as
   );
 
   assert.deepEqual(result, { ok: true });
-  assert.equal(capturedOptions?.transport, "parallels");
-  assert.equal(capturedOptions?.vmName, "Windows 11");
+  assert.equal(capturedOptions?.transport, "ssh");
+  assert.equal(capturedOptions?.sshHost, "custom-host");
   assert.equal(capturedOptions?.remoteHost, "127.0.0.1");
   assert.equal(capturedOptions?.remotePort, 27124);
 });

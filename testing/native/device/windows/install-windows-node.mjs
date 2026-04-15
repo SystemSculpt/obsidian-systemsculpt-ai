@@ -3,14 +3,14 @@ import path from "node:path";
 import process from "node:process";
 import { pathToFileURL } from "node:url";
 import {
-  DEFAULT_WINDOWS_PARALLELS_VM_NAME,
+  DEFAULT_WINDOWS_NODE_EXE,
   DEFAULT_WINDOWS_SSH_HOST,
   runRemotePowerShellScript,
 } from "./remote-run.mjs";
 
 const DEFAULT_NODE_MAJOR = 20;
 const DEFAULT_REMOTE_TEMP_ROOT = "C:/Windows/Temp";
-const DEFAULT_WINDOWS_PARALLELS_NODE_INSTALL_EXE = "C:/Users/Public/SystemSculpt/nodejs/node.exe";
+const DEFAULT_WINDOWS_NODE_INSTALL_EXE = "C:/Users/Public/SystemSculpt/nodejs/node.exe";
 
 function fail(message) {
   throw new Error(message);
@@ -49,17 +49,17 @@ function parseJsonObjectText(rawText, label) {
 
 export function parseArgs(argv) {
   const options = {
-    vmName: String(process.env.SYSTEMSCULPT_WINDOWS_VM_NAME || "").trim() || DEFAULT_WINDOWS_PARALLELS_VM_NAME,
+    sshHost: String(process.env.SYSTEMSCULPT_WINDOWS_SSH_HOST || DEFAULT_WINDOWS_SSH_HOST).trim(),
     nodeExe:
-      String(process.env.SYSTEMSCULPT_WINDOWS_PARALLELS_NODE_EXE || "").trim() ||
-      DEFAULT_WINDOWS_PARALLELS_NODE_INSTALL_EXE,
+      String(process.env.SYSTEMSCULPT_WINDOWS_NODE_EXE || "").trim() ||
+      DEFAULT_WINDOWS_NODE_INSTALL_EXE,
     major: DEFAULT_NODE_MAJOR,
   };
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
-    if (arg === "--vm-name") {
-      options.vmName = String(argv[index + 1] || "").trim() || options.vmName;
+    if (arg === "--host") {
+      options.sshHost = String(argv[index + 1] || "").trim() || options.sshHost;
       index += 1;
       continue;
     }
@@ -88,13 +88,13 @@ export function parseArgs(argv) {
 }
 
 function usage() {
-  console.log(`Usage: node testing/native/device/windows/install-parallels-node.mjs [options]
+  console.log(`Usage: node testing/native/device/windows/install-windows-node.mjs [options]
 
-Install or refresh a user-scoped Node.js runtime inside the Parallels Windows guest.
+Install or refresh a user-scoped Node.js runtime inside the Windows SSH host.
 
 Options:
-  --vm-name <name>     Parallels VM name. Default: ${DEFAULT_WINDOWS_PARALLELS_VM_NAME}
-  --node-exe <path>    Node install path inside Windows. Default: ${DEFAULT_WINDOWS_PARALLELS_NODE_INSTALL_EXE}
+  --host <alias>       SSH host alias. Default: ${DEFAULT_WINDOWS_SSH_HOST}
+  --node-exe <path>    Node install path inside Windows. Default: ${DEFAULT_WINDOWS_NODE_INSTALL_EXE}
   --major <n>          Node major line to install from nodejs.org. Default: ${DEFAULT_NODE_MAJOR}
 `);
 }
@@ -111,7 +111,8 @@ export function buildResolveNodeReleaseScript(options = {}) {
     "  'x64' { $nodeArch = 'x64' }",
     "  default { throw ('Unsupported Windows architecture for Node install: ' + $arch) }",
     "}",
-    "$index = Invoke-RestMethod -Uri 'https://nodejs.org/dist/index.json'",
+    "$indexResponse = Invoke-RestMethod -Uri 'https://nodejs.org/dist/index.json'",
+    "$index = if ($indexResponse -is [array]) { $indexResponse } elseif ($indexResponse.value) { $indexResponse.value } else { $indexResponse }",
     "$zipFileTag = 'win-' + $nodeArch + '-zip'",
     "$release = $index | Where-Object {",
     "  $_.version -match ('^v' + $major + '\\.') -and $_.files -contains $zipFileTag",
@@ -206,8 +207,8 @@ export function buildFinalizeNodeInstallScript(state) {
 export function buildInstallNodeScript(options = {}) {
   const major = Math.max(18, Number(options.major) || DEFAULT_NODE_MAJOR);
   const nodeExe =
-    String(options.nodeExe || DEFAULT_WINDOWS_PARALLELS_NODE_INSTALL_EXE).trim() ||
-    DEFAULT_WINDOWS_PARALLELS_NODE_INSTALL_EXE;
+    String(options.nodeExe || DEFAULT_WINDOWS_NODE_INSTALL_EXE).trim() ||
+    DEFAULT_WINDOWS_NODE_INSTALL_EXE;
   const installDir = path.posix.dirname(nodeExe).replace(/\\/g, "/");
 
   return [
@@ -218,18 +219,17 @@ export function buildInstallNodeScript(options = {}) {
   ].join("\n");
 }
 
-async function runParallelsScript(script, options = {}) {
+async function runWindowsSshScript(script, options = {}) {
   return await runRemotePowerShellScript(script, {
     transport: "ssh",
     sshHost: options.sshHost || DEFAULT_WINDOWS_SSH_HOST,
-    vmName: options.vmName,
-    nodeExe: options.nodeExe,
+    nodeExe: options.nodeExe || DEFAULT_WINDOWS_NODE_EXE,
   });
 }
 
 async function resolveReleaseState(options) {
   const resolved = parseJsonObjectText(
-    await runParallelsScript(buildResolveNodeReleaseScript(options), options),
+    await runWindowsSshScript(buildResolveNodeReleaseScript(options), options),
     "the Node release probe"
   );
   const releaseVersion = String(resolved.releaseVersion || "").trim();
@@ -264,25 +264,25 @@ async function main() {
     return;
   }
 
-  console.error("[windows-install-parallels-node] resolving latest Node release");
+  console.error("[windows-install-node] resolving latest Node release");
   const releaseState = await resolveReleaseState(options);
   console.error(
-    `[windows-install-parallels-node] downloading ${releaseState.releaseVersion} (${releaseState.arch})`
+    `[windows-install-node] downloading ${releaseState.releaseVersion} (${releaseState.arch})`
   );
   parseJsonObjectText(
-    await runParallelsScript(buildDownloadNodeZipScript(releaseState), options),
+    await runWindowsSshScript(buildDownloadNodeZipScript(releaseState), options),
     "the Node zip download"
   );
 
-  console.error("[windows-install-parallels-node] extracting and installing Node");
+  console.error("[windows-install-node] extracting and installing Node");
   parseJsonObjectText(
-    await runParallelsScript(buildInstallNodeZipScript(releaseState), options),
+    await runWindowsSshScript(buildInstallNodeZipScript(releaseState), options),
     "the Node install step"
   );
 
-  console.error("[windows-install-parallels-node] finalizing PATH and verifying node.exe");
+  console.error("[windows-install-node] finalizing PATH and verifying node.exe");
   const finalized = parseJsonObjectText(
-    await runParallelsScript(buildFinalizeNodeInstallScript(releaseState), options),
+    await runWindowsSshScript(buildFinalizeNodeInstallScript(releaseState), options),
     "the Node verification step"
   );
   process.stdout.write(
@@ -302,7 +302,7 @@ async function main() {
 if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) {
   main().catch((error) => {
     console.error(
-      `[windows-install-parallels-node] ${error instanceof Error ? error.message : String(error)}`
+      `[windows-install-node] ${error instanceof Error ? error.message : String(error)}`
     );
     process.exit(1);
   });

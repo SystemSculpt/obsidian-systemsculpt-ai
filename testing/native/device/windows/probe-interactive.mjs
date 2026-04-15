@@ -7,7 +7,7 @@ function usage() {
   console.log(`Usage: node testing/native/device/windows/probe-interactive.mjs [options]
 
 Run a top-level window probe inside the active Windows desktop session without
-bringing the VM to the foreground on the Mac. This is the first-line truth
+bringing Windows to the foreground on the Mac. This is the first-line truth
 source when a fresh Obsidian launch shows a trust or blocker modal.
 
 Options:

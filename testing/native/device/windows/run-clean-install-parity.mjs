@@ -11,8 +11,7 @@ import {
   runWindowsCleanInstallParity,
 } from "./clean-install-parity.mjs";
 import {
-  DEFAULT_WINDOWS_PARALLELS_NODE_EXE,
-  DEFAULT_WINDOWS_PARALLELS_VM_NAME,
+  DEFAULT_WINDOWS_NODE_EXE,
   DEFAULT_WINDOWS_SSH_HOST,
   DEFAULT_WINDOWS_TRANSPORT,
   normalizeWindowsTransport,
@@ -83,11 +82,9 @@ export function parseArgs(argv, env = process.env) {
     ...parity,
     transport: String(env.SYSTEMSCULPT_WINDOWS_TRANSPORT || "").trim() || DEFAULT_WINDOWS_TRANSPORT,
     sshHost: String(env.SYSTEMSCULPT_WINDOWS_SSH_HOST || DEFAULT_WINDOWS_SSH_HOST).trim(),
-    vmName: String(env.SYSTEMSCULPT_WINDOWS_VM_NAME || "").trim() || DEFAULT_WINDOWS_PARALLELS_VM_NAME,
-    parallelsRepoRoot: String(env.SYSTEMSCULPT_WINDOWS_PARALLELS_REPO_ROOT || "").trim(),
     nodeExe:
-      String(env.SYSTEMSCULPT_WINDOWS_PARALLELS_NODE_EXE || "").trim() ||
-      DEFAULT_WINDOWS_PARALLELS_NODE_EXE,
+      String(env.SYSTEMSCULPT_WINDOWS_NODE_EXE || "").trim() ||
+      DEFAULT_WINDOWS_NODE_EXE,
     apiKeyEnv: "",
     requireProvider: false,
   };
@@ -101,16 +98,6 @@ export function parseArgs(argv, env = process.env) {
     }
     if (arg === "--host") {
       options.sshHost = String(argv[index + 1] || "").trim() || options.sshHost;
-      index += 1;
-      continue;
-    }
-    if (arg === "--vm-name") {
-      options.vmName = String(argv[index + 1] || "").trim() || options.vmName;
-      index += 1;
-      continue;
-    }
-    if (arg === "--parallels-repo-root") {
-      options.parallelsRepoRoot = String(argv[index + 1] || "").trim() || options.parallelsRepoRoot;
       index += 1;
       continue;
     }
@@ -186,11 +173,9 @@ Run the Windows clean-install desktop acceptance lane from either:
   same no-focus bridge API from this machine
 
 Options:
-  --transport <parallels|ssh>  Windows transport. Default: ${DEFAULT_WINDOWS_TRANSPORT}
-  --vm-name <name>             Parallels VM name. Default: ${DEFAULT_WINDOWS_PARALLELS_VM_NAME}
-  --parallels-repo-root <path> Windows repo root inside the Parallels guest
-  --node-exe <path>            Windows Node executable for Parallels runs
-  --host <alias>               SSH host alias for the optional remote fallback
+  --transport <ssh>          Windows transport. Default: ${DEFAULT_WINDOWS_TRANSPORT}
+  --host <alias>             SSH host alias. Default: SYSTEMSCULPT_WINDOWS_SSH_HOST
+  --node-exe <path>          Windows Node executable. Default: ${DEFAULT_WINDOWS_NODE_EXE}
   --provider-id <id>         Optional provider id for Settings -> Providers parity
   --provider-model-id <id>   Optional provider model id or comma list
   --api-key-env <ENV_VAR>    Resolve the provider API key from a host env var
@@ -475,26 +460,6 @@ export async function runCleanInstallParity(options, env = process.env, dependen
     console.log(
       `[windows-clean-install-runner] Relaunched Windows Obsidian to refresh plugin version ${runtimeVersionRefresh.before.pluginVersion || "missing"} -> ${runtimeVersionRefresh.after.pluginVersion || "missing"}`
     );
-  }
-
-  if (connection.transport === "parallels") {
-    const stdout = await runWindowsNodeModuleRemotelyImpl(
-      path.resolve(process.cwd(), "testing/native/device/windows/clean-install-parity.mjs"),
-      {
-        ...connection,
-        artifactRoot: process.cwd(),
-        args: buildRemoteCleanInstallParityArgs({
-          ...options,
-          apiKey,
-        }),
-      }
-    );
-    const remoteResult = parseJsonObjectText(stdout, "the Windows clean-install parity result");
-    return {
-      ...remoteResult,
-      windowsHost,
-      runtimeVersionRefresh: summarizeRuntimeVersionRefresh(runtimeVersionRefresh),
-    };
   }
 
   const remoteRecord = await readLatestWindowsBridgeRecord({

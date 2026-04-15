@@ -100,8 +100,10 @@ function chatSetupSnippet(promptLiteral) {
   `;
 }
 
-function chatCompletionLoopSnippet() {
+function chatCompletionLoopSnippet(options = {}) {
+  const requireToolCall = options.requireToolCall === true;
   return `
+    const requireToolCall = ${requireToolCall ? "true" : "false"};
     const clickApprove = () => {
       const directButtons = Array.from(document.querySelectorAll('.systemsculpt-popup [data-button-text="Approve"]'));
       const directButton = directButtons[directButtons.length - 1] || null;
@@ -212,6 +214,17 @@ function chatCompletionLoopSnippet() {
       }
       if (
         stableNow &&
+        Date.now() - stableSince >= 1500 &&
+        (!requireToolCall || seenToolCalls.length > 0) &&
+        (turnSettled || Date.now() - stableSince >= 10000)
+      ) {
+        break;
+      }
+      if (
+        requireToolCall &&
+        turnSettled &&
+        stableNow &&
+        seenToolCalls.length === 0 &&
         Date.now() - stableSince >= 1500
       ) {
         break;
@@ -316,7 +329,7 @@ function buildFileReadExpression(fixtureDir) {
     "Then reply with exactly: ALPHA=ALPHA_20260311-194643; BETA=BETA_20260311-194643; SHARED=GAMMA_20260311-194643";
   return `(async () => {
     ${chatSetupSnippet(JSON.stringify(prompt))}
-    ${chatCompletionLoopSnippet()}
+    ${chatCompletionLoopSnippet({ requireToolCall: true })}
     return {
       lastAssistant: toText(lastAssistant?.content).trim(),
       messageCount: messages.length,
@@ -336,7 +349,7 @@ function buildFileWriteExpression(fixtureDir, outputFileName) {
     "then read that file back and reply with exactly: Confirmed: ALPHA=ALPHA_20260311-194643 BETA=BETA_20260311-194643 SHARED=GAMMA_20260311-194643";
   return `(async () => {
     ${chatSetupSnippet(JSON.stringify(prompt))}
-    ${chatCompletionLoopSnippet()}
+    ${chatCompletionLoopSnippet({ requireToolCall: true })}
     const outputPath = ${JSON.stringify(outputPath)};
     const outputFile = app.vault.getAbstractFileByPath(outputPath);
     const outputContents = outputFile ? await app.vault.read(outputFile) : null;
@@ -877,6 +890,13 @@ function normalizeAssistantAssertionText(value) {
   return normalized;
 }
 
+function assertSawToolCall(caseName, result) {
+  const toolCalls = Array.isArray(result?.seenToolCalls) ? result.seenToolCalls : [];
+  if (toolCalls.length < 1) {
+    throw new Error(`${caseName} expected at least one filesystem tool call.`);
+  }
+}
+
 export function assertCaseResult(caseName, options, result) {
   if (!result || typeof result !== "object") {
     throw new Error(`${caseName} returned no result payload.`);
@@ -892,26 +912,33 @@ export function assertCaseResult(caseName, options, result) {
   }
 
   if (caseName === "file-read") {
-    const expected =
-      "ALPHA=ALPHA_20260311-194643; BETA=BETA_20260311-194643; SHARED=GAMMA_20260311-194643";
+    const expectedParts = [
+      "ALPHA=ALPHA_20260311-194643",
+      "BETA=BETA_20260311-194643",
+      "SHARED=GAMMA_20260311-194643",
+    ];
     const actual = normalizeAssistantAssertionText(result.lastAssistant);
-    if (actual !== expected) {
-      throw new Error(`${caseName} expected exact fixture echo but got "${result.lastAssistant || ""}".`);
+    assertSawToolCall(caseName, result);
+    for (const part of expectedParts) {
+      if (!actual.includes(part)) {
+        throw new Error(`${caseName} expected fixture value "${part}" but got "${result.lastAssistant || ""}".`);
+      }
     }
     return;
   }
 
   if (caseName === "file-write") {
-    const expectedAssistant =
-      "Confirmed: ALPHA=ALPHA_20260311-194643 BETA=BETA_20260311-194643 SHARED=GAMMA_20260311-194643";
     const expectedLines = [
       "ALPHA=ALPHA_20260311-194643",
       "BETA=BETA_20260311-194643",
       "SHARED=GAMMA_20260311-194643",
     ];
     const actual = normalizeAssistantAssertionText(result.lastAssistant);
-    if (actual !== expectedAssistant) {
-      throw new Error(`${caseName} expected confirmed echo but got "${result.lastAssistant || ""}".`);
+    assertSawToolCall(caseName, result);
+    for (const line of expectedLines) {
+      if (!actual.includes(line)) {
+        throw new Error(`${caseName} expected confirmed value "${line}" but got "${result.lastAssistant || ""}".`);
+      }
     }
     if (!result.outputExists) {
       throw new Error(`${caseName} did not create ${result.outputPath || "the output file"}.`);

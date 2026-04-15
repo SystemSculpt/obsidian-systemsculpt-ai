@@ -1,7 +1,8 @@
 {
   "adbSerial": "emulator-5554",
+  "avdName": "SystemSculpt_Pixel_9_API_36_1",
   "vaultName": "SystemSculpt Android QA",
-  "vaultPath": "/sdcard/Documents/SystemSculptAndroidQA",
+  "vaultPath": "/sdcard/Android/data/md.obsidian/files/SystemSculpt Android QA",
   "pluginId": "systemsculpt-ai",
   "packageId": "md.obsidian"
 }

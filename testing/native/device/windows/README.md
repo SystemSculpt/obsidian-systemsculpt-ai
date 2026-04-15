@@ -3,7 +3,7 @@
 Windows uses the same desktop bridge runner as macOS desktop, but it now carries a different job:
 it is the canonical clean-install desktop lane.
 
-Use a real Windows host or VM when you need proof for behavior that the already-open macOS dev vault
+Use a real Windows host when you need proof for behavior that the already-open macOS dev vault
 does not prove by itself.
 
 ## Use this lane for
@@ -52,9 +52,9 @@ npm run test:native:windows:stress
 npm run test:native:windows:soak
 ```
 
-`npm run test:native:windows:install-node` is the first remote-machine setup step for the online Windows VM. It installs a user-scoped Node 20 runtime inside the Windows host so the bridge bootstrap and no-focus test commands can execute repo-local scripts remotely via SSH.
+`npm run test:native:windows:install-node` is the first remote-machine setup step for the Windows host. It installs a user-scoped Node 20 runtime inside Windows so the bridge bootstrap and no-focus test commands can execute repo-local scripts remotely via SSH.
 
-`npm run test:native:windows:prepare` now runs the repo's Windows bootstrap on the online Windows VM via SSH. The npm wrapper still forwards extra task args, so `npm run test:native:windows:prepare -- --launch` does the bootstrap plus Obsidian relaunch from the Mac.
+`npm run test:native:windows:prepare` now runs the repo's Windows bootstrap on the remote Windows host via SSH. The npm wrapper still forwards extra task args, so `npm run test:native:windows:prepare -- --launch` does the bootstrap plus Obsidian relaunch from the Mac.
 
 The printed bootstrap JSON now redacts sensitive seeded plugin fields such as
 license data, user identity, and API or access tokens. Future release prep can
@@ -69,11 +69,11 @@ vault.
 - a vault that is already open in Obsidian for the no-focus bridge phase
 
 For the provider-connected lane, set the provider env vars on the machine that runs the external runner.
-That is usually the Mac if you are attaching from the Mac into the Windows VM through the bridge workflow.
+That is usually the Mac if you are attaching from the Mac into the Windows host through the bridge workflow.
 The bridge writes the API key into the Windows plugin's auth storage, so the Windows Obsidian process itself does not need those env vars.
 
-If you are driving the Windows VM from the Mac during active development, keep the Windows plugin path under a Mac-side `mirrorTargets` entry with `"type": "windows-ssh"` in the ignored local `systemsculpt-sync.config.json`.
-That keeps the online Windows VM on the newest bundle through the normal dev watcher without polluting the Mac desktop runner's local `pluginTargets` list. Keep `"type": "windows-parallels"` only as the explicit fallback when you intentionally point the harness at a local Parallels VM instead.
+If you are driving the Windows host from the Mac during active development, keep the Windows plugin path under a Mac-side `mirrorTargets` entry with `"type": "windows-ssh"` in the ignored local `systemsculpt-sync.config.json`.
+That keeps the Windows host on the newest bundle through the normal dev watcher without polluting the Mac desktop runner's local `pluginTargets` list.
 
 ## Bootstrap rule
 
@@ -106,7 +106,7 @@ republish the bridge without foregrounding Obsidian.
 That split keeps Windows responsible for fresh-user truth while still reusing the same bridge
 automation layer as macOS once the runtime is open.
 
-`npm run check:release:windows` is the fast Windows release gate on the online Windows VM: it runs `build`, `test:native:windows:clean-install`, and `test:native:windows:baselines` in that order.
+`npm run check:release:windows` is the fast Windows release gate on the configured Windows host: it runs `build`, `test:native:windows:clean-install`, and `test:native:windows:baselines` in that order.
 
 `npm run check:release:native` treats steps 1 and 3 as mandatory release gates inside the broader native matrix.
 

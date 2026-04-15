@@ -171,8 +171,9 @@ test("formatGateCommand renders npm scripts with passthrough args", () => {
         "./systemsculpt-sync.android.json",
         "--headless",
         "--sync",
+        "--reset-vault",
       ],
     }),
-    "npm run test:native:android:debug:open -- --config ./systemsculpt-sync.android.json --headless --sync",
+    "npm run test:native:android:debug:open -- --config ./systemsculpt-sync.android.json --headless --sync --reset-vault",
   );
 });

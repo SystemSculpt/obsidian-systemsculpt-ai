@@ -37,8 +37,8 @@ npm run test:native:android:stress
 
 This forwards the Android WebView DevTools socket over `adb`.
 Before running the smoke matrix, use `npm run test:native:android:sync` or
-`npm run test:native:android:debug:open -- --sync`; Android sync now forces a
-production bundle unless you explicitly pass `--skip-build`.
+`npm run test:native:android:debug:open -- --sync --reset-vault`; Android sync
+now forces a production bundle unless you explicitly pass `--skip-build`.
 
 ### iOS
 

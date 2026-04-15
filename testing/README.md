@@ -13,7 +13,7 @@ The canonical test story is:
 
 The old separate-instance WDIO harness has been removed.
 Dev builds now sync through the shared config-driven pipeline: keep a local-only `systemsculpt-sync.config.json` in the repo root and the watcher will push every successful rebuild into its `pluginTargets` plus any `mirrorTargets`.
-Use a `"type": "windows-ssh"` mirror target when the online Windows VM should stay on the latest bundle without turning that VM path into a local desktop-automation selector on the Mac.
+Use a `"type": "windows-ssh"` mirror target when the Windows host should stay on the latest bundle without turning that remote path into a local desktop-automation selector on the Mac.
 
 ## Layers
 
@@ -38,7 +38,7 @@ This is the canonical desktop lane.
 - No renderer driving or app focus takeover
 - Already-running Obsidian only; the harness never launches the app
 - Localhost bridge owned by the plugin itself
-- Windows is the canonical clean-install desktop host: use a real Windows machine or VM to prove brand-new install, enable/load, and “no local Pi installed” behavior instead of inferring that from the already-open macOS dev vault
+- Windows is the canonical clean-install desktop host: use a real Windows host to prove brand-new install, enable/load, and “no local Pi installed” behavior instead of inferring that from the already-open macOS dev vault
 - Settings-file bootstrap and recovery: patch or touch the target `data.json`, let the running plugin's external-settings sync path reassert the bridge, and on unchanged-file touches expect the bridge to restart in place so wedged listeners can heal without focus takeover
 - The external desktop client now tracks discovery changes and can reconnect to a newer bridge record mid-run instead of treating that as a hard failure
 
@@ -63,7 +63,7 @@ node scripts/reload-local-obsidian-plugin.mjs
 `node scripts/reload-local-obsidian-plugin.mjs` is for an explicit in-place plugin reload after code sync.
 Routine attach-only validation should prefer `--no-reload` when the bridge is already live.
 `./run.sh --headless` is safe to invoke repeatedly; duplicate launches now reuse the existing watcher instead of stacking background sync loops.
-That wrapper now relies on the build-integrated sync path rather than a second polling loop, so local vault sync and Windows VM mirroring move in lockstep with each successful rebuild.
+That wrapper now relies on the build-integrated sync path rather than a second polling loop, so local vault sync and Windows host mirroring move in lockstep with each successful rebuild.
 `test:native:desktop:provider-connected` is the canonical settings-auth round-trip lane: it injects a provider API key through the bridge, waits for the model catalog to refresh, proves a provider-backed turn, clears auth again, and verifies the same path drops back to Providers guidance.
 `test:native:desktop:stress` now specifically churns repeated in-place plugin reloads and fails if the live desktop bridge comes back with duplicate plugin or embeddings status-bar items.
 `test:native:desktop:chatview-stress` now churns real chatview state on the same automation leaf, and `test:native:desktop:soak` combines both stress lanes for a longer unattended release candidate run.
@@ -82,10 +82,10 @@ Before ship, the required native matrix is:
 - macOS: `npm run test:native:desktop:baselines`
 - Windows clean install: `npm run test:native:windows:clean-install`
 - Windows desktop baselines: `npm run test:native:windows:baselines`
-- Android: `npm run test:native:android:debug:open -- --config ./systemsculpt-sync.android.json --headless --sync` then `npm run test:native:android:extended`
+- Android: `npm run test:native:android:debug:open -- --config ./systemsculpt-sync.android.json --headless --sync --reset-vault` then `npm run test:native:android:extended`
 - iOS: `npm run test:native:ios` when a paired physical device is available
 
-For the Windows-only release gate on the online Windows VM, run `npm run check:release:windows`.
+For the Windows-only release gate on the configured Windows SSH host, run `npm run check:release:windows`.
 
 `npm run check:release:native` is the canonical one-command wrapper for that matrix. It fails the release path if macOS, Windows, or Android are not green, and it only skips iOS when the host genuinely does not have a paired device plus WebKit adapter available.
 

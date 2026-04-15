@@ -223,8 +223,7 @@ export async function runInteractiveWindowsPowerShell(options = {}) {
     try {
       runPowerShellScript(schedulerScriptPath);
     } catch (error) {
-      // Parallels current-user exec already runs inside the logged-in Windows account,
-      // but that session may still lack permission to register scheduled tasks.
+      // A remote interactive session may still lack permission to register scheduled tasks.
       if (!shouldFallbackToDirectInteractiveRun(error)) {
         throw error;
       }

@@ -3,7 +3,7 @@
  * Pre-push native testing gate.
  *
  * Runs unit tests, builds the plugin, and optionally runs Android emulator
- * and Windows VM smoke tests. Exit code 0 = safe to push.
+ * and Windows smoke tests. Exit code 0 = safe to push.
  *
  * Usage:
  *   node testing/native/pre-push-check.mjs [--skip-android] [--skip-windows] [--skip-unit]
@@ -63,8 +63,12 @@ function hasAndroidDevice() {
 }
 
 function hasWindowsSSH() {
+  const host = String(process.env.SYSTEMSCULPT_WINDOWS_SSH_HOST || "").trim();
+  if (!host) {
+    return false;
+  }
   try {
-    execFileSync("ssh", ["-o", "ConnectTimeout=3", "tickblaze-kamatera", "echo ok"], {
+    execFileSync("ssh", ["-o", "ConnectTimeout=3", host, "echo ok"], {
       encoding: "utf8",
       timeout: 10000,
       stdio: "pipe",
@@ -87,7 +91,7 @@ step("Build plugin", () => npm("build"));
 if (!skipAndroid) {
   if (hasAndroidDevice()) {
     step("Android: sync plugin", () =>
-      npm("test:native:android:debug:open", "--", "--config", "./systemsculpt-sync.android.json", "--headless", "--sync", "--skip-open-apps")
+      npm("test:native:android:debug:open", "--", "--config", "./systemsculpt-sync.android.json", "--headless", "--sync", "--reset-vault", "--skip-open-apps")
     );
 
     step("Android: accept trust", () => {
@@ -111,7 +115,7 @@ if (!skipWindows) {
   if (hasWindowsSSH()) {
     step("Windows: desktop baselines", () => npm("test:native:windows:baselines"));
   } else {
-    log("SKIP: Windows VM (tickblaze-kamatera) not reachable");
+    log("SKIP: Windows SSH host not configured or not reachable");
     results.push({ name: "Windows desktop baselines", status: "SKIP", elapsed: "0" });
   }
 }

@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 import fs from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import net from "node:net";
 import { spawn, spawnSync } from "node:child_process";
@@ -10,16 +9,14 @@ import { build as buildWithEsbuild } from "esbuild";
 import { assertProductionPluginArtifacts, REQUIRED_PLUGIN_ARTIFACTS } from "../../../../scripts/plugin-artifacts.mjs";
 
 export const DEFAULT_WINDOWS_TRANSPORT = "ssh";
-export const DEFAULT_WINDOWS_SSH_HOST = "tickblaze-kamatera";
-export const DEFAULT_WINDOWS_PARALLELS_VM_NAME = "Windows 11";
-export const DEFAULT_WINDOWS_PARALLELS_SHARE_DRIVE = "Y:";
-export const DEFAULT_WINDOWS_PARALLELS_NODE_EXE = "node";
+export const DEFAULT_WINDOWS_SSH_HOST = "";
+export const DEFAULT_WINDOWS_NODE_EXE = "node";
 export const DEFAULT_WINDOWS_REMOTE_TEMP_DIR = "C:/Windows/Temp";
 export const DEFAULT_SSH_CONNECT_TIMEOUT_SECONDS = 10;
 export const DEFAULT_SSH_SERVER_ALIVE_INTERVAL_SECONDS = 15;
 export const DEFAULT_SSH_SERVER_ALIVE_COUNT_MAX = 120;
 export const DEFAULT_SSH_MAX_BUFFER_BYTES = 1024 * 1024 * 24;
-const SUPPORTED_WINDOWS_TRANSPORTS = new Set(["parallels", "ssh"]);
+const SUPPORTED_WINDOWS_TRANSPORTS = new Set(["ssh"]);
 
 function fail(message) {
   throw new Error(message);
@@ -33,10 +30,6 @@ function outputText(result) {
 
 function psSingleQuote(value) {
   return `'${String(value || "").replace(/'/g, "''")}'`;
-}
-
-function encodePowerShell(scriptContent) {
-  return Buffer.from(String(scriptContent || ""), "utf16le").toString("base64");
 }
 
 function normalizeWindowsPath(value) {
@@ -59,17 +52,6 @@ export function normalizeWindowsTransport(value) {
   );
 }
 
-export function resolveDefaultParallelsRepoRoot(localRepoRoot = process.cwd(), env = process.env) {
-  const explicitRoot = String(env.SYSTEMSCULPT_WINDOWS_PARALLELS_REPO_ROOT || "").trim();
-  if (explicitRoot) {
-    return normalizeWindowsPath(explicitRoot);
-  }
-  const shareDrive =
-    String(env.SYSTEMSCULPT_WINDOWS_PARALLELS_SHARE_DRIVE || "").trim() ||
-    DEFAULT_WINDOWS_PARALLELS_SHARE_DRIVE;
-  return normalizeWindowsPath(path.win32.join(shareDrive, path.basename(path.resolve(localRepoRoot))));
-}
-
 export function resolveWindowsTransportOptions(options = {}, env = process.env) {
   const localRepoRoot = path.resolve(String(options.localRepoRoot || options.artifactRoot || process.cwd()));
   const transport = normalizeWindowsTransport(
@@ -80,131 +62,11 @@ export function resolveWindowsTransportOptions(options = {}, env = process.env) 
     transport,
     localRepoRoot,
     sshHost: String(options.sshHost || env.SYSTEMSCULPT_WINDOWS_SSH_HOST || DEFAULT_WINDOWS_SSH_HOST).trim(),
-    vmName: String(options.vmName || env.SYSTEMSCULPT_WINDOWS_VM_NAME || "").trim() || DEFAULT_WINDOWS_PARALLELS_VM_NAME,
-    parallelsRepoRoot:
-      normalizeWindowsPath(
-        options.parallelsRepoRoot || env.SYSTEMSCULPT_WINDOWS_PARALLELS_REPO_ROOT || ""
-      ) || resolveDefaultParallelsRepoRoot(localRepoRoot, env),
     nodeExe:
       normalizeWindowsPath(
-        options.nodeExe || env.SYSTEMSCULPT_WINDOWS_PARALLELS_NODE_EXE || DEFAULT_WINDOWS_PARALLELS_NODE_EXE
-      ) || DEFAULT_WINDOWS_PARALLELS_NODE_EXE,
+        options.nodeExe || env.SYSTEMSCULPT_WINDOWS_NODE_EXE || DEFAULT_WINDOWS_NODE_EXE
+      ) || DEFAULT_WINDOWS_NODE_EXE,
   };
-}
-
-export function mapLocalPathToParallelsRepoPath(localPath, options = {}, env = process.env) {
-  const connection = resolveWindowsTransportOptions(options, env);
-  const resolvedLocalPath = path.resolve(String(localPath || ""));
-  const relativePath = path.relative(connection.localRepoRoot, resolvedLocalPath);
-  if (
-    !relativePath ||
-    relativePath === ".." ||
-    relativePath.startsWith(`..${path.sep}`) ||
-    path.isAbsolute(relativePath)
-  ) {
-    fail(
-      `Parallels Windows transport requires a repo-local path under ${connection.localRepoRoot}. Got ${resolvedLocalPath}.`
-    );
-  }
-  return normalizeWindowsPath(
-    path.win32.join(connection.parallelsRepoRoot.replace(/\//g, "\\"), ...relativePath.split(path.sep))
-  );
-}
-
-function resolveParallelsVmIpv4(options = {}) {
-  const connection = resolveWindowsTransportOptions(options, options.env || process.env);
-  const spawnSyncImpl = options.spawnSyncImpl || spawnSync;
-  const result = spawnSyncImpl("prlctl", ["list", "-f", "-i", connection.vmName], {
-    encoding: "utf8",
-    stdio: "pipe",
-  });
-
-  if (result?.error) {
-    throw result.error;
-  }
-  if ((result?.status ?? 1) !== 0) {
-    fail(outputText(result) || `Failed to query Parallels VM info for ${connection.vmName}.`);
-  }
-
-  const ipLine = String(result.stdout || "")
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .find((line) => line.startsWith("IP Addresses:"));
-  const ipValue = String(ipLine || "")
-    .replace(/^IP Addresses:\s*/u, "")
-    .split(",")
-    .map((entry) => entry.trim())
-    .find((entry) => /^\d{1,3}(?:\.\d{1,3}){3}$/u.test(entry));
-
-  if (!ipValue) {
-    fail(`Could not resolve an IPv4 address for Parallels VM ${connection.vmName}.`);
-  }
-  return ipValue;
-}
-
-function buildPrlctlExecArgs(options = {}, commandArgs = []) {
-  const connection = resolveWindowsTransportOptions(options, options.env || process.env);
-  return ["exec", connection.vmName, "--current-user", ...commandArgs];
-}
-
-function buildPowerShellCommandArgs(scriptContent) {
-  return [
-    "powershell.exe",
-    "-NoLogo",
-    "-NoProfile",
-    "-NonInteractive",
-    "-ExecutionPolicy",
-    "Bypass",
-    "-EncodedCommand",
-    encodePowerShell(scriptContent),
-  ];
-}
-
-function buildParallelsNodeForwardScript() {
-  return [
-    "const net = require('node:net');",
-    "const remoteHost = String(process.argv[1] || '127.0.0.1');",
-    "const remotePort = Number(process.argv[2]);",
-    "if (!Number.isFinite(remotePort) || remotePort <= 0) {",
-    "  console.error('FORWARD_ERROR=invalid remote port');",
-    "  process.exit(1);",
-    "}",
-    "const sockets = new Set();",
-    "const server = net.createServer((client) => {",
-    "  const upstream = net.connect({ host: remoteHost, port: remotePort });",
-    "  sockets.add(client);",
-    "  sockets.add(upstream);",
-    "  const cleanup = () => {",
-    "    sockets.delete(client);",
-    "    sockets.delete(upstream);",
-    "    if (!client.destroyed) client.destroy();",
-    "    if (!upstream.destroyed) upstream.destroy();",
-    "  };",
-    "  client.on('error', cleanup);",
-    "  upstream.on('error', cleanup);",
-    "  client.on('close', () => sockets.delete(client));",
-    "  upstream.on('close', () => sockets.delete(upstream));",
-    "  client.pipe(upstream);",
-    "  upstream.pipe(client);",
-    "});",
-    "server.on('error', (error) => {",
-    "  console.error(`FORWARD_ERROR=${error && error.message ? error.message : String(error)}`);",
-    "  process.exit(1);",
-    "});",
-    "server.listen(0, '0.0.0.0', () => {",
-    "  const address = server.address();",
-    "  const port = address && typeof address === 'object' ? address.port : 0;",
-    "  process.stdout.write(`FORWARD_PORT=${port}\\n`);",
-    "});",
-    "const closeAll = () => {",
-    "  for (const socket of sockets) {",
-    "    if (!socket.destroyed) socket.destroy();",
-    "  }",
-    "  server.close(() => process.exit(0));",
-    "};",
-    "process.on('SIGTERM', closeAll);",
-    "process.on('SIGINT', closeAll);",
-  ].join("\n");
 }
 
 export function toPowerShellArrayLiteral(values = []) {
@@ -276,32 +138,6 @@ export function buildRemoteWindowsNodeScript(options = {}) {
     "  if ($cleanupPath -and (Test-Path $cleanupPath)) {",
     "    Remove-Item $cleanupPath -Force -ErrorAction SilentlyContinue",
     "  }",
-    "}",
-    "exit $exitCode",
-    "",
-  ].join("\n");
-}
-
-function buildParallelsRemoteNodeScript(entryPath, options = {}) {
-  const connection = resolveWindowsTransportOptions(options, options.env || process.env);
-  const remoteEntryPath = mapLocalPathToParallelsRepoPath(entryPath, connection, options.env || process.env);
-  const args = Array.isArray(options.args) ? options.args : [];
-
-  return [
-    "$ErrorActionPreference = 'Stop'",
-    `$repoRoot = ${psSingleQuote(connection.parallelsRepoRoot)}`,
-    `$scriptPath = ${psSingleQuote(remoteEntryPath)}`,
-    `$nodeCommand = ${psSingleQuote(connection.nodeExe)}`,
-    `$scriptArgs = ${toPowerShellArrayLiteral(args)}`,
-    "if (!(Test-Path $repoRoot)) { throw ('Parallels repo root not found: ' + $repoRoot) }",
-    "if (!(Test-Path $scriptPath)) { throw ('Parallels entry path not found: ' + $scriptPath) }",
-    "$exitCode = 0",
-    "Push-Location $repoRoot",
-    "try {",
-    "  & $nodeCommand $scriptPath @scriptArgs",
-    "  $exitCode = if ($null -eq $LASTEXITCODE) { 0 } else { [int]$LASTEXITCODE }",
-    "} finally {",
-    "  Pop-Location",
     "}",
     "exit $exitCode",
     "",
@@ -463,122 +299,13 @@ export async function startSshLocalPortForward(options = {}) {
   };
 }
 
-async function waitForParallelsForward(child, timeoutMs = 15_000) {
-  return await new Promise((resolve, reject) => {
-    let stdout = "";
-    let stderr = "";
-    let settled = false;
-
-    const finish = (error, port) => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      clearTimeout(timer);
-      if (error) {
-        reject(error);
-        return;
-      }
-      resolve({ port, stdout: stdout.trim(), stderr: stderr.trim() });
-    };
-
-    const parseForwardPort = () => {
-      const match = stdout.match(/FORWARD_PORT=(\d+)/u);
-      if (match) {
-        finish(null, Number(match[1]));
-      }
-    };
-
-    child.stdout?.setEncoding("utf8");
-    child.stderr?.setEncoding("utf8");
-    child.stdout?.on("data", (chunk) => {
-      stdout += String(chunk || "");
-      parseForwardPort();
-    });
-    child.stderr?.on("data", (chunk) => {
-      stderr += String(chunk || "");
-    });
-    child.once("error", (error) => finish(error));
-    child.once("exit", (code, signal) => {
-      finish(
-        new Error(
-          [stderr.trim(), stdout.trim()]
-            .filter(Boolean)
-            .join("\n") ||
-            `Parallels port-forward exited before it became ready (code=${code ?? "null"}, signal=${signal ?? "null"}).`
-        )
-      );
-    });
-
-    const timer = setTimeout(() => {
-      finish(
-        new Error(
-          [stderr.trim(), stdout.trim()]
-            .filter(Boolean)
-            .join("\n") || "Timed out waiting for the Parallels port-forward to report its listening port."
-        )
-      );
-    }, timeoutMs);
-  });
-}
-
-async function startParallelsLocalPortForward(options = {}) {
-  const remotePort = Number(options.remotePort);
-  if (!Number.isFinite(remotePort) || remotePort <= 0) {
-    fail(`Invalid remote port for Parallels port-forward: ${String(options.remotePort)}`);
-  }
-
-  const connection = resolveWindowsTransportOptions(options, options.env || process.env);
-  const remoteHost = String(options.remoteHost || "127.0.0.1").trim() || "127.0.0.1";
-  const vmHost = String(options.vmHost || "").trim() || resolveParallelsVmIpv4(connection);
-  const prlctlProcess = spawn(
-    "prlctl",
-    buildPrlctlExecArgs(connection, [
-      connection.nodeExe,
-      "-e",
-      buildParallelsNodeForwardScript(),
-      remoteHost,
-      String(remotePort),
-    ]),
-    {
-      stdio: ["ignore", "pipe", "pipe"],
-    }
-  );
-
-  try {
-    const ready = await waitForParallelsForward(prlctlProcess, Number(options.timeoutMs) || 15_000);
-    await waitForForwardedPort(vmHost, ready.port, Number(options.timeoutMs) || 15_000);
-    return {
-      process: prlctlProcess,
-      host: vmHost,
-      port: ready.port,
-      localHost: vmHost,
-      localPort: ready.port,
-      remoteHost,
-      remotePort,
-      vmHost,
-      vmName: connection.vmName,
-      getStdout: () => ready.stdout,
-      getStderr: () => ready.stderr,
-    };
-  } catch (error) {
-    await stopChildProcess(prlctlProcess);
-    throw error;
-  }
-}
-
 export async function startWindowsLocalPortForward(options = {}, dependencies = {}) {
   const connection = {
     ...options,
     ...resolveWindowsTransportOptions(options, options.env || process.env),
   };
   const startSshLocalPortForwardImpl = dependencies.startSshLocalPortForwardImpl || startSshLocalPortForward;
-  const startParallelsLocalPortForwardImpl =
-    dependencies.startParallelsLocalPortForwardImpl || startParallelsLocalPortForward;
-  if (connection.transport === "ssh") {
-    return await startSshLocalPortForwardImpl(connection);
-  }
-  return await startParallelsLocalPortForwardImpl(connection);
+  return await startSshLocalPortForwardImpl(connection);
 }
 
 export function buildRemotePowerShellInvocation(options = {}) {
@@ -600,21 +327,21 @@ export function buildRemotePowerShellInvocation(options = {}) {
   ];
 }
 
-async function copyLocalFileToWindowsPath(localPath, remotePath, options = {}) {
-  const sshHost = String(options.sshHost || "").trim();
-  if (!sshHost) {
-    fail("SSH Windows transport requires --host or SYSTEMSCULPT_WINDOWS_SSH_HOST.");
+export async function runRemotePowerShellScript(script, options = {}) {
+  const remoteScript = String(script || "");
+  if (!remoteScript.trim()) {
+    fail("Missing remote PowerShell script.");
   }
 
+  const connection = resolveWindowsTransportOptions(options, options.env || process.env);
   const result = spawnSync(
-    "scp",
-    [
-      "-q",
-      ...buildSshOptionArgs(options),
-      localPath,
-      `${sshHost}:${remotePath}`,
-    ],
+    "ssh",
+    buildRemotePowerShellInvocation({
+      ...connection,
+      command: "powershell -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command -",
+    }),
     {
+      input: `${remoteScript}\n`,
       encoding: "utf8",
       stdio: "pipe",
       maxBuffer: maxBufferBytes(options),
@@ -625,71 +352,10 @@ async function copyLocalFileToWindowsPath(localPath, remotePath, options = {}) {
     throw result.error;
   }
   if ((result.status ?? 1) !== 0) {
-    fail(outputText(result) || "Failed to copy a file to the Windows host.");
-  }
-}
-
-export async function runRemotePowerShellScript(script, options = {}) {
-  const remoteScript = String(script || "");
-  if (!remoteScript.trim()) {
-    fail("Missing remote PowerShell script.");
+    fail(outputText(result) || `Windows SSH command failed with exit code ${result.status ?? "unknown"}.`);
   }
 
-  const connection = resolveWindowsTransportOptions(options, options.env || process.env);
-  if (connection.transport === "parallels") {
-    const result = spawnSync("prlctl", buildPrlctlExecArgs(connection, buildPowerShellCommandArgs(remoteScript)), {
-      encoding: "utf8",
-      stdio: "pipe",
-      maxBuffer: maxBufferBytes(options),
-    });
-
-    if (result.error) {
-      throw result.error;
-    }
-    if ((result.status ?? 1) !== 0) {
-      fail(outputText(result) || `Parallels PowerShell command failed with exit code ${result.status ?? "unknown"}.`);
-    }
-
-    return String(result.stdout || "");
-  }
-
-  const nonce = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-  const prefix = String(options.fileNamePrefix || "ss-remote-ps").trim() || "ss-remote-ps";
-  const localPath = path.join(os.tmpdir(), `${prefix}-${nonce}.ps1`);
-  const remoteTempDir =
-    String(options.remoteTempDir || DEFAULT_WINDOWS_REMOTE_TEMP_DIR).trim() ||
-    DEFAULT_WINDOWS_REMOTE_TEMP_DIR;
-  const remotePath = `${remoteTempDir.replace(/[\\/]+$/g, "")}/${prefix}-${nonce}.ps1`;
-  const remotePathLiteral = psSingleQuote(remotePath);
-  const remoteCommand = [
-    "powershell -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command",
-    psSingleQuote(
-      `$exitCode = 0; try { & ${remotePathLiteral}; $exitCode = $LASTEXITCODE } finally { if (Test-Path ${remotePathLiteral}) { Remove-Item ${remotePathLiteral} -Force -ErrorAction SilentlyContinue } }; exit $exitCode`
-    ),
-  ].join(" ");
-
-  await fs.writeFile(localPath, remoteScript, "utf8");
-
-  try {
-    await copyLocalFileToWindowsPath(localPath, remotePath, connection);
-
-    const result = spawnSync("ssh", buildRemotePowerShellInvocation({ ...connection, command: remoteCommand }), {
-      encoding: "utf8",
-      stdio: "pipe",
-      maxBuffer: maxBufferBytes(options),
-    });
-
-    if (result.error) {
-      throw result.error;
-    }
-    if ((result.status ?? 1) !== 0) {
-      fail(outputText(result) || `Windows SSH command failed with exit code ${result.status ?? "unknown"}.`);
-    }
-
-    return String(result.stdout || "");
-  } finally {
-    await fs.rm(localPath, { force: true }).catch(() => {});
-  }
+  return String(result.stdout || "");
 }
 
 export async function copySecretToWindowsTempFile(value, options = {}) {
@@ -701,58 +367,25 @@ export async function copySecretToWindowsTempFile(value, options = {}) {
   const connection = resolveWindowsTransportOptions(options, options.env || process.env);
   const nonce = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
   const prefix = String(options.fileNamePrefix || "ss-secret").trim() || "ss-secret";
-  const localPath = path.join(os.tmpdir(), `${prefix}-${nonce}.txt`);
   const remoteTempDir =
     String(options.remoteTempDir || DEFAULT_WINDOWS_REMOTE_TEMP_DIR).trim() ||
     DEFAULT_WINDOWS_REMOTE_TEMP_DIR;
   const remotePath = `${remoteTempDir.replace(/[\\/]+$/g, "")}/${prefix}-${nonce}.txt`;
 
-  if (connection.transport === "parallels") {
-    const remoteScript = [
-      "$ErrorActionPreference = 'Stop'",
-      `$targetPath = ${psSingleQuote(remotePath)}`,
-      `$contentBase64 = ${psSingleQuote(Buffer.from(secretValue, "utf8").toString("base64"))}`,
-      "New-Item -ItemType Directory -Path (Split-Path -Parent $targetPath) -Force | Out-Null",
-      "[System.IO.File]::WriteAllText(",
-      "  $targetPath,",
-      "  [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($contentBase64)),",
-      "  [System.Text.UTF8Encoding]::new($false)",
-      ")",
-      "",
-    ].join("\n");
-    await runRemotePowerShellScript(remoteScript, connection);
-    return remotePath;
-  }
-
-  await fs.writeFile(localPath, secretValue, "utf8");
-
-  try {
-    const result = spawnSync(
-      "scp",
-      [
-        "-q",
-        ...buildSshOptionArgs(connection),
-        localPath,
-        `${String(connection.sshHost || "").trim()}:${remotePath}`,
-      ],
-      {
-        encoding: "utf8",
-        stdio: "pipe",
-        maxBuffer: maxBufferBytes(options),
-      }
-    );
-
-    if (result.error) {
-      throw result.error;
-    }
-    if ((result.status ?? 1) !== 0) {
-      fail(outputText(result) || "Failed to copy a secret file to the Windows host.");
-    }
-
-    return remotePath;
-  } finally {
-    await fs.rm(localPath, { force: true }).catch(() => {});
-  }
+  const remoteScript = [
+    "$ErrorActionPreference = 'Stop'",
+    `$targetPath = ${psSingleQuote(remotePath)}`,
+    `$contentBase64 = ${psSingleQuote(Buffer.from(secretValue, "utf8").toString("base64"))}`,
+    "New-Item -ItemType Directory -Path (Split-Path -Parent $targetPath) -Force | Out-Null",
+    "[System.IO.File]::WriteAllText(",
+    "  $targetPath,",
+    "  [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($contentBase64)),",
+    "  [System.Text.UTF8Encoding]::new($false)",
+    ")",
+    "",
+  ].join("\n");
+  await runRemotePowerShellScript(remoteScript, connection);
+  return remotePath;
 }
 
 export async function buildWindowsNodeModuleWorkspace(entryPath, options = {}) {
@@ -807,16 +440,6 @@ export async function runWindowsNodeModuleRemotely(entryPath, options = {}, depe
   const buildWindowsNodeModuleWorkspaceImpl =
     dependencies.buildWindowsNodeModuleWorkspaceImpl || buildWindowsNodeModuleWorkspace;
 
-  if (connection.transport === "parallels") {
-    return await runRemotePowerShellScriptImpl(
-      buildParallelsRemoteNodeScript(entryPath, {
-        ...connection,
-        args: taskArgs,
-      }),
-      connection
-    );
-  }
-
   const workspace = await buildWindowsNodeModuleWorkspaceImpl(entryPath, connection);
   const script = buildRemoteWindowsNodeScript({
     entryRelativePath: workspace.entryRelativePath,
@@ -827,7 +450,7 @@ export async function runWindowsNodeModuleRemotely(entryPath, options = {}, depe
       : Array.isArray(options.cleanupPaths)
         ? options.cleanupPaths
         : [],
-    nodeCommand: "node",
+    nodeCommand: connection.nodeExe || DEFAULT_WINDOWS_NODE_EXE,
   });
 
   return await runRemotePowerShellScriptImpl(script, connection);
@@ -839,9 +462,7 @@ export function parseRemoteRunArgs(argv) {
     entryPath: "",
     transport: DEFAULT_WINDOWS_TRANSPORT,
     sshHost: "",
-    vmName: DEFAULT_WINDOWS_PARALLELS_VM_NAME,
-    parallelsRepoRoot: "",
-    nodeExe: DEFAULT_WINDOWS_PARALLELS_NODE_EXE,
+    nodeExe: DEFAULT_WINDOWS_NODE_EXE,
     taskArgs: [],
   };
 
@@ -869,16 +490,6 @@ export function parseRemoteRunArgs(argv) {
       index += 1;
       continue;
     }
-    if (arg === "--vm-name") {
-      options.vmName = String(args[index + 1] || "").trim() || options.vmName;
-      index += 1;
-      continue;
-    }
-    if (arg === "--parallels-repo-root") {
-      options.parallelsRepoRoot = normalizeWindowsPath(String(args[index + 1] || "").trim());
-      index += 1;
-      continue;
-    }
     if (arg === "--node-exe") {
       options.nodeExe = normalizeWindowsPath(String(args[index + 1] || "").trim()) || options.nodeExe;
       index += 1;
@@ -901,11 +512,9 @@ Send a repo-local JavaScript file to the Windows test host and execute it with t
 configured Windows transport.
 
 Options:
-  --transport <parallels|ssh>           Windows transport. Default: ${DEFAULT_WINDOWS_TRANSPORT}
-  --vm-name <name>                      Parallels VM name. Default: ${DEFAULT_WINDOWS_PARALLELS_VM_NAME}
-  --parallels-repo-root <path>          Windows repo root inside the Parallels guest
-  --node-exe <path>                     Windows Node executable for Parallels runs
-  --host <alias>                        SSH host alias for the optional remote fallback
+  --transport <ssh>                     Windows transport. Default: ${DEFAULT_WINDOWS_TRANSPORT}
+  --host <alias>                        SSH host alias. Default: SYSTEMSCULPT_WINDOWS_SSH_HOST
+  --node-exe <path>                     Windows Node executable. Default: ${DEFAULT_WINDOWS_NODE_EXE}
 `);
 }
 
@@ -922,8 +531,6 @@ async function main() {
   const stdout = await runWindowsNodeModuleRemotely(options.entryPath, {
     transport: options.transport,
     sshHost: options.sshHost,
-    vmName: options.vmName,
-    parallelsRepoRoot: options.parallelsRepoRoot,
     nodeExe: options.nodeExe,
     args: options.taskArgs,
   });

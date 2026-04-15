@@ -8,7 +8,7 @@ export const DEFAULT_ANDROID_SERIAL = "emulator-5554";
 export const DEFAULT_ANDROID_PACKAGE = "md.obsidian";
 export const DEFAULT_REPEAT = 1;
 export const DEFAULT_PAUSE_MS = 1000;
-export const DEFAULT_WEB_FETCH_URL = "https://www.wikipedia.org/";
+export const DEFAULT_WEB_FETCH_URL = "https://www.rfc-editor.org/rfc/rfc9110.txt";
 export const DEFAULT_YOUTUBE_URL = "https://www.youtube.com/watch?v=nDLb8_wgX50";
 
 export const CORE_CASES = [

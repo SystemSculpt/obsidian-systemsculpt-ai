@@ -37,6 +37,7 @@ export const REQUIRED_NATIVE_RELEASE_GATES = Object.freeze([
       "./systemsculpt-sync.android.json",
       "--headless",
       "--sync",
+      "--reset-vault",
     ],
   },
   {

@@ -24,6 +24,7 @@ Expected stack on this Mac:
 ```bash
 npm run test:native:android:sync -- --config ./systemsculpt-sync.android.json
 npm run test:native:android:debug:open -- --config ./systemsculpt-sync.android.json --sync
+npm run test:native:android:debug:open -- --config ./systemsculpt-sync.android.json --headless --sync --reset-vault
 npm run test:native:android:logcat -- --serial emulator-5554
 npm run test:native:android
 npm run test:native:android:extended
@@ -46,14 +47,14 @@ Example:
 
 ```bash
 npm run build
-npm run test:native:android:debug:open -- --config ./systemsculpt-sync.android.json --sync
+npm run test:native:android:debug:open -- --config ./systemsculpt-sync.android.json --sync --reset-vault
 npm run test:native:android:extended
 ```
 
 No-focus background lane:
 
 ```bash
-npm run test:native:android:debug:open -- --config ./systemsculpt-sync.android.json --avd SystemSculpt_Pixel_9_API_36_1 --headless --sync
+npm run test:native:android:debug:open -- --config ./systemsculpt-sync.android.json --headless --sync --reset-vault
 npm run test:native:android:extended
 ```
 
@@ -66,10 +67,16 @@ available in the repo environment, including `.env.local`.
 
 ## Vault contract
 
-Use a dedicated shared-storage vault and keep its sync config local in:
+Use a dedicated app-data vault and keep its sync config local in:
 
 ```text
 ./systemsculpt-sync.android.json
 ```
 
 That file stays ignored and machine-specific.
+
+The local config can set `avdName` so the helper boots the emulator automatically
+when no Android device is already attached. Keep the vault under
+`/sdcard/Android/data/md.obsidian/files/...`; the broader `/sdcard/Documents`
+path is convenient for manual browsing but has proved less reliable for
+repeatable headless cleanup on emulators.
