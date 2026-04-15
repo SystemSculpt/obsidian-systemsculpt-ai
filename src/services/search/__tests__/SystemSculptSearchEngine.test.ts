@@ -72,6 +72,28 @@ describe("SystemSculptSearchEngine lexical mode", () => {
     expect(app.vault.cachedRead).not.toHaveBeenCalled();
   });
 
+  it("returns only the requested number of recent files", async () => {
+    const { app } = buildFixture();
+    const plugin = makePlugin(app);
+    const engine = new SystemSculptSearchEngine(app as any, plugin);
+
+    const recents = await engine.getRecent(2);
+
+    expect(recents.map((r) => r.path)).toEqual(["notes/fresh-orange.md", "notes/orange-juice.md"]);
+    expect(app.vault.cachedRead).not.toHaveBeenCalled();
+  });
+
+  it("hydrates previews only for requested recent paths", async () => {
+    const { app } = buildFixture();
+    const plugin = makePlugin(app);
+    const engine = new SystemSculptSearchEngine(app as any, plugin);
+
+    const previews = await engine.getRecentPreviews(["notes/fresh-orange.md"]);
+
+    expect(app.vault.cachedRead).toHaveBeenCalledTimes(1);
+    expect(previews.get("notes/fresh-orange.md")).toContain("Orange harvest note");
+  });
+
   it("prefers full term coverage over recent one-term matches", async () => {
     const { app } = buildFixture();
     const plugin = makePlugin(app);

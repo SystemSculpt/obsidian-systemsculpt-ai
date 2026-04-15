@@ -8,44 +8,31 @@ import type {
 } from "../services/search/SystemSculptSearchEngine";
 
 export class SystemSculptSearchModal extends StandardModal {
-  private plugin: SystemSculptPlugin;
   private engine: SystemSculptSearchEngine;
   private searchInputEl: HTMLInputElement | null = null;
   private listEl: HTMLElement | null = null;
-  private metricsEl: HTMLElement | null = null;
-  private stateEl: HTMLElement | null = null;
-  private embeddings: SearchResponse["embeddings"] | null = null;
 
   private readonly SEARCH_LIMIT = 80;
   private currentQuery = "";
   private debounceHandle: number | null = null;
+  private recentPreviewHandle: number | null = null;
   private querySerial = 0;
-  private isModalOpen = false;
 
   constructor(plugin: SystemSculptPlugin) {
     super(plugin.app);
-    this.plugin = plugin;
     this.engine = plugin.getSearchEngine();
-    this.embeddings = this.engine.getEmbeddingsIndicator();
     this.setSize("fullwidth");
   }
 
   onOpen() {
     super.onOpen();
-    this.isModalOpen = true;
     this.contentEl.addClass("ss-search__content");
 
-    this.addTitle(
-      "SystemSculpt Search",
-      "Search your notes. Embeddings join automatically when they are ready."
-    );
+    this.addTitle("SystemSculpt Search");
 
     const shell = this.contentEl.createDiv({ cls: "ss-search" });
 
     this.searchInputEl = this.buildSearchBar(shell, "Search your vault...", (value) => this.onSearchChange(value));
-
-    this.stateEl = shell.createDiv({ cls: "ss-search__state" });
-    this.metricsEl = shell.createDiv({ cls: "ss-search__metrics" });
 
     this.listEl = shell.createDiv({ cls: "ss-modal__list ss-search__list" });
 
@@ -54,16 +41,18 @@ export class SystemSculptSearchModal extends StandardModal {
 
     setTimeout(() => this.searchInputEl?.focus(), 0);
     void this.renderRecents();
-    void this.refreshRecentsAfterWarmIndex();
   }
 
   onClose() {
-    this.isModalOpen = false;
+    this.querySerial += 1;
+    this.cancelRecentPreviewHydration();
     if (this.debounceHandle) {
       window.clearTimeout(this.debounceHandle);
       this.debounceHandle = null;
     }
     super.onClose();
+    this.searchInputEl = null;
+    this.listEl = null;
   }
 
   private buildSearchBar(parent: HTMLElement, placeholder: string, onInput: (value: string) => void): HTMLInputElement {
@@ -98,6 +87,9 @@ export class SystemSculptSearchModal extends StandardModal {
 
   private onSearchChange(query: string) {
     this.currentQuery = query;
+    if (query.trim()) {
+      this.cancelRecentPreviewHydration();
+    }
     if (this.debounceHandle) {
       window.clearTimeout(this.debounceHandle);
     }
@@ -116,6 +108,7 @@ export class SystemSculptSearchModal extends StandardModal {
       return;
     }
 
+    this.cancelRecentPreviewHydration();
     this.renderLoading("Searching...");
 
     const response = await this.engine.search(trimmed, {
@@ -129,36 +122,15 @@ export class SystemSculptSearchModal extends StandardModal {
     this.renderResponse(response);
   }
 
-  private async renderRecents(options: { showLoading?: boolean } = {}) {
+  private async renderRecents() {
     const serial = ++this.querySerial;
-    if (options.showLoading !== false) {
-      this.renderLoading("Opening recent notes...");
-    }
     const recents = await this.engine.getRecent(25);
     if (serial < this.querySerial) return;
-    const indicator = this.engine.getEmbeddingsIndicator();
-    this.embeddings = indicator;
     this.renderResults(recents);
-    this.renderMetrics({
-      totalMs: 0,
-      indexedCount: recents.length,
-      inspectedCount: recents.length,
-      mode: "smart",
-      usedEmbeddings: false,
-    });
-    this.renderState(this.recentsStateText(indicator));
-  }
-
-  private async refreshRecentsAfterWarmIndex() {
-    await this.engine.warmIndex();
-    if (!this.isModalOpen || this.currentQuery.trim().length > 0) return;
-    await this.renderRecents({ showLoading: false });
+    this.scheduleRecentPreviewHydration(recents, serial);
   }
 
   private renderResponse(response: SearchResponse) {
-    this.embeddings = response.embeddings;
-    this.renderMetrics(response.stats);
-    this.renderState(this.stateTextFor(response));
     this.renderResults(response.results);
   }
 
@@ -208,6 +180,42 @@ export class SystemSculptSearchModal extends StandardModal {
     this.makeDraggable(results);
   }
 
+  private scheduleRecentPreviewHydration(results: SearchHit[], serial: number) {
+    this.cancelRecentPreviewHydration();
+    const paths = results
+      .filter((result) => result.origin === "recent" && !result.excerpt)
+      .map((result) => result.path);
+    if (paths.length === 0) return;
+
+    this.recentPreviewHandle = window.setTimeout(() => {
+      this.recentPreviewHandle = null;
+      void this.hydrateRecentPreviews(paths, serial);
+    }, 0);
+  }
+
+  private cancelRecentPreviewHydration() {
+    if (this.recentPreviewHandle) {
+      window.clearTimeout(this.recentPreviewHandle);
+      this.recentPreviewHandle = null;
+    }
+  }
+
+  private async hydrateRecentPreviews(paths: string[], serial: number) {
+    const previews = await this.engine.getRecentPreviews(paths, 25);
+    if (serial !== this.querySerial || this.currentQuery.trim().length > 0 || !this.listEl) {
+      return;
+    }
+
+    const items = Array.from(this.listEl.querySelectorAll<HTMLElement>(".ss-search__item"));
+    items.forEach((item) => {
+      const path = item.getAttribute("data-path");
+      if (!path || item.querySelector(".ss-search__excerpt")) return;
+      const preview = previews.get(path);
+      if (!preview) return;
+      item.createDiv({ cls: "ss-search__excerpt", text: preview });
+    });
+  }
+
   private renderLoading(text: string) {
     if (!this.listEl) return;
     this.listEl.empty();
@@ -220,62 +228,6 @@ export class SystemSculptSearchModal extends StandardModal {
     this.listEl.empty();
     const empty = this.listEl.createDiv("ss-modal__empty-state ss-search__empty");
     empty.createDiv({ text });
-  }
-
-  private renderMetrics(stats: Partial<SearchResponse["stats"]>) {
-    if (!this.metricsEl) return;
-    const parts: string[] = [];
-    if (typeof stats.totalMs === "number") parts.push(`Total ${Math.round(stats.totalMs)} ms`);
-    if (typeof stats.lexMs === "number") parts.push(`Notes ${Math.round(stats.lexMs)} ms`);
-    if (typeof stats.semMs === "number") parts.push(`Embeddings ${Math.round(stats.semMs)} ms`);
-    if (typeof stats.indexMs === "number") parts.push(`Index ${Math.round(stats.indexMs)} ms`);
-    if (typeof stats.indexedCount === "number") parts.push(`${stats.indexedCount} indexed`);
-    if (typeof stats.inspectedCount === "number") parts.push(`${stats.inspectedCount} checked`);
-
-    this.metricsEl.setText(parts.join(" • "));
-  }
-
-  private renderState(message: string) {
-    if (!this.stateEl) return;
-    this.stateEl.setText(message);
-  }
-
-  private stateTextFor(response: SearchResponse): string {
-    const usedEmbeddings = response.stats.usedEmbeddings;
-    const emb = response.embeddings;
-    if (usedEmbeddings) {
-      return "Searching notes and embeddings.";
-    }
-    if (!emb.enabled) {
-      return "Searching notes. Embeddings are off.";
-    }
-    if (!emb.ready || !emb.available) {
-      return emb.reason ? `Searching notes. Embeddings unavailable: ${emb.reason}` : "Searching notes. Embeddings are still preparing.";
-    }
-    const processed = emb.processed ?? 0;
-    const total = emb.total ?? 0;
-    if (total > 0 && processed / total < 0.75) {
-      return "Searching notes. Embeddings will join when more of the vault is indexed.";
-    }
-    if (response.stats.embeddingsEligible) {
-      return "Searching notes. Embeddings checked in, but note matches won.";
-    }
-    return "Searching notes.";
-  }
-
-  private recentsStateText(indicator: SearchResponse["embeddings"]): string {
-    if (!indicator.enabled) {
-      return "Recent notes. Search will use note text.";
-    }
-    const processed = indicator.processed ?? 0;
-    const total = indicator.total ?? 0;
-    if (!indicator.ready || !indicator.available) {
-      return "Recent notes. Embeddings are still preparing.";
-    }
-    if (total > 0 && processed / total < 0.75) {
-      return "Recent notes. Embeddings will join after more of the vault is indexed.";
-    }
-    return "Recent notes. Embeddings are ready for detailed searches.";
   }
 
   private formatUpdated(ts?: number): string {

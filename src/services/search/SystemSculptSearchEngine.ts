@@ -74,7 +74,7 @@ export class SystemSculptSearchEngine {
   private index: Map<string, IndexedDocument> = new Map();
   private tokenIndex: Map<string, Set<string>> = new Map();
   private tokenVocabulary: Set<string> = new Set();
-  private recentHitsCache: SearchHit[] | null = null;
+  private recentHitsCache: { limit: number; hits: SearchHit[] } | null = null;
   private indexPromise: Promise<void> | null = null;
   private dirtyPaths: Set<string> = new Set();
   private eventRefs: EventRef[] = [];
@@ -83,6 +83,7 @@ export class SystemSculptSearchEngine {
   private readonly PREVIEW_CHARS = 240;
   private readonly CANDIDATE_LIMIT = 320;
   private readonly CONTENT_CONCURRENCY = 10;
+  private readonly RECENT_PREVIEW_CONCURRENCY = 2;
   private readonly SEMANTIC_TIMEOUT_MS = 1500;
   private lastLexicalInspect = 0;
 
@@ -173,10 +174,11 @@ export class SystemSculptSearchEngine {
    * Recent files snapshot for empty queries
    */
   async getRecent(limit = 25): Promise<SearchHit[]> {
-    if (!this.recentHitsCache) {
-      this.recentHitsCache = this.getEligibleFiles()
-        .sort((a, b) => (b.stat?.mtime || 0) - (a.stat?.mtime || 0))
-        .map((file) => {
+    if (!this.recentHitsCache || this.recentHitsCache.limit < limit) {
+      const recentFiles = this.selectRecentFiles(this.getEligibleFiles(), limit);
+      this.recentHitsCache = {
+        limit,
+        hits: recentFiles.map((file) => {
           const indexed = this.index.get(file.path);
           return {
             path: file.path,
@@ -187,10 +189,33 @@ export class SystemSculptSearchEngine {
             updatedAt: file.stat?.mtime || 0,
             size: file.stat?.size || 0,
           };
-        });
+        }),
+      };
     }
 
-    return this.recentHitsCache.slice(0, limit);
+    return this.recentHitsCache.hits.slice(0, limit);
+  }
+
+  async getRecentPreviews(paths: string[], limit = 25): Promise<Map<string, string>> {
+    const previews = new Map<string, string>();
+    const uniquePaths = Array.from(new Set(paths)).slice(0, limit);
+    const tasks = uniquePaths.map((path) => async () => {
+      const file = this.app.vault.getAbstractFileByPath(path);
+      if (!(file instanceof TFile) || !this.isEligible(file)) return;
+
+      try {
+        const content = await this.safeRead(file);
+        const preview = this.buildPreviewFromText(this.getIndexText(file, content));
+        if (preview) {
+          previews.set(path, preview);
+        }
+      } catch {
+        // Skip failed preview hydration.
+      }
+    });
+
+    await this.runLimited(tasks, this.RECENT_PREVIEW_CONCURRENCY);
+    return previews;
   }
 
   async warmIndex(): Promise<void> {
@@ -359,6 +384,13 @@ export class SystemSculptSearchEngine {
     const cached = this.plugin.vaultFileCache?.getAllFiles?.();
     const files = Array.isArray(cached) ? cached : this.app.vault.getFiles();
     return files.filter((f) => this.isEligible(f));
+  }
+
+  private selectRecentFiles(files: TFile[], limit: number): TFile[] {
+    if (limit <= 0) return [];
+    return files
+      .sort((a, b) => (b.stat?.mtime || 0) - (a.stat?.mtime || 0))
+      .slice(0, limit);
   }
 
   private isEligible(file: TFile): boolean {

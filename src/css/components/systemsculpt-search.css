@@ -77,13 +77,6 @@
   color: var(--text-normal);
 }
 
-.ss-search__metrics,
-.ss-search__state {
-  color: var(--text-muted);
-  font-size: 12px;
-  padding: 0 2px;
-}
-
 /* Results */
 .ss-search__list {
   display: flex;

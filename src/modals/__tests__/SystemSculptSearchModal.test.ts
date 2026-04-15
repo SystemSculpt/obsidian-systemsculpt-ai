@@ -3,7 +3,7 @@
  */
 import { App } from "obsidian";
 import { SystemSculptSearchModal } from "../SystemSculptSearchModal";
-import { SearchResponse, EmbeddingsIndicator } from "../../services/search/SystemSculptSearchEngine";
+import { SearchResponse } from "../../services/search/SystemSculptSearchEngine";
 
 const createMockSearchResponse = (overrides: Partial<SearchResponse> = {}): SearchResponse => ({
   results: [
@@ -40,6 +40,7 @@ const createMockSearchResponse = (overrides: Partial<SearchResponse> = {}): Sear
 const createMockEngine = (overrides: Record<string, any> = {}) => ({
   search: jest.fn().mockResolvedValue(createMockSearchResponse()),
   warmIndex: jest.fn().mockResolvedValue(undefined),
+  getRecentPreviews: jest.fn().mockResolvedValue(new Map()),
   getRecent: jest.fn().mockResolvedValue([
     { path: "notes/recent.md", title: "Recent Note", score: 1, origin: "recent" as const, updatedAt: Date.now() },
   ]),
@@ -49,7 +50,7 @@ const createMockEngine = (overrides: Record<string, any> = {}) => ({
     available: true,
     processed: 80,
     total: 100,
-  } as EmbeddingsIndicator),
+  }),
   ...overrides,
 });
 
@@ -84,8 +85,8 @@ describe("SystemSculptSearchModal", () => {
       expect(plugin.getSearchEngine).toHaveBeenCalled();
     });
 
-    it("fetches initial embeddings indicator", () => {
-      expect(plugin._testEngine.getEmbeddingsIndicator).toHaveBeenCalled();
+    it("does not check backend readiness during construction", () => {
+      expect(plugin._testEngine.getEmbeddingsIndicator).not.toHaveBeenCalled();
     });
   });
 
@@ -100,14 +101,14 @@ describe("SystemSculptSearchModal", () => {
       expect((modal as any).listEl).not.toBeNull();
     });
 
-    it("creates metrics element", () => {
+    it("does not create metrics chrome", () => {
       modal.onOpen();
-      expect((modal as any).metricsEl).not.toBeNull();
+      expect(modal.contentEl.querySelector(".ss-search__metrics")).toBeNull();
     });
 
-    it("creates state element", () => {
+    it("does not create backend state chrome", () => {
       modal.onOpen();
-      expect((modal as any).stateEl).not.toBeNull();
+      expect(modal.contentEl.querySelector(".ss-search__state")).toBeNull();
     });
 
     it("does not render mode or sort controls", () => {
@@ -123,49 +124,35 @@ describe("SystemSculptSearchModal", () => {
       expect(plugin._testEngine.getRecent).toHaveBeenCalledWith(25);
     });
 
-    it("warms the content index in the background", () => {
+    it("does not warm the content index on open", () => {
       modal.onOpen();
-      expect(plugin._testEngine.warmIndex).toHaveBeenCalled();
+      expect(plugin._testEngine.warmIndex).not.toHaveBeenCalled();
     });
 
-    it("refreshes recent previews after the background index warms", async () => {
-      let resolveWarmIndex!: () => void;
-      const warmIndex = new Promise<void>((resolve) => {
-        resolveWarmIndex = resolve;
-      });
+    it("does not check backend readiness on open", () => {
+      modal.onOpen();
+      expect(plugin._testEngine.getEmbeddingsIndicator).not.toHaveBeenCalled();
+    });
 
+    it("hydrates only visible recent previews after the initial render", async () => {
       plugin = createMockPlugin({
-        warmIndex: jest.fn().mockReturnValue(warmIndex),
-        getRecent: jest.fn()
-          .mockResolvedValueOnce([
-            { path: "notes/recent.md", title: "Recent Note", score: 1, origin: "recent" as const, updatedAt: Date.now() },
-          ])
-          .mockResolvedValueOnce([
-            {
-              path: "notes/recent.md",
-              title: "Recent Note",
-              excerpt: "Indexed preview text",
-              score: 1,
-              origin: "recent" as const,
-              updatedAt: Date.now(),
-            },
-          ]),
+        getRecentPreviews: jest.fn().mockResolvedValue(new Map([["notes/recent.md", "Recent note opening text"]])),
       });
       modal = new SystemSculptSearchModal(plugin);
 
       modal.onOpen();
       await Promise.resolve();
 
-      expect(plugin._testEngine.getRecent).toHaveBeenCalledTimes(1);
       expect((modal as any).listEl?.textContent).toContain("Recent Note");
-      expect((modal as any).listEl?.textContent).not.toContain("No preview available");
+      expect((modal as any).listEl?.textContent).not.toContain("Recent note opening text");
 
-      resolveWarmIndex();
+      jest.runOnlyPendingTimers();
       await Promise.resolve();
       await Promise.resolve();
 
-      expect(plugin._testEngine.getRecent).toHaveBeenCalledTimes(2);
-      expect((modal as any).listEl?.textContent).toContain("Indexed preview text");
+      expect(plugin._testEngine.getRecentPreviews).toHaveBeenCalledWith(["notes/recent.md"], 25);
+      expect((modal as any).listEl?.textContent).toContain("Recent note opening text");
+      expect(plugin._testEngine.warmIndex).not.toHaveBeenCalled();
     });
   });
 
@@ -254,65 +241,6 @@ describe("SystemSculptSearchModal", () => {
         sort: "relevance",
         limit: 80,
       });
-    });
-  });
-
-  describe("state messages", () => {
-    it("shows the embeddings message when embeddings contributed", async () => {
-      modal.onOpen();
-
-      const response = createMockSearchResponse({
-        stats: { ...createMockSearchResponse().stats, usedEmbeddings: true },
-      });
-      plugin._testEngine.search.mockResolvedValue(response);
-
-      await (modal as any).executeSearch("test");
-
-      const stateText = (modal as any).stateTextFor(response);
-      expect(stateText).toBe("Searching notes and embeddings.");
-    });
-
-    it("shows 'Embeddings off in settings' when disabled", () => {
-      modal.onOpen();
-
-      const response = createMockSearchResponse({
-        stats: { ...createMockSearchResponse().stats, usedEmbeddings: false },
-        embeddings: { enabled: false, ready: false, available: false, processed: 0, total: 0 },
-      });
-
-      const stateText = (modal as any).stateTextFor(response);
-      expect(stateText).toBe("Searching notes. Embeddings are off.");
-    });
-
-    it("shows embeddings unavailable with reason when not available", () => {
-      modal.onOpen();
-
-      const response = createMockSearchResponse({
-        stats: { ...createMockSearchResponse().stats, usedEmbeddings: false },
-        embeddings: {
-          enabled: true,
-          ready: true,
-          available: false,
-          reason: "No vectors generated yet",
-          processed: 0,
-          total: 100,
-        },
-      });
-
-      const stateText = (modal as any).stateTextFor(response);
-      expect(stateText).toBe("Searching notes. Embeddings unavailable: No vectors generated yet");
-    });
-
-    it("shows progress message before embeddings are sufficiently indexed", () => {
-      modal.onOpen();
-
-      const response = createMockSearchResponse({
-        stats: { ...createMockSearchResponse().stats, usedEmbeddings: false },
-        embeddings: { enabled: true, ready: true, available: true, processed: 60, total: 100 },
-      });
-
-      const stateText = (modal as any).stateTextFor(response);
-      expect(stateText).toBe("Searching notes. Embeddings will join when more of the vault is indexed.");
     });
   });
 
@@ -416,64 +344,6 @@ describe("SystemSculptSearchModal", () => {
       const text = "Machine Learning Guide";
       const result = (modal as any).getHighlightedText(text, "xyz");
       expect(result).toBe(text);
-    });
-  });
-
-  describe("metrics display", () => {
-    it("renders totalMs metric", async () => {
-      modal.onOpen();
-
-      const response = createMockSearchResponse({
-        stats: { ...createMockSearchResponse().stats, totalMs: 42 },
-      });
-      plugin._testEngine.search.mockResolvedValue(response);
-
-      await (modal as any).executeSearch("test");
-
-      const metricsEl = (modal as any).metricsEl;
-      expect(metricsEl?.textContent).toContain("Total 42 ms");
-    });
-
-    it("renders notes metric", async () => {
-      modal.onOpen();
-
-      const response = createMockSearchResponse({
-        stats: { ...createMockSearchResponse().stats, lexMs: 15 },
-      });
-      plugin._testEngine.search.mockResolvedValue(response);
-
-      await (modal as any).executeSearch("test");
-
-      const metricsEl = (modal as any).metricsEl;
-      expect(metricsEl?.textContent).toContain("Notes 15 ms");
-    });
-
-    it("renders embeddings metric when present", async () => {
-      modal.onOpen();
-
-      const response = createMockSearchResponse({
-        stats: { ...createMockSearchResponse().stats, semMs: 30 },
-      });
-      plugin._testEngine.search.mockResolvedValue(response);
-
-      await (modal as any).executeSearch("test");
-
-      const metricsEl = (modal as any).metricsEl;
-      expect(metricsEl?.textContent).toContain("Embeddings 30 ms");
-    });
-
-    it("renders indexed count", async () => {
-      modal.onOpen();
-
-      const response = createMockSearchResponse({
-        stats: { ...createMockSearchResponse().stats, indexedCount: 250 },
-      });
-      plugin._testEngine.search.mockResolvedValue(response);
-
-      await (modal as any).executeSearch("test");
-
-      const metricsEl = (modal as any).metricsEl;
-      expect(metricsEl?.textContent).toContain("250 indexed");
     });
   });
 
