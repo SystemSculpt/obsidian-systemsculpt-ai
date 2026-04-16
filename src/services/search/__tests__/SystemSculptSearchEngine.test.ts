@@ -216,6 +216,72 @@ describe("SystemSculptSearchEngine lexical mode", () => {
     jest.useRealTimers();
   });
 
+  it("bootstraps the embeddings manager on smart searches so lazy autostart still runs semantic retrieval", async () => {
+    const { app } = buildFixture();
+    const plugin = makePlugin(app);
+    plugin.settings.embeddingsEnabled = true;
+    const getOrCreateEmbeddingsManager = jest.fn(() => {
+      plugin.embeddingsManager = {
+        searchSimilar: jest.fn(() => Promise.resolve([])),
+        isReady: () => true,
+        hasAnyEmbeddings: () => false,
+        getStats: () => ({ total: 0, processed: 0, present: 0, needsProcessing: 0 }),
+      };
+      return plugin.embeddingsManager;
+    });
+    plugin.getOrCreateEmbeddingsManager = getOrCreateEmbeddingsManager;
+
+    const engine = new SystemSculptSearchEngine(app as any, plugin);
+
+    // First warm the full content index via a lexical search so smart mode
+    // bypasses the metadata fast path (which never reaches the embeddings
+    // bootstrap) and runs the full search path where the bug lives.
+    await engine.search("orange", { mode: "lexical", limit: 10 });
+    await engine.search("orange", { mode: "smart", limit: 10 });
+    expect(getOrCreateEmbeddingsManager).toHaveBeenCalled();
+  });
+
+  it("refreshes dirty index entries before serving recents so modified notes get fresh previews", async () => {
+    const { app, files } = buildFixture();
+    const plugin = makePlugin(app);
+    const engine = new SystemSculptSearchEngine(app as any, plugin);
+
+    const target = files.find((f) => f.path === "notes/orange-juice.md")!;
+
+    // Warm the full content index so indexed.preview is populated.
+    await engine.search("orange", { mode: "lexical", limit: 10 });
+
+    const initial = await engine.getRecent(10);
+    const initialExcerpt = initial.find((r) => r.path === target.path)?.excerpt ?? "";
+    expect(initialExcerpt.toLowerCase()).toContain("orange");
+
+    // Simulate an external edit: update the mocked content and fire modify.
+    (app.vault.cachedRead as jest.Mock).mockImplementation((file: any) => {
+      if (file.path === target.path) {
+        return Promise.resolve("Totally new body text about automation checklists.");
+      }
+      // Defer to the original fixture mapping for other files.
+      const defaults: Record<string, string> = {
+        "notes/fresh-orange.md": "Orange harvest note with no juice details.",
+        "notes/research.canvas": "",
+        "notes/unrelated.md": "Nothing about fruit here.",
+        "notes/東京.md": "これは東京の会議メモです。京都ではありません。",
+        "notes/emoji-launch.md": "Release mood 🚀 and notes for a symbol-only query.",
+        "notes/cyrillic.md": "Привет мир from the multilingual search fixture.",
+      };
+      return Promise.resolve(defaults[file.path] ?? "");
+    });
+
+    const modifyListener = (app.vault.on as jest.Mock).mock.calls.find(([event]) => event === "modify")?.[1];
+    expect(modifyListener).toBeDefined();
+    modifyListener(target);
+
+    const refreshed = await engine.getRecent(10);
+    const refreshedExcerpt = refreshed.find((r) => r.path === target.path)?.excerpt ?? "";
+    expect(refreshedExcerpt.toLowerCase()).toContain("automation");
+    expect(refreshedExcerpt.toLowerCase()).not.toContain("orange juice");
+  });
+
   it("drops cached recents when userIgnoreFilters change between empty-query loads", async () => {
     const { app } = buildFixture();
     const plugin = makePlugin(app);

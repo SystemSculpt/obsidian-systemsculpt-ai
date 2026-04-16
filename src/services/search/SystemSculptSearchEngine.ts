@@ -224,10 +224,11 @@ export class SystemSculptSearchEngine {
     let usedEmbeddings = false;
 
     let embeddingsIndicator = this.getEmbeddingsIndicator();
-    // Explicit semantic requests should lazily bootstrap the embeddings manager
-    // so a fresh session (or delayed autostart) can still produce semantic hits
-    // instead of silently falling back to lexical-only.
-    if (mode === "semantic" && embeddingsIndicator.enabled && !this.getExistingEmbeddingsManager()) {
+    // Smart and semantic searches should lazily bootstrap the embeddings
+    // manager so a fresh session (or delayed autostart / auto-processing off)
+    // can still produce semantic hits instead of silently falling back to
+    // lexical-only. Lexical-only searches intentionally skip the bootstrap.
+    if (mode !== "lexical" && embeddingsIndicator.enabled && !this.getExistingEmbeddingsManager()) {
       this.ensureEmbeddingsManager();
       embeddingsIndicator = this.getEmbeddingsIndicator();
     }
@@ -268,6 +269,14 @@ export class SystemSculptSearchEngine {
    */
   async getRecent(limit = 25): Promise<SearchHit[]> {
     this.refreshEligibilityIfChanged();
+    // Reuse indexed previews below requires the index to match on-disk state.
+    // When the content index is already built, flush any modify/create events
+    // that set dirtyPaths so we don't serve stale snippets for modified
+    // notes. The modal only hydrates rows that lack an excerpt, so a stale
+    // indexed.preview would otherwise persist until the next full search.
+    if (this.contentIndexReady) {
+      await this.refreshDirtyIndex();
+    }
     if (!this.recentHitsCache || this.recentHitsCache.limit < limit) {
       const recentFiles = this.selectRecentFiles(this.getEligibleFiles(), limit);
       this.recentHitsCache = {
