@@ -412,6 +412,39 @@ describe("SystemSculptSearchEngine lexical mode", () => {
     expect(paths).toContain("notes/orange-juice.md");
   });
 
+  it("falls back to substring matching for punctuated query terms after indexing", async () => {
+    // Purpose-built fixture: the punctuated query "co-op" has no prefix of
+    // length >= 3 that exists as an indexed token ("co-o" and "co-" never
+    // survive the tokenizer), and "co"/"op" alone are below the 3-char
+    // prefix-expansion floor. Without the substring fallback trigger for
+    // punctuated terms, the note drops out of results entirely after the
+    // content index is ready.
+    const app = new App();
+    const files = [
+      new TFile({ path: "notes/co-op.md", stat: { mtime: NOW - 500 } }),
+      new TFile({ path: "notes/unrelated.md", stat: { mtime: NOW - 2_000 } }),
+    ];
+    const contents: Record<string, string> = {
+      "notes/co-op.md": "The co-op meeting is tomorrow.",
+      "notes/unrelated.md": "Nothing relevant here.",
+    };
+    app.vault.getFiles.mockReturnValue(files);
+    // @ts-expect-error mock injected for tests
+    app.vault.cachedRead = jest.fn((file) => Promise.resolve(contents[file.path] ?? ""));
+    app.vault.read.mockImplementation(app.vault.cachedRead);
+    app.vault.getAbstractFileByPath.mockImplementation((p) => files.find((f) => f.path === p) ?? null);
+
+    const plugin = makePlugin(app);
+    const engine = new SystemSculptSearchEngine(app as any, plugin);
+
+    // Warm the full content index so the next search uses the token path.
+    await engine.search("co", { mode: "lexical", limit: 10 });
+
+    const res = await engine.search("co-op", { mode: "lexical", limit: 10 });
+
+    expect(res.results.map((r) => r.path)).toContain("notes/co-op.md");
+  });
+
   it("scores non-tokenizable terms in mixed queries so emoji-only docs still hit", async () => {
     const { app } = buildFixture();
     const plugin = makePlugin(app);

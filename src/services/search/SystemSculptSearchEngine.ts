@@ -1042,6 +1042,11 @@ export class SystemSculptSearchEngine {
     // `pathsForQueryTerm(...).size === 0` gate in the caller still avoids
     // running a substring scan when the term has exact token coverage.
     if (value.length < 3) return true;
+    // Token index stores punctuation-stripped tokens, so a query term
+    // containing separators (e.g. "orange-juice", "don't") can never hit the
+    // token index directly — the body still contains the substring, so fall
+    // back to the substring scan to recover the match.
+    if (/[^\p{L}\p{N}\p{M}]/u.test(value)) return true;
     return /[^\x00-\x7F]/.test(value) || this.tokenizeSearchText(value).size === 0;
   }
 
