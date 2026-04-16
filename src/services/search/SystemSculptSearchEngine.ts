@@ -135,6 +135,7 @@ export class SystemSculptSearchEngine {
   private readonly RECENT_PREVIEW_CONCURRENCY = 2;
   private readonly MAX_RECENT_PREVIEW_FILE_BYTES = 1024 * 1024;
   private readonly SEMANTIC_TIMEOUT_MS = 1500;
+  private readonly UNICODE_TOKEN_PATTERN = /[\p{L}\p{N}\p{M}]+/gu;
   private lastLexicalInspect = 0;
 
   constructor(app: App, plugin: SystemSculptPlugin) {
@@ -667,6 +668,11 @@ export class SystemSculptSearchEngine {
     for (const doc of candidates) {
       candidateMap.set(doc.path, doc);
     }
+    if (this.shouldUseSubstringCandidateFallback(queryTerms, phrase, candidateMap.size)) {
+      for (const doc of this.collectSubstringCandidateDocs(terms, phrase, limit)) {
+        candidateMap.set(doc.path, doc);
+      }
+    }
 
     const pool = Array.from(candidateMap.values());
     this.lastLexicalInspect = pool.length;
@@ -782,7 +788,7 @@ export class SystemSculptSearchEngine {
   private tokenizeSearchText(text: string): Set<string> {
     const tokens = text
       .toLowerCase()
-      .match(/[a-z0-9]+/g);
+      .match(this.UNICODE_TOKEN_PATTERN);
     if (!tokens) return new Set();
     return new Set(tokens.filter((token) => token.length > 1));
   }
@@ -953,6 +959,42 @@ export class SystemSculptSearchEngine {
     }
 
     return candidates.slice(0, Math.max(limit * 8, this.CANDIDATE_LIMIT));
+  }
+
+  private shouldUseSubstringCandidateFallback(queryTerms: QueryTerm[], phrase: string, candidateCount: number): boolean {
+    if (!phrase) return false;
+    if (candidateCount === 0 && (/[^\x00-\x7F]/.test(phrase) || this.tokenizeSearchText(phrase).size === 0)) {
+      return true;
+    }
+    return queryTerms.some((term) => this.needsSubstringFallback(term.value) && this.pathsForQueryTerm(term).size === 0);
+  }
+
+  private needsSubstringFallback(value: string): boolean {
+    if (!value) return false;
+    return /[^\x00-\x7F]/.test(value) || this.tokenizeSearchText(value).size === 0;
+  }
+
+  private collectSubstringCandidateDocs(terms: string[], phrase: string, limit: number): IndexedDocument[] {
+    const matches: IndexedDocument[] = [];
+    const cap = Math.max(limit * 8, this.CANDIDATE_LIMIT);
+    const searchableTerms = terms.filter(Boolean);
+
+    for (const doc of this.index.values()) {
+      if (
+        this.documentContainsSubstring(doc, phrase) ||
+        searchableTerms.some((term) => this.documentContainsSubstring(doc, term))
+      ) {
+        matches.push(doc);
+        if (matches.length >= cap) break;
+      }
+    }
+
+    return matches;
+  }
+
+  private documentContainsSubstring(doc: IndexedDocument, value: string): boolean {
+    if (!value) return false;
+    return doc.lowerTitle.includes(value) || doc.lowerPath.includes(value) || doc.body.includes(value);
   }
 
   private runMetadataSearch(terms: string[], phrase: string, limit: number, sort: SortMode): SearchHit[] {

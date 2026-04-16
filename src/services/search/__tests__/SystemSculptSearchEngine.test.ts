@@ -24,6 +24,9 @@ describe("SystemSculptSearchEngine lexical mode", () => {
       new TFile({ path: "notes/fresh-orange.md", stat: { mtime: NOW - 100 } }),
       new TFile({ path: "notes/research.canvas", stat: { mtime: NOW - 1_500 } }),
       new TFile({ path: "notes/unrelated.md", stat: { mtime: NOW - 2_000 } }),
+      new TFile({ path: "notes/東京.md", stat: { mtime: NOW - 3_000 } }),
+      new TFile({ path: "notes/emoji-launch.md", stat: { mtime: NOW - 3_100 } }),
+      new TFile({ path: "notes/cyrillic.md", stat: { mtime: NOW - 3_200 } }),
     ];
 
     const contents: Record<string, string> = {
@@ -38,6 +41,9 @@ describe("SystemSculptSearchEngine lexical mode", () => {
         edges: [{ id: "e1", fromNode: "n1", toNode: "n2", label: "references" }],
       }),
       "notes/unrelated.md": "Nothing about fruit here. This sentence mentions nodes for a targeted test.",
+      "notes/東京.md": "これは東京の会議メモです。京都ではありません。",
+      "notes/emoji-launch.md": "Release mood 🚀 and notes for a symbol-only query.",
+      "notes/cyrillic.md": "Привет мир from the multilingual search fixture.",
     };
 
     app.vault.getFiles.mockReturnValue(files);
@@ -170,6 +176,9 @@ describe("SystemSculptSearchEngine lexical mode", () => {
       "notes/fresh-orange.md",
       "notes/research.canvas",
       "notes/unrelated.md",
+      "notes/東京.md",
+      "notes/emoji-launch.md",
+      "notes/cyrillic.md",
     ]);
   });
 
@@ -278,6 +287,52 @@ describe("SystemSculptSearchEngine lexical mode", () => {
 
     expect(res.stats.metadataOnly).toBe(true);
     expect(res.results.map((r) => r.path)).toContain("notes/fresh-orange.md");
+
+    engine.destroy();
+    jest.useRealTimers();
+  });
+
+  it("finds CJK body matches after the content index is ready", async () => {
+    const { app } = buildFixture();
+    const plugin = makePlugin(app);
+    const engine = new SystemSculptSearchEngine(app as any, plugin);
+
+    const res = await engine.search("東京", { mode: "lexical", limit: 10 });
+
+    expect(res.results.map((r) => r.path)).toContain("notes/東京.md");
+  });
+
+  it("finds Cyrillic body matches with Unicode tokens", async () => {
+    const { app } = buildFixture();
+    const plugin = makePlugin(app);
+    const engine = new SystemSculptSearchEngine(app as any, plugin);
+
+    const res = await engine.search("привет", { mode: "lexical", limit: 10 });
+
+    expect(res.results.map((r) => r.path)).toContain("notes/cyrillic.md");
+  });
+
+  it("finds symbol-only body matches through substring fallback", async () => {
+    const { app } = buildFixture();
+    const plugin = makePlugin(app);
+    const engine = new SystemSculptSearchEngine(app as any, plugin);
+
+    const res = await engine.search("🚀", { mode: "lexical", limit: 10 });
+
+    expect(res.results.map((r) => r.path)).toContain("notes/emoji-launch.md");
+  });
+
+  it("finds non-ASCII metadata matches before reading note bodies", async () => {
+    jest.useFakeTimers();
+    const { app } = buildFixture();
+    const plugin = makePlugin(app);
+    const engine = new SystemSculptSearchEngine(app as any, plugin);
+
+    const res = await engine.search("東京", { mode: "smart", limit: 10 });
+
+    expect(res.stats.metadataOnly).toBe(true);
+    expect(res.results.map((r) => r.path)).toContain("notes/東京.md");
+    expect(app.vault.cachedRead).not.toHaveBeenCalled();
 
     engine.destroy();
     jest.useRealTimers();
