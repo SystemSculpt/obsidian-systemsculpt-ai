@@ -113,6 +113,7 @@ export class SystemSculptSearchEngine {
   private tokenLengthBuckets: Map<number, string[]> = new Map();
   private tokenLookupsDirty = true;
   private eligibleFilesCache: TFile[] | null = null;
+  private eligibleFilesCacheSignature: string | null = null;
   private metadataTokenCache: Map<string, MetadataTokenSnapshot> = new Map();
   private recentHitsCache: { limit: number; hits: SearchHit[] } | null = null;
   private recentPreviewCache: Map<string, CachedPreview> = new Map();
@@ -203,6 +204,7 @@ export class SystemSculptSearchEngine {
     }
 
     const indexStart = performance.now();
+    this.refreshEligibilityIfChanged();
     await this.ensureIndex();
     await this.refreshDirtyIndex();
     const indexMs = performance.now() - indexStart;
@@ -220,7 +222,14 @@ export class SystemSculptSearchEngine {
     let semMs: number | undefined;
     let usedEmbeddings = false;
 
-    const embeddingsIndicator = this.getEmbeddingsIndicator();
+    let embeddingsIndicator = this.getEmbeddingsIndicator();
+    // Explicit semantic requests should lazily bootstrap the embeddings manager
+    // so a fresh session (or delayed autostart) can still produce semantic hits
+    // instead of silently falling back to lexical-only.
+    if (mode === "semantic" && embeddingsIndicator.enabled && !this.getExistingEmbeddingsManager()) {
+      this.ensureEmbeddingsManager();
+      embeddingsIndicator = this.getEmbeddingsIndicator();
+    }
     const embeddingsEligible = this.shouldUseEmbeddings(mode, embeddingsIndicator, terms);
 
     if (embeddingsEligible) {
@@ -342,6 +351,7 @@ export class SystemSculptSearchEngine {
     this.tokenLengthBuckets.clear();
     this.tokenLookupsDirty = true;
     this.eligibleFilesCache = null;
+    this.eligibleFilesCacheSignature = null;
     this.metadataTokenCache.clear();
     this.recentHitsCache = null;
     this.recentPreviewCache.clear();
@@ -364,6 +374,7 @@ export class SystemSculptSearchEngine {
     this.eventRefs.push(
       this.app.vault.on("create", (file) => {
         this.eligibleFilesCache = null;
+        this.eligibleFilesCacheSignature = null;
         if (file instanceof TFile) {
           this.metadataTokenCache.delete(file.path);
         }
@@ -378,6 +389,7 @@ export class SystemSculptSearchEngine {
     this.eventRefs.push(
       this.app.vault.on("delete", (file) => {
         this.eligibleFilesCache = null;
+        this.eligibleFilesCacheSignature = null;
         if (file instanceof TFile) {
           this.metadataTokenCache.delete(file.path);
           const existing = this.index.get(file.path);
@@ -395,6 +407,7 @@ export class SystemSculptSearchEngine {
     this.eventRefs.push(
       this.app.vault.on("rename", (file, oldPath) => {
         this.eligibleFilesCache = null;
+        this.eligibleFilesCacheSignature = null;
         if (!(file instanceof TFile)) return;
         this.metadataTokenCache.delete(oldPath);
         this.metadataTokenCache.delete(file.path);
@@ -456,6 +469,7 @@ export class SystemSculptSearchEngine {
     this.tokenLengthBuckets.clear();
     this.tokenLookupsDirty = true;
     this.eligibleFilesCache = null;
+    this.eligibleFilesCacheSignature = null;
     this.metadataTokenCache.clear();
     this.recentHitsCache = null;
     this.recentPreviewCache.clear();
@@ -585,14 +599,64 @@ export class SystemSculptSearchEngine {
   }
 
   private getEligibleFiles(): TFile[] {
-    if (this.eligibleFilesCache) {
+    const signature = this.computeEligibilitySignature();
+    if (this.eligibleFilesCache && this.eligibleFilesCacheSignature === signature) {
       return this.eligibleFilesCache;
     }
 
     const cached = this.plugin.vaultFileCache?.getAllFilesView?.() ?? this.plugin.vaultFileCache?.getAllFiles?.();
     const files = Array.isArray(cached) ? cached : this.app.vault.getFiles();
     this.eligibleFilesCache = Array.from(files).filter((f) => this.isEligible(f));
+    this.eligibleFilesCacheSignature = signature;
     return this.eligibleFilesCache;
+  }
+
+  /**
+   * If the user's "Excluded files" filters changed since the last search,
+   * drop any now-ineligible indexed docs and invalidate the eligible-files
+   * snapshot so the next search reflects the new exclusions.
+   */
+  private refreshEligibilityIfChanged(): void {
+    const signature = this.computeEligibilitySignature();
+    if (this.eligibleFilesCacheSignature === null || this.eligibleFilesCacheSignature === signature) {
+      return;
+    }
+    this.pruneIndexForCurrentEligibility();
+    this.eligibleFilesCache = null;
+    this.eligibleFilesCacheSignature = null;
+  }
+
+  private pruneIndexForCurrentEligibility(): void {
+    if (this.index.size === 0) return;
+    for (const [path] of this.index) {
+      const file = this.app.vault.getAbstractFileByPath(path);
+      if (file instanceof TFile && this.isEligible(file)) continue;
+      const doc = this.index.get(path);
+      if (doc) this.removeFromTokenIndex(doc);
+      this.index.delete(path);
+      this.dirtyPaths.delete(path);
+      this.recentPreviewCache.delete(path);
+    }
+    this.recentHitsCache = null;
+  }
+
+  /**
+   * Produce a cheap signature of the inputs that `isEligible` reads from outside
+   * our own settings. We snapshot Obsidian's `userIgnoreFilters` so the cached
+   * eligible-files list refreshes when the user edits core "Excluded files"
+   * without needing a plugin settings event.
+   */
+  private computeEligibilitySignature(): string {
+    try {
+      const vault = this.app.vault as unknown as { getConfig?: (key: string) => unknown };
+      const filters = typeof vault.getConfig === "function" ? vault.getConfig("userIgnoreFilters") : null;
+      if (Array.isArray(filters) && filters.length > 0) {
+        return filters.map((value) => String(value)).join("\u0000");
+      }
+    } catch {
+      // Vault config lookup may throw on some platforms; treat as "no filters".
+    }
+    return "";
   }
 
   private getMetadataTokenSnapshot(file: TFile): MetadataTokenSnapshot {
@@ -1333,6 +1397,24 @@ export class SystemSculptSearchEngine {
   private getExistingEmbeddingsManager(): SearchableEmbeddingsManager | null {
     const manager = (this.plugin as { embeddingsManager?: SearchableEmbeddingsManager }).embeddingsManager;
     return manager && typeof manager.searchSimilar === "function" ? manager : null;
+  }
+
+  /**
+   * Invoke the plugin's lazy embeddings-manager factory if it exists. Used for
+   * explicit semantic searches so a missing manager doesn't silently degrade to
+   * lexical-only results. Errors (missing license, misconfigured provider) are
+   * swallowed because the subsequent indicator check will report them.
+   */
+  private ensureEmbeddingsManager(): void {
+    const plugin = this.plugin as {
+      getOrCreateEmbeddingsManager?: () => SearchableEmbeddingsManager;
+    };
+    if (typeof plugin.getOrCreateEmbeddingsManager !== "function") return;
+    try {
+      plugin.getOrCreateEmbeddingsManager();
+    } catch {
+      // Bootstrap failures are surfaced through the embeddings indicator.
+    }
   }
 
   private extractTitle(path: string, fallback?: string | null): string {

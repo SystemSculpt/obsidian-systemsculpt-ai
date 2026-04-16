@@ -361,6 +361,32 @@ describe("SystemSculptSearchEngine semantic mode", () => {
       expect(res.embeddings.reason).toContain("not initialized");
       expect(plugin.getOrCreateEmbeddingsManager).not.toHaveBeenCalled();
     });
+
+    it("lazily bootstraps the embeddings manager for explicit semantic mode", async () => {
+      const { app } = buildFixture();
+      const manager = createMockManager({
+        searchSimilar: jest.fn().mockResolvedValue([
+          { path: "notes/machine-learning.md", score: 0.9, metadata: { title: "ML" } },
+        ]),
+      });
+      const plugin: any = {
+        app,
+        settings: { embeddingsEnabled: true, embeddingsExclusions: {} },
+        vaultFileCache: undefined,
+        embeddingsManager: undefined,
+        getOrCreateEmbeddingsManager: jest.fn(() => {
+          plugin.embeddingsManager = manager;
+          return manager;
+        }),
+      };
+      const engine = new SystemSculptSearchEngine(app as any, plugin);
+
+      const res = await engine.search("artificial intelligence", { mode: "semantic", limit: 10 });
+
+      expect(plugin.getOrCreateEmbeddingsManager).toHaveBeenCalled();
+      expect(manager.searchSimilar).toHaveBeenCalledWith("artificial intelligence", 10, undefined);
+      expect(res.results.map((r) => r.path)).toContain("notes/machine-learning.md");
+    });
   });
 
   describe("empty query handling", () => {

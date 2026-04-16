@@ -216,6 +216,24 @@ describe("SystemSculptSearchEngine lexical mode", () => {
     jest.useRealTimers();
   });
 
+  it("invalidates the eligible file snapshot when userIgnoreFilters change", async () => {
+    const { app } = buildFixture();
+    const plugin = makePlugin(app);
+    plugin.settings.embeddingsExclusions.respectObsidianExclusions = true;
+    let ignoreFilters: string[] = [];
+    (app.vault as any).getConfig = jest.fn((key: string) => (key === "userIgnoreFilters" ? ignoreFilters : null));
+
+    const engine = new SystemSculptSearchEngine(app as any, plugin);
+
+    const before = await engine.search("orange", { mode: "lexical", limit: 10 });
+    expect(before.results.map((r) => r.path)).toContain("notes/orange-juice.md");
+
+    ignoreFilters = ["orange-juice"];
+
+    const after = await engine.search("orange", { mode: "lexical", limit: 10 });
+    expect(after.results.map((r) => r.path)).not.toContain("notes/orange-juice.md");
+  });
+
   it("invalidates the eligible file snapshot when files are created", async () => {
     jest.useFakeTimers();
     const { app, files } = buildFixture();
