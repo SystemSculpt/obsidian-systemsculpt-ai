@@ -613,31 +613,18 @@ export class SystemSculptSearchEngine {
 
   /**
    * If the user's "Excluded files" filters changed since the last search,
-   * drop any now-ineligible indexed docs and invalidate the eligible-files
-   * snapshot so the next search reflects the new exclusions.
+   * blow away the content/token indexes so the next search sees newly-included
+   * files and forgets newly-excluded ones. Track the new signature so
+   * subsequent changes are still detected — nulling it here previously let the
+   * guard short-circuit later edits until an unrelated event repopulated it.
    */
   private refreshEligibilityIfChanged(): void {
     const signature = this.computeEligibilitySignature();
     if (this.eligibleFilesCacheSignature === null || this.eligibleFilesCacheSignature === signature) {
       return;
     }
-    this.pruneIndexForCurrentEligibility();
-    this.eligibleFilesCache = null;
-    this.eligibleFilesCacheSignature = null;
-  }
-
-  private pruneIndexForCurrentEligibility(): void {
-    if (this.index.size === 0) return;
-    for (const [path] of this.index) {
-      const file = this.app.vault.getAbstractFileByPath(path);
-      if (file instanceof TFile && this.isEligible(file)) continue;
-      const doc = this.index.get(path);
-      if (doc) this.removeFromTokenIndex(doc);
-      this.index.delete(path);
-      this.dirtyPaths.delete(path);
-      this.recentPreviewCache.delete(path);
-    }
-    this.recentHitsCache = null;
+    this.clearIndexes();
+    this.eligibleFilesCacheSignature = signature;
   }
 
   /**
@@ -1048,6 +1035,12 @@ export class SystemSculptSearchEngine {
 
   private needsSubstringFallback(value: string): boolean {
     if (!value) return false;
+    // Prefix expansion in buildQueryTerms requires length >= 3, so 1- and
+    // 2-char tokenizable terms (e.g. "fr" while typing "fresh") would
+    // otherwise have no candidates once the content index is ready. The
+    // `pathsForQueryTerm(...).size === 0` gate in the caller still avoids
+    // running a substring scan when the term has exact token coverage.
+    if (value.length < 3) return true;
     return /[^\x00-\x7F]/.test(value) || this.tokenizeSearchText(value).size === 0;
   }
 

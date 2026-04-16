@@ -234,6 +234,29 @@ describe("SystemSculptSearchEngine lexical mode", () => {
     expect(after.results.map((r) => r.path)).not.toContain("notes/orange-juice.md");
   });
 
+  it("keeps detecting further userIgnoreFilters changes after the first prune", async () => {
+    const { app } = buildFixture();
+    const plugin = makePlugin(app);
+    plugin.settings.embeddingsExclusions.respectObsidianExclusions = true;
+    let ignoreFilters: string[] = [];
+    (app.vault as any).getConfig = jest.fn((key: string) => (key === "userIgnoreFilters" ? ignoreFilters : null));
+
+    const engine = new SystemSculptSearchEngine(app as any, plugin);
+
+    await engine.search("orange", { mode: "lexical", limit: 10 });
+
+    ignoreFilters = ["orange-juice"];
+    const afterFirst = await engine.search("orange", { mode: "lexical", limit: 10 });
+    expect(afterFirst.results.map((r) => r.path)).not.toContain("notes/orange-juice.md");
+    expect(afterFirst.results.map((r) => r.path)).toContain("notes/fresh-orange.md");
+
+    ignoreFilters = ["fresh-orange"];
+    const afterSecond = await engine.search("orange", { mode: "lexical", limit: 10 });
+    expect(afterSecond.results.map((r) => r.path)).not.toContain("notes/fresh-orange.md");
+    // Removing the previous filter should let orange-juice.md become searchable again.
+    expect(afterSecond.results.map((r) => r.path)).toContain("notes/orange-juice.md");
+  });
+
   it("invalidates the eligible file snapshot when files are created", async () => {
     jest.useFakeTimers();
     const { app, files } = buildFixture();
@@ -338,6 +361,23 @@ describe("SystemSculptSearchEngine lexical mode", () => {
     const res = await engine.search("🚀", { mode: "lexical", limit: 10 });
 
     expect(res.results.map((r) => r.path)).toContain("notes/emoji-launch.md");
+  });
+
+  it("falls back to substring matching for 2-character prefix queries after indexing", async () => {
+    const { app } = buildFixture();
+    const plugin = makePlugin(app);
+    const engine = new SystemSculptSearchEngine(app as any, plugin);
+
+    // Warm the full content index so subsequent searches use the token path.
+    await engine.search("orange", { mode: "lexical", limit: 10 });
+
+    // "fr" is ASCII and tokenizable at length 2, but prefix expansion starts
+    // at length 3 — without the short-term substring fallback, fresh-* notes
+    // would disappear once the content index is ready.
+    const res = await engine.search("fr", { mode: "lexical", limit: 10 });
+    const paths = res.results.map((r) => r.path);
+    expect(paths).toContain("notes/fresh-orange.md");
+    expect(paths).toContain("notes/orange-juice.md");
   });
 
   it("scores non-tokenizable terms in mixed queries so emoji-only docs still hit", async () => {
