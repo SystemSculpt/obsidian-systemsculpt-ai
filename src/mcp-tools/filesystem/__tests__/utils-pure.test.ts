@@ -724,6 +724,21 @@ describe("shouldExcludeFromSearch", () => {
     expect(shouldExcludeFromSearch(file, plugin)).toBe(false);
   });
 
+  it("skips likely unsafe regex patterns", () => {
+    const plugin = createMockPlugin({
+      settings: {
+        embeddingsExclusions: {
+          patterns: ["(a+)+b", "\\.tmp$"],
+        },
+      },
+    });
+    const regularFile = new TFile({ path: "notes/aaaaaaaaaaaaaaaaaaaaaaaaaaaa.md" });
+    const tmpFile = new TFile({ path: "notes/cache.tmp" });
+
+    expect(shouldExcludeFromSearch(regularFile, plugin)).toBe(false);
+    expect(shouldExcludeFromSearch(tmpFile, plugin)).toBe(true);
+  });
+
   it("respects ignoreChatHistory setting when false", () => {
     const plugin = createMockPlugin({
       settings: {

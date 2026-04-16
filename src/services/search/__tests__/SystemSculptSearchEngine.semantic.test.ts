@@ -66,7 +66,7 @@ describe("SystemSculptSearchEngine semantic mode", () => {
 
       await engine.search("artificial intelligence", { mode: "semantic", limit: 10 });
 
-      expect(mockManager.searchSimilar).toHaveBeenCalledWith("artificial intelligence", 10);
+      expect(mockManager.searchSimilar).toHaveBeenCalledWith("artificial intelligence", 10, undefined);
     });
 
     it("returns results with origin='semantic'", async () => {

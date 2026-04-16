@@ -173,6 +173,60 @@ describe("SystemSculptSearchEngine lexical mode", () => {
     ]);
   });
 
+  it("reuses the eligible file snapshot across metadata searches", async () => {
+    jest.useFakeTimers();
+    const { app, files } = buildFixture();
+    const plugin = makePlugin(app);
+    const getAllFilesView = jest.fn(() => files);
+    plugin.vaultFileCache = { getAllFilesView };
+    const engine = new SystemSculptSearchEngine(app as any, plugin);
+
+    await engine.search("fresh", { mode: "smart", limit: 10 });
+    await engine.search("orange", { mode: "smart", limit: 10 });
+
+    expect(getAllFilesView).toHaveBeenCalledTimes(1);
+
+    engine.destroy();
+    jest.useRealTimers();
+  });
+
+  it("reuses cached title and path tokens across metadata searches", async () => {
+    jest.useFakeTimers();
+    const { app } = buildFixture();
+    const plugin = makePlugin(app);
+    const engine = new SystemSculptSearchEngine(app as any, plugin);
+    const tokenizeSpy = jest.spyOn(engine as any, "tokenizeSearchText");
+
+    await engine.search("fresh", { mode: "smart", limit: 10 });
+    const firstSearchTokenizations = tokenizeSpy.mock.calls.length;
+    await engine.search("orange", { mode: "smart", limit: 10 });
+
+    expect(tokenizeSpy).toHaveBeenCalledTimes(firstSearchTokenizations);
+
+    engine.destroy();
+    jest.useRealTimers();
+  });
+
+  it("invalidates the eligible file snapshot when files are created", async () => {
+    jest.useFakeTimers();
+    const { app, files } = buildFixture();
+    const plugin = makePlugin(app);
+    const getAllFilesView = jest.fn(() => files);
+    plugin.vaultFileCache = { getAllFilesView };
+    const engine = new SystemSculptSearchEngine(app as any, plugin);
+
+    await engine.search("fresh", { mode: "smart", limit: 10 });
+    const createListener = (app.vault.on as jest.Mock).mock.calls.find(([event]) => event === "create")?.[1];
+    expect(createListener).toBeDefined();
+    createListener(new TFile({ path: "notes/new.md", stat: { mtime: NOW } }));
+    await engine.search("orange", { mode: "smart", limit: 10 });
+
+    expect(getAllFilesView).toHaveBeenCalledTimes(2);
+
+    engine.destroy();
+    jest.useRealTimers();
+  });
+
   it("prefers full term coverage over recent one-term matches", async () => {
     const { app } = buildFixture();
     const plugin = makePlugin(app);
@@ -202,6 +256,31 @@ describe("SystemSculptSearchEngine lexical mode", () => {
     const res = await engine.search("yelow submarine", { mode: "lexical", limit: 10 });
 
     expect(res.results[0]?.path).toBe("notes/research.canvas");
+  });
+
+  it("matches longer query terms against shorter indexed tokens", async () => {
+    const { app } = buildFixture();
+    const plugin = makePlugin(app);
+    const engine = new SystemSculptSearchEngine(app as any, plugin);
+
+    const res = await engine.search("oranges", { mode: "lexical", limit: 10 });
+
+    expect(res.results.map((r) => r.path)).toContain("notes/fresh-orange.md");
+  });
+
+  it("uses shorter title tokens for longer metadata queries before the content index is ready", async () => {
+    jest.useFakeTimers();
+    const { app } = buildFixture();
+    const plugin = makePlugin(app);
+    const engine = new SystemSculptSearchEngine(app as any, plugin);
+
+    const res = await engine.search("oranges", { mode: "smart", limit: 10 });
+
+    expect(res.stats.metadataOnly).toBe(true);
+    expect(res.results.map((r) => r.path)).toContain("notes/fresh-orange.md");
+
+    engine.destroy();
+    jest.useRealTimers();
   });
 
   it("does not index JSON keys from .canvas files", async () => {
