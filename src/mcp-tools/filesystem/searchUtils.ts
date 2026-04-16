@@ -1,6 +1,37 @@
 import { TFile } from "obsidian";
 import type SystemSculptPlugin from "../../main";
 
+const regexCache = new Map<string, RegExp | null>();
+const REGEX_CACHE_LIMIT = 200;
+
+function getCachedSafeRegex(pattern: string): RegExp | null {
+  const cached = regexCache.get(pattern);
+  if (cached !== undefined) return cached;
+
+  if (regexCache.size >= REGEX_CACHE_LIMIT) {
+    regexCache.clear();
+  }
+
+  if (isLikelyUnsafeRegex(pattern)) {
+    regexCache.set(pattern, null);
+    return null;
+  }
+
+  try {
+    const regex = new RegExp(pattern);
+    regexCache.set(pattern, regex);
+    return regex;
+  } catch {
+    regexCache.set(pattern, null);
+    return null;
+  }
+}
+
+function isLikelyUnsafeRegex(pattern: string): boolean {
+  if (pattern.length > 240) return true;
+  return /\((?:[^()\\]|\\.)*[+*](?:[^()\\]|\\.)*\)[+*{]/.test(pattern);
+}
+
 /**
  * Check if a file should be excluded from search results.
  * This lives in a mobile-safe module so search surfaces do not pull Node helpers.
@@ -21,13 +52,9 @@ export function shouldExcludeFromSearch(file: TFile, plugin: SystemSculptPlugin)
       const userIgnoreFilters = plugin.app.vault.getConfig("userIgnoreFilters");
       if (userIgnoreFilters && Array.isArray(userIgnoreFilters)) {
         for (const pattern of userIgnoreFilters) {
-          try {
-            const regex = new RegExp(pattern);
-            if (regex.test(file.path)) {
-              return true;
-            }
-          } catch {
-            // Ignore invalid user regex patterns.
+          const regex = getCachedSafeRegex(String(pattern));
+          if (regex?.test(file.path)) {
+            return true;
           }
         }
       }
@@ -63,13 +90,9 @@ export function shouldExcludeFromSearch(file: TFile, plugin: SystemSculptPlugin)
 
   if (plugin.settings.embeddingsExclusions?.patterns) {
     for (const pattern of plugin.settings.embeddingsExclusions.patterns) {
-      try {
-        const regex = new RegExp(pattern);
-        if (regex.test(file.path)) {
-          return true;
-        }
-      } catch {
-        // Ignore invalid user regex patterns.
+      const regex = getCachedSafeRegex(String(pattern));
+      if (regex?.test(file.path)) {
+        return true;
       }
     }
   }

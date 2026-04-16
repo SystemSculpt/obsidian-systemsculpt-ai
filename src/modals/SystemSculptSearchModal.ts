@@ -1,147 +1,109 @@
-import { Notice } from "obsidian";
+import { Notice, setIcon } from "obsidian";
 import type SystemSculptPlugin from "../main";
 import { StandardModal } from "../core/ui/modals/standard/StandardModal";
 import type {
   SystemSculptSearchEngine,
-  SearchMode,
-  SortMode,
   SearchHit,
   SearchResponse,
 } from "../services/search/SystemSculptSearchEngine";
 
 export class SystemSculptSearchModal extends StandardModal {
-  private plugin: SystemSculptPlugin;
+  private static nextListId = 0;
   private engine: SystemSculptSearchEngine;
   private searchInputEl: HTMLInputElement | null = null;
+  private statusEl: HTMLElement | null = null;
   private listEl: HTMLElement | null = null;
-  private metricsEl: HTMLElement | null = null;
-  private stateEl: HTMLElement | null = null;
-  private modeButtons: Partial<Record<SearchMode, HTMLButtonElement>> = {};
-  private sortButtons: Partial<Record<SortMode, HTMLButtonElement>> = {};
-  private embeddings: SearchResponse["embeddings"] | null = null;
+  private activeResultEl: HTMLElement | null = null;
 
-  private mode: SearchMode = "smart";
-  private sort: SortMode = "relevance";
+  private readonly SEARCH_LIMIT = 30;
+  private readonly RECENT_LIMIT = 25;
+  private readonly STABLE_TOP_COUNT = 14;
+  private readonly listId = `ss-search-results-${++SystemSculptSearchModal.nextListId}`;
   private currentQuery = "";
   private debounceHandle: number | null = null;
+  private recentPreviewHandle: number | null = null;
+  private indexRefreshHandle: number | null = null;
+  private searchAbortController: AbortController | null = null;
+  private previewAbortController: AbortController | null = null;
   private querySerial = 0;
 
   constructor(plugin: SystemSculptPlugin) {
     super(plugin.app);
-    this.plugin = plugin;
     this.engine = plugin.getSearchEngine();
-    this.embeddings = this.engine.getEmbeddingsIndicator();
-    this.setSize("fullwidth");
+    this.setSize("large");
+    this.modalEl.addClass("ss-search-modal");
   }
 
   onOpen() {
     super.onOpen();
+    document.body.classList.add("ss-search-open");
     this.contentEl.addClass("ss-search__content");
-
-    this.addTitle(
-      "SystemSculpt Search",
-      "Fast lexical search with optional semantic lift. Mode indicators show exactly when embeddings are used."
-    );
+    this.footerEl.addClass("ss-search__footer");
+    this.footerEl.createDiv({ text: "↑/↓ Navigate · Enter Open · Esc Close", cls: "ss-search__hint" });
 
     const shell = this.contentEl.createDiv({ cls: "ss-search" });
-
-    const controlRow = shell.createDiv({ cls: "ss-search__controls" });
-    this.buildModeSelector(controlRow);
-    this.buildSortToggle(controlRow);
-
     this.searchInputEl = this.buildSearchBar(shell, "Search your vault...", (value) => this.onSearchChange(value));
 
-    this.stateEl = shell.createDiv({ cls: "ss-search__state" });
-    this.metricsEl = shell.createDiv({ cls: "ss-search__metrics" });
+    this.statusEl = shell.createDiv({ cls: "ss-search__status" });
+    this.statusEl.setAttr("aria-live", "polite");
 
-    this.listEl = shell.createDiv({ cls: "ss-modal__list ss-search__list" });
-
-    this.addActionButton("Copy Results", () => this.copyResults(), false, "clipboard");
-    this.addActionButton("Close", () => this.close(), false, "x");
+    this.listEl = shell.createDiv({ cls: "ss-search__list" });
+    this.listEl.id = this.listId;
+    this.listEl.setAttr("role", "listbox");
+    this.listEl.setAttr("aria-label", "Search results");
+    this.registerDomEvent(this.listEl, "click", (event) => void this.handleResultClick(event));
+    this.registerDomEvent(this.listEl, "keydown", (event) => void this.handleResultKeydown(event as KeyboardEvent));
+    this.registerDomEvent(this.listEl, "focusin", (event) => this.handleResultFocus(event));
 
     setTimeout(() => this.searchInputEl?.focus(), 0);
     void this.renderRecents();
   }
 
   onClose() {
+    document.body.classList.remove("ss-search-open");
+    this.querySerial += 1;
+    this.cancelSearch();
+    this.cancelRecentPreviewHydration();
+    this.cancelIndexRefresh();
     if (this.debounceHandle) {
       window.clearTimeout(this.debounceHandle);
       this.debounceHandle = null;
     }
     super.onClose();
-  }
-
-  private buildModeSelector(container: HTMLElement) {
-    const group = container.createDiv({ cls: "ss-search__mode-group" });
-    const modes: Array<{ id: SearchMode; label: string; desc: string }> = [
-      { id: "lexical", label: "Fast", desc: "Pure lexical, zero embeddings" },
-      { id: "smart", label: "Smart", desc: "Lexical + embeddings when available" },
-      { id: "semantic", label: "Semantic", desc: "Embeddings first" },
-    ];
-
-    modes.forEach((mode) => {
-      const btn = group.createEl("button", {
-        cls: "ss-search__pill ss-search__pill--ghost",
-        attr: { "data-mode": mode.id },
-      });
-      btn.createSpan({ cls: "ss-search__pill-label", text: mode.label });
-      btn.createSpan({ cls: "ss-search__pill-desc", text: mode.desc });
-
-      this.registerDomEvent(btn, "click", () => {
-        if (btn.disabled) return;
-        this.mode = mode.id;
-        this.syncModeButtons();
-        void this.executeSearch(this.currentQuery);
-      });
-
-      this.modeButtons[mode.id] = btn;
-    });
-
-    this.syncModeButtons();
-    if (this.embeddings) {
-      this.syncModeAvailability(this.embeddings);
-    }
-  }
-
-  private buildSortToggle(container: HTMLElement) {
-    const sortWrap = container.createDiv({ cls: "ss-search__sort" });
-    const sorts: Array<{ id: SortMode; label: string }> = [
-      { id: "relevance", label: "Relevance" },
-      { id: "recency", label: "Recency" },
-    ];
-
-    sorts.forEach((sort) => {
-      const btn = sortWrap.createEl("button", {
-        cls: "ss-search__pill ss-search__pill--chip",
-        attr: { "data-sort": sort.id },
-        text: sort.label,
-      });
-
-      this.registerDomEvent(btn, "click", () => {
-        this.sort = sort.id;
-        this.syncSortButtons();
-        void this.executeSearch(this.currentQuery);
-      });
-
-      this.sortButtons[sort.id] = btn;
-    });
-
-    this.syncSortButtons();
+    this.searchInputEl = null;
+    this.statusEl = null;
+    this.listEl = null;
+    this.activeResultEl = null;
   }
 
   private buildSearchBar(parent: HTMLElement, placeholder: string, onInput: (value: string) => void): HTMLInputElement {
     const wrapper = parent.createDiv({ cls: "ss-search__input-row" });
     const icon = wrapper.createDiv({ cls: "ss-search__icon" });
     icon.setAttr("aria-hidden", "true");
+    setIcon(icon, "search");
 
     const input = wrapper.createEl("input", {
       type: "text",
       placeholder,
       cls: "ss-search__input",
+      attr: {
+        role: "combobox",
+        autocomplete: "off",
+        "aria-label": "Search your vault",
+        "aria-autocomplete": "list",
+        "aria-controls": this.listId,
+        "aria-expanded": "false",
+      },
     });
 
-    const clear = wrapper.createDiv({ cls: "ss-search__clear" });
-    clear.setAttr("aria-label", "Clear search");
+    const clear = wrapper.createEl("button", {
+      type: "button",
+      cls: "ss-search__clear",
+      attr: {
+        "aria-label": "Clear search",
+      },
+    });
+    setIcon(clear, "x");
     clear.style.display = "none";
 
     this.registerDomEvent(input, "input", () => {
@@ -149,11 +111,20 @@ export class SystemSculptSearchModal extends StandardModal {
       onInput(input.value);
     });
 
+    this.registerDomEvent(input, "keydown", (event) => {
+      const keyboardEvent = event as KeyboardEvent;
+      if (keyboardEvent.key !== "ArrowDown") return;
+      const firstItem = this.getResultItems()[0];
+      if (!firstItem) return;
+      keyboardEvent.preventDefault();
+      this.focusResult(firstItem);
+    });
+
     this.registerDomEvent(clear, "click", () => {
       input.value = "";
       clear.style.display = "none";
       onInput("");
-      input.focus();
+      this.focusSearchInput();
     });
 
     return input;
@@ -161,6 +132,9 @@ export class SystemSculptSearchModal extends StandardModal {
 
   private onSearchChange(query: string) {
     this.currentQuery = query;
+    if (query.trim()) {
+      this.cancelRecentPreviewHydration();
+    }
     if (this.debounceHandle) {
       window.clearTimeout(this.debounceHandle);
     }
@@ -170,107 +144,218 @@ export class SystemSculptSearchModal extends StandardModal {
   }
 
   private async executeSearch(query: string) {
+    this.currentQuery = query;
     const trimmed = query.trim();
     const serial = ++this.querySerial;
 
     if (!trimmed) {
+      this.cancelSearch();
+      this.cancelIndexRefresh();
       await this.renderRecents();
       return;
     }
 
-    this.renderLoading("Indexing & searching...");
+    this.cancelRecentPreviewHydration();
+    this.cancelIndexRefresh();
+    this.cancelSearch();
 
-    const response = await this.engine.search(trimmed, {
-      mode: this.mode,
-      sort: this.sort,
-      limit: 80,
-    });
+    const controller = new AbortController();
+    this.searchAbortController = controller;
+    if (!this.hasRenderedResults()) {
+      this.renderLoading("Searching...");
+    }
 
-    if (serial < this.querySerial) return;
+    try {
+      const response = await this.engine.search(trimmed, {
+        mode: "smart",
+        sort: "relevance",
+        limit: this.SEARCH_LIMIT,
+        signal: controller.signal,
+      });
 
-    this.renderResponse(response);
+      if (serial < this.querySerial || controller.signal.aborted) return;
+      this.renderResponse(response);
+
+      if (response.stats.indexingPending && response.stats.metadataOnly) {
+        this.scheduleIndexRefresh(trimmed, serial);
+      }
+    } catch (error) {
+      if (this.isAbortError(error) || serial < this.querySerial) return;
+      this.renderEmpty("Search failed. Try again.");
+    } finally {
+      if (this.searchAbortController === controller) {
+        this.searchAbortController = null;
+      }
+    }
+  }
+
+  private scheduleIndexRefresh(query: string, serial: number) {
+    this.cancelIndexRefresh();
+    this.indexRefreshHandle = window.setTimeout(() => {
+      this.indexRefreshHandle = null;
+      void this.refreshAfterIndexReady(query, serial);
+    }, 0);
+  }
+
+  private cancelIndexRefresh() {
+    if (this.indexRefreshHandle !== null) {
+      window.clearTimeout(this.indexRefreshHandle);
+      this.indexRefreshHandle = null;
+    }
+  }
+
+  private async refreshAfterIndexReady(query: string, serial: number) {
+    let controller: AbortController | null = null;
+    try {
+      await this.engine.whenIndexReady();
+      if (serial !== this.querySerial || this.currentQuery.trim() !== query || !this.listEl) return;
+
+      controller = new AbortController();
+      this.searchAbortController = controller;
+      const response = await this.engine.search(query, {
+        mode: "smart",
+        sort: "relevance",
+        limit: this.SEARCH_LIMIT,
+        signal: controller.signal,
+      });
+
+      if (serial === this.querySerial && !controller.signal.aborted) {
+        this.renderResponse(response, { stabilize: true });
+      }
+    } catch (error) {
+      if (!this.isAbortError(error) && serial === this.querySerial) {
+        this.renderEmpty("Search failed. Try again.");
+      }
+    } finally {
+      if (controller && this.searchAbortController === controller) {
+        this.searchAbortController = null;
+      }
+    }
   }
 
   private async renderRecents() {
     const serial = ++this.querySerial;
-    this.renderLoading("Pulling your newest notes...");
-    const recents = await this.engine.getRecent(25);
-    if (serial < this.querySerial) return;
-    const indicator = this.engine.getEmbeddingsIndicator();
-    this.embeddings = indicator;
-    this.renderResults(recents);
-    this.renderMetrics({
-      totalMs: 0,
-      indexedCount: recents.length,
-      inspectedCount: recents.length,
-      mode: this.mode,
-      usedEmbeddings: false,
+    this.cancelRecentPreviewHydration();
+    try {
+      const recents = await this.engine.getRecent(this.RECENT_LIMIT);
+      if (serial < this.querySerial) return;
+      this.renderResults(recents, { label: "Recent", context: "recent" });
+      this.scheduleRecentPreviewHydration(recents, serial);
+    } catch {
+      if (serial < this.querySerial) return;
+      this.setStatus("Recent");
+      this.renderEmpty("Could not load recent notes.");
+    }
+  }
+
+  private renderResponse(response: SearchResponse, options: { stabilize?: boolean } = {}) {
+    const count = response.results.length;
+    const label = `${count} ${count === 1 ? "result" : "results"}`;
+    this.renderResults(response.results, {
+      label,
+      context: "search",
+      stabilize: options.stabilize,
     });
-    this.syncModeAvailability(indicator);
-    this.renderState("Showing your 25 most recent files.");
   }
 
-  private renderResponse(response: SearchResponse) {
-    this.embeddings = response.embeddings;
-    this.renderMetrics(response.stats);
-    this.renderState(this.stateTextFor(response));
-    this.syncModeAvailability(response.embeddings);
-    this.renderResults(response.results);
-  }
-
-  private renderResults(results: SearchHit[]) {
+  private renderResults(
+    results: SearchHit[],
+    options: { label: string; context: "recent" | "search"; stabilize?: boolean }
+  ) {
     if (!this.listEl) return;
-    this.listEl.empty();
+    const previousState = this.captureListState();
+    const orderedResults = options.stabilize
+      ? this.stabilizeResults(results, previousState.renderedPaths, previousState.focusedPath)
+      : results;
 
-    if (results.length === 0) {
-      this.renderEmpty("No matches yet. Try fewer words or switch modes.");
+    this.setStatus(options.label);
+    this.clearActiveResult();
+    this.listEl.empty();
+    this.setComboboxExpanded(orderedResults.length > 0);
+
+    if (orderedResults.length === 0) {
+      this.renderEmpty(options.context === "recent" ? "No recent notes yet." : "No matches yet. Try fewer words.");
       return;
     }
 
-    results.forEach((result) => {
+    orderedResults.forEach((result, index) => {
       const item = document.createElement("div");
       item.className = "ss-search__item";
+      item.id = this.resultId(index);
       item.setAttr("data-path", result.path);
+      item.setAttr("role", "option");
+      item.setAttr("tabindex", "-1");
+      item.setAttr("aria-selected", "false");
 
       const header = item.createDiv({ cls: "ss-search__item-top" });
       const titleEl = header.createDiv({ cls: "ss-search__title" });
-      titleEl.innerHTML = this.getHighlightedText(result.title, this.currentQuery);
-
-      const badges = header.createDiv({ cls: "ss-search__badges" });
-      badges.createSpan({
-        cls: `ss-search__pill ss-search__pill--${result.origin}`,
-        text: this.labelForOrigin(result.origin),
-      });
-      badges.createSpan({ cls: "ss-search__score", text: `${Math.round((result.score || 0) * 100)}%` });
+      this.appendHighlightedText(titleEl, result.title, this.currentQuery);
 
       const meta = item.createDiv({ cls: "ss-search__meta" });
-      meta.setText(`${result.path} • ${this.formatUpdated(result.updatedAt)}${result.size ? ` • ${this.formatSize(result.size)}` : ""}`);
+      meta.setText([result.path, this.formatUpdated(result.updatedAt)].join(" · "));
 
-      const excerpt = item.createDiv({ cls: "ss-search__excerpt" });
       if (result.excerpt) {
-        excerpt.innerHTML = this.getHighlightedText(result.excerpt, this.currentQuery);
-      } else {
-        excerpt.setText("No preview available");
+        const excerpt = item.createDiv({ cls: "ss-search__excerpt" });
+        this.appendHighlightedText(excerpt, result.excerpt, this.currentQuery);
       }
-
-      this.registerDomEvent(item, "click", async () => {
-        try {
-          await this.app.workspace.openLinkText(result.path, "");
-          this.close();
-        } catch {
-          new Notice(`Failed to open: ${result.path}`);
-        }
-      });
 
       this.listEl!.appendChild(item);
     });
 
-    this.makeDraggable(results);
+    this.restoreListState(previousState, options.stabilize === true);
+  }
+
+  private scheduleRecentPreviewHydration(results: SearchHit[], serial: number) {
+    this.cancelRecentPreviewHydration();
+    const paths = results
+      .filter((result) => result.origin === "recent" && !result.excerpt)
+      .map((result) => result.path);
+    if (paths.length === 0) return;
+
+    this.recentPreviewHandle = window.setTimeout(() => {
+      this.recentPreviewHandle = null;
+      void this.hydrateRecentPreviews(paths, serial);
+    }, 30);
+  }
+
+  private cancelRecentPreviewHydration() {
+    if (this.recentPreviewHandle) {
+      window.clearTimeout(this.recentPreviewHandle);
+      this.recentPreviewHandle = null;
+    }
+    this.previewAbortController?.abort();
+    this.previewAbortController = null;
+  }
+
+  private async hydrateRecentPreviews(paths: string[], serial: number) {
+    const controller = new AbortController();
+    this.previewAbortController = controller;
+    const previews = await this.engine.getRecentPreviews(paths, 25, controller.signal);
+    if (
+      controller.signal.aborted ||
+      serial !== this.querySerial ||
+      this.currentQuery.trim().length > 0 ||
+      !this.listEl
+    ) {
+      return;
+    }
+
+    const items = Array.from(this.listEl.querySelectorAll<HTMLElement>(".ss-search__item"));
+    items.forEach((item) => {
+      const path = item.getAttribute("data-path");
+      if (!path || item.querySelector(".ss-search__excerpt")) return;
+      const preview = previews.get(path);
+      if (!preview) return;
+      const excerpt = item.createDiv({ cls: "ss-search__excerpt" });
+      excerpt.setText(preview);
+    });
   }
 
   private renderLoading(text: string) {
     if (!this.listEl) return;
+    this.setStatus(text);
     this.listEl.empty();
+    this.setComboboxExpanded(false);
     const loading = this.listEl.createDiv("ss-modal__loading ss-search__loading");
     loading.createDiv({ text });
   }
@@ -278,111 +363,246 @@ export class SystemSculptSearchModal extends StandardModal {
   private renderEmpty(text: string) {
     if (!this.listEl) return;
     this.listEl.empty();
+    this.setComboboxExpanded(false);
+    this.clearActiveResult();
     const empty = this.listEl.createDiv("ss-modal__empty-state ss-search__empty");
     empty.createDiv({ text });
   }
 
-  private renderMetrics(stats: Partial<SearchResponse["stats"]>) {
-    if (!this.metricsEl) return;
-    const parts: string[] = [];
-    if (typeof stats.totalMs === "number") parts.push(`Total ${Math.round(stats.totalMs)} ms`);
-    if (typeof stats.lexMs === "number") parts.push(`Lex ${Math.round(stats.lexMs)} ms`);
-    if (typeof stats.semMs === "number") parts.push(`Semantic ${Math.round(stats.semMs)} ms`);
-    if (typeof stats.indexMs === "number") parts.push(`Index ${Math.round(stats.indexMs)} ms`);
-    if (typeof stats.indexedCount === "number") parts.push(`${stats.indexedCount} indexed`);
-    if (typeof stats.inspectedCount === "number") parts.push(`${stats.inspectedCount} scanned`);
-
-    const modeLabel = stats.mode ? this.labelForMode(stats.mode) : "";
-    this.metricsEl.setText(parts.length ? `${modeLabel} • ${parts.join(" • ")}` : modeLabel);
+  private async handleResultClick(event: Event) {
+    const item = this.findResultItem(event.target);
+    if (!item) return;
+    await this.openResult(item.getAttribute("data-path"));
   }
 
-  private renderState(message: string) {
-    if (!this.stateEl) return;
-    this.stateEl.setText(message);
+  private async handleResultKeydown(event: KeyboardEvent) {
+    const item = this.findResultItem(event.target);
+    if (!item) return;
+
+    if (event.key === "Enter") {
+      event.preventDefault();
+      await this.openResult(item.getAttribute("data-path"));
+      return;
+    }
+
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+    event.preventDefault();
+    const items = this.getResultItems();
+    const currentIndex = items.indexOf(item);
+    const nextIndex = event.key === "ArrowDown"
+      ? Math.min(items.length - 1, currentIndex + 1)
+      : Math.max(0, currentIndex - 1);
+    const nextItem = items[nextIndex];
+    if (nextItem === item && event.key === "ArrowUp") {
+      this.focusSearchInput();
+      this.clearActiveResult();
+      return;
+    }
+    if (nextItem) this.focusResult(nextItem);
   }
 
-  private stateTextFor(response: SearchResponse): string {
-    const usedEmbeddings = response.stats.usedEmbeddings;
-    const emb = response.embeddings;
-    if (this.mode === "lexical") {
-      return "Fast – fastest path.";
-    }
-    if (usedEmbeddings) {
-      return "Smart blend: embeddings contributed to these results.";
-    }
-    if (!emb.enabled) {
-      return "Embeddings off in settings – running lexical search only.";
-    }
-    if (!emb.available) {
-      return emb.reason ? `Embeddings unavailable: ${emb.reason}` : "Embeddings not ready yet; showing lexical results.";
-    }
-    return "Embeddings ready but not used for this query (short query or no vectors).";
+  private handleResultFocus(event: Event) {
+    const item = this.findResultItem(event.target);
+    if (!item) return;
+    this.setActiveResult(item);
   }
 
-  private syncModeButtons() {
-    Object.entries(this.modeButtons).forEach(([mode, btn]) => {
-      if (!btn) return;
-      if (mode === this.mode) {
-        btn.addClass("is-active");
+  private async openResult(path: string | null) {
+    if (!path) return;
+    try {
+      await this.app.workspace.openLinkText(path, "");
+      this.close();
+    } catch {
+      new Notice(`Failed to open: ${path}`);
+    }
+  }
+
+  private findResultItem(target: EventTarget | null): HTMLElement | null {
+    if (!(target instanceof HTMLElement)) return null;
+    return target.closest<HTMLElement>(".ss-search__item");
+  }
+
+  private getResultItems(): HTMLElement[] {
+    return Array.from(this.listEl?.querySelectorAll<HTMLElement>(".ss-search__item") ?? []);
+  }
+
+  private hasRenderedResults(): boolean {
+    return this.getResultItems().length > 0;
+  }
+
+  private captureListState(): {
+    renderedPaths: string[];
+    focusedPath: string | null;
+    focusedIndex: number;
+    hadListFocus: boolean;
+    scrollTop: number;
+  } {
+    const items = this.getResultItems();
+    const activeItem = this.findResultItem(document.activeElement);
+    const focusedIndex = activeItem ? items.indexOf(activeItem) : -1;
+    return {
+      renderedPaths: items.map((item) => item.getAttribute("data-path") ?? "").filter(Boolean),
+      focusedPath: activeItem?.getAttribute("data-path") ?? null,
+      focusedIndex,
+      hadListFocus: !!activeItem,
+      scrollTop: this.listEl?.scrollTop ?? 0,
+    };
+  }
+
+  private stabilizeResults(results: SearchHit[], renderedPaths: string[], focusedPath: string | null): SearchHit[] {
+    if (renderedPaths.length === 0 || results.length === 0) return results;
+
+    const nextByPath = new Map(results.map((result) => [result.path, result]));
+    const preservedPaths = new Set(renderedPaths.slice(0, this.STABLE_TOP_COUNT));
+    if (focusedPath) preservedPaths.add(focusedPath);
+
+    const preserved: SearchHit[] = [];
+    for (const path of renderedPaths) {
+      if (!preservedPaths.has(path)) continue;
+      const next = nextByPath.get(path);
+      if (next) preserved.push(next);
+    }
+
+    if (preserved.length === 0) return results;
+    const preservedSet = new Set(preserved.map((result) => result.path));
+    const additions = results.filter((result) => !preservedSet.has(result.path));
+    return [...preserved, ...additions].slice(0, results.length);
+  }
+
+  private restoreListState(state: ReturnType<SystemSculptSearchModal["captureListState"]>, stabilized: boolean) {
+    if (!this.listEl) return;
+
+    const focusTarget = state.focusedPath
+      ? this.getResultItems().find((item) => item.getAttribute("data-path") === state.focusedPath)
+      : null;
+
+    if (!stabilized) {
+      if (state.hadListFocus) {
+        this.focusSearchInput();
+      }
+      return;
+    }
+
+    this.listEl.scrollTop = state.scrollTop;
+
+    if (state.hadListFocus && state.focusedPath && !focusTarget) {
+      this.focusSearchInput(true);
+      this.clearActiveResult();
+      return;
+    }
+
+    const fallback = state.hadListFocus && state.focusedIndex >= 0
+      ? this.getResultItems()[Math.min(state.focusedIndex, this.getResultItems().length - 1)]
+      : null;
+    const item = focusTarget ?? fallback;
+    if (item) this.focusResult(item, true);
+  }
+
+  private focusSearchInput(preventScroll = false) {
+    if (!this.searchInputEl) return;
+    try {
+      this.searchInputEl.focus({ preventScroll });
+    } catch {
+      this.searchInputEl.focus();
+    }
+  }
+
+  private focusResult(item: HTMLElement, preventScroll = false) {
+    try {
+      item.focus({ preventScroll });
+    } catch {
+      item.focus();
+    }
+    this.setActiveResult(item);
+  }
+
+  private setActiveResult(activeItem: HTMLElement) {
+    if (this.activeResultEl && this.activeResultEl !== activeItem && this.activeResultEl.isConnected) {
+      this.activeResultEl.setAttr("aria-selected", "false");
+    }
+    activeItem.setAttr("aria-selected", "true");
+    this.activeResultEl = activeItem;
+    this.searchInputEl?.setAttr("aria-activedescendant", activeItem.id);
+  }
+
+  private clearActiveResult() {
+    if (this.activeResultEl?.isConnected) {
+      this.activeResultEl.setAttr("aria-selected", "false");
+    }
+    this.activeResultEl = null;
+    this.searchInputEl?.removeAttribute("aria-activedescendant");
+  }
+
+  private setComboboxExpanded(expanded: boolean) {
+    this.searchInputEl?.setAttr("aria-expanded", expanded ? "true" : "false");
+  }
+
+  private setStatus(text: string) {
+    this.statusEl?.setText(text);
+  }
+
+  private resultId(index: number): string {
+    return `${this.listId}-option-${index}`;
+  }
+
+  private cancelSearch() {
+    this.searchAbortController?.abort();
+    this.searchAbortController = null;
+  }
+
+  private isAbortError(error: unknown): boolean {
+    return error instanceof DOMException && error.name === "AbortError";
+  }
+
+  private appendHighlightedText(parent: HTMLElement, text: string, query: string) {
+    const matches = this.getHighlightRanges(text, query);
+    if (matches.length === 0) {
+      parent.setText(text);
+      return;
+    }
+
+    let last = 0;
+    for (const match of matches) {
+      if (match.start > last) {
+        parent.appendText(text.slice(last, match.start));
+      }
+      const mark = parent.createEl("mark", { cls: "ss-hl" });
+      mark.setText(text.slice(match.start, match.end));
+      last = match.end;
+    }
+    if (last < text.length) {
+      parent.appendText(text.slice(last));
+    }
+  }
+
+  private getHighlightRanges(text: string, query: string): Array<{ start: number; end: number }> {
+    if (!query || !query.trim()) return [];
+
+    const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
+    const lowerText = text.toLowerCase();
+    const rawMatches: Array<{ start: number; end: number }> = [];
+
+    terms.forEach((term) => {
+      let idx = 0;
+      while ((idx = lowerText.indexOf(term, idx)) > -1) {
+        rawMatches.push({ start: idx, end: idx + term.length });
+        idx += term.length;
+      }
+    });
+
+    if (rawMatches.length === 0) return [];
+    rawMatches.sort((a, b) => a.start - b.start || b.end - a.end);
+
+    const merged: Array<{ start: number; end: number }> = [];
+    for (const match of rawMatches) {
+      const previous = merged[merged.length - 1];
+      if (!previous || match.start > previous.end) {
+        merged.push({ ...match });
       } else {
-        btn.removeClass("is-active");
+        previous.end = Math.max(previous.end, match.end);
       }
-    });
-  }
-
-  private syncModeAvailability(indicator: SearchResponse["embeddings"]) {
-    const embeddingsReady = indicator.enabled && indicator.ready && indicator.available;
-
-    Object.entries(this.modeButtons).forEach(([mode, btn]) => {
-      if (!btn) return;
-      if (mode === "lexical") {
-        btn.disabled = false;
-        btn.removeClass("is-disabled");
-        return;
-      }
-      btn.disabled = !embeddingsReady;
-      btn.toggleClass("is-disabled", !embeddingsReady);
-    });
-
-    if (!embeddingsReady && this.mode !== "lexical") {
-      this.mode = "lexical";
-      this.syncModeButtons();
     }
-  }
-
-  private syncSortButtons() {
-    Object.entries(this.sortButtons).forEach(([sort, btn]) => {
-      if (!btn) return;
-      if (sort === this.sort) {
-        btn.addClass("is-active");
-      } else {
-        btn.removeClass("is-active");
-      }
-    });
-  }
-
-  private labelForOrigin(origin: SearchHit["origin"]): string {
-    switch (origin) {
-      case "semantic":
-        return "Semantic";
-      case "blend":
-        return "Blended";
-      case "recent":
-        return "Recent";
-      default:
-        return "Lexical";
-    }
-  }
-
-  private labelForMode(mode: SearchMode): string {
-    switch (mode) {
-      case "lexical":
-        return "Fast";
-      case "semantic":
-        return "Semantic first";
-      default:
-        return "Smart blend";
-    }
+    return merged;
   }
 
   private formatUpdated(ts?: number): string {
@@ -394,86 +614,5 @@ export class SystemSculptSearchModal extends StandardModal {
     if (diff < day) return "Updated today";
     if (diff < 7 * day) return `${Math.round(diff / day)}d ago`;
     return date.toLocaleDateString();
-  }
-
-  private formatSize(bytes: number): string {
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  }
-
-  private getHighlightedText(text: string, query: string): string {
-    if (!query || !query.trim()) {
-      return text;
-    }
-    const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
-    const lc = text.toLowerCase();
-    const matches: Array<{ start: number; end: number }> = [];
-
-    terms.forEach((t) => {
-      let idx = 0;
-      while ((idx = lc.indexOf(t, idx)) > -1) {
-        matches.push({ start: idx, end: idx + t.length });
-        idx += t.length;
-      }
-    });
-
-    if (matches.length === 0) return text;
-
-    matches.sort((a, b) => a.start - b.start);
-    let result = "";
-    let last = 0;
-
-    matches.forEach((m) => {
-      if (m.start > last) {
-        result += text.slice(last, m.start);
-      }
-      result += `<mark class="ss-hl">${text.slice(m.start, m.end)}</mark>`;
-      last = m.end;
-    });
-
-    if (last < text.length) {
-      result += text.slice(last);
-    }
-
-    return result;
-  }
-
-  private makeDraggable(results: SearchHit[]) {
-    if (!this.listEl) return;
-    const el = this.listEl;
-    el.draggable = true;
-    el.addClass("scs-draggable");
-    this.registerDomEvent(el, "dragstart", (e: Event) => {
-      const ev = e as DragEvent;
-      if (!ev.dataTransfer) return;
-      const payload = {
-        type: "search-results",
-        query: this.currentQuery,
-        results: results.slice(0, 50).map((r) => ({ path: r.path, score: r.score })),
-      };
-      const text = results.map((r) => r.path).join("\n");
-      ev.dataTransfer.setData("text/plain", JSON.stringify(payload));
-      ev.dataTransfer.setData("application/json", JSON.stringify(payload));
-      ev.dataTransfer.setData("text/uri-list", text);
-    });
-  }
-
-  private async copyResults() {
-    try {
-      const items = Array.from(this.listEl?.querySelectorAll(".ss-search__item") || []);
-      if (items.length === 0) {
-        new Notice("No results to copy.");
-        return;
-      }
-      const paths = items
-        .map((el) => el.getAttribute("data-path") || "")
-        .filter(Boolean)
-        .join("\n");
-      await navigator.clipboard.writeText(paths);
-      new Notice("Search results copied to clipboard", 3000);
-    } catch {
-      new Notice("Failed to copy results", 4000);
-    }
   }
 }

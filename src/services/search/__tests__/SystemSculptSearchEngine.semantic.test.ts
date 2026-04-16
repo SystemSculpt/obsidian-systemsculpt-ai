@@ -22,6 +22,7 @@ const makePlugin = (app: App, options: { embeddingsEnabled?: boolean; manager?: 
       },
     },
     vaultFileCache: undefined,
+    embeddingsManager: manager,
     getOrCreateEmbeddingsManager: jest.fn().mockReturnValue(manager),
   } as any;
 };
@@ -65,7 +66,7 @@ describe("SystemSculptSearchEngine semantic mode", () => {
 
       await engine.search("artificial intelligence", { mode: "semantic", limit: 10 });
 
-      expect(mockManager.searchSimilar).toHaveBeenCalledWith("artificial intelligence", 10);
+      expect(mockManager.searchSimilar).toHaveBeenCalledWith("artificial intelligence", 10, undefined);
     });
 
     it("returns results with origin='semantic'", async () => {
@@ -146,6 +147,7 @@ describe("SystemSculptSearchEngine semantic mode", () => {
       });
       const { app, plugin } = buildFixture({ manager: mockManager });
       const engine = new SystemSculptSearchEngine(app as any, plugin);
+      await engine.startIndexing();
 
       const res = await engine.search("learning", { mode: "smart", limit: 10 });
 
@@ -162,6 +164,7 @@ describe("SystemSculptSearchEngine semantic mode", () => {
       });
       const { app, plugin } = buildFixture({ manager: mockManager });
       const engine = new SystemSculptSearchEngine(app as any, plugin);
+      await engine.startIndexing();
 
       const res = await engine.search("machine learning", { mode: "smart", limit: 10 });
 
@@ -177,12 +180,49 @@ describe("SystemSculptSearchEngine semantic mode", () => {
       });
       const { app, plugin } = buildFixture({ manager: mockManager });
       const engine = new SystemSculptSearchEngine(app as any, plugin);
+      await engine.startIndexing();
 
       const res = await engine.search("machine", { mode: "smart", limit: 10 });
 
       expect(res.stats.usedEmbeddings).toBe(false);
       const lexicalResults = res.results.filter((r) => r.origin === "lexical");
       expect(lexicalResults.length).toBeGreaterThan(0);
+    });
+
+    it("does not use embeddings in smart mode until the index is at least 75% complete", async () => {
+      const mockManager = createMockManager({
+        getStats: jest.fn().mockReturnValue({ total: 100, processed: 60, present: 60, needsProcessing: 40 }),
+        searchSimilar: jest.fn().mockResolvedValue([
+          { path: "notes/machine-learning.md", score: 0.95, metadata: { title: "Machine Learning" } },
+        ]),
+      });
+      const { app, plugin } = buildFixture({ manager: mockManager });
+      const engine = new SystemSculptSearchEngine(app as any, plugin);
+      await engine.startIndexing();
+
+      const res = await engine.search("machine learning", { mode: "smart", limit: 10 });
+
+      expect(mockManager.searchSimilar).not.toHaveBeenCalled();
+      expect(res.stats.usedEmbeddings).toBe(false);
+      expect(res.stats.embeddingsEligible).toBe(false);
+    });
+
+    it("uses embeddings in smart mode once the index is at least 75% complete", async () => {
+      const mockManager = createMockManager({
+        getStats: jest.fn().mockReturnValue({ total: 100, processed: 80, present: 80, needsProcessing: 20 }),
+        searchSimilar: jest.fn().mockResolvedValue([
+          { path: "notes/machine-learning.md", score: 0.95, metadata: { title: "Machine Learning" } },
+        ]),
+      });
+      const { app, plugin } = buildFixture({ manager: mockManager });
+      const engine = new SystemSculptSearchEngine(app as any, plugin);
+      await engine.startIndexing();
+
+      const res = await engine.search("machine learning", { mode: "smart", limit: 10 });
+
+      expect(mockManager.searchSimilar).toHaveBeenCalled();
+      expect(res.stats.usedEmbeddings).toBe(true);
+      expect(res.stats.embeddingsEligible).toBe(true);
     });
 
     it("deduplicates results by path", async () => {
@@ -194,6 +234,7 @@ describe("SystemSculptSearchEngine semantic mode", () => {
       });
       const { app, plugin } = buildFixture({ manager: mockManager });
       const engine = new SystemSculptSearchEngine(app as any, plugin);
+      await engine.startIndexing();
 
       const res = await engine.search("learning", { mode: "smart", limit: 10 });
 
@@ -211,6 +252,7 @@ describe("SystemSculptSearchEngine semantic mode", () => {
       });
       const { app, plugin } = buildFixture({ manager: mockManager });
       const engine = new SystemSculptSearchEngine(app as any, plugin);
+      await engine.startIndexing();
 
       const res = await engine.search("learning", { mode: "smart", limit: 10 });
 
@@ -300,7 +342,7 @@ describe("SystemSculptSearchEngine semantic mode", () => {
       expect(res.embeddings.total).toBe(200);
     });
 
-    it("handles manager errors and returns reason", async () => {
+    it("does not instantiate embeddings just to report readiness", async () => {
       const { app } = buildFixture();
       const plugin = {
         app,
@@ -316,7 +358,34 @@ describe("SystemSculptSearchEngine semantic mode", () => {
 
       expect(res.embeddings.ready).toBe(false);
       expect(res.embeddings.available).toBe(false);
-      expect(res.embeddings.reason).toContain("Manager initialization failed");
+      expect(res.embeddings.reason).toContain("not initialized");
+      expect(plugin.getOrCreateEmbeddingsManager).not.toHaveBeenCalled();
+    });
+
+    it("lazily bootstraps the embeddings manager for explicit semantic mode", async () => {
+      const { app } = buildFixture();
+      const manager = createMockManager({
+        searchSimilar: jest.fn().mockResolvedValue([
+          { path: "notes/machine-learning.md", score: 0.9, metadata: { title: "ML" } },
+        ]),
+      });
+      const plugin: any = {
+        app,
+        settings: { embeddingsEnabled: true, embeddingsExclusions: {} },
+        vaultFileCache: undefined,
+        embeddingsManager: undefined,
+        getOrCreateEmbeddingsManager: jest.fn(() => {
+          plugin.embeddingsManager = manager;
+          return manager;
+        }),
+      };
+      const engine = new SystemSculptSearchEngine(app as any, plugin);
+
+      const res = await engine.search("artificial intelligence", { mode: "semantic", limit: 10 });
+
+      expect(plugin.getOrCreateEmbeddingsManager).toHaveBeenCalled();
+      expect(manager.searchSimilar).toHaveBeenCalledWith("artificial intelligence", 10, undefined);
+      expect(res.results.map((r) => r.path)).toContain("notes/machine-learning.md");
     });
   });
 
