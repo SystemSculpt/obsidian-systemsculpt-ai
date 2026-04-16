@@ -216,6 +216,29 @@ describe("SystemSculptSearchEngine lexical mode", () => {
     jest.useRealTimers();
   });
 
+  it("drops cached recents when userIgnoreFilters change between empty-query loads", async () => {
+    const { app } = buildFixture();
+    const plugin = makePlugin(app);
+    plugin.settings.embeddingsExclusions.respectObsidianExclusions = true;
+    let ignoreFilters: string[] = [];
+    (app.vault as any).getConfig = jest.fn((key: string) => (key === "userIgnoreFilters" ? ignoreFilters : null));
+
+    const engine = new SystemSculptSearchEngine(app as any, plugin);
+
+    // First empty-query load populates the recent-hits cache via getRecent.
+    const before = await engine.getRecent(10);
+    expect(before.map((r) => r.path)).toContain("notes/orange-juice.md");
+
+    // User edits Obsidian's "Excluded files". Without eligibility refresh in
+    // getRecent, the cached recents would still include the excluded note
+    // until a non-empty search or vault event invalidates the cache.
+    ignoreFilters = ["orange-juice"];
+
+    const after = await engine.getRecent(10);
+    expect(after.map((r) => r.path)).not.toContain("notes/orange-juice.md");
+    expect(after.map((r) => r.path)).toContain("notes/fresh-orange.md");
+  });
+
   it("invalidates the eligible file snapshot when userIgnoreFilters change", async () => {
     const { app } = buildFixture();
     const plugin = makePlugin(app);

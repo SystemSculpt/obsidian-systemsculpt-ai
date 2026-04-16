@@ -267,6 +267,7 @@ export class SystemSculptSearchEngine {
    * Recent files snapshot for empty queries
    */
   async getRecent(limit = 25): Promise<SearchHit[]> {
+    this.refreshEligibilityIfChanged();
     if (!this.recentHitsCache || this.recentHitsCache.limit < limit) {
       const recentFiles = this.selectRecentFiles(this.getEligibleFiles(), limit);
       this.recentHitsCache = {
