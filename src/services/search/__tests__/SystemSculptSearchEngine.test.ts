@@ -340,6 +340,19 @@ describe("SystemSculptSearchEngine lexical mode", () => {
     expect(res.results.map((r) => r.path)).toContain("notes/emoji-launch.md");
   });
 
+  it("scores non-tokenizable terms in mixed queries so emoji-only docs still hit", async () => {
+    const { app } = buildFixture();
+    const plugin = makePlugin(app);
+    const engine = new SystemSculptSearchEngine(app as any, plugin);
+
+    // "orange" doesn't appear in emoji-launch.md at all; "🚀" has no tokenized
+    // form and the phrase "orange 🚀" never appears verbatim. The doc should
+    // still be returned because the non-tokenizable term matches its body.
+    const res = await engine.search("orange 🚀", { mode: "lexical", limit: 10 });
+
+    expect(res.results.map((r) => r.path)).toContain("notes/emoji-launch.md");
+  });
+
   it("finds non-ASCII metadata matches before reading note bodies", async () => {
     jest.useFakeTimers();
     const { app } = buildFixture();

@@ -836,6 +836,19 @@ export class SystemSculptSearchEngine {
     if (fuzzyPath) total += 4;
     if (fuzzyBody) total += 2.5;
 
+    if (total > 0) return total;
+
+    // Non-tokenizable terms (e.g. emoji, single characters, symbol-only) have
+    // empty exact/prefix/fuzzy sets, so token-based scoring always returns 0
+    // even when the candidate pool added the doc via substring fallback. Score
+    // these by substring so mixed queries like "launch 🚀" still credit docs
+    // that only contain the non-tokenizable portion.
+    if (term.exact.size === 0 && term.prefix.size === 0 && term.fuzzy.size === 0 && term.value.length > 0) {
+      if (doc.lowerTitle.includes(term.value)) total += 9;
+      if (doc.lowerPath.includes(term.value)) total += 4;
+      if (doc.body.includes(term.value)) total += 3;
+    }
+
     return total;
   }
 
