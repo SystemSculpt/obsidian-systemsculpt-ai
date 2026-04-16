@@ -277,6 +277,38 @@ describe("SystemSculptSearchEngine lexical mode", () => {
     jest.useRealTimers();
   });
 
+  it("refreshes eligibility on the smart metadata fast path so in-flight indexes can't go stale", async () => {
+    jest.useFakeTimers();
+    const { app } = buildFixture();
+    const plugin = makePlugin(app);
+    plugin.settings.embeddingsExclusions.respectObsidianExclusions = true;
+    let ignoreFilters: string[] = [];
+    (app.vault as any).getConfig = jest.fn((key: string) => (key === "userIgnoreFilters" ? ignoreFilters : null));
+
+    const engine = new SystemSculptSearchEngine(app as any, plugin);
+    const clearSpy = jest.spyOn(engine as any, "clearIndexes");
+
+    // First smart search while the content index isn't ready yet → metadata fast path.
+    // Fake timers keep the scheduled background indexing from running.
+    const first = await engine.search("orange", { mode: "smart", limit: 10 });
+    expect(first.stats.metadataOnly).toBe(true);
+    expect(clearSpy).not.toHaveBeenCalled();
+
+    // Simulate the user editing Obsidian's "Excluded files" between searches.
+    ignoreFilters = ["orange-juice"];
+
+    // Second smart search, still cold → metadata fast path again. Without the
+    // refresh-before-metadata call, the signature would be updated silently and
+    // a later lexical pass would reuse the stale (pre-filter) content index.
+    const second = await engine.search("orange", { mode: "smart", limit: 10 });
+    expect(second.stats.metadataOnly).toBe(true);
+    expect(second.results.map((r) => r.path)).not.toContain("notes/orange-juice.md");
+    expect(clearSpy).toHaveBeenCalledTimes(1);
+
+    engine.destroy();
+    jest.useRealTimers();
+  });
+
   it("prefers full term coverage over recent one-term matches", async () => {
     const { app } = buildFixture();
     const plugin = makePlugin(app);

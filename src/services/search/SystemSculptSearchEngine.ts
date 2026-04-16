@@ -181,6 +181,7 @@ export class SystemSculptSearchEngine {
     }
 
     if (mode === "smart" && !this.contentIndexReady) {
+      this.refreshEligibilityIfChanged();
       const metadataStart = performance.now();
       const metadataHits = this.runMetadataSearch(terms, phrase, limit, sort);
       this.scheduleIndexing();
