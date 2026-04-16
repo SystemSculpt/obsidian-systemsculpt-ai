@@ -8,11 +8,17 @@ import type {
 } from "../services/search/SystemSculptSearchEngine";
 
 export class SystemSculptSearchModal extends StandardModal {
+  private static nextListId = 0;
   private engine: SystemSculptSearchEngine;
   private searchInputEl: HTMLInputElement | null = null;
+  private statusEl: HTMLElement | null = null;
   private listEl: HTMLElement | null = null;
+  private activeResultEl: HTMLElement | null = null;
 
-  private readonly SEARCH_LIMIT = 80;
+  private readonly SEARCH_LIMIT = 30;
+  private readonly RECENT_LIMIT = 25;
+  private readonly STABLE_TOP_COUNT = 14;
+  private readonly listId = `ss-search-results-${++SystemSculptSearchModal.nextListId}`;
   private currentQuery = "";
   private debounceHandle: number | null = null;
   private recentPreviewHandle: number | null = null;
@@ -24,30 +30,37 @@ export class SystemSculptSearchModal extends StandardModal {
   constructor(plugin: SystemSculptPlugin) {
     super(plugin.app);
     this.engine = plugin.getSearchEngine();
-    this.setSize("fullwidth");
+    this.setSize("large");
+    this.modalEl.addClass("ss-search-modal");
   }
 
   onOpen() {
     super.onOpen();
+    document.body.classList.add("ss-search-open");
     this.contentEl.addClass("ss-search__content");
-    this.footerEl.style.display = "none";
-
-    this.addTitle("SystemSculpt Search");
+    this.footerEl.addClass("ss-search__footer");
+    this.footerEl.createDiv({ text: "↑/↓ Navigate · Enter Open · Esc Close", cls: "ss-search__hint" });
 
     const shell = this.contentEl.createDiv({ cls: "ss-search" });
     this.searchInputEl = this.buildSearchBar(shell, "Search your vault...", (value) => this.onSearchChange(value));
 
-    this.listEl = shell.createDiv({ cls: "ss-modal__list ss-search__list" });
+    this.statusEl = shell.createDiv({ cls: "ss-search__status" });
+    this.statusEl.setAttr("aria-live", "polite");
+
+    this.listEl = shell.createDiv({ cls: "ss-search__list" });
+    this.listEl.id = this.listId;
     this.listEl.setAttr("role", "listbox");
     this.listEl.setAttr("aria-label", "Search results");
     this.registerDomEvent(this.listEl, "click", (event) => void this.handleResultClick(event));
     this.registerDomEvent(this.listEl, "keydown", (event) => void this.handleResultKeydown(event as KeyboardEvent));
+    this.registerDomEvent(this.listEl, "focusin", (event) => this.handleResultFocus(event));
 
     setTimeout(() => this.searchInputEl?.focus(), 0);
     void this.renderRecents();
   }
 
   onClose() {
+    document.body.classList.remove("ss-search-open");
     this.querySerial += 1;
     this.cancelSearch();
     this.cancelRecentPreviewHydration();
@@ -58,7 +71,9 @@ export class SystemSculptSearchModal extends StandardModal {
     }
     super.onClose();
     this.searchInputEl = null;
+    this.statusEl = null;
     this.listEl = null;
+    this.activeResultEl = null;
   }
 
   private buildSearchBar(parent: HTMLElement, placeholder: string, onInput: (value: string) => void): HTMLInputElement {
@@ -71,6 +86,14 @@ export class SystemSculptSearchModal extends StandardModal {
       type: "text",
       placeholder,
       cls: "ss-search__input",
+      attr: {
+        role: "combobox",
+        autocomplete: "off",
+        "aria-label": "Search your vault",
+        "aria-autocomplete": "list",
+        "aria-controls": this.listId,
+        "aria-expanded": "false",
+      },
     });
 
     const clear = wrapper.createEl("button", {
@@ -94,14 +117,14 @@ export class SystemSculptSearchModal extends StandardModal {
       const firstItem = this.getResultItems()[0];
       if (!firstItem) return;
       keyboardEvent.preventDefault();
-      firstItem.focus();
+      this.focusResult(firstItem);
     });
 
     this.registerDomEvent(clear, "click", () => {
       input.value = "";
       clear.style.display = "none";
       onInput("");
-      input.focus();
+      this.focusSearchInput();
     });
 
     return input;
@@ -197,7 +220,7 @@ export class SystemSculptSearchModal extends StandardModal {
       });
 
       if (serial === this.querySerial && !controller.signal.aborted) {
-        this.renderResponse(response);
+        this.renderResponse(response, { stabilize: true });
       }
     } catch (error) {
       if (!this.isAbortError(error) && serial === this.querySerial) {
@@ -213,41 +236,63 @@ export class SystemSculptSearchModal extends StandardModal {
   private async renderRecents() {
     const serial = ++this.querySerial;
     this.cancelRecentPreviewHydration();
-    const recents = await this.engine.getRecent(25);
-    if (serial < this.querySerial) return;
-    this.renderResults(recents);
-    this.scheduleRecentPreviewHydration(recents, serial);
+    try {
+      const recents = await this.engine.getRecent(this.RECENT_LIMIT);
+      if (serial < this.querySerial) return;
+      this.renderResults(recents, { label: "Recent", context: "recent" });
+      this.scheduleRecentPreviewHydration(recents, serial);
+    } catch {
+      if (serial < this.querySerial) return;
+      this.setStatus("Recent");
+      this.renderEmpty("Could not load recent notes.");
+    }
   }
 
-  private renderResponse(response: SearchResponse) {
-    this.renderResults(response.results);
+  private renderResponse(response: SearchResponse, options: { stabilize?: boolean } = {}) {
+    const count = response.results.length;
+    const label = `${count} ${count === 1 ? "result" : "results"}`;
+    this.renderResults(response.results, {
+      label,
+      context: "search",
+      stabilize: options.stabilize,
+    });
   }
 
-  private renderResults(results: SearchHit[]) {
+  private renderResults(
+    results: SearchHit[],
+    options: { label: string; context: "recent" | "search"; stabilize?: boolean }
+  ) {
     if (!this.listEl) return;
-    this.listEl.empty();
+    const previousState = this.captureListState();
+    const orderedResults = options.stabilize
+      ? this.stabilizeResults(results, previousState.renderedPaths, previousState.focusedPath)
+      : results;
 
-    if (results.length === 0) {
-      this.renderEmpty("No matches yet. Try fewer words.");
+    this.setStatus(options.label);
+    this.clearActiveResult();
+    this.listEl.empty();
+    this.setComboboxExpanded(orderedResults.length > 0);
+
+    if (orderedResults.length === 0) {
+      this.renderEmpty(options.context === "recent" ? "No recent notes yet." : "No matches yet. Try fewer words.");
       return;
     }
 
-    results.forEach((result) => {
+    orderedResults.forEach((result, index) => {
       const item = document.createElement("div");
       item.className = "ss-search__item";
+      item.id = this.resultId(index);
       item.setAttr("data-path", result.path);
       item.setAttr("role", "option");
-      item.setAttr("tabindex", "0");
-      item.setAttr("aria-label", `${result.title}, ${result.path}`);
+      item.setAttr("tabindex", "-1");
+      item.setAttr("aria-selected", "false");
 
       const header = item.createDiv({ cls: "ss-search__item-top" });
       const titleEl = header.createDiv({ cls: "ss-search__title" });
       this.appendHighlightedText(titleEl, result.title, this.currentQuery);
 
       const meta = item.createDiv({ cls: "ss-search__meta" });
-      const metaParts = [result.path, this.formatUpdated(result.updatedAt)];
-      if (result.size) metaParts.push(this.formatSize(result.size));
-      meta.setText(metaParts.join(" - "));
+      meta.setText([result.path, this.formatUpdated(result.updatedAt)].join(" · "));
 
       if (result.excerpt) {
         const excerpt = item.createDiv({ cls: "ss-search__excerpt" });
@@ -256,6 +301,8 @@ export class SystemSculptSearchModal extends StandardModal {
 
       this.listEl!.appendChild(item);
     });
+
+    this.restoreListState(previousState, options.stabilize === true);
   }
 
   private scheduleRecentPreviewHydration(results: SearchHit[], serial: number) {
@@ -300,13 +347,15 @@ export class SystemSculptSearchModal extends StandardModal {
       const preview = previews.get(path);
       if (!preview) return;
       const excerpt = item.createDiv({ cls: "ss-search__excerpt" });
-      this.appendHighlightedText(excerpt, preview, "");
+      excerpt.setText(preview);
     });
   }
 
   private renderLoading(text: string) {
     if (!this.listEl) return;
+    this.setStatus(text);
     this.listEl.empty();
+    this.setComboboxExpanded(false);
     const loading = this.listEl.createDiv("ss-modal__loading ss-search__loading");
     loading.createDiv({ text });
   }
@@ -314,6 +363,8 @@ export class SystemSculptSearchModal extends StandardModal {
   private renderEmpty(text: string) {
     if (!this.listEl) return;
     this.listEl.empty();
+    this.setComboboxExpanded(false);
+    this.clearActiveResult();
     const empty = this.listEl.createDiv("ss-modal__empty-state ss-search__empty");
     empty.createDiv({ text });
   }
@@ -328,7 +379,7 @@ export class SystemSculptSearchModal extends StandardModal {
     const item = this.findResultItem(event.target);
     if (!item) return;
 
-    if (event.key === "Enter" || event.key === " ") {
+    if (event.key === "Enter") {
       event.preventDefault();
       await this.openResult(item.getAttribute("data-path"));
       return;
@@ -341,7 +392,19 @@ export class SystemSculptSearchModal extends StandardModal {
     const nextIndex = event.key === "ArrowDown"
       ? Math.min(items.length - 1, currentIndex + 1)
       : Math.max(0, currentIndex - 1);
-    items[nextIndex]?.focus();
+    const nextItem = items[nextIndex];
+    if (nextItem === item && event.key === "ArrowUp") {
+      this.focusSearchInput();
+      this.clearActiveResult();
+      return;
+    }
+    if (nextItem) this.focusResult(nextItem);
+  }
+
+  private handleResultFocus(event: Event) {
+    const item = this.findResultItem(event.target);
+    if (!item) return;
+    this.setActiveResult(item);
   }
 
   private async openResult(path: string | null) {
@@ -365,6 +428,121 @@ export class SystemSculptSearchModal extends StandardModal {
 
   private hasRenderedResults(): boolean {
     return this.getResultItems().length > 0;
+  }
+
+  private captureListState(): {
+    renderedPaths: string[];
+    focusedPath: string | null;
+    focusedIndex: number;
+    hadListFocus: boolean;
+    scrollTop: number;
+  } {
+    const items = this.getResultItems();
+    const activeItem = this.findResultItem(document.activeElement);
+    const focusedIndex = activeItem ? items.indexOf(activeItem) : -1;
+    return {
+      renderedPaths: items.map((item) => item.getAttribute("data-path") ?? "").filter(Boolean),
+      focusedPath: activeItem?.getAttribute("data-path") ?? null,
+      focusedIndex,
+      hadListFocus: !!activeItem,
+      scrollTop: this.listEl?.scrollTop ?? 0,
+    };
+  }
+
+  private stabilizeResults(results: SearchHit[], renderedPaths: string[], focusedPath: string | null): SearchHit[] {
+    if (renderedPaths.length === 0 || results.length === 0) return results;
+
+    const nextByPath = new Map(results.map((result) => [result.path, result]));
+    const preservedPaths = new Set(renderedPaths.slice(0, this.STABLE_TOP_COUNT));
+    if (focusedPath) preservedPaths.add(focusedPath);
+
+    const preserved: SearchHit[] = [];
+    for (const path of renderedPaths) {
+      if (!preservedPaths.has(path)) continue;
+      const next = nextByPath.get(path);
+      if (next) preserved.push(next);
+    }
+
+    if (preserved.length === 0) return results;
+    const preservedSet = new Set(preserved.map((result) => result.path));
+    const additions = results.filter((result) => !preservedSet.has(result.path));
+    return [...preserved, ...additions].slice(0, results.length);
+  }
+
+  private restoreListState(state: ReturnType<SystemSculptSearchModal["captureListState"]>, stabilized: boolean) {
+    if (!this.listEl) return;
+
+    const focusTarget = state.focusedPath
+      ? this.getResultItems().find((item) => item.getAttribute("data-path") === state.focusedPath)
+      : null;
+
+    if (!stabilized) {
+      if (state.hadListFocus) {
+        this.focusSearchInput();
+      }
+      return;
+    }
+
+    this.listEl.scrollTop = state.scrollTop;
+
+    if (state.hadListFocus && state.focusedPath && !focusTarget) {
+      this.focusSearchInput(true);
+      this.clearActiveResult();
+      return;
+    }
+
+    const fallback = state.hadListFocus && state.focusedIndex >= 0
+      ? this.getResultItems()[Math.min(state.focusedIndex, this.getResultItems().length - 1)]
+      : null;
+    const item = focusTarget ?? fallback;
+    if (item) this.focusResult(item, true);
+  }
+
+  private focusSearchInput(preventScroll = false) {
+    if (!this.searchInputEl) return;
+    try {
+      this.searchInputEl.focus({ preventScroll });
+    } catch {
+      this.searchInputEl.focus();
+    }
+  }
+
+  private focusResult(item: HTMLElement, preventScroll = false) {
+    try {
+      item.focus({ preventScroll });
+    } catch {
+      item.focus();
+    }
+    this.setActiveResult(item);
+  }
+
+  private setActiveResult(activeItem: HTMLElement) {
+    if (this.activeResultEl && this.activeResultEl !== activeItem && this.activeResultEl.isConnected) {
+      this.activeResultEl.setAttr("aria-selected", "false");
+    }
+    activeItem.setAttr("aria-selected", "true");
+    this.activeResultEl = activeItem;
+    this.searchInputEl?.setAttr("aria-activedescendant", activeItem.id);
+  }
+
+  private clearActiveResult() {
+    if (this.activeResultEl?.isConnected) {
+      this.activeResultEl.setAttr("aria-selected", "false");
+    }
+    this.activeResultEl = null;
+    this.searchInputEl?.removeAttribute("aria-activedescendant");
+  }
+
+  private setComboboxExpanded(expanded: boolean) {
+    this.searchInputEl?.setAttr("aria-expanded", expanded ? "true" : "false");
+  }
+
+  private setStatus(text: string) {
+    this.statusEl?.setText(text);
+  }
+
+  private resultId(index: number): string {
+    return `${this.listId}-option-${index}`;
   }
 
   private cancelSearch() {
@@ -436,11 +614,5 @@ export class SystemSculptSearchModal extends StandardModal {
     if (diff < day) return "Updated today";
     if (diff < 7 * day) return `${Math.round(diff / day)}d ago`;
     return date.toLocaleDateString();
-  }
-
-  private formatSize(bytes: number): string {
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   }
 }

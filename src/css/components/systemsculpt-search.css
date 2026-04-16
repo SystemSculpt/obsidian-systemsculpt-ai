@@ -1,17 +1,41 @@
-/* SystemSculpt Search — rebuilt to match native Obsidian, minimal and compact */
+/* SystemSculpt Search - focused vault search layout */
+
+.ss-modal.ss-search-modal {
+  width: min(860px, 94vw);
+  height: min(760px, 84vh);
+  max-width: 94vw;
+  max-height: 86vh;
+}
+
+.ss-search-modal .ss-modal__header {
+  display: none;
+}
+
+body.ss-search-open .tooltip {
+  display: none !important;
+}
+
+.ss-search-modal .ss-modal__content {
+  min-height: 0;
+  overflow: hidden;
+  padding: 16px 16px 0;
+}
 
 .ss-search__content {
   display: flex;
   flex-direction: column;
   min-height: 0;
   height: 100%;
+  overflow: hidden;
 }
 
 .ss-search {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 10px;
   min-height: 0;
+  height: 100%;
+  overflow: hidden;
 }
 
 /* Search bar */
@@ -24,6 +48,7 @@
   border-radius: 6px;
   background: var(--background-primary);
   min-height: 36px;
+  flex-shrink: 0;
 }
 
 .ss-search__icon {
@@ -37,6 +62,7 @@
 
 .ss-search__input {
   flex: 1;
+  min-width: 0;
   border: none;
   background: transparent;
   outline: none;
@@ -67,29 +93,41 @@
   color: var(--text-normal);
 }
 
+.ss-search__status {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.3;
+  min-height: 16px;
+  padding: 0 2px;
+  flex-shrink: 0;
+}
+
 /* Results */
 .ss-search__list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  overflow-y: auto;
-  padding: 6px 2px 12px;
-  scroll-padding: 8px;
-  flex: 1;
+  display: block;
   min-height: 0;
+  margin: 0;
+  padding: 0 4px 12px;
+  overflow-y: auto;
+  scroll-padding: 10px;
   overscroll-behavior: contain;
 }
 
 .ss-search__item {
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 8px;
-  padding: 10px 12px;
-  background: var(--background-primary);
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  border-bottom: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  padding: 10px 12px 11px;
+  background: transparent;
+  cursor: pointer;
+  overflow: hidden;
   transition: border-color 120ms ease, background-color 120ms ease;
 }
 
 .ss-search__item:hover {
-  border-color: var(--interactive-accent);
   background: var(--background-modifier-hover);
 }
 
@@ -98,36 +136,51 @@
   outline-offset: 2px;
 }
 
+.ss-search__item[aria-selected="true"] {
+  background: var(--background-modifier-hover);
+}
+
 .ss-search__item-top {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  align-items: flex-start;
+  display: block;
+  min-width: 0;
 }
 
 .ss-search__title {
+  display: block;
+  min-width: 0;
   font-size: 14px;
   font-weight: 600;
   line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .ss-search__meta {
-  margin-top: 4px;
+  margin-top: 2px;
   color: var(--text-muted);
   font-size: 12px;
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .ss-search__excerpt {
-  margin-top: 6px;
+  display: block;
+  margin-top: 5px;
   color: var(--text-normal);
-  line-height: 1.45;
+  line-height: 18px;
   font-size: 13px;
+  max-height: 36px;
+  overflow: hidden;
+  overflow-wrap: anywhere;
 }
 
-.ss-search__excerpt mark.ss-hl,
-mark.ss-hl {
+.ss-search-modal mark.ss-hl {
   background: color-mix(in srgb, var(--interactive-accent) 35%, var(--background-primary));
   color: var(--text-normal);
+  text-decoration: none;
   padding: 0 2px;
   border-radius: 3px;
 }
@@ -137,4 +190,41 @@ mark.ss-hl {
   text-align: center;
   color: var(--text-muted);
   padding: 12px 0;
+}
+
+.ss-search__footer {
+  border-top: 1px solid var(--background-modifier-border);
+  flex: 0 0 auto;
+  justify-content: center;
+  min-height: 32px;
+  padding: 8px 16px;
+}
+
+.ss-search__hint {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.is-mobile .ss-search-modal .ss-search__footer,
+.is-phone .ss-search-modal .ss-search__footer {
+  display: none;
+}
+
+@media (max-width: 700px) {
+  .ss-modal.ss-search-modal {
+    width: 96vw;
+    height: 82vh;
+  }
+
+  .ss-search-modal .ss-modal__content {
+    padding: 12px 12px 0;
+  }
+
+  .ss-search__list {
+    padding-inline: 0;
+  }
+
+  .ss-search__excerpt {
+    max-height: 18px;
+  }
 }

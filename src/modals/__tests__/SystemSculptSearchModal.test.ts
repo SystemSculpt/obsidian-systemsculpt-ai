@@ -94,16 +94,31 @@ describe("SystemSculptSearchModal", () => {
       expect(plugin._testEngine.getEmbeddingsIndicator).not.toHaveBeenCalled();
     });
 
-    it("renders one simple search view without metrics, modes, or footer actions", () => {
+    it("renders one simple command-palette search view without metrics or mode controls", () => {
       modal.onOpen();
 
       expect((modal as any).searchInputEl).not.toBeNull();
       expect((modal as any).listEl).not.toBeNull();
+      expect(modal.modalEl.hasClass("ss-search-modal")).toBe(true);
+      expect((modal as any).footerEl.querySelector(".ss-search__hint")?.textContent).toContain("Enter Open");
       expect(modal.contentEl.querySelector(".ss-search__metrics")).toBeNull();
       expect(modal.contentEl.querySelector(".ss-search__state")).toBeNull();
       expect(modal.contentEl.querySelector("[data-mode]")).toBeNull();
       expect(modal.contentEl.querySelector("[data-sort]")).toBeNull();
-      expect((modal as any).footerEl.style.display).toBe("none");
+      expect((modal as any).headerEl.textContent).not.toContain("SystemSculpt Search");
+    });
+
+    it("uses combobox/listbox attributes for the result list", () => {
+      modal.onOpen();
+
+      const input = (modal as any).searchInputEl as HTMLInputElement;
+      const listEl = (modal as any).listEl as HTMLElement;
+      expect(input.getAttribute("role")).toBe("combobox");
+      expect(input.getAttribute("aria-label")).toBe("Search your vault");
+      expect(input.getAttribute("aria-controls")).toBe(listEl.id);
+      expect(input.getAttribute("aria-autocomplete")).toBe("list");
+      expect(listEl.getAttribute("role")).toBe("listbox");
+      expect(listEl.getAttribute("aria-label")).toBe("Search results");
     });
 
     it("renders recent files on open without warming or checking backends", async () => {
@@ -113,6 +128,18 @@ describe("SystemSculptSearchModal", () => {
       expect(plugin._testEngine.getRecent).toHaveBeenCalledWith(25);
       expect(plugin._testEngine.getEmbeddingsIndicator).not.toHaveBeenCalled();
       expect((modal as any).listEl?.textContent).toContain("Recent Note");
+    });
+
+    it("shows a graceful empty state if recent files cannot be loaded", async () => {
+      plugin = createMockPlugin({
+        getRecent: jest.fn().mockRejectedValue(new Error("metadata unavailable")),
+      });
+      modal = new SystemSculptSearchModal(plugin);
+
+      modal.onOpen();
+      await flush();
+
+      expect((modal as any).listEl?.textContent).toContain("Could not load recent notes.");
     });
   });
 
@@ -177,9 +204,26 @@ describe("SystemSculptSearchModal", () => {
       expect(plugin._testEngine.search).toHaveBeenCalledWith("test", {
         mode: "smart",
         sort: "relevance",
-        limit: 80,
+        limit: 30,
         signal: expect.any(AbortSignal),
       });
+    });
+
+    it("clears the active query and returns to recents with the clear button", async () => {
+      modal.onOpen();
+      const input = (modal as any).searchInputEl as HTMLInputElement;
+      const clear = modal.contentEl.querySelector(".ss-search__clear") as HTMLButtonElement;
+
+      input.value = "test";
+      input.dispatchEvent(new Event("input"));
+      expect(clear.style.display).toBe("flex");
+
+      clear.click();
+      await flush();
+
+      expect(input.value).toBe("");
+      expect(clear.style.display).toBe("none");
+      expect(plugin._testEngine.getRecent).toHaveBeenCalledWith(25);
     });
 
     it("uses query serials to prevent stale responses from replacing newer results", async () => {
@@ -227,11 +271,50 @@ describe("SystemSculptSearchModal", () => {
       modal.onOpen();
 
       await (modal as any).executeSearch("body");
+      expect(modal.contentEl.querySelector(".ss-search__status")?.textContent).toBe("1 result");
       jest.advanceTimersByTime(0);
       await flush(4);
 
       expect(plugin._testEngine.whenIndexReady).toHaveBeenCalled();
       expect((modal as any).listEl?.querySelector('[data-path="notes/body-hit.md"]')).not.toBeNull();
+    });
+
+    it("stabilizes fast metadata-to-index refreshes without waiting for interaction", async () => {
+      const first = createMockSearchResponse({
+        results: [
+          { path: "notes/a.md", title: "A", score: 0.8, origin: "lexical", updatedAt: Date.now() },
+          { path: "notes/b.md", title: "B", score: 0.7, origin: "lexical", updatedAt: Date.now() },
+        ],
+        stats: {
+          ...createMockSearchResponse().stats,
+          indexingPending: true,
+          metadataOnly: true,
+        },
+      });
+      const second = createMockSearchResponse({
+        results: [
+          { path: "notes/c.md", title: "C", score: 0.95, origin: "lexical", updatedAt: Date.now() },
+          { path: "notes/b.md", title: "B", score: 0.9, origin: "lexical", updatedAt: Date.now() },
+          { path: "notes/a.md", title: "A", score: 0.4, origin: "lexical", updatedAt: Date.now() },
+        ],
+      });
+      plugin = createMockPlugin({
+        search: jest.fn().mockResolvedValueOnce(first).mockResolvedValueOnce(second),
+        whenIndexReady: jest.fn().mockResolvedValue(undefined),
+      });
+      modal = new SystemSculptSearchModal(plugin);
+      modal.onOpen();
+
+      await (modal as any).executeSearch("body");
+      expect(modal.contentEl.querySelector(".ss-search__status")?.textContent).toBe("2 results");
+      jest.advanceTimersByTime(0);
+      await flush(4);
+
+      expect(Array.from((modal as any).listEl.querySelectorAll<HTMLElement>(".ss-search__item")).map((item) => item.getAttribute("data-path"))).toEqual([
+        "notes/a.md",
+        "notes/b.md",
+        "notes/c.md",
+      ]);
     });
   });
 
@@ -243,8 +326,18 @@ describe("SystemSculptSearchModal", () => {
       const listEl = (modal as any).listEl;
       const item = listEl?.querySelector(".ss-search__item");
       expect(item?.getAttribute("data-path")).toBe("notes/test.md");
+      expect(item?.getAttribute("tabindex")).toBe("-1");
       expect(listEl?.querySelector(".ss-search__score")).toBeNull();
       expect(listEl?.querySelector(".ss-search__pill--semantic")).toBeNull();
+    });
+
+    it("shows section labels and omits file size noise", async () => {
+      modal.onOpen();
+      await (modal as any).executeSearch("test");
+
+      expect(modal.contentEl.querySelector(".ss-search__status")?.textContent).toBe("1 result");
+      expect((modal as any).listEl?.textContent).toContain("notes/test.md");
+      expect((modal as any).listEl?.textContent).not.toContain("1.0 KB");
     });
 
     it("escapes note content while still highlighting matching terms", async () => {
@@ -314,6 +407,16 @@ describe("SystemSculptSearchModal", () => {
       expect(plugin.app.workspace.openLinkText).toHaveBeenCalledWith("notes/test.md", "");
     });
 
+    it("does not open a focused result with Space", async () => {
+      modal.onOpen();
+      await (modal as any).executeSearch("test");
+
+      const item = (modal as any).listEl?.querySelector(".ss-search__item") as HTMLElement;
+      item.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true }));
+
+      expect(plugin.app.workspace.openLinkText).not.toHaveBeenCalled();
+    });
+
     it("moves focus from the input to the first result with ArrowDown", async () => {
       document.body.appendChild((modal as any).modalEl);
       modal.onOpen();
@@ -323,6 +426,68 @@ describe("SystemSculptSearchModal", () => {
       input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
 
       expect(document.activeElement).toBe((modal as any).listEl?.querySelector(".ss-search__item"));
+      expect(((modal as any).searchInputEl as HTMLInputElement).getAttribute("aria-activedescendant")).toBe(
+        ((modal as any).listEl?.querySelector(".ss-search__item") as HTMLElement).id
+      );
+    });
+
+    it("preserves focused result and scroll position across stabilized refreshes", async () => {
+      document.body.appendChild((modal as any).modalEl);
+      modal.onOpen();
+      const first = createMockSearchResponse({
+        results: [
+          { path: "notes/a.md", title: "A", score: 0.8, origin: "lexical", updatedAt: Date.now() },
+          { path: "notes/b.md", title: "B", score: 0.7, origin: "lexical", updatedAt: Date.now() },
+        ],
+      });
+      const second = createMockSearchResponse({
+        results: [
+          { path: "notes/c.md", title: "C", score: 0.95, origin: "lexical", updatedAt: Date.now() },
+          { path: "notes/b.md", title: "B", score: 0.9, origin: "lexical", updatedAt: Date.now() },
+          { path: "notes/a.md", title: "A", score: 0.4, origin: "lexical", updatedAt: Date.now() },
+        ],
+      });
+
+      (modal as any).renderResponse(first);
+      const listEl = (modal as any).listEl as HTMLElement;
+      const focused = listEl.querySelector('[data-path="notes/b.md"]') as HTMLElement;
+      focused.focus();
+      listEl.scrollTop = 48;
+
+      (modal as any).renderResponse(second, { stabilize: true });
+
+      expect(document.activeElement?.getAttribute("data-path")).toBe("notes/b.md");
+      expect(listEl.scrollTop).toBe(48);
+      expect(Array.from(listEl.querySelectorAll<HTMLElement>(".ss-search__item")).map((item) => item.getAttribute("data-path"))).toEqual([
+        "notes/a.md",
+        "notes/b.md",
+        "notes/c.md",
+      ]);
+    });
+
+    it("returns focus to the input instead of a different result when the focused path disappears", async () => {
+      document.body.appendChild((modal as any).modalEl);
+      modal.onOpen();
+      const first = createMockSearchResponse({
+        results: [
+          { path: "notes/a.md", title: "A", score: 0.8, origin: "lexical", updatedAt: Date.now() },
+          { path: "notes/b.md", title: "B", score: 0.7, origin: "lexical", updatedAt: Date.now() },
+        ],
+      });
+      const second = createMockSearchResponse({
+        results: [
+          { path: "notes/c.md", title: "C", score: 0.95, origin: "lexical", updatedAt: Date.now() },
+        ],
+      });
+
+      (modal as any).renderResponse(first);
+      const listEl = (modal as any).listEl as HTMLElement;
+      (listEl.querySelector('[data-path="notes/b.md"]') as HTMLElement).focus();
+
+      (modal as any).renderResponse(second);
+
+      expect(document.activeElement).toBe((modal as any).searchInputEl);
+      expect(((modal as any).searchInputEl as HTMLInputElement).getAttribute("aria-activedescendant")).toBeNull();
     });
   });
 
@@ -332,11 +497,5 @@ describe("SystemSculptSearchModal", () => {
       expect((modal as any).formatUpdated(Date.now() - 1000)).toBe("Updated today");
     });
 
-    it("formats sizes", () => {
-      modal.onOpen();
-      expect((modal as any).formatSize(500)).toBe("500 B");
-      expect((modal as any).formatSize(2048)).toBe("2.0 KB");
-      expect((modal as any).formatSize(1500000)).toBe("1.4 MB");
-    });
   });
 });
