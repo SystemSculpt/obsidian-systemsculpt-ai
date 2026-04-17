@@ -1,12 +1,64 @@
-export function normalizePastedImageMimeType(rawMimeType: string): string {
+const MEDIA_MIME_PREFIXES = ["image/", "video/", "audio/"] as const;
+
+const IMAGE_EXTENSIONS_FOR_INGEST = new Set([
+  "png",
+  "jpg",
+  "jpeg",
+  "webp",
+  "gif",
+  "bmp",
+  "tiff",
+  "avif",
+  "svg",
+]);
+const VIDEO_EXTENSIONS_FOR_INGEST = new Set([
+  "mp4",
+  "mov",
+  "mkv",
+  "webm",
+  "avi",
+  "m4v",
+  "mpeg",
+  "mpg",
+]);
+const AUDIO_EXTENSIONS_FOR_INGEST = new Set([
+  "mp3",
+  "wav",
+  "m4a",
+  "aac",
+  "ogg",
+  "oga",
+  "flac",
+  "opus",
+  "weba",
+]);
+
+export function isMediaMimeType(rawMimeType: string): boolean {
   const normalized = String(rawMimeType || "").trim().toLowerCase();
-  if (normalized.startsWith("image/")) {
+  return MEDIA_MIME_PREFIXES.some((prefix) => normalized.startsWith(prefix));
+}
+
+export function isMediaIngestableExtension(extension: string): boolean {
+  const normalized = String(extension || "")
+    .trim()
+    .toLowerCase()
+    .replace(/^\./, "");
+  return (
+    IMAGE_EXTENSIONS_FOR_INGEST.has(normalized) ||
+    VIDEO_EXTENSIONS_FOR_INGEST.has(normalized) ||
+    AUDIO_EXTENSIONS_FOR_INGEST.has(normalized)
+  );
+}
+
+export function normalizePastedMediaMimeType(rawMimeType: string): string {
+  const normalized = String(rawMimeType || "").trim().toLowerCase();
+  if (isMediaMimeType(normalized)) {
     return normalized;
   }
   return "image/png";
 }
 
-export function extractClipboardImageFiles(event: ClipboardEvent): File[] {
+export function extractClipboardMediaFiles(event: ClipboardEvent): File[] {
   const clipboard = event.clipboardData;
   if (!clipboard) {
     return [];
@@ -20,7 +72,7 @@ export function extractClipboardImageFiles(event: ClipboardEvent): File[] {
         continue;
       }
       const file = item.getAsFile();
-      if (!file || !String(file.type || "").toLowerCase().startsWith("image/")) {
+      if (!file || !isMediaMimeType(file.type)) {
         continue;
       }
       const key = `${file.name}:${file.type}:${file.size}:${file.lastModified}`;
@@ -38,7 +90,7 @@ export function extractClipboardImageFiles(event: ClipboardEvent): File[] {
 
   if (clipboard.files && clipboard.files.length > 0) {
     for (const file of Array.from(clipboard.files)) {
-      if (!file || !String(file.type || "").toLowerCase().startsWith("image/")) {
+      if (!file || !isMediaMimeType(file.type)) {
         continue;
       }
       const key = `${file.name}:${file.type}:${file.size}:${file.lastModified}`;

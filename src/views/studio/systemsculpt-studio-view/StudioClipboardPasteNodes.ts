@@ -36,8 +36,46 @@ export function buildPastedTextNode(options: {
   };
 }
 
+export function buildMediaIngestNode(options: {
+  mediaDefinition: StudioNodeDefinition;
+  sourcePath: string;
+  anchor: { x: number; y: number };
+  index: number;
+  nextNodeId: () => string;
+  normalizeNodePosition: (position: { x: number; y: number }) => { x: number; y: number };
+  prettifyNodeKind: (kind: string) => string;
+  cloneConfigDefaults: (definition: StudioNodeDefinition) => Record<string, unknown>;
+}): StudioNodeInstance {
+  const {
+    mediaDefinition,
+    sourcePath,
+    anchor,
+    index,
+    nextNodeId,
+    normalizeNodePosition,
+    prettifyNodeKind,
+    cloneConfigDefaults,
+  } = options;
+  return {
+    id: nextNodeId(),
+    kind: mediaDefinition.kind,
+    version: mediaDefinition.version,
+    title: prettifyNodeKind(mediaDefinition.kind),
+    position: normalizeNodePosition({
+      x: anchor.x + (index % 5) * 38,
+      y: anchor.y + Math.floor(index / 5) * 38,
+    }),
+    config: {
+      ...cloneConfigDefaults(mediaDefinition),
+      sourcePath,
+    },
+    continueOnError: false,
+    disabled: false,
+  };
+}
+
 export async function materializePastedMediaNodes(options: {
-  imageFiles: File[];
+  mediaFiles: File[];
   mediaDefinition: StudioNodeDefinition;
   anchor: { x: number; y: number };
   projectPath: string;
@@ -49,7 +87,7 @@ export async function materializePastedMediaNodes(options: {
   cloneConfigDefaults: (definition: StudioNodeDefinition) => Record<string, unknown>;
 }): Promise<StudioNodeInstance[]> {
   const {
-    imageFiles,
+    mediaFiles,
     mediaDefinition,
     anchor,
     projectPath,
@@ -62,27 +100,23 @@ export async function materializePastedMediaNodes(options: {
   } = options;
 
   const output: StudioNodeInstance[] = [];
-  for (let index = 0; index < imageFiles.length; index += 1) {
-    const imageFile = imageFiles[index];
-    const mimeType = normalizeMimeType(imageFile.type);
-    const bytes = await imageFile.arrayBuffer();
+  for (let index = 0; index < mediaFiles.length; index += 1) {
+    const mediaFile = mediaFiles[index];
+    const mimeType = normalizeMimeType(mediaFile.type);
+    const bytes = await mediaFile.arrayBuffer();
     const asset = await storeAsset(projectPath, bytes, mimeType);
-    output.push({
-      id: nextNodeId(),
-      kind: mediaDefinition.kind,
-      version: mediaDefinition.version,
-      title: prettifyNodeKind(mediaDefinition.kind),
-      position: normalizeNodePosition({
-        x: anchor.x + (index % 5) * 38,
-        y: anchor.y + Math.floor(index / 5) * 38,
-      }),
-      config: {
-        ...cloneConfigDefaults(mediaDefinition),
+    output.push(
+      buildMediaIngestNode({
+        mediaDefinition,
         sourcePath: asset.path,
-      },
-      continueOnError: false,
-      disabled: false,
-    });
+        anchor,
+        index,
+        nextNodeId,
+        normalizeNodePosition,
+        prettifyNodeKind,
+        cloneConfigDefaults,
+      })
+    );
   }
 
   return output;

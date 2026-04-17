@@ -137,11 +137,14 @@ import {
 } from "./systemsculpt-studio-view/StudioGraphHistoryState";
 import { materializeGraphClipboardPaste } from "./systemsculpt-studio-view/StudioGraphClipboardPasteMaterializer";
 import {
-  extractClipboardImageFiles,
+  extractClipboardMediaFiles,
   extractClipboardText,
-  normalizePastedImageMimeType,
+  isMediaIngestableExtension,
+  isMediaMimeType,
+  normalizePastedMediaMimeType,
 } from "./systemsculpt-studio-view/StudioClipboardData";
 import {
+  buildMediaIngestNode,
   buildPastedTextNode,
   materializePastedMediaNodes,
 } from "./systemsculpt-studio-view/StudioClipboardPasteNodes";
@@ -867,12 +870,12 @@ export class SystemSculptStudioView extends ItemView {
       return;
     }
 
-    const imageFiles = extractClipboardImageFiles(event);
-    if (imageFiles.length > 0) {
+    const mediaFiles = extractClipboardMediaFiles(event);
+    if (mediaFiles.length > 0) {
       event.preventDefault();
       event.stopPropagation();
       try {
-        await this.pasteClipboardImages(imageFiles);
+        await this.pasteClipboardMedia(mediaFiles);
       } catch (error) {
         this.setError(error);
       }
@@ -935,7 +938,7 @@ export class SystemSculptStudioView extends ItemView {
     new Notice("Pasted text as a Text node.");
   }
 
-  private async pasteClipboardImages(imageFiles: File[]): Promise<void> {
+  private async pasteClipboardMedia(mediaFiles: File[]): Promise<void> {
     if (!this.currentProject || !this.currentProjectPath) {
       return;
     }
@@ -950,13 +953,13 @@ export class SystemSculptStudioView extends ItemView {
     const studio = this.plugin.getStudioService();
     const project = this.currentProject;
     const nodes = await materializePastedMediaNodes({
-      imageFiles,
+      mediaFiles,
       mediaDefinition,
       anchor: this.resolvePasteAnchorPosition(),
       projectPath: this.currentProjectPath,
       nextNodeId: () => randomId("node"),
       normalizeNodePosition: (position) => this.normalizeNodePosition(position),
-      normalizeMimeType: normalizePastedImageMimeType,
+      normalizeMimeType: normalizePastedMediaMimeType,
       storeAsset: async (projectPath, bytes, mimeType) =>
         await studio.storeAsset(projectPath, bytes, mimeType),
       prettifyNodeKind,
@@ -980,8 +983,8 @@ export class SystemSculptStudioView extends ItemView {
     this.render();
     new Notice(
       createdNodeIds.length === 1
-        ? "Pasted 1 image as a Media node."
-        : `Pasted ${createdNodeIds.length} images as Media nodes.`
+        ? "Pasted 1 media file as a Media node."
+        : `Pasted ${createdNodeIds.length} media files as Media nodes.`
     );
   }
 
@@ -3850,6 +3853,8 @@ export class SystemSculptStudioView extends ItemView {
     notePaths: string[];
     folderPaths: string[];
     unsupportedPaths: string[];
+    vaultMediaPaths: string[];
+    externalMediaFiles: File[];
   }> {
     const references = new Set<string>();
     const pushReference = (value: string): void => {
@@ -3867,6 +3872,18 @@ export class SystemSculptStudioView extends ItemView {
         return;
       }
       payloads.add(next);
+    };
+
+    const vaultMediaPaths = new Set<string>();
+    const externalMediaFiles: File[] = [];
+    const externalMediaSeenKeys = new Set<string>();
+    const pushExternalMediaFile = (file: File): void => {
+      const key = `${file.name}:${file.type}:${file.size}:${file.lastModified}`;
+      if (externalMediaSeenKeys.has(key)) {
+        return;
+      }
+      externalMediaSeenKeys.add(key);
+      externalMediaFiles.push(file);
     };
 
     for (const preferredType of ["text/plain", "text/uri-list", "application/json"]) {
@@ -3908,6 +3925,17 @@ export class SystemSculptStudioView extends ItemView {
         typeof (file as unknown as { path?: unknown }).path === "string"
           ? String((file as unknown as { path?: string }).path)
           : "";
+      if (isMediaMimeType(file.type)) {
+        const vaultPath = absolutePath
+          ? this.resolveVaultPathFromAbsoluteFilePath(absolutePath)
+          : "";
+        if (vaultPath) {
+          vaultMediaPaths.add(vaultPath);
+        } else {
+          pushExternalMediaFile(file);
+        }
+        continue;
+      }
       if (!absolutePath) {
         continue;
       }
@@ -3936,13 +3964,19 @@ export class SystemSculptStudioView extends ItemView {
         continue;
       }
       if (item instanceof TFile) {
-        unsupportedPaths.add(item.path);
+        if (isMediaIngestableExtension(item.extension)) {
+          vaultMediaPaths.add(item.path);
+        } else {
+          unsupportedPaths.add(item.path);
+        }
       }
     }
     return {
       notePaths: Array.from(notePaths),
       folderPaths: Array.from(folderPaths),
       unsupportedPaths: Array.from(unsupportedPaths),
+      vaultMediaPaths: Array.from(vaultMediaPaths),
+      externalMediaFiles,
     };
   }
 
@@ -3969,15 +4003,17 @@ export class SystemSculptStudioView extends ItemView {
     }
 
     const dropped = await this.collectDroppedVaultItems(event.dataTransfer);
-    if (
-      dropped.notePaths.length === 0 &&
-      dropped.folderPaths.length === 0 &&
-      dropped.unsupportedPaths.length === 0
-    ) {
+    const totalCollected =
+      dropped.notePaths.length +
+      dropped.folderPaths.length +
+      dropped.unsupportedPaths.length +
+      dropped.vaultMediaPaths.length +
+      dropped.externalMediaFiles.length;
+    if (totalCollected === 0) {
       const hasPayload =
         (event.dataTransfer.types?.length || 0) > 0 || (event.dataTransfer.files?.length || 0) > 0;
       if (hasPayload) {
-        new Notice("Drop a markdown note from your vault to create a Note node.");
+        new Notice("Drop a markdown note or media file to create a node.");
       }
       return;
     }
@@ -3985,19 +4021,109 @@ export class SystemSculptStudioView extends ItemView {
     if (dropped.folderPaths.length > 0) {
       new Notice("Dropping folders into Studio is not supported yet.");
     }
-    if (dropped.notePaths.length === 0) {
-      if (dropped.unsupportedPaths.length > 0) {
-        new Notice("Only markdown notes can be dropped into Studio.");
-      }
-      return;
-    }
 
     const anchor =
       this.resolveGraphPositionFromClientPoint(event.clientX, event.clientY) ||
       this.resolvePasteAnchorPosition();
-    await this.insertVaultNoteNodes(dropped.notePaths, anchor, {
-      source: "drop",
+
+    let handledSomething = false;
+
+    if (dropped.vaultMediaPaths.length > 0 || dropped.externalMediaFiles.length > 0) {
+      try {
+        await this.dropMediaIntoStudio({
+          vaultMediaPaths: dropped.vaultMediaPaths,
+          externalMediaFiles: dropped.externalMediaFiles,
+          anchor,
+        });
+        handledSomething = true;
+      } catch (error) {
+        this.setError(error);
+      }
+    }
+
+    if (dropped.notePaths.length > 0) {
+      await this.insertVaultNoteNodes(dropped.notePaths, anchor, {
+        source: "drop",
+      });
+      handledSomething = true;
+    }
+
+    if (!handledSomething && dropped.unsupportedPaths.length > 0) {
+      new Notice("Only markdown notes and media files can be dropped into Studio.");
+    }
+  }
+
+  private async dropMediaIntoStudio(options: {
+    vaultMediaPaths: string[];
+    externalMediaFiles: File[];
+    anchor: { x: number; y: number };
+  }): Promise<void> {
+    if (!this.currentProject || !this.currentProjectPath) {
+      return;
+    }
+    const mediaDefinition = this.nodeDefinitions.find(
+      (definition) => definition.kind === "studio.media_ingest"
+    );
+    if (!mediaDefinition) {
+      throw new Error("Media node definition is unavailable.");
+    }
+
+    const { vaultMediaPaths, externalMediaFiles, anchor } = options;
+    const project = this.currentProject;
+    const newNodes: StudioNodeInstance[] = [];
+
+    const pushNodeForPath = (sourcePath: string): void => {
+      newNodes.push(
+        buildMediaIngestNode({
+          mediaDefinition,
+          sourcePath,
+          anchor,
+          index: newNodes.length,
+          nextNodeId: () => randomId("node"),
+          normalizeNodePosition: (position) => this.normalizeNodePosition(position),
+          prettifyNodeKind,
+          cloneConfigDefaults: (definition) => cloneConfigDefaults(definition),
+        })
+      );
+    };
+
+    for (const vaultPath of vaultMediaPaths) {
+      pushNodeForPath(vaultPath);
+    }
+
+    if (externalMediaFiles.length > 0) {
+      const studio = this.plugin.getStudioService();
+      for (const file of externalMediaFiles) {
+        const mimeType = normalizePastedMediaMimeType(file.type);
+        const bytes = await file.arrayBuffer();
+        const asset = await studio.storeAsset(this.currentProjectPath, bytes, mimeType);
+        pushNodeForPath(asset.path);
+      }
+    }
+
+    if (newNodes.length === 0) {
+      return;
+    }
+
+    const changed = this.commitCurrentProjectMutation("graph.node.create", (currentProject) => {
+      currentProject.graph.nodes.push(...newNodes);
+      return true;
     });
+    if (!changed) {
+      return;
+    }
+
+    const lastNode = newNodes[newNodes.length - 1];
+    this.graphInteraction.selectOnlyNode(lastNode.id);
+    this.graphInteraction.clearPendingConnection();
+    this.recomputeEntryNodes(project);
+    this.render();
+
+    new Notice(
+      newNodes.length === 1
+        ? "Added 1 media file as a Media node."
+        : `Added ${newNodes.length} media files as Media nodes.`
+    );
   }
 
   private async revealPathInFinder(path: string): Promise<void> {
