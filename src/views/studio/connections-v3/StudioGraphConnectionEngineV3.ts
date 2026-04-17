@@ -29,7 +29,8 @@ export class StudioGraphConnectionEngineV3 {
   private graphCanvasEl: HTMLElement | null = null;
   private graphEdgesLayerEl: SVGSVGElement | null = null;
   private autoCreateHintEl: HTMLElement | null = null;
-  private edgeLayerListenersBound = false;
+  private boundEdgeLayer: SVGSVGElement | null = null;
+  private edgeLayerHandler: ((event: MouseEvent) => void) | null = null;
   private storeUnsub: (() => void) | null = null;
 
   constructor(private readonly host: Host) {
@@ -67,7 +68,7 @@ export class StudioGraphConnectionEngineV3 {
     this.detachAnimator();
     this.renderer?.clear();
     this.renderer = null;
-    this.edgeLayerListenersBound = false;
+    this.unbindEdgeLayerListeners();
     if (this.autoCreateHintEl) {
       this.autoCreateHintEl.remove();
       this.autoCreateHintEl = null;
@@ -78,7 +79,8 @@ export class StudioGraphConnectionEngineV3 {
 
   onNodeRemoved(nodeId: string): void {
     this.store.removeEdgesForNode(nodeId);
-    if (this.portInteraction.isPendingConnectionSource(nodeId, "")) {
+    const pending = this.portInteraction.getPendingConnectionSourceKey();
+    if (pending && pending.startsWith(`${nodeId}:out:`)) {
       this.portInteraction.cancel();
     }
   }
@@ -128,22 +130,11 @@ export class StudioGraphConnectionEngineV3 {
   }
 
   beginConnection(fromNodeId: string, fromPortId: string): void {
-    // Click-to-begin flow parity: no drag, but mark source active.
-    // For V3 we forward to the host so existing behaviour still works:
-    // the interaction host renders the pending source via getPendingConnection().
     const existing = this.portInteraction.getPendingConnectionSourceKey();
     const nextKey = `${fromNodeId}:out:${fromPortId}`;
     if (existing === nextKey) {
       this.portInteraction.cancel();
     }
-    // Persist the source in the store for a visual cue via renderer subscribers.
-    this.store.setDragState({
-      source: { nodeId: fromNodeId, portId: fromPortId },
-      cursorWorld: { x: 0, y: 0 },
-      snapTarget: null,
-      snapConfidence: 0,
-      validity: "invalid",
-    });
     this.host.requestRender();
   }
 
@@ -252,7 +243,8 @@ export class StudioGraphConnectionEngineV3 {
   }
 
   private bindEdgeLayerListeners(layer: SVGSVGElement): void {
-    if (this.edgeLayerListenersBound) return;
+    if (this.boundEdgeLayer === layer) return;
+    this.unbindEdgeLayerListeners();
     const handle = (event: MouseEvent) => {
       const target = event.target as Element | null;
       const path = target?.closest("path[data-edge-id]") as SVGPathElement | null;
@@ -265,7 +257,17 @@ export class StudioGraphConnectionEngineV3 {
     };
     layer.addEventListener("click", handle);
     layer.addEventListener("contextmenu", handle);
-    this.edgeLayerListenersBound = true;
+    this.boundEdgeLayer = layer;
+    this.edgeLayerHandler = handle;
+  }
+
+  private unbindEdgeLayerListeners(): void {
+    if (this.boundEdgeLayer && this.edgeLayerHandler) {
+      this.boundEdgeLayer.removeEventListener("click", this.edgeLayerHandler);
+      this.boundEdgeLayer.removeEventListener("contextmenu", this.edgeLayerHandler);
+    }
+    this.boundEdgeLayer = null;
+    this.edgeLayerHandler = null;
   }
 
   private openEdgeContextMenu(edgeId: string, clientX: number, clientY: number): void {
