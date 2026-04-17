@@ -38,6 +38,11 @@ export class StudioLinkFlowBridge {
           );
         });
         return;
+      default: {
+        const _exhaustive: never = event;
+        void _exhaustive;
+        return;
+      }
     }
   }
 
