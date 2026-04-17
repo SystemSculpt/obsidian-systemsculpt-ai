@@ -50,6 +50,7 @@ export class StudioPortInteraction {
   private autoCreateHintTimer: number | null = null;
   private autoCreateHintVisible = false;
   private suppressedOutputClickKey: string | null = null;
+  private pointerListenerTeardown: (() => void) | null = null;
 
   constructor(
     private readonly host: PortInteractionHost,
@@ -76,14 +77,9 @@ export class StudioPortInteraction {
   }
 
   clearRenderBindings(): void {
-    this.resetPortVisualState();
+    this.cancel();
     this.ports.clear();
     this.canvasEl = null;
-    this.clearAutoCreateHintTimer();
-    if (this.autoCreateHintVisible) {
-      this.autoCreateHintVisible = false;
-      this.callbacks.onAutoCreateHint(false, null, 0, 0);
-    }
   }
 
   getPendingConnectionSourceKey(): string | null {
@@ -96,6 +92,7 @@ export class StudioPortInteraction {
   }
 
   cancel(): void {
+    this.teardownPointerListeners();
     if (this.drag) {
       this.store.setDragState(null);
       this.drag = null;
@@ -197,17 +194,9 @@ export class StudioPortInteraction {
     };
 
     const onEnd = (event: PointerEvent) => {
-      if (!this.drag || event.pointerId !== startEvent.pointerId) return;
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onEnd);
-      window.removeEventListener("pointercancel", onEnd);
-      if (typeof sourcePinEl.releasePointerCapture === "function") {
-        try {
-          sourcePinEl.releasePointerCapture(startEvent.pointerId);
-        } catch {
-          // ignore
-        }
-      }
+      if (event.pointerId !== startEvent.pointerId) return;
+      this.teardownPointerListeners();
+      if (!this.drag) return;
 
       const finished = this.drag;
       const snap = this.store.getDragState()?.snapTarget || null;
@@ -241,9 +230,29 @@ export class StudioPortInteraction {
       }
     };
 
+    this.pointerListenerTeardown = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onEnd);
+      window.removeEventListener("pointercancel", onEnd);
+      if (typeof sourcePinEl.releasePointerCapture === "function") {
+        try {
+          sourcePinEl.releasePointerCapture(startEvent.pointerId);
+        } catch {
+          // ignore
+        }
+      }
+    };
+
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onEnd);
     window.addEventListener("pointercancel", onEnd);
+  }
+
+  private teardownPointerListeners(): void {
+    if (this.pointerListenerTeardown) {
+      this.pointerListenerTeardown();
+      this.pointerListenerTeardown = null;
+    }
   }
 
   private updateDragStoreSnapshot(): void {
