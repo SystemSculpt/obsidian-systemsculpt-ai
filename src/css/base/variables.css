@@ -94,6 +94,13 @@
   --ss-studio-accent: #8de8bc;
   --ss-studio-accent-bright: #9effd0;
   --ss-studio-accent-light: #9deec8;
+  --ss-studio-link-stroke: var(--text-muted);
+  --ss-studio-link-stroke-hover: var(--interactive-accent);
+  --ss-studio-link-flow-a: color-mix(in srgb, var(--interactive-accent) 72%, transparent);
+  --ss-studio-link-flow-b: color-mix(in srgb, var(--ss-studio-accent-light) 72%, transparent);
+  --ss-studio-link-flare: color-mix(in srgb, var(--interactive-accent) 95%, white 10%);
+  --ss-studio-link-failed: color-mix(in srgb, var(--color-red, #e04b4b) 80%, var(--ss-studio-border));
+  --ss-studio-port-hit-size: 24px;
   --ss-studio-accent-muted: #7bcda5;
   --ss-studio-accent-soft: #89d6ad;
   --ss-studio-accent-dim: #7fcfaa;
