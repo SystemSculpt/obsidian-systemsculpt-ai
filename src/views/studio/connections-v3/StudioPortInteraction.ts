@@ -1,4 +1,3 @@
-import type { Notice as ObsidianNotice } from "obsidian";
 import { Notice } from "obsidian";
 import type {
   ConnectionAutoCreateRequest,
@@ -50,7 +49,6 @@ export class StudioPortInteraction {
   private canvasEl: HTMLElement | null = null;
   private autoCreateHintTimer: number | null = null;
   private autoCreateHintVisible = false;
-  private autoCreateHintLabel: string | null = null;
   private suppressedOutputClickKey: string | null = null;
 
   constructor(
@@ -283,7 +281,6 @@ export class StudioPortInteraction {
     if (!this.drag || !this.drag.active) return;
     const descriptor = this.host.describeConnectionAutoCreate?.(this.drag.sourceType) ?? null;
     if (!descriptor) return;
-    this.autoCreateHintLabel = descriptor.label;
     this.autoCreateHintTimer = window.setTimeout(() => {
       this.autoCreateHintTimer = null;
       if (!this.drag || !this.drag.active) return;
@@ -344,13 +341,6 @@ export class StudioPortInteraction {
   }
 
   noticeInvalidConnection(message: string): void {
-    // Re-export Notice import so this module is self-contained for lint.
-    const factory: typeof Notice = Notice;
-    new factory(message);
-  }
-
-  // Allow unused Obsidian symbol import to be preserved for future hooks.
-  private _silenceUnused(): ObsidianNotice | null {
-    return null;
+    new Notice(message);
   }
 }
