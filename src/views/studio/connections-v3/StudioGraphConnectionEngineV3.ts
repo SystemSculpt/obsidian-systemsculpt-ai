@@ -2,7 +2,6 @@ import { Notice } from "obsidian";
 import type { StudioProjectV1, StudioRunEvent } from "../../../studio/types";
 import { randomId } from "../../../studio/utils";
 import type {
-  ConnectionAutoCreateDescriptor,
   ConnectionAutoCreateRequest,
   PendingConnection,
   StudioGraphInteractionHost,
@@ -249,15 +248,6 @@ export class StudioGraphConnectionEngineV3 {
       return this.host.onConnectionAutoCreateRequested(request) === true;
     } catch {
       return false;
-    }
-  }
-
-  private resolveAutoCreateDescriptor(sourceType: string): ConnectionAutoCreateDescriptor | null {
-    if (!this.host.describeConnectionAutoCreate) return null;
-    try {
-      return this.host.describeConnectionAutoCreate(sourceType);
-    } catch {
-      return null;
     }
   }
 
