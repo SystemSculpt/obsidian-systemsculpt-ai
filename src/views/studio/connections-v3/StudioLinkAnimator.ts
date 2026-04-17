@@ -1,4 +1,4 @@
-import type { StudioLinkStore, EdgeState } from "./StudioLinkStore";
+import type { StudioLinkStore } from "./StudioLinkStore";
 
 const FLOW_PERIOD_MS = 1200;
 const FLARE_MS = 600;
