@@ -6,6 +6,7 @@ const VALID_STATUSES: Set<StreamingStatus> = new Set([
   "content",
   "tool_calls",
   "executing_tools",
+  "retrying",
 ]);
 
 export class StreamingIndicator {

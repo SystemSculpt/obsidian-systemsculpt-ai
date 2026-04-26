@@ -15,7 +15,8 @@ import type SystemSculptPlugin from "../../main";
 import { validateBrowserFileSize } from "../../utils/FileValidator";
 import { MessagePart } from "../../types";
 import { SlashCommandMenu, SlashCommand } from "./SlashCommandMenu";
-import { StreamingController, type StreamTurnResult } from "./controllers/StreamingController";
+import { StreamingController, type StreamCompletionState, type StreamTurnResult } from "./controllers/StreamingController";
+import { ChatTurnProgressController } from "./controllers/ChatTurnProgressController";
 import { messageHandling } from "./messageHandling";
 import { AtMentionMenu } from "../../components/AtMentionMenu";
 import { LARGE_TEXT_THRESHOLDS, LARGE_TEXT_MESSAGES, LargeTextHelpers } from "../../constants/largeText";
@@ -68,6 +69,17 @@ export interface InputHandlerOptions {
 }
 
 export type AutomationApprovalMode = "interactive" | "auto-approve" | "deny";
+
+type HostedTurnTransaction = {
+  turnId: string;
+  submittedUserMessageId?: string;
+  submittedUserText?: string;
+  assistantMessageId?: string;
+  committedAssistantMessageId?: string;
+  committedPhase: "submitted_user" | "assistant_committed" | "tool_execution_committed";
+  completedToolCount: number;
+  latestStreamCompletionState?: StreamCompletionState;
+};
 
 export class InputHandler extends Component {
   private app: App;
@@ -281,7 +293,9 @@ export class InputHandler extends Component {
 
   private async streamAssistantTurn(
     signal: AbortSignal,
-    includeContextFiles: boolean
+    includeContextFiles: boolean,
+    turnProgress?: ChatTurnProgressController,
+    options?: { transientSystemPromptSuffix?: string }
   ): Promise<StreamTurnResult> {
     const continuationTarget = this.getHostedContinuationTarget();
     const { messageEl } = continuationTarget ?? this.createAssistantMessageContainer();
@@ -295,6 +309,7 @@ export class InputHandler extends Component {
 
     const contextFiles = includeContextFiles ? this.chatView.contextManager.getContextFiles() : new Set<string>();
     const selectedModelId = this.getSelectedModelIdForChat();
+    turnProgress?.attach(messageEl);
 
     // Read the selected prompt content if one is active
     let systemPromptOverride: string | undefined;
@@ -318,6 +333,9 @@ export class InputHandler extends Component {
         webSearchEnabled: this.webSearchEnabled,
         ...(this.agentModeEnabled ? {} : { allowTools: false }),
         ...(systemPromptOverride ? { systemPromptOverride } : {}),
+        ...(options?.transientSystemPromptSuffix
+          ? { transientSystemPromptSuffix: options.transientSystemPromptSuffix }
+          : {}),
       debug: this.chatView.getDebugLogService?.()?.createStreamLogger({
         chatId: this.getChatId(),
         assistantMessageId: messageId,
@@ -330,7 +348,9 @@ export class InputHandler extends Component {
       messageEl,
       messageId,
       signal,
-      continuationTarget?.seedParts
+      continuationTarget?.seedParts,
+      turnProgress?.getTracker(),
+      !!turnProgress
     );
   }
 
@@ -528,12 +548,16 @@ export class InputHandler extends Component {
   }
 
   private failHostedToolTurn(message: string, statusCode: number, metadata?: Record<string, unknown>): never {
+    const submitted = this.submittedInputSnapshot;
     const error = new SystemSculptError(
       message,
       ERROR_CODES.STREAM_ERROR,
       statusCode,
       {
         errorCode: TOOL_LOOP_ERROR_CODE,
+        recoverCommittedTurn: true,
+        submittedUserMessageId: submitted?.messageId,
+        submittedUserText: submitted?.rawText,
         ...metadata,
       }
     );
@@ -545,67 +569,172 @@ export class InputHandler extends Component {
     throw error;
   }
 
+  private isEmptyStreamCompletion(completionState: StreamCompletionState): boolean {
+    return (
+      completionState === "empty" ||
+      completionState === "no_events" ||
+      completionState === "reasoning_only" ||
+      completionState === "empty_after_seed"
+    );
+  }
+
+  private buildEmptyContinuationRetryHint(completionState: StreamCompletionState, retryAttempt: number): string {
+    const classification =
+      completionState === "reasoning_only"
+        ? "reasoning but no visible assistant content or tool call"
+        : completionState === "empty_after_seed"
+          ? "no new assistant output after the existing tool results"
+          : "no assistant output";
+
+    return [
+      `The previous continuation attempt returned ${classification}.`,
+      `This is retry ${retryAttempt}. Continue from the completed tool results already in the transcript.`,
+      "Either call the next needed tool or provide the final answer. Do not return an empty response.",
+    ].join(" ");
+  }
+
   private async runHostedAgentTurnLoop(signal: AbortSignal, includeContextFiles: boolean): Promise<void> {
     const maxToolContinuationRounds = 8;
+    const maxEmptyInitialRetries = 2;
     const maxEmptyContinuationRetries = 3;
     let completedToolContinuationRounds = 0;
+    let emptyInitialRetries = 0;
     let emptyContinuationRetries = 0;
     let hasExecutedHostedToolRound = false;
+    let transientSystemPromptSuffix: string | undefined;
+    const turnTransaction: HostedTurnTransaction = {
+      turnId: this.generateMessageId(),
+      submittedUserMessageId: this.submittedInputSnapshot?.messageId,
+      submittedUserText: this.submittedInputSnapshot?.rawText,
+      committedPhase: "submitted_user",
+      completedToolCount: 0,
+    };
+    const turnProgress = new ChatTurnProgressController({
+      showStreamingStatus: this.showStreamingStatus.bind(this),
+      hideStreamingStatus: this.hideStreamingStatus.bind(this),
+      updateStreamingStatus: this.updateStreamingStatus.bind(this),
+    });
 
-    while (completedToolContinuationRounds < maxToolContinuationRounds) {
-      const streamedTurn = await this.streamAssistantTurn(signal, includeContextFiles);
-      if (streamedTurn.completionState === "aborted") {
-        return;
-      }
+    turnProgress.begin();
 
-      if (streamedTurn.completionState === "empty") {
-        if (hasExecutedHostedToolRound && emptyContinuationRetries < maxEmptyContinuationRetries) {
-          emptyContinuationRetries += 1;
-          try {
-            errorLogger.debug("Retrying empty hosted continuation round", {
-              source: "InputHandler",
-              method: "runHostedAgentTurnLoop",
-              metadata: {
-                retryAttempt: emptyContinuationRetries,
-                maxEmptyContinuationRetries,
-                chatId: this.getChatId(),
-              },
-            });
-          } catch {}
-          continue;
+    try {
+      while (completedToolContinuationRounds < maxToolContinuationRounds) {
+        turnProgress.setStatus("preparing");
+        const streamedTurn = await this.streamAssistantTurn(
+          signal,
+          includeContextFiles,
+          turnProgress,
+          { transientSystemPromptSuffix }
+        );
+        turnTransaction.assistantMessageId = streamedTurn.messageId;
+        turnTransaction.latestStreamCompletionState = streamedTurn.completionState;
+        if (streamedTurn.completionState === "aborted") {
+          return;
         }
 
-        this.failHostedToolTurn(
-          hasExecutedHostedToolRound
-            ? "The hosted agent returned an empty continuation after tool execution."
-            : "The hosted agent returned an empty response.",
-          502,
-          {
-            reason: hasExecutedHostedToolRound ? "empty-continuation" : "empty-response",
-            emptyContinuationRetries,
+        if (this.isEmptyStreamCompletion(streamedTurn.completionState)) {
+          if (!hasExecutedHostedToolRound && emptyInitialRetries < maxEmptyInitialRetries) {
+            emptyInitialRetries += 1;
+            transientSystemPromptSuffix = undefined;
+            turnProgress.setStatus("retrying");
+            try {
+              errorLogger.debug("Retrying empty hosted initial turn", {
+                source: "InputHandler",
+                method: "runHostedAgentTurnLoop",
+                metadata: {
+                  retryAttempt: emptyInitialRetries,
+                  maxEmptyInitialRetries,
+                  chatId: this.getChatId(),
+                },
+              });
+            } catch {}
+            continue;
           }
-        );
+
+          if (hasExecutedHostedToolRound && emptyContinuationRetries < maxEmptyContinuationRetries) {
+            emptyContinuationRetries += 1;
+            transientSystemPromptSuffix = this.buildEmptyContinuationRetryHint(
+              streamedTurn.completionState,
+              emptyContinuationRetries
+            );
+            turnProgress.setStatus("retrying");
+            try {
+              errorLogger.debug("Retrying empty hosted continuation round", {
+                source: "InputHandler",
+                method: "runHostedAgentTurnLoop",
+                metadata: {
+                  retryAttempt: emptyContinuationRetries,
+                  maxEmptyContinuationRetries,
+                  chatId: this.getChatId(),
+                  completionState: streamedTurn.completionState,
+                },
+              });
+            } catch {}
+            continue;
+          }
+
+          this.failHostedToolTurn(
+            hasExecutedHostedToolRound
+              ? "The hosted agent returned an empty continuation after tool execution."
+              : "The hosted agent returned an empty response.",
+            502,
+            {
+              reason: hasExecutedHostedToolRound ? "empty-continuation" : "empty-response",
+              emptyInitialRetries,
+              emptyContinuationRetries,
+              latestStreamCompletionState: streamedTurn.completionState,
+              hasExecutedHostedToolRound,
+              assistantMessageId: turnTransaction.assistantMessageId,
+              committedAssistantMessageId: turnTransaction.committedAssistantMessageId,
+              submittedUserMessageId: turnTransaction.submittedUserMessageId,
+              submittedUserText: turnTransaction.submittedUserText,
+              committedPhase: turnTransaction.committedPhase,
+              completedToolCount: turnTransaction.completedToolCount,
+            }
+          );
+        }
+
+        emptyInitialRetries = 0;
+        emptyContinuationRetries = 0;
+        transientSystemPromptSuffix = undefined;
+        turnTransaction.committedPhase = "assistant_committed";
+        turnTransaction.committedAssistantMessageId = streamedTurn.messageId;
+        if (!this.shouldContinueHostedToolLoop(streamedTurn.message, streamedTurn.stopReason)) {
+          return;
+        }
+
+        turnProgress.attach(streamedTurn.messageEl);
+        turnProgress.setStatus("executing_tools");
+        const executedMessage = await this.executeHostedToolCalls(streamedTurn.message, signal);
+        await this.persistAssistantToolLoopUpdate(executedMessage);
+        turnProgress.attach(streamedTurn.messageEl);
+        hasExecutedHostedToolRound = true;
+        turnTransaction.committedPhase = "tool_execution_committed";
+        turnTransaction.completedToolCount += (executedMessage.tool_calls || []).filter(
+          (toolCall) => toolCall.state === "completed" || toolCall.state === "failed"
+        ).length;
+        completedToolContinuationRounds += 1;
       }
 
-      emptyContinuationRetries = 0;
-      if (!this.shouldContinueHostedToolLoop(streamedTurn.message, streamedTurn.stopReason)) {
-        return;
-      }
-
-      const executedMessage = await this.executeHostedToolCalls(streamedTurn.message, signal);
-      await this.persistAssistantToolLoopUpdate(executedMessage);
-      hasExecutedHostedToolRound = true;
-      completedToolContinuationRounds += 1;
+      this.failHostedToolTurn(
+        "The hosted agent exceeded the maximum tool continuation depth.",
+        500,
+        {
+          reason: "max-tool-continuation-depth",
+          maxToolContinuationRounds,
+          latestStreamCompletionState: turnTransaction.latestStreamCompletionState,
+          hasExecutedHostedToolRound,
+          assistantMessageId: turnTransaction.assistantMessageId,
+          committedAssistantMessageId: turnTransaction.committedAssistantMessageId,
+          submittedUserMessageId: turnTransaction.submittedUserMessageId,
+          submittedUserText: turnTransaction.submittedUserText,
+          committedPhase: turnTransaction.committedPhase,
+          completedToolCount: turnTransaction.completedToolCount,
+        }
+      );
+    } finally {
+      turnProgress.end();
     }
-
-    this.failHostedToolTurn(
-      "The hosted agent exceeded the maximum tool continuation depth.",
-      500,
-      {
-        reason: "max-tool-continuation-depth",
-        maxToolContinuationRounds,
-      }
-    );
   }
 
   private setupInput(): void {
@@ -1555,7 +1684,7 @@ export class InputHandler extends Component {
    */
   private cleanupAllStatusIndicators(): void {
     // Clean up any status indicators that might still be in the chat container
-    this.chatContainer?.querySelectorAll('.systemsculpt-streaming-status').forEach(el => {
+    this.chatContainer?.querySelectorAll('.systemsculpt-streaming-status, .ss-streaming-indicator').forEach(el => {
       el.remove();
     });
   }

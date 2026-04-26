@@ -38,11 +38,22 @@ export async function listPiTextCatalogModels(
   // On desktop, include all models from authenticated Pi providers
   if (PlatformContext.get().supportsDesktopOnlyFeatures()) {
     try {
-      const { listLocalPiTextModelsAsSystemModels } = await import("../pi/PiTextModels");
+      const {
+        isSupportedOpenAiCodexChatModel,
+        listLocalPiTextModelsAsSystemModels,
+      } = await import("../pi/PiTextModels");
       const localModels = await listLocalPiTextModelsAsSystemModels(plugin);
 
       // Deduplicate: skip any local model whose id already matches the managed model
       for (const model of localModels) {
+        if (
+          !isSupportedOpenAiCodexChatModel(
+            String(model.sourceProviderId || model.provider || ""),
+            String(model.piExecutionModelId || "").split("/").slice(1).join("/")
+          )
+        ) {
+          continue;
+        }
         if (!existingIds.has(model.id)) {
           models.push(model);
           existingIds.add(model.id);

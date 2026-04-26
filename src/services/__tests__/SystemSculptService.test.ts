@@ -583,6 +583,40 @@ describe("SystemSculptService", () => {
     expect(mcpService.getAvailableTools).toHaveBeenCalledTimes(1);
   });
 
+  it("adds transient continuation hints to the prepared system prompt without storing them as chat messages", async () => {
+    const plugin = createPlugin();
+    const service = SystemSculptService.getInstance(plugin);
+    global.fetch = jest.fn().mockResolvedValue(
+      new Response('data: {"choices":[{"delta":{"content":"continued"}}]}\n\ndata: [DONE]\n\n', {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      })
+    ) as any;
+
+    await collectEvents(
+      service.streamMessage({
+        messages: [{ role: "user", content: "Continue", message_id: "msg_1" } as any],
+        model: "systemsculpt@@systemsculpt/ai-agent",
+        transientSystemPromptSuffix: "Previous continuation was empty. Continue with final content.",
+      })
+    );
+
+    expect(contextFileService.prepareMessagesWithContext).toHaveBeenCalledWith(
+      [{ role: "user", content: "Continue", message_id: "msg_1" }],
+      new Set(),
+      true,
+      `${AGENT_PRESET.systemPrompt}\n\nPrevious continuation was empty. Continue with final content.`
+    );
+    const [url, fetchOptions] = (global.fetch as jest.Mock).mock.calls[0] || [];
+    expect(url).toBe("https://api.systemsculpt.test/api/v1/chat/completions");
+    expect(JSON.parse(fetchOptions.body)).toEqual({
+      model: "systemsculpt/ai-agent",
+      messages: [{ role: "user", content: "Continue" }],
+      stream: true,
+      tools: expect.any(Array),
+    });
+  });
+
   it("routes remote provider models through the remote provider stream executor", async () => {
     const plugin = createPlugin();
     const service = SystemSculptService.getInstance(plugin);

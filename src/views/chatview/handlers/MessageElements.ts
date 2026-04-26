@@ -50,7 +50,10 @@ export function updateStreamingStatus(
 ): void {
   const indicator = indicatorInstances.get(messageEl);
   if (indicator) {
-    const label = text || (status === "reasoning" ? "Thinking\u2026" : status === "tool_calls" ? "Using tools\u2026" : "Writing\u2026");
+    if (indicator.element.parentElement !== messageEl) {
+      messageEl.appendChild(indicator.element);
+    }
+    const label = text || (status === "reasoning" ? "Thinking\u2026" : status === "tool_calls" ? "Using tools\u2026" : status === "executing_tools" ? "Running tools\u2026" : status === "retrying" ? "Retrying response\u2026" : "Writing\u2026");
     indicator.update(status, label, metrics);
     if (liveRegionEl) {
       liveRegionEl.textContent = label;
@@ -76,6 +79,8 @@ export function showStreamingStatus(messageEl: HTMLElement, liveRegionEl: HTMLEl
   if (!indicator) {
     indicator = new StreamingIndicator();
     indicatorInstances.set(messageEl, indicator);
+  }
+  if (indicator.element.parentElement !== messageEl) {
     messageEl.appendChild(indicator.element);
   }
   indicator.show();

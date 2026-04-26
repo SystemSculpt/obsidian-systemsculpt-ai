@@ -365,6 +365,7 @@ export class SystemSculptService {
     model: string;
     contextFiles?: Set<string>;
     systemPromptOverride?: string;
+    transientSystemPromptSuffix?: string;
     emitNotices?: boolean;
     allowTools?: boolean;
   }): Promise<PreparedChatRequest> {
@@ -375,6 +376,7 @@ export class SystemSculptService {
 	      model,
 	      contextFiles,
 	      systemPromptOverride,
+	      transientSystemPromptSuffix,
 	      emitNotices = false,
 	    } = options;
 
@@ -458,6 +460,16 @@ export class SystemSculptService {
       finalSystemPrompt = AGENT_TOOL_INSTRUCTIONS;
     }
     // else: no custom prompt, agent mode OFF: no system prompt (undefined)
+
+    const transientPromptSuffix =
+      typeof transientSystemPromptSuffix === "string"
+        ? transientSystemPromptSuffix.trim()
+        : "";
+    if (transientPromptSuffix.length > 0) {
+      finalSystemPrompt = finalSystemPrompt
+        ? `${finalSystemPrompt.trim()}\n\n${transientPromptSuffix}`
+        : transientPromptSuffix;
+    }
 
     let tools: OpenAITool[] = [];
     if (
@@ -1103,6 +1115,7 @@ export class SystemSculptService {
     onError,
     contextFiles,
     systemPromptOverride,
+    transientSystemPromptSuffix,
     signal,
     forcedToolName,
     maxTokens,
@@ -1120,6 +1133,7 @@ export class SystemSculptService {
     onError?: (error: string) => void;
     contextFiles?: Set<string>;
     systemPromptOverride?: string;
+    transientSystemPromptSuffix?: string;
     signal?: AbortSignal;
     forcedToolName?: string;
     maxTokens?: number;
@@ -1146,6 +1160,7 @@ export class SystemSculptService {
         model,
         contextFiles,
         systemPromptOverride,
+        transientSystemPromptSuffix,
         emitNotices: true,
         allowTools,
       });

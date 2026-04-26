@@ -64,6 +64,24 @@ describe("ChatView loaded model migration", () => {
     ).resolves.toBe("systemsculpt@@systemsculpt/ai-agent");
   });
 
+  it("falls back from persisted OpenAI Codex models rejected by ChatGPT account auth", async () => {
+    const chatView = createChatView({
+      getCachedModels: jest.fn(() => [
+        {
+          id: "local-pi-openai-codex@@gpt-5.1",
+          provider: "openai-codex",
+          piExecutionModelId: "openai-codex/gpt-5.1",
+          piLocalAvailable: true,
+        },
+      ]),
+      getModels: jest.fn(async () => []),
+    });
+
+    await expect(
+      (chatView as any).resolveLoadedSelectedModelId("local-pi-openai-codex@@gpt-5.1")
+    ).resolves.toBe("systemsculpt@@systemsculpt/ai-agent");
+  });
+
   it("migrates stale local Pi chat selections using cached models", async () => {
     const getModels = jest.fn(async () => []);
     const chatView = createChatView({

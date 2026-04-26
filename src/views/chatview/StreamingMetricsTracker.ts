@@ -1,4 +1,10 @@
-export type StreamingStatus = "preparing" | "reasoning" | "content" | "tool_calls" | "executing_tools";
+export type StreamingStatus =
+  | "preparing"
+  | "reasoning"
+  | "content"
+  | "tool_calls"
+  | "executing_tools"
+  | "retrying";
 
 export interface StreamingMetrics {
   elapsedMs: number;
@@ -17,6 +23,7 @@ const STATUS_LABELS: Record<StreamingStatus, string> = {
   content: "Writing\u2026",
   tool_calls: "Using tools\u2026",
   executing_tools: "Running tools\u2026",
+  retrying: "Retrying response\u2026",
 };
 
 export class StreamingMetricsTracker {

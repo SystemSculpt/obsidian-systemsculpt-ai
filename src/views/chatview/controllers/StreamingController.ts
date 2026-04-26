@@ -28,7 +28,13 @@ export interface StreamingControllerOptions {
   autosaveDebounceMs?: number;
 }
 
-export type StreamCompletionState = "completed" | "aborted" | "empty";
+export type StreamCompletionState =
+  | "completed"
+  | "aborted"
+  | "empty"
+  | "no_events"
+  | "reasoning_only"
+  | "empty_after_seed";
 
 export interface StreamTurnResult {
   messageId: string;
@@ -100,6 +106,7 @@ export class StreamingController extends Component {
     let collectedAnnotations: Annotation[] = [];
     const collectedReasoningDetails: unknown[] = [];
     let emittedRenderableOutput = false;
+    let emittedReasoningOutput = false;
     let restoredSeedRendering = false;
 
     const streamStartTime = performance.now();
@@ -142,6 +149,9 @@ export class StreamingController extends Component {
           case "reasoning": {
             assembler.apply(event);
             this.updateMessageRendering(assembler, messageEl, assistantMessage, true);
+            if (String(event.text || "").length > 0) {
+              emittedReasoningOutput = true;
+            }
             metricsTracker.setStatus("reasoning");
             break;
           }
@@ -335,7 +345,13 @@ export class StreamingController extends Component {
       ? "aborted"
       : completedNaturally
         ? "completed"
-        : "empty";
+        : emittedReasoningOutput
+          ? "reasoning_only"
+          : Array.isArray(seedParts) && seedParts.length > 0
+            ? "empty_after_seed"
+            : eventCount === 0
+              ? "no_events"
+              : "no_events";
     const completed = completionState === "completed";
     return {
       messageId: assistantMessage.message_id ?? messageId,
