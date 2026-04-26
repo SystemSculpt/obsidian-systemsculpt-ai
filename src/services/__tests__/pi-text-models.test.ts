@@ -2,6 +2,7 @@ import {
   buildLocalPiCanonicalModelId,
   buildLocalPiExecutionModelId,
   collectSharedPiProviderHints,
+  isSupportedOpenAiCodexChatModel,
   resolveLocalPiExecutionModelIdFromCanonical,
   toLocalPiSystemSculptModel,
 } from "../pi/PiTextModels";
@@ -67,5 +68,16 @@ describe("PiTextModels", () => {
       context_length: 1_000_000,
     });
     expect(model.supported_parameters).toEqual(["tools"]);
+  });
+
+  it("filters OpenAI Codex models that ChatGPT accounts cannot run", () => {
+    expect(isSupportedOpenAiCodexChatModel("openai-codex", "gpt-5.1")).toBe(false);
+    expect(isSupportedOpenAiCodexChatModel("openai-codex", "gpt-5.1-codex-max")).toBe(false);
+    expect(isSupportedOpenAiCodexChatModel("openai-codex", "gpt-5.2-codex")).toBe(false);
+    expect(isSupportedOpenAiCodexChatModel("openai-codex", "gpt-5.3-codex-spark")).toBe(false);
+    expect(isSupportedOpenAiCodexChatModel("openai-codex", "gpt-5.2")).toBe(true);
+    expect(isSupportedOpenAiCodexChatModel("openai-codex", "gpt-5.3-codex")).toBe(true);
+    expect(isSupportedOpenAiCodexChatModel("openai-codex", "gpt-5.4-mini")).toBe(true);
+    expect(isSupportedOpenAiCodexChatModel("openrouter", "openai/gpt-5.1")).toBe(true);
   });
 });

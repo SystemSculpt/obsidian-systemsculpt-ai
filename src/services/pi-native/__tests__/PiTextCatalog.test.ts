@@ -18,6 +18,12 @@ jest.mock("../../PlatformRequestClient", () => ({
 }));
 
 jest.mock("../../pi/PiTextModels", () => ({
+  isSupportedOpenAiCodexChatModel: jest.fn((providerId: string, modelId: string) => {
+    if (providerId !== "openai-codex") {
+      return true;
+    }
+    return !["gpt-5.1", "gpt-5.1-codex-max", "gpt-5.1-codex-mini", "gpt-5.2-codex", "gpt-5.3-codex-spark"].includes(modelId);
+  }),
   listLocalPiTextModelsAsSystemModels: jest.fn(),
 }));
 
@@ -96,6 +102,47 @@ describe("PiTextCatalog", () => {
     expect(models.map((model) => model.id)).toEqual([
       "systemsculpt@@systemsculpt/ai-agent",
       "local-pi-openai@@gpt-4.1",
+    ]);
+  });
+
+  it("omits OpenAI Codex models rejected by ChatGPT-account Codex auth", async () => {
+    listLocalPiTextModelsAsSystemModels.mockResolvedValue([
+      {
+        id: "local-pi-openai-codex@@gpt-5.1",
+        name: "GPT-5.1",
+        provider: "openai-codex",
+        sourceMode: "pi_local",
+        sourceProviderId: "openai-codex",
+        piExecutionModelId: "openai-codex/gpt-5.1",
+        piLocalAvailable: true,
+      },
+      {
+        id: "local-pi-openai-codex@@gpt-5.4-mini",
+        name: "GPT-5.4 Mini",
+        provider: "openai-codex",
+        sourceMode: "pi_local",
+        sourceProviderId: "openai-codex",
+        piExecutionModelId: "openai-codex/gpt-5.4-mini",
+        piLocalAvailable: true,
+      },
+      {
+        id: "local-pi-openai-codex@@gpt-5.3-codex-spark",
+        name: "GPT-5.3 Codex Spark",
+        provider: "openai-codex",
+        sourceMode: "pi_local",
+        sourceProviderId: "openai-codex",
+        piExecutionModelId: "openai-codex/gpt-5.3-codex-spark",
+        piLocalAvailable: true,
+      },
+    ]);
+
+    const models = await listPiTextCatalogModels({
+      settings: { serverUrl: "http://localhost:3000", licenseKey: "license_test", licenseValid: true },
+    } as any);
+
+    expect(models.map((model) => model.id)).toEqual([
+      "systemsculpt@@systemsculpt/ai-agent",
+      "local-pi-openai-codex@@gpt-5.4-mini",
     ]);
   });
 

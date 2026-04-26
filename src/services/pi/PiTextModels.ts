@@ -60,6 +60,13 @@ export type LocalPiListedModel = {
   keywords: string[];
 };
 
+const OPENAI_CODEX_CHATGPT_SUPPORTED_MODEL_IDS = new Set([
+  "gpt-5.2",
+  "gpt-5.3-codex",
+  "gpt-5.4",
+  "gpt-5.4-mini",
+]);
+
 async function loadPiSdkRuntimeModule(): Promise<
   typeof import("./PiSdkRuntime")
 > {
@@ -78,6 +85,17 @@ function stripPinnedDateSuffix(modelId: string): string {
 
 function normalizePiProviderId(value: unknown): string {
   return normalizeStudioPiProviderId(value);
+}
+
+export function isSupportedOpenAiCodexChatModel(providerId: string, modelId: string): boolean {
+  const normalizedProviderId = normalizePiProviderId(providerId);
+  if (normalizedProviderId !== "openai-codex") {
+    return true;
+  }
+
+  return OPENAI_CODEX_CHATGPT_SUPPORTED_MODEL_IDS.has(
+    String(modelId || "").trim().toLowerCase()
+  );
 }
 
 function toNumber(value: unknown): number {
@@ -251,7 +269,12 @@ export async function listLocalPiTextModels(
   const models: LocalPiListedModel[] = modelRegistry
     .getAvailable()
     .map((model) => toLocalPiListEntry(model))
-    .filter((model): model is LocalPiListedModel => !!model);
+    .filter((model): model is LocalPiListedModel => {
+      if (!model) {
+        return false;
+      }
+      return isSupportedOpenAiCodexChatModel(model.providerId, model.modelId);
+    });
 
   const byCanonicalId = new Map<string, LocalPiListedModel>();
   for (const model of models) {

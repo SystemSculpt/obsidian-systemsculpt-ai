@@ -64,7 +64,7 @@ describe("StreamingController stream behavior", () => {
     expect(onAssistantResponse).toHaveBeenCalledTimes(1);
   });
 
-  test("treats seeded continuations with no new renderable output as empty", async () => {
+  test("classifies seeded continuations with no new renderable output as empty_after_seed", async () => {
     const { controller, saveChat, onAssistantResponse } = createController();
 
     const stream = (async function* () {
@@ -94,7 +94,7 @@ describe("StreamingController stream behavior", () => {
     );
 
     expect(result.completed).toBe(false);
-    expect(result.completionState).toBe("empty");
+    expect(result.completionState).toBe("empty_after_seed");
     expect(saveChat).not.toHaveBeenCalled();
     expect(onAssistantResponse).not.toHaveBeenCalled();
     expect(messageEl.isConnected).toBe(true);
@@ -349,7 +349,7 @@ describe("StreamingController stream behavior", () => {
     expect(onError).not.toHaveBeenCalled();
   });
 
-  test("returns an empty completion state when stream has no renderable output", async () => {
+  test("returns no_events when stream has no output events", async () => {
     const { controller, saveChat, onAssistantResponse, onError } = createController();
 
     const stream = (async function* () {})();
@@ -362,14 +362,14 @@ describe("StreamingController stream behavior", () => {
     const result = await controller.stream(stream, messageEl, "assistant-empty", abortController.signal);
 
     expect(result.completed).toBe(false);
-    expect(result.completionState).toBe("empty");
+    expect(result.completionState).toBe("no_events");
     expect(saveChat).not.toHaveBeenCalled();
     expect(onAssistantResponse).not.toHaveBeenCalled();
     expect(onError).not.toHaveBeenCalled();
     expect(messageEl.isConnected).toBe(false);
   });
 
-  test("treats reasoning-only terminal output as empty so blank assistant replies are not persisted", async () => {
+  test("classifies reasoning-only terminal output so blank assistant replies are not persisted", async () => {
     const { controller, saveChat, onAssistantResponse, onError } = createController();
 
     const stream = (async function* () {
@@ -389,7 +389,7 @@ describe("StreamingController stream behavior", () => {
     );
 
     expect(result.completed).toBe(false);
-    expect(result.completionState).toBe("empty");
+    expect(result.completionState).toBe("reasoning_only");
     expect(result.message.content).toBe("");
     expect(result.message.reasoning).toContain("Need to inspect the fixture carefully.");
     expect(saveChat).not.toHaveBeenCalled();

@@ -27,6 +27,7 @@ import { classifyQuotaExceededError } from "./utils/quotaError";
 import { classifyStreamError, type StreamErrorKind } from "./utils/streamError";
 import { ChatErrorModal } from "./modals/ChatErrorModal";
 import type { ToolCall } from "../../types/toolCalls";
+import { TOOL_LOOP_ERROR_CODE } from "../../utils/tooling";
 import { tryCopyToClipboard } from "../../utils/clipboard";
 import { resolveAbsoluteVaultPath } from "../../utils/vaultPathUtils";
 import type { DocumentProcessingProgressEvent } from "../../types/documentProcessing";
@@ -65,6 +66,28 @@ import {
 } from "./modelSelection";
 
 export { CHAT_VIEW_TYPE };
+
+const OPENAI_CODEX_CHATGPT_SUPPORTED_MODEL_IDS = new Set([
+  "gpt-5.2",
+  "gpt-5.3-codex",
+  "gpt-5.4",
+  "gpt-5.4-mini",
+]);
+
+function escapeMessageIdForSelector(messageId: string): string {
+  const cssEscape = (globalThis as any)?.CSS?.escape;
+  if (typeof cssEscape === "function") {
+    return cssEscape(messageId);
+  }
+
+  return String(messageId).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
+function isSupportedPersistedOpenAiCodexChatModel(modelId: string): boolean {
+  return OPENAI_CODEX_CHATGPT_SUPPORTED_MODEL_IDS.has(
+    String(modelId || "").trim().toLowerCase()
+  );
+}
 
 export class ChatView extends ItemView {
   public messages: ChatMessage[] = [];
@@ -415,6 +438,151 @@ export class ChatView extends ItemView {
     return mergedMessage;
   }
 
+  private shouldRecoverCommittedChatTurn(error: string | SystemSculptError): error is SystemSculptError {
+    if (!(error instanceof SystemSculptError)) {
+      return false;
+    }
+
+    return (
+      error.metadata?.recoverCommittedTurn === true ||
+      error.metadata?.errorCode === TOOL_LOOP_ERROR_CODE
+    );
+  }
+
+  private removeUnpersistedAssistantDraft(messageId: string | undefined): void {
+    const normalizedMessageId = String(messageId || "").trim();
+    if (!normalizedMessageId || !this.chatContainer) {
+      return;
+    }
+
+    const persisted = this.messages.some((message) => message.message_id === normalizedMessageId);
+    if (persisted) {
+      return;
+    }
+
+    const node = this.chatContainer.querySelector(
+      `.systemsculpt-message[data-message-id="${escapeMessageIdForSelector(normalizedMessageId)}"]`,
+    ) as HTMLElement | null;
+    removeMessageElement(node);
+  }
+
+  private findCommittedAssistantMessage(messageId: string | undefined): ChatMessage | null {
+    const normalizedMessageId = String(messageId || "").trim();
+    if (normalizedMessageId) {
+      const directMatch = this.messages.find(
+        (message) => message.role === "assistant" && message.message_id === normalizedMessageId
+      );
+      if (directMatch) {
+        return directMatch;
+      }
+    }
+
+    return [...this.messages].reverse().find((message) => message.role === "assistant") || null;
+  }
+
+  private formatCommittedTurnFailureText(errorMessage: string, error: SystemSculptError): string {
+    const completedToolCount = Number(error.metadata?.completedToolCount || 0);
+    const keptTools =
+      Number.isFinite(completedToolCount) && completedToolCount > 0
+        ? ` The ${completedToolCount === 1 ? "completed tool result was" : `${completedToolCount} completed tool results were`} kept in the transcript.`
+        : "";
+    const cleanMessage = String(errorMessage || "The hosted agent did not return a usable continuation.")
+      .trim()
+      .replace(/[.!?]+$/g, "");
+
+    return `SystemSculpt stopped after the turn was already in progress: ${cleanMessage}.${keptTools}`;
+  }
+
+  private appendFailurePart(message: ChatMessage, failureText: string): ChatMessage {
+    const normalizedParts = this.messageRenderer.normalizeMessageToParts(message);
+    const existingParts = Array.isArray(normalizedParts?.parts) ? [...normalizedParts.parts] : [];
+    const alreadyMarked = existingParts.some(
+      (part) =>
+        part.type === "content" &&
+        typeof part.data === "string" &&
+        part.data.includes("SystemSculpt stopped after the turn was already in progress")
+    );
+
+    if (alreadyMarked) {
+      return message;
+    }
+
+    const maxTimestamp = existingParts.reduce(
+      (max, part) => Math.max(max, Number(part.timestamp || 0)),
+      0
+    );
+    const timestamp = Math.max(Date.now(), maxTimestamp + 1);
+    const separator = existingParts.length > 0 ? "\n\n" : "";
+    const partText = `${separator}${failureText}`;
+    const currentContent = typeof message.content === "string" ? message.content.trim() : "";
+
+    return {
+      ...message,
+      content: currentContent ? `${currentContent}\n\n${failureText}` : failureText,
+      messageParts: [
+        ...existingParts,
+        {
+          id: `turn_failure-${timestamp}`,
+          type: "content",
+          timestamp,
+          data: partText,
+        },
+      ],
+    };
+  }
+
+  private async renderAssistantMessageUpdate(message: ChatMessage): Promise<void> {
+    const messageId = String(message.message_id || "").trim();
+    const messageEl = messageId && this.chatContainer
+      ? this.chatContainer.querySelector(
+          `.systemsculpt-message[data-message-id="${escapeMessageIdForSelector(messageId)}"]`
+        ) as HTMLElement | null
+      : null;
+
+    if (!messageEl) {
+      await this.addMessage(message.role, message.content, message.message_id, message);
+      return;
+    }
+
+    try {
+      this.messageRenderer.renderUnifiedMessageParts(
+        messageEl,
+        this.messageRenderer.normalizeMessageToParts(message).parts,
+        false
+      );
+      this.messageRenderer.finalizeInlineBlocks(messageEl);
+    } catch {
+      await messageHandling.reloadAllMessages(this);
+    }
+  }
+
+  private async recoverCommittedChatTurn(error: SystemSculptError, errorMessage: string): Promise<void> {
+    const assistantMessageId =
+      typeof error.metadata?.assistantMessageId === "string"
+        ? error.metadata.assistantMessageId
+        : undefined;
+    const committedAssistantMessageId =
+      typeof error.metadata?.committedAssistantMessageId === "string"
+        ? error.metadata.committedAssistantMessageId
+        : undefined;
+
+    this.removeUnpersistedAssistantDraft(assistantMessageId);
+
+    const committedAssistant = this.findCommittedAssistantMessage(committedAssistantMessageId || assistantMessageId);
+    const failureText = this.formatCommittedTurnFailureText(errorMessage, error);
+    const message =
+      committedAssistant ||
+      ({
+        role: "assistant",
+        content: "",
+        message_id: this.generateMessageId(),
+      } as ChatMessage);
+
+    const updatedMessage = this.appendFailurePart(message, failureText);
+    await this.persistAssistantMessage(updatedMessage, { syncPiTranscript: false });
+    await this.renderAssistantMessageUpdate(updatedMessage);
+  }
+
   public async handleError(error: string | SystemSculptError): Promise<void> {
     let errorMessage = typeof error === "string" ? error : error.message;
     const automationRequestActive = this.inputHandler?.isAutomationRequestActive?.() === true;
@@ -441,6 +609,17 @@ export class ChatView extends ItemView {
       error instanceof SystemSculptError && typeof error.metadata?.upstreamMessage === "string"
         ? String(error.metadata.upstreamMessage)
         : "";
+
+    const shouldRecoverCommittedTurn =
+      typeof (this as any).shouldRecoverCommittedChatTurn === "function" &&
+      (this as any).shouldRecoverCommittedChatTurn(error);
+    if (shouldRecoverCommittedTurn) {
+      await this.recoverCommittedChatTurn(error as SystemSculptError, errorMessage);
+      if (!automationRequestActive) {
+        new Notice("The turn stopped, but the submitted message and completed tool results were kept.", 8000);
+      }
+      return;
+    }
 
     if (isContextOverflowErrorMessage(errorMessage) || isContextOverflowErrorMessage(upstreamMessage)) {
       await this.resetFailedAssistantTurn();
@@ -774,6 +953,14 @@ export class ChatView extends ItemView {
       resolveLegacyPiTextSelectionId,
     } = await loadPiTextMigrationModule();
     const normalizedRawModelId = normalizeLegacyPiTextSelectionId(rawModelId);
+    const parsedLocalPiMatch = normalizedRawModelId.match(/^local-pi-openai-codex@@(.+)$/i);
+    if (
+      parsedLocalPiMatch &&
+      !isSupportedPersistedOpenAiCodexChatModel(parsedLocalPiMatch[1])
+    ) {
+      return getManagedSystemSculptModelId();
+    }
+
     const tryResolve = (models: any[]): string => {
       const directMatch = findModelById(models, rawModelId);
       if (directMatch?.id) {
@@ -866,7 +1053,7 @@ export class ChatView extends ItemView {
   private removeUserMessageDomById(messageId: string): void {
     if (!this.chatContainer) return;
     const node = this.chatContainer.querySelector(
-      `.systemsculpt-message[data-message-id="${CSS.escape(messageId)}"]`,
+      `.systemsculpt-message[data-message-id="${escapeMessageIdForSelector(messageId)}"]`,
     ) as HTMLElement | null;
     removeMessageElement(node);
   }
