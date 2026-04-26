@@ -3,6 +3,7 @@ import type { SystemSculptModel } from "../types";
 import type { SystemSculptTextModelSourceMode } from "../types/llm";
 import { SYSTEMSCULPT_PI_EXECUTION_MODEL_ID } from "./pi/PiCanonicalIds";
 import { buildManagedSystemSculptModel, isManagedSystemSculptModelId } from "./systemsculpt/ManagedSystemSculptModel";
+import { resolveManagedSystemSculptModelContract } from "./systemsculpt/ManagedSystemSculptRemoteConfig";
 
 async function loadPiTextCatalogModule(): Promise<typeof import("./pi-native/PiTextCatalog")> {
   return await import("./pi-native/PiTextCatalog");
@@ -71,7 +72,8 @@ export class ModelManagementService {
     }
 
     // Default: route through the managed SystemSculpt hosted model
-    const managedModel = buildManagedSystemSculptModel(this.plugin);
+    const managedContract = await resolveManagedSystemSculptModelContract(this.plugin);
+    const managedModel = buildManagedSystemSculptModel(this.plugin, managedContract);
     const baseModel = resolvedModel || managedModel;
 
     return {
