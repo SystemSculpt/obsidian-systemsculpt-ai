@@ -1,10 +1,20 @@
 import { listPiTextCatalogModels } from "../PiTextCatalog";
 import { PlatformContext } from "../../PlatformContext";
+import { MANAGED_SYSTEMSCULPT_MODEL_CONTRACT } from "../../systemsculpt/ManagedSystemSculptContract";
+import { clearManagedSystemSculptModelContractCacheForTests } from "../../systemsculpt/ManagedSystemSculptRemoteConfig";
+
+const mockPlatformRequest = jest.fn();
 
 jest.mock("../../PlatformContext", () => ({
   PlatformContext: {
     get: jest.fn(),
   },
+}));
+
+jest.mock("../../PlatformRequestClient", () => ({
+  PlatformRequestClient: jest.fn().mockImplementation(() => ({
+    request: mockPlatformRequest,
+  })),
 }));
 
 jest.mock("../../pi/PiTextModels", () => ({
@@ -21,6 +31,12 @@ const { listConfiguredRemoteProviderModels } = jest.requireMock("../../providerR
 describe("PiTextCatalog", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    clearManagedSystemSculptModelContractCacheForTests();
+    mockPlatformRequest.mockResolvedValue({
+      ok: false,
+      status: 503,
+      json: async () => ({}),
+    });
     (PlatformContext.get as jest.Mock).mockReturnValue({
       supportsDesktopOnlyFeatures: () => true,
     });
@@ -43,6 +59,12 @@ describe("PiTextCatalog", () => {
       piAuthMode: "hosted",
       piRemoteAvailable: true,
       piLocalAvailable: false,
+      context_length: MANAGED_SYSTEMSCULPT_MODEL_CONTRACT.contextLength,
+      capabilities: [...MANAGED_SYSTEMSCULPT_MODEL_CONTRACT.capabilities],
+      top_provider: expect.objectContaining({
+        context_length: MANAGED_SYSTEMSCULPT_MODEL_CONTRACT.contextLength,
+        max_completion_tokens: MANAGED_SYSTEMSCULPT_MODEL_CONTRACT.maxCompletionTokens,
+      }),
     });
   });
 
@@ -89,6 +111,7 @@ describe("PiTextCatalog", () => {
       id: "systemsculpt@@systemsculpt/ai-agent",
       description: "Add an active SystemSculpt license in Setup to use SystemSculpt.",
     });
+    expect(mockPlatformRequest).not.toHaveBeenCalled();
   });
 
   it("keeps mobile limited to the managed SystemSculpt model", async () => {
@@ -139,5 +162,42 @@ describe("PiTextCatalog", () => {
       "openrouter@@openai/gpt-5.4-mini",
     ]);
     expect(listLocalPiTextModelsAsSystemModels).not.toHaveBeenCalled();
+  });
+
+  it("hydrates managed model metadata from the website plugin config when available", async () => {
+    mockPlatformRequest.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        api: {
+          configured_managed_model: {
+            context_window: 196_608,
+            max_completion_tokens: 24_576,
+            capabilities: ["chat", "reasoning", "vision", "tools"],
+            modality: "text+image->text",
+          },
+        },
+      }),
+    });
+    listLocalPiTextModelsAsSystemModels.mockResolvedValue([]);
+
+    const models = await listPiTextCatalogModels({
+      manifest: { version: "5.1.0" },
+      settings: { serverUrl: "http://localhost:3000", licenseKey: "license_test", licenseValid: true },
+    } as any);
+
+    expect(mockPlatformRequest).toHaveBeenCalledWith(expect.objectContaining({
+      url: expect.stringContaining("/api/plugin/config"),
+      method: "GET",
+      licenseKey: "license_test",
+    }));
+    expect(models[0]).toMatchObject({
+      context_length: 196_608,
+      capabilities: ["chat", "reasoning", "vision", "tools"],
+      top_provider: expect.objectContaining({
+        context_length: 196_608,
+        max_completion_tokens: 24_576,
+      }),
+    });
   });
 });

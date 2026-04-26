@@ -1,12 +1,11 @@
 import type SystemSculptPlugin from "../../main";
 import type { SystemSculptModel } from "../../types/llm";
 import { ensureCanonicalId } from "../../utils/modelUtils";
+import { SYSTEMSCULPT_PI_CANONICAL_MODEL_ID } from "../pi/PiCanonicalIds";
 import {
-  SYSTEMSCULPT_PI_CANONICAL_MODEL_ID,
-  SYSTEMSCULPT_PI_EXECUTION_MODEL_ID,
-  SYSTEMSCULPT_PI_PROVIDER_ID,
-  SYSTEMSCULPT_PI_PROVIDER_MODEL_ID,
-} from "../pi/PiCanonicalIds";
+  MANAGED_SYSTEMSCULPT_MODEL_CONTRACT,
+  type ManagedSystemSculptModelContract,
+} from "./ManagedSystemSculptContract";
 
 function hasActiveSystemSculptLicense(plugin: Pick<SystemSculptPlugin, "settings">): boolean {
   const settings = plugin?.settings || {};
@@ -28,33 +27,34 @@ export function hasManagedSystemSculptAccess(
 }
 
 export function buildManagedSystemSculptModel(
-  plugin: Pick<SystemSculptPlugin, "settings">
+  plugin: Pick<SystemSculptPlugin, "settings">,
+  contract: ManagedSystemSculptModelContract = MANAGED_SYSTEMSCULPT_MODEL_CONTRACT
 ): SystemSculptModel {
   const hasLicense = hasActiveSystemSculptLicense(plugin);
 
   return {
-    id: SYSTEMSCULPT_PI_CANONICAL_MODEL_ID,
-    name: "SystemSculpt",
+    id: contract.id,
+    name: contract.name,
     description: hasLicense
       ? "The managed SystemSculpt model for chat across desktop and mobile."
       : "Add an active SystemSculpt license in Setup to use SystemSculpt.",
-    provider: SYSTEMSCULPT_PI_PROVIDER_ID,
+    provider: contract.providerId,
     sourceMode: "systemsculpt",
-    sourceProviderId: SYSTEMSCULPT_PI_PROVIDER_ID,
+    sourceProviderId: contract.providerId,
     identifier: {
-      providerId: SYSTEMSCULPT_PI_PROVIDER_ID,
-      modelId: SYSTEMSCULPT_PI_PROVIDER_MODEL_ID,
-      displayName: "SystemSculpt",
+      providerId: contract.providerId,
+      modelId: contract.providerModelId,
+      displayName: contract.name,
     },
-    piExecutionModelId: SYSTEMSCULPT_PI_EXECUTION_MODEL_ID,
+    piExecutionModelId: contract.executionModelId,
     piAuthMode: "hosted",
     piRemoteAvailable: true,
     piLocalAvailable: false,
-    context_length: 256_000,
-    capabilities: ["chat", "reasoning"],
+    context_length: contract.contextLength,
+    capabilities: [...contract.capabilities],
     supported_parameters: ["tools"],
     architecture: {
-      modality: "text+image->text",
+      modality: contract.modality,
       tokenizer: "systemsculpt-managed",
       instruct_type: null,
     },
@@ -65,8 +65,8 @@ export function buildManagedSystemSculptModel(
       request: "0",
     },
     top_provider: {
-      context_length: 256_000,
-      max_completion_tokens: 32_768,
+      context_length: contract.contextLength,
+      max_completion_tokens: contract.maxCompletionTokens,
       is_moderated: false,
     },
   };

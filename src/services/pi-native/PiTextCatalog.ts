@@ -1,6 +1,7 @@
 import type SystemSculptPlugin from "../../main";
 import type { SystemSculptModel } from "../../types/llm";
 import { buildManagedSystemSculptModel } from "../systemsculpt/ManagedSystemSculptModel";
+import { resolveManagedSystemSculptModelContract } from "../systemsculpt/ManagedSystemSculptRemoteConfig";
 import { PlatformContext } from "../PlatformContext";
 import { listConfiguredRemoteProviderModels } from "../providerRuntime/RemoteProviderCatalog";
 
@@ -22,7 +23,8 @@ function logPiCatalogFailure(
 export async function listPiTextCatalogModels(
   plugin: SystemSculptPlugin
 ): Promise<SystemSculptModel[]> {
-  const models: SystemSculptModel[] = [buildManagedSystemSculptModel(plugin)];
+  const managedContract = await resolveManagedSystemSculptModelContract(plugin);
+  const models: SystemSculptModel[] = [buildManagedSystemSculptModel(plugin, managedContract)];
   const existingIds = new Set(models.map((m) => m.id));
 
   const remoteProviderModels = listConfiguredRemoteProviderModels(plugin);
