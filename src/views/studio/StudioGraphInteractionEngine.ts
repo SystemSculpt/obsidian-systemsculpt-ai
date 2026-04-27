@@ -1,4 +1,4 @@
-import { StudioGraphConnectionEngineV2 } from "./connections-v2/StudioGraphConnectionEngineV2";
+import { StudioGraphConnectionEngineV3 } from "./connections-v3/StudioGraphConnectionEngineV3";
 import { StudioGraphGroupController } from "./StudioGraphGroupController";
 import { StudioGraphSelectionController } from "./StudioGraphSelectionController";
 import type {
@@ -16,7 +16,7 @@ export type { PendingConnection };
 
 export class StudioGraphInteractionEngine {
   private readonly selectionController: StudioGraphSelectionController;
-  private readonly connectionEngine: StudioGraphConnectionEngineV2;
+  private readonly connectionEngine: StudioGraphConnectionEngineV3;
   private readonly groupController: StudioGraphGroupController;
 
   constructor(private readonly host: StudioGraphInteractionHost) {
@@ -56,7 +56,7 @@ export class StudioGraphInteractionEngine {
         this.host.commitProjectMutation(reason, mutator, options),
     });
 
-    this.connectionEngine = new StudioGraphConnectionEngineV2({
+    this.connectionEngine = new StudioGraphConnectionEngineV3({
       ...this.host,
       getGraphZoom: () => this.selectionController.getGraphZoom(),
     });
@@ -265,6 +265,10 @@ export class StudioGraphInteractionEngine {
 
   renderEdgeLayer(): void {
     this.connectionEngine.renderEdgeLayer();
+  }
+
+  applyRunEvent(event: import("../../studio/types").StudioRunEvent): void {
+    this.connectionEngine.applyRunEvent(event);
   }
 
   notifyNodePositionsChanged(options?: { recomputeCanvasBounds?: boolean }): void {
