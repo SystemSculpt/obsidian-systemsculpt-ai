@@ -137,7 +137,7 @@ These files define the user-facing surfaces and are the source of truth:
 
 - Website: `https://systemsculpt.com`
 - Repo: `https://github.com/SystemSculpt/obsidian-systemsculpt-ai`
-- Discord: `https://discord.gg/3gNUZJWxnJ`
+- Issues: `https://github.com/SystemSculpt/obsidian-systemsculpt-ai/issues`
 - Email: `support@systemsculpt.com`
 
 ## License
