@@ -198,7 +198,7 @@ What to do:
 
 1. Turn the high-level release notes into a fuller changelog grouped by user-facing areas.
 2. Write a short migration note explaining the SystemSculpt Pi-provider cutover in plain English.
-3. Prepare the matching website/Discord/email announcement copy if this release is being actively promoted.
+3. Prepare the matching website/email announcement copy if this release is being actively promoted.
 
 Exit criteria:
 
