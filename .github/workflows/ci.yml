@@ -32,3 +32,9 @@ jobs:
 
       - name: Unit Tests
         run: npm test
+
+      - name: Embeddings Tests
+        run: npm run test:embeddings
+
+      - name: Build (production)
+        run: npm run build
