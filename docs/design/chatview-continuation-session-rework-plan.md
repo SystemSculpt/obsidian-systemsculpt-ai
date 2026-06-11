@@ -192,7 +192,7 @@ Own hosted continuation semantics:
 
 ### Phase 6: Website Hosted Contract
 
-In `/Users/systemsculpt/gits/systemsculpt-website`:
+In the website repo (hosted API):
 
 - Add Workers AI regression coverage for:
   - assistant tool call history + matching tool result -> final content
