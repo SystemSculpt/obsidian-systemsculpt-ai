@@ -1,6 +1,6 @@
 # SystemSculpt AI (Obsidian Plugin)
 
-SystemSculpt AI adds AI chat, vault-aware tools, semantic note search, transcription, and workflow automations to Obsidian.
+SystemSculpt AI adds AI chat, meeting transcription, semantic search, and agent workflows inside your Obsidian vault. Bring your own API keys or use managed models.
 
 ## Current release facts
 
