@@ -320,6 +320,31 @@ export class DesktopAutomationClient {
     });
   }
 
+  async toggleRecorder() {
+    return await this.request("/v1/recorder/toggle", {
+      method: "POST",
+      body: {},
+      timeoutMs: 30000,
+      allowRecovery: true,
+    });
+  }
+
+  async getRecorderStatus() {
+    return await this.request("/v1/recorder/status", {
+      timeoutMs: 15000,
+      allowRecovery: true,
+    });
+  }
+
+  async embedText(text) {
+    return await this.request("/v1/embeddings/embed", {
+      method: "POST",
+      body: { text },
+      timeoutMs: 120000,
+      allowRecovery: true,
+    });
+  }
+
   async reloadPlugin() {
     return await this.request("/v1/plugin/reload", {
       method: "POST",

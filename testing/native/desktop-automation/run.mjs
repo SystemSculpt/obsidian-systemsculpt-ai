@@ -18,7 +18,7 @@ Run no-focus desktop automation against the already-running Obsidian vault by
 talking to the plugin's localhost bridge instead of driving the renderer.
 
 Options:
-  --case <name|all|extended|stress|soak>   Case list: setup-baseline, managed-baseline, provider-connected-baseline, release-smoke, fixture-provider-listing, fixture-chat-roundtrip, model-switch, chat-exact, file-read, file-write, web-fetch, youtube-transcript, reload-stress, chatview-stress, all, extended, stress, or soak. Default: all
+  --case <name|all|extended|stress|soak>   Case list: setup-baseline, managed-baseline, provider-connected-baseline, release-smoke, fixture-provider-listing, fixture-chat-roundtrip, recorder-smoke, embeddings-smoke, model-switch, chat-exact, file-read, file-write, web-fetch, youtube-transcript, reload-stress, chatview-stress, all, extended, stress, or soak. Default: all
   --sync-config <path>         Sync config used to resolve the desktop plugin target. Default: ./systemsculpt-sync.config.json
   --target-index <n>           Pin a pluginTargets entry from the sync config
   --vault-name <name>          Pin a specific sync target by vault name

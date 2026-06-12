@@ -38,8 +38,15 @@ export const PROVIDER_CONNECTED_BASELINE_CASE = "provider-connected-baseline";
 export const SOAK_CASES = [DEFAULT_STRESS_CASE, CHATVIEW_STRESS_CASE];
 export const FIXTURE_PROVIDER_LISTING_CASE = "fixture-provider-listing";
 export const FIXTURE_CHAT_ROUNDTRIP_CASE = "fixture-chat-roundtrip";
+export const RECORDER_SMOKE_CASE = "recorder-smoke";
+export const EMBEDDINGS_SMOKE_CASE = "embeddings-smoke";
 export const RELEASE_SMOKE_CASE = "release-smoke";
-const RELEASE_SMOKE_CASES = [FIXTURE_PROVIDER_LISTING_CASE, FIXTURE_CHAT_ROUNDTRIP_CASE];
+const RELEASE_SMOKE_CASES = [
+  FIXTURE_PROVIDER_LISTING_CASE,
+  FIXTURE_CHAT_ROUNDTRIP_CASE,
+  RECORDER_SMOKE_CASE,
+  EMBEDDINGS_SMOKE_CASE,
+];
 const BASELINE_SUITE_CASES = [MANAGED_BASELINE_CASE, PROVIDER_CONNECTED_BASELINE_CASE];
 const MANAGED_SYSTEMSCULPT_MODEL_ID = "systemsculpt@@systemsculpt/ai-agent";
 const DESKTOP_BASELINE_PI_MODEL_ID = "local-pi-openrouter@@openai/gpt-5.4-mini";
@@ -1851,6 +1858,63 @@ export async function runFixtureChatRoundtripCase(client) {
   };
 }
 
+/**
+ * Release smoke (issue #215): recorder start/stop with the Chromium fake
+ * media device, transcribed through the local Whisper-shaped fixture. Proves
+ * the capture pipeline, the custom transcription path, and the deterministic
+ * transcript end to end without microphones or real credentials.
+ */
+export async function runRecorderSmokeCase(client, options = {}) {
+  const recordMs = Number.isFinite(options.recorderCaptureMs) ? Number(options.recorderCaptureMs) : 2000;
+  const started = await client.toggleRecorder();
+  if (started?.recording !== true) {
+    throw new Error(`Recorder smoke expected recording to start. Got: ${JSON.stringify(started)}`);
+  }
+
+  await sleep(recordMs);
+
+  const stopped = await client.toggleRecorder();
+  if (stopped?.recording !== false) {
+    throw new Error(`Recorder smoke expected recording to stop. Got: ${JSON.stringify(stopped)}`);
+  }
+
+  const deadline = Date.now() + 90000;
+  let status = null;
+  while (Date.now() < deadline) {
+    status = await client.getRecorderStatus();
+    if (typeof status?.lastTranscript === "string" && status.lastTranscript.trim()) {
+      break;
+    }
+    await sleep(1000);
+  }
+
+  const transcript = String(status?.lastTranscript || "").trim();
+  assertIncludes(transcript, FIXTURE_TEXTS.transcript, "Recorder smoke transcript");
+
+  return {
+    capturedMs: recordMs,
+    transcript,
+  };
+}
+
+/**
+ * Release smoke (issue #215): one embeddings round-trip through the active
+ * provider (the CI vault points the custom embeddings provider at the local
+ * OpenAI-shaped fixture). Asserts a non-empty vector came back.
+ */
+export async function runEmbeddingsSmokeCase(client) {
+  const result = await client.embedText("release smoke embeddings round-trip");
+  const dimensions = Number(result?.dimensions || 0);
+  if (!(dimensions > 0)) {
+    throw new Error(`Embeddings smoke expected a non-empty vector. Got: ${JSON.stringify(result)}`);
+  }
+  return {
+    provider: String(result?.provider || ""),
+    model: String(result?.model || ""),
+    dimensions,
+  };
+}
+
 export async function runProviderConnectedBaselineCase(client, options = {}) {
   const authConfig = resolveProviderConnectedAuthConfig(options.env || process.env);
   const inventory = await loadModelInventory(client);
@@ -2663,6 +2727,10 @@ export async function runCase(client, options, caseName) {
       return { client, result: await runFixtureProviderListingCase(client) };
     case FIXTURE_CHAT_ROUNDTRIP_CASE:
       return { client, result: await runFixtureChatRoundtripCase(client) };
+    case RECORDER_SMOKE_CASE:
+      return { client, result: await runRecorderSmokeCase(client, options) };
+    case EMBEDDINGS_SMOKE_CASE:
+      return { client, result: await runEmbeddingsSmokeCase(client) };
     case "model-switch":
       return { client, result: await runModelSwitchCase(client, options) };
     case "chat-exact":

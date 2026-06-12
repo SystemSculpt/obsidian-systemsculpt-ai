@@ -1169,6 +1169,26 @@ export class EmbeddingsManager {
     return { provider: this.provider.id, model, schema: EMBEDDING_SCHEMA_VERSION };
   }
 
+  /**
+   * Public: single-text embedding round-trip for diagnostics/automation.
+   * Returns shape metadata only, never the vector itself.
+   */
+  public async embedTextForDiagnostics(
+    text: string,
+  ): Promise<{ provider: string; model: string; dimensions: number }> {
+    await this.awaitReady();
+    const vectors = await this.provider.generateEmbeddings(
+      [String(text || '').trim() || 'diagnostics'],
+      { inputType: 'query' },
+    );
+    const descriptor = this.getCurrentNamespaceDescriptor();
+    return {
+      provider: descriptor.provider,
+      model: descriptor.model,
+      dimensions: Array.isArray(vectors?.[0]) ? vectors[0].length : 0,
+    };
+  }
+
   /** Public: List available namespaces with counts */
   public async getNamespaceStats(): Promise<Array<{ namespace: string; provider: string; model: string; schema: number; dimension: number; vectors: number; files: number }>> {
     await this.awaitReady();

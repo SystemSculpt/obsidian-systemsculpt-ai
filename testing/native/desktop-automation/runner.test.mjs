@@ -2,6 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   assertHealthyStatus,
+  EMBEDDINGS_SMOKE_CASE,
+  RECORDER_SMOKE_CASE,
+  runEmbeddingsSmokeCase,
+  runRecorderSmokeCase,
   BASELINE_SUITE_CASE,
   CHATVIEW_STRESS_CASE,
   FIXTURE_CHAT_ROUNDTRIP_CASE,
@@ -2623,6 +2627,8 @@ test("caseList resolves release-smoke to the fixture cases", () => {
   assert.deepEqual(caseList(RELEASE_SMOKE_CASE), [
     FIXTURE_PROVIDER_LISTING_CASE,
     FIXTURE_CHAT_ROUNDTRIP_CASE,
+    RECORDER_SMOKE_CASE,
+    EMBEDDINGS_SMOKE_CASE,
   ]);
 });
 
@@ -2691,4 +2697,45 @@ test("runFixtureChatRoundtripCase asserts the deterministic fixture completion",
   const outcome = await runFixtureChatRoundtripCase(buildFixtureSmokeClient());
   assert.equal(outcome.selectedModelId, "openrouter@@openai/gpt-5.4-mini");
   assert.match(outcome.response, /fixture-completion: hello from the mock provider/);
+});
+
+test("runRecorderSmokeCase drives toggle on/off and waits for the fixture transcript", async () => {
+  let recording = false;
+  let transcript = null;
+  const client = {
+    async toggleRecorder() {
+      recording = !recording;
+      if (!recording) {
+        setTimeout(() => {
+          transcript = "fixture-transcript: hello from the mock whisper";
+        }, 10);
+      }
+      return { recording };
+    },
+    async getRecorderStatus() {
+      return { recording, lastTranscript: transcript };
+    },
+  };
+
+  const outcome = await runRecorderSmokeCase(client, { recorderCaptureMs: 5 });
+  assert.match(outcome.transcript, /fixture-transcript/);
+});
+
+test("runEmbeddingsSmokeCase asserts a non-empty vector", async () => {
+  const outcome = await runEmbeddingsSmokeCase({
+    async embedText() {
+      return { provider: "custom", model: "fixture-embeddings", dimensions: 8 };
+    },
+  });
+  assert.equal(outcome.dimensions, 8);
+  assert.equal(outcome.provider, "custom");
+
+  await assert.rejects(
+    runEmbeddingsSmokeCase({
+      async embedText() {
+        return { provider: "custom", model: "fixture-embeddings", dimensions: 0 };
+      },
+    }),
+    /non-empty vector/
+  );
 });

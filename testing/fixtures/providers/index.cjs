@@ -34,6 +34,8 @@ const LMSTUDIO_FIXTURE_MODELS = [
 	{ id: "qwen/qwen3-8b", object: "model", owned_by: "organization_owner" },
 ];
 
+const FIXTURE_EMBEDDING_VECTOR = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8];
+
 function readBody(req) {
 	return new Promise((resolve) => {
 		let data = "";
@@ -151,6 +153,26 @@ function createLmStudioServer() {
 		if (req.method === "POST" && url.pathname === "/v1/chat/completions") {
 			return handleOpenAiChat(req, res);
 		}
+		if (req.method === "POST" && url.pathname === "/v1/embeddings") {
+			const raw = await readBody(req);
+			let parsed = {};
+			try {
+				parsed = JSON.parse(raw || "{}");
+			} catch {
+				return sendJson(res, 400, { error: { message: "invalid JSON body" } });
+			}
+			const inputs = Array.isArray(parsed.input) ? parsed.input : [parsed.input];
+			return sendJson(res, 200, {
+				object: "list",
+				model: String(parsed.model || "fixture-embeddings"),
+				data: inputs.map((_, index) => ({
+					object: "embedding",
+					index,
+					embedding: FIXTURE_EMBEDDING_VECTOR,
+				})),
+				usage: { prompt_tokens: 4, total_tokens: 4 },
+			});
+		}
 		return sendJson(res, 404, { error: { message: `no fixture route for ${req.method} ${url.pathname}` } });
 	});
 }
@@ -218,6 +240,7 @@ module.exports = {
 	OPENROUTER_FIXTURE_MODELS,
 	OLLAMA_FIXTURE_MODELS,
 	LMSTUDIO_FIXTURE_MODELS,
+	FIXTURE_EMBEDDING_VECTOR,
 	FIXTURE_TEXTS,
 	startProviderFixtures,
 };

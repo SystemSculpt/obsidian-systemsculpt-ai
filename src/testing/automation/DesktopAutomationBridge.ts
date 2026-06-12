@@ -148,6 +148,8 @@ export class DesktopAutomationBridge {
   private selfReloadScheduled = false;
   private selfReloadPromise: Promise<void> | null = null;
   private selfReloadRequestedAt: string | null = null;
+  private lastRecorderTranscript: string | null = null;
+  private unsubscribeRecorderTranscription: (() => void) | null = null;
   private readonly singletonToken = Symbol("DesktopAutomationBridge");
 
   constructor(private readonly plugin: SystemSculptPlugin) {}
@@ -208,6 +210,10 @@ export class DesktopAutomationBridge {
   }
 
   private async stopNow(): Promise<void> {
+    if (this.unsubscribeRecorderTranscription) {
+      this.unsubscribeRecorderTranscription();
+      this.unsubscribeRecorderTranscription = null;
+    }
     const runtime = loadBridgeRuntime();
     const server = this.server;
     const sockets = Array.from(this.serverSockets);
@@ -755,6 +761,46 @@ export class DesktopAutomationBridge {
         return;
       }
 
+      if (method === "POST" && url.pathname === "/v1/recorder/toggle") {
+        const recorder = this.plugin.getRecorderService();
+        this.ensureRecorderTranscriptionObserver(recorder);
+        await recorder.toggleRecording();
+        this.sendJson(response, 200, {
+          ok: true,
+          data: {
+            recording: recorder.isCurrentlyRecording(),
+          },
+        });
+        return;
+      }
+
+      if (method === "GET" && url.pathname === "/v1/recorder/status") {
+        const recorder = this.plugin.getRecorderService();
+        this.ensureRecorderTranscriptionObserver(recorder);
+        this.sendJson(response, 200, {
+          ok: true,
+          data: {
+            recording: recorder.isCurrentlyRecording(),
+            lastTranscript: this.lastRecorderTranscript,
+          },
+        });
+        return;
+      }
+
+      if (method === "POST" && url.pathname === "/v1/embeddings/embed") {
+        const body = await this.readJsonBody(request);
+        const text = String(body.text || "").trim();
+        if (!text) {
+          throw new BridgeHttpError(400, "text is required.");
+        }
+        const manager = this.plugin.getOrCreateEmbeddingsManager();
+        this.sendJson(response, 200, {
+          ok: true,
+          data: await manager.embedTextForDiagnostics(text),
+        });
+        return;
+      }
+
       if (method === "POST" && url.pathname === "/v1/plugin/reload") {
         const reload = this.requestSelfReload();
         response.once("finish", () => {
@@ -792,6 +838,22 @@ export class DesktopAutomationBridge {
       }
       this.sendJson(response, statusCode, payload);
     }
+  }
+
+  /**
+   * Lazily observe recorder transcriptions so /v1/recorder/status can report
+   * the last transcript. Subscribing on first recorder route keeps the bridge
+   * from initializing the recorder for vaults that never touch it.
+   */
+  private ensureRecorderTranscriptionObserver(recorder: {
+    onTranscription: (callback: (text: string) => void) => () => void;
+  }): void {
+    if (this.unsubscribeRecorderTranscription) {
+      return;
+    }
+    this.unsubscribeRecorderTranscription = recorder.onTranscription((text) => {
+      this.lastRecorderTranscript = text;
+    });
   }
 
   private assertAuthorized(request: IncomingMessage): void {

@@ -8,6 +8,7 @@
 const {
   startProviderFixtures,
   FIXTURE_TEXTS,
+  FIXTURE_EMBEDDING_VECTOR,
   OPENROUTER_FIXTURE_MODELS,
   OLLAMA_FIXTURE_MODELS,
   LMSTUDIO_FIXTURE_MODELS,
@@ -104,6 +105,20 @@ describe("provider fixture servers", () => {
     });
     const completion = await completionResponse.json();
     expect(completion.choices[0].message.content).toBe(FIXTURE_TEXTS.completion);
+  });
+
+  it("lmstudio fixture answers OpenAI-shape embeddings", async () => {
+    const response = await fetch(`${fixtures.lmstudio.url}/v1/embeddings`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: "fixture-embeddings", input: ["hello", "world"] }),
+    });
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.object).toBe("list");
+    expect(body.data).toHaveLength(2);
+    expect(body.data[0].embedding).toEqual(FIXTURE_EMBEDDING_VECTOR);
+    expect(body.data[1].index).toBe(1);
   });
 
   it("whisper fixture returns the deterministic transcript", async () => {
