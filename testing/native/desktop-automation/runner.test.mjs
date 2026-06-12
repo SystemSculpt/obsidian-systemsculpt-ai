@@ -4,14 +4,19 @@ import {
   assertHealthyStatus,
   BASELINE_SUITE_CASE,
   CHATVIEW_STRESS_CASE,
+  FIXTURE_CHAT_ROUNDTRIP_CASE,
+  FIXTURE_PROVIDER_LISTING_CASE,
   MANAGED_BASELINE_CASE,
   PROVIDER_CONNECTED_BASELINE_CASE,
+  RELEASE_SMOKE_CASE,
   SETUP_BASELINE_CASE,
   buildBaselineSummary,
   caseList,
   isTransientModelExecutionError,
   resolveBootstrapReload,
   runChatExactCase,
+  runFixtureChatRoundtripCase,
+  runFixtureProviderListingCase,
   runManagedBaselineCase,
   runProviderConnectedBaselineCase,
   runChatViewStressCase,
@@ -2612,4 +2617,78 @@ test("runProviderConnectedBaselineCase fails clearly when no provider API key is
     runProviderConnectedBaselineCase(client, { env: {} }),
     /No provider API key was available/
   );
+});
+
+test("caseList resolves release-smoke to the fixture cases", () => {
+  assert.deepEqual(caseList(RELEASE_SMOKE_CASE), [
+    FIXTURE_PROVIDER_LISTING_CASE,
+    FIXTURE_CHAT_ROUNDTRIP_CASE,
+  ]);
+});
+
+function buildFixtureSmokeClient({ includeFixtureModel = true } = {}) {
+  let currentModelId = "systemsculpt@@systemsculpt/ai-agent";
+  const options = [
+    {
+      value: "systemsculpt@@systemsculpt/ai-agent",
+      label: "SystemSculpt Agent",
+      providerAuthenticated: true,
+      providerLabel: "SystemSculpt",
+      section: "systemsculpt",
+    },
+  ];
+  if (includeFixtureModel) {
+    options.push({
+      value: "openrouter@@openai/gpt-5.4-mini",
+      label: "GPT-5.4 Mini",
+      providerAuthenticated: true,
+      providerId: "openrouter",
+      providerLabel: "OpenRouter",
+      section: "custom",
+    });
+  }
+  return {
+    async listModels() {
+      return { selectedModelId: currentModelId, options };
+    },
+    async ensureChatOpen(body = {}) {
+      if (body.selectedModelId) {
+        currentModelId = body.selectedModelId;
+      }
+      return { selectedModelId: currentModelId };
+    },
+    async setModel(modelId) {
+      currentModelId = modelId;
+      return { selectedModelId: currentModelId };
+    },
+    async sendChat() {
+      return {
+        selectedModelId: currentModelId,
+        currentModelName: "GPT-5.4 Mini",
+        messages: [
+          {
+            role: "assistant",
+            content: "fixture-completion: hello from the mock provider",
+          },
+        ],
+      };
+    },
+  };
+}
+
+test("runFixtureProviderListingCase requires both the managed and fixture models", async () => {
+  const outcome = await runFixtureProviderListingCase(buildFixtureSmokeClient());
+  assert.equal(outcome.managedModel.modelId, "systemsculpt@@systemsculpt/ai-agent");
+  assert.equal(outcome.fixtureModel.modelId, "openrouter@@openai/gpt-5.4-mini");
+
+  await assert.rejects(
+    runFixtureProviderListingCase(buildFixtureSmokeClient({ includeFixtureModel: false })),
+    /expected "openrouter@@openai\/gpt-5\.4-mini"/
+  );
+});
+
+test("runFixtureChatRoundtripCase asserts the deterministic fixture completion", async () => {
+  const outcome = await runFixtureChatRoundtripCase(buildFixtureSmokeClient());
+  assert.equal(outcome.selectedModelId, "openrouter@@openai/gpt-5.4-mini");
+  assert.match(outcome.response, /fixture-completion: hello from the mock provider/);
 });

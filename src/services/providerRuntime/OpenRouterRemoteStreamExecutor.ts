@@ -7,7 +7,7 @@ import { StreamingService } from "../StreamingService";
 import { resolveStudioPiProviderApiKey } from "../../studio/piAuth/StudioPiAuthStorage";
 import { transformToolsForModel } from "../../utils/tooling";
 import { toChatCompletionsMessages } from "../../utils/messages/toChatCompletionsMessages";
-import { resolveRemoteProviderEndpoint } from "./RemoteProviderCatalog";
+import { resolveConfiguredRemoteProviderEndpoint } from "./RemoteProviderCatalog";
 
 type RemoteOpenRouterStreamInput = {
   plugin: SystemSculptPlugin;
@@ -46,7 +46,7 @@ function buildRemoteRequestBody(input: RemoteOpenRouterStreamInput): Record<stri
       input.prepared.resolvedModel.provider ||
       "openrouter",
   ).trim();
-  const endpoint = resolveRemoteProviderEndpoint(providerId);
+  const endpoint = resolveConfiguredRemoteProviderEndpoint(input.plugin, providerId);
   const body: Record<string, unknown> = {
     model: input.prepared.actualModelId,
     messages: toChatCompletionsMessages(input.prepared.preparedMessages, {
@@ -79,7 +79,7 @@ export async function* executeOpenRouterRemoteStream(
       input.prepared.resolvedModel.provider ||
       "openrouter",
   ).trim();
-  const endpoint = resolveRemoteProviderEndpoint(providerId);
+  const endpoint = resolveConfiguredRemoteProviderEndpoint(input.plugin, providerId);
   if (!endpoint) {
     throw new Error(`No remote endpoint configured for provider "${providerId}".`);
   }
