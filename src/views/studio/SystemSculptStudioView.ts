@@ -1338,6 +1338,7 @@ export class SystemSculptStudioView extends ItemView {
 
   private handleRunEvent(event: StudioRunEvent): void {
     this.runPresentation.applyEvent(event);
+    this.graphInteraction.applyRunEvent(event);
     if (event.type === "node.started") {
       this.materializeManagedOutputPlaceholders(event);
     }

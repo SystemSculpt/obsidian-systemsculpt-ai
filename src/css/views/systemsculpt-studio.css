@@ -1011,33 +1011,86 @@ select.ss-pi-wizard__select { width: 100%; }
     0 4px 10px color-mix(in srgb, var(--ss-studio-shadow) 24%, transparent);
 }
 
-.ss-studio-link-path {
+.ss-studio-link-group .ss-studio-link-path {
   fill: none;
-  stroke: var(--text-muted);
+  stroke: var(--ss-studio-link-stroke);
   stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
+  opacity: 0.65;
+  transition: stroke 0.12s ease, stroke-width 0.12s ease, opacity 0.12s ease;
+}
+
+.ss-studio-link-group .ss-studio-link-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 14;
   stroke-linecap: round;
   stroke-linejoin: round;
   pointer-events: stroke;
   cursor: pointer;
-  opacity: 0.6;
-  transition: stroke 0.12s ease, stroke-width 0.12s ease, opacity 0.12s ease;
 }
 
-.ss-studio-link-path:hover {
-  stroke: var(--interactive-accent);
+.ss-studio-link-group .ss-studio-link-hit:hover + .ss-studio-link-path,
+.ss-studio-link-group:has(.ss-studio-link-hit:hover) .ss-studio-link-path {
+  stroke: var(--ss-studio-link-stroke-hover);
   stroke-width: 2;
+  opacity: 1;
+}
+
+.ss-studio-link-group .ss-studio-link-chevron {
+  fill: none;
+  stroke: var(--ss-studio-link-stroke);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.65;
+  pointer-events: none;
+}
+
+.ss-studio-link-group[data-status="flowing"] .ss-studio-link-path {
+  stroke: var(--ss-studio-link-flow-a);
+  stroke-dasharray: 10 8;
+  stroke-dashoffset: calc(var(--ss-link-flow-phase, 0) * -18px);
+  opacity: 1;
+  animation: none;
+}
+
+.ss-studio-link-group[data-status="completed"] .ss-studio-link-path {
+  stroke: var(--ss-studio-link-flow-b);
+  opacity: 0.95;
+}
+
+.ss-studio-link-group[data-status="failed"] .ss-studio-link-path,
+.ss-studio-link-group[data-status="failed"] .ss-studio-link-chevron {
+  stroke: var(--ss-studio-link-failed);
   opacity: 1;
 }
 
 .ss-studio-link-preview {
   fill: none;
-  stroke: color-mix(in srgb, var(--ss-studio-accent-light) 82%, var(--interactive-accent) 18%);
   stroke-width: 2.2;
   stroke-linecap: round;
   stroke-linejoin: round;
-  stroke-dasharray: 8 6;
   opacity: 0.95;
   pointer-events: none;
+  stroke: var(--ss-studio-link-flow-a);
+}
+
+.ss-studio-link-preview[data-validity="valid"] {
+  stroke: var(--interactive-accent);
+  stroke-dasharray: none;
+}
+
+.ss-studio-link-preview[data-validity="near"] {
+  stroke: color-mix(in srgb, var(--interactive-accent) 60%, var(--ss-studio-link-stroke));
+  stroke-dasharray: 6 6;
+}
+
+.ss-studio-link-preview[data-validity="invalid"] {
+  stroke: color-mix(in srgb, var(--ss-studio-link-stroke) 70%, transparent);
+  stroke-dasharray: 8 6;
 }
 
 .ss-studio-connection-autocreate-hint {
@@ -1741,6 +1794,51 @@ select.ss-pi-wizard__select { width: 100%; }
 
 .ss-studio-port-pin.is-linked.is-output {
   color: var(--color-green, var(--ss-studio-success-tint));
+}
+
+.ss-studio-port-pin {
+  position: relative;
+}
+
+.ss-studio-port-pin::before {
+  content: "";
+  position: absolute;
+  inset: calc((var(--ss-studio-port-hit-size) - 8px) / -2);
+  border-radius: var(--ss-radius-pill);
+  pointer-events: auto;
+}
+
+.ss-studio-port-pin.is-drop-target {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--interactive-accent) 45%, transparent);
+}
+
+.ss-studio-port-pin.is-drop-target.is-input {
+  animation: ss-studio-port-halo 1.1s ease-in-out infinite;
+}
+
+.ss-studio-port-pin.is-drop-incompatible {
+  opacity: 0.25;
+  filter: grayscale(0.4);
+}
+
+@keyframes ss-studio-port-halo {
+  0%,
+  100% {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--interactive-accent) 35%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--interactive-accent) 55%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ss-studio-link-group[data-status="flowing"] .ss-studio-link-path {
+    stroke-dasharray: none;
+    stroke-dashoffset: 0;
+  }
+  .ss-studio-port-pin.is-drop-target.is-input {
+    animation: none;
+  }
 }
 
 .ss-studio-port-label {
