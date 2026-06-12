@@ -95,10 +95,12 @@ Automated E2E testing runs in GitHub Actions on every PR and push to main:
 
 | Workflow | Runner | What it proves |
 |----------|--------|----------------|
-| `ci.yml` | ubuntu-latest | Unit tests + fast plugin checks |
-| `windows-e2e.yml` | windows-latest | Fresh Obsidian install, plugin loads, bridge comes up, clean-install parity |
-| `macos-e2e.yml` | macos-latest | Obsidian .dmg install, vault bootstrap, bridge, managed baseline |
-| `android-e2e.yml` | ubuntu-latest + emulator | APK install on Android emulator, vault prep, WebView bridge, chat smoke |
+| `ci.yml` | ubuntu-latest | Unit tests, embeddings tests, production build, built-bundle integration suite |
+| `macos-e2e.yml` | macos-latest | Obsidian .dmg install, vault bootstrap, bridge, managed baseline, release smoke against local provider fixtures (provider listing, chat round-trip, recorder, embeddings) |
+
+Windows and Android E2E run locally via the `test:native:windows:*` and
+`test:native:android*` scripts (Windows over SSH to the paired machine,
+Android against a connected device/emulator); they have no CI workflow yet.
 
 iOS is local-only: it requires a cable-connected physical iPad with Developer Mode. There is no simulator path for real Obsidian plugin QA. See `testing/native/device/ios/README.md`.
 

@@ -2,6 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   assertHealthyStatus,
+  EMBEDDINGS_SMOKE_CASE,
+  RECORDER_SMOKE_CASE,
+  runEmbeddingsSmokeCase,
+  runRecorderSmokeCase,
+  buildFixtureSettingsPatch,
   BASELINE_SUITE_CASE,
   CHATVIEW_STRESS_CASE,
   FIXTURE_CHAT_ROUNDTRIP_CASE,
@@ -2623,6 +2628,8 @@ test("caseList resolves release-smoke to the fixture cases", () => {
   assert.deepEqual(caseList(RELEASE_SMOKE_CASE), [
     FIXTURE_PROVIDER_LISTING_CASE,
     FIXTURE_CHAT_ROUNDTRIP_CASE,
+    RECORDER_SMOKE_CASE,
+    EMBEDDINGS_SMOKE_CASE,
   ]);
 });
 
@@ -2691,4 +2698,61 @@ test("runFixtureChatRoundtripCase asserts the deterministic fixture completion",
   const outcome = await runFixtureChatRoundtripCase(buildFixtureSmokeClient());
   assert.equal(outcome.selectedModelId, "openrouter@@openai/gpt-5.4-mini");
   assert.match(outcome.response, /fixture-completion: hello from the mock provider/);
+});
+
+test("runRecorderSmokeCase drives toggle on/off and waits for the fixture transcript", async () => {
+  let recording = false;
+  let transcript = null;
+  const client = {
+    async toggleRecorder() {
+      recording = !recording;
+      if (!recording) {
+        setTimeout(() => {
+          transcript = "fixture-transcript: hello from the mock whisper";
+        }, 10);
+      }
+      return { recording };
+    },
+    async getRecorderStatus() {
+      return { recording, lastTranscript: transcript };
+    },
+  };
+
+  const outcome = await runRecorderSmokeCase(client, { recorderCaptureMs: 5 });
+  assert.match(outcome.transcript, /fixture-transcript/);
+});
+
+test("runEmbeddingsSmokeCase asserts a non-empty vector", async () => {
+  const outcome = await runEmbeddingsSmokeCase({
+    async embedText() {
+      return { provider: "custom", model: "fixture-embeddings", dimensions: 8 };
+    },
+  });
+  assert.equal(outcome.dimensions, 8);
+  assert.equal(outcome.provider, "custom");
+
+  await assert.rejects(
+    runEmbeddingsSmokeCase({
+      async embedText() {
+        return { provider: "custom", model: "fixture-embeddings", dimensions: 0 };
+      },
+    }),
+    /non-empty vector/
+  );
+});
+
+test("buildFixtureSettingsPatch maps fixture URLs onto provider/transcription/embeddings settings", () => {
+  const patch = buildFixtureSettingsPatch({
+    openrouter: "http://127.0.0.1:4310",
+    whisper: "http://127.0.0.1:4311",
+    lmstudio: "http://127.0.0.1:4312",
+  });
+  assert.equal(patch.customProviders[0].endpoint, "http://127.0.0.1:4310/api/v1");
+  assert.equal(patch.customTranscriptionEndpoint, "http://127.0.0.1:4311/v1/audio/transcriptions");
+  assert.equal(patch.embeddingsCustomEndpoint, "http://127.0.0.1:4312/v1/embeddings");
+  assert.equal(patch.transcriptionProvider, "custom");
+  assert.equal(patch.embeddingsProvider, "custom");
+  assert.equal(patch.autoTranscribeRecordings, true);
+
+  assert.throws(() => buildFixtureSettingsPatch({}), /missing server URLs/);
 });

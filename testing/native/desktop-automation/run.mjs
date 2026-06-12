@@ -18,7 +18,7 @@ Run no-focus desktop automation against the already-running Obsidian vault by
 talking to the plugin's localhost bridge instead of driving the renderer.
 
 Options:
-  --case <name|all|extended|stress|soak>   Case list: setup-baseline, managed-baseline, provider-connected-baseline, release-smoke, fixture-provider-listing, fixture-chat-roundtrip, model-switch, chat-exact, file-read, file-write, web-fetch, youtube-transcript, reload-stress, chatview-stress, all, extended, stress, or soak. Default: all
+  --case <name|all|extended|stress|soak>   Case list: setup-baseline, managed-baseline, provider-connected-baseline, release-smoke, fixture-provider-listing, fixture-chat-roundtrip, recorder-smoke, embeddings-smoke, model-switch, chat-exact, file-read, file-write, web-fetch, youtube-transcript, reload-stress, chatview-stress, all, extended, stress, or soak. Default: all
   --sync-config <path>         Sync config used to resolve the desktop plugin target. Default: ./systemsculpt-sync.config.json
   --target-index <n>           Pin a pluginTargets entry from the sync config
   --vault-name <name>          Pin a specific sync target by vault name
@@ -29,6 +29,10 @@ Options:
   --repeat <n>                 Repeat the selected cases. Default: ${DEFAULT_REPEAT}
   --pause-ms <n>               Delay between iterations. Default: ${DEFAULT_PAUSE_MS}
   --json-output <path>         Write the final JSON report to this path as well as stdout
+  --apply-fixture-settings <path>
+                               Read a provider-fixture state file (see testing/fixtures/providers/serve.mjs)
+                               and apply the fixture-backed provider/transcription/embeddings settings
+                               through the live bridge before running cases
   --no-reload                  Reuse a live bridge if one already exists instead of forcing a plugin reload
   --allow-single-model-fallback
                                Allow fresh-install fallback coverage when only one authenticated model exists
@@ -122,6 +126,11 @@ function parseArgs(argv) {
     }
     if (arg === "--json-output") {
       options.jsonOutput = path.resolve(String(argv[index + 1] || "").trim());
+      index += 1;
+      continue;
+    }
+    if (arg === "--apply-fixture-settings") {
+      options.applyFixtureSettings = path.resolve(String(argv[index + 1] || "").trim());
       index += 1;
       continue;
     }

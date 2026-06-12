@@ -33,6 +33,7 @@ export class RecorderService {
   private lastRecordingPath: string | null = null;
   private offlineRecordings: Map<string, Blob> = new Map();
   private listeners: Set<(recording: boolean) => void> = new Set();
+  private transcriptionListeners: Set<(text: string) => void> = new Set();
   private sessionCompletionPromise: Promise<void> | null = null;
   private sessionCompletionResolver: (() => void) | null = null;
   private toggleQueue: Promise<void> = Promise.resolve();
@@ -72,12 +73,26 @@ export class RecorderService {
     return () => this.listeners.delete(callback);
   }
 
+  /**
+   * Observe completed transcriptions without replacing the service-level
+   * onTranscriptionComplete callback (used by the desktop automation bridge).
+   */
+  public onTranscription(callback: (text: string) => void): () => void {
+    this.transcriptionListeners.add(callback);
+    return () => this.transcriptionListeners.delete(callback);
+  }
+
+  public isCurrentlyRecording(): boolean {
+    return this.isRecording;
+  }
+
   public unload(): void {
     if (this.isRecording) {
       void this.stopRecording();
     }
     this.cleanup(true);
     this.listeners.clear();
+    this.transcriptionListeners.clear();
   }
 
   public toggleRecording(): Promise<void> {
@@ -286,6 +301,13 @@ export class RecorderService {
   }
 
   private handleTranscriptionComplete(text: string): void {
+    for (const listener of this.transcriptionListeners) {
+      try {
+        listener(text);
+      } catch {
+        // Observers must never break the recorder flow.
+      }
+    }
     try {
       this.info("transcription complete callback received", { receivedChars: text.length });
       if (this.onTranscriptionDone) {
