@@ -38,3 +38,6 @@ jobs:
 
       - name: Build (production)
         run: npm run build
+
+      - name: Integration Tests (built bundle + provider fixtures)
+        run: npm run test:integration:ci
