@@ -241,48 +241,17 @@ jobs:
             --case managed-baseline \
             --no-reload
 
-      - name: Connect fixture provider and run release smoke
+      - name: Run release smoke (provider fixtures)
         run: |
-          # Seed the BYOK custom provider AFTER managed-baseline: with it in
-          # settings from first launch, the local-Pi openrouter model reads
-          # the fixture key as real auth and managed-baseline's local-Pi leg
-          # would send to the real OpenRouter API. The release-smoke run
-          # below omits --no-reload so the plugin reloads and picks up the
-          # new settings before the fixture cases execute.
-          plugin_dir="${HOME}/Documents/SystemSculptMacQA/.obsidian/plugins/systemsculpt-ai"
-          node --input-type=module -e "
-            import fs from 'node:fs';
-            const dataPath = '${plugin_dir}/data.json';
-            const settings = JSON.parse(fs.readFileSync(dataPath, 'utf8'));
-            const fixtureState = JSON.parse(
-              fs.readFileSync(process.env.HOME + '/.systemsculpt-fixtures.json', 'utf8')
-            );
-            settings.customProviders = [
-              {
-                id: 'openrouter',
-                name: 'OpenRouter (fixture)',
-                endpoint: fixtureState.openrouter + '/api/v1',
-                apiKey: 'fixture-key',
-                isEnabled: true,
-              },
-            ];
-            // Recorder smoke: transcribe captured fake-device audio through
-            // the local Whisper-shaped fixture.
-            settings.autoTranscribeRecordings = true;
-            settings.transcriptionProvider = 'custom';
-            settings.customTranscriptionEndpoint = fixtureState.whisper + '/v1/audio/transcriptions';
-            settings.customTranscriptionApiKey = 'fixture-key';
-            settings.customTranscriptionModel = 'whisper-1';
-            // Embeddings smoke: round-trip through the OpenAI-shaped fixture.
-            settings.embeddingsProvider = 'custom';
-            settings.embeddingsCustomEndpoint = fixtureState.lmstudio + '/v1/embeddings';
-            settings.embeddingsCustomApiKey = 'fixture-key';
-            settings.embeddingsCustomModel = 'fixture-embeddings';
-            fs.writeFileSync(dataPath, JSON.stringify(settings, null, 2));
-            console.log('Fixture provider connected in plugin settings');
-          "
+          # Fixture settings apply AFTER managed-baseline (a fixture-keyed
+          # openrouter entry present during the baseline would make its
+          # local-Pi leg call the real OpenRouter API). The runner patches
+          # settings through the live bridge, which persists them itself —
+          # editing data.json externally races the plugin's settings flush.
           node testing/native/desktop-automation/run.mjs \
-            --case release-smoke
+            --case release-smoke \
+            --no-reload \
+            --apply-fixture-settings "${HOME}/.systemsculpt-fixtures.json"
 
       # ---- Failure diagnostics ----
 

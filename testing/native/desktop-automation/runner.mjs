@@ -2715,6 +2715,43 @@ export async function runChatViewStressCase(client, options = {}) {
   );
 }
 
+/**
+ * Settings patch that points the BYOK custom provider, transcription, and
+ * embeddings at the local fixture servers (issue #215 release smoke). Applied
+ * through the live bridge so the plugin persists it itself — editing
+ * data.json externally races the plugin's own settings flush.
+ */
+export function buildFixtureSettingsPatch(fixtureState) {
+  const openrouterUrl = String(fixtureState?.openrouter || "").trim();
+  const whisperUrl = String(fixtureState?.whisper || "").trim();
+  const lmstudioUrl = String(fixtureState?.lmstudio || "").trim();
+  if (!openrouterUrl || !whisperUrl || !lmstudioUrl) {
+    throw new Error(
+      `Fixture state file is missing server URLs. Got: ${JSON.stringify(fixtureState)}`
+    );
+  }
+  return {
+    customProviders: [
+      {
+        id: "openrouter",
+        name: "OpenRouter (fixture)",
+        endpoint: `${openrouterUrl}/api/v1`,
+        apiKey: "fixture-key",
+        isEnabled: true,
+      },
+    ],
+    autoTranscribeRecordings: true,
+    transcriptionProvider: "custom",
+    customTranscriptionEndpoint: `${whisperUrl}/v1/audio/transcriptions`,
+    customTranscriptionApiKey: "fixture-key",
+    customTranscriptionModel: "whisper-1",
+    embeddingsProvider: "custom",
+    embeddingsCustomEndpoint: `${lmstudioUrl}/v1/embeddings`,
+    embeddingsCustomApiKey: "fixture-key",
+    embeddingsCustomModel: "fixture-embeddings",
+  };
+}
+
 export async function runCase(client, options, caseName) {
   switch (caseName) {
     case SETUP_BASELINE_CASE:
@@ -2784,6 +2821,15 @@ export async function runDesktopAutomation(options, dependencies = {}) {
     `[desktop-automation] Connected to ${bootstrapResult.target.vaultName} via ${bootstrapResult.reload.method} ` +
       `(${bootstrapResult.client.baseUrl})`
   );
+
+  if (options.applyFixtureSettings) {
+    const fixtureState = JSON.parse(await fs.readFile(options.applyFixtureSettings, "utf8"));
+    const updated = await client.updateSettings(buildFixtureSettingsPatch(fixtureState));
+    log(
+      `[desktop-automation] Applied fixture settings (${(updated?.updatedKeys || []).length} keys) ` +
+        `from ${options.applyFixtureSettings}`
+    );
+  }
 
   const seededFixtures = await seedTextFixtures(client, fixtureDir, {
     loadFixtureBundle: dependencies.loadFixtureBundle,

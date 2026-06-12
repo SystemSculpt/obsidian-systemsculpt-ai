@@ -6,6 +6,7 @@ import {
   RECORDER_SMOKE_CASE,
   runEmbeddingsSmokeCase,
   runRecorderSmokeCase,
+  buildFixtureSettingsPatch,
   BASELINE_SUITE_CASE,
   CHATVIEW_STRESS_CASE,
   FIXTURE_CHAT_ROUNDTRIP_CASE,
@@ -2738,4 +2739,20 @@ test("runEmbeddingsSmokeCase asserts a non-empty vector", async () => {
     }),
     /non-empty vector/
   );
+});
+
+test("buildFixtureSettingsPatch maps fixture URLs onto provider/transcription/embeddings settings", () => {
+  const patch = buildFixtureSettingsPatch({
+    openrouter: "http://127.0.0.1:4310",
+    whisper: "http://127.0.0.1:4311",
+    lmstudio: "http://127.0.0.1:4312",
+  });
+  assert.equal(patch.customProviders[0].endpoint, "http://127.0.0.1:4310/api/v1");
+  assert.equal(patch.customTranscriptionEndpoint, "http://127.0.0.1:4311/v1/audio/transcriptions");
+  assert.equal(patch.embeddingsCustomEndpoint, "http://127.0.0.1:4312/v1/embeddings");
+  assert.equal(patch.transcriptionProvider, "custom");
+  assert.equal(patch.embeddingsProvider, "custom");
+  assert.equal(patch.autoTranscribeRecordings, true);
+
+  assert.throws(() => buildFixtureSettingsPatch({}), /missing server URLs/);
 });

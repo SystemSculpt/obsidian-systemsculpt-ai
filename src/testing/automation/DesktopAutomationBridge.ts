@@ -761,6 +761,27 @@ export class DesktopAutomationBridge {
         return;
       }
 
+      if (method === "POST" && url.pathname === "/v1/settings/update") {
+        const body = await this.readJsonBody(request);
+        const patch = body.settings;
+        if (!patch || typeof patch !== "object" || Array.isArray(patch)) {
+          throw new BridgeHttpError(400, "settings must be an object of keys to merge.");
+        }
+        // In-memory merge + persist: applying settings through the live
+        // plugin avoids the data.json write race a reload-based flow has
+        // (the plugin can flush its own settings over an external edit).
+        Object.assign(this.plugin.settings as unknown as Record<string, unknown>, patch);
+        await this.plugin.saveSettings();
+        await this.refreshModelCatalog();
+        this.sendJson(response, 200, {
+          ok: true,
+          data: {
+            updatedKeys: Object.keys(patch as Record<string, unknown>),
+          },
+        });
+        return;
+      }
+
       if (method === "POST" && url.pathname === "/v1/recorder/toggle") {
         const recorder = this.plugin.getRecorderService();
         this.ensureRecorderTranscriptionObserver(recorder);

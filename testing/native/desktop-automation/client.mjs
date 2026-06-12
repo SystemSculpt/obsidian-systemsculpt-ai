@@ -320,6 +320,15 @@ export class DesktopAutomationClient {
     });
   }
 
+  async updateSettings(settings) {
+    return await this.request("/v1/settings/update", {
+      method: "POST",
+      body: { settings },
+      timeoutMs: 30000,
+      allowRecovery: true,
+    });
+  }
+
   async toggleRecorder() {
     return await this.request("/v1/recorder/toggle", {
       method: "POST",

@@ -29,6 +29,10 @@ Options:
   --repeat <n>                 Repeat the selected cases. Default: ${DEFAULT_REPEAT}
   --pause-ms <n>               Delay between iterations. Default: ${DEFAULT_PAUSE_MS}
   --json-output <path>         Write the final JSON report to this path as well as stdout
+  --apply-fixture-settings <path>
+                               Read a provider-fixture state file (see testing/fixtures/providers/serve.mjs)
+                               and apply the fixture-backed provider/transcription/embeddings settings
+                               through the live bridge before running cases
   --no-reload                  Reuse a live bridge if one already exists instead of forcing a plugin reload
   --allow-single-model-fallback
                                Allow fresh-install fallback coverage when only one authenticated model exists
@@ -122,6 +126,11 @@ function parseArgs(argv) {
     }
     if (arg === "--json-output") {
       options.jsonOutput = path.resolve(String(argv[index + 1] || "").trim());
+      index += 1;
+      continue;
+    }
+    if (arg === "--apply-fixture-settings") {
+      options.applyFixtureSettings = path.resolve(String(argv[index + 1] || "").trim());
       index += 1;
       continue;
     }
