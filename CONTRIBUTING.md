@@ -39,7 +39,8 @@ review when all of them are green locally.
 
 - Match the surrounding file's style exactly (indentation, naming, idiom).
   No drive-by reformatting.
-- The compiled `main.js`/`styles.css` at the repo root are build artifacts;
-  never edit them by hand and only commit them when a release flow asks for it.
+- The compiled `main.js`/`styles.css` at the repo root are gitignored build
+  artifacts (`npm run build` regenerates them; releases attach them); never
+  edit them by hand.
 - New emails, providers, or commands follow registry patterns; grep for an
   existing exemplar before inventing a new shape.
