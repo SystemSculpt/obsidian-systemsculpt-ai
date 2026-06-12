@@ -131,6 +131,8 @@
     "test:related": "node scripts/jest.mjs --config jest.config.cjs --findRelatedTests --passWithNoTests",
     "test:leaks": "node scripts/jest.mjs --config jest.config.cjs --maxWorkers=1 --openHandlesTimeout=200 --passWithNoTests",
     "test:embeddings": "node scripts/jest.mjs --config jest.embeddings.config.cjs --passWithNoTests",
+    "test:integration": "npm run build && npm run test:integration:ci",
+    "test:integration:ci": "node scripts/jest.mjs --config jest.integration.config.cjs --runInBand --forceExit",
     "test:embeddings:serial": "node scripts/jest.mjs --config jest.embeddings.config.cjs --runInBand --passWithNoTests",
     "test:release-script": "node --test scripts/release-plugin.test.mjs scripts/check-release-surfaces.test.mjs",
     "check:release-surfaces": "node scripts/check-release-surfaces.mjs",
