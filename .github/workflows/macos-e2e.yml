@@ -96,6 +96,20 @@ jobs:
 
       # ---- Bootstrap vault and launch ----
 
+      - name: Start provider fixtures
+        run: |
+          state_file="${HOME}/.systemsculpt-fixtures.json"
+          node testing/fixtures/providers/serve.mjs --state-file "${state_file}" &
+          for i in $(seq 1 20); do
+            [ -f "${state_file}" ] && break
+            sleep 1
+          done
+          if [ ! -f "${state_file}" ]; then
+            echo "ERROR: provider fixtures did not start"
+            exit 1
+          fi
+          cat "${state_file}"
+
       - name: Prepare vault and launch Obsidian
         run: |
           vault_path="${HOME}/Documents/SystemSculptMacQA"
@@ -221,6 +235,37 @@ jobs:
           node testing/native/desktop-automation/run.mjs \
             --case managed-baseline \
             --no-reload
+
+      - name: Connect fixture provider and run release smoke
+        run: |
+          # Seed the BYOK custom provider AFTER managed-baseline: with it in
+          # settings from first launch, the local-Pi openrouter model reads
+          # the fixture key as real auth and managed-baseline's local-Pi leg
+          # would send to the real OpenRouter API. The release-smoke run
+          # below omits --no-reload so the plugin reloads and picks up the
+          # new settings before the fixture cases execute.
+          plugin_dir="${HOME}/Documents/SystemSculptMacQA/.obsidian/plugins/systemsculpt-ai"
+          node --input-type=module -e "
+            import fs from 'node:fs';
+            const dataPath = '${plugin_dir}/data.json';
+            const settings = JSON.parse(fs.readFileSync(dataPath, 'utf8'));
+            const fixtureState = JSON.parse(
+              fs.readFileSync(process.env.HOME + '/.systemsculpt-fixtures.json', 'utf8')
+            );
+            settings.customProviders = [
+              {
+                id: 'openrouter',
+                name: 'OpenRouter (fixture)',
+                endpoint: fixtureState.openrouter + '/api/v1',
+                apiKey: 'fixture-key',
+                isEnabled: true,
+              },
+            ];
+            fs.writeFileSync(dataPath, JSON.stringify(settings, null, 2));
+            console.log('Fixture provider connected in plugin settings');
+          "
+          node testing/native/desktop-automation/run.mjs \
+            --case release-smoke
 
       # ---- Failure diagnostics ----
 

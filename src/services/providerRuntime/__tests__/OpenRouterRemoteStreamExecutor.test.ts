@@ -7,6 +7,8 @@ const mockStreamResponse = jest.fn();
 
 jest.mock("../RemoteProviderCatalog", () => ({
   resolveRemoteProviderEndpoint: (...args: any[]) => mockResolveEndpoint(...args),
+  resolveConfiguredRemoteProviderEndpoint: (_plugin: unknown, ...args: any[]) =>
+    mockResolveEndpoint(...args),
 }));
 
 jest.mock("../../../studio/piAuth/StudioPiAuthStorage", () => ({

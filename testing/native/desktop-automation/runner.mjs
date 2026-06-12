@@ -21,6 +21,10 @@ import {
   normalizeProviderId,
   resolveProviderModelPreferences,
 } from "../shared/model-inventory.mjs";
+import { createRequire } from "node:module";
+
+const requireCjs = createRequire(import.meta.url);
+const { OPENROUTER_FIXTURE_MODELS, FIXTURE_TEXTS } = requireCjs("../../fixtures/providers/index.cjs");
 
 export const CORE_CASES = ["model-switch", "chat-exact", "file-read", "file-write", "web-fetch"];
 export const EXTENDED_CASES = [...CORE_CASES, "youtube-transcript"];
@@ -32,6 +36,10 @@ export const BASELINE_SUITE_CASE = "baselines";
 export const MANAGED_BASELINE_CASE = "managed-baseline";
 export const PROVIDER_CONNECTED_BASELINE_CASE = "provider-connected-baseline";
 export const SOAK_CASES = [DEFAULT_STRESS_CASE, CHATVIEW_STRESS_CASE];
+export const FIXTURE_PROVIDER_LISTING_CASE = "fixture-provider-listing";
+export const FIXTURE_CHAT_ROUNDTRIP_CASE = "fixture-chat-roundtrip";
+export const RELEASE_SMOKE_CASE = "release-smoke";
+const RELEASE_SMOKE_CASES = [FIXTURE_PROVIDER_LISTING_CASE, FIXTURE_CHAT_ROUNDTRIP_CASE];
 const BASELINE_SUITE_CASES = [MANAGED_BASELINE_CASE, PROVIDER_CONNECTED_BASELINE_CASE];
 const MANAGED_SYSTEMSCULPT_MODEL_ID = "systemsculpt@@systemsculpt/ai-agent";
 const DESKTOP_BASELINE_PI_MODEL_ID = "local-pi-openrouter@@openai/gpt-5.4-mini";
@@ -705,6 +713,9 @@ export function caseList(caseName) {
   }
   if (caseName === PROVIDER_CONNECTED_BASELINE_CASE) {
     return [PROVIDER_CONNECTED_BASELINE_CASE];
+  }
+  if (caseName === RELEASE_SMOKE_CASE) {
+    return [...RELEASE_SMOKE_CASES];
   }
   return [caseName];
 }
@@ -1766,6 +1777,80 @@ export async function runManagedBaselineCase(client) {
   };
 }
 
+const FIXTURE_OPENROUTER_MODEL_ID = `openrouter@@${OPENROUTER_FIXTURE_MODELS[0].id}`;
+
+/**
+ * Release smoke (issue #215): the model catalog must list the managed model
+ * and the remote seed model surfaced by the customProviders entry the CI
+ * vault seeds against the local fixture server. Encodes #201 against the
+ * real app: providers disappearing from the dropdown fails this case.
+ */
+export async function runFixtureProviderListingCase(client) {
+  const inventory = await loadModelInventory(client);
+  if (!inventory.managedOption) {
+    throw new Error("Fixture provider listing expected the managed SystemSculpt model in the dropdown.");
+  }
+  const fixtureOption = inventory.options.find(
+    (option) => option && option.value === FIXTURE_OPENROUTER_MODEL_ID
+  );
+  if (!fixtureOption) {
+    throw new Error(
+      `Fixture provider listing expected "${FIXTURE_OPENROUTER_MODEL_ID}" from the seeded custom provider. ` +
+        `Available: ${describeModelOptions(inventory.options)}`
+    );
+  }
+
+  return {
+    availableModelCount: inventory.options.length,
+    readyModelCount: inventory.ready.length,
+    managedModel: buildModelSummary(inventory.managedOption),
+    fixtureModel: buildModelSummary(fixtureOption),
+  };
+}
+
+/**
+ * Release smoke (issue #215): a full chat round-trip through the remote
+ * provider execution path against the local OpenRouter-compatible fixture.
+ * No real provider credentials are involved; the fixture streams a
+ * deterministic completion, so any drift in endpoint resolution, auth
+ * plumbing, request shape, or SSE parsing fails the case.
+ */
+export async function runFixtureChatRoundtripCase(client) {
+  const inventory = await loadModelInventory(client);
+  const fixtureOption = inventory.options.find(
+    (option) => option && option.value === FIXTURE_OPENROUTER_MODEL_ID
+  );
+  if (!fixtureOption) {
+    throw new Error(
+      `Fixture chat round-trip expected "${FIXTURE_OPENROUTER_MODEL_ID}" from the seeded custom provider. ` +
+        `Available: ${describeModelOptions(inventory.options)}`
+    );
+  }
+
+  await ensureChatModelSelection(client, fixtureOption.value, {
+    reset: true,
+    label: "Fixture chat round-trip selection",
+  });
+  const snapshot = await client.sendChat({
+    text: "Reply with OK.",
+    includeContextFiles: false,
+    webSearchEnabled: false,
+    approvalMode: "interactive",
+  });
+  const assistant = getLastAssistantMessage(snapshot);
+  const assistantText = toMessageText(assistant?.content).trim();
+
+  assertEqual(snapshot.selectedModelId, fixtureOption.value, "Fixture model selected after send");
+  assertIncludes(assistantText, FIXTURE_TEXTS.completion, "Fixture chat reply");
+
+  return {
+    response: assistantText,
+    model: buildModelSummary(fixtureOption),
+    selectedModelId: snapshot.selectedModelId,
+    currentModelName: snapshot.currentModelName || null,
+  };
+}
+
 export async function runProviderConnectedBaselineCase(client, options = {}) {
   const authConfig = resolveProviderConnectedAuthConfig(options.env || process.env);
   const inventory = await loadModelInventory(client);
@@ -2574,6 +2659,10 @@ export async function runCase(client, options, caseName) {
       return { client, result: await runManagedBaselineCase(client) };
     case PROVIDER_CONNECTED_BASELINE_CASE:
       return { client, result: await runProviderConnectedBaselineCase(client, options) };
+    case FIXTURE_PROVIDER_LISTING_CASE:
+      return { client, result: await runFixtureProviderListingCase(client) };
+    case FIXTURE_CHAT_ROUNDTRIP_CASE:
+      return { client, result: await runFixtureChatRoundtripCase(client) };
     case "model-switch":
       return { client, result: await runModelSwitchCase(client, options) };
     case "chat-exact":

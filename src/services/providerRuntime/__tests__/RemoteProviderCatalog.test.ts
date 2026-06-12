@@ -1,6 +1,7 @@
 import {
   listConfiguredRemoteProviderModels,
   resolveRemoteProviderEndpoint,
+  resolveConfiguredRemoteProviderEndpoint,
   getConfiguredRemoteProviderApiKey,
 } from "../RemoteProviderCatalog";
 import { AI_PROVIDERS } from "../../../constants/externalServices";
@@ -34,6 +35,39 @@ describe("RemoteProviderCatalog", () => {
     it("returns empty string for unknown providers", () => {
       expect(resolveRemoteProviderEndpoint("anthropic")).toBe("");
       expect(resolveRemoteProviderEndpoint("")).toBe("");
+    });
+  });
+
+  describe("resolveConfiguredRemoteProviderEndpoint", () => {
+    it("prefers the enabled custom provider's configured endpoint", () => {
+      const plugin = makePlugin([
+        { id: "openrouter", endpoint: "http://127.0.0.1:4310/api/v1/", apiKey: "k", isEnabled: true },
+      ]);
+      expect(resolveConfiguredRemoteProviderEndpoint(plugin, "openrouter")).toBe(
+        "http://127.0.0.1:4310/api/v1"
+      );
+    });
+
+    it("falls back to the canonical base URL when no entry matches", () => {
+      expect(resolveConfiguredRemoteProviderEndpoint(makePlugin(), "openrouter")).toBe(
+        AI_PROVIDERS.OPENROUTER.BASE_URL
+      );
+    });
+
+    it("ignores disabled entries and invalid endpoints", () => {
+      const disabled = makePlugin([
+        { id: "openrouter", endpoint: "http://127.0.0.1:4310", apiKey: "k", isEnabled: false },
+      ]);
+      expect(resolveConfiguredRemoteProviderEndpoint(disabled, "openrouter")).toBe(
+        AI_PROVIDERS.OPENROUTER.BASE_URL
+      );
+
+      const invalid = makePlugin([
+        { id: "openrouter", endpoint: "not-a-url", apiKey: "k", isEnabled: true },
+      ]);
+      expect(resolveConfiguredRemoteProviderEndpoint(invalid, "openrouter")).toBe(
+        AI_PROVIDERS.OPENROUTER.BASE_URL
+      );
     });
   });
 

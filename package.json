@@ -74,6 +74,7 @@
     "test:native:desktop:extended": "node testing/native/desktop-automation/run.mjs --case extended",
     "test:native:desktop:baselines": "node testing/native/desktop-automation/run.mjs --case baselines --no-reload",
     "test:native:desktop:provider-connected": "node testing/native/desktop-automation/run.mjs --case provider-connected-baseline --no-reload",
+    "test:native:desktop:release-smoke": "node testing/native/desktop-automation/run.mjs --case release-smoke --no-reload",
     "test:native:desktop:chatview-stress": "node testing/native/desktop-automation/run.mjs --case chatview-stress --repeat 5 --pause-ms 750 --no-reload",
     "test:native:desktop:stress": "node testing/native/desktop-automation/run.mjs --case stress --repeat 5 --pause-ms 1500 --no-reload",
     "test:native:desktop:soak": "node testing/native/desktop-automation/run.mjs --case soak --repeat 25 --pause-ms 1500 --no-reload",

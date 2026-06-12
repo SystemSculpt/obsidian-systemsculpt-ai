@@ -122,6 +122,36 @@ export function resolveRemoteProviderEndpoint(providerId: string): string {
   return "";
 }
 
+/**
+ * Endpoint resolution for executing against a remote provider. A user who
+ * configured the provider with an explicit endpoint (proxy, gateway, or a
+ * local fixture in tests) gets that endpoint; otherwise the canonical base
+ * URL applies. Matching mirrors resolveConfiguredProviderApiKey: the entry's
+ * id/name (or endpoint-derived provider) keys the lookup, and disabled
+ * entries never win.
+ */
+export function resolveConfiguredRemoteProviderEndpoint(
+  plugin: Pick<SystemSculptPlugin, "settings">,
+  providerId: string,
+): string {
+  const normalized = normalizeProviderId(providerId);
+  const customProviders = Array.isArray(plugin.settings?.customProviders)
+    ? (plugin.settings.customProviders as CustomProvider[])
+    : [];
+
+  for (const provider of customProviders) {
+    const endpointProvider = resolvePiProviderFromEndpoint(provider.endpoint || "");
+    const providerKey = normalizeProviderId(provider.id || provider.name || endpointProvider);
+    const enabled = provider.isEnabled !== false;
+    const endpoint = String(provider.endpoint || "").trim();
+    if (enabled && providerKey === normalized && /^https?:\/\//i.test(endpoint)) {
+      return endpoint.replace(/\/+$/, "");
+    }
+  }
+
+  return resolveRemoteProviderEndpoint(providerId);
+}
+
 export function getConfiguredRemoteProviderApiKey(
   plugin: SystemSculptPlugin,
   providerId: string,
