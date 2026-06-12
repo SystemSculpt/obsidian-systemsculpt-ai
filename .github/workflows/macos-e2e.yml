@@ -146,22 +146,8 @@ jobs:
               settings.transcriptionProvider = 'systemsculpt';
               settings.embeddingsProvider = 'systemsculpt';
             }
-            // Point a BYOK custom provider at the local fixture server so the
-            // release-smoke cases run hermetically (no real provider keys).
-            const fixtureState = JSON.parse(
-              fs.readFileSync(process.env.HOME + '/.systemsculpt-fixtures.json', 'utf8')
-            );
-            settings.customProviders = [
-              {
-                id: 'openrouter',
-                name: 'OpenRouter (fixture)',
-                endpoint: fixtureState.openrouter + '/api/v1',
-                apiKey: 'fixture-key',
-                isEnabled: true,
-              },
-            ];
             fs.writeFileSync('${plugin_dir}/data.json', JSON.stringify(settings, null, 2));
-            console.log('Plugin settings seeded (bridge enabled, fixture provider connected)');
+            console.log('Plugin settings seeded (bridge enabled)');
           "
 
           echo "Vault prepared at ${vault_path}"
@@ -250,11 +236,36 @@ jobs:
             --case managed-baseline \
             --no-reload
 
-      - name: Run release smoke (provider fixtures)
+      - name: Connect fixture provider and run release smoke
         run: |
+          # Seed the BYOK custom provider AFTER managed-baseline: with it in
+          # settings from first launch, the local-Pi openrouter model reads
+          # the fixture key as real auth and managed-baseline's local-Pi leg
+          # would send to the real OpenRouter API. The release-smoke run
+          # below omits --no-reload so the plugin reloads and picks up the
+          # new settings before the fixture cases execute.
+          plugin_dir="${HOME}/Documents/SystemSculptMacQA/.obsidian/plugins/systemsculpt-ai"
+          node --input-type=module -e "
+            import fs from 'node:fs';
+            const dataPath = '${plugin_dir}/data.json';
+            const settings = JSON.parse(fs.readFileSync(dataPath, 'utf8'));
+            const fixtureState = JSON.parse(
+              fs.readFileSync(process.env.HOME + '/.systemsculpt-fixtures.json', 'utf8')
+            );
+            settings.customProviders = [
+              {
+                id: 'openrouter',
+                name: 'OpenRouter (fixture)',
+                endpoint: fixtureState.openrouter + '/api/v1',
+                apiKey: 'fixture-key',
+                isEnabled: true,
+              },
+            ];
+            fs.writeFileSync(dataPath, JSON.stringify(settings, null, 2));
+            console.log('Fixture provider connected in plugin settings');
+          "
           node testing/native/desktop-automation/run.mjs \
-            --case release-smoke \
-            --no-reload
+            --case release-smoke
 
       # ---- Failure diagnostics ----
 
