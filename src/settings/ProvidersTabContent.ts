@@ -61,6 +61,8 @@ type TabState = {
   oauthAbortController: AbortController | null;
 };
 
+const PROVIDER_MODEL_HINT_TIMEOUT_MS = 2_500;
+
 async function loadStudioPiAuthInventoryModule(): Promise<
   typeof import("../studio/piAuth/StudioPiAuthInventory")
 > {
@@ -198,19 +200,32 @@ function modelMatchesProvider(model: SystemSculptModel, providerId: string): boo
   );
 }
 
+function isLocalPiModel(model: SystemSculptModel): boolean {
+  const modelId = String(model.id || "").trim().toLowerCase();
+  const sourceMode = String(model.sourceMode || "").trim().toLowerCase();
+  return (
+    modelId.startsWith("local-pi-") ||
+    sourceMode === "pi_local" ||
+    sourceMode === "local_pi" ||
+    model.piLocalAvailable === true
+  );
+}
+
 function pickProviderModelHint(
   providerId: string,
   models: SystemSculptModel[],
 ): ProviderModelHint | null {
   const normalizedProvider = normalizeProviderId(providerId);
-  const providerModels = models.filter((model) => modelMatchesProvider(model, normalizedProvider));
+  const providerModels = models.filter(
+    (model) => modelMatchesProvider(model, normalizedProvider) && !isLocalPiModel(model)
+  );
   if (providerModels.length === 0) {
     return null;
   }
 
   const preferredIds =
     normalizedProvider === "xai"
-      ? ["xai@@grok-4.3", "local-pi-xai@@grok-4.3"]
+      ? ["xai@@grok-4.3"]
       : [];
   const preferredModel =
     preferredIds
@@ -237,6 +252,24 @@ function getConnectedRemoteProviderIds(state: TabState): string[] {
       return getProviderDisplayState(record, state.localProviderIds).connected;
     })
     .map((record) => normalizeProviderId(record.provider));
+}
+
+async function loadProviderModelsWithTimeout(
+  loadModels: () => Promise<SystemSculptModel[]>,
+): Promise<SystemSculptModel[]> {
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([
+      loadModels(),
+      new Promise<SystemSculptModel[]>((resolve) => {
+        timeout = setTimeout(() => resolve([]), PROVIDER_MODEL_HINT_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+  }
 }
 
 async function refreshProviderModelHints(
@@ -268,7 +301,7 @@ async function refreshProviderModelHints(
   }
 
   try {
-    const models = (await loadModels()) as SystemSculptModel[];
+    const models = await loadProviderModelsWithTimeout(loadModels);
     const next = new Map(state.providerModelHints);
     const connectedProviderIds = new Set(getConnectedRemoteProviderIds(state));
     for (const providerId of Array.from(next.keys())) {

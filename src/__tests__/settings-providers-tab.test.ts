@@ -474,6 +474,127 @@ describe("Providers tab provider states", () => {
     expect(refreshModels).toHaveBeenCalledTimes(1);
   });
 
+  it("does not treat local xAI Pi aliases as ready remote provider models", async () => {
+    listStudioPiOAuthProvidersMock.mockResolvedValue([]);
+    listStudioPiProviderAuthRecordsMock.mockResolvedValue([
+      {
+        provider: "xai",
+        displayName: "xAI",
+        supportsOAuth: false,
+        hasAnyAuth: true,
+        hasStoredCredential: false,
+        source: "env",
+        credentialType: "api_key",
+        oauthExpiresAt: null,
+      },
+    ]);
+    const getModels = jest.fn(async () => [
+      {
+        id: "local-pi-xai@@grok-4.3",
+        name: "Grok 4.3",
+        provider: "xai",
+        sourceProviderId: "xai",
+        sourceMode: "pi_local",
+        piLocalAvailable: true,
+      },
+    ]);
+    const refreshModels = jest.fn(async () => [
+      {
+        id: "local-pi-xai@@grok-4.3",
+        name: "Grok 4.3",
+        provider: "xai",
+        sourceProviderId: "xai",
+        sourceMode: "pi_local",
+        piLocalAvailable: true,
+      },
+    ]);
+    const plugin = {
+      app: new App(),
+      settings: {
+        customProviders: [],
+      },
+      modelService: {
+        getModels,
+        refreshModels,
+      },
+    } as any;
+    const tab = { plugin } as any;
+    const container = document.createElement("div");
+
+    await displayProvidersTabContent(container, tab);
+
+    expect(getModels).toHaveBeenCalledTimes(1);
+    expect(container.textContent).toContain(
+      "xAI is connected. Refresh models if new provider models do not appear yet."
+    );
+    expect(
+      Array.from(container.querySelectorAll("button")).some(
+        (button) => button.textContent?.trim() === "Use in Chat"
+      )
+    ).toBe(false);
+
+    const refreshButton = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent?.trim() === "Refresh models"
+    ) as HTMLButtonElement | undefined;
+    expect(refreshButton).toBeTruthy();
+
+    refreshButton!.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await Promise.resolve();
+
+    expect(refreshModels).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders connected provider rows when model catalog loading stalls", async () => {
+    jest.useFakeTimers();
+    listStudioPiOAuthProvidersMock.mockResolvedValue([]);
+    listStudioPiProviderAuthRecordsMock.mockResolvedValue([
+      {
+        provider: "xai",
+        displayName: "xAI",
+        supportsOAuth: false,
+        hasAnyAuth: true,
+        hasStoredCredential: false,
+        source: "env",
+        credentialType: "api_key",
+        oauthExpiresAt: null,
+      },
+    ]);
+    const getModels = jest.fn(() => new Promise(() => {}));
+    const plugin = {
+      app: new App(),
+      settings: {
+        customProviders: [],
+      },
+      modelService: {
+        getModels,
+      },
+    } as any;
+    const tab = { plugin } as any;
+    const container = document.createElement("div");
+
+    try {
+      const renderPromise = displayProvidersTabContent(container, tab);
+      await Promise.resolve();
+      await Promise.resolve();
+      await jest.advanceTimersByTimeAsync(2_600);
+      await renderPromise;
+
+      expect(getModels).toHaveBeenCalledTimes(1);
+      expect(container.querySelector(".ss-providers-loading")).toBeNull();
+      expect(container.textContent).toContain(
+        "xAI is connected. Refresh models if new provider models do not appear yet."
+      );
+      expect(
+        Array.from(container.querySelectorAll("button")).some(
+          (button) => button.textContent?.trim() === "Refresh models"
+        )
+      ).toBe(true);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it("fails closed with an error instead of spinning forever when provider inventory stalls", async () => {
     jest.useFakeTimers();
     listStudioPiOAuthProvidersMock.mockResolvedValue([]);
