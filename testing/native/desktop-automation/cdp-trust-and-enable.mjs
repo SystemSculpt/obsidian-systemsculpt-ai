@@ -98,33 +98,6 @@ async function main() {
   await cdp.send("Runtime.enable");
   console.log("Runtime.enable OK");
 
-  // Patch url.pathToFileURL BEFORE clicking trust so it's in place when
-  // Obsidian auto-loads plugins after trust acceptance.  On Windows,
-  // manifest.dir is relative (".obsidian/plugins/foo") which causes
-  // pathToFileURL to throw "File URL path must be absolute".
-  console.log("Patching pathToFileURL for relative-path support...");
-  const patchResult = await cdp.send("Runtime.evaluate", {
-    expression: `(() => {
-      try {
-        const url = require('url');
-        const nodePath = require('path');
-        if (url.__ptfuPatched) return 'already-patched';
-        const orig = url.pathToFileURL;
-        url.pathToFileURL = function(p) {
-          if (typeof p === 'string' && !nodePath.isAbsolute(p)) {
-            const bp = globalThis.app?.vault?.adapter?.basePath || '';
-            if (bp) p = nodePath.resolve(bp, p);
-          }
-          return orig(p);
-        };
-        url.__ptfuPatched = true;
-        return 'patched';
-      } catch (e) { return 'error: ' + e.message; }
-    })()`,
-    returnByValue: true,
-  });
-  console.log(`pathToFileURL patch: ${patchResult?.result?.value}`);
-
   // Poll for trust button and click it
   let trustClicked = false;
   for (let attempt = 1; attempt <= 30; attempt += 1) {
@@ -163,10 +136,6 @@ async function main() {
   console.log("Waiting 8s for Obsidian to process trust...");
   await sleep(8000);
 
-  // On Windows, make Obsidian's own loadPlugin() path expectations coherent:
-  // pathToFileURL() needs an absolute manifest dir, while vault adapter reads
-  // still need vault-relative paths. Patch the adapter only inside this CI
-  // bootstrap path so the real plugin loader can provide Obsidian's API module.
   let pluginLoaded = false;
   const EVAL_TIMEOUT = 60000;
 
@@ -181,123 +150,36 @@ async function main() {
         const manifest = plugins.manifests?.[id];
         if (!manifest) return { ready: false, reason: 'no-manifest' };
 
-        const nodePath = require('path');
-        const bp = globalThis.app?.vault?.adapter?.basePath || '';
-        const absDir = bp ? nodePath.resolve(bp, manifest.dir) : manifest.dir;
-        const originalManifestDir = manifest.dir;
-        const adapter = globalThis.app?.vault?.adapter;
-        if (process.platform === 'win32' && bp && adapter && !adapter.__systemsculptAbsolutePathPatch) {
-          adapter.__systemsculptAbsolutePathPatch = true;
-          const toAdapterPath = (candidate) => {
-            if (typeof candidate !== 'string' || !nodePath.isAbsolute(candidate)) return candidate;
-            const relative = nodePath.relative(bp, candidate);
-            if (!relative || relative.startsWith('..') || nodePath.isAbsolute(relative)) return candidate;
-            return relative.replace(/\\\\/g, '/');
-          };
-          for (const methodName of ['read', 'readBinary', 'exists', 'stat', 'list', 'mkdir', 'remove', 'rename', 'copy', 'write', 'writeBinary', 'append']) {
-            const original = adapter[methodName];
-            if (typeof original !== 'function') continue;
-            adapter[methodName] = function patchedAdapterMethod(first, ...rest) {
-              return original.call(this, toAdapterPath(first), ...rest);
-            };
-          }
-        }
-        if (process.platform === 'win32' && bp && !nodePath.isAbsolute(manifest.dir)) {
-          manifest.dir = absDir;
-        }
-
-        let enablePluginError = null;
-        let loadPluginError = null;
+        const serializeError = (error) => error ? {
+          message: error.message || String(error),
+          stack: error.stack || null,
+          name: error.name || null,
+        } : null;
         const diagnostics = {
           resourcesPath: process.resourcesPath || null,
           platform: process.platform || null,
-          basePath: bp || null,
-          originalManifestDir,
+          basePath: globalThis.app?.vault?.adapter?.basePath || null,
           manifestDir: manifest.dir,
+          enabled: Boolean(plugins.enabledPlugins?.has?.(id)),
           pluginManagerKeys: Object.keys(plugins).filter((key) => /plugin|load|enable|api/i.test(key)).slice(0, 20),
           hasCreateRequire: typeof require('module')?.createRequire === 'function',
         };
 
-        // Enable the plugin in Obsidian's config
         if (!plugins.enabledPlugins?.has?.(id)) {
-          try { await plugins.enablePluginAndSave(id); } catch (e) { enablePluginError = e.message; }
+          try {
+            await plugins.enablePluginAndSave(id);
+          } catch (error) {
+            return { ready: false, reason: 'enable-failed', error: serializeError(error), diagnostics };
+          }
         }
 
-        // Try loadPlugin() first (works on macOS, may work on some Windows)
         try {
           await plugins.loadPlugin(id);
-          if (plugins.plugins?.[id]) return { ready: true, action: 'loadPlugin' };
-        } catch (e) { loadPluginError = e.message; }
-
-        // --- Windows fallback: manual require() with module resolution ---
-        const mainPath = nodePath.join(absDir, 'main.js');
-
-        // Make externalized deps (obsidian, electron, etc.) resolvable.
-        // Obsidian bundles its API inside app.asar which isn't in standard
-        // module paths.  Find it in Module._cache or via createRequire.
-        const Module = require('module');
-        if (!Module.__cdpPatched) {
-          Module.__cdpPatched = true;
-
-          // Strategy 1: search Module._cache for the obsidian module
-          // by looking for a cached module that exports Plugin + Notice
-          for (const [key, cached] of Object.entries(Module._cache)) {
-            const ex = cached?.exports;
-            if (ex && typeof ex.Plugin === 'function' && typeof ex.Notice === 'function') {
-              Module._cache['obsidian'] = cached;
-              break;
-            }
-          }
-
-          // Strategy 2: try createRequire from app.asar
-          if (!Module._cache['obsidian'] && process.resourcesPath) {
-            try {
-              const asarReq = Module.createRequire(
-                nodePath.join(process.resourcesPath, 'app.asar', 'dummy.js')
-              );
-              const obs = asarReq('obsidian');
-              Module._cache['obsidian'] = {
-                id: 'obsidian', filename: 'obsidian', loaded: true,
-                exports: obs, children: [], paths: [],
-              };
-            } catch {}
-          }
-
-          // Strategy 3: add app.asar to global module paths
-          if (process.resourcesPath) {
-            const asarPath = nodePath.join(process.resourcesPath, 'app.asar');
-            if (!Module.globalPaths.includes(asarPath)) {
-              Module.globalPaths.unshift(asarPath);
-            }
-          }
-
-          // Patch _resolveFilename as a final safety net
-          const origResolve = Module._resolveFilename;
-          Module._resolveFilename = function(request, parent) {
-            if (request === 'obsidian' && Module._cache['obsidian']) {
-              return 'obsidian';
-            }
-            return origResolve.apply(this, arguments);
-          };
-        }
-
-        try {
-          // Clear stale cache
-          Object.keys(require.cache).forEach(k => {
-            if (k.includes('systemsculpt-ai')) delete require.cache[k];
-          });
-          const mod = require(mainPath);
-          const Cls = mod.default || mod;
-          if (typeof Cls !== 'function') {
-            return { ready: false, reason: 'no-constructor', type: typeof Cls, mainPath, enablePluginError, loadPluginError, diagnostics };
-          }
-          const inst = new Cls(globalThis.app, manifest);
-          plugins.plugins[id] = inst;
-          let onloadErr = null;
-          try { await inst.onload(); } catch (e) { onloadErr = e.message; }
-          return { ready: true, action: 'manual-require', onloadErr, mainPath };
-        } catch (e) {
-          return { ready: false, reason: 'require-failed', error: e.message, mainPath, enablePluginError, loadPluginError, diagnostics };
+          return plugins.plugins?.[id]
+            ? { ready: true, action: 'loadPlugin' }
+            : { ready: false, reason: 'load-returned-without-plugin', diagnostics };
+        } catch (error) {
+          return { ready: false, reason: 'load-failed', error: serializeError(error), diagnostics };
         }
       })()`,
       returnByValue: true,

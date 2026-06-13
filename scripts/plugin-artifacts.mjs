@@ -15,6 +15,26 @@ const FORBIDDEN_MAIN_BUNDLE_FRAGMENTS = [
       "main.js still uses a node:url import-meta banner that breaks mobile plugin startup before load.",
   },
   {
+    fragment: '"@mariozechner/pi-agent-core": resolveWorkspaceOrImport(',
+    message:
+      "main.js still eagerly resolves Pi extension aliases during Obsidian plugin startup.",
+  },
+  {
+    fragment: '"@mariozechner/pi-ai": resolveWorkspaceOrImport(',
+    message:
+      "main.js still eagerly resolves Pi extension aliases during Obsidian plugin startup.",
+  },
+  {
+    fragment: '"@mariozechner/pi-ai/oauth": resolveWorkspaceOrImport(',
+    message:
+      "main.js still eagerly resolves Pi extension aliases during Obsidian plugin startup.",
+  },
+  {
+    fragment: '"@mariozechner/pi-tui": resolveWorkspaceOrImport(',
+    message:
+      "main.js still eagerly resolves Pi extension aliases during Obsidian plugin startup.",
+  },
+  {
     fragment: "node_modules/@mariozechner/pi-coding-agent/dist/modes/interactive/components/index.js",
     message:
       "main.js still bundles the Pi interactive component index; expected the core SDK surface only.",
