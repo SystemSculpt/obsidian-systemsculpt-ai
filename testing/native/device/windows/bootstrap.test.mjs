@@ -145,6 +145,7 @@ test("buildWindowsLaunchScript injects the clean Pi agent dir and env clearing l
     piAgentDir: "C:/Vaults/SystemSculptWindowsQA/.systemsculpt/pi-empty-agent",
     vaultPath: "C:/Vaults/SystemSculptWindowsQA",
     resultPath: "C:/Windows/Temp/obsidian-launch.json",
+    remoteDebuggingPort: 9222,
     clearedEnvKeys: ["OPENAI_API_KEY", "ANTHROPIC_API_KEY"],
   });
 
@@ -152,8 +153,11 @@ test("buildWindowsLaunchScript injects the clean Pi agent dir and env clearing l
   assert.match(script, /OPENAI_API_KEY/);
   assert.match(script, /ANTHROPIC_API_KEY/);
   assert.match(script, /SystemSculptWindowsQA/);
+  assert.match(script, /--remote-debugging-port=\$remoteDebuggingPort/);
+  assert.match(script, /--use-fake-device-for-media-stream/);
   assert.match(script, /foreach \(\$name in @\("OPENAI_API_KEY", "ANTHROPIC_API_KEY"\)\)/);
-  assert.match(script, /ArgumentList @\(\$vaultPath\)/);
+  assert.match(script, /\$argumentList \+= \$vaultPath/);
+  assert.match(script, /ArgumentList \$argumentList/);
 });
 
 test("buildWindowsTrustPromptDismissScript looks for the trust prompt and enable button", () => {

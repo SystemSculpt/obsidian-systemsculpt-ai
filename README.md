@@ -102,7 +102,8 @@ Desktop validation is attach-only to an already-open Obsidian vault. Keep live s
 ### Local plugin release
 
 ```bash
-npm run check:release:windows         # build + Windows 11 clean install + Windows baselines
+npm run check:release:windows         # require the GitHub Windows E2E check on the current commit
+npm run check:release:windows:local   # optional maintained Windows host/dev helper
 npm run check:release:native          # required native release matrix
 npm run check:release-surfaces -- --version <version> --require-notes
 npm run release:plugin                  # auto bump (major/minor/patch from commits)
@@ -113,8 +114,8 @@ npm run release:plugin -- --bump patch # force a specific bump
 Release automation now runs fully on your local machine: it validates the plugin, builds the release bundle, commits the version bump, pushes `main` and the tag, and creates a draft GitHub release with `gh`.
 Before it tags anything, the release script now runs a safety preflight that blocks tracked local-only files, unignored local-only files that should probably go into `.gitignore`, hardcoded local paths, hardcoded desktop vault selectors, and secret-looking tokens.
 If `GITHUB_TOKEN` or `GH_TOKEN` is present but weaker than your stored `gh` login, the release script now automatically falls back to the stored auth for push and draft-release steps.
-The native release matrix is now explicit instead of implicit: macOS desktop baselines, Windows clean-install parity, Windows desktop baselines, and Android runtime smoke must all pass before release creation can continue. iOS runtime smoke is included automatically when a paired physical device is available on the host and is otherwise skipped honestly.
-Use `npm run check:release:windows` when you want the fast Windows-only release gate on the configured Windows SSH host before running the full native matrix.
+The native release matrix is now explicit instead of implicit: macOS desktop baselines, the GitHub Windows E2E check, and Android runtime smoke must all pass before release creation can continue. The Windows E2E check runs a fresh Obsidian install, clean-install parity, and desktop baselines on `windows-latest` for the exact commit being released. iOS runtime smoke is included automatically when a paired physical device is available on the host and is otherwise skipped honestly.
+Use `npm run check:release:windows:local` only when you want the optional Windows-only dev helper on a maintained Windows host before waiting on the canonical GitHub check.
 
 The old tag-triggered GitHub Actions release workflow is retired. Treat `npm run release:plugin` as the canonical publish path for this repo.
 That release path now packages the standard Obsidian plugin artifact set only: `manifest.json`, `main.js`, and `styles.css`.
