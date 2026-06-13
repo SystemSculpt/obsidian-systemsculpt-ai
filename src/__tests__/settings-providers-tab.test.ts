@@ -421,6 +421,59 @@ describe("Providers tab provider states", () => {
     expect((app.workspace as any).setActiveLeaf).toHaveBeenCalledWith(leaf, { focus: true });
   });
 
+  it("offers refresh instead of Use in Chat when a connected provider has no model hint yet", async () => {
+    listStudioPiOAuthProvidersMock.mockResolvedValue([]);
+    listStudioPiProviderAuthRecordsMock.mockResolvedValue([
+      {
+        provider: "xai",
+        displayName: "xAI",
+        supportsOAuth: false,
+        hasAnyAuth: true,
+        hasStoredCredential: false,
+        source: "env",
+        credentialType: "api_key",
+        oauthExpiresAt: null,
+      },
+    ]);
+    const getModels = jest.fn(async () => []);
+    const refreshModels = jest.fn(async () => []);
+    const plugin = {
+      app: new App(),
+      settings: {
+        customProviders: [],
+      },
+      modelService: {
+        getModels,
+        refreshModels,
+      },
+    } as any;
+    const tab = { plugin } as any;
+    const container = document.createElement("div");
+
+    await displayProvidersTabContent(container, tab);
+
+    expect(getModels).toHaveBeenCalledTimes(1);
+    expect(container.textContent).toContain(
+      "xAI is connected. Refresh models if new provider models do not appear yet."
+    );
+    expect(
+      Array.from(container.querySelectorAll("button")).some(
+        (button) => button.textContent?.trim() === "Use in Chat"
+      )
+    ).toBe(false);
+
+    const refreshButton = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent?.trim() === "Refresh models"
+    ) as HTMLButtonElement | undefined;
+    expect(refreshButton).toBeTruthy();
+
+    refreshButton!.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await Promise.resolve();
+
+    expect(refreshModels).toHaveBeenCalledTimes(1);
+  });
+
   it("fails closed with an error instead of spinning forever when provider inventory stalls", async () => {
     jest.useFakeTimers();
     listStudioPiOAuthProvidersMock.mockResolvedValue([]);

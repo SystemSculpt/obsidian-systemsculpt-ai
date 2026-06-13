@@ -415,6 +415,30 @@ async function performUseProviderInChat(
   }
 }
 
+async function performRefreshProviderModels(
+  state: TabState,
+  plugin: SystemSculptSettingTab["plugin"],
+  providerId: string,
+  label: string,
+  rerender: () => void,
+): Promise<void> {
+  const normalizedProvider = normalizeProviderId(providerId);
+  state.actionRunning = true;
+  rerender();
+  try {
+    await refreshProviderModelHints(state, plugin, {
+      forceRefresh: true,
+      providerIds: [normalizedProvider],
+    });
+    if (!state.providerModelHints.has(normalizedProvider)) {
+      new Notice(`No ${label} models are available yet.`);
+    }
+  } finally {
+    state.actionRunning = false;
+    rerender();
+  }
+}
+
 // ─── Render ─────────────────────────────────────────────────────────────────
 
 function renderProvidersList(
@@ -502,6 +526,9 @@ function renderProviderRow(
   const connected = displayState.connected;
   const blocked = displayState.blocked;
   const localConfigured = hasConfiguredLocalProvider(record.provider, state.localProviderIds);
+  const normalizedProviderId = normalizeProviderId(record.provider);
+  const providerHint =
+    connected && !localProvider ? state.providerModelHints.get(normalizedProviderId) : undefined;
   const isExpanded =
     state.activeConnectProvider === record.provider;
 
@@ -581,11 +608,15 @@ function renderProviderRow(
   } else if (connected) {
     const useInChatBtn = actions.createEl("button", {
       cls: "ss-provider-row__btn ss-provider-row__btn--connect",
-      text: "Use in Chat",
+      text: providerHint ? "Use in Chat" : "Refresh models",
     });
-    useInChatBtn.disabled = state.actionRunning || localProvider;
+    useInChatBtn.disabled = state.actionRunning;
     useInChatBtn.addEventListener("click", () => {
-      void performUseProviderInChat(state, plugin, record.provider, label, rerender);
+      if (providerHint) {
+        void performUseProviderInChat(state, plugin, record.provider, label, rerender);
+      } else {
+        void performRefreshProviderModels(state, plugin, record.provider, label, rerender);
+      }
     });
 
     const disconnectBtn = actions.createEl("button", {
@@ -622,11 +653,10 @@ function renderProviderRow(
   }
 
   if (connected && !localProvider) {
-    const hint = state.providerModelHints.get(normalizeProviderId(record.provider));
     const readyEl = row.createDiv({ cls: "ss-provider-row__ready" });
     readyEl.createDiv({
       cls: "ss-provider-row__ready-text",
-      text: getProviderReadyText(label, hint),
+      text: getProviderReadyText(label, providerHint),
     });
   }
 
