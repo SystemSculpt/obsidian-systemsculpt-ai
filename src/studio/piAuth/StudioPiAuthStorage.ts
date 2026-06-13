@@ -374,6 +374,18 @@ export async function setStudioPiProviderApiKey(
     // Mobile and other restricted runtimes may not support Pi auth storage writes.
     // The plugin-settings mirror above remains the source of truth in that case.
   }
+
+  // The SDK's proper-lockfile path can silently no-op writes in Electron's
+  // renderer. Mirror the credential through direct fs so the Pi model registry
+  // can discover provider models after a refresh or Obsidian restart.
+  mutateAuthJsonFile(
+    context.plugin,
+    (data) => {
+      data[provider] = { type: "api_key", key };
+      return data;
+    },
+    { ensureDir: true, logLabel: `save ${provider}` },
+  );
 }
 
 export async function clearStudioPiProviderAuth(

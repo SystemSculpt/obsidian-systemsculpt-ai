@@ -107,6 +107,34 @@ describe("OpenRouterRemoteStreamExecutor", () => {
     expect(events).toEqual([{ type: "content", content: "hi" }]);
   });
 
+  it("sends xAI Grok requests to the xAI chat completions endpoint", async () => {
+    mockResolveEndpoint.mockReturnValue("https://api.x.ai/v1");
+    mockRequest.mockResolvedValue({ ok: true, status: 200, headers: new Map() });
+    mockStreamResponse.mockReturnValue((async function* () {
+      yield { type: "content", content: "grok" };
+    })());
+
+    const input = makeInput();
+    input.prepared.resolvedModel = {
+      sourceProviderId: "xai",
+      provider: "xai",
+    };
+    input.prepared.actualModelId = "grok-4.3";
+
+    const gen = executeOpenRouterRemoteStream(input);
+    const events = [];
+    for await (const event of gen) {
+      events.push(event);
+    }
+
+    const callArgs = mockRequest.mock.calls[0][0];
+    expect(mockResolveEndpoint).toHaveBeenCalledWith("xai");
+    expect(mockResolveApiKey).toHaveBeenCalledWith("xai", expect.anything());
+    expect(callArgs.url).toBe("https://api.x.ai/v1/chat/completions");
+    expect(callArgs.body.model).toBe("grok-4.3");
+    expect(events).toEqual([{ type: "content", content: "grok" }]);
+  });
+
   it("includes tools in the request body when provided", async () => {
     const tools = [{ type: "function", function: { name: "test_tool" } }];
     const input = makeInput();

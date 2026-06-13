@@ -109,6 +109,23 @@
   margin-top: 5px;
 }
 
+.ss-provider-row__ready {
+  display: flex;
+  align-items: center;
+  gap: var(--size-2-2);
+  margin: 0 var(--size-4-3) var(--size-4-2) calc(var(--size-4-3) + 12px);
+  padding: var(--size-2-2) var(--size-4-2);
+  border-radius: var(--radius-s);
+  background: color-mix(in srgb, var(--text-success) 10%, transparent);
+  color: var(--text-normal);
+}
+
+.ss-provider-row__ready-text {
+  font-size: 0.84em;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+
 /* Actions */
 .ss-provider-row__actions {
   display: flex;

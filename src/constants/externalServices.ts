@@ -38,6 +38,11 @@ export const AI_PROVIDERS = {
     CHAT_COMPLETIONS: getExternalUrl("https://openrouter.ai/api/v1/chat/completions"),
     MODELS: getExternalUrl("https://openrouter.ai/api/v1/models")
   },
+  XAI: {
+    BASE_URL: getExternalUrl("https://api.x.ai/v1"),
+    CHAT_COMPLETIONS: getExternalUrl("https://api.x.ai/v1/chat/completions"),
+    MODELS: getExternalUrl("https://api.x.ai/v1/models")
+  },
   MINIMAX: {
     BASE_URL: getExternalUrl("https://api.minimax.io/v1")
   },

@@ -1474,6 +1474,10 @@ export class DesktopAutomationBridge {
                 String(
                   element.querySelector<HTMLElement>(".ss-provider-row__warning")?.textContent || "",
                 ).trim() || null,
+              ready:
+                String(
+                  element.querySelector<HTMLElement>(".ss-provider-row__ready-text")?.textContent || "",
+                ).trim() || null,
               tone,
               actions: Array.from(
                 element.querySelectorAll<HTMLButtonElement>(".ss-provider-row__actions button"),

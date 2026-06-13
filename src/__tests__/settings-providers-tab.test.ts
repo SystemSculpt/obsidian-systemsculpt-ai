@@ -40,6 +40,13 @@ jest.mock("../core/ui/modals/OAuthStatusModal", () => ({
   })),
 }));
 
+jest.mock("../views/chatview/ChatView", () => ({
+  ChatView: jest.fn().mockImplementation(function ChatView(this: any, leaf: any, plugin: any) {
+    this.leaf = leaf;
+    this.plugin = plugin;
+  }),
+}));
+
 jest.mock("../services/pi/PiTextModels", () => {
   return {
     collectSharedPiProviderHints: jest.fn(() => []),
@@ -59,6 +66,14 @@ const {
   listStudioPiProviderAuthRecords: listStudioPiProviderAuthRecordsMock,
   listStudioPiOAuthProviders: listStudioPiOAuthProvidersMock,
 } = jest.requireMock("../studio/piAuth/StudioPiAuthInventory") as Record<string, jest.Mock>;
+
+const {
+  setStudioPiProviderApiKey: setStudioPiProviderApiKeyMock,
+} = jest.requireMock("../studio/piAuth/StudioPiAuthStorage") as Record<string, jest.Mock>;
+
+const {
+  ChatView: ChatViewMock,
+} = jest.requireMock("../views/chatview/ChatView") as Record<string, jest.Mock>;
 
 const {
   collectSharedPiProviderHints: collectSharedPiProviderHintsMock,
@@ -286,6 +301,124 @@ describe("Providers tab provider states", () => {
 
     const row = container.querySelector(".ss-provider-row");
     expect(row?.className).toContain("ss-provider-row--connected");
+  });
+
+  it("refreshes models after saving an xAI key and makes Grok 4.3 easy to use", async () => {
+    listStudioPiOAuthProvidersMock.mockResolvedValue([]);
+    listStudioPiProviderAuthRecordsMock
+      .mockResolvedValueOnce([
+        {
+          provider: "xai",
+          displayName: "xAI",
+          supportsOAuth: false,
+          hasAnyAuth: false,
+          hasStoredCredential: false,
+          source: "none",
+          credentialType: "none",
+          oauthExpiresAt: null,
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          provider: "xai",
+          displayName: "xAI",
+          supportsOAuth: false,
+          hasAnyAuth: true,
+          hasStoredCredential: true,
+          source: "api_key",
+          credentialType: "api_key",
+          oauthExpiresAt: null,
+        },
+      ]);
+    setStudioPiProviderApiKeyMock.mockResolvedValue(undefined);
+    const refreshModels = jest.fn(async () => [
+      {
+        id: "xai@@grok-4.3",
+        name: "Grok 4.3",
+        provider: "xai",
+        sourceProviderId: "xai",
+      },
+    ]);
+
+    const app = new App();
+    let leafViewState: Record<string, any> = { type: "", state: {} };
+    const leaf = {
+      view: null as any,
+      getViewState: jest.fn(() => leafViewState),
+      setViewState: jest.fn(async (nextState: Record<string, any>) => {
+        leafViewState = nextState;
+      }),
+      open: jest.fn(async (view: any) => {
+        leaf.view = view;
+      }),
+    };
+    (app.workspace as any).getLeaf = jest.fn(() => leaf);
+    (app.workspace as any).setActiveLeaf = jest.fn();
+    const updateSettings = jest.fn().mockResolvedValue(undefined);
+    const plugin = {
+      app,
+      settings: {
+        customProviders: [],
+      },
+      getSettingsManager: jest.fn(() => ({
+        updateSettings,
+      })),
+      modelService: {
+        refreshModels,
+      },
+    } as any;
+    const tab = { plugin } as any;
+    const container = document.createElement("div");
+
+    await displayProvidersTabContent(container, tab);
+
+    const connectButton = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent?.trim() === "Connect"
+    ) as HTMLButtonElement | undefined;
+    connectButton?.click();
+    await Promise.resolve();
+
+    const input = container.querySelector<HTMLInputElement>(".ss-provider-connect-input");
+    const saveButton = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent?.trim() === "Save"
+    ) as HTMLButtonElement | undefined;
+    expect(input).toBeTruthy();
+    expect(saveButton).toBeTruthy();
+
+    input!.value = "xai-test-key";
+    saveButton!.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await Promise.resolve();
+
+    expect(setStudioPiProviderApiKeyMock).toHaveBeenCalledWith(
+      "xai",
+      "xai-test-key",
+      { plugin },
+    );
+    expect(refreshModels).toHaveBeenCalledTimes(1);
+    expect(container.textContent).toContain("Connected via API key");
+    expect(container.textContent).toContain("Grok 4.3 is ready in the model picker.");
+    const useInChatButton = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent?.trim() === "Use in Chat"
+    ) as HTMLButtonElement | undefined;
+    expect(useInChatButton).toBeTruthy();
+
+    useInChatButton!.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await Promise.resolve();
+
+    expect(updateSettings).toHaveBeenCalledWith({ selectedModelId: "xai@@grok-4.3" });
+    expect((app.workspace as any).getLeaf).toHaveBeenCalledWith("tab");
+    expect(leaf.setViewState).toHaveBeenCalledWith({
+      type: "systemsculpt-chat-view",
+      state: expect.objectContaining({
+        chatId: "",
+        selectedModelId: "xai@@grok-4.3",
+      }),
+    });
+    expect(ChatViewMock).toHaveBeenCalledWith(leaf, plugin);
+    expect(leaf.open).toHaveBeenCalled();
+    expect((app.workspace as any).setActiveLeaf).toHaveBeenCalledWith(leaf, { focus: true });
   });
 
   it("fails closed with an error instead of spinning forever when provider inventory stalls", async () => {

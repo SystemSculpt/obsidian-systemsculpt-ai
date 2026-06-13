@@ -10,6 +10,7 @@ jest.mock("../../../studio/piAuth/StudioPiProviderRegistry", () => ({
   resolveProviderLabel: jest.fn((id: string) => id),
   resolvePiProviderFromEndpoint: jest.fn((endpoint: string) => {
     if (endpoint.includes("openrouter")) return "openrouter";
+    if (endpoint.includes("api.x.ai") || endpoint.includes("x.ai")) return "xai";
     return null;
   }),
 }));
@@ -26,9 +27,18 @@ describe("RemoteProviderCatalog", () => {
       );
     });
 
+    it("returns the xAI base URL for the xai provider", () => {
+      expect(resolveRemoteProviderEndpoint("xai")).toBe(
+        AI_PROVIDERS.XAI.BASE_URL
+      );
+    });
+
     it("is case-insensitive", () => {
       expect(resolveRemoteProviderEndpoint("OpenRouter")).toBe(
         AI_PROVIDERS.OPENROUTER.BASE_URL
+      );
+      expect(resolveRemoteProviderEndpoint("XAI")).toBe(
+        AI_PROVIDERS.XAI.BASE_URL
       );
     });
 
@@ -85,6 +95,22 @@ describe("RemoteProviderCatalog", () => {
 
       expect(getConfiguredRemoteProviderApiKey(plugin, "openrouter")).toBe(
         "sk-or-test-key"
+      );
+    });
+
+    it("returns the API key for a matching enabled xAI provider", () => {
+      const plugin = makePlugin([
+        {
+          id: "xai",
+          name: "xAI",
+          endpoint: "https://api.x.ai/v1",
+          apiKey: "xai-test-key",
+          isEnabled: true,
+        },
+      ]);
+
+      expect(getConfiguredRemoteProviderApiKey(plugin, "xai")).toBe(
+        "xai-test-key"
       );
     });
 
@@ -151,6 +177,22 @@ describe("RemoteProviderCatalog", () => {
         "sk-or-endpoint-match"
       );
     });
+
+    it("matches xAI by endpoint when id and name are empty", () => {
+      const plugin = makePlugin([
+        {
+          id: "",
+          name: "",
+          endpoint: "https://api.x.ai/v1",
+          apiKey: "xai-endpoint-match",
+          isEnabled: true,
+        },
+      ]);
+
+      expect(getConfiguredRemoteProviderApiKey(plugin, "xai")).toBe(
+        "xai-endpoint-match"
+      );
+    });
   });
 
   describe("listConfiguredRemoteProviderModels", () => {
@@ -177,6 +219,38 @@ describe("RemoteProviderCatalog", () => {
       expect(model.piAuthMode).toBe("byok");
       expect(model.piExecutionModelId).toBeTruthy();
       expect(model.supported_parameters).toContain("tools");
+    });
+
+    it("returns Grok 4.3 when xAI is configured", () => {
+      const plugin = makePlugin([
+        {
+          id: "xai",
+          name: "xAI",
+          endpoint: "https://api.x.ai/v1",
+          apiKey: "xai-key",
+          isEnabled: true,
+        },
+      ]);
+
+      const models = listConfiguredRemoteProviderModels(plugin);
+      const grok = models.find((model) => model.id === "xai@@grok-4.3");
+
+      expect(grok).toMatchObject({
+        id: "xai@@grok-4.3",
+        name: "Grok 4.3",
+        provider: "xai",
+        sourceMode: "custom_endpoint",
+        sourceProviderId: "xai",
+        piRemoteAvailable: true,
+        piLocalAvailable: false,
+        piAuthMode: "byok",
+        piExecutionModelId: "grok-4.3",
+        context_length: 1_000_000,
+      });
+      expect(grok?.supported_parameters).toContain("tools");
+      expect(grok?.capabilities).toEqual(
+        expect.arrayContaining(["chat", "reasoning", "vision"])
+      );
     });
 
     it("returns empty array when no matching provider is configured", () => {
