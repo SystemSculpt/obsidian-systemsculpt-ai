@@ -60,6 +60,10 @@ jobs:
             --external:@codemirror/* --external:@lezer/* `
             --external:@mariozechner/pi-tui
 
+      - name: Validate desktop CI artifact
+        run: |
+          node --input-type=module -e "import { assertProductionPluginArtifacts } from './scripts/plugin-artifacts.mjs'; assertProductionPluginArtifacts();"
+
       - name: Cache Obsidian installer
         id: obsidian-cache
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4

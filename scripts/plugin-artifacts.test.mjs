@@ -104,6 +104,23 @@ test("assertProductionPluginArtifacts rejects eager Pi extension alias resolutio
   );
 });
 
+test("assertProductionPluginArtifacts rejects the unshimmed Pi config module", () => {
+  const root = createTempPluginDir();
+  writeRequiredArtifacts(
+    root,
+    [
+      "// node_modules/@mariozechner/pi-coding-agent/dist/config.js",
+      "__filename = (0, import_url.fileURLToPath)(__systemsculpt_import_meta_url__);",
+      "",
+    ].join("\n")
+  );
+
+  assert.throws(
+    () => assertProductionPluginArtifacts({ root }),
+    /Obsidian-safe config shim/i
+  );
+});
+
 test("buildProductionPlugin revalidates the post-build artifact set", () => {
   const root = createTempPluginDir();
 

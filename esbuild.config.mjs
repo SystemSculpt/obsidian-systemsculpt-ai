@@ -189,8 +189,10 @@ const createPiSdkBuildFixPlugins = () => {
 		{
 			name: "pi-sdk-config-shim",
 			setup(build) {
-				build.onResolve({ filter: /\/config\.js$/ }, (args) => {
-					if (args.importer?.includes("@mariozechner/pi-coding-agent")) {
+				build.onResolve({ filter: /config\.js$/ }, (args) => {
+					const importPath = String(args.path || "").replace(/\\/g, "/");
+					const importer = String(args.importer || "").replace(/\\/g, "/");
+					if (importPath.endsWith("/config.js") && importer.includes("@mariozechner/pi-coding-agent")) {
 						return { path: args.path, namespace: "pi-config-shim", pluginData: { resolveDir: args.resolveDir } };
 					}
 				});
@@ -269,6 +271,11 @@ const createPiSdkBuildFixPlugins = () => {
 					const before = contents;
 
 					contents = contents.replace(
+						"const __dirname = path.dirname(fileURLToPath(import.meta.url));",
+						'const __dirname = "";'
+					);
+
+					contents = contents.replace(
 						/(const resolveWorkspaceOrImport = \(workspaceRelativePath, specifier\) => \{[\s\S]*?^\s{4}\};)/m,
 						`$1
     const tryResolveWorkspaceOrImport = (workspaceRelativePath, specifier) => {
@@ -293,9 +300,16 @@ const createPiSdkBuildFixPlugins = () => {
 						);
 					}
 
+					contents = contents.replace(
+						"...(isBunBinary ? { virtualModules: VIRTUAL_MODULES, tryNative: false } : { alias: getAliases() }),",
+						"virtualModules: VIRTUAL_MODULES,\n        tryNative: false,"
+					);
+
 					if (
 						contents === before ||
 						!contents.includes("tryResolveWorkspaceOrImport") ||
+						contents.includes("path.dirname(fileURLToPath(import.meta.url))") ||
+						contents.includes("{ alias: getAliases() }") ||
 						/"@mariozechner\/pi-(?:agent-core|tui|ai)(?:\/oauth)?":\s*resolveWorkspaceOrImport\(/.test(contents)
 					) {
 						throw new Error("Pi SDK extension loader alias patch did not match expected output");

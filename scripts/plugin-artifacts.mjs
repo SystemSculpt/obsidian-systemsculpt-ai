@@ -35,6 +35,16 @@ const FORBIDDEN_MAIN_BUNDLE_FRAGMENTS = [
       "main.js still eagerly resolves Pi extension aliases during Obsidian plugin startup.",
   },
   {
+    fragment: "node_modules/@mariozechner/pi-coding-agent/dist/config.js",
+    message:
+      "main.js still bundles the Pi config module instead of the Obsidian-safe config shim.",
+  },
+  {
+    fragment: "fileURLToPath)(__systemsculpt_import_meta_url__",
+    message:
+      "main.js still derives Pi SDK paths from the Obsidian eval import-meta shim.",
+  },
+  {
     fragment: "node_modules/@mariozechner/pi-coding-agent/dist/modes/interactive/components/index.js",
     message:
       "main.js still bundles the Pi interactive component index; expected the core SDK surface only.",
