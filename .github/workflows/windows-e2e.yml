@@ -94,9 +94,11 @@ jobs:
 
           7z x $installerPath "-o$extractRoot" -y | Out-Host
           $appArchive = Get-ChildItem -Path $extractRoot -Filter "app-*.7z" -Recurse -ErrorAction SilentlyContinue |
+            Sort-Object @{ Expression = { if ($_.Name -match "64") { 0 } else { 1 } } }, Name |
             Select-Object -First 1
 
           if ($appArchive) {
+            Write-Host "Using Obsidian app payload $($appArchive.Name)"
             7z x $appArchive.FullName "-o$installRoot" -y | Out-Host
           } else {
             Copy-Item -Path (Join-Path $extractRoot "*") -Destination $installRoot -Recurse -Force
