@@ -80,7 +80,7 @@ Docs:
 Before ship, the required native matrix is:
 
 - macOS: `npm run test:native:desktop:baselines`
-- Windows: GitHub check `windows-e2e` on the exact release commit. The job installs Obsidian on `windows-latest`, launches the fresh Windows QA vault, then runs `npm run test:native:windows:clean-install` and `npm run test:native:windows:baselines`.
+- Windows: GitHub check `windows-e2e` on the exact release commit. The job installs Obsidian on `windows-2025-vs2026`, launches the fresh Windows QA vault, then runs `npm run test:native:windows:clean-install` and `npm run test:native:windows:baselines`.
 - Android: `npm run test:native:android:debug:open -- --config ./systemsculpt-sync.android.json --headless --sync --reset-vault` then `npm run test:native:android:extended`
 - iOS: `npm run test:native:ios` when a paired physical device is available
 
@@ -96,7 +96,7 @@ Automated E2E testing runs in GitHub Actions on every PR and push to main:
 |----------|--------|----------------|
 | `ci.yml` | ubuntu-latest | Unit tests, embeddings tests, production build, built-bundle integration suite |
 | `macos-e2e.yml` | macos-latest | Obsidian .dmg install, vault bootstrap, bridge, managed baseline, release smoke against local provider fixtures (provider listing, chat round-trip, recorder, embeddings) |
-| `windows-e2e.yml` | windows-latest | Obsidian `.exe` install, fresh Windows vault bootstrap, local bridge, clean-install parity, xAI/Grok provider pass, and Windows desktop baselines |
+| `windows-e2e.yml` | windows-2025-vs2026 | Obsidian `.exe` install, fresh Windows vault bootstrap, local bridge, clean-install parity, xAI/Grok provider pass, and Windows desktop baselines |
 
 Android E2E still runs locally via the `test:native:android*` scripts against a connected device/emulator.
 

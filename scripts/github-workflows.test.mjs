@@ -18,7 +18,7 @@ test("Windows E2E workflow keeps the canonical build, bootstrap, clean-install, 
 
   assert.match(text, /^\s*windows-e2e:/m);
   assert.match(text, /^\s*name: windows-e2e$/m);
-  assert.match(text, /runs-on: windows-latest/);
+  assert.match(text, /runs-on: windows-2025-vs2026/);
   assert.match(text, /XAI_API_KEY: \$\{\{ secrets\.XAI_API_KEY \}\}/);
   assert.match(text, /--skip-trust-prompt/);
 

@@ -106,7 +106,7 @@ republish the bridge without foregrounding Obsidian.
 That split keeps Windows responsible for fresh-user truth while still reusing the same bridge
 automation layer as macOS once the runtime is open.
 
-`npm run check:release:windows` is the canonical Windows release gate: it requires the GitHub `windows-e2e` check to be green for the current commit. That hosted job installs Obsidian on `windows-latest`, runs the local Windows bootstrap with a fresh vault, then runs `test:native:windows:clean-install` and `test:native:windows:baselines` in that order.
+`npm run check:release:windows` is the canonical Windows release gate: it requires the GitHub `windows-e2e` check to be green for the current commit. That hosted job installs Obsidian on `windows-2025-vs2026`, runs the local Windows bootstrap with a fresh vault, then runs `test:native:windows:clean-install` and `test:native:windows:baselines` in that order.
 
 `npm run check:release:windows:local` is the optional development helper for a maintained Windows host. It still runs `build`, `test:native:windows:clean-install`, and `test:native:windows:baselines` locally or through the configured SSH transport, but release creation no longer depends on a Mac-side VM or throwaway Windows guest.
 
