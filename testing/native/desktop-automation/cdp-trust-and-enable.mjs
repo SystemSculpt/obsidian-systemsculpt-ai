@@ -184,16 +184,25 @@ async function main() {
         const manifest = plugins.manifests?.[id];
         if (!manifest) return { ready: false, reason: 'no-manifest' };
 
+        let enablePluginError = null;
+        let loadPluginError = null;
+        const diagnostics = {
+          resourcesPath: process.resourcesPath || null,
+          platform: process.platform || null,
+          pluginManagerKeys: Object.keys(plugins).filter((key) => /plugin|load|enable|api/i.test(key)).slice(0, 20),
+          hasCreateRequire: typeof require('module')?.createRequire === 'function',
+        };
+
         // Enable the plugin in Obsidian's config
         if (!plugins.enabledPlugins?.has?.(id)) {
-          try { await plugins.enablePluginAndSave(id); } catch {}
+          try { await plugins.enablePluginAndSave(id); } catch (e) { enablePluginError = e.message; }
         }
 
         // Try loadPlugin() first (works on macOS, may work on some Windows)
         try {
           await plugins.loadPlugin(id);
           if (plugins.plugins?.[id]) return { ready: true, action: 'loadPlugin' };
-        } catch {}
+        } catch (e) { loadPluginError = e.message; }
 
         // --- Windows fallback: manual require() with module resolution ---
         const nodePath = require('path');
@@ -258,7 +267,7 @@ async function main() {
           const mod = require(mainPath);
           const Cls = mod.default || mod;
           if (typeof Cls !== 'function') {
-            return { ready: false, reason: 'no-constructor', type: typeof Cls, mainPath };
+            return { ready: false, reason: 'no-constructor', type: typeof Cls, mainPath, enablePluginError, loadPluginError, diagnostics };
           }
           const inst = new Cls(globalThis.app, manifest);
           plugins.plugins[id] = inst;
@@ -266,7 +275,7 @@ async function main() {
           try { await inst.onload(); } catch (e) { onloadErr = e.message; }
           return { ready: true, action: 'manual-require', onloadErr, mainPath };
         } catch (e) {
-          return { ready: false, reason: 'require-failed', error: e.message, mainPath };
+          return { ready: false, reason: 'require-failed', error: e.message, mainPath, enablePluginError, loadPluginError, diagnostics };
         }
       })()`,
       returnByValue: true,
