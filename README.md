@@ -4,7 +4,7 @@ SystemSculpt AI adds AI chat, meeting transcription, semantic search, and agent 
 
 ## Current release facts
 
-- Plugin version: `5.7.0`
+- Plugin version: `5.7.1`
 - Minimum Obsidian version: `1.4.0`
 - Platforms: desktop and mobile (`manifest.json` sets `isDesktopOnly: false`)
 - License: MIT
