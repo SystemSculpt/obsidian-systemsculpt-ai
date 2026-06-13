@@ -140,6 +140,9 @@ test("buildNativeReleaseGatePlan skips iOS when unavailable", () => {
   });
 
   assert.equal(plan.length, REQUIRED_NATIVE_RELEASE_GATES.length + 1);
+  const windowsGate = plan.find((gate) => gate.id === "windows-e2e");
+  assert.equal(windowsGate?.label, "Windows clean-install and desktop baselines GitHub check");
+  assert.deepEqual(windowsGate?.args, ["scripts/check-github-required-checks.mjs", "--name", "windows-e2e"]);
   const iosGate = plan.at(-1);
   assert.equal(iosGate?.id, OPTIONAL_IOS_RELEASE_GATE.id);
   assert.equal(iosGate?.required, false);

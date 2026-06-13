@@ -189,8 +189,10 @@ const createPiSdkBuildFixPlugins = () => {
 		{
 			name: "pi-sdk-config-shim",
 			setup(build) {
-				build.onResolve({ filter: /\/config\.js$/ }, (args) => {
-					if (args.importer?.includes("@mariozechner/pi-coding-agent")) {
+				build.onResolve({ filter: /config\.js$/ }, (args) => {
+					const importPath = String(args.path || "").replace(/\\/g, "/");
+					const importer = String(args.importer || "").replace(/\\/g, "/");
+					if (importPath.endsWith("/config.js") && importer.includes("@mariozechner/pi-coding-agent")) {
 						return { path: args.path, namespace: "pi-config-shim", pluginData: { resolveDir: args.resolveDir } };
 					}
 				});
@@ -256,6 +258,62 @@ const createPiSdkBuildFixPlugins = () => {
 						/\bimport\(\s*"(node:[a-z_]+)"\s*\)/g,
 						'Promise.resolve(require("$1"))'
 					);
+
+					return { contents, loader: "js" };
+				});
+			}
+		},
+		{
+			name: "pi-sdk-extension-loader-alias-fix",
+			setup(build) {
+				build.onLoad({ filter: /[\\/]@mariozechner[\\/]pi-coding-agent[\\/]dist[\\/]core[\\/]extensions[\\/]loader\.js$/ }, async (args) => {
+					let contents = await fs.promises.readFile(args.path, "utf8");
+					const before = contents;
+
+					contents = contents.replace(
+						"const __dirname = path.dirname(fileURLToPath(import.meta.url));",
+						'const __dirname = "";'
+					);
+
+					contents = contents.replace(
+						/(const resolveWorkspaceOrImport = \(workspaceRelativePath, specifier\) => \{[\s\S]*?^\s{4}\};)/m,
+						`$1
+    const tryResolveWorkspaceOrImport = (workspaceRelativePath, specifier) => {
+        try {
+            return resolveWorkspaceOrImport(workspaceRelativePath, specifier);
+        }
+        catch {
+            return undefined;
+        }
+    };`
+					);
+
+					for (const [workspaceRelativePath, specifier] of [
+						["agent/dist/index.js", "@mariozechner/pi-agent-core"],
+						["tui/dist/index.js", "@mariozechner/pi-tui"],
+						["ai/dist/index.js", "@mariozechner/pi-ai"],
+						["ai/dist/oauth.js", "@mariozechner/pi-ai/oauth"],
+					]) {
+						contents = contents.replace(
+							`"${specifier}": resolveWorkspaceOrImport("${workspaceRelativePath}", "${specifier}")`,
+							`"${specifier}": tryResolveWorkspaceOrImport("${workspaceRelativePath}", "${specifier}")`
+						);
+					}
+
+					contents = contents.replace(
+						"...(isBunBinary ? { virtualModules: VIRTUAL_MODULES, tryNative: false } : { alias: getAliases() }),",
+						"virtualModules: VIRTUAL_MODULES,\n        tryNative: false,"
+					);
+
+					if (
+						contents === before ||
+						!contents.includes("tryResolveWorkspaceOrImport") ||
+						contents.includes("path.dirname(fileURLToPath(import.meta.url))") ||
+						contents.includes("{ alias: getAliases() }") ||
+						/"@mariozechner\/pi-(?:agent-core|tui|ai)(?:\/oauth)?":\s*resolveWorkspaceOrImport\(/.test(contents)
+					) {
+						throw new Error("Pi SDK extension loader alias patch did not match expected output");
+					}
 
 					return { contents, loader: "js" };
 				});
@@ -333,19 +391,6 @@ const buildOptions = {
 							pattern,
 							`(() => { try { return require("${mod}"); } catch { return {}; } })()`
 						);
-					}
-
-					// The Pi SDK's extensions loader eagerly calls resolveWorkspaceOrImport()
-					// which uses import.meta.resolve(). This fails for pi-tui even though
-					// we alias it at build time — the extensions loader is a separate
-					// dynamic resolution path. Wrap the call so it degrades gracefully.
-					const beforePiTuiPatch = code;
-					code = code.replace(
-						/"@mariozechner\/pi-tui":\s*resolveWorkspaceOrImport\([^)]+\)/g,
-						'"@mariozechner/pi-tui": (() => { try { return resolveWorkspaceOrImport("tui/dist/index.js", "@mariozechner/pi-tui"); } catch { return undefined; } })()'
-					);
-					if (code === beforePiTuiPatch) {
-						console.warn("[build] pi-tui resolveWorkspaceOrImport patch did not match — verify SDK output");
 					}
 
 					writeFileSync(outfile, code);

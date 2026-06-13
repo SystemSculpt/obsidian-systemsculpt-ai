@@ -28,6 +28,7 @@ export function buildWindowsLaunchScript(options = {}) {
   const obsidianExe = JSON.stringify(String(options.obsidianExe || "").trim());
   const piAgentDir = JSON.stringify(String(options.piAgentDir || "").trim());
   const resultPath = JSON.stringify(String(options.resultPath || "").trim());
+  const remoteDebuggingPort = Math.max(0, Number(options.remoteDebuggingPort) || 0);
   const clearedEnvKeys = toPowerShellArrayLiteral(
     Array.isArray(options.clearedEnvKeys) ? options.clearedEnvKeys : []
   );
@@ -39,6 +40,7 @@ export function buildWindowsLaunchScript(options = {}) {
     `$obsidianExe = ${obsidianExe}`,
     `$piAgentDir = ${piAgentDir}`,
     `$vaultPath = ${vaultPath}`,
+    `$remoteDebuggingPort = ${remoteDebuggingPort}`,
     "$cleared = @()",
     `foreach ($name in ${clearedEnvKeys}) {`,
     "  if (Test-Path (\"Env:\" + $name)) {",
@@ -49,7 +51,14 @@ export function buildWindowsLaunchScript(options = {}) {
     "$env:PI_CODING_AGENT_DIR = $piAgentDir",
     "if (!(Test-Path $obsidianExe)) { throw ('Obsidian executable not found: ' + $obsidianExe) }",
     "if (!(Test-Path $vaultPath)) { throw ('Prepared vault path not found: ' + $vaultPath) }",
-    "$process = Start-Process -FilePath $obsidianExe -ArgumentList @($vaultPath) -PassThru",
+    "$argumentList = @()",
+    "if ($remoteDebuggingPort -gt 0) {",
+    "  $argumentList += \"--remote-debugging-port=$remoteDebuggingPort\"",
+    "  $argumentList += '--use-fake-device-for-media-stream'",
+    "  $argumentList += '--use-fake-ui-for-media-stream'",
+    "}",
+    "$argumentList += $vaultPath",
+    "$process = Start-Process -FilePath $obsidianExe -ArgumentList $argumentList -PassThru",
     "Start-Sleep -Seconds 2",
     "$result = [ordered]@{",
     "  ok = $true",
@@ -57,6 +66,7 @@ export function buildWindowsLaunchScript(options = {}) {
     "  obsidianPid = $process.Id",
     "  obsidianExe = $obsidianExe",
     "  vaultPath = $vaultPath",
+    "  remoteDebuggingPort = if ($remoteDebuggingPort -gt 0) { $remoteDebuggingPort } else { $null }",
     "  piAgentDir = $piAgentDir",
     "  clearedEnvKeys = $cleared",
     "  startedAt = (Get-Date).ToString('o')",
@@ -150,6 +160,8 @@ export function resolveWindowsBootstrapOptions(argv, env = process.env) {
     resetVault: false,
     launch: false,
     keepExistingObsidian: false,
+    skipTrustPrompt: false,
+    remoteDebuggingPort: 0,
     timeoutMs: 90_000,
   };
 
@@ -207,6 +219,15 @@ export function resolveWindowsBootstrapOptions(argv, env = process.env) {
       options.keepExistingObsidian = true;
       continue;
     }
+    if (arg === "--skip-trust-prompt") {
+      options.skipTrustPrompt = true;
+      continue;
+    }
+    if (arg === "--remote-debugging-port") {
+      options.remoteDebuggingPort = Math.max(0, Number(argv[index + 1]) || 0);
+      index += 1;
+      continue;
+    }
     if (arg === "--timeout-ms") {
       options.timeoutMs = Math.max(1000, Number(argv[index + 1]) || options.timeoutMs);
       index += 1;
@@ -252,6 +273,9 @@ Options:
   --reset-vault              Delete and recreate the target vault before copying artifacts
   --launch                   Relaunch Obsidian through an interactive scheduled task after prep
   --keep-existing-obsidian   Skip the pre-launch Obsidian shutdown step
+  --skip-trust-prompt        Skip the UIAutomation trust prompt helper
+  --remote-debugging-port <n>
+                              Launch Obsidian with CDP enabled on this port
   --timeout-ms <n>           Interactive launch timeout. Default: 90000
   --help, -h                 Show this help
 `);
@@ -365,6 +389,7 @@ async function launchPreparedVault(options) {
       piAgentDir: options.piAgentDir,
       vaultPath: options.vaultPath,
       resultPath,
+      remoteDebuggingPort: options.remoteDebuggingPort,
       clearedEnvKeys: WINDOWS_LOCAL_PI_ENV_KEYS,
     }),
   });
@@ -431,9 +456,11 @@ export async function runWindowsBootstrap(options) {
     const launchResult = await launchPreparedVault(options);
     result.launch = launchResult.launch;
     result.launchResultPath = launchResult.resultPath;
-    const trustPromptResult = await dismissWindowsTrustPromptIfPresent(options);
-    result.trustPrompt = trustPromptResult.trustPrompt;
-    result.trustPromptResultPath = trustPromptResult.resultPath;
+    if (!options.skipTrustPrompt) {
+      const trustPromptResult = await dismissWindowsTrustPromptIfPresent(options);
+      result.trustPrompt = trustPromptResult.trustPrompt;
+      result.trustPromptResultPath = trustPromptResult.resultPath;
+    }
   }
 
   return result;

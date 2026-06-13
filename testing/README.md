@@ -80,12 +80,11 @@ Docs:
 Before ship, the required native matrix is:
 
 - macOS: `npm run test:native:desktop:baselines`
-- Windows clean install: `npm run test:native:windows:clean-install`
-- Windows desktop baselines: `npm run test:native:windows:baselines`
+- Windows: GitHub check `windows-e2e` on the exact release commit. The job installs Obsidian on `windows-latest`, launches the fresh Windows QA vault, then runs `npm run test:native:windows:clean-install` and `npm run test:native:windows:baselines`.
 - Android: `npm run test:native:android:debug:open -- --config ./systemsculpt-sync.android.json --headless --sync --reset-vault` then `npm run test:native:android:extended`
 - iOS: `npm run test:native:ios` when a paired physical device is available
 
-For the Windows-only release gate on the configured Windows SSH host, run `npm run check:release:windows`.
+For the Windows-only release gate, run `npm run check:release:windows` after the commit has been pushed and the GitHub check has completed. For local development on a maintained Windows host, use `npm run check:release:windows:local`.
 
 `npm run check:release:native` is the canonical one-command wrapper for that matrix. It fails the release path if macOS, Windows, or Android are not green, and it only skips iOS when the host genuinely does not have a paired device plus WebKit adapter available.
 
@@ -97,10 +96,9 @@ Automated E2E testing runs in GitHub Actions on every PR and push to main:
 |----------|--------|----------------|
 | `ci.yml` | ubuntu-latest | Unit tests, embeddings tests, production build, built-bundle integration suite |
 | `macos-e2e.yml` | macos-latest | Obsidian .dmg install, vault bootstrap, bridge, managed baseline, release smoke against local provider fixtures (provider listing, chat round-trip, recorder, embeddings) |
+| `windows-e2e.yml` | windows-latest | Obsidian `.exe` install, fresh Windows vault bootstrap, local bridge, clean-install parity, xAI/Grok provider pass, and Windows desktop baselines |
 
-Windows and Android E2E run locally via the `test:native:windows:*` and
-`test:native:android*` scripts (Windows over SSH to the paired machine,
-Android against a connected device/emulator); they have no CI workflow yet.
+Android E2E still runs locally via the `test:native:android*` scripts against a connected device/emulator.
 
 iOS is local-only: it requires a cable-connected physical iPad with Developer Mode. There is no simulator path for real Obsidian plugin QA. See `testing/native/device/ios/README.md`.
 

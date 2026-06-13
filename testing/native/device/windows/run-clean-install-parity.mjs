@@ -268,9 +268,10 @@ export function buildWindowsLocalPiStatusScript() {
     "$ErrorActionPreference = 'Stop'",
     "$modelsPath = Join-Path $HOME '.pi/models.json'",
     "$authPath = Join-Path $HOME '.pi/auth.json'",
-    "$piCommand = Get-Command pi -ErrorAction SilentlyContinue",
+    "$piCommands = @(Get-Command pi -All -ErrorAction SilentlyContinue | ForEach-Object { $_.Source } | Where-Object { $_ })",
     "[pscustomobject]@{",
-    "  piCommandPath = if ($piCommand) { $piCommand.Source } else { $null }",
+    "  piCommandPath = if ($piCommands.Count -gt 0) { $piCommands[0] } else { $null }",
+    "  piCommandPaths = $piCommands",
     "  modelsFileExists = Test-Path $modelsPath",
     "  authFileExists = Test-Path $authPath",
     "} | ConvertTo-Json -Compress",
@@ -292,22 +293,59 @@ export function parseWindowsBridgeRecord(rawText) {
 
 export function parseWindowsLocalPiStatus(rawText) {
   const parsed = parseJsonObjectText(rawText, "the Windows local Pi probe");
+  const piCommandPaths = Array.isArray(parsed.piCommandPaths)
+    ? parsed.piCommandPaths
+    : parsed.piCommandPath
+      ? [parsed.piCommandPath]
+      : [];
   return {
-    piCommandPath: String(parsed.piCommandPath || "").trim() || null,
+    piCommandPath: String(parsed.piCommandPath || piCommandPaths[0] || "").trim() || null,
+    piCommandPaths: piCommandPaths
+      .map((entry) => String(entry || "").trim())
+      .filter((entry) => entry.length > 0),
     modelsFileExists: Boolean(parsed.modelsFileExists),
     authFileExists: Boolean(parsed.authFileExists),
   };
 }
 
-export function assertNoLocalPiInstalled(status) {
-  const summary = {
-    piCommandPath: String(status?.piCommandPath || "").trim() || null,
+export function isProjectLocalPiCommandPath(commandPath) {
+  const normalized = String(commandPath || "")
+    .trim()
+    .replaceAll("/", "\\")
+    .toLowerCase();
+  return /\\node_modules\\\.bin\\pi(?:\.cmd|\.ps1|\.exe)?$/.test(normalized);
+}
+
+export function summarizeWindowsLocalPiStatus(status) {
+  const rawCommandPaths = Array.isArray(status?.piCommandPaths)
+    ? status.piCommandPaths
+    : status?.piCommandPath
+      ? [status.piCommandPath]
+      : [];
+  const piCommandPaths = Array.from(
+    new Set(
+      rawCommandPaths
+        .map((entry) => String(entry || "").trim())
+        .filter((entry) => entry.length > 0)
+    )
+  );
+  const ignoredPiCommandPaths = piCommandPaths.filter(isProjectLocalPiCommandPath);
+  const userPiCommandPaths = piCommandPaths.filter((entry) => !isProjectLocalPiCommandPath(entry));
+
+  return {
+    piCommandPath: userPiCommandPaths[0] || null,
+    piCommandPaths: userPiCommandPaths,
+    ignoredPiCommandPaths,
     modelsFileExists: Boolean(status?.modelsFileExists),
     authFileExists: Boolean(status?.authFileExists),
   };
+}
+
+export function assertNoLocalPiInstalled(status) {
+  const summary = summarizeWindowsLocalPiStatus(status);
   const reasons = [];
-  if (summary.piCommandPath) {
-    reasons.push(`pi command at ${summary.piCommandPath}`);
+  if (summary.piCommandPaths.length > 0) {
+    reasons.push(`pi command at ${summary.piCommandPaths.join(", ")}`);
   }
   if (summary.modelsFileExists) {
     reasons.push("~/.pi/models.json");
@@ -344,13 +382,14 @@ export function readLocalWindowsPiStatus() {
     encoding: "utf8",
     stdio: "pipe",
   });
-  const piCommandPath = String(result.stdout || "")
+  const piCommandPaths = String(result.stdout || "")
     .split(/\r?\n/)
     .map((entry) => entry.trim())
-    .find(Boolean) || null;
+    .filter(Boolean);
 
   return {
-    piCommandPath,
+    piCommandPath: piCommandPaths[0] || null,
+    piCommandPaths,
     modelsFileExists: fs.existsSync(modelsPath),
     authFileExists: fs.existsSync(authPath),
   };

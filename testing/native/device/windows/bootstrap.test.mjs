@@ -13,6 +13,7 @@ import {
 import {
   buildWindowsLaunchScript,
   buildWindowsTrustPromptDismissScript,
+  resolveWindowsBootstrapOptions,
   sanitizeWindowsBootstrapReport,
 } from "./bootstrap.mjs";
 
@@ -145,6 +146,7 @@ test("buildWindowsLaunchScript injects the clean Pi agent dir and env clearing l
     piAgentDir: "C:/Vaults/SystemSculptWindowsQA/.systemsculpt/pi-empty-agent",
     vaultPath: "C:/Vaults/SystemSculptWindowsQA",
     resultPath: "C:/Windows/Temp/obsidian-launch.json",
+    remoteDebuggingPort: 9222,
     clearedEnvKeys: ["OPENAI_API_KEY", "ANTHROPIC_API_KEY"],
   });
 
@@ -152,8 +154,11 @@ test("buildWindowsLaunchScript injects the clean Pi agent dir and env clearing l
   assert.match(script, /OPENAI_API_KEY/);
   assert.match(script, /ANTHROPIC_API_KEY/);
   assert.match(script, /SystemSculptWindowsQA/);
+  assert.match(script, /--remote-debugging-port=\$remoteDebuggingPort/);
+  assert.match(script, /--use-fake-device-for-media-stream/);
   assert.match(script, /foreach \(\$name in @\("OPENAI_API_KEY", "ANTHROPIC_API_KEY"\)\)/);
-  assert.match(script, /ArgumentList @\(\$vaultPath\)/);
+  assert.match(script, /\$argumentList \+= \$vaultPath/);
+  assert.match(script, /ArgumentList \$argumentList/);
 });
 
 test("buildWindowsTrustPromptDismissScript looks for the trust prompt and enable button", () => {
@@ -168,6 +173,21 @@ test("buildWindowsTrustPromptDismissScript looks for the trust prompt and enable
   assert.match(script, /InvokePattern/);
   assert.match(script, /SendKeys/);
   assert.match(script, /obsidian-trust\.json/);
+});
+
+test("resolveWindowsBootstrapOptions can skip UIAutomation trust handling for CDP-driven CI", () => {
+  const options = resolveWindowsBootstrapOptions(
+    ["--launch", "--skip-trust-prompt", "--remote-debugging-port", "9222"],
+    {
+      LOCALAPPDATA: "C:/Users/Test/AppData/Local",
+      APPDATA: "C:/Users/Test/AppData/Roaming",
+      USERPROFILE: "C:/Users/Test",
+    }
+  );
+
+  assert.equal(options.launch, true);
+  assert.equal(options.skipTrustPrompt, true);
+  assert.equal(options.remoteDebuggingPort, 9222);
 });
 
 test("sanitizeWindowsBootstrapReport redacts sensitive plugin data before printing", () => {

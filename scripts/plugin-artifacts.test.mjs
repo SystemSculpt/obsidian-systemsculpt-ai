@@ -85,6 +85,42 @@ test("assertProductionPluginArtifacts rejects the mobile-breaking node:url impor
   );
 });
 
+test("assertProductionPluginArtifacts rejects eager Pi extension alias resolution", () => {
+  const root = createTempPluginDir();
+  writeRequiredArtifacts(
+    root,
+    [
+      "const aliases = {",
+      '  "@mariozechner/pi-agent-core": resolveWorkspaceOrImport("agent/dist/index.js", "@mariozechner/pi-agent-core"),',
+      '  "@mariozechner/pi-ai": resolveWorkspaceOrImport("ai/dist/index.js", "@mariozechner/pi-ai"),',
+      "};",
+      "",
+    ].join("\n")
+  );
+
+  assert.throws(
+    () => assertProductionPluginArtifacts({ root }),
+    /eagerly resolves Pi extension aliases/i
+  );
+});
+
+test("assertProductionPluginArtifacts rejects the unshimmed Pi config module", () => {
+  const root = createTempPluginDir();
+  writeRequiredArtifacts(
+    root,
+    [
+      "// node_modules/@mariozechner/pi-coding-agent/dist/config.js",
+      "__filename = (0, import_url.fileURLToPath)(__systemsculpt_import_meta_url__);",
+      "",
+    ].join("\n")
+  );
+
+  assert.throws(
+    () => assertProductionPluginArtifacts({ root }),
+    /Obsidian-safe config shim/i
+  );
+});
+
 test("buildProductionPlugin revalidates the post-build artifact set", () => {
   const root = createTempPluginDir();
 

@@ -98,7 +98,9 @@ async function main() {
         [
           'scripts/release-plugin.test.mjs',
           'scripts/plugin-artifacts.test.mjs',
+          'scripts/check-github-required-checks.test.mjs',
           'scripts/check-native-release-gates.test.mjs',
+          'scripts/github-workflows.test.mjs',
           'testing/native/device/android/utils.test.mjs',
           'testing/native/device/windows/bootstrap.test.mjs',
           'testing/native/device/windows/clean-install-parity.test.mjs',

@@ -1,0 +1,225 @@
+name: Windows E2E
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      obsidian_version:
+        description: "Obsidian version to install"
+        required: false
+        default: "1.8.9"
+
+concurrency:
+  group: windows-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-e2e:
+    name: windows-e2e
+    runs-on: windows-latest
+    timeout-minutes: 25
+    env:
+      OBSIDIAN_VERSION: ${{ inputs.obsidian_version || '1.8.9' }}
+      SYSTEMSCULPT_RUNTIME_SMOKE_LICENSE_KEY: ${{ secrets.SYSTEMSCULPT_E2E_LICENSE_KEY }}
+      SYSTEMSCULPT_RUNTIME_SMOKE_SERVER_URL: ${{ secrets.SYSTEMSCULPT_RUNTIME_SMOKE_SERVER_URL }}
+      SYSTEMSCULPT_DESKTOP_PROVIDER_ID: xai
+      SYSTEMSCULPT_DESKTOP_PROVIDER_MODEL_ID: xai@@grok-4.3
+      SYSTEMSCULPT_DESKTOP_PROVIDER_API_KEY: ${{ secrets.XAI_API_KEY }}
+      XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "20.x"
+          cache: "npm"
+          cache-dependency-path: package-lock.json
+
+      - name: Require xAI provider secret
+        shell: pwsh
+        run: |
+          if (-not $env:XAI_API_KEY) {
+            throw "XAI_API_KEY repository secret is required for the Windows provider-connected release gate."
+          }
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Build plugin
+        run: npm run build
+
+      - name: Rebundle plugin for desktop CI
+        run: |
+          npx esbuild main.js --bundle --outfile=main.js --allow-overwrite `
+            --format=cjs --platform=node `
+            --external:obsidian --external:electron `
+            --external:@codemirror/* --external:@lezer/* `
+            --external:@mariozechner/pi-tui
+
+      - name: Validate desktop CI artifact
+        run: |
+          node --input-type=module -e "import { assertProductionPluginArtifacts } from './scripts/plugin-artifacts.mjs'; assertProductionPluginArtifacts();"
+
+      - name: Cache Obsidian installer
+        id: obsidian-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~\obsidian-installer
+          key: obsidian-exe-${{ env.OBSIDIAN_VERSION }}
+
+      - name: Download Obsidian installer
+        if: steps.obsidian-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $installerDir = Join-Path $HOME "obsidian-installer"
+          New-Item -ItemType Directory -Force -Path $installerDir | Out-Null
+          $url = "https://github.com/obsidianmd/obsidian-releases/releases/download/v$env:OBSIDIAN_VERSION/Obsidian-$env:OBSIDIAN_VERSION.exe"
+          $installerPath = Join-Path $installerDir "Obsidian-$env:OBSIDIAN_VERSION.exe"
+          Write-Host "Downloading Obsidian $env:OBSIDIAN_VERSION"
+          Invoke-WebRequest -Uri $url -OutFile $installerPath
+          Get-Item $installerPath | Select-Object FullName, Length
+
+      - name: Extract Obsidian
+        shell: pwsh
+        run: |
+          $installerPath = Join-Path $HOME "obsidian-installer\Obsidian-$env:OBSIDIAN_VERSION.exe"
+          if (!(Test-Path $installerPath)) {
+            throw "Obsidian installer not found at $installerPath"
+          }
+
+          $extractRoot = Join-Path $env:RUNNER_TEMP "obsidian-installer-extract"
+          $installRoot = Join-Path $env:LOCALAPPDATA "Programs\Obsidian"
+          Remove-Item -Path $extractRoot, $installRoot -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $extractRoot, $installRoot | Out-Null
+
+          7z x $installerPath "-o$extractRoot" -y | Out-Host
+          $appArchive = Get-ChildItem -Path $extractRoot -Filter "app-*.7z" -Recurse -ErrorAction SilentlyContinue |
+            Sort-Object @{ Expression = { if ($_.Name -match "64") { 0 } else { 1 } } }, Name |
+            Select-Object -First 1
+
+          if ($appArchive) {
+            Write-Host "Using Obsidian app payload $($appArchive.Name)"
+            7z x $appArchive.FullName "-o$installRoot" -y | Out-Host
+          } else {
+            Copy-Item -Path (Join-Path $extractRoot "*") -Destination $installRoot -Recurse -Force
+          }
+
+          $searchRoots = @(
+            $installRoot,
+            $extractRoot,
+            (Join-Path $env:LOCALAPPDATA "Programs")
+          ) | Where-Object { $_ -and (Test-Path $_) }
+
+          $obsidianExe = $null
+          foreach ($root in $searchRoots) {
+            $candidate = Get-ChildItem -Path $root -Filter Obsidian.exe -Recurse -ErrorAction SilentlyContinue |
+              Select-Object -First 1
+            if ($candidate) {
+              $obsidianExe = $candidate.FullName
+              break
+            }
+          }
+
+          if (-not $obsidianExe) {
+            throw "Obsidian.exe was not found after extraction."
+          }
+
+          "OBSIDIAN_EXE=$obsidianExe" | Out-File -FilePath $env:GITHUB_ENV -Append
+          Write-Host "Obsidian extracted at $obsidianExe"
+
+      - name: Prepare vault and launch Obsidian
+        shell: pwsh
+        run: |
+          node testing/native/device/windows/bootstrap.mjs `
+            --reset-vault `
+            --launch `
+            --skip-trust-prompt `
+            --remote-debugging-port 9222 `
+            --obsidian-exe "$env:OBSIDIAN_EXE" `
+            --timeout-ms 120000
+
+      - name: Dismiss trust prompt and enable plugin via CDP
+        run: |
+          node --experimental-websocket testing/native/desktop-automation/cdp-trust-and-enable.mjs --port 9222 --plugin-id systemsculpt-ai
+
+      - name: Wait for desktop automation bridge
+        shell: pwsh
+        run: |
+          $discoveryDir = Join-Path $HOME ".systemsculpt\obsidian-automation"
+          $deadline = (Get-Date).AddSeconds(120)
+          $found = $false
+
+          while ((Get-Date) -lt $deadline) {
+            if (Test-Path $discoveryDir) {
+              $records = Get-ChildItem -Path $discoveryDir -Filter *.json -ErrorAction SilentlyContinue
+              foreach ($record in $records) {
+                try {
+                  $parsed = Get-Content -Raw $record.FullName | ConvertFrom-Json
+                  if ($parsed.pluginId -eq "systemsculpt-ai" -and $parsed.port) {
+                    Write-Host "Bridge discovered: port=$($parsed.port)"
+                    $found = $true
+                    break
+                  }
+                } catch {}
+              }
+            }
+            if ($found) { break }
+            Write-Host "Waiting for bridge discovery file..."
+            Start-Sleep -Seconds 3
+          }
+
+          if (-not $found) {
+            throw "Desktop automation bridge did not become ready within 120 seconds."
+          }
+
+      - name: Run Windows clean-install parity
+        run: |
+          node testing/native/device/windows/run-clean-install-parity.mjs --provider-id xai --provider-model-id xai@@grok-4.3 --api-key-env XAI_API_KEY --require-provider
+
+      - name: Run Windows desktop baselines
+        run: npm run test:native:windows:baselines
+
+      - name: Capture Windows diagnostics on failure
+        if: failure()
+        shell: pwsh
+        run: |
+          $diag = Join-Path $env:RUNNER_TEMP "systemsculpt-windows-diagnostics"
+          New-Item -ItemType Directory -Force -Path $diag | Out-Null
+
+          $paths = @(
+            @{ Source = (Join-Path $env:APPDATA "Obsidian\logs"); Name = "obsidian-logs-upper" },
+            @{ Source = (Join-Path $env:APPDATA "obsidian\logs"); Name = "obsidian-logs-lower" },
+            @{ Source = (Join-Path $HOME ".systemsculpt\obsidian-automation"); Name = "bridge-discovery" },
+            @{ Source = (Join-Path $HOME "Documents\SystemSculptWindowsQA\.obsidian\plugins\systemsculpt-ai"); Name = "plugin" }
+          )
+
+          foreach ($entry in $paths) {
+            if (Test-Path $entry.Source) {
+              Copy-Item -Path $entry.Source -Destination (Join-Path $diag $entry.Name) -Recurse -Force -ErrorAction SilentlyContinue
+            }
+          }
+
+          Get-Process -Name Obsidian -ErrorAction SilentlyContinue |
+            Select-Object Id, Path, StartTime |
+            ConvertTo-Json -Depth 3 |
+            Out-File -FilePath (Join-Path $diag "obsidian-processes.json") -Encoding utf8
+
+      - name: Upload Windows diagnostics
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-e2e-diagnostics
+          path: ${{ runner.temp }}\systemsculpt-windows-diagnostics
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Stop Obsidian
+        if: always()
+        shell: pwsh
+        run: |
+          Get-Process -Name Obsidian -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          Write-Host "Obsidian processes stopped."

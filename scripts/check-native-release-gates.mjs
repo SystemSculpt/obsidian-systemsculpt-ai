@@ -14,16 +14,10 @@ export const REQUIRED_NATIVE_RELEASE_GATES = Object.freeze([
     args: ["run", "test:native:desktop:baselines"],
   },
   {
-    id: "windows-clean-install",
-    label: "Windows clean-install parity",
-    command: "npm",
-    args: ["run", "test:native:windows:clean-install"],
-  },
-  {
-    id: "windows-desktop-baselines",
-    label: "Windows desktop baselines",
-    command: "npm",
-    args: ["run", "test:native:windows:baselines"],
+    id: "windows-e2e",
+    label: "Windows clean-install and desktop baselines GitHub check",
+    command: "node",
+    args: ["scripts/check-github-required-checks.mjs", "--name", "windows-e2e"],
   },
   {
     id: "android-prepare",
@@ -87,8 +81,7 @@ Run the mandatory native release matrix before shipping the Obsidian plugin.
 
 Required lanes:
   - macOS desktop baselines
-  - Windows clean-install parity
-  - Windows desktop baselines
+  - Windows clean-install parity and desktop baselines via GitHub check "windows-e2e"
   - Android sync + runtime smoke
 
 Optional lane:
