@@ -131,6 +131,7 @@ jobs:
           node testing/native/device/windows/bootstrap.mjs `
             --reset-vault `
             --launch `
+            --skip-trust-prompt `
             --remote-debugging-port 9222 `
             --obsidian-exe "$env:OBSIDIAN_EXE" `
             --timeout-ms 120000

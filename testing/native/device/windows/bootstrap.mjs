@@ -160,6 +160,7 @@ export function resolveWindowsBootstrapOptions(argv, env = process.env) {
     resetVault: false,
     launch: false,
     keepExistingObsidian: false,
+    skipTrustPrompt: false,
     remoteDebuggingPort: 0,
     timeoutMs: 90_000,
   };
@@ -218,6 +219,10 @@ export function resolveWindowsBootstrapOptions(argv, env = process.env) {
       options.keepExistingObsidian = true;
       continue;
     }
+    if (arg === "--skip-trust-prompt") {
+      options.skipTrustPrompt = true;
+      continue;
+    }
     if (arg === "--remote-debugging-port") {
       options.remoteDebuggingPort = Math.max(0, Number(argv[index + 1]) || 0);
       index += 1;
@@ -268,6 +273,7 @@ Options:
   --reset-vault              Delete and recreate the target vault before copying artifacts
   --launch                   Relaunch Obsidian through an interactive scheduled task after prep
   --keep-existing-obsidian   Skip the pre-launch Obsidian shutdown step
+  --skip-trust-prompt        Skip the UIAutomation trust prompt helper
   --remote-debugging-port <n>
                               Launch Obsidian with CDP enabled on this port
   --timeout-ms <n>           Interactive launch timeout. Default: 90000
@@ -450,9 +456,11 @@ export async function runWindowsBootstrap(options) {
     const launchResult = await launchPreparedVault(options);
     result.launch = launchResult.launch;
     result.launchResultPath = launchResult.resultPath;
-    const trustPromptResult = await dismissWindowsTrustPromptIfPresent(options);
-    result.trustPrompt = trustPromptResult.trustPrompt;
-    result.trustPromptResultPath = trustPromptResult.resultPath;
+    if (!options.skipTrustPrompt) {
+      const trustPromptResult = await dismissWindowsTrustPromptIfPresent(options);
+      result.trustPrompt = trustPromptResult.trustPrompt;
+      result.trustPromptResultPath = trustPromptResult.resultPath;
+    }
   }
 
   return result;

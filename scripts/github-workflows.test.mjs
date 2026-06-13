@@ -20,6 +20,7 @@ test("Windows E2E workflow keeps the canonical build, bootstrap, clean-install, 
   assert.match(text, /^\s*name: windows-e2e$/m);
   assert.match(text, /runs-on: windows-latest/);
   assert.match(text, /XAI_API_KEY: \$\{\{ secrets\.XAI_API_KEY \}\}/);
+  assert.match(text, /--skip-trust-prompt/);
 
   const build = indexOfRequired(text, "npm run build");
   const bootstrap = indexOfRequired(text, "node testing/native/device/windows/bootstrap.mjs");

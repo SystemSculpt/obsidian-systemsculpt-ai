@@ -13,6 +13,7 @@ import {
 import {
   buildWindowsLaunchScript,
   buildWindowsTrustPromptDismissScript,
+  resolveWindowsBootstrapOptions,
   sanitizeWindowsBootstrapReport,
 } from "./bootstrap.mjs";
 
@@ -172,6 +173,21 @@ test("buildWindowsTrustPromptDismissScript looks for the trust prompt and enable
   assert.match(script, /InvokePattern/);
   assert.match(script, /SendKeys/);
   assert.match(script, /obsidian-trust\.json/);
+});
+
+test("resolveWindowsBootstrapOptions can skip UIAutomation trust handling for CDP-driven CI", () => {
+  const options = resolveWindowsBootstrapOptions(
+    ["--launch", "--skip-trust-prompt", "--remote-debugging-port", "9222"],
+    {
+      LOCALAPPDATA: "C:/Users/Test/AppData/Local",
+      APPDATA: "C:/Users/Test/AppData/Roaming",
+      USERPROFILE: "C:/Users/Test",
+    }
+  );
+
+  assert.equal(options.launch, true);
+  assert.equal(options.skipTrustPrompt, true);
+  assert.equal(options.remoteDebuggingPort, 9222);
 });
 
 test("sanitizeWindowsBootstrapReport redacts sensitive plugin data before printing", () => {
