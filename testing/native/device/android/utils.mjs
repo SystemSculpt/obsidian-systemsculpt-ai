@@ -230,6 +230,36 @@ export async function waitForDeviceBoot({ adbPath = resolveAdbPath(), serial, ti
   fail(`Timed out waiting for Android device ${serial || "(auto)"} to finish booting.`);
 }
 
+export function buildAndroidSharedStorageReadyScript() {
+  return "[ -d /sdcard/Android ] || [ -d /storage/self/primary/Android ]";
+}
+
+export async function waitForAndroidSharedStorage({
+  adbPath = resolveAdbPath(),
+  serial,
+  timeoutMs = 60000,
+  pollMs = 1000,
+  runAdbShellImpl = runAdbShell,
+  sleepImpl = sleep,
+} = {}) {
+  const attempts = Math.max(1, Math.ceil(Number(timeoutMs) / Math.max(1, Number(pollMs))));
+  let lastError = null;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      runAdbShellImpl(adbPath, serial, buildAndroidSharedStorageReadyScript());
+      return;
+    } catch (error) {
+      lastError = error;
+    }
+    if (attempt < attempts - 1) {
+      await sleepImpl(pollMs);
+    }
+  }
+
+  const details = lastError instanceof Error ? ` Last error: ${lastError.message}` : "";
+  fail(`Timed out waiting for Android shared storage on ${serial || "(auto)"}.${details}`);
+}
+
 export async function waitForAndroidDeviceSelection({
   adbPath = resolveAdbPath(),
   serial = null,

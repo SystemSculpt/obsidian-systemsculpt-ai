@@ -15,6 +15,7 @@ import {
   runAdbShell,
   selectAndroidDevice,
   shellQuote,
+  waitForAndroidSharedStorage,
 } from "./utils.mjs";
 import {
   REQUIRED_PLUGIN_ARTIFACTS,
@@ -141,6 +142,9 @@ console.log(`[android-sync] Target device: ${device.serial}`);
 console.log(`[android-sync] Vault path: ${vaultPath}`);
 console.log(`[android-sync] Plugin path: ${pluginPath}`);
 console.log(`[android-sync] main.js size: ${artifactInspection.mainBundle.formattedSize}`);
+
+console.log("[android-sync] Waiting for Android shared storage");
+await waitForAndroidSharedStorage({ adbPath, serial: device.serial });
 
 if (options.resetVault) {
   console.log("[android-sync] Resetting Android QA vault");
