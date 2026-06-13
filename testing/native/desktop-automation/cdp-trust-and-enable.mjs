@@ -163,13 +163,10 @@ async function main() {
   console.log("Waiting 8s for Obsidian to process trust...");
   await sleep(8000);
 
-  // On Windows, Obsidian's loadPlugin() has an unsolvable contradiction:
-  //   - pathToFileURL(manifest.dir) needs an absolute dir
-  //   - adapter.read(manifest.dir + '/...') needs a RELATIVE dir
-  // Making dir absolute fixes pathToFileURL but breaks the adapter (doubled
-  // path), and vice versa.  So we skip loadPlugin() entirely on Windows and
-  // load the plugin ourselves via require(), after patching Module resolution
-  // so that externalized imports (obsidian, electron, @codemirror/*) resolve.
+  // On Windows, make Obsidian's own loadPlugin() path expectations coherent:
+  // pathToFileURL() needs an absolute manifest dir, while vault adapter reads
+  // still need vault-relative paths. Patch the adapter only inside this CI
+  // bootstrap path so the real plugin loader can provide Obsidian's API module.
   let pluginLoaded = false;
   const EVAL_TIMEOUT = 60000;
 
@@ -184,11 +181,39 @@ async function main() {
         const manifest = plugins.manifests?.[id];
         if (!manifest) return { ready: false, reason: 'no-manifest' };
 
+        const nodePath = require('path');
+        const bp = globalThis.app?.vault?.adapter?.basePath || '';
+        const absDir = bp ? nodePath.resolve(bp, manifest.dir) : manifest.dir;
+        const originalManifestDir = manifest.dir;
+        const adapter = globalThis.app?.vault?.adapter;
+        if (process.platform === 'win32' && bp && adapter && !adapter.__systemsculptAbsolutePathPatch) {
+          adapter.__systemsculptAbsolutePathPatch = true;
+          const toAdapterPath = (candidate) => {
+            if (typeof candidate !== 'string' || !nodePath.isAbsolute(candidate)) return candidate;
+            const relative = nodePath.relative(bp, candidate);
+            if (!relative || relative.startsWith('..') || nodePath.isAbsolute(relative)) return candidate;
+            return relative.replace(/\\\\/g, '/');
+          };
+          for (const methodName of ['read', 'readBinary', 'exists', 'stat', 'list', 'mkdir', 'remove', 'rename', 'copy', 'write', 'writeBinary', 'append']) {
+            const original = adapter[methodName];
+            if (typeof original !== 'function') continue;
+            adapter[methodName] = function patchedAdapterMethod(first, ...rest) {
+              return original.call(this, toAdapterPath(first), ...rest);
+            };
+          }
+        }
+        if (process.platform === 'win32' && bp && !nodePath.isAbsolute(manifest.dir)) {
+          manifest.dir = absDir;
+        }
+
         let enablePluginError = null;
         let loadPluginError = null;
         const diagnostics = {
           resourcesPath: process.resourcesPath || null,
           platform: process.platform || null,
+          basePath: bp || null,
+          originalManifestDir,
+          manifestDir: manifest.dir,
           pluginManagerKeys: Object.keys(plugins).filter((key) => /plugin|load|enable|api/i.test(key)).slice(0, 20),
           hasCreateRequire: typeof require('module')?.createRequire === 'function',
         };
@@ -205,9 +230,6 @@ async function main() {
         } catch (e) { loadPluginError = e.message; }
 
         // --- Windows fallback: manual require() with module resolution ---
-        const nodePath = require('path');
-        const bp = globalThis.app?.vault?.adapter?.basePath || '';
-        const absDir = bp ? nodePath.resolve(bp, manifest.dir) : manifest.dir;
         const mainPath = nodePath.join(absDir, 'main.js');
 
         // Make externalized deps (obsidian, electron, etc.) resolvable.
