@@ -79,7 +79,7 @@ jobs:
           Invoke-WebRequest -Uri $url -OutFile $installerPath
           Get-Item $installerPath | Select-Object FullName, Length
 
-      - name: Install Obsidian
+      - name: Extract Obsidian
         shell: pwsh
         run: |
           $installerPath = Join-Path $HOME "obsidian-installer\Obsidian-$env:OBSIDIAN_VERSION.exe"
@@ -87,16 +87,25 @@ jobs:
             throw "Obsidian installer not found at $installerPath"
           }
 
-          $process = Start-Process -FilePath $installerPath -ArgumentList "/S" -PassThru -Wait
-          if ($process.ExitCode -ne 0) {
-            throw "Obsidian installer failed with exit code $($process.ExitCode)"
+          $extractRoot = Join-Path $env:RUNNER_TEMP "obsidian-installer-extract"
+          $installRoot = Join-Path $env:LOCALAPPDATA "Programs\Obsidian"
+          Remove-Item -Path $extractRoot, $installRoot -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $extractRoot, $installRoot | Out-Null
+
+          7z x $installerPath "-o$extractRoot" -y | Out-Host
+          $appArchive = Get-ChildItem -Path $extractRoot -Filter "app-*.7z" -Recurse -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+
+          if ($appArchive) {
+            7z x $appArchive.FullName "-o$installRoot" -y | Out-Host
+          } else {
+            Copy-Item -Path (Join-Path $extractRoot "*") -Destination $installRoot -Recurse -Force
           }
 
           $searchRoots = @(
-            (Join-Path $env:LOCALAPPDATA "Programs"),
-            $env:LOCALAPPDATA,
-            $env:ProgramFiles,
-            ${env:ProgramFiles(x86)}
+            $installRoot,
+            $extractRoot,
+            (Join-Path $env:LOCALAPPDATA "Programs")
           ) | Where-Object { $_ -and (Test-Path $_) }
 
           $obsidianExe = $null
@@ -110,11 +119,11 @@ jobs:
           }
 
           if (-not $obsidianExe) {
-            throw "Obsidian.exe was not found after install."
+            throw "Obsidian.exe was not found after extraction."
           }
 
           "OBSIDIAN_EXE=$obsidianExe" | Out-File -FilePath $env:GITHUB_ENV -Append
-          Write-Host "Obsidian installed at $obsidianExe"
+          Write-Host "Obsidian extracted at $obsidianExe"
 
       - name: Prepare vault and launch Obsidian
         shell: pwsh
