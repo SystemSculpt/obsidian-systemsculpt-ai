@@ -5,11 +5,13 @@ import {
   buildRemoteCleanInstallParityArgs,
   buildWindowsLocalPiStatusScript,
   buildLatestWindowsBridgeRecordScript,
+  isProjectLocalPiCommandPath,
   parseArgs,
   parseWindowsBridgeRecord,
   parseWindowsLocalPiStatus,
   resolveKnownProviderEnvCandidates,
   resolveProviderApiKey,
+  summarizeWindowsLocalPiStatus,
 } from "./run-clean-install-parity.mjs";
 
 test("parseArgs accepts Windows transport selectors and provider auth options", () => {
@@ -126,7 +128,8 @@ test("buildLatestWindowsBridgeRecordScript fetches the newest SystemSculpt bridg
 test("buildWindowsLocalPiStatusScript probes the Windows host for local Pi install markers", () => {
   const script = buildWindowsLocalPiStatusScript();
 
-  assert.match(script, /Get-Command pi/);
+  assert.match(script, /Get-Command pi -All/);
+  assert.match(script, /piCommandPaths/);
   assert.match(script, /\.pi\/models\.json|\.pi\\models\.json/);
   assert.match(script, /ConvertTo-Json -Compress/);
 });
@@ -156,34 +159,107 @@ PS C:\\Users\\Administrator>`);
 
 test("parseWindowsLocalPiStatus tolerates prompt noise around the JSON payload", () => {
   const status = parseWindowsLocalPiStatus(`PS C:\\Users\\Administrator> $probe | ConvertTo-Json -Compress
-{"piCommandPath":null,"modelsFileExists":false,"authFileExists":true}
+{"piCommandPath":null,"piCommandPaths":[],"modelsFileExists":false,"authFileExists":true}
 PS C:\\Users\\Administrator>`);
 
   assert.deepEqual(status, {
     piCommandPath: null,
+    piCommandPaths: [],
     modelsFileExists: false,
     authFileExists: true,
   });
+});
+
+test("parseWindowsLocalPiStatus preserves all discovered pi command paths", () => {
+  const status = parseWindowsLocalPiStatus(
+    JSON.stringify({
+      piCommandPath: "D:\\a\\repo\\repo\\node_modules\\.bin\\pi.CMD",
+      piCommandPaths: [
+        "D:\\a\\repo\\repo\\node_modules\\.bin\\pi.CMD",
+        "C:\\Users\\Administrator\\AppData\\Roaming\\npm\\pi.cmd",
+      ],
+      modelsFileExists: false,
+      authFileExists: false,
+    })
+  );
+
+  assert.deepEqual(status.piCommandPaths, [
+    "D:\\a\\repo\\repo\\node_modules\\.bin\\pi.CMD",
+    "C:\\Users\\Administrator\\AppData\\Roaming\\npm\\pi.cmd",
+  ]);
+});
+
+test("isProjectLocalPiCommandPath detects npm shims without hiding user installs", () => {
+  assert.equal(
+    isProjectLocalPiCommandPath("D:\\a\\repo\\repo\\node_modules\\.bin\\pi.CMD"),
+    true
+  );
+  assert.equal(isProjectLocalPiCommandPath("D:/a/repo/repo/node_modules/.bin/pi"), true);
+  assert.equal(
+    isProjectLocalPiCommandPath("C:\\Users\\Administrator\\AppData\\Roaming\\npm\\pi.cmd"),
+    false
+  );
+});
+
+test("summarizeWindowsLocalPiStatus ignores project-local npm shims but keeps real Pi installs", () => {
+  assert.deepEqual(
+    summarizeWindowsLocalPiStatus({
+      piCommandPaths: [
+        "D:\\a\\repo\\repo\\node_modules\\.bin\\pi.CMD",
+        "C:\\Users\\Administrator\\AppData\\Roaming\\npm\\pi.cmd",
+      ],
+      modelsFileExists: false,
+      authFileExists: true,
+    }),
+    {
+      piCommandPath: "C:\\Users\\Administrator\\AppData\\Roaming\\npm\\pi.cmd",
+      piCommandPaths: ["C:\\Users\\Administrator\\AppData\\Roaming\\npm\\pi.cmd"],
+      ignoredPiCommandPaths: ["D:\\a\\repo\\repo\\node_modules\\.bin\\pi.CMD"],
+      modelsFileExists: false,
+      authFileExists: true,
+    }
+  );
 });
 
 test("assertNoLocalPiInstalled allows auth.json but rejects a pi command or models.json", () => {
   assert.deepEqual(
     assertNoLocalPiInstalled({
       piCommandPath: null,
+      piCommandPaths: [],
       modelsFileExists: false,
       authFileExists: true,
     }),
     {
       piCommandPath: null,
+      piCommandPaths: [],
+      ignoredPiCommandPaths: [],
       modelsFileExists: false,
       authFileExists: true,
+    }
+  );
+
+  assert.deepEqual(
+    assertNoLocalPiInstalled({
+      piCommandPaths: ["D:\\a\\repo\\repo\\node_modules\\.bin\\pi.CMD"],
+      modelsFileExists: false,
+      authFileExists: false,
+    }),
+    {
+      piCommandPath: null,
+      piCommandPaths: [],
+      ignoredPiCommandPaths: ["D:\\a\\repo\\repo\\node_modules\\.bin\\pi.CMD"],
+      modelsFileExists: false,
+      authFileExists: false,
     }
   );
 
   assert.throws(
     () =>
       assertNoLocalPiInstalled({
-        piCommandPath: "C:\\Users\\Administrator\\AppData\\Roaming\\npm\\pi.cmd",
+        piCommandPaths: [
+          "D:\\a\\repo\\repo\\node_modules\\.bin\\pi.CMD",
+          "C:\\Users\\Administrator\\AppData\\Roaming\\npm\\pi.cmd",
+        ],
         modelsFileExists: false,
         authFileExists: false,
       }),
