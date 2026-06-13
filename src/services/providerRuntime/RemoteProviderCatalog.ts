@@ -26,6 +26,16 @@ const REMOTE_PROVIDER_SEEDS: readonly RemoteProviderSeed[] = [
     supportedParameters: ["tools"],
     endpoint: AI_PROVIDERS.OPENROUTER.BASE_URL,
   },
+  {
+    providerId: "xai",
+    modelId: "grok-4.3",
+    name: "Grok 4.3",
+    description: "xAI remote provider model for chat, tool use, reasoning, and image-capable turns.",
+    contextLength: 1_000_000,
+    modality: "text+image->text",
+    supportedParameters: ["tools"],
+    endpoint: AI_PROVIDERS.XAI.BASE_URL,
+  },
 ];
 
 function normalizeProviderId(value: unknown): string {
@@ -118,6 +128,9 @@ export function resolveRemoteProviderEndpoint(providerId: string): string {
   const normalized = normalizeProviderId(providerId);
   if (normalized === "openrouter") {
     return AI_PROVIDERS.OPENROUTER.BASE_URL;
+  }
+  if (normalized === "xai") {
+    return AI_PROVIDERS.XAI.BASE_URL;
   }
   return "";
 }

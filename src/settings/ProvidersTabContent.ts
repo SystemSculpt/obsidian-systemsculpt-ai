@@ -1,5 +1,8 @@
 import { Notice, Setting } from "obsidian";
 import type { SystemSculptSettingTab } from "./SystemSculptSettingTab";
+import { CHAT_VIEW_TYPE } from "../core/plugin/viewTypes";
+import { generateDefaultChatTitle } from "../utils/titleUtils";
+import type { SystemSculptModel } from "../types/llm";
 import type {
   StudioPiProviderAuthRecord,
   StudioPiOAuthProvider,
@@ -35,6 +38,13 @@ type ProviderRowState = {
   expanding: boolean;
 };
 
+type ProviderModelHint = {
+  modelId: string;
+  modelName: string;
+  providerId: string;
+  preferred: boolean;
+};
+
 type TabState = {
   providers: ProviderRowState[];
   loading: boolean;
@@ -42,6 +52,7 @@ type TabState = {
   piReady: boolean;
   localProviderIds: Set<string>;
   oauthProvidersById: Map<string, StudioPiOAuthProvider>;
+  providerModelHints: Map<string, ProviderModelHint>;
   /** True when in-modal provider connect actions should be surfaced. */
   inModalAuthAvailable: boolean;
   activeConnectProvider: string | null;
@@ -49,6 +60,8 @@ type TabState = {
   actionRunning: boolean;
   oauthAbortController: AbortController | null;
 };
+
+const PROVIDER_MODEL_HINT_TIMEOUT_MS = 2_500;
 
 async function loadStudioPiAuthInventoryModule(): Promise<
   typeof import("../studio/piAuth/StudioPiAuthInventory")
@@ -111,6 +124,7 @@ export async function displayProvidersTabContent(
     piReady: false,
     localProviderIds: new Set(),
     oauthProvidersById: new Map(),
+    providerModelHints: new Map(),
     inModalAuthAvailable: true,
     activeConnectProvider: null,
     activeConnectMethod: null,
@@ -144,7 +158,7 @@ export async function displayProvidersTabContent(
     state.inModalAuthAvailable = false;
   }
 
-  await refreshProviderList(state, plugin);
+  await refreshProvidersAndModelHints(state, plugin);
   render();
 }
 
@@ -172,6 +186,154 @@ async function refreshProviderList(
     state.providers = [];
   } finally {
     state.loading = false;
+  }
+}
+
+function modelMatchesProvider(model: SystemSculptModel, providerId: string): boolean {
+  const normalizedProvider = normalizeProviderId(providerId);
+  if (!normalizedProvider) {
+    return false;
+  }
+  return (
+    normalizeProviderId(model.sourceProviderId) === normalizedProvider ||
+    normalizeProviderId(model.provider) === normalizedProvider
+  );
+}
+
+function isLocalPiModel(model: SystemSculptModel): boolean {
+  const modelId = String(model.id || "").trim().toLowerCase();
+  const sourceMode = String(model.sourceMode || "").trim().toLowerCase();
+  return (
+    modelId.startsWith("local-pi-") ||
+    sourceMode === "pi_local" ||
+    sourceMode === "local_pi" ||
+    model.piLocalAvailable === true
+  );
+}
+
+function pickProviderModelHint(
+  providerId: string,
+  models: SystemSculptModel[],
+): ProviderModelHint | null {
+  const normalizedProvider = normalizeProviderId(providerId);
+  const providerModels = models.filter(
+    (model) => modelMatchesProvider(model, normalizedProvider) && !isLocalPiModel(model)
+  );
+  if (providerModels.length === 0) {
+    return null;
+  }
+
+  const preferredIds =
+    normalizedProvider === "xai"
+      ? ["xai@@grok-4.3"]
+      : [];
+  const preferredModel =
+    preferredIds
+      .map((id) => providerModels.find((model) => model.id === id))
+      .find(Boolean) || null;
+  const model = preferredModel || providerModels[0];
+
+  return {
+    modelId: model.id,
+    modelName: String(model.name || model.id || "").trim() || model.id,
+    providerId: normalizedProvider,
+    preferred: Boolean(preferredModel),
+  };
+}
+
+function getConnectedRemoteProviderIds(state: TabState): string[] {
+  return state.providers
+    .map((providerState) => providerState.record)
+    .filter((record) => {
+      const providerId = normalizeProviderId(record.provider);
+      if (!providerId || isStudioPiLocalProvider(providerId)) {
+        return false;
+      }
+      return getProviderDisplayState(record, state.localProviderIds).connected;
+    })
+    .map((record) => normalizeProviderId(record.provider));
+}
+
+async function loadProviderModelsWithTimeout(
+  loadModels: () => Promise<SystemSculptModel[]>,
+): Promise<SystemSculptModel[]> {
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([
+      loadModels(),
+      new Promise<SystemSculptModel[]>((resolve) => {
+        timeout = setTimeout(() => resolve([]), PROVIDER_MODEL_HINT_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+  }
+}
+
+async function refreshProviderModelHints(
+  state: TabState,
+  plugin: SystemSculptSettingTab["plugin"],
+  options: { forceRefresh?: boolean; providerIds?: string[] } = {},
+): Promise<void> {
+  const providerIds = (
+    options.providerIds && options.providerIds.length > 0
+      ? options.providerIds
+      : getConnectedRemoteProviderIds(state)
+  )
+    .map((providerId) => normalizeProviderId(providerId))
+    .filter((providerId) => providerId.length > 0);
+  if (providerIds.length === 0) {
+    state.providerModelHints = new Map();
+    return;
+  }
+
+  const modelService = (plugin as any)?.modelService;
+  const loadModels =
+    options.forceRefresh && typeof modelService?.refreshModels === "function"
+      ? () => modelService.refreshModels()
+      : typeof modelService?.getModels === "function"
+        ? () => modelService.getModels()
+        : null;
+  if (!loadModels) {
+    return;
+  }
+
+  try {
+    const models = await loadProviderModelsWithTimeout(loadModels);
+    const next = new Map(state.providerModelHints);
+    const connectedProviderIds = new Set(getConnectedRemoteProviderIds(state));
+    for (const providerId of Array.from(next.keys())) {
+      if (!connectedProviderIds.has(providerId)) {
+        next.delete(providerId);
+      }
+    }
+    for (const providerId of providerIds) {
+      const hint = pickProviderModelHint(providerId, Array.isArray(models) ? models : []);
+      if (hint) {
+        next.set(providerId, hint);
+      } else {
+        next.delete(providerId);
+      }
+    }
+    state.providerModelHints = next;
+  } catch {
+    // Provider status remains useful even when the model catalog is temporarily unavailable.
+  }
+}
+
+async function refreshProvidersAndModelHints(
+  state: TabState,
+  plugin: SystemSculptSettingTab["plugin"],
+  options: { forceModelRefresh?: boolean; providerIds?: string[] } = {},
+): Promise<void> {
+  await refreshProviderList(state, plugin);
+  if (!state.errorMessage) {
+    await refreshProviderModelHints(state, plugin, {
+      forceRefresh: options.forceModelRefresh,
+      providerIds: options.providerIds,
+    });
   }
 }
 
@@ -215,7 +377,96 @@ async function performProviderDisconnect(
       `Failed to disconnect ${label}: ${error instanceof Error ? error.message : String(error)}`,
     );
   } finally {
-    await refreshProviderList(state, plugin);
+    await refreshProvidersAndModelHints(state, plugin, {
+      forceModelRefresh: true,
+      providerIds: [provider],
+    });
+    state.actionRunning = false;
+    rerender();
+  }
+}
+
+function getProviderReadyText(label: string, hint: ProviderModelHint | undefined): string {
+  if (!hint) {
+    return `${label} is connected. Refresh models if new provider models do not appear yet.`;
+  }
+  if (hint.providerId === "xai" && hint.modelId === "xai@@grok-4.3") {
+    return "Grok 4.3 is ready in the model picker.";
+  }
+  return `${hint.modelName} is ready in the model picker.`;
+}
+
+async function openProviderModelInChat(
+  plugin: SystemSculptSettingTab["plugin"],
+  modelId: string,
+): Promise<void> {
+  await plugin.getSettingsManager().updateSettings({ selectedModelId: modelId });
+  const { ChatView } = await import("../views/chatview/ChatView");
+  const leaf = plugin.app.workspace.getLeaf("tab");
+  await leaf.setViewState({
+    type: CHAT_VIEW_TYPE,
+    state: {
+      chatId: "",
+      selectedModelId: modelId,
+      chatTitle: generateDefaultChatTitle(),
+    },
+  });
+  const view = new ChatView(leaf, plugin);
+  await leaf.open(view);
+  plugin.app.workspace.setActiveLeaf(leaf, { focus: true });
+}
+
+async function performUseProviderInChat(
+  state: TabState,
+  plugin: SystemSculptSettingTab["plugin"],
+  providerId: string,
+  label: string,
+  rerender: () => void,
+): Promise<void> {
+  const normalizedProvider = normalizeProviderId(providerId);
+  state.actionRunning = true;
+  rerender();
+  try {
+    await refreshProviderModelHints(state, plugin, {
+      forceRefresh: true,
+      providerIds: [normalizedProvider],
+    });
+    const hint = state.providerModelHints.get(normalizedProvider);
+    if (!hint) {
+      new Notice(`No ${label} models are available yet. Refresh provider status and try again.`);
+      return;
+    }
+    await openProviderModelInChat(plugin, hint.modelId);
+    new Notice(`Using ${hint.modelName} in Chat.`);
+  } catch (error) {
+    new Notice(
+      `Failed to open ${label} in Chat: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  } finally {
+    state.actionRunning = false;
+    rerender();
+  }
+}
+
+async function performRefreshProviderModels(
+  state: TabState,
+  plugin: SystemSculptSettingTab["plugin"],
+  providerId: string,
+  label: string,
+  rerender: () => void,
+): Promise<void> {
+  const normalizedProvider = normalizeProviderId(providerId);
+  state.actionRunning = true;
+  rerender();
+  try {
+    await refreshProviderModelHints(state, plugin, {
+      forceRefresh: true,
+      providerIds: [normalizedProvider],
+    });
+    if (!state.providerModelHints.has(normalizedProvider)) {
+      new Notice(`No ${label} models are available yet.`);
+    }
+  } finally {
     state.actionRunning = false;
     rerender();
   }
@@ -261,7 +512,9 @@ function renderProvidersList(
       .setDisabled(state.loading || state.actionRunning)
       .onClick(async () => {
         button.setDisabled(true);
-        await refreshProviderList(state, plugin);
+        await refreshProvidersAndModelHints(state, plugin, {
+          forceModelRefresh: true,
+        });
         rerender();
         button.setDisabled(false);
       });
@@ -306,6 +559,9 @@ function renderProviderRow(
   const connected = displayState.connected;
   const blocked = displayState.blocked;
   const localConfigured = hasConfiguredLocalProvider(record.provider, state.localProviderIds);
+  const normalizedProviderId = normalizeProviderId(record.provider);
+  const providerHint =
+    connected && !localProvider ? state.providerModelHints.get(normalizedProviderId) : undefined;
   const isExpanded =
     state.activeConnectProvider === record.provider;
 
@@ -383,6 +639,19 @@ function renderProviderRow(
       void performProviderDisconnect(state, plugin, record.provider, label, rerender);
     });
   } else if (connected) {
+    const useInChatBtn = actions.createEl("button", {
+      cls: "ss-provider-row__btn ss-provider-row__btn--connect",
+      text: providerHint ? "Use in Chat" : "Refresh models",
+    });
+    useInChatBtn.disabled = state.actionRunning;
+    useInChatBtn.addEventListener("click", () => {
+      if (providerHint) {
+        void performUseProviderInChat(state, plugin, record.provider, label, rerender);
+      } else {
+        void performRefreshProviderModels(state, plugin, record.provider, label, rerender);
+      }
+    });
+
     const disconnectBtn = actions.createEl("button", {
       cls: "ss-provider-row__btn ss-provider-row__btn--disconnect",
       text: "Disconnect",
@@ -413,6 +682,14 @@ function renderProviderRow(
         );
       }
       rerender();
+    });
+  }
+
+  if (connected && !localProvider) {
+    const readyEl = row.createDiv({ cls: "ss-provider-row__ready" });
+    readyEl.createDiv({
+      cls: "ss-provider-row__ready-text",
+      text: getProviderReadyText(label, providerHint),
     });
   }
 
@@ -662,7 +939,10 @@ function renderOAuthConnect(
       await modal.showSuccess();
       state.activeConnectProvider = null;
       state.activeConnectMethod = null;
-      await refreshProviderList(state, plugin);
+      await refreshProvidersAndModelHints(state, plugin, {
+        forceModelRefresh: true,
+        providerIds: [providerId],
+      });
     } catch (error) {
       modal.close();
       if (abortController.signal.aborted) return;
@@ -732,10 +1012,18 @@ function renderApiKeyConnect(
     try {
       const { setStudioPiProviderApiKey } = await loadStudioPiAuthStorageModule();
       await setStudioPiProviderApiKey(providerId, key, { plugin });
-      new Notice(`${label} API key saved.`);
       state.activeConnectProvider = null;
       state.activeConnectMethod = null;
-      await refreshProviderList(state, plugin);
+      await refreshProvidersAndModelHints(state, plugin, {
+        forceModelRefresh: true,
+        providerIds: [providerId],
+      });
+      const hint = state.providerModelHints.get(normalizeProviderId(providerId));
+      new Notice(
+        hint
+          ? `${label} API key saved. ${hint.modelName} is ready in Chat.`
+          : `${label} API key saved. Models will appear after refresh.`
+      );
     } catch (error) {
       new Notice(
         `Failed to save API key: ${error instanceof Error ? error.message : String(error)}`

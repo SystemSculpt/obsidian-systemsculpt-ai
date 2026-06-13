@@ -45,6 +45,14 @@ export const DEFAULT_PROVIDER_MODEL_PREFERENCES = new Map([
       "anthropic/claude-3.7-sonnet",
     ],
   ],
+  [
+    "xai",
+    [
+      "grok-4.3",
+      "xai@@grok-4.3",
+      "local-pi-xai@@grok-4.3",
+    ],
+  ],
 ]);
 
 function appendNestedModelSelectors(target, value) {

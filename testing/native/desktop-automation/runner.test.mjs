@@ -30,7 +30,7 @@ import {
   runReloadStressCase,
   runSetupBaselineCase,
 } from "./runner.mjs";
-import { findProviderModelOption } from "../shared/model-inventory.mjs";
+import { findProviderModelOption, resolveProviderModelPreferences } from "../shared/model-inventory.mjs";
 
 function buildHealthyStatus(startedAt, options = {}) {
   return {
@@ -362,6 +362,36 @@ test("findProviderModelOption can prefer a stable provider model by canonical su
       preferredModelIds: ["gpt-5.4-mini"],
     })?.value,
     "local-pi-openrouter@@openai/gpt-5.4-mini"
+  );
+});
+
+test("xAI provider model defaults prefer Grok 4.3 for release baselines", () => {
+  const inventory = {
+    options: [
+      {
+        value: "local-pi-xai@@grok-2",
+        label: "Grok 2",
+        providerAuthenticated: true,
+        providerId: "xai",
+        section: "local",
+      },
+      {
+        value: "local-pi-xai@@grok-4.3",
+        label: "Grok 4.3",
+        providerAuthenticated: true,
+        providerId: "xai",
+        section: "local",
+        piExecutionModelId: "grok-4.3",
+      },
+    ],
+  };
+
+  assert.equal(
+    findProviderModelOption(inventory, "xai", {
+      authenticated: true,
+      preferredModelIds: resolveProviderModelPreferences("xai"),
+    })?.value,
+    "local-pi-xai@@grok-4.3"
   );
 });
 

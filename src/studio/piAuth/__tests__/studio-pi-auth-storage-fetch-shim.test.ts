@@ -158,6 +158,61 @@ describe("StudioPiAuthStorage fetch shim integration", () => {
     });
   });
 
+  it("rewrites auth.json directly when saving API keys to bypass proper-lockfile silent writes", async () => {
+    const fsState = {
+      content: JSON.stringify({ anthropic: { type: "api_key", key: "sk-ant-old" } }, null, 2),
+      writes: [] as Array<{ path: string; content: string }>,
+    };
+
+    jest.doMock("fs", () => ({
+      existsSync: jest.fn((_path: string) => true),
+      readFileSync: jest.fn((_path: string, _encoding: string) => fsState.content),
+      writeFileSync: jest.fn((path: string, content: string) => {
+        fsState.writes.push({ path, content });
+        fsState.content = content;
+      }),
+      chmodSync: jest.fn(),
+      mkdirSync: jest.fn(),
+    }));
+
+    jest.doMock("../../../services/pi/PiSdkStoragePaths", () => ({
+      resolvePiAuthPath: jest.fn(() => "/fake/vault/.systemsculpt/pi-agent/auth.json"),
+    }));
+
+    const storageSet = jest.fn(() => {
+      // Simulate the SDK path updating in-memory state while the Electron
+      // file-backed write is not durable.
+    });
+    jest.doMock("../../../services/pi/PiSdkDesktopSupport", () => ({
+      createPiAuthStorage: jest.fn(() => ({ set: storageSet })),
+      withPiDesktopFetchShim: jest.fn(async (callback: () => Promise<unknown>) => await callback()),
+    }));
+
+    let setStudioPiProviderApiKey: typeof import("../StudioPiAuthStorage").setStudioPiProviderApiKey;
+    jest.isolateModules(() => {
+      ({ setStudioPiProviderApiKey } = require("../StudioPiAuthStorage"));
+    });
+
+    const updateSettings = jest.fn(async () => {});
+    await setStudioPiProviderApiKey!("xai", "xai-test-key", {
+      plugin: {
+        settings: { customProviders: [] },
+        getSettingsManager: () => ({ updateSettings }),
+      } as any,
+    });
+
+    expect(storageSet).toHaveBeenCalledWith("xai", {
+      type: "api_key",
+      key: "xai-test-key",
+    });
+    expect(fsState.writes).toHaveLength(1);
+    const parsed = JSON.parse(fsState.writes[0].content);
+    expect(parsed).toMatchObject({
+      anthropic: { type: "api_key", key: "sk-ant-old" },
+      xai: { type: "api_key", key: "xai-test-key" },
+    });
+  });
+
   it("persists provider API keys to plugin settings when Pi auth storage is unavailable", async () => {
     const updateSettings = jest.fn(async (patch: any) => {
       plugin.settings = {
