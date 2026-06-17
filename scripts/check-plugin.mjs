@@ -102,6 +102,10 @@ async function main() {
           'scripts/check-native-release-gates.test.mjs',
           'scripts/github-workflows.test.mjs',
           'testing/native/device/android/utils.test.mjs',
+          'testing/native/device/ios/canary-preflight.test.mjs',
+          'testing/native/device/ios/sanitize-canary-diagnostics.test.mjs',
+          'testing/native/runtime-smoke/cli.test.mjs',
+          'testing/native/shared/ios-device-selection.test.mjs',
           'testing/native/device/windows/bootstrap.test.mjs',
           'testing/native/device/windows/clean-install-parity.test.mjs',
           'testing/native/device/windows/interactive-task.test.mjs',
@@ -111,6 +115,12 @@ async function main() {
         ].join(' ')
     );
     results.push({ name: 'script-tests', ...scriptTests });
+
+    if (!fast) {
+      checks.push('integration');
+      const integration = run('npm run test:integration:ci');
+      results.push({ name: 'integration', ...integration });
+    }
 
     let tests;
     if (fast) {
@@ -150,6 +160,11 @@ async function main() {
       }
     } else if (r.name === 'script-tests') {
       console.error('[plugin] FAIL: Script-level tests failed');
+      if (verbose) {
+        console.error(r.stdout || r.stderr || '');
+      }
+    } else if (r.name === 'integration') {
+      console.error('[plugin] FAIL: Built-bundle integration tests failed');
       if (verbose) {
         console.error(r.stdout || r.stderr || '');
       }

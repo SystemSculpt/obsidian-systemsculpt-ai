@@ -3,6 +3,15 @@
 `testing/native/runtime-smoke/` is the shared real-runtime smoke harness for **mobile only**.
 
 Desktop moved to [desktop automation](../desktop-automation/README.md).
+Fast mobile startup coverage lives in the built-bundle integration suite:
+
+```bash
+npm run build
+npm run test:integration:ci
+```
+
+That contract starts the shipped bundle under an iPad-like runtime and catches
+desktop-only startup regressions before this real-device smoke harness runs.
 
 Entry point:
 
@@ -46,7 +55,8 @@ now forces a production bundle unless you explicitly pass `--skip-build`.
 npm run test:native:ios
 ```
 
-This uses the plugged-in iPhone/iPad plus the RemoteDebug iOS WebKit adapter.
+This uses the managed canary iPhone/iPad, or a local plugged-in device, plus the
+RemoteDebug iOS WebKit adapter.
 The harness will auto-start the adapter when needed, reload the synced plugin
 before the smoke pass, and then drive the real Obsidian runtime through the same
 shared cases as Android.
@@ -92,7 +102,9 @@ these are available:
 - `SYSTEMSCULPT_RUNTIME_SMOKE_LICENSE_KEY`
 - `SYSTEMSCULPT_E2E_LICENSE_KEY` in the repo environment, including `.env.local`
 
-If neither is present, hosted chat cases will run without smoke auth bootstrap.
+If neither is present, hosted chat cases run without smoke auth bootstrap unless
+the command passes `--require-hosted-auth`. The iOS release canary uses that
+flag so stale on-device auth cannot satisfy the release gate.
 
 ## Architecture
 

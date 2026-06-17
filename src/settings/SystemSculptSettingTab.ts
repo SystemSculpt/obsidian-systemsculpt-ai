@@ -285,7 +285,7 @@ export class SystemSculptSettingTab extends PluginSettingTab {
     });
 
     containerEl.createEl("p", {
-      text: "Manage your SystemSculpt account, workspace preferences, and vault integrations.",
+      text: "Manage all things SystemSculpt, workspace preferences, and vault integrations.",
       cls: "setting-item-description",
     });
 
