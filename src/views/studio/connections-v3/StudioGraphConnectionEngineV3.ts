@@ -130,12 +130,7 @@ export class StudioGraphConnectionEngineV3 {
   }
 
   beginConnection(fromNodeId: string, fromPortId: string): void {
-    const existing = this.portInteraction.getPendingConnectionSourceKey();
-    const nextKey = `${fromNodeId}:out:${fromPortId}`;
-    if (existing === nextKey) {
-      this.portInteraction.cancel();
-    }
-    this.host.requestRender();
+    this.portInteraction.arm(fromNodeId, fromPortId);
   }
 
   completeConnection(targetNodeId: string, targetPortId: string): void {
@@ -171,6 +166,7 @@ export class StudioGraphConnectionEngineV3 {
     );
     this.applyConnectedPortVisuals(project);
     this.portInteraction.applyActiveOutputClass();
+    this.portInteraction.reapplyPendingHighlights();
     this.renderer?.render();
   }
 

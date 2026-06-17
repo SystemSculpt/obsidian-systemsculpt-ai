@@ -39,6 +39,18 @@ type InternalDrag = ConnectionDragState & {
   sourceKey: string;
 };
 
+type InternalArmed = {
+  fromNodeId: string;
+  fromPortId: string;
+  sourceType: string;
+  candidates: SnapCandidate[];
+  compatiblePortKeys: Set<string>;
+  incompatiblePortKeys: Set<string>;
+  sourceKey: string;
+  lastClientX: number;
+  lastClientY: number;
+};
+
 function portKey(nodeId: string, direction: PortDirection, portId: string): string {
   return `${nodeId}:${direction}:${portId}`;
 }
@@ -46,6 +58,8 @@ function portKey(nodeId: string, direction: PortDirection, portId: string): stri
 export class StudioPortInteraction {
   private readonly ports = new Map<string, PortMapEntry>();
   private drag: InternalDrag | null = null;
+  private armed: InternalArmed | null = null;
+  private armedTeardown: (() => void) | null = null;
   private canvasEl: HTMLElement | null = null;
   private autoCreateHintTimer: number | null = null;
   private autoCreateHintVisible = false;
@@ -83,19 +97,28 @@ export class StudioPortInteraction {
   }
 
   getPendingConnectionSourceKey(): string | null {
-    return this.drag?.sourceKey ?? null;
+    return this.drag?.sourceKey ?? this.armed?.sourceKey ?? null;
   }
 
   isPendingConnectionSource(nodeId: string, portId: string): boolean {
-    if (!this.drag) return false;
-    return this.drag.fromNodeId === nodeId && this.drag.fromPortId === portId;
+    if (this.drag && this.drag.fromNodeId === nodeId && this.drag.fromPortId === portId) {
+      return true;
+    }
+    if (this.armed && this.armed.fromNodeId === nodeId && this.armed.fromPortId === portId) {
+      return true;
+    }
+    return false;
   }
 
   cancel(): void {
     this.teardownPointerListeners();
-    if (this.drag) {
+    this.armedTeardown?.();
+    this.armedTeardown = null;
+    const hadPending = Boolean(this.drag || this.armed);
+    this.drag = null;
+    this.armed = null;
+    if (hadPending) {
       this.store.setDragState(null);
-      this.drag = null;
       this.callbacks.onDragStateChange(null);
     }
     this.resetPortVisualState();
@@ -133,28 +156,8 @@ export class StudioPortInteraction {
     if (this.host.isBusy() || startEvent.button !== 0) return;
     startEvent.preventDefault();
 
-    const sourceType = this.host.getPortType(fromNodeId, "out", fromPortId) || "";
-    const candidates: SnapCandidate[] = [];
-    const compatible = new Set<string>();
-    const incompatible = new Set<string>();
-    for (const port of this.ports.values()) {
-      if (port.direction !== "in") continue;
-      const portType = this.host.getPortType(port.nodeId, "in", port.portId) || "";
-      const ok = sourceType && portType && this.host.portTypeCompatible(sourceType, portType);
-      const key = portKey(port.nodeId, "in", port.portId);
-      const center = this.portCenter(port.element);
-      if (center) {
-        candidates.push({
-          portKey: key,
-          nodeId: port.nodeId,
-          portId: port.portId,
-          center,
-          compatible: Boolean(ok),
-        });
-      }
-      if (ok) compatible.add(key);
-      else incompatible.add(key);
-    }
+    const { sourceType, candidates, compatible, incompatible } =
+      this.collectInputCandidates(fromNodeId, fromPortId);
 
     this.applyDragClasses(compatible, incompatible);
 
@@ -194,6 +197,8 @@ export class StudioPortInteraction {
       );
       if (!this.drag.active && moved > DRAG_ACTIVATION_PX) {
         this.drag.active = true;
+        this.cancelArmedOnly();
+        this.applyActiveOutputClass();
         this.callbacks.onDragStateChange(this.drag);
         this.scheduleAutoCreateHint();
       }
@@ -210,7 +215,12 @@ export class StudioPortInteraction {
       const finished = this.drag;
       const snap = this.store.getDragState()?.snapTarget || null;
       const shouldAutoCreate = this.autoCreateHintVisible;
-      this.suppressedOutputClickKey = finished.sourceKey;
+      // Only suppress the synthetic click that follows a REAL drag-release. A
+      // plain click (never activated) must fall through to beginConnection so
+      // click-to-connect can arm.
+      if (finished.active) {
+        this.suppressedOutputClickKey = finished.sourceKey;
+      }
 
       this.clearAutoCreateHintTimer();
       this.autoCreateHintVisible = false;
@@ -280,27 +290,13 @@ export class StudioPortInteraction {
   }
 
   private updateDragStoreSnapshot(): void {
-    if (!this.drag || !this.canvasEl) return;
-    const zoom = this.host.getGraphZoom() || 1;
-    const canvasRect = this.canvasEl.getBoundingClientRect();
-    const cursorWorld = {
-      x: (this.drag.lastClientX - canvasRect.left) / zoom,
-      y: (this.drag.lastClientY - canvasRect.top) / zoom,
-    };
-    const worldRadius = SNAP_RADIUS_SCREEN_PX / zoom;
-    const snap = resolveSnapTarget({
-      cursorWorld,
+    if (!this.drag) return;
+    const snap = this.writeSnapshot({
+      fromNodeId: this.drag.fromNodeId,
+      fromPortId: this.drag.fromPortId,
       candidates: this.drag.candidates,
-      radius: worldRadius,
-    });
-    const validity =
-      snap && snap.confidence >= 0.15 ? "valid" : snap ? "near" : "invalid";
-    this.store.setDragState({
-      source: { nodeId: this.drag.fromNodeId, portId: this.drag.fromPortId },
-      cursorWorld: snap?.magnetisedCursor ?? cursorWorld,
-      snapTarget: snap?.snapTarget ?? null,
-      snapConfidence: snap?.confidence ?? 0,
-      validity,
+      lastClientX: this.drag.lastClientX,
+      lastClientY: this.drag.lastClientY,
     });
     if (snap) {
       this.hideAutoCreateHint();
@@ -355,6 +351,71 @@ export class StudioPortInteraction {
     }
   }
 
+  private collectInputCandidates(
+    fromNodeId: string,
+    fromPortId: string
+  ): {
+    sourceType: string;
+    candidates: SnapCandidate[];
+    compatible: Set<string>;
+    incompatible: Set<string>;
+  } {
+    const sourceType = this.host.getPortType(fromNodeId, "out", fromPortId) || "";
+    const candidates: SnapCandidate[] = [];
+    const compatible = new Set<string>();
+    const incompatible = new Set<string>();
+    for (const port of this.ports.values()) {
+      if (port.direction !== "in") continue;
+      const portType = this.host.getPortType(port.nodeId, "in", port.portId) || "";
+      const ok = sourceType && portType && this.host.portTypeCompatible(sourceType, portType);
+      const key = portKey(port.nodeId, "in", port.portId);
+      const center = this.portCenter(port.element);
+      if (center) {
+        candidates.push({
+          portKey: key,
+          nodeId: port.nodeId,
+          portId: port.portId,
+          center,
+          compatible: Boolean(ok),
+        });
+      }
+      if (ok) compatible.add(key);
+      else incompatible.add(key);
+    }
+    return { sourceType, candidates, compatible, incompatible };
+  }
+
+  private writeSnapshot(args: {
+    fromNodeId: string;
+    fromPortId: string;
+    candidates: SnapCandidate[];
+    lastClientX: number;
+    lastClientY: number;
+  }): ReturnType<typeof resolveSnapTarget> {
+    if (!this.canvasEl) return null;
+    const zoom = this.host.getGraphZoom() || 1;
+    const canvasRect = this.canvasEl.getBoundingClientRect();
+    const cursorWorld = {
+      x: (args.lastClientX - canvasRect.left) / zoom,
+      y: (args.lastClientY - canvasRect.top) / zoom,
+    };
+    const worldRadius = SNAP_RADIUS_SCREEN_PX / zoom;
+    const snap = resolveSnapTarget({
+      cursorWorld,
+      candidates: args.candidates,
+      radius: worldRadius,
+    });
+    const validity = snap && snap.confidence >= 0.15 ? "valid" : snap ? "near" : "invalid";
+    this.store.setDragState({
+      source: { nodeId: args.fromNodeId, portId: args.fromPortId },
+      cursorWorld: snap?.magnetisedCursor ?? cursorWorld,
+      snapTarget: snap?.snapTarget ?? null,
+      snapConfidence: snap?.confidence ?? 0,
+      validity,
+    });
+    return snap;
+  }
+
   private portCenter(element: HTMLElement): { x: number; y: number } | null {
     if (!this.canvasEl) return null;
     const canvasRect = this.canvasEl.getBoundingClientRect();
@@ -366,11 +427,100 @@ export class StudioPortInteraction {
   }
 
   applyActiveOutputClass(): void {
+    const activeKey = this.drag?.sourceKey ?? this.armed?.sourceKey ?? null;
     for (const [key, port] of this.ports) {
       if (port.direction !== "out") continue;
-      const active = key === this.drag?.sourceKey;
-      port.element.classList.toggle("is-active", active);
+      port.element.classList.toggle("is-active", key === activeKey);
     }
+  }
+
+  arm(fromNodeId: string, fromPortId: string): void {
+    if (this.host.isBusy()) return;
+    const key = portKey(fromNodeId, "out", fromPortId);
+    // Clicking the already-armed output again cancels (toggle off).
+    if (this.armed?.sourceKey === key) {
+      this.cancel();
+      return;
+    }
+    // Re-arming (or arming over a stale drag) starts clean.
+    this.cancel();
+
+    const { sourceType, candidates, compatible, incompatible } =
+      this.collectInputCandidates(fromNodeId, fromPortId);
+    this.applyDragClasses(compatible, incompatible);
+
+    const start = this.sourcePinClientPoint(fromNodeId, fromPortId);
+    this.armed = {
+      fromNodeId,
+      fromPortId,
+      sourceType,
+      candidates,
+      compatiblePortKeys: compatible,
+      incompatiblePortKeys: incompatible,
+      sourceKey: key,
+      lastClientX: start.x,
+      lastClientY: start.y,
+    };
+
+    const onArmedMove = (event: PointerEvent) => {
+      if (!this.armed) return;
+      this.armed.lastClientX = event.clientX;
+      this.armed.lastClientY = event.clientY;
+      this.writeSnapshot({
+        fromNodeId: this.armed.fromNodeId,
+        fromPortId: this.armed.fromPortId,
+        candidates: this.armed.candidates,
+        lastClientX: event.clientX,
+        lastClientY: event.clientY,
+      });
+    };
+    const onArmedKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && this.armed) {
+        event.preventDefault();
+        this.cancel();
+      }
+    };
+    window.addEventListener("pointermove", onArmedMove);
+    window.addEventListener("keydown", onArmedKey);
+    this.armedTeardown = () => {
+      window.removeEventListener("pointermove", onArmedMove);
+      window.removeEventListener("keydown", onArmedKey);
+    };
+
+    this.writeSnapshot({
+      fromNodeId,
+      fromPortId,
+      candidates,
+      lastClientX: start.x,
+      lastClientY: start.y,
+    });
+    this.applyActiveOutputClass();
+    this.callbacks.onDragStateChange(null);
+  }
+
+  private cancelArmedOnly(): void {
+    if (!this.armed) return;
+    this.armedTeardown?.();
+    this.armedTeardown = null;
+    this.armed = null;
+  }
+
+  private sourcePinClientPoint(
+    nodeId: string,
+    portId: string
+  ): { x: number; y: number } {
+    const entry = this.ports.get(portKey(nodeId, "out", portId));
+    if (entry) {
+      const rect = entry.element.getBoundingClientRect();
+      return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    }
+    return { x: 0, y: 0 };
+  }
+
+  reapplyPendingHighlights(): void {
+    const active = this.drag ?? this.armed;
+    if (!active) return;
+    this.applyDragClasses(active.compatiblePortKeys, active.incompatiblePortKeys);
   }
 
   noticeInvalidConnection(message: string): void {
