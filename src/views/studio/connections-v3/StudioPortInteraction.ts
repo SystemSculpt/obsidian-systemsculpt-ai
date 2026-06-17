@@ -106,6 +106,15 @@ export class StudioPortInteraction {
     }
   }
 
+  private clearDragState(): void {
+    this.resetPortVisualState();
+    if (this.drag) {
+      this.drag = null;
+      this.store.setDragState(null);
+      this.callbacks.onDragStateChange(null);
+    }
+  }
+
   consumeSuppressedOutputClick(nodeId: string, portId: string): boolean {
     const key = portKey(nodeId, "out", portId);
     if (this.suppressedOutputClickKey !== key) {
@@ -206,18 +215,26 @@ export class StudioPortInteraction {
       this.clearAutoCreateHintTimer();
       this.autoCreateHintVisible = false;
       this.callbacks.onAutoCreateHint(false, null, 0, 0);
-      this.resetPortVisualState();
-      this.drag = null;
-      this.store.setDragState(null);
-      this.callbacks.onDragStateChange(null);
 
+      // A plain click (no drag past the activation threshold) commits nothing.
       if (!finished.active) {
+        this.clearDragState();
         return;
       }
+
+      // A real drag landed on a snap target: commit BEFORE clearing this.drag,
+      // because commitConnectionFromSnap reads the source via
+      // getPendingConnectionSourceKey() -> this.drag.sourceKey. The commit path
+      // calls cancel() internally, which clears this.drag for us.
       if (snap) {
         this.callbacks.onConnectionCommit(snap);
+        if (this.drag === finished) {
+          this.clearDragState();
+        }
         return;
       }
+
+      // Released over empty space with the auto-create hint showing.
       if (shouldAutoCreate) {
         const handled = this.callbacks.onAutoCreateRelease({
           fromNodeId: finished.fromNodeId,
@@ -226,8 +243,15 @@ export class StudioPortInteraction {
           clientX: event.clientX,
           clientY: event.clientY,
         });
-        if (handled) return;
+        if (handled) {
+          if (this.drag === finished) {
+            this.clearDragState();
+          }
+          return;
+        }
       }
+
+      this.clearDragState();
     };
 
     this.pointerListenerTeardown = () => {
