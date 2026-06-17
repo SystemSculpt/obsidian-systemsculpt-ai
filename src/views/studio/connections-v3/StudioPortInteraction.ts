@@ -85,6 +85,14 @@ export class StudioPortInteraction {
     this.ports.set(portKey(nodeId, direction, portId), { nodeId, portId, direction, element });
   }
 
+  getPortElement(
+    nodeId: string,
+    direction: PortDirection,
+    portId: string
+  ): HTMLElement | null {
+    return this.ports.get(portKey(nodeId, direction, portId))?.element ?? null;
+  }
+
   clearPortElements(): void {
     this.resetPortVisualState();
     this.ports.clear();

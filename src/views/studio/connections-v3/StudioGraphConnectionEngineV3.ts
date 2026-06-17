@@ -1,6 +1,10 @@
 import { Notice } from "obsidian";
-import type { StudioProjectV1, StudioRunEvent } from "../../../studio/types";
+import type { StudioNodeInstance, StudioProjectV1, StudioRunEvent } from "../../../studio/types";
 import { randomId } from "../../../studio/utils";
+import {
+  resolveStudioPortAnchorWorldPoint,
+  type StudioPortLocalOffset,
+} from "./StudioPortAnchorGeometry";
 import type {
   ConnectionAutoCreateRequest,
   PendingConnection,
@@ -9,7 +13,7 @@ import type {
 import { StudioSimpleContextMenuOverlay } from "../StudioSimpleContextMenuOverlay";
 import { StudioLinkStore, type PortAnchor } from "./StudioLinkStore";
 import { StudioLinkFlowBridge } from "./StudioLinkFlowBridge";
-import { StudioLinkRenderer } from "./StudioLinkRenderer";
+import { StudioEdgeRenderer } from "./StudioEdgeRenderer";
 import { StudioLinkAnimator } from "./StudioLinkAnimator";
 import { StudioPortInteraction } from "./StudioPortInteraction";
 
@@ -24,7 +28,7 @@ export class StudioGraphConnectionEngineV3 {
   private readonly flowBridge = new StudioLinkFlowBridge(this.store);
   private readonly edgeContextMenu = new StudioSimpleContextMenuOverlay();
   private readonly portInteraction: StudioPortInteraction;
-  private renderer: StudioLinkRenderer | null = null;
+  private renderer: StudioEdgeRenderer | null = null;
   private animator: StudioLinkAnimator | null = null;
   private graphCanvasEl: HTMLElement | null = null;
   private graphEdgesLayerEl: SVGSVGElement | null = null;
@@ -32,6 +36,12 @@ export class StudioGraphConnectionEngineV3 {
   private boundEdgeLayer: SVGSVGElement | null = null;
   private edgeLayerHandler: ((event: MouseEvent) => void) | null = null;
   private storeUnsub: (() => void) | null = null;
+  private edgeLayerResizeObserver: ResizeObserver | null = null;
+  // Last good per-port pin offset (card-local world px), keyed
+  // `nodeId:direction:portId`. Persists across renders so a render while the
+  // leaf is hidden/unlaid-out still resolves precise anchors from the last
+  // measurement instead of dropping the edge.
+  private readonly portOffsetCache = new Map<string, StudioPortLocalOffset>();
 
   constructor(private readonly host: Host) {
     this.portInteraction = new StudioPortInteraction(host, this.store, {
@@ -58,10 +68,12 @@ export class StudioGraphConnectionEngineV3 {
     this.portInteraction.cancel();
     this.flowBridge.resetAll();
     this.store.clear();
+    this.portOffsetCache.clear();
     this.closeEdgeContextMenu();
   }
 
   clearRenderBindings(): void {
+    this.disconnectEdgeLayerResizeObserver();
     this.graphCanvasEl = null;
     this.graphEdgesLayerEl = null;
     this.portInteraction.clearRenderBindings();
@@ -79,6 +91,12 @@ export class StudioGraphConnectionEngineV3 {
 
   onNodeRemoved(nodeId: string): void {
     this.store.removeEdgesForNode(nodeId);
+    const prefix = `${nodeId}:`;
+    for (const key of this.portOffsetCache.keys()) {
+      if (key.startsWith(prefix)) {
+        this.portOffsetCache.delete(key);
+      }
+    }
     const pending = this.portInteraction.getPendingConnectionSourceKey();
     if (pending && pending.startsWith(`${nodeId}:out:`)) {
       this.portInteraction.cancel();
@@ -93,7 +111,7 @@ export class StudioGraphConnectionEngineV3 {
   registerEdgesLayerElement(layer: SVGSVGElement): void {
     this.graphEdgesLayerEl = layer;
     this.detachAnimator();
-    this.renderer = new StudioLinkRenderer({
+    this.renderer = new StudioEdgeRenderer({
       store: this.store,
       layer,
       resolvePortAnchorPoint: (anchor, direction) => this.resolvePortAnchorPoint(anchor, direction),
@@ -107,6 +125,31 @@ export class StudioGraphConnectionEngineV3 {
     });
     this.animator.attach();
     this.bindEdgeLayerListeners(layer);
+    this.observeCanvasForEdgeReresolve();
+  }
+
+  // The edge layer resolves port anchors via getBoundingClientRect at render
+  // time. When the Studio leaf renders while hidden/unlaid-out (plugin reload,
+  // tab restore), those rects are zero, so resolvePortAnchorPoint bails and no
+  // lines are drawn even though the ports (dots) show as connected. Re-render
+  // once the canvas gains a real box so anchors resolve against actual geometry.
+  private observeCanvasForEdgeReresolve(): void {
+    this.disconnectEdgeLayerResizeObserver();
+    const canvas = this.graphCanvasEl;
+    if (!canvas || typeof ResizeObserver === "undefined") {
+      return;
+    }
+    this.edgeLayerResizeObserver = new ResizeObserver(() => {
+      this.renderer?.render();
+    });
+    this.edgeLayerResizeObserver.observe(canvas);
+  }
+
+  private disconnectEdgeLayerResizeObserver(): void {
+    if (this.edgeLayerResizeObserver) {
+      this.edgeLayerResizeObserver.disconnect();
+      this.edgeLayerResizeObserver = null;
+    }
   }
 
   clearPortElements(): void {
@@ -339,21 +382,64 @@ export class StudioGraphConnectionEngineV3 {
     this.autoCreateHintEl.style.top = `${Math.round(anchorY)}px`;
   }
 
+  // Resolve a port anchor in canvas WORLD coordinates, primarily from the data
+  // model (node.position + width) — the same coordinates the visible cards are
+  // positioned with — so edges never depend on whether a pin can be measured at
+  // render time. DOM measurement only refines the per-port vertical offset and
+  // is cached, so a render while hidden/unlaid-out still draws precise edges.
   private resolvePortAnchorPoint(
     anchor: PortAnchor,
     direction: PortDirection
   ): { x: number; y: number } | null {
-    const element = this.findPortElement(anchor.nodeId, direction, anchor.portId);
-    if (!element || !this.graphCanvasEl) return null;
-    const canvasRect = this.graphCanvasEl.getBoundingClientRect();
-    const portRect = element.getBoundingClientRect();
+    const node = this.findNodeById(anchor.nodeId);
+    if (!node) return null;
+    const measuredOffset = this.resolvePortLocalOffset(anchor.nodeId, direction, anchor.portId);
+    return resolveStudioPortAnchorWorldPoint({ node, direction, measuredOffset });
+  }
+
+  private findNodeById(nodeId: string): StudioNodeInstance | null {
+    const project = this.host.getCurrentProject();
+    if (!project) return null;
+    return project.graph.nodes.find((node) => node.id === nodeId) ?? null;
+  }
+
+  private resolvePortLocalOffset(
+    nodeId: string,
+    direction: PortDirection,
+    portId: string
+  ): StudioPortLocalOffset | null {
+    const key = `${nodeId}:${direction}:${portId}`;
+    const measured = this.measurePortLocalOffset(nodeId, direction, portId);
+    if (measured) {
+      this.portOffsetCache.set(key, measured);
+      return measured;
+    }
+    return this.portOffsetCache.get(key) ?? null;
+  }
+
+  // Measure a pin's centre offset relative to its own card, in world px. Returns
+  // null when the pin/card isn't found or isn't laid out (rect collapsed), so
+  // the caller falls back to the cached or constant offset. Reads the pin from
+  // the element registry first (robust), then the selector as a fallback.
+  private measurePortLocalOffset(
+    nodeId: string,
+    direction: PortDirection,
+    portId: string
+  ): StudioPortLocalOffset | null {
+    const pin =
+      this.portInteraction.getPortElement(nodeId, direction, portId) ??
+      this.findPortElement(nodeId, direction, portId);
+    if (!pin) return null;
+    const card = pin.closest(".ss-studio-node-card") as HTMLElement | null;
+    if (!card) return null;
+    const cardRect = card.getBoundingClientRect();
+    if (cardRect.width === 0 && cardRect.height === 0) return null;
+    const pinRect = pin.getBoundingClientRect();
     const zoom = this.host.getGraphZoom() || 1;
-    const x =
-      direction === "out"
-        ? (portRect.left - canvasRect.left + portRect.width) / zoom
-        : (portRect.left - canvasRect.left) / zoom;
-    const y = (portRect.top - canvasRect.top + portRect.height / 2) / zoom;
-    return { x, y };
+    return {
+      dx: (pinRect.left + pinRect.width / 2 - cardRect.left) / zoom,
+      dy: (pinRect.top + pinRect.height / 2 - cardRect.top) / zoom,
+    };
   }
 
   private findPortElement(

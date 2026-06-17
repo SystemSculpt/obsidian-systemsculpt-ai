@@ -183,7 +183,7 @@ export function renderStudioGraphWorkspace(
     }
     if (
       target.closest(
-        ".ss-studio-node-card, .ss-studio-port-pin, .ss-studio-link-path, .ss-studio-link-preview, .ss-studio-node-inspector, .ss-studio-node-context-menu, .ss-studio-simple-context-menu, .ss-studio-group-frame, .ss-studio-group-tag, .ss-studio-group-tag-input"
+        ".ss-studio-node-card, .ss-studio-port-pin, .ss-studio-edge-hit, .ss-studio-edge-line, .ss-studio-edge-preview, .ss-studio-node-inspector, .ss-studio-node-context-menu, .ss-studio-simple-context-menu, .ss-studio-group-frame, .ss-studio-group-tag, .ss-studio-group-tag-input"
       )
     ) {
       return;
@@ -198,7 +198,7 @@ export function renderStudioGraphWorkspace(
     }
     if (
       target.closest(
-        ".ss-studio-node-card, .ss-studio-port-pin, .ss-studio-link-path, .ss-studio-link-preview, .ss-studio-node-inspector, .ss-studio-node-context-menu, .ss-studio-simple-context-menu, .ss-studio-group-frame, .ss-studio-group-tag, .ss-studio-group-tag-input"
+        ".ss-studio-node-card, .ss-studio-port-pin, .ss-studio-edge-hit, .ss-studio-edge-line, .ss-studio-edge-preview, .ss-studio-node-inspector, .ss-studio-node-context-menu, .ss-studio-simple-context-menu, .ss-studio-group-frame, .ss-studio-group-tag, .ss-studio-group-tag-input"
       )
     ) {
       return;

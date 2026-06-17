@@ -1011,86 +1011,27 @@ select.ss-pi-wizard__select { width: 100%; }
     0 4px 10px color-mix(in srgb, var(--ss-studio-shadow) 24%, transparent);
 }
 
-.ss-studio-link-group .ss-studio-link-path {
-  fill: none;
-  stroke: var(--ss-studio-link-stroke);
-  stroke-width: 1.5;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  pointer-events: none;
-  opacity: 0.65;
+/* Studio edges (v2 renderer). Base visuals (stroke/width/opacity/fill) are set
+   INLINE on the elements by StudioEdgeRenderer so lines always render regardless
+   of theme or viewport state classes. These rules only add hover + flow polish
+   on the fresh `ss-studio-edge-*` class names, and intentionally do NOT include
+   any visibility/display state rules (the legacy `.ss-studio-link-*` rules did,
+   which is what hid the old lines). Overrides use !important to beat the inline
+   base styles. */
+.ss-studio-edge-group .ss-studio-edge-line {
   transition: stroke 0.12s ease, stroke-width 0.12s ease, opacity 0.12s ease;
 }
 
-.ss-studio-link-group .ss-studio-link-hit {
-  fill: none;
-  stroke: transparent;
-  stroke-width: 14;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  pointer-events: stroke;
-  cursor: pointer;
+.ss-studio-edge-group:has(.ss-studio-edge-hit:hover) .ss-studio-edge-line,
+.ss-studio-edge-group:has(.ss-studio-edge-hit:hover) .ss-studio-edge-arrow {
+  stroke: var(--ss-studio-link-stroke-hover, var(--interactive-accent, #5b8def)) !important;
+  stroke-width: 2.4 !important;
+  opacity: 1 !important;
 }
 
-.ss-studio-link-group .ss-studio-link-hit:hover + .ss-studio-link-path,
-.ss-studio-link-group:has(.ss-studio-link-hit:hover) .ss-studio-link-path {
-  stroke: var(--ss-studio-link-stroke-hover);
-  stroke-width: 2;
-  opacity: 1;
-}
-
-.ss-studio-link-group .ss-studio-link-chevron {
-  fill: none;
-  stroke: var(--ss-studio-link-stroke);
-  stroke-width: 1.5;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  opacity: 0.65;
-  pointer-events: none;
-}
-
-.ss-studio-link-group[data-status="flowing"] .ss-studio-link-path {
-  stroke: var(--ss-studio-link-flow-a);
+.ss-studio-edge-group[data-status="flowing"] .ss-studio-edge-line {
   stroke-dasharray: 10 8;
   stroke-dashoffset: calc(var(--ss-link-flow-phase, 0) * -18px);
-  opacity: 1;
-  animation: none;
-}
-
-.ss-studio-link-group[data-status="completed"] .ss-studio-link-path {
-  stroke: var(--ss-studio-link-flow-b);
-  opacity: 0.95;
-}
-
-.ss-studio-link-group[data-status="failed"] .ss-studio-link-path,
-.ss-studio-link-group[data-status="failed"] .ss-studio-link-chevron {
-  stroke: var(--ss-studio-link-failed);
-  opacity: 1;
-}
-
-.ss-studio-link-preview {
-  fill: none;
-  stroke-width: 2.2;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  opacity: 0.95;
-  pointer-events: none;
-  stroke: var(--ss-studio-link-flow-a);
-}
-
-.ss-studio-link-preview[data-validity="valid"] {
-  stroke: var(--interactive-accent);
-  stroke-dasharray: none;
-}
-
-.ss-studio-link-preview[data-validity="near"] {
-  stroke: color-mix(in srgb, var(--interactive-accent) 60%, var(--ss-studio-link-stroke));
-  stroke-dasharray: 6 6;
-}
-
-.ss-studio-link-preview[data-validity="invalid"] {
-  stroke: color-mix(in srgb, var(--ss-studio-link-stroke) 70%, transparent);
-  stroke-dasharray: 8 6;
 }
 
 .ss-studio-connection-autocreate-hint {
@@ -1109,8 +1050,7 @@ select.ss-pi-wizard__select { width: 100%; }
   padding: var(--ss-space-6) var(--ss-space-sm);
 }
 
-.ss-studio-simple-context-menu,
-.ss-studio-link-context-menu {
+.ss-studio-simple-context-menu {
   --ss-studio-simple-context-menu-scale: 1;
   position: absolute;
   z-index: 16;
@@ -1150,8 +1090,7 @@ select.ss-pi-wizard__select { width: 100%; }
   gap: var(--ss-space-xs);
 }
 
-.ss-studio-simple-context-menu-item,
-.ss-studio-link-context-menu-item {
+.ss-studio-simple-context-menu-item {
   appearance: none;
   border: 1px solid var(--ss-studio-border);
   border-radius: var(--ss-radius-lg);
@@ -1183,9 +1122,7 @@ select.ss-pi-wizard__select { width: 100%; }
 }
 
 .ss-studio-simple-context-menu-item:hover,
-.ss-studio-simple-context-menu-item:focus-visible,
-.ss-studio-link-context-menu-item:hover,
-.ss-studio-link-context-menu-item:focus-visible {
+.ss-studio-simple-context-menu-item:focus-visible {
   border-color: var(--ss-studio-border);
   background: var(--background-secondary);
   outline: none;
@@ -1446,16 +1383,9 @@ select.ss-pi-wizard__select { width: 100%; }
 }
 
 .ss-studio-graph-viewport.is-interacting .ss-studio-group-frame,
-.ss-studio-graph-viewport.is-interacting .ss-studio-link-path,
-.ss-studio-graph-viewport.is-interacting .ss-studio-link-preview,
 .ss-studio-graph-viewport.is-interacting .ss-studio-node-card {
   transition: none;
   animation-play-state: paused;
-}
-
-.ss-studio-graph-viewport.is-interacting .ss-studio-link-path,
-.ss-studio-graph-viewport.is-interacting .ss-studio-link-preview {
-  pointer-events: none;
 }
 
 /* Drop the halo only during active node drag — per-frame filter repaint
@@ -1475,8 +1405,6 @@ select.ss-pi-wizard__select { width: 100%; }
 .ss-studio-graph-viewport.is-zoom-overview .ss-studio-group-frame,
 .ss-studio-graph-viewport.is-zoom-overview .ss-studio-group-tag,
 .ss-studio-graph-viewport.is-zoom-overview .ss-studio-group-tag-input,
-.ss-studio-graph-viewport.is-zoom-overview .ss-studio-link-path,
-.ss-studio-graph-viewport.is-zoom-overview .ss-studio-link-preview,
 .ss-studio-graph-viewport.is-zoom-overview .ss-studio-node-card,
 .ss-studio-graph-viewport.is-zoom-overview .ss-studio-port-pin {
   pointer-events: none;
@@ -1496,11 +1424,6 @@ select.ss-pi-wizard__select { width: 100%; }
   contain-intrinsic-size: 280px 200px;
 }
 
-.ss-studio-graph-viewport.is-zoomed-micro .ss-studio-link-path,
-.ss-studio-graph-viewport.is-zoomed-micro .ss-studio-link-preview {
-  display: none;
-}
-
 .ss-studio-graph-viewport.is-zoomed-micro .ss-studio-group-frame {
   border-style: solid;
   opacity: 0.4;
@@ -1518,10 +1441,6 @@ select.ss-pi-wizard__select { width: 100%; }
 .ss-studio-graph-viewport.is-zoomed-extreme .ss-studio-node-output-preview,
 .ss-studio-graph-viewport.is-zoomed-extreme .ss-studio-node-inline-config-panel {
   display: none;
-}
-
-.ss-studio-graph-viewport.is-zoomed-extreme .ss-studio-link-path {
-  stroke-width: 1px;
 }
 
 @keyframes ss-studio-pending-pulse {
@@ -1828,10 +1747,6 @@ select.ss-pi-wizard__select { width: 100%; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .ss-studio-link-group[data-status="flowing"] .ss-studio-link-path {
-    stroke-dasharray: none;
-    stroke-dashoffset: 0;
-  }
   .ss-studio-port-pin.is-drop-target.is-input {
     animation: none;
   }
@@ -4139,23 +4054,15 @@ select.ss-pi-wizard__select { width: 100%; }
 
 .ss-studio-graph-viewport.is-scrolling .ss-studio-node-context-menu,
 .ss-studio-graph-viewport.is-scrolling .ss-studio-simple-context-menu,
-.ss-studio-graph-viewport.is-scrolling .ss-studio-link-context-menu,
 .ss-studio-graph-viewport.is-scrolling .ss-studio-node-inspector {
   backdrop-filter: none;
   transition: none;
 }
 
 .ss-studio-graph-viewport.is-scrolling .ss-studio-node-card,
-.ss-studio-graph-viewport.is-scrolling .ss-studio-link-path,
-.ss-studio-graph-viewport.is-scrolling .ss-studio-link-preview,
 .ss-studio-graph-viewport.is-scrolling .ss-studio-group-frame {
   transition: none;
   animation-play-state: paused;
-}
-
-.ss-studio-graph-viewport.is-scrolling .ss-studio-link-path,
-.ss-studio-graph-viewport.is-scrolling .ss-studio-link-preview {
-  pointer-events: none;
 }
 
 .ss-studio-graph-viewport.is-scrolling .ss-studio-node-card {
