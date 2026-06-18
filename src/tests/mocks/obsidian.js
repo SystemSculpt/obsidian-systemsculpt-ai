@@ -292,16 +292,10 @@ class App {
       trigger: jest.fn(),
       getActiveViewOfType: jest.fn(() => null),
       getActiveFile: jest.fn(() => null),
-      getLeaf: jest.fn(() => new WorkspaceLeaf(this)),
-      setActiveLeaf: jest.fn(),
       getLeavesOfType: jest.fn(() => []),
-      iterateAllLeaves: jest.fn(),
       onLayoutReady: jest.fn((cb) => cb()),
     };
     this.metadataCache = {
-      on: jest.fn(() => ({ unload: jest.fn() })),
-      offref: jest.fn(),
-      getCache: jest.fn(() => null),
       getFileCache: jest.fn(() => null),
       getFirstLinkpathDest: jest.fn(() => null),
     };

@@ -13,18 +13,6 @@ It is built around one idea: **test the plugin inside the actual Obsidian runtim
 
 ## Primary command matrix
 
-### Mobile contract
-
-```bash
-npm run build
-npm run test:integration:ci
-```
-
-This is the fast CI gate for mobile startup. It loads the built plugin artifact
-under an iPad-like Obsidian runtime and verifies that desktop-only services do
-not activate on mobile. It complements the real-device smoke harness; it does
-not replace it.
-
 ### Desktop
 
 ```bash
@@ -57,8 +45,6 @@ npm run test:native:android:logcat -- --serial emulator-5554
 ### iOS / iPad
 
 ```bash
-npm run check:release:ios-canary
-npm run test:native:ios:canary:preflight
 npm run test:native:ios
 npm run test:native:ios:debug:open -- --sync --open-xcode
 npm run test:native:ios:inspect:plugin -- --strict
@@ -107,9 +93,7 @@ Use `--case <name>` on any native smoke command when iterating on a specific fai
 When desktop and mobile parity matters, use the native surface that matches the platform:
 
 - desktop: bridge-based no-focus automation
-- mobile contract: built-bundle startup under a mobile runtime in normal CI
-- mobile real runtime: inspectable Android/iOS runtime smoke
-- iOS truth source: managed real-device canary, not an ad hoc release laptop
+- mobile: inspectable runtime smoke
 
 Desktop means attach-only to an already-running Obsidian vault. The harness does not launch or foreground the app.
 Keep the synced bundle current in the background with `./run.sh --headless` when you want continuous live validation without terminal noise.
