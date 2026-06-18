@@ -41,6 +41,7 @@ Options:
   --web-fetch-url <url>           URL for the web-fetch hosted service smoke. Default: https://www.wikipedia.org/
   --youtube-url <url>             URL for the YouTube transcript hosted service smoke. Default: https://www.youtube.com/watch?v=nDLb8_wgX50
   --json-output <path>            Write the final JSON report to this path as well as stdout
+  --require-hosted-auth           Fail unless hosted auth is bootstrapped from smoke-test secrets
   --help, -h                      Show this help.
 `);
 }
@@ -71,6 +72,7 @@ export function parseArgs(argv) {
     webFetchUrl: DEFAULT_WEB_FETCH_URL,
     youtubeUrl: DEFAULT_YOUTUBE_URL,
     jsonOutput: "",
+    requireHostedAuth: false,
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -169,6 +171,10 @@ export function parseArgs(argv) {
     if (arg === "--json-output") {
       options.jsonOutput = String(argv[index + 1] || "").trim();
       index += 1;
+      continue;
+    }
+    if (arg === "--require-hosted-auth") {
+      options.requireHostedAuth = true;
       continue;
     }
     if (arg === "--help" || arg === "-h") {

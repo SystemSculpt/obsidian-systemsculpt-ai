@@ -394,8 +394,8 @@ export function buildApiKeyHint(
   const normalized = normalizeProviderId(providerId);
   const override = PROVIDER_AUTH_HINT_OVERRIDES[normalized];
   if (override) return override;
-  if (envVar) return `Set the ${envVar} environment variable, or paste it below to save it in ~/.pi/agent/auth.json.`;
-  return "Paste your API key below to save it for Pi.";
+  if (envVar) return `Set ${envVar} before launching Obsidian, or paste it below to save it for this vault.`;
+  return "Paste your API key below to save it for this vault.";
 }
 
 function normalizeEndpoint(endpoint: string): string {

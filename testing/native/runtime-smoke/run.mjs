@@ -230,13 +230,20 @@ async function main() {
   const preparedRuntime = await ensureJsonUrl(options);
   const runtime = await connectToRuntime(preparedRuntime.jsonUrl, options.targetHint);
   const iterations = [];
+  let hostedAuthBootstrapped = false;
 
   try {
     await prepareRuntime(runtime, options);
     const authState = await bootstrapHostedAuth(runtime);
     if (authState) {
+      hostedAuthBootstrapped = true;
       console.log(
         `[runtime-smoke] Bootstrapped hosted auth (${authState.licenseKeyLength} chars, ${authState.serverUrl})`
+      );
+    }
+    if (options.requireHostedAuth && !hostedAuthBootstrapped) {
+      throw new Error(
+        "Hosted auth bootstrap is required for this smoke run. Set SYSTEMSCULPT_RUNTIME_SMOKE_LICENSE_KEY or SYSTEMSCULPT_E2E_LICENSE_KEY."
       );
     }
     console.log(`[runtime-smoke] Seeding fixtures into ${options.fixtureDir}`);
@@ -283,6 +290,7 @@ async function main() {
     recordAudioPath: options.recordAudioPath || `${options.fixtureDir}/audio-phrases.m4a`,
     webFetchUrl: options.webFetchUrl,
     youtubeUrl: options.youtubeUrl,
+    hostedAuthBootstrapped,
     repeat: options.repeat,
     iterations,
   };

@@ -10,6 +10,8 @@ import { inspectReleaseSurfaces } from "./check-release-surfaces.mjs";
 
 const cwd = process.cwd();
 const args = process.argv.slice(2);
+const DEFAULT_RELEASE_GITHUB_CHECK_WAIT_TIMEOUT_MS = 45 * 60 * 1000;
+const DEFAULT_RELEASE_GITHUB_CHECK_POLL_INTERVAL_MS = 30 * 1000;
 const GITHUB_ENV_TOKEN_KEYS = ["GITHUB_TOKEN", "GH_TOKEN"];
 const GITHUB_AUTH_FALLBACK_PATTERNS = [
   /GH013/i,
@@ -27,7 +29,11 @@ function parseArgs(argv) {
     dryRun: false,
     skipChecks: false,
     allowDirty: false,
+    requireIos: false,
+    requireIosCanary: true,
+    allowMissingIosCanaryReason: "",
     notesFile: null,
+    help: false,
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -46,6 +52,29 @@ function parseArgs(argv) {
     }
     if (arg === "--allow-dirty") {
       options.allowDirty = true;
+      continue;
+    }
+    if (arg === "--require-ios") {
+      options.requireIos = true;
+      continue;
+    }
+    if (arg === "--require-ios-canary") {
+      options.requireIosCanary = true;
+      continue;
+    }
+    if (arg === "--allow-missing-ios-canary") {
+      const value = argv[i + 1];
+      const normalizedValue = String(value || "").trim();
+      if (!normalizedValue || normalizedValue.startsWith("-")) {
+        fail("Missing value for --allow-missing-ios-canary.");
+      }
+      options.requireIosCanary = true;
+      options.allowMissingIosCanaryReason = normalizedValue;
+      i += 1;
+      continue;
+    }
+    if (arg === "--help" || arg === "-h") {
+      options.help = true;
       continue;
     }
     if (arg === "--bump") {
@@ -92,6 +121,26 @@ function parseArgs(argv) {
   }
 
   return options;
+}
+
+function usage() {
+  console.log(`Usage: node scripts/release-plugin.mjs [options]
+
+Prepare, validate, tag, push, and draft a GitHub release for the SystemSculpt
+Obsidian plugin. Public actions happen only after local release validation.
+
+Options:
+  --dry-run                         Preview the release plan and notes only
+  --draft                           Keep compatibility with draft-release callers
+  --skip-checks                     Skip local validation gates
+  --allow-dirty                     Allow a dirty working tree
+  --bump <major|minor|patch>        Force a version bump
+  --version <x.y.z>                 Force an exact version
+  --notes-file <path>               Authored public release notes
+  --require-ios                     Require local real-device iOS validation
+  --require-ios-canary              Require GitHub check "ios-canary-release" (default)
+  --allow-missing-ios-canary <why>  Explicitly document a temporary canary exception
+  --help, -h                        Show this help.`);
 }
 
 function buildCommandEnv(envOverrides = {}) {
@@ -905,6 +954,10 @@ function getLastTag() {
   return result.status === 0 ? result.stdout : "";
 }
 
+function getHeadSha() {
+  return runCapture("git", ["rev-parse", "HEAD"]).stdout.trim();
+}
+
 function getCommitsSince(lastTag) {
   const argsForLog = lastTag
     ? ["log", `${lastTag}..HEAD`, "--pretty=format:%h%x09%s"]
@@ -1038,6 +1091,7 @@ function printPlan({
   commitCount,
   dryRun,
   githubAuthStrategyName,
+  nativeValidationPlan,
 }) {
   console.log("\n[release] Plan");
   console.log(`[release] - Current version: ${currentVersion}`);
@@ -1046,7 +1100,7 @@ function printPlan({
   console.log(`[release] - Commits included: ${commitCount}`);
   console.log("[release] - Local GitHub draft release via gh: yes");
   console.log(`[release] - GitHub auth mode: ${githubAuthStrategyName}`);
-  console.log("[release] - Native validation: required macOS + Windows + Android; iOS when available");
+  console.log(`[release] - Native validation: ${nativeValidationPlan}`);
   console.log(`[release] - Dry run: ${dryRun ? "yes" : "no"}`);
 }
 
@@ -1069,7 +1123,57 @@ function writeNotesFile(version, commits, customNotesFile) {
   return notesPath;
 }
 
-function runChecks(skipChecks) {
+function buildNativeReleaseCheckArgs(options = {}) {
+  const nativeArgs = ["run", "check:release:native"];
+  const passthrough = [];
+  const gatePhase = options.gatePhase || "all";
+  const includeLocalOptions = gatePhase !== "hosted";
+  const includeHostedOptions = gatePhase !== "local";
+  const requireIosCanary = options.requireIosCanary !== false;
+  if (gatePhase === "local") {
+    passthrough.push("--only-local");
+  }
+  if (gatePhase === "hosted") {
+    passthrough.push("--only-hosted");
+  }
+  if (includeLocalOptions && options.requireIos) {
+    passthrough.push("--require-ios");
+  }
+  if (includeHostedOptions && (requireIosCanary || options.allowMissingIosCanaryReason)) {
+    passthrough.push("--require-ios-canary");
+  }
+  if (includeHostedOptions && options.allowMissingIosCanaryReason) {
+    passthrough.push("--allow-missing-ios-canary", options.allowMissingIosCanaryReason);
+  }
+  if (includeHostedOptions && options.githubRepo) {
+    passthrough.push("--github-repo", options.githubRepo);
+  }
+  if (includeHostedOptions && options.githubRef) {
+    passthrough.push("--github-ref", options.githubRef);
+  }
+  if (includeHostedOptions && options.githubWaitTimeoutMs) {
+    passthrough.push("--github-wait-timeout-ms", String(options.githubWaitTimeoutMs));
+  }
+  if (includeHostedOptions && options.githubPollIntervalMs) {
+    passthrough.push("--github-poll-interval-ms", String(options.githubPollIntervalMs));
+  }
+
+  return passthrough.length > 0 ? [...nativeArgs, "--", ...passthrough] : nativeArgs;
+}
+
+function describeNativeValidationPlan(options = {}) {
+  const localIos = options.requireIos ? "local iOS required" : "local iOS when available";
+  const requireIosCanary = options.requireIosCanary !== false;
+  const canary = options.allowMissingIosCanaryReason
+    ? `iOS canary explicit override (${options.allowMissingIosCanaryReason})`
+    : requireIosCanary
+      ? "iOS canary required"
+      : "iOS canary not required by this invocation";
+
+  return `local macOS + Android before push; hosted Windows + iOS canary after push; ${localIos}; ${canary}`;
+}
+
+function runLocalReleaseChecks(skipChecks) {
   if (skipChecks) {
     logStep("Skipping checks (--skip-checks).");
     return;
@@ -1083,9 +1187,19 @@ function runChecks(skipChecks) {
 
   logStep("Running npm run build");
   run("npm", ["run", "build"]);
+}
 
-  logStep("Running npm run check:release:native");
-  run("npm", ["run", "check:release:native"]);
+function runNativeReleaseChecks(skipChecks, options = {}, { envOverrides = {} } = {}) {
+  if (skipChecks) {
+    return;
+  }
+
+  const nativeReleaseCheckArgs = buildNativeReleaseCheckArgs(options);
+  logStep(`Running ${formatCommandLabel("npm", nativeReleaseCheckArgs)}`);
+  // Native gates shell out to `gh` for hosted checks, so they must inherit the
+  // same GitHub auth environment the release flow resolved (e.g. dropping a
+  // weak GITHUB_TOKEN in favor of stored gh auth).
+  run("npm", nativeReleaseCheckArgs, { envOverrides });
 }
 
 function ensureReleaseAssets() {
@@ -1134,6 +1248,10 @@ function verifyDraftRelease(version, githubAuthStrategy) {
 
 function main() {
   const options = parseArgs(args);
+  if (options.help) {
+    usage();
+    return;
+  }
 
   const repoRoot = getRepoRoot();
   if (repoRoot !== cwd) {
@@ -1208,6 +1326,7 @@ function main() {
     commitCount: commits.length,
     dryRun: options.dryRun,
     githubAuthStrategyName: githubAuthStrategy.name,
+    nativeValidationPlan: describeNativeValidationPlan(options),
   });
 
   ensureAuthoredReleaseNotesFile(options, newVersion);
@@ -1218,10 +1337,6 @@ function main() {
     logStep("Dry run complete. No files changed.");
     return;
   }
-
-  runChecks(options.skipChecks);
-  const releaseAssetFiles = ensureReleaseAssets();
-  logStep(`Verified local release assets (${releaseAssetFiles.length} files).`);
 
   if (usePreBumpedMetadata) {
     logStep(`Version files already point at ${newVersion}; skipping metadata rewrite and release commit.`);
@@ -1241,6 +1356,10 @@ function main() {
     writeJson(versionsPath, versions);
     updateReadmeVersion(readmePath, newVersion);
   }
+
+  runLocalReleaseChecks(options.skipChecks);
+  const releaseAssetFiles = ensureReleaseAssets();
+  logStep(`Verified local release assets (${releaseAssetFiles.length} files).`);
 
   const releaseSurfaceCheck = inspectReleaseSurfaces({
     root: cwd,
@@ -1262,11 +1381,35 @@ function main() {
     run("git", ["commit", "-m", `release: ${newVersion}`]);
   }
 
-  logStep(`Creating git tag ${newVersion}`);
-  run("git", ["tag", "-a", newVersion, "-m", newVersion]);
+  const releaseSha = getHeadSha();
+  logStep(`Release commit SHA: ${releaseSha}`);
+
+  runNativeReleaseChecks(
+    options.skipChecks,
+    {
+      ...options,
+      gatePhase: "local",
+    },
+    { envOverrides: githubAuthStrategy.envOverrides },
+  );
 
   logStep("Pushing main");
   runWithGitHubAuthFallback("git", ["push", "origin", "main"], githubAuthStrategy);
+
+  runNativeReleaseChecks(
+    options.skipChecks,
+    {
+      ...options,
+      gatePhase: "hosted",
+      githubRef: releaseSha,
+      githubWaitTimeoutMs: DEFAULT_RELEASE_GITHUB_CHECK_WAIT_TIMEOUT_MS,
+      githubPollIntervalMs: DEFAULT_RELEASE_GITHUB_CHECK_POLL_INTERVAL_MS,
+    },
+    { envOverrides: githubAuthStrategy.envOverrides },
+  );
+
+  logStep(`Creating git tag ${newVersion} on ${releaseSha}`);
+  run("git", ["tag", "-a", newVersion, "-m", newVersion, releaseSha]);
 
   logStep(`Pushing tag ${newVersion}`);
   runWithGitHubAuthFallback("git", ["push", "origin", newVersion], githubAuthStrategy);
@@ -1285,8 +1428,12 @@ if (isDirectExecution) {
 }
 
 export {
+  buildNativeReleaseCheckArgs,
+  describeNativeValidationPlan,
+  getHeadSha,
   hasGitHubEnvTokens,
   normalizeReleaseNotesMarkdown,
+  parseArgs,
   parseGitHubAuthStatus,
   resolveGitHubReleaseAuthStrategy,
   resolveReleaseVersionPlan,

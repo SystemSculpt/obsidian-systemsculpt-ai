@@ -960,6 +960,10 @@ export default class SystemSculptPlugin extends Plugin {
         if (this.isUnloading) {
           return;
         }
+        if (!PlatformContext.get().supportsDesktopOnlyFeatures()) {
+          tracer.markMilestone("file-context-menu-skipped-mobile");
+          return;
+        }
         try {
           logger.debug("Starting file context menu service after critical initialization", {
             source: "SystemSculptPlugin",

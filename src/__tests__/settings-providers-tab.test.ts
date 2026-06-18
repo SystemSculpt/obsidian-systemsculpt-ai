@@ -378,6 +378,11 @@ describe("Providers tab provider states", () => {
     connectButton?.click();
     await Promise.resolve();
 
+    expect(container.textContent).toContain(
+      "Set XAI_API_KEY before launching Obsidian, or paste it below to save it for this vault."
+    );
+    expect(container.textContent).not.toContain("~/.pi/agent/auth.json");
+
     const input = container.querySelector<HTMLInputElement>(".ss-provider-connect-input");
     const saveButton = Array.from(container.querySelectorAll("button")).find(
       (button) => button.textContent?.trim() === "Save"

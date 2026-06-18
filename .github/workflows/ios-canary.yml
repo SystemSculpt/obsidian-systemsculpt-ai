@@ -1,0 +1,125 @@
+name: iOS Canary
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      smoke_case:
+        description: "Mobile smoke case profile"
+        required: false
+        default: "all"
+  schedule:
+    - cron: "17 10 * * *"
+
+concurrency:
+  group: ios-canary-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  ios-canary:
+    name: "${{ github.event_name == 'push' && 'ios-canary-release' || 'ios-canary-ad-hoc' }}"
+    runs-on: [self-hosted, macOS, ios-canary]
+    timeout-minutes: 35
+    env:
+      SYSTEMSCULPT_RUNTIME_SMOKE_LICENSE_KEY: ${{ secrets.SYSTEMSCULPT_E2E_LICENSE_KEY }}
+      SYSTEMSCULPT_RUNTIME_SMOKE_SERVER_URL: ${{ secrets.SYSTEMSCULPT_RUNTIME_SMOKE_SERVER_URL }}
+      SYSTEMSCULPT_IOS_SYNC_CONFIG_B64: ${{ secrets.SYSTEMSCULPT_IOS_SYNC_CONFIG_B64 }}
+      SMOKE_CASE: ${{ github.event.inputs.smoke_case || 'all' }}
+
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Resolve iOS canary workspace path
+        run: |
+          set -euo pipefail
+          echo "IOS_CANARY_DIR=${RUNNER_TEMP}/systemsculpt-ios-canary/${{ github.run_id }}-${{ github.run_attempt }}" >> "${GITHUB_ENV}"
+
+      - name: Use Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "24.x"
+          cache: "npm"
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Build plugin
+        run: npm run build
+
+      - name: Prepare iOS canary workspace
+        run: |
+          set -euo pipefail
+          rm -rf "${RUNNER_TEMP}/systemsculpt-ios-canary"
+          mkdir -p "${IOS_CANARY_DIR}"
+
+      - name: Require iOS canary secrets
+        run: |
+          set -euo pipefail
+          missing=0
+          if [ -z "${SYSTEMSCULPT_IOS_SYNC_CONFIG_B64:-}" ]; then
+            echo "SYSTEMSCULPT_IOS_SYNC_CONFIG_B64 is required for the iOS canary runner."
+            missing=1
+          fi
+          if [ -z "${SYSTEMSCULPT_RUNTIME_SMOKE_LICENSE_KEY:-}" ]; then
+            echo "SYSTEMSCULPT_E2E_LICENSE_KEY is required so iOS runtime smoke can bootstrap hosted auth."
+            missing=1
+          fi
+          if [ "$missing" -ne 0 ]; then
+            exit 1
+          fi
+
+      - name: Verify iOS canary host
+        run: |
+          set -euo pipefail
+          config_path="${IOS_CANARY_DIR}/systemsculpt-sync.ios.json"
+          raw_path="${IOS_CANARY_DIR}/preflight.raw.json"
+          cleanup() { rm -f "${config_path}" "${raw_path}"; }
+          trap cleanup EXIT
+          printf "%s" "${SYSTEMSCULPT_IOS_SYNC_CONFIG_B64}" | base64 --decode > "${config_path}"
+          chmod 600 "${config_path}"
+          npm --silent run test:native:ios:canary:preflight -- --config "${config_path}" --json > "${raw_path}"
+          node testing/native/device/ios/sanitize-canary-diagnostics.mjs --preflight "${raw_path}" --output "${IOS_CANARY_DIR}/preflight.json"
+          cat "${IOS_CANARY_DIR}/preflight.json"
+
+      - name: Sync plugin and relaunch Obsidian
+        run: |
+          set -euo pipefail
+          config_path="${IOS_CANARY_DIR}/systemsculpt-sync.ios.json"
+          cleanup() { rm -f "${config_path}"; }
+          trap cleanup EXIT
+          printf "%s" "${SYSTEMSCULPT_IOS_SYNC_CONFIG_B64}" | base64 --decode > "${config_path}"
+          chmod 600 "${config_path}"
+          npm run test:native:ios:debug:open -- --config "${config_path}" --sync --skip-open-apps
+
+      - name: Inspect plugin state
+        run: npm run test:native:ios:inspect:plugin -- --strict
+
+      - name: Run iOS runtime smoke
+        run: |
+          set -euo pipefail
+          raw_path="${IOS_CANARY_DIR}/runtime-smoke.raw.json"
+          cleanup() { rm -f "${raw_path}"; }
+          trap cleanup EXIT
+          npm run test:native:ios -- --case "${SMOKE_CASE}" --require-hosted-auth --json-output "${raw_path}"
+          node testing/native/device/ios/sanitize-canary-diagnostics.mjs --runtime "${raw_path}" --output "${IOS_CANARY_DIR}/runtime-smoke.json"
+          cat "${IOS_CANARY_DIR}/runtime-smoke.json"
+
+      - name: Upload iOS canary diagnostics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ios-canary-diagnostics
+          path: |
+            ${{ env.IOS_CANARY_DIR }}/preflight.json
+            ${{ env.IOS_CANARY_DIR }}/runtime-smoke.json
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Remove iOS canary temp files
+        if: always()
+        run: rm -rf "${IOS_CANARY_DIR}"

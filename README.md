@@ -103,18 +103,25 @@ Desktop validation is attach-only to an already-open Obsidian vault. Keep live s
 
 ```bash
 npm run check:release:windows         # require the GitHub Windows E2E check on the current commit
+npm run check:release:ios-canary      # require the GitHub iOS canary check on the current commit
+npm run test:native:ios:canary:preflight # verify the local/self-hosted iOS canary host
 npm run check:release:windows:local   # optional maintained Windows host/dev helper
 npm run check:release:native          # required native release matrix
+npm run check:release:native -- --only-local  # local native gates before public release actions
+npm run check:release:native -- --only-hosted --github-ref <sha> # hosted gates on the release SHA
 npm run check:release-surfaces -- --version <version> --require-notes
 npm run release:plugin                  # auto bump (major/minor/patch from commits)
 npm run release:plugin -- --dry-run    # preview next version + notes only
+npm run release:plugin -- --help       # show release flags and iOS canary options
 npm run release:plugin -- --bump patch # force a specific bump
+npm run release:plugin -- --require-ios-canary # explicit no-op reminder; iOS canary is required by default
+npm run release:plugin -- --allow-missing-ios-canary "runner not provisioned yet" # explicit temporary canary exception
 ```
 
-Release automation now runs fully on your local machine: it validates the plugin, builds the release bundle, commits the version bump, pushes `main` and the tag, and creates a draft GitHub release with `gh`.
+Release automation now runs fully on your local machine: it prepares release metadata, validates the plugin, builds the release bundle, commits the release metadata, runs local native gates, pushes the release commit, verifies hosted checks on that exact commit SHA, then pushes the tag and creates a draft GitHub release with `gh`.
 Before it tags anything, the release script now runs a safety preflight that blocks tracked local-only files, unignored local-only files that should probably go into `.gitignore`, hardcoded local paths, hardcoded desktop vault selectors, and secret-looking tokens.
 If `GITHUB_TOKEN` or `GH_TOKEN` is present but weaker than your stored `gh` login, the release script now automatically falls back to the stored auth for push and draft-release steps.
-The native release matrix is now explicit instead of implicit: macOS desktop baselines, the GitHub Windows E2E check, and Android runtime smoke must all pass before release creation can continue. The Windows E2E check runs a fresh Obsidian install, clean-install parity, and desktop baselines on `windows-latest` for the exact commit being released. iOS runtime smoke is included automatically when a paired physical device is available on the host and is otherwise skipped honestly.
+The release path now includes the built-bundle mobile startup contract through `npm run check:plugin`. The native release matrix is explicit instead of implicit: local macOS desktop baselines and Android runtime smoke must pass before the release commit is pushed, then the GitHub Windows E2E check and GitHub iOS canary check must pass on that exact pushed SHA before any tag or draft release is created. The Windows E2E check runs a fresh Obsidian install, clean-install parity, and desktop baselines on `windows-2025-vs2026` for the exact commit being released. The iOS canary check runs real App Store Obsidian on a paired physical iPhone or iPad through the self-hosted `ios-canary` runner. Local iOS runtime smoke is included automatically in the local gate phase when a paired physical device is available on the release host and is otherwise skipped honestly. Use `--allow-missing-ios-canary "<reason>"` only for a named temporary exception.
 Use `npm run check:release:windows:local` only when you want the optional Windows-only dev helper on a maintained Windows host before waiting on the canonical GitHub check.
 
 The old tag-triggered GitHub Actions release workflow is retired. Treat `npm run release:plugin` as the canonical publish path for this repo.
