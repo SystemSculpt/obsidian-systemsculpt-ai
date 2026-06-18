@@ -39,7 +39,7 @@ describe("ImageGenerationModelCatalog", () => {
     const text = formatCuratedImageModelOptionText(model!);
     expect(text).toContain("OpenAI GPT-5 Image Mini");
     expect(text).not.toContain("openai/gpt-5-image-mini");
-    expect(text).toContain("$0.02");
+    expect(text).toContain("$0.03");
     expect(text).toContain("cr/img");
   });
 

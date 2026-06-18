@@ -314,8 +314,8 @@ describe("StudioApiExecutionAdapter", () => {
       expect.any(Object)
     );
     expect(imageClient.createGenerationJob).toHaveBeenCalledWith(
-      expect.not.objectContaining({
-        model: expect.anything(),
+      expect.objectContaining({
+        model: "openai/gpt-5-image-mini",
       }),
       expect.any(Object)
     );

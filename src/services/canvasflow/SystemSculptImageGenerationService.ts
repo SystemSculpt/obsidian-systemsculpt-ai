@@ -87,10 +87,12 @@ export type SystemSculptPrepareInputImageUploadsResponse = {
 
 export type SystemSculptCreateGenerationJobRequest = {
   prompt: string;
+  model?: string;
   input_images?: SystemSculptImageInput[];
   options?: {
     count?: number;
     aspect_ratio?: string;
+    image_size?: string;
     seed?: number;
   };
 };
@@ -946,6 +948,11 @@ export class SystemSculptImageGenerationService {
       input_images: request.input_images || [],
     };
 
+    const modelId = typeof request.model === "string" ? request.model.trim() : "";
+    if (modelId) {
+      payload.model = modelId;
+    }
+
     if (request.options) {
       const optionsPayload: Record<string, unknown> = {};
       if (typeof request.options.count === "number" && Number.isFinite(request.options.count)) {
@@ -953,6 +960,9 @@ export class SystemSculptImageGenerationService {
       }
       if (typeof request.options.aspect_ratio === "string" && request.options.aspect_ratio.trim()) {
         optionsPayload.aspect_ratio = request.options.aspect_ratio.trim();
+      }
+      if (typeof request.options.image_size === "string" && request.options.image_size.trim()) {
+        optionsPayload.image_size = request.options.image_size.trim();
       }
       if (typeof request.options.seed === "number" && Number.isFinite(request.options.seed)) {
         optionsPayload.seed = Math.max(0, Math.floor(request.options.seed));
