@@ -45,6 +45,20 @@ describe("resolveStudioDynamicSelectOptions (image models)", () => {
     expect(values).toContain("stability/sdxl");
   });
 
+  it("omits models the synced catalog marks as non-generating", async () => {
+    const options = await resolveStudioDynamicSelectOptions({
+      plugin: fakePlugin([
+        { id: "dead/model", name: "Dead Model", provider: "X", supports_generation: false },
+        { id: "live/model", name: "Live Model", provider: "X", supports_generation: true },
+      ]),
+      source: "studio.systemsculpt_image_models",
+    });
+
+    const values = options.map((option) => option.value);
+    expect(values).toContain("live/model");
+    expect(values).not.toContain("dead/model");
+  });
+
   it("returns an empty list for unrecognized sources", async () => {
     const options = await resolveStudioDynamicSelectOptions({
       plugin: fakePlugin(),

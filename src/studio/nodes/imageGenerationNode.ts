@@ -214,14 +214,16 @@ export const imageGenerationNode: StudioNodeDefinition = {
         options: IMAGE_SIZE_OPTIONS,
       },
       {
+        // Text (not number) so an empty value stays empty: the inline number
+        // editor coerces blanks to its min (0), which would silently pin a fixed
+        // seed of 0. execute() parses this string and treats blank/non-numeric as
+        // "random".
         key: "seed",
         label: "Seed",
-        type: "number",
+        type: "text",
         required: false,
-        min: 0,
-        integer: true,
         placeholder: "Random",
-        description: "Fix a seed for reproducible results. Leave blank for random.",
+        description: "Whole number for reproducible results. Leave blank for random.",
       },
     ],
     allowUnknownKeys: true,

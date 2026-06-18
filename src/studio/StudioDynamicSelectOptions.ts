@@ -86,6 +86,11 @@ function resolveStudioImageModelOptions(
   const groups = getCuratedImageGenerationModelGroups(readCachedServerImageModels(plugin));
   for (const group of groups) {
     for (const model of group.models) {
+      // Skip models the synced catalog explicitly marks as non-generating, so the
+      // picker never offers a model the backend would reject at generation time.
+      if (model.supportsGeneration === false) {
+        continue;
+      }
       const id = normalizeText(model.id);
       // The managed engine is already represented by the "SystemSculpt Default" entry.
       if (!id || id.toLowerCase().startsWith("systemsculpt/managed")) {

@@ -180,6 +180,20 @@ function migrateImageGenerationNodes(
     if (typeof nextConfig.imageSize !== "string") {
       nextConfig.imageSize = "";
     }
+    // Older projects could save count 5-8 under the previous schema (max 8). The
+    // new max is 4, and config validation rejects out-of-range values before the
+    // node's runtime clamp runs, so normalize legacy counts here or the flow
+    // would fail to compile instead of being capped.
+    const countValue = nextConfig.count;
+    const countNumeric =
+      typeof countValue === "number"
+        ? countValue
+        : typeof countValue === "string"
+          ? Number(countValue.trim())
+          : Number.NaN;
+    if (Number.isFinite(countNumeric) && countNumeric > 4) {
+      nextConfig.count = 4;
+    }
 
     if (JSON.stringify(nextConfig) !== JSON.stringify(currentConfig)) {
       changed = true;

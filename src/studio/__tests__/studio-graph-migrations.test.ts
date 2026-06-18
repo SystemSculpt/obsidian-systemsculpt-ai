@@ -547,6 +547,32 @@ describe("migrateStudioProjectToPathOnlyPorts", () => {
     ).toBe(true);
   });
 
+  it("clamps legacy image counts above the new maximum to 4", () => {
+    const project = baseProject();
+    project.graph.nodes.push({
+      id: "image",
+      kind: "studio.image_generation",
+      version: "1.0.0",
+      title: "Image",
+      position: { x: 0, y: 0 },
+      config: {
+        count: 8,
+        aspectRatio: "16:9",
+      },
+    });
+
+    const migrated = migrateStudioProjectToPathOnlyPorts(project);
+    expect(migrated.changed).toBe(true);
+
+    const imageNode = migrated.project.graph.nodes.find((node) => node.id === "image");
+    expect(imageNode?.config).toMatchObject({
+      count: 4,
+      aspectRatio: "16:9",
+      modelId: "",
+      imageSize: "",
+    });
+  });
+
   it("leaves image nodes that already declare model levers unchanged", () => {
     const project = baseProject();
     project.graph.nodes.push({
