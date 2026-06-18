@@ -5,8 +5,8 @@ import { resolveSystemSculptApiBaseUrl } from "../utils/urlHelpers";
 import {
   SystemSculptImageGenerationService,
   type SystemSculptImageInput,
-} from "../services/canvasflow/SystemSculptImageGenerationService";
-import { resolveSystemSculptImageAspectRatio } from "../services/canvasflow/SystemSculptImageAspectRatio";
+} from "../services/images/SystemSculptImageGenerationService";
+import { resolveSystemSculptImageAspectRatio } from "../services/images/SystemSculptImageAspectRatio";
 import type {
   StudioApiAdapter,
   StudioImageGenerationRequest,

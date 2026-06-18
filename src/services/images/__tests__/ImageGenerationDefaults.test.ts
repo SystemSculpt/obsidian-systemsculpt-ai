@@ -1,11 +1,11 @@
 import {
-  __resetCanvasFlowPromptDefaultsRuntimeForTests,
-  getCanvasFlowLastUsedState,
-  queueCanvasFlowLastUsedPatch,
-  resolveCanvasFlowPromptDefaults,
-} from "../CanvasFlowPromptDefaults";
+  __resetImageGenerationDefaultsRuntimeForTests,
+  getImageGenerationLastUsedState,
+  queueImageGenerationLastUsedPatch,
+  resolveImageGenerationDefaults,
+} from "../ImageGenerationDefaults";
 
-describe("CanvasFlowPromptDefaults", () => {
+describe("ImageGenerationDefaults", () => {
   const buildSettings = (
     overrides: Partial<{
       imageGenerationDefaultModelId: string;
@@ -22,11 +22,11 @@ describe("CanvasFlowPromptDefaults", () => {
   });
 
   beforeEach(() => {
-    __resetCanvasFlowPromptDefaultsRuntimeForTests();
+    __resetImageGenerationDefaultsRuntimeForTests();
   });
 
   it("resolves defaults from current behavior when no last-used values exist", () => {
-    const result = resolveCanvasFlowPromptDefaults({
+    const result = resolveImageGenerationDefaults({
       settings: buildSettings(),
       source: "command",
       serverModels: [
@@ -44,7 +44,7 @@ describe("CanvasFlowPromptDefaults", () => {
   });
 
   it("supports partial per-field last-used inheritance", () => {
-    const result = resolveCanvasFlowPromptDefaults({
+    const result = resolveImageGenerationDefaults({
       settings: buildSettings({
         imageGenerationDefaultModelId: "openai/gpt-5-image-mini",
         imageGenerationLastUsedModelId: "openai/gpt-5-image",
@@ -67,7 +67,7 @@ describe("CanvasFlowPromptDefaults", () => {
   });
 
   it("keeps nano image-node fallback to match_input_image when there is no aspect history", () => {
-    const result = resolveCanvasFlowPromptDefaults({
+    const result = resolveImageGenerationDefaults({
       settings: buildSettings({
         imageGenerationDefaultModelId: "google/nano-banana-pro",
         imageGenerationLastUsedModelId: "",
@@ -81,7 +81,7 @@ describe("CanvasFlowPromptDefaults", () => {
   });
 
   it("uses last-used aspect ratio for nano image-node creation when available", () => {
-    const result = resolveCanvasFlowPromptDefaults({
+    const result = resolveImageGenerationDefaults({
       settings: buildSettings({
         imageGenerationDefaultModelId: "google/nano-banana-pro",
         imageGenerationLastUsedAspectRatio: "9:16",
@@ -93,7 +93,7 @@ describe("CanvasFlowPromptDefaults", () => {
   });
 
   it("clamps stored image count into the supported range", () => {
-    const state = getCanvasFlowLastUsedState(
+    const state = getImageGenerationLastUsedState(
       buildSettings({
         imageGenerationLastUsedCount: 99,
       })
@@ -113,13 +113,13 @@ describe("CanvasFlowPromptDefaults", () => {
       }),
     } as any;
 
-    const persistPromise = queueCanvasFlowLastUsedPatch(plugin, {
+    const persistPromise = queueImageGenerationLastUsedPatch(plugin, {
       modelId: "openai/gpt-5-image",
       imageCount: 3,
       aspectRatio: "16:9",
     });
 
-    const runtimeState = getCanvasFlowLastUsedState(settings);
+    const runtimeState = getImageGenerationLastUsedState(settings);
     expect(runtimeState.modelId).toBe("openai/gpt-5-image");
     expect(runtimeState.imageCount).toBe(3);
     expect(runtimeState.aspectRatio).toBe("16:9");
