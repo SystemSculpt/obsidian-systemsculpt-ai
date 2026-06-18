@@ -69,7 +69,8 @@ export type StudioNodeConfigSelectPresentation =
 export type StudioNodeConfigDynamicOptionsSource =
   | "studio.local_text_models"
   | "studio.systemsculpt_text_models"
-  | "studio.pi_text_models";
+  | "studio.pi_text_models"
+  | "studio.systemsculpt_image_models";
 export type StudioNodeConfigFieldVisibilityRule = {
   key: string;
   equals: StudioPrimitiveValue | StudioPrimitiveValue[];
@@ -285,6 +286,8 @@ export type StudioImageGenerationRequest = {
   modelId?: string;
   count?: number;
   aspectRatio?: string;
+  imageSize?: string;
+  seed?: number;
   inputImages?: StudioAssetRef[];
   runId: string;
   projectPath: string;

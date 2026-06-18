@@ -7,6 +7,7 @@ const PROMPT_TEMPLATE_INLINE_MIGRATION_ID = "studio.inline-prompt-template.v1";
 const RESEND_TO_HTTP_REQUEST_MIGRATION_ID = "studio.resend-http-request.v1";
 const NOTE_NODE_CANONICAL_MIGRATION_ID = "studio.note-canonical-config.v1";
 const PI_TEXT_NODE_MODEL_MIGRATION_ID = "studio.pi-text-model-selector.v1";
+const IMAGE_NODE_LEVERS_MIGRATION_ID = "studio.image-node-levers.v1";
 const RESEND_DEFAULT_BASE_URL = "https://api.resend.com";
 const RESEND_DEFAULT_MAX_RETRIES = 3;
 
@@ -138,6 +139,47 @@ function migrateTextGenerationNodes(
     };
     delete nextConfig.sourceMode;
     delete nextConfig.localModelId;
+
+    if (JSON.stringify(nextConfig) !== JSON.stringify(currentConfig)) {
+      changed = true;
+      return {
+        ...node,
+        config: nextConfig,
+      };
+    }
+
+    return node;
+  });
+
+  return {
+    nodes: nextNodes,
+    changed,
+  };
+}
+
+function migrateImageGenerationNodes(
+  nodes: StudioProjectV1["graph"]["nodes"]
+): {
+  nodes: StudioProjectV1["graph"]["nodes"];
+  changed: boolean;
+} {
+  let changed = false;
+  const nextNodes = nodes.map((node) => {
+    if (node.kind !== "studio.image_generation") {
+      return node;
+    }
+
+    const currentConfig = (node.config || {}) as Record<string, StudioJsonValue>;
+    const nextConfig: Record<string, StudioJsonValue> = { ...currentConfig };
+    // Backfill the model + resolution levers as explicit defaults so the new
+    // controls render with a known selection ("" => SystemSculpt managed default).
+    // Seed is intentionally left absent, which the node treats as "random".
+    if (typeof nextConfig.modelId !== "string") {
+      nextConfig.modelId = "";
+    }
+    if (typeof nextConfig.imageSize !== "string") {
+      nextConfig.imageSize = "";
+    }
 
     if (JSON.stringify(nextConfig) !== JSON.stringify(currentConfig)) {
       changed = true;
@@ -505,6 +547,12 @@ export function migrateStudioProjectToPathOnlyPorts(project: StudioProjectV1): {
     nodes = textGenerationMigration.nodes;
   }
 
+  const imageGenerationMigration = migrateImageGenerationNodes(nodes);
+  if (imageGenerationMigration.changed) {
+    changed = true;
+    nodes = imageGenerationMigration.nodes;
+  }
+
   let entryNodeIds = project.graph.entryNodeIds;
   let groups = project.graph.groups;
   const promptTemplateMigration = migratePromptTemplateNodes(nodes, edges, entryNodeIds, groups);
@@ -549,6 +597,12 @@ export function migrateStudioProjectToPathOnlyPorts(project: StudioProjectV1): {
   if (textGenerationMigration.changed && !appliedMigrationIds.has(PI_TEXT_NODE_MODEL_MIGRATION_ID)) {
     nextApplied.push({
       id: PI_TEXT_NODE_MODEL_MIGRATION_ID,
+      at: nowIso(),
+    });
+  }
+  if (imageGenerationMigration.changed && !appliedMigrationIds.has(IMAGE_NODE_LEVERS_MIGRATION_ID)) {
+    nextApplied.push({
+      id: IMAGE_NODE_LEVERS_MIGRATION_ID,
       at: nowIso(),
     });
   }

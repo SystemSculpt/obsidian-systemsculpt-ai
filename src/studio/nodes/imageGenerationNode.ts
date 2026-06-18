@@ -15,7 +15,15 @@ import {
 
 const IMAGE_PROMPT_MAX_CHARS = 7_900;
 const IMAGE_INPUT_MAX_COUNT = 8;
+const IMAGE_OUTPUT_MAX_COUNT = 4;
 const DEFAULT_IMAGE_ASPECT_RATIO = "16:9";
+const IMAGE_SIZE_OPTIONS: { value: string; label: string }[] = [
+  { value: "", label: "Auto (model default)" },
+  { value: "0.5K", label: "0.5K" },
+  { value: "1K", label: "1K" },
+  { value: "2K", label: "2K" },
+  { value: "4K", label: "4K" },
+];
 const LEGACY_LOCAL_PROVIDER_IDS = new Set([
   "local_macos_image_generation",
   "local_macos",
@@ -156,18 +164,29 @@ export const imageGenerationNode: StudioNodeDefinition = {
   ],
   outputPorts: [{ id: "images", type: "json" }],
   configDefaults: {
+    modelId: "",
     count: 1,
     aspectRatio: DEFAULT_IMAGE_ASPECT_RATIO,
+    imageSize: "",
   },
   configSchema: {
     fields: [
+      {
+        key: "modelId",
+        label: "Model",
+        type: "select",
+        required: false,
+        description: "Image model routed through SystemSculpt (OpenRouter). Leave on Default to let SystemSculpt choose.",
+        selectPresentation: "searchable_dropdown",
+        optionsSource: "studio.systemsculpt_image_models",
+      },
       {
         key: "count",
         label: "Image Count",
         type: "number",
         required: true,
         min: 1,
-        max: 8,
+        max: IMAGE_OUTPUT_MAX_COUNT,
         integer: true,
       },
       {
@@ -186,6 +205,24 @@ export const imageGenerationNode: StudioNodeDefinition = {
           { value: "2:3", label: "2:3" },
         ],
       },
+      {
+        key: "imageSize",
+        label: "Resolution",
+        type: "select",
+        required: false,
+        description: "Output resolution hint. Applied only by models that support it; ignored otherwise.",
+        options: IMAGE_SIZE_OPTIONS,
+      },
+      {
+        key: "seed",
+        label: "Seed",
+        type: "number",
+        required: false,
+        min: 0,
+        integer: true,
+        placeholder: "Random",
+        description: "Fix a seed for reproducible results. Leave blank for random.",
+      },
     ],
     allowUnknownKeys: true,
   },
@@ -202,13 +239,26 @@ export const imageGenerationNode: StudioNodeDefinition = {
       );
     }
     const countRaw = Number(context.node.config.count as StudioJsonValue);
-    const count = Number.isFinite(countRaw) && countRaw > 0 ? Math.min(8, Math.floor(countRaw)) : 1;
+    const count =
+      Number.isFinite(countRaw) && countRaw > 0
+        ? Math.min(IMAGE_OUTPUT_MAX_COUNT, Math.floor(countRaw))
+        : 1;
     const configuredAspectRatio = getText(context.node.config.aspectRatio as StudioJsonValue).trim();
     const aspectRatio = configuredAspectRatio || DEFAULT_IMAGE_ASPECT_RATIO;
+    const modelId = getText(context.node.config.modelId as StudioJsonValue).trim();
+    const imageSize = getText(context.node.config.imageSize as StudioJsonValue).trim();
+    const seedConfig = context.node.config.seed;
+    const seedText =
+      typeof seedConfig === "number" ? String(seedConfig) : getText(seedConfig as StudioJsonValue).trim();
+    const seedNum = seedText.length > 0 ? Number(seedText) : Number.NaN;
+    const seed = Number.isFinite(seedNum) && seedNum >= 0 ? Math.floor(seedNum) : undefined;
     const result = await context.services.api.generateImage({
       prompt,
+      modelId: modelId || undefined,
       count,
       aspectRatio,
+      imageSize: imageSize || undefined,
+      seed,
       inputImages,
       runId: context.runId,
       projectPath: context.projectPath,

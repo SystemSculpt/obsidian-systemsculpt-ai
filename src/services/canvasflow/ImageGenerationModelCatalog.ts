@@ -63,16 +63,30 @@ type CuratedImageGenerationModelSeed = {
 
 const EXCLUDED_MODEL_IDS = new Set(["openrouter/auto"]);
 
+// Mirrors the server's curated image-model allow-list (see the website repo's
+// image-generation catalog). The managed default is offered separately as the
+// "SystemSculpt Default" option, so it is intentionally absent here. Server
+// catalog metadata (pricing, limits) overrides these fallbacks once synced.
 const CURATED_IMAGE_GENERATION_MODELS_SEED: readonly CuratedImageGenerationModelSeed[] = [
   {
-    id: "openai/gpt-5-image-mini",
-    label: "OpenAI GPT-5 Image Mini",
-    provider: "OpenAI",
+    id: "google/gemini-3-pro-image-preview",
+    label: "Google Nano Banana Pro (Gemini 3 Pro Image)",
+    provider: "Google",
     supportsImageInput: true,
     maxImagesPerJob: 4,
     defaultAspectRatio: "1:1",
     allowedAspectRatios: ["1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3"],
-    fallbackUsdPerImage: 0.02,
+    fallbackUsdPerImage: 0.12,
+  },
+  {
+    id: "google/gemini-2.5-flash-image",
+    label: "Google Nano Banana (Gemini 2.5 Flash Image)",
+    provider: "Google",
+    supportsImageInput: true,
+    maxImagesPerJob: 4,
+    defaultAspectRatio: "1:1",
+    allowedAspectRatios: ["1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3"],
+    fallbackUsdPerImage: 0.04,
   },
   {
     id: "openai/gpt-5-image",
@@ -82,17 +96,27 @@ const CURATED_IMAGE_GENERATION_MODELS_SEED: readonly CuratedImageGenerationModel
     maxImagesPerJob: 4,
     defaultAspectRatio: "1:1",
     allowedAspectRatios: ["1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3"],
-    fallbackUsdPerImage: 0.04,
+    fallbackUsdPerImage: 0.08,
   },
   {
-    id: "google/gemini-2.5-flash-image",
-    label: "Google Gemini 2.5 Flash Image",
-    provider: "Google",
+    id: "openai/gpt-5-image-mini",
+    label: "OpenAI GPT-5 Image Mini",
+    provider: "OpenAI",
     supportsImageInput: true,
     maxImagesPerJob: 4,
     defaultAspectRatio: "1:1",
     allowedAspectRatios: ["1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3"],
-    fallbackUsdPerImage: 0.015,
+    fallbackUsdPerImage: 0.03,
+  },
+  {
+    id: "black-forest-labs/flux.2-pro",
+    label: "Black Forest Labs FLUX.2 Pro",
+    provider: "Black Forest Labs",
+    supportsImageInput: true,
+    maxImagesPerJob: 4,
+    defaultAspectRatio: "1:1",
+    allowedAspectRatios: ["1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3"],
+    fallbackUsdPerImage: 0.06,
   },
 ] as const;
 

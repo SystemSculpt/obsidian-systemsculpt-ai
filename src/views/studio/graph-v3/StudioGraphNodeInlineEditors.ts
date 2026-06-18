@@ -231,7 +231,7 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
       nodeEl,
       node,
       definition,
-      orderedFieldKeys: ["modelId", "count", "aspectRatio"],
+      orderedFieldKeys: ["modelId", "count", "aspectRatio", "imageSize", "seed"],
       interactionLocked,
       onNodeConfigMutated,
       onNodeConfigValueChange,

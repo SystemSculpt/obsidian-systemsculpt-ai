@@ -70,7 +70,7 @@ function buildStudioImageIdempotencyKey(
     .map((asset) => `${String(asset.hash || "").toLowerCase()}:${Math.max(0, Number(asset.sizeBytes) || 0)}`)
     .join("|");
   const payloadSignature = hashFnv1aHex(
-    `${String(request.prompt || "")}|${String(request.aspectRatio || "")}|${String(request.count || "")}|${imageSignature}`
+    `${String(request.prompt || "")}|${String(request.aspectRatio || "")}|${String(request.count || "")}|${String(request.imageSize || "")}|${request.seed ?? ""}|${imageSignature}`
   );
   return `studio-image-${runToken}-${modelToken}-r${attemptToken}-${payloadSignature}`;
 }
@@ -411,7 +411,14 @@ export class StudioApiExecutionAdapter implements StudioApiAdapter {
   }
 
   async generateImage(request: StudioImageGenerationRequest): Promise<StudioImageGenerationResult> {
-    const modelId = String(request.modelId || STUDIO_MANAGED_IMAGE_MODEL_ID).trim() || STUDIO_MANAGED_IMAGE_MODEL_ID;
+    // An empty selection means "let the server pick the managed default"; we must
+    // not send the synthetic local sentinel as a model id (the server rejects it).
+    const selectedModelId = String(request.modelId || "").trim();
+    const requestModelId = selectedModelId || undefined;
+    const resultModelId = selectedModelId || STUDIO_MANAGED_IMAGE_MODEL_ID;
+    const imageSize = String(request.imageSize || "").trim();
+    const seedRaw = Number(request.seed);
+    const seed = Number.isFinite(seedRaw) && seedRaw >= 0 ? Math.floor(seedRaw) : undefined;
     const imageClient = this.ensureImageClient();
     const { uploadedInputImages, inputImageBytes } = await this.uploadInputImagesForStudioGeneration(
       imageClient,
@@ -429,14 +436,17 @@ export class StudioApiExecutionAdapter implements StudioApiAdapter {
         create = await imageClient.createGenerationJob(
           {
             prompt: request.prompt,
+            model: requestModelId,
             input_images: uploadedInputImages,
             options: {
               count: request.count,
               aspect_ratio: resolvedAspectRatio || undefined,
+              image_size: imageSize || undefined,
+              seed,
             },
           },
           {
-            idempotencyKey: buildStudioImageIdempotencyKey(request, modelId, attempt),
+            idempotencyKey: buildStudioImageIdempotencyKey(request, resultModelId, attempt),
           }
         );
       } catch (error) {
@@ -492,7 +502,7 @@ export class StudioApiExecutionAdapter implements StudioApiAdapter {
 
       return {
         images,
-        modelId,
+        modelId: resultModelId,
       };
     }
 

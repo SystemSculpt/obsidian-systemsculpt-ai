@@ -668,7 +668,73 @@ describe("Studio built-in text/image node execution", () => {
     const imageRequest = generateImageMock.mock.calls[0]?.[0];
     expect(typeof imageRequest.prompt).toBe("string");
     expect(String(imageRequest.prompt).length).toBeLessThanOrEqual(7_900);
-    expect(imageRequest).not.toHaveProperty("modelId");
+    // No model configured => no override; the server applies its managed default.
+    expect(imageRequest.modelId).toBeUndefined();
+  });
+
+  it("forwards configured model, resolution, and seed levers to image generation", async () => {
+    const definition = registry.get("studio.image_generation", "1.0.0");
+    expect(definition).toBeDefined();
+    const generateImageMock = jest.fn(async () => ({
+      images: [],
+      modelId: "google/gemini-3-pro-image-preview",
+    }));
+
+    await definition!.execute(
+      createContext({
+        nodeId: "image-node",
+        kind: "studio.image_generation",
+        config: {
+          modelId: "google/gemini-3-pro-image-preview",
+          count: 3,
+          aspectRatio: "9:16",
+          imageSize: "4K",
+          seed: 42,
+        },
+        inputs: {
+          prompt: "A cinematic skyline at dusk",
+        },
+        generateImageMock,
+      })
+    );
+
+    const imageRequest = generateImageMock.mock.calls[0]?.[0];
+    expect(imageRequest.modelId).toBe("google/gemini-3-pro-image-preview");
+    expect(imageRequest.aspectRatio).toBe("9:16");
+    expect(imageRequest.imageSize).toBe("4K");
+    expect(imageRequest.seed).toBe(42);
+    expect(imageRequest.count).toBe(3);
+  });
+
+  it("treats a blank seed as random and clamps count to the model maximum", async () => {
+    const definition = registry.get("studio.image_generation", "1.0.0");
+    expect(definition).toBeDefined();
+    const generateImageMock = jest.fn(async () => ({
+      images: [],
+      modelId: "openai/gpt-5-image-mini",
+    }));
+
+    await definition!.execute(
+      createContext({
+        nodeId: "image-node",
+        kind: "studio.image_generation",
+        config: {
+          count: 12,
+          seed: "",
+          imageSize: "",
+        },
+        inputs: {
+          prompt: "A watercolor fox",
+        },
+        generateImageMock,
+      })
+    );
+
+    const imageRequest = generateImageMock.mock.calls[0]?.[0];
+    expect(imageRequest.seed).toBeUndefined();
+    expect(imageRequest.imageSize).toBeUndefined();
+    expect(imageRequest.modelId).toBeUndefined();
+    expect(imageRequest.count).toBe(4);
   });
 
   it("truncates oversized plain image prompts before API submission", async () => {
