@@ -22,7 +22,7 @@ export class ImageProcessor {
   /**
    * Load a Blob into a drawable image source with dimensions, using
    * createImageBitmap where available and falling back to HTMLImageElement
-   * (matches the pattern in CanvasFlowRunner / StudioCaptionBoardComposition).
+   * (matches the pattern in StudioCaptionBoardComposition).
    */
   private static async loadImage(
     blob: Blob,

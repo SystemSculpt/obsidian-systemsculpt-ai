@@ -350,12 +350,6 @@ export interface SystemSculptSettings {
   openAiApiKey: string;
 
   /**
-   * Retired setting kept only for backward migration compatibility.
-   * CanvasFlow is hard-switched off in favor of the desktop-only SystemSculpt Studio view.
-   */
-  canvasFlowEnabled: boolean;
-
-  /**
    * SystemSculpt-hosted image generation (OpenRouter provider).
    * Used by SystemSculpt Studio.
    */
@@ -628,8 +622,6 @@ Raw transcript:`,
   hideSystemMessagesInChat: false,
   respectReducedMotion: true,
   openAiApiKey: "",
-
-  canvasFlowEnabled: false,
 
   imageGenerationDefaultModelId: "openai/gpt-5-image-mini",
   imageGenerationLastUsedModelId: "",

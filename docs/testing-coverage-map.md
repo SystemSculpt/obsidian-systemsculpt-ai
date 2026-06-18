@@ -81,7 +81,6 @@ Releases now ship only the standard Obsidian plugin assets: `main.js`, `manifest
 - Retired benchmark commands, views, docs, and storage paths are removed.
 - Dev builds no longer auto-sync into `testing/e2e/fixtures`.
 - New chat state and saves no longer emit legacy prompt-selection metadata; older chat files remain backward-readable on load.
-- CanvasFlow no longer renders a dead-end "Saved Model (Unsupported)" chip; unsupported note-level image models fall back to actionable choices.
 - `test:native:*` remains the canonical integration command surface.
 - `runtime:smoke:*`, `android:*`, and `ios:*` remain compatibility aliases around the same native harness.
 

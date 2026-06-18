@@ -22,7 +22,6 @@ SystemSculpt AI adds AI chat, meeting transcription, semantic search, and agent 
 - Find semantically similar notes with embeddings.
 - Record audio and transcribe notes.
 - Run capture-folder workflow automations.
-- Use CanvasFlow image generation in Obsidian Canvas (experimental).
 
 ## Quick start
 
