@@ -191,8 +191,13 @@ function migrateImageGenerationNodes(
         : typeof countValue === "string"
           ? Number(countValue.trim())
           : Number.NaN;
-    if (Number.isFinite(countNumeric) && countNumeric > 4) {
-      nextConfig.count = 4;
+    if (Number.isFinite(countNumeric)) {
+      // Floor as well as clamp: the schema is integer-constrained, so a stray
+      // decimal would also fail validation, not just an out-of-range integer.
+      const normalizedCount = Math.min(4, Math.floor(countNumeric));
+      if (normalizedCount !== countValue) {
+        nextConfig.count = normalizedCount;
+      }
     }
 
     if (JSON.stringify(nextConfig) !== JSON.stringify(currentConfig)) {
