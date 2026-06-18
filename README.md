@@ -18,6 +18,7 @@ SystemSculpt AI adds AI chat, meeting transcription, semantic search, and agent 
 - Filter models by favorites in the model selection modal.
 - Set up local Pi providers from the Providers tab, including clearer Ollama guidance.
 - Use the redesigned Studio canvas foundation for much larger graph workspaces.
+- Generate images from a Studio image node: pick the model, aspect ratio, image size, seed, and batch count.
 - Recover from streaming failures with clearer chat error notices and disconnect controls.
 - Find semantically similar notes with embeddings.
 - Record audio and transcribe notes.
