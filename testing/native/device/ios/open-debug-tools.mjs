@@ -4,8 +4,6 @@ import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { spawnSync } from "node:child_process";
-import { pathToFileURL } from "node:url";
-import { selectReachablePhysicalIosDevice } from "../../shared/ios-device-selection.mjs";
 
 const DEFAULT_CONFIG_PATH = path.resolve(process.cwd(), "systemsculpt-sync.ios.json");
 const DEFAULT_BUNDLE_ID = "md.obsidian";
@@ -30,7 +28,8 @@ Options:
 }
 
 function fail(message) {
-  throw new Error(message);
+  console.error(`[ios-debug] ${message}`);
+  process.exit(1);
 }
 
 function run(command, args, options = {}) {
@@ -159,6 +158,45 @@ function readJsonFromDevicectl(args) {
   }
 }
 
+function selectDevice(devices, requestedDevice) {
+  const candidates = devices.filter((device) => {
+    const platform = device.hardwareProperties?.platform;
+    const reality = device.hardwareProperties?.reality;
+    const pairingState = device.connectionProperties?.pairingState;
+    return platform === "iOS" && reality === "physical" && pairingState === "paired";
+  });
+
+  if (requestedDevice) {
+    const lowered = requestedDevice.toLowerCase();
+    const matched = candidates.find((device) => {
+      const name = String(device.deviceProperties?.name || "").toLowerCase();
+      const identifier = String(device.identifier || "").toLowerCase();
+      const udid = String(device.hardwareProperties?.udid || "").toLowerCase();
+      return name === lowered || identifier === lowered || udid === lowered;
+    });
+    if (!matched) {
+      fail(`No paired physical iOS device matched "${requestedDevice}".`);
+    }
+    return matched;
+  }
+
+  const wiredCandidates = candidates.filter((device) => device.connectionProperties?.transportType === "wired");
+  if (wiredCandidates.length === 1) {
+    return wiredCandidates[0];
+  }
+  if (candidates.length === 1) {
+    return candidates[0];
+  }
+  if (wiredCandidates.length > 1) {
+    fail("Multiple wired iOS devices are connected. Re-run with --device.");
+  }
+  if (candidates.length > 1) {
+    fail("Multiple iOS devices are paired. Re-run with --device.");
+  }
+
+  fail("No paired physical iOS device is currently available.");
+}
+
 function appExists(appName) {
   const result = spawnSync("open", ["-Ra", appName], { encoding: "utf8" });
   return result.status === 0;
@@ -193,10 +231,7 @@ function main() {
   }
 
   const devicesJson = readJsonFromDevicectl(["devicectl", "list", "devices"]);
-  const device = selectReachablePhysicalIosDevice(devicesJson.result?.devices || [], {
-    requestedDevice: options.device,
-    recoveryAction: "re-run the iOS debug command",
-  });
+  const device = selectDevice(devicesJson.result?.devices || [], options.device);
   const deviceIdentifier = String(device.identifier || "").trim();
   const deviceName = device.deviceProperties?.name || device.hardwareProperties?.marketingName || deviceIdentifier;
   const deviceUdid = device.hardwareProperties?.udid || "";
@@ -267,15 +302,4 @@ function main() {
   console.log("[ios-debug] Next: use QuickTime for live screen mirroring, Console for device logs, and Safari Develop for Web Inspector if Obsidian exposes inspectable web content.");
 }
 
-const isDirectExecution = process.argv[1]
-  ? pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url
-  : false;
-
-if (isDirectExecution) {
-  try {
-    main();
-  } catch (error) {
-    console.error(`[ios-debug] ${error instanceof Error ? error.message : String(error)}`);
-    process.exit(1);
-  }
-}
+main();

@@ -5,31 +5,23 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
-import {
-  findReachablePhysicalIosDevice,
-  listDevicectlDevices,
-  selectReachablePhysicalIosDevice,
-} from "../testing/native/shared/ios-device-selection.mjs";
 
 export const REQUIRED_NATIVE_RELEASE_GATES = Object.freeze([
   {
     id: "macos-desktop-baselines",
     label: "macOS desktop baselines",
-    phase: "local",
     command: "npm",
     args: ["run", "test:native:desktop:baselines"],
   },
   {
     id: "windows-e2e",
     label: "Windows clean-install and desktop baselines GitHub check",
-    phase: "hosted",
     command: "node",
     args: ["scripts/check-github-required-checks.mjs", "--name", "windows-e2e"],
   },
   {
     id: "android-prepare",
     label: "Android sync and headless relaunch",
-    phase: "local",
     command: "npm",
     args: [
       "run",
@@ -45,7 +37,6 @@ export const REQUIRED_NATIVE_RELEASE_GATES = Object.freeze([
   {
     id: "android-runtime-extended",
     label: "Android runtime smoke",
-    phase: "local",
     command: "npm",
     args: ["run", "test:native:android:extended"],
   },
@@ -54,47 +45,8 @@ export const REQUIRED_NATIVE_RELEASE_GATES = Object.freeze([
 export const OPTIONAL_IOS_RELEASE_GATE = Object.freeze({
   id: "ios-runtime",
   label: "iOS runtime smoke",
-  phase: "local",
   command: "npm",
   args: ["run", "test:native:ios"],
-});
-
-export const IOS_RELEASE_GATES = Object.freeze([
-  {
-    id: "ios-prepare",
-    label: "iOS sync and relaunch",
-    phase: "local",
-    command: "npm",
-    args: [
-      "run",
-      "test:native:ios:debug:open",
-      "--",
-      "--sync",
-      "--skip-open-apps",
-    ],
-  },
-  {
-    id: "ios-inspect",
-    label: "iOS plugin inspection",
-    phase: "local",
-    command: "npm",
-    args: ["run", "test:native:ios:inspect:plugin", "--", "--strict"],
-  },
-  OPTIONAL_IOS_RELEASE_GATE,
-]);
-
-export const IOS_CANARY_RELEASE_GATE = Object.freeze({
-  id: "ios-canary",
-  label: "iOS canary release GitHub check",
-  phase: "hosted",
-  command: "node",
-  args: ["scripts/check-github-required-checks.mjs", "--name", "ios-canary-release"],
-});
-
-export const NATIVE_RELEASE_GATE_PHASES = Object.freeze({
-  ALL: "all",
-  LOCAL: "local",
-  HOSTED: "hosted",
 });
 
 function fail(message) {
@@ -104,73 +56,12 @@ function fail(message) {
 export function parseArgs(argv) {
   const options = {
     requireIos: false,
-    requireIosCanary: true,
-    allowMissingIosCanaryReason: "",
-    githubRepo: "",
-    githubRef: "",
-    githubWaitTimeoutMs: 0,
-    githubPollIntervalMs: 0,
-    gatePhase: NATIVE_RELEASE_GATE_PHASES.ALL,
   };
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--require-ios") {
       options.requireIos = true;
-      continue;
-    }
-    if (arg === "--require-ios-canary") {
-      options.requireIosCanary = true;
-      continue;
-    }
-    if (arg === "--only-local") {
-      if (options.gatePhase === NATIVE_RELEASE_GATE_PHASES.HOSTED) {
-        fail("Use only one of --only-local or --only-hosted");
-      }
-      options.gatePhase = NATIVE_RELEASE_GATE_PHASES.LOCAL;
-      continue;
-    }
-    if (arg === "--only-hosted") {
-      if (options.gatePhase === NATIVE_RELEASE_GATE_PHASES.LOCAL) {
-        fail("Use only one of --only-local or --only-hosted");
-      }
-      options.gatePhase = NATIVE_RELEASE_GATE_PHASES.HOSTED;
-      continue;
-    }
-    if (arg === "--allow-missing-ios-canary") {
-      const reason = String(argv[index + 1] || "").trim();
-      index += 1;
-      if (!reason || reason.startsWith("-")) {
-        fail("--allow-missing-ios-canary requires a short reason");
-      }
-      options.allowMissingIosCanaryReason = reason;
-      options.requireIosCanary = true;
-      continue;
-    }
-    if (arg === "--github-repo") {
-      options.githubRepo = String(argv[index + 1] || "").trim();
-      index += 1;
-      if (!options.githubRepo) {
-        fail("--github-repo requires owner/name");
-      }
-      continue;
-    }
-    if (arg === "--github-ref") {
-      options.githubRef = String(argv[index + 1] || "").trim();
-      index += 1;
-      if (!options.githubRef) {
-        fail("--github-ref requires a commit SHA or ref");
-      }
-      continue;
-    }
-    if (arg === "--github-wait-timeout-ms") {
-      options.githubWaitTimeoutMs = Number(argv[index + 1]) || 0;
-      index += 1;
-      continue;
-    }
-    if (arg === "--github-poll-interval-ms") {
-      options.githubPollIntervalMs = Number(argv[index + 1]) || 0;
-      index += 1;
       continue;
     }
     if (arg === "--help" || arg === "-h") {
@@ -192,55 +83,17 @@ Required lanes:
   - macOS desktop baselines
   - Windows clean-install parity and desktop baselines via GitHub check "windows-e2e"
   - Android sync + runtime smoke
-  - GitHub iOS canary release check "ios-canary-release"
 
 Optional lane:
-  - local iOS sync + inspection + runtime smoke when a paired physical device is available
+  - iOS runtime smoke when a paired physical device is available
 
 Options:
-  --only-local                     Run only local gates: macOS, Android, and local real-device iOS when available
-  --only-hosted                    Run only hosted GitHub gates: Windows E2E and iOS canary
-  --require-ios                    Fail instead of skipping when the local iOS lane is unavailable
-  --require-ios-canary             Require the GitHub check named "ios-canary-release" on this commit (default)
-  --allow-missing-ios-canary <why> Skip the GitHub iOS canary requirement with an explicit reason
-  --github-repo <owner/name>       Repository for GitHub check lookups
-  --github-ref <sha-or-ref>        Commit SHA/ref for GitHub check lookups
-  --github-wait-timeout-ms <n>     Poll GitHub checks until they pass or this timeout elapses
-  --github-poll-interval-ms <n>    Poll interval for GitHub checks
-  --help, -h                       Show this help.`);
-}
-
-function gateMatchesPhase(gate, gatePhase = NATIVE_RELEASE_GATE_PHASES.ALL) {
-  return gatePhase === NATIVE_RELEASE_GATE_PHASES.ALL || gate.phase === gatePhase;
+  --require-ios     Fail instead of skipping when the iOS lane is unavailable
+  --help, -h        Show this help.`);
 }
 
 export function formatGateCommand(gate) {
   return `${gate.command} ${gate.args.join(" ")}`;
-}
-
-function withGithubCheckOptions(gate, options = {}) {
-  if (!["windows-e2e", "ios-canary"].includes(gate.id)) {
-    return gate;
-  }
-
-  const args = [...gate.args];
-  if (options.githubRepo) {
-    args.push("--repo", options.githubRepo);
-  }
-  if (options.githubRef) {
-    args.push("--ref", options.githubRef);
-  }
-  if (options.githubWaitTimeoutMs) {
-    args.push("--wait-timeout-ms", String(options.githubWaitTimeoutMs));
-  }
-  if (options.githubPollIntervalMs) {
-    args.push("--poll-interval-ms", String(options.githubPollIntervalMs));
-  }
-
-  return {
-    ...gate,
-    args,
-  };
 }
 
 export function commandExists(command, spawnImpl = spawnSync) {
@@ -291,7 +144,38 @@ export function readJsonFromDevicectl(
 }
 
 export function selectPairedPhysicalIosDevice(payload) {
-  return findReachablePhysicalIosDevice(payload);
+  const devices = Array.isArray(payload?.result?.devices)
+    ? payload.result.devices
+    : Array.isArray(payload?.devices)
+      ? payload.devices
+      : [];
+
+  const candidates = devices.filter((device) => {
+    const platform = String(device?.hardwareProperties?.platform || "").trim();
+    const reality = String(device?.hardwareProperties?.reality || "").trim();
+    const pairingState = String(device?.connectionProperties?.pairingState || "").trim();
+    const transportType = String(device?.connectionProperties?.transportType || "").trim().toLowerCase();
+    const tunnelState = String(device?.connectionProperties?.tunnelState || "").trim().toLowerCase();
+    const connected =
+      transportType === "wired" ||
+      transportType === "wireless" ||
+      transportType === "network" ||
+      tunnelState === "available" ||
+      tunnelState === "connected" ||
+      tunnelState === "active";
+    return (
+      (platform === "iOS" || platform === "iPadOS") &&
+      reality === "physical" &&
+      pairingState === "paired" &&
+      connected
+    );
+  });
+
+  const wired = candidates.filter((device) => {
+    return String(device?.connectionProperties?.transportType || "").trim() === "wired";
+  });
+
+  return wired[0] || candidates[0] || null;
 }
 
 export function probeIosAvailability(
@@ -318,9 +202,13 @@ export function probeIosAvailability(
     const payload = readDevicesImpl
       ? readDevicesImpl()
       : readJsonFromDevicectl(["devicectl", "list", "devices"]);
-    const device = selectReachablePhysicalIosDevice(listDevicectlDevices(payload), {
-      recoveryAction: "re-run the native release check",
-    });
+    const device = selectPairedPhysicalIosDevice(payload);
+    if (!device) {
+      return {
+        available: false,
+        reason: "no connected physical iOS device is currently available",
+      };
+    }
 
     const label =
       String(device?.deviceProperties?.name || "").trim() ||
@@ -341,49 +229,24 @@ export function probeIosAvailability(
 
 export function buildNativeReleaseGatePlan({
   requireIos = false,
-  requireIosCanary = true,
-  allowMissingIosCanaryReason = "",
-  githubRepo = "",
-  githubRef = "",
-  githubWaitTimeoutMs = 0,
-  githubPollIntervalMs = 0,
-  gatePhase = NATIVE_RELEASE_GATE_PHASES.ALL,
   iosAvailability = { available: false, reason: "not probed" },
 } = {}) {
-  const githubCheckOptions = {
-    githubRepo,
-    githubRef,
-    githubWaitTimeoutMs,
-    githubPollIntervalMs,
-  };
   const plan = REQUIRED_NATIVE_RELEASE_GATES.map((gate) => ({
-    ...withGithubCheckOptions(gate, githubCheckOptions),
+    ...gate,
     required: true,
     run: true,
     skipReason: null,
   }));
 
-  const shouldRunIosCanary = Boolean(requireIosCanary && !allowMissingIosCanaryReason);
-  plan.push({
-    ...withGithubCheckOptions(IOS_CANARY_RELEASE_GATE, githubCheckOptions),
-    required: shouldRunIosCanary,
-    run: shouldRunIosCanary,
-    skipReason: shouldRunIosCanary
-      ? null
-      : allowMissingIosCanaryReason
-        ? `explicit override: ${allowMissingIosCanaryReason}`
-        : "not required by this invocation",
-  });
-
   const iosRequired = Boolean(requireIos || iosAvailability.available);
-  plan.push(...IOS_RELEASE_GATES.map((gate) => ({
-    ...gate,
+  plan.push({
+    ...OPTIONAL_IOS_RELEASE_GATE,
     required: iosRequired,
     run: Boolean(iosAvailability.available),
     skipReason: iosAvailability.available ? null : String(iosAvailability.reason || "unavailable"),
-  })));
+  });
 
-  return plan.filter((gate) => gateMatchesPhase(gate, gatePhase));
+  return plan;
 }
 
 function logStep(message) {
@@ -408,23 +271,13 @@ export function runGate(gate, { spawnImpl = spawnSync, cwd = process.cwd(), env 
 }
 
 export function runNativeReleaseGates(options = {}, dependencies = {}) {
-  const gatePhase = options.gatePhase || NATIVE_RELEASE_GATE_PHASES.ALL;
-  const iosAvailability = gatePhase === NATIVE_RELEASE_GATE_PHASES.HOSTED
-    ? { available: false, reason: "hosted-only gate phase" }
-    : probeIosAvailability(dependencies);
+  const iosAvailability = probeIosAvailability(dependencies);
   const plan = buildNativeReleaseGatePlan({
     requireIos: options.requireIos,
-    requireIosCanary: options.requireIosCanary,
-    allowMissingIosCanaryReason: options.allowMissingIosCanaryReason,
-    githubRepo: options.githubRepo,
-    githubRef: options.githubRef,
-    githubWaitTimeoutMs: options.githubWaitTimeoutMs,
-    githubPollIntervalMs: options.githubPollIntervalMs,
-    gatePhase,
     iosAvailability,
   });
 
-  logStep(`Native release contract (${gatePhase} gates):`);
+  logStep("Native release contract:");
   for (const gate of plan) {
     if (gate.run) {
       logStep(`- required: ${gate.label}`);

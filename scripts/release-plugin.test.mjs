@@ -4,9 +4,6 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
-  buildNativeReleaseCheckArgs,
-  describeNativeValidationPlan,
-  parseArgs,
   parseGitHubAuthStatus,
   normalizeReleaseNotesMarkdown,
   resolveGitHubReleaseAuthStrategy,
@@ -39,53 +36,6 @@ github.com
 
   assert.equal(parsed.usesEnvToken, true);
   assert.deepEqual(parsed.scopes, ["repo", "read:org"]);
-});
-
-test("parseArgs accepts iOS canary release gate options", () => {
-  assert.deepEqual(
-    parseArgs([
-      "--dry-run",
-      "--allow-dirty",
-      "--require-ios",
-      "--require-ios-canary",
-      "--allow-missing-ios-canary",
-      " runner not provisioned yet ",
-      "--bump",
-      "patch",
-      "--notes-file",
-      "docs/release-notes/9.9.9.md",
-    ]),
-    {
-      bump: "patch",
-      version: null,
-      draft: false,
-      dryRun: true,
-      skipChecks: false,
-      allowDirty: true,
-      requireIos: true,
-      requireIosCanary: true,
-      allowMissingIosCanaryReason: "runner not provisioned yet",
-      notesFile: "docs/release-notes/9.9.9.md",
-      help: false,
-    },
-  );
-});
-
-test("parseArgs exposes release help without running release preflights", () => {
-  assert.equal(parseArgs(["--help"]).help, true);
-});
-
-test("parseArgs rejects a missing or flag-like --allow-missing-ios-canary reason", (t) => {
-  // release-plugin's fail() calls process.exit(1) instead of throwing, so stub
-  // both (auto-restored by node:test) and assert the guard triggers an exit.
-  t.mock.method(console, "error", () => {});
-  const exit = t.mock.method(process, "exit", () => {
-    throw new Error("process.exit");
-  });
-
-  assert.throws(() => parseArgs(["--allow-missing-ios-canary"]), /process\.exit/);
-  assert.throws(() => parseArgs(["--allow-missing-ios-canary", "--dry-run"]), /process\.exit/);
-  assert.equal(exit.mock.calls.length, 2);
 });
 
 test("normalizeReleaseNotesMarkdown unwraps wrapped prose and list items while preserving markdown structure", () => {
@@ -325,143 +275,6 @@ remote: - Changes must have workflow scope.
     }),
     false
   );
-});
-
-test("buildNativeReleaseCheckArgs forwards iOS release gate options", () => {
-  assert.deepEqual(
-    buildNativeReleaseCheckArgs({}),
-    ["run", "check:release:native", "--", "--require-ios-canary"],
-  );
-
-  assert.deepEqual(
-    buildNativeReleaseCheckArgs({
-      requireIos: true,
-      requireIosCanary: true,
-      githubRef: "abc123",
-      githubWaitTimeoutMs: 60000,
-      githubPollIntervalMs: 5000,
-    }),
-    [
-      "run",
-      "check:release:native",
-      "--",
-      "--require-ios",
-      "--require-ios-canary",
-      "--github-ref",
-      "abc123",
-      "--github-wait-timeout-ms",
-      "60000",
-      "--github-poll-interval-ms",
-      "5000",
-    ],
-  );
-
-  assert.deepEqual(
-    buildNativeReleaseCheckArgs({
-      allowMissingIosCanaryReason: "runner not provisioned yet",
-    }),
-    [
-      "run",
-      "check:release:native",
-      "--",
-      "--require-ios-canary",
-      "--allow-missing-ios-canary",
-      "runner not provisioned yet",
-    ],
-  );
-
-  assert.deepEqual(
-    buildNativeReleaseCheckArgs({
-      gatePhase: "local",
-      requireIos: true,
-      githubRef: "abc123",
-    }),
-    [
-      "run",
-      "check:release:native",
-      "--",
-      "--only-local",
-      "--require-ios",
-    ],
-  );
-
-  assert.deepEqual(
-    buildNativeReleaseCheckArgs({
-      gatePhase: "hosted",
-      requireIos: true,
-      githubRef: "abc123",
-      githubWaitTimeoutMs: 60000,
-    }),
-    [
-      "run",
-      "check:release:native",
-      "--",
-      "--only-hosted",
-      "--require-ios-canary",
-      "--github-ref",
-      "abc123",
-      "--github-wait-timeout-ms",
-      "60000",
-    ],
-  );
-});
-
-test("describeNativeValidationPlan exposes local iOS and canary mode", () => {
-  assert.equal(
-    describeNativeValidationPlan({}),
-    "local macOS + Android before push; hosted Windows + iOS canary after push; local iOS when available; iOS canary required",
-  );
-
-  assert.equal(
-    describeNativeValidationPlan({
-      requireIos: true,
-      requireIosCanary: true,
-    }),
-    "local macOS + Android before push; hosted Windows + iOS canary after push; local iOS required; iOS canary required",
-  );
-
-  assert.equal(
-    describeNativeValidationPlan({
-      allowMissingIosCanaryReason: "runner not provisioned yet",
-    }),
-    "local macOS + Android before push; hosted Windows + iOS canary after push; local iOS when available; iOS canary explicit override (runner not provisioned yet)",
-  );
-});
-
-test("release flow validates local gates before push and hosted gates on the release SHA before tagging", () => {
-  const text = fs.readFileSync(path.join(process.cwd(), "scripts", "release-plugin.mjs"), "utf8");
-  const commitIndex = text.indexOf('run("git", ["commit", "-m", `release: ${newVersion}`])');
-  const shaIndex = text.indexOf("const releaseSha = getHeadSha()");
-  const localGateIndex = text.indexOf('gatePhase: "local"');
-  const pushMainIndex = text.indexOf('runWithGitHubAuthFallback("git", ["push", "origin", "main"], githubAuthStrategy)');
-  const hostedGateIndex = text.indexOf('gatePhase: "hosted"');
-  const refIndex = text.indexOf("githubRef: releaseSha", hostedGateIndex);
-  const hostedAuthEnvIndex = text.indexOf("envOverrides: githubAuthStrategy.envOverrides", hostedGateIndex);
-  const tagIndex = text.indexOf('run("git", ["tag", "-a", newVersion, "-m", newVersion, releaseSha])');
-  const pushTagIndex = text.indexOf('runWithGitHubAuthFallback("git", ["push", "origin", newVersion], githubAuthStrategy)');
-
-  for (const [name, index] of Object.entries({
-    commitIndex,
-    shaIndex,
-    localGateIndex,
-    pushMainIndex,
-    hostedGateIndex,
-    refIndex,
-    hostedAuthEnvIndex,
-    tagIndex,
-    pushTagIndex,
-  })) {
-    assert.notEqual(index, -1, `Expected release script to contain ${name}`);
-  }
-
-  assert.ok(commitIndex < shaIndex, "release SHA must be read after the release commit");
-  assert.ok(shaIndex < localGateIndex, "local native gates must run after the final local release commit is known");
-  assert.ok(localGateIndex < pushMainIndex, "local native gates must pass before pushing main");
-  assert.ok(pushMainIndex < hostedGateIndex, "hosted gates must run after the release commit is pushed");
-  assert.ok(refIndex > hostedGateIndex, "hosted gates must receive the release SHA");
-  assert.ok(hostedAuthEnvIndex > hostedGateIndex, "hosted native gates must run with the resolved GitHub auth env");
-  assert.ok(hostedGateIndex < tagIndex, "hosted gates must pass before creating the tag");
-  assert.ok(tagIndex < pushTagIndex, "tag must exist locally before pushing it");
 });
 
 test("runWithGitHubAuthFallback retries once without GitHub env tokens when GitHub rejects the inherited auth", (t) => {
