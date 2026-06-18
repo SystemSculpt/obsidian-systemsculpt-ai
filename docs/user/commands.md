@@ -57,8 +57,6 @@ Chat always runs through SystemSculpt. There are no separate chat-model commands
 | --- | --- | --- | --- |
 | Run Workflow Automation |  | `run-workflow-automation` | Runs automation for active markdown note |
 | Show Automation Backlog |  | `open-automation-backlog` | Opens automation backlog modal |
-| SystemSculpt - Create Prompt Node (Active Canvas) |  | `canvasflow-create-prompt-node` | Only when active view is Canvas |
-| SystemSculpt - Toggle Canvas Enhancements |  | `canvasflow-toggle-enhancements` | Toggles SystemSculpt canvas enhancement mode |
 
 ## Studio
 

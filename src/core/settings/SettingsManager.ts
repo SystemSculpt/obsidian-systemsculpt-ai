@@ -102,7 +102,9 @@ export class SettingsManager {
     delete (migratedSettings as any).systemPromptType;
     delete (migratedSettings as any).systemPromptPath;
     delete (migratedSettings as any).useLatestSystemPromptForNewChats;
-    
+    // CanvasFlow (legacy Obsidian-canvas feature) was removed in favor of SystemSculpt Studio.
+    delete (migratedSettings as any).canvasFlowEnabled;
+
     // Ensure other nested objects are properly initialized
     if (!migratedSettings.favoritesFilterSettings) {
       migratedSettings.favoritesFilterSettings = DEFAULT_SETTINGS.favoritesFilterSettings;
