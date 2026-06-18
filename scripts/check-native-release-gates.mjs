@@ -138,11 +138,12 @@ export function parseArgs(argv) {
       continue;
     }
     if (arg === "--allow-missing-ios-canary") {
-      options.allowMissingIosCanaryReason = String(argv[index + 1] || "").trim();
+      const reason = String(argv[index + 1] || "").trim();
       index += 1;
-      if (!options.allowMissingIosCanaryReason) {
+      if (!reason || reason.startsWith("-")) {
         fail("--allow-missing-ios-canary requires a short reason");
       }
+      options.allowMissingIosCanaryReason = reason;
       options.requireIosCanary = true;
       continue;
     }

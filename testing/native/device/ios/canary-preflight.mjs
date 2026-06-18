@@ -17,6 +17,14 @@ function fail(message) {
   throw new Error(message);
 }
 
+function requireValue(argv, index, flag) {
+  const value = argv[index + 1];
+  if (value === undefined || value === "" || value.startsWith("-")) {
+    fail(`Missing value for ${flag}.`);
+  }
+  return value;
+}
+
 function usage() {
   console.log(`Usage: node testing/native/device/ios/canary-preflight.mjs [options]
 
@@ -43,12 +51,12 @@ export function parseArgs(argv) {
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--config" || arg === "-c") {
-      options.configPath = path.resolve(process.cwd(), argv[index + 1] || "");
+      options.configPath = path.resolve(process.cwd(), requireValue(argv, index, arg));
       index += 1;
       continue;
     }
     if (arg === "--device") {
-      options.requestedDevice = String(argv[index + 1] || "").trim() || null;
+      options.requestedDevice = String(requireValue(argv, index, arg)).trim() || null;
       index += 1;
       continue;
     }

@@ -75,6 +75,19 @@ test("parseArgs exposes release help without running release preflights", () => 
   assert.equal(parseArgs(["--help"]).help, true);
 });
 
+test("parseArgs rejects a missing or flag-like --allow-missing-ios-canary reason", (t) => {
+  // release-plugin's fail() calls process.exit(1) instead of throwing, so stub
+  // both (auto-restored by node:test) and assert the guard triggers an exit.
+  t.mock.method(console, "error", () => {});
+  const exit = t.mock.method(process, "exit", () => {
+    throw new Error("process.exit");
+  });
+
+  assert.throws(() => parseArgs(["--allow-missing-ios-canary"]), /process\.exit/);
+  assert.throws(() => parseArgs(["--allow-missing-ios-canary", "--dry-run"]), /process\.exit/);
+  assert.equal(exit.mock.calls.length, 2);
+});
+
 test("normalizeReleaseNotesMarkdown unwraps wrapped prose and list items while preserving markdown structure", () => {
   const input = `# SystemSculpt 5.3.3
 
@@ -423,6 +436,7 @@ test("release flow validates local gates before push and hosted gates on the rel
   const pushMainIndex = text.indexOf('runWithGitHubAuthFallback("git", ["push", "origin", "main"], githubAuthStrategy)');
   const hostedGateIndex = text.indexOf('gatePhase: "hosted"');
   const refIndex = text.indexOf("githubRef: releaseSha", hostedGateIndex);
+  const hostedAuthEnvIndex = text.indexOf("envOverrides: githubAuthStrategy.envOverrides", hostedGateIndex);
   const tagIndex = text.indexOf('run("git", ["tag", "-a", newVersion, "-m", newVersion, releaseSha])');
   const pushTagIndex = text.indexOf('runWithGitHubAuthFallback("git", ["push", "origin", newVersion], githubAuthStrategy)');
 
@@ -433,6 +447,7 @@ test("release flow validates local gates before push and hosted gates on the rel
     pushMainIndex,
     hostedGateIndex,
     refIndex,
+    hostedAuthEnvIndex,
     tagIndex,
     pushTagIndex,
   })) {
@@ -444,6 +459,7 @@ test("release flow validates local gates before push and hosted gates on the rel
   assert.ok(localGateIndex < pushMainIndex, "local native gates must pass before pushing main");
   assert.ok(pushMainIndex < hostedGateIndex, "hosted gates must run after the release commit is pushed");
   assert.ok(refIndex > hostedGateIndex, "hosted gates must receive the release SHA");
+  assert.ok(hostedAuthEnvIndex > hostedGateIndex, "hosted native gates must run with the resolved GitHub auth env");
   assert.ok(hostedGateIndex < tagIndex, "hosted gates must pass before creating the tag");
   assert.ok(tagIndex < pushTagIndex, "tag must exist locally before pushing it");
 });

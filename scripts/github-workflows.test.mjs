@@ -55,11 +55,20 @@ test("iOS canary workflow stays self-hosted, trusted, and ordered", () => {
   assert.doesNotMatch(text, /preflight\.raw\.json\s*$/m);
   assert.doesNotMatch(text, /runtime-smoke\.raw\.json\s*$/m);
   assert.doesNotMatch(text, /^\s+\$\{\{ runner\.temp \}\}\/systemsculpt-ios-canary$/m);
+  // Least-privilege token (#1) and runner.temp is unavailable in job-level env (#2):
+  // IOS_CANARY_DIR must be resolved in a step via $GITHUB_ENV, not interpolated in job env.
+  assert.match(text, /\npermissions:\n\s+contents: read\n/);
+  assert.doesNotMatch(text, /IOS_CANARY_DIR: \$\{\{ runner\.temp \}\}/);
+  assert.match(
+    text,
+    /IOS_CANARY_DIR=\$\{RUNNER_TEMP\}\/systemsculpt-ios-canary\/\$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}" >> "\$\{GITHUB_ENV\}"/,
+  );
   assert.match(text, /sanitize-canary-diagnostics\.mjs --preflight/);
   assert.match(text, /sanitize-canary-diagnostics\.mjs --runtime/);
   assert.match(text, /--require-hosted-auth/);
   assert.match(text, /Remove iOS canary temp files/);
 
+  const resolveDir = indexOfRequired(text, "Resolve iOS canary workspace path");
   const build = indexOfRequired(text, "npm run build");
   const requireSecrets = indexOfRequired(text, "Require iOS canary secrets");
   const host = indexOfRequired(text, "npm --silent run test:native:ios:canary:preflight -- --config");
@@ -67,6 +76,7 @@ test("iOS canary workflow stays self-hosted, trusted, and ordered", () => {
   const inspect = indexOfRequired(text, "npm run test:native:ios:inspect:plugin -- --strict");
   const smoke = indexOfRequired(text, "npm run test:native:ios -- --case");
 
+  assert.ok(resolveDir < build, "workspace path must be resolved before steps consume IOS_CANARY_DIR");
   assert.ok(build < host, "plugin must build before host/device verification");
   assert.ok(build < requireSecrets, "build must happen before canary secret validation");
   assert.ok(requireSecrets < host, "canary secrets must be present before host/device verification");

@@ -3,9 +3,19 @@ import assert from "node:assert/strict";
 
 import {
   buildSanitizedCanaryDiagnostics,
+  parseArgs,
   sanitizePreflightDiagnostics,
   sanitizeRuntimeSmokeDiagnostics,
 } from "./sanitize-canary-diagnostics.mjs";
+
+test("parseArgs rejects missing or flag-like option values", () => {
+  assert.throws(() => parseArgs(["--preflight", "--output"]), /Missing value for --preflight/);
+  assert.throws(() => parseArgs(["--runtime"]), /Missing value for --runtime/);
+  assert.throws(
+    () => parseArgs(["--preflight", "raw.json", "--output", "--runtime"]),
+    /Missing value for --output/,
+  );
+});
 
 test("sanitizePreflightDiagnostics keeps readiness facts and strips paths/device identity", () => {
   const sanitized = sanitizePreflightDiagnostics({

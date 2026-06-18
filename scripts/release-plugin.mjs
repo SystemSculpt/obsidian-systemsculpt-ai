@@ -65,7 +65,7 @@ function parseArgs(argv) {
     if (arg === "--allow-missing-ios-canary") {
       const value = argv[i + 1];
       const normalizedValue = String(value || "").trim();
-      if (!normalizedValue) {
+      if (!normalizedValue || normalizedValue.startsWith("-")) {
         fail("Missing value for --allow-missing-ios-canary.");
       }
       options.requireIosCanary = true;
@@ -1189,19 +1189,17 @@ function runLocalReleaseChecks(skipChecks) {
   run("npm", ["run", "build"]);
 }
 
-function runNativeReleaseChecks(skipChecks, options = {}) {
+function runNativeReleaseChecks(skipChecks, options = {}, { envOverrides = {} } = {}) {
   if (skipChecks) {
     return;
   }
 
   const nativeReleaseCheckArgs = buildNativeReleaseCheckArgs(options);
   logStep(`Running ${formatCommandLabel("npm", nativeReleaseCheckArgs)}`);
-  run("npm", nativeReleaseCheckArgs);
-}
-
-function runChecks(skipChecks, options = {}) {
-  runLocalReleaseChecks(skipChecks);
-  runNativeReleaseChecks(skipChecks, options);
+  // Native gates shell out to `gh` for hosted checks, so they must inherit the
+  // same GitHub auth environment the release flow resolved (e.g. dropping a
+  // weak GITHUB_TOKEN in favor of stored gh auth).
+  run("npm", nativeReleaseCheckArgs, { envOverrides });
 }
 
 function ensureReleaseAssets() {
@@ -1386,21 +1384,29 @@ function main() {
   const releaseSha = getHeadSha();
   logStep(`Release commit SHA: ${releaseSha}`);
 
-  runNativeReleaseChecks(options.skipChecks, {
-    ...options,
-    gatePhase: "local",
-  });
+  runNativeReleaseChecks(
+    options.skipChecks,
+    {
+      ...options,
+      gatePhase: "local",
+    },
+    { envOverrides: githubAuthStrategy.envOverrides },
+  );
 
   logStep("Pushing main");
   runWithGitHubAuthFallback("git", ["push", "origin", "main"], githubAuthStrategy);
 
-  runNativeReleaseChecks(options.skipChecks, {
-    ...options,
-    gatePhase: "hosted",
-    githubRef: releaseSha,
-    githubWaitTimeoutMs: DEFAULT_RELEASE_GITHUB_CHECK_WAIT_TIMEOUT_MS,
-    githubPollIntervalMs: DEFAULT_RELEASE_GITHUB_CHECK_POLL_INTERVAL_MS,
-  });
+  runNativeReleaseChecks(
+    options.skipChecks,
+    {
+      ...options,
+      gatePhase: "hosted",
+      githubRef: releaseSha,
+      githubWaitTimeoutMs: DEFAULT_RELEASE_GITHUB_CHECK_WAIT_TIMEOUT_MS,
+      githubPollIntervalMs: DEFAULT_RELEASE_GITHUB_CHECK_POLL_INTERVAL_MS,
+    },
+    { envOverrides: githubAuthStrategy.envOverrides },
+  );
 
   logStep(`Creating git tag ${newVersion} on ${releaseSha}`);
   run("git", ["tag", "-a", newVersion, "-m", newVersion, releaseSha]);

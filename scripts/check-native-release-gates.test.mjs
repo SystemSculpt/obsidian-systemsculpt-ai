@@ -117,6 +117,17 @@ test("parseArgs treats an iOS canary override as canary validation intent", () =
   );
 });
 
+test("parseArgs rejects a missing or flag-like --allow-missing-ios-canary reason", () => {
+  assert.throws(
+    () => parseArgs(["--allow-missing-ios-canary"]),
+    /--allow-missing-ios-canary requires a short reason/,
+  );
+  assert.throws(
+    () => parseArgs(["--allow-missing-ios-canary", "--require-ios-canary"]),
+    /--allow-missing-ios-canary requires a short reason/,
+  );
+});
+
 test("parseArgs exposes mutually exclusive local and hosted gate phases", () => {
   assert.equal(parseArgs(["--only-local"]).gatePhase, NATIVE_RELEASE_GATE_PHASES.LOCAL);
   assert.equal(parseArgs(["--only-hosted"]).gatePhase, NATIVE_RELEASE_GATE_PHASES.HOSTED);

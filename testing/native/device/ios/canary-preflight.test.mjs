@@ -76,6 +76,12 @@ test("parseArgs supports canary preflight options", () => {
   assert.equal(parsed.json, true);
 });
 
+test("parseArgs rejects missing or flag-like values for --config and --device", () => {
+  assert.throws(() => parseArgs(["--config"]), /Missing value for --config/);
+  assert.throws(() => parseArgs(["--config", "--json"]), /Missing value for --config/);
+  assert.throws(() => parseArgs(["--device", "--skip-config"]), /Missing value for --device/);
+});
+
 test("inspectSyncConfig requires at least one plugin target", () => {
   assert.throws(
     () => inspectSyncConfig("/tmp/missing.json", { fsImpl: memoryFs({}) }),

@@ -7,6 +7,14 @@ function fail(message) {
   throw new Error(message);
 }
 
+function requireValue(argv, index, flag) {
+  const value = argv[index + 1];
+  if (value === undefined || value === "" || value.startsWith("-")) {
+    fail(`Missing value for ${flag}.`);
+  }
+  return value;
+}
+
 function usage() {
   console.log(`Usage: node testing/native/device/ios/sanitize-canary-diagnostics.mjs [options]
 
@@ -30,17 +38,17 @@ export function parseArgs(argv) {
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--preflight") {
-      options.preflightPath = String(argv[index + 1] || "").trim();
+      options.preflightPath = String(requireValue(argv, index, arg)).trim();
       index += 1;
       continue;
     }
     if (arg === "--runtime") {
-      options.runtimePath = String(argv[index + 1] || "").trim();
+      options.runtimePath = String(requireValue(argv, index, arg)).trim();
       index += 1;
       continue;
     }
     if (arg === "--output") {
-      options.outputPath = String(argv[index + 1] || "").trim();
+      options.outputPath = String(requireValue(argv, index, arg)).trim();
       index += 1;
       continue;
     }
