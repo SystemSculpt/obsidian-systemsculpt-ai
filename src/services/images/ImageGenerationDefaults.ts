@@ -6,21 +6,21 @@ import {
   type ImageGenerationServerCatalogModel,
 } from "./ImageGenerationModelCatalog";
 
-export type CanvasFlowPromptDefaults = {
+export type ImageGenerationDefaults = {
   modelId: string;
   imageCount: number;
   aspectRatio: string;
 };
 
-export type CanvasFlowPromptDefaultsSource = "command" | "image-node";
+export type ImageGenerationDefaultsSource = "command" | "image-node";
 
-type CanvasFlowLastUsedState = {
+type ImageGenerationLastUsedState = {
   modelId: string;
   imageCount: number;
   aspectRatio: string;
 };
 
-type CanvasFlowLastUsedPatch = {
+type ImageGenerationLastUsedPatch = {
   modelId?: string;
   imageCount?: unknown;
   aspectRatio?: string;
@@ -30,7 +30,7 @@ const NANO_BANANA_MODEL_ID = "google/nano-banana-pro";
 const MIN_IMAGE_COUNT = 1;
 const MAX_IMAGE_COUNT = 4;
 
-let runtimeLastUsedPatch: Partial<CanvasFlowLastUsedState> = {};
+let runtimeLastUsedPatch: Partial<ImageGenerationLastUsedState> = {};
 let persistenceQueue: Promise<void> = Promise.resolve();
 
 function clampImageCount(value: number): number {
@@ -68,7 +68,7 @@ function readStateFromSettings(
     | "imageGenerationLastUsedCount"
     | "imageGenerationLastUsedAspectRatio"
   >
-): CanvasFlowLastUsedState {
+): ImageGenerationLastUsedState {
   return {
     modelId: sanitizeModelId(settings.imageGenerationLastUsedModelId),
     imageCount: sanitizeImageCountState(settings.imageGenerationLastUsedCount),
@@ -76,7 +76,7 @@ function readStateFromSettings(
   };
 }
 
-function toSettingsPatch(patch: Partial<CanvasFlowLastUsedState>): Partial<SystemSculptSettings> {
+function toSettingsPatch(patch: Partial<ImageGenerationLastUsedState>): Partial<SystemSculptSettings> {
   const update: Partial<SystemSculptSettings> = {};
   if (Object.prototype.hasOwnProperty.call(patch, "modelId")) {
     update.imageGenerationLastUsedModelId = sanitizeModelId(patch.modelId);
@@ -90,14 +90,14 @@ function toSettingsPatch(patch: Partial<CanvasFlowLastUsedState>): Partial<Syste
   return update;
 }
 
-export function getCanvasFlowLastUsedState(
+export function getImageGenerationLastUsedState(
   settings: Pick<
     SystemSculptSettings,
     | "imageGenerationLastUsedModelId"
     | "imageGenerationLastUsedCount"
     | "imageGenerationLastUsedAspectRatio"
   >
-): CanvasFlowLastUsedState {
+): ImageGenerationLastUsedState {
   const stored = readStateFromSettings(settings);
   return {
     modelId:
@@ -115,7 +115,7 @@ export function getCanvasFlowLastUsedState(
   };
 }
 
-export function resolveCanvasFlowPromptDefaults(options: {
+export function resolveImageGenerationDefaults(options: {
   settings: Pick<
     SystemSculptSettings,
     | "imageGenerationDefaultModelId"
@@ -123,10 +123,10 @@ export function resolveCanvasFlowPromptDefaults(options: {
     | "imageGenerationLastUsedCount"
     | "imageGenerationLastUsedAspectRatio"
   >;
-  source: CanvasFlowPromptDefaultsSource;
+  source: ImageGenerationDefaultsSource;
   serverModels?: readonly ImageGenerationServerCatalogModel[];
-}): CanvasFlowPromptDefaults {
-  const lastUsed = getCanvasFlowLastUsedState(options.settings);
+}): ImageGenerationDefaults {
+  const lastUsed = getImageGenerationLastUsedState(options.settings);
 
   const settingsModelId = sanitizeModelId(options.settings.imageGenerationDefaultModelId);
   const modelId = lastUsed.modelId || settingsModelId || DEFAULT_IMAGE_GENERATION_MODEL_ID;
@@ -149,11 +149,11 @@ export function resolveCanvasFlowPromptDefaults(options: {
   };
 }
 
-export function queueCanvasFlowLastUsedPatch(
+export function queueImageGenerationLastUsedPatch(
   plugin: Pick<SystemSculptPlugin, "getSettingsManager">,
-  patch: CanvasFlowLastUsedPatch
+  patch: ImageGenerationLastUsedPatch
 ): Promise<void> {
-  const nextPatch: Partial<CanvasFlowLastUsedState> = {};
+  const nextPatch: Partial<ImageGenerationLastUsedState> = {};
 
   if (Object.prototype.hasOwnProperty.call(patch, "modelId")) {
     nextPatch.modelId = sanitizeModelId(patch.modelId);
@@ -190,7 +190,7 @@ export function queueCanvasFlowLastUsedPatch(
   return persistenceQueue;
 }
 
-export function __resetCanvasFlowPromptDefaultsRuntimeForTests(): void {
+export function __resetImageGenerationDefaultsRuntimeForTests(): void {
   runtimeLastUsedPatch = {};
   persistenceQueue = Promise.resolve();
 }

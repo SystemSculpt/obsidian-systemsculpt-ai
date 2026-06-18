@@ -3,9 +3,9 @@ import { attachFolderSuggester } from "../components/FolderSuggester";
 import type { SystemSculptSettingTab } from "./SystemSculptSettingTab";
 import {
   type ImageGenerationServerCatalogModel,
-} from "../services/canvasflow/ImageGenerationModelCatalog";
-import { SystemSculptImageGenerationService } from "../services/canvasflow/SystemSculptImageGenerationService";
-import { queueCanvasFlowLastUsedPatch } from "../services/canvasflow/CanvasFlowPromptDefaults";
+} from "../services/images/ImageGenerationModelCatalog";
+import { SystemSculptImageGenerationService } from "../services/images/SystemSculptImageGenerationService";
+import { queueImageGenerationLastUsedPatch } from "../services/images/ImageGenerationDefaults";
 import { PlatformContext } from "../services/PlatformContext";
 
 export async function displayImageGenerationTabContent(containerEl: HTMLElement, tabInstance: SystemSculptSettingTab) {
@@ -27,7 +27,7 @@ export async function displayImageGenerationTabContent(containerEl: HTMLElement,
   new Setting(containerEl)
     .setName("Open SystemSculpt Studio")
     .setDesc(
-      "Launch the new desktop-only Studio workspace (hard switch from CanvasFlow)."
+      "Launch the desktop-only Studio workspace."
     )
     .addButton((button) => {
       button
@@ -178,7 +178,7 @@ async function testImageGenerationConnection(tabInstance: SystemSculptSettingTab
   await plugin.getSettingsManager().updateSettings({
     imageGenerationDefaultModelId: nextModel,
   });
-  void queueCanvasFlowLastUsedPatch(plugin, { modelId: nextModel });
+  void queueImageGenerationLastUsedPatch(plugin, { modelId: nextModel });
 
   new Notice("Image generation API connection OK.");
   tabInstance.display();

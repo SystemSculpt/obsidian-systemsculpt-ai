@@ -8,7 +8,7 @@ import type { SystemSculptModel } from "../types/llm";
 import {
   getCuratedImageGenerationModelGroups,
   type ImageGenerationServerCatalogModel,
-} from "../services/canvasflow/ImageGenerationModelCatalog";
+} from "../services/images/ImageGenerationModelCatalog";
 
 function normalizeText(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";

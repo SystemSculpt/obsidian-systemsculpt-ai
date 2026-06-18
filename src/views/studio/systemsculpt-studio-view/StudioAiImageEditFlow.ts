@@ -5,7 +5,7 @@ import {
 import {
   SYSTEMSCULPT_CONCRETE_IMAGE_ASPECT_RATIOS,
   inferClosestSystemSculptAspectRatio,
-} from "../../../services/canvasflow/SystemSculptImageAspectRatio";
+} from "../../../services/images/SystemSculptImageAspectRatio";
 import type {
   StudioNodeDefinition,
   StudioNodeInstance,
