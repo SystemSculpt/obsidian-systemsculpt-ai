@@ -116,6 +116,7 @@ export function findProviderModelOption(inventory, providerId, options = {}) {
   const requiredAuthenticated =
     typeof options.authenticated === "boolean" ? options.authenticated : undefined;
   const requiredModelId = String(options.modelId || "").trim() || null;
+  const requirePreferred = Boolean(options.requirePreferred);
 
   const models = Array.isArray(inventory?.options) ? inventory.options : [];
   const matches = models.filter((option) => {
@@ -148,6 +149,14 @@ export function findProviderModelOption(inventory, providerId, options = {}) {
       if (preferredMatch) {
         return preferredMatch;
       }
+    }
+    if (requirePreferred) {
+      // The caller demanded one of preferredModelIds specifically (e.g. the
+      // #201 OpenAI lane asserting openai@@gpt-5.4-mini). Refuse to fall back
+      // to an unrelated model of the same provider or to the preferredSections
+      // default: a vanished seed must fail the gate, not silently pass on
+      // whatever else the provider happens to expose.
+      return null;
     }
   }
   if (preferredSections) {

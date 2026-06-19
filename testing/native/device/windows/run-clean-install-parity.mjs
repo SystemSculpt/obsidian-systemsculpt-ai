@@ -153,6 +153,10 @@ export function parseArgs(argv, env = process.env) {
       options.requireProvider = true;
       continue;
     }
+    if (arg === "--require-provider-model") {
+      options.requireProviderModel = true;
+      continue;
+    }
     if (arg === "--help" || arg === "-h") {
       options.help = true;
       continue;
@@ -402,6 +406,9 @@ export function buildRemoteCleanInstallParityArgs(options = {}) {
   }
   if (Array.isArray(options.preferredProviderModelIds) && options.preferredProviderModelIds.length > 0) {
     args.push("--provider-model-id", options.preferredProviderModelIds.map((entry) => String(entry || "").trim()).filter(Boolean).join(","));
+  }
+  if (options.requireProviderModel) {
+    args.push("--require-provider-model");
   }
   if (String(options.apiKey || "").trim()) {
     args.push("--api-key", String(options.apiKey).trim());

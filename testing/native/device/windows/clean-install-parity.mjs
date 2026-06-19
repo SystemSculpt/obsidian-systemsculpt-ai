@@ -33,6 +33,7 @@ export function parseCleanInstallParityArgs(argv, env = process.env) {
       .split(",")
       .map((entry) => String(entry || "").trim())
       .filter((entry) => entry.length > 0),
+    requireProviderModel: false,
     apiKeyFile: "",
     apiKey: "",
     waitTimeoutMs: numberOption(env.SYSTEMSCULPT_WINDOWS_WAIT_TIMEOUT_MS, DEFAULT_WAIT_TIMEOUT_MS),
@@ -62,6 +63,10 @@ export function parseCleanInstallParityArgs(argv, env = process.env) {
         .map((entry) => String(entry || "").trim())
         .filter((entry) => entry.length > 0);
       index += 1;
+      continue;
+    }
+    if (arg === "--require-provider-model") {
+      options.requireProviderModel = true;
       continue;
     }
     if (arg === "--api-key-file") {
@@ -232,6 +237,7 @@ export function findProviderModel(inventory, providerId, authenticated, options 
       providerId,
       options.preferredModelIds
     ),
+    requirePreferred: options.requirePreferred,
   });
 }
 
@@ -506,6 +512,7 @@ export async function runCleanInstallParityAgainstRecord(record, options = {}) {
       const inventory = await request(record, "/v1/chat/models?refresh=1", { timeoutMs: 60_000 });
       const option = findProviderModel(inventory, options.providerId, true, {
         preferredModelIds: options.preferredProviderModelIds,
+        requirePreferred: options.requireProviderModel,
       });
       return option ? { inventory, option } : null;
     },

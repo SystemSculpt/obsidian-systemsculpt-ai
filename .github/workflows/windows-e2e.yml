@@ -188,7 +188,7 @@ jobs:
       - name: Run Windows clean-install parity (OpenAI BYOK, #201)
         if: env.HAS_OPENAI == 'true'
         run: |
-          node testing/native/device/windows/run-clean-install-parity.mjs --provider-id openai --provider-model-id openai@@gpt-5.4-mini --api-key-env OPENAI_API_KEY --require-provider
+          node testing/native/device/windows/run-clean-install-parity.mjs --provider-id openai --provider-model-id openai@@gpt-5.4-mini --api-key-env OPENAI_API_KEY --require-provider --require-provider-model
 
       - name: Run Windows desktop baselines
         run: npm run test:native:windows:baselines
