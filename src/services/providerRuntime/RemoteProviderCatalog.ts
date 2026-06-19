@@ -36,6 +36,16 @@ const REMOTE_PROVIDER_SEEDS: readonly RemoteProviderSeed[] = [
     supportedParameters: ["tools"],
     endpoint: AI_PROVIDERS.XAI.BASE_URL,
   },
+  {
+    providerId: "openai",
+    modelId: "gpt-5.4-mini",
+    name: "GPT-5.4 Mini",
+    description: "OpenAI remote provider model for chat, tool use, reasoning, and image-capable turns.",
+    contextLength: 400_000,
+    modality: "text+image->text",
+    supportedParameters: ["tools"],
+    endpoint: AI_PROVIDERS.OPENAI.BASE_URL,
+  },
 ];
 
 function normalizeProviderId(value: unknown): string {
@@ -131,6 +141,9 @@ export function resolveRemoteProviderEndpoint(providerId: string): string {
   }
   if (normalized === "xai") {
     return AI_PROVIDERS.XAI.BASE_URL;
+  }
+  if (normalized === "openai") {
+    return AI_PROVIDERS.OPENAI.BASE_URL;
   }
   return "";
 }
