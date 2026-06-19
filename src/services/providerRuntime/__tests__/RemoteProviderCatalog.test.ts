@@ -33,6 +33,12 @@ describe("RemoteProviderCatalog", () => {
       );
     });
 
+    it("returns the OpenAI base URL for the openai provider", () => {
+      expect(resolveRemoteProviderEndpoint("openai")).toBe(
+        AI_PROVIDERS.OPENAI.BASE_URL
+      );
+    });
+
     it("is case-insensitive", () => {
       expect(resolveRemoteProviderEndpoint("OpenRouter")).toBe(
         AI_PROVIDERS.OPENROUTER.BASE_URL
@@ -251,6 +257,52 @@ describe("RemoteProviderCatalog", () => {
       expect(grok?.capabilities).toEqual(
         expect.arrayContaining(["chat", "reasoning", "vision"])
       );
+    });
+
+    it("returns GPT-5.4 Mini when OpenAI is configured", () => {
+      const plugin = makePlugin([
+        {
+          id: "openai",
+          name: "OpenAI",
+          endpoint: "https://api.openai.com/v1",
+          apiKey: "sk-openai-key",
+          isEnabled: true,
+        },
+      ]);
+
+      const models = listConfiguredRemoteProviderModels(plugin);
+      const gpt = models.find((model) => model.id === "openai@@gpt-5.4-mini");
+
+      expect(gpt).toMatchObject({
+        id: "openai@@gpt-5.4-mini",
+        name: "GPT-5.4 Mini",
+        provider: "openai",
+        sourceMode: "custom_endpoint",
+        sourceProviderId: "openai",
+        piRemoteAvailable: true,
+        piLocalAvailable: false,
+        piAuthMode: "byok",
+        piExecutionModelId: "gpt-5.4-mini",
+      });
+      expect(gpt?.supported_parameters).toContain("tools");
+    });
+
+    it("gives every configured remote provider model a resolvable execution endpoint (#201 contract)", () => {
+      // The core #201 failure mode: a model appears in the Chat dropdown but
+      // has no execution endpoint, so selecting it throws "No remote endpoint
+      // configured". Lock catalog appearance to executability so a future seed
+      // can never ship that gap again.
+      const plugin = makePlugin([
+        { id: "openrouter", name: "OpenRouter", endpoint: "https://openrouter.ai/api/v1", apiKey: "k", isEnabled: true },
+        { id: "xai", name: "xAI", endpoint: "https://api.x.ai/v1", apiKey: "k", isEnabled: true },
+        { id: "openai", name: "OpenAI", endpoint: "https://api.openai.com/v1", apiKey: "k", isEnabled: true },
+      ]);
+
+      const models = listConfiguredRemoteProviderModels(plugin);
+      expect(models.length).toBeGreaterThanOrEqual(3);
+      for (const model of models) {
+        expect(resolveRemoteProviderEndpoint(String(model.sourceProviderId))).not.toBe("");
+      }
     });
 
     it("returns empty array when no matching provider is configured", () => {

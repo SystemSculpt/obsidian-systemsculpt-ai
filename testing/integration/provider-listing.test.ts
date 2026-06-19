@@ -24,6 +24,7 @@ const { startProviderFixtures } = require("../fixtures/providers/index.cjs");
 type Fixtures = Awaited<ReturnType<typeof startProviderFixtures>>;
 
 const OPENROUTER_SEED_MODEL_ID = createCanonicalId("openrouter", "openai/gpt-5.4-mini");
+const OPENAI_SEED_MODEL_ID = createCanonicalId("openai", "gpt-5.4-mini");
 
 function buildPluginStub(customProviders: unknown[] = []) {
   return {
@@ -82,6 +83,28 @@ describe("text model catalog (#201 guard)", () => {
     const seed = models.find((model) => model.id === OPENROUTER_SEED_MODEL_ID);
     expect(seed?.piAuthMode).toBe("byok");
     expect(seed?.provider).toBe("openrouter");
+  });
+
+  it("lists the OpenAI seed model when a keyed custom provider is configured (#201)", async () => {
+    const models = await listPiTextCatalogModels(
+      buildPluginStub([
+        {
+          id: "openai",
+          name: "OpenAI",
+          endpoint: "https://api.openai.com/v1",
+          apiKey: "fixture-key",
+          isEnabled: true,
+        },
+      ])
+    );
+
+    const ids = models.map((model) => model.id);
+    expect(ids[0]).toBe(SYSTEMSCULPT_PI_CANONICAL_MODEL_ID);
+    expect(ids).toContain(OPENAI_SEED_MODEL_ID);
+
+    const seed = models.find((model) => model.id === OPENAI_SEED_MODEL_ID);
+    expect(seed?.piAuthMode).toBe("byok");
+    expect(seed?.provider).toBe("openai");
   });
 
   it("drops the seed model when the provider has no API key", async () => {
