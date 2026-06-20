@@ -15,17 +15,25 @@ concurrency:
   group: linux-e2e-${{ github.ref }}
   cancel-in-progress: true
 
+# Least privilege: this lane only reads the repo. The smoke license/server
+# secrets are NOT exposed job-wide — they are scoped to the single seed step
+# that writes data.json (see "Seed plugin settings"), so install/build/test
+# steps and the launched Electron process never see them.
+permissions:
+  contents: read
+
 jobs:
   desktop-baselines:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
       OBSIDIAN_VERSION: ${{ inputs.obsidian_version || '1.8.9' }}
-      SYSTEMSCULPT_RUNTIME_SMOKE_LICENSE_KEY: ${{ secrets.SYSTEMSCULPT_E2E_LICENSE_KEY }}
-      SYSTEMSCULPT_RUNTIME_SMOKE_SERVER_URL: ${{ secrets.SYSTEMSCULPT_RUNTIME_SMOKE_SERVER_URL }}
 
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          # Don't leave the GITHUB_TOKEN in .git/config for later PR-controlled steps.
+          persist-credentials: false
 
       - name: Use Node.js
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
@@ -119,7 +127,13 @@ jobs:
           fi
           cat "${state_file}"
 
-      - name: Prepare vault and launch Obsidian
+      - name: Seed plugin settings
+        # The smoke license/server secrets are scoped to THIS step only — they
+        # are consumed solely by the data.json seed below and never reach the
+        # install/build/test steps or the launched Electron process.
+        env:
+          SYSTEMSCULPT_RUNTIME_SMOKE_LICENSE_KEY: ${{ secrets.SYSTEMSCULPT_E2E_LICENSE_KEY }}
+          SYSTEMSCULPT_RUNTIME_SMOKE_SERVER_URL: ${{ secrets.SYSTEMSCULPT_RUNTIME_SMOKE_SERVER_URL }}
         run: |
           vault_path="${HOME}/Documents/SystemSculptLinuxQA"
           plugin_dir="${vault_path}/.obsidian/plugins/systemsculpt-ai"
@@ -182,6 +196,10 @@ jobs:
             console.log('Registered vault:', key, '->', vaultPath);
           "
 
+      - name: Launch Obsidian under Xvfb
+        # No secret env here: the license already lives in data.json (seeded
+        # above), so the Obsidian/Electron process is launched without it.
+        run: |
           # Clear Pi-related env vars for clean-install parity
           unset PI_CODING_AGENT_DIR OPENAI_API_KEY ANTHROPIC_API_KEY \
                 GEMINI_API_KEY GOOGLE_API_KEY GROQ_API_KEY MISTRAL_API_KEY \
@@ -199,6 +217,13 @@ jobs:
             [ -e /tmp/.X99-lock ] && break
             sleep 1
           done
+          # Fail fast with a clear message if the display never came up, instead
+          # of launching Obsidian against a dead display and timing out later.
+          if [ ! -e /tmp/.X99-lock ]; then
+            echo "ERROR: Xvfb display :99 did not become ready within 15s"
+            cat /tmp/xvfb.log 2>/dev/null || true
+            exit 1
+          fi
           obsidian_bin="${HOME}/obsidian-installer/squashfs-root/obsidian"
           nohup "${obsidian_bin}" \
             --remote-debugging-port=9222 \
@@ -294,6 +319,39 @@ jobs:
           cp -R "${HOME}/.config/obsidian/logs" diagnostics/obsidian-logs 2>/dev/null || true
           cp -R "${HOME}/Documents/SystemSculptLinuxQA/.obsidian/plugins/systemsculpt-ai" diagnostics/plugin-dir 2>/dev/null || true
           cp -R "${HOME}/.systemsculpt/obsidian-automation" diagnostics/bridge-discovery 2>/dev/null || true
+
+          # Redact secrets from any JSON we are about to upload. GitHub log
+          # masking does NOT protect artifact contents, so the seeded license
+          # (data.json) and the bridge bearer token (discovery files) must be
+          # scrubbed before upload.
+          node --input-type=module -e "
+            import fs from 'node:fs';
+            const SECRET = /key|token|secret|license|password/i;
+            const redact = (v) => {
+              if (Array.isArray(v)) return v.map(redact);
+              if (v && typeof v === 'object') {
+                for (const k of Object.keys(v)) {
+                  v[k] = SECRET.test(k) && typeof v[k] === 'string' ? '[REDACTED]' : redact(v[k]);
+                }
+              }
+              return v;
+            };
+            const targets = [
+              'diagnostics/plugin-dir/data.json',
+              ...(fs.existsSync('diagnostics/bridge-discovery')
+                ? fs.readdirSync('diagnostics/bridge-discovery')
+                    .filter((f) => f.endsWith('.json'))
+                    .map((f) => 'diagnostics/bridge-discovery/' + f)
+                : []),
+            ];
+            for (const p of targets) {
+              try {
+                const d = redact(JSON.parse(fs.readFileSync(p, 'utf8')));
+                fs.writeFileSync(p, JSON.stringify(d, null, 2));
+                console.log('Redacted secrets in', p);
+              } catch {}
+            }
+          "
           echo "Diagnostics collected"
 
       - name: Upload failure diagnostics
