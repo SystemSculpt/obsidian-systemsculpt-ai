@@ -79,6 +79,15 @@ describe("built bundle (main.js) on mobile emulation", () => {
     const commandIds = plugin._commands.map((command: { id: string }) => command.id);
     expect(new Set(commandIds).size).toBe(commandIds.length);
 
+    // #207 graceful degradation: the desktop-only recorder service is WITHHELD
+    // on mobile. Its construction is gated behind !PlatformContext.isMobileRuntime()
+    // (src/main.ts:1689) because recording needs desktop audio APIs. A regression
+    // that ungates it — re-introducing desktop-only code on phones, the #181/#207
+    // failure class — flips this to non-null. The desktop guard
+    // (bundle-load.test.ts) asserts the same service IS initialized off-mobile, so
+    // this is a real gate, not a vacuous default (the field defaulting to null).
+    expect(plugin.recorderService).toBeNull();
+
     plugin.unload();
   });
 });

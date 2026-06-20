@@ -61,6 +61,13 @@ describe("built bundle (main.js)", () => {
     const commandIds = plugin._commands.map((command: { id: string }) => command.id);
     expect(new Set(commandIds).size).toBe(commandIds.length);
 
+    // Contrast with the mobile guard (bundle-load.mobile.test.ts): the
+    // desktop-only recorder service that mobile withholds DOES initialize
+    // off-mobile. This is what makes "withheld on mobile" a real gate
+    // (src/main.ts:1689) rather than a vacuous default — a regression in either
+    // direction (recorder on mobile, or recorder missing on desktop) red-builds.
+    expect(plugin.recorderService).not.toBeNull();
+
     plugin.unload();
   });
 });
