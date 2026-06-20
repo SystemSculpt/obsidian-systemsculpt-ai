@@ -307,6 +307,46 @@ describe("toGeminiContents", () => {
     ]);
   });
 
+  it("attaches the Gemini 3 thoughtSignature sentinel to replayed functionCall parts (#231 multi-turn tool use)", () => {
+    // Gemini 3 validates a thoughtSignature on every functionCall when thinking
+    // is active (on by default for Gemini 3). Calls we replay without an
+    // originating signature must carry the documented skip sentinel, or the next
+    // tool-loop turn is rejected. Older models must NOT receive it.
+    const message = {
+      role: "assistant",
+      content: "",
+      tool_calls: [
+        {
+          id: "call_01",
+          request: {
+            id: "call_01",
+            type: "function",
+            function: { name: "get_weather", arguments: '{"city":"Paris"}' },
+          },
+        },
+      ],
+    } as any;
+
+    const gemini3 = toGeminiContents([message], "gemini-3-flash-preview");
+    expect(gemini3).toEqual([
+      {
+        role: "model",
+        parts: [
+          {
+            functionCall: { name: "get_weather", args: { city: "Paris" } },
+            thoughtSignature: "skip_thought_signature_validator",
+          },
+        ],
+      },
+    ]);
+
+    // A non-Gemini-3 model (or unknown id) must not receive the sentinel.
+    const gemini2 = toGeminiContents([message], "gemini-2.5-flash");
+    expect(gemini2[0].parts[0]).toEqual({
+      functionCall: { name: "get_weather", args: { city: "Paris" } },
+    });
+  });
+
   it("includes a leading text part when an assistant has both text and tool_calls", () => {
     const result = toGeminiContents([
       {
@@ -623,6 +663,27 @@ describe("GeminiStreamParser", () => {
   it("serializes missing functionCall args as an empty object", () => {
     const sse = frame({
       candidates: [{ content: { parts: [{ functionCall: { name: "ping" } }] } }],
+    });
+    const parser = new GeminiStreamParser();
+    const finalEvent = pushAll(parser, sse).find(
+      (e) => e.type === "tool-call" && e.phase === "final",
+    );
+    expect(finalEvent).toEqual({
+      type: "tool-call",
+      phase: "final",
+      call: { id: "call_0_ping", type: "function", function: { name: "ping", arguments: "{}" } },
+    });
+  });
+
+  it("serializes array functionCall args as an empty object, not a JSON array", () => {
+    // Tool arguments must be a JSON object. An array is `typeof === "object"`,
+    // so without an Array.isArray guard it would serialize as "[1,2,3]" and
+    // mis-parse downstream. Gemini does not emit array args, but the parser
+    // must not trust that.
+    const sse = frame({
+      candidates: [
+        { content: { parts: [{ functionCall: { name: "ping", args: [1, 2, 3] } }] } },
+      ],
     });
     const parser = new GeminiStreamParser();
     const finalEvent = pushAll(parser, sse).find(

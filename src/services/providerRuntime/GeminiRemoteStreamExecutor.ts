@@ -34,6 +34,10 @@ type GeminiInlineDataPart = {
 };
 type GeminiFunctionCallPart = {
   functionCall: { name: string; args: Record<string, unknown> };
+  // Gemini 3 validates a thoughtSignature on every functionCall part when
+  // thinking is active (on by default for Gemini 3). Replayed calls we did not
+  // originate a signature for carry GEMINI_THOUGHT_SIGNATURE_SENTINEL instead.
+  thoughtSignature?: string;
 };
 type GeminiFunctionResponsePart = {
   functionResponse: { name: string; response: Record<string, unknown> };
@@ -193,8 +197,23 @@ function buildToolResponsePayload(content: ChatMessage["content"]): Record<strin
  * collapse into `functionResponse` parts on a role `"user"` turn — adjacent tool
  * results merge into one turn, mirroring the Anthropic executor.
  */
-export function toGeminiContents(messages: ChatMessage[]): GeminiContent[] {
+// Gemini 3 requires a thoughtSignature on every functionCall part when thinking
+// is enabled (Gemini 3 thinks by default). For calls we replay without an
+// originating signature, Google's own SDK uses this documented sentinel to skip
+// validation; without it, the next turn of a multi-turn tool loop is rejected.
+// Older Gemini models reject an unexpected thoughtSignature, so it is gated on v3.
+const GEMINI_THOUGHT_SIGNATURE_SENTINEL = "skip_thought_signature_validator";
+
+function modelRequiresThoughtSignature(modelId: string): boolean {
+  return String(modelId || "").trim().toLowerCase().includes("gemini-3");
+}
+
+export function toGeminiContents(
+  messages: ChatMessage[],
+  modelId = "",
+): GeminiContent[] {
   const result: GeminiContent[] = [];
+  const wantsThoughtSignature = modelRequiresThoughtSignature(modelId);
 
   for (const message of messages || []) {
     if (!message || message.role === "system") continue;
@@ -234,7 +253,13 @@ export function toGeminiContents(messages: ChatMessage[]): GeminiContent[] {
         for (const toolCall of message.tool_calls) {
           const fnCall = extractFunctionCallPart(toolCall);
           if (fnCall) {
-            parts.push({ functionCall: { name: fnCall.name, args: fnCall.args } });
+            const functionCallPart: GeminiFunctionCallPart = {
+              functionCall: { name: fnCall.name, args: fnCall.args },
+            };
+            if (wantsThoughtSignature) {
+              functionCallPart.thoughtSignature = GEMINI_THOUGHT_SIGNATURE_SENTINEL;
+            }
+            parts.push(functionCallPart);
           }
         }
       }
@@ -325,7 +350,10 @@ export function buildGeminiRequestBody(
   input: RemoteGeminiStreamInput,
 ): Record<string, unknown> {
   const body: Record<string, unknown> = {
-    contents: toGeminiContents(input.prepared.preparedMessages),
+    contents: toGeminiContents(
+      input.prepared.preparedMessages,
+      input.prepared.actualModelId,
+    ),
   };
 
   const system = input.prepared.finalSystemPrompt;
@@ -516,7 +544,9 @@ export class GeminiStreamParser {
           const name =
             typeof part.functionCall.name === "string" ? part.functionCall.name : "";
           const args =
-            part.functionCall.args && typeof part.functionCall.args === "object"
+            part.functionCall.args &&
+            typeof part.functionCall.args === "object" &&
+            !Array.isArray(part.functionCall.args)
               ? part.functionCall.args
               : {};
           // Gemini sends the complete call in one part and provides no id, so we
