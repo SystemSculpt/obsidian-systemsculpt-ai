@@ -16,9 +16,11 @@ concurrency:
   cancel-in-progress: true
 
 # Least privilege: this lane only reads the repo. The smoke license/server
-# secrets are NOT exposed job-wide — they are scoped to the single seed step
-# that writes data.json (see "Seed plugin settings"), so install/build/test
-# steps and the launched Electron process never see them.
+# secrets are scoped to the single "Seed plugin settings" step's env, not the
+# job env, so they aren't present in the environment of the install/build/test
+# steps or the Obsidian launch step. (The plugin still reads the license from
+# the seeded data.json by design — that file is redacted before any artifact
+# upload; see "Collect logs on failure".)
 permissions:
   contents: read
 
@@ -326,7 +328,9 @@ jobs:
           # scrubbed before upload.
           node --input-type=module -e "
             import fs from 'node:fs';
-            const SECRET = /key|token|secret|license|password/i;
+            // Broad on purpose: over-redacting a diagnostics dump is safe, and
+            // serverUrl/endpoints are seeded from secrets too (CodeRabbit #5).
+            const SECRET = /key|token|secret|license|password|url|server|host|endpoint|credential/i;
             const redact = (v) => {
               if (Array.isArray(v)) return v.map(redact);
               if (v && typeof v === 'object') {
