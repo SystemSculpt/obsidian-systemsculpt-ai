@@ -25,6 +25,7 @@ type Fixtures = Awaited<ReturnType<typeof startProviderFixtures>>;
 
 const OPENROUTER_SEED_MODEL_ID = createCanonicalId("openrouter", "openai/gpt-5.4-mini");
 const OPENAI_SEED_MODEL_ID = createCanonicalId("openai", "gpt-5.4-mini");
+const ANTHROPIC_SEED_MODEL_ID = createCanonicalId("anthropic", "claude-sonnet-4-6");
 
 function buildPluginStub(customProviders: unknown[] = []) {
   return {
@@ -105,6 +106,28 @@ describe("text model catalog (#201 guard)", () => {
     const seed = models.find((model) => model.id === OPENAI_SEED_MODEL_ID);
     expect(seed?.piAuthMode).toBe("byok");
     expect(seed?.provider).toBe("openai");
+  });
+
+  it("lists the Claude seed model when a keyed Anthropic provider is configured (#230)", async () => {
+    const models = await listPiTextCatalogModels(
+      buildPluginStub([
+        {
+          id: "anthropic",
+          name: "Anthropic",
+          endpoint: "https://api.anthropic.com/v1",
+          apiKey: "fixture-key",
+          isEnabled: true,
+        },
+      ])
+    );
+
+    const ids = models.map((model) => model.id);
+    expect(ids[0]).toBe(SYSTEMSCULPT_PI_CANONICAL_MODEL_ID);
+    expect(ids).toContain(ANTHROPIC_SEED_MODEL_ID);
+
+    const seed = models.find((model) => model.id === ANTHROPIC_SEED_MODEL_ID);
+    expect(seed?.piAuthMode).toBe("byok");
+    expect(seed?.provider).toBe("anthropic");
   });
 
   it("drops the seed model when the provider has no API key", async () => {

@@ -39,6 +39,12 @@ describe("RemoteProviderCatalog", () => {
       );
     });
 
+    it("returns the Anthropic base URL for the anthropic provider (#230)", () => {
+      expect(resolveRemoteProviderEndpoint("anthropic")).toBe(
+        AI_PROVIDERS.ANTHROPIC.BASE_URL
+      );
+    });
+
     it("is case-insensitive", () => {
       expect(resolveRemoteProviderEndpoint("OpenRouter")).toBe(
         AI_PROVIDERS.OPENROUTER.BASE_URL
@@ -49,7 +55,7 @@ describe("RemoteProviderCatalog", () => {
     });
 
     it("returns empty string for unknown providers", () => {
-      expect(resolveRemoteProviderEndpoint("anthropic")).toBe("");
+      expect(resolveRemoteProviderEndpoint("cohere")).toBe("");
       expect(resolveRemoteProviderEndpoint("")).toBe("");
     });
   });
@@ -287,6 +293,38 @@ describe("RemoteProviderCatalog", () => {
       expect(gpt?.supported_parameters).toContain("tools");
     });
 
+    it("returns Claude Sonnet 4.6 when Anthropic is configured (#230)", () => {
+      const plugin = makePlugin([
+        {
+          id: "anthropic",
+          name: "Anthropic",
+          endpoint: "https://api.anthropic.com/v1",
+          apiKey: "sk-ant-key",
+          isEnabled: true,
+        },
+      ]);
+
+      const models = listConfiguredRemoteProviderModels(plugin);
+      const claude = models.find((model) => model.id === "anthropic@@claude-sonnet-4-6");
+
+      expect(claude).toMatchObject({
+        id: "anthropic@@claude-sonnet-4-6",
+        name: "Claude Sonnet 4.6",
+        provider: "anthropic",
+        sourceMode: "custom_endpoint",
+        sourceProviderId: "anthropic",
+        piRemoteAvailable: true,
+        piLocalAvailable: false,
+        piAuthMode: "byok",
+        piExecutionModelId: "claude-sonnet-4-6",
+        context_length: 200_000,
+      });
+      expect(claude?.supported_parameters).toContain("tools");
+      expect(claude?.capabilities).toEqual(
+        expect.arrayContaining(["chat", "reasoning", "vision"])
+      );
+    });
+
     it("gives every configured remote provider model a resolvable execution endpoint (#201 contract)", () => {
       // The core #201 failure mode: a model appears in the Chat dropdown but
       // has no execution endpoint, so selecting it throws "No remote endpoint
@@ -296,10 +334,11 @@ describe("RemoteProviderCatalog", () => {
         { id: "openrouter", name: "OpenRouter", endpoint: "https://openrouter.ai/api/v1", apiKey: "k", isEnabled: true },
         { id: "xai", name: "xAI", endpoint: "https://api.x.ai/v1", apiKey: "k", isEnabled: true },
         { id: "openai", name: "OpenAI", endpoint: "https://api.openai.com/v1", apiKey: "k", isEnabled: true },
+        { id: "anthropic", name: "Anthropic", endpoint: "https://api.anthropic.com/v1", apiKey: "k", isEnabled: true },
       ]);
 
       const models = listConfiguredRemoteProviderModels(plugin);
-      expect(models.length).toBeGreaterThanOrEqual(3);
+      expect(models.length).toBeGreaterThanOrEqual(4);
       for (const model of models) {
         expect(resolveRemoteProviderEndpoint(String(model.sourceProviderId))).not.toBe("");
       }
