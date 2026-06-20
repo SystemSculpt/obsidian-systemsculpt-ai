@@ -142,6 +142,7 @@ export function isTransientError(error) {
   const message = String(error?.message || error || "").toLowerCase();
   return (
     /\b429\b/.test(message) ||
+    /\b50[234]\b/.test(message) ||
     [
       "http 429",
       "status 429",
@@ -152,6 +153,20 @@ export function isTransientError(error) {
       "retry shortly",
       "retry after",
       "upstream error",
+      // Live-provider stream/network hiccups (recurring windows-e2e flake, PRs
+      // #239/#240): the plugin surfaces a transient upstream stream failure as a
+      // generic "Error in streaming response. Please try again." The chat-send
+      // retry (retryTransient) must treat that — and the usual gateway/socket
+      // transients — as retryable so a single provider blip does not fail the
+      // lane. Genuine regressions carry distinct messages and still fail fast.
+      "error in streaming response",
+      "bad gateway",
+      "service unavailable",
+      "gateway timeout",
+      "socket hang up",
+      "econnreset",
+      "etimedout",
+      "fetch failed",
     ].some((needle) => message.includes(needle))
   );
 }
