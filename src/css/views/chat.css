@@ -813,6 +813,23 @@
   line-height: 1.45;
 }
 
+.systemsculpt-chat-model-modal-empty-retry {
+  margin-top: 4px;
+  padding: 6px 16px;
+  border-radius: 8px;
+  border: 1px solid var(--interactive-accent);
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.systemsculpt-chat-model-modal-empty-retry:hover {
+  background: var(--interactive-accent-hover);
+  border-color: var(--interactive-accent-hover);
+}
+
 .systemsculpt-chat-composer-attachments {
   display: flex;
   flex-wrap: wrap;

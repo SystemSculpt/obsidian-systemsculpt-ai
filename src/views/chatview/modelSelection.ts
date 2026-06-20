@@ -322,9 +322,20 @@ export function getChatModelPickerSearchText(option: ChatModelPickerOption): str
 export async function loadChatModelPickerOptions(
   plugin: Pick<SystemSculptPlugin, "modelService" | "settings">,
 ): Promise<ChatModelPickerOption[]> {
-  const models = plugin.modelService?.getModels
-    ? await plugin.modelService.getModels().catch(() => [] as SystemSculptModel[])
+  const modelService = plugin.modelService;
+  const models = modelService?.getModels
+    ? await modelService.getModels().catch(() => [] as SystemSculptModel[])
     : [];
+
+  // A failed catalog load must not masquerade as "no models available": surface
+  // the reason so the picker can show it with a retry instead of a silent,
+  // unexplained empty dropdown (#206).
+  if (models.length === 0) {
+    const status = modelService?.getCatalogStatus?.();
+    if (status?.state === "error") {
+      throw new Error(status.reason || "The model catalog is unavailable.");
+    }
+  }
 
   const providerHints = Array.from(
     new Set(

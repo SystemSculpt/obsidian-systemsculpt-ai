@@ -415,7 +415,7 @@ describe("ChatModelPickerModal", () => {
     expect(activeOption?.dataset.modelValue).toBe("openai@@gpt-4.1");
   });
 
-  it("shows an empty state when the model list loads without options", async () => {
+  it("shows an empty state with a retry action when the model list loads without options", async () => {
     const modal = new ChatModelPickerModal(new App(), {
       currentValue: "missing-model",
       loadOptions: async () => [],
@@ -432,5 +432,45 @@ describe("ChatModelPickerModal", () => {
     expect(
       (modal.contentEl.querySelector(".systemsculpt-chat-model-modal-list") as HTMLElement | null)?.style.display
     ).toBe("none");
+    // An empty dropdown must never be a dead end — it must offer a retry (#206).
+    expect(
+      modal.contentEl.querySelector(".systemsculpt-chat-model-modal-empty-retry")
+    ).not.toBeNull();
+  });
+
+  it("shows the failure reason and a working Retry action when loading fails (#206)", async () => {
+    const loadOptions = jest
+      .fn()
+      .mockRejectedValueOnce(new Error("OpenRouter endpoint unreachable"))
+      .mockResolvedValueOnce([buildOption({ value: "openai@@gpt-4.1", label: "GPT-4.1" })]);
+
+    const modal = new ChatModelPickerModal(new App(), {
+      currentValue: "openai@@gpt-4.1",
+      loadOptions,
+      onSelect: jest.fn(),
+      onOpenSetup: jest.fn(),
+    });
+
+    modal.onOpen();
+    await flush();
+
+    // The reason is visible, not a generic "unavailable".
+    expect(
+      modal.contentEl.querySelector(".systemsculpt-chat-model-modal-empty-text")?.textContent
+    ).toContain("OpenRouter endpoint unreachable");
+
+    const retryButton = modal.contentEl.querySelector(
+      ".systemsculpt-chat-model-modal-empty-retry"
+    ) as HTMLButtonElement | null;
+    expect(retryButton).not.toBeNull();
+
+    retryButton!.dispatchEvent(new window.Event("click", { bubbles: true }));
+    await flush();
+
+    expect(loadOptions).toHaveBeenCalledTimes(2);
+    const optionTitles = Array.from(
+      modal.contentEl.querySelectorAll(".systemsculpt-chat-model-modal-option-title")
+    ).map((el) => el.textContent?.trim());
+    expect(optionTitles).toContain("GPT-4.1");
   });
 });

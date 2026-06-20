@@ -14,12 +14,25 @@ async function loadPiTextCatalogModule(): Promise<typeof import("../pi-native/Pi
   return await import("../pi-native/PiTextCatalog");
 }
 
+export type ModelCatalogState = "loading" | "ready" | "error";
+
+/**
+ * Deterministic catalog state so the chat model dropdown is never silently
+ * empty: a `ready` catalog has models, and an empty/failed catalog reports an
+ * `error` with a human-readable reason the UI can show alongside a retry (#206).
+ */
+export type ModelCatalogStatus = {
+  state: ModelCatalogState;
+  reason: string | null;
+};
+
 export class UnifiedModelService {
   private static instance: UnifiedModelService | null = null;
   private favoritesService: FavoritesService;
   private cachedModels: SystemSculptModel[] | null = null;
   private loadingPromise: Promise<SystemSculptModel[]> | null = null;
   private isInitialLoadDone = false;
+  private catalogStatus: ModelCatalogStatus = { state: "loading", reason: null };
 
   private constructor(private readonly plugin: SystemSculptPlugin) {
     this.favoritesService = FavoritesService.getInstance(plugin);
@@ -45,6 +58,7 @@ export class UnifiedModelService {
     }
 
     this.loadingPromise = (async () => {
+      this.catalogStatus = { state: "loading", reason: null };
       const { listPiTextCatalogModels } = await loadPiTextCatalogModule();
       const models = await listPiTextCatalogModels(this.plugin);
       this.favoritesService.processFavorites(models);
@@ -61,6 +75,7 @@ export class UnifiedModelService {
         this.isInitialLoadDone = true;
       }
 
+      this.catalogStatus = { state: "ready", reason: null };
       return modelsWithRuntimeFlags;
     })();
 
@@ -74,10 +89,29 @@ export class UnifiedModelService {
   public async getModels(forceRefresh: boolean = false): Promise<SystemSculptModel[]> {
     try {
       return await this.loadModels(forceRefresh);
-    } catch {
-      this.cachedModels = [];
+    } catch (error) {
+      // Never collapse a failure into a silent empty dropdown: record the
+      // reason so the picker can surface it with a retry instead of an
+      // unexplained blank list (#206).
+      this.catalogStatus = {
+        state: "error",
+        reason: error instanceof Error ? error.message : String(error || "Unknown error"),
+      };
+      // Do NOT cache an empty list here: an empty array is truthy, so caching it
+      // would make the Retry path (getModels() without forceRefresh) reuse the
+      // failed result and re-throw without ever re-hitting the catalog. Clearing
+      // the cache lets the very next getModels() re-attempt the load (#206).
+      this.cachedModels = null;
       return [];
     }
+  }
+
+  /**
+   * Current catalog state for the model dropdown. `ready` means the list is
+   * trustworthy; `error` carries a reason to show the user with a retry (#206).
+   */
+  public getCatalogStatus(): ModelCatalogStatus {
+    return { ...this.catalogStatus };
   }
 
   public async getModelById(modelId: string): Promise<SystemSculptModel | undefined> {
@@ -226,5 +260,6 @@ export class UnifiedModelService {
   public clearAllCaches(): void {
     this.cachedModels = null;
     this.loadingPromise = null;
+    this.catalogStatus = { state: "loading", reason: null };
   }
 }
