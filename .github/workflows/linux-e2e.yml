@@ -1,0 +1,379 @@
+name: Linux E2E
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      obsidian_version:
+        description: "Obsidian version to install"
+        required: false
+        default: "1.8.9"
+
+concurrency:
+  group: linux-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+# Least privilege: this lane only reads the repo. The smoke license/server
+# secrets are scoped to the single "Seed plugin settings" step's env, not the
+# job env, so they aren't present in the environment of the install/build/test
+# steps or the Obsidian launch step. (The plugin still reads the license from
+# the seeded data.json by design — that file is redacted before any artifact
+# upload; see "Collect logs on failure".)
+permissions:
+  contents: read
+
+jobs:
+  desktop-baselines:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      OBSIDIAN_VERSION: ${{ inputs.obsidian_version || '1.8.9' }}
+
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          # Don't leave the GITHUB_TOKEN in .git/config for later PR-controlled steps.
+          persist-credentials: false
+
+      - name: Use Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "24.x"
+          cache: "npm"
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Build plugin
+        run: npm run build
+
+      - name: Rebundle plugin for desktop CI
+        run: |
+          # The standard build externalizes proper-lockfile/graceful-fs (mobile compat).
+          # Obsidian's Electron module loader can't resolve them in CI without pi-agent.
+          # Re-bundle main.js to inline those deps, keeping only Obsidian-provided externals.
+          npx esbuild main.js --bundle --outfile=main.js --allow-overwrite \
+            --format=cjs --platform=node \
+            --external:obsidian --external:electron \
+            --external:@codemirror/* --external:@lezer/* \
+            --external:@mariozechner/pi-tui
+
+      # ---- Linux desktop runtime deps (Electron/Chromium + virtual display) ----
+
+      - name: Install Linux desktop runtime deps
+        run: |
+          sudo apt-get update
+          # xvfb for a headless display; the rest are Electron/Chromium runtime
+          # libs. The libasound2 package was renamed to libasound2t64 on 24.04,
+          # so fall back to the classic name on older images.
+          sudo apt-get install -y \
+            xvfb libgbm1 libnss3 libnspr4 libatk1.0-0t64 libatk-bridge2.0-0t64 \
+            libcups2t64 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 \
+            libxfixes3 libxrandr2 libgtk-3-0t64 libpango-1.0-0 libcairo2 \
+            libasound2t64 libxshmfence1 fonts-liberation \
+          || sudo apt-get install -y \
+            xvfb libgbm1 libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 \
+            libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 \
+            libxfixes3 libxrandr2 libgtk-3-0 libpango-1.0-0 libcairo2 \
+            libasound2 libxshmfence1 fonts-liberation
+
+      # ---- Install Obsidian (AppImage, extracted to avoid FUSE) ----
+
+      - name: Cache Obsidian installer
+        id: obsidian-cache
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: ~/obsidian-installer/Obsidian.AppImage
+          key: obsidian-appimage-${{ env.OBSIDIAN_VERSION }}
+
+      - name: Download Obsidian AppImage
+        if: steps.obsidian-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/obsidian-installer
+          url="https://github.com/obsidianmd/obsidian-releases/releases/download/v${OBSIDIAN_VERSION}/Obsidian-${OBSIDIAN_VERSION}.AppImage"
+          echo "Downloading Obsidian ${OBSIDIAN_VERSION} from ${url}"
+          curl -fL -o ~/obsidian-installer/Obsidian.AppImage "${url}"
+          ls -lh ~/obsidian-installer/
+
+      - name: Extract Obsidian AppImage
+        run: |
+          # GitHub runners lack FUSE, so extract the AppImage and run the binary
+          # directly instead of mounting it.
+          cd ~/obsidian-installer
+          chmod +x Obsidian.AppImage
+          rm -rf squashfs-root
+          ./Obsidian.AppImage --appimage-extract >/dev/null
+          if [ ! -x squashfs-root/obsidian ]; then
+            echo "ERROR: obsidian binary not found after extraction"
+            ls -la squashfs-root || true
+            exit 1
+          fi
+          echo "Obsidian extracted to ${HOME}/obsidian-installer/squashfs-root/obsidian"
+
+      # ---- Bootstrap vault and launch ----
+
+      - name: Start provider fixtures
+        run: |
+          state_file="${HOME}/.systemsculpt-fixtures.json"
+          node testing/fixtures/providers/serve.mjs --state-file "${state_file}" &
+          for i in $(seq 1 20); do
+            [ -f "${state_file}" ] && break
+            sleep 1
+          done
+          if [ ! -f "${state_file}" ]; then
+            echo "ERROR: provider fixtures did not start"
+            exit 1
+          fi
+          cat "${state_file}"
+
+      - name: Seed plugin settings
+        # The smoke license/server secrets are scoped to THIS step only — they
+        # are consumed solely by the data.json seed below and never reach the
+        # install/build/test steps or the launched Electron process.
+        env:
+          SYSTEMSCULPT_RUNTIME_SMOKE_LICENSE_KEY: ${{ secrets.SYSTEMSCULPT_E2E_LICENSE_KEY }}
+          SYSTEMSCULPT_RUNTIME_SMOKE_SERVER_URL: ${{ secrets.SYSTEMSCULPT_RUNTIME_SMOKE_SERVER_URL }}
+        run: |
+          vault_path="${HOME}/Documents/SystemSculptLinuxQA"
+          plugin_dir="${vault_path}/.obsidian/plugins/systemsculpt-ai"
+
+          # Create vault with plugin
+          rm -rf "${vault_path}"
+          mkdir -p "${plugin_dir}"
+          cp main.js manifest.json styles.css "${plugin_dir}/"
+          echo '{}' > "${vault_path}/.obsidian/app.json"
+          echo '{}' > "${vault_path}/.obsidian/appearance.json"
+          echo '["systemsculpt-ai"]' > "${vault_path}/.obsidian/community-plugins.json"
+          echo '{"file-explorer":true,"global-search":true,"switcher":true,"command-palette":true,"editor-status":true}' > "${vault_path}/.obsidian/core-plugins.json"
+          echo '# SystemSculpt Linux QA' > "${vault_path}/Welcome.md"
+
+          # Seed plugin settings with hosted auth + the automation bridge flag
+          # (matches the macOS/Windows CI seed).
+          node --input-type=module -e "
+            import fs from 'node:fs';
+            import crypto from 'node:crypto';
+            const licenseKey = process.env.SYSTEMSCULPT_RUNTIME_SMOKE_LICENSE_KEY || '';
+            const serverUrl = process.env.SYSTEMSCULPT_RUNTIME_SMOKE_SERVER_URL || 'https://api.systemsculpt.com';
+            const settings = {
+              settingsMode: 'advanced',
+              selectedModelId: 'systemsculpt@@systemsculpt/ai-agent',
+              desktopAutomationBridgeEnabled: true,
+              vaultInstanceId: crypto.randomUUID(),
+            };
+            if (licenseKey) {
+              settings.licenseKey = licenseKey;
+              settings.licenseValid = true;
+              settings.enableSystemSculptProvider = true;
+              settings.serverUrl = serverUrl;
+              settings.transcriptionProvider = 'systemsculpt';
+              settings.embeddingsProvider = 'systemsculpt';
+            }
+            fs.writeFileSync('${plugin_dir}/data.json', JSON.stringify(settings, null, 2));
+            console.log('Plugin settings seeded (bridge enabled)');
+          "
+
+          echo "Vault prepared at ${vault_path}"
+
+          # Register vault in Obsidian's state (Linux config dir)
+          obsidian_config="${HOME}/.config/obsidian"
+          mkdir -p "${obsidian_config}"
+          node --input-type=module -e "
+            import fs from 'node:fs';
+            import path from 'node:path';
+            import crypto from 'node:crypto';
+            const configPath = path.join(process.env.HOME, '.config/obsidian/obsidian.json');
+            const vaultPath = path.join(process.env.HOME, 'Documents/SystemSculptLinuxQA');
+            let state = {};
+            try { state = JSON.parse(fs.readFileSync(configPath, 'utf8')); } catch {}
+            if (!state.vaults) state.vaults = {};
+            const key = crypto.createHash('md5').update(vaultPath).digest('hex').slice(0, 16);
+            state.vaults[key] = { path: vaultPath, ts: Date.now(), open: true };
+            for (const [k, v] of Object.entries(state.vaults)) {
+              if (k !== key) v.open = false;
+            }
+            fs.writeFileSync(configPath, JSON.stringify(state, null, 2));
+            console.log('Registered vault:', key, '->', vaultPath);
+          "
+
+      - name: Launch Obsidian under Xvfb
+        # No secret env here: the license already lives in data.json (seeded
+        # above), so the Obsidian/Electron process is launched without it.
+        run: |
+          # Clear Pi-related env vars for clean-install parity
+          unset PI_CODING_AGENT_DIR OPENAI_API_KEY ANTHROPIC_API_KEY \
+                GEMINI_API_KEY GOOGLE_API_KEY GROQ_API_KEY MISTRAL_API_KEY \
+                OPENROUTER_API_KEY PERPLEXITY_API_KEY DEEPSEEK_API_KEY \
+                XAI_API_KEY CEREBRAS_API_KEY SAMBANOVA_API_KEY TOGETHER_API_KEY 2>/dev/null || true
+
+          # Start a virtual display, then launch Obsidian against it. Electron in
+          # CI needs --no-sandbox (no setuid sandbox/user-ns) and --disable-gpu
+          # (no GPU under Xvfb). The fake media flags give getUserMedia a
+          # synthetic mic without a prompt (recorder smoke).
+          Xvfb :99 -screen 0 1280x1024x24 -nolisten tcp >/tmp/xvfb.log 2>&1 &
+          export DISPLAY=:99
+          # Xvfb writes /tmp/.X99-lock once the display is up (no extra deps).
+          for i in $(seq 1 15); do
+            [ -e /tmp/.X99-lock ] && break
+            sleep 1
+          done
+          # Fail fast with a clear message if the display never came up, instead
+          # of launching Obsidian against a dead display and timing out later.
+          if [ ! -e /tmp/.X99-lock ]; then
+            echo "ERROR: Xvfb display :99 did not become ready within 15s"
+            cat /tmp/xvfb.log 2>/dev/null || true
+            exit 1
+          fi
+          obsidian_bin="${HOME}/obsidian-installer/squashfs-root/obsidian"
+          nohup "${obsidian_bin}" \
+            --remote-debugging-port=9222 \
+            --no-sandbox \
+            --disable-gpu \
+            --use-fake-device-for-media-stream \
+            --use-fake-ui-for-media-stream >/tmp/obsidian.log 2>&1 &
+          echo "Obsidian launched (pid $!) with remote debugging on port 9222"
+
+      - name: Dismiss trust prompt and enable plugin via CDP
+        run: |
+          node --experimental-websocket \
+            testing/native/desktop-automation/cdp-trust-and-enable.mjs \
+            --port 9222 \
+            --plugin-id systemsculpt-ai
+
+      - name: Wait for desktop automation bridge
+        run: |
+          # The bridge only publishes its discovery file once the plugin has
+          # fully loaded (onload + critical init). On Linux this step IS the
+          # #181 "does it load" guard — if startup fails, no file appears.
+          discovery_dir="${HOME}/.systemsculpt/obsidian-automation"
+          deadline=$(($(date +%s) + 120))
+          found=false
+
+          while [ "$(date +%s)" -lt "${deadline}" ]; do
+            if [ -d "${discovery_dir}" ]; then
+              for f in "${discovery_dir}"/*.json; do
+                [ -f "${f}" ] || continue
+                port=$(node --input-type=module -e "
+                  import fs from 'node:fs';
+                  try {
+                    const d = JSON.parse(fs.readFileSync('${f}','utf8'));
+                    if (d.pluginId === 'systemsculpt-ai' && d.port) {
+                      console.log(d.port);
+                    }
+                  } catch {}
+                " 2>/dev/null)
+                if [ -n "${port}" ]; then
+                  echo "Bridge discovered: port=${port}"
+                  found=true
+                  break 2
+                fi
+              done
+            fi
+            echo "Waiting for bridge discovery file..."
+            sleep 3
+          done
+
+          if [ "${found}" != "true" ]; then
+            echo "ERROR: Desktop automation bridge did not become ready within 120 seconds."
+            echo "----- obsidian.log -----"; tail -100 /tmp/obsidian.log 2>/dev/null || true
+            exit 1
+          fi
+
+      # ---- Run tests ----
+
+      - name: Run desktop baselines
+        run: |
+          # Create sync config pointing to the CI vault plugin directory
+          echo '{"pluginTargets":[{"path":"'"${HOME}/Documents/SystemSculptLinuxQA/.obsidian/plugins/systemsculpt-ai"'"}]}' \
+            > systemsculpt-sync.config.json
+          node testing/native/desktop-automation/run.mjs \
+            --case managed-baseline \
+            --no-reload
+
+      - name: Run release smoke (provider fixtures)
+        run: |
+          # Fixture settings apply AFTER managed-baseline (a fixture-keyed
+          # openrouter entry present during the baseline would make its
+          # local-Pi leg call the real OpenRouter API). The runner patches
+          # settings through the live bridge, which persists them itself.
+          node testing/native/desktop-automation/run.mjs \
+            --case release-smoke \
+            --no-reload \
+            --apply-fixture-settings "${HOME}/.systemsculpt-fixtures.json"
+
+      # ---- Failure diagnostics ----
+
+      - name: Capture screenshot on failure
+        if: failure()
+        run: |
+          DISPLAY=:99 import -window root failure-screenshot.png 2>/dev/null || \
+            DISPLAY=:99 xwd -root -silent 2>/dev/null | convert xwd:- failure-screenshot.png 2>/dev/null || \
+            echo "Screenshot capture unavailable"
+
+      - name: Collect logs on failure
+        if: failure()
+        run: |
+          mkdir -p diagnostics
+          cp /tmp/obsidian.log diagnostics/ 2>/dev/null || true
+          cp /tmp/xvfb.log diagnostics/ 2>/dev/null || true
+          cp -R "${HOME}/.config/obsidian/logs" diagnostics/obsidian-logs 2>/dev/null || true
+          cp -R "${HOME}/Documents/SystemSculptLinuxQA/.obsidian/plugins/systemsculpt-ai" diagnostics/plugin-dir 2>/dev/null || true
+          cp -R "${HOME}/.systemsculpt/obsidian-automation" diagnostics/bridge-discovery 2>/dev/null || true
+
+          # Redact secrets from any JSON we are about to upload. GitHub log
+          # masking does NOT protect artifact contents, so the seeded license
+          # (data.json) and the bridge bearer token (discovery files) must be
+          # scrubbed before upload.
+          node --input-type=module -e "
+            import fs from 'node:fs';
+            // Broad on purpose: over-redacting a diagnostics dump is safe, and
+            // serverUrl/endpoints are seeded from secrets too (CodeRabbit #5).
+            const SECRET = /key|token|secret|license|password|url|server|host|endpoint|credential/i;
+            const redact = (v) => {
+              if (Array.isArray(v)) return v.map(redact);
+              if (v && typeof v === 'object') {
+                for (const k of Object.keys(v)) {
+                  v[k] = SECRET.test(k) && typeof v[k] === 'string' ? '[REDACTED]' : redact(v[k]);
+                }
+              }
+              return v;
+            };
+            const targets = [
+              'diagnostics/plugin-dir/data.json',
+              ...(fs.existsSync('diagnostics/bridge-discovery')
+                ? fs.readdirSync('diagnostics/bridge-discovery')
+                    .filter((f) => f.endsWith('.json'))
+                    .map((f) => 'diagnostics/bridge-discovery/' + f)
+                : []),
+            ];
+            for (const p of targets) {
+              try {
+                const d = redact(JSON.parse(fs.readFileSync(p, 'utf8')));
+                fs.writeFileSync(p, JSON.stringify(d, null, 2));
+                console.log('Redacted secrets in', p);
+              } catch {}
+            }
+          "
+          echo "Diagnostics collected"
+
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: linux-e2e-diagnostics
+          path: |
+            failure-screenshot.png
+            diagnostics/
+          retention-days: 7
+          if-no-files-found: ignore
+
+      # ---- Cleanup ----
+
+      - name: Stop Obsidian
+        if: always()
+        run: |
+          pkill -f obsidian 2>/dev/null || true
+          pkill -f Xvfb 2>/dev/null || true
+          echo "Obsidian and Xvfb processes stopped."
