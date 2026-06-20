@@ -1,7 +1,7 @@
 # AGENTS.md
 
 Single source of truth for AI agents working in this repo (the SystemSculpt AI
-Obsidian plugin). `CLAUDE.md` is a hard link to this file — **edit `AGENTS.md`**.
+Obsidian plugin). `CLAUDE.md` is a symlink to this file — **edit `AGENTS.md`**.
 
 ## Merge autonomy, proven by CI
 
