@@ -33,6 +33,9 @@ jobs:
       - name: Unit Tests
         run: npm test
 
+      - name: Native Shared Unit Tests
+        run: npm run test:native:shared
+
       - name: Embeddings Tests
         run: npm run test:embeddings
 
