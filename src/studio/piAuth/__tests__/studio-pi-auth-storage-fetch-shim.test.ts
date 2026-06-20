@@ -9,6 +9,7 @@ describe("StudioPiAuthStorage fetch shim integration", () => {
     // jest.resetModules() clears the cache but not the doMock registry, so
     // un-register module mocks each test or fs/path stubs leak.
     jest.dontMock("fs");
+    jest.dontMock("../../../platform/desktopOnly");
     jest.dontMock("../../../services/pi/PiSdkStoragePaths");
     jest.dontMock("../../../services/pi/PiSdkDesktopSupport");
     jest.dontMock("../../../services/pi/PiSdkAuthStorage");
@@ -467,5 +468,45 @@ describe("StudioPiAuthStorage fetch shim integration", () => {
         }),
       ]),
     );
+  });
+
+  it("resolves BYOK keys from plugin settings on mobile without loading the Pi SDK (#207)", async () => {
+    // Mobile has no Node: the desktop-only boundary yields nothing, so the Pi
+    // SDK (node:fs) must never be required. doMock it to throw — if the lazy
+    // boundary ever reaches for it, this test fails loudly.
+    jest.doMock("../../../platform/desktopOnly", () => ({
+      hasNodeRuntime: () => false,
+      loadDesktopOnly: () => null,
+    }));
+    jest.doMock("../../../services/pi/PiSdkDesktopSupport", () => {
+      throw new Error("Pi SDK desktop support must not load on mobile (#207)");
+    });
+
+    let resolveStudioPiProviderApiKey: typeof import("../StudioPiAuthStorage").resolveStudioPiProviderApiKey;
+    let readStudioPiProviderAuthState: typeof import("../StudioPiAuthStorage").readStudioPiProviderAuthState;
+    jest.isolateModules(() => {
+      ({ resolveStudioPiProviderApiKey, readStudioPiProviderAuthState } = require("../StudioPiAuthStorage"));
+    });
+
+    const plugin = {
+      settings: {
+        customProviders: [
+          {
+            id: "openrouter",
+            name: "OpenRouter",
+            endpoint: "https://openrouter.ai/api/v1",
+            apiKey: "sk-or-mobile",
+            isEnabled: true,
+          },
+        ],
+      },
+    } as any;
+
+    await expect(resolveStudioPiProviderApiKey!("openrouter", { plugin })).resolves.toBe("sk-or-mobile");
+    await expect(readStudioPiProviderAuthState!("openrouter", { plugin })).resolves.toEqual({
+      provider: "openrouter",
+      hasAnyAuth: true,
+      source: "api_key",
+    });
   });
 });

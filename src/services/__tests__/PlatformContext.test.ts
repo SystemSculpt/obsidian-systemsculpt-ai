@@ -118,6 +118,36 @@ describe("PlatformContext", () => {
     });
   });
 
+  describe("supportsNodeApis", () => {
+    it("is true on desktop (Node available)", () => {
+      const context = PlatformContext.get();
+
+      expect(context.supportsNodeApis()).toBe(true);
+    });
+
+    it("is false on mobile (no Node runtime)", () => {
+      mockEnvironment = {
+        runtime: "mobile",
+        surface: "mobile",
+        isMobileEmulation: false,
+      };
+      const context = PlatformContext.get();
+
+      expect(context.supportsNodeApis()).toBe(false);
+    });
+
+    it("stays true during desktop mobile-emulation (capability follows runtime, not surface)", () => {
+      mockEnvironment = {
+        runtime: "desktop",
+        surface: "mobile",
+        isMobileEmulation: true,
+      };
+      const context = PlatformContext.get();
+
+      expect(context.supportsNodeApis()).toBe(true);
+    });
+  });
+
   describe("uiVariant", () => {
     it('returns "desktop" on desktop', () => {
       const context = PlatformContext.get();

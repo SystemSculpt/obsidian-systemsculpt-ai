@@ -28,6 +28,9 @@ describe("PiTextRuntime", () => {
     supportsDesktopOnlyFeatures = jest.fn(() => true);
     jest.spyOn(PlatformContext, "get").mockReturnValue({
       supportsDesktopOnlyFeatures,
+      // Both predicates derive from isDesktopRuntime, so Node availability tracks
+      // desktop-only support — mirror it so the mobile toggles below cover both.
+      supportsNodeApis: () => supportsDesktopOnlyFeatures(),
     } as any);
   });
 
