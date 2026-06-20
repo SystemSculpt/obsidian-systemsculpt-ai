@@ -15,17 +15,26 @@ concurrency:
   group: macos-e2e-${{ github.ref }}
   cancel-in-progress: true
 
+# Least privilege: this lane only reads the repo. The smoke license/server
+# secrets are scoped to the "Seed plugin settings" step's env, not the job env,
+# so they aren't present in the environment of the install/build/test steps or
+# the Obsidian launch step. (The plugin reads the license from the seeded
+# data.json by design — that file is redacted before any artifact upload.)
+permissions:
+  contents: read
+
 jobs:
   desktop-baselines:
     runs-on: macos-latest
     timeout-minutes: 15
     env:
       OBSIDIAN_VERSION: ${{ inputs.obsidian_version || '1.8.9' }}
-      SYSTEMSCULPT_RUNTIME_SMOKE_LICENSE_KEY: ${{ secrets.SYSTEMSCULPT_E2E_LICENSE_KEY }}
-      SYSTEMSCULPT_RUNTIME_SMOKE_SERVER_URL: ${{ secrets.SYSTEMSCULPT_RUNTIME_SMOKE_SERVER_URL }}
 
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          # Don't leave the GITHUB_TOKEN in .git/config for later PR-controlled steps.
+          persist-credentials: false
 
       - name: Use Node.js
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
@@ -110,7 +119,13 @@ jobs:
           fi
           cat "${state_file}"
 
-      - name: Prepare vault and launch Obsidian
+      - name: Seed plugin settings
+        # The smoke license/server secrets are scoped to THIS step only — they
+        # are consumed solely by the data.json seed below and never reach the
+        # install/build/test steps or the launched Electron process.
+        env:
+          SYSTEMSCULPT_RUNTIME_SMOKE_LICENSE_KEY: ${{ secrets.SYSTEMSCULPT_E2E_LICENSE_KEY }}
+          SYSTEMSCULPT_RUNTIME_SMOKE_SERVER_URL: ${{ secrets.SYSTEMSCULPT_RUNTIME_SMOKE_SERVER_URL }}
         run: |
           vault_path="${HOME}/Documents/SystemSculptMacQA"
           plugin_dir="${vault_path}/.obsidian/plugins/systemsculpt-ai"
@@ -173,6 +188,10 @@ jobs:
             console.log('Registered vault:', key, '->', vaultPath);
           "
 
+      - name: Launch Obsidian
+        # No secret env here: the license already lives in data.json (seeded
+        # above), so the Obsidian/Electron process is launched without it.
+        run: |
           # Clear Pi-related env vars for clean-install parity
           unset PI_CODING_AGENT_DIR OPENAI_API_KEY ANTHROPIC_API_KEY \
                 GEMINI_API_KEY GOOGLE_API_KEY GROQ_API_KEY MISTRAL_API_KEY \
@@ -268,6 +287,10 @@ jobs:
           cp -R "${HOME}/Library/Application Support/obsidian/logs" diagnostics/obsidian-logs 2>/dev/null || true
           cp -R "${HOME}/Documents/SystemSculptMacQA/.obsidian/plugins/systemsculpt-ai" diagnostics/plugin-dir 2>/dev/null || true
           cp -R "${HOME}/.systemsculpt/obsidian-automation" diagnostics/bridge-discovery 2>/dev/null || true
+
+          # Scrub secrets (seeded license in data.json, bridge bearer token)
+          # from the JSON we upload — log masking does not cover artifact files.
+          node testing/native/shared/redact-diagnostics.mjs diagnostics
           echo "Diagnostics collected"
 
       - name: Upload failure diagnostics
