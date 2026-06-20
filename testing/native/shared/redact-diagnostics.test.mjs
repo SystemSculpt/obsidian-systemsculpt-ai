@@ -66,6 +66,25 @@ test("redactDiagnosticsDir scrubs every JSON under the diagnostics tree", () => 
   }
 });
 
+test("redactDiagnosticsDir fails closed on an unparseable .json (never ships raw)", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "redact-failclosed-"));
+  try {
+    // A *.json that fails to parse (e.g. a crash truncated data.json mid-write)
+    // could still contain a secret. It must NOT survive into the artifact.
+    const broken = path.join(dir, "data.json");
+    fs.writeFileSync(broken, '{"licenseKey":"live-secret-uuid", TRUNCATED');
+
+    const redacted = redactDiagnosticsDir(dir);
+    assert.deepEqual(redacted, [broken]);
+
+    const after = fs.readFileSync(broken, "utf8");
+    assert.ok(!after.includes("live-secret-uuid"), "raw secret must be gone");
+    assert.match(after, /_redacted/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("redactDiagnosticsDir is a no-op for a missing directory", () => {
   assert.deepEqual(redactDiagnosticsDir(path.join(os.tmpdir(), "redact-missing-xyz-404")), []);
 });

@@ -52,18 +52,49 @@ function collectJsonFiles(dir, acc) {
  * untouched — they're never the secret vector (the seeded credentials live in
  * data.json / the bridge discovery JSON).
  */
+const UNPARSEABLE_MARKER = {
+  _redacted: "unparseable JSON replaced to avoid leaking unredacted secrets",
+};
+
 export function redactDiagnosticsDir(diagDir) {
   if (!diagDir || !fs.existsSync(diagDir)) {
     return [];
   }
   const redacted = [];
   for (const file of collectJsonFiles(diagDir, [])) {
+    let parsed;
     try {
-      const obj = redactSecrets(JSON.parse(fs.readFileSync(file, "utf8")));
-      fs.writeFileSync(file, JSON.stringify(obj, null, 2));
+      parsed = JSON.parse(fs.readFileSync(file, "utf8"));
+    } catch {
+      // Fail closed: a *.json we can't read/parse might still contain secrets,
+      // so we must never ship its raw contents. Replace it with a marker (or, if
+      // that also fails, delete it) instead of leaving it in the artifact.
+      try {
+        fs.writeFileSync(file, JSON.stringify(UNPARSEABLE_MARKER, null, 2));
+        redacted.push(file);
+      } catch {
+        try {
+          fs.rmSync(file, { force: true });
+          redacted.push(file);
+        } catch {
+          // Nothing more we can safely do; surface it rather than hide it.
+          console.error("WARNING: could not redact or remove", file);
+        }
+      }
+      continue;
+    }
+    try {
+      fs.writeFileSync(file, JSON.stringify(redactSecrets(parsed), null, 2));
       redacted.push(file);
     } catch {
-      // Not JSON / unreadable — leave it; not a credential carrier.
+      // Couldn't write the redacted form — remove the original so the unredacted
+      // file is never uploaded.
+      try {
+        fs.rmSync(file, { force: true });
+        redacted.push(file);
+      } catch {
+        console.error("WARNING: could not redact or remove", file);
+      }
     }
   }
   return redacted;
