@@ -322,40 +322,9 @@ jobs:
           cp -R "${HOME}/Documents/SystemSculptLinuxQA/.obsidian/plugins/systemsculpt-ai" diagnostics/plugin-dir 2>/dev/null || true
           cp -R "${HOME}/.systemsculpt/obsidian-automation" diagnostics/bridge-discovery 2>/dev/null || true
 
-          # Redact secrets from any JSON we are about to upload. GitHub log
-          # masking does NOT protect artifact contents, so the seeded license
-          # (data.json) and the bridge bearer token (discovery files) must be
-          # scrubbed before upload.
-          node --input-type=module -e "
-            import fs from 'node:fs';
-            // Broad on purpose: over-redacting a diagnostics dump is safe, and
-            // serverUrl/endpoints are seeded from secrets too (CodeRabbit #5).
-            const SECRET = /key|token|secret|license|password|url|server|host|endpoint|credential/i;
-            const redact = (v) => {
-              if (Array.isArray(v)) return v.map(redact);
-              if (v && typeof v === 'object') {
-                for (const k of Object.keys(v)) {
-                  v[k] = SECRET.test(k) && typeof v[k] === 'string' ? '[REDACTED]' : redact(v[k]);
-                }
-              }
-              return v;
-            };
-            const targets = [
-              'diagnostics/plugin-dir/data.json',
-              ...(fs.existsSync('diagnostics/bridge-discovery')
-                ? fs.readdirSync('diagnostics/bridge-discovery')
-                    .filter((f) => f.endsWith('.json'))
-                    .map((f) => 'diagnostics/bridge-discovery/' + f)
-                : []),
-            ];
-            for (const p of targets) {
-              try {
-                const d = redact(JSON.parse(fs.readFileSync(p, 'utf8')));
-                fs.writeFileSync(p, JSON.stringify(d, null, 2));
-                console.log('Redacted secrets in', p);
-              } catch {}
-            }
-          "
+          # Scrub secrets (seeded license in data.json, bridge bearer token)
+          # from the JSON we upload — log masking does not cover artifact files.
+          node testing/native/shared/redact-diagnostics.mjs diagnostics
           echo "Diagnostics collected"
 
       - name: Upload failure diagnostics

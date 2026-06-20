@@ -15,6 +15,13 @@ concurrency:
   group: windows-e2e-${{ github.ref }}
   cancel-in-progress: true
 
+# Least privilege: this lane only reads the repo. (The provider/smoke secrets
+# stay at job scope because the device scripts consume them indirectly across
+# several steps; the leak vector was the failure artifact, which is now redacted
+# before upload — see "Redact Windows diagnostics".)
+permissions:
+  contents: read
+
 jobs:
   windows-e2e:
     name: windows-e2e
@@ -36,6 +43,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          # Don't leave the GITHUB_TOKEN in .git/config for later PR-controlled steps.
+          persist-credentials: false
 
       - name: Use Node.js
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
@@ -217,6 +227,14 @@ jobs:
             Select-Object Id, Path, StartTime |
             ConvertTo-Json -Depth 3 |
             Out-File -FilePath (Join-Path $diag "obsidian-processes.json") -Encoding utf8
+
+      - name: Redact Windows diagnostics
+        if: failure()
+        shell: pwsh
+        run: |
+          # Scrub secrets (seeded license in data.json, bridge bearer token)
+          # from the JSON we upload — log masking does not cover artifact files.
+          node testing/native/shared/redact-diagnostics.mjs "$env:RUNNER_TEMP\systemsculpt-windows-diagnostics"
 
       - name: Upload Windows diagnostics
         if: failure()

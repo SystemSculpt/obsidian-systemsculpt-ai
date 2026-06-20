@@ -137,7 +137,7 @@
     "test:integration:ci": "node scripts/jest.mjs --config jest.integration.config.cjs --runInBand --forceExit",
     "test:embeddings:serial": "node scripts/jest.mjs --config jest.embeddings.config.cjs --runInBand --passWithNoTests",
     "test:release-script": "node --test scripts/release-plugin.test.mjs scripts/check-release-surfaces.test.mjs",
-    "test:native:shared": "node --test testing/native/shared/model-inventory.test.mjs",
+    "test:native:shared": "node --test testing/native/shared/*.test.mjs",
     "check:release-surfaces": "node scripts/check-release-surfaces.mjs",
     "release:plugin": "node scripts/release-plugin.mjs"
   },
