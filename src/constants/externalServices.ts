@@ -52,6 +52,12 @@ export const AI_PROVIDERS = {
   GROQ: {
     BASE_URL: getExternalUrl("https://api.groq.com/openai/v1"),
     AUDIO_TRANSCRIPTIONS: getExternalUrl("https://api.groq.com/openai/v1/audio/transcriptions")
+  },
+  GOOGLE: {
+    // Gemini native API. The base ends at the API version; the executor builds
+    // the per-call path `${BASE_URL}/models/{model}:streamGenerateContent?alt=sse`
+    // (model + action live in the path, not a /chat/completions suffix).
+    BASE_URL: getExternalUrl("https://generativelanguage.googleapis.com/v1beta")
   }
 } as const;
 

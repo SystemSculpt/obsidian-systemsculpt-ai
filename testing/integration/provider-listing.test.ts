@@ -26,6 +26,7 @@ type Fixtures = Awaited<ReturnType<typeof startProviderFixtures>>;
 const OPENROUTER_SEED_MODEL_ID = createCanonicalId("openrouter", "openai/gpt-5.4-mini");
 const OPENAI_SEED_MODEL_ID = createCanonicalId("openai", "gpt-5.4-mini");
 const ANTHROPIC_SEED_MODEL_ID = createCanonicalId("anthropic", "claude-sonnet-4-6");
+const GOOGLE_SEED_MODEL_ID = createCanonicalId("google", "gemini-3-flash-preview");
 
 function buildPluginStub(customProviders: unknown[] = []) {
   return {
@@ -128,6 +129,28 @@ describe("text model catalog (#201 guard)", () => {
     const seed = models.find((model) => model.id === ANTHROPIC_SEED_MODEL_ID);
     expect(seed?.piAuthMode).toBe("byok");
     expect(seed?.provider).toBe("anthropic");
+  });
+
+  it("lists the Gemini seed model when a keyed Google provider is configured (#231)", async () => {
+    const models = await listPiTextCatalogModels(
+      buildPluginStub([
+        {
+          id: "google",
+          name: "Google Gemini",
+          endpoint: "https://generativelanguage.googleapis.com/v1beta",
+          apiKey: "fixture-key",
+          isEnabled: true,
+        },
+      ])
+    );
+
+    const ids = models.map((model) => model.id);
+    expect(ids[0]).toBe(SYSTEMSCULPT_PI_CANONICAL_MODEL_ID);
+    expect(ids).toContain(GOOGLE_SEED_MODEL_ID);
+
+    const seed = models.find((model) => model.id === GOOGLE_SEED_MODEL_ID);
+    expect(seed?.piAuthMode).toBe("byok");
+    expect(seed?.provider).toBe("google");
   });
 
   it("drops the seed model when the provider has no API key", async () => {
