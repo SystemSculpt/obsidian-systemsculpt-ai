@@ -40,6 +40,7 @@ export type { StreamDebugCallbacks } from "./StreamExecutionTypes";
 
 let localPiStreamExecutorModulePromise: Promise<typeof import("./LocalPiStreamExecutor")> | null = null;
 let remoteProviderStreamExecutorModulePromise: Promise<typeof import("./providerRuntime/OpenRouterRemoteStreamExecutor")> | null = null;
+let anthropicRemoteStreamExecutorModulePromise: Promise<typeof import("./providerRuntime/AnthropicRemoteStreamExecutor")> | null = null;
 
 async function loadLocalPiStreamExecutorModule(): Promise<typeof import("./LocalPiStreamExecutor")> {
   if (!localPiStreamExecutorModulePromise) {
@@ -53,6 +54,13 @@ async function loadRemoteProviderStreamExecutorModule(): Promise<typeof import("
     remoteProviderStreamExecutorModulePromise = import("./providerRuntime/OpenRouterRemoteStreamExecutor");
   }
   return await remoteProviderStreamExecutorModulePromise;
+}
+
+async function loadAnthropicRemoteStreamExecutorModule(): Promise<typeof import("./providerRuntime/AnthropicRemoteStreamExecutor")> {
+  if (!anthropicRemoteStreamExecutorModulePromise) {
+    anthropicRemoteStreamExecutorModulePromise = import("./providerRuntime/AnthropicRemoteStreamExecutor");
+  }
+  return await anthropicRemoteStreamExecutorModulePromise;
 }
 
 export type CreditsBalanceSnapshot = {
@@ -1211,6 +1219,28 @@ export class SystemSculptService {
       }
 
       if (prepared.modelSource === "custom_endpoint") {
+        const remoteProviderId = String(
+          prepared.resolvedModel.sourceProviderId || prepared.resolvedModel.provider || "",
+        )
+          .trim()
+          .toLowerCase();
+
+        // Anthropic/Claude runs through the native Messages API executor; the
+        // OpenAI-compatible /chat/completions path cannot serve it (#230).
+        if (remoteProviderId === "anthropic") {
+          const { executeAnthropicRemoteStream } = await loadAnthropicRemoteStreamExecutorModule();
+          for await (const event of executeAnthropicRemoteStream({
+            plugin: this.plugin,
+            prepared,
+            signal,
+            reasoningEffort,
+            debug,
+          })) {
+            yield event;
+          }
+          return;
+        }
+
         const { executeOpenRouterRemoteStream } = await loadRemoteProviderStreamExecutorModule();
         for await (const event of executeOpenRouterRemoteStream({
           plugin: this.plugin,

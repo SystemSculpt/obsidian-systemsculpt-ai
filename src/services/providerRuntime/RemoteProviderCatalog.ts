@@ -46,6 +46,18 @@ const REMOTE_PROVIDER_SEEDS: readonly RemoteProviderSeed[] = [
     supportedParameters: ["tools"],
     endpoint: AI_PROVIDERS.OPENAI.BASE_URL,
   },
+  {
+    // Anthropic runs through the native Messages API executor (not the
+    // OpenAI-compatible /chat/completions path) — see AnthropicRemoteStreamExecutor (#230).
+    providerId: "anthropic",
+    modelId: "claude-sonnet-4-6",
+    name: "Claude Sonnet 4.6",
+    description: "Anthropic Claude remote provider model (native Messages API) for chat, tool use, and reasoning.",
+    contextLength: 200_000,
+    modality: "text+image->text",
+    supportedParameters: ["tools"],
+    endpoint: AI_PROVIDERS.ANTHROPIC.BASE_URL,
+  },
 ];
 
 function normalizeProviderId(value: unknown): string {
@@ -144,6 +156,9 @@ export function resolveRemoteProviderEndpoint(providerId: string): string {
   }
   if (normalized === "openai") {
     return AI_PROVIDERS.OPENAI.BASE_URL;
+  }
+  if (normalized === "anthropic") {
+    return AI_PROVIDERS.ANTHROPIC.BASE_URL;
   }
   return "";
 }

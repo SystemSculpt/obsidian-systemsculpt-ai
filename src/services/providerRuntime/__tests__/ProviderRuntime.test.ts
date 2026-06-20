@@ -132,6 +132,30 @@ describe("ProviderRuntime", () => {
       });
     });
 
+    it("resolves a remote BYOK plan for a configured Anthropic model (#230)", async () => {
+      // #230 acceptance: a configured Anthropic key yields a Chat model that
+      // resolves an executable plan (not just appears in the dropdown).
+      mockedResolveEndpoint.mockReturnValue("https://api.anthropic.com/v1");
+      const model = makeRemoteModel({
+        id: "anthropic@@claude-sonnet-4-6",
+        piExecutionModelId: "claude-sonnet-4-6",
+        sourceProviderId: "anthropic",
+        provider: "anthropic",
+      });
+
+      const plan = await resolveProviderRuntimePlan(model, {} as any);
+
+      expect(plan).toEqual({
+        mode: "remote",
+        actualModelId: "claude-sonnet-4-6",
+        providerId: "anthropic",
+        authMode: "byok",
+        endpoint: "https://api.anthropic.com/v1",
+        supportsTools: true,
+        supportsImages: true,
+      });
+    });
+
     it("falls back to Pi provider auth when plugin has no stored key", async () => {
       mockedGetApiKey.mockReturnValue("");
       mockResolveStudioPiProviderApiKey.mockResolvedValue(null);
