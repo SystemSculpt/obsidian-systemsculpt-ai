@@ -69,6 +69,28 @@ function resolveMaxTokens(prepared: PreparedChatRequest): number {
   return DEFAULT_MAX_TOKENS;
 }
 
+// Map the requested reasoning effort onto an Anthropic extended-thinking token
+// budget. Anthropic requires `budget_tokens >= 1024`; `"off"`/unset (or any
+// unrecognized value) disables thinking. The effort vocabulary mirrors
+// SystemSculptService.normalizeReasoningEffort
+// ("off"|"minimal"|"low"|"medium"|"high"|"xhigh").
+function resolveAnthropicThinkingBudget(reasoningEffort?: string): number | null {
+  switch (String(reasoningEffort || "").trim().toLowerCase()) {
+    case "minimal":
+      return 1024;
+    case "low":
+      return 2048;
+    case "medium":
+      return 4096;
+    case "high":
+      return 8192;
+    case "xhigh":
+      return 16384;
+    default:
+      return null;
+  }
+}
+
 /**
  * Parse a data URL (or bare base64 payload) into the Anthropic image-block
  * `media_type`/`data` pair. Returns null when the value is not a usable base64
@@ -184,9 +206,22 @@ export function toAnthropicMessages(messages: ChatMessage[]): AnthropicMessage[]
     if (!message || message.role === "system") continue;
 
     if (message.role === "tool") {
+      const toolUseId =
+        typeof message.tool_call_id === "string" ? message.tool_call_id.trim() : "";
+      // An empty tool_use_id yields an uncorrelatable tool_result that breaks
+      // Anthropic's turn contract; fall back to a plain user text turn instead
+      // (CodeRabbit, #230).
+      if (!toolUseId) {
+        const fallback = stringifyToolResultContent(message.content).trim();
+        if (fallback.length > 0) {
+          result.push({ role: "user", content: fallback });
+        }
+        continue;
+      }
+
       const block: AnthropicToolResultBlock = {
         type: "tool_result",
-        tool_use_id: typeof message.tool_call_id === "string" ? message.tool_call_id : "",
+        tool_use_id: toolUseId,
         content: stringifyToolResultContent(message.content),
       };
       const last = result[result.length - 1];
@@ -303,9 +338,18 @@ export function toAnthropicTools(tools: unknown[]): AnthropicTool[] {
 export function buildAnthropicMessagesRequestBody(
   input: RemoteAnthropicStreamInput,
 ): Record<string, unknown> {
+  const thinkingBudget = resolveAnthropicThinkingBudget(input.reasoningEffort);
+  let maxTokens = resolveMaxTokens(input.prepared);
+  // Anthropic requires max_tokens to exceed budget_tokens, leaving room for the
+  // visible answer on top of the thinking budget. Bump it when the requested
+  // budget would otherwise crowd out the response.
+  if (thinkingBudget !== null && maxTokens <= thinkingBudget) {
+    maxTokens = thinkingBudget + DEFAULT_MAX_TOKENS;
+  }
+
   const body: Record<string, unknown> = {
     model: input.prepared.actualModelId,
-    max_tokens: resolveMaxTokens(input.prepared),
+    max_tokens: maxTokens,
     messages: toAnthropicMessages(input.prepared.preparedMessages),
     stream: true,
   };
@@ -317,6 +361,16 @@ export function buildAnthropicMessagesRequestBody(
 
   if (Array.isArray(input.prepared.tools) && input.prepared.tools.length > 0) {
     body.tools = toAnthropicTools(input.prepared.tools as OpenAITool[]);
+  }
+
+  // Extended thinking: a reasoning-capable Claude should actually reason when
+  // the user requests it. The catalog advertises reasoning and streamMessage
+  // forwards reasoningEffort, so without this the Messages API silently returns
+  // a non-thinking response (#230, Codex P2). Thinking deltas surface via the
+  // parser's `thinking_delta` → reasoning events. Temperature is intentionally
+  // never sent (Anthropic requires it unset/1 when thinking is enabled).
+  if (thinkingBudget !== null) {
+    body.thinking = { type: "enabled", budget_tokens: thinkingBudget };
   }
 
   return body;

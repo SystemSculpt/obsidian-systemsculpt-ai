@@ -35,6 +35,7 @@ import { errorLogger } from "../utils/errorLogger";
 import type { PreparedChatRequest, StreamDebugCallbacks } from "./StreamExecutionTypes";
 import { MCPService } from "../mcp/MCPService";
 import type { ToolCall, ToolCallRequest, ToolCallResult } from "../types/toolCalls";
+import { normalizeProviderId } from "./providerRuntime/RemoteProviderCatalog";
 
 export type { StreamDebugCallbacks } from "./StreamExecutionTypes";
 
@@ -1219,11 +1220,9 @@ export class SystemSculptService {
       }
 
       if (prepared.modelSource === "custom_endpoint") {
-        const remoteProviderId = String(
-          prepared.resolvedModel.sourceProviderId || prepared.resolvedModel.provider || "",
-        )
-          .trim()
-          .toLowerCase();
+        const remoteProviderId = normalizeProviderId(
+          String(prepared.resolvedModel.sourceProviderId || prepared.resolvedModel.provider || ""),
+        );
 
         // Anthropic/Claude runs through the native Messages API executor; the
         // OpenAI-compatible /chat/completions path cannot serve it (#230).

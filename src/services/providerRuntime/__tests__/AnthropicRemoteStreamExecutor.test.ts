@@ -192,6 +192,38 @@ describe("buildAnthropicMessagesRequestBody", () => {
     const withoutTools = buildAnthropicMessagesRequestBody(makeInput());
     expect("tools" in withoutTools).toBe(false);
   });
+
+  it("omits extended thinking when no reasoning effort is requested (#230)", () => {
+    const body = buildAnthropicMessagesRequestBody(makeInput());
+    expect("thinking" in body).toBe(false);
+    expect(body.max_tokens).toBe(8192);
+  });
+
+  it("omits extended thinking when reasoning effort is 'off' (#230)", () => {
+    const body = buildAnthropicMessagesRequestBody(makeInput({ reasoningEffort: "off" }));
+    expect("thinking" in body).toBe(false);
+  });
+
+  it("enables extended thinking for a requested reasoning effort (#230)", () => {
+    // Codex P2: a reasoning-capable Claude must actually reason. medium fits
+    // under the default 8192 cap, so max_tokens is left untouched.
+    const body = buildAnthropicMessagesRequestBody(makeInput({ reasoningEffort: "medium" }));
+    expect(body.thinking).toEqual({ type: "enabled", budget_tokens: 4096 });
+    expect(body.max_tokens).toBe(8192);
+  });
+
+  it("bumps max_tokens above the thinking budget when the effort crowds the cap (#230)", () => {
+    // high → 8192 budget, which is not below the default 8192 cap, so max_tokens
+    // is raised to leave room for the visible answer (Anthropic requires
+    // max_tokens > budget_tokens).
+    const high = buildAnthropicMessagesRequestBody(makeInput({ reasoningEffort: "high" }));
+    expect(high.thinking).toEqual({ type: "enabled", budget_tokens: 8192 });
+    expect(high.max_tokens).toBe(16384);
+
+    const xhigh = buildAnthropicMessagesRequestBody(makeInput({ reasoningEffort: "xhigh" }));
+    expect(xhigh.thinking).toEqual({ type: "enabled", budget_tokens: 16384 });
+    expect(xhigh.max_tokens).toBe(24576);
+  });
 });
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -298,6 +330,20 @@ describe("toAnthropicMessages", () => {
         ],
       },
     ]);
+  });
+
+  it("falls back to a plain user turn for a tool message missing a tool_call_id (#230)", () => {
+    // An empty tool_use_id is uncorrelatable and breaks Anthropic's turn
+    // contract; emit the content as plain user text instead (CodeRabbit).
+    const result = toAnthropicMessages([
+      { role: "tool", content: "orphan-result" } as any,
+    ]);
+    expect(result).toEqual([{ role: "user", content: "orphan-result" }]);
+  });
+
+  it("drops a tool message with neither tool_call_id nor content (#230)", () => {
+    const result = toAnthropicMessages([{ role: "tool", content: "" } as any]);
+    expect(result).toEqual([]);
   });
 
   it("does not merge a tool result into a preceding non-tool-result user turn", () => {

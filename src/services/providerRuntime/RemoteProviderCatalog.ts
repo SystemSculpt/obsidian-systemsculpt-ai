@@ -60,7 +60,7 @@ const REMOTE_PROVIDER_SEEDS: readonly RemoteProviderSeed[] = [
   },
 ];
 
-function normalizeProviderId(value: unknown): string {
+export function normalizeProviderId(value: unknown): string {
   return String(value || "").trim().toLowerCase();
 }
 
