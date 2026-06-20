@@ -149,3 +149,24 @@ test("isTransientError matches 429 and retryable upstream conditions", () => {
   assert.equal(isTransientError(new Error("retry after 10 seconds")), true);
   assert.equal(isTransientError(new Error("providers tab not found")), false);
 });
+
+test("isTransientError treats live-provider stream + gateway hiccups as transient (windows-e2e flake guard)", () => {
+  // Recurring windows-e2e flake (PRs #239, #240): the plugin wraps a transient
+  // upstream stream failure as this generic message. The chat-send retry must
+  // recognize it (and the usual gateway/socket transients) so one live-provider
+  // blip does not fail the lane. Without this, retryTransient threw on the first
+  // failure and the job died at the chat round-trip.
+  assert.equal(isTransientError(new Error("Error in streaming response. Please try again.")), true);
+  assert.equal(isTransientError(new Error("upstream connect error: 503 Service Unavailable")), true);
+  assert.equal(isTransientError(new Error("502 Bad Gateway")), true);
+  assert.equal(isTransientError(new Error("504 Gateway Timeout")), true);
+  assert.equal(isTransientError(new Error("socket hang up")), true);
+  assert.equal(isTransientError(new Error("read ECONNRESET")), true);
+  assert.equal(isTransientError(new Error("connect ETIMEDOUT 1.2.3.4:443")), true);
+  assert.equal(isTransientError(new Error("fetch failed")), true);
+
+  // Genuine regressions must still fail fast — never retried away.
+  assert.equal(isTransientError(new Error("Model grok-4.3 did not echo the expected token")), false);
+  assert.equal(isTransientError(new Error("Invalid API key")), false);
+  assert.equal(isTransientError(new Error("Managed SystemSculpt model was not present")), false);
+});
