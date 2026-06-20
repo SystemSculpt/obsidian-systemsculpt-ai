@@ -143,17 +143,34 @@ export class ChatModelPickerModal extends StandardModal {
     });
   }
 
-  private showEmptyState(message: string, icon: string = "search-x"): void {
+  private showEmptyState(
+    message: string,
+    options: { icon?: string; showRetry?: boolean } = {},
+  ): void {
     this.listEl.style.display = "none";
     this.emptyStateEl.style.display = "flex";
     this.emptyStateEl.empty();
 
     const iconEl = this.emptyStateEl.createDiv({ cls: "systemsculpt-chat-model-modal-empty-icon" });
-    setIcon(iconEl, icon);
+    setIcon(iconEl, options.icon || "search-x");
     this.emptyStateEl.createDiv({
       cls: "systemsculpt-chat-model-modal-empty-text",
       text: message,
     });
+
+    // An empty/failed dropdown must never be a dead end — always offer a retry
+    // so a transient catalog failure is recoverable in place (#206).
+    if (options.showRetry) {
+      const retryButtonEl = this.emptyStateEl.createEl("button", {
+        cls: "systemsculpt-chat-model-modal-empty-retry",
+        text: "Retry",
+        attr: { type: "button" },
+      });
+      this.registerDomEvent(retryButtonEl, "click", () => {
+        this.renderLoadingState();
+        void this.reloadOptions();
+      });
+    }
   }
 
   private hideEmptyState(): void {
@@ -170,7 +187,10 @@ export class ChatModelPickerModal extends StandardModal {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error || "Unknown error");
       this.loading = false;
-      this.showEmptyState(`Unable to load models (${message}).`, "alert-triangle");
+      this.showEmptyState(`Couldn't load models — ${message}`, {
+        icon: "alert-triangle",
+        showRetry: true,
+      });
     }
   }
 
@@ -212,11 +232,10 @@ export class ChatModelPickerModal extends StandardModal {
     if (this.filteredOptions.length === 0) {
       if (this.loading) {
         this.renderLoadingState();
+      } else if (query) {
+        this.showEmptyState(`No models found matching "${query}".`);
       } else {
-        const message = query
-          ? `No models found matching "${query}".`
-          : "No chat models are available right now.";
-        this.showEmptyState(message);
+        this.showEmptyState("No chat models are available right now.", { showRetry: true });
       }
       return;
     }

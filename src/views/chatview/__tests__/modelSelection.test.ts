@@ -202,4 +202,42 @@ describe("chat model setup helpers", () => {
       })
     );
   });
+
+  it("surfaces the catalog error reason instead of returning a silent empty list", async () => {
+    const plugin = {
+      modelService: {
+        getModels: jest.fn().mockResolvedValue([]),
+        getCatalogStatus: jest.fn(() => ({
+          state: "error",
+          reason: "OpenRouter endpoint unreachable",
+        })),
+      },
+      settings: {},
+    } as any;
+
+    await expect(loadChatModelPickerOptions(plugin)).rejects.toThrow(
+      "OpenRouter endpoint unreachable"
+    );
+  });
+
+  it("returns an empty list without throwing when the catalog is ready but empty", async () => {
+    const plugin = {
+      modelService: {
+        getModels: jest.fn().mockResolvedValue([]),
+        getCatalogStatus: jest.fn(() => ({ state: "ready", reason: null })),
+      },
+      settings: {},
+    } as any;
+
+    await expect(loadChatModelPickerOptions(plugin)).resolves.toEqual([]);
+  });
+
+  it("returns an empty list when the model service exposes no catalog status", async () => {
+    const plugin = {
+      modelService: { getModels: jest.fn().mockResolvedValue([]) },
+      settings: {},
+    } as any;
+
+    await expect(loadChatModelPickerOptions(plugin)).resolves.toEqual([]);
+  });
 });

@@ -110,4 +110,44 @@ describe("UnifiedModelService", () => {
       localPi: true,
     });
   });
+
+  it("starts in a loading status before the first load resolves", () => {
+    const plugin = buildPlugin();
+    const service = UnifiedModelService.getInstance(plugin);
+    expect(service.getCatalogStatus()).toEqual({ state: "loading", reason: null });
+  });
+
+  it("reports a ready status after a successful catalog load", async () => {
+    const plugin = buildPlugin();
+    const service = UnifiedModelService.getInstance(plugin);
+    await service.getModels();
+    expect(service.getCatalogStatus()).toEqual({ state: "ready", reason: null });
+  });
+
+  it("records an error status with a reason instead of a silent empty list", async () => {
+    const plugin = buildPlugin();
+    listPiTextCatalogModels.mockRejectedValue(new Error("endpoint unreachable"));
+    const service = UnifiedModelService.getInstance(plugin);
+
+    const models = await service.getModels();
+
+    expect(models).toEqual([]);
+    expect(service.getCatalogStatus()).toEqual({
+      state: "error",
+      reason: "endpoint unreachable",
+    });
+  });
+
+  it("recovers to a ready status after a failed load is retried successfully", async () => {
+    const plugin = buildPlugin();
+    listPiTextCatalogModels.mockRejectedValueOnce(new Error("endpoint unreachable"));
+    const service = UnifiedModelService.getInstance(plugin);
+
+    await service.getModels();
+    expect(service.getCatalogStatus().state).toBe("error");
+
+    const recovered = await service.refreshModels();
+    expect(recovered.length).toBeGreaterThan(0);
+    expect(service.getCatalogStatus()).toEqual({ state: "ready", reason: null });
+  });
 });
