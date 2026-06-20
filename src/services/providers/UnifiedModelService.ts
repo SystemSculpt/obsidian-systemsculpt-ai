@@ -97,7 +97,11 @@ export class UnifiedModelService {
         state: "error",
         reason: error instanceof Error ? error.message : String(error || "Unknown error"),
       };
-      this.cachedModels = [];
+      // Do NOT cache an empty list here: an empty array is truthy, so caching it
+      // would make the Retry path (getModels() without forceRefresh) reuse the
+      // failed result and re-throw without ever re-hitting the catalog. Clearing
+      // the cache lets the very next getModels() re-attempt the load (#206).
+      this.cachedModels = null;
       return [];
     }
   }

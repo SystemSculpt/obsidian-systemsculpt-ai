@@ -150,4 +150,23 @@ describe("UnifiedModelService", () => {
     expect(recovered.length).toBeGreaterThan(0);
     expect(service.getCatalogStatus()).toEqual({ state: "ready", reason: null });
   });
+
+  it("re-attempts the catalog on the next getModels after an error instead of serving a cached empty list (#206)", async () => {
+    const plugin = buildPlugin();
+    listPiTextCatalogModels.mockRejectedValueOnce(new Error("endpoint unreachable"));
+    const service = UnifiedModelService.getInstance(plugin);
+
+    // First load fails: error recorded, empty list returned.
+    await service.getModels();
+    expect(service.getCatalogStatus().state).toBe("error");
+
+    // The chat picker's Retry path calls getModels() WITHOUT forcing a refresh.
+    // A failed load must not cache an empty list (truthy []), or retry would
+    // reuse it and re-throw the same error without ever hitting the catalog (#206).
+    const recovered = await service.getModels();
+
+    expect(listPiTextCatalogModels).toHaveBeenCalledTimes(2);
+    expect(recovered.map((model: { id: string }) => model.id)).toContain(MANAGED_MODEL.id);
+    expect(service.getCatalogStatus()).toEqual({ state: "ready", reason: null });
+  });
 });
