@@ -169,6 +169,50 @@ describe("buildGeminiRequestBody", () => {
     expect("generationConfig" in body).toBe(false);
   });
 
+  it("omits thinkingConfig when no reasoning effort is requested (#231)", () => {
+    const body = buildGeminiRequestBody(
+      makeInput({
+        prepared: makePrepared({
+          resolvedModel: {
+            top_provider: { context_length: 1000000, max_completion_tokens: 8192, is_moderated: false },
+          },
+        }),
+      }),
+    );
+    expect(body.generationConfig).toEqual({ maxOutputTokens: 8192 });
+  });
+
+  it("enables thinking with thought summaries for a requested reasoning effort (#231)", () => {
+    // A reasoning-capable Gemini must actually reason; includeThoughts surfaces
+    // the thought summaries the parser turns into reasoning events.
+    const body = buildGeminiRequestBody(makeInput({ reasoningEffort: "medium" }));
+    expect(body.generationConfig).toEqual({
+      thinkingConfig: { thinkingBudget: 4096, includeThoughts: true },
+    });
+  });
+
+  it("disables thinking (budget 0, no thoughts) when reasoning effort is 'off' (#231)", () => {
+    const body = buildGeminiRequestBody(makeInput({ reasoningEffort: "off" }));
+    expect(body.generationConfig).toEqual({ thinkingConfig: { thinkingBudget: 0 } });
+  });
+
+  it("merges maxOutputTokens and thinkingConfig when both apply (#231)", () => {
+    const body = buildGeminiRequestBody(
+      makeInput({
+        reasoningEffort: "high",
+        prepared: makePrepared({
+          resolvedModel: {
+            top_provider: { context_length: 1000000, max_completion_tokens: 8192, is_moderated: false },
+          },
+        }),
+      }),
+    );
+    expect(body.generationConfig).toEqual({
+      maxOutputTokens: 8192,
+      thinkingConfig: { thinkingBudget: 8192, includeThoughts: true },
+    });
+  });
+
   it("translates tools into functionDeclarations and omits tools when none provided", () => {
     const withTools = buildGeminiRequestBody(
       makeInput({

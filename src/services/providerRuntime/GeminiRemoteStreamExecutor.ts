@@ -296,6 +296,31 @@ export function toGeminiTools(tools: unknown[]): GeminiFunctionDeclaration[] {
   return result;
 }
 
+// Map the requested reasoning effort onto a Gemini thinking-token budget.
+// `"off"` explicitly disables Gemini's default-on thinking (budget 0); unset or
+// an unrecognized value returns null so thinkingConfig is omitted and the model
+// uses its dynamic default. The effort vocabulary mirrors
+// SystemSculptService.normalizeReasoningEffort
+// ("off"|"minimal"|"low"|"medium"|"high"|"xhigh").
+function resolveGeminiThinkingBudget(reasoningEffort?: string): number | null {
+  switch (String(reasoningEffort || "").trim().toLowerCase()) {
+    case "off":
+      return 0;
+    case "minimal":
+      return 1024;
+    case "low":
+      return 2048;
+    case "medium":
+      return 4096;
+    case "high":
+      return 8192;
+    case "xhigh":
+      return 16384;
+    default:
+      return null;
+  }
+}
+
 export function buildGeminiRequestBody(
   input: RemoteGeminiStreamInput,
 ): Record<string, unknown> {
@@ -315,12 +340,26 @@ export function buildGeminiRequestBody(
     }
   }
 
-  // Gemini does not require maxOutputTokens (unlike Anthropic). Only set it when
-  // the model metadata declares a positive completion cap; otherwise omit
-  // generationConfig entirely rather than inventing a default.
+  // generationConfig carries maxOutputTokens (only when a positive cap is
+  // declared — Gemini does not require it) plus thinkingConfig mapped from the
+  // requested reasoning effort. A reasoning-capable Gemini should actually
+  // reason when the user asks (the catalog advertises it and streamMessage
+  // forwards reasoningEffort); includeThoughts surfaces thought summaries, which
+  // the parser turns into reasoning events. Mirrors the Anthropic executor.
+  const generationConfig: Record<string, unknown> = {};
   const cap = input.prepared.resolvedModel?.top_provider?.max_completion_tokens;
   if (typeof cap === "number" && Number.isFinite(cap) && cap > 0) {
-    body.generationConfig = { maxOutputTokens: Math.floor(cap) };
+    generationConfig.maxOutputTokens = Math.floor(cap);
+  }
+  const thinkingBudget = resolveGeminiThinkingBudget(input.reasoningEffort);
+  if (thinkingBudget !== null) {
+    generationConfig.thinkingConfig =
+      thinkingBudget > 0
+        ? { thinkingBudget, includeThoughts: true }
+        : { thinkingBudget: 0 };
+  }
+  if (Object.keys(generationConfig).length > 0) {
+    body.generationConfig = generationConfig;
   }
 
   return body;
