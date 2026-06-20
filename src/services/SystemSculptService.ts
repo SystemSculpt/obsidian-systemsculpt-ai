@@ -42,6 +42,7 @@ export type { StreamDebugCallbacks } from "./StreamExecutionTypes";
 let localPiStreamExecutorModulePromise: Promise<typeof import("./LocalPiStreamExecutor")> | null = null;
 let remoteProviderStreamExecutorModulePromise: Promise<typeof import("./providerRuntime/OpenRouterRemoteStreamExecutor")> | null = null;
 let anthropicRemoteStreamExecutorModulePromise: Promise<typeof import("./providerRuntime/AnthropicRemoteStreamExecutor")> | null = null;
+let geminiRemoteStreamExecutorModulePromise: Promise<typeof import("./providerRuntime/GeminiRemoteStreamExecutor")> | null = null;
 
 async function loadLocalPiStreamExecutorModule(): Promise<typeof import("./LocalPiStreamExecutor")> {
   if (!localPiStreamExecutorModulePromise) {
@@ -62,6 +63,13 @@ async function loadAnthropicRemoteStreamExecutorModule(): Promise<typeof import(
     anthropicRemoteStreamExecutorModulePromise = import("./providerRuntime/AnthropicRemoteStreamExecutor");
   }
   return await anthropicRemoteStreamExecutorModulePromise;
+}
+
+async function loadGeminiRemoteStreamExecutorModule(): Promise<typeof import("./providerRuntime/GeminiRemoteStreamExecutor")> {
+  if (!geminiRemoteStreamExecutorModulePromise) {
+    geminiRemoteStreamExecutorModulePromise = import("./providerRuntime/GeminiRemoteStreamExecutor");
+  }
+  return await geminiRemoteStreamExecutorModulePromise;
 }
 
 export type CreditsBalanceSnapshot = {
@@ -1239,6 +1247,23 @@ export class SystemSculptService {
           }
           return;
         }
+
+        // Gemini uses the native generateContent streaming API, not the
+        // OpenAI-compatible /chat/completions executor (#231).
+        if (remoteProviderId === "google") {
+          const { executeGeminiRemoteStream } = await loadGeminiRemoteStreamExecutorModule();
+          for await (const event of executeGeminiRemoteStream({
+            plugin: this.plugin,
+            prepared,
+            signal,
+            reasoningEffort,
+            debug,
+          })) {
+            yield event;
+          }
+          return;
+        }
+
 
         const { executeOpenRouterRemoteStream } = await loadRemoteProviderStreamExecutorModule();
         for await (const event of executeOpenRouterRemoteStream({

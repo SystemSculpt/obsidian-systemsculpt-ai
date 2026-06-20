@@ -58,6 +58,18 @@ const REMOTE_PROVIDER_SEEDS: readonly RemoteProviderSeed[] = [
     supportedParameters: ["tools"],
     endpoint: AI_PROVIDERS.ANTHROPIC.BASE_URL,
   },
+  {
+    // Gemini runs through the native generateContent streaming executor (not the
+    // OpenAI-compatible /chat/completions path) — see GeminiRemoteStreamExecutor (#231).
+    providerId: "google",
+    modelId: "gemini-3-flash-preview",
+    name: "Gemini 3 Flash",
+    description: "Google Gemini remote provider model (native generateContent API) for chat, tool use, reasoning, and image-capable turns.",
+    contextLength: 1_000_000,
+    modality: "text+image->text",
+    supportedParameters: ["tools"],
+    endpoint: AI_PROVIDERS.GOOGLE.BASE_URL,
+  },
 ];
 
 export function normalizeProviderId(value: unknown): string {
@@ -159,6 +171,9 @@ export function resolveRemoteProviderEndpoint(providerId: string): string {
   }
   if (normalized === "anthropic") {
     return AI_PROVIDERS.ANTHROPIC.BASE_URL;
+  }
+  if (normalized === "google") {
+    return AI_PROVIDERS.GOOGLE.BASE_URL;
   }
   return "";
 }

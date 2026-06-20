@@ -45,6 +45,12 @@ describe("RemoteProviderCatalog", () => {
       );
     });
 
+    it("returns the Google base URL for the google provider (#231)", () => {
+      expect(resolveRemoteProviderEndpoint("google")).toBe(
+        AI_PROVIDERS.GOOGLE.BASE_URL
+      );
+    });
+
     it("is case-insensitive", () => {
       expect(resolveRemoteProviderEndpoint("OpenRouter")).toBe(
         AI_PROVIDERS.OPENROUTER.BASE_URL
@@ -325,6 +331,38 @@ describe("RemoteProviderCatalog", () => {
       );
     });
 
+    it("returns Gemini 3 Flash when Google is configured (#231)", () => {
+      const plugin = makePlugin([
+        {
+          id: "google",
+          name: "Google Gemini",
+          endpoint: "https://generativelanguage.googleapis.com/v1beta",
+          apiKey: "gemini-key",
+          isEnabled: true,
+        },
+      ]);
+
+      const models = listConfiguredRemoteProviderModels(plugin);
+      const gemini = models.find((model) => model.id === "google@@gemini-3-flash-preview");
+
+      expect(gemini).toMatchObject({
+        id: "google@@gemini-3-flash-preview",
+        name: "Gemini 3 Flash",
+        provider: "google",
+        sourceMode: "custom_endpoint",
+        sourceProviderId: "google",
+        piRemoteAvailable: true,
+        piLocalAvailable: false,
+        piAuthMode: "byok",
+        piExecutionModelId: "gemini-3-flash-preview",
+        context_length: 1_000_000,
+      });
+      expect(gemini?.supported_parameters).toContain("tools");
+      expect(gemini?.capabilities).toEqual(
+        expect.arrayContaining(["chat", "reasoning", "vision"])
+      );
+    });
+
     it("gives every configured remote provider model a resolvable execution endpoint (#201 contract)", () => {
       // The core #201 failure mode: a model appears in the Chat dropdown but
       // has no execution endpoint, so selecting it throws "No remote endpoint
@@ -335,10 +373,11 @@ describe("RemoteProviderCatalog", () => {
         { id: "xai", name: "xAI", endpoint: "https://api.x.ai/v1", apiKey: "k", isEnabled: true },
         { id: "openai", name: "OpenAI", endpoint: "https://api.openai.com/v1", apiKey: "k", isEnabled: true },
         { id: "anthropic", name: "Anthropic", endpoint: "https://api.anthropic.com/v1", apiKey: "k", isEnabled: true },
+        { id: "google", name: "Google Gemini", endpoint: "https://generativelanguage.googleapis.com/v1beta", apiKey: "k", isEnabled: true },
       ]);
 
       const models = listConfiguredRemoteProviderModels(plugin);
-      expect(models.length).toBeGreaterThanOrEqual(4);
+      expect(models.length).toBeGreaterThanOrEqual(5);
       for (const model of models) {
         expect(resolveRemoteProviderEndpoint(String(model.sourceProviderId))).not.toBe("");
       }

@@ -156,6 +156,30 @@ describe("ProviderRuntime", () => {
       });
     });
 
+    it("resolves a remote BYOK plan for a configured Gemini model (#231)", async () => {
+      // #231 acceptance: a configured Google/Gemini key yields a Chat model that
+      // resolves an executable plan (not just appears in the dropdown).
+      mockedResolveEndpoint.mockReturnValue("https://generativelanguage.googleapis.com/v1beta");
+      const model = makeRemoteModel({
+        id: "google@@gemini-3-flash-preview",
+        piExecutionModelId: "gemini-3-flash-preview",
+        sourceProviderId: "google",
+        provider: "google",
+      });
+
+      const plan = await resolveProviderRuntimePlan(model, {} as any);
+
+      expect(plan).toEqual({
+        mode: "remote",
+        actualModelId: "gemini-3-flash-preview",
+        providerId: "google",
+        authMode: "byok",
+        endpoint: "https://generativelanguage.googleapis.com/v1beta",
+        supportsTools: true,
+        supportsImages: true,
+      });
+    });
+
     it("falls back to Pi provider auth when plugin has no stored key", async () => {
       mockedGetApiKey.mockReturnValue("");
       mockResolveStudioPiProviderApiKey.mockResolvedValue(null);
