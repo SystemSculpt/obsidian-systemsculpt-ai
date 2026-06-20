@@ -1,17 +1,18 @@
 /**
  * Pi provider auth storage — thin wrapper around the Pi SDK's AuthStorage.
  *
- * The SDK is a direct npm dependency (`@mariozechner/pi-coding-agent`).
- * Desktop-only: all callers must gate on PlatformContext before reaching here.
+ * The SDK is a direct npm dependency (`@mariozechner/pi-coding-agent`) that pulls
+ * in node:fs, so it is desktop-only. This module is nonetheless safe on every
+ * platform — provider executors call resolveStudioPiProviderApiKey() here for
+ * BYOK key lookup on mobile too — because it reaches the SDK only through the
+ * canonical desktop-only boundary (`loadDesktopOnly`). On mobile that boundary
+ * returns null and callers fall back to plugin-settings keys (#207).
  */
 
 import { Platform } from "obsidian";
 import type SystemSculptPlugin from "../../main";
 import type { CustomProvider } from "../../types/llm";
-import {
-  createPiAuthStorage,
-  withPiDesktopFetchShim,
-} from "../../services/pi/PiSdkDesktopSupport";
+import { loadDesktopOnly } from "../../platform/desktopOnly";
 import type { PiAuthStorageInstance } from "../../services/pi/PiSdkAuthStorage";
 import { resolvePiAuthPath } from "../../services/pi/PiSdkStoragePaths";
 import type {
@@ -86,6 +87,21 @@ type StudioPiAuthStorageContext = {
   storage?: StudioPiAuthStorageInstance;
 };
 
+// `typeof import(...)` is erased at compile time — it never emits a runtime
+// require, so it does not put the Pi SDK on the static import graph (#207).
+type PiSdkDesktopSupportModule = typeof import("../../services/pi/PiSdkDesktopSupport");
+
+/**
+ * Load the Pi SDK desktop-auth support through the canonical desktop-only
+ * boundary. Returns null on mobile (no Node), where callers fall back to
+ * plugin-settings keys.
+ */
+function loadPiDesktopSupport(): PiSdkDesktopSupportModule | null {
+  return loadDesktopOnly(
+    () => require("../../services/pi/PiSdkDesktopSupport") as PiSdkDesktopSupportModule,
+  );
+}
+
 function tryGetAuthStorage(
   context: StudioPiAuthStorageContext = {},
 ): StudioPiAuthStorageInstance | null {
@@ -93,8 +109,13 @@ function tryGetAuthStorage(
     return context.storage;
   }
 
+  const support = loadPiDesktopSupport();
+  if (!support) {
+    return null;
+  }
+
   try {
-    return createPiAuthStorage({ plugin: context.plugin });
+    return support.createPiAuthStorage({ plugin: context.plugin });
   } catch {
     return null;
   }
@@ -216,10 +237,12 @@ async function resolveProviderApiKey(
   }
 
   if (storage && typeof storage.getApiKey === "function") {
+    const support = loadPiDesktopSupport();
+    const readApiKey = async () => String((await storage.getApiKey(provider)) || "").trim();
     try {
-      const fromStorage = await withPiDesktopFetchShim(async () =>
-        String((await storage.getApiKey(provider)) || "").trim()
-      );
+      const fromStorage = support
+        ? await support.withPiDesktopFetchShim(readApiKey)
+        : await readApiKey();
       if (fromStorage) {
         return fromStorage;
       }
@@ -323,8 +346,10 @@ export async function loginStudioPiProviderOAuth(
   if (!providerId) throw new Error("Select a valid provider before starting OAuth login.");
   if (!Platform.isDesktopApp) throw new Error("OAuth login is only available on desktop.");
 
+  const support = loadPiDesktopSupport();
+  if (!support) throw new Error("Pi desktop support is unavailable in this runtime.");
   const storage = getAuthStorage({ plugin: options.plugin });
-  await withPiDesktopFetchShim(async () => {
+  await support.withPiDesktopFetchShim(async () => {
     await storage.login(providerId, {
       onAuth: options.onAuth,
       onPrompt: options.onPrompt,

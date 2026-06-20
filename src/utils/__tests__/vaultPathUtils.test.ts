@@ -79,4 +79,19 @@ describe("joinFilesystemPath", () => {
       "C:\\vault\\.systemsculpt\\pi-agent\\auth.json",
     );
   });
+
+  it("joins posix filesystem bases with vault-relative segments", () => {
+    expect(joinFilesystemPath("/home/user/vault", ".systemsculpt/pi-agent/auth.json")).toBe(
+      "/home/user/vault/.systemsculpt/pi-agent/auth.json",
+    );
+  });
+
+  it("trims a trailing separator off the base instead of doubling it", () => {
+    expect(joinFilesystemPath("/vault/", "notes/today.md")).toBe("/vault/notes/today.md");
+    expect(joinFilesystemPath("C:\\vault\\", "a/b")).toBe("C:\\vault\\a\\b");
+  });
+
+  it("returns the base unchanged when no segments are provided", () => {
+    expect(joinFilesystemPath("/vault")).toBe("/vault");
+  });
 });

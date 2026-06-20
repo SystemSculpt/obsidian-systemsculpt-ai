@@ -1,4 +1,3 @@
-import path from "node:path";
 import { normalizePath } from "obsidian";
 
 type VaultAdapterLike = {
@@ -19,16 +18,22 @@ export function joinFilesystemPath(basePath: string, ...segments: string[]): str
     return "";
   }
 
-  const pathApi =
-    normalizedBasePath.includes("\\") || /^[a-zA-Z]:/.test(normalizedBasePath)
-      ? path.win32
-      : path.posix;
+  // Windows bases join with "\\", POSIX with "/". The segments are already
+  // normalized to clean "/"-split parts, so a pure join is exact here — no
+  // node:path needed, which keeps this shared util safe on mobile, where there
+  // is no Node runtime (#207).
+  const separator =
+    normalizedBasePath.includes("\\") || /^[a-zA-Z]:/.test(normalizedBasePath) ? "\\" : "/";
   const normalizedSegments = segments
     .flatMap((segment) => normalizeVaultRelativePath(segment).split("/"))
     .filter(Boolean);
-  return normalizedSegments.length > 0
-    ? pathApi.join(normalizedBasePath, ...normalizedSegments)
-    : normalizedBasePath;
+  if (normalizedSegments.length === 0) {
+    return normalizedBasePath;
+  }
+  // Trim a trailing separator off the base so we never emit a doubled one,
+  // matching path.join's boundary behavior.
+  const trimmedBase = normalizedBasePath.replace(/[\\/]+$/, "");
+  return `${trimmedBase}${separator}${normalizedSegments.join(separator)}`;
 }
 
 export function resolveAbsoluteVaultPath(adapterLike: unknown, vaultPath: string): string | null {

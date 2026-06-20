@@ -76,6 +76,18 @@ export class PlatformContext {
     return this.isDesktopRuntime();
   }
 
+  /**
+   * True iff a Node.js runtime is available (desktop/Electron). This is THE gate
+   * for touching Node builtins (`fs`, `path`, `child_process`, …) or loading any
+   * desktop-only subsystem that does. Obsidian's mobile runtime has no Node, so
+   * an eager Node `require` on the startup path crashes load there (#207) — all
+   * such access must go through a capability-gated lazy boundary (see
+   * `src/platform/desktopOnly.ts`).
+   */
+  public supportsNodeApis(): boolean {
+    return this.isDesktopRuntime();
+  }
+
   public uiVariant(): PlatformUIVariant {
     return this.isMobile() ? "mobile" : "desktop";
   }

@@ -9,16 +9,17 @@ Obsidian plugin). `CLAUDE.md` is a symlink to this file — **edit `AGENTS.md`**
   merge **without per-step human approval**.
 - A change is "done" only when **CI/CD proves it on the PR**. Local green is
   necessary, never sufficient — CI is the proof of correctness.
-- Merge **only** when every required check **and** every automated review is
-  green on the merge commit:
+- Merge **only** when every required CI check is green on the merge commit
+  (plus any automated reviewer that is configured, per the bullet below):
   - `ci.yml` — tsc/bundle check, full unit suite, embeddings, production build,
     built-bundle integration suite.
   - `macos-e2e.yml` — real Obsidian install + release smoke (provider listing,
     chat round-trip, recorder, embeddings) against local provider fixtures.
   - `windows-e2e.yml` — Obsidian install, clean-install parity, provider pass,
     Windows desktop baselines.
-  - The automated PR reviewer — read the posted findings, not just the check
-    rollup.
+  - Automated PR reviewers are **optional** — when one is configured, read its
+    posted findings, not just the check rollup. CI/CD is the required gate
+    either way.
 - Never merge red, pending, or unverified. Never bypass CI. Treat
   HIGH/MEDIUM/CRITICAL review findings as blockers: fix them, or justify
   accepting each one in the PR before merging.
@@ -37,6 +38,26 @@ Obsidian plugin). `CLAUDE.md` is a symlink to this file — **edit `AGENTS.md`**
 - #215 built the foundation — the built-bundle integration harness, reusable
   provider fixtures (`testing/fixtures/providers/`), and the CI release-smoke
   lanes. New rework rides on it.
+
+## Re-architect, don't perpetuate legacy patterns
+
+- When work touches a system that would benefit from better organization or
+  architecture, **re-architect that part** — do not patch around it to keep a
+  legacy pattern or past "slop" alive, even for a small-scale fix. Rebuild the
+  affected system toward a canonical design, supersede the old pattern instead
+  of layering onto it, and prove the result with tests/guards (the test net
+  above). Default to the version a careful engineer would write from scratch
+  today, not the one that minimizes diff against the past.
+- **Why:** the AI landscape changes constantly — each generation of models is
+  more capable than the last, and part of the job is cleaning up the patterns
+  left by earlier, less-capable models rather than carrying them forward. Code
+  shaped to satisfy a weaker model is technical debt; replace it with the
+  canonical version a stronger model would write.
+- Scope re-architecture to the part the work touches — it is justified by the
+  task at hand, not a licence to rewrite unrelated systems. Keep each PR focused
+  (one issue per PR), and let a permanent guard prove the rebuild is correct
+  (e.g. #207 → `testing/integration/bundle-load.no-node.test.ts` proves the
+  startup path requires no Node on mobile).
 
 ## Where things live
 
