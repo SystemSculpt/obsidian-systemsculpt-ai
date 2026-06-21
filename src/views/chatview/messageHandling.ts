@@ -1,7 +1,7 @@
 import { ChatView } from "./ChatView";
 import { ChatRole, MultiPartContent, ChatMessage, MessagePart, UrlCitation } from "../../types";
 import { ButtonComponent, Notice } from "obsidian";
-import { appendMessageToGroupedContainer, removeMessageElement } from "./utils/MessageGrouping";
+import { appendMessageToGroupedContainer } from "./utils/MessageGrouping";
 // Tool call rendering is fully status-driven from PI tool events.
 
 export const messageHandling = {
@@ -182,82 +182,7 @@ export const messageHandling = {
       chatView.inputHandler.focus();
     };
     
-    const editHandler = async (e: CustomEvent) => {
-      if (chatView.isLegacyReadOnlyChat()) {
-        new Notice("Editing archived chats is disabled. Start a new chat instead.");
-        return;
-      }
-
-      if (chatView.getPiSessionFile() || chatView.getPiSessionId()) {
-        new Notice("Editing earlier SystemSculpt-session messages is not supported yet. Branch from that user message instead.");
-        return;
-      }
-
-      const { messageId, newContent } = e.detail;
-      const index = chatView.messages.findIndex((msg) => msg.message_id === messageId);
-      if (index !== -1) {
-        const existingMessage = chatView.messages[index];
-        const updatedMessage = {
-          ...existingMessage,
-          content: newContent,
-          messageParts: undefined
-        };
-        chatView.messages[index] = updatedMessage;
-        chatView.clearPiSessionState({ save: false });
-        
-        await chatView.saveChat();
-        
-        // Re-render just this message with updated content
-        const { contentEl: newContentEl } = await chatView.messageRenderer.renderMessage({
-          app: chatView.app,
-          messageId,
-          role: updatedMessage.role,
-          content: updatedMessage.content,
-          onResend:
-            updatedMessage.role === "user"
-              ? async (input) => this.runResendAction(chatView, input)
-              : undefined,
-        });
-        
-        // Re-apply assistant message rendering if needed
-        if (updatedMessage.role === 'assistant') {
-          await this.renderAssistantMessage(chatView, messageEl, updatedMessage);
-        }
-        
-        const oldContentEl = messageEl.querySelector(".systemsculpt-message-content");
-        if (oldContentEl && newContentEl) {
-          oldContentEl.replaceWith(newContentEl);
-        }
-        
-        const updatedStr = typeof updatedMessage.content === "string" ? updatedMessage.content : JSON.stringify(updatedMessage.content);
-        messageEl.dataset.content = updatedStr;
-      }
-    };
-    
-    const deleteHandler = async (e: CustomEvent) => {
-      if (chatView.isLegacyReadOnlyChat()) {
-        new Notice("Deleting turns from archived chats is disabled. Start a new chat instead.");
-        return;
-      }
-
-      if (chatView.getPiSessionFile() || chatView.getPiSessionId()) {
-        new Notice("Deleting individual messages is disabled for SystemSculpt-session chats. Branch from a user message instead.");
-        return;
-      }
-
-      const { messageId } = e.detail;
-      const index = chatView.messages.findIndex((msg) => msg.message_id === messageId);
-      if (index !== -1) {
-        chatView.messages.splice(index, 1);
-        chatView.clearPiSessionState({ save: false });
-        await chatView.saveChat();
-        removeMessageElement(messageEl);
-      }
-    };
-    
     registerHandler(messageEl, "reply", replyHandler as EventListener);
-    registerHandler(messageEl, "edit", editHandler as EventListener);
-    registerHandler(messageEl, "delete", deleteHandler as EventListener);
   },
 
 
