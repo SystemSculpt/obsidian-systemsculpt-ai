@@ -7,6 +7,8 @@ import { ScrollManagerService } from "./ScrollManagerService";
 import type SystemSculptPlugin from "../../main";
 import { showPopup, showAlert } from "../../core/ui/";
 import { SystemSculptError, isContextOverflowErrorMessage, ERROR_CODES } from "../../utils/errors";
+import { SYSTEMSCULPT_WEBSITE } from "../../constants/externalServices";
+import { openExternalUrl } from "../../utils/externalUrl";
 import { MessageRenderer } from "./MessageRenderer";
 import { InputHandler, type AutomationApprovalMode } from "./InputHandler";
 import { FileContextManager } from "./FileContextManager";
@@ -705,6 +707,53 @@ export class ChatView extends ItemView {
       return;
     }
 
+    if (
+      error instanceof SystemSculptError &&
+      (error.code === ERROR_CODES.LICENSE_EXPIRED || error.code === ERROR_CODES.INVALID_LICENSE)
+    ) {
+      await this.resetFailedAssistantTurn();
+
+      // A rejected license is no longer valid — reflect that across the UI so
+      // gating, the account panel, and the banner all agree (#249).
+      try {
+        await this.plugin.getSettingsManager().updateSettings({ licenseValid: false });
+      } catch {}
+
+      const expired = error.code === ERROR_CODES.LICENSE_EXPIRED;
+      const renewUrl =
+        typeof error.metadata?.renewUrl === "string" && error.metadata.renewUrl
+          ? String(error.metadata.renewUrl)
+          : SYSTEMSCULPT_WEBSITE.LICENSE;
+
+      try {
+        uiSetup.showLicenseBanner(this, { expired, renewUrl });
+      } catch {}
+
+      if (automationRequestActive) {
+        return;
+      }
+
+      const result = await showPopup(
+        this.app,
+        expired
+          ? "Your SystemSculpt subscription has expired, so the managed AI can't run.\n\nRenew to continue, or switch to your own API key in Settings."
+          : "Your SystemSculpt license key is invalid or was changed, so the managed AI can't run.\n\nRenew or re-enter your key, or switch to your own API key in Settings.",
+        {
+          title: expired ? "Subscription expired" : "License problem",
+          icon: "key-round",
+          primaryButton: "Renew subscription",
+          secondaryButton: "Open settings",
+        }
+      );
+
+      if (result?.action === "primary" || result?.confirmed) {
+        void openExternalUrl(renewUrl);
+      } else if (result?.action === "secondary") {
+        this.openSetupTab("account");
+      }
+      return;
+    }
+
     if (error instanceof SystemSculptError && error.code === ERROR_CODES.TURN_IN_FLIGHT) {
       await this.resetFailedAssistantTurn();
       const lockUntil = typeof error.metadata?.lockUntil === 'string' ? error.metadata.lockUntil : '';
@@ -880,8 +929,37 @@ export class ChatView extends ItemView {
     this.creditsBalanceRefreshPromise = (async () => {
       try {
         this.creditsBalance = await this.aiService.getCreditsBalance();
-      } catch {
-        // Avoid noisy toasts; the balance UI is a convenience panel.
+        // A successful balance fetch means the license is healthy again — heal
+        // any stale invalid state so gating/account UI agree (#249). Guarded so
+        // a routine poll doesn't rewrite settings on every refresh.
+        if (this.plugin.settings.licenseValid === false) {
+          try {
+            await this.plugin.getSettingsManager().updateSettings({ licenseValid: true });
+          } catch {}
+        }
+        try { uiSetup.hideLicenseBanner(this); } catch {}
+      } catch (creditsError) {
+        // Proactively surface an expired/invalid license on chat open — before
+        // the user sends a doomed message (#249). Other errors stay silent
+        // (the balance UI is a convenience panel).
+        if (
+          creditsError instanceof SystemSculptError &&
+          (creditsError.code === ERROR_CODES.LICENSE_EXPIRED || creditsError.code === ERROR_CODES.INVALID_LICENSE)
+        ) {
+          try {
+            await this.plugin.getSettingsManager().updateSettings({ licenseValid: false });
+          } catch {}
+          const renewUrl =
+            typeof creditsError.metadata?.renewUrl === "string" && creditsError.metadata.renewUrl
+              ? String(creditsError.metadata.renewUrl)
+              : SYSTEMSCULPT_WEBSITE.LICENSE;
+          try {
+            uiSetup.showLicenseBanner(this, {
+              expired: creditsError.code === ERROR_CODES.LICENSE_EXPIRED,
+              renewUrl,
+            });
+          } catch {}
+        }
       } finally {
         try {
           await this.updateCreditsIndicator();

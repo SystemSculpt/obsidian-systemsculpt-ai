@@ -49,6 +49,72 @@ describe("StreamingErrorHandler", () => {
     }).rejects.toThrow(upstreamMessage);
   });
 
+  describe("SystemSculpt API license failures (#249)", () => {
+    it("classifies a 401 'Invalid or expired license key' string as LICENSE_EXPIRED (not a generic stream error)", async () => {
+      const response = createMockResponse(401, { error: "Invalid or expired license key" });
+      await expect(
+        StreamingErrorHandler.handleStreamError(response, false)
+      ).rejects.toMatchObject({
+        code: ERROR_CODES.LICENSE_EXPIRED,
+        message: "Your license has expired. Please renew your subscription.",
+      });
+    });
+
+    it("classifies an invalid (non-expired) key as INVALID_LICENSE", async () => {
+      const response = createMockResponse(401, { error: "Invalid license key", code: "license_invalid" });
+      await expect(
+        StreamingErrorHandler.handleStreamError(response, false)
+      ).rejects.toMatchObject({ code: ERROR_CODES.INVALID_LICENSE });
+    });
+
+    it("honors a discriminated server code + renew_url in metadata", async () => {
+      const response = createMockResponse(401, {
+        error: "Invalid or expired license key",
+        code: "license_expired",
+        renew_url: "https://systemsculpt.com/renew",
+      });
+      try {
+        await StreamingErrorHandler.handleStreamError(response, false);
+        throw new Error("expected handleStreamError to throw");
+      } catch (err) {
+        const systemError = err as SystemSculptError;
+        expect(systemError.code).toBe(ERROR_CODES.LICENSE_EXPIRED);
+        expect(systemError.metadata).toEqual(
+          expect.objectContaining({
+            licenseFailure: true,
+            renewUrl: "https://systemsculpt.com/renew",
+            statusCode: 401,
+          })
+        );
+      }
+    });
+
+    it("classifies the object-shaped error form ({ error: { code } }) as a license failure", async () => {
+      const response = createMockResponse(401, {
+        error: { code: "invalid_license", message: "Invalid license key" },
+      });
+      await expect(
+        StreamingErrorHandler.handleStreamError(response, false)
+      ).rejects.toMatchObject({ code: ERROR_CODES.INVALID_LICENSE });
+    });
+
+    it("classifies an object-shaped missing_license code as a license failure", async () => {
+      const response = createMockResponse(401, {
+        error: { code: "missing_license", message: "Missing license key" },
+      });
+      await expect(
+        StreamingErrorHandler.handleStreamError(response, false)
+      ).rejects.toMatchObject({ code: ERROR_CODES.INVALID_LICENSE });
+    });
+
+    it("does NOT misclassify a generic 500 stream error as a license problem", async () => {
+      const response = createMockResponse(500, { error: "INTERNAL_ERROR", message: "boom" });
+      await expect(
+        StreamingErrorHandler.handleStreamError(response, false)
+      ).rejects.toMatchObject({ code: ERROR_CODES.STREAM_ERROR });
+    });
+  });
+
   describe("non-JSON response handling", () => {
     it("handles plain text error response", async () => {
       const response = createMockResponse(500, "Internal Server Error");

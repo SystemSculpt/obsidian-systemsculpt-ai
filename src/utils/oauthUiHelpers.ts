@@ -1,3 +1,5 @@
+import { openExternalUrl } from "./externalUrl";
+
 export type OAuthPromptLike = {
   message?: unknown;
   placeholder?: unknown;
@@ -15,22 +17,5 @@ export function isOAuthCodePrompt(prompt: OAuthPromptLike): boolean {
 }
 
 export async function openExternalUrlForOAuth(url: string): Promise<void> {
-  const trimmed = String(url || "").trim();
-  if (!trimmed) {
-    return;
-  }
-  const runtimeRequire = typeof window !== "undefined" ? (window as any)?.require : null;
-  const electron = typeof runtimeRequire === "function" ? runtimeRequire("electron") : null;
-  const shell = electron?.shell;
-  try {
-    if (typeof shell?.openExternal === "function") {
-      await shell.openExternal(trimmed);
-      return;
-    }
-  } catch {
-    // Fall back to window.open below.
-  }
-  if (typeof window !== "undefined" && typeof window.open === "function") {
-    window.open(trimmed, "_blank", "noopener,noreferrer");
-  }
+  await openExternalUrl(url);
 }
