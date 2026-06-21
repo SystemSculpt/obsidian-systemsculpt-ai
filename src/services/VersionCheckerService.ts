@@ -8,6 +8,7 @@ import SystemSculptPlugin from "../main";
 import { DEVELOPMENT_MODE } from "../constants/api";
 import { GITHUB_API } from "../constants/externalServices";
 import { API_BASE_URL, SYSTEMSCULPT_API_ENDPOINTS } from "../constants/api";
+import { compareNumericVersions, parseNumericVersion } from "../utils/semver";
 
 export interface VersionInfo {
   currentVersion: string;
@@ -611,11 +612,7 @@ export class VersionCheckerService {
    * unparseable remote version must never be treated as "newer than current".
    */
   parseSemver(version: string): number[] | null {
-    if (typeof version !== "string") return null;
-    const trimmed = version.trim().replace(/^v/i, "");
-    if (!/^\d+(\.\d+)*$/.test(trimmed)) return null;
-    const parts = trimmed.split(".").map((part) => parseInt(part, 10));
-    return parts.every((n) => Number.isInteger(n) && n >= 0) ? parts : null;
+    return parseNumericVersion(version);
   }
 
   /**
@@ -627,19 +624,7 @@ export class VersionCheckerService {
    * make the plugin claim an update is available (#168).
    */
   private compareVersions(versionA: string, versionB: string): number {
-    const partsA = this.parseSemver(versionA);
-    const partsB = this.parseSemver(versionB);
-    if (!partsA || !partsB) return 0;
-
-    for (let i = 0; i < Math.max(partsA.length, partsB.length); i++) {
-      const partA = i < partsA.length ? partsA[i] : 0;
-      const partB = i < partsB.length ? partsB[i] : 0;
-
-      if (partA > partB) return 1;
-      if (partA < partB) return -1;
-    }
-
-    return 0; // Versions are equal
+    return compareNumericVersions(versionA, versionB);
   }
 
   /**

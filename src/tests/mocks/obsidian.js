@@ -696,6 +696,7 @@ class Setting {
 
 module.exports = {
   App,
+  apiVersion: "1.5.0",
   Plugin,
   Notice: class Notice {
     constructor(message) {

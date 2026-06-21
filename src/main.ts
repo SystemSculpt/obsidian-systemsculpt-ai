@@ -18,7 +18,8 @@ ErrorCollectorService.initializeEarlyLogsCapture();
  * SystemSculpt AI Plugin for Obsidian
  * Version: 1.5.3
  */
-import { Plugin, Notice, MarkdownView, Platform, setIcon, WorkspaceLeaf, debounce, TFile, FileSystemAdapter, normalizePath } from "obsidian";
+import { Plugin, Notice, MarkdownView, Platform, setIcon, WorkspaceLeaf, debounce, TFile, FileSystemAdapter, normalizePath, apiVersion } from "obsidian";
+import { checkObsidianCompatibility, MINIMUM_OBSIDIAN_VERSION } from "./core/plugin/lifecycle/ObsidianCompat";
 import { initializeNotificationQueue } from "./core/ui/notifications";
 import { SystemSculptSettings, DEFAULT_SETTINGS, LogLevel, LICENSE_URL } from "./types";
 import { SystemSculptModel } from "./types/llm";
@@ -125,6 +126,8 @@ export default class SystemSculptPlugin extends Plugin {
   private isUnloading = false;
   private isPreloadingDone = false;
   private failures: string[] = [];
+  /** True once a fatal load failure has put the plugin into minimal recovery mode. */
+  private safeMode = false;
   emitter: EventEmitter;
   directoryManager: DirectoryManager;
   public versionCheckerService: VersionCheckerService;
@@ -497,6 +500,7 @@ export default class SystemSculptPlugin extends Plugin {
     void this.writeMobileStartupProbe("onload-entered");
 
     try {
+      this.warnIfObsidianVersionUnsupported();
       this.configureLifecycle(loadStart);
       if (!this.lifecycleCoordinator) {
         throw new Error("Lifecycle coordinator failed to initialize");
@@ -540,9 +544,11 @@ export default class SystemSculptPlugin extends Plugin {
           source: "SystemSculptPlugin",
         });
       }
+
+      this.enterSafeMode("core initialization failed", error);
     }
 
-    if (this.failures.length > 0) {
+    if (this.failures.length > 0 && !this.safeMode) {
       logger.warn("Initialization reported recoverable issues", {
         source: "SystemSculptPlugin",
         metadata: {
@@ -553,6 +559,70 @@ export default class SystemSculptPlugin extends Plugin {
         `SystemSculpt had issues with: ${this.failures.join(", ")}. Some features may be unavailable.`,
         this.collectErrorDetails()
       );
+    }
+  }
+
+  /**
+   * Fail-soft Obsidian version gate (#212/#147). If the running Obsidian is
+   * older than the verified minimum, surface ONE clear notice and continue
+   * best-effort — never hard-block. An unreadable app version is treated as
+   * supported. Safe to call before any service exists.
+   */
+  private warnIfObsidianVersionUnsupported(): void {
+    try {
+      const compat = checkObsidianCompatibility(apiVersion, MINIMUM_OBSIDIAN_VERSION);
+      if (compat.supported) {
+        return;
+      }
+      this.failures.push("unsupported Obsidian version");
+      this.getInitializationTracer().markMilestone("obsidian.version.unsupported", {
+        current: compat.currentVersion,
+        minimum: compat.minimumVersion,
+      });
+      new Notice(
+        `SystemSculpt AI needs Obsidian ${compat.minimumVersion} or newer (you have ${compat.currentVersion}). ` +
+          `Some features may not work until you update Obsidian.`,
+        15000
+      );
+    } catch {
+      // Version gate must never break load.
+    }
+  }
+
+  /**
+   * Enter minimal recovery mode after a fatal load failure (#212/#183). Instead
+   * of silently degrading, register a single recovery command that surfaces
+   * diagnostics and tell the user their settings are safe. Idempotent and
+   * defensive — it runs on the failure path and must not throw.
+   */
+  private enterSafeMode(reason: string, error?: unknown): void {
+    if (this.safeMode) {
+      return;
+    }
+    this.safeMode = true;
+    try {
+      this.addCommand({
+        id: "systemsculpt-show-load-diagnostics",
+        name: "Show load diagnostics (safe mode)",
+        callback: () => {
+          new Notice(
+            `SystemSculpt AI did not finish loading (${reason}). Your settings and backups are safe. ` +
+              `Details:\n${this.collectErrorDetails()}`,
+            0
+          );
+        },
+      });
+    } catch {
+      // Command registration is best-effort in a degraded host.
+    }
+    try {
+      this.showErrorNotice(
+        `SystemSculpt AI could not finish loading (${reason}). Your settings are safe — run ` +
+          `"Show load diagnostics (safe mode)" from the command palette for details.`,
+        error ? String(error) : this.collectErrorDetails()
+      );
+    } catch {
+      // Notice is best-effort.
     }
   }
 
