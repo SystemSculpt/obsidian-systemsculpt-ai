@@ -8,6 +8,7 @@ import SystemSculptPlugin from "../main";
 import { DEVELOPMENT_MODE } from "../constants/api";
 import { GITHUB_API } from "../constants/externalServices";
 import { API_BASE_URL, SYSTEMSCULPT_API_ENDPOINTS } from "../constants/api";
+import { compareNumericVersions, parseNumericVersion } from "../utils/semver";
 
 export interface VersionInfo {
   currentVersion: string;
@@ -589,7 +590,10 @@ export class VersionCheckerService {
 
       const data = response.json || (response.text ? JSON.parse(response.text) : {});
       const version = data?.data?.latestVersion;
-      if (typeof version === 'string') {
+      // Only trust a strictly-numeric version string. A malformed/sentinel value
+      // ("latest", "v5.8.1-beta", an HTML error page, "99.99.99") must fail safe
+      // to "you're up to date" rather than trigger a false update loop (#168).
+      if (typeof version === 'string' && this.parseSemver(version)) {
         return version;
       }
       return this.currentVersion;
@@ -599,25 +603,28 @@ export class VersionCheckerService {
   }
 
   /**
-   * Compares two semantic version strings
-   * @param versionA First version (typically current)
-   * @param versionB Second version (typically latest)
-   * @returns 1 if A > B, 0 if A = B, -1 if A < B
+   * Parse a strict numeric version ("1", "1.2", "1.2.3", "1.2.3.4", with an
+   * optional leading "v") into its integer parts. Returns null for anything
+   * non-numeric — "latest", "1.2.3-beta", "", whitespace, an HTML error body —
+   * so callers can fail safe instead of computing a bogus comparison.
+   *
+   * This is the guard against the #168 false-"update available" loop: an
+   * unparseable remote version must never be treated as "newer than current".
+   */
+  parseSemver(version: string): number[] | null {
+    return parseNumericVersion(version);
+  }
+
+  /**
+   * Compares two semantic version strings.
+   * @returns 1 if A > B, 0 if A = B (or either side is unparseable), -1 if A < B
+   *
+   * If either version cannot be parsed as a strict numeric semver, returns 0
+   * ("treat as equal") rather than guessing — so a malformed value can never
+   * make the plugin claim an update is available (#168).
    */
   private compareVersions(versionA: string, versionB: string): number {
-    const partsA = versionA.split('.').map(part => parseInt(part, 10));
-    const partsB = versionB.split('.').map(part => parseInt(part, 10));
-    
-    // Compare each part of the version
-    for (let i = 0; i < Math.max(partsA.length, partsB.length); i++) {
-      const partA = i < partsA.length ? partsA[i] : 0;
-      const partB = i < partsB.length ? partsB[i] : 0;
-      
-      if (partA > partB) return 1;
-      if (partA < partB) return -1;
-    }
-    
-    return 0; // Versions are equal
+    return compareNumericVersions(versionA, versionB);
   }
 
   /**

@@ -92,6 +92,7 @@ jest.mock("../../../types", () => ({
 
 import { SettingsManager } from "../SettingsManager";
 import { DEFAULT_SETTINGS, LogLevel } from "../../../types";
+import { migrateSettingsToCurrentSchema } from "../migrations/SettingsMigrator";
 
 describe("SettingsManager", () => {
   let mockPlugin: any;
@@ -327,13 +328,20 @@ describe("SettingsManager", () => {
     });
 
     describe("legacy property removal", () => {
+      // Legacy/dead keys are now pruned by the versioned migrator's v0→v1 step
+      // (the single canonical home), not the normalization helper. Assert via
+      // the real migration entry point. Exhaustive per-key coverage lives in
+      // SettingsMigrator.test.ts; these pin the well-known cases at this layer.
+      const pruneViaMigrator = (raw: Record<string, unknown>) =>
+        migrateSettingsToCurrentSchema(raw, DEFAULT_SETTINGS).settings as any;
+
       it("removes cachedEmbeddingStats", () => {
-        const result = migrateSettings({ cachedEmbeddingStats: { some: "data" } });
+        const result = pruneViaMigrator({ cachedEmbeddingStats: { some: "data" } });
         expect(result.cachedEmbeddingStats).toBeUndefined();
       });
 
       it("removes legacy provider selection fields", () => {
-        const result = migrateSettings({
+        const result = pruneViaMigrator({
           selectedProvider: "custom-provider",
           selectedModelProviders: ["openai", "anthropic"],
         });
@@ -342,12 +350,12 @@ describe("SettingsManager", () => {
       });
 
       it("removes excludedFolders", () => {
-        const result = migrateSettings({ excludedFolders: ["folder"] });
+        const result = pruneViaMigrator({ excludedFolders: ["folder"] });
         expect(result.excludedFolders).toBeUndefined();
       });
 
       it("removes excludedFiles", () => {
-        const result = migrateSettings({ excludedFiles: ["file.md"] });
+        const result = pruneViaMigrator({ excludedFiles: ["file.md"] });
         expect(result.excludedFiles).toBeUndefined();
       });
     });
@@ -454,9 +462,14 @@ describe("SettingsManager", () => {
 
     });
 
+    // Legacy/dead keys are pruned once by the versioned migrator's v0→v1 step,
+    // not on every validate pass. Raw fixtures omit schemaVersion (v0 data) so
+    // the prune runs. Exhaustive coverage lives in SettingsMigrator.test.ts.
+    const pruneLegacy = (raw: Record<string, unknown>) =>
+      migrateSettingsToCurrentSchema(raw, DEFAULT_SETTINGS).settings as any;
+
     it("removes deprecated screen recording settings", () => {
-      const result = validateSettings({
-        ...DEFAULT_SETTINGS,
+      const result = pruneLegacy({
         videoRecordingsDirectory: "SystemSculpt/Video Recordings",
         videoCaptureSystemAudio: true,
         videoCaptureMicrophoneAudio: true,
@@ -473,21 +486,15 @@ describe("SettingsManager", () => {
     });
 
     it("removes deprecated studio telemetry settings", () => {
-      const result = validateSettings({
-        ...DEFAULT_SETTINGS,
-        studioTelemetryOptIn: true,
-      } as any);
-
+      const result = pruneLegacy({ studioTelemetryOptIn: true });
       expect("studioTelemetryOptIn" in result).toBe(false);
     });
 
     it("removes legacy provider selection fields during validation", () => {
-      const result = validateSettings({
-        ...DEFAULT_SETTINGS,
+      const result = pruneLegacy({
         selectedProvider: "custom-provider",
         selectedModelProviders: ["openai", "anthropic"],
-      } as any);
-
+      });
       expect("selectedProvider" in result).toBe(false);
       expect("selectedModelProviders" in result).toBe(false);
     });
@@ -546,6 +553,71 @@ describe("SettingsManager", () => {
 
       expect(mockPlugin.loadData).toHaveBeenCalled();
       expect(settingsManager.settings.settingsMode).toBe("advanced");
+    });
+
+    it("runs the versioned migrator on load: stamps schemaVersion, prunes legacy, keeps providers (#212)", async () => {
+      mockPlugin.loadData.mockResolvedValue({
+        // pre-versioning data (no schemaVersion) carrying legacy keys
+        licenseKey: "user-key",
+        customProviders: [{ id: "openrouter", name: "OpenRouter", isEnabled: true }],
+        selectedProvider: "legacy",
+        canvasFlowEnabled: true,
+        recordSystemAudio: true,
+      });
+
+      await settingsManager.loadSettings();
+
+      expect(settingsManager.settings.schemaVersion).toBe(1);
+      expect(settingsManager.settings).not.toHaveProperty("selectedProvider");
+      expect(settingsManager.settings).not.toHaveProperty("canvasFlowEnabled");
+      expect(settingsManager.settings).not.toHaveProperty("recordSystemAudio");
+      expect(settingsManager.settings.licenseKey).toBe("user-key");
+      expect(settingsManager.settings.customProviders).toHaveLength(1);
+    });
+
+    it("restoreFromExternalSettings migrates an OLD backup before applying it (#212)", async () => {
+      await settingsManager.loadSettings(); // initialize current schema
+
+      // An old backup file: no schemaVersion, legacy keys, real user data.
+      await settingsManager.restoreFromExternalSettings({
+        licenseKey: "restored-key",
+        customProviders: [{ id: "openrouter", name: "OpenRouter", isEnabled: true }],
+        selectedProvider: "legacy",
+        canvasFlowEnabled: true,
+        recordSystemAudio: true,
+      });
+
+      // Restored data is migrated to the current schema, not written back stale.
+      expect(settingsManager.settings.schemaVersion).toBe(1);
+      expect(settingsManager.settings).not.toHaveProperty("selectedProvider");
+      expect(settingsManager.settings).not.toHaveProperty("canvasFlowEnabled");
+      expect(settingsManager.settings).not.toHaveProperty("recordSystemAudio");
+      expect(settingsManager.settings.licenseKey).toBe("restored-key");
+      expect(settingsManager.settings.customProviders).toHaveLength(1);
+      expect(mockPlugin.saveData).toHaveBeenCalled();
+    });
+
+    it("reloadSettingsFromDisk migrates an externally-edited OLD payload (#212)", async () => {
+      await settingsManager.loadSettings(); // initialize current schema
+
+      // Simulate an old/synced data.json appearing on disk (no schemaVersion).
+      mockPlugin.loadData.mockResolvedValue({
+        licenseKey: "disk-key",
+        customProviders: [{ id: "openrouter", name: "OpenRouter", isEnabled: true }],
+        selectedProvider: "legacy",
+        canvasFlowEnabled: true,
+        recordSystemAudio: true,
+      });
+
+      await settingsManager.reloadSettingsFromDisk();
+
+      // The disk-reload entry point migrates exactly like load/restore.
+      expect(settingsManager.settings.schemaVersion).toBe(1);
+      expect(settingsManager.settings).not.toHaveProperty("selectedProvider");
+      expect(settingsManager.settings).not.toHaveProperty("canvasFlowEnabled");
+      expect(settingsManager.settings).not.toHaveProperty("recordSystemAudio");
+      expect(settingsManager.settings.licenseKey).toBe("disk-key");
+      expect(settingsManager.settings.customProviders).toHaveLength(1);
     });
 
     it("triggers settings-loaded event", async () => {

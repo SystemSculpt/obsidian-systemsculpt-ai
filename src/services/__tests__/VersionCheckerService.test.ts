@@ -186,6 +186,22 @@ describe("VersionCheckerService", () => {
       expect(result.isLatest).toBe(true);
     });
 
+    it("ignores a malformed remote latestVersion and stays on latest (#168)", async () => {
+      const { httpRequest } = await import("../../utils/httpClient");
+      for (const bad of ["latest", "v2.0.0-beta", "<html>error</html>", ""]) {
+        (httpRequest as jest.Mock).mockResolvedValue({
+          status: 200,
+          json: { data: { latestVersion: bad } },
+        });
+
+        const result = await service.checkVersion(true);
+
+        // Malformed remote → fail safe to "you're up to date", never a false update.
+        expect(result.isLatest).toBe(true);
+        expect(result.latestVersion).toBe("1.0.0");
+      }
+    });
+
     it("includes releaseUrl and updateUrl", async () => {
       const { httpRequest } = await import("../../utils/httpClient");
       (httpRequest as jest.Mock).mockResolvedValue({
@@ -307,6 +323,42 @@ describe("VersionCheckerService", () => {
       expect(compareVersions("1.10.0", "1.9.0")).toBe(1);
       expect(compareVersions("1.9.0", "1.10.0")).toBe(-1);
       expect(compareVersions("10.0.0", "9.0.0")).toBe(1);
+    });
+
+    it("treats malformed/non-numeric versions as equal — never a false 'update available' (#168)", () => {
+      // If either side cannot be parsed, return 0 so no update is ever claimed.
+      expect(compareVersions("1.0.0", "latest")).toBe(0);
+      expect(compareVersions("1.0.0", "")).toBe(0);
+      expect(compareVersions("1.0.0", "1.0.0-beta")).toBe(0);
+      expect(compareVersions("1.0.0", "not.a.version")).toBe(0);
+      expect(compareVersions("1.0.0", "   ")).toBe(0);
+      expect(compareVersions("garbage", "1.0.0")).toBe(0);
+      expect(compareVersions("1.0.0", undefined as unknown as string)).toBe(0);
+    });
+
+    it("tolerates a leading 'v' on otherwise-numeric versions", () => {
+      expect(compareVersions("v1.0.0", "1.0.0")).toBe(0);
+      expect(compareVersions("1.0.0", "v2.0.0")).toBe(-1);
+    });
+  });
+
+  describe("parseSemver (#168 guard)", () => {
+    const parse = (v: unknown): number[] | null => (service as any).parseSemver(v);
+
+    it("parses strict numeric versions, optionally v-prefixed", () => {
+      expect(parse("1.2.3")).toEqual([1, 2, 3]);
+      expect(parse("v5.8.1")).toEqual([5, 8, 1]);
+      expect(parse("1")).toEqual([1]);
+      expect(parse("1.2.3.4")).toEqual([1, 2, 3, 4]);
+    });
+
+    it("returns null for anything non-numeric", () => {
+      for (const bad of ["", "   ", "latest", "1.2.3-beta", "v", "1.x.0", "abc", "1.2.3.beta"]) {
+        expect(parse(bad)).toBeNull();
+      }
+      expect(parse(undefined)).toBeNull();
+      expect(parse(null)).toBeNull();
+      expect(parse(123)).toBeNull();
     });
   });
 

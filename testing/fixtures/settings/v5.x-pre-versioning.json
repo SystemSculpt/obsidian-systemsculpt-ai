@@ -1,0 +1,36 @@
+{
+  "_fixtureMeta": {
+    "describes": "Representative SystemSculpt v5.x data.json before schema versioning shipped — newer shape with multiple custom providers, a legacy workflowEngine.templates bag, and only partial nested objects. Proves a recent install back-fills new nested defaults and keeps every provider.",
+    "era": "5.x"
+  },
+  "licenseKey": "user-v5-license",
+  "licenseValid": false,
+  "selectedModelId": "systemsculpt@@systemsculpt/ai-agent",
+  "customProviders": [
+    {
+      "id": "openai",
+      "name": "My OpenAI",
+      "endpoint": "https://api.openai.com/v1",
+      "apiKey": "sk-v5-openai",
+      "isEnabled": true
+    },
+    {
+      "id": "anthropic",
+      "name": "Claude",
+      "endpoint": "https://api.anthropic.com",
+      "apiKey": "sk-ant-v5",
+      "isEnabled": false
+    }
+  ],
+  "workflowEngine": {
+    "enabled": true,
+    "templates": {
+      "auto-inbox": { "enabled": true, "sourceFolder": "Inbox" }
+    }
+  },
+  "embeddingsExclusions": {
+    "folders": ["Daily Notes"]
+  },
+  "studioTelemetryOptIn": true,
+  "selectedProvider": "custom"
+}
