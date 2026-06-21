@@ -8,6 +8,7 @@ import type SystemSculptPlugin from "../../main";
 import { showPopup, showAlert } from "../../core/ui/";
 import { SystemSculptError, isContextOverflowErrorMessage, ERROR_CODES } from "../../utils/errors";
 import { SYSTEMSCULPT_WEBSITE } from "../../constants/externalServices";
+import { openExternalUrl } from "../../utils/externalUrl";
 import { MessageRenderer } from "./MessageRenderer";
 import { InputHandler, type AutomationApprovalMode } from "./InputHandler";
 import { FileContextManager } from "./FileContextManager";
@@ -746,7 +747,7 @@ export class ChatView extends ItemView {
       );
 
       if (result?.action === "primary" || result?.confirmed) {
-        window.open(renewUrl, "_blank");
+        void openExternalUrl(renewUrl);
       } else if (result?.action === "secondary") {
         this.openSetupTab("account");
       }
@@ -928,7 +929,14 @@ export class ChatView extends ItemView {
     this.creditsBalanceRefreshPromise = (async () => {
       try {
         this.creditsBalance = await this.aiService.getCreditsBalance();
-        // A successful balance fetch means the license is healthy again.
+        // A successful balance fetch means the license is healthy again — heal
+        // any stale invalid state so gating/account UI agree (#249). Guarded so
+        // a routine poll doesn't rewrite settings on every refresh.
+        if (this.plugin.settings.licenseValid === false) {
+          try {
+            await this.plugin.getSettingsManager().updateSettings({ licenseValid: true });
+          } catch {}
+        }
         try { uiSetup.hideLicenseBanner(this); } catch {}
       } catch (creditsError) {
         // Proactively surface an expired/invalid license on chat open — before

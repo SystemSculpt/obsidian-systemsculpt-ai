@@ -7,6 +7,7 @@ import { InputHandler } from "./InputHandler";
 import { ensureCanonicalId, getDisplayName, getImageCompatibilityInfo } from '../../utils/modelUtils';
 import { attachOverlapInsetManager } from "../../core/ui/services/OverlapInsetService";
 import { renderChatCreditsIndicator } from "./ui/ChatComposerIndicators";
+import { openExternalUrl } from "../../utils/externalUrl";
 
 // ────────────────────────────────────────────────────────────────────────────
 // Utility helpers for desktop Pi chat UI
@@ -520,7 +521,7 @@ export const uiSetup = {
     renewBtn.className = "systemsculpt-license-banner-renew";
     renewBtn.textContent = "Renew";
     renewBtn.addEventListener("click", () => {
-      window.open(options.renewUrl, "_blank");
+      void openExternalUrl(options.renewUrl);
     });
     banner.appendChild(renewBtn);
 

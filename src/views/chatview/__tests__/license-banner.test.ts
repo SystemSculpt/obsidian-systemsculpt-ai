@@ -53,7 +53,8 @@ describe("uiSetup license banner (#249)", () => {
     expect(renewBtn).not.toBeNull();
     const openSpy = jest.spyOn(dom.window as any, "open").mockImplementation(() => null);
     renewBtn.dispatchEvent(new dom.window.Event("click"));
-    expect(openSpy).toHaveBeenCalledWith("https://systemsculpt.com/renew", "_blank");
+    // Opened safely: scheme-validated, in a new tab, with opener/referrer stripped.
+    expect(openSpy).toHaveBeenCalledWith("https://systemsculpt.com/renew", "_blank", "noopener,noreferrer");
     openSpy.mockRestore();
   });
 

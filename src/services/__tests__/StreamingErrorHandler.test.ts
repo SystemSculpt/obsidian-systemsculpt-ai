@@ -89,6 +89,24 @@ describe("StreamingErrorHandler", () => {
       }
     });
 
+    it("classifies the object-shaped error form ({ error: { code } }) as a license failure", async () => {
+      const response = createMockResponse(401, {
+        error: { code: "invalid_license", message: "Invalid license key" },
+      });
+      await expect(
+        StreamingErrorHandler.handleStreamError(response, false)
+      ).rejects.toMatchObject({ code: ERROR_CODES.INVALID_LICENSE });
+    });
+
+    it("classifies an object-shaped missing_license code as a license failure", async () => {
+      const response = createMockResponse(401, {
+        error: { code: "missing_license", message: "Missing license key" },
+      });
+      await expect(
+        StreamingErrorHandler.handleStreamError(response, false)
+      ).rejects.toMatchObject({ code: ERROR_CODES.INVALID_LICENSE });
+    });
+
     it("does NOT misclassify a generic 500 stream error as a license problem", async () => {
       const response = createMockResponse(500, { error: "INTERNAL_ERROR", message: "boom" });
       await expect(
