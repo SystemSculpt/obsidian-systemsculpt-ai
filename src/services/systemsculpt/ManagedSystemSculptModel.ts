@@ -7,7 +7,13 @@ import {
   type ManagedSystemSculptModelContract,
 } from "./ManagedSystemSculptContract";
 
-function hasActiveSystemSculptLicense(plugin: Pick<SystemSculptPlugin, "settings">): boolean {
+/**
+ * The single low-level SystemSculpt-license primitive: a license is held only
+ * when the key is non-empty AND the server marked it valid. Composite gating
+ * decisions live in EntitlementService (#209); this is the one boolean it (and
+ * the managed-access helper below) reads, so the predicate has exactly one home.
+ */
+export function hasActiveSystemSculptLicense(plugin: Pick<SystemSculptPlugin, "settings">): boolean {
   const settings = plugin?.settings || {};
   return !!(String(settings.licenseKey || "").trim() && settings.licenseValid === true);
 }

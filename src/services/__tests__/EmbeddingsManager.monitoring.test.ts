@@ -52,6 +52,7 @@ jest.mock('../../core/ui/notifications', () => ({
 }));
 
 import { EmbeddingsManager } from '../embeddings/EmbeddingsManager';
+import { EntitlementService } from '../entitlement/EntitlementService';
 import { EmbeddingsProviderError } from '../embeddings/providers/ProviderError';
 import { DEFAULT_EMBEDDING_DIMENSION } from '../../constants/embeddings';
 
@@ -103,6 +104,7 @@ function createPluginStub() {
     settings,
     app,
     getSettingsManager: jest.fn(() => settingsManager),
+    getEntitlementService: () => new EntitlementService({ settings } as any),
   };
 }
 

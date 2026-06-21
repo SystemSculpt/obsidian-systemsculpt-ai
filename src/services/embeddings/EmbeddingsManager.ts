@@ -1593,8 +1593,9 @@ export class EmbeddingsManager {
       const model = (p.customModel || p.model || '').trim();
       return !!endpoint && !!model;
     }
-    // For SystemSculpt, require license key
-    return !!this.plugin.settings.licenseKey?.trim() && this.plugin.settings.licenseValid === true;
+    // SystemSculpt-hosted embeddings require an active license — decided by the
+    // single entitlement owner (#209), never an inline license check here.
+    return this.plugin.getEntitlementService().canUseEmbeddings(p.providerId);
   }
 
   private async processFile(file: TFile, reason: 'modify' | 'create' | 'rename' | 'manual' | 'auto' = 'manual'): Promise<void> {

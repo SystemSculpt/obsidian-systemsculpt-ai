@@ -1879,7 +1879,7 @@ export class TranscriptionService {
 
       if (
         provider === "systemsculpt" &&
-        (!this.plugin.settings.licenseKey || !this.plugin.settings.licenseValid)
+        !this.plugin.getEntitlementService().canUseTranscription(provider)
       ) {
         throw new Error(
           "A valid SystemSculpt license is required to use the SystemSculpt API for transcription. Please enter a valid license key or switch to a custom transcription provider in the settings."

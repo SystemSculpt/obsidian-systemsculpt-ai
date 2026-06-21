@@ -4,6 +4,7 @@
 
 import { App, WorkspaceLeaf } from "obsidian";
 import { SystemSculptService } from "../../../services/SystemSculptService";
+import { EntitlementService } from "../../../services/entitlement/EntitlementService";
 import { ChatView } from "../ChatView";
 
 describe("ChatView empty chat status", () => {
@@ -25,6 +26,7 @@ describe("ChatView empty chat status", () => {
     cachedModels?: Array<{ id: string }>;
     licenseKey?: string;
     licenseValid?: boolean;
+    customProviders?: Array<Record<string, unknown>>;
   }) => {
     const app = new App();
     const leaf = new WorkspaceLeaf(app);
@@ -45,7 +47,7 @@ describe("ChatView empty chat status", () => {
         chatFontSize: "medium",
         respectReducedMotion: false,
         activeProvider: { type: "native", id: "systemsculpt" },
-        customProviders: [],
+        customProviders: options?.customProviders ?? [],
         mcpServers: [],
       },
       modelService: {
@@ -53,6 +55,8 @@ describe("ChatView empty chat status", () => {
       },
       openSettingsTab: jest.fn(),
     };
+    // The real entitlement service (#209) drives the gating decisions under test.
+    plugin.getEntitlementService = () => new EntitlementService(plugin);
 
     const chatView = new ChatView(leaf as any, plugin);
     chatView.chatContainer = document.createElement("div");
@@ -151,6 +155,69 @@ describe("ChatView empty chat status", () => {
     expectNoStandalonePiCopy(statusText);
     expect(actionLabels).toContain("Open Account");
     expect(actionLabels).toHaveLength(1);
+  });
+
+  it("never walls a BYOK user with a configured custom provider, even with no license (#209)", () => {
+    // The May 2026 bug: a BYOK user (own OpenRouter key, no SystemSculpt
+    // license) was blocked from Chat by a license prompt purely because the
+    // managed model was the default selection. Same no-license inputs as the
+    // test above, but WITH a configured custom provider — they must land on a
+    // ready state, never the "Setup required" / "Open Account" wall.
+    const chatView = createChatView({
+      selectedModelId: "systemsculpt@@systemsculpt/ai-agent",
+      cachedModels: [],
+      licenseKey: "",
+      licenseValid: false,
+      customProviders: [
+        {
+          id: "openrouter",
+          name: "OpenRouter",
+          endpoint: "https://openrouter.ai/api/v1",
+          apiKey: "byok-key",
+          isEnabled: true,
+        },
+      ],
+    });
+
+    chatView.displayChatStatus();
+
+    const statusText = chatView.chatContainer.textContent || "";
+    const actionLabels = Array.from(
+      chatView.chatContainer.querySelectorAll(".systemsculpt-chat-status-action-label")
+    ).map((el) => el.textContent?.trim());
+
+    expect(statusText).not.toContain("Finish setup");
+    expect(statusText).not.toContain("Setup required");
+    expect(statusText).not.toContain("Add and validate your SystemSculpt license");
+    expect(actionLabels).not.toContain("Open Account");
+    // Lands on the normal ready state with the usual primary action.
+    expect(statusText).toContain("New chat");
+    expect(statusText).toContain("Ready");
+    expect(actionLabels).toContain("Add Context");
+  });
+
+  it("persists the user's real selection, not the BYOK runtime fallback, into leaf state (#209)", () => {
+    const chatView = createChatView({
+      selectedModelId: "systemsculpt@@systemsculpt/ai-agent",
+      licenseKey: "",
+      licenseValid: false,
+      customProviders: [
+        {
+          id: "openrouter",
+          name: "OpenRouter",
+          endpoint: "https://openrouter.ai/api/v1",
+          apiKey: "byok-key",
+          isEnabled: true,
+        },
+      ],
+    });
+
+    // Runtime resolves onto the BYOK model so chat actually works...
+    expect(chatView.getEffectiveSelectedModelId()).not.toBe("systemsculpt@@systemsculpt/ai-agent");
+
+    // ...but persisted leaf state keeps the user's actual selection, so adding a
+    // license later restores the managed model instead of sticking on the fallback.
+    expect(chatView.getState().selectedModelId).toBe("systemsculpt@@systemsculpt/ai-agent");
   });
 
   it("keeps local Pi chats on a local-ready state instead of redirecting to Account copy", () => {

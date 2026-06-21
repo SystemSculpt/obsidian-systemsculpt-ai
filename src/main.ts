@@ -35,6 +35,7 @@ import type { CommandManager } from "./core/plugin/commands";
 import { setLogLevel } from "./utils/errorHandling";
 import { errorLogger } from "./utils/errorLogger";
 import { UnifiedModelService } from "./services/providers/UnifiedModelService";
+import { EntitlementService } from "./services/entitlement/EntitlementService";
 import { DirectoryManager } from "./core/DirectoryManager";
 import { VersionCheckerService } from "./services/VersionCheckerService";
 import { FavoritesService } from "./services/FavoritesService";
@@ -120,6 +121,7 @@ export default class SystemSculptPlugin extends Plugin {
   private commandManager: CommandManager;
   private fileContextMenuService: FileContextMenuService | null = null;
   private _modelService: UnifiedModelService | undefined;
+  private _entitlementService: EntitlementService | null = null;
   private isUnloading = false;
   private isPreloadingDone = false;
   private failures: string[] = [];
@@ -191,9 +193,8 @@ export default class SystemSculptPlugin extends Plugin {
       // Validate prerequisites based on provider
       const provider = (this.settings as any).embeddingsProvider || "systemsculpt";
       if (provider === 'systemsculpt') {
-        const hasLicenseKey = !!this.settings.licenseKey?.trim();
-        const hasValidLicense = this.settings.licenseValid === true;
-        if (!hasLicenseKey || !hasValidLicense) {
+        // Route through the single entitlement owner (#209) — no inline license check.
+        if (!this.getEntitlementService().canUseEmbeddings(provider)) {
           throw new Error('Embeddings require an active SystemSculpt license. Validate your license in settings.');
         }
       } else if (provider === 'custom') {
@@ -2346,6 +2347,15 @@ export default class SystemSculptPlugin extends Plugin {
 
   getLicenseManager(): LicenseManager {
     return this.licenseManager;
+  }
+
+  /**
+   * The single owner of gating decisions (chat/embeddings/recorder) — #209.
+   * Stateless and memoized: it reads live settings, so callers never hold a
+   * stale license view. UI must ask this instead of inlining license checks.
+   */
+  getEntitlementService(): EntitlementService {
+    return (this._entitlementService ??= new EntitlementService(this));
   }
 
   getSettingsManager(): SettingsManager {
