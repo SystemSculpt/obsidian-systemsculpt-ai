@@ -171,3 +171,22 @@ export function migrateSettingsToCurrentSchema(
   merged.schemaVersion = CURRENT_SCHEMA_VERSION;
   return { settings: merged, fromVersion, toVersion: CURRENT_SCHEMA_VERSION, appliedSteps, future: false };
 }
+
+/**
+ * Schema versions in [1, current] that have NO migration step. A non-empty
+ * result means the chain has a gap: a bump to `current` would stamp data as
+ * fully migrated while silently skipping the missing step. Guarded permanently
+ * by SettingsMigrator.test.ts so a future schema bump that forgets a step fails
+ * CI instead of shipping (#212).
+ */
+export function findMissingMigrationVersions(
+  migrations: readonly SettingsMigrationStep[] = SETTINGS_MIGRATIONS,
+  current: number = CURRENT_SCHEMA_VERSION,
+): number[] {
+  const targets = new Set(migrations.map((step) => step.to));
+  const missing: number[] = [];
+  for (let version = 1; version <= current; version++) {
+    if (!targets.has(version)) missing.push(version);
+  }
+  return missing;
+}

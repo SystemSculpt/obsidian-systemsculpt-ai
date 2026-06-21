@@ -3,6 +3,7 @@ import {
   CURRENT_SCHEMA_VERSION,
   LEGACY_KEYS_REMOVED_IN_V1,
   deepMergeDefaults,
+  findMissingMigrationVersions,
   migrateSettingsToCurrentSchema,
   readSchemaVersion,
 } from "../SettingsMigrator";
@@ -142,5 +143,20 @@ describe("migrateSettingsToCurrentSchema", () => {
     migrateSettingsToCurrentSchema(raw, DEFAULT_SETTINGS);
     expect(raw).toHaveProperty("selectedProvider", "legacy");
     expect(raw).not.toHaveProperty("schemaVersion");
+  });
+});
+
+describe("findMissingMigrationVersions (chain-completeness guard, #212)", () => {
+  it("reports no gaps for the shipped migration registry", () => {
+    expect(findMissingMigrationVersions()).toEqual([]);
+  });
+
+  it("detects a missing intermediate step before a future bump", () => {
+    const gappy = [
+      { to: 1, describe: "v0->v1", migrate: (s: Record<string, unknown>) => s },
+      { to: 3, describe: "v2->v3", migrate: (s: Record<string, unknown>) => s },
+    ];
+    // Bumping to v3 with no v2 step must surface version 2 as missing.
+    expect(findMissingMigrationVersions(gappy, 3)).toEqual([2]);
   });
 });

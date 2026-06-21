@@ -1055,8 +1055,10 @@ export class SettingsManager {
       loadedData && typeof loadedData === "object" && !Array.isArray(loadedData)
         ? (loadedData as Record<string, unknown>)
         : {};
-    const mergedSettings = this.migrateSettings({ ...DEFAULT_SETTINGS, ...raw });
-    const nextSettings = await this.validateSettingsAsync(mergedSettings);
+    // Route disk reloads through the SAME versioned migrate+validate+rollback
+    // path as load/restore, so an externally-edited or synced OLD file is
+    // migrated (deep-merge + legacy prune + schema stamp), not applied stale (#212).
+    const nextSettings = await this.migrateValidateWithRollback(raw);
 
     if (JSON.stringify(this.settings) === JSON.stringify(nextSettings)) {
       if (this.shouldIgnoreInternalPluginDataEcho(nextSettings)) {
@@ -1150,11 +1152,8 @@ export class SettingsManager {
    * dead-plugin class this versioning exists to prevent (#212).
    */
   async restoreFromExternalSettings(raw: unknown): Promise<void> {
-    const { settings } = migrateSettingsToCurrentSchema(
-      this.asSettingsRecord(raw),
-      DEFAULT_SETTINGS,
-    );
-    await this.updateSettings(settings as Partial<SystemSculptSettings>);
+    const migrated = await this.migrateValidateWithRollback(this.asSettingsRecord(raw));
+    await this.updateSettings(migrated);
   }
 
   // ... other methods like getLicenseKey, setLicenseKey, validateLicenseKey, etc.

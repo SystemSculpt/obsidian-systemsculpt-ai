@@ -58,6 +58,14 @@ describe("SystemSculptPlugin safe mode + version gate (#212)", () => {
     expect(plugin.failures).not.toContain("unsupported Obsidian version");
   });
 
+  it("flags an unsupported Obsidian version, failing soft without throwing (#212/#147)", () => {
+    const plugin = makePlugin();
+    jest.spyOn(plugin, "getObsidianApiVersion").mockReturnValue("1.0.0");
+
+    expect(() => plugin.warnIfObsidianVersionUnsupported()).not.toThrow();
+    expect(plugin.failures).toContain("unsupported Obsidian version");
+  });
+
   it("onload enters safe mode (and never rethrows) when core initialization throws (#183)", async () => {
     const plugin = makePlugin();
     jest.spyOn(plugin as any, "writeMobileStartupProbe").mockResolvedValue(undefined);

@@ -568,9 +568,14 @@ export default class SystemSculptPlugin extends Plugin {
    * best-effort — never hard-block. An unreadable app version is treated as
    * supported. Safe to call before any service exists.
    */
+  /** Indirection over the `obsidian` apiVersion export so tests can drive the gate. */
+  protected getObsidianApiVersion(): string | undefined {
+    return apiVersion;
+  }
+
   private warnIfObsidianVersionUnsupported(): void {
     try {
-      const compat = checkObsidianCompatibility(apiVersion, MINIMUM_OBSIDIAN_VERSION);
+      const compat = checkObsidianCompatibility(this.getObsidianApiVersion(), MINIMUM_OBSIDIAN_VERSION);
       if (compat.supported) {
         return;
       }

@@ -31,4 +31,10 @@ describe("checkObsidianCompatibility (#212 min-version fail-soft)", () => {
   it("defaults the minimum to MINIMUM_OBSIDIAN_VERSION", () => {
     expect(checkObsidianCompatibility("99.0.0").minimumVersion).toBe(MINIMUM_OBSIDIAN_VERSION);
   });
+
+  it("stays in sync with manifest.json minAppVersion (drift guard, #212)", () => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const manifest = require("../../../../../manifest.json");
+    expect(MINIMUM_OBSIDIAN_VERSION).toBe(manifest.minAppVersion);
+  });
 });

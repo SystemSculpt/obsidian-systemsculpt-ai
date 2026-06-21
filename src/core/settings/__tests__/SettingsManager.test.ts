@@ -597,6 +597,29 @@ describe("SettingsManager", () => {
       expect(mockPlugin.saveData).toHaveBeenCalled();
     });
 
+    it("reloadSettingsFromDisk migrates an externally-edited OLD payload (#212)", async () => {
+      await settingsManager.loadSettings(); // initialize current schema
+
+      // Simulate an old/synced data.json appearing on disk (no schemaVersion).
+      mockPlugin.loadData.mockResolvedValue({
+        licenseKey: "disk-key",
+        customProviders: [{ id: "openrouter", name: "OpenRouter", isEnabled: true }],
+        selectedProvider: "legacy",
+        canvasFlowEnabled: true,
+        recordSystemAudio: true,
+      });
+
+      await settingsManager.reloadSettingsFromDisk();
+
+      // The disk-reload entry point migrates exactly like load/restore.
+      expect(settingsManager.settings.schemaVersion).toBe(1);
+      expect(settingsManager.settings).not.toHaveProperty("selectedProvider");
+      expect(settingsManager.settings).not.toHaveProperty("canvasFlowEnabled");
+      expect(settingsManager.settings).not.toHaveProperty("recordSystemAudio");
+      expect(settingsManager.settings.licenseKey).toBe("disk-key");
+      expect(settingsManager.settings.customProviders).toHaveLength(1);
+    });
+
     it("triggers settings-loaded event", async () => {
       await settingsManager.loadSettings();
 
