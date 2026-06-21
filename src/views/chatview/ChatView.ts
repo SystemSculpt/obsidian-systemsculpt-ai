@@ -36,7 +36,6 @@ import { resolveProviderLabel } from "../../studio/piAuth/StudioPiProviderRegist
 import { PlatformContext } from "../../services/PlatformContext";
 import {
   getManagedSystemSculptModelId,
-  hasManagedSystemSculptAccess,
   isManagedSystemSculptModelId,
 } from "../../services/systemsculpt/ManagedSystemSculptModel";
 import {
@@ -57,7 +56,6 @@ import { renderChatStatusSurface } from "./ui/ChatStatusSurface";
 import {
   getChatModelDisplayName,
   getChatModelSetupSurface,
-  getEffectiveChatModelId,
   openChatModelSetupTab,
   promptChatModelSetup,
   type ChatModelSetupPromptOverrides,
@@ -865,8 +863,7 @@ export class ChatView extends ItemView {
   }
 
   public async refreshCreditsBalance(): Promise<void> {
-    const isProActive =
-      !!(this.plugin.settings.licenseValid === true && this.plugin.settings.licenseKey?.trim());
+    const isProActive = this.plugin.getEntitlementService().hasSystemSculptLicense();
 
     if (!isProActive) {
       this.creditsBalance = null;
@@ -911,7 +908,13 @@ export class ChatView extends ItemView {
   }
 
   public hasConfiguredProvider(): boolean {
-    return this.isManagedSelectedModel() ? hasManagedSystemSculptAccess(this.plugin) : true;
+    // Ask the single entitlement owner (#209) rather than checking license here.
+    // For a BYOK user with a configured custom provider this is always true —
+    // resolveDefaultModel keeps them off the license-walled managed model — so
+    // they never hit a SystemSculpt setup wall in chat.
+    return this.plugin
+      .getEntitlementService()
+      .canUseChat(this.selectedModelId, this.plugin.settings.selectedModelId).allowed;
   }
 
   public openSetupTab(targetTab: ChatModelSetupTab = "account"): void {
@@ -924,7 +927,13 @@ export class ChatView extends ItemView {
   }
 
   public getEffectiveSelectedModelId(): string {
-    return getEffectiveChatModelId(this.selectedModelId, this.plugin.settings.selectedModelId);
+    // The model chat actually runs on, accounting for entitlement (#209): a BYOK
+    // user with no license is resolved onto their configured custom model rather
+    // than the license-walled managed default. The stored selection is left
+    // untouched, so activating a license restores the managed model.
+    return this.plugin
+      .getEntitlementService()
+      .resolveDefaultModel(this.selectedModelId, this.plugin.settings.selectedModelId);
   }
 
   public isManagedSelectedModel(): boolean {

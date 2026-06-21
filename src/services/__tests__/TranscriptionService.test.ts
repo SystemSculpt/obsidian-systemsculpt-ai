@@ -68,6 +68,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { PlatformContext } from "../PlatformContext";
+import { EntitlementService } from "../entitlement/EntitlementService";
 import { TranscriptionService } from "../TranscriptionService";
 import { AUDIO_UPLOAD_MAX_BYTES } from "../../constants/uploadLimits";
 
@@ -100,6 +101,7 @@ describe("TranscriptionService", () => {
       },
       directoryManager: null,
     };
+    mockPlugin.getEntitlementService = () => new EntitlementService(mockPlugin);
 
     // Reset singleton for each test
     (TranscriptionService as any).instance = undefined;

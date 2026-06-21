@@ -35,6 +35,7 @@ import type { CommandManager } from "./core/plugin/commands";
 import { setLogLevel } from "./utils/errorHandling";
 import { errorLogger } from "./utils/errorLogger";
 import { UnifiedModelService } from "./services/providers/UnifiedModelService";
+import { EntitlementService } from "./services/entitlement/EntitlementService";
 import { DirectoryManager } from "./core/DirectoryManager";
 import { VersionCheckerService } from "./services/VersionCheckerService";
 import { FavoritesService } from "./services/FavoritesService";
@@ -120,6 +121,7 @@ export default class SystemSculptPlugin extends Plugin {
   private commandManager: CommandManager;
   private fileContextMenuService: FileContextMenuService | null = null;
   private _modelService: UnifiedModelService | undefined;
+  private _entitlementService: EntitlementService | null = null;
   private isUnloading = false;
   private isPreloadingDone = false;
   private failures: string[] = [];
@@ -2346,6 +2348,15 @@ export default class SystemSculptPlugin extends Plugin {
 
   getLicenseManager(): LicenseManager {
     return this.licenseManager;
+  }
+
+  /**
+   * The single owner of gating decisions (chat/embeddings/recorder) — #209.
+   * Stateless and memoized: it reads live settings, so callers never hold a
+   * stale license view. UI must ask this instead of inlining license checks.
+   */
+  getEntitlementService(): EntitlementService {
+    return (this._entitlementService ??= new EntitlementService(this));
   }
 
   getSettingsManager(): SettingsManager {

@@ -6,6 +6,7 @@ import { App, WorkspaceLeaf } from "obsidian";
 import { SystemSculptService } from "../../../services/SystemSculptService";
 import { PlatformContext } from "../../../services/PlatformContext";
 import { ChatView } from "../ChatView";
+import { EntitlementService } from "../../../services/entitlement/EntitlementService";
 
 describe("ChatView loaded model migration", () => {
   beforeEach(() => {
@@ -49,6 +50,7 @@ describe("ChatView loaded model migration", () => {
         updateSettings: jest.fn().mockResolvedValue(undefined),
       })),
     };
+    plugin.getEntitlementService = () => new EntitlementService(plugin);
 
     return new ChatView(leaf as any, plugin);
   }
