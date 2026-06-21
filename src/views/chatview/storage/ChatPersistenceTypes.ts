@@ -26,6 +26,7 @@ export interface ChatMetadata {
   chatFontSize?: "small" | "medium" | "large";
   selectedPromptPath?: string;
   agentModeEnabled?: boolean;
+  hideSystemMessages?: boolean;
   chatBackend?: ChatBackend;
   piSessionFile?: string;
   piSessionId?: string;

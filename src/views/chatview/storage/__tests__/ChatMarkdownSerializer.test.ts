@@ -19,6 +19,8 @@ jest.mock("obsidian", () => ({
           result[key] = JSON.parse(value.replace(/'/g, '"'));
         } else if (value === "null" || value === "") {
           result[key] = null;
+        } else if (value === "true" || value === "false") {
+          result[key] = value === "true";
         } else if (!isNaN(Number(value))) {
           result[key] = Number(value);
         } else {
@@ -273,6 +275,30 @@ Hello!
       expect(result?.metadata.title).toBe("Test Chat");
       expect(result?.metadata.chatBackend).toBe("systemsculpt");
       expect(result?.metadata.systemMessage).toBeUndefined();
+    });
+
+    it("round-trips the per-chat hide system/tool preference (#213, #174, #167)", () => {
+      const base = {
+        model: "gpt-4",
+        title: "Test Chat",
+        created: "2024-01-01T00:00:00Z",
+        lastModified: "2024-01-01T12:00:00Z",
+      };
+
+      const hidden = ChatMarkdownSerializer.parseMarkdown(
+        createMarkdown({ id: "chat-hidden", ...base, hideSystemMessages: true }, "")
+      );
+      expect(hidden?.metadata.hideSystemMessages).toBe(true);
+
+      const shown = ChatMarkdownSerializer.parseMarkdown(
+        createMarkdown({ id: "chat-shown", ...base, hideSystemMessages: false }, "")
+      );
+      expect(shown?.metadata.hideSystemMessages).toBe(false);
+
+      const unset = ChatMarkdownSerializer.parseMarkdown(
+        createMarkdown({ id: "chat-unset", ...base }, "")
+      );
+      expect(unset?.metadata.hideSystemMessages).toBeUndefined();
     });
 
     it("marks legacy prompt metadata as legacy-only compatibility state", () => {

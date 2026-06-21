@@ -1,4 +1,15 @@
 /* Tool-call specific overrides for shared structured layout */
+
+/*
+ * Per-chat "hide system & tool messages" toggle (#213/#174/#167).
+ * When the chat container opts in, hide inline tool-call activity (the modern
+ * systemsculpt backend renders tool calls inline, not as tool-role messages).
+ * Reasoning (.systemsculpt-reasoning-wrapper) is intentionally left visible.
+ */
+.systemsculpt-hide-tool-activity .systemsculpt-tool-call-group {
+  display: none !important;
+}
+
 .systemsculpt-tool-call-group[data-group-status="failed"] .systemsculpt-chat-structured-title {
   color: var(--color-red);
   user-select: text;

@@ -118,6 +118,9 @@ export class ChatView extends ItemView {
   /** Tools trusted for this chat session (cleared on chat reload/close) */
   private dragDropCleanup: (() => void) | null = null;
   public chatFontSize: "small" | "medium" | "large";
+  // Per-chat override for hiding SystemSculpt system + tool messages (#213/#174/#167).
+  // undefined = follow the global `hideSystemMessagesInChat` setting.
+  public hideSystemMessages: boolean | undefined;
   private chatExportService: ChatExportService | null = null;
   private debugLogService: ChatDebugLogService | null = null;
   private warnedImageIncompatModels: Set<string> = new Set();
@@ -164,6 +167,7 @@ export class ChatView extends ItemView {
         piSessionId?: string;
         piLastEntryId?: string;
         piLastSyncedAt?: string;
+        hideSystemMessages?: boolean;
     }) || {};
 
     this.messages = [];
@@ -187,6 +191,7 @@ export class ChatView extends ItemView {
 
     // Initialize chat font size from saved state or plugin settings
     this.chatFontSize = initialState.chatFontSize || (plugin.settings as any).chatFontSize || "medium";
+    this.hideSystemMessages = initialState.hideSystemMessages;
   }
 
   private ensureCoreServicesReady(): void {
@@ -318,6 +323,7 @@ export class ChatView extends ItemView {
           chatFontSize: this.chatFontSize,
           selectedPromptPath: this.inputHandler?.getSelectedPromptPath?.() || "",
           agentModeEnabled: this.inputHandler?.isAgentModeEnabled?.(),
+          hideSystemMessages: this.hideSystemMessages,
           piSessionFile: this.piSessionFile,
           piSessionId: this.piSessionId,
           piLastEntryId: this.piLastEntryId,
@@ -1190,7 +1196,36 @@ export class ChatView extends ItemView {
   }
 
   public shouldRenderMessageRole(role: ChatRole): boolean {
-    return !(this.plugin.settings.hideSystemMessagesInChat && role === "system");
+    if (this.isSystemNoiseHidden() && (role === "system" || role === "tool")) {
+      return false;
+    }
+    return true;
+  }
+
+  // Effective visibility for SystemSculpt system + tool messages (#213/#174/#167):
+  // a per-chat preference wins; otherwise fall back to the global default.
+  public isSystemNoiseHidden(): boolean {
+    return this.hideSystemMessages ?? this.plugin.settings.hideSystemMessagesInChat ?? false;
+  }
+
+  // Flip the per-chat preference, then re-render and persist so long chats stay
+  // de-cluttered across reloads.
+  public toggleSystemNoiseHidden(): void {
+    this.hideSystemMessages = !this.isSystemNoiseHidden();
+    this.applyHideToolActivityClass();
+    this.inputHandler?.syncHideSystemMessagesButton?.();
+    void this.renderMessagesInChunks();
+    void this.saveChat();
+  }
+
+  // Inline tool-call blocks live inside assistant messages, so for reloaded chats
+  // (where tool-role messages are not persisted) we hide tool activity via a
+  // container class rather than the role filter.
+  public applyHideToolActivityClass(): void {
+    this.chatContainer?.classList.toggle(
+      "systemsculpt-hide-tool-activity",
+      this.isSystemNoiseHidden(),
+    );
   }
 
 
@@ -1498,6 +1533,7 @@ export class ChatView extends ItemView {
       selectedModelId: this.getPersistedSelectedModelId(),
       version: this.chatVersion,
       chatFontSize: this.chatFontSize,
+      hideSystemMessages: this.hideSystemMessages,
       chatBackend: this.chatBackend,
       piSessionFile: this.piSessionFile,
       piSessionId: this.piSessionId,
@@ -1533,6 +1569,8 @@ export class ChatView extends ItemView {
         this.chatFontSize = state.chatFontSize;
         this.scheduleChatFontSizeClassSync();
       }
+      this.hideSystemMessages =
+        typeof state?.hideSystemMessages === "boolean" ? state.hideSystemMessages : undefined;
       this.virtualStartIndex = 0;
       this.hasAdjustedInitialWindow = false;
       this.messages = [];
@@ -1567,6 +1605,9 @@ export class ChatView extends ItemView {
     this.chatVersion = state.version !== undefined ? state.version : -1;
 
     this.applyChatLeafState(state);
+    if (typeof state.hideSystemMessages === "boolean") {
+      this.hideSystemMessages = state.hideSystemMessages;
+    }
     // Restore chat font size
     if (state.chatFontSize) {
       this.chatFontSize = state.chatFontSize;
@@ -1687,6 +1728,13 @@ export class ChatView extends ItemView {
           }
         }
 
+        // Restore per-chat system/tool message visibility (#213/#174/#167).
+        if (typeof chatData.hideSystemMessages === "boolean") {
+          this.hideSystemMessages = chatData.hideSystemMessages;
+        }
+        this.applyHideToolActivityClass();
+        this.inputHandler?.syncHideSystemMessagesButton?.();
+
         // Restore context files without blocking first render.
         if (this.contextManager) {
           const contextFiles = (chatData.context_files || []).filter(Boolean);
@@ -1804,6 +1852,8 @@ export class ChatView extends ItemView {
 
   public async renderMessagesInChunks(): Promise<void> {
     if (!this.chatContainer) return;
+
+    this.applyHideToolActivityClass();
 
     const renderEpoch = ++this.renderEpoch;
     const visibleMessages = this.messages.filter((message) =>
