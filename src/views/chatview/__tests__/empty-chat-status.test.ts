@@ -196,6 +196,30 @@ describe("ChatView empty chat status", () => {
     expect(actionLabels).toContain("Add Context");
   });
 
+  it("persists the user's real selection, not the BYOK runtime fallback, into leaf state (#209)", () => {
+    const chatView = createChatView({
+      selectedModelId: "systemsculpt@@systemsculpt/ai-agent",
+      licenseKey: "",
+      licenseValid: false,
+      customProviders: [
+        {
+          id: "openrouter",
+          name: "OpenRouter",
+          endpoint: "https://openrouter.ai/api/v1",
+          apiKey: "byok-key",
+          isEnabled: true,
+        },
+      ],
+    });
+
+    // Runtime resolves onto the BYOK model so chat actually works...
+    expect(chatView.getEffectiveSelectedModelId()).not.toBe("systemsculpt@@systemsculpt/ai-agent");
+
+    // ...but persisted leaf state keeps the user's actual selection, so adding a
+    // license later restores the managed model instead of sticking on the fallback.
+    expect(chatView.getState().selectedModelId).toBe("systemsculpt@@systemsculpt/ai-agent");
+  });
+
   it("keeps local Pi chats on a local-ready state instead of redirecting to Account copy", () => {
     const chatView = createChatView({
       selectedModelId: "local-pi-openai@@gpt-4.1",

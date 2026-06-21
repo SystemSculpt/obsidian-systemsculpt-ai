@@ -310,7 +310,7 @@ export class ChatView extends ItemView {
         this.chatId,
         this.messages,
         {
-          selectedModelId: this.getEffectiveSelectedModelId(),
+          selectedModelId: this.getPersistedSelectedModelId(),
           contextFiles: this.contextManager?.getContextFiles() || new Set(),
           title: this.chatTitle,
           chatFontSize: this.chatFontSize,
@@ -936,6 +936,21 @@ export class ChatView extends ItemView {
       .resolveDefaultModel(this.selectedModelId, this.plugin.settings.selectedModelId);
   }
 
+  /**
+   * The user's actual stored selection, WITHOUT entitlement resolution — for
+   * persistence only (chat file + leaf state). Persisting the entitlement-
+   * resolved value would let a no-license BYOK user's runtime fallback overwrite
+   * their managed selection, so it would not come back after a license is
+   * activated (#209). Runtime execution/gating uses getEffectiveSelectedModelId.
+   */
+  private getPersistedSelectedModelId(): string {
+    return (
+      ensureCanonicalId(String(this.selectedModelId || "").trim()) ||
+      ensureCanonicalId(String(this.plugin.settings.selectedModelId || "").trim()) ||
+      getManagedSystemSculptModelId()
+    );
+  }
+
   public isManagedSelectedModel(): boolean {
     return isManagedSystemSculptModelId(this.getEffectiveSelectedModelId());
   }
@@ -1402,7 +1417,7 @@ export class ChatView extends ItemView {
     return {
       chatId: this.chatId,
       chatTitle: this.chatTitle,
-      selectedModelId: this.getEffectiveSelectedModelId(),
+      selectedModelId: this.getPersistedSelectedModelId(),
       version: this.chatVersion,
       chatFontSize: this.chatFontSize,
       chatBackend: this.chatBackend,

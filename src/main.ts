@@ -193,9 +193,8 @@ export default class SystemSculptPlugin extends Plugin {
       // Validate prerequisites based on provider
       const provider = (this.settings as any).embeddingsProvider || "systemsculpt";
       if (provider === 'systemsculpt') {
-        const hasLicenseKey = !!this.settings.licenseKey?.trim();
-        const hasValidLicense = this.settings.licenseValid === true;
-        if (!hasLicenseKey || !hasValidLicense) {
+        // Route through the single entitlement owner (#209) — no inline license check.
+        if (!this.getEntitlementService().canUseEmbeddings(provider)) {
           throw new Error('Embeddings require an active SystemSculpt license. Validate your license in settings.');
         }
       } else if (provider === 'custom') {
