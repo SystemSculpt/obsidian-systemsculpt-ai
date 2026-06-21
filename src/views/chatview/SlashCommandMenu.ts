@@ -147,6 +147,15 @@ export class SlashCommandMenu extends Component {
         }
       },
       {
+        id: 'attach-context',
+        name: 'Attach Context File',
+        description: 'Add a vault file as context for this chat',
+        icon: 'paperclip',
+        execute: async (chatView: ChatView) => {
+          await chatView.contextManager.addContextFile();
+        }
+      },
+      {
         id: 'export',
         name: 'Export Chat',
         description: 'Export chat as markdown note',
