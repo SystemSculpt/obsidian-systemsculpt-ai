@@ -187,6 +187,9 @@ export const uiSetup = {
         }
 
         if (messageVisibilityChanged) {
+          // A chat with no per-chat preference follows the global default, so a
+          // global flip must refresh its messages and the composer toggle (#213).
+          chatView.inputHandler?.syncHideSystemMessagesButton?.();
           if (chatView.messages.length === 0) {
             chatView.displayChatStatus();
           } else {

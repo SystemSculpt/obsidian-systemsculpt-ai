@@ -105,6 +105,8 @@ export class InputHandler extends Component {
   private webSearchEnabled = false;
   private agentModeEnabled: boolean;
   private agentModeButtonEl: HTMLElement | null = null;
+  // ButtonComponent for the per-chat hide system/tool toggle (#213/#174/#167).
+  private hideSystemButton: any = null;
   private selectedPromptPath: string | null = null;
   private selectedPromptName: string | null = null;
   private promptChip: HTMLElement | null = null;
@@ -765,6 +767,8 @@ export class InputHandler extends Component {
         void this.plugin.saveSettings();
       },
       isAgentModeEnabled: () => this.agentModeEnabled,
+      onToggleHideSystemMessages: () => this.chatView?.toggleSystemNoiseHidden?.(),
+      isHideSystemMessagesEnabled: () => this.chatView?.isSystemNoiseHidden?.() ?? false,
     });
 
     this.input = composer.input;
@@ -776,6 +780,7 @@ export class InputHandler extends Component {
     this.settingsButton = composer.settingsButton;
     this.attachButton = composer.attachButton;
     this.agentModeButtonEl = composer.agentModeButton?.buttonEl || null;
+    this.hideSystemButton = composer.hideSystemButton || null;
     this.modelSelectionController.ensureHost({
       modelSlot: (composer as any).modelSlot,
       toolbar: (composer as any).toolbar,
@@ -1455,6 +1460,16 @@ export class InputHandler extends Component {
   private syncAgentModeButton(): void {
     if (!this.agentModeButtonEl) return;
     this.agentModeButtonEl.classList.toggle("ss-active", this.agentModeEnabled);
+  }
+
+  // Keep the composer toggle in sync when the per-chat preference changes outside
+  // a click (e.g. restored on chat load) (#213/#174/#167).
+  public syncHideSystemMessagesButton(): void {
+    if (!this.hideSystemButton) return;
+    const hidden = this.chatView?.isSystemNoiseHidden?.() ?? false;
+    this.hideSystemButton.setIcon(hidden ? "eye-off" : "eye");
+    this.hideSystemButton.setTooltip(hidden ? "Show system & tool messages" : "Hide system & tool messages");
+    this.hideSystemButton.buttonEl?.classList.toggle("ss-active", hidden);
   }
 
   public getSelectedPromptPath(): string | null {

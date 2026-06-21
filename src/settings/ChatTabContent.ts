@@ -48,8 +48,8 @@ new Setting(containerEl)
 	    });
 
 new Setting(containerEl)
-    .setName("Hide SystemSculpt system messages")
-    .setDesc("Keep system-role messages in the saved chat history, but hide them from the chat view.")
+    .setName("Hide SystemSculpt system & tool messages")
+    .setDesc("Default for new chats: keep system and tool messages in the saved history but hide them from the chat view. Each chat has its own toggle in the composer toolbar that overrides this default.")
     .addToggle((toggle: ToggleComponent) => {
         toggle
             .setValue(plugin.settings.hideSystemMessagesInChat ?? false)

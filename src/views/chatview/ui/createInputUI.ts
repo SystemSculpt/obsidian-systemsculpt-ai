@@ -19,6 +19,8 @@ export interface ChatComposerDeps {
   isWebSearchEnabled?: () => boolean;
   onToggleAgentMode?: () => void;
   isAgentModeEnabled?: () => boolean;
+  onToggleHideSystemMessages?: () => void;
+  isHideSystemMessagesEnabled?: () => boolean;
   onOpenPromptSelector?: () => void;
 }
 
@@ -33,6 +35,7 @@ export interface ChatComposerElements {
   attachButton: ButtonComponent;
   webSearchButton: ButtonComponent;
   agentModeButton: ButtonComponent;
+  hideSystemButton: ButtonComponent;
   promptSlot: HTMLDivElement;
   sendButton: ButtonComponent;
   stopButton: ButtonComponent;
@@ -103,6 +106,26 @@ export function createChatComposer(parent: HTMLElement, deps: ChatComposerDeps):
   agentModeButton.buttonEl.classList.add("systemsculpt-chat-composer-button");
   if (deps.isAgentModeEnabled?.()) {
     agentModeButton.buttonEl.classList.add("ss-active");
+  }
+
+  // Per-chat toggle to hide distracting SystemSculpt system + tool messages in
+  // long chats (#213/#174/#167). Mirrors the agent-mode toggle convention.
+  const hideSystemHidden = () => deps.isHideSystemMessagesEnabled?.() ?? false;
+  const hideSystemButton = new ButtonComponent(leftGroup)
+    .setIcon(hideSystemHidden() ? "eye-off" : "eye")
+    .setTooltip(hideSystemHidden() ? "Show system & tool messages" : "Hide system & tool messages")
+    .setClass("clickable-icon")
+    .onClick(() => {
+      deps.onToggleHideSystemMessages?.();
+      const hidden = hideSystemHidden();
+      hideSystemButton.setIcon(hidden ? "eye-off" : "eye");
+      hideSystemButton.setTooltip(hidden ? "Show system & tool messages" : "Hide system & tool messages");
+      hideSystemButton.buttonEl.classList.toggle("ss-active", hidden);
+    });
+  hideSystemButton.buttonEl.setAttribute("aria-label", "Toggle system and tool messages");
+  hideSystemButton.buttonEl.classList.add("systemsculpt-chat-composer-button");
+  if (hideSystemHidden()) {
+    hideSystemButton.buttonEl.classList.add("ss-active");
   }
 
   const settingsButton = new ButtonComponent(rightGroup)
@@ -192,6 +215,7 @@ export function createChatComposer(parent: HTMLElement, deps: ChatComposerDeps):
     attachButton,
     webSearchButton,
     agentModeButton,
+    hideSystemButton,
     sendButton,
     stopButton,
     micButton,

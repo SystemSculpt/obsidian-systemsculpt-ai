@@ -370,6 +370,7 @@ export class ChatMarkdownSerializer {
         ? parsed.selectedPromptPath.trim()
         : undefined,
       agentModeEnabled: typeof parsed.agentModeEnabled === "boolean" ? parsed.agentModeEnabled : undefined,
+      hideSystemMessages: typeof parsed.hideSystemMessages === "boolean" ? parsed.hideSystemMessages : undefined,
       chatBackend: resolveChatBackend({
         explicitBackend: parsed.chatBackend,
         piSessionFile: piState.sessionFile,

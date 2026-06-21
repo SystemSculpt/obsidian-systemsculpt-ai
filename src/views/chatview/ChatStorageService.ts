@@ -22,6 +22,7 @@ type LoadedChatRecord = {
   chatFontSize?: "small" | "medium" | "large";
   selectedPromptPath?: string;
   agentModeEnabled?: boolean;
+  hideSystemMessages?: boolean;
   chatPath: string;
   chatBackend: ChatBackend;
   piSessionFile?: string;
@@ -37,6 +38,7 @@ type SaveChatOptions = {
   chatFontSize?: "small" | "medium" | "large";
   selectedPromptPath?: string;
   agentModeEnabled?: boolean;
+  hideSystemMessages?: boolean;
   piSessionFile?: string;
   piSessionId?: string;
   piLastEntryId?: string;
@@ -190,6 +192,7 @@ export class ChatStorageService {
         chatFontSize: options.chatFontSize || "medium",
         selectedPromptPath: options.selectedPromptPath || existingMetadata?.selectedPromptPath || undefined,
         agentModeEnabled: typeof options.agentModeEnabled === "boolean" ? options.agentModeEnabled : existingMetadata?.agentModeEnabled,
+        hideSystemMessages: typeof options.hideSystemMessages === "boolean" ? options.hideSystemMessages : existingMetadata?.hideSystemMessages,
         piSessionFile: piState.sessionFile,
         piSessionId: piState.sessionId,
         piLastEntryId: piState.lastEntryId || getLastMessagePiEntryId(messages),
@@ -474,6 +477,7 @@ export class ChatStorageService {
       chatFontSize: metadata.chatFontSize,
       selectedPromptPath: metadata.selectedPromptPath,
       agentModeEnabled: metadata.agentModeEnabled,
+      hideSystemMessages: metadata.hideSystemMessages,
       chatPath: filePath || `${this.chatDirectory}/${metadata.id}.md`,
       chatBackend,
       piSessionFile: piState.sessionFile,

@@ -141,6 +141,16 @@ describe("ChatStorageService", () => {
       expect(createdContent).not.toContain("prompts/custom.md");
     });
 
+    it("persists the per-chat hide system/tool preference to frontmatter (#213, #174, #167)", async () => {
+      await service.saveChat("chat-hidden", testMessages, { hideSystemMessages: true });
+      expect(mockVault.create.mock.calls[0][1] as string).toContain("hideSystemMessages: true");
+    });
+
+    it("persists an explicit show preference so it can override a hidden global default", async () => {
+      await service.saveChat("chat-shown", testMessages, { hideSystemMessages: false });
+      expect(mockVault.create.mock.calls[0][1] as string).toContain("hideSystemMessages: false");
+    });
+
     it("adds default chat tag to new history files", async () => {
       (mockApp as any).plugins.plugins["systemsculpt-ai"] = {
         settings: { defaultChatTag: "#project" },
