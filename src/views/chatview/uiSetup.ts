@@ -12,6 +12,7 @@ import { renderChatCreditsIndicator } from "./ui/ChatComposerIndicators";
 // Utility helpers for desktop Pi chat UI
 // ────────────────────────────────────────────────────────────────────────────
 const TOOL_WARNING_BANNER_CLASS = "systemsculpt-tool-warning-banner";
+const LICENSE_BANNER_CLASS = "systemsculpt-license-banner";
 const IMAGE_CONTEXT_EXTENSIONS = new Set(["jpg", "jpeg", "png", "webp", "svg"]);
 
 const isImageExtension = (extension?: string | null): boolean => {
@@ -100,6 +101,18 @@ const ensureToolWarningBanner = (container: HTMLElement): HTMLElement | null => 
     banner.appendChild(textSpan);
   }
 
+  return banner;
+};
+
+const ensureLicenseBanner = (container: HTMLElement): HTMLElement | null => {
+  let banner = container.querySelector(`.${LICENSE_BANNER_CLASS}`) as HTMLElement | null;
+  if (!banner) {
+    const composer = container.querySelector(".systemsculpt-chat-composer");
+    if (!composer) return null;
+    banner = document.createElement("div");
+    banner.className = LICENSE_BANNER_CLASS;
+    composer.parentNode?.insertBefore(banner, composer);
+  }
   return banner;
 };
 
@@ -477,5 +490,56 @@ export const uiSetup = {
       // On error, hide warning
       if (banner) banner.style.display = "none";
     }
+  },
+
+  /**
+   * Show a persistent, dismissible license/subscription banner above the
+   * composer with a Renew action (#249). Idempotent — reuses an existing banner.
+   */
+  showLicenseBanner: function(chatView: ChatView, options: { expired: boolean; renewUrl: string }): void {
+    const container = chatView.containerEl.children[1] as HTMLElement | undefined;
+    if (!container) return;
+    const banner = ensureLicenseBanner(container);
+    if (!banner) return;
+
+    banner.empty();
+
+    const iconSpan = document.createElement("span");
+    iconSpan.className = "systemsculpt-license-banner-icon";
+    setIcon(iconSpan, "key-round");
+    banner.appendChild(iconSpan);
+
+    const textSpan = document.createElement("span");
+    textSpan.className = "systemsculpt-license-banner-text";
+    textSpan.textContent = options.expired
+      ? "Your SystemSculpt subscription has expired. Renew to keep using the managed AI, or switch to your own API key in Settings."
+      : "Your SystemSculpt license is invalid. Renew or update your key to keep using the managed AI, or switch to your own API key in Settings.";
+    banner.appendChild(textSpan);
+
+    const renewBtn = document.createElement("button");
+    renewBtn.className = "systemsculpt-license-banner-renew";
+    renewBtn.textContent = "Renew";
+    renewBtn.addEventListener("click", () => {
+      window.open(options.renewUrl, "_blank");
+    });
+    banner.appendChild(renewBtn);
+
+    const dismissBtn = document.createElement("button");
+    dismissBtn.className = "systemsculpt-license-banner-dismiss";
+    dismissBtn.setAttribute("aria-label", "Dismiss");
+    setIcon(dismissBtn, "x");
+    dismissBtn.addEventListener("click", () => {
+      banner.style.display = "none";
+    });
+    banner.appendChild(dismissBtn);
+
+    banner.style.display = "flex";
+  },
+
+  /** Hide the license banner (e.g. once a credits refresh succeeds). */
+  hideLicenseBanner: function(chatView: ChatView): void {
+    const container = chatView.containerEl.children[1] as HTMLElement | undefined;
+    const banner = container?.querySelector(`.${LICENSE_BANNER_CLASS}`) as HTMLElement | null;
+    if (banner) banner.style.display = "none";
   },
 };

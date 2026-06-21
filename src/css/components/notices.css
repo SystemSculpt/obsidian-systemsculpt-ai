@@ -61,6 +61,73 @@
   flex: 1;
 }
 
+/* License / subscription banner (#249) — persistent, dismissible, actionable. */
+.systemsculpt-license-banner {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  margin: 0 8px 8px 8px;
+  background-color: var(--background-modifier-error);
+  border: 1px solid var(--background-modifier-error-hover);
+  border-radius: var(--radius-m);
+  color: var(--text-error);
+  font-size: var(--font-ui-small);
+}
+
+.systemsculpt-license-banner-icon {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+}
+
+.systemsculpt-license-banner-icon svg {
+  width: 16px;
+  height: 16px;
+  stroke: var(--text-error);
+}
+
+.systemsculpt-license-banner-text {
+  flex: 1;
+}
+
+.systemsculpt-license-banner-renew {
+  flex-shrink: 0;
+  cursor: pointer;
+  padding: 2px 10px;
+  border-radius: var(--radius-s);
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+  font-size: var(--font-ui-smaller);
+  font-weight: var(--font-medium);
+  border: none;
+}
+
+.systemsculpt-license-banner-renew:hover {
+  background-color: var(--interactive-accent-hover);
+}
+
+.systemsculpt-license-banner-dismiss {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  padding: 2px;
+  background: transparent;
+  border: none;
+  color: var(--text-error);
+  opacity: 0.7;
+}
+
+.systemsculpt-license-banner-dismiss:hover {
+  opacity: 1;
+}
+
+.systemsculpt-license-banner-dismiss svg {
+  width: 14px;
+  height: 14px;
+}
+
 /* Agent Status Modal styles */
 .systemsculpt-agent-status-section {
   margin-bottom: 16px;

@@ -247,7 +247,43 @@ export class StreamingErrorHandler {
             return 0;
           };
 
-          if (normalizedUpstreamCode === 'insufficient_credits') {
+          // License / subscription failure (#249). The managed SystemSculpt API
+          // authenticates with the license key, so any 401/403 here is a license
+          // problem — never a transient stream error. A newer server sends a
+          // discriminated code (`license_expired` | `license_invalid` | ...) and a
+          // `renew_url`; older servers send only a 401 with a human string, so we
+          // fall back to status + message text. Without this, the key bug (#249)
+          // surfaced as the generic "Error in streaming response. Please try again."
+          const topLevelCode = typeof data.code === 'string' ? data.code.trim().toLowerCase() : '';
+          const licenseCode = normalizedUpstreamCode.startsWith('license_') ? normalizedUpstreamCode : topLevelCode;
+          const serverErrorMessage = (isStringError ? String(data.error) : upstreamMessage).trim();
+          const isLicenseCode =
+            licenseCode.startsWith('license_') || licenseCode === 'invalid_license' || licenseCode === 'missing_license';
+          const isAuthStatus = status === 401 || status === 403;
+          const mentionsLicense = /licen[sc]e/i.test(serverErrorMessage);
+
+          if (isLicenseCode || (isAuthStatus && (mentionsLicense || isAuthFailureMessage(serverErrorMessage)))) {
+            const expired = licenseCode === 'license_expired' || /\bexpired\b/i.test(serverErrorMessage);
+            errorCode = expired ? ERROR_CODES.LICENSE_EXPIRED : ERROR_CODES.INVALID_LICENSE;
+            errorMessage = getErrorMessage(errorCode);
+            const renewUrlRaw =
+              typeof data.renew_url === 'string' && data.renew_url.trim()
+                ? data.renew_url.trim()
+                : typeof (data.error as any)?.renew_url === 'string' && (data.error as any).renew_url.trim()
+                  ? (data.error as any).renew_url.trim()
+                  : null;
+            metadata = {
+              model: data.model,
+              statusCode: status,
+              rawError: data.error,
+              licenseFailure: true,
+              ...(serverErrorMessage ? { serverMessage: serverErrorMessage } : {}),
+              ...(licenseCode ? { licenseCode } : {}),
+              ...(renewUrlRaw ? { renewUrl: renewUrlRaw } : {}),
+              ...(requestId ? { requestId } : {}),
+              ...(context?.endpoint ? { endpoint: context.endpoint } : {}),
+            };
+          } else if (normalizedUpstreamCode === 'insufficient_credits') {
             errorCode = ERROR_CODES.INSUFFICIENT_CREDITS;
             errorMessage = upstreamMessage || getErrorMessage(errorCode);
             metadata = {
