@@ -230,41 +230,6 @@ export const uiSetup = {
     // If we need DOM mutation tracking in the future, we can add it back
     // with more selective and less verbose logging
 
-    // Define the event listener function
-    const handleMessageEdited = async (event: Event) => {
-      // Cast to CustomEvent to access detail
-      const customEvent = event as CustomEvent;
-      const { messageId, newContent } = customEvent.detail;
-      const messageIndex = chatView.messages.findIndex(msg => msg.message_id === messageId);
-      if (messageIndex !== -1) {
-        // Ensure content type matches (simple string for now)
-        if (typeof chatView.messages[messageIndex].content === 'string') {
-           chatView.messages[messageIndex].content = newContent;
-           await chatView.saveChat();
-        } else {
-             // Handle potential MultiPartContent edits if needed in the future
-             // For now, let's assume it's text part if it's an array
-             if (Array.isArray(chatView.messages[messageIndex].content)) {
-                 const textPart = (chatView.messages[messageIndex].content as any[]).find(p => p.type === 'text');
-                 if (textPart) {
-                     textPart.text = newContent;
-                     await chatView.saveChat();
-                 } else {
-                 }
-             }
-        }
-      } else {
-      }
-    };
-
-    // Add the event listener using standard addEventListener
-    chatView.chatContainer.addEventListener('message-edited', handleMessageEdited);
-
-    // Register cleanup to remove the listener on unload
-    chatView.register(() => {
-      chatView.chatContainer.removeEventListener('message-edited', handleMessageEdited);
-    });
-
     // Create scroll-to-bottom button
     const scrollToBottomButton = document.createElement('button');
     scrollToBottomButton.className = 'systemsculpt-scroll-to-bottom';
