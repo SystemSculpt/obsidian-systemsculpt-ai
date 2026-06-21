@@ -206,14 +206,21 @@ export class StorageManager {
       const folderExists = this.app.vault.getAbstractFileByPath(normalizedPath) instanceof TFolder;
       
       if (!exists || !folderExists) {
+        // Re-check after the await: unload may have begun mid-flight (#214).
+        if (this.isUnloading()) {
+          return;
+        }
         await this.app.vault.createFolder(normalizedPath);
       }
-      
+
       // Create marker file if requested
       if (createMarker) {
         const markerPath = `${normalizedPath}/.folder`;
         const markerExists = await this.app.vault.adapter.exists(markerPath);
         if (!markerExists) {
+          if (this.isUnloading()) {
+            return;
+          }
           await this.app.vault.adapter.write(
             markerPath,
             "This file helps Obsidian recognize the directory."
@@ -259,7 +266,12 @@ export class StorageManager {
       
       // Convert object to JSON if needed
       const content = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
-      
+
+      // Re-check after the await: unload may have begun mid-flight (#214).
+      if (this.isUnloading()) {
+        return { success: false, error: "plugin-unloading" };
+      }
+
       // Write the file
       await this.app.vault.adapter.write(path, content);
       
@@ -291,6 +303,11 @@ export class StorageManager {
       const adapter: any = this.app.vault.adapter as any;
 
       const exists = await this.app.vault.adapter.exists(path);
+
+      // Re-check after the await: unload may have begun mid-flight (#214).
+      if (this.isUnloading()) {
+        return { success: false, error: "plugin-unloading" };
+      }
 
       if (!exists) {
         await this.app.vault.adapter.write(path, payload);

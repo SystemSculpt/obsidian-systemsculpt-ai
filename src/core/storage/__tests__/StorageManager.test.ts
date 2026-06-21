@@ -478,5 +478,39 @@ describe("StorageManager", () => {
       expect(result.success).toBe(true);
       expect(app.vault.adapter.write).toHaveBeenCalled();
     });
+
+    // TOCTOU: an entry-only check would still let an adapter write through if
+    // unload begins during an internal await. Each write path must re-check the
+    // unloading flag immediately before it mutates the vault.
+    it("writeFile bails if unload flips after entry but before the adapter write", async () => {
+      const app = createMockApp();
+      let unloading = false;
+      const storage = new StorageManager(app as any, { isPluginUnloading: () => unloading } as any);
+      jest.spyOn(storage, "initialize").mockImplementation(async () => {
+        unloading = true; // unload begins while we await initialization
+      });
+
+      const result = await storage.writeFile("diagnostics", "race.json", { a: 1 });
+
+      expect(result.success).toBe(false);
+      expect(app.vault.adapter.write).not.toHaveBeenCalled();
+    });
+
+    it("appendToFile bails if unload flips after entry but before the adapter mutation", async () => {
+      const app = createMockApp();
+      let unloading = false;
+      const storage = new StorageManager(app as any, { isPluginUnloading: () => unloading } as any);
+      jest.spyOn(storage, "initialize").mockResolvedValue(undefined);
+      app.vault.adapter.exists.mockImplementation(async () => {
+        unloading = true; // unload begins while we await exists()
+        return false;
+      });
+
+      const result = await storage.appendToFile("diagnostics", "race.log", "line");
+
+      expect(result.success).toBe(false);
+      expect(app.vault.adapter.write).not.toHaveBeenCalled();
+      expect(app.vault.adapter.append).not.toHaveBeenCalled();
+    });
   });
 });

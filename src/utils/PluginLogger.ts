@@ -163,6 +163,11 @@ export class PluginLogger {
     if (this.isFlushing || this.pendingFlush.length === 0) {
       return;
     }
+    // Disabled means inert (#214/#158): never flush once unloading; drop queue.
+    if (this.plugin?.isPluginUnloading?.()) {
+      this.pendingFlush.length = 0;
+      return;
+    }
     this.isFlushing = true;
     try {
       const storage = this.plugin.storage;
@@ -204,6 +209,11 @@ export class PluginLogger {
   }
 
   private async enforceSizeLimit() {
+    // Disabled means inert (#214/#158): this trims the log via a direct adapter
+    // write that bypasses the StorageManager guard, so it must bail on unload.
+    if (this.plugin?.isPluginUnloading?.()) {
+      return;
+    }
     const adapter: any = this.plugin.app?.vault?.adapter;
     const storage = this.plugin.storage;
     if (!adapter || typeof adapter.stat !== "function" || !storage) {
@@ -217,6 +227,10 @@ export class PluginLogger {
         return;
       }
 
+      // Re-check after awaiting stat: unload may have begun mid-flight (#214).
+      if (this.plugin?.isPluginUnloading?.()) {
+        return;
+      }
       // Trim file to the last portion of buffered entries to keep context
       const recent = this.buffer.slice(-200).map((entry) => JSON.stringify(entry)).join("\n");
       await adapter.write(path, `${recent}\n`);

@@ -361,5 +361,37 @@ describe("PluginLogger", () => {
 
       expect(mockStorage.appendToFile).not.toHaveBeenCalled();
     });
+
+    it("a flush scheduled while active does not write once the timer fires after disable", async () => {
+      mockPlugin.settings.debugMode = true;
+      let unloading = false;
+      mockPlugin.isPluginUnloading = jest.fn(() => unloading);
+
+      logger.info("buffered while active"); // schedules a flush timer
+      unloading = true;                      // plugin disabled before the timer fires
+
+      jest.advanceTimersByTime(3000);
+      await Promise.resolve();
+
+      expect(mockStorage.appendToFile).not.toHaveBeenCalled();
+    });
+
+    it("enforceSizeLimit performs no direct adapter write when unload flips mid-flush", async () => {
+      mockPlugin.settings.debugMode = true;
+      let unloading = false;
+      mockPlugin.isPluginUnloading = jest.fn(() => unloading);
+      // The append step is where unload begins; enforceSizeLimit runs next and
+      // must not perform its direct (keystone-bypassing) adapter stat/write.
+      mockStorage.appendToFile.mockImplementation(async () => {
+        unloading = true;
+      });
+
+      logger.info("entry");
+      await logger.flushNow();
+
+      expect(mockStorage.appendToFile).toHaveBeenCalled();
+      expect(mockPlugin.app.vault.adapter.stat).not.toHaveBeenCalled();
+      expect(mockPlugin.app.vault.adapter.write).not.toHaveBeenCalled();
+    });
   });
 });
