@@ -1,0 +1,173 @@
+import { SystemSculptSettings } from "../../../types";
+import { CURRENT_SCHEMA_VERSION } from "./schemaVersion";
+
+export { CURRENT_SCHEMA_VERSION };
+
+/**
+ * Top-level keys that existed in pre-versioning (v0) settings and have since
+ * been removed from the schema. The v0→v1 migration prunes them so dead data
+ * does not linger across an update. Previously these were `delete`d ad-hoc on
+ * every load/save inside SettingsManager; the versioned chain is their single
+ * canonical home now.
+ */
+export const LEGACY_KEYS_REMOVED_IN_V1: readonly string[] = [
+  "cachedEmbeddingStats",
+  "defaultTemplateModelId",
+  "studioTelemetryOptIn",
+  "selectedProvider",
+  "selectedModelProviders",
+  "systemPrompt",
+  "systemPromptType",
+  "systemPromptPath",
+  "useLatestSystemPromptForNewChats",
+  "canvasFlowEnabled",
+  "toolingAutoApproveReadOnly",
+  "excludedFolders",
+  "excludedFiles",
+  "autoUpdateSimilarNotes",
+  "hideSimilarNotesAlreadyInContext",
+  "backgroundEmbeddingUpdates",
+  "recordSystemAudio",
+  "templateHotkey",
+  "enableTemplateHotkey",
+  "videoRecordingsDirectory",
+  "videoCaptureSystemAudio",
+  "videoCaptureMicrophoneAudio",
+  "showVideoRecordButtonInChat",
+  "showVideoRecordingPermissionPopup",
+];
+
+export interface SettingsMigrationStep {
+  /** The schema version this step upgrades the settings TO (from `to - 1`). */
+  readonly to: number;
+  readonly describe: string;
+  readonly migrate: (settings: Record<string, unknown>) => Record<string, unknown>;
+}
+
+export interface SettingsMigrationResult {
+  readonly settings: Record<string, unknown>;
+  /** Schema version read from the persisted data (0 = pre-versioning/garbage). */
+  readonly fromVersion: number;
+  /** Schema version stamped onto the result. */
+  readonly toVersion: number;
+  /** Human-readable descriptions of the steps that ran, in order. */
+  readonly appliedSteps: string[];
+  /** True when persisted data is from a NEWER schema than this build understands. */
+  readonly future: boolean;
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function pruneLegacyKeysV1(settings: Record<string, unknown>): Record<string, unknown> {
+  const next = { ...settings };
+  for (const key of LEGACY_KEYS_REMOVED_IN_V1) {
+    delete next[key];
+  }
+  return next;
+}
+
+/**
+ * Ordered registry of schema migrations. Each step upgrades settings from
+ * version `to - 1` to `to`. Add new steps here (never ad-hoc field deletes
+ * scattered through load/validate) and bump CURRENT_SCHEMA_VERSION to match.
+ */
+export const SETTINGS_MIGRATIONS: readonly SettingsMigrationStep[] = [
+  {
+    to: 1,
+    describe: "Prune legacy keys removed before schema versioning was introduced",
+    migrate: pruneLegacyKeysV1,
+  },
+];
+
+/** Read a non-negative integer schema version from raw data; 0 if absent/garbage. */
+export function readSchemaVersion(raw: unknown): number {
+  if (!isPlainObject(raw)) return 0;
+  const value = raw.schemaVersion;
+  if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+    return Math.floor(value);
+  }
+  return 0;
+}
+
+function cloneDefault(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(cloneDefault);
+  if (isPlainObject(value)) {
+    const out: Record<string, unknown> = {};
+    for (const key of Object.keys(value)) out[key] = cloneDefault(value[key]);
+    return out;
+  }
+  return value;
+}
+
+/**
+ * Recursively back-fill keys present in `defaults` but missing from `raw`,
+ * WITHOUT overwriting values the user has set. Nested plain objects are merged
+ * key-by-key; arrays and primitives are taken from `raw` when present. A nested
+ * field that defaults to a plain object but is corrupt (non-object) in `raw` is
+ * reset to the default. Keys present in `raw` but absent from `defaults` are
+ * preserved — unknown/forward-compatible keys are never dropped here.
+ *
+ * This closes the "update wiped my nested setting" class (#112, #100): when a
+ * release adds a sub-key to a nested settings object, old data gains it instead
+ * of having the whole object replaced by a shallow `{ ...DEFAULT, ...raw }`.
+ */
+export function deepMergeDefaults(
+  defaults: Record<string, unknown>,
+  raw: Record<string, unknown>,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...raw };
+  for (const key of Object.keys(defaults)) {
+    const defaultValue = defaults[key];
+    const rawValue = raw[key];
+    if (!(key in raw) || rawValue === undefined) {
+      out[key] = cloneDefault(defaultValue);
+    } else if (isPlainObject(defaultValue)) {
+      out[key] = isPlainObject(rawValue)
+        ? deepMergeDefaults(defaultValue, rawValue)
+        : cloneDefault(defaultValue);
+    } else {
+      out[key] = rawValue;
+    }
+  }
+  return out;
+}
+
+/**
+ * Migrate raw persisted settings to the current schema:
+ *  1. read the persisted schema version (absent/garbage → 0),
+ *  2. deep-merge defaults to back-fill new/nested keys,
+ *  3. run each ordered migration step from the persisted version up to current,
+ *  4. stamp the resulting `schemaVersion`.
+ *
+ * Newer-than-current data (a downgrade scenario) is never mutated by steps and
+ * keeps its own future version — we only back-fill missing keys, never
+ * downgrade or prune data a future build may rely on.
+ *
+ * This function is PURE: it does not read or write disk and does not mutate its
+ * inputs, so it is trivially testable and safe to run inside a try/rollback.
+ */
+export function migrateSettingsToCurrentSchema(
+  raw: Record<string, unknown>,
+  defaults: SystemSculptSettings,
+): SettingsMigrationResult {
+  const fromVersion = readSchemaVersion(raw);
+  let merged = deepMergeDefaults(defaults as unknown as Record<string, unknown>, raw);
+  const appliedSteps: string[] = [];
+
+  if (fromVersion > CURRENT_SCHEMA_VERSION) {
+    merged.schemaVersion = fromVersion;
+    return { settings: merged, fromVersion, toVersion: fromVersion, appliedSteps, future: true };
+  }
+
+  for (const step of [...SETTINGS_MIGRATIONS].sort((a, b) => a.to - b.to)) {
+    if (step.to > fromVersion && step.to <= CURRENT_SCHEMA_VERSION) {
+      merged = step.migrate(merged);
+      appliedSteps.push(step.describe);
+    }
+  }
+
+  merged.schemaVersion = CURRENT_SCHEMA_VERSION;
+  return { settings: merged, fromVersion, toVersion: CURRENT_SCHEMA_VERSION, appliedSteps, future: false };
+}

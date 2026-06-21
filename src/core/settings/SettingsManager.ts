@@ -5,6 +5,11 @@ import { AutomaticBackupService } from "./AutomaticBackupService";
 import { applyCurrentSecretsToBackup, redactSettingsForBackup } from "./backupSanitizer";
 import { canonicalizeSystemSculptServerUrlSetting } from "../../utils/urlHelpers";
 import { resolveAbsoluteVaultPath } from "../../utils/vaultPathUtils";
+import {
+  CURRENT_SCHEMA_VERSION,
+  migrateSettingsToCurrentSchema,
+  readSchemaVersion,
+} from "./migrations/SettingsMigrator";
 
 type NodeFsModule = typeof import("node:fs");
 type NodePathModule = typeof import("node:path");
@@ -19,8 +24,6 @@ function loadNodePath(): NodePathModule {
   return require("node:path") as NodePathModule;
 }
 
-// Current settings version - increment when making breaking changes to settings structure
-const CURRENT_SETTINGS_VERSION = "1.0";
 const PLUGIN_DATA_POLL_INTERVAL_MS = 1000;
 
 /**
@@ -89,21 +92,8 @@ export class SettingsManager {
       migratedSettings.embeddingsVectorFormatVersion = DEFAULT_SETTINGS.embeddingsVectorFormatVersion;
     }
     
-    // Remove old embeddings stats if they exist (from old system)
-    if ('cachedEmbeddingStats' in migratedSettings) {
-      delete (migratedSettings as any).cachedEmbeddingStats;
-    }
-
-    delete (migratedSettings as any).defaultTemplateModelId;
-    delete (migratedSettings as any).studioTelemetryOptIn;
-    delete (migratedSettings as any).selectedProvider;
-    delete (migratedSettings as any).selectedModelProviders;
-    delete (migratedSettings as any).systemPrompt;
-    delete (migratedSettings as any).systemPromptType;
-    delete (migratedSettings as any).systemPromptPath;
-    delete (migratedSettings as any).useLatestSystemPromptForNewChats;
-    // CanvasFlow (legacy Obsidian-canvas feature) was removed in favor of SystemSculpt Studio.
-    delete (migratedSettings as any).canvasFlowEnabled;
+    // Legacy/dead keys are pruned by the versioned migrator's v0→v1 step
+    // (SettingsMigrator.LEGACY_KEYS_REMOVED_IN_V1) — no ad-hoc deletes here.
 
     // Ensure other nested objects are properly initialized
     if (!migratedSettings.favoritesFilterSettings) {
@@ -182,10 +172,6 @@ export class SettingsManager {
       delete (migratedSettings.workflowEngine as any).templates;
     }
     
-    if ("toolingAutoApproveReadOnly" in migratedSettings) {
-      delete (migratedSettings as any).toolingAutoApproveReadOnly;
-    }
-
     if (!Array.isArray(migratedSettings.mcpServers)) {
       migratedSettings.mcpServers = DEFAULT_SETTINGS.mcpServers;
     }
@@ -200,15 +186,6 @@ export class SettingsManager {
       migratedSettings.logLevel = LogLevel.WARNING;
     }
 
-    // Remove old embeddings exclusion properties if they exist
-    if ('excludedFolders' in migratedSettings) {
-      delete (migratedSettings as any).excludedFolders;
-    }
-    
-    if ('excludedFiles' in migratedSettings) {
-      delete (migratedSettings as any).excludedFiles;
-    }
-    
     if (!Array.isArray(migratedSettings.favoriteChats)) {
       migratedSettings.favoriteChats = DEFAULT_SETTINGS.favoriteChats;
     }
@@ -372,35 +349,106 @@ export class SettingsManager {
   }
 
   async loadSettings(): Promise<void> {
+    let raw: Record<string, unknown> = {};
     try {
       const loadedData = await this.plugin.loadData();
-      const raw =
-        loadedData && typeof loadedData === "object" && !Array.isArray(loadedData)
-          ? (loadedData as Record<string, unknown>)
-          : {};
-
-      const mergedSettings = this.migrateSettings({ ...DEFAULT_SETTINGS, ...raw });
-      this.settings = await this.validateSettingsAsync(mergedSettings);
-      this.plugin._internal_settings_systemsculpt_plugin = { ...this.settings };
-      this.isInitialized = true;
-      await this.saveSettings();
+      raw = this.asSettingsRecord(loadedData);
     } catch (loadError) {
       const backupSettings = await this.restoreFromBackup();
-      const raw =
-        backupSettings && typeof backupSettings === "object" && !Array.isArray(backupSettings)
-          ? (backupSettings as Record<string, unknown>)
-          : {};
-
-      const restored = this.migrateSettings({ ...DEFAULT_SETTINGS, ...raw });
-      this.settings = await this.validateSettingsAsync(restored);
-      this.plugin._internal_settings_systemsculpt_plugin = { ...this.settings };
-      this.isInitialized = true;
-      await this.saveSettings();
+      raw = this.asSettingsRecord(backupSettings);
     }
+
+    this.settings = await this.migrateValidateWithRollback(raw);
+    this.plugin._internal_settings_systemsculpt_plugin = { ...this.settings };
+    this.isInitialized = true;
+    await this.saveSettings();
+
     this.plugin.app.workspace.trigger("systemsculpt:settings-loaded", this.settings);
-    
+
     // Start automatic backup service after settings are loaded
     this.automaticBackupService.start();
+  }
+
+  private asSettingsRecord(value: unknown): Record<string, unknown> {
+    return value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
+  }
+
+  /**
+   * Run the versioned schema migration (back-fill defaults, prune legacy keys,
+   * stamp the schema version) followed by normalization/validation. If any step
+   * throws, ROLL BACK: snapshot the user's raw data to a pre-migration backup
+   * and load the safest shape we can, so an update can never leave the plugin
+   * dead or wipe settings (#212; #183/#112/#100).
+   */
+  private async migrateValidateWithRollback(
+    raw: Record<string, unknown>,
+  ): Promise<SystemSculptSettings> {
+    const fromVersion = readSchemaVersion(raw);
+    try {
+      const result = migrateSettingsToCurrentSchema(raw, DEFAULT_SETTINGS);
+      // Back up BEFORE applying a real schema upgrade so a migration bug found
+      // later is always recoverable from the pre-migration snapshot.
+      if (!result.future && result.fromVersion < CURRENT_SCHEMA_VERSION && this.hasMeaningfulData(raw)) {
+        await this.writePreMigrationBackup(raw, fromVersion);
+      }
+      return await this.validateSettingsAsync(this.migrateSettings(result.settings));
+    } catch (migrationError) {
+      await this.writePreMigrationBackup(raw, fromVersion).catch(() => {});
+      try {
+        // Safe fallback = pre-versioning behavior (defaults + raw, normalized).
+        // The user's original data is preserved both here (raw wins) and in the
+        // pre-migration backup written above.
+        return await this.validateSettingsAsync(this.migrateSettings({ ...DEFAULT_SETTINGS, ...raw }));
+      } catch (fallbackError) {
+        // Last resort: pure defaults. Data is safe in the pre-migration backup.
+        return { ...DEFAULT_SETTINGS };
+      }
+    }
+  }
+
+  private hasMeaningfulData(raw: Record<string, unknown>): boolean {
+    return Object.keys(raw).length > 0;
+  }
+
+  /**
+   * Best-effort snapshot of the raw persisted settings (secrets redacted) to a
+   * dedicated pre-migration backup file, so a schema upgrade is always
+   * reversible. Never throws — backup must not block plugin load.
+   */
+  private async writePreMigrationBackup(raw: Record<string, unknown>, fromVersion: number): Promise<void> {
+    try {
+      const redacted = redactSettingsForBackup(raw);
+      const payload = {
+        ...redacted,
+        _backupMeta: {
+          type: "pre-migration",
+          fromSchemaVersion: fromVersion,
+          toSchemaVersion: CURRENT_SCHEMA_VERSION,
+          createdAt: new Date().toISOString(),
+          version: "1.1",
+          redactedSecrets: true,
+        },
+      };
+      const fileName = `settings-backup-premigration-v${fromVersion}.json`;
+      const dir = ".systemsculpt/settings-backups";
+      try {
+        await this.plugin.app.vault.createFolder(dir);
+      } catch {
+        // directory already exists
+      }
+      await this.plugin.app.vault.adapter.write(`${dir}/${fileName}`, JSON.stringify(payload, null, 2));
+      if (this.plugin.storage) {
+        try {
+          await this.plugin.storage.writeFile("settings", `backups/${fileName}`, payload);
+        } catch {
+          // vault storage optional
+        }
+      }
+    } catch {
+      // best-effort only
+    }
   }
 
   /**
@@ -505,29 +553,8 @@ export class SettingsManager {
     }
 
 
-    // Remove old embeddings properties if they exist
-    if ('autoUpdateSimilarNotes' in validatedSettings) {
-      delete (validatedSettings as any).autoUpdateSimilarNotes;
-    }
-
-    if ('hideSimilarNotesAlreadyInContext' in validatedSettings) {
-      delete (validatedSettings as any).hideSimilarNotesAlreadyInContext;
-    }
-
-    if ('backgroundEmbeddingUpdates' in validatedSettings) {
-      delete (validatedSettings as any).backgroundEmbeddingUpdates;
-    }
-
-    delete (validatedSettings as any).recordSystemAudio;
-    delete (validatedSettings as any).defaultTemplateModelId;
-    delete (validatedSettings as any).templateHotkey;
-    delete (validatedSettings as any).enableTemplateHotkey;
-    delete (validatedSettings as any).videoRecordingsDirectory;
-    delete (validatedSettings as any).videoCaptureSystemAudio;
-    delete (validatedSettings as any).videoCaptureMicrophoneAudio;
-    delete (validatedSettings as any).showVideoRecordButtonInChat;
-    delete (validatedSettings as any).showVideoRecordingPermissionPopup;
-    delete (validatedSettings as any).studioTelemetryOptIn;
+    // Legacy/dead keys are pruned by the versioned migrator (v0→v1) on load,
+    // not re-deleted on every validate pass.
 
     if (typeof validatedSettings.embeddingsEnabled !== 'boolean') {
       validatedSettings.embeddingsEnabled = defaultSettings.embeddingsEnabled;
@@ -655,16 +682,9 @@ export class SettingsManager {
       validatedSettings.favoriteStudioSessions = defaultSettings.favoriteStudioSessions;
     }
 
-    // Remove cachedEmbeddingStats if it exists (from old embeddings system)
-    if ('cachedEmbeddingStats' in validatedSettings) {
-      delete (validatedSettings as any).cachedEmbeddingStats;
-    }
-    delete (validatedSettings as any).selectedProvider;
-    delete (validatedSettings as any).selectedModelProviders;
-    delete (validatedSettings as any).systemPrompt;
-    delete (validatedSettings as any).systemPromptType;
-    delete (validatedSettings as any).systemPromptPath;
-    delete (validatedSettings as any).useLatestSystemPromptForNewChats;
+    // Legacy/dead keys (cachedEmbeddingStats, selectedProvider, systemPrompt*, …)
+    // are pruned once by the versioned migrator's v0→v1 step, not on every
+    // validate pass. See SettingsMigrator.LEGACY_KEYS_REMOVED_IN_V1.
 
     // Persist the canonical hosted API origin. Production builds always pin this to the
     // real SystemSculpt API, while development builds still normalize local overrides.

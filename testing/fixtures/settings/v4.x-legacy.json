@@ -1,0 +1,44 @@
+{
+  "_fixtureMeta": {
+    "describes": "Representative SystemSculpt v4.x data.json — pre-versioning (no schemaVersion), carrying keys that were removed in later releases. Proves an old install upgrades cleanly without losing the user's providers/license.",
+    "era": "4.x"
+  },
+  "licenseKey": "user-v4-license",
+  "licenseValid": true,
+  "selectedModelId": "gpt-4",
+  "chatsDirectory": "SystemSculpt/Chats",
+  "recordingsDirectory": "SystemSculpt/Recordings",
+  "customProviders": [
+    {
+      "id": "openrouter",
+      "name": "OpenRouter",
+      "endpoint": "https://openrouter.ai/api/v1",
+      "apiKey": "sk-or-v4-key",
+      "isEnabled": true
+    }
+  ],
+  "selectedProvider": "openai",
+  "selectedModelProviders": ["openai", "anthropic"],
+  "systemPrompt": "You are a helpful assistant.",
+  "systemPromptType": "default",
+  "systemPromptPath": "",
+  "useLatestSystemPromptForNewChats": true,
+  "canvasFlowEnabled": true,
+  "excludedFolders": ["Private", "Archive"],
+  "excludedFiles": ["secret.md"],
+  "cachedEmbeddingStats": { "count": 100, "lastRun": 1700000000000 },
+  "defaultTemplateModelId": "gpt-4",
+  "templateHotkey": "Mod+Shift+T",
+  "enableTemplateHotkey": true,
+  "recordSystemAudio": true,
+  "videoRecordingsDirectory": "SystemSculpt/Video Recordings",
+  "videoCaptureSystemAudio": true,
+  "videoCaptureMicrophoneAudio": false,
+  "showVideoRecordButtonInChat": true,
+  "showVideoRecordingPermissionPopup": true,
+  "studioTelemetryOptIn": false,
+  "toolingAutoApproveReadOnly": true,
+  "autoUpdateSimilarNotes": true,
+  "hideSimilarNotesAlreadyInContext": false,
+  "backgroundEmbeddingUpdates": true
+}

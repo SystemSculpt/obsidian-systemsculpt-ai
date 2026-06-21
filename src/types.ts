@@ -16,6 +16,7 @@ import type { WorkflowEngineSettings, WorkflowAutomationState, WorkflowAutomatio
 import { createDefaultWorkflowEngineSettings, createDefaultWorkflowAutomationsState, WORKFLOW_AUTOMATION_IDS } from "./types/workflows";
 import type { ReadwiseImportOptions, ReadwiseOrganization, ReadwiseSyncMode, ReadwiseTweetOrganization } from "./types/readwise";
 import { DEFAULT_READWISE_IMPORT_OPTIONS } from "./types/readwise";
+import { CURRENT_SCHEMA_VERSION } from "./core/settings/migrations/schemaVersion";
 
 export { LogLevel };
 export type { ToolCall };
@@ -85,6 +86,12 @@ export interface SystemSculptSettings {
    * no-focus automation against the already-running Obsidian instance.
    */
   desktopAutomationBridgeEnabled?: boolean;
+
+  /**
+   * Persisted settings schema version, driving the versioned migration chain
+   * (see SettingsMigrator). Absent/0 means pre-versioning data, migrated on load.
+   */
+  schemaVersion?: number;
 
   /**
    * Internal migration flags (not user-facing).
@@ -501,6 +508,7 @@ export const DEFAULT_SETTINGS: SystemSculptSettings = {
   settingsMode: "standard",
   vaultInstanceId: "",
   desktopAutomationBridgeEnabled: false,
+  schemaVersion: CURRENT_SCHEMA_VERSION,
   embeddingsVectorFormatVersion: 0,
   licenseKey: "",
   licenseValid: false,
