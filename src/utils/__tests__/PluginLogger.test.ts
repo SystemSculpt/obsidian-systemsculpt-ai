@@ -331,4 +331,35 @@ describe("PluginLogger", () => {
       expect(() => logger.error("Test")).not.toThrow();
     });
   });
+
+  // #214/#158: once the plugin is unloading the logger must stop buffering and
+  // stop its self-rescheduling flush timer, so diagnostics never keep writing
+  // to disk after the plugin is disabled.
+  describe("inert once the plugin is unloading (#214, #158)", () => {
+    it("drops new entries while the plugin is unloading", async () => {
+      mockPlugin.settings.debugMode = true;
+      mockPlugin.isPluginUnloading = jest.fn(() => true);
+
+      logger.info("after disable");
+
+      expect(logger.getRecentEntries()).toHaveLength(0);
+
+      jest.advanceTimersByTime(3000);
+      await Promise.resolve();
+
+      expect(mockStorage.appendToFile).not.toHaveBeenCalled();
+    });
+
+    it("dispose() cancels the pending flush timer so nothing writes after disable", async () => {
+      mockPlugin.settings.debugMode = true;
+
+      logger.info("buffered before disable"); // schedules a flush timer
+      logger.dispose();
+
+      jest.advanceTimersByTime(3000);
+      await Promise.resolve();
+
+      expect(mockStorage.appendToFile).not.toHaveBeenCalled();
+    });
+  });
 });

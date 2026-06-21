@@ -82,6 +82,11 @@ export class PluginLogger {
   }
 
   private write(level: PluginLogLevel, message: string, error?: unknown, context?: PluginLogContext) {
+    // Disabled means inert (#214/#158): once the plugin is unloading, stop
+    // buffering and scheduling new diagnostics so nothing writes after disable.
+    if (this.plugin?.isPluginUnloading?.()) {
+      return;
+    }
     if (!this.shouldLog(level, context)) {
       return;
     }
@@ -137,6 +142,21 @@ export class PluginLogger {
 
   public async flushNow(): Promise<void> {
     await this.flushPendingEntries(true);
+  }
+
+  /**
+   * Stop the logger for plugin unload (#214/#158): cancel the self-rescheduling
+   * flush timer and drop any pending entries so the logger does not keep writing
+   * diagnostics to disk after the plugin is disabled.
+   */
+  public dispose(): void {
+    if (this.flushTimer !== null) {
+      if (typeof window !== "undefined") {
+        window.clearTimeout(this.flushTimer);
+      }
+      this.flushTimer = null;
+    }
+    this.pendingFlush.length = 0;
   }
 
   private async flushPendingEntries(force: boolean = false) {

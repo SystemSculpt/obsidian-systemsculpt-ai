@@ -27,7 +27,10 @@ export class RibbonManager {
    * Initialize the ribbon manager and register all ribbon icons
    */
   initialize() {
-    if (this.isDisposed || this.isInitialized) {
+    // Disabled means inert (#134/#214): ribbon init is deferred (a setTimeout in
+    // ViewManager), so this can fire after onunload flips the unloading flag.
+    // Don't re-add icons to a plugin that is already tearing down.
+    if (this.isDisposed || this.isInitialized || this.plugin?.isPluginUnloading?.()) {
       return;
     }
     this.isInitialized = true;
@@ -106,7 +109,7 @@ export class RibbonManager {
     title: string,
     callback: () => void
   ) {
-    if (this.isDisposed) {
+    if (this.isDisposed || this.plugin?.isPluginUnloading?.()) {
       return;
     }
     const ribbon = this.plugin.addRibbonIcon(icon, title, callback) as RibbonHandle;

@@ -46,7 +46,18 @@ export class StorageManager {
     this.app = app;
     this.plugin = plugin;
   }
-  
+
+  /**
+   * Once the plugin is unloading every write path becomes a no-op, so a disabled
+   * plugin leaves no further trace on disk (#214/#158). StorageManager is the
+   * single chokepoint that diagnostics, logs, metrics, and backups all funnel
+   * through, so this one guard makes "disabled means no disk writes" hold even
+   * when a timer or flush closure is still mid-flight.
+   */
+  private isUnloading(): boolean {
+    return this.plugin?.isPluginUnloading?.() === true;
+  }
+
   /**
    * Initialize the storage system
    * Creates necessary directories and ensures everything is ready
@@ -167,6 +178,10 @@ export class StorageManager {
    * @returns Promise resolving when directory is created
    */
   async ensureDirectory(path: string, createMarker: boolean = false): Promise<void> {
+    if (this.isUnloading()) {
+      return;
+    }
+
     // Normalize path to use forward slashes
     const normalizedPath = path.replace(/\\/g, '/');
     
@@ -231,6 +246,10 @@ export class StorageManager {
     fileName: string, 
     data: string | object
   ): Promise<StorageOperationResult> {
+    if (this.isUnloading()) {
+      return { success: false, error: "plugin-unloading" };
+    }
+
     try {
       // Ensure storage is initialized
       await this.initialize();
@@ -260,6 +279,10 @@ export class StorageManager {
     fileName: string,
     data: string
   ): Promise<StorageOperationResult> {
+    if (this.isUnloading()) {
+      return { success: false, error: "plugin-unloading" };
+    }
+
     try {
       await this.initialize();
 

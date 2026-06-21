@@ -2009,6 +2009,11 @@ export default class SystemSculptPlugin extends Plugin {
         this.resourceMonitor = null;
       }
 
+      // Stop the global freeze-detection interval (#214/#158). Its 50ms timer is
+      // never auto-cleaned and would otherwise keep firing after the plugin is
+      // disabled — the core #158 timer leak.
+      FreezeMonitor.stop();
+
       await this.stopDesktopAutomationBridge();
 
       // Clean up settings manager (stop automatic backups)
@@ -2156,6 +2161,9 @@ export default class SystemSculptPlugin extends Plugin {
 
 
       // Plugin unloaded successfully silently
+      // Cancel the logger's self-rescheduling flush timer before dropping it
+      // (#214/#158) so no diagnostics flush fires after the plugin is disabled.
+      this.pluginLogger?.dispose();
       this.pluginLogger = null;
       phase.complete();
       logger.info("SystemSculpt plugin unloaded", {
