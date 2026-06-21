@@ -1983,6 +1983,17 @@ export default class SystemSculptPlugin extends Plugin {
 
   async onunload() {
     this.isUnloading = true;
+
+    // Halt self-rescheduling timers first and unconditionally (#214/#158): the
+    // FreezeMonitor interval and PluginLogger flush timer never auto-clean, so
+    // they must stop even if a later teardown step throws.
+    try {
+      FreezeMonitor.stop();
+      this.pluginLogger?.dispose();
+    } catch (error) {
+      // Best-effort; teardown continues regardless.
+    }
+
     const tracer = this.getInitializationTracer();
     tracer.flushOpenPhases("plugin-unload");
     const phase = tracer.startPhase("plugin.onunload", {
@@ -2156,6 +2167,7 @@ export default class SystemSculptPlugin extends Plugin {
 
 
       // Plugin unloaded successfully silently
+      // The logger's flush timer was already disposed at the top of onunload.
       this.pluginLogger = null;
       phase.complete();
       logger.info("SystemSculpt plugin unloaded", {

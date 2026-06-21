@@ -82,6 +82,11 @@ export class PluginLogger {
   }
 
   private write(level: PluginLogLevel, message: string, error?: unknown, context?: PluginLogContext) {
+    // Disabled means inert (#214/#158): once the plugin is unloading, stop
+    // buffering and scheduling new diagnostics so nothing writes after disable.
+    if (this.plugin?.isPluginUnloading?.()) {
+      return;
+    }
     if (!this.shouldLog(level, context)) {
       return;
     }
@@ -139,8 +144,28 @@ export class PluginLogger {
     await this.flushPendingEntries(true);
   }
 
+  /**
+   * Stop the logger for plugin unload (#214/#158): cancel the self-rescheduling
+   * flush timer and drop any pending entries so the logger does not keep writing
+   * diagnostics to disk after the plugin is disabled.
+   */
+  public dispose(): void {
+    if (this.flushTimer !== null) {
+      if (typeof window !== "undefined") {
+        window.clearTimeout(this.flushTimer);
+      }
+      this.flushTimer = null;
+    }
+    this.pendingFlush.length = 0;
+  }
+
   private async flushPendingEntries(force: boolean = false) {
     if (this.isFlushing || this.pendingFlush.length === 0) {
+      return;
+    }
+    // Disabled means inert (#214/#158): never flush once unloading; drop queue.
+    if (this.plugin?.isPluginUnloading?.()) {
+      this.pendingFlush.length = 0;
       return;
     }
     this.isFlushing = true;
@@ -184,6 +209,11 @@ export class PluginLogger {
   }
 
   private async enforceSizeLimit() {
+    // Disabled means inert (#214/#158): this trims the log via a direct adapter
+    // write that bypasses the StorageManager guard, so it must bail on unload.
+    if (this.plugin?.isPluginUnloading?.()) {
+      return;
+    }
     const adapter: any = this.plugin.app?.vault?.adapter;
     const storage = this.plugin.storage;
     if (!adapter || typeof adapter.stat !== "function" || !storage) {
@@ -197,6 +227,10 @@ export class PluginLogger {
         return;
       }
 
+      // Re-check after awaiting stat: unload may have begun mid-flight (#214).
+      if (this.plugin?.isPluginUnloading?.()) {
+        return;
+      }
       // Trim file to the last portion of buffered entries to keep context
       const recent = this.buffer.slice(-200).map((entry) => JSON.stringify(entry)).join("\n");
       await adapter.write(path, `${recent}\n`);

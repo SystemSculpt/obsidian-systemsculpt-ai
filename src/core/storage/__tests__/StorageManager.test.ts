@@ -430,4 +430,87 @@ describe("StorageManager", () => {
       expect(storage.isInitialized()).toBe(true);
     });
   });
+
+  // #214: disabled means fully inert. StorageManager is the single chokepoint
+  // through which every diagnostics/log/backup writer funnels, so guarding it
+  // makes "no disk writes after the plugin unloads" hold structurally — even if
+  // a timer or flush closure is still mid-flight (the #158 root cause).
+  describe("inert once the plugin is unloading (#214, #158)", () => {
+    const makeStorage = (unloading: boolean) => {
+      const app = createMockApp();
+      const plugin = { isPluginUnloading: () => unloading };
+      return { app, storage: new StorageManager(app as any, plugin as any) };
+    };
+
+    it("writeFile is a no-op and never touches the adapter", async () => {
+      const { app, storage } = makeStorage(true);
+
+      const result = await storage.writeFile("diagnostics", "leak.json", { a: 1 });
+
+      expect(result.success).toBe(false);
+      expect(app.vault.adapter.write).not.toHaveBeenCalled();
+    });
+
+    it("appendToFile is a no-op and never touches the adapter", async () => {
+      const { app, storage } = makeStorage(true);
+
+      const result = await storage.appendToFile("diagnostics", "leak.log", "leaked line");
+
+      expect(result.success).toBe(false);
+      expect(app.vault.adapter.write).not.toHaveBeenCalled();
+      expect(app.vault.adapter.append).not.toHaveBeenCalled();
+    });
+
+    it("ensureDirectory is a no-op and never creates folders or markers", async () => {
+      const { app, storage } = makeStorage(true);
+
+      await storage.ensureDirectory(".systemsculpt/diagnostics", true);
+
+      expect(app.vault.createFolder).not.toHaveBeenCalled();
+      expect(app.vault.adapter.write).not.toHaveBeenCalled();
+    });
+
+    it("still writes normally while the plugin is active", async () => {
+      const { app, storage } = makeStorage(false);
+
+      const result = await storage.writeFile("diagnostics", "active.json", { a: 1 });
+
+      expect(result.success).toBe(true);
+      expect(app.vault.adapter.write).toHaveBeenCalled();
+    });
+
+    // TOCTOU: an entry-only check would still let an adapter write through if
+    // unload begins during an internal await. Each write path must re-check the
+    // unloading flag immediately before it mutates the vault.
+    it("writeFile bails if unload flips after entry but before the adapter write", async () => {
+      const app = createMockApp();
+      let unloading = false;
+      const storage = new StorageManager(app as any, { isPluginUnloading: () => unloading } as any);
+      jest.spyOn(storage, "initialize").mockImplementation(async () => {
+        unloading = true; // unload begins while we await initialization
+      });
+
+      const result = await storage.writeFile("diagnostics", "race.json", { a: 1 });
+
+      expect(result.success).toBe(false);
+      expect(app.vault.adapter.write).not.toHaveBeenCalled();
+    });
+
+    it("appendToFile bails if unload flips after entry but before the adapter mutation", async () => {
+      const app = createMockApp();
+      let unloading = false;
+      const storage = new StorageManager(app as any, { isPluginUnloading: () => unloading } as any);
+      jest.spyOn(storage, "initialize").mockResolvedValue(undefined);
+      app.vault.adapter.exists.mockImplementation(async () => {
+        unloading = true; // unload begins while we await exists()
+        return false;
+      });
+
+      const result = await storage.appendToFile("diagnostics", "race.log", "line");
+
+      expect(result.success).toBe(false);
+      expect(app.vault.adapter.write).not.toHaveBeenCalled();
+      expect(app.vault.adapter.append).not.toHaveBeenCalled();
+    });
+  });
 });
