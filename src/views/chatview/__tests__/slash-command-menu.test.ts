@@ -209,4 +209,38 @@ describe("SlashCommandMenu", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(copyChatArtifactPathsToClipboard).toHaveBeenCalled();
   });
+
+  it("executes the attach context file command when selected (#117)", async () => {
+    const input = document.createElement("textarea");
+    input.value = "/attach";
+    const addContextFile = jest.fn(async () => {});
+    const chatView = {
+      contextManager: { addContextFile },
+    } as any;
+
+    const menu = new SlashCommandMenu({
+      plugin: {
+        app: { workspace: { getLeaf: jest.fn(), setActiveLeaf: jest.fn() } },
+        settings: { selectedModelId: "systemsculpt@@systemsculpt/ai-agent" },
+      } as any,
+      chatView,
+      inputElement: input,
+      inputHandler: { handleOpenChatHistoryFile: jest.fn(async () => {}) },
+      onClose: jest.fn(),
+      onExecute: async (command) => {
+        await command.execute(chatView);
+      },
+    });
+
+    menu.show("attach");
+
+    const attachItem = Array.from(document.querySelectorAll(".systemsculpt-slash-result-item")).find(
+      (el) => el.textContent?.includes("Attach Context File")
+    );
+    expect(attachItem).not.toBeNull();
+    attachItem?.dispatchEvent(new dom.window.Event("click"));
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(addContextFile).toHaveBeenCalled();
+  });
 });
