@@ -1138,8 +1138,23 @@ export class SettingsManager {
     this.plugin._internal_settings_systemsculpt_plugin = { ...this.settings };
 
     // Call saveSettings to persist, update plugin._settings, and dispatch event
-    await this.saveSettings(); 
+    await this.saveSettings();
     // Settings updated and saved - silent operation
+  }
+
+  /**
+   * Apply externally-sourced settings (a restored backup or an import) by first
+   * running them through the SAME versioned migrator the load path uses, then
+   * persisting via updateSettings. Without this, restoring an OLD backup would
+   * write a stale schema back to disk and could resurrect the lost-settings /
+   * dead-plugin class this versioning exists to prevent (#212).
+   */
+  async restoreFromExternalSettings(raw: unknown): Promise<void> {
+    const { settings } = migrateSettingsToCurrentSchema(
+      this.asSettingsRecord(raw),
+      DEFAULT_SETTINGS,
+    );
+    await this.updateSettings(settings as Partial<SystemSculptSettings>);
   }
 
   // ... other methods like getLicenseKey, setLicenseKey, validateLicenseKey, etc.

@@ -503,8 +503,9 @@ export class BackupRestoreModal {
                 currentSettings,
             );
 
-            // Apply settings
-            await this.plugin.getSettingsManager().updateSettings(restoredSettings as any);
+            // Apply settings THROUGH the versioned migrator so an old backup is
+            // migrated to the current schema on restore, exactly like a load (#212).
+            await this.plugin.getSettingsManager().restoreFromExternalSettings(restoredSettings);
             new Notice("Settings restored successfully", 3000);
             
             return true;

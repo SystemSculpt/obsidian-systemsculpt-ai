@@ -575,6 +575,28 @@ describe("SettingsManager", () => {
       expect(settingsManager.settings.customProviders).toHaveLength(1);
     });
 
+    it("restoreFromExternalSettings migrates an OLD backup before applying it (#212)", async () => {
+      await settingsManager.loadSettings(); // initialize current schema
+
+      // An old backup file: no schemaVersion, legacy keys, real user data.
+      await settingsManager.restoreFromExternalSettings({
+        licenseKey: "restored-key",
+        customProviders: [{ id: "openrouter", name: "OpenRouter", isEnabled: true }],
+        selectedProvider: "legacy",
+        canvasFlowEnabled: true,
+        recordSystemAudio: true,
+      });
+
+      // Restored data is migrated to the current schema, not written back stale.
+      expect(settingsManager.settings.schemaVersion).toBe(1);
+      expect(settingsManager.settings).not.toHaveProperty("selectedProvider");
+      expect(settingsManager.settings).not.toHaveProperty("canvasFlowEnabled");
+      expect(settingsManager.settings).not.toHaveProperty("recordSystemAudio");
+      expect(settingsManager.settings.licenseKey).toBe("restored-key");
+      expect(settingsManager.settings.customProviders).toHaveLength(1);
+      expect(mockPlugin.saveData).toHaveBeenCalled();
+    });
+
     it("triggers settings-loaded event", async () => {
       await settingsManager.loadSettings();
 
