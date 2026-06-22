@@ -417,6 +417,20 @@ export interface SystemSculptSettings {
    * it on a new device instead of re-embedding the whole vault.
    */
   embeddingsPortableIndex?: boolean;
+  /**
+   * Set true when a bulk rebuild is interrupted by a non-license fatal error
+   * (e.g. a sustained rate limit). Persisted so the rebuild resumes on the next
+   * load even when autoProcess is OFF — the durable per-file completeness markers
+   * make the resumed run skip already-embedded files. Cleared on a clean vault
+   * completion. See #208 / #127.
+   */
+  embeddingsRebuildPending?: boolean;
+  /**
+   * Earliest epoch-ms at which an interrupted rebuild should resume, derived from
+   * the server's Retry-After cooldown. Honored on the next load so resume waits
+   * out the cooldown instead of immediately re-hitting the rate limit. 0 = ASAP.
+   */
+  embeddingsRebuildRetryAt?: number;
   // Embeddings search behavior settings removed; use internal defaults
   
   /**
@@ -670,6 +684,8 @@ Raw transcript:`,
   embeddingsRateLimitPerMinute: 50, // Default rate limiting
   embeddingsQuietPeriodMs: 1200,
   embeddingsPortableIndex: true,
+  embeddingsRebuildPending: false,
+  embeddingsRebuildRetryAt: 0,
   // Search behavior defaults removed; handled internally
   
   /**
