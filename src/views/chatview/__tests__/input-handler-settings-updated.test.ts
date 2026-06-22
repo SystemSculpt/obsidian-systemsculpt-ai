@@ -31,6 +31,7 @@ describe("InputHandler.handleSettingsUpdated (#210, #213)", () => {
     const handler = makeHandler();
     handler.handleSettingsUpdated();
     expect(handler.updateGeneratingState).toHaveBeenCalledTimes(1);
-    expect(handler.onModelChange).toHaveBeenCalledWith({ refreshOptions: true });
+    expect(handler.onModelChange).toHaveBeenCalledTimes(1);
+    expect(handler.onModelChange).toHaveBeenNthCalledWith(1, { refreshOptions: true });
   });
 });
