@@ -37,6 +37,69 @@ interface TranscriptResponse {
 }
 
 /**
+ * Shape of an error payload relayed by the SystemSculpt YouTube transcript
+ * endpoint. Quota exhaustion arrives either as `{ error: "limit-exceeded", ... }`
+ * or, for async jobs, as a failed job whose `error` text embeds the upstream
+ * "429 - limit-exceeded" message (#152).
+ */
+export interface YouTubeTranscriptErrorPayload {
+  error?: string;
+  message?: string;
+  details?: string;
+}
+
+// The ways the backend signals an exhausted transcript quota, whether it relays
+// a raw provider code, an HTTP 429, or a human-readable details line.
+const TRANSCRIPT_QUOTA_PATTERN =
+  /limit[\s_-]?exceeded|usage limit|quota|rate[\s_-]?limit|too many requests|\b429\b/i;
+
+/**
+ * Turn a failed YouTube-transcript response into a clear, user-facing message.
+ *
+ * The transcript runs through the SystemSculpt backend, which calls the upstream
+ * transcript provider; when the shared plan is over quota the backend relays a
+ * 429 `limit-exceeded`. Surfacing that raw payload to the user is noise (#152),
+ * so quota exhaustion becomes actionable guidance. Any other failure keeps the
+ * server's own message (usually already specific, e.g. "Invalid video id").
+ */
+export function describeYouTubeTranscriptError(
+  status?: number,
+  payload?: YouTubeTranscriptErrorPayload | null
+): string {
+  const text = [payload?.error, payload?.message, payload?.details]
+    .map((part) => (typeof part === "string" ? part : ""))
+    .join(" ");
+
+  if (status === 429 || TRANSCRIPT_QUOTA_PATTERN.test(text)) {
+    return "YouTube transcription is temporarily unavailable because the transcript service has reached its usage limit. Please try again in a little while.";
+  }
+
+  const specific = (payload?.error || payload?.message || "").trim();
+  if (specific) return specific;
+  if (typeof status === "number" && status > 0) {
+    return `YouTube transcript request failed (HTTP ${status}).`;
+  }
+  return "YouTube transcript request failed.";
+}
+
+/**
+ * A definitive HTTP error *response* from the transcript endpoint (as opposed to
+ * a transport failure). Carrying the typed status lets `makeRequest` avoid
+ * pointlessly re-attempting a server-answered request on the other transport,
+ * and its message is already the user-facing form from
+ * `describeYouTubeTranscriptError`. (#152)
+ */
+export class YouTubeTranscriptHttpError extends Error {
+  readonly status: number;
+
+  constructor(status: number, payload?: YouTubeTranscriptErrorPayload | null) {
+    super(describeYouTubeTranscriptError(status, payload));
+    this.name = "YouTubeTranscriptHttpError";
+    this.status = status;
+  }
+}
+
+/**
  * Service for extracting transcripts from YouTube videos via the SystemSculpt API
  */
 export class YouTubeTranscriptService {
@@ -121,7 +184,11 @@ export class YouTubeTranscriptService {
 
     // Immediate result
     if (!response.text) {
-      throw new Error(response.error || "No transcript returned");
+      throw new Error(
+        describeYouTubeTranscriptError(undefined, {
+          error: response.error || "No transcript returned",
+        })
+      );
     }
 
     console.log("[YouTubeTranscriptService] Transcript received:", {
@@ -165,7 +232,13 @@ export class YouTubeTranscriptService {
       }
 
       if (response.status === "failed") {
-        throw new Error(response.error || "Transcript generation failed");
+        // The job failed upstream; the cause (often a relayed 429 quota error)
+        // lives in `response.error`. Map it to actionable guidance (#152).
+        throw new Error(
+          describeYouTubeTranscriptError(undefined, {
+            error: response.error || "Transcript generation failed",
+          })
+        );
       }
 
       console.log("[YouTubeTranscriptService] Job still processing:", {
@@ -210,9 +283,9 @@ export class YouTubeTranscriptService {
         console.log("[YouTubeTranscriptService] Response status:", response.status);
 
         if (response.status >= 400) {
-          const errorData = response.json || {};
+          const errorData = (response.json || {}) as YouTubeTranscriptErrorPayload;
           console.error("[YouTubeTranscriptService] Error response:", errorData);
-          throw new Error(errorData.error || `HTTP ${response.status}`);
+          throw new YouTubeTranscriptHttpError(response.status, errorData);
         }
 
         return response.json as TranscriptResponse;
@@ -232,13 +305,21 @@ export class YouTubeTranscriptService {
         console.log("[YouTubeTranscriptService] Response status:", response.status);
 
         if (!response.ok) {
-          const errorData = await response.json().catch(() => ({}));
+          const errorData = (await response
+            .json()
+            .catch(() => ({}))) as YouTubeTranscriptErrorPayload;
           console.error("[YouTubeTranscriptService] Error response:", errorData);
-          throw new Error(errorData.error || `HTTP ${response.status}`);
+          throw new YouTubeTranscriptHttpError(response.status, errorData);
         }
 
         return (await response.json()) as TranscriptResponse;
       } catch (fetchError) {
+        // A definitive HTTP error response is the server's answer, not a
+        // transport failure — don't burn a second request on the other
+        // transport (which would just re-surface the same status) (#152).
+        if (fetchError instanceof YouTubeTranscriptHttpError) {
+          throw fetchError;
+        }
         console.warn("[YouTubeTranscriptService] Fetch request failed; retrying via requestUrl", {
           endpoint,
           message: fetchError instanceof Error ? fetchError.message : String(fetchError),
