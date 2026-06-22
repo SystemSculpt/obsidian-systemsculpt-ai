@@ -982,6 +982,41 @@ First`;
       expect(text).toContain("Content-Type: audio/ogg");
     });
 
+    it("accepts a text/plain 200 body as the transcript (self-hosted Whisper contract)", async () => {
+      (PlatformContext.get as jest.Mock).mockReturnValue({
+        isMobile: jest.fn(() => false),
+        preferredTransport: jest.fn(() => "requestUrl"),
+        supportsStreaming: jest.fn(() => true),
+      });
+
+      mockPlugin.settings.transcriptionProvider = "custom";
+      mockPlugin.settings.customTranscriptionEndpoint =
+        "http://localhost:9000/v1/audio/transcriptions";
+      mockPlugin.settings.customTranscriptionApiKey = "";
+      (TranscriptionService as any).instance = undefined;
+      service = TranscriptionService.getInstance(mockPlugin);
+
+      (requestUrl as jest.Mock).mockResolvedValue({
+        status: 200,
+        headers: { "content-type": "text/plain" },
+        text: "a plain transcript",
+      });
+
+      const file = new TFile();
+      (file as any).path = "audio.m4a";
+      (file as any).name = "audio.m4a";
+      (file as any).basename = "audio";
+      (file as any).extension = "m4a";
+
+      const result = await (service as any).transcribeAudio(
+        file,
+        new Blob(["audio"], { type: "audio/mp4" }),
+        { onProgress: jest.fn() }
+      );
+
+      expect(result).toBe("a plain transcript");
+    });
+
     it("surfaces plain-text 413 errors without a JSON parse wrapper", async () => {
       (PlatformContext.get as jest.Mock).mockReturnValue({
         isMobile: jest.fn(() => true),

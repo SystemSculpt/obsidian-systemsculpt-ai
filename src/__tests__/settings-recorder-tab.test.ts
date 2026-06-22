@@ -11,6 +11,45 @@ jest.mock("../services/PlatformContext", () => ({
   },
 }));
 
+function createPlugin(settingsOverrides: Record<string, unknown> = {}) {
+  const app = new App();
+  let plugin: any;
+  // Merge patches into plugin.settings so a re-render reflects the change,
+  // mirroring the real SettingsManager.
+  const updateSettings = jest.fn(async (patch: Record<string, unknown>) => {
+    Object.assign(plugin.settings, patch ?? {});
+  });
+  plugin = {
+    app,
+    settings: {
+      autoTranscribeRecordings: false,
+      autoPasteTranscription: false,
+      keepRecordingsAfterTranscription: true,
+      cleanTranscriptionOutput: true,
+      autoSubmitAfterTranscription: false,
+      postProcessingEnabled: false,
+      postProcessingPrompt: "Custom cleanup instructions",
+      transcriptionProvider: "systemsculpt",
+      customTranscriptionEndpoint: "",
+      customTranscriptionApiKey: "",
+      customTranscriptionModel: "",
+      transcriptionOutputFormat: "markdown",
+      showTranscriptionFormatChooserInModal: true,
+      enableAutoAudioResampling: true,
+      preferredMicrophoneId: "default",
+      ...settingsOverrides,
+    },
+    getSettingsManager: jest.fn(() => ({ updateSettings })),
+  };
+  return { app, plugin, updateSettings };
+}
+
+function render(plugin: any) {
+  const container = document.createElement("div");
+  const tab: any = { app: plugin.app, plugin, display: jest.fn() };
+  return { container, tab };
+}
+
 describe("Recorder settings tab", () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -19,43 +58,39 @@ describe("Recorder settings tab", () => {
       configurable: true,
       value: {
         enumerateDevices: jest.fn().mockResolvedValue([]),
-        getUserMedia: jest.fn().mockResolvedValue({
-          getTracks: () => [{ stop: jest.fn() }],
-        }),
+        getUserMedia: jest.fn().mockResolvedValue({ getTracks: () => [{ stop: jest.fn() }] }),
       },
     });
   });
 
-  it("locks transcription to SystemSculpt without custom-provider controls", async () => {
-    const app = new App();
-    const updateSettings = jest.fn().mockResolvedValue(undefined);
-    const plugin: any = {
-      app,
-      settings: {
-        autoTranscribeRecordings: false,
-        autoPasteTranscription: false,
-        keepRecordingsAfterTranscription: true,
-        cleanTranscriptionOutput: true,
-        autoSubmitAfterTranscription: false,
-        postProcessingEnabled: false,
-        postProcessingPrompt: "Custom cleanup instructions",
-        transcriptionProvider: "custom",
-        transcriptionOutputFormat: "markdown",
-        showTranscriptionFormatChooserInModal: true,
-        enableAutoAudioResampling: true,
-        preferredMicrophoneId: "default",
-      },
-      getSettingsManager: jest.fn(() => ({
-        updateSettings,
-      })),
-    };
+  it("offers a transcription provider choice and hides custom controls on SystemSculpt", async () => {
+    const { plugin } = createPlugin({ transcriptionProvider: "systemsculpt" });
+    const { container, tab } = render(plugin);
 
-    const container = document.createElement("div");
-    const tab: any = {
-      app,
-      plugin,
-      display: jest.fn(),
-    };
+    await displayRecorderTabContent(container, tab);
+
+    const names = Array.from(container.querySelectorAll(".setting-item-name")).map((el) =>
+      el.textContent?.trim()
+    );
+    // The provider is now configurable...
+    expect(names).toContain("Transcription provider");
+    // ...but custom-endpoint controls stay hidden until "custom" is chosen.
+    expect(names).not.toContain("Custom endpoint URL");
+    expect(names).not.toContain("API key");
+    expect(names).not.toContain("Model name");
+    // Unrelated recorder settings remain.
+    expect(names).toContain("Transcription clean-up prompt");
+    expect(names).toContain("Automatic audio format conversion");
+  });
+
+  it("reveals the self-hosted Whisper controls + validation when provider is custom", async () => {
+    const { plugin } = createPlugin({
+      transcriptionProvider: "custom",
+      customTranscriptionEndpoint: "https://api.groq.com/openai/v1/audio/transcriptions",
+      customTranscriptionApiKey: "gsk_test",
+      customTranscriptionModel: "whisper-large-v3",
+    });
+    const { container, tab } = render(plugin);
 
     await displayRecorderTabContent(container, tab);
 
@@ -63,19 +98,59 @@ describe("Recorder settings tab", () => {
     const names = Array.from(container.querySelectorAll(".setting-item-name")).map((el) =>
       el.textContent?.trim()
     );
+    expect(names).toContain("Transcription provider");
+    expect(names).toContain("Custom endpoint URL");
+    expect(names).toContain("API key");
+    expect(names).toContain("Model name");
+    // The documented contract is surfaced to the user.
+    expect(text).toContain("multipart/form-data");
+    // A fully-configured endpoint validates as compatible.
+    expect(text).toContain("Endpoint looks compatible");
+  });
 
-    expect(text).toContain("transcribe through SystemSculpt");
-    expect(names).toContain("Transcription execution");
-    expect(text).toContain("SystemSculpt clean-up");
-    expect(names).toContain("Transcription clean-up prompt");
-    expect(text).toContain("managed cleanup step");
-    expect(names).not.toContain("Transcription provider");
-    expect(text).not.toContain("Custom endpoint URL");
-    expect(text).not.toContain("API key");
-    expect(text).not.toContain("Model name");
-    expect(text).not.toContain("Groq");
-    expect(text).not.toContain("OpenAI");
-    expect(text).not.toContain("Local");
-    expect(names).toContain("Automatic audio format conversion");
+  it("surfaces a config-time error when the custom endpoint is missing", async () => {
+    const { plugin } = createPlugin({
+      transcriptionProvider: "custom",
+      customTranscriptionEndpoint: "",
+    });
+    const { container, tab } = render(plugin);
+
+    await displayRecorderTabContent(container, tab);
+
+    const errorNote = container.querySelector(".ss-inline-note-error")?.textContent || "";
+    expect(errorNote).toMatch(/required/i);
+  });
+
+  it("switches to custom and reveals the controls when the provider dropdown changes", async () => {
+    const { plugin, updateSettings } = createPlugin({ transcriptionProvider: "systemsculpt" });
+    const { container, tab } = render(plugin);
+
+    await displayRecorderTabContent(container, tab);
+
+    const namesBefore = Array.from(container.querySelectorAll(".setting-item-name")).map((el) =>
+      el.textContent?.trim()
+    );
+    expect(namesBefore).not.toContain("Custom endpoint URL");
+
+    // The provider <select> is the only one carrying a "systemsculpt" option.
+    const providerSelect = Array.from(container.querySelectorAll("select")).find((select) =>
+      Array.from(select.querySelectorAll("option")).some(
+        (opt) => (opt as HTMLOptionElement).value === "systemsculpt"
+      )
+    ) as HTMLSelectElement | undefined;
+    expect(providerSelect).toBeTruthy();
+
+    providerSelect!.value = "custom";
+    providerSelect!.dispatchEvent(new Event("change"));
+
+    // Drain the async onChange (persist + re-render + mic enumerate).
+    for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(updateSettings).toHaveBeenCalledWith({ transcriptionProvider: "custom" });
+    const namesAfter = Array.from(container.querySelectorAll(".setting-item-name")).map((el) =>
+      el.textContent?.trim()
+    );
+    expect(namesAfter).toContain("Custom endpoint URL");
+    expect(namesAfter).toContain("Model name");
   });
 });

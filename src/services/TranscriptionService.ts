@@ -1,6 +1,7 @@
 import { Notice, TFile, requestUrl, normalizePath } from "obsidian";
 import { PlatformContext } from "./PlatformContext";
 import { SystemSculptService } from "./SystemSculptService";
+import { normalizeTranscriptionResponse } from "./transcription/providers/transcriptionResponse";
 import { AUDIO_UPLOAD_MAX_BYTES } from "../constants/uploadLimits";
 import type SystemSculptPlugin from "../main";
 import { logDebug, logInfo, logWarning, logError, logMobileError } from "../utils/errorHandling";
@@ -1092,7 +1093,15 @@ export class TranscriptionService {
             if (contentType.includes('application/x-ndjson')) {
               responseData = this.parseNdjsonText(rawResponseTextFor200, context?.onProgress);
             } else {
-              responseData = JSON.parse(rawResponseTextFor200 || '{}');
+              // A text/plain transcript is allowed by the #211 contract; if the
+              // body is not JSON, keep it as a raw string for the normalizer
+              // instead of throwing an "unparseable JSON" error.
+              const body = rawResponseTextFor200 || "";
+              try {
+                responseData = JSON.parse(body || "{}");
+              } catch {
+                responseData = body;
+              }
             }
           }
         } catch (jsonParseError) {
@@ -1141,31 +1150,28 @@ export class TranscriptionService {
 
         let transcriptionText = "";
 
-        // Handle different response formats
-        if (this.plugin.settings.transcriptionProvider === "custom" && 
-            this.plugin.settings.customTranscriptionEndpoint.includes("groq.com")) {
-          // Groq API response format
-          if (context?.timestamped && responseData.segments) {
-            // Convert segments to SRT format (simplified)
-            transcriptionText = responseData.segments.map((segment: any, index: number) => {
-              const start = this.formatTimestamp(segment.start);
-              const end = this.formatTimestamp(segment.end);
-              return `${index + 1}\n${start} --> ${end}\n${segment.text.trim()}\n`;
-            }).join('\n');
-            } else {
-            transcriptionText = responseData.text || "";
-          }
-                } else {
-          // SystemSculpt or other API response format
-          if (typeof responseData === 'string') {
-            transcriptionText = responseData;
-          } else if (responseData.text) {
-            transcriptionText = responseData.text;
-          } else if (responseData.data?.text) {
-            transcriptionText = responseData.data.text;
-          } else {
+        // Groq verbose_json with timestamps -> SRT. This is a presentation
+        // concern (timed segments rendered as subtitle cues), kept as-is.
+        const isGroqTimestampedSegments =
+          this.plugin.settings.transcriptionProvider === "custom" &&
+          (this.plugin.settings.customTranscriptionEndpoint || "").toLowerCase().includes("groq.com") &&
+          !!context?.timestamped &&
+          Array.isArray((responseData as any)?.segments);
+
+        if (isGroqTimestampedSegments) {
+          // Reuse the null-safe SRT builder (guards missing text/start/end)
+          // instead of an unguarded inline map.
+          transcriptionText = this.segmentsToSrt((responseData as any).segments);
+        } else {
+          // One definition of a "compatible" transcription response (#211): a
+          // plain string body, { text }, { data: { text } }, or { segments } are
+          // all accepted; anything else is an unrecognized shape. This is the
+          // response half of the self-hosted Whisper contract.
+          const normalized = normalizeTranscriptionResponse(responseData);
+          if (!normalized) {
             throw new Error("Invalid response format: no transcription text found");
           }
+          transcriptionText = normalized.text;
         }
 
         if (!transcriptionText?.trim()) {
@@ -1903,6 +1909,20 @@ export class TranscriptionService {
         arrayBuffer = await this.plugin.app.vault.readBinary(file);
         this.debug("Read audio file from vault", { filePath: file.path });
       } catch (readError) {
+        // Desktop-only fallback: a direct fs read when the vault adapter read
+        // fails. Gated on Node availability so mobile (no fs) surfaces the
+        // original error instead of crashing on require("fs"). #211 / #207.
+        const canUseNode =
+          typeof (this.platform as any)?.supportsNodeApis === "function"
+            ? !!(this.platform as any).supportsNodeApis()
+            : !this.platform.isMobile();
+        if (!canUseNode || typeof require !== "function") {
+          throw new Error(
+            `Failed to read audio file. Original error: ${
+              readError instanceof Error ? readError.message : String(readError)
+            }`
+          );
+        }
         try {
           const fs = require("fs");
           const path = require("path");
