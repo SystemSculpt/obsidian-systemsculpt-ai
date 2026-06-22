@@ -9,7 +9,8 @@ export type RecorderStopReason =
 
 export interface MicrophoneRecorderOptions {
   mimeType: string;
-  extension: string;
+  /** Encoder bitrate hint (bits/second). Omit for the platform default. */
+  audioBitsPerSecond?: number;
   preferredMicrophoneId?: string | null;
   onError: (error: Error) => void;
   onStatus: (status: string) => void;
@@ -27,7 +28,7 @@ type RecorderState = "idle" | "starting" | "recording" | "stopping";
 export class MicrophoneRecorder {
   private readonly app: App;
   private readonly mimeType: string;
-  private readonly extension: string;
+  private readonly audioBitsPerSecond: number | null;
   private readonly onError: (error: Error) => void;
   private readonly onStatus: (status: string) => void;
   private readonly onComplete: (filePath: string, audioBlob: Blob, stopReason?: RecorderStopReason) => void;
@@ -52,7 +53,7 @@ export class MicrophoneRecorder {
   constructor(app: App, options: MicrophoneRecorderOptions) {
     this.app = app;
     this.mimeType = options.mimeType;
-    this.extension = options.extension;
+    this.audioBitsPerSecond = options.audioBitsPerSecond ?? null;
     this.onError = options.onError;
     this.onStatus = options.onStatus;
     this.onComplete = options.onComplete;
@@ -210,8 +211,12 @@ export class MicrophoneRecorder {
   }
 
   private createMediaRecorder(stream: MediaStream): MediaRecorder {
+    const recorderOptions: MediaRecorderOptions = { mimeType: this.mimeType };
+    if (this.audioBitsPerSecond && this.audioBitsPerSecond > 0) {
+      recorderOptions.audioBitsPerSecond = this.audioBitsPerSecond;
+    }
     try {
-      return new MediaRecorder(stream, { mimeType: this.mimeType });
+      return new MediaRecorder(stream, recorderOptions);
     } catch (_) {
       return new MediaRecorder(stream);
     }

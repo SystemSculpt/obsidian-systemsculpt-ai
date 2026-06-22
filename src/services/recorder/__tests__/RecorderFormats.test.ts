@@ -2,7 +2,12 @@
  * @jest-environment jsdom
  */
 
-import { pickRecorderFormat, RecorderFormat } from "../RecorderFormats";
+import {
+  pickRecorderFormat,
+  pickRecorderAudioBitsPerSecond,
+  MOBILE_RECORDING_AUDIO_BITS_PER_SECOND,
+  RecorderFormat,
+} from "../RecorderFormats";
 
 describe("RecorderFormats", () => {
   const originalMediaRecorder = (global as any).MediaRecorder;
@@ -199,6 +204,25 @@ describe("RecorderFormats", () => {
 
       expect(format.mimeType).toBe("audio/webm;codecs=opus");
       expect(format.extension).toBe("webm");
+    });
+  });
+
+  describe("pickRecorderAudioBitsPerSecond", () => {
+    it("caps mobile recordings at the speech-optimized bitrate (#169)", () => {
+      expect(pickRecorderAudioBitsPerSecond({ isMobile: true })).toBe(
+        MOBILE_RECORDING_AUDIO_BITS_PER_SECOND
+      );
+    });
+
+    it("leaves desktop recordings at the platform default (undefined)", () => {
+      expect(pickRecorderAudioBitsPerSecond({ isMobile: false })).toBeUndefined();
+      expect(pickRecorderAudioBitsPerSecond()).toBeUndefined();
+    });
+
+    it("keeps a ~70-minute mobile meeting under the 25MB direct-upload limit", () => {
+      const seconds = 70 * 60;
+      const estimatedBytes = (MOBILE_RECORDING_AUDIO_BITS_PER_SECOND * seconds) / 8;
+      expect(estimatedBytes).toBeLessThan(25 * 1024 * 1024);
     });
   });
 

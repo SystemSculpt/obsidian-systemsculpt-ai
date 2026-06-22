@@ -49,7 +49,13 @@ class MockMediaRecorder {
     this.onerror?.({ error });
   };
 
-  public constructor(_stream: MediaStream, _options?: { mimeType?: string }) {
+  public options?: { mimeType?: string; audioBitsPerSecond?: number };
+
+  public constructor(
+    _stream: MediaStream,
+    _options?: { mimeType?: string; audioBitsPerSecond?: number }
+  ) {
+    this.options = _options;
     MockMediaRecorder.instances.push(this);
   }
 }
@@ -128,7 +134,6 @@ describe("MicrophoneRecorder", () => {
 
     const recorder = new MicrophoneRecorder(app, {
       mimeType: "audio/webm;codecs=opus",
-      extension: "webm",
       onError: jest.fn(),
       onStatus,
       onComplete,
@@ -166,7 +171,6 @@ describe("MicrophoneRecorder", () => {
 
     const recorder = new MicrophoneRecorder(app, {
       mimeType: "audio/webm;codecs=opus",
-      extension: "webm",
       onError: jest.fn(),
       onStatus: jest.fn(),
       onComplete,
@@ -202,7 +206,6 @@ describe("MicrophoneRecorder", () => {
 
     const recorder = new MicrophoneRecorder(app, {
       mimeType: "audio/webm;codecs=opus",
-      extension: "webm",
       onError,
       onStatus: jest.fn(),
       onComplete,
@@ -250,7 +253,6 @@ describe("MicrophoneRecorder", () => {
 
     const recorder = new MicrophoneRecorder(app, {
       mimeType: "audio/webm;codecs=opus",
-      extension: "webm",
       onError,
       onStatus: jest.fn(),
       onComplete,
@@ -275,6 +277,64 @@ describe("MicrophoneRecorder", () => {
       "background-hidden"
     );
     expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("requests the speech-optimized bitrate when one is provided (#169)", async () => {
+    const track = createTrack();
+    const stream = createStream(track);
+    Object.defineProperty(globalThis.navigator, "mediaDevices", {
+      configurable: true,
+      value: {
+        getUserMedia: jest.fn().mockResolvedValue(stream),
+        addEventListener: jest.fn(),
+        removeEventListener: jest.fn(),
+      },
+    });
+
+    const app = new App();
+    (app.vault.adapter as any).writeBinary = jest.fn().mockResolvedValue(undefined);
+
+    const recorder = new MicrophoneRecorder(app, {
+      mimeType: "audio/webm;codecs=opus",
+      audioBitsPerSecond: 48000,
+      onError: jest.fn(),
+      onStatus: jest.fn(),
+      onComplete: jest.fn(),
+    });
+
+    await recorder.start("SystemSculpt/Recordings/bitrate.webm");
+
+    const instance = MockMediaRecorder.instances[MockMediaRecorder.instances.length - 1];
+    expect(instance.options?.audioBitsPerSecond).toBe(48000);
+    expect(instance.options?.mimeType).toBe("audio/webm;codecs=opus");
+  });
+
+  it("omits the bitrate when none is provided (platform default)", async () => {
+    const track = createTrack();
+    const stream = createStream(track);
+    Object.defineProperty(globalThis.navigator, "mediaDevices", {
+      configurable: true,
+      value: {
+        getUserMedia: jest.fn().mockResolvedValue(stream),
+        addEventListener: jest.fn(),
+        removeEventListener: jest.fn(),
+      },
+    });
+
+    const app = new App();
+    (app.vault.adapter as any).writeBinary = jest.fn().mockResolvedValue(undefined);
+
+    const recorder = new MicrophoneRecorder(app, {
+      mimeType: "audio/webm;codecs=opus",
+      onError: jest.fn(),
+      onStatus: jest.fn(),
+      onComplete: jest.fn(),
+    });
+
+    await recorder.start("SystemSculpt/Recordings/default-bitrate.webm");
+
+    const instance = MockMediaRecorder.instances[MockMediaRecorder.instances.length - 1];
+    expect(instance.options?.audioBitsPerSecond).toBeUndefined();
   });
 
   it("acquires wake lock while recording and releases it on cleanup", async () => {
@@ -302,7 +362,6 @@ describe("MicrophoneRecorder", () => {
     (app.vault.adapter as any).writeBinary = jest.fn().mockResolvedValue(undefined);
     const recorder = new MicrophoneRecorder(app, {
       mimeType: "audio/webm;codecs=opus",
-      extension: "webm",
       onError: jest.fn(),
       onStatus: jest.fn(),
       onComplete: jest.fn(),
@@ -336,7 +395,6 @@ describe("MicrophoneRecorder", () => {
 
     const recorder = new MicrophoneRecorder(app, {
       mimeType: "audio/webm;codecs=opus",
-      extension: "webm",
       onError: jest.fn(),
       onStatus,
       onComplete: jest.fn(),

@@ -108,14 +108,27 @@ describe("RecordingSession", () => {
       );
     });
 
-    it("passes format to recorder", async () => {
+    it("passes the format mime type to the recorder", async () => {
       await session.start();
 
       expect(MicrophoneRecorder).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({
           mimeType: "audio/webm;codecs=opus",
-          extension: "webm",
+        })
+      );
+    });
+
+    it("forwards the configured audio bitrate to the recorder (#169)", async () => {
+      mockOptions.audioBitsPerSecond = 48000;
+      session = new RecordingSession(mockOptions);
+
+      await session.start();
+
+      expect(MicrophoneRecorder).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          audioBitsPerSecond: 48000,
         })
       );
     });

@@ -790,7 +790,7 @@ export class TranscriptionService {
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         throw new Error(
-          `Failed to decode audio for chunking (${message}). This can happen if your platform can't decode the file format. Try converting the audio to MP3 or WAV and retry.`
+          `Failed to decode audio for chunking (${message}). This recording is large enough to need local splitting before upload, but this platform can't decode its format — common for webm/opus on mobile. To transcribe it, switch to the SystemSculpt transcription provider (it uploads the file as-is with no local decoding, up to 500 MB), run the transcription on desktop, or convert the audio to MP3 or WAV and retry.`
         );
       }
       let audioBuffer: AudioBuffer = decoded;

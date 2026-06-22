@@ -232,4 +232,34 @@ describe("TranscriptionService chunking end-to-end", () => {
       expect(text).toContain("Content-Type: audio/wav");
     }
   });
+
+  it("surfaces actionable guidance when the platform can't decode a large recording for chunking (#169)", async () => {
+    class FailingAudioContext {
+      public state = "running";
+      async decodeAudioData(): Promise<any> {
+        throw new DOMException("Unable to decode audio data", "EncodingError");
+      }
+      createBuffer(numberOfChannels: number, length: number, sampleRate: number): any {
+        return new FakeAudioBuffer(numberOfChannels, length, sampleRate) as any;
+      }
+      async close() {
+        this.state = "closed";
+      }
+    }
+
+    const originalAudioContext = (globalThis as any).AudioContext;
+    (globalThis as any).AudioContext = FailingAudioContext;
+
+    try {
+      const promise = (service as any).buildWavChunkBlobs(
+        new ArrayBuffer(AUDIO_UPLOAD_MAX_BYTES + 1),
+        16000,
+        AUDIO_UPLOAD_MAX_BYTES
+      );
+      await expect(promise).rejects.toThrow(/SystemSculpt transcription provider/i);
+      await expect(promise).rejects.toThrow(/desktop/i);
+    } finally {
+      (globalThis as any).AudioContext = originalAudioContext;
+    }
+  });
 });
