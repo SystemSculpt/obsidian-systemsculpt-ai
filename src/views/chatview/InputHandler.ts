@@ -103,7 +103,6 @@ export class InputHandler extends Component {
   private attachmentPillsByKey: Map<string, HTMLElement> = new Map();
   private isGenerating = false;
   private webSearchEnabled = false;
-  private agentModeEnabled: boolean;
   private agentModeButtonEl: HTMLElement | null = null;
   // ButtonComponent for the per-chat hide system/tool toggle (#213/#174/#167).
   private hideSystemButton: any = null;
@@ -187,7 +186,6 @@ export class InputHandler extends Component {
     this.getChatId = options.getChatId;
     this.notifyModelChange = options.onModelChange || (() => {});
     this.chatView = options.chatView;
-    this.agentModeEnabled = this.plugin.settings.agentModeEnabled ?? true;
     this.selectedPromptPath = this.plugin.settings.lastUsedPromptPath || null;
     this.promptService = new PromptService(
       this.app,
@@ -333,7 +331,7 @@ export class InputHandler extends Component {
           this.chatView?.setPiSessionState?.(session);
         },
         webSearchEnabled: this.webSearchEnabled,
-        ...(this.agentModeEnabled ? {} : { allowTools: false }),
+        ...((this.chatView?.isAgentModeActive?.() ?? true) ? {} : { allowTools: false }),
         ...(systemPromptOverride ? { systemPromptOverride } : {}),
         ...(options?.transientSystemPromptSuffix
           ? { transientSystemPromptSuffix: options.transientSystemPromptSuffix }
@@ -761,12 +759,8 @@ export class InputHandler extends Component {
       hasProLicense: () => !!(this.plugin.settings.licenseKey?.trim() && this.plugin.settings.licenseValid),
       onToggleWebSearch: () => { this.webSearchEnabled = !this.webSearchEnabled; },
       isWebSearchEnabled: () => this.webSearchEnabled,
-      onToggleAgentMode: () => {
-        this.agentModeEnabled = !this.agentModeEnabled;
-        this.plugin.settings.agentModeEnabled = this.agentModeEnabled;
-        void this.plugin.saveSettings();
-      },
-      isAgentModeEnabled: () => this.agentModeEnabled,
+      onToggleAgentMode: () => this.chatView?.toggleAgentMode?.(),
+      isAgentModeEnabled: () => this.chatView?.isAgentModeActive?.() ?? true,
       onToggleHideSystemMessages: () => this.chatView?.toggleSystemNoiseHidden?.(),
       isHideSystemMessagesEnabled: () => this.chatView?.isSystemNoiseHidden?.() ?? false,
     });
@@ -859,11 +853,22 @@ export class InputHandler extends Component {
     };
 
     this.registerEvent(
-      this.app.workspace.on("systemsculpt:settings-updated", () => {
-        this.updateGeneratingState();
-        this.onModelChange({ refreshOptions: true });
-      })
+      this.app.workspace.on("systemsculpt:settings-updated", () => this.handleSettingsUpdated())
     );
+  }
+
+  /**
+   * React to a global settings change. Refresh the generating-state UI and
+   * model options, and re-sync the composer toggles whose active state follows
+   * a per-chat value with a global-default fallback — a chat that follows the
+   * global default (per-chat value unset) would otherwise show a stale toggle
+   * after the global setting changes (#210, #213).
+   */
+  public handleSettingsUpdated(): void {
+    this.updateGeneratingState();
+    this.onModelChange({ refreshOptions: true });
+    this.syncAgentModeButton();
+    this.syncHideSystemMessagesButton();
   }
 
   private initializeSlashCommands(): void {
@@ -1448,18 +1453,12 @@ export class InputHandler extends Component {
     this.automationApprovalMode = mode;
   }
 
-  public isAgentModeEnabled(): boolean {
-    return this.agentModeEnabled;
-  }
-
-  public setAgentModeEnabled(enabled: boolean): void {
-    this.agentModeEnabled = enabled;
-    this.syncAgentModeButton();
-  }
-
-  private syncAgentModeButton(): void {
+  // Keep the composer agent-mode toggle's active state in sync with the per-chat
+  // value owned by ChatView (e.g. restored on chat load) (#210/#149/#185).
+  public syncAgentModeButton(): void {
     if (!this.agentModeButtonEl) return;
-    this.agentModeButtonEl.classList.toggle("ss-active", this.agentModeEnabled);
+    const active = this.chatView?.isAgentModeActive?.() ?? true;
+    this.agentModeButtonEl.classList.toggle("ss-active", active);
   }
 
   // Keep the composer toggle in sync when the per-chat preference changes outside
@@ -1489,7 +1488,6 @@ export class InputHandler extends Component {
   public resetForFreshChat(): void {
     this.pendingLargeTextContent = null;
     this.webSearchEnabled = false;
-    this.agentModeEnabled = this.plugin.settings.agentModeEnabled ?? true;
     this.syncAgentModeButton();
     this.selectedPromptPath = this.plugin.settings.lastUsedPromptPath || null;
     this.selectedPromptName = this.selectedPromptPath

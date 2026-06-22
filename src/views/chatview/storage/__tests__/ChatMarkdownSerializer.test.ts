@@ -301,6 +301,31 @@ Hello!
       expect(unset?.metadata.hideSystemMessages).toBeUndefined();
     });
 
+    it("round-trips the per-chat agent-mode preference (#210, #149, #185)", () => {
+      const base = {
+        model: "gpt-4",
+        title: "Test Chat",
+        created: "2024-01-01T00:00:00Z",
+        lastModified: "2024-01-01T12:00:00Z",
+      };
+
+      const on = ChatMarkdownSerializer.parseMarkdown(
+        createMarkdown({ id: "chat-agent-on", ...base, agentModeEnabled: true }, "")
+      );
+      expect(on?.metadata.agentModeEnabled).toBe(true);
+
+      const off = ChatMarkdownSerializer.parseMarkdown(
+        createMarkdown({ id: "chat-agent-off", ...base, agentModeEnabled: false }, "")
+      );
+      expect(off?.metadata.agentModeEnabled).toBe(false);
+
+      // Unset means "follow the global default" — must not coerce to a boolean.
+      const unset = ChatMarkdownSerializer.parseMarkdown(
+        createMarkdown({ id: "chat-agent-unset", ...base }, "")
+      );
+      expect(unset?.metadata.agentModeEnabled).toBeUndefined();
+    });
+
     it("marks legacy prompt metadata as legacy-only compatibility state", () => {
       const content = createMarkdown(
         {

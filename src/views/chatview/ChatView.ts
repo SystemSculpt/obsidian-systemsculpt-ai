@@ -121,6 +121,9 @@ export class ChatView extends ItemView {
   // Per-chat override for hiding SystemSculpt system + tool messages (#213/#174/#167).
   // undefined = follow the global `hideSystemMessagesInChat` setting.
   public hideSystemMessages: boolean | undefined;
+  // Per-chat override for agent mode (#210/#149/#185).
+  // undefined = follow the global `agentModeEnabled` setting.
+  public agentModeEnabled: boolean | undefined;
   private chatExportService: ChatExportService | null = null;
   private debugLogService: ChatDebugLogService | null = null;
   private warnedImageIncompatModels: Set<string> = new Set();
@@ -168,6 +171,7 @@ export class ChatView extends ItemView {
         piLastEntryId?: string;
         piLastSyncedAt?: string;
         hideSystemMessages?: boolean;
+        agentModeEnabled?: boolean;
     }) || {};
 
     this.messages = [];
@@ -192,6 +196,7 @@ export class ChatView extends ItemView {
     // Initialize chat font size from saved state or plugin settings
     this.chatFontSize = initialState.chatFontSize || (plugin.settings as any).chatFontSize || "medium";
     this.hideSystemMessages = initialState.hideSystemMessages;
+    this.agentModeEnabled = initialState.agentModeEnabled;
   }
 
   private ensureCoreServicesReady(): void {
@@ -322,7 +327,7 @@ export class ChatView extends ItemView {
           title: this.chatTitle,
           chatFontSize: this.chatFontSize,
           selectedPromptPath: this.inputHandler?.getSelectedPromptPath?.() || "",
-          agentModeEnabled: this.inputHandler?.isAgentModeEnabled?.(),
+          agentModeEnabled: this.agentModeEnabled,
           hideSystemMessages: this.hideSystemMessages,
           piSessionFile: this.piSessionFile,
           piSessionId: this.piSessionId,
@@ -1228,6 +1233,20 @@ export class ChatView extends ItemView {
     );
   }
 
+  // Effective agent mode (#210/#149/#185): a per-chat preference wins; otherwise
+  // fall back to the global `agentModeEnabled` default (enabled when unset).
+  public isAgentModeActive(): boolean {
+    return this.agentModeEnabled ?? this.plugin.settings.agentModeEnabled ?? true;
+  }
+
+  // Flip the per-chat preference, sync the composer toggle, and persist — without
+  // mutating the global default (the v5 regression behind #149/#185).
+  public toggleAgentMode(): void {
+    this.agentModeEnabled = !this.isAgentModeActive();
+    this.inputHandler?.syncAgentModeButton?.();
+    void this.saveChat();
+  }
+
 
   public async getCurrentSystemPrompt(): Promise<string> {
     this.ensureCoreServicesReady();
@@ -1534,6 +1553,7 @@ export class ChatView extends ItemView {
       version: this.chatVersion,
       chatFontSize: this.chatFontSize,
       hideSystemMessages: this.hideSystemMessages,
+      agentModeEnabled: this.agentModeEnabled,
       chatBackend: this.chatBackend,
       piSessionFile: this.piSessionFile,
       piSessionId: this.piSessionId,
@@ -1571,6 +1591,8 @@ export class ChatView extends ItemView {
       }
       this.hideSystemMessages =
         typeof state?.hideSystemMessages === "boolean" ? state.hideSystemMessages : undefined;
+      this.agentModeEnabled =
+        typeof state?.agentModeEnabled === "boolean" ? state.agentModeEnabled : undefined;
       this.virtualStartIndex = 0;
       this.hasAdjustedInitialWindow = false;
       this.messages = [];
@@ -1607,6 +1629,9 @@ export class ChatView extends ItemView {
     this.applyChatLeafState(state);
     if (typeof state.hideSystemMessages === "boolean") {
       this.hideSystemMessages = state.hideSystemMessages;
+    }
+    if (typeof state.agentModeEnabled === "boolean") {
+      this.agentModeEnabled = state.agentModeEnabled;
     }
     // Restore chat font size
     if (state.chatFontSize) {
@@ -1723,10 +1748,11 @@ export class ChatView extends ItemView {
         // Restore selected prompt and agent mode for this chat
         if (this.inputHandler) {
           this.inputHandler.setSelectedPromptPath(chatData.selectedPromptPath || null);
-          if (typeof chatData.agentModeEnabled === "boolean") {
-            this.inputHandler.setAgentModeEnabled(chatData.agentModeEnabled);
-          }
         }
+        // Restore per-chat agent mode (#210/#149/#185); undefined follows the global default.
+        this.agentModeEnabled =
+          typeof chatData.agentModeEnabled === "boolean" ? chatData.agentModeEnabled : undefined;
+        this.inputHandler?.syncAgentModeButton?.();
 
         // Restore per-chat system/tool message visibility (#213/#174/#167).
         if (typeof chatData.hideSystemMessages === "boolean") {
@@ -2550,11 +2576,12 @@ export class ChatView extends ItemView {
   }
 
   public isAgentModeEnabled(): boolean {
-    return this.inputHandler?.isAgentModeEnabled?.() ?? false;
+    return this.isAgentModeActive();
   }
 
   public setAgentModeEnabled(enabled: boolean): void {
-    this.inputHandler?.setAgentModeEnabled?.(enabled);
+    this.agentModeEnabled = enabled;
+    this.inputHandler?.syncAgentModeButton?.();
   }
 
   public async sendAutomationMessage(options?: {
@@ -2573,7 +2600,7 @@ export class ChatView extends ItemView {
     }
 
     if (typeof options?.agentModeEnabled === "boolean") {
-      this.inputHandler.setAgentModeEnabled(options.agentModeEnabled);
+      this.setAgentModeEnabled(options.agentModeEnabled);
     }
 
     if (options && "text" in options && options.text !== undefined) {
