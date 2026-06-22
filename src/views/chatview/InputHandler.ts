@@ -853,11 +853,22 @@ export class InputHandler extends Component {
     };
 
     this.registerEvent(
-      this.app.workspace.on("systemsculpt:settings-updated", () => {
-        this.updateGeneratingState();
-        this.onModelChange({ refreshOptions: true });
-      })
+      this.app.workspace.on("systemsculpt:settings-updated", () => this.handleSettingsUpdated())
     );
+  }
+
+  /**
+   * React to a global settings change. Refresh the generating-state UI and
+   * model options, and re-sync the composer toggles whose active state follows
+   * a per-chat value with a global-default fallback — a chat that follows the
+   * global default (per-chat value unset) would otherwise show a stale toggle
+   * after the global setting changes (#210, #213).
+   */
+  public handleSettingsUpdated(): void {
+    this.updateGeneratingState();
+    this.onModelChange({ refreshOptions: true });
+    this.syncAgentModeButton();
+    this.syncHideSystemMessagesButton();
   }
 
   private initializeSlashCommands(): void {
