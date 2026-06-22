@@ -418,6 +418,14 @@ export class MicrophoneRecorder {
           this.onStatus("Recording saved after app lock/background");
         }
         this.onComplete(targetPath, blob, this.stopReason);
+      } else {
+        // Defensive: outputPath is set on start(), so this should be
+        // unreachable. Surface it rather than dropping captured audio silently.
+        logError(
+          "MicrophoneRecorder",
+          "finalizeRecording reached without a target path; captured audio not saved",
+          { stopReason: this.stopReason }
+        );
       }
     } catch (error) {
       this.onError(new Error(`Save failed: ${error instanceof Error ? error.message : String(error)}`));

@@ -268,6 +268,7 @@ describe("MicrophoneRecorder", () => {
     await flushPromises();
     await flushPromises();
 
+    expect((app.vault.adapter as any).writeBinary).toHaveBeenCalled();
     expect(onComplete).toHaveBeenCalledWith(
       "SystemSculpt/Recordings/bg-miclost.webm",
       expect.any(Blob),
