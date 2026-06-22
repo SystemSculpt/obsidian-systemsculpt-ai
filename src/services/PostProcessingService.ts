@@ -139,6 +139,7 @@ export class PostProcessingService {
     const modal = new PostProcessingModelPromptModal(this.plugin, {
       missingModelId: modelId,
       reason,
+      isManaged: isManagedSystemSculptModelId(modelId),
       onClose: () => {
         PostProcessingService.promptVisible = false;
       },
