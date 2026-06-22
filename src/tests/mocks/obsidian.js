@@ -275,12 +275,20 @@ class App {
       createFolder: jest.fn(),
       modify: jest.fn(),
       configDir: "/.obsidian",
+      // Mobile-shaped DataAdapter (CapacitorAdapter): no getBasePath, so the
+      // filesystem tools take the Vault/adapter path that runs on a phone (#142).
       adapter: {
         exists: jest.fn(),
         read: jest.fn(),
         write: jest.fn(),
         list: jest.fn(() => ({ files: [], folders: [] })),
         trashLocal: jest.fn(),
+        getFullPath: jest.fn((p) => p),
+        mkdir: jest.fn(),
+        stat: jest.fn(),
+        remove: jest.fn(),
+        rmdir: jest.fn(),
+        rename: jest.fn(),
       },
     };
     this.fileManager = {

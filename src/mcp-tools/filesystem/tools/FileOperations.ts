@@ -8,6 +8,7 @@ import {
   normalizeVaultPath,
   isHiddenSystemPath,
   ensureAdapterFolder,
+  ensureVaultFolder,
   adapterPathExists,
   readAdapterText,
   writeAdapterText,
@@ -244,12 +245,15 @@ export class FileOperations {
       if (isBaseFile) {
         assertValidObsidianBasesYaml(normalizedPath || path, content);
       }
-      // Ensure parent directories exist if requested
+      // Ensure parent directories exist if requested. ensureVaultFolder builds
+      // every missing ancestor through the Vault API (mobile-safe) and only
+      // swallows "already exists", so a missing mid-level folder no longer
+      // silently fails the write (#142).
       if (createDirs) {
         const lastSlash = normalizedPath.lastIndexOf('/');
         if (lastSlash > 0) {
           const folderPath = normalizedPath.substring(0, lastSlash);
-          try { await this.app.vault.createFolder(folderPath); } catch {}
+          await ensureVaultFolder(this.app, folderPath);
         }
       }
       await this.app.vault.create(normalizedPath, content);

@@ -1,12 +1,29 @@
 import { App, TFile, TFolder, normalizePath } from "obsidian";
-import path from "node:path";
-import fs from "node:fs/promises";
+import { loadDesktopOnly } from "../../platform/desktopOnly";
 import { FILESYSTEM_LIMITS } from "./constants";
 export { fuzzyMatchScore, shouldExcludeFromSearch } from "./searchUtils";
 
 /**
  * Utility functions for MCP Filesystem tools
  */
+
+/**
+ * Node `fs`/`path` are reached ONLY through the canonical desktop-only boundary
+ * (#207, #142): the `require` runs inside a thunk so it is lazy — never an eager
+ * module-eval touch that would crash mobile bundle load — and `loadDesktopOnly`
+ * returns null on a phone, where the Vault/adapter APIs take over. A static
+ * `import … from "node:…"` here would hard-crash Obsidian on Android/iOS.
+ */
+type NodeFsPromises = typeof import("node:fs/promises");
+type NodePath = typeof import("node:path");
+
+function nodeFs(): NodeFsPromises | null {
+  return loadDesktopOnly(() => require("node:fs/promises") as NodeFsPromises);
+}
+
+function nodePath(): NodePath | null {
+  return loadDesktopOnly(() => require("node:path") as NodePath);
+}
 
 /**
  * Format bytes to human readable string
@@ -56,50 +73,79 @@ export function isHiddenSystemPath(path: string): boolean {
  * Ensures a resolved path stays within the base directory.
  * Throws an error if the path would escape the base directory via traversal sequences.
  */
-function assertWithinBase(basePath: string, resolvedPath: string): void {
-  const realBase = path.resolve(basePath);
-  const realResolved = path.resolve(resolvedPath);
+function assertWithinBase(nodePathMod: NodePath, basePath: string, resolvedPath: string): void {
+  const realBase = nodePathMod.resolve(basePath);
+  const realResolved = nodePathMod.resolve(resolvedPath);
 
   // Allow exact match (accessing base directory itself)
   if (realResolved === realBase) return;
 
   // Ensure resolved path is within base (with path separator to prevent prefix attacks)
-  if (!realResolved.startsWith(realBase + path.sep)) {
+  if (!realResolved.startsWith(realBase + nodePathMod.sep)) {
     throw new Error("Path traversal detected: path escapes vault directory");
   }
 }
 
+/**
+ * Resolve a vault path to an absolute filesystem path for the Node fast-path
+ * (desktop only). Returns null when there is no Node runtime or the adapter
+ * exposes no base path (mobile) — callers then fall back to the adapter API.
+ */
 export function resolveAdapterPath(adapter: any, vaultPath: string): string | null {
   if (!adapter || typeof adapter.getBasePath !== "function") return null;
+  const nodePathMod = nodePath();
+  if (!nodePathMod) return null;
   const basePath = adapter.getBasePath();
   if (!basePath) return null;
   const normalized = normalizeVaultPath(String(vaultPath ?? ""));
   if (!normalized) return basePath;
 
-  const resolved = path.join(basePath, normalized);
-  assertWithinBase(basePath, resolved);
+  const resolved = nodePathMod.join(basePath, normalized);
+  assertWithinBase(nodePathMod, basePath, resolved);
   return resolved;
 }
 
 export async function ensureAdapterFolder(adapter: any, folderPath: string): Promise<void> {
   const fullPath = resolveAdapterPath(adapter, folderPath);
-  if (fullPath) {
-    await fs.mkdir(fullPath, { recursive: true });
+  const fsMod = fullPath ? nodeFs() : null;
+  if (fullPath && fsMod) {
+    await fsMod.mkdir(fullPath, { recursive: true });
     return;
   }
+  // Mobile / no-base-path: CapacitorAdapter.mkdir is NOT recursive, so build each
+  // ancestor segment-by-segment, skipping ones that already exist (#142).
   if (adapter && typeof adapter.mkdir === "function") {
     const normalized = normalizeVaultPath(String(folderPath ?? ""));
-    if (normalized) {
-      await adapter.mkdir(normalized);
+    if (!normalized) return;
+    const segments = normalized.split("/").filter(Boolean);
+    let current = "";
+    for (const segment of segments) {
+      current = current ? `${current}/${segment}` : segment;
+      let exists = false;
+      if (typeof adapter.exists === "function") {
+        try {
+          exists = await adapter.exists(current);
+        } catch {
+          exists = false;
+        }
+      }
+      if (!exists) {
+        try {
+          await adapter.mkdir(current);
+        } catch {
+          // Tolerate races / "already exists" — a sibling op may have created it.
+        }
+      }
     }
   }
 }
 
 export async function adapterPathExists(adapter: any, vaultPath: string): Promise<boolean> {
   const fullPath = resolveAdapterPath(adapter, vaultPath);
-  if (fullPath) {
+  const fsMod = fullPath ? nodeFs() : null;
+  if (fullPath && fsMod) {
     try {
-      await fs.access(fullPath);
+      await fsMod.access(fullPath);
       return true;
     } catch {
       return false;
@@ -117,8 +163,9 @@ export async function adapterPathExists(adapter: any, vaultPath: string): Promis
 
 export async function readAdapterText(adapter: any, vaultPath: string): Promise<string> {
   const fullPath = resolveAdapterPath(adapter, vaultPath);
-  if (fullPath) {
-    return await fs.readFile(fullPath, "utf8");
+  const fsMod = fullPath ? nodeFs() : null;
+  if (fullPath && fsMod) {
+    return await fsMod.readFile(fullPath, "utf8");
   }
   if (adapter && typeof adapter.read === "function") {
     return await adapter.read(normalizeVaultPath(String(vaultPath ?? "")));
@@ -128,8 +175,9 @@ export async function readAdapterText(adapter: any, vaultPath: string): Promise<
 
 export async function writeAdapterText(adapter: any, vaultPath: string, content: string): Promise<void> {
   const fullPath = resolveAdapterPath(adapter, vaultPath);
-  if (fullPath) {
-    await fs.writeFile(fullPath, content, "utf8");
+  const fsMod = fullPath ? nodeFs() : null;
+  if (fullPath && fsMod) {
+    await fsMod.writeFile(fullPath, content, "utf8");
     return;
   }
   if (adapter && typeof adapter.write === "function") {
@@ -141,8 +189,9 @@ export async function writeAdapterText(adapter: any, vaultPath: string, content:
 
 export async function statAdapterPath(adapter: any, vaultPath: string): Promise<{ size: number; ctime: number; mtime: number } | null> {
   const fullPath = resolveAdapterPath(adapter, vaultPath);
-  if (fullPath) {
-    const stat = await fs.stat(fullPath);
+  const fsMod = fullPath ? nodeFs() : null;
+  if (fullPath && fsMod) {
+    const stat = await fsMod.stat(fullPath);
     return { size: stat.size, ctime: stat.ctimeMs, mtime: stat.mtimeMs };
   }
   if (adapter && typeof adapter.stat === "function") {
@@ -160,21 +209,23 @@ export async function statAdapterPath(adapter: any, vaultPath: string): Promise<
 export async function listAdapterFiles(adapter: any, root: string): Promise<string[]> {
   const basePath = resolveAdapterPath(adapter, "");
   const rootPath = resolveAdapterPath(adapter, root);
-  if (basePath && rootPath) {
+  const fsMod = basePath && rootPath ? nodeFs() : null;
+  const nodePathMod = basePath && rootPath ? nodePath() : null;
+  if (basePath && rootPath && fsMod && nodePathMod) {
     const files: string[] = [];
     const walk = async (dir: string) => {
-      let entries: Array<import("node:fs").Dirent>;
+      let entries: any[];
       try {
-        entries = await fs.readdir(dir, { withFileTypes: true });
+        entries = await fsMod.readdir(dir, { withFileTypes: true });
       } catch {
         return;
       }
       for (const entry of entries) {
-        const full = path.join(dir, entry.name);
+        const full = nodePathMod.join(dir, entry.name);
         if (entry.isDirectory()) {
           await walk(full);
         } else if (entry.isFile()) {
-          const rel = path.relative(basePath, full).split(path.sep).join("/");
+          const rel = nodePathMod.relative(basePath, full).split(nodePathMod.sep).join("/");
           files.push(rel);
         }
       }
@@ -209,8 +260,9 @@ export async function listAdapterFiles(adapter: any, root: string): Promise<stri
 export async function listAdapterDirectory(adapter: any, dirPath: string): Promise<{ files: string[]; folders: string[] }> {
   const basePath = resolveAdapterPath(adapter, "");
   const fullPath = resolveAdapterPath(adapter, dirPath);
-  if (basePath && fullPath) {
-    const entries = await fs.readdir(fullPath, { withFileTypes: true });
+  const fsMod = basePath && fullPath ? nodeFs() : null;
+  if (basePath && fullPath && fsMod) {
+    const entries = await fsMod.readdir(fullPath, { withFileTypes: true });
     const normalizedDir = normalizeVaultPath(String(dirPath ?? ""));
     const files: string[] = [];
     const folders: string[] = [];
@@ -234,6 +286,97 @@ export async function listAdapterDirectory(adapter: any, dirPath: string): Promi
   }
 
   throw new Error("Adapter base path unavailable");
+}
+
+/**
+ * Move a vault path on disk. Desktop uses the Node fast-path; mobile (no base
+ * path / no Node) renames through the adapter API (#142).
+ */
+export async function renameAdapterPath(adapter: any, sourcePath: string, destPath: string): Promise<void> {
+  const sourceFull = resolveAdapterPath(adapter, sourcePath);
+  const destFull = resolveAdapterPath(adapter, destPath);
+  const fsMod = sourceFull && destFull ? nodeFs() : null;
+  if (sourceFull && destFull && fsMod) {
+    await fsMod.rename(sourceFull, destFull);
+    return;
+  }
+  if (adapter && typeof adapter.rename === "function") {
+    await adapter.rename(
+      normalizeVaultPath(String(sourcePath ?? "")),
+      normalizeVaultPath(String(destPath ?? "")),
+    );
+    return;
+  }
+  throw new Error("Adapter base path unavailable");
+}
+
+/**
+ * Permanently remove a vault path on disk (mirrors the desktop `fs.rm`). Mobile
+ * (no base path / no Node) removes files via `adapter.remove` and folders via
+ * `adapter.rmdir(path, recursive)` (#142).
+ */
+export async function removeAdapterPath(adapter: any, vaultPath: string): Promise<void> {
+  const fullPath = resolveAdapterPath(adapter, vaultPath);
+  const fsMod = fullPath ? nodeFs() : null;
+  if (fullPath && fsMod) {
+    await fsMod.rm(fullPath, { recursive: true, force: true });
+    return;
+  }
+  const normalized = normalizeVaultPath(String(vaultPath ?? ""));
+  if (!normalized) return;
+  let isFolder = false;
+  if (adapter && typeof adapter.stat === "function") {
+    try {
+      const stat = await adapter.stat(normalized);
+      isFolder = stat?.type === "folder";
+    } catch {
+      isFolder = false;
+    }
+  }
+  if (isFolder && adapter && typeof adapter.rmdir === "function") {
+    await adapter.rmdir(normalized, true);
+    return;
+  }
+  if (adapter && typeof adapter.remove === "function") {
+    await adapter.remove(normalized);
+    return;
+  }
+  if (adapter && typeof adapter.rmdir === "function") {
+    await adapter.rmdir(normalized, true);
+    return;
+  }
+  throw new Error("Adapter base path unavailable");
+}
+
+/**
+ * Ensure a folder (and every missing ancestor) exists via the Vault API alone —
+ * mobile-safe (no Node). Each ancestor is created segment-by-segment, skipping
+ * those that already exist and tolerating "already exists" races, so a note
+ * write never fails because a mid-level folder was missing (#142).
+ */
+export async function ensureVaultFolder(app: App, folderPath: string): Promise<void> {
+  const normalized = normalizePath(normalizeVaultPath(String(folderPath ?? "")));
+  if (!normalized || normalized === "/" || normalized === ".") return;
+
+  const segments = normalized.split("/").filter(Boolean);
+  let current = "";
+  for (const segment of segments) {
+    current = current ? `${current}/${segment}` : segment;
+    const node = app.vault.getAbstractFileByPath(current);
+    if (node instanceof TFolder) continue;
+    if (node instanceof TFile) {
+      throw new Error(`Cannot create folder "${current}": a file with that name already exists`);
+    }
+    try {
+      await app.vault.createFolder(current);
+    } catch (err) {
+      // Tolerate a concurrent create: only rethrow if the folder truly isn't there.
+      const after = app.vault.getAbstractFileByPath(current);
+      if (!(after instanceof TFolder)) {
+        throw err;
+      }
+    }
+  }
 }
 
 /**

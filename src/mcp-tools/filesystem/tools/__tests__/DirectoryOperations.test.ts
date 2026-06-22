@@ -36,6 +36,8 @@ jest.mock("../../utils", () => ({
   listAdapterDirectory: jest.fn(async () => ({ files: [], folders: [] })),
   resolveAdapterPath: jest.fn(() => null),
   statAdapterPath: jest.fn(async () => null),
+  renameAdapterPath: jest.fn(async () => {}),
+  removeAdapterPath: jest.fn(async () => {}),
 }));
 
 // Mock constants
