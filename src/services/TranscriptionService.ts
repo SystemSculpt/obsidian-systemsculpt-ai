@@ -1093,7 +1093,15 @@ export class TranscriptionService {
             if (contentType.includes('application/x-ndjson')) {
               responseData = this.parseNdjsonText(rawResponseTextFor200, context?.onProgress);
             } else {
-              responseData = JSON.parse(rawResponseTextFor200 || '{}');
+              // A text/plain transcript is allowed by the #211 contract; if the
+              // body is not JSON, keep it as a raw string for the normalizer
+              // instead of throwing an "unparseable JSON" error.
+              const body = rawResponseTextFor200 || "";
+              try {
+                responseData = JSON.parse(body || "{}");
+              } catch {
+                responseData = body;
+              }
             }
           }
         } catch (jsonParseError) {
@@ -1146,7 +1154,7 @@ export class TranscriptionService {
         // concern (timed segments rendered as subtitle cues), kept as-is.
         const isGroqTimestampedSegments =
           this.plugin.settings.transcriptionProvider === "custom" &&
-          this.plugin.settings.customTranscriptionEndpoint.includes("groq.com") &&
+          (this.plugin.settings.customTranscriptionEndpoint || "").toLowerCase().includes("groq.com") &&
           !!context?.timestamped &&
           Array.isArray((responseData as any)?.segments);
 
