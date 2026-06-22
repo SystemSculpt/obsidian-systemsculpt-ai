@@ -95,9 +95,13 @@ export async function displayRecorderTabContent(containerEl: HTMLElement, tabIns
       "Model used for transcription clean-up. Defaults to your chat model — pick a faster or cheaper model here to keep chat on a stronger one."
     )
     .addDropdown((dropdown) => {
+      // Guards the late re-apply below: if the user picks a value while the
+      // model list is still loading, don't clobber their choice.
+      let userSelected = false;
       dropdown.addOption("", "Use chat model (default)");
       dropdown.setValue(plugin.settings.postProcessingModelId || "");
       dropdown.onChange(async (value) => {
+        userSelected = true;
         await plugin.getSettingsManager().updateSettings({ postProcessingModelId: value });
       });
       // Populate the model list asynchronously. The dropdown stays usable with
@@ -110,8 +114,11 @@ export async function displayRecorderTabContent(containerEl: HTMLElement, tabIns
             const label = String(model.name || model.id || "").trim() || model.id;
             dropdown.addOption(model.id, label);
           }
-          // Re-apply the stored selection now that its option exists.
-          dropdown.setValue(plugin.settings.postProcessingModelId || "");
+          // Re-apply the stored selection now that its option exists — unless the
+          // user already chose something while the list was loading.
+          if (!userSelected) {
+            dropdown.setValue(plugin.settings.postProcessingModelId || "");
+          }
         } catch {
           // Leave the default-only dropdown in place.
         }

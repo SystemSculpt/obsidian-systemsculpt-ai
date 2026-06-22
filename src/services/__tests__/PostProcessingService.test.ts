@@ -366,9 +366,14 @@ describe("PostProcessingService", () => {
       const service = PostProcessingService.getInstance(mockPlugin);
       const reason = (service as any).buildModelUnavailableReason(CONFIGURED_MODEL_ID);
 
+      // Names the offending model and points at the provider/model controls.
       expect(reason).toContain(CONFIGURED_MODEL_ID);
-      // The whole point of #97 is that post-processing is no longer SystemSculpt-only.
-      expect(reason).not.toContain("only through SystemSculpt");
+      expect(reason).toMatch(/provider/i);
+      expect(reason).toMatch(/Recorder settings|different post-processing model/i);
+      // A BYOK failure must never be framed as a SystemSculpt licensing problem,
+      // under any wording (#97) — guard the whole concept, not one stale phrase.
+      expect(reason).not.toMatch(/license/i);
+      expect(reason).not.toMatch(/SystemSculpt/i);
     });
 
     it("explains when the license key is missing for the managed model", () => {

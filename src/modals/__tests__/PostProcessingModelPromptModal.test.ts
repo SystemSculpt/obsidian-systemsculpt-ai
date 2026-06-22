@@ -15,6 +15,11 @@ describe("PostProcessingModelPromptModal", () => {
     } as any;
   };
 
+  const footerButtons = (modal: any): HTMLButtonElement[] =>
+    Array.from(modal.modalEl.querySelectorAll("button.ss-button")) as HTMLButtonElement[];
+  const buttonByText = (modal: any, label: string): HTMLButtonElement | undefined =>
+    footerButtons(modal).find((b) => (b.textContent || "").includes(label));
+
   it("frames the issue as SystemSculpt availability without exposing raw model ids", () => {
     const plugin = createPlugin();
 
@@ -31,6 +36,11 @@ describe("PostProcessingModelPromptModal", () => {
     expect(text).toContain("SystemSculpt");
     expect(text).not.toContain("Model id:");
     expect(text).not.toContain("systemsculpt@@systemsculpt/ai-agent");
+
+    // Managed recovery leads with the licensing/account fix.
+    const account = buttonByText(modal, "Open Account");
+    expect(account).toBeTruthy();
+    expect(account?.classList.contains("ss-button--primary")).toBe(true);
   });
 
   it("frames a BYOK model problem around the model/provider, not SystemSculpt licensing", () => {
@@ -51,5 +61,12 @@ describe("PostProcessingModelPromptModal", () => {
     // Must not imply SystemSculpt is silently running clean-up for them.
     expect(text).not.toContain("SystemSculpt still handles transcription clean-up automatically");
     expect(text).not.toContain("Model id:");
+
+    // BYOK recovery leads with Recording settings; the managed account/licensing
+    // path must be absent so a renderActions() regression is caught.
+    const recording = buttonByText(modal, "Open Recording Settings");
+    expect(recording).toBeTruthy();
+    expect(recording?.classList.contains("ss-button--primary")).toBe(true);
+    expect(buttonByText(modal, "Open Account")).toBeUndefined();
   });
 });
