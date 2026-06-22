@@ -9,6 +9,7 @@ import {
 import { FILESYSTEM_LIMITS } from "../constants";
 import { getFilesFromFolder, normalizeVaultPath } from "../utils";
 import { openFileInMainWorkspace } from '../../../utils/workspaceUtils';
+import { resolveFolderNotePath } from "../folderNotes";
 
 /**
  * Management operations for MCP Filesystem tools (workspace, context)
@@ -85,8 +86,16 @@ export class ManagementOperations {
       for (const path of paths) {
         try {
           const normalized = normalizePath(normalizeVaultPath(path));
-          const abstractFile = this.app.vault.getAbstractFileByPath(normalized);
-          
+          // Fall back to the Folder Notes layout (X.md -> X/X.md) so folder
+          // notes can be added to context too (#154).
+          let abstractFile = this.app.vault.getAbstractFileByPath(normalized);
+          if (!abstractFile) {
+            const folderNotePath = resolveFolderNotePath(this.app, normalized);
+            if (folderNotePath) {
+              abstractFile = this.app.vault.getAbstractFileByPath(folderNotePath);
+            }
+          }
+
           if (!abstractFile) {
             results.push({ path, success: false, reason: "File or directory not found" });
             continue;

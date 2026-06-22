@@ -390,6 +390,26 @@ describe("DirectoryOperations", () => {
       // Notice is called but we don't mock it as a spy
       expect(app.fileManager.renameFile).toHaveBeenCalled();
     });
+
+    it("resolves a Folder Notes source path when moving (#154)", async () => {
+      const folder = new TFolder({ path: "Projects" });
+      const folderNote = new TFile({ path: "Projects/Projects.md" });
+      (app.vault.getAbstractFileByPath as jest.Mock).mockImplementation((p: string) => {
+        if (p === "Projects") return folder;
+        if (p === "Projects/Projects.md") return folderNote;
+        return null;
+      });
+
+      const result = await dirOps.moveItems({
+        items: [{ source: "Projects.md", destination: "Archive/Projects.md" }],
+      });
+
+      expect(result.results[0].success).toBe(true);
+      expect(app.fileManager.renameFile).toHaveBeenCalledWith(
+        folderNote,
+        "Archive/Projects.md"
+      );
+    });
   });
 
   describe("trashFiles", () => {
@@ -444,6 +464,21 @@ describe("DirectoryOperations", () => {
       expect(result.results.length).toBe(3);
       expect(result.results.every((r) => r.success)).toBe(true);
       expect(app.vault.adapter.trashLocal).toHaveBeenCalledTimes(3);
+    });
+
+    it("resolves a Folder Notes path when trashing (#154)", async () => {
+      const folder = new TFolder({ path: "Projects" });
+      const folderNote = new TFile({ path: "Projects/Projects.md" });
+      (app.vault.getAbstractFileByPath as jest.Mock).mockImplementation((p: string) => {
+        if (p === "Projects") return folder;
+        if (p === "Projects/Projects.md") return folderNote;
+        return null;
+      });
+
+      const result = await dirOps.trashFiles({ paths: ["Projects.md"] });
+
+      expect(result.results[0].success).toBe(true);
+      expect(app.vault.adapter.trashLocal).toHaveBeenCalledWith("Projects/Projects.md");
     });
   });
 });

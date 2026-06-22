@@ -232,6 +232,29 @@ describe("ManagementOperations", () => {
         expect(app.vault.getAbstractFileByPath).toHaveBeenCalledWith("test.md");
       });
 
+      it("resolves a Folder Notes path when adding to context (#154)", async () => {
+        const folder = new TFolder();
+        (folder as any).path = "Projects";
+        const folderNote = new TFile({ path: "Projects/Projects.md" });
+        (app.vault.getAbstractFileByPath as jest.Mock).mockImplementation((p: string) => {
+          if (p === "Projects") return folder;
+          if (p === "Projects/Projects.md") return folderNote;
+          return null;
+        });
+
+        const result = await mgmtOps.manageContext({
+          action: "add",
+          paths: ["Projects.md"],
+        });
+
+        expect(result.results[0].success).toBe(true);
+        expect(mockDocumentContextManager.addFileToContext).toHaveBeenCalledWith(
+          folderNote,
+          mockContextManager,
+          expect.anything()
+        );
+      });
+
       it("handles file not found", async () => {
         (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(null);
 

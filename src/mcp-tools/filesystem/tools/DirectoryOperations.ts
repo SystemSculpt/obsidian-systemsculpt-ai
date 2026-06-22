@@ -22,6 +22,7 @@ import {
   statAdapterPath,
 } from "../utils";
 import SystemSculptPlugin from "../../../main";
+import { resolveFolderNotePath } from "../folderNotes";
 
 /**
  * Directory operations for MCP Filesystem tools
@@ -397,8 +398,15 @@ export class DirectoryOperations {
           const normalizedSource = normalizePath(normalizeVaultPath(source));
           const normalizedDestination = normalizePath(normalizeVaultPath(destination));
 
-          // Get the source file/folder
-          const sourceFile = this.app.vault.getAbstractFileByPath(normalizedSource);
+          // Get the source file/folder, falling back to the Folder Notes
+          // layout (X.md -> X/X.md) so moves work on folder notes too (#154).
+          let sourceFile = this.app.vault.getAbstractFileByPath(normalizedSource);
+          if (!sourceFile) {
+            const folderNotePath = resolveFolderNotePath(this.app, normalizedSource);
+            if (folderNotePath) {
+              sourceFile = this.app.vault.getAbstractFileByPath(folderNotePath);
+            }
+          }
           if (!sourceFile) {
             throw new Error(`Item not found: ${source}`);
           }
@@ -478,9 +486,16 @@ export class DirectoryOperations {
       return { path, success: true };
     }
     
-    // Get the file/folder
+    // Get the file/folder, falling back to the Folder Notes layout
+    // (X.md -> X/X.md) so trashing works on folder notes too (#154).
     const normalizedPath = normalizePath(normalizeVaultPath(path));
-    const file = this.app.vault.getAbstractFileByPath(normalizedPath);
+    let file = this.app.vault.getAbstractFileByPath(normalizedPath);
+    if (!file) {
+      const folderNotePath = resolveFolderNotePath(this.app, normalizedPath);
+      if (folderNotePath) {
+        file = this.app.vault.getAbstractFileByPath(folderNotePath);
+      }
+    }
     if (!file) {
       throw new Error(`File not found: ${path}`);
     }

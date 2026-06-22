@@ -406,6 +406,24 @@ describe("FileOperations", () => {
       expect(result).toContain("missing/missing.md");
     });
 
+    it("reads a Folder Notes file when handed the folder-style path (#154)", async () => {
+      const folder = new TFolder();
+      (folder as any).path = "Projects";
+      const folderNote = new TFile({ path: "Projects/Projects.md" });
+      (app.vault.getAbstractFileByPath as jest.Mock).mockImplementation((p: string) => {
+        if (p === "Projects") return folder;
+        if (p === "Projects/Projects.md") return folderNote;
+        return null;
+      });
+      (app.vault.read as jest.Mock).mockResolvedValue("folder note body");
+
+      const result = await fileOps.readFiles({ paths: ["Projects.md"] });
+
+      expect(result.files[0].error).toBeUndefined();
+      expect(result.files[0].content).toContain("folder note body");
+      expect(result.files[0].path).toBe("Projects/Projects.md");
+    });
+
     it("applies simple text replacement", async () => {
       const mockFile = new TFile({ path: "test.md" });
       (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(mockFile);

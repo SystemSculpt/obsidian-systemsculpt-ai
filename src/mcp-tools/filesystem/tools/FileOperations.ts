@@ -1,4 +1,4 @@
-import { App, TFile, TFolder, normalizePath } from "obsidian";
+import { App, TFile, normalizePath } from "obsidian";
 import { FileReadMetadata, ReadFilesParams, WriteFileParams, EditFileParams, FileEdit } from "../types";
 import { FILESYSTEM_LIMITS } from "../constants";
 import {
@@ -14,6 +14,7 @@ import {
   statAdapterPath,
 } from "../utils";
 import { assertValidObsidianBasesYaml } from "../../../utils/obsidianBasesYaml";
+import { resolveExistingVaultFile } from "../folderNotes";
 
 /**
  * File operations for MCP Filesystem tools (read, write, edit)
@@ -64,7 +65,7 @@ export class FileOperations {
         continue;
       }
       const normalizedPath = normalizePath(normalizeVaultPath(path));
-      const file = this.app.vault.getAbstractFileByPath(normalizedPath);
+      const file = resolveExistingVaultFile(this.app, normalizedPath);
       if (file instanceof TFile) {
         try {
           const fullContent = await this.app.vault.read(file);
@@ -108,8 +109,8 @@ export class FileOperations {
             hasMore: hasMore
           };
           
-          files.push({ 
-            path: normalizedPath || path, 
+          files.push({
+            path: file.path,
             content: windowContent,
             metadata
           });
@@ -257,32 +258,6 @@ export class FileOperations {
     return { path: normalizedPath || path, success: true };
   }
 
-  private resolveFolderNotePath(requestedPath: string): string | null {
-    // Folder Notes plugin can store folder note "X" at "X/X.md".
-    // We only fall back when the requested path is a markdown file and the
-    // resolved target is unambiguous and already exists.
-    if (!requestedPath.endsWith(".md")) return null;
-
-    const withoutExt = requestedPath.slice(0, -3);
-    if (!withoutExt) return null;
-
-    const lastSlash = withoutExt.lastIndexOf("/");
-    const noteName = lastSlash >= 0 ? withoutExt.slice(lastSlash + 1) : withoutExt;
-    if (!noteName) return null;
-
-    const folderPath = withoutExt;
-    const candidatePath = `${folderPath}/${noteName}.md`;
-    if (candidatePath === requestedPath) return null;
-
-    const folder = this.app.vault.getAbstractFileByPath(folderPath);
-    if (!(folder instanceof TFolder)) return null;
-
-    const candidate = this.app.vault.getAbstractFileByPath(candidatePath);
-    if (!(candidate instanceof TFile)) return null;
-
-    return candidatePath;
-  }
-
   /**
    * Apply file edits using the clean MCP filesystem server approach
    */
@@ -317,19 +292,11 @@ export class FileOperations {
       return diff;
     }
 
-    let resolvedPath = normalizedPath;
-    let abstractFile = this.app.vault.getAbstractFileByPath(resolvedPath);
-    if (!(abstractFile instanceof TFile)) {
-      const fallback = this.resolveFolderNotePath(resolvedPath);
-      if (fallback) {
-        resolvedPath = fallback;
-        abstractFile = this.app.vault.getAbstractFileByPath(resolvedPath);
-      }
-    }
-
-    if (!(abstractFile instanceof TFile)) {
+    const abstractFile = resolveExistingVaultFile(this.app, normalizedPath);
+    if (!abstractFile) {
       throw new Error(`File not found: ${filePath}`);
     }
+    const resolvedPath = abstractFile.path;
 
     const content = normalizeLineEndings(await this.app.vault.read(abstractFile));
 
