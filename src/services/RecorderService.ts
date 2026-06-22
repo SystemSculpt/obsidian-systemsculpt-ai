@@ -260,12 +260,14 @@ export class RecorderService {
     this.storeRecordingInMemory(result);
     const stoppedFromBackground =
       result.stopReason === "background-hidden" || result.stopReason === "background-pagehide";
+    const stoppedByInterruption = result.stopReason === "interrupted";
+    const stoppedUnexpectedly = stoppedFromBackground || stoppedByInterruption;
 
     const fileName = result.filePath.split("/").pop();
     const autoTranscribe = this.plugin.settings.autoTranscribeRecordings;
     if (autoTranscribe) {
-      if (stoppedFromBackground) {
-        this.ui.setStatus("Saved after lock/background interruption. Transcribing captured audio…");
+      if (stoppedUnexpectedly) {
+        this.ui.setStatus("Saved after interruption. Transcribing captured audio…");
       } else {
         this.ui.setStatus("Saved. Transcribing…");
       }
@@ -275,6 +277,11 @@ export class RecorderService {
       if (stoppedFromBackground) {
         this.ui.linger(
           `${savedMessage} iOS stopped recording when the app locked/backgrounded; keep the app unlocked for continuous recording.`,
+          4200
+        );
+      } else if (stoppedByInterruption) {
+        this.ui.linger(
+          `${savedMessage} Recording was interrupted before you stopped it; saved what was captured.`,
           4200
         );
       } else {
