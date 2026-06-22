@@ -116,6 +116,25 @@ export class SystemSculptError extends Error {
 }
 
 /**
+ * Distinguish a genuine managed SystemSculpt license/subscription failure from a
+ * BYOK provider key auth failure. Both surface as a 401, and the custom-provider
+ * path maps its 401 to INVALID_LICENSE too — but only the managed SystemSculpt
+ * API path sets `metadata.licenseFailure`. A BYOK key problem must NOT trigger
+ * the renewal flow or flip `licenseValid`: it points the user at their own
+ * provider key, not a SystemSculpt subscription (#249). LICENSE_EXPIRED is
+ * produced only by the managed path, so it needs no discriminator; only the
+ * overloaded INVALID_LICENSE does.
+ */
+export function isManagedLicenseFailure(error: unknown): error is SystemSculptError {
+  if (!(error instanceof SystemSculptError)) return false;
+  if (error.code === ERROR_CODES.LICENSE_EXPIRED) return true;
+  return (
+    error.code === ERROR_CODES.INVALID_LICENSE &&
+    error.metadata?.licenseFailure === true
+  );
+}
+
+/**
  * Get a user-friendly error message for the given error code
  */
 export function getErrorMessage(code: ErrorCode, model?: string): string {

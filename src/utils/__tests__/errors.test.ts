@@ -7,6 +7,7 @@ import {
   getErrorMessage,
   ErrorCode,
   isAuthFailureMessage,
+  isManagedLicenseFailure,
   isContextOverflowErrorMessage,
 } from "../errors";
 
@@ -137,6 +138,48 @@ describe("errors", () => {
 
     it("does not flag rate limit messages", () => {
       expect(isAuthFailureMessage("Rate limit exceeded")).toBe(false);
+    });
+  });
+
+  describe("isManagedLicenseFailure (#249)", () => {
+    it("matches a managed LICENSE_EXPIRED", () => {
+      const error = new SystemSculptError("expired", ERROR_CODES.LICENSE_EXPIRED, 401, {
+        licenseFailure: true,
+      });
+      expect(isManagedLicenseFailure(error)).toBe(true);
+    });
+
+    it("matches LICENSE_EXPIRED even without the flag (no BYOK path produces it)", () => {
+      const error = new SystemSculptError("expired", ERROR_CODES.LICENSE_EXPIRED, 401, {});
+      expect(isManagedLicenseFailure(error)).toBe(true);
+    });
+
+    it("matches a managed INVALID_LICENSE only when licenseFailure is set", () => {
+      const managed = new SystemSculptError("invalid", ERROR_CODES.INVALID_LICENSE, 401, {
+        licenseFailure: true,
+      });
+      expect(isManagedLicenseFailure(managed)).toBe(true);
+    });
+
+    it("does NOT match a BYOK provider auth failure mapped to INVALID_LICENSE (no licenseFailure)", () => {
+      // The custom-provider path maps a 401 to INVALID_LICENSE with a provider
+      // but never sets licenseFailure — it is the user's own key, not a
+      // SystemSculpt subscription, so it must not read as a renewal problem.
+      const byok = new SystemSculptError("Invalid API key", ERROR_CODES.INVALID_LICENSE, 401, {
+        provider: "openrouter",
+      });
+      expect(isManagedLicenseFailure(byok)).toBe(false);
+    });
+
+    it("does not match non-license codes or non-SystemSculpt errors", () => {
+      expect(
+        isManagedLicenseFailure(
+          new SystemSculptError("boom", ERROR_CODES.STREAM_ERROR, 500, { licenseFailure: true })
+        )
+      ).toBe(false);
+      expect(isManagedLicenseFailure(new Error("plain"))).toBe(false);
+      expect(isManagedLicenseFailure("a string")).toBe(false);
+      expect(isManagedLicenseFailure(null)).toBe(false);
     });
   });
 

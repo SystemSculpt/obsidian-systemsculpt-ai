@@ -8,6 +8,7 @@ import { showPopup } from "../../../core/ui/";
 import { openExternalUrl } from "../../../utils/externalUrl";
 import { uiSetup } from "../uiSetup";
 import { SYSTEMSCULPT_WEBSITE } from "../../../constants/externalServices";
+import { ChatErrorModal } from "../modals/ChatErrorModal";
 
 jest.mock("../../../core/ui/", () => ({ showPopup: jest.fn() }));
 jest.mock("../../../utils/externalUrl", () => ({ openExternalUrl: jest.fn() }));
@@ -18,11 +19,15 @@ jest.mock("../uiSetup", () => ({
     updateToolCompatibilityWarning: jest.fn().mockResolvedValue(undefined),
   },
 }));
+jest.mock("../modals/ChatErrorModal", () => ({
+  ChatErrorModal: jest.fn().mockImplementation((opts) => ({ open: jest.fn(), opts })),
+}));
 
 const showPopupMock = showPopup as jest.Mock;
 const openExternalUrlMock = openExternalUrl as jest.Mock;
 const showBannerMock = uiSetup.showLicenseBanner as jest.Mock;
 const hideBannerMock = uiSetup.hideLicenseBanner as jest.Mock;
+const ChatErrorModalMock = ChatErrorModal as unknown as jest.Mock;
 
 const makeHandleErrorView = (opts: { automation?: boolean; updateSettings: jest.Mock }) => ({
   inputHandler: { isAutomationRequestActive: jest.fn(() => opts.automation === true) },
@@ -88,7 +93,10 @@ describe("ChatView license error handling (#249)", () => {
 
     await ChatView.prototype.handleError.call(
       view as any,
-      new SystemSculptError("invalid", ERROR_CODES.INVALID_LICENSE, 401, {})
+      // A real managed invalid-license carries licenseFailure: true (set by the
+      // SystemSculpt API error path) — that is what distinguishes it from a BYOK
+      // provider key failure, which is also mapped to INVALID_LICENSE (#249).
+      new SystemSculptError("invalid", ERROR_CODES.INVALID_LICENSE, 401, { licenseFailure: true })
     );
 
     expect(showBannerMock).toHaveBeenCalledWith(view, {
@@ -97,6 +105,64 @@ describe("ChatView license error handling (#249)", () => {
     });
     expect(view.openSetupTab).toHaveBeenCalledWith("account");
     expect(openExternalUrlMock).not.toHaveBeenCalled();
+  });
+
+  it("BYOK provider auth failure (INVALID_LICENSE without licenseFailure) is not treated as a SystemSculpt license problem (#249)", async () => {
+    const updateSettings = jest.fn().mockResolvedValue(undefined);
+    // automation: true so the fall-through catch-all skips UI construction.
+    const view = makeHandleErrorView({ automation: true, updateSettings });
+
+    await ChatView.prototype.handleError.call(
+      view as any,
+      new SystemSculptError(
+        "Invalid API key or authentication error.",
+        ERROR_CODES.INVALID_LICENSE,
+        401,
+        { provider: "openrouter", statusCode: 401 }
+      )
+    );
+
+    // Must NOT flip the managed SystemSculpt license or show the renewal banner —
+    // the failing credential is the user's own provider key, not a subscription.
+    expect(updateSettings).not.toHaveBeenCalledWith({ licenseValid: false });
+    expect(showBannerMock).not.toHaveBeenCalled();
+    expect(showPopupMock).not.toHaveBeenCalled();
+    // The catch-all still cleans up the failed assistant turn.
+    expect(view.resetFailedAssistantTurn).toHaveBeenCalled();
+  });
+
+  it("BYOK provider auth failure (non-automation) surfaces the provider-recovery action instead of the renewal flow (#249)", async () => {
+    const updateSettings = jest.fn().mockResolvedValue(undefined);
+    // automation: false so the interactive recovery UI actually runs — this is
+    // the positive half of the #249 fix and must stay permanently guarded.
+    const view = Object.assign(makeHandleErrorView({ automation: false, updateSettings }), {
+      titleForStreamErrorKind: jest.fn(() => "Authentication required"),
+      iconForStreamErrorKind: jest.fn(() => "key-round"),
+    });
+
+    await ChatView.prototype.handleError.call(
+      view as any,
+      new SystemSculptError(
+        "Invalid API key or authentication error.",
+        ERROR_CODES.INVALID_LICENSE,
+        401,
+        { provider: "openrouter", statusCode: 401 }
+      )
+    );
+
+    // Not a managed license problem: no renewal flow, no licenseValid flip.
+    expect(updateSettings).not.toHaveBeenCalledWith({ licenseValid: false });
+    expect(showBannerMock).not.toHaveBeenCalled();
+    expect(showPopupMock).not.toHaveBeenCalled();
+
+    // Instead the auth failure routes the user to reconnect their own provider
+    // key via the "Open Providers" recovery action.
+    expect(ChatErrorModalMock).toHaveBeenCalledTimes(1);
+    const modalArgs = ChatErrorModalMock.mock.calls[0][0];
+    expect(modalArgs.primaryActionLabel).toBe("Open Providers");
+    modalArgs.onPrimaryAction();
+    expect(view.openSetupTab).toHaveBeenCalledWith("providers");
+    expect(ChatErrorModalMock.mock.results[0].value.open).toHaveBeenCalledTimes(1);
   });
 
   it("during automation: heals state and banners but skips the blocking popup", async () => {
@@ -127,6 +193,22 @@ describe("ChatView license error handling (#249)", () => {
     expect(updateSettings).toHaveBeenCalledWith({ licenseValid: false });
     expect(showBannerMock).toHaveBeenCalledWith(view, { expired: true, renewUrl: "https://x/renew" });
     expect(hideBannerMock).not.toHaveBeenCalled();
+  });
+
+  it("refreshCreditsBalance: flags a managed INVALID_LICENSE (licenseFailure) as an invalid-key banner", async () => {
+    const updateSettings = jest.fn().mockResolvedValue(undefined);
+    const getCreditsBalance = jest.fn().mockRejectedValue(
+      new SystemSculptError("invalid", ERROR_CODES.INVALID_LICENSE, 401, {
+        licenseFailure: true,
+        renewUrl: "https://x/renew",
+      })
+    );
+    const view = makeRefreshView({ licenseValid: true, getCreditsBalance, updateSettings });
+
+    await ChatView.prototype.refreshCreditsBalance.call(view as any);
+
+    expect(updateSettings).toHaveBeenCalledWith({ licenseValid: false });
+    expect(showBannerMock).toHaveBeenCalledWith(view, { expired: false, renewUrl: "https://x/renew" });
   });
 
   it("refreshCreditsBalance: heals stale invalid state and hides the banner on a successful fetch", async () => {
