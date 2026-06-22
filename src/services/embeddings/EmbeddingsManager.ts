@@ -25,6 +25,7 @@ import { ContentPreprocessor } from './processing/ContentPreprocessor';
 import { VectorSearch } from './search/VectorSearch';
 import { EmbeddingsIndexFile } from './storage/EmbeddingsIndexFile';
 import { restoreEmbeddingsIndexIfEmpty, writeEmbeddingsIndexSnapshot } from './storage/EmbeddingsPortableIndex';
+import { computeRebuildResume } from './rebuildResume';
 import { buildNamespace, buildNamespacePrefix, namespaceMatchesCurrentVersion, parseNamespace, parseNamespaceDimension } from './utils/namespace';
 import { buildVectorId } from "./utils/vectorId";
 import { normalizeInPlace, toFloat32Array } from './utils/vector';
@@ -165,6 +166,11 @@ export class EmbeddingsManager {
         if (this.plugin.settings.embeddingsEnabled && this.config.autoProcess) {
           this.scheduleAutoProcessing();
         }
+
+        // Resume a rebuild interrupted by a non-license fatal error (e.g. a
+        // sustained rate limit). Covers the autoProcess-OFF case the line above
+        // does not — see #208 / #127.
+        this.resumeInterruptedRebuildIfNeeded();
 
         this.setupFileWatchers();
         this.initialized = true;
@@ -1323,6 +1329,10 @@ export class EmbeddingsManager {
     } else {
       this.vaultCooldownUntil = 0;
       this.cancelScheduledVaultProcessing();
+      // A completed vault run means any interrupted rebuild has finished.
+      if (scope === 'vault') {
+        this.clearRebuildResumeIntent();
+      }
     }
     this.healthMonitor.recordSuccess(scope);
   }
@@ -1384,12 +1394,60 @@ export class EmbeddingsManager {
 
     // Don't auto-reschedule on license errors - user action required
     if (!isLicenseError) {
-      this.scheduleVaultProcessing(retryMs);
+      // Persist resume intent so an interrupted rebuild survives a restart even
+      // when autoProcess is OFF (the in-memory timer below does not). #208/#127.
+      this.persistRebuildResumeIntent(this.vaultCooldownUntil);
+      // force: a manual rebuild (autoProcess OFF) must still retry in-session,
+      // not only after the next launch.
+      this.scheduleVaultProcessing(retryMs, { force: true });
     }
   }
 
-  private scheduleVaultProcessing(delayMs: number): void {
-    if (!this.config.autoProcess) return;
+  /**
+   * Persist that a bulk rebuild was interrupted and the earliest time to resume
+   * it. Read on the next load by resumeInterruptedRebuildIfNeeded. Mirrors the
+   * migration write at initialize() — settings flow through the SettingsManager.
+   */
+  private persistRebuildResumeIntent(retryAt: number): void {
+    void this.plugin.getSettingsManager().updateSettings({
+      embeddingsRebuildPending: true,
+      embeddingsRebuildRetryAt: Math.max(0, retryAt),
+    });
+  }
+
+  /** Clear the persisted resume intent once a rebuild completes cleanly. */
+  private clearRebuildResumeIntent(): void {
+    if (this.plugin.settings.embeddingsRebuildPending !== true) return;
+    void this.plugin.getSettingsManager().updateSettings({
+      embeddingsRebuildPending: false,
+      embeddingsRebuildRetryAt: 0,
+    });
+  }
+
+  /**
+   * Resume a rebuild interrupted by a non-license fatal error after a restart.
+   *
+   * When autoProcess is ON the normal startup scheduleAutoProcessing already
+   * resumes (the durable per-file completeness markers make the re-run skip
+   * finished files), so computeRebuildResume defers to it. When autoProcess is
+   * OFF — the gap behind #127 — this re-arms exactly one forced vault run,
+   * honoring the persisted retry-at so it waits out a server cooldown.
+   */
+  private resumeInterruptedRebuildIfNeeded(): void {
+    const decision = computeRebuildResume({
+      enabled: this.plugin.settings.embeddingsEnabled === true,
+      autoProcess: this.config.autoProcess === true,
+      rebuildPending: this.plugin.settings.embeddingsRebuildPending === true,
+      retryAt: this.plugin.settings.embeddingsRebuildRetryAt ?? 0,
+      now: Date.now(),
+    });
+    if (!decision.resume) return;
+    this.scheduleVaultProcessing(decision.delayMs, { force: true });
+  }
+
+  private scheduleVaultProcessing(delayMs: number, options: { force?: boolean } = {}): void {
+    const force = options.force === true;
+    if (!this.config.autoProcess && !force) return;
     if (!this.plugin.settings.embeddingsEnabled) return;
 
     const now = Date.now();
@@ -1418,13 +1476,13 @@ export class EmbeddingsManager {
       }
 
       if (!this.plugin.settings.embeddingsEnabled) return;
-      if (!this.config.autoProcess) return;
+      if (!this.config.autoProcess && !force) return;
       if (this.processingSuspended) return;
       if (!this.isProviderReady()) return;
 
       const now = Date.now();
       if (now < this.vaultCooldownUntil) {
-        this.scheduleVaultProcessing(this.vaultCooldownUntil - now);
+        this.scheduleVaultProcessing(this.vaultCooldownUntil - now, { force });
         return;
       }
 
