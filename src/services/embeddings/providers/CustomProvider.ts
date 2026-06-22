@@ -1,15 +1,24 @@
 /**
  * CustomProvider - User-configurable embeddings provider
- * 
+ *
  * Supports any OpenAI-compatible embeddings API:
  * - OpenAI API
  * - Azure OpenAI
- * - Local embeddings servers
+ * - Local embeddings servers (LM Studio, Ollama, ...)
  * - Other compatible providers
+ *
+ * Response parsing is delegated to the shared `normalizeEmbeddingsResponse` so
+ * every server shape (OpenAI `data[]`, top-level `{embedding}`/`{embeddings}`,
+ * raw arrays) is handled in one tested place (#153), and every failure is raised
+ * as a typed `EmbeddingsProviderError` so callers can tell a transient 429/5xx
+ * apart from a permanent 4xx (#150, and the retry/backoff slice that follows).
  */
 
 import { httpRequest } from '../../../utils/httpClient';
 import { EmbeddingsProvider, EmbeddingsGenerateOptions } from '../types';
+import { normalizeEmbeddingsResponse } from './embeddingResponse';
+import { EmbeddingsProviderError, isEmbeddingsProviderError } from './ProviderError';
+import { buildHttpErrorOptions } from './providerHttpErrors';
 
 export interface CustomProviderConfig {
   endpoint: string;
@@ -25,7 +34,7 @@ export class CustomProvider implements EmbeddingsProvider {
   readonly supportsModels = true;
   public readonly model: string | undefined;
   public expectedDimension: number | undefined;
-  
+
   private readonly maxBatchSize: number;
   private readonly headers: Record<string, string>;
   private readonly isOllamaStyle: boolean;
@@ -36,7 +45,7 @@ export class CustomProvider implements EmbeddingsProvider {
       'Content-Type': 'application/json',
       ...config.headers
     };
-    
+
     if (config.apiKey) {
       this.headers['Authorization'] = `Bearer ${config.apiKey}`;
     }
@@ -65,59 +74,10 @@ export class CustomProvider implements EmbeddingsProvider {
       return this.generateEmbeddingsInBatches(texts, options?.inputType);
     }
 
-    try {
-      if (this.isOllamaStyle) {
-        return this.processOllamaParallel(texts, endpoint, model, options);
-      } else {
-        // OpenAI-compatible batch embeddings
-        const response = await httpRequest({
-          url: endpoint,
-          method: 'POST',
-          headers: this.headers,
-          body: JSON.stringify({
-            input: texts,
-            model,
-            encoding_format: 'float',
-            input_type: options?.inputType === 'query' ? 'query' : 'document'
-          })
-        });
-
-        if (!response.status || response.status !== 200) {
-          const errorMessage = await this.parseErrorResponse(response as any);
-          throw new Error(`Custom API error ${response.status}: ${errorMessage}`);
-        }
-
-        const data = response.json ?? JSON.parse(response.text || '{}');
-        
-        // Handle OpenAI-style response
-        if (data.data && Array.isArray(data.data)) {
-          const embeddings = data.data
-            .sort((a: any, b: any) => a.index - b.index)
-            .map((item: any) => item.embedding);
-          
-          const sample = embeddings[0];
-          const dim = Array.isArray(sample) ? sample.length : undefined;
-          if (typeof dim === 'number' && dim > 0) {
-            this.expectedDimension = dim;
-          }
-          
-          return embeddings;
-        }
-        
-        // Handle direct array response
-        if (Array.isArray(data) && data.length > 0 && Array.isArray(data[0])) {
-          const dim = data[0].length;
-          if (typeof dim === 'number' && dim > 0) {
-            this.expectedDimension = dim;
-          }
-          return data;
-        }
-
-        throw new Error('Unsupported response format from custom endpoint');
-      }
-    } catch (error) {
-      throw error;
+    if (this.isOllamaStyle) {
+      return this.processOllamaParallel(texts, endpoint, model, options);
     }
+    return this.processOpenAiBatch(texts, endpoint, model, options);
   }
 
   async validateConfiguration(): Promise<boolean> {
@@ -148,16 +108,59 @@ export class CustomProvider implements EmbeddingsProvider {
       'text-embedding-004',
       'text-embedding-004-multilingual'
     ];
-    
+
     if (this.config.model && !commonModels.includes(this.config.model)) {
       return [this.config.model, ...commonModels];
     }
-    
+
     return commonModels;
   }
 
   getMaxBatchSize(): number {
     return this.maxBatchSize;
+  }
+
+  /** OpenAI-compatible batch embeddings (one request for the whole batch). */
+  private async processOpenAiBatch(
+    texts: string[],
+    endpoint: string,
+    model: string,
+    options?: EmbeddingsGenerateOptions
+  ): Promise<number[][]> {
+    let response;
+    try {
+      response = await httpRequest({
+        url: endpoint,
+        method: 'POST',
+        headers: this.headers,
+        body: JSON.stringify({
+          input: texts,
+          model,
+          encoding_format: 'float',
+          input_type: options?.inputType === 'query' ? 'query' : 'document'
+        })
+      });
+    } catch (error) {
+      throw this.toNetworkError(error, endpoint);
+    }
+
+    if (!response.status || response.status !== 200) {
+      throw await this.toHttpError(response, endpoint);
+    }
+
+    const data = response.json ?? this.safeParseJson(response.text);
+    const vectors = normalizeEmbeddingsResponse(data);
+    if (!vectors) {
+      throw new EmbeddingsProviderError('Unsupported response format from custom endpoint', {
+        code: 'UNEXPECTED_RESPONSE',
+        providerId: this.id,
+        endpoint,
+        details: { shape: this.describeShape(data) }
+      });
+    }
+
+    this.recordDimension(vectors);
+    return vectors;
   }
 
   private async generateEmbeddingsInBatches(texts: string[], inputType?: 'document' | 'query'): Promise<number[][]> {
@@ -185,33 +188,37 @@ export class CustomProvider implements EmbeddingsProvider {
     let firstError: Error | null = null;
 
     const processOne = async (index: number, text: string): Promise<void> => {
-      const response = await httpRequest({
-        url: endpoint,
-        method: 'POST',
-        headers: this.headers,
-        body: JSON.stringify({
-          model,
-          prompt: text,
-          task_type: options?.inputType === 'query' ? 'retrieval_query' : 'retrieval_document'
-        })
-      });
+      let response;
+      try {
+        response = await httpRequest({
+          url: endpoint,
+          method: 'POST',
+          headers: this.headers,
+          body: JSON.stringify({
+            model,
+            prompt: text,
+            task_type: options?.inputType === 'query' ? 'retrieval_query' : 'retrieval_document'
+          })
+        });
+      } catch (error) {
+        throw this.toNetworkError(error, endpoint);
+      }
 
       if (!response.status || response.status !== 200) {
-        const errorMessage = await this.parseErrorResponse(response as any);
-        throw new Error(`Custom API error ${response.status}: ${errorMessage}`);
+        throw await this.toHttpError(response, endpoint);
       }
 
-      const data = response.json ?? JSON.parse(response.text || '{}');
-      let embedding: number[] | undefined;
-
-      if (Array.isArray(data?.embedding)) {
-        embedding = data.embedding;
-      } else if (Array.isArray(data?.data) && Array.isArray(data.data[0]?.embedding)) {
-        embedding = data.data[0].embedding;
-      }
+      const data = response.json ?? this.safeParseJson(response.text);
+      const vectors = normalizeEmbeddingsResponse(data);
+      const embedding = vectors?.[0];
 
       if (!embedding) {
-        throw new Error('Unsupported response format from Ollama endpoint');
+        throw new EmbeddingsProviderError('Unsupported response format from Ollama endpoint', {
+          code: 'UNEXPECTED_RESPONSE',
+          providerId: this.id,
+          endpoint,
+          details: { shape: this.describeShape(data) }
+        });
       }
 
       if (!this.expectedDimension && embedding.length > 0) {
@@ -244,15 +251,69 @@ export class CustomProvider implements EmbeddingsProvider {
     return results.sort((a, b) => a.index - b.index).map(r => r.embedding);
   }
 
+  /** Adopt the observed dimension from the first vector for downstream validation. */
+  private recordDimension(vectors: number[][]): void {
+    const dim = vectors[0]?.length;
+    if (typeof dim === 'number' && dim > 0) {
+      this.expectedDimension = dim;
+    }
+  }
+
+  /** Build a typed error for a non-200 HTTP response, preserving the legacy message. */
+  private async toHttpError(response: any, endpoint: string): Promise<EmbeddingsProviderError> {
+    const errorMessage = await this.parseErrorResponse(response);
+    return new EmbeddingsProviderError(
+      `Custom API error ${response.status}: ${errorMessage}`,
+      buildHttpErrorOptions({
+        status: response.status || 0,
+        headers: response.headers,
+        providerId: this.id,
+        endpoint,
+        details: { body: errorMessage.slice(0, 500) }
+      })
+    );
+  }
+
+  /** Wrap a transport-level failure as a transient NETWORK_ERROR (never double-wrap). */
+  private toNetworkError(error: unknown, endpoint: string): EmbeddingsProviderError {
+    if (isEmbeddingsProviderError(error)) {
+      return error;
+    }
+    const message = error instanceof Error ? error.message : String(error);
+    return new EmbeddingsProviderError(message, {
+      code: 'NETWORK_ERROR',
+      transient: true,
+      providerId: this.id,
+      endpoint,
+      cause: error
+    });
+  }
+
+  private safeParseJson(text?: string): unknown {
+    try {
+      return JSON.parse(text || '{}');
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** A compact, non-sensitive description of a response shape for error diagnostics. */
+  private describeShape(data: unknown): string {
+    if (data == null) return String(data);
+    if (Array.isArray(data)) return `array[${data.length}]`;
+    if (typeof data === 'object') return `object{${Object.keys(data as object).join(',')}}`;
+    return typeof data;
+  }
+
   private async parseErrorResponse(response: any): Promise<string> {
     try {
       const errorData = JSON.parse(response.text);
-      
+
       // Common error formats
       if (errorData.error?.message) return errorData.error.message;
       if (errorData.message) return errorData.message;
       if (errorData.detail) return errorData.detail;
-      
+
       return response.text;
     } catch {
       return response.text || 'Unknown error';
