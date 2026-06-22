@@ -211,6 +211,10 @@ export class RecorderUIManager {
     ]);
   }
 
+  // Stop must be one tap. The first tap latches `stopRequested` and disables
+  // the button; any further taps are ignored here so a laggy webview that
+  // delivers several taps before the disabled state paints can't fire stop
+  // more than once (#148). Reset by open(): the next recording stops in one tap.
   private requestStop(): void {
     if (this.stopRequested) return;
     this.stopRequested = true;
