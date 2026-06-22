@@ -16,12 +16,14 @@ SystemSculpt AI adds AI chat, meeting transcription, semantic search, and agent 
 - Select custom system prompts from vault markdown files per conversation.
 - Use built-in vault tools to read, search, edit, move, and organize notes.
 - Filter models by favorites in the model selection modal.
+- Bring your own Claude (Anthropic) and Gemini (Google) keys with native API support, alongside OpenAI, xAI, and OpenRouter.
+- Run entirely on your own provider key — BYOK chat never hits a SystemSculpt license wall.
 - Set up local Pi providers from the Providers tab, including clearer Ollama guidance.
 - Use the redesigned Studio canvas foundation for much larger graph workspaces.
 - Generate images from a Studio image node: pick the model, aspect ratio, image size, seed, and batch count.
 - Recover from streaming failures with clearer chat error notices and disconnect controls.
-- Find semantically similar notes with embeddings.
-- Record audio and transcribe notes.
+- Find semantically similar notes with embeddings, backed by a portable index that survives Obsidian Sync and vault restore.
+- Record audio and transcribe notes, including self-hosted Whisper and a separate post-processing model.
 - Run capture-folder workflow automations.
 
 ## Quick start
