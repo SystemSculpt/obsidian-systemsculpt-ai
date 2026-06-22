@@ -1,6 +1,11 @@
 import { App } from "obsidian";
+import { logError } from "../../utils/errorHandling";
 
-export type RecorderStopReason = "manual" | "background-hidden" | "background-pagehide";
+export type RecorderStopReason =
+  | "manual"
+  | "background-hidden"
+  | "background-pagehide"
+  | "interrupted";
 
 export interface MicrophoneRecorderOptions {
   mimeType: string;
@@ -33,6 +38,7 @@ export class MicrophoneRecorder {
   private micStream: MediaStream | null = null;
   private mediaRecorder: MediaRecorder | null = null;
   private chunks: Blob[] = [];
+  private outputPath: string | null = null;
 
   private deviceChangeListener: ((this: MediaDevices, ev: Event) => any) | null = null;
   private micTrackEndListener: (() => void) | null = null;
@@ -62,6 +68,7 @@ export class MicrophoneRecorder {
 
     this.state = "starting";
     this.chunks = [];
+    this.outputPath = outputPath;
     this.stopReason = "manual";
     this.wakeLockHintShown = false;
 
@@ -76,6 +83,20 @@ export class MicrophoneRecorder {
       };
       this.mediaRecorder.onstop = async () => {
         await this.finalizeRecording(outputPath);
+      };
+      this.mediaRecorder.onerror = (event: Event) => {
+        // iOS can revoke the mic track when the screen locks and surface it as a
+        // MediaRecorder "error" rather than a clean visibilitychange/onstop.
+        // Without this handler the in-progress recording is dropped silently
+        // (#162). Treat any error while recording as an interruption so the
+        // captured chunks are still flushed to disk.
+        if (this.state !== "recording") return;
+        logError(
+          "MicrophoneRecorder",
+          "Recording interrupted by MediaRecorder error",
+          (event as { error?: unknown })?.error ?? event
+        );
+        this.stop("interrupted");
       };
 
       this.mediaRecorder.start(800);
@@ -106,6 +127,8 @@ export class MicrophoneRecorder {
     this.stopReason = reason;
     if (reason === "manual") {
       this.onStatus("Processing recording...");
+    } else if (reason === "interrupted") {
+      this.onStatus("Recording interrupted. Saving captured audio...");
     } else {
       this.onStatus("App moved to background. Saving captured audio...");
     }
@@ -240,8 +263,19 @@ export class MicrophoneRecorder {
       this.swapMicStream(next);
       this.onStatus("Microphone reconnected");
     } catch (error) {
-      this.onError(new Error(`Microphone lost: ${error instanceof Error ? error.message : String(error)}`));
-      this.stop("manual");
+      // A lock/background transition can end the mic track and then block
+      // re-acquisition (getUserMedia is unavailable while the page is hidden).
+      // Preserve the background classification so the captured audio is saved
+      // and flagged, instead of being treated as a hard failure (#162).
+      const hiddenNow = typeof document !== "undefined" && document.hidden;
+      if (hiddenNow) {
+        this.stop("background-hidden");
+      } else {
+        this.onError(
+          new Error(`Microphone lost: ${error instanceof Error ? error.message : String(error)}`)
+        );
+        this.stop("manual");
+      }
     } finally {
       this.refreshingMic = false;
     }
@@ -360,6 +394,10 @@ export class MicrophoneRecorder {
   }
 
   private async finalizeRecording(outputPath?: string): Promise<void> {
+    // Fall back to the path captured at start() so paths that finalize without
+    // re-passing it (stop()'s already-inactive branch, the onerror path) still
+    // persist the buffered audio rather than silently dropping it (#162).
+    const targetPath = outputPath ?? this.outputPath ?? undefined;
     try {
       if (this.chunks.length === 0) {
         if (this.stopReason !== "manual") {
@@ -369,15 +407,25 @@ export class MicrophoneRecorder {
       }
 
       const blob = new Blob(this.chunks, { type: this.mimeType });
-      if (outputPath) {
+      if (targetPath) {
         const arrayBuffer = await blob.arrayBuffer();
-        await this.app.vault.adapter.writeBinary(outputPath, arrayBuffer);
+        await this.app.vault.adapter.writeBinary(targetPath, arrayBuffer);
         if (this.stopReason === "manual") {
           this.onStatus("Recording saved");
+        } else if (this.stopReason === "interrupted") {
+          this.onStatus("Recording saved after interruption");
         } else {
           this.onStatus("Recording saved after app lock/background");
         }
-        this.onComplete(outputPath, blob, this.stopReason);
+        this.onComplete(targetPath, blob, this.stopReason);
+      } else {
+        // Defensive: outputPath is set on start(), so this should be
+        // unreachable. Surface it rather than dropping captured audio silently.
+        logError(
+          "MicrophoneRecorder",
+          "finalizeRecording reached without a target path; captured audio not saved",
+          { stopReason: this.stopReason }
+        );
       }
     } catch (error) {
       this.onError(new Error(`Save failed: ${error instanceof Error ? error.message : String(error)}`));

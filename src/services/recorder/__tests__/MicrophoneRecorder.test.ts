@@ -18,10 +18,12 @@ const flushPromises = async (): Promise<void> => {
 
 class MockMediaRecorder {
   public static isTypeSupported = jest.fn(() => true);
+  public static instances: MockMediaRecorder[] = [];
 
   public state: "inactive" | "recording" = "inactive";
   public ondataavailable: ((event: { data: Blob }) => void) | null = null;
   public onstop: (() => void) | null = null;
+  public onerror: ((event: { error?: unknown }) => void) | null = null;
   public requestData = jest.fn(() => {
     if (this.state !== "recording") return;
     if (this.ondataavailable) {
@@ -38,7 +40,18 @@ class MockMediaRecorder {
     this.onstop?.();
   });
 
-  public constructor(_stream: MediaStream, _options?: { mimeType?: string }) {}
+  /**
+   * Simulate the device revoking the mic (e.g. iOS lock): a real MediaRecorder
+   * fires "error" and transitions to "inactive" without a clean onstop.
+   */
+  public emitError = (error?: unknown): void => {
+    this.state = "inactive";
+    this.onerror?.({ error });
+  };
+
+  public constructor(_stream: MediaStream, _options?: { mimeType?: string }) {
+    MockMediaRecorder.instances.push(this);
+  }
 }
 
 const createTrack = (): MockTrack => ({
@@ -64,6 +77,7 @@ describe("MicrophoneRecorder", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     hiddenValue = false;
+    MockMediaRecorder.instances = [];
     Object.defineProperty(document, "hidden", {
       configurable: true,
       get: () => hiddenValue,
@@ -167,6 +181,100 @@ describe("MicrophoneRecorder", () => {
       expect.any(Blob),
       "background-pagehide"
     );
+  });
+
+  it("flushes and saves captured audio when the recorder errors mid-recording (#162)", async () => {
+    const track = createTrack();
+    const stream = createStream(track);
+    Object.defineProperty(globalThis.navigator, "mediaDevices", {
+      configurable: true,
+      value: {
+        getUserMedia: jest.fn().mockResolvedValue(stream),
+        addEventListener: jest.fn(),
+        removeEventListener: jest.fn(),
+      },
+    });
+
+    const app = new App();
+    (app.vault.adapter as any).writeBinary = jest.fn().mockResolvedValue(undefined);
+    const onComplete = jest.fn();
+    const onError = jest.fn();
+
+    const recorder = new MicrophoneRecorder(app, {
+      mimeType: "audio/webm;codecs=opus",
+      extension: "webm",
+      onError,
+      onStatus: jest.fn(),
+      onComplete,
+    });
+
+    await recorder.start("SystemSculpt/Recordings/interrupted.webm");
+
+    const instance = MockMediaRecorder.instances[MockMediaRecorder.instances.length - 1];
+    // A timeslice chunk lands before the interruption (start(800) on a device).
+    instance.requestData();
+    // iOS lock revokes the track: the recorder errors and goes inactive without
+    // a clean visibilitychange/onstop. The captured audio must still be saved.
+    instance.emitError(new Error("The operation could not be performed"));
+    await flushPromises();
+
+    expect((app.vault.adapter as any).writeBinary).toHaveBeenCalled();
+    expect(onComplete).toHaveBeenCalledWith(
+      "SystemSculpt/Recordings/interrupted.webm",
+      expect.any(Blob),
+      "interrupted"
+    );
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("treats a mic loss while backgrounded as a background save, not a hard failure (#162)", async () => {
+    const track = createTrack();
+    const stream = createStream(track);
+    const getUserMedia = jest
+      .fn()
+      .mockResolvedValueOnce(stream)
+      .mockRejectedValue(new Error("NotAllowedError: getUserMedia blocked while hidden"));
+    Object.defineProperty(globalThis.navigator, "mediaDevices", {
+      configurable: true,
+      value: {
+        getUserMedia,
+        addEventListener: jest.fn(),
+        removeEventListener: jest.fn(),
+      },
+    });
+
+    const app = new App();
+    (app.vault.adapter as any).writeBinary = jest.fn().mockResolvedValue(undefined);
+    const onComplete = jest.fn();
+    const onError = jest.fn();
+
+    const recorder = new MicrophoneRecorder(app, {
+      mimeType: "audio/webm;codecs=opus",
+      extension: "webm",
+      onError,
+      onStatus: jest.fn(),
+      onComplete,
+    });
+
+    await recorder.start("SystemSculpt/Recordings/bg-miclost.webm");
+    const instance = MockMediaRecorder.instances[MockMediaRecorder.instances.length - 1];
+    instance.requestData(); // buffer a chunk before the track ends
+
+    // Device locks: the track ends AND the page is hidden, so re-acquisition fails.
+    hiddenValue = true;
+    const endedCall = track.addEventListener.mock.calls.find(([event]) => event === "ended");
+    const endedHandler = endedCall?.[1] as () => void;
+    endedHandler();
+    await flushPromises();
+    await flushPromises();
+
+    expect((app.vault.adapter as any).writeBinary).toHaveBeenCalled();
+    expect(onComplete).toHaveBeenCalledWith(
+      "SystemSculpt/Recordings/bg-miclost.webm",
+      expect.any(Blob),
+      "background-hidden"
+    );
+    expect(onError).not.toHaveBeenCalled();
   });
 
   it("acquires wake lock while recording and releases it on cleanup", async () => {
