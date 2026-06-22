@@ -619,6 +619,50 @@ describe("InputHandler hosted tool loop", () => {
     expect(streamAssistantTurn).toHaveBeenCalledTimes(3);
   });
 
+  it("surfaces a toolUse stop with no tool calls instead of stalling silently (#210, #146)", async () => {
+    const { aiService, handler, onError } = createHostedToolLoopHarness();
+
+    // The model signals it wants a tool (stopReason "toolUse") but no tool call
+    // materialised on the message — the #146 continuation-failure shape. The
+    // turn must surface an actionable error, not end silently after one round.
+    const streamAssistantTurn = jest
+      .spyOn(handler as any, "streamAssistantTurn")
+      .mockResolvedValue({
+        messageId: "assistant-tooluse-empty",
+        message: {
+          role: "assistant",
+          content: "Let me read that file for you.",
+          message_id: "assistant-tooluse-empty",
+          tool_calls: [],
+        } as any,
+        messageEl: document.createElement("div"),
+        completed: true,
+        completionState: "completed",
+        stopReason: "toolUse",
+      });
+
+    handler.setValue("Read my note.");
+
+    await expect(
+      handler.submitForAutomation({
+        includeContextFiles: false,
+        approvalMode: "auto-approve",
+        focusAfterSend: false,
+      })
+    ).rejects.toThrow(/tool call/i);
+
+    expect(streamAssistantTurn).toHaveBeenCalledTimes(1);
+    expect(aiService.executeHostedToolCall).not.toHaveBeenCalled();
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(onError.mock.calls[0]?.[0]?.metadata).toEqual(
+      expect.objectContaining({
+        recoverCommittedTurn: true,
+        reason: "tool-use-without-tool-calls",
+        stopReason: "toolUse",
+      })
+    );
+  });
+
   it("keeps the submitted user message and completed tool result when continuation retries are exhausted", async () => {
     const { aiService, handler, messages, onError } = createHostedToolLoopHarness();
 
