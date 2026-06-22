@@ -8,6 +8,7 @@ import { showPopup } from "../../../core/ui/";
 import { openExternalUrl } from "../../../utils/externalUrl";
 import { uiSetup } from "../uiSetup";
 import { SYSTEMSCULPT_WEBSITE } from "../../../constants/externalServices";
+import { ChatErrorModal } from "../modals/ChatErrorModal";
 
 jest.mock("../../../core/ui/", () => ({ showPopup: jest.fn() }));
 jest.mock("../../../utils/externalUrl", () => ({ openExternalUrl: jest.fn() }));
@@ -18,11 +19,15 @@ jest.mock("../uiSetup", () => ({
     updateToolCompatibilityWarning: jest.fn().mockResolvedValue(undefined),
   },
 }));
+jest.mock("../modals/ChatErrorModal", () => ({
+  ChatErrorModal: jest.fn().mockImplementation((opts) => ({ open: jest.fn(), opts })),
+}));
 
 const showPopupMock = showPopup as jest.Mock;
 const openExternalUrlMock = openExternalUrl as jest.Mock;
 const showBannerMock = uiSetup.showLicenseBanner as jest.Mock;
 const hideBannerMock = uiSetup.hideLicenseBanner as jest.Mock;
+const ChatErrorModalMock = ChatErrorModal as unknown as jest.Mock;
 
 const makeHandleErrorView = (opts: { automation?: boolean; updateSettings: jest.Mock }) => ({
   inputHandler: { isAutomationRequestActive: jest.fn(() => opts.automation === true) },
@@ -124,6 +129,40 @@ describe("ChatView license error handling (#249)", () => {
     expect(showPopupMock).not.toHaveBeenCalled();
     // The catch-all still cleans up the failed assistant turn.
     expect(view.resetFailedAssistantTurn).toHaveBeenCalled();
+  });
+
+  it("BYOK provider auth failure (non-automation) surfaces the provider-recovery action instead of the renewal flow (#249)", async () => {
+    const updateSettings = jest.fn().mockResolvedValue(undefined);
+    // automation: false so the interactive recovery UI actually runs — this is
+    // the positive half of the #249 fix and must stay permanently guarded.
+    const view = Object.assign(makeHandleErrorView({ automation: false, updateSettings }), {
+      titleForStreamErrorKind: jest.fn(() => "Authentication required"),
+      iconForStreamErrorKind: jest.fn(() => "key-round"),
+    });
+
+    await ChatView.prototype.handleError.call(
+      view as any,
+      new SystemSculptError(
+        "Invalid API key or authentication error.",
+        ERROR_CODES.INVALID_LICENSE,
+        401,
+        { provider: "openrouter", statusCode: 401 }
+      )
+    );
+
+    // Not a managed license problem: no renewal flow, no licenseValid flip.
+    expect(updateSettings).not.toHaveBeenCalledWith({ licenseValid: false });
+    expect(showBannerMock).not.toHaveBeenCalled();
+    expect(showPopupMock).not.toHaveBeenCalled();
+
+    // Instead the auth failure routes the user to reconnect their own provider
+    // key via the "Open Providers" recovery action.
+    expect(ChatErrorModalMock).toHaveBeenCalledTimes(1);
+    const modalArgs = ChatErrorModalMock.mock.calls[0][0];
+    expect(modalArgs.primaryActionLabel).toBe("Open Providers");
+    modalArgs.onPrimaryAction();
+    expect(view.openSetupTab).toHaveBeenCalledWith("providers");
+    expect(ChatErrorModalMock.mock.results[0].value.open).toHaveBeenCalledTimes(1);
   });
 
   it("during automation: heals state and banners but skips the blocking popup", async () => {
