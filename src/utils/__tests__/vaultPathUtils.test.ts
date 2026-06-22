@@ -81,8 +81,8 @@ describe("joinFilesystemPath", () => {
   });
 
   it("joins posix filesystem bases with vault-relative segments", () => {
-    expect(joinFilesystemPath("/home/user/vault", ".systemsculpt/pi-agent/auth.json")).toBe(
-      "/home/user/vault/.systemsculpt/pi-agent/auth.json",
+    expect(joinFilesystemPath("/srv/obsidian/vault", ".systemsculpt/pi-agent/auth.json")).toBe(
+      "/srv/obsidian/vault/.systemsculpt/pi-agent/auth.json",
     );
   });
 
