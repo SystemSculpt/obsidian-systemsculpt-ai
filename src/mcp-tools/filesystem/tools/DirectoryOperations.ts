@@ -1,12 +1,11 @@
 import { App, TFile, TFolder, normalizePath, Notice } from "obsidian";
-import fs from "node:fs/promises";
-import { 
-  FileInfo, 
-  DirectoryInfo, 
-  CreateDirectoriesParams, 
-  ListDirectoriesParams, 
-  MoveItemsParams, 
-  TrashFilesParams 
+import {
+  FileInfo,
+  DirectoryInfo,
+  CreateDirectoriesParams,
+  ListDirectoriesParams,
+  MoveItemsParams,
+  TrashFilesParams
 } from "../types";
 import { FILESYSTEM_LIMITS } from "../constants";
 import {
@@ -18,7 +17,8 @@ import {
   isHiddenSystemPath,
   ensureAdapterFolder,
   listAdapterDirectory,
-  resolveAdapterPath,
+  renameAdapterPath,
+  removeAdapterPath,
   statAdapterPath,
 } from "../utils";
 import SystemSculptPlugin from "../../../main";
@@ -381,16 +381,12 @@ export class DirectoryOperations {
 
           if (this.shouldUseAdapter(source) || this.shouldUseAdapter(destination)) {
             const adapter: any = this.app.vault.adapter as any;
-            const sourceFull = resolveAdapterPath(adapter, source);
-            const destFull = resolveAdapterPath(adapter, destination);
-            if (!sourceFull || !destFull) {
-              throw new Error("Adapter base path unavailable");
-            }
             const destFolder = destination.split("/").slice(0, -1).join("/");
             if (destFolder) {
               await ensureAdapterFolder(adapter, destFolder);
             }
-            await fs.rename(sourceFull, destFull);
+            // Desktop uses the Node fast-path; mobile renames through the adapter.
+            await renameAdapterPath(adapter, source, destination);
             results.push({ source, destination, success: true });
             continue;
           }
@@ -478,11 +474,8 @@ export class DirectoryOperations {
 
     if (this.shouldUseAdapter(path)) {
       const adapter: any = this.app.vault.adapter as any;
-      const fullPath = resolveAdapterPath(adapter, path);
-      if (!fullPath) {
-        throw new Error("Adapter base path unavailable");
-      }
-      await fs.rm(fullPath, { recursive: true, force: true });
+      // Desktop uses the Node fast-path; mobile removes through the adapter.
+      await removeAdapterPath(adapter, path);
       return { path, success: true };
     }
     

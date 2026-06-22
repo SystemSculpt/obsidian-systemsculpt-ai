@@ -49,7 +49,10 @@ describe("FilesystemAdapter", () => {
     expect(result).toEqual({ ok: true });
   });
 
-  describe("on mobile (no Node runtime, #207)", () => {
+  // Since #142 the filesystem tool graph is pure Vault-API code (no Node), so it
+  // runs on mobile too. The adapter must NOT gate the server off when the
+  // runtime reports mobile — agent file tools must work on a phone.
+  describe("on mobile (no Node runtime, #142)", () => {
     beforeEach(() => {
       jest
         .spyOn(PlatformContext, "get")
@@ -60,30 +63,39 @@ describe("FilesystemAdapter", () => {
       jest.restoreAllMocks();
     });
 
-    it("never constructs the Node-backed filesystem server", () => {
+    it("still constructs the filesystem server (no desktop-only gate)", () => {
       new FilesystemAdapter({} as any, {} as any);
 
-      expect(lastServerInstance).toBeNull();
+      expect(lastServerInstance).not.toBeNull();
     });
 
-    it("degrades listTools to an empty list instead of crashing", async () => {
+    it("delegates listTools to the server instead of degrading", async () => {
       const adapter = new FilesystemAdapter({} as any, {} as any);
+      const server = getLastServerInstance();
+      server.getTools.mockResolvedValue([{ name: "write" }]);
 
-      await expect(adapter.listTools()).resolves.toEqual([]);
+      await expect(adapter.listTools()).resolves.toEqual([{ name: "write" }]);
     });
 
-    it("throws a clear desktop-only error from executeTool", async () => {
+    it("executes tools on mobile instead of throwing a desktop-only error", async () => {
       const adapter = new FilesystemAdapter({} as any, {} as any);
+      const server = getLastServerInstance();
+      server.executeTool.mockResolvedValue({ ok: true });
 
-      await expect(adapter.executeTool("read", { path: "note.md" })).rejects.toThrow(
-        /desktop runtime/i,
-      );
+      await expect(adapter.executeTool("write", { path: "note.md" })).resolves.toEqual({
+        ok: true,
+      });
+      expect(server.executeTool).toHaveBeenCalledWith("write", { path: "note.md" }, undefined);
     });
 
-    it("treats setAllowedPaths as a no-op", () => {
+    it("forwards setAllowedPaths to the server", () => {
       const adapter = new FilesystemAdapter({} as any, {} as any);
+      const server = getLastServerInstance() as unknown as { setAllowedPaths?: jest.Mock };
+      server.setAllowedPaths = jest.fn();
 
-      expect(() => adapter.setAllowedPaths(["/vault"])).not.toThrow();
+      adapter.setAllowedPaths(["/vault"]);
+
+      expect(server.setAllowedPaths).toHaveBeenCalledWith(["/vault"]);
     });
   });
 });

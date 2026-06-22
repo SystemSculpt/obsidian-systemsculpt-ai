@@ -1321,3 +1321,136 @@ describe("normalizeLineEndings additional coverage", () => {
     expect(normalizeLineEndings("\r\n\r\n")).toBe("\n\n");
   });
 });
+
+// Robust folder creation for the agent write path (#142). On mobile a note
+// write must create every missing ancestor through the Vault API alone, never a
+// fragile single `createFolder` whose errors are swallowed.
+describe("ensureVaultFolder", () => {
+  const { ensureVaultFolder } = require("../utils");
+  const { TFolder, TFile } = require("obsidian");
+
+  function makeApp(existing: Record<string, "folder" | "file"> = {}) {
+    const tree = new Map<string, "folder" | "file">(Object.entries(existing));
+    const createFolder = jest.fn(async (p: string) => {
+      if (tree.has(p)) throw new Error(`Folder already exists: ${p}`);
+      tree.set(p, "folder");
+    });
+    const getAbstractFileByPath = jest.fn((p: string) => {
+      const kind = tree.get(p);
+      if (kind === "folder") return new TFolder({ path: p, children: [] });
+      if (kind === "file") return new TFile({ path: p });
+      return null;
+    });
+    return { app: { vault: { getAbstractFileByPath, createFolder } } as any, tree, createFolder };
+  }
+
+  const createdPaths = (createFolder: jest.Mock) => createFolder.mock.calls.map((c) => c[0]);
+
+  it("creates each missing ancestor segment-by-segment", async () => {
+    const { app, createFolder } = makeApp();
+    await ensureVaultFolder(app, "A/B/C");
+    expect(createdPaths(createFolder)).toEqual(["A", "A/B", "A/B/C"]);
+  });
+
+  it("skips ancestors that already exist", async () => {
+    const { app, createFolder } = makeApp({ A: "folder" });
+    await ensureVaultFolder(app, "A/B/C");
+    expect(createdPaths(createFolder)).toEqual(["A/B", "A/B/C"]);
+  });
+
+  it("no-ops when the target folder already exists", async () => {
+    const { app, createFolder } = makeApp({ A: "folder", "A/B": "folder" });
+    await ensureVaultFolder(app, "A/B");
+    expect(createFolder).not.toHaveBeenCalled();
+  });
+
+  it("tolerates a racing create that throws but leaves the folder present", async () => {
+    const { app, tree } = makeApp();
+    (app.vault.createFolder as jest.Mock).mockImplementation(async (p: string) => {
+      tree.set(p, "folder");
+      throw new Error("Folder already exists.");
+    });
+    await expect(ensureVaultFolder(app, "A/B")).resolves.toBeUndefined();
+  });
+
+  it("throws when a file blocks a folder segment", async () => {
+    const { app } = makeApp({ A: "file" });
+    await expect(ensureVaultFolder(app, "A/B")).rejects.toThrow(/file/i);
+  });
+
+  it("no-ops for empty or root paths", async () => {
+    const { app, createFolder } = makeApp();
+    await ensureVaultFolder(app, "");
+    await ensureVaultFolder(app, "/");
+    expect(createFolder).not.toHaveBeenCalled();
+  });
+});
+
+// Mobile move/trash for hidden (.systemsculpt) paths must run through the
+// adapter API — there is no Node `fs` and no base path on a phone (#142).
+describe("renameAdapterPath (mobile, no base path)", () => {
+  const { renameAdapterPath } = require("../utils");
+
+  it("renames via the adapter API using normalized vault paths", async () => {
+    const adapter = { rename: jest.fn(async () => {}) }; // no getBasePath → mobile
+    await renameAdapterPath(adapter, "\\Notes\\a.md", "/Notes/b.md");
+    expect(adapter.rename).toHaveBeenCalledWith("Notes/a.md", "Notes/b.md");
+  });
+
+  it("throws a clear error when the adapter cannot rename", async () => {
+    await expect(renameAdapterPath({}, "a.md", "b.md")).rejects.toThrow(/adapter/i);
+  });
+});
+
+describe("removeAdapterPath (mobile, no base path)", () => {
+  const { removeAdapterPath } = require("../utils");
+
+  it("removes a file via adapter.remove", async () => {
+    const adapter = {
+      stat: jest.fn(async () => ({ type: "file" })),
+      remove: jest.fn(async () => {}),
+      rmdir: jest.fn(async () => {}),
+    };
+    await removeAdapterPath(adapter, "Notes/a.md");
+    expect(adapter.remove).toHaveBeenCalledWith("Notes/a.md");
+    expect(adapter.rmdir).not.toHaveBeenCalled();
+  });
+
+  it("removes a folder via adapter.rmdir(recursive)", async () => {
+    const adapter = {
+      stat: jest.fn(async () => ({ type: "folder" })),
+      remove: jest.fn(async () => {}),
+      rmdir: jest.fn(async () => {}),
+    };
+    await removeAdapterPath(adapter, "Notes/sub");
+    expect(adapter.rmdir).toHaveBeenCalledWith("Notes/sub", true);
+  });
+});
+
+// CapacitorAdapter.mkdir is not recursive, so a missing mid-level folder used to
+// abort the whole create on mobile. ensureAdapterFolder must build each ancestor.
+describe("ensureAdapterFolder (mobile, no base path)", () => {
+  const { ensureAdapterFolder } = require("../utils");
+  const mkdirPaths = (mkdir: jest.Mock) => mkdir.mock.calls.map((c) => c[0]);
+
+  it("creates each missing ancestor segment-by-segment via adapter.mkdir", async () => {
+    const created = new Set<string>();
+    const adapter = {
+      exists: jest.fn(async (p: string) => created.has(p)),
+      mkdir: jest.fn(async (p: string) => {
+        created.add(p);
+      }),
+    };
+    await ensureAdapterFolder(adapter, "A/B/C");
+    expect(mkdirPaths(adapter.mkdir as jest.Mock)).toEqual(["A", "A/B", "A/B/C"]);
+  });
+
+  it("skips ancestors that already exist", async () => {
+    const adapter = {
+      exists: jest.fn(async (p: string) => p === "A"),
+      mkdir: jest.fn(async () => {}),
+    };
+    await ensureAdapterFolder(adapter, "A/B");
+    expect(mkdirPaths(adapter.mkdir as jest.Mock)).toEqual(["A/B"]);
+  });
+});

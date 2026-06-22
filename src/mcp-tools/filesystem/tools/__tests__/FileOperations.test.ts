@@ -23,6 +23,7 @@ jest.mock("../../utils", () => ({
   createSimpleDiff: jest.fn((original, modified, path) => `diff for ${path}`),
   isHiddenSystemPath: jest.fn(() => false),
   ensureAdapterFolder: jest.fn(async () => {}),
+  ensureVaultFolder: jest.fn(async () => {}),
   adapterPathExists: jest.fn(async () => false),
   readAdapterText: jest.fn(async () => ""),
   writeAdapterText: jest.fn(async () => {}),
@@ -269,8 +270,12 @@ describe("FileOperations", () => {
       expect(result.path).toBe("new.md");
     });
 
-    it("creates parent directories when createDirs is true", async () => {
+    it("creates parent directories via ensureVaultFolder when createDirs is true", async () => {
+      // Robust, mobile-safe nested folder creation (#142): writeFile must
+      // delegate to ensureVaultFolder, not the fragile inline createFolder whose
+      // errors were swallowed.
       (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(null);
+      const { ensureVaultFolder } = require("../../utils");
 
       await fileOps.writeFile({
         path: "parent/child/file.md",
@@ -278,7 +283,8 @@ describe("FileOperations", () => {
         createDirs: true,
       } as any);
 
-      expect(app.vault.createFolder).toHaveBeenCalledWith("parent/child");
+      expect(ensureVaultFolder).toHaveBeenCalledWith(app, "parent/child");
+      expect(app.vault.create).toHaveBeenCalledWith("parent/child/file.md", "hello");
     });
 
     it("overwrites existing file by default", async () => {
