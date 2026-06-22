@@ -23,6 +23,8 @@ import { CustomProvider } from './providers/CustomProvider';
 import { EmbeddingsProcessor } from './processing/EmbeddingsProcessor';
 import { ContentPreprocessor } from './processing/ContentPreprocessor';
 import { VectorSearch } from './search/VectorSearch';
+import { EmbeddingsIndexFile } from './storage/EmbeddingsIndexFile';
+import { restoreEmbeddingsIndexIfEmpty, writeEmbeddingsIndexSnapshot } from './storage/EmbeddingsPortableIndex';
 import { buildNamespace, buildNamespacePrefix, namespaceMatchesCurrentVersion, parseNamespace, parseNamespaceDimension } from './utils/namespace';
 import { buildVectorId } from "./utils/vectorId";
 import { normalizeInPlace, toFloat32Array } from './utils/vector';
@@ -99,6 +101,8 @@ export class EmbeddingsManager {
   private vaultCooldownUntil: number = 0;
   private scheduledVaultRun: ReturnType<typeof setTimeout> | null = null;
   private scheduledVaultRunAt: number | null = null;
+  private portableIndexFile: EmbeddingsIndexFile | null = null;
+  private portableIndexSnapshotTimer: ReturnType<typeof setTimeout> | null = null;
   private queryCooldownUntil: number = 0;
   private lastDimensionNoticeAt: number = 0;
   private failedFiles: Map<string, FailedEmbeddingFile> = new Map();
@@ -138,6 +142,10 @@ export class EmbeddingsManager {
     this.initializationPromise = (async () => {
       try {
         await this.storage.initialize();
+        // Restore from the synced vault snapshot before the legacy-DB migration,
+        // so a portable index wins over stale per-device legacy data on a fresh
+        // device. No-op when the local store already has vectors.
+        await this.restorePortableIndexIfEmpty();
         await this.migrateEmbeddingsStorageIfNeeded();
         await this.storage.loadEmbeddings();
 
@@ -249,6 +257,71 @@ export class EmbeddingsManager {
     try {
       await this.plugin.getSettingsManager().updateSettings({ embeddingsVectorFormatVersion: CURRENT_FORMAT_VERSION });
     } catch {}
+  }
+
+  private isPortableIndexEnabled(): boolean {
+    // Default on: undefined settings (older configs) opt in.
+    return this.plugin.settings.embeddingsPortableIndex !== false;
+  }
+
+  private getPortableIndexFile(): EmbeddingsIndexFile | null {
+    const adapter = this.app?.vault?.adapter;
+    if (!adapter) return null;
+    if (!this.portableIndexFile) {
+      this.portableIndexFile = new EmbeddingsIndexFile(adapter);
+    }
+    return this.portableIndexFile;
+  }
+
+  /**
+   * Restore the embedding index from the synced vault snapshot when the local
+   * IndexedDB store is empty (fresh device / wiped store). Best-effort: a
+   * missing, corrupt, or partially-synced snapshot must never block startup.
+   */
+  private async restorePortableIndexIfEmpty(): Promise<void> {
+    if (!this.isPortableIndexEnabled()) return;
+    const file = this.getPortableIndexFile();
+    if (!file) return;
+    try {
+      const result = await restoreEmbeddingsIndexIfEmpty({ store: this.storage, file });
+      if (result.restored) {
+        try {
+          new Notice(
+            `SystemSculpt restored ${result.imported} embeddings from the synced vault index.`,
+            5000,
+          );
+        } catch {}
+      }
+    } catch {
+      // Best-effort restore; fall through to normal (re)embedding.
+    }
+  }
+
+  /**
+   * Debounce a portable snapshot write after embeddings change, so a burst of
+   * processing collapses into a single vault write.
+   */
+  private schedulePortableIndexSnapshot(delayMs = 5000): void {
+    if (!this.isPortableIndexEnabled()) return;
+    if (!this.app?.vault?.adapter) return;
+    if (this.portableIndexSnapshotTimer) {
+      try { clearTimeout(this.portableIndexSnapshotTimer); } catch {}
+    }
+    this.portableIndexSnapshotTimer = setTimeout(() => {
+      this.portableIndexSnapshotTimer = null;
+      void this.writePortableIndexSnapshot();
+    }, delayMs);
+  }
+
+  private async writePortableIndexSnapshot(): Promise<void> {
+    if (!this.isPortableIndexEnabled()) return;
+    const file = this.getPortableIndexFile();
+    if (!file) return;
+    try {
+      await writeEmbeddingsIndexSnapshot({ store: this.storage, file });
+    } catch {
+      // Best-effort: a snapshot write must never disrupt embedding.
+    }
   }
 
   /**
@@ -391,6 +464,10 @@ export class EmbeddingsManager {
       }
 
       this.handleProcessingSuccess('vault');
+
+      // Persist a portable snapshot so the freshly-embedded index survives a
+      // device move via Obsidian Sync/backup.
+      this.schedulePortableIndexSnapshot();
 
       // If the provider signaled a model change, schedule a follow-up refresh (respect autoProcess)
       if ((this.provider as any).lastModelChanged === true) {
@@ -1161,6 +1238,10 @@ export class EmbeddingsManager {
   cleanup(): void {
     this.unregisterWatchers();
     this.processor.cleanup();
+    if (this.portableIndexSnapshotTimer) {
+      try { clearTimeout(this.portableIndexSnapshotTimer); } catch {}
+      this.portableIndexSnapshotTimer = null;
+    }
   }
 
   /** Public: Describe the active namespace components */

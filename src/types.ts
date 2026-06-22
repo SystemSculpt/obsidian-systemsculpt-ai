@@ -411,6 +411,12 @@ export interface SystemSculptSettings {
   embeddingsRateLimitPerMinute?: number; // Maximum requests per minute
   /** Quiet period after edits before re-embedding on modify events (ms) */
   embeddingsQuietPeriodMs?: number;
+  /**
+   * When true (default), persist a portable copy of the embedding index into the
+   * synced vault (`.systemsculpt/embeddings/`) so Obsidian Sync/backup restores
+   * it on a new device instead of re-embedding the whole vault.
+   */
+  embeddingsPortableIndex?: boolean;
   // Embeddings search behavior settings removed; use internal defaults
   
   /**
@@ -663,6 +669,7 @@ Raw transcript:`,
   embeddingsBatchSize: 20, // Optimized batch size for parallel processing
   embeddingsRateLimitPerMinute: 50, // Default rate limiting
   embeddingsQuietPeriodMs: 1200,
+  embeddingsPortableIndex: true,
   // Search behavior defaults removed; handled internally
   
   /**
