@@ -666,6 +666,7 @@
 }
 
 .systemsculpt-chat-model-modal-option {
+  position: relative;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   gap: 12px;
@@ -784,6 +785,85 @@
 .systemsculpt-chat-model-modal-pill.is-setup-required {
   border-color: color-mix(in srgb, var(--text-warning, var(--interactive-accent)) 40%, var(--background-modifier-border) 60%);
   color: var(--text-warning, var(--interactive-accent));
+}
+
+/* Favorites (restored for #210): a favorites-only filter chip in the search row
+   and a per-row star toggle that pins models to the top of their section. */
+.systemsculpt-chat-model-modal-favorites-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  padding: 4px 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    color 140ms ease,
+    border-color 140ms ease,
+    background 140ms ease;
+}
+
+.systemsculpt-chat-model-modal-favorites-toggle:hover,
+.systemsculpt-chat-model-modal-favorites-toggle:focus-visible {
+  color: var(--text-normal);
+  border-color: color-mix(in srgb, var(--interactive-accent) 40%, var(--background-modifier-border) 60%);
+}
+
+.systemsculpt-chat-model-modal-favorites-toggle.is-active {
+  color: var(--interactive-accent);
+  border-color: color-mix(in srgb, var(--interactive-accent) 52%, var(--background-modifier-border) 48%);
+  background: color-mix(in srgb, var(--interactive-accent) 12%, var(--background-primary) 88%);
+}
+
+.systemsculpt-chat-model-modal-favorites-toggle-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.systemsculpt-chat-model-modal-option-favorite {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    color 140ms ease,
+    background 140ms ease,
+    opacity 140ms ease;
+}
+
+/* Reveal the star on row hover/focus, and keep it visible whenever favorited. */
+.systemsculpt-chat-model-modal-option:hover .systemsculpt-chat-model-modal-option-favorite,
+.systemsculpt-chat-model-modal-option.is-active .systemsculpt-chat-model-modal-option-favorite,
+.systemsculpt-chat-model-modal-option-favorite:focus-visible,
+.systemsculpt-chat-model-modal-option-favorite.is-favorite {
+  opacity: 1;
+}
+
+.systemsculpt-chat-model-modal-option-favorite:hover {
+  color: var(--text-normal);
+  background: color-mix(in srgb, var(--background-modifier-hover) 80%, var(--background-primary) 20%);
+}
+
+.systemsculpt-chat-model-modal-option-favorite.is-favorite {
+  color: var(--color-yellow, #e0af00);
 }
 
 .systemsculpt-chat-model-modal-empty {
