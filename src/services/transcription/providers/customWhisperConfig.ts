@@ -39,8 +39,8 @@ function isLocalHost(hostname: string): boolean {
   return (
     host === "localhost" ||
     host === "::1" ||
-    host === "127.0.0.1" ||
-    host.startsWith("127.") ||
+    // 127.0.0.0/8 loopback — match only dotted-quad IPv4, not "127.example.com".
+    /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host) ||
     host.endsWith(".local")
   );
 }

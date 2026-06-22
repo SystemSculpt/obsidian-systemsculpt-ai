@@ -60,6 +60,18 @@ describe("validateCustomWhisperConfig", () => {
     expect(result.warnings.some((w) => /API key/i.test(w))).toBe(false);
   });
 
+  it("treats a 127.x.x.x address as local but not a domain that merely starts with 127.", () => {
+    const loopback = validateCustomWhisperConfig({
+      endpoint: "http://127.0.0.53:9000/v1/audio/transcriptions",
+    });
+    expect(loopback.warnings.some((w) => /unencrypted/i.test(w))).toBe(false);
+
+    const spoof = validateCustomWhisperConfig({
+      endpoint: "http://127.example.com/v1/audio/transcriptions",
+    });
+    expect(spoof.warnings.some((w) => /unencrypted/i.test(w))).toBe(true);
+  });
+
   it("does not warn about a missing key for localhost", () => {
     const result = validateCustomWhisperConfig({
       endpoint: "http://localhost:9000/v1/audio/transcriptions",
