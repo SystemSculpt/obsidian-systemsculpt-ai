@@ -12,6 +12,11 @@ import { EmbeddingVector } from '../types';
 import { buildNamespaceWithSchema, normalizeModelForNamespace, parseNamespace } from '../utils/namespace';
 import { buildVectorId } from "../utils/vectorId";
 import { normalizeInPlace, toFloat32Array, VectorLike } from '../utils/vector';
+import {
+  deserializeEmbeddingsIndex,
+  serializeEmbeddingsIndex,
+  type SerializedEmbeddingsIndex,
+} from './EmbeddingsIndexSerialization';
 
 const LEGACY_DB_NAME = "SystemSculptEmbeddings";
 const DB_VERSION = 10;
@@ -1072,6 +1077,28 @@ export class EmbeddingsStorage {
       this.vectorsArrayCache = Array.from(this.cache.values());
     }
     return this.vectorsArrayCache;
+  }
+
+  /**
+   * Serialize every stored vector into a portable, versioned envelope that can
+   * live in the synced vault (so Obsidian Sync/backup restores it on a new
+   * device). Records are device-independent — no remapping needed on import.
+   */
+  async exportAll(): Promise<SerializedEmbeddingsIndex> {
+    const vectors = await this.getAllVectors();
+    return serializeEmbeddingsIndex(vectors, { createdAt: Date.now() });
+  }
+
+  /**
+   * Import a portable envelope into the store. Malformed records and unknown
+   * formats are dropped by the deserializer, so this never throws on a partially
+   * synced or corrupt snapshot.
+   */
+  async importAll(index: SerializedEmbeddingsIndex): Promise<{ imported: number }> {
+    const vectors = deserializeEmbeddingsIndex(index);
+    if (vectors.length === 0) return { imported: 0 };
+    await this.storeVectors(vectors);
+    return { imported: vectors.length };
   }
 
   async getVectorsByNamespacePrefix(prefix: string): Promise<EmbeddingVector[]> {
