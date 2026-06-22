@@ -23,6 +23,11 @@ import { buildVectorId } from "../utils/vectorId";
 import { normalizeInPlace, toFloat32Array } from '../utils/vector';
 import { DEFAULT_EMBEDDING_DIMENSION } from '../../../constants/embeddings';
 import { ContentPreprocessor, PreparedChunk } from "./ContentPreprocessor";
+import {
+  withProviderRetry,
+  type EmbeddingsRetryOptions,
+  type EmbeddingsRetryDeps,
+} from "./embeddingsRetry";
 import { tokenCounter } from '../../../utils/TokenCounter';
 import { errorLogger } from '../../../utils/errorLogger';
 import { EmbeddingsProviderError, isEmbeddingsProviderError } from '../providers/ProviderError';
@@ -31,6 +36,10 @@ export interface ProcessorConfig {
   batchSize: number;
   maxConcurrency: number;
   rateLimitPerMinute?: number;
+  /** Backoff policy for retrying transient provider errors (defaults applied if omitted). */
+  retry?: EmbeddingsRetryOptions;
+  /** Injected retry dependencies (sleep/random/onRetry) — primarily for tests. */
+  retryDeps?: EmbeddingsRetryDeps;
 }
 
 type PendingChunkWork = {
@@ -714,7 +723,33 @@ export class EmbeddingsProcessor {
     if (this.cancelled) return texts.map(() => null);
 
     try {
-      const embeddings = await this.provider.generateEmbeddings(texts, { inputType: "document", batchMetadata: metadata });
+      // Retry transient provider errors (notably 429 rate limits, which neither
+      // provider retries) with backoff before letting the error reach
+      // handleBatchError — which would otherwise cancel the whole run on the
+      // first 429 (the #127 "bulk rebuild stalls on rate limit" behavior).
+      const embeddings = await withProviderRetry(
+        () => this.provider.generateEmbeddings(texts, { inputType: "document", batchMetadata: metadata }),
+        this.config.retry,
+        {
+          ...this.config.retryDeps,
+          onRetry: this.config.retryDeps?.onRetry ?? ((info) => {
+            errorLogger.warn(
+              `Embeddings request ${info.error.code}; retry ${info.attempt} in ${info.delayMs}ms`,
+              {
+                source: "EmbeddingsProcessor",
+                method: "generateEmbeddingsWithHtmlForbiddenIsolation",
+                providerId: this.provider.id,
+                metadata: {
+                  attempt: info.attempt,
+                  delayMs: info.delayMs,
+                  code: info.error.code,
+                  status: info.error.status,
+                },
+              }
+            );
+          }),
+        }
+      );
       if (embeddings.length !== texts.length) {
         throw new Error(`Embedding count mismatch: expected ${texts.length}, got ${embeddings.length}`);
       }
