@@ -6,7 +6,7 @@ import { ChatStorageService } from "./ChatStorageService";
 import { ScrollManagerService } from "./ScrollManagerService";
 import type SystemSculptPlugin from "../../main";
 import { showPopup, showAlert } from "../../core/ui/";
-import { SystemSculptError, isContextOverflowErrorMessage, ERROR_CODES } from "../../utils/errors";
+import { SystemSculptError, isContextOverflowErrorMessage, ERROR_CODES, isManagedLicenseFailure } from "../../utils/errors";
 import { SYSTEMSCULPT_WEBSITE } from "../../constants/externalServices";
 import { openExternalUrl } from "../../utils/externalUrl";
 import { MessageRenderer } from "./MessageRenderer";
@@ -718,22 +718,25 @@ export class ChatView extends ItemView {
       return;
     }
 
-    if (
-      error instanceof SystemSculptError &&
-      (error.code === ERROR_CODES.LICENSE_EXPIRED || error.code === ERROR_CODES.INVALID_LICENSE)
-    ) {
+    // Capture (rather than narrow `error` in the `if`) so the later
+    // `error instanceof SystemSculptError` checks still see the union type — a
+    // non-license SystemSculptError must keep flowing to the branches below.
+    const managedLicenseError = isManagedLicenseFailure(error) ? error : null;
+    if (managedLicenseError) {
       await this.resetFailedAssistantTurn();
 
-      // A rejected license is no longer valid — reflect that across the UI so
-      // gating, the account panel, and the banner all agree (#249).
+      // A rejected managed license is no longer valid — reflect that across the
+      // UI so gating, the account panel, and the banner all agree (#249). A BYOK
+      // provider key failure is excluded by isManagedLicenseFailure, so it never
+      // wrongly flips licenseValid or shows the renewal flow.
       try {
         await this.plugin.getSettingsManager().updateSettings({ licenseValid: false });
       } catch {}
 
-      const expired = error.code === ERROR_CODES.LICENSE_EXPIRED;
+      const expired = managedLicenseError.code === ERROR_CODES.LICENSE_EXPIRED;
       const renewUrl =
-        typeof error.metadata?.renewUrl === "string" && error.metadata.renewUrl
-          ? String(error.metadata.renewUrl)
+        typeof managedLicenseError.metadata?.renewUrl === "string" && managedLicenseError.metadata.renewUrl
+          ? String(managedLicenseError.metadata.renewUrl)
           : SYSTEMSCULPT_WEBSITE.LICENSE;
 
       try {
@@ -953,10 +956,7 @@ export class ChatView extends ItemView {
         // Proactively surface an expired/invalid license on chat open — before
         // the user sends a doomed message (#249). Other errors stay silent
         // (the balance UI is a convenience panel).
-        if (
-          creditsError instanceof SystemSculptError &&
-          (creditsError.code === ERROR_CODES.LICENSE_EXPIRED || creditsError.code === ERROR_CODES.INVALID_LICENSE)
-        ) {
+        if (isManagedLicenseFailure(creditsError)) {
           try {
             await this.plugin.getSettingsManager().updateSettings({ licenseValid: false });
           } catch {}

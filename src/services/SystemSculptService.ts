@@ -836,7 +836,10 @@ export class SystemSculptService {
       throw new SystemSculptError(
         "License key required to fetch credits balance.",
         ERROR_CODES.INVALID_LICENSE,
-        401
+        401,
+        // A missing managed license key is a genuine SystemSculpt license
+        // failure (not a BYOK provider key issue), so tag it accordingly (#249).
+        { licenseFailure: true }
       );
     }
 
