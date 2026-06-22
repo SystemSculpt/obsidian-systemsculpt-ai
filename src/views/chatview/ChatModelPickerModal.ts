@@ -1,19 +1,29 @@
 import { App, Notice, setIcon } from "obsidian";
 import { StandardModal } from "../../core/ui/modals/standard/StandardModal";
+import { ensureCanonicalId } from "../../utils/modelUtils";
 import { rankStudioFuzzyItems } from "../studio/StudioFuzzySearch";
 import {
+  applyChatModelFavorites,
   compareChatModelPickerOptions,
   getChatModelPickerSearchText,
   getChatModelPickerSectionLabel,
+  type ChatModelFavoritesState,
   type ChatModelPickerOption,
   type ChatModelSetupTab,
 } from "./modelSelection";
+
+type ChatModelPickerFavoritesConfig = {
+  state: ChatModelFavoritesState;
+  onToggleFavorite: (modelValue: string) => Promise<void> | void;
+  onToggleFavoritesOnly: () => Promise<boolean> | boolean;
+};
 
 type ChatModelPickerModalOptions = {
   currentValue: string;
   loadOptions: () => Promise<ChatModelPickerOption[]>;
   onSelect: (value: string) => Promise<void> | void;
   onOpenSetup: (targetTab: ChatModelSetupTab) => void;
+  favorites?: ChatModelPickerFavoritesConfig;
 };
 
 export class ChatModelPickerModal extends StandardModal {
@@ -23,14 +33,25 @@ export class ChatModelPickerModal extends StandardModal {
   private listEl!: HTMLElement;
   private emptyStateEl!: HTMLElement;
   private summaryValueEl!: HTMLElement;
+  private favoritesToggleEl: HTMLButtonElement | null = null;
+  private rawOptions: ChatModelPickerOption[] = [];
   private loadedOptions: ChatModelPickerOption[] = [];
   private filteredOptions: ChatModelPickerOption[] = [];
+  private readonly favoritesState: { favoriteIds: Set<string>; showFavoritesOnly: boolean; favoritesFirst: boolean };
   private selectedIndex = -1;
   private loading = false;
 
   constructor(app: App, options: ChatModelPickerModalOptions) {
     super(app);
     this.options = options;
+    // Own a mutable copy of the favorite ids so per-row toggles update the modal
+    // optimistically without mutating the caller's set. Absent favorites config
+    // (the default picker) collapses to an identity reorder via applyChatModelFavorites.
+    this.favoritesState = {
+      favoriteIds: new Set(options.favorites?.state.favoriteIds ?? []),
+      showFavoritesOnly: options.favorites?.state.showFavoritesOnly ?? false,
+      favoritesFirst: options.favorites?.state.favoritesFirst ?? false,
+    };
     this.setSize("medium");
     this.modalEl.addClass("systemsculpt-chat-model-picker-modal");
   }
@@ -53,8 +74,10 @@ export class ChatModelPickerModal extends StandardModal {
 
   onClose(): void {
     super.onClose();
+    this.rawOptions = [];
     this.loadedOptions = [];
     this.filteredOptions = [];
+    this.favoritesToggleEl = null;
   }
 
   private renderShell(): void {
@@ -92,6 +115,29 @@ export class ChatModelPickerModal extends StandardModal {
       },
     });
     this.clearButtonEl.style.display = "none";
+
+    if (this.options.favorites) {
+      this.favoritesToggleEl = searchRowEl.createEl("button", {
+        cls: "systemsculpt-chat-model-modal-favorites-toggle",
+        attr: {
+          type: "button",
+          "aria-label": "Show favorites only",
+          "aria-pressed": "false",
+        },
+      });
+      const favoritesIconEl = this.favoritesToggleEl.createSpan({
+        cls: "systemsculpt-chat-model-modal-favorites-toggle-icon",
+      });
+      setIcon(favoritesIconEl, "star");
+      this.favoritesToggleEl.createSpan({
+        cls: "systemsculpt-chat-model-modal-favorites-toggle-label",
+        text: "Favorites",
+      });
+      this.syncFavoritesToggle();
+      this.registerDomEvent(this.favoritesToggleEl, "click", () => {
+        void this.handleToggleFavoritesOnly();
+      });
+    }
 
     this.listEl = bodyEl.createDiv({
       cls: "systemsculpt-chat-model-modal-list",
@@ -181,9 +227,9 @@ export class ChatModelPickerModal extends StandardModal {
   private async reloadOptions(): Promise<void> {
     try {
       const loaded = await this.options.loadOptions();
-      this.loadedOptions = [...loaded].sort(compareChatModelPickerOptions);
+      this.rawOptions = [...loaded];
       this.loading = false;
-      this.applyFilter(this.searchInputEl.value);
+      this.recomputeOptions();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error || "Unknown error");
       this.loading = false;
@@ -191,6 +237,61 @@ export class ChatModelPickerModal extends StandardModal {
         icon: "alert-triangle",
         showRetry: true,
       });
+    }
+  }
+
+  /**
+   * Re-derive the visible list from the raw catalog and the current favorites
+   * state (annotate, favorites-only filter, favorites-first order), then refilter
+   * for the active search query. The single funnel for any favorites change.
+   */
+  private recomputeOptions(): void {
+    this.loadedOptions = applyChatModelFavorites(this.rawOptions, this.favoritesState);
+    this.applyFilter(this.searchInputEl.value);
+  }
+
+  private syncFavoritesToggle(): void {
+    if (!this.favoritesToggleEl) {
+      return;
+    }
+    const active = this.favoritesState.showFavoritesOnly;
+    this.favoritesToggleEl.classList.toggle("is-active", active);
+    this.favoritesToggleEl.setAttribute("aria-pressed", active ? "true" : "false");
+  }
+
+  private async handleToggleFavoritesOnly(): Promise<void> {
+    if (!this.options.favorites) {
+      return;
+    }
+    try {
+      this.favoritesState.showFavoritesOnly = await this.options.favorites.onToggleFavoritesOnly();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error || "Unknown error");
+      new Notice(`Unable to update the favorites filter: ${message}`, 6000);
+      return;
+    }
+    this.syncFavoritesToggle();
+    this.recomputeOptions();
+  }
+
+  private async handleToggleFavorite(option: ChatModelPickerOption): Promise<void> {
+    if (!this.options.favorites) {
+      return;
+    }
+    const canonicalId = ensureCanonicalId(option.value);
+    // Optimistically flip the local set so the star + ordering respond instantly;
+    // recompute re-annotates every row from this set as the source of truth.
+    if (this.favoritesState.favoriteIds.has(canonicalId)) {
+      this.favoritesState.favoriteIds.delete(canonicalId);
+    } else {
+      this.favoritesState.favoriteIds.add(canonicalId);
+    }
+    this.recomputeOptions();
+    try {
+      await this.options.favorites.onToggleFavorite(option.value);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error || "Unknown error");
+      new Notice(`Unable to update favorites: ${message}`, 6000);
     }
   }
 
@@ -301,6 +402,24 @@ export class ChatModelPickerModal extends StandardModal {
         metaEl.createDiv({
           cls: "systemsculpt-chat-model-modal-pill is-setup-required",
           text: "Needs setup",
+        });
+      }
+
+      if (this.options.favorites) {
+        const favoriteButtonEl = optionEl.createEl("button", {
+          cls: "systemsculpt-chat-model-modal-option-favorite",
+          attr: {
+            type: "button",
+            "aria-label": option.isFavorite ? "Remove from favorites" : "Add to favorites",
+            "aria-pressed": option.isFavorite ? "true" : "false",
+          },
+        });
+        favoriteButtonEl.classList.toggle("is-favorite", Boolean(option.isFavorite));
+        setIcon(favoriteButtonEl, "star");
+        // Starring is a row-local action — it must not bubble up to select the model.
+        this.registerDomEvent(favoriteButtonEl, "click", (event: Event) => {
+          event.stopPropagation();
+          void this.handleToggleFavorite(option);
         });
       }
 

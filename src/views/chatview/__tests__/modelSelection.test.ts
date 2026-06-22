@@ -11,10 +11,13 @@ import {
 } from "../../../services/pi-native/PiTextAuth";
 import { hasManagedSystemSculptAccess } from "../../../services/systemsculpt/ManagedSystemSculptModel";
 import {
+  applyChatModelFavorites,
   loadChatModelPickerOptions,
   openChatModelSetupTab,
   promptChatModelSetup,
+  type ChatModelPickerOption,
 } from "../modelSelection";
+import { ensureCanonicalId } from "../../../utils/modelUtils";
 
 jest.mock("../../../core/ui/", () => ({
   showPopup: jest.fn(),
@@ -239,5 +242,134 @@ describe("chat model setup helpers", () => {
     } as any;
 
     await expect(loadChatModelPickerOptions(plugin)).resolves.toEqual([]);
+  });
+});
+
+describe("applyChatModelFavorites", () => {
+  const favOption = (
+    overrides: Partial<ChatModelPickerOption> &
+      Pick<ChatModelPickerOption, "value" | "label" | "section" | "providerLabel">,
+  ): ChatModelPickerOption => ({
+    value: overrides.value,
+    label: overrides.label,
+    description: overrides.description,
+    badge: overrides.badge,
+    keywords: overrides.keywords,
+    providerAuthenticated: overrides.providerAuthenticated ?? true,
+    providerId: overrides.providerId || overrides.providerLabel.toLowerCase(),
+    providerLabel: overrides.providerLabel,
+    contextLabel: overrides.contextLabel,
+    section: overrides.section,
+    icon: overrides.icon || "cloud",
+    isFavorite: overrides.isFavorite,
+    setupSurface: overrides.setupSurface || {
+      targetTab: "providers",
+      title: "Finish setup",
+      primaryButton: "Open Providers",
+    },
+  });
+
+  // Section order (systemsculpt -> pi -> local) and, within pi, provider label
+  // order put Claude (Anthropic) ahead of GPT-4.1 (OpenAI) by default — so
+  // favoriting GPT-4.1 is what proves favorites-first actually reorders.
+  const baseOptions = (): ChatModelPickerOption[] => [
+    favOption({
+      value: "systemsculpt@@systemsculpt/ai-agent",
+      label: "SystemSculpt Agent",
+      section: "systemsculpt",
+      providerLabel: "SystemSculpt",
+      providerId: "systemsculpt",
+      icon: "sparkles",
+    }),
+    favOption({
+      value: "anthropic@@claude-3-7-sonnet",
+      label: "Claude 3.7 Sonnet",
+      section: "pi",
+      providerLabel: "Anthropic",
+      providerId: "anthropic",
+    }),
+    favOption({
+      value: "openai@@gpt-4.1",
+      label: "GPT-4.1",
+      section: "pi",
+      providerLabel: "OpenAI",
+      providerId: "openai",
+    }),
+    favOption({
+      value: "local-ollama@@qwen2.5-coder",
+      label: "Qwen 2.5 Coder",
+      section: "local",
+      providerLabel: "Ollama",
+      providerId: "ollama",
+      icon: "hard-drive",
+    }),
+  ];
+
+  it("annotates isFavorite by canonical id and preserves default order when no flags are set", () => {
+    const favoriteIds = new Set([ensureCanonicalId("openai@@gpt-4.1")]);
+    const result = applyChatModelFavorites(baseOptions(), {
+      favoriteIds,
+      showFavoritesOnly: false,
+      favoritesFirst: false,
+    });
+
+    expect(result.map((option) => option.value)).toEqual([
+      "systemsculpt@@systemsculpt/ai-agent",
+      "anthropic@@claude-3-7-sonnet",
+      "openai@@gpt-4.1",
+      "local-ollama@@qwen2.5-coder",
+    ]);
+    expect(result.find((option) => option.value === "openai@@gpt-4.1")?.isFavorite).toBe(true);
+    expect(result.find((option) => option.value === "anthropic@@claude-3-7-sonnet")?.isFavorite).toBe(
+      false,
+    );
+  });
+
+  it("bubbles favorites to the top of their section when favoritesFirst is enabled", () => {
+    const favoriteIds = new Set([ensureCanonicalId("openai@@gpt-4.1")]);
+    const result = applyChatModelFavorites(baseOptions(), {
+      favoriteIds,
+      showFavoritesOnly: false,
+      favoritesFirst: true,
+    });
+
+    // GPT-4.1 (favorited) now leads the Pi section ahead of Claude, while the
+    // section grouping (systemsculpt -> pi -> local) stays intact.
+    expect(result.map((option) => option.value)).toEqual([
+      "systemsculpt@@systemsculpt/ai-agent",
+      "openai@@gpt-4.1",
+      "anthropic@@claude-3-7-sonnet",
+      "local-ollama@@qwen2.5-coder",
+    ]);
+  });
+
+  it("filters to favorites only, always keeping managed SystemSculpt models visible", () => {
+    const favoriteIds = new Set([ensureCanonicalId("openai@@gpt-4.1")]);
+    const result = applyChatModelFavorites(baseOptions(), {
+      favoriteIds,
+      showFavoritesOnly: true,
+      favoritesFirst: true,
+    });
+
+    expect(result.map((option) => option.value)).toEqual([
+      "systemsculpt@@systemsculpt/ai-agent",
+      "openai@@gpt-4.1",
+    ]);
+  });
+
+  it("is an identity reorder with no favorites (back-compat with the default picker)", () => {
+    const result = applyChatModelFavorites(baseOptions(), {
+      favoriteIds: new Set<string>(),
+      showFavoritesOnly: false,
+      favoritesFirst: false,
+    });
+
+    expect(result.map((option) => option.value)).toEqual([
+      "systemsculpt@@systemsculpt/ai-agent",
+      "anthropic@@claude-3-7-sonnet",
+      "openai@@gpt-4.1",
+      "local-ollama@@qwen2.5-coder",
+    ]);
+    expect(result.every((option) => option.isFavorite === false)).toBe(true);
   });
 });

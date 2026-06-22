@@ -1,6 +1,8 @@
 import { App, Component, setIcon } from "obsidian";
 import type SystemSculptPlugin from "../../main";
 import type { SystemSculptModel } from "../../types/llm";
+import { FavoritesService } from "../../services/FavoritesService";
+import { ensureCanonicalId } from "../../utils/modelUtils";
 import {
   buildPiTextProviderSetupMessage,
 } from "../../services/pi-native/PiTextAuth";
@@ -90,6 +92,31 @@ export class ChatModelSelectionController extends Component {
     return await this.modelPickerOptionsPromise;
   }
 
+  private getFavoritesService(): FavoritesService {
+    return FavoritesService.getInstance(this.options.plugin);
+  }
+
+  /**
+   * Toggle a model's favorite state from the picker. Resolves the catalog record
+   * by canonical id and syncs its in-memory `isFavorite` flag to the persisted
+   * truth first, so FavoritesService.toggleFavorite always flips the right way
+   * regardless of any stale flag on the cached record.
+   */
+  private async toggleModelFavorite(modelValue: string): Promise<void> {
+    const favoritesService = this.getFavoritesService();
+    const modelService = this.options.plugin.modelService;
+    const models = modelService?.getModels
+      ? await modelService.getModels().catch(() => [] as SystemSculptModel[])
+      : [];
+    const canonicalId = ensureCanonicalId(modelValue);
+    const model = models.find((candidate) => ensureCanonicalId(candidate.id) === canonicalId);
+    if (!model) {
+      return;
+    }
+    model.isFavorite = favoritesService.getFavoriteIds().has(canonicalId);
+    await favoritesService.toggleFavorite(model);
+  }
+
   public ensureHost(composer: {
     modelSlot?: HTMLElement | null;
     toolbar?: HTMLElement | null;
@@ -175,6 +202,7 @@ export class ChatModelSelectionController extends Component {
 
     this.registerDomEvent(triggerButtonEl, "click", () => {
       triggerButtonEl.setAttribute("aria-expanded", "true");
+      const favoritesService = this.getFavoritesService();
       const modal = new ChatModelPickerModal(this.options.app, {
         currentValue: currentModelId,
         loadOptions: async () => await this.loadOptions(true),
@@ -185,6 +213,17 @@ export class ChatModelSelectionController extends Component {
         },
         onOpenSetup: (tab: ChatModelSetupTab) => {
           this.openSetupTab(tab);
+        },
+        favorites: {
+          state: {
+            favoriteIds: favoritesService.getFavoriteIds(),
+            showFavoritesOnly: favoritesService.getShowFavoritesOnly(),
+            favoritesFirst: favoritesService.getFavoritesFirst(),
+          },
+          onToggleFavorite: async (modelValue: string) => {
+            await this.toggleModelFavorite(modelValue);
+          },
+          onToggleFavoritesOnly: async () => await favoritesService.toggleShowFavoritesOnly(),
         },
       });
       const originalOnClose = modal.onClose.bind(modal);

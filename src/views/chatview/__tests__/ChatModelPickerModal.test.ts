@@ -473,4 +473,157 @@ describe("ChatModelPickerModal", () => {
     ).map((el) => el.textContent?.trim());
     expect(optionTitles).toContain("GPT-4.1");
   });
+
+  it("surfaces favorites: a favorites-only toggle plus per-row stars that reflect state", async () => {
+    const modal = new ChatModelPickerModal(new App(), {
+      currentValue: "anthropic@@claude-3-7-sonnet",
+      loadOptions: async () => [
+        buildOption({
+          value: "anthropic@@claude-3-7-sonnet",
+          label: "Claude 3.7 Sonnet",
+          providerLabel: "Anthropic",
+          providerId: "anthropic",
+          section: "pi",
+        }),
+        buildOption({
+          value: "openai@@gpt-4.1",
+          label: "GPT-4.1",
+          providerLabel: "OpenAI",
+          providerId: "openai",
+          section: "pi",
+        }),
+      ],
+      onSelect: jest.fn(),
+      onOpenSetup: jest.fn(),
+      favorites: {
+        state: {
+          favoriteIds: new Set(["openai@@gpt-4.1"]),
+          showFavoritesOnly: false,
+          favoritesFirst: true,
+        },
+        onToggleFavorite: jest.fn().mockResolvedValue(undefined),
+        onToggleFavoritesOnly: jest.fn().mockResolvedValue(true),
+      },
+    });
+
+    modal.onOpen();
+    await flush();
+
+    expect(
+      modal.contentEl.querySelector(".systemsculpt-chat-model-modal-favorites-toggle"),
+    ).not.toBeNull();
+
+    const gptStar = modal.contentEl.querySelector(
+      '[data-model-value="openai@@gpt-4.1"] .systemsculpt-chat-model-modal-option-favorite',
+    );
+    const claudeStar = modal.contentEl.querySelector(
+      '[data-model-value="anthropic@@claude-3-7-sonnet"] .systemsculpt-chat-model-modal-option-favorite',
+    );
+    expect(gptStar).not.toBeNull();
+    expect(gptStar?.classList.contains("is-favorite")).toBe(true);
+    expect(claudeStar?.classList.contains("is-favorite")).toBe(false);
+  });
+
+  it("toggles a model's favorite when its star is clicked, without selecting the model", async () => {
+    const onSelect = jest.fn();
+    const onToggleFavorite = jest.fn().mockResolvedValue(undefined);
+    const modal = new ChatModelPickerModal(new App(), {
+      currentValue: "anthropic@@claude-3-7-sonnet",
+      loadOptions: async () => [
+        buildOption({
+          value: "anthropic@@claude-3-7-sonnet",
+          label: "Claude 3.7 Sonnet",
+          providerLabel: "Anthropic",
+          providerId: "anthropic",
+          section: "pi",
+        }),
+      ],
+      onSelect,
+      onOpenSetup: jest.fn(),
+      favorites: {
+        state: {
+          favoriteIds: new Set<string>(),
+          showFavoritesOnly: false,
+          favoritesFirst: true,
+        },
+        onToggleFavorite,
+        onToggleFavoritesOnly: jest.fn().mockResolvedValue(false),
+      },
+    });
+
+    modal.onOpen();
+    await flush();
+
+    const star = modal.contentEl.querySelector(
+      '[data-model-value="anthropic@@claude-3-7-sonnet"] .systemsculpt-chat-model-modal-option-favorite',
+    ) as HTMLElement;
+    star.click();
+    await flush();
+
+    expect(onToggleFavorite).toHaveBeenCalledWith("anthropic@@claude-3-7-sonnet");
+    // Optimistic: the star now reflects the favorited state…
+    expect(
+      modal.contentEl
+        .querySelector(
+          '[data-model-value="anthropic@@claude-3-7-sonnet"] .systemsculpt-chat-model-modal-option-favorite',
+        )
+        ?.classList.contains("is-favorite"),
+    ).toBe(true);
+    // …and starring must never double as selecting the model.
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it("filters to favorites (keeping the toggle) when the favorites-only control is activated", async () => {
+    const onToggleFavoritesOnly = jest.fn().mockResolvedValue(true);
+    const modal = new ChatModelPickerModal(new App(), {
+      currentValue: "openai@@gpt-4.1",
+      loadOptions: async () => [
+        buildOption({
+          value: "openai@@gpt-4.1",
+          label: "GPT-4.1",
+          providerLabel: "OpenAI",
+          providerId: "openai",
+          section: "pi",
+        }),
+        buildOption({
+          value: "anthropic@@claude-3-7-sonnet",
+          label: "Claude 3.7 Sonnet",
+          providerLabel: "Anthropic",
+          providerId: "anthropic",
+          section: "pi",
+        }),
+      ],
+      onSelect: jest.fn(),
+      onOpenSetup: jest.fn(),
+      favorites: {
+        state: {
+          favoriteIds: new Set(["openai@@gpt-4.1"]),
+          showFavoritesOnly: false,
+          favoritesFirst: true,
+        },
+        onToggleFavorite: jest.fn().mockResolvedValue(undefined),
+        onToggleFavoritesOnly,
+      },
+    });
+
+    modal.onOpen();
+    await flush();
+
+    expect(
+      modal.contentEl.querySelectorAll(".systemsculpt-chat-model-modal-option").length,
+    ).toBe(2);
+
+    (
+      modal.contentEl.querySelector(
+        ".systemsculpt-chat-model-modal-favorites-toggle",
+      ) as HTMLElement
+    ).click();
+    await flush();
+
+    expect(onToggleFavoritesOnly).toHaveBeenCalled();
+    const remaining = Array.from(
+      modal.contentEl.querySelectorAll(".systemsculpt-chat-model-modal-option"),
+    ).map((el) => (el as HTMLElement).dataset.modelValue);
+    expect(remaining).toEqual(["openai@@gpt-4.1"]);
+  });
 });

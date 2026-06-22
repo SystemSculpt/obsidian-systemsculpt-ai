@@ -49,6 +49,18 @@ export type ChatModelPickerOption = {
   section: ChatModelPickerSection;
   icon: string;
   setupSurface: ChatModelSetupSurface;
+  /** Whether this model is in the user's favorites (annotated by applyChatModelFavorites). */
+  isFavorite?: boolean;
+};
+
+/**
+ * Favorite-model state used to annotate, filter, and order picker options.
+ * `favoriteIds` holds canonical model ids (see FavoritesService.getFavoriteIds).
+ */
+export type ChatModelFavoritesState = {
+  favoriteIds: ReadonlySet<string>;
+  showFavoritesOnly: boolean;
+  favoritesFirst: boolean;
 };
 
 export function getEffectiveChatModelId(
@@ -302,6 +314,58 @@ export function compareChatModelPickerOptions(
   }
 
   return left.label.localeCompare(right.label);
+}
+
+/**
+ * Compare two picker options, bubbling favorites to the top of their section
+ * when `favoritesFirst` is enabled. Section grouping is always preserved first
+ * so the modal's section headers stay contiguous.
+ */
+export function compareChatModelPickerFavorites(
+  left: ChatModelPickerOption,
+  right: ChatModelPickerOption,
+  favoritesFirst: boolean,
+): number {
+  const sectionCompare =
+    getChatModelPickerSectionOrder(left.section) - getChatModelPickerSectionOrder(right.section);
+  if (sectionCompare !== 0) {
+    return sectionCompare;
+  }
+
+  if (favoritesFirst) {
+    const favoriteCompare = Number(Boolean(right.isFavorite)) - Number(Boolean(left.isFavorite));
+    if (favoriteCompare !== 0) {
+      return favoriteCompare;
+    }
+  }
+
+  return compareChatModelPickerOptions(left, right);
+}
+
+/**
+ * Annotate picker options with their favorite state, optionally filter to
+ * favorites-only (managed SystemSculpt models always stay visible), and order
+ * them favorites-first within each section. Pure — callers own the I/O of
+ * reading favorite ids and persisting toggles.
+ */
+export function applyChatModelFavorites(
+  options: ChatModelPickerOption[],
+  state: ChatModelFavoritesState,
+): ChatModelPickerOption[] {
+  const annotated = options.map((option) => ({
+    ...option,
+    isFavorite: state.favoriteIds.has(ensureCanonicalId(option.value)),
+  }));
+
+  const visible = state.showFavoritesOnly
+    ? annotated.filter(
+        (option) => option.isFavorite || isManagedSystemSculptModelId(option.value),
+      )
+    : annotated;
+
+  return visible.sort((left, right) =>
+    compareChatModelPickerFavorites(left, right, state.favoritesFirst),
+  );
 }
 
 export function getChatModelPickerSearchText(option: ChatModelPickerOption): string {
