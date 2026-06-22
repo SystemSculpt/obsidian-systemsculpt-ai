@@ -152,6 +152,41 @@ describe("PiLocalAgentExecutor", () => {
     expect(latestSession().dispose).toHaveBeenCalledTimes(1);
   });
 
+  it("stops the local agent loop after repeated identical failing tool calls (#136, #210)", async () => {
+    const failingArgs = { path: "inbox/note.md", frontmatter: { status: "filed" } };
+    configureNextSession = (session) => {
+      session.setPromptImplementation(async () => {
+        // The model re-issues the same tool call that keeps failing — the
+        // "stuck in agent loop" shape from #136. agent_end is never emitted, so
+        // without a loop guard the turn would never terminate.
+        for (let round = 1; round <= 6; round += 1) {
+          session.emit({
+            type: "tool_execution_start",
+            toolCallId: `call_${round}`,
+            toolName: "edit_file",
+            args: failingArgs,
+          });
+          session.emit({
+            type: "tool_execution_end",
+            toolCallId: `call_${round}`,
+            toolName: "edit_file",
+            isError: true,
+            result: { error: "permission denied" },
+          });
+        }
+      });
+    };
+
+    const generator = streamPiLocalAgentTurn({
+      plugin: createPlugin(),
+      modelId: "openai/gpt-5-mini",
+      messages: [{ role: "user", content: "File my inbox notes.", message_id: "loop_1" } as any],
+    });
+
+    await expect(collectEvents(generator)).rejects.toThrow(/repeated|loop/i);
+    expect(latestSession().abort).toHaveBeenCalled();
+  });
+
   it("reuses an existing Pi session file when provided", async () => {
     configureNextSession = (session) => {
       session.setPromptImplementation(async () => {
