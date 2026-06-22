@@ -2,7 +2,15 @@ import { PostProcessingService } from "../PostProcessingService";
 import { SystemSculptError } from "../../utils/errors";
 import { DEFAULT_SETTINGS } from "../../types";
 
+// The canonical managed SystemSculpt model id. getPostProcessingModelId() only
+// resolves to this as a last-resort fallback now (#97) — it is no longer the
+// hardcoded post-processing model.
 const MANAGED_MODEL_ID = "systemsculpt@@systemsculpt/ai-agent";
+// A BYOK model the user explicitly chose for post-processing.
+const CONFIGURED_MODEL_ID = "openai@@gpt-4";
+// The active chat model (selectedModelId) — the fallback when no dedicated
+// post-processing model is set.
+const CHAT_MODEL_ID = "anthropic@@claude-sonnet-4";
 
 const createMockSculptService = () => ({
   streamMessage: jest.fn(),
@@ -26,9 +34,10 @@ const createMockPlugin = () => ({
   settings: {
     postProcessingEnabled: true,
     postProcessingPrompt: "Process this text",
-    postProcessingModelId: "openai@@gpt-4",
+    // By default the user has chosen a dedicated BYOK post-processing model.
+    postProcessingModelId: CONFIGURED_MODEL_ID,
     postProcessingProviderId: "openai",
-    selectedModelId: "anthropic@@claude-sonnet-4",
+    selectedModelId: CHAT_MODEL_ID,
     useLatestModelEverywhere: false,
     settingsMode: "advanced",
     licenseKey: "valid-license",
@@ -61,17 +70,34 @@ describe("PostProcessingService", () => {
   });
 
   describe("getPostProcessingModelId (private)", () => {
-    it("always returns the managed SystemSculpt model", () => {
+    it("uses the dedicated post-processing model when one is configured (#97)", () => {
       const service = PostProcessingService.getInstance(mockPlugin);
       const modelId = (service as any).getPostProcessingModelId();
 
-      expect(modelId).toBe(MANAGED_MODEL_ID);
+      expect(modelId).toBe(CONFIGURED_MODEL_ID);
     });
 
-    it("ignores legacy post-processing model settings", () => {
-      mockPlugin.settings.postProcessingModelId = "custom-provider@@custom-model";
-      mockPlugin.settings.postProcessingProviderId = "custom-provider";
-      mockPlugin.settings.selectedModelId = "openai@@gpt-4.1";
+    it("falls back to the active chat model when no post-processing model is set", () => {
+      mockPlugin.settings.postProcessingModelId = "";
+
+      const service = PostProcessingService.getInstance(mockPlugin);
+      const modelId = (service as any).getPostProcessingModelId();
+
+      expect(modelId).toBe(CHAT_MODEL_ID);
+    });
+
+    it("treats a blank/whitespace post-processing model as unset", () => {
+      mockPlugin.settings.postProcessingModelId = "   ";
+
+      const service = PostProcessingService.getInstance(mockPlugin);
+      const modelId = (service as any).getPostProcessingModelId();
+
+      expect(modelId).toBe(CHAT_MODEL_ID);
+    });
+
+    it("falls back to the managed model only when neither a post-processing nor chat model exists", () => {
+      mockPlugin.settings.postProcessingModelId = "";
+      mockPlugin.settings.selectedModelId = "";
 
       const service = PostProcessingService.getInstance(mockPlugin);
       const modelId = (service as any).getPostProcessingModelId();
@@ -93,8 +119,32 @@ describe("PostProcessingService", () => {
       expect(mockSculptService.streamMessage).not.toHaveBeenCalled();
     });
 
-    it("returns the original text and opens recovery guidance when managed access is missing", async () => {
+    it("post-processes through a BYOK model without a SystemSculpt license (#97)", async () => {
       const { PostProcessingModelPromptModal } = require("../../modals/PostProcessingModelPromptModal");
+      // BYOK user: no managed access at all.
+      mockPlugin.settings.licenseKey = "";
+      mockPlugin.settings.licenseValid = false;
+      mockSculptService.streamMessage.mockReturnValue(
+        (async function* () {
+          yield { type: "content", text: "clean text" };
+        })()
+      );
+
+      const service = PostProcessingService.getInstance(mockPlugin);
+      await expect(service.processTranscription("raw text")).resolves.toBe("clean text");
+
+      // The dedicated BYOK model routes through the same provider runtime the
+      // chat uses — it must not be blocked behind a managed license.
+      expect(mockSculptService.streamMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ model: CONFIGURED_MODEL_ID })
+      );
+      expect(PostProcessingModelPromptModal).not.toHaveBeenCalled();
+    });
+
+    it("returns the original text and opens recovery guidance only when the managed model is selected without access", async () => {
+      const { PostProcessingModelPromptModal } = require("../../modals/PostProcessingModelPromptModal");
+      // The managed model is selected, but there is no valid license.
+      mockPlugin.settings.postProcessingModelId = MANAGED_MODEL_ID;
       mockPlugin.settings.licenseKey = "";
       mockPlugin.settings.licenseValid = false;
 
@@ -110,7 +160,7 @@ describe("PostProcessingService", () => {
       );
     });
 
-    it("processes text through the managed SystemSculpt model", async () => {
+    it("processes text through the configured post-processing model (#97)", async () => {
       mockSculptService.streamMessage.mockReturnValue(
         (async function* () {
           yield { type: "content", text: "Processed " };
@@ -122,7 +172,7 @@ describe("PostProcessingService", () => {
       await expect(service.processTranscription("original text")).resolves.toBe("Processed text");
       expect(mockSculptService.streamMessage).toHaveBeenCalledWith(
         expect.objectContaining({
-          model: MANAGED_MODEL_ID,
+          model: CONFIGURED_MODEL_ID,
           messages: expect.arrayContaining([
             expect.objectContaining({
               role: "system",
@@ -134,6 +184,21 @@ describe("PostProcessingService", () => {
             }),
           ]),
         })
+      );
+    });
+
+    it("falls back to the chat model when no post-processing model is set", async () => {
+      mockPlugin.settings.postProcessingModelId = "";
+      mockSculptService.streamMessage.mockReturnValue(
+        (async function* () {
+          yield { type: "content", text: "done" };
+        })()
+      );
+
+      const service = PostProcessingService.getInstance(mockPlugin);
+      await expect(service.processTranscription("text")).resolves.toBe("done");
+      expect(mockSculptService.streamMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ model: CHAT_MODEL_ID })
       );
     });
 
@@ -159,7 +224,7 @@ describe("PostProcessingService", () => {
       );
     });
 
-    it("returns the original text when validation says the managed model is unavailable", async () => {
+    it("returns the original text when validation says the model is unavailable", async () => {
       mockPlugin.modelService.validateSpecificModel.mockResolvedValueOnce({
         isAvailable: false,
       });
@@ -236,15 +301,15 @@ describe("PostProcessingService", () => {
   });
 
   describe("ensurePostProcessingModelAvailability (private)", () => {
-    it("resolves when the managed model is available", async () => {
+    it("resolves when the model is available", async () => {
       const service = PostProcessingService.getInstance(mockPlugin);
 
       await expect(
-        (service as any).ensurePostProcessingModelAvailability(MANAGED_MODEL_ID)
+        (service as any).ensurePostProcessingModelAvailability(CONFIGURED_MODEL_ID)
       ).resolves.not.toThrow();
     });
 
-    it("throws a SystemSculptError when the managed model is unavailable", async () => {
+    it("throws a SystemSculptError when the model is unavailable", async () => {
       mockPlugin.modelService.validateSpecificModel.mockResolvedValueOnce({
         isAvailable: false,
       });
@@ -252,11 +317,11 @@ describe("PostProcessingService", () => {
       const service = PostProcessingService.getInstance(mockPlugin);
 
       await expect(
-        (service as any).ensurePostProcessingModelAvailability(MANAGED_MODEL_ID)
+        (service as any).ensurePostProcessingModelAvailability(CONFIGURED_MODEL_ID)
       ).rejects.toThrow(SystemSculptError);
     });
 
-    it("includes the managed model id in error metadata", async () => {
+    it("includes the model id in error metadata", async () => {
       mockPlugin.modelService.validateSpecificModel.mockResolvedValueOnce({
         isAvailable: false,
       });
@@ -264,11 +329,11 @@ describe("PostProcessingService", () => {
       const service = PostProcessingService.getInstance(mockPlugin);
 
       try {
-        await (service as any).ensurePostProcessingModelAvailability(MANAGED_MODEL_ID);
+        await (service as any).ensurePostProcessingModelAvailability(CONFIGURED_MODEL_ID);
         fail("Expected error");
       } catch (error) {
         expect(error).toBeInstanceOf(SystemSculptError);
-        expect((error as SystemSculptError).metadata?.model).toBe(MANAGED_MODEL_ID);
+        expect((error as SystemSculptError).metadata?.model).toBe(CONFIGURED_MODEL_ID);
       }
     });
 
@@ -279,11 +344,11 @@ describe("PostProcessingService", () => {
       const service = PostProcessingService.getInstance(mockPlugin);
 
       await expect(
-        (service as any).ensurePostProcessingModelAvailability(MANAGED_MODEL_ID)
+        (service as any).ensurePostProcessingModelAvailability(CONFIGURED_MODEL_ID)
       ).rejects.toBe(originalError);
     });
 
-    it("wraps validation failures as managed-model unavailability", async () => {
+    it("wraps validation failures as model unavailability", async () => {
       mockPlugin.modelService.validateSpecificModel.mockRejectedValueOnce(
         new Error("Validation failed")
       );
@@ -291,13 +356,22 @@ describe("PostProcessingService", () => {
       const service = PostProcessingService.getInstance(mockPlugin);
 
       await expect(
-        (service as any).ensurePostProcessingModelAvailability(MANAGED_MODEL_ID)
+        (service as any).ensurePostProcessingModelAvailability(CONFIGURED_MODEL_ID)
       ).rejects.toThrow(SystemSculptError);
     });
   });
 
   describe("buildModelUnavailableReason (private)", () => {
-    it("explains when the license key is missing", () => {
+    it("gives model-agnostic guidance for a non-managed (BYOK) model", () => {
+      const service = PostProcessingService.getInstance(mockPlugin);
+      const reason = (service as any).buildModelUnavailableReason(CONFIGURED_MODEL_ID);
+
+      expect(reason).toContain(CONFIGURED_MODEL_ID);
+      // The whole point of #97 is that post-processing is no longer SystemSculpt-only.
+      expect(reason).not.toContain("only through SystemSculpt");
+    });
+
+    it("explains when the license key is missing for the managed model", () => {
       mockPlugin.settings.licenseKey = "";
 
       const service = PostProcessingService.getInstance(mockPlugin);
@@ -307,7 +381,7 @@ describe("PostProcessingService", () => {
       expect(reason).toContain("SystemSculpt");
     });
 
-    it("explains when the license has not been validated", () => {
+    it("explains when the managed license has not been validated", () => {
       mockPlugin.settings.licenseKey = "valid";
       mockPlugin.settings.licenseValid = false;
 
@@ -318,7 +392,7 @@ describe("PostProcessingService", () => {
       expect(reason).toContain("Setup");
     });
 
-    it("returns a generic managed-service reason for runtime failures", () => {
+    it("returns a generic managed-service reason for managed runtime failures", () => {
       const service = PostProcessingService.getInstance(mockPlugin);
       const reason = (service as any).buildModelUnavailableReason(MANAGED_MODEL_ID);
 

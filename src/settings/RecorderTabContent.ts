@@ -76,7 +76,7 @@ export async function displayRecorderTabContent(containerEl: HTMLElement, tabIns
 
   new Setting(containerEl)
     .setName("Enable post-processing")
-    .setDesc("Apply SystemSculpt clean-up after transcription completes.")
+    .setDesc("Clean up the transcription with an LLM after it completes.")
     .addToggle((toggle) => {
       toggle
         .setValue(plugin.settings.postProcessingEnabled)
@@ -85,10 +85,43 @@ export async function displayRecorderTabContent(containerEl: HTMLElement, tabIns
         });
     });
 
+  // #97: a dedicated post-processing model. Clean-up is a cheap, mechanical
+  // task, so users want to run it on a fast/cheap model while keeping a stronger
+  // model for chat. Empty value = "use the chat model" (the PostProcessingService
+  // fallback), which keeps the default behavior and works for BYOK users.
+  new Setting(containerEl)
+    .setName("Post-processing model")
+    .setDesc(
+      "Model used for transcription clean-up. Defaults to your chat model — pick a faster or cheaper model here to keep chat on a stronger one."
+    )
+    .addDropdown((dropdown) => {
+      dropdown.addOption("", "Use chat model (default)");
+      dropdown.setValue(plugin.settings.postProcessingModelId || "");
+      dropdown.onChange(async (value) => {
+        await plugin.getSettingsManager().updateSettings({ postProcessingModelId: value });
+      });
+      // Populate the model list asynchronously. The dropdown stays usable with
+      // the default option while models load, and failures degrade gracefully
+      // (clean-up still runs via the chat model).
+      void (async () => {
+        try {
+          const models = await plugin.modelService.getModels();
+          for (const model of models) {
+            const label = String(model.name || model.id || "").trim() || model.id;
+            dropdown.addOption(model.id, label);
+          }
+          // Re-apply the stored selection now that its option exists.
+          dropdown.setValue(plugin.settings.postProcessingModelId || "");
+        } catch {
+          // Leave the default-only dropdown in place.
+        }
+      })();
+    });
+
   let postProcessingPromptText: HTMLTextAreaElement | null = null;
   new Setting(containerEl)
     .setName("Transcription clean-up prompt")
-    .setDesc("Optional. Adjust the clean-up instructions while SystemSculpt continues to run the managed cleanup step.")
+    .setDesc("Optional. Adjust the instructions used for the transcription clean-up step.")
     .addTextArea((text) => {
       postProcessingPromptText = text.inputEl;
       text
