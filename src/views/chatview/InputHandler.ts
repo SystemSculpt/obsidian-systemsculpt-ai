@@ -388,8 +388,24 @@ export class InputHandler extends Component {
     return renderedMessages.find((messageEl) => messageEl.dataset.messageId === messageId) ?? null;
   }
 
-  private shouldContinueHostedToolLoop(message: ChatMessage, _stopReason?: string): boolean {
+  private shouldContinueHostedToolLoop(message: ChatMessage, stopReason?: string): boolean {
     const toolCalls = Array.isArray(message.tool_calls) ? message.tool_calls : [];
+
+    // The model signalled it wants to use a tool (stopReason "toolUse") but no
+    // tool call materialised on the message — e.g. a provider continuation error
+    // dropped the call. Continuing would re-prompt with nothing to execute, and
+    // returning here would look like the agent silently died after its first
+    // tool call (#146). Surface it as an actionable error, never a silent stall
+    // (#210). The turn cap and empty-completion retries above remain the
+    // backstops for the other terminal paths.
+    if (stopReason === "toolUse" && toolCalls.length === 0) {
+      this.failHostedToolTurn(
+        "The model requested a tool call but none was returned. Stopping to avoid a silent stall — please try again.",
+        502,
+        { reason: "tool-use-without-tool-calls", stopReason }
+      );
+    }
+
     if (toolCalls.length === 0) {
       return false;
     }
