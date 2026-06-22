@@ -34,11 +34,14 @@ export const CUSTOM_WHISPER_CONTRACT =
   "faster-whisper-server compatible endpoints all satisfy this.";
 
 function isLocalHost(hostname: string): boolean {
+  // URL.hostname brackets IPv6 literals (e.g. "[::1]"); compare unbracketed.
+  const host = hostname.replace(/^\[|\]$/g, "");
   return (
-    hostname === "localhost" ||
-    hostname === "127.0.0.1" ||
-    hostname === "::1" ||
-    hostname.endsWith(".local")
+    host === "localhost" ||
+    host === "::1" ||
+    host === "127.0.0.1" ||
+    host.startsWith("127.") ||
+    host.endsWith(".local")
   );
 }
 

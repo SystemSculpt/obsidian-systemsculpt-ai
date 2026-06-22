@@ -13,8 +13,13 @@ jest.mock("../services/PlatformContext", () => ({
 
 function createPlugin(settingsOverrides: Record<string, unknown> = {}) {
   const app = new App();
-  const updateSettings = jest.fn().mockResolvedValue(undefined);
-  const plugin: any = {
+  let plugin: any;
+  // Merge patches into plugin.settings so a re-render reflects the change,
+  // mirroring the real SettingsManager.
+  const updateSettings = jest.fn(async (patch: Record<string, unknown>) => {
+    Object.assign(plugin.settings, patch ?? {});
+  });
+  plugin = {
     app,
     settings: {
       autoTranscribeRecordings: false,
@@ -114,5 +119,38 @@ describe("Recorder settings tab", () => {
 
     const errorNote = container.querySelector(".ss-inline-note-error")?.textContent || "";
     expect(errorNote).toMatch(/required/i);
+  });
+
+  it("switches to custom and reveals the controls when the provider dropdown changes", async () => {
+    const { plugin, updateSettings } = createPlugin({ transcriptionProvider: "systemsculpt" });
+    const { container, tab } = render(plugin);
+
+    await displayRecorderTabContent(container, tab);
+
+    const namesBefore = Array.from(container.querySelectorAll(".setting-item-name")).map((el) =>
+      el.textContent?.trim()
+    );
+    expect(namesBefore).not.toContain("Custom endpoint URL");
+
+    // The provider <select> is the only one carrying a "systemsculpt" option.
+    const providerSelect = Array.from(container.querySelectorAll("select")).find((select) =>
+      Array.from(select.querySelectorAll("option")).some(
+        (opt) => (opt as HTMLOptionElement).value === "systemsculpt"
+      )
+    ) as HTMLSelectElement | undefined;
+    expect(providerSelect).toBeTruthy();
+
+    providerSelect!.value = "custom";
+    providerSelect!.dispatchEvent(new Event("change"));
+
+    // Drain the async onChange (persist + re-render + mic enumerate).
+    for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(updateSettings).toHaveBeenCalledWith({ transcriptionProvider: "custom" });
+    const namesAfter = Array.from(container.querySelectorAll(".setting-item-name")).map((el) =>
+      el.textContent?.trim()
+    );
+    expect(namesAfter).toContain("Custom endpoint URL");
+    expect(namesAfter).toContain("Model name");
   });
 });

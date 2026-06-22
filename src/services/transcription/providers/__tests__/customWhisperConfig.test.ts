@@ -51,6 +51,15 @@ describe("validateCustomWhisperConfig", () => {
     expect(result.warnings.some((w) => /unencrypted/i.test(w))).toBe(false);
   });
 
+  it("treats the IPv6 loopback [::1] as local (URL.hostname is bracketed)", () => {
+    const result = validateCustomWhisperConfig({
+      endpoint: "http://[::1]:9000/v1/audio/transcriptions",
+    });
+    expect(result.ok).toBe(true);
+    expect(result.warnings.some((w) => /unencrypted/i.test(w))).toBe(false);
+    expect(result.warnings.some((w) => /API key/i.test(w))).toBe(false);
+  });
+
   it("does not warn about a missing key for localhost", () => {
     const result = validateCustomWhisperConfig({
       endpoint: "http://localhost:9000/v1/audio/transcriptions",

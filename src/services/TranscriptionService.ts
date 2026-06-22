@@ -1151,12 +1151,9 @@ export class TranscriptionService {
           Array.isArray((responseData as any)?.segments);
 
         if (isGroqTimestampedSegments) {
-          // Convert segments to SRT format (simplified)
-          transcriptionText = (responseData as any).segments.map((segment: any, index: number) => {
-            const start = this.formatTimestamp(segment.start);
-            const end = this.formatTimestamp(segment.end);
-            return `${index + 1}\n${start} --> ${end}\n${segment.text.trim()}\n`;
-          }).join('\n');
+          // Reuse the null-safe SRT builder (guards missing text/start/end)
+          // instead of an unguarded inline map.
+          transcriptionText = this.segmentsToSrt((responseData as any).segments);
         } else {
           // One definition of a "compatible" transcription response (#211): a
           // plain string body, { text }, { data: { text } }, or { segments } are
