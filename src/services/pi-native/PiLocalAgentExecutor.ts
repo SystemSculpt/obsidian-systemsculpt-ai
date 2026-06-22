@@ -294,6 +294,12 @@ function normalizePiToolExecutionResult(result: unknown, isError: boolean): Tool
   };
 }
 
+// A tool call that keeps failing with identical arguments is the "stuck in
+// agent loop" failure (#136): the SDK re-issues it every turn and the user is
+// re-prompted forever. Stop the local turn after this many identical
+// consecutive failures and surface an actionable error (#210).
+const MAX_CONSECUTIVE_IDENTICAL_TOOL_FAILURES = 3;
+
 export async function* streamPiLocalAgentTurn(
   options: PiLocalAgentRunOptions
 ): AsyncGenerator<StreamEvent, void, unknown> {
@@ -332,6 +338,8 @@ export async function* streamPiLocalAgentTurn(
     let streamedText = "";
     let streamedReasoning = "";
     let finished = false;
+    let repeatedToolFailureKey: string | null = null;
+    let repeatedToolFailureCount = 0;
 
     const push = (item: QueueItem) => {
       if (finished && item.kind === "event") {
@@ -474,19 +482,42 @@ export async function* streamPiLocalAgentTurn(
             executionStartedAt: existing?.executionStartedAt,
           };
           toolCallsById.delete(toolCallId);
+          const isError = Boolean(sessionEvent.isError);
           push({
             kind: "event",
-            event: buildPiToolCallEvent(
-              snapshot,
-              Boolean(sessionEvent.isError) ? "failed" : "completed",
-              {
-                result: normalizePiToolExecutionResult(
-                  sessionEvent.result,
-                  Boolean(sessionEvent.isError)
-                ),
-              }
-            ),
+            event: buildPiToolCallEvent(snapshot, isError ? "failed" : "completed", {
+              result: normalizePiToolExecutionResult(sessionEvent.result, isError),
+            }),
           });
+
+          // Loop guard (#136): a tool call that keeps failing with identical
+          // arguments means the agent is stuck re-issuing the same failing
+          // action. Stop after a few identical consecutive failures and surface
+          // an actionable error (#210) instead of letting the local loop run
+          // unbounded. A successful (or different) call resets the counter.
+          if (isError) {
+            const failureKey = `${snapshot.name} ${snapshot.arguments}`;
+            if (failureKey === repeatedToolFailureKey) {
+              repeatedToolFailureCount += 1;
+            } else {
+              repeatedToolFailureKey = failureKey;
+              repeatedToolFailureCount = 1;
+            }
+            if (repeatedToolFailureCount >= MAX_CONSECUTIVE_IDENTICAL_TOOL_FAILURES) {
+              finished = true;
+              void activeSession.abort().catch(() => {});
+              push({
+                kind: "error",
+                error: new Error(
+                  `The agent repeatedly attempted the same failing tool call (${snapshot.name}) ${repeatedToolFailureCount} times and was stopped to avoid a loop. Adjust the request or try a different approach.`
+                ),
+              });
+              return;
+            }
+          } else {
+            repeatedToolFailureKey = null;
+            repeatedToolFailureCount = 0;
+          }
         }
         return;
       }
