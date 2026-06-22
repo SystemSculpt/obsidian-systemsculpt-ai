@@ -10,7 +10,10 @@ module.exports = {
 	roots: ['<rootDir>/src'],
 	testMatch: [
 		'**/__tests__/**/Embeddings*.test.ts',
-		'services/embeddings/**/__tests__/**/*.test.ts'
+		// Match the whole embeddings tree by path (not just `Embeddings*`-named
+		// files). The previous glob lacked a `<rootDir>` anchor, so it silently
+		// matched nothing and tests like providers/__tests__ went unrun.
+		'<rootDir>/src/services/embeddings/**/__tests__/**/*.test.ts'
 	],
 	moduleNameMapper: {
 		'^obsidian$': '<rootDir>/src/tests/mocks/obsidian.js',
