@@ -37,6 +37,9 @@ jest.mock("../recorder/RecorderFormats", () => ({
     mimeType: "audio/webm;codecs=opus",
     extension: "webm",
   }),
+  pickRecorderAudioBitsPerSecond: jest.fn(({ isMobile }: { isMobile?: boolean } = {}) =>
+    isMobile ? 48000 : undefined
+  ),
 }));
 
 jest.mock("../recorder/RecordingSession", () => ({

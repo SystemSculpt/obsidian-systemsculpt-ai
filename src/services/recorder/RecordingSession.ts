@@ -16,6 +16,7 @@ export interface RecordingSessionOptions {
   directoryPath: string;
   ensureDirectory: (path: string) => Promise<void>;
   format: RecorderFormat;
+  audioBitsPerSecond?: number;
   preferredMicrophoneId?: string | null;
   onStatus: (status: string) => void;
   onError: (error: Error) => void;
@@ -55,7 +56,7 @@ export class RecordingSession {
 
     this.recorder = new MicrophoneRecorder(this.options.app, {
       mimeType: this.options.format.mimeType,
-      extension: this.options.format.extension,
+      audioBitsPerSecond: this.options.audioBitsPerSecond,
       preferredMicrophoneId: this.options.preferredMicrophoneId,
       onError: this.forwardError,
       onStatus: this.options.onStatus,

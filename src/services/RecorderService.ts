@@ -2,7 +2,7 @@ import { App } from "obsidian";
 import type SystemSculptPlugin from "../main";
 import { PlatformContext } from "./PlatformContext";
 import { RecorderUIManager } from "./recorder/RecorderUIManager";
-import { pickRecorderFormat } from "./recorder/RecorderFormats";
+import { pickRecorderFormat, pickRecorderAudioBitsPerSecond } from "./recorder/RecorderFormats";
 import { RecordingSession, RecordingResult } from "./recorder/RecordingSession";
 import { TranscriptionCoordinator } from "./transcription/TranscriptionCoordinator";
 import { logDebug, logInfo, logWarning, logError } from "../utils/errorHandling";
@@ -131,6 +131,12 @@ export class RecorderService {
       const format = pickRecorderFormat({
         preferM4a: this.platform.isMobile(),
       });
+      // Cap mobile recordings at a speech-optimized bitrate so meeting-length
+      // audio stays under the transcription direct-upload limit and avoids the
+      // mobile chunk/decode path that can't handle webm/opus (#169).
+      const audioBitsPerSecond = pickRecorderAudioBitsPerSecond({
+        isMobile: this.platform.isMobile(),
+      });
       const directoryManager = this.plugin.directoryManager;
       if (!directoryManager) {
         throw new Error("Recorder directories are not initialized yet. Please wait and try again.");
@@ -151,6 +157,7 @@ export class RecorderService {
           await directoryManager.ensureDirectoryByPath(path);
         },
         format,
+        audioBitsPerSecond,
         preferredMicrophoneId: this.plugin.settings.preferredMicrophoneId,
         onStatus: (status) => this.updateStatus(status),
         onError: (error) => this.handleError(error),
