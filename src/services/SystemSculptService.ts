@@ -1302,7 +1302,11 @@ export class SystemSculptService {
       debug?.onRequest?.({
         provider: String(resolvedModel.provider || "systemsculpt"),
         endpoint,
-        headers: SystemSculptEnvironment.buildHeaders((this.settings.licenseKey || "").trim()),
+        // The license key is a credential: never write it to the debug payload,
+        // which is persisted to the vault and copied to the clipboard. Reuse the
+        // real header shape but with a redacted placeholder (mirrors the BYOK
+        // executors). The genuine key is sent on the real request below.
+        headers: SystemSculptEnvironment.buildHeaders("[redacted]"),
         body: requestBody,
         transport,
         canStream: true,
