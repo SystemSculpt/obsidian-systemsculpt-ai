@@ -38,3 +38,19 @@ export function ensureArray<T>(value: unknown): T[] {
   return Array.isArray(value) ? (value as T[]) : [];
 }
 
+/**
+ * A Studio policy file lives in the vault and can be shared / synced / imported.
+ * A bare `"*"` CLI command pattern would match every command, granting arbitrary
+ * local command execution on project open with no approval. Such a blanket
+ * wildcard is never an acceptable pattern: it is dropped at policy-parse time and
+ * refused again inside the CLI gate (defense-in-depth). Legitimate per-command
+ * patterns — including path-prefix wildcards like a star-slash-ffmpeg pattern —
+ * are NOT blanket wildcards and are preserved.
+ *
+ * Single source of truth so the parse-time strip and the gate-time refusal can
+ * never drift apart.
+ */
+export function isBlanketCliCommandPattern(pattern: string): boolean {
+  return asString(pattern).trim() === "*";
+}
+

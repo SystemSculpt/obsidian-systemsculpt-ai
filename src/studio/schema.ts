@@ -7,7 +7,15 @@ import {
   type StudioPermissionPolicyV1,
   type StudioProjectV1,
 } from "./types";
-import { asNumber, asString, ensureArray, isRecord, nowIso, randomId } from "./utils";
+import {
+  asNumber,
+  asString,
+  ensureArray,
+  isBlanketCliCommandPattern,
+  isRecord,
+  nowIso,
+  randomId,
+} from "./utils";
 
 const DEFAULT_MAX_RUNS = 100;
 const DEFAULT_MAX_ARTIFACTS_MB = 1024;
@@ -424,7 +432,11 @@ export function parseStudioPolicy(rawText: string): StudioPermissionPolicyV1 {
           allowedPaths: ensureArray<unknown>(scope.allowedPaths).map((entry) => asString(entry).trim()).filter(Boolean),
           allowedCommandPatterns: ensureArray<unknown>(scope.allowedCommandPatterns)
             .map((entry) => asString(entry).trim())
-            .filter(Boolean),
+            .filter(Boolean)
+            // SEC-03: a (syncable) policy must never grant arbitrary commands via
+            // a bare "*". Drop it here so a shared project still opens, just
+            // without the blanket grant; legitimate per-command patterns survive.
+            .filter((pattern) => !isBlanketCliCommandPattern(pattern)),
           allowedDomains: ensureArray<unknown>(scope.allowedDomains).map((entry) => asString(entry).trim()).filter(Boolean),
         },
         grantedAt: asString(rawGrant.grantedAt).trim() || nowIso(),

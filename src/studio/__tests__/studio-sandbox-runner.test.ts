@@ -21,10 +21,13 @@ function createPolicy(): StudioPermissionPolicyV1 {
         grantedByUser: true,
       },
       {
-        id: "grant_cli_all",
+        id: "grant_cli_node",
         capability: "cli",
+        // Grant the specific command this test spawns. A bare "*" is no longer a
+        // valid CLI pattern (SEC-03): it is stripped at policy-parse time and
+        // refused inside the CLI gate, so fixtures must name real commands.
         scope: {
-          allowedCommandPatterns: ["*"],
+          allowedCommandPatterns: ["node"],
         },
         grantedAt: new Date().toISOString(),
         grantedByUser: true,
