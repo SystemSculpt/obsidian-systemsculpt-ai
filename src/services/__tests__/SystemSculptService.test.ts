@@ -731,6 +731,48 @@ describe("SystemSculptService", () => {
     );
   });
 
+  it("redacts the license key from debug.onRequest headers when streaming hosted chat", async () => {
+    const plugin = createPlugin();
+    plugin.settings.licenseKey = "ssk-super-secret-license";
+    const service = SystemSculptService.getInstance(plugin);
+    const debug = {
+      onRequest: jest.fn(),
+      onResponse: jest.fn(),
+      onStreamEnd: jest.fn(),
+    };
+
+    (service as any).platformRequestClient.request = jest.fn().mockResolvedValue(
+      new Response('data: {"choices":[{"delta":{"content":"Hi"}}]}\n\ndata: [DONE]\n\n', {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      })
+    );
+
+    await collectEvents(
+      service.streamMessage({
+        messages: [{ role: "user", content: "Hello", message_id: "msg_redact_1" } as any],
+        model: "systemsculpt@@systemsculpt/ai-agent",
+        debug,
+      })
+    );
+
+    expect(debug.onRequest).toHaveBeenCalledTimes(1);
+    const requestPayload = debug.onRequest.mock.calls[0][0];
+    const debugHeaders = requestPayload.headers as Record<string, string>;
+
+    // The real license key must never reach the debug payload (it is persisted to
+    // disk and copied to the clipboard). Mirrors the BYOK executor redaction.
+    expect(JSON.stringify(debugHeaders)).not.toContain("ssk-super-secret-license");
+    if ("x-license-key" in debugHeaders) {
+      expect(debugHeaders["x-license-key"]).toBe("[redacted]");
+    }
+
+    // The real request must still send the genuine key (out of scope to redact).
+    expect((service as any).platformRequestClient.request).toHaveBeenCalledWith(
+      expect.objectContaining({ licenseKey: "ssk-super-secret-license" })
+    );
+  });
+
   it("routes Pi-local chat turns through the local Pi stream executor", async () => {
     const plugin = createPlugin();
     const service = SystemSculptService.getInstance(plugin);
