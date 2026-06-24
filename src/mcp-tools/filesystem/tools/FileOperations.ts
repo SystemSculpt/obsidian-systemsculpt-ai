@@ -1,5 +1,5 @@
 import { App, TFile, normalizePath } from "obsidian";
-import { FileReadMetadata, ReadFilesParams, WriteFileParams, EditFileParams, FileEdit } from "../types";
+import { FileReadMetadata, ReadFilesParams, WriteFileParams, EditFileParams, EditFileResult, FileEdit, SkippedEdit } from "../types";
 import { FILESYSTEM_LIMITS } from "../constants";
 import {
   validatePath,
@@ -263,9 +263,16 @@ export class FileOperations {
   }
 
   /**
-   * Apply file edits using the clean MCP filesystem server approach
+   * Apply file edits using the clean MCP filesystem server approach.
+   *
+   * Returns an honest accounting of the operation: the `diff`, how many edits
+   * actually applied (`appliedCount`) out of `requestedCount`, and which were
+   * `skipped` (only possible under `strict:false`). When nothing applies the
+   * file is left untouched — no redundant no-op write — so the caller can tell
+   * a phantom success apart from a real one. Under `strict:true` (the default) a
+   * non-matching edit still throws, so behavior on the default path is unchanged.
    */
-  async editFile(params: EditFileParams): Promise<string> {
+  async editFile(params: EditFileParams): Promise<EditFileResult> {
     const filePath = params.path;
     const edits = params.edits;
     const strict = (params as any).strict ?? true;
@@ -277,23 +284,18 @@ export class FileOperations {
       const adapter: any = this.app.vault.adapter as any;
       const content = normalizeLineEndings(await readAdapterText(adapter, normalizedPath));
 
-      let modifiedContent = content;
-      for (const edit of edits) {
-        try {
-          modifiedContent = this.applySingleEdit(modifiedContent, edit);
-        } catch (e) {
-          if (strict) {
-            throw e;
-          }
-        }
-      }
+      const { modifiedContent, appliedCount, skipped } = this.applyEdits(content, edits, strict);
 
       const diff = createSimpleDiff(content, modifiedContent, filePath);
-      if (isBaseFile) {
-        assertValidObsidianBasesYaml(normalizedPath || filePath, modifiedContent);
+      // Only write when content actually changed — skip the redundant no-op write
+      // so a zero-match (strict:false) edit never touches the file's mtime.
+      if (modifiedContent !== content) {
+        if (isBaseFile) {
+          assertValidObsidianBasesYaml(normalizedPath || filePath, modifiedContent);
+        }
+        await writeAdapterText(adapter, normalizedPath, modifiedContent);
       }
-      await writeAdapterText(adapter, normalizedPath, modifiedContent);
-      return diff;
+      return { diff, appliedCount, requestedCount: edits.length, skipped };
     }
 
     const abstractFile = resolveExistingVaultFile(this.app, normalizedPath);
@@ -304,28 +306,53 @@ export class FileOperations {
 
     const content = normalizeLineEndings(await this.app.vault.read(abstractFile));
 
-    // Apply edits sequentially
-    let modifiedContent = content;
-    for (const edit of edits) {
-      try {
-        modifiedContent = this.applySingleEdit(modifiedContent, edit);
-      } catch (e) {
-        if (strict) {
-          throw e;
-        }
-      }
-    }
+    const { modifiedContent, appliedCount, skipped } = this.applyEdits(content, edits, strict);
 
     // Create simple diff
     const diff = createSimpleDiff(content, modifiedContent, resolvedPath);
 
-    // Apply the changes to the file
-    if (isBaseFile) {
-      assertValidObsidianBasesYaml(resolvedPath, modifiedContent);
+    // Apply the changes to the file only when something actually changed.
+    if (modifiedContent !== content) {
+      if (isBaseFile) {
+        assertValidObsidianBasesYaml(resolvedPath, modifiedContent);
+      }
+      await this.app.vault.modify(abstractFile, modifiedContent);
     }
-    await this.app.vault.modify(abstractFile, modifiedContent);
 
-    return diff;
+    return { diff, appliedCount, requestedCount: edits.length, skipped };
+  }
+
+  /**
+   * Apply a list of edits sequentially, counting successes and collecting any
+   * skipped edits. Shared by the adapter fast-path and the Vault-API path so
+   * both report identically. Under `strict:true` a non-matching edit rethrows;
+   * under `strict:false` it is recorded in `skipped` and the loop continues.
+   */
+  private applyEdits(
+    content: string,
+    edits: FileEdit[],
+    strict: boolean
+  ): { modifiedContent: string; appliedCount: number; skipped: SkippedEdit[] } {
+    let modifiedContent = content;
+    let appliedCount = 0;
+    const skipped: SkippedEdit[] = [];
+
+    edits.forEach((edit, index) => {
+      try {
+        modifiedContent = this.applySingleEdit(modifiedContent, edit);
+        appliedCount++;
+      } catch (e) {
+        if (strict) {
+          throw e;
+        }
+        skipped.push({
+          index,
+          reason: e instanceof Error ? e.message : String(e),
+        });
+      }
+    });
+
+    return { modifiedContent, appliedCount, skipped };
   }
 
   private applySingleEdit(source: string, edit: FileEdit): string {

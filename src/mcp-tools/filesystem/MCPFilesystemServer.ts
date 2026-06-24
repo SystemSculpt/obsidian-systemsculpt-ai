@@ -90,9 +90,21 @@ export class MCPFilesystemServer {
         return await this.fileOps.readFiles(args as ReadFilesParams);
       case "write":
         return await this.fileOps.writeFile(args as WriteFileParams);
-      case "edit":
-        const diff = await this.fileOps.editFile(args as EditFileParams);
-        return { path: (args as EditFileParams).path, success: true, diff };
+      case "edit": {
+        const { diff, appliedCount, requestedCount, skipped } =
+          await this.fileOps.editFile(args as EditFileParams);
+        // Honest reporting (BUG-02): success is false when nothing applied, so a
+        // mistyped find-string under strict:false can no longer masquerade as a
+        // successful edit. appliedCount/skipped let the caller retry the misses.
+        return {
+          path: (args as EditFileParams).path,
+          success: appliedCount > 0,
+          diff,
+          appliedCount,
+          requestedCount,
+          skipped,
+        };
+      }
       case "create_folders":
         return await this.directoryOps.createDirectories(args as CreateDirectoriesParams);
       case "list_items":

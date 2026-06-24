@@ -68,7 +68,7 @@ export const fileToolDefinitions: MCPToolInfo[] = [
   },
   {
     name: "edit",
-    description: "Apply find-and-replace edits to an existing file. Supports exact matching, regex patterns, loose whitespace matching, and line range targeting. Returns a diff showing changes made.",
+    description: "Apply find-and-replace edits to an existing file. Supports exact matching, regex patterns, loose whitespace matching, and line range targeting. Returns a diff plus appliedCount/requestedCount and a skipped[] list (each {index, reason}). When strict is false, check appliedCount: if it is less than requestedCount, the skipped edits did NOT apply (e.g. oldText not found) — fix their oldText and retry. success is false when appliedCount is 0, meaning nothing was written.",
     inputSchema: {
       type: "object",
       properties: {
@@ -136,7 +136,7 @@ export const fileToolDefinitions: MCPToolInfo[] = [
         strict: {
           type: "boolean",
           default: true,
-          description: "If true (default), fail if any edit doesn't match. If false, skip non-matching edits."
+          description: "If true (default), fail the whole operation if any edit doesn't match. If false, apply the edits that match and report the rest in skipped[] (appliedCount tells you how many landed)."
         }
       },
       required: ["path", "edits"],
