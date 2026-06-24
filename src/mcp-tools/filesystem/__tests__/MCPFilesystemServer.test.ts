@@ -198,9 +198,14 @@ describe("MCPFilesystemServer", () => {
     });
 
     describe("edit tool", () => {
-      it("calls editFile and returns diff", async () => {
-        const params = { path: "test.md", old_string: "old", new_string: "new" };
-        mockEditFile.mockResolvedValue("@@ -1 +1 @@\n-old\n+new");
+      it("reports success with applied/skipped counts when edits land", async () => {
+        const params = { path: "test.md", edits: [{ oldText: "old", newText: "new" }] };
+        mockEditFile.mockResolvedValue({
+          diff: "@@ -1 +1 @@\n-old\n+new",
+          appliedCount: 1,
+          requestedCount: 1,
+          skipped: [],
+        });
 
         const result = await server.executeTool("edit", params);
 
@@ -209,7 +214,32 @@ describe("MCPFilesystemServer", () => {
           path: "test.md",
           success: true,
           diff: "@@ -1 +1 @@\n-old\n+new",
+          appliedCount: 1,
+          requestedCount: 1,
+          skipped: [],
         });
+      });
+
+      it("reports success:false when zero edits applied (BUG-02)", async () => {
+        const params = {
+          path: "test.md",
+          edits: [{ oldText: "notfound", newText: "x" }],
+          strict: false,
+        };
+        mockEditFile.mockResolvedValue({
+          diff: "",
+          appliedCount: 0,
+          requestedCount: 1,
+          skipped: [{ index: 0, reason: "Edit produced no changes" }],
+        });
+
+        const result = await server.executeTool("edit", params);
+
+        // The model must not see a phantom success when nothing was applied.
+        expect(result.success).toBe(false);
+        expect(result.appliedCount).toBe(0);
+        expect(result.requestedCount).toBe(1);
+        expect(result.skipped).toEqual([{ index: 0, reason: "Edit produced no changes" }]);
       });
     });
 

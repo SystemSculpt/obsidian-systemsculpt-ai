@@ -409,7 +409,7 @@ describe("FileOperations", () => {
       });
 
       expect(app.vault.modify).toHaveBeenCalledWith(fallbackFile, "hello universe");
-      expect(result).toContain("missing/missing.md");
+      expect(result.diff).toContain("missing/missing.md");
     });
 
     it("reads a Folder Notes file when handed the folder-style path (#154)", async () => {
@@ -441,7 +441,10 @@ describe("FileOperations", () => {
       });
 
       expect(app.vault.modify).toHaveBeenCalledWith(mockFile, "hello universe");
-      expect(result).toContain("diff");
+      expect(result.diff).toContain("diff");
+      expect(result.appliedCount).toBe(1);
+      expect(result.requestedCount).toBe(1);
+      expect(result.skipped).toEqual([]);
     });
 
     it("applies multiple edits in sequence", async () => {
@@ -474,7 +477,7 @@ describe("FileOperations", () => {
       ).rejects.toThrow("Edit produced no changes");
     });
 
-    it("silently skips failed edits when strict is false", async () => {
+    it("applies matching edits and reports skipped ones when strict is false (BUG-02)", async () => {
       const mockFile = new TFile({ path: "test.md" });
       (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(mockFile);
       (app.vault.read as jest.Mock).mockResolvedValue("hello world");
@@ -488,7 +491,54 @@ describe("FileOperations", () => {
         strict: false,
       } as any);
 
+      // Partial application still writes the file with the edits that landed.
       expect(app.vault.modify).toHaveBeenCalledWith(mockFile, "HELLO world");
+      // ...but the caller is told only one of two edits applied, so it can retry
+      // the failed one instead of believing a phantom success (BUG-02).
+      expect(result.appliedCount).toBe(1);
+      expect(result.requestedCount).toBe(2);
+      expect(result.skipped).toHaveLength(1);
+      expect(result.skipped[0].index).toBe(0);
+      expect(result.skipped[0].reason).toBeTruthy();
+    });
+
+    it("does not write the file when zero edits match (strict:false) (BUG-02)", async () => {
+      const mockFile = new TFile({ path: "test.md" });
+      (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(mockFile);
+      (app.vault.read as jest.Mock).mockResolvedValue("hello world");
+
+      const result = await fileOps.editFile({
+        path: "test.md",
+        edits: [
+          { oldText: "notfound", newText: "replacement" },
+          { oldText: "alsoMissing", newText: "other" },
+        ],
+        strict: false,
+      } as any);
+
+      // BUG-02: when nothing matches, the redundant no-op write is skipped
+      // entirely so the file's mtime/content is never touched.
+      expect(app.vault.modify).not.toHaveBeenCalled();
+      expect(result.appliedCount).toBe(0);
+      expect(result.requestedCount).toBe(2);
+      expect(result.skipped).toHaveLength(2);
+    });
+
+    it("skips the redundant no-op write when an edit replaces text with itself", async () => {
+      const mockFile = new TFile({ path: "test.md" });
+      (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(mockFile);
+      (app.vault.read as jest.Mock).mockResolvedValue("hello world");
+
+      // "world" -> "world" produces no net change; applySingleEdit treats a
+      // no-op replacement as "no changes", so nothing should be written.
+      const result = await fileOps.editFile({
+        path: "test.md",
+        edits: [{ oldText: "world", newText: "world" }],
+        strict: false,
+      } as any);
+
+      expect(app.vault.modify).not.toHaveBeenCalled();
+      expect(result.appliedCount).toBe(0);
     });
 
     it("replaces all occurrences when occurrence is all", async () => {

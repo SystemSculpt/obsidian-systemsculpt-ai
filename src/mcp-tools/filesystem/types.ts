@@ -109,6 +109,30 @@ export interface EditFileParams {
   strict?: boolean | null;
 }
 
+/**
+ * An edit that was requested but did not apply (only collected under
+ * `strict:false`; under `strict:true` a non-matching edit throws instead).
+ */
+export interface SkippedEdit {
+  /** Zero-based index of the edit within the requested `edits` array. */
+  index: number;
+  /** Human-readable reason the edit did not apply (e.g. "Edit produced no changes"). */
+  reason: string;
+}
+
+/**
+ * Result of an `edit` operation. Carries the human-readable `diff` (kept for
+ * backward compatibility) plus an honest accounting of how many edits actually
+ * landed. `appliedCount === 0` means nothing changed and the file was not
+ * written — callers must treat that as a failure, not a phantom success.
+ */
+export interface EditFileResult {
+  diff: string;
+  appliedCount: number;
+  requestedCount: number;
+  skipped: SkippedEdit[];
+}
+
 export interface CreateDirectoriesParams {
   paths: string[];
 }
