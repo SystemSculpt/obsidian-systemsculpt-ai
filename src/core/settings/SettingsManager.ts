@@ -1,4 +1,4 @@
-import { normalizePath } from "obsidian";
+import { Notice, normalizePath } from "obsidian";
 import { SystemSculptSettings, DEFAULT_SETTINGS, LogLevel, createDefaultWorkflowEngineSettings } from "../../types";
 import SystemSculptPlugin from "../../main";
 import { AutomaticBackupService } from "./AutomaticBackupService";
@@ -50,6 +50,10 @@ export class SettingsManager {
     ignoreUntil: number;
     remainingBudget: number;
   }> = [];
+  // De-duplicate the user-facing save-failure Notice so a sync-lock storm (many
+  // failing saves in quick succession) shows one Notice, not one per keystroke.
+  private lastSaveFailureNoticeAt = 0;
+  private static readonly SAVE_FAILURE_NOTICE_DEDUPE_MS = 5000;
 
 
   constructor(plugin: SystemSculptPlugin) {
@@ -788,6 +792,17 @@ export class SettingsManager {
       
       await this.plugin.app.vault.adapter.write(backupPath, backupData);
     } catch (error) {
+      // Backups are a best-effort safety net: log for diagnostics but do not
+      // rethrow or block saveSettings — a failed backup must not look like a
+      // failed save, and the primary saveData write has already succeeded.
+      try {
+        this.plugin.getLogger().error("Failed to write SystemSculpt settings backup", error, {
+          source: "SettingsManager",
+          method: "backupSettings",
+        });
+      } catch {
+        // Logger must never mask the (already non-fatal) backup failure.
+      }
     }
   }
 
@@ -1085,6 +1100,42 @@ export class SettingsManager {
   }
 
   /**
+   * Surface a settings-persistence failure instead of swallowing it. The failure
+   * is always logged via the plugin logger (for diagnostics), and a single
+   * de-duplicated Notice is shown so the user knows their last change may not have
+   * persisted — without spamming one Notice per keystroke during a sync-lock
+   * storm. We log + notify rather than rethrow: `saveSettings` is invoked from the
+   * load path and from ~100 fire-and-forget `updateSettings(...)` callers, so
+   * rethrowing would convert disk-full/permission errors into uncaught rejections
+   * and could break plugin load. Observability is the fix here; serializing writes
+   * is tracked separately (BUG-09).
+   */
+  private surfaceSaveFailure(error: unknown): void {
+    try {
+      this.plugin.getLogger().error("Failed to save SystemSculpt settings", error, {
+        source: "SettingsManager",
+        method: "saveSettings",
+      });
+    } catch {
+      // Logger must never mask the original failure.
+    }
+
+    const now = Date.now();
+    if (now - this.lastSaveFailureNoticeAt < SettingsManager.SAVE_FAILURE_NOTICE_DEDUPE_MS) {
+      return;
+    }
+    this.lastSaveFailureNoticeAt = now;
+    try {
+      new Notice(
+        "Failed to save SystemSculpt settings — your last change may not persist.",
+        8000,
+      );
+    } catch {
+      // Notice is best-effort UI; never let it throw out of the catch.
+    }
+  }
+
+  /**
    * Save settings using Obsidian's native data API
    * This ensures settings are properly saved with fallback options
    */
@@ -1106,6 +1157,9 @@ export class SettingsManager {
       this.plugin.app.workspace.trigger("systemsculpt:settings-updated", oldSettings, this.plugin._internal_settings_systemsculpt_plugin);
       await this.backupSettings();
     } catch (error) {
+      // Persistence failed (disk full, permissions, sync lock, …). Do NOT
+      // swallow it: log + show a de-duplicated Notice so the loss is visible.
+      this.surfaceSaveFailure(error);
     }
   }
 
