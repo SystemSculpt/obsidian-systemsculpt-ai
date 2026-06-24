@@ -95,9 +95,30 @@ export class LicenseService {
       // Unexpected body shape; keep existing state but report as invalid this round
       return !!this.plugin.settings.licenseValid;
     } catch (error) {
-      // Offline or server error: preserve last known good validity
+      // An authoritative reject (server says the key is no longer valid —
+      // revoked / expired / refunded) arrives as a 401/403 and MUST downgrade
+      // the cached validity, otherwise a revoked license keeps granting
+      // managed-model access indefinitely. Any other failure (offline, DNS
+      // blip, timeout, 5xx) is transient: preserve last-known-good validity so
+      // a flaky connection never logs a paying user out.
+      if (this.isAuthoritativeReject(error)) {
+        await this.plugin.getSettingsManager().updateSettings({ licenseValid: false });
+        return false;
+      }
       return !!this.plugin.settings.licenseValid;
     }
+  }
+
+  /**
+   * Whether an error from license validation is the server *authoritatively*
+   * rejecting the key (HTTP 401/403), as opposed to a transient/offline
+   * failure. Only an authoritative reject should flip `licenseValid` to false.
+   */
+  private isAuthoritativeReject(error: unknown): boolean {
+    return (
+      error instanceof SystemSculptError &&
+      (error.statusCode === 401 || error.statusCode === 403)
+    );
   }
 
 

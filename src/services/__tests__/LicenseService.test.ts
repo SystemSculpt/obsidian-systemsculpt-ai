@@ -392,6 +392,69 @@ describe("LicenseService", () => {
       });
     });
 
+    describe("authoritative reject (BUG-08)", () => {
+      // A server 401/403 is the server *authoritatively* saying the key is no
+      // longer valid (revoked / expired / refunded). Unlike an offline blip,
+      // it must flip the locally cached `licenseValid` to false so a revoked
+      // license can't keep granting managed-model access indefinitely.
+      beforeEach(() => {
+        mockPlugin.settings.licenseKey = "revoked-key";
+      });
+
+      it("downgrades a previously valid license to false on 401", async () => {
+        mockPlugin.settings.licenseValid = true;
+        httpRequest.mockResolvedValue({
+          status: 401,
+          json: { error: "Unauthorized" },
+        });
+
+        const service = new LicenseService(mockPlugin, "https://api.com");
+        const result = await service.validateLicense();
+
+        expect(result).toBe(false);
+        expect(mockPlugin._updateSettings).toHaveBeenCalledWith({
+          licenseValid: false,
+        });
+      });
+
+      it("downgrades a previously valid license to false on 403", async () => {
+        mockPlugin.settings.licenseValid = true;
+        httpRequest.mockResolvedValue({
+          status: 403,
+          json: { error: "Forbidden" },
+        });
+
+        const service = new LicenseService(mockPlugin, "https://api.com");
+        const result = await service.validateLicense();
+
+        expect(result).toBe(false);
+        expect(mockPlugin._updateSettings).toHaveBeenCalledWith({
+          licenseValid: false,
+        });
+      });
+    });
+
+    describe("transient failure preserves validity (BUG-08)", () => {
+      // A non-HTTP throw (DNS failure, dropped connection, timeout) is NOT an
+      // authoritative reject: a flaky connection must not log a paying user out.
+      beforeEach(() => {
+        mockPlugin.settings.licenseKey = "valid-key";
+      });
+
+      it("does not downgrade on a network-level throw (TypeError)", async () => {
+        mockPlugin.settings.licenseValid = true;
+        httpRequest.mockRejectedValue(new TypeError("Failed to fetch"));
+
+        const service = new LicenseService(mockPlugin, "https://api.com");
+        const result = await service.validateLicense();
+
+        expect(result).toBe(true);
+        expect(mockPlugin._updateSettings).not.toHaveBeenCalledWith({
+          licenseValid: false,
+        });
+      });
+    });
+
     describe("with network errors", () => {
       beforeEach(() => {
         mockPlugin.settings.licenseKey = "test-key";
