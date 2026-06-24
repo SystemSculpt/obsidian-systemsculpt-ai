@@ -3,6 +3,8 @@ import { SystemSculptService } from "../SystemSculptService";
 import { SystemSculptEnvironment } from "../api/SystemSculptEnvironment";
 import { AGENT_PRESET } from "../../constants/prompts";
 import { AGENT_TOOL_INSTRUCTIONS } from "../../constants/prompts/agent";
+import { StreamingErrorHandler } from "../StreamingErrorHandler";
+import { SystemSculptError, ERROR_CODES } from "../../utils/errors";
 
 const licenseService = {
   validateLicense: jest.fn().mockResolvedValue(true),
@@ -771,6 +773,163 @@ describe("SystemSculptService", () => {
     expect((service as any).platformRequestClient.request).toHaveBeenCalledWith(
       expect.objectContaining({ licenseKey: "ssk-super-secret-license" })
     );
+  });
+
+  describe("transient rate-limit retry (BUG-07)", () => {
+    const rateLimitError = (retryAfterSeconds: number) =>
+      new SystemSculptError("Rate limit exceeded", ERROR_CODES.QUOTA_EXCEEDED, 429, {
+        isRateLimited: true,
+        shouldRetry: true,
+        retryAfterSeconds,
+      });
+
+    const okStreamResponse = (text: string) =>
+      new Response(`data: {"choices":[{"delta":{"content":"${text}"}}]}\n\ndata: [DONE]\n\n`, {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      });
+
+    const notOkResponse = () =>
+      new Response("rate limited", {
+        status: 429,
+        headers: { "content-type": "application/json" },
+      });
+
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    it("retries once after a 429 and succeeds when no content was streamed yet", async () => {
+      jest.useFakeTimers();
+      const plugin = createPlugin();
+      const service = SystemSculptService.getInstance(plugin);
+
+      // First attempt: non-ok 429 → handler throws a transient rate-limit error.
+      // Second attempt: ok 200 stream with content.
+      const request = jest
+        .fn()
+        .mockResolvedValueOnce(notOkResponse())
+        .mockResolvedValueOnce(okStreamResponse("Recovered"));
+      (service as any).platformRequestClient.request = request;
+
+      (StreamingErrorHandler.handleStreamError as jest.Mock).mockImplementationOnce(async () => {
+        throw rateLimitError(1);
+      });
+
+      const generator = service.streamMessage({
+        messages: [{ role: "user", content: "Hello", message_id: "msg_retry_1" } as any],
+        model: "systemsculpt@@systemsculpt/ai-agent",
+      });
+
+      const events: any[] = [];
+      const drain = (async () => {
+        for await (const event of generator) {
+          events.push(event);
+        }
+      })();
+
+      // Advance through the retry wait so the second attempt runs.
+      await jest.advanceTimersByTimeAsync(2000);
+      await drain;
+
+      // Exactly the recovered content — never the partial 429 path, never doubled.
+      expect(events).toEqual([{ type: "content", text: "Recovered" }]);
+      expect(request).toHaveBeenCalledTimes(2);
+    });
+
+    it("does NOT retry (and never double-emits) once content has already streamed", async () => {
+      const plugin = createPlugin();
+      const service = SystemSculptService.getInstance(plugin);
+      modelManagementService.getModelInfo.mockResolvedValueOnce({
+        isCustom: true,
+        actualModelId: "openai/gpt-5.4-mini",
+        modelSource: "custom_endpoint",
+        model: {
+          id: "openrouter@@openai/gpt-5.4-mini",
+          provider: "openrouter",
+          sourceMode: "custom_endpoint",
+          sourceProviderId: "openrouter",
+          piExecutionModelId: "openai/gpt-5.4-mini",
+          piRemoteAvailable: true,
+          piLocalAvailable: false,
+          supported_parameters: ["tools"],
+        },
+      });
+
+      // Emit one chunk, THEN fail with an otherwise-retryable rate limit. Because
+      // content already streamed, the retry guard must refuse to retry — so the
+      // executor runs exactly once and the error propagates (no double-emit).
+      let executorCalls = 0;
+      remoteProviderStreamExecutor.executeOpenRouterRemoteStream.mockImplementation(
+        async function* () {
+          executorCalls += 1;
+          yield { type: "content", text: "Partial" };
+          throw rateLimitError(1);
+        }
+      );
+
+      // Fail loudly if the wait is ever entered: a post-content error must never
+      // reach the retry-wait branch.
+      const waitSpy = jest.spyOn(service as any, "waitForRetryWindow");
+
+      const events: any[] = [];
+      await expect(
+        (async () => {
+          for await (const event of service.streamMessage({
+            messages: [{ role: "user", content: "Hello", message_id: "msg_retry_2" } as any],
+            model: "openrouter@@openai/gpt-5.4-mini",
+          })) {
+            events.push(event);
+          }
+        })()
+      ).rejects.toBeInstanceOf(SystemSculptError);
+
+      expect(events).toEqual([{ type: "content", text: "Partial" }]);
+      expect(executorCalls).toBe(1);
+      expect(waitSpy).not.toHaveBeenCalled();
+    });
+
+    it("honors an abort signal during the retry wait without retrying", async () => {
+      const plugin = createPlugin();
+      const service = SystemSculptService.getInstance(plugin);
+      const controller = new AbortController();
+
+      const request = jest
+        .fn()
+        .mockResolvedValueOnce(notOkResponse())
+        .mockResolvedValueOnce(okStreamResponse("ShouldNeverAppear"));
+      (service as any).platformRequestClient.request = request;
+
+      (StreamingErrorHandler.handleStreamError as jest.Mock).mockImplementationOnce(async () => {
+        throw rateLimitError(5);
+      });
+
+      // Abort exactly while the retry wait is pending: the real waitForRetryWindow
+      // resolves on abort, so the loop must observe signal.aborted and bail out
+      // without ever issuing the second request.
+      const realWait = (service as any).waitForRetryWindow.bind(service);
+      const waitSpy = jest
+        .spyOn(service as any, "waitForRetryWindow")
+        .mockImplementation((delayMs: any, signal: any) => {
+          controller.abort();
+          return realWait(delayMs, signal);
+        });
+
+      const events: any[] = [];
+      for await (const event of service.streamMessage({
+        messages: [{ role: "user", content: "Hello", message_id: "msg_retry_3" } as any],
+        model: "systemsculpt@@systemsculpt/ai-agent",
+        signal: controller.signal,
+      })) {
+        events.push(event);
+      }
+
+      // Aborted mid-wait: no content, the wait was entered once, and the second
+      // attempt is never made.
+      expect(events).toEqual([]);
+      expect(waitSpy).toHaveBeenCalledTimes(1);
+      expect(request).toHaveBeenCalledTimes(1);
+    });
   });
 
   it("routes Pi-local chat turns through the local Pi stream executor", async () => {

@@ -30,6 +30,67 @@ const MESSAGE_CONTENT_PATTERNS = [
   /message content/,
 ];
 
+/**
+ * Resolve the server-advertised retry delay (in seconds) for a 429.
+ *
+ * Order of precedence:
+ *   1. The HTTP `Retry-After` header — delta-seconds (e.g. `60`) or an
+ *      HTTP-date (e.g. `Wed, 21 Oct 2026 07:28:00 GMT`), per RFC 9110.
+ *   2. A `retry_after*` field on the parsed error body (some providers only
+ *      surface it there, never as a header).
+ *
+ * Returns `undefined` when nothing usable is present so callers can apply their
+ * own fallback. A header date in the past clamps to 0.
+ */
+const resolveRetryAfterSeconds = (response: Response, data: any): number | undefined => {
+  const fromNumeric = (value: unknown): number | undefined => {
+    const parsed = typeof value === "number" ? value : Number(value);
+    if (Number.isFinite(parsed) && parsed >= 0) {
+      return Math.ceil(parsed);
+    }
+    return undefined;
+  };
+
+  const headerValue = (() => {
+    try {
+      return response.headers?.get?.("retry-after") ?? null;
+    } catch {
+      return null;
+    }
+  })();
+
+  if (typeof headerValue === "string" && headerValue.trim().length > 0) {
+    const trimmed = headerValue.trim();
+    const numeric = fromNumeric(trimmed);
+    if (numeric !== undefined) {
+      return numeric;
+    }
+    const dateMs = Date.parse(trimmed);
+    if (Number.isFinite(dateMs)) {
+      return Math.max(0, Math.ceil((dateMs - Date.now()) / 1000));
+    }
+  }
+
+  const error = data?.error;
+  const candidates = [
+    error?.retry_after_seconds,
+    error?.retryAfterSeconds,
+    error?.retry_after,
+    error?.metadata?.retry_after_seconds,
+    error?.metadata?.retry_after,
+    data?.retry_after_seconds,
+    data?.retry_after,
+  ];
+  for (const candidate of candidates) {
+    const numeric = fromNumeric(candidate);
+    if (numeric !== undefined) {
+      return numeric;
+    }
+  }
+
+  return undefined;
+};
+
 const isImageUnsupportedMessage = (message: string): boolean => {
   const lc = (message || "").toLowerCase();
   if (!lc) return false;
@@ -100,6 +161,11 @@ export class StreamingErrorHandler {
       let errorMessage = "Unknown error";
       let metadata: any = {};
       let shouldResubmit = false;
+      // Populated by the 429 branches (managed + custom) so transient rate-limit
+      // metadata is built in exactly one place per branch instead of duplicated.
+      let rateLimit:
+        | { isRateLimited: true; shouldRetry: true; retryAfterSeconds: number }
+        | null = null;
       const requestId = data?.request_id || data?.requestId || data?.error?.request_id;
       const errorType = data?.error?.type;
       const errorHttpCode = data?.error?.http_code;
@@ -167,8 +233,16 @@ export class StreamingErrorHandler {
             errorMessage = upstreamMessage || `Model ${model} is unavailable with this provider.`;
             shouldResubmit = true;
           } else if (status === 429) {
+            // BUG-17: a BYOK 429 is a transient rate limit, not a terminal quota
+            // wall. Mark it transient and surface the server's Retry-After so the
+            // Chat UI can offer a retry (mirrors the managed branch below).
             errorCode = ERROR_CODES.QUOTA_EXCEEDED;
             errorMessage = data.error.message || 'Rate limit or quota exceeded. Please try again later.';
+            rateLimit = {
+              isRateLimited: true,
+              shouldRetry: true,
+              retryAfterSeconds: resolveRetryAfterSeconds(response, data) ?? 5,
+            };
           } else {
             errorCode = (data.error.code || ERROR_CODES.STREAM_ERROR) as ErrorCode;
             errorMessage = data.error.message || 'An error occurred with the provider.';
@@ -183,6 +257,7 @@ export class StreamingErrorHandler {
             statusCode: status,
             rawError: data.error,
             upstreamMessage,
+            ...(rateLimit ?? {}),
             ...(requestId ? { requestId } : {}),
             ...(errorType ? { errorType } : {}),
             ...(errorHttpCode ? { errorHttpCode } : {}),
@@ -338,13 +413,15 @@ export class StreamingErrorHandler {
               errorMessage = errorMessage.includes('rate-limited upstream') 
                 ? errorMessage + ' OpenRouter is automatically trying alternative providers.'
                 : 'Rate limit exceeded. Please try again in a moment.';
+              // BUG-16: honor the server's Retry-After (header or body) instead of
+              // an unconditional 5s hint; fall back to 5 only when absent.
               metadata = {
                 model: data.model,
                 statusCode: status,
                 rawError: data.error,
                 isRateLimited: true,
                 shouldRetry: true,
-                retryAfterSeconds: 5 // Suggest 5 second retry delay
+                retryAfterSeconds: resolveRetryAfterSeconds(response, data) ?? 5,
               };
             } else {
               metadata = {

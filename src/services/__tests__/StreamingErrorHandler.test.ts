@@ -2,12 +2,16 @@ import { StreamingErrorHandler } from "../StreamingErrorHandler";
 import { SystemSculptError, ERROR_CODES } from "../../utils/errors";
 
 describe("StreamingErrorHandler", () => {
-  const createMockResponse = (status: number, body: any): Response => ({
+  const createMockResponse = (
+    status: number,
+    body: any,
+    headers?: Record<string, string>
+  ): Response => ({
     status,
     text: jest.fn().mockResolvedValue(typeof body === "string" ? body : JSON.stringify(body)),
     ok: status >= 200 && status < 300,
     statusText: "OK",
-    headers: new Headers(),
+    headers: new Headers(headers),
     redirected: false,
     type: "basic",
     url: "",
@@ -149,6 +153,43 @@ describe("StreamingErrorHandler", () => {
         code: ERROR_CODES.QUOTA_EXCEEDED,
         message: "Rate limit exceeded",
       });
+    });
+
+    // BUG-17: a BYOK/custom-provider 429 is transient, not terminal. The classifier
+    // (quotaError.ts) keys "offer a retry" off isRateLimited/shouldRetry, so the
+    // custom branch must set them — otherwise BYOK 429s never offer a retry.
+    it("classifies a custom-provider 429 as a transient rate limit", async () => {
+      const response = createMockResponse(429, {
+        error: { message: "Rate limit exceeded" },
+      });
+
+      try {
+        await StreamingErrorHandler.handleStreamError(response, true);
+        throw new Error("expected handleStreamError to throw");
+      } catch (err) {
+        const sysErr = err as SystemSculptError;
+        expect(sysErr.code).toBe(ERROR_CODES.QUOTA_EXCEEDED);
+        expect(sysErr.metadata?.isRateLimited).toBe(true);
+        expect(sysErr.metadata?.shouldRetry).toBe(true);
+      }
+    });
+
+    // BUG-16/BUG-17: the custom 429 must honor the server Retry-After header
+    // instead of an unconditional hint.
+    it("honors the Retry-After header on a custom-provider 429", async () => {
+      const response = createMockResponse(
+        429,
+        { error: { message: "Rate limit exceeded" } },
+        { "retry-after": "42" }
+      );
+
+      try {
+        await StreamingErrorHandler.handleStreamError(response, true);
+        throw new Error("expected handleStreamError to throw");
+      } catch (err) {
+        const sysErr = err as SystemSculptError;
+        expect(sysErr.metadata?.retryAfterSeconds).toBe(42);
+      }
     });
 
     it("uses top-level message when error wrapper is missing", async () => {
@@ -392,6 +433,44 @@ describe("StreamingErrorHandler", () => {
         await StreamingErrorHandler.handleStreamError(response, false);
       } catch (err) {
         expect((err as SystemSculptError).message).toContain("OpenRouter is automatically trying");
+      }
+    });
+
+    // BUG-16: the managed 429 path used to hard-code a 5s hint, so the UI always
+    // said "wait ~5s" even when the server's Retry-After header said 60. The hint
+    // must reflect the real header value.
+    it("honors the Retry-After header on a managed 429 (BUG-16)", async () => {
+      const response = createMockResponse(
+        429,
+        { error: { message: "Request rate-limited upstream by provider" } },
+        { "retry-after": "60" }
+      );
+
+      try {
+        await StreamingErrorHandler.handleStreamError(response, false);
+        throw new Error("expected handleStreamError to throw");
+      } catch (err) {
+        const sysErr = err as SystemSculptError;
+        expect(sysErr.code).toBe(ERROR_CODES.QUOTA_EXCEEDED);
+        expect(sysErr.metadata?.isRateLimited).toBe(true);
+        expect(sysErr.metadata?.shouldRetry).toBe(true);
+        // Must reflect the server header, not the legacy hard-coded 5.
+        expect(sysErr.metadata?.retryAfterSeconds).toBe(60);
+      }
+    });
+
+    // BUG-16: when the server omits Retry-After, fall back to the 5s hint.
+    it("falls back to a 5s hint when a managed 429 has no Retry-After header", async () => {
+      const response = createMockResponse(429, {
+        error: { message: "Request rate-limited upstream by provider" },
+      });
+
+      try {
+        await StreamingErrorHandler.handleStreamError(response, false);
+        throw new Error("expected handleStreamError to throw");
+      } catch (err) {
+        const sysErr = err as SystemSculptError;
+        expect(sysErr.metadata?.retryAfterSeconds).toBe(5);
       }
     });
 
