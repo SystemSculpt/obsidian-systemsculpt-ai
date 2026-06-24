@@ -1129,25 +1129,21 @@ export class SystemSculptService {
     };
   }
 
-  async *streamMessage({
-    messages,
-    model,
-    onError,
-    contextFiles,
-    systemPromptOverride,
-    transientSystemPromptSuffix,
-    signal,
-    forcedToolName,
-    maxTokens,
-    reasoningEffort,
-    allowTools,
-    includeReasoning,
-    debug,
-    sessionFile,
-    sessionId,
-    onPiSessionReady,
-    webSearchEnabled,
-  }: {
+  /**
+   * Public chat-stream entry point.
+   *
+   * Wraps {@link streamMessageOnce} in a bounded, abort-aware retry for transient
+   * upstream rate limits (BUG-07). The retry is gated by a single invariant: it
+   * may only fire when **no event has been yielded yet** (`hasYielded` latches on
+   * the one and only `yield` below), so already-streamed content can never be
+   * double-emitted. Once any event is emitted, the retry branch is unreachable
+   * and a later failure propagates exactly as before.
+   *
+   * Terminal error handling (abort swallow, logging, `debug.onError`, the
+   * `onError` callback, and the rethrow) lives here so it runs once, on the final
+   * outcome — never per inner attempt.
+   */
+  async *streamMessage(options: {
     messages: ChatMessage[];
     model: string;
     onError?: (error: string) => void;
@@ -1166,193 +1162,166 @@ export class SystemSculptService {
     onPiSessionReady?: (session: { sessionFile?: string; sessionId: string }) => void;
     webSearchEnabled?: boolean;
   }): AsyncGenerator<StreamEvent, void, unknown> {
+    const { model, onError, debug, signal } = options;
+    const MAX_RATE_LIMIT_RETRIES = 1;
+
+    let hasYielded = false;
+    let attempt = 0;
+
+    while (true) {
+      try {
+        for await (const event of this.streamMessageOnce(options)) {
+          // The single yield site: the moment one event leaves, retry is off the
+          // table for the rest of this turn (no double-emit, structurally).
+          hasYielded = true;
+          yield event;
+        }
+        return;
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") {
+          return;
+        }
+
+        // Only retry a transient rate limit, only before any output, only while
+        // attempts remain, and never after an abort.
+        const retry =
+          !hasYielded && attempt < MAX_RATE_LIMIT_RETRIES && !signal?.aborted
+            ? this.shouldRetryRateLimitedStreamTurn(error)
+            : null;
+        if (retry) {
+          attempt += 1;
+          await this.waitForRetryWindow(
+            this.getRateLimitedRetryDelayMs(retry.retryAfterSeconds, attempt),
+            signal,
+          );
+          if (signal?.aborted) {
+            return;
+          }
+          continue;
+        }
+
+        try {
+          errorLogger.error("Stream error in streamMessage", error, {
+            source: "SystemSculptService",
+            method: "streamMessage",
+            metadata: { model },
+          });
+        } catch {}
+        try {
+          debug?.onError?.({
+            error: error instanceof Error ? error.message : String(error),
+            details: error,
+          });
+        } catch {}
+        if (onError) {
+          let errorMessage = error instanceof Error ? error.message : "An unknown error occurred";
+
+          if (
+            error instanceof SystemSculptError &&
+            error.code === ERROR_CODES.STREAM_ERROR &&
+            error.statusCode === 400
+          ) {
+            errorMessage +=
+              "\nPlease try again in a few moments. If the issue persists, try selecting a different model.";
+          }
+          onError(errorMessage);
+        }
+        throw error;
+      }
+    }
+  }
+
+  /**
+   * Execute a single chat-stream attempt end to end (prepare → route → stream).
+   * Errors propagate raw so {@link streamMessage} can decide whether to retry;
+   * this method must not invoke the user-facing error callbacks.
+   */
+  private async *streamMessageOnce({
+    messages,
+    model,
+    contextFiles,
+    systemPromptOverride,
+    transientSystemPromptSuffix,
+    signal,
+    forcedToolName,
+    maxTokens,
+    reasoningEffort,
+    allowTools,
+    includeReasoning,
+    debug,
+    sessionFile,
+    sessionId,
+    onPiSessionReady,
+    webSearchEnabled,
+  }: {
+    messages: ChatMessage[];
+    model: string;
+    contextFiles?: Set<string>;
+    systemPromptOverride?: string;
+    transientSystemPromptSuffix?: string;
+    signal?: AbortSignal;
+    forcedToolName?: string;
+    maxTokens?: number;
+    reasoningEffort?: string;
+    allowTools?: boolean;
+    includeReasoning?: boolean;
+    debug?: StreamDebugCallbacks;
+    sessionFile?: string;
+    sessionId?: string;
+    onPiSessionReady?: (session: { sessionFile?: string; sessionId: string }) => void;
+    webSearchEnabled?: boolean;
+  }): AsyncGenerator<StreamEvent, void, unknown> {
     this.refreshSettings();
 
-    try {
-      errorLogger.debug("Starting streamMessage", {
-        source: "SystemSculptService",
-        method: "streamMessage",
-        metadata: { model },
-      });
+    errorLogger.debug("Starting streamMessage", {
+      source: "SystemSculptService",
+      method: "streamMessage",
+      metadata: { model },
+    });
 
-      const prepared = await this.prepareChatRequest({
-        messages,
-        model,
-        contextFiles,
-        systemPromptOverride,
-        transientSystemPromptSuffix,
-        emitNotices: true,
-        allowTools,
-      });
+    const prepared = await this.prepareChatRequest({
+      messages,
+      model,
+      contextFiles,
+      systemPromptOverride,
+      transientSystemPromptSuffix,
+      emitNotices: true,
+      allowTools,
+    });
 
-      const {
-        resolvedModel,
-      } = prepared;
+    const {
+      resolvedModel,
+    } = prepared;
 
-      if (prepared.modelSource === "pi_local") {
-        const { executeLocalPiStream } = await loadLocalPiStreamExecutorModule();
-        const preview = this.buildLocalPiRequestPreview({
-          prepared,
-          sessionFile,
-          reasoningEffort,
-        });
-
-        try {
-          debug?.onRequest?.({
-            provider: String(resolvedModel.sourceProviderId || resolvedModel.provider || "unknown"),
-            endpoint: "local-pi-sdk",
-            headers: {},
-            body: preview,
-            transport: "pi-sdk",
-            canStream: true,
-            isCustomProvider: false,
-          });
-        } catch {}
-
-        for await (const event of executeLocalPiStream({
-          plugin: this.plugin,
-          prepared,
-          sessionFile,
-          onSessionReady: onPiSessionReady,
-          signal,
-          reasoningEffort,
-          debug,
-        })) {
-          yield event;
-        }
-
-        try {
-          debug?.onStreamEnd?.({
-            completed: !signal?.aborted,
-            aborted: !!signal?.aborted,
-          });
-        } catch {}
-        return;
-      }
-
-      if (prepared.modelSource === "custom_endpoint") {
-        const remoteProviderId = normalizeProviderId(
-          String(prepared.resolvedModel.sourceProviderId || prepared.resolvedModel.provider || ""),
-        );
-
-        // Anthropic/Claude runs through the native Messages API executor; the
-        // OpenAI-compatible /chat/completions path cannot serve it (#230).
-        if (remoteProviderId === "anthropic") {
-          const { executeAnthropicRemoteStream } = await loadAnthropicRemoteStreamExecutorModule();
-          for await (const event of executeAnthropicRemoteStream({
-            plugin: this.plugin,
-            prepared,
-            signal,
-            reasoningEffort,
-            debug,
-          })) {
-            yield event;
-          }
-          return;
-        }
-
-        // Gemini uses the native generateContent streaming API, not the
-        // OpenAI-compatible /chat/completions executor (#231).
-        if (remoteProviderId === "google") {
-          const { executeGeminiRemoteStream } = await loadGeminiRemoteStreamExecutorModule();
-          for await (const event of executeGeminiRemoteStream({
-            plugin: this.plugin,
-            prepared,
-            signal,
-            reasoningEffort,
-            debug,
-          })) {
-            yield event;
-          }
-          return;
-        }
-
-
-        const { executeOpenRouterRemoteStream } = await loadRemoteProviderStreamExecutorModule();
-        for await (const event of executeOpenRouterRemoteStream({
-          plugin: this.plugin,
-          prepared,
-          signal,
-          reasoningEffort,
-          debug,
-        })) {
-          yield event;
-        }
-        return;
-      }
-
-      const endpoint = `${this.baseUrl}${SYSTEMSCULPT_API_ENDPOINTS.CHAT.COMPLETIONS}`;
-      const requestBody = this.buildHostedChatRequestBody({
+    if (prepared.modelSource === "pi_local") {
+      const { executeLocalPiStream } = await loadLocalPiStreamExecutorModule();
+      const preview = this.buildLocalPiRequestPreview({
         prepared,
-        forcedToolName,
-        maxTokens,
+        sessionFile,
         reasoningEffort,
-        webSearchEnabled,
       });
 
-      if (this.trimPayloadImages(requestBody)) {
-        new Notice(
-          "Some images were removed from older messages to fit within the server's request size limit.",
-          8000,
-        );
-      }
-
-      const transport = PlatformContext.get().preferredTransport({ endpoint });
-
-      debug?.onRequest?.({
-        provider: String(resolvedModel.provider || "systemsculpt"),
-        endpoint,
-        // The license key is a credential: never write it to the debug payload,
-        // which is persisted to the vault and copied to the clipboard. Reuse the
-        // real header shape but with a redacted placeholder (mirrors the BYOK
-        // executors). The genuine key is sent on the real request below.
-        headers: SystemSculptEnvironment.buildHeaders("[redacted]"),
-        body: requestBody,
-        transport,
-        canStream: true,
-        isCustomProvider: false,
-      });
-
-      const response = await this.platformRequestClient.request({
-        url: endpoint,
-        method: "POST",
-        body: requestBody,
-        stream: true,
-        signal,
-        licenseKey: (this.settings.licenseKey || "").trim(),
-      });
-
-      debug?.onResponse?.({
-        provider: String(resolvedModel.provider || "systemsculpt"),
-        endpoint,
-        status: response.status,
-        headers: serializeResponseHeaders(response.headers),
-        isCustomProvider: false,
-      });
-
-      if (!response.ok) {
-        await StreamingErrorHandler.handleStreamError(response, false, {
-          provider: String(resolvedModel.provider || "systemsculpt"),
-          endpoint,
-          model: prepared.actualModelId,
-        });
-      }
-
-      let diagnostics: any;
-      for await (
-        const event of this.streamingService.streamResponse(response, {
-          model: prepared.actualModelId,
+      try {
+        debug?.onRequest?.({
+          provider: String(resolvedModel.sourceProviderId || resolvedModel.provider || "unknown"),
+          endpoint: "local-pi-sdk",
+          headers: {},
+          body: preview,
+          transport: "pi-sdk",
+          canStream: true,
           isCustomProvider: false,
-          signal,
-          onRawEvent: debug?.onRawEvent,
-          onDiagnostics: (value) => {
-            diagnostics = value;
-          },
-        })
-      ) {
-        try {
-          debug?.onStreamEvent?.({ event });
-        } catch {}
+        });
+      } catch {}
+
+      for await (const event of executeLocalPiStream({
+        plugin: this.plugin,
+        prepared,
+        sessionFile,
+        onSessionReady: onPiSessionReady,
+        signal,
+        reasoningEffort,
+        debug,
+      })) {
         yield event;
       }
 
@@ -1360,41 +1329,144 @@ export class SystemSculptService {
         debug?.onStreamEnd?.({
           completed: !signal?.aborted,
           aborted: !!signal?.aborted,
-          diagnostics,
         });
       } catch {}
-    } catch (error) {
-      if (error instanceof DOMException && error.name === "AbortError") {
+      return;
+    }
+
+    if (prepared.modelSource === "custom_endpoint") {
+      const remoteProviderId = normalizeProviderId(
+        String(prepared.resolvedModel.sourceProviderId || prepared.resolvedModel.provider || ""),
+      );
+
+      // Anthropic/Claude runs through the native Messages API executor; the
+      // OpenAI-compatible /chat/completions path cannot serve it (#230).
+      if (remoteProviderId === "anthropic") {
+        const { executeAnthropicRemoteStream } = await loadAnthropicRemoteStreamExecutorModule();
+        for await (const event of executeAnthropicRemoteStream({
+          plugin: this.plugin,
+          prepared,
+          signal,
+          reasoningEffort,
+          debug,
+        })) {
+          yield event;
+        }
         return;
       }
-      try {
-        errorLogger.error("Stream error in streamMessage", error, {
-          source: "SystemSculptService",
-          method: "streamMessage",
-          metadata: { model },
-        });
-      } catch {}
-      try {
-        debug?.onError?.({
-          error: error instanceof Error ? error.message : String(error),
-          details: error,
-        });
-      } catch {}
-      if (onError) {
-        let errorMessage = error instanceof Error ? error.message : "An unknown error occurred";
 
-        if (
-          error instanceof SystemSculptError &&
-          error.code === ERROR_CODES.STREAM_ERROR &&
-          error.statusCode === 400
-        ) {
-          errorMessage +=
-            "\nPlease try again in a few moments. If the issue persists, try selecting a different model.";
+      // Gemini uses the native generateContent streaming API, not the
+      // OpenAI-compatible /chat/completions executor (#231).
+      if (remoteProviderId === "google") {
+        const { executeGeminiRemoteStream } = await loadGeminiRemoteStreamExecutorModule();
+        for await (const event of executeGeminiRemoteStream({
+          plugin: this.plugin,
+          prepared,
+          signal,
+          reasoningEffort,
+          debug,
+        })) {
+          yield event;
         }
-        onError(errorMessage);
+        return;
       }
-      throw error;
+
+
+      const { executeOpenRouterRemoteStream } = await loadRemoteProviderStreamExecutorModule();
+      for await (const event of executeOpenRouterRemoteStream({
+        plugin: this.plugin,
+        prepared,
+        signal,
+        reasoningEffort,
+        debug,
+      })) {
+        yield event;
+      }
+      return;
     }
+
+    const endpoint = `${this.baseUrl}${SYSTEMSCULPT_API_ENDPOINTS.CHAT.COMPLETIONS}`;
+    const requestBody = this.buildHostedChatRequestBody({
+      prepared,
+      forcedToolName,
+      maxTokens,
+      reasoningEffort,
+      webSearchEnabled,
+    });
+
+    if (this.trimPayloadImages(requestBody)) {
+      new Notice(
+        "Some images were removed from older messages to fit within the server's request size limit.",
+        8000,
+      );
+    }
+
+    const transport = PlatformContext.get().preferredTransport({ endpoint });
+
+    debug?.onRequest?.({
+      provider: String(resolvedModel.provider || "systemsculpt"),
+      endpoint,
+      // The license key is a credential: never write it to the debug payload,
+      // which is persisted to the vault and copied to the clipboard. Reuse the
+      // real header shape but with a redacted placeholder (mirrors the BYOK
+      // executors). The genuine key is sent on the real request below.
+      headers: SystemSculptEnvironment.buildHeaders("[redacted]"),
+      body: requestBody,
+      transport,
+      canStream: true,
+      isCustomProvider: false,
+    });
+
+    const response = await this.platformRequestClient.request({
+      url: endpoint,
+      method: "POST",
+      body: requestBody,
+      stream: true,
+      signal,
+      licenseKey: (this.settings.licenseKey || "").trim(),
+    });
+
+    debug?.onResponse?.({
+      provider: String(resolvedModel.provider || "systemsculpt"),
+      endpoint,
+      status: response.status,
+      headers: serializeResponseHeaders(response.headers),
+      isCustomProvider: false,
+    });
+
+    if (!response.ok) {
+      await StreamingErrorHandler.handleStreamError(response, false, {
+        provider: String(resolvedModel.provider || "systemsculpt"),
+        endpoint,
+        model: prepared.actualModelId,
+      });
+    }
+
+    let diagnostics: any;
+    for await (
+      const event of this.streamingService.streamResponse(response, {
+        model: prepared.actualModelId,
+        isCustomProvider: false,
+        signal,
+        onRawEvent: debug?.onRawEvent,
+        onDiagnostics: (value) => {
+          diagnostics = value;
+        },
+      })
+    ) {
+      try {
+        debug?.onStreamEvent?.({ event });
+      } catch {}
+      yield event;
+    }
+
+    try {
+      debug?.onStreamEnd?.({
+        completed: !signal?.aborted,
+        aborted: !!signal?.aborted,
+        diagnostics,
+      });
+    } catch {}
   }
 
   /**
