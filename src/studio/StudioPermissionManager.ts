@@ -1,6 +1,6 @@
 import { normalizePath } from "obsidian";
 import type { StudioCapabilityGrant, StudioPermissionPolicyV1 } from "./types";
-import { nowIso, randomId } from "./utils";
+import { isBlanketCliCommandPattern, nowIso, randomId } from "./utils";
 
 function wildcardToRegExp(pattern: string): RegExp {
   const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&");
@@ -79,6 +79,9 @@ export class StudioPermissionManager {
       const patterns = grant.scope.allowedCommandPatterns || [];
       for (const pattern of patterns) {
         if (!pattern.trim()) continue;
+        // SEC-03 defense-in-depth: a bare "*" matches every command. Even if a
+        // policy bypassed parse-time stripping, never honor it as an allow-all.
+        if (isBlanketCliCommandPattern(pattern)) continue;
         if (wildcardToRegExp(pattern.trim()).test(trimmed)) {
           return;
         }

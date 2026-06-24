@@ -15,7 +15,7 @@ import {
 } from "./StudioProjectSession";
 import { StudioProjectSessionManager } from "./StudioProjectSessionManager";
 import { resolveStudioDynamicSelectOptions } from "./StudioDynamicSelectOptions";
-import { randomId } from "./utils";
+import { isBlanketCliCommandPattern, randomId } from "./utils";
 import type {
   StudioAssetRef,
   StudioCapability,
@@ -366,13 +366,19 @@ export class StudioService {
       });
       changed = true;
     } else {
-      const patterns = new Set(cliGrant.scope.allowedCommandPatterns || []);
-      if (!patterns.has("*")) {
-        for (const pattern of requiredCliPatterns) {
-          if (!patterns.has(pattern)) {
-            patterns.add(pattern);
-            changed = true;
-          }
+      const existing = cliGrant.scope.allowedCommandPatterns || [];
+      // SEC-03: scrub any stale blanket "*" baked into an on-disk policy so
+      // re-opening an older project converges to the safe state (the cleanup is
+      // persisted below via savePolicy).
+      const patterns = new Set(existing.filter((p) => !isBlanketCliCommandPattern(p)));
+      if (patterns.size !== existing.length) {
+        changed = true;
+      }
+      // Always ensure the legitimate ffmpeg/ffprobe defaults are present.
+      for (const pattern of requiredCliPatterns) {
+        if (!patterns.has(pattern)) {
+          patterns.add(pattern);
+          changed = true;
         }
       }
       cliGrant.scope.allowedCommandPatterns = Array.from(patterns);
