@@ -87,10 +87,6 @@ Config.overrideWebpackConfig((currentConfiguration) => {
       ...browserOnlyModuleFallbacks,
       obsidian: path.resolve(process.cwd(), "src/shims/obsidian.ts"),
       src: path.resolve(process.cwd(), "../src"),
-      "gpt-tokenizer/esm/encoding": path.resolve(
-        process.cwd(),
-        "src/shims/gptTokenizerEncoding.ts"
-      ),
       "@plugin-ui/createInputUI": path.resolve(
         process.cwd(),
         "../src/views/chatview/ui/createInputUI.ts"

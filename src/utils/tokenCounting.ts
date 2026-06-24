@@ -1,8 +1,6 @@
 import { TokenEstimator } from "../services/embeddings/utils/TokenEstimator";
 import type { ChatMessage, MultiPartContent } from "../types";
 
-type EncodeFn = (text: string) => number[];
-
 class LruCache<K, V> {
   private maxEntries: number;
   private map: Map<K, V>;
@@ -37,43 +35,24 @@ class LruCache<K, V> {
   }
 }
 
-let attemptedTokenizerLoad = false;
-let encodeImpl: EncodeFn | null = null;
-
-function ensureTokenizerLoading(): void {
-  if (attemptedTokenizerLoad) return;
-  attemptedTokenizerLoad = true;
-  // Try loading a tokenizer implementation in the background; fallback to heuristic if unavailable
-  import("gpt-tokenizer/esm/encoding").then((mod: any) => {
-    if (mod && typeof mod.encode === "function") {
-      encodeImpl = (text: string) => mod.encode(text);
-    }
-  }).catch(() => {
-    // Silently continue with heuristic estimator
-  });
-}
-
 const tokenCache = new LruCache<string, number>(1000);
 
+/**
+ * Estimate the number of tokens in `text`.
+ *
+ * Token counts are intentionally a heuristic (see `TokenEstimator`): a
+ * character/word-based approximation that needs no runtime tokenizer dependency.
+ * That keeps the mobile bundle free of node-ish BPE libraries, and client-side
+ * counts are only ever estimates anyway — the server is authoritative for
+ * billing. Results are memoized per input string for cheap repeated lookups.
+ */
 export function countTextTokens(text: string): number {
   if (!text) return 0;
-  ensureTokenizerLoading();
 
   const cached = tokenCache.get(text);
   if (cached !== undefined) return cached;
 
-  let tokens: number;
-  try {
-    if (encodeImpl) {
-      tokens = encodeImpl(text).length;
-    } else {
-      // Heuristic fallback
-      tokens = TokenEstimator.estimateTokens(text);
-    }
-  } catch {
-    tokens = TokenEstimator.estimateTokens(text);
-  }
-
+  const tokens = TokenEstimator.estimateTokens(text);
   tokenCache.set(text, tokens);
   return tokens;
 }

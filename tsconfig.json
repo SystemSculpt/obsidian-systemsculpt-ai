@@ -22,7 +22,6 @@
     ],
     "paths": {
       "@/*": ["Nexus/src/*"],
-      "gpt-tokenizer": ["src/types/gpt-tokenizer"],
       "obsidian": ["node_modules/obsidian"]
     },
     "jsx": "react-jsx",

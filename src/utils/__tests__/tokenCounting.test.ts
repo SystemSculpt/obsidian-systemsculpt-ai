@@ -1,6 +1,8 @@
 /**
  * @jest-environment node
  */
+import * as fs from "fs";
+import * as path from "path";
 import {
   countTextTokens,
   countMessageTokens,
@@ -16,6 +18,60 @@ import {
   countToolResultTokens,
   countToolCallTokensForProvider,
 } from "../tokenCounting";
+import { TokenEstimator } from "../../services/embeddings/utils/TokenEstimator";
+
+/**
+ * Guard for DEP-01: token counting is heuristic-only by design.
+ *
+ * `tokenCounting` once carried a dynamic `import("gpt-tokenizer/...")` that was
+ * never installed, so it always rejected silently and every caller fell back to
+ * the `TokenEstimator` heuristic. We removed that phantom dependency and made the
+ * heuristic the explicit, documented path. These tests cement that contract so
+ * the dead import (and its `.d.ts`/tsconfig/remotion tendrils) cannot silently
+ * return — client-side counts are estimates; the server is authoritative for
+ * billing.
+ */
+describe("DEP-01: heuristic-only token counting (no phantom tokenizer)", () => {
+  it("countTextTokens returns exactly the documented heuristic value", () => {
+    const samples = [
+      "hello world",
+      "The quick brown fox jumps over the lazy dog",
+      "function add(a, b) { return a + b; }",
+      "日本語のトークンも数える",
+    ];
+    for (const text of samples) {
+      expect(countTextTokens(text)).toBe(TokenEstimator.estimateTokens(text));
+    }
+  });
+
+  it("estimateTokens is the same heuristic path as countTextTokens", () => {
+    const text = "an alias must not diverge from the heuristic";
+    expect(estimateTokens(text)).toBe(TokenEstimator.estimateTokens(text));
+  });
+
+  it("no gpt-tokenizer reference remains anywhere under src/", () => {
+    const srcRoot = path.resolve(__dirname, "../..");
+    const offenders: string[] = [];
+
+    const walk = (dir: string): void => {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          walk(full);
+          continue;
+        }
+        if (!/\.(ts|tsx|js|jsx)$/.test(entry.name)) continue;
+        if (full === __filename) continue; // this guard file names the string
+        if (fs.readFileSync(full, "utf8").includes("gpt-tokenizer")) {
+          offenders.push(path.relative(srcRoot, full));
+        }
+      }
+    };
+
+    walk(srcRoot);
+    expect(offenders).toEqual([]);
+  });
+});
 
 describe("countTextTokens", () => {
   it("returns 0 for empty string", () => {
