@@ -919,10 +919,22 @@ export class InputHandler extends Component {
   }
 
   private handleStopGeneration(): void {
-    this.turnLifecycle.stop();
+    this.abortActiveTurn();
 
     // Don't force scroll when user stops generation - respect their current position
     // this.scrollManager.resetScrollState();
+  }
+
+  /**
+   * Abort the in-flight chat turn (if any), aborting its stream's AbortController.
+   *
+   * Safe to call when no turn is active: ChatTurnLifecycleController.stop() is
+   * idempotent and never throws. This is the canonical teardown hook — the Stop
+   * button, the input handler's own dispose path, and ChatView.onClose() all go
+   * through it so any route that ends a turn aborts the stream (BUG-03).
+   */
+  public abortActiveTurn(): void {
+    this.turnLifecycle.stop();
   }
 
   private async handleSendMessage(overrides?: {
@@ -1579,6 +1591,11 @@ export class InputHandler extends Component {
       return;
     }
     this.localResourcesDisposed = true;
+
+    // Abort any in-flight stream before tearing down the rest, so the network
+    // request, its rAF metrics ticker, and autosave stop running into a
+    // disposed view (BUG-03).
+    this.abortActiveTurn();
 
     if (this.renderTimeout) {
       clearTimeout(this.renderTimeout);
