@@ -3193,10 +3193,11 @@ export class ChatView extends ItemView {
   }
 
   async onClose(): Promise<void> {
-    // Cancel any pending operations
-    if (this.inputHandler && typeof (this.inputHandler as any).abortCurrentGeneration === 'function') {
-      (this.inputHandler as any).abortCurrentGeneration();
-    }
+    // Abort any in-flight stream before tearing down the DOM/metrics, so the
+    // network request and its rAF ticker stop running into a removed view
+    // (BUG-03). disposeViewResources() also funnels through this via
+    // inputHandler.unload(), but call it first/explicitly here too.
+    this.inputHandler?.abortActiveTurn?.();
 
     this.disposeViewResources();
     this.messages = [];
