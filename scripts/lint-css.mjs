@@ -208,6 +208,40 @@ function checkSelector(selectorInfo) {
 }
 
 /**
+ * Lint every CSS file under a directory.
+ *
+ * Pure (no process.exit, no console): scans `cssDir`, returns a structured
+ * report so callers (the CLI below, and the check:plugin gate) can decide how
+ * to surface results. This is what makes the guard testable.
+ *
+ * @param {{ cssDir: string }} options
+ * @returns {{ errorCount: number, warningCount: number, fileCount: number, issues: Array<{severity: string, message: string, selector: string, line: number, file: string}> }}
+ */
+export function lintCssDirectory({ cssDir }) {
+  const issues = [];
+  let errorCount = 0;
+  let warningCount = 0;
+
+  const cssFiles = findCssFiles(cssDir);
+
+  for (const file of cssFiles) {
+    const content = fs.readFileSync(file, "utf8");
+    const relPath = path.relative(ROOT_DIR, file);
+    const selectors = extractSelectors(content, relPath);
+
+    for (const sel of selectors) {
+      for (const issue of checkSelector(sel)) {
+        if (issue.severity === "error") errorCount++;
+        if (issue.severity === "warning") warningCount++;
+        issues.push(issue);
+      }
+    }
+  }
+
+  return { errorCount, warningCount, fileCount: cssFiles.length, issues };
+}
+
+/**
  * Recursively find all CSS files
  */
 function findCssFiles(dir) {
@@ -238,31 +272,15 @@ function main() {
     process.exit(1);
   }
 
-  const cssFiles = findCssFiles(CSS_DIR);
-  console.log(`Found ${cssFiles.length} CSS files\n`);
+  const { errorCount, warningCount, fileCount, issues } = lintCssDirectory({ cssDir: CSS_DIR });
+  console.log(`Found ${fileCount} CSS files\n`);
 
-  let errorCount = 0;
-  let warningCount = 0;
   const issuesByFile = new Map();
-
-  for (const file of cssFiles) {
-    const content = fs.readFileSync(file, "utf8");
-    const relPath = path.relative(ROOT_DIR, file);
-    const selectors = extractSelectors(content, relPath);
-
-    for (const sel of selectors) {
-      const issues = checkSelector(sel);
-
-      for (const issue of issues) {
-        if (issue.severity === "error") errorCount++;
-        if (issue.severity === "warning") warningCount++;
-
-        if (!issuesByFile.has(relPath)) {
-          issuesByFile.set(relPath, []);
-        }
-        issuesByFile.get(relPath).push(issue);
-      }
+  for (const issue of issues) {
+    if (!issuesByFile.has(issue.file)) {
+      issuesByFile.set(issue.file, []);
     }
+    issuesByFile.get(issue.file).push(issue);
   }
 
   // Report issues
@@ -297,4 +315,9 @@ function main() {
   }
 }
 
-main();
+// Run the CLI only when invoked directly (e.g. `node scripts/lint-css.mjs`),
+// not when imported (the check:plugin gate and the guard test import
+// lintCssDirectory instead).
+if (process.argv[1] && path.resolve(process.argv[1]) === __filename) {
+  main();
+}

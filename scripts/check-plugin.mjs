@@ -4,6 +4,7 @@
  * Unified, quiet checker for the Obsidian plugin.
  * - TypeScript typecheck (noEmit)
  * - Real production build + artifact validation
+ * - CSS lint (Obsidian-override scoping hygiene)
  * - Release workflow node:test coverage
  * - Jest unit tests
  * Prints concise summary on success; details only on failure or --verbose.
@@ -13,6 +14,7 @@ import { execSync } from 'node:child_process';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { buildProductionPlugin } from './plugin-artifacts.mjs';
+import { lintCssDirectory } from './lint-css.mjs';
 
 const args = process.argv.slice(2);
 const verbose = args.includes('--verbose');
@@ -79,9 +81,33 @@ async function checkBundle() {
   }
 }
 
+function checkCss() {
+  const cssDir = path.join(root, 'src', 'css');
+  if (!fs.existsSync(cssDir)) {
+    return { ok: true, ms: 0, note: 'no-css' };
+  }
+
+  const started = Date.now();
+  const report = lintCssDirectory({ cssDir });
+  const ms = Date.now() - started;
+
+  if (report.errorCount > 0) {
+    const lines = report.issues
+      .filter(issue => issue.severity === 'error')
+      .map(issue => `${issue.file}:${issue.line} ${issue.message} (selector: ${issue.selector})`);
+    return {
+      ok: false,
+      ms,
+      message: `${report.errorCount} CSS error(s):\n${lines.join('\n')}`,
+    };
+  }
+
+  return { ok: true, ms, note: `${report.fileCount} files` };
+}
+
 async function main() {
   const results = [];
-  const checks = ['tsc', 'bundle'];
+  const checks = ['tsc', 'bundle', 'css'];
   const jestRunner = path.join(root, 'scripts', 'jest.mjs');
   const jestCmdPrefix = fs.existsSync(jestRunner) ? `node ${JSON.stringify(jestRunner)}` : 'npx jest';
 
@@ -91,6 +117,9 @@ async function main() {
   const bundle = await checkBundle();
   results.push({ name: 'bundle', ...bundle });
 
+  const css = checkCss();
+  results.push({ name: 'css', ...css });
+
   if (!skipTests) {
     checks.push('script-tests', 'tests');
     const scriptTests = run(
@@ -98,6 +127,7 @@ async function main() {
         [
           'scripts/release-plugin.test.mjs',
           'scripts/plugin-artifacts.test.mjs',
+          'scripts/lint-css.test.mjs',
           'scripts/check-github-required-checks.test.mjs',
           'scripts/check-native-release-gates.test.mjs',
           'scripts/github-workflows.test.mjs',
@@ -148,6 +178,9 @@ async function main() {
       if (verbose) {
         console.error(r.message || '');
       }
+    } else if (r.name === 'css') {
+      console.error('[plugin] FAIL: CSS lint found unscoped Obsidian-override selectors');
+      console.error(r.message || '');
     } else if (r.name === 'script-tests') {
       console.error('[plugin] FAIL: Script-level tests failed');
       if (verbose) {
