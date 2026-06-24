@@ -91,15 +91,26 @@ jest.mock("../../../types", () => ({
 }));
 
 import { SettingsManager } from "../SettingsManager";
+import { Notice } from "obsidian";
 import { DEFAULT_SETTINGS, LogLevel } from "../../../types";
 import { migrateSettingsToCurrentSchema } from "../migrations/SettingsMigrator";
+
+const NoticeMock = Notice as unknown as jest.Mock;
 
 describe("SettingsManager", () => {
   let mockPlugin: any;
   let settingsManager: SettingsManager;
+  let mockLogger: { error: jest.Mock; warn: jest.Mock; info: jest.Mock; debug: jest.Mock };
 
   beforeEach(() => {
     jest.clearAllMocks();
+
+    mockLogger = {
+      error: jest.fn(),
+      warn: jest.fn(),
+      info: jest.fn(),
+      debug: jest.fn(),
+    };
 
     mockPlugin = {
       manifest: {
@@ -109,6 +120,7 @@ describe("SettingsManager", () => {
       saveData: jest.fn().mockResolvedValue(undefined),
       storage: null,
       register: jest.fn(),
+      getLogger: jest.fn(() => mockLogger),
       app: {
         vault: {
           configDir: ".obsidian",
@@ -116,8 +128,10 @@ describe("SettingsManager", () => {
             basePath: "/tmp/systemsculpt-test-vault",
             exists: jest.fn().mockResolvedValue(false),
             read: jest.fn(),
+            write: jest.fn().mockResolvedValue(undefined),
             list: jest.fn().mockResolvedValue({ files: [] }),
           },
+          createFolder: jest.fn().mockResolvedValue(undefined),
         },
         workspace: {
           trigger: jest.fn(),
@@ -949,6 +963,87 @@ describe("SettingsManager", () => {
       const result = await restoreFromBackup();
 
       expect(result).toBeNull();
+    });
+  });
+
+  // Guard for plan 009 (BUG-19): a failing saveData/backup write must never be
+  // swallowed silently. Before this guard, saveSettings/backupSettings wrapped
+  // their body in an empty `catch (error) {}`, so a disk-full / permission /
+  // sync-lock failure resolved as success — memory changed, disk did not, and
+  // the change was lost on reload. The failure must be observable (logged via
+  // the plugin logger + a user-facing Notice).
+  describe("surfacing save/backup failures (plan 009 / BUG-19)", () => {
+    it("logs and shows a Notice when saveData rejects", async () => {
+      await settingsManager.loadSettings();
+      NoticeMock.mockClear();
+      mockLogger.error.mockClear();
+
+      const saveError = new Error("ENOSPC: no space left on device");
+      mockPlugin.saveData.mockRejectedValueOnce(saveError);
+
+      // updateSettings -> saveSettings; the persistence failure must surface.
+      await settingsManager.updateSettings({ settingsMode: "advanced" });
+
+      expect(mockLogger.error).toHaveBeenCalledTimes(1);
+      const [message, forwardedError] = mockLogger.error.mock.calls[0];
+      expect(typeof message).toBe("string");
+      expect(forwardedError).toBe(saveError);
+      expect(NoticeMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("de-duplicates the Notice across a burst of consecutive save failures", async () => {
+      await settingsManager.loadSettings();
+      NoticeMock.mockClear();
+      mockLogger.error.mockClear();
+
+      mockPlugin.saveData.mockRejectedValue(new Error("EBUSY: resource busy"));
+
+      // Simulate a sync-lock storm: many saves fail back-to-back. The user must
+      // not be spammed with one Notice per keystroke.
+      await settingsManager.updateSettings({ settingsMode: "advanced" });
+      await settingsManager.updateSettings({ debugMode: true });
+      await settingsManager.updateSettings({ agentModeEnabled: false });
+
+      // Every failure is logged for diagnostics, but the Notice is de-duplicated.
+      expect(mockLogger.error.mock.calls.length).toBeGreaterThanOrEqual(3);
+      expect(NoticeMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not log or show a Notice on the happy path", async () => {
+      await settingsManager.loadSettings();
+      NoticeMock.mockClear();
+      mockLogger.error.mockClear();
+
+      await settingsManager.updateSettings({ settingsMode: "advanced" });
+
+      expect(settingsManager.settings.settingsMode).toBe("advanced");
+      expect(mockLogger.error).not.toHaveBeenCalled();
+      expect(NoticeMock).not.toHaveBeenCalled();
+    });
+
+    it("logs a backup failure but does not break updateSettings", async () => {
+      await settingsManager.loadSettings();
+      NoticeMock.mockClear();
+      mockLogger.error.mockClear();
+      mockLogger.warn.mockClear();
+
+      // saveData succeeds; only the best-effort backup write fails.
+      mockPlugin.app.vault.adapter.exists.mockResolvedValue(true);
+      mockPlugin.app.vault.adapter.write = jest
+        .fn()
+        .mockRejectedValue(new Error("EACCES: permission denied"));
+
+      await expect(
+        settingsManager.updateSettings({ settingsMode: "advanced" })
+      ).resolves.toBeUndefined();
+
+      // The in-memory change still applied and was persisted via saveData.
+      expect(settingsManager.settings.settingsMode).toBe("advanced");
+      expect(mockPlugin.saveData).toHaveBeenCalled();
+      // Backup failure is observable in diagnostics (best-effort: logged, no throw).
+      const backupLogged =
+        mockLogger.error.mock.calls.length > 0 || mockLogger.warn.mock.calls.length > 0;
+      expect(backupLogged).toBe(true);
     });
   });
 });
