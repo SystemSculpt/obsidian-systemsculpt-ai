@@ -133,7 +133,13 @@ export interface EmbeddingsProvider {
   /** Best-effort hint of the embedding vector dimension produced by this provider. */
   expectedDimension?: number;
 
-  generateEmbeddings(texts: string[], options?: EmbeddingsGenerateOptions): Promise<number[][]>;
+  /**
+   * Returns one slot per input text, in order. A slot is `null` when the
+   * provider produced no vector for that input (e.g. a whitespace-only chunk
+   * that must not be sent to the API). Callers MUST pair `result[i]` with
+   * `texts[i]` and skip `null` slots — never assume a 1:1 dense array.
+   */
+  generateEmbeddings(texts: string[], options?: EmbeddingsGenerateOptions): Promise<(number[] | null)[]>;
   validateConfiguration(): Promise<boolean>;
   getModels?(): Promise<string[]>;
   /**

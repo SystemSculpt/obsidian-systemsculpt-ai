@@ -9,10 +9,20 @@ describe("SystemSculptProvider WAF signal coverage", () => {
     const obsidian = await import("obsidian");
     requestUrlMock = obsidian.requestUrl as jest.Mock;
     requestUrlMock.mockReset();
-    requestUrlMock.mockResolvedValue({
-      status: 200,
-      text: JSON.stringify({ embeddings: [[0.1, 0.2, 0.3]] }),
-      headers: { "content-type": "application/json" },
+    // Echo one vector per sent text so batch requests get a count-aligned
+    // response (the provider asserts vectors.length === texts.length).
+    requestUrlMock.mockImplementation((opts: { body?: string }) => {
+      let count = 1;
+      try {
+        const payload = opts?.body ? JSON.parse(opts.body) : undefined;
+        if (Array.isArray(payload?.texts)) count = payload.texts.length;
+      } catch {}
+      const embeddings = Array.from({ length: count }, () => [0.1, 0.2, 0.3]);
+      return Promise.resolve({
+        status: 200,
+        text: JSON.stringify({ embeddings }),
+        headers: { "content-type": "application/json" },
+      });
     });
 
     const { SystemSculptProvider } = await import("../embeddings/providers/SystemSculptProvider");
