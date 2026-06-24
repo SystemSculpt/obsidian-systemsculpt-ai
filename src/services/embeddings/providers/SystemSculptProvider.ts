@@ -51,7 +51,10 @@ export class SystemSculptProvider implements EmbeddingsProvider {
     this.model = DEFAULT_EMBEDDING_MODEL;
   }
 
-  async generateEmbeddings(texts: string[], options?: EmbeddingsGenerateOptions): Promise<number[][]> {
+  async generateEmbeddings(
+    texts: string[],
+    options?: EmbeddingsGenerateOptions
+  ): Promise<(number[] | null)[]> {
     if (!this.licenseKey) {
       throw new Error('License key is required for SystemSculpt embeddings');
     }
@@ -60,26 +63,47 @@ export class SystemSculptProvider implements EmbeddingsProvider {
       return [];
     }
 
-    // Validate and truncate texts
-    const validTexts = texts
-      .filter(text => text && typeof text === 'string' && text.trim().length > 0)
-      .map(text => {
-        const sanitized = this.sanitizeTextForApi(text);
-        // Ensure each text is within token limits
-        // Use a more conservative limit (5000 tokens) to account for server overhead
-        const truncated = tokenCounter.truncateToTokenLimit(sanitized, 5000);
-        return truncated;
-      });
+    // Sanitize/truncate each input, but NEVER drop entries: whitespace-only or
+    // non-string inputs become `null` at their original index. The returned
+    // array always has one slot per input so callers can pair `result[i]` with
+    // `texts[i]`. Sending the filtered (shorter) list and returning it shifts
+    // every later vector onto the wrong chunk -> silent semantic-search
+    // corruption (BUG-01). The processor requires `length === input.length`
+    // and skips per-index `null`.
+    const prepared = texts.map(text => {
+      if (!text || typeof text !== 'string' || text.trim().length === 0) {
+        return null;
+      }
+      const sanitized = this.sanitizeTextForApi(text);
+      // Use a conservative token limit (5000) to account for server overhead.
+      return tokenCounter.truncateToTokenLimit(sanitized, 5000);
+    });
 
-    if (validTexts.length === 0) {
-      return [];
+    // Indices we actually send to the API, in order.
+    const sendIndices: number[] = [];
+    const sendTexts: string[] = [];
+    prepared.forEach((value, index) => {
+      if (value !== null) {
+        sendIndices.push(index);
+        sendTexts.push(value);
+      }
+    });
+
+    if (sendTexts.length === 0) {
+      // Nothing valid to embed: every slot is null, but the length is preserved.
+      return prepared.map(() => null);
     }
 
-    if (validTexts.length > this.maxTextsPerRequest) {
-      return this.generateEmbeddingsInClientBatches(validTexts, options);
-    }
+    const vectors = sendTexts.length > this.maxTextsPerRequest
+      ? await this.generateEmbeddingsInClientBatches(sendTexts, options)
+      : await this.performEmbeddingRequest(sendTexts, options);
 
-    return this.performEmbeddingRequest(validTexts, options);
+    // Re-thread the returned vectors back into their original positions.
+    const aligned: (number[] | null)[] = prepared.map(() => null);
+    for (let i = 0; i < sendIndices.length; i++) {
+      aligned[sendIndices[i]] = vectors[i] ?? null;
+    }
+    return aligned;
   }
 
   private sanitizeTextForApi(text: string): string {
@@ -361,10 +385,25 @@ export class SystemSculptProvider implements EmbeddingsProvider {
           this.expectedDimension = sampleDim;
         }
 
-        // Support single or batch responses
-        if (Array.isArray(data.embeddings)) return data.embeddings;
-        if (Array.isArray(data.embedding)) return [data.embedding];
-        return [];
+        // Support single or batch responses. Assert one vector per text we
+        // sent so a server that drops rows fails loudly here instead of
+        // silently misaligning vectors with chunks downstream (BUG-01).
+        const vectors: number[][] = Array.isArray(data.embeddings)
+          ? data.embeddings
+          : Array.isArray(data.embedding)
+            ? [data.embedding]
+            : [];
+        if (vectors.length !== payloadTexts.length) {
+          throw new EmbeddingsProviderError(
+            `Embedding count mismatch: expected ${payloadTexts.length}, got ${vectors.length}`,
+            {
+              code: 'UNEXPECTED_RESPONSE',
+              providerId: this.id,
+              endpoint: url,
+            }
+          );
+        }
+        return vectors;
 
       } catch (error) {
         let normalized = this.normalizeError(error, url);
