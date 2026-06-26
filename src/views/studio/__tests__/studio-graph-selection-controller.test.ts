@@ -543,6 +543,7 @@ describe("StudioGraphSelectionController drag behavior", () => {
     } as unknown as PointerEvent;
 
     const harness = installWindowPointerListenerHarness();
+    const movePreventDefault = jest.fn();
     try {
       controller.startNodeDrag("node_1", startEvent, nodeEl);
       harness.emit(
@@ -551,6 +552,7 @@ describe("StudioGraphSelectionController drag behavior", () => {
           pointerId: 11,
           clientX: 140,
           clientY: 180,
+          preventDefault: movePreventDefault,
         } as PointerEvent
       );
       harness.emit(
@@ -566,6 +568,7 @@ describe("StudioGraphSelectionController drag behavior", () => {
     }
 
     expect(startEvent.preventDefault).toHaveBeenCalledTimes(1);
+    expect(movePreventDefault).toHaveBeenCalledTimes(1);
     expect(project.graph.nodes[0].position).toEqual({ x: 80, y: 110 });
     expect(nodeEl.style.transform).toBe("translate(80px, 110px)");
     expect(renderEdgeLayer).toHaveBeenCalled();
@@ -582,6 +585,54 @@ describe("StudioGraphSelectionController drag behavior", () => {
       expect.any(Function),
       { captureHistory: false, mode: "discrete" }
     );
+  });
+
+  it("does not prevent the initial pointer default until a node actually drags", () => {
+    const host = createHost();
+    const project = {
+      graph: {
+        nodes: [
+          {
+            id: "node_1",
+            position: { x: 40, y: 50 },
+            kind: "studio.label",
+            config: {},
+          },
+        ],
+      },
+    } as any;
+    host.getCurrentProject = () => project;
+    host.commitProjectMutation = jest.fn((_reason, mutator) => mutator(project) !== false);
+
+    const controller = new StudioGraphSelectionController(host);
+    const nodeEl = createElementStub();
+    controller.registerNodeElement("node_1", nodeEl);
+    const startEvent = {
+      button: 0,
+      pointerId: 21,
+      clientX: 100,
+      clientY: 120,
+      preventDefault: jest.fn(),
+    } as unknown as PointerEvent;
+
+    const harness = installWindowPointerListenerHarness();
+    try {
+      controller.startNodeDrag("node_1", startEvent, nodeEl);
+      harness.emit(
+        "pointerup",
+        {
+          pointerId: 21,
+          clientX: 100,
+          clientY: 120,
+        } as PointerEvent
+      );
+    } finally {
+      harness.restore();
+    }
+
+    expect(startEvent.preventDefault).not.toHaveBeenCalled();
+    expect(project.graph.nodes[0].position).toEqual({ x: 40, y: 50 });
+    expect(controller.getSelectedNodeIds()).toEqual(["node_1"]);
   });
 
   it("allows marquee selection while busy so multi-node layout changes stay available during runs", () => {

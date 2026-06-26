@@ -205,16 +205,17 @@ export function renderLabelNodeCard(options: RenderLabelNodeCardOptions): void {
     });
     textSurfaceEl = displayEl;
     applyFontSize(fontSize);
-    displayEl.addEventListener("click", (event) => {
-      const pointerEvent = event as MouseEvent;
+    displayEl.addEventListener("pointerdown", (event) => {
+      const pointerEvent = event as PointerEvent;
       if (pointerEvent.button !== 0) {
         return;
       }
+      event.stopPropagation();
       if (pointerEvent.shiftKey || pointerEvent.metaKey || pointerEvent.ctrlKey) {
         graphInteraction.toggleNodeSelection(node.id);
         return;
       }
-      graphInteraction.ensureSingleSelection(node.id);
+      graphInteraction.startNodeDrag(node.id, pointerEvent, nodeEl);
     });
     displayEl.addEventListener("dblclick", (event) => {
       event.preventDefault();

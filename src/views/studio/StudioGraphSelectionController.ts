@@ -752,8 +752,6 @@ export class StudioGraphSelectionController {
       return;
     }
 
-    startEvent.preventDefault();
-
     const pointerId = startEvent.pointerId;
     const startX = startEvent.clientX;
     const startY = startEvent.clientY;
@@ -819,6 +817,7 @@ export class StudioGraphSelectionController {
       const travel = Math.hypot(pendingClientX - startX, pendingClientY - startY);
       if (!dragged && travel > 3) {
         dragged = true;
+        startEvent.preventDefault();
         captureHistoryOnNextMutation = true;
         this.host.onNodeDragStateChange?.(true);
         syncHoveredGroup();
@@ -863,6 +862,12 @@ export class StudioGraphSelectionController {
       const latestEvent = this.resolveLatestPointerEvent(moveEvent);
       pendingClientX = latestEvent.clientX;
       pendingClientY = latestEvent.clientY;
+      if (
+        Math.hypot(pendingClientX - startX, pendingClientY - startY) > 3 &&
+        typeof moveEvent.preventDefault === "function"
+      ) {
+        moveEvent.preventDefault();
+      }
       scheduleDragFrame();
     };
 
