@@ -45,6 +45,7 @@ import { PreviewService } from './services/PreviewService';
 import { StorageManager } from "./core/storage";
 import { ResumeChatService } from "./views/chatview/ResumeChatService";
 import { EmbeddingsManager } from "./services/embeddings/EmbeddingsManager";
+import { FileExplorerStudioButtonManager } from "./core/plugin/FileExplorerStudioButtonManager";
 import { VaultFileCache } from "./utils/VaultFileCache";
 import { EmbeddingsStatusBar } from "./components/EmbeddingsStatusBar";
 import { FreezeMonitor } from "./services/FreezeMonitor";
@@ -156,6 +157,7 @@ export default class SystemSculptPlugin extends Plugin {
   private webResearchApiService: WebResearchApiService | null = null;
   private webResearchCorpusService: WebResearchCorpusService | null = null;
   private studioService: StudioService | null = null;
+  private fileExplorerStudioButtonManager: FileExplorerStudioButtonManager | null = null;
   private desktopAutomationBridge: DesktopAutomationBridge | null = null;
   private pendingSettingsFocusTab: string | null = null;
   private readonly mobileStartupProbePath = normalizePath("SystemSculpt/Diagnostics/mobile-startup.json");
@@ -1881,6 +1883,18 @@ export default class SystemSculptPlugin extends Plugin {
     this.hasRegisteredStudioExtensions = true;
   }
 
+  private startFileExplorerStudioButtonIfNeeded(): void {
+    if (!PlatformContext.get().supportsDesktopOnlyFeatures()) {
+      return;
+    }
+
+    if (!this.fileExplorerStudioButtonManager) {
+      this.fileExplorerStudioButtonManager = new FileExplorerStudioButtonManager(this);
+    }
+
+    this.fileExplorerStudioButtonManager.start();
+  }
+
   private ensureCommandManager(): CommandManager {
     if (this.commandManager) {
       return this.commandManager;
@@ -1910,6 +1924,7 @@ export default class SystemSculptPlugin extends Plugin {
       }
       this.ensureViewManager();
       this.registerStudioExtensionsIfNeeded();
+      this.startFileExplorerStudioButtonIfNeeded();
       this.ensureCommandManager();
 
       try {
@@ -2021,6 +2036,11 @@ export default class SystemSculptPlugin extends Plugin {
       }
 
       await this.stopDesktopAutomationBridge();
+
+      if (this.fileExplorerStudioButtonManager) {
+        this.fileExplorerStudioButtonManager.dispose();
+        this.fileExplorerStudioButtonManager = null;
+      }
 
       // Clean up settings manager (stop automatic backups)
       if (this.settingsManager) {
