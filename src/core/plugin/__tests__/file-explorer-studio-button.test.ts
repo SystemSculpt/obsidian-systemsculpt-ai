@@ -146,6 +146,24 @@ describe("FileExplorerStudioButtonManager", () => {
     });
   });
 
+  it("creates a Studio project beside the active explorer file", async () => {
+    const buttons = appendExplorer({ activeFilePath: "Selected/Brief.md" });
+    const { manager, createProject } = createHarness({
+      activeFile: new TFile({ path: "Workspace/Other.md" }),
+    });
+
+    manager.syncButtons();
+    buttons
+      .querySelector<HTMLElement>(`.${FILE_EXPLORER_STUDIO_BUTTON_CLASS}`)
+      ?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    await flushPromises();
+
+    expect(createProject).toHaveBeenCalledWith({
+      name: "New Studio Project",
+      projectPath: "Selected/New Studio Project.systemsculpt",
+    });
+  });
+
   it("does not add the explorer action on non-desktop surfaces", () => {
     mockSupportsDesktopOnlyFeatures = false;
     const buttons = appendExplorer();
