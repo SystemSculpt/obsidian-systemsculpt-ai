@@ -10,6 +10,18 @@ import {
 } from "./StudioGraphNodeGeometry";
 import { mountStudioGraphNodeResizeHandle } from "./StudioGraphNodeResizeHandle";
 
+const STUDIO_LABEL_DOUBLE_TAP_DELAY_MS = 450;
+const STUDIO_LABEL_DOUBLE_TAP_SLOP_PX = 8;
+const STUDIO_LABEL_TAP_DRAG_SLOP_PX = 3;
+
+type LabelTapSnapshot = {
+  at: number;
+  clientX: number;
+  clientY: number;
+};
+
+const lastLabelTapByNodeId = new Map<string, LabelTapSnapshot>();
+
 type RenderLabelNodeCardOptions = {
   nodeEl: HTMLElement;
   node: StudioNodeInstance;
@@ -51,6 +63,64 @@ function clampLabelMetric(value: number, min: number, max: number): number {
     return min;
   }
   return Math.max(min, Math.min(max, Math.round(value)));
+}
+
+function isRepeatLabelTap(
+  nodeId: string,
+  event: PointerEvent,
+  now: number
+): boolean {
+  const previousTap = lastLabelTapByNodeId.get(nodeId);
+  if (!previousTap) {
+    return false;
+  }
+  const elapsedMs = now - previousTap.at;
+  if (elapsedMs < 0 || elapsedMs > STUDIO_LABEL_DOUBLE_TAP_DELAY_MS) {
+    return false;
+  }
+  const travel = Math.hypot(
+    event.clientX - previousTap.clientX,
+    event.clientY - previousTap.clientY
+  );
+  return travel <= STUDIO_LABEL_DOUBLE_TAP_SLOP_PX;
+}
+
+function trackPotentialLabelTap(nodeId: string, event: PointerEvent, now: number): void {
+  lastLabelTapByNodeId.set(nodeId, {
+    at: now,
+    clientX: event.clientX,
+    clientY: event.clientY,
+  });
+
+  const pointerId = event.pointerId;
+  const startClientX = event.clientX;
+  const startClientY = event.clientY;
+  const clearIfDragged = (moveEvent: PointerEvent): void => {
+    if (moveEvent.pointerId !== pointerId) {
+      return;
+    }
+    const travel = Math.hypot(
+      moveEvent.clientX - startClientX,
+      moveEvent.clientY - startClientY
+    );
+    if (travel <= STUDIO_LABEL_TAP_DRAG_SLOP_PX) {
+      return;
+    }
+    lastLabelTapByNodeId.delete(nodeId);
+    stopTracking();
+  };
+  const stopTracking = (finishEvent?: PointerEvent): void => {
+    if (finishEvent && finishEvent.pointerId !== pointerId) {
+      return;
+    }
+    window.removeEventListener("pointermove", clearIfDragged);
+    window.removeEventListener("pointerup", stopTracking);
+    window.removeEventListener("pointercancel", stopTracking);
+  };
+
+  window.addEventListener("pointermove", clearIfDragged);
+  window.addEventListener("pointerup", stopTracking);
+  window.addEventListener("pointercancel", stopTracking);
 }
 
 export function renderLabelNodeCard(options: RenderLabelNodeCardOptions): void {
@@ -212,14 +282,25 @@ export function renderLabelNodeCard(options: RenderLabelNodeCardOptions): void {
       }
       event.stopPropagation();
       if (pointerEvent.shiftKey || pointerEvent.metaKey || pointerEvent.ctrlKey) {
+        lastLabelTapByNodeId.delete(node.id);
         graphInteraction.toggleNodeSelection(node.id);
         return;
       }
+      const now = Date.now();
+      if (isRepeatLabelTap(node.id, pointerEvent, now)) {
+        event.preventDefault();
+        lastLabelTapByNodeId.delete(node.id);
+        graphInteraction.ensureSingleSelection(node.id);
+        onRequestLabelEdit(node.id);
+        return;
+      }
+      trackPotentialLabelTap(node.id, pointerEvent, now);
       graphInteraction.startNodeDrag(node.id, pointerEvent, nodeEl);
     });
     displayEl.addEventListener("dblclick", (event) => {
       event.preventDefault();
       event.stopPropagation();
+      lastLabelTapByNodeId.delete(node.id);
       graphInteraction.ensureSingleSelection(node.id);
       onRequestLabelEdit(node.id);
     });
