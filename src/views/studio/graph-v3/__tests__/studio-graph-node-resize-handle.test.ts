@@ -153,17 +153,46 @@ describe("mountStudioGraphNodeResizeHandle", () => {
     expect(onNodeGeometryMutated).not.toHaveBeenCalled();
   });
 
+  it("marks the resize handle active while pointer tracking is live", () => {
+    const node = createNode("studio.label");
+    const nodeEl = document.body.createDiv();
+
+    mountStudioGraphNodeResizeHandle({
+      node,
+      nodeEl,
+      title: "Resize label",
+      ariaLabel: "Resize label",
+      interactionLocked: false,
+      getGraphZoom: () => 1,
+      onNodeConfigMutated: jest.fn(),
+      onNodeGeometryMutated: jest.fn(),
+      applySize: () => undefined,
+      readInitialSize: () => ({ width: 300, height: 200 }),
+    });
+
+    const handleEl = nodeEl.querySelector<HTMLElement>(".ss-studio-node-resize-handle");
+    expect(handleEl).not.toBeNull();
+
+    handleEl?.dispatchEvent(createPointerEvent("pointerdown", { pointerId: 13, clientX: 100, clientY: 100 }));
+    expect(handleEl?.classList.contains("is-active")).toBe(true);
+
+    window.dispatchEvent(createPointerEvent("pointerup", { pointerId: 13, clientX: 100, clientY: 100 }));
+    expect(handleEl?.classList.contains("is-active")).toBe(false);
+  });
+
   it("uses node size change callbacks instead of direct config mutation", () => {
     const node = createNode();
     const nodeEl = document.body.createDiv();
     const onNodeConfigMutated = jest.fn();
     const onNodeGeometryMutated = jest.fn();
+    const mutationOrder: string[] = [];
     const onNodeSizeChange = jest.fn(
       (
         _nodeId: string,
         size: { width: number; height: number },
         _options?: { mode?: "continuous" | "discrete"; captureHistory?: boolean }
       ) => {
+        mutationOrder.push(`callback:${size.width}x${size.height}`);
         node.config.width = size.width;
         node.config.height = size.height;
       }
@@ -180,6 +209,7 @@ describe("mountStudioGraphNodeResizeHandle", () => {
       onNodeSizeChange,
       onNodeGeometryMutated,
       applySize: ({ width, height }) => {
+        mutationOrder.push(`dom:${width}x${height}`);
         nodeEl.style.width = `${width}px`;
         nodeEl.style.minHeight = `${height}px`;
       },
@@ -206,7 +236,56 @@ describe("mountStudioGraphNodeResizeHandle", () => {
       { width: 340, height: 250 },
       expect.objectContaining({ mode: "discrete", captureHistory: false })
     );
+    expect(mutationOrder).toEqual([
+      "dom:340x250",
+      "callback:340x250",
+      "callback:340x250",
+    ]);
     expect(onNodeConfigMutated).not.toHaveBeenCalled();
     expect(onNodeGeometryMutated).not.toHaveBeenCalled();
+  });
+
+  it("finalizes callback-driven resizes from the latest pending size when config is stale", () => {
+    const node = createNode("studio.label");
+    node.config.width = 300;
+    node.config.height = 200;
+    const nodeEl = document.body.createDiv();
+    const onNodeSizeChange = jest.fn();
+
+    mountStudioGraphNodeResizeHandle({
+      node,
+      nodeEl,
+      title: "Resize label",
+      ariaLabel: "Resize label",
+      interactionLocked: false,
+      getGraphZoom: () => 1,
+      onNodeConfigMutated: jest.fn(),
+      onNodeSizeChange,
+      onNodeGeometryMutated: jest.fn(),
+      applySize: ({ width, height }) => {
+        nodeEl.style.width = `${width}px`;
+        nodeEl.style.height = `${height}px`;
+      },
+      readInitialSize: () => ({ width: 300, height: 200 }),
+    });
+
+    const handleEl = nodeEl.querySelector<HTMLElement>(".ss-studio-node-resize-handle");
+    expect(handleEl).not.toBeNull();
+    handleEl?.dispatchEvent(createPointerEvent("pointerdown", { pointerId: 23, clientX: 100, clientY: 100 }));
+    window.dispatchEvent(createPointerEvent("pointermove", { pointerId: 23, clientX: 140, clientY: 150 }));
+    window.dispatchEvent(createPointerEvent("pointerup", { pointerId: 23, clientX: 140, clientY: 150 }));
+
+    expect(onNodeSizeChange).toHaveBeenNthCalledWith(
+      1,
+      node.id,
+      { width: 340, height: 250 },
+      expect.objectContaining({ mode: "continuous", captureHistory: true })
+    );
+    expect(onNodeSizeChange).toHaveBeenNthCalledWith(
+      2,
+      node.id,
+      { width: 340, height: 250 },
+      expect.objectContaining({ mode: "discrete", captureHistory: false })
+    );
   });
 });

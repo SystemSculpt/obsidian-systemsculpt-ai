@@ -89,6 +89,8 @@ export function mountStudioGraphNodeResizeHandle(
   let startHeight = 0;
   let pendingWidth = 0;
   let pendingHeight = 0;
+  let lastAppliedWidth = 0;
+  let lastAppliedHeight = 0;
   let didMutateDuringDrag = false;
   let capturedHistoryForDrag = false;
 
@@ -100,11 +102,15 @@ export function mountStudioGraphNodeResizeHandle(
     const bounds = resolveStudioGraphNodeResizeBounds(options.node);
     const nextWidth = clampRounded(pendingWidth, bounds.minWidth, bounds.maxWidth);
     const nextHeight = clampRounded(pendingHeight, bounds.minHeight, bounds.maxHeight);
-    const previousWidth = Number(nodeConfig.width);
-    const previousHeight = Number(nodeConfig.height);
-    if (previousWidth === nextWidth && previousHeight === nextHeight) {
+    if (lastAppliedWidth === nextWidth && lastAppliedHeight === nextHeight) {
       return;
     }
+    options.applySize({
+      width: nextWidth,
+      height: nextHeight,
+    });
+    lastAppliedWidth = nextWidth;
+    lastAppliedHeight = nextHeight;
     if (options.onNodeSizeChange) {
       options.onNodeSizeChange(
         options.node.id,
@@ -126,10 +132,6 @@ export function mountStudioGraphNodeResizeHandle(
         options.onNodeConfigMutated(options.node);
       }
     }
-    options.applySize({
-      width: nextWidth,
-      height: nextHeight,
-    });
     didMutateDuringDrag = true;
   };
 
@@ -137,7 +139,14 @@ export function mountStudioGraphNodeResizeHandle(
     if (frameId !== null) {
       return;
     }
-    frameId = window.requestAnimationFrame(applyPendingSize);
+    let frameFiredSynchronously = false;
+    frameId = window.requestAnimationFrame(() => {
+      frameFiredSynchronously = true;
+      applyPendingSize();
+    });
+    if (frameFiredSynchronously) {
+      frameId = null;
+    }
   };
 
   const stopTracking = (): void => {
@@ -165,8 +174,8 @@ export function mountStudioGraphNodeResizeHandle(
       options.onNodeSizeChange(
         options.node.id,
         {
-          width: Number(nodeConfig.width) || clampRounded(pendingWidth, 1, Number.MAX_SAFE_INTEGER),
-          height: Number(nodeConfig.height) || clampRounded(pendingHeight, 1, Number.MAX_SAFE_INTEGER),
+          width: lastAppliedWidth,
+          height: lastAppliedHeight,
         },
         {
           mode: "discrete",
@@ -214,10 +223,13 @@ export function mountStudioGraphNodeResizeHandle(
     const initialSize = options.readInitialSize
       ? options.readInitialSize()
       : readInitialSizeFromNode(options.node, options.nodeEl);
-    startWidth = initialSize.width;
-    startHeight = initialSize.height;
+    const bounds = resolveStudioGraphNodeResizeBounds(options.node);
+    startWidth = clampRounded(initialSize.width, bounds.minWidth, bounds.maxWidth);
+    startHeight = clampRounded(initialSize.height, bounds.minHeight, bounds.maxHeight);
     pendingWidth = startWidth;
     pendingHeight = startHeight;
+    lastAppliedWidth = startWidth;
+    lastAppliedHeight = startHeight;
     handleEl.classList.add("is-active");
     if (typeof handleEl.setPointerCapture === "function") {
       try {

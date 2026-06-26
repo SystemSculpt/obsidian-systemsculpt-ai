@@ -62,7 +62,33 @@ const IDLE_NODE_RUN_STATE: StudioNodeRunDisplayState = {
   outputs: null,
 };
 
-function renderNodeCard(options: {
+type RenderNodeCardHarness = {
+  graphInteraction: ReturnType<typeof createGraphInteractionStub>;
+  node: StudioNodeInstance;
+  nodeEl: HTMLElement;
+  onRequestLabelEdit: jest.Mock;
+  onStopLabelEdit: jest.Mock;
+};
+
+function createPointerEvent(
+  type: string,
+  options: { pointerId: number; clientX: number; clientY: number; button?: number }
+): PointerEvent {
+  const event = new MouseEvent(type, {
+    bubbles: true,
+    cancelable: true,
+    clientX: options.clientX,
+    clientY: options.clientY,
+    button: options.button ?? 0,
+  });
+  Object.defineProperty(event, "pointerId", {
+    value: options.pointerId,
+    configurable: true,
+  });
+  return event as PointerEvent;
+}
+
+function renderNodeCardHarness(options: {
   kind: string;
   config?: StudioNodeInstance["config"];
   nodeRunState?: StudioNodeRunDisplayState;
@@ -70,7 +96,8 @@ function renderNodeCard(options: {
   onOpenImageEditor?: (node: StudioNodeInstance) => void;
   onEditImageWithAi?: (node: StudioNodeInstance) => void;
   onCopyNodeImageToClipboard?: (node: StudioNodeInstance) => void;
-}): HTMLElement {
+  isLabelEditing?: boolean;
+}): RenderNodeCardHarness {
   const {
     kind,
     config = {},
@@ -79,10 +106,13 @@ function renderNodeCard(options: {
     onOpenImageEditor,
     onEditImageWithAi,
     onCopyNodeImageToClipboard,
+    isLabelEditing = false,
   } = options;
   const node = createNode(kind, config);
   const layer = document.body.createDiv({ cls: "ss-studio-test-layer" });
   const graphInteraction = createGraphInteractionStub();
+  const onRequestLabelEdit = jest.fn();
+  const onStopLabelEdit = jest.fn();
 
   renderStudioGraphNodeCard({
     layer,
@@ -104,10 +134,10 @@ function renderNodeCard(options: {
     onEditImageWithAi,
     onCopyNodeImageToClipboard,
     onNodeGeometryMutated: jest.fn(),
-    isLabelEditing: jest.fn(() => false),
+    isLabelEditing: jest.fn(() => isLabelEditing),
     consumeLabelAutoFocus: jest.fn(() => false),
-    onRequestLabelEdit: jest.fn(),
-    onStopLabelEdit: jest.fn(),
+    onRequestLabelEdit,
+    onStopLabelEdit,
     onRevealPathInFinder: jest.fn(),
   });
 
@@ -115,6 +145,17 @@ function renderNodeCard(options: {
   if (!nodeEl) {
     throw new Error(`Expected rendered node card for ${kind}`);
   }
+  return {
+    graphInteraction,
+    node,
+    nodeEl,
+    onRequestLabelEdit,
+    onStopLabelEdit,
+  };
+}
+
+function renderNodeCard(options: Parameters<typeof renderNodeCardHarness>[0]): HTMLElement {
+  const { nodeEl } = renderNodeCardHarness(options);
   return nodeEl;
 }
 
@@ -138,6 +179,62 @@ describe("renderStudioGraphNodeCard", () => {
     expect(nodeEl.classList.contains("has-resize-handle")).toBe(true);
     expect(handleEl).not.toBeNull();
     expect(handleEl?.getAttribute("aria-label")).toBe("Resize node");
+  });
+
+  it("starts dragging display-mode label cards from the label body", () => {
+    const { graphInteraction, node, nodeEl } = renderNodeCardHarness({
+      kind: "studio.label",
+      config: { value: "Move me" },
+    });
+    const displayEl = nodeEl.querySelector<HTMLElement>(".ss-studio-label-display");
+
+    expect(displayEl).not.toBeNull();
+    displayEl?.dispatchEvent(
+      createPointerEvent("pointerdown", {
+        pointerId: 17,
+        clientX: 120,
+        clientY: 140,
+      })
+    );
+
+    expect(graphInteraction.startNodeDrag).toHaveBeenCalledWith(
+      node.id,
+      expect.any(MouseEvent),
+      nodeEl
+    );
+  });
+
+  it("keeps label editing textareas out of card dragging", () => {
+    const { graphInteraction, nodeEl } = renderNodeCardHarness({
+      kind: "studio.label",
+      config: { value: "Editable text" },
+      isLabelEditing: true,
+    });
+    const editorEl = nodeEl.querySelector<HTMLTextAreaElement>(".ss-studio-label-editor");
+
+    expect(editorEl).not.toBeNull();
+    editorEl?.dispatchEvent(
+      createPointerEvent("pointerdown", {
+        pointerId: 19,
+        clientX: 120,
+        clientY: 140,
+      })
+    );
+
+    expect(graphInteraction.startNodeDrag).not.toHaveBeenCalled();
+  });
+
+  it("opens label edit mode on double click", () => {
+    const { graphInteraction, node, nodeEl, onRequestLabelEdit } = renderNodeCardHarness({
+      kind: "studio.label",
+      config: { value: "Double click me" },
+    });
+    const displayEl = nodeEl.querySelector<HTMLElement>(".ss-studio-label-display");
+
+    displayEl?.dispatchEvent(new MouseEvent("dblclick", { bubbles: true, cancelable: true }));
+
+    expect(graphInteraction.ensureSingleSelection).toHaveBeenCalledWith(node.id);
+    expect(onRequestLabelEdit).toHaveBeenCalledWith(node.id);
   });
 
   it("keeps media-ingest image previews in contained mode", () => {
