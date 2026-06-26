@@ -202,6 +202,13 @@ describe("renderStudioGraphNodeCard", () => {
       expect.any(MouseEvent),
       nodeEl
     );
+    window.dispatchEvent(
+      createPointerEvent("pointerup", {
+        pointerId: 17,
+        clientX: 120,
+        clientY: 140,
+      })
+    );
   });
 
   it("keeps label editing textareas out of card dragging", () => {
@@ -235,6 +242,56 @@ describe("renderStudioGraphNodeCard", () => {
 
     expect(graphInteraction.ensureSingleSelection).toHaveBeenCalledWith(node.id);
     expect(onRequestLabelEdit).toHaveBeenCalledWith(node.id);
+  });
+
+  it("opens label edit on a repeated tap even when selection re-renders the card", () => {
+    const nowSpy = jest.spyOn(Date, "now");
+    try {
+      nowSpy.mockReturnValueOnce(1000);
+      const firstRender = renderNodeCardHarness({
+        kind: "studio.label",
+        config: { value: "Tap twice" },
+      });
+      const firstDisplayEl = firstRender.nodeEl.querySelector<HTMLElement>(".ss-studio-label-display");
+      firstDisplayEl?.dispatchEvent(
+        createPointerEvent("pointerdown", {
+          pointerId: 31,
+          clientX: 120,
+          clientY: 140,
+        })
+      );
+      window.dispatchEvent(
+        createPointerEvent("pointerup", {
+          pointerId: 31,
+          clientX: 120,
+          clientY: 140,
+        })
+      );
+      expect(firstRender.onRequestLabelEdit).not.toHaveBeenCalled();
+
+      document.body.innerHTML = "";
+      nowSpy.mockReturnValueOnce(1200);
+      const secondRender = renderNodeCardHarness({
+        kind: "studio.label",
+        config: { value: "Tap twice" },
+      });
+      const secondDisplayEl = secondRender.nodeEl.querySelector<HTMLElement>(".ss-studio-label-display");
+      secondDisplayEl?.dispatchEvent(
+        createPointerEvent("pointerdown", {
+          pointerId: 32,
+          clientX: 123,
+          clientY: 142,
+        })
+      );
+
+      expect(secondRender.graphInteraction.ensureSingleSelection).toHaveBeenCalledWith(
+        secondRender.node.id
+      );
+      expect(secondRender.onRequestLabelEdit).toHaveBeenCalledWith(secondRender.node.id);
+      expect(secondRender.graphInteraction.startNodeDrag).not.toHaveBeenCalled();
+    } finally {
+      nowSpy.mockRestore();
+    }
   });
 
   it("keeps media-ingest image previews in contained mode", () => {
