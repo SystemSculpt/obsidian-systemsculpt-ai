@@ -17,6 +17,7 @@ This folder includes both user docs and engineering docs for the Obsidian plugin
 
 ## Engineering docs (repo root `docs/`)
 
+- [Development, testing, and release](development.md)
 - [Android device testing](android-device-testing.md)
 - [iPad device testing](ipad-device-testing.md)
 - [Windows desktop testing](windows-desktop-testing.md)

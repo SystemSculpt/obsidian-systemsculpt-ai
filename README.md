@@ -1,38 +1,51 @@
 # SystemSculpt AI (Obsidian Plugin)
 
-SystemSculpt AI adds AI chat, meeting transcription, semantic search, and agent workflows inside your Obsidian vault. Bring your own API keys or use managed models.
+AI chat, semantic search, meeting transcription, image generation, and agent workflows — inside your Obsidian vault, on your terms.
 
-## Current release facts
+Bring your own API keys (no license wall) or use managed models with SystemSculpt Pro. Every AI file change can be reviewed before it touches your notes.
 
-- Plugin version: `5.10.0`
-- Minimum Obsidian version: `1.4.0`
-- Platforms: desktop and mobile (`manifest.json` sets `isDesktopOnly: false`)
-- License: MIT
+## Why SystemSculpt AI
 
-## What you can do
+- **Chat with your vault.** Conversational AI that reads, searches, and reasons over your notes, with custom system prompts loaded from vault markdown files and favorite-filtered model selection.
+- **Agents you stay in control of.** Toggle agent mode for tool-assisted workflows — read, search, edit, move, and organize notes — with review-before-change so AI never silently rewrites your vault.
+- **Semantic search that survives sync.** Find notes by meaning with embeddings, backed by a portable index that survives Obsidian Sync and vault restore.
+- **Voice to notes.** Record audio and transcribe meetings or voice memos straight into markdown, including self-hosted Whisper and a separate post-processing model.
+- **Image generation in Studio.** Generate images from a Studio canvas node: pick the model, aspect ratio, image size, seed, and batch count.
+- **Automations.** Capture-folder workflows that process new files automatically.
+- **Your keys, your models.** Native Anthropic (Claude), Google (Gemini), OpenAI, xAI, and OpenRouter support, plus local Pi providers with clear Ollama guidance. BYOK chat never hits a SystemSculpt license wall.
 
-- Chat with your notes through SystemSculpt.
-- Toggle agent mode on/off to switch between tool-assisted and pure reasoning chat.
-- Select custom system prompts from vault markdown files per conversation.
-- Use built-in vault tools to read, search, edit, move, and organize notes.
-- Filter models by favorites in the model selection modal.
-- Bring your own Claude (Anthropic) and Gemini (Google) keys with native API support, alongside OpenAI, xAI, and OpenRouter.
-- Run entirely on your own provider key — BYOK chat never hits a SystemSculpt license wall.
-- Set up local Pi providers from the Providers tab, including clearer Ollama guidance.
-- Use the redesigned Studio canvas foundation for much larger graph workspaces.
-- Generate images from a Studio image node: pick the model, aspect ratio, image size, seed, and batch count.
-- Recover from streaming failures with clearer chat error notices and disconnect controls.
-- Find semantically similar notes with embeddings, backed by a portable index that survives Obsidian Sync and vault restore.
-- Record audio and transcribe notes, including self-hosted Whisper and a separate post-processing model.
-- Run capture-folder workflow automations.
+Works on desktop and mobile.
+
+## Free vs Pro
+
+- **Bring your own keys:** BYOK-powered chat and features run entirely on your own provider keys.
+- **SystemSculpt Pro:** managed models with no key setup, hosted transcription and image credits, and priority support — $19/month or $149 lifetime. Details at [systemsculpt.com/pricing](https://systemsculpt.com/pricing).
 
 ## Quick start
 
-1. Install **SystemSculpt AI** from Obsidian Community Plugins (or use manual install below).
-2. Open `Settings -> SystemSculpt AI -> Account`.
-3. Activate your SystemSculpt license key.
+1. Install **SystemSculpt AI** from Obsidian Community Plugins.
+2. Open `Settings -> SystemSculpt AI`.
+3. Add a provider key under `Providers`, or activate a Pro license under `Account`.
 4. Run the command `Open SystemSculpt Chat`.
 5. Optional: enable embeddings in `Knowledge` for Similar Notes.
+
+## Privacy and safety
+
+- BYOK requests go to your chosen provider with your keys.
+- Agent edits support review-before-change, and agent tool policies (including command approval) are enforced and synced.
+- License keys are redacted from logs.
+
+## Docs
+
+- Docs hub: `docs/README.md`
+- Getting started: `docs/user/getting-started.md`
+- Settings reference: `docs/user/settings.md`
+- Commands: `docs/user/commands.md`
+- Ribbon icons: `docs/user/ribbon-icons.md`
+- Similar Notes: `docs/user/similar-notes.md`
+- Audio & transcription: `docs/user/audio-transcription.md`
+- Automations: `docs/user/automations.md`
+- Troubleshooting: `docs/user/troubleshooting.md`
 
 ## Installation
 
@@ -52,89 +65,24 @@ npm install
 npm run build
 ```
 
-## Core docs
+## Current release facts
 
-- Docs hub: `docs/README.md`
-- Getting started: `docs/user/getting-started.md`
-- Settings reference: `docs/user/settings.md`
-- Commands: `docs/user/commands.md`
-- Ribbon icons: `docs/user/ribbon-icons.md`
-- Similar Notes: `docs/user/similar-notes.md`
-- Audio & transcription: `docs/user/audio-transcription.md`
-- Automations: `docs/user/automations.md`
-- Troubleshooting: `docs/user/troubleshooting.md`
+- Plugin version: `5.10.0`
+- Minimum Obsidian version: `1.4.0`
+- Platforms: desktop and mobile (`manifest.json` sets `isDesktopOnly: false`)
+- License: MIT
 
 ## Development
 
-### Build and checks
+Build, test, sync, and release documentation lives in [docs/development.md](docs/development.md), with contributor gates in [CONTRIBUTING.md](CONTRIBUTING.md). Common entry points:
 
 ```bash
 npm run dev               # watch build
 npm run build             # production build
 npm run check:plugin      # typecheck + bundle resolution
-npm run check:plugin:fast # faster local check
 npm run check:all         # plugin check + Jest suite
+npm test                  # full unit suite
 ```
-
-If you keep a local-only `systemsculpt-sync.config.json`, the dev watcher now auto-syncs every successful rebuild into all configured `pluginTargets` plus any `mirrorTargets`, including remote Windows SSH mirrors declared as `"type": "windows-ssh"`.
-`./run.sh --headless` remains the canonical background entrypoint because it enables the same build-integrated sync path and also asks the already-open desktop vault to hot-reload the plugin after local sync succeeds.
-
-### Tests
-
-```bash
-npm test
-npm run test:debug
-npm run test:strict
-npm run test:embeddings
-npm run test:leaks
-npm run test:native:desktop:extended
-npm run test:native:android:extended
-npm run check:pre-push              # full native gate (unit + build + Android + Windows)
-npm run check:pre-push:quick        # fast gate (unit + build only)
-```
-
-Testing architecture docs:
-
-- `testing/README.md`
-- `testing/native/README.md`
-
-Desktop validation is attach-only to an already-open Obsidian vault. Keep live sync running with `./run.sh --headless` and use the desktop bridge runner when you need real chat/model verification without taking focus.
-
-
-### Local plugin release
-
-```bash
-npm run check:release:windows         # require the GitHub Windows E2E check on the current commit
-npm run check:release:windows:local   # optional maintained Windows host/dev helper
-npm run check:release:native          # required native release matrix
-npm run check:release-surfaces -- --version <version> --require-notes
-npm run release:plugin                  # auto bump (major/minor/patch from commits)
-npm run release:plugin -- --dry-run    # preview next version + notes only
-npm run release:plugin -- --bump patch # force a specific bump
-```
-
-Release automation now runs fully on your local machine: it validates the plugin, builds the release bundle, commits the version bump, pushes `main` and the tag, and creates a draft GitHub release with `gh`.
-Before it tags anything, the release script now runs a safety preflight that blocks tracked local-only files, unignored local-only files that should probably go into `.gitignore`, hardcoded local paths, hardcoded desktop vault selectors, and secret-looking tokens.
-If `GITHUB_TOKEN` or `GH_TOKEN` is present but weaker than your stored `gh` login, the release script now automatically falls back to the stored auth for push and draft-release steps.
-The native release matrix is now explicit instead of implicit: macOS desktop baselines, the GitHub Windows E2E check, and Android runtime smoke must all pass before release creation can continue. The Windows E2E check runs a fresh Obsidian install, clean-install parity, and desktop baselines on `windows-latest` for the exact commit being released. iOS runtime smoke is included automatically when a paired physical device is available on the host and is otherwise skipped honestly.
-Use `npm run check:release:windows:local` only when you want the optional Windows-only dev helper on a maintained Windows host before waiting on the canonical GitHub check.
-
-The old tag-triggered GitHub Actions release workflow is retired. Treat `npm run release:plugin` as the canonical publish path for this repo.
-That release path now packages the standard Obsidian plugin artifact set only: `manifest.json`, `main.js`, and `styles.css`.
-Before release, `npm run check:release-surfaces -- --version <version> --require-notes` verifies the exact version surfaces and release notes file. After a production build, add `--check-artifacts` to verify the release asset set too.
-Desktop validation is now bridge-based and no-focus by default; the old renderer-driving desktop lane is retired.
-When multiple synced desktop vaults exist, use `--vault-name <vault-name>` or `--vault-path <absolute-path>` to pin one explicitly. Otherwise the desktop runner prefers the latest live bridge target automatically.
-
-## Canonical source files for docs
-
-These files define the user-facing surfaces and are the source of truth:
-
-- Settings tabs: `src/settings/SettingsTabRegistry.ts`
-- Commands: `src/core/plugin/commands.ts`, `src/main.ts`
-- Ribbon icons: `src/core/plugin/ribbons.ts`
-- Filesystem MCP tools: `src/mcp-tools/filesystem/toolDefinitions/*.ts`
-- YouTube MCP tool: `src/mcp-tools/youtube/MCPYouTubeServer.ts`
-- Web research tools: `src/services/web/registerWebResearchTools.ts`
 
 ## Support
 
