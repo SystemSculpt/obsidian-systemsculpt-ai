@@ -8,7 +8,7 @@ Bring your own API keys (no license wall) or use managed models with SystemSculp
 
 - **Chat with your vault.** Conversational AI that reads, searches, and reasons over your notes, with custom system prompts loaded from vault markdown files and favorite-filtered model selection.
 - **Agents you stay in control of.** Toggle agent mode for tool-assisted workflows — read, search, edit, move, and organize notes — with review-before-change so AI never silently rewrites your vault.
-- **Semantic search that survives sync.** Find notes by meaning with embeddings, backed by a portable index that survives Obsidian Sync and vault restore.
+- **Semantic search that survives sync (Pro).** Find notes by meaning with embeddings, backed by a portable index that survives Obsidian Sync and vault restore.
 - **Voice to notes.** Record audio and transcribe meetings or voice memos straight into markdown, including self-hosted Whisper and a separate post-processing model.
 - **Image generation in Studio.** Generate images from a Studio canvas node: pick the model, aspect ratio, image size, seed, and batch count.
 - **Automations.** Capture-folder workflows that process new files automatically.
@@ -19,7 +19,7 @@ Works on desktop and mobile.
 ## Free vs Pro
 
 - **Bring your own keys:** BYOK-powered chat and features run entirely on your own provider keys.
-- **SystemSculpt Pro:** managed models with no key setup, hosted transcription and image credits, and priority support — $19/month or $149 lifetime. Details at [systemsculpt.com/pricing](https://systemsculpt.com/pricing).
+- **SystemSculpt Pro:** managed models with no key setup, semantic search / Similar Notes, hosted transcription and image credits, and priority support — $19/month or $149 lifetime. Details at [systemsculpt.com/pricing](https://systemsculpt.com/pricing).
 
 ## Quick start
 
@@ -27,7 +27,7 @@ Works on desktop and mobile.
 2. Open `Settings -> SystemSculpt AI`.
 3. Add a provider key under `Providers`, or activate a Pro license under `Account`.
 4. Run the command `Open SystemSculpt Chat`.
-5. Optional: enable embeddings in `Knowledge` for Similar Notes.
+5. Optional (Pro license required): enable embeddings in `Knowledge` for Similar Notes.
 
 ## Privacy and safety
 
@@ -37,15 +37,15 @@ Works on desktop and mobile.
 
 ## Docs
 
-- Docs hub: `docs/README.md`
-- Getting started: `docs/user/getting-started.md`
-- Settings reference: `docs/user/settings.md`
-- Commands: `docs/user/commands.md`
-- Ribbon icons: `docs/user/ribbon-icons.md`
-- Similar Notes: `docs/user/similar-notes.md`
-- Audio & transcription: `docs/user/audio-transcription.md`
-- Automations: `docs/user/automations.md`
-- Troubleshooting: `docs/user/troubleshooting.md`
+- Docs hub: [docs/README.md](docs/README.md)
+- Getting started: [docs/user/getting-started.md](docs/user/getting-started.md)
+- Settings reference: [docs/user/settings.md](docs/user/settings.md)
+- Commands: [docs/user/commands.md](docs/user/commands.md)
+- Ribbon icons: [docs/user/ribbon-icons.md](docs/user/ribbon-icons.md)
+- Similar Notes: [docs/user/similar-notes.md](docs/user/similar-notes.md)
+- Audio & transcription: [docs/user/audio-transcription.md](docs/user/audio-transcription.md)
+- Automations: [docs/user/automations.md](docs/user/automations.md)
+- Troubleshooting: [docs/user/troubleshooting.md](docs/user/troubleshooting.md)
 
 ## Installation
 
