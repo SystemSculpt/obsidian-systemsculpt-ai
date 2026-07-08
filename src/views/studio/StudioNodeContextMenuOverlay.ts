@@ -6,6 +6,11 @@ import {
 } from "./StudioFloatingMenuUtils";
 
 const CONTEXT_MENU_WIDTH = 360;
+// Menu chrome estimates for anchoring before first layout. These are overlay
+// dimensions, not node geometry — deliberately independent of
+// src/studio/StudioNodeGeometry.ts node constants.
+const CONTEXT_MENU_MIN_HEIGHT = 120;
+const CONTEXT_MENU_FALLBACK_HEIGHT = 280;
 
 export type StudioNodeContextMenuItem = {
   definition: StudioNodeDefinition;
@@ -456,9 +461,11 @@ export class StudioNodeContextMenuOverlay {
     const width = CONTEXT_MENU_WIDTH;
     this.rootEl.style.width = `${width}px`;
     this.rootEl.style.setProperty("--ss-studio-node-context-menu-scale", String(scale));
-    this.rootEl.style.transformOrigin = "top left";
 
-    const height = Math.max(120, this.rootEl.offsetHeight || 280);
+    const height = Math.max(
+      CONTEXT_MENU_MIN_HEIGHT,
+      this.rootEl.offsetHeight || CONTEXT_MENU_FALLBACK_HEIGHT
+    );
     const visualWidth = width * scale;
     const visualHeight = height * scale;
     const position = resolveStudioAnchoredMenuPosition({

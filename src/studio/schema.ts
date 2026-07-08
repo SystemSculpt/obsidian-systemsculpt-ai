@@ -16,6 +16,7 @@ import {
   nowIso,
   randomId,
 } from "./utils";
+import { TEXT_NODE_KINDS_MIGRATION_ID } from "./StudioGraphMigrations";
 
 const DEFAULT_MAX_RUNS = 100;
 const DEFAULT_MAX_ARTIFACTS_MB = 1024;
@@ -39,6 +40,21 @@ function normalizeHexColor(value: string): string | null {
   return lower;
 }
 
+function readNodeSize(raw: unknown): { width: number; height: number } | null {
+  if (!isRecord(raw)) {
+    return null;
+  }
+  const width = asNumber(raw.width);
+  const height = asNumber(raw.height);
+  // Size is all-or-nothing: invalid or partial geometry is dropped here and
+  // the kind's default rendering applies (the load migration backfills
+  // partial legacy config geometry before it ever reaches serialization).
+  if (width === null || height === null) {
+    return null;
+  }
+  return { width, height };
+}
+
 function readNode(raw: unknown): StudioProjectV1["graph"]["nodes"][number] {
   if (!isRecord(raw)) {
     throw new Error("Invalid node entry: expected object.");
@@ -50,6 +66,7 @@ function readNode(raw: unknown): StudioProjectV1["graph"]["nodes"][number] {
   const title = asString(raw.title).trim() || kind || id;
   const x = asNumber((raw.position as any)?.x) ?? 0;
   const y = asNumber((raw.position as any)?.y) ?? 0;
+  const size = readNodeSize(raw.size);
   const config = isRecord(raw.config) ? (raw.config as Record<string, any>) : {};
   const continueOnError = raw.continueOnError === true;
   const disabled = raw.disabled === true;
@@ -67,6 +84,7 @@ function readNode(raw: unknown): StudioProjectV1["graph"]["nodes"][number] {
     version,
     title,
     position: { x, y },
+    ...(size ? { size } : {}),
     config,
     continueOnError,
     disabled,
@@ -387,7 +405,10 @@ export function createEmptyStudioProject(options: {
     },
     migrations: {
       projectSchemaVersion: "1.0.0",
-      applied: [],
+      // Fresh projects are born with canonical text-node kinds, so record the
+      // rename stamp up front; otherwise the first load would treat their
+      // "studio.text" nodes as the legacy text-output kind and rename them.
+      applied: [{ id: TEXT_NODE_KINDS_MIGRATION_ID, at: now }],
     },
   };
 }

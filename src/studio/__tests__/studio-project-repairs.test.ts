@@ -122,7 +122,7 @@ describe("StudioProjectRepairs", () => {
     };
     const managedText: StudioNodeInstance = {
       id: "managed_text",
-      kind: "studio.text",
+      kind: "studio.text_output",
       version: "1.0.0",
       title: "Managed Text",
       position: { x: 420, y: 360 },

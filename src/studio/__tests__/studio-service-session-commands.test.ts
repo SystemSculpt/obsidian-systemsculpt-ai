@@ -83,59 +83,55 @@ function createSession(
   });
 }
 
+async function retainExistingSession(service: StudioService, session: StudioProjectSession): Promise<void> {
+  await (service as any).projectSessionManager.retainSession(session.getProjectPath(), async () => session);
+}
+
 describe("StudioService session-backed mutation commands", () => {
-  it("mutates the current project through the active session", () => {
+  it("mutates retained sessions by project path", async () => {
     const service = new StudioService(createPluginStub());
     const session = createSession();
-    (service as any).currentProjectSession = session;
-    (service as any).currentProjectPath = session.getProjectPath();
+    await retainExistingSession(service, session);
 
-    const changed = service.mutateCurrentProject("node.title", (project) => {
+    const changed = service.mutateProject(session.getProjectPath(), "node.title", (project) => {
       project.name = "Renamed from service";
       return true;
     });
 
     expect(changed).toBe(true);
     expect(session.getProject().name).toBe("Renamed from service");
-    expect(service.getCurrentProjectSnapshot()?.name).toBe("Renamed from service");
+    expect(service.getProjectSession(session.getProjectPath())).toBe(session);
   });
 
-  it("returns defensive current project snapshots", () => {
+  it("refuses mutations for paths without a retained session", () => {
+    const service = new StudioService(createPluginStub());
+
+    const changed = service.mutateProject("Studio/Nowhere.systemsculpt", "node.title", (project) => {
+      project.name = "Should never run";
+      return true;
+    });
+
+    expect(changed).toBe(false);
+  });
+
+  it("returns defensive project snapshots from retained sessions", async () => {
     const service = new StudioService(createPluginStub());
     const session = createSession();
-    (service as any).currentProjectSession = session;
-    (service as any).currentProjectPath = session.getProjectPath();
+    await retainExistingSession(service, session);
 
-    const snapshot = service.getCurrentProjectSnapshot();
-    expect(snapshot).not.toBeNull();
-    snapshot!.name = "Mutated outside service";
+    const snapshot = service.getProjectSession(session.getProjectPath())!.getProjectSnapshot();
+    snapshot.name = "Mutated outside service";
 
     expect(session.getProject().name).toBe("Test Project");
   });
 
-  it("mutates retained non-current sessions by project path", async () => {
-    const service = new StudioService(createPluginStub());
-    const session = createSession("Studio/Other.systemsculpt");
-    await (service as any).projectSessionManager.retainSession("Studio/Other.systemsculpt", async () => session);
-
-    const changed = service.mutateProject("Studio/Other.systemsculpt", "project.repair", (project) => {
-      project.name = "Other Project";
-      return true;
-    });
-
-    expect(changed).toBe(true);
-    expect(service.getProjectSession("Studio/Other.systemsculpt")).toBe(session);
-    expect(session.getProject().name).toBe("Other Project");
-  });
-
-  it("reuses the current session for same-path opens without reloading", async () => {
+  it("reuses an already-retained session for same-path retains without reloading", async () => {
     const service = new StudioService(createPluginStub());
     const session = createSession();
     const loadProjectForSession = jest.spyOn(service as any, "loadProjectForSession");
-    (service as any).currentProjectSession = session;
-    (service as any).currentProjectPath = session.getProjectPath();
+    await retainExistingSession(service, session);
 
-    const reopened = await service.openProjectSession(session.getProjectPath());
+    const reopened = await service.retainProjectSession(session.getProjectPath());
 
     expect(reopened).toBe(session);
     expect(loadProjectForSession).not.toHaveBeenCalled();
@@ -149,10 +145,9 @@ describe("StudioService session-backed mutation commands", () => {
     const loadProjectForSession = jest
       .spyOn(service as any, "loadProjectForSession")
       .mockResolvedValue({ project: reloadedProject, rawText: '{"name":"Reloaded Project"}' });
-    (service as any).currentProjectSession = session;
-    (service as any).currentProjectPath = session.getProjectPath();
+    await retainExistingSession(service, session);
 
-    const reopened = await service.openProjectSession(session.getProjectPath(), { forceReload: true });
+    const reopened = await service.retainProjectSession(session.getProjectPath(), { forceReload: true });
 
     expect(reopened).toBe(session);
     expect(loadProjectForSession).toHaveBeenCalledWith(session.getProjectPath());
@@ -192,14 +187,15 @@ describe("StudioService session-backed mutation commands", () => {
     jest.spyOn((service as any).projectStore, "readProjectRawText").mockResolvedValue("{}");
     jest.spyOn(service as any, "ensureDefaultPolicy").mockResolvedValue(undefined);
 
-    const session = await service.openProjectSession("Studio/Test.systemsculpt", { forceReload: true });
+    const session = await service.retainProjectSession("Studio/Test.systemsculpt", { forceReload: true });
     const mediaNode = session.getProject().graph.nodes.find((node) => node.id === "media_1");
 
     expect(loadProject).toHaveBeenCalledWith("Studio/Test.systemsculpt");
+    // Resized geometry survives normalization as first-class node.size;
+    // caption edits stay in config and the legacy geometry keys are stripped.
+    expect(mediaNode?.size).toEqual({ width: 512, height: 356 });
     expect(mediaNode?.config).toEqual({
       sourcePath: "/media/input.mp4",
-      width: 512,
-      height: 356,
       captionBoard: {
         version: 1,
         labels: [],
@@ -212,10 +208,9 @@ describe("StudioService session-backed mutation commands", () => {
           nodes: expect.arrayContaining([
             expect.objectContaining({
               id: "media_1",
+              size: { width: 512, height: 356 },
               config: expect.objectContaining({
                 sourcePath: "/media/input.mp4",
-                width: 512,
-                height: 356,
               }),
             }),
           ]),
@@ -224,7 +219,7 @@ describe("StudioService session-backed mutation commands", () => {
     );
   });
 
-  it("runs the current project from the live session snapshot", async () => {
+  it("runs a project from its retained session snapshot", async () => {
     const service = new StudioService(createPluginStub());
     const session = createSession();
     const flushSpy = jest.spyOn(session, "flushPendingSaveWork").mockResolvedValue();
@@ -232,8 +227,7 @@ describe("StudioService session-backed mutation commands", () => {
       project.name = "Live Session Snapshot";
       return true;
     });
-    (service as any).currentProjectSession = session;
-    (service as any).currentProjectPath = session.getProjectPath();
+    await retainExistingSession(service, session);
 
     const summary = {
       runId: "run_live",
@@ -250,7 +244,7 @@ describe("StudioService session-backed mutation commands", () => {
     };
     (service as any).runtime = runtime;
 
-    const result = await service.runCurrentProject();
+    const result = await service.runProject(session.getProjectPath());
 
     expect(result).toBe(summary);
     expect(flushSpy).toHaveBeenCalledWith({ force: true });
@@ -262,11 +256,35 @@ describe("StudioService session-backed mutation commands", () => {
     expect(runtime.runProject).not.toHaveBeenCalled();
   });
 
-  it("runs scoped node executions from the live session snapshot", async () => {
+  it("falls back to a store-backed run when no session is retained for the path", async () => {
+    const service = new StudioService(createPluginStub());
+    const summary = {
+      runId: "run_cold",
+      status: "success",
+      startedAt: "2026-03-22T00:00:00.000Z",
+      finishedAt: "2026-03-22T00:00:01.000Z",
+      error: null,
+      executedNodeIds: [],
+      cachedNodeIds: [],
+    } as const;
+    const runtime = {
+      runProjectSnapshot: jest.fn(async () => summary),
+      runProject: jest.fn(async () => summary),
+    };
+    (service as any).runtime = runtime;
+
+    const result = await service.runProject("Studio/Cold.systemsculpt");
+
+    expect(result).toBe(summary);
+    expect(runtime.runProject).toHaveBeenCalledWith("Studio/Cold.systemsculpt", { onEvent: undefined });
+    expect(runtime.runProjectSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("runs scoped node executions from the retained session snapshot", async () => {
     const project = projectFixture();
     project.graph.nodes.push({
       id: "node_live",
-      kind: "studio.text",
+      kind: "studio.text_output",
       version: "1.0.0",
       title: "Live Node",
       position: { x: 0, y: 0 },
@@ -278,8 +296,7 @@ describe("StudioService session-backed mutation commands", () => {
     const session = createSession("Studio/Scoped.systemsculpt", project);
     const flushSpy = jest.spyOn(session, "flushPendingSaveWork").mockResolvedValue();
     const loadProjectSpy = jest.spyOn((service as any).projectStore, "loadProject");
-    (service as any).currentProjectSession = session;
-    (service as any).currentProjectPath = session.getProjectPath();
+    await retainExistingSession(service, session);
 
     const summary = {
       runId: "run_scoped",
@@ -296,7 +313,7 @@ describe("StudioService session-backed mutation commands", () => {
     };
     (service as any).runtime = runtime;
 
-    const result = await service.runCurrentProjectFromNode("node_live");
+    const result = await service.runProjectFromNode(session.getProjectPath(), "node_live");
 
     expect(result).toBe(summary);
     expect(flushSpy).toHaveBeenCalledWith({ force: true });
@@ -317,7 +334,7 @@ describe("StudioService session-backed mutation commands", () => {
     expect(runtime.runProject).not.toHaveBeenCalled();
   });
 
-  it("renames the current project and moves the retained session path", async () => {
+  it("renames a project and moves the retained session to the new path", async () => {
     const service = new StudioService(createPluginStub());
     const session = createSession();
     const flushSpy = jest.spyOn(session, "flushPendingSaveWork").mockResolvedValue();
@@ -337,17 +354,15 @@ describe("StudioService session-backed mutation commands", () => {
     jest.spyOn((service as any).projectStore, "readProjectRawText").mockResolvedValue(
       '{"name":"Renamed Project"}'
     );
-    await (service as any).projectSessionManager.retainSession("Studio/Test.systemsculpt", async () => session);
-    (service as any).currentProjectSession = session;
-    (service as any).currentProjectPath = "Studio/Test.systemsculpt";
+    await retainExistingSession(service, session);
 
     const renamed = await service.renameProject("Studio/Test.systemsculpt", "Renamed");
 
     expect(flushSpy).toHaveBeenCalledWith({ force: true });
     expect(renamed.newPath).toBe("Studio/Renamed.systemsculpt");
-    expect((service as any).currentProjectPath).toBe("Studio/Renamed.systemsculpt");
     expect(session.getProjectPath()).toBe("Studio/Renamed.systemsculpt");
     expect(session.getProject().name).toBe("Renamed Project");
     expect(service.getProjectSession("Studio/Renamed.systemsculpt")).toBe(session);
+    expect(service.getProjectSession("Studio/Test.systemsculpt")).toBeNull();
   });
 });

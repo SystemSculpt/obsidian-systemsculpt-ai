@@ -32,9 +32,18 @@ function baseProject(): StudioProjectV1 {
     },
     migrations: {
       projectSchemaVersion: "1.0.0",
-      applied: [],
+      // Modern fixture: text-node kinds already canonical, so the text-kind
+      // rename pass never touches these projects. Legacy-kind tests strip
+      // this stamp explicitly.
+      applied: [{ id: "studio.text-node-kinds.v1", at: now }],
     },
   };
+}
+
+function legacyProject(): StudioProjectV1 {
+  const project = baseProject();
+  project.migrations.applied = [];
+  return project;
 }
 
 describe("migrateStudioProjectToPathOnlyPorts", () => {
@@ -168,10 +177,11 @@ describe("migrateStudioProjectToPathOnlyPorts", () => {
 
     const migrated = migrateStudioProjectToPathOnlyPorts(project);
     expect(migrated.changed).toBe(true);
+    // Resized geometry survives as first-class size; caption edits and
+    // rendered-asset bookkeeping stay in config.
+    expect(migrated.project.graph.nodes[0].size).toEqual({ width: 512, height: 356 });
     expect(migrated.project.graph.nodes[0].config).toEqual({
       sourcePath: "/media/input.mp4",
-      width: 512,
-      height: 356,
       captionBoard: {
         version: 1,
         labels: [],
@@ -611,5 +621,287 @@ describe("migrateStudioProjectToPathOnlyPorts", () => {
 
     const migrated = migrateStudioProjectToPathOnlyPorts(project);
     expect(migrated.changed).toBe(false);
+  });
+
+  it("renames legacy studio.text and studio.label kinds in one atomic pass", () => {
+    const project = legacyProject();
+    project.graph.nodes.push(
+      {
+        id: "legacy_text",
+        kind: "studio.text",
+        version: "1.0.0",
+        title: "Text Output",
+        position: { x: 0, y: 0 },
+        config: { value: "generated text", textDisplayMode: "rendered" },
+      },
+      {
+        id: "legacy_label",
+        kind: "studio.label",
+        version: "1.0.0",
+        title: "Text",
+        position: { x: 220, y: 0 },
+        config: { value: "annotation", fontSize: 18, width: 300, height: 120 },
+      },
+      {
+        id: "generation",
+        kind: "studio.text_generation",
+        version: "1.0.0",
+        title: "Generate",
+        position: { x: 440, y: 0 },
+        config: {},
+      }
+    );
+    project.graph.edges.push({
+      id: "e1",
+      fromNodeId: "legacy_text",
+      fromPortId: "text",
+      toNodeId: "generation",
+      toPortId: "prompt",
+    });
+    project.graph.entryNodeIds = ["legacy_text"];
+
+    const migrated = migrateStudioProjectToPathOnlyPorts(project);
+    expect(migrated.changed).toBe(true);
+
+    const textOutputNode = migrated.project.graph.nodes.find((node) => node.id === "legacy_text");
+    expect(textOutputNode?.kind).toBe("studio.text_output");
+    expect(textOutputNode?.config).toEqual({
+      value: "generated text",
+      textDisplayMode: "rendered",
+    });
+
+    // The label rename must land on studio.text and never chain onward into
+    // studio.text_output, even though both renames run in the same pass.
+    const textNode = migrated.project.graph.nodes.find((node) => node.id === "legacy_label");
+    expect(textNode?.kind).toBe("studio.text");
+    expect(textNode?.config).toEqual({
+      value: "annotation",
+      fontSize: 18,
+    });
+    expect(textNode?.size).toEqual({ width: 300, height: 120 });
+
+    const signature = migrated.project.graph.edges
+      .map((edge) => `${edge.fromNodeId}:${edge.fromPortId}->${edge.toNodeId}:${edge.toPortId}`)
+      .sort();
+    expect(signature).toEqual(["legacy_text:text->generation:prompt"]);
+    expect(migrated.project.graph.entryNodeIds).toEqual(["legacy_text"]);
+
+    expect(
+      migrated.project.migrations.applied.some((entry) => entry.id === "studio.text-node-kinds.v1")
+    ).toBe(true);
+
+    const rerun = migrateStudioProjectToPathOnlyPorts(migrated.project);
+    expect(rerun.changed).toBe(false);
+    expect(rerun.project).toBe(migrated.project);
+  });
+
+  it("stamps stampless projects without legacy text kinds so future studio.text nodes survive reloads", () => {
+    const project = legacyProject();
+    project.graph.nodes.push({
+      id: "input",
+      kind: "studio.input",
+      version: "1.0.0",
+      title: "Input",
+      position: { x: 0, y: 0 },
+      config: { value: "seed" },
+    });
+
+    const migrated = migrateStudioProjectToPathOnlyPorts(project);
+    expect(migrated.changed).toBe(true);
+    expect(migrated.project.graph.nodes[0].kind).toBe("studio.input");
+    expect(
+      migrated.project.migrations.applied.some((entry) => entry.id === "studio.text-node-kinds.v1")
+    ).toBe(true);
+
+    // A new-style Text node added after the stamp landed must never be
+    // re-renamed to studio.text_output on later loads.
+    migrated.project.graph.nodes.push({
+      id: "new_text",
+      kind: "studio.text",
+      version: "1.0.0",
+      title: "Text",
+      position: { x: 220, y: 0 },
+      config: { value: "note to self" },
+    });
+    const rerun = migrateStudioProjectToPathOnlyPorts(migrated.project);
+    expect(rerun.changed).toBe(false);
+    expect(
+      rerun.project.graph.nodes.find((node) => node.id === "new_text")?.kind
+    ).toBe("studio.text");
+  });
+
+  describe("node geometry migration to first-class size", () => {
+    it("moves legacy config.width/config.height to node.size and strips the config keys", () => {
+      const project = baseProject();
+      project.graph.nodes.push({
+        id: "media",
+        kind: "studio.media_ingest",
+        version: "1.0.0",
+        title: "Media",
+        position: { x: 0, y: 0 },
+        config: {
+          sourcePath: "/media/input.mp4",
+          width: 512,
+          height: 356,
+          captionBoard: { version: 1, labels: [] },
+        },
+      });
+
+      const migrated = migrateStudioProjectToPathOnlyPorts(project);
+      expect(migrated.changed).toBe(true);
+
+      const mediaNode = migrated.project.graph.nodes.find((node) => node.id === "media");
+      expect(mediaNode?.size).toEqual({ width: 512, height: 356 });
+      expect(mediaNode?.config).toEqual({
+        sourcePath: "/media/input.mp4",
+        captionBoard: { version: 1, labels: [] },
+      });
+    });
+
+    it("keeps fontSize in config while moving text-node width/height to size", () => {
+      const project = baseProject();
+      project.graph.nodes.push({
+        id: "text",
+        kind: "studio.text",
+        version: "1.0.0",
+        title: "Text",
+        position: { x: 0, y: 0 },
+        config: { value: "annotation", fontSize: 18, width: 300, height: 120 },
+      });
+
+      const migrated = migrateStudioProjectToPathOnlyPorts(project);
+      expect(migrated.changed).toBe(true);
+
+      const textNode = migrated.project.graph.nodes.find((node) => node.id === "text");
+      expect(textNode?.size).toEqual({ width: 300, height: 120 });
+      expect(textNode?.config).toEqual({ value: "annotation", fontSize: 18 });
+    });
+
+    it("fills the kind default height when only a legacy width exists", () => {
+      const project = baseProject();
+      project.graph.nodes.push({
+        id: "text",
+        kind: "studio.text",
+        version: "1.0.0",
+        title: "Text",
+        position: { x: 0, y: 0 },
+        config: { value: "annotation", width: 300 },
+      });
+
+      const migrated = migrateStudioProjectToPathOnlyPorts(project);
+      expect(migrated.changed).toBe(true);
+
+      const textNode = migrated.project.graph.nodes.find((node) => node.id === "text");
+      // 140 is the pre-migration rendered default for a heightless text node.
+      expect(textNode?.size).toEqual({ width: 300, height: 140 });
+      expect(textNode?.config).toEqual({ value: "annotation" });
+    });
+
+    it("fills the kind default width when only a legacy height exists", () => {
+      const project = baseProject();
+      project.graph.nodes.push({
+        id: "http",
+        kind: "studio.http_request",
+        version: "1.0.0",
+        title: "HTTP",
+        position: { x: 0, y: 0 },
+        config: { url: "https://example.com", height: 320 },
+      });
+
+      const migrated = migrateStudioProjectToPathOnlyPorts(project);
+      expect(migrated.changed).toBe(true);
+
+      const httpNode = migrated.project.graph.nodes.find((node) => node.id === "http");
+      expect(httpNode?.size).toEqual({ width: 280, height: 320 });
+      expect(httpNode?.config).toEqual({ url: "https://example.com" });
+    });
+
+    it("drops non-numeric geometry garbage without minting a size", () => {
+      const project = baseProject();
+      project.graph.nodes.push({
+        id: "http",
+        kind: "studio.http_request",
+        version: "1.0.0",
+        title: "HTTP",
+        position: { x: 0, y: 0 },
+        config: { url: "https://example.com", width: "abc", height: null },
+      });
+
+      const migrated = migrateStudioProjectToPathOnlyPorts(project);
+      expect(migrated.changed).toBe(true);
+
+      const httpNode = migrated.project.graph.nodes.find((node) => node.id === "http");
+      expect(httpNode?.size).toBeUndefined();
+      expect(httpNode?.config).toEqual({ url: "https://example.com" });
+    });
+
+    it("keeps an existing size authoritative and only strips lingering legacy keys", () => {
+      const project = baseProject();
+      project.graph.nodes.push({
+        id: "text",
+        kind: "studio.text",
+        version: "1.0.0",
+        title: "Text",
+        position: { x: 0, y: 0 },
+        size: { width: 420, height: 260 },
+        config: { value: "annotation", width: 300, height: 120 },
+      });
+
+      const migrated = migrateStudioProjectToPathOnlyPorts(project);
+      expect(migrated.changed).toBe(true);
+
+      const textNode = migrated.project.graph.nodes.find((node) => node.id === "text");
+      expect(textNode?.size).toEqual({ width: 420, height: 260 });
+      expect(textNode?.config).toEqual({ value: "annotation" });
+    });
+
+    it("is idempotent: a second run leaves the migrated project untouched", () => {
+      const project = baseProject();
+      project.graph.nodes.push({
+        id: "text",
+        kind: "studio.text",
+        version: "1.0.0",
+        title: "Text",
+        position: { x: 0, y: 0 },
+        config: { value: "annotation", fontSize: 18, width: 300, height: 120 },
+      });
+
+      const migrated = migrateStudioProjectToPathOnlyPorts(project);
+      expect(migrated.changed).toBe(true);
+
+      const rerun = migrateStudioProjectToPathOnlyPorts(migrated.project);
+      expect(rerun.changed).toBe(false);
+      expect(rerun.project).toBe(migrated.project);
+    });
+  });
+
+  it("leaves already-migrated projects with modern studio.text nodes untouched", () => {
+    const project = baseProject();
+    project.graph.nodes.push(
+      {
+        id: "text",
+        kind: "studio.text",
+        version: "1.0.0",
+        title: "Text",
+        position: { x: 0, y: 0 },
+        config: { value: "annotation" },
+      },
+      {
+        id: "text_output",
+        kind: "studio.text_output",
+        version: "1.0.0",
+        title: "Text Output",
+        position: { x: 220, y: 0 },
+        config: { value: "" },
+      }
+    );
+
+    const migrated = migrateStudioProjectToPathOnlyPorts(project);
+    expect(migrated.changed).toBe(false);
+    expect(migrated.project).toBe(project);
+    expect(migrated.project.graph.nodes.map((node) => node.kind)).toEqual([
+      "studio.text",
+      "studio.text_output",
+    ]);
   });
 });

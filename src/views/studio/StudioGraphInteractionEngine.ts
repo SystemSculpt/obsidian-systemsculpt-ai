@@ -1,6 +1,7 @@
 import { StudioGraphConnectionEngineV3 } from "./connections-v3/StudioGraphConnectionEngineV3";
 import { StudioGraphGroupController } from "./StudioGraphGroupController";
 import { StudioGraphSelectionController } from "./StudioGraphSelectionController";
+import { StudioGraphSelectionResizeController } from "./StudioGraphSelectionResizeController";
 import type {
   PendingConnection,
   StudioGraphInteractionHost,
@@ -18,6 +19,8 @@ export class StudioGraphInteractionEngine {
   private readonly selectionController: StudioGraphSelectionController;
   private readonly connectionEngine: StudioGraphConnectionEngineV3;
   private readonly groupController: StudioGraphGroupController;
+  private readonly selectionResizeController: StudioGraphSelectionResizeController;
+  private externalSelectionChangeListener: (() => void) | null = null;
 
   constructor(private readonly host: StudioGraphInteractionHost) {
     this.selectionController = new StudioGraphSelectionController({
@@ -26,6 +29,7 @@ export class StudioGraphInteractionEngine {
       renderEdgeLayer: () => this.connectionEngine.renderEdgeLayer(),
       onNodePositionsChanged: () => {
         this.groupController.refreshGroupBounds();
+        this.selectionResizeController.refreshSelectionFrame();
         this.host.onNodePositionsChanged?.();
       },
       commitProjectMutation: (reason, mutator, options) =>
@@ -59,6 +63,22 @@ export class StudioGraphInteractionEngine {
     this.connectionEngine = new StudioGraphConnectionEngineV3({
       ...this.host,
       getGraphZoom: () => this.selectionController.getGraphZoom(),
+    });
+
+    this.selectionResizeController = new StudioGraphSelectionResizeController({
+      isBusy: () => this.host.isBusy(),
+      getCurrentProject: () => this.host.getCurrentProject(),
+      getGraphZoom: () => this.selectionController.getGraphZoom(),
+      getSelectedNodeIds: () => this.selectionController.getSelectedNodeIds(),
+      getNodeElement: (nodeId) => this.selectionController.getNodeElement(nodeId),
+      onSelectionResize: (patches, options) => this.host.onSelectionResize?.(patches, options),
+    });
+
+    // The engine multiplexes selection changes: the multi-select resize
+    // frame re-derives first, then the host's own listener runs.
+    this.selectionController.setSelectionChangeListener(() => {
+      this.selectionResizeController.refreshSelectionFrame();
+      this.externalSelectionChangeListener?.();
     });
   }
 
@@ -102,7 +122,7 @@ export class StudioGraphInteractionEngine {
   }
 
   setSelectionChangeListener(listener: (() => void) | null): void {
-    this.selectionController.setSelectionChangeListener(listener);
+    this.externalSelectionChangeListener = listener;
   }
 
   isPendingConnectionSource(nodeId: string, portId: string): boolean {
@@ -126,11 +146,13 @@ export class StudioGraphInteractionEngine {
     this.selectionController.clearRenderBindings();
     this.connectionEngine.clearRenderBindings();
     this.groupController.clearRenderBindings();
+    this.selectionResizeController.clearRenderBindings();
   }
 
   onNodeRemoved(nodeId: string): void {
     this.selectionController.onNodeRemoved(nodeId);
     this.connectionEngine.onNodeRemoved(nodeId);
+    this.selectionResizeController.refreshSelectionFrame();
   }
 
   registerViewportElement(viewport: HTMLElement): void {
@@ -145,6 +167,10 @@ export class StudioGraphInteractionEngine {
     this.selectionController.registerMarqueeElement(marquee);
   }
 
+  registerSnapGuidesElement(layer: HTMLElement): void {
+    this.selectionController.registerSnapGuidesElement(layer);
+  }
+
   registerZoomLabelElement(label: HTMLElement): void {
     this.selectionController.registerZoomLabelElement(label);
   }
@@ -153,6 +179,7 @@ export class StudioGraphInteractionEngine {
     this.selectionController.registerCanvasElement(canvas);
     this.connectionEngine.registerCanvasElement(canvas);
     this.groupController.registerCanvasElement(canvas);
+    this.selectionResizeController.registerCanvasElement(canvas);
   }
 
   registerEdgesLayerElement(layer: SVGSVGElement): void {
@@ -187,6 +214,10 @@ export class StudioGraphInteractionEngine {
 
   refreshGroupBounds(): void {
     this.groupController.refreshGroupBounds();
+  }
+
+  refreshSelectionResizeFrame(): void {
+    this.selectionResizeController.refreshSelectionFrame();
   }
 
   requestGroupNameEdit(groupId: string): void {

@@ -29,7 +29,7 @@ describe("StudioGraphNodeDetailMode", () => {
   });
 
   it("hides text editor by default in collapsed mode and shows it in expanded mode", () => {
-    const node = nodeFixture("studio.text");
+    const node = nodeFixture("studio.text_output");
     expect(
       resolveStudioNodeDetailSectionVisibility({
         node,
@@ -47,7 +47,7 @@ describe("StudioGraphNodeDetailMode", () => {
   });
 
   it("writes sparse collapsed overrides and removes default-value entries", () => {
-    const node = nodeFixture("studio.text");
+    const node = nodeFixture("studio.text_output");
     const changedToVisible = writeStudioCollapsedSectionVisibilityOverride({
       node,
       section: "textEditor",
@@ -72,12 +72,12 @@ describe("StudioGraphNodeDetailMode", () => {
   });
 
   it("marks section applicability by node kind", () => {
-    const textNode = nodeFixture("studio.text_generation");
+    const generationNode = nodeFixture("studio.text_generation");
     const noteNode = nodeFixture("studio.note");
-    const labelNode = nodeFixture("studio.label");
+    const visualTextNode = nodeFixture("studio.text");
 
-    expect(isStudioCollapsedSectionApplicableToNode(textNode, "systemPrompt")).toBe(true);
+    expect(isStudioCollapsedSectionApplicableToNode(generationNode, "systemPrompt")).toBe(true);
     expect(isStudioCollapsedSectionApplicableToNode(noteNode, "systemPrompt")).toBe(false);
-    expect(isStudioCollapsedSectionApplicableToNode(labelNode, "outputPreview")).toBe(false);
+    expect(isStudioCollapsedSectionApplicableToNode(visualTextNode, "outputPreview")).toBe(false);
   });
 });

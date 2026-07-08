@@ -1,5 +1,5 @@
 import type { StudioNodeInstance } from "../../../studio/types";
-import { resolveStudioGraphNodeWidth } from "../graph-v3/StudioGraphNodeGeometry";
+import { resolveStudioGraphNodeWidth } from "../../../studio/StudioNodeGeometry";
 
 /**
  * Horizontal inset (world px) of a port pin's centre from the card's vertical

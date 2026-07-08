@@ -142,13 +142,13 @@ function definitionFixture(kind: string): StudioNodeDefinition {
 describe("Studio collapsed detail rendering", () => {
   it("hides inline text editor surface when text editor visibility is disabled", () => {
     const nodeEl = document.createElement("div");
-    const node = nodeFixture("studio.text", { value: "hello" });
+    const node = nodeFixture("studio.text_output", { value: "hello" });
 
     renderStudioNodeInlineEditor({
       nodeEl,
       node,
       nodeRunState: IDLE_NODE_RUN_STATE,
-      definition: definitionFixture("studio.text"),
+      definition: definitionFixture("studio.text_output"),
       interactionLocked: false,
       onNodeConfigMutated: jest.fn(),
       showTextEditor: false,

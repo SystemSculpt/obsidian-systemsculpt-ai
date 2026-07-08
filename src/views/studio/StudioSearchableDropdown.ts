@@ -100,10 +100,13 @@ export function renderStudioSearchableDropdown(options: StudioSearchableDropdown
     const viewportWidth = window.innerWidth || document.documentElement?.clientWidth || 0;
     const viewportHeight = window.innerHeight || document.documentElement?.clientHeight || 0;
     if (!viewportWidth) {
-      panelEl.style.left = "0px";
-      panelEl.style.right = "auto";
-      panelEl.style.width = "100%";
+      // Static full-width reset lives in views/studio-editors.css.
+      panelEl.classList.add("ss-studio-searchable-select-panel--full-width");
+      panelEl.style.left = "";
+      panelEl.style.right = "";
+      panelEl.style.width = "";
     } else {
+      panelEl.classList.remove("ss-studio-searchable-select-panel--full-width");
       const rect = rootEl.getBoundingClientRect();
       const viewportMargin = STUDIO_DROPDOWN_VIEWPORT_MARGIN_PX;
       const availableWidth = Math.max(rect.width, viewportWidth - viewportMargin * 2);

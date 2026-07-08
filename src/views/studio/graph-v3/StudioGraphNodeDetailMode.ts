@@ -8,7 +8,7 @@ export const STUDIO_NODE_COLLAPSED_VISIBILITY_CONFIG_KEY = "__studioCollapsedVis
 
 const INLINE_TEXT_NODE_KINDS = new Set<string>([
   "studio.note",
-  "studio.text",
+  "studio.text_output",
   "studio.text_generation",
   "studio.transcription",
 ]);
@@ -80,7 +80,7 @@ export function isStudioCollapsedSectionApplicableToNode(
   section: StudioCollapsedDetailSection
 ): boolean {
   const kind = normalizeNodeKind(node.kind);
-  if (kind === "studio.label") {
+  if (kind === "studio.text") {
     return false;
   }
   if (section === "systemPrompt") {

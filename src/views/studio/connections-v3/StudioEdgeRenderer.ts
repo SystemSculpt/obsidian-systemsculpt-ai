@@ -7,11 +7,14 @@ const SVG_NS = "http://www.w3.org/2000/svg";
  * Brand-new Studio edge renderer (replaces the legacy StudioLinkRenderer).
  *
  * Design goals after the legacy line system failed to render at all:
- *  1. CSS-immune visibility — every visual property (stroke, width, opacity,
- *     fill) is set INLINE on the element. No dependency on `.ss-studio-link-*`
- *     stylesheet rules, several of which could hide lines (e.g. a stuck
- *     `is-zoomed-micro` viewport class sets `display:none` on link paths).
- *  2. Fresh class names (`ss-studio-edge*`) so no legacy rule can match.
+ *  1. Dynamic visibility is inline — the status-driven stroke color/opacity
+ *     and the drag-preview stroke/dash are set INLINE on the element so a
+ *     line is never invisible because of a stylesheet regression. Static
+ *     presentation (fill, stroke widths, caps/joins, pointer-events) lives
+ *     on the `.ss-studio-edge-*` rules in views/studio.css.
+ *  2. Fresh class names (`ss-studio-edge*`) so no legacy `.ss-studio-link-*`
+ *     rule can match (e.g. a stuck `is-zoomed-micro` viewport class set
+ *     `display:none` on legacy link paths).
  *  3. Geometry comes from the caller's data-driven anchor resolver, so a line
  *     is drawn whenever both endpoint nodes exist — independent of DOM
  *     measurement, paint timing, or visibility.
@@ -38,9 +41,6 @@ export type StudioEdgeRendererOptions = {
   resolvePortAnchorPoint: EdgePortAnchorResolver;
   getCursorAnchorPoint: () => { x: number; y: number } | null;
 };
-
-const EDGE_STROKE_WIDTH = 1.6;
-const HIT_STROKE_WIDTH = 14;
 
 // Status → stroke colour. CSS vars keep theme adaptivity, but every entry has a
 // concrete fallback so a line is NEVER invisible even if the var is undefined.
@@ -133,34 +133,19 @@ export class StudioEdgeRenderer {
     group.dataset.edgeId = edgeId;
 
     // Wide, transparent hit target for hover/right-click selection.
+    // Static presentation for all three paths lives in views/studio.css.
     const hitPath = document.createElementNS(SVG_NS, "path") as SVGPathElement;
     hitPath.setAttribute("class", "ss-studio-edge-hit");
     hitPath.dataset.edgeId = edgeId;
-    hitPath.style.fill = "none";
-    hitPath.style.stroke = "transparent";
-    hitPath.style.strokeWidth = String(HIT_STROKE_WIDTH);
-    hitPath.style.strokeLinecap = "round";
-    hitPath.style.pointerEvents = "stroke";
-    hitPath.style.cursor = "pointer";
     group.appendChild(hitPath);
 
     const visiblePath = document.createElementNS(SVG_NS, "path") as SVGPathElement;
     visiblePath.setAttribute("class", "ss-studio-edge-line");
     visiblePath.dataset.edgeId = edgeId;
-    visiblePath.style.fill = "none";
-    visiblePath.style.strokeWidth = String(EDGE_STROKE_WIDTH);
-    visiblePath.style.strokeLinecap = "round";
-    visiblePath.style.strokeLinejoin = "round";
-    visiblePath.style.pointerEvents = "none";
     group.appendChild(visiblePath);
 
     const arrowPath = document.createElementNS(SVG_NS, "path") as SVGPathElement;
     arrowPath.setAttribute("class", "ss-studio-edge-arrow");
-    arrowPath.style.fill = "none";
-    arrowPath.style.strokeWidth = String(EDGE_STROKE_WIDTH);
-    arrowPath.style.strokeLinecap = "round";
-    arrowPath.style.strokeLinejoin = "round";
-    arrowPath.style.pointerEvents = "none";
     group.appendChild(arrowPath);
 
     return { group, hitPath, visiblePath, arrowPath };
@@ -200,14 +185,9 @@ export class StudioEdgeRenderer {
 
     const curve = buildCubicLinkCurve(source, end);
     if (!this.previewPath) {
+      // Static presentation lives on .ss-studio-edge-preview in views/studio.css.
       this.previewPath = document.createElementNS(SVG_NS, "path") as SVGPathElement;
       this.previewPath.setAttribute("class", "ss-studio-edge-preview");
-      this.previewPath.style.fill = "none";
-      this.previewPath.style.strokeWidth = "2.2";
-      this.previewPath.style.strokeLinecap = "round";
-      this.previewPath.style.strokeLinejoin = "round";
-      this.previewPath.style.opacity = "0.95";
-      this.previewPath.style.pointerEvents = "none";
     }
     this.previewPath.style.stroke = previewStroke(drag.validity);
     this.previewPath.style.strokeDasharray = drag.validity === "valid" ? "none" : "6 6";

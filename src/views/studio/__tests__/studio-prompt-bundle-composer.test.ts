@@ -7,7 +7,7 @@ import {
 const createNode = (overrides: Partial<StudioNodeInstance>): StudioNodeInstance =>
   ({
     id: "node-1",
-    kind: "studio.text",
+    kind: "studio.text_output",
     version: "1.0.0",
     title: "Node",
     position: { x: 0, y: 0 },
@@ -93,7 +93,7 @@ describe("StudioPromptBundleComposer", () => {
 
   it("resolves text source from runtime output, then config value, then config preview", async () => {
     const fromRuntime = await resolvePromptBundleNodeSource({
-      node: createNode({ kind: "studio.text", config: {} }),
+      node: createNode({ kind: "studio.text_output", config: {} }),
       runtimePath: undefined,
       runtimeText: " runtime output ",
       configuredNotePath: "",
@@ -103,7 +103,7 @@ describe("StudioPromptBundleComposer", () => {
     expect(fromRuntime.content).toBe("runtime output");
 
     const fromConfigValue = await resolvePromptBundleNodeSource({
-      node: createNode({ kind: "studio.text", config: { value: "configured value" } }),
+      node: createNode({ kind: "studio.text_output", config: { value: "configured value" } }),
       runtimePath: undefined,
       runtimeText: "",
       configuredNotePath: "",
@@ -113,7 +113,7 @@ describe("StudioPromptBundleComposer", () => {
     expect(fromConfigValue.content).toBe("configured value");
 
     const fromConfigPreview = await resolvePromptBundleNodeSource({
-      node: createNode({ kind: "studio.text", config: { prompt: "hello" } }),
+      node: createNode({ kind: "studio.text_output", config: { prompt: "hello" } }),
       runtimePath: undefined,
       runtimeText: "",
       configuredNotePath: "",

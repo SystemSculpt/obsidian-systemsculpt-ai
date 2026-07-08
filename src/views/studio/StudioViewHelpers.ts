@@ -9,9 +9,9 @@ const NODE_DESCRIPTION_BY_KIND: Record<string, string> = {
   "studio.json":
     "Build JSON payloads in Composer or Raw mode, pass through upstream JSON, or validate/parse text input into JSON.",
   "studio.value": "Generic value preview node for scalar or unknown output types.",
-  "studio.label": "Adds a visual-only label card for organizing your canvas.",
+  "studio.text": "Adds freeform text for annotating your canvas.",
   "studio.note": "Reads selected markdown vault notes and keeps a live read-only preview.",
-  "studio.text": "Stores editable text and outputs it for downstream nodes.",
+  "studio.text_output": "Stores editable text and outputs it for downstream nodes.",
   "studio.text_generation": "Calls a text model and returns generated text output.",
   "studio.image_generation": "Generates one or more images from your prompt.",
   "studio.media_ingest": "Stores media files and outputs a reusable media path.",
@@ -29,7 +29,8 @@ const NODE_DESCRIPTION_BY_KIND: Record<string, string> = {
 const NODE_DISPLAY_NAME_BY_KIND: Record<string, string> = {
   "studio.json": "JSON",
   "studio.value": "Value",
-  "studio.label": "Label",
+  "studio.text": "Text",
+  "studio.text_output": "Text Output",
   "studio.media_ingest": "Media",
 };
 
@@ -55,6 +56,24 @@ export function cloneConfigDefaults(
   } catch {
     return {};
   }
+}
+
+export type StudioNodeInsertMenuItem = {
+  definition: StudioNodeDefinition;
+  title: string;
+  summary: string;
+};
+
+export function buildNodeInsertMenuItems(
+  definitions: StudioNodeDefinition[]
+): StudioNodeInsertMenuItem[] {
+  return definitions
+    .filter((definition) => definition.hiddenFromInsertMenu !== true)
+    .map((definition) => ({
+      definition,
+      title: prettifyNodeKind(definition.kind),
+      summary: describeNodeDefinition(definition),
+    }));
 }
 
 export function describeNodeDefinition(definition: StudioNodeDefinition): string {

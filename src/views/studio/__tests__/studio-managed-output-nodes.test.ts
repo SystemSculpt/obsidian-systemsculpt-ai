@@ -384,7 +384,7 @@ describe("StudioManagedOutputNodes text outputs", () => {
     expect(result.createdEdgeIds).toEqual(["edge_text_0"]);
 
     const textNode = project.graph.nodes.find((node) => node.id === "node_text_0");
-    expect(textNode?.kind).toBe("studio.text");
+    expect(textNode?.kind).toBe("studio.text_output");
     expect(textNode?.config.value).toBe("Title Option A");
     expect(textNode?.config[MANAGED_TEXT_OWNER_KEY]).toBe(MANAGED_TEXT_OWNER);
     expect(textNode?.config[MANAGED_TEXT_SOURCE_NODE_ID_KEY]).toBe(sourceNode.id);
@@ -435,7 +435,7 @@ describe("StudioManagedOutputNodes text outputs", () => {
     expect(second.createdNodeIds).toEqual(["node_text_1"]);
     expect(third.changed).toBe(false);
     expect(third.createdNodeIds).toEqual([]);
-    expect(project.graph.nodes.filter((node) => node.kind === "studio.text")).toHaveLength(2);
+    expect(project.graph.nodes.filter((node) => node.kind === "studio.text_output")).toHaveLength(2);
     expect(project.graph.edges).toHaveLength(2);
   });
 
@@ -476,7 +476,7 @@ describe("StudioManagedOutputNodes text outputs", () => {
     const sourceNode = createTextSourceNode();
     const connectedTextNode: StudioNodeInstance = {
       id: "text_existing",
-      kind: "studio.text",
+      kind: "studio.text_output",
       version: "1.0.0",
       title: "Title Note",
       position: { x: 500, y: 160 },
@@ -607,7 +607,7 @@ describe("StudioManagedOutputNodes pending placeholders", () => {
     expect(result.createdNodeIds).toEqual(["pending_text_0"]);
     const pendingText = project.graph.nodes.find((node) => node.id === "pending_text_0");
     expect(pendingText).toBeDefined();
-    expect(pendingText?.kind).toBe("studio.text");
+    expect(pendingText?.kind).toBe("studio.text_output");
     expect(pendingText?.disabled).toBe(true);
     expect(pendingText?.config[MANAGED_OUTPUT_PENDING_KEY]).toBe(true);
     expect(pendingText?.config[MANAGED_OUTPUT_PENDING_RUN_ID_KEY]).toBe("run_2");

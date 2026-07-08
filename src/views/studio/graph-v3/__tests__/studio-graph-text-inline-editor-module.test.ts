@@ -38,7 +38,7 @@ function click(element: HTMLElement): void {
 describe("StudioGraphTextInlineEditor module", () => {
   it("limits inline text support to text-like node kinds", () => {
     expect(isInlineTextNodeKind("studio.note")).toBe(true);
-    expect(isInlineTextNodeKind("studio.text")).toBe(true);
+    expect(isInlineTextNodeKind("studio.text_output")).toBe(true);
     expect(isInlineTextNodeKind("studio.text_generation")).toBe(true);
     expect(isInlineTextNodeKind("studio.transcription")).toBe(true);
     expect(isInlineTextNodeKind("studio.json")).toBe(false);
@@ -86,7 +86,7 @@ describe("StudioGraphTextInlineEditor module", () => {
 
   it("uses config value change callbacks for display mode and text edits", () => {
     const nodeEl = document.createElement("div");
-    const node = nodeFixture("studio.text", { value: "Hello" });
+    const node = nodeFixture("studio.text_output", { value: "Hello" });
     const onNodeConfigMutated = jest.fn();
     const onNodeConfigValueChange = jest.fn((nodeId: string, key: string, value: unknown) => {
       expect(nodeId).toBe(node.id);

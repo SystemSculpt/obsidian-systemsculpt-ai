@@ -406,7 +406,7 @@ async function collectNodeFields(
       pushField(fields, "Saved Output", getText(config.value), "markdown");
       break;
     }
-    case "studio.text": {
+    case "studio.text_output": {
       usedKeys.add("value");
       usedKeys.add("textDisplayMode");
       pushField(fields, "Text", getText(config.value), "markdown");

@@ -15,37 +15,6 @@ import {
   statusLabelForNode,
   type StudioNodeRunDisplayState,
 } from "../StudioRunPresentationState";
-import { resolveNodeMediaPreview } from "./StudioGraphMediaPreview";
-
-export function bindNodeCardPointerDown(options: {
-  nodeEl: HTMLElement;
-  nodeId: string;
-  graphInteraction: StudioGraphInteractionEngine;
-}): void {
-  const { nodeEl, nodeId, graphInteraction } = options;
-  nodeEl.addEventListener("pointerdown", (event) => {
-    const pointerEvent = event as PointerEvent;
-    const target = pointerEvent.target as HTMLElement | null;
-    if (!target) {
-      return;
-    }
-    if (
-      target.closest(
-        "input, button, select, textarea, a, .ss-studio-port-pin, .ss-studio-label-resize-handle, .ss-studio-node-resize-handle, .ss-studio-label-display"
-      )
-    ) {
-      return;
-    }
-
-    const modifierToggle = pointerEvent.shiftKey || pointerEvent.metaKey || pointerEvent.ctrlKey;
-    if (modifierToggle) {
-      graphInteraction.toggleNodeSelection(nodeId);
-      return;
-    }
-
-    graphInteraction.startNodeDrag(nodeId, pointerEvent, nodeEl);
-  });
-}
 
 export function renderNodeHeader(options: {
   nodeEl: HTMLElement;
@@ -155,11 +124,14 @@ export function renderNodeStatusRow(options: {
   const statusRow = nodeEl.createDiv({ cls: "ss-studio-node-run-status-row" });
   const statusTone = isPlaceholder ? "pending" : nodeRunState.status;
   const statusText = isPlaceholder ? "Generating" : statusLabelForNode(nodeRunState.status);
-  statusRow.createDiv({
+  const statusEl = statusRow.createDiv({
     cls: `ss-studio-node-run-status is-${statusTone}`,
     text: statusText,
   });
   const statusMessage = isPlaceholder ? "" : nodeRunState.message.trim();
+  if (statusMessage) {
+    statusEl.title = statusMessage;
+  }
   if (statusMessage) {
     statusRow.createDiv({
       cls: "ss-studio-node-run-message",
@@ -258,40 +230,11 @@ export function renderNodePorts(options: {
   }
 }
 
-function extractPathExtension(path: string): string {
-  const normalized = String(path || "").trim().toLowerCase();
-  if (!normalized) {
-    return "";
-  }
-  const withoutQuery = normalized.split(/[?#]/, 1)[0];
-  const dot = withoutQuery.lastIndexOf(".");
-  return dot >= 0 ? withoutQuery.slice(dot + 1) : "";
-}
-
-function mediaIngestLooksLikeImage(node: StudioNodeInstance, nodeRunState: StudioNodeRunDisplayState): boolean {
-  const mediaPreview = resolveNodeMediaPreview(node, nodeRunState.outputs as Record<string, unknown> | null);
-  if (mediaPreview?.kind === "image") {
-    return true;
-  }
-  if (node.kind !== "studio.media_ingest") {
-    return false;
-  }
-  const outputs = (nodeRunState.outputs || {}) as Record<string, unknown>;
-  const candidatePaths = [
-    typeof outputs.preview_path === "string" ? outputs.preview_path : "",
-    typeof outputs.path === "string" ? outputs.path : "",
-    typeof node.config.sourcePath === "string" ? node.config.sourcePath : "",
-  ];
-  const extension = candidatePaths.map((value) => extractPathExtension(value)).find(Boolean) || "";
-  return new Set(["png", "jpg", "jpeg", "webp", "gif", "bmp", "tiff", "avif", "svg"]).has(extension);
-}
-
 export function renderCollapsedVisibilityControls(options: {
   nodeEl: HTMLElement;
   node: StudioNodeInstance;
   busy: boolean;
   nodeDetailMode: StudioNodeDetailMode;
-  nodeRunState: StudioNodeRunDisplayState;
   onNodeConfigMutated: (node: StudioNodeInstance) => void;
   onNodeConfigValueChange?: (
     nodeId: string,
@@ -299,45 +242,33 @@ export function renderCollapsedVisibilityControls(options: {
     value: StudioJsonValue | null,
     options?: { mode?: "discrete" | "continuous"; captureHistory?: boolean }
   ) => void;
-  onOpenImageEditor?: (node: StudioNodeInstance) => void;
-  onEditImageWithAi?: (node: StudioNodeInstance) => void;
-  onCopyNodeImageToClipboard?: (node: StudioNodeInstance) => void;
 }): void {
   const {
     nodeEl,
     node,
     busy,
     nodeDetailMode,
-    nodeRunState,
     onNodeConfigMutated,
     onNodeConfigValueChange,
-    onOpenImageEditor,
-    onEditImageWithAi,
-    onCopyNodeImageToClipboard,
   } = options;
   if (nodeDetailMode !== "expanded") {
     return;
   }
-  if (node.kind === "studio.label") {
+  if (node.kind === "studio.text") {
     return;
   }
 
   const sections = listStudioCollapsedDetailSections().filter((section) =>
     isStudioCollapsedSectionApplicableToNode(node, section)
   );
-  const hasImageActions = mediaIngestLooksLikeImage(node, nodeRunState);
-  const showAiEditAction =
-    node.kind === "studio.media_ingest" && hasImageActions && typeof onEditImageWithAi === "function";
-  const showEditorAction = node.kind === "studio.media_ingest" && hasImageActions && typeof onOpenImageEditor === "function";
-  const showCopyImageAction = hasImageActions && typeof onCopyNodeImageToClipboard === "function";
-  if (sections.length === 0 && !showAiEditAction && !showEditorAction && !showCopyImageAction) {
+  if (sections.length === 0) {
     return;
   }
 
   const wrapEl = nodeEl.createDiv({ cls: "ss-studio-node-collapsed-visibility" });
   wrapEl.createDiv({
     cls: "ss-studio-node-collapsed-visibility-title",
-    text: "Quick Actions",
+    text: "Collapsed view",
   });
   const buttonsEl = wrapEl.createDiv({ cls: "ss-studio-node-collapsed-visibility-buttons" });
   const commitPresentationMutation = (nextValue: StudioJsonValue | null): void => {
@@ -405,66 +336,6 @@ export function renderCollapsedVisibilityControls(options: {
         (draftNode.config[STUDIO_NODE_COLLAPSED_VISIBILITY_CONFIG_KEY] ?? null) as StudioJsonValue | null
       );
       syncVisualState();
-    });
-  }
-
-  if (showAiEditAction) {
-    const button = buttonsEl.createEl("button", {
-      cls: "ss-studio-node-collapsed-visibility-button",
-      text: "Edit with AI",
-      attr: {
-        "aria-label": "Edit image with AI",
-        title: "Edit image with AI",
-      },
-    });
-    button.type = "button";
-    button.disabled = busy;
-    button.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      if (!busy) {
-        onEditImageWithAi?.(node);
-      }
-    });
-  }
-
-  if (showEditorAction) {
-    const button = buttonsEl.createEl("button", {
-      cls: "ss-studio-node-collapsed-visibility-button",
-      text: "Edit Image",
-      attr: {
-        "aria-label": "Open image editor",
-        title: "Open image editor",
-      },
-    });
-    button.type = "button";
-    button.disabled = busy;
-    button.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      if (!busy) {
-        onOpenImageEditor?.(node);
-      }
-    });
-  }
-
-  if (showCopyImageAction) {
-    const button = buttonsEl.createEl("button", {
-      cls: "ss-studio-node-collapsed-visibility-button",
-      text: "Copy Image",
-      attr: {
-        "aria-label": "Copy image to clipboard",
-        title: "Copy image to clipboard",
-      },
-    });
-    button.type = "button";
-    button.disabled = busy;
-    button.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      if (!busy) {
-        onCopyNodeImageToClipboard?.(node);
-      }
     });
   }
 }

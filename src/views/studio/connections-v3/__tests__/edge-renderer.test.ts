@@ -11,7 +11,7 @@ const edge = (id: string) => ({
 });
 
 describe("StudioEdgeRenderer", () => {
-  it("creates a visible, inline-styled path for each edge", () => {
+  it("creates a visible path for each edge with dynamic stroke inline", () => {
     const store = new StudioLinkStore();
     const layer = makeLayer();
     const renderer = new StudioEdgeRenderer({
@@ -29,9 +29,11 @@ describe("StudioEdgeRenderer", () => {
     expect(line).not.toBeNull();
     expect(line!.getAttribute("d")).toBeTruthy();
     expect(line!.getAttribute("d")!.startsWith("M 100 100")).toBe(true);
-    // Inline-styled so no stylesheet rule can hide it.
-    expect(line!.style.fill).toBe("none");
-    expect(line!.style.strokeWidth).toBe("1.6");
+    // Dynamic status stroke/opacity are inline so no stylesheet regression
+    // can blank the line; static presentation (fill, stroke-width, caps)
+    // lives on .ss-studio-edge-* rules in src/css/views/studio.css.
+    expect(line!.style.stroke).toBeTruthy();
+    expect(line!.style.opacity).toBeTruthy();
     expect(line!.style.display).not.toBe("none");
 
     const group = layer.querySelector(".ss-studio-edge-group") as SVGGElement;

@@ -1,13 +1,15 @@
 import type { StudioProjectV1 } from "../../../studio/types";
+import {
+  STUDIO_GRAPH_DEFAULT_NODE_HEIGHT,
+  STUDIO_GRAPH_DEFAULT_NODE_WIDTH,
+  STUDIO_GRAPH_MEASURED_NODE_MIN_HEIGHT,
+  STUDIO_GRAPH_MEASURED_NODE_MIN_WIDTH,
+} from "../../../studio/StudioNodeGeometry";
 
 export const STUDIO_GRAPH_CANVAS_BASE_WIDTH = 32000;
 export const STUDIO_GRAPH_CANVAS_BASE_HEIGHT = 32000;
 export const STUDIO_GRAPH_CANVAS_MAX_WIDTH = 100000;
 export const STUDIO_GRAPH_CANVAS_MAX_HEIGHT = 100000;
-export const STUDIO_GRAPH_CANVAS_NODE_WIDTH = 280;
-export const STUDIO_GRAPH_CANVAS_FALLBACK_NODE_HEIGHT = 164;
-export const STUDIO_GRAPH_CANVAS_MIN_NODE_HEIGHT = 80;
-export const STUDIO_GRAPH_CANVAS_MIN_NODE_WIDTH = 120;
 export const STUDIO_GRAPH_CANVAS_EXPAND_PADDING_X = 1000;
 export const STUDIO_GRAPH_CANVAS_EXPAND_PADDING_Y = 720;
 
@@ -33,16 +35,16 @@ function clampDimension(value: number, min: number, max: number): number {
 
 function normalizeNodeHeight(value: number | null | undefined): number {
   if (!Number.isFinite(value)) {
-    return STUDIO_GRAPH_CANVAS_FALLBACK_NODE_HEIGHT;
+    return STUDIO_GRAPH_DEFAULT_NODE_HEIGHT;
   }
-  return Math.max(STUDIO_GRAPH_CANVAS_MIN_NODE_HEIGHT, Math.round(Number(value)));
+  return Math.max(STUDIO_GRAPH_MEASURED_NODE_MIN_HEIGHT, Math.round(Number(value)));
 }
 
 function normalizeNodeWidth(value: number | null | undefined): number {
   if (!Number.isFinite(value)) {
-    return STUDIO_GRAPH_CANVAS_NODE_WIDTH;
+    return STUDIO_GRAPH_DEFAULT_NODE_WIDTH;
   }
-  return Math.max(STUDIO_GRAPH_CANVAS_MIN_NODE_WIDTH, Math.round(Number(value)));
+  return Math.max(STUDIO_GRAPH_MEASURED_NODE_MIN_WIDTH, Math.round(Number(value)));
 }
 
 function normalizeDimension(value: number | undefined, fallback: number): number {

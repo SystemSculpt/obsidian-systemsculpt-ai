@@ -43,7 +43,6 @@ import {
   resolveStudioAssetPreviewSrc,
 } from "./graph-v3/StudioGraphMediaPreviewModal";
 import { openStudioImageEditorModal } from "./graph-v3/StudioGraphImageEditorModal";
-import { openStudioAiImageEditPromptModal } from "./graph-v3/StudioGraphAiImageEditPromptModal";
 import { composeStudioCaptionBoardImage } from "../../studio/StudioCaptionBoardComposition";
 import {
   boardStateHasRenderableEdits,
@@ -71,12 +70,17 @@ import {
   STUDIO_NODE_DETAIL_DEFAULT_MODE,
   type StudioNodeDetailMode,
 } from "./graph-v3/StudioGraphNodeDetailMode";
+import type { StudioGraphNodeResizePatch } from "./graph-v3/StudioGraphNodeCardTypes";
+import { readStudioTextNodeValue } from "./graph-v3/StudioGraphTextNodeCard";
 import {
+  clampStudioNodeDimension,
   resolveStudioGraphNodeMinHeight,
   resolveStudioGraphNodeWidth,
   STUDIO_GRAPH_DEFAULT_NODE_HEIGHT,
   STUDIO_GRAPH_DEFAULT_NODE_WIDTH,
-} from "./graph-v3/StudioGraphNodeGeometry";
+  STUDIO_GRAPH_TEXT_NODE_MAX_FONT_SIZE,
+  STUDIO_GRAPH_TEXT_NODE_MIN_FONT_SIZE,
+} from "../../studio/StudioNodeGeometry";
 import { StudioGraphInteractionEngine } from "./StudioGraphInteractionEngine";
 import {
   STUDIO_GRAPH_DEFAULT_ZOOM,
@@ -97,8 +101,8 @@ import {
   StudioRunPresentationState,
 } from "./StudioRunPresentationState";
 import {
+  buildNodeInsertMenuItems,
   cloneConfigDefaults,
-  describeNodeDefinition,
   definitionKey,
   formatNodeConfigPreview,
   prettifyNodeKind,
@@ -150,7 +154,7 @@ import {
 } from "./systemsculpt-studio-view/StudioClipboardPasteNodes";
 import {
   inferAiImageEditAspectRatio,
-  insertAiImageEditNodes,
+  insertAiImageEditNode,
 } from "./systemsculpt-studio-view/StudioAiImageEditFlow";
 import {
   coerceNotePreviewText,
@@ -208,6 +212,12 @@ export class SystemSculptStudioView extends ItemView {
   private currentProject: StudioProjectV1 | null = null;
   private currentProjectPath: string | null = null;
   private currentProjectSession: StudioProjectSession | null = null;
+  /**
+   * The normalized project path this view currently holds a session retain
+   * on. Exactly one retain per view per loaded project; released when the
+   * view loads another project or closes.
+   */
+  private retainedProjectPath: string | null = null;
   private busy = false;
   private lastError: string | null = null;
   private nodeDefinitions: StudioNodeDefinition[] = [];
@@ -227,8 +237,8 @@ export class SystemSculptStudioView extends ItemView {
   private graphViewStateByProjectPath: StudioGraphViewStateByProject = {};
   private nodeDetailModeByProjectPath: StudioNodeDetailModeByProject = {};
   private pendingViewportState: StudioGraphViewportState | null = null;
-  private editingLabelNodeIds = new Set<string>();
-  private pendingLabelAutofocusNodeId: string | null = null;
+  private editingTextNodeIds = new Set<string>();
+  private pendingTextNodeAutofocusNodeId: string | null = null;
   private readonly runPresentation = new StudioRunPresentationState();
   private readonly graphInteraction: StudioGraphInteractionEngine;
   private graphZoomMode: StudioGraphZoomMode = "interactive";
@@ -259,6 +269,7 @@ export class SystemSculptStudioView extends ItemView {
         this.commitCurrentProjectMutation(reason, mutator, options),
       requestRender: () => this.render(),
       onNodeDragStateChange: (isDragging) => this.handleNodeDragStateChange(isDragging),
+      onSelectionResize: (patches, options) => this.handleSelectionResize(patches, options),
       onGraphZoomChanged: (zoom, context) => this.handleGraphZoomChanged(zoom, context),
       getPortType: (nodeId, direction, portId) => this.getPortType(nodeId, direction, portId),
       portTypeCompatible: (sourceType, targetType) => this.portTypeCompatible(sourceType, targetType),
@@ -348,11 +359,12 @@ export class SystemSculptStudioView extends ItemView {
     this.resetViewportScrollingState();
     this.runPresentation.reset();
     this.clearProjectLiveSyncState();
+    await this.releaseRetainedProjectSession();
     this.currentProjectSession = null;
     this.currentProjectPath = null;
     this.currentProject = null;
-    this.editingLabelNodeIds.clear();
-    this.pendingLabelAutofocusNodeId = null;
+    this.editingTextNodeIds.clear();
+    this.pendingTextNodeAutofocusNodeId = null;
     this.inspectorOverlay?.destroy();
     this.inspectorOverlay = null;
     this.nodeContextMenuOverlay?.destroy();
@@ -446,8 +458,8 @@ export class SystemSculptStudioView extends ItemView {
     this.currentProject = this.currentProjectSession.getProject();
     this.transientFieldErrorsByNodeId.clear();
     this.runPresentation.reset();
-    this.editingLabelNodeIds.clear();
-    this.pendingLabelAutofocusNodeId = null;
+    this.editingTextNodeIds.clear();
+    this.pendingTextNodeAutofocusNodeId = null;
     this.nodeContextMenuOverlay?.hide();
     this.nodeActionContextMenuOverlay?.hide();
     this.graphInteraction.clearPendingConnection({ requestRender: false });
@@ -658,7 +670,10 @@ export class SystemSculptStudioView extends ItemView {
     if (!this.copySelectedGraphNodesToClipboard({ showNotice: false })) {
       return false;
     }
-    this.removeNodes(selectedNodeIds);
+    if (!this.removeNodes(selectedNodeIds)) {
+      new Notice("Unable to cut: the selected nodes no longer exist in this project.");
+      return false;
+    }
     new Notice(selectedNodeIds.length === 1 ? "Cut 1 node." : `Cut ${selectedNodeIds.length} nodes.`);
     return true;
   }
@@ -909,14 +924,14 @@ export class SystemSculptStudioView extends ItemView {
     if (!this.currentProject || !this.currentProjectPath) {
       return;
     }
-    const textDefinition = this.nodeDefinitions.find((definition) => definition.kind === "studio.text");
-    if (!textDefinition) {
+    const textNodeDefinition = this.nodeDefinitions.find((definition) => definition.kind === "studio.text");
+    if (!textNodeDefinition) {
       throw new Error("Text node definition is unavailable.");
     }
 
     const project = this.currentProject;
     const node = buildPastedTextNode({
-      textDefinition,
+      textNodeDefinition,
       text,
       position: this.resolvePasteAnchorPosition(),
       nextNodeId: () => randomId("node"),
@@ -935,7 +950,7 @@ export class SystemSculptStudioView extends ItemView {
     this.graphInteraction.clearPendingConnection();
     this.recomputeEntryNodes(project);
     this.render();
-    new Notice("Pasted text as a Text node.");
+    new Notice("Pasted as text.");
   }
 
   private async pasteClipboardMedia(mediaFiles: File[]): Promise<void> {
@@ -1518,9 +1533,9 @@ export class SystemSculptStudioView extends ItemView {
       this.clearTransientFieldErrorsForNode(nodeId);
       this.runPresentation.removeNode(nodeId);
       this.graphInteraction.onNodeRemoved(nodeId);
-      this.editingLabelNodeIds.delete(nodeId);
-      if (this.pendingLabelAutofocusNodeId === nodeId) {
-        this.pendingLabelAutofocusNodeId = null;
+      this.editingTextNodeIds.delete(nodeId);
+      if (this.pendingTextNodeAutofocusNodeId === nodeId) {
+        this.pendingTextNodeAutofocusNodeId = null;
       }
     }
     this.recomputeEntryNodes(this.currentProject);
@@ -1660,10 +1675,14 @@ export class SystemSculptStudioView extends ItemView {
       mode?: StudioProjectSessionAutosaveMode;
     }
   ): boolean {
+    const session = this.currentProjectSession;
+    if (!session) {
+      return false;
+    }
     if (options?.captureHistory !== false) {
       this.captureProjectHistoryCheckpoint();
     }
-    return this.plugin.getStudioService().mutateCurrentProject(reason, mutator, {
+    return session.mutate(reason, mutator, {
       mode: options?.mode || "discrete",
     });
   }
@@ -1676,10 +1695,14 @@ export class SystemSculptStudioView extends ItemView {
       mode?: StudioProjectSessionAutosaveMode;
     }
   ): Promise<boolean> {
+    const session = this.currentProjectSession;
+    if (!session) {
+      return false;
+    }
     if (options?.captureHistory !== false) {
       this.captureProjectHistoryCheckpoint();
     }
-    return await this.plugin.getStudioService().mutateCurrentProjectAsync(reason, mutator, {
+    return await session.mutateAsync(reason, mutator, {
       mode: options?.mode || "discrete",
     });
   }
@@ -1718,6 +1741,27 @@ export class SystemSculptStudioView extends ItemView {
     await this.flushPendingProjectSaveWork({ force: true, showNotice: options?.showNotice });
   }
 
+  /**
+   * Release the session retain this view holds. Safe to call when nothing is
+   * retained. Never throws: releasing is cleanup and must not block teardown.
+   */
+  private async releaseRetainedProjectSession(): Promise<void> {
+    const retainedPath = this.retainedProjectPath;
+    this.retainedProjectPath = null;
+    this.currentProjectSession = null;
+    if (!retainedPath) {
+      return;
+    }
+    try {
+      await this.plugin.getStudioService().releaseProjectSession(retainedPath);
+    } catch (error) {
+      console.warn("[SystemSculpt Studio] Failed to release project session", {
+        projectPath: retainedPath,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
   private async loadProjectFromPath(
     projectPath: string | null,
     options?: { notifyOnError?: boolean; forceReload?: boolean }
@@ -1732,13 +1776,12 @@ export class SystemSculptStudioView extends ItemView {
 
     if (projectPath !== this.currentProjectPath || options?.forceReload) {
       this.captureGraphViewportState();
-      this.editingLabelNodeIds.clear();
-      this.pendingLabelAutofocusNodeId = null;
+      this.editingTextNodeIds.clear();
+      this.pendingTextNodeAutofocusNodeId = null;
     }
 
     if (!projectPath) {
-      await this.plugin.getStudioService().closeCurrentProject();
-      this.currentProjectSession = null;
+      await this.releaseRetainedProjectSession();
       this.currentProjectPath = null;
       this.currentProject = null;
       this.resetProjectHistory(null);
@@ -1753,8 +1796,7 @@ export class SystemSculptStudioView extends ItemView {
     }
 
     if (!isStudioProjectPath(projectPath)) {
-      await this.plugin.getStudioService().closeCurrentProject();
-      this.currentProjectSession = null;
+      await this.releaseRetainedProjectSession();
       this.currentProjectPath = null;
       this.currentProject = null;
       this.resetProjectHistory(null);
@@ -1777,12 +1819,26 @@ export class SystemSculptStudioView extends ItemView {
 
     try {
       const studio = this.plugin.getStudioService();
-      const session = await studio.openProjectSession(projectPath, {
+      const session = await studio.retainProjectSession(projectPath, {
         forceReload: options?.forceReload,
       });
+      // One retain per view: swap ownership to the newly retained session and
+      // drop the previous retain. When the manager handed back the session we
+      // already own (same-path reload, or a rename that moved our session),
+      // the extra retain is released at the session's current path.
+      const previousSession = this.currentProjectSession;
+      const previousRetainedPath = this.retainedProjectPath;
+      this.currentProjectSession = session;
+      this.retainedProjectPath = session.getProjectPath();
+      if (previousSession && previousRetainedPath) {
+        if (previousSession === session) {
+          await studio.releaseProjectSession(session.getProjectPath());
+        } else {
+          await studio.releaseProjectSession(previousRetainedPath);
+        }
+      }
       const project = session.getProject();
       const savedGraphView = getSavedGraphViewState(this.graphViewStateByProjectPath, projectPath);
-      this.currentProjectSession = session;
       this.currentProjectPath = projectPath;
       this.currentProject = project;
       this.graphInteraction.clearProjectState();
@@ -1834,8 +1890,7 @@ export class SystemSculptStudioView extends ItemView {
       this.lastError = null;
       this.syncInspectorSelection();
     } catch (error) {
-      await this.plugin.getStudioService().closeCurrentProject();
-      this.currentProjectSession = null;
+      await this.releaseRetainedProjectSession();
       this.currentProjectPath = null;
       this.currentProject = null;
       this.resetProjectHistory(null);
@@ -2456,31 +2511,53 @@ export class SystemSculptStudioView extends ItemView {
     }
   }
 
-  private handleNodeSizeChange(
+  /**
+   * Applies one resize-frame patch — any combination of size, position, and
+   * fontSize — as a single "node.geometry" mutation so a left/top or corner
+   * drag lands as one atomic change with one history entry. Single-node
+   * resizes are just a one-entry group resize.
+   */
+  private handleNodeResize(
     nodeId: string,
-    size: { width: number; height: number },
+    patch: StudioGraphNodeResizePatch,
     options?: {
       mode?: StudioProjectSessionAutosaveMode;
       captureHistory?: boolean;
     }
   ): void {
-    const nextWidth = Math.max(1, Math.round(size.width));
-    const nextHeight = Math.max(1, Math.round(size.height));
+    this.handleSelectionResize([{ nodeId, patch }], options);
+  }
+
+  /**
+   * Applies a batch of resize patches — one per affected node — inside ONE
+   * "node.geometry" mutation. This is the multi-select resize frame's
+   * commit seam: a whole group transform lands atomically, so a single
+   * undo step restores every node's pre-gesture geometry.
+   */
+  private handleSelectionResize(
+    patches: Array<{ nodeId: string; patch: StudioGraphNodeResizePatch }>,
+    options?: {
+      mode?: StudioProjectSessionAutosaveMode;
+      captureHistory?: boolean;
+    }
+  ): void {
+    if (patches.length === 0) {
+      return;
+    }
     const changed = this.commitCurrentProjectMutation(
       "node.geometry",
       (project) => {
-        const target = this.findNode(project, nodeId);
-        if (!target) {
-          return false;
+        let mutated = false;
+        for (const { nodeId, patch } of patches) {
+          const target = this.findNode(project, nodeId);
+          if (!target) {
+            continue;
+          }
+          if (this.applyNodeResizePatch(target, patch)) {
+            mutated = true;
+          }
         }
-        const previousWidth = Number(target.config.width);
-        const previousHeight = Number(target.config.height);
-        if (previousWidth === nextWidth && previousHeight === nextHeight) {
-          return false;
-        }
-        target.config.width = nextWidth;
-        target.config.height = nextHeight;
-        return true;
+        return mutated;
       },
       {
         captureHistory: options?.captureHistory,
@@ -2491,6 +2568,56 @@ export class SystemSculptStudioView extends ItemView {
       return;
     }
     this.graphInteraction.notifyNodePositionsChanged();
+  }
+
+  /** The one geometry-patch application shared by single and group resizes. */
+  private applyNodeResizePatch(
+    target: StudioNodeInstance,
+    patch: StudioGraphNodeResizePatch
+  ): boolean {
+    let mutated = false;
+    if (patch.size && (patch.size.width !== undefined || patch.size.height !== undefined)) {
+      // Geometry is first-class canvas data. Height is optional: text and
+      // aspect-driven media cards persist width only. Any lingering legacy
+      // config geometry is ignored by the resolvers (size wins) and
+      // stripped by the load migration on the next open.
+      const nextWidth =
+        patch.size.width !== undefined
+          ? Math.max(1, Math.round(patch.size.width))
+          : (target.size?.width ?? resolveStudioGraphNodeWidth(target));
+      const nextHeight =
+        patch.size.height !== undefined
+          ? Math.max(1, Math.round(patch.size.height))
+          : target.size?.height;
+      if (target.size?.width !== nextWidth || target.size?.height !== nextHeight) {
+        target.size = {
+          width: nextWidth,
+          ...(nextHeight !== undefined ? { height: nextHeight } : {}),
+        };
+        mutated = true;
+      }
+    }
+    if (patch.position) {
+      const nextX = Math.max(24, Math.round(patch.position.x));
+      const nextY = Math.max(24, Math.round(patch.position.y));
+      if (target.position.x !== nextX || target.position.y !== nextY) {
+        target.position.x = nextX;
+        target.position.y = nextY;
+        mutated = true;
+      }
+    }
+    if (patch.fontSize !== undefined) {
+      const nextFontSize = clampStudioNodeDimension(
+        patch.fontSize,
+        STUDIO_GRAPH_TEXT_NODE_MIN_FONT_SIZE,
+        STUDIO_GRAPH_TEXT_NODE_MAX_FONT_SIZE
+      );
+      if (target.config.fontSize !== nextFontSize) {
+        target.config.fontSize = nextFontSize;
+        mutated = true;
+      }
+    }
+    return mutated;
   }
 
   private openImageEditorForNode(node: StudioNodeInstance): void {
@@ -2527,22 +2654,11 @@ export class SystemSculptStudioView extends ItemView {
       return;
     }
 
-    const textDefinition = this.nodeDefinitions.find((definition) => definition.kind === "studio.text");
     const imageGenerationDefinition = this.nodeDefinitions.find(
       (definition) => definition.kind === "studio.image_generation"
     );
-    if (!textDefinition || !imageGenerationDefinition) {
+    if (!imageGenerationDefinition) {
       this.setError("Studio image-edit dependencies are unavailable.");
-      return;
-    }
-
-    const prompt = await openStudioAiImageEditPromptModal({
-      app: this.app,
-      title: "Edit with AI",
-      description:
-        "Describe how you want the AI to change this image. Studio will add an AI image step, keep the original image, and append the edited result.",
-    });
-    if (!prompt) {
       return;
     }
 
@@ -2553,12 +2669,10 @@ export class SystemSculptStudioView extends ItemView {
       if (!sourceNode) {
         return false;
       }
-      const inserted = insertAiImageEditNodes({
+      const inserted = insertAiImageEditNode({
         project,
         sourceNode,
-        prompt,
         aspectRatio,
-        textDefinition,
         imageGenerationDefinition,
         nextNodeId: () => randomId("node"),
         nextEdgeId: () => randomId("edge"),
@@ -2576,8 +2690,16 @@ export class SystemSculptStudioView extends ItemView {
     this.graphInteraction.clearPendingConnection();
     this.recomputeEntryNodes(this.currentProject);
     this.render();
-    new Notice("AI image edit added. Running now...");
-    void this.runGraph({ fromNodeId: createdImageGenerationNodeId });
+    this.focusImageGenerationPrompt(createdImageGenerationNodeId);
+  }
+
+  /** After spawning an AI edit node, put the caret straight into its Prompt box. */
+  private focusImageGenerationPrompt(nodeId: string): void {
+    const nodeEl = this.graphInteraction.getNodeElement(nodeId);
+    const promptEl = nodeEl?.querySelector<HTMLTextAreaElement>(
+      ".ss-studio-node-inline-config-field--prompt textarea"
+    );
+    promptEl?.focus();
   }
 
   private async resolveAiImageEditAspectRatioForNode(node: StudioNodeInstance): Promise<string> {
@@ -2917,12 +3039,12 @@ export class SystemSculptStudioView extends ItemView {
     try {
       const studio = this.plugin.getStudioService();
       const result = fromNodeId
-        ? await studio.runCurrentProjectFromNode(fromNodeId, {
+        ? await studio.runProjectFromNode(this.currentProjectPath, fromNodeId, {
             onEvent: (event) => {
               this.handleRunEvent(event);
             },
           })
-        : await studio.runCurrentProject({
+        : await studio.runProject(this.currentProjectPath, {
             onEvent: (event) => {
               this.handleRunEvent(event);
             },
@@ -3036,9 +3158,9 @@ export class SystemSculptStudioView extends ItemView {
     const normalizedType = String(sourceType || "").trim();
     if (normalizedType === "text") {
       return {
-        nodeKind: "studio.text",
+        nodeKind: "studio.text_output",
         targetPortId: "text",
-        label: "text preview",
+        label: "text output preview",
       };
     }
     if (normalizedType === "json" || normalizedType === "any") {
@@ -3105,7 +3227,7 @@ export class SystemSculptStudioView extends ItemView {
     nodeKind: string,
     value: StudioJsonValue
   ): void {
-    if (nodeKind === "studio.text") {
+    if (nodeKind === "studio.text_output") {
       node.config.value = this.normalizeSeededTextValue(value);
       return;
     }
@@ -3122,7 +3244,7 @@ export class SystemSculptStudioView extends ItemView {
     nodeKind: string,
     value: StudioJsonValue
   ): StudioNodeOutputMap | null {
-    if (nodeKind === "studio.text") {
+    if (nodeKind === "studio.text_output") {
       return {
         text: this.normalizeSeededTextValue(value),
       };
@@ -3287,7 +3409,7 @@ export class SystemSculptStudioView extends ItemView {
     definition: StudioNodeDefinition,
     options?: {
       position?: { x: number; y: number };
-      autoEditLabel?: boolean;
+      autoEditText?: boolean;
     }
   ): StudioNodeInstance | null {
     let project: StudioProjectV1;
@@ -3325,11 +3447,11 @@ export class SystemSculptStudioView extends ItemView {
     if (!changed) {
       return null;
     }
-    if (node.kind === "studio.label" && options?.autoEditLabel === true) {
-      this.editingLabelNodeIds.add(node.id);
-      this.pendingLabelAutofocusNodeId = node.id;
+    if (node.kind === "studio.text" && options?.autoEditText === true) {
+      this.editingTextNodeIds.add(node.id);
+      this.pendingTextNodeAutofocusNodeId = node.id;
     } else {
-      this.editingLabelNodeIds.delete(node.id);
+      this.editingTextNodeIds.delete(node.id);
     }
     this.graphInteraction.selectOnlyNode(node.id);
     this.graphInteraction.clearPendingConnection();
@@ -3338,60 +3460,97 @@ export class SystemSculptStudioView extends ItemView {
     return node;
   }
 
-  private createLabelAtPosition(position: { x: number; y: number }): void {
-    const definition = this.nodeDefinitions.find((entry) => entry.kind === "studio.label");
+  private createTextNodeAtPosition(position: { x: number; y: number }): void {
+    const definition = this.nodeDefinitions.find((entry) => entry.kind === "studio.text");
     if (!definition) {
-      this.setError('Missing node definition for "studio.label@1.0.0".');
+      this.setError('Missing node definition for "studio.text@1.0.0".');
       return;
     }
     this.createNodeFromDefinition(definition, {
       position,
-      autoEditLabel: true,
+      autoEditText: true,
     });
   }
 
-  private isLabelNodeEditing(nodeId: string): boolean {
-    return this.editingLabelNodeIds.has(String(nodeId || "").trim());
+  private isTextNodeEditing(nodeId: string): boolean {
+    return this.editingTextNodeIds.has(String(nodeId || "").trim());
   }
 
-  private requestLabelNodeEdit(nodeId: string, options?: { autoFocus?: boolean }): void {
+  private requestTextNodeEdit(nodeId: string, options?: { autoFocus?: boolean }): void {
     const normalizedNodeId = String(nodeId || "").trim();
     if (!normalizedNodeId) {
       return;
     }
-    if (this.editingLabelNodeIds.has(normalizedNodeId) && options?.autoFocus !== true) {
+    if (this.editingTextNodeIds.has(normalizedNodeId) && options?.autoFocus !== true) {
       return;
     }
-    this.editingLabelNodeIds.add(normalizedNodeId);
+    this.editingTextNodeIds.add(normalizedNodeId);
     if (options?.autoFocus === true) {
-      this.pendingLabelAutofocusNodeId = normalizedNodeId;
+      this.pendingTextNodeAutofocusNodeId = normalizedNodeId;
     }
     this.render();
   }
 
-  private stopLabelNodeEdit(nodeId: string): void {
+  private stopTextNodeEdit(nodeId: string): void {
     const normalizedNodeId = String(nodeId || "").trim();
     if (!normalizedNodeId) {
       return;
     }
-    if (!this.editingLabelNodeIds.delete(normalizedNodeId)) {
+    if (!this.editingTextNodeIds.delete(normalizedNodeId)) {
+      // Only a real edit session ends here; nodes that never entered edit
+      // mode (programmatic callers, already-ended sessions) are untouched.
       return;
     }
-    if (this.pendingLabelAutofocusNodeId === normalizedNodeId) {
-      this.pendingLabelAutofocusNodeId = null;
+    if (this.pendingTextNodeAutofocusNodeId === normalizedNodeId) {
+      this.pendingTextNodeAutofocusNodeId = null;
+    }
+    if (this.removeTextNodeIfEmptyOnEditEnd(normalizedNodeId)) {
+      // removeNodes already cleaned up interaction state and re-rendered.
+      return;
     }
     this.render();
   }
 
-  private consumeLabelAutoFocus(nodeId: string): boolean {
+  /**
+   * tldraw parity: when a `studio.text` edit session ends (blur, Escape,
+   * click-away — every path funnels through `stopTextNodeEdit`) with no
+   * visible content, the node is deleted in the same interaction instead
+   * of leaving an empty husk on the canvas. The removal reuses
+   * `removeNodes`, so it lands as a single "graph.node.remove" commit with
+   * one history checkpoint — a single undo restores the node, with its
+   * edit session closed — and it is intentionally silent: this is implicit
+   * cleanup, not a user command, so no notice is shown.
+   *
+   * Deliberate non-goals: while the view is busy the node is left in place,
+   * matching the manual Delete-key gating. Teardown paths (`onClose`,
+   * project switches, history application) clear `editingTextNodeIds`
+   * directly without ending the session, intentionally leaving an empty
+   * node in the graph rather than racing a fresh mutation against the
+   * pending save flush and session release.
+   */
+  private removeTextNodeIfEmptyOnEditEnd(nodeId: string): boolean {
+    if (this.busy || !this.currentProject) {
+      return false;
+    }
+    const node = this.findNode(this.currentProject, nodeId);
+    if (!node || node.kind !== "studio.text") {
+      return false;
+    }
+    if (readStudioTextNodeValue(node).trim().length > 0) {
+      return false;
+    }
+    return this.removeNodes([nodeId]);
+  }
+
+  private consumeTextNodeAutoFocus(nodeId: string): boolean {
     const normalizedNodeId = String(nodeId || "").trim();
     if (!normalizedNodeId) {
       return false;
     }
-    if (this.pendingLabelAutofocusNodeId !== normalizedNodeId) {
+    if (this.pendingTextNodeAutofocusNodeId !== normalizedNodeId) {
       return false;
     }
-    this.pendingLabelAutofocusNodeId = null;
+    this.pendingTextNodeAutofocusNodeId = null;
     return true;
   }
 
@@ -3406,13 +3565,7 @@ export class SystemSculptStudioView extends ItemView {
       return;
     }
 
-    const contextMenuItems = this.nodeDefinitions
-      .filter((definition) => definition.hiddenFromInsertMenu !== true)
-      .map((definition) => ({
-      definition,
-      title: prettifyNodeKind(definition.kind),
-      summary: describeNodeDefinition(definition),
-      }));
+    const contextMenuItems = buildNodeInsertMenuItems(this.nodeDefinitions);
     if (contextMenuItems.length === 0) {
       new Notice("No node definitions are available.");
       return;
@@ -3650,9 +3803,9 @@ export class SystemSculptStudioView extends ItemView {
     this.render();
   }
 
-  private removeNodes(nodeIds: string[]): void {
+  private removeNodes(nodeIds: string[]): boolean {
     if (!this.currentProject) {
-      return;
+      return false;
     }
 
     const idsToRemove = new Set(
@@ -3661,11 +3814,11 @@ export class SystemSculptStudioView extends ItemView {
         .filter((nodeId) => nodeId.length > 0)
     );
     if (idsToRemove.size === 0) {
-      return;
+      return false;
     }
 
     if (!this.currentProject.graph.nodes.some((node) => idsToRemove.has(node.id))) {
-      return;
+      return false;
     }
 
     const changed = this.commitCurrentProjectMutation("graph.node.remove", (project) => {
@@ -3681,22 +3834,23 @@ export class SystemSculptStudioView extends ItemView {
       return true;
     });
     if (!changed) {
-      return;
+      return false;
     }
 
     for (const nodeId of idsToRemove) {
       this.clearTransientFieldErrorsForNode(nodeId);
       this.runPresentation.removeNode(nodeId);
       this.graphInteraction.onNodeRemoved(nodeId);
-      this.editingLabelNodeIds.delete(nodeId);
-      if (this.pendingLabelAutofocusNodeId === nodeId) {
-        this.pendingLabelAutofocusNodeId = null;
+      this.editingTextNodeIds.delete(nodeId);
+      if (this.pendingTextNodeAutofocusNodeId === nodeId) {
+        this.pendingTextNodeAutofocusNodeId = null;
       }
     }
     this.nodeContextMenuOverlay?.hide();
     this.nodeActionContextMenuOverlay?.hide();
     this.recomputeEntryNodes(this.currentProject);
     this.render();
+    return true;
   }
 
   private removeNode(nodeId: string): void {
@@ -4231,8 +4385,8 @@ export class SystemSculptStudioView extends ItemView {
       onOpenNodeContextMenu: (event) => {
         this.openNodeContextMenuAtPointer(event);
       },
-      onCreateLabelAtPosition: (position) => {
-        this.createLabelAtPosition(position);
+      onCreateTextNodeAtPosition: (position) => {
+        this.createTextNodeAtPosition(position);
       },
       onRunNode: (nodeId) => {
         void this.runGraph({ fromNodeId: nodeId });
@@ -4265,8 +4419,8 @@ export class SystemSculptStudioView extends ItemView {
       onNodeConfigValueChange: (nodeId, key, value, options) => {
         this.handleNodeConfigValueChange(nodeId, key, value, options);
       },
-      onNodeSizeChange: (nodeId, size, options) => {
-        this.handleNodeSizeChange(nodeId, size, options);
+      onNodeResize: (nodeId, patch, options) => {
+        this.handleNodeResize(nodeId, patch, options);
       },
       onOpenImageEditor: (node) => {
         this.openImageEditorForNode(node);
@@ -4287,10 +4441,10 @@ export class SystemSculptStudioView extends ItemView {
       },
       resolveDynamicSelectOptions: (source, node) =>
         this.resolveDynamicSelectOptionsForNode(source, node),
-      isLabelEditing: (nodeId) => this.isLabelNodeEditing(nodeId),
-      consumeLabelAutoFocus: (nodeId) => this.consumeLabelAutoFocus(nodeId),
-      onRequestLabelEdit: (nodeId) => this.requestLabelNodeEdit(nodeId, { autoFocus: true }),
-      onStopLabelEdit: (nodeId) => this.stopLabelNodeEdit(nodeId),
+      isTextNodeEditing: (nodeId) => this.isTextNodeEditing(nodeId),
+      consumeTextNodeAutoFocus: (nodeId) => this.consumeTextNodeAutoFocus(nodeId),
+      onRequestTextNodeEdit: (nodeId) => this.requestTextNodeEdit(nodeId, { autoFocus: true }),
+      onStopTextNodeEdit: (nodeId) => this.stopTextNodeEdit(nodeId),
       onRevealPathInFinder: (path) => {
         void this.revealPathInFinder(path);
       },

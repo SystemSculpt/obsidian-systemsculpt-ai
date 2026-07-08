@@ -303,7 +303,6 @@ export class StudioNodeInspectorOverlay {
     this.rootEl.style.width = `${this.layout.width}px`;
     this.rootEl.style.height = `${this.layout.height}px`;
     this.rootEl.style.setProperty("--ss-studio-inspector-scale", String(scale));
-    this.rootEl.style.transformOrigin = "top left";
     this.rootEl.dataset.side = this.placement;
     this.host.onLayoutChanged?.({ ...this.layout });
   }

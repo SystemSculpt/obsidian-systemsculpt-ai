@@ -15,6 +15,19 @@ export type StudioGraphNodeMutationOptions = {
   captureHistory?: boolean;
 };
 
+/**
+ * One atomic geometry mutation from the resize frame: any combination of
+ * size (either dimension alone is valid — text/image cards persist width
+ * only), position (left/top drags keep the opposite edge anchored), and
+ * fontSize (text cards scale type on vertical/corner drags). The host commits
+ * the whole patch as a single `"node.geometry"` mutation → one history entry.
+ */
+export type StudioGraphNodeResizePatch = {
+  size?: { width?: number; height?: number };
+  position?: { x: number; y: number };
+  fontSize?: number;
+};
+
 export type RenderStudioGraphNodeCardOptions = {
   layer: HTMLElement;
   busy: boolean;
@@ -47,9 +60,9 @@ export type RenderStudioGraphNodeCardOptions = {
     value: StudioJsonValue,
     options?: StudioGraphNodeMutationOptions
   ) => void;
-  onNodeSizeChange?: (
+  onNodeResize?: (
     nodeId: string,
-    size: { width: number; height: number },
+    patch: StudioGraphNodeResizePatch,
     options?: StudioGraphNodeMutationOptions
   ) => void;
   onOpenImageEditor?: (node: StudioNodeInstance) => void;
@@ -67,10 +80,10 @@ export type RenderStudioGraphNodeCardOptions = {
     source: StudioNodeConfigDynamicOptionsSource,
     node: StudioNodeInstance
   ) => Promise<StudioNodeConfigSelectOption[]>;
-  isLabelEditing: (nodeId: string) => boolean;
-  consumeLabelAutoFocus: (nodeId: string) => boolean;
-  onRequestLabelEdit: (nodeId: string) => void;
-  onStopLabelEdit: (nodeId: string) => void;
+  isTextNodeEditing: (nodeId: string) => boolean;
+  consumeTextNodeAutoFocus: (nodeId: string) => boolean;
+  onRequestTextNodeEdit: (nodeId: string) => void;
+  onStopTextNodeEdit: (nodeId: string) => void;
   onRevealPathInFinder: (path: string) => void;
   resolveNodeBadge?: (node: StudioNodeInstance) => {
     text: string;

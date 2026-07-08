@@ -2,9 +2,10 @@ import type {
   StudioNodeDefinition,
   StudioNodeInstance,
 } from "../../../studio/types";
+import { STUDIO_GRAPH_DEFAULT_NODE_WIDTH } from "../../../studio/StudioNodeGeometry";
 
 export function buildPastedTextNode(options: {
-  textDefinition: StudioNodeDefinition;
+  textNodeDefinition: StudioNodeDefinition;
   text: string;
   position: { x: number; y: number };
   nextNodeId: () => string;
@@ -13,7 +14,7 @@ export function buildPastedTextNode(options: {
   normalizeNodePosition: (position: { x: number; y: number }) => { x: number; y: number };
 }): StudioNodeInstance {
   const {
-    textDefinition,
+    textNodeDefinition,
     text,
     position,
     nextNodeId,
@@ -23,12 +24,17 @@ export function buildPastedTextNode(options: {
   } = options;
   return {
     id: nextNodeId(),
-    kind: textDefinition.kind,
-    version: textDefinition.version,
-    title: prettifyNodeKind(textDefinition.kind),
+    kind: textNodeDefinition.kind,
+    version: textNodeDefinition.version,
+    title: prettifyNodeKind(textNodeDefinition.kind),
     position: normalizeNodePosition(position),
+    // Paste-sizing: width + content only. Text-node height is intrinsic —
+    // the card reflows to the pasted content, so no height is persisted.
+    size: {
+      width: STUDIO_GRAPH_DEFAULT_NODE_WIDTH,
+    },
     config: {
-      ...cloneConfigDefaults(textDefinition),
+      ...cloneConfigDefaults(textNodeDefinition),
       value: text,
     },
     continueOnError: false,

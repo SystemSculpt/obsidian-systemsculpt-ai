@@ -158,7 +158,7 @@ describe("StudioRunOutputProjectors", () => {
   it("removes stale managed text outputs for text-generation node output events", () => {
     const source = nodeFixture("studio.text_generation", {}, "node_text_source");
     const managedText = nodeFixture(
-      "studio.text",
+      "studio.text_output",
       {
         [MANAGED_TEXT_OWNER_KEY]: MANAGED_TEXT_OWNER,
         [MANAGED_TEXT_SOURCE_NODE_ID_KEY]: source.id,

@@ -1,9 +1,15 @@
 import type { StudioNodeInstance, StudioProjectV1 } from "../../../studio/types";
 import { isStudioVisualOnlyNodeKind } from "../../../studio/StudioNodeKinds";
+import {
+  STUDIO_GRAPH_DEFAULT_NODE_HEIGHT,
+  STUDIO_GRAPH_DEFAULT_NODE_WIDTH,
+  STUDIO_GRAPH_MEASURED_NODE_MIN_HEIGHT,
+  STUDIO_GRAPH_MEASURED_NODE_MIN_WIDTH,
+} from "../../../studio/StudioNodeGeometry";
 
-const NODE_WIDTH = 280;
-const MIN_NODE_WIDTH = 120;
-const DEFAULT_NODE_HEIGHT = 164;
+const NODE_WIDTH = STUDIO_GRAPH_DEFAULT_NODE_WIDTH;
+const MIN_NODE_WIDTH = STUDIO_GRAPH_MEASURED_NODE_MIN_WIDTH;
+const DEFAULT_NODE_HEIGHT = STUDIO_GRAPH_DEFAULT_NODE_HEIGHT;
 const DEFAULT_LAYER_GAP_X = 90;
 const DEFAULT_NODE_GAP_Y = 20;
 const EPSILON = 0.5;
@@ -36,7 +42,7 @@ function normalizeNodeHeight(value: number | null | undefined): number {
   if (!Number.isFinite(value)) {
     return DEFAULT_NODE_HEIGHT;
   }
-  return Math.max(80, Math.round(Number(value)));
+  return Math.max(STUDIO_GRAPH_MEASURED_NODE_MIN_HEIGHT, Math.round(Number(value)));
 }
 
 function normalizeNodeWidth(value: number | null | undefined): number {

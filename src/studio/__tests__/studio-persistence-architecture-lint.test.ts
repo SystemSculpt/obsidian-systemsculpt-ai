@@ -15,10 +15,10 @@ const ALLOWED_LEGACY_NODE_MUTATION_FILES = [
   "src/views/studio/graph-v3/StudioGraphImageEditorModal.ts",
   "src/views/studio/graph-v3/StudioGraphInlineConfigPanel.ts",
   "src/views/studio/graph-v3/StudioGraphJsonInlineEditor.ts",
-  "src/views/studio/graph-v3/StudioGraphLabelNodeCard.ts",
   "src/views/studio/graph-v3/StudioGraphNodeCardSections.ts",
-  "src/views/studio/graph-v3/StudioGraphNodeResizeHandle.ts",
+  "src/views/studio/graph-v3/StudioGraphNodeResizeFrame.ts",
   "src/views/studio/graph-v3/StudioGraphTextInlineEditor.ts",
+  "src/views/studio/graph-v3/StudioGraphTextNodeCard.ts",
 ];
 
 function listSourceFiles(): string[] {
@@ -108,10 +108,32 @@ describe("Studio persistence architecture lint", () => {
 
   it("keeps session-backed runs on the runtime snapshot path", () => {
     const serviceSource = readRepoFile("src/studio/StudioService.ts");
-    expect(serviceSource).toContain("const projectSnapshot = this.currentProjectSession?.getProjectSnapshot();");
-    expect(serviceSource).toContain("return this.runtime.runProjectSnapshot(this.currentProjectPath, projectSnapshot, {");
+    expect(serviceSource).toContain("const projectSnapshot = session.getProjectSnapshot();");
+    expect(serviceSource).toContain("return this.runtime.runProjectSnapshot(normalized, projectSnapshot, {");
     expect(serviceSource).toContain(
-      "return this.runtime.runProjectSnapshot(this.currentProjectPath, projectSnapshot, {\n      entryNodeIds: [normalizedNodeId],"
+      "return this.runtime.runProjectSnapshot(normalized, projectSnapshot, {\n      entryNodeIds: [normalizedNodeId],"
     );
+  });
+
+  it("keeps StudioService free of global current-project session state", () => {
+    const serviceSource = readRepoFile("src/studio/StudioService.ts");
+    // Sessions are owned per-view through retain/release refcounting; a
+    // service-level "current" pointer is the root cause of cross-tab
+    // corruption (#286) and must not come back.
+    expect(serviceSource).not.toMatch(/currentProjectPath/);
+    expect(serviceSource).not.toMatch(/currentProjectSession/);
+    expect(serviceSource).not.toMatch(/mutateCurrentProject/);
+    expect(serviceSource).not.toMatch(/openProjectSession\(/);
+    expect(serviceSource).not.toMatch(/closeCurrentProject/);
+    expect(serviceSource).toContain("retainProjectSession(");
+    expect(serviceSource).toContain("releaseProjectSession(");
+  });
+
+  it("keeps production Studio sources off the removed current-project service seams", () => {
+    expect(findTokenMatches(/mutateCurrentProject(Async|AndFlush)?\(/g)).toEqual([]);
+    expect(findTokenMatches(/getCurrentProjectPath\(/g)).toEqual([]);
+    expect(findTokenMatches(/getCurrentProjectSession\(/g)).toEqual([]);
+    expect(findTokenMatches(/closeCurrentProject\(/g)).toEqual([]);
+    expect(findTokenMatches(/runCurrentProject(FromNode)?\(/g)).toEqual([]);
   });
 });

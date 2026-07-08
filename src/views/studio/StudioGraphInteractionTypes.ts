@@ -7,6 +7,7 @@ import {
   STUDIO_GRAPH_CANVAS_BASE_HEIGHT,
   STUDIO_GRAPH_CANVAS_BASE_WIDTH,
 } from "./graph-v3/StudioGraphCanvasBounds";
+import type { StudioGraphNodeResizePatch } from "./graph-v3/StudioGraphNodeCardTypes";
 
 export const STUDIO_GRAPH_CANVAS_WIDTH = STUDIO_GRAPH_CANVAS_BASE_WIDTH;
 export const STUDIO_GRAPH_CANVAS_HEIGHT = STUDIO_GRAPH_CANVAS_BASE_HEIGHT;
@@ -70,6 +71,15 @@ export type StudioGraphInteractionHost = {
   requestRender: () => void;
   onNodeDragStateChange?: (isDragging: boolean) => void;
   onNodePositionsChanged?: () => void;
+  /**
+   * Atomic multi-node geometry commit from the multi-select resize frame:
+   * the host applies EVERY patch inside one project mutation so a group
+   * resize lands as a single history entry.
+   */
+  onSelectionResize?: (
+    patches: Array<{ nodeId: string; patch: StudioGraphNodeResizePatch }>,
+    options?: StudioGraphProjectMutationOptions
+  ) => void;
   resolveNodeDragHoverGroup?: (draggedNodeIds: string[]) => string | null;
   onNodeDragHoverGroupChange?: (groupId: string | null, draggedNodeIds: string[]) => void;
   onNodeDropToGroup?: (groupId: string | null, draggedNodeIds: string[]) => void;

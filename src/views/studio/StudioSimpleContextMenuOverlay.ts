@@ -246,7 +246,6 @@ export class StudioSimpleContextMenuOverlay {
     const scale = normalizeStudioMenuScale(this.graphZoom);
     this.rootEl.style.width = `${this.menuWidth}px`;
     this.rootEl.style.setProperty("--ss-studio-simple-context-menu-scale", String(scale));
-    this.rootEl.style.transformOrigin = "top left";
 
     const height = Math.max(40, this.rootEl.offsetHeight || 80);
     const visualWidth = this.menuWidth * scale;

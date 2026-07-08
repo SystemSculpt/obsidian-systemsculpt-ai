@@ -25,6 +25,7 @@ type OnCloseContext = {
     };
   };
   flushPendingProjectSaveWork: jest.Mock<Promise<void>, []>;
+  releaseRetainedProjectSession: jest.Mock<Promise<void>, []>;
   clearSaveTimer: jest.Mock<void, []>;
   clearLayoutSaveTimer: jest.Mock<void, []>;
   resetViewportScrollingState: jest.Mock<void, []>;
@@ -35,8 +36,8 @@ type OnCloseContext = {
   currentProjectSession: Record<string, unknown> | null;
   currentProjectPath: string | null;
   currentProject: Record<string, unknown> | null;
-  editingLabelNodeIds: Set<string>;
-  pendingLabelAutofocusNodeId: string | null;
+  editingTextNodeIds: Set<string>;
+  pendingTextNodeAutofocusNodeId: string | null;
   inspectorOverlay: { destroy: jest.Mock<void, []> } | null;
   nodeContextMenuOverlay: { destroy: jest.Mock<void, []> } | null;
   nodeActionContextMenuOverlay: { destroy: jest.Mock<void, []> } | null;
@@ -92,6 +93,7 @@ function createOnCloseContext(): OnCloseContext {
       },
     },
     flushPendingProjectSaveWork: jest.fn(async () => {}),
+    releaseRetainedProjectSession: jest.fn(async () => {}),
     clearSaveTimer: jest.fn(),
     clearLayoutSaveTimer: jest.fn(),
     resetViewportScrollingState: jest.fn(),
@@ -102,8 +104,8 @@ function createOnCloseContext(): OnCloseContext {
     currentProjectSession: { path: "SystemSculpt/Studio/Test.systemsculpt" },
     currentProjectPath: "SystemSculpt/Studio/Test.systemsculpt",
     currentProject: { graph: { nodes: [] } },
-    editingLabelNodeIds: new Set(["node-a"]),
-    pendingLabelAutofocusNodeId: "node-a",
+    editingTextNodeIds: new Set(["node-a"]),
+    pendingTextNodeAutofocusNodeId: "node-a",
     inspectorOverlay: { destroy: jest.fn() },
     nodeContextMenuOverlay: { destroy: jest.fn() },
     nodeActionContextMenuOverlay: { destroy: jest.fn() },
@@ -139,6 +141,7 @@ describe("SystemSculptStudioView save persistence", () => {
     await onClose.call(context);
 
     expect(context.flushPendingProjectSaveWork).toHaveBeenCalledTimes(1);
+    expect(context.releaseRetainedProjectSession).toHaveBeenCalledTimes(1);
     expect(context.captureGraphViewportState).toHaveBeenCalledTimes(1);
     expect(context.app.workspace.requestSaveLayout).toHaveBeenCalledTimes(1);
     expect(context.currentProjectSession).toBeNull();

@@ -111,7 +111,7 @@ describe("StudioGraphCompiler", () => {
     project.graph.nodes.push(
       {
         id: "text",
-        kind: "studio.text",
+        kind: "studio.text_output",
         version: "1.0.0",
         title: "Text",
         position: { x: 0, y: 0 },
@@ -143,7 +143,7 @@ describe("StudioGraphCompiler", () => {
     project.graph.nodes.push(
       {
         id: "text",
-        kind: "studio.text",
+        kind: "studio.text_output",
         version: "1.0.0",
         title: "Text",
         position: { x: 0, y: 0 },
@@ -191,7 +191,7 @@ describe("StudioGraphCompiler", () => {
     project.graph.nodes.push(
       {
         id: "text",
-        kind: "studio.text",
+        kind: "studio.text_output",
         version: "1.0.0",
         title: "Text",
         position: { x: 0, y: 0 },
@@ -287,7 +287,7 @@ describe("StudioGraphCompiler", () => {
     project.graph.nodes.push(
       {
         id: "a",
-        kind: "studio.text",
+        kind: "studio.text_output",
         version: "1.0.0",
         title: "A",
         position: { x: 0, y: 0 },
@@ -295,7 +295,7 @@ describe("StudioGraphCompiler", () => {
       },
       {
         id: "b",
-        kind: "studio.text",
+        kind: "studio.text_output",
         version: "1.0.0",
         title: "B",
         position: { x: 200, y: 0 },

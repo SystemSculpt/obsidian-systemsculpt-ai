@@ -103,7 +103,7 @@ export function isInlineTextNodeKind(kind: string): boolean {
   const normalizedKind = normalizeNodeKind(kind);
   return (
     normalizedKind === "studio.note" ||
-    normalizedKind === "studio.text" ||
+    normalizedKind === "studio.text_output" ||
     normalizedKind === "studio.text_generation" ||
     normalizedKind === "studio.transcription"
   );

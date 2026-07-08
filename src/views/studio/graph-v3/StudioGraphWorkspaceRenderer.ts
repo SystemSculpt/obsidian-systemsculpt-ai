@@ -14,7 +14,10 @@ import {
 import type { StudioNodeRunDisplayState } from "../StudioRunPresentationState";
 import type { StudioNodeDetailMode } from "./StudioGraphNodeDetailMode";
 import { renderStudioGraphNodeCard } from "./StudioGraphNodeCardRenderer";
-import type { StudioGraphNodeMutationOptions } from "./StudioGraphNodeCardTypes";
+import type {
+  StudioGraphNodeMutationOptions,
+  StudioGraphNodeResizePatch,
+} from "./StudioGraphNodeCardTypes";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -42,7 +45,7 @@ export type StudioGraphWorkspaceRendererOptions = {
   onZoomOverview: () => void;
   onToggleNodeDetailMode: () => void;
   onOpenNodeContextMenu: (event: MouseEvent) => void;
-  onCreateLabelAtPosition: (position: { x: number; y: number }) => void;
+  onCreateTextNodeAtPosition: (position: { x: number; y: number }) => void;
   onRunNode: (nodeId: string) => void;
   onCopyTextGenerationPromptBundle: (nodeId: string) => void;
   onToggleTextGenerationOutputLock: (nodeId: string) => void;
@@ -55,9 +58,9 @@ export type StudioGraphWorkspaceRendererOptions = {
     value: StudioJsonValue,
     options?: StudioGraphNodeMutationOptions
   ) => void;
-  onNodeSizeChange?: (
+  onNodeResize?: (
     nodeId: string,
-    size: { width: number; height: number },
+    patch: StudioGraphNodeResizePatch,
     options?: StudioGraphNodeMutationOptions
   ) => void;
   onOpenImageEditor?: (node: StudioNodeInstance) => void;
@@ -75,10 +78,10 @@ export type StudioGraphWorkspaceRendererOptions = {
     source: StudioNodeConfigDynamicOptionsSource,
     node: StudioNodeInstance
   ) => Promise<StudioNodeConfigSelectOption[]>;
-  isLabelEditing: (nodeId: string) => boolean;
-  consumeLabelAutoFocus: (nodeId: string) => boolean;
-  onRequestLabelEdit: (nodeId: string) => void;
-  onStopLabelEdit: (nodeId: string) => void;
+  isTextNodeEditing: (nodeId: string) => boolean;
+  consumeTextNodeAutoFocus: (nodeId: string) => boolean;
+  onRequestTextNodeEdit: (nodeId: string) => void;
+  onStopTextNodeEdit: (nodeId: string) => void;
   onRevealPathInFinder: (path: string) => void;
   resolveNodeBadge?: (node: StudioNodeInstance) => {
     text: string;
@@ -113,7 +116,7 @@ export function renderStudioGraphWorkspace(
     onZoomOverview,
     onToggleNodeDetailMode,
     onOpenNodeContextMenu,
-    onCreateLabelAtPosition,
+    onCreateTextNodeAtPosition,
     onRunNode,
     onCopyTextGenerationPromptBundle,
     onToggleTextGenerationOutputLock,
@@ -121,7 +124,7 @@ export function renderStudioGraphWorkspace(
     onNodeTitleInput,
     onNodeConfigMutated,
     onNodeConfigValueChange,
-    onNodeSizeChange,
+    onNodeResize,
     onOpenImageEditor,
     onEditImageWithAi,
     onCopyNodeImageToClipboard,
@@ -130,10 +133,10 @@ export function renderStudioGraphWorkspace(
     renderMarkdownPreview,
     onNodeGeometryMutated,
     resolveDynamicSelectOptions,
-    isLabelEditing,
-    consumeLabelAutoFocus,
-    onRequestLabelEdit,
-    onStopLabelEdit,
+    isTextNodeEditing,
+    consumeTextNodeAutoFocus,
+    onRequestTextNodeEdit,
+    onStopTextNodeEdit,
     onRevealPathInFinder,
     resolveNodeBadge,
   } = options;
@@ -212,7 +215,7 @@ export function renderStudioGraphWorkspace(
     const zoom = graphInteraction.getGraphZoom() || 1;
     const graphX = (viewport.scrollLeft + localX) / zoom;
     const graphY = (viewport.scrollTop + localY) / zoom;
-    onCreateLabelAtPosition({
+    onCreateTextNodeAtPosition({
       x: graphX,
       y: graphY,
     });
@@ -228,6 +231,9 @@ export function renderStudioGraphWorkspace(
 
   const marquee = viewport.createDiv({ cls: "ss-studio-marquee-select" });
   graphInteraction.registerMarqueeElement(marquee);
+
+  const snapGuides = viewport.createDiv({ cls: "ss-studio-snap-guides-layer" });
+  graphInteraction.registerSnapGuidesElement(snapGuides);
 
   const controls = editor.createDiv({ cls: "ss-studio-graph-workspace-controls" });
   const runButton = controls.createEl("button", {
@@ -397,7 +403,7 @@ export function renderStudioGraphWorkspace(
       onNodeTitleInput,
       onNodeConfigMutated,
       onNodeConfigValueChange,
-      onNodeSizeChange,
+      onNodeResize,
       onOpenImageEditor,
       onEditImageWithAi,
       onCopyNodeImageToClipboard,
@@ -406,10 +412,10 @@ export function renderStudioGraphWorkspace(
       renderMarkdownPreview,
       onNodeGeometryMutated,
       resolveDynamicSelectOptions,
-      isLabelEditing,
-      consumeLabelAutoFocus,
-      onRequestLabelEdit,
-      onStopLabelEdit,
+      isTextNodeEditing,
+      consumeTextNodeAutoFocus,
+      onRequestTextNodeEdit,
+      onStopTextNodeEdit,
       onRevealPathInFinder,
       resolveNodeBadge,
     });
@@ -418,5 +424,6 @@ export function renderStudioGraphWorkspace(
   graphInteraction.renderGroupLayer();
   graphInteraction.refreshNodeSelectionClasses();
   graphInteraction.applyGraphZoom();
+  graphInteraction.refreshSelectionResizeFrame();
   return { viewportEl: viewport };
 }

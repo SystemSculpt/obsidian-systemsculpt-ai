@@ -595,7 +595,7 @@ describe("StudioGraphSelectionController drag behavior", () => {
           {
             id: "node_1",
             position: { x: 40, y: 50 },
-            kind: "studio.label",
+            kind: "studio.text",
             config: {},
           },
         ],

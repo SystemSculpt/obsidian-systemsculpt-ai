@@ -84,8 +84,12 @@ function resolveImagePrompt(context: StudioNodeExecutionContext): {
     };
   }
 
+  // A wired prompt input wins; the node's own Prompt box is the fallback so
+  // the node runs standalone without an upstream text node.
+  const wiredPrompt = getText(rawPromptInput).trim();
+  const configuredPrompt = getText(context.node.config.prompt as StudioJsonValue).trim();
   return {
-    prompt: clampImagePromptLength(getText(rawPromptInput), IMAGE_PROMPT_MAX_CHARS),
+    prompt: clampImagePromptLength(wiredPrompt || configuredPrompt, IMAGE_PROMPT_MAX_CHARS),
     structuredInputImages: structured.inputImages,
   };
 }
@@ -159,11 +163,12 @@ export const imageGenerationNode: StudioNodeDefinition = {
   capabilityClass: "api",
   cachePolicy: "by_inputs",
   inputPorts: [
-    { id: "prompt", type: "text", required: true },
+    { id: "prompt", type: "text", required: false },
     { id: "images", type: "any", required: false },
   ],
   outputPorts: [{ id: "images", type: "json" }],
   configDefaults: {
+    prompt: "",
     modelId: "",
     count: 1,
     aspectRatio: DEFAULT_IMAGE_ASPECT_RATIO,
@@ -171,6 +176,13 @@ export const imageGenerationNode: StudioNodeDefinition = {
   },
   configSchema: {
     fields: [
+      {
+        key: "prompt",
+        label: "Prompt",
+        type: "textarea",
+        required: false,
+        placeholder: "Describe the image to generate — or how to edit the connected images. A wired prompt input overrides this.",
+      },
       {
         key: "modelId",
         label: "Model",
@@ -231,7 +243,9 @@ export const imageGenerationNode: StudioNodeDefinition = {
   async execute(context) {
     const { prompt, structuredInputImages } = resolveImagePrompt(context);
     if (!prompt) {
-      throw new Error(`Image generation node "${context.node.id}" requires a prompt input.`);
+      throw new Error(
+        `Image generation node "${context.node.id}" requires a prompt. Type one in the node's Prompt box or connect a text input.`
+      );
     }
     const inputImages = await resolveInputImages(context, structuredInputImages);
     const providerRaw = getText(context.node.config.provider as StudioJsonValue).trim();

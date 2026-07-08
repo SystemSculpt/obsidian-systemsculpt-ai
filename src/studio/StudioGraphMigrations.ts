@@ -1,6 +1,7 @@
 import type { StudioEdge, StudioJsonValue, StudioProjectV1 } from "./types";
 import { nowIso } from "./utils";
 import { ensureStudioNoteConfigItems } from "./StudioNoteConfig";
+import { resolveStudioNodeDefaultSize } from "./StudioNodeGeometry";
 
 const PATH_ONLY_PORTS_MIGRATION_ID = "studio.path-only-ports.v1";
 const PROMPT_TEMPLATE_INLINE_MIGRATION_ID = "studio.inline-prompt-template.v1";
@@ -8,8 +9,25 @@ const RESEND_TO_HTTP_REQUEST_MIGRATION_ID = "studio.resend-http-request.v1";
 const NOTE_NODE_CANONICAL_MIGRATION_ID = "studio.note-canonical-config.v1";
 const PI_TEXT_NODE_MODEL_MIGRATION_ID = "studio.pi-text-model-selector.v1";
 const IMAGE_NODE_LEVERS_MIGRATION_ID = "studio.image-node-levers.v1";
+export const TEXT_NODE_KINDS_MIGRATION_ID = "studio.text-node-kinds.v1";
 const RESEND_DEFAULT_BASE_URL = "https://api.resend.com";
 const RESEND_DEFAULT_MAX_RETRIES = 3;
+
+/**
+ * One-shot kind renames applied as a single atomic lookup: every node kind is
+ * mapped through this table at most once, so a project persisted with BOTH
+ * legacy kinds can never chain studio.label -> studio.text ->
+ * studio.text_output. The pass is gated on TEXT_NODE_KINDS_MIGRATION_ID
+ * because "studio.text" is reused: pre-migration it names the port-bearing
+ * text-output node, post-migration it names the visual canvas Text node
+ * (formerly "studio.label"). Once the stamp is present the pass never runs
+ * again, and the stamp is recorded even for projects that contained neither
+ * legacy kind so text nodes created later are never falsely renamed.
+ */
+const LEGACY_TEXT_NODE_KIND_RENAMES: Record<string, string> = {
+  "studio.text": "studio.text_output",
+  "studio.label": "studio.text",
+};
 
 const LEGACY_OUTPUT_PORT_REMAP: Record<string, Record<string, string>> = {
   "studio.image_generation": {
@@ -113,6 +131,86 @@ function clampFiniteInt(
   }
   const rounded = Math.floor(parsed);
   return Math.max(bounds.min, Math.min(bounds.max, rounded));
+}
+
+function asFiniteGeometryNumber(value: StudioJsonValue | undefined): number | null {
+  const parsed =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number(value.trim() || Number.NaN)
+        : Number.NaN;
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+/**
+ * Moves legacy canvas geometry out of node config and into the first-class
+ * node.size field.
+ *
+ * Deliberately stampless and unconditional: "size is absent while
+ * config.width/config.height hold numbers" is unambiguous (unlike the text
+ * kind rename, where a kind id was reused and only a stamp could
+ * disambiguate), the pass is a no-op on already-migrated nodes, and no
+ * production write path emits config geometry anymore (guarded by
+ * studio-geometry-architecture-lint.test.ts). Migration is lossless: values
+ * move unclamped — the geometry resolvers clamp at read time.
+ */
+function migrateNodeGeometryToSize(
+  nodes: StudioProjectV1["graph"]["nodes"]
+): {
+  nodes: StudioProjectV1["graph"]["nodes"];
+  changed: boolean;
+} {
+  let changed = false;
+  const nextNodes = nodes.map((node) => {
+    const config = (node.config || {}) as Record<string, StudioJsonValue>;
+    const hasWidthKey = Object.prototype.hasOwnProperty.call(config, "width");
+    const hasHeightKey = Object.prototype.hasOwnProperty.call(config, "height");
+    if (!hasWidthKey && !hasHeightKey) {
+      return node;
+    }
+
+    changed = true;
+    const nextConfig: Record<string, StudioJsonValue> = { ...config };
+    delete nextConfig.width;
+    delete nextConfig.height;
+
+    // An existing first-class size is authoritative; only strip the stale keys.
+    if (node.size) {
+      return {
+        ...node,
+        config: nextConfig,
+      };
+    }
+
+    const width = asFiniteGeometryNumber(config.width);
+    const height = asFiniteGeometryNumber(config.height);
+
+    // Non-numeric garbage is dropped without minting a size; partial data
+    // fills the missing dimension with the kind's default rendered value so
+    // rendering stays identical to the pre-migration read path.
+    if (width === null && height === null) {
+      return {
+        ...node,
+        config: nextConfig,
+      };
+    }
+
+    const defaults = resolveStudioNodeDefaultSize(node.kind);
+    return {
+      ...node,
+      size: {
+        width: width ?? defaults.width,
+        height: height ?? defaults.height,
+      },
+      config: nextConfig,
+    };
+  });
+
+  return {
+    nodes: nextNodes,
+    changed,
+  };
 }
 
 function migrateTextGenerationNodes(
@@ -507,7 +605,29 @@ export function migrateStudioProjectToPathOnlyPorts(project: StudioProjectV1): {
   let changed = false;
   let noteMigrationChanged = false;
 
-  let nodes = project.graph.nodes.map((node) => {
+  const textKindStampApplied = project.migrations.applied.some(
+    (entry) => entry.id === TEXT_NODE_KINDS_MIGRATION_ID
+  );
+  let textKindMigrationRan = false;
+  let sourceNodes = project.graph.nodes;
+  if (!textKindStampApplied) {
+    textKindMigrationRan = true;
+    // Force a rewrite even when no node needed renaming: the stamp itself is
+    // the guard that keeps future (post-rename) "studio.text" nodes intact.
+    changed = true;
+    sourceNodes = sourceNodes.map((node) => {
+      const renamedKind = LEGACY_TEXT_NODE_KIND_RENAMES[node.kind];
+      if (!renamedKind) {
+        return node;
+      }
+      return {
+        ...node,
+        kind: renamedKind,
+      };
+    });
+  }
+
+  let nodes = sourceNodes.map((node) => {
     if (node.kind === "studio.media_ingest") {
       const nextConfig = normalizeMediaIngestConfig(node.config || {});
       const currentSerialized = JSON.stringify(node.config || {});
@@ -572,6 +692,12 @@ export function migrateStudioProjectToPathOnlyPorts(project: StudioProjectV1): {
     nodes = imageGenerationMigration.nodes;
   }
 
+  const geometryMigration = migrateNodeGeometryToSize(nodes);
+  if (geometryMigration.changed) {
+    changed = true;
+    nodes = geometryMigration.nodes;
+  }
+
   let entryNodeIds = project.graph.entryNodeIds;
   let groups = project.graph.groups;
   const promptTemplateMigration = migratePromptTemplateNodes(nodes, edges, entryNodeIds, groups);
@@ -589,6 +715,12 @@ export function migrateStudioProjectToPathOnlyPorts(project: StudioProjectV1): {
 
   const appliedMigrationIds = new Set(project.migrations.applied.map((entry) => entry.id));
   const nextApplied = [...project.migrations.applied];
+  if (textKindMigrationRan && !appliedMigrationIds.has(TEXT_NODE_KINDS_MIGRATION_ID)) {
+    nextApplied.push({
+      id: TEXT_NODE_KINDS_MIGRATION_ID,
+      at: nowIso(),
+    });
+  }
   if (!appliedMigrationIds.has(PATH_ONLY_PORTS_MIGRATION_ID)) {
     nextApplied.push({
       id: PATH_ONLY_PORTS_MIGRATION_ID,

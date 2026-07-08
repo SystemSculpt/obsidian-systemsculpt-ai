@@ -1,27 +1,32 @@
 import { isManagedOutputPlaceholderNode } from "../../../studio/StudioManagedOutputNodes";
 import { formatNodeConfigPreview } from "../StudioViewHelpers";
-import { renderLabelNodeCard } from "./StudioGraphLabelNodeCard";
+import { renderTextNodeCard } from "./StudioGraphTextNodeCard";
 import {
-  bindNodeCardPointerDown,
   renderCollapsedVisibilityControls,
   renderNodeHeader,
   renderNodePorts,
   renderNodeStatusRow,
 } from "./StudioGraphNodeCardSections";
 import {
+  bindNodeCardPointerDown,
+  isStudioNodeCardInteractiveTarget,
+} from "./StudioGraphNodeCardPointer";
+import {
   renderNodeMediaPreview,
   renderNodeOutputPreview,
   resolveMediaIngestRevealPath,
 } from "./StudioGraphNodeCardPreviews";
 import type { RenderStudioGraphNodeCardOptions } from "./StudioGraphNodeCardTypes";
+import { renderStudioMediaNodeActionBar } from "./StudioMediaNodeActionBar";
 import { renderStudioNodeInlineEditor } from "./StudioGraphNodeInlineEditors";
 import { resolveStudioNodeDetailSectionVisibility } from "./StudioGraphNodeDetailMode";
 import {
   isStudioExpandedTextNodeKind,
   resolveStudioGraphNodeMinHeight,
   resolveStudioGraphNodeWidth,
-} from "./StudioGraphNodeGeometry";
-import { mountStudioGraphNodeResizeHandle } from "./StudioGraphNodeResizeHandle";
+} from "../../../studio/StudioNodeGeometry";
+import { resolveNodeMediaPreview } from "./StudioGraphMediaPreview";
+import { mountStudioGraphNodeResizeFrame } from "./StudioGraphNodeResizeFrame";
 
 export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOptions): void {
   const {
@@ -41,7 +46,7 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
     onNodeTitleInput,
     onNodeConfigMutated,
     onNodeConfigValueChange,
-    onNodeSizeChange,
+    onNodeResize,
     onOpenImageEditor,
     onEditImageWithAi,
     onCopyNodeImageToClipboard,
@@ -50,10 +55,10 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
     renderMarkdownPreview,
     onNodeGeometryMutated,
     resolveDynamicSelectOptions,
-    isLabelEditing,
-    consumeLabelAutoFocus,
-    onRequestLabelEdit,
-    onStopLabelEdit,
+    isTextNodeEditing,
+    consumeTextNodeAutoFocus,
+    onRequestTextNodeEdit,
+    onStopTextNodeEdit,
     onRevealPathInFinder,
     resolveNodeBadge,
   } = options;
@@ -82,8 +87,8 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
     graphInteraction,
   });
 
-  if (node.kind === "studio.label") {
-    renderLabelNodeCard({
+  if (node.kind === "studio.text") {
+    renderTextNodeCard({
       nodeEl,
       node,
       busy,
@@ -91,34 +96,19 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
       onRemoveNode,
       onNodeConfigMutated,
       onNodeConfigValueChange,
-      onNodeSizeChange,
+      onNodeResize,
       onNodeGeometryMutated,
-      isEditing: isLabelEditing(node.id),
-      shouldAutoFocus: consumeLabelAutoFocus(node.id),
-      onRequestLabelEdit,
-      onStopLabelEdit,
+      isEditing: isTextNodeEditing(node.id),
+      shouldAutoFocus: consumeTextNodeAutoFocus(node.id),
+      onRequestTextNodeEdit,
+      onStopTextNodeEdit,
     });
     return;
   }
 
-  renderNodeHeader({
-    nodeEl,
-    node,
-    interactionLocked,
-    onNodeTitleInput,
-    onRunNode,
-    onCopyTextGenerationPromptBundle,
-    onToggleTextGenerationOutputLock,
-    onRemoveNode,
-  });
-
   if (node.kind === "studio.media_ingest") {
     nodeEl.addEventListener("dblclick", (event) => {
-      const target = event.target as HTMLElement | null;
-      if (!target) {
-        return;
-      }
-      if (target.closest("input, button, select, textarea, a, .ss-studio-port-pin")) {
+      if (isStudioNodeCardInteractiveTarget(event.target)) {
         return;
       }
       const revealPath = resolveMediaIngestRevealPath(
@@ -133,6 +123,115 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
       onRevealPathInFinder(revealPath);
     });
   }
+
+  const mediaPreviewDescriptor = resolveNodeMediaPreview(
+    node,
+    nodeRunState.outputs as Record<string, unknown> | null
+  );
+  const mediaPreviewSrc =
+    mediaPreviewDescriptor && resolveAssetPreviewSrc
+      ? resolveAssetPreviewSrc(mediaPreviewDescriptor.path)
+      : null;
+
+  const mountResizeFrame = (): void => {
+    mountStudioGraphNodeResizeFrame({
+      node,
+      nodeEl,
+      title: node.kind === "studio.terminal" ? "Resize terminal node" : "Resize node",
+      ariaLabel: node.kind === "studio.terminal" ? "Resize terminal node" : "Resize node",
+      interactionLocked,
+      getGraphZoom: () => graphInteraction.getGraphZoom(),
+      hasAspectMediaContent: mediaPreviewDescriptor !== null,
+      onNodeConfigMutated,
+      onNodeConfigValueChange,
+      onNodeResize,
+      onNodeGeometryMutated,
+      applySize: ({ width, height }) => {
+        nodeEl.style.width = `${width}px`;
+        if (height === null) {
+          return;
+        }
+        if (node.kind === "studio.terminal") {
+          nodeEl.style.height = `${height}px`;
+          return;
+        }
+        nodeEl.style.minHeight = `${height}px`;
+      },
+      readInitialSize: () => {
+        const measuredHeight = nodeEl.offsetHeight;
+        const resolvedMinHeight = resolveStudioGraphNodeMinHeight(node);
+        return {
+          width: resolveStudioGraphNodeWidth(node),
+          height:
+            measuredHeight > 0
+              ? measuredHeight
+              : Math.max(resolvedMinHeight, 1),
+        };
+      },
+    });
+  };
+
+  // ── Media layout: media nodes whose preview IS the card ──
+  // The card shows only the media plus a floating action bar inside the
+  // media's edge, port pins on the side edges, and a status badge only
+  // while running/failed.
+  if (
+    node.kind === "studio.media_ingest" &&
+    !isPlaceholder &&
+    definition &&
+    mediaPreviewDescriptor &&
+    mediaPreviewSrc
+  ) {
+    nodeEl.dataset.chromeLayout = "media";
+    renderNodeStatusRow({
+      nodeEl,
+      node,
+      isPlaceholder,
+      nodeRunState,
+      resolveNodeBadge,
+    });
+    renderNodePorts({
+      nodeEl,
+      node,
+      definition,
+      graphInteraction,
+      interactionLocked,
+    });
+    renderNodeMediaPreview({
+      nodeEl,
+      node,
+      nodeRunState,
+      resolveAssetPreviewSrc,
+      onRevealPathInFinder,
+      onOpenMediaPreview,
+    });
+    mountResizeFrame();
+    renderStudioMediaNodeActionBar({
+      nodeEl,
+      node,
+      definition,
+      mediaKind: mediaPreviewDescriptor.kind,
+      interactionLocked,
+      onRunNode,
+      onRemoveNode,
+      onNodeConfigValueChange,
+      onOpenImageEditor,
+      onEditImageWithAi,
+      onCopyNodeImageToClipboard,
+    });
+    return;
+  }
+
+  renderNodeHeader({
+    nodeEl,
+    node,
+    interactionLocked,
+    onNodeTitleInput,
+    onRunNode,
+    onCopyTextGenerationPromptBundle,
+    onToggleTextGenerationOutputLock,
+    onRemoveNode,
+  });
 
   nodeEl.createEl("div", {
     cls: "ss-studio-node-kind",
@@ -163,7 +262,7 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
     return;
   }
 
-  if (node.kind === "studio.text" && isPlaceholder) {
+  if (node.kind === "studio.text_output" && isPlaceholder) {
     const pendingPreviewEl = nodeEl.createDiv({ cls: "ss-studio-node-pending-preview is-text" });
     pendingPreviewEl.createDiv({
       cls: "ss-studio-node-pending-title",
@@ -231,36 +330,7 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
     });
   }
 
-  mountStudioGraphNodeResizeHandle({
-    node,
-    nodeEl,
-    title: node.kind === "studio.terminal" ? "Resize terminal node" : "Resize node",
-    ariaLabel: node.kind === "studio.terminal" ? "Resize terminal node" : "Resize node",
-    interactionLocked,
-    getGraphZoom: () => graphInteraction.getGraphZoom(),
-    onNodeConfigMutated,
-    onNodeSizeChange,
-    onNodeGeometryMutated,
-    applySize: ({ width, height }) => {
-      nodeEl.style.width = `${width}px`;
-      if (node.kind === "studio.terminal") {
-        nodeEl.style.height = `${height}px`;
-        return;
-      }
-      nodeEl.style.minHeight = `${height}px`;
-    },
-    readInitialSize: () => {
-      const measuredHeight = nodeEl.offsetHeight;
-      const resolvedMinHeight = resolveStudioGraphNodeMinHeight(node);
-      return {
-        width: resolveStudioGraphNodeWidth(node),
-        height:
-          measuredHeight > 0
-            ? measuredHeight
-            : Math.max(resolvedMinHeight, 1),
-      };
-    },
-  });
+  mountResizeFrame();
 
   if (!isPlaceholder) {
     renderCollapsedVisibilityControls({
@@ -268,12 +338,8 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
       node,
       busy,
       nodeDetailMode,
-      nodeRunState,
       onNodeConfigMutated,
       onNodeConfigValueChange,
-      onOpenImageEditor,
-      onEditImageWithAi,
-      onCopyNodeImageToClipboard,
     });
   }
 
@@ -303,151 +369,9 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
     onOpenMediaPreview,
   });
 
-  // ── Chrome layout: single entry point for ALL non-label nodes ──
-  // Universal hierarchy:
-  //   Top overlay (hover):  Quick Actions + title input
-  //   Card (always):        Ports, crucial inline config fields,
-  //                          output previews, media previews, text editors
-  //   Bottom overlay (hover): secondary config fields (model, reasoning,
-  //                          sourcePath), config preview text, kind, status
-  // Content-prominent nodes additionally get data-chrome-layout="overlay"
-  // for zero-padding / flex-column card styling.
-  const contentFillsCard =
-    node.kind === "studio.media_ingest" &&
-    !!nodeEl.querySelector(".ss-studio-node-media-preview");
-
-  applyChromeLayout(nodeEl, {
-    contentFillsCard,
-    topPanel: [
-      "ss-studio-node-collapsed-visibility",
-      "ss-studio-node-header",
-    ],
-    bottomPanel: [
-      "ss-studio-node-config-preview",
-      "ss-studio-node-kind",
-      "ss-studio-node-run-status-row",
-    ],
-  });
-
-  // ── Secondary field moves ──
-  // After layout, move secondary config fields into the bottom overlay.
-  // Crucial fields stay on the card; secondary fields appear on hover.
-  moveSecondaryFieldsToBottomOverlay(nodeEl, node.kind);
-}
-
-/**
- * Chrome layout policy — single source of truth for every node card.
- *
- * topPanel classes → hover-reveal panel above the card.
- * bottomPanel classes → hover-reveal panel below the card.
- * Everything else stays on the card (ports, content, resize handle).
- *
- * contentFillsCard: if true, the card gets data-chrome-layout="overlay"
- * for zero-padding / flex-column styling (content-prominent nodes).
- */
-interface ChromeLayoutPolicy {
-  contentFillsCard: boolean;
-  topPanel: string[];
-  bottomPanel: string[];
-}
-
-/**
- * Single entry point for chrome layout on all node types.
- * 1. Moves header buttons into Quick Actions
- * 2. Creates top overlay (Quick Actions + title)
- * 3. Creates bottom overlay (config, previews, metadata)
- * 4. Leaves ports + main content on the card
- */
-function applyChromeLayout(
-  nodeEl: HTMLElement,
-  policy: ChromeLayoutPolicy
-): void {
-  if (policy.contentFillsCard) {
-    nodeEl.dataset.chromeLayout = "overlay";
-  }
-
-  // Move header action buttons into the Quick Actions toolbar
-  const headerEl = nodeEl.querySelector(".ss-studio-node-header");
-  const buttonsContainer = nodeEl.querySelector(
-    ".ss-studio-node-collapsed-visibility-buttons"
-  );
-  if (headerEl && buttonsContainer) {
-    for (const btn of Array.from(headerEl.querySelectorAll("button"))) {
-      buttonsContainer.appendChild(btn);
-    }
-  }
-
-  const topSet = new Set(policy.topPanel);
-  const bottomSet = new Set(policy.bottomPanel);
-
-  // Create top overlay and route topPanel elements into it
-  const chromeTop = nodeEl.createDiv({
-    cls: "ss-studio-node-chrome-overlay-top",
-  });
-  for (const child of Array.from(nodeEl.children)) {
-    if (child === chromeTop) continue;
-    if (Array.from(child.classList).some((c) => topSet.has(c))) {
-      chromeTop.appendChild(child);
-    }
-  }
-
-  // Create bottom overlay and route bottomPanel elements into it
-  const chromeBottom = nodeEl.createDiv({
-    cls: "ss-studio-node-chrome-overlay",
-  });
-  for (const child of Array.from(nodeEl.children)) {
-    if (child === chromeTop || child === chromeBottom) continue;
-    if (Array.from(child.classList).some((c) => bottomSet.has(c))) {
-      chromeBottom.appendChild(child);
-    }
-  }
-
-  // Collapsed mode fallback: if buttons weren't moved (no Quick Actions
-  // container), extract them from the header so they stay accessible.
-  if (!buttonsContainer && headerEl) {
-    const headerInPanel =
-      chromeTop.querySelector(".ss-studio-node-header") ??
-      chromeBottom.querySelector(".ss-studio-node-header");
-    if (headerInPanel) {
-      for (const btn of Array.from(
-        headerInPanel.querySelectorAll("button")
-      )) {
-        chromeTop.appendChild(btn);
-      }
-    }
-  }
-}
-
-/**
- * Moves secondary config fields from the card into the bottom overlay.
- * Crucial fields stay on the card; secondary fields appear on hover.
- *
- * text_generation: systemPrompt stays → modelId, localModelId, reasoningEffort move down
- * media_ingest:    media preview stays → sourcePath moves down
- */
-const SECONDARY_FIELDS: Record<string, string[]> = {
-  "studio.text_generation": [
-    ".ss-studio-node-inline-config-field--modelid",
-    ".ss-studio-node-inline-config-field--localmodelid",
-    ".ss-studio-node-inline-config-field--reasoningeffort",
-  ],
-  "studio.media_ingest": [
-    ".ss-studio-node-inline-config-field--sourcepath",
-  ],
-};
-
-function moveSecondaryFieldsToBottomOverlay(
-  nodeEl: HTMLElement,
-  kind: string
-): void {
-  const selectors = SECONDARY_FIELDS[kind];
-  if (!selectors) return;
-
-  const chromeBottom = nodeEl.querySelector(".ss-studio-node-chrome-overlay");
-  if (!chromeBottom) return;
-
-  for (const sel of selectors) {
-    const el = nodeEl.querySelector(sel);
-    if (el) chromeBottom.appendChild(el);
-  }
+  // No hover chrome: every control rendered above — header actions, ports,
+  // config fields, previews, status — lives on the card in normal flow,
+  // visible whether or not the pointer is over the node. Media cards are the
+  // one structural exception (the media-chrome branch above): the card IS
+  // the media and actions live in the always-visible pill action bar.
 }

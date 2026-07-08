@@ -6,7 +6,7 @@ import {
 } from "../../../studio/types";
 import {
   inferAiImageEditAspectRatio,
-  insertAiImageEditNodes,
+  insertAiImageEditNode,
 } from "../systemsculpt-studio-view/StudioAiImageEditFlow";
 
 function definitionFixture(kind: string): StudioNodeDefinition {
@@ -87,7 +87,7 @@ describe("StudioAiImageEditFlow", () => {
     expect(inferAiImageEditAspectRatio(1000, 1500)).toBe("2:3");
   });
 
-  it("adds prompt and image-generation nodes plus wiring for an AI image edit", () => {
+  it("adds one image-generation node wired to the source image — no companion text node", () => {
     const sourceNode = nodeFixture("studio.media_ingest", {
       id: "media_1",
       title: "Cover Image",
@@ -96,30 +96,21 @@ describe("StudioAiImageEditFlow", () => {
     });
     const project = projectFixture([sourceNode]);
 
-    const result = insertAiImageEditNodes({
+    const result = insertAiImageEditNode({
       project,
       sourceNode,
-      prompt: "Remove the background and add dramatic lighting",
       aspectRatio: "3:2",
-      textDefinition: definitionFixture("studio.text"),
       imageGenerationDefinition: definitionFixture("studio.image_generation"),
-      nextNodeId: jest.fn().mockReturnValueOnce("prompt_1").mockReturnValueOnce("image_1"),
-      nextEdgeId: jest.fn().mockReturnValueOnce("edge_prompt").mockReturnValueOnce("edge_image"),
-      cloneConfigDefaults: () => ({}),
+      nextNodeId: jest.fn().mockReturnValueOnce("image_1"),
+      nextEdgeId: jest.fn().mockReturnValueOnce("edge_image"),
+      cloneConfigDefaults: () => ({ prompt: "" }),
       normalizeNodePosition: (position) => ({ x: Math.round(position.x), y: Math.round(position.y) }),
     });
 
-    expect(result.promptNodeId).toBe("prompt_1");
     expect(result.imageGenerationNodeId).toBe("image_1");
-    expect(project.graph.nodes.map((node) => node.id)).toEqual(["media_1", "prompt_1", "image_1"]);
+    expect(result.createdNodeIds).toEqual(["image_1"]);
+    expect(project.graph.nodes.map((node) => node.id)).toEqual(["media_1", "image_1"]);
     expect(project.graph.edges).toEqual([
-      {
-        id: "edge_prompt",
-        fromNodeId: "prompt_1",
-        fromPortId: "text",
-        toNodeId: "image_1",
-        toPortId: "prompt",
-      },
       {
         id: "edge_image",
         fromNodeId: "media_1",
@@ -129,16 +120,39 @@ describe("StudioAiImageEditFlow", () => {
       },
     ]);
 
-    const promptNode = project.graph.nodes.find((node) => node.id === "prompt_1");
     const imageNode = project.graph.nodes.find((node) => node.id === "image_1");
-    expect(promptNode?.title).toBe("Cover Image Edit Prompt");
-    expect(promptNode?.config.value).toBe("Remove the background and add dramatic lighting");
     expect(imageNode?.title).toBe("Cover Image AI Edit");
     expect(imageNode?.config.count).toBe(1);
     expect(imageNode?.config.aspectRatio).toBe("3:2");
+    // The prompt starts empty: the user types it into the node's own Prompt box.
+    expect(imageNode?.config.prompt).toBe("");
   });
 
-  it("adds the new AI edit nodes into the same group as the source image", () => {
+  it("places the new node to the right of the source image", () => {
+    const sourceNode = nodeFixture("studio.media_ingest", {
+      id: "media_1",
+      title: "Source Image",
+      position: { x: 80, y: 180 },
+    });
+    const project = projectFixture([sourceNode]);
+
+    insertAiImageEditNode({
+      project,
+      sourceNode,
+      aspectRatio: "1:1",
+      imageGenerationDefinition: definitionFixture("studio.image_generation"),
+      nextNodeId: jest.fn().mockReturnValueOnce("image_1"),
+      nextEdgeId: jest.fn().mockReturnValueOnce("edge_image"),
+      cloneConfigDefaults: () => ({}),
+      normalizeNodePosition: (position) => ({ x: Math.round(position.x), y: Math.round(position.y) }),
+    });
+
+    const imageNode = project.graph.nodes.find((node) => node.id === "image_1");
+    expect(imageNode?.position.x).toBeGreaterThan(sourceNode.position.x);
+    expect(imageNode?.position.y).toBe(sourceNode.position.y);
+  });
+
+  it("adds the new AI edit node into the same group as the source image", () => {
     const sourceNode = nodeFixture("studio.media_ingest", {
       id: "media_1",
       title: "Source Image",
@@ -151,19 +165,17 @@ describe("StudioAiImageEditFlow", () => {
       },
     ]);
 
-    insertAiImageEditNodes({
+    insertAiImageEditNode({
       project,
       sourceNode,
-      prompt: "Make it look like a product shot",
       aspectRatio: "1:1",
-      textDefinition: definitionFixture("studio.text"),
       imageGenerationDefinition: definitionFixture("studio.image_generation"),
-      nextNodeId: jest.fn().mockReturnValueOnce("prompt_1").mockReturnValueOnce("image_1"),
-      nextEdgeId: jest.fn().mockReturnValueOnce("edge_prompt").mockReturnValueOnce("edge_image"),
+      nextNodeId: jest.fn().mockReturnValueOnce("image_1"),
+      nextEdgeId: jest.fn().mockReturnValueOnce("edge_image"),
       cloneConfigDefaults: () => ({}),
       normalizeNodePosition: (position) => ({ x: Math.round(position.x), y: Math.round(position.y) }),
     });
 
-    expect(project.graph.groups?.[0]?.nodeIds).toEqual(["media_1", "prompt_1", "image_1"]);
+    expect(project.graph.groups?.[0]?.nodeIds).toEqual(["media_1", "image_1"]);
   });
 });

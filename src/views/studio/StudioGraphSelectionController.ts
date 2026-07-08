@@ -16,7 +16,19 @@ import {
   STUDIO_GRAPH_CANVAS_MAX_HEIGHT,
   STUDIO_GRAPH_CANVAS_MAX_WIDTH,
 } from "./graph-v3/StudioGraphCanvasBounds";
-import { resolveStudioGraphNodeWidth } from "./graph-v3/StudioGraphNodeGeometry";
+import {
+  resolveMeasuredStudioNodeHeight,
+  resolveMeasuredStudioNodeWidth,
+  resolveStudioCanvasDelta,
+  resolveStudioGraphSafeZoom,
+} from "../../studio/StudioNodeGeometry";
+import {
+  resolveStudioGraphSnap,
+  STUDIO_SNAP_THRESHOLD_PX,
+  type StudioSnapRect,
+  type StudioSnapResult,
+} from "./graph-v3/StudioGraphSnapGuides";
+import { renderStudioGraphSnapGuidesLayer } from "./graph-v3/StudioGraphSnapGuidesOverlay";
 import {
   isStudioGraphEditableFieldActive,
   shouldStudioGraphDeferWheelToNativeScroll,
@@ -39,8 +51,6 @@ const WHEEL_DOM_DELTA_LINE =
 const WHEEL_DOM_DELTA_PAGE =
   typeof WheelEvent !== "undefined" ? WheelEvent.DOM_DELTA_PAGE : 2;
 const STUDIO_GRAPH_SELECTION_FIT_PADDING_PX = 25;
-const STUDIO_GRAPH_NODE_MIN_HEIGHT_PX = 80;
-const STUDIO_GRAPH_NODE_FALLBACK_HEIGHT_PX = 164;
 const STUDIO_GRAPH_ZOOM_SETTLE_DELAY_MS = 160;
 type StudioGraphSelectionHost = {
   isBusy: () => boolean;
@@ -71,6 +81,7 @@ export class StudioGraphSelectionController {
   private graphViewportEl: HTMLElement | null = null;
   private graphSurfaceEl: HTMLElement | null = null;
   private graphMarqueeEl: HTMLElement | null = null;
+  private snapGuidesEl: HTMLElement | null = null;
   private graphZoomLabelEl: HTMLElement | null = null;
   private graphCanvasEl: HTMLElement | null = null;
   private graphEdgesLayerEl: SVGSVGElement | null = null;
@@ -165,6 +176,7 @@ export class StudioGraphSelectionController {
     this.graphViewportEl = null;
     this.graphSurfaceEl = null;
     this.graphMarqueeEl = null;
+    this.snapGuidesEl = null;
     this.graphZoomLabelEl = null;
     this.graphCanvasEl = null;
     this.graphEdgesLayerEl = null;
@@ -192,6 +204,10 @@ export class StudioGraphSelectionController {
 
   registerMarqueeElement(marquee: HTMLElement): void {
     this.graphMarqueeEl = marquee;
+  }
+
+  registerSnapGuidesElement(layer: HTMLElement): void {
+    this.snapGuidesEl = layer;
   }
 
   registerZoomLabelElement(label: HTMLElement): void {
@@ -365,16 +381,8 @@ export class StudioGraphSelectionController {
       }
 
       const nodeEl = this.nodeElsById.get(node.id);
-      const measuredWidth = nodeEl?.offsetWidth;
-      const measuredHeight = nodeEl?.offsetHeight;
-      const nodeWidth = Math.max(
-        120,
-        measuredWidth && measuredWidth > 0 ? measuredWidth : resolveStudioGraphNodeWidth(node)
-      );
-      const nodeHeight = Math.max(
-        STUDIO_GRAPH_NODE_MIN_HEIGHT_PX,
-        measuredHeight && measuredHeight > 0 ? measuredHeight : STUDIO_GRAPH_NODE_FALLBACK_HEIGHT_PX
-      );
+      const nodeWidth = resolveMeasuredStudioNodeWidth(nodeEl?.offsetWidth, node);
+      const nodeHeight = resolveMeasuredStudioNodeHeight(nodeEl?.offsetHeight);
 
       left = Math.min(left, nodeX);
       top = Math.min(top, nodeY);
@@ -460,11 +468,8 @@ export class StudioGraphSelectionController {
       }
       for (const node of project.graph.nodes) {
         const nodeEl = this.nodeElsById.get(node.id);
-        const nodeHeight = Math.max(80, nodeEl?.offsetHeight || 164);
-        const nodeWidth = Math.max(
-          120,
-          nodeEl?.offsetWidth || resolveStudioGraphNodeWidth(node)
-        );
+        const nodeHeight = resolveMeasuredStudioNodeHeight(nodeEl?.offsetHeight);
+        const nodeWidth = resolveMeasuredStudioNodeWidth(nodeEl?.offsetWidth, node);
         const nodeX1 = node.position.x;
         const nodeY1 = node.position.y;
         const nodeX2 = nodeX1 + nodeWidth;
@@ -755,13 +760,54 @@ export class StudioGraphSelectionController {
     const pointerId = startEvent.pointerId;
     const startX = startEvent.clientX;
     const startY = startEvent.clientY;
-    const zoom = this.graphZoom || 1;
+    const zoom = this.graphZoom;
     let pendingClientX = startX;
     let pendingClientY = startY;
     let dragFrameRequested = false;
     let dragged = false;
     let captureHistoryOnNextMutation = false;
     let hoveredGroupId: string | null = null;
+
+    // Smart alignment guides: statics are frozen for the whole drag; the
+    // dragged selection snaps as one unit (union bounds). Holding Ctrl/Cmd
+    // bypasses snapping so placement can freeball.
+    const dragNodeIdSet = new Set(dragNodeIds);
+    const staticSnapRects: StudioSnapRect[] = [];
+    for (const node of project.graph.nodes) {
+      if (dragNodeIdSet.has(node.id)) {
+        continue;
+      }
+      const nodeX = Number(node.position?.x);
+      const nodeY = Number(node.position?.y);
+      if (!Number.isFinite(nodeX) || !Number.isFinite(nodeY)) {
+        continue;
+      }
+      const nodeEl = this.nodeElsById.get(node.id);
+      staticSnapRects.push({
+        left: nodeX,
+        top: nodeY,
+        right: nodeX + resolveMeasuredStudioNodeWidth(nodeEl?.offsetWidth, node),
+        bottom: nodeY + resolveMeasuredStudioNodeHeight(nodeEl?.offsetHeight),
+      });
+    }
+    let movingOriginBounds: StudioSnapRect | null = null;
+    for (const [dragNodeId, origin] of originByNodeId.entries()) {
+      const dragNode = dragNodes.get(dragNodeId);
+      const nodeEl = this.nodeElsById.get(dragNodeId);
+      const right = origin.x + resolveMeasuredStudioNodeWidth(nodeEl?.offsetWidth, dragNode);
+      const bottom = origin.y + resolveMeasuredStudioNodeHeight(nodeEl?.offsetHeight);
+      if (!movingOriginBounds) {
+        movingOriginBounds = { left: origin.x, top: origin.y, right, bottom };
+        continue;
+      }
+      movingOriginBounds.left = Math.min(movingOriginBounds.left, origin.x);
+      movingOriginBounds.top = Math.min(movingOriginBounds.top, origin.y);
+      movingOriginBounds.right = Math.max(movingOriginBounds.right, right);
+      movingOriginBounds.bottom = Math.max(movingOriginBounds.bottom, bottom);
+    }
+    const snapThreshold = STUDIO_SNAP_THRESHOLD_PX / resolveStudioGraphSafeZoom(zoom);
+    let snapBypassed = Boolean(startEvent.ctrlKey || startEvent.metaKey);
+    let activeSnap: StudioSnapResult | null = null;
     const syncHoveredGroup = (): void => {
       const nextGroupId = this.host.resolveNodeDragHoverGroup?.(dragNodeIds) || null;
       if (nextGroupId === hoveredGroupId) {
@@ -783,8 +829,32 @@ export class StudioGraphSelectionController {
       mode?: StudioGraphProjectMutationOptions["mode"];
       forceChanged?: boolean;
     }): boolean => {
-      const deltaX = (pendingClientX - startX) / zoom;
-      const deltaY = (pendingClientY - startY) / zoom;
+      // Shared screen→canvas math with the resize frame — one zoom division.
+      let { deltaX, deltaY } = resolveStudioCanvasDelta({
+        startClientX: startX,
+        startClientY: startY,
+        clientX: pendingClientX,
+        clientY: pendingClientY,
+        zoom,
+      });
+      activeSnap = null;
+      if (!snapBypassed && movingOriginBounds && staticSnapRects.length > 0) {
+        const snap = resolveStudioGraphSnap({
+          moving: {
+            left: movingOriginBounds.left + deltaX,
+            top: movingOriginBounds.top + deltaY,
+            right: movingOriginBounds.right + deltaX,
+            bottom: movingOriginBounds.bottom + deltaY,
+          },
+          others: staticSnapRects,
+          threshold: snapThreshold,
+        });
+        deltaX += snap.deltaX;
+        deltaY += snap.deltaY;
+        if (snap.guides.length > 0 || snap.gaps.length > 0) {
+          activeSnap = snap;
+        }
+      }
       return this.host.commitProjectMutation(
         "node.position",
         (currentProject) => {
@@ -831,6 +901,7 @@ export class StudioGraphSelectionController {
         mode: "continuous",
       });
       captureHistoryOnNextMutation = false;
+      this.renderSnapGuides(activeSnap);
       if (!changed) {
         syncHoveredGroup();
         return;
@@ -862,6 +933,7 @@ export class StudioGraphSelectionController {
       const latestEvent = this.resolveLatestPointerEvent(moveEvent);
       pendingClientX = latestEvent.clientX;
       pendingClientY = latestEvent.clientY;
+      snapBypassed = Boolean(moveEvent.ctrlKey || moveEvent.metaKey);
       if (
         Math.hypot(pendingClientX - startX, pendingClientY - startY) > 3 &&
         typeof moveEvent.preventDefault === "function"
@@ -869,6 +941,19 @@ export class StudioGraphSelectionController {
         moveEvent.preventDefault();
       }
       scheduleDragFrame();
+    };
+
+    // Pressing/releasing Ctrl or Cmd mid-drag toggles snapping immediately,
+    // even while the pointer is stationary.
+    const onModifierChange = (keyEvent: KeyboardEvent): void => {
+      const nextBypassed = Boolean(keyEvent.ctrlKey || keyEvent.metaKey);
+      if (nextBypassed === snapBypassed) {
+        return;
+      }
+      snapBypassed = nextBypassed;
+      if (dragged) {
+        scheduleDragFrame();
+      }
     };
 
     const finishDrag = (event: PointerEvent): void => {
@@ -883,6 +968,9 @@ export class StudioGraphSelectionController {
       window.removeEventListener("pointermove", onPointerMove);
       window.removeEventListener("pointerup", finishDrag);
       window.removeEventListener("pointercancel", finishDrag);
+      window.removeEventListener("keydown", onModifierChange);
+      window.removeEventListener("keyup", onModifierChange);
+      this.renderSnapGuides(null);
       if (typeof dragSurfaceEl.releasePointerCapture === "function") {
         try {
           dragSurfaceEl.releasePointerCapture(pointerId);
@@ -912,6 +1000,19 @@ export class StudioGraphSelectionController {
     window.addEventListener("pointermove", onPointerMove);
     window.addEventListener("pointerup", finishDrag);
     window.addEventListener("pointercancel", finishDrag);
+    window.addEventListener("keydown", onModifierChange);
+    window.addEventListener("keyup", onModifierChange);
+  }
+
+  private renderSnapGuides(result: StudioSnapResult | null): void {
+    if (!this.snapGuidesEl) {
+      return;
+    }
+    try {
+      renderStudioGraphSnapGuidesLayer(this.snapGuidesEl, result, this.graphZoom);
+    } catch {
+      // Guide rendering must never break an in-flight drag.
+    }
   }
 
   toggleNodeSelection(nodeId: string): void {
@@ -973,16 +1074,16 @@ export class StudioGraphSelectionController {
         const node = nodeById.get(nodeId);
         const nodeEl = this.nodeElsById.get(nodeId);
         if (!node) {
-          return nodeEl ? Math.max(120, nodeEl.offsetWidth || 280) : null;
+          return nodeEl ? resolveMeasuredStudioNodeWidth(nodeEl.offsetWidth) : null;
         }
-        return Math.max(120, nodeEl?.offsetWidth || resolveStudioGraphNodeWidth(node));
+        return resolveMeasuredStudioNodeWidth(nodeEl?.offsetWidth, node);
       },
       getNodeHeight: (nodeId) => {
         const nodeEl = this.nodeElsById.get(nodeId);
         if (!nodeEl) {
           return null;
         }
-        return Math.max(80, nodeEl.offsetHeight || 164);
+        return resolveMeasuredStudioNodeHeight(nodeEl.offsetHeight);
       },
     });
 

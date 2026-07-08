@@ -10,6 +10,19 @@ This folder contains graph-v3 rendering and inline editing modules used by Studi
 - `StudioGraphNodeCardRenderer.ts` + `StudioGraphNodeCardSections.ts` + `StudioGraphNodeCardPreviews.ts`
   - Card structure and preview composition.
 
+- `StudioGraphNodeCardPointer.ts`
+  - Node-card pointer policy: the single source of truth for interactive-vs-drag
+    surfaces, plus the card pointerdown binding (drag / modifier-select).
+    Composite chrome opts out of dragging with `markStudioNodeCardInteractive`;
+    never grow ad-hoc `closest()` selector strings elsewhere.
+
+- `StudioMediaNodeActionBar.ts`
+  - Hover action bar for media-only cards (`data-chrome-layout="media"`): one
+    flat pill of icon actions (run / edit / copy / replace / delete) pinned
+    inside the media's edge. The bar owns every pointer gesture that starts
+    on it (pointerdown stops there), and its reveal is opacity-only so it is
+    always hit-testable.
+
 - `StudioGraphNodeInlineEditors.ts`
   - Inline editor orchestration for node-specific editor surfaces (routing + non-text/non-JSON editors).
 

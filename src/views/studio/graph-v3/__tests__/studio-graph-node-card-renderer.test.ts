@@ -18,6 +18,35 @@ function createNode(kind: string, config: StudioNodeInstance["config"] = {}): St
   };
 }
 
+function definitionFields(kind: string): StudioNodeDefinition["configSchema"]["fields"] {
+  // Mirror the real media-ingest schema so the source picker renders.
+  if (kind === "studio.media_ingest") {
+    return [
+      {
+        key: "sourcePath",
+        label: "Source Path",
+        type: "media_path",
+        required: true,
+        allowOutsideVault: true,
+        mediaKinds: ["image", "video", "audio"],
+      },
+    ];
+  }
+  // Mirror the real image-generation schema keys so the static-chrome
+  // contract can assert every field renders on the card.
+  if (kind === "studio.image_generation") {
+    return [
+      { key: "prompt", label: "Prompt", type: "textarea", required: false },
+      { key: "modelId", label: "Model", type: "select", required: false, options: [] },
+      { key: "count", label: "Image Count", type: "number", required: true, min: 1, max: 4, integer: true },
+      { key: "aspectRatio", label: "Aspect Ratio", type: "select", required: false, options: [] },
+      { key: "imageSize", label: "Resolution", type: "select", required: false, options: [] },
+      { key: "seed", label: "Seed", type: "text", required: false },
+    ];
+  }
+  return [];
+}
+
 function createDefinition(kind: string): StudioNodeDefinition {
   return {
     kind,
@@ -28,7 +57,7 @@ function createDefinition(kind: string): StudioNodeDefinition {
     outputPorts: [],
     configDefaults: {},
     configSchema: {
-      fields: [],
+      fields: definitionFields(kind),
       allowUnknownKeys: true,
     },
     async execute() {
@@ -66,8 +95,8 @@ type RenderNodeCardHarness = {
   graphInteraction: ReturnType<typeof createGraphInteractionStub>;
   node: StudioNodeInstance;
   nodeEl: HTMLElement;
-  onRequestLabelEdit: jest.Mock;
-  onStopLabelEdit: jest.Mock;
+  onRequestTextNodeEdit: jest.Mock;
+  onStopTextNodeEdit: jest.Mock;
 };
 
 function createPointerEvent(
@@ -96,7 +125,9 @@ function renderNodeCardHarness(options: {
   onOpenImageEditor?: (node: StudioNodeInstance) => void;
   onEditImageWithAi?: (node: StudioNodeInstance) => void;
   onCopyNodeImageToClipboard?: (node: StudioNodeInstance) => void;
-  isLabelEditing?: boolean;
+  onRunNode?: (nodeId: string) => void;
+  onRemoveNode?: (nodeId: string) => void;
+  isTextNodeEditing?: boolean;
 }): RenderNodeCardHarness {
   const {
     kind,
@@ -106,13 +137,15 @@ function renderNodeCardHarness(options: {
     onOpenImageEditor,
     onEditImageWithAi,
     onCopyNodeImageToClipboard,
-    isLabelEditing = false,
+    onRunNode = jest.fn(),
+    onRemoveNode = jest.fn(),
+    isTextNodeEditing = false,
   } = options;
   const node = createNode(kind, config);
   const layer = document.body.createDiv({ cls: "ss-studio-test-layer" });
   const graphInteraction = createGraphInteractionStub();
-  const onRequestLabelEdit = jest.fn();
-  const onStopLabelEdit = jest.fn();
+  const onRequestTextNodeEdit = jest.fn();
+  const onStopTextNodeEdit = jest.fn();
 
   renderStudioGraphNodeCard({
     layer,
@@ -124,20 +157,21 @@ function renderNodeCardHarness(options: {
     graphInteraction: graphInteraction as any,
     findNodeDefinition: () => createDefinition(kind),
     resolveAssetPreviewSrc,
-    onRunNode: jest.fn(),
+    onRunNode,
     onCopyTextGenerationPromptBundle: jest.fn(),
     onToggleTextGenerationOutputLock: jest.fn(),
-    onRemoveNode: jest.fn(),
+    onRemoveNode,
     onNodeTitleInput: jest.fn(),
     onNodeConfigMutated: jest.fn(),
+    onNodeConfigValueChange: jest.fn(),
     onOpenImageEditor,
     onEditImageWithAi,
     onCopyNodeImageToClipboard,
     onNodeGeometryMutated: jest.fn(),
-    isLabelEditing: jest.fn(() => isLabelEditing),
-    consumeLabelAutoFocus: jest.fn(() => false),
-    onRequestLabelEdit,
-    onStopLabelEdit,
+    isTextNodeEditing: jest.fn(() => isTextNodeEditing),
+    consumeTextNodeAutoFocus: jest.fn(() => false),
+    onRequestTextNodeEdit,
+    onStopTextNodeEdit,
     onRevealPathInFinder: jest.fn(),
   });
 
@@ -149,8 +183,8 @@ function renderNodeCardHarness(options: {
     graphInteraction,
     node,
     nodeEl,
-    onRequestLabelEdit,
-    onStopLabelEdit,
+    onRequestTextNodeEdit,
+    onStopTextNodeEdit,
   };
 }
 
@@ -164,29 +198,75 @@ describe("renderStudioGraphNodeCard", () => {
     document.body.innerHTML = "";
   });
 
-  it("mounts the shared resize handle on text nodes", () => {
-    const nodeEl = renderNodeCard({ kind: "studio.text" });
+  // Static-chrome contract: the studio has NO hover-revealed chrome. Every
+  // control — header actions, config fields, status — is a plain in-flow
+  // descendant of the card, present whether or not the pointer is near it.
+  it("renders all chrome in normal card flow with no hover overlay containers", () => {
+    const nodeEl = renderNodeCard({ kind: "studio.http_request" });
 
-    expect(nodeEl.classList.contains("has-resize-handle")).toBe(true);
-    expect(nodeEl.classList.contains("is-expanded-text-node")).toBe(true);
-    expect(nodeEl.querySelector(".ss-studio-node-resize-handle")).not.toBeNull();
+    expect(nodeEl.querySelector(".ss-studio-node-chrome-overlay")).toBeNull();
+    expect(nodeEl.querySelector(".ss-studio-node-chrome-overlay-top")).toBeNull();
+
+    const header = nodeEl.querySelector<HTMLElement>(".ss-studio-node-header");
+    expect(header?.parentElement).toBe(nodeEl);
+    expect(header?.querySelector(".ss-studio-node-run")).not.toBeNull();
+    expect(header?.querySelector(".ss-studio-node-remove")).not.toBeNull();
+
+    const statusRow = nodeEl.querySelector<HTMLElement>(".ss-studio-node-run-status-row");
+    expect(statusRow?.parentElement).toBe(nodeEl);
   });
 
-  it("mounts the shared resize handle on standard workflow nodes", () => {
-    const nodeEl = renderNodeCard({ kind: "studio.http_request" });
-    const handleEl = nodeEl.querySelector<HTMLElement>(".ss-studio-node-resize-handle");
+  it("keeps every image-generation config field on the card, prompt first", () => {
+    const nodeEl = renderNodeCard({
+      kind: "studio.image_generation",
+      config: { prompt: "", count: 1 },
+    });
 
-    expect(nodeEl.classList.contains("has-resize-handle")).toBe(true);
-    expect(handleEl).not.toBeNull();
-    expect(handleEl?.getAttribute("aria-label")).toBe("Resize node");
+    const grid = nodeEl.querySelector<HTMLElement>(".ss-studio-node-inline-config-grid");
+    expect(grid).not.toBeNull();
+    const fieldSuffixes = Array.from(
+      grid?.querySelectorAll<HTMLElement>(".ss-studio-node-inline-config-field") ?? []
+    ).map((fieldEl) =>
+      Array.from(fieldEl.classList)
+        .find((cls) => cls.startsWith("ss-studio-node-inline-config-field--"))
+        ?.replace("ss-studio-node-inline-config-field--", "")
+    );
+    expect(fieldSuffixes).toEqual(["prompt", "modelid", "count", "aspectratio", "imagesize", "seed"]);
+    // Nothing gets relocated out of the grid after render.
+    for (const fieldEl of Array.from(
+      nodeEl.querySelectorAll<HTMLElement>(".ss-studio-node-inline-config-field")
+    )) {
+      expect(fieldEl.parentElement).toBe(grid);
+    }
+  });
+
+  it("mounts the shared eight-zone resize frame on text nodes", () => {
+    const nodeEl = renderNodeCard({ kind: "studio.text_output" });
+
+    expect(nodeEl.classList.contains("has-resize-frame")).toBe(true);
+    expect(nodeEl.classList.contains("is-expanded-text-node")).toBe(true);
+    expect(nodeEl.querySelectorAll(".ss-studio-node-resize-zone")).toHaveLength(8);
+  });
+
+  it("mounts the shared eight-zone resize frame on standard workflow nodes", () => {
+    const nodeEl = renderNodeCard({ kind: "studio.http_request" });
+    const zoneEls = Array.from(
+      nodeEl.querySelectorAll<HTMLElement>(".ss-studio-node-resize-zone")
+    );
+
+    expect(nodeEl.classList.contains("has-resize-frame")).toBe(true);
+    expect(zoneEls).toHaveLength(8);
+    for (const zoneEl of zoneEls) {
+      expect(zoneEl.getAttribute("aria-label")).toBe("Resize node");
+    }
   });
 
   it("starts dragging display-mode label cards from the label body", () => {
     const { graphInteraction, node, nodeEl } = renderNodeCardHarness({
-      kind: "studio.label",
+      kind: "studio.text",
       config: { value: "Move me" },
     });
-    const displayEl = nodeEl.querySelector<HTMLElement>(".ss-studio-label-display");
+    const displayEl = nodeEl.querySelector<HTMLElement>(".ss-studio-text-node-display");
 
     expect(displayEl).not.toBeNull();
     displayEl?.dispatchEvent(
@@ -213,11 +293,11 @@ describe("renderStudioGraphNodeCard", () => {
 
   it("keeps label editing textareas out of card dragging", () => {
     const { graphInteraction, nodeEl } = renderNodeCardHarness({
-      kind: "studio.label",
+      kind: "studio.text",
       config: { value: "Editable text" },
-      isLabelEditing: true,
+      isTextNodeEditing: true,
     });
-    const editorEl = nodeEl.querySelector<HTMLTextAreaElement>(".ss-studio-label-editor");
+    const editorEl = nodeEl.querySelector<HTMLTextAreaElement>(".ss-studio-text-node-editor");
 
     expect(editorEl).not.toBeNull();
     editorEl?.dispatchEvent(
@@ -232,16 +312,16 @@ describe("renderStudioGraphNodeCard", () => {
   });
 
   it("opens label edit mode on double click", () => {
-    const { graphInteraction, node, nodeEl, onRequestLabelEdit } = renderNodeCardHarness({
-      kind: "studio.label",
+    const { graphInteraction, node, nodeEl, onRequestTextNodeEdit } = renderNodeCardHarness({
+      kind: "studio.text",
       config: { value: "Double click me" },
     });
-    const displayEl = nodeEl.querySelector<HTMLElement>(".ss-studio-label-display");
+    const displayEl = nodeEl.querySelector<HTMLElement>(".ss-studio-text-node-display");
 
     displayEl?.dispatchEvent(new MouseEvent("dblclick", { bubbles: true, cancelable: true }));
 
     expect(graphInteraction.ensureSingleSelection).toHaveBeenCalledWith(node.id);
-    expect(onRequestLabelEdit).toHaveBeenCalledWith(node.id);
+    expect(onRequestTextNodeEdit).toHaveBeenCalledWith(node.id);
   });
 
   it("opens label edit on a repeated tap even when selection re-renders the card", () => {
@@ -249,10 +329,10 @@ describe("renderStudioGraphNodeCard", () => {
     try {
       nowSpy.mockReturnValueOnce(1000);
       const firstRender = renderNodeCardHarness({
-        kind: "studio.label",
+        kind: "studio.text",
         config: { value: "Tap twice" },
       });
-      const firstDisplayEl = firstRender.nodeEl.querySelector<HTMLElement>(".ss-studio-label-display");
+      const firstDisplayEl = firstRender.nodeEl.querySelector<HTMLElement>(".ss-studio-text-node-display");
       firstDisplayEl?.dispatchEvent(
         createPointerEvent("pointerdown", {
           pointerId: 31,
@@ -267,15 +347,15 @@ describe("renderStudioGraphNodeCard", () => {
           clientY: 140,
         })
       );
-      expect(firstRender.onRequestLabelEdit).not.toHaveBeenCalled();
+      expect(firstRender.onRequestTextNodeEdit).not.toHaveBeenCalled();
 
       document.body.innerHTML = "";
       nowSpy.mockReturnValueOnce(1200);
       const secondRender = renderNodeCardHarness({
-        kind: "studio.label",
+        kind: "studio.text",
         config: { value: "Tap twice" },
       });
-      const secondDisplayEl = secondRender.nodeEl.querySelector<HTMLElement>(".ss-studio-label-display");
+      const secondDisplayEl = secondRender.nodeEl.querySelector<HTMLElement>(".ss-studio-text-node-display");
       secondDisplayEl?.dispatchEvent(
         createPointerEvent("pointerdown", {
           pointerId: 32,
@@ -287,11 +367,132 @@ describe("renderStudioGraphNodeCard", () => {
       expect(secondRender.graphInteraction.ensureSingleSelection).toHaveBeenCalledWith(
         secondRender.node.id
       );
-      expect(secondRender.onRequestLabelEdit).toHaveBeenCalledWith(secondRender.node.id);
+      expect(secondRender.onRequestTextNodeEdit).toHaveBeenCalledWith(secondRender.node.id);
       expect(secondRender.graphInteraction.startNodeDrag).not.toHaveBeenCalled();
     } finally {
       nowSpy.mockRestore();
     }
+  });
+
+  it("labels the text-card toolbar and resize frame with text wording", () => {
+    const { nodeEl } = renderNodeCardHarness({
+      kind: "studio.text",
+      config: { value: "Annotated" },
+    });
+
+    const buttons = Array.from(nodeEl.querySelectorAll<HTMLButtonElement>("button"));
+    const ariaLabels = buttons.map((button) => button.getAttribute("aria-label"));
+    expect(ariaLabels).toEqual(expect.arrayContaining(["Delete text"]));
+    // Font size is drag-scaled (edges/corners) — the A-/A+ buttons are retired.
+    expect(ariaLabels).not.toContain("Decrease text size");
+    expect(ariaLabels).not.toContain("Increase text size");
+    for (const ariaLabel of ariaLabels) {
+      expect(ariaLabel?.toLowerCase()).not.toContain("label");
+    }
+
+    const zoneEls = Array.from(
+      nodeEl.querySelectorAll<HTMLElement>(".ss-studio-node-resize-zone")
+    );
+    expect(zoneEls).toHaveLength(8);
+    for (const zoneEl of zoneEls) {
+      expect(zoneEl.getAttribute("aria-label")).toBe("Resize text");
+    }
+  });
+
+  it("renders text cards with intrinsic height — no explicit height style", () => {
+    const { nodeEl } = renderNodeCardHarness({
+      kind: "studio.text",
+      config: { value: "line one\nline two" },
+    });
+
+    expect(nodeEl.style.width).not.toBe("");
+    expect(nodeEl.style.height).toBe("");
+    expect(nodeEl.style.minHeight).toBe("");
+  });
+
+  it("auto-grows the editing textarea to its content height on input", () => {
+    const { nodeEl } = renderNodeCardHarness({
+      kind: "studio.text",
+      config: { value: "start" },
+      isTextNodeEditing: true,
+    });
+    const editorEl = nodeEl.querySelector<HTMLTextAreaElement>(".ss-studio-text-node-editor");
+    expect(editorEl).not.toBeNull();
+    if (!editorEl) {
+      return;
+    }
+
+    Object.defineProperty(editorEl, "scrollHeight", { value: 96, configurable: true });
+    editorEl.value = "start\nmore\nlines";
+    editorEl.dispatchEvent(new Event("input", { bubbles: true }));
+
+    expect(editorEl.style.height).toBe("96px");
+    // The card itself never carries a fixed height.
+    expect(nodeEl.style.height).toBe("");
+  });
+
+  it("shows a faint Text placeholder when the text card is empty", () => {
+    const { nodeEl } = renderNodeCardHarness({
+      kind: "studio.text",
+      config: { value: "" },
+    });
+    const displayEl = nodeEl.querySelector<HTMLElement>(".ss-studio-text-node-display");
+
+    expect(displayEl?.textContent).toBe("Text");
+    expect(displayEl?.classList.contains("is-placeholder")).toBe(true);
+  });
+
+  it("does not mark non-empty text cards as placeholders", () => {
+    const { nodeEl } = renderNodeCardHarness({
+      kind: "studio.text",
+      config: { value: "Real content" },
+    });
+    const displayEl = nodeEl.querySelector<HTMLElement>(".ss-studio-text-node-display");
+
+    expect(displayEl?.textContent).toBe("Real content");
+    expect(displayEl?.classList.contains("is-placeholder")).toBe(false);
+  });
+
+  it("gives the text-card editor a Text placeholder", () => {
+    const { nodeEl } = renderNodeCardHarness({
+      kind: "studio.text",
+      config: { value: "" },
+      isTextNodeEditing: true,
+    });
+    const editorEl = nodeEl.querySelector<HTMLTextAreaElement>(".ss-studio-text-node-editor");
+
+    expect(editorEl?.getAttribute("placeholder")).toBe("Text");
+  });
+
+  it("ends the text edit session through onStopTextNodeEdit when the editor blurs", () => {
+    const { node, nodeEl, onStopTextNodeEdit } = renderNodeCardHarness({
+      kind: "studio.text",
+      config: { value: "" },
+      isTextNodeEditing: true,
+    });
+    const editorEl = nodeEl.querySelector<HTMLTextAreaElement>(".ss-studio-text-node-editor");
+    expect(editorEl).not.toBeNull();
+
+    editorEl?.dispatchEvent(new FocusEvent("blur"));
+
+    expect(onStopTextNodeEdit).toHaveBeenCalledWith(node.id);
+  });
+
+  it("routes Escape through blur so it ends the text edit session", () => {
+    const { node, nodeEl, onStopTextNodeEdit } = renderNodeCardHarness({
+      kind: "studio.text",
+      config: { value: "draft" },
+      isTextNodeEditing: true,
+    });
+    const editorEl = nodeEl.querySelector<HTMLTextAreaElement>(".ss-studio-text-node-editor");
+    expect(editorEl).not.toBeNull();
+    editorEl?.focus();
+
+    editorEl?.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })
+    );
+
+    expect(onStopTextNodeEdit).toHaveBeenCalledWith(node.id);
   });
 
   it("keeps media-ingest image previews in contained mode", () => {
@@ -316,43 +517,129 @@ describe("renderStudioGraphNodeCard", () => {
     expect(imageEl?.getAttribute("src")).toBe("app://preview/source.png");
   });
 
-  it("renders quick actions for image media-ingest nodes", () => {
+  const IMAGE_MEDIA_HARNESS = {
+    kind: "studio.media_ingest",
+    config: { sourcePath: "Assets/source.png" },
+    nodeRunState: {
+      ...IDLE_NODE_RUN_STATE,
+      outputs: {
+        path: "Assets/source.png",
+        preview_path: "Assets/source.png",
+        source_preview_path: "Assets/source.png",
+      },
+    },
+    resolveAssetPreviewSrc: () => "app://preview/source.png",
+  } as const;
+
+  it("renders image media nodes as media-only cards with floating chrome", () => {
     const onOpenImageEditor = jest.fn();
     const onEditImageWithAi = jest.fn();
     const onCopyNodeImageToClipboard = jest.fn();
-    const nodeEl = renderNodeCard({
-      kind: "studio.media_ingest",
-      config: { sourcePath: "Assets/source.png" },
-      nodeRunState: {
-        ...IDLE_NODE_RUN_STATE,
-        outputs: {
-          path: "Assets/source.png",
-          preview_path: "Assets/source.png",
-          source_preview_path: "Assets/source.png",
-        },
-      },
+    const onRunNode = jest.fn();
+    const onRemoveNode = jest.fn();
+    const { node, nodeEl } = renderNodeCardHarness({
+      ...IMAGE_MEDIA_HARNESS,
       onOpenImageEditor,
       onEditImageWithAi,
       onCopyNodeImageToClipboard,
+      onRunNode,
+      onRemoveNode,
     });
 
-    const quickActions = nodeEl.querySelector<HTMLElement>(".ss-studio-node-collapsed-visibility");
-    const buttons = Array.from(nodeEl.querySelectorAll<HTMLButtonElement>(".ss-studio-node-collapsed-visibility-button"));
-    const aiEditButton = buttons.find((button) => button.textContent?.trim() === "Edit with AI");
-    const editButton = buttons.find((button) => button.textContent?.trim() === "Edit Image");
-    const copyButton = buttons.find((button) => button.textContent?.trim() === "Copy Image");
+    expect(nodeEl.dataset.chromeLayout).toBe("media");
+    // Legacy chrome stays off the image entirely — no header, no title bar.
+    expect(nodeEl.querySelector(".ss-studio-node-header")).toBeNull();
+    expect(nodeEl.querySelector(".ss-studio-media-node-title")).toBeNull();
+    expect(nodeEl.querySelector(".ss-studio-node-collapsed-visibility")).toBeNull();
+    expect(nodeEl.querySelector(".ss-studio-node-inline-config-field--sourcepath")).toBeNull();
+    expect(nodeEl.querySelector(".ss-studio-node-chrome-overlay")).toBeNull();
+    expect(nodeEl.querySelector(".ss-studio-node-chrome-overlay-top")).toBeNull();
 
-    expect(quickActions?.textContent).toContain("Quick Actions");
-    expect(aiEditButton).toBeDefined();
-    expect(editButton).toBeDefined();
-    expect(copyButton).toBeDefined();
+    const toolbar = nodeEl.querySelector<HTMLElement>(".ss-studio-media-action-bar");
+    expect(toolbar).not.toBeNull();
+    const buttonFor = (label: string): HTMLButtonElement | null =>
+      toolbar?.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`) ?? null;
 
-    aiEditButton?.click();
-    editButton?.click();
-    copyButton?.click();
+    buttonFor("Run node")?.click();
+    buttonFor("Edit with AI")?.click();
+    buttonFor("Edit image")?.click();
+    buttonFor("Copy image")?.click();
+    buttonFor("Delete node")?.click();
 
-    expect(onEditImageWithAi).toHaveBeenCalledTimes(1);
-    expect(onOpenImageEditor).toHaveBeenCalledTimes(1);
-    expect(onCopyNodeImageToClipboard).toHaveBeenCalledTimes(1);
+    expect(onRunNode).toHaveBeenCalledWith(node.id);
+    expect(onEditImageWithAi).toHaveBeenCalledWith(node);
+    expect(onOpenImageEditor).toHaveBeenCalledWith(node);
+    expect(onCopyNodeImageToClipboard).toHaveBeenCalledWith(node);
+    expect(onRemoveNode).toHaveBeenCalledWith(node.id);
+    expect(buttonFor("Replace media")).not.toBeNull();
+  });
+
+  it("keeps toolbar presses off the drag gesture but drags from the image", () => {
+    const { graphInteraction, node, nodeEl } = renderNodeCardHarness(IMAGE_MEDIA_HARNESS);
+    const toolbar = nodeEl.querySelector<HTMLElement>(".ss-studio-media-action-bar");
+    const runButton = nodeEl.querySelector<HTMLElement>('button[aria-label="Run node"]');
+    expect(toolbar).not.toBeNull();
+
+    for (const el of [toolbar, runButton]) {
+      el?.dispatchEvent(
+        createPointerEvent("pointerdown", { pointerId: 41, clientX: 10, clientY: 10 })
+      );
+    }
+    expect(graphInteraction.startNodeDrag).not.toHaveBeenCalled();
+
+    const previewEl = nodeEl.querySelector<HTMLElement>(".ss-studio-node-media-preview");
+    previewEl?.dispatchEvent(
+      createPointerEvent("pointerdown", { pointerId: 42, clientX: 10, clientY: 10 })
+    );
+    expect(graphInteraction.startNodeDrag).toHaveBeenCalledWith(
+      node.id,
+      expect.any(MouseEvent),
+      nodeEl
+    );
+    window.dispatchEvent(
+      createPointerEvent("pointerup", { pointerId: 42, clientX: 10, clientY: 10 })
+    );
+  });
+
+  it("keeps the source picker on the card while a media node has no preview", () => {
+    const nodeEl = renderNodeCard({
+      kind: "studio.media_ingest",
+      config: { sourcePath: "" },
+    });
+
+    expect(nodeEl.dataset.chromeLayout).toBeUndefined();
+    expect(nodeEl.querySelector(".ss-studio-media-action-bar")).toBeNull();
+    const sourceField = nodeEl.querySelector<HTMLElement>(
+      ".ss-studio-node-inline-config-field--sourcepath"
+    );
+    expect(sourceField).not.toBeNull();
+    // The picker must not hide inside the hover-reveal bottom overlay.
+    expect(sourceField?.closest(".ss-studio-node-chrome-overlay")).toBeNull();
+  });
+
+  it("omits image-only actions from the toolbar for video previews", () => {
+    const nodeEl = renderNodeCard({
+      kind: "studio.media_ingest",
+      config: { sourcePath: "Assets/source.mp4" },
+      nodeRunState: {
+        ...IDLE_NODE_RUN_STATE,
+        outputs: {
+          path: "Assets/source.mp4",
+          preview_path: "Assets/source.mp4",
+          source_preview_path: "Assets/source.mp4",
+        },
+      },
+      resolveAssetPreviewSrc: () => "app://preview/source.mp4",
+      onOpenImageEditor: jest.fn(),
+      onEditImageWithAi: jest.fn(),
+      onCopyNodeImageToClipboard: jest.fn(),
+    });
+
+    const toolbar = nodeEl.querySelector<HTMLElement>(".ss-studio-media-action-bar");
+    expect(toolbar).not.toBeNull();
+    const labels = Array.from(
+      toolbar?.querySelectorAll<HTMLButtonElement>("button") ?? []
+    ).map((button) => button.getAttribute("aria-label"));
+    expect(labels).toEqual(["Run node", "Replace media", "Delete node"]);
   });
 });

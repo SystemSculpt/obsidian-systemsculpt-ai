@@ -56,13 +56,13 @@ function click(element: HTMLElement): void {
 describe("StudioGraphNodeInlineEditors text display mode", () => {
   it("defaults to rendered mode when display mode is missing", () => {
     const nodeEl = document.createElement("div");
-    const node = nodeFixture("studio.text", { value: "# Hello" });
+    const node = nodeFixture("studio.text_output", { value: "# Hello" });
 
     const rendered = renderStudioNodeInlineEditor({
       nodeEl,
       node,
       nodeRunState: IDLE_NODE_RUN_STATE,
-      definition: definitionFixture("studio.text"),
+      definition: definitionFixture("studio.text_output"),
       interactionLocked: false,
       onNodeConfigMutated: jest.fn(),
     });
@@ -158,13 +158,13 @@ describe("StudioGraphNodeInlineEditors text display mode", () => {
 
   it("keeps rendered surface height aligned with the raw editor when toggled", () => {
     const nodeEl = document.createElement("div");
-    const node = nodeFixture("studio.text", { value: "# Hello" });
+    const node = nodeFixture("studio.text_output", { value: "# Hello" });
 
     renderStudioNodeInlineEditor({
       nodeEl,
       node,
       nodeRunState: IDLE_NODE_RUN_STATE,
-      definition: definitionFixture("studio.text"),
+      definition: definitionFixture("studio.text_output"),
       interactionLocked: false,
       onNodeConfigMutated: jest.fn(),
       renderMarkdownPreview: jest.fn().mockResolvedValue(undefined),
@@ -205,7 +205,7 @@ describe("StudioGraphNodeInlineEditors text display mode", () => {
 
   it("lets rendered surface wheel events bubble to the graph container", () => {
     const nodeEl = document.createElement("div");
-    const node = nodeFixture("studio.text", {
+    const node = nodeFixture("studio.text_output", {
       value: "# Hello",
       textDisplayMode: "rendered",
     });
@@ -214,7 +214,7 @@ describe("StudioGraphNodeInlineEditors text display mode", () => {
       nodeEl,
       node,
       nodeRunState: IDLE_NODE_RUN_STATE,
-      definition: definitionFixture("studio.text"),
+      definition: definitionFixture("studio.text_output"),
       interactionLocked: false,
       onNodeConfigMutated: jest.fn(),
       renderMarkdownPreview: jest.fn().mockResolvedValue(undefined),
@@ -263,7 +263,7 @@ describe("StudioGraphNodeInlineEditors text display mode", () => {
 
   it("treats invalid display mode values as rendered", () => {
     const nodeEl = document.createElement("div");
-    const node = nodeFixture("studio.text", {
+    const node = nodeFixture("studio.text_output", {
       value: "content",
       textDisplayMode: "unknown-mode",
     });
@@ -272,7 +272,7 @@ describe("StudioGraphNodeInlineEditors text display mode", () => {
       nodeEl,
       node,
       nodeRunState: IDLE_NODE_RUN_STATE,
-      definition: definitionFixture("studio.text"),
+      definition: definitionFixture("studio.text_output"),
       interactionLocked: false,
       onNodeConfigMutated: jest.fn(),
     });

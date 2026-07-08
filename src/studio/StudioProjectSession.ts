@@ -85,6 +85,7 @@ export class StudioProjectSession {
   private dirtyRevision = 0;
   private persistedRevision = 0;
   private pendingExternalSync = false;
+  private disposed = false;
   private lastAcceptedSignature: string | null = null;
   private lastRejectedSignature: string | null = null;
   private expectedProjectWriteSignatures = new Set<string>();
@@ -104,6 +105,17 @@ export class StudioProjectSession {
 
   getProjectPath(): string {
     return this.projectPath;
+  }
+
+  isDisposed(): boolean {
+    return this.disposed;
+  }
+
+  private warnDisposedWrite(operation: string): void {
+    console.warn("[SystemSculpt Studio] Ignored write to disposed project session", {
+      projectPath: this.projectPath,
+      operation,
+    });
   }
 
   getProject(): StudioProjectV1 {
@@ -142,6 +154,10 @@ export class StudioProjectSession {
     mutator: StudioProjectSessionMutator,
     options?: StudioProjectSessionMutateOptions
   ): boolean {
+    if (this.disposed) {
+      this.warnDisposedWrite(`mutate:${reason}`);
+      return false;
+    }
     const changed = mutator(this.project) !== false;
     if (!changed) {
       return false;
@@ -158,6 +174,10 @@ export class StudioProjectSession {
     mutator: StudioProjectSessionAsyncMutator,
     options?: StudioProjectSessionMutateOptions
   ): Promise<boolean> {
+    if (this.disposed) {
+      this.warnDisposedWrite(`mutateAsync:${reason}`);
+      return false;
+    }
     const changed = (await mutator(this.project)) !== false;
     if (!changed) {
       return false;
@@ -183,6 +203,10 @@ export class StudioProjectSession {
   }
 
   replaceProject(project: StudioProjectV1, options?: StudioProjectSessionReplaceProjectOptions): void {
+    if (this.disposed) {
+      this.warnDisposedWrite("replaceProject");
+      return;
+    }
     this.project = cloneStudioProjectSnapshot(project);
     this.projectPath = String(options?.projectPath || this.projectPath || "").trim();
     this.clearSaveTimer();
@@ -296,6 +320,10 @@ export class StudioProjectSession {
     mode?: StudioProjectSessionAutosaveMode;
     reason?: StudioProjectSessionMutationReason;
   }): void {
+    if (this.disposed) {
+      this.warnDisposedWrite(`schedulePersist:${options?.reason || "unknown"}`);
+      return;
+    }
     const mode = options?.mode || "discrete";
     this.dirtyRevision += 1;
 
@@ -317,6 +345,9 @@ export class StudioProjectSession {
   }
 
   async flushPendingSaveWork(options?: { force?: boolean }): Promise<void> {
+    if (this.disposed) {
+      return;
+    }
     if (options?.force !== true && !this.hasPendingLocalSaveWork()) {
       return;
     }
@@ -335,7 +366,11 @@ export class StudioProjectSession {
   }
 
   async close(): Promise<void> {
+    if (this.disposed) {
+      return;
+    }
     await this.flushPendingSaveWork({ force: true });
+    this.disposed = true;
     this.clearSaveTimer();
     this.listeners.clear();
   }
@@ -379,7 +414,7 @@ export class StudioProjectSession {
   }
 
   private async flushSave(): Promise<void> {
-    if (!this.projectPath) {
+    if (this.disposed || !this.projectPath) {
       return;
     }
 

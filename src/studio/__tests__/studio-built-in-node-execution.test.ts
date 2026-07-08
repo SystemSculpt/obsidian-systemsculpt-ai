@@ -113,13 +113,13 @@ describe("Studio built-in text/image node execution", () => {
   registerBuiltInStudioNodes(registry);
 
   it("text node emits configured text for downstream nodes", async () => {
-    const definition = registry.get("studio.text", "1.0.0");
+    const definition = registry.get("studio.text_output", "1.0.0");
     expect(definition).toBeDefined();
 
     const result = await definition!.execute(
       createContext({
         nodeId: "note-node",
-        kind: "studio.text",
+        kind: "studio.text_output",
         config: {
           value: "Edited note text",
         },
@@ -133,13 +133,13 @@ describe("Studio built-in text/image node execution", () => {
   });
 
   it("text node falls back to upstream text when config is empty", async () => {
-    const definition = registry.get("studio.text", "1.0.0");
+    const definition = registry.get("studio.text_output", "1.0.0");
     expect(definition).toBeDefined();
 
     const result = await definition!.execute(
       createContext({
         nodeId: "note-node",
-        kind: "studio.text",
+        kind: "studio.text_output",
         config: {
           value: "",
         },
@@ -704,6 +704,80 @@ describe("Studio built-in text/image node execution", () => {
     expect(imageRequest.imageSize).toBe("4K");
     expect(imageRequest.seed).toBe(42);
     expect(imageRequest.count).toBe(3);
+  });
+
+  it("falls back to the node's own Prompt box when no prompt input is wired", async () => {
+    const definition = registry.get("studio.image_generation", "1.0.0");
+    expect(definition).toBeDefined();
+    const generateImageMock = jest.fn(async () => ({
+      images: [],
+      modelId: "openai/gpt-5-image-mini",
+    }));
+
+    await definition!.execute(
+      createContext({
+        nodeId: "image-node",
+        kind: "studio.image_generation",
+        config: {
+          prompt: "A watercolor fox in morning fog",
+        },
+        inputs: {},
+        generateImageMock,
+      })
+    );
+
+    const imageRequest = generateImageMock.mock.calls[0]?.[0];
+    expect(imageRequest.prompt).toBe("A watercolor fox in morning fog");
+  });
+
+  it("prefers a wired prompt input over the node's own Prompt box", async () => {
+    const definition = registry.get("studio.image_generation", "1.0.0");
+    expect(definition).toBeDefined();
+    const generateImageMock = jest.fn(async () => ({
+      images: [],
+      modelId: "openai/gpt-5-image-mini",
+    }));
+
+    await definition!.execute(
+      createContext({
+        nodeId: "image-node",
+        kind: "studio.image_generation",
+        config: {
+          prompt: "Config prompt that should lose",
+        },
+        inputs: {
+          prompt: "Wired prompt that should win",
+        },
+        generateImageMock,
+      })
+    );
+
+    const imageRequest = generateImageMock.mock.calls[0]?.[0];
+    expect(imageRequest.prompt).toBe("Wired prompt that should win");
+  });
+
+  it("fails loudly when neither a wired prompt nor a Prompt box value exists", async () => {
+    const definition = registry.get("studio.image_generation", "1.0.0");
+    expect(definition).toBeDefined();
+    const generateImageMock = jest.fn(async () => ({
+      images: [],
+      modelId: "openai/gpt-5-image-mini",
+    }));
+
+    await expect(
+      definition!.execute(
+        createContext({
+          nodeId: "image-node",
+          kind: "studio.image_generation",
+          config: {
+            prompt: "   ",
+          },
+          inputs: {},
+          generateImageMock,
+        })
+      )
+    ).rejects.toThrow("requires a prompt");
+    expect(generateImageMock).not.toHaveBeenCalled();
   });
 
   it("treats a blank seed as random and clamps count to the model maximum", async () => {

@@ -31,6 +31,16 @@ export type StudioNodePosition = {
   y: number;
 };
 
+export type StudioNodeSize = {
+  width: number;
+  /**
+   * Explicit rendered height. Optional: kinds with intrinsic height (text —
+   * content reflow) or aspect-driven height (image/video media cards) persist
+   * width only and let the DOM derive the height.
+   */
+  height?: number;
+};
+
 export type StudioPortDefinition = {
   id: string;
   type: StudioPortDataType;
@@ -118,6 +128,12 @@ export type StudioNodeInstance = {
   version: string;
   title: string;
   position: StudioNodePosition;
+  /**
+   * Rendered card size on the canvas. Layout geometry is canvas data (like
+   * position), not node config; absent means "use the kind's default size"
+   * from src/studio/StudioNodeGeometry.ts.
+   */
+  size?: StudioNodeSize;
   config: Record<string, StudioJsonValue>;
   continueOnError?: boolean;
   disabled?: boolean;

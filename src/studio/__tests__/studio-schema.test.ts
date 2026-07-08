@@ -25,6 +25,40 @@ describe("Studio schema", () => {
     expect(parsed.graph.groups || []).toEqual([]);
   });
 
+  it("round-trips first-class node size and drops invalid or partial size data", () => {
+    const project = createEmptyStudioProject({
+      name: "Sized",
+      policyPath: "SystemSculpt/Studio/Sized.systemsculpt-assets/policy/grants.json",
+      minPluginVersion: "4.13.0",
+      maxRuns: 100,
+      maxArtifactsMb: 1024,
+    });
+    project.graph.nodes.push({
+      id: "node_1",
+      kind: "studio.text",
+      version: "1.0.0",
+      title: "Text",
+      position: { x: 10, y: 20 },
+      size: { width: 320, height: 240 },
+      config: { value: "hello" },
+      continueOnError: false,
+      disabled: false,
+    });
+
+    const parsed = parseStudioProject(serializeStudioProject(project));
+    expect(parsed.graph.nodes[0].size).toEqual({ width: 320, height: 240 });
+
+    const corrupted = JSON.parse(serializeStudioProject(project));
+    corrupted.graph.nodes[0].size = { width: "abc", height: 240 };
+    expect(parseStudioProject(JSON.stringify(corrupted)).graph.nodes[0].size).toBeUndefined();
+
+    corrupted.graph.nodes[0].size = { width: 320 };
+    expect(parseStudioProject(JSON.stringify(corrupted)).graph.nodes[0].size).toBeUndefined();
+
+    delete corrupted.graph.nodes[0].size;
+    expect(parseStudioProject(JSON.stringify(corrupted)).graph.nodes[0].size).toBeUndefined();
+  });
+
   it("migrates legacy canvas-like payloads into v1", () => {
     const legacy = {
       name: "Legacy",

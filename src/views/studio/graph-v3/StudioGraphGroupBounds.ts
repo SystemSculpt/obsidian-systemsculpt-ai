@@ -1,8 +1,11 @@
 import type { StudioNodeGroup, StudioProjectV1 } from "../../../studio/types";
+import {
+  STUDIO_GRAPH_DEFAULT_NODE_HEIGHT,
+  STUDIO_GRAPH_DEFAULT_NODE_WIDTH,
+  STUDIO_GRAPH_MEASURED_NODE_MIN_HEIGHT,
+  STUDIO_GRAPH_MEASURED_NODE_MIN_WIDTH,
+} from "../../../studio/StudioNodeGeometry";
 
-export const STUDIO_GRAPH_GROUP_NODE_WIDTH = 280;
-export const STUDIO_GRAPH_GROUP_MIN_NODE_HEIGHT = 80;
-export const STUDIO_GRAPH_GROUP_FALLBACK_NODE_HEIGHT = 164;
 export const STUDIO_GRAPH_GROUP_PADDING_X = 20;
 export const STUDIO_GRAPH_GROUP_PADDING_TOP = 18;
 export const STUDIO_GRAPH_GROUP_PADDING_BOTTOM = 32;
@@ -38,11 +41,11 @@ export function computeStudioGraphGroupBounds(
     const resolvedHeight = options?.getNodeHeight?.(nodeId);
     const resolvedWidth = options?.getNodeWidth?.(nodeId);
     const nodeWidth = Number.isFinite(resolvedWidth)
-      ? Math.max(120, Number(resolvedWidth))
-      : STUDIO_GRAPH_GROUP_NODE_WIDTH;
+      ? Math.max(STUDIO_GRAPH_MEASURED_NODE_MIN_WIDTH, Number(resolvedWidth))
+      : STUDIO_GRAPH_DEFAULT_NODE_WIDTH;
     const nodeHeight = Number.isFinite(resolvedHeight)
-      ? Math.max(STUDIO_GRAPH_GROUP_MIN_NODE_HEIGHT, Number(resolvedHeight))
-      : STUDIO_GRAPH_GROUP_FALLBACK_NODE_HEIGHT;
+      ? Math.max(STUDIO_GRAPH_MEASURED_NODE_MIN_HEIGHT, Number(resolvedHeight))
+      : STUDIO_GRAPH_DEFAULT_NODE_HEIGHT;
 
     minX = Math.min(minX, node.position.x);
     minY = Math.min(minY, node.position.y);

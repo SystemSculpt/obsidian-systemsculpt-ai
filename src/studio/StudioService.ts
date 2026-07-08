@@ -36,56 +36,6 @@ import {
 } from "./paths";
 import { parseStudioProject } from "./schema";
 
-function starterGraph(project: StudioProjectV1): StudioProjectV1 {
-  if (project.graph.nodes.length > 0) {
-    return project;
-  }
-
-  const inputId = randomId("node");
-  const textId = randomId("node");
-
-  return {
-    ...project,
-    graph: {
-      nodes: [
-        {
-          id: inputId,
-          kind: "studio.input",
-          version: "1.0.0",
-          title: "Input",
-          position: { x: 80, y: 120 },
-          config: { value: "Describe a launch-ready plan for this project." },
-          continueOnError: false,
-          disabled: false,
-        },
-        {
-          id: textId,
-          kind: "studio.text_generation",
-          version: "1.0.0",
-          title: "Text Generation",
-          position: { x: 420, y: 120 },
-          config: {
-            modelId: project.engine.apiMode === "systemsculpt_only" ? "openai/gpt-5-mini" : "",
-          },
-          continueOnError: false,
-          disabled: false,
-        },
-      ],
-      edges: [
-        {
-          id: randomId("edge"),
-          fromNodeId: inputId,
-          fromPortId: "text",
-          toNodeId: textId,
-          toPortId: "prompt",
-        },
-      ],
-      entryNodeIds: [inputId],
-      groups: project.graph.groups || [],
-    },
-  };
-}
-
 export class StudioService {
   private readonly registry = new StudioNodeRegistry();
   private readonly compiler = new StudioGraphCompiler();
@@ -94,8 +44,6 @@ export class StudioService {
   private readonly apiAdapter: StudioApiExecutionAdapter;
   private readonly runtime: StudioRuntime;
   private readonly projectSessionManager = new StudioProjectSessionManager();
-  private currentProjectPath: string | null = null;
-  private currentProjectSession: StudioProjectSession | null = null;
 
   constructor(private readonly plugin: SystemSculptPlugin) {
     this.projectStore = new StudioProjectStore(plugin.app);
@@ -114,65 +62,12 @@ export class StudioService {
     registerBuiltInStudioNodes(this.registry);
   }
 
-  getCurrentProjectPath(): string | null {
-    return this.currentProjectPath;
-  }
-
   async listProjects(): Promise<string[]> {
     return this.projectStore.listProjects();
   }
 
-  getCurrentProjectSession(): StudioProjectSession | null {
-    return this.currentProjectSession;
-  }
-
-  async getCurrentProject(): Promise<StudioProjectV1 | null> {
-    if (this.currentProjectSession) {
-      return this.currentProjectSession.getProject();
-    }
-    if (!this.currentProjectPath) return null;
-    return this.projectStore.loadProject(this.currentProjectPath);
-  }
-
-  getCurrentProjectSnapshot(): StudioProjectV1 | null {
-    return this.currentProjectSession?.getProjectSnapshot() || null;
-  }
-
   getProjectSession(projectPath: string): StudioProjectSession | null {
     return this.projectSessionManager.getSession(projectPath);
-  }
-
-  mutateCurrentProject(
-    reason: StudioProjectSessionMutationReason,
-    mutator: (project: StudioProjectV1) => boolean | void,
-    options?: StudioProjectSessionMutateOptions
-  ): boolean {
-    if (!this.currentProjectSession) {
-      return false;
-    }
-    return this.currentProjectSession.mutate(reason, mutator, options);
-  }
-
-  async mutateCurrentProjectAsync(
-    reason: StudioProjectSessionMutationReason,
-    mutator: (project: StudioProjectV1) => Promise<boolean | void>,
-    options?: StudioProjectSessionMutateOptions
-  ): Promise<boolean> {
-    if (!this.currentProjectSession) {
-      return false;
-    }
-    return await this.currentProjectSession.mutateAsync(reason, mutator, options);
-  }
-
-  async mutateCurrentProjectAndFlush(
-    reason: StudioProjectSessionMutationReason,
-    mutator: (project: StudioProjectV1) => boolean | void,
-    options?: StudioProjectSessionMutateOptions
-  ): Promise<boolean> {
-    if (!this.currentProjectSession) {
-      return false;
-    }
-    return await this.currentProjectSession.mutateAndFlush(reason, mutator, options);
   }
 
   mutateProject(
@@ -244,38 +139,16 @@ export class StudioService {
     };
   }
 
-  async openProjectSession(
+  /**
+   * Retain a project session for a specific owner (usually a Studio view).
+   * Every retain must be paired with exactly one releaseProjectSession call;
+   * the session-manager refcount decides when the session actually closes.
+   */
+  async retainProjectSession(
     path: string,
     options?: { forceReload?: boolean }
   ): Promise<StudioProjectSession> {
     const normalized = normalizeStudioProjectPath(path);
-    if (
-      this.currentProjectSession &&
-      this.currentProjectSession.getProjectPath() === normalized &&
-      options?.forceReload !== true
-    ) {
-      this.currentProjectPath = normalized;
-      return this.currentProjectSession;
-    }
-
-    if (
-      this.currentProjectSession &&
-      this.currentProjectSession.getProjectPath() === normalized &&
-      options?.forceReload === true
-    ) {
-      const loaded = await this.loadProjectForSession(normalized);
-      this.currentProjectSession.replaceProjectSnapshot(loaded.project, {
-        projectPath: normalized,
-        acceptedRawText: loaded.rawText,
-      });
-      this.currentProjectPath = normalized;
-      return this.currentProjectSession;
-    }
-
-    const previousProjectPath = this.currentProjectPath;
-    if (previousProjectPath && previousProjectPath !== normalized) {
-      await this.projectSessionManager.releaseSession(previousProjectPath);
-    }
 
     const existingSession = this.projectSessionManager.getSession(normalized);
     if (existingSession && options?.forceReload === true) {
@@ -286,20 +159,20 @@ export class StudioService {
       });
     }
 
-    const session = await this.projectSessionManager.retainSession(normalized, async (sessionPath) => {
+    return await this.projectSessionManager.retainSession(normalized, async (sessionPath) => {
       const loaded = await this.loadProjectForSession(sessionPath);
       return await this.buildProjectSession(sessionPath, loaded.project, {
         acceptedRawText: loaded.rawText,
       });
     });
-    this.currentProjectSession = session;
-    this.currentProjectPath = normalized;
-    return session;
   }
 
-  async openProject(path: string): Promise<StudioProjectV1> {
-    const session = await this.openProjectSession(path);
-    return session.getProject();
+  async releaseProjectSession(path: string): Promise<void> {
+    const rawPath = String(path || "").trim();
+    if (!rawPath) {
+      return;
+    }
+    await this.projectSessionManager.releaseSession(normalizeStudioProjectPath(rawPath));
   }
 
   private getProjectsFolder(): string {
@@ -389,7 +262,15 @@ export class StudioService {
     }
   }
 
-  async createProject(options?: { name?: string; projectPath?: string }): Promise<StudioProjectV1> {
+  /**
+   * Create a new Studio project file on disk without retaining a session.
+   * Session ownership belongs to whichever view subsequently opens the path
+   * via retainProjectSession.
+   */
+  async createProjectFile(options?: { name?: string; projectPath?: string }): Promise<{
+    path: string;
+    project: StudioProjectV1;
+  }> {
     const name = sanitizeStudioProjectName(String(options?.name || "New Studio Project"));
     const filePath = options?.projectPath
       ? normalizeStudioProjectPath(options.projectPath)
@@ -403,24 +284,16 @@ export class StudioService {
       maxArtifactsMb: Math.max(1, Math.floor(this.plugin.settings.studioRunRetentionMaxArtifactsMb || 1024)),
     });
 
-    const seeded = starterGraph(created.project);
-    await this.projectStore.saveProject(created.path, seeded);
-    await this.ensureDefaultPolicy(seeded);
+    await this.ensureDefaultPolicy(created.project);
+    return {
+      path: created.path,
+      project: created.project,
+    };
+  }
 
-    const previousProjectPath = this.currentProjectPath;
-    if (previousProjectPath && previousProjectPath !== created.path) {
-      await this.projectSessionManager.releaseSession(previousProjectPath);
-    }
-
-    const acceptedRawText = await this.projectStore.readProjectRawText(created.path);
-    const session = await this.projectSessionManager.retainSession(created.path, async (sessionPath) =>
-      await this.buildProjectSession(sessionPath, seeded, {
-        acceptedRawText,
-      })
-    );
-    this.currentProjectSession = session;
-    this.currentProjectPath = created.path;
-    return session.getProject();
+  async createProject(options?: { name?: string; projectPath?: string }): Promise<StudioProjectV1> {
+    const created = await this.createProjectFile(options);
+    return created.project;
   }
 
   async renameProject(projectPath: string, nextName: string): Promise<{
@@ -435,14 +308,10 @@ export class StudioService {
     }
 
     const session = this.projectSessionManager.getSession(normalizedProjectPath);
-    const projectSnapshot = session?.getProjectSnapshot()
-      || (this.currentProjectPath === normalizedProjectPath ? this.currentProjectSession?.getProjectSnapshot() : null)
-      || undefined;
+    const projectSnapshot = session?.getProjectSnapshot() || undefined;
 
     if (session) {
       await session.flushPendingSaveWork({ force: true });
-    } else if (this.currentProjectSession?.getProjectPath() === normalizedProjectPath) {
-      await this.currentProjectSession.flushPendingSaveWork({ force: true });
     }
 
     const renamed = await this.projectStore.renameProject(normalizedProjectPath, safeName, {
@@ -456,12 +325,6 @@ export class StudioService {
         acceptedRawText: nextRawText,
       });
       this.projectSessionManager.moveSession(renamed.oldPath, renamed.newPath);
-      if (this.currentProjectSession === session || this.currentProjectPath === renamed.oldPath) {
-        this.currentProjectSession = session;
-        this.currentProjectPath = renamed.newPath;
-      }
-    } else if (this.currentProjectPath === renamed.oldPath) {
-      this.currentProjectPath = renamed.newPath;
     }
 
     return renamed;
@@ -479,9 +342,6 @@ export class StudioService {
       projectPath: normalizedProjectPath,
       acceptedRawText: rawText,
     });
-    if (this.currentProjectSession?.getProjectPath() === normalizedProjectPath) {
-      this.currentProjectSession = session;
-    }
   }
 
   lintProjectText(rawText: string): StudioProjectLintResult {
@@ -501,58 +361,70 @@ export class StudioService {
     }
   }
 
-  async runCurrentProject(options?: { onEvent?: StudioRunEventHandler }): Promise<StudioRunSummary> {
-    if (!this.currentProjectPath) {
-      throw new Error("No Studio project is currently open.");
+  private requireProjectPath(projectPath: string): string {
+    const rawPath = String(projectPath || "").trim();
+    if (!rawPath) {
+      throw new Error("A valid Studio project path is required.");
     }
-    await this.currentProjectSession?.flushPendingSaveWork({ force: true });
-    const projectSnapshot = this.currentProjectSession?.getProjectSnapshot();
-    if (!projectSnapshot) {
-      return this.runtime.runProject(this.currentProjectPath, {
+    return normalizeStudioProjectPath(rawPath);
+  }
+
+  async runProject(
+    projectPath: string,
+    options?: { onEvent?: StudioRunEventHandler }
+  ): Promise<StudioRunSummary> {
+    const normalized = this.requireProjectPath(projectPath);
+    const session = this.projectSessionManager.getSession(normalized);
+    if (!session) {
+      return this.runtime.runProject(normalized, {
         onEvent: options?.onEvent,
       });
     }
-    return this.runtime.runProjectSnapshot(this.currentProjectPath, projectSnapshot, {
+    await session.flushPendingSaveWork({ force: true });
+    const projectSnapshot = session.getProjectSnapshot();
+    return this.runtime.runProjectSnapshot(normalized, projectSnapshot, {
       onEvent: options?.onEvent,
     });
   }
 
-  async runCurrentProjectFromNode(
+  async runProjectFromNode(
+    projectPath: string,
     nodeId: string,
     options?: { onEvent?: StudioRunEventHandler }
   ): Promise<StudioRunSummary> {
-    if (!this.currentProjectPath) {
-      throw new Error("No Studio project is currently open.");
-    }
+    const normalized = this.requireProjectPath(projectPath);
 
     const normalizedNodeId = String(nodeId || "").trim();
     if (!normalizedNodeId) {
       throw new Error("A valid node ID is required to run a scoped Studio execution.");
     }
 
-    await this.currentProjectSession?.flushPendingSaveWork({ force: true });
+    const session = this.projectSessionManager.getSession(normalized);
+    if (session) {
+      await session.flushPendingSaveWork({ force: true });
+    }
     const projectSnapshot =
-      this.currentProjectSession?.getProjectSnapshot() ||
-      await this.projectStore.loadProject(this.currentProjectPath);
+      session?.getProjectSnapshot() || (await this.projectStore.loadProject(normalized));
     const exists = projectSnapshot.graph.nodes.some((node) => node.id === normalizedNodeId);
     if (!exists) {
       throw new Error(`Cannot run from node "${normalizedNodeId}" because it is not part of this project.`);
     }
 
-    return this.runtime.runProjectSnapshot(this.currentProjectPath, projectSnapshot, {
+    return this.runtime.runProjectSnapshot(normalized, projectSnapshot, {
       entryNodeIds: [normalizedNodeId],
       forceNodeIds: [normalizedNodeId],
       onEvent: options?.onEvent,
     });
   }
 
-  async getRecentRuns(): Promise<StudioRunSummary[]> {
-    if (!this.currentProjectPath) return [];
-    return this.runtime.getRecentRuns(this.currentProjectPath);
+  async getRecentRuns(projectPath: string): Promise<StudioRunSummary[]> {
+    const rawPath = String(projectPath || "").trim();
+    if (!rawPath) return [];
+    return this.runtime.getRecentRuns(normalizeStudioProjectPath(rawPath));
   }
 
-  async getProjectNodeCache(projectPath?: string): Promise<StudioNodeCacheSnapshotV1 | null> {
-    const rawPath = String(projectPath || this.currentProjectPath || "").trim();
+  async getProjectNodeCache(projectPath: string): Promise<StudioNodeCacheSnapshotV1 | null> {
+    const rawPath = String(projectPath || "").trim();
     if (!rawPath) {
       return null;
     }
@@ -569,15 +441,18 @@ export class StudioService {
     return this.assetStore.readArrayBuffer(asset);
   }
 
-  async addCapabilityGrant(grant: {
-    capability: StudioCapability;
-    scope: StudioCapabilityGrant["scope"];
-    grantedByUser?: boolean;
-  }): Promise<void> {
-    if (!this.currentProjectPath) {
-      throw new Error("No Studio project is currently open.");
+  async addCapabilityGrant(
+    projectPath: string,
+    grant: {
+      capability: StudioCapability;
+      scope: StudioCapabilityGrant["scope"];
+      grantedByUser?: boolean;
     }
-    const project = await this.projectStore.loadProject(this.currentProjectPath);
+  ): Promise<void> {
+    const normalized = this.requireProjectPath(projectPath);
+    const project =
+      this.projectSessionManager.getSession(normalized)?.getProjectSnapshot() ||
+      (await this.projectStore.loadProject(normalized));
     const policy = await this.projectStore.loadPolicy(project.permissionsRef.policyPath);
     policy.grants.push({
       id: randomId("grant"),
@@ -589,18 +464,7 @@ export class StudioService {
     await this.projectStore.savePolicy(project.permissionsRef.policyPath, policy);
   }
 
-  async closeCurrentProject(): Promise<void> {
-    const previousProjectPath = this.currentProjectPath;
-    this.currentProjectPath = null;
-    this.currentProjectSession = null;
-    if (previousProjectPath) {
-      await this.projectSessionManager.releaseSession(previousProjectPath);
-    }
-  }
-
   async dispose(): Promise<void> {
-    this.currentProjectSession = null;
-    this.currentProjectPath = null;
     await this.projectSessionManager.closeAll();
   }
 

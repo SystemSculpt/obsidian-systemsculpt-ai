@@ -1,28 +1,30 @@
 import type { StudioNodeInstance } from "../../../studio/types";
 import type { StudioGraphInteractionEngine } from "../StudioGraphInteractionEngine";
+import type {
+  StudioGraphNodeMutationOptions,
+  StudioGraphNodeResizePatch,
+} from "./StudioGraphNodeCardTypes";
 import {
-  resolveStudioLabelFontSize,
-  resolveStudioLabelHeight,
-  resolveStudioLabelWidth,
-  STUDIO_GRAPH_LABEL_DEFAULT_FONT_SIZE,
-  STUDIO_GRAPH_LABEL_MAX_FONT_SIZE,
-  STUDIO_GRAPH_LABEL_MIN_FONT_SIZE,
-} from "./StudioGraphNodeGeometry";
-import { mountStudioGraphNodeResizeHandle } from "./StudioGraphNodeResizeHandle";
+  resolveStudioTextNodeFontSize,
+  resolveStudioTextNodeHeight,
+  resolveStudioTextNodeWidth,
+  STUDIO_GRAPH_TEXT_NODE_DEFAULT_FONT_SIZE,
+} from "../../../studio/StudioNodeGeometry";
+import { mountStudioGraphNodeResizeFrame } from "./StudioGraphNodeResizeFrame";
 
-const STUDIO_LABEL_DOUBLE_TAP_DELAY_MS = 450;
-const STUDIO_LABEL_DOUBLE_TAP_SLOP_PX = 8;
-const STUDIO_LABEL_TAP_DRAG_SLOP_PX = 3;
+const STUDIO_TEXT_NODE_DOUBLE_TAP_DELAY_MS = 450;
+const STUDIO_TEXT_NODE_DOUBLE_TAP_SLOP_PX = 8;
+const STUDIO_TEXT_NODE_TAP_DRAG_SLOP_PX = 3;
 
-type LabelTapSnapshot = {
+type TextNodeTapSnapshot = {
   at: number;
   clientX: number;
   clientY: number;
 };
 
-const lastLabelTapByNodeId = new Map<string, LabelTapSnapshot>();
+const lastTextNodeTapByNodeId = new Map<string, TextNodeTapSnapshot>();
 
-type RenderLabelNodeCardOptions = {
+type RenderTextNodeCardOptions = {
   nodeEl: HTMLElement;
   node: StudioNodeInstance;
   busy: boolean;
@@ -35,19 +37,24 @@ type RenderLabelNodeCardOptions = {
     value: string | number,
     options?: { mode?: "discrete" | "continuous"; captureHistory?: boolean }
   ) => void;
-  onNodeSizeChange?: (
+  onNodeResize?: (
     nodeId: string,
-    size: { width: number; height: number },
-    options?: { mode?: "discrete" | "continuous"; captureHistory?: boolean }
+    patch: StudioGraphNodeResizePatch,
+    options?: StudioGraphNodeMutationOptions
   ) => void;
   onNodeGeometryMutated: (node: StudioNodeInstance) => void;
   isEditing: boolean;
   shouldAutoFocus: boolean;
-  onRequestLabelEdit: (nodeId: string) => void;
-  onStopLabelEdit: (nodeId: string) => void;
+  onRequestTextNodeEdit: (nodeId: string) => void;
+  onStopTextNodeEdit: (nodeId: string) => void;
 };
 
-function readLabelText(node: StudioNodeInstance): string {
+/**
+ * Canonical reader for a `studio.text` node's text value. Shared with the
+ * view's empty-on-edit-end cleanup so both surfaces agree on what counts
+ * as the node's content.
+ */
+export function readStudioTextNodeValue(node: StudioNodeInstance): string {
   const value = node.config.value;
   if (typeof value === "string") {
     return value;
@@ -58,35 +65,28 @@ function readLabelText(node: StudioNodeInstance): string {
   return "";
 }
 
-function clampLabelMetric(value: number, min: number, max: number): number {
-  if (!Number.isFinite(value)) {
-    return min;
-  }
-  return Math.max(min, Math.min(max, Math.round(value)));
-}
-
-function isRepeatLabelTap(
+function isRepeatTextNodeTap(
   nodeId: string,
   event: PointerEvent,
   now: number
 ): boolean {
-  const previousTap = lastLabelTapByNodeId.get(nodeId);
+  const previousTap = lastTextNodeTapByNodeId.get(nodeId);
   if (!previousTap) {
     return false;
   }
   const elapsedMs = now - previousTap.at;
-  if (elapsedMs < 0 || elapsedMs > STUDIO_LABEL_DOUBLE_TAP_DELAY_MS) {
+  if (elapsedMs < 0 || elapsedMs > STUDIO_TEXT_NODE_DOUBLE_TAP_DELAY_MS) {
     return false;
   }
   const travel = Math.hypot(
     event.clientX - previousTap.clientX,
     event.clientY - previousTap.clientY
   );
-  return travel <= STUDIO_LABEL_DOUBLE_TAP_SLOP_PX;
+  return travel <= STUDIO_TEXT_NODE_DOUBLE_TAP_SLOP_PX;
 }
 
-function trackPotentialLabelTap(nodeId: string, event: PointerEvent, now: number): void {
-  lastLabelTapByNodeId.set(nodeId, {
+function trackPotentialTextNodeTap(nodeId: string, event: PointerEvent, now: number): void {
+  lastTextNodeTapByNodeId.set(nodeId, {
     at: now,
     clientX: event.clientX,
     clientY: event.clientY,
@@ -103,10 +103,10 @@ function trackPotentialLabelTap(nodeId: string, event: PointerEvent, now: number
       moveEvent.clientX - startClientX,
       moveEvent.clientY - startClientY
     );
-    if (travel <= STUDIO_LABEL_TAP_DRAG_SLOP_PX) {
+    if (travel <= STUDIO_TEXT_NODE_TAP_DRAG_SLOP_PX) {
       return;
     }
-    lastLabelTapByNodeId.delete(nodeId);
+    lastTextNodeTapByNodeId.delete(nodeId);
     stopTracking();
   };
   const stopTracking = (finishEvent?: PointerEvent): void => {
@@ -123,7 +123,7 @@ function trackPotentialLabelTap(nodeId: string, event: PointerEvent, now: number
   window.addEventListener("pointercancel", stopTracking);
 }
 
-export function renderLabelNodeCard(options: RenderLabelNodeCardOptions): void {
+export function renderTextNodeCard(options: RenderTextNodeCardOptions): void {
   const {
     nodeEl,
     node,
@@ -132,117 +132,75 @@ export function renderLabelNodeCard(options: RenderLabelNodeCardOptions): void {
     onRemoveNode,
     onNodeConfigMutated,
     onNodeConfigValueChange,
-    onNodeSizeChange,
+    onNodeResize,
     onNodeGeometryMutated,
     isEditing,
     shouldAutoFocus,
-    onRequestLabelEdit,
-    onStopLabelEdit,
+    onRequestTextNodeEdit,
+    onStopTextNodeEdit,
   } = options;
 
-  nodeEl.addClass("ss-studio-label-card");
-  const applyDimensions = (): void => {
-    const width = resolveStudioLabelWidth(node);
-    const height = resolveStudioLabelHeight(node);
-    nodeEl.style.width = `${width}px`;
-    nodeEl.style.height = `${height}px`;
-  };
-  applyDimensions();
+  nodeEl.addClass("ss-studio-text-node-card");
+  // Width is the wrap width; height is INTRINSIC — the card auto-grows with
+  // its reflowed content (tldraw-style), so no explicit height is rendered.
+  nodeEl.style.width = `${resolveStudioTextNodeWidth(node)}px`;
 
-  const toolbarEl = nodeEl.createDiv({ cls: "ss-studio-label-toolbar" });
-  const fontControlsEl = toolbarEl.createDiv({ cls: "ss-studio-label-font-controls" });
-
-  const decreaseButton = fontControlsEl.createEl("button", {
-    cls: "ss-studio-label-font-button",
-    text: "A-",
-    attr: {
-      title: "Decrease label text size",
-      "aria-label": "Decrease label text size",
-    },
-  });
-  decreaseButton.type = "button";
-  const increaseButton = fontControlsEl.createEl("button", {
-    cls: "ss-studio-label-font-button",
-    text: "A+",
-    attr: {
-      title: "Increase label text size",
-      "aria-label": "Increase label text size",
-    },
-  });
-  increaseButton.type = "button";
+  // Font size has no toolbar controls — it is drag-scaled via the resize
+  // frame (top/bottom edges and corners), tldraw-style.
+  const toolbarEl = nodeEl.createDiv({ cls: "ss-studio-text-node-toolbar" });
   const removeButton = toolbarEl.createEl("button", {
-    cls: "ss-studio-label-remove",
+    cls: "ss-studio-text-node-remove",
     text: "×",
     attr: {
-      title: "Delete label",
-      "aria-label": "Delete label",
+      title: "Delete text",
+      "aria-label": "Delete text",
     },
   });
   removeButton.type = "button";
-
-  decreaseButton.disabled = busy;
-  increaseButton.disabled = busy;
   removeButton.disabled = busy;
 
-  const getCurrentFontSize = (): number => resolveStudioLabelFontSize(node);
+  const getCurrentFontSize = (): number => resolveStudioTextNodeFontSize(node);
   let textSurfaceEl: HTMLElement | HTMLTextAreaElement | null = null;
   const applyFontSize = (fontSize: number): void => {
     if (textSurfaceEl) {
-      textSurfaceEl.style.setProperty("--ss-studio-label-font-size", `${fontSize}px`);
+      textSurfaceEl.style.setProperty("--ss-studio-text-node-font-size", `${fontSize}px`);
     }
   };
-  const commitFontSize = (next: number): void => {
-    const normalized = clampLabelMetric(
-      next,
-      STUDIO_GRAPH_LABEL_MIN_FONT_SIZE,
-      STUDIO_GRAPH_LABEL_MAX_FONT_SIZE
-    );
-    applyFontSize(normalized);
-    if (onNodeConfigValueChange) {
-      onNodeConfigValueChange(node.id, "fontSize", normalized, { mode: "discrete" });
-      return;
-    }
-    node.config.fontSize = normalized;
-    onNodeConfigMutated(node);
-  };
-  decreaseButton.addEventListener("click", (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    if (busy) {
-      return;
-    }
-    commitFontSize(getCurrentFontSize() - 1);
-  });
-  increaseButton.addEventListener("click", (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    if (busy) {
-      return;
-    }
-    commitFontSize(getCurrentFontSize() + 1);
-  });
   removeButton.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
     onRemoveNode(node.id);
   });
 
-  const contentEl = nodeEl.createDiv({ cls: "ss-studio-label-content" });
-  const labelText = readLabelText(node);
-  const fontSize = getCurrentFontSize() || STUDIO_GRAPH_LABEL_DEFAULT_FONT_SIZE;
+  const contentEl = nodeEl.createDiv({ cls: "ss-studio-text-node-content" });
+  const textValue = readStudioTextNodeValue(node);
+  const fontSize = getCurrentFontSize() || STUDIO_GRAPH_TEXT_NODE_DEFAULT_FONT_SIZE;
 
   if (isEditing) {
     const textAreaEl = contentEl.createEl("textarea", {
-      cls: "ss-studio-label-editor",
+      cls: "ss-studio-text-node-editor",
       attr: {
-        "aria-label": `${node.title || "Label"} content`,
+        "aria-label": `${node.title || "Text"} content`,
+        placeholder: "Text",
       },
     });
-    textAreaEl.value = labelText;
+    textAreaEl.value = textValue;
     textAreaEl.disabled = busy;
     textSurfaceEl = textAreaEl;
     applyFontSize(fontSize);
+    // The card's height is intrinsic, so the editor must auto-grow with its
+    // content exactly like the display surface reflows: keep the textarea's
+    // height synced to its scrollHeight while typing.
+    const syncEditorHeight = (): void => {
+      textAreaEl.style.height = "auto";
+      const scrollHeight = textAreaEl.scrollHeight;
+      if (scrollHeight > 0) {
+        textAreaEl.style.height = `${scrollHeight}px`;
+      }
+    };
+    syncEditorHeight();
     textAreaEl.addEventListener("input", (event) => {
+      syncEditorHeight();
       const nextValue = (event.target as HTMLTextAreaElement).value;
       if (onNodeConfigValueChange) {
         onNodeConfigValueChange(node.id, "value", nextValue, { mode: "continuous" });
@@ -260,7 +218,7 @@ export function renderLabelNodeCard(options: RenderLabelNodeCardOptions): void {
       textAreaEl.blur();
     });
     textAreaEl.addEventListener("blur", () => {
-      onStopLabelEdit(node.id);
+      onStopTextNodeEdit(node.id);
     });
     if (shouldAutoFocus && !busy) {
       window.requestAnimationFrame(() => {
@@ -269,10 +227,12 @@ export function renderLabelNodeCard(options: RenderLabelNodeCardOptions): void {
       });
     }
   } else {
+    const hasText = textValue.trim().length > 0;
     const displayEl = contentEl.createDiv({
-      cls: "ss-studio-label-display",
-      text: labelText.trim().length > 0 ? labelText : "Label",
+      cls: "ss-studio-text-node-display",
+      text: hasText ? textValue : "Text",
     });
+    displayEl.classList.toggle("is-placeholder", !hasText);
     textSurfaceEl = displayEl;
     applyFontSize(fontSize);
     displayEl.addEventListener("pointerdown", (event) => {
@@ -282,48 +242,54 @@ export function renderLabelNodeCard(options: RenderLabelNodeCardOptions): void {
       }
       event.stopPropagation();
       if (pointerEvent.shiftKey || pointerEvent.metaKey || pointerEvent.ctrlKey) {
-        lastLabelTapByNodeId.delete(node.id);
+        lastTextNodeTapByNodeId.delete(node.id);
         graphInteraction.toggleNodeSelection(node.id);
         return;
       }
       const now = Date.now();
-      if (isRepeatLabelTap(node.id, pointerEvent, now)) {
+      if (isRepeatTextNodeTap(node.id, pointerEvent, now)) {
         event.preventDefault();
-        lastLabelTapByNodeId.delete(node.id);
+        lastTextNodeTapByNodeId.delete(node.id);
         graphInteraction.ensureSingleSelection(node.id);
-        onRequestLabelEdit(node.id);
+        onRequestTextNodeEdit(node.id);
         return;
       }
-      trackPotentialLabelTap(node.id, pointerEvent, now);
+      trackPotentialTextNodeTap(node.id, pointerEvent, now);
       graphInteraction.startNodeDrag(node.id, pointerEvent, nodeEl);
     });
     displayEl.addEventListener("dblclick", (event) => {
       event.preventDefault();
       event.stopPropagation();
-      lastLabelTapByNodeId.delete(node.id);
+      lastTextNodeTapByNodeId.delete(node.id);
       graphInteraction.ensureSingleSelection(node.id);
-      onRequestLabelEdit(node.id);
+      onRequestTextNodeEdit(node.id);
     });
   }
 
-  mountStudioGraphNodeResizeHandle({
+  mountStudioGraphNodeResizeFrame({
     node,
     nodeEl,
-    handleClassName: "ss-studio-label-resize-handle",
-    title: "Resize label",
-    ariaLabel: "Resize label",
+    title: "Resize text",
+    ariaLabel: "Resize text",
     interactionLocked: busy,
     getGraphZoom: () => graphInteraction.getGraphZoom(),
     onNodeConfigMutated,
-    onNodeSizeChange,
+    onNodeConfigValueChange,
+    onNodeResize,
     onNodeGeometryMutated,
-    applySize: ({ width, height }) => {
+    // Text cards persist and render width only — height reflows from content.
+    applySize: ({ width }) => {
       nodeEl.style.width = `${width}px`;
-      nodeEl.style.height = `${height}px`;
     },
+    applyFontSize: (nextFontSize) => {
+      applyFontSize(nextFontSize);
+    },
+    readFontSize: () => getCurrentFontSize() || STUDIO_GRAPH_TEXT_NODE_DEFAULT_FONT_SIZE,
     readInitialSize: () => ({
-      width: resolveStudioLabelWidth(node),
-      height: resolveStudioLabelHeight(node),
+      width: resolveStudioTextNodeWidth(node),
+      // Prefer the live rendered height; the content estimate keeps
+      // DOM-less environments (jsdom) deterministic.
+      height: resolveStudioTextNodeHeight(node, nodeEl),
     }),
   });
 }

@@ -8,7 +8,7 @@ import type {
 import {
   resolveStudioGraphNodeWidth,
   STUDIO_GRAPH_LARGE_TEXT_NODE_MIN_HEIGHT,
-} from "../views/studio/graph-v3/StudioGraphNodeGeometry";
+} from "./StudioNodeGeometry";
 
 export const MANAGED_MEDIA_OWNER_KEY = "__studio_managed_by";
 export const MANAGED_MEDIA_OWNER = "studio.image_generation_output.v1";
@@ -121,7 +121,7 @@ function isManagedMediaNode(node: StudioNodeInstance): boolean {
 }
 
 function isManagedTextNode(node: StudioNodeInstance): boolean {
-  if (node.kind !== "studio.text") {
+  if (node.kind !== "studio.text_output") {
     return false;
   }
   const config = asRecord(node.config);
@@ -255,7 +255,7 @@ function readManagedMediaSlot(node: StudioNodeInstance): { sourceNodeId: string;
 }
 
 function readManagedTextSourceNodeId(node: StudioNodeInstance): string {
-  if (node.kind !== "studio.text") {
+  if (node.kind !== "studio.text_output") {
     return "";
   }
   const config = asRecord(node.config);
@@ -287,7 +287,7 @@ function readManagedTextSlot(node: StudioNodeInstance): { sourceNodeId: string; 
 }
 
 function readManagedTextOutputHash(node: StudioNodeInstance): string {
-  if (node.kind !== "studio.text") {
+  if (node.kind !== "studio.text_output") {
     return "";
   }
   const config = asRecord(node.config);
@@ -556,7 +556,7 @@ function findConnectedTextNodeByHash(options: {
       continue;
     }
     const candidate = nodeById.get(edge.toNodeId);
-    if (!candidate || candidate.kind !== "studio.text") {
+    if (!candidate || candidate.kind !== "studio.text_output") {
       continue;
     }
     if (options.usedNodeIds.has(candidate.id)) {
@@ -870,7 +870,7 @@ export function materializePendingTextOutputPlaceholder(
   const nodeId = options.createNodeId();
   const newNode: StudioNodeInstance = {
     id: nodeId,
-    kind: "studio.text",
+    kind: "studio.text_output",
     version: "1.0.0",
     title: buildManagedTextTitle(options.sourceNode, slotIndex, slotIndex + 1),
     position: {
@@ -1179,7 +1179,7 @@ export function materializeTextOutputsAsTextNodes(
   const slotIndex = nextManagedSlotIndex++;
   const newNode: StudioNodeInstance = {
     id: nodeId,
-    kind: "studio.text",
+    kind: "studio.text_output",
     version: "1.0.0",
     title: buildManagedTextTitle(options.sourceNode, slotIndex, slotIndex + 1),
     position: {
