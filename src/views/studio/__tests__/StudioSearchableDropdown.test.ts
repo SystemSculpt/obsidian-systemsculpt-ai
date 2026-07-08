@@ -144,6 +144,7 @@ describe("renderStudioSearchableDropdown", () => {
     setRect(panel, { top: 0, left: 0, width: 260, height: 240 });
     setRect(list, { top: 0, left: 0, width: 244, height: 160 });
     Object.defineProperty(panel, "scrollHeight", { configurable: true, value: 240 });
+    Object.defineProperty(list, "scrollHeight", { configurable: true, value: 160 });
 
     trigger.click();
     await flush();
@@ -181,6 +182,7 @@ describe("renderStudioSearchableDropdown", () => {
     setRect(panel, { top: 0, left: 0, width: 260, height: 240 });
     setRect(list, { top: 0, left: 0, width: 244, height: 160 });
     Object.defineProperty(panel, "scrollHeight", { configurable: true, value: 240 });
+    Object.defineProperty(list, "scrollHeight", { configurable: true, value: 160 });
 
     trigger.click();
     await flush();
@@ -188,6 +190,46 @@ describe("renderStudioSearchableDropdown", () => {
     expect(root.classList.contains("is-open-upward")).toBe(true);
     expect(panel.style.top).toBe("auto");
     expect(panel.style.bottom).toBe("calc(100% + 4px)");
+  });
+
+  it("keeps the list usable when positioned during the async loading state", async () => {
+    // Regression: the first positioning pass runs while the list still shows
+    // the empty "Loading options..." state. The old math derived the panel
+    // chrome from that empty measurement and wrote a near-zero list
+    // max-height that every later re-measure inherited - the dropdown
+    // opened a few pixels tall with no visible options.
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    let releaseOptions: (() => void) | null = null;
+    renderStudioSearchableDropdown({
+      containerEl: host,
+      ariaLabel: "Model",
+      value: "model-a",
+      disabled: false,
+      loadOptions: () =>
+        new Promise((resolve) => {
+          releaseOptions = () =>
+            resolve([
+              { value: "model-a", label: "Model A" },
+              { value: "model-b", label: "Model B" },
+              { value: "model-c", label: "Model C" },
+            ]);
+        }),
+      onValueChange: jest.fn(),
+    });
+    await flush();
+
+    const trigger = host.querySelector(".ss-studio-searchable-select-trigger") as HTMLButtonElement;
+    const list = host.querySelector(".ss-studio-searchable-select-list") as HTMLElement;
+
+    trigger.click();
+    await flush();
+    releaseOptions?.();
+    await flush();
+
+    const listMaxHeight = Number.parseInt(list.style.maxHeight || "0", 10);
+    expect(listMaxHeight).toBeGreaterThanOrEqual(72);
   });
 
   it("caps panel height to the available viewport space", async () => {
@@ -219,12 +261,13 @@ describe("renderStudioSearchableDropdown", () => {
     setRect(panel, { top: 0, left: 0, width: 260, height: 240 });
     setRect(list, { top: 0, left: 0, width: 244, height: 160 });
     Object.defineProperty(panel, "scrollHeight", { configurable: true, value: 240 });
+    Object.defineProperty(list, "scrollHeight", { configurable: true, value: 160 });
 
     trigger.click();
     await flush();
 
     expect(root.classList.contains("is-open-upward")).toBe(true);
     expect(panel.style.maxHeight).toBe("200px");
-    expect(list.style.maxHeight).toBe("80px");
+    expect(list.style.maxHeight).toBe("120px");
   });
 });

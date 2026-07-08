@@ -97,6 +97,23 @@ export function renderStudioSearchableDropdown(options: StudioSearchableDropdown
   });
 
   const positionPanel = (): void => {
+    // Reset sizing constraints from any previous pass BEFORE measuring.
+    // Without this, the first pass (measured while the list still shows the
+    // empty "Loading options..." state) writes a collapsed list max-height,
+    // and every later re-measure reads the panel WITH that stale constraint
+    // applied — a feedback loop that pins the list at a few pixels tall.
+    panelEl.style.maxHeight = "";
+    listEl.style.maxHeight = "";
+
+    // The panel renders inside the zoomed graph canvas (CSS scale()), so a
+    // CSS pixel applied here occupies `scale` visual pixels. Measure the
+    // scale from the trigger and convert every visual-viewport budget into
+    // local CSS pixels before applying it.
+    const rootRect = rootEl.getBoundingClientRect();
+    const rawScale = rootEl.offsetWidth > 0 ? rootRect.width / rootEl.offsetWidth : 1;
+    const scale = Number.isFinite(rawScale) && rawScale > 0 ? rawScale : 1;
+    const toLocalPx = (visualPx: number): number => visualPx / scale;
+
     const viewportWidth = window.innerWidth || document.documentElement?.clientWidth || 0;
     const viewportHeight = window.innerHeight || document.documentElement?.clientHeight || 0;
     if (!viewportWidth) {
@@ -107,30 +124,30 @@ export function renderStudioSearchableDropdown(options: StudioSearchableDropdown
       panelEl.style.width = "";
     } else {
       panelEl.classList.remove("ss-studio-searchable-select-panel--full-width");
-      const rect = rootEl.getBoundingClientRect();
       const viewportMargin = STUDIO_DROPDOWN_VIEWPORT_MARGIN_PX;
-      const availableWidth = Math.max(rect.width, viewportWidth - viewportMargin * 2);
+      const availableWidth = toLocalPx(Math.max(rootRect.width, viewportWidth - viewportMargin * 2));
+      const triggerWidth = rootEl.offsetWidth || toLocalPx(rootRect.width);
       const optionsForSizing = loadedOptions ? ensureCurrentValuePresent(loadedOptions) : [];
       const estimatedContentWidth = estimatePreferredPanelWidth(optionsForSizing);
       const minPanelWidth = Math.min(
         availableWidth,
-        Math.max(rect.width, STUDIO_DROPDOWN_MIN_PANEL_WIDTH_PX)
+        Math.max(triggerWidth, STUDIO_DROPDOWN_MIN_PANEL_WIDTH_PX)
       );
-      const preferredWidth = Math.max(minPanelWidth, Math.max(rect.width, estimatedContentWidth));
+      const preferredWidth = Math.max(minPanelWidth, Math.max(triggerWidth, estimatedContentWidth));
       const cappedPreferredWidth = Math.min(STUDIO_DROPDOWN_MAX_PANEL_WIDTH_PX, preferredWidth);
       const panelWidth = Math.min(availableWidth, cappedPreferredWidth);
 
-      let leftOffset = 0;
-      const rightOverflow = rect.left + panelWidth - (viewportWidth - viewportMargin);
+      let leftOffsetVisual = 0;
+      const rightOverflow = rootRect.left + panelWidth * scale - (viewportWidth - viewportMargin);
       if (rightOverflow > 0) {
-        leftOffset -= rightOverflow;
+        leftOffsetVisual -= rightOverflow;
       }
-      const leftOverflow = viewportMargin - (rect.left + leftOffset);
+      const leftOverflow = viewportMargin - (rootRect.left + leftOffsetVisual);
       if (leftOverflow > 0) {
-        leftOffset += leftOverflow;
+        leftOffsetVisual += leftOverflow;
       }
 
-      panelEl.style.left = `${Math.round(leftOffset)}px`;
+      panelEl.style.left = `${Math.round(toLocalPx(leftOffsetVisual))}px`;
       panelEl.style.right = "auto";
       panelEl.style.width = `${Math.round(panelWidth)}px`;
     }
@@ -139,42 +156,36 @@ export function renderStudioSearchableDropdown(options: StudioSearchableDropdown
       rootEl.classList.remove("is-open-upward");
       panelEl.style.top = `calc(100% + ${STUDIO_DROPDOWN_PANEL_GAP_PX}px)`;
       panelEl.style.bottom = "auto";
-      panelEl.style.maxHeight = "";
-      listEl.style.maxHeight = "";
       return;
     }
 
-    const rect = rootEl.getBoundingClientRect();
     const viewportMargin = STUDIO_DROPDOWN_VIEWPORT_MARGIN_PX;
-    const availableBelow = Math.max(
-      0,
-      viewportHeight - rect.bottom - viewportMargin - STUDIO_DROPDOWN_PANEL_GAP_PX
+    const availableBelow = toLocalPx(
+      Math.max(0, viewportHeight - rootRect.bottom - viewportMargin) - STUDIO_DROPDOWN_PANEL_GAP_PX
     );
-    const availableAbove = Math.max(
-      0,
-      rect.top - viewportMargin - STUDIO_DROPDOWN_PANEL_GAP_PX
+    const availableAbove = toLocalPx(
+      Math.max(0, rootRect.top - viewportMargin) - STUDIO_DROPDOWN_PANEL_GAP_PX
     );
-    const panelRect = panelEl.getBoundingClientRect();
+    // Measured with constraints cleared, so these reflect natural content.
+    // scrollHeight is already in local CSS pixels.
     const naturalPanelHeight = Math.max(
       panelEl.scrollHeight || 0,
-      panelRect.height || 0,
       STUDIO_DROPDOWN_FALLBACK_PANEL_HEIGHT_PX
     );
-    const listRect = listEl.getBoundingClientRect();
-    const estimatedChromeHeight = Math.max(
+    // Chrome = everything except the list (search box, borders, padding).
+    const chromeHeight = Math.max(
       STUDIO_DROPDOWN_FALLBACK_PANEL_CHROME_PX,
-      naturalPanelHeight - (listRect.height || 0)
+      (panelEl.scrollHeight || 0) - (listEl.scrollHeight || 0)
     );
     const openUpward = availableBelow < naturalPanelHeight && availableAbove > availableBelow;
-    const availableVerticalSpace = openUpward ? availableAbove : availableBelow;
-    const panelMaxHeight = Math.max(0, Math.min(naturalPanelHeight, availableVerticalSpace));
+    const availableVerticalSpace = Math.max(0, openUpward ? availableAbove : availableBelow);
+    // The list keeps a usable floor no matter how tight the space math gets;
+    // the panel budget follows from it instead of the other way around.
     const listMaxHeight = Math.max(
-      0,
-      Math.min(
-        panelMaxHeight - estimatedChromeHeight,
-        Math.max(STUDIO_DROPDOWN_MIN_LIST_HEIGHT_PX, availableVerticalSpace - estimatedChromeHeight)
-      )
+      STUDIO_DROPDOWN_MIN_LIST_HEIGHT_PX,
+      Math.min(naturalPanelHeight, availableVerticalSpace) - chromeHeight
     );
+    const panelMaxHeight = listMaxHeight + chromeHeight;
 
     rootEl.classList.toggle("is-open-upward", openUpward);
     panelEl.style.top = openUpward ? "auto" : `calc(100% + ${STUDIO_DROPDOWN_PANEL_GAP_PX}px)`;
@@ -364,7 +375,9 @@ export function renderStudioSearchableDropdown(options: StudioSearchableDropdown
       return;
     }
     open = true;
-    panelEl.style.display = "grid";
+    // Restore the stylesheet's flex-column layout (an inline display value
+    // would override it and break the list's flex sizing).
+    panelEl.style.display = "";
     bindViewportListeners();
     positionPanel();
     rootEl.addClass("is-open");
