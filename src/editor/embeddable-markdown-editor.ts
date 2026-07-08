@@ -359,6 +359,15 @@ function getEmbeddableEditorClass(
       return this.embeddableOptions ?? constructingOptions ?? {};
     }
 
+    handleEmbeddableEscape(): boolean {
+      this.getEmbeddableOptions().onEscape?.();
+      return true;
+    }
+
+    handleEmbeddablePaste(event: ClipboardEvent): void {
+      this.getEmbeddableOptions().onPaste?.(event);
+    }
+
     onUpdate(update: ViewUpdate, changed: boolean): void {
       const superOnUpdate = (Base.prototype as {
         onUpdate?: (update: ViewUpdate, changed: boolean) => void;
@@ -386,7 +395,7 @@ function getEmbeddableEditorClass(
       extensions.push(
         EditorView.domEventHandlers({
           paste: (event) => {
-            this.getEmbeddableOptions().onPaste?.(event);
+            this.handleEmbeddablePaste(event);
           },
         })
       );
@@ -395,10 +404,7 @@ function getEmbeddableEditorClass(
           keymap.of([
             {
               key: "Escape",
-              run: () => {
-                this.getEmbeddableOptions().onEscape?.();
-                return true;
-              },
+              run: () => this.handleEmbeddableEscape(),
               preventDefault: true,
             },
           ])

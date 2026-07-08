@@ -1174,7 +1174,8 @@
 }
 
 .ss-studio-text-node-display,
-.ss-studio-text-node-editor {
+.ss-studio-text-node-editor,
+.ss-studio-text-node-live-editor {
   display: block;
   box-sizing: border-box;
   width: 100%;
@@ -1238,18 +1239,9 @@
   margin-bottom: 0;
 }
 
-/* Obsidian-note editing: the live-preview editor host mirrors the display
- * surface's box so entering and leaving edit mode never shifts layout. */
+/* Obsidian-note editing: the live-preview editor host shares the text-node
+ * box contract above; only the editable-cursor signal is its own. */
 .ss-studio-text-node-live-editor {
-  display: block;
-  box-sizing: border-box;
-  width: 100%;
-  max-width: 100%;
-  min-width: 0;
-  padding: var(--ss-space-1);
-  font-size: var(--ss-studio-text-node-font-size, inherit);
-  line-height: var(--ss-leading-base);
-  color: var(--ss-ink);
   cursor: text;
 }
 

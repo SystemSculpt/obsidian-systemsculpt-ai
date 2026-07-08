@@ -1,7 +1,10 @@
 /**
  * @jest-environment jsdom
  */
-import { createEmbeddableMarkdownEditor } from "../embeddable-markdown-editor";
+import {
+  createEmbeddableMarkdownEditor,
+  isEmbeddableMarkdownEditorSupported,
+} from "../embeddable-markdown-editor";
 
 /**
  * Fake of Obsidian's INTERNAL markdown editor class chain. The real chain is
@@ -314,6 +317,51 @@ describe("createEmbeddableMarkdownEditor", () => {
 
     handle!.focus();
     expect(rawEditor.editor.cm.focus).toHaveBeenCalled();
+  });
+
+  it("set() replaces the document and value reflects it", () => {
+    const { app } = createFakeApp();
+    const handle = createEmbeddableMarkdownEditor(app, document.body.createDiv(), {
+      value: "before",
+    });
+
+    handle!.set("after");
+    expect(handle!.value).toBe("after");
+  });
+
+  it("reports support based on whether the internal editor resolves", () => {
+    const { app } = createFakeApp();
+    expect(isEmbeddableMarkdownEditorSupported(app)).toBe(true);
+    expect(isEmbeddableMarkdownEditorSupported({} as never)).toBe(false);
+  });
+
+  it("routes the Escape key handler to onEscape", () => {
+    const { app } = createFakeApp();
+    const onEscape = jest.fn();
+    const handle = createEmbeddableMarkdownEditor(app, document.body.createDiv(), {
+      value: "x",
+      onEscape,
+    });
+    const rawEditor = handle!.editor as { handleEmbeddableEscape?: () => boolean };
+
+    expect(rawEditor.handleEmbeddableEscape?.()).toBe(true);
+    expect(onEscape).toHaveBeenCalledTimes(1);
+  });
+
+  it("routes paste events to onPaste", () => {
+    const { app } = createFakeApp();
+    const onPaste = jest.fn();
+    const handle = createEmbeddableMarkdownEditor(app, document.body.createDiv(), {
+      value: "x",
+      onPaste,
+    });
+    const rawEditor = handle!.editor as {
+      handleEmbeddablePaste?: (event: ClipboardEvent) => void;
+    };
+
+    const pasteEvent = new Event("paste") as ClipboardEvent;
+    rawEditor.handleEmbeddablePaste?.(pasteEvent);
+    expect(onPaste).toHaveBeenCalledWith(pasteEvent);
   });
 
   it("selectAll() dispatches a whole-document selection", () => {

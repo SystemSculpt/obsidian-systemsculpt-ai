@@ -163,6 +163,9 @@ describe("studio.text live-preview card", () => {
 
       const displayEl = nodeEl.querySelector<HTMLElement>(".ss-studio-text-node-display");
       expect(displayEl?.textContent).toBe("plain body");
+      // The fallback shows raw text, so the markdown block-flow styling
+      // must come off with it.
+      expect(displayEl?.classList.contains("is-markdown")).toBe(false);
     });
 
     it("leaves rendered links and checkboxes to their own pointer handling instead of dragging", () => {

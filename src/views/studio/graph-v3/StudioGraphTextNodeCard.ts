@@ -436,16 +436,19 @@ export function renderTextNodeCard(options: RenderTextNodeCardOptions): void {
       return;
     }
     displayEl.addClass("is-markdown");
+    const fallBackToPlainText = (): void => {
+      // Raw text needs the pre-wrap source styling back, not markdown
+      // block flow.
+      displayEl.removeClass("is-markdown");
+      displayEl.empty();
+      displayEl.setText(textValue);
+    };
     try {
       void Promise.resolve(
         renderMarkdownPreview(node, textValue, displayEl)
-      ).catch(() => {
-        displayEl.empty();
-        displayEl.setText(textValue);
-      });
+      ).catch(fallBackToPlainText);
     } catch {
-      displayEl.empty();
-      displayEl.setText(textValue);
+      fallBackToPlainText();
     }
   }
 
