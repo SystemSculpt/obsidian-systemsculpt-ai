@@ -1223,6 +1223,72 @@
   box-shadow: none;
 }
 
+/* Rendered-markdown display: the resting card shows the value the way a
+ * note preview would — real headings, tables, checklists — so the source
+ * pre-wrap rule gives way to normal block flow. */
+.ss-studio-text-node-display.is-markdown {
+  white-space: normal;
+}
+
+.ss-studio-text-node-display.is-markdown > :first-child {
+  margin-top: 0;
+}
+
+.ss-studio-text-node-display.is-markdown > :last-child {
+  margin-bottom: 0;
+}
+
+/* Obsidian-note editing: the live-preview editor host mirrors the display
+ * surface's box so entering and leaving edit mode never shifts layout. */
+.ss-studio-text-node-live-editor {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  padding: var(--ss-space-1);
+  font-size: var(--ss-studio-text-node-font-size, inherit);
+  line-height: var(--ss-leading-base);
+  color: var(--ss-ink);
+  cursor: text;
+}
+
+/* The embedded editor carries Obsidian's own markdown-source-view chrome;
+ * strip the note-page framing so only the text shows on the canvas. */
+.ss-studio-text-node-live-editor .markdown-source-view {
+  padding: 0;
+  background: transparent;
+}
+
+.ss-studio-text-node-live-editor .cm-editor {
+  background: transparent;
+  font-size: inherit;
+}
+
+.ss-studio-text-node-live-editor .cm-editor .cm-scroller {
+  overflow: visible;
+  min-height: 0;
+  padding: 0;
+  font-size: inherit;
+  line-height: var(--ss-leading-base);
+}
+
+/* Kill the readable-line-width sizer margins a full note view would get. */
+.ss-studio-text-node-live-editor .cm-editor .cm-sizer {
+  max-width: none;
+  margin: 0;
+  padding: 0;
+}
+
+.ss-studio-text-node-live-editor .cm-editor .cm-content {
+  padding: 0;
+  caret-color: var(--ss-ink);
+}
+
+.ss-studio-text-node-live-editor .cm-editor.cm-focused {
+  outline: none;
+}
+
 /* ------------------------------------------------------------------ *
  * Inspector overlay
  * ------------------------------------------------------------------ */

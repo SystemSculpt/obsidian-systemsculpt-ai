@@ -38,6 +38,7 @@ type OnCloseContext = {
   currentProject: Record<string, unknown> | null;
   editingTextNodeIds: Set<string>;
   pendingTextNodeAutofocusNodeId: string | null;
+  disposeTextNodeEditors: jest.Mock<void, []>;
   inspectorOverlay: { destroy: jest.Mock<void, []> } | null;
   nodeContextMenuOverlay: { destroy: jest.Mock<void, []> } | null;
   nodeActionContextMenuOverlay: { destroy: jest.Mock<void, []> } | null;
@@ -106,6 +107,7 @@ function createOnCloseContext(): OnCloseContext {
     currentProject: { graph: { nodes: [] } },
     editingTextNodeIds: new Set(["node-a"]),
     pendingTextNodeAutofocusNodeId: "node-a",
+    disposeTextNodeEditors: jest.fn(),
     inspectorOverlay: { destroy: jest.fn() },
     nodeContextMenuOverlay: { destroy: jest.fn() },
     nodeActionContextMenuOverlay: { destroy: jest.fn() },
@@ -143,6 +145,7 @@ describe("SystemSculptStudioView save persistence", () => {
     expect(context.flushPendingProjectSaveWork).toHaveBeenCalledTimes(1);
     expect(context.releaseRetainedProjectSession).toHaveBeenCalledTimes(1);
     expect(context.captureGraphViewportState).toHaveBeenCalledTimes(1);
+    expect(context.disposeTextNodeEditors).toHaveBeenCalledTimes(1);
     expect(context.app.workspace.requestSaveLayout).toHaveBeenCalledTimes(1);
     expect(context.currentProjectSession).toBeNull();
     expect(context.currentProjectPath).toBeNull();

@@ -59,6 +59,8 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
     consumeTextNodeAutoFocus,
     onRequestTextNodeEdit,
     onStopTextNodeEdit,
+    createTextNodeMarkdownEditor,
+    registerTextNodeEditorTeardown,
     onRevealPathInFinder,
     resolveNodeBadge,
   } = options;
@@ -101,6 +103,9 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
       shouldAutoFocus: consumeTextNodeAutoFocus(node.id),
       onRequestTextNodeEdit,
       onStopTextNodeEdit,
+      renderMarkdownPreview,
+      createMarkdownEditor: createTextNodeMarkdownEditor,
+      registerEditorTeardown: registerTextNodeEditorTeardown,
     });
     return;
   }

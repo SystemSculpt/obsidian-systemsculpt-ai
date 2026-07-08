@@ -11,6 +11,7 @@ import {
   STUDIO_GRAPH_TEXT_NODE_DEFAULT_FONT_SIZE,
 } from "../../../studio/StudioNodeGeometry";
 import { mountStudioGraphNodeResizeFrame } from "./StudioGraphNodeResizeFrame";
+import { markStudioNodeCardInteractive } from "./StudioGraphNodeCardPointer";
 
 const STUDIO_TEXT_NODE_DOUBLE_TAP_DELAY_MS = 450;
 const STUDIO_TEXT_NODE_DOUBLE_TAP_SLOP_PX = 8;
@@ -23,6 +24,37 @@ type TextNodeTapSnapshot = {
 };
 
 const lastTextNodeTapByNodeId = new Map<string, TextNodeTapSnapshot>();
+
+/**
+ * Editing surface handle produced by the host view's embedded-markdown-editor
+ * factory. Mirrors the shape of `EmbeddableMarkdownEditorHandle` without
+ * importing it, so this render module stays free of app-level dependencies.
+ */
+export type StudioTextNodeMarkdownEditorHandle = {
+  readonly value: string;
+  set(value: string): void;
+  focus(): void;
+  selectAll(): void;
+  destroy(): void;
+  readonly editorEl: HTMLElement | null;
+  readonly editor: unknown;
+};
+
+/**
+ * Builds an Obsidian live-preview markdown editor inside `containerEl`, or
+ * returns null when the embedded editor is unavailable — the card then falls
+ * back to the plain textarea surface.
+ */
+export type StudioTextNodeMarkdownEditorFactory = (
+  containerEl: HTMLElement,
+  options: {
+    value: string;
+    placeholder: string;
+    onChange?: (value: string) => void;
+    onEscape?: () => void;
+    onBlur?: () => void;
+  }
+) => StudioTextNodeMarkdownEditorHandle | null;
 
 type RenderTextNodeCardOptions = {
   nodeEl: HTMLElement;
@@ -46,6 +78,13 @@ type RenderTextNodeCardOptions = {
   shouldAutoFocus: boolean;
   onRequestTextNodeEdit: (nodeId: string) => void;
   onStopTextNodeEdit: (nodeId: string) => void;
+  renderMarkdownPreview?: (
+    node: StudioNodeInstance,
+    markdown: string,
+    containerEl: HTMLElement
+  ) => Promise<void> | void;
+  createMarkdownEditor?: StudioTextNodeMarkdownEditorFactory;
+  registerEditorTeardown?: (nodeId: string, teardown: () => void) => void;
 };
 
 /**
@@ -122,6 +161,92 @@ function trackPotentialTextNodeTap(nodeId: string, event: PointerEvent, now: num
   window.addEventListener("pointercancel", stopTracking);
 }
 
+type MountLiveMarkdownEditorOptions = {
+  contentEl: HTMLElement;
+  node: StudioNodeInstance;
+  textValue: string;
+  createMarkdownEditor: StudioTextNodeMarkdownEditorFactory;
+  registerEditorTeardown?: (nodeId: string, teardown: () => void) => void;
+  onNodeConfigMutated: (node: StudioNodeInstance) => void;
+  onNodeConfigValueChange?: RenderTextNodeCardOptions["onNodeConfigValueChange"];
+  onStopTextNodeEdit: (nodeId: string) => void;
+  shouldAutoFocus: boolean;
+  adoptTextSurface: (el: HTMLElement) => void;
+};
+
+/**
+ * Mounts the embedded Obsidian live-preview editor for a text-node edit
+ * session. Returns false when the factory cannot produce an editor, in which
+ * case the caller renders the plain textarea instead. The host owns the
+ * editor's lifetime through the registered teardown — the graph re-render
+ * that follows `onStopTextNodeEdit` destroys the editor before the card's
+ * DOM is dropped.
+ */
+function mountLiveMarkdownEditor(options: MountLiveMarkdownEditorOptions): boolean {
+  const {
+    contentEl,
+    node,
+    textValue,
+    createMarkdownEditor,
+    registerEditorTeardown,
+    onNodeConfigMutated,
+    onNodeConfigValueChange,
+    onStopTextNodeEdit,
+    shouldAutoFocus,
+    adoptTextSurface,
+  } = options;
+
+  const hostEl = contentEl.createDiv({
+    cls: "ss-studio-text-node-live-editor",
+    attr: {
+      "aria-label": `${node.title || "Text"} content`,
+    },
+  });
+  // Pointer gestures inside the editor belong to the editor (text selection,
+  // checkbox toggles, table cells), never to card dragging.
+  markStudioNodeCardInteractive(hostEl);
+
+  const commitValue = (nextValue: string): void => {
+    if (onNodeConfigValueChange) {
+      onNodeConfigValueChange(node.id, "value", nextValue, { mode: "continuous" });
+      return;
+    }
+    node.config.value = nextValue;
+    onNodeConfigMutated(node);
+  };
+
+  const editorHandle = createMarkdownEditor(hostEl, {
+    value: textValue,
+    placeholder: "Text",
+    onChange: (nextValue) => {
+      commitValue(nextValue);
+    },
+    onEscape: () => {
+      onStopTextNodeEdit(node.id);
+    },
+    onBlur: () => {
+      onStopTextNodeEdit(node.id);
+    },
+  });
+  if (!editorHandle) {
+    hostEl.remove();
+    return false;
+  }
+
+  adoptTextSurface(hostEl);
+  registerEditorTeardown?.(node.id, () => {
+    editorHandle.destroy();
+  });
+
+  if (shouldAutoFocus) {
+    window.requestAnimationFrame(() => {
+      editorHandle.focus();
+      editorHandle.selectAll();
+    });
+  }
+  return true;
+}
+
 export function renderTextNodeCard(options: RenderTextNodeCardOptions): void {
   const {
     nodeEl,
@@ -136,6 +261,9 @@ export function renderTextNodeCard(options: RenderTextNodeCardOptions): void {
     shouldAutoFocus,
     onRequestTextNodeEdit,
     onStopTextNodeEdit,
+    renderMarkdownPreview,
+    createMarkdownEditor,
+    registerEditorTeardown,
   } = options;
 
   nodeEl.addClass("ss-studio-text-node-card");
@@ -159,6 +287,36 @@ export function renderTextNodeCard(options: RenderTextNodeCardOptions): void {
   const fontSize = getCurrentFontSize() || STUDIO_GRAPH_TEXT_NODE_DEFAULT_FONT_SIZE;
 
   if (isEditing) {
+    // Obsidian-note parity: edit through the embedded live-preview markdown
+    // editor whenever the host can build one. The editor is created against
+    // internal Obsidian API, so a null factory result (unsupported internals,
+    // busy view, headless tests) falls through to the plain textarea.
+    const liveEditorMounted =
+      !busy && createMarkdownEditor
+        ? mountLiveMarkdownEditor({
+            contentEl,
+            node,
+            textValue,
+            createMarkdownEditor,
+            registerEditorTeardown,
+            onNodeConfigMutated,
+            onNodeConfigValueChange,
+            onStopTextNodeEdit,
+            shouldAutoFocus,
+            adoptTextSurface: (el) => {
+              textSurfaceEl = el;
+              applyFontSize(fontSize);
+            },
+          })
+        : false;
+    if (!liveEditorMounted) {
+      renderTextNodeTextarea();
+    }
+  } else {
+    renderTextNodeDisplay();
+  }
+
+  function renderTextNodeTextarea(): void {
     const textAreaEl = contentEl.createEl("textarea", {
       cls: "ss-studio-text-node-editor",
       attr: {
@@ -212,15 +370,20 @@ export function renderTextNodeCard(options: RenderTextNodeCardOptions): void {
         textAreaEl.select();
       });
     }
-  } else {
+  }
+
+  function renderTextNodeDisplay(): void {
     const hasText = textValue.trim().length > 0;
     const displayEl = contentEl.createDiv({
       cls: "ss-studio-text-node-display",
-      text: hasText ? textValue : "Text",
+      text: hasText ? "" : "Text",
     });
     displayEl.classList.toggle("is-placeholder", !hasText);
     textSurfaceEl = displayEl;
     applyFontSize(fontSize);
+    if (hasText) {
+      renderTextNodeDisplayContent(displayEl);
+    }
     displayEl.addEventListener("pointerdown", (event) => {
       const pointerEvent = event as PointerEvent;
       if (pointerEvent.button !== 0) {
@@ -250,6 +413,31 @@ export function renderTextNodeCard(options: RenderTextNodeCardOptions): void {
       graphInteraction.ensureSingleSelection(node.id);
       onRequestTextNodeEdit(node.id);
     });
+  }
+
+  /**
+   * Obsidian-note parity for the resting card: the value is markdown, so it
+   * displays as rendered markdown (headings, tables, checklists) through the
+   * host's renderer. Without a renderer (headless tests, degraded hosts) the
+   * raw text is shown exactly as before.
+   */
+  function renderTextNodeDisplayContent(displayEl: HTMLElement): void {
+    if (!renderMarkdownPreview) {
+      displayEl.setText(textValue);
+      return;
+    }
+    displayEl.addClass("is-markdown");
+    try {
+      void Promise.resolve(
+        renderMarkdownPreview(node, textValue, displayEl)
+      ).catch(() => {
+        displayEl.empty();
+        displayEl.setText(textValue);
+      });
+    } catch {
+      displayEl.empty();
+      displayEl.setText(textValue);
+    }
   }
 
   mountStudioGraphNodeResizeFrame({
