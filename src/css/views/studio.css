@@ -1002,9 +1002,12 @@
   --ss-studio-group-accent: var(--ss-ink-muted);
 
   position: absolute;
-  border: 1px dashed var(--ss-line-strong);
+  /* The frame always wears the group's accent — a muted dashed line plus a
+   * whisper of fill — so choosing a color visibly changes the group, not
+   * just the picker chip. Drop-target state below goes full strength. */
+  border: 1px dashed color-mix(in srgb, var(--ss-studio-group-accent) 75%, transparent);
   border-radius: var(--ss-radius-xl);
-  background-color: transparent;
+  background-color: color-mix(in srgb, var(--ss-studio-group-accent) 5%, transparent);
   cursor: grab;
   transition:
     left var(--ss-dur-fast) var(--ss-ease),
