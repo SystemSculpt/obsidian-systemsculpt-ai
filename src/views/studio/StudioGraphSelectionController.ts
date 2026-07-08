@@ -23,6 +23,7 @@ import {
   resolveStudioGraphSafeZoom,
 } from "../../studio/StudioNodeGeometry";
 import {
+  resolveStudioGraphResizeSnap,
   resolveStudioGraphSnap,
   STUDIO_SNAP_THRESHOLD_PX,
   type StudioSnapRect,
@@ -1002,6 +1003,55 @@ export class StudioGraphSelectionController {
     window.addEventListener("pointercancel", finishDrag);
     window.addEventListener("keydown", onModifierChange);
     window.addEventListener("keyup", onModifierChange);
+  }
+
+  /**
+   * Snap support for the per-node resize frame: snaps the dragged edge(s)
+   * of the candidate rect to the other nodes' alignment anchors and draws
+   * the same guide lines a move-drag would. Returns canvas-space
+   * adjustments to add to the raw drag deltas. Callers clear the guides
+   * with clearResizeSnapGuides() when the gesture ends.
+   */
+  resolveNodeResizeSnap(
+    nodeId: string,
+    moving: StudioSnapRect,
+    edges: { x: -1 | 0 | 1; y: -1 | 0 | 1 }
+  ): { deltaX: number; deltaY: number } {
+    const project = this.host.getCurrentProject();
+    if (!project) {
+      this.renderSnapGuides(null);
+      return { deltaX: 0, deltaY: 0 };
+    }
+    const others: StudioSnapRect[] = [];
+    for (const node of project.graph.nodes) {
+      if (node.id === nodeId) {
+        continue;
+      }
+      const nodeX = Number(node.position?.x);
+      const nodeY = Number(node.position?.y);
+      if (!Number.isFinite(nodeX) || !Number.isFinite(nodeY)) {
+        continue;
+      }
+      const nodeEl = this.nodeElsById.get(node.id);
+      others.push({
+        left: nodeX,
+        top: nodeY,
+        right: nodeX + resolveMeasuredStudioNodeWidth(nodeEl?.offsetWidth, node),
+        bottom: nodeY + resolveMeasuredStudioNodeHeight(nodeEl?.offsetHeight),
+      });
+    }
+    const snap = resolveStudioGraphResizeSnap({
+      moving,
+      others,
+      threshold: STUDIO_SNAP_THRESHOLD_PX / resolveStudioGraphSafeZoom(this.graphZoom),
+      edges,
+    });
+    this.renderSnapGuides(snap.guides.length > 0 ? snap : null);
+    return { deltaX: snap.deltaX, deltaY: snap.deltaY };
+  }
+
+  clearResizeSnapGuides(): void {
+    this.renderSnapGuides(null);
   }
 
   private renderSnapGuides(result: StudioSnapResult | null): void {

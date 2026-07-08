@@ -158,6 +158,17 @@ type MountStudioGraphNodeResizeFrameOptions = {
     options?: StudioGraphNodeMutationOptions
   ) => void;
   onNodeGeometryMutated: (node: StudioNodeInstance) => void;
+  /**
+   * Smart-guide snapping (same behavior as move drags): given the candidate
+   * rect with raw deltas applied and the dragged edges, returns canvas-space
+   * adjustments to add to the deltas. Host renders/clears the guide lines.
+   */
+  resolveResizeSnap?: (
+    moving: { left: number; top: number; right: number; bottom: number },
+    edges: StudioGraphResizeZoneDirection
+  ) => { deltaX: number; deltaY: number };
+  /** Called when the gesture ends so the host can clear its guide lines. */
+  onResizeSnapEnd?: () => void;
   applySize: (size: StudioGraphResizeFrameSize) => void;
   /** Live fontSize preview while a text drag is in flight. */
   applyFontSize?: (fontSizePx: number) => void;
@@ -255,12 +266,13 @@ export function mountStudioGraphNodeResizeFrame(
   let lastApplied: ResizeTargetState | null = null;
   let didMutateDuringDrag = false;
   let capturedHistoryForDrag = false;
+  let snapBypassed = false;
 
-  const computeTarget = (): ResizeTargetState => {
+  const computeTarget = (deltaX: number, deltaY: number): ResizeTargetState => {
     const direction = activeDirection;
     const bounds = resolveStudioGraphNodeResizeBounds(node);
-    const dw = direction.x === 0 ? 0 : direction.x * pendingDeltaX;
-    const dh = direction.y === 0 ? 0 : direction.y * pendingDeltaY;
+    const dw = direction.x === 0 ? 0 : direction.x * deltaX;
+    const dh = direction.y === 0 ? 0 : direction.y * deltaY;
 
     if (dragMode === "box" || dragMode === "min-height") {
       const width =
@@ -484,7 +496,26 @@ export function mountStudioGraphNodeResizeFrame(
     if (activePointerId === null) {
       return;
     }
-    const target = computeTarget();
+    let effectiveDeltaX = pendingDeltaX;
+    let effectiveDeltaY = pendingDeltaY;
+    if (options.resolveResizeSnap && !snapBypassed) {
+      // Candidate rect with raw deltas applied to the DRAGGED edges only;
+      // the anchored edges stay put during a resize.
+      const snap = options.resolveResizeSnap(
+        {
+          left: startX + (activeDirection.x === -1 ? pendingDeltaX : 0),
+          right: startX + startWidth + (activeDirection.x === 1 ? pendingDeltaX : 0),
+          top: startY + (activeDirection.y === -1 ? pendingDeltaY : 0),
+          bottom: startY + startHeight + (activeDirection.y === 1 ? pendingDeltaY : 0),
+        },
+        activeDirection
+      );
+      effectiveDeltaX += snap.deltaX;
+      effectiveDeltaY += snap.deltaY;
+    } else if (options.onResizeSnapEnd && snapBypassed) {
+      options.onResizeSnapEnd();
+    }
+    const target = computeTarget(effectiveDeltaX, effectiveDeltaY);
     if (lastApplied && targetsEqual(lastApplied, target)) {
       return;
     }
@@ -537,6 +568,7 @@ export function mountStudioGraphNodeResizeFrame(
       commitTarget(lastApplied, "discrete");
     }
     lastApplied = null;
+    options.onResizeSnapEnd?.();
   };
 
   const onPointerMove = (event: PointerEvent): void => {
@@ -552,6 +584,7 @@ export function mountStudioGraphNodeResizeFrame(
     });
     pendingDeltaX = delta.deltaX;
     pendingDeltaY = delta.deltaY;
+    snapBypassed = event.ctrlKey || event.metaKey;
     scheduleApply();
   };
 
@@ -574,6 +607,7 @@ export function mountStudioGraphNodeResizeFrame(
     activeDirection = ZONE_DIRECTIONS[zone];
     didMutateDuringDrag = false;
     capturedHistoryForDrag = false;
+    snapBypassed = event.ctrlKey || event.metaKey;
     startClientX = event.clientX;
     startClientY = event.clientY;
     pendingDeltaX = 0;

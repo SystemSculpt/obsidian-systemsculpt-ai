@@ -35,7 +35,13 @@ function createNode(
 
 function createPointerEvent(
   type: string,
-  options: { pointerId: number; clientX: number; clientY: number; button?: number }
+  options: {
+    pointerId: number;
+    clientX: number;
+    clientY: number;
+    button?: number;
+    ctrlKey?: boolean;
+  }
 ): PointerEvent {
   const event = new MouseEvent(type, {
     bubbles: true,
@@ -43,6 +49,7 @@ function createPointerEvent(
     clientX: options.clientX,
     clientY: options.clientY,
     button: options.button ?? 0,
+    ctrlKey: options.ctrlKey ?? false,
   });
   Object.defineProperty(event, "pointerId", {
     value: options.pointerId,
@@ -699,6 +706,67 @@ describe("mountStudioGraphNodeResizeFrame", () => {
       // content can still overflow-grow past it.
       expect(nodeEl.style.minHeight).toBe("250px");
       expect(nodeEl.style.height).toBe("");
+    });
+  });
+
+  describe("smart-guide snapping", () => {
+    it("feeds the dragged-edge candidate rect to resolveResizeSnap and commits the adjusted size", () => {
+      const node = createNode();
+      const resolveResizeSnap = jest.fn(() => ({ deltaX: 5, deltaY: 0 }));
+      const onResizeSnapEnd = jest.fn();
+      const { nodeEl, onNodeConfigMutated } = mountFrame(node, {
+        resolveResizeSnap,
+        onResizeSnapEnd,
+      });
+
+      dragZone(nodeEl, "e", { from: { x: 100, y: 100 }, to: { x: 140, y: 100 }, release: false });
+
+      // node at (200,150), initial 300x200, raw east delta +40 → the candidate
+      // rect moves ONLY the dragged (right) edge; the anchored edges stay put.
+      expect(resolveResizeSnap).toHaveBeenCalledWith(
+        { left: 200, right: 540, top: 150, bottom: 350 },
+        { x: 1, y: 0 }
+      );
+      // Snap adjustment (+5) lands on top of the raw delta: 300 + 40 + 5.
+      expect(node.size?.width).toBe(345);
+
+      window.dispatchEvent(
+        createPointerEvent("pointerup", { pointerId: 7, clientX: 140, clientY: 100 })
+      );
+      expect(node.size?.width).toBe(345);
+      expect(onNodeConfigMutated).toHaveBeenCalledTimes(1);
+      // Release always clears the host's guide lines.
+      expect(onResizeSnapEnd).toHaveBeenCalled();
+    });
+
+    it("bypasses snapping while Ctrl is held and clears live guides immediately", () => {
+      const node = createNode();
+      const resolveResizeSnap = jest.fn(() => ({ deltaX: 5, deltaY: 0 }));
+      const onResizeSnapEnd = jest.fn();
+      const { nodeEl } = mountFrame(node, { resolveResizeSnap, onResizeSnapEnd });
+
+      queryZone(nodeEl, "e").dispatchEvent(
+        createPointerEvent("pointerdown", { pointerId: 9, clientX: 100, clientY: 100 })
+      );
+      window.dispatchEvent(
+        createPointerEvent("pointermove", {
+          pointerId: 9,
+          clientX: 140,
+          clientY: 100,
+          ctrlKey: true,
+        })
+      );
+
+      expect(resolveResizeSnap).not.toHaveBeenCalled();
+      // Guides from any earlier snapped frame are cleared as soon as the
+      // bypass modifier goes down, not only on release.
+      expect(onResizeSnapEnd).toHaveBeenCalled();
+      expect(node.size?.width).toBe(340);
+
+      window.dispatchEvent(
+        createPointerEvent("pointerup", { pointerId: 9, clientX: 140, clientY: 100 })
+      );
+      expect(node.size?.width).toBe(340);
     });
   });
 });

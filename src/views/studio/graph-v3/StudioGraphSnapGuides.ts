@@ -296,6 +296,75 @@ function offsetRect(rect: StudioSnapRect, deltaX: number, deltaY: number): Studi
   };
 }
 
+/**
+ * Edge-anchored snapping for RESIZE drags: only the dragged edge(s) snap to
+ * static alignment anchors (edges/centers), mirroring the move-drag guides.
+ * Spacing/gap snapping deliberately does not apply — a resize moves an edge,
+ * not the whole box, so equal-gap targets are meaningless mid-gesture.
+ */
+export function resolveStudioGraphResizeSnap(params: {
+  /** Candidate rect with the raw drag deltas already applied. */
+  moving: StudioSnapRect;
+  others: StudioSnapRect[];
+  threshold: number;
+  /** Which edges the active zone drags: -1 = left/top, 1 = right/bottom. */
+  edges: { x: -1 | 0 | 1; y: -1 | 0 | 1 };
+}): StudioSnapResult {
+  const empty: StudioSnapResult = { deltaX: 0, deltaY: 0, guides: [], gaps: [] };
+  const { moving } = params;
+  const threshold = Number.isFinite(params.threshold) ? Math.max(0, params.threshold) : 0;
+  if (threshold === 0 || !isFiniteRect(moving)) {
+    return empty;
+  }
+  const others = params.others.filter(isFiniteRect);
+  if (others.length === 0) {
+    return empty;
+  }
+
+  const resolveEdge = (axis: AxisName, edge: -1 | 0 | 1): AlignmentCandidate | null => {
+    if (edge === 0) {
+      return null;
+    }
+    const span = axisSpan(moving, axis);
+    const anchor = edge === 1 ? span.max : span.min;
+    let best: AlignmentCandidate | null = null;
+    for (const other of others) {
+      for (const target of anchors(axisSpan(other, axis))) {
+        const adjustment = target - anchor;
+        if (Math.abs(adjustment) > threshold) {
+          continue;
+        }
+        if (!best || Math.abs(adjustment) < Math.abs(best.adjustment)) {
+          best = { adjustment, position: target };
+        }
+      }
+    }
+    return best;
+  };
+
+  const xCandidate = resolveEdge("x", params.edges.x);
+  const yCandidate = resolveEdge("y", params.edges.y);
+  const deltaX = xCandidate?.adjustment ?? 0;
+  const deltaY = yCandidate?.adjustment ?? 0;
+  // Only the dragged edges move; the anchored edges stay put.
+  const snapped: StudioSnapRect = {
+    left: moving.left + (params.edges.x === -1 ? deltaX : 0),
+    right: moving.right + (params.edges.x === 1 ? deltaX : 0),
+    top: moving.top + (params.edges.y === -1 ? deltaY : 0),
+    bottom: moving.bottom + (params.edges.y === 1 ? deltaY : 0),
+  };
+
+  const guides: StudioSnapGuideLine[] = [];
+  if (xCandidate) {
+    guides.push(buildAlignmentGuide(snapped, others, "x", xCandidate.position));
+  }
+  if (yCandidate) {
+    guides.push(buildAlignmentGuide(snapped, others, "y", yCandidate.position));
+  }
+
+  return { deltaX, deltaY, guides, gaps: [] };
+}
+
 export function resolveStudioGraphSnap(params: {
   moving: StudioSnapRect;
   others: StudioSnapRect[];

@@ -200,6 +200,18 @@ export class StudioGraphInteractionEngine {
     return this.selectionController.getNodeElement(nodeId);
   }
 
+  resolveNodeResizeSnap(
+    nodeId: string,
+    moving: { left: number; top: number; right: number; bottom: number },
+    edges: { x: -1 | 0 | 1; y: -1 | 0 | 1 }
+  ): { deltaX: number; deltaY: number } {
+    return this.selectionController.resolveNodeResizeSnap(nodeId, moving, edges);
+  }
+
+  clearResizeSnapGuides(): void {
+    this.selectionController.clearResizeSnapGuides();
+  }
+
   registerPortElement(nodeId: string, direction: "in" | "out", portId: string, element: HTMLElement): void {
     this.connectionEngine.registerPortElement(nodeId, direction, portId, element);
   }

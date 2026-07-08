@@ -273,6 +273,9 @@ export function renderTextNodeCard(options: RenderTextNodeCardOptions): void {
     ariaLabel: "Resize text",
     interactionLocked: busy,
     getGraphZoom: () => graphInteraction.getGraphZoom(),
+    resolveResizeSnap: (moving, edges) =>
+      graphInteraction.resolveNodeResizeSnap(node.id, moving, edges),
+    onResizeSnapEnd: () => graphInteraction.clearResizeSnapGuides(),
     onNodeConfigMutated,
     onNodeConfigValueChange,
     onNodeResize,

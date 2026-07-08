@@ -1,4 +1,5 @@
 import {
+  resolveStudioGraphResizeSnap,
   resolveStudioGraphSnap,
   STUDIO_SNAP_THRESHOLD_PX,
   type StudioSnapRect,
@@ -165,6 +166,73 @@ describe("resolveStudioGraphSnap guardrails", () => {
       moving: rect(103, 300, 100, 80),
       others: [{ left: NaN, top: 0, right: 100, bottom: 100 }],
       threshold: THRESHOLD,
+    });
+
+    expect(result).toEqual({ deltaX: 0, deltaY: 0, guides: [], gaps: [] });
+  });
+});
+
+describe("resolveStudioGraphResizeSnap", () => {
+  it("snaps the dragged east edge to a static anchor with a guide and no spacing gaps", () => {
+    const result = resolveStudioGraphResizeSnap({
+      moving: rect(300, 300, 97, 80), // right edge at 397
+      others: [rect(400, 100, 100, 90)], // left anchor at 400
+      threshold: THRESHOLD,
+      edges: { x: 1, y: 0 },
+    });
+
+    expect(result.deltaX).toBe(3);
+    expect(result.deltaY).toBe(0);
+    // Guide spans from the static's top to the snapped moving rect's bottom.
+    expect(result.guides).toEqual([{ axis: "x", position: 400, start: 100, end: 380 }]);
+    // Spacing gaps are a move-drag concept; resize never emits them.
+    expect(result.gaps).toEqual([]);
+  });
+
+  it("never snaps off the anchored edge — only dragged edges are candidates", () => {
+    // The static's left anchor (297) sits 3px from the moving LEFT edge (300),
+    // but an east drag anchors the left edge, so nothing may snap.
+    const result = resolveStudioGraphResizeSnap({
+      moving: rect(300, 300, 100, 80),
+      others: [rect(297, 500, 50, 80)],
+      threshold: THRESHOLD,
+      edges: { x: 1, y: 0 },
+    });
+
+    expect(result).toEqual({ deltaX: 0, deltaY: 0, guides: [], gaps: [] });
+  });
+
+  it("snaps both axes independently on a corner drag", () => {
+    const result = resolveStudioGraphResizeSnap({
+      moving: rect(100, 100, 103, 77), // right 203, bottom 177
+      others: [rect(200, 300, 80, 80), rect(400, 180, 80, 100)],
+      threshold: THRESHOLD,
+      edges: { x: 1, y: 1 },
+    });
+
+    expect(result.deltaX).toBe(-3); // right 203 → 200
+    expect(result.deltaY).toBe(3); // bottom 177 → 180
+    expect(result.guides).toHaveLength(2);
+    expect(result.gaps).toEqual([]);
+  });
+
+  it("returns identity when no edge is being dragged", () => {
+    const result = resolveStudioGraphResizeSnap({
+      moving: rect(100, 100, 100, 90),
+      others: [rect(100, 300, 100, 90)],
+      threshold: THRESHOLD,
+      edges: { x: 0, y: 0 },
+    });
+
+    expect(result).toEqual({ deltaX: 0, deltaY: 0, guides: [], gaps: [] });
+  });
+
+  it("returns identity for a non-positive threshold", () => {
+    const result = resolveStudioGraphResizeSnap({
+      moving: rect(300, 300, 97, 80),
+      others: [rect(400, 100, 100, 90)],
+      threshold: 0,
+      edges: { x: 1, y: 0 },
     });
 
     expect(result).toEqual({ deltaX: 0, deltaY: 0, guides: [], gaps: [] });

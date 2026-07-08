@@ -141,6 +141,9 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
       ariaLabel: node.kind === "studio.terminal" ? "Resize terminal node" : "Resize node",
       interactionLocked,
       getGraphZoom: () => graphInteraction.getGraphZoom(),
+      resolveResizeSnap: (moving, edges) =>
+        graphInteraction.resolveNodeResizeSnap(node.id, moving, edges),
+      onResizeSnapEnd: () => graphInteraction.clearResizeSnapGuides(),
       hasAspectMediaContent: mediaPreviewDescriptor !== null,
       onNodeConfigMutated,
       onNodeConfigValueChange,
