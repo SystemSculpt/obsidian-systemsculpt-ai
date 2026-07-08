@@ -28,7 +28,6 @@ describe("ImageGenerationDefaults", () => {
   it("resolves defaults from current behavior when no last-used values exist", () => {
     const result = resolveImageGenerationDefaults({
       settings: buildSettings(),
-      source: "command",
       serverModels: [
         {
           id: "google/gemini-3.1-flash-lite-image",
@@ -51,7 +50,6 @@ describe("ImageGenerationDefaults", () => {
         imageGenerationLastUsedCount: 4,
         imageGenerationLastUsedAspectRatio: "",
       }),
-      source: "command",
       serverModels: [
         {
           id: "openai/gpt-5.4-image-2",
@@ -69,39 +67,34 @@ describe("ImageGenerationDefaults", () => {
   it("treats retired model ids in persisted settings as unset", () => {
     const result = resolveImageGenerationDefaults({
       settings: buildSettings({
-        // Both values predate the 2026-07 curation pass and no longer exist
-        // on the server; they must fall through to the current default
+        // All three values predate the 2026-07 curation pass and no longer
+        // exist on the server; they must fall through to the current default
         // instead of producing a guaranteed invalid_model rejection.
+        // nano-banana-pro also carried a match_input_image aspect special
+        // case that retired with it.
         imageGenerationDefaultModelId: "openai/gpt-5-image-mini",
         imageGenerationLastUsedModelId: "google/gemini-3-pro-image-preview",
       }),
-      source: "command",
     });
 
     expect(result.modelId).toBe("google/gemini-3.1-flash-image");
-  });
 
-  it("keeps nano image-node fallback to match_input_image when there is no aspect history", () => {
-    const result = resolveImageGenerationDefaults({
+    const nano = resolveImageGenerationDefaults({
       settings: buildSettings({
         imageGenerationDefaultModelId: "google/nano-banana-pro",
-        imageGenerationLastUsedModelId: "",
-        imageGenerationLastUsedAspectRatio: "",
+        imageGenerationLastUsedModelId: "google/nano-banana-pro",
       }),
-      source: "image-node",
     });
 
-    expect(result.modelId).toBe("google/nano-banana-pro");
-    expect(result.aspectRatio).toBe("match_input_image");
+    expect(nano.modelId).toBe("google/gemini-3.1-flash-image");
+    expect(nano.aspectRatio).not.toBe("match_input_image");
   });
 
-  it("uses last-used aspect ratio for nano image-node creation when available", () => {
+  it("uses the last-used aspect ratio when available", () => {
     const result = resolveImageGenerationDefaults({
       settings: buildSettings({
-        imageGenerationDefaultModelId: "google/nano-banana-pro",
         imageGenerationLastUsedAspectRatio: "9:16",
       }),
-      source: "image-node",
     });
 
     expect(result.aspectRatio).toBe("9:16");

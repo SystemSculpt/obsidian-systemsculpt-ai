@@ -13,8 +13,6 @@ export type ImageGenerationDefaults = {
   aspectRatio: string;
 };
 
-export type ImageGenerationDefaultsSource = "command" | "image-node";
-
 type ImageGenerationLastUsedState = {
   modelId: string;
   imageCount: number;
@@ -27,7 +25,6 @@ type ImageGenerationLastUsedPatch = {
   aspectRatio?: string;
 };
 
-const NANO_BANANA_MODEL_ID = "google/nano-banana-pro";
 const MIN_IMAGE_COUNT = 1;
 const MAX_IMAGE_COUNT = 4;
 
@@ -128,7 +125,6 @@ export function resolveImageGenerationDefaults(options: {
     | "imageGenerationLastUsedCount"
     | "imageGenerationLastUsedAspectRatio"
   >;
-  source: ImageGenerationDefaultsSource;
   serverModels?: readonly ImageGenerationServerCatalogModel[];
 }): ImageGenerationDefaults {
   const lastUsed = getImageGenerationLastUsedState(options.settings);
@@ -138,14 +134,9 @@ export function resolveImageGenerationDefaults(options: {
 
   const imageCount = sanitizeImageCountState(lastUsed.imageCount);
 
-  let aspectRatio = sanitizeAspectRatio(lastUsed.aspectRatio);
-  if (!aspectRatio) {
-    if (options.source === "image-node" && modelId === NANO_BANANA_MODEL_ID) {
-      aspectRatio = "match_input_image";
-    } else {
-      aspectRatio = getDefaultImageAspectRatio(modelId, options.serverModels);
-    }
-  }
+  const aspectRatio =
+    sanitizeAspectRatio(lastUsed.aspectRatio) ||
+    getDefaultImageAspectRatio(modelId, options.serverModels);
 
   return {
     modelId,

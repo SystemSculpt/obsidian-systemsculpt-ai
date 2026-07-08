@@ -10,6 +10,7 @@ export const RETIRED_IMAGE_GENERATION_MODEL_IDS: ReadonlySet<string> = new Set([
   "google/gemini-3-pro-image-preview",
   "google/gemini-3-pro-image",
   "google/gemini-2.5-flash-image",
+  "google/nano-banana-pro",
   "openai/gpt-5-image",
   "openai/gpt-5-image-mini",
   "black-forest-labs/flux.2-pro",
