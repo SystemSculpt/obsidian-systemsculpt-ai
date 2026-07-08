@@ -27,19 +27,18 @@ describe("CommandManager open-systemsculpt-studio command", () => {
     (app.vault.getFiles as jest.Mock).mockReturnValue(options?.vaultFiles ?? []);
 
     const activateSystemSculptStudioView = jest.fn().mockResolvedValue(undefined);
-    const createProject = jest.fn().mockResolvedValue({
-      name: options?.projectName ?? "Untitled Studio",
+    const createProjectFile = jest.fn().mockResolvedValue({
+      path: options?.projectPath ?? "SystemSculpt/Studio/Untitled Studio.systemsculpt",
+      project: {
+        name: options?.projectName ?? "Untitled Studio",
+      },
     });
-    const getCurrentProjectPath = jest
-      .fn()
-      .mockReturnValue(options?.projectPath ?? "SystemSculpt/Studio/Untitled Studio.systemsculpt");
 
     const addCommand = jest.fn();
     const plugin = {
       addCommand,
       getStudioService: jest.fn(() => ({
-        createProject,
-        getCurrentProjectPath,
+        createProjectFile,
       })),
       getViewManager: jest.fn(() => ({
         activateSystemSculptStudioView,
@@ -55,8 +54,7 @@ describe("CommandManager open-systemsculpt-studio command", () => {
 
     return {
       openCommand,
-      createProject,
-      getCurrentProjectPath,
+      createProjectFile,
       activateSystemSculptStudioView,
     };
   }
@@ -66,12 +64,12 @@ describe("CommandManager open-systemsculpt-studio command", () => {
       path: "Projects/Current.systemsculpt",
       extension: "systemsculpt",
     });
-    const { openCommand, createProject, activateSystemSculptStudioView } =
+    const { openCommand, createProjectFile, activateSystemSculptStudioView } =
       registerStudioOpenCommand({ activeFile });
 
     await openCommand.callback();
 
-    expect(createProject).not.toHaveBeenCalled();
+    expect(createProjectFile).not.toHaveBeenCalled();
     expect(activateSystemSculptStudioView).toHaveBeenCalledWith(activeFile.path);
   });
 
@@ -79,8 +77,7 @@ describe("CommandManager open-systemsculpt-studio command", () => {
     const consoleLogSpy = jest.spyOn(console, "log").mockImplementation(() => {});
     const {
       openCommand,
-      createProject,
-      getCurrentProjectPath,
+      createProjectFile,
       activateSystemSculptStudioView,
     } = registerStudioOpenCommand({
       activeFile: null,
@@ -93,8 +90,7 @@ describe("CommandManager open-systemsculpt-studio command", () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(createProject).toHaveBeenCalledTimes(1);
-    expect(getCurrentProjectPath).toHaveBeenCalledTimes(1);
+    expect(createProjectFile).toHaveBeenCalledTimes(1);
     expect(activateSystemSculptStudioView).toHaveBeenCalledWith(
       "SystemSculpt/Studio/Fresh Studio.systemsculpt"
     );

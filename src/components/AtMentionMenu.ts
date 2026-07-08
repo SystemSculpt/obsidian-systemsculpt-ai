@@ -475,10 +475,10 @@ export class AtMentionMenu extends Component {
     const spaceBelow = window.innerHeight - inputRect.bottom;
     const preferAbove = spaceAbove > spaceBelow;
 
-    this.menuEl.style.position = "fixed";
+    // position: fixed + z-index come from .systemsculpt-at-mention-suggest
+    // (components/chat-status.css); only the computed offsets are inline.
     this.menuEl.style.left = `${left}px`;
     this.menuEl.style.width = `${width}px`;
-    this.menuEl.style.zIndex = "1000";
 
     if (preferAbove && spaceAbove >= 200) {
       this.menuEl.style.top = "auto";

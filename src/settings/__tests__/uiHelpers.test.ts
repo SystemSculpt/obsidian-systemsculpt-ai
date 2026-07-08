@@ -164,15 +164,15 @@ describe("uiHelpers", () => {
         linkText: "Sign up with our referral link",
         href: "https://readwise.io/systemsculpt",
         suffixText: " (supports SystemSculpt).",
-        className: "readwise-affiliate-note",
-        linkClassName: "readwise-affiliate-link",
+        className: "ss-readwise-affiliate-note",
+        linkClassName: "ss-readwise-affiliate-link",
         datasetTestId: "readwise-referral-link",
       });
 
       expect(container.contains(note)).toBe(true);
       expect(note.tagName).toBe("DIV");
       expect(note.classList.contains("ss-inline-note")).toBe(true);
-      expect(note.classList.contains("readwise-affiliate-note")).toBe(true);
+      expect(note.classList.contains("ss-readwise-affiliate-note")).toBe(true);
       expect(note.textContent).toContain("New to Readwise?");
       expect(note.textContent).toContain("Sign up with our referral link");
       expect(note.textContent).toContain("supports SystemSculpt");
@@ -184,7 +184,7 @@ describe("uiHelpers", () => {
       expect(link?.rel).toBe("noopener");
       expect(link?.dataset.testId).toBe("readwise-referral-link");
       expect(link?.classList.contains("ss-help-link")).toBe(true);
-      expect(link?.classList.contains("readwise-affiliate-link")).toBe(true);
+      expect(link?.classList.contains("ss-readwise-affiliate-link")).toBe(true);
 
       expect(setIcon).toHaveBeenCalledWith(
         expect.any(HTMLSpanElement),

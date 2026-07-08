@@ -106,9 +106,8 @@ export class TextEditModal extends StandardModal {
       this.textArea.style.maxHeight = `${this.options.maxHeight}px`;
     }
 
-    // Ensure vertical resize is enabled
-    this.textArea.style.resize = "vertical";
-    
+    // Vertical resize comes from .ss-modal__textarea (modals/modal.css)
+
     // Auto-resize functionality
     this.textArea.addEventListener("input", () => {
       this.autoResizeTextArea();
@@ -117,13 +116,11 @@ export class TextEditModal extends StandardModal {
     
     // Initial resize
     setTimeout(() => this.autoResizeTextArea(), 0);
-      // Create Reset to Default Prompt button
-      const resetButton = textAreaContainer.createEl("button", { text: "Reset to Default Prompt" });
-      resetButton.style.marginTop = "8px";
-      resetButton.style.display = "block";
-      resetButton.style.padding = "6px 12px";
-      resetButton.style.fontSize = "0.9em";
-      resetButton.style.cursor = "pointer";
+      // Create Reset to Default Prompt button (styled in modals/modal.css)
+      const resetButton = textAreaContainer.createEl("button", {
+        text: "Reset to Default Prompt",
+        cls: "ss-modal__textarea-reset",
+      });
 
       resetButton.addEventListener("click", () => {
           if (this.textArea) {

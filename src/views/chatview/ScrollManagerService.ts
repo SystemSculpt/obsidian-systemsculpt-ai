@@ -125,10 +125,10 @@ export class ScrollManagerService {
   }
 
   private initializeSentinel(): void {
+    // Styled in views/chat.css (.systemsculpt-scroll-sentinel)
     this.sentinel = document.createElement("div");
     this.sentinel.className = "systemsculpt-scroll-sentinel";
     this.sentinel.setAttribute("aria-hidden", "true");
-    this.sentinel.style.cssText = "height:1px;width:100%;pointer-events:none;overflow-anchor:none;";
     this.container.appendChild(this.sentinel);
   }
 

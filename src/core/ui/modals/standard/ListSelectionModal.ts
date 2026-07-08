@@ -591,20 +591,17 @@ export class ListSelectionModal extends StandardModal {
     previewImg.src = imageUrl;
     previewImg.alt = title;
     previewImg.onload = () => {
-      // Adjust container size based on image aspect ratio
+      // Size presets live in modals/modal.css (.ss-preview-container--*)
       const aspectRatio = previewImg.naturalWidth / previewImg.naturalHeight;
       if (aspectRatio > 1.5) {
         // Wide image - maximize width
-        previewContainer.style.width = "350px";
-        previewContainer.style.height = "auto";
+        previewContainer.classList.add("ss-preview-container--landscape");
       } else if (aspectRatio < 0.7) {
         // Tall image - maximize height
-        previewContainer.style.width = "auto";
-        previewContainer.style.height = "350px";
+        previewContainer.classList.add("ss-preview-container--portrait");
       } else {
         // Balanced image - square-ish
-        previewContainer.style.width = "300px";
-        previewContainer.style.height = "300px";
+        previewContainer.classList.add("ss-preview-container--square");
       }
     };
     

@@ -36,12 +36,11 @@ const createPlugin = () => {
 
 describe("TitleGenerationService", () => {
   let streamMessage: jest.Mock;
-  let setTimeoutSpy: jest.SpyInstance;
-  let clearTimeoutSpy: jest.SpyInstance;
 
   beforeEach(() => {
-    setTimeoutSpy = jest.spyOn(global, "setTimeout").mockImplementation(() => 0 as any);
-    clearTimeoutSpy = jest.spyOn(global, "clearTimeout").mockImplementation(() => {});
+    // Fake timers keep the service's 30s timeout guard from firing; spying on
+    // global.setTimeout breaks on Node >= 26, where sandbox timers are lazy.
+    jest.useFakeTimers();
     streamMessage = jest.fn();
     jest.spyOn(SystemSculptService, "getInstance").mockReturnValue({
       streamMessage,
@@ -49,8 +48,7 @@ describe("TitleGenerationService", () => {
   });
 
   afterEach(() => {
-    setTimeoutSpy.mockRestore();
-    clearTimeoutSpy.mockRestore();
+    jest.useRealTimers();
     jest.restoreAllMocks();
     (TitleGenerationService as any).instance = null;
   });

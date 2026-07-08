@@ -101,15 +101,21 @@ export class ResumeChatService {
 
     // Get the appropriate container based on current view mode
     const editorContainer = view.contentEl.querySelector('.cm-editor');
-    const contentContainer = view.getMode() === 'source' ? editorContainer : view.contentEl;
+    const isSourceMode = view.getMode() === 'source';
+    const contentContainer = isSourceMode ? editorContainer : view.contentEl;
     if (!contentContainer) return;
 
     // Extract chat ID from the file
     const chatId = this.extractChatId(file);
     if (!chatId) return;
 
-    // Create and insert the resume chat button
+    // Create and insert the resume chat button. In source mode the button
+    // mounts inside .cm-editor and needs the absolute-positioning modifier
+    // (resume-chat.css keys off this class, not the Obsidian ancestor).
     const buttonContainer = this.createResumeChatButton(chatId, file);
+    if (isSourceMode) {
+      buttonContainer.classList.add('systemsculpt-resume-chat-button--editor');
+    }
     contentContainer.insertBefore(buttonContainer, contentContainer.firstChild);
     this.resumeButtonByLeaf.set(leaf, buttonContainer);
     try { (window as any).FreezeMonitor?.mark?.('resume-chat:handleLeafChange:end'); } catch {}

@@ -28,7 +28,7 @@ export class ReadwiseSyncWidget {
   show(): void {
     if (this.containerEl) {
       // Already showing, just ensure visible
-      this.containerEl.classList.add("visible");
+      this.containerEl.classList.add("is-visible");
       return;
     }
 
@@ -37,7 +37,7 @@ export class ReadwiseSyncWidget {
 
     // Trigger animation after render
     requestAnimationFrame(() => {
-      this.containerEl?.classList.add("visible");
+      this.containerEl?.classList.add("is-visible");
     });
   }
 
@@ -54,7 +54,7 @@ export class ReadwiseSyncWidget {
     }
 
     // Animate out
-    this.containerEl.classList.remove("visible");
+    this.containerEl.classList.remove("is-visible");
 
     // Remove after animation
     setTimeout(() => {
@@ -82,18 +82,18 @@ export class ReadwiseSyncWidget {
   private render(): void {
     // Create container
     this.containerEl = document.createElement("div");
-    this.containerEl.className = "readwise-sync-widget";
+    this.containerEl.className = "ss-readwise-widget";
 
     // Header
     const headerEl = document.createElement("div");
-    headerEl.className = "readwise-sync-widget-header";
+    headerEl.className = "ss-readwise-widget__header";
 
     this.titleEl = document.createElement("span");
-    this.titleEl.className = "readwise-sync-widget-title";
+    this.titleEl.className = "ss-readwise-widget__title";
     this.titleEl.textContent = "Syncing Readwise...";
 
     const closeBtn = document.createElement("button");
-    closeBtn.className = "readwise-sync-widget-close";
+    closeBtn.className = "ss-readwise-widget__close";
     closeBtn.setAttribute("aria-label", "Dismiss");
     closeBtn.textContent = "×";
     closeBtn.addEventListener("click", () => this.hide());
@@ -103,23 +103,23 @@ export class ReadwiseSyncWidget {
 
     // Content
     const contentEl = document.createElement("div");
-    contentEl.className = "readwise-sync-widget-content";
+    contentEl.className = "ss-readwise-widget__content";
 
     this.itemEl = document.createElement("div");
-    this.itemEl.className = "readwise-sync-widget-item";
+    this.itemEl.className = "ss-readwise-widget__item";
     this.itemEl.textContent = "Starting...";
 
     const progressContainer = document.createElement("div");
-    progressContainer.className = "readwise-sync-widget-progress";
+    progressContainer.className = "ss-readwise-widget__progress";
 
     this.progressBarEl = document.createElement("div");
-    this.progressBarEl.className = "readwise-sync-widget-progress-bar";
+    this.progressBarEl.className = "ss-readwise-widget__progress-bar";
     this.progressBarEl.style.width = "0%";
 
     progressContainer.appendChild(this.progressBarEl);
 
     this.statsEl = document.createElement("div");
-    this.statsEl.className = "readwise-sync-widget-stats";
+    this.statsEl.className = "ss-readwise-widget__stats";
     this.statsEl.textContent = "";
 
     contentEl.appendChild(this.itemEl);

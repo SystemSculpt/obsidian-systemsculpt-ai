@@ -171,11 +171,24 @@ describe("StandardAIResponseModal", () => {
       expect(generateSpy).toHaveBeenCalled();
     });
 
-    it("injects redesign styles", () => {
+    it("does not inject runtime style elements (styling lives in modals/ai-response.css)", () => {
       modal.onOpen();
 
-      const styleEl = document.getElementById("ss-airesponse-redesign-styles");
-      // Style may or may not be injected depending on test order
+      expect(document.getElementById("ss-airesponse-redesign-styles")).toBeNull();
+      expect(document.getElementById("systemsculpt-pulse-keyframes")).toBeNull();
+    });
+
+    it("applies the design-system classes instead of inline styles", () => {
+      modal.onOpen();
+
+      const responseEl = (modal as any).responseContainer as HTMLElement;
+      const buttonsEl = (modal as any).buttonContainer as HTMLElement;
+
+      expect(responseEl.classList.contains("ss-airesponse-modal__response")).toBe(true);
+      expect(buttonsEl.classList.contains("ss-button-container")).toBe(true);
+      expect(buttonsEl.classList.contains("ss-airesponse-modal__buttons")).toBe(true);
+      expect(responseEl.getAttribute("style")).toBeNull();
+      expect(buttonsEl.getAttribute("style")).toBeNull();
     });
   });
 

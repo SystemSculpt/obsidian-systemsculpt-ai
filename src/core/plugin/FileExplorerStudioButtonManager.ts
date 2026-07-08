@@ -171,7 +171,7 @@ export class FileExplorerStudioButtonManager {
     try {
       const studio = this.plugin.getStudioService() as StudioServiceLike;
       const projectPath = this.resolveTargetProjectPath(button);
-      const project = await studio.createProject(
+      const created = await studio.createProjectFile(
         projectPath
           ? {
               name: NEW_STUDIO_PROJECT_NAME,
@@ -181,14 +181,10 @@ export class FileExplorerStudioButtonManager {
               name: NEW_STUDIO_PROJECT_NAME,
             }
       );
-      const createdProjectPath = studio.getCurrentProjectPath();
-      if (!createdProjectPath) {
-        throw new Error("Studio project was created but no project path was returned.");
-      }
 
       const viewManager = this.plugin.getViewManager() as ViewManagerLike;
-      await viewManager.activateSystemSculptStudioView(createdProjectPath);
-      new Notice(`Created Studio project: ${project.name}`);
+      await viewManager.activateSystemSculptStudioView(created.path);
+      new Notice(`Created Studio project: ${created.project.name}`);
     } catch (error: any) {
       new Notice(`Unable to create Studio project: ${error?.message || error}`);
     } finally {

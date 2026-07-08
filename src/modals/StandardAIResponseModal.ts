@@ -53,45 +53,11 @@ export class StandardAIResponseModal extends StandardModal {
     // Add title and close button
     this.addTitle("AI Response");
 
-    // Create response container
-    this.responseContainer = this.contentEl.createDiv("ss-modal__response-container");
-    this.responseContainer.style.padding = "20px";
-    this.responseContainer.style.backgroundColor = "var(--background-secondary)";
-    this.responseContainer.style.borderRadius = "8px";
-    this.responseContainer.style.whiteSpace = "pre-wrap";
-    this.responseContainer.style.maxHeight = "60vh";
-    this.responseContainer.style.minHeight = "250px";
-    this.responseContainer.style.overflow = "auto";
-    this.responseContainer.style.marginBottom = "20px";
-    this.responseContainer.style.boxShadow = "0 2px 8px rgba(0, 0, 0, 0.1)";
-    this.responseContainer.style.display = "flex";
-    this.responseContainer.style.flexDirection = "column";
-    this.responseContainer.style.justifyContent = "center";
-    this.responseContainer.style.fontSize = "15px";
-    this.responseContainer.style.lineHeight = "1.5";
+    // Create response container (styled in modals/ai-response.css)
+    this.responseContainer = this.contentEl.createDiv("ss-airesponse-modal__response");
 
     // Create button container in the footer
-    this.buttonContainer = this.footerEl.createDiv("ss-button-container");
-    this.buttonContainer.style.display = "flex";
-    this.buttonContainer.style.flexWrap = "wrap";
-    this.buttonContainer.style.gap = "10px";
-    this.buttonContainer.style.justifyContent = "center";
-    this.buttonContainer.style.alignItems = "center";
-    this.buttonContainer.style.marginTop = "12px";
-
-    // Inject redesign styles if not already present
-    if (!document.getElementById("ss-airesponse-redesign-styles")) {
-      const styleEl = document.createElement("style");
-      styleEl.id = "ss-airesponse-redesign-styles";
-      styleEl.textContent = `
-        .ss-button {
-          min-width: 120px;
-          max-width: 200px;
-          flex: 1 1 auto;
-        }
-      `;
-      document.head.appendChild(styleEl);
-    }
+    this.buttonContainer = this.footerEl.createDiv("ss-button-container ss-airesponse-modal__buttons");
 
     // Start generating the response
     this.generateResponse();
@@ -104,40 +70,12 @@ export class StandardAIResponseModal extends StandardModal {
     }
 
     // Create a loading indicator that takes up the full container
-    this.loadingEl = this.responseContainer.createDiv("ss-modal__loading");
-    this.loadingEl.style.display = "flex";
-    this.loadingEl.style.alignItems = "center";
-    this.loadingEl.style.justifyContent = "center";
-    this.loadingEl.style.height = "100%";
-    this.loadingEl.style.width = "100%";
-    this.loadingEl.style.minHeight = "200px";
-    this.loadingEl.style.boxSizing = "border-box";
+    // (styled in modals/ai-response.css; pulse comes from the shared
+    // ss-pulse keyframes in foundation/motion.css)
+    this.loadingEl = this.responseContainer.createDiv("ss-modal__loading ss-airesponse-modal__loading");
 
-    // Add loading text with a clean, minimal style
     const loadingTextEl = this.loadingEl.createDiv("ss-modal__loading-text");
     loadingTextEl.setText("Processing with AI...");
-    loadingTextEl.style.fontWeight = "600";
-    loadingTextEl.style.color = "var(--text-accent)";
-    loadingTextEl.style.fontSize = "20px";
-    loadingTextEl.style.letterSpacing = "0.5px";
-    loadingTextEl.style.textAlign = "center";
-
-    // Add a smooth pulse animation to the text
-    if (!document.getElementById("systemsculpt-pulse-keyframes")) {
-      const styleEl = document.createElement("style");
-      styleEl.id = "systemsculpt-pulse-keyframes";
-      styleEl.textContent = `
-        @keyframes pulse {
-          0% { opacity: 0.4; }
-          50% { opacity: 1; }
-          100% { opacity: 0.4; }
-        }
-        .ss-modal__loading-text {
-          animation: pulse 2.5s infinite ease-in-out;
-        }
-      `;
-      document.head.appendChild(styleEl);
-    }
   }
 
   private async generateResponse() {
@@ -150,7 +88,8 @@ export class StandardAIResponseModal extends StandardModal {
       this.buttonContainer.empty();
       this.fullResponse = "";
 
-      // Show loading indicator
+      // Show loading indicator (re-center the container while loading)
+      this.responseContainer.classList.remove("is-populated");
       this.createLoadingIndicator();
 
       // Stream the response from the LLM
@@ -169,9 +108,8 @@ export class StandardAIResponseModal extends StandardModal {
               this.loadingEl.remove();
               this.loadingEl = undefined;
 
-              // Reset container style for text content
-              this.responseContainer.style.display = "block";
-              this.responseContainer.style.justifyContent = "initial";
+              // Reset container layout for text content
+              this.responseContainer.classList.add("is-populated");
             }
 
             this.fullResponse += event.text;
@@ -189,9 +127,8 @@ export class StandardAIResponseModal extends StandardModal {
         if (this.loadingEl) {
           this.loadingEl.remove();
 
-          // Reset container style for text content
-          this.responseContainer.style.display = "block";
-          this.responseContainer.style.justifyContent = "initial";
+          // Reset container layout for text content
+          this.responseContainer.classList.add("is-populated");
         }
         this.responseContainer.setText(`Error: ${error.message || "Failed to get response from AI"}`);
 

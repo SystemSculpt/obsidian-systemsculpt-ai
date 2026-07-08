@@ -50,88 +50,27 @@ export class BackupRestoreModal {
                 closeOnSelect: true,
                 // Add custom content handler to display details properly and add create backup button
                 customContent: (containerEl) => {
-                    // Add a small style block for our custom formatting
-                    const styleEl = document.createElement('style');
-                    styleEl.textContent = `
-                        .backup-details {
-                            font-size: 12px;
-                            color: var(--text-muted);
-                            white-space: normal !important;
-                            overflow: visible !important;
-                            text-overflow: clip !important;
-                            line-height: 1.5;
-                            margin-top: 4px;
-                        }
-                        .backup-detail-item {
-                            display: inline-block;
-                            margin-right: 8px;
-                            background: var(--background-secondary);
-                            padding: 2px 6px;
-                            border-radius: 4px;
-                            margin-bottom: 4px;
-                        }
-                        .create-backup-button {
-                            display: flex;
-                            padding: 10px;
-                            margin-bottom: 10px;
-                            background: var(--background-secondary);
-                            border-radius: 5px;
-                            align-items: center;
-                            cursor: pointer;
-                            transition: background-color 0.2s;
-                        }
-                        .create-backup-button:hover {
-                            background: var(--background-modifier-hover);
-                        }
-                        .create-backup-icon {
-                            margin-right: 8px;
-                            color: var(--text-accent);
-                        }
-                        .create-backup-text {
-                            flex-grow: 1;
-                        }
-                        .create-backup-text-main {
-                            font-weight: 500;
-                            margin-bottom: 2px;
-                        }
-                        .create-backup-text-sub {
-                            font-size: 12px;
-                            color: var(--text-muted);
-                        }
-                        .manual-backup-container {
-                            margin-bottom: 10px;
-                            padding: 10px;
-                            background: var(--background-secondary);
-                            border-radius: 5px;
-                        }
-                    `;
-                    containerEl.appendChild(styleEl);
-                    
-                    // Container for manual backup input and button
-                    const manualBackupContainer = containerEl.createDiv({ cls: 'manual-backup-container' });
-                    manualBackupContainer.style.marginBottom = '10px'; // Add some spacing
-                    manualBackupContainer.style.padding = '10px';
-                    manualBackupContainer.style.background = 'var(--background-secondary)';
-                    manualBackupContainer.style.borderRadius = '5px';
+                    // Styles live in src/css/modals/misc-modals.css (.ss-backup-*)
 
-                    const inputPromptEl = manualBackupContainer.createEl('p', { text: 'Enter a name for the new manual backup:'});
-                    inputPromptEl.style.marginBottom = '5px';
-                    
+                    // Container for manual backup input and button
+                    const manualBackupContainer = containerEl.createDiv({ cls: 'ss-backup-manual' });
+
+                    manualBackupContainer.createEl('p', {
+                        text: 'Enter a name for the new manual backup:',
+                        cls: 'ss-backup-manual__prompt'
+                    });
+
                     const backupNameInput = new TextComponent(manualBackupContainer)
                         .setPlaceholder(`Manual backup ${new Date().toLocaleString()}`)
                         .setValue(`Manual backup ${new Date().toLocaleString()}`); // Pre-fill with default
-                    
-                    backupNameInput.inputEl.style.width = '100%';
-                    backupNameInput.inputEl.style.marginBottom = '8px';
+
+                    backupNameInput.inputEl.addClass('ss-backup-manual__input');
 
                     // Create backup button
                     const createBackupButton = manualBackupContainer.createEl('button', {
                         text: 'Create Manual Backup',
-                        cls: 'mod-cta' // Obsidian's call-to-action button style
+                        cls: 'mod-cta ss-backup-manual__submit' // Obsidian's call-to-action button style
                     });
-                    // setIcon(createBackupButton, 'plus-circle'); // Add icon to button itself, if desired
-                    createBackupButton.style.width = '100%';
-
 
                     createBackupButton.addEventListener('click', async () => {
                         const backupName = backupNameInput.getValue().trim();
@@ -176,7 +115,7 @@ export class BackupRestoreModal {
                             // Add our custom details element
                             const content = itemEl.querySelector('.ss-modal__item-content');
                             if (content) {
-                                const detailsEl = content.createDiv({ cls: 'backup-details' });
+                                const detailsEl = content.createDiv({ cls: 'ss-backup-details' });
                                 
                                 // Format details as nice badges
                                 const details = itemData._backupDetails;
@@ -185,7 +124,7 @@ export class BackupRestoreModal {
                                     detailItems.forEach(item => {
                                         detailsEl.createSpan({
                                             text: item,
-                                            cls: 'backup-detail-item'
+                                            cls: 'ss-backup-details__item'
                                         });
                                     });
                                 } else {

@@ -195,9 +195,9 @@ export class PreviewService {
     this.initializeGlobalListeners();
 
     if (!this.markdownPreview) {
+      // Pointer events are re-enabled while visible via
+      // .systemsculpt-preview.systemsculpt-visible (views/preview.css).
       this.markdownPreview = document.body.createDiv({ cls: 'systemsculpt-preview systemsculpt-markdown-preview' });
-      // Make sure the preview can receive mouse events
-      this.markdownPreview.style.pointerEvents = 'auto';
     }
 
     // Add this element to the set of active elements

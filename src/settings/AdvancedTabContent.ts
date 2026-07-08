@@ -35,6 +35,24 @@ export function displayAdvancedTabContent(containerEl: HTMLElement, tabInstance:
             });
     }
 
+    new Setting(containerEl)
+        .setName("Relative line numbers")
+        .setDesc("Show a vim-style line number gutter in the editor: the current line shows its absolute number, every other line shows its distance from the cursor. Tip: turn off Obsidian's core \"Show line number\" to avoid a doubled gutter.")
+        .addToggle((toggle) => {
+            toggle
+                .setValue(Boolean(plugin.settings.relativeLineNumbersEnabled))
+                .onChange(async (value) => {
+                    await plugin.getSettingsManager().updateSettings({
+                        relativeLineNumbersEnabled: value,
+                    });
+                    new Notice(
+                        value
+                            ? "Relative line numbers enabled."
+                            : "Relative line numbers disabled."
+                    );
+                });
+        });
+
     // Update Notifications setting
     const updateNotificationsSetting = new Setting(containerEl)
         .setName("Update notifications")

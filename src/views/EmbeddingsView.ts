@@ -79,25 +79,25 @@ export class EmbeddingsView extends ItemView {
   
   private setupUI(): void {
     // Create compact header
-    this.headerEl = this.contentEl.createDiv({ cls: 'embeddings-view-header' });
+    this.headerEl = this.contentEl.createDiv({ cls: 'ss-embeddings-view__header' });
     
-    this.titleEl = this.headerEl.createDiv({ cls: 'embeddings-view-title' });
+    this.titleEl = this.headerEl.createDiv({ cls: 'ss-embeddings-view__title' });
     
     // Title row with icon and text
-    const titleRowEl = this.titleEl.createDiv({ cls: 'embeddings-view-title-row' });
-    const iconEl = titleRowEl.createDiv({ cls: 'embeddings-view-icon' });
+    const titleRowEl = this.titleEl.createDiv({ cls: 'ss-embeddings-view__title-row' });
+    const iconEl = titleRowEl.createDiv({ cls: 'ss-embeddings-view__icon' });
     setIcon(iconEl, 'network');
     titleRowEl.createSpan({ text: 'Similar Notes' });
     
     // File name element (initially hidden)
-    this.fileNameEl = this.titleEl.createDiv({ cls: 'embeddings-view-file-name' });
+    this.fileNameEl = this.titleEl.createDiv({ cls: 'ss-embeddings-view__file-name' });
     this.fileNameEl.style.display = 'none';
     
     // Create hidden status element (kept for compatibility but hidden)
-    this.statusEl = this.contentEl.createDiv({ cls: 'embeddings-view-status', attr: { style: 'display: none;' } });
+    this.statusEl = this.contentEl.createDiv({ cls: 'ss-embeddings-view__status', attr: { style: 'display: none;' } });
     
     // Create results container
-    this.resultsEl = this.contentEl.createDiv({ cls: 'embeddings-view-results' });
+    this.resultsEl = this.contentEl.createDiv({ cls: 'ss-embeddings-view__results' });
     
     // Show initial state
     this.showEmptyState();
@@ -250,11 +250,11 @@ export class EmbeddingsView extends ItemView {
   }
   
   private startRefreshAnimation(): void {
-    this.titleEl.addClass('refreshing');
+    this.titleEl.addClass('is-refreshing');
   }
   
   private stopRefreshAnimation(): void {
-    this.titleEl.removeClass('refreshing');
+    this.titleEl.removeClass('is-refreshing');
   }
   
   private updateFileName(fileName: string): void {
@@ -615,12 +615,12 @@ export class EmbeddingsView extends ItemView {
    * Update context indicators for all currently displayed results
    */
   private updateContextIndicators(): void {
-    const resultElements = this.resultsEl.querySelectorAll('.similar-note-item');
+    const resultElements = this.resultsEl.querySelectorAll('.ss-similar-note');
     resultElements.forEach((el, index) => {
       if (index < this.currentResults.length) {
         const result = this.currentResults[index];
         const isInContext = this.isNoteInContext(result.path);
-        el.classList.toggle('similar-note-in-context', isInContext);
+        el.classList.toggle('is-in-context', isInContext);
       }
     });
   }
@@ -653,18 +653,18 @@ export class EmbeddingsView extends ItemView {
     this.currentChatView = null;
     this.lastSearchContent = '';
     
-    const emptyEl = this.resultsEl.createDiv({ cls: 'embeddings-view-empty' });
-    const iconEl = emptyEl.createDiv({ cls: 'empty-icon' });
+    const emptyEl = this.resultsEl.createDiv({ cls: 'ss-embeddings-view__state ss-embeddings-view__state--empty' });
+    const iconEl = emptyEl.createDiv({ cls: 'ss-embeddings-view__state-icon' });
     setIcon(iconEl, 'file-text');
     
     emptyEl.createDiv({ 
       text: 'Open a note or chat to see similar content',
-      cls: 'empty-title' 
+      cls: 'ss-embeddings-view__state-title' 
     });
     
     emptyEl.createDiv({
       text: 'Switch to any markdown note or chat view and this panel will show related notes from your vault.',
-      cls: 'empty-description'
+      cls: 'ss-embeddings-view__state-description'
     });
   }
   
@@ -674,18 +674,18 @@ export class EmbeddingsView extends ItemView {
     this.statusEl.empty();
     this.resultsEl.empty();
     
-    const emptyEl = this.resultsEl.createDiv({ cls: 'embeddings-view-empty' });
-    const iconEl = emptyEl.createDiv({ cls: 'empty-icon' });
+    const emptyEl = this.resultsEl.createDiv({ cls: 'ss-embeddings-view__state ss-embeddings-view__state--empty' });
+    const iconEl = emptyEl.createDiv({ cls: 'ss-embeddings-view__state-icon' });
     setIcon(iconEl, 'file-x');
     
     emptyEl.createDiv({ 
       text: 'Note is empty',
-      cls: 'empty-title' 
+      cls: 'ss-embeddings-view__state-title' 
     });
     
     emptyEl.createDiv({ 
       text: 'Add some content to this note or chat to find similar notes.',
-      cls: 'empty-description' 
+      cls: 'ss-embeddings-view__state-description' 
     });
   }
   
@@ -695,18 +695,18 @@ export class EmbeddingsView extends ItemView {
     this.statusEl.empty();
     this.resultsEl.empty();
     
-    const errorEl = this.resultsEl.createDiv({ cls: 'embeddings-view-error' });
-    const iconEl = errorEl.createDiv({ cls: 'error-icon' });
+    const errorEl = this.resultsEl.createDiv({ cls: 'ss-embeddings-view__state ss-embeddings-view__state--error' });
+    const iconEl = errorEl.createDiv({ cls: 'ss-embeddings-view__state-icon' });
     setIcon(iconEl, 'alert-circle');
     
     errorEl.createDiv({ 
       text: 'Error finding similar notes',
-      cls: 'error-title' 
+      cls: 'ss-embeddings-view__state-title' 
     });
     
     errorEl.createDiv({ 
       text: message,
-      cls: 'error-message' 
+      cls: 'ss-embeddings-view__state-description' 
     });
   }
   
@@ -722,18 +722,18 @@ export class EmbeddingsView extends ItemView {
     this.currentChatView = null;
     this.lastSearchContent = '';
     
-    const disabledEl = this.resultsEl.createDiv({ cls: 'embeddings-view-disabled' });
-    const iconEl = disabledEl.createDiv({ cls: 'disabled-icon' });
+    const disabledEl = this.resultsEl.createDiv({ cls: 'ss-embeddings-view__state ss-embeddings-view__state--disabled' });
+    const iconEl = disabledEl.createDiv({ cls: 'ss-embeddings-view__state-icon' });
     setIcon(iconEl, 'power');
     
     disabledEl.createDiv({ 
       text: 'Embeddings Disabled',
-      cls: 'disabled-title' 
+      cls: 'ss-embeddings-view__state-title' 
     });
     
     disabledEl.createDiv({ 
       text: 'Enable embeddings in Settings > SystemSculpt AI > Embeddings to find similar notes.',
-      cls: 'disabled-description' 
+      cls: 'ss-embeddings-view__state-description' 
     });
   }
   
@@ -763,24 +763,24 @@ export class EmbeddingsView extends ItemView {
     this.resultsEl.empty();
     
     if (results.length === 0) {
-      const noResultsEl = this.resultsEl.createDiv({ cls: 'embeddings-view-no-results' });
-      const iconEl = noResultsEl.createDiv({ cls: 'no-results-icon' });
+      const noResultsEl = this.resultsEl.createDiv({ cls: 'ss-embeddings-view__state ss-embeddings-view__state--no-results' });
+      const iconEl = noResultsEl.createDiv({ cls: 'ss-embeddings-view__state-icon' });
       setIcon(iconEl, 'search-x');
       
       noResultsEl.createDiv({ 
         text: 'No similar notes found',
-        cls: 'no-results-title' 
+        cls: 'ss-embeddings-view__state-title' 
       });
       
       noResultsEl.createDiv({ 
         text: 'This note doesn\'t have similar content in your vault yet.',
-        cls: 'no-results-description' 
+        cls: 'ss-embeddings-view__state-description' 
       });
       return;
     }
     
     // Render results
-    const resultsContainer = this.resultsEl.createDiv({ cls: 'results-container' });
+    const resultsContainer = this.resultsEl.createDiv({ cls: 'ss-embeddings-view__results-container' });
     
     for (const result of results) {
       await this.renderResult(resultsContainer, result);
@@ -788,21 +788,21 @@ export class EmbeddingsView extends ItemView {
   }
   
   private async renderResult(container: HTMLElement, result: SearchResult): Promise<void> {
-    const resultEl = container.createDiv({ cls: 'similar-note-item cursor-pointer' });
+    const resultEl = container.createDiv({ cls: 'ss-similar-note' });
     
     // Check if this note is already in context (only for chat views)
     const isDraggableForChat = this.currentChatView !== null;
     if (isDraggableForChat) {
       const isInContext = this.isNoteInContext(result.path);
       if (isInContext) {
-        resultEl.addClass('similar-note-in-context');
+        resultEl.addClass('is-in-context');
       }
     }
     
     // Make draggable if viewing results for a chat
     if (isDraggableForChat) {
       resultEl.setAttribute('draggable', 'true');
-      resultEl.addClass('similar-note-draggable');
+      resultEl.addClass('ss-similar-note--draggable');
       
       // Set up drag handlers
       resultEl.addEventListener('dragstart', (e) => {
@@ -831,7 +831,7 @@ export class EmbeddingsView extends ItemView {
         e.dataTransfer.effectAllowed = 'copy';
         
         // Add visual feedback
-        resultEl.addClass('similar-note-dragging');
+        resultEl.addClass('is-dragging');
         
       });
       
@@ -846,7 +846,7 @@ export class EmbeddingsView extends ItemView {
         }
         
         // Remove visual feedback
-        resultEl.removeClass('similar-note-dragging');
+        resultEl.removeClass('is-dragging');
         
         // Small delay before checking active file to allow focus to settle
         setTimeout(() => {
@@ -871,16 +871,16 @@ export class EmbeddingsView extends ItemView {
     
     // Score indicator with proper thresholds
     const scorePercent = Math.round(result.score * 100);
-    const scoreClass = scorePercent >= 75 ? 'score-high' : 
-                      scorePercent >= 50 ? 'score-medium' : 'score-low';
-    const scoreEl = resultEl.createDiv({ cls: `note-score ${scoreClass}` });
+    const scoreClass = scorePercent >= 75 ? 'ss-similar-note__score--high' : 
+                      scorePercent >= 50 ? 'ss-similar-note__score--medium' : 'ss-similar-note__score--low';
+    const scoreEl = resultEl.createDiv({ cls: `ss-similar-note__score ${scoreClass}` });
     scoreEl.createSpan({ text: `${scorePercent}%` });
     
     // Note content
-    const contentEl = resultEl.createDiv({ cls: 'note-content' });
+    const contentEl = resultEl.createDiv({ cls: 'ss-similar-note__content' });
     
     // Title with link (keep for accessibility and right-click context)
-    const titleEl = contentEl.createDiv({ cls: 'note-title' });
+    const titleEl = contentEl.createDiv({ cls: 'ss-similar-note__title' });
     const linkEl = titleEl.createEl('a', {
       cls: 'internal-link',
       text: result.metadata.title || result.path.split('/').pop() || result.path,
@@ -895,21 +895,21 @@ export class EmbeddingsView extends ItemView {
     // Excerpt or content preview
     const sectionTitle = result.metadata.sectionTitle;
     if (sectionTitle) {
-      contentEl.createDiv({ cls: 'note-section-title', text: sectionTitle });
+      contentEl.createDiv({ cls: 'ss-similar-note__section-title', text: sectionTitle });
     }
 
     if (result.metadata.excerpt) {
-      const excerptEl = contentEl.createDiv({ cls: 'note-excerpt' });
+      const excerptEl = contentEl.createDiv({ cls: 'ss-similar-note__excerpt' });
       excerptEl.textContent = result.metadata.excerpt;
     }
     
     // Metadata row
-    const metaEl = contentEl.createDiv({ cls: 'note-metadata' });
+    const metaEl = contentEl.createDiv({ cls: 'ss-similar-note__metadata' });
     
     // Path info
     const pathParts = result.path.split('/');
     if (pathParts.length > 1) {
-      const pathEl = metaEl.createSpan({ cls: 'note-path' });
+      const pathEl = metaEl.createSpan({ cls: 'ss-similar-note__path' });
       pathEl.textContent = pathParts.slice(0, -1).join('/');
     }
     
@@ -919,7 +919,7 @@ export class EmbeddingsView extends ItemView {
     if (result.metadata.lastModified) {
       const date = new Date(result.metadata.lastModified);
       metaEl.createSpan({ 
-        cls: 'note-date',
+        cls: 'ss-similar-note__date',
         text: this.formatDate(date)
       });
     }
@@ -1002,18 +1002,18 @@ export class EmbeddingsView extends ItemView {
     );
     
     // Add progress elements
-    const processingEl = this.resultsEl.querySelector('.embeddings-view-processing') as HTMLElement;
+    const processingEl = this.resultsEl.querySelector('.ss-embeddings-view__processing') as HTMLElement;
     if (processingEl) {
-      const progressEl = processingEl.createDiv({ cls: 'processing-progress' });
+      const progressEl = processingEl.createDiv({ cls: 'ss-embeddings-view__processing-progress' });
       progressEl.createDiv({ 
         text: 'Starting...',
         cls: 'systemsculpt-progress-text' 
       });
       
-      const progressBar = progressEl.createDiv({ cls: 'systemsculpt-progress-bar' });
+      const progressBar = progressEl.createDiv({ cls: 'ss-embeddings-view-progress-track' });
       progressBar.createDiv({ cls: 'systemsculpt-progress-fill' });
 
-      const secondaryActions = processingEl.createDiv({ cls: 'processing-secondary-actions' });
+      const secondaryActions = processingEl.createDiv({ cls: 'ss-embeddings-view__processing-secondary-actions' });
       const remainingBtn = secondaryActions.createEl('button', {
         text: 'View remaining files',
         cls: 'mod-muted'
@@ -1028,7 +1028,7 @@ export class EmbeddingsView extends ItemView {
    * Update processing progress
    */
   private updateProcessingStatus(progress: { current: number; total: number; currentFile?: string }): void {
-    const progressEl = this.resultsEl.querySelector('.processing-progress');
+    const progressEl = this.resultsEl.querySelector('.ss-embeddings-view__processing-progress');
     if (!progressEl) return;
     
     const progressText = progressEl.querySelector('.systemsculpt-progress-text') as HTMLElement;
@@ -1132,26 +1132,26 @@ export class EmbeddingsView extends ItemView {
     this.statusEl.empty();
     this.resultsEl.empty();
 
-    const processingEl = this.resultsEl.createDiv({ cls: 'embeddings-view-processing' });
+    const processingEl = this.resultsEl.createDiv({ cls: 'ss-embeddings-view__processing' });
     
     // Processing icon
-    const iconEl = processingEl.createDiv({ cls: 'processing-icon' });
+    const iconEl = processingEl.createDiv({ cls: 'ss-embeddings-view__processing-icon' });
     setIcon(iconEl, 'database');
     
     // Processing message
     processingEl.createDiv({ 
       text: title,
-      cls: 'processing-title' 
+      cls: 'ss-embeddings-view__processing-title' 
     });
     
     processingEl.createDiv({ 
       text: description,
-      cls: 'processing-description' 
+      cls: 'ss-embeddings-view__processing-description' 
     });
 
     if (showActions) {
       // Action buttons
-      const actionsEl = processingEl.createDiv({ cls: 'processing-actions' });
+      const actionsEl = processingEl.createDiv({ cls: 'ss-embeddings-view__processing-actions' });
       
       const startBtn = actionsEl.createEl('button', {
         text: 'Start Processing',

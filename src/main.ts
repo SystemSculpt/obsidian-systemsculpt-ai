@@ -64,6 +64,8 @@ import { ReadwiseService } from "./services/readwise";
 import { WebResearchApiService } from "./services/web/WebResearchApiService";
 import { WebResearchCorpusService } from "./services/web/WebResearchCorpusService";
 import { guardQuickEditEditorDiffLeaks, quickEditEditorDiffExtension } from "./quick-edit/editor-diff";
+import { relativeLineNumbersExtension } from "./editor/relative-line-numbers";
+import { type Extension } from "@codemirror/state";
 import type { StudioService } from "./studio/StudioService";
 import { SYSTEMSCULPT_STUDIO_VIEW_TYPE } from "./core/plugin/viewTypes";
 import type { DesktopAutomationBridge } from "./testing/automation/DesktopAutomationBridge";
@@ -159,6 +161,9 @@ export default class SystemSculptPlugin extends Plugin {
   private studioService: StudioService | null = null;
   private fileExplorerStudioButtonManager: FileExplorerStudioButtonManager | null = null;
   private desktopAutomationBridge: DesktopAutomationBridge | null = null;
+  /** Live-reconfigurable slot for the relative line number gutter editor extension. */
+  private readonly relativeLineNumberExtensions: Extension[] = [];
+  private relativeLineNumbersApplied = false;
   private pendingSettingsFocusTab: string | null = null;
   private readonly mobileStartupProbePath = normalizePath("SystemSculpt/Diagnostics/mobile-startup.json");
   // Removed complex settings callback system - embeddings are now completely on-demand
@@ -482,6 +487,14 @@ export default class SystemSculptPlugin extends Plugin {
 
   async onload() {
     const loadStart = performance.now();
+    // Injected by esbuild `define`; "dev" outside the bundler (tests).
+    const buildStamp =
+      typeof __SS_BUILD_STAMP__ !== "undefined" ? __SS_BUILD_STAMP__ : "dev";
+    // Plain console line (not just the plugin logger) so any vault can
+    // answer "which build am I running?" straight from devtools.
+    console.info(
+      `[SystemSculpt] v${this.manifest.version} build ${buildStamp}`
+    );
     const tracer = this.getInitializationTracer();
     const onloadPhase = tracer.startPhase("plugin.onload", {
       slowThresholdMs: 5000,
@@ -496,6 +509,7 @@ export default class SystemSculptPlugin extends Plugin {
       source: "SystemSculptPlugin",
       metadata: {
         version: this.manifest.version,
+        build: buildStamp,
       },
     });
 
@@ -677,6 +691,9 @@ export default class SystemSculptPlugin extends Plugin {
 
         PlatformContext.initialize();
         this.registerEditorExtension(quickEditEditorDiffExtension);
+        // Registered empty; filled in / cleared by syncRelativeLineNumbersExtension()
+        // once settings load and whenever the toggle changes.
+        this.registerEditorExtension(this.relativeLineNumberExtensions);
         this.registerEvent(
           this.app.workspace.on("file-open", () => {
             guardQuickEditEditorDiffLeaks(this.app);
@@ -752,6 +769,15 @@ export default class SystemSculptPlugin extends Plugin {
                 source: "SystemSculptPlugin",
               });
             });
+
+            try {
+              this.syncRelativeLineNumbersExtension();
+            } catch (error) {
+              const logger = this.getLogger();
+              logger.error("Relative line numbers settings sync failed", error, {
+                source: "SystemSculptPlugin",
+              });
+            }
           })
         );
 
@@ -1485,6 +1511,14 @@ export default class SystemSculptPlugin extends Plugin {
         settingsManager.startWatchingPluginDataFile();
       }
 
+      try {
+        this.syncRelativeLineNumbersExtension();
+      } catch (error) {
+        logger.error("Relative line numbers startup sync failed", error, {
+          source: "SystemSculptPlugin",
+        });
+      }
+
       const debugMode = this.settings.debugMode ?? false;
       const logLevel = debugMode ? LogLevel.DEBUG : this.settings.logLevel ?? LogLevel.WARNING;
       setLogLevel(logLevel);
@@ -1834,6 +1868,26 @@ export default class SystemSculptPlugin extends Plugin {
 
     await this.desktopAutomationBridge.stop().catch(() => {});
     this.desktopAutomationBridge = null;
+  }
+
+  /**
+   * Apply or remove the relative line number gutter across open editors to match
+   * the current setting. Mutates the registered editor-extension array and calls
+   * {@link Workspace.updateOptions} — the Obsidian-endorsed way to reconfigure
+   * editor extensions live, so the toggle takes effect without a reload.
+   */
+  syncRelativeLineNumbersExtension(): void {
+    const enabled = Boolean(this.settings.relativeLineNumbersEnabled);
+    if (enabled === this.relativeLineNumbersApplied) {
+      return;
+    }
+
+    this.relativeLineNumberExtensions.length = 0;
+    if (enabled) {
+      this.relativeLineNumberExtensions.push(relativeLineNumbersExtension());
+    }
+    this.relativeLineNumbersApplied = enabled;
+    this.app.workspace.updateOptions();
   }
 
   private async initializeManagers() {

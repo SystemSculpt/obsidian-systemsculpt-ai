@@ -47,17 +47,16 @@ function createHarness(options?: { activeFile?: TFile | null }) {
   const app = new App();
   (app.workspace.getActiveFile as jest.Mock).mockReturnValue(options?.activeFile ?? null);
 
-  const createProject = jest.fn().mockResolvedValue({ name: "New Studio Project" });
-  const getCurrentProjectPath = jest
-    .fn()
-    .mockReturnValue("Projects/New Studio Project.systemsculpt");
+  const createProjectFile = jest.fn(async (options?: { projectPath?: string }) => ({
+    path: options?.projectPath ?? "Projects/New Studio Project.systemsculpt",
+    project: { name: "New Studio Project" },
+  }));
   const activateSystemSculptStudioView = jest.fn().mockResolvedValue(undefined);
 
   const plugin = {
     app,
     getStudioService: jest.fn(() => ({
-      createProject,
-      getCurrentProjectPath,
+      createProjectFile,
     })),
     getViewManager: jest.fn(() => ({
       activateSystemSculptStudioView,
@@ -69,8 +68,7 @@ function createHarness(options?: { activeFile?: TFile | null }) {
   return {
     app,
     manager,
-    createProject,
-    getCurrentProjectPath,
+    createProjectFile,
     activateSystemSculptStudioView,
   };
 }
@@ -111,7 +109,7 @@ describe("FileExplorerStudioButtonManager", () => {
 
   it("creates and opens a Studio project in the active explorer folder", async () => {
     const buttons = appendExplorer({ activeFolderPath: "Projects" });
-    const { manager, createProject, activateSystemSculptStudioView } = createHarness();
+    const { manager, createProjectFile, activateSystemSculptStudioView } = createHarness();
 
     manager.syncButtons();
     buttons
@@ -119,7 +117,7 @@ describe("FileExplorerStudioButtonManager", () => {
       ?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
     await flushPromises();
 
-    expect(createProject).toHaveBeenCalledWith({
+    expect(createProjectFile).toHaveBeenCalledWith({
       name: "New Studio Project",
       projectPath: "Projects/New Studio Project.systemsculpt",
     });
@@ -130,7 +128,7 @@ describe("FileExplorerStudioButtonManager", () => {
 
   it("falls back to the active file parent when the explorer has no active folder", async () => {
     const buttons = appendExplorer();
-    const { manager, createProject } = createHarness({
+    const { manager, createProjectFile } = createHarness({
       activeFile: new TFile({ path: "Clients/Brief.md" }),
     });
 
@@ -140,7 +138,7 @@ describe("FileExplorerStudioButtonManager", () => {
       ?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
     await flushPromises();
 
-    expect(createProject).toHaveBeenCalledWith({
+    expect(createProjectFile).toHaveBeenCalledWith({
       name: "New Studio Project",
       projectPath: "Clients/New Studio Project.systemsculpt",
     });
@@ -148,7 +146,7 @@ describe("FileExplorerStudioButtonManager", () => {
 
   it("creates a Studio project beside the active explorer file", async () => {
     const buttons = appendExplorer({ activeFilePath: "Selected/Brief.md" });
-    const { manager, createProject } = createHarness({
+    const { manager, createProjectFile } = createHarness({
       activeFile: new TFile({ path: "Workspace/Other.md" }),
     });
 
@@ -158,7 +156,7 @@ describe("FileExplorerStudioButtonManager", () => {
       ?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
     await flushPromises();
 
-    expect(createProject).toHaveBeenCalledWith({
+    expect(createProjectFile).toHaveBeenCalledWith({
       name: "New Studio Project",
       projectPath: "Selected/New Studio Project.systemsculpt",
     });

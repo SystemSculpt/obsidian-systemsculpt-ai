@@ -39,35 +39,29 @@ export class SaveAsNoteModal extends Modal {
 
     contentEl.createEl("p", { text: "Choose a location and name for your note" });
 
-    // Folder input
-    const folderLabel = contentEl.createEl("label", { text: "Folder" });
-    folderLabel.style.marginBottom = "12px";
+    // Folder input (styled in modals/ai-response.css)
+    contentEl.createEl("label", { text: "Folder", cls: "ss-save-note-modal__label" });
 
     this.folderInput = contentEl.createEl("input", {
+      cls: "ss-save-note-modal__input",
       type: "text",
       value: this.defaultFolder,
       placeholder: "Folder path",
     });
-    this.folderInput.style.width = "100%";
-    this.folderInput.style.marginBottom = "12px";
 
     attachFolderSuggester(this.folderInput, (folder) => { this.folderInput.value = folder; }, this.app);
 
     // Filename input
-    const fileNameLabel = contentEl.createEl("label", { text: "File name" });
+    contentEl.createEl("label", { text: "File name", cls: "ss-save-note-modal__label" });
     this.fileNameInput = contentEl.createEl("input", {
+      cls: "ss-save-note-modal__input",
       type: "text",
       value: this.defaultFileName,
       placeholder: "File name (without extension)",
     });
-    this.fileNameInput.style.width = "100%";
 
     // Buttons container
-    const buttonContainer = contentEl.createDiv({ cls: "modal-button-container" });
-    buttonContainer.style.display = "flex";
-    buttonContainer.style.justifyContent = "flex-end";
-    buttonContainer.style.gap = "10px";
-    buttonContainer.style.marginTop = "20px";
+    const buttonContainer = contentEl.createDiv({ cls: "modal-button-container ss-save-note-modal__actions" });
 
     this.cancelButton = buttonContainer.createEl("button", { text: "Cancel" });
     this.saveButton = buttonContainer.createEl("button", { text: "Save" });

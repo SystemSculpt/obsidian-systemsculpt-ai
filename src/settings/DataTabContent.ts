@@ -229,7 +229,7 @@ export function displayDataTabContent(
         text.inputEl.type = "number";
         text.inputEl.min = String(READWISE_SYNC_INTERVAL_MIN_MINUTES);
         text.inputEl.max = String(READWISE_SYNC_INTERVAL_MAX_MINUTES);
-        text.inputEl.style.width = "120px";
+        text.inputEl.addClass("ss-settings-input--narrow");
       });
   }
 
@@ -246,8 +246,8 @@ function renderReadwiseAffiliateNote(containerEl: HTMLElement): void {
     linkText: "Sign up with our referral link",
     href: READWISE.REFERRAL,
     suffixText: " (supports SystemSculpt).",
-    className: "readwise-affiliate-note",
-    linkClassName: "readwise-affiliate-link",
+    className: "ss-readwise-affiliate-note",
+    linkClassName: "ss-readwise-affiliate-link",
     ariaLabel: "Open Readwise signup (referral link; opens in new tab)",
     datasetTestId: "readwise-referral-link",
   });
@@ -278,10 +278,10 @@ function renderApiTokenSetting(
           validateBtn.setButtonText("Validate");
           validateBtn.buttonEl.classList.remove("mod-success");
           statusEl.setText("");
-          statusEl.className = "readwise-status";
+          statusEl.className = "ss-readwise-status";
         });
       text.inputEl.type = "password";
-      text.inputEl.style.width = "250px";
+      text.inputEl.addClass("ss-settings-input--wide");
     })
     .addButton((button) => {
       validateBtn = button;
@@ -289,14 +289,14 @@ function renderApiTokenSetting(
         const token = tokenInput.getValue();
         if (!token) {
           statusEl.setText("Enter a token first");
-          statusEl.className = "readwise-status mod-warning";
+          statusEl.className = "ss-readwise-status mod-warning";
           return;
         }
 
         button.setDisabled(true);
         button.setButtonText("Validating...");
         statusEl.setText("");
-        statusEl.className = "readwise-status";
+        statusEl.className = "ss-readwise-status";
 
         try {
           const service = plugin.getReadwiseService();
@@ -307,12 +307,12 @@ function renderApiTokenSetting(
           } else {
             button.setButtonText("Validate");
             statusEl.setText("Invalid token");
-            statusEl.className = "readwise-status mod-error";
+            statusEl.className = "ss-readwise-status mod-error";
           }
         } catch (error) {
           button.setButtonText("Validate");
           statusEl.setText("Validation failed");
-          statusEl.className = "readwise-status mod-error";
+          statusEl.className = "ss-readwise-status mod-error";
         } finally {
           button.setDisabled(false);
         }
@@ -320,7 +320,7 @@ function renderApiTokenSetting(
     });
 
   // Add status element (for errors only now)
-  statusEl = tokenSetting.controlEl.createSpan({ cls: "readwise-status" });
+  statusEl = tokenSetting.controlEl.createSpan({ cls: "ss-readwise-status" });
 
   // Add help link
   const helpLink = tokenSetting.descEl.createEl("a", {
@@ -343,7 +343,7 @@ function renderSyncStatus(
 
   containerEl.createEl("h5", { text: "Sync status", cls: "setting-item-heading" });
 
-  const statusContainer = containerEl.createDiv({ cls: "readwise-sync-status-container" });
+  const statusContainer = containerEl.createDiv({ cls: "ss-readwise-sync-status" });
 
   // Last sync time
   if (lastSync && lastSync > 0) {
@@ -351,12 +351,12 @@ function renderSyncStatus(
     const formattedDate = lastSyncDate.toLocaleString();
     statusContainer.createDiv({
       text: `Last sync: ${formattedDate}`,
-      cls: "readwise-sync-info",
+      cls: "ss-readwise-sync-status__info",
     });
   } else {
     statusContainer.createDiv({
       text: "Never synced",
-      cls: "readwise-sync-info",
+      cls: "ss-readwise-sync-status__info",
     });
   }
 
@@ -364,7 +364,7 @@ function renderSyncStatus(
   if (syncState.totalImported > 0) {
     statusContainer.createDiv({
       text: `Total imported: ${syncState.totalImported} items`,
-      cls: "readwise-sync-info",
+      cls: "ss-readwise-sync-status__info",
     });
   }
 
@@ -376,7 +376,7 @@ function renderSyncStatus(
     if (nextSync > new Date()) {
       statusContainer.createDiv({
         text: `Next sync: ${nextSync.toLocaleString()}`,
-        cls: "readwise-sync-info",
+        cls: "ss-readwise-sync-status__info",
       });
     }
   }
@@ -385,7 +385,7 @@ function renderSyncStatus(
   if (syncState.lastError) {
     statusContainer.createDiv({
       text: `Last error: ${syncState.lastError}`,
-      cls: "readwise-sync-error",
+      cls: "ss-readwise-sync-status__error",
     });
   }
 }
@@ -397,7 +397,7 @@ function renderSyncActions(
   const { plugin } = tabInstance;
   const service = plugin.getReadwiseService();
 
-  const actionsContainer = containerEl.createDiv({ cls: "readwise-sync-actions" });
+  const actionsContainer = containerEl.createDiv({ cls: "ss-readwise-sync-actions" });
 
   // Sync Now button
   let syncButton: ButtonComponent;
@@ -430,15 +430,15 @@ function renderSyncActions(
           button.setButtonText("Cancel");
 
           // Add progress element
-          progressEl = actionsContainer.createDiv({ cls: "readwise-progress" });
-          progressEl.createDiv({ cls: "readwise-progress-bar" });
-          const progressText = progressEl.createDiv({ cls: "readwise-progress-text" });
+          progressEl = actionsContainer.createDiv({ cls: "ss-readwise-progress" });
+          progressEl.createDiv({ cls: "ss-readwise-progress__bar" });
+          const progressText = progressEl.createDiv({ cls: "ss-readwise-progress__text" });
           progressText.setText("Starting sync...");
 
           // Listen for progress events
           const unsubProgress = service.on("sync:progress", ({ current, total, currentItem }) => {
             progressText.setText(`Syncing: ${current}/${total} - ${currentItem || ""}`);
-            const progressBar = progressEl?.querySelector(".readwise-progress-bar") as HTMLElement;
+            const progressBar = progressEl?.querySelector(".ss-readwise-progress__bar") as HTMLElement;
             if (progressBar && total > 0) {
               progressBar.style.width = `${(current / total) * 100}%`;
             }

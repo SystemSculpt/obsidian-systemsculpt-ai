@@ -95,12 +95,12 @@ export class EmbeddingsStatusBar extends Component {
     this.statusBarEl.createSpan({ text: " " });
 
     this.valueEl = this.statusBarEl.createSpan({
+      cls: "ss-embeddings-status-bar-value",
       attr: {
         role: "meter",
         "aria-label": "Embeddings",
       },
     });
-    this.valueEl.style.marginLeft = "2px";
     this.valueEl.textContent = this.plugin.settings.embeddingsEnabled ? "initializing" : "idle";
 
     this.detailEl = this.statusBarEl.createSpan();

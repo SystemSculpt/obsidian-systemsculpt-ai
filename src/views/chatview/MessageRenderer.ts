@@ -53,9 +53,6 @@ const REASONING_MEANINGFUL_CHILD_TAGS = new Set([
   "BLOCKQUOTE",
 ]);
 
-const REASONING_COMPACT_LINE_HEIGHT = '1.35';
-const REASONING_COMPACT_MARGIN = '0.35em';
-
 export interface MessageRenderOptions {
   app: App;
   messageId: string;
@@ -1136,15 +1133,8 @@ export class MessageRenderer extends Component {
     }
 
     if (container) {
-      container.style.lineHeight = REASONING_COMPACT_LINE_HEIGHT;
-
-      const blockChildren = Array.from(container.children).filter((child): child is HTMLElement => child instanceof HTMLElement);
-      blockChildren.forEach((child, index) => {
-        const isFirst = index === 0;
-        const isLast = index === blockChildren.length - 1;
-        child.style.marginTop = isFirst ? '0' : REASONING_COMPACT_MARGIN;
-        child.style.marginBottom = isLast ? '0' : REASONING_COMPACT_MARGIN;
-      });
+      // Compact line-height/margins live in components/chat-blocks.css
+      container.classList.add("systemsculpt-reasoning-compact");
     }
 
     // Add basic styling classes but do not modify content
@@ -1155,8 +1145,7 @@ export class MessageRenderer extends Component {
     // Handle images for click-to-open behavior (preserve existing functionality)
     container.querySelectorAll("img").forEach((img) => {
       img.addClass("systemsculpt-message-image");
-      img.style.cursor = "pointer";
-      
+
       img.addEventListener("click", async (e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -1291,7 +1280,6 @@ export class MessageRenderer extends Component {
     // Preserve the existing interactive behaviour for images rendered inside
     // assistant messages.
     container.querySelectorAll("img").forEach((img) => {
-      img.style.cursor = "pointer";
       img.classList.add("systemsculpt-message-image");
 
       img.addEventListener("click", async (e) => {
@@ -1868,43 +1856,24 @@ class LargeTextModal extends Modal {
     // Set modal title
     this.titleEl.setText(this.title);
 
-    // Create container with proper Obsidian styling
     const container = contentEl.createEl("div", {
-      cls: "large-text-modal-container"
+      cls: "systemsculpt-large-text-modal-container"
     });
 
-    // Create textarea for content display
+    // Create textarea for content display (styled in large-text.css)
     const textarea = container.createEl("textarea", {
-      cls: "large-text-viewer",
+      cls: "systemsculpt-large-text-viewer",
       attr: {
         readonly: "true",
         spellcheck: "false"
       }
     });
-
-    // Set content and configure textarea
     textarea.value = this.content;
-    textarea.style.width = "100%";
-    textarea.style.height = "60vh";
-    textarea.style.minHeight = "400px";
-    textarea.style.fontFamily = "var(--font-monospace)";
-    textarea.style.fontSize = "13px";
-    textarea.style.lineHeight = "1.4";
-    textarea.style.resize = "vertical";
-    textarea.style.border = "1px solid var(--border-color)";
-    textarea.style.borderRadius = "4px";
-    textarea.style.padding = "12px";
-    textarea.style.backgroundColor = "var(--background-primary)";
-    textarea.style.color = "var(--text-normal)";
 
     // Add copy button
     const buttonContainer = container.createEl("div", {
-      cls: "large-text-modal-buttons"
+      cls: "systemsculpt-large-text-modal-buttons"
     });
-    buttonContainer.style.marginTop = "12px";
-    buttonContainer.style.display = "flex";
-    buttonContainer.style.gap = "8px";
-    buttonContainer.style.justifyContent = "flex-end";
 
     const copyButton = buttonContainer.createEl("button", {
       text: "Copy to Clipboard",

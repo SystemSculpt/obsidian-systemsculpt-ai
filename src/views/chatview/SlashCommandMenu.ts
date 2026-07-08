@@ -489,20 +489,19 @@ export class SlashCommandMenu extends Component {
       left = window.innerWidth - menuWidth - 10;
     }
     
+    // position: fixed + z-index come from .systemsculpt-slash-command-menu
+    // (components/slash-commands.css); only the computed offsets are inline.
     // Check if there's enough space above the input
     if (inputRect.top < 320) { // Not enough space above, position below instead
-      this.menuElement.style.position = 'fixed';
       this.menuElement.style.top = `${inputRect.bottom + 10}px`;
       this.menuElement.style.bottom = 'auto';
     } else {
       // Position above input, anchored to bottom so it shrinks downward
-      this.menuElement.style.position = 'fixed';
       this.menuElement.style.top = 'auto';
       this.menuElement.style.bottom = `${bottom}px`;
     }
-    
+
     this.menuElement.style.left = `${left}px`;
-    this.menuElement.style.zIndex = '1000';
   }
 
   private removeSlashAndClose(): void {

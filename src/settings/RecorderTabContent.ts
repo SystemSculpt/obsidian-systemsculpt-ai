@@ -234,14 +234,14 @@ function renderCustomTranscriptionSettings(containerEl: HTMLElement, tabInstance
       model: plugin.settings.customTranscriptionModel || "",
     });
     if (result.ok && result.warnings.length === 0) {
-      statusEl.createDiv({ cls: "ss-inline-note-ok", text: "✓ Endpoint looks compatible." });
+      statusEl.createDiv({ cls: "ss-inline-note ss-inline-note--ok", text: "✓ Endpoint looks compatible." });
       return;
     }
     for (const error of result.errors) {
-      statusEl.createDiv({ cls: "ss-inline-note-error", text: `⛔ ${error}` });
+      statusEl.createDiv({ cls: "ss-inline-note ss-inline-note--error", text: `⛔ ${error}` });
     }
     for (const warning of result.warnings) {
-      statusEl.createDiv({ cls: "ss-inline-note-warning", text: `⚠️ ${warning}` });
+      statusEl.createDiv({ cls: "ss-inline-note ss-inline-note--warning", text: `⚠️ ${warning}` });
     }
   };
 

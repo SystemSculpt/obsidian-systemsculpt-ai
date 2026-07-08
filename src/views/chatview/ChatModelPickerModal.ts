@@ -53,7 +53,9 @@ export class ChatModelPickerModal extends StandardModal {
       favoritesFirst: options.favorites?.state.favoritesFirst ?? false,
     };
     this.setSize("medium");
-    this.modalEl.addClass("systemsculpt-chat-model-picker-modal");
+    // The component's one block name is `systemsculpt-chat-model-modal`,
+    // applied to the body rendered in renderShell(); the modal shell itself
+    // needs no extra class beyond the StandardModal sizing.
   }
 
   onOpen(): void {

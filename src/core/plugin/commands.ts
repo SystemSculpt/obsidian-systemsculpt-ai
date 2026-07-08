@@ -606,16 +606,12 @@ export class CommandManager {
 
         try {
           const studio = this.plugin.getStudioService();
-          const activeFile = this.app.workspace.getActiveFile();
-          if (activeFile && activeFile.extension.toLowerCase() === "systemsculpt") {
-            await studio.openProject(activeFile.path);
-          }
-
-          if (!studio.getCurrentProjectPath()) {
+          const projectPath = this.resolveActiveStudioProjectPath();
+          if (!projectPath) {
             new Notice("Open a .systemsculpt file in the file explorer first.");
             return;
           }
-          const result = await studio.runCurrentProject();
+          const result = await studio.runProject(projectPath);
           if (result.status === "success") {
             new Notice(`Studio run complete: ${result.runId}`);
           } else {
@@ -686,16 +682,34 @@ export class CommandManager {
     return activeView;
   }
 
-  private async createAndOpenStudioProject(): Promise<{ name: string; path: string }> {
-    const studio = this.plugin.getStudioService();
-    const project = await studio.createProject();
-    const projectPath = studio.getCurrentProjectPath();
-    if (!projectPath) {
-      throw new Error("Studio project was created but no project path was returned.");
+  /**
+   * "Current Studio project" is a derived lookup: the focused .systemsculpt
+   * file, or the project the active Studio view has loaded. There is no
+   * global current-project pointer on the service anymore.
+   */
+  private resolveActiveStudioProjectPath(): string | null {
+    const activeFile = this.app.workspace.getActiveFile();
+    if (activeFile && activeFile.extension.toLowerCase() === "systemsculpt") {
+      return activeFile.path;
     }
 
-    await this.plugin.getViewManager().activateSystemSculptStudioView(projectPath);
-    return { name: project.name, path: projectPath };
+    const activeStudioView = this.getActiveStudioView();
+    if (activeStudioView) {
+      const viewState = activeStudioView.getState() as { file?: unknown };
+      const statePath = typeof viewState?.file === "string" ? viewState.file.trim() : "";
+      if (statePath) {
+        return statePath;
+      }
+    }
+
+    return null;
+  }
+
+  private async createAndOpenStudioProject(): Promise<{ name: string; path: string }> {
+    const studio = this.plugin.getStudioService();
+    const created = await studio.createProjectFile();
+    await this.plugin.getViewManager().activateSystemSculptStudioView(created.path);
+    return { name: created.project.name, path: created.path };
   }
 
   private getCurrentActiveFilePath(): string | null {
@@ -728,15 +742,6 @@ export class CommandManager {
       const stateFilePath = this.resolveVaultFilePath((viewState as { file?: unknown }).file);
       if (stateFilePath) {
         return stateFilePath;
-      }
-
-      try {
-        const servicePath = this.resolveVaultFilePath(this.plugin.getStudioService().getCurrentProjectPath());
-        if (servicePath) {
-          return servicePath;
-        }
-      } catch {
-        // Best-effort fallback only when Studio view is active.
       }
     }
 

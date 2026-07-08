@@ -88,6 +88,13 @@ export interface SystemSculptSettings {
   desktopAutomationBridgeEnabled?: boolean;
 
   /**
+   * When enabled, render a vim-style relative line number gutter in the markdown
+   * editor: the current line shows its absolute number, every other line shows
+   * its distance from the cursor.
+   */
+  relativeLineNumbersEnabled?: boolean;
+
+  /**
    * Persisted settings schema version, driving the versioned migration chain
    * (see SettingsMigrator). Absent/0 means pre-versioning data, migrated on load.
    */
@@ -528,6 +535,7 @@ export const DEFAULT_SETTINGS: SystemSculptSettings = {
   settingsMode: "standard",
   vaultInstanceId: "",
   desktopAutomationBridgeEnabled: false,
+  relativeLineNumbersEnabled: false,
   schemaVersion: CURRENT_SCHEMA_VERSION,
   embeddingsVectorFormatVersion: 0,
   licenseKey: "",

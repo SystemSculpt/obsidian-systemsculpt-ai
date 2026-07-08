@@ -159,14 +159,16 @@ describe("SaveAsNoteModal", () => {
       expect(fileNameInput.value).toBe("New File Name");
     });
 
-    it("folder input is full width", () => {
+    it("folder input uses the design-system input class (styled in modals/ai-response.css)", () => {
       const folderInput = (modal as any).folderInput as HTMLInputElement;
-      expect(folderInput.style.width).toBe("100%");
+      expect(folderInput.classList.contains("ss-save-note-modal__input")).toBe(true);
+      expect(folderInput.getAttribute("style")).toBeNull();
     });
 
-    it("file name input is full width", () => {
+    it("file name input uses the design-system input class (styled in modals/ai-response.css)", () => {
       const fileNameInput = (modal as any).fileNameInput as HTMLInputElement;
-      expect(fileNameInput.style.width).toBe("100%");
+      expect(fileNameInput.classList.contains("ss-save-note-modal__input")).toBe(true);
+      expect(fileNameInput.getAttribute("style")).toBeNull();
     });
 
     it("folder input is an input element", () => {
@@ -185,24 +187,13 @@ describe("SaveAsNoteModal", () => {
       modal.onOpen();
     });
 
-    it("button container has flex display", () => {
+    it("button container uses the design-system actions class instead of inline styles", () => {
       const buttonContainer = modal.contentEl.querySelector(".modal-button-container") as HTMLElement;
-      expect(buttonContainer?.style.display).toBe("flex");
-    });
-
-    it("button container has flex-end justification", () => {
-      const buttonContainer = modal.contentEl.querySelector(".modal-button-container") as HTMLElement;
-      expect(buttonContainer?.style.justifyContent).toBe("flex-end");
-    });
-
-    it("button container has gap", () => {
-      const buttonContainer = modal.contentEl.querySelector(".modal-button-container") as HTMLElement;
-      expect(buttonContainer?.style.gap).toBe("10px");
-    });
-
-    it("button container has top margin", () => {
-      const buttonContainer = modal.contentEl.querySelector(".modal-button-container") as HTMLElement;
-      expect(buttonContainer?.style.marginTop).toBe("20px");
+      expect(buttonContainer).not.toBeNull();
+      // Layout (flex, flex-end, gap, top margin) lives on
+      // .ss-save-note-modal__actions in src/css/modals/ai-response.css.
+      expect(buttonContainer.classList.contains("ss-save-note-modal__actions")).toBe(true);
+      expect(buttonContainer.getAttribute("style")).toBeNull();
     });
   });
 

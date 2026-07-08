@@ -117,7 +117,7 @@ describe("Recorder settings tab", () => {
 
     await displayRecorderTabContent(container, tab);
 
-    const errorNote = container.querySelector(".ss-inline-note-error")?.textContent || "";
+    const errorNote = container.querySelector(".ss-inline-note--error")?.textContent || "";
     expect(errorNote).toMatch(/required/i);
   });
 

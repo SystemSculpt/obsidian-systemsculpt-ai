@@ -23,12 +23,8 @@ export class ImproveResponseModal extends Modal {
 
     contentEl.createEl("p", { text: this.promptText });
 
-    // Preset buttons container
-    const presetContainer = contentEl.createDiv();
-    presetContainer.style.display = "flex";
-    presetContainer.style.flexWrap = "wrap";
-    presetContainer.style.gap = "8px";
-    presetContainer.style.marginTop = "8px";
+    // Preset buttons container (styled in modals/ai-response.css)
+    const presetContainer = contentEl.createDiv("ss-improve-modal__presets");
 
     const presets = ["Shorter", "Longer", "Simpler", "More professional", "More creative"];
     presets.forEach((preset) => {
@@ -40,30 +36,22 @@ export class ImproveResponseModal extends Modal {
     });
 
     this.inputEl = contentEl.createEl("input", {
+      cls: "ss-improve-modal__input",
       type: "text",
       placeholder: "E.g., shorter, longer, simpler, professional, creative, or custom instruction",
       value: this.defaultValue,
     });
 
-    this.inputEl.style.width = "100%";
-    this.inputEl.style.marginTop = "10px";
-    this.inputEl.style.marginBottom = "20px";
-
-    const buttonContainer = contentEl.createDiv();
-    buttonContainer.style.display = "flex";
-    buttonContainer.style.justifyContent = "flex-end";
-    buttonContainer.style.gap = "10px";
+    const buttonContainer = contentEl.createDiv("ss-improve-modal__actions");
 
     const cancelButton = buttonContainer.createEl("button", { text: "Cancel" });
     cancelButton.addClass("mod-muted");
-    cancelButton.style.flex = "0 0 auto";
     cancelButton.onclick = () => {
       this.close();
     };
 
     const confirmButton = buttonContainer.createEl("button", { text: "Improve" });
     confirmButton.addClass("mod-cta");
-    confirmButton.style.flex = "0 0 auto";
     confirmButton.onclick = () => {
       const value = this.inputEl.value.trim();
       if (!value) {
