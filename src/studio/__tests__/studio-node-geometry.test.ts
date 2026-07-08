@@ -57,8 +57,9 @@ describe("clampStudioNodeDimension", () => {
 
 describe("estimateStudioTextNodeHeight", () => {
   it("uses the canonical chrome + per-line formula", () => {
-    // 46px chrome + 22px per line.
-    expect(estimateStudioTextNodeHeight(12)).toBe(46 + 12 * 22);
+    // 10px chrome (content padding + card borders; the card is toolbar-free)
+    // + 22px per line.
+    expect(estimateStudioTextNodeHeight(12)).toBe(10 + 12 * 22);
   });
 
   it("clamps single lines up to the text-node minimum height", () => {

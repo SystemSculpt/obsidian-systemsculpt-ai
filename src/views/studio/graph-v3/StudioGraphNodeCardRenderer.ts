@@ -93,7 +93,6 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
       node,
       busy,
       graphInteraction,
-      onRemoveNode,
       onNodeConfigMutated,
       onNodeConfigValueChange,
       onNodeResize,

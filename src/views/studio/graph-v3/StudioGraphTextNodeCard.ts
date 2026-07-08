@@ -29,7 +29,6 @@ type RenderTextNodeCardOptions = {
   node: StudioNodeInstance;
   busy: boolean;
   graphInteraction: StudioGraphInteractionEngine;
-  onRemoveNode: (nodeId: string) => void;
   onNodeConfigMutated: (node: StudioNodeInstance) => void;
   onNodeConfigValueChange?: (
     nodeId: string,
@@ -129,7 +128,6 @@ export function renderTextNodeCard(options: RenderTextNodeCardOptions): void {
     node,
     busy,
     graphInteraction,
-    onRemoveNode,
     onNodeConfigMutated,
     onNodeConfigValueChange,
     onNodeResize,
@@ -145,20 +143,9 @@ export function renderTextNodeCard(options: RenderTextNodeCardOptions): void {
   // its reflowed content (tldraw-style), so no explicit height is rendered.
   nodeEl.style.width = `${resolveStudioTextNodeWidth(node)}px`;
 
-  // Font size has no toolbar controls — it is drag-scaled via the resize
-  // frame (top/bottom edges and corners), tldraw-style.
-  const toolbarEl = nodeEl.createDiv({ cls: "ss-studio-text-node-toolbar" });
-  const removeButton = toolbarEl.createEl("button", {
-    cls: "ss-studio-text-node-remove",
-    text: "×",
-    attr: {
-      title: "Delete text",
-      "aria-label": "Delete text",
-    },
-  });
-  removeButton.type = "button";
-  removeButton.disabled = busy;
-
+  // No chrome at all — tldraw parity: deleting goes through select +
+  // Delete/Backspace/cut, and font size is drag-scaled via the resize frame
+  // (top/bottom edges and corners).
   const getCurrentFontSize = (): number => resolveStudioTextNodeFontSize(node);
   let textSurfaceEl: HTMLElement | HTMLTextAreaElement | null = null;
   const applyFontSize = (fontSize: number): void => {
@@ -166,11 +153,6 @@ export function renderTextNodeCard(options: RenderTextNodeCardOptions): void {
       textSurfaceEl.style.setProperty("--ss-studio-text-node-font-size", `${fontSize}px`);
     }
   };
-  removeButton.addEventListener("click", (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    onRemoveNode(node.id);
-  });
 
   const contentEl = nodeEl.createDiv({ cls: "ss-studio-text-node-content" });
   const textValue = readStudioTextNodeValue(node);
@@ -184,6 +166,10 @@ export function renderTextNodeCard(options: RenderTextNodeCardOptions): void {
         placeholder: "Text",
       },
     });
+    // A textarea defaults to rows="2", which makes an EMPTY editor's
+    // scrollHeight two lines tall — the auto-grow sync below then locks a
+    // fresh one-line text node at double height. One row is the true floor.
+    textAreaEl.rows = 1;
     textAreaEl.value = textValue;
     textAreaEl.disabled = busy;
     textSurfaceEl = textAreaEl;

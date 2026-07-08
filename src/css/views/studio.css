@@ -1154,35 +1154,6 @@
   outline-offset: 2px;
 }
 
-.ss-studio-text-node-toolbar {
-  position: relative;
-  /* Above the resize frame's top strip/corners so the toolbar buttons stay
-   * clickable. Always visible — no hover reveal anywhere in the studio. */
-  z-index: 4;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--ss-space-1);
-  padding: var(--ss-space-1) var(--ss-space-2);
-}
-
-.ss-studio-text-node-remove {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  border-radius: var(--ss-radius-xs);
-  color: var(--ss-ink-faint);
-  cursor: pointer;
-  transition: var(--ss-transition-colors);
-}
-
-.ss-studio-text-node-remove:hover {
-  background-color: var(--ss-state-hover);
-  color: var(--ss-ink);
-}
-
 /* Text-node height is intrinsic: the card auto-grows with its reflowed
  * content, so the display div and editing textarea both size to content —
  * no fixed heights anywhere in the chain. */
@@ -1197,7 +1168,9 @@
   width: 100%;
   max-width: 100%;
   min-width: 0;
-  padding: var(--ss-space-2);
+  /* tldraw-tight: the text IS the node, so only a hairline of breathing
+   * room. Keep in sync with STUDIO_TEXT_NODE_VERTICAL_CHROME_PX. */
+  padding: var(--ss-space-1);
   overflow-wrap: anywhere;
   word-break: break-word;
   font-size: var(--ss-studio-text-node-font-size, inherit);
@@ -1219,6 +1192,9 @@
  * overflow: hidden keeps the scrollHeight-driven auto-grow jitter-free. */
 .ss-studio-text-node-editor {
   overflow: hidden;
+  /* min-height: 0 defeats theme-level textarea floors that would otherwise
+   * pad short text with dead space below the last line. */
+  min-height: 0;
   background: transparent;
   border: none;
   border-radius: 0;

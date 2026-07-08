@@ -32,7 +32,9 @@ export const STUDIO_GRAPH_TERMINAL_MAX_HEIGHT = 1600;
 // absurd values from wrecking canvas math, not to constrain design intent.
 export const STUDIO_GRAPH_TEXT_NODE_MIN_WIDTH = 140;
 export const STUDIO_GRAPH_TEXT_NODE_MAX_WIDTH = 4000;
-export const STUDIO_GRAPH_TEXT_NODE_MIN_HEIGHT = 90;
+// One line of default-size text plus the vertical chrome — the card is
+// chromeless (no toolbar), so a single-line text node is genuinely short.
+export const STUDIO_GRAPH_TEXT_NODE_MIN_HEIGHT = 32;
 export const STUDIO_GRAPH_TEXT_NODE_MAX_HEIGHT = 4000;
 export const STUDIO_GRAPH_TEXT_NODE_DEFAULT_HEIGHT = STUDIO_GRAPH_TEXT_NODE_MIN_HEIGHT + 50;
 export const STUDIO_GRAPH_TEXT_NODE_MIN_FONT_SIZE = 10;
@@ -45,18 +47,22 @@ export const STUDIO_GRAPH_TEXT_NODE_DEFAULT_FONT_SIZE = 14;
  * testing). Mid-layout measurements can transiently read tiny/zero values.
  */
 export const STUDIO_GRAPH_MEASURED_NODE_MIN_WIDTH = 120;
-export const STUDIO_GRAPH_MEASURED_NODE_MIN_HEIGHT = 80;
+// Below the shortest legitimate card (a one-line text node at
+// STUDIO_GRAPH_TEXT_NODE_MIN_HEIGHT) so compact text measures honestly;
+// still catches the degenerate zero/near-zero mid-layout reads it guards.
+export const STUDIO_GRAPH_MEASURED_NODE_MIN_HEIGHT = 24;
 
 /**
  * Canonical text-node content-height estimate — the DOM-less fallback behind
  * resolveStudioTextNodeHeight. Line height approximates the default 14px font
- * at the base leading; the vertical chrome covers the toolbar row plus
- * content padding. Live DOM measurement (resolveStudioTextNodeHeight with an
+ * at the base leading; the vertical chrome is the content padding plus the
+ * card borders (keep in sync with .ss-studio-text-node-display padding in
+ * studio.css). Live DOM measurement (resolveStudioTextNodeHeight with an
  * element) always wins; this estimate keeps group bounds, canvas bounds, and
  * jsdom tests correct when no element exists.
  */
 const STUDIO_TEXT_NODE_LINE_HEIGHT_PX = 22;
-const STUDIO_TEXT_NODE_VERTICAL_CHROME_PX = 46;
+const STUDIO_TEXT_NODE_VERTICAL_CHROME_PX = 10;
 
 export type StudioGraphNodeResizeBounds = {
   minWidth: number;

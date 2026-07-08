@@ -374,21 +374,17 @@ describe("renderStudioGraphNodeCard", () => {
     }
   });
 
-  it("labels the text-card toolbar and resize frame with text wording", () => {
+  it("renders the text card chromeless — no buttons, text-labeled resize frame", () => {
     const { nodeEl } = renderNodeCardHarness({
       kind: "studio.text",
       config: { value: "Annotated" },
     });
 
-    const buttons = Array.from(nodeEl.querySelectorAll<HTMLButtonElement>("button"));
-    const ariaLabels = buttons.map((button) => button.getAttribute("aria-label"));
-    expect(ariaLabels).toEqual(expect.arrayContaining(["Delete text"]));
-    // Font size is drag-scaled (edges/corners) — the A-/A+ buttons are retired.
-    expect(ariaLabels).not.toContain("Decrease text size");
-    expect(ariaLabels).not.toContain("Increase text size");
-    for (const ariaLabel of ariaLabels) {
-      expect(ariaLabel?.toLowerCase()).not.toContain("label");
-    }
+    // tldraw parity: the text IS the node. No toolbar, no delete button
+    // (select + Delete/Backspace/cut is the removal path), no font buttons
+    // (font size is drag-scaled via edges/corners).
+    expect(nodeEl.querySelectorAll("button")).toHaveLength(0);
+    expect(nodeEl.querySelector(".ss-studio-text-node-toolbar")).toBeNull();
 
     const zoneEls = Array.from(
       nodeEl.querySelectorAll<HTMLElement>(".ss-studio-node-resize-zone")
@@ -421,6 +417,11 @@ describe("renderStudioGraphNodeCard", () => {
     if (!editorEl) {
       return;
     }
+
+    // rows=1 is load-bearing: a textarea defaults to rows="2", whose
+    // two-line scrollHeight the auto-grow sync would lock in, rendering a
+    // fresh one-line text node at double height.
+    expect(editorEl.rows).toBe(1);
 
     Object.defineProperty(editorEl, "scrollHeight", { value: 96, configurable: true });
     editorEl.value = "start\nmore\nlines";

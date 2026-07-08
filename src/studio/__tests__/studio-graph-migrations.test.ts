@@ -1,5 +1,6 @@
 import type { StudioProjectV1 } from "../types";
 import { migrateStudioProjectToPathOnlyPorts } from "../StudioGraphMigrations";
+import { STUDIO_GRAPH_TEXT_NODE_DEFAULT_HEIGHT } from "../StudioNodeGeometry";
 
 function baseProject(): StudioProjectV1 {
   const now = new Date().toISOString();
@@ -792,8 +793,14 @@ describe("migrateStudioProjectToPathOnlyPorts", () => {
       expect(migrated.changed).toBe(true);
 
       const textNode = migrated.project.graph.nodes.find((node) => node.id === "text");
-      // 140 is the pre-migration rendered default for a heightless text node.
-      expect(textNode?.size).toEqual({ width: 300, height: 140 });
+      // The fill tracks the live text-node default height. The value is
+      // inert for text cards (they render intrinsic height and persist
+      // width-only), so it follows the kind default rather than freezing a
+      // historical constant.
+      expect(textNode?.size).toEqual({
+        width: 300,
+        height: STUDIO_GRAPH_TEXT_NODE_DEFAULT_HEIGHT,
+      });
       expect(textNode?.config).toEqual({ value: "annotation" });
     });
 
