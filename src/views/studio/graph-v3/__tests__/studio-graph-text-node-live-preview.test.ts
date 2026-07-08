@@ -165,6 +165,32 @@ describe("studio.text live-preview card", () => {
       expect(displayEl?.textContent).toBe("plain body");
     });
 
+    it("leaves rendered links and checkboxes to their own pointer handling instead of dragging", () => {
+      const renderMarkdownPreview = jest.fn((_node, _markdown, containerEl: HTMLElement) => {
+        containerEl.createEl("a", { text: "a link", attr: { href: "https://example.com" } });
+        const checkboxEl = containerEl.createEl("input");
+        checkboxEl.type = "checkbox";
+      });
+      const { nodeEl, graphInteraction } = renderHarness({
+        value: "[a link](https://example.com)\n\n- [ ] task",
+        renderMarkdownPreview,
+      });
+
+      const displayEl = nodeEl.querySelector<HTMLElement>(".ss-studio-text-node-display");
+      const linkEl = displayEl?.querySelector<HTMLElement>("a");
+      const checkboxEl = displayEl?.querySelector<HTMLElement>("input");
+      expect(linkEl).not.toBeNull();
+      expect(checkboxEl).not.toBeNull();
+
+      for (const targetEl of [linkEl, checkboxEl]) {
+        const event = new MouseEvent("pointerdown", { bubbles: true, cancelable: true });
+        Object.defineProperty(event, "pointerId", { value: 41, configurable: true });
+        targetEl?.dispatchEvent(event);
+      }
+
+      expect(graphInteraction.startNodeDrag).not.toHaveBeenCalled();
+    });
+
     it("still opens edit mode on double click over rendered markdown", () => {
       const renderMarkdownPreview = jest.fn();
       const { node, nodeEl, onRequestTextNodeEdit, graphInteraction } = renderHarness({

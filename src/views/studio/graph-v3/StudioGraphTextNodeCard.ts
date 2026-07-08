@@ -389,6 +389,15 @@ export function renderTextNodeCard(options: RenderTextNodeCardOptions): void {
       if (pointerEvent.button !== 0) {
         return;
       }
+      // Rendered markdown carries its own controls (links, task checkboxes,
+      // embeds); their pointer gestures belong to the control, not to card
+      // dragging. The card-level pointer policy skips these targets too.
+      if (
+        event.target instanceof Element &&
+        event.target.closest("a, input, button, audio, video") !== null
+      ) {
+        return;
+      }
       event.stopPropagation();
       if (pointerEvent.shiftKey || pointerEvent.metaKey || pointerEvent.ctrlKey) {
         lastTextNodeTapByNodeId.delete(node.id);

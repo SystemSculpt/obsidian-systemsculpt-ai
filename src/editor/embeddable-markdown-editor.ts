@@ -158,6 +158,77 @@ function resolveInternalMarkdownEditorClass(
  */
 let constructingOptions: EmbeddableMarkdownEditorOptions | null = null;
 
+type WorkspaceWithSetActiveLeaf = {
+  setActiveLeaf?: (...args: unknown[]) => void;
+  activeEditor?: unknown;
+};
+
+type SetActiveLeafPatchState = {
+  original: (...args: unknown[]) => void;
+  wrapper: (...args: unknown[]) => void;
+  editors: Set<InternalMarkdownEditorInstance>;
+};
+
+/**
+ * One shared `setActiveLeaf` patch per workspace, reference-counted across
+ * every live embedded editor. A per-editor wrap chain would break on
+ * out-of-order teardown (the middle wrapper can never be unlinked); here the
+ * single wrapper suppresses leaf activation while ANY live embedded editor
+ * has focus, and the original method is restored when the last editor
+ * releases.
+ */
+const setActiveLeafPatchByWorkspace = new WeakMap<object, SetActiveLeafPatchState>();
+
+function acquireSetActiveLeafPatch(
+  workspace: WorkspaceWithSetActiveLeaf,
+  editor: InternalMarkdownEditorInstance
+): void {
+  if (typeof workspace.setActiveLeaf !== "function") {
+    return;
+  }
+  let state = setActiveLeafPatchByWorkspace.get(workspace as object);
+  if (!state) {
+    const original = workspace.setActiveLeaf;
+    const editors = new Set<InternalMarkdownEditorInstance>();
+    const wrapper = (...args: unknown[]): void => {
+      for (const activeEditor of editors) {
+        if (activeEditor.editor?.cm?.hasFocus === true) {
+          return;
+        }
+      }
+      original.apply(workspace, args);
+    };
+    state = { original, wrapper, editors };
+    setActiveLeafPatchByWorkspace.set(workspace as object, state);
+    workspace.setActiveLeaf = wrapper;
+  }
+  state.editors.add(editor);
+}
+
+function releaseSetActiveLeafPatch(
+  workspace: WorkspaceWithSetActiveLeaf | undefined,
+  editor: InternalMarkdownEditorInstance
+): void {
+  if (!workspace) {
+    return;
+  }
+  const state = setActiveLeafPatchByWorkspace.get(workspace as object);
+  if (!state) {
+    return;
+  }
+  state.editors.delete(editor);
+  if (state.editors.size > 0) {
+    return;
+  }
+  setActiveLeafPatchByWorkspace.delete(workspace as object);
+  // Only restore when the wrapper is still installed; if something else
+  // wrapped after us, the now-empty editor set makes our wrapper a pure
+  // pass-through, so leaving it in a foreign chain stays harmless.
+  if (workspace.setActiveLeaf === state.wrapper) {
+    workspace.setActiveLeaf = state.original;
+  }
+}
+
 const embeddableClassByBase = new WeakMap<
   InternalMarkdownEditorConstructor,
   InternalMarkdownEditorConstructor
@@ -229,26 +300,15 @@ function getEmbeddableEditorClass(
 
       self.set?.(options.value ?? "", true);
 
-      // Keep the workspace from yanking focus back to a leaf while the
-      // embedded editor owns it. Registered so unload restores the original.
-      const workspace = (app as {
-        workspace?: {
-          setActiveLeaf?: (...args: unknown[]) => void;
-          activeEditor?: unknown;
-        };
-      }).workspace;
-      if (workspace && typeof workspace.setActiveLeaf === "function") {
-        const original = workspace.setActiveLeaf.bind(workspace);
-        const patched = (...args: unknown[]): void => {
-          if (!this.embeddableHasFocus()) {
-            original(...args);
-          }
-        };
-        workspace.setActiveLeaf = patched;
+      // Keep the workspace from yanking focus back to a leaf while an
+      // embedded editor owns it. The patch is shared and reference-counted,
+      // so any number of editors can come and go in any order.
+      const workspace = (app as { workspace?: WorkspaceWithSetActiveLeaf })
+        .workspace;
+      if (workspace) {
+        acquireSetActiveLeafPatch(workspace, self);
         self.register?.(() => {
-          if (workspace.setActiveLeaf === patched) {
-            workspace.setActiveLeaf = original;
-          }
+          releaseSetActiveLeafPatch(workspace, self);
         });
       }
 
@@ -273,11 +333,6 @@ function getEmbeddableEditorClass(
       if (options.cls) {
         self.editorEl?.classList.add(options.cls);
       }
-    }
-
-    private embeddableHasFocus(): boolean {
-      const self = this as unknown as InternalMarkdownEditorInstance;
-      return self.editor?.cm?.hasFocus === true;
     }
 
     private pushKeymapScope(): void {

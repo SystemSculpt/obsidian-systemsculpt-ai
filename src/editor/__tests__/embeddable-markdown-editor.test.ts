@@ -267,6 +267,44 @@ describe("createEmbeddableMarkdownEditor", () => {
     expect(container.childElementCount).toBe(0);
   });
 
+  it("restores the original setActiveLeaf after out-of-order destruction of two editors", () => {
+    const { app } = createFakeApp();
+    const originalSetActiveLeaf = app.workspace.setActiveLeaf;
+
+    const first = createEmbeddableMarkdownEditor(app, document.body.createDiv(), {
+      value: "a",
+    });
+    const second = createEmbeddableMarkdownEditor(app, document.body.createDiv(), {
+      value: "b",
+    });
+
+    // Teardown in creation order — the regression case: a per-instance wrap
+    // chain would leave a destroyed editor's wrapper installed forever.
+    first!.destroy();
+    second!.destroy();
+
+    expect(app.workspace.setActiveLeaf).toBe(originalSetActiveLeaf);
+  });
+
+  it("keeps setActiveLeaf suppressed only while an editor has focus", () => {
+    const { app } = createFakeApp();
+    const originalSetActiveLeaf = app.workspace.setActiveLeaf;
+    const handle = createEmbeddableMarkdownEditor(app, document.body.createDiv(), {
+      value: "a",
+    });
+    const rawEditor = handle!.editor as FakeScrollableMarkdownEditor;
+
+    rawEditor.editor.cm.hasFocus = true;
+    app.workspace.setActiveLeaf("leaf-while-focused");
+    expect(originalSetActiveLeaf).not.toHaveBeenCalled();
+
+    rawEditor.editor.cm.hasFocus = false;
+    app.workspace.setActiveLeaf("leaf-while-blurred");
+    expect(originalSetActiveLeaf).toHaveBeenCalledWith("leaf-while-blurred");
+
+    handle!.destroy();
+  });
+
   it("focus() forwards to the CodeMirror view", () => {
     const { app } = createFakeApp();
     const container = document.body.createDiv();
