@@ -40,19 +40,22 @@ function normalizeHexColor(value: string): string | null {
   return lower;
 }
 
-function readNodeSize(raw: unknown): { width: number; height: number } | null {
+function readNodeSize(raw: unknown): { width: number; height?: number } | null {
   if (!isRecord(raw)) {
     return null;
   }
   const width = asNumber(raw.width);
   const height = asNumber(raw.height);
-  // Size is all-or-nothing: invalid or partial geometry is dropped here and
-  // the kind's default rendering applies (the load migration backfills
-  // partial legacy config geometry before it ever reaches serialization).
-  if (width === null || height === null) {
+  // Width is required; height is OPTIONAL — matching StudioNodeSize. Kinds
+  // with intrinsic height (text reflow) or aspect-driven height (image/video
+  // media cards) deliberately persist width only, so a width-only size must
+  // survive normalization instead of being dropped as "partial" (dropping it
+  // silently reset every resized image back to the default width on the next
+  // load). Only a size with no usable width is discarded.
+  if (width === null) {
     return null;
   }
-  return { width, height };
+  return { width, ...(height !== null ? { height } : {}) };
 }
 
 function readNode(raw: unknown): StudioProjectV1["graph"]["nodes"][number] {

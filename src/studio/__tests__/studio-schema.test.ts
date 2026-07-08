@@ -25,7 +25,7 @@ describe("Studio schema", () => {
     expect(parsed.graph.groups || []).toEqual([]);
   });
 
-  it("round-trips first-class node size and drops invalid or partial size data", () => {
+  it("round-trips first-class node size, keeping width-only sizes", () => {
     const project = createEmptyStudioProject({
       name: "Sized",
       policyPath: "SystemSculpt/Studio/Sized.systemsculpt-assets/policy/grants.json",
@@ -52,8 +52,14 @@ describe("Studio schema", () => {
     corrupted.graph.nodes[0].size = { width: "abc", height: 240 };
     expect(parseStudioProject(JSON.stringify(corrupted)).graph.nodes[0].size).toBeUndefined();
 
+    // Width-only sizes are the PERSISTED contract for intrinsic-height kinds
+    // (text reflow, aspect-driven image/video cards) — regression guard: they
+    // were once dropped as "partial", silently resetting resized images back
+    // to the default width on the next load.
     corrupted.graph.nodes[0].size = { width: 320 };
-    expect(parseStudioProject(JSON.stringify(corrupted)).graph.nodes[0].size).toBeUndefined();
+    expect(parseStudioProject(JSON.stringify(corrupted)).graph.nodes[0].size).toEqual({
+      width: 320,
+    });
 
     delete corrupted.graph.nodes[0].size;
     expect(parseStudioProject(JSON.stringify(corrupted)).graph.nodes[0].size).toBeUndefined();
