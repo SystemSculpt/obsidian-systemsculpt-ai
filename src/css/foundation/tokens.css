@@ -1,0 +1,207 @@
+/**
+ * SystemSculpt Design Tokens
+ *
+ * The single source of truth for every visual decision in the plugin.
+ * Every color derives from Obsidian's theme variables via color-mix, so the
+ * system adapts to any theme (light, dark, custom) without per-theme forks.
+ *
+ * Rules of the system (enforced by scripts/lint-css.mjs):
+ *   - Component sheets never hardcode colors, radii, font sizes, shadows,
+ *     durations, or z-indexes — they consume these tokens.
+ *   - Spacing sits on a 4px grid.
+ *   - One state grammar: hover tints, active presses, focus rings, and
+ *     disabled fades are identical everywhere.
+ */
+
+body {
+  /* ------------------------------------------------------------------ *
+   * Ink — text and iconography
+   * ------------------------------------------------------------------ */
+  --ss-ink: var(--text-normal);
+  --ss-ink-muted: var(--text-muted);
+  --ss-ink-faint: var(--text-faint);
+  --ss-ink-accent: var(--text-accent);
+  --ss-ink-on-accent: var(--text-on-accent);
+
+  /* ------------------------------------------------------------------ *
+   * Surfaces — a four-step elevation ramp. Higher steps read subtly
+   * lighter (dark themes) or cooler (light themes) because they blend a
+   * whisper of ink into the base. All fully opaque.
+   * ------------------------------------------------------------------ */
+  --ss-surface-0: var(--background-primary);
+  --ss-surface-1: color-mix(in srgb, var(--ss-ink) 3%, var(--background-primary));
+  --ss-surface-2: color-mix(in srgb, var(--ss-ink) 6%, var(--background-primary));
+  --ss-surface-3: color-mix(in srgb, var(--ss-ink) 9%, var(--background-primary));
+  --ss-surface-sunken: var(--background-secondary);
+
+  /* Interactive state tints, layered over any surface. */
+  --ss-state-hover: color-mix(in srgb, var(--ss-ink) 6%, transparent);
+  --ss-state-active: color-mix(in srgb, var(--ss-ink) 10%, transparent);
+  --ss-state-selected: color-mix(in srgb, var(--ss-accent) 14%, transparent);
+
+  /* Modal / drawer scrim. */
+  --ss-scrim: color-mix(in srgb, black 45%, transparent);
+
+  /* ------------------------------------------------------------------ *
+   * Lines — hairline borders and separators
+   * ------------------------------------------------------------------ */
+  --ss-line: color-mix(in srgb, var(--ss-ink) 10%, transparent);
+  --ss-line-strong: color-mix(in srgb, var(--ss-ink) 18%, transparent);
+  --ss-line-accent: color-mix(in srgb, var(--ss-accent) 45%, transparent);
+
+  /* ------------------------------------------------------------------ *
+   * Accent — used sparingly: primary actions, selection, focus, progress
+   * ------------------------------------------------------------------ */
+  --ss-accent: var(--interactive-accent);
+  --ss-accent-hover: var(--interactive-accent-hover);
+  --ss-accent-tint: color-mix(in srgb, var(--ss-accent) 12%, var(--ss-surface-0));
+  --ss-accent-tint-strong: color-mix(in srgb, var(--ss-accent) 22%, var(--ss-surface-0));
+
+  /* ------------------------------------------------------------------ *
+   * Status — success / warning / danger / info, each as ink, tint, line
+   * ------------------------------------------------------------------ */
+  --ss-success: color-mix(in srgb, rgb(var(--color-green-rgb, 8, 185, 78)) 82%, var(--ss-ink) 18%);
+  --ss-success-tint: color-mix(in srgb, rgb(var(--color-green-rgb, 8, 185, 78)) 12%, var(--ss-surface-0));
+  --ss-success-line: color-mix(in srgb, rgb(var(--color-green-rgb, 8, 185, 78)) 40%, transparent);
+
+  --ss-warning: color-mix(in srgb, rgb(var(--color-yellow-rgb, 224, 172, 0)) 82%, var(--ss-ink) 18%);
+  --ss-warning-tint: color-mix(in srgb, rgb(var(--color-yellow-rgb, 224, 172, 0)) 12%, var(--ss-surface-0));
+  --ss-warning-line: color-mix(in srgb, rgb(var(--color-yellow-rgb, 224, 172, 0)) 40%, transparent);
+
+  --ss-danger: color-mix(in srgb, rgb(var(--color-red-rgb, 233, 49, 71)) 82%, var(--ss-ink) 18%);
+  --ss-danger-tint: color-mix(in srgb, rgb(var(--color-red-rgb, 233, 49, 71)) 12%, var(--ss-surface-0));
+  --ss-danger-line: color-mix(in srgb, rgb(var(--color-red-rgb, 233, 49, 71)) 40%, transparent);
+
+  --ss-info: color-mix(in srgb, rgb(var(--color-blue-rgb, 8, 109, 221)) 82%, var(--ss-ink) 18%);
+  --ss-info-tint: color-mix(in srgb, rgb(var(--color-blue-rgb, 8, 109, 221)) 12%, var(--ss-surface-0));
+  --ss-info-line: color-mix(in srgb, rgb(var(--color-blue-rgb, 8, 109, 221)) 40%, transparent);
+
+  /* ------------------------------------------------------------------ *
+   * Spacing — 4px grid
+   * ------------------------------------------------------------------ */
+  --ss-space-0: 2px;
+  --ss-space-1: 4px;
+  --ss-space-2: 8px;
+  --ss-space-3: 12px;
+  --ss-space-4: 16px;
+  --ss-space-5: 20px;
+  --ss-space-6: 24px;
+  --ss-space-8: 32px;
+  --ss-space-10: 40px;
+
+  /* ------------------------------------------------------------------ *
+   * Radius — one scale; nested elements step down one size
+   * ------------------------------------------------------------------ */
+  --ss-radius-xs: 4px;
+  --ss-radius-sm: 7px;
+  --ss-radius-md: 10px;
+  --ss-radius-lg: 14px;
+  --ss-radius-xl: 20px;
+  --ss-radius-full: 999px;
+  --ss-radius-round: 50%;
+
+  /* ------------------------------------------------------------------ *
+   * Over-media chrome — controls drawn on top of user images/video sit
+   * on the media itself, not on theme surfaces, so these are the one
+   * deliberate theme-independent family (video-player scrim grammar).
+   * ------------------------------------------------------------------ */
+  --ss-media-scrim: rgba(0, 0, 0, 0.62);
+  --ss-media-scrim-soft: rgba(0, 0, 0, 0.32);
+  --ss-media-state-hover: rgba(255, 255, 255, 0.18);
+  --ss-ink-on-media: #fff;
+  --ss-ink-on-media-muted: rgba(255, 255, 255, 0.82);
+  --ss-line-on-media: rgba(255, 255, 255, 0.28);
+
+  /* ------------------------------------------------------------------ *
+   * Typography — interface font, 13px UI base
+   * ------------------------------------------------------------------ */
+  --ss-font: var(--font-interface);
+  --ss-font-mono: var(--font-monospace);
+
+  --ss-text-xs: 11px;
+  --ss-text-sm: 12px;
+  --ss-text-base: 13px;
+  --ss-text-lg: 15px;
+  --ss-text-xl: 17px;
+  --ss-text-2xl: 20px;
+
+  --ss-weight-medium: 500;
+  --ss-weight-semibold: 600;
+
+  --ss-leading-tight: 1.25;
+  --ss-leading-base: 1.45;
+  --ss-leading-relaxed: 1.6;
+
+  --ss-tracking-tight: -0.01em;
+  --ss-tracking-wide: 0.05em;
+
+  /* ------------------------------------------------------------------ *
+   * Elevation — soft, large-blur, low-opacity; pairs with --ss-line
+   * ------------------------------------------------------------------ */
+  --ss-shadow-color: color-mix(in srgb, black 55%, transparent);
+  --ss-elevation-1:
+    0 1px 2px color-mix(in srgb, var(--ss-shadow-color) 24%, transparent);
+  --ss-elevation-2:
+    0 2px 6px color-mix(in srgb, var(--ss-shadow-color) 24%, transparent),
+    0 8px 24px color-mix(in srgb, var(--ss-shadow-color) 18%, transparent);
+  --ss-elevation-3:
+    0 4px 12px color-mix(in srgb, var(--ss-shadow-color) 28%, transparent),
+    0 16px 48px color-mix(in srgb, var(--ss-shadow-color) 24%, transparent);
+  --ss-elevation-4:
+    0 8px 24px color-mix(in srgb, var(--ss-shadow-color) 32%, transparent),
+    0 32px 80px color-mix(in srgb, var(--ss-shadow-color) 28%, transparent);
+
+  /* ------------------------------------------------------------------ *
+   * Focus — one ring everywhere
+   * ------------------------------------------------------------------ */
+  --ss-ring: 0 0 0 3px color-mix(in srgb, var(--ss-accent) 35%, transparent);
+
+  /* ------------------------------------------------------------------ *
+   * Motion — three durations, three easings
+   * ------------------------------------------------------------------ */
+  --ss-dur-fast: 120ms;
+  --ss-dur-base: 200ms;
+  --ss-dur-slow: 320ms;
+  --ss-ease: cubic-bezier(0.2, 0, 0, 1);
+  --ss-ease-out: cubic-bezier(0, 0, 0.2, 1);
+  --ss-ease-spring: cubic-bezier(0.34, 1.3, 0.64, 1);
+
+  /* Canonical transition sets. */
+  --ss-transition-colors:
+    color var(--ss-dur-fast) var(--ss-ease),
+    background-color var(--ss-dur-fast) var(--ss-ease),
+    border-color var(--ss-dur-fast) var(--ss-ease),
+    box-shadow var(--ss-dur-fast) var(--ss-ease),
+    opacity var(--ss-dur-fast) var(--ss-ease);
+  --ss-transition-transform:
+    transform var(--ss-dur-base) var(--ss-ease);
+
+  /* ------------------------------------------------------------------ *
+   * Z-layers
+   * ------------------------------------------------------------------ */
+  --ss-z-raised: 10;
+  --ss-z-sticky: 100;
+  --ss-z-drawer: 500;
+  --ss-z-modal: 1000;
+  --ss-z-popover: 1100;
+  --ss-z-tooltip: 1200;
+  --ss-z-notice: 1300;
+
+  /* ------------------------------------------------------------------ *
+   * Shared component metrics
+   * ------------------------------------------------------------------ */
+  --ss-control-height: 32px;
+  --ss-control-height-sm: 26px;
+  --ss-control-height-lg: 40px;
+  --ss-icon-size: 16px;
+  --ss-icon-size-sm: 14px;
+  --ss-icon-size-lg: 20px;
+  --ss-touch-target: 44px;
+}
+
+/* Light themes need gentler shadows and a slightly stronger hairline. */
+body.theme-light {
+  --ss-shadow-color: color-mix(in srgb, black 30%, transparent);
+  --ss-line: color-mix(in srgb, var(--ss-ink) 12%, transparent);
+  --ss-scrim: color-mix(in srgb, black 32%, transparent);
+}

@@ -1,17 +1,18 @@
 # Styling coverage snapshot
 
-Last verified against plugin source: **2026-02-11**.
+Last verified against plugin source: **2026-07-03**.
 
 This repo does **not** ship a standalone Obsidian theme package. It ships plugin CSS for SystemSculpt views/components.
 
 ## What is in scope here
 
 - CSS entrypoint: `src/css/index.css`
-- Tokens and design variables: `src/css/base/variables.css`
-- Shared primitives: `src/css/base/*`, `src/css/components/*`, `src/css/layout/*`
+- Tokens and design variables: `src/css/foundation/tokens.css`
+- Shared primitives: `src/css/foundation/*`, `src/css/primitives/*`, `src/css/components/*`
 - View-level styling: `src/css/views/*`
 - Modal styling: `src/css/modals/*`
-- Scoped Obsidian overrides: `src/css/obsidian-overrides/*`
+- Scoped Obsidian overrides: live with each view's sheet (e.g.
+  `views/chat.css`), strictly `[data-type="systemsculpt-*"]`-scoped
 
 ## Areas with broad styling coverage
 

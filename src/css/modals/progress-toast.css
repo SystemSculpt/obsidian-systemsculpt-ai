@@ -1,0 +1,157 @@
+/**
+ * Document-processing progress toast — fixed bottom-right widget
+ * (DocumentProcessingModal.ts). Status rows (.systemsculpt-progress-status*)
+ * are shared with the transcription/automation modals — see misc-modals.css.
+ */
+
+.systemsculpt-progress-modal {
+  position: fixed;
+  bottom: var(--ss-space-8);
+  right: var(--ss-space-8);
+  width: 350px;
+  max-width: calc(100vw - var(--ss-space-10));
+  padding: var(--ss-space-4);
+  background-color: var(--ss-surface-2);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-md);
+  box-shadow: var(--ss-elevation-3);
+  z-index: var(--ss-z-notice);
+  animation: ss-slide-up var(--ss-dur-base) var(--ss-ease-out);
+}
+
+.systemsculpt-progress-header {
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-2);
+  margin-bottom: var(--ss-space-3);
+}
+
+.systemsculpt-progress-icon {
+  display: flex;
+  align-items: center;
+  color: var(--ss-ink-muted);
+}
+
+.systemsculpt-progress-title {
+  flex: 1;
+  font-weight: var(--ss-weight-semibold);
+  font-size: var(--ss-text-sm);
+}
+
+.systemsculpt-progress-percent {
+  font-variant-numeric: tabular-nums;
+  font-size: var(--ss-text-sm);
+  color: var(--ss-ink);
+}
+
+.systemsculpt-progress-bar-track {
+  height: 6px;
+  margin-top: var(--ss-space-2);
+  background-color: var(--ss-line);
+  border-radius: var(--ss-radius-full);
+  overflow: hidden;
+}
+
+.systemsculpt-progress-bar {
+  width: 0%;
+  height: 100%;
+  background-color: var(--ss-accent);
+  border-radius: var(--ss-radius-full);
+  transition: width var(--ss-dur-slow) var(--ss-ease);
+}
+
+.systemsculpt-progress-modal.is-complete .systemsculpt-progress-bar {
+  background-color: var(--ss-success);
+}
+
+.systemsculpt-progress-modal.is-error .systemsculpt-progress-bar {
+  background-color: var(--ss-danger);
+}
+
+/* Steps */
+.systemsculpt-progress-steps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ss-space-1);
+  margin-top: var(--ss-space-3);
+}
+
+.systemsculpt-progress-step {
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-2);
+  font-size: var(--ss-text-sm);
+  color: var(--ss-ink-faint);
+}
+
+.systemsculpt-progress-step.active {
+  color: var(--ss-ink);
+}
+
+.systemsculpt-progress-step.active .systemsculpt-progress-step-icon svg {
+  animation: ss-spin 1s linear infinite;
+}
+
+.systemsculpt-progress-step.completed {
+  color: var(--ss-success);
+}
+
+.systemsculpt-progress-step.error {
+  color: var(--ss-danger);
+}
+
+.systemsculpt-progress-step-icon {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.systemsculpt-progress-step-text {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Buttons */
+.systemsculpt-progress-buttons {
+  display: flex;
+  gap: var(--ss-space-2);
+  margin-top: var(--ss-space-3);
+}
+
+.systemsculpt-progress-button {
+  flex: 1;
+  min-height: var(--ss-control-height-sm);
+  padding: 0 var(--ss-space-3);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-xs);
+  background-color: var(--ss-surface-1);
+  color: var(--ss-ink);
+  font-size: var(--ss-text-sm);
+  font-weight: var(--ss-weight-medium);
+  cursor: pointer;
+  transition: var(--ss-transition-colors);
+}
+
+.systemsculpt-progress-button:hover {
+  background-color: var(--ss-surface-3);
+}
+
+.systemsculpt-progress-button.primary {
+  background-color: var(--ss-accent);
+  border-color: var(--ss-accent);
+  color: var(--ss-ink-on-accent);
+}
+
+.systemsculpt-progress-button.primary:hover {
+  background-color: var(--ss-accent-hover);
+}
+
+.systemsculpt-progress-detail {
+  margin-top: var(--ss-space-2);
+  font-size: var(--ss-text-xs);
+  color: var(--ss-ink-muted);
+}
+
+.systemsculpt-progress-detail.is-hidden {
+  display: none;
+}

@@ -1,24 +1,25 @@
-/* 
-  SystemSculpt Update Notification Drawer
-  Minimal, native Obsidian styling
-*/
+/**
+ * Update notification drawer — bottom-right toast offering the new version.
+ */
 
 .systemsculpt-update-drawer {
   position: fixed;
-  bottom: 20px;
-  right: 20px;
+  bottom: var(--ss-space-5);
+  right: var(--ss-space-5);
   width: 280px;
-  max-width: calc(100vw - 40px);
-  background: var(--background-primary);
-  border: 1px solid var(--background-modifier-border);
-  border-radius: var(--radius-s);
-  box-shadow: var(--shadow-s);
-  z-index: 9999;
+  max-width: calc(100vw - var(--ss-space-10));
+  background: var(--ss-surface-2);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-md);
+  box-shadow: var(--ss-elevation-3);
+  z-index: var(--ss-z-notice);
   transform: translateY(10px);
   opacity: 0;
-  transition: transform 0.2s ease, opacity 0.2s ease;
-  font-family: var(--font-interface);
-  font-size: var(--font-ui-small);
+  transition:
+    transform var(--ss-dur-base) var(--ss-ease-out),
+    opacity var(--ss-dur-base) var(--ss-ease-out);
+  font-family: var(--ss-font);
+  font-size: var(--ss-text-sm);
 }
 
 .systemsculpt-update-drawer.visible {
@@ -26,35 +27,33 @@
   opacity: 1;
 }
 
-/* Simple header without colored background */
 .systemsculpt-update-drawer-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 12px 16px 8px 16px;
-  border-bottom: 1px solid var(--background-modifier-border);
+  padding: var(--ss-space-3) var(--ss-space-4) var(--ss-space-2);
+  border-bottom: 1px solid var(--ss-line);
 }
 
 .systemsculpt-update-drawer-title {
-  font-weight: var(--font-weight-medium);
-  font-size: var(--font-ui-small);
-  color: var(--text-normal);
+  font-weight: var(--ss-weight-semibold);
+  font-size: var(--ss-text-sm);
+  color: var(--ss-ink);
 }
 
-/* Minimal close button */
 .systemsculpt-update-drawer-close {
-  cursor: pointer;
-  width: 16px;
-  height: 16px;
   position: relative;
-  opacity: 0.5;
-  transition: opacity 0.15s ease;
-  background: var(--ss-layer-base);
-  border: none;
-  outline: none;
   display: flex;
   align-items: center;
   justify-content: center;
+  width: var(--ss-icon-size);
+  height: var(--ss-icon-size);
+  background: transparent;
+  border: none;
+  outline: none;
+  cursor: pointer;
+  opacity: 0.5;
+  transition: var(--ss-transition-colors);
 }
 
 .systemsculpt-update-drawer-close:hover,
@@ -64,11 +63,11 @@
 
 .systemsculpt-update-drawer-close::before,
 .systemsculpt-update-drawer-close::after {
-  content: '';
+  content: "";
   position: absolute;
   width: 1px;
   height: 10px;
-  background: var(--text-muted);
+  background: var(--ss-ink-muted);
 }
 
 .systemsculpt-update-drawer-close::before {
@@ -79,24 +78,22 @@
   transform: rotate(-45deg);
 }
 
-/* Content area */
 .systemsculpt-update-drawer-content {
-  padding: 8px 16px 16px 16px;
+  padding: var(--ss-space-2) var(--ss-space-4) var(--ss-space-4);
 }
 
 .systemsculpt-update-drawer-message {
-  margin-bottom: 12px;
-  font-size: var(--font-ui-small);
-  color: var(--text-muted);
-  line-height: 1.3;
+  margin-bottom: var(--ss-space-3);
+  font-size: var(--ss-text-sm);
+  color: var(--ss-ink-muted);
+  line-height: var(--ss-leading-base);
 }
 
-/* Simple version display */
 .systemsculpt-update-drawer-versions {
-  margin-bottom: 16px;
-  font-family: var(--font-monospace);
-  font-size: var(--font-ui-smaller);
-  color: var(--text-muted);
+  margin-bottom: var(--ss-space-4);
+  font-family: var(--ss-font-mono);
+  font-size: var(--ss-text-xs);
+  color: var(--ss-ink-muted);
   text-align: center;
 }
 
@@ -105,57 +102,50 @@
 }
 
 .systemsculpt-update-drawer-latest {
-  color: var(--text-normal);
-  font-weight: var(--font-weight-medium);
+  color: var(--ss-ink);
+  font-weight: var(--ss-weight-medium);
 }
 
 .systemsculpt-update-drawer-arrow {
-  margin: 0 6px;
+  margin: 0 var(--ss-space-2);
   opacity: 0.5;
 }
 
-/* Simple button matching Obsidian's style */
 .systemsculpt-update-drawer-button {
   width: 100%;
-  padding: 6px 12px;
-  font-size: var(--font-ui-small);
-  font-weight: var(--font-weight-medium);
+  min-height: var(--ss-control-height);
+  padding: 0 var(--ss-space-3);
+  font-size: var(--ss-text-sm);
+  font-weight: var(--ss-weight-medium);
   cursor: pointer;
-  background: var(--interactive-accent);
-  color: var(--text-on-accent);
-  border: 1px solid var(--interactive-accent);
-  border-radius: var(--button-radius);
-  transition: all 0.15s ease;
+  background: var(--ss-accent);
+  color: var(--ss-ink-on-accent);
+  border: 1px solid var(--ss-accent);
+  border-radius: var(--ss-radius-sm);
+  transition: var(--ss-transition-colors);
   outline: none;
 }
 
 .systemsculpt-update-drawer-button:hover {
-  background: var(--interactive-accent-hover);
-  border-color: var(--interactive-accent-hover);
+  background: var(--ss-accent-hover);
+  border-color: var(--ss-accent-hover);
 }
 
 .systemsculpt-update-drawer-button:focus-visible {
-  outline: 2px solid var(--background-modifier-border-focus);
-  outline-offset: 1px;
+  box-shadow: var(--ss-ring);
 }
 
-/* Mobile responsive */
 @media (max-width: 768px) {
   .systemsculpt-update-drawer {
-    bottom: 16px;
-    right: 16px;
-    left: 16px;
+    bottom: var(--ss-space-4);
+    right: var(--ss-space-4);
+    left: var(--ss-space-4);
     width: auto;
   }
 }
 
-/* Reduced motion support */
 @media (prefers-reduced-motion: reduce) {
-  .systemsculpt-update-drawer {
-    transition: opacity 0.15s ease;
-    transform: none;
-  }
-  
+  .systemsculpt-update-drawer,
   .systemsculpt-update-drawer.visible {
     transform: none;
   }

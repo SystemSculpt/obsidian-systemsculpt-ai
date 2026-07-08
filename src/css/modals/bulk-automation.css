@@ -1,0 +1,242 @@
+/**
+ * Bulk automation widgets — fixed bottom-right confirm/progress toasts
+ * (BulkAutomationConfirmModal.ts / AutomationProcessingModal.ts).
+ */
+
+.systemsculpt-bulk-confirm-widget,
+.systemsculpt-bulk-progress-widget {
+  position: fixed;
+  bottom: var(--ss-space-5);
+  right: var(--ss-space-5);
+  width: 320px;
+  max-width: calc(100vw - var(--ss-space-10));
+  background-color: var(--ss-surface-2);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-md);
+  box-shadow: var(--ss-elevation-3);
+  z-index: var(--ss-z-notice);
+  animation: ss-slide-up var(--ss-dur-base) var(--ss-ease-out);
+}
+
+.systemsculpt-bulk-widget-header {
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-2);
+  padding: var(--ss-space-3) var(--ss-space-4);
+  border-bottom: 1px solid var(--ss-line);
+}
+
+.systemsculpt-bulk-widget-icon {
+  display: flex;
+  align-items: center;
+  color: var(--ss-ink-muted);
+}
+
+.systemsculpt-bulk-progress-widget:not(.is-complete):not(.is-error):not(.is-stopped)
+  .systemsculpt-bulk-widget-icon svg {
+  animation: ss-spin 1s linear infinite;
+}
+
+.systemsculpt-bulk-widget-title {
+  flex: 1;
+  font-weight: var(--ss-weight-semibold);
+  font-size: var(--ss-text-sm);
+}
+
+.systemsculpt-bulk-widget-close {
+  display: flex;
+  align-items: center;
+  padding: var(--ss-space-0);
+  border-radius: var(--ss-radius-xs);
+  color: var(--ss-ink-muted);
+  cursor: pointer;
+  transition: var(--ss-transition-colors);
+}
+
+.systemsculpt-bulk-widget-close:hover {
+  background-color: var(--ss-state-hover);
+  color: var(--ss-ink);
+}
+
+.systemsculpt-bulk-widget-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ss-space-2);
+  padding: var(--ss-space-3) var(--ss-space-4);
+}
+
+.systemsculpt-bulk-widget-description,
+.systemsculpt-bulk-widget-info,
+.systemsculpt-bulk-widget-status {
+  font-size: var(--ss-text-sm);
+  color: var(--ss-ink-muted);
+  line-height: var(--ss-leading-base);
+}
+
+.systemsculpt-bulk-widget-count {
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--ss-weight-medium);
+  color: var(--ss-ink);
+}
+
+/* Progress */
+.systemsculpt-bulk-widget-progress-track {
+  height: 6px;
+  background-color: var(--ss-line);
+  border-radius: var(--ss-radius-full);
+  overflow: hidden;
+}
+
+.systemsculpt-bulk-widget-progress-fill {
+  width: 0%;
+  height: 100%;
+  background-color: var(--ss-accent);
+  border-radius: var(--ss-radius-full);
+  transition: width var(--ss-dur-slow) var(--ss-ease);
+}
+
+.systemsculpt-bulk-progress-widget.is-complete .systemsculpt-bulk-widget-progress-fill {
+  background-color: var(--ss-success);
+}
+
+.systemsculpt-bulk-progress-widget.is-complete .systemsculpt-bulk-widget-icon {
+  color: var(--ss-success);
+}
+
+.systemsculpt-bulk-progress-widget.is-error .systemsculpt-bulk-widget-progress-fill {
+  background-color: var(--ss-danger);
+}
+
+.systemsculpt-bulk-progress-widget.is-error .systemsculpt-bulk-widget-icon {
+  color: var(--ss-danger);
+}
+
+.systemsculpt-bulk-progress-widget.is-stopped .systemsculpt-bulk-widget-progress-fill {
+  background-color: var(--ss-warning);
+}
+
+.systemsculpt-bulk-progress-widget.is-minimized .systemsculpt-bulk-widget-body {
+  display: none;
+}
+
+.systemsculpt-bulk-progress-widget.is-minimized {
+  width: auto;
+}
+
+/* Batch list */
+.systemsculpt-bulk-widget-batch {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ss-space-1);
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.systemsculpt-bulk-batch-item {
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-2);
+  font-size: var(--ss-text-sm);
+}
+
+.systemsculpt-bulk-batch-icon {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  color: var(--ss-ink-faint);
+}
+
+.systemsculpt-bulk-batch-name {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.systemsculpt-bulk-batch-status {
+  flex-shrink: 0;
+  color: var(--ss-ink-muted);
+}
+
+.systemsculpt-bulk-batch-item:not(.is-complete):not(.is-error):not(.is-skipped)
+  .systemsculpt-bulk-batch-status svg {
+  animation: ss-spin 1s linear infinite;
+}
+
+.systemsculpt-bulk-batch-item.is-complete .systemsculpt-bulk-batch-icon {
+  color: var(--ss-success);
+}
+
+.systemsculpt-bulk-batch-item.is-error .systemsculpt-bulk-batch-icon {
+  color: var(--ss-danger);
+}
+
+.systemsculpt-bulk-batch-item.is-skipped {
+  opacity: 0.6;
+}
+
+/* Detail */
+.systemsculpt-bulk-widget-detail {
+  font-size: var(--ss-text-xs);
+  color: var(--ss-ink-muted);
+}
+
+.systemsculpt-bulk-widget-detail.is-hidden {
+  display: none;
+}
+
+.systemsculpt-bulk-widget-detail-primary {
+  color: var(--ss-ink);
+}
+
+.systemsculpt-bulk-widget-detail-secondary {
+  color: var(--ss-ink-faint);
+}
+
+/* Buttons */
+.systemsculpt-bulk-widget-buttons {
+  display: flex;
+  gap: var(--ss-space-2);
+  padding: 0 var(--ss-space-4) var(--ss-space-3);
+}
+
+.systemsculpt-bulk-widget-buttons button {
+  flex: 1;
+  min-height: var(--ss-control-height-sm);
+  padding: 0 var(--ss-space-3);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-xs);
+  background-color: var(--ss-surface-1);
+  color: var(--ss-ink);
+  font-size: var(--ss-text-sm);
+  font-weight: var(--ss-weight-medium);
+  cursor: pointer;
+  transition: var(--ss-transition-colors);
+}
+
+.systemsculpt-bulk-widget-buttons button:hover {
+  background-color: var(--ss-surface-3);
+}
+
+.systemsculpt-bulk-widget-buttons button.mod-cta {
+  background-color: var(--ss-accent);
+  border-color: var(--ss-accent);
+  color: var(--ss-ink-on-accent);
+}
+
+.systemsculpt-bulk-widget-buttons button.mod-cta:hover {
+  background-color: var(--ss-accent-hover);
+}
+
+.systemsculpt-bulk-widget-buttons button.mod-danger {
+  background-color: var(--ss-danger-tint);
+  border-color: var(--ss-danger-line);
+  color: var(--ss-danger);
+}
+
+.systemsculpt-bulk-widget-buttons button.mod-danger:hover {
+  background-color: var(--ss-danger);
+  border-color: var(--ss-danger);
+  color: var(--ss-ink-on-accent);
+}

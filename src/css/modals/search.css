@@ -1,0 +1,204 @@
+/**
+ * SystemSculpt search modal — full-vault search with keyboard navigation.
+ * Root: `.ss-modal.ss-search-modal`; TS toggles `body.ss-search-open`.
+ */
+
+.ss-modal.ss-search-modal {
+  width: min(860px, 94vw);
+  max-width: min(860px, 94vw);
+  height: min(760px, 84vh);
+}
+
+.ss-search-modal .ss-modal__header {
+  display: none;
+}
+
+.ss-search-modal .ss-modal__content {
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Obsidian tooltips fight the overlay while the modal is open */
+body.ss-search-open .tooltip {
+  display: none !important;
+}
+
+.ss-search__content {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.ss-search {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  height: 100%;
+}
+
+/* Input row */
+.ss-search__input-row {
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-2);
+  padding: var(--ss-space-3) var(--ss-space-4);
+  border-bottom: 1px solid var(--ss-line);
+}
+
+.ss-search__icon {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  color: var(--ss-ink-faint);
+}
+
+.ss-search__input {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: var(--ss-control-height);
+  background: transparent;
+  border: none;
+  color: var(--ss-ink);
+  font-size: var(--ss-text-lg);
+}
+
+.ss-search__input:focus {
+  outline: none;
+  box-shadow: none;
+}
+
+.ss-search__input::placeholder {
+  color: var(--ss-ink-faint);
+}
+
+.ss-search__clear {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--ss-radius-round);
+  color: var(--ss-ink-muted);
+  cursor: pointer;
+  transition: var(--ss-transition-colors);
+}
+
+.ss-search__clear:hover {
+  background-color: var(--ss-state-hover);
+  color: var(--ss-ink);
+}
+
+.ss-search__status {
+  padding: var(--ss-space-1) var(--ss-space-4);
+  font-size: var(--ss-text-xs);
+  color: var(--ss-ink-faint);
+}
+
+/* Results */
+.ss-search__list {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scroll-padding: var(--ss-space-2);
+}
+
+.ss-search__item {
+  display: block;
+  padding: var(--ss-space-2) var(--ss-space-4);
+  border-bottom: 1px solid var(--ss-line);
+  cursor: pointer;
+  transition: var(--ss-transition-colors);
+}
+
+.ss-search__item:hover,
+.ss-search__item[aria-selected="true"] {
+  background-color: var(--ss-state-hover);
+}
+
+.ss-search__item[aria-selected="true"] {
+  box-shadow: inset 2px 0 0 var(--ss-accent);
+}
+
+.ss-search__item:focus {
+  outline: none;
+  box-shadow: inset 2px 0 0 var(--ss-accent), var(--ss-ring);
+}
+
+.ss-search__item-top {
+  display: flex;
+  align-items: baseline;
+  gap: var(--ss-space-2);
+  min-width: 0;
+}
+
+.ss-search__title {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: var(--ss-text-base);
+  font-weight: var(--ss-weight-medium);
+}
+
+.ss-search__meta {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: var(--ss-text-xs);
+  color: var(--ss-ink-faint);
+}
+
+.ss-search__excerpt {
+  max-height: 36px;
+  overflow: hidden;
+  margin-top: var(--ss-space-0);
+  font-size: var(--ss-text-sm);
+  color: var(--ss-ink-muted);
+}
+
+.ss-search-modal mark.ss-hl {
+  background-color: var(--ss-accent-tint-strong);
+  color: inherit;
+  border-radius: 2px;
+}
+
+.ss-search__loading,
+.ss-search__empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--ss-space-8);
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-sm);
+}
+
+/* Footer hints */
+.ss-search__footer {
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-3);
+  padding: var(--ss-space-2) var(--ss-space-4);
+  border-top: 1px solid var(--ss-line);
+}
+
+.ss-search__hint {
+  font-size: var(--ss-text-xs);
+  color: var(--ss-ink-faint);
+}
+
+.is-mobile .ss-search__footer,
+.is-phone .ss-search__footer {
+  display: none;
+}
+
+@media (max-width: 700px) {
+  .ss-modal.ss-search-modal {
+    width: 96vw;
+    height: 88vh;
+  }
+
+  .ss-search__excerpt {
+    max-height: 18px;
+  }
+}

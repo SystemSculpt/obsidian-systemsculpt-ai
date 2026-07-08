@@ -1,0 +1,88 @@
+/**
+ * Changelog modal — markdown release-notes viewer with version picker.
+ * Root: `.ss-changelog-modal.ss-modal--large` (ChangeLogModal.ts).
+ */
+
+.ss-changelog-modal .ss-modal__header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ss-space-2);
+}
+
+.ss-changelog-header-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-2);
+}
+
+.ss-changelog-version-select {
+  max-width: 280px;
+  min-height: var(--ss-control-height);
+}
+
+.ss-changelog-modal .ss-modal__content {
+  overflow: hidden;
+}
+
+/* Inner markdown region scrolls */
+.systemsculpt-changelog-modal {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: var(--ss-space-4) var(--ss-space-5);
+}
+
+.systemsculpt-changelog-notes {
+  flex: 1;
+}
+
+.systemsculpt-changelog-notes-inner {
+  max-width: 100%;
+}
+
+/* Markdown typography */
+.systemsculpt-changelog-modal .markdown-preview-view h1,
+.systemsculpt-changelog-modal .markdown-preview-view h2,
+.systemsculpt-changelog-modal .markdown-preview-view h3 {
+  letter-spacing: var(--ss-tracking-tight);
+  font-weight: var(--ss-weight-semibold);
+}
+
+.systemsculpt-changelog-modal .markdown-preview-view p,
+.systemsculpt-changelog-modal .markdown-preview-view ul,
+.systemsculpt-changelog-modal .markdown-preview-view ol {
+  line-height: var(--ss-leading-relaxed);
+}
+
+.systemsculpt-changelog-modal .markdown-preview-view blockquote {
+  border-left: 2px solid var(--ss-accent);
+  background-color: var(--ss-accent-tint);
+  border-radius: 0 var(--ss-radius-sm) var(--ss-radius-sm) 0;
+}
+
+.systemsculpt-changelog-modal .markdown-preview-view code {
+  font-family: var(--ss-font-mono);
+  font-size: var(--ss-text-sm);
+}
+
+.ss-changelog-modal .ss-modal__footer {
+  justify-content: space-between;
+}
+
+@media (max-width: 680px) {
+  .ss-changelog-header-controls {
+    flex-wrap: wrap;
+  }
+
+  .ss-changelog-version-select {
+    max-width: 100%;
+    width: 100%;
+  }
+
+  .systemsculpt-changelog-modal {
+    padding: var(--ss-space-3);
+  }
+}

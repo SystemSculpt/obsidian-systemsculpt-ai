@@ -1,0 +1,111 @@
+/**
+ * SystemSculpt Motion
+ *
+ * The canonical animation set. Component sheets reference only these
+ * keyframes — no per-component @keyframes. Durations and easings come from
+ * tokens.css; everything respects prefers-reduced-motion.
+ */
+
+/* Entrances */
+@keyframes ss-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes ss-fade-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@keyframes ss-scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes ss-slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes ss-slide-down {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes ss-slide-in-left {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes ss-slide-in-right {
+  from {
+    opacity: 0;
+    transform: translateX(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* Continuous */
+@keyframes ss-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes ss-pulse {
+  0%,
+  100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+@keyframes ss-shimmer {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+
+/* Feedback */
+@keyframes ss-flash {
+  0% { background-color: var(--ss-accent-tint-strong); }
+  100% { background-color: transparent; }
+}
+
+@keyframes ss-shake {
+  0%,
+  100% { transform: translateX(0); }
+  25% { transform: translateX(-3px); }
+  75% { transform: translateX(3px); }
+}
+
+/* Reduced motion: freeze decorative movement, keep opacity changes instant. */
+@media (prefers-reduced-motion: reduce) {
+  .ss-modal * {
+    animation-duration: 0.01ms;
+    animation-iteration-count: 1;
+    transition-duration: 0.01ms;
+  }
+}

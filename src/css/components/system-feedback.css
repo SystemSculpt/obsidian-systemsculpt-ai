@@ -1,0 +1,168 @@
+/**
+ * System feedback + shared scaffolding — popups, drag-drop overlay,
+ * and the surviving layout helpers.
+ * (Consolidates the live remains of the old misc.css / containers.css /
+ * grid.css.)
+ */
+
+/* ------------------------------------------------------------------ *
+ * Popups
+ * ------------------------------------------------------------------ */
+.systemsculpt-popup-container {
+  position: fixed;
+  inset: 0;
+  z-index: var(--ss-z-modal);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--ss-scrim);
+  animation: ss-fade-in var(--ss-dur-base) var(--ss-ease-out);
+}
+
+.systemsculpt-popup-container.systemsculpt-popup-closing {
+  animation: ss-fade-out var(--ss-dur-base) var(--ss-ease) forwards;
+}
+
+.systemsculpt-popup {
+  width: min(480px, 92vw);
+  padding: var(--ss-space-5);
+  background-color: var(--ss-surface-0);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-lg);
+  box-shadow: var(--ss-elevation-4);
+  animation: ss-slide-up var(--ss-dur-base) var(--ss-ease-out);
+}
+
+.systemsculpt-popup-container.systemsculpt-popup-closing .systemsculpt-popup {
+  animation: ss-fade-out var(--ss-dur-base) var(--ss-ease) forwards;
+}
+
+.systemsculpt-popup-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ss-space-3);
+}
+
+.systemsculpt-popup-title {
+  font-size: var(--ss-text-lg);
+  font-weight: var(--ss-weight-semibold);
+  letter-spacing: var(--ss-tracking-tight);
+}
+
+.systemsculpt-popup-icon {
+  display: inline-flex;
+  align-items: center;
+  color: var(--ss-ink-muted);
+}
+
+.systemsculpt-popup-description {
+  font-size: var(--ss-text-sm);
+  color: var(--ss-ink-muted);
+  line-height: var(--ss-leading-base);
+}
+
+.systemsculpt-popup-textarea {
+  width: 100%;
+  min-height: 120px;
+  padding: var(--ss-space-2);
+  background-color: var(--ss-surface-sunken);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-sm);
+  color: var(--ss-ink);
+  font-size: var(--ss-text-base);
+  resize: vertical;
+}
+
+.systemsculpt-popup-textarea:focus {
+  border-color: var(--ss-accent);
+  box-shadow: var(--ss-ring);
+  outline: none;
+}
+
+.systemsculpt-popup-message {
+  font-size: var(--ss-text-base);
+  line-height: var(--ss-leading-base);
+}
+
+.systemsculpt-popup-inputs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ss-space-2);
+}
+
+.systemsculpt-popup-checkbox-container {
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-2);
+}
+
+.systemsculpt-popup-checkbox {
+  accent-color: var(--ss-accent);
+}
+
+/* Generic collapsed / load-more helpers */
+.systemsculpt-collapsed {
+  display: none;
+}
+
+.systemsculpt-load-more {
+  align-self: center;
+  margin: var(--ss-space-2) 0;
+}
+
+/* ------------------------------------------------------------------ *
+ * Drag-drop overlay (chat container)
+ * ------------------------------------------------------------------ */
+.systemsculpt-drag-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: var(--ss-z-sticky);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: var(--ss-space-2);
+  background-color: color-mix(in srgb, var(--ss-accent) 8%, var(--ss-scrim));
+  border: 2px dashed var(--ss-accent);
+  border-radius: var(--ss-radius-lg);
+  color: var(--ss-ink);
+  pointer-events: none;
+}
+
+.systemsculpt-chat-container.systemsculpt-drag-active .systemsculpt-drag-overlay {
+  display: flex;
+}
+
+.systemsculpt-drag-message {
+  font-size: var(--ss-text-lg);
+  font-weight: var(--ss-weight-semibold);
+}
+
+.systemsculpt-drag-message::before {
+  content: "📄 ";
+}
+
+.systemsculpt-chat-container.systemsculpt-drag-active[data-drag-type="search"]
+  .systemsculpt-drag-message::before {
+  content: "🔍 ";
+}
+
+.systemsculpt-chat-container.systemsculpt-drag-active[data-drag-type="folder"]
+  .systemsculpt-drag-message::before {
+  content: "📁 ";
+}
+
+.systemsculpt-drag-detail {
+  font-size: var(--ss-text-sm);
+  color: var(--ss-ink-muted);
+}
+
+/* ------------------------------------------------------------------ *
+ * Message scaffold survivors
+ * ------------------------------------------------------------------ */
+.systemsculpt-message-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ss-space-1);
+}
+

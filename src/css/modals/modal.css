@@ -1,0 +1,595 @@
+/**
+ * SystemSculpt Modal Shell
+ *
+ * The one modal system. StandardModal (src/core/ui/modals/standard/) puts
+ * `.ss-modal` on Obsidian's `.modal` element and builds:
+ *   .ss-modal > .ss-modal__header + .ss-modal__content + .ss-modal__footer
+ *
+ * Sizing comes from `.ss-modal--{small|medium|large|fullwidth}` (setSize()).
+ * The list is the scroll region by default; `.ss-modal--scrollable` makes
+ * the whole content scroll instead.
+ */
+
+.ss-modal {
+  display: flex;
+  flex-direction: column;
+  width: 90vw;
+  max-width: 560px;
+  max-height: 85vh;
+  padding: 0;
+  overflow: hidden;
+
+  background-color: var(--ss-surface-0);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-lg);
+  box-shadow: var(--ss-elevation-4);
+  color: var(--ss-ink);
+
+  animation: ss-scale-in var(--ss-dur-base) var(--ss-ease-out);
+}
+
+/* Sizes */
+.ss-modal--small {
+  max-width: 420px;
+}
+
+.ss-modal--medium {
+  max-width: 560px;
+}
+
+.ss-modal--large {
+  max-width: 680px;
+  height: min(640px, 85vh);
+}
+
+.ss-modal--fullwidth {
+  max-width: 1200px;
+  width: 90vw;
+  height: 90vh;
+}
+
+/* ------------------------------------------------------------------ *
+ * Header
+ * ------------------------------------------------------------------ */
+.ss-modal__header {
+  flex-shrink: 0;
+  padding: var(--ss-space-4) var(--ss-space-5);
+  border-bottom: 1px solid var(--ss-line);
+}
+
+.ss-modal__title-container {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ss-space-3);
+}
+
+.ss-modal__title {
+  margin: 0;
+  font-size: var(--ss-text-xl);
+  font-weight: var(--ss-weight-semibold);
+  letter-spacing: var(--ss-tracking-tight);
+  line-height: var(--ss-leading-tight);
+}
+
+.ss-modal__subtitle {
+  margin: var(--ss-space-1) 0 0;
+  font-size: var(--ss-text-sm);
+  color: var(--ss-ink-muted);
+}
+
+.ss-modal__close-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border-radius: var(--ss-radius-xs);
+  color: var(--ss-ink-muted);
+  cursor: pointer;
+  transition: var(--ss-transition-colors);
+}
+
+.ss-modal__close-button:hover {
+  background-color: var(--ss-state-hover);
+  color: var(--ss-ink);
+}
+
+.ss-modal__description {
+  margin-top: var(--ss-space-2);
+  font-size: var(--ss-text-sm);
+  color: var(--ss-ink-muted);
+  line-height: var(--ss-leading-base);
+}
+
+/* ------------------------------------------------------------------ *
+ * Content — sections manage their own padding; the list scrolls
+ * ------------------------------------------------------------------ */
+.ss-modal__content {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.ss-modal--scrollable .ss-modal__content {
+  overflow-y: auto;
+  padding: var(--ss-space-4) var(--ss-space-5);
+}
+
+.ss-modal__custom-content {
+  padding: var(--ss-space-4) var(--ss-space-5);
+}
+
+/* ------------------------------------------------------------------ *
+ * Search
+ * ------------------------------------------------------------------ */
+.ss-modal__search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  margin: var(--ss-space-3) var(--ss-space-5);
+}
+
+.ss-modal__search-icon {
+  position: absolute;
+  left: var(--ss-space-3);
+  display: flex;
+  align-items: center;
+  color: var(--ss-ink-faint);
+  pointer-events: none;
+}
+
+.ss-modal__search-icon svg {
+  width: var(--ss-icon-size);
+  height: var(--ss-icon-size);
+}
+
+.ss-modal__search-input {
+  width: 100%;
+  min-height: var(--ss-control-height);
+  padding: 0 var(--ss-space-8) 0 var(--ss-space-8);
+  background-color: var(--ss-surface-sunken);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-sm);
+  color: var(--ss-ink);
+  font-size: var(--ss-text-base);
+  transition: var(--ss-transition-colors);
+}
+
+.ss-modal__search-input:focus {
+  border-color: var(--ss-accent);
+  box-shadow: var(--ss-ring);
+  outline: none;
+}
+
+.ss-modal__search-input::placeholder {
+  color: var(--ss-ink-faint);
+}
+
+.ss-modal__search-clear {
+  position: absolute;
+  right: var(--ss-space-2);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--ss-radius-round);
+  color: var(--ss-ink-muted);
+  cursor: pointer;
+  transition: var(--ss-transition-colors);
+}
+
+.ss-modal__search-input:not(:placeholder-shown) ~ .ss-modal__search-clear {
+  display: flex;
+}
+
+.ss-modal__search-clear:hover {
+  background-color: var(--ss-state-hover);
+  color: var(--ss-ink);
+}
+
+/* ------------------------------------------------------------------ *
+ * Filters
+ * ------------------------------------------------------------------ */
+.ss-modal__filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ss-space-2);
+  flex-shrink: 0;
+  padding: 0 var(--ss-space-5) var(--ss-space-3);
+}
+
+.ss-modal__filter-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ss-space-2);
+  align-items: center;
+}
+
+/* ------------------------------------------------------------------ *
+ * List + items
+ * ------------------------------------------------------------------ */
+.ss-modal__list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--ss-space-2) var(--ss-space-3) var(--ss-space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ss-space-0);
+}
+
+.ss-modal__item {
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-3);
+  padding: var(--ss-space-2) var(--ss-space-3);
+  border: 1px solid transparent;
+  border-radius: var(--ss-radius-sm);
+  cursor: pointer;
+  transition: var(--ss-transition-colors);
+}
+
+.ss-modal__item:hover,
+.ss-modal__item:focus {
+  background-color: var(--ss-state-hover);
+}
+
+.ss-modal__item.ss-active {
+  background-color: var(--ss-accent-tint);
+  border-color: var(--ss-line-accent);
+}
+
+.ss-modal__item.ss-active .ss-modal__item-icon {
+  color: var(--ss-ink-accent);
+}
+
+.ss-modal__item--failed {
+  border-left: 2px solid var(--ss-danger);
+  background-color: var(--ss-danger-tint);
+}
+
+.ss-modal__item-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: var(--ss-icon-size-lg);
+  color: var(--ss-ink-muted);
+}
+
+.ss-modal__item-content {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.ss-modal__item-title {
+  font-size: var(--ss-text-base);
+  font-weight: var(--ss-weight-medium);
+  color: var(--ss-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ss-modal__item-description {
+  margin-top: 1px;
+  font-size: var(--ss-text-sm);
+  color: var(--ss-ink-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ss-modal__item-badge {
+  flex-shrink: 0;
+  padding: var(--ss-space-0) var(--ss-space-2);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-full);
+  background-color: var(--ss-surface-1);
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-xs);
+  font-weight: var(--ss-weight-medium);
+  letter-spacing: var(--ss-tracking-wide);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* Thumbnails + hover preview */
+.ss-modal__item-thumbnail {
+  position: relative;
+  flex-shrink: 0;
+  width: 48px;
+  height: 48px;
+  border-radius: var(--ss-radius-xs);
+  overflow: hidden;
+  border: 1px solid var(--ss-line);
+}
+
+.ss-modal__item-thumbnail img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: var(--ss-transition-transform);
+}
+
+.ss-modal__item-thumbnail:hover img {
+  transform: scale(1.06);
+}
+
+.ss-preview-container {
+  position: fixed;
+  z-index: var(--ss-z-popover);
+  max-width: 360px;
+  padding: var(--ss-space-2);
+  background: var(--ss-surface-2);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-md);
+  box-shadow: var(--ss-elevation-3);
+  pointer-events: none;
+  animation: ss-fade-in var(--ss-dur-fast) var(--ss-ease-out);
+}
+
+.ss-preview-container img {
+  max-width: 100%;
+  border-radius: var(--ss-radius-xs);
+}
+
+/* Aspect-ratio size presets (ListSelectionModal.ts, applied on image load;
+   the cursor-relative left/top stay inline). */
+.ss-preview-container--landscape {
+  width: 350px;
+  height: auto;
+}
+
+.ss-preview-container--portrait {
+  width: auto;
+  height: 350px;
+}
+
+.ss-preview-container--square {
+  width: 300px;
+  height: 300px;
+}
+
+.ss-preview-title {
+  margin-top: var(--ss-space-1);
+  font-size: var(--ss-text-xs);
+  color: var(--ss-ink-muted);
+  text-align: center;
+}
+
+.ss-modal__item-preview {
+  width: 100%;
+  max-height: 200px;
+  overflow: hidden;
+  border-radius: var(--ss-radius-sm);
+  margin-top: var(--ss-space-2);
+}
+
+.ss-modal__item-preview img {
+  width: 100%;
+  object-fit: contain;
+}
+
+.ss-modal__item.expanded {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+/* ------------------------------------------------------------------ *
+ * Summary bar (e.g. pending-files)
+ * ------------------------------------------------------------------ */
+.ss-modal__summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ss-space-3);
+  flex-shrink: 0;
+  padding: var(--ss-space-2) var(--ss-space-5);
+  border-bottom: 1px solid var(--ss-line);
+  background-color: var(--ss-surface-1);
+}
+
+.ss-modal__summary-text {
+  font-size: var(--ss-text-sm);
+  color: var(--ss-ink-muted);
+}
+
+.ss-modal__summary-actions {
+  display: flex;
+  gap: var(--ss-space-2);
+}
+
+/* ------------------------------------------------------------------ *
+ * Loading / error / empty
+ * ------------------------------------------------------------------ */
+.ss-modal__loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--ss-space-2);
+  padding: var(--ss-space-8);
+  color: var(--ss-ink-muted);
+}
+
+.ss-modal__loading::before {
+  content: "";
+  width: var(--ss-icon-size);
+  height: var(--ss-icon-size);
+  border: 2px solid var(--ss-line);
+  border-top-color: var(--ss-accent);
+  border-radius: var(--ss-radius-round);
+  animation: ss-spin 0.8s linear infinite;
+}
+
+.ss-modal__error {
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-2);
+  margin: var(--ss-space-3) var(--ss-space-5);
+  padding: var(--ss-space-3);
+  background-color: var(--ss-danger-tint);
+  border: 1px solid var(--ss-danger-line);
+  border-radius: var(--ss-radius-sm);
+  color: var(--ss-danger);
+  font-size: var(--ss-text-sm);
+}
+
+.ss-modal__empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--ss-space-2);
+  min-height: 150px;
+  padding: var(--ss-space-6);
+  color: var(--ss-ink-muted);
+  text-align: center;
+}
+
+.ss-modal__empty-state-icon {
+  color: var(--ss-ink-faint);
+}
+
+/* Plain stacked body copy (PostProcessingModelPromptModal.ts) */
+.ss-modal__stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ss-space-3);
+  padding: var(--ss-space-4) var(--ss-space-5);
+}
+
+.ss-modal__stack p {
+  margin: 0;
+  line-height: var(--ss-leading-base);
+}
+
+.ss-modal__callout {
+  padding: var(--ss-space-3);
+  background-color: var(--ss-accent-tint);
+  border: 1px solid var(--ss-line-accent);
+  border-radius: var(--ss-radius-sm);
+  font-size: var(--ss-text-sm);
+}
+
+.ss-modal__muted {
+  font-size: var(--ss-text-sm);
+  color: var(--ss-ink-muted);
+}
+
+.ss-modal__inline-code {
+  font-family: var(--ss-font-mono);
+  font-size: var(--ss-text-sm);
+  background-color: var(--ss-surface-sunken);
+  padding: var(--ss-space-0) var(--ss-space-1);
+  border-radius: var(--ss-radius-xs);
+}
+
+/* Search-result highlight */
+.ss-hl {
+  background-color: var(--ss-accent-tint-strong);
+  color: var(--ss-ink);
+  border-radius: 2px;
+}
+
+/* ------------------------------------------------------------------ *
+ * Text edit modal bits (TextEditModal.ts)
+ * ------------------------------------------------------------------ */
+.ss-modal__textarea-container {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: var(--ss-space-4) var(--ss-space-5);
+}
+
+.ss-modal__textarea {
+  width: 100%;
+  min-height: 160px;
+  padding: var(--ss-space-3);
+  background-color: var(--ss-surface-sunken);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-sm);
+  color: var(--ss-ink);
+  font-size: var(--ss-text-base);
+  line-height: var(--ss-leading-base);
+  resize: vertical;
+  transition: var(--ss-transition-colors);
+}
+
+.ss-modal__textarea:focus {
+  border-color: var(--ss-accent);
+  box-shadow: var(--ss-ring);
+  outline: none;
+}
+
+.ss-modal__textarea-reset {
+  display: block;
+  margin-top: var(--ss-space-2);
+  padding: var(--ss-space-1) var(--ss-space-3);
+  font-size: var(--ss-text-sm);
+  cursor: pointer;
+}
+
+.ss-modal__title-generation {
+  padding: 0 var(--ss-space-5) var(--ss-space-3);
+  font-size: var(--ss-text-sm);
+  color: var(--ss-ink-muted);
+}
+
+/* ------------------------------------------------------------------ *
+ * Footer
+ * ------------------------------------------------------------------ */
+.ss-modal__footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--ss-space-2);
+  flex-shrink: 0;
+  padding: var(--ss-space-3) var(--ss-space-5);
+  border-top: 1px solid var(--ss-line);
+  background-color: var(--ss-surface-0);
+}
+
+.ss-modal__footer-group {
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-2);
+}
+
+.ss-modal__footer .ss-button.is-loading {
+  opacity: 0.65;
+}
+
+/* ------------------------------------------------------------------ *
+ * Mobile
+ * ------------------------------------------------------------------ */
+@media (max-width: 768px) {
+  .ss-modal,
+  .ss-modal--small,
+  .ss-modal--medium,
+  .ss-modal--large {
+    width: 95vw;
+    max-width: 95vw;
+    max-height: 90vh;
+    height: auto;
+  }
+
+  .ss-modal__header,
+  .ss-modal__footer {
+    padding-left: var(--ss-space-4);
+    padding-right: var(--ss-space-4);
+  }
+
+  .ss-modal__search {
+    margin-left: var(--ss-space-4);
+    margin-right: var(--ss-space-4);
+  }
+}

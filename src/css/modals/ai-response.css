@@ -1,0 +1,108 @@
+/**
+ * AI response flow modals.
+ * TS: src/modals/StandardAIResponseModal.ts (StandardModal shell),
+ *     src/modals/ImproveResponseModal.ts, src/modals/SaveAsNoteModal.ts
+ *     (native Obsidian modals).
+ */
+
+/* ------------------------------------------------------------------ *
+ * StandardAIResponseModal
+ * ------------------------------------------------------------------ */
+.ss-airesponse-modal__response {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 250px;
+  max-height: 60vh;
+  overflow: auto;
+  margin-bottom: var(--ss-space-5);
+  padding: var(--ss-space-5);
+  background-color: var(--ss-surface-sunken);
+  border-radius: var(--ss-radius-sm);
+  box-shadow: var(--ss-elevation-1);
+  white-space: pre-wrap;
+  font-size: var(--ss-text-lg);
+  line-height: var(--ss-leading-base);
+}
+
+/* Once the first response chunk lands, flow as normal text. */
+.ss-airesponse-modal__response.is-populated {
+  display: block;
+  justify-content: initial;
+}
+
+.ss-airesponse-modal__loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  min-height: 200px;
+}
+
+.ss-airesponse-modal__loading .ss-modal__loading-text {
+  font-size: var(--ss-text-2xl);
+  font-weight: var(--ss-weight-semibold);
+  letter-spacing: var(--ss-tracking-wide);
+  color: var(--ss-ink-accent);
+  text-align: center;
+  animation: ss-pulse 2.5s ease-in-out infinite;
+}
+
+/* Footer action row — extends the .ss-button-container primitive. */
+.ss-airesponse-modal__buttons {
+  justify-content: center;
+  margin-top: var(--ss-space-3);
+}
+
+.ss-airesponse-modal__buttons .ss-button {
+  flex: 1 1 auto;
+  min-width: 120px;
+  max-width: 200px;
+}
+
+/* ------------------------------------------------------------------ *
+ * ImproveResponseModal
+ * ------------------------------------------------------------------ */
+.ss-improve-modal__presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ss-space-2);
+  margin-top: var(--ss-space-2);
+}
+
+.ss-improve-modal__input {
+  width: 100%;
+  margin-top: var(--ss-space-3);
+  margin-bottom: var(--ss-space-5);
+}
+
+.ss-improve-modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--ss-space-2);
+}
+
+.ss-improve-modal__actions > button {
+  flex: 0 0 auto;
+}
+
+/* ------------------------------------------------------------------ *
+ * SaveAsNoteModal
+ * ------------------------------------------------------------------ */
+.ss-save-note-modal__label {
+  margin-bottom: var(--ss-space-3);
+}
+
+.ss-save-note-modal__input {
+  width: 100%;
+  margin-bottom: var(--ss-space-3);
+}
+
+.ss-save-note-modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--ss-space-2);
+  margin-top: var(--ss-space-5);
+}

@@ -1,134 +1,108 @@
-/* Large Text Component Styles */
+/**
+ * Large text handling — collapsed preview with stats + actions for oversized
+ * pasted content; expands into a viewer modal.
+ */
 
 .systemsculpt-large-text-container {
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  padding: 16px;
-  margin: 8px 0;
-  background-color: var(--background-modifier-form-field);
+  margin: var(--ss-space-2) 0;
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-sm);
+  overflow: hidden;
 }
 
 .systemsculpt-large-text-preview {
-  margin-bottom: 12px;
   max-height: 150px;
   overflow: hidden;
-  position: relative;
-}
-
-.systemsculpt-text-truncation {
-  font-style: italic;
-  color: var(--text-muted);
-  margin-top: 8px;
-  font-size: 0.9em;
+  padding: var(--ss-space-2) var(--ss-space-3);
+  font-family: var(--ss-font-mono);
+  font-size: var(--ss-text-sm);
+  line-height: var(--ss-leading-base);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  -webkit-mask-image: linear-gradient(to bottom, black 60%, transparent 100%);
+  mask-image: linear-gradient(to bottom, black 60%, transparent 100%);
 }
 
 .systemsculpt-large-text-indicator {
-  border-top: 1px solid var(--border-color);
-  padding-top: 12px;
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 12px;
+  justify-content: space-between;
+  gap: var(--ss-space-2);
+  padding: var(--ss-space-1) var(--ss-space-3);
+  background-color: var(--ss-surface-1);
+  border-top: 1px solid var(--ss-line);
 }
 
 .systemsculpt-large-text-stats {
-  font-size: 0.9em;
-  color: var(--text-muted);
-  font-weight: 500;
+  font-size: var(--ss-text-xs);
+  color: var(--ss-ink-muted);
+  font-variant-numeric: tabular-nums;
 }
 
 .systemsculpt-large-text-actions {
   display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
+  gap: var(--ss-space-1);
 }
 
 .systemsculpt-view-button,
 .systemsculpt-save-button,
 .systemsculpt-copy-button {
-  padding: 6px 12px;
-  border: 1px solid var(--border-color);
-  border-radius: 4px;
-  background-color: var(--background-secondary);
-  color: var(--text-normal);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ss-space-1);
+  min-height: var(--ss-control-height-sm);
+  padding: 0 var(--ss-space-2);
+  background: transparent;
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-xs);
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-xs);
   cursor: pointer;
-  font-size: 0.85em;
-  transition: all 0.2s ease;
+  transition: var(--ss-transition-colors);
 }
 
 .systemsculpt-view-button:hover,
 .systemsculpt-save-button:hover,
 .systemsculpt-copy-button:hover {
-  background-color: var(--background-modifier-hover);
-  border-color: var(--border-color-hover);
+  background-color: var(--ss-state-hover);
+  border-color: var(--ss-line-strong);
+  color: var(--ss-ink);
 }
 
-/* Large Text Modal Styles - Using Obsidian Modal */
+.systemsculpt-text-truncation {
+  font-size: var(--ss-text-xs);
+  color: var(--ss-ink-faint);
+  font-style: italic;
+}
 
-.large-text-modal-container {
+/* Expanded viewer modal (LargeTextModal in MessageRenderer.ts) */
+.systemsculpt-large-text-viewer {
   width: 100%;
+  height: 60vh;
+  min-height: 400px;
+  max-height: 70vh;
+  overflow-y: auto;
+  padding: var(--ss-space-3);
+  background-color: var(--ss-surface-sunken);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-sm);
+  color: var(--ss-ink);
+  font-family: var(--ss-font-mono);
+  font-size: var(--ss-text-sm);
+  line-height: var(--ss-leading-base);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  resize: vertical;
 }
 
-.large-text-viewer {
-  /* Styles are applied via JavaScript to ensure proper Obsidian integration */
+.systemsculpt-large-text-modal-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--ss-space-2);
+  margin-top: var(--ss-space-3);
 }
 
-.large-text-modal-buttons {
-  /* Styles are applied via JavaScript for consistency */
-}
-
-/* Notice Styles */
-
+/* Inline notice */
 .systemsculpt-notice {
-  position: fixed;
-  top: 20px;
-  right: 20px;
-  background-color: var(--background-primary);
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
-  padding: 12px 16px;
-  color: var(--text-normal);
-  box-shadow: 0 4px 12px color-mix(in srgb, rgb(0, 0, 0) 20%, var(--ss-layer-base));
-  z-index: 1001;
-  animation: slideIn 0.3s ease-out;
-}
-
-@keyframes slideIn {
-  from {
-    transform: translateX(100%);
-    opacity: 0;
-  }
-  to {
-    transform: translateX(0);
-    opacity: 1;
-  }
-}
-
-/* Responsive Design */
-
-@media (max-width: 768px) {
-  .systemsculpt-large-text-indicator {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-  
-  .systemsculpt-large-text-actions {
-    width: 100%;
-    justify-content: flex-start;
-  }
-  
-  .systemsculpt-modal-content {
-    max-width: 95vw;
-    max-height: 95vh;
-  }
-  
-  .systemsculpt-modal-header {
-    padding: 12px 16px;
-  }
-  
-  .systemsculpt-large-text-viewer {
-    padding: 16px;
-    font-size: 12px;
-  }
+  animation: ss-slide-up var(--ss-dur-base) var(--ss-ease-out);
 }

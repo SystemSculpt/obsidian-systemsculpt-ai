@@ -1,292 +1,164 @@
 /**
- * Diff Viewer Styles - Optimized for tool call UI
+ * Diff viewer — tool-call file diff display.
+ * Color contract: additions = success, deletions = danger, mixed = warning.
  */
 
 .systemsculpt-diff-viewer {
-  border: 1px solid var(--background-modifier-border);
-  border-radius: var(--radius-s);
-  background: var(--background-primary);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-sm);
   overflow: hidden;
-  font-size: var(--font-ui-smaller);
+  font-size: var(--ss-text-xs);
 }
 
-/* Compact Header */
 .systemsculpt-diff-header {
-  padding: 6px 10px;
-  background: var(--background-secondary);
-  border-bottom: 1px solid var(--background-modifier-border);
+  background-color: var(--ss-surface-1);
+  border-bottom: 1px solid var(--ss-line);
 }
 
 .systemsculpt-diff-file-info {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: var(--ss-space-2);
+  padding: var(--ss-space-1) var(--ss-space-2);
 }
 
 .systemsculpt-diff-filename {
-  font-family: var(--font-monospace);
-  font-weight: 500;
-  color: var(--text-normal);
-  font-size: var(--font-ui-smaller);
-  flex-shrink: 1;
+  font-family: var(--ss-font-mono);
   min-width: 0;
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .systemsculpt-diff-stats {
-  font-family: var(--font-monospace);
-  font-size: var(--font-ui-smallest);
-  font-weight: 600;
-  padding: 2px 6px;
-  border-radius: var(--radius-xs);
-  background: var(--background-modifier-form-field);
-  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ss-space-1);
   flex-shrink: 0;
-  min-width: fit-content;
+  padding: 0 var(--ss-space-2);
+  border-radius: var(--ss-radius-full);
+  background-color: var(--ss-surface-2);
+  font-variant-numeric: tabular-nums;
 }
 
-.systemsculpt-diff-stats.systemsculpt-diff-no-changes {
-  color: var(--text-faint);
-  background: var(--background-modifier-hover);
-}
-
-/* Individual spans for additions and deletions */
-.systemsculpt-diff-additions {
-  color: var(--color-green);
-}
-
-.systemsculpt-diff-deletions {
-  color: var(--color-red);
-}
-
-.systemsculpt-diff-total {
-  color: var(--text-muted);
-}
-
-/* Background colors based on what types of changes exist */
 .systemsculpt-diff-stats.systemsculpt-diff-has-additions {
-  background: color-mix(in srgb, rgb(var(--color-green-rgb)) 10%, var(--ss-layer-base));
+  background-color: var(--ss-success-tint);
 }
 
 .systemsculpt-diff-stats.systemsculpt-diff-has-deletions {
-  background: color-mix(in srgb, rgb(var(--color-red-rgb)) 10%, var(--ss-layer-base));
+  background-color: var(--ss-danger-tint);
 }
 
-.systemsculpt-diff-stats.systemsculpt-diff-has-additions.systemsculpt-diff-has-deletions {
-  background: color-mix(in srgb, rgb(var(--color-orange-rgb)) 10%, var(--ss-layer-base));
+.systemsculpt-diff-stats.systemsculpt-diff-no-changes {
+  color: var(--ss-ink-faint);
 }
 
-/* Content */
+.systemsculpt-diff-additions {
+  color: var(--ss-success);
+}
+
+.systemsculpt-diff-deletions {
+  color: var(--ss-danger);
+}
+
+.systemsculpt-diff-total {
+  color: var(--ss-ink-muted);
+}
+
 .systemsculpt-diff-content {
   max-height: clamp(120px, 30vh, 200px);
   overflow-y: auto;
-  font-family: var(--font-monospace);
-}
-
-.systemsculpt-diff-no-changes-notice {
-  padding: 16px;
-  text-align: center;
-  color: var(--text-faint);
-  font-style: italic;
-  font-size: var(--font-ui-smaller);
-}
-
-/* Hunks */
-.systemsculpt-diff-hunk {
-  border-bottom: 1px solid var(--background-modifier-border-focus);
-}
-
-.systemsculpt-diff-hunk:last-child {
-  border-bottom: none;
-}
-
-.systemsculpt-diff-hunk-separated {
-  margin-top: 8px;
-  border-top: 2px solid var(--background-modifier-border);
-  position: relative;
 }
 
 .systemsculpt-diff-hunk-separated::before {
-  content: '⋯';
-  position: absolute;
-  top: -10px;
-  left: 50%;
-  transform: translateX(-50%);
-  background: var(--background-primary);
-  color: var(--text-faint);
-  padding: 0 8px;
-  font-size: var(--font-ui-smallest);
+  content: "⋯";
+  display: block;
+  padding: var(--ss-space-0) var(--ss-space-2);
+  color: var(--ss-ink-faint);
+  text-align: center;
 }
 
 .systemsculpt-diff-hunk-header {
-  font-family: var(--font-monospace);
-  font-size: var(--font-ui-smallest);
-  padding: 6px 10px;
-  color: var(--text-muted);
-  background: var(--background-modifier-hover);
-  border-bottom: 1px solid var(--background-modifier-border);
+  padding: var(--ss-space-0) var(--ss-space-2);
+  background-color: var(--ss-surface-1);
+  color: var(--ss-ink-faint);
+  font-family: var(--ss-font-mono);
 }
 
 .systemsculpt-diff-lines {
-  /* Container for lines in a hunk */
+  display: flex;
+  flex-direction: column;
 }
 
-/* Lines */
 .systemsculpt-diff-line {
   display: flex;
-  align-items: stretch;
-  min-height: 18px;
-  line-height: 18px;
-  font-size: var(--font-ui-smaller);
-  border-left: 2px solid var(--ss-layer-base);
+  align-items: baseline;
+  border-left: 2px solid transparent;
+  font-family: var(--ss-font-mono);
+  line-height: var(--ss-leading-base);
+  transition: background-color var(--ss-dur-fast) var(--ss-ease);
 }
 
 .systemsculpt-diff-line-added {
-  background: color-mix(in srgb, rgb(var(--color-green-rgb)) 8%, var(--ss-layer-base));
-  border-left-color: var(--color-green);
+  background-color: var(--ss-success-tint);
+  border-left-color: var(--ss-success);
 }
 
 .systemsculpt-diff-line-removed {
-  background: color-mix(in srgb, rgb(var(--color-red-rgb)) 8%, var(--ss-layer-base));
-  border-left-color: var(--color-red);
+  background-color: var(--ss-danger-tint);
+  border-left-color: var(--ss-danger);
 }
 
 .systemsculpt-diff-line-unchanged {
-  background: var(--background-primary);
-  opacity: 0.7;
+  color: var(--ss-ink-muted);
 }
 
 .systemsculpt-diff-line:hover {
-  background: var(--background-modifier-hover);
+  background-color: var(--ss-state-hover);
 }
 
-.systemsculpt-diff-line-added:hover {
-  background: color-mix(in srgb, rgb(var(--color-green-rgb)) 12%, var(--ss-layer-base));
-}
-
-.systemsculpt-diff-line-removed:hover {
-  background: color-mix(in srgb, rgb(var(--color-red-rgb)) 12%, var(--ss-layer-base));
-}
-
-/* Line numbers (optional, compact) */
-
+/* Base class covers the -old/-new variants DiffViewer.ts co-applies */
 .systemsculpt-diff-line-number {
-  min-width: 36px;
-  color: var(--text-faint);
-  font-size: var(--font-ui-smallest);
+  flex-shrink: 0;
+  min-width: 3.5ch;
+  padding: 0 var(--ss-space-1);
+  color: var(--ss-ink-faint);
   text-align: right;
-  padding: 0 4px;
-  background: var(--background-modifier-hover);
-  border-right: 1px solid var(--background-modifier-border);
   user-select: none;
-  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
 }
 
-.systemsculpt-diff-line-number-old {
-  border-left: 1px solid var(--background-modifier-border);
-}
-
-.systemsculpt-diff-line-number-new {
-  border-right: 1px solid var(--background-modifier-border);
-}
-
-.systemsculpt-diff-line-added .systemsculpt-diff-line-number-new {
-  color: var(--color-green);
-}
-
-.systemsculpt-diff-line-removed .systemsculpt-diff-line-number-old {
-  color: var(--color-red);
-}
-
-/* Prefix symbols */
 .systemsculpt-diff-prefix {
-  width: 16px;
-  text-align: center;
-  font-weight: 600;
-  user-select: none;
-  padding: 0 2px;
   flex-shrink: 0;
+  width: 1.5ch;
+  color: var(--ss-ink-faint);
+  user-select: none;
 }
 
-.systemsculpt-diff-line-added .systemsculpt-diff-prefix {
-  color: var(--color-green);
-}
-
-.systemsculpt-diff-line-removed .systemsculpt-diff-prefix {
-  color: var(--color-red);
-}
-
-.systemsculpt-diff-line-unchanged .systemsculpt-diff-prefix {
-  color: var(--ss-layer-base);
-}
-
-/* Line content */
 .systemsculpt-diff-line-content {
-  flex: 1;
-  padding: 0 6px;
-  white-space: pre-wrap;
-  word-break: break-word;
+  flex: 1 1 auto;
   min-width: 0;
-  overflow-wrap: break-word;
-  font-family: var(--font-monospace);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding-right: var(--ss-space-2);
 }
 
-/* Dark theme adjustments */
-.theme-dark .systemsculpt-diff-line-added {
-  background: color-mix(in srgb, rgb(34, 197, 94) 8%, var(--ss-layer-base));
-}
-
-.theme-dark .systemsculpt-diff-line-removed {
-  background: color-mix(in srgb, rgb(239, 68, 68) 8%, var(--ss-layer-base));
-}
-
-.theme-dark .systemsculpt-diff-line-added:hover {
-  background: color-mix(in srgb, rgb(34, 197, 94) 12%, var(--ss-layer-base));
-}
-
-.theme-dark .systemsculpt-diff-line-removed:hover {
-  background: color-mix(in srgb, rgb(239, 68, 68) 12%, var(--ss-layer-base));
-}
-
-/* Light theme adjustments */
-.theme-light .systemsculpt-diff-line-added {
-  background: color-mix(in srgb, rgb(34, 197, 94) 6%, var(--ss-layer-base));
-}
-
-.theme-light .systemsculpt-diff-line-removed {
-  background: color-mix(in srgb, rgb(239, 68, 68) 6%, var(--ss-layer-base));
-}
-
-.theme-light .systemsculpt-diff-line-added:hover {
-  background: color-mix(in srgb, rgb(34, 197, 94) 10%, var(--ss-layer-base));
-}
-
-.theme-light .systemsculpt-diff-line-removed:hover {
-  background: color-mix(in srgb, rgb(239, 68, 68) 10%, var(--ss-layer-base));
+.systemsculpt-diff-no-changes-notice {
+  padding: var(--ss-space-2);
+  color: var(--ss-ink-faint);
+  font-style: italic;
+  text-align: center;
 }
 
 .systemsculpt-diff-truncated {
-  padding: 6px 10px;
-  font-size: var(--font-ui-smallest);
-  color: var(--text-muted);
-  border-top: 1px solid var(--background-modifier-border);
-  background: var(--background-secondary);
+  padding: var(--ss-space-1) var(--ss-space-2);
+  color: var(--ss-ink-faint);
+  font-style: italic;
 }
 
-/* Responsive design */
 @media (max-width: 600px) {
   .systemsculpt-diff-line-number {
-    min-width: 24px;
+    min-width: 2.5ch;
   }
-
-  .systemsculpt-diff-prefix {
-    width: 14px;
-  }
-  
-  .systemsculpt-diff-line-content {
-    padding: 0 4px;
-  }
-} 
+}

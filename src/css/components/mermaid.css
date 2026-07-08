@@ -1,70 +1,109 @@
-/* Mermaid diagram enhancements – SystemSculpt */
+/**
+ * Mermaid diagrams inside SystemSculpt chat — expand affordance and
+ * Obsidian-theme-mapped diagram colors.
+ *
+ * Every rule is scoped to the SystemSculpt containers that render mermaid:
+ * `.systemsculpt-message-content` (chat messages — MessageRenderer /
+ * MarkdownMessageRenderer render into it) and
+ * `.systemsculpt-mermaid-preview-modal` (MermaidPreviewModal). Bare
+ * `.mermaid` selectors would restyle every mermaid diagram in the vault.
+ *
+ * The `!important`s here fight Mermaid's own inline SVG attributes, not
+ * Obsidian — they are load-bearing.
+ */
 
-/* Ensure diagram containers can host absolutely-positioned buttons */
-.mermaid {
+.systemsculpt-message-content .mermaid {
   position: relative;
 }
 
-/* Expand button overlay */
 .systemsculpt-mermaid-expand-btn {
   position: absolute;
-  top: 4px;
-  right: 4px;
-  background: var(--background-primary);
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 4px;
-  padding: 2px;
-  cursor: pointer;
-  color: var(--text-muted);
+  top: var(--ss-space-1);
+  right: var(--ss-space-1);
   display: flex;
   align-items: center;
+  padding: var(--ss-space-0);
+  background: var(--ss-surface-2);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-xs);
+  color: var(--ss-ink-muted);
+  cursor: pointer;
   opacity: 0.8;
-  transition: opacity 0.12s ease-in-out;
-  z-index: 10;
+  transition: var(--ss-transition-colors);
+  z-index: var(--ss-z-raised);
   pointer-events: auto;
 }
 
-/* Always show for now – can fade on hover later */
-.systemsculpt-mermaid-expand-btn {
-  opacity: 0.8;
-}
-
-/* Ensure hover emphasises */
-.mermaid:hover .systemsculpt-mermaid-expand-btn {
+.systemsculpt-message-content .mermaid:hover .systemsculpt-mermaid-expand-btn {
   opacity: 1;
+  color: var(--ss-ink);
 }
 
-/* Expanded preview modal layout */
+.systemsculpt-mermaid-preview-modal .ss-mermaid-preview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ss-space-2);
+  margin-bottom: var(--ss-space-3);
+}
+
+.systemsculpt-mermaid-preview-modal .ss-mermaid-preview-header h2 {
+  margin: 0;
+  font-size: var(--ss-text-lg);
+  letter-spacing: var(--ss-tracking-tight);
+}
+
+.systemsculpt-mermaid-preview-modal .ss-mermaid-preview-close {
+  display: flex;
+  align-items: center;
+  padding: var(--ss-space-0);
+  border-radius: var(--ss-radius-xs);
+  color: var(--ss-ink-muted);
+  cursor: pointer;
+  transition: var(--ss-transition-colors);
+}
+
+.systemsculpt-mermaid-preview-modal .ss-mermaid-preview-close:hover {
+  background-color: var(--ss-state-hover);
+  color: var(--ss-ink);
+}
+
 .systemsculpt-mermaid-preview-modal .ss-mermaid-preview-diagram {
   overflow: auto;
   max-height: 70vh;
 }
 
+.systemsculpt-mermaid-preview-modal .ss-mermaid-preview-footer {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: var(--ss-space-3);
+}
+
 .systemsculpt-mermaid-preview-modal button.ss-mermaid-copy-btn {
-  margin-top: 8px;
+  margin-top: var(--ss-space-2);
 }
 
-/* Mermaid theme – map to Obsidian CSS variables for seamless theming */
-.mermaid .node rect,
-.mermaid .node circle,
-.mermaid .node polygon {
-  fill: var(--background-secondary) !important;
-  stroke: var(--interactive-accent) !important;
+/* Map diagram colors onto the theme (chat messages + preview modal only). */
+:is(.systemsculpt-message-content, .systemsculpt-mermaid-preview-modal) .mermaid .node rect,
+:is(.systemsculpt-message-content, .systemsculpt-mermaid-preview-modal) .mermaid .node circle,
+:is(.systemsculpt-message-content, .systemsculpt-mermaid-preview-modal) .mermaid .node polygon {
+  fill: var(--ss-surface-sunken) !important;
+  stroke: var(--ss-accent) !important;
 }
 
-.mermaid .node text {
-  fill: var(--text-normal) !important;
+:is(.systemsculpt-message-content, .systemsculpt-mermaid-preview-modal) .mermaid .node text {
+  fill: var(--ss-ink) !important;
 }
 
-.mermaid .edgePath path {
-  stroke: var(--interactive-accent) !important;
+:is(.systemsculpt-message-content, .systemsculpt-mermaid-preview-modal) .mermaid .edgePath path {
+  stroke: var(--ss-accent) !important;
 }
 
-.mermaid .edgeLabel text {
-  fill: var(--text-muted) !important;
+:is(.systemsculpt-message-content, .systemsculpt-mermaid-preview-modal) .mermaid .edgeLabel text {
+  fill: var(--ss-ink-muted) !important;
 }
 
-.mermaid .cluster rect {
-  fill: var(--background-primary) !important;
-  stroke: var(--interactive-accent) !important;
-} 
+:is(.systemsculpt-message-content, .systemsculpt-mermaid-preview-modal) .mermaid .cluster rect {
+  fill: var(--ss-surface-0) !important;
+  stroke: var(--ss-accent) !important;
+}

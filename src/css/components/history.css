@@ -1,0 +1,132 @@
+/**
+ * Chat history modal — searchable list of past chats.
+ */
+
+.systemsculpt-history-modal .ss-modal__content {
+  display: flex;
+  flex-direction: column;
+  min-height: 420px;
+}
+
+.systemsculpt-history-search {
+  display: flex;
+  flex-shrink: 0;
+  margin: var(--ss-space-3) var(--ss-space-5);
+}
+
+.systemsculpt-history-search .search-input-container {
+  width: 100%;
+}
+
+.systemsculpt-history-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: 68vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ss-space-1);
+  padding: 0 var(--ss-space-3) var(--ss-space-3);
+}
+
+.systemsculpt-history-item {
+  padding: var(--ss-space-2) var(--ss-space-3);
+  background-color: var(--ss-surface-0);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-sm);
+  cursor: pointer;
+  transition: var(--ss-transition-colors);
+}
+
+.systemsculpt-history-item:hover {
+  background-color: var(--ss-surface-1);
+  border-color: var(--ss-line-strong);
+}
+
+.systemsculpt-history-item.is-selected {
+  background-color: var(--ss-accent-tint);
+  border-color: var(--ss-line-accent);
+}
+
+.systemsculpt-history-item-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ss-space-2);
+}
+
+.systemsculpt-history-item-header-left {
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-2);
+  min-width: 0;
+}
+
+.systemsculpt-history-item-badge {
+  flex-shrink: 0;
+  padding: 0 var(--ss-space-2);
+  border-radius: var(--ss-radius-full);
+  background-color: var(--ss-surface-2);
+  font-size: var(--ss-text-xs);
+  color: var(--ss-ink-muted);
+}
+
+.systemsculpt-history-item-time {
+  flex-shrink: 0;
+  font-size: var(--ss-text-xs);
+  color: var(--ss-ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.systemsculpt-history-item-favorite {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  color: var(--ss-ink-faint);
+}
+
+.systemsculpt-history-item-favorite.is-favorite {
+  color: var(--ss-warning);
+}
+
+.systemsculpt-history-item-favorite.is-favorite svg {
+  fill: currentColor;
+}
+
+.systemsculpt-history-item-title {
+  margin-top: var(--ss-space-1);
+  font-size: var(--ss-text-base);
+  font-weight: var(--ss-weight-medium);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.systemsculpt-history-item-subtitle {
+  margin-top: 1px;
+  font-size: var(--ss-text-sm);
+  color: var(--ss-ink-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.systemsculpt-history-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--ss-space-2);
+  min-height: 240px;
+  margin: var(--ss-space-3) var(--ss-space-5);
+  border: 1px dashed var(--ss-line-strong);
+  border-radius: var(--ss-radius-md);
+  color: var(--ss-ink-muted);
+  text-align: center;
+}
+
+.systemsculpt-history-empty-icon .svg-icon {
+  width: 28px;
+  height: 28px;
+  color: var(--ss-ink-faint);
+}

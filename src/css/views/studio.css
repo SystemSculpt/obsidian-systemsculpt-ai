@@ -1,0 +1,1708 @@
+/**
+ * SystemSculpt Studio — node-graph canvas workspace.
+ * TS: src/views/studio/** (graph-v3, connections-v3, overlays, menus).
+ *
+ * Runtime contracts (TS setProperty — do not rename):
+ *   --ss-studio-group-accent, --ss-studio-chip-color, --ss-studio-swatch-color,
+ *   --ss-studio-simple-context-menu-scale, --ss-studio-node-context-menu-scale,
+ *   --ss-studio-inspector-scale, --ss-studio-text-node-font-size,
+ *   --ss-studio-annotation-color, --ss-studio-annotation-stroke,
+ *   --ss-link-flow-phase (edge marching ants), --ss-link-flare-t.
+ *
+ * Edge strokes are applied inline by StudioEdgeRenderer.ts reading
+ * --ss-studio-link-* vars — defined below, derived from the theme accent.
+ */
+
+/* ------------------------------------------------------------------ *
+ * Studio palette — derived from the theme, no hardcoded brand colors
+ * ------------------------------------------------------------------ */
+.ss-studio-view {
+  --ss-studio-surface: var(--ss-surface-0);
+  --ss-studio-border: var(--ss-line);
+  --ss-studio-shadow: var(--ss-shadow-color);
+
+  --ss-studio-accent: var(--ss-accent);
+  --ss-studio-accent-bright: color-mix(in srgb, var(--ss-accent) 80%, white);
+  --ss-studio-accent-light: color-mix(in srgb, var(--ss-accent) 65%, white);
+  --ss-studio-accent-soft: color-mix(in srgb, var(--ss-accent) 55%, var(--ss-surface-0));
+  --ss-studio-accent-muted: color-mix(in srgb, var(--ss-accent) 70%, var(--ss-ink-muted));
+  --ss-studio-accent-mid: color-mix(in srgb, var(--ss-accent) 60%, var(--ss-ink));
+  --ss-studio-accent-dim: color-mix(in srgb, var(--ss-accent) 45%, var(--ss-surface-0));
+
+  --ss-studio-success-tint: var(--ss-success);
+  --ss-studio-surface-success: var(--ss-success);
+  --ss-studio-surface-success-light: var(--ss-success-tint);
+
+  --ss-studio-error: var(--ss-danger);
+  --ss-studio-error-muted: color-mix(in srgb, var(--ss-danger) 70%, var(--ss-ink-muted));
+  --ss-studio-warning: var(--ss-warning);
+
+  --ss-studio-info: var(--ss-info);
+  --ss-studio-info-bright: color-mix(in srgb, var(--ss-info) 80%, white);
+
+  --ss-studio-highlight: var(--ss-ink);
+  --ss-studio-bg-dark: color-mix(in srgb, var(--ss-accent) 20%, var(--ss-surface-sunken));
+  --ss-studio-bg-darker: color-mix(in srgb, var(--ss-accent) 10%, var(--ss-surface-sunken));
+  --ss-studio-bg-mid: color-mix(in srgb, var(--ss-accent) 28%, var(--ss-surface-sunken));
+  --ss-studio-bg-deep: color-mix(in srgb, var(--ss-accent) 15%, var(--ss-surface-sunken));
+
+  /* Edge strokes (read inline by StudioEdgeRenderer.ts) */
+  --ss-studio-link-stroke: var(--ss-ink-muted);
+  --ss-studio-link-stroke-hover: var(--ss-accent);
+  --ss-studio-link-flow-a: color-mix(in srgb, var(--ss-accent) 72%, transparent);
+  --ss-studio-link-flow-b: color-mix(in srgb, var(--ss-studio-accent-light) 72%, transparent);
+  --ss-studio-link-failed: color-mix(in srgb, var(--ss-danger) 80%, var(--ss-line));
+
+  /* Port hit target (was undefined — 8px pin, 24px touchable area) */
+  --ss-studio-port-hit-size: 24px;
+
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+/* ------------------------------------------------------------------ *
+ * Studio keyframes (specialized; shared ones live in foundation/motion.css)
+ * ------------------------------------------------------------------ */
+@keyframes ss-studio-pending-pulse {
+  0%,
+  100% { opacity: 0.92; }
+  50% { opacity: 0.55; }
+}
+
+@keyframes ss-studio-port-halo {
+  0%,
+  100% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--ss-accent) 35%, transparent); }
+  50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--ss-accent) 20%, transparent); }
+}
+
+@keyframes ss-studio-pending-shimmer {
+  0%,
+  100% { opacity: 0.5; }
+  50% { opacity: 0.9; }
+}
+
+/* ------------------------------------------------------------------ *
+ * Workspace, viewport, canvas
+ * ------------------------------------------------------------------ */
+.ss-studio-graph-workspace {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.ss-studio-graph-viewport {
+  position: relative;
+  flex: 1;
+  height: 100%;
+  overflow: auto;
+  contain: layout style;
+  background-color: var(--ss-surface-sunken);
+  background-image:
+    radial-gradient(color-mix(in srgb, var(--ss-line-strong) 70%, transparent) 1px, transparent 1px),
+    radial-gradient(color-mix(in srgb, var(--ss-line) 60%, transparent) 1px, transparent 1px);
+  background-size: 400px 400px, 40px 40px;
+  background-attachment: local;
+}
+
+.ss-studio-graph-viewport.is-zoom-overview {
+  background-size: 2000px 2000px, 200px 200px;
+}
+
+.ss-studio-graph-surface,
+.ss-studio-graph-canvas {
+  position: relative;
+  contain: layout style;
+}
+
+.ss-studio-graph-canvas {
+  transform-origin: 0 0;
+}
+
+/* Layers */
+.ss-studio-groups-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: auto;
+}
+
+.ss-studio-edges-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  contain: layout paint style;
+}
+
+.ss-studio-nodes-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.ss-studio-group-tags-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+}
+
+/* Marquee select */
+.ss-studio-marquee-select {
+  position: absolute;
+  z-index: 4;
+  display: none;
+  border: 1px dashed var(--ss-accent);
+  background-color: color-mix(in srgb, var(--ss-accent) 10%, transparent);
+  border-radius: var(--ss-radius-xs);
+  pointer-events: none;
+}
+
+.ss-studio-marquee-select.is-active {
+  display: block;
+}
+
+/* Smart alignment guides (drag snapping) */
+.ss-studio-snap-guides-layer {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 5;
+  pointer-events: none;
+}
+
+.ss-studio-snap-guide {
+  position: absolute;
+  background-color: var(--ss-accent);
+}
+
+.ss-studio-snap-guide.is-vertical {
+  width: 1px;
+}
+
+.ss-studio-snap-guide.is-horizontal {
+  height: 1px;
+}
+
+.ss-studio-snap-gap-span {
+  position: absolute;
+  background-color: color-mix(in srgb, var(--ss-accent) 55%, transparent);
+}
+
+.ss-studio-snap-gap-span.is-horizontal {
+  height: 1px;
+}
+
+.ss-studio-snap-gap-span.is-vertical {
+  width: 1px;
+}
+
+.ss-studio-snap-gap-badge {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  padding: 1px var(--ss-space-1);
+  background-color: var(--ss-accent);
+  color: var(--ss-ink-on-accent);
+  font-size: var(--ss-text-xs);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.4;
+  border-radius: var(--ss-radius-xs);
+  white-space: nowrap;
+}
+
+/* Workspace controls (floating toolbar) */
+.ss-studio-graph-workspace-controls {
+  position: absolute;
+  top: var(--ss-space-3);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 8;
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-1);
+  padding: var(--ss-space-1);
+  background-color: var(--ss-surface-0);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-full);
+  box-shadow: var(--ss-elevation-2);
+  pointer-events: auto;
+}
+
+.ss-studio-graph-workspace-control-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--ss-space-1);
+  min-height: 28px;
+  padding: 0 var(--ss-space-2);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--ss-radius-full);
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-sm);
+  cursor: pointer;
+  transition: var(--ss-transition-colors);
+}
+
+.ss-studio-graph-workspace-control-button:hover {
+  background-color: var(--ss-state-hover);
+  color: var(--ss-ink);
+}
+
+.ss-studio-graph-workspace-control-button.is-run {
+  color: var(--ss-success);
+}
+
+.ss-studio-graph-workspace-control-button.is-run:hover {
+  background-color: var(--ss-success-tint);
+}
+
+.ss-studio-graph-workspace-control-button.is-active {
+  border-color: var(--ss-line-accent);
+  color: var(--ss-ink-accent);
+}
+
+.ss-studio-graph-workspace-control-button:disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.ss-studio-graph-workspace-control-zoom-row {
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-0);
+}
+
+.ss-studio-graph-workspace-control-zoom-label {
+  display: grid;
+  place-items: center;
+  min-width: 44px;
+  font-size: var(--ss-text-xs);
+  color: var(--ss-ink-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Empty state */
+.ss-studio-empty-state {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  color: var(--ss-ink-muted);
+  text-align: center;
+}
+
+/* Errors / warnings at view level */
+.ss-studio-error {
+  padding: var(--ss-space-3);
+  background-color: var(--ss-danger-tint);
+  border: 1px solid var(--ss-danger-line);
+  border-radius: var(--ss-radius-sm);
+  color: var(--ss-danger);
+  font-size: var(--ss-text-sm);
+}
+
+.ss-studio-warning {
+  padding: var(--ss-space-3);
+  background-color: var(--ss-warning-tint);
+  border: 1px solid var(--ss-warning-line);
+  border-radius: var(--ss-radius-sm);
+  color: var(--ss-warning);
+  font-size: var(--ss-text-sm);
+}
+
+/* ------------------------------------------------------------------ *
+ * Edges — static presentation for StudioEdgeRenderer's SVG paths.
+ * Dynamic status stroke/opacity and preview stroke/dash stay inline
+ * (set by StudioEdgeRenderer.ts).
+ * ------------------------------------------------------------------ */
+.ss-studio-edge-line {
+  transition: stroke var(--ss-dur-fast) var(--ss-ease), stroke-width var(--ss-dur-fast) var(--ss-ease);
+}
+
+.ss-studio-edge-line,
+.ss-studio-edge-arrow {
+  fill: none;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+
+/* Hover polish must beat the inline SVG stroke/opacity from StudioEdgeRenderer */
+.ss-studio-edge-group:has(.ss-studio-edge-hit:hover) .ss-studio-edge-line,
+.ss-studio-edge-group:has(.ss-studio-edge-hit:hover) .ss-studio-edge-arrow {
+  stroke: var(--ss-studio-link-stroke-hover) !important;
+  stroke-width: 2.4 !important;
+  opacity: 1 !important;
+}
+
+.ss-studio-edge-group[data-status="flowing"] .ss-studio-edge-line {
+  stroke-dasharray: 10 8;
+  stroke-dashoffset: calc(var(--ss-link-flow-phase, 0) * -18px);
+}
+
+/* Wide, transparent hit target for hover/right-click selection. */
+.ss-studio-edge-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 14;
+  stroke-linecap: round;
+  pointer-events: stroke;
+  cursor: pointer;
+}
+
+/* Drag-to-connect preview line (stroke color/dash set inline per validity). */
+.ss-studio-edge-preview {
+  fill: none;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.95;
+  pointer-events: none;
+}
+
+.ss-studio-connection-autocreate-hint {
+  position: absolute;
+  z-index: 8;
+  padding: var(--ss-space-1) var(--ss-space-2);
+  background-color: var(--ss-surface-2);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-sm);
+  box-shadow: var(--ss-elevation-2);
+  font-size: var(--ss-text-xs);
+  color: var(--ss-ink-muted);
+  pointer-events: none;
+}
+
+/* ------------------------------------------------------------------ *
+ * Node cards
+ * ------------------------------------------------------------------ */
+.ss-studio-node-card {
+  position: absolute;
+  /* keep in sync with STUDIO_GRAPH_DEFAULT_NODE_WIDTH (src/studio/StudioNodeGeometry.ts) */
+  width: 280px;
+  background-color: var(--ss-surface-0);
+  border: 1px solid var(--ss-line);
+  border-left: 3px solid var(--ss-studio-accent-soft);
+  border-radius: var(--ss-radius-lg);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  pointer-events: auto;
+  contain: layout style paint;
+  transition: border-color var(--ss-dur-fast) var(--ss-ease), box-shadow var(--ss-dur-fast) var(--ss-ease);
+}
+
+.ss-studio-node-card:hover,
+.ss-studio-node-card.is-selected {
+  z-index: 5;
+  border-color: var(--ss-accent);
+  box-shadow: var(--ss-elevation-2), var(--ss-ring);
+  /* Allow overlay chrome to overflow */
+  contain: layout style;
+}
+
+.ss-studio-node-card:active {
+  cursor: grabbing;
+}
+
+/* Canvas button reset — Obsidian's native `button` styling (padding,
+ * min-height, background, shadow) must never leak into node-card
+ * controls: it turns 8px port pins into ovals and swallows icon
+ * buttons in padding. `:where()` keeps specificity at one class, so
+ * every component rule below (and in studio-editors.css, imported
+ * after this file) still wins. */
+.ss-studio-node-card :where(button) {
+  appearance: none;
+  margin: 0;
+  padding: 0;
+  height: auto;
+  min-height: 0;
+  background: none;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  font: inherit;
+  color: inherit;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.ss-studio-node-card.is-dragging,
+.ss-studio-node-card.is-selected {
+  will-change: transform;
+}
+
+.ss-studio-node-card.is-detail-collapsed {
+  background-color: var(--ss-surface-1);
+}
+
+.ss-studio-node-card.is-managed-pending {
+  border-color: var(--ss-studio-info-bright);
+}
+
+.ss-studio-node-card.is-managed-pending .ss-studio-node-run-status {
+  animation: ss-studio-pending-pulse 1.4s var(--ss-ease) infinite;
+}
+
+/* Perf gating while interacting / scrolling / zooming */
+.ss-studio-graph-viewport.is-interacting .ss-studio-node-card,
+.ss-studio-graph-viewport.is-scrolling .ss-studio-node-card {
+  transition: none;
+  box-shadow: none;
+  animation-play-state: paused;
+}
+
+.ss-studio-graph-viewport.is-zoom-overview .ss-studio-node-card,
+.ss-studio-graph-viewport.is-zoom-overview .ss-studio-group-frame,
+.ss-studio-graph-viewport.is-zoom-overview .ss-studio-port-pin {
+  pointer-events: none;
+}
+
+.ss-studio-graph-viewport.is-zoomed-micro .ss-studio-node-card {
+  background-color: var(--ss-line);
+  contain: strict;
+  contain-intrinsic-size: 280px 200px;
+}
+
+.ss-studio-graph-viewport.is-zoomed-micro .ss-studio-node-card > * {
+  display: none !important;
+}
+
+.ss-studio-graph-viewport.is-zoomed-extreme .ss-studio-node-card textarea,
+.ss-studio-graph-viewport.is-zoomed-extreme .ss-studio-node-card input,
+.ss-studio-graph-viewport.is-zoomed-extreme .ss-studio-node-text-rendered,
+.ss-studio-graph-viewport.is-zoomed-extreme .ss-studio-node-config-preview {
+  display: none;
+}
+
+/* Header */
+.ss-studio-node-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto auto;
+  align-items: center;
+  gap: var(--ss-space-1);
+  padding: var(--ss-space-2) var(--ss-space-2) var(--ss-space-1);
+}
+
+.ss-studio-node-kind {
+  display: none;
+}
+
+.ss-studio-node-title-input {
+  min-width: 0;
+  padding: var(--ss-space-0) var(--ss-space-1);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--ss-radius-xs);
+  color: var(--ss-ink);
+  font-size: var(--ss-text-base);
+  font-weight: var(--ss-weight-semibold);
+  transition: var(--ss-transition-colors);
+}
+
+.ss-studio-node-title-input:hover {
+  border-color: var(--ss-line);
+}
+
+.ss-studio-node-title-input:focus {
+  border-color: var(--ss-accent);
+  background-color: var(--ss-surface-sunken);
+  outline: none;
+}
+
+/* Header action buttons are always visible; they size to their label
+ * ("Run", "Copy", "Lock", "×") instead of clipping in a fixed square. */
+.ss-studio-node-remove,
+.ss-studio-node-run,
+.ss-studio-node-copy-prompt,
+.ss-studio-node-lock-output {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 var(--ss-space-1);
+  border-radius: var(--ss-radius-xs);
+  color: var(--ss-ink-faint);
+  font-size: var(--ss-text-xs);
+  cursor: pointer;
+  transition: var(--ss-transition-colors);
+}
+
+.ss-studio-node-remove:hover {
+  background-color: var(--ss-danger-tint);
+  color: var(--ss-danger);
+}
+
+.ss-studio-node-run:hover {
+  background-color: var(--ss-success-tint);
+  color: var(--ss-success);
+}
+
+.ss-studio-node-copy-prompt:hover,
+.ss-studio-node-lock-output:hover {
+  background-color: var(--ss-state-hover);
+  color: var(--ss-ink);
+}
+
+.ss-studio-node-lock-output.is-active {
+  color: var(--ss-ink-accent);
+}
+
+/* ------------------------------------------------------------------ *
+ * Image generation — the prompt IS the card's content; the remaining
+ * settings sit under it in the same always-visible config grid.
+ * ------------------------------------------------------------------ */
+.ss-studio-node-card[data-node-kind="studio.image_generation"]
+  .ss-studio-node-inline-config-field--prompt
+  .ss-studio-node-inline-config-textarea {
+  min-height: 108px;
+}
+
+/* ------------------------------------------------------------------ *
+ * Media layout (data-chrome-layout="media") — media nodes whose card
+ * IS the media. The card carries nothing but the image/video:
+ *   - one flat pill of icon actions floating inside the media's edge
+ *     (bottom for images; top for videos so the native playback
+ *     controls stay free), always visible — no hover reveal anywhere
+ *   - port pins centered on the side edges
+ *   - status badge inside the top-left corner, only while active/failed
+ *
+ * Gesture ownership lives in StudioMediaNodeActionBar.ts.
+ * ------------------------------------------------------------------ */
+.ss-studio-node-card[data-chrome-layout="media"] {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  border-left-width: 1px;
+  /* No `paint` containment: the edge port pins straddle the card box. */
+  contain: layout style;
+}
+
+.ss-studio-node-card[data-chrome-layout="media"] .ss-studio-node-media-preview {
+  border-radius: calc(var(--ss-radius-lg) - 1px);
+}
+
+.ss-studio-media-action-bar {
+  position: absolute;
+  left: 50%;
+  bottom: var(--ss-space-2);
+  transform: translateX(-50%);
+  z-index: 7;
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-0);
+  padding: var(--ss-space-1);
+  background-color: var(--ss-media-scrim);
+  border-radius: var(--ss-radius-full);
+  box-shadow: var(--ss-elevation-2);
+  /* Control surface, not a drag surface — never show the grab hand. */
+  cursor: default;
+}
+
+.ss-studio-media-action-bar.is-top {
+  top: var(--ss-space-2);
+  bottom: auto;
+}
+
+.ss-studio-media-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--ss-radius-full);
+  color: var(--ss-ink-on-media-muted);
+  cursor: pointer;
+  transition: var(--ss-transition-colors);
+  --icon-size: 16px;
+}
+
+.ss-studio-media-action svg {
+  width: 16px;
+  height: 16px;
+}
+
+.ss-studio-media-action:hover {
+  background-color: var(--ss-media-state-hover);
+  color: var(--ss-ink-on-media);
+}
+
+.ss-studio-media-action.is-danger:hover {
+  color: var(--ss-danger);
+}
+
+.ss-studio-media-action-bar.is-locked .ss-studio-media-action {
+  color: var(--ss-line-on-media);
+  cursor: default;
+}
+
+.ss-studio-media-action-bar.is-locked .ss-studio-media-action:hover {
+  background-color: transparent;
+}
+
+/* Ports: pins float centered on the side edges; labels stay in tooltips. */
+.ss-studio-node-card[data-chrome-layout="media"] .ss-studio-node-ports {
+  position: absolute;
+  inset: 0;
+  display: block;
+  padding: 0;
+  pointer-events: none;
+}
+
+.ss-studio-node-card[data-chrome-layout="media"] .ss-studio-node-ports-col {
+  position: absolute;
+  top: 50%;
+  left: -5px;
+  transform: translateY(-50%);
+  gap: var(--ss-space-2);
+}
+
+.ss-studio-node-card[data-chrome-layout="media"]
+  .ss-studio-node-ports-col:has(.ss-studio-port-row.is-output) {
+  left: auto;
+  right: -5px;
+}
+
+.ss-studio-node-card[data-chrome-layout="media"] .ss-studio-port-label {
+  display: none;
+}
+
+.ss-studio-node-card[data-chrome-layout="media"] .ss-studio-port-pin {
+  pointer-events: auto;
+  width: 10px;
+  height: 10px;
+  box-shadow: var(--ss-elevation-1);
+}
+
+/* Status: quiet badge inside the top-left corner; only states that need
+ * attention surface at all. Failure detail rides the pill's tooltip. */
+.ss-studio-node-card[data-chrome-layout="media"] .ss-studio-node-run-status-row {
+  position: absolute;
+  top: var(--ss-space-2);
+  left: var(--ss-space-2);
+  z-index: 5;
+  padding: 0;
+  pointer-events: none;
+}
+
+.ss-studio-node-card[data-chrome-layout="media"] .ss-studio-node-run-status {
+  background-color: color-mix(in srgb, var(--ss-surface-0) 88%, transparent);
+}
+
+.ss-studio-node-card[data-chrome-layout="media"] .ss-studio-node-run-status.is-idle,
+.ss-studio-node-card[data-chrome-layout="media"] .ss-studio-node-run-status.is-succeeded,
+.ss-studio-node-card[data-chrome-layout="media"] .ss-studio-node-run-status.is-cached,
+.ss-studio-node-card[data-chrome-layout="media"] .ss-studio-node-run-message {
+  display: none;
+}
+
+/* Resize frame: four edge strips + four corner zones (tldraw-style).
+ * Hit-zone geometry (sizes, carving around corners) is declared as data in
+ * StudioGraphNodeResizeFrame.ts and applied inline; this block owns cursors,
+ * stacking, and the corner affordance visuals. Zones sit BELOW ports and the
+ * text toolbar (z-index 3 vs 4) so port pins keep winning connection drags
+ * where the strips graze their hit areas. */
+.ss-studio-node-resize-zone {
+  position: absolute;
+  z-index: 3;
+}
+
+.ss-studio-node-resize-zone.is-disabled {
+  display: none;
+}
+
+.ss-studio-node-resize-zone.is-zone-e,
+.ss-studio-node-resize-zone.is-zone-w,
+.ss-studio-selection-resize-zone.is-zone-e,
+.ss-studio-selection-resize-zone.is-zone-w {
+  cursor: ew-resize;
+}
+
+.ss-studio-node-resize-zone.is-zone-n,
+.ss-studio-node-resize-zone.is-zone-s,
+.ss-studio-selection-resize-zone.is-zone-n,
+.ss-studio-selection-resize-zone.is-zone-s {
+  cursor: ns-resize;
+}
+
+.ss-studio-node-resize-zone.is-zone-nw,
+.ss-studio-node-resize-zone.is-zone-se,
+.ss-studio-selection-resize-zone.is-zone-nw,
+.ss-studio-selection-resize-zone.is-zone-se {
+  cursor: nwse-resize;
+}
+
+.ss-studio-node-resize-zone.is-zone-ne,
+.ss-studio-node-resize-zone.is-zone-sw,
+.ss-studio-selection-resize-zone.is-zone-ne,
+.ss-studio-selection-resize-zone.is-zone-sw {
+  cursor: nesw-resize;
+}
+
+/* Corner affordance: a small square that reveals on hover/selection, like
+ * the legacy corner handle did. Edge strips stay invisible hit areas. */
+.ss-studio-node-resize-zone.is-corner::after,
+.ss-studio-selection-resize-zone.is-corner::after {
+  content: "";
+  position: absolute;
+  inset: 2px;
+  border: 1px solid var(--ss-line-strong);
+  border-radius: var(--ss-radius-xs);
+  background-color: var(--ss-surface-0);
+  opacity: 0;
+  transition: opacity var(--ss-dur-fast) var(--ss-ease);
+}
+
+.ss-studio-node-card:hover .ss-studio-node-resize-zone.is-corner::after,
+.ss-studio-node-card.is-selected .ss-studio-node-resize-zone.is-corner::after,
+.ss-studio-node-resize-zone.is-active::after {
+  opacity: 1;
+}
+
+/* Multi-select resize frame: ONE bounds box around a 2+ selection with the
+ * same 8-zone affordances; dragging scales the whole selection as a group
+ * (tldraw parity). Lives inside the zoomed canvas, so it is positioned in
+ * canvas-space coordinates by StudioGraphSelectionResizeController. */
+.ss-studio-selection-resize-frame {
+  position: absolute;
+  z-index: 4;
+  display: none;
+  border: 1px solid var(--ss-accent);
+  border-radius: var(--ss-radius-xs);
+  pointer-events: none;
+}
+
+.ss-studio-selection-resize-frame.is-visible {
+  display: block;
+}
+
+.ss-studio-selection-resize-zone {
+  position: absolute;
+  pointer-events: auto;
+}
+
+/* The group frame owns the resize affordance while it is up: per-node
+ * zones hide so the two frames can never fight over the same drag. */
+.ss-studio-graph-canvas.is-multi-select-active .ss-studio-node-resize-zone {
+  display: none;
+}
+
+/* Selection-frame corners are always visible while the frame is shown —
+ * the frame itself only exists for an active multi-selection. */
+.ss-studio-selection-resize-frame.is-visible .ss-studio-selection-resize-zone.is-corner::after {
+  opacity: 1;
+}
+
+/* Node-kind sizing */
+.ss-studio-node-card[data-node-kind="studio.terminal"] {
+  min-height: 320px;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ------------------------------------------------------------------ *
+ * Run status
+ * ------------------------------------------------------------------ */
+.ss-studio-node-run-status-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--ss-space-1);
+  padding: 0 var(--ss-space-2) var(--ss-space-1);
+}
+
+.ss-studio-node-run-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ss-space-1);
+  padding: 0 var(--ss-space-2);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-full);
+  font-size: var(--ss-text-xs);
+  color: var(--ss-ink-muted);
+}
+
+.ss-studio-node-run-status::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: var(--ss-radius-round);
+  background-color: currentColor;
+}
+
+.ss-studio-node-run-status.is-pending {
+  color: var(--ss-ink-faint);
+}
+
+.ss-studio-node-run-status.is-running {
+  color: var(--ss-info);
+  border-color: var(--ss-info-line);
+}
+
+.ss-studio-node-run-status.is-cached {
+  color: var(--ss-studio-accent-mid);
+  border-color: var(--ss-line-accent);
+}
+
+.ss-studio-node-run-status.is-succeeded {
+  color: var(--ss-success);
+  border-color: var(--ss-success-line);
+}
+
+.ss-studio-node-run-status.is-failed {
+  color: var(--ss-danger);
+  border-color: var(--ss-danger-line);
+}
+
+.ss-studio-node-run-message {
+  min-width: 0;
+  padding: 0 var(--ss-space-2);
+  border-radius: var(--ss-radius-full);
+  background-color: var(--ss-surface-1);
+  font-size: var(--ss-text-xs);
+  color: var(--ss-ink-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ss-studio-node-badge {
+  padding: 0 var(--ss-space-2);
+  border-radius: var(--ss-radius-full);
+  background-color: var(--ss-surface-2);
+  font-size: var(--ss-text-xs);
+  color: var(--ss-ink-muted);
+}
+
+.ss-studio-node-badge.is-warning {
+  background-color: var(--ss-warning-tint);
+  color: var(--ss-warning);
+}
+
+/* ------------------------------------------------------------------ *
+ * Ports
+ * ------------------------------------------------------------------ */
+.ss-studio-node-ports {
+  position: relative;
+  /* Above the resize frame's edge strips (z-index 3) so a port pin's hit
+   * area keeps winning connection drags along the card border. */
+  z-index: 4;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--ss-space-1);
+  padding: var(--ss-space-1) var(--ss-space-2) var(--ss-space-2);
+}
+
+.ss-studio-node-ports.is-single-col {
+  grid-template-columns: 1fr;
+}
+
+.ss-studio-node-ports-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ss-space-1);
+  min-width: 0;
+}
+
+.ss-studio-port-row {
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-1);
+  min-width: 0;
+}
+
+.ss-studio-port-row.is-output {
+  justify-content: flex-end;
+}
+
+.ss-studio-port-pin {
+  position: relative;
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  border-radius: var(--ss-radius-round);
+  border: 1.5px solid var(--ss-line-strong);
+  background-color: var(--ss-surface-0);
+  cursor: crosshair;
+  transition: transform var(--ss-dur-fast) var(--ss-ease-spring), border-color var(--ss-dur-fast) var(--ss-ease);
+}
+
+.ss-studio-port-pin::before {
+  content: "";
+  position: absolute;
+  inset: calc((var(--ss-studio-port-hit-size) - 8px) / -2);
+  border-radius: var(--ss-radius-round);
+}
+
+.ss-studio-port-pin.is-input {
+  border-color: var(--ss-accent);
+}
+
+.ss-studio-port-pin.is-output {
+  border-color: var(--ss-success);
+}
+
+.ss-studio-port-pin:hover,
+.ss-studio-port-pin.is-active {
+  transform: scale(1.25);
+  box-shadow: var(--ss-ring);
+}
+
+.ss-studio-port-pin.is-linked {
+  background-color: currentColor;
+}
+
+.ss-studio-port-pin.is-linked.is-input {
+  color: var(--ss-accent);
+}
+
+.ss-studio-port-pin.is-linked.is-output {
+  color: var(--ss-success);
+}
+
+.ss-studio-port-pin.is-drop-target {
+  box-shadow: var(--ss-ring);
+}
+
+.ss-studio-port-pin.is-drop-target.is-input {
+  animation: ss-studio-port-halo 1.1s var(--ss-ease) infinite;
+}
+
+.ss-studio-port-pin.is-drop-incompatible {
+  opacity: 0.25;
+  filter: grayscale(1);
+}
+
+.ss-studio-port-label {
+  min-width: 0;
+  font-family: var(--ss-font-mono);
+  font-size: var(--ss-text-xs);
+  color: var(--ss-ink-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ss-studio-port-pin.is-drop-target.is-input {
+    animation: none;
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * Groups + tags
+ * ------------------------------------------------------------------ */
+.ss-studio-group-frame {
+  --ss-studio-group-accent: var(--ss-ink-muted);
+
+  position: absolute;
+  border: 1px dashed var(--ss-line-strong);
+  border-radius: var(--ss-radius-xl);
+  background-color: transparent;
+  cursor: grab;
+  transition:
+    left var(--ss-dur-fast) var(--ss-ease),
+    top var(--ss-dur-fast) var(--ss-ease),
+    width var(--ss-dur-fast) var(--ss-ease),
+    height var(--ss-dur-fast) var(--ss-ease),
+    border-color var(--ss-dur-fast) var(--ss-ease);
+}
+
+.ss-studio-group-frame.is-dragging {
+  cursor: grabbing;
+}
+
+.ss-studio-group-frame.is-drop-target {
+  border-color: var(--ss-studio-group-accent);
+  background-color: color-mix(in srgb, var(--ss-studio-group-accent) 8%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--ss-studio-group-accent) 30%, transparent);
+}
+
+.ss-studio-group-tag {
+  position: absolute;
+  transform: translate(-50%, 52%);
+  pointer-events: auto;
+}
+
+.ss-studio-group-tag-row {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ss-space-1);
+}
+
+.ss-studio-group-tag-name-slot {
+  display: inline-flex;
+  min-width: 0;
+}
+
+.ss-studio-group-tag-button,
+.ss-studio-group-tag-input,
+.ss-studio-group-tag-action,
+.ss-studio-group-align-button,
+.ss-studio-group-color-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 24px;
+  padding: 0 var(--ss-space-2);
+  background-color: var(--ss-surface-1);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-full);
+  box-shadow: var(--ss-elevation-1);
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-xs);
+  cursor: pointer;
+  transition: var(--ss-transition-colors);
+}
+
+.ss-studio-group-tag-button:hover,
+.ss-studio-group-tag-action:hover,
+.ss-studio-group-align-button:hover,
+.ss-studio-group-color-button:hover {
+  background-color: var(--ss-surface-2);
+  color: var(--ss-ink);
+}
+
+.ss-studio-group-tag-input {
+  cursor: text;
+  color: var(--ss-ink);
+}
+
+.ss-studio-group-tag-input:focus-visible {
+  outline: none;
+  border-color: var(--ss-accent);
+  box-shadow: var(--ss-ring);
+}
+
+.ss-studio-group-color-button {
+  width: 28px;
+  padding: 0;
+}
+
+.ss-studio-group-color-chip {
+  width: 14px;
+  height: 14px;
+  border-radius: var(--ss-radius-round);
+  border: 1px solid var(--ss-line-strong);
+  background: var(--ss-studio-chip-color, var(--ss-studio-group-accent));
+}
+
+.ss-studio-group-color-palette {
+  position: absolute;
+  bottom: calc(100% + var(--ss-space-2));
+  left: 50%;
+  transform: translateX(-50%);
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: var(--ss-space-1);
+  padding: var(--ss-space-2);
+  background-color: var(--ss-surface-2);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-md);
+  box-shadow: var(--ss-elevation-3);
+  z-index: 8;
+}
+
+.ss-studio-group-color-swatch {
+  aspect-ratio: 1;
+  width: 18px;
+  border-radius: var(--ss-radius-round);
+  border: 1px solid var(--ss-line-strong);
+  background: var(--ss-studio-swatch-color, var(--ss-ink-muted));
+  cursor: pointer;
+  transition: transform var(--ss-dur-fast) var(--ss-ease-spring);
+}
+
+.ss-studio-group-color-swatch:hover {
+  transform: scale(1.15);
+}
+
+.ss-studio-group-color-swatch.is-active {
+  box-shadow: var(--ss-ring);
+}
+
+/* ------------------------------------------------------------------ *
+ * Text nodes (kind "studio.text") — tldraw-style: no card chrome, just
+ * the text. A hairline outline appears on hover, an accent outline on
+ * selection, and the toolbar/resize handle follow the same progressive
+ * disclosure as the shared node chrome.
+ * ------------------------------------------------------------------ */
+.ss-studio-node-card.ss-studio-text-node-card {
+  background-color: transparent;
+  border-color: transparent;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.ss-studio-node-card.ss-studio-text-node-card:hover {
+  border-color: transparent;
+  box-shadow: none;
+  outline: 1px solid var(--ss-line);
+  outline-offset: 2px;
+}
+
+.ss-studio-node-card.ss-studio-text-node-card.is-selected {
+  border-color: transparent;
+  box-shadow: none;
+  outline: 1px solid var(--ss-line-accent);
+  outline-offset: 2px;
+}
+
+.ss-studio-text-node-toolbar {
+  position: relative;
+  /* Above the resize frame's top strip/corners so the toolbar buttons stay
+   * clickable. Always visible — no hover reveal anywhere in the studio. */
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ss-space-1);
+  padding: var(--ss-space-1) var(--ss-space-2);
+}
+
+.ss-studio-text-node-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--ss-radius-xs);
+  color: var(--ss-ink-faint);
+  cursor: pointer;
+  transition: var(--ss-transition-colors);
+}
+
+.ss-studio-text-node-remove:hover {
+  background-color: var(--ss-state-hover);
+  color: var(--ss-ink);
+}
+
+/* Text-node height is intrinsic: the card auto-grows with its reflowed
+ * content, so the display div and editing textarea both size to content —
+ * no fixed heights anywhere in the chain. */
+.ss-studio-text-node-content {
+  position: relative;
+}
+
+.ss-studio-text-node-display,
+.ss-studio-text-node-editor {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  padding: var(--ss-space-2);
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  font-size: var(--ss-studio-text-node-font-size, inherit);
+  line-height: var(--ss-leading-base);
+  color: var(--ss-ink);
+}
+
+.ss-studio-text-node-display {
+  white-space: pre-wrap;
+  cursor: grab;
+}
+
+.ss-studio-text-node-display.is-placeholder {
+  color: var(--ss-ink-faint);
+}
+
+/* The editor blends into the canvas: same box and font metrics as the
+ * display surface; the card's selection outline carries the focus state.
+ * overflow: hidden keeps the scrollHeight-driven auto-grow jitter-free. */
+.ss-studio-text-node-editor {
+  overflow: hidden;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  resize: none;
+}
+
+.ss-studio-text-node-editor::placeholder {
+  color: var(--ss-ink-faint);
+}
+
+.ss-studio-text-node-editor:focus,
+.ss-studio-text-node-editor:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+/* ------------------------------------------------------------------ *
+ * Inspector overlay
+ * ------------------------------------------------------------------ */
+.ss-studio-node-inspector {
+  --ss-studio-inspector-scale: 1;
+
+  position: absolute;
+  z-index: 9;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background-color: var(--ss-surface-0);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-md);
+  box-shadow: var(--ss-elevation-3);
+  transform: scale(var(--ss-studio-inspector-scale));
+  transform-origin: top left;
+  transition:
+    left var(--ss-dur-fast) var(--ss-ease),
+    top var(--ss-dur-fast) var(--ss-ease),
+    width var(--ss-dur-fast) var(--ss-ease),
+    height var(--ss-dur-fast) var(--ss-ease),
+    transform var(--ss-dur-fast) var(--ss-ease);
+}
+
+.ss-studio-graph-viewport.is-scrolling .ss-studio-node-inspector {
+  transition: none;
+}
+
+.ss-studio-node-inspector-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--ss-space-2);
+  padding: var(--ss-space-2) var(--ss-space-3);
+  border-bottom: 1px solid var(--ss-line);
+  cursor: move;
+}
+
+.ss-studio-node-inspector-title {
+  font-size: var(--ss-text-base);
+  font-weight: var(--ss-weight-semibold);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ss-studio-node-inspector-subtitle {
+  font-size: var(--ss-text-xs);
+  color: var(--ss-ink-muted);
+}
+
+.ss-studio-node-inspector-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--ss-space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ss-space-3);
+}
+
+.ss-studio-node-inspector-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ss-space-1);
+}
+
+.ss-studio-node-inspector-field.is-hidden {
+  display: none;
+}
+
+.ss-studio-node-inspector-field-label {
+  font-size: var(--ss-text-sm);
+  font-weight: var(--ss-weight-medium);
+}
+
+.ss-studio-node-inspector-field-label.is-required::after {
+  content: "*";
+  margin-left: 2px;
+  color: var(--ss-danger);
+}
+
+.ss-studio-node-inspector-field-help {
+  font-size: var(--ss-text-xs);
+  color: var(--ss-ink-faint);
+}
+
+.ss-studio-node-inspector-textarea {
+  min-height: 80px;
+  padding: var(--ss-space-2);
+  background-color: var(--ss-surface-sunken);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-sm);
+  color: var(--ss-ink);
+  font-size: var(--ss-text-sm);
+  resize: vertical;
+  transition: var(--ss-transition-colors);
+}
+
+.ss-studio-node-inspector-textarea:focus {
+  border-color: var(--ss-accent);
+  box-shadow: var(--ss-ring);
+  outline: none;
+}
+
+.ss-studio-node-inspector-textarea.is-monospace {
+  font-family: var(--ss-font-mono);
+}
+
+.ss-studio-node-inspector-select-button-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ss-space-1);
+}
+
+.ss-studio-node-inspector-select-button {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--ss-control-height-sm);
+  padding: 0 var(--ss-space-2);
+  background-color: var(--ss-surface-1);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-full);
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-sm);
+  cursor: pointer;
+  transition: var(--ss-transition-colors);
+}
+
+.ss-studio-node-inspector-select-button:hover:not(:disabled) {
+  background-color: var(--ss-surface-2);
+  color: var(--ss-ink);
+}
+
+.ss-studio-node-inspector-select-button.is-active {
+  background-color: var(--ss-accent-tint-strong);
+  border-color: var(--ss-line-accent);
+  color: var(--ss-ink-accent);
+}
+
+.ss-studio-node-inspector-select-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ss-studio-node-inspector-path-row {
+  display: flex;
+  gap: var(--ss-space-1);
+}
+
+.ss-studio-node-inspector-path-button {
+  flex-shrink: 0;
+}
+
+.ss-studio-node-inspector-checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-2);
+}
+
+.ss-studio-node-inspector-checkbox {
+  accent-color: var(--ss-accent);
+}
+
+.ss-studio-node-inspector-field-error {
+  display: none;
+  font-size: var(--ss-text-xs);
+  color: var(--ss-danger);
+}
+
+.ss-studio-node-inspector-field-error.is-visible {
+  display: block;
+}
+
+.ss-studio-node-inspector-advanced {
+  border-top: 1px solid var(--ss-line);
+  padding-top: var(--ss-space-2);
+}
+
+.ss-studio-node-inspector-runtime {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ss-space-1);
+  padding: var(--ss-space-2);
+  background-color: var(--ss-surface-1);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-sm);
+}
+
+.ss-studio-node-inspector-runtime-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ss-space-2);
+}
+
+.ss-studio-node-inspector-runtime-title {
+  font-size: var(--ss-text-sm);
+  font-weight: var(--ss-weight-semibold);
+}
+
+.ss-studio-node-inspector-runtime-badge {
+  padding: 0 var(--ss-space-2);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-full);
+  font-size: var(--ss-text-xs);
+  color: var(--ss-ink-muted);
+}
+
+.ss-studio-node-inspector-runtime-badge.is-pending {
+  color: var(--ss-ink-faint);
+}
+
+.ss-studio-node-inspector-runtime-badge.is-running {
+  color: var(--ss-info);
+  border-color: var(--ss-info-line);
+}
+
+.ss-studio-node-inspector-runtime-badge.is-cached {
+  color: var(--ss-studio-accent-mid);
+  border-color: var(--ss-line-accent);
+}
+
+.ss-studio-node-inspector-runtime-badge.is-succeeded {
+  color: var(--ss-success);
+  border-color: var(--ss-success-line);
+}
+
+.ss-studio-node-inspector-runtime-badge.is-failed {
+  color: var(--ss-danger);
+  border-color: var(--ss-danger-line);
+}
+
+.ss-studio-node-inspector-runtime-message,
+.ss-studio-node-inspector-runtime-field,
+.ss-studio-node-inspector-runtime-label,
+.ss-studio-node-inspector-runtime-path,
+.ss-studio-node-inspector-runtime-updated {
+  font-size: var(--ss-text-xs);
+  color: var(--ss-ink-muted);
+}
+
+.ss-studio-node-inspector-status {
+  padding: var(--ss-space-1) var(--ss-space-3);
+  font-size: var(--ss-text-xs);
+  color: var(--ss-ink-muted);
+  border-top: 1px solid var(--ss-line);
+}
+
+.ss-studio-node-inspector-status.is-error {
+  color: var(--ss-danger);
+}
+
+.ss-studio-node-inspector-resize {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  width: 12px;
+  height: 12px;
+  border-right: 2px solid var(--ss-line-strong);
+  border-bottom: 2px solid var(--ss-line-strong);
+  cursor: nwse-resize;
+}
+
+/* ------------------------------------------------------------------ *
+ * Context menus
+ * ------------------------------------------------------------------ */
+.ss-studio-simple-context-menu {
+  --ss-studio-simple-context-menu-scale: 1;
+
+  position: absolute;
+  z-index: 16;
+  display: flex;
+  flex-direction: column;
+  min-width: 200px;
+  background-color: var(--ss-surface-2);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-md);
+  box-shadow: var(--ss-elevation-3);
+  transform: scale(var(--ss-studio-simple-context-menu-scale));
+  transform-origin: top left;
+  overflow: hidden;
+}
+
+.ss-studio-simple-context-menu-header {
+  padding: var(--ss-space-2) var(--ss-space-3) var(--ss-space-1);
+  border-bottom: 1px solid var(--ss-line);
+}
+
+.ss-studio-simple-context-menu-title {
+  font-size: var(--ss-text-sm);
+  font-weight: var(--ss-weight-semibold);
+}
+
+.ss-studio-simple-context-menu-subtitle {
+  font-size: var(--ss-text-xs);
+  color: var(--ss-ink-muted);
+}
+
+.ss-studio-simple-context-menu-list {
+  display: flex;
+  flex-direction: column;
+  padding: var(--ss-space-1);
+}
+
+.ss-studio-simple-context-menu-item {
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-2);
+  padding: var(--ss-space-1) var(--ss-space-2);
+  border-radius: var(--ss-radius-xs);
+  cursor: pointer;
+  transition: var(--ss-transition-colors);
+}
+
+.ss-studio-simple-context-menu-item:hover,
+.ss-studio-simple-context-menu-item:focus-visible {
+  background-color: var(--ss-state-hover);
+}
+
+.ss-studio-simple-context-menu-item-content {
+  min-width: 0;
+}
+
+.ss-studio-simple-context-menu-item-title {
+  font-size: var(--ss-text-sm);
+}
+
+.ss-studio-simple-context-menu-item-summary {
+  font-size: var(--ss-text-xs);
+  color: var(--ss-ink-muted);
+}
+
+.ss-studio-node-context-menu {
+  --ss-studio-node-context-menu-scale: 1;
+
+  position: absolute;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  min-width: 240px;
+  max-height: 400px;
+  background-color: color-mix(in srgb, var(--ss-surface-2) 92%, transparent);
+  backdrop-filter: blur(6px);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-md);
+  box-shadow: var(--ss-elevation-3);
+  transform: scale(var(--ss-studio-node-context-menu-scale));
+  transform-origin: top left;
+  overflow: hidden;
+  transition:
+    left var(--ss-dur-fast) var(--ss-ease),
+    top var(--ss-dur-fast) var(--ss-ease),
+    transform var(--ss-dur-fast) var(--ss-ease);
+}
+
+.ss-studio-node-context-menu-header {
+  padding: var(--ss-space-2) var(--ss-space-3) var(--ss-space-1);
+}
+
+.ss-studio-node-context-menu-title {
+  font-size: var(--ss-text-sm);
+  font-weight: var(--ss-weight-semibold);
+}
+
+.ss-studio-node-context-menu-subtitle {
+  font-size: var(--ss-text-xs);
+  color: var(--ss-ink-muted);
+}
+
+.ss-studio-node-context-menu-actions {
+  display: flex;
+  flex-direction: column;
+  padding: var(--ss-space-1);
+  border-bottom: 1px solid var(--ss-line);
+}
+
+.ss-studio-node-context-menu-action {
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-2);
+  padding: var(--ss-space-1) var(--ss-space-2);
+  border-radius: var(--ss-radius-xs);
+  cursor: pointer;
+  transition: var(--ss-transition-colors);
+}
+
+.ss-studio-node-context-menu-action:hover {
+  background-color: var(--ss-state-hover);
+}
+
+.ss-studio-node-context-menu-action-content {
+  min-width: 0;
+}
+
+.ss-studio-node-context-menu-action-title {
+  font-size: var(--ss-text-sm);
+}
+
+.ss-studio-node-context-menu-action-summary {
+  font-size: var(--ss-text-xs);
+  color: var(--ss-ink-muted);
+}
+
+.ss-studio-node-context-menu-search-wrap {
+  padding: var(--ss-space-1) var(--ss-space-2);
+  border-bottom: 1px solid var(--ss-line);
+}
+
+.ss-studio-node-context-menu-search-input {
+  width: 100%;
+  min-height: var(--ss-control-height-sm);
+  padding: 0 var(--ss-space-2);
+  background-color: var(--ss-surface-sunken);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-xs);
+  color: var(--ss-ink);
+  font-size: var(--ss-text-sm);
+}
+
+.ss-studio-node-context-menu-search-input:focus-visible {
+  outline: none;
+  border-color: var(--ss-accent);
+  box-shadow: var(--ss-ring);
+}
+
+.ss-studio-node-context-menu-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--ss-space-1);
+}
+
+.ss-studio-node-context-menu-item {
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-2);
+  padding: var(--ss-space-1) var(--ss-space-2);
+  border-radius: var(--ss-radius-xs);
+  cursor: pointer;
+  transition: var(--ss-transition-colors);
+}
+
+.ss-studio-node-context-menu-item:hover,
+.ss-studio-node-context-menu-item:focus-visible {
+  background-color: var(--ss-state-hover);
+}
+
+.ss-studio-node-context-menu-item.is-active {
+  background-color: var(--ss-accent-tint);
+}
+
+.ss-studio-node-context-menu-item-content {
+  min-width: 0;
+}
+
+.ss-studio-node-context-menu-item-title {
+  font-size: var(--ss-text-sm);
+}
+
+.ss-studio-node-context-menu-item-summary {
+  font-size: var(--ss-text-xs);
+  color: var(--ss-ink-muted);
+}
+
+.ss-studio-node-context-menu-empty {
+  padding: var(--ss-space-3);
+  font-size: var(--ss-text-sm);
+  color: var(--ss-ink-muted);
+  text-align: center;
+}

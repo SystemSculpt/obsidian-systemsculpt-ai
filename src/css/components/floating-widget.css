@@ -1,20 +1,24 @@
+/**
+ * Floating widget shell — shared chrome for the recorder popover and
+ * quick-edit widget. TS toggles `.is-visible`, `.is-dragging`, and the
+ * `hidden` attribute; `[data-layout="mobile"]` pins to the bottom.
+ */
+
 .ss-hover-shell,
 .systemsculpt-floating-widget {
   position: fixed;
-  z-index: 1100;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  width: min(340px, calc(100vw - 24px));
-  padding: 12px;
-  border: 1px solid var(--background-modifier-border);
-  border-radius: var(--radius-m, 12px);
-  background: var(--background-primary);
-  color: var(--text-normal);
-  box-shadow: var(--shadow-s, 0 10px 28px rgba(0, 0, 0, 0.24));
+  z-index: var(--ss-z-popover);
+  width: min(340px, calc(100vw - var(--ss-space-6)));
+  background-color: var(--ss-surface-2);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-lg);
+  box-shadow: var(--ss-elevation-3);
   opacity: 0;
   transform: translateY(8px);
-  transition: opacity 130ms ease, transform 160ms ease, box-shadow 160ms ease;
+  transition:
+    opacity var(--ss-dur-base) var(--ss-ease-out),
+    transform var(--ss-dur-base) var(--ss-ease-out),
+    box-shadow var(--ss-dur-fast) var(--ss-ease);
 }
 
 .ss-hover-shell.is-visible,
@@ -23,10 +27,15 @@
   transform: translateY(0);
 }
 
+.ss-hover-shell.is-dragging {
+  box-shadow: var(--ss-elevation-4);
+}
+
+/* Mobile pinning (fights inline drag positioning — keep !important) */
 .ss-hover-shell[data-layout="mobile"] {
-  left: 12px !important;
-  right: 12px !important;
-  bottom: 16px !important;
+  left: var(--ss-space-3) !important;
+  right: var(--ss-space-3) !important;
+  bottom: var(--ss-space-4) !important;
   top: auto !important;
   width: auto;
   max-width: 460px;
@@ -35,36 +44,31 @@
 
 .ss-hover-shell__header {
   display: flex;
-  align-items: flex-start;
-  gap: 10px;
+  align-items: center;
+  gap: var(--ss-space-2);
+  padding: var(--ss-space-2) var(--ss-space-3);
+  border-bottom: 1px solid var(--ss-line);
 }
 
 .ss-hover-shell__drag-handle {
-  flex: 1;
-  min-width: 0;
   display: flex;
-  align-items: flex-start;
-  gap: 8px;
+  align-items: center;
+  gap: var(--ss-space-2);
+  flex: 1 1 auto;
+  min-width: 0;
   cursor: move;
-  user-select: none;
 }
 
 .ss-hover-shell[data-layout="mobile"] .ss-hover-shell__drag-handle {
   cursor: default;
 }
 
-.ss-hover-shell.is-dragging {
-  box-shadow: var(--shadow-l, 0 16px 34px rgba(0, 0, 0, 0.3));
-}
-
 .ss-hover-shell__icon {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  justify-content: center;
+  flex-shrink: 0;
   width: 18px;
-  height: 18px;
-  color: var(--text-muted);
-  margin-top: 1px;
+  color: var(--ss-ink-muted);
 }
 
 .ss-hover-shell__icon[hidden] {
@@ -72,39 +76,36 @@
 }
 
 .ss-hover-shell__title-stack {
-  flex: 1;
   min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
 }
 
 .ss-hover-shell__title {
-  font-size: var(--font-ui-small, 13px);
-  font-weight: var(--font-semibold, 600);
-  color: var(--text-normal);
-  line-height: 1.25;
+  font-size: var(--ss-text-sm);
+  font-weight: var(--ss-weight-semibold);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .ss-hover-shell__subtitle {
-  font-size: var(--font-ui-smaller, 11px);
-  color: var(--text-muted);
-  line-height: 1.25;
-}
-
-.ss-hover-shell__subtitle[hidden] {
-  display: none;
+  font-size: var(--ss-text-xs);
+  color: var(--ss-ink-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .ss-hover-shell__header-actions {
-  display: inline-flex;
-  gap: 6px;
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-1);
+  flex-shrink: 0;
 }
 
 .ss-hover-shell__status {
-  font-size: var(--font-ui-smaller, 11px);
-  color: var(--text-muted);
-  margin-top: -2px;
+  padding: var(--ss-space-1) var(--ss-space-3);
+  font-size: var(--ss-text-xs);
+  color: var(--ss-ink-muted);
 }
 
 .ss-hover-shell__status[hidden] {
@@ -113,60 +114,62 @@
 
 .ss-hover-shell__content,
 .systemsculpt-floating-widget-content {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  min-width: 0;
+  padding: var(--ss-space-3);
+}
+
+.systemsculpt-floating-widget-title {
+  font-size: var(--ss-text-sm);
+  font-weight: var(--ss-weight-semibold);
 }
 
 .ss-hover-shell__footer-actions {
   display: flex;
-  gap: 8px;
-  align-items: center;
   justify-content: flex-end;
-}
-
-.ss-hover-shell__footer-actions[hidden],
-.ss-hover-shell__header-actions[hidden] {
-  display: none;
+  gap: var(--ss-space-2);
+  padding: var(--ss-space-2) var(--ss-space-3) var(--ss-space-3);
 }
 
 .ss-hover-shell__action {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  border: 1px solid var(--background-modifier-border);
-  border-radius: var(--radius-s, 8px);
-  background: var(--background-secondary);
-  color: var(--text-normal);
-  font-size: var(--font-ui-smaller, 11px);
-  line-height: 1.2;
-  padding: 5px 10px;
+  gap: var(--ss-space-1);
+  min-height: var(--ss-control-height-sm);
+  padding: 0 var(--ss-space-3);
+  background-color: var(--ss-surface-1);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-full);
+  color: var(--ss-ink);
+  font-size: var(--ss-text-sm);
+  font-weight: var(--ss-weight-medium);
+  cursor: pointer;
+  transition: var(--ss-transition-colors);
 }
 
-.ss-hover-shell__action:not(:disabled):hover {
-  background: var(--background-modifier-hover);
-}
-
-.ss-hover-shell__action:disabled {
-  opacity: 0.6;
+.ss-hover-shell__action:hover {
+  background-color: var(--ss-surface-3);
+  border-color: var(--ss-line-strong);
 }
 
 .ss-hover-shell__action.mod-cta {
-  background: var(--interactive-accent);
-  color: var(--text-on-accent);
-  border-color: var(--interactive-accent);
+  background-color: var(--ss-accent);
+  border-color: var(--ss-accent);
+  color: var(--ss-ink-on-accent);
 }
 
-.ss-hover-shell__action.mod-cta:not(:disabled):hover {
-  background: var(--interactive-accent-hover);
-  border-color: var(--interactive-accent-hover);
+.ss-hover-shell__action.mod-cta:hover {
+  background-color: var(--ss-accent-hover);
+}
+
+.ss-hover-shell__action[hidden] {
+  display: none;
 }
 
 .ss-hover-shell__action-icon {
-  width: 14px;
-  height: 14px;
   display: inline-flex;
   align-items: center;
-  justify-content: center;
+}
+
+.ss-hover-shell__action-icon svg {
+  width: var(--ss-icon-size-sm);
+  height: var(--ss-icon-size-sm);
 }

@@ -1,0 +1,131 @@
+/**
+ * Small shared modal pieces that predate the ss-modal shell.
+ */
+
+/* Recorder advanced-controls modal (native Obsidian modal, class on contentEl) */
+.ss-recorder-advanced-modal {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ss-space-3);
+}
+
+.ss-recorder-advanced-modal h2,
+.ss-recorder-advanced-modal h3 {
+  margin: 0 0 var(--ss-space-2);
+  letter-spacing: var(--ss-tracking-tight);
+}
+
+.ss-recorder-advanced-modal .setting-item {
+  margin: 0;
+  padding: var(--ss-space-2) 0;
+}
+
+.ss-recorder-advanced-modal__inline-note {
+  font-size: var(--ss-text-sm);
+  color: var(--ss-ink-muted);
+}
+
+/* Transcription / automation progress rows (AudioTranscriptionModal.ts,
+   AutomationProcessingModal.ts) */
+.systemsculpt-progress-status {
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-2);
+  padding: var(--ss-space-1) 0;
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-sm);
+}
+
+.systemsculpt-progress-status-icon {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.systemsculpt-progress-status-text {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Warning icon accent (UpdateNotificationWarningModal.ts) */
+.ss-modal-icon--warning {
+  color: var(--ss-warning);
+  cursor: help;
+}
+
+/* Generic modal button row (legacy hook) */
+.systemsculpt-modal-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--ss-space-2);
+  margin-top: var(--ss-space-4);
+}
+
+/* ------------------------------------------------------------------ *
+ * Settings backup restore (BackupRestoreModal.ts — ListSelectionModal
+ * shell). Manual-backup form + per-item detail badges.
+ * ------------------------------------------------------------------ */
+.ss-backup-manual {
+  margin-bottom: var(--ss-space-3);
+  padding: var(--ss-space-3);
+  background-color: var(--ss-surface-sunken);
+  border-radius: var(--ss-radius-xs);
+}
+
+.ss-backup-manual__prompt {
+  margin-bottom: var(--ss-space-1);
+}
+
+.ss-backup-manual__input {
+  width: 100%;
+  margin-bottom: var(--ss-space-2);
+}
+
+.ss-backup-manual__submit {
+  width: 100%;
+}
+
+.ss-backup-details {
+  margin-top: var(--ss-space-1);
+  font-size: var(--ss-text-sm);
+  color: var(--ss-ink-muted);
+  line-height: var(--ss-leading-base);
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+}
+
+.ss-backup-details__item {
+  display: inline-block;
+  margin-right: var(--ss-space-2);
+  margin-bottom: var(--ss-space-1);
+  padding: var(--ss-space-0) var(--ss-space-1);
+  background-color: var(--ss-surface-sunken);
+  border-radius: var(--ss-radius-xs);
+}
+
+/* Chat error modal (ChatErrorModal.ts — StandardModal shell) */
+.ss-chat-error-modal__body {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--ss-space-3);
+  padding: var(--ss-space-4) var(--ss-space-5);
+}
+
+.ss-chat-error-modal__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--ss-radius-round);
+  background-color: var(--ss-danger-tint);
+  color: var(--ss-danger);
+}
+
+.ss-chat-error-modal__message {
+  font-size: var(--ss-text-base);
+  line-height: var(--ss-leading-base);
+  overflow-wrap: anywhere;
+}

@@ -1,0 +1,282 @@
+/**
+ * Credits & usage modal — tabbed summary/usage panels.
+ * Root: `.ss-credits-balance-modal.ss-modal--medium` (CreditsBalanceModal.ts).
+ */
+
+.ss-credits-balance-modal {
+  max-width: 540px;
+}
+
+.ss-credits-balance {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ss-space-4);
+  padding: var(--ss-space-4) var(--ss-space-5);
+  overflow-y: auto;
+}
+
+/* Tabs */
+.ss-credits-balance__tabs {
+  display: flex;
+  gap: var(--ss-space-1);
+  padding: var(--ss-space-0);
+  background-color: var(--ss-surface-sunken);
+  border-radius: var(--ss-radius-sm);
+  align-self: flex-start;
+}
+
+.ss-credits-balance__tab {
+  min-height: var(--ss-control-height-sm);
+  padding: 0 var(--ss-space-3);
+  border: none;
+  border-radius: var(--ss-radius-xs);
+  background: transparent;
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-sm);
+  font-weight: var(--ss-weight-medium);
+  cursor: pointer;
+  transition: var(--ss-transition-colors);
+}
+
+.ss-credits-balance__tab:hover {
+  color: var(--ss-ink);
+}
+
+.ss-credits-balance__tab.is-active {
+  background-color: var(--ss-surface-0);
+  color: var(--ss-ink);
+  box-shadow: var(--ss-elevation-1);
+}
+
+.ss-credits-balance__panel {
+  display: none;
+  flex-direction: column;
+  gap: var(--ss-space-4);
+}
+
+.ss-credits-balance__panel.is-active {
+  display: flex;
+}
+
+/* Hero balance */
+.ss-credits-balance__hero {
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-3);
+  padding: var(--ss-space-4);
+  background-color: var(--ss-accent-tint);
+  border: 1px solid var(--ss-line-accent);
+  border-radius: var(--ss-radius-md);
+}
+
+.ss-credits-balance__hero.is-low {
+  background-color: var(--ss-warning-tint);
+  border-color: var(--ss-warning-line);
+}
+
+.ss-credits-balance__hero.is-empty {
+  background-color: var(--ss-danger-tint);
+  border-color: var(--ss-danger-line);
+}
+
+.ss-credits-balance__hero-icon {
+  display: flex;
+  align-items: center;
+  color: var(--ss-ink-accent);
+}
+
+.ss-credits-balance__hero.is-low .ss-credits-balance__hero-icon {
+  color: var(--ss-warning);
+}
+
+.ss-credits-balance__hero.is-empty .ss-credits-balance__hero-icon {
+  color: var(--ss-danger);
+}
+
+.ss-credits-balance__hero-label {
+  font-size: var(--ss-text-xs);
+  color: var(--ss-ink-muted);
+  letter-spacing: var(--ss-tracking-wide);
+  text-transform: uppercase;
+}
+
+.ss-credits-balance__hero-value {
+  font-size: var(--ss-text-2xl);
+  font-weight: var(--ss-weight-semibold);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Meter */
+.ss-credits-balance__meter-label {
+  font-size: var(--ss-text-sm);
+  color: var(--ss-ink-muted);
+  margin-bottom: var(--ss-space-1);
+}
+
+.ss-credits-balance__meter-track {
+  height: 6px;
+  background-color: var(--ss-line);
+  border-radius: var(--ss-radius-full);
+  overflow: hidden;
+}
+
+.ss-credits-balance__meter-fill {
+  width: 0%;
+  height: 100%;
+  background-color: var(--ss-accent);
+  border-radius: var(--ss-radius-full);
+  transition: width var(--ss-dur-slow) var(--ss-ease);
+}
+
+/* Stats */
+.ss-credits-balance__stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--ss-space-3);
+}
+
+.ss-credits-balance__stat {
+  padding: var(--ss-space-3);
+  background-color: var(--ss-surface-1);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-sm);
+}
+
+.ss-credits-balance__stat-label {
+  font-size: var(--ss-text-xs);
+  color: var(--ss-ink-muted);
+  letter-spacing: var(--ss-tracking-wide);
+  text-transform: uppercase;
+}
+
+.ss-credits-balance__stat-value {
+  margin-top: var(--ss-space-0);
+  font-size: var(--ss-text-lg);
+  font-weight: var(--ss-weight-semibold);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Timeline */
+.ss-credits-balance__timeline {
+  display: flex;
+  flex-direction: column;
+}
+
+.ss-credits-balance__timeline-row {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--ss-space-3);
+  padding: var(--ss-space-2) 0;
+  border-bottom: 1px solid var(--ss-line);
+  font-size: var(--ss-text-sm);
+}
+
+.ss-credits-balance__timeline-row:last-child {
+  border-bottom: none;
+}
+
+.ss-credits-balance__timeline-label {
+  color: var(--ss-ink-muted);
+}
+
+.ss-credits-balance__timeline-value {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Hints + status */
+.ss-credits-balance__hint {
+  font-size: var(--ss-text-sm);
+  color: var(--ss-ink-muted);
+}
+
+.ss-credits-balance__hint.is-warning {
+  color: var(--ss-warning);
+}
+
+.ss-credits-balance__status {
+  font-size: var(--ss-text-sm);
+  color: var(--ss-ink-muted);
+}
+
+.ss-credits-balance__status.is-warning {
+  color: var(--ss-warning);
+}
+
+.ss-credits-balance__status.is-error {
+  color: var(--ss-danger);
+}
+
+/* Usage panel */
+.ss-credits-usage__list {
+  max-height: 340px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ss-space-2);
+}
+
+.ss-credits-usage__item {
+  padding: var(--ss-space-3);
+  background-color: var(--ss-surface-1);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-sm);
+}
+
+.ss-credits-usage__item-header {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--ss-space-3);
+}
+
+.ss-credits-usage__item-title {
+  font-size: var(--ss-text-sm);
+  font-weight: var(--ss-weight-medium);
+}
+
+.ss-credits-usage__item-credits {
+  font-size: var(--ss-text-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.ss-credits-usage__item-meta,
+.ss-credits-usage__item-details,
+.ss-credits-usage__item-billing-note,
+.ss-credits-usage__item-cache-note,
+.ss-credits-usage__item-balance-trail {
+  margin-top: var(--ss-space-1);
+  font-size: var(--ss-text-xs);
+  color: var(--ss-ink-muted);
+}
+
+.ss-credits-usage__hint {
+  font-size: var(--ss-text-sm);
+  color: var(--ss-ink-muted);
+}
+
+.ss-credits-usage__load-more {
+  align-self: center;
+}
+
+.ss-credits-usage__load-more.is-loading {
+  opacity: 0.65;
+  pointer-events: none;
+}
+
+@media (max-width: 720px) {
+  .ss-credits-balance__tabs {
+    align-self: stretch;
+  }
+
+  .ss-credits-balance__tab {
+    flex: 1;
+  }
+
+  .ss-credits-balance__stats {
+    grid-template-columns: 1fr;
+  }
+
+  .ss-credits-balance__timeline-row {
+    flex-direction: column;
+    gap: var(--ss-space-0);
+  }
+}

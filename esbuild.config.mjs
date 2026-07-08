@@ -336,6 +336,10 @@ const buildOptions = {
 		// Resolve import.meta.url from the actual runtime bundle path so synced builds keep
 		// working on Windows instead of carrying a fake build-time file URL across machines.
 		"import.meta.url": "__systemsculpt_import_meta_url__",
+		// Build stamp logged at plugin onload: makes "which build is this
+		// vault actually running" answerable from the devtools console —
+		// stale synced builds must never masquerade as code bugs again.
+		"__SS_BUILD_STAMP__": JSON.stringify(new Date().toISOString()),
 	},
 	external: [
 		"obsidian",

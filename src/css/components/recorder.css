@@ -1,75 +1,87 @@
-.ss-recorder-hover {
-  width: min(300px, calc(100vw - 24px));
-}
+/**
+ * Recorder hover popover — live badge, timer, waveform canvas.
+ * Lives inside the floating widget shell (.ss-hover-shell).
+ */
 
-.ss-recorder-hover[data-state="recording"] {
-  border-color: var(--interactive-accent);
+.ss-recorder-hover {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ss-space-2);
+  width: min(300px, calc(100vw - var(--ss-space-6)));
 }
 
 .ss-recorder-hover__badge-row {
   display: flex;
   align-items: center;
-  justify-content: flex-start;
+  gap: var(--ss-space-2);
 }
 
 .ss-recorder-hover__live {
-  font-size: 10px;
-  line-height: 1.2;
-  letter-spacing: 0.08em;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ss-space-1);
+  padding: 0 var(--ss-space-2);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-full);
+  font-size: var(--ss-text-xs);
+  font-weight: var(--ss-weight-semibold);
+  letter-spacing: var(--ss-tracking-wide);
   text-transform: uppercase;
-  color: var(--text-muted);
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 999px;
-  background: var(--background-secondary);
-  padding: 3px 8px;
+  color: var(--ss-ink-muted);
+}
+
+.ss-recorder-hover[data-state="recording"] {
+  border-color: var(--ss-danger-line);
 }
 
 .ss-recorder-hover[data-state="recording"] .ss-recorder-hover__live {
-  border-color: var(--interactive-accent);
-  color: var(--interactive-accent);
+  border-color: var(--ss-danger-line);
+  color: var(--ss-danger);
+}
+
+.ss-recorder-hover[data-state="recording"] .ss-recorder-hover__live::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: var(--ss-radius-round);
+  background-color: var(--ss-danger);
+  animation: ss-pulse 1.5s var(--ss-ease) infinite;
 }
 
 .ss-recorder-hover__timer {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border: 1px solid var(--background-modifier-border);
-  border-radius: var(--radius-s, 8px);
-  padding: 6px 9px;
-  background: var(--background-secondary);
+  gap: var(--ss-space-2);
+  padding: var(--ss-space-2) var(--ss-space-3);
+  background-color: var(--ss-surface-1);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-sm);
 }
 
 .ss-recorder-hover__timer-label {
-  font-size: 10px;
-  line-height: 1.2;
-  letter-spacing: 0.08em;
+  font-size: var(--ss-text-xs);
+  color: var(--ss-ink-muted);
+  letter-spacing: var(--ss-tracking-wide);
   text-transform: uppercase;
-  color: var(--text-muted);
 }
 
 .ss-recorder-hover__timer-value {
-  font-family: var(--font-monospace);
-  font-size: 20px;
-  font-weight: var(--font-semibold, 600);
-  line-height: 1.1;
-  color: var(--text-normal);
-}
-
-.ss-recorder-hover__status-line {
-  font-size: var(--font-ui-smaller);
-  color: var(--text-muted);
+  font-family: var(--ss-font-mono);
+  font-size: var(--ss-text-2xl);
+  font-weight: var(--ss-weight-semibold);
+  font-variant-numeric: tabular-nums;
 }
 
 .ss-recorder-hover__visualizer-wrap {
-  border: 1px solid var(--background-modifier-border);
-  border-radius: var(--radius-s, 8px);
-  padding: 4px;
-  background: var(--background-secondary);
+  padding: var(--ss-space-2);
+  background-color: var(--ss-surface-sunken);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-sm);
 }
 
 .ss-recorder-hover__visualizer {
+  display: block;
   width: 100%;
   height: 52px;
-  display: block;
-  border-radius: calc(var(--radius-s, 8px) - 2px);
 }

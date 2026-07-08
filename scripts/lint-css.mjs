@@ -79,18 +79,22 @@ const FORBIDDEN_PATTERNS = [
     message: "Bare [data-type=] selector - must only target systemsculpt views",
     severity: "error",
   },
-];
-
-/**
- * Patterns that warn about non-prefixed classes (may need migration)
- */
-const WARNING_PATTERNS = [
   {
-    // Class definitions that don't start with systemsculpt- or ss-
-    pattern: /^\.[a-z][a-z0-9-]*\s*[{,]/,
-    exception: /^\.(systemsculpt-|ss-|theme-|modal\.|is-|has-)/,
-    message: "Non-prefixed class - consider using ss-* or systemsculpt-* prefix",
-    severity: "warning",
+    // Top-level class selectors whose leading class lacks a plugin prefix
+    // (ss-/systemsculpt-) or a state prefix (is-/mod-). By the time a
+    // selector reaches this check, extractSelectors has already stripped
+    // the `{` and split comma lists, so this matches the bare selector
+    // text. Compound selectors that START with a prefixed class or with
+    // [data-type="systemsculpt-*"] scoping never match the `^.` anchor,
+    // so they stay silent by construction.
+    //
+    // Promoted from warning to ERROR once the tree reached zero bare
+    // classes: every top-level class must now carry the design-system
+    // naming (ss-*/systemsculpt-*, or is-*/mod-* state grammar), and the
+    // check:plugin/CI gate fails on any new bare class.
+    pattern: /^\.(?!ss-|systemsculpt-|is-|mod-)[a-z][a-z0-9_-]*/,
+    message: "Non-prefixed class - use an ss-* or systemsculpt-* prefix (state classes: is-*/mod-*)",
+    severity: "error",
   },
 ];
 
@@ -189,20 +193,147 @@ function checkSelector(selectorInfo) {
     }
   }
 
-  // Check warning patterns
-  for (const warn of WARNING_PATTERNS) {
-    if (warn.pattern.test(selector)) {
-      if (!warn.exception || !warn.exception.test(selector)) {
+  return issues;
+}
+
+/* ------------------------------------------------------------------ *
+ * Design-system rules
+ *
+ * The design system (src/css/foundation/tokens.css) is the single source
+ * of visual truth. These rules keep component sheets on the tokens:
+ * no raw colors, tokenized radii/font-sizes/shadows/transitions, z-index
+ * from the layer scale, and `!important` only where a file has a
+ * documented, load-bearing reason (allowlist below).
+ * ------------------------------------------------------------------ */
+
+/** Files exempt from token rules (they DEFINE the tokens/keyframes). */
+const TOKEN_SOURCE_FILES = new Set(["foundation/tokens.css"]);
+
+/** Files allowed to use !important, each for a documented reason. */
+const IMPORTANT_ALLOWLIST = new Set([
+  "foundation/base.css", // .systemsculpt-visually-hidden (a11y, beats inline styles)
+  "components/mermaid.css", // fights Mermaid's inline SVG attributes
+  "components/messages.css", // markdown font-size inheritance + hidden copy button
+  "components/chat-blocks.css", // per-chat hide-tool-activity toggle (#213)
+  "components/resume-chat.css", // beats reading/source-mode content styles
+  "components/floating-widget.css", // mobile pinning beats inline drag positioning
+  "components/quick-edit.css", // mobile pinning beats inline drag positioning
+  "components/slash-commands.css", // mobile positioning beats inline JS placement
+  "components/youtube-canvas.css", // input icon padding vs generic input rules
+  "modals/search.css", // hide Obsidian tooltips while the overlay is open
+  "platform/mobile.css", // force favorites filter visible on mobile
+  "views/studio.css", // edge hover must beat inline SVG strokes; zoom-micro perf
+]);
+
+/** font-size values allowed besides var(--ss-*)/var(--chat-*)/calc/inherit. */
+const FONT_SIZE_LITERAL_ALLOW = new Set([
+  "16px", // iOS: inputs under 16px trigger focus zoom
+  "inherit",
+  "1em",
+]);
+
+const DECLARATION_RULES = [
+  {
+    property: /^(color|background|background-color|border(-\w+)*-color|border|border-top|border-right|border-bottom|border-left|outline|fill|stroke|caret-color|accent-color|text-decoration-color)$/,
+    test: (value) =>
+      /#[0-9a-fA-F]{3,8}\b/.test(value) ||
+      /\b(rgb|rgba|hsl|hsla)\(/.test(value),
+    message: "Raw color (hex/rgb/hsl) — use a --ss-* token or color-mix of tokens",
+  },
+  {
+    property: /^border-radius$/,
+    test: (value) =>
+      !/var\(--ss-radius|^(0|inherit|2px)$|^0 /.test(value.trim()),
+    message: "border-radius must come from the --ss-radius-* scale",
+  },
+  {
+    property: /^font-size$/,
+    test: (value) => {
+      const v = value.trim();
+      if (FONT_SIZE_LITERAL_ALLOW.has(v)) return false;
+      // --ss-studio-text-node-font-size is a runtime contract written by TS.
+      return !/var\(--ss-text|var\(--chat-|var\(--ss-studio-text-node-font-size|^calc\(/.test(v);
+    },
+    message: "font-size must come from the --ss-text-* scale (or the chat font-scale vars)",
+  },
+  {
+    property: /^box-shadow$/,
+    test: (value) => {
+      const v = value.trim();
+      if (v === "none" || v === "inherit") return false;
+      return !/var\(--ss-/.test(v);
+    },
+    message: "box-shadow must use --ss-elevation-*/--ss-ring (or token-based insets)",
+  },
+  {
+    property: /^transition$/,
+    test: (value) => {
+      const v = value.trim();
+      if (v === "none") return false;
+      // Any raw duration literal (e.g. 0.2s / 150ms) outside tokens.
+      return /(^|[\s,])\d+(\.\d+)?m?s\b/.test(v) && !/0\.01ms/.test(v);
+    },
+    message: "transition durations must use var(--ss-dur-*)",
+  },
+  {
+    property: /^z-index$/,
+    test: (value) => {
+      const v = value.trim();
+      if (/var\(--ss-z|^calc\(/.test(v)) return false;
+      const n = Number(v);
+      // Studio canvas layer tiers (0-20) are a documented local scale.
+      return !(Number.isInteger(n) && n >= -1 && n <= 20);
+    },
+    message: "z-index must use the --ss-z-* layer scale (or studio's 0-20 canvas tiers)",
+  },
+];
+
+/**
+ * Lint declarations inside a CSS file against the design-system rules.
+ */
+function checkDeclarations(content, relPath) {
+  const issues = [];
+  const normalized = relPath.replace(/\\/g, "/");
+  const cssPath = normalized.replace(/^src\/css\//, "");
+
+  if (TOKEN_SOURCE_FILES.has(cssPath)) return issues;
+
+  const noComments = content.replace(/\/\*[\s\S]*?\*\//g, (m) =>
+    m.replace(/[^\n]/g, " ")
+  );
+  const lines = noComments.split("\n");
+
+  lines.forEach((line, idx) => {
+    const lineNum = idx + 1;
+    const decl = line.match(/^\s*([a-z-]+)\s*:\s*([^;{}]+);?\s*$/);
+
+    if (line.includes("!important") && !IMPORTANT_ALLOWLIST.has(cssPath)) {
+      issues.push({
+        severity: "error",
+        message:
+          "!important is not allowed here — remove it or add this file to IMPORTANT_ALLOWLIST with a documented reason",
+        selector: line.trim(),
+        line: lineNum,
+        file: relPath,
+      });
+    }
+
+    if (!decl) return;
+    const [, property, rawValue] = decl;
+    const value = rawValue.replace(/!important/g, "").trim();
+
+    for (const rule of DECLARATION_RULES) {
+      if (rule.property.test(property) && rule.test(value)) {
         issues.push({
-          severity: warn.severity,
-          message: warn.message,
-          selector,
-          line,
-          file,
+          severity: "error",
+          message: rule.message,
+          selector: `${property}: ${value}`,
+          line: lineNum,
+          file: relPath,
         });
       }
     }
-  }
+  });
 
   return issues;
 }
@@ -235,6 +366,12 @@ export function lintCssDirectory({ cssDir }) {
         if (issue.severity === "warning") warningCount++;
         issues.push(issue);
       }
+    }
+
+    for (const issue of checkDeclarations(content, relPath)) {
+      if (issue.severity === "error") errorCount++;
+      if (issue.severity === "warning") warningCount++;
+      issues.push(issue);
     }
   }
 

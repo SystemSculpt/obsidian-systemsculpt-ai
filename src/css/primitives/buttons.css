@@ -1,0 +1,185 @@
+/**
+ * SystemSculpt Buttons
+ *
+ * The one button system. Three variants (default, primary, danger),
+ * two sizes, one state grammar:
+ *   hover  → surface tint + stronger hairline
+ *   active → gentle press (scale), deeper tint
+ *   focus  → token ring
+ *   busy   → spinner replaces label
+ *   selected (.ss-active) → accent tint, accent hairline
+ */
+
+.ss-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--ss-space-2);
+  min-height: var(--ss-control-height);
+  padding: 0 var(--ss-space-4);
+  box-sizing: border-box;
+  flex-shrink: 0;
+
+  font-family: var(--ss-font);
+  font-size: var(--ss-text-base);
+  font-weight: var(--ss-weight-medium);
+  line-height: var(--ss-leading-tight);
+  color: var(--ss-ink);
+
+  background-color: var(--ss-surface-1);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-sm);
+  box-shadow: none;
+  cursor: pointer;
+
+  transition: var(--ss-transition-colors), transform var(--ss-dur-fast) var(--ss-ease);
+}
+
+.ss-button:hover {
+  background-color: var(--ss-surface-2);
+  border-color: var(--ss-line-strong);
+}
+
+.ss-button:active {
+  background-color: var(--ss-surface-3);
+  transform: scale(0.98);
+}
+
+.ss-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+/* Icon inside a button */
+.ss-button__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ss-button__icon svg {
+  width: var(--ss-icon-size);
+  height: var(--ss-icon-size);
+}
+
+/* ------------------------------------------------------------------ *
+ * Variants
+ * ------------------------------------------------------------------ */
+.ss-button--primary,
+.ss-button.mod-cta {
+  background-color: var(--ss-accent);
+  border-color: var(--ss-accent);
+  color: var(--ss-ink-on-accent);
+  box-shadow: var(--ss-elevation-1);
+}
+
+.ss-button--primary:hover,
+.ss-button.mod-cta:hover {
+  background-color: var(--ss-accent-hover);
+  border-color: var(--ss-accent-hover);
+}
+
+.ss-button--primary:active,
+.ss-button.mod-cta:active {
+  background-color: var(--ss-accent-hover);
+}
+
+.ss-button--secondary {
+  background-color: var(--ss-surface-1);
+}
+
+.ss-button--danger {
+  background-color: var(--ss-danger-tint);
+  border-color: var(--ss-danger-line);
+  color: var(--ss-danger);
+}
+
+.ss-button--danger:hover {
+  background-color: var(--ss-danger);
+  border-color: var(--ss-danger);
+  color: var(--ss-ink-on-accent);
+}
+
+.ss-button--danger:active {
+  background-color: var(--ss-danger);
+}
+
+.ss-button.mod-warning {
+  background-color: var(--ss-warning-tint);
+  border-color: var(--ss-warning-line);
+  color: var(--ss-warning);
+}
+
+.ss-button.mod-warning:hover {
+  background-color: var(--ss-warning);
+  border-color: var(--ss-warning);
+  color: var(--ss-ink-on-accent);
+}
+
+/* ------------------------------------------------------------------ *
+ * Sizes
+ * ------------------------------------------------------------------ */
+.ss-button--small {
+  min-height: var(--ss-control-height-sm);
+  padding: 0 var(--ss-space-3);
+  font-size: var(--ss-text-sm);
+  gap: var(--ss-space-1);
+}
+
+.ss-button--small .ss-button__icon svg {
+  width: var(--ss-icon-size-sm);
+  height: var(--ss-icon-size-sm);
+}
+
+/* ------------------------------------------------------------------ *
+ * States
+ * ------------------------------------------------------------------ */
+.ss-button.ss-active {
+  background-color: var(--ss-accent-tint-strong);
+  border-color: var(--ss-line-accent);
+  color: var(--ss-ink-accent);
+}
+
+.ss-button.ss-loading {
+  position: relative;
+  color: transparent;
+  pointer-events: none;
+}
+
+.ss-button.ss-loading::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: var(--ss-icon-size);
+  height: var(--ss-icon-size);
+  border: 2px solid color-mix(in srgb, var(--ss-ink) 20%, transparent);
+  border-top-color: var(--ss-ink);
+  border-radius: var(--ss-radius-round);
+  animation: ss-spin 0.8s linear infinite;
+}
+
+.ss-button--primary.ss-loading::after,
+.ss-button.mod-cta.ss-loading::after {
+  border-color: color-mix(in srgb, var(--ss-ink-on-accent) 30%, transparent);
+  border-top-color: var(--ss-ink-on-accent);
+}
+
+/* ------------------------------------------------------------------ *
+ * Arrangement
+ * ------------------------------------------------------------------ */
+.ss-button-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ss-space-2);
+  justify-content: flex-end;
+  align-items: center;
+}
+
+/* Keyboard shortcut hint inside buttons/menus */
+.systemsculpt-shortcut-hint {
+  margin-left: var(--ss-space-1);
+  font-size: var(--ss-text-xs);
+  color: var(--ss-ink-faint);
+}

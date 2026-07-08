@@ -1,0 +1,319 @@
+/**
+ * Chat structured blocks — inline collapsibles (reasoning / tool calls),
+ * the activity drawer, the monospace tree block, and tool-call previews.
+ * TS: src/views/chatview/renderers/, InlineCollapsibleBlock.ts.
+ */
+
+/* ------------------------------------------------------------------ *
+ * Inline collapsible (current chronological block)
+ * ------------------------------------------------------------------ */
+.systemsculpt-inline-collapsible {
+  margin: var(--ss-space-2) 0;
+  background-color: var(--ss-surface-0);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-md);
+  overflow: hidden;
+  font-size: inherit;
+}
+
+.systemsculpt-inline-collapsible-header {
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-2);
+  padding: var(--ss-space-2) var(--ss-space-3);
+  cursor: pointer;
+  user-select: none;
+  transition: var(--ss-transition-colors);
+  font-size: inherit;
+}
+
+.systemsculpt-inline-collapsible-header:hover {
+  background-color: var(--ss-state-hover);
+}
+
+.systemsculpt-inline-collapsible-icon {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  color: var(--ss-ink-muted);
+}
+
+.systemsculpt-inline-reasoning .systemsculpt-inline-collapsible-icon {
+  color: var(--ss-ink-accent);
+}
+
+.systemsculpt-inline-tool_call .systemsculpt-inline-collapsible-icon {
+  color: var(--ss-warning);
+}
+
+.systemsculpt-inline-collapsible.is-streaming .systemsculpt-inline-collapsible-icon {
+  animation: ss-pulse 1.2s var(--ss-ease) infinite;
+}
+
+.systemsculpt-inline-collapsible-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--ss-text-sm);
+  font-weight: var(--ss-weight-medium);
+  color: var(--ss-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.systemsculpt-inline-collapsible-status {
+  flex-shrink: 0;
+  font-size: var(--ss-text-xs);
+  color: var(--ss-ink-muted);
+}
+
+.systemsculpt-inline-collapsible-status:empty {
+  display: none;
+}
+
+.systemsculpt-inline-collapsible-status.is-pending {
+  color: var(--ss-ink-faint);
+}
+
+.systemsculpt-inline-collapsible-status.is-success {
+  color: var(--ss-success);
+}
+
+.systemsculpt-inline-collapsible-status.is-error {
+  color: var(--ss-danger);
+}
+
+.systemsculpt-inline-collapsible-chevron {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  color: var(--ss-ink-faint);
+  transition: transform var(--ss-dur-fast) var(--ss-ease);
+}
+
+.systemsculpt-inline-collapsible.is-collapsed .systemsculpt-inline-collapsible-chevron {
+  transform: rotate(-90deg);
+}
+
+.systemsculpt-inline-collapsible-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ss-space-2);
+  padding: var(--ss-space-2) var(--ss-space-3) var(--ss-space-3);
+  border-top: 1px solid var(--ss-line);
+}
+
+.systemsculpt-inline-collapsible.is-collapsed .systemsculpt-inline-collapsible-content {
+  display: none;
+}
+
+/* Reasoning body */
+.systemsculpt-inline-reasoning-text {
+  max-height: 120px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  font-size: var(--ss-text-sm);
+  color: var(--ss-ink-muted);
+  line-height: var(--ss-leading-base);
+}
+
+.systemsculpt-reasoning-wrapper {
+  font-size: inherit;
+}
+
+.systemsculpt-reasoning-scroll-container {
+  width: 100%;
+  max-height: 100px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable both-edges;
+  padding: var(--ss-space-2);
+  background-color: var(--ss-surface-sunken);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-sm);
+}
+
+.systemsculpt-reasoning-text {
+  font-family: var(--ss-font);
+  white-space: normal;
+  user-select: text;
+}
+
+.systemsculpt-reasoning-text > :first-child {
+  margin-top: 0;
+}
+
+.systemsculpt-reasoning-text > :last-child {
+  margin-bottom: 0;
+}
+
+/* Compact verbatim rendering — added by MessageRenderer.ts after the
+   reasoning markdown is rendered. */
+.systemsculpt-reasoning-compact {
+  line-height: 1.35;
+}
+
+.systemsculpt-reasoning-compact > * {
+  margin-top: 0.35em;
+  margin-bottom: 0.35em;
+}
+
+.systemsculpt-reasoning-compact > :first-child {
+  margin-top: 0;
+}
+
+.systemsculpt-reasoning-compact > :last-child {
+  margin-bottom: 0;
+}
+
+.systemsculpt-inline-tool-status,
+.systemsculpt-inline-tool-line,
+.systemsculpt-inline-tool-summary {
+  font-size: var(--ss-text-sm);
+  color: var(--ss-ink-muted);
+}
+
+.systemsculpt-inline-tool-error {
+  font-size: var(--ss-text-sm);
+  color: var(--ss-danger);
+}
+
+/* ------------------------------------------------------------------ *
+ * Monospace tree block
+ * ------------------------------------------------------------------ */
+.systemsculpt-chat-structured-block {
+  font-family: var(--ss-font-mono);
+  font-size: inherit;
+  margin: var(--ss-space-2) 0;
+}
+
+.systemsculpt-chat-structured-header {
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-1);
+  font-size: inherit;
+}
+
+.systemsculpt-chat-structured-title {
+  font-weight: var(--ss-weight-medium);
+  font-size: inherit;
+}
+
+.systemsculpt-chat-structured-bullet {
+  display: inline-block;
+  width: 1.6ch;
+  flex-shrink: 0;
+  color: var(--ss-ink-muted);
+}
+
+.systemsculpt-chat-structured-bullet.is-active {
+  color: var(--ss-accent);
+}
+
+.systemsculpt-chat-structured-bullet.is-active svg {
+  animation: ss-spin 1s linear infinite;
+}
+
+.systemsculpt-chat-structured-bullet.is-failed {
+  color: var(--ss-danger);
+}
+
+.systemsculpt-chat-structured-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: var(--ss-space-1);
+}
+
+.systemsculpt-chat-tree--empty .systemsculpt-chat-structured-lines {
+  display: none;
+}
+
+.systemsculpt-chat-structured-line {
+  display: flex;
+  align-items: baseline;
+  gap: var(--ss-space-1);
+  font-size: inherit;
+}
+
+.systemsculpt-chat-structured-line[data-state="failed"] {
+  color: var(--ss-danger);
+}
+
+.systemsculpt-chat-structured-line-prefix {
+  min-width: 4ch;
+  text-align: right;
+  flex-shrink: 0;
+  color: var(--ss-ink-faint);
+}
+
+.systemsculpt-chat-structured-line-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: inherit;
+}
+.systemsculpt-chat-structured-label {
+  color: var(--ss-ink);
+}
+.systemsculpt-chat-structured-detail {
+  color: var(--ss-ink-muted);
+}
+
+/* Inline operations preview rendered under a tool-call line
+   (renderOperationsInlinePreview in toolCallPreview.ts) */
+.systemsculpt-inline-ops {
+  font-size: var(--ss-text-xs);
+  color: var(--ss-ink-muted);
+}
+
+.systemsculpt-inline-ops__body ul {
+  margin: var(--ss-space-1) 0;
+  padding-left: var(--ss-space-4);
+}
+
+.systemsculpt-chat-structured-line-actions {
+  display: inline-flex;
+  gap: var(--ss-space-1);
+  flex-shrink: 0;
+  font-size: inherit;
+}
+
+.systemsculpt-tool-call-group[data-group-status="failed"] .systemsculpt-chat-structured-title {
+  color: var(--ss-danger);
+}
+
+/* Per-chat "hide tool activity" toggle (#213) — must beat everything */
+.systemsculpt-hide-tool-activity .systemsculpt-tool-call-group {
+  display: none !important;
+}
+
+/* Open-file button on tool rows */
+.systemsculpt-tool-call-open-file-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--ss-radius-xs);
+  color: var(--ss-ink-muted);
+  cursor: pointer;
+  transition: var(--ss-transition-colors);
+}
+
+.systemsculpt-tool-call-open-file-btn:hover {
+  background-color: var(--ss-state-hover);
+  color: var(--ss-ink-accent);
+}
+
+/* Inline diff */
+.systemsculpt-inline-diff {
+  margin-top: var(--ss-space-2);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-sm);
+  overflow: hidden;
+}
+
+.systemsculpt-inline-diff__body {
+  max-height: clamp(120px, 30vh, 240px);
+  overflow-y: auto;
+}

@@ -1,0 +1,318 @@
+/**
+ * Janitor modal — sectioned vault-cleanup dashboard.
+ * Root: `.ss-janitor-modal.ss-modal--large` (JanitorModal.ts).
+ */
+
+.ss-janitor-modal {
+  max-width: 800px;
+}
+
+.ss-janitor-modal .ss-modal__content {
+  overflow-y: auto;
+  padding: var(--ss-space-5);
+}
+
+.ss-janitor-sections {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ss-space-5);
+}
+
+.ss-janitor-section {
+  background-color: var(--ss-surface-1);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-md);
+  overflow: hidden;
+}
+
+.ss-janitor-section:focus-within {
+  border-color: var(--ss-line-accent);
+}
+
+.ss-janitor-section-header {
+  padding: var(--ss-space-4) var(--ss-space-5);
+  border-bottom: 1px solid var(--ss-line);
+}
+
+.ss-janitor-section-title {
+  font-size: var(--ss-text-lg);
+  font-weight: var(--ss-weight-semibold);
+  letter-spacing: var(--ss-tracking-tight);
+}
+
+.ss-janitor-section-description {
+  margin-top: var(--ss-space-1);
+  font-size: var(--ss-text-sm);
+  color: var(--ss-ink-muted);
+}
+
+.ss-janitor-section-content {
+  position: relative;
+  padding: var(--ss-space-5);
+}
+
+/* Loading overlay */
+.ss-janitor-loading-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: color-mix(in srgb, var(--ss-surface-0) 80%, transparent);
+  z-index: var(--ss-z-sticky);
+}
+
+.ss-janitor-loading-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--ss-space-2);
+}
+
+.ss-janitor-loading-icon svg {
+  animation: ss-spin 1s linear infinite;
+}
+
+.ss-janitor-loading-title {
+  font-weight: var(--ss-weight-medium);
+}
+
+.ss-janitor-loading-subtitle,
+.ss-janitor-loading-text {
+  font-size: var(--ss-text-sm);
+  color: var(--ss-ink-muted);
+}
+
+.ss-janitor-error-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.ss-janitor-stat-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ss-space-0);
+  min-width: 0;
+}
+
+.ss-janitor-preview-count {
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--ss-weight-medium);
+}
+
+.ss-janitor-main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ss-space-4);
+}
+
+/* Error */
+.ss-janitor-error {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--ss-space-2);
+  padding: var(--ss-space-3);
+  background-color: var(--ss-danger-tint);
+  border: 1px solid var(--ss-danger-line);
+  border-radius: var(--ss-radius-sm);
+}
+
+.ss-janitor-error-icon {
+  color: var(--ss-danger);
+}
+
+.ss-janitor-error-title {
+  font-weight: var(--ss-weight-semibold);
+  color: var(--ss-danger);
+}
+
+.ss-janitor-error-message {
+  font-size: var(--ss-text-sm);
+  color: var(--ss-ink-muted);
+}
+
+/* Stats */
+.ss-janitor-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: var(--ss-space-3);
+}
+
+.ss-janitor-stat-card {
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-3);
+  padding: var(--ss-space-3);
+  background-color: var(--ss-surface-0);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-sm);
+}
+
+.ss-janitor-stat-card:focus-within {
+  border-color: var(--ss-line-accent);
+}
+
+.ss-janitor-stat-icon {
+  color: var(--ss-ink-muted);
+}
+
+.ss-janitor-stat-card--warning .ss-janitor-stat-icon {
+  color: var(--ss-warning);
+}
+
+.ss-janitor-stat-card--success .ss-janitor-stat-icon {
+  color: var(--ss-success);
+}
+
+.ss-janitor-stat-card--muted {
+  opacity: 0.7;
+}
+
+.ss-janitor-stat-value {
+  font-size: var(--ss-text-xl);
+  font-weight: var(--ss-weight-semibold);
+  font-variant-numeric: tabular-nums;
+}
+
+.ss-janitor-stat-label {
+  font-size: var(--ss-text-xs);
+  color: var(--ss-ink-muted);
+  letter-spacing: var(--ss-tracking-wide);
+  text-transform: uppercase;
+}
+
+/* Actions */
+.ss-janitor-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--ss-space-3);
+  margin-top: var(--ss-space-4);
+}
+
+.ss-janitor-actions .ss-button {
+  min-width: 140px;
+}
+
+.ss-janitor-actions .ss-button.ss-disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+/* Confirmation preview */
+.ss-janitor-preview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ss-space-3);
+}
+
+.ss-janitor-preview-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ss-space-2);
+}
+
+.ss-janitor-preview-header {
+  margin-bottom: var(--ss-space-2);
+  font-size: var(--ss-text-sm);
+  color: var(--ss-ink-muted);
+}
+
+.ss-janitor-preview-list {
+  max-height: 300px;
+  overflow-y: auto;
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-sm);
+}
+
+.ss-janitor-preview-item {
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-2);
+  padding: var(--ss-space-2) var(--ss-space-3);
+  border-bottom: 1px solid var(--ss-line);
+  transition: var(--ss-transition-colors);
+}
+
+.ss-janitor-preview-item:last-child {
+  border-bottom: none;
+}
+
+.ss-janitor-preview-item:hover,
+.ss-janitor-preview-item:focus-within {
+  background-color: var(--ss-state-hover);
+}
+
+.ss-janitor-preview-icon {
+  flex-shrink: 0;
+  color: var(--ss-ink-muted);
+}
+
+.ss-janitor-preview-path {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: var(--ss-text-sm);
+}
+
+.ss-janitor-preview-size {
+  flex-shrink: 0;
+  padding: 0 var(--ss-space-2);
+  border-radius: var(--ss-radius-full);
+  background-color: var(--ss-surface-2);
+  font-size: var(--ss-text-xs);
+  color: var(--ss-ink-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.ss-janitor-preview-more {
+  padding: var(--ss-space-2) var(--ss-space-3);
+  font-size: var(--ss-text-sm);
+  color: var(--ss-ink-faint);
+  text-align: center;
+}
+
+.ss-janitor-preview-section-header {
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-2);
+  margin: var(--ss-space-3) 0 var(--ss-space-2);
+}
+
+.ss-janitor-preview-section-icon {
+  color: var(--ss-ink-muted);
+}
+
+.ss-janitor-preview-section-title {
+  font-weight: var(--ss-weight-semibold);
+  font-size: var(--ss-text-sm);
+}
+
+/* Mobile / accessibility */
+@media (max-width: 768px) {
+  .ss-janitor-modal {
+    width: 95vw;
+  }
+
+  .ss-janitor-stats {
+    grid-template-columns: 1fr;
+  }
+
+  .ss-janitor-actions {
+    flex-direction: column;
+  }
+
+  .ss-janitor-preview-path {
+    white-space: normal;
+    word-break: break-all;
+  }
+}
+
+@media (prefers-contrast: more) {
+  .ss-janitor-section,
+  .ss-janitor-stat-card,
+  .ss-janitor-preview-list {
+    border-width: 2px;
+  }
+}

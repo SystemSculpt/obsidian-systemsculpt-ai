@@ -81,6 +81,72 @@ test("lintCssDirectory passes properly scoped plugin selectors (the gate stays g
   assert.equal(report.errorCount, 0, "scoped plugin selectors must not error");
 });
 
+test("lintCssDirectory errors on a bare non-prefixed top-level class", () => {
+  const dir = createTempCssDir();
+  // A class with no ss-/systemsculpt- prefix leaks into every matching
+  // element in the vault (e.g. `.mermaid` restyled EVERY mermaid diagram).
+  // The migration finished — the whole tree is prefixed — so this is now a
+  // hard ERROR (permanent CI guard), no longer a gradual-migration warning.
+  writeCss(
+    dir,
+    "bare-class.css",
+    [
+      ".mermaid {",
+      "  position: relative;",
+      "}",
+      "",
+    ].join("\n")
+  );
+
+  const report = lintCssDirectory({ cssDir: dir });
+
+  assert.ok(
+    report.errorCount > 0,
+    `a bare class must be an error, got ${report.errorCount} error(s)`
+  );
+  assert.ok(
+    report.issues.some(
+      issue => issue.severity === "error" && issue.selector === ".mermaid"
+    ),
+    "expected an error-severity issue for the .mermaid selector"
+  );
+});
+
+test("lintCssDirectory stays silent on prefixed and prefix-scoped classes", () => {
+  const dir = createTempCssDir();
+  writeCss(
+    dir,
+    "prefixed.css",
+    [
+      ".ss-card {",
+      "  padding: 0;",
+      "}",
+      ".systemsculpt-message-content .mermaid {",
+      "  position: relative;",
+      "}",
+      ".is-mobile .ss-card {",
+      "  padding: 0;",
+      "}",
+      '.workspace-leaf-content[data-type="systemsculpt-chat-view"] .mermaid {',
+      "  position: relative;",
+      "}",
+      "",
+    ].join("\n")
+  );
+
+  const report = lintCssDirectory({ cssDir: dir });
+
+  assert.equal(report.errorCount, 0, "prefixed/scoped selectors must not error");
+  assert.equal(
+    report.warningCount,
+    0,
+    `prefixed/scoped selectors must not warn; issues:\n` +
+      report.issues
+        .map(issue => `  ${issue.file}:${issue.line} ${issue.selector} — ${issue.message}`)
+        .join("\n")
+  );
+});
+
 test("the shipped src/css tree passes the linter (gate is green today)", () => {
   const cssDir = path.join(process.cwd(), "src", "css");
   const report = lintCssDirectory({ cssDir });
@@ -91,6 +157,15 @@ test("the shipped src/css tree passes the linter (gate is green today)", () => {
     `src/css must stay clean so the gate is green; errors:\n` +
       report.issues
         .filter(issue => issue.severity === "error")
+        .map(issue => `  ${issue.file}:${issue.line} ${issue.message}`)
+        .join("\n")
+  );
+  assert.equal(
+    report.warningCount,
+    0,
+    `src/css must stay warning-free too; warnings:\n` +
+      report.issues
+        .filter(issue => issue.severity === "warning")
         .map(issue => `  ${issue.file}:${issue.line} ${issue.message}`)
         .join("\n")
   );
