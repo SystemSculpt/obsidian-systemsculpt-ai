@@ -1044,11 +1044,16 @@
   min-width: 0;
 }
 
-.ss-studio-group-tag-button,
-.ss-studio-group-tag-input,
-.ss-studio-group-tag-action,
-.ss-studio-group-align-button,
-.ss-studio-group-color-button {
+/* All button rules in the tag row are scoped under .ss-studio-group-tag so
+ * they carry (0,2,0) specificity. Obsidian's native
+ * `button:not(.clickable-icon)` rule is (0,1,1) and silently overrides any
+ * single-class background/box-shadow/color — that leak is exactly what made
+ * the color-picker swatches render as gray pills. */
+.ss-studio-group-tag .ss-studio-group-tag-button,
+.ss-studio-group-tag .ss-studio-group-tag-input,
+.ss-studio-group-tag .ss-studio-group-tag-action,
+.ss-studio-group-tag .ss-studio-group-align-button,
+.ss-studio-group-tag .ss-studio-group-color-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1064,26 +1069,26 @@
   transition: var(--ss-transition-colors);
 }
 
-.ss-studio-group-tag-button:hover,
-.ss-studio-group-tag-action:hover,
-.ss-studio-group-align-button:hover,
-.ss-studio-group-color-button:hover {
+.ss-studio-group-tag .ss-studio-group-tag-button:hover,
+.ss-studio-group-tag .ss-studio-group-tag-action:hover,
+.ss-studio-group-tag .ss-studio-group-align-button:hover,
+.ss-studio-group-tag .ss-studio-group-color-button:hover {
   background-color: var(--ss-surface-2);
   color: var(--ss-ink);
 }
 
-.ss-studio-group-tag-input {
+.ss-studio-group-tag .ss-studio-group-tag-input {
   cursor: text;
   color: var(--ss-ink);
 }
 
-.ss-studio-group-tag-input:focus-visible {
+.ss-studio-group-tag .ss-studio-group-tag-input:focus-visible {
   outline: none;
   border-color: var(--ss-accent);
   box-shadow: var(--ss-ring);
 }
 
-.ss-studio-group-color-button {
+.ss-studio-group-tag .ss-studio-group-color-button {
   width: 28px;
   padding: 0;
 }
@@ -1112,21 +1117,25 @@
   z-index: 8;
 }
 
-.ss-studio-group-color-swatch {
+/* Scoped under .ss-studio-group-tag — see the specificity note on the tag
+ * button rules above; Obsidian's native button background otherwise paints
+ * every swatch gray. */
+.ss-studio-group-tag .ss-studio-group-color-swatch {
   aspect-ratio: 1;
   width: 18px;
   border-radius: var(--ss-radius-round);
   border: 1px solid var(--ss-line-strong);
   background: var(--ss-studio-swatch-color, var(--ss-ink-muted));
+  box-shadow: none;
   cursor: pointer;
   transition: transform var(--ss-dur-fast) var(--ss-ease-spring);
 }
 
-.ss-studio-group-color-swatch:hover {
+.ss-studio-group-tag .ss-studio-group-color-swatch:hover {
   transform: scale(1.15);
 }
 
-.ss-studio-group-color-swatch.is-active {
+.ss-studio-group-tag .ss-studio-group-color-swatch.is-active {
   box-shadow: var(--ss-ring);
 }
 

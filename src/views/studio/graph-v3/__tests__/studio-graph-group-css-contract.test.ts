@@ -28,4 +28,22 @@ describe("Studio group CSS contract", () => {
       /background-color:[^;]*var\(--ss-studio-group-accent\)[^;]*;/
     );
   });
+
+  it("keeps swatch/tag button styling at two-class specificity to beat Obsidian's button rule", () => {
+    // Obsidian's app stylesheet ships `button:not(.clickable-icon)` at
+    // (0,1,1) specificity, which silently overrides any single-class
+    // background/box-shadow/color in plugin CSS. The color-picker swatches
+    // rendered as gray pills because of exactly this. Every swatch rule must
+    // stay scoped under .ss-studio-group-tag (0,2,0).
+    const css = readStudioCss();
+
+    const scopedSwatchRule = readRuleBody(
+      css,
+      /\.ss-studio-group-tag \.ss-studio-group-color-swatch\s*\{(?<body>[^}]*)\}/s
+    );
+    expect(scopedSwatchRule).toMatch(/background:[^;]*var\(--ss-studio-swatch-color\)?/);
+
+    // No bare single-class swatch rule may reintroduce the losing selector.
+    expect(css).not.toMatch(/(^|[^ \w-])\.ss-studio-group-color-swatch\s*\{/m);
+  });
 });
