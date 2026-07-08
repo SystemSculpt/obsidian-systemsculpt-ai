@@ -651,7 +651,7 @@ Raw transcript:`,
   respectReducedMotion: true,
   openAiApiKey: "",
 
-  imageGenerationDefaultModelId: "openai/gpt-5-image-mini",
+  imageGenerationDefaultModelId: "",
   imageGenerationLastUsedModelId: "",
   imageGenerationLastUsedCount: 1,
   imageGenerationLastUsedAspectRatio: "",

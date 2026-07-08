@@ -97,12 +97,14 @@ function resolveStudioImageModelOptions(
         continue;
       }
       const summary = normalizeText(model.pricing?.summary);
+      const hint = normalizeText(model.hint);
+      const description = [hint, summary].filter((part) => part.length > 0).join(" • ");
       options.push({
         value: id,
         label: normalizeText(model.label) || id,
-        description: summary || undefined,
+        description: description || undefined,
         badge: normalizeText(model.provider) || undefined,
-        keywords: [id, normalizeText(model.label), normalizeText(model.provider)].filter(
+        keywords: [id, normalizeText(model.label), normalizeText(model.provider), hint].filter(
           (entry) => entry.length > 0
         ),
         providerAuthenticated: authenticated,

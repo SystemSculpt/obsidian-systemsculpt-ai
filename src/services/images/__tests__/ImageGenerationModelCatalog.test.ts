@@ -21,7 +21,7 @@ describe("ImageGenerationModelCatalog", () => {
   });
 
   it("resolves curated model details by id", () => {
-    const model = getCuratedImageGenerationModel("openai/gpt-5-image-mini");
+    const model = getCuratedImageGenerationModel("google/gemini-3.1-flash-image");
     expect(model).not.toBeNull();
     expect(model?.supportsImageInput).toBe(true);
   });
@@ -34,29 +34,29 @@ describe("ImageGenerationModelCatalog", () => {
   });
 
   it("formats option text with id and pricing summary", () => {
-    const model = getCuratedImageGenerationModel("openai/gpt-5-image-mini");
+    const model = getCuratedImageGenerationModel("google/gemini-3.1-flash-image");
     expect(model).not.toBeNull();
     const text = formatCuratedImageModelOptionText(model!);
-    expect(text).toContain("OpenAI GPT-5 Image Mini");
-    expect(text).not.toContain("openai/gpt-5-image-mini");
-    expect(text).toContain("$0.03");
+    expect(text).toContain("Google Nano Banana 2");
+    expect(text).not.toContain("google/gemini-3.1-flash-image");
+    expect(text).toContain("$0.067");
     expect(text).toContain("cr/img");
   });
 
   it("prioritizes common supported aspect ratios for a model", () => {
-    const ratios = getSupportedImageAspectRatios("openai/gpt-5-image-mini");
+    const ratios = getSupportedImageAspectRatios("google/gemini-3.1-flash-image");
     expect(ratios[0]).toBe("16:9");
     expect(ratios).toContain("1:1");
     expect(ratios).toContain("9:16");
   });
 
   it("returns top recommended aspect ratios", () => {
-    const ratios = getRecommendedImageAspectRatios("openai/gpt-5-image-mini");
+    const ratios = getRecommendedImageAspectRatios("google/gemini-3.1-flash-image");
     expect(ratios).toEqual(["16:9", "1:1", "9:16"]);
   });
 
   it("returns model default aspect ratio when supported", () => {
-    const ratio = getDefaultImageAspectRatio("openai/gpt-5-image-mini");
+    const ratio = getDefaultImageAspectRatio("google/gemini-3.1-flash-image");
     expect(ratio).toBe("1:1");
   });
 
@@ -108,16 +108,16 @@ describe("ImageGenerationModelCatalog", () => {
   it("uses server aspect ratio metadata for curated model constraints", () => {
     const serverModels: ImageGenerationServerCatalogModel[] = [
       {
-        id: "openai/gpt-5-image-mini",
+        id: "google/gemini-3.1-flash-image",
         allowed_aspect_ratios: ["1:1", "16:9"],
         default_aspect_ratio: "16:9",
       },
     ];
 
-    const ratios = getSupportedImageAspectRatios("openai/gpt-5-image-mini", serverModels);
+    const ratios = getSupportedImageAspectRatios("google/gemini-3.1-flash-image", serverModels);
     expect(ratios).toContain("16:9");
     expect(ratios).toContain("1:1");
-    expect(getDefaultImageAspectRatio("openai/gpt-5-image-mini", serverModels)).toBe("16:9");
+    expect(getDefaultImageAspectRatio("google/gemini-3.1-flash-image", serverModels)).toBe("16:9");
   });
 
   it("merges preferred and supplemental server catalogs by id", () => {
@@ -174,9 +174,9 @@ describe("ImageGenerationModelCatalog", () => {
       },
     ]);
     const catalog = resolveImageGenerationModelCatalog(mergedServerCatalog);
-    const gpt5Mini = catalog.find((model) => model.id === "openai/gpt-5-image-mini");
+    const nanoBanana2 = catalog.find((model) => model.id === "google/gemini-3.1-flash-image");
     const riverflow = catalog.find((model) => model.id === "sourceful/riverflow-v2-fast");
-    expect(gpt5Mini?.supportsGeneration).toBe(false);
+    expect(nanoBanana2?.supportsGeneration).toBe(false);
     expect(riverflow?.supportsGeneration).toBe(false);
   });
 });

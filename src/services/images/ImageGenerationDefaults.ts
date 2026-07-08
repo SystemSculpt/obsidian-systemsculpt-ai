@@ -3,6 +3,7 @@ import type { SystemSculptSettings } from "../../types";
 import {
   DEFAULT_IMAGE_GENERATION_MODEL_ID,
   getDefaultImageAspectRatio,
+  RETIRED_IMAGE_GENERATION_MODEL_IDS,
   type ImageGenerationServerCatalogModel,
 } from "./ImageGenerationModelCatalog";
 
@@ -38,7 +39,11 @@ function clampImageCount(value: number): number {
 }
 
 function sanitizeModelId(value: unknown): string {
-  return String(value || "").trim();
+  const id = String(value || "").trim();
+  // Persisted defaults/last-used values can outlive the catalog. Retired ids
+  // resolve as unset so the fallback chain lands on a current model instead
+  // of a guaranteed server-side invalid_model rejection.
+  return RETIRED_IMAGE_GENERATION_MODEL_IDS.has(id) ? "" : id;
 }
 
 function sanitizeAspectRatio(value: unknown): string {

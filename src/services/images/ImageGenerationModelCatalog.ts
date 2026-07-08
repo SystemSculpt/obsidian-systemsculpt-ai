@@ -1,4 +1,19 @@
-export const DEFAULT_IMAGE_GENERATION_MODEL_ID = "openai/gpt-5-image-mini" as const;
+export const DEFAULT_IMAGE_GENERATION_MODEL_ID = "google/gemini-3.1-flash-image" as const;
+
+/**
+ * Model ids we previously offered and have since retired (superseded models,
+ * ids the provider shut down, or models no longer routed by the server).
+ * Persisted settings/last-used values pointing at these are treated as unset
+ * so defaults fall back to a current model instead of failing server-side.
+ */
+export const RETIRED_IMAGE_GENERATION_MODEL_IDS: ReadonlySet<string> = new Set([
+  "google/gemini-3-pro-image-preview",
+  "google/gemini-3-pro-image",
+  "google/gemini-2.5-flash-image",
+  "openai/gpt-5-image",
+  "openai/gpt-5-image-mini",
+  "black-forest-labs/flux.2-pro",
+]);
 
 export const COMMON_IMAGE_ASPECT_RATIOS = ["16:9", "1:1", "9:16", "4:3", "3:4", "3:2", "2:3"] as const;
 export const RECOMMENDED_IMAGE_ASPECT_RATIOS = ["16:9", "1:1", "9:16"] as const;
@@ -31,6 +46,8 @@ export type ImageGenerationCuratedModel = {
   defaultAspectRatio: string;
   allowedAspectRatios: readonly string[];
   pricing: ImagePricing;
+  /** Short "best for" guidance shown in model pickers alongside pricing. */
+  hint?: string;
 };
 
 export type ImageGenerationServerCatalogModel = {
@@ -59,6 +76,7 @@ type CuratedImageGenerationModelSeed = {
   defaultAspectRatio: string;
   allowedAspectRatios: readonly string[];
   fallbackUsdPerImage?: number;
+  hint?: string;
 };
 
 const EXCLUDED_MODEL_IDS = new Set(["openrouter/auto"]);
@@ -67,56 +85,44 @@ const EXCLUDED_MODEL_IDS = new Set(["openrouter/auto"]);
 // image-generation catalog). The managed default is offered separately as the
 // "SystemSculpt Default" option, so it is intentionally absent here. Server
 // catalog metadata (pricing, limits) overrides these fallbacks once synced.
+//
+// Curation policy (2026-07-07): current-generation models only — the arena
+// leader (GPT-5.4 Image 2), the value/photorealism pick (Nano Banana 2), and
+// the speed/cost tier (Nano Banana 2 Lite). Superseded generations are
+// retired via RETIRED_IMAGE_GENERATION_MODEL_IDS instead of lingering here.
 const CURATED_IMAGE_GENERATION_MODELS_SEED: readonly CuratedImageGenerationModelSeed[] = [
   {
-    id: "google/gemini-3-pro-image-preview",
-    label: "Google Nano Banana Pro (Gemini 3 Pro Image)",
-    provider: "Google",
-    supportsImageInput: true,
-    maxImagesPerJob: 4,
-    defaultAspectRatio: "1:1",
-    allowedAspectRatios: ["1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3"],
-    fallbackUsdPerImage: 0.12,
-  },
-  {
-    id: "google/gemini-2.5-flash-image",
-    label: "Google Nano Banana (Gemini 2.5 Flash Image)",
-    provider: "Google",
-    supportsImageInput: true,
-    maxImagesPerJob: 4,
-    defaultAspectRatio: "1:1",
-    allowedAspectRatios: ["1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3"],
-    fallbackUsdPerImage: 0.04,
-  },
-  {
-    id: "openai/gpt-5-image",
-    label: "OpenAI GPT-5 Image",
+    id: "openai/gpt-5.4-image-2",
+    label: "OpenAI GPT-5.4 Image 2",
     provider: "OpenAI",
     supportsImageInput: true,
     maxImagesPerJob: 4,
     defaultAspectRatio: "1:1",
     allowedAspectRatios: ["1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3"],
-    fallbackUsdPerImage: 0.08,
+    fallbackUsdPerImage: 0.053,
+    hint: "Highest quality — best editing, in-image text, and instruction following",
   },
   {
-    id: "openai/gpt-5-image-mini",
-    label: "OpenAI GPT-5 Image Mini",
-    provider: "OpenAI",
+    id: "google/gemini-3.1-flash-image",
+    label: "Google Nano Banana 2 (Gemini 3.1 Flash Image)",
+    provider: "Google",
     supportsImageInput: true,
     maxImagesPerJob: 4,
     defaultAspectRatio: "1:1",
     allowedAspectRatios: ["1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3"],
-    fallbackUsdPerImage: 0.03,
+    fallbackUsdPerImage: 0.067,
+    hint: "Best value — top-tier photorealism, up to 4K, strong editing",
   },
   {
-    id: "black-forest-labs/flux.2-pro",
-    label: "Black Forest Labs FLUX.2 Pro",
-    provider: "Black Forest Labs",
+    id: "google/gemini-3.1-flash-lite-image",
+    label: "Google Nano Banana 2 Lite (Gemini 3.1 Flash Lite Image)",
+    provider: "Google",
     supportsImageInput: true,
     maxImagesPerJob: 4,
     defaultAspectRatio: "1:1",
     allowedAspectRatios: ["1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3"],
-    fallbackUsdPerImage: 0.06,
+    fallbackUsdPerImage: 0.034,
+    hint: "Fastest and cheapest — ~4s generations, 1K output only",
   },
 ] as const;
 
@@ -344,6 +350,7 @@ function toCuratedModel(
     defaultAspectRatio,
     allowedAspectRatios: mergedAllowed.length > 0 ? mergedAllowed : seed.allowedAspectRatios,
     pricing: buildImagePricing(serverModel, seed.fallbackUsdPerImage),
+    hint: seed.hint,
   };
 }
 

@@ -14,7 +14,7 @@ describe("ImageGenerationDefaults", () => {
       imageGenerationLastUsedAspectRatio: string;
     }> = {}
   ) => ({
-    imageGenerationDefaultModelId: "openai/gpt-5-image-mini",
+    imageGenerationDefaultModelId: "google/gemini-3.1-flash-lite-image",
     imageGenerationLastUsedModelId: "",
     imageGenerationLastUsedCount: 1,
     imageGenerationLastUsedAspectRatio: "",
@@ -31,14 +31,14 @@ describe("ImageGenerationDefaults", () => {
       source: "command",
       serverModels: [
         {
-          id: "openai/gpt-5-image-mini",
+          id: "google/gemini-3.1-flash-lite-image",
           default_aspect_ratio: "3:4",
           allowed_aspect_ratios: ["1:1", "3:4"],
         },
       ],
     });
 
-    expect(result.modelId).toBe("openai/gpt-5-image-mini");
+    expect(result.modelId).toBe("google/gemini-3.1-flash-lite-image");
     expect(result.imageCount).toBe(1);
     expect(result.aspectRatio).toBe("3:4");
   });
@@ -46,24 +46,39 @@ describe("ImageGenerationDefaults", () => {
   it("supports partial per-field last-used inheritance", () => {
     const result = resolveImageGenerationDefaults({
       settings: buildSettings({
-        imageGenerationDefaultModelId: "openai/gpt-5-image-mini",
-        imageGenerationLastUsedModelId: "openai/gpt-5-image",
+        imageGenerationDefaultModelId: "google/gemini-3.1-flash-lite-image",
+        imageGenerationLastUsedModelId: "openai/gpt-5.4-image-2",
         imageGenerationLastUsedCount: 4,
         imageGenerationLastUsedAspectRatio: "",
       }),
       source: "command",
       serverModels: [
         {
-          id: "openai/gpt-5-image",
+          id: "openai/gpt-5.4-image-2",
           default_aspect_ratio: "16:9",
           allowed_aspect_ratios: ["1:1", "16:9"],
         },
       ],
     });
 
-    expect(result.modelId).toBe("openai/gpt-5-image");
+    expect(result.modelId).toBe("openai/gpt-5.4-image-2");
     expect(result.imageCount).toBe(4);
     expect(result.aspectRatio).toBe("16:9");
+  });
+
+  it("treats retired model ids in persisted settings as unset", () => {
+    const result = resolveImageGenerationDefaults({
+      settings: buildSettings({
+        // Both values predate the 2026-07 curation pass and no longer exist
+        // on the server; they must fall through to the current default
+        // instead of producing a guaranteed invalid_model rejection.
+        imageGenerationDefaultModelId: "openai/gpt-5-image-mini",
+        imageGenerationLastUsedModelId: "google/gemini-3-pro-image-preview",
+      }),
+      source: "command",
+    });
+
+    expect(result.modelId).toBe("google/gemini-3.1-flash-image");
   });
 
   it("keeps nano image-node fallback to match_input_image when there is no aspect history", () => {
@@ -114,19 +129,19 @@ describe("ImageGenerationDefaults", () => {
     } as any;
 
     const persistPromise = queueImageGenerationLastUsedPatch(plugin, {
-      modelId: "openai/gpt-5-image",
+      modelId: "openai/gpt-5.4-image-2",
       imageCount: 3,
       aspectRatio: "16:9",
     });
 
     const runtimeState = getImageGenerationLastUsedState(settings);
-    expect(runtimeState.modelId).toBe("openai/gpt-5-image");
+    expect(runtimeState.modelId).toBe("openai/gpt-5.4-image-2");
     expect(runtimeState.imageCount).toBe(3);
     expect(runtimeState.aspectRatio).toBe("16:9");
 
     await persistPromise;
     expect(updateSettings).toHaveBeenCalledWith({
-      imageGenerationLastUsedModelId: "openai/gpt-5-image",
+      imageGenerationLastUsedModelId: "openai/gpt-5.4-image-2",
       imageGenerationLastUsedCount: 3,
       imageGenerationLastUsedAspectRatio: "16:9",
     });
