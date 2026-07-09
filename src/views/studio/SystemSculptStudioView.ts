@@ -33,6 +33,8 @@ import {
   type StudioProjectSessionMutationReason,
 } from "../../studio/StudioProjectSession";
 import { renderStudioGraphWorkspace } from "./graph-v3/StudioGraphWorkspaceRenderer";
+import { createEmbeddableMarkdownEditor } from "../../editor/embeddable-markdown-editor";
+import type { StudioTextNodeMarkdownEditorFactory } from "./graph-v3/StudioGraphTextNodeCard";
 import {
   createGroupFromSelection as createNodeGroupFromSelection,
   removeNodesFromGroups,
@@ -239,6 +241,13 @@ export class SystemSculptStudioView extends ItemView {
   private pendingViewportState: StudioGraphViewportState | null = null;
   private editingTextNodeIds = new Set<string>();
   private pendingTextNodeAutofocusNodeId: string | null = null;
+  /**
+   * Live embedded markdown editors keyed by text-node id. Each graph render
+   * rebuilds card DOM wholesale, so every mounted editor registers a teardown
+   * here and `disposeTextNodeEditors` runs before the DOM is dropped —
+   * CodeMirror views must be destroyed, not garbage-collected.
+   */
+  private textNodeEditorTeardowns = new Map<string, () => void>();
   private readonly runPresentation = new StudioRunPresentationState();
   private readonly graphInteraction: StudioGraphInteractionEngine;
   private graphZoomMode: StudioGraphZoomMode = "interactive";
@@ -365,6 +374,7 @@ export class SystemSculptStudioView extends ItemView {
     this.currentProject = null;
     this.editingTextNodeIds.clear();
     this.pendingTextNodeAutofocusNodeId = null;
+    this.disposeTextNodeEditors();
     this.inspectorOverlay?.destroy();
     this.inspectorOverlay = null;
     this.nodeContextMenuOverlay?.destroy();
@@ -3542,6 +3552,54 @@ export class SystemSculptStudioView extends ItemView {
     return this.removeNodes([nodeId]);
   }
 
+  /**
+   * Text-node edit sessions run in Obsidian's own embedded live-preview
+   * markdown editor, so editing a text card feels exactly like editing a
+   * note: syntax renders live, tables and checkboxes stay interactive. The
+   * factory returns null when the internal editor cannot be built, and the
+   * card falls back to its plain textarea.
+   */
+  private readonly createTextNodeMarkdownEditor: StudioTextNodeMarkdownEditorFactory = (
+    containerEl,
+    options
+  ) => {
+    return createEmbeddableMarkdownEditor(this.app, containerEl, {
+      value: options.value,
+      placeholder: options.placeholder,
+      onChange: options.onChange,
+      onEscape: options.onEscape,
+      onBlur: options.onBlur,
+    });
+  };
+
+  private registerTextNodeEditorTeardown(nodeId: string, teardown: () => void): void {
+    const normalizedNodeId = String(nodeId || "").trim();
+    if (!normalizedNodeId) {
+      return;
+    }
+    this.textNodeEditorTeardowns.get(normalizedNodeId)?.();
+    this.textNodeEditorTeardowns.set(normalizedNodeId, teardown);
+  }
+
+  /**
+   * Destroys every live embedded editor. Runs before each graph re-render
+   * (the render replaces card DOM wholesale) and on view teardown, so no
+   * CodeMirror view outlives the elements it is mounted in.
+   */
+  private disposeTextNodeEditors(): void {
+    const teardowns = Array.from(this.textNodeEditorTeardowns.values());
+    this.textNodeEditorTeardowns.clear();
+    for (const teardown of teardowns) {
+      try {
+        teardown();
+      } catch (error) {
+        console.warn("[SystemSculpt Studio] Failed to dispose a text-node editor", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+  }
+
   private consumeTextNodeAutoFocus(nodeId: string): boolean {
     const normalizedNodeId = String(nodeId || "").trim();
     if (!normalizedNodeId) {
@@ -4445,6 +4503,9 @@ export class SystemSculptStudioView extends ItemView {
       consumeTextNodeAutoFocus: (nodeId) => this.consumeTextNodeAutoFocus(nodeId),
       onRequestTextNodeEdit: (nodeId) => this.requestTextNodeEdit(nodeId, { autoFocus: true }),
       onStopTextNodeEdit: (nodeId) => this.stopTextNodeEdit(nodeId),
+      createTextNodeMarkdownEditor: this.createTextNodeMarkdownEditor,
+      registerTextNodeEditorTeardown: (nodeId, teardown) =>
+        this.registerTextNodeEditorTeardown(nodeId, teardown),
       onRevealPathInFinder: (path) => {
         void this.revealPathInFinder(path);
       },
@@ -4581,6 +4642,8 @@ export class SystemSculptStudioView extends ItemView {
   private render(): void {
     this.captureGraphViewportState();
     this.resetViewportScrollingState();
+    // The render below replaces all card DOM; destroy live editors first.
+    this.disposeTextNodeEditors();
     this.graphInteraction.clearRenderBindings();
     this.nodeContextMenuOverlay?.hide();
     this.nodeActionContextMenuOverlay?.hide();

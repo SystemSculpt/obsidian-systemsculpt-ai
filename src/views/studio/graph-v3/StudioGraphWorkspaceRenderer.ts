@@ -18,6 +18,7 @@ import type {
   StudioGraphNodeMutationOptions,
   StudioGraphNodeResizePatch,
 } from "./StudioGraphNodeCardTypes";
+import type { StudioTextNodeMarkdownEditorFactory } from "./StudioGraphTextNodeCard";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -82,6 +83,8 @@ export type StudioGraphWorkspaceRendererOptions = {
   consumeTextNodeAutoFocus: (nodeId: string) => boolean;
   onRequestTextNodeEdit: (nodeId: string) => void;
   onStopTextNodeEdit: (nodeId: string) => void;
+  createTextNodeMarkdownEditor?: StudioTextNodeMarkdownEditorFactory;
+  registerTextNodeEditorTeardown?: (nodeId: string, teardown: () => void) => void;
   onRevealPathInFinder: (path: string) => void;
   resolveNodeBadge?: (node: StudioNodeInstance) => {
     text: string;
@@ -137,6 +140,8 @@ export function renderStudioGraphWorkspace(
     consumeTextNodeAutoFocus,
     onRequestTextNodeEdit,
     onStopTextNodeEdit,
+    createTextNodeMarkdownEditor,
+    registerTextNodeEditorTeardown,
     onRevealPathInFinder,
     resolveNodeBadge,
   } = options;
@@ -416,6 +421,8 @@ export function renderStudioGraphWorkspace(
       consumeTextNodeAutoFocus,
       onRequestTextNodeEdit,
       onStopTextNodeEdit,
+      createTextNodeMarkdownEditor,
+      registerTextNodeEditorTeardown,
       onRevealPathInFinder,
       resolveNodeBadge,
     });

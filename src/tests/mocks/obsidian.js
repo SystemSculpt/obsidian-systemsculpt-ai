@@ -702,10 +702,32 @@ class Setting {
   }
 }
 
+/**
+ * Minimal hotkey scope mirror — enough for code that layers a child scope
+ * over `app.scope` and registers key overrides on it.
+ */
+class Scope {
+  constructor(parent) {
+    this.parent = parent ?? null;
+    this.keys = [];
+  }
+
+  register(modifiers, key, func) {
+    const handler = { modifiers, key, func };
+    this.keys.push(handler);
+    return handler;
+  }
+
+  unregister(handler) {
+    this.keys = this.keys.filter((entry) => entry !== handler);
+  }
+}
+
 module.exports = {
   App,
   apiVersion: "1.5.0",
   Plugin,
+  Scope,
   Notice: class Notice {
     constructor(message) {
       // eslint-disable-next-line no-console

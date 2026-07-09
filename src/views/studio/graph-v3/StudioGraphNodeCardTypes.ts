@@ -9,6 +9,7 @@ import type {
 import type { StudioGraphInteractionEngine } from "../StudioGraphInteractionEngine";
 import type { StudioNodeDetailMode } from "./StudioGraphNodeDetailMode";
 import type { StudioNodeRunDisplayState } from "../StudioRunPresentationState";
+import type { StudioTextNodeMarkdownEditorFactory } from "./StudioGraphTextNodeCard";
 
 export type StudioGraphNodeMutationOptions = {
   mode?: StudioProjectSessionAutosaveMode;
@@ -84,6 +85,8 @@ export type RenderStudioGraphNodeCardOptions = {
   consumeTextNodeAutoFocus: (nodeId: string) => boolean;
   onRequestTextNodeEdit: (nodeId: string) => void;
   onStopTextNodeEdit: (nodeId: string) => void;
+  createTextNodeMarkdownEditor?: StudioTextNodeMarkdownEditorFactory;
+  registerTextNodeEditorTeardown?: (nodeId: string, teardown: () => void) => void;
   onRevealPathInFinder: (path: string) => void;
   resolveNodeBadge?: (node: StudioNodeInstance) => {
     text: string;
