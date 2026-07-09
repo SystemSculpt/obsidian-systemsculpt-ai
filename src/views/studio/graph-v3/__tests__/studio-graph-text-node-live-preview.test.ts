@@ -308,6 +308,34 @@ describe("studio.text live-preview card", () => {
       expect(capture.handle.selectAll).toHaveBeenCalled();
     });
 
+    it("skips the deferred autofocus when the editor is torn down before the frame fires", () => {
+      const pendingFrames: FrameRequestCallback[] = [];
+      jest
+        .spyOn(window, "requestAnimationFrame")
+        .mockImplementation((callback: FrameRequestCallback) => {
+          pendingFrames.push(callback);
+          return pendingFrames.length;
+        });
+      const capture = createEditorFactory();
+      const registerEditorTeardown = jest.fn();
+      renderHarness({
+        value: "x",
+        isEditing: true,
+        shouldAutoFocus: true,
+        createMarkdownEditor: capture.factory,
+        registerEditorTeardown,
+      });
+
+      const teardown = registerEditorTeardown.mock.calls[0][1] as () => void;
+      teardown();
+      for (const frame of pendingFrames) {
+        frame(0);
+      }
+
+      expect(capture.handle.focus).not.toHaveBeenCalled();
+      expect(capture.handle.selectAll).not.toHaveBeenCalled();
+    });
+
     it("falls back to the plain textarea when the factory yields no editor", () => {
       const capture = createEditorFactory("null");
       const { nodeEl } = renderHarness({

@@ -247,6 +247,7 @@ function getEmbeddableEditorClass(
   ) => object) {
     embeddableOptions: EmbeddableMarkdownEditorOptions;
     private embeddableScope: unknown = null;
+    private embeddableScopePushed = false;
     private embeddableDestroyed = false;
 
     constructor(
@@ -320,7 +321,18 @@ function getEmbeddableEditorClass(
             workspace.activeEditor = self.owner;
           }
         });
-        contentDOM.addEventListener("blur", () => {
+        contentDOM.addEventListener("blur", (event) => {
+          // Live preview renders focusable controls (task checkboxes,
+          // embeds) inside the editor; focus moving onto one is not the
+          // user leaving the editor.
+          const related = (event as FocusEvent).relatedTarget;
+          if (
+            related instanceof Node &&
+            (self.editorEl?.contains(related) === true ||
+              self.containerEl?.contains(related) === true)
+          ) {
+            return;
+          }
           this.popKeymapScope();
           // Chrome fires blur when an element is removed from the DOM;
           // only a still-loaded editor reports a real blur.
@@ -336,19 +348,26 @@ function getEmbeddableEditorClass(
     }
 
     private pushKeymapScope(): void {
-      if (!this.embeddableScope) {
+      if (!this.embeddableScope || this.embeddableScopePushed) {
         return;
       }
+      this.embeddableScopePushed = true;
       const app = (this as unknown as { app?: App }).app;
       (app as unknown as {
         keymap?: { pushScope?: (scope: unknown) => void };
       })?.keymap?.pushScope?.(this.embeddableScope);
     }
 
+    /**
+     * Pops only what was pushed: destroy-without-focus would otherwise pop a
+     * scope that is not on the stack, and Chrome's DOM-removal blur during
+     * destroy would pop a second time — both scramble the hotkey stack.
+     */
     private popKeymapScope(): void {
-      if (!this.embeddableScope) {
+      if (!this.embeddableScope || !this.embeddableScopePushed) {
         return;
       }
+      this.embeddableScopePushed = false;
       const app = (this as unknown as { app?: App }).app;
       (app as unknown as {
         keymap?: { popScope?: (scope: unknown) => void };

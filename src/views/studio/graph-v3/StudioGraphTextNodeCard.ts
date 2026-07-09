@@ -234,12 +234,18 @@ function mountLiveMarkdownEditor(options: MountLiveMarkdownEditorOptions): boole
   }
 
   adoptTextSurface(hostEl);
+  let editorDisposed = false;
   registerEditorTeardown?.(node.id, () => {
+    editorDisposed = true;
     editorHandle.destroy();
   });
 
   if (shouldAutoFocus) {
     window.requestAnimationFrame(() => {
+      // A re-render can tear the editor down before this frame fires.
+      if (editorDisposed) {
+        return;
+      }
       editorHandle.focus();
       editorHandle.selectAll();
     });

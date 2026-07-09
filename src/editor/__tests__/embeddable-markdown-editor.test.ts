@@ -240,6 +240,54 @@ describe("createEmbeddableMarkdownEditor", () => {
     expect(onBlur).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps the edit session alive when focus moves to a control inside the editor", () => {
+    const { app } = createFakeApp();
+    const container = document.body.createDiv();
+    const onBlur = jest.fn();
+
+    const handle = createEmbeddableMarkdownEditor(app, container, {
+      value: "- [ ] task",
+      onBlur,
+    });
+    const rawEditor = handle!.editor as FakeScrollableMarkdownEditor;
+    const inEditorCheckbox = rawEditor.editorEl.createEl("input");
+
+    rawEditor.editor.cm.contentDOM.dispatchEvent(
+      new FocusEvent("blur", { relatedTarget: inEditorCheckbox })
+    );
+
+    expect(onBlur).not.toHaveBeenCalled();
+  });
+
+  it("does not pop a keymap scope that was never pushed", () => {
+    const { app } = createFakeApp();
+    const handle = createEmbeddableMarkdownEditor(app, document.body.createDiv(), {
+      value: "x",
+    });
+
+    // Destroy without the editor ever gaining focus.
+    handle!.destroy();
+
+    expect(app.keymap.pushScope).not.toHaveBeenCalled();
+    expect(app.keymap.popScope).not.toHaveBeenCalled();
+  });
+
+  it("pops the keymap scope at most once for a focused editor", () => {
+    const { app } = createFakeApp();
+    const handle = createEmbeddableMarkdownEditor(app, document.body.createDiv(), {
+      value: "x",
+    });
+    const rawEditor = handle!.editor as FakeScrollableMarkdownEditor;
+
+    rawEditor.editor.cm.contentDOM.dispatchEvent(new FocusEvent("focusin"));
+    // Blur then destroy — the DOM-removal blur in Chrome makes this the
+    // double-pop path.
+    rawEditor.editor.cm.contentDOM.dispatchEvent(new FocusEvent("blur"));
+    handle!.destroy();
+
+    expect(app.keymap.popScope).toHaveBeenCalledTimes(1);
+  });
+
   it("suppresses onBlur after the editor is unloaded (Chrome DOM-removal blur)", () => {
     const { app } = createFakeApp();
     const container = document.body.createDiv();
