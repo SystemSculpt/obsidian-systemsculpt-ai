@@ -313,29 +313,28 @@ function getEmbeddableEditorClass(
         });
       }
 
-      const contentDOM = self.editor?.cm?.contentDOM;
-      if (contentDOM) {
-        contentDOM.addEventListener("focusin", () => {
+      // Focus tracking lives on the editing surface as a WHOLE, not just the
+      // CodeMirror content: live preview renders focusable controls (task
+      // checkboxes, embeds) inside the editor, and hopping between them and
+      // the text must not end the session — only focus leaving the surface
+      // entirely does. focusin/focusout bubble, blur does not.
+      const focusRootEl =
+        self.containerEl ?? self.editorEl ?? self.editor?.cm?.contentDOM;
+      if (focusRootEl) {
+        focusRootEl.addEventListener("focusin", () => {
           this.pushKeymapScope();
           if (workspace) {
             workspace.activeEditor = self.owner;
           }
         });
-        contentDOM.addEventListener("blur", (event) => {
-          // Live preview renders focusable controls (task checkboxes,
-          // embeds) inside the editor; focus moving onto one is not the
-          // user leaving the editor.
+        focusRootEl.addEventListener("focusout", (event) => {
           const related = (event as FocusEvent).relatedTarget;
-          if (
-            related instanceof Node &&
-            (self.editorEl?.contains(related) === true ||
-              self.containerEl?.contains(related) === true)
-          ) {
+          if (related instanceof Node && focusRootEl.contains(related)) {
             return;
           }
           this.popKeymapScope();
-          // Chrome fires blur when an element is removed from the DOM;
-          // only a still-loaded editor reports a real blur.
+          // Chrome fires focusout when a focused element is removed from
+          // the DOM; only a still-loaded editor reports a real blur.
           if (self._loaded !== false) {
             this.embeddableOptions.onBlur?.();
           }

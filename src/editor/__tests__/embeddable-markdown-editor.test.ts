@@ -216,7 +216,7 @@ describe("createEmbeddableMarkdownEditor", () => {
     const handle = createEmbeddableMarkdownEditor(app, container, { value: "x" });
     const rawEditor = handle!.editor as FakeScrollableMarkdownEditor;
 
-    rawEditor.editor.cm.contentDOM.dispatchEvent(new FocusEvent("focusin"));
+    rawEditor.editor.cm.contentDOM.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
     expect(app.keymap.pushScope).toHaveBeenCalled();
     expect(app.workspace.activeEditor).toBe(rawEditor.owner);
 
@@ -236,7 +236,7 @@ describe("createEmbeddableMarkdownEditor", () => {
     });
     const rawEditor = handle!.editor as FakeScrollableMarkdownEditor;
 
-    rawEditor.editor.cm.contentDOM.dispatchEvent(new FocusEvent("blur"));
+    rawEditor.editor.cm.contentDOM.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
     expect(onBlur).toHaveBeenCalledTimes(1);
   });
 
@@ -253,10 +253,36 @@ describe("createEmbeddableMarkdownEditor", () => {
     const inEditorCheckbox = rawEditor.editorEl.createEl("input");
 
     rawEditor.editor.cm.contentDOM.dispatchEvent(
-      new FocusEvent("blur", { relatedTarget: inEditorCheckbox })
+      new FocusEvent("focusout", { bubbles: true, relatedTarget: inEditorCheckbox })
     );
 
     expect(onBlur).not.toHaveBeenCalled();
+  });
+
+  it("ends the session when an in-editor control loses focus to the outside", () => {
+    const { app } = createFakeApp();
+    const container = document.body.createDiv();
+    const outsideEl = document.body.createDiv();
+    const onBlur = jest.fn();
+
+    const handle = createEmbeddableMarkdownEditor(app, container, {
+      value: "- [ ] task",
+      onBlur,
+    });
+    const rawEditor = handle!.editor as FakeScrollableMarkdownEditor;
+    const inEditorCheckbox = rawEditor.editorEl.createEl("input");
+
+    // Focus hops content -> in-editor checkbox (session stays alive) ...
+    rawEditor.editor.cm.contentDOM.dispatchEvent(
+      new FocusEvent("focusout", { bubbles: true, relatedTarget: inEditorCheckbox })
+    );
+    expect(onBlur).not.toHaveBeenCalled();
+
+    // ... then checkbox -> somewhere outside the card: NOW the session ends.
+    inEditorCheckbox.dispatchEvent(
+      new FocusEvent("focusout", { bubbles: true, relatedTarget: outsideEl })
+    );
+    expect(onBlur).toHaveBeenCalledTimes(1);
   });
 
   it("does not pop a keymap scope that was never pushed", () => {
@@ -279,10 +305,10 @@ describe("createEmbeddableMarkdownEditor", () => {
     });
     const rawEditor = handle!.editor as FakeScrollableMarkdownEditor;
 
-    rawEditor.editor.cm.contentDOM.dispatchEvent(new FocusEvent("focusin"));
+    rawEditor.editor.cm.contentDOM.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
     // Blur then destroy — the DOM-removal blur in Chrome makes this the
     // double-pop path.
-    rawEditor.editor.cm.contentDOM.dispatchEvent(new FocusEvent("blur"));
+    rawEditor.editor.cm.contentDOM.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
     handle!.destroy();
 
     expect(app.keymap.popScope).toHaveBeenCalledTimes(1);
@@ -300,7 +326,7 @@ describe("createEmbeddableMarkdownEditor", () => {
     const rawEditor = handle!.editor as FakeScrollableMarkdownEditor;
 
     handle!.destroy();
-    rawEditor.editor.cm.contentDOM.dispatchEvent(new FocusEvent("blur"));
+    rawEditor.editor.cm.contentDOM.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
     expect(onBlur).not.toHaveBeenCalled();
   });
 
