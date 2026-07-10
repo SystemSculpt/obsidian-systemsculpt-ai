@@ -67,4 +67,28 @@ describe("SystemSculptStudioView text editor lifecycle", () => {
       expect.objectContaining({ error: "commit failed" })
     );
   });
+
+  it("clears stale state when a bulk editor teardown throws", () => {
+    const harness = createHarness();
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined);
+    const failedTeardown = jest.fn(() => {
+      throw new Error("snapshot failed");
+    });
+    harness.textNodeEditorSnapshots.set("text_1", {
+      selection: { anchor: 1, head: 1 },
+      scrollTop: 12,
+      focused: true,
+    });
+    harness.registerTextNodeEditorTeardown("text_1", failedTeardown);
+
+    expect(() => harness.disposeTextNodeEditors()).not.toThrow();
+
+    expect(failedTeardown).toHaveBeenCalledTimes(1);
+    expect(harness.textNodeEditorTeardowns.size).toBe(0);
+    expect(harness.consumeTextNodeEditorSnapshot("text_1")).toBeUndefined();
+    expect(warn).toHaveBeenCalledWith(
+      "[SystemSculpt Studio] Failed to dispose a text-node editor",
+      expect.objectContaining({ nodeId: "text_1", error: "snapshot failed" })
+    );
+  });
 });

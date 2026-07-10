@@ -3697,7 +3697,9 @@ export class SystemSculptStudioView extends ItemView {
           this.textNodeEditorSnapshots.delete(nodeId);
         }
       } catch (error) {
+        this.textNodeEditorSnapshots.delete(nodeId);
         console.warn("[SystemSculpt Studio] Failed to dispose a text-node editor", {
+          nodeId,
           error: error instanceof Error ? error.message : String(error),
         });
       }
