@@ -12,6 +12,7 @@
  */
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
+import ts from "typescript";
 
 const BUNDLE_PATH = path.resolve(__dirname, "..", "..", "main.js");
 const MANIFEST_PATH = path.resolve(__dirname, "..", "..", "manifest.json");
@@ -69,5 +70,38 @@ describe("built bundle (main.js)", () => {
     expect(plugin.recorderService).not.toBeNull();
 
     plugin.unload();
+  });
+
+  it("does not ship browser-native dynamic imports for Node builtins (#235)", () => {
+    const code = readFileSync(BUNDLE_PATH, "utf8");
+    const source = ts.createSourceFile(
+      BUNDLE_PATH,
+      code,
+      ts.ScriptTarget.ESNext,
+      true,
+      ts.ScriptKind.JS
+    );
+    const dynamicNodeImports: string[] = [];
+
+    const visit = (node: ts.Node): void => {
+      if (
+        ts.isCallExpression(node) &&
+        node.expression.kind === ts.SyntaxKind.ImportKeyword &&
+        node.arguments.length === 1 &&
+        ts.isStringLiteral(node.arguments[0]) &&
+        node.arguments[0].text.startsWith("node:")
+      ) {
+        dynamicNodeImports.push(node.arguments[0].text);
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(source);
+
+    // Electron's renderer treats native import() as a URL fetch. A specifier
+    // such as node:fs therefore rejects with "Failed to fetch dynamically
+    // imported module: node:fs" instead of loading the Node builtin. Desktop
+    // code must use the plugin's lazy loadDesktopOnly(() => require(...))
+    // boundary, which also keeps mobile startup safe.
+    expect(dynamicNodeImports).toEqual([]);
   });
 });
