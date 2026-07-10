@@ -55,6 +55,7 @@ systemsculpt-sync.windows.generated.json
 vault/
 
 # Misc local dirs
+plans/
 log/
 logs/
 devlogs/
