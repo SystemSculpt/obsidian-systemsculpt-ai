@@ -132,6 +132,7 @@ import {
   cloneProjectSnapshot,
   normalizeNodeIdList,
   parseGraphClipboardPayload,
+  serializeProjectSnapshot,
   STUDIO_GRAPH_CLIPBOARD_SCHEMA,
   type StudioGraphClipboardPayload,
   type StudioGraphHistorySnapshot,
@@ -3581,6 +3582,7 @@ export class SystemSculptStudioView extends ItemView {
     }
     this.pendingTextNodeFocusPointByNodeId.delete(normalizedNodeId);
     this.textNodeEditorSnapshots.delete(normalizedNodeId);
+    const redoSnapshotsBeforeEmptyRemoval = this.historyState.redoSnapshots;
     if (this.removeTextNodeIfEmptyOnEditEnd(normalizedNodeId)) {
       // removeNodes captured the pre-edit graph and cleaned up interaction
       // state. Finalize history at the post-delete graph so undo restores the
@@ -3591,6 +3593,24 @@ export class SystemSculptStudioView extends ItemView {
           this.currentProject,
           this.graphInteraction.getSelectedNodeIds()
         );
+        const latestUndoSnapshot =
+          this.historyState.undoSnapshots[this.historyState.undoSnapshots.length - 1];
+        if (
+          latestUndoSnapshot &&
+          serializeProjectSnapshot(latestUndoSnapshot.project) ===
+            this.historyState.currentSerialized
+        ) {
+          // Creating a blank text node and immediately leaving it is a net-zero
+          // graph interaction. Do not make the next Undo consume an identical
+          // pre-creation snapshot and appear to do nothing, or discard a Redo
+          // stack that existed before the temporary node was created.
+          this.historyState.undoSnapshots.pop();
+          this.historyState.redoSnapshots = redoSnapshotsBeforeEmptyRemoval;
+        } else {
+          // A real edit-and-delete invalidates any earlier redo branch even if
+          // the pre-removal checkpoint did not need to add an undo snapshot.
+          this.historyState.redoSnapshots = [];
+        }
       }
       return;
     }

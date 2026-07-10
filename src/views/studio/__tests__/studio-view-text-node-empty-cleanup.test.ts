@@ -1,6 +1,10 @@
 /** @jest-environment jsdom */
 
-import type { StudioNodeInstance, StudioProjectV1 } from "../../../studio/types";
+import type {
+  StudioNodeDefinition,
+  StudioNodeInstance,
+  StudioProjectV1,
+} from "../../../studio/types";
 import { SystemSculptStudioView } from "../SystemSculptStudioView";
 import { createStudioGraphHistoryState } from "../systemsculpt-studio-view/StudioGraphHistoryState";
 
@@ -16,6 +20,9 @@ const viewPrototype = (SystemSculptStudioView as any).prototype;
 // listed here resolves `this.<name>(...)` calls inside the methods under
 // test to the real implementation.
 const REAL_VIEW_METHODS = [
+  "createNodeFromDefinition",
+  "currentProjectOrThrow",
+  "normalizeNodePosition",
   "stopTextNodeEdit",
   "removeTextNodeIfEmptyOnEditEnd",
   "removeNodes",
@@ -133,6 +140,7 @@ function createEditEndHarness(options: {
       onNodeRemoved: jest.fn(),
       clearPendingConnection: jest.fn(),
       clearProjectState: jest.fn(),
+      selectOnlyNode: jest.fn(),
       setSelectedNodeIds: jest.fn(),
     },
     recomputeEntryNodes: jest.fn(),
@@ -159,6 +167,25 @@ function createEditEndHarness(options: {
   };
 }
 
+function createTextNodeDefinition(): StudioNodeDefinition {
+  return {
+    kind: "studio.text",
+    version: "1.0.0",
+    capabilityClass: "local_cpu",
+    cachePolicy: "never",
+    inputPorts: [],
+    outputPorts: [],
+    configDefaults: { value: "" },
+    configSchema: {
+      fields: [],
+      allowUnknownKeys: true,
+    },
+    async execute() {
+      return { outputs: {} };
+    },
+  };
+}
+
 describe("SystemSculptStudioView empty text node cleanup (tldraw parity)", () => {
   let noticeSpy: jest.SpyInstance;
 
@@ -172,6 +199,72 @@ describe("SystemSculptStudioView empty text node cleanup (tldraw parity)", () =>
 
   afterEach(() => {
     noticeSpy.mockRestore();
+  });
+
+  it("does not leave a no-op undo entry after creating and blurring an empty text node", () => {
+    const harness = createEditEndHarness({ nodes: [] });
+    harness.context.resetProjectHistory(harness.context.currentProject);
+
+    const createdNode = harness.context.createNodeFromDefinition(
+      createTextNodeDefinition(),
+      { position: { x: 80, y: 120 }, autoEditText: true }
+    );
+    expect(createdNode).not.toBeNull();
+    expect(harness.nodeIds()).toEqual([createdNode.id]);
+
+    harness.context.stopTextNodeEdit(createdNode.id);
+
+    expect(harness.nodeIds()).toEqual([]);
+    expect(harness.context.historyState.undoSnapshots).toHaveLength(0);
+    expect(harness.context.undoGraphHistory()).toBe(false);
+  });
+
+  it("keeps the previous meaningful undo after an empty create-and-blur cycle", () => {
+    const harness = createEditEndHarness({
+      nodes: [createTextNode("existing", "before")],
+      editingNodeIds: ["existing"],
+    });
+    harness.context.resetProjectHistory(harness.context.currentProject);
+    harness.context.handleNodeConfigValueChange("existing", "value", "after", {
+      mode: "continuous",
+      captureHistory: false,
+    });
+    harness.context.stopTextNodeEdit("existing");
+
+    const createdNode = harness.context.createNodeFromDefinition(
+      createTextNodeDefinition(),
+      { position: { x: 80, y: 120 }, autoEditText: true }
+    );
+    harness.context.stopTextNodeEdit(createdNode.id);
+
+    expect(harness.nodeIds()).toEqual(["existing"]);
+    expect(harness.context.historyState.undoSnapshots).toHaveLength(1);
+    expect(harness.context.undoGraphHistory()).toBe(true);
+    expect(harness.findValue("existing")).toBe("before");
+  });
+
+  it("preserves redo history across an empty create-and-blur cycle", () => {
+    const harness = createEditEndHarness({
+      nodes: [createTextNode("existing", "before")],
+      editingNodeIds: ["existing"],
+    });
+    harness.context.resetProjectHistory(harness.context.currentProject);
+    harness.context.handleNodeConfigValueChange("existing", "value", "after", {
+      mode: "continuous",
+      captureHistory: false,
+    });
+    harness.context.stopTextNodeEdit("existing");
+    expect(harness.context.undoGraphHistory()).toBe(true);
+    expect(harness.findValue("existing")).toBe("before");
+
+    const createdNode = harness.context.createNodeFromDefinition(
+      createTextNodeDefinition(),
+      { position: { x: 80, y: 120 }, autoEditText: true }
+    );
+    harness.context.stopTextNodeEdit(createdNode.id);
+
+    expect(harness.context.redoGraphHistory()).toBe(true);
+    expect(harness.findValue("existing")).toBe("after");
   });
 
   it("deletes an empty studio.text node when its edit session ends, silently and in one commit", () => {
