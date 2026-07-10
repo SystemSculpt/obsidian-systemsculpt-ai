@@ -6,57 +6,113 @@ import {
   isEmbeddableMarkdownEditorSupported,
 } from "../embeddable-markdown-editor";
 
-/**
- * Fake of Obsidian's INTERNAL markdown editor class chain. The real chain is
- * resolved at runtime from `app.embedRegistry.embedByExtension.md` by walking
- * two prototype levels up from the widget's `editMode` instance — exactly the
- * shape mocked here:
- *
- *   editMode instance → FakeEmbedEditMode → FakeScrollableMarkdownEditor
- *                                            ↑ resolved base class
- */
-class FakeScrollableMarkdownEditor {
-  app: unknown;
-  containerEl: HTMLElement;
-  owner: Record<string, unknown>;
+class FakeNativeMarkdownEditMode {
   editorEl: HTMLElement;
-  editor: {
-    cm: {
-      state: { doc: { toString: () => string } };
-      dispatch: jest.Mock;
-      contentDOM: HTMLElement;
-      focus: jest.Mock;
-      hasFocus: boolean;
+  currentValue = "";
+  cm: {
+    state: {
+      doc: { toString: () => string; length: number };
+      selection: { main: { anchor: number; head: number } };
     };
+    dispatch: jest.Mock;
+    contentDOM: HTMLElement;
+    scrollDOM: HTMLElement;
+    focus: jest.Mock;
+    hasFocus: boolean;
   };
-  _loaded = true;
-  unloadCount = 0;
-  private registeredDisposers: Array<() => void> = [];
-  private currentValue = "";
+  editor: { cm: FakeNativeMarkdownEditMode["cm"] };
 
-  constructor(app: unknown, container: HTMLElement, owner: Record<string, unknown>) {
-    this.app = app;
-    this.containerEl = container;
-    this.owner = owner;
-    this.editorEl = container.createDiv({ cls: "markdown-source-view" });
+  constructor(containerEl: HTMLElement) {
+    this.editorEl = containerEl.createDiv({ cls: "markdown-source-view" });
     const contentDOM = this.editorEl.createDiv({ cls: "cm-content" });
-    this.editor = {
-      cm: {
-        state: { doc: { toString: () => this.currentValue } },
-        dispatch: jest.fn(),
-        contentDOM,
-        focus: jest.fn(),
-        hasFocus: false,
+    const scrollDOM = this.editorEl.createDiv({ cls: "cm-scroller" });
+    const selection = { main: { anchor: 0, head: 0 } };
+    const doc = {
+      toString: () => this.currentValue,
+      get length() {
+        return this.toString().length;
       },
     };
+    const focus = jest.fn(() => {
+      this.cm.hasFocus = true;
+    });
+    const dispatch = jest.fn((spec: { selection?: { anchor: number; head: number } }) => {
+      if (spec.selection) {
+        selection.main = { ...spec.selection };
+      }
+    });
+    this.cm = {
+      state: { doc, selection },
+      dispatch,
+      contentDOM,
+      scrollDOM,
+      focus,
+      hasFocus: false,
+    };
+    this.editor = { cm: this.cm };
   }
 
   set(value: string): void {
     this.currentValue = value;
   }
 
-  register(disposer: () => void): void {
-    this.registeredDisposers.push(disposer);
+  focus(): void {
+    this.cm.focus();
+  }
+}
+
+class FakeNativeMarkdownEmbedBase {
+  app: any;
+  containerEl: HTMLElement;
+  editorEl: HTMLElement;
+  previewEl: HTMLElement;
+  editMode: FakeNativeMarkdownEditMode | null = null;
+  editable = false;
+  useIframe = true;
+  text = "";
+  _loaded = true;
+  unloadCount = 0;
+  lastShowEditorPoint: { x: number; y: number } | undefined;
+
+  constructor(app: any, containerEl: HTMLElement) {
+    this.app = app;
+    this.containerEl = containerEl;
+    this.previewEl = containerEl.createDiv({ cls: "markdown-embed-content" });
+    this.editorEl = containerEl.createDiv({ cls: "markdown-embed-content" });
+  }
+
+  set(value: string): void {
+    this.text = value;
+    this.editMode?.set(value);
+  }
+
+  save(value: string): void {
+    this.set(value);
+  }
+
+  showEditor(point?: { x: number; y: number }): void {
+    if (!this.editable) {
+      return;
+    }
+    this.lastShowEditorPoint = point;
+    if (!this.editMode) {
+      this.editMode = new FakeNativeMarkdownEditMode(this.editorEl);
+    }
+    this.editMode.set(this.text);
+    if (point) {
+      const offset = Math.max(0, Math.min(this.text.length, Math.round(point.x)));
+      this.editMode.cm.dispatch({ selection: { anchor: offset, head: offset } });
+    }
+  }
+
+  showPreview(): void {
+    (this as unknown as { applyScope: (scope: unknown) => void }).applyScope(null);
+    this.editMode = null;
+    this.editorEl.empty();
+  }
+
+  load(): void {
+    this._loaded = true;
   }
 
   unload(): void {
@@ -65,28 +121,19 @@ class FakeScrollableMarkdownEditor {
     }
     this._loaded = false;
     this.unloadCount += 1;
-    for (const disposer of this.registeredDisposers.splice(0)) {
-      disposer();
-    }
-    (this as { onunload?: () => void }).onunload?.();
+    this.containerEl.empty();
   }
-
-  onUpdate(_update: unknown, _changed: boolean): void {}
-
-  buildLocalExtensions(): unknown[] {
-    return [];
-  }
-
-  destroy(): void {}
 }
 
-class FakeEmbedEditMode extends FakeScrollableMarkdownEditor {}
+class FakeNativeMarkdownFileEmbed extends FakeNativeMarkdownEmbedBase {}
 
-function createFakeApp(): {
+type FakeAppHarness = {
   app: any;
-  widgetUnload: jest.Mock;
-} {
-  const widgetUnload = jest.fn();
+  createdWidgets: FakeNativeMarkdownFileEmbed[];
+};
+
+function createFakeApp(): FakeAppHarness {
+  const createdWidgets: FakeNativeMarkdownFileEmbed[] = [];
   const app: any = {
     scope: {},
     keymap: {
@@ -96,28 +143,27 @@ function createFakeApp(): {
     workspace: {
       activeEditor: null,
       setActiveLeaf: jest.fn(),
+      unsetActiveEditor: jest.fn((editor: unknown) => {
+        if (app.workspace.activeEditor === editor) {
+          app.workspace.activeEditor = null;
+        }
+      }),
+    },
+    foldManager: {
+      loadPath: jest.fn(() => null),
+      savePath: jest.fn(),
     },
   };
   app.embedRegistry = {
     embedByExtension: {
-      md: (_context: unknown, _file: unknown, _subpath: string) => {
-        const widget = {
-          editable: false,
-          editMode: undefined as FakeEmbedEditMode | undefined,
-          showEditor() {
-            this.editMode = new FakeEmbedEditMode(
-              app,
-              document.body.createDiv(),
-              {}
-            );
-          },
-          unload: widgetUnload,
-        };
+      md: (context: { containerEl: HTMLElement }) => {
+        const widget = new FakeNativeMarkdownFileEmbed(app, context.containerEl);
+        createdWidgets.push(widget);
         return widget;
       },
     },
   };
-  return { app, widgetUnload };
+  return { app, createdWidgets };
 }
 
 describe("createEmbeddableMarkdownEditor", () => {
@@ -127,13 +173,15 @@ describe("createEmbeddableMarkdownEditor", () => {
   });
 
   it("returns null when the app exposes no embed registry", () => {
-    const container = document.body.createDiv();
-    const handle = createEmbeddableMarkdownEditor({} as never, container, {});
+    const handle = createEmbeddableMarkdownEditor(
+      {} as never,
+      document.body.createDiv(),
+      {}
+    );
     expect(handle).toBeNull();
   });
 
-  it("returns null when internal editor resolution throws", () => {
-    const container = document.body.createDiv();
+  it("returns null when native markdown surface resolution throws", () => {
     const app: any = {
       embedRegistry: {
         embedByExtension: {
@@ -143,27 +191,33 @@ describe("createEmbeddableMarkdownEditor", () => {
         },
       },
     };
-    expect(createEmbeddableMarkdownEditor(app, container, {})).toBeNull();
+    expect(
+      createEmbeddableMarkdownEditor(app, document.body.createDiv(), {})
+    ).toBeNull();
   });
 
-  it("constructs an editor seeded with the initial value and unloads the probe widget", () => {
-    const { app, widgetUnload } = createFakeApp();
-    const container = document.body.createDiv();
-
-    const handle = createEmbeddableMarkdownEditor(app, container, {
-      value: "# Hello\n\nSome **bold** text",
+  it("constructs the surface from Obsidian's native markdown embed component", () => {
+    const { app } = createFakeApp();
+    const handle = createEmbeddableMarkdownEditor(app, document.body.createDiv(), {
+      value: "# Native",
     });
 
     expect(handle).not.toBeNull();
-    expect(handle?.value).toBe("# Hello\n\nSome **bold** text");
-    expect(widgetUnload).toHaveBeenCalled();
+    expect(handle?.editor).toBeInstanceOf(FakeNativeMarkdownEmbedBase);
+    expect(handle?.value).toBe("# Native");
   });
 
-  it("applies the optional cls to the editor element", () => {
-    const { app } = createFakeApp();
-    const container = document.body.createDiv();
+  it("unloads the throwaway file-embed probe after resolving the native base", () => {
+    const { app, createdWidgets } = createFakeApp();
+    createEmbeddableMarkdownEditor(app, document.body.createDiv(), { value: "x" });
 
-    const handle = createEmbeddableMarkdownEditor(app, container, {
+    expect(createdWidgets).toHaveLength(1);
+    expect(createdWidgets[0].unloadCount).toBe(1);
+  });
+
+  it("applies the optional class to the native editor wrapper", () => {
+    const { app } = createFakeApp();
+    const handle = createEmbeddableMarkdownEditor(app, document.body.createDiv(), {
       value: "",
       cls: "ss-test-editor",
     });
@@ -171,183 +225,58 @@ describe("createEmbeddableMarkdownEditor", () => {
     expect(handle?.editorEl?.classList.contains("ss-test-editor")).toBe(true);
   });
 
-  it("reports document changes through onChange", () => {
+  it("reports native markdown saves through onChange without duplicate values", () => {
     const { app } = createFakeApp();
-    const container = document.body.createDiv();
     const onChange = jest.fn();
-
-    const handle = createEmbeddableMarkdownEditor(app, container, {
+    const handle = createEmbeddableMarkdownEditor(app, document.body.createDiv(), {
       value: "before",
       onChange,
     });
-    expect(handle).not.toBeNull();
+    const surface = handle!.editor as FakeNativeMarkdownEmbedBase;
 
-    const rawEditor = handle!.editor as FakeScrollableMarkdownEditor;
-    rawEditor.onUpdate(
-      { state: { doc: { toString: () => "after" } } },
-      true
-    );
+    surface.save("after");
+    surface.save("after");
 
+    expect(onChange).toHaveBeenCalledTimes(1);
     expect(onChange).toHaveBeenCalledWith("after");
   });
 
-  it("does not report unchanged updates", () => {
+  it("commit flushes the current CodeMirror document through onChange", () => {
     const { app } = createFakeApp();
-    const container = document.body.createDiv();
     const onChange = jest.fn();
-
-    const handle = createEmbeddableMarkdownEditor(app, container, {
+    const handle = createEmbeddableMarkdownEditor(app, document.body.createDiv(), {
       value: "before",
       onChange,
     });
-    const rawEditor = handle!.editor as FakeScrollableMarkdownEditor;
-    rawEditor.onUpdate(
-      { state: { doc: { toString: () => "before" } } },
-      false
-    );
+    const surface = handle!.editor as FakeNativeMarkdownEmbedBase;
+    surface.editMode!.set("final draft");
 
-    expect(onChange).not.toHaveBeenCalled();
+    expect(handle!.commit()).toBe("final draft");
+    expect(onChange).toHaveBeenLastCalledWith("final draft");
   });
 
-  it("claims the workspace active editor while focused and releases it on destroy", () => {
+  it("claims the workspace active editor while focused and unsets it on destroy", () => {
     const { app } = createFakeApp();
-    const container = document.body.createDiv();
+    const handle = createEmbeddableMarkdownEditor(app, document.body.createDiv(), {
+      value: "x",
+    });
+    const surface = handle!.editor as FakeNativeMarkdownEmbedBase;
 
-    const handle = createEmbeddableMarkdownEditor(app, container, { value: "x" });
-    const rawEditor = handle!.editor as FakeScrollableMarkdownEditor;
-
-    rawEditor.editor.cm.contentDOM.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
-    expect(app.keymap.pushScope).toHaveBeenCalled();
-    expect(app.workspace.activeEditor).toBe(rawEditor.owner);
+    surface.editMode!.cm.contentDOM.dispatchEvent(
+      new FocusEvent("focusin", { bubbles: true })
+    );
+    expect(app.keymap.pushScope).toHaveBeenCalledTimes(1);
+    expect(app.workspace.activeEditor).toBe(surface);
 
     handle!.destroy();
-    expect(app.keymap.popScope).toHaveBeenCalled();
+    expect(app.keymap.popScope).toHaveBeenCalledTimes(1);
+    expect(app.workspace.unsetActiveEditor).toHaveBeenCalledWith(surface);
     expect(app.workspace.activeEditor).toBeNull();
   });
 
-  it("invokes onBlur when the editor content loses focus", () => {
+  it("never monkey-patches workspace.setActiveLeaf", () => {
     const { app } = createFakeApp();
-    const container = document.body.createDiv();
-    const onBlur = jest.fn();
-
-    const handle = createEmbeddableMarkdownEditor(app, container, {
-      value: "x",
-      onBlur,
-    });
-    const rawEditor = handle!.editor as FakeScrollableMarkdownEditor;
-
-    rawEditor.editor.cm.contentDOM.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
-    expect(onBlur).toHaveBeenCalledTimes(1);
-  });
-
-  it("keeps the edit session alive when focus moves to a control inside the editor", () => {
-    const { app } = createFakeApp();
-    const container = document.body.createDiv();
-    const onBlur = jest.fn();
-
-    const handle = createEmbeddableMarkdownEditor(app, container, {
-      value: "- [ ] task",
-      onBlur,
-    });
-    const rawEditor = handle!.editor as FakeScrollableMarkdownEditor;
-    const inEditorCheckbox = rawEditor.editorEl.createEl("input");
-
-    rawEditor.editor.cm.contentDOM.dispatchEvent(
-      new FocusEvent("focusout", { bubbles: true, relatedTarget: inEditorCheckbox })
-    );
-
-    expect(onBlur).not.toHaveBeenCalled();
-  });
-
-  it("ends the session when an in-editor control loses focus to the outside", () => {
-    const { app } = createFakeApp();
-    const container = document.body.createDiv();
-    const outsideEl = document.body.createDiv();
-    const onBlur = jest.fn();
-
-    const handle = createEmbeddableMarkdownEditor(app, container, {
-      value: "- [ ] task",
-      onBlur,
-    });
-    const rawEditor = handle!.editor as FakeScrollableMarkdownEditor;
-    const inEditorCheckbox = rawEditor.editorEl.createEl("input");
-
-    // Focus hops content -> in-editor checkbox (session stays alive) ...
-    rawEditor.editor.cm.contentDOM.dispatchEvent(
-      new FocusEvent("focusout", { bubbles: true, relatedTarget: inEditorCheckbox })
-    );
-    expect(onBlur).not.toHaveBeenCalled();
-
-    // ... then checkbox -> somewhere outside the card: NOW the session ends.
-    inEditorCheckbox.dispatchEvent(
-      new FocusEvent("focusout", { bubbles: true, relatedTarget: outsideEl })
-    );
-    expect(onBlur).toHaveBeenCalledTimes(1);
-  });
-
-  it("does not pop a keymap scope that was never pushed", () => {
-    const { app } = createFakeApp();
-    const handle = createEmbeddableMarkdownEditor(app, document.body.createDiv(), {
-      value: "x",
-    });
-
-    // Destroy without the editor ever gaining focus.
-    handle!.destroy();
-
-    expect(app.keymap.pushScope).not.toHaveBeenCalled();
-    expect(app.keymap.popScope).not.toHaveBeenCalled();
-  });
-
-  it("pops the keymap scope at most once for a focused editor", () => {
-    const { app } = createFakeApp();
-    const handle = createEmbeddableMarkdownEditor(app, document.body.createDiv(), {
-      value: "x",
-    });
-    const rawEditor = handle!.editor as FakeScrollableMarkdownEditor;
-
-    rawEditor.editor.cm.contentDOM.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
-    // Blur then destroy — the DOM-removal blur in Chrome makes this the
-    // double-pop path.
-    rawEditor.editor.cm.contentDOM.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
-    handle!.destroy();
-
-    expect(app.keymap.popScope).toHaveBeenCalledTimes(1);
-  });
-
-  it("suppresses onBlur after the editor is unloaded (Chrome DOM-removal blur)", () => {
-    const { app } = createFakeApp();
-    const container = document.body.createDiv();
-    const onBlur = jest.fn();
-
-    const handle = createEmbeddableMarkdownEditor(app, container, {
-      value: "x",
-      onBlur,
-    });
-    const rawEditor = handle!.editor as FakeScrollableMarkdownEditor;
-
-    handle!.destroy();
-    rawEditor.editor.cm.contentDOM.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
-    expect(onBlur).not.toHaveBeenCalled();
-  });
-
-  it("destroys idempotently with a single unload", () => {
-    const { app } = createFakeApp();
-    const container = document.body.createDiv();
-
-    const handle = createEmbeddableMarkdownEditor(app, container, { value: "x" });
-    const rawEditor = handle!.editor as FakeScrollableMarkdownEditor;
-
-    handle!.destroy();
-    handle!.destroy();
-
-    expect(rawEditor.unloadCount).toBe(1);
-    expect(container.childElementCount).toBe(0);
-  });
-
-  it("restores the original setActiveLeaf after out-of-order destruction of two editors", () => {
-    const { app } = createFakeApp();
-    const originalSetActiveLeaf = app.workspace.setActiveLeaf;
-
+    const original = app.workspace.setActiveLeaf;
     const first = createEmbeddableMarkdownEditor(app, document.body.createDiv(), {
       value: "a",
     });
@@ -355,101 +284,175 @@ describe("createEmbeddableMarkdownEditor", () => {
       value: "b",
     });
 
-    // Teardown in creation order — the regression case: a per-instance wrap
-    // chain would leave a destroyed editor's wrapper installed forever.
+    expect(app.workspace.setActiveLeaf).toBe(original);
     first!.destroy();
     second!.destroy();
-
-    expect(app.workspace.setActiveLeaf).toBe(originalSetActiveLeaf);
+    expect(app.workspace.setActiveLeaf).toBe(original);
   });
 
-  it("keeps setActiveLeaf suppressed only while an editor has focus", () => {
+  it("invokes onBlur only when focus leaves the entire native surface", () => {
     const { app } = createFakeApp();
-    const originalSetActiveLeaf = app.workspace.setActiveLeaf;
-    const handle = createEmbeddableMarkdownEditor(app, document.body.createDiv(), {
-      value: "a",
-    });
-    const rawEditor = handle!.editor as FakeScrollableMarkdownEditor;
-
-    rawEditor.editor.cm.hasFocus = true;
-    app.workspace.setActiveLeaf("leaf-while-focused");
-    expect(originalSetActiveLeaf).not.toHaveBeenCalled();
-
-    rawEditor.editor.cm.hasFocus = false;
-    app.workspace.setActiveLeaf("leaf-while-blurred");
-    expect(originalSetActiveLeaf).toHaveBeenCalledWith("leaf-while-blurred");
-
-    handle!.destroy();
-  });
-
-  it("focus() forwards to the CodeMirror view", () => {
-    const { app } = createFakeApp();
+    const onBlur = jest.fn();
     const container = document.body.createDiv();
-
-    const handle = createEmbeddableMarkdownEditor(app, container, { value: "abc" });
-    const rawEditor = handle!.editor as FakeScrollableMarkdownEditor;
-
-    handle!.focus();
-    expect(rawEditor.editor.cm.focus).toHaveBeenCalled();
-  });
-
-  it("set() replaces the document and value reflects it", () => {
-    const { app } = createFakeApp();
-    const handle = createEmbeddableMarkdownEditor(app, document.body.createDiv(), {
-      value: "before",
+    const outside = document.body.createDiv();
+    const handle = createEmbeddableMarkdownEditor(app, container, {
+      value: "- [ ] task",
+      onBlur,
     });
+    const surface = handle!.editor as FakeNativeMarkdownEmbedBase;
+    const checkbox = surface.editorEl.createEl("input");
 
-    handle!.set("after");
-    expect(handle!.value).toBe("after");
+    surface.editMode!.cm.contentDOM.dispatchEvent(
+      new FocusEvent("focusout", { bubbles: true, relatedTarget: checkbox })
+    );
+    expect(onBlur).not.toHaveBeenCalled();
+
+    checkbox.dispatchEvent(
+      new FocusEvent("focusout", { bubbles: true, relatedTarget: outside })
+    );
+    expect(onBlur).toHaveBeenCalledTimes(1);
   });
 
-  it("reports support based on whether the internal editor resolves", () => {
+  it("does not pop a scope that was never pushed and destroys idempotently", () => {
     const { app } = createFakeApp();
-    expect(isEmbeddableMarkdownEditorSupported(app)).toBe(true);
-    expect(isEmbeddableMarkdownEditorSupported({} as never)).toBe(false);
-  });
-
-  it("routes the Escape key handler to onEscape", () => {
-    const { app } = createFakeApp();
-    const onEscape = jest.fn();
     const handle = createEmbeddableMarkdownEditor(app, document.body.createDiv(), {
       value: "x",
-      onEscape,
     });
-    const rawEditor = handle!.editor as { handleEmbeddableEscape?: () => boolean };
+    const surface = handle!.editor as FakeNativeMarkdownEmbedBase;
 
-    expect(rawEditor.handleEmbeddableEscape?.()).toBe(true);
-    expect(onEscape).toHaveBeenCalledTimes(1);
+    handle!.destroy();
+    handle!.destroy();
+
+    expect(app.keymap.popScope).not.toHaveBeenCalled();
+    expect(surface.unloadCount).toBe(1);
   });
 
-  it("routes paste events to onPaste", () => {
+  it("suppresses blur callbacks caused by editor teardown", () => {
+    const { app } = createFakeApp();
+    const onBlur = jest.fn();
+    const handle = createEmbeddableMarkdownEditor(app, document.body.createDiv(), {
+      value: "x",
+      onBlur,
+    });
+    const surface = handle!.editor as FakeNativeMarkdownEmbedBase;
+    const contentDOM = surface.editMode!.cm.contentDOM;
+
+    handle!.destroy();
+    contentDOM.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
+
+    expect(onBlur).not.toHaveBeenCalled();
+  });
+
+  it("detaches lifecycle listeners before the container can be reused", () => {
     const { app } = createFakeApp();
     const onPaste = jest.fn();
-    const handle = createEmbeddableMarkdownEditor(app, document.body.createDiv(), {
+    const container = document.body.createDiv();
+    const handle = createEmbeddableMarkdownEditor(app, container, {
       value: "x",
       onPaste,
     });
-    const rawEditor = handle!.editor as {
-      handleEmbeddablePaste?: (event: ClipboardEvent) => void;
-    };
 
-    const pasteEvent = new Event("paste") as ClipboardEvent;
-    rawEditor.handleEmbeddablePaste?.(pasteEvent);
-    expect(onPaste).toHaveBeenCalledWith(pasteEvent);
+    handle!.destroy();
+    const replacementChild = container.createDiv();
+    replacementChild.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+    replacementChild.dispatchEvent(new Event("paste", { bubbles: true }));
+
+    expect(app.keymap.pushScope).not.toHaveBeenCalled();
+    expect(app.workspace.activeEditor).toBeNull();
+    expect(onPaste).not.toHaveBeenCalled();
   });
 
-  it("selectAll() dispatches a whole-document selection", () => {
+  it("enters edit mode at the native Canvas pointer position", () => {
     const { app } = createFakeApp();
-    const container = document.body.createDiv();
+    const handle = createEmbeddableMarkdownEditor(app, document.body.createDiv(), {
+      value: "abcdef",
+      focusAt: { x: 4, y: 20 },
+    });
+    const surface = handle!.editor as FakeNativeMarkdownEmbedBase;
 
-    const handle = createEmbeddableMarkdownEditor(app, container, { value: "abc" });
-    const rawEditor = handle!.editor as FakeScrollableMarkdownEditor;
+    expect(surface.lastShowEditorPoint).toEqual({ x: 4, y: 20 });
+    expect(surface.editMode!.cm.state.selection.main).toEqual({ anchor: 4, head: 4 });
+  });
+
+  it("focus(), set(), and selectAll() delegate to the native editor", () => {
+    const { app } = createFakeApp();
+    const handle = createEmbeddableMarkdownEditor(app, document.body.createDiv(), {
+      value: "abc",
+    });
+    const surface = handle!.editor as FakeNativeMarkdownEmbedBase;
+
+    handle!.focus();
+    expect(surface.editMode!.cm.focus).toHaveBeenCalled();
+
+    handle!.set("after");
+    expect(handle!.value).toBe("after");
 
     handle!.selectAll();
-    expect(rawEditor.editor.cm.dispatch).toHaveBeenCalledWith(
-      expect.objectContaining({
-        selection: expect.objectContaining({ anchor: 0, head: 3 }),
-      })
+    expect(surface.editMode!.cm.state.selection.main).toEqual({ anchor: 0, head: 5 });
+  });
+
+  it("captures and restores selection, scroll, and focus across remounts", () => {
+    const firstHarness = createFakeApp();
+    const first = createEmbeddableMarkdownEditor(
+      firstHarness.app,
+      document.body.createDiv(),
+      { value: "abcdef" }
+    )!;
+    const firstSurface = first.editor as FakeNativeMarkdownEmbedBase;
+    firstSurface.editMode!.cm.dispatch({ selection: { anchor: 2, head: 5 } });
+    firstSurface.editMode!.cm.scrollDOM.scrollTop = 37;
+    firstSurface.editMode!.cm.hasFocus = true;
+    const snapshot = first.captureSnapshot();
+
+    const secondHarness = createFakeApp();
+    const second = createEmbeddableMarkdownEditor(
+      secondHarness.app,
+      document.body.createDiv(),
+      { value: "abcdef" }
+    )!;
+    const secondSurface = second.editor as FakeNativeMarkdownEmbedBase;
+    second.restoreSnapshot(snapshot);
+
+    expect(secondSurface.editMode!.cm.state.selection.main).toEqual({ anchor: 2, head: 5 });
+    expect(secondSurface.editMode!.cm.scrollDOM.scrollTop).toBe(37);
+    expect(secondSurface.editMode!.cm.focus).toHaveBeenCalled();
+  });
+
+  it("routes native preview exit and paste events to the host", () => {
+    const { app } = createFakeApp();
+    const onEscape = jest.fn();
+    const onPaste = jest.fn();
+    const container = document.body.createDiv();
+    const handle = createEmbeddableMarkdownEditor(app, container, {
+      value: "x",
+      onEscape,
+      onPaste,
+    });
+    const surface = handle!.editor as FakeNativeMarkdownEmbedBase;
+
+    container.dispatchEvent(new Event("paste", { bubbles: true }));
+    surface.showPreview(true);
+
+    expect(onPaste).toHaveBeenCalledTimes(1);
+    expect(onEscape).toHaveBeenCalledTimes(1);
+  });
+
+  it("provides the project and node context through the native Canvas linktext", () => {
+    const { app } = createFakeApp();
+    const handle = createEmbeddableMarkdownEditor(app, document.body.createDiv(), {
+      value: "x",
+      sourcePath: "Projects/Launch.systemsculpt",
+      nodeId: "text_1",
+    });
+
+    expect((handle!.editor as { linktext?: string }).linktext).toBe(
+      "Projects/Launch.systemsculpt#^text_1"
     );
+  });
+
+  it("reports support based on whether the native markdown embed resolves", () => {
+    const { app } = createFakeApp();
+    expect(isEmbeddableMarkdownEditorSupported(app)).toBe(true);
+    expect(isEmbeddableMarkdownEditorSupported({} as never)).toBe(false);
   });
 });

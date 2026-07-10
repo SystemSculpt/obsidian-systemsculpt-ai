@@ -42,6 +42,12 @@ type HarnessOptions = {
   renderMarkdownPreview?: jest.Mock;
   createMarkdownEditor?: StudioTextNodeMarkdownEditorFactory;
   registerEditorTeardown?: jest.Mock;
+  initialFocusPoint?: { x: number; y: number };
+  initialEditorSnapshot?: {
+    selection: { anchor: number; head: number };
+    scrollTop: number;
+    focused: boolean;
+  };
 };
 
 function renderHarness(options: HarnessOptions = {}) {
@@ -68,6 +74,8 @@ function renderHarness(options: HarnessOptions = {}) {
     renderMarkdownPreview: options.renderMarkdownPreview,
     createMarkdownEditor: options.createMarkdownEditor,
     registerEditorTeardown: options.registerEditorTeardown,
+    initialFocusPoint: options.initialFocusPoint,
+    initialEditorSnapshot: options.initialEditorSnapshot,
   });
 
   return {
@@ -88,23 +96,39 @@ type EditorFactoryCapture = {
     options: Parameters<StudioTextNodeMarkdownEditorFactory>[1];
   }>;
   handle: StudioTextNodeMarkdownEditorHandle & {
+    value: string;
+    commit: jest.Mock;
     destroy: jest.Mock;
     focus: jest.Mock;
+    focusAt: jest.Mock;
     selectAll: jest.Mock;
+    captureSnapshot: jest.Mock;
+    restoreSnapshot: jest.Mock;
   };
 };
 
 function createEditorFactory(result: "handle" | "null" = "handle"): EditorFactoryCapture {
-  const handle = {
+  const calls: EditorFactoryCapture["calls"] = [];
+  const handle: EditorFactoryCapture["handle"] = {
     value: "",
     set: jest.fn(),
+    commit: jest.fn(() => {
+      calls[0]?.options.onChange?.(handle.value);
+      return handle.value;
+    }),
     destroy: jest.fn(),
     focus: jest.fn(),
+    focusAt: jest.fn(),
     selectAll: jest.fn(),
+    captureSnapshot: jest.fn(() => ({
+      selection: { anchor: 0, head: 0 },
+      scrollTop: 0,
+      focused: false,
+    })),
+    restoreSnapshot: jest.fn(),
     editorEl: null,
     editor: null,
   };
-  const calls: EditorFactoryCapture["calls"] = [];
   const factory: StudioTextNodeMarkdownEditorFactory = (containerEl, options) => {
     calls.push({ containerEl, options });
     if (result === "null") {
@@ -202,10 +226,17 @@ describe("studio.text live-preview card", () => {
       });
 
       const displayEl = nodeEl.querySelector<HTMLElement>(".ss-studio-text-node-display");
-      displayEl?.dispatchEvent(new MouseEvent("dblclick", { bubbles: true, cancelable: true }));
+      displayEl?.dispatchEvent(
+        new MouseEvent("dblclick", {
+          bubbles: true,
+          cancelable: true,
+          clientX: 48,
+          clientY: 64,
+        })
+      );
 
       expect(graphInteraction.ensureSingleSelection).toHaveBeenCalledWith(node.id);
-      expect(onRequestTextNodeEdit).toHaveBeenCalledWith(node.id);
+      expect(onRequestTextNodeEdit).toHaveBeenCalledWith(node.id, { x: 48, y: 64 });
     });
   });
 
@@ -254,7 +285,30 @@ describe("studio.text live-preview card", () => {
         node.id,
         "value",
         "start plus more",
-        { mode: "continuous" }
+        { mode: "continuous", captureHistory: false }
+      );
+    });
+
+    it("flushes the native document before ending the edit session", () => {
+      const capture = createEditorFactory();
+      const { node, onNodeConfigValueChange, onStopTextNodeEdit } = renderHarness({
+        value: "",
+        isEditing: true,
+        createMarkdownEditor: capture.factory,
+      });
+      capture.handle.value = "final IME draft";
+
+      capture.calls[0].options.onBlur?.();
+
+      expect(capture.handle.commit).toHaveBeenCalledTimes(1);
+      expect(onNodeConfigValueChange).toHaveBeenCalledWith(
+        node.id,
+        "value",
+        "final IME draft",
+        { mode: "continuous", captureHistory: false }
+      );
+      expect(onNodeConfigValueChange.mock.invocationCallOrder[0]).toBeLessThan(
+        onStopTextNodeEdit.mock.invocationCallOrder[0]
       );
     });
 
@@ -273,6 +327,57 @@ describe("studio.text live-preview card", () => {
       expect(onStopTextNodeEdit).toHaveBeenCalledTimes(2);
     });
 
+    it("ends the edit session even when the final commit throws", () => {
+      const capture = createEditorFactory();
+      capture.handle.commit.mockImplementation(() => {
+        throw new Error("commit failed");
+      });
+      const { node, onStopTextNodeEdit } = renderHarness({
+        value: "x",
+        isEditing: true,
+        createMarkdownEditor: capture.factory,
+      });
+
+      expect(() => capture.calls[0].options.onBlur?.()).toThrow("commit failed");
+      expect(onStopTextNodeEdit).toHaveBeenCalledWith(node.id);
+    });
+
+    it("preserves the native selection, scroll, and focus snapshot across card remounts", () => {
+      const capture = createEditorFactory();
+      const snapshot = {
+        selection: { anchor: 3, head: 7 },
+        scrollTop: 42,
+        focused: true,
+      };
+      const nextSnapshot = {
+        selection: { anchor: 8, head: 8 },
+        scrollTop: 64,
+        focused: true,
+      };
+      capture.handle.captureSnapshot.mockReturnValue(nextSnapshot);
+      const registerEditorTeardown = jest.fn();
+      const { node } = renderHarness({
+        value: "persistent editor state",
+        isEditing: true,
+        createMarkdownEditor: capture.factory,
+        registerEditorTeardown,
+        initialEditorSnapshot: snapshot,
+      });
+
+      expect(capture.handle.restoreSnapshot).toHaveBeenCalledWith(snapshot);
+      const teardown = registerEditorTeardown.mock.calls[0][1] as () => unknown;
+      expect(teardown()).toEqual(nextSnapshot);
+      expect(capture.handle.commit).toHaveBeenCalledTimes(1);
+      expect(capture.handle.commit.mock.invocationCallOrder[0]).toBeLessThan(
+        capture.handle.captureSnapshot.mock.invocationCallOrder[0]
+      );
+      expect(capture.handle.captureSnapshot.mock.invocationCallOrder[0]).toBeLessThan(
+        capture.handle.destroy.mock.invocationCallOrder[0]
+      );
+      expect(capture.handle.destroy).toHaveBeenCalledTimes(1);
+      expect(registerEditorTeardown).toHaveBeenCalledWith(node.id, expect.any(Function));
+    });
+
     it("registers a teardown that destroys the editor", () => {
       const capture = createEditorFactory();
       const registerEditorTeardown = jest.fn();
@@ -289,7 +394,43 @@ describe("studio.text live-preview card", () => {
       expect(capture.handle.destroy).toHaveBeenCalled();
     });
 
-    it("autofocuses and selects the editor content when requested", () => {
+    it("destroys the editor even when its final commit throws", () => {
+      const capture = createEditorFactory();
+      capture.handle.commit.mockImplementation(() => {
+        throw new Error("commit failed");
+      });
+      const registerEditorTeardown = jest.fn();
+      renderHarness({
+        value: "x",
+        isEditing: true,
+        createMarkdownEditor: capture.factory,
+        registerEditorTeardown,
+      });
+
+      const teardown = registerEditorTeardown.mock.calls[0][1] as () => void;
+      expect(teardown).toThrow("commit failed");
+      expect(capture.handle.destroy).toHaveBeenCalledTimes(1);
+    });
+
+    it("destroys the editor even when snapshot capture throws", () => {
+      const capture = createEditorFactory();
+      capture.handle.captureSnapshot.mockImplementation(() => {
+        throw new Error("snapshot failed");
+      });
+      const registerEditorTeardown = jest.fn();
+      renderHarness({
+        value: "x",
+        isEditing: true,
+        createMarkdownEditor: capture.factory,
+        registerEditorTeardown,
+      });
+
+      const teardown = registerEditorTeardown.mock.calls[0][1] as () => void;
+      expect(teardown).toThrow("snapshot failed");
+      expect(capture.handle.destroy).toHaveBeenCalledTimes(1);
+    });
+
+    it("autofocuses without selecting the whole document when requested", () => {
       jest
         .spyOn(window, "requestAnimationFrame")
         .mockImplementation((callback: FrameRequestCallback) => {
@@ -305,7 +446,23 @@ describe("studio.text live-preview card", () => {
       });
 
       expect(capture.handle.focus).toHaveBeenCalled();
-      expect(capture.handle.selectAll).toHaveBeenCalled();
+      expect(capture.handle.selectAll).not.toHaveBeenCalled();
+    });
+
+    it("forwards the pointer focus point and suppresses deferred autofocus", () => {
+      const requestAnimationFrame = jest.spyOn(window, "requestAnimationFrame");
+      const capture = createEditorFactory();
+      renderHarness({
+        value: "x",
+        isEditing: true,
+        shouldAutoFocus: true,
+        initialFocusPoint: { x: 48, y: 64 },
+        createMarkdownEditor: capture.factory,
+      });
+
+      expect(capture.calls[0].options.focusAt).toEqual({ x: 48, y: 64 });
+      expect(requestAnimationFrame).not.toHaveBeenCalled();
+      expect(capture.handle.focus).not.toHaveBeenCalled();
     });
 
     it("skips the deferred autofocus when the editor is torn down before the frame fires", () => {

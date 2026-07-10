@@ -9,7 +9,10 @@ import type {
 import type { StudioGraphInteractionEngine } from "../StudioGraphInteractionEngine";
 import type { StudioNodeDetailMode } from "./StudioGraphNodeDetailMode";
 import type { StudioNodeRunDisplayState } from "../StudioRunPresentationState";
-import type { StudioTextNodeMarkdownEditorFactory } from "./StudioGraphTextNodeCard";
+import type {
+  StudioTextNodeMarkdownEditorFactory,
+  StudioTextNodeMarkdownEditorSnapshot,
+} from "./StudioGraphTextNodeCard";
 
 export type StudioGraphNodeMutationOptions = {
   mode?: StudioProjectSessionAutosaveMode;
@@ -83,10 +86,17 @@ export type RenderStudioGraphNodeCardOptions = {
   ) => Promise<StudioNodeConfigSelectOption[]>;
   isTextNodeEditing: (nodeId: string) => boolean;
   consumeTextNodeAutoFocus: (nodeId: string) => boolean;
-  onRequestTextNodeEdit: (nodeId: string) => void;
+  consumeTextNodeFocusPoint: (nodeId: string) => { x: number; y: number } | undefined;
+  consumeTextNodeEditorSnapshot: (
+    nodeId: string
+  ) => StudioTextNodeMarkdownEditorSnapshot | undefined;
+  onRequestTextNodeEdit: (nodeId: string, focusAt?: { x: number; y: number }) => void;
   onStopTextNodeEdit: (nodeId: string) => void;
   createTextNodeMarkdownEditor?: StudioTextNodeMarkdownEditorFactory;
-  registerTextNodeEditorTeardown?: (nodeId: string, teardown: () => void) => void;
+  registerTextNodeEditorTeardown?: (
+    nodeId: string,
+    teardown: () => StudioTextNodeMarkdownEditorSnapshot
+  ) => void;
   onRevealPathInFinder: (path: string) => void;
   resolveNodeBadge?: (node: StudioNodeInstance) => {
     text: string;

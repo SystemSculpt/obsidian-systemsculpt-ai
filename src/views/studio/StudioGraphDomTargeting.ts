@@ -1,4 +1,12 @@
-const STUDIO_GRAPH_EDITABLE_SELECTOR = "input, textarea, select, [contenteditable='true']";
+export const STUDIO_GRAPH_EDITOR_SURFACE_ATTR = "data-studio-editor-surface";
+
+const STUDIO_GRAPH_EDITABLE_SELECTOR = [
+  "input",
+  "textarea",
+  "select",
+  "[contenteditable='true']",
+  `[${STUDIO_GRAPH_EDITOR_SURFACE_ATTR}]`,
+].join(", ");
 const STUDIO_GRAPH_MENU_SELECTOR = ".ss-studio-node-context-menu, .ss-studio-simple-context-menu";
 const STUDIO_GRAPH_NATIVE_WHEEL_SCROLL_SELECTOR = [
   ".ss-studio-node-inspector",

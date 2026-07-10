@@ -170,6 +170,8 @@ function renderNodeCardHarness(options: {
     onNodeGeometryMutated: jest.fn(),
     isTextNodeEditing: jest.fn(() => isTextNodeEditing),
     consumeTextNodeAutoFocus: jest.fn(() => false),
+    consumeTextNodeFocusPoint: jest.fn(() => undefined),
+    consumeTextNodeEditorSnapshot: jest.fn(() => undefined),
     onRequestTextNodeEdit,
     onStopTextNodeEdit,
     onRevealPathInFinder: jest.fn(),
@@ -321,7 +323,7 @@ describe("renderStudioGraphNodeCard", () => {
     displayEl?.dispatchEvent(new MouseEvent("dblclick", { bubbles: true, cancelable: true }));
 
     expect(graphInteraction.ensureSingleSelection).toHaveBeenCalledWith(node.id);
-    expect(onRequestTextNodeEdit).toHaveBeenCalledWith(node.id);
+    expect(onRequestTextNodeEdit).toHaveBeenCalledWith(node.id, { x: 0, y: 0 });
   });
 
   it("opens label edit on a repeated tap even when selection re-renders the card", () => {
@@ -367,7 +369,10 @@ describe("renderStudioGraphNodeCard", () => {
       expect(secondRender.graphInteraction.ensureSingleSelection).toHaveBeenCalledWith(
         secondRender.node.id
       );
-      expect(secondRender.onRequestTextNodeEdit).toHaveBeenCalledWith(secondRender.node.id);
+      expect(secondRender.onRequestTextNodeEdit).toHaveBeenCalledWith(
+        secondRender.node.id,
+        { x: 123, y: 142 }
+      );
       expect(secondRender.graphInteraction.startNodeDrag).not.toHaveBeenCalled();
     } finally {
       nowSpy.mockRestore();

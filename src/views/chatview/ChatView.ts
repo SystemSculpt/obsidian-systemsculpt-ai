@@ -36,6 +36,7 @@ import type { DocumentProcessingProgressEvent } from "../../types/documentProces
 import { ChatDebugLogService } from "./ChatDebugLogService";
 import { resolveProviderLabel } from "../../studio/piAuth/StudioPiProviderRegistry";
 import { PlatformContext } from "../../services/PlatformContext";
+import { loadDesktopOnly } from "../../platform/desktopOnly";
 import {
   getManagedSystemSculptModelId,
   isManagedSystemSculptModelId,
@@ -87,6 +88,12 @@ function isSupportedPersistedOpenAiCodexChatModel(modelId: string): boolean {
   return OPENAI_CODEX_CHATGPT_SUPPORTED_MODEL_IDS.has(
     String(modelId || "").trim().toLowerCase()
   );
+}
+
+type NodeFileSystem = Pick<typeof import("node:fs"), "existsSync">;
+
+function nodeFileSystem(): NodeFileSystem | null {
+  return loadDesktopOnly(() => require("node:fs") as NodeFileSystem);
 }
 
 export class ChatView extends ItemView {
@@ -2946,8 +2953,7 @@ export class ChatView extends ItemView {
       throw new Error("This chat does not have an active SystemSculpt session to branch.");
     }
     if (sessionFile) {
-      const { existsSync } = await import("node:fs");
-      if (!existsSync(sessionFile)) {
+      if (!nodeFileSystem()?.existsSync(sessionFile)) {
         throw new Error(
           "The linked session file no longer exists. Reopen the chat to recover it, or start a new chat."
         );
@@ -2989,8 +2995,7 @@ export class ChatView extends ItemView {
     const nextSessionName = String(result.sessionName || "").trim();
 
     if (nextSessionFile) {
-      const { existsSync } = await import("node:fs");
-      if (!existsSync(nextSessionFile)) {
+      if (!nodeFileSystem()?.existsSync(nextSessionFile)) {
         await this.applyLocalPiForkState({
           forkMessageId: messageId,
           sessionFile: nextSessionFile,

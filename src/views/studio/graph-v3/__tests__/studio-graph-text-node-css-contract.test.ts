@@ -44,6 +44,23 @@ describe("Studio text-node CSS contract", () => {
     expect(liveEditorRule).not.toMatch(/max-width/);
   });
 
+  it("neutralizes the native embed frame while keeping its editor behavior", () => {
+    const css = readStudioCss();
+    const nativeSurfaceRule = readRuleBody(
+      css,
+      /\.ss-studio-text-node-live-editor\.markdown-embed\s*\{(?<body>[^}]*)\}/s
+    );
+    const nativeContentRule = readRuleBody(
+      css,
+      /\.ss-studio-text-node-live-editor\s*>\s*\.markdown-embed-content\s*\{(?<body>[^}]*)\}/s
+    );
+
+    expect(nativeSurfaceRule).toMatch(/background(?:-color)?:\s*transparent;/);
+    expect(nativeSurfaceRule).toMatch(/border:\s*0;/);
+    expect(nativeSurfaceRule).toMatch(/font-style:\s*inherit;/);
+    expect(nativeContentRule).toMatch(/height:\s*auto;/);
+  });
+
   it("lets rendered markdown flow as normal blocks instead of pre-wrap source", () => {
     const css = readStudioCss();
     const markdownDisplayRule = readRuleBody(

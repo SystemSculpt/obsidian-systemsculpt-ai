@@ -1245,6 +1245,20 @@
   cursor: text;
 }
 
+/* The native MarkdownEmbed component brings note-embed framing and a 100%
+ * content height. Studio keeps its behavior, but the text itself remains the
+ * chromeless, intrinsic-height canvas node. */
+.ss-studio-text-node-live-editor.markdown-embed {
+  margin: 0;
+  background: transparent;
+  border: 0;
+  font-style: inherit;
+}
+
+.ss-studio-text-node-live-editor > .markdown-embed-content {
+  height: auto;
+}
+
 /* The embedded editor carries Obsidian's own markdown-source-view chrome;
  * strip the note-page framing so only the text shows on the canvas. */
 .ss-studio-text-node-live-editor .markdown-source-view {
