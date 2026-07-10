@@ -11,6 +11,7 @@ import {
   STUDIO_GRAPH_TEXT_NODE_DEFAULT_FONT_SIZE,
 } from "../../../studio/StudioNodeGeometry";
 import { mountStudioGraphNodeResizeFrame } from "./StudioGraphNodeResizeFrame";
+import { STUDIO_GRAPH_EDITOR_SURFACE_ATTR } from "../StudioGraphDomTargeting";
 import { markStudioNodeCardInteractive } from "./StudioGraphNodeCardPointer";
 
 const STUDIO_TEXT_NODE_DOUBLE_TAP_DELAY_MS = 450;
@@ -30,11 +31,22 @@ const lastTextNodeTapByNodeId = new Map<string, TextNodeTapSnapshot>();
  * factory. Mirrors the shape of `EmbeddableMarkdownEditorHandle` without
  * importing it, so this render module stays free of app-level dependencies.
  */
+export type StudioTextNodeMarkdownEditorSnapshot = {
+  selection: { anchor: number; head: number };
+  scrollTop: number;
+  focused: boolean;
+};
+
 export type StudioTextNodeMarkdownEditorHandle = {
   readonly value: string;
   set(value: string): void;
+  /** Flushes the current native document through onChange before returning it. */
+  commit(): string;
   focus(): void;
+  focusAt(point: { x: number; y: number }): void;
   selectAll(): void;
+  captureSnapshot(): StudioTextNodeMarkdownEditorSnapshot;
+  restoreSnapshot(snapshot: StudioTextNodeMarkdownEditorSnapshot): void;
   destroy(): void;
   readonly editorEl: HTMLElement | null;
   readonly editor: unknown;
@@ -50,6 +62,8 @@ export type StudioTextNodeMarkdownEditorFactory = (
   options: {
     value: string;
     placeholder: string;
+    focusAt?: { x: number; y: number };
+    nodeId?: string;
     onChange?: (value: string) => void;
     onEscape?: () => void;
     onBlur?: () => void;
@@ -76,7 +90,8 @@ type RenderTextNodeCardOptions = {
   onNodeGeometryMutated: (node: StudioNodeInstance) => void;
   isEditing: boolean;
   shouldAutoFocus: boolean;
-  onRequestTextNodeEdit: (nodeId: string) => void;
+  initialFocusPoint?: { x: number; y: number };
+  onRequestTextNodeEdit: (nodeId: string, focusAt?: { x: number; y: number }) => void;
   onStopTextNodeEdit: (nodeId: string) => void;
   renderMarkdownPreview?: (
     node: StudioNodeInstance,
@@ -84,7 +99,11 @@ type RenderTextNodeCardOptions = {
     containerEl: HTMLElement
   ) => Promise<void> | void;
   createMarkdownEditor?: StudioTextNodeMarkdownEditorFactory;
-  registerEditorTeardown?: (nodeId: string, teardown: () => void) => void;
+  initialEditorSnapshot?: StudioTextNodeMarkdownEditorSnapshot;
+  registerEditorTeardown?: (
+    nodeId: string,
+    teardown: () => StudioTextNodeMarkdownEditorSnapshot
+  ) => void;
 };
 
 /**
@@ -166,11 +185,16 @@ type MountLiveMarkdownEditorOptions = {
   node: StudioNodeInstance;
   textValue: string;
   createMarkdownEditor: StudioTextNodeMarkdownEditorFactory;
-  registerEditorTeardown?: (nodeId: string, teardown: () => void) => void;
+  registerEditorTeardown?: (
+    nodeId: string,
+    teardown: () => StudioTextNodeMarkdownEditorSnapshot
+  ) => void;
+  initialEditorSnapshot?: StudioTextNodeMarkdownEditorSnapshot;
   onNodeConfigMutated: (node: StudioNodeInstance) => void;
   onNodeConfigValueChange?: RenderTextNodeCardOptions["onNodeConfigValueChange"];
   onStopTextNodeEdit: (nodeId: string) => void;
   shouldAutoFocus: boolean;
+  initialFocusPoint?: { x: number; y: number };
   adoptTextSurface: (el: HTMLElement) => void;
 };
 
@@ -189,10 +213,12 @@ function mountLiveMarkdownEditor(options: MountLiveMarkdownEditorOptions): boole
     textValue,
     createMarkdownEditor,
     registerEditorTeardown,
+    initialEditorSnapshot,
     onNodeConfigMutated,
     onNodeConfigValueChange,
     onStopTextNodeEdit,
     shouldAutoFocus,
+    initialFocusPoint,
     adoptTextSurface,
   } = options;
 
@@ -200,6 +226,7 @@ function mountLiveMarkdownEditor(options: MountLiveMarkdownEditorOptions): boole
     cls: "ss-studio-text-node-live-editor",
     attr: {
       "aria-label": `${node.title || "Text"} content`,
+      [STUDIO_GRAPH_EDITOR_SURFACE_ATTR]: "",
     },
   });
   // Pointer gestures inside the editor belong to the editor (text selection,
@@ -208,25 +235,35 @@ function mountLiveMarkdownEditor(options: MountLiveMarkdownEditorOptions): boole
 
   const commitValue = (nextValue: string): void => {
     if (onNodeConfigValueChange) {
-      onNodeConfigValueChange(node.id, "value", nextValue, { mode: "continuous" });
+      onNodeConfigValueChange(node.id, "value", nextValue, {
+        mode: "continuous",
+        captureHistory: false,
+      });
       return;
     }
     node.config.value = nextValue;
     onNodeConfigMutated(node);
   };
 
-  const editorHandle = createMarkdownEditor(hostEl, {
+  let editorHandle: StudioTextNodeMarkdownEditorHandle | null = null;
+  const finishEditing = (): void => {
+    // Native CodeMirror updates are synchronous in the normal path, but IME,
+    // paste, and fast click-away can race the final owner.save callback. Flush
+    // the live document before the view decides whether an empty node should
+    // be removed.
+    editorHandle?.commit();
+    onStopTextNodeEdit(node.id);
+  };
+  editorHandle = createMarkdownEditor(hostEl, {
     value: textValue,
     placeholder: "Text",
+    focusAt: initialFocusPoint,
+    nodeId: node.id,
     onChange: (nextValue) => {
       commitValue(nextValue);
     },
-    onEscape: () => {
-      onStopTextNodeEdit(node.id);
-    },
-    onBlur: () => {
-      onStopTextNodeEdit(node.id);
-    },
+    onEscape: finishEditing,
+    onBlur: finishEditing,
   });
   if (!editorHandle) {
     hostEl.remove();
@@ -235,19 +272,29 @@ function mountLiveMarkdownEditor(options: MountLiveMarkdownEditorOptions): boole
 
   adoptTextSurface(hostEl);
   let editorDisposed = false;
+  if (initialEditorSnapshot) {
+    editorHandle.restoreSnapshot(initialEditorSnapshot);
+  }
   registerEditorTeardown?.(node.id, () => {
+    // Whole-graph renders can arrive between CodeMirror's last DOM update and
+    // its owner callback. Persist the live document before carrying the caret
+    // snapshot into the replacement editor.
+    editorHandle.commit();
+    const snapshot = editorHandle.captureSnapshot();
     editorDisposed = true;
     editorHandle.destroy();
+    return snapshot;
   });
 
-  if (shouldAutoFocus) {
+  if (shouldAutoFocus && !initialFocusPoint && !initialEditorSnapshot) {
     window.requestAnimationFrame(() => {
       // A re-render can tear the editor down before this frame fires.
       if (editorDisposed) {
         return;
       }
+      // Native note editing focuses the caret; it does not select the whole
+      // document on entry. Pointer-driven entry is handled by focusAt above.
       editorHandle.focus();
-      editorHandle.selectAll();
     });
   }
   return true;
@@ -265,10 +312,12 @@ export function renderTextNodeCard(options: RenderTextNodeCardOptions): void {
     onNodeGeometryMutated,
     isEditing,
     shouldAutoFocus,
+    initialFocusPoint,
     onRequestTextNodeEdit,
     onStopTextNodeEdit,
     renderMarkdownPreview,
     createMarkdownEditor,
+    initialEditorSnapshot,
     registerEditorTeardown,
   } = options;
 
@@ -305,10 +354,12 @@ export function renderTextNodeCard(options: RenderTextNodeCardOptions): void {
             textValue,
             createMarkdownEditor,
             registerEditorTeardown,
+            initialEditorSnapshot,
             onNodeConfigMutated,
             onNodeConfigValueChange,
             onStopTextNodeEdit,
             shouldAutoFocus,
+            initialFocusPoint,
             adoptTextSurface: (el) => {
               textSurfaceEl = el;
               applyFontSize(fontSize);
@@ -353,7 +404,10 @@ export function renderTextNodeCard(options: RenderTextNodeCardOptions): void {
       syncEditorHeight();
       const nextValue = (event.target as HTMLTextAreaElement).value;
       if (onNodeConfigValueChange) {
-        onNodeConfigValueChange(node.id, "value", nextValue, { mode: "continuous" });
+        onNodeConfigValueChange(node.id, "value", nextValue, {
+          mode: "continuous",
+          captureHistory: false,
+        });
         return;
       }
       node.config.value = nextValue;
@@ -415,7 +469,10 @@ export function renderTextNodeCard(options: RenderTextNodeCardOptions): void {
         event.preventDefault();
         lastTextNodeTapByNodeId.delete(node.id);
         graphInteraction.ensureSingleSelection(node.id);
-        onRequestTextNodeEdit(node.id);
+        onRequestTextNodeEdit(node.id, {
+          x: pointerEvent.clientX,
+          y: pointerEvent.clientY,
+        });
         return;
       }
       trackPotentialTextNodeTap(node.id, pointerEvent, now);
@@ -426,7 +483,10 @@ export function renderTextNodeCard(options: RenderTextNodeCardOptions): void {
       event.stopPropagation();
       lastTextNodeTapByNodeId.delete(node.id);
       graphInteraction.ensureSingleSelection(node.id);
-      onRequestTextNodeEdit(node.id);
+      onRequestTextNodeEdit(node.id, {
+        x: (event as MouseEvent).clientX,
+        y: (event as MouseEvent).clientY,
+      });
     });
   }
 

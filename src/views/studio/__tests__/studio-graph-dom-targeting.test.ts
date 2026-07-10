@@ -27,6 +27,18 @@ describe("isStudioGraphEditableTarget", () => {
     root.remove();
   });
 
+  it("keeps pointer gestures inside a composite editor surface in the editor", () => {
+    const editorSurface = document.createElement("div");
+    editorSurface.setAttribute("data-studio-editor-surface", "");
+    const livePreviewWidget = document.createElement("span");
+    editorSurface.appendChild(livePreviewWidget);
+    document.body.appendChild(editorSurface);
+
+    expect(isStudioGraphEditableTarget(livePreviewWidget)).toBe(true);
+
+    editorSurface.remove();
+  });
+
   it("returns false for non-editable node surfaces", () => {
     const surface = document.createElement("div");
     surface.className = "ss-studio-node-card";

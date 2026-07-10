@@ -18,7 +18,10 @@ import type {
   StudioGraphNodeMutationOptions,
   StudioGraphNodeResizePatch,
 } from "./StudioGraphNodeCardTypes";
-import type { StudioTextNodeMarkdownEditorFactory } from "./StudioGraphTextNodeCard";
+import type {
+  StudioTextNodeMarkdownEditorFactory,
+  StudioTextNodeMarkdownEditorSnapshot,
+} from "./StudioGraphTextNodeCard";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -81,10 +84,17 @@ export type StudioGraphWorkspaceRendererOptions = {
   ) => Promise<StudioNodeConfigSelectOption[]>;
   isTextNodeEditing: (nodeId: string) => boolean;
   consumeTextNodeAutoFocus: (nodeId: string) => boolean;
-  onRequestTextNodeEdit: (nodeId: string) => void;
+  consumeTextNodeFocusPoint: (nodeId: string) => { x: number; y: number } | undefined;
+  consumeTextNodeEditorSnapshot: (
+    nodeId: string
+  ) => StudioTextNodeMarkdownEditorSnapshot | undefined;
+  onRequestTextNodeEdit: (nodeId: string, focusAt?: { x: number; y: number }) => void;
   onStopTextNodeEdit: (nodeId: string) => void;
   createTextNodeMarkdownEditor?: StudioTextNodeMarkdownEditorFactory;
-  registerTextNodeEditorTeardown?: (nodeId: string, teardown: () => void) => void;
+  registerTextNodeEditorTeardown?: (
+    nodeId: string,
+    teardown: () => StudioTextNodeMarkdownEditorSnapshot
+  ) => void;
   onRevealPathInFinder: (path: string) => void;
   resolveNodeBadge?: (node: StudioNodeInstance) => {
     text: string;
@@ -138,6 +148,8 @@ export function renderStudioGraphWorkspace(
     resolveDynamicSelectOptions,
     isTextNodeEditing,
     consumeTextNodeAutoFocus,
+    consumeTextNodeFocusPoint,
+    consumeTextNodeEditorSnapshot,
     onRequestTextNodeEdit,
     onStopTextNodeEdit,
     createTextNodeMarkdownEditor,
@@ -419,6 +431,8 @@ export function renderStudioGraphWorkspace(
       resolveDynamicSelectOptions,
       isTextNodeEditing,
       consumeTextNodeAutoFocus,
+      consumeTextNodeFocusPoint,
+      consumeTextNodeEditorSnapshot,
       onRequestTextNodeEdit,
       onStopTextNodeEdit,
       createTextNodeMarkdownEditor,

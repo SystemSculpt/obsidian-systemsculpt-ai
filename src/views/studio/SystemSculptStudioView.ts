@@ -34,7 +34,10 @@ import {
 } from "../../studio/StudioProjectSession";
 import { renderStudioGraphWorkspace } from "./graph-v3/StudioGraphWorkspaceRenderer";
 import { createEmbeddableMarkdownEditor } from "../../editor/embeddable-markdown-editor";
-import type { StudioTextNodeMarkdownEditorFactory } from "./graph-v3/StudioGraphTextNodeCard";
+import type {
+  StudioTextNodeMarkdownEditorFactory,
+  StudioTextNodeMarkdownEditorSnapshot,
+} from "./graph-v3/StudioGraphTextNodeCard";
 import {
   createGroupFromSelection as createNodeGroupFromSelection,
   removeNodesFromGroups,
@@ -240,14 +243,24 @@ export class SystemSculptStudioView extends ItemView {
   private nodeDetailModeByProjectPath: StudioNodeDetailModeByProject = {};
   private pendingViewportState: StudioGraphViewportState | null = null;
   private editingTextNodeIds = new Set<string>();
+  /** Text changes stay continuous while typing, then become one undo step on edit end. */
+  private dirtyTextNodeEditIds = new Set<string>();
   private pendingTextNodeAutofocusNodeId: string | null = null;
+  private pendingTextNodeFocusPointByNodeId = new Map<string, { x: number; y: number }>();
   /**
    * Live embedded markdown editors keyed by text-node id. Each graph render
    * rebuilds card DOM wholesale, so every mounted editor registers a teardown
    * here and `disposeTextNodeEditors` runs before the DOM is dropped —
    * CodeMirror views must be destroyed, not garbage-collected.
    */
-  private textNodeEditorTeardowns = new Map<string, () => void>();
+  private textNodeEditorTeardowns = new Map<
+    string,
+    () => StudioTextNodeMarkdownEditorSnapshot
+  >();
+  private textNodeEditorSnapshots = new Map<
+    string,
+    StudioTextNodeMarkdownEditorSnapshot
+  >();
   private readonly runPresentation = new StudioRunPresentationState();
   private readonly graphInteraction: StudioGraphInteractionEngine;
   private graphZoomMode: StudioGraphZoomMode = "interactive";
@@ -359,10 +372,10 @@ export class SystemSculptStudioView extends ItemView {
     this.unbindVaultEvents();
     this.graphClipboardPayload = null;
     this.graphClipboardPasteCount = 0;
-    this.resetProjectHistory(null);
     this.captureGraphViewportState();
     this.app.workspace.requestSaveLayout();
-    await this.flushPendingProjectSaveWork();
+    await this.flushTextNodeEditorsBeforeProjectTransition();
+    this.resetProjectHistory(null);
     this.clearSaveTimer();
     this.clearLayoutSaveTimer();
     this.resetViewportScrollingState();
@@ -373,8 +386,10 @@ export class SystemSculptStudioView extends ItemView {
     this.currentProjectPath = null;
     this.currentProject = null;
     this.editingTextNodeIds.clear();
+    this.dirtyTextNodeEditIds.clear();
     this.pendingTextNodeAutofocusNodeId = null;
-    this.disposeTextNodeEditors();
+    this.pendingTextNodeFocusPointByNodeId.clear();
+    this.textNodeEditorSnapshots.clear();
     this.inspectorOverlay?.destroy();
     this.inspectorOverlay = null;
     this.nodeContextMenuOverlay?.destroy();
@@ -469,7 +484,10 @@ export class SystemSculptStudioView extends ItemView {
     this.transientFieldErrorsByNodeId.clear();
     this.runPresentation.reset();
     this.editingTextNodeIds.clear();
+    this.dirtyTextNodeEditIds.clear();
     this.pendingTextNodeAutofocusNodeId = null;
+    this.pendingTextNodeFocusPointByNodeId.clear();
+    this.textNodeEditorSnapshots.clear();
     this.nodeContextMenuOverlay?.hide();
     this.nodeActionContextMenuOverlay?.hide();
     this.graphInteraction.clearPendingConnection({ requestRender: false });
@@ -1544,6 +1562,9 @@ export class SystemSculptStudioView extends ItemView {
       this.runPresentation.removeNode(nodeId);
       this.graphInteraction.onNodeRemoved(nodeId);
       this.editingTextNodeIds.delete(nodeId);
+      this.dirtyTextNodeEditIds.delete(nodeId);
+      this.pendingTextNodeFocusPointByNodeId.delete(nodeId);
+      this.textNodeEditorSnapshots.delete(nodeId);
       if (this.pendingTextNodeAutofocusNodeId === nodeId) {
         this.pendingTextNodeAutofocusNodeId = null;
       }
@@ -1751,6 +1772,11 @@ export class SystemSculptStudioView extends ItemView {
     await this.flushPendingProjectSaveWork({ force: true, showNotice: options?.showNotice });
   }
 
+  private async flushTextNodeEditorsBeforeProjectTransition(): Promise<void> {
+    this.disposeTextNodeEditors();
+    await this.flushPendingProjectSaveWork();
+  }
+
   /**
    * Release the session retain this view holds. Safe to call when nothing is
    * retained. Never throws: releasing is cleanup and must not block teardown.
@@ -1780,14 +1806,22 @@ export class SystemSculptStudioView extends ItemView {
       return;
     }
 
-    if (projectPath !== this.currentProjectPath && this.currentProjectPath && this.currentProject) {
-      await this.flushPendingProjectSaveWork();
+    const isProjectTransition =
+      projectPath !== this.currentProjectPath || options?.forceReload === true;
+    if (isProjectTransition && this.currentProjectPath && this.currentProject) {
+      // The live native document can be newer than the last owner callback.
+      // Commit/destroy it while the old session is still active, then flush
+      // that session before switching or force-reloading the project.
+      await this.flushTextNodeEditorsBeforeProjectTransition();
     }
 
-    if (projectPath !== this.currentProjectPath || options?.forceReload) {
+    if (isProjectTransition) {
       this.captureGraphViewportState();
       this.editingTextNodeIds.clear();
+      this.dirtyTextNodeEditIds.clear();
       this.pendingTextNodeAutofocusNodeId = null;
+      this.pendingTextNodeFocusPointByNodeId.clear();
+      this.textNodeEditorSnapshots.clear();
     }
 
     if (!projectPath) {
@@ -2480,6 +2514,13 @@ export class SystemSculptStudioView extends ItemView {
       captureHistory?: boolean;
     }
   ): void {
+    const currentNode = this.currentProject
+      ? this.findNode(this.currentProject, nodeId)
+      : null;
+    const isActiveTextEdit =
+      key === "value" &&
+      currentNode?.kind === "studio.text" &&
+      this.editingTextNodeIds.has(nodeId);
     const changed = this.commitCurrentProjectMutation(
       "node.config",
       (project) => {
@@ -2504,12 +2545,17 @@ export class SystemSculptStudioView extends ItemView {
         return true;
       },
       {
-        captureHistory: options?.captureHistory,
+        // Text typing is one native edit transaction. The final checkpoint is
+        // captured when the edit session ends, not once per CodeMirror update.
+        captureHistory: isActiveTextEdit ? false : options?.captureHistory,
         mode: options?.mode,
       }
     );
     if (!changed || !this.currentProject) {
       return;
+    }
+    if (isActiveTextEdit) {
+      this.dirtyTextNodeEditIds.add(nodeId);
     }
     const node = this.findNode(this.currentProject, nodeId);
     if (!node) {
@@ -3459,9 +3505,15 @@ export class SystemSculptStudioView extends ItemView {
     }
     if (node.kind === "studio.text" && options?.autoEditText === true) {
       this.editingTextNodeIds.add(node.id);
+      this.dirtyTextNodeEditIds.delete(node.id);
       this.pendingTextNodeAutofocusNodeId = node.id;
+      this.pendingTextNodeFocusPointByNodeId.delete(node.id);
+      this.textNodeEditorSnapshots.delete(node.id);
     } else {
       this.editingTextNodeIds.delete(node.id);
+      this.dirtyTextNodeEditIds.delete(node.id);
+      this.pendingTextNodeFocusPointByNodeId.delete(node.id);
+      this.textNodeEditorSnapshots.delete(node.id);
     }
     this.graphInteraction.selectOnlyNode(node.id);
     this.graphInteraction.clearPendingConnection();
@@ -3486,17 +3538,30 @@ export class SystemSculptStudioView extends ItemView {
     return this.editingTextNodeIds.has(String(nodeId || "").trim());
   }
 
-  private requestTextNodeEdit(nodeId: string, options?: { autoFocus?: boolean }): void {
+  private requestTextNodeEdit(
+    nodeId: string,
+    options?: { autoFocus?: boolean; focusAt?: { x: number; y: number } }
+  ): void {
     const normalizedNodeId = String(nodeId || "").trim();
     if (!normalizedNodeId) {
       return;
     }
-    if (this.editingTextNodeIds.has(normalizedNodeId) && options?.autoFocus !== true) {
+    const wasEditing = this.editingTextNodeIds.has(normalizedNodeId);
+    if (wasEditing && options?.autoFocus !== true) {
       return;
     }
     this.editingTextNodeIds.add(normalizedNodeId);
+    if (!wasEditing) {
+      this.dirtyTextNodeEditIds.delete(normalizedNodeId);
+      this.textNodeEditorSnapshots.delete(normalizedNodeId);
+    }
     if (options?.autoFocus === true) {
       this.pendingTextNodeAutofocusNodeId = normalizedNodeId;
+      if (options.focusAt) {
+        this.pendingTextNodeFocusPointByNodeId.set(normalizedNodeId, options.focusAt);
+      } else {
+        this.pendingTextNodeFocusPointByNodeId.delete(normalizedNodeId);
+      }
     }
     this.render();
   }
@@ -3514,9 +3579,15 @@ export class SystemSculptStudioView extends ItemView {
     if (this.pendingTextNodeAutofocusNodeId === normalizedNodeId) {
       this.pendingTextNodeAutofocusNodeId = null;
     }
+    this.pendingTextNodeFocusPointByNodeId.delete(normalizedNodeId);
+    this.textNodeEditorSnapshots.delete(normalizedNodeId);
     if (this.removeTextNodeIfEmptyOnEditEnd(normalizedNodeId)) {
-      // removeNodes already cleaned up interaction state and re-rendered.
+      // removeNodes captured the pre-edit graph and cleaned up interaction
+      // state, so the clear-and-delete flow remains one undo transaction.
       return;
+    }
+    if (this.dirtyTextNodeEditIds.delete(normalizedNodeId)) {
+      this.captureProjectHistoryCheckpoint();
     }
     this.render();
   }
@@ -3566,32 +3637,49 @@ export class SystemSculptStudioView extends ItemView {
     return createEmbeddableMarkdownEditor(this.app, containerEl, {
       value: options.value,
       placeholder: options.placeholder,
+      focusAt: options.focusAt,
+      sourcePath: this.currentProjectPath || "",
+      nodeId: options.nodeId,
       onChange: options.onChange,
       onEscape: options.onEscape,
       onBlur: options.onBlur,
     });
   };
 
-  private registerTextNodeEditorTeardown(nodeId: string, teardown: () => void): void {
+  private registerTextNodeEditorTeardown(
+    nodeId: string,
+    teardown: () => StudioTextNodeMarkdownEditorSnapshot
+  ): void {
     const normalizedNodeId = String(nodeId || "").trim();
     if (!normalizedNodeId) {
       return;
     }
-    this.textNodeEditorTeardowns.get(normalizedNodeId)?.();
+    const previousTeardown = this.textNodeEditorTeardowns.get(normalizedNodeId);
+    if (previousTeardown) {
+      const snapshot = previousTeardown();
+      if (this.editingTextNodeIds.has(normalizedNodeId)) {
+        this.textNodeEditorSnapshots.set(normalizedNodeId, snapshot);
+      }
+    }
     this.textNodeEditorTeardowns.set(normalizedNodeId, teardown);
   }
 
   /**
-   * Destroys every live embedded editor. Runs before each graph re-render
-   * (the render replaces card DOM wholesale) and on view teardown, so no
-   * CodeMirror view outlives the elements it is mounted in.
+   * Destroys every live embedded editor before the graph replaces card DOM.
+   * Active edit sessions retain their native selection, scroll, and focus so
+   * unrelated graph renders remount the editor without interrupting typing.
    */
   private disposeTextNodeEditors(): void {
-    const teardowns = Array.from(this.textNodeEditorTeardowns.values());
+    const teardowns = Array.from(this.textNodeEditorTeardowns.entries());
     this.textNodeEditorTeardowns.clear();
-    for (const teardown of teardowns) {
+    for (const [nodeId, teardown] of teardowns) {
       try {
-        teardown();
+        const snapshot = teardown();
+        if (this.editingTextNodeIds.has(nodeId)) {
+          this.textNodeEditorSnapshots.set(nodeId, snapshot);
+        } else {
+          this.textNodeEditorSnapshots.delete(nodeId);
+        }
       } catch (error) {
         console.warn("[SystemSculpt Studio] Failed to dispose a text-node editor", {
           error: error instanceof Error ? error.message : String(error),
@@ -3610,6 +3698,30 @@ export class SystemSculptStudioView extends ItemView {
     }
     this.pendingTextNodeAutofocusNodeId = null;
     return true;
+  }
+
+  private consumeTextNodeFocusPoint(
+    nodeId: string
+  ): { x: number; y: number } | undefined {
+    const normalizedNodeId = String(nodeId || "").trim();
+    if (!normalizedNodeId) {
+      return undefined;
+    }
+    const point = this.pendingTextNodeFocusPointByNodeId.get(normalizedNodeId);
+    this.pendingTextNodeFocusPointByNodeId.delete(normalizedNodeId);
+    return point;
+  }
+
+  private consumeTextNodeEditorSnapshot(
+    nodeId: string
+  ): StudioTextNodeMarkdownEditorSnapshot | undefined {
+    const normalizedNodeId = String(nodeId || "").trim();
+    if (!normalizedNodeId) {
+      return undefined;
+    }
+    const snapshot = this.textNodeEditorSnapshots.get(normalizedNodeId);
+    this.textNodeEditorSnapshots.delete(normalizedNodeId);
+    return snapshot;
   }
 
   private openNodeDefinitionMenu(options: {
@@ -3900,6 +4012,9 @@ export class SystemSculptStudioView extends ItemView {
       this.runPresentation.removeNode(nodeId);
       this.graphInteraction.onNodeRemoved(nodeId);
       this.editingTextNodeIds.delete(nodeId);
+      this.dirtyTextNodeEditIds.delete(nodeId);
+      this.pendingTextNodeFocusPointByNodeId.delete(nodeId);
+      this.textNodeEditorSnapshots.delete(nodeId);
       if (this.pendingTextNodeAutofocusNodeId === nodeId) {
         this.pendingTextNodeAutofocusNodeId = null;
       }
@@ -4501,7 +4616,11 @@ export class SystemSculptStudioView extends ItemView {
         this.resolveDynamicSelectOptionsForNode(source, node),
       isTextNodeEditing: (nodeId) => this.isTextNodeEditing(nodeId),
       consumeTextNodeAutoFocus: (nodeId) => this.consumeTextNodeAutoFocus(nodeId),
-      onRequestTextNodeEdit: (nodeId) => this.requestTextNodeEdit(nodeId, { autoFocus: true }),
+      consumeTextNodeFocusPoint: (nodeId) => this.consumeTextNodeFocusPoint(nodeId),
+      consumeTextNodeEditorSnapshot: (nodeId) =>
+        this.consumeTextNodeEditorSnapshot(nodeId),
+      onRequestTextNodeEdit: (nodeId, focusAt) =>
+        this.requestTextNodeEdit(nodeId, { autoFocus: true, focusAt }),
       onStopTextNodeEdit: (nodeId) => this.stopTextNodeEdit(nodeId),
       createTextNodeMarkdownEditor: this.createTextNodeMarkdownEditor,
       registerTextNodeEditorTeardown: (nodeId, teardown) =>

@@ -1,38 +1,44 @@
 import type { App } from "obsidian";
 import * as obsidian from "obsidian";
-import { Prec, type Extension } from "@codemirror/state";
-import {
-  EditorView,
-  keymap,
-  placeholder as cmPlaceholder,
-  type ViewUpdate,
-} from "@codemirror/view";
 
 /**
- * Embeddable Obsidian markdown editor — the SAME live-preview CodeMirror
- * editor Obsidian mounts inside embedded notes and Canvas text cards, so an
- * embedded surface edits exactly like a note: inline syntax rendering,
- * checkboxes, tables, code fences, the user's editor plugins and vault
- * Live Preview setting all apply.
+ * Obsidian's native Canvas text cards do not construct a detached CodeMirror
+ * editor. They mount the internal markdown-embed component, let that component
+ * own preview/edit mode, and point the workspace at it while focused.
  *
- * Obsidian does not export this editor class, so it is resolved at runtime
- * with the community-established technique (obsidian-kanban, Fevol's
- * embeddable-editor): instantiate a throwaway markdown embed through
- * `app.embedRegistry.embedByExtension.md`, flip it editable to force the
- * editor into existence, and walk two prototype levels up from its
- * `editMode` to reach the reusable MarkdownEditor base class.
- *
- * Every touchpoint with the internal shape is defensive: if any step no
- * longer matches (future Obsidian versions, test environments without the
- * registry), `createEmbeddableMarkdownEditor` returns `null` and callers
- * fall back to their plain-text editing surface.
+ * Obsidian does not export that component. Resolve its base class from the
+ * registered markdown embed (the registered file embed subclasses the generic
+ * markdown embed), then build the smallest Canvas-style owner around it. If the
+ * internal shape ever changes, callers receive null and keep their textarea
+ * fallback.
  */
+
+export type EmbeddableMarkdownEditorPoint = {
+  x: number;
+  y: number;
+};
+
+export type EmbeddableMarkdownEditorSelection = {
+  anchor: number;
+  head: number;
+};
+
+export type EmbeddableMarkdownEditorSnapshot = {
+  selection: EmbeddableMarkdownEditorSelection;
+  scrollTop: number;
+  focused: boolean;
+};
 
 export type EmbeddableMarkdownEditorOptions = {
   value?: string;
   placeholder?: string;
-  /** Extra class applied to the editor element (the markdown-source-view). */
+  /** Extra class applied to the native markdown editor wrapper. */
   cls?: string;
+  /** Canvas-style pointer position used to place the caret on edit entry. */
+  focusAt?: EmbeddableMarkdownEditorPoint;
+  /** Vault-relative context for links, editor extensions, and fold state. */
+  sourcePath?: string;
+  nodeId?: string;
   onChange?: (value: string) => void;
   onEscape?: () => void;
   onBlur?: () => void;
@@ -40,71 +46,96 @@ export type EmbeddableMarkdownEditorOptions = {
 };
 
 export type EmbeddableMarkdownEditorHandle = {
-  /** Current markdown source held by the editor document. */
   readonly value: string;
-  /** Replace the whole document. */
   set(value: string): void;
+  commit(): string;
   focus(): void;
+  focusAt(point: EmbeddableMarkdownEditorPoint): void;
   selectAll(): void;
+  captureSnapshot(): EmbeddableMarkdownEditorSnapshot;
+  restoreSnapshot(snapshot: EmbeddableMarkdownEditorSnapshot): void;
   destroy(): void;
-  /** The internal editor element (markdown-source-view), when exposed. */
   readonly editorEl: HTMLElement | null;
-  /** Raw internal editor instance — advanced use and tests only. */
+  /** Raw internal markdown-embed instance — advanced use and tests only. */
   readonly editor: unknown;
 };
 
-type InternalEditorOwner = {
-  app: App;
-  onMarkdownScroll: () => void;
-  getMode: () => string;
-  editMode?: unknown;
-  editor?: unknown;
-};
-
-type InternalMarkdownEditorConstructor = new (
-  app: App,
-  container: HTMLElement,
-  owner: InternalEditorOwner
-) => InternalMarkdownEditorInstance;
-
-type InternalMarkdownEditorInstance = {
-  editor?: {
-    cm?: {
-      state?: { doc?: { toString(): string; length?: number } };
-      dispatch?: (spec: unknown) => void;
-      contentDOM?: HTMLElement;
-      focus?: () => void;
-      hasFocus?: boolean;
-    };
+type InternalCodeMirror = {
+  state?: {
+    doc?: { toString(): string; length?: number };
+    selection?: { main?: { anchor?: number; head?: number } };
   };
-  editorEl?: HTMLElement;
-  containerEl?: HTMLElement;
-  owner?: InternalEditorOwner;
-  set?: (value: string, clear?: boolean) => void;
-  register?: (disposer: () => void) => void;
-  unload?: () => void;
-  destroy?: () => void;
-  _loaded?: boolean;
+  dispatch?: (spec: unknown) => void;
+  contentDOM?: HTMLElement;
+  scrollDOM?: HTMLElement;
+  focus?: () => void;
+  posAtCoords?: (point: EmbeddableMarkdownEditorPoint, precise?: boolean) => number | null;
+  hasFocus?: boolean;
 };
 
-/**
- * Resolution result cache, per App instance. `null` records a failed
- * resolution so a broken internal shape is probed exactly once per session.
- */
-const resolvedEditorClassByApp = new WeakMap<
+type InternalMarkdownEditMode = {
+  cm?: InternalCodeMirror;
+  editor?: { cm?: InternalCodeMirror };
+  editorEl?: HTMLElement;
+  focus?: () => void;
+  set?: (value: string, clear?: boolean) => void;
+};
+
+type InternalMarkdownEmbedInstance = {
+  app?: App;
+  containerEl?: HTMLElement;
+  editorEl?: HTMLElement;
+  previewEl?: HTMLElement;
+  editMode?: InternalMarkdownEditMode | null;
+  editable?: boolean;
+  useIframe?: boolean;
+  text?: string;
+  _loaded?: boolean;
+  set?: (value: string, clear?: boolean) => void;
+  save?: (value: string, clear?: boolean) => void;
+  showEditor?: (point?: EmbeddableMarkdownEditorPoint) => void;
+  showPreview?: (clear?: boolean) => void;
+  load?: () => void;
+  unload?: () => void;
+  register?: (disposer: () => void) => void;
+};
+
+type InternalMarkdownEmbedConstructor = new (
+  app: App,
+  containerEl: HTMLElement,
+  file: null,
+  state?: unknown
+) => InternalMarkdownEmbedInstance;
+
+const resolvedMarkdownEmbedByApp = new WeakMap<
   object,
-  InternalMarkdownEditorConstructor | null
+  InternalMarkdownEmbedConstructor | null
 >();
 
-function resolveInternalMarkdownEditorClass(
-  app: App
-): InternalMarkdownEditorConstructor | null {
-  const cached = resolvedEditorClassByApp.get(app as unknown as object);
+function looksLikeMarkdownEmbedConstructor(
+  candidate: unknown
+): candidate is InternalMarkdownEmbedConstructor {
+  if (typeof candidate !== "function") {
+    return false;
+  }
+  const prototype = (candidate as { prototype?: Record<string, unknown> }).prototype;
+  return Boolean(
+    prototype &&
+      typeof prototype.set === "function" &&
+      typeof prototype.showEditor === "function" &&
+      typeof prototype.showPreview === "function"
+  );
+}
+
+function resolveInternalMarkdownEmbedClass(app: App): InternalMarkdownEmbedConstructor | null {
+  const appKey = app as unknown as object;
+  const cached = resolvedMarkdownEmbedByApp.get(appKey);
   if (cached !== undefined) {
     return cached;
   }
 
-  let resolved: InternalMarkdownEditorConstructor | null = null;
+  let resolved: InternalMarkdownEmbedConstructor | null = null;
+  let widget: InternalMarkdownEmbedInstance | null = null;
   try {
     const embedCreator = (app as unknown as {
       embedRegistry?: {
@@ -115,320 +146,234 @@ function resolveInternalMarkdownEditorClass(
       };
     }).embedRegistry?.embedByExtension?.md;
     if (typeof embedCreator === "function") {
-      const widget = embedCreator(
-        { app, containerEl: document.createElement("div") },
-        null,
-        ""
-      ) as {
-        editable?: boolean;
-        editMode?: unknown;
-        showEditor?: () => void;
-        unload?: () => void;
-      };
-      widget.editable = true;
-      widget.showEditor?.();
-      const editMode = widget.editMode;
-      if (editMode) {
-        const basePrototype = Object.getPrototypeOf(
-          Object.getPrototypeOf(editMode)
-        ) as { constructor?: unknown };
-        if (typeof basePrototype?.constructor === "function") {
-          resolved = basePrototype.constructor as InternalMarkdownEditorConstructor;
+      const probeEl = document.createElement("div");
+      widget = embedCreator({ app, containerEl: probeEl }, null, "") as
+        | InternalMarkdownEmbedInstance
+        | null;
+      if (widget) {
+        // Registered .md embeds are file-aware subclasses. Canvas text cards
+        // use the generic markdown-embed component one prototype above them.
+        const registeredPrototype = Object.getPrototypeOf(widget) as object | null;
+        const basePrototype = registeredPrototype
+          ? (Object.getPrototypeOf(registeredPrototype) as { constructor?: unknown } | null)
+          : null;
+        const candidate = basePrototype?.constructor;
+        if (looksLikeMarkdownEmbedConstructor(candidate)) {
+          resolved = candidate;
         }
       }
-      widget.unload?.();
     }
   } catch (error) {
     console.warn(
-      "[SystemSculpt] Embedded markdown editor resolution failed; falling back to plain editing",
+      "[SystemSculpt] Native markdown surface resolution failed; falling back to plain editing",
       error instanceof Error ? error.message : String(error)
     );
-    resolved = null;
+  } finally {
+    try {
+      widget?.unload?.();
+    } catch {
+      // Probe teardown is best-effort; a failed probe still falls back safely.
+    }
   }
 
-  resolvedEditorClassByApp.set(app as unknown as object, resolved);
+  resolvedMarkdownEmbedByApp.set(appKey, resolved);
   return resolved;
 }
 
-/**
- * Options for the editor currently being constructed. `buildLocalExtensions`
- * runs from inside the base-class constructor — before the subclass body has
- * assigned instance fields — so construction stashes the options here for
- * the synchronous window of the `new` call.
- */
-let constructingOptions: EmbeddableMarkdownEditorOptions | null = null;
-
-type WorkspaceWithSetActiveLeaf = {
-  setActiveLeaf?: (...args: unknown[]) => void;
-  activeEditor?: unknown;
-};
-
-type SetActiveLeafPatchState = {
-  original: (...args: unknown[]) => void;
-  wrapper: (...args: unknown[]) => void;
-  editors: Set<InternalMarkdownEditorInstance>;
-};
-
-/**
- * One shared `setActiveLeaf` patch per workspace, reference-counted across
- * every live embedded editor. A per-editor wrap chain would break on
- * out-of-order teardown (the middle wrapper can never be unlinked); here the
- * single wrapper suppresses leaf activation while ANY live embedded editor
- * has focus, and the original method is restored when the last editor
- * releases.
- */
-const setActiveLeafPatchByWorkspace = new WeakMap<object, SetActiveLeafPatchState>();
-
-function acquireSetActiveLeafPatch(
-  workspace: WorkspaceWithSetActiveLeaf,
-  editor: InternalMarkdownEditorInstance
-): void {
-  if (typeof workspace.setActiveLeaf !== "function") {
-    return;
-  }
-  let state = setActiveLeafPatchByWorkspace.get(workspace as object);
-  if (!state) {
-    const original = workspace.setActiveLeaf;
-    const editors = new Set<InternalMarkdownEditorInstance>();
-    const wrapper = (...args: unknown[]): void => {
-      for (const activeEditor of editors) {
-        if (activeEditor.editor?.cm?.hasFocus === true) {
-          return;
-        }
-      }
-      original.apply(workspace, args);
-    };
-    state = { original, wrapper, editors };
-    setActiveLeafPatchByWorkspace.set(workspace as object, state);
-    workspace.setActiveLeaf = wrapper;
-  }
-  state.editors.add(editor);
-}
-
-function releaseSetActiveLeafPatch(
-  workspace: WorkspaceWithSetActiveLeaf | undefined,
-  editor: InternalMarkdownEditorInstance
-): void {
-  if (!workspace) {
-    return;
-  }
-  const state = setActiveLeafPatchByWorkspace.get(workspace as object);
-  if (!state) {
-    return;
-  }
-  state.editors.delete(editor);
-  if (state.editors.size > 0) {
-    return;
-  }
-  setActiveLeafPatchByWorkspace.delete(workspace as object);
-  // Only restore when the wrapper is still installed; if something else
-  // wrapped after us, the now-empty editor set makes our wrapper a pure
-  // pass-through, so leaving it in a foreign chain stays harmless.
-  if (workspace.setActiveLeaf === state.wrapper) {
-    workspace.setActiveLeaf = state.original;
-  }
-}
-
 const embeddableClassByBase = new WeakMap<
-  InternalMarkdownEditorConstructor,
-  InternalMarkdownEditorConstructor
+  InternalMarkdownEmbedConstructor,
+  InternalMarkdownEmbedConstructor
 >();
 
-function getEmbeddableEditorClass(
-  Base: InternalMarkdownEditorConstructor
-): InternalMarkdownEditorConstructor {
+function getCodeMirror(instance: InternalMarkdownEmbedInstance): InternalCodeMirror | null {
+  return instance.editMode?.cm ?? instance.editMode?.editor?.cm ?? null;
+}
+
+function getEmbeddableMarkdownClass(
+  Base: InternalMarkdownEmbedConstructor
+): InternalMarkdownEmbedConstructor {
   const cached = embeddableClassByBase.get(Base);
   if (cached) {
     return cached;
   }
 
-  class EmbeddableMarkdownEditor extends (Base as new (
-    ...args: never[]
-  ) => object) {
-    embeddableOptions: EmbeddableMarkdownEditorOptions;
+  class EmbeddableMarkdownSurface extends (Base as new (...args: never[]) => object) {
+    private embeddableOptions: EmbeddableMarkdownEditorOptions = {};
     private embeddableScope: unknown = null;
     private embeddableScopePushed = false;
+    private embeddableNativeScope: unknown = null;
     private embeddableDestroyed = false;
+    private embeddableClosingThroughPreview = false;
+    private embeddableLastReportedValue = "";
 
     constructor(
       app: App,
-      container: HTMLElement,
+      containerEl: HTMLElement,
       options: EmbeddableMarkdownEditorOptions
     ) {
-      super(
-        ...([
-          app,
-          container,
-          {
-            app,
-            // Mocks the owning MarkdownView surface the editor expects:
-            // scroll bookkeeping and the mode used to pick live preview.
-            onMarkdownScroll: () => {},
-            getMode: () => "source",
-          },
-        ] as never[])
-      );
+      super(...([app, containerEl, null, { mode: "source" }] as never[]));
       this.embeddableOptions = options;
-      const self = this as unknown as InternalMarkdownEditorInstance & {
-        app: App;
-      };
+      this.embeddableLastReportedValue = options.value ?? "";
+
+      const self = this as unknown as InternalMarkdownEmbedInstance;
       self.app = app;
-
-      // Commands and link handling resolve the editor through the owner
-      // view, so the mock owner must point back at this editor instance.
-      const owner = self.owner;
-      if (owner) {
-        owner.editMode = this;
-        owner.editor = self.editor;
-      }
-
-      // Hotkeys take precedence over the CM keymap; a dedicated scope keeps
-      // Mod+Enter (globally "open link under cursor in new leaf") from
-      // hijacking editing inside the embedded surface.
-      const ScopeCtor = (obsidian as { Scope?: new (parent: unknown) => unknown })
-        .Scope;
-      if (ScopeCtor && (app as { scope?: unknown }).scope !== undefined) {
-        const scope = new ScopeCtor((app as { scope?: unknown }).scope) as {
-          register?: (
-            modifiers: string[],
-            key: string,
-            handler: () => boolean
-          ) => void;
-        };
-        scope.register?.(["Mod"], "Enter", () => true);
-        this.embeddableScope = scope;
-      }
-
-      self.set?.(options.value ?? "", true);
-
-      // Keep the workspace from yanking focus back to a leaf while an
-      // embedded editor owns it. The patch is shared and reference-counted,
-      // so any number of editors can come and go in any order.
-      const workspace = (app as { workspace?: WorkspaceWithSetActiveLeaf })
-        .workspace;
-      if (workspace) {
-        acquireSetActiveLeafPatch(workspace, self);
-        self.register?.(() => {
-          releaseSetActiveLeafPatch(workspace, self);
-        });
-      }
-
-      // Focus tracking lives on the editing surface as a WHOLE, not just the
-      // CodeMirror content: live preview renders focusable controls (task
-      // checkboxes, embeds) inside the editor, and hopping between them and
-      // the text must not end the session — only focus leaving the surface
-      // entirely does. focusin/focusout bubble, blur does not.
-      const focusRootEl =
-        self.containerEl ?? self.editorEl ?? self.editor?.cm?.contentDOM;
-      if (focusRootEl) {
-        focusRootEl.addEventListener("focusin", () => {
-          this.pushKeymapScope();
-          if (workspace) {
-            workspace.activeEditor = self.owner;
-          }
-        });
-        focusRootEl.addEventListener("focusout", (event) => {
-          const related = (event as FocusEvent).relatedTarget;
-          if (related instanceof Node && focusRootEl.contains(related)) {
-            return;
-          }
-          this.popKeymapScope();
-          // Chrome fires focusout when a focused element is removed from
-          // the DOM; only a still-loaded editor reports a real blur.
-          if (self._loaded !== false) {
-            this.embeddableOptions.onBlur?.();
-          }
-        });
-      }
-
+      self.editable = true;
+      // Canvas uses the same component in an iframe. Studio keeps it in the
+      // card document so canvas transforms, intrinsic height, and host theme
+      // variables remain stable while preserving the native editor lifecycle.
+      self.useIframe = false;
+      self.containerEl?.classList.add("markdown-embed");
       if (options.cls) {
         self.editorEl?.classList.add(options.cls);
       }
+
+      this.createScope(app);
+      this.bindSurfaceLifecycle(app);
+      self.set?.(options.value ?? "", true);
+      self.load?.();
+      self.showEditor?.(options.focusAt);
     }
 
-    private pushKeymapScope(): void {
+    private createScope(app: App): void {
+      const ScopeCtor = (obsidian as { Scope?: new (parent: unknown) => unknown }).Scope;
+      if (!ScopeCtor || (app as { scope?: unknown }).scope === undefined) {
+        return;
+      }
+      const scope = new ScopeCtor((app as { scope?: unknown }).scope) as {
+        register?: (modifiers: string[], key: string, handler: () => boolean) => void;
+      };
+      scope.register?.(["Mod"], "Enter", () => true);
+      this.embeddableScope = scope;
+    }
+
+    private bindSurfaceLifecycle(app: App): void {
+      const self = this as unknown as InternalMarkdownEmbedInstance;
+      const focusRootEl = self.containerEl ?? self.editorEl;
+      if (!focusRootEl) {
+        return;
+      }
+      focusRootEl.addEventListener("focusin", () => {
+        this.pushScope(app);
+        const workspace = (app as unknown as { workspace?: { activeEditor?: unknown } })
+          .workspace;
+        if (workspace) {
+          workspace.activeEditor = self;
+        }
+      });
+      focusRootEl.addEventListener("focusout", (event) => {
+        const relatedTarget = (event as FocusEvent).relatedTarget;
+        if (relatedTarget instanceof Node && focusRootEl.contains(relatedTarget)) {
+          return;
+        }
+        this.popScope(app);
+        if (
+          !this.embeddableDestroyed &&
+          !this.embeddableClosingThroughPreview &&
+          self._loaded !== false
+        ) {
+          this.embeddableOptions.onBlur?.();
+        }
+      });
+      focusRootEl.addEventListener("paste", (event) => {
+        this.embeddableOptions.onPaste?.(event as ClipboardEvent);
+      });
+    }
+
+    /** Native MarkdownEmbed calls this while opening/closing editor search. */
+    applyScope(scope: unknown): void {
+      if (scope === this.embeddableNativeScope) {
+        return;
+      }
+      const app = (this as unknown as InternalMarkdownEmbedInstance).app;
+      const keymap = (app as unknown as {
+        keymap?: {
+          pushScope?: (value: unknown) => void;
+          popScope?: (value: unknown) => void;
+        };
+      })?.keymap;
+      if (this.embeddableNativeScope) {
+        keymap?.popScope?.(this.embeddableNativeScope);
+      }
+      if (scope) {
+        keymap?.pushScope?.(scope);
+      }
+      this.embeddableNativeScope = scope;
+    }
+
+    private pushScope(app: App): void {
       if (!this.embeddableScope || this.embeddableScopePushed) {
         return;
       }
       this.embeddableScopePushed = true;
-      const app = (this as unknown as { app?: App }).app;
-      (app as unknown as {
-        keymap?: { pushScope?: (scope: unknown) => void };
-      })?.keymap?.pushScope?.(this.embeddableScope);
+      (app as unknown as { keymap?: { pushScope?: (scope: unknown) => void } })
+        .keymap?.pushScope?.(this.embeddableScope);
     }
 
-    /**
-     * Pops only what was pushed: destroy-without-focus would otherwise pop a
-     * scope that is not on the stack, and Chrome's DOM-removal blur during
-     * destroy would pop a second time — both scramble the hotkey stack.
-     */
-    private popKeymapScope(): void {
+    private popScope(app: App): void {
       if (!this.embeddableScope || !this.embeddableScopePushed) {
         return;
       }
       this.embeddableScopePushed = false;
-      const app = (this as unknown as { app?: App }).app;
-      (app as unknown as {
-        keymap?: { popScope?: (scope: unknown) => void };
-      })?.keymap?.popScope?.(this.embeddableScope);
+      (app as unknown as { keymap?: { popScope?: (scope: unknown) => void } })
+        .keymap?.popScope?.(this.embeddableScope);
     }
 
-    getEmbeddableOptions(): EmbeddableMarkdownEditorOptions {
-      return this.embeddableOptions ?? constructingOptions ?? {};
+    save(value: string, clear = false): void {
+      const baseSave = (Base.prototype as {
+        save?: (value: string, clear?: boolean) => void;
+      }).save;
+      baseSave?.call(this, value, clear);
+      if (value === this.embeddableLastReportedValue) {
+        return;
+      }
+      this.embeddableLastReportedValue = value;
+      this.embeddableOptions.onChange?.(value);
     }
 
-    handleEmbeddableEscape(): boolean {
-      this.getEmbeddableOptions().onEscape?.();
-      return true;
-    }
-
-    handleEmbeddablePaste(event: ClipboardEvent): void {
-      this.getEmbeddableOptions().onPaste?.(event);
-    }
-
-    onUpdate(update: ViewUpdate, changed: boolean): void {
-      const superOnUpdate = (Base.prototype as {
-        onUpdate?: (update: ViewUpdate, changed: boolean) => void;
-      }).onUpdate;
-      superOnUpdate?.call(this, update, changed);
-      if (changed) {
-        const value =
-          update?.state?.doc?.toString() ??
-          (this as unknown as InternalMarkdownEditorInstance).editor?.cm?.state?.doc?.toString() ??
-          "";
-        this.getEmbeddableOptions().onChange?.(value);
+    showPreview(clear = false): void {
+      const wasEditing = Boolean(
+        (this as unknown as InternalMarkdownEmbedInstance).editMode
+      );
+      this.embeddableClosingThroughPreview = true;
+      try {
+        const baseShowPreview = (Base.prototype as {
+          showPreview?: (clear?: boolean) => void;
+        }).showPreview;
+        baseShowPreview?.call(this, clear);
+      } finally {
+        this.embeddableClosingThroughPreview = false;
+      }
+      if (wasEditing && !this.embeddableDestroyed) {
+        this.embeddableOptions.onEscape?.();
       }
     }
 
-    buildLocalExtensions(): Extension[] {
-      const superBuild = (Base.prototype as {
-        buildLocalExtensions?: () => Extension[];
-      }).buildLocalExtensions;
-      const extensions: Extension[] = superBuild ? superBuild.call(this) : [];
-      const options = this.getEmbeddableOptions();
+    get linktext(): string {
+      const sourcePath = String(this.embeddableOptions.sourcePath || "").trim();
+      const nodeId = String(this.embeddableOptions.nodeId || "").trim();
+      return nodeId ? `${sourcePath}#^${nodeId}` : sourcePath;
+    }
 
-      if (options.placeholder) {
-        extensions.push(cmPlaceholder(options.placeholder));
-      }
-      extensions.push(
-        EditorView.domEventHandlers({
-          paste: (event) => {
-            this.handleEmbeddablePaste(event);
-          },
-        })
-      );
-      extensions.push(
-        Prec.highest(
-          keymap.of([
-            {
-              key: "Escape",
-              run: () => this.handleEmbeddableEscape(),
-              preventDefault: true,
-            },
-          ])
-        )
-      );
-      return extensions;
+    getFoldInfo(): unknown {
+      const foldManager = (
+        (this as unknown as InternalMarkdownEmbedInstance).app as unknown as {
+          foldManager?: { loadPath?: (path: string) => unknown };
+        }
+      )?.foldManager;
+      return foldManager?.loadPath?.(this.linktext) ?? null;
+    }
+
+    onMarkdownFold(): void {
+      const self = this as unknown as InternalMarkdownEmbedInstance & {
+        previewMode?: { renderer?: { getFoldInfo?: () => unknown } };
+      };
+      const foldInfo = self.editMode
+        ? (self.editMode as { getFoldInfo?: () => unknown }).getFoldInfo?.()
+        : self.previewMode?.renderer?.getFoldInfo?.();
+      const foldManager = (self.app as unknown as {
+        foldManager?: { savePath?: (path: string, info: unknown) => void };
+      })?.foldManager;
+      foldManager?.savePath?.(this.linktext, foldInfo);
     }
 
     destroyEmbeddable(): void {
@@ -436,39 +381,38 @@ function getEmbeddableEditorClass(
         return;
       }
       this.embeddableDestroyed = true;
-      const self = this as unknown as InternalMarkdownEditorInstance & {
-        app?: App;
-      };
-      if (self._loaded !== false) {
+      const self = this as unknown as InternalMarkdownEmbedInstance;
+      const app = self.app;
+      if (app) {
+        this.popScope(app);
+      }
+      this.applyScope(null);
+      try {
         self.unload?.();
+      } finally {
+        const workspace = (app as unknown as {
+          workspace?: {
+            activeEditor?: unknown;
+            unsetActiveEditor?: (editor: unknown) => void;
+          };
+        })?.workspace;
+        if (workspace?.unsetActiveEditor) {
+          workspace.unsetActiveEditor(self);
+        } else if (workspace?.activeEditor === self) {
+          workspace.activeEditor = null;
+        }
+        self.containerEl?.empty?.();
       }
-      this.popKeymapScope();
-      const workspace = (self.app as unknown as {
-        workspace?: { activeEditor?: unknown };
-      })?.workspace;
-      if (workspace && workspace.activeEditor === self.owner) {
-        workspace.activeEditor = null;
-      }
-      self.containerEl?.empty?.();
-      const superDestroy = (Base.prototype as { destroy?: () => void }).destroy;
-      superDestroy?.call(this);
-    }
-
-    onunload(): void {
-      const superOnunload = (Base.prototype as { onunload?: () => void })
-        .onunload;
-      superOnunload?.call(this);
-      this.destroyEmbeddable();
     }
   }
 
-  const built = EmbeddableMarkdownEditor as unknown as InternalMarkdownEditorConstructor;
+  const built = EmbeddableMarkdownSurface as unknown as InternalMarkdownEmbedConstructor;
   embeddableClassByBase.set(Base, built);
   return built;
 }
 
 export function isEmbeddableMarkdownEditorSupported(app: App): boolean {
-  return resolveInternalMarkdownEditorClass(app) !== null;
+  return resolveInternalMarkdownEmbedClass(app) !== null;
 }
 
 export function createEmbeddableMarkdownEditor(
@@ -476,38 +420,45 @@ export function createEmbeddableMarkdownEditor(
   containerEl: HTMLElement,
   options: EmbeddableMarkdownEditorOptions
 ): EmbeddableMarkdownEditorHandle | null {
-  const Base = resolveInternalMarkdownEditorClass(app);
+  const Base = resolveInternalMarkdownEmbedClass(app);
   if (!Base) {
     return null;
   }
 
-  const EmbeddableClass = getEmbeddableEditorClass(Base);
-  let instance: InternalMarkdownEditorInstance & {
+  const EmbeddableClass = getEmbeddableMarkdownClass(Base);
+  let instance: InternalMarkdownEmbedInstance & {
     destroyEmbeddable?: () => void;
   };
-  constructingOptions = options;
   try {
     instance = new (EmbeddableClass as unknown as new (
       app: App,
-      container: HTMLElement,
+      containerEl: HTMLElement,
       options: EmbeddableMarkdownEditorOptions
-    ) => InternalMarkdownEditorInstance & { destroyEmbeddable?: () => void })(
+    ) => InternalMarkdownEmbedInstance & { destroyEmbeddable?: () => void })(
       app,
       containerEl,
       options
     );
   } catch (error) {
     console.warn(
-      "[SystemSculpt] Embedded markdown editor construction failed; falling back to plain editing",
+      "[SystemSculpt] Native markdown surface construction failed; falling back to plain editing",
       error instanceof Error ? error.message : String(error)
     );
     return null;
-  } finally {
-    constructingOptions = null;
   }
 
   const readValue = (): string =>
-    instance.editor?.cm?.state?.doc?.toString() ?? "";
+    getCodeMirror(instance)?.state?.doc?.toString() ?? instance.text ?? "";
+
+  const commit = (): string => {
+    const value = readValue();
+    instance.save?.(value, true);
+    return value;
+  };
+
+  const focusAt = (point: EmbeddableMarkdownEditorPoint): void => {
+    instance.showEditor?.(point);
+  };
 
   return {
     get value(): string {
@@ -516,15 +467,42 @@ export function createEmbeddableMarkdownEditor(
     set(value: string): void {
       instance.set?.(value, true);
     },
+    commit,
     focus(): void {
-      instance.editor?.cm?.focus?.();
+      instance.editMode?.focus?.();
+      getCodeMirror(instance)?.focus?.();
     },
+    focusAt,
     selectAll(): void {
-      const length =
-        instance.editor?.cm?.state?.doc?.length ?? readValue().length;
-      instance.editor?.cm?.dispatch?.({
-        selection: { anchor: 0, head: length },
-      });
+      const cm = getCodeMirror(instance);
+      const length = cm?.state?.doc?.length ?? readValue().length;
+      cm?.dispatch?.({ selection: { anchor: 0, head: length } });
+    },
+    captureSnapshot(): EmbeddableMarkdownEditorSnapshot {
+      const cm = getCodeMirror(instance);
+      const main = cm?.state?.selection?.main;
+      return {
+        selection: {
+          anchor: Number(main?.anchor ?? 0),
+          head: Number(main?.head ?? main?.anchor ?? 0),
+        },
+        scrollTop: Number(cm?.scrollDOM?.scrollTop ?? 0),
+        focused: cm?.hasFocus === true,
+      };
+    },
+    restoreSnapshot(snapshot: EmbeddableMarkdownEditorSnapshot): void {
+      const cm = getCodeMirror(instance);
+      const length = cm?.state?.doc?.length ?? readValue().length;
+      const anchor = Math.max(0, Math.min(length, Math.round(snapshot.selection.anchor)));
+      const head = Math.max(0, Math.min(length, Math.round(snapshot.selection.head)));
+      cm?.dispatch?.({ selection: { anchor, head } });
+      if (cm?.scrollDOM) {
+        cm.scrollDOM.scrollTop = Math.max(0, snapshot.scrollTop || 0);
+      }
+      if (snapshot.focused) {
+        instance.editMode?.focus?.();
+        cm?.focus?.();
+      }
     },
     destroy(): void {
       instance.destroyEmbeddable?.();

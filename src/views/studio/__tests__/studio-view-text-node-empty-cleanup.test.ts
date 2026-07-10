@@ -22,6 +22,7 @@ const REAL_VIEW_METHODS = [
   "findNode",
   "commitCurrentProjectMutation",
   "captureProjectHistoryCheckpoint",
+  "handleNodeConfigValueChange",
   "setHistoryCurrentSnapshot",
   "resetProjectHistory",
   "undoGraphHistory",
@@ -118,7 +119,10 @@ function createEditEndHarness(options: {
     currentProjectSession: session,
     historyState: createStudioGraphHistoryState(),
     editingTextNodeIds: new Set<string>(options.editingNodeIds ?? []),
+    dirtyTextNodeEditIds: new Set<string>(),
     pendingTextNodeAutofocusNodeId: null,
+    pendingTextNodeFocusPointByNodeId: new Map<string, { x: number; y: number }>(),
+    textNodeEditorSnapshots: new Map<string, unknown>(),
     transientFieldErrorsByNodeId: new Map<string, unknown>(),
     nodeContextMenuOverlay: null,
     nodeActionContextMenuOverlay: null,
@@ -132,6 +136,9 @@ function createEditEndHarness(options: {
     },
     recomputeEntryNodes: jest.fn(),
     clearTransientFieldErrorsForNode: jest.fn(),
+    cloneJsonValue: jest.fn((value: unknown) => value),
+    refreshNodeCardPreview: jest.fn(),
+    handleNoteNodeConfigMutated: jest.fn(),
     render: jest.fn(),
     commitCurrentProjectMutationAsync: jest.fn(() => Promise.resolve(false)),
   };
@@ -244,6 +251,28 @@ describe("SystemSculptStudioView empty text node cleanup (tldraw parity)", () =>
     expect(harness.nodeIds()).toEqual(["node_text"]);
     expect(harness.commitReasons).toEqual([]);
     expect(harness.context.editingTextNodeIds.size).toBe(0);
+  });
+
+  it("groups a complete text edit into one graph undo transaction", () => {
+    const harness = createEditEndHarness({
+      nodes: [createTextNode("node_text", "before")],
+      editingNodeIds: ["node_text"],
+    });
+    harness.context.resetProjectHistory(harness.context.currentProject);
+
+    for (const value of ["a", "af", "after"]) {
+      harness.context.handleNodeConfigValueChange("node_text", "value", value, {
+        mode: "continuous",
+        captureHistory: false,
+      });
+    }
+    harness.context.stopTextNodeEdit("node_text");
+
+    expect(harness.context.historyState.undoSnapshots).toHaveLength(1);
+    expect(harness.findValue("node_text")).toBe("after");
+
+    expect(harness.context.undoGraphHistory()).toBe(true);
+    expect(harness.findValue("node_text")).toBe("before");
   });
 
   it("restores the auto-deleted node with a single undo, edit session closed", () => {
