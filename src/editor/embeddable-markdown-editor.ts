@@ -205,6 +205,7 @@ function getEmbeddableMarkdownClass(
     private embeddableDestroyed = false;
     private embeddableClosingThroughPreview = false;
     private embeddableLastReportedValue = "";
+    private embeddableLifecycleAbort: AbortController | null = null;
 
     constructor(
       app: App,
@@ -252,31 +253,52 @@ function getEmbeddableMarkdownClass(
       if (!focusRootEl) {
         return;
       }
-      focusRootEl.addEventListener("focusin", () => {
-        this.pushScope(app);
-        const workspace = (app as unknown as { workspace?: { activeEditor?: unknown } })
-          .workspace;
-        if (workspace) {
-          workspace.activeEditor = self;
-        }
-      });
-      focusRootEl.addEventListener("focusout", (event) => {
-        const relatedTarget = (event as FocusEvent).relatedTarget;
-        if (relatedTarget instanceof Node && focusRootEl.contains(relatedTarget)) {
-          return;
-        }
-        this.popScope(app);
-        if (
-          !this.embeddableDestroyed &&
-          !this.embeddableClosingThroughPreview &&
-          self._loaded !== false
-        ) {
-          this.embeddableOptions.onBlur?.();
-        }
-      });
-      focusRootEl.addEventListener("paste", (event) => {
-        this.embeddableOptions.onPaste?.(event as ClipboardEvent);
-      });
+      this.embeddableLifecycleAbort = new AbortController();
+      const { signal } = this.embeddableLifecycleAbort;
+      focusRootEl.addEventListener(
+        "focusin",
+        () => {
+          if (this.embeddableDestroyed) {
+            return;
+          }
+          this.pushScope(app);
+          const workspace = (app as unknown as {
+            workspace?: { activeEditor?: unknown };
+          }).workspace;
+          if (workspace) {
+            workspace.activeEditor = self;
+          }
+        },
+        { signal }
+      );
+      focusRootEl.addEventListener(
+        "focusout",
+        (event) => {
+          const relatedTarget = (event as FocusEvent).relatedTarget;
+          if (relatedTarget instanceof Node && focusRootEl.contains(relatedTarget)) {
+            return;
+          }
+          this.popScope(app);
+          if (
+            !this.embeddableDestroyed &&
+            !this.embeddableClosingThroughPreview &&
+            self._loaded !== false
+          ) {
+            this.embeddableOptions.onBlur?.();
+          }
+        },
+        { signal }
+      );
+      focusRootEl.addEventListener(
+        "paste",
+        (event) => {
+          if (this.embeddableDestroyed) {
+            return;
+          }
+          this.embeddableOptions.onPaste?.(event as ClipboardEvent);
+        },
+        { signal }
+      );
     }
 
     /** Native MarkdownEmbed calls this while opening/closing editor search. */
@@ -381,6 +403,8 @@ function getEmbeddableMarkdownClass(
         return;
       }
       this.embeddableDestroyed = true;
+      this.embeddableLifecycleAbort?.abort();
+      this.embeddableLifecycleAbort = null;
       const self = this as unknown as InternalMarkdownEmbedInstance;
       const app = self.app;
       if (app) {

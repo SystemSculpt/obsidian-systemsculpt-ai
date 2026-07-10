@@ -42,6 +42,7 @@ type HarnessOptions = {
   renderMarkdownPreview?: jest.Mock;
   createMarkdownEditor?: StudioTextNodeMarkdownEditorFactory;
   registerEditorTeardown?: jest.Mock;
+  initialFocusPoint?: { x: number; y: number };
   initialEditorSnapshot?: {
     selection: { anchor: number; head: number };
     scrollTop: number;
@@ -73,6 +74,7 @@ function renderHarness(options: HarnessOptions = {}) {
     renderMarkdownPreview: options.renderMarkdownPreview,
     createMarkdownEditor: options.createMarkdownEditor,
     registerEditorTeardown: options.registerEditorTeardown,
+    initialFocusPoint: options.initialFocusPoint,
     initialEditorSnapshot: options.initialEditorSnapshot,
   });
 
@@ -325,6 +327,21 @@ describe("studio.text live-preview card", () => {
       expect(onStopTextNodeEdit).toHaveBeenCalledTimes(2);
     });
 
+    it("ends the edit session even when the final commit throws", () => {
+      const capture = createEditorFactory();
+      capture.handle.commit.mockImplementation(() => {
+        throw new Error("commit failed");
+      });
+      const { node, onStopTextNodeEdit } = renderHarness({
+        value: "x",
+        isEditing: true,
+        createMarkdownEditor: capture.factory,
+      });
+
+      expect(() => capture.calls[0].options.onBlur?.()).toThrow("commit failed");
+      expect(onStopTextNodeEdit).toHaveBeenCalledWith(node.id);
+    });
+
     it("preserves the native selection, scroll, and focus snapshot across card remounts", () => {
       const capture = createEditorFactory();
       const snapshot = {
@@ -430,6 +447,22 @@ describe("studio.text live-preview card", () => {
 
       expect(capture.handle.focus).toHaveBeenCalled();
       expect(capture.handle.selectAll).not.toHaveBeenCalled();
+    });
+
+    it("forwards the pointer focus point and suppresses deferred autofocus", () => {
+      const requestAnimationFrame = jest.spyOn(window, "requestAnimationFrame");
+      const capture = createEditorFactory();
+      renderHarness({
+        value: "x",
+        isEditing: true,
+        shouldAutoFocus: true,
+        initialFocusPoint: { x: 48, y: 64 },
+        createMarkdownEditor: capture.factory,
+      });
+
+      expect(capture.calls[0].options.focusAt).toEqual({ x: 48, y: 64 });
+      expect(requestAnimationFrame).not.toHaveBeenCalled();
+      expect(capture.handle.focus).not.toHaveBeenCalled();
     });
 
     it("skips the deferred autofocus when the editor is torn down before the frame fires", () => {

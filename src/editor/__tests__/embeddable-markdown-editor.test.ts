@@ -343,6 +343,25 @@ describe("createEmbeddableMarkdownEditor", () => {
     expect(onBlur).not.toHaveBeenCalled();
   });
 
+  it("detaches lifecycle listeners before the container can be reused", () => {
+    const { app } = createFakeApp();
+    const onPaste = jest.fn();
+    const container = document.body.createDiv();
+    const handle = createEmbeddableMarkdownEditor(app, container, {
+      value: "x",
+      onPaste,
+    });
+
+    handle!.destroy();
+    const replacementChild = container.createDiv();
+    replacementChild.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+    replacementChild.dispatchEvent(new Event("paste", { bubbles: true }));
+
+    expect(app.keymap.pushScope).not.toHaveBeenCalled();
+    expect(app.workspace.activeEditor).toBeNull();
+    expect(onPaste).not.toHaveBeenCalled();
+  });
+
   it("enters edit mode at the native Canvas pointer position", () => {
     const { app } = createFakeApp();
     const handle = createEmbeddableMarkdownEditor(app, document.body.createDiv(), {

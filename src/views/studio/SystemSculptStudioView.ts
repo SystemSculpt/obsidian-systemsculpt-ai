@@ -3664,9 +3664,17 @@ export class SystemSculptStudioView extends ItemView {
     }
     const previousTeardown = this.textNodeEditorTeardowns.get(normalizedNodeId);
     if (previousTeardown) {
-      const snapshot = previousTeardown();
-      if (this.editingTextNodeIds.has(normalizedNodeId)) {
-        this.textNodeEditorSnapshots.set(normalizedNodeId, snapshot);
+      try {
+        const snapshot = previousTeardown();
+        if (this.editingTextNodeIds.has(normalizedNodeId)) {
+          this.textNodeEditorSnapshots.set(normalizedNodeId, snapshot);
+        }
+      } catch (error) {
+        this.textNodeEditorSnapshots.delete(normalizedNodeId);
+        console.warn("[SystemSculpt Studio] Failed to replace a text-node editor", {
+          nodeId: normalizedNodeId,
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
     }
     this.textNodeEditorTeardowns.set(normalizedNodeId, teardown);

@@ -251,8 +251,11 @@ function mountLiveMarkdownEditor(options: MountLiveMarkdownEditorOptions): boole
     // paste, and fast click-away can race the final owner.save callback. Flush
     // the live document before the view decides whether an empty node should
     // be removed.
-    editorHandle?.commit();
-    onStopTextNodeEdit(node.id);
+    try {
+      editorHandle?.commit();
+    } finally {
+      onStopTextNodeEdit(node.id);
+    }
   };
   editorHandle = createMarkdownEditor(hostEl, {
     value: textValue,
