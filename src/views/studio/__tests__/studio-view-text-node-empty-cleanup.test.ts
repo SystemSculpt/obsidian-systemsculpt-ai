@@ -26,6 +26,7 @@ const REAL_VIEW_METHODS = [
   "setHistoryCurrentSnapshot",
   "resetProjectHistory",
   "undoGraphHistory",
+  "redoGraphHistory",
   "applyHistorySnapshot",
 ] as const;
 
@@ -308,5 +309,10 @@ describe("SystemSculptStudioView empty text node cleanup (tldraw parity)", () =>
     expect(harness.nodeIds()).toEqual(["node_text"]);
     expect(harness.findValue("node_text")).toBe("hello");
     expect(harness.context.editingTextNodeIds.size).toBe(0);
+
+    const redone = harness.context.redoGraphHistory();
+
+    expect(redone).toBe(true);
+    expect(harness.nodeIds()).toEqual([]);
   });
 });

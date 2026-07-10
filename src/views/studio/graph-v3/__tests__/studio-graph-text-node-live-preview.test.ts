@@ -377,6 +377,42 @@ describe("studio.text live-preview card", () => {
       expect(capture.handle.destroy).toHaveBeenCalled();
     });
 
+    it("destroys the editor even when its final commit throws", () => {
+      const capture = createEditorFactory();
+      capture.handle.commit.mockImplementation(() => {
+        throw new Error("commit failed");
+      });
+      const registerEditorTeardown = jest.fn();
+      renderHarness({
+        value: "x",
+        isEditing: true,
+        createMarkdownEditor: capture.factory,
+        registerEditorTeardown,
+      });
+
+      const teardown = registerEditorTeardown.mock.calls[0][1] as () => void;
+      expect(teardown).toThrow("commit failed");
+      expect(capture.handle.destroy).toHaveBeenCalledTimes(1);
+    });
+
+    it("destroys the editor even when snapshot capture throws", () => {
+      const capture = createEditorFactory();
+      capture.handle.captureSnapshot.mockImplementation(() => {
+        throw new Error("snapshot failed");
+      });
+      const registerEditorTeardown = jest.fn();
+      renderHarness({
+        value: "x",
+        isEditing: true,
+        createMarkdownEditor: capture.factory,
+        registerEditorTeardown,
+      });
+
+      const teardown = registerEditorTeardown.mock.calls[0][1] as () => void;
+      expect(teardown).toThrow("snapshot failed");
+      expect(capture.handle.destroy).toHaveBeenCalledTimes(1);
+    });
+
     it("autofocuses without selecting the whole document when requested", () => {
       jest
         .spyOn(window, "requestAnimationFrame")

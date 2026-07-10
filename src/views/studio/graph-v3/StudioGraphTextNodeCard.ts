@@ -278,12 +278,15 @@ function mountLiveMarkdownEditor(options: MountLiveMarkdownEditorOptions): boole
   registerEditorTeardown?.(node.id, () => {
     // Whole-graph renders can arrive between CodeMirror's last DOM update and
     // its owner callback. Persist the live document before carrying the caret
-    // snapshot into the replacement editor.
-    editorHandle.commit();
-    const snapshot = editorHandle.captureSnapshot();
-    editorDisposed = true;
-    editorHandle.destroy();
-    return snapshot;
+    // snapshot into the replacement editor. Destruction is unconditional so
+    // a failed commit/snapshot cannot leak Obsidian's focus or keymap owner.
+    try {
+      editorHandle.commit();
+      return editorHandle.captureSnapshot();
+    } finally {
+      editorDisposed = true;
+      editorHandle.destroy();
+    }
   });
 
   if (shouldAutoFocus && !initialFocusPoint && !initialEditorSnapshot) {

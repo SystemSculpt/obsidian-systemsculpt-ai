@@ -3583,7 +3583,15 @@ export class SystemSculptStudioView extends ItemView {
     this.textNodeEditorSnapshots.delete(normalizedNodeId);
     if (this.removeTextNodeIfEmptyOnEditEnd(normalizedNodeId)) {
       // removeNodes captured the pre-edit graph and cleaned up interaction
-      // state, so the clear-and-delete flow remains one undo transaction.
+      // state. Finalize history at the post-delete graph so undo restores the
+      // original node and redo reapplies the deletion, still as one edit
+      // transaction.
+      if (this.currentProject) {
+        this.setHistoryCurrentSnapshot(
+          this.currentProject,
+          this.graphInteraction.getSelectedNodeIds()
+        );
+      }
       return;
     }
     if (this.dirtyTextNodeEditIds.delete(normalizedNodeId)) {
