@@ -76,6 +76,23 @@ describe("HostedTransportAdapter", () => {
     }));
   });
 
+  it("forwards exact lowercase operation-scoped job headers without forcing plugin version", async () => {
+    const adapter = new HostedTransportAdapter({ baseUrl: "https://api.test", pluginVersion: "6", licenseKey: () => "key" });
+    await adapter.job({ path: "/job", headers: {
+      "x-systemsculpt-job-contract": "managed-job-protocol-v1",
+      "x-systemsculpt-capability": "transcription",
+      "idempotency-key": "op:create",
+    } });
+    expect(request.mock.calls[0][0].headers).toEqual({
+      "x-systemsculpt-contract": "managed-capabilities-v2",
+      "x-systemsculpt-job-contract": "managed-job-protocol-v1",
+      "x-systemsculpt-capability": "transcription",
+      "idempotency-key": "op:create",
+    });
+    expect(request.mock.calls[0][0].headers).not.toHaveProperty("Idempotency-Key");
+    expect(request.mock.calls[0][0].headers).not.toHaveProperty("x-plugin-version");
+  });
+
   it("returns bounded diagnostics with preserved response metadata", async () => {
     request.mockResolvedValue(response(503, { error: "x".repeat(5000) }));
     const adapter = new HostedTransportAdapter({ baseUrl: "https://api.test", pluginVersion: "6", licenseKey: () => "secret" });

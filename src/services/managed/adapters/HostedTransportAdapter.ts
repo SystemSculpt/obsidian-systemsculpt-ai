@@ -39,10 +39,10 @@ export class HostedTransportAdapter {
 
   request(operation: ManagedTransportOperation) { return this.send(operation); }
   stream(operation: ManagedTransportOperation) { return this.send({ ...operation, method: operation.method ?? "POST" }, {}, true); }
-  job(operation: ManagedTransportOperation) { return this.send(operation); }
+  job(operation: ManagedTransportOperation) { return this.send(operation, operation.headers ?? {}, false, true); }
 
-  private async send(operation: ManagedTransportOperation, extra: Record<string, string> = {}, stream = false): Promise<ManagedTransportResult> {
-    const headers: Record<string, string> = { "x-plugin-version": this.options.pluginVersion, ...extra };
+  private async send(operation: ManagedTransportOperation, extra: Record<string, string> = {}, stream = false, scopedHeaders = false): Promise<ManagedTransportResult> {
+    const headers: Record<string, string> = scopedHeaders ? { ...extra } : { "x-plugin-version": this.options.pluginVersion, ...extra };
     if (!extra["x-systemsculpt-admission-contract"]) headers["x-systemsculpt-contract"] = MANAGED_CAPABILITY_CONTRACT;
     if (operation.capability) headers["x-systemsculpt-capability"] = operation.capability;
     if (operation.idempotencyKey) headers["Idempotency-Key"] = operation.idempotencyKey;

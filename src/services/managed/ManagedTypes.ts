@@ -78,5 +78,24 @@ export interface ManagedResponseDiagnostics {
 export interface ManagedTransportResult { response: Response; diagnostics: ManagedResponseDiagnostics; }
 export interface ManagedTransportOperation {
   path: string; method?: string; body?: unknown; capability?: ManagedRequestContractId;
-  idempotencyKey?: string; signal?: AbortSignal;
+  idempotencyKey?: string; headers?: Record<string, string>; signal?: AbortSignal;
+}
+
+export type ManagedJobCapability = "transcription" | "document_processing" | "image_generation";
+export type ManagedJobStatus = "uploading" | "queued" | "processing" | "succeeded" | "completed" | "failed" | "expired";
+export type ManagedRecoveryPhase =
+  | "admitted" | "content_ready" | "prepare_dispatching" | "prepared" | "create_dispatching" | "created"
+  | "part_dispatching" | "uploading" | "abort_dispatching" | "upload_aborted" | "complete_dispatching"
+  | "upload_completed" | "start_dispatching" | "processing" | "result_ready" | "local_commit_pending"
+  | "completed" | "blocked_ambiguous" | "abandoned";
+export interface ManagedPendingDispatch {
+  operation: "prepare" | "create" | "part" | "abort" | "complete" | "start";
+  requestId: string; idempotencyKey?: string; partNumber?: number; dispatchedAt: string;
+}
+export interface ManagedJobRecoveryRecord {
+  schemaVersion: 1; revision: number; capability: ManagedJobCapability; operationId: string;
+  source: { identity: string; fingerprint: string }; jobId?: string;
+  completedParts?: Array<{ partNumber: number; etag: string }>;
+  phase: ManagedRecoveryPhase; pendingDispatch?: ManagedPendingDispatch;
+  createdAt: string; updatedAt: string;
 }
