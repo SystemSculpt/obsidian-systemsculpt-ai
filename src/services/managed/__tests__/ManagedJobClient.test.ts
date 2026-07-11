@@ -1,5 +1,5 @@
 import fixture from "../../../../testing/fixtures/managed/managed-job-protocol-v1.json";
-import { ManagedJobClient, MANAGED_JOB_DESCRIPTORS, MANAGED_JOB_PROTOCOL } from "../ManagedJobClient";
+import { ManagedJobClient, MANAGED_JOB_DESCRIPTORS, MANAGED_JOB_OPERATION_STATUSES, MANAGED_JOB_PROTOCOL } from "../ManagedJobClient";
 import { HostedTransportAdapter } from "../adapters/HostedTransportAdapter";
 
 const json = (value: unknown, status = 200, headers: Record<string, string> = {}) => new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json", "x-request-id": "req-1", ...headers } });
@@ -18,19 +18,20 @@ describe("ManagedJobClient exact wire contract", () => {
       expect(Object.entries(d.paths).map(([name, [method, path]]) => ({ name, method, path }))).toEqual(f.operations.map(({ name, method, path }) => ({ name, method, path })));
       expect(d.statuses).toEqual([...f.statuses.non_terminal, ...f.statuses.terminal]);
       expect(d.version).toEqual(f.version.required_on); expect(d.idempotent).toEqual(f.idempotency.required_on);
+      expect(MANAGED_JOB_OPERATION_STATUSES[f.capability as keyof typeof MANAGED_JOB_OPERATION_STATUSES]).toEqual(f.status_discriminants);
     }
   });
 
   it.each([
     ["transcription.create", () => client.transcription.create({ filename: "a", contentType: "audio/wav", contentLengthBytes: 1 }, "op"), "transcription", true, true],
-    ["transcription.part_url", () => client.transcription.partUrl("job", 1), "transcription", false, false],
-    ["transcription.upload_complete", () => client.transcription.complete("job", [{ partNumber: 1, etag: "e" }], "op"), "transcription", true, true],
+    ["transcription.part_url", () => client.transcription.uploadPart("job", 1, new Uint8Array([1]).buffer), "transcription", false, false],
+    ["transcription.upload_complete", () => client.transcription.complete("job", [{ partNumber: 1, etag: "e".repeat(32) }], "op"), "transcription", true, true],
     ["transcription.upload_abort", () => client.transcription.abortUpload("job"), "transcription", false, false],
     ["transcription.start", () => client.transcription.start("job", "op"), "transcription", true, true],
     ["transcription.status", () => client.transcription.status("job"), "transcription", false, false],
     ["document.create", () => client.documents.create({ filename: "a.pdf", contentType: "application/pdf", contentLengthBytes: 1 }, "op"), "document_processing", true, true],
-    ["document.part_url", () => client.documents.partUrl("doc", 1), "document_processing", false, false],
-    ["document.upload_complete", () => client.documents.complete("doc", [{ partNumber: 1, etag: "e" }], "op"), "document_processing", true, true],
+    ["document.part_url", () => client.documents.uploadPart("doc", 1, new Uint8Array([1]).buffer), "document_processing", false, false],
+    ["document.upload_complete", () => client.documents.complete("doc", [{ partNumber: 1, etag: "e".repeat(32) }], "op"), "document_processing", true, true],
     ["document.upload_abort", () => client.documents.abortUpload("doc"), "document_processing", false, false],
     ["document.start", () => client.documents.start("doc", "op"), "document_processing", true, true],
     ["document.status", () => client.documents.status("doc"), "document_processing", false, false],
@@ -57,8 +58,8 @@ describe("ManagedJobClient exact wire contract", () => {
   it("parses document, multipart part, result and image list discriminants", async () => {
     request.mockResolvedValueOnce(json({ document: { id: "doc-1", status: "uploading" }, upload: { part_size_bytes: 10, total_parts: 1, part_url_expires_in_seconds: 900, expires_at: "2099-01-01T00:00:00Z" } }));
     expect((await client.documents.create({ filename: "a.pdf", contentType: "application/pdf", contentLengthBytes: 10 }, "op")).document.id).toBe("doc-1");
-    request.mockResolvedValueOnce(json({ part: { part_number: 1, method: "PUT", url: "https://signed/x", url_expires_in_seconds: 900, expected_content_length_bytes: 10 } }));
-    const part = await client.documents.partUrl("doc-1", 1); expect(part).toEqual({ part_number: 1, expected_content_length_bytes: 10 }); expect(JSON.stringify(part)).not.toContain("signed");
+    request.mockResolvedValueOnce(json({ part: { part_number: 1, method: "PUT", url: "https://signed/x", url_expires_in_seconds: 900, expected_content_length_bytes: 10 } })).mockResolvedValueOnce(new Response("", { status: 200, headers: { etag: `"${"a".repeat(32)}"` } }));
+    const part = await client.documents.uploadPart("doc-1", 1, new Uint8Array(10).buffer); expect(part).toEqual({ partNumber: 1, etag: `"${"a".repeat(32)}"` }); expect(JSON.stringify(part)).not.toContain("signed");
     request.mockResolvedValueOnce(json({ result: { content: [], text: "x", markdown: "x", images: [], metadata: {} } }));
     expect((await client.documents.download("doc-1")).result.text).toBe("x");
     request.mockResolvedValueOnce(json({ items: [{ job: imageJob(), outputs: [], usage: { raw_usd: 0.1, cost_source: "provider", estimated: false } }], next_before: null }));
@@ -77,8 +78,8 @@ describe("ManagedJobClient exact wire contract", () => {
   it.each([
     ["transcription create", () => client.transcription.create({ filename: "", contentType: "audio/wav", contentLengthBytes: 1 }, "op")],
     ["document content type", () => client.documents.create({ filename: "a", contentType: "text/plain", contentLengthBytes: 1 }, "op")],
-    ["part zero", () => client.transcription.partUrl("job", 0)],
-    ["duplicate parts", () => client.documents.complete("doc", [{ partNumber: 1, etag: "a" }, { partNumber: 1, etag: "b" }], "op")],
+    ["part zero", () => client.transcription.uploadPart("job", 0, new ArrayBuffer(1))],
+    ["duplicate parts", () => client.documents.complete("doc", [{ partNumber: 1, etag: "a".repeat(32) }, { partNumber: 1, etag: "b".repeat(32) }], "op")],
     ["image prompt", () => client.images.create({ prompt: "" })],
     ["image uploaded key", () => client.images.create({ prompt: "x", input_images: [{ type: "uploaded", key: "https://storage/key", mime_type: "image/png", size_bytes: 1, sha256: "a".repeat(64) }] })],
     ["image count", () => client.images.create({ prompt: "x", options: { count: 5 } })],
@@ -96,7 +97,7 @@ describe("ManagedJobClient exact wire contract", () => {
     ["transcription status", () => client.transcription.status("job"), { job: { ...txJob(), error: null }, transcript: 5, progress: 2 }],
     ["document create", () => client.documents.create({ filename: "a.pdf", contentType: "application/pdf", contentLengthBytes: 1 }, "op"), { job: { id: "doc", status: "uploading" }, upload: {} }],
     ["document status", () => client.documents.status("doc"), { document: { id: "doc", status: "expired", error: null, progress: 0 } }],
-    ["part", () => client.documents.partUrl("doc", 1), { part: { part_number: 1, method: "POST", url: "https://signed", url_expires_in_seconds: 900, expected_content_length_bytes: 1 } }],
+    ["part", () => client.documents.uploadPart("doc", 1, new ArrayBuffer(1)), { part: { part_number: 1, method: "POST", url: "https://signed", url_expires_in_seconds: 900, expected_content_length_bytes: 1 } }],
     ["result", () => client.documents.download("doc"), { result: { content: "bad", text: "x", markdown: "x", images: [], metadata: {} } }],
     ["input prepare", () => client.images.prepareInputs([{ mime_type: "image/png", size_bytes: 1, sha256: "a".repeat(64) }], async () => new ArrayBuffer(1)), { contract: MANAGED_JOB_PROTOCOL, upload_id: "u", expires_at: "2099-01-01T00:00:00Z", input_uploads: [{ index: 0, upload: { method: "PUT", url: "https://s", headers: {}, expires_in_seconds: 900, expires_at: "2099-01-01T00:00:00Z" }, input_image: { type: "provider", key: "k", mime_type: "image/png", size_bytes: 1, sha256: "a".repeat(64) } }] }],
     ["image create", () => client.images.create({ prompt: "x" }), { job: imageJob(), poll_url: 5 }],
@@ -114,6 +115,51 @@ describe("ManagedJobClient exact wire contract", () => {
   ])("maps HTTP %s exactly with request ID/retryability", async (status, code, retryable) => {
     request.mockResolvedValue(json({ code }, status, { "retry-after": "5" }));
     await expect(client.transcription.status("job")).rejects.toMatchObject({ code, status, requestId: "req-1", retryable });
+  });
+
+  it.each([
+    ["transcription.upload_complete", () => client.transcription.complete("job", [{ partNumber: 1, etag: "a".repeat(32) }], "op"), (status: string) => ({ job: { id: "job", status } }), "queued", "uploading"],
+    ["transcription.start", () => client.transcription.start("job", "op"), (status: string) => ({ job: { id: "job", status } }), "queued", "uploading"],
+    ["document.upload_complete", () => client.documents.complete("doc", [{ partNumber: 1, etag: "a".repeat(32) }], "op"), (status: string) => ({ document: { id: "doc", status } }), "queued", "uploading"],
+    ["document.start", () => client.documents.start("doc", "op"), (status: string) => ({ document: { id: "doc", status } }), "queued", "uploading"],
+    ["image.generation_create", () => client.images.create({ prompt: "x" }), (status: string) => ({ job: { id: "img", status, created_at: "2026-01-01T00:00:00Z", expires_at: "2099-01-01T00:00:00Z", error: null }, poll_url: "/poll" }), "queued", "uploading"],
+  ] as const)("enforces operation-specific status discriminants for %s", async (_name, invoke, payload, allowed, forbidden) => {
+    request.mockResolvedValueOnce(json(payload(allowed))); await expect(invoke()).resolves.toBeDefined();
+    request.mockResolvedValueOnce(json(payload(forbidden))); await expect(invoke()).rejects.toMatchObject({ code: "malformed_response" });
+  });
+
+  it.each(["transcription", "document_processing"] as const)("accepts fixture failed as successful %s upload_abort acknowledgement", async capability => {
+    request.mockResolvedValue(json(capability === "transcription" ? { job: { id: "job", status: "failed" } } : { document: { id: "doc", status: "failed" } }));
+    const result = capability === "transcription" ? await client.transcription.abortUpload("job") : await client.documents.abortUpload("doc");
+    expect((result as any)[capability === "transcription" ? "job" : "document"].status).toBe("failed");
+  });
+
+  it("uploads multipart bytes call-locally, forwards signed headers, validates ETag, and honors abort/errors", async () => {
+    const controller = new AbortController();
+    request.mockResolvedValueOnce(json({ part: { part_number: 1, method: "PUT", url: "https://signed/x", url_expires_in_seconds: 900, expected_content_length_bytes: 1 } }))
+      .mockResolvedValueOnce(new Response("", { status: 200, headers: { etag: `"${"f".repeat(32)}-1"` } }));
+    await expect(client.transcription.uploadPart("job", 1, new Uint8Array([1]).buffer, controller.signal)).resolves.toEqual({ partNumber: 1, etag: `"${"f".repeat(32)}-1"` });
+    expect(request.mock.calls[1][0]).toEqual(expect.objectContaining({ url: "https://signed/x", method: "PUT", headers: {}, signal: controller.signal }));
+    expect(JSON.stringify(request.mock.calls[0][0])).not.toContain("signed/x");
+
+    request.mockReset(); request.mockResolvedValueOnce(json({ part: { part_number: 1, method: "PUT", url: "https://signed/x", url_expires_in_seconds: 900, expected_content_length_bytes: 1 } })).mockResolvedValueOnce(new Response("", { status: 200, headers: { etag: "Bearer secret" } }));
+    await expect(client.transcription.uploadPart("job", 1, new ArrayBuffer(1))).rejects.toMatchObject({ code: "malformed_response" });
+    request.mockReset(); request.mockResolvedValueOnce(json({ part: { part_number: 1, method: "PUT", url: "https://signed/x", url_expires_in_seconds: 900, expected_content_length_bytes: 1 } })).mockResolvedValueOnce(new Response("denied", { status: 403 }));
+    await expect(client.transcription.uploadPart("job", 1, new ArrayBuffer(1))).rejects.toMatchObject({ code: "managed_job_error" });
+    request.mockReset(); controller.abort(); await expect(client.transcription.uploadPart("job", 1, new ArrayBuffer(1), controller.signal)).rejects.toMatchObject({ name: "AbortError" }); expect(request).not.toHaveBeenCalled();
+  });
+
+  it("downloads succeeded image outputs call-locally without exposing signed URLs", async () => {
+    const output = { index: 0, mime_type: "image/png", size_bytes: 2, width: 10, height: 20, url: "https://signed/output", url_expires_in_seconds: 1800 };
+    request.mockResolvedValueOnce(json({ job: { ...imageJob("succeeded"), processing_started_at: "2026-01-01T00:00:01Z", completed_at: "2026-01-01T00:00:02Z" }, outputs: [output], usage: { raw_usd: 1, cost_source: "provider", estimated: false } })).mockResolvedValueOnce(new Response(new Uint8Array([1, 2]), { status: 200, headers: { "content-type": "image/png" } }));
+    const results = await client.images.downloadOutputs("img-1"); expect(results).toHaveLength(1); expect(results[0]).toMatchObject({ index: 0, mime_type: "image/png", size_bytes: 2, width: 10, height: 20 }); expect([...new Uint8Array(results[0].bytes)]).toEqual([1, 2]); expect(JSON.stringify(results)).not.toContain("signed/output");
+    expect(request.mock.calls[1][0]).toEqual(expect.objectContaining({ url: "https://signed/output", method: "GET", preserveResponseHeaders: true }));
+
+    request.mockReset(); request.mockResolvedValueOnce(json({ job: { ...imageJob("succeeded"), processing_started_at: "2026-01-01T00:00:01Z", completed_at: "2026-01-01T00:00:02Z" }, outputs: [output], usage: { raw_usd: 1, cost_source: "provider", estimated: false } })).mockResolvedValueOnce(new Response(new Uint8Array([1]), { status: 200 }));
+    await expect(client.images.downloadOutputs("img-1")).rejects.toMatchObject({ code: "malformed_response" });
+    request.mockReset(); request.mockResolvedValueOnce(json({ job: { ...imageJob("succeeded"), processing_started_at: "2026-01-01T00:00:01Z", completed_at: "2026-01-01T00:00:02Z" }, outputs: [output], usage: { raw_usd: 1, cost_source: "provider", estimated: false } })).mockResolvedValueOnce(new Response("denied", { status: 403 }));
+    await expect(client.images.downloadOutputs("img-1")).rejects.toMatchObject({ code: "managed_job_error", status: 403 });
+    const controller = new AbortController(); controller.abort(); request.mockReset(); await expect(client.images.downloadOutputs("img-1", controller.signal)).rejects.toMatchObject({ name: "AbortError" }); expect(request).not.toHaveBeenCalled();
   });
 
   it("maps terminal status errors exactly and omits forbidden status headers", async () => {

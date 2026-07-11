@@ -41,9 +41,17 @@ export class HostedTransportAdapter {
   stream(operation: ManagedTransportOperation) { return this.send({ ...operation, method: operation.method ?? "POST" }, {}, true); }
   job(operation: ManagedTransportOperation) { return this.send(operation, operation.headers ?? {}, false, true); }
 
-  private async uploadSignedInput(url: string, method: string, headers: Record<string, string>, body: ArrayBuffer, signal?: AbortSignal): Promise<void> {
+  async uploadSignedInput(url: string, method: string, headers: Record<string, string>, body: ArrayBuffer, signal?: AbortSignal): Promise<void> {
     const response = await this.client.request({ url, method, headers, body, stream: false, preserveResponseHeaders: false, signal });
     if (!response.ok) throw new Error(`Signed upload failed (${response.status})`);
+  }
+
+  async uploadSignedJobPart(url: string, method: string, headers: Record<string, string>, body: ArrayBuffer, signal?: AbortSignal): Promise<Response> {
+    return this.client.request({ url, method, headers, body, stream: false, preserveResponseHeaders: true, signal });
+  }
+
+  async downloadSignedImageOutput(url: string, signal?: AbortSignal): Promise<Response> {
+    return this.client.request({ url, method: "GET", headers: {}, stream: false, preserveResponseHeaders: true, signal });
   }
 
   private async send(operation: ManagedTransportOperation, extra: Record<string, string> = {}, stream = false, scopedHeaders = false): Promise<ManagedTransportResult> {

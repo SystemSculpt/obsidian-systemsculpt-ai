@@ -116,6 +116,23 @@ describe("ManagedJobRecoveryStore hardening", () => {
     await expect(store.beginDispatch("image_generation", "img-1", ready.revision, { operation: "create", requestId: "r", idempotencyKey: "img-1:create", dispatchedAt: "2026-01-01T00:00:00Z" })).resolves.toMatchObject({ phase: "create_dispatching" });
   });
 
+  it("enforces exhaustive phase/pendingDispatch/capability canonical coherence", async () => {
+    const baseAdapter = new MemoryAdapter(); const baseStore = new ManagedJobRecoveryStore(baseAdapter); const valid = await create(baseStore);
+    const badRecords = [
+      { ...valid, phase: "create_dispatching", pendingDispatch: undefined },
+      { ...valid, phase: "admitted", pendingDispatch: { operation: "create", requestId: "req-1", idempotencyKey: "op-1:create", dispatchedAt: "2026-01-01T00:00:00Z" } },
+      { ...valid, phase: "part_dispatching", pendingDispatch: { operation: "create", requestId: "req-1", idempotencyKey: "op-1:create", partNumber: 1, dispatchedAt: "2026-01-01T00:00:00Z" } },
+      { ...valid, phase: "part_dispatching", pendingDispatch: { operation: "part", requestId: "req-1", dispatchedAt: "2026-01-01T00:00:00Z" } },
+      { ...valid, capability: "image_generation", phase: "complete_dispatching", pendingDispatch: { operation: "complete", requestId: "req-1", dispatchedAt: "2026-01-01T00:00:00Z" } },
+      { ...valid, completedParts: [{ partNumber: 1, etag: "x-amz-signature=abc" }] },
+      { ...valid, completedParts: [{ partNumber: 1, etag: "%68%74%74%70%3A%2F%2Fx" }] },
+    ];
+    for (const [index, record] of badRecords.entries()) {
+      const adapter = new MemoryAdapter(); adapter.files.set(`.systemsculpt/managed-jobs/${record.capability}/bad-${index}.json`, JSON.stringify({ ...record, operationId: `bad-${index}` }));
+      await expect(new ManagedJobRecoveryStore(adapter).initialize()).rejects.toMatchObject({ code: "recovery_corrupt" });
+    }
+  });
+
   it("strictly rejects content, URLs, headers, credentials, invalid lengths and formats", async () => {
     const adapter = new MemoryAdapter(); const store = new ManagedJobRecoveryStore(adapter);
     await expect(create(store, { ...initial, source: { identity: "https://signed.example/x", fingerprint: "bad" } })).rejects.toMatchObject({ code: "invalid_record" });
