@@ -1,4 +1,4 @@
-import { ManagedJobRecoveryStore, ManagedRecoveryAdapter } from "../ManagedJobRecoveryStore";
+import { MANAGED_MULTIPART_PART_LIMITS, ManagedJobRecoveryStore, ManagedRecoveryAdapter } from "../ManagedJobRecoveryStore";
 import { ManagedJobCapability, ManagedRecoveryPhase } from "../ManagedTypes";
 
 class MemoryAdapter implements ManagedRecoveryAdapter {
@@ -160,6 +160,17 @@ describe("ManagedJobRecoveryStore hardening", () => {
     adapter.files.set(`.systemsculpt/managed-jobs/${capability}/${id}.json`, JSON.stringify(record)); const store = new ManagedJobRecoveryStore(adapter);
     const applied = await store.applyReconciliation(capability, id, 1, status); expect(applied.phase).toBe(expected); expect(applied.pendingDispatch).toBeUndefined();
     await expect(store.applyReconciliation(capability, id, 1, status)).rejects.toMatchObject({ code: "stale_revision" });
+  });
+
+  it.each([
+    ["transcription", -1, false], ["transcription", 0, false], ["transcription", 1, true], ["transcription", 50, true], ["transcription", 51, false],
+    ["document_processing", -1, false], ["document_processing", 0, false], ["document_processing", 1, true], ["document_processing", 3, true], ["document_processing", 4, false],
+    ["image_generation", 1, false],
+  ] as const)("canonical pending part bound %s part %s valid=%s", async (capability, partNumber, valid) => {
+    expect(MANAGED_MULTIPART_PART_LIMITS[capability]).toBe(capability === "transcription" ? 50 : capability === "document_processing" ? 3 : 0);
+    const adapter = new MemoryAdapter(); const id = `pending-${capability}-${String(partNumber).replace("-", "n")}`; const record = { schemaVersion: 1, revision: 1, capability, operationId: id, source: { identity: "vault:source", fingerprint: `sha256:${"a".repeat(64)}` }, jobId: "job", phase: "part_dispatching", pendingDispatch: { operation: "part", requestId: "req-1", partNumber, dispatchedAt: "2026-01-01T00:00:00Z" }, createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" };
+    adapter.files.set(`.systemsculpt/managed-jobs/${capability}/${id}.json`, JSON.stringify(record)); const initialized = new ManagedJobRecoveryStore(adapter).initialize();
+    if (valid) await expect(initialized).resolves.toBeUndefined(); else await expect(initialized).rejects.toMatchObject({ code: "recovery_corrupt" });
   });
 
   it("strictly rejects content, URLs, headers, credentials, invalid lengths and formats", async () => {

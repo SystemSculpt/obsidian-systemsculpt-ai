@@ -47,6 +47,21 @@ describe("ManagedJobClient exact wire contract", () => {
     expect(Object.hasOwn(headers, "x-plugin-version")).toBe(version); expect(Object.hasOwn(headers, "idempotency-key")).toBe(idem); expect(headers).not.toHaveProperty("Idempotency-Key");
   });
 
+  it.each([
+    ["transcription", 899], ["transcription", 901], ["document_processing", 899], ["document_processing", 901],
+  ] as const)("rejects %s create upload URL lifetime %s instead of exact 900", async (capability, lifetime) => {
+    const payload = capability === "transcription"
+      ? { job: txJob(), upload: { part_size_bytes: 5, total_parts: 1, part_url_expires_in_seconds: lifetime } }
+      : { document: { id: "doc", status: "uploading" }, upload: { part_size_bytes: 5, total_parts: 1, part_url_expires_in_seconds: lifetime, expires_at: "2099-01-01T00:00:00Z" } };
+    request.mockResolvedValue(json(payload)); const invoke = capability === "transcription" ? client.transcription.create({ filename: "a", contentType: "audio/wav", contentLengthBytes: 5 }, "op") : client.documents.create({ filename: "a.pdf", contentType: "application/pdf", contentLengthBytes: 5 }, "op");
+    await expect(invoke).rejects.toMatchObject({ code: "malformed_response" });
+  });
+
+  it.each([["2025-12-31T23:59:59Z", false], ["2026-01-01T00:00:00Z", false], ["2026-01-01T00:00:01Z", true]] as const)("validates document upload expiry %s future=%s", async (expires_at, accepted) => {
+    const deterministic = new ManagedJobClient(transport, () => Date.parse("2026-01-01T00:00:00Z")); request.mockResolvedValue(json({ document: { id: "doc", status: "uploading" }, upload: { part_size_bytes: 5, total_parts: 1, part_url_expires_in_seconds: 900, expires_at } }));
+    const result = deterministic.documents.create({ filename: "a.pdf", contentType: "application/pdf", contentLengthBytes: 5 }, "op"); if (accepted) await expect(result).resolves.toBeDefined(); else await expect(result).rejects.toMatchObject({ code: "malformed_response" });
+  });
+
   it("sends exact transcription create body/headers and returns only durable public fields", async () => {
     request.mockResolvedValue(json({ job: txJob(), upload: { part_size_bytes: 5, total_parts: 1, part_url_expires_in_seconds: 900 } }));
     const result = await client.transcription.create({ filename: "a.wav", contentType: "audio/wav", contentLengthBytes: 5 }, "operation-1");
