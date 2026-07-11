@@ -1,10 +1,11 @@
 import type { ChatMessage } from "../../../types";
 import type { ToolCall } from "../../../types/toolCalls";
 import type { StreamTurnResult } from "../controllers/StreamingController";
+import type { AcceptedChatOperation } from "../../../services/managed/ManagedTypes";
 
 export type ChatTurnEffects = {
   readonly signal: AbortSignal;
-  readonly commitUser: (message: ChatMessage) => Promise<void>;
+  readonly acceptedOperation: AcceptedChatOperation;
   readonly commitAssistant: (message: ChatMessage) => Promise<void>;
   readonly runInitialStream: (retryCount: number, signal: AbortSignal) => Promise<StreamTurnResult>;
   readonly shouldContinueTools: (result: StreamTurnResult) => boolean;

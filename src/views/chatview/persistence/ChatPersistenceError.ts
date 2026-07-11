@@ -6,6 +6,7 @@ export type ChatPersistenceOperation =
   | "pi_sync"
   | "pi_fork"
   | "resend_branch"
+  | "resend_user_commit"
   | "flush";
 
 export class ChatPersistenceError extends Error {

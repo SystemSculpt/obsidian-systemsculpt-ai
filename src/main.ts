@@ -69,6 +69,9 @@ import { type Extension } from "@codemirror/state";
 import type { StudioService } from "./studio/StudioService";
 import { SYSTEMSCULPT_STUDIO_VIEW_TYPE } from "./core/plugin/viewTypes";
 import type { DesktopAutomationBridge } from "./testing/automation/DesktopAutomationBridge";
+import { API_BASE_URL } from "./constants/api";
+import { ManagedCapabilityClient } from "./services/managed/ManagedCapabilityClient";
+import { ManagedCapabilityClientFactory } from "./services/managed/ManagedCapabilityClientFactory";
 
 type ViewManagerModule = typeof import("./core/plugin/views");
 type CommandManagerModule = typeof import("./core/plugin/commands");
@@ -161,6 +164,7 @@ export default class SystemSculptPlugin extends Plugin {
   private studioService: StudioService | null = null;
   private fileExplorerStudioButtonManager: FileExplorerStudioButtonManager | null = null;
   private desktopAutomationBridge: DesktopAutomationBridge | null = null;
+  private managedCapabilityClient: ManagedCapabilityClient | null = null;
   /** Live-reconfigurable slot for the relative line number gutter editor extension. */
   private readonly relativeLineNumberExtensions: Extension[] = [];
   private relativeLineNumbersApplied = false;
@@ -186,6 +190,14 @@ export default class SystemSculptPlugin extends Plugin {
       this._aiService = SystemSculptService.getInstance(this);
     }
     return this._aiService;
+  }
+
+  public getManagedCapabilityClient(): ManagedCapabilityClient {
+    if (!this.managedCapabilityClient) this.managedCapabilityClient = ManagedCapabilityClientFactory.create({
+      baseUrl: API_BASE_URL.replace(/\/api\/v1\/?$/, ""), pluginVersion: this.manifest.version,
+      licenseKey: () => this.settings.licenseKey, disclosureAcceptance: () => this.settings.managedDisclosureAcceptance,
+    });
+    return this.managedCapabilityClient;
   }
 
   public get modelService(): UnifiedModelService {
@@ -2212,6 +2224,7 @@ export default class SystemSculptPlugin extends Plugin {
       FavoritesService.clearInstance();
       RuntimeIncompatibilityService.clearInstance();
       SystemSculptService.clearInstance(); // Clear SystemSculptService singleton
+      this.managedCapabilityClient = null;
       
       // Clear service references without reassignment
       // @ts-ignore - Cleanup is handled by garbage collection

@@ -647,4 +647,27 @@ describe("ChatTranscript", () => {
     expect(retry).toBe(first);
     expect(port.createExclusive).toHaveBeenCalledTimes(1);
   });
+
+  it("atomically replaces a resend suffix and returns the authoritative message", async () => {
+    const port = storage();
+    port.load.mockResolvedValue({ chatId: "chat-1", version: 4, messages: [message("u1", "user"), message("a1", "assistant"), message("u2", "user"), message("a2", "assistant")] });
+    port.save.mockResolvedValue({ version: 5 });
+    const transcript = await ChatTranscript.load(port, "chat-1");
+    const replacement = message("u3", "user", "replacement");
+    const accepted = await transcript.commitAcceptedUser({ kind: "resend", message: replacement, targetMessageId: "u2", expectedIndex: 2, expectedVersion: 4 });
+    expect(port.save).toHaveBeenCalledTimes(1);
+    expect(accepted.snapshot.messages).toEqual([message("u1", "user"), message("a1", "assistant"), replacement]);
+    expect(accepted.message).toBe(accepted.snapshot.messages[2]);
+  });
+
+  it("rejects stale resend identity without writing or projecting", async () => {
+    const port = storage();
+    port.load.mockResolvedValue({ chatId: "chat-1", version: 4, messages: [message("u1", "user")] });
+    const transcript = await ChatTranscript.load(port, "chat-1");
+    const before = transcript.snapshot();
+    await expect(transcript.commitAcceptedUser({ kind: "resend", message: message("u2", "user"), targetMessageId: "missing", expectedIndex: 0, expectedVersion: 4 })).rejects.toMatchObject({ operation: "resend_user_commit" });
+    expect(port.save).not.toHaveBeenCalled();
+    expect(transcript.snapshot()).toBe(before);
+  });
+
 });

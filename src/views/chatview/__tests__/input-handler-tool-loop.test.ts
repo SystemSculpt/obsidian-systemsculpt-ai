@@ -11,6 +11,27 @@ import { getConfiguredRemoteProviderApiKey } from "../../../services/providerRun
 import {
   buildPiTextProviderSetupMessage,
 } from "../../../services/pi-native/PiTextAuth";
+import fixture from "../../../../testing/fixtures/managed/managed-capabilities-v2.json";
+import { ManagedCapabilityCatalog } from "../../../services/managed/ManagedCapabilityCatalog";
+import { ManagedAdmission } from "../../../services/managed/ManagedAdmission";
+import { ManagedCapabilityClient } from "../../../services/managed/ManagedCapabilityClient";
+import type { HostedTransportAdapter } from "../../../services/managed/adapters/HostedTransportAdapter";
+import type { AcceptedUserCommitInput } from "../ChatView";
+import { ChatTurnLifecycleController } from "../controllers/ChatTurnLifecycleController";
+
+const managedCatalog = ManagedCapabilityCatalog.parse(fixture);
+const managedFixtureTransport = { getCatalog: async () => managedCatalog, getAdmission: async () => ({ outcome: "allowed" as const, diagnostics: undefined }) };
+const managedChatAdmission = new ManagedCapabilityClient({
+  admission: new ManagedAdmission({ transport: managedFixtureTransport as HostedTransportAdapter, licenseKey: () => "fixture-license", disclosureAcceptance: () => ({ version: "disclosure-test-v1", acceptedAt: "2026-07-11T00:00:00Z" }) }),
+  transport: managedFixtureTransport as HostedTransportAdapter,
+});
+function commitAccepted(messages: ChatMessage[], input: AcceptedUserCommitInput) {
+  const next = input.kind === "resend" ? [...messages.slice(0, input.expectedIndex), input.message]
+    : messages.some((entry) => entry.message_id === input.message.message_id) ? [...messages] : [...messages, input.message];
+  messages.splice(0, messages.length, ...next);
+  const snapshot = Object.freeze({ chatId: "chat-1", version: 1, messages: Object.freeze([...messages]) });
+  return Promise.resolve(Object.freeze({ snapshot, message: snapshot.messages[snapshot.messages.length - 1] }));
+}
 
 jest.mock("../../../services/RecorderService", () => ({
   RecorderService: {
@@ -154,6 +175,8 @@ describe("InputHandler hosted tool loop", () => {
     } as any;
 
     const handler = new InputHandler({
+      managedChatAdmission,
+      commitAcceptedUserMessage: async (input) => { await onMessageSubmit(input.message); return commitAccepted(messages, input); },
       app,
       container,
       aiService,
@@ -223,6 +246,7 @@ describe("InputHandler hosted tool loop", () => {
       code: "chat_turn_already_active",
       state: "reserved",
     }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
     expect(ensureReady).toHaveBeenCalledTimes(1);
     expect(handler.getValue()).toBe("Summarize [PASTED TEXT - 20 LINES OF TEXT]");
     expect((handler as any).pendingLargeTextContent).toBe("full large paste");
@@ -254,7 +278,7 @@ describe("InputHandler hosted tool loop", () => {
 
     expect(repeatedDisposal).toBe(firstDisposal);
     expect(cleanupIndicators).not.toHaveBeenCalled();
-    expect((handler as any).turnLifecycle.getState()).toBe("terminal");
+    expect((handler as any).turnLifecycle).toBeNull();
 
     resolveReadiness(true);
     await expect(submission).resolves.toBeUndefined();
@@ -264,7 +288,7 @@ describe("InputHandler hosted tool loop", () => {
     expect((handler as any).pendingLargeTextContent).toBe("preserve on close");
     expect(onMessageSubmit).not.toHaveBeenCalled();
     expect(aiService.streamMessage).not.toHaveBeenCalled();
-    expect((handler as any).turnLifecycle.getState()).toBe("terminal");
+    expect((handler as any).turnLifecycle).toBeNull();
     expect(cleanupIndicators).toHaveBeenCalledTimes(1);
 
     await expect(handler.disposeLocalResources()).resolves.toBeUndefined();
@@ -286,7 +310,7 @@ describe("InputHandler hosted tool loop", () => {
 
     expect(onMessageSubmit).not.toHaveBeenCalled();
     expect(aiService.streamMessage).not.toHaveBeenCalled();
-    expect((handler as any).turnLifecycle.getState()).toBe("terminal");
+    expect((handler as any).turnLifecycle).toBeNull();
   });
 
   it("releases reservation and restores composer plus large-paste state when the first durable commit fails", async () => {
@@ -305,6 +329,7 @@ describe("InputHandler hosted tool loop", () => {
 
   it("rejects a concurrent submission before consuming input, admission, commit, or stream", async () => {
     const { aiService, handler, onMessageSubmit } = createHostedToolLoopHarness();
+    (handler as any).turnLifecycle = new ChatTurnLifecycleController({ getIsGenerating: () => false, setGenerating: jest.fn() });
     let settle!: () => void;
     const activeReady = new Promise<void>((resolve) => {
       void (handler as any).turnLifecycle.runTurn(async () => {
@@ -919,6 +944,8 @@ describe("InputHandler hosted tool loop", () => {
     } as any;
 
     const handler = new InputHandler({
+      managedChatAdmission,
+      commitAcceptedUserMessage: (input) => commitAccepted([], input),
       app,
       container,
       aiService,
@@ -1010,6 +1037,8 @@ describe("InputHandler hosted tool loop", () => {
     } as any;
 
     const handler = new InputHandler({
+      managedChatAdmission,
+      commitAcceptedUserMessage: (input) => commitAccepted([], input),
       app,
       container,
       aiService: {
@@ -1065,6 +1094,8 @@ describe("InputHandler hosted tool loop", () => {
     } as any;
 
     const handler = new InputHandler({
+      managedChatAdmission,
+      commitAcceptedUserMessage: (input) => commitAccepted([], input),
       app,
       container,
       aiService: {
@@ -1154,6 +1185,8 @@ describe("InputHandler hosted tool loop", () => {
     } as any;
 
     const handler = new InputHandler({
+      managedChatAdmission,
+      commitAcceptedUserMessage: (input) => commitAccepted([], input),
       app,
       container,
       aiService: {
@@ -1211,6 +1244,8 @@ describe("InputHandler hosted tool loop", () => {
     container.appendChild(chatContainer);
 
     const handler = new InputHandler({
+      managedChatAdmission,
+      commitAcceptedUserMessage: (input) => commitAccepted([], input),
       app,
       container,
       aiService: { streamMessage: jest.fn() } as any,
@@ -1270,6 +1305,8 @@ describe("InputHandler hosted tool loop", () => {
     container.appendChild(chatContainer);
 
     const handler = new InputHandler({
+      managedChatAdmission,
+      commitAcceptedUserMessage: (input) => commitAccepted([], input),
       app,
       container,
       aiService: { streamMessage: jest.fn() } as any,
@@ -1373,6 +1410,8 @@ describe("InputHandler hosted tool loop", () => {
     } as any;
 
     const handler = new InputHandler({
+      managedChatAdmission,
+      commitAcceptedUserMessage: (input) => commitAccepted([], input),
       app,
       container,
       aiService: { streamMessage: jest.fn() } as any,
@@ -1438,6 +1477,8 @@ describe("InputHandler hosted tool loop", () => {
     } as any;
 
     const handler = new InputHandler({
+      managedChatAdmission,
+      commitAcceptedUserMessage: (input) => commitAccepted([], input),
       app,
       container,
       aiService: { streamMessage: jest.fn() } as any,

@@ -79,17 +79,10 @@ export function reduceChatTurn(state: ChatTurnState, event: ChatTurnEvent): Chat
 
   switch (state.kind) {
     case "idle":
-      if (event.type === "TURN_STARTED") return result({ kind: "committing_user" }, { type: "PERSIST_USER" });
-      break;
-
-    case "committing_user":
-      if (event.type === "USER_COMMITTED") {
-        return result(
-          { kind: "streaming_initial", retryCount: 0 },
-          { type: "START_STREAM", phase: "initial", retryCount: 0, continuationIndex: 0 },
-        );
-      }
-      if (event.type === "PERSIST_FAILED" && event.operation === "user_commit") return finish("persistence_failed");
+      if (event.type === "TURN_STARTED") return result(
+        { kind: "streaming_initial", retryCount: 0 },
+        { type: "START_STREAM", phase: "initial", retryCount: 0, continuationIndex: 0 },
+      );
       break;
 
     case "streaming_initial":

@@ -31,14 +31,14 @@ function assertExactTypes(
   // @ts-expect-error state is readonly
   result.state = { kind: "idle" };
   // @ts-expect-error effects are readonly
-  result.effects.push({ type: "PERSIST_USER" });
+  result.effects.push({ type: "START_STREAM", phase: "initial", retryCount: 0, continuationIndex: 0 });
 }
 void assertExactTypes;
 
 function assertNever(value: never): never { throw new Error(String(value)); }
 function exhaustState(value: ChatTurnState): void {
   switch (value.kind) {
-    case "idle": case "committing_user": case "streaming_initial": case "retrying_initial":
+    case "idle": case "streaming_initial": case "retrying_initial":
     case "committing_assistant": case "awaiting_approval": case "executing_tool":
     case "checkpointing_tools": case "continuation_pending": case "streaming_continuation":
     case "retrying_continuation": case "cancel_requested": case "settling": case "terminal": return;
@@ -47,7 +47,7 @@ function exhaustState(value: ChatTurnState): void {
 }
 function exhaustEvent(value: ChatTurnEvent): void {
   switch (value.type) {
-    case "TURN_STARTED": case "USER_COMMITTED": case "PERSIST_FAILED": case "STREAM_DELTA":
+    case "TURN_STARTED": case "PERSIST_FAILED": case "STREAM_DELTA":
     case "STREAM_FINISHED": case "STREAM_FAILED": case "RETRY_ALLOWED": case "RETRY_EXHAUSTED":
     case "ASSISTANT_COMMITTED": case "TOOL_APPROVED": case "TOOL_DENIED": case "TOOL_COMPLETED":
     case "TOOL_FAILED": case "TOOL_CANCEL_UNKNOWN": case "TOOL_CHECKPOINT_COMMITTED":
@@ -57,7 +57,7 @@ function exhaustEvent(value: ChatTurnEvent): void {
 }
 function exhaustEffect(value: ChatTurnEffect): void {
   switch (value.type) {
-    case "PERSIST_USER": case "START_STREAM": case "PERSIST_ASSISTANT": case "REQUEST_TOOL_APPROVAL":
+    case "START_STREAM": case "PERSIST_ASSISTANT": case "REQUEST_TOOL_APPROVAL":
     case "EXECUTE_TOOL": case "PERSIST_TOOL_CHECKPOINT": case "START_CONTINUATION": case "REQUEST_ABORT":
     case "AWAIT_SETTLEMENT": case "FINISH": return;
     default: assertNever(value);
@@ -75,8 +75,7 @@ void exhaustState; void exhaustEvent; void exhaustEffect; void exhaustOutcome;
 describe("Chat turn state machine", () => {
   describe("happy path and assistant ordering", () => {
     const cases: ReadonlyArray<readonly [string, ChatTurnState, ChatTurnEvent, ChatTurnTransition]> = [
-      ["admits an idle turn", { kind: "idle" }, { type: "TURN_STARTED" }, { state: { kind: "committing_user" }, effects: [{ type: "PERSIST_USER" }] }],
-      ["starts initial streaming only after user durability", { kind: "committing_user" }, { type: "USER_COMMITTED" }, { state: { kind: "streaming_initial", retryCount: 0 }, effects: [{ type: "START_STREAM", phase: "initial", retryCount: 0, continuationIndex: 0 }] }],
+      ["starts initial streaming from an already durable accepted operation", { kind: "idle" }, { type: "TURN_STARTED" }, { state: { kind: "streaming_initial", retryCount: 0 }, effects: [{ type: "START_STREAM", phase: "initial", retryCount: 0, continuationIndex: 0 }] }],
       ["accepts an initial delta without effects", { kind: "streaming_initial", retryCount: 0 }, { type: "STREAM_DELTA" }, { state: { kind: "streaming_initial", retryCount: 0 }, effects: [] }],
       ["commits a no-tool assistant before finishing", { kind: "streaming_initial", retryCount: 0 }, { type: "STREAM_FINISHED", toolCount: 0 }, { state: { kind: "committing_assistant", phase: "initial", pendingToolCount: 0, continuationIndex: 0 }, effects: [{ type: "PERSIST_ASSISTANT" }] }],
       ["finishes only after no-tool assistant commit", { kind: "committing_assistant", phase: "initial", pendingToolCount: 0, continuationIndex: 0 }, { type: "ASSISTANT_COMMITTED" }, { state: { kind: "terminal", outcome: "completed" }, effects: [{ type: "FINISH", outcome: "completed" }] }],
@@ -139,7 +138,6 @@ describe("Chat turn state machine", () => {
 
   describe("persistence seams", () => {
     test.each([
-      ["user", { kind: "committing_user" }, { type: "PERSIST_FAILED", operation: "user_commit" }],
       ["initial assistant", { kind: "committing_assistant", phase: "initial", pendingToolCount: 1, continuationIndex: 0 }, { type: "PERSIST_FAILED", operation: "assistant_commit" }],
       ["continuation assistant", { kind: "committing_assistant", phase: "continuation", pendingToolCount: 0, continuationIndex: 2 }, { type: "PERSIST_FAILED", operation: "assistant_commit" }],
       ["tool checkpoint", { kind: "checkpointing_tools", outcomeUnknown: false, continuationIndex: 1 }, { type: "PERSIST_FAILED", operation: "tool_checkpoint" }],
@@ -150,7 +148,6 @@ describe("Chat turn state machine", () => {
 
   describe("cancellation settlement", () => {
     test.each([
-      { kind: "committing_user" },
       { kind: "streaming_initial", retryCount: 0 },
       { kind: "retrying_initial", retryCount: 0, failureKind: "empty" },
       { kind: "committing_assistant", phase: "initial", pendingToolCount: 1, continuationIndex: 0 },
@@ -178,16 +175,14 @@ describe("Chat turn state machine", () => {
   describe("illegal guards and terminal idempotency", () => {
     const illegalCases: ReadonlyArray<readonly [string, ChatTurnState, ChatTurnEvent]> = [
       ["idle cancellation", { kind: "idle" }, { type: "CANCEL_REQUESTED" }],
-      ["duplicate start", { kind: "committing_user" }, { type: "TURN_STARTED" }],
+      ["duplicate start", { kind: "streaming_initial", retryCount: 0 }, { type: "TURN_STARTED" }],
       ["assistant before stream", { kind: "streaming_initial", retryCount: 0 }, { type: "ASSISTANT_COMMITTED" }],
       ["approval before assistant durability", { kind: "committing_assistant", phase: "initial", pendingToolCount: 1, continuationIndex: 0 }, { type: "TOOL_APPROVED" }],
       ["negative tool count", { kind: "streaming_initial", retryCount: 0 }, { type: "STREAM_FINISHED", toolCount: -1 }],
       ["noninteger tool count", { kind: "streaming_initial", retryCount: 0 }, { type: "STREAM_FINISHED", toolCount: 1.5 }],
       ["nonmonotonic initial retry", { kind: "retrying_initial", retryCount: 2, failureKind: "transport" }, { type: "RETRY_ALLOWED", retryCount: 2 }],
       ["negative continuation retry", { kind: "retrying_continuation", retryCount: 0, continuationIndex: 1, failureKind: "empty" }, { type: "RETRY_ALLOWED", retryCount: -1 }],
-      ["wrong user persistence seam", { kind: "committing_user" }, { type: "PERSIST_FAILED", operation: "assistant_commit" }],
       ["wrong assistant persistence seam", { kind: "committing_assistant", phase: "initial", pendingToolCount: 0, continuationIndex: 0 }, { type: "PERSIST_FAILED", operation: "tool_checkpoint" }],
-      ["wrong checkpoint persistence seam", { kind: "checkpointing_tools", outcomeUnknown: false, continuationIndex: 0 }, { type: "PERSIST_FAILED", operation: "user_commit" }],
       ["duplicate cancellation", { kind: "cancel_requested" }, { type: "CANCEL_REQUESTED" }],
       ["settled before settlement start", { kind: "cancel_requested" }, { type: "SETTLED", outcome: "cancelled" }],
       ["mismatched settlement", { kind: "settling", requestedOutcome: "cancelled" }, { type: "SETTLED", outcome: "tool_outcome_unknown" }],
@@ -210,7 +205,6 @@ describe("Chat turn state machine", () => {
 
     test.each([
       { type: "TURN_STARTED" },
-      { type: "PERSIST_FAILED", operation: "user_commit" },
       { type: "CANCEL_REQUESTED" },
       { type: "SETTLED", outcome: "cancelled" },
     ] as const)("terminal state is idempotent for $type", event => {

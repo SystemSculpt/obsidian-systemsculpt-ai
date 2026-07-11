@@ -264,7 +264,9 @@ export const uiSetup = {
       chatContainer: chatView.chatContainer,
       scrollManager: chatView.scrollManager,
       messageRenderer: chatView.messageRenderer,
+      managedChatAdmission: chatView.getManagedChatAdmission(),
       onMessageSubmit: (message) => chatView.persistSubmittedUserMessage(message),
+      commitAcceptedUserMessage: (input) => chatView.commitAcceptedUserMessage(input),
       onAssistantResponse: async (message) => {
         await chatView.persistAssistantMessage(message);
       },

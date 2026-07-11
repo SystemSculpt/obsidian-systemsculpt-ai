@@ -2,6 +2,23 @@ import { ChatTurn } from "../turn/ChatTurn";
 import type { ChatTurnEffects } from "../turn/ChatTurnEffects";
 import type { ChatMessage } from "../../types";
 import { ChatPersistenceError } from "../persistence/ChatPersistenceError";
+import fixture from "../../../../testing/fixtures/managed/managed-capabilities-v2.json";
+import { ManagedCapabilityCatalog } from "../../../services/managed/ManagedCapabilityCatalog";
+import { ManagedAdmission } from "../../../services/managed/ManagedAdmission";
+import { ManagedCapabilityClient } from "../../../services/managed/ManagedCapabilityClient";
+import type { HostedTransportAdapter } from "../../../services/managed/adapters/HostedTransportAdapter";
+import type { AcceptedChatOperation } from "../../../services/managed/ManagedTypes";
+
+const user = { role: "user", content: "go", message_id: "user-1" } as ChatMessage;
+let acceptedOperation: AcceptedChatOperation;
+beforeAll(async () => {
+  const catalog = ManagedCapabilityCatalog.parse(fixture);
+  const transport = { getCatalog: async () => catalog, getAdmission: async () => ({ outcome: "allowed" as const, diagnostics: undefined }) };
+  const client = new ManagedCapabilityClient({ admission: new ManagedAdmission({ transport: transport as HostedTransportAdapter, licenseKey: () => "fixture", disclosureAcceptance: () => ({ version: "disclosure-test-v1", acceptedAt: "now" }) }), transport: transport as HostedTransportAdapter });
+  const result = await client.acquireChatTurnLease();
+  if (result.outcome !== "allowed") throw new Error("Fixture admission blocked");
+  acceptedOperation = Object.freeze({ lease: result.lease, durableTurnId: user.message_id, acceptedUserMessage: user, initialDurableSnapshot: Object.freeze({ chatId: "chat-1", version: 1, messages: Object.freeze([user]) }), turnBoundaryId: user.message_id });
+});
 
 function tool(id: string, state = "pending"): any {
   return { id, state, request: { function: { name: `tool_${id}`, arguments: "{}" } } };
@@ -26,7 +43,7 @@ function harness(overrides: Partial<ChatTurnEffects> = {}) {
   const continuation = message([], "assistant-2", "done");
   const effects: ChatTurnEffects = {
     signal: controller.signal,
-    commitUser: async () => { order.push("user"); },
+    acceptedOperation,
     commitAssistant: async (value) => { order.push(`assistant:${value.message_id}`); },
     runInitialStream: async () => stream(initial),
     shouldContinueTools: (value) => toolCallsPresent(value.message),
@@ -44,14 +61,12 @@ function harness(overrides: Partial<ChatTurnEffects> = {}) {
   return { controller, effects, order, initial, continuation, turn: new ChatTurn(effects) };
 }
 
-const user = { role: "user", content: "go", message_id: "user-1" } as ChatMessage;
-
 describe("ChatTurn tool ownership", () => {
   it("durably checkpoints a completed tool before starting its continuation", async () => {
     const { turn, order } = harness();
     await turn.run(user);
     expect(turn.outcome).toBe("completed");
-    expect(order).toEqual(["user", "assistant:assistant-1", "approve:1", "execute:1", "checkpoint", "render", "continuation", "assistant:assistant-2"]);
+    expect(order).toEqual(["assistant:assistant-1", "approve:1", "execute:1", "checkpoint", "render", "continuation", "assistant:assistant-2"]);
   });
 
   it("finishes explicitly when a tool-bearing assistant response should not continue", async () => {
@@ -79,7 +94,7 @@ describe("ChatTurn tool ownership", () => {
     const calls = [tool("1"), tool("2"), tool("3")];
     const { turn, order } = harness({ runInitialStream: async () => stream(message(calls)) });
     await turn.run(user);
-    expect(order).toEqual(["user", "assistant:assistant-1", "approve:1", "execute:1", "approve:2", "execute:2", "approve:3", "execute:3", "checkpoint", "render", "continuation", "assistant:assistant-2"]);
+    expect(order).toEqual(["assistant:assistant-1", "approve:1", "execute:1", "approve:2", "execute:2", "approve:3", "execute:3", "checkpoint", "render", "continuation", "assistant:assistant-2"]);
   });
 
   it.each([["denial", false], ["failure", true]] as const)("persists %s and continues the batch", async (_label, approved) => {
@@ -223,7 +238,7 @@ describe("ChatTurn tool ownership", () => {
   it("returns the same running promise for repeated run calls", async () => {
     let release!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; });
-    const { turn } = harness({ commitUser: async () => gate });
+    const { turn } = harness({ runInitialStream: async () => { await gate; return stream(message()); } });
     const first = turn.run(user);
     const second = turn.run(user);
     expect(second).toBe(first);

@@ -60,28 +60,18 @@ describe("messageHandling resubmit behavior", () => {
     expect(Notice).toHaveBeenCalledWith("Branched chat to that message and restored it to the composer.");
   });
 
-  it("propagates resend persistence failure without changing the accepted transcript", async () => {
-    const messages = [
-      { message_id: "user-1", role: "user", content: "First" },
-      { message_id: "assistant-1", role: "assistant", content: "Reply" },
-    ];
-    const failure = new Error("disk failed");
+  it("installs resend intent without changing the accepted transcript", async () => {
+    const messages = [{ message_id: "user-1", role: "user", content: "First" }, { message_id: "assistant-1", role: "assistant", content: "Reply" }];
+    const setPendingResendIntent = jest.fn();
     const chatView: any = {
-      messages,
-      chatId: "chat-original",
-      isLegacyReadOnlyChat: jest.fn(() => false),
-      getPiSessionFile: jest.fn(() => ""),
-      getPiSessionId: jest.fn(() => undefined),
-      commitResendBranch: jest.fn().mockRejectedValue(failure),
+      messages, chatId: "chat-original", isLegacyReadOnlyChat: jest.fn(() => false),
+      getPiSessionFile: jest.fn(() => ""), getPiSessionId: jest.fn(() => undefined),
+      getPendingResendIdentity: jest.fn(() => ({ targetMessageId: "user-1", expectedIndex: 0, expectedVersion: 1 })),
+      inputHandler: { setPendingResendIntent, setValue: jest.fn(), focus: jest.fn() },
     };
-
-    await expect(messageHandling.runResendAction(chatView, {
-      messageId: "user-1",
-      content: "First",
-    })).rejects.toBe(failure);
-
+    await expect(messageHandling.runResendAction(chatView, { messageId: "user-1", content: "First" })).resolves.toEqual({ status: "success" });
+    expect(setPendingResendIntent).toHaveBeenCalledWith({ targetMessageId: "user-1", expectedIndex: 0, expectedVersion: 1 });
     expect(chatView.messages).toBe(messages);
-    expect(chatView.chatId).toBe("chat-original");
   });
 
   it("reuses a durable first-message resend branch and restores the composer on projection retry", async () => {
@@ -105,45 +95,21 @@ describe("messageHandling resubmit behavior", () => {
     expect(result).toEqual({ status: "success" });
   });
 
-  it("keeps legacy resubmit behavior by truncating later messages and restoring editable text", async () => {
-    const chatView: any = {
-      messages: [
-        { message_id: "user_1", role: "user", content: "First" },
-        { message_id: "assistant_1", role: "assistant", content: "Reply" },
-        { message_id: "user_2", role: "user", content: "Legacy resend target" },
-        { message_id: "assistant_2", role: "assistant", content: "Latest reply" },
-      ],
-      isLegacyReadOnlyChat: jest.fn(() => false),
-      getPiSessionFile: jest.fn(() => ""),
-      getPiSessionId: jest.fn(() => undefined),
-      clearPiSessionState: jest.fn(),
-      commitResendBranch: jest.fn(async function(this: any, index: number) {
-        this.messages = this.messages.slice(0, index);
-        await this.renderMessagesInChunks();
-      }),
-      renderMessagesInChunks: jest.fn(async () => {}),
-      chatId: "chat_1",
-      chatVersion: 1,
-      isFullyLoaded: true,
-      inputHandler: {
-        setValue: jest.fn(),
-        focus: jest.fn(),
-      },
-    };
-
-    const result = await messageHandling.runResendAction(chatView, {
-      messageId: "user_2",
-      content: "\n\nLegacy resend target\n\n",
-    });
-
-    expect(chatView.messages).toEqual([
+  it("queues standard resend without eagerly truncating durable messages", async () => {
+    const messages = [
       { message_id: "user_1", role: "user", content: "First" },
       { message_id: "assistant_1", role: "assistant", content: "Reply" },
-    ]);
-    expect(chatView.commitResendBranch).toHaveBeenCalledWith(2, "user_2");
-    expect(chatView.renderMessagesInChunks).toHaveBeenCalledTimes(1);
-    expect(chatView.inputHandler.setValue).toHaveBeenCalledWith("Legacy resend target");
-    expect(chatView.inputHandler.focus).toHaveBeenCalledTimes(1);
+      { message_id: "user_2", role: "user", content: "Legacy resend target" },
+      { message_id: "assistant_2", role: "assistant", content: "Latest reply" },
+    ];
+    const chatView: any = {
+      messages, isLegacyReadOnlyChat: jest.fn(() => false), getPiSessionFile: jest.fn(() => ""), getPiSessionId: jest.fn(() => undefined),
+      getPendingResendIdentity: jest.fn(() => ({ targetMessageId: "user_2", expectedIndex: 2, expectedVersion: 1 })),
+      inputHandler: { setPendingResendIntent: jest.fn(), setValue: jest.fn(), focus: jest.fn() },
+    };
+    const result = await messageHandling.runResendAction(chatView, { messageId: "user_2", content: "Legacy resend target" });
+    expect(chatView.messages).toBe(messages);
+    expect(chatView.inputHandler.setPendingResendIntent).toHaveBeenCalledWith({ targetMessageId: "user_2", expectedIndex: 2, expectedVersion: 1 });
     expect(result).toEqual({ status: "success" });
   });
 });

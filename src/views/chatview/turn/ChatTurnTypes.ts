@@ -8,7 +8,6 @@ export type ChatTurnOutcome =
 
 export type ChatTurnState =
   | { readonly kind: "idle" }
-  | { readonly kind: "committing_user" }
   | { readonly kind: "streaming_initial"; readonly retryCount: number }
   | { readonly kind: "retrying_initial"; readonly retryCount: number; readonly failureKind: "empty" | "malformed" | "transport" }
   | { readonly kind: "committing_assistant"; readonly phase: "initial" | "continuation"; readonly pendingToolCount: number; readonly continuationIndex: number }
@@ -24,8 +23,7 @@ export type ChatTurnState =
 
 export type ChatTurnEvent =
   | { readonly type: "TURN_STARTED" }
-  | { readonly type: "USER_COMMITTED" }
-  | { readonly type: "PERSIST_FAILED"; readonly operation: "user_commit" | "assistant_commit" | "tool_checkpoint" }
+  | { readonly type: "PERSIST_FAILED"; readonly operation: "assistant_commit" | "tool_checkpoint" }
   | { readonly type: "STREAM_DELTA" }
   | { readonly type: "STREAM_FINISHED"; readonly toolCount: number }
   | { readonly type: "STREAM_FAILED"; readonly failureKind: "empty" | "malformed" | "transport" }
@@ -44,7 +42,6 @@ export type ChatTurnEvent =
   | { readonly type: "SETTLED"; readonly outcome: "cancelled" | "tool_outcome_unknown" };
 
 export type ChatTurnEffect =
-  | { readonly type: "PERSIST_USER" }
   | { readonly type: "START_STREAM"; readonly phase: "initial" | "continuation"; readonly retryCount: number; readonly continuationIndex: number }
   | { readonly type: "PERSIST_ASSISTANT" }
   | { readonly type: "REQUEST_TOOL_APPROVAL"; readonly remainingToolCount: number }

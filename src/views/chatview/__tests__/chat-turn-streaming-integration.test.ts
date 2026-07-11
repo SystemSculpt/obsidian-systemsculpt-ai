@@ -4,8 +4,24 @@
 
 import { ChatTurn } from "../turn/ChatTurn";
 import type { ChatMessage } from "../../../types";
+import fixture from "../../../../testing/fixtures/managed/managed-capabilities-v2.json";
+import { ManagedCapabilityCatalog } from "../../../services/managed/ManagedCapabilityCatalog";
+import { ManagedAdmission } from "../../../services/managed/ManagedAdmission";
+import { ManagedCapabilityClient } from "../../../services/managed/ManagedCapabilityClient";
+import type { HostedTransportAdapter } from "../../../services/managed/adapters/HostedTransportAdapter";
+import type { AcceptedChatOperation } from "../../../services/managed/ManagedTypes";
 
 const user = { role: "user", content: "hello", message_id: "user-1" } as ChatMessage;
+let acceptedOperation: AcceptedChatOperation;
+beforeAll(async () => {
+  const catalog = ManagedCapabilityCatalog.parse(fixture);
+  const transport = { getCatalog: async () => catalog, getAdmission: async () => ({ outcome: "allowed" as const, diagnostics: undefined }) };
+  const client = new ManagedCapabilityClient({ admission: new ManagedAdmission({ transport: transport as HostedTransportAdapter, licenseKey: () => "fixture", disclosureAcceptance: () => ({ version: "disclosure-test-v1", acceptedAt: "now" }) }), transport: transport as HostedTransportAdapter });
+  const result = await client.acquireChatTurnLease();
+  if (result.outcome !== "allowed") throw new Error("Fixture admission blocked");
+  acceptedOperation = Object.freeze({ lease: result.lease, durableTurnId: user.message_id, acceptedUserMessage: user, initialDurableSnapshot: Object.freeze({ chatId: "chat-1", version: 1, messages: Object.freeze([user]) }), turnBoundaryId: user.message_id });
+});
+
 const assistant = (content = "answer", toolCount = 0) => ({
   role: "assistant",
   content,
@@ -15,12 +31,11 @@ const assistant = (content = "answer", toolCount = 0) => ({
 
 function harness(streamResults: any[]) {
   const order: string[] = [];
-  const commitUser = jest.fn(async () => { order.push("user"); });
   const commitAssistant = jest.fn(async () => { order.push("assistant"); });
   const runInitialStream = jest.fn(async () => streamResults.shift());
   const turn = new ChatTurn({
     signal: new AbortController().signal,
-    commitUser,
+    acceptedOperation,
     commitAssistant,
     runInitialStream,
     shouldContinueTools: () => false,
@@ -30,14 +45,15 @@ function harness(streamResults: any[]) {
     renderToolCheckpoint: jest.fn(),
     runContinuationStream: jest.fn(),
   });
-  return { turn, order, commitUser, commitAssistant, runInitialStream };
+  return { turn, order, commitAssistant, runInitialStream };
 }
 
 describe("ChatTurn initial streaming migration", () => {
-  test("durably commits the user before streaming and the assistant before terminal completion", async () => {
+  test("starts from the accepted durable operation and commits the assistant before terminal completion", async () => {
     const h = harness([{ completionState: "completed", message: assistant() }]);
     await h.turn.run(user);
-    expect(h.order).toEqual(["user", "assistant"]);
+    expect(h.order).toEqual(["assistant"]);
+    expect(h.turn.acceptedOperation).toBe(acceptedOperation);
     expect(h.runInitialStream).toHaveBeenCalledWith(0, h.turn.signal);
   });
 
@@ -62,10 +78,9 @@ describe("ChatTurn initial streaming migration", () => {
   test("settles cancellation with the supplied lifecycle signal and no second abort owner", async () => {
     const controller = new AbortController();
     controller.abort();
-    const commitUser = jest.fn();
     const turn = new ChatTurn({
       signal: controller.signal,
-      commitUser,
+      acceptedOperation,
       commitAssistant: jest.fn(),
       runInitialStream: jest.fn(),
       shouldContinueTools: jest.fn(),
@@ -76,17 +91,11 @@ describe("ChatTurn initial streaming migration", () => {
       runContinuationStream: jest.fn(),
     });
     await turn.run(user);
-    expect(commitUser).not.toHaveBeenCalled();
     expect(turn.signal).toBe(controller.signal);
     expect(turn.outcome).toBe("cancelled");
   });
 
-  test("maps user and assistant persistence rejection to persistence_failed", async () => {
-    const userFailure = harness([]);
-    userFailure.commitUser.mockRejectedValueOnce(new Error("disk"));
-    await expect(userFailure.turn.run(user)).rejects.toThrow("disk");
-    expect(userFailure.turn.outcome).toBe("persistence_failed");
-
+  test("maps assistant persistence rejection to persistence_failed", async () => {
     const assistantFailure = harness([{ completionState: "completed", message: assistant() }]);
     assistantFailure.commitAssistant.mockRejectedValueOnce(new Error("disk"));
     await expect(assistantFailure.turn.run(user)).rejects.toThrow("disk");
@@ -97,7 +106,6 @@ describe("ChatTurn initial streaming migration", () => {
     const h = harness([{ completionState: "completed", message: assistant() }]);
     await h.turn.run(user);
     await h.turn.run(user);
-    expect(h.commitUser).toHaveBeenCalledTimes(1);
     expect(h.commitAssistant).toHaveBeenCalledTimes(1);
   });
 });

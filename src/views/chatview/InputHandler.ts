@@ -48,6 +48,8 @@ import { TOOL_LOOP_ERROR_CODE } from "../../utils/tooling";
 import { extractPrimaryPathArg, requiresUserApproval } from "../../utils/toolPolicy";
 import { ChatModelSelectionController } from "./ChatModelSelectionController";
 import { ChatTurn } from "./turn/ChatTurn";
+import type { AcceptedChatOperation, ManagedChatAdmissionPort } from "../../services/managed/ManagedTypes";
+import type { AcceptedUserCommitInput, AcceptedUserCommitResult } from "./ChatView";
 
 export interface InputHandlerOptions {
   app: App;
@@ -58,7 +60,9 @@ export interface InputHandlerOptions {
   chatContainer: HTMLElement;
   scrollManager: ScrollManagerService;
   messageRenderer: MessageRenderer;
+  managedChatAdmission: ManagedChatAdmissionPort;
   onMessageSubmit: (message: ChatMessage) => Promise<void>;
+  commitAcceptedUserMessage: (input: AcceptedUserCommitInput) => Promise<AcceptedUserCommitResult>;
   onAssistantResponse: (message: ChatMessage) => Promise<void>;
   onError: (error: string | SystemSculptError) => void;
   onAddContextFile: () => void;
@@ -73,6 +77,10 @@ export interface InputHandlerOptions {
 }
 
 export type AutomationApprovalMode = "interactive" | "auto-approve" | "deny";
+
+type PendingSubmissionIntent =
+  | Readonly<{ kind: "append" }>
+  | Readonly<{ kind: "resend"; targetMessageId: string; expectedIndex: number; expectedVersion: number }>;
 
 type HostedTurnTransaction = {
   turnId: string;
@@ -94,7 +102,9 @@ export class InputHandler extends Component {
   private chatContainer: HTMLElement;
   private scrollManager: ScrollManagerService;
   private messageRenderer: MessageRenderer;
+  private managedChatAdmission: ManagedChatAdmissionPort;
   private onMessageSubmit: (message: ChatMessage) => Promise<void>;
+  private commitAcceptedUserMessage: (input: AcceptedUserCommitInput) => Promise<AcceptedUserCommitResult>;
   private persistAssistantResponse: (message: ChatMessage) => Promise<void>;
   private onAssistantResponse: (message: ChatMessage) => Promise<void>;
   private onError: (error: string | SystemSculptError) => void;
@@ -160,7 +170,9 @@ export class InputHandler extends Component {
 
   // ───────────────────────── Streaming controller ──────────────────────────
   private streamingController: StreamingController;
-  private turnLifecycle: ChatTurnLifecycleController;
+  private turnLifecycle: ChatTurnLifecycleController | null = null;
+  private pendingSubmissionIntent: PendingSubmissionIntent = Object.freeze({ kind: "append" });
+  private acceptedOperation: AcceptedChatOperation | null = null;
 
   constructor(options: InputHandlerOptions) {
     super();
@@ -172,7 +184,9 @@ export class InputHandler extends Component {
     this.chatContainer = options.chatContainer;
     this.scrollManager = options.scrollManager;
     this.messageRenderer = options.messageRenderer;
+    this.managedChatAdmission = options.managedChatAdmission;
     this.onMessageSubmit = options.onMessageSubmit;
+    this.commitAcceptedUserMessage = options.commitAcceptedUserMessage;
     this.persistAssistantResponse = options.onAssistantResponse;
     this.onAssistantResponse = options.onAssistantResponse;
     this.onError = options.onError;
@@ -267,10 +281,6 @@ export class InputHandler extends Component {
     });
     this.addChild(this.streamingController);
 
-    this.turnLifecycle = new ChatTurnLifecycleController({
-      getIsGenerating: () => this.isGenerating,
-      setGenerating: (generating) => this.setGeneratingState(generating),
-    });
   }
 
   public waitForPersistenceIdle(): Promise<void> {
@@ -753,7 +763,7 @@ export class InputHandler extends Component {
    * through it so any route that ends a turn aborts the stream (BUG-03).
    */
   public abortActiveTurn(): Promise<void> {
-    return this.turnLifecycle.stop();
+    return this.turnLifecycle?.stop() ?? Promise.resolve();
   }
 
   private async handleSendMessage(overrides?: {
@@ -767,7 +777,7 @@ export class InputHandler extends Component {
     if (this.localResourcesDisposed || this.localResourcesDisposing) {
       return;
     }
-    if (this.turnLifecycle.isActive()) {
+    if (this.turnLifecycle?.isActive()) {
       await this.turnLifecycle.runTurn(async () => {});
       return;
     }
@@ -793,6 +803,9 @@ export class InputHandler extends Component {
     focusAfterSend?: boolean;
     rethrowErrors?: boolean;
   }): Promise<void> {
+    const candidateMessageId = this.generateMessageId();
+    const admission = await this.managedChatAdmission.acquireChatTurnLease();
+    if (admission.outcome !== "allowed") return;
     const originalInputValue = this.input.value;
     const originalPendingLargeText = this.pendingLargeTextContent;
     let consumedLargeText = false;
@@ -834,18 +847,24 @@ export class InputHandler extends Component {
     }
 
     try {
+      const userMessage: ChatMessage = { role: "user", content: messageText, message_id: candidateMessageId };
+      const intent = this.pendingSubmissionIntent;
+      const commitInput: AcceptedUserCommitInput = intent.kind === "resend" ? { ...intent, message: userMessage } : { kind: "append", message: userMessage };
+      const accepted = await this.commitAcceptedUserMessage(commitInput);
+      const durableTurnId = String(accepted.message.message_id || "").trim();
+      if (!durableTurnId) throw new Error("Accepted chat operation requires a durable turn ID.");
+      userCommitted = true;
+      this.pendingSubmissionIntent = Object.freeze({ kind: "append" });
+      const acceptedOperation: AcceptedChatOperation = Object.freeze({
+        lease: admission.lease, durableTurnId, acceptedUserMessage: accepted.message,
+        initialDurableSnapshot: accepted.snapshot, turnBoundaryId: candidateMessageId,
+      });
+      this.acceptedOperation = acceptedOperation;
+      this.submittedInputSnapshot = { messageId: durableTurnId, rawText: submittedRawText };
+      this.input.value = "";
+      this.adjustInputHeight();
+      this.turnLifecycle = new ChatTurnLifecycleController({ getIsGenerating: () => this.isGenerating, setGenerating: (generating) => this.setGeneratingState(generating) });
       const lifecycleTurn = this.turnLifecycle.runTurn(async (signal) => {
-        this.input.value = "";
-        this.adjustInputHeight();
-
-        const messageId = this.generateMessageId();
-        this.submittedInputSnapshot = { messageId, rawText: submittedRawText };
-
-        const userMessage: ChatMessage = {
-          role: "user",
-          content: messageText,
-          message_id: messageId,
-        } as any;
         const streamWithProgress = async (
           turnSignal: AbortSignal,
           phase: "initial" | "continuation",
@@ -872,10 +891,7 @@ export class InputHandler extends Component {
         };
         const turn = new ChatTurn({
           signal,
-          commitUser: async (message) => {
-            await this.onMessageSubmit(message);
-            userCommitted = true;
-          },
+          acceptedOperation,
           commitAssistant: async (message) => {
             if (typeof this.chatView?.persistAssistantMessage === "function") {
               await this.chatView.persistAssistantMessage(message, { operation: "assistant_commit" });
@@ -931,7 +947,7 @@ export class InputHandler extends Component {
             { reason: "max-tool-continuation-depth", maxToolContinuationRounds },
           ),
         });
-        await turn.run(userMessage);
+        await turn.run(accepted.message as ChatMessage);
         void this.chatView.refreshCreditsBalance();
       });
       if (this.submissionReservationGeneration !== reservationGeneration) {
@@ -974,6 +990,10 @@ export class InputHandler extends Component {
       }
       await this.chatView.contextManager.validateAndCleanContextFiles();
     }
+  }
+
+  public setPendingResendIntent(identity: { targetMessageId: string; expectedIndex: number; expectedVersion: number }): void {
+    this.pendingSubmissionIntent = Object.freeze({ kind: "resend", ...identity });
   }
 
   public async submitWithOverrides(overrides: { includeContextFiles?: boolean }): Promise<void> {
@@ -1578,7 +1598,7 @@ export class InputHandler extends Component {
 
     const terminal = this.abortActiveTurn();
     let disposal: Promise<void>;
-    if (!reservedPreflight && this.turnLifecycle.getState() === "terminal") {
+    if (!reservedPreflight && (!this.turnLifecycle || this.turnLifecycle.getState() === "terminal")) {
       cleanup();
       disposal = Promise.resolve();
     } else {

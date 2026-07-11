@@ -1,9 +1,14 @@
 import { ManagedAdmission } from "./ManagedAdmission";
 import { HostedTransportAdapter } from "./adapters/HostedTransportAdapter";
 import {
-  ManagedAdmissionOutcome, ManagedCapabilityAlias, ManagedLease,
+  ManagedAdmissionOutcome, ManagedAllowedLease, ManagedCapabilityAlias, ManagedChatLeaseResult, ManagedLease,
   ManagedRequestContractId, ManagedTransportOperation,
 } from "./ManagedTypes";
+
+function isAllowedChatLease(lease: ManagedLease): lease is ManagedAllowedLease {
+  return lease.outcome === "allowed" && lease.descriptor?.alias === "systemsculpt/chat"
+    && lease.requestContract?.capability === "chat_turn" && lease.descriptor.request_contracts.includes(lease.requestContract);
+}
 
 type ClientOperation = {
   alias: ManagedCapabilityAlias;
@@ -20,6 +25,11 @@ export class ManagedCapabilityClient {
   request(operation: ClientOperation) { return this.execute("request", operation); }
   stream(operation: ClientOperation) { return this.execute("stream", operation); }
   job(operation: ClientOperation) { return this.execute("job", operation); }
+  async acquireChatTurnLease(): Promise<ManagedChatLeaseResult> {
+    const lease = await this.dependencies.admission.acquireLease({ alias: "systemsculpt/chat", requestContract: "chat_turn" });
+    if (!isAllowedChatLease(lease)) return { outcome: lease.outcome === "allowed" ? "capability_unavailable" : lease.outcome, lease };
+    return { outcome: "allowed", lease };
+  }
 
   private execute(kind: "request" | "stream" | "job", operation: ClientOperation) {
     return this.dependencies.admission.withLease(

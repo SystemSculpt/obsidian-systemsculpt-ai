@@ -8,8 +8,17 @@ export type ChatTranscriptSnapshot = Readonly<{
   readOnly?: true;
 }>;
 
+export type AcceptedUserTranscriptInput =
+  | Readonly<{ kind: "append"; message: ChatMessage }>
+  | Readonly<{ kind: "resend"; message: ChatMessage; targetMessageId: string; expectedIndex: number; expectedVersion: number }>;
+
+export type AcceptedUserTranscriptResult = Readonly<{
+  snapshot: ChatTranscriptSnapshot;
+  message: Readonly<ChatMessage>;
+}>;
+
 export type ChatTranscriptCandidate = Readonly<{
-  operation: Exclude<ChatPersistenceOperation, "flush" | "resend_branch">;
+  operation: Exclude<ChatPersistenceOperation, "flush" | "resend_branch" | "resend_user_commit">;
   baseRevision: number;
   messages: readonly Readonly<ChatMessage>[];
 }>;

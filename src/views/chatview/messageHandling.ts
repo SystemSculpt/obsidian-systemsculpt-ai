@@ -114,8 +114,9 @@ export const messageHandling = {
       }
     }
 
-    await chatView.commitResendBranch(index, messageId);
-
+    const identity = chatView.getPendingResendIdentity(messageId);
+    if (!identity || !chatView.inputHandler) return { status: "error" };
+    chatView.inputHandler.setPendingResendIntent(identity);
     await this.restoreResendInput(chatView, content);
 
     return { status: "success" };

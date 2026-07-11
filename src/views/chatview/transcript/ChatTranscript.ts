@@ -4,6 +4,8 @@ import { ChatIdAllocationError, ChatIdAllocator } from "../persistence/ChatIdAll
 import { ChatPersistenceError } from "../persistence/ChatPersistenceError";
 import type { ChatTranscriptStorage } from "./ChatTranscriptStorage";
 import type {
+  AcceptedUserTranscriptInput,
+  AcceptedUserTranscriptResult,
   ChatTranscriptBranch,
   ChatTranscriptCandidate,
   ChatTranscriptSnapshot,
@@ -271,6 +273,54 @@ export class ChatTranscript {
     );
   }
 
+  public commitAcceptedUser(input: AcceptedUserTranscriptInput): Promise<AcceptedUserTranscriptResult> {
+    const base = this.current;
+    const baseRevision = this.revision;
+    return this.serializeTransition(async () => {
+      this.assertWritable();
+      const operation = input.kind === "resend" ? "resend_user_commit" : "user_commit";
+      this.assertCurrentBase(operation, baseRevision, { snapshot: base, revision: baseRevision });
+      let messages: readonly ChatMessage[];
+      if (input.kind === "resend") {
+        const target = base.messages[input.expectedIndex];
+        if (base.version !== input.expectedVersion || !target || target.role !== "user" || target.message_id !== input.targetMessageId) {
+          throw new ChatPersistenceError({ operation, chatId: base.chatId, cause: new ChatTranscriptStaleTransitionError(baseRevision, this.revision) });
+        }
+        messages = [...base.messages.slice(0, input.expectedIndex), input.message] as ChatMessage[];
+      } else {
+        messages = base.messages.some((entry) => entry.message_id === input.message.message_id)
+          ? [...base.messages] as ChatMessage[] : [...base.messages, input.message] as ChatMessage[];
+      }
+      return (await this.persistAcceptedUser(operation, messages)).snapshot;
+    }).then((committed) => {
+      const message = committed.messages.find((entry) => entry.message_id === input.message.message_id && entry.role === "user");
+      if (!message) throw new ChatPersistenceError({ operation: input.kind === "resend" ? "resend_user_commit" : "user_commit", chatId: committed.chatId, cause: new Error("Committed user message is absent from authoritative snapshot") });
+      return Object.freeze({ snapshot: committed, message });
+    });
+  }
+
+  private async persistAcceptedUser(operation: "user_commit" | "resend_user_commit", messages: readonly ChatMessage[]): Promise<AcceptedUserTranscriptResult> {
+    let chatId = this.current.chatId;
+    let version: number;
+    try {
+      const storageMessages = deepClone(messages) as readonly ChatMessage[];
+      if (chatId) ({ version } = await this.storage.save(chatId, storageMessages));
+      else {
+        const allocated = await new ChatIdAllocator((candidateId) => this.storage.createExclusive(candidateId, storageMessages), this.now).allocate();
+        chatId = allocated.chatId;
+        version = allocated.value.version;
+      }
+    } catch (cause) {
+      const allocationError = cause instanceof ChatIdAllocationError ? cause : null;
+      throw new ChatPersistenceError({ operation, chatId: allocationError?.chatId || chatId, cause: allocationError?.cause || cause });
+    }
+    this.current = snapshot(chatId, version!, messages);
+    this.revision += 1;
+    const message = this.current.messages[this.current.messages.length - 1];
+    if (!message || message.role !== "user") throw new ChatPersistenceError({ operation, chatId, cause: new Error("Committed user message is absent from authoritative snapshot") });
+    return Object.freeze({ snapshot: this.current, message });
+  }
+
   public candidateUser(message: ChatMessage): ChatTranscriptCandidate {
     const messages = this.current.messages.some((entry) => entry.message_id === message.message_id)
       ? [...this.current.messages]
@@ -419,7 +469,7 @@ export class ChatTranscript {
   }
 
   private assertCurrentBase(
-    operation: ChatTranscriptCandidate["operation"] | "resend_branch" | "pi_sync" | "pi_fork",
+    operation: ChatTranscriptCandidate["operation"] | "resend_branch" | "resend_user_commit" | "pi_sync" | "pi_fork",
     baseRevision: number,
     base: { snapshot: ChatTranscriptSnapshot; revision: number } | undefined,
   ): void {

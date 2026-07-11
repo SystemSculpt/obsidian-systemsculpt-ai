@@ -36,6 +36,7 @@ export class ChatTurn {
   constructor(private readonly effects: ChatTurnEffects) {}
 
   public get signal(): AbortSignal { return this.effects.signal; }
+  public get acceptedOperation() { return this.effects.acceptedOperation; }
   public get outcome(): ChatTurnOutcome | undefined {
     return this.state.kind === "terminal" ? this.state.outcome : undefined;
   }
@@ -65,20 +66,6 @@ export class ChatTurn {
 
   private async executeEffect(effect: ChatTurnEffect): Promise<void> {
     switch (effect.type) {
-      case "PERSIST_USER":
-        if (this.signal.aborted) {
-          await this.requestSettlement();
-          return;
-        }
-        try {
-          await this.effects.commitUser(this.userMessage);
-        } catch (error) {
-          await this.dispatch({ type: "PERSIST_FAILED", operation: "user_commit" });
-          throw error;
-        }
-        await this.dispatch({ type: "USER_COMMITTED" });
-        return;
-
       case "START_STREAM":
         await this.startStream(effect.phase, effect.retryCount, effect.continuationIndex);
         return;

@@ -52,6 +52,8 @@ import { ChatIdAllocationError, ChatIdAllocator } from "./persistence/ChatIdAllo
 import { ChatPersistenceError, type ChatPersistenceOperation } from "./persistence/ChatPersistenceError";
 import { ChatTranscript } from "./transcript/ChatTranscript";
 import type { ChatTranscriptStorage } from "./transcript/ChatTranscriptStorage";
+import type { ChatTranscriptSnapshot } from "./transcript/ChatTranscriptTypes";
+import type { ManagedChatAdmissionPort } from "../../services/managed/ManagedTypes";
 import { mergePiTranscriptMessages } from "./piTranscriptMerge";
 import type { SystemSculptModel } from "../../types/llm";
 
@@ -96,6 +98,11 @@ function isSupportedPersistedOpenAiCodexChatModel(modelId: string): boolean {
 
 type NodeFileSystem = Pick<typeof import("node:fs"), "existsSync">;
 type ChatSaveOptions = NonNullable<Parameters<ChatStorageService["saveChat"]>[2]>;
+export type AcceptedUserCommitInput =
+  | Readonly<{ kind: "append"; message: ChatMessage }>
+  | Readonly<{ kind: "resend"; message: ChatMessage; targetMessageId: string; expectedIndex: number; expectedVersion: number }>;
+export type AcceptedUserCommitResult = Readonly<{ snapshot: ChatTranscriptSnapshot; message: Readonly<ChatMessage> }>;
+
 type PendingCommittedPiProjection = {
   kind: "sync" | "fork";
   state: PiSessionState;
@@ -274,6 +281,8 @@ export class ChatView extends ItemView {
   public getCurrentModelName(): string {
     return getChatModelDisplayName(this.selectedModelId, this.plugin.settings.selectedModelId);
   }
+
+  public getManagedChatAdmission(): ManagedChatAdmissionPort { return this.plugin.getManagedCapabilityClient(); }
 
   getViewType(): string {
     return CHAT_VIEW_TYPE;
@@ -465,20 +474,29 @@ export class ChatView extends ItemView {
   }
 
   public async persistSubmittedUserMessage(message: ChatMessage): Promise<void> {
-    const existingMessage = this.messages.find((entry) => entry.message_id === message.message_id);
+    await this.commitAcceptedUserMessage({ kind: "append", message });
+  }
+
+  public async commitAcceptedUserMessage(input: AcceptedUserCommitInput): Promise<AcceptedUserCommitResult> {
+    const existingMessage = this.messages.find((entry) => entry.message_id === input.message.message_id);
     await this.waitForLegacyPersistenceIdle();
     const transcript = this.ensureChatTranscript();
-    const saved = await transcript.commit(transcript.candidateUser(message));
+    const accepted = await transcript.commitAcceptedUser(input);
     this.projectTranscript();
     try {
       this.updateViewState();
-      if (!existingMessage) {
-        (this.app.workspace as any)?.trigger?.("systemsculpt:chat-message-added", this.chatId);
-      }
-      await this.addMessage(message.role, message.content, message.message_id, existingMessage || message);
-    } catch (projectionError) {
-      await this.recoverPersistedProjection(saved.chatId, transcript.mutableMessages());
+      if (!existingMessage) (this.app.workspace as any)?.trigger?.("systemsculpt:chat-message-added", this.chatId);
+      await this.addMessage(accepted.message.role, accepted.message.content, accepted.message.message_id, accepted.message as ChatMessage);
+    } catch {
+      await this.recoverPersistedProjection(accepted.snapshot.chatId, transcript.mutableMessages());
     }
+    return accepted;
+  }
+
+  public getPendingResendIdentity(messageId: string): { targetMessageId: string; expectedIndex: number; expectedVersion: number } | null {
+    const snapshot = this.ensureChatTranscript().snapshot();
+    const expectedIndex = snapshot.messages.findIndex((entry) => entry.message_id === messageId && entry.role === "user");
+    return expectedIndex < 0 ? null : { targetMessageId: messageId, expectedIndex, expectedVersion: snapshot.version };
   }
 
   private mergeAssistantToolCalls(existingToolCalls: ToolCall[] = [], nextToolCalls: ToolCall[] = []): ToolCall[] | undefined {
