@@ -11,6 +11,7 @@ export type PlatformRequestInput = {
   signal?: AbortSignal;
   cache?: RequestCache;
   licenseKey?: string;
+  preserveResponseHeaders?: boolean;
 };
 
 export class PlatformRequestClient {
@@ -25,7 +26,7 @@ export class PlatformRequestClient {
     };
     const body = typeof input.body === "undefined" ? undefined : JSON.stringify(input.body);
 
-    if (input.stream) {
+    if (input.stream && !input.preserveResponseHeaders) {
       return await postJsonStreaming(
         input.url,
         headers,
@@ -51,21 +52,39 @@ export class PlatformRequestClient {
       }
     }
 
-    const result = await requestUrl({
+    if (input.signal?.aborted) {
+      throw new DOMException("The operation was aborted", "AbortError");
+    }
+
+    const requestPromise = requestUrl({
       url: input.url,
       method: input.method,
       headers,
       body,
       throw: false,
     });
+    const result = input.signal
+      ? await new Promise<Awaited<typeof requestPromise>>((resolve, reject) => {
+          const abort = () => reject(new DOMException("The operation was aborted", "AbortError"));
+          input.signal!.addEventListener("abort", abort, { once: true });
+          requestPromise.then(resolve, reject).finally(() => input.signal!.removeEventListener("abort", abort));
+        })
+      : await requestPromise;
 
     const status = result.status || 500;
     const textBody =
       typeof result.text === "string" ? result.text : JSON.stringify(result.json || {});
+    const responseHeaders = new Headers();
+    const nativeHeaders = (result as typeof result & { headers?: Record<string, string> }).headers;
+    if (nativeHeaders) {
+      for (const [name, value] of Object.entries(nativeHeaders)) {
+        if (typeof value === "string") responseHeaders.set(name, value);
+      }
+    }
+    if (!responseHeaders.has("Content-Type")) {
+      responseHeaders.set("Content-Type", input.stream ? "text/event-stream" : "application/json");
+    }
 
-    return new Response(textBody, {
-      status,
-      headers: { "Content-Type": "application/json" },
-    });
+    return new Response(textBody, { status, headers: responseHeaders });
   }
 }

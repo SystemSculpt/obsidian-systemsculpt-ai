@@ -107,6 +107,7 @@ export interface SystemSculptSettings {
 
   licenseKey: string;
   licenseValid: boolean;
+  managedDisclosureAcceptance: { version: string; acceptedAt: string } | null;
   suppressLicenseUpgradePrompt: boolean;
   selectedModelId: string;
   /** When enabled, always use the most recently selected AI model across all features */
@@ -540,6 +541,7 @@ export const DEFAULT_SETTINGS: SystemSculptSettings = {
   embeddingsVectorFormatVersion: 0,
   licenseKey: "",
   licenseValid: false,
+  managedDisclosureAcceptance: null,
   suppressLicenseUpgradePrompt: false,
   selectedModelId: "systemsculpt@@systemsculpt/ai-agent",
   useLatestModelEverywhere: true,

@@ -95,6 +95,20 @@ export class SettingsManager {
     if (typeof migratedSettings.embeddingsVectorFormatVersion !== "number" || !Number.isFinite(migratedSettings.embeddingsVectorFormatVersion)) {
       migratedSettings.embeddingsVectorFormatVersion = DEFAULT_SETTINGS.embeddingsVectorFormatVersion;
     }
+
+    const disclosure = migratedSettings.managedDisclosureAcceptance;
+    if (
+      !disclosure || typeof disclosure !== "object" || Array.isArray(disclosure) ||
+      typeof disclosure.version !== "string" || disclosure.version.trim().length === 0 ||
+      typeof disclosure.acceptedAt !== "string" || disclosure.acceptedAt.trim().length === 0
+    ) {
+      migratedSettings.managedDisclosureAcceptance = null;
+    } else {
+      migratedSettings.managedDisclosureAcceptance = {
+        version: disclosure.version,
+        acceptedAt: disclosure.acceptedAt,
+      };
+    }
     
     // Legacy/dead keys are pruned by the versioned migrator's v0→v1 step
     // (SettingsMigrator.LEGACY_KEYS_REMOVED_IN_V1) — no ad-hoc deletes here.
@@ -518,6 +532,20 @@ export class SettingsManager {
     // Validate boolean settings - using a simpler approach to avoid TypeScript errors
     if (typeof validatedSettings.licenseValid !== 'boolean') {
       validatedSettings.licenseValid = defaultSettings.licenseValid;
+    }
+
+    const disclosure = validatedSettings.managedDisclosureAcceptance;
+    if (
+      !disclosure || typeof disclosure !== "object" || Array.isArray(disclosure) ||
+      typeof disclosure.version !== "string" || disclosure.version.trim().length === 0 ||
+      typeof disclosure.acceptedAt !== "string" || disclosure.acceptedAt.trim().length === 0
+    ) {
+      validatedSettings.managedDisclosureAcceptance = null;
+    } else {
+      validatedSettings.managedDisclosureAcceptance = {
+        version: disclosure.version,
+        acceptedAt: disclosure.acceptedAt,
+      };
     }
 
     const hasActiveLicense = !!validatedSettings.licenseKey?.trim() && validatedSettings.licenseValid === true;
