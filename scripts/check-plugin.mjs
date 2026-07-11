@@ -107,9 +107,12 @@ function checkCss() {
 
 async function main() {
   const results = [];
-  const checks = ['tsc', 'bundle', 'css'];
+  const checks = ['egress', 'tsc', 'bundle', 'css'];
   const jestRunner = path.join(root, 'scripts', 'jest.mjs');
   const jestCmdPrefix = fs.existsSync(jestRunner) ? `node ${JSON.stringify(jestRunner)}` : 'npx jest';
+
+  const egress = run('node scripts/network-egress-inventory.mjs current --fixture testing/fixtures/managed/egress-baseline-660e7fe.json');
+  results.push({ name: 'egress', ...egress });
 
   const tsc = run('npx tsc --noEmit --skipLibCheck');
   results.push({ name: 'tsc', ...tsc });
@@ -126,6 +129,8 @@ async function main() {
       'node --test ' +
         [
           'scripts/release-plugin.test.mjs',
+          'scripts/network-egress-inventory.test.mjs',
+          'scripts/check-plugin.test.mjs',
           'scripts/plugin-artifacts.test.mjs',
           'scripts/lint-css.test.mjs',
           'scripts/check-github-required-checks.test.mjs',
@@ -168,7 +173,10 @@ async function main() {
   }
 
   for (const r of failed) {
-    if (r.name === 'tsc') {
+    if (r.name === 'egress') {
+      console.error('[plugin] FAIL: Network egress inventory mismatch');
+      console.error(r.stdout || r.stderr || '');
+    } else if (r.name === 'tsc') {
       console.error('[plugin] FAIL: TypeScript errors found');
       if (verbose) {
         console.error(r.stdout || r.stderr || '');
