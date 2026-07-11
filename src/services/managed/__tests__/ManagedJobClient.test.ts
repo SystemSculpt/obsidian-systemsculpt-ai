@@ -80,15 +80,34 @@ describe("ManagedJobClient exact wire contract", () => {
     ["part zero", () => client.transcription.partUrl("job", 0)],
     ["duplicate parts", () => client.documents.complete("doc", [{ partNumber: 1, etag: "a" }, { partNumber: 1, etag: "b" }], "op")],
     ["image prompt", () => client.images.create({ prompt: "" })],
+    ["image uploaded key", () => client.images.create({ prompt: "x", input_images: [{ type: "uploaded", key: "https://storage/key", mime_type: "image/png", size_bytes: 1, sha256: "a".repeat(64) }] })],
+    ["image count", () => client.images.create({ prompt: "x", options: { count: 5 } })],
+    ["image aspect", () => client.images.create({ prompt: "x", options: { aspect_ratio: "wide" } })],
+    ["image size", () => client.images.create({ prompt: "x", options: { image_size: "8K" } })],
+    ["image seed", () => client.images.create({ prompt: "x", options: { seed: -1 } })],
+    ["image idempotency", () => client.images.create({ prompt: "x" }, "bad:id")],
+    ["list limit", () => client.images.list({ limit: 101 })],
+    ["list before", () => client.images.list({ before: "not-date" })],
+    ["list status", () => client.images.list({ status: "completed" as any })],
   ])("rejects invalid request matrix: %s", async (_name, invoke) => { await expect(Promise.resolve().then(invoke)).rejects.toMatchObject({ code: "invalid_request" }); expect(request).not.toHaveBeenCalled(); });
 
   it.each([
-    [{ job: { id: "job", status: "completed" }, upload: {} }],
-    [{ document: { id: "doc", status: "expired" } }],
-    [{ part: { part_number: 1, method: "PUT", url: "x" } }],
-    [{ items: [{ job: imageJob(), outputs: [] }], next_before: null }],
-    [{ job: imageJob(), outputs: [], usage: {}, extra: true }],
-  ])("rejects malformed/forbidden response matrix", async payload => { request.mockResolvedValue(json(payload)); await expect(client.transcription.status("job")).rejects.toMatchObject({ code: "malformed_response" }); });
+    ["transcription create", () => client.transcription.create({ filename: "a", contentType: "audio/wav", contentLengthBytes: 1 }, "op"), { job: { id: "job", status: "uploading" }, upload: {} }],
+    ["transcription status", () => client.transcription.status("job"), { job: { ...txJob(), error: null }, transcript: 5, progress: 2 }],
+    ["document create", () => client.documents.create({ filename: "a.pdf", contentType: "application/pdf", contentLengthBytes: 1 }, "op"), { job: { id: "doc", status: "uploading" }, upload: {} }],
+    ["document status", () => client.documents.status("doc"), { document: { id: "doc", status: "expired", error: null, progress: 0 } }],
+    ["part", () => client.documents.partUrl("doc", 1), { part: { part_number: 1, method: "POST", url: "https://signed", url_expires_in_seconds: 900, expected_content_length_bytes: 1 } }],
+    ["result", () => client.documents.download("doc"), { result: { content: "bad", text: "x", markdown: "x", images: [], metadata: {} } }],
+    ["input prepare", () => client.images.prepareInputs([{ mime_type: "image/png", size_bytes: 1, sha256: "a".repeat(64) }], async () => new ArrayBuffer(1)), { contract: MANAGED_JOB_PROTOCOL, upload_id: "u", expires_at: "2099-01-01T00:00:00Z", input_uploads: [{ index: 0, upload: { method: "PUT", url: "https://s", headers: {}, expires_in_seconds: 900, expires_at: "2099-01-01T00:00:00Z" }, input_image: { type: "provider", key: "k", mime_type: "image/png", size_bytes: 1, sha256: "a".repeat(64) } }] }],
+    ["image create", () => client.images.create({ prompt: "x" }), { job: imageJob(), poll_url: 5 }],
+    ["image list", () => client.images.list(), { items: [{ job: imageJob(), outputs: [], usage: { raw_usd: -1, cost_source: "provider", estimated: false } }], next_before: null }],
+    ["image status discriminant", () => client.images.status("img"), { job: { ...imageJob("succeeded"), completed_at: null }, outputs: [], usage: { raw_usd: 1, cost_source: "provider", estimated: false } }],
+  ] as const)("rejects malformed actual %s parser", async (_name, invoke, payload) => { request.mockResolvedValue(json(payload)); await expect(invoke()).rejects.toMatchObject({ code: "malformed_response" }); });
+
+  it("constructs generation list query from typed fields", async () => {
+    request.mockResolvedValue(json({ items: [], next_before: null })); await client.images.list({ limit: 10, before: "2026-01-01T00:00:00Z", status: "failed" });
+    expect(request.mock.calls[0][0].url).toContain("limit=10&before=2026-01-01T00%3A00%3A00Z&status=failed");
+  });
 
   it.each([
     [400, "invalid_request", false], [401, "license_required", false], [402, "payment_required", false], [403, "license_rejected", false], [409, "operation_conflict", false], [426, "upgrade_required", false], [429, "rate_limited", true], [502, "temporarily_unavailable", true], [503, "temporarily_unavailable", true],

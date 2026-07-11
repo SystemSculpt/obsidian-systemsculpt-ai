@@ -1,6 +1,7 @@
 import { ManagedJobCapability, ManagedJobRecoveryRecord, ManagedPendingDispatch, ManagedRecoveryPhase } from "./ManagedTypes";
 
 export interface ManagedRecoveryAdapter {
+  readonly storageDomain: string;
   capabilities: { read: boolean; write: boolean; list: boolean; mkdir: boolean; atomicRename: boolean; remove: boolean };
   read(path: string): Promise<string>; write(path: string, contents: string): Promise<void>; exists(path: string): Promise<boolean>;
   list(path: string): Promise<string[]>; mkdir(path: string): Promise<void>; rename(from: string, to: string): Promise<void>; remove(path: string): Promise<void>;
@@ -13,7 +14,7 @@ type DeleteJournal = { schemaVersion: 1; capability: ManagedJobCapability; opera
 const capabilities: ManagedJobCapability[] = ["transcription", "document_processing", "image_generation"];
 const phases: ManagedRecoveryPhase[] = ["admitted", "content_ready", "prepare_dispatching", "prepared", "create_dispatching", "created", "part_dispatching", "uploading", "abort_dispatching", "upload_aborted", "complete_dispatching", "upload_completed", "start_dispatching", "processing", "result_ready", "local_commit_pending", "completed", "blocked_ambiguous", "abandoned"];
 const recordKeys = new Set(["schemaVersion", "revision", "capability", "operationId", "source", "jobId", "completedParts", "phase", "pendingDispatch", "createdAt", "updatedAt"]);
-const adapterLocks = new WeakMap<ManagedRecoveryAdapter, Map<string, Promise<void>>>();
+const domainLocks = new Map<string, Map<string, Promise<void>>>();
 const dispatchLegality: Record<ManagedJobCapability, Partial<Record<ManagedRecoveryPhase, ManagedPendingDispatch["operation"][]>>> = {
   transcription: { content_ready: ["create"], created: ["part", "complete", "abort"], uploading: ["part", "complete", "abort"], upload_completed: ["start"] },
   document_processing: { content_ready: ["create"], created: ["part", "complete", "abort"], uploading: ["part", "complete", "abort"], upload_completed: ["start"] },
@@ -25,15 +26,15 @@ export class ManagedJobRecoveryStore {
   private readonly locks: Map<string, Promise<void>>;
   constructor(private readonly adapter: ManagedRecoveryAdapter, private readonly now: () => string = () => new Date().toISOString()) {
     const c = adapter.capabilities;
-    if (!c?.read || !c.write || !c.list || !c.mkdir || !c.atomicRename || !c.remove) throw new ManagedRecoveryError("recovery_unavailable", "Recovery requires read, write, list, mkdir, atomic rename, and remove.");
-    this.locks = adapterLocks.get(adapter) ?? new Map<string, Promise<void>>(); adapterLocks.set(adapter, this.locks);
+    if (!c?.read || !c.write || !c.list || !c.mkdir || !c.atomicRename || !c.remove || typeof adapter.storageDomain !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/.test(adapter.storageDomain)) throw new ManagedRecoveryError("recovery_unavailable", "Recovery requires a stable storage domain plus read, write, list, mkdir, atomic rename, and remove.");
+    this.locks = domainLocks.get(adapter.storageDomain) ?? new Map<string, Promise<void>>(); domainLocks.set(adapter.storageDomain, this.locks);
   }
 
   async initialize(): Promise<void> {
-    await this.adapter.mkdir(this.root);
-    const files = await this.adapter.list(this.root);
-    const bases = new Set(files.map(p => p.replace(/\.(?:tmp|journal|bak|delete-journal|deleting)$/, "")).filter(p => p.endsWith(".json")));
-    for (const path of [...bases].sort()) await this.serial(path, () => this.recover(path));
+    await this.adapter.mkdir(this.root); const files = await this.adapter.list(this.root);
+    const bases = new Set(files.map(p => p.replace(/\.(?:tmp|journal|bak|delete-journal|deleting)$/, "")).filter(p => p.endsWith(".json"))); const errors: ManagedRecoveryError[] = [];
+    for (const path of [...bases].sort()) { try { await this.serial(path, async () => { await this.recover(path); if (await this.adapter.exists(path)) await this.readCandidate(path); }); } catch (error) { errors.push(error instanceof ManagedRecoveryError ? error : new ManagedRecoveryError("recovery_corrupt", "Recovery initialization failed.")); } }
+    if (errors.length) throw errors[0];
   }
 
   createAdmitted(input: { capability: ManagedJobCapability; operationId: string; source: { identity: string; fingerprint: string } }): Promise<ManagedJobRecoveryRecord> {
@@ -57,6 +58,7 @@ export class ManagedJobRecoveryStore {
       const idemRequired = c !== "image_generation" && ["create", "complete", "start"].includes(pending.operation);
       if (idemRequired && pending.idempotencyKey !== `${id}:${pending.operation}`) throw new ManagedRecoveryError("invalid_record", "Invalid deterministic idempotency key.");
       if (!idemRequired && c !== "image_generation" && pending.idempotencyKey) throw new ManagedRecoveryError("invalid_record", "Idempotency key is forbidden for this operation.");
+      if (c === "image_generation" && pending.idempotencyKey !== undefined && pending.idempotencyKey !== `${id}:create`) throw new ManagedRecoveryError("invalid_record", "Invalid optional image idempotency key.");
       const phase = `${pending.operation}_dispatching` as ManagedRecoveryPhase; return { ...r, phase, pendingDispatch: pending };
     });
   }
@@ -108,10 +110,11 @@ export class ManagedJobRecoveryStore {
     if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(x.operationId) || typeof x.source?.identity !== "string" || x.source.identity.length < 1 || x.source.identity.length > 512 || /(?:https?:\/\/|\b(?:authorization|credential|headers?|prompt|content)\b)/i.test(x.source.identity) || !/^sha256:[a-f0-9]{64}$/.test(x.source.fingerprint)) throw new ManagedRecoveryError("invalid_record", "Invalid source identity/fingerprint.");
     if (typeof x.createdAt !== "string" || !Number.isFinite(Date.parse(x.createdAt)) || typeof x.updatedAt !== "string" || !Number.isFinite(Date.parse(x.updatedAt)) || Date.parse(x.updatedAt) < Date.parse(x.createdAt)) throw new ManagedRecoveryError("invalid_record", "Invalid timestamps.");
     if (x.jobId !== undefined && (typeof x.jobId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/.test(x.jobId))) throw new ManagedRecoveryError("invalid_record", "Invalid first-party job ID.");
-    if (x.completedParts !== undefined && (!Array.isArray(x.completedParts) || x.completedParts.length > 50 || x.completedParts.some((p: any) => Object.keys(p).sort().join() !== "etag,partNumber" || !Number.isInteger(p.partNumber) || p.partNumber < 1 || typeof p.etag !== "string" || p.etag.length < 1 || p.etag.length > 1024))) throw new ManagedRecoveryError("invalid_record", "Invalid completed parts.");
+    if (x.completedParts !== undefined && (!Array.isArray(x.completedParts) || x.completedParts.length > 50 || x.completedParts.some((p: any) => Object.keys(p).sort().join() !== "etag,partNumber" || !Number.isInteger(p.partNumber) || p.partNumber < 1 || !this.safeDurableString(p.etag, 1024)))) throw new ManagedRecoveryError("invalid_record", "Invalid completed parts.");
     if (x.pendingDispatch !== undefined) this.validateDispatch(x.pendingDispatch);
   }
-  private validateDispatch(p: any) { const keys = new Set(["operation", "requestId", "idempotencyKey", "partNumber", "dispatchedAt"]); if (!p || typeof p !== "object" || Object.keys(p).some(k => !keys.has(k)) || !["prepare", "create", "part", "abort", "complete", "start"].includes(p.operation) || typeof p.requestId !== "string" || p.requestId.length < 1 || p.requestId.length > 256 || !Number.isFinite(Date.parse(p.dispatchedAt))) throw new ManagedRecoveryError("invalid_record", "Invalid dispatch metadata."); if (p.idempotencyKey !== undefined && (typeof p.idempotencyKey !== "string" || p.idempotencyKey.length > 256)) throw new ManagedRecoveryError("invalid_record", "Invalid idempotency key."); }
+  private safeDurableString(value: unknown, max: number) { return typeof value === "string" && value.length >= 1 && value.length <= max && !/(?:https?:\/\/|(?:^|[^a-z])(?:authorization|credential|password|secret|token|headers?|prompt|content)(?:[^a-z]|$))/i.test(value); }
+  private validateDispatch(p: any) { const keys = new Set(["operation", "requestId", "idempotencyKey", "partNumber", "dispatchedAt"]); if (!p || typeof p !== "object" || Object.keys(p).some(k => !keys.has(k)) || !["prepare", "create", "part", "abort", "complete", "start"].includes(p.operation) || !this.safeDurableString(p.requestId, 256) || !Number.isFinite(Date.parse(p.dispatchedAt))) throw new ManagedRecoveryError("invalid_record", "Invalid dispatch metadata."); if (p.idempotencyKey !== undefined && (typeof p.idempotencyKey !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}:(?:create|complete|start)$/.test(p.idempotencyKey))) throw new ManagedRecoveryError("invalid_record", "Invalid idempotency key."); }
   private async readRecord(path: string, c: ManagedJobCapability, id: string) { let parsed: unknown; try { parsed = JSON.parse(await this.adapter.read(path)); } catch { throw new ManagedRecoveryError("recovery_corrupt", "Malformed recovery record."); } try { this.validateRecord(parsed); } catch { throw new ManagedRecoveryError("recovery_corrupt", "Invalid recovery record."); } this.cas(parsed, (parsed as ManagedJobRecoveryRecord).revision, c, id); return parsed as ManagedJobRecoveryRecord; }
 
   private journal(raw: string, path: string): WriteJournal { let x: any; try { x = JSON.parse(raw); } catch { throw new ManagedRecoveryError("recovery_corrupt", "Malformed write journal."); } const identity = this.identity(path); if (!x || Object.keys(x).sort().join() !== "capability,fromRevision,operationId,phase,schemaVersion,toRevision" || x.schemaVersion !== 1 || !["prepared", "original_moved", "promoted"].includes(x.phase) || x.capability !== identity.capability || x.operationId !== identity.operationId || !Number.isInteger(x.fromRevision) || x.toRevision !== x.fromRevision + 1) throw new ManagedRecoveryError("recovery_corrupt", "Invalid write journal."); return x; }
@@ -134,7 +137,7 @@ export class ManagedJobRecoveryStore {
   private async readCandidate(path: string) { let x: unknown; try { x = JSON.parse(await this.adapter.read(path)); this.validateRecord(x); } catch { throw new ManagedRecoveryError("recovery_corrupt", "Invalid recovery candidate."); } return x as ManagedJobRecoveryRecord; }
 
   private async recover(path: string) {
-    if (await this.adapter.exists(`${path}.delete-journal`)) { const journal = this.parseDeleteJournal(await this.adapter.read(`${path}.delete-journal`), path); const existing = await this.optionalRecord(path); if (existing && existing.revision > journal.revision) throw new ManagedRecoveryError("recovery_corrupt", "Delete journal is stale relative to record."); const tombstone = await this.optionalRecord(`${path}.deleting`); if (tombstone && tombstone.revision !== journal.revision) throw new ManagedRecoveryError("recovery_corrupt", "Delete tombstone revision mismatch."); await this.finishDelete(path, journal); return; }
+    if (await this.adapter.exists(`${path}.delete-journal`)) { const journal = this.parseDeleteJournal(await this.adapter.read(`${path}.delete-journal`), path); const existing = await this.optionalRecord(path); const tombstone = await this.optionalRecord(`${path}.deleting`); if (existing && existing.revision !== journal.revision || tombstone && tombstone.revision !== journal.revision) throw new ManagedRecoveryError("recovery_corrupt", "Delete journal revision mismatch."); await this.finishDelete(path, journal); return; }
     if (!(await this.adapter.exists(`${path}.journal`))) { if (await this.adapter.exists(`${path}.tmp`)) await this.adapter.remove(`${path}.tmp`); if (await this.adapter.exists(`${path}.bak`) || await this.adapter.exists(`${path}.deleting`)) throw new ManagedRecoveryError("recovery_corrupt", "Orphan recovery artifact without journal."); return; }
     const j = this.journal(await this.adapter.read(`${path}.journal`), path); const current = await this.optionalRecord(path), temp = await this.optionalRecord(`${path}.tmp`), backup = await this.optionalRecord(`${path}.bak`);
     for (const candidate of [current, temp, backup]) if (candidate && candidate.capability !== j.capability || candidate && candidate.operationId !== j.operationId) throw new ManagedRecoveryError("recovery_corrupt", "Journal candidate identity mismatch.");
@@ -146,5 +149,5 @@ export class ManagedJobRecoveryStore {
     throw new ManagedRecoveryError("recovery_corrupt", "Unrecoverable journal artifact combination.");
   }
   private async optionalRecord(path: string) { if (!(await this.adapter.exists(path))) return undefined; return this.readCandidate(path); }
-  private async finishDelete(path: string, j: DeleteJournal) { const current = await this.optionalRecord(path); if (current && current.revision > j.revision) throw new ManagedRecoveryError("recovery_corrupt", "Refusing to delete newer record."); for (const suffix of [".deleting", ".tmp", ".bak", ".journal"]) if (await this.adapter.exists(`${path}${suffix}`)) await this.adapter.remove(`${path}${suffix}`); if (await this.adapter.exists(path)) await this.adapter.remove(path); if (await this.adapter.exists(`${path}.delete-journal`)) await this.adapter.remove(`${path}.delete-journal`); }
+  private async finishDelete(path: string, j: DeleteJournal) { const current = await this.optionalRecord(path); if (current && current.revision !== j.revision) throw new ManagedRecoveryError("recovery_corrupt", "Refusing mismatched record deletion."); for (const suffix of [".deleting", ".tmp", ".bak", ".journal"]) if (await this.adapter.exists(`${path}${suffix}`)) await this.adapter.remove(`${path}${suffix}`); if (await this.adapter.exists(path)) await this.adapter.remove(path); if (await this.adapter.exists(`${path}.delete-journal`)) await this.adapter.remove(`${path}.delete-journal`); }
 }
