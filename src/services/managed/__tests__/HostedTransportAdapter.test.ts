@@ -93,6 +93,13 @@ describe("HostedTransportAdapter", () => {
     expect(request.mock.calls[0][0].headers).not.toHaveProperty("x-plugin-version");
   });
 
+  it("uses the existing transport sink for signed uploads without adding license or managed headers", async () => {
+    const adapter = new HostedTransportAdapter({ baseUrl: "https://api.test", pluginVersion: "6", licenseKey: () => "secret" });
+    await (adapter as any).uploadSignedInput("https://signed.test/input", "PUT", { "content-type": "image/png" }, new Uint8Array([1]).buffer);
+    expect(request).toHaveBeenCalledWith(expect.objectContaining({ url: "https://signed.test/input", method: "PUT", headers: { "content-type": "image/png" }, preserveResponseHeaders: false }));
+    expect(request.mock.calls[0][0].licenseKey).toBeUndefined();
+  });
+
   it("returns bounded diagnostics with preserved response metadata", async () => {
     request.mockResolvedValue(response(503, { error: "x".repeat(5000) }));
     const adapter = new HostedTransportAdapter({ baseUrl: "https://api.test", pluginVersion: "6", licenseKey: () => "secret" });

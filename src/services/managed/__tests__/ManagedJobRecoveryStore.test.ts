@@ -1,75 +1,123 @@
 import { ManagedJobRecoveryStore, ManagedRecoveryAdapter } from "../ManagedJobRecoveryStore";
-import { ManagedJobRecoveryRecord } from "../ManagedTypes";
+import { ManagedJobCapability, ManagedRecoveryPhase } from "../ManagedTypes";
 
 class MemoryAdapter implements ManagedRecoveryAdapter {
   capabilities = { read: true, write: true, list: true, mkdir: true, atomicRename: true, remove: true };
-  files = new Map<string, string>();
-  events: string[] = [];
+  files = new Map<string, string>(); events: string[] = []; failAt = -1; boundaries = 0;
+  private boundary(event: string) { this.events.push(event); if (this.boundaries++ === this.failAt) throw new Error("injected crash"); }
   async read(p: string) { if (!this.files.has(p)) throw Object.assign(new Error("missing"), { code: "ENOENT" }); return this.files.get(p)!; }
-  async write(p: string, v: string) { this.events.push(`write:${p}`); this.files.set(p, v); }
+  async write(p: string, v: string) { this.boundary(`write:${p}`); this.files.set(p, v); }
   async exists(p: string) { return this.files.has(p); }
   async list(p: string) { return [...this.files.keys()].filter(k => k.startsWith(p)); }
-  async mkdir(p: string) { this.events.push(`mkdir:${p}`); }
-  async rename(a: string, b: string) { this.events.push(`rename:${a}:${b}`); if (!this.files.has(a)) throw new Error("missing"); this.files.set(b, this.files.get(a)!); this.files.delete(a); }
-  async remove(p: string) { this.events.push(`remove:${p}`); this.files.delete(p); }
+  async mkdir(p: string) { this.boundary(`mkdir:${p}`); }
+  async rename(a: string, b: string) { this.boundary(`rename:${a}:${b}`); if (!this.files.has(a)) throw new Error("missing"); this.files.set(b, this.files.get(a)!); this.files.delete(a); }
+  async remove(p: string) { this.boundary(`remove:${p}`); this.files.delete(p); }
+  clone() { const next = new MemoryAdapter(); next.files = new Map(this.files); return next; }
 }
+const initial = { capability: "transcription", operationId: "op-1", source: { identity: "vault:a.wav", fingerprint: `sha256:${"a".repeat(64)}` } } as const;
+const create = async (store: ManagedJobRecoveryStore, value = initial) => store.createAdmitted(value);
 
-const initial = { capability: "transcription", operationId: "op-1", source: { identity: "vault:a.wav", fingerprint: "sha256:a" } } as const;
-
-describe("ManagedJobRecoveryStore", () => {
-  it("fails closed before creating records when atomic rename is unavailable", async () => {
-    const adapter = new MemoryAdapter(); adapter.capabilities.atomicRename = false;
-    expect(() => new ManagedJobRecoveryStore(adapter)).toThrow(expect.objectContaining({ code: "recovery_unavailable" }));
-    expect(adapter.files.size).toBe(0);
+describe("ManagedJobRecoveryStore hardening", () => {
+  it("fails closed without atomic rename and serializes same-operation create/CAS mutations", async () => {
+    const bad = new MemoryAdapter(); bad.capabilities.atomicRename = false;
+    expect(() => new ManagedJobRecoveryStore(bad)).toThrow(expect.objectContaining({ code: "recovery_unavailable" }));
+    const adapter = new MemoryAdapter(); const store = new ManagedJobRecoveryStore(adapter); const siblingStore = new ManagedJobRecoveryStore(adapter);
+    const creates = await Promise.allSettled([create(store), create(siblingStore)]);
+    expect(creates.filter(x => x.status === "fulfilled")).toHaveLength(1);
+    const admitted = await store.read("transcription", "op-1");
+    const mutations = await Promise.allSettled([
+      store.markContentReady("transcription", "op-1", admitted.revision),
+      store.markContentReady("transcription", "op-1", admitted.revision),
+    ]);
+    expect(mutations.filter(x => x.status === "fulfilled")).toHaveLength(1);
+    expect(mutations.filter(x => x.status === "rejected")).toHaveLength(1);
   });
 
-  it("creates admitted records before content reads and enforces revision CAS and legal transitions", async () => {
-    const adapter = new MemoryAdapter(); const store = new ManagedJobRecoveryStore(adapter, () => "2026-01-01T00:00:00.000Z");
-    const admitted = await store.createAdmitted(initial);
-    expect(admitted).toMatchObject({ schemaVersion: 1, revision: 1, phase: "admitted", operationId: "op-1" });
-    const ready = await store.transition(initial.capability, initial.operationId, 1, "content_ready");
-    expect(ready.revision).toBe(2);
-    await expect(store.transition(initial.capability, initial.operationId, 1, "create_dispatching")).rejects.toMatchObject({ code: "stale_revision" });
-    await expect(store.transition(initial.capability, initial.operationId, 2, "completed")).rejects.toMatchObject({ code: "illegal_transition" });
+  it("exposes only legal typed mutations and preserves immutable identity and creation time", async () => {
+    const store = new ManagedJobRecoveryStore(new MemoryAdapter(), () => "2026-01-01T00:00:00.000Z");
+    const admitted = await create(store); const ready = await store.markContentReady("transcription", "op-1", admitted.revision);
+    const dispatch = await store.beginDispatch("transcription", "op-1", ready.revision, { operation: "create", requestId: "req-1", idempotencyKey: "op-1:create", dispatchedAt: "2026-01-01T00:00:00.000Z" });
+    const ack = await store.acknowledgeCreated("transcription", "op-1", dispatch.revision, "job-1");
+    expect(ack).toMatchObject({ capability: "transcription", operationId: "op-1", createdAt: admitted.createdAt, phase: "created", jobId: "job-1" });
+    expect((store as any).update).toBeUndefined(); expect((store as any).transition).toBeUndefined();
   });
 
-  it("durably records dispatch metadata before transport and acknowledges separately", async () => {
-    const adapter = new MemoryAdapter(); const store = new ManagedJobRecoveryStore(adapter);
-    let record = await store.createAdmitted(initial); record = await store.transition("transcription", "op-1", record.revision, "content_ready");
-    const dispatched = await store.beginDispatch("transcription", "op-1", record.revision, { operation: "create", requestId: "req-1", idempotencyKey: "op-1:create", dispatchedAt: "2026-01-01T00:00:00Z" });
-    expect(dispatched.phase).toBe("create_dispatching");
-    const acknowledged = await store.acknowledge("transcription", "op-1", dispatched.revision, "created", { jobId: "job-1" });
-    expect(acknowledged).toMatchObject({ phase: "created", revision: dispatched.revision + 1, jobId: "job-1", pendingDispatch: undefined });
+  it("recovers every write boundary including original moved before journal phase update", async () => {
+    const baseline = new MemoryAdapter(); const initialStore = new ManagedJobRecoveryStore(baseline); const admitted = await create(initialStore);
+    for (let failAt = 0; failAt < 12; failAt++) {
+      const adapter = baseline.clone(); adapter.failAt = failAt; const store = new ManagedJobRecoveryStore(adapter);
+      await store.markContentReady("transcription", "op-1", admitted.revision).catch(() => undefined);
+      adapter.failAt = -1;
+      const recovered = new ManagedJobRecoveryStore(adapter); await recovered.initialize();
+      const record = await recovered.read("transcription", "op-1");
+      expect([1, 2]).toContain(record.revision);
+      expect(adapter.files.has(".systemsculpt/managed-jobs/transcription/op-1.json.journal")).toBe(false);
+    }
   });
 
-  it.each([
-    ["transcription", "complete_dispatching", "queued", "upload_completed"],
-    ["transcription", "complete_dispatching", "uploading", "blocked_ambiguous"],
-    ["transcription", "start_dispatching", "processing", "processing"],
-    ["document_processing", "start_dispatching", "completed", "result_ready"],
-    ["document_processing", "abort_dispatching", "failed", "upload_aborted"],
-    ["image_generation", "create_dispatching", "queued", "blocked_ambiguous"],
-  ] as const)("reconciles %s %s + %s to %s without ordinal assumptions", (capability, phase, status, expected) => {
-    expect(ManagedJobRecoveryStore.reconcile(capability, phase, status)).toBe(expected);
+  it("quarantines malformed/stale journals and never overwrites a newer record", async () => {
+    const adapter = new MemoryAdapter(); const store = new ManagedJobRecoveryStore(adapter); await create(store);
+    const path = ".systemsculpt/managed-jobs/transcription/op-1.json";
+    adapter.files.set(`${path}.journal`, JSON.stringify({ schemaVersion: 1, phase: "promoted", fromRevision: 5, toRevision: 6 }));
+    await expect(new ManagedJobRecoveryStore(adapter).initialize()).rejects.toMatchObject({ code: "recovery_corrupt" });
+    expect(JSON.parse(adapter.files.get(path)!).revision).toBe(1);
+    adapter.files.set(`${path}.journal`, "{");
+    await expect(new ManagedJobRecoveryStore(adapter).initialize()).rejects.toMatchObject({ code: "recovery_corrupt" });
   });
 
-  it("retains completed records and deletes abandoned records with journal first and last", async () => {
-    const adapter = new MemoryAdapter(); const store = new ManagedJobRecoveryStore(adapter);
-    const record = await store.createAdmitted(initial);
-    const abandoned = await store.transition("transcription", "op-1", record.revision, "abandoned");
+  it("validates delete journals, protects newer records, and removes the journal last", async () => {
+    const adapter = new MemoryAdapter(); const store = new ManagedJobRecoveryStore(adapter); const admitted = await create(store);
+    const abandoned = await store.abandon("transcription", "op-1", admitted.revision);
     await store.delete("transcription", "op-1", abandoned.revision);
-    const journalWrites = adapter.events.findIndex(e => e.includes(".delete-journal"));
-    const tombstoneRename = adapter.events.findIndex(e => e.includes(".deleting"));
-    const journalRemoval = adapter.events.map((e, i) => [e, i] as const).filter(([e]) => e.includes("remove:") && e.includes(".delete-journal")).at(-1)![1];
-    expect(journalWrites).toBeLessThan(tombstoneRename);
-    expect(journalRemoval).toBeGreaterThan(tombstoneRename);
-    await expect(store.delete("transcription", "completed", 1)).rejects.toBeDefined();
+    const journalWrite = adapter.events.findIndex(x => x.includes("write:") && x.includes("delete-journal"));
+    const tombstone = adapter.events.findIndex(x => x.includes("rename:") && x.includes(".deleting"));
+    const journalRemove = adapter.events.findLastIndex(x => x.includes("remove:") && x.includes("delete-journal"));
+    expect(journalWrite).toBeLessThan(tombstone); expect(journalRemove).toBeGreaterThan(tombstone);
+
+    const guarded = new MemoryAdapter(); const guardedStore = new ManagedJobRecoveryStore(guarded); await create(guardedStore);
+    const path = ".systemsculpt/managed-jobs/transcription/op-1.json";
+    guarded.files.set(`${path}.delete-journal`, JSON.stringify({ schemaVersion: 1, capability: "transcription", operationId: "op-1", revision: 0, intent: "delete" }));
+    await expect(new ManagedJobRecoveryStore(guarded).initialize()).rejects.toMatchObject({ code: "recovery_corrupt" });
+    expect(guarded.files.has(path)).toBe(true);
   });
 
-  it("never serializes signed URLs, credentials, providers, or arbitrary payloads", async () => {
+  it("recovers deletion after every write/rename/remove boundary without resurrection", async () => {
+    const baseline = new MemoryAdapter(); const baseStore = new ManagedJobRecoveryStore(baseline); const admitted = await create(baseStore); await baseStore.abandon("transcription", "op-1", admitted.revision);
+    for (let failAt = 0; failAt < 10; failAt++) {
+      const adapter = baseline.clone(); adapter.failAt = failAt; const store = new ManagedJobRecoveryStore(adapter);
+      await store.delete("transcription", "op-1", 2).catch(() => undefined); adapter.failAt = -1;
+      const recovered = new ManagedJobRecoveryStore(adapter); await recovered.initialize();
+      const path = ".systemsculpt/managed-jobs/transcription/op-1.json";
+      if (adapter.files.has(`${path}.delete-journal`)) throw new Error("delete journal survived recovery");
+      if (adapter.files.has(path)) expect(JSON.parse(adapter.files.get(path)!).phase).toBe("abandoned");
+    }
+  });
+
+  it("rejects impossible capability dispatches, missing part numbers, and bad idempotency", async () => {
+    const adapter = new MemoryAdapter(); const store = new ManagedJobRecoveryStore(adapter); let record = await create(store); record = await store.markContentReady("transcription", "op-1", record.revision);
+    await expect(store.beginDispatch("transcription", "op-1", record.revision, { operation: "prepare", requestId: "r", dispatchedAt: "2026-01-01T00:00:00Z" })).rejects.toMatchObject({ code: "illegal_transition" });
+    await expect(store.beginDispatch("transcription", "op-1", record.revision, { operation: "create", requestId: "r", idempotencyKey: "wrong", dispatchedAt: "2026-01-01T00:00:00Z" })).rejects.toMatchObject({ code: "invalid_record" });
+    const image = await create(store, { capability: "image_generation", operationId: "img-1", source: { identity: "vault:image.png", fingerprint: `sha256:${"b".repeat(64)}` } }); const ready = await store.markContentReady("image_generation", "img-1", image.revision);
+    await expect(store.beginDispatch("image_generation", "img-1", ready.revision, { operation: "part", requestId: "r", dispatchedAt: "2026-01-01T00:00:00Z" })).rejects.toMatchObject({ code: "illegal_transition" });
+    await expect(store.beginDispatch("image_generation", "img-1", ready.revision, { operation: "create", requestId: "r", idempotencyKey: "img-1:create", dispatchedAt: "2026-01-01T00:00:00Z" })).resolves.toMatchObject({ phase: "create_dispatching" });
+  });
+
+  it("strictly rejects content, URLs, headers, credentials, invalid lengths and formats", async () => {
     const adapter = new MemoryAdapter(); const store = new ManagedJobRecoveryStore(adapter);
-    const record = await store.createAdmitted(initial);
-    await expect(store.update("transcription", "op-1", record.revision, { signedUrl: "https://secret", credential: "x" } as any)).rejects.toMatchObject({ code: "invalid_record" });
-    expect([...adapter.files.values()].join(" ")).not.toContain("https://secret");
+    await expect(create(store, { ...initial, source: { identity: "https://signed.example/x", fingerprint: "bad" } })).rejects.toMatchObject({ code: "invalid_record" });
+    await expect(create(store, { ...initial, operationId: "x".repeat(129) })).rejects.toMatchObject({ code: "invalid_record" });
+    expect(JSON.stringify([...adapter.files.values()])).not.toMatch(/signed|authorization|headers|content/i);
+  });
+
+  it("is capability-exhaustive for every dispatching phase/status Cartesian product", () => {
+    const statuses = ["uploading", "queued", "processing", "succeeded", "completed", "failed", "expired", "unknown"] as const;
+    const phases = ["prepare_dispatching", "create_dispatching", "part_dispatching", "complete_dispatching", "start_dispatching", "abort_dispatching"] as const;
+    const capabilities: ManagedJobCapability[] = ["transcription", "document_processing", "image_generation"];
+    for (const capability of capabilities) for (const phase of phases) for (const status of statuses) {
+      const result = ManagedJobRecoveryStore.reconcile(capability, phase, status);
+      expect(["blocked_ambiguous", "upload_completed", "processing", "result_ready", "upload_aborted"]).toContain(result);
+      if (capability === "image_generation" && phase !== "create_dispatching" && phase !== "prepare_dispatching") expect(result).toBe("blocked_ambiguous");
+      if (capability === "document_processing" && status === "expired") expect(result).toBe("blocked_ambiguous");
+    }
   });
 });

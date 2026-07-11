@@ -2,92 +2,91 @@ import { HostedTransportAdapter } from "./adapters/HostedTransportAdapter";
 import { MANAGED_CAPABILITY_CONTRACT, ManagedJobCapability, ManagedJobStatus, ManagedTransportResult } from "./ManagedTypes";
 
 export const MANAGED_JOB_PROTOCOL = "managed-job-protocol-v1" as const;
-
 type Operation = "create" | "part_url" | "upload_complete" | "upload_abort" | "start" | "status" | "download" | "input_prepare" | "generation_create" | "generation_list" | "generation_status";
-type JobErrorCode = "managed_job_error" | "malformed_response" | "unsupported_operation" | "invalid_request";
-export class ManagedJobError extends Error {
-  constructor(public readonly code: JobErrorCode, message: string, public readonly status?: number, public readonly requestId?: string | null) { super(message); this.name = "ManagedJobError"; }
-}
+type ErrorCode = "invalid_request" | "license_required" | "payment_required" | "license_rejected" | "operation_conflict" | "upgrade_required" | "rate_limited" | "temporarily_unavailable" | "managed_job_error" | "malformed_response" | "unsupported_operation" | "transcription_failed" | "document_processing_failed" | "image_generation_failed" | "job_expired";
+export class ManagedJobError extends Error { constructor(public readonly code: ErrorCode, message: string, public readonly status?: number, public readonly requestId: string | null = null, public readonly retryable = false) { super(message); this.name = "ManagedJobError"; } }
 
 export const MANAGED_JOB_DESCRIPTORS: Record<ManagedJobCapability, { paths: Partial<Record<Operation, [string, string]>>; statuses: ManagedJobStatus[]; version: Operation[]; idempotent: Operation[] }> = {
-  transcription: {
-    paths: { create: ["POST", "/api/plugin/audio/transcriptions/jobs"], part_url: ["GET", "/api/plugin/audio/transcriptions/jobs/{jobId}/upload/part-url"], upload_complete: ["POST", "/api/plugin/audio/transcriptions/jobs/{jobId}/upload/complete"], upload_abort: ["POST", "/api/plugin/audio/transcriptions/jobs/{jobId}/upload/abort"], start: ["POST", "/api/plugin/audio/transcriptions/jobs/{jobId}/start"], status: ["GET", "/api/plugin/audio/transcriptions/jobs/{jobId}"] },
-    statuses: ["uploading", "queued", "processing", "succeeded", "failed", "expired"], version: ["create", "upload_complete", "start"], idempotent: ["create", "upload_complete", "start"],
-  },
-  document_processing: {
-    paths: { create: ["POST", "/api/plugin/documents/jobs"], part_url: ["GET", "/api/plugin/documents/jobs/{documentId}/upload/part-url"], upload_complete: ["POST", "/api/plugin/documents/jobs/{documentId}/upload/complete"], upload_abort: ["POST", "/api/plugin/documents/jobs/{documentId}/upload/abort"], start: ["POST", "/api/plugin/documents/jobs/{documentId}/start"], status: ["GET", "/api/plugin/documents/{documentId}"], download: ["GET", "/api/plugin/documents/{documentId}/download"] },
-    statuses: ["uploading", "queued", "processing", "completed", "failed"], version: ["create", "upload_complete", "start"], idempotent: ["create", "upload_complete", "start"],
-  },
-  image_generation: {
-    paths: { input_prepare: ["POST", "/api/plugin/images/inputs/prepare"], generation_create: ["POST", "/api/plugin/images/generations/jobs"], generation_list: ["GET", "/api/plugin/images/generations/jobs"], generation_status: ["GET", "/api/plugin/images/generations/jobs/{jobId}"] },
-    statuses: ["queued", "processing", "succeeded", "failed", "expired"], version: [], idempotent: [],
-  },
+  transcription: { paths: { create: ["POST", "/api/plugin/audio/transcriptions/jobs"], part_url: ["GET", "/api/plugin/audio/transcriptions/jobs/{jobId}/upload/part-url"], upload_complete: ["POST", "/api/plugin/audio/transcriptions/jobs/{jobId}/upload/complete"], upload_abort: ["POST", "/api/plugin/audio/transcriptions/jobs/{jobId}/upload/abort"], start: ["POST", "/api/plugin/audio/transcriptions/jobs/{jobId}/start"], status: ["GET", "/api/plugin/audio/transcriptions/jobs/{jobId}"] }, statuses: ["uploading", "queued", "processing", "succeeded", "failed", "expired"], version: ["create", "upload_complete", "start"], idempotent: ["create", "upload_complete", "start"] },
+  document_processing: { paths: { create: ["POST", "/api/plugin/documents/jobs"], part_url: ["GET", "/api/plugin/documents/jobs/{documentId}/upload/part-url"], upload_complete: ["POST", "/api/plugin/documents/jobs/{documentId}/upload/complete"], upload_abort: ["POST", "/api/plugin/documents/jobs/{documentId}/upload/abort"], start: ["POST", "/api/plugin/documents/jobs/{documentId}/start"], status: ["GET", "/api/plugin/documents/{documentId}"], download: ["GET", "/api/plugin/documents/{documentId}/download"] }, statuses: ["uploading", "queued", "processing", "completed", "failed"], version: ["create", "upload_complete", "start"], idempotent: ["create", "upload_complete", "start"] },
+  image_generation: { paths: { input_prepare: ["POST", "/api/plugin/images/inputs/prepare"], generation_create: ["POST", "/api/plugin/images/generations/jobs"], generation_list: ["GET", "/api/plugin/images/generations/jobs"], generation_status: ["GET", "/api/plugin/images/generations/jobs/{jobId}"] }, statuses: ["queued", "processing", "succeeded", "failed", "expired"], version: [], idempotent: [] },
 };
+
+export interface ManagedMultipartPart { part_number: number; expected_content_length_bytes: number }
+export interface ManagedImageInputReceipt { index: number; mime_type: string; size_bytes: number; sha256: string }
+export interface ManagedImageOutput { index: number; mime_type: string; size_bytes: number; width: number; height: number }
+export interface ManagedImageUsage { raw_usd: number; cost_source: string; estimated: boolean }
+type JsonObject = Record<string, unknown>;
+const exact = (value: unknown, required: readonly string[], optional: readonly string[] = []): JsonObject => { if (!value || typeof value !== "object" || Array.isArray(value)) malformed(); const object = value as JsonObject; const allowed = new Set([...required, ...optional]); if (required.some(k => !(k in object)) || Object.keys(object).some(k => !allowed.has(k))) malformed(); return object; };
+const string = (v: unknown, max = 2048) => { if (typeof v !== "string" || v.length < 1 || v.length > max) malformed(); return v; };
+const integer = (v: unknown, min: number, max: number) => { if (!Number.isInteger(v) || (v as number) < min || (v as number) > max) malformed(); return v as number; };
+const date = (v: unknown) => { const s = string(v, 64); if (!Number.isFinite(Date.parse(s))) malformed(); return s; };
+function malformed(message = "Malformed managed job response."): never { throw new ManagedJobError("malformed_response", message); }
 
 export class ManagedJobClient {
   readonly transcription = {
-    create: (body: { filename: string; contentType: string; contentLengthBytes: number; timestamped?: boolean; language?: string }, operationId: string, signal?: AbortSignal) => this.call("transcription", "create", { body, operationId, signal }),
-    partUrl: (jobId: string, partNumber: number, signal?: AbortSignal) => this.call("transcription", "part_url", { jobId, query: `partNumber=${partNumber}`, signal }),
-    complete: (jobId: string, parts: Array<{ partNumber: number; etag: string }>, operationId: string, signal?: AbortSignal) => this.call("transcription", "upload_complete", { jobId, body: { parts }, operationId, signal }),
-    abortUpload: (jobId: string, signal?: AbortSignal) => this.call("transcription", "upload_abort", { jobId, signal }),
-    start: (jobId: string, operationId: string, signal?: AbortSignal) => this.call("transcription", "start", { jobId, operationId, signal }),
-    status: (jobId: string, signal?: AbortSignal) => this.call("transcription", "status", { jobId, signal }),
-    resume: (jobId: string, signal?: AbortSignal) => this.call("transcription", "status", { jobId, signal }),
-    cancel: async () => { throw new ManagedJobError("unsupported_operation", "Server processing cancellation is unsupported."); },
+    create: (body: { filename: string; contentType: string; contentLengthBytes: number; timestamped?: boolean; language?: string }, operationId: string, signal?: AbortSignal) => { this.validateCreate(body, 524288000); if (body.language !== undefined && (typeof body.language !== "string" || body.language.length > 64)) this.invalid(); return this.call("transcription", "create", { body, operationId, signal }); },
+    partUrl: (jobId: string, partNumber: number, signal?: AbortSignal) => { this.partNumber(partNumber, 50); return this.call("transcription", "part_url", { jobId, query: `partNumber=${partNumber}`, signal }); },
+    complete: (jobId: string, parts: Array<{ partNumber: number; etag: string }>, operationId: string, signal?: AbortSignal) => { this.parts(parts, 50); return this.call("transcription", "upload_complete", { jobId, body: { parts }, operationId, signal }); },
+    abortUpload: (jobId: string, signal?: AbortSignal) => this.call("transcription", "upload_abort", { jobId, signal }), start: (jobId: string, operationId: string, signal?: AbortSignal) => this.call("transcription", "start", { jobId, operationId, signal }), status: (jobId: string, signal?: AbortSignal) => this.call("transcription", "status", { jobId, signal }), resume: (jobId: string, signal?: AbortSignal) => this.call("transcription", "status", { jobId, signal }), cancel: async () => { throw new ManagedJobError("unsupported_operation", "Server processing cancellation is unsupported."); },
   };
   readonly documents = {
-    create: (body: { filename: string; contentType: string; contentLengthBytes: number }, operationId: string, signal?: AbortSignal) => this.call("document_processing", "create", { body, operationId, signal }),
-    partUrl: (jobId: string, partNumber: number, signal?: AbortSignal) => this.call("document_processing", "part_url", { jobId, query: `partNumber=${partNumber}`, signal }),
-    complete: (jobId: string, parts: Array<{ partNumber: number; etag: string }>, operationId: string, signal?: AbortSignal) => this.call("document_processing", "upload_complete", { jobId, body: { parts }, operationId, signal }),
-    abortUpload: (jobId: string, signal?: AbortSignal) => this.call("document_processing", "upload_abort", { jobId, signal }),
-    start: (jobId: string, operationId: string, signal?: AbortSignal) => this.call("document_processing", "start", { jobId, operationId, signal }),
-    status: (jobId: string, signal?: AbortSignal) => this.call("document_processing", "status", { jobId, signal }),
-    download: (jobId: string, signal?: AbortSignal) => this.call("document_processing", "download", { jobId, signal }),
-    resume: (jobId: string, signal?: AbortSignal) => this.call("document_processing", "status", { jobId, signal }),
-    cancel: async () => { throw new ManagedJobError("unsupported_operation", "Server processing cancellation is unsupported."); },
+    create: (body: { filename: string; contentType: string; contentLengthBytes: number }, operationId: string, signal?: AbortSignal) => { this.validateCreate(body, 26214400); if (!["application/pdf", "image/png", "image/jpeg", "image/jpg", "image/webp"].includes(body.contentType)) this.invalid(); return this.call("document_processing", "create", { body, operationId, signal }); },
+    partUrl: (jobId: string, partNumber: number, signal?: AbortSignal) => { this.partNumber(partNumber, 3); return this.call("document_processing", "part_url", { jobId, query: `partNumber=${partNumber}`, signal }); },
+    complete: (jobId: string, parts: Array<{ partNumber: number; etag: string }>, operationId: string, signal?: AbortSignal) => { this.parts(parts, 3); return this.call("document_processing", "upload_complete", { jobId, body: { parts }, operationId, signal }); },
+    abortUpload: (jobId: string, signal?: AbortSignal) => this.call("document_processing", "upload_abort", { jobId, signal }), start: (jobId: string, operationId: string, signal?: AbortSignal) => this.call("document_processing", "start", { jobId, operationId, signal }), status: (jobId: string, signal?: AbortSignal) => this.call("document_processing", "status", { jobId, signal }), download: (jobId: string, signal?: AbortSignal) => this.call("document_processing", "download", { jobId, signal }), resume: (jobId: string, signal?: AbortSignal) => this.call("document_processing", "status", { jobId, signal }), cancel: async () => { throw new ManagedJobError("unsupported_operation", "Server processing cancellation is unsupported."); },
   };
   readonly images = {
-    prepareInputs: async (input_images: Array<{ mime_type: string; size_bytes: number; sha256: string }>, upload: (value: { index: number; method: string; url: string; headers: Record<string, string>; expiresAt: string }) => Promise<void>, signal?: AbortSignal) => {
-      const result: any = await this.call("image_generation", "input_prepare", { body: { input_images }, signal });
-      if (!Array.isArray(result.input_uploads)) throw new ManagedJobError("malformed_response", "Missing input_uploads.");
-      for (const item of result.input_uploads) {
-        const u = item?.upload; if (!u || typeof u.url !== "string" || u.url.length > 2048 || typeof u.expires_at !== "string" || Date.parse(u.expires_at) <= Date.now()) throw new ManagedJobError("malformed_response", "Invalid signed upload.");
-        await upload({ index: item.index, method: u.method, url: u.url, headers: u.headers ?? {}, expiresAt: u.expires_at });
-      }
-      return { uploadId: result.upload_id as string, inputs: result.input_uploads.map((x: any) => x.input_image) };
+    prepareInputs: async (input_images: Array<{ mime_type: string; size_bytes: number; sha256: string }>, bytes: (index: number) => Promise<ArrayBuffer>, signal?: AbortSignal): Promise<{ uploadId: string; inputs: Array<{ index: number; mime_type: string; size_bytes: number; sha256: string }> }> => {
+      this.imageInputs(input_images); const result = await this.call("image_generation", "input_prepare", { body: { input_images }, signal }) as any;
+      for (const item of result.internalUploads) { const body = await bytes(item.index); if (!(body instanceof ArrayBuffer) || body.byteLength !== item.size_bytes) this.invalid("Input bytes do not match declared size."); await (this.transport as any).uploadSignedInput(item.url, item.method, item.headers, body, signal); }
+      return { uploadId: result.uploadId, inputs: result.inputs };
     },
-    create: (body: unknown, operationId?: string, signal?: AbortSignal) => this.call("image_generation", "generation_create", { body, optionalIdempotencyKey: operationId ? `${operationId}:create` : undefined, signal }),
-    status: (jobId: string, signal?: AbortSignal) => this.call("image_generation", "generation_status", { jobId, signal }),
-    list: (query = "", signal?: AbortSignal) => this.call("image_generation", "generation_list", { query, signal }),
-    resume: async (_jobId: string) => { throw new ManagedJobError("unsupported_operation", "Image processing resume is unsupported."); },
-    cancel: async (_jobId: string) => { throw new ManagedJobError("unsupported_operation", "Image cancellation is unsupported."); },
+    create: (body: { prompt: string; input_images?: unknown[]; options?: { count?: number; aspect_ratio?: string; image_size?: string; seed?: number } }, operationId?: string, signal?: AbortSignal) => { if (!body || typeof body.prompt !== "string" || body.prompt.length < 1 || body.prompt.length > 8000) this.invalid(); return this.call("image_generation", "generation_create", { body, optionalIdempotencyKey: operationId ? `${operationId}:create` : undefined, signal }); },
+    status: (jobId: string, signal?: AbortSignal) => this.call("image_generation", "generation_status", { jobId, signal }), list: (query = "", signal?: AbortSignal) => this.call("image_generation", "generation_list", { query, signal }), resume: async (_jobId: string) => { throw new ManagedJobError("unsupported_operation", "Image processing resume is unsupported."); }, cancel: async (_jobId: string) => { throw new ManagedJobError("unsupported_operation", "Image cancellation is unsupported."); },
   };
-
   constructor(private readonly transport: HostedTransportAdapter) {}
 
-  private async call(capability: ManagedJobCapability, operation: Operation, options: { jobId?: string; query?: string; body?: unknown; operationId?: string; optionalIdempotencyKey?: string; signal?: AbortSignal }): Promise<any> {
-    const descriptor = MANAGED_JOB_DESCRIPTORS[capability]; const route = descriptor.paths[operation];
-    if (!route) throw new ManagedJobError("unsupported_operation", `${capability}.${operation} is unsupported.`);
-    let path = route[1].replace("{jobId}", encodeURIComponent(options.jobId ?? "")).replace("{documentId}", encodeURIComponent(options.jobId ?? ""));
-    if (options.query) path += `?${options.query}`;
+  private invalid(message = "Invalid managed job request."): never { throw new ManagedJobError("invalid_request", message); }
+  private validateCreate(v: { filename: string; contentType: string; contentLengthBytes: number }, max: number) { if (!v || typeof v.filename !== "string" || v.filename.length < 1 || v.filename.length > 512 || typeof v.contentType !== "string" || v.contentType.length < 1 || !Number.isInteger(v.contentLengthBytes) || v.contentLengthBytes < 1 || v.contentLengthBytes > max) this.invalid(); }
+  private partNumber(n: number, max: number) { if (!Number.isInteger(n) || n < 1 || n > max) this.invalid(); }
+  private parts(parts: Array<{ partNumber: number; etag: string }>, max: number) { if (!Array.isArray(parts) || parts.length < 1 || parts.length > max || new Set(parts.map(p => p.partNumber)).size !== parts.length || parts.some(p => !Number.isInteger(p.partNumber) || p.partNumber < 1 || p.partNumber > max || typeof p.etag !== "string" || p.etag.length < 1 || p.etag.length > 1024)) this.invalid(); }
+  private imageInputs(items: Array<{ mime_type: string; size_bytes: number; sha256: string }>) { if (!Array.isArray(items) || items.length < 1 || items.length > 4 || items.some(x => !["image/png", "image/jpeg", "image/webp"].includes(x.mime_type) || !Number.isInteger(x.size_bytes) || x.size_bytes < 1 || x.size_bytes > 20971520 || !/^[a-f0-9]{64}$/.test(x.sha256))) this.invalid(); }
+
+  private async call<T = any>(capability: ManagedJobCapability, operation: Operation, options: { jobId?: string; query?: string; body?: unknown; operationId?: string; optionalIdempotencyKey?: string; signal?: AbortSignal }): Promise<T> {
+    const descriptor = MANAGED_JOB_DESCRIPTORS[capability], route = descriptor.paths[operation]; if (!route) throw new ManagedJobError("unsupported_operation", `${capability}.${operation} is unsupported.`);
+    if (options.jobId !== undefined && !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/.test(options.jobId)) this.invalid("Invalid first-party job ID.");
+    let path = route[1].replace("{jobId}", encodeURIComponent(options.jobId ?? "")).replace("{documentId}", encodeURIComponent(options.jobId ?? "")); if (options.query) path += `?${options.query}`;
     const headers: Record<string, string> = { "x-systemsculpt-contract": MANAGED_CAPABILITY_CONTRACT, "x-systemsculpt-job-contract": MANAGED_JOB_PROTOCOL, "x-systemsculpt-capability": capability };
     if (descriptor.version.includes(operation)) headers["x-plugin-version"] = (this.transport as any).options.pluginVersion;
-    if (descriptor.idempotent.includes(operation)) {
-      if (!options.operationId) throw new ManagedJobError("invalid_request", "A durable operation ID is required.");
-      const suffix = operation === "upload_complete" ? "complete" : operation;
-      headers["idempotency-key"] = `${options.operationId}:${suffix}`;
-    } else if (options.optionalIdempotencyKey) headers["idempotency-key"] = options.optionalIdempotencyKey;
-    const result = await this.transport.job({ path, method: route[0], body: options.body, headers, signal: options.signal });
-    return this.parse(capability, operation, result);
+    if (descriptor.idempotent.includes(operation)) { if (!options.operationId || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(options.operationId)) this.invalid("A durable operation ID is required."); headers["idempotency-key"] = `${options.operationId}:${operation === "upload_complete" ? "complete" : operation}`; } else if (options.optionalIdempotencyKey) headers["idempotency-key"] = options.optionalIdempotencyKey;
+    const result = await this.transport.job({ path, method: route[0], body: options.body, headers, signal: options.signal }); return this.parse(capability, operation, result) as T;
   }
 
-  private async parse(capability: ManagedJobCapability, operation: Operation, result: ManagedTransportResult): Promise<any> {
-    if (!result.response.ok) throw new ManagedJobError("managed_job_error", `Managed job request failed (${result.response.status}).`, result.response.status, result.diagnostics.requestId);
-    let value: any; try { value = await result.response.json(); } catch { throw new ManagedJobError("malformed_response", "Expected a JSON response.", result.response.status, result.diagnostics.requestId); }
-    const statuses = MANAGED_JOB_DESCRIPTORS[capability].statuses;
-    const jobs = [value?.job, ...(Array.isArray(value?.items) ? value.items.map((x: any) => x?.job) : [])].filter(Boolean);
-    for (const job of jobs) if (typeof job.id !== "string" || !statuses.includes(job.status)) throw new ManagedJobError("malformed_response", "Invalid job status response.", result.response.status, result.diagnostics.requestId);
-    if (operation !== "input_prepare" && operation !== "generation_list" && jobs.length === 0 && operation !== "download") throw new ManagedJobError("malformed_response", "Missing job response.", result.response.status, result.diagnostics.requestId);
-    return value;
+  private async parse(capability: ManagedJobCapability, operation: Operation, result: ManagedTransportResult): Promise<unknown> {
+    if (!result.response.ok) { const map: Record<number, [ErrorCode, boolean]> = { 400: ["invalid_request", false], 401: ["license_required", false], 402: ["payment_required", false], 403: ["license_rejected", false], 409: ["operation_conflict", false], 426: ["upgrade_required", false], 429: ["rate_limited", true], 502: ["temporarily_unavailable", true], 503: ["temporarily_unavailable", true] }; const [code, retryable] = map[result.response.status] ?? ["managed_job_error", false]; throw new ManagedJobError(code, `Managed job request failed (${result.response.status}).`, result.response.status, result.diagnostics.requestId, retryable); }
+    let value: unknown; try { value = await result.response.json(); } catch { malformed("Expected a JSON response."); }
+    const parsed = this.validateResponse(capability, operation, value); const terminal = this.terminalError(capability, parsed); if (terminal) throw new ManagedJobError(terminal, terminal === "job_expired" ? "The managed job expired." : "Managed job failed.", result.response.status, result.diagnostics.requestId, false); return parsed;
+  }
+
+  private terminalError(c: ManagedJobCapability, value: any): ErrorCode | null { const holder = value?.job ?? value?.document; const status = holder?.status; if (status === "expired") return "job_expired"; if (status === "failed") return c === "transcription" ? "transcription_failed" : c === "document_processing" ? "document_processing_failed" : "image_generation_failed"; return null; }
+  private job(value: unknown, statuses: ManagedJobStatus[], keys: string[]) { const x = exact(value, keys); string(x.id, 256); if (!statuses.includes(x.status as ManagedJobStatus)) malformed(); return x; }
+  private upload(value: unknown, document = false) { const keys = ["part_size_bytes", "total_parts", "part_url_expires_in_seconds", ...(document ? ["expires_at"] : [])]; const x = exact(value, keys); integer(x.part_size_bytes, 1, 524288000); integer(x.total_parts, 1, 50); integer(x.part_url_expires_in_seconds, 1, 3600); if (document) date(x.expires_at); return x; }
+  private validateResponse(c: ManagedJobCapability, op: Operation, value: unknown): unknown {
+    const statuses = MANAGED_JOB_DESCRIPTORS[c].statuses;
+    if (op === "part_url") { const root = exact(value, ["part"]), p = exact(root.part, ["part_number", "method", "url", "url_expires_in_seconds", "expected_content_length_bytes"]); const part_number = integer(p.part_number, 1, c === "document_processing" ? 3 : 50); if (p.method !== "PUT") malformed(); string(p.url, 2048); integer(p.url_expires_in_seconds, 1, 3600); const expected_content_length_bytes = integer(p.expected_content_length_bytes, 1, 524288000); return { part_number, expected_content_length_bytes }; }
+    if (c === "transcription") {
+      if (op === "create") { const root = exact(value, ["job", "upload"]); return { job: this.job(root.job, statuses, ["id", "status", "filename", "content_type", "content_length_bytes", "expires_at"]), upload: this.upload(root.upload) }; }
+      if (op === "status") { const root = exact(value, ["job", "transcript", "progress"]); return { job: this.job(root.job, statuses, ["id", "status", "filename", "content_type", "content_length_bytes", "expires_at", "error"]), transcript: root.transcript, progress: root.progress }; }
+      const root = exact(value, ["job"], op === "start" ? ["transcript_urls", "usage_summary"] : []); return { job: this.job(root.job, statuses, ["id", "status"]) };
+    }
+    if (c === "document_processing") {
+      if (op === "download") { const root = exact(value, ["result"]); return { result: exact(root.result, ["content", "text", "markdown", "images", "metadata"]) }; }
+      if (op === "create") { const root = exact(value, ["document", "upload"]); return { document: this.job(root.document, statuses, ["id", "status"]), upload: this.upload(root.upload, true) }; }
+      const root = exact(value, ["document"]); return { document: this.job(root.document, statuses, op === "status" ? ["id", "status", "error", "progress"] : ["id", "status"]) };
+    }
+    if (op === "input_prepare") { const root = exact(value, ["contract", "upload_id", "expires_at", "input_uploads"]); if (root.contract !== MANAGED_JOB_PROTOCOL || !Array.isArray(root.input_uploads) || root.input_uploads.length < 1 || root.input_uploads.length > 4) malformed(); const uploadId = string(root.upload_id, 256); date(root.expires_at); const internalUploads: any[] = [], inputs: any[] = []; for (const raw of root.input_uploads) { const item = exact(raw, ["index", "upload", "input_image"]), upload = exact(item.upload, ["method", "url", "headers", "expires_in_seconds", "expires_at"]), image = exact(item.input_image, ["type", "key", "mime_type", "size_bytes", "sha256"]); const index = integer(item.index, 0, 3); if (upload.method !== "PUT" || !upload.headers || typeof upload.headers !== "object" || Array.isArray(upload.headers)) malformed(); const expiresAt = date(upload.expires_at); if (Date.parse(expiresAt) <= Date.now()) malformed(); const mime_type = string(image.mime_type, 32), size_bytes = integer(image.size_bytes, 1, 20971520), sha256 = string(image.sha256, 64); if (!/^[a-f0-9]{64}$/.test(sha256)) malformed(); internalUploads.push({ index, method: "PUT", url: string(upload.url, 2048), headers: upload.headers, size_bytes }); inputs.push({ index, mime_type, size_bytes, sha256 }); } return { uploadId, inputs, internalUploads }; }
+    if (op === "generation_create") { const root = exact(value, ["job", "poll_url"]); string(root.poll_url, 2048); return { job: this.job(root.job, statuses, ["id", "status", "created_at", "expires_at", "error"]) }; }
+    const root = exact(value, op === "generation_list" ? ["items", "next_before"] : ["job", "outputs", "usage"], op === "generation_status" ? ["poll_after_ms"] : []); const items = op === "generation_list" ? root.items : [{ job: root.job, outputs: root.outputs, usage: root.usage }]; if (!Array.isArray(items)) malformed(); const parsed = items.map(raw => { const item = exact(raw, ["job", "outputs", "usage"]); const job = this.job(item.job, statuses, ["id", "status", "created_at", "processing_started_at", "completed_at", "expires_at", "error", "attempt_count"]); if (!Array.isArray(item.outputs)) malformed(); const outputs = item.outputs.map(rawOutput => { const output = exact(rawOutput, ["index", "mime_type", "size_bytes", "width", "height", "url", "url_expires_in_seconds"]); string(output.url, 2048); integer(output.url_expires_in_seconds, 1, 3600); return { index: integer(output.index, 0, 3), mime_type: string(output.mime_type, 32), size_bytes: integer(output.size_bytes, 1, 20971520), width: integer(output.width, 1, 32768), height: integer(output.height, 1, 32768) }; }); const rawUsage = exact(item.usage, ["raw_usd", "cost_source", "estimated"]); if (typeof rawUsage.raw_usd !== "number" || rawUsage.raw_usd < 0 || typeof rawUsage.estimated !== "boolean") malformed(); const usage: ManagedImageUsage = { raw_usd: rawUsage.raw_usd, cost_source: string(rawUsage.cost_source, 64), estimated: rawUsage.estimated }; return { job, outputs, usage }; }); return op === "generation_list" ? { items: parsed, next_before: root.next_before } : { ...parsed[0], ...(root.poll_after_ms === undefined ? {} : { poll_after_ms: root.poll_after_ms }) };
   }
 }
