@@ -6,7 +6,7 @@ export interface ManagedRecoveryAdapter {
   read(path: string): Promise<string>; write(path: string, contents: string): Promise<void>; exists(path: string): Promise<boolean>;
   list(path: string): Promise<string[]>; mkdir(path: string): Promise<void>; rename(from: string, to: string): Promise<void>; remove(path: string): Promise<void>;
 }
-export class ManagedRecoveryError extends Error { constructor(public readonly code: "recovery_unavailable" | "recovery_corrupt" | "invalid_record" | "stale_revision" | "record_mismatch" | "illegal_transition", message: string) { super(message); this.name = "ManagedRecoveryError"; } }
+export class ManagedRecoveryError extends Error { constructor(public readonly code: "recovery_unavailable" | "recovery_corrupt" | "invalid_record" | "stale_revision" | "record_mismatch" | "illegal_transition" | "reconciliation_error", message: string) { super(message); this.name = "ManagedRecoveryError"; } }
 
 type WireStatus = "uploading" | "queued" | "processing" | "succeeded" | "completed" | "failed" | "expired" | "unknown";
 type WriteJournal = { schemaVersion: 1; phase: "prepared" | "original_moved" | "promoted"; capability: ManagedJobCapability; operationId: string; fromRevision: number; toRevision: number };
@@ -69,7 +69,7 @@ export class ManagedJobRecoveryStore {
   acknowledgePart(c: Exclude<ManagedJobCapability, "image_generation">, id: string, rev: number, part: { partNumber: number; etag: string }) { return this.mutate(c, id, rev, r => { if (r.phase !== "part_dispatching" || r.pendingDispatch?.partNumber !== part.partNumber || !part.etag || part.etag.length > 1024) this.illegal(); return { ...r, phase: "uploading", pendingDispatch: undefined, completedParts: [...(r.completedParts ?? []).filter(x => x.partNumber !== part.partNumber), part] }; }); }
   acknowledgeComplete(c: Exclude<ManagedJobCapability, "image_generation">, id: string, rev: number) { return this.ack(c, id, rev, "complete_dispatching", "upload_completed"); }
   acknowledgeStarted(c: Exclude<ManagedJobCapability, "image_generation">, id: string, rev: number) { return this.ack(c, id, rev, "start_dispatching", "processing"); }
-  applyReconciliation(c: ManagedJobCapability, id: string, rev: number, observedStatus: WireStatus) { return this.mutate(c, id, rev, r => { if (!["prepare_dispatching", "create_dispatching", "part_dispatching", "complete_dispatching", "start_dispatching", "abort_dispatching", "processing"].includes(r.phase)) this.illegal("Record is not reconcilable."); const phase = ManagedJobRecoveryStore.reconcile(c, r.phase, observedStatus); return { ...r, phase, pendingDispatch: undefined }; }); }
+  applyReconciliation(c: ManagedJobCapability, id: string, rev: number, observedStatus: WireStatus) { return this.mutate(c, id, rev, r => { const dispatching = ["prepare_dispatching", "create_dispatching", "part_dispatching", "complete_dispatching", "start_dispatching", "abort_dispatching"].includes(r.phase); if (!dispatching && r.phase !== "processing") this.illegal("Record is not reconcilable."); const phase = ManagedJobRecoveryStore.reconcile(c, r.phase, observedStatus); if (!dispatching && phase === "blocked_ambiguous") throw new ManagedRecoveryError("reconciliation_error", "Invalid observed status for acknowledged processing job."); return { ...r, phase, pendingDispatch: undefined }; }); }
 
   delete(c: ManagedJobCapability, id: string, rev: number): Promise<void> {
     const path = this.path(c, id); return this.serial(path, async () => {
@@ -95,7 +95,7 @@ export class ManagedJobRecoveryStore {
     const terminal = c === "document_processing" ? ["completed", "failed"] : ["succeeded", "failed", "expired"];
     if (phase === "complete_dispatching") { if (status === "queued") return "upload_completed"; if (status === "processing") return "processing"; if (terminal.includes(status)) return "result_ready"; return "blocked_ambiguous"; }
     if (phase === "start_dispatching") { if (status === "processing") return "processing"; if (terminal.includes(status)) return "result_ready"; return "blocked_ambiguous"; }
-    if (phase === "processing") return terminal.includes(status) ? "result_ready" : "processing";
+    if (phase === "processing") { if (terminal.includes(status)) return "result_ready"; if (status === "queued" || status === "processing") return "processing"; return "blocked_ambiguous"; }
     return "blocked_ambiguous";
   }
 

@@ -173,6 +173,24 @@ describe("ManagedJobRecoveryStore hardening", () => {
     if (valid) await expect(initialized).resolves.toBeUndefined(); else await expect(initialized).rejects.toMatchObject({ code: "recovery_corrupt" });
   });
 
+  it.each([
+    ["transcription", "queued", "processing"], ["transcription", "processing", "processing"], ["transcription", "succeeded", "result_ready"], ["transcription", "failed", "result_ready"], ["transcription", "expired", "result_ready"],
+    ["document_processing", "queued", "processing"], ["document_processing", "processing", "processing"], ["document_processing", "completed", "result_ready"], ["document_processing", "failed", "result_ready"],
+    ["image_generation", "queued", "processing"], ["image_generation", "processing", "processing"], ["image_generation", "succeeded", "result_ready"], ["image_generation", "failed", "result_ready"], ["image_generation", "expired", "result_ready"],
+  ] as const)("reconciles acknowledged processing %s %s → %s", async (capability, status, expected) => {
+    const adapter = new MemoryAdapter(); const id = `processing-${capability}-${status}`; const record = { schemaVersion: 1, revision: 1, capability, operationId: id, source: { identity: "vault:source", fingerprint: `sha256:${"a".repeat(64)}` }, jobId: "job", phase: "processing", createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" };
+    adapter.files.set(`.systemsculpt/managed-jobs/${capability}/${id}.json`, JSON.stringify(record)); const result = await new ManagedJobRecoveryStore(adapter).applyReconciliation(capability, id, 1, status); expect(result).toMatchObject({ phase: expected, revision: 2 });
+  });
+
+  it.each([
+    ["transcription", "uploading"], ["transcription", "completed"], ["transcription", "unknown"],
+    ["document_processing", "uploading"], ["document_processing", "succeeded"], ["document_processing", "expired"], ["document_processing", "unknown"],
+    ["image_generation", "uploading"], ["image_generation", "completed"], ["image_generation", "unknown"],
+  ] as const)("rejects invalid acknowledged processing status %s %s without mutation", async (capability, status) => {
+    const adapter = new MemoryAdapter(); const id = `invalid-${capability}-${status}`; const path = `.systemsculpt/managed-jobs/${capability}/${id}.json`; const record = { schemaVersion: 1, revision: 1, capability, operationId: id, source: { identity: "vault:source", fingerprint: `sha256:${"a".repeat(64)}` }, jobId: "job", phase: "processing", createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" }; adapter.files.set(path, JSON.stringify(record)); const store = new ManagedJobRecoveryStore(adapter);
+    await expect(store.applyReconciliation(capability, id, 1, status)).rejects.toMatchObject({ code: "reconciliation_error" }); expect(JSON.parse(adapter.files.get(path)!).revision).toBe(1); expect(JSON.parse(adapter.files.get(path)!).phase).toBe("processing");
+  });
+
   it("strictly rejects content, URLs, headers, credentials, invalid lengths and formats", async () => {
     const adapter = new MemoryAdapter(); const store = new ManagedJobRecoveryStore(adapter);
     await expect(create(store, { ...initial, source: { identity: "https://signed.example/x", fingerprint: "bad" } })).rejects.toMatchObject({ code: "invalid_record" });
