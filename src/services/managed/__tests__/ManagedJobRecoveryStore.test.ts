@@ -133,6 +133,35 @@ describe("ManagedJobRecoveryStore hardening", () => {
     }
   });
 
+  it("enforces unique capability-bounded completed part identities and legal acknowledgements", async () => {
+    const etag = "a".repeat(32); const baseAdapter = new MemoryAdapter(); const baseStore = new ManagedJobRecoveryStore(baseAdapter); const valid = await create(baseStore);
+    const cases = [
+      ["transcription", [{ partNumber: 0, etag }]], ["transcription", [{ partNumber: 51, etag }]], ["transcription", [{ partNumber: 1, etag }, { partNumber: 1, etag: "b".repeat(32) }]],
+      ["document_processing", [{ partNumber: 0, etag }]], ["document_processing", [{ partNumber: 4, etag }]], ["document_processing", [{ partNumber: 3, etag }, { partNumber: 3, etag: "b".repeat(32) }]],
+      ["image_generation", [{ partNumber: 1, etag }]],
+    ] as const;
+    for (const [index, [capability, completedParts]] of cases.entries()) { const adapter = new MemoryAdapter(); adapter.files.set(`.systemsculpt/managed-jobs/${capability}/bad-part-${index}.json`, JSON.stringify({ ...valid, capability, operationId: `bad-part-${index}`, completedParts })); await expect(new ManagedJobRecoveryStore(adapter).initialize()).rejects.toMatchObject({ code: "recovery_corrupt" }); }
+    for (const [capability, partNumber] of [["transcription", 1], ["transcription", 50], ["document_processing", 1], ["document_processing", 3]] as const) { const adapter = new MemoryAdapter(); adapter.files.set(`.systemsculpt/managed-jobs/${capability}/good-${partNumber}.json`, JSON.stringify({ ...valid, capability, operationId: `good-${partNumber}`, completedParts: [{ partNumber, etag }] })); await expect(new ManagedJobRecoveryStore(adapter).initialize()).resolves.toBeUndefined(); }
+
+    const adapter = new MemoryAdapter(); const store = new ManagedJobRecoveryStore(adapter); let record = await create(store); record = await store.markContentReady("transcription", "op-1", record.revision); record = await store.beginDispatch("transcription", "op-1", record.revision, { operation: "create", requestId: "r", idempotencyKey: "op-1:create", dispatchedAt: "2026-01-01T00:00:00Z" }); record = await store.acknowledgeCreated("transcription", "op-1", record.revision, "job");
+    await expect(store.beginDispatch("transcription", "op-1", record.revision, { operation: "part", requestId: "r", partNumber: 51, dispatchedAt: "2026-01-01T00:00:00Z" })).rejects.toMatchObject({ code: "invalid_record" });
+    record = await store.beginDispatch("transcription", "op-1", record.revision, { operation: "part", requestId: "r", partNumber: 50, dispatchedAt: "2026-01-01T00:00:00Z" });
+    await expect(store.acknowledgePart("transcription", "op-1", record.revision, { partNumber: 49, etag })).rejects.toMatchObject({ code: "illegal_transition" });
+    await expect(store.acknowledgePart("transcription", "op-1", record.revision, { partNumber: 50, etag })).resolves.toMatchObject({ completedParts: [{ partNumber: 50, etag }] });
+  });
+
+  it.each([
+    ["transcription", "complete_dispatching", "queued", "upload_completed"], ["transcription", "complete_dispatching", "processing", "processing"], ["transcription", "complete_dispatching", "failed", "result_ready"],
+    ["document_processing", "start_dispatching", "queued", "blocked_ambiguous"], ["document_processing", "start_dispatching", "processing", "processing"], ["document_processing", "start_dispatching", "completed", "result_ready"],
+    ["transcription", "abort_dispatching", "failed", "upload_aborted"], ["image_generation", "create_dispatching", "queued", "blocked_ambiguous"],
+  ] as const)("atomically applies reconciliation %s %s %s → %s", async (capability, phase, status, expected) => {
+    const adapter = new MemoryAdapter(); const operation = phase.replace("_dispatching", "") as any; const id = `reconcile-${capability}`; const pending: any = { operation, requestId: "req-1", dispatchedAt: "2026-01-01T00:00:00Z" }; if (capability !== "image_generation" && ["create", "complete", "start"].includes(operation)) pending.idempotencyKey = `${id}:${operation}`;
+    const record = { schemaVersion: 1, revision: 1, capability, operationId: id, source: { identity: "vault:source", fingerprint: `sha256:${"a".repeat(64)}` }, jobId: "job", phase, pendingDispatch: pending, createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" };
+    adapter.files.set(`.systemsculpt/managed-jobs/${capability}/${id}.json`, JSON.stringify(record)); const store = new ManagedJobRecoveryStore(adapter);
+    const applied = await store.applyReconciliation(capability, id, 1, status); expect(applied.phase).toBe(expected); expect(applied.pendingDispatch).toBeUndefined();
+    await expect(store.applyReconciliation(capability, id, 1, status)).rejects.toMatchObject({ code: "stale_revision" });
+  });
+
   it("strictly rejects content, URLs, headers, credentials, invalid lengths and formats", async () => {
     const adapter = new MemoryAdapter(); const store = new ManagedJobRecoveryStore(adapter);
     await expect(create(store, { ...initial, source: { identity: "https://signed.example/x", fingerprint: "bad" } })).rejects.toMatchObject({ code: "invalid_record" });
