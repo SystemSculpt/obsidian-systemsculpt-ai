@@ -259,7 +259,7 @@ export const uiSetup = {
       app: chatView.app,
       container,
       aiService: chatView.aiService,
-      getMessages: () => chatView.getMessages(),
+      getMessages: () => [...chatView.getMessages()],
       isChatReady: () => !chatView.chatId || chatView.isFullyLoaded,
       chatContainer: chatView.chatContainer,
       scrollManager: chatView.scrollManager,

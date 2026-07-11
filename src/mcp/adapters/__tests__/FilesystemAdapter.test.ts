@@ -49,6 +49,19 @@ describe("FilesystemAdapter", () => {
     expect(result).toEqual({ ok: true });
   });
 
+  it("reports an unknown outcome when abort is requested after execution starts", async () => {
+    const adapter = new FilesystemAdapter({} as any, {} as any);
+    const server = getLastServerInstance();
+    server.executeTool.mockReturnValue(new Promise(() => {}));
+    const controller = new AbortController();
+
+    const execution = adapter.executeTool("write", { path: "note.md" }, undefined, { signal: controller.signal });
+    controller.abort();
+
+    await expect(execution).rejects.toMatchObject({ code: "TOOL_CANCEL_REQUESTED_OUTCOME_UNKNOWN" });
+    expect(server.executeTool).toHaveBeenCalledTimes(1);
+  });
+
   // Since #142 the filesystem tool graph is pure Vault-API code (no Node), so it
   // runs on mobile too. The adapter must NOT gate the server off when the
   // runtime reports mobile — agent file tools must work on a phone.

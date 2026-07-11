@@ -67,7 +67,7 @@ export class ChatExportService {
     };
   }
 
-  private calculateSummary(messages: ChatMessage[]): ChatExportSummary {
+  private calculateSummary(messages: readonly ChatMessage[]): ChatExportSummary {
     const summary: ChatExportSummary = {
       totalMessages: messages.length,
       assistantMessages: 0,

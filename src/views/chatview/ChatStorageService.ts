@@ -130,10 +130,31 @@ export class ChatStorageService {
     }
   }
   
+  async createChatExclusive(
+    chatId: string,
+    messages: ChatMessage[],
+    options: SaveChatOptions = {},
+  ): Promise<{ version: number } | null> {
+    const filePath = `${this.chatDirectory}/${chatId}.md`;
+    try {
+      const result = await this.saveChatSimple(chatId, messages, options, true);
+      return { version: result.version };
+    } catch (error) {
+      // Obsidian's vault.create is exclusive. A path that exists after the
+      // failed create means another writer won the race; callers should try
+      // the next deterministic suffix. Other failures remain fatal.
+      if (await this.app.vault.adapter.exists(filePath)) {
+        return null;
+      }
+      throw error;
+    }
+  }
+
   private async saveChatSimple(
     chatId: string,
     messages: ChatMessage[],
     options: SaveChatOptions = {},
+    exclusiveCreate: boolean = false,
   ): Promise<{ filePath: string; version: number }> {
     let filePath = `[unknown-path]/${chatId}.md`;
     try {
@@ -143,7 +164,7 @@ export class ChatStorageService {
       let fileExists = false;
       let existingMetadata: ChatMetadata | null = null;
 
-      const file = vault.getAbstractFileByPath(filePath);
+      const file = exclusiveCreate ? null : vault.getAbstractFileByPath(filePath);
       if (file instanceof TFile) {
         fileExists = true;
         const content = await vault.read(file);
@@ -234,7 +255,7 @@ export class ChatStorageService {
         }
       }
 
-      if (fileExists && file instanceof TFile) {
+      if (!exclusiveCreate && fileExists && file instanceof TFile) {
         await vault.modify(file, fullContent);
       } else {
         await vault.create(filePath, fullContent);

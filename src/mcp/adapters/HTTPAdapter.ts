@@ -1,6 +1,7 @@
 import type { App } from "obsidian";
 import SystemSculptPlugin from "../../main";
 import { MCPServer, MCPToolInfo } from "../../types/mcp";
+import type { MCPExecutionOptions } from "../MCPService";
 
 interface JSONRPCRequest {
   jsonrpc: "2.0";
@@ -81,7 +82,12 @@ export class HTTPAdapter {
     }));
   }
 
-  async executeTool(toolName: string, args: any, _chatView?: any, options?: { timeoutMs?: number }): Promise<any> {
+  async executeTool(toolName: string, args: any, _chatView?: any, options?: MCPExecutionOptions): Promise<any> {
+    if (options?.signal?.aborted) {
+      throw Object.assign(new Error('Tool execution was cancelled before it started.'), {
+        code: 'TOOL_CANCELLED_BEFORE_START' as const,
+      });
+    }
     const endpoint = this.assertEndpoint();
     const request: JSONRPCRequest = {
       jsonrpc: "2.0",
@@ -91,13 +97,25 @@ export class HTTPAdapter {
     };
 
     const { httpRequest } = await import('../../utils/httpClient');
-    const r = await httpRequest({
-      url: endpoint,
-      method: 'POST',
-      headers: this.getHeaders(),
-      body: JSON.stringify(request),
-      timeoutMs: options?.timeoutMs,
-    });
+    let r;
+    try {
+      r = await httpRequest({
+        url: endpoint,
+        method: 'POST',
+        headers: this.getHeaders(),
+        body: JSON.stringify(request),
+        timeoutMs: options?.timeoutMs,
+        signal: options?.signal,
+      });
+    } catch (error) {
+      if (options?.signal?.aborted || (error instanceof Error && error.message === 'Request timed out')) {
+        throw Object.assign(new Error('Cancellation was requested after tool execution began; the tool outcome is unknown.'), {
+          code: 'TOOL_CANCEL_REQUESTED_OUTCOME_UNKNOWN' as const,
+          cause: error,
+        });
+      }
+      throw error;
+    }
     const response = new Response(r.text || JSON.stringify(r.json || {}), { status: r.status });
     if (!response.ok) throw new Error(`Tool execution failed: ${response.statusText}`);
 

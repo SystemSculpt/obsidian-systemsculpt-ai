@@ -7,25 +7,21 @@ import { SystemSculptError, ERROR_CODES } from "../../../utils/errors";
 import { errorLogger } from "../../../utils/errorLogger";
 import { ToolCall, ToolCallRequest } from "../../../types/toolCalls";
 import { TranscriptAssembler } from "../transcript/TranscriptAssembler";
-import { ChatPersistenceManager } from "../persistence/ChatPersistenceManager";
 import { createToolCallIdState, sanitizeToolCallId, ToolCallIdState } from "../../../utils/toolCallId";
 import { StreamingMetricsTracker, StreamingMetrics } from "../StreamingMetricsTracker";
 
 export interface StreamingControllerOptions {
   scrollManager: ScrollManagerService;
   messageRenderer: MessageRenderer;
-  saveChat: () => Promise<void>;
   generateMessageId: () => string;
   extractAnnotations: (text: string) => any[];
   showStreamingStatus: (el: HTMLElement) => void;
   hideStreamingStatus: (el: HTMLElement) => void;
   updateStreamingStatus: (el: HTMLElement, status: string, text: string, metrics?: StreamingMetrics) => void;
   toggleStopButton: (show: boolean) => void;
-  onAssistantResponse: (msg: ChatMessage) => Promise<void>;
   onError: (err: string | SystemSculptError) => void;
   setStreamingFootnote?: (el: HTMLElement, text: string) => void;
   clearStreamingFootnote?: (el: HTMLElement) => void;
-  autosaveDebounceMs?: number;
 }
 
 export type StreamCompletionState =
@@ -48,17 +44,20 @@ export interface StreamTurnResult {
 export class StreamingController extends Component {
   private readonly opts: StreamingControllerOptions;
   private readonly activeAssemblers = new Map<string, TranscriptAssembler>();
-  private readonly persistence: ChatPersistenceManager;
   private scrollScheduled = false;
 
   constructor(options: StreamingControllerOptions) {
     super();
     this.opts = options;
-    this.persistence = new ChatPersistenceManager({
-      saveChat: options.saveChat,
-      onAssistantResponse: options.onAssistantResponse,
-      debounceMs: options.autosaveDebounceMs,
-    });
+  }
+
+  /** Initial streaming owns no persistence queue; retained for the legacy caller join seam. */
+  public waitForPersistenceIdle(): Promise<void> {
+    return Promise.resolve();
+  }
+
+  public getActiveAssemblerCount(): number {
+    return this.activeAssemblers.size;
   }
 
   public async stream(
@@ -313,21 +312,14 @@ export class StreamingController extends Component {
         }
       }
 
-      // Only persist if: not aborted, and either completed naturally or we recovered from an error
       const completedSuccessfully = !abortedBySignal && completedNaturally;
       if (completedSuccessfully) {
         this.updateMessageRendering(assembler, messageEl, assistantMessage, false);
-        // Finalize inline blocks (auto-collapse reasoning/tool blocks)
         try {
           this.opts.messageRenderer.finalizeInlineBlocks(messageEl);
         } catch {}
-        await this.persistence.commit(assistantMessage);
-      } else {
-        // Ensure any pending autosave timers are cancelled so partial output is not saved
-        try { this.persistence.cancelAutosave(); } catch {}
-        if (!restoredSeedRendering) {
-          restoredSeedRendering = this.restoreSeedRendering(messageEl, seedParts);
-        }
+      } else if (!restoredSeedRendering) {
+        restoredSeedRendering = this.restoreSeedRendering(messageEl, seedParts);
       }
 
       this.scheduleStickToBottom(scrollManager, true);
@@ -339,6 +331,7 @@ export class StreamingController extends Component {
       if (debugMode) {
         console.debug(`[StreamingController] Stream finished in ${streamDuration.toFixed(2)}ms. Total events: ${eventCount}`);
       }
+      this.activeAssemblers.delete(messageId);
     }
 
     const completionState: StreamCompletionState = abortedBySignal
@@ -387,7 +380,6 @@ export class StreamingController extends Component {
     try {
       this.opts.messageRenderer.renderMessageParts(messageEl, { messageParts: parts }, isStreaming);
     } catch {}
-    this.persistence.scheduleAutosave();
   }
 
   private handleToolCallEvent(params: {

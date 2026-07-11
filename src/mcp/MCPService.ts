@@ -10,6 +10,22 @@ import { FilesystemAdapter } from "./adapters/FilesystemAdapter";
 import { HTTPAdapter } from "./adapters/HTTPAdapter";
 import { YouTubeAdapter } from "./adapters/YouTubeAdapter";
 
+export interface MCPExecutionOptions {
+  timeoutMs?: number;
+  signal?: AbortSignal;
+}
+
+export class MCPToolExecutionError extends Error {
+  constructor(
+    public readonly code: 'TOOL_CANCELLED_BEFORE_START' | 'TOOL_CANCEL_REQUESTED_OUTCOME_UNKNOWN',
+    message: string,
+    public readonly cause?: unknown,
+  ) {
+    super(message);
+    this.name = 'MCPToolExecutionError';
+  }
+}
+
 interface MCPConnectionResult {
   success: boolean;
   error?: string;
@@ -200,8 +216,15 @@ export class MCPService {
     toolName: string,
     args: any,
     chatView?: any,
-    options?: { timeoutMs?: number }
+    options?: MCPExecutionOptions
   ): Promise<any> {
+    if (options?.signal?.aborted) {
+      throw new MCPToolExecutionError(
+        'TOOL_CANCELLED_BEFORE_START',
+        'Tool execution was cancelled before it started.',
+      );
+    }
+
     const resolvedToolName = resolveCanonicalToolAlias(toolName);
     const firstUnderscoreIndex = resolvedToolName.indexOf('_');
     if (firstUnderscoreIndex === -1) {

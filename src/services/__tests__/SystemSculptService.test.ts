@@ -507,6 +507,24 @@ describe("SystemSculptService", () => {
     );
   });
 
+  it("preserves an adapter's unknown-outcome cancellation code", async () => {
+    const plugin = createPlugin();
+    const service = SystemSculptService.getInstance(plugin);
+    mcpService.executeTool.mockRejectedValueOnce(Object.assign(new Error("unknown"), {
+      code: "TOOL_CANCEL_REQUESTED_OUTCOME_UNKNOWN",
+    }));
+
+    const result = await service.executeHostedToolCall({
+      toolCall: {
+        id: "call_unknown",
+        type: "function",
+        function: { name: "mcp-filesystem_write", arguments: "{}" },
+      } as any,
+    });
+
+    expect(result.error?.code).toBe("TOOL_CANCEL_REQUESTED_OUTCOME_UNKNOWN");
+  });
+
   it("returns a structured failure for invalid hosted tool call arguments", async () => {
     const plugin = createPlugin();
     const service = SystemSculptService.getInstance(plugin);

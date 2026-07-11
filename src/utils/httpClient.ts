@@ -6,6 +6,7 @@ export interface HttpRequestOptions {
   headers?: Record<string, string>;
   body?: string;
   timeoutMs?: number;
+  signal?: AbortSignal;
 }
 
 export interface HttpResponseShim {
@@ -64,23 +65,31 @@ export async function httpRequest(opts: HttpRequestOptions): Promise<HttpRespons
   const disabled = !!(state?.disabledUntil && state.disabledUntil > now);
   const timeoutMs = Math.max(0, Number(opts.timeoutMs || 0));
 
+  const abortError = () => Object.assign(new Error('Request aborted'), { name: 'AbortError' });
+  if (opts.signal?.aborted) throw abortError();
+
   // Generic timeout wrapper that races the underlying request
   async function withTimeout<T>(promise: Promise<T>): Promise<T> {
-    if (!timeoutMs) return promise;
+    if (!timeoutMs && !opts.signal) return promise;
     return await new Promise<T>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        reject(new Error('Request timed out'));
-      }, timeoutMs);
+      let settled = false;
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      const finish = (callback: () => void) => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        opts.signal?.removeEventListener('abort', onAbort);
+        callback();
+      };
+      const onAbort = () => finish(() => reject(abortError()));
+      if (timeoutMs) {
+        timer = setTimeout(() => finish(() => reject(new Error('Request timed out'))), timeoutMs);
+      }
+      opts.signal?.addEventListener('abort', onAbort, { once: true });
 
       promise
-        .then((value) => {
-          clearTimeout(timer);
-          resolve(value);
-        })
-        .catch((error) => {
-          clearTimeout(timer);
-          reject(error);
-        });
+        .then((value) => finish(() => resolve(value)))
+        .catch((error) => finish(() => reject(error)));
     });
   }
 
@@ -126,9 +135,12 @@ export async function httpRequest(opts: HttpRequestOptions): Promise<HttpRespons
         }
       );
 
+      const onAbort = () => req.destroy(abortError());
+      opts.signal?.addEventListener('abort', onAbort, { once: true });
       const timer = timeoutMs ? setTimeout(() => req.destroy(new Error("Request timed out")), timeoutMs) : null;
       const clearTimer = () => {
         if (timer) clearTimeout(timer);
+        opts.signal?.removeEventListener('abort', onAbort);
       };
 
       req.on("error", (error) => {

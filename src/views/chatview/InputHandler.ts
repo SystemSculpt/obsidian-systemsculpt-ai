@@ -39,11 +39,15 @@ import type { StreamingMetrics } from "./StreamingMetricsTracker";
 import { extractAnnotationsFromResponse as extractAnnotationsFromResponseExternal } from "./handlers/Annotations";
 import { handleOpenChatHistoryFile as handleOpenChatHistoryFileExternal, handleSaveChatAsNote as handleSaveChatAsNoteExternal } from "./handlers/NotesHandlers";
 // Turn lifecycle handling
-import { ChatTurnLifecycleController } from "./controllers/ChatTurnLifecycleController";
+import {
+  ChatTurnAlreadyActiveError,
+  ChatTurnLifecycleController,
+} from "./controllers/ChatTurnLifecycleController";
 import { errorLogger } from "../../utils/errorLogger";
 import { TOOL_LOOP_ERROR_CODE } from "../../utils/tooling";
 import { extractPrimaryPathArg, requiresUserApproval } from "../../utils/toolPolicy";
 import { ChatModelSelectionController } from "./ChatModelSelectionController";
+import { ChatTurn } from "./turn/ChatTurn";
 
 export interface InputHandlerOptions {
   app: App;
@@ -148,13 +152,11 @@ export class InputHandler extends Component {
   private liveRegionEl: HTMLElement | null = null;
   private recorderToggleUnsubscribe: (() => void) | null = null;
   private localResourcesDisposed = false;
-
-  /**
-   * A debounced handle used for throttling disk writes while streaming. Every
-   * time a chunk arrives we schedule a save 1 s in the future; additional
-   * chunks reset the timer.  When the timer fires we persist the chat using
-   * the normal saveChat() pathway (now safe because isFullyLoaded is true).
-   */
+  private localResourcesDisposing = false;
+  private localResourceDisposalPromise: Promise<void> | null = null;
+  private submissionReserved = false;
+  private submissionReservationGeneration = 0;
+  private submissionReservationPromise: Promise<void> | null = null;
 
   // ───────────────────────── Streaming controller ──────────────────────────
   private streamingController: StreamingController;
@@ -253,15 +255,12 @@ export class InputHandler extends Component {
     this.streamingController = new StreamingController({
       scrollManager: this.scrollManager,
       messageRenderer: this.messageRenderer,
-      saveChat: this.saveChatImmediate.bind(this),
-      autosaveDebounceMs: 600,
       generateMessageId: this.generateMessageId.bind(this),
       extractAnnotations: this.extractAnnotationsFromResponse.bind(this),
       showStreamingStatus: this.showStreamingStatus.bind(this),
       hideStreamingStatus: this.hideStreamingStatus.bind(this),
       updateStreamingStatus: this.updateStreamingStatus.bind(this),
       toggleStopButton: this.toggleStopButton.bind(this),
-      onAssistantResponse: this.onAssistantResponse,
       onError: this.onError,
       setStreamingFootnote: this.setStreamingFootnote.bind(this),
       clearStreamingFootnote: this.clearStreamingFootnote.bind(this),
@@ -272,6 +271,10 @@ export class InputHandler extends Component {
       getIsGenerating: () => this.isGenerating,
       setGenerating: (generating) => this.setGeneratingState(generating),
     });
+  }
+
+  public waitForPersistenceIdle(): Promise<void> {
+    return this.streamingController.waitForPersistenceIdle();
   }
 
   private getSelectedModelIdForChat(): string {
@@ -295,9 +298,11 @@ export class InputHandler extends Component {
     signal: AbortSignal,
     includeContextFiles: boolean,
     turnProgress?: ChatTurnProgressController,
-    options?: { transientSystemPromptSuffix?: string }
+    options?: { transientSystemPromptSuffix?: string; phase?: "initial" | "continuation" }
   ): Promise<StreamTurnResult> {
-    const continuationTarget = this.getHostedContinuationTarget();
+    const continuationTarget = options?.phase === "initial"
+      ? null
+      : this.getHostedContinuationTarget();
     const { messageEl } = continuationTarget ?? this.createAssistantMessageContainer();
     let messageId = continuationTarget?.messageId || messageEl.dataset.messageId;
     if (!messageId || messageId.trim().length === 0) {
@@ -469,14 +474,6 @@ export class InputHandler extends Component {
     await messageHandling.addMessage(this.chatView, message.role, message.content, message.message_id, message);
   }
 
-  private async persistAssistantToolLoopUpdate(message: ChatMessage): Promise<void> {
-    if (typeof this.chatView?.persistAssistantMessage === "function") {
-      await this.chatView.persistAssistantMessage(message, { syncPiTranscript: false });
-    } else {
-      await this.persistAssistantResponse(message);
-    }
-    await this.renderPersistedAssistantMessage(message, { forceRerender: true });
-  }
 
   private async confirmHostedToolExecution(toolCall: ToolCall): Promise<boolean> {
     const functionName = String(toolCall.request?.function?.name || "").trim();
@@ -519,48 +516,23 @@ export class InputHandler extends Component {
     return popup?.confirmed === true && popup.action === "primary";
   }
 
-  private async executeHostedToolCalls(message: ChatMessage, signal: AbortSignal): Promise<ChatMessage> {
-    const toolCalls = Array.isArray(message.tool_calls) ? message.tool_calls : [];
-    if (toolCalls.length === 0) {
-      return message;
-    }
-
-    for (const toolCall of toolCalls) {
-      if (signal.aborted) {
-        break;
-      }
-      if (toolCall.state === "completed" || toolCall.state === "failed") {
-        continue;
-      }
-
-      toolCall.state = "executing";
-      toolCall.executionStartedAt = toolCall.executionStartedAt || Date.now();
-
-      const approved = await this.confirmHostedToolExecution(toolCall);
-      if (!approved) {
-        toolCall.state = "failed";
-        toolCall.executionCompletedAt = Date.now();
-        toolCall.result = {
-          success: false,
-          error: {
-            code: "USER_DENIED",
-            message: "The user denied this tool execution.",
-          },
-        };
-        continue;
-      }
-
-      const result = await this.aiService.executeHostedToolCall({
-        toolCall,
-        chatView: this.chatView,
-      });
-
-      toolCall.result = result;
+  private async executeHostedToolCall(toolCall: ToolCall, signal: AbortSignal): Promise<void> {
+    if (signal.aborted) {
+      toolCall.state = "failed";
       toolCall.executionCompletedAt = Date.now();
-      toolCall.state = result.success ? "completed" : "failed";
+      toolCall.result = {
+        success: false,
+        error: { code: "TOOL_CANCELLED_BEFORE_START", message: "Tool execution was cancelled before it started." },
+      };
+      return;
     }
 
-    return message;
+    toolCall.state = "executing";
+    toolCall.executionStartedAt = toolCall.executionStartedAt || Date.now();
+    const result = await this.aiService.executeHostedToolCall({ toolCall, chatView: this.chatView, signal });
+    toolCall.result = result;
+    toolCall.executionCompletedAt = Date.now();
+    toolCall.state = result.success ? "completed" : "failed";
   }
 
   private failHostedToolTurn(message: string, statusCode: number, metadata?: Record<string, unknown>): never {
@@ -585,15 +557,6 @@ export class InputHandler extends Component {
     throw error;
   }
 
-  private isEmptyStreamCompletion(completionState: StreamCompletionState): boolean {
-    return (
-      completionState === "empty" ||
-      completionState === "no_events" ||
-      completionState === "reasoning_only" ||
-      completionState === "empty_after_seed"
-    );
-  }
-
   private buildEmptyContinuationRetryHint(completionState: StreamCompletionState, retryAttempt: number): string {
     const classification =
       completionState === "reasoning_only"
@@ -607,150 +570,6 @@ export class InputHandler extends Component {
       `This is retry ${retryAttempt}. Continue from the completed tool results already in the transcript.`,
       "Either call the next needed tool or provide the final answer. Do not return an empty response.",
     ].join(" ");
-  }
-
-  private async runHostedAgentTurnLoop(signal: AbortSignal, includeContextFiles: boolean): Promise<void> {
-    const maxToolContinuationRounds = 8;
-    const maxEmptyInitialRetries = 2;
-    const maxEmptyContinuationRetries = 3;
-    let completedToolContinuationRounds = 0;
-    let emptyInitialRetries = 0;
-    let emptyContinuationRetries = 0;
-    let hasExecutedHostedToolRound = false;
-    let transientSystemPromptSuffix: string | undefined;
-    const turnTransaction: HostedTurnTransaction = {
-      turnId: this.generateMessageId(),
-      submittedUserMessageId: this.submittedInputSnapshot?.messageId,
-      submittedUserText: this.submittedInputSnapshot?.rawText,
-      committedPhase: "submitted_user",
-      completedToolCount: 0,
-    };
-    const turnProgress = new ChatTurnProgressController({
-      showStreamingStatus: this.showStreamingStatus.bind(this),
-      hideStreamingStatus: this.hideStreamingStatus.bind(this),
-      updateStreamingStatus: this.updateStreamingStatus.bind(this),
-    });
-
-    turnProgress.begin();
-
-    try {
-      while (completedToolContinuationRounds < maxToolContinuationRounds) {
-        turnProgress.setStatus("preparing");
-        const streamedTurn = await this.streamAssistantTurn(
-          signal,
-          includeContextFiles,
-          turnProgress,
-          { transientSystemPromptSuffix }
-        );
-        turnTransaction.assistantMessageId = streamedTurn.messageId;
-        turnTransaction.latestStreamCompletionState = streamedTurn.completionState;
-        if (streamedTurn.completionState === "aborted") {
-          return;
-        }
-
-        if (this.isEmptyStreamCompletion(streamedTurn.completionState)) {
-          if (!hasExecutedHostedToolRound && emptyInitialRetries < maxEmptyInitialRetries) {
-            emptyInitialRetries += 1;
-            transientSystemPromptSuffix = undefined;
-            turnProgress.setStatus("retrying");
-            try {
-              errorLogger.debug("Retrying empty hosted initial turn", {
-                source: "InputHandler",
-                method: "runHostedAgentTurnLoop",
-                metadata: {
-                  retryAttempt: emptyInitialRetries,
-                  maxEmptyInitialRetries,
-                  chatId: this.getChatId(),
-                },
-              });
-            } catch {}
-            continue;
-          }
-
-          if (hasExecutedHostedToolRound && emptyContinuationRetries < maxEmptyContinuationRetries) {
-            emptyContinuationRetries += 1;
-            transientSystemPromptSuffix = this.buildEmptyContinuationRetryHint(
-              streamedTurn.completionState,
-              emptyContinuationRetries
-            );
-            turnProgress.setStatus("retrying");
-            try {
-              errorLogger.debug("Retrying empty hosted continuation round", {
-                source: "InputHandler",
-                method: "runHostedAgentTurnLoop",
-                metadata: {
-                  retryAttempt: emptyContinuationRetries,
-                  maxEmptyContinuationRetries,
-                  chatId: this.getChatId(),
-                  completionState: streamedTurn.completionState,
-                },
-              });
-            } catch {}
-            continue;
-          }
-
-          this.failHostedToolTurn(
-            hasExecutedHostedToolRound
-              ? "The hosted agent returned an empty continuation after tool execution."
-              : "The hosted agent returned an empty response.",
-            502,
-            {
-              reason: hasExecutedHostedToolRound ? "empty-continuation" : "empty-response",
-              emptyInitialRetries,
-              emptyContinuationRetries,
-              latestStreamCompletionState: streamedTurn.completionState,
-              hasExecutedHostedToolRound,
-              assistantMessageId: turnTransaction.assistantMessageId,
-              committedAssistantMessageId: turnTransaction.committedAssistantMessageId,
-              submittedUserMessageId: turnTransaction.submittedUserMessageId,
-              submittedUserText: turnTransaction.submittedUserText,
-              committedPhase: turnTransaction.committedPhase,
-              completedToolCount: turnTransaction.completedToolCount,
-            }
-          );
-        }
-
-        emptyInitialRetries = 0;
-        emptyContinuationRetries = 0;
-        transientSystemPromptSuffix = undefined;
-        turnTransaction.committedPhase = "assistant_committed";
-        turnTransaction.committedAssistantMessageId = streamedTurn.messageId;
-        if (!this.shouldContinueHostedToolLoop(streamedTurn.message, streamedTurn.stopReason)) {
-          return;
-        }
-
-        turnProgress.attach(streamedTurn.messageEl);
-        turnProgress.setStatus("executing_tools");
-        const executedMessage = await this.executeHostedToolCalls(streamedTurn.message, signal);
-        await this.persistAssistantToolLoopUpdate(executedMessage);
-        turnProgress.attach(streamedTurn.messageEl);
-        hasExecutedHostedToolRound = true;
-        turnTransaction.committedPhase = "tool_execution_committed";
-        turnTransaction.completedToolCount += (executedMessage.tool_calls || []).filter(
-          (toolCall) => toolCall.state === "completed" || toolCall.state === "failed"
-        ).length;
-        completedToolContinuationRounds += 1;
-      }
-
-      this.failHostedToolTurn(
-        "The hosted agent exceeded the maximum tool continuation depth.",
-        500,
-        {
-          reason: "max-tool-continuation-depth",
-          maxToolContinuationRounds,
-          latestStreamCompletionState: turnTransaction.latestStreamCompletionState,
-          hasExecutedHostedToolRound,
-          assistantMessageId: turnTransaction.assistantMessageId,
-          committedAssistantMessageId: turnTransaction.committedAssistantMessageId,
-          submittedUserMessageId: turnTransaction.submittedUserMessageId,
-          submittedUserText: turnTransaction.submittedUserText,
-          committedPhase: turnTransaction.committedPhase,
-          completedToolCount: turnTransaction.completedToolCount,
-        }
-      );
-    } finally {
-      turnProgress.end();
-    }
   }
 
   private setupInput(): void {
@@ -933,8 +752,8 @@ export class InputHandler extends Component {
    * button, the input handler's own dispose path, and ChatView.onClose() all go
    * through it so any route that ends a turn aborts the stream (BUG-03).
    */
-  public abortActiveTurn(): void {
-    this.turnLifecycle.stop();
+  public abortActiveTurn(): Promise<void> {
+    return this.turnLifecycle.stop();
   }
 
   private async handleSendMessage(overrides?: {
@@ -942,14 +761,49 @@ export class InputHandler extends Component {
     focusAfterSend?: boolean;
     rethrowErrors?: boolean;
   }): Promise<void> {
-    let messageText: string = this.input.value.trim();
+    if (this.submissionReserved) {
+      throw new ChatTurnAlreadyActiveError("reserved");
+    }
+    if (this.localResourcesDisposed || this.localResourcesDisposing) {
+      return;
+    }
+    if (this.turnLifecycle.isActive()) {
+      await this.turnLifecycle.runTurn(async () => {});
+      return;
+    }
+
+    const reservationGeneration = ++this.submissionReservationGeneration;
+    this.submissionReserved = true;
+    const reservation = this.handleReservedSendMessage(reservationGeneration, overrides);
+    this.submissionReservationPromise = reservation;
+    try {
+      await reservation;
+    } finally {
+      if (this.submissionReservationGeneration === reservationGeneration) {
+        this.submissionReserved = false;
+      }
+      if (this.submissionReservationPromise === reservation) {
+        this.submissionReservationPromise = null;
+      }
+    }
+  }
+
+  private async handleReservedSendMessage(reservationGeneration: number, overrides?: {
+    includeContextFiles?: boolean;
+    focusAfterSend?: boolean;
+    rethrowErrors?: boolean;
+  }): Promise<void> {
+    const originalInputValue = this.input.value;
+    const originalPendingLargeText = this.pendingLargeTextContent;
+    let consumedLargeText = false;
+    let userCommitted = false;
+    let messageText: string = originalInputValue.trim();
     if (!messageText) return;
 
-    // Replace placeholder with actual large text content if present
-    if (this.pendingLargeTextContent && LargeTextHelpers.containsPlaceholder(messageText)) {
+    if (originalPendingLargeText && LargeTextHelpers.containsPlaceholder(messageText)) {
       const placeholderRegex = /\[PASTED TEXT - \d+ LINES OF TEXT\]/g;
-      messageText = messageText.replace(placeholderRegex, this.pendingLargeTextContent);
-      this.pendingLargeTextContent = null;
+      messageText = messageText.replace(placeholderRegex, originalPendingLargeText);
+      consumedLargeText = true;
     }
 
     if (!this.isChatReady()) {
@@ -962,16 +816,25 @@ export class InputHandler extends Component {
       return;
     }
 
-    if (!(await this.ensureProviderReadyForChat())) {
+    const providerReady = await this.ensureProviderReadyForChat();
+    if (
+      !providerReady ||
+      reservationGeneration !== this.submissionReservationGeneration ||
+      this.localResourcesDisposed ||
+      this.localResourcesDisposing
+    ) {
       return;
     }
 
     const includeContextFiles = overrides?.includeContextFiles ?? true;
 
     const submittedRawText = messageText;
+    if (consumedLargeText) {
+      this.pendingLargeTextContent = null;
+    }
 
     try {
-      await this.turnLifecycle.runTurn(async (signal) => {
+      const lifecycleTurn = this.turnLifecycle.runTurn(async (signal) => {
         this.input.value = "";
         this.adjustInputHeight();
 
@@ -983,12 +846,106 @@ export class InputHandler extends Component {
           content: messageText,
           message_id: messageId,
         } as any;
-        await this.onMessageSubmit(userMessage);
-
-        await this.runHostedAgentTurnLoop(signal, includeContextFiles);
+        const streamWithProgress = async (
+          turnSignal: AbortSignal,
+          phase: "initial" | "continuation",
+          retryCount: number,
+          previous?: StreamTurnResult,
+        ): Promise<StreamTurnResult> => {
+          const progress = new ChatTurnProgressController({
+            showStreamingStatus: this.showStreamingStatus.bind(this),
+            hideStreamingStatus: this.hideStreamingStatus.bind(this),
+            updateStreamingStatus: this.updateStreamingStatus.bind(this),
+          });
+          progress.begin();
+          try {
+            progress.setStatus(retryCount > 0 ? "retrying" : "preparing");
+            return await this.streamAssistantTurn(turnSignal, includeContextFiles, progress, {
+              phase,
+              transientSystemPromptSuffix: phase === "continuation" && retryCount > 0 && previous
+                ? this.buildEmptyContinuationRetryHint(previous.completionState, retryCount)
+                : undefined,
+            });
+          } finally {
+            progress.end();
+          }
+        };
+        const turn = new ChatTurn({
+          signal,
+          commitUser: async (message) => {
+            await this.onMessageSubmit(message);
+            userCommitted = true;
+          },
+          commitAssistant: async (message) => {
+            if (typeof this.chatView?.persistAssistantMessage === "function") {
+              await this.chatView.persistAssistantMessage(message, { operation: "assistant_commit" });
+              await this.renderPersistedAssistantMessage(message);
+            } else {
+              await this.onAssistantResponse(message);
+            }
+          },
+          runInitialStream: (retryCount, turnSignal) => streamWithProgress(turnSignal, "initial", retryCount),
+          shouldContinueTools: (result) => this.shouldContinueHostedToolLoop(result.message, result.stopReason),
+          requestToolApproval: async (toolCall) => {
+            const approved = await this.confirmHostedToolExecution(toolCall);
+            if (!approved) {
+              toolCall.state = "failed";
+              toolCall.executionCompletedAt = Date.now();
+              toolCall.result = {
+                success: false,
+                error: { code: "USER_DENIED", message: "The user denied this tool execution." },
+              };
+            }
+            return approved;
+          },
+          executeTool: (toolCall, turnSignal) => this.executeHostedToolCall(toolCall, turnSignal),
+          commitToolCheckpoint: async (message) => {
+            if (typeof this.chatView?.persistAssistantMessage === "function") {
+              await this.chatView.persistAssistantMessage(message, { operation: "tool_checkpoint" });
+            } else {
+              await this.persistAssistantResponse(message);
+            }
+          },
+          renderToolCheckpoint: (message) => this.renderPersistedAssistantMessage(message, { forceRerender: true }),
+          runContinuationStream: (retryCount, turnSignal, previous) =>
+            streamWithProgress(turnSignal, "continuation", retryCount, previous),
+          onInitialRetryExhausted: (latest) => this.failHostedToolTurn(
+            "The hosted agent returned an empty response.", 502, {
+              reason: "empty-response", emptyInitialRetries: 2,
+              latestStreamCompletionState: latest.completionState, committedPhase: "submitted_user",
+            },
+          ),
+          onContinuationRetryExhausted: (latest, emptyContinuationRetries, previous) => this.failHostedToolTurn(
+            "The hosted agent returned an empty continuation after tool execution.", 502, {
+              reason: "empty-continuation", emptyContinuationRetries,
+              latestStreamCompletionState: latest.completionState,
+              committedAssistantMessageId: previous.messageId,
+              committedPhase: "tool_execution_committed",
+              completedToolCount: (previous.message.tool_calls || []).filter(
+                (toolCall) => toolCall.state === "completed" || toolCall.state === "failed"
+              ).length,
+            },
+          ),
+          onMaxContinuationDepth: (maxToolContinuationRounds) => this.failHostedToolTurn(
+            "The hosted agent exceeded the maximum tool continuation depth.", 500,
+            { reason: "max-tool-continuation-depth", maxToolContinuationRounds },
+          ),
+        });
+        await turn.run(userMessage);
         void this.chatView.refreshCreditsBalance();
       });
+      if (this.submissionReservationGeneration !== reservationGeneration) {
+        return;
+      }
+      this.submissionReserved = false;
+      this.submissionReservationPromise = null;
+      await lifecycleTurn;
     } catch (err) {
+      if (!userCommitted) {
+        this.input.value = originalInputValue;
+        this.pendingLargeTextContent = originalPendingLargeText;
+        this.adjustInputHeight();
+      }
       // StreamingController already forwards errors into ChatView.handleError via onError.
       // Swallow here to avoid "Uncaught (in promise)" in the Obsidian console.
       if (!(err instanceof SystemSculptError)) {
@@ -1586,38 +1543,67 @@ export class InputHandler extends Component {
     }
   }
 
-  private disposeLocalResources(): void {
+  public disposeLocalResources(): Promise<void> {
     if (this.localResourcesDisposed) {
-      return;
+      return Promise.resolve();
     }
-    this.localResourcesDisposed = true;
-
-    // Abort any in-flight stream before tearing down the rest, so the network
-    // request, its rAF metrics ticker, and autosave stop running into a
-    // disposed view (BUG-03).
-    this.abortActiveTurn();
-
-    if (this.renderTimeout) {
-      clearTimeout(this.renderTimeout);
+    if (this.localResourceDisposalPromise) {
+      return this.localResourceDisposalPromise;
     }
 
-    if (this.recorderVisualizer) {
-      this.recorderVisualizer.remove();
-      this.recorderVisualizer = null;
-    }
+    this.localResourcesDisposing = true;
+    this.submissionReservationGeneration = (this.submissionReservationGeneration || 0) + 1;
+    this.submissionReserved = false;
+    const reservedPreflight = this.submissionReservationPromise;
+    this.submissionReservationPromise = null;
 
-    this.recorderToggleUnsubscribe?.();
-    this.recorderToggleUnsubscribe = null;
-    this.cleanupAllStatusIndicators();
+    const cleanup = () => {
+      if (this.localResourcesDisposed) return;
+      this.localResourcesDisposed = true;
+      this.localResourcesDisposing = false;
+
+      if (this.renderTimeout) {
+        clearTimeout(this.renderTimeout);
+      }
+
+      if (this.recorderVisualizer) {
+        this.recorderVisualizer.remove();
+        this.recorderVisualizer = null;
+      }
+
+      this.recorderToggleUnsubscribe?.();
+      this.recorderToggleUnsubscribe = null;
+      this.cleanupAllStatusIndicators();
+    };
+
+    const terminal = this.abortActiveTurn();
+    let disposal: Promise<void>;
+    if (!reservedPreflight && this.turnLifecycle.getState() === "terminal") {
+      cleanup();
+      disposal = Promise.resolve();
+    } else {
+      const reservedSettlement = reservedPreflight
+        ? reservedPreflight.then(() => undefined, () => undefined)
+        : Promise.resolve();
+      disposal = Promise.all([reservedSettlement, terminal]).then(() => undefined).finally(cleanup);
+    }
+    this.localResourceDisposalPromise = disposal;
+    void disposal.then(
+      () => { if (this.localResourceDisposalPromise === disposal) this.localResourceDisposalPromise = null; },
+      () => { if (this.localResourceDisposalPromise === disposal) this.localResourceDisposalPromise = null; },
+    );
+    return disposal;
   }
 
   public unload(): void {
-    this.disposeLocalResources();
-    super.unload();
+    void this.disposeLocalResources().then(
+      () => super.unload(),
+      () => super.unload(),
+    );
   }
 
   public onunload(): void {
-    this.disposeLocalResources();
+    void this.disposeLocalResources().catch(() => {});
   }
 
   private generateMessageId(): string {
@@ -1710,10 +1696,20 @@ export class InputHandler extends Component {
     }
   }
 
-  public consumeSubmittedInputSnapshot(): { messageId: string; rawText: string } | null {
-    const snapshot = this.submittedInputSnapshot;
+  public peekSubmittedInputSnapshot(): Readonly<{ messageId: string; rawText: string }> | null {
+    return this.submittedInputSnapshot;
+  }
+
+  public clearSubmittedInputSnapshot(expectedMessageId: string): boolean {
+    if (this.submittedInputSnapshot?.messageId !== expectedMessageId) return false;
     this.submittedInputSnapshot = null;
-    return snapshot;
+    return true;
+  }
+
+  public consumeSubmittedInputSnapshot(): { messageId: string; rawText: string } | null {
+    const snapshot = this.peekSubmittedInputSnapshot();
+    if (snapshot) this.clearSubmittedInputSnapshot(snapshot.messageId);
+    return snapshot ? { ...snapshot } : null;
   }
 
   /**

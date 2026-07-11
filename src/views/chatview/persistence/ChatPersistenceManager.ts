@@ -1,9 +1,11 @@
 import type { ChatMessage } from "../../../types";
 import { errorLogger } from "../../../utils/errorLogger";
+import { ChatPersistenceError } from "./ChatPersistenceError";
 
 export interface ChatPersistenceManagerOptions {
   saveChat: () => Promise<void>;
   onAssistantResponse: (message: ChatMessage) => Promise<void>;
+  chatId?: () => string;
   debounceMs?: number;
 }
 
@@ -11,6 +13,7 @@ export class ChatPersistenceManager {
   private readonly saveChat: () => Promise<void>;
   private readonly onAssistantResponse: (message: ChatMessage) => Promise<void>;
   private readonly debounceMs: number;
+  private readonly chatId: () => string;
   private autosaveTimer: ReturnType<typeof setTimeout> | null = null;
   // Save queue semantics: ensure we never lose a final save when a prior save is in flight
   private inFlight: Promise<void> | null = null;
@@ -19,6 +22,7 @@ export class ChatPersistenceManager {
   constructor(options: ChatPersistenceManagerOptions) {
     this.saveChat = options.saveChat;
     this.onAssistantResponse = options.onAssistantResponse;
+    this.chatId = options.chatId ?? (() => "");
     this.debounceMs = options.debounceMs ?? 500;
   }
 
@@ -28,7 +32,9 @@ export class ChatPersistenceManager {
     }
     this.autosaveTimer = setTimeout(() => {
       this.autosaveTimer = null;
-      this.requestFlush("autosave");
+      void this.requestFlush("autosave").catch(() => {
+        // Autosave has no awaiting caller; the failure is logged in requestFlush.
+      });
     }, this.debounceMs);
   }
 
@@ -39,8 +45,14 @@ export class ChatPersistenceManager {
     }
   }
 
-  public async commit(finalMessage: ChatMessage): Promise<void> {
+  public async waitForIdle(): Promise<void> {
     this.cancelAutosave();
+    const active = this.inFlight;
+    if (active) await active;
+  }
+
+  public async commit(finalMessage: ChatMessage): Promise<void> {
+    await this.waitForIdle();
     try {
       await this.onAssistantResponse(finalMessage);
     } catch (error) {
@@ -49,7 +61,12 @@ export class ChatPersistenceManager {
         method: "commit",
         metadata: { messageId: finalMessage?.message_id },
       });
-      throw error;
+      if (error instanceof ChatPersistenceError) throw error;
+      throw new ChatPersistenceError({
+        operation: "assistant_commit",
+        chatId: this.chatId(),
+        cause: error,
+      });
     }
     await this.requestFlush("commit");
   }
@@ -80,8 +97,14 @@ export class ChatPersistenceManager {
               method: "requestFlush",
               metadata: { reason },
             });
-            // On save failure, break the loop to avoid busy retrying
-            break;
+            // On save failure, reject the entire flush cycle rather than
+            // allowing a final commit to report success.
+            if (error instanceof ChatPersistenceError) throw error;
+            throw new ChatPersistenceError({
+              operation: "flush",
+              chatId: this.chatId(),
+              cause: error,
+            });
           }
           // Loop continues if another flush was requested while we saved
         }

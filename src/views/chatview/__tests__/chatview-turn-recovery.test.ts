@@ -34,6 +34,8 @@ const createRecoverableView = (messages: ChatMessage[]) => {
   view.messageRenderer = messageRenderer;
   view.inputHandler = {
     isAutomationRequestActive: jest.fn(() => true),
+    peekSubmittedInputSnapshot: jest.fn(),
+    clearSubmittedInputSnapshot: jest.fn(),
     consumeSubmittedInputSnapshot: jest.fn(),
     setInputText: jest.fn(),
   };
@@ -51,6 +53,32 @@ const createRecoverableView = (messages: ChatMessage[]) => {
 };
 
 describe("ChatView committed turn recovery", () => {
+  it("retains the submitted-input snapshot when durable deletion fails and clears it only after retry succeeds", async () => {
+    const failed = { role: "user", content: "raw prompt", message_id: "user-failed" } as ChatMessage;
+    const { view } = createRecoverableView([failed]);
+    const snapshot = { messageId: "user-failed", rawText: "raw prompt" };
+    view.inputHandler.peekSubmittedInputSnapshot.mockReturnValue(snapshot);
+    const transcript = {
+      candidateDeleteMessage: jest.fn(() => ({ operation: "history_delete" })),
+      commit: jest.fn()
+        .mockRejectedValueOnce(new Error("disk full"))
+        .mockResolvedValueOnce({ chatId: "chat-recovery", version: 2, messages: [] }),
+      snapshot: jest.fn(() => ({ chatId: "chat-recovery", version: 2, messages: [] })),
+    };
+    view.chatTranscript = transcript;
+    view.projectTranscript = jest.fn(() => { view.messages = []; });
+
+    await expect(view.removeFailedSubmissionTurn()).rejects.toThrow("disk full");
+    expect(view.inputHandler.clearSubmittedInputSnapshot).not.toHaveBeenCalled();
+    expect(view.inputHandler.setInputText).not.toHaveBeenCalled();
+    expect(view.messages).toEqual([failed]);
+
+    await expect(view.removeFailedSubmissionTurn()).resolves.toBe(true);
+    expect(view.inputHandler.clearSubmittedInputSnapshot).toHaveBeenCalledWith("user-failed");
+    expect(view.inputHandler.setInputText).toHaveBeenCalledWith("raw prompt");
+    expect(transcript.commit).toHaveBeenCalledTimes(2);
+  });
+
   it("keeps submitted user and completed tool rows when post-tool continuation fails", async () => {
     const completedToolCall = {
       id: "call_1",

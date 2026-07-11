@@ -18,14 +18,12 @@ const createController = () => {
       messageRenderer: {
         renderMessageParts: jest.fn(),
       } as any,
-      saveChat,
       generateMessageId: jest.fn(() => "generated-id"),
       extractAnnotations: jest.fn(() => []),
       showStreamingStatus: jest.fn(),
       hideStreamingStatus: jest.fn(),
       updateStreamingStatus: jest.fn(),
       toggleStopButton: jest.fn(),
-      onAssistantResponse,
       onError,
     }),
     saveChat,
@@ -35,6 +33,26 @@ const createController = () => {
 };
 
 describe("StreamingController stream behavior", () => {
+  test("keeps initial streaming ephemeral with no autosave or assistant commit and cleans its assembler", async () => {
+    const { controller, saveChat, onAssistantResponse } = createController();
+    const messageEl = document.createElement("div");
+    const stream = (async function* () {
+      yield { type: "content", text: "Preview only" } as any;
+    })();
+
+    const result = await controller.stream(
+      stream,
+      messageEl,
+      "assistant-preview",
+      new AbortController().signal,
+    );
+
+    expect(result.message.content).toBe("Preview only");
+    expect(saveChat).not.toHaveBeenCalled();
+    expect(onAssistantResponse).not.toHaveBeenCalled();
+    expect(controller.getActiveAssemblerCount()).toBe(0);
+  });
+
   test("continues from seeded parts when streaming again into the same message id", async () => {
     const { controller, onAssistantResponse } = createController();
 
@@ -61,7 +79,8 @@ describe("StreamingController stream behavior", () => {
     expect(result.completionState).toBe("completed");
     expect(result.messageId).toBe("assistant-seeded");
     expect(result.message.content).toBe("Hello world");
-    expect(onAssistantResponse).toHaveBeenCalledTimes(1);
+    expect(onAssistantResponse).not.toHaveBeenCalled();
+    expect(controller.getActiveAssemblerCount()).toBe(0);
   });
 
   test("classifies seeded continuations with no new renderable output as empty_after_seed", async () => {
@@ -120,9 +139,6 @@ describe("StreamingController stream behavior", () => {
   });
 
   test("backfills reasoning_details ids from tool_calls", async () => {
-    const saveChat = jest.fn().mockResolvedValue(undefined);
-    const onAssistantResponse = jest.fn().mockResolvedValue(undefined);
-
     const toolCallId = "tool_default_api:mcp-filesystem_read_szyfwOy5FpnrUXatzq4y";
 
     const controller = new StreamingController({
@@ -132,14 +148,12 @@ describe("StreamingController stream behavior", () => {
       messageRenderer: {
         renderMessageParts: jest.fn(),
       } as any,
-      saveChat,
       generateMessageId: jest.fn(() => "generated-id"),
       extractAnnotations: jest.fn(() => []),
       showStreamingStatus: jest.fn(),
       hideStreamingStatus: jest.fn(),
       updateStreamingStatus: jest.fn(),
       toggleStopButton: jest.fn(),
-      onAssistantResponse,
       onError: jest.fn(),
     });
 

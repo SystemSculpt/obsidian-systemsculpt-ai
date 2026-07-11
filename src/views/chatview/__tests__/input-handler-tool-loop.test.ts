@@ -199,6 +199,133 @@ describe("InputHandler hosted tool loop", () => {
     };
   };
 
+  it("synchronously reserves one of two idle submissions before deferred readiness or large-paste consumption", async () => {
+    const { aiService, handler, onMessageSubmit } = createHostedToolLoopHarness();
+    let resolveReadiness!: (ready: boolean) => void;
+    const readiness = new Promise<boolean>((resolve) => { resolveReadiness = resolve; });
+    const ensureReady = jest.fn(() => readiness);
+    (handler as any).ensureProviderReadyForChat = ensureReady;
+    (handler as any).pendingLargeTextContent = "full large paste";
+    (handler as any).createAssistantMessageContainer = jest.fn(() => {
+      const messageEl = document.createElement("div");
+      messageEl.dataset.messageId = "assistant-race";
+      return { messageEl, contentEl: messageEl };
+    });
+    handler.setValue("Summarize [PASTED TEXT - 20 LINES OF TEXT]");
+    aiService.streamMessage.mockImplementation(() => (async function* () {
+      yield { type: "content", text: "done" } as any;
+    })());
+
+    const first = handler.submitForAutomation();
+    const second = handler.submitForAutomation();
+
+    await expect(second).rejects.toEqual(expect.objectContaining({
+      code: "chat_turn_already_active",
+      state: "reserved",
+    }));
+    expect(ensureReady).toHaveBeenCalledTimes(1);
+    expect(handler.getValue()).toBe("Summarize [PASTED TEXT - 20 LINES OF TEXT]");
+    expect((handler as any).pendingLargeTextContent).toBe("full large paste");
+    expect(onMessageSubmit).not.toHaveBeenCalled();
+    expect(aiService.streamMessage).not.toHaveBeenCalled();
+
+    resolveReadiness(true);
+    await first;
+
+    expect(onMessageSubmit).toHaveBeenCalledTimes(1);
+    expect(onMessageSubmit.mock.calls[0]?.[0]?.content).toBe("Summarize full large paste");
+    expect(String(onMessageSubmit.mock.calls[0]?.[0]?.content)).not.toContain("[PASTED TEXT");
+    expect(aiService.streamMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("invalidates and awaits deferred readiness when disposed before lifecycle promotion", async () => {
+    const { aiService, handler, onMessageSubmit } = createHostedToolLoopHarness();
+    let resolveReadiness!: (ready: boolean) => void;
+    const readiness = new Promise<boolean>((resolve) => { resolveReadiness = resolve; });
+    const ensureReady = jest.fn(() => readiness);
+    const cleanupIndicators = jest.spyOn(handler as any, "cleanupAllStatusIndicators");
+    (handler as any).ensureProviderReadyForChat = ensureReady;
+    (handler as any).pendingLargeTextContent = "preserve on close";
+    handler.setValue("Close [PASTED TEXT - 8 LINES OF TEXT]");
+
+    const submission = handler.submitForAutomation();
+    const firstDisposal = handler.disposeLocalResources();
+    const repeatedDisposal = handler.disposeLocalResources();
+
+    expect(repeatedDisposal).toBe(firstDisposal);
+    expect(cleanupIndicators).not.toHaveBeenCalled();
+    expect((handler as any).turnLifecycle.getState()).toBe("terminal");
+
+    resolveReadiness(true);
+    await expect(submission).resolves.toBeUndefined();
+    await expect(firstDisposal).resolves.toBeUndefined();
+
+    expect(handler.getValue()).toBe("Close [PASTED TEXT - 8 LINES OF TEXT]");
+    expect((handler as any).pendingLargeTextContent).toBe("preserve on close");
+    expect(onMessageSubmit).not.toHaveBeenCalled();
+    expect(aiService.streamMessage).not.toHaveBeenCalled();
+    expect((handler as any).turnLifecycle.getState()).toBe("terminal");
+    expect(cleanupIndicators).toHaveBeenCalledTimes(1);
+
+    await expect(handler.disposeLocalResources()).resolves.toBeUndefined();
+    expect(cleanupIndicators).toHaveBeenCalledTimes(1);
+  });
+
+  it("onunload invalidates a reserved preflight before it can promote a turn", async () => {
+    const { aiService, handler, onMessageSubmit } = createHostedToolLoopHarness();
+    let resolveReadiness!: (ready: boolean) => void;
+    const readiness = new Promise<boolean>((resolve) => { resolveReadiness = resolve; });
+    (handler as any).ensureProviderReadyForChat = jest.fn(() => readiness);
+    handler.setValue("do not submit after close");
+
+    const submission = handler.submitForAutomation();
+    handler.onunload();
+    resolveReadiness(true);
+    await submission;
+    await Promise.resolve();
+
+    expect(onMessageSubmit).not.toHaveBeenCalled();
+    expect(aiService.streamMessage).not.toHaveBeenCalled();
+    expect((handler as any).turnLifecycle.getState()).toBe("terminal");
+  });
+
+  it("releases reservation and restores composer plus large-paste state when the first durable commit fails", async () => {
+    const { handler, onMessageSubmit } = createHostedToolLoopHarness();
+    (handler as any).ensureProviderReadyForChat = jest.fn().mockResolvedValue(true);
+    (handler as any).pendingLargeTextContent = "recover this paste";
+    handler.setValue("Use [PASTED TEXT - 12 LINES OF TEXT]");
+    onMessageSubmit.mockRejectedValueOnce(new Error("disk failed"));
+
+    await expect(handler.submitForAutomation()).rejects.toThrow("disk failed");
+
+    expect(handler.getValue()).toBe("Use [PASTED TEXT - 12 LINES OF TEXT]");
+    expect((handler as any).pendingLargeTextContent).toBe("recover this paste");
+    expect((handler as any).submissionReserved).toBe(false);
+  });
+
+  it("rejects a concurrent submission before consuming input, admission, commit, or stream", async () => {
+    const { aiService, handler, onMessageSubmit } = createHostedToolLoopHarness();
+    let settle!: () => void;
+    const activeReady = new Promise<void>((resolve) => {
+      void (handler as any).turnLifecycle.runTurn(async () => {
+        resolve();
+        await new Promise<void>((done) => { settle = done; });
+      });
+    });
+    await activeReady;
+    handler.setValue("keep this draft");
+
+    await expect(handler.submitForAutomation()).rejects.toEqual(expect.objectContaining({
+      code: "chat_turn_already_active",
+    }));
+    expect(handler.getValue()).toBe("keep this draft");
+    expect(onMessageSubmit).not.toHaveBeenCalled();
+    expect(aiService.streamMessage).not.toHaveBeenCalled();
+
+    settle();
+    await (handler as any).turnLifecycle.stop();
+  });
+
   it("executes hosted tool calls locally and continues the turn after toolUse", async () => {
     const { aiService, chatView, handler, messages } = createHostedToolLoopHarness();
 
@@ -263,6 +390,7 @@ describe("InputHandler hosted tool loop", () => {
         id: "call_1",
       }),
       chatView,
+      signal: expect.any(AbortSignal),
     });
     expect(messages).toEqual(
       expect.arrayContaining([
@@ -1192,6 +1320,38 @@ describe("InputHandler hosted tool loop", () => {
         },
       })
     ).resolves.toBe(false);
+  });
+
+  it("marks an unknown tool outcome terminal even when the caller signal is not aborted", async () => {
+    const { handler, aiService } = createHostedToolLoopHarness();
+    aiService.executeHostedToolCall.mockResolvedValue({
+      success: false,
+      error: {
+        code: "TOOL_CANCEL_REQUESTED_OUTCOME_UNKNOWN",
+        message: "Outcome unknown",
+      },
+    });
+    const message = {
+      role: "assistant",
+      content: "",
+      message_id: "assistant-unknown",
+      tool_calls: [{
+        id: "call_unknown",
+        messageId: "assistant-unknown",
+        request: {
+          id: "call_unknown",
+          type: "function",
+          function: { name: "mcp-filesystem_write", arguments: "{}" },
+        },
+        state: "executing",
+        timestamp: 1,
+      }],
+    } as any;
+
+    await (handler as any).executeHostedToolCall(message.tool_calls[0], new AbortController().signal);
+
+    expect(message.tool_calls[0].result.error.code).toBe("TOOL_CANCEL_REQUESTED_OUTCOME_UNKNOWN");
+    expect(message.tool_calls[0].state).toBe("failed");
   });
 
   it("cleans local UI artifacts when the handler unloads", () => {

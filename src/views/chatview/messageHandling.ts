@@ -62,6 +62,17 @@ export const messageHandling = {
     // Token counter has been removed
   },
 
+  restoreResendInput: async function(chatView: ChatView, content: string): Promise<void> {
+    if (!chatView.inputHandler) return;
+    try {
+      const { trimOuterBlankLines } = await import('../../utils/textUtils');
+      chatView.inputHandler.setValue(trimOuterBlankLines(content));
+    } catch {
+      chatView.inputHandler.setValue(content);
+    }
+    chatView.inputHandler.focus();
+  },
+
   runResendAction: async function(
     chatView: ChatView,
     input: { messageId: string; content: string }
@@ -69,6 +80,10 @@ export const messageHandling = {
     const { messageId, content } = input;
     const index = chatView.messages.findIndex((msg) => msg.message_id === messageId);
     if (index === -1) {
+      if (await chatView.retryPendingResend(messageId)) {
+        await this.restoreResendInput(chatView, content);
+        return { status: "success" };
+      }
       return { status: "error" };
     }
 
@@ -99,29 +114,9 @@ export const messageHandling = {
       }
     }
 
-    chatView.messages.splice(index);
-    chatView.clearPiSessionState({ save: false });
+    await chatView.commitResendBranch(index, messageId);
 
-    if (chatView.messages.length === 0) {
-      chatView.chatId = "";
-      chatView.chatVersion = 0;
-      chatView.isFullyLoaded = false;
-    } else {
-      await chatView.saveChat();
-    }
-
-    await this.reloadAllMessages(chatView);
-
-    if (chatView.inputHandler) {
-      try {
-        const { trimOuterBlankLines } = await import('../../utils/textUtils');
-        const asString = typeof content === 'string' ? content : JSON.stringify(content ?? '');
-        chatView.inputHandler.setValue(trimOuterBlankLines(asString));
-      } catch {
-        chatView.inputHandler.setValue(typeof content === 'string' ? content : JSON.stringify(content ?? ''));
-      }
-      chatView.inputHandler.focus();
-    }
+    await this.restoreResendInput(chatView, content);
 
     return { status: "success" };
   },

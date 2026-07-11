@@ -1502,8 +1502,18 @@ export class SystemSculptService {
     toolCall: ToolCall | ToolCallRequest;
     chatView?: any;
     timeoutMs?: number;
+    signal?: AbortSignal;
   }): Promise<ToolCallResult> {
     const request = ((options.toolCall as ToolCall)?.request || options.toolCall || {}) as ToolCallRequest;
+    if (options.signal?.aborted) {
+      return {
+        success: false,
+        error: {
+          code: 'TOOL_CANCELLED_BEFORE_START',
+          message: 'Tool execution was cancelled before it started.',
+        },
+      };
+    }
     const functionName = String(request?.function?.name || "").trim();
     if (!functionName) {
       return {
@@ -1535,16 +1545,20 @@ export class SystemSculptService {
     try {
       const data = await this.mcpService.executeTool(functionName, parsedArgs, options.chatView, {
         timeoutMs: options.timeoutMs,
+        signal: options.signal,
       });
       return {
         success: true,
         data,
       };
     } catch (error) {
+      const cancellationCode = (error as { code?: unknown })?.code;
       return {
         success: false,
         error: {
-          code: "TOOL_EXECUTION_FAILED",
+          code: cancellationCode === 'TOOL_CANCELLED_BEFORE_START' || cancellationCode === 'TOOL_CANCEL_REQUESTED_OUTCOME_UNKNOWN'
+            ? cancellationCode
+            : "TOOL_EXECUTION_FAILED",
           message: error instanceof Error ? error.message : `Tool execution failed for ${functionName}.`,
           details: error,
         },

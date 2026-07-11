@@ -22,7 +22,7 @@ export interface ChatExportContext {
   chatVersion?: number;
   exportedAt: Date;
   contextFiles: ChatExportContextFile[];
-  messages: ChatMessage[];
+  messages: readonly ChatMessage[];
   summary: ChatExportSummary;
 }
 

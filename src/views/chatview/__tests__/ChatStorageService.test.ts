@@ -103,6 +103,25 @@ describe("ChatStorageService", () => {
       expect(result.version).toBe(1);
     });
 
+    it("exclusively creates only one artifact for concurrent writers", async () => {
+      const created = new Set<string>();
+      mockVault.create.mockImplementation(async (path: string) => {
+        if (created.has(path)) throw new Error("File already exists");
+        created.add(path);
+        await Promise.resolve();
+      });
+      mockVault.adapter.exists.mockImplementation(async (path: string) => created.has(path));
+
+      const results = await Promise.all([
+        service.createChatExclusive("same-chat", testMessages),
+        service.createChatExclusive("same-chat", testMessages),
+      ]);
+
+      expect(results.filter(Boolean)).toHaveLength(1);
+      expect(results.filter((result) => result === null)).toHaveLength(1);
+      expect(created).toEqual(new Set(["SystemSculpt/Chats/same-chat.md"]));
+    });
+
     it("creates file when it does not exist", async () => {
       await service.saveChat("new-chat", testMessages);
 

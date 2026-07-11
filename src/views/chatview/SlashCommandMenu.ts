@@ -101,13 +101,8 @@ export class SlashCommandMenu extends Component {
             
             clearBtn.addEventListener('click', async () => {
               try {
-                // Empty in-memory message list
-                chatView.messages.splice(0, chatView.messages.length);
-
-                // Reset identifiers so the next save starts a fresh conversation
-                chatView.chatId = '';
-                chatView.chatVersion = 0;
-                chatView.isFullyLoaded = false;
+                // Reset transcript identity and projection so the next save starts a fresh conversation.
+                chatView.clearTranscriptProjection();
                 chatView.clearPiSessionState({ save: false });
 
                 // Clear UI

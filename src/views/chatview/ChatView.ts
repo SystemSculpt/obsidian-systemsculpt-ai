@@ -48,6 +48,10 @@ import {
   type PiSessionState,
 } from "./storage/ChatPersistenceTypes";
 import { loadPiTextMigrationModule } from "./runtimeModules";
+import { ChatIdAllocationError, ChatIdAllocator } from "./persistence/ChatIdAllocator";
+import { ChatPersistenceError, type ChatPersistenceOperation } from "./persistence/ChatPersistenceError";
+import { ChatTranscript } from "./transcript/ChatTranscript";
+import type { ChatTranscriptStorage } from "./transcript/ChatTranscriptStorage";
 import { mergePiTranscriptMessages } from "./piTranscriptMerge";
 import type { SystemSculptModel } from "../../types/llm";
 
@@ -91,13 +95,23 @@ function isSupportedPersistedOpenAiCodexChatModel(modelId: string): boolean {
 }
 
 type NodeFileSystem = Pick<typeof import("node:fs"), "existsSync">;
+type ChatSaveOptions = NonNullable<Parameters<ChatStorageService["saveChat"]>[2]>;
+type PendingCommittedPiProjection = {
+  kind: "sync" | "fork";
+  state: PiSessionState;
+  title?: string;
+  render: boolean;
+  shouldReplaceTranscript: boolean;
+  forkMessageId?: string;
+  forkResult?: { text: string; cancelled: boolean };
+};
 
 function nodeFileSystem(): NodeFileSystem | null {
   return loadDesktopOnly(() => require("node:fs") as NodeFileSystem);
 }
 
 export class ChatView extends ItemView {
-  public messages: ChatMessage[] = [];
+  public readonly messages: readonly ChatMessage[] = [];
   public aiService: SystemSculptService;
   public chatStorage: ChatStorageService;
   public chatContainer: HTMLElement;
@@ -148,7 +162,11 @@ export class ChatView extends ItemView {
   private renderEpoch: number = 0;
   private loadEpoch: number = 0;
   private activeLoad: { chatId: string; promise: Promise<void> } | null = null;
+  private pendingResendProjection: { targetMessageId: string; chatId: string } | null = null;
+  private chatTranscript: ChatTranscript | null = null;
+  private pendingCommittedPiProjection: PendingCommittedPiProjection | null = null;
   private resourcesDisposed = false;
+  private resourceDisposalPromise: Promise<void> | null = null;
 
   // Explicitly re-declare core ItemView fields for clarity / type checking
   declare app: App;
@@ -181,7 +199,6 @@ export class ChatView extends ItemView {
         agentModeEnabled?: boolean;
     }) || {};
 
-    this.messages = [];
     this.chatId = initialState.chatId || "";
 
     // Initialize the chat title
@@ -288,94 +305,180 @@ export class ChatView extends ItemView {
   handleOpenChatSettings = () => chatSettingsHandling.openChatSettings(this);
 
 
-  public async saveChat(): Promise<void> {
-    this.ensureCoreServicesReady();
-    // Guard: if we are still loading an existing chat (messages not yet
-    // hydrated) suppress any automatic save that could wipe history.
-    if (!this.isFullyLoaded && this.chatId) {
-      return;
-    }
-    
-    // Check if we have actual content to save
-    const hasMessages = this.messages.length > 0;
-    const hasContextFiles = this.contextManager?.getContextFiles().size > 0;
-    const hasContent = hasMessages || hasContextFiles;
-    
-    // If this is a new chat with no content, only update view state
-    if (!this.chatId && !hasContent) {
-      // Update view state to persist settings in workspace
-      this.updateViewState();
-      return;
-    }
-    
-    if (!this.chatId) {
-      const now = new Date();
-      const year = now.getFullYear();
-      const month = String(now.getMonth() + 1).padStart(2, "0");
-      const day = String(now.getDate()).padStart(2, "0");
-      const hour = String(now.getHours()).padStart(2, "0");
-      const minute = String(now.getMinutes()).padStart(2, "0");
-      const second = String(now.getSeconds()).padStart(2, "0");
-      this.chatId = `${year}-${month}-${day} ${hour}-${minute}-${second}`;
+  private getChatSaveOptions(overrides?: Partial<ChatSaveOptions>): ChatSaveOptions {
+    return {
+      selectedModelId: this.getPersistedSelectedModelId(),
+      contextFiles: this.contextManager?.getContextFiles() || new Set<string>(),
+      title: this.chatTitle,
+      chatFontSize: this.chatFontSize,
+      selectedPromptPath: this.inputHandler?.getSelectedPromptPath?.() || "",
+      agentModeEnabled: this.agentModeEnabled,
+      hideSystemMessages: this.hideSystemMessages,
+      piSessionFile: this.piSessionFile,
+      piSessionId: this.piSessionId,
+      piLastEntryId: this.piLastEntryId,
+      piLastSyncedAt: this.piLastSyncedAt,
+      chatBackend: this.chatBackend,
+      ...overrides,
+    };
+  }
 
-      if (!this.chatTitle) {
-        this.initializeChatTitle();
+  private transcriptStorage(): ChatTranscriptStorage {
+    return {
+      load: async (chatId) => {
+        const loaded = await this.chatStorage.loadChat(chatId);
+        return loaded ? {
+          chatId,
+          version: loaded.version || 0,
+          messages: loaded.messages || [],
+          readOnly: loaded.chatBackend === "legacy",
+        } : null;
+      },
+      save: async (chatId, messages) => {
+        if (Object.prototype.hasOwnProperty.call(this, "saveChat")) {
+          await this.saveChat();
+          return { version: this.chatVersion };
+        }
+        const saved = await this.chatStorage.saveChat(chatId, [...messages], this.getChatSaveOptions());
+        return { version: saved.version };
+      },
+      createExclusive: async (chatId, messages) => {
+        if (Object.prototype.hasOwnProperty.call(this, "saveChat")) {
+          await this.saveChat();
+          return { version: this.chatVersion };
+        }
+        return this.chatStorage.createChatExclusive(chatId, [...messages], this.getChatSaveOptions());
+      },
+    };
+  }
+
+  private ensureChatTranscript(): ChatTranscript {
+    if (!this.chatTranscript || this.chatTranscript.snapshot().chatId !== this.chatId) {
+      this.chatTranscript = ChatTranscript.fromSnapshot(this.transcriptStorage(), {
+        chatId: this.chatId,
+        version: Math.max(0, this.chatVersion),
+        messages: this.messages,
+      });
+    }
+    return this.chatTranscript;
+  }
+
+  private async waitForLegacyPersistenceIdle(): Promise<void> {
+    await this.inputHandler?.waitForPersistenceIdle?.();
+  }
+
+  private projectTranscript(): void {
+    const transcript = this.chatTranscript || this.ensureChatTranscript();
+    const accepted = transcript.snapshot();
+    // The sole projection adapter: callers receive a frozen readonly snapshot.
+    // @ts-expect-error Transcript ownership intentionally centralizes this readonly field assignment.
+    this.messages = accepted.messages;
+    this.chatId = accepted.chatId;
+    this.chatVersion = accepted.version;
+    this.isFullyLoaded = true;
+  }
+
+  private async persistCandidate(
+    candidate: ChatMessage[],
+    operation: ChatPersistenceOperation,
+    requestedChatId: string = this.chatId,
+  ): Promise<{ chatId: string; version: number }> {
+    // Unit harnesses historically replace saveChat on the instance. Preserve
+    // that public seam without using it in real ChatView instances.
+    if (Object.prototype.hasOwnProperty.call(this, "saveChat")) {
+      try {
+        await this.saveChat();
+        return { chatId: requestedChatId || this.chatId, version: this.chatVersion };
+      } catch (cause) {
+        throw new ChatPersistenceError({ operation, chatId: requestedChatId || this.chatId, cause });
       }
-      this.updateViewState();
+    }
+
+    if (!requestedChatId) {
+      try {
+        const allocator = new ChatIdAllocator((chatId) =>
+          this.chatStorage.createChatExclusive(chatId, candidate, this.getChatSaveOptions())
+        );
+        const allocated = await allocator.allocate();
+        return { chatId: allocated.chatId, version: allocated.value.version };
+      } catch (cause) {
+        const allocationError = cause instanceof ChatIdAllocationError ? cause : null;
+        throw new ChatPersistenceError({
+          operation,
+          chatId: allocationError?.chatId || "",
+          cause: allocationError?.cause || cause,
+        });
+      }
     }
 
     try {
-      const savedChat = await this.chatStorage.saveChat(
-        this.chatId,
-        this.messages,
-        {
-          selectedModelId: this.getPersistedSelectedModelId(),
-          contextFiles: this.contextManager?.getContextFiles() || new Set(),
-          title: this.chatTitle,
-          chatFontSize: this.chatFontSize,
-          selectedPromptPath: this.inputHandler?.getSelectedPromptPath?.() || "",
-          agentModeEnabled: this.agentModeEnabled,
-          hideSystemMessages: this.hideSystemMessages,
-          piSessionFile: this.piSessionFile,
-          piSessionId: this.piSessionId,
-          piLastEntryId: this.piLastEntryId,
-          piLastSyncedAt: this.piLastSyncedAt,
-          chatBackend: this.chatBackend,
-        },
-      );
-      this.chatVersion = savedChat.version || this.chatVersion;
-
-      // If this was the first successful save of a brand-new chat, mark it as fully loaded so
-      // subsequent saveChat() calls are no longer skipped by the early-exit guard.
-      const wasNewChat = !this.isFullyLoaded;
-      if (wasNewChat && !this.isFullyLoaded) {
-        this.isFullyLoaded = true;
-      }
-
-      this.updateViewState();
-    } catch (error) {
-      this.handleError("Failed to save chat");
+      const saved = await this.chatStorage.saveChat(requestedChatId, candidate, this.getChatSaveOptions());
+      return { chatId: requestedChatId, version: saved.version };
+    } catch (cause) {
+      throw new ChatPersistenceError({ operation, chatId: requestedChatId, cause });
     }
   }
 
-  public async addMessageToHistory(message: ChatMessage): Promise<void> {
-    // Check for duplicates using message_id
-    if (!this.messages.find(m => m.message_id === message.message_id)) {
-        this.messages.push(message);
-        // Trigger event for embeddings view to refresh
-        (this.app.workspace as any).trigger('systemsculpt:chat-message-added', this.chatId);
+  public async saveChat(): Promise<void> {
+    this.ensureCoreServicesReady();
+    if (!this.isFullyLoaded && this.chatId) return;
+
+    const hasContent = this.messages.length > 0 || (this.contextManager?.getContextFiles().size || 0) > 0;
+    if (!this.chatId && !hasContent) {
+      this.updateViewState();
+      return;
     }
-    await this.saveChat();
+
+    const saved = await this.persistCandidate([...this.messages], "flush");
+    const wasNew = !this.chatId;
+    this.chatId = saved.chatId;
+    this.chatVersion = saved.version || this.chatVersion;
+    this.isFullyLoaded = true;
+    if (wasNew && !this.chatTitle) this.initializeChatTitle();
+    this.updateViewState();
+  }
+
+  private async recoverPersistedProjection(_chatId: string, _fallback: ChatMessage[]): Promise<void> {
+    const transcript = this.ensureChatTranscript();
+    await transcript.recover();
+    this.projectTranscript();
+    this.updateViewState();
+    await messageHandling.reloadAllMessages(this);
+  }
+
+  public async addMessageToHistory(message: ChatMessage): Promise<void> {
+    if (this.messages.some((entry) => entry.message_id === message.message_id)) return;
+    await this.waitForLegacyPersistenceIdle();
+    const transcript = this.ensureChatTranscript();
+    const operation: ChatPersistenceOperation = message.role === "tool" ? "tool_checkpoint" : "assistant_commit";
+    const candidate = operation === "tool_checkpoint"
+      ? transcript.candidateTools(message)
+      : transcript.candidateAssistant(message);
+    const saved = await transcript.commit(candidate);
+    this.projectTranscript();
+    try {
+      (this.app.workspace as any)?.trigger?.("systemsculpt:chat-message-added", this.chatId);
+      this.updateViewState();
+    } catch (projectionError) {
+      await this.recoverPersistedProjection(saved.chatId, transcript.mutableMessages());
+    }
   }
 
   public async persistSubmittedUserMessage(message: ChatMessage): Promise<void> {
     const existingMessage = this.messages.find((entry) => entry.message_id === message.message_id);
-    if (!existingMessage) {
-      this.messages.push(message);
+    await this.waitForLegacyPersistenceIdle();
+    const transcript = this.ensureChatTranscript();
+    const saved = await transcript.commit(transcript.candidateUser(message));
+    this.projectTranscript();
+    try {
+      this.updateViewState();
+      if (!existingMessage) {
+        (this.app.workspace as any)?.trigger?.("systemsculpt:chat-message-added", this.chatId);
+      }
+      await this.addMessage(message.role, message.content, message.message_id, existingMessage || message);
+    } catch (projectionError) {
+      await this.recoverPersistedProjection(saved.chatId, transcript.mutableMessages());
     }
-
-    await this.saveChat();
-    await this.addMessage(message.role, message.content, message.message_id, existingMessage || message);
   }
 
   private mergeAssistantToolCalls(existingToolCalls: ToolCall[] = [], nextToolCalls: ToolCall[] = []): ToolCall[] | undefined {
@@ -405,35 +508,52 @@ export class ChatView extends ItemView {
   }
 
   public upsertAssistantMessage(message: ChatMessage): ChatMessage {
-    const existingMessageIndex = this.messages.findIndex((entry) => entry.message_id === message.message_id);
-    if (existingMessageIndex === -1) {
-      this.messages.push(message);
-      return message;
-    }
-
-    const existingMessage = this.messages[existingMessageIndex];
-    const mergedMessage: ChatMessage = {
-      ...existingMessage,
-      ...message,
-      content: message.content !== undefined ? message.content : existingMessage.content,
-      reasoning: message.reasoning || existingMessage.reasoning,
-      annotations: message.annotations || existingMessage.annotations,
-      tool_calls: this.mergeAssistantToolCalls(existingMessage.tool_calls || [], message.tool_calls || []),
-      messageParts: message.messageParts || existingMessage.messageParts,
-      reasoning_details: (message as any).reasoning_details || (existingMessage as any).reasoning_details,
-    };
-
-    this.messages[existingMessageIndex] = mergedMessage;
-    return mergedMessage;
+    const transcript = this.ensureChatTranscript();
+    transcript.previewAssistant(message);
+    this.projectTranscript();
+    return this.messages.find((entry) => entry.message_id === message.message_id) as ChatMessage;
   }
 
   public async persistAssistantMessage(
     message: ChatMessage,
-    options?: { syncPiTranscript?: boolean }
+    options?: { syncPiTranscript?: boolean; operation?: "assistant_commit" | "tool_checkpoint" }
   ): Promise<ChatMessage> {
-    const mergedMessage = this.upsertAssistantMessage(message);
+    await this.waitForLegacyPersistenceIdle();
+    const existingIndex = this.messages.findIndex((entry) => entry.message_id === message.message_id);
+    const existing = existingIndex >= 0 ? this.messages[existingIndex] : undefined;
+    const mergedMessage: ChatMessage = existing ? {
+      ...existing,
+      ...message,
+      content: message.content !== undefined ? message.content : existing.content,
+      reasoning: message.reasoning || existing.reasoning,
+      annotations: message.annotations || existing.annotations,
+      tool_calls: this.mergeAssistantToolCalls(existing.tool_calls || [], message.tool_calls || []),
+      messageParts: message.messageParts || existing.messageParts,
+      reasoning_details: (message as any).reasoning_details || (existing as any).reasoning_details,
+    } : message;
+    const candidate = [...this.messages];
+    if (existingIndex >= 0) candidate[existingIndex] = mergedMessage;
+    else candidate.push(mergedMessage);
+
     const shouldSyncPiTranscript =
       options?.syncPiTranscript !== false && this.isPiBackedChat() && !!this.getPiSessionFile();
+
+    const operation: ChatPersistenceOperation = options?.operation
+      ?? (mergedMessage.tool_calls?.length ? "tool_checkpoint" : "assistant_commit");
+    const transcript = this.ensureChatTranscript();
+    const transcriptCandidate = operation === "tool_checkpoint"
+      ? transcript.candidateTools(mergedMessage)
+      : transcript.candidateAssistant(mergedMessage);
+    const saved = await transcript.commit(transcriptCandidate);
+    this.projectTranscript();
+    try {
+      this.updateViewState();
+      if (!existing) {
+        (this.app.workspace as any)?.trigger?.("systemsculpt:chat-message-added", this.chatId);
+      }
+    } catch (projectionError) {
+      await this.recoverPersistedProjection(saved.chatId, candidate);
+    }
 
     if (shouldSyncPiTranscript) {
       try {
@@ -445,15 +565,51 @@ export class ChatView extends ItemView {
         });
       } catch {
         new Notice(
-          "Pi finished the turn, but transcript sync failed. The last synced chat snapshot is still preserved.",
+          "Pi finished the turn, but transcript sync failed. The committed chat snapshot is still preserved.",
           7000
         );
       }
-      return mergedMessage;
     }
-
-    await this.saveChat();
     return mergedMessage;
+  }
+
+  private async projectResendSnapshot(): Promise<void> {
+    this.projectTranscript();
+    this.clearPiSessionState({ save: false });
+    this.updateViewState();
+    await messageHandling.reloadAllMessages(this);
+  }
+
+  public async commitResendBranch(index: number, targetMessageId?: string): Promise<void> {
+    const resolvedTargetMessageId = targetMessageId || String(this.messages[index]?.message_id || "");
+    await this.waitForLegacyPersistenceIdle();
+    const transcript = this.ensureChatTranscript();
+    const saved = await transcript.branchFrom(index);
+    this.pendingResendProjection = {
+      targetMessageId: resolvedTargetMessageId,
+      chatId: saved.chatId,
+    };
+
+    try {
+      await this.projectResendSnapshot();
+      this.pendingResendProjection = null;
+    } catch (projectionError) {
+      await transcript.recover();
+      await this.projectResendSnapshot();
+      this.pendingResendProjection = null;
+    }
+  }
+
+  public async retryPendingResend(targetMessageId: string): Promise<boolean> {
+    const pending = this.pendingResendProjection;
+    if (!pending || pending.targetMessageId !== targetMessageId) return false;
+
+    const transcript = this.ensureChatTranscript();
+    if (transcript.snapshot().chatId !== pending.chatId) return false;
+    await transcript.recover();
+    await this.projectResendSnapshot();
+    this.pendingResendProjection = null;
+    return true;
   }
 
   private shouldRecoverCommittedChatTurn(error: string | SystemSculptError): error is SystemSculptError {
@@ -1179,12 +1335,12 @@ export class ChatView extends ItemView {
   }
 
   public async removeFailedSubmissionTurn(): Promise<boolean> {
-    const snapshot = this.inputHandler?.consumeSubmittedInputSnapshot?.() ?? null;
+    const snapshot = this.inputHandler?.peekSubmittedInputSnapshot?.() ?? null;
     if (snapshot) {
-      const idx = this.messages.findIndex((msg) => msg.message_id === snapshot.messageId);
-      if (idx >= 0) {
-        this.messages.splice(idx, 1);
-      }
+      const transcript = this.ensureChatTranscript();
+      await transcript.commit(transcript.candidateDeleteMessage(snapshot.messageId));
+      this.projectTranscript();
+      this.inputHandler?.clearSubmittedInputSnapshot?.(snapshot.messageId);
       this.removeUserMessageDomById(snapshot.messageId);
       this.inputHandler?.setInputText(snapshot.rawText);
     }
@@ -1521,35 +1677,48 @@ export class ChatView extends ItemView {
     globalThis.setTimeout(() => this.applyChatFontSizeClass(), delayMs);
   }
 
-  private disposeViewResources(): void {
+  private disposeViewResources(): Promise<void> {
     if (this.resourcesDisposed) {
-      return;
+      return Promise.resolve();
     }
-    this.resourcesDisposed = true;
-
-    if (this.dragDropCleanup) {
-      this.dragDropCleanup();
-      this.dragDropCleanup = null;
+    if (this.resourceDisposalPromise) {
+      return this.resourceDisposalPromise;
     }
 
-    try {
-      this.scrollManager?.cleanup?.();
-    } catch {}
-    try {
-      (this.scrollManager as any)?.destroy?.();
-    } catch {}
+    const cleanup = () => {
+      if (this.resourcesDisposed) return;
+      this.resourcesDisposed = true;
 
-    try {
-      (this.contextManager as any)?.destroy?.();
-    } catch {}
+      if (this.dragDropCleanup) {
+        this.dragDropCleanup();
+        this.dragDropCleanup = null;
+      }
 
-    try {
-      this.inputHandler?.unload?.();
-    } catch {}
+      try {
+        this.scrollManager?.cleanup?.();
+      } catch {}
+      try {
+        (this.scrollManager as any)?.destroy?.();
+      } catch {}
+      try {
+        (this.contextManager as any)?.destroy?.();
+      } catch {}
+      try {
+        this.inputHandler?.unload?.();
+      } catch {}
+    };
+
+    const disposal = Promise.resolve(this.inputHandler?.disposeLocalResources?.()).finally(cleanup);
+    this.resourceDisposalPromise = disposal;
+    void disposal.then(
+      () => { if (this.resourceDisposalPromise === disposal) this.resourceDisposalPromise = null; },
+      () => { if (this.resourceDisposalPromise === disposal) this.resourceDisposalPromise = null; },
+    );
+    return disposal;
   }
 
   onunload() {
-    this.disposeViewResources();
+    void this.disposeViewResources().catch(() => {});
   }
 
   getState(): any {
@@ -1602,7 +1771,8 @@ export class ChatView extends ItemView {
         typeof state?.agentModeEnabled === "boolean" ? state.agentModeEnabled : undefined;
       this.virtualStartIndex = 0;
       this.hasAdjustedInitialWindow = false;
-      this.messages = [];
+      this.ensureChatTranscript().clear();
+      this.projectTranscript();
       this.contextManager?.clearContext();
       this.inputHandler?.resetForFreshChat?.();
       void this.refreshModelMetadata();
@@ -1662,7 +1832,8 @@ export class ChatView extends ItemView {
       this.initializeChatTitle();
       this.virtualStartIndex = 0;
       this.hasAdjustedInitialWindow = false;
-      this.messages = [];
+      this.ensureChatTranscript().clear();
+      this.projectTranscript();
       this.contextManager?.clearContext();
       this.chatBackend = this.defaultChatBackend();
       this.applyPiSessionState({}, { reset: true, updateViewState: false });
@@ -1715,7 +1886,12 @@ export class ChatView extends ItemView {
         if (loadEpoch !== this.loadEpoch) return;
 
         if (!chatData) {
-          this.messages = [];
+          this.chatTranscript = ChatTranscript.loadStored(this.transcriptStorage(), {
+            chatId,
+            version: 0,
+            messages: [],
+          });
+          this.projectTranscript();
           this.chatContainer?.empty();
           this.setTitle("Chat not found");
           this.chatBackend = this.defaultChatBackend();
@@ -1746,7 +1922,13 @@ export class ChatView extends ItemView {
         });
         const hasPiSession = this.isPiBackedChat() && (!!this.getPiSessionFile() || !!this.getPiSessionId());
         const canHydratePiTranscript = !!this.getPiSessionFile();
-        this.messages = persistedMessages;
+        this.chatTranscript = ChatTranscript.loadStored(this.transcriptStorage(), {
+          chatId,
+          version: this.chatVersion,
+          messages: persistedMessages,
+          readOnly: chatData.chatBackend === "legacy",
+        });
+        this.projectTranscript();
 
         // Load chat font size from chat data
         this.chatFontSize = chatData.chatFontSize || this.plugin.settings.chatFontSize || "medium";
@@ -1811,7 +1993,13 @@ export class ChatView extends ItemView {
             } catch {}
 
             if (persistedMessages.length === 0) {
-              this.messages = persistedMessages;
+              this.chatTranscript = ChatTranscript.loadStored(this.transcriptStorage(), {
+                chatId,
+                version: this.chatVersion,
+                messages: persistedMessages,
+                readOnly: chatData.chatBackend === "legacy",
+              });
+              this.projectTranscript();
               await this.renderMessagesInChunks();
               if (loadEpoch !== this.loadEpoch) return;
             }
@@ -2774,6 +2962,76 @@ export class ChatView extends ItemView {
     };
   }
 
+  private buildPiTransitionState(next: Partial<PiSessionState>, reset: boolean = false): PiSessionState {
+    const current = reset ? {} : this.readPiSessionState();
+    return normalizePiSessionState({
+      sessionFile: next.sessionFile ?? current.sessionFile,
+      sessionId: next.sessionId ?? current.sessionId,
+      lastEntryId: next.lastEntryId ?? current.lastEntryId,
+      lastSyncedAt: next.lastSyncedAt ?? new Date().toISOString(),
+    });
+  }
+
+  private async persistPiTransition(
+    messages: readonly ChatMessage[],
+    state: PiSessionState,
+    title: string,
+    operation: "pi_sync" | "pi_fork",
+  ): Promise<{ chatId?: string; version: number }> {
+    const options = this.getChatSaveOptions({
+      title,
+      chatBackend: "systemsculpt",
+      piSessionFile: state.sessionFile,
+      piSessionId: state.sessionId,
+      piLastEntryId: state.lastEntryId,
+      piLastSyncedAt: state.lastSyncedAt,
+    });
+    try {
+      if (this.chatId) {
+        const saved = await this.chatStorage.saveChat(this.chatId, [...messages], options);
+        return { chatId: this.chatId, version: saved.version };
+      }
+      const allocated = await new ChatIdAllocator(
+        (chatId) => this.chatStorage.createChatExclusive(chatId, [...messages], options),
+      ).allocate();
+      return { chatId: allocated.chatId, version: allocated.value.version };
+    } catch (cause) {
+      const allocationError = cause instanceof ChatIdAllocationError ? cause : null;
+      throw new ChatPersistenceError({
+        operation,
+        chatId: allocationError?.chatId || this.chatId,
+        cause: allocationError?.cause || cause,
+      });
+    }
+  }
+
+  private async applyPendingCommittedPiProjection(): Promise<PendingCommittedPiProjection | null> {
+    const pending = this.pendingCommittedPiProjection;
+    if (!pending) return null;
+
+    this.projectTranscript();
+    this.applyPiSessionState(pending.state, {
+      backend: "systemsculpt",
+      reset: true,
+      updateViewState: false,
+    });
+    if (pending.title && pending.title !== this.chatTitle) {
+      await this.setTitle(pending.title, false);
+    }
+    this.updateViewState();
+    if (pending.render) await this.renderMessagesInChunks();
+    this.pendingCommittedPiProjection = null;
+    return pending;
+  }
+
+  private async recoverCommittedPiProjection(): Promise<void> {
+    try {
+      await this.applyPendingCommittedPiProjection();
+    } catch {
+      await this.applyPendingCommittedPiProjection();
+    }
+  }
+
   public async syncPiSessionTranscript(options?: {
     sessionFile?: string;
     sessionId?: string;
@@ -2781,7 +3039,14 @@ export class ChatView extends ItemView {
     render?: boolean;
     persist?: boolean;
     force?: boolean;
+    pendingFork?: { messageId: string; result: { text: string; cancelled: boolean } };
   }): Promise<boolean> {
+    if (this.pendingCommittedPiProjection?.kind === "sync") {
+      const pending = this.pendingCommittedPiProjection;
+      await this.applyPendingCommittedPiProjection();
+      return pending.shouldReplaceTranscript;
+    }
+
     const sessionRef = this.resolvePiSessionRef(options);
     if (!PlatformContext.get().supportsDesktopOnlyFeatures()) {
       return false;
@@ -2790,19 +3055,27 @@ export class ChatView extends ItemView {
       return false;
     }
     if (!sessionRef.sessionFile) {
-      this.applyPiSessionState(
-        {
-          sessionFile: sessionRef.sessionFile,
-          sessionId: sessionRef.sessionId,
-        },
-        {
-          backend: "systemsculpt",
-          touchSyncedAt: !!sessionRef.sessionId,
-        }
-      );
-      if (options?.persist && this.chatId && this.isFullyLoaded) {
-        await this.saveChat();
+      const candidateState = this.buildPiTransitionState({
+        sessionFile: sessionRef.sessionFile,
+        sessionId: sessionRef.sessionId,
+      });
+      const transcript = this.ensureChatTranscript();
+      if (options?.persist === true) {
+        await transcript.commitPiReplacement(this.messages, (messages) =>
+          this.persistPiTransition(messages, candidateState, this.chatTitle, "pi_sync")
+        );
+      } else {
+        transcript.acceptAuthoritativePiProjection(this.messages);
       }
+      this.pendingCommittedPiProjection = {
+        kind: options?.pendingFork ? "fork" : "sync",
+        state: candidateState,
+        render: false,
+        shouldReplaceTranscript: false,
+        forkMessageId: options?.pendingFork?.messageId,
+        forkResult: options?.pendingFork?.result,
+      };
+      await this.recoverCommittedPiProjection();
       return false;
     }
 
@@ -2823,81 +3096,72 @@ export class ChatView extends ItemView {
       !this.piLastEntryId ||
       (!!nextLastEntryId && nextLastEntryId !== this.piLastEntryId);
 
-    if (shouldReplaceTranscript && snapshot.messages.length > 0) {
-      this.messages = mergePiTranscriptMessages(this.messages, snapshot.messages, {
-        hadSyncedPiTranscript: !!this.piLastEntryId,
-      });
-    }
-    this.applyPiSessionState(
-      {
-        sessionFile: snapshot.sessionFile || sessionRef.sessionFile,
-        sessionId: snapshot.sessionId || sessionRef.sessionId,
-        lastEntryId: nextLastEntryId,
-      },
-      {
-        backend: "systemsculpt",
-        touchSyncedAt: true,
-      }
-    );
-
+    const candidateMessages = shouldReplaceTranscript && snapshot.messages.length > 0
+      ? mergePiTranscriptMessages(this.messages, snapshot.messages, {
+          hadSyncedPiTranscript: !!this.piLastEntryId,
+        })
+      : [...this.messages];
+    const candidateState = this.buildPiTransitionState({
+      sessionFile: snapshot.sessionFile || sessionRef.sessionFile,
+      sessionId: snapshot.sessionId || sessionRef.sessionId,
+      lastEntryId: nextLastEntryId,
+    });
     const sessionName = String(snapshot.sessionName || "").trim();
-    if (options?.syncTitle !== false && sessionName) {
-      this.setTitle(sessionName, false);
-    }
+    const candidateTitle = options?.syncTitle !== false && sessionName ? sessionName : this.chatTitle;
+    const transcript = this.ensureChatTranscript();
 
-    this.updateViewState();
-
-    if (options?.render !== false && shouldReplaceTranscript) {
-      await this.renderMessagesInChunks();
+    if (options?.persist === true) {
+      await transcript.commitPiReplacement(candidateMessages, (messages) =>
+        this.persistPiTransition(messages, candidateState, candidateTitle, "pi_sync")
+      );
+    } else {
+      transcript.acceptAuthoritativePiProjection(candidateMessages);
     }
-
-    if (options?.persist && this.chatId && this.isFullyLoaded) {
-      await this.saveChat();
-    }
+    this.pendingCommittedPiProjection = {
+      kind: options?.pendingFork ? "fork" : "sync",
+      state: candidateState,
+      title: candidateTitle !== this.chatTitle ? candidateTitle : undefined,
+      render: options?.render !== false && shouldReplaceTranscript,
+      shouldReplaceTranscript,
+      forkMessageId: options?.pendingFork?.messageId,
+      forkResult: options?.pendingFork?.result,
+    };
+    await this.recoverCommittedPiProjection();
 
     return shouldReplaceTranscript;
   }
 
   private async applyLocalPiForkState(options: {
     forkMessageId: string;
+    forkText: string;
     sessionFile?: string;
     sessionId?: string;
     sessionName?: string;
   }): Promise<void> {
-    const forkIndex = this.messages.findIndex(
-      (message) => message.message_id === options.forkMessageId && message.role === "user"
-    );
-    if (forkIndex === -1) {
-      throw new Error("Pi could not resolve the chat message selected for forking.");
-    }
-
     // Pi restores the selected user prompt into the editor, so the visible transcript should
     // stop immediately before that message while the new branch waits for its first assistant turn.
-    this.messages = this.messages.slice(0, forkIndex);
-    this.applyPiSessionState(
-      {
+    const transcript = this.ensureChatTranscript();
+    const sessionName = String(options.sessionName || "").trim();
+    const candidateTitle = sessionName || this.chatTitle;
+    let candidateState: PiSessionState | null = null;
+    await transcript.commitPiFork(options.forkMessageId, async (messages) => {
+      candidateState = this.buildPiTransitionState({
         sessionFile: options.sessionFile,
         sessionId: options.sessionId,
-        lastEntryId: String(this.messages[this.messages.length - 1]?.pi_entry_id || "").trim() || undefined,
-      },
-      {
-        backend: "systemsculpt",
-        reset: !options.sessionFile && !options.sessionId,
-        touchSyncedAt: true,
-      }
-    );
-
-    const sessionName = String(options.sessionName || "").trim();
-    if (sessionName) {
-      this.setTitle(sessionName, false);
-    }
-
-    this.updateViewState();
-    await this.renderMessagesInChunks();
-
-    if (this.chatId && this.isFullyLoaded) {
-      await this.saveChat();
-    }
+        lastEntryId: String(messages[messages.length - 1]?.pi_entry_id || "").trim() || undefined,
+      }, !options.sessionFile && !options.sessionId);
+      return this.persistPiTransition(messages, candidateState, candidateTitle, "pi_fork");
+    });
+    this.pendingCommittedPiProjection = {
+      kind: "fork",
+      state: candidateState!,
+      title: candidateTitle !== this.chatTitle ? candidateTitle : undefined,
+      render: true,
+      shouldReplaceTranscript: true,
+      forkMessageId: options.forkMessageId,
+      forkResult: { text: options.forkText, cancelled: false },
+    };
+    await this.recoverCommittedPiProjection();
   }
 
   public async hydrateFromPiSession(options?: {
@@ -2940,6 +3204,15 @@ export class ChatView extends ItemView {
     text: string;
     cancelled: boolean;
   }> {
+    if (
+      this.pendingCommittedPiProjection?.kind === "fork" &&
+      this.pendingCommittedPiProjection.forkMessageId === messageId
+    ) {
+      const result = this.pendingCommittedPiProjection.forkResult!;
+      await this.applyPendingCommittedPiProjection();
+      return result;
+    }
+
     const sessionFile = this.getPiSessionFile();
     const sessionId = this.getPiSessionId();
     const targetMessage = this.messages.find(
@@ -2948,6 +3221,9 @@ export class ChatView extends ItemView {
     if (!targetMessage) {
       throw new Error("Only SystemSculpt session user messages can be branched.");
     }
+    const targetText = typeof targetMessage.content === "string"
+      ? targetMessage.content
+      : JSON.stringify(targetMessage.content ?? "");
 
     if (!sessionFile && !sessionId) {
       throw new Error("This chat does not have an active SystemSculpt session to branch.");
@@ -2963,14 +3239,9 @@ export class ChatView extends ItemView {
     if (!sessionFile && sessionId) {
       await this.applyLocalPiForkState({
         forkMessageId: messageId,
+        forkText: targetText,
       });
-      return {
-        text:
-          typeof targetMessage.content === "string"
-            ? targetMessage.content
-            : JSON.stringify(targetMessage.content ?? ""),
-        cancelled: false,
-      };
+      return { text: targetText, cancelled: false };
     }
 
     const { forkPiSession } = await import("../../services/pi/PiSessionService");
@@ -2998,6 +3269,7 @@ export class ChatView extends ItemView {
       if (!nodeFileSystem()?.existsSync(nextSessionFile)) {
         await this.applyLocalPiForkState({
           forkMessageId: messageId,
+          forkText: result.text || targetText,
           sessionFile: nextSessionFile,
           sessionId: nextSessionId,
           sessionName: nextSessionName,
@@ -3010,6 +3282,7 @@ export class ChatView extends ItemView {
           render: true,
           persist: true,
           force: true,
+          pendingFork: { messageId, result },
         });
       }
     } else {
@@ -3020,6 +3293,7 @@ export class ChatView extends ItemView {
         render: true,
         persist: true,
         force: true,
+        pendingFork: { messageId, result },
       });
     }
 
@@ -3141,8 +3415,14 @@ export class ChatView extends ItemView {
     return result.markdown;
   }
 
-  public getMessages(): ChatMessage[] {
-    return [...this.messages];
+  public getMessages(): readonly ChatMessage[] {
+    return this.messages;
+  }
+
+  public clearTranscriptProjection(): void {
+    this.ensureChatTranscript().clear();
+    this.projectTranscript();
+    this.isFullyLoaded = false;
   }
 
   public getChatTitle(): string {
@@ -3198,14 +3478,30 @@ export class ChatView extends ItemView {
   }
 
   async onClose(): Promise<void> {
-    // Abort any in-flight stream before tearing down the DOM/metrics, so the
-    // network request and its rAF ticker stop running into a removed view
-    // (BUG-03). disposeViewResources() also funnels through this via
-    // inputHandler.unload(), but call it first/explicitly here too.
-    this.inputHandler?.abortActiveTurn?.();
+    let terminalError: unknown;
+    try {
+      await this.inputHandler?.abortActiveTurn?.();
+    } catch (error) {
+      terminalError = error;
+    }
 
-    this.disposeViewResources();
-    this.messages = [];
-    await super.onClose?.();
+    try {
+      await this.disposeViewResources();
+    } catch (error) {
+      terminalError ??= error;
+    } finally {
+      this.ensureChatTranscript().teardown();
+      this.projectTranscript();
+      this.isFullyLoaded = false;
+      try {
+        await super.onClose?.();
+      } catch (error) {
+        terminalError ??= error;
+      }
+    }
+
+    if (terminalError !== undefined) {
+      throw terminalError;
+    }
   }
 }

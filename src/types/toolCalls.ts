@@ -30,11 +30,15 @@ export interface ToolCallRequest {
 /**
  * Tool execution result
  */
+export type ToolCancellationErrorCode =
+  | 'TOOL_CANCELLED_BEFORE_START'
+  | 'TOOL_CANCEL_REQUESTED_OUTCOME_UNKNOWN';
+
 export interface ToolCallResult {
   success: boolean;
   data?: any;
   error?: {
-    code: string;
+    code: string | ToolCancellationErrorCode;
     message: string;
     details?: any;
   };

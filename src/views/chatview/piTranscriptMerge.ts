@@ -30,8 +30,8 @@ function messagesEqual(
 }
 
 function findSuffixPrefixOverlapStart(
-  currentMessages: ChatMessage[],
-  snapshotMessages: ChatMessage[],
+  currentMessages: readonly ChatMessage[],
+  snapshotMessages: readonly ChatMessage[],
 ): number {
   let bestStart = -1;
   let bestOverlap = 0;
@@ -57,8 +57,8 @@ function findSuffixPrefixOverlapStart(
 }
 
 export function mergePiTranscriptMessages(
-  currentMessages: ChatMessage[],
-  snapshotMessages: ChatMessage[],
+  currentMessages: readonly ChatMessage[],
+  snapshotMessages: readonly ChatMessage[],
   options?: { hadSyncedPiTranscript?: boolean },
 ): ChatMessage[] {
   if (snapshotMessages.length === 0) {
