@@ -1,0 +1,46 @@
+{
+  "contract_version": "admission-v1",
+  "negotiation_header": {
+    "name": "x-systemsculpt-admission-contract",
+    "value": "admission-v1"
+  },
+  "responses": {
+    "allowed": {
+      "status": 200,
+      "code": "allowed",
+      "message": "License admitted."
+    },
+    "license_required": {
+      "status": 401,
+      "code": "license_required",
+      "message": "License key is required."
+    },
+    "license_rejected": {
+      "status": 403,
+      "code": "license_rejected",
+      "message": "License key was rejected.",
+      "reasons": ["invalid", "expired", "revoked"]
+    },
+    "temporarily_unavailable": {
+      "status": 503,
+      "code": "temporarily_unavailable",
+      "message": "License admission is temporarily unavailable.",
+      "retryable": true,
+      "grace_eligible": true
+    },
+    "rate_limited": {
+      "status": 429,
+      "code": "rate_limited",
+      "message": "Too many admission requests."
+    }
+  },
+  "required_response_headers": [
+    "X-RateLimit-Limit",
+    "X-RateLimit-Remaining",
+    "X-RateLimit-Reset"
+  ],
+  "conditional_response_headers": {
+    "Retry-After": ["rate_limited", "temporarily_unavailable"]
+  },
+  "forbidden_response_fields": ["license_key", "licenseKey", "credential", "token"]
+}

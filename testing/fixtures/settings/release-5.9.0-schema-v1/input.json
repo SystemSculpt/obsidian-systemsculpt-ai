@@ -1,0 +1,57 @@
+{
+  "source": {
+    "pluginRelease": "5.9.0",
+    "commit": "e97e8f98e6265bc0a965f24b36f954ac6e198209",
+    "storedSchemaVersion": 1,
+    "inspectedWith": "git show",
+    "artifacts": [
+      "src/types.ts",
+      "src/core/settings/migrations/schemaVersion.ts",
+      "src/types/workflows.ts",
+      "src/studio/types.ts"
+    ]
+  },
+  "settings": {
+    "schemaVersion": 1,
+    "licenseKey": "license-sentinel",
+    "licenseValid": true,
+    "lastValidated": 1710000000000,
+    "settingsMode": "advanced",
+    "selectedModelId": "legacy-provider@@legacy-model",
+    "customProviders": [{
+      "id": "legacy-provider",
+      "name": "Legacy provider",
+      "endpoint": "https://legacy.invalid",
+      "apiKey": "sentinel-provider-key",
+      "isEnabled": true
+    }],
+    "activeProvider": { "id": "legacy-provider", "name": "Legacy provider", "type": "custom" },
+    "useSystemSculptAsFallback": true,
+    "chatsDirectory": "Knowledge/Chats",
+    "savedChatsDirectory": "Knowledge/Saved",
+    "recordingsDirectory": "Media/Recordings",
+    "attachmentsDirectory": "Media/Attachments",
+    "extractionsDirectory": "Knowledge/Extractions",
+    "systemPromptsDirectory": "Knowledge/Prompts",
+    "embeddingsExclusions": { "folders": ["Private"], "patterns": ["*.secret"], "ignoreChatHistory": true, "respectObsidianExclusions": true },
+    "embeddingsProvider": "custom",
+    "embeddingsCustomEndpoint": "https://legacy.invalid",
+    "embeddingsCustomApiKey": "sentinel-embeddings-key",
+    "embeddingsCustomModel": "legacy-model",
+    "transcriptionProvider": "custom",
+    "customTranscriptionEndpoint": "https://legacy.invalid",
+    "customTranscriptionApiKey": "sentinel-transcription-key",
+    "customTranscriptionModel": "legacy-model",
+    "postProcessingPrompt": "Clean the transcript without changing meaning.",
+    "titleGenerationPrompt": "Write a concise title.",
+    "transcriptionOutputFormat": "srt",
+    "imageGenerationOutputDir": "Media/Generated",
+    "chatFontSize": "large",
+    "respectReducedMotion": true,
+    "enableExperimentalFeatures": true,
+    "workflowEngine": { "enabled": true, "templates": { "daily": { "enabled": true, "sourceFolder": "Inbox" } } },
+    "studioGraph": { "nodes": [{ "id": "note-1", "type": "note", "path": "Inbox/Seed.md" }], "edges": [] },
+    "mcpServers": [{ "name": "legacy", "url": "https://legacy.invalid", "oauthToken": "sentinel-oauth-token" }],
+    "readwiseApiToken": "sentinel-readwise-token"
+  }
+}

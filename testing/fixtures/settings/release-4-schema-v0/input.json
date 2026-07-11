@@ -1,0 +1,36 @@
+{
+  "source": {
+    "pluginRelease": "4.0.0",
+    "commit": "1020f95a241be990d94b3d6d0b7e500a04327564",
+    "storedSchemaVersion": 0,
+    "inspectedWith": "git show",
+    "artifacts": [
+      "src/settings.ts",
+      "src/modules/chat/settings/ChatSettings.ts",
+      "src/modules/recorder/settings/RecorderSettings.ts",
+      "src/modules/brain/settings/BrainSettings.ts"
+    ]
+  },
+  "settings": {
+    "licenseKey": "license-sentinel",
+    "openAIApiKey": "sentinel-api-key",
+    "groqAPIKey": "sentinel-api-key",
+    "openRouterAPIKey": "sentinel-api-key",
+    "anthropicApiKey": "sentinel-api-key",
+    "localEndpoint": "https://legacy.invalid",
+    "temperature": 0.4,
+    "showopenAISetting": true,
+    "showgroqSetting": false,
+    "showlocalEndpointSetting": true,
+    "showopenRouterSetting": false,
+    "showAnthropicSetting": true,
+    "chatsDirectory": "Archive/Chats",
+    "recordingsDirectory": "Archive/Recordings",
+    "systemPrompt": "Answer from the vault.",
+    "postProcessingPrompt": "Clean this transcript.",
+    "transcriptionOutputFormat": "markdown",
+    "autoTranscribeRecordings": true,
+    "keepRecordingsAfterTranscription": false,
+    "chatFontSize": "large"
+  }
+}

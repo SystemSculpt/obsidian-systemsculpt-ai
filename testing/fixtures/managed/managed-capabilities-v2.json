@@ -1,0 +1,401 @@
+{
+  "contract_version": "managed-capabilities-v2",
+  "status": "available",
+  "disclosure_version": "disclosure-test-v1",
+  "cache_ttl_seconds": 300,
+  "capabilities": [
+    {
+      "alias": "systemsculpt/chat",
+      "endpoint": "/api/v1/chat/completions",
+      "mode": "stream",
+      "availability": "available",
+      "auth": "license",
+      "metering": "metered_turn",
+      "cancellation_supported": false,
+      "background_eligible": false,
+      "limits": {},
+      "request_contracts": [
+        {
+          "capability": "chat_turn",
+          "header": "x-systemsculpt-capability",
+          "header_value": "chat_turn",
+          "background_eligible": false,
+          "purpose": {
+            "presence": "forbidden",
+            "values": []
+          },
+          "cancellation_supported": false,
+          "request": {
+            "method": "POST",
+            "path": "/api/v1/chat/completions",
+            "required_headers": [
+              "x-license-key",
+              "x-plugin-version",
+              "x-systemsculpt-contract",
+              "x-systemsculpt-capability",
+              "idempotency-key"
+            ],
+            "body": {
+              "schema": "managed_chat_request_v1",
+              "required_fields": [
+                "model",
+                "messages",
+                "stream"
+              ],
+              "optional_fields": [
+                "tools",
+                "tool_choice"
+              ],
+              "additional_properties": false,
+              "model": "ai-agent",
+              "stream": true,
+              "messages": "managed_chat_messages_v1",
+              "tools": "managed_chat_tools_v1",
+              "tool_choice": [
+                "auto",
+                "none",
+                "required"
+              ]
+            },
+            "definitions": {
+              "managed_chat_messages_v1": {
+                "type": "non_empty_array",
+                "additional_properties": false,
+                "roles": {
+                  "system": {
+                    "required_fields": [
+                      "role",
+                      "content"
+                    ],
+                    "optional_fields": [],
+                    "content": "string"
+                  },
+                  "developer": {
+                    "required_fields": [
+                      "role",
+                      "content"
+                    ],
+                    "optional_fields": [],
+                    "content": "string"
+                  },
+                  "user": {
+                    "required_fields": [
+                      "role",
+                      "content"
+                    ],
+                    "optional_fields": [],
+                    "content": "string|managed_chat_user_content_blocks_v1"
+                  },
+                  "assistant": {
+                    "required_fields": [
+                      "role"
+                    ],
+                    "optional_fields": [
+                      "content",
+                      "reasoning_content",
+                      "tool_calls"
+                    ],
+                    "content": "string",
+                    "at_least_one": [
+                      "content",
+                      "reasoning_content",
+                      "tool_calls"
+                    ],
+                    "tool_calls": "managed_chat_tool_calls_v1"
+                  },
+                  "tool": {
+                    "required_fields": [
+                      "role",
+                      "tool_call_id",
+                      "content"
+                    ],
+                    "optional_fields": [
+                      "name"
+                    ],
+                    "content": "string"
+                  }
+                },
+                "user_content_blocks": {
+                  "text": {
+                    "required_fields": [
+                      "type",
+                      "text"
+                    ],
+                    "optional_fields": [],
+                    "type_values": [
+                      "text",
+                      "input_text"
+                    ]
+                  },
+                  "image_url": {
+                    "required_fields": [
+                      "type",
+                      "image_url"
+                    ],
+                    "optional_fields": [],
+                    "image_url": {
+                      "required_fields": [
+                        "url"
+                      ],
+                      "optional_fields": [],
+                      "url": "data_url"
+                    }
+                  },
+                  "input_image": {
+                    "required_fields": [
+                      "type",
+                      "image_url"
+                    ],
+                    "optional_fields": [],
+                    "image_url": "data_url"
+                  }
+                },
+                "tool_calls": {
+                  "required_fields": [
+                    "id",
+                    "type",
+                    "function"
+                  ],
+                  "optional_fields": [],
+                  "type": "function",
+                  "function": {
+                    "required_fields": [
+                      "name",
+                      "arguments"
+                    ],
+                    "optional_fields": [],
+                    "arguments": {
+                      "wire_type": "string",
+                      "encoding": "json",
+                      "decoded_type": "non_array_object"
+                    }
+                  }
+                }
+              },
+              "managed_chat_tools_v1": {
+                "type": "array",
+                "additional_properties": false,
+                "item": {
+                  "required_fields": [
+                    "type",
+                    "function"
+                  ],
+                  "optional_fields": [],
+                  "type": "function",
+                  "function": {
+                    "required_fields": [
+                      "name"
+                    ],
+                    "optional_fields": [
+                      "description",
+                      "parameters"
+                    ],
+                    "description": "string",
+                    "parameters": "json_schema_object"
+                  }
+                }
+              }
+            }
+          },
+          "response": {
+            "status": 200,
+            "content_type": "text/event-stream",
+            "request_id_header": "x-request-id",
+            "frame_delimiter": "\n\n",
+            "data_prefix": "data: ",
+            "json_frames": [
+              "managed_chat_delta_v1",
+              "managed_chat_error_v1"
+            ],
+            "definitions": {
+              "managed_chat_delta_v1": {
+                "format": "openai_chat_completion_chunk",
+                "model_alias": "systemsculpt/ai-agent",
+                "allowed_delta_fields": [
+                  "role",
+                  "content",
+                  "reasoning_content",
+                  "tool_calls"
+                ],
+                "implementation_identity_forbidden": true
+              },
+              "managed_chat_error_v1": {
+                "required_fields": [
+                  "error"
+                ],
+                "error_required_fields": [
+                  "code",
+                  "message"
+                ],
+                "bounded": true,
+                "implementation_identity_forbidden": true
+              }
+            },
+            "successful_terminal_marker": "data: [DONE]\n\n",
+            "successful_terminal_marker_count": 1,
+            "terminal_failures": [
+              {
+                "code": "malformed_frame",
+                "retry_same_idempotency_key": false
+              },
+              {
+                "code": "missing_terminal_marker",
+                "retry_same_idempotency_key": false
+              },
+              {
+                "code": "empty_successful_stream",
+                "retry_same_idempotency_key": false
+              },
+              {
+                "code": "in_stream_error",
+                "retry_same_idempotency_key": false
+              }
+            ],
+            "cancellation_behavior": "client_abort_stops_waiting_server_work_may_continue"
+          },
+          "errors": {
+            "statuses": [
+              400,
+              401,
+              403,
+              402,
+              409,
+              426,
+              429,
+              502,
+              503
+            ],
+            "conflict_codes": [
+              "operation_in_progress",
+              "operation_already_completed",
+              "operation_terminal",
+              "settlement_pending"
+            ],
+            "bounded_first_party_messages": true
+          }
+        },
+        {
+          "capability": "text_generation",
+          "header": "x-systemsculpt-capability",
+          "header_value": "text_generation",
+          "background_eligible": true,
+          "purpose": {
+            "presence": "required",
+            "values": [
+              "transcript_postprocess",
+              "workflow_automation"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "alias": "systemsculpt/embeddings",
+      "endpoint": "/api/plugin/embeddings",
+      "mode": "request",
+      "availability": "available",
+      "auth": "license",
+      "metering": "metered_operation",
+      "cancellation_supported": false,
+      "background_eligible": true,
+      "limits": {},
+      "request_contracts": [
+        {
+          "capability": "embeddings",
+          "header": "x-systemsculpt-capability",
+          "header_value": "embeddings",
+          "background_eligible": true,
+          "cancellation_supported": false,
+          "request": {
+            "method": "POST",
+            "path": "/api/plugin/embeddings",
+            "required_headers": [
+              "x-license-key",
+              "x-plugin-version",
+              "x-systemsculpt-contract",
+              "x-systemsculpt-capability",
+              "idempotency-key"
+            ],
+            "body": {
+              "input": "string|string[]",
+              "additional_properties": false
+            }
+          },
+          "response": {
+            "one_of": [
+              {
+                "shape": "single",
+                "required_fields": [
+                  "embedding",
+                  "dimensions",
+                  "indexSchemaVersion",
+                  "indexNamespace"
+                ],
+                "optional_fields": [
+                  "tokenCount"
+                ],
+                "forbidden_fields": [
+                  "embeddings"
+                ]
+              },
+              {
+                "shape": "batch",
+                "required_fields": [
+                  "embeddings",
+                  "dimensions",
+                  "indexSchemaVersion",
+                  "indexNamespace"
+                ],
+                "optional_fields": [
+                  "tokenCount"
+                ],
+                "forbidden_fields": [
+                  "embedding"
+                ]
+              }
+            ],
+            "dimensions": "positive_integer",
+            "index_schema_version": 1,
+            "index_namespace": "systemsculpt:managed:v1:<dimensions>"
+          }
+        }
+      ]
+    },
+    {
+      "alias": "systemsculpt/transcription",
+      "endpoint": "/api/plugin/audio/transcriptions/jobs",
+      "mode": "job",
+      "availability": "available",
+      "auth": "license",
+      "metering": "metered_job",
+      "cancellation_supported": false,
+      "background_eligible": true,
+      "limits": {},
+      "request_contracts": []
+    },
+    {
+      "alias": "systemsculpt/documents",
+      "endpoint": "/api/plugin/documents/jobs",
+      "mode": "job",
+      "availability": "available",
+      "auth": "license",
+      "metering": "metered_job",
+      "cancellation_supported": false,
+      "background_eligible": true,
+      "limits": {},
+      "request_contracts": []
+    },
+    {
+      "alias": "systemsculpt/images",
+      "endpoint": "/api/plugin/images/generations/jobs",
+      "mode": "job",
+      "availability": "available",
+      "auth": "license",
+      "metering": "metered_job",
+      "cancellation_supported": false,
+      "background_eligible": true,
+      "limits": {},
+      "request_contracts": []
+    }
+  ]
+}
