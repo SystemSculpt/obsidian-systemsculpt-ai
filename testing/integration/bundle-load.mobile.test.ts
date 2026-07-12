@@ -18,6 +18,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { Platform } from "obsidian";
+import { exerciseBuiltStudioGenerations } from "./studio-generation-bundle-harness";
 
 const BUNDLE_PATH = path.resolve(__dirname, "..", "..", "main.js");
 const MANIFEST_PATH = path.resolve(__dirname, "..", "..", "manifest.json");
@@ -89,5 +90,11 @@ describe("built bundle (main.js) on mobile emulation", () => {
     expect(plugin.recorderService).toBeNull();
 
     plugin.unload();
+  });
+
+  it("exercises immutable Studio restart and binary recovery on the built mobile adapter seam", async () => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const bundleModule = require(BUNDLE_PATH);
+    await exerciseBuiltStudioGenerations(bundleModule);
   });
 });

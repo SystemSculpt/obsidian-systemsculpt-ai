@@ -119,6 +119,18 @@ describe("StudioProjectGenerationStore", () => {
     }
   });
 
+  it("rejects non-closed legacy schema and missing referenced policy before adoption", async () => {
+    const extraAdapter = new MemoryAdapter();
+    const withExtra = JSON.stringify({ ...JSON.parse(legacyProject), unexpected: true });
+    extraAdapter.files.set(locator.vaultRelativeProjectPath, new TextEncoder().encode(withExtra));
+    expect((await new StudioProjectGenerationStore(extraAdapter).discoverAndAdopt(locator)).status).toBe("invalid_candidate");
+
+    const missingPolicy = new MemoryAdapter();
+    missingPolicy.files.set(locator.vaultRelativeProjectPath, new TextEncoder().encode(legacyProject));
+    expect((await new StudioProjectGenerationStore(missingPolicy).discoverAndAdopt(locator)).status).toBe("invalid_candidate");
+    expect([...missingPolicy.files.keys()].some((path) => path.startsWith(".systemsculpt/studio/projects/"))).toBe(false);
+  });
+
   it("preserves the legacy projection across every root-publication write cut", async () => {
     for (let cut = 0; cut < 10; cut += 1) {
       const adapter = new MemoryAdapter();
@@ -136,30 +148,42 @@ describe("StudioProjectGenerationStore", () => {
     }
   });
 
-  it("ingests changed document bytes with an unchanged selected-generation sidecar", async () => {
+  it("preserves changed document bytes when the selected-token sidecar hashes are stale", async () => {
     const adapter = new MemoryAdapter(); await seedLegacy(adapter);
     const root = await new StudioProjectGenerationStore(adapter, { now: () => "2026-07-11T01:02:03.004Z" }).discoverAndAdopt(locator);
     if (root.status !== "committed") throw new Error("adoption failed");
     const changed = legacyProject.replace('"Alpha"', '"Externally edited"');
     adapter.files.set(locator.vaultRelativeProjectPath, new TextEncoder().encode(changed));
-
-    const opened = await new StudioProjectGenerationStore(adapter, { now: () => "2026-07-11T02:02:03.004Z" }).open("project_alpha", locator);
-    expect(opened.status).toBe("ready");
-    if (opened.status === "ready") {
-      expect(opened.expectedGeneration.revision).toBe(1);
-      expect(new TextDecoder().decode(opened.generation.files.get("project.systemsculpt"))).toBe(changed);
-    }
+    const opened = await new StudioProjectGenerationStore(adapter).open("project_alpha", locator);
+    expect(opened.status).toBe("read_only");
+    expect(new TextDecoder().decode(adapter.files.get(locator.vaultRelativeProjectPath)!)).toBe(changed);
   });
 
-  it("ingests changed support bytes with an unchanged selected-generation sidecar", async () => {
+  it("ingests an external document edit only with a closed-API marker hashing exact candidate bytes", async () => {
+    const adapter = new MemoryAdapter(); await seedLegacy(adapter);
+    const store = new StudioProjectGenerationStore(adapter, { now: () => "2026-07-11T01:02:03.004Z" });
+    const root = await store.discoverAndAdopt(locator);
+    if (root.status !== "committed") throw new Error("adoption failed");
+    const changed = new TextEncoder().encode(legacyProject.replace('"Alpha"', '"Trusted external edit"'));
+    const policy = adapter.files.get("SystemSculpt/Studio/Alpha.systemsculpt-assets/policy/grants.json")!;
+    const marker = await store.createExternalCandidateMarker({ projectId: "project_alpha", expectedGeneration: root.expectedGeneration, projectDocument: changed, supportFiles: [{ supportRelativePath: "policy/grants.json", bytes: policy }] });
+    adapter.files.set(locator.vaultRelativeProjectPath, changed);
+    adapter.files.set(`${locator.vaultRelativeProjectPath}.identity.json`, new TextEncoder().encode(marker));
+    adapter.files.set("SystemSculpt/Studio/Alpha.systemsculpt-assets/.studio-projection.json", new TextEncoder().encode(marker));
+    const opened = await new StudioProjectGenerationStore(adapter, { now: () => "2026-07-11T02:02:03.004Z" }).open("project_alpha", locator);
+    expect(opened.status).toBe("ready");
+    if (opened.status === "ready") expect(opened.expectedGeneration.revision).toBe(1);
+  });
+
+  it("preserves support edits whose unchanged sidecar hashes are stale", async () => {
     const adapter = new MemoryAdapter(); await seedLegacy(adapter);
     const root = await new StudioProjectGenerationStore(adapter, { now: () => "2026-07-11T01:02:03.004Z" }).discoverAndAdopt(locator);
     if (root.status !== "committed") throw new Error("adoption failed");
     const policyPath = "SystemSculpt/Studio/Alpha.systemsculpt-assets/policy/grants.json";
     adapter.files.set(policyPath, new TextEncoder().encode("{\"schema\":\"studio.policy.v1\",\"external\":true}\n"));
-    const opened = await new StudioProjectGenerationStore(adapter, { now: () => "2026-07-11T02:02:03.004Z" }).open("project_alpha", locator);
-    expect(opened.status).toBe("ready");
-    if (opened.status === "ready") expect(new TextDecoder().decode(opened.generation.files.get("support/policy/grants.json"))).toContain("external");
+    const opened = await new StudioProjectGenerationStore(adapter).open("project_alpha", locator);
+    expect(opened.status).toBe("read_only");
+    expect(new TextDecoder().decode(adapter.files.get(policyPath)!)).toContain("external");
   });
 
   it("preserves partial support replacement as read-only", async () => {
@@ -238,7 +262,7 @@ describe("StudioProjectGenerationStore", () => {
   });
 
   it("keeps secret sentinels out of manifest and descriptor metadata", async () => {
-    const adapter = new MemoryAdapter();
+    const adapter = new MemoryAdapter(); await seedLegacy(adapter);
     const secretProject = legacyProject.replace('"Alpha"', '"SECRET_SENTINEL"');
     adapter.files.set(locator.vaultRelativeProjectPath, new TextEncoder().encode(secretProject));
     const result = await new StudioProjectGenerationStore(adapter, { now: () => "2026-07-11T01:02:03.004Z" }).discoverAndAdopt(locator);

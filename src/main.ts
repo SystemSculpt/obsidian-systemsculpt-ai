@@ -19,6 +19,8 @@ ErrorCollectorService.initializeEarlyLogsCapture();
  * Version: 1.5.3
  */
 import { Plugin, Notice, MarkdownView, Platform, setIcon, WorkspaceLeaf, debounce, TFile, FileSystemAdapter, normalizePath, apiVersion } from "obsidian";
+export { StudioProjectGenerationStore } from "./studio/persistence/StudioProjectGenerationStore";
+export { ObsidianStudioGenerationAdapter } from "./studio/persistence/ObsidianStudioGenerationAdapter";
 import { checkObsidianCompatibility, MINIMUM_OBSIDIAN_VERSION } from "./core/plugin/lifecycle/ObsidianCompat";
 import { initializeNotificationQueue } from "./core/ui/notifications";
 import { SystemSculptSettings, DEFAULT_SETTINGS, LogLevel, LICENSE_URL } from "./types";

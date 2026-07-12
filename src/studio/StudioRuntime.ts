@@ -320,6 +320,7 @@ export class StudioRuntime {
     const eventsPath = normalizePath(`${runDir}/events.ndjson`);
     const persistedEvents: string[] = [];
     const stagedAssetFiles = new Map<string, Uint8Array>();
+    const stagedAssetBytesByProjectionPath = new Map<string, Uint8Array>();
 
     const emit = async (event: StudioRunEvent): Promise<void> => {
       persistedEvents.push(`${JSON.stringify(event)}\n`);
@@ -449,9 +450,13 @@ export class StudioRuntime {
             storeAsset: async (bytes, mimeType) => {
               const staged = await this.assetStore.stageArrayBuffer(projectPath, bytes, mimeType);
               stagedAssetFiles.set(staged.generationFile.contentAddressedPath, staged.generationFile.bytes);
+              stagedAssetBytesByProjectionPath.set(staged.asset.path, staged.generationFile.bytes);
               return staged.asset;
             },
-            readAsset: (asset) => this.assetStore.readArrayBuffer(asset),
+            readAsset: (asset) => {
+              const staged = stagedAssetBytesByProjectionPath.get(asset.path);
+              return staged ? Promise.resolve(staged.slice().buffer) : this.assetStore.readArrayBuffer(asset);
+            },
             resolveAbsolutePath: (path) => {
               const normalized = String(path || "").trim();
               if (!normalized) {

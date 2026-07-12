@@ -1,4 +1,5 @@
-import { deriveStudioAssetsDir, normalizeStudioProjectPath } from "../paths";
+import { deriveStudioAssetsDir, deriveStudioPolicyPath, normalizeStudioProjectPath } from "../paths";
+import { parseStudioPolicy, parseStudioProject } from "../schema";
 import { sha256HexFromArrayBuffer } from "../hash";
 
 export type GenerationHash = string;
@@ -58,6 +59,7 @@ export type StudioProjectGenerationCreateCommand = {
   policyDocument: Uint8Array;
   projectManifest: Uint8Array;
 };
+export type StudioExternalCandidate = { projectId: string; expectedGeneration: ExpectedGeneration; projectDocument: Uint8Array; supportFiles: readonly { supportRelativePath: string; bytes: Uint8Array }[] };
 export type StudioProjectGenerationCommand =
   | { kind: "replace_project"; projectId: string; projectDocument: Uint8Array; reason: "discrete_save" | "autosave" | "migration" | "repair" }
   | { kind: "replace_policy"; projectId: string; policyDocument: Uint8Array }
@@ -108,6 +110,31 @@ export function validateProjectionLocator(locator: ProjectionLocator): Projectio
   const normalized = normalizeStudioProjectPath(raw);
   if (normalized !== raw || normalized.startsWith(`${AUTHORITY_ROOT}/`) || normalized.startsWith(".systemsculpt/")) throw new Error("Invalid or reserved Studio projection path.");
   return { vaultRelativeProjectPath: normalized };
+}
+
+function hasAllowedKeys(value: Record<string, unknown>, required: readonly string[], allowed: readonly string[]): boolean {
+  return required.every((key) => Object.prototype.hasOwnProperty.call(value, key)) && Object.keys(value).every((key) => allowed.includes(key));
+}
+
+function validateClosedLegacyProject(raw: Record<string, unknown>, locator: ProjectionLocator): { projectId: string } {
+  const top = ["schema", "projectId", "name", "createdAt", "updatedAt", "engine", "graph", "permissionsRef", "settings", "migrations"];
+  if (!hasExactKeys(raw, top)) throw new Error("Legacy Studio project root schema is not closed.");
+  const object = (value: unknown, label: string): Record<string, unknown> => { if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${label} must be an object.`); return value as Record<string, unknown>; };
+  if (!hasExactKeys(object(raw.engine, "engine"), ["apiMode", "minPluginVersion"])) throw new Error("Legacy engine schema is not closed.");
+  const graph = object(raw.graph, "graph");
+  if (!hasExactKeys(graph, ["nodes", "edges", "entryNodeIds", "groups"]) || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges) || !Array.isArray(graph.entryNodeIds) || !Array.isArray(graph.groups)) throw new Error("Legacy graph schema is not closed.");
+  for (const node of graph.nodes) if (!hasAllowedKeys(object(node, "node"), ["id", "kind", "version", "title", "position", "config"], ["id", "kind", "version", "title", "position", "size", "config", "continueOnError", "disabled"])) throw new Error("Legacy node schema is not closed.");
+  for (const edge of graph.edges) if (!hasExactKeys(object(edge, "edge"), ["id", "fromNodeId", "fromPortId", "toNodeId", "toPortId"])) throw new Error("Legacy edge schema is not closed.");
+  for (const group of graph.groups) if (!hasAllowedKeys(object(group, "group"), ["id", "name", "nodeIds"], ["id", "name", "color", "nodeIds"])) throw new Error("Legacy group schema is not closed.");
+  const permissions = object(raw.permissionsRef, "permissionsRef");
+  if (!hasExactKeys(permissions, ["policyVersion", "policyPath"]) || permissions.policyPath !== deriveStudioPolicyPath(locator.vaultRelativeProjectPath)) throw new Error("Legacy policy reference is invalid for the projection locator.");
+  const settings = object(raw.settings, "settings");
+  if (!hasExactKeys(settings, ["runConcurrency", "defaultFsScope", "retention"]) || !hasExactKeys(object(settings.retention, "retention"), ["maxRuns", "maxArtifactsMb"])) throw new Error("Legacy settings schema is not closed.");
+  const migrations = object(raw.migrations, "migrations");
+  if (!hasExactKeys(migrations, ["projectSchemaVersion", "applied"]) || !Array.isArray(migrations.applied)) throw new Error("Legacy migrations schema is not closed.");
+  for (const applied of migrations.applied) if (!hasExactKeys(object(applied, "migration"), ["id", "at"])) throw new Error("Legacy migration entry schema is not closed.");
+  parseStudioProject(decoder.decode(encoder.encode(JSON.stringify(raw))));
+  return { projectId: String(raw.projectId || "") };
 }
 
 function hasExactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
@@ -217,9 +244,22 @@ export class StudioProjectGenerationStore {
       }
       if (existing.status === "fork_detected" || existing.status === "future_unsupported") return existing;
       if (await this.authorityHasCandidates(projectId)) return { status: "recovery_required", message: "Existing authority candidates failed validation; legacy bytes were preserved." };
+      try { validateClosedLegacyProject(JSON.parse(decoder.decode(documentBytes)) as Record<string, unknown>, locator); }
+      catch (error) { return { status: "invalid_candidate", message: String(error) }; }
       const files = new Map<string, Uint8Array>(); files.set("project.systemsculpt", documentBytes);
       try { await this.captureTree(deriveStudioAssetsDir(locator.vaultRelativeProjectPath), "support", files); }
       catch (error) { return { status: "storage_unavailable", message: String(error) }; }
+      const policyBytes = files.get("support/policy/grants.json");
+      if (!policyBytes) return { status: "invalid_candidate", message: "Legacy project policy reference is missing from the support tree." };
+      try { parseStudioPolicy(decoder.decode(policyBytes)); }
+      catch (error) { return { status: "invalid_candidate", message: `Legacy policy is invalid: ${String(error)}` }; }
+      const manifestBytes = files.get("support/project.manifest.json");
+      if (manifestBytes) {
+        try {
+          const manifest = JSON.parse(decoder.decode(manifestBytes)) as Record<string, unknown>;
+          if (!hasExactKeys(manifest, ["schema", "projectId", "projectPath", "assetsDir", "createdAt"]) || manifest.schema !== "studio.manifest.v1" || manifest.projectId !== projectId || manifest.projectPath !== locator.vaultRelativeProjectPath || manifest.assetsDir !== deriveStudioAssetsDir(locator.vaultRelativeProjectPath)) throw new Error("manifest references do not match the projection");
+        } catch (error) { return { status: "invalid_candidate", message: `Legacy support manifest is invalid: ${String(error)}` }; }
+      }
       return this.publish(projectId, files, null, "create", locator);
     });
   }
@@ -323,12 +363,9 @@ export class StudioProjectGenerationStore {
     if (!marker || marker.projectId !== projectId || marker.revision !== recovered.expectedGeneration.revision || marker.generationHash !== recovered.expectedGeneration.generationHash) {
       return { status: "fork_detected", message: "Changed projection is based on an untrusted or stale generation; bytes were preserved." };
     }
-    const authorityMarker = canonicalJson(await this.buildMarker(recovered.generation));
     const candidateMarker = await this.buildMarker({ files: projection.files, metadata: recovered.generation.metadata });
     const candidateHashesMatch = marker.projectDocumentSha256 === candidateMarker.projectDocumentSha256 && marker.supportManifestSha256 === candidateMarker.supportManifestSha256;
-    if (projection.markerRaw !== authorityMarker && !candidateHashesMatch) {
-      return { status: "read_only", message: "Changed projection marker is not a trusted selected-generation base; bytes were preserved." };
-    }
+    if (!candidateHashesMatch) return { status: "read_only", message: "Changed projection marker hashes do not validate the exact candidate bytes; bytes were preserved." };
     const reconciled = await this.reconcileExternalCandidate(locator, recovered.expectedGeneration);
     if (reconciled.status !== "committed") return { status: reconciled.status === "fork_detected" ? "fork_detected" : "read_only", message: `External candidate was preserved (${reconciled.status}).` };
     return { status: "ready", expectedGeneration: reconciled.expectedGeneration, generation: reconciled.generation, projectionStatus: "matching" };
@@ -384,6 +421,16 @@ export class StudioProjectGenerationStore {
     try { await this.writeProjection(recovered.generation); return { ...recovered, projectionStatus: "repaired" }; }
     catch (error) { return { status: "storage_unavailable", message: String(error) }; }
   }
+  async createExternalCandidateMarker(candidate: StudioExternalCandidate): Promise<string> {
+    const recovered = await this.recover(candidate.projectId);
+    if (recovered.status !== "ready" || recovered.expectedGeneration.revision !== candidate.expectedGeneration.revision || recovered.expectedGeneration.generationHash !== candidate.expectedGeneration.generationHash) throw new Error("External candidate base generation is stale or unavailable.");
+    const files = new Map<string, Uint8Array>([["project.systemsculpt", candidate.projectDocument.slice()]]);
+    for (const file of candidate.supportFiles) files.set(`support/${normalizeRelativePath(file.supportRelativePath)}`, file.bytes.slice());
+    const parsed = JSON.parse(decoder.decode(candidate.projectDocument)) as Record<string, unknown>;
+    if (parsed.schema !== "studio.project.v1" || parsed.projectId !== candidate.projectId) throw new Error("External candidate project identity is invalid.");
+    return canonicalJson(await this.buildMarker({ files, metadata: recovered.generation.metadata }));
+  }
+
   async reconcileExternalCandidate(candidate: ProjectionLocator, expected: ExpectedGeneration): Promise<CommitResult> {
     let locator: ProjectionLocator;
     try { locator = validateProjectionLocator(candidate); } catch (error) { return { status: "invalid_candidate", message: String(error) }; }
@@ -403,10 +450,9 @@ export class StudioProjectGenerationStore {
       for (const path of recovered.generation.files.keys()) {
         if (path.startsWith("support/") && !projection.files.has(path)) return { status: "invalid_candidate", message: "External projection is missing selected-generation support content." };
       }
-      const authorityMarker = canonicalJson(await this.buildMarker(recovered.generation));
       const computed = await this.buildMarker({ files: projection.files, metadata: recovered.generation.metadata });
       const candidateHashesMatch = marker.projectDocumentSha256 === computed.projectDocumentSha256 && marker.supportManifestSha256 === computed.supportManifestSha256;
-      if (projection.markerRaw !== authorityMarker && !candidateHashesMatch) return { status: "invalid_candidate", message: "External projection marker is not a trusted base or complete candidate hash." };
+      if (!candidateHashesMatch) return { status: "invalid_candidate", message: "External projection marker hashes do not validate the exact candidate bytes." };
       return this.commitInternal({
         kind: "external_sync",
         projectId,

@@ -13,6 +13,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import ts from "typescript";
+import { exerciseBuiltStudioGenerations } from "./studio-generation-bundle-harness";
 
 const BUNDLE_PATH = path.resolve(__dirname, "..", "..", "main.js");
 const MANIFEST_PATH = path.resolve(__dirname, "..", "..", "manifest.json");
@@ -70,6 +71,12 @@ describe("built bundle (main.js)", () => {
     expect(plugin.recorderService).not.toBeNull();
 
     plugin.unload();
+  });
+
+  it("executes immutable Studio create/commit/restart/binary recovery through the built production adapter seam", async () => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const bundleModule = require(BUNDLE_PATH);
+    await exerciseBuiltStudioGenerations(bundleModule);
   });
 
   it("does not ship browser-native dynamic imports for Node builtins (#235)", () => {

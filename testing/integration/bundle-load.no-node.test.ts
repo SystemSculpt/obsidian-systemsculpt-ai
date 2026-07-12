@@ -28,6 +28,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { builtinModules } from "node:module";
 import path from "node:path";
 import { Platform } from "obsidian";
+import { exerciseBuiltStudioGenerations } from "./studio-generation-bundle-harness";
 
 const BUNDLE_PATH = path.resolve(__dirname, "..", "..", "main.js");
 const MANIFEST_PATH = path.resolve(__dirname, "..", "..", "manifest.json");
@@ -141,6 +142,15 @@ describe("built bundle (main.js) with the Node runtime absent (#207)", () => {
     expect(plugin.settings.selectedModelId).toBe("systemsculpt@@systemsculpt/ai-agent");
     expect(plugin._commands.length).toBeGreaterThan(0);
     expect(plugin._settingTabs.length).toBeGreaterThan(0);
+  });
+
+  it("executes Studio generation create/commit/restart/binary recovery with Node requires unavailable", async () => {
+    const mobileRequire = (request: string): unknown => {
+      if (MOBILE_ABSENT.has(request)) throw new Error(`Cannot find module '${request}' — simulated mobile`);
+      return require(request);
+    };
+    const bundleModule = loadBundleWithRequire(mobileRequire) as Parameters<typeof exerciseBuiltStudioGenerations>[0];
+    await exerciseBuiltStudioGenerations(bundleModule);
   });
 
   it("ships the safe-node-externals try/catch wrapping (mobile degrade-to-{})", () => {
