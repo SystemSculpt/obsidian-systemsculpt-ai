@@ -17,40 +17,40 @@ export type ManagedServerOutcome = "allowed" | "license_required" | "license_rej
 export type ManagedAdmissionOutcome = ManagedServerOutcome | "disclosure_required" | "capability_unavailable";
 export type ManagedDisclosureAcceptance = { version: string; acceptedAt: string };
 
-export type JsonContractValue = string | number | boolean | null | JsonContractValue[] | { [key: string]: JsonContractValue };
+export type JsonContractValue = string | number | boolean | null | readonly JsonContractValue[] | { readonly [key: string]: JsonContractValue };
 
-export interface ManagedPurposeContract { presence: "forbidden" | "required"; values: string[]; }
+export interface ManagedPurposeContract { readonly presence: "forbidden" | "required"; readonly values: readonly string[]; }
 export interface ManagedWireRequestContract {
-  method: string;
-  path: string;
-  required_headers: string[];
-  body: { [key: string]: JsonContractValue };
-  definitions?: { [key: string]: JsonContractValue };
+  readonly method: string;
+  readonly path: string;
+  readonly required_headers: readonly string[];
+  readonly body: Readonly<{ [key: string]: JsonContractValue }>;
+  readonly definitions?: Readonly<{ [key: string]: JsonContractValue }>;
 }
-export interface ManagedWireResponseContract { [key: string]: JsonContractValue; }
-export interface ManagedWireErrorContract { [key: string]: JsonContractValue; }
+export interface ManagedWireResponseContract { readonly [key: string]: JsonContractValue; }
+export interface ManagedWireErrorContract { readonly [key: string]: JsonContractValue; }
 export interface ManagedNestedRequestContract {
-  capability: ManagedRequestContractId;
-  header: "x-systemsculpt-capability";
-  header_value: ManagedRequestContractId;
-  background_eligible: boolean;
-  purpose?: ManagedPurposeContract;
-  cancellation_supported?: boolean;
-  request?: ManagedWireRequestContract;
-  response?: ManagedWireResponseContract;
-  errors?: ManagedWireErrorContract;
+  readonly capability: ManagedRequestContractId;
+  readonly header: "x-systemsculpt-capability";
+  readonly header_value: ManagedRequestContractId;
+  readonly background_eligible: boolean;
+  readonly purpose?: ManagedPurposeContract;
+  readonly cancellation_supported?: boolean;
+  readonly request?: ManagedWireRequestContract;
+  readonly response?: ManagedWireResponseContract;
+  readonly errors?: ManagedWireErrorContract;
 }
 export interface ManagedCapabilityDescriptor {
-  alias: ManagedCapabilityAlias;
-  endpoint: string;
-  mode: ManagedMode;
-  availability: ManagedAvailability;
-  auth: "license";
-  metering: "metered_turn" | "metered_operation" | "metered_job";
-  cancellation_supported: boolean;
-  background_eligible: boolean;
-  limits: Record<string, string | number | boolean>;
-  request_contracts: ManagedNestedRequestContract[];
+  readonly alias: ManagedCapabilityAlias;
+  readonly endpoint: string;
+  readonly mode: ManagedMode;
+  readonly availability: ManagedAvailability;
+  readonly auth: "license";
+  readonly metering: "metered_turn" | "metered_operation" | "metered_job";
+  readonly cancellation_supported: boolean;
+  readonly background_eligible: boolean;
+  readonly limits: Readonly<Record<string, string | number | boolean>>;
+  readonly request_contracts: readonly ManagedNestedRequestContract[];
 }
 export interface ManagedCapabilityCatalogContract {
   contract_version: typeof MANAGED_CAPABILITY_CONTRACT;
@@ -73,7 +73,7 @@ export interface ManagedAdmissionContract {
 }
 export interface ManagedOperation { alias: ManagedCapabilityAlias; requestContract?: ManagedRequestContractId; }
 export interface ManagedLease { outcome: ManagedAdmissionOutcome; descriptor?: ManagedCapabilityDescriptor; requestContract?: ManagedNestedRequestContract; diagnostics?: ManagedResponseDiagnostics; }
-export interface ManagedAllowedLease extends ManagedLease { outcome: "allowed"; descriptor: ManagedCapabilityDescriptor; requestContract: ManagedNestedRequestContract; }
+export interface ManagedAllowedLease extends ManagedLease { readonly outcome: "allowed"; readonly descriptor: ManagedCapabilityDescriptor; readonly requestContract: ManagedNestedRequestContract; }
 export type ManagedChatLeaseResult =
   | Readonly<{ outcome: "allowed"; lease: ManagedAllowedLease }>
   | Readonly<{ outcome: Exclude<ManagedAdmissionOutcome, "allowed">; lease: ManagedLease }>;

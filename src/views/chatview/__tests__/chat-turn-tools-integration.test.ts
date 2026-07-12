@@ -2,19 +2,13 @@ import { ChatTurn } from "../turn/ChatTurn";
 import type { ChatTurnEffects } from "../turn/ChatTurnEffects";
 import type { ChatMessage } from "../../types";
 import { ChatPersistenceError } from "../persistence/ChatPersistenceError";
-import fixture from "../../../../testing/fixtures/managed/managed-capabilities-v2.json";
-import { ManagedCapabilityCatalog } from "../../../services/managed/ManagedCapabilityCatalog";
-import { ManagedAdmission } from "../../../services/managed/ManagedAdmission";
-import { ManagedCapabilityClient } from "../../../services/managed/ManagedCapabilityClient";
-import type { HostedTransportAdapter } from "../../../services/managed/adapters/HostedTransportAdapter";
+import { createDeterministicManagedChatClient } from "../../../services/managed/__tests__/ManagedChatTestHarness";
 import type { AcceptedChatOperation } from "../../../services/managed/ManagedTypes";
 
 const user = { role: "user", content: "go", message_id: "user-1" } as ChatMessage;
 let acceptedOperation: AcceptedChatOperation;
 beforeAll(async () => {
-  const catalog = ManagedCapabilityCatalog.parse(fixture);
-  const transport = { getCatalog: async () => catalog, getAdmission: async () => ({ outcome: "allowed" as const, diagnostics: undefined }) };
-  const client = new ManagedCapabilityClient({ admission: new ManagedAdmission({ transport: transport as HostedTransportAdapter, licenseKey: () => "fixture", disclosureAcceptance: () => ({ version: "disclosure-test-v1", acceptedAt: "now" }) }), transport: transport as HostedTransportAdapter });
+  const { client } = createDeterministicManagedChatClient();
   const result = await client.acquireChatTurnLease();
   if (result.outcome !== "allowed") throw new Error("Fixture admission blocked");
   acceptedOperation = Object.freeze({ lease: result.lease, durableTurnId: user.message_id, acceptedUserMessage: user, initialDurableSnapshot: Object.freeze({ chatId: "chat-1", version: 1, messages: Object.freeze([user]) }), turnBoundaryId: user.message_id });
@@ -228,11 +222,33 @@ describe("ChatTurn tool ownership", () => {
   it("terminates through the reducer at maximum continuation depth", async () => {
     const failure = new Error("max depth");
     const { turn } = harness({
-      runContinuationStream: async (_retry, _signal, previous) => stream(message([tool(`next-${previous.message_id}`)], `${previous.message_id}-next`)),
+      runContinuationStream: async (_operation, _retry, _signal, previous) => stream(message([tool(`next-${previous.message_id}`)], `${previous.message_id}-next`)),
       onMaxContinuationDepth: () => { throw failure; },
     });
     await expect(turn.run(user)).rejects.toBe(failure);
     expect(turn.outcome).toBe("transport_failed");
+  });
+
+  it("carries the exact accepted operation through initial and multiple continuation callbacks", async () => {
+    let round = 0;
+    const { turn, effects } = harness({
+      runInitialStream: async (operation) => {
+        expect(operation).toBe(acceptedOperation);
+        return stream(message([tool("initial")], "assistant-initial"));
+      },
+      runContinuationStream: async (operation) => {
+        expect(operation).toBe(acceptedOperation);
+        round += 1;
+        return round < 2
+          ? stream(message([tool(`continuation-${round}`)], `assistant-${round}`))
+          : stream(message([], "assistant-final", "done"));
+      },
+    });
+    const continuation = jest.spyOn(effects, "runContinuationStream");
+    await turn.run(user);
+    expect(continuation).toHaveBeenCalledTimes(2);
+    expect(continuation.mock.calls.every(([operation]) => operation === acceptedOperation)).toBe(true);
+    expect(turn.acceptedOperation).toBe(acceptedOperation);
   });
 
   it("returns the same running promise for repeated run calls", async () => {

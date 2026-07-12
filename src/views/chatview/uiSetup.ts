@@ -267,6 +267,7 @@ export const uiSetup = {
       managedChatAdmission: chatView.getManagedChatAdmission(),
       onMessageSubmit: (message) => chatView.persistSubmittedUserMessage(message),
       commitAcceptedUserMessage: (input) => chatView.commitAcceptedUserMessage(input),
+      claimAcceptedUserCommit: (result) => chatView.claimAcceptedUserCommit(result),
       onAssistantResponse: async (message) => {
         await chatView.persistAssistantMessage(message);
       },

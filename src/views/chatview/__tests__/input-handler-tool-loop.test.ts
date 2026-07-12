@@ -11,26 +11,23 @@ import { getConfiguredRemoteProviderApiKey } from "../../../services/providerRun
 import {
   buildPiTextProviderSetupMessage,
 } from "../../../services/pi-native/PiTextAuth";
-import fixture from "../../../../testing/fixtures/managed/managed-capabilities-v2.json";
-import { ManagedCapabilityCatalog } from "../../../services/managed/ManagedCapabilityCatalog";
-import { ManagedAdmission } from "../../../services/managed/ManagedAdmission";
-import { ManagedCapabilityClient } from "../../../services/managed/ManagedCapabilityClient";
-import type { HostedTransportAdapter } from "../../../services/managed/adapters/HostedTransportAdapter";
+import { createDeterministicManagedChatClient } from "../../../services/managed/__tests__/ManagedChatTestHarness";
 import type { AcceptedUserCommitInput } from "../ChatView";
 import { ChatTurnLifecycleController } from "../controllers/ChatTurnLifecycleController";
 
-const managedCatalog = ManagedCapabilityCatalog.parse(fixture);
-const managedFixtureTransport = { getCatalog: async () => managedCatalog, getAdmission: async () => ({ outcome: "allowed" as const, diagnostics: undefined }) };
-const managedChatAdmission = new ManagedCapabilityClient({
-  admission: new ManagedAdmission({ transport: managedFixtureTransport as HostedTransportAdapter, licenseKey: () => "fixture-license", disclosureAcceptance: () => ({ version: "disclosure-test-v1", acceptedAt: "2026-07-11T00:00:00Z" }) }),
-  transport: managedFixtureTransport as HostedTransportAdapter,
-});
+const managedHarness = createDeterministicManagedChatClient();
+const managedChatAdmission = managedHarness.client;
 function commitAccepted(messages: ChatMessage[], input: AcceptedUserCommitInput) {
   const next = input.kind === "resend" ? [...messages.slice(0, input.expectedIndex), input.message]
     : messages.some((entry) => entry.message_id === input.message.message_id) ? [...messages] : [...messages, input.message];
   messages.splice(0, messages.length, ...next);
   const snapshot = Object.freeze({ chatId: "chat-1", version: 1, messages: Object.freeze([...messages]) });
-  return Promise.resolve(Object.freeze({ snapshot, message: snapshot.messages[snapshot.messages.length - 1] }));
+  return Promise.resolve(Object.freeze({
+    status: "accepted_current" as const,
+    snapshot,
+    message: snapshot.messages[snapshot.messages.length - 1],
+    ownership: Object.freeze({ transcriptIdentity: messages, generation: 1, originalChatId: "chat-1", acceptedChatId: "chat-1" }),
+  }));
 }
 
 jest.mock("../../../services/RecorderService", () => ({
@@ -111,6 +108,11 @@ jest.mock("../../../services/pi-native/PiTextAuth", () => ({
 }));
 
 describe("InputHandler hosted tool loop", () => {
+  it("uses the production managed fixture admission path", async () => {
+    await expect(managedHarness.transport.getCatalog()).resolves.toMatchObject({ contract_version: "managed-capabilities-v2" });
+    await expect(managedHarness.transport.getAdmission()).resolves.toMatchObject({ outcome: "allowed" });
+    await expect(managedChatAdmission.acquireChatTurnLease()).resolves.toMatchObject({ outcome: "allowed" });
+  });
   beforeEach(() => {
     jest.clearAllMocks();
     (getConfiguredRemoteProviderApiKey as jest.Mock).mockReturnValue("");
@@ -177,6 +179,7 @@ describe("InputHandler hosted tool loop", () => {
     const handler = new InputHandler({
       managedChatAdmission,
       commitAcceptedUserMessage: async (input) => { await onMessageSubmit(input.message); return commitAccepted(messages, input); },
+      claimAcceptedUserCommit: () => true,
       app,
       container,
       aiService,
@@ -325,6 +328,20 @@ describe("InputHandler hosted tool loop", () => {
     expect(handler.getValue()).toBe("Use [PASTED TEXT - 12 LINES OF TEXT]");
     expect((handler as any).pendingLargeTextContent).toBe("recover this paste");
     expect((handler as any).submissionReserved).toBe(false);
+  });
+
+  it("does not create a lifecycle or stream when a durable commit is no longer current", async () => {
+    const { handler, messages } = createHostedToolLoopHarness();
+    handler.setValue("old chat message");
+    const acceptedMessage = { role: "user", content: "old chat message", message_id: "durable-old" } as ChatMessage;
+    const snapshot = Object.freeze({ chatId: "old-chat", version: 2, messages: Object.freeze([acceptedMessage]) });
+    (handler as any).commitAcceptedUserMessage = jest.fn(async () => Object.freeze({ status: "accepted_not_current", snapshot, message: acceptedMessage }));
+    (handler as any).claimAcceptedUserCommit = jest.fn(() => false);
+    const stream = jest.spyOn(handler as any, "streamAssistantTurn");
+    await handler.submitWithOverrides({ includeContextFiles: false });
+    expect((handler as any).turnLifecycle).toBeNull();
+    expect(stream).not.toHaveBeenCalled();
+    expect(messages).toEqual([]);
   });
 
   it("rejects a concurrent submission before consuming input, admission, commit, or stream", async () => {
@@ -651,10 +668,10 @@ describe("InputHandler hosted tool loop", () => {
     await handler.submitWithOverrides({ includeContextFiles: false });
 
     expect(streamAssistantTurn).toHaveBeenCalledTimes(3);
-    expect(streamAssistantTurn.mock.calls[2]?.[3]?.transientSystemPromptSuffix).toContain(
+    expect(streamAssistantTurn.mock.calls[2]?.[4]?.transientSystemPromptSuffix).toContain(
       "previous continuation attempt"
     );
-    expect(streamAssistantTurn.mock.calls[2]?.[3]?.transientSystemPromptSuffix).toContain(
+    expect(streamAssistantTurn.mock.calls[2]?.[4]?.transientSystemPromptSuffix).toContain(
       "Do not return an empty response"
     );
     expect(aiService.executeHostedToolCall).toHaveBeenCalledTimes(1);
@@ -946,6 +963,7 @@ describe("InputHandler hosted tool loop", () => {
     const handler = new InputHandler({
       managedChatAdmission,
       commitAcceptedUserMessage: (input) => commitAccepted([], input),
+      claimAcceptedUserCommit: () => true,
       app,
       container,
       aiService,
@@ -1039,6 +1057,7 @@ describe("InputHandler hosted tool loop", () => {
     const handler = new InputHandler({
       managedChatAdmission,
       commitAcceptedUserMessage: (input) => commitAccepted([], input),
+      claimAcceptedUserCommit: () => true,
       app,
       container,
       aiService: {
@@ -1096,6 +1115,7 @@ describe("InputHandler hosted tool loop", () => {
     const handler = new InputHandler({
       managedChatAdmission,
       commitAcceptedUserMessage: (input) => commitAccepted([], input),
+      claimAcceptedUserCommit: () => true,
       app,
       container,
       aiService: {
@@ -1187,6 +1207,7 @@ describe("InputHandler hosted tool loop", () => {
     const handler = new InputHandler({
       managedChatAdmission,
       commitAcceptedUserMessage: (input) => commitAccepted([], input),
+      claimAcceptedUserCommit: () => true,
       app,
       container,
       aiService: {
@@ -1246,6 +1267,7 @@ describe("InputHandler hosted tool loop", () => {
     const handler = new InputHandler({
       managedChatAdmission,
       commitAcceptedUserMessage: (input) => commitAccepted([], input),
+      claimAcceptedUserCommit: () => true,
       app,
       container,
       aiService: { streamMessage: jest.fn() } as any,
@@ -1307,6 +1329,7 @@ describe("InputHandler hosted tool loop", () => {
     const handler = new InputHandler({
       managedChatAdmission,
       commitAcceptedUserMessage: (input) => commitAccepted([], input),
+      claimAcceptedUserCommit: () => true,
       app,
       container,
       aiService: { streamMessage: jest.fn() } as any,
@@ -1412,6 +1435,7 @@ describe("InputHandler hosted tool loop", () => {
     const handler = new InputHandler({
       managedChatAdmission,
       commitAcceptedUserMessage: (input) => commitAccepted([], input),
+      claimAcceptedUserCommit: () => true,
       app,
       container,
       aiService: { streamMessage: jest.fn() } as any,
@@ -1479,6 +1503,7 @@ describe("InputHandler hosted tool loop", () => {
     const handler = new InputHandler({
       managedChatAdmission,
       commitAcceptedUserMessage: (input) => commitAccepted([], input),
+      claimAcceptedUserCommit: () => true,
       app,
       container,
       aiService: { streamMessage: jest.fn() } as any,

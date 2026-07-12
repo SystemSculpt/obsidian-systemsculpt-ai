@@ -119,8 +119,8 @@ export class ChatTurn {
     let streamed: StreamTurnResult;
     try {
       streamed = phase === "initial"
-        ? await this.effects.runInitialStream(retryCount, this.signal)
-        : await this.effects.runContinuationStream(retryCount, this.signal, this.previousStream!);
+        ? await this.effects.runInitialStream(this.acceptedOperation, retryCount, this.signal)
+        : await this.effects.runContinuationStream(this.acceptedOperation, retryCount, this.signal, this.previousStream!);
     } catch (error) {
       if (this.signal.aborted) {
         await this.requestSettlement();

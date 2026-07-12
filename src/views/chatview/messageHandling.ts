@@ -79,13 +79,7 @@ export const messageHandling = {
   ): Promise<{ status: "success" | "cancelled" | "error" }> {
     const { messageId, content } = input;
     const index = chatView.messages.findIndex((msg) => msg.message_id === messageId);
-    if (index === -1) {
-      if (await chatView.retryPendingResend(messageId)) {
-        await this.restoreResendInput(chatView, content);
-        return { status: "success" };
-      }
-      return { status: "error" };
-    }
+    if (index === -1) return { status: "error" };
 
     if (chatView.isLegacyReadOnlyChat()) {
       new Notice("This archived chat is read-only. Start a new chat to continue from here.");

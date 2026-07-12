@@ -5,6 +5,15 @@ import {
   ManagedRequestContractId, ManagedTransportOperation,
 } from "./ManagedTypes";
 
+function deepFreeze<T>(value: T, seen = new WeakSet<object>()): T {
+  if (value === null || typeof value !== "object" || seen.has(value as object)) return value;
+  seen.add(value as object);
+  for (const key of Reflect.ownKeys(value as object)) {
+    deepFreeze((value as Record<PropertyKey, object | null | string | number | boolean | undefined>)[key], seen);
+  }
+  return Object.freeze(value);
+}
+
 function isAllowedChatLease(lease: ManagedLease): lease is ManagedAllowedLease {
   return lease.outcome === "allowed" && lease.descriptor?.alias === "systemsculpt/chat"
     && lease.requestContract?.capability === "chat_turn" && lease.descriptor.request_contracts.includes(lease.requestContract);
@@ -28,7 +37,8 @@ export class ManagedCapabilityClient {
   async acquireChatTurnLease(): Promise<ManagedChatLeaseResult> {
     const lease = await this.dependencies.admission.acquireLease({ alias: "systemsculpt/chat", requestContract: "chat_turn" });
     if (!isAllowedChatLease(lease)) return { outcome: lease.outcome === "allowed" ? "capability_unavailable" : lease.outcome, lease };
-    return { outcome: "allowed", lease };
+    deepFreeze(lease);
+    return Object.freeze({ outcome: "allowed", lease });
   }
 
   private execute(kind: "request" | "stream" | "job", operation: ClientOperation) {

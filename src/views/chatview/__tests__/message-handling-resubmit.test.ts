@@ -74,25 +74,11 @@ describe("messageHandling resubmit behavior", () => {
     expect(chatView.messages).toBe(messages);
   });
 
-  it("reuses a durable first-message resend branch and restores the composer on projection retry", async () => {
-    const chatView: any = {
-      messages: [],
-      retryPendingResend: jest.fn().mockResolvedValue(true),
-      inputHandler: {
-        setValue: jest.fn(),
-        focus: jest.fn(),
-      },
-    };
-
-    const result = await messageHandling.runResendAction(chatView, {
-      messageId: "user-first",
-      content: "\nRetry this prompt\n",
-    });
-
-    expect(chatView.retryPendingResend).toHaveBeenCalledWith("user-first");
-    expect(chatView.inputHandler.setValue).toHaveBeenCalledWith("Retry this prompt");
-    expect(chatView.inputHandler.focus).toHaveBeenCalledTimes(1);
-    expect(result).toEqual({ status: "success" });
+  it("never reaches interrupted durable-branch recovery from the active resend action", async () => {
+    const retryPendingResend = jest.fn();
+    const chatView: any = { messages: [], retryPendingResend, inputHandler: { setValue: jest.fn(), focus: jest.fn() } };
+    await expect(messageHandling.runResendAction(chatView, { messageId: "user-first", content: "Retry" })).resolves.toEqual({ status: "error" });
+    expect(retryPendingResend).not.toHaveBeenCalled();
   });
 
   it("queues standard resend without eagerly truncating durable messages", async () => {

@@ -63,6 +63,7 @@ export interface InputHandlerOptions {
   managedChatAdmission: ManagedChatAdmissionPort;
   onMessageSubmit: (message: ChatMessage) => Promise<void>;
   commitAcceptedUserMessage: (input: AcceptedUserCommitInput) => Promise<AcceptedUserCommitResult>;
+  claimAcceptedUserCommit: (result: AcceptedUserCommitResult) => boolean;
   onAssistantResponse: (message: ChatMessage) => Promise<void>;
   onError: (error: string | SystemSculptError) => void;
   onAddContextFile: () => void;
@@ -105,6 +106,7 @@ export class InputHandler extends Component {
   private managedChatAdmission: ManagedChatAdmissionPort;
   private onMessageSubmit: (message: ChatMessage) => Promise<void>;
   private commitAcceptedUserMessage: (input: AcceptedUserCommitInput) => Promise<AcceptedUserCommitResult>;
+  private claimAcceptedUserCommit: (result: AcceptedUserCommitResult) => boolean;
   private persistAssistantResponse: (message: ChatMessage) => Promise<void>;
   private onAssistantResponse: (message: ChatMessage) => Promise<void>;
   private onError: (error: string | SystemSculptError) => void;
@@ -187,6 +189,7 @@ export class InputHandler extends Component {
     this.managedChatAdmission = options.managedChatAdmission;
     this.onMessageSubmit = options.onMessageSubmit;
     this.commitAcceptedUserMessage = options.commitAcceptedUserMessage;
+    this.claimAcceptedUserCommit = options.claimAcceptedUserCommit;
     this.persistAssistantResponse = options.onAssistantResponse;
     this.onAssistantResponse = options.onAssistantResponse;
     this.onError = options.onError;
@@ -305,11 +308,13 @@ export class InputHandler extends Component {
   }
 
   private async streamAssistantTurn(
+    acceptedOperation: AcceptedChatOperation,
     signal: AbortSignal,
     includeContextFiles: boolean,
     turnProgress?: ChatTurnProgressController,
     options?: { transientSystemPromptSuffix?: string; phase?: "initial" | "continuation" }
   ): Promise<StreamTurnResult> {
+    void acceptedOperation;
     const continuationTarget = options?.phase === "initial"
       ? null
       : this.getHostedContinuationTarget();
@@ -851,9 +856,10 @@ export class InputHandler extends Component {
       const intent = this.pendingSubmissionIntent;
       const commitInput: AcceptedUserCommitInput = intent.kind === "resend" ? { ...intent, message: userMessage } : { kind: "append", message: userMessage };
       const accepted = await this.commitAcceptedUserMessage(commitInput);
+      userCommitted = true;
+      if (!this.claimAcceptedUserCommit(accepted) || accepted.status !== "accepted_current") return;
       const durableTurnId = String(accepted.message.message_id || "").trim();
       if (!durableTurnId) throw new Error("Accepted chat operation requires a durable turn ID.");
-      userCommitted = true;
       this.pendingSubmissionIntent = Object.freeze({ kind: "append" });
       const acceptedOperation: AcceptedChatOperation = Object.freeze({
         lease: admission.lease, durableTurnId, acceptedUserMessage: accepted.message,
@@ -879,7 +885,7 @@ export class InputHandler extends Component {
           progress.begin();
           try {
             progress.setStatus(retryCount > 0 ? "retrying" : "preparing");
-            return await this.streamAssistantTurn(turnSignal, includeContextFiles, progress, {
+            return await this.streamAssistantTurn(acceptedOperation, turnSignal, includeContextFiles, progress, {
               phase,
               transientSystemPromptSuffix: phase === "continuation" && retryCount > 0 && previous
                 ? this.buildEmptyContinuationRetryHint(previous.completionState, retryCount)
@@ -900,7 +906,10 @@ export class InputHandler extends Component {
               await this.onAssistantResponse(message);
             }
           },
-          runInitialStream: (retryCount, turnSignal) => streamWithProgress(turnSignal, "initial", retryCount),
+          runInitialStream: (operation, retryCount, turnSignal) => {
+            if (operation !== acceptedOperation) throw new Error("Chat turn operation identity changed before initial stream.");
+            return streamWithProgress(turnSignal, "initial", retryCount);
+          },
           shouldContinueTools: (result) => this.shouldContinueHostedToolLoop(result.message, result.stopReason),
           requestToolApproval: async (toolCall) => {
             const approved = await this.confirmHostedToolExecution(toolCall);
@@ -923,8 +932,10 @@ export class InputHandler extends Component {
             }
           },
           renderToolCheckpoint: (message) => this.renderPersistedAssistantMessage(message, { forceRerender: true }),
-          runContinuationStream: (retryCount, turnSignal, previous) =>
-            streamWithProgress(turnSignal, "continuation", retryCount, previous),
+          runContinuationStream: (operation, retryCount, turnSignal, previous) => {
+            if (operation !== acceptedOperation) throw new Error("Chat turn operation identity changed before continuation.");
+            return streamWithProgress(turnSignal, "continuation", retryCount, previous);
+          },
           onInitialRetryExhausted: (latest) => this.failHostedToolTurn(
             "The hosted agent returned an empty response.", 502, {
               reason: "empty-response", emptyInitialRetries: 2,

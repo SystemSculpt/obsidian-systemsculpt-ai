@@ -4,19 +4,13 @@
 
 import { ChatTurn } from "../turn/ChatTurn";
 import type { ChatMessage } from "../../../types";
-import fixture from "../../../../testing/fixtures/managed/managed-capabilities-v2.json";
-import { ManagedCapabilityCatalog } from "../../../services/managed/ManagedCapabilityCatalog";
-import { ManagedAdmission } from "../../../services/managed/ManagedAdmission";
-import { ManagedCapabilityClient } from "../../../services/managed/ManagedCapabilityClient";
-import type { HostedTransportAdapter } from "../../../services/managed/adapters/HostedTransportAdapter";
+import { createDeterministicManagedChatClient } from "../../../services/managed/__tests__/ManagedChatTestHarness";
 import type { AcceptedChatOperation } from "../../../services/managed/ManagedTypes";
 
 const user = { role: "user", content: "hello", message_id: "user-1" } as ChatMessage;
 let acceptedOperation: AcceptedChatOperation;
 beforeAll(async () => {
-  const catalog = ManagedCapabilityCatalog.parse(fixture);
-  const transport = { getCatalog: async () => catalog, getAdmission: async () => ({ outcome: "allowed" as const, diagnostics: undefined }) };
-  const client = new ManagedCapabilityClient({ admission: new ManagedAdmission({ transport: transport as HostedTransportAdapter, licenseKey: () => "fixture", disclosureAcceptance: () => ({ version: "disclosure-test-v1", acceptedAt: "now" }) }), transport: transport as HostedTransportAdapter });
+  const { client } = createDeterministicManagedChatClient();
   const result = await client.acquireChatTurnLease();
   if (result.outcome !== "allowed") throw new Error("Fixture admission blocked");
   acceptedOperation = Object.freeze({ lease: result.lease, durableTurnId: user.message_id, acceptedUserMessage: user, initialDurableSnapshot: Object.freeze({ chatId: "chat-1", version: 1, messages: Object.freeze([user]) }), turnBoundaryId: user.message_id });
@@ -54,7 +48,7 @@ describe("ChatTurn initial streaming migration", () => {
     await h.turn.run(user);
     expect(h.order).toEqual(["assistant"]);
     expect(h.turn.acceptedOperation).toBe(acceptedOperation);
-    expect(h.runInitialStream).toHaveBeenCalledWith(0, h.turn.signal);
+    expect(h.runInitialStream).toHaveBeenCalledWith(acceptedOperation, 0, h.turn.signal);
   });
 
   test("retries empty and reasoning-only initial output without committing an assistant", async () => {

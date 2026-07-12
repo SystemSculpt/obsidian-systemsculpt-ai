@@ -1,19 +1,47 @@
+import fixture from "../../../../testing/fixtures/managed/managed-capabilities-v2.json";
+import { PlatformRequestClient } from "../../PlatformRequestClient";
 import { ManagedCapabilityClientFactory } from "../ManagedCapabilityClientFactory";
 
+function responseFor(url: string): Response {
+  if (url.endsWith("/api/plugin/config")) return new Response(JSON.stringify(fixture), { status: 200 });
+  if (url.endsWith("/api/plugin/license/validate")) return new Response(JSON.stringify({ code: "allowed" }), { status: 200 });
+  throw new Error(`Unexpected URL: ${url}`);
+}
+
 describe("ManagedCapabilityClientFactory", () => {
-  it("creates one client graph while retaining live accessors", () => {
+  it("shares one graph and evaluates live credential/disclosure accessors on every invalidated admission", async () => {
+    const request = jest.spyOn(PlatformRequestClient.prototype, "request").mockImplementation(async (input) => responseFor(input.url));
     let key = "first";
-    let disclosure = { version: "v1", acceptedAt: "now" };
-    const client = ManagedCapabilityClientFactory.create({
-      baseUrl: "https://api.test",
-      pluginVersion: "1.0.0",
-      licenseKey: () => key,
-      disclosureAcceptance: () => disclosure,
+    let disclosure = { version: "disclosure-test-v1", acceptedAt: "first" };
+    const graph = ManagedCapabilityClientFactory.createGraph({
+      baseUrl: "https://api.test", pluginVersion: "1.0.0",
+      licenseKey: () => key, disclosureAcceptance: () => disclosure,
     });
-    expect(client).toBeDefined();
+    const acquire = jest.spyOn(graph.admission, "acquireLease");
+
+    const first = await graph.client.acquireChatTurnLease();
+    expect(first.outcome).toBe("allowed");
+    expect(acquire).toHaveBeenCalledTimes(1);
+    const admitted = await acquire.mock.results[0].value;
+    if (first.outcome !== "allowed") throw new Error("Expected allowed fixture lease");
+    expect(first.lease).toBe(admitted);
+    expect(Object.isFrozen(first.lease)).toBe(true);
+    expect(Object.isFrozen(first.lease.descriptor)).toBe(true);
+    expect(Object.isFrozen(first.lease.requestContract)).toBe(true);
+    expect(() => { Object.defineProperty(first.lease.requestContract, "capability", { value: "embeddings" }); }).toThrow();
+    expect(first.lease.descriptor.request_contracts).toContain(first.lease.requestContract);
+    expect(request.mock.calls.some(([input]) => input.licenseKey === "first")).toBe(true);
+
+    disclosure = { version: "other-disclosure", acceptedAt: "changed" };
+    await expect(graph.client.acquireChatTurnLease()).resolves.toMatchObject({ outcome: "disclosure_required" });
     key = "second";
-    disclosure = { version: "v2", acceptedAt: "later" };
-    expect(key).toBe("second");
-    expect(disclosure.version).toBe("v2");
+    disclosure = { version: "disclosure-test-v1", acceptedAt: "second" };
+    const second = await graph.client.acquireChatTurnLease();
+    expect(second.outcome).toBe("allowed");
+    expect(acquire).toHaveBeenCalledTimes(3);
+    expect(request.mock.calls.some(([input]) => input.licenseKey === "second")).toBe(true);
+    expect(Object.isFrozen(graph)).toBe(true);
+    expect(acquire.mock.instances.every((owner) => owner === graph.admission)).toBe(true);
+    request.mockRestore();
   });
 });

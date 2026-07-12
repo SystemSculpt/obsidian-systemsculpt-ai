@@ -101,7 +101,10 @@ type ChatSaveOptions = NonNullable<Parameters<ChatStorageService["saveChat"]>[2]
 export type AcceptedUserCommitInput =
   | Readonly<{ kind: "append"; message: ChatMessage }>
   | Readonly<{ kind: "resend"; message: ChatMessage; targetMessageId: string; expectedIndex: number; expectedVersion: number }>;
-export type AcceptedUserCommitResult = Readonly<{ snapshot: ChatTranscriptSnapshot; message: Readonly<ChatMessage> }>;
+export type ChatOwnershipToken = Readonly<{ transcriptIdentity: object; generation: number; originalChatId: string; acceptedChatId: string }>;
+export type AcceptedUserCommitResult =
+  | Readonly<{ status: "accepted_current"; snapshot: ChatTranscriptSnapshot; message: Readonly<ChatMessage>; ownership: ChatOwnershipToken }>
+  | Readonly<{ status: "accepted_not_current"; snapshot: ChatTranscriptSnapshot; message: Readonly<ChatMessage> }>;
 
 type PendingCommittedPiProjection = {
   kind: "sync" | "fork";
@@ -168,6 +171,7 @@ export class ChatView extends ItemView {
   private hasAdjustedInitialWindow: boolean = false;
   private renderEpoch: number = 0;
   private loadEpoch: number = 0;
+  private chatOwnershipGeneration: number = 0;
   private activeLoad: { chatId: string; promise: Promise<void> } | null = null;
   private pendingResendProjection: { targetMessageId: string; chatId: string } | null = null;
   private chatTranscript: ChatTranscript | null = null;
@@ -478,19 +482,45 @@ export class ChatView extends ItemView {
   }
 
   public async commitAcceptedUserMessage(input: AcceptedUserCommitInput): Promise<AcceptedUserCommitResult> {
-    const existingMessage = this.messages.find((entry) => entry.message_id === input.message.message_id);
-    await this.waitForLegacyPersistenceIdle();
     const transcript = this.ensureChatTranscript();
+    const generation = this.chatOwnershipGeneration;
+    const originalChatId = this.chatId;
+    await this.waitForLegacyPersistenceIdle();
+    const existingMessage = transcript.snapshot().messages.find((entry) => entry.message_id === input.message.message_id);
     const accepted = await transcript.commitAcceptedUser(input);
-    this.projectTranscript();
+    if (this.chatTranscript !== transcript || this.chatOwnershipGeneration !== generation || this.chatId !== originalChatId) {
+      return Object.freeze({ status: "accepted_not_current", snapshot: accepted.snapshot, message: accepted.message });
+    }
+    this.projectAcceptedTranscriptSnapshot(accepted.snapshot);
+    const ownership = Object.freeze({ transcriptIdentity: transcript, generation, originalChatId, acceptedChatId: accepted.snapshot.chatId });
     try {
       this.updateViewState();
       if (!existingMessage) (this.app.workspace as any)?.trigger?.("systemsculpt:chat-message-added", this.chatId);
       await this.addMessage(accepted.message.role, accepted.message.content, accepted.message.message_id, accepted.message as ChatMessage);
     } catch {
-      await this.recoverPersistedProjection(accepted.snapshot.chatId, transcript.mutableMessages());
+      if (this.isAcceptedUserCommitCurrentToken(ownership)) {
+        await this.recoverPersistedProjection(accepted.snapshot.chatId, transcript.mutableMessages());
+      }
     }
-    return accepted;
+    return Object.freeze({ status: "accepted_current", snapshot: accepted.snapshot, message: accepted.message, ownership });
+  }
+
+  private projectAcceptedTranscriptSnapshot(accepted: ChatTranscriptSnapshot): void {
+    // @ts-expect-error Transcript ownership intentionally centralizes this readonly field assignment.
+    this.messages = accepted.messages;
+    this.chatId = accepted.chatId;
+    this.chatVersion = accepted.version;
+    this.isFullyLoaded = true;
+  }
+
+  private isAcceptedUserCommitCurrentToken(token: ChatOwnershipToken): boolean {
+    return this.chatTranscript === token.transcriptIdentity
+      && this.chatOwnershipGeneration === token.generation
+      && this.chatId === token.acceptedChatId;
+  }
+
+  public claimAcceptedUserCommit(result: AcceptedUserCommitResult): result is Extract<AcceptedUserCommitResult, { status: "accepted_current" }> {
+    return result.status === "accepted_current" && this.isAcceptedUserCommitCurrentToken(result.ownership);
   }
 
   public getPendingResendIdentity(messageId: string): { targetMessageId: string; expectedIndex: number; expectedVersion: number } | null {
@@ -1768,6 +1798,7 @@ export class ChatView extends ItemView {
     }
 
     const previousChatId = this.chatId;
+    this.chatOwnershipGeneration += 1;
 
     if (!state?.chatId) {
       this.chatId = "";
@@ -1874,6 +1905,7 @@ export class ChatView extends ItemView {
       return;
     }
 
+    this.chatOwnershipGeneration += 1;
     const loadEpoch = ++this.loadEpoch;
     const promise = (async () => {
       this.chatId = chatId;

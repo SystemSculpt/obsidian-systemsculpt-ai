@@ -7,13 +7,14 @@ export type ChatTurnEffects = {
   readonly signal: AbortSignal;
   readonly acceptedOperation: AcceptedChatOperation;
   readonly commitAssistant: (message: ChatMessage) => Promise<void>;
-  readonly runInitialStream: (retryCount: number, signal: AbortSignal) => Promise<StreamTurnResult>;
+  readonly runInitialStream: (operation: AcceptedChatOperation, retryCount: number, signal: AbortSignal) => Promise<StreamTurnResult>;
   readonly shouldContinueTools: (result: StreamTurnResult) => boolean;
   readonly requestToolApproval: (toolCall: ToolCall) => Promise<boolean>;
   readonly executeTool: (toolCall: ToolCall, signal: AbortSignal) => Promise<void>;
   readonly commitToolCheckpoint: (message: ChatMessage) => Promise<void>;
   readonly renderToolCheckpoint: (message: ChatMessage) => Promise<void>;
   readonly runContinuationStream: (
+    operation: AcceptedChatOperation,
     retryCount: number,
     signal: AbortSignal,
     previous: StreamTurnResult,
