@@ -93,12 +93,15 @@ export const SYSTEMSCULPT_WEBSITE = {
   DOCS: getExternalUrl("https://systemsculpt.com/docs", "http://localhost:3000/docs"),
   SUPPORT: getExternalUrl("https://systemsculpt.com/contact", "http://localhost:3000/contact"),
   LICENSE: getExternalUrl("https://systemsculpt.com/resources?tab=license", "http://localhost:3000/resources?tab=license"),
-  TERMS: getExternalUrl("https://systemsculpt.com/terms", "http://localhost:3000/terms"),
-  PRIVACY: getExternalUrl("https://systemsculpt.com/privacy", "http://localhost:3000/privacy"),
   FEEDBACK: getExternalUrl(
     "https://github.com/SystemSculpt/obsidian-systemsculpt-ai/issues/new?title=SystemSculpt%20Feedback%3A%20&body=Please%20describe%20your%20feedback%3A%0A%0A-%20What%20happened%20or%20what%20would%20you%20like%20to%20see%20improved%3F%0A-%20Steps%20to%20reproduce%20%28if%20a%20bug%29%3A%0A-%20Expected%20behavior%3A%0A-%20Screenshots%20or%20logs%3A%0A%0AEnvironment%3A%0A-%20Obsidian%20version%3A%0A-%20OS%3A%0A-%20SystemSculpt%20AI%20version%3A%0A%0AAdditional%20context%3A",
     "https://github.com/SystemSculpt/obsidian-systemsculpt-ai/issues/new?title=SystemSculpt%20Feedback%3A%20&body=Please%20describe%20your%20feedback%3A%0A%0A-%20What%20happened%20or%20what%20would%20you%20like%20to%20see%20improved%3F%0A-%20Steps%20to%20reproduce%20%28if%20a%20bug%29%3A%0A-%20Expected%20behavior%3A%0A-%20Screenshots%20or%20logs%3A%0A%0AEnvironment%3A%0A-%20Obsidian%20version%3A%0A-%20OS%3A%0A-%20SystemSculpt%20AI%20version%3A%0A%0AAdditional%20context%3A"
   )
+} as const;
+
+export const SYSTEMSCULPT_LEGAL_URLS = {
+  TERMS: getExternalUrl("https://systemsculpt.com/terms", "http://localhost:3000/terms"),
+  PRIVACY: getExternalUrl("https://systemsculpt.com/privacy", "http://localhost:3000/privacy"),
 } as const;
 
 // MCP Documentation

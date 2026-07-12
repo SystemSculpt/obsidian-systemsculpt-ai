@@ -1,6 +1,6 @@
 import { Notice, Setting, TextComponent } from "obsidian";
 import { SystemSculptService } from "../../services/SystemSculptService";
-import { SYSTEMSCULPT_WEBSITE } from "../../constants/externalServices";
+import { SYSTEMSCULPT_LEGAL_URLS, SYSTEMSCULPT_WEBSITE } from "../../constants/externalServices";
 import { checkPremiumUserStatus } from "../../utils/licenseUtils";
 import { SystemSculptSettingTab } from "../SystemSculptSettingTab";
 
@@ -15,7 +15,8 @@ export function renderAccountSection(
   const userStatus = checkPremiumUserStatus(plugin.settings);
   const hasSavedLicense = (plugin.settings.licenseKey || "").trim().length > 0;
 
-  const validateCurrentLicense = async (): Promise<boolean> => {
+  let validateCurrentLicense: () => Promise<boolean>;
+  validateCurrentLicense = async (): Promise<boolean> => {
     const validatingNotice = new Notice("Validating license key...", 0);
     try {
       const success = await plugin.getLicenseManager().validateLicenseKey(true, false);
@@ -287,12 +288,12 @@ export function renderAccountSection(
   const managedDataSetting = new Setting(root).setName("Managed data");
   managedDataSetting.descEl.append("Managed features send request content to SystemSculpt. See ");
   const termsLink = document.createElement("a");
-  termsLink.href = SYSTEMSCULPT_WEBSITE.TERMS;
+  termsLink.href = SYSTEMSCULPT_LEGAL_URLS.TERMS;
   termsLink.target = "_blank";
   termsLink.rel = "noopener noreferrer";
   termsLink.textContent = "Terms";
   const privacyLink = document.createElement("a");
-  privacyLink.href = SYSTEMSCULPT_WEBSITE.PRIVACY;
+  privacyLink.href = SYSTEMSCULPT_LEGAL_URLS.PRIVACY;
   privacyLink.target = "_blank";
   privacyLink.rel = "noopener noreferrer";
   privacyLink.textContent = "Privacy";
