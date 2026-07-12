@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { execFileSync } from 'node:child_process';
-import { generateInventory, generateVerificationV2, verifyCurrent, verifyVerificationV2, verifyDispositionLedger, effectiveDisposition } from './network-egress-inventory.mjs';
+import { generateInventory, generateVerificationV2, generateVerificationV3, verifyCurrent, verifyVerificationV2, verifyVerificationV3, verifyDispositionLedger, effectiveDisposition } from './network-egress-inventory.mjs';
 import { createPluginBuildOptions } from './plugin-build-options.mjs';
 
 function repo(files) {
@@ -128,6 +128,96 @@ test('pure build options preserve the production contract without touching artif
   assert.equal(options.define.__SS_BUILD_STAMP__, '"fixed"');
   assert.ok(options.external.includes('obsidian'));
   assert.deepEqual(fs.readdirSync(sentinel), before);
+});
+
+test('v3 semantic identities are independent of checkout location', () => {
+  const files = { 'src/a.ts': 'import { requestUrl } from "obsidian"; export const run = (url: string) => { fetch(url); return requestUrl({ url }); };\n' };
+  const first = repo(files);
+  const secondParent = fs.mkdtempSync(path.join(os.tmpdir(), 'egress-relocated-parent-'));
+  const second = path.join(secondParent, 'differently-named-checkout');
+  execFileSync('git', ['clone', '-q', first, second]);
+  const ref = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: first, encoding: 'utf8' }).trim();
+  const fixture = writeFixture(first, generateInventory({ root: first, ref, sourceRef: ref }));
+  const v2Path = path.join(first, 'verification-v2.json');
+  const v2 = generateVerificationV2({ root: first, fixture, sourceRef: ref, historicalFixturePath: 'fixture.json' });
+  fs.writeFileSync(v2Path, JSON.stringify(v2, null, 2) + '\n');
+  const options = { fixture, verificationArtifactV2: v2Path, sourceRef: ref, historicalFixturePath: 'fixture.json', priorSemanticCatalogPath: 'verification-v2.json' };
+  const one = generateVerificationV3({ root: first, ...options });
+  const two = generateVerificationV3({ root: second, ...options });
+  assert.deepEqual(one, two);
+  assert.doesNotMatch(JSON.stringify(one), new RegExp(`${first.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')}|${second.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')}`));
+});
+
+test('v3 sorts equivalent declaration sets before hashing', () => {
+  const source = (overloads) => `${overloads}\nfunction transport(value: string | URL) { return fetch(String(value)); }\ntransport("https://a.invalid");\n`;
+  const first = repo({ 'src/a.ts': source('function transport(value: string): Response;\nfunction transport(value: URL): Response;') });
+  const second = repo({ 'src/a.ts': source('function transport(value: URL): Response;\nfunction transport(value: string): Response;') });
+  const firstRef = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: first, encoding: 'utf8' }).trim();
+  const fixture = writeFixture(first, generateInventory({ root: first, ref: firstRef, sourceRef: firstRef }));
+  const v2Path = path.join(first, 'verification-v2.json');
+  fs.writeFileSync(v2Path, JSON.stringify(generateVerificationV2({ root: first, fixture, sourceRef: firstRef, historicalFixturePath: 'fixture.json' }), null, 2) + '\n');
+  const firstArtifact = generateVerificationV3({ root: first, fixture, verificationArtifactV2: v2Path, sourceRef: firstRef, historicalFixturePath: 'fixture.json', priorSemanticCatalogPath: 'verification-v2.json' });
+  const secondRef = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: second, encoding: 'utf8' }).trim();
+  const secondArtifact = generateVerificationV3({ root: second, fixture, verificationArtifactV2: v2Path, sourceRef: secondRef, historicalFixturePath: 'fixture.json', priorSemanticCatalogPath: 'verification-v2.json' });
+  assert.deepEqual(firstArtifact.records.map(record => record.provenance.bindingDeclarationFingerprint), secondArtifact.records.map(record => record.provenance.bindingDeclarationFingerprint));
+});
+
+test('v3 rejects real destination, import, callee, and wrapper-edge mutations', () => {
+  const original = 'import { requestUrl } from "obsidian";\nexport function send(url: string) { return requestUrl({ url: url + "/v1" }); }\nexport const run = () => send("https://a.invalid");\n';
+  const root = repo({ 'src/a.ts': original });
+  const ref = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
+  const fixture = writeFixture(root, generateInventory({ root, ref, sourceRef: ref }));
+  const v2Path = path.join(root, 'verification-v2.json');
+  fs.writeFileSync(v2Path, JSON.stringify(generateVerificationV2({ root, fixture, sourceRef: ref, historicalFixturePath: 'fixture.json' }), null, 2) + '\n');
+  const v3Path = path.join(root, 'verification-v3.json');
+  fs.writeFileSync(v3Path, JSON.stringify(generateVerificationV3({ root, fixture, verificationArtifactV2: v2Path, sourceRef: ref, historicalFixturePath: 'fixture.json', priorSemanticCatalogPath: 'verification-v2.json' }), null, 2) + '\n');
+  const verify = () => verifyVerificationV3({ root, fixture, verificationArtifactV2: v2Path, verificationArtifactV3: v3Path });
+  for (const [mutation, diagnostic] of [
+    [original.replace('/v1', '/v2'), /arguments_changed|destination_changed/],
+    [original.replace('from "obsidian"', 'from "other-transport"'), /import_chain_changed|callee_changed|occurrence_missing/],
+    [original.replace('requestUrl({', 'requestUrl?.({'), /callee_changed|dynamic_or_computed_access|wrapper_chain_changed/],
+    [original.replace('send("https://a.invalid")', 'send("https://b.invalid")'), /wrapper_chain_changed/]
+  ]) { fs.writeFileSync(path.join(root, 'src/a.ts'), mutation); assert.throws(verify, diagnostic); }
+});
+
+test('v3 fails closed on extra, unmapped, and duplicate live occurrences and duplicate artifact IDs', () => {
+  const root = repo({ 'src/a.ts': 'fetch("https://a.invalid");\n' });
+  const ref = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
+  const fixture = writeFixture(root, generateInventory({ root, ref, sourceRef: ref }));
+  const v2Path = path.join(root, 'verification-v2.json');
+  fs.writeFileSync(v2Path, JSON.stringify(generateVerificationV2({ root, fixture, sourceRef: ref, historicalFixturePath: 'fixture.json' }), null, 2) + '\n');
+  const v3Path = path.join(root, 'verification-v3.json');
+  const artifact = generateVerificationV3({ root, fixture, verificationArtifactV2: v2Path, sourceRef: ref, historicalFixturePath: 'fixture.json', priorSemanticCatalogPath: 'verification-v2.json' });
+  fs.writeFileSync(v3Path, JSON.stringify(artifact, null, 2) + '\n');
+  const verify = () => verifyVerificationV3({ root, fixture, verificationArtifactV2: v2Path, verificationArtifactV3: v3Path });
+
+  fs.writeFileSync(path.join(root, 'src/a.ts'), 'fetch("https://a.invalid");\nfetch("https://new.invalid");\n');
+  assert.throws(verify, /unreviewed_occurrence/);
+
+  fs.writeFileSync(path.join(root, 'src/a.ts'), 'fetch("https://a.invalid");\nfetch("https://a.invalid");\n');
+  assert.throws(verify, /duplicate_actual_v3_id|unreviewed_occurrence/);
+
+  fs.writeFileSync(path.join(root, 'src/a.ts'), 'fetch("https://a.invalid");\nnew WebSocket("wss:\/\/unmapped.invalid");\n');
+  assert.throws(verify, /unreviewed_occurrence/);
+
+  fs.writeFileSync(path.join(root, 'src/a.ts'), 'fetch("https://a.invalid");\n');
+  const duplicated = structuredClone(artifact);
+  duplicated.records.push({ ...duplicated.records[0] });
+  fs.writeFileSync(v3Path, JSON.stringify(duplicated, null, 2) + '\n');
+  assert.throws(verify, /duplicate_artifact_v3_id/);
+});
+
+test('integrated Chat commit verifies with v3 from a differently named checkout', () => {
+  const sourceRoot = process.cwd();
+  const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'egress-chat-relocation-'));
+  const root = path.join(parent, 'chat-checkout-with-unrelated-name');
+  execFileSync('git', ['clone', '-q', '--no-checkout', sourceRoot, root]);
+  execFileSync('git', ['checkout', '-q', '478cd5606a578f18dc923e65a36b65a5f601f9c7'], { cwd: root });
+  fs.symlinkSync(path.join(sourceRoot, 'node_modules'), path.join(root, 'node_modules'), 'dir');
+  const v3 = 'testing/fixtures/managed/egress-verification-v3-660e7fe.json';
+  fs.copyFileSync(path.join(sourceRoot, v3), path.join(root, v3));
+  const output = execFileSync(process.execPath, [path.join(sourceRoot, 'scripts/network-egress-inventory.mjs'), 'current', '--source-ref', '478cd5606a578f18dc923e65a36b65a5f601f9c7', '--fixture', 'testing/fixtures/managed/egress-baseline-660e7fe.json'], { cwd: root, encoding: 'utf8', stdio: 'pipe' });
+  assert.match(output, /PASS/);
 });
 
 test('v2 ignores enclosing class edits but detects semantic sink mutations precisely', () => {
