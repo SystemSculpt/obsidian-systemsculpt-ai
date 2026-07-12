@@ -118,4 +118,13 @@ describe("built bundle (main.js)", () => {
     // boundary, which also keeps mobile startup safe.
     expect(dynamicNodeImports).toEqual([]);
   });
+
+  it("does not ship the retired generic HTTP MCP runtime", () => {
+    const code = readFileSync(BUNDLE_PATH, "utf8");
+
+    expect(code).not.toContain("HTTPAdapter");
+    expect(code).not.toContain('"tools/list"');
+    expect(code).not.toContain('"tools/call"');
+    expect(code).not.toContain("Invalid HTTP server configuration");
+  });
 });

@@ -572,6 +572,31 @@ describe("SystemSculptService", () => {
     expect(result.error?.code).toBe("TOOL_CANCEL_REQUESTED_OUTCOME_UNKNOWN");
   });
 
+  it("preserves the bounded retired HTTP MCP code", async () => {
+    const plugin = createPlugin();
+    const service = SystemSculptService.getInstance(plugin);
+    mcpService.executeTool.mockRejectedValueOnce(Object.assign(
+      new Error("Custom HTTP MCP servers are no longer supported."),
+      { code: "unsupported_retired_http_mcp" },
+    ));
+
+    const result = await service.executeHostedToolCall({
+      toolCall: {
+        id: "call_retired_http",
+        type: "function",
+        function: { name: "legacy-http_any_tool", arguments: "{}" },
+      } as any,
+    });
+
+    expect(result).toMatchObject({
+      success: false,
+      error: {
+        code: "unsupported_retired_http_mcp",
+        message: "Custom HTTP MCP servers are no longer supported.",
+      },
+    });
+  });
+
   it("returns a structured failure for invalid hosted tool call arguments", async () => {
     const plugin = createPlugin();
     const service = SystemSculptService.getInstance(plugin);

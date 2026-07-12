@@ -613,6 +613,246 @@
       },
       "previousTransitionHash": "0c3ca7518f45b5865e8d315f2fee8d4a0f06855357468be7cf896c766da6da79",
       "transitionHash": "bae8cca1dda3def6dfbc12f74113affa74542b5e3c447d30707bc714a9fd3233"
+    },
+    {
+      "sequence": 5,
+      "historicalRecordId": "7f43aec1faa1a2fade716a85d86d85355caa5fa12f701c10a7fa53e43184bb5d",
+      "v2OccurrenceId": "10c5b7e1d906939dcd8a288ee2039919a4d6d2223d0d02411157934233c7d056",
+      "ownerPlan": "027",
+      "from": "present",
+      "to": "removed",
+      "predecessorSourceTree": "28487eac818879131b9f21f33362f604c7545381",
+      "stagedSourceTree": "5704aeb58a94ece6c097b935dff8e161b4018d8a",
+      "sourceEvidence": [
+        {
+          "path": "src/__tests__/mcp-http-retirement.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "9db1671e77d57fe844746939f7dc7be40609bc91"
+        },
+        {
+          "path": "src/mcp/MCPService.ts",
+          "beforeGitBlobOrNull": "4e0959d72d963981f7774d5a7a4b0388916688ef",
+          "afterGitBlobOrNull": "8f57068f5b0db85c119389e120a055246af836d9"
+        },
+        {
+          "path": "src/mcp/__tests__/MCPService.test.ts",
+          "beforeGitBlobOrNull": "2dc5656d1d8d46779c11ce2469d94dabcd225677",
+          "afterGitBlobOrNull": "161ff6f501f98685f6589f91b246ebd395b123e0"
+        },
+        {
+          "path": "src/mcp/adapters/HTTPAdapter.ts",
+          "beforeGitBlobOrNull": "9317116617e11081c949a04c4b36a5f69bb6d58b",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/mcp/adapters/__tests__/HTTPAdapter.test.ts",
+          "beforeGitBlobOrNull": "ab515ee6fd7c040032e431f4cac0479a8019b197",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/SystemSculptService.ts",
+          "beforeGitBlobOrNull": "feaa07c63e7f3526fa8d0611dc60df8e8f0e2e9c",
+          "afterGitBlobOrNull": "7a15db08319292c049de42a6e8539ac7900aa4f4"
+        },
+        {
+          "path": "src/services/__tests__/SystemSculptService.test.ts",
+          "beforeGitBlobOrNull": "a3740cdd8cd29f1da78794b8de6f401cc7e747ae",
+          "afterGitBlobOrNull": "e8c956ece149693e57994fd7de555516b5387281"
+        },
+        {
+          "path": "src/views/chatview/InputHandler.ts",
+          "beforeGitBlobOrNull": "ce35b50a886eaf7d640ae6d51c94f6d220c29f35",
+          "afterGitBlobOrNull": "ce35b50a886eaf7d640ae6d51c94f6d220c29f35"
+        }
+      ],
+      "predecessorLedger": {
+        "gitBlob": "1c038f8549aa9980d2c000b929a6cf056c077140",
+        "sha256": "6c1545ee03a590cbf993693ac94add62441c2dbf483427736d7a42138082d520",
+        "transitionCount": 5,
+        "finalTransitionHash": "bae8cca1dda3def6dfbc12f74113affa74542b5e3c447d30707bc714a9fd3233"
+      },
+      "previousTransitionHash": "bae8cca1dda3def6dfbc12f74113affa74542b5e3c447d30707bc714a9fd3233",
+      "transitionHash": "66a6d0fdc3f403352731d8eb46e5e6f6ca0f5576e38935e401f4b15246305f72"
+    },
+    {
+      "sequence": 6,
+      "historicalRecordId": "5d0adf88620f850aa4e0abb2759fbbc444f5f6bfeabc9e70ecc0bdd23c2d6c66",
+      "v2OccurrenceId": "ce5aeb0cc53ce9eb53492747a4b1b9591e47a0eb8b78a70c4ef3ba9a66f0f260",
+      "ownerPlan": "027",
+      "from": "present",
+      "to": "removed",
+      "predecessorSourceTree": "28487eac818879131b9f21f33362f604c7545381",
+      "stagedSourceTree": "5704aeb58a94ece6c097b935dff8e161b4018d8a",
+      "sourceEvidence": [
+        {
+          "path": "src/__tests__/mcp-http-retirement.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "9db1671e77d57fe844746939f7dc7be40609bc91"
+        },
+        {
+          "path": "src/mcp/MCPService.ts",
+          "beforeGitBlobOrNull": "4e0959d72d963981f7774d5a7a4b0388916688ef",
+          "afterGitBlobOrNull": "8f57068f5b0db85c119389e120a055246af836d9"
+        },
+        {
+          "path": "src/mcp/__tests__/MCPService.test.ts",
+          "beforeGitBlobOrNull": "2dc5656d1d8d46779c11ce2469d94dabcd225677",
+          "afterGitBlobOrNull": "161ff6f501f98685f6589f91b246ebd395b123e0"
+        },
+        {
+          "path": "src/mcp/adapters/HTTPAdapter.ts",
+          "beforeGitBlobOrNull": "9317116617e11081c949a04c4b36a5f69bb6d58b",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/mcp/adapters/__tests__/HTTPAdapter.test.ts",
+          "beforeGitBlobOrNull": "ab515ee6fd7c040032e431f4cac0479a8019b197",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/SystemSculptService.ts",
+          "beforeGitBlobOrNull": "feaa07c63e7f3526fa8d0611dc60df8e8f0e2e9c",
+          "afterGitBlobOrNull": "7a15db08319292c049de42a6e8539ac7900aa4f4"
+        },
+        {
+          "path": "src/services/__tests__/SystemSculptService.test.ts",
+          "beforeGitBlobOrNull": "a3740cdd8cd29f1da78794b8de6f401cc7e747ae",
+          "afterGitBlobOrNull": "e8c956ece149693e57994fd7de555516b5387281"
+        },
+        {
+          "path": "src/views/chatview/InputHandler.ts",
+          "beforeGitBlobOrNull": "ce35b50a886eaf7d640ae6d51c94f6d220c29f35",
+          "afterGitBlobOrNull": "ce35b50a886eaf7d640ae6d51c94f6d220c29f35"
+        }
+      ],
+      "predecessorLedger": {
+        "gitBlob": "1c038f8549aa9980d2c000b929a6cf056c077140",
+        "sha256": "6c1545ee03a590cbf993693ac94add62441c2dbf483427736d7a42138082d520",
+        "transitionCount": 5,
+        "finalTransitionHash": "bae8cca1dda3def6dfbc12f74113affa74542b5e3c447d30707bc714a9fd3233"
+      },
+      "previousTransitionHash": "66a6d0fdc3f403352731d8eb46e5e6f6ca0f5576e38935e401f4b15246305f72",
+      "transitionHash": "2a8c7c76083d27bd667b8617757b871bae56701c1b32aa4955459401b7acd8c4"
+    },
+    {
+      "sequence": 7,
+      "historicalRecordId": "2fca44e549dee18aa18e9131fc599851d7506bc97ef441aeaf17feb817dbe4cc",
+      "v2OccurrenceId": "64a539aaaf4162fb849a75659ab296310dc798146f0a5bb2ee11d5c27c410d97",
+      "ownerPlan": "027",
+      "from": "present",
+      "to": "removed",
+      "predecessorSourceTree": "28487eac818879131b9f21f33362f604c7545381",
+      "stagedSourceTree": "5704aeb58a94ece6c097b935dff8e161b4018d8a",
+      "sourceEvidence": [
+        {
+          "path": "src/__tests__/mcp-http-retirement.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "9db1671e77d57fe844746939f7dc7be40609bc91"
+        },
+        {
+          "path": "src/mcp/MCPService.ts",
+          "beforeGitBlobOrNull": "4e0959d72d963981f7774d5a7a4b0388916688ef",
+          "afterGitBlobOrNull": "8f57068f5b0db85c119389e120a055246af836d9"
+        },
+        {
+          "path": "src/mcp/__tests__/MCPService.test.ts",
+          "beforeGitBlobOrNull": "2dc5656d1d8d46779c11ce2469d94dabcd225677",
+          "afterGitBlobOrNull": "161ff6f501f98685f6589f91b246ebd395b123e0"
+        },
+        {
+          "path": "src/mcp/adapters/HTTPAdapter.ts",
+          "beforeGitBlobOrNull": "9317116617e11081c949a04c4b36a5f69bb6d58b",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/mcp/adapters/__tests__/HTTPAdapter.test.ts",
+          "beforeGitBlobOrNull": "ab515ee6fd7c040032e431f4cac0479a8019b197",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/SystemSculptService.ts",
+          "beforeGitBlobOrNull": "feaa07c63e7f3526fa8d0611dc60df8e8f0e2e9c",
+          "afterGitBlobOrNull": "7a15db08319292c049de42a6e8539ac7900aa4f4"
+        },
+        {
+          "path": "src/services/__tests__/SystemSculptService.test.ts",
+          "beforeGitBlobOrNull": "a3740cdd8cd29f1da78794b8de6f401cc7e747ae",
+          "afterGitBlobOrNull": "e8c956ece149693e57994fd7de555516b5387281"
+        },
+        {
+          "path": "src/views/chatview/InputHandler.ts",
+          "beforeGitBlobOrNull": "ce35b50a886eaf7d640ae6d51c94f6d220c29f35",
+          "afterGitBlobOrNull": "ce35b50a886eaf7d640ae6d51c94f6d220c29f35"
+        }
+      ],
+      "predecessorLedger": {
+        "gitBlob": "1c038f8549aa9980d2c000b929a6cf056c077140",
+        "sha256": "6c1545ee03a590cbf993693ac94add62441c2dbf483427736d7a42138082d520",
+        "transitionCount": 5,
+        "finalTransitionHash": "bae8cca1dda3def6dfbc12f74113affa74542b5e3c447d30707bc714a9fd3233"
+      },
+      "previousTransitionHash": "2a8c7c76083d27bd667b8617757b871bae56701c1b32aa4955459401b7acd8c4",
+      "transitionHash": "c0a4bdec75e43e1101c39e2ecb85c0e3fee12ef6f62a6d5a625649348d306ebb"
+    },
+    {
+      "sequence": 8,
+      "historicalRecordId": "2e9fab54cfc30c79d5a79ccbd00fa734346650d920d61e05ebf866d2cab564f0",
+      "v2OccurrenceId": "5662c293d400759cae4112de0bd675a5de032f94ac4a6460f983429ea27f3a28",
+      "ownerPlan": "027",
+      "from": "present",
+      "to": "removed",
+      "predecessorSourceTree": "28487eac818879131b9f21f33362f604c7545381",
+      "stagedSourceTree": "5704aeb58a94ece6c097b935dff8e161b4018d8a",
+      "sourceEvidence": [
+        {
+          "path": "src/__tests__/mcp-http-retirement.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "9db1671e77d57fe844746939f7dc7be40609bc91"
+        },
+        {
+          "path": "src/mcp/MCPService.ts",
+          "beforeGitBlobOrNull": "4e0959d72d963981f7774d5a7a4b0388916688ef",
+          "afterGitBlobOrNull": "8f57068f5b0db85c119389e120a055246af836d9"
+        },
+        {
+          "path": "src/mcp/__tests__/MCPService.test.ts",
+          "beforeGitBlobOrNull": "2dc5656d1d8d46779c11ce2469d94dabcd225677",
+          "afterGitBlobOrNull": "161ff6f501f98685f6589f91b246ebd395b123e0"
+        },
+        {
+          "path": "src/mcp/adapters/HTTPAdapter.ts",
+          "beforeGitBlobOrNull": "9317116617e11081c949a04c4b36a5f69bb6d58b",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/mcp/adapters/__tests__/HTTPAdapter.test.ts",
+          "beforeGitBlobOrNull": "ab515ee6fd7c040032e431f4cac0479a8019b197",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/SystemSculptService.ts",
+          "beforeGitBlobOrNull": "feaa07c63e7f3526fa8d0611dc60df8e8f0e2e9c",
+          "afterGitBlobOrNull": "7a15db08319292c049de42a6e8539ac7900aa4f4"
+        },
+        {
+          "path": "src/services/__tests__/SystemSculptService.test.ts",
+          "beforeGitBlobOrNull": "a3740cdd8cd29f1da78794b8de6f401cc7e747ae",
+          "afterGitBlobOrNull": "e8c956ece149693e57994fd7de555516b5387281"
+        },
+        {
+          "path": "src/views/chatview/InputHandler.ts",
+          "beforeGitBlobOrNull": "ce35b50a886eaf7d640ae6d51c94f6d220c29f35",
+          "afterGitBlobOrNull": "ce35b50a886eaf7d640ae6d51c94f6d220c29f35"
+        }
+      ],
+      "predecessorLedger": {
+        "gitBlob": "1c038f8549aa9980d2c000b929a6cf056c077140",
+        "sha256": "6c1545ee03a590cbf993693ac94add62441c2dbf483427736d7a42138082d520",
+        "transitionCount": 5,
+        "finalTransitionHash": "bae8cca1dda3def6dfbc12f74113affa74542b5e3c447d30707bc714a9fd3233"
+      },
+      "previousTransitionHash": "c0a4bdec75e43e1101c39e2ecb85c0e3fee12ef6f62a6d5a625649348d306ebb",
+      "transitionHash": "fa555cb9aab17626f55ae54dbe783f863ce87188543661689e17a61d1ec5318f"
     }
   ]
 }

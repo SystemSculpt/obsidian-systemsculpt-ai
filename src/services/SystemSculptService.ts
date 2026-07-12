@@ -1594,12 +1594,14 @@ export class SystemSculptService {
         data,
       };
     } catch (error) {
-      const cancellationCode = (error as { code?: unknown })?.code;
+      const executionCode = (error as { code?: unknown })?.code;
       return {
         success: false,
         error: {
-          code: cancellationCode === 'TOOL_CANCELLED_BEFORE_START' || cancellationCode === 'TOOL_CANCEL_REQUESTED_OUTCOME_UNKNOWN'
-            ? cancellationCode
+          code: executionCode === 'TOOL_CANCELLED_BEFORE_START'
+            || executionCode === 'TOOL_CANCEL_REQUESTED_OUTCOME_UNKNOWN'
+            || executionCode === 'unsupported_retired_http_mcp'
+            ? executionCode
             : "TOOL_EXECUTION_FAILED",
           message: error instanceof Error ? error.message : `Tool execution failed for ${functionName}.`,
           details: error,

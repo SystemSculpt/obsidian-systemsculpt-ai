@@ -7,7 +7,6 @@ import type { SystemSculptSettings } from "../types";
 
 // Adapters
 import { FilesystemAdapter } from "./adapters/FilesystemAdapter";
-import { HTTPAdapter } from "./adapters/HTTPAdapter";
 import { YouTubeAdapter } from "./adapters/YouTubeAdapter";
 
 export interface MCPExecutionOptions {
@@ -17,7 +16,10 @@ export interface MCPExecutionOptions {
 
 export class MCPToolExecutionError extends Error {
   constructor(
-    public readonly code: 'TOOL_CANCELLED_BEFORE_START' | 'TOOL_CANCEL_REQUESTED_OUTCOME_UNKNOWN',
+    public readonly code:
+      | 'TOOL_CANCELLED_BEFORE_START'
+      | 'TOOL_CANCEL_REQUESTED_OUTCOME_UNKNOWN'
+      | 'unsupported_retired_http_mcp',
     message: string,
     public readonly cause?: unknown,
   ) {
@@ -28,6 +30,7 @@ export class MCPToolExecutionError extends Error {
 
 interface MCPConnectionResult {
   success: boolean;
+  code?: 'unsupported_retired_http_mcp';
   error?: string;
   tools?: MCPToolInfo[];
   timestamp: number;
@@ -45,15 +48,13 @@ export class MCPService {
   private filesystemRootAliases: string[] = [];
 
   // Adapter instances keyed by server id
-  private adapters: Map<string, FilesystemAdapter | HTTPAdapter | YouTubeAdapter> = new Map();
+  private adapters: Map<string, FilesystemAdapter | YouTubeAdapter> = new Map();
 
   // Static caches shared across instances
   private static connectionTestCache: Map<string, { result: MCPConnectionResult; timestamp: number }> = new Map();
   private static connectionTestPromises: Map<string, Promise<MCPConnectionResult>> = new Map();
 
   private readonly CACHE_DURATION = 30 * 60 * 1000; // 30 minutes
-  private requestIdCounter = 0;
-
   constructor(plugin: SystemSculptPlugin, app: App, settingsProvider?: () => SystemSculptSettings) {
     this.plugin = plugin;
     this.app = app;
@@ -61,19 +62,17 @@ export class MCPService {
     this.settingsProvider = settingsProvider ?? (() => this.plugin.settings);
   }
 
-  private getAdapterForServer(server: MCPServer): FilesystemAdapter | HTTPAdapter | YouTubeAdapter {
+  private getAdapterForServer(server: MCPServer): FilesystemAdapter | YouTubeAdapter {
     const existing = this.adapters.get(server.id);
     if (existing) return existing;
 
-    let adapter: FilesystemAdapter | HTTPAdapter | YouTubeAdapter;
+    let adapter: FilesystemAdapter | YouTubeAdapter;
     if (server.transport === "internal" && server.id === "mcp-filesystem") {
       adapter = new FilesystemAdapter(this.plugin, this.app);
     } else if (server.transport === "internal" && server.id === "mcp-youtube") {
       adapter = new YouTubeAdapter(this.plugin, this.app);
-    } else if (server.transport === "http") {
-      adapter = new HTTPAdapter(server, this.plugin, this.app, () => ++this.requestIdCounter);
     } else {
-      throw new Error("Only HTTP and internal transports are currently supported");
+      throw new Error("Only built-in internal MCP servers are supported");
     }
 
     this.adapters.set(server.id, adapter);
@@ -86,6 +85,15 @@ export class MCPService {
   }
 
   async testConnection(server: MCPServer): Promise<MCPConnectionResult> {
+    if (server.transport === "http") {
+      return {
+        success: false,
+        code: 'unsupported_retired_http_mcp',
+        error: 'Custom HTTP MCP servers are no longer supported.',
+        timestamp: Date.now(),
+      };
+    }
+
     const cached = MCPService.connectionTestCache.get(server.id);
     if (cached && Date.now() - cached.result.timestamp < this.CACHE_DURATION) {
       return cached.result;
@@ -151,16 +159,8 @@ export class MCPService {
     // Internal servers (filesystem, youtube) are ALWAYS available - no settings checks
     const internalServers = this.getInternalServers();
 
-    // Custom HTTP servers from settings (keep isEnabled check for user-configured servers)
-    const settings = this.settingsProvider();
-    const customServers = (settings.mcpServers || []).filter(
-      (server) => server.transport === "http" && server.isEnabled
-    );
-
-    const allServers = [...internalServers, ...customServers];
-
     const serverToolsArrays = await Promise.all(
-      allServers.map(async (server) => {
+      internalServers.map(async (server) => {
         try {
           const connectionResult = await this.testConnection(server);
           if (!connectionResult.success || !connectionResult.tools) return [] as OpenAITool[];
@@ -242,16 +242,22 @@ export class MCPService {
       // Use hardcoded internal server definition
       server = this.getInternalServers().find(s => s.id === serverId)!;
     } else {
-      // Look up custom server from settings
+      // Legacy entries remain byte-compatible in settings until the closed v6
+      // migration, but they are no longer executable.
       const settings = this.settingsProvider();
-      const customServer = settings.mcpServers.find(s => s.id === serverId);
-      if (!customServer) throw new Error(`MCP server not found: ${serverId}`);
-      if (!customServer.isEnabled) throw new Error(`MCP server is disabled: ${customServer.name}`);
-      server = customServer;
+      const retiredServer = (settings.mcpServers || []).find(
+        (candidate) => candidate.id === serverId && candidate.transport === "http",
+      );
+      if (retiredServer) {
+        throw new MCPToolExecutionError(
+          'unsupported_retired_http_mcp',
+          'Custom HTTP MCP servers are no longer supported.',
+        );
+      }
+      throw new Error(`MCP server not found: ${serverId}`);
     }
 
     const adapter = this.getAdapterForServer(server);
-    // @ts-ignore - HTTPAdapter ignores chatView param.
     const mappedArgs = serverId === "mcp-filesystem"
       ? this.mapFilesystemArgs(actualToolName, args)
       : args;
@@ -264,14 +270,7 @@ export class MCPService {
     // Always include internal servers
     const internalServers = this.getInternalServers();
 
-    // Include enabled custom HTTP servers from settings
-    const settings = this.settingsProvider();
-    const customServers = (settings.mcpServers || []).filter(
-      (server) => server.transport === "http" && server.isEnabled
-    );
-
-    const allServers = [...internalServers, ...customServers];
-    const testResults = await Promise.all(allServers.map(async (server) => {
+    const testResults = await Promise.all(internalServers.map(async (server) => {
       const result = await this.testConnection(server);
       return { serverId: server.id, result };
     }));
