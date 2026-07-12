@@ -20,26 +20,33 @@ class MemoryAdapter {
 }
 
 const bytes = (value: string) => new TextEncoder().encode(value).buffer;
-const location = (adapter: MemoryAdapter, extra: Record<string, unknown> = {}) => ({
-  adapter: adapter as any,
-  configDirectory: ".obsidian",
-  pluginManifest: { id: "systemsculpt-ai", dir: ".obsidian/plugins/systemsculpt-ai" },
-  ...extra,
-});
+const installedPlugin = (adapter: MemoryAdapter) => ({
+  app: { vault: { configDir: ".obsidian", adapter } },
+  manifest: { id: "systemsculpt-ai", dir: ".obsidian/plugins/systemsculpt-ai" },
+}) as any;
 
 describe("ManagedDocumentLocalStaging", () => {
   it("derives the opaque root from installed plugin identity and rejects caller-selected roots", async () => {
     const adapter = new MemoryAdapter();
-    const staging = new ManagedDocumentLocalStaging(location(adapter));
+    const staging = new ManagedDocumentLocalStaging(installedPlugin(adapter));
     await staging.stage("operation-secret-name", [{ kind: "markdown", bytes: bytes("private") }]);
     expect([...adapter.files.keys()].every((path) => path.startsWith(".obsidian/plugins/systemsculpt-ai/.managed-document-staging/"))).toBe(true);
-    expect(() => new ManagedDocumentLocalStaging({ ...location(adapter), pluginManifest: { id: "systemsculpt-ai", dir: "arbitrary/root" } }))
-      .toThrow(ManagedDocumentLocalStagingError);
+    const callsBefore = adapter.calls.length;
+    expect(() => new ManagedDocumentLocalStaging({
+      adapter,
+      configDirectory: "alternate",
+      pluginManifest: { id: "systemsculpt-ai", dir: "alternate/plugins/systemsculpt-ai" },
+    } as any)).toThrow(ManagedDocumentLocalStagingError);
+    expect(() => new ManagedDocumentLocalStaging({
+      app: { vault: { configDir: ".obsidian", adapter } },
+      manifest: { id: "alternate-plugin", dir: ".obsidian/plugins/alternate-plugin" },
+    } as any)).toThrow(ManagedDocumentLocalStagingError);
+    expect(adapter.calls).toHaveLength(callsBefore);
   });
 
   it("writes opaque verified artifacts and redacted immutable manifest generations", async () => {
     const adapter = new MemoryAdapter();
-    const staging = new ManagedDocumentLocalStaging(location(adapter));
+    const staging = new ManagedDocumentLocalStaging(installedPlugin(adapter));
     const metadata = await staging.stage("operation-secret-name", [
       { kind: "markdown", bytes: bytes("# private output") },
       { kind: "image", bytes: bytes("private image") },
@@ -56,7 +63,7 @@ describe("ManagedDocumentLocalStaging", () => {
 
   it("keeps the previous valid manifest selectable when a later generation write or rename fails", async () => {
     const adapter = new MemoryAdapter();
-    const staging = new ManagedDocumentLocalStaging(location(adapter));
+    const staging = new ManagedDocumentLocalStaging(installedPlugin(adapter));
     const metadata = await staging.stage("operation-1", [{ kind: "markdown", bytes: bytes("good") }]);
     const validManifestCount = [...adapter.files.keys()].filter((path) => /manifest-\d{6}\.json$/.test(path)).length;
     adapter.fail = (operation) => operation === "rename";
@@ -68,7 +75,7 @@ describe("ManagedDocumentLocalStaging", () => {
 
   it("ignores a corrupt newest immutable manifest and selects an older valid ready generation", async () => {
     const adapter = new MemoryAdapter();
-    const staging = new ManagedDocumentLocalStaging(location(adapter));
+    const staging = new ManagedDocumentLocalStaging(installedPlugin(adapter));
     const metadata = await staging.stage("operation-1", [{ kind: "markdown", bytes: bytes("good") }]);
     const directory = [...adapter.directories].find((path) => path.includes(".managed-document-staging/") && !path.endsWith("staging"))!;
     adapter.files.set(`${directory}/manifest-999999.json`, "{");
@@ -77,7 +84,7 @@ describe("ManagedDocumentLocalStaging", () => {
 
   it("blocks corrupt staged bytes instead of returning them", async () => {
     const adapter = new MemoryAdapter();
-    const staging = new ManagedDocumentLocalStaging(location(adapter));
+    const staging = new ManagedDocumentLocalStaging(installedPlugin(adapter));
     const metadata = await staging.stage("operation-1", [{ kind: "markdown", bytes: bytes("good") }]);
     const artifactPath = [...adapter.files.keys()].find((path) => path.endsWith(metadata[0].id))!;
     adapter.files.set(artifactPath, bytes("evil"));
@@ -97,7 +104,7 @@ describe("ManagedDocumentLocalStaging", () => {
         return Array.from(new Uint8Array(result), (byte) => byte.toString(16).padStart(2, "0")).join("");
       };
       adapter.after = (operation) => { if (operation === boundary) controller.abort(); };
-      const staging = new ManagedDocumentLocalStaging(location(adapter, { digest }));
+      const staging = new ManagedDocumentLocalStaging(installedPlugin(adapter), { digest });
       await expect(staging.stage("operation-1", [{ kind: "markdown", bytes: bytes("data") }], controller.signal))
         .rejects.toMatchObject({ name: "AbortError" });
       const callsAtAbort = adapter.calls.length;
@@ -108,7 +115,7 @@ describe("ManagedDocumentLocalStaging", () => {
 
   it.each(["list", "read", "readBinary", "digest"])("fences verified reads after awaited %s", async (boundary) => {
     const adapter = new MemoryAdapter();
-    const staging = new ManagedDocumentLocalStaging(location(adapter));
+    const staging = new ManagedDocumentLocalStaging(installedPlugin(adapter));
     const metadata = await staging.stage("operation-1", [{ kind: "markdown", bytes: bytes("data") }]);
     const controller = new AbortController();
     let digestCalls = 0;
@@ -119,7 +126,7 @@ describe("ManagedDocumentLocalStaging", () => {
       return Array.from(new Uint8Array(result), (byte) => byte.toString(16).padStart(2, "0")).join("");
     };
     adapter.after = (operation) => { if (operation === boundary) controller.abort(); };
-    const reader = new ManagedDocumentLocalStaging(location(adapter, { digest }));
+    const reader = new ManagedDocumentLocalStaging(installedPlugin(adapter), { digest });
     await expect(reader.readVerified("operation-1", metadata, controller.signal)).rejects.toMatchObject({ name: "AbortError" });
   });
 });

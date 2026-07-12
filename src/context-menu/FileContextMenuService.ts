@@ -469,9 +469,9 @@ export class FileContextMenuService {
 
       const extractionPath = await this.documentProcessor.processDocument(file, {
         onProgress: (event) => {
-          if (controller.signal.aborted || this.activeDocumentConversion !== controller) return;
+          if (controller.signal.aborted) return;
           this.handleProgressEvent(file, event);
-          if (controller.signal.aborted || this.activeDocumentConversion !== controller) return;
+          if (controller.signal.aborted) return;
           modalHandle?.updateProgress(event);
         },
         showNotices: false,

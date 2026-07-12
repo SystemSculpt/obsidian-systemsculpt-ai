@@ -259,17 +259,6 @@ const bootstrap = (
     const entry = menu.recordedItems.find((item) => item.title === "Convert to Markdown");
     expect(entry).toBeDefined();
 
-    const progressEvent = {
-      stage: "uploading",
-      progress: 20,
-      label: "Uploading document",
-      flow: "document",
-    } as any;
-    documentProcessor.processDocument.mockImplementationOnce(async (_file: TFile, options: any) => {
-      options.onProgress?.(progressEvent);
-      return "site/extracted.md";
-    });
-
     await entry!.onClick?.();
 
     expect(processingModalLauncher).toHaveBeenCalledWith(
@@ -281,6 +270,16 @@ const bootstrap = (
 
     const [, options] = documentProcessor.processDocument.mock.calls[0];
     expect(options?.onProgress).toBeDefined();
+
+    const progressEvent = {
+      stage: "uploading",
+      progress: 20,
+      label: "Uploading document",
+      flow: "document",
+    } as any;
+
+    options.onProgress?.(progressEvent);
+
     expect(modalHandle.updateProgress).toHaveBeenCalledWith(progressEvent);
     expect(modalHandle.markSuccess).toHaveBeenCalledWith(
       expect.objectContaining({

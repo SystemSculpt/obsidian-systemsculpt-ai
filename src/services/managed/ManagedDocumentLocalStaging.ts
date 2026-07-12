@@ -1,4 +1,4 @@
-import type { DataAdapter } from "obsidian";
+import type SystemSculptPlugin from "../../main";
 
 const STAGING_DIRECTORY = ".managed-document-staging";
 const MANIFEST_PATTERN = /\/manifest-(\d{6})\.json$/;
@@ -21,10 +21,7 @@ interface ManagedDocumentStagingManifest {
   artifacts: ManagedDocumentStagedArtifact[];
 }
 
-export interface ManagedDocumentStagingLocation {
-  adapter: DataAdapter;
-  configDirectory: string;
-  pluginManifest: { id: string; dir?: string };
+export interface ManagedDocumentStagingTestSeam {
   digest?: (bytes: ArrayBuffer) => Promise<string>;
 }
 
@@ -43,19 +40,20 @@ export class ManagedDocumentLocalStagingError extends Error {
  * crash recovery; this module deliberately makes no physical flush guarantee.
  */
 export class ManagedDocumentLocalStaging {
-  private readonly adapter: DataAdapter;
+  private readonly adapter: SystemSculptPlugin["app"]["vault"]["adapter"];
   private readonly root: string;
   private readonly digest: (bytes: ArrayBuffer) => Promise<string>;
 
-  constructor(location: ManagedDocumentStagingLocation) {
-    this.adapter = location.adapter;
-    this.digest = location.digest ?? sha256;
-    const configDirectory = normalizeRelativePath(location.configDirectory);
-    const pluginId = normalizePluginId(location.pluginManifest.id);
+  constructor(plugin: SystemSculptPlugin, testSeam: ManagedDocumentStagingTestSeam = {}) {
+    const configDirectory = normalizeRelativePath(plugin?.app?.vault?.configDir);
+    const pluginId = normalizePluginId(plugin?.manifest?.id);
+    if (pluginId !== "systemsculpt-ai") invalidRequest();
     const derivedDirectory = `${configDirectory}/plugins/${pluginId}`;
-    if (location.pluginManifest.dir !== undefined && normalizeRelativePath(location.pluginManifest.dir) !== derivedDirectory) {
+    if (plugin.manifest.dir !== undefined && normalizeRelativePath(plugin.manifest.dir) !== derivedDirectory) {
       throw new ManagedDocumentLocalStagingError("invalid_staging_request", "Plugin manifest directory does not match the installed plugin location.");
     }
+    this.adapter = plugin.app.vault.adapter;
+    this.digest = testSeam.digest ?? sha256;
     this.root = `${derivedDirectory}/${STAGING_DIRECTORY}`;
   }
 
@@ -216,14 +214,15 @@ export class ManagedDocumentLocalStaging {
   }
 }
 
-function normalizeRelativePath(value: string): string {
+function normalizeRelativePath(value: unknown): string {
+  if (typeof value !== "string") invalidRequest();
   const normalized = value.replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/+$/, "");
   if (!normalized || normalized.startsWith("/") || normalized.split("/").some((part) => part === ".." || part === "." || !part)) invalidRequest();
   return normalized;
 }
 
-function normalizePluginId(value: string): string {
-  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value)) invalidRequest();
+function normalizePluginId(value: unknown): string {
+  if (typeof value !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value)) invalidRequest();
   return value;
 }
 
