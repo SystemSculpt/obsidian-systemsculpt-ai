@@ -48,7 +48,12 @@ describe("ChatTurn initial streaming migration", () => {
     await h.turn.run(user);
     expect(h.order).toEqual(["assistant"]);
     expect(h.turn.acceptedOperation).toBe(acceptedOperation);
-    expect(h.runInitialStream).toHaveBeenCalledWith(acceptedOperation, 0, h.turn.signal);
+    expect(h.runInitialStream).toHaveBeenCalledWith(
+      acceptedOperation,
+      0,
+      h.turn.signal,
+      expect.objectContaining({ isOpen: expect.any(Function) }),
+    );
   });
 
   test("retries empty and reasoning-only initial output without committing an assistant", async () => {
@@ -60,7 +65,19 @@ describe("ChatTurn initial streaming migration", () => {
     await h.turn.run(user);
     expect(h.runInitialStream).toHaveBeenCalledTimes(3);
     expect(h.commitAssistant).toHaveBeenCalledTimes(1);
-    expect(h.commitAssistant).toHaveBeenCalledWith(expect.objectContaining({ content: "recovered" }));
+    expect(h.commitAssistant).toHaveBeenCalledWith(
+      expect.objectContaining({ content: "recovered" }),
+      expect.objectContaining({ isOpen: expect.any(Function) }),
+    );
+  });
+
+  test("does not automatically retry an empty managed stream", async () => {
+    const h = harness([{ completionState: "empty", message: assistant("") }]);
+    (h.turn as any).effects.retryEmptyStream = false;
+    await expect(h.turn.run(user)).rejects.toThrow("empty response");
+    expect(h.runInitialStream).toHaveBeenCalledTimes(1);
+    expect(h.commitAssistant).not.toHaveBeenCalled();
+    expect(h.turn.outcome).toBe("retry_exhausted");
   });
 
   test("completes a no-tool answer", async () => {

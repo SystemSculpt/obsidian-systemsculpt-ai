@@ -6,6 +6,8 @@ import { ChatView } from "../ChatView";
 import { ERROR_CODES, SystemSculptError } from "../../../utils/errors";
 import { TOOL_LOOP_ERROR_CODE } from "../../../utils/tooling";
 import type { ChatMessage, MessagePart } from "../../../types";
+import type { AcceptedChatOperation } from "../../../services/managed/ManagedTypes";
+import { messageHandling } from "../messageHandling";
 
 const contentPart = (id: string, text: string, timestamp = 1): MessagePart => ({
   id,
@@ -53,6 +55,81 @@ const createRecoverableView = (messages: ChatMessage[]) => {
 };
 
 describe("ChatView committed turn recovery", () => {
+  it("suppresses every late projection when abort wins during a managed 409 durable reload", async () => {
+    const view = Object.create(ChatView.prototype) as ChatView & Record<string, any>;
+    const abort = new AbortController();
+    const user = { role: "user", content: "accepted", message_id: "user-1" } as ChatMessage;
+    const operation = {
+      durableTurnId: "user-1",
+      initialDurableSnapshot: { chatId: "chat-recovery", version: 1, messages: [user] },
+    } as AcceptedChatOperation;
+    let releaseRecover!: () => void;
+    const transcript = {
+      snapshot: jest.fn(() => ({ chatId: "chat-recovery", version: 2, messages: [user] })),
+      recover: jest.fn(() => new Promise<void>((resolve) => { releaseRecover = resolve; })),
+    };
+    view.chatId = "chat-recovery";
+    view.chatTranscript = transcript;
+    view.projectTranscript = jest.fn();
+    view.updateViewState = jest.fn();
+    const reload = jest.spyOn(messageHandling, "reloadAllMessages").mockResolvedValue(undefined);
+    const fence = { isOpen: jest.fn(() => true), claimTerminal: jest.fn(() => true) };
+
+    const recovering = view.recoverManagedChatConflict(operation, abort.signal, fence);
+    await Promise.resolve();
+    abort.abort();
+    releaseRecover();
+    await expect(recovering).resolves.toBe(false);
+    expect(fence.claimTerminal).not.toHaveBeenCalled();
+    expect(view.projectTranscript).not.toHaveBeenCalled();
+    expect(view.updateViewState).not.toHaveBeenCalled();
+    expect(reload).not.toHaveBeenCalled();
+    reload.mockRestore();
+  });
+
+  it("claims a managed 409 terminal winner before projection so a later abort cannot win", async () => {
+    const view = Object.create(ChatView.prototype) as ChatView & Record<string, any>;
+    const abort = new AbortController();
+    const user = { role: "user", content: "accepted", message_id: "user-1" } as ChatMessage;
+    const operation = {
+      durableTurnId: "user-1",
+      initialDurableSnapshot: { chatId: "chat-recovery", version: 1, messages: [user] },
+    } as AcceptedChatOperation;
+    let releaseRecover!: () => void;
+    const transcript = {
+      snapshot: jest.fn(() => ({ chatId: "chat-recovery", version: 2, messages: [user] })),
+      recover: jest.fn(() => new Promise<void>((resolve) => { releaseRecover = resolve; })),
+    };
+    let open = true;
+    const emissions: string[] = [];
+    const fence = {
+      isOpen: jest.fn(() => open),
+      claimTerminal: jest.fn((outcome: string) => {
+        if (!open) return false;
+        open = false;
+        emissions.push(outcome);
+        return true;
+      }),
+    };
+    view.chatId = "chat-recovery";
+    view.chatTranscript = transcript;
+    view.projectTranscript = jest.fn(() => { abort.abort(); });
+    view.updateViewState = jest.fn();
+    const reload = jest.spyOn(messageHandling, "reloadAllMessages").mockResolvedValue(undefined);
+
+    const recovering = view.recoverManagedChatConflict(operation, abort.signal, fence);
+    await Promise.resolve();
+    expect(fence.claimTerminal).not.toHaveBeenCalled();
+    releaseRecover();
+    await expect(recovering).resolves.toBe(true);
+    expect(emissions).toEqual(["transport_failed"]);
+    expect(fence.claimTerminal("cancelled")).toBe(false);
+    expect(view.projectTranscript).toHaveBeenCalledTimes(1);
+    expect(view.updateViewState).toHaveBeenCalledTimes(1);
+    expect(reload).toHaveBeenCalledTimes(1);
+    reload.mockRestore();
+  });
+
   it("retains the submitted-input snapshot when durable deletion fails and clears it only after retry succeeds", async () => {
     const failed = { role: "user", content: "raw prompt", message_id: "user-failed" } as ChatMessage;
     const { view } = createRecoverableView([failed]);

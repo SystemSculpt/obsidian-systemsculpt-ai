@@ -108,7 +108,7 @@ describe("ChatTurn tool ownership", () => {
     expect(order.filter((entry) => entry === "checkpoint")).toHaveLength(1);
   });
 
-  it("durably marks every unstarted tool cancelled when abort arrives immediately before approval", async () => {
+  it("starts no tool work or checkpoint writes when abort arrives immediately before approval", async () => {
     const calls = [tool("1"), tool("2"), tool("3")];
     let actualInvocations = 0;
     let checkpointed: any[] = [];
@@ -140,19 +140,7 @@ describe("ChatTurn tool ownership", () => {
     expect(approval).not.toHaveBeenCalled();
     expect(actualInvocations).toBe(0);
     expect(continuation).not.toHaveBeenCalled();
-    expect(checkpointed).toHaveLength(3);
-    expect(checkpointed).toEqual(expect.arrayContaining(calls.map((value) => expect.objectContaining({
-      id: value.id,
-      state: "failed",
-      result: {
-        success: false,
-        error: {
-          code: "TOOL_CANCELLED_BEFORE_START",
-          message: "Tool execution was cancelled before it started.",
-        },
-      },
-    }))));
-    expect(checkpointed.some((value) => value.state === "pending")).toBe(false);
+    expect(checkpointed).toHaveLength(0);
   });
 
   it("cancels after approval without starting a later tool or continuation", async () => {
@@ -184,6 +172,23 @@ describe("ChatTurn tool ownership", () => {
     });
     await turn.run(user);
     expect(turn.outcome).toBe("tool_outcome_unknown");
+  });
+
+  it("durably checkpoints an unknown outcome returned by an aborting tool execution", async () => {
+    const { turn, controller, effects } = harness({
+      executeTool: async (value) => {
+        value.state = "failed";
+        value.result = { success: false, error: { code: "TOOL_CANCEL_REQUESTED_OUTCOME_UNKNOWN", message: "unknown" } };
+        controller.abort();
+      },
+    });
+    const checkpoint = jest.spyOn(effects, "commitToolCheckpoint");
+    const continuation = jest.spyOn(effects, "runContinuationStream");
+    await turn.run(user);
+    expect(turn.outcome).toBe("tool_outcome_unknown");
+    expect(checkpoint).toHaveBeenCalledTimes(1);
+    expect(checkpoint.mock.calls[0]?.[2]).toBe(true);
+    expect(continuation).not.toHaveBeenCalled();
   });
 
   it("cancels after a normal checkpoint when cancellation arrives during persistence", async () => {

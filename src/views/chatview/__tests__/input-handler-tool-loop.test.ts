@@ -168,6 +168,18 @@ describe("InputHandler hosted tool loop", () => {
       }
     });
     const onError = jest.fn();
+    const getMessages = jest.fn(() => messages);
+
+    const currentRuntimeAdapter = {
+      dispatch: jest.fn(async () => ({
+        kind: "stream" as const,
+        events: (async function* () {
+          yield { type: "content", text: "done" } as any;
+        })(),
+        diagnostic: {},
+      })),
+      notifyDurablyTerminal: jest.fn(),
+    };
 
     const chatView = {
       contextManager: {
@@ -180,6 +192,8 @@ describe("InputHandler hosted tool loop", () => {
       refreshCreditsBalance: jest.fn(),
       isLegacyReadOnlyChat: jest.fn(() => false),
       isPiBackedChat: jest.fn(() => false),
+      getCurrentRuntimeAdapter: jest.fn(() => currentRuntimeAdapter),
+      recoverManagedChatConflict: jest.fn().mockResolvedValue(true),
       getPiSessionFile: jest.fn(() => undefined),
       getPiSessionId: jest.fn(() => undefined),
       getSelectedModelId: jest.fn(() => "systemsculpt@@systemsculpt/ai-agent"),
@@ -195,7 +209,7 @@ describe("InputHandler hosted tool loop", () => {
       app,
       container,
       aiService,
-      getMessages: () => messages,
+      getMessages,
       isChatReady: () => true,
       chatContainer,
       scrollManager: {
@@ -241,14 +255,16 @@ describe("InputHandler hosted tool loop", () => {
       onMessageSubmit,
       onAssistantResponse,
       onError,
+      getMessages,
       chatView,
+      currentRuntimeAdapter,
       handler,
       bindAcceptedRequest,
     };
   };
 
   it("synchronously reserves one of two idle submissions before deferred readiness or large-paste consumption", async () => {
-    const { aiService, handler, onMessageSubmit } = createHostedToolLoopHarness();
+    const { aiService, currentRuntimeAdapter, handler, onMessageSubmit } = createHostedToolLoopHarness();
     let resolveReadiness!: (ready: boolean) => void;
     const readiness = new Promise<boolean>((resolve) => { resolveReadiness = resolve; });
     const ensureReady = jest.fn(() => readiness);
@@ -284,7 +300,164 @@ describe("InputHandler hosted tool loop", () => {
     expect(onMessageSubmit).toHaveBeenCalledTimes(1);
     expect(onMessageSubmit.mock.calls[0]?.[0]?.content).toBe("Summarize full large paste");
     expect(String(onMessageSubmit.mock.calls[0]?.[0]?.content)).not.toContain("[PASTED TEXT");
-    expect(aiService.streamMessage).toHaveBeenCalledTimes(1);
+    expect(aiService.streamMessage).not.toHaveBeenCalled();
+    expect(currentRuntimeAdapter.dispatch).toHaveBeenCalledTimes(1);
+  });
+
+  it("dispatches standard Chat from only the exact accepted snapshot and durable continuation snapshot", async () => {
+    const { chatView, currentRuntimeAdapter, getMessages, handler, bindAcceptedRequest } = createHostedToolLoopHarness();
+    const operation = await bindAcceptedRequest();
+    const acceptedRequestSnapshot = (handler as any).acceptedRequestSnapshot;
+    const fence = { isOpen: (candidate?: unknown) => !candidate || candidate === operation };
+    jest.spyOn(handler as any, "createAssistantMessageContainer").mockImplementation(() => {
+      const messageEl = document.createElement("div");
+      messageEl.dataset.messageId = `assistant-${Math.random()}`;
+      return { messageEl, contentEl: messageEl };
+    });
+    getMessages.mockClear();
+    chatView.contextManager.getContextFiles.mockClear();
+    chatView.getSelectedModelId.mockClear();
+    currentRuntimeAdapter.dispatch.mockClear();
+
+    await (handler as any).streamAssistantTurn(
+      operation,
+      new AbortController().signal,
+      true,
+      undefined,
+      { runtime: "managed", phase: "initial", fence },
+    );
+    expect(currentRuntimeAdapter.dispatch).toHaveBeenCalledTimes(1);
+    expect(currentRuntimeAdapter.dispatch.mock.calls[0]?.[0]?.acceptedRequestSnapshot).toBe(acceptedRequestSnapshot);
+    expect(currentRuntimeAdapter.dispatch.mock.calls[0]?.[0]).toEqual(expect.objectContaining({
+      phase: "initial",
+      continuationIndex: 0,
+    }));
+    expect(getMessages).not.toHaveBeenCalled();
+    expect(chatView.contextManager.getContextFiles).not.toHaveBeenCalled();
+    expect(chatView.getSelectedModelId).not.toHaveBeenCalled();
+
+    const postCheckpointDurableSnapshot = Object.freeze({
+      chatId: "chat-1",
+      version: 2,
+      messages: Object.freeze([operation.acceptedUserMessage]),
+    });
+    currentRuntimeAdapter.dispatch.mockClear();
+    getMessages.mockClear();
+    await (handler as any).streamAssistantTurn(
+      operation,
+      new AbortController().signal,
+      true,
+      undefined,
+      {
+        runtime: "managed",
+        phase: "continuation",
+        postCheckpointSnapshot: postCheckpointDurableSnapshot,
+        durableContinuationIndex: 1,
+        fence,
+      },
+    );
+    expect(currentRuntimeAdapter.dispatch.mock.calls[0]?.[0]?.acceptedRequestSnapshot).toBe(acceptedRequestSnapshot);
+    expect(currentRuntimeAdapter.dispatch.mock.calls[0]?.[0]?.postCheckpointDurableSnapshot).toBe(postCheckpointDurableSnapshot);
+    expect(currentRuntimeAdapter.dispatch.mock.calls[0]?.[0]?.continuationIndex).toBe(1);
+    expect(getMessages).not.toHaveBeenCalled();
+    expect(chatView.contextManager.getContextFiles).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "operation_in_progress",
+    "operation_already_completed",
+    "operation_terminal",
+    "settlement_pending",
+  ] as const)("recovers managed %s before creating any assistant projection", async (disposition) => {
+    const { aiService, chatView, currentRuntimeAdapter, handler, bindAcceptedRequest } = createHostedToolLoopHarness();
+    const operation = await bindAcceptedRequest();
+    currentRuntimeAdapter.dispatch.mockResolvedValueOnce({ kind: "recovery", disposition, diagnostic: { status: 409 } });
+    const createProjection = jest.spyOn(handler as any, "createAssistantMessageContainer");
+    const fence = { isOpen: () => true };
+
+    await expect((handler as any).streamAssistantTurn(
+      operation,
+      new AbortController().signal,
+      true,
+      undefined,
+      { runtime: "managed", phase: "initial", fence },
+    )).rejects.toThrow("Explicit resend is required");
+
+    expect(chatView.recoverManagedChatConflict).toHaveBeenCalledTimes(1);
+    expect(chatView.recoverManagedChatConflict).toHaveBeenCalledWith(
+      operation,
+      expect.any(AbortSignal),
+      fence,
+    );
+    expect(createProjection).not.toHaveBeenCalled();
+    expect(aiService.streamMessage).not.toHaveBeenCalled();
+    expect(currentRuntimeAdapter.dispatch).toHaveBeenCalledTimes(1);
+  });
+
+  it("suppresses late managed recovery and projection after local abort", async () => {
+    const { chatView, currentRuntimeAdapter, handler, bindAcceptedRequest } = createHostedToolLoopHarness();
+    const operation = await bindAcceptedRequest();
+    let resolveDispatch!: (value: unknown) => void;
+    currentRuntimeAdapter.dispatch.mockImplementationOnce(() => new Promise((resolve) => { resolveDispatch = resolve; }));
+    const createProjection = jest.spyOn(handler as any, "createAssistantMessageContainer");
+    const abort = new AbortController();
+    const pending = (handler as any).streamAssistantTurn(
+      operation,
+      abort.signal,
+      true,
+      undefined,
+      { runtime: "managed", phase: "initial", fence: { isOpen: () => true } },
+    );
+    abort.abort();
+    resolveDispatch({ kind: "recovery", disposition: "operation_in_progress", diagnostic: { status: 409 } });
+    await expect(pending).rejects.toThrow("cancelled before projection");
+    expect(chatView.recoverManagedChatConflict).not.toHaveBeenCalled();
+    expect(createProjection).not.toHaveBeenCalled();
+  });
+
+  it("does not record a hosted tool completion that resolves after local abort", async () => {
+    const { aiService, handler, bindAcceptedRequest } = createHostedToolLoopHarness();
+    const operation = await bindAcceptedRequest();
+    let resolveTool!: (value: unknown) => void;
+    aiService.executeHostedToolCall.mockImplementationOnce(() => new Promise((resolve) => { resolveTool = resolve; }));
+    const toolCall = {
+      id: "late-tool",
+      request: { id: "late-tool", type: "function", function: { name: "read", arguments: "{}" } },
+      state: "pending",
+    } as any;
+    const abort = new AbortController();
+    const execution = (handler as any).executeHostedToolCall(toolCall, abort.signal, { isOpen: () => true }, operation);
+    await Promise.resolve();
+    abort.abort();
+    resolveTool({ success: true, data: "late" });
+    await execution;
+    expect(toolCall.state).toBe("executing");
+    expect(toolCall.result).toBeUndefined();
+    expect(toolCall.executionCompletedAt).toBeUndefined();
+  });
+
+  it("records an outcome-unknown tool result so cancellation can be checkpointed honestly", async () => {
+    const { aiService, handler, bindAcceptedRequest } = createHostedToolLoopHarness();
+    const operation = await bindAcceptedRequest();
+    let resolveTool!: (value: unknown) => void;
+    aiService.executeHostedToolCall.mockImplementationOnce(() => new Promise((resolve) => { resolveTool = resolve; }));
+    const toolCall = {
+      id: "unknown-tool",
+      request: { id: "unknown-tool", type: "function", function: { name: "write", arguments: "{}" } },
+      state: "pending",
+    } as any;
+    const abort = new AbortController();
+    const execution = (handler as any).executeHostedToolCall(toolCall, abort.signal, { isOpen: () => true }, operation);
+    await Promise.resolve();
+    abort.abort();
+    resolveTool({
+      success: false,
+      error: { code: "TOOL_CANCEL_REQUESTED_OUTCOME_UNKNOWN", message: "Outcome unknown" },
+    });
+    await execution;
+    expect(toolCall.state).toBe("failed");
+    expect(toolCall.result.error.code).toBe("TOOL_CANCEL_REQUESTED_OUTCOME_UNKNOWN");
+    expect(toolCall.executionCompletedAt).toEqual(expect.any(Number));
   });
 
   it("submits the immutable composer candidate captured before awaited readiness", async () => {
@@ -564,7 +737,7 @@ describe("InputHandler hosted tool loop", () => {
   });
 
   it("reuses the last assistant root when a hosted continuation round starts", async () => {
-    const { aiService, chatContainer, handler, messages, bindAcceptedRequest } = createHostedToolLoopHarness();
+    const { aiService, chatContainer, chatView, handler, messages, bindAcceptedRequest } = createHostedToolLoopHarness();
 
     const existingMessageEl = document.createElement("div");
     existingMessageEl.classList.add("systemsculpt-message", "systemsculpt-assistant-message");
@@ -628,8 +801,9 @@ describe("InputHandler hosted tool loop", () => {
         completionState: "completed",
       });
 
+    chatView.isPiBackedChat.mockReturnValue(true);
     const operation = await bindAcceptedRequest();
-    await (handler as any).streamAssistantTurn(operation, new AbortController().signal, false);
+    await (handler as any).streamAssistantTurn(operation, new AbortController().signal, false, undefined, { runtime: "pi" });
 
     expect(createAssistantMessageContainerSpy).not.toHaveBeenCalled();
     expect(streamSpy).toHaveBeenCalledTimes(1);
@@ -706,7 +880,8 @@ describe("InputHandler hosted tool loop", () => {
   });
 
   it("retries a reasoning-only continuation after hosted tool execution and finishes the turn", async () => {
-    const { aiService, handler, messages, onError } = createHostedToolLoopHarness();
+    const { aiService, chatView, handler, messages, onError } = createHostedToolLoopHarness();
+    chatView.isPiBackedChat.mockReturnValue(true);
 
     const firstAssistantMessage: ChatMessage = {
       role: "assistant",
@@ -775,12 +950,13 @@ describe("InputHandler hosted tool loop", () => {
     await handler.submitWithOverrides({ includeContextFiles: false });
 
     expect(streamAssistantTurn).toHaveBeenCalledTimes(3);
-    expect(streamAssistantTurn.mock.calls[2]?.[4]).toEqual({
+    expect(streamAssistantTurn.mock.calls[2]?.[4]).toEqual(expect.objectContaining({
       phase: "continuation",
+      runtime: "pi",
       transientSystemPromptSuffix: expect.stringMatching(
         /previous continuation attempt returned reasoning but no visible assistant content or tool call.*retry 1/i,
       ),
-    });
+    }));
     expect(aiService.executeHostedToolCall).toHaveBeenCalledTimes(1);
     expect(onError).not.toHaveBeenCalled();
     expect(messages).toEqual(
@@ -803,7 +979,8 @@ describe("InputHandler hosted tool loop", () => {
   });
 
   it("retries an initial empty hosted turn before failing the user task", async () => {
-    const { handler, messages, onError } = createHostedToolLoopHarness();
+    const { chatView, handler, messages, onError } = createHostedToolLoopHarness();
+    chatView.isPiBackedChat.mockReturnValue(true);
 
     const finalAssistantMessage: ChatMessage = {
       role: "assistant",
@@ -859,7 +1036,8 @@ describe("InputHandler hosted tool loop", () => {
   });
 
   it("surfaces an unrecoverable empty hosted turn instead of silently succeeding", async () => {
-    const { handler, onError } = createHostedToolLoopHarness();
+    const { chatView, handler, onError } = createHostedToolLoopHarness();
+    chatView.isPiBackedChat.mockReturnValue(true);
 
     const streamAssistantTurn = jest.spyOn(handler as any, "streamAssistantTurn").mockResolvedValue({
       messageId: "assistant-empty",
@@ -941,7 +1119,8 @@ describe("InputHandler hosted tool loop", () => {
   });
 
   it("keeps the submitted user message and completed tool result when continuation retries are exhausted", async () => {
-    const { aiService, handler, messages, onError } = createHostedToolLoopHarness();
+    const { aiService, chatView, handler, messages, onError } = createHostedToolLoopHarness();
+    chatView.isPiBackedChat.mockReturnValue(true);
 
     const firstAssistantMessage: ChatMessage = {
       role: "assistant",
@@ -1032,7 +1211,7 @@ describe("InputHandler hosted tool loop", () => {
     );
   });
 
-  it("streams using the chat's selected model instead of forcing managed SystemSculpt", async () => {
+  it("keeps Pi-backed Chat on its selected Pi stream and never enters CurrentRuntimeAdapter", async () => {
     const app = new App();
     const container = document.createElement("div");
     const chatContainer = document.createElement("div");
@@ -1065,6 +1244,8 @@ describe("InputHandler hosted tool loop", () => {
       getPiSessionFile: jest.fn(() => undefined),
       getPiSessionId: jest.fn(() => undefined),
       getSelectedModelId: jest.fn(() => "local-pi-openai@@gpt-4.1"),
+      isPiBackedChat: jest.fn(() => true),
+      getCurrentRuntimeAdapter: jest.fn(() => { throw new Error("Pi must not enter managed runtime"); }),
       getDurableTranscriptSnapshot: jest.fn(),
       setPiSessionState: jest.fn(),
     } as any;
@@ -1121,13 +1302,14 @@ describe("InputHandler hosted tool loop", () => {
     const operation = Object.freeze({ lease: {} as never, durableTurnId: "u", acceptedUserMessage: message, initialDurableSnapshot: durable, turnBoundaryId: "b" });
     (handler as any).acceptedOperation = operation;
     (handler as any).acceptedRequestSnapshot = { operation, legacyPreparation: { modelSource: "pi_local", resolvedModel: {}, actualModelId: "local-pi-openai@@gpt-4.1", preparedMessages: [message], finalSystemPrompt: "", tools: [] } };
-    await (handler as any).streamAssistantTurn(operation, new AbortController().signal, false, undefined, { phase: "initial" });
+    await (handler as any).streamAssistantTurn(operation, new AbortController().signal, false, undefined, { phase: "initial", runtime: "pi" });
 
     expect(aiService.streamMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         model: "local-pi-openai@@gpt-4.1",
       })
     );
+    expect(chatView.getCurrentRuntimeAdapter).not.toHaveBeenCalled();
   });
 
   it("routes local Pi setup failures to Providers instead of forcing managed fallback", async () => {

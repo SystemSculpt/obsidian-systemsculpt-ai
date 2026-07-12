@@ -48,9 +48,11 @@ import { TOOL_LOOP_ERROR_CODE } from "../../utils/tooling";
 import { extractPrimaryPathArg, requiresUserApproval } from "../../utils/toolPolicy";
 import { ChatModelSelectionController } from "./ChatModelSelectionController";
 import { ChatTurn } from "./turn/ChatTurn";
+import type { ChatTurnFence } from "./turn/ChatTurnEffects";
 import type { AcceptedChatOperation, ManagedChatAdmissionPort } from "../../services/managed/ManagedTypes";
 import { composeAcceptedLegacyContinuation, type AcceptedChatRequestSnapshot, type FrozenPreparedChatRequest } from "../../services/chat/AcceptedChatRequestSnapshot";
 import type { AcceptedUserCommitInput, AcceptedUserCommitResult } from "./ChatView";
+import type { ChatTranscriptSnapshot } from "./transcript/ChatTranscriptTypes";
 
 export interface InputHandlerOptions {
   app: App;
@@ -315,7 +317,91 @@ export class InputHandler extends Component {
     signal: AbortSignal,
     includeContextFiles: boolean,
     turnProgress?: ChatTurnProgressController,
-    options?: { phase?: "initial" | "continuation"; transientSystemPromptSuffix?: string }
+    options?: {
+      phase?: "initial" | "continuation";
+      transientSystemPromptSuffix?: string;
+      runtime?: "managed" | "pi";
+      postCheckpointSnapshot?: ChatTranscriptSnapshot;
+      durableContinuationIndex?: number;
+      fence?: ChatTurnFence;
+    },
+  ): Promise<StreamTurnResult> {
+    if (options?.runtime === "pi") {
+      return this.streamPiAssistantTurn(acceptedOperation, signal, includeContextFiles, turnProgress, options);
+    }
+    return this.streamManagedAssistantTurn(acceptedOperation, signal, turnProgress, options);
+  }
+
+  private async streamManagedAssistantTurn(
+    acceptedOperation: AcceptedChatOperation,
+    signal: AbortSignal,
+    turnProgress?: ChatTurnProgressController,
+    options?: {
+      phase?: "initial" | "continuation";
+      postCheckpointSnapshot?: ChatTranscriptSnapshot;
+      durableContinuationIndex?: number;
+      fence?: ChatTurnFence;
+    },
+  ): Promise<StreamTurnResult> {
+    const acceptedRequest = this.acceptedRequestSnapshot;
+    if (!acceptedRequest || acceptedRequest.operation !== acceptedOperation) {
+      throw new Error("Accepted Chat request snapshot is unavailable for the active operation.");
+    }
+    if (!options?.fence || !options.fence.isOpen(acceptedOperation)) {
+      throw new Error("Managed Chat turn fence is unavailable for the active operation.");
+    }
+    const phase = options.phase ?? "initial";
+    const continuationIndex = phase === "initial" ? 0 : options.durableContinuationIndex;
+    if (typeof continuationIndex !== "number" || !Number.isInteger(continuationIndex) || continuationIndex < 0) {
+      throw new Error("Managed Chat continuation requires a durable continuation index.");
+    }
+    if (phase === "continuation" && !options.postCheckpointSnapshot) {
+      throw new Error("Managed Chat continuation requires a post-checkpoint durable snapshot.");
+    }
+    const runtime = this.chatView.getCurrentRuntimeAdapter();
+    const dispatched = await runtime.dispatch({
+      acceptedRequestSnapshot: acceptedRequest,
+      phase,
+      continuationIndex,
+      ...(options.postCheckpointSnapshot ? { postCheckpointDurableSnapshot: options.postCheckpointSnapshot } : {}),
+      signal,
+      fence: options.fence,
+    });
+    if (signal.aborted || !options.fence.isOpen(acceptedOperation)) {
+      throw new Error("Managed Chat dispatch was cancelled before projection.");
+    }
+    if (dispatched.kind === "recovery") {
+      await this.chatView.recoverManagedChatConflict(acceptedOperation, signal, options.fence);
+      throw new Error(`Managed Chat recovered durable state (${dispatched.disposition}). Explicit resend is required.`);
+    }
+
+    if (signal.aborted || !options.fence.isOpen(acceptedOperation)) {
+      throw new Error("Managed Chat dispatch was cancelled before projection.");
+    }
+    const { messageEl } = this.createAssistantMessageContainer();
+    let messageId = messageEl.dataset.messageId;
+    if (!messageId || !messageId.trim()) {
+      messageId = this.generateMessageId();
+      messageEl.dataset.messageId = messageId;
+    }
+    turnProgress?.attach(messageEl);
+    return this.streamingController.stream(
+      dispatched.events,
+      messageEl,
+      messageId,
+      signal,
+      undefined,
+      turnProgress?.getTracker(),
+      !!turnProgress,
+    );
+  }
+
+  private async streamPiAssistantTurn(
+    acceptedOperation: AcceptedChatOperation,
+    signal: AbortSignal,
+    includeContextFiles: boolean,
+    turnProgress?: ChatTurnProgressController,
+    options?: { phase?: "initial" | "continuation"; transientSystemPromptSuffix?: string },
   ): Promise<StreamTurnResult> {
     const acceptedRequest = this.acceptedRequestSnapshot;
     if (!acceptedRequest || acceptedRequest.operation !== acceptedOperation) {
@@ -532,20 +618,19 @@ export class InputHandler extends Component {
     return popup?.confirmed === true && popup.action === "primary";
   }
 
-  private async executeHostedToolCall(toolCall: ToolCall, signal: AbortSignal): Promise<void> {
-    if (signal.aborted) {
-      toolCall.state = "failed";
-      toolCall.executionCompletedAt = Date.now();
-      toolCall.result = {
-        success: false,
-        error: { code: "TOOL_CANCELLED_BEFORE_START", message: "Tool execution was cancelled before it started." },
-      };
-      return;
-    }
+  private async executeHostedToolCall(
+    toolCall: ToolCall,
+    signal: AbortSignal,
+    fence?: ChatTurnFence,
+    operation?: AcceptedChatOperation,
+  ): Promise<void> {
+    if (signal.aborted || (fence && !fence.isOpen(operation))) return;
 
     toolCall.state = "executing";
     toolCall.executionStartedAt = toolCall.executionStartedAt || Date.now();
     const result = await this.aiService.executeHostedToolCall({ toolCall, chatView: this.chatView, signal });
+    const outcomeUnknown = !result.success && result.error?.code === "TOOL_CANCEL_REQUESTED_OUTCOME_UNKNOWN";
+    if ((fence && !fence.isOpen(operation)) || (signal.aborted && !outcomeUnknown)) return;
     toolCall.result = result;
     toolCall.executionCompletedAt = Date.now();
     toolCall.state = result.success ? "completed" : "failed";
@@ -892,6 +977,7 @@ export class InputHandler extends Component {
         systemPromptOverride: acceptedPrompt,
         allowTools: this.chatView?.isAgentModeActive?.() ?? true,
       });
+      const runtimeKind: "managed" | "pi" = this.chatView?.isPiBackedChat?.() === true ? "pi" : "managed";
       for (const notice of this.acceptedRequestSnapshot.notices) new Notice(notice.message, notice.timeoutMs);
       this.submittedInputSnapshot = { messageId: durableTurnId, rawText: submittedRawText };
       this.input.value = "";
@@ -904,6 +990,9 @@ export class InputHandler extends Component {
           phase: "initial" | "continuation",
           retryCount: number,
           previous?: StreamTurnResult,
+          postCheckpointSnapshot?: ChatTranscriptSnapshot,
+          durableContinuationIndex?: number,
+          fence?: ChatTurnFence,
         ): Promise<StreamTurnResult> => {
           const progress = new ChatTurnProgressController({
             showStreamingStatus: this.showStreamingStatus.bind(this),
@@ -916,7 +1005,11 @@ export class InputHandler extends Component {
             const retryProvenance = latestLegacyStreamResult ?? previous;
             const streamed = await this.streamAssistantTurn(acceptedOperation, turnSignal, includeContextFiles, progress, {
               phase,
-              transientSystemPromptSuffix: phase === "continuation" && retryCount > 0 && retryProvenance
+              runtime: runtimeKind,
+              postCheckpointSnapshot,
+              durableContinuationIndex,
+              fence,
+              transientSystemPromptSuffix: runtimeKind === "pi" && phase === "continuation" && retryCount > 0 && retryProvenance
                 ? this.buildEmptyContinuationRetryHint(retryProvenance.completionState, retryCount)
                 : undefined,
             });
@@ -929,21 +1022,26 @@ export class InputHandler extends Component {
         const turn = new ChatTurn({
           signal,
           acceptedOperation,
-          commitAssistant: async (message) => {
+          commitAssistant: async (message, fence) => {
+            if (signal.aborted || !fence.isOpen(acceptedOperation)) return;
             if (typeof this.chatView?.persistAssistantMessage === "function") {
               await this.chatView.persistAssistantMessage(message, { operation: "assistant_commit" });
+              if (signal.aborted || !fence.isOpen(acceptedOperation)) return;
               await this.renderPersistedAssistantMessage(message);
             } else {
               await this.onAssistantResponse(message);
+              if (signal.aborted || !fence.isOpen(acceptedOperation)) return;
             }
           },
-          runInitialStream: (operation, retryCount, turnSignal) => {
+          runInitialStream: (operation, retryCount, turnSignal, fence) => {
             if (operation !== acceptedOperation) throw new Error("Chat turn operation identity changed before initial stream.");
-            return streamWithProgress(turnSignal, "initial", retryCount);
+            return streamWithProgress(turnSignal, "initial", retryCount, undefined, undefined, undefined, fence);
           },
           shouldContinueTools: (result) => this.shouldContinueHostedToolLoop(result.message, result.stopReason),
-          requestToolApproval: async (toolCall) => {
+          requestToolApproval: async (toolCall, turnSignal, fence) => {
+            if (turnSignal.aborted || !fence.isOpen(acceptedOperation)) return false;
             const approved = await this.confirmHostedToolExecution(toolCall);
+            if (turnSignal.aborted || !fence.isOpen(acceptedOperation)) return false;
             if (!approved) {
               toolCall.state = "failed";
               toolCall.executionCompletedAt = Date.now();
@@ -954,18 +1052,38 @@ export class InputHandler extends Component {
             }
             return approved;
           },
-          executeTool: (toolCall, turnSignal) => this.executeHostedToolCall(toolCall, turnSignal),
-          commitToolCheckpoint: async (message) => {
+          executeTool: (toolCall, turnSignal, fence) => {
+            if (turnSignal.aborted || !fence.isOpen(acceptedOperation)) return Promise.resolve();
+            return this.executeHostedToolCall(toolCall, turnSignal, fence, acceptedOperation);
+          },
+          commitToolCheckpoint: async (message, fence, outcomeUnknown) => {
+            if ((!outcomeUnknown && signal.aborted) || !fence.isOpen(acceptedOperation)) return;
             if (typeof this.chatView?.persistAssistantMessage === "function") {
               await this.chatView.persistAssistantMessage(message, { operation: "tool_checkpoint" });
             } else {
               await this.persistAssistantResponse(message);
             }
+            if ((!outcomeUnknown && signal.aborted) || !fence.isOpen(acceptedOperation)) return;
           },
-          renderToolCheckpoint: (message) => this.renderPersistedAssistantMessage(message, { forceRerender: true }),
-          runContinuationStream: (operation, retryCount, turnSignal, previous) => {
+          renderToolCheckpoint: (message, fence) => !signal.aborted && fence.isOpen(acceptedOperation)
+            ? this.renderPersistedAssistantMessage(message, { forceRerender: true })
+            : Promise.resolve(),
+          readDurableSnapshot: async () => this.chatView.getDurableTranscriptSnapshot(),
+          runContinuationStream: (operation, retryCount, turnSignal, previous, postCheckpointSnapshot, durableContinuationIndex, fence) => {
             if (operation !== acceptedOperation) throw new Error("Chat turn operation identity changed before continuation.");
-            return streamWithProgress(turnSignal, "continuation", retryCount, previous);
+            return streamWithProgress(
+              turnSignal,
+              "continuation",
+              retryCount,
+              previous,
+              postCheckpointSnapshot,
+              durableContinuationIndex,
+              fence,
+            );
+          },
+          retryEmptyStream: runtimeKind === "pi",
+          onTerminal: (_outcome, operation) => {
+            if (runtimeKind === "managed") this.chatView.getCurrentRuntimeAdapter().notifyDurablyTerminal(operation);
           },
           onInitialRetryExhausted: (latest) => this.failHostedToolTurn(
             "The hosted agent returned an empty response.", 502, {

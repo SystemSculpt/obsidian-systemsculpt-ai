@@ -2,6 +2,7 @@ import type { ManagedCapabilityClient } from "../../../services/managed/ManagedC
 import type { AcceptedChatOperation, JsonContractValue } from "../../../services/managed/ManagedTypes";
 import type { AcceptedChatRequestSnapshot, ManagedPreparedMessage } from "../../../services/chat/AcceptedChatRequestSnapshot";
 import { composeAcceptedChatContinuation } from "../../../services/chat/AcceptedChatRequestSnapshot";
+import type { StreamEvent, StreamToolCall } from "../../../streaming/types";
 
 export type ManagedChatRuntimeEvent =
   | Readonly<{ kind: "content_delta"; text: string }>
@@ -30,6 +31,114 @@ export type ManagedChatDispatchInput = Readonly<{
   postCheckpointDurableSnapshot?: import("../transcript/ChatTranscriptTypes").ChatTranscriptSnapshot;
   signal?: AbortSignal;
 }>;
+
+export type ManagedChatTranslationFence = Readonly<{ isOpen: () => boolean }>;
+const LOCAL_ABORT = Symbol("managed-chat-local-abort");
+
+function unreachableManagedEvent(event: never): never {
+  throw new Error(`Unsupported managed Chat runtime event: ${JSON.stringify(event)}`);
+}
+
+function normalizedFinishReason(reason: string): string {
+  return reason === "tool_calls" ? "toolUse" : reason;
+}
+
+/** The sole boundary from the closed managed event union into the existing stream pipeline. */
+export async function* translateManagedChatEvents(
+  events: AsyncIterable<ManagedChatRuntimeEvent>,
+  signal: AbortSignal,
+  fence: ManagedChatTranslationFence,
+): AsyncGenerator<StreamEvent> {
+  const toolIdentity = new Map<number, { id?: string; name?: string }>();
+  let finishReasonSeen = false;
+  const iterator = events[Symbol.asyncIterator]();
+  let iteratorFinished = false;
+  let abortedWhileWaiting = false;
+  try {
+    while (true) {
+      if (signal.aborted || !fence.isOpen()) return;
+      const step = await new Promise<IteratorResult<ManagedChatRuntimeEvent> | typeof LOCAL_ABORT>((resolve, reject) => {
+        if (signal.aborted) { resolve(LOCAL_ABORT); return; }
+        const onAbort = (): void => resolve(LOCAL_ABORT);
+        signal.addEventListener("abort", onAbort, { once: true });
+        void iterator.next().then(
+          (result) => { signal.removeEventListener("abort", onAbort); resolve(result); },
+          (error) => { signal.removeEventListener("abort", onAbort); reject(error); },
+        );
+      });
+      if (step === LOCAL_ABORT) {
+        abortedWhileWaiting = true;
+        return;
+      }
+      if (step.done) {
+        iteratorFinished = true;
+        return;
+      }
+      if (signal.aborted || !fence.isOpen()) return;
+      const event = step.value;
+      switch (event.kind) {
+        case "content_delta":
+          yield { type: "content", text: event.text };
+          break;
+        case "reasoning_delta":
+          yield { type: "reasoning", text: event.text };
+          break;
+        case "tool_call_delta": {
+          const previous = toolIdentity.get(event.index) ?? {};
+          const current = {
+            id: previous.id ?? event.id,
+            name: previous.name ?? event.name,
+          };
+          toolIdentity.set(event.index, current);
+          const call: StreamToolCall = {
+            id: current.id ?? `managed_index_${event.index}`,
+            type: "function",
+            index: event.index,
+            function: {
+              name: current.name ?? "",
+              arguments: event.arguments ?? "",
+            },
+          };
+          yield { type: "tool-call", phase: "delta", call };
+          break;
+        }
+        case "tool_call_completed": {
+          const previous = toolIdentity.get(event.index) ?? {};
+          const call: StreamToolCall = {
+            id: previous.id ?? event.id ?? `managed_index_${event.index}`,
+            type: "function",
+            index: event.index,
+            function: {
+              name: previous.name ?? event.name ?? "",
+              arguments: event.arguments,
+            },
+          };
+          yield { type: "tool-call", phase: "final", call };
+          break;
+        }
+        case "finish_reason":
+          if (finishReasonSeen) throw new Error("Managed Chat stream emitted more than one finish reason.");
+          finishReasonSeen = true;
+          yield { type: "meta", key: "stop-reason", value: normalizedFinishReason(event.reason) };
+          break;
+        case "request_id":
+        case "usage":
+          break;
+        case "done":
+          return;
+        default:
+          unreachableManagedEvent(event);
+      }
+      if (signal.aborted || !fence.isOpen()) return;
+    }
+  } finally {
+    if (!iteratorFinished && iterator.return) {
+      const closing = Promise.resolve(iterator.return());
+      if (abortedWhileWaiting) void closing.catch(() => undefined);
+      else await closing;
+    }
+  }
+}
 
 type JsonObject = { readonly [key: string]: JsonContractValue };
 type OperationRegistry = Map<string, Promise<ManagedChatDispatchResult>>;

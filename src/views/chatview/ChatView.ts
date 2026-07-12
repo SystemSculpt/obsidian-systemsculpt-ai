@@ -53,9 +53,12 @@ import { ChatPersistenceError, type ChatPersistenceOperation } from "./persisten
 import { ChatTranscript } from "./transcript/ChatTranscript";
 import type { ChatTranscriptStorage } from "./transcript/ChatTranscriptStorage";
 import type { ChatTranscriptSnapshot } from "./transcript/ChatTranscriptTypes";
-import type { ManagedChatAdmissionPort } from "../../services/managed/ManagedTypes";
+import type { AcceptedChatOperation, ManagedChatAdmissionPort } from "../../services/managed/ManagedTypes";
 import { mergePiTranscriptMessages } from "./piTranscriptMerge";
 import type { SystemSculptModel } from "../../types/llm";
+import { ManagedChatRuntimeAdapter } from "./turn/ManagedChatRuntimeAdapter";
+import { CurrentRuntimeAdapter } from "./turn/CurrentRuntimeAdapter";
+import type { ChatTurnFence } from "./turn/ChatTurnEffects";
 
 import { uiSetup } from "./uiSetup";
 import { messageHandling } from "./messageHandling";
@@ -175,6 +178,7 @@ export class ChatView extends ItemView {
   private activeLoad: { chatId: string; promise: Promise<void> } | null = null;
   private chatTranscript: ChatTranscript | null = null;
   private pendingCommittedPiProjection: PendingCommittedPiProjection | null = null;
+  private currentRuntimeAdapter: CurrentRuntimeAdapter | null = null;
   private resourcesDisposed = false;
   private resourceDisposalPromise: Promise<void> | null = null;
 
@@ -286,6 +290,15 @@ export class ChatView extends ItemView {
   }
 
   public getManagedChatAdmission(): ManagedChatAdmissionPort { return this.plugin.getManagedCapabilityClient(); }
+
+  public getCurrentRuntimeAdapter(): CurrentRuntimeAdapter {
+    if (!this.currentRuntimeAdapter) {
+      this.currentRuntimeAdapter = new CurrentRuntimeAdapter(
+        new ManagedChatRuntimeAdapter(this.plugin.getManagedCapabilityClient()),
+      );
+    }
+    return this.currentRuntimeAdapter;
+  }
 
   getViewType(): string {
     return CHAT_VIEW_TYPE;
@@ -456,6 +469,24 @@ export class ChatView extends ItemView {
     this.projectTranscript();
     this.updateViewState();
     await messageHandling.reloadAllMessages(this);
+  }
+
+  public async recoverManagedChatConflict(
+    operation: AcceptedChatOperation,
+    signal: AbortSignal,
+    fence: ChatTurnFence,
+  ): Promise<boolean> {
+    if (operation.initialDurableSnapshot.chatId !== this.chatId) return false;
+    if (signal.aborted || !fence.isOpen(operation)) return false;
+    const transcript = this.ensureChatTranscript();
+    await transcript.recover();
+    if (signal.aborted || !fence.isOpen(operation)) return false;
+    const recoveryWon = fence.claimTerminal("transport_failed");
+    if (!recoveryWon) return false;
+    this.projectTranscript();
+    this.updateViewState();
+    await messageHandling.reloadAllMessages(this);
+    return true;
   }
 
   public async addMessageToHistory(message: ChatMessage): Promise<void> {
