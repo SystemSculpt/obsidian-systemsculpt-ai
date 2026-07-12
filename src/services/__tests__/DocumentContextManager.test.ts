@@ -105,64 +105,96 @@ describe("DocumentContextManager", () => {
 
   describe("document conversion context effects", () => {
     const effect = {
-      effectId: "a".repeat(64),
-      operationId: "operation-1",
-      outputIdentity: "output-1",
-      outputPath: "Extractions/document.md",
-      markdownSha256: "b".repeat(64),
+      effectId: "a".repeat(64), operationId: "operation-1", outputIdentity: "output-1",
+      outputPath: "Extractions/document.md", markdownSha256: "b".repeat(64),
     };
+    const record = (projectionMutated: boolean, notificationAcknowledged: boolean) => ({
+      operationId: effect.operationId, outputIdentity: effect.outputIdentity,
+      outputPath: effect.outputPath, markdownSha256: effect.markdownSha256,
+      projectionMutated, notificationAcknowledged,
+    });
 
-    it("persists identity before projecting and applies once", async () => {
+    it("persists identity, projection mutation, and notification acknowledgement in order", async () => {
       const order: string[] = [];
-      mockPlugin.saveData.mockImplementation(async () => { order.push("persist"); });
+      mockPlugin.saveData.mockImplementation(async (data: any) => {
+        const saved = data.managedDocumentContextEffectsV1[effect.effectId];
+        order.push(saved.notificationAcknowledged ? "ack" : saved.projectionMutated ? "projection-state" : "identity");
+      });
       (mockContextManager.addToContextFiles as jest.Mock).mockImplementation(() => { order.push("project"); return true; });
+      (mockContextManager.triggerContextChange as jest.Mock).mockImplementation(async () => { order.push("notify"); });
 
       await expect(manager.applyDocumentConversionContextEffect(effect, mockContextManager)).resolves.toBe("applied");
+      expect(order).toEqual(["identity", "project", "projection-state", "notify", "ack"]);
+    });
 
-      expect(order).toEqual(["persist", "project"]);
-      expect(mockPlugin.saveData).toHaveBeenCalledWith(expect.objectContaining({
-        settingsSentinel: true,
-        managedDocumentContextEffectsV1: { [effect.effectId]: expect.objectContaining({ outputPath: effect.outputPath }) },
+    it("returns already_applied only after both durable phases and the link are present", async () => {
+      mockPlugin.loadData.mockResolvedValue({ managedDocumentContextEffectsV1: { [effect.effectId]: record(true, true) } });
+      (mockContextManager.hasContextFile as jest.Mock).mockReturnValue(true);
+      await expect(manager.applyDocumentConversionContextEffect(effect, mockContextManager)).resolves.toBe("already_applied");
+      expect(mockContextManager.addToContextFiles).not.toHaveBeenCalled();
+      expect(mockContextManager.triggerContextChange).not.toHaveBeenCalled();
+      expect(mockPlugin.saveData).not.toHaveBeenCalled();
+    });
+
+    it("repairs notification after the link exists but triggerContextChange was never acknowledged", async () => {
+      mockPlugin.loadData.mockResolvedValue({ managedDocumentContextEffectsV1: { [effect.effectId]: record(true, false) } });
+      (mockContextManager.hasContextFile as jest.Mock).mockReturnValue(true);
+      await expect(manager.applyDocumentConversionContextEffect(effect, mockContextManager)).resolves.toBe("repaired");
+      expect(mockContextManager.addToContextFiles).not.toHaveBeenCalled();
+      expect(mockContextManager.triggerContextChange).toHaveBeenCalledTimes(1);
+      expect(mockPlugin.saveData).toHaveBeenLastCalledWith(expect.objectContaining({
+        managedDocumentContextEffectsV1: { [effect.effectId]: record(true, true) },
       }));
     });
 
-    it("returns already_applied for an exact durable replay without duplicating context", async () => {
-      mockPlugin.loadData.mockResolvedValue({ managedDocumentContextEffectsV1: { [effect.effectId]: {
-        operationId: effect.operationId, outputIdentity: effect.outputIdentity,
-        outputPath: effect.outputPath, markdownSha256: effect.markdownSha256,
-      } } });
-      (mockContextManager.hasContextFile as jest.Mock).mockReturnValue(true);
-
-      await expect(manager.applyDocumentConversionContextEffect(effect, mockContextManager)).resolves.toBe("already_applied");
-      expect(mockContextManager.addToContextFiles).not.toHaveBeenCalled();
-      expect(mockPlugin.saveData).not.toHaveBeenCalled();
-    });
-
-    it("repairs a missing projection after durable identity was recorded", async () => {
-      mockPlugin.loadData.mockResolvedValue({ managedDocumentContextEffectsV1: { [effect.effectId]: {
-        operationId: effect.operationId, outputIdentity: effect.outputIdentity,
-        outputPath: effect.outputPath, markdownSha256: effect.markdownSha256,
-      } } });
-
+    it("repairs a missing link even when earlier state claimed projection", async () => {
+      mockPlugin.loadData.mockResolvedValue({ managedDocumentContextEffectsV1: { [effect.effectId]: record(true, false) } });
       await expect(manager.applyDocumentConversionContextEffect(effect, mockContextManager)).resolves.toBe("repaired");
       expect(mockContextManager.addToContextFiles).toHaveBeenCalledTimes(1);
-      expect(mockPlugin.saveData).not.toHaveBeenCalled();
+      expect(mockContextManager.triggerContextChange).toHaveBeenCalledTimes(1);
+    });
+
+    it("replays safely after cancellation at each mutation/ack boundary", async () => {
+      const boundaries = ["identity", "projection", "projection-state", "notification"] as const;
+      for (const boundary of boundaries) {
+        jest.clearAllMocks();
+        let saved: any = { settingsSentinel: true };
+        let linkPresent = false;
+        const controller = new AbortController();
+        mockPlugin.loadData.mockImplementation(async () => saved);
+        mockPlugin.saveData.mockImplementation(async (data: any) => {
+          saved = JSON.parse(JSON.stringify(data));
+          const state = data.managedDocumentContextEffectsV1[effect.effectId];
+          if (boundary === "identity" && !state.projectionMutated) controller.abort();
+          if (boundary === "projection-state" && state.projectionMutated && !state.notificationAcknowledged) controller.abort();
+        });
+        (mockContextManager.hasContextFile as jest.Mock).mockImplementation(() => linkPresent);
+        (mockContextManager.addToContextFiles as jest.Mock).mockImplementation(() => {
+          linkPresent = true;
+          if (boundary === "projection") controller.abort();
+          return true;
+        });
+        (mockContextManager.triggerContextChange as jest.Mock).mockImplementation(async () => {
+          if (boundary === "notification") controller.abort();
+        });
+        await expect(manager.applyDocumentConversionContextEffect({ ...effect, signal: controller.signal }, mockContextManager))
+          .rejects.toMatchObject({ name: "AbortError" });
+
+        const additionsBeforeReplay = (mockContextManager.addToContextFiles as jest.Mock).mock.calls.length;
+        const notificationsBeforeReplay = (mockContextManager.triggerContextChange as jest.Mock).mock.calls.length;
+        const replayContext = createMockContextManager();
+        (replayContext.hasContextFile as jest.Mock).mockImplementation(() => linkPresent);
+        (replayContext.addToContextFiles as jest.Mock).mockImplementation(() => { linkPresent = true; return true; });
+        await expect(manager.applyDocumentConversionContextEffect(effect, replayContext)).resolves.toBe("repaired");
+        expect((replayContext.addToContextFiles as jest.Mock).mock.calls.length + additionsBeforeReplay).toBe(linkPresent ? 1 : 0);
+        expect(replayContext.triggerContextChange).toHaveBeenCalledTimes(boundary === "notification" ? 1 : 1);
+        expect(notificationsBeforeReplay).toBe(boundary === "notification" ? 1 : 0);
+      }
     });
 
     it("rejects effect ID reuse with different data", async () => {
-      mockPlugin.loadData.mockResolvedValue({ managedDocumentContextEffectsV1: { [effect.effectId]: {
-        operationId: effect.operationId, outputIdentity: effect.outputIdentity,
-        outputPath: "different.md", markdownSha256: effect.markdownSha256,
-      } } });
+      mockPlugin.loadData.mockResolvedValue({ managedDocumentContextEffectsV1: { [effect.effectId]: { ...record(true, true), outputPath: "different.md" } } });
       await expect(manager.applyDocumentConversionContextEffect(effect, mockContextManager)).rejects.toThrow("identity conflict");
-      expect(mockContextManager.addToContextFiles).not.toHaveBeenCalled();
-    });
-
-    it("does not project when aborted while durable persistence is awaiting", async () => {
-      const controller = new AbortController();
-      mockPlugin.saveData.mockImplementation(async () => { controller.abort(); });
-      await expect(manager.applyDocumentConversionContextEffect({ ...effect, signal: controller.signal }, mockContextManager))
-        .rejects.toMatchObject({ name: "AbortError" });
       expect(mockContextManager.addToContextFiles).not.toHaveBeenCalled();
     });
   });

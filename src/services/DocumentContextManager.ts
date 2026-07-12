@@ -36,6 +36,8 @@ interface PersistedDocumentContextEffect {
   outputIdentity: string;
   outputPath: string;
   markdownSha256: string;
+  projectionMutated: boolean;
+  notificationAcknowledged: boolean;
 }
 
 const DOCUMENT_CONTEXT_EFFECTS_KEY = "managedDocumentContextEffectsV1";
@@ -83,33 +85,58 @@ export class DocumentContextManager {
     throwIfAborted(effect.signal);
     const ledger = readContextEffectLedger(data[DOCUMENT_CONTEXT_EFFECTS_KEY]);
     const persisted = ledger[effect.effectId];
-    const requested: PersistedDocumentContextEffect = {
+    const identity = {
       operationId: effect.operationId,
       outputIdentity: effect.outputIdentity,
       outputPath: effect.outputPath,
       markdownSha256: effect.markdownSha256,
     };
-    if (persisted && JSON.stringify(persisted) !== JSON.stringify(requested)) {
+    if (persisted && (
+      persisted.operationId !== identity.operationId ||
+      persisted.outputIdentity !== identity.outputIdentity ||
+      persisted.outputPath !== identity.outputPath ||
+      persisted.markdownSha256 !== identity.markdownSha256
+    )) {
       throw new Error("Document context effect identity conflict.");
     }
 
-    const wikiLink = `[[${effect.outputPath}]]`;
-    if (!persisted) {
-      ledger[effect.effectId] = requested;
-      await this.plugin.saveData?.({ ...data, [DOCUMENT_CONTEXT_EFFECTS_KEY]: ledger });
+    const wasPersisted = Boolean(persisted);
+    const record: PersistedDocumentContextEffect = persisted ?? {
+      ...identity,
+      projectionMutated: false,
+      notificationAcknowledged: false,
+    };
+    const persist = async () => {
+      ledger[effect.effectId] = { ...record };
+      await this.plugin.saveData({ ...data, [DOCUMENT_CONTEXT_EFFECTS_KEY]: ledger });
       throwIfAborted(effect.signal);
-    }
+    };
+    if (!persisted) await persist();
 
-    if (contextManager.hasContextFile(wikiLink)) {
+    const wikiLink = `[[${effect.outputPath}]]`;
+    const linkPresent = contextManager.hasContextFile(wikiLink);
+    if (record.projectionMutated && record.notificationAcknowledged && linkPresent) {
       return "already_applied";
     }
 
-    throwIfAborted(effect.signal);
-    contextManager.addToContextFiles(wikiLink);
-    throwIfAborted(effect.signal);
-    await contextManager.triggerContextChange();
-    throwIfAborted(effect.signal);
-    return persisted ? "repaired" : "applied";
+    if (!linkPresent) {
+      throwIfAborted(effect.signal);
+      contextManager.addToContextFiles(wikiLink);
+      throwIfAborted(effect.signal);
+    }
+    if (!record.projectionMutated || !linkPresent) {
+      record.projectionMutated = true;
+      await persist();
+    }
+
+    if (!record.notificationAcknowledged) {
+      throwIfAborted(effect.signal);
+      await contextManager.triggerContextChange();
+      throwIfAborted(effect.signal);
+      record.notificationAcknowledged = true;
+      await persist();
+    }
+    return wasPersisted ? "repaired" : "applied";
   }
 
   /**

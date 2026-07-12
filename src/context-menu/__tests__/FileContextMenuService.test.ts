@@ -44,6 +44,36 @@ describe("FileContextMenuService", () => {
     expect(modal.markFailure).not.toHaveBeenCalled();
   });
 
+  it("suppresses late progress and success when cancelled during success effects", async () => {
+    const app = new App() as any;
+    app.workspace.layoutReady = true;
+    app.workspace.on = jest.fn(() => ({ id: "evt-ref" }));
+    const plugin = { settings: { licenseKey: "test", licenseValid: true }, register: jest.fn(), registerEvent: jest.fn(), getPluginLogger: jest.fn(() => null) } as any;
+    let processingOptions: any;
+    const processDocument = jest.fn(async (_file, options) => { processingOptions = options; return "output.md"; });
+    let cancel!: () => void;
+    let finishSuccess!: () => void;
+    const modal = { updateProgress: jest.fn(), markSuccess: jest.fn(), markFailure: jest.fn(), close: jest.fn() };
+    const service = new FileContextMenuService({
+      app, plugin, documentProcessor: { processDocument }, chatLauncher: { open: jest.fn() },
+      launchProcessingModal: jest.fn((options) => { cancel = options.onCancel!; return modal; }),
+    });
+    jest.spyOn(service as any, "handleDocumentSuccess").mockImplementation(() => new Promise<void>((resolve) => { finishSuccess = resolve; }));
+    const file = new TFile({ path: "document.pdf", name: "document.pdf", extension: "pdf" });
+
+    const pending = (service as any).handleDocumentConversion(file);
+    await Promise.resolve();
+    await Promise.resolve();
+    cancel();
+    processingOptions.onProgress({ stage: "processing", progress: 50, label: "late" });
+    finishSuccess();
+    await pending;
+
+    expect(modal.updateProgress).not.toHaveBeenCalled();
+    expect(modal.markSuccess).not.toHaveBeenCalled();
+    expect(modal.markFailure).not.toHaveBeenCalled();
+  });
+
   it("uses markdown mode for Convert Audio to Markdown flow", async () => {
     const app = new App() as any;
     app.workspace.layoutReady = true;

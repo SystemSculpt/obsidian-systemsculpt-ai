@@ -469,7 +469,9 @@ export class FileContextMenuService {
 
       const extractionPath = await this.documentProcessor.processDocument(file, {
         onProgress: (event) => {
+          if (controller.signal.aborted || this.activeDocumentConversion !== controller) return;
           this.handleProgressEvent(file, event);
+          if (controller.signal.aborted || this.activeDocumentConversion !== controller) return;
           modalHandle?.updateProgress(event);
         },
         showNotices: false,
@@ -480,12 +482,14 @@ export class FileContextMenuService {
 
       if (controller.signal.aborted) return;
       const durationMs = Date.now() - startedAt;
-      await this.handleDocumentSuccess(file, extractionPath, durationMs);
+      await this.handleDocumentSuccess(file, extractionPath, durationMs, controller.signal);
+      if (controller.signal.aborted || this.activeDocumentConversion !== controller) return;
 
       const openOutput = async () => {
         await this.openExtractionFile(extractionPath);
       };
 
+      if (controller.signal.aborted || this.activeDocumentConversion !== controller) return;
       modalHandle?.markSuccess({
         extractionPath,
         durationMs,
@@ -535,8 +539,10 @@ export class FileContextMenuService {
   private async handleDocumentSuccess(
     file: TFile,
     extractionPath: string,
-    durationMs: number
+    durationMs: number,
+    signal?: AbortSignal
   ): Promise<TFile | null> {
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
     this.info("Document conversion complete", {
       filePath: file.path,
       extractionPath,
@@ -544,8 +550,10 @@ export class FileContextMenuService {
     });
 
     new Notice(`Converted ${file.name} to Markdown`, 4000);
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
 
     const output = await this.openExtractionFile(extractionPath);
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
     return output;
   }
 
