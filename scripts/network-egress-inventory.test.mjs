@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { execFileSync } from 'node:child_process';
-import { generateInventory, generateVerificationV2, verifyCurrent, verifyVerificationV2 } from './network-egress-inventory.mjs';
+import { generateInventory, generateVerificationV2, verifyCurrent, verifyVerificationV2, verifyDispositionLedger, effectiveDisposition } from './network-egress-inventory.mjs';
 import { createPluginBuildOptions } from './plugin-build-options.mjs';
 
 function repo(files) {
@@ -412,6 +412,48 @@ test('default verify rejects coordinated historical fixture and companion tamper
     mutation.records[0][field] = `${mutation.records[0][field]}-laundered`;
     fs.writeFileSync(tamperedCompanion, JSON.stringify(mutation, null, 2) + '\n');
     assert.throws(() => verifyVerificationV2({ root, fixture, verificationArtifact: tamperedCompanion, sourceRef: mutation.approvedSource.commit }), /history_tampered/, field);
+  }
+});
+
+test('empty disposition ledger classifies all historical records without rewriting v1 or v2', () => {
+  const root = process.cwd();
+  const fixture = path.join(root, 'testing/fixtures/managed/egress-baseline-660e7fe.json');
+  const verificationArtifact = path.join(root, 'testing/fixtures/managed/egress-verification-v2-660e7fe.json');
+  const dispositionLedger = path.join(root, 'testing/fixtures/managed/egress-dispositions-v1-660e7fe.json');
+  const result = verifyDispositionLedger({ root, fixture, verificationArtifact, dispositionLedger });
+  assert.equal(result.transitions, 0);
+  const states = effectiveDisposition({ root, fixture, verificationArtifact, dispositionLedger, sourceRef: 'c4f81ebc35aa836f787f198b8341d9496bc367ba' });
+  assert.equal(states.records.length, 140);
+  assert.equal(states.records.filter(record => record.effectiveStatus === 'present').length, 131);
+  assert.equal(states.records.filter(record => record.effectiveStatus === 'historical_removed').length, 9);
+});
+
+test('disposition ledger rejects malformed versions, anchors, mappings, and non-empty transitions', () => {
+  const root = process.cwd();
+  const fixture = path.join(root, 'testing/fixtures/managed/egress-baseline-660e7fe.json');
+  const verificationArtifact = path.join(root, 'testing/fixtures/managed/egress-verification-v2-660e7fe.json');
+  const original = JSON.parse(fs.readFileSync(path.join(root, 'testing/fixtures/managed/egress-dispositions-v1-660e7fe.json'), 'utf8'));
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'egress-disposition-'));
+  const check = (mutation, pattern) => {
+    const dispositionLedger = path.join(temp, 'ledger.json');
+    fs.writeFileSync(dispositionLedger, JSON.stringify(mutation(structuredClone(original)), null, 2) + '\n');
+    assert.throws(() => verifyDispositionLedger({ root, fixture, verificationArtifact, dispositionLedger }), pattern);
+  };
+  check(value => ({ ...value, schemaVersion: 2 }), /disposition_history_tampered/);
+  check(value => ({ ...value, unexpected: true }), /disposition_history_tampered/);
+  check(value => { value.historicalFixture.sha256 = '0'.repeat(64); return value; }, /disposition_anchor_mismatch/);
+  check(value => { value.semanticCatalog.mappingCount -= 1; return value; }, /disposition_anchor_mismatch/);
+  check(value => { value.transitions.push({ sequence: 0 }); return value; }, /disposition_transition_unsupported/);
+});
+
+test('default disposition discovery matches explicit ledger for current and frozen source-ref', () => {
+  const cwd = process.cwd();
+  const fixture = 'testing/fixtures/managed/egress-baseline-660e7fe.json';
+  const ledger = 'testing/fixtures/managed/egress-dispositions-v1-660e7fe.json';
+  for (const sourceArgs of [[], ['--source-ref', 'c4f81ebc35aa836f787f198b8341d9496bc367ba']]) {
+    const automatic = execFileSync(process.execPath, ['scripts/network-egress-inventory.mjs', 'current', '--fixture', fixture, ...sourceArgs], { cwd, encoding: 'utf8' });
+    const explicit = execFileSync(process.execPath, ['scripts/network-egress-inventory.mjs', 'current', '--fixture', fixture, '--disposition-ledger', ledger, ...sourceArgs], { cwd, encoding: 'utf8' });
+    assert.equal(automatic, explicit);
   }
 });
 

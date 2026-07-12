@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "ledgerVersion": "network-egress-dispositions-v1",
+  "historicalFixture": {
+    "path": "testing/fixtures/managed/egress-baseline-660e7fe.json",
+    "gitBlob": "cb3ee69ab4f7b42cef1f2aa8546e830a3fefa664",
+    "sha256": "f2d8a626080e6e474852fa6951a2e0c76d4ef8dd1798eaf5809ac089db6c1b1f"
+  },
+  "semanticCatalog": {
+    "path": "testing/fixtures/managed/egress-verification-v2-660e7fe.json",
+    "gitBlob": "6f984a7a111ab6ea3766eda4ce5a210974bb9735",
+    "sha256": "73c7c61550487de92c45c475ad6f4829304b0bd7608f22f787b4d9e2200de2f2",
+    "mappingCount": 131,
+    "mappingSha256": "a27f8f5c5270e42672bc3829d5d1b84939e4f1a74d20f8992ce1738483351db1"
+  },
+  "transitions": []
+}

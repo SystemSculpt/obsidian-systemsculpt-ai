@@ -629,6 +629,70 @@ function semanticTree(root, mode, ref) {
   return occurrences;
 }
 function mappingKey(record) { return `${record.path}|${record.classification}|${record.primitiveOrImport}`; }
+export function defaultDispositionLedgerPath(fixturePath) {
+  const suffix = path.basename(fixturePath).match(/^egress-baseline-(.+)\.json$/)?.[1] || IMMUTABLE_BASELINE_REF;
+  return path.join(path.dirname(fixturePath), `egress-dispositions-v1-${suffix}.json`);
+}
+function artifactPath(root, file) { return path.relative(root, path.resolve(file)).replaceAll(path.sep, '/'); }
+function exactKeys(value, expected, category, label) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || canonical(Object.keys(value).sort()) !== canonical([...expected].sort())) throw new Error(`${category}: ${label} has malformed fields; restore the reviewed disposition ledger`);
+}
+export function loadAndValidateDispositionLedger({ dispositionLedger } = {}) {
+  let ledger;
+  try { ledger = JSON.parse(fs.readFileSync(dispositionLedger, 'utf8')); }
+  catch { throw new Error(`disposition_history_tampered: ${dispositionLedger} is missing or malformed JSON; restore the reviewed disposition ledger`); }
+  exactKeys(ledger, ['schemaVersion', 'ledgerVersion', 'historicalFixture', 'semanticCatalog', 'transitions'], 'disposition_history_tampered', 'ledger');
+  exactKeys(ledger.historicalFixture, ['path', 'gitBlob', 'sha256'], 'disposition_history_tampered', 'historicalFixture');
+  exactKeys(ledger.semanticCatalog, ['path', 'gitBlob', 'sha256', 'mappingCount', 'mappingSha256'], 'disposition_history_tampered', 'semanticCatalog');
+  if (ledger.schemaVersion !== 1 || ledger.ledgerVersion !== 'network-egress-dispositions-v1') throw new Error('disposition_history_tampered: unsupported disposition schemaVersion or ledgerVersion; restore the version 1 ledger');
+  if (!Array.isArray(ledger.transitions)) throw new Error('disposition_history_tampered: transitions must be an array; restore the reviewed disposition ledger');
+  if (ledger.transitions.length) throw new Error('disposition_transition_unsupported: this Plan025b core checkpoint accepts only an empty transition ledger; use the reviewed transition-generator checkpoint');
+  return ledger;
+}
+export function validateDispositionAnchors({ root = process.cwd(), fixture, verificationArtifact, ledger }) {
+  const historicalBytes = fs.readFileSync(fixture);
+  const catalogBytes = fs.readFileSync(verificationArtifact);
+  const catalog = JSON.parse(catalogBytes);
+  const expectedHistorical = { path: artifactPath(root, fixture), gitBlob: git(root, ['hash-object', fixture]).trim(), sha256: hash(historicalBytes) };
+  const expectedCatalog = { path: artifactPath(root, verificationArtifact), gitBlob: git(root, ['hash-object', verificationArtifact]).trim(), sha256: hash(catalogBytes), mappingCount: catalog.records?.length, mappingSha256: canonicalHash(catalog.records) };
+  if (canonical(ledger.historicalFixture) !== canonical(expectedHistorical)) throw new Error(`disposition_anchor_mismatch: historical fixture anchor differs from ${expectedHistorical.path}; restore the reviewed ledger`);
+  if (canonical(ledger.semanticCatalog) !== canonical(expectedCatalog)) throw new Error(`disposition_anchor_mismatch: semantic catalog anchor differs from ${expectedCatalog.path}; restore the reviewed ledger`);
+  return { historical: JSON.parse(historicalBytes), catalog };
+}
+export function buildEffectiveDispositionMap({ historical, catalog, ledger }) {
+  if (ledger.transitions.length) throw new Error('disposition_transition_unsupported: this Plan025b core checkpoint accepts only an empty transition ledger; use the reviewed transition-generator checkpoint');
+  const identity = record => `${record.id || record.historicalRecordId}|${record.origin || record.historicalOrigin}|${record.occurrenceIdentity || record.historicalOccurrenceIdentity}`;
+  const mappings = new Map();
+  for (const mapped of catalog.records || []) {
+    const key = identity(mapped);
+    if (mappings.has(key)) throw new Error(`disposition_mapping_mismatch: duplicate v2 mapping for ${mapped.historicalRecordId}; restore the reviewed semantic catalog`);
+    mappings.set(key, mapped);
+  }
+  const records = (historical.records || []).map(record => {
+    const key = identity(record);
+    const mapped = mappings.get(key);
+    if (record.currentStatus === 'removed') {
+      if (mapped) throw new Error(`disposition_mapping_mismatch: historical removed record ${record.id} has a v2 mapping; restore the reviewed artifacts`);
+      return { historicalRecordId: record.id, historicalOccurrenceIdentity: record.occurrenceIdentity, ownerPlan: record.ownerPlan, effectiveStatus: 'historical_removed' };
+    }
+    if (record.currentStatus !== 'present' || !mapped) throw new Error(`disposition_mapping_mismatch: present historical record ${record.id} requires exactly one v2 mapping; restore the reviewed artifacts`);
+    mappings.delete(key);
+    return { historicalRecordId: record.id, historicalOccurrenceIdentity: record.occurrenceIdentity, v2OccurrenceId: mapped.v2OccurrenceId, ownerPlan: record.ownerPlan, effectiveStatus: 'present' };
+  });
+  if (mappings.size) throw new Error(`disposition_mapping_mismatch: semantic catalog contains ${mappings.size} unknown historical mappings; restore the reviewed artifacts`);
+  return new Map(records.map(record => [`${record.historicalRecordId}|${record.historicalOccurrenceIdentity}`, record]));
+}
+export function verifyDispositionLedger({ root = process.cwd(), fixture, verificationArtifact, dispositionLedger = defaultDispositionLedgerPath(fixture) } = {}) {
+  const ledger = loadAndValidateDispositionLedger({ dispositionLedger });
+  const { historical, catalog } = validateDispositionAnchors({ root, fixture, verificationArtifact, ledger });
+  const effective = buildEffectiveDispositionMap({ historical, catalog, ledger });
+  return { transitions: ledger.transitions.length, records: effective.size, effective };
+}
+export function effectiveDisposition({ root = process.cwd(), fixture, verificationArtifact, dispositionLedger = defaultDispositionLedgerPath(fixture), sourceRef } = {}) {
+  verifyVerificationV2({ root, fixture, verificationArtifact, sourceRef });
+  const result = verifyDispositionLedger({ root, fixture, verificationArtifact, dispositionLedger });
+  return { records: [...result.effective.values()] };
+}
 export function generateVerificationV2({ root = process.cwd(), fixture, sourceRef, historicalFixturePath } = {}) {
   const historicalBytes = fs.readFileSync(fixture);
   const historical = JSON.parse(historicalBytes);
@@ -718,6 +782,7 @@ async function cli() {
   const fixture = value('--fixture');
   const analyzerVersion = value('--analyzer-version');
   const companion = value('--verification-artifact') || (fixture ? path.join(path.dirname(fixture), `egress-verification-v2-${path.basename(fixture).match(/egress-baseline-(.+)\.json$/)?.[1] || IMMUTABLE_BASELINE_REF}.json`) : undefined);
+  const dispositionLedger = value('--disposition-ledger') || (fixture ? defaultDispositionLedgerPath(fixture) : undefined);
   const assertDefaultTrustBoundary = () => {
     if (value('--ref') && value('--ref') !== IMMUTABLE_BASELINE_REF) throw new Error(`history_tampered: default verification pins --ref ${IMMUTABLE_BASELINE_REF}; use --analyzer-version 1 for archaeology`);
     const bytes = fs.readFileSync(fixture);
@@ -737,7 +802,8 @@ async function cli() {
     else {
       assertDefaultTrustBoundary();
       if (!fs.existsSync(companion)) throw new Error(`verification_companion_missing: create ${companion}; refusing silent v1 fallback`);
-      verifyVerificationV2({ root, fixture, verificationArtifact: companion, sourceRef: value('--source-ref') });
+      if (!fs.existsSync(dispositionLedger)) throw new Error(`disposition_history_tampered: create ${dispositionLedger}; refusing silent disposition fallback`);
+      effectiveDisposition({ root, fixture, verificationArtifact: companion, dispositionLedger, sourceRef: value('--source-ref') });
     }
     console.log('[egress] PASS: live production inventory matches reviewed fixture');
   } else if (command === 'verify') {
@@ -759,7 +825,9 @@ async function cli() {
       const expected = fs.readFileSync(companion);
       if (!actual.equals(expected)) throw new Error(`occurrence_changed: v2 companion differs from approved-source regeneration; review ${companion}`);
       verifyVerificationV2({ root, fixture, verificationArtifact: companion, sourceRef });
-      console.log('[egress] PASS: historical v1 bytes and semantic v2 companion verified');
+      if (!fs.existsSync(dispositionLedger)) throw new Error(`disposition_history_tampered: create ${dispositionLedger}; refusing silent disposition fallback`);
+      verifyDispositionLedger({ root, fixture, verificationArtifact: companion, dispositionLedger });
+      console.log('[egress] PASS: historical v1 bytes, semantic v2 companion, and empty disposition ledger verified');
     }
   } else throw new Error(`unknown command: ${command}`);
 }
