@@ -413,7 +413,7 @@ describe("migrateStudioProjectToPathOnlyPorts", () => {
     expect(migrated.project.graph.nodes.some((node) => node.kind === "studio.prompt_template")).toBe(false);
   });
 
-  it("migrates resend audience sync nodes to generic batch HTTP request nodes", () => {
+  it("retires resend audience sync nodes as secret-free unsupported placeholders", () => {
     const project = baseProject();
     project.graph.nodes.push(
       {
@@ -464,23 +464,15 @@ describe("migrateStudioProjectToPathOnlyPorts", () => {
     expect(migrated.changed).toBe(true);
 
     const migratedNode = migrated.project.graph.nodes.find((node) => node.id === "resend");
-    expect(migratedNode?.kind).toBe("studio.http_request");
-    expect(migratedNode?.config).toEqual(
-      expect.objectContaining({
-        method: "POST",
-        url: "https://api.resend.com/contacts",
-        bearerToken: "",
-        bodyMode: "auto",
-        maxRetries: 2,
-      })
-    );
-    expect(migratedNode?.config.headers).toEqual({
-      "Content-Type": "application/json",
+    expect(migratedNode).toMatchObject({
+      kind: "studio.retired_http_request",
+      version: "1.0.0",
+      title: "Retired HTTP Request",
+      config: {
+        reason: "HTTP Request nodes are retired. Replace this node with a retained managed capability.",
+      },
     });
-    expect(migratedNode?.config.body).toEqual({
-      unsubscribed: false,
-      segments: [{ id: "segment_123" }],
-    });
+    expect(JSON.stringify(migratedNode?.config)).not.toMatch(/segment_123|apiKey|bearer|https?:\/\//i);
 
     const signature = migrated.project.graph.edges
       .map((edge) => `${edge.fromNodeId}:${edge.fromPortId}->${edge.toNodeId}:${edge.toPortId}`)
@@ -527,7 +519,7 @@ describe("migrateStudioProjectToPathOnlyPorts", () => {
     ).toBe(true);
   });
 
-  it("backfills model and resolution levers on legacy image generation nodes", () => {
+  it("removes legacy image provider/model fields and backfills managed resolution config", () => {
     const project = baseProject();
     project.graph.nodes.push({
       id: "image",
@@ -538,6 +530,9 @@ describe("migrateStudioProjectToPathOnlyPorts", () => {
       config: {
         count: 2,
         aspectRatio: "16:9",
+        modelId: "openai/gpt-5-image",
+        provider: "openai",
+        providerId: "legacy-provider",
       },
     });
 
@@ -545,10 +540,9 @@ describe("migrateStudioProjectToPathOnlyPorts", () => {
     expect(migrated.changed).toBe(true);
 
     const imageNode = migrated.project.graph.nodes.find((node) => node.id === "image");
-    expect(imageNode?.config).toMatchObject({
+    expect(imageNode?.config).toEqual({
       count: 2,
       aspectRatio: "16:9",
-      modelId: "",
       imageSize: "",
     });
     expect(
@@ -556,6 +550,12 @@ describe("migrateStudioProjectToPathOnlyPorts", () => {
         (entry) => entry.id === "studio.image-node-levers.v1"
       )
     ).toBe(true);
+    expect(
+      migrated.project.migrations.applied.some(
+        (entry) => entry.id === "studio.managed-node-config.v1"
+      )
+    ).toBe(true);
+    expect(migrateStudioProjectToPathOnlyPorts(migrated.project).changed).toBe(false);
   });
 
   it("clamps legacy image counts above the new maximum to 4", () => {
@@ -579,7 +579,6 @@ describe("migrateStudioProjectToPathOnlyPorts", () => {
     expect(imageNode?.config).toMatchObject({
       count: 4,
       aspectRatio: "16:9",
-      modelId: "",
       imageSize: "",
     });
   });
@@ -604,7 +603,7 @@ describe("migrateStudioProjectToPathOnlyPorts", () => {
     expect(imageNode?.config).toMatchObject({ count: 3 });
   });
 
-  it("leaves image nodes that already declare model levers unchanged", () => {
+  it("sanitizes configured legacy image model levers once, then remains idempotent", () => {
     const project = baseProject();
     project.graph.nodes.push({
       id: "image",
@@ -614,6 +613,7 @@ describe("migrateStudioProjectToPathOnlyPorts", () => {
       position: { x: 0, y: 0 },
       config: {
         modelId: "openai/gpt-5-image",
+        provider: "openai",
         count: 1,
         aspectRatio: "1:1",
         imageSize: "2K",
@@ -621,7 +621,18 @@ describe("migrateStudioProjectToPathOnlyPorts", () => {
     });
 
     const migrated = migrateStudioProjectToPathOnlyPorts(project);
-    expect(migrated.changed).toBe(false);
+    expect(migrated.changed).toBe(true);
+    expect(migrated.project.graph.nodes.find((node) => node.id === "image")?.config).toEqual({
+      count: 1,
+      aspectRatio: "1:1",
+      imageSize: "2K",
+    });
+    expect(
+      migrated.project.migrations.applied.some(
+        (entry) => entry.id === "studio.managed-node-config.v1"
+      )
+    ).toBe(true);
+    expect(migrateStudioProjectToPathOnlyPorts(migrated.project).changed).toBe(false);
   });
 
   it("renames legacy studio.text and studio.label kinds in one atomic pass", () => {
@@ -804,7 +815,7 @@ describe("migrateStudioProjectToPathOnlyPorts", () => {
       expect(textNode?.config).toEqual({ value: "annotation" });
     });
 
-    it("fills the kind default width when only a legacy height exists", () => {
+    it("preserves first-class geometry while retiring and sanitizing an HTTP node", () => {
       const project = baseProject();
       project.graph.nodes.push({
         id: "http",
@@ -812,15 +823,26 @@ describe("migrateStudioProjectToPathOnlyPorts", () => {
         version: "1.0.0",
         title: "HTTP",
         position: { x: 0, y: 0 },
-        config: { url: "https://example.com", height: 320 },
+        config: {
+          url: "https://secret.example.com",
+          headers: { Authorization: "Bearer sentinel-header" },
+          bearerToken: "sentinel-token",
+          body: { secret: "sentinel-body" },
+          width: 410,
+          height: 320,
+        },
       });
 
       const migrated = migrateStudioProjectToPathOnlyPorts(project);
       expect(migrated.changed).toBe(true);
 
       const httpNode = migrated.project.graph.nodes.find((node) => node.id === "http");
-      expect(httpNode?.size).toEqual({ width: 280, height: 320 });
-      expect(httpNode?.config).toEqual({ url: "https://example.com" });
+      expect(httpNode?.kind).toBe("studio.retired_http_request");
+      expect(httpNode?.size).toEqual({ width: 410, height: 320 });
+      expect(httpNode?.config).toEqual({
+        reason: "HTTP Request nodes are retired. Replace this node with a retained managed capability.",
+      });
+      expect(JSON.stringify(httpNode)).not.toMatch(/secret\.example|sentinel-header|sentinel-token|sentinel-body/);
     });
 
     it("drops non-numeric geometry garbage without minting a size", () => {
@@ -839,7 +861,11 @@ describe("migrateStudioProjectToPathOnlyPorts", () => {
 
       const httpNode = migrated.project.graph.nodes.find((node) => node.id === "http");
       expect(httpNode?.size).toBeUndefined();
-      expect(httpNode?.config).toEqual({ url: "https://example.com" });
+      expect(httpNode?.kind).toBe("studio.retired_http_request");
+      expect(httpNode?.config).toEqual({
+        reason: "HTTP Request nodes are retired. Replace this node with a retained managed capability.",
+      });
+      expect(JSON.stringify(httpNode)).not.toContain("https://example.com");
     });
 
     it("keeps an existing size authoritative and only strips lingering legacy keys", () => {

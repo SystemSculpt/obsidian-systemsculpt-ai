@@ -638,6 +638,15 @@ export function migrateStudioProjectToPathOnlyPorts(project: StudioProjectV1): {
     changed = true;
   }
 
+  // Geometry must be promoted before any retirement pass replaces config.
+  // Retired nodes keep first-class canvas size, while their legacy request
+  // fields (including width/height-adjacent secrets) are discarded below.
+  const geometryMigration = migrateNodeGeometryToSize(nodes);
+  if (geometryMigration.changed) {
+    changed = true;
+    nodes = geometryMigration.nodes;
+  }
+
   const resendMigration = migrateResendAudienceSyncNodes(nodes, edges);
   if (resendMigration.changed) {
     changed = true;
@@ -661,12 +670,6 @@ export function migrateStudioProjectToPathOnlyPorts(project: StudioProjectV1): {
   if (imageGenerationMigration.changed) {
     changed = true;
     nodes = imageGenerationMigration.nodes;
-  }
-
-  const geometryMigration = migrateNodeGeometryToSize(nodes);
-  if (geometryMigration.changed) {
-    changed = true;
-    nodes = geometryMigration.nodes;
   }
 
   let entryNodeIds = project.graph.entryNodeIds;
