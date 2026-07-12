@@ -10,7 +10,8 @@ import {
 import type SystemSculptPlugin from "../main";
 import {
   isAudioFileExtension,
-  isDocumentFileExtension,
+  isAutoDocumentConversionFileExtension,
+  isManagedDocumentConversionFileExtension,
   normalizeFileExtension,
 } from "../constants/fileTypes";
 import { DocumentProcessingService } from "../services/DocumentProcessingService";
@@ -59,7 +60,6 @@ export interface DocumentProcessor {
     file: TFile,
     options?: {
       onProgress?: (event: DocumentProcessingProgressEvent) => void;
-      addToContext?: boolean;
       showNotices?: boolean;
       flow?: DocumentProcessingFlow;
       signal?: AbortSignal;
@@ -278,7 +278,7 @@ export class FileContextMenuService {
     this.logMenuOpen(file, extension, context);
     const shouldChat = this.shouldOfferChatWithFile(extension);
     const shouldCopyImage = this.shouldOfferCopyImage(extension);
-    const shouldConvertDocument = isDocumentFileExtension(extension);
+    const shouldConvertDocument = isManagedDocumentConversionFileExtension(extension);
     const shouldConvertAudio = isAudioFileExtension(extension);
 
     this.debug("Evaluating menu population", {
@@ -335,7 +335,7 @@ export class FileContextMenuService {
 
     return (
       CHAT_TEXT_EXTENSIONS.has(extension) ||
-      isDocumentFileExtension(extension) ||
+      isAutoDocumentConversionFileExtension(extension) ||
       isAudioFileExtension(extension) ||
       CHAT_IMAGE_EXTENSIONS.has(extension)
     );
@@ -346,7 +346,7 @@ export class FileContextMenuService {
     return (
       this.shouldOfferChatWithFile(ext) ||
       this.shouldOfferCopyImage(ext) ||
-      isDocumentFileExtension(ext) ||
+      isManagedDocumentConversionFileExtension(ext) ||
       isAudioFileExtension(ext)
     );
   }
@@ -407,11 +407,7 @@ export class FileContextMenuService {
     flow: ProcessingFlow,
     context: MenuContext
   ): void {
-    const hasValidLicense = this.hasValidProcessingLicense();
-    const title =
-      flow === "document"
-        ? this.buildConvertMenuTitle(hasValidLicense)
-        : this.buildAudioMenuTitle(hasValidLicense);
+    const title = flow === "document" ? CONVERT_MENU_TITLE : "Convert Audio to Markdown";
     const icon = flow === "document" ? "file-text" : "file-audio";
 
     menu.addItem((item) => {
@@ -423,7 +419,6 @@ export class FileContextMenuService {
           this.info("Convert to Markdown triggered", {
             filePath: file.path,
             flow,
-            hasValidLicense,
             source: context.source,
           });
 
@@ -434,20 +429,6 @@ export class FileContextMenuService {
           }
         });
     });
-  }
-
-  private hasValidProcessingLicense(): boolean {
-    const { licenseKey, licenseValid } = this.plugin.settings ?? {};
-    return Boolean(licenseKey?.trim() && licenseValid);
-  }
-
-  private buildConvertMenuTitle(hasValidLicense: boolean): string {
-    return hasValidLicense ? CONVERT_MENU_TITLE : `${CONVERT_MENU_TITLE} (Pro)`;
-  }
-
-  private buildAudioMenuTitle(hasValidLicense: boolean): string {
-    const base = "Convert Audio to Markdown";
-    return hasValidLicense ? base : `${base} (Pro)`;
   }
 
   private async handleDocumentConversion(file: TFile): Promise<void> {
@@ -475,7 +456,6 @@ export class FileContextMenuService {
           modalHandle?.updateProgress(event);
         },
         showNotices: false,
-        addToContext: false,
         flow: "document",
         signal: controller.signal,
       });

@@ -11,6 +11,11 @@ import { PlatformContext } from "../../services/PlatformContext";
 import type { ChatMessage } from "../../types";
 import { CHAT_VIEW_TYPE, SYSTEMSCULPT_STUDIO_VIEW_TYPE } from "./viewTypes";
 import { STUDIO_PROJECT_EXTENSION } from "../../studio/types";
+import {
+  isAudioFileExtension,
+  isAutoDocumentConversionFileExtension,
+  normalizeFileExtension,
+} from "../../constants/fileTypes";
 
 type StudioCommandViewLike = {
   getViewType(): string;
@@ -263,30 +268,11 @@ export class CommandManager {
       checkCallback: (checking: boolean) => {
         const activeFile = this.app.workspace.getActiveFile();
         if (!activeFile) return false;
-        const extension = activeFile.extension.toLowerCase();
-        const supportedExtensions = [
-          "md",
-          "txt",
-          "markdown",
-          "pdf",
-          "doc",
-          "docx",
-          "ppt",
-          "pptx",
-          "xls",
-          "xlsx",
-          "mp3",
-          "wav",
-          "m4a",
-          "ogg",
-          "webm",
-          "jpg",
-          "jpeg",
-          "png",
-          "webp",
-          "svg",
-        ];
-        if (!supportedExtensions.includes(extension)) return false;
+        const extension = normalizeFileExtension(activeFile.extension);
+        const supported = ["md", "txt", "markdown", "jpg", "jpeg", "png", "webp", "svg"].includes(extension)
+          || isAutoDocumentConversionFileExtension(extension)
+          || isAudioFileExtension(extension);
+        if (!supported) return false;
         if (!checking) {
           const leaf = this.app.workspace.getLeaf("tab");
           const { ChatView } = loadChatViewModule();

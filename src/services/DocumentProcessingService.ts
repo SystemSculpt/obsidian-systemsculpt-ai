@@ -1,6 +1,6 @@
 import { App, Notice, TFile } from "obsidian";
 import type SystemSculptPlugin from "../main";
-import { getDocumentMimeType, normalizeFileExtension } from "../constants/fileTypes";
+import { getManagedDocumentMimeType, normalizeFileExtension } from "../constants/fileTypes";
 import type {
   DocumentProcessingFlow,
   DocumentProcessingLogEntry,
@@ -33,14 +33,6 @@ const STAGE_ICONS: Record<DocumentProcessingStage, string> = {
   error: "x-circle",
 };
 
-const SUPPORTED_MANAGED_DOCUMENT_MIME_TYPES = new Set([
-  "application/pdf",
-  "image/png",
-  "image/jpeg",
-  "image/jpg",
-  "image/webp",
-]);
-
 type ProgressMeta = Partial<
   Pick<DocumentProcessingLogEntry, "filePath" | "fileName" | "durationMs" | "attempt" | "source">
 > & { documentId?: string; metadata?: Record<string, unknown> };
@@ -65,7 +57,6 @@ export interface DocumentProcessingReceipt {
 
 export interface DocumentProcessingOptions {
   onProgress?: (event: DocumentProcessingProgressEvent) => void;
-  addToContext?: boolean;
   showNotices?: boolean;
   flow?: DocumentProcessingFlow;
   signal?: AbortSignal;
@@ -97,6 +88,14 @@ interface PreparedLocalEffects {
   markdownBytes: ArrayBuffer;
   images: PreparedImageEffect[];
   artifacts: Array<{ kind: "image" | "markdown"; bytes: ArrayBuffer }>;
+}
+
+interface NormalizedManagedDocumentResult {
+  content: string;
+  text: string;
+  markdown: string;
+  metadata: Readonly<Record<string, unknown>>;
+  images: ManagedDocumentDownloadResult["images"] | Record<string, string>;
 }
 
 export class ManagedDocumentLocalEffectError extends Error {
@@ -156,8 +155,8 @@ export class DocumentProcessingService {
         fingerprint: () => `sha256:${sha256HexFromBytesPortable(new TextEncoder().encode(identity))}`,
         load: async () => {
           throwIfAborted(signal);
-          const contentType = getDocumentMimeType(normalizeFileExtension(file.extension));
-          if (!contentType || !SUPPORTED_MANAGED_DOCUMENT_MIME_TYPES.has(contentType)) {
+          const contentType = getManagedDocumentMimeType(normalizeFileExtension(file.extension));
+          if (!contentType) {
             throw new Error(`Managed document processing does not support .${file.extension || "unknown"} files.`);
           }
           const bytes = await this.app.vault.readBinary(file);
@@ -350,7 +349,7 @@ export class DocumentProcessingService {
     };
   }
 
-  private normalizeManagedResult(result: ManagedDocumentDownloadResult): Record<string, any> {
+  private normalizeManagedResult(result: ManagedDocumentDownloadResult): NormalizedManagedDocumentResult {
     const content = result.markdown.trim()
       ? result.markdown
       : result.text.trim()

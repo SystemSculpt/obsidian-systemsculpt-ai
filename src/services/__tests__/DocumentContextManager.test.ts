@@ -4,14 +4,6 @@
 import { App, TFile, Notice } from "obsidian";
 import { DocumentContextManager, ChatContextManager } from "../DocumentContextManager";
 
-// Mock dependencies
-const mockCheckLicenseForFile = jest.fn();
-jest.mock("../../core/license/LicenseChecker", () => ({
-  LicenseChecker: {
-    checkLicenseForFile: (...args: any[]) => mockCheckLicenseForFile(...args),
-  },
-}));
-
 const mockProcessDocument = jest.fn();
 jest.mock("../DocumentProcessingService", () => ({
   DocumentProcessingService: {
@@ -101,7 +93,6 @@ describe("DocumentContextManager", () => {
     mockContextManager = createMockContextManager();
 
     // Default mock behaviors
-    mockCheckLicenseForFile.mockResolvedValue(true);
     mockProcessDocument.mockImplementation(async (_file: TFile, options: any) => {
       const receipt = documentReceipt("Extractions/document/document.md");
       await options.commitContextEffect?.(receipt, new AbortController().signal);
@@ -241,16 +232,6 @@ describe("DocumentContextManager", () => {
         expect(mockContextManager.addToContextFiles).not.toHaveBeenCalled();
       });
 
-      it("returns false when license check fails", async () => {
-        const file = createMockFile();
-        mockCheckLicenseForFile.mockResolvedValue(false);
-
-        const result = await manager.addFileToContext(file, mockContextManager);
-
-        expect(result).toBe(false);
-        expect(mockContextManager.addToContextFiles).not.toHaveBeenCalled();
-      });
-
       it("does not save changes when saveChanges is false", async () => {
         const file = createMockFile();
 
@@ -282,16 +263,24 @@ describe("DocumentContextManager", () => {
         );
       });
 
-      it("processes DOCX files", async () => {
+      it("rejects unsupported Office files without managed processing or context routing", async () => {
         const file = createMockFile({ path: "test/doc.docx", extension: "docx", basename: "doc" });
-        resolveDocument("Extractions/doc/doc.md");
-        (mockApp.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(null);
-        (mockApp.vault.getAllLoadedFiles as jest.Mock).mockReturnValue([]);
+
+        const result = await manager.addFileToContext(file, mockContextManager);
+
+        expect(result).toBe(false);
+        expect(mockProcessDocument).not.toHaveBeenCalled();
+        expect(mockContextManager.addToContextFiles).not.toHaveBeenCalled();
+      });
+
+      it("keeps images local when adding them to context", async () => {
+        const file = createMockFile({ path: "images/diagram.png", extension: "png", basename: "diagram" });
 
         const result = await manager.addFileToContext(file, mockContextManager);
 
         expect(result).toBe(true);
-        expect(mockProcessDocument).toHaveBeenCalled();
+        expect(mockProcessDocument).not.toHaveBeenCalled();
+        expect(mockContextManager.addToContextFiles).toHaveBeenCalledWith("[[images/diagram.png]]");
       });
 
       it("handles document processing error", async () => {

@@ -1,8 +1,8 @@
 import { ChatView } from "./ChatView";
 import { TFile, TFolder, Notice } from "obsidian";
-import { showPopup, showAlert } from "../../core/ui/";
-import { LICENSE_URL } from "../../types";
+import { showAlert } from "../../core/ui/";
 import { DocumentContextManager } from "../../services/DocumentContextManager";
+import { isUnsupportedOfficeFileExtension } from "../../constants/fileTypes";
 
 interface SearchResultData {
   type: 'search-results';
@@ -511,16 +511,7 @@ export const eventHandling = {
                     dropType = folderCount > 1 ? 'folders' : 'folder';
                     dropDetails = folderCount > 1 ? `${folderCount} folders` : `Folder: "${abstractFile.name}"`;
                   } else if (isFile(abstractFile)) {
-                    const extension = abstractFile.extension.toLowerCase();
-                    const requiresPro = ["pdf", "doc", "docx", "mp3", "wav", "m4a", "ogg", "webm"].includes(extension);
-                    if (
-                      requiresPro &&
-                      (!chatView.plugin.settings.licenseKey?.trim() || !chatView.plugin.settings.licenseValid)
-                    ) {
-                      await showPopup(chatView.app, "Document processing is a Pro feature...", { title: "Pro Feature", primaryButton: "Get License", secondaryButton: "Maybe Later" })
-                        .then((result) => { if (result?.confirmed) window.open(LICENSE_URL, "_blank"); });
-                      return;
-                    }
+                    if (isUnsupportedOfficeFileExtension(abstractFile.extension)) continue;
                     filesToProcess.push(abstractFile);
                   } else if (!filePath.includes(".")) {
                     const mdPath = `${filePath}.md`;
@@ -540,16 +531,7 @@ export const eventHandling = {
               if (!filePath) continue;
               let abstractFile = chatView.app.vault.getAbstractFileByPath(filePath);
               if (isFile(abstractFile)) {
-                const extension = abstractFile.extension.toLowerCase();
-                const requiresPro = ["pdf", "doc", "docx", "mp3", "wav", "m4a", "ogg", "webm"].includes(extension);
-                if (
-                  requiresPro &&
-                  (!chatView.plugin.settings.licenseKey?.trim() || !chatView.plugin.settings.licenseValid)
-                ) {
-                  await showPopup(chatView.app, "Document processing is a Pro feature...", { title: "Pro Feature", primaryButton: "Get License", secondaryButton: "Maybe Later" })
-                    .then((result) => { if (result?.confirmed) window.open(LICENSE_URL, "_blank"); });
-                  return;
-                }
+                if (isUnsupportedOfficeFileExtension(abstractFile.extension)) continue;
               }
               if (isFile(abstractFile) || isFolder(abstractFile)) filesToProcess.push(abstractFile);
             }
@@ -565,28 +547,11 @@ export const eventHandling = {
 
           // Separate files and folders
           const folders = filesToProcess.filter(isFolder) as TFolder[];
-          const files = filesToProcess.filter(isFile) as TFile[];
+          const files = filesToProcess.filter(isFile).filter((file) => !isUnsupportedOfficeFileExtension(file.extension)) as TFile[];
 
           // Process folders first
           for (const folder of folders) {
-            const folderFiles = getFilesFromFolder(folder);
-
-            // Check license for pro features
-            const proFiles = folderFiles.filter(file => {
-              const extension = file.extension.toLowerCase();
-              return ["pdf", "doc", "docx", "mp3", "wav", "m4a", "ogg", "webm"].includes(extension);
-            });
-
-            if (proFiles.length > 0 && (!chatView.plugin.settings.licenseKey?.trim() || !chatView.plugin.settings.licenseValid)) {
-              await showPopup(chatView.app, "Document processing is a Pro feature...", {
-                title: "Pro Feature",
-                primaryButton: "Get License",
-                secondaryButton: "Maybe Later"
-              }).then((result) => {
-                if (result?.confirmed) window.open(LICENSE_URL, "_blank");
-              });
-              continue;
-            }
+            const folderFiles = getFilesFromFolder(folder).filter((file) => !isUnsupportedOfficeFileExtension(file.extension));
 
             // Add files to context
             const addedCount = await documentContextManager.addFilesToContext(folderFiles, chatView.contextManager, {
@@ -600,23 +565,6 @@ export const eventHandling = {
 
           // Process individual files
           if (files.length > 0) {
-
-            // Check license for pro features
-            const proFiles = files.filter(file => {
-              const extension = file.extension.toLowerCase();
-              return ["pdf", "doc", "docx", "mp3", "wav", "m4a", "ogg", "webm"].includes(extension);
-            });
-
-            if (proFiles.length > 0 && (!chatView.plugin.settings.licenseKey?.trim() || !chatView.plugin.settings.licenseValid)) {
-              await showPopup(chatView.app, "Document processing is a Pro feature...", {
-                title: "Pro Feature",
-                primaryButton: "Get License",
-                secondaryButton: "Maybe Later"
-              }).then((result) => {
-                if (result?.confirmed) window.open(LICENSE_URL, "_blank");
-              });
-              return;
-            }
 
             // Add files to context
             const addedCount = await documentContextManager.addFilesToContext(files, chatView.contextManager, {

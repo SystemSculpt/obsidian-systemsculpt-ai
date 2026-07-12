@@ -11,6 +11,9 @@ const createMockFiles = (): TFile[] => [
   new TFile({ path: "images/diagram.png" }),
   new TFile({ path: "images/photo.jpg" }),
   new TFile({ path: "documents/report.pdf" }),
+  new TFile({ path: "documents/legacy.docx" }),
+  new TFile({ path: "documents/slides.pptx" }),
+  new TFile({ path: "documents/sheet.xlsx" }),
   new TFile({ path: "audio/recording.mp3" }),
   new TFile({ path: "folder/subfolder/nested.md" }),
 ];
@@ -78,6 +81,7 @@ describe("ContextSelectionModal", () => {
     it("loads all supported files from vault", () => {
       const files = (modal as any).files;
       expect(files.length).toBe(8);
+      expect(files.map((item: any) => item.file.extension)).not.toEqual(expect.arrayContaining(["docx", "pptx", "xlsx"]));
     });
 
     it("categorizes files by type", () => {

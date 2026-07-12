@@ -230,6 +230,20 @@ const bootstrap = (
     expect(titles).toContain("Convert to Markdown");
   });
 
+  it.each(["png", "jpg", "jpeg", "webp"])("offers explicit managed conversion for %s images", (extension) => {
+    const { handlers } = bootstrap();
+    const menu = createMenuStub();
+    emitFileMenu(handlers, menu, createFile(extension), "preview");
+    expect(menu.recordedItems.map((item) => item.title)).toContain("Convert to Markdown");
+  });
+
+  it.each(["doc", "docx", "ppt", "pptx", "xls", "xlsx"])("does not advertise unsupported Office conversion or Chat routing for %s", (extension) => {
+    const { handlers } = bootstrap();
+    const menu = createMenuStub();
+    emitFileMenu(handlers, menu, createFile(extension), "preview");
+    expect(menu.recordedItems).toHaveLength(0);
+  });
+
   it("invokes the document processor when the menu item is clicked", async () => {
     const { handlers, documentProcessor } = bootstrap();
     const menu = createMenuStub();

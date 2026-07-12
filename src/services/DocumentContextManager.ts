@@ -1,11 +1,11 @@
 import { App, TFile, Notice } from "obsidian";
 import { DocumentProcessingService } from "./DocumentProcessingService";
-import { LicenseChecker } from "../core/license/LicenseChecker";
 import type SystemSculptPlugin from "../main";
 import { DocumentProcessingProgressEvent } from "../types/documentProcessing";
 import {
   isAudioFileExtension,
-  isDocumentFileExtension,
+  isAutoDocumentConversionFileExtension,
+  isUnsupportedOfficeFileExtension,
   normalizeFileExtension,
 } from "../constants/fileTypes";
 import { TranscriptionService } from "./TranscriptionService";
@@ -158,18 +158,17 @@ export class DocumentContextManager {
     
     
     try {
-      // Check license before processing
-      if (!(await LicenseChecker.checkLicenseForFile(file, this.app, this.plugin))) {
+      const extension = normalizeFileExtension(file.extension);
+      if (isUnsupportedOfficeFileExtension(extension)) {
+        if (showNotices) new Notice("This Office file type is not supported for Chat context.", 4000);
         return false;
       }
-      
-      const extension = normalizeFileExtension(file.extension);
       
       // Determine how to process the file based on its extension
       let contextPath: string;
       let contextEffectCommitted = false;
       
-      if (isDocumentFileExtension(extension)) {
+      if (isAutoDocumentConversionFileExtension(extension)) {
         // Process document file
         try {
           contextManager.updateProcessingStatus(file, {
@@ -188,7 +187,6 @@ export class DocumentContextManager {
               });
             },
             showNotices: false,
-            addToContext: false,
             commitContextEffect: async (effect, signal) => {
               for (const imagePath of effect.imagePaths) {
                 throwIfAborted(signal);

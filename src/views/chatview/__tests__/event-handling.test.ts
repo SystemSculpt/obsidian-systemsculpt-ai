@@ -2,6 +2,7 @@ import { JSDOM } from "jsdom";
 import { TFile } from "obsidian";
 import { eventHandling } from "../eventHandling";
 import { DocumentContextManager } from "../../../services/DocumentContextManager";
+import { showPopup } from "../../../core/ui/";
 
 jest.mock("../../../services/DocumentContextManager", () => ({
   DocumentContextManager: {
@@ -110,5 +111,44 @@ describe("eventHandling.setupDragAndDrop", () => {
     const filesArg = addFilesToContext.mock.calls[0][0] as TFile[];
     expect(filesArg).toHaveLength(2);
     expect(filesArg.map((f) => f.path)).toEqual(["FileA.md", "FileB.md"]);
+  });
+
+  it("does not apply stale local license authority before managed admission", async () => {
+    const addFilesToContext = jest.fn(async (files: TFile[]) => files.length);
+    (DocumentContextManager.getInstance as jest.Mock).mockReturnValue({ addFilesToContext });
+    const chatView: any = {
+      app: { vault: { getAbstractFileByPath: jest.fn((path: string) => new TFile({ path })), getAllLoadedFiles: jest.fn(() => []) } },
+      plugin: { settings: { licenseKey: "", licenseValid: false } },
+      contextManager: { getContextFiles: () => new Set() },
+    };
+    const container = document.createElement("div");
+    const handlers: Record<string, (e: any) => any> = {};
+    container.addEventListener = ((type: string, cb: any) => { handlers[type] = cb; }) as any;
+    eventHandling.setupDragAndDrop(chatView, container);
+    await handlers.drop({
+      dataTransfer: { items: [{ type: "text/plain", getAsString: (cb: (value: string) => void) => cb("report.pdf") }], types: ["text/plain"] },
+      preventDefault: jest.fn(), stopPropagation: jest.fn(),
+    });
+    expect(showPopup).not.toHaveBeenCalled();
+    expect(addFilesToContext).toHaveBeenCalledWith([expect.objectContaining({ path: "report.pdf" })], expect.any(Object), expect.any(Object));
+  });
+
+  it("filters unsupported Office files out of Chat drops", async () => {
+    const addFilesToContext = jest.fn(async (files: TFile[]) => files.length);
+    (DocumentContextManager.getInstance as jest.Mock).mockReturnValue({ addFilesToContext });
+    const chatView: any = {
+      app: { vault: { getAbstractFileByPath: jest.fn((path: string) => new TFile({ path })), getAllLoadedFiles: jest.fn(() => []) } },
+      plugin: { settings: {} },
+      contextManager: { getContextFiles: () => new Set() },
+    };
+    const container = document.createElement("div");
+    const handlers: Record<string, (e: any) => any> = {};
+    container.addEventListener = ((type: string, cb: any) => { handlers[type] = cb; }) as any;
+    eventHandling.setupDragAndDrop(chatView, container);
+    await handlers.drop({
+      dataTransfer: { items: [{ type: "text/plain", getAsString: (cb: (value: string) => void) => cb("legacy.docx") }], types: ["text/plain"] },
+      preventDefault: jest.fn(), stopPropagation: jest.fn(),
+    });
+    expect(addFilesToContext).not.toHaveBeenCalled();
   });
 });
