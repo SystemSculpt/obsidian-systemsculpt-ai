@@ -10,6 +10,9 @@ const EXTENSIONS = /\.(?:[cm]?[jt]sx?)$/;
 const EXCLUDED = /(?:^|\/)(?:__tests__|fixtures|generated)(?:\/|$)|\.(?:test|spec|d)\.[cm]?[jt]sx?$/;
 const SDK_PACKAGES = /^(?:openai|@anthropic-ai\/sdk|@openai\/codex(?:-sdk)?|@mariozechner\/(?:pi-ai|pi-coding-agent)|@google\/generative-ai|cohere-ai|groq-sdk|@xenova\/transformers)(?:\/|$)/;
 const NODE_NETWORK = new Set(['http', 'https', 'net', 'tls', 'dns', 'node:http', 'node:https', 'node:net', 'node:tls', 'node:dns']);
+const IMMUTABLE_BASELINE_REF = '660e7fe';
+const IMMUTABLE_HISTORY_BLOB = 'cb3ee69ab4f7b42cef1f2aa8546e830a3fefa664';
+const IMMUTABLE_HISTORY_SHA256 = 'f2d8a626080e6e474852fa6951a2e0c76d4ef8dd1798eaf5809ac089db6c1b1f';
 const hash = value => crypto.createHash('sha256').update(value).digest('hex');
 const normalize = value => String(value).replace(/\s+/g, ' ').trim();
 const git = (root, args) => execFileSync('git', args, { cwd: root, encoding: 'utf8' });
@@ -273,21 +276,37 @@ function containingSymbol(node, sf) {
   }
   return '<module>';
 }
-function semanticOccurrences(file, source) {
+function semanticOccurrences(file, source, checker, programSourceFile, semanticBindings = new Map()) {
   const kind = file.endsWith('x') ? ts.ScriptKind.TSX : file.endsWith('.js') || file.endsWith('.mjs') || file.endsWith('.cjs') ? ts.ScriptKind.JS : ts.ScriptKind.TS;
-  const sf = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, kind);
+  const sf = programSourceFile || ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, kind);
   if (sf.parseDiagnostics.length) throw new Error(`${file}:1:1 resolution_ambiguous: parser recovery is forbidden`);
   const { aliases, imports } = collectBindings(sf);
   const occurrences = [];
+  const hazards = [];
   const direct = new Map();
   const calls = [];
   const ast = node => printed(node, sf);
-  const importFor = primitive => {
-    const module = primitive.startsWith('obsidian.') ? 'obsidian' : primitive.startsWith('node:') ? primitive.split('.').shift() : SDK_PACKAGES.test(primitive) ? primitive.split(':')[0] : null;
-    const item = imports.find(entry => entry.module === module);
-    if (!item) return [];
-    return [{ fromPath: file, exportedName: module, importedName: primitive.split('.').at(-1), toPath: module, declarationFingerprint: canonicalHash({ kind: 'ImportDeclaration', text: ast(item.node) }) }];
+  const portablePath = name => { const normalized = name.replaceAll(path.sep, '/'); const marker = normalized.lastIndexOf('/src/'); return marker >= 0 ? normalized.slice(marker + 1) : normalized; };
+  const resolveSymbol = (node, strict = true) => {
+    if (!checker) return { symbol: undefined, chain: [] };
+    let symbol = checker.getSymbolAtLocation(node);
+    const chain = [];
+    const seen = new Set();
+    while (symbol && (symbol.flags & ts.SymbolFlags.Alias)) {
+      if (seen.has(symbol)) throw new Error(`${file}:1:1 resolution_ambiguous: cyclic alias resolution; remove the cycle`);
+      seen.add(symbol);
+      const declaration = symbol.declarations?.[0];
+      if (!declaration) throw new Error(`${file}:1:1 resolution_ambiguous: alias has no declaration; use a static import`);
+      const declarationFile = portablePath(declaration.getSourceFile().fileName);
+      const moduleNode = declaration.parent?.parent?.parent?.moduleSpecifier || declaration.parent?.parent?.moduleSpecifier || declaration.parent?.moduleSpecifier;
+      const moduleName = ts.isStringLiteralLike(moduleNode) ? moduleNode.text : declarationFile;
+      chain.push({ fromPath: declarationFile, exportedName: symbol.name, importedName: declaration.propertyName?.text || declaration.name?.text || symbol.name, toPath: moduleName, declarationFingerprint: canonicalHash({ kind: ts.SyntaxKind[declaration.kind], text: printed(declaration, declaration.getSourceFile()) }) });
+      symbol = checker.getAliasedSymbol(symbol);
+      if (chain.length > 64) throw new Error(`${file}:1:1 resolution_ambiguous: import chain truncated; simplify the chain`);
+    }
+    return { symbol, chain };
   };
+  const importFor = node => resolveSymbol(node).chain;
   const add = (node, primitive, classification, extra = {}) => {
     const expression = ts.isCallExpression(node) || ts.isNewExpression(node) ? node.expression : node;
     const args = ts.isCallExpression(node) || ts.isNewExpression(node) ? [...(node.arguments || [])] : [];
@@ -302,9 +321,37 @@ function semanticOccurrences(file, source) {
       normalizedArguments,
       minimalOccurrenceFingerprint: canonicalHash(exact)
     };
-    const chain = importFor(primitive.replace(/^wrapper(?:-call)?:[^>]+->/, ''));
-    const binding = chain[0]?.declarationFingerprint || canonicalHash({ symbol: occurrence.localSymbol, declaration: normalizedCallee });
-    const destination = canonicalHash({ arguments: normalizedArguments });
+    const resolutionNode = ts.isCallExpression(node) || ts.isNewExpression(node) ? (ts.isPropertyAccessExpression(node.expression) || ts.isElementAccessExpression(node.expression) ? node.expression.name || node.expression.argumentExpression : node.expression) : node.name || node;
+    const resolved = resolveSymbol(resolutionNode);
+    const chain = importFor(resolutionNode);
+    const declarations = resolved.symbol?.declarations || [];
+    const declarationShape = d => {
+      if (ts.isFunctionLike(d)) return { name: d.name?.getText(d.getSourceFile()) || '<anonymous>', parameters: d.parameters.map(p => printed(p, d.getSourceFile())), type: d.type ? printed(d.type, d.getSourceFile()) : null };
+      return { text: printed(d, d.getSourceFile()) };
+    };
+    const binding = declarations.length ? canonicalHash(declarations.map(d => ({ path: portablePath(d.getSourceFile().fileName), kind: ts.SyntaxKind[d.kind], ...declarationShape(d) }))) : chain[0]?.declarationFingerprint || canonicalHash({ symbol: occurrence.localSymbol, declaration: normalizedCallee });
+    const dependencySeen = new Set();
+    const dependencies = [];
+    const collectDependency = (dependencyNode, depth = 0) => {
+      if (!checker || depth > 32) { if (depth > 32) throw new Error(`${file}:1:1 resolution_ambiguous: destination dependency graph truncated; simplify the expression`); return; }
+      if (ts.isIdentifier(dependencyNode)) {
+        const symbol = checker.getSymbolAtLocation(dependencyNode);
+        for (const declaration of symbol?.declarations || []) {
+          const key = `${portablePath(declaration.getSourceFile().fileName)}:${declaration.pos}:${declaration.end}`;
+          if (dependencySeen.has(key)) continue;
+          dependencySeen.add(key);
+          if (ts.isVariableDeclaration(declaration) && declaration.initializer) {
+            dependencies.push({ path: portablePath(declaration.getSourceFile().fileName), symbol: dependencyNode.text, expression: printed(declaration.initializer, declaration.getSourceFile()) });
+            ts.forEachChild(declaration.initializer, child => collectDependency(child, depth + 1));
+          }
+          if (ts.isPropertyDeclaration(declaration) && declaration.initializer) dependencies.push({ path: portablePath(declaration.getSourceFile().fileName), symbol: dependencyNode.text, expression: printed(declaration.initializer, declaration.getSourceFile()) });
+        }
+      }
+      ts.forEachChild(dependencyNode, child => collectDependency(child, depth + 1));
+    };
+    for (const argument of args) collectDependency(argument);
+    dependencies.sort((a, b) => canonical(a).localeCompare(canonical(b), 'en'));
+    const destination = canonicalHash({ arguments: normalizedArguments, dependencies });
     const wrapperCallChain = extra.wrapperEdge ? [{ path: file, symbol: extra.localSymbol, callFingerprint: canonicalHash(extra.wrapperEdge) }] : [];
     const provenance = {
       bindingDeclarationFingerprint: binding,
@@ -316,12 +363,79 @@ function semanticOccurrences(file, source) {
     occurrences.push({ path: file, classification, primitiveOrImport: primitive, occurrence, provenance, sourceSpan: span(sf, node) });
   };
   for (const item of imports) if (!item.typeOnly && SDK_PACKAGES.test(item.module)) add(item.node, item.module, 'sdk_runtime', { localSymbol: item.module });
+  const transportNames = new Set(['fetch', 'requestUrl', 'httpRequest', 'request', 'get', 'connect', 'WebSocket', 'XMLHttpRequest']);
+  const unmistakableTransportNames = new Set(['fetch', 'requestUrl', 'httpRequest', 'WebSocket', 'XMLHttpRequest']);
+  const hazard = (node, reason) => { const lc = lineColumn(sf, node.getStart(sf)); hazards.push(`${file}:${lc.line}:${lc.column} dynamic_or_computed_access: ${reason}; replace it with a statically resolved transport binding`); };
   const visit = (node, stack = []) => {
     let next = stack;
+    if (ts.isElementAccessExpression(node)) {
+      const key = ts.isStringLiteralLike(node.argumentExpression) ? node.argumentExpression.text : '<computed>';
+      const base = node.expression.getText(sf);
+      const baseAlias = ts.isIdentifier(node.expression) ? aliases.get(node.expression.text) : undefined;
+      let computedTransport = false;
+      if (!ts.isStringLiteralLike(node.argumentExpression) && checker) {
+        const keySymbol = checker.getSymbolAtLocation(node.argumentExpression);
+        const keyDeclarations = [...(keySymbol?.declarations || []), ...(keySymbol?.valueDeclaration ? [keySymbol.valueDeclaration] : [])];
+        computedTransport = keyDeclarations.some(d => ts.isVariableDeclaration(d) && d.initializer && ts.isStringLiteralLike(d.initializer) && transportNames.has(d.initializer.text));
+        if (!computedTransport && ts.isIdentifier(node.argumentExpression)) computedTransport = new RegExp(`\\b(?:const|let|var)\\s+${node.argumentExpression.text}\\s*=\\s*["'](?:${[...transportNames].join('|')})["']`).test(source);
+      }
+      if (unmistakableTransportNames.has(key) || (/^(?:globalThis|window|self|global)$/.test(base) && computedTransport) || (baseAlias && (SDK_PACKAGES.test(baseAlias.module) || NODE_NETWORK.has(baseAlias.module)) && transportNames.has(key))) hazard(node, `computed transport member ${base}[${key}]`);
+    }
+    if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword && (!node.arguments[0] || !ts.isStringLiteralLike(node.arguments[0]))) hazard(node, 'dynamic import specifier');
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'require' && (!node.arguments[0] || !ts.isStringLiteralLike(node.arguments[0]))) hazard(node, 'dynamic require specifier');
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && ['eval', 'Function'].includes(node.expression.text)) hazard(node, `${node.expression.text} dispatch`);
+    if (ts.isNewExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'Function') hazard(node, 'Function constructor dispatch');
+
     if (ts.isFunctionLike(node)) next = [...stack, node];
     if (ts.isCallExpression(node)) {
+      const expressionText = node.expression.getText(sf);
+      if (ts.isElementAccessExpression(node.expression) || (ts.isCallExpression(node.expression) && ts.isElementAccessExpression(node.expression.expression))) {
+        const base = ts.isElementAccessExpression(node.expression) ? node.expression.expression : node.expression.expression.expression;
+        const symbol = checker?.getSymbolAtLocation(base);
+        const registry = symbol?.declarations?.find(d => ts.isVariableDeclaration(d) && d.initializer && ts.isObjectLiteralExpression(d.initializer));
+        if (registry?.initializer.properties.some(property => /\b(?:fetch|requestUrl|httpRequest|WebSocket|XMLHttpRequest)\b/.test(property.getText(registry.getSourceFile())))) hazard(node, `registry transport dispatch ${expressionText}`);
+      }
+      if (ts.isIdentifier(node.expression) && checker) {
+        const symbol = checker.getSymbolAtLocation(node.expression);
+        const binding = symbol?.declarations?.find(d => ts.isBindingElement(d));
+        const bindingInitializer = binding?.parent?.parent?.initializer;
+        if (bindingInitializer && ts.isObjectLiteralExpression(bindingInitializer) && /\b(?:fetch|requestUrl|httpRequest|WebSocket|XMLHttpRequest)\b/.test(bindingInitializer.getText(bindingInitializer.getSourceFile()))) hazard(node, `destructured registry transport dispatch ${expressionText}`);
+        if (symbol?.declarations?.some(d => ts.isParameter(d))) {
+          const parameter = symbol.declarations.find(d => ts.isParameter(d));
+          const fn = parameter.parent;
+          const fnName = fn.name && ts.isIdentifier(fn.name) ? fn.name.text : null;
+          if (fnName && new RegExp(`\\b${fnName}\\s*\\(\\s*(?:fetch|requestUrl|httpRequest)\\b`).test(source)) throw new Error(`${file}:${lineColumn(sf, node.getStart(sf)).line}:${lineColumn(sf, node.getStart(sf)).column} resolution_ambiguous: unresolved higher-order transport parameter; call a statically resolved transport`);
+        }
+      }
+      if (ts.isCallExpression(node.expression)) {
+        const factoryLookup = ts.isPropertyAccessExpression(node.expression.expression) ? node.expression.expression.name : node.expression.expression;
+        const factorySymbol = checker?.getSymbolAtLocation(factoryLookup);
+        const returnsTransport = factorySymbol?.declarations?.some(declaration => {
+          let found = false;
+          const inspect = child => { if (ts.isReturnStatement(child) && child.expression && /\b(?:fetch|requestUrl|httpRequest)\b/.test(child.expression.getText(child.getSourceFile()))) found = true; ts.forEachChild(child, inspect); };
+          inspect(declaration); return found;
+        });
+        if (returnsTransport) throw new Error(`${file}:${lineColumn(sf, node.getStart(sf)).line}:${lineColumn(sf, node.getStart(sf)).column} resolution_ambiguous: returned factory transport dispatch; bind a statically resolved transport`);
+      }
       calls.push({ node, stack: next });
-      const primitive = primitiveForCall(node, aliases);
+      if (ts.isIdentifier(node.expression)) {
+        const invokedAlias = aliases.get(node.expression.text);
+        if (node.expression.text !== invokedAlias?.imported && invokedAlias?.module === 'globalThis' && invokedAlias.imported === 'fetch') hazard(node, 'aliased global fetch invocation');
+      }
+      let primitive = primitiveForCall(node, aliases);
+      if (!primitive && checker) {
+        const lookup = ts.isPropertyAccessExpression(node.expression) ? node.expression.name : node.expression;
+        const resolvedCall = resolveSymbol(lookup, false);
+        const modules = resolvedCall.chain.map(hop => hop.toPath);
+        const resolvedName = resolvedCall.symbol?.name || (ts.isIdentifier(lookup) ? lookup.text : lookup.getText(sf));
+        const semanticBinding = semanticBindings.get(`${file}|${ts.isIdentifier(lookup) ? lookup.text : resolvedName}`);
+        if ((resolvedName === 'requestUrl' && modules.includes('obsidian')) || (semanticBinding?.module === 'obsidian' && semanticBinding.imported === 'requestUrl')) primitive = 'obsidian.requestUrl';
+        else if (resolvedName === 'fetch' && modules.some(module => /globalThis|lib\.dom/.test(module))) primitive = 'fetch';
+        else {
+          const networkModule = modules.find(module => NODE_NETWORK.has(module));
+          if (networkModule && transportNames.has(resolvedName)) primitive = `${networkModule}.${resolvedName}`;
+        }
+      }
       if (primitive) {
         add(node, primitive, 'outbound_sink');
         const fn = next.at(-1);
@@ -353,11 +467,144 @@ function semanticOccurrences(file, source) {
     if (!name || !wrapperNames.has(name) || stack.some(fn => fn.name?.getText(sf) === name)) continue;
     add(node, `wrapper-call:${name}->${wrapperNames.get(name)}`, 'wrapper_boundary', { localSymbol: name, wrapperEdge: { caller: containingSymbol(node, sf), call: ast(node) } });
   }
+  if (hazards.length) throw new Error(hazards.join('\n'));
   return occurrences.sort((a, b) => compareRecords(a, b));
 }
 function semanticTree(root, mode, ref) {
-  const files = mode === 'source-ref' ? baselineFiles(root, ref) : worktreeFiles(root);
-  return files.flatMap(file => semanticOccurrences(file, sourceFor(root, mode, ref, file))).sort(compareRecords);
+  const files = mode === 'source-ref' ? baselineFiles(root, ref) : mode === 'index' ? indexFiles(root) : worktreeFiles(root);
+  const sources = new Map(files.map(file => [path.resolve(root, file), sourceFor(root, mode, ref, file)]));
+  const options = { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext, moduleResolution: ts.ModuleResolutionKind.Bundler, allowJs: true, skipLibCheck: true, noResolve: false };
+  const base = ts.createCompilerHost(options, true);
+  const host = {
+    ...base,
+    fileExists(name) {
+      const resolved = path.resolve(name);
+      if (resolved.startsWith(`${path.resolve(root, 'src')}${path.sep}`)) return sources.has(resolved);
+      return sources.has(resolved) || base.fileExists(name);
+    },
+    readFile(name) {
+      const resolved = path.resolve(name);
+      if (resolved.startsWith(`${path.resolve(root, 'src')}${path.sep}`)) return sources.get(resolved);
+      return sources.get(resolved) ?? base.readFile(name);
+    },
+    getSourceFile(name, languageVersion) {
+      const resolved = path.resolve(name);
+      const text = sources.get(resolved);
+      if (text !== undefined) return ts.createSourceFile(resolved, text, languageVersion, true, name.endsWith('x') ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
+      if (resolved.startsWith(`${path.resolve(root, 'src')}${path.sep}`)) return undefined;
+      return base.getSourceFile(name, languageVersion);
+    },
+    writeFile() {}
+  };
+  const program = ts.createProgram([...sources.keys()], options, host);
+  const syntactic = program.getSyntacticDiagnostics().filter(d => sources.has(path.resolve(d.file?.fileName || '')));
+  if (syntactic.length) {
+    const d = syntactic[0]; const sf = d.file; const lc = sf && d.start !== undefined ? lineColumn(sf, d.start) : { line: 1, column: 1 };
+    throw new Error(`${sf?.fileName || '<source>'}:${lc.line}:${lc.column} resolution_ambiguous: parser recovery is forbidden; fix the syntax`);
+  }
+  const checker = program.getTypeChecker();
+  const rawBindings = new Map();
+  const resolveModulePath = (fromFile, specifier) => {
+    if (!specifier.startsWith('.')) return specifier;
+    const basePath = path.posix.normalize(path.posix.join(path.posix.dirname(fromFile), specifier));
+    return files.find(candidate => candidate === basePath || candidate === `${basePath}.ts` || candidate === `${basePath}.tsx` || candidate === `${basePath}/index.ts`) || specifier;
+  };
+  for (const file of files) {
+    const sf = program.getSourceFile(path.resolve(root, file));
+    for (const statement of sf.statements) {
+      if (ts.isImportDeclaration(statement) && ts.isStringLiteralLike(statement.moduleSpecifier) && statement.importClause?.namedBindings && ts.isNamedImports(statement.importClause.namedBindings)) {
+        for (const element of statement.importClause.namedBindings.elements) rawBindings.set(`${file}|${element.name.text}`, { module: resolveModulePath(file, statement.moduleSpecifier.text), imported: element.propertyName?.text || element.name.text });
+      }
+      if (ts.isExportDeclaration(statement) && statement.moduleSpecifier && ts.isStringLiteralLike(statement.moduleSpecifier) && statement.exportClause && ts.isNamedExports(statement.exportClause)) {
+        for (const element of statement.exportClause.elements) rawBindings.set(`${file}|${element.name.text}`, { module: resolveModulePath(file, statement.moduleSpecifier.text), imported: element.propertyName?.text || element.name.text });
+      }
+    }
+  }
+  const semanticBindings = new Map();
+  const resolveBinding = (file, name, trail = new Set()) => {
+    const key = `${file}|${name}`;
+    if (trail.has(key)) throw new Error(`${file}:1:1 resolution_ambiguous: cyclic import/re-export chain; remove the cycle`);
+    const binding = rawBindings.get(key);
+    if (!binding) return undefined;
+    if (!binding.module.startsWith('src/')) return binding;
+    const nextTrail = new Set(trail); nextTrail.add(key);
+    return resolveBinding(binding.module, binding.imported, nextTrail) || binding;
+  };
+  for (const key of rawBindings.keys()) { const separator = key.lastIndexOf('|'); const resolved = resolveBinding(key.slice(0, separator), key.slice(separator + 1)); if (resolved) semanticBindings.set(key, resolved); }
+  const occurrences = files.flatMap(file => {
+    const absolute = path.resolve(root, file);
+    return semanticOccurrences(file, sources.get(absolute), checker, program.getSourceFile(absolute), semanticBindings);
+  }).sort(compareRecords);
+  const portable = name => { const normalized = name.replaceAll(path.sep, '/'); const marker = normalized.lastIndexOf('/src/'); return marker >= 0 ? normalized.slice(marker + 1) : normalized; };
+  const resolvedSymbol = node => {
+    let symbol = checker.getSymbolAtLocation(node);
+    const seen = new Set();
+    while (symbol && (symbol.flags & ts.SymbolFlags.Alias)) {
+      if (seen.has(symbol)) throw new Error(`${portable(node.getSourceFile().fileName)}:1:1 resolution_ambiguous: cyclic call alias; remove the cycle`);
+      seen.add(symbol); symbol = checker.getAliasedSymbol(symbol);
+    }
+    return symbol;
+  };
+  const declarationKey = declaration => {
+    let owner = declaration.parent;
+    while (owner && !ts.isClassLike(owner) && !ts.isFunctionLike(owner)) owner = owner.parent;
+    const ownerName = ts.isClassLike(owner) ? owner.name?.getText(owner.getSourceFile()) || '<anonymous-class>' : '<module>';
+    const declaredName = declaration.name?.getText(declaration.getSourceFile()) || declaration.parent?.name?.getText?.(declaration.getSourceFile()) || '<anonymous>';
+    return `${portable(declaration.getSourceFile().fileName)}|${ownerName}.${declaredName}`;
+  };
+  const callers = new Map();
+  for (const file of files) {
+    const sf = program.getSourceFile(path.resolve(root, file));
+    const visit = node => {
+      if (ts.isCallExpression(node)) {
+        const lookup = ts.isPropertyAccessExpression(node.expression) ? node.expression.name : node.expression;
+        const symbol = resolvedSymbol(lookup);
+        for (const declaration of symbol?.declarations || []) {
+          if (!ts.isFunctionLike(declaration)) continue;
+          const key = declarationKey(declaration);
+          let parent = node.parent; while (parent && !ts.isFunctionLike(parent)) parent = parent.parent;
+          const caller = parent && ts.isFunctionLike(parent) ? declarationKey(parent) : `${file}|<module>`;
+          const edge = { path: file, symbol: caller, callFingerprint: canonicalHash({ target: key, call: printed(node, sf) }) };
+          if (!callers.has(key)) callers.set(key, []);
+          callers.get(key).push(edge);
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(sf);
+  }
+  for (const occurrence of occurrences) {
+    if (occurrence.classification !== 'wrapper_boundary' || !occurrence.primitiveOrImport.startsWith('wrapper:')) continue;
+    const sf = program.getSourceFile(path.resolve(root, occurrence.path));
+    const declarations = [];
+    const find = node => {
+      if (ts.isFunctionLike(node)) {
+        const declaredName = node.name?.getText(sf) || node.parent?.name?.getText?.(sf) || '<anonymous>';
+        if (declaredName === occurrence.occurrence.localSymbol || (occurrence.occurrence.localSymbol === '<anonymous>' && lineColumn(sf, node.getStart(sf)).line === occurrence.sourceSpan.startLine)) declarations.push(node);
+      }
+      ts.forEachChild(node, find);
+    };
+    find(sf);
+    const declaration = declarations.find(item => lineColumn(sf, item.getStart(sf)).line === occurrence.sourceSpan.startLine);
+    if (!declaration) throw new Error(`${occurrence.path}:1:1 resolution_ambiguous: wrapper declaration ${occurrence.occurrence.localSymbol}@${occurrence.sourceSpan.startLine} is unresolved; use an exact static wrapper`);
+    const key = declarationKey(declaration);
+    const walk = (key, trail = new Set()) => {
+      if (trail.has(key)) return [];
+      if (trail.size > 64) throw new Error(`${occurrence.path}:1:1 resolution_ambiguous: wrapper call graph truncated; simplify the chain`);
+      const edges = (callers.get(key) || []).sort((a, b) => canonical(a).localeCompare(canonical(b), 'en'));
+      if (!edges.length) return [[]];
+      const nextTrail = new Set(trail); nextTrail.add(key);
+      const chains = edges.flatMap(edge => edge.symbol.endsWith('|<module>') ? [[edge]] : walk(edge.symbol, nextTrail).map(rest => [edge, ...rest]));
+      if (!chains.length) return [];
+      const shortest = Math.min(...chains.map(chain => chain.length));
+      return chains.filter(chain => chain.length === shortest).sort((a, b) => canonical(a).localeCompare(canonical(b), 'en'));
+    };
+    const shortestChains = walk(key);
+    if (!shortestChains.length && (callers.get(key) || []).length) throw new Error(`${occurrence.path}:1:1 resolution_ambiguous: cyclic wrapper call graph has no exact terminating chain; break the cycle`);
+    occurrence.provenance.wrapperCallChain = [...occurrence.provenance.wrapperCallChain, ...shortestChains.flat()];
+    occurrence.provenance.semanticCallChainFingerprint = canonicalHash({ classification: occurrence.classification, primitive: occurrence.primitiveOrImport, occurrence: occurrence.occurrence.minimalOccurrenceFingerprint, binding: occurrence.provenance.bindingDeclarationFingerprint, importChain: occurrence.provenance.resolvedImportChain, wrapperCallChain: occurrence.provenance.wrapperCallChain, destination: occurrence.provenance.destinationExpressionFingerprint });
+  }
+  return occurrences;
 }
 function mappingKey(record) { return `${record.path}|${record.classification}|${record.primitiveOrImport}`; }
 export function generateVerificationV2({ root = process.cwd(), fixture, sourceRef, historicalFixturePath } = {}) {
@@ -406,26 +653,36 @@ export function verifyVerificationV2({ root = process.cwd(), fixture, verificati
   if (artifact.historicalFixture.sha256 !== hash(historicalBytes) || artifact.historicalFixture.gitBlob !== git(root, ['hash-object', fixture]).trim()) throw new Error('history_tampered: restore the immutable v1 fixture bytes');
   const historical = JSON.parse(historicalBytes);
   const present = historical.records.filter(record => record.currentStatus === 'present');
+  const historyById = new Map(present.map(record => [record.id, record]));
+  for (const mapped of artifact.records) {
+    const record = historyById.get(mapped.historicalRecordId);
+    if (!record || mapped.historicalOrigin !== record.origin || mapped.historicalOccurrenceIdentity !== record.occurrenceIdentity || mapped.path !== record.path || mapped.classification !== record.classification || mapped.primitiveOrImport !== record.primitiveOrImport) throw new Error(`history_tampered: ${mapped.historicalRecordId} companion mapping disagrees with immutable historical identity; restore the reviewed companion`);
+  }
   if (artifact.records.length !== present.length || new Set(artifact.records.map(r => r.historicalRecordId)).size !== artifact.records.length) throw new Error('mapping_count_mismatch: regenerate and review the complete v2 companion');
-  const live = semanticTree(root, sourceRef ? 'source-ref' : 'worktree', sourceRef);
-  const groups = new Map(); for (const item of live) { const key = mappingKey(item); if (!groups.has(key)) groups.set(key, []); groups.get(key).push(item); }
   const errors = [];
-  for (const expected of artifact.records) {
-    const history = present.find(r => r.id === expected.historicalRecordId && r.origin === expected.historicalOrigin);
-    if (!history) { errors.push(`history_tampered ${expected.historicalRecordId}: mapping points to removed or unknown history; remove the fabricated mapping`); continue; }
-    const candidates = groups.get(mappingKey(expected)) || [];
-    let actual = candidates[expected.occurrenceOrdinal];
-    let forcedCategory;
-    if (!actual) {
-      const sameLocation = live.filter(item => item.path === expected.path && item.classification === expected.classification);
-      actual = sameLocation[expected.occurrenceOrdinal];
-      if (actual) forcedCategory = 'callee_changed';
-      else if (live.some(item => item.classification === expected.classification && item.primitiveOrImport === expected.primitiveOrImport)) forcedCategory = 'occurrence_moved';
+  const states = sourceRef ? [['source-ref', semanticTree(root, 'source-ref', sourceRef)]] : [['index', semanticTree(root, 'index')], ['worktree', semanticTree(root, 'worktree')]];
+  for (const [state, live] of states) {
+    const groups = new Map(); for (const item of live) { const key = mappingKey(item); if (!groups.has(key)) groups.set(key, []); groups.get(key).push(item); }
+    const approvedKeys = new Set(artifact.records.map(mappingKey));
+    for (const item of live) if (!approvedKeys.has(mappingKey(item))) errors.push(`${state} ${item.path}:${item.sourceSpan.startLine}:${item.sourceSpan.startColumn} unreviewed_occurrence ${item.primitiveOrImport} (${item.classification}): semantic occurrence is absent from the companion; remove it or review a new historical mapping`);
+    for (const expected of artifact.records) {
+      const history = present.find(r => r.id === expected.historicalRecordId && r.origin === expected.historicalOrigin);
+      if (!history) { errors.push(`${state} history_tampered ${expected.historicalRecordId}: mapping points to removed or unknown history; remove the fabricated mapping`); continue; }
+      const candidates = groups.get(mappingKey(expected)) || [];
+      let actual = candidates[expected.occurrenceOrdinal];
+      let forcedCategory;
+      if (!actual) {
+        const sameLocation = live.filter(item => item.path === expected.path && item.classification === expected.classification);
+        actual = sameLocation[expected.occurrenceOrdinal];
+        if (actual) forcedCategory = 'callee_changed';
+        else if (live.some(item => item.classification === expected.classification && item.primitiveOrImport === expected.primitiveOrImport)) forcedCategory = 'occurrence_moved';
+      }
+      const category = forcedCategory || diagnosticCategory(expected, actual);
+      const actualId = actual ? hash(`network-egress-occurrence-v2\0${canonical({ ...expected, occurrence: actual.occurrence, provenance: actual.provenance, v2OccurrenceId: undefined })}`) : 'missing';
+      if (!actual || expected.occurrence.minimalOccurrenceFingerprint !== actual.occurrence.minimalOccurrenceFingerprint || expected.provenance.semanticCallChainFingerprint !== actual.provenance.semanticCallChainFingerprint) errors.push(`${state} ${actual?.path || expected.path}:${actual?.sourceSpan.startLine || history.sourceSpan.startLine}:${actual?.sourceSpan.startColumn || history.sourceSpan.startColumn} ${expected.historicalRecordId} owner ${history.ownerPlan} ${expected.primitiveOrImport} (${expected.classification}) ${category}: observed ${String(actualId).slice(0, 12)} expected ${expected.v2OccurrenceId.slice(0, 12)}; restore the approved semantic occurrence or regenerate the companion through review`);
+      const expectedCount = artifact.records.filter(r => mappingKey(r) === mappingKey(expected)).length;
+      if (candidates.length !== expectedCount && expected.occurrenceOrdinal === 0) errors.push(`${state} ${expected.path}:${history.sourceSpan.startLine}:${history.sourceSpan.startColumn} ${expected.historicalRecordId} owner ${history.ownerPlan} ${expected.primitiveOrImport} (${expected.classification}) occurrence_count_changed: observed ${candidates.length} expected ${expectedCount}; remove the duplicate or restore the missing occurrence`);
     }
-    const category = forcedCategory || diagnosticCategory(expected, actual);
-    const actualId = actual ? hash(`network-egress-occurrence-v2\0${canonical({ ...expected, occurrence: actual.occurrence, provenance: actual.provenance, v2OccurrenceId: undefined })}`) : 'missing';
-    if (!actual || expected.occurrence.minimalOccurrenceFingerprint !== actual.occurrence.minimalOccurrenceFingerprint || expected.provenance.semanticCallChainFingerprint !== actual.provenance.semanticCallChainFingerprint) errors.push(`${actual?.path || expected.path}:${actual?.sourceSpan.startLine || history.sourceSpan.startLine}:${actual?.sourceSpan.startColumn || history.sourceSpan.startColumn} ${expected.historicalRecordId} owner ${history.ownerPlan} ${expected.primitiveOrImport} (${expected.classification}) ${category}: observed ${String(actualId).slice(0, 12)} expected ${expected.v2OccurrenceId.slice(0, 12)}; restore the approved semantic occurrence or regenerate the companion through review`);
-    if (candidates.length !== artifact.records.filter(r => mappingKey(r) === mappingKey(expected)).length && expected.occurrenceOrdinal === 0) errors.push(`${expected.path}:${history.sourceSpan.startLine}:${history.sourceSpan.startColumn} ${expected.historicalRecordId} owner ${history.ownerPlan} ${expected.primitiveOrImport} (${expected.classification}) occurrence_count_changed: observed ${candidates.length} expected ${artifact.records.filter(r => mappingKey(r) === mappingKey(expected)).length}; remove the duplicate or restore the missing occurrence`);
   }
   if (errors.length) throw new Error(errors.join('\n'));
   return { records: artifact.records.length };
@@ -438,7 +695,12 @@ async function cli() {
   const root = process.cwd();
   const fixture = value('--fixture');
   const analyzerVersion = value('--analyzer-version');
-  const companion = value('--verification-artifact') || (fixture ? path.join(path.dirname(fixture), `egress-verification-v2-${path.basename(fixture).match(/egress-baseline-(.+)\.json$/)?.[1] || '660e7fe'}.json`) : undefined);
+  const companion = value('--verification-artifact') || (fixture ? path.join(path.dirname(fixture), `egress-verification-v2-${path.basename(fixture).match(/egress-baseline-(.+)\.json$/)?.[1] || IMMUTABLE_BASELINE_REF}.json`) : undefined);
+  const assertDefaultTrustBoundary = () => {
+    if (value('--ref') && value('--ref') !== IMMUTABLE_BASELINE_REF) throw new Error(`history_tampered: default verification pins --ref ${IMMUTABLE_BASELINE_REF}; use --analyzer-version 1 for archaeology`);
+    const bytes = fs.readFileSync(fixture);
+    if (hash(bytes) !== IMMUTABLE_HISTORY_SHA256 || git(root, ['hash-object', fixture]).trim() !== IMMUTABLE_HISTORY_BLOB) throw new Error('history_tampered: restore the immutable Plan 025 fixture bytes');
+  };
   if (command === 'baseline') {
     const output = value('--output');
     if (!output) throw new Error('--output is required');
@@ -451,6 +713,8 @@ async function cli() {
   } else if (command === 'current') {
     if (analyzerVersion === '1') verifyCurrent({ root, fixture });
     else {
+      assertDefaultTrustBoundary();
+      if (value('--source-ref')) throw new Error('history_tampered: default current rejects --source-ref; use --analyzer-version 1 for archaeology');
       if (!fs.existsSync(companion)) throw new Error(`verification_companion_missing: create ${companion}; refusing silent v1 fallback`);
       verifyVerificationV2({ root, fixture, verificationArtifact: companion, sourceRef: value('--source-ref') });
     }
@@ -462,6 +726,10 @@ async function cli() {
       if (!actual.equals(expected)) throw new Error(`history_tampered: historical fixture differs from deterministic v1 regeneration; restore ${fixture}`);
       console.log('[egress] PASS: historical v1 fixture is byte-identical');
     } else {
+      assertDefaultTrustBoundary();
+      if (value('--source-ref') && value('--source-ref') !== 'c4f81ebc35aa836f787f198b8341d9496bc367ba') throw new Error('history_tampered: default verify rejects caller source-ref overrides; use --analyzer-version 1 for archaeology');
+      const historicalRegeneration = Buffer.from(stableJson(generateInventory({ root, ref: IMMUTABLE_BASELINE_REF, sourceRef: '98a67bf8a2778248f4b76262448b1a3a23c649f2' })));
+      if (!historicalRegeneration.equals(fs.readFileSync(fixture))) throw new Error(`history_tampered: v1 fixture is not the deterministic Plan 025 record; restore ${fixture}`);
       if (!fs.existsSync(companion)) throw new Error(`verification_companion_missing: create ${companion}; refusing silent v1 fallback`);
       const sourceRef = value('--source-ref') || JSON.parse(fs.readFileSync(companion, 'utf8')).approvedSource.commit;
       const actual = Buffer.from(stableJson(generateVerificationV2({ root, fixture, sourceRef, historicalFixturePath: path.relative(root, fixture).replaceAll(path.sep, '/') })));
