@@ -226,9 +226,9 @@ describe("managed chat ownership structure", () => {
     expect(chatSources).not.toContain("NODE_ENV");
     expect(chatSources).not.toContain("acquireLease(");
     expect(input).not.toContain("commitUser:");
-    expect(input).toContain("preparedRequest: preparedRequest");
-    const streamMethod = input.slice(input.indexOf("private async streamAssistantTurn"), input.indexOf("private getHostedContinuationTarget"));
-    expect(streamMethod).toContain("composeAcceptedLegacyContinuation");
+    expect(input).toContain("acceptedRequestSnapshot: acceptedRequest");
+    const streamMethod = input.slice(input.indexOf("private async streamAssistantTurn"), input.indexOf("private shouldContinueHostedToolLoop"));
+    expect(streamMethod).not.toContain("composeAcceptedLegacyContinuation");
     expect(streamMethod).not.toContain("this.getMessages()");
     expect(streamMethod).not.toContain("getContextFiles()");
     expect(streamMethod).not.toContain("readPromptContent");

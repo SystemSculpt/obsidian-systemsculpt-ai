@@ -443,24 +443,6 @@ export class DocumentProcessingService {
     return Math.min(100, Math.max(0, value));
   }
 
-  private mapNormalizedStatusToStage(status?: string): DocumentProcessingStage {
-    switch ((status ?? "").toLowerCase()) {
-      case "queued": return "queued";
-      case "validating":
-      case "preparing": return "validating";
-      case "uploading": return "uploading";
-      case "downloading": return "downloading";
-      case "contextualizing":
-      case "integrating": return "contextualizing";
-      case "completed":
-      case "ready": return "ready";
-      case "failed":
-      case "error":
-      case "timed_out": return "error";
-      default: return "processing";
-    }
-  }
-
   private formatExtractionContent(data: any): string {
     const title = data?.title ?? data?.metadata?.title ?? data?.document?.title ?? "Document Extraction";
     let content = data?.content ?? data?.text ?? data?.document?.content ?? data?.document?.text ?? data?.markdown ?? data?.extraction ?? "";

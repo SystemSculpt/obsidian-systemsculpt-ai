@@ -55,8 +55,8 @@ describe("Studio settings tab", () => {
       el.textContent?.trim()
     );
 
-    expect(text).toContain("through SystemSculpt");
-    expect(names).toContain("Open SystemSculpt Studio");
+    expect(text).toContain("Projects folder");
+    expect(names).toContain("Open Studio");
     expect(names).not.toContain("Studio telemetry (remote)");
     expect(names).not.toContain("Studio terminal sidecar timeout (minutes)");
     expect(text).not.toContain("redacted Studio run telemetry");

@@ -75,7 +75,7 @@ describe("Chat tab native layout", () => {
     expect(names).toContain("Honor OS Reduced Motion");
     expect(names).not.toContain("Default system prompt");
     expect(names).not.toContain("Favorite models");
-    expect(container.textContent).toContain("SystemSculpt chat works the same way across desktop and mobile");
+    expect(container.textContent).toContain("Chat settings");
     expect(container.textContent).toContain("chat preferences and display choices");
     expect(container.querySelector(".ss-favorites-manager")).toBeNull();
   });

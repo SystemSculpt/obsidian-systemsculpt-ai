@@ -36,14 +36,14 @@ describe("ChangeLogService", () => {
       allowStale: false,
     });
 
-    expect(entries).toHaveLength(1);
-    expect(entries[0]).toMatchObject({
+    const entry = entries.find((candidate) => candidate.version === "5.11.0");
+    expect(entry).toMatchObject({
       version: "5.11.0",
       date: "Jul 2026",
       url: "https://github.com/SystemSculpt/obsidian-systemsculpt-ai/releases",
     });
-    expect(entries[0].notes).toContain("Studio text nodes");
-    expect(entries[0].notes).toContain("Chat Resend");
+    expect(entry?.notes).toContain("Studio text nodes");
+    expect(entry?.notes).toContain("Chat Resend");
     expect(storage.readFile).not.toHaveBeenCalled();
     expect(storage.writeFile).not.toHaveBeenCalled();
   });

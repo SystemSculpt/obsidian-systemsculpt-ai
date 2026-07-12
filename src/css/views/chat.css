@@ -456,13 +456,7 @@ textarea.systemsculpt-chat-input::placeholder {
     order: 3;
   }
 
-  .systemsculpt-chat-identity-slot,
-  .systemsculpt-chat-identity {
-    width: 100%;
-    max-width: 100%;
-  }
-
-  /* 16px stops iOS focus zoom; taller target for touch */
+  /* Keep narrow desktop windows readable and keyboard-friendly. */
   textarea.systemsculpt-chat-input {
     font-size: 16px;
     min-height: var(--ss-touch-target);

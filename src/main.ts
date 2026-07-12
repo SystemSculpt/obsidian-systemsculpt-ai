@@ -1319,14 +1319,6 @@ export default class SystemSculptPlugin extends Plugin {
     // Embeddings uses on-demand processing silently
   }
 
-  /**
-   * Auto-start embeddings processing - simplified
-   */
-  private async autoStartEmbeddingsProcessing(): Promise<void> {
-    // Auto-processing handled internally by embeddings manager
-    // Processing happens on-demand when needed
-  }
-
   private ensureSettingsManagerInstance(): SettingsManager {
     if (!this.settingsManager) {
       this.settingsManager = new SettingsManager(this);
@@ -1351,10 +1343,6 @@ export default class SystemSculptPlugin extends Plugin {
       const settingsManager = this.ensureSettingsManagerInstance();
       await settingsManager.loadSettings();
       this._internal_settings_systemsculpt_plugin = settingsManager.getSettings();
-      if (PlatformContext.get().supportsDesktopOnlyFeatures()) {
-        settingsManager.startWatchingPluginDataFile();
-      }
-
       try {
         this.syncRelativeLineNumbersExtension();
       } catch (error) {

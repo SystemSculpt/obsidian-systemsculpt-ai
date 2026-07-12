@@ -2,8 +2,6 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import fixture from "../fixtures/managed/managed-capabilities-v2.json";
 
-const CANONICAL_ID = "systemsculpt@@systemsculpt/ai-agent";
-
 export async function exerciseBuiltStandardChatIdentity(
   bundleModule: { default?: new (...args: never[]) => object } | (new (...args: never[]) => object),
 ): Promise<void> {
@@ -39,7 +37,6 @@ export async function exerciseBuiltStandardChatIdentity(
     });
   }
   const settings = plugin.settings as Record<string, unknown>;
-  settings.selectedModelId = "openrouter@@openai/gpt-5.4-mini";
   for (const key of ["activeProvider", "customProviders", "credentials", "endpoints"]) {
     Object.defineProperty(settings, key, {
       configurable: true,
@@ -50,7 +47,7 @@ export async function exerciseBuiltStandardChatIdentity(
   const leaf = new WorkspaceLeaf(app);
   await leaf.setViewState({
     type: "systemsculpt-chat-view",
-    state: { selectedModelId: "local-pi-openai@@gpt-5.4" },
+    state: {},
   });
   const view = viewCreator!(leaf);
   if (!(globalThis as { IntersectionObserver?: unknown }).IntersectionObserver) {
@@ -70,16 +67,12 @@ export async function exerciseBuiltStandardChatIdentity(
   await (view.onOpen as () => Promise<void>)();
   view.isFullyLoaded = true;
 
-  expect((view.getEffectiveSelectedModelId as () => string)()).toBe(CANONICAL_ID);
-  expect((view.getCurrentModelName as () => string)()).toBe("SystemSculpt");
-  expect((view.getState as () => { selectedModelId: string })().selectedModelId).toBe(CANONICAL_ID);
-  expect((view.isPiBackedChat as () => boolean)()).toBe(false);
+  expect((view.getState as () => Record<string, unknown>)()).not.toHaveProperty("selectedModelId");
+  expect((view.isLegacyReadOnlyChat as () => boolean)()).toBe(false);
 
   const content = (view.containerEl as HTMLElement).children[1] as HTMLElement;
-  expect(content.querySelectorAll(".systemsculpt-chat-identity")).toHaveLength(1);
-  expect(content.querySelector(".systemsculpt-chat-identity")?.textContent).toContain("SystemSculpt");
-  expect(content.querySelector(".systemsculpt-chat-identity")?.textContent).toContain("ai-agent");
-  expect(content.querySelector(".systemsculpt-chat-identity button")).toBeNull();
+  expect(content.querySelector(".systemsculpt-chat-identity")).toBeNull();
+  expect(content.querySelector(".systemsculpt-chat-composer-chips")).toBeNull();
   expect(content.querySelector("[aria-haspopup]")).toBeNull();
 
   const descriptor = fixture.capabilities.find((item) => item.alias === "systemsculpt/chat")!;

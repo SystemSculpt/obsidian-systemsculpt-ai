@@ -147,7 +147,7 @@ describe("ChatStorageService", () => {
       expect(mockVault.create).toHaveBeenCalled();
     });
 
-    it("persists the selected model while omitting client-side prompt metadata", async () => {
+    it("omits retired model and client-side prompt metadata", async () => {
       await service.saveChat(
         "test-chat",
         testMessages,
@@ -155,7 +155,7 @@ describe("ChatStorageService", () => {
       );
 
       const createdContent = mockVault.create.mock.calls[0][1] as string;
-      expect(createdContent).toContain('model: "local-pi-openai@@gpt-4.1"');
+      expect(createdContent).not.toContain("model:");
       expect(createdContent).not.toContain("systemMessage");
       expect(createdContent).not.toContain("prompts/custom.md");
     });
@@ -633,7 +633,7 @@ Hello
       expect(createCall[1]).toContain("large");
     });
 
-    it("writes the selected model while omitting legacy prompt fields from saved frontmatter", async () => {
+    it("omits the retired model and legacy prompt fields from saved frontmatter", async () => {
       await service.saveChat(
         "prompt-type-chat",
         [{ role: "user" as ChatRole, content: "Hello" }],
@@ -642,7 +642,7 @@ Hello
 
       expect(mockVault.create).toHaveBeenCalled();
       const createCall = mockVault.create.mock.calls[0];
-      expect(createCall[1]).toContain('model: "systemsculpt@@systemsculpt/ai-agent"');
+      expect(createCall[1]).not.toContain("model:");
       expect(createCall[1]).not.toContain("systemMessage");
       expect(createCall[1]).not.toContain("prompts/my-prompt.md");
     });

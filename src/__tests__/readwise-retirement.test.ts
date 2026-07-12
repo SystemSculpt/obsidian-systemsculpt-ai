@@ -20,7 +20,7 @@ describe("retired Readwise integration", () => {
 
   it("keeps legacy settings inert while omitting the retired token from backups", () => {
     const settingsTypes = readSource("types.ts");
-    expect(settingsTypes).toContain('readwiseApiToken: ""');
+    expect(settingsTypes).not.toContain("readwiseApiToken");
 
     const runtimeSources = [
       "main.ts",

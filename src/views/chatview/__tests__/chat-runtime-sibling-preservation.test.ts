@@ -27,10 +27,11 @@ describe("standard Chat runtime sibling preservation", () => {
     expect(input).not.toMatch(/PiSession|getPiSession|runtime:\s*["']pi["']/);
   });
 
-  it("keeps the shared streamMessage interface only for Studio", () => {
+  it("keeps Studio on its managed capability adapter without reviving the Chat facade", () => {
     const service = read("src/services/SystemSculptService.ts");
-    expect(service).toMatch(/async \*streamMessage\(options:/);
-    expect(read("src/studio/StudioApiExecutionAdapter.ts")).toContain(".streamMessage(");
+    const studio = read("src/studio/StudioApiExecutionAdapter.ts");
+    expect(service).not.toContain("streamMessage(");
+    expect(studio).toContain("getManagedCapabilityClient().generateText(");
   });
 
   it("keeps only the managed selection seam", () => {

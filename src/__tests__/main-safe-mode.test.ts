@@ -68,7 +68,6 @@ describe("SystemSculptPlugin safe mode + version gate (#212)", () => {
 
   it("onload enters safe mode (and never rethrows) when core initialization throws (#183)", async () => {
     const plugin = makePlugin();
-    jest.spyOn(plugin as any, "writeMobileStartupProbe").mockResolvedValue(undefined);
     jest.spyOn(plugin as any, "configureLifecycle").mockImplementation(() => {
       throw new Error("simulated fatal init failure");
     });

@@ -10,352 +10,59 @@ function baseProject(): StudioProjectV1 {
     name: "Test",
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
-    engine: {
-      apiMode: "systemsculpt_only",
-      minPluginVersion: "0.0.0",
-    },
-    graph: {
-      nodes: [],
-      edges: [],
-      entryNodeIds: [],
-    },
-    permissionsRef: {
-      policyVersion: 1,
-      policyPath: "Test.systemsculpt-assets/policy/grants.json",
-    },
+    engine: { apiMode: "systemsculpt_only", minPluginVersion: "0.0.0" },
+    graph: { nodes: [], edges: [], entryNodeIds: [] },
+    permissionsRef: { policyVersion: 1, policyPath: "Test.systemsculpt-assets/policy/grants.json" },
     settings: {
       runConcurrency: "adaptive",
       defaultFsScope: "vault",
-      retention: {
-        maxRuns: 100,
-        maxArtifactsMb: 1024,
-      },
+      retention: { maxRuns: 100, maxArtifactsMb: 1024 },
     },
-    migrations: {
-      projectSchemaVersion: "1.0.0",
-      applied: [],
-    },
+    migrations: { projectSchemaVersion: "1.0.0", applied: [] },
   };
 }
 
-describe("StudioGraphCompiler", () => {
+describe("StudioGraphCompiler managed node graph", () => {
   const registry = new StudioNodeRegistry();
   registerBuiltInStudioNodes(registry);
   const compiler = new StudioGraphCompiler();
 
-  it("compiles a valid linear graph", () => {
+  it("compiles a valid managed text graph", () => {
     const project = baseProject();
     project.graph.nodes.push(
-      {
-        id: "input",
-        kind: "studio.input",
-        version: "1.0.0",
-        title: "Input",
-        position: { x: 0, y: 0 },
-        config: { value: "hello" },
-      },
-      {
-        id: "text",
-        kind: "studio.text_generation",
-        version: "1.0.0",
-        title: "Text",
-        position: { x: 220, y: 0 },
-        config: { modelId: "openai/gpt-5-mini" },
-      }
+      { id: "input", kind: "studio.input", version: "1.0.0", title: "Input", position: { x: 0, y: 0 }, config: { value: "hello" } },
+      { id: "text", kind: "studio.text_generation", version: "1.0.0", title: "Text", position: { x: 220, y: 0 }, config: {} },
     );
-    project.graph.edges.push({
-      id: "e1",
-      fromNodeId: "input",
-      fromPortId: "text",
-      toNodeId: "text",
-      toPortId: "prompt",
-    });
+    project.graph.edges.push({ id: "e1", fromNodeId: "input", fromPortId: "text", toNodeId: "text", toPortId: "prompt" });
 
-    const compiled = compiler.compile(project, registry);
-    expect(compiled.executionOrder).toEqual(["input", "text"]);
-  });
-
-  it("rejects incompatible port types", () => {
-    const project = baseProject();
-    project.graph.nodes.push(
-      {
-        id: "http",
-        kind: "studio.http_request",
-        version: "1.0.0",
-        title: "HTTP",
-        position: { x: 0, y: 0 },
-        config: { method: "GET", url: "https://api.systemsculpt.com" },
-      },
-      {
-        id: "text",
-        kind: "studio.text_generation",
-        version: "1.0.0",
-        title: "Text",
-        position: { x: 250, y: 0 },
-        config: { modelId: "openai/gpt-5-mini" },
-      }
-    );
-    project.graph.edges.push({
-      id: "e1",
-      fromNodeId: "http",
-      fromPortId: "status",
-      toNodeId: "text",
-      toPortId: "prompt",
-    });
-
-    expect(() => compiler.compile(project, registry)).toThrow("type mismatch");
-  });
-
-  it("allows text output to connect into HTTP request body", () => {
-    const project = baseProject();
-    project.graph.nodes.push(
-      {
-        id: "text",
-        kind: "studio.text_output",
-        version: "1.0.0",
-        title: "Text",
-        position: { x: 0, y: 0 },
-        config: { value: "hello from text node" },
-      },
-      {
-        id: "http",
-        kind: "studio.http_request",
-        version: "1.0.0",
-        title: "HTTP",
-        position: { x: 250, y: 0 },
-        config: { method: "POST", url: "https://api.systemsculpt.com/import" },
-      }
-    );
-    project.graph.edges.push({
-      id: "e1",
-      fromNodeId: "text",
-      fromPortId: "text",
-      toNodeId: "http",
-      toPortId: "body_text",
-    });
-
-    const compiled = compiler.compile(project, registry);
-    expect(compiled.executionOrder).toEqual(["text", "http"]);
-  });
-
-  it("rejects multiple HTTP request body connections", () => {
-    const project = baseProject();
-    project.graph.nodes.push(
-      {
-        id: "text",
-        kind: "studio.text_output",
-        version: "1.0.0",
-        title: "Text",
-        position: { x: 0, y: 0 },
-        config: { value: "hello from text node" },
-      },
-      {
-        id: "json",
-        kind: "studio.json",
-        version: "1.0.0",
-        title: "JSON",
-        position: { x: 0, y: 180 },
-        config: {},
-      },
-      {
-        id: "http",
-        kind: "studio.http_request",
-        version: "1.0.0",
-        title: "HTTP",
-        position: { x: 280, y: 0 },
-        config: { method: "POST", url: "https://api.systemsculpt.com/import" },
-      }
-    );
-    project.graph.edges.push(
-      {
-        id: "e1",
-        fromNodeId: "text",
-        fromPortId: "text",
-        toNodeId: "http",
-        toPortId: "body_text",
-      },
-      {
-        id: "e2",
-        fromNodeId: "json",
-        fromPortId: "json",
-        toNodeId: "http",
-        toPortId: "body_json",
-      }
-    );
-
-    expect(() => compiler.compile(project, registry)).toThrow("body accepts one source");
-  });
-
-  it("rejects mixed HTTP body sources across typed ports", () => {
-    const project = baseProject();
-    project.graph.nodes.push(
-      {
-        id: "text",
-        kind: "studio.text_output",
-        version: "1.0.0",
-        title: "Text",
-        position: { x: 0, y: 0 },
-        config: { value: "hello from text node" },
-      },
-      {
-        id: "json",
-        kind: "studio.json",
-        version: "1.0.0",
-        title: "JSON",
-        position: { x: 0, y: 180 },
-        config: {},
-      },
-      {
-        id: "http",
-        kind: "studio.http_request",
-        version: "1.0.0",
-        title: "HTTP",
-        position: { x: 280, y: 0 },
-        config: { method: "POST", url: "https://api.systemsculpt.com/import" },
-      }
-    );
-    project.graph.edges.push(
-      {
-        id: "e1",
-        fromNodeId: "text",
-        fromPortId: "text",
-        toNodeId: "http",
-        toPortId: "body_text",
-      },
-      {
-        id: "e2",
-        fromNodeId: "json",
-        fromPortId: "json",
-        toNodeId: "http",
-        toPortId: "body_json",
-      }
-    );
-
-    expect(() => compiler.compile(project, registry)).toThrow("body accepts one source");
-  });
-
-  it("rejects duplicate HTTP query connections", () => {
-    const project = baseProject();
-    project.graph.nodes.push(
-      {
-        id: "q1",
-        kind: "studio.json",
-        version: "1.0.0",
-        title: "Query 1",
-        position: { x: 0, y: 0 },
-        config: {},
-      },
-      {
-        id: "q2",
-        kind: "studio.json",
-        version: "1.0.0",
-        title: "Query 2",
-        position: { x: 0, y: 180 },
-        config: {},
-      },
-      {
-        id: "http",
-        kind: "studio.http_request",
-        version: "1.0.0",
-        title: "HTTP",
-        position: { x: 280, y: 0 },
-        config: { method: "GET", url: "https://api.systemsculpt.com/import" },
-      }
-    );
-    project.graph.edges.push(
-      {
-        id: "e1",
-        fromNodeId: "q1",
-        fromPortId: "json",
-        toNodeId: "http",
-        toPortId: "query",
-      },
-      {
-        id: "e2",
-        fromNodeId: "q2",
-        fromPortId: "json",
-        toNodeId: "http",
-        toPortId: "query",
-      }
-    );
-
-    expect(() => compiler.compile(project, registry)).toThrow('input "query" accepts only one connection');
+    expect(compiler.compile(project, registry).executionOrder).toEqual(["input", "text"]);
   });
 
   it("rejects cyclic graphs", () => {
     const project = baseProject();
     project.graph.nodes.push(
-      {
-        id: "a",
-        kind: "studio.text_output",
-        version: "1.0.0",
-        title: "A",
-        position: { x: 0, y: 0 },
-        config: { value: "A" },
-      },
-      {
-        id: "b",
-        kind: "studio.text_output",
-        version: "1.0.0",
-        title: "B",
-        position: { x: 200, y: 0 },
-        config: { value: "B" },
-      }
+      { id: "a", kind: "studio.text_output", version: "1.0.0", title: "A", position: { x: 0, y: 0 }, config: { value: "A" } },
+      { id: "b", kind: "studio.text_output", version: "1.0.0", title: "B", position: { x: 200, y: 0 }, config: { value: "B" } },
     );
     project.graph.edges.push(
-      {
-        id: "e1",
-        fromNodeId: "a",
-        fromPortId: "text",
-        toNodeId: "b",
-        toPortId: "text",
-      },
-      {
-        id: "e2",
-        fromNodeId: "b",
-        fromPortId: "text",
-        toNodeId: "a",
-        toPortId: "text",
-      }
+      { id: "e1", fromNodeId: "a", fromPortId: "text", toNodeId: "b", toPortId: "text" },
+      { id: "e2", fromNodeId: "b", fromPortId: "text", toNodeId: "a", toPortId: "text" },
     );
 
     expect(() => compiler.compile(project, registry)).toThrow("cycle");
   });
 
-  it("accepts dataset dynamic field outputs saved on node config", () => {
+  it("rejects retired HTTP request nodes", () => {
     const project = baseProject();
-    project.graph.nodes.push(
-      {
-        id: "dataset",
-        kind: "studio.dataset",
-        version: "1.0.0",
-        title: "Dataset",
-        position: { x: 0, y: 0 },
-        config: {
-          workingDirectory: "/workspace/adapter-project",
-          customQuery: "SELECT email FROM users LIMIT 5;",
-          outputFields: ["email"],
-        },
-      },
-      {
-        id: "http",
-        kind: "studio.http_request",
-        version: "1.0.0",
-        title: "HTTP",
-        position: { x: 280, y: 0 },
-        config: { method: "POST", url: "https://api.systemsculpt.com/import" },
-      }
-    );
-    project.graph.edges.push({
-      id: "e1",
-      fromNodeId: "dataset",
-      fromPortId: "email",
-      toNodeId: "http",
-      toPortId: "body_json",
+    project.graph.nodes.push({
+      id: "http",
+      kind: "studio.http_request",
+      version: "1.0.0",
+      title: "Retired HTTP",
+      position: { x: 0, y: 0 },
+      config: { url: "https://example.com" },
     });
 
-    const compiled = compiler.compile(project, registry);
-    expect(compiled.executionOrder).toContain("dataset");
-    expect(compiled.executionOrder).toContain("http");
+    expect(() => compiler.compile(project, registry)).toThrow('missing node definition for "studio.http_request@1.0.0"');
   });
 });

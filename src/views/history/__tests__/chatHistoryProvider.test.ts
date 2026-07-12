@@ -64,4 +64,29 @@ describe("chatHistoryProvider", () => {
       messageCount: 2,
     });
   });
+
+  it("marks retired chat backends as read-only", async () => {
+    (ChatStorageService as jest.Mock).mockImplementation(() => ({
+      loadChats: jest.fn(async () => [{
+        id: "legacy-chat",
+        title: "Legacy Chat",
+        lastModified: Date.parse("2026-03-10T10:00:00.000Z"),
+        messages: [],
+        chatPath: "SystemSculpt/Chats/legacy-chat.md",
+        chatBackend: "legacy",
+      }]),
+    }));
+    (ChatFavoritesService.getInstance as jest.Mock).mockReturnValue({
+      isFavorite: jest.fn(() => false),
+      toggleFavorite: jest.fn(async () => false),
+    });
+
+    const provider = createChatHistoryProvider({
+      app: {},
+      settings: { chatsDirectory: "SystemSculpt/Chats" },
+    } as any);
+    const [entry] = await provider.loadEntries();
+
+    expect(entry.badge).toBe("Read-only");
+  });
 });

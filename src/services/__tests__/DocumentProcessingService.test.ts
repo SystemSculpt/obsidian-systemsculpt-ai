@@ -143,7 +143,6 @@ describe("DocumentProcessingService managed local effects", () => {
     const handler = jest.fn();
     (service as any).emitProgress(handler, { stage: "processing", progress: 150, label: "Test", icon: "cpu" }, { filePath: "doc.pdf" });
     expect(handler).toHaveBeenCalledWith(expect.objectContaining({ progress: 100, flow: "document" }));
-    expect((service as any).mapNormalizedStatusToStage("completed")).toBe("ready");
     expect((service as any).extractImagesFromData({ images: [{ filename: "a.png", base64: "abc" }] })).toEqual({ "a.png": "abc" });
     expect((service as any).generateUniqueImageName("My Doc", "Image 1.PNG", "data")).toMatch(/^My-Doc-Image-1-.*\.png$/);
     expect(new TextDecoder().decode((service as any).base64ToArrayBuffer(Buffer.from("hello").toString("base64")))).toBe("hello");

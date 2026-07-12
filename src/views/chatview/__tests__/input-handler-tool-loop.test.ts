@@ -883,36 +883,6 @@ describe("InputHandler hosted tool loop", () => {
     );
   });
 
-  it("normalizes legacy model input before request preparation without reading legacy authorities", async () => {
-    const { aiService, chatView, handler, plugin } = createHostedToolLoopHarness();
-    chatView.getSelectedModelId = jest.fn(() => "openrouter@@openai/gpt-5.4-mini");
-    Object.defineProperty(plugin, "modelService", {
-      configurable: true,
-      get: () => { throw new Error("forbidden modelService read"); },
-    });
-    Object.defineProperty(plugin, "getEntitlementService", {
-      configurable: true,
-      get: () => { throw new Error("forbidden entitlement read"); },
-    });
-    jest.spyOn(handler as any, "streamAssistantTurn").mockResolvedValue({
-      messageId: "assistant",
-      message: { role: "assistant", content: "done", message_id: "assistant" },
-      messageEl: document.createElement("div"),
-      completed: true,
-      completionState: "completed",
-    });
-    handler.setValue("use the managed identity");
-
-    await handler.submitForAutomation();
-
-    expect(aiService.prepareAcceptedChatRequest).toHaveBeenCalledWith(
-      expect.any(Object),
-      expect.objectContaining({
-        model: "systemsculpt@@systemsculpt/ai-agent",
-      }),
-    );
-  });
-
   it("uses one managed admission result and fails automation before payload preparation", async () => {
     const { aiService, handler } = createHostedToolLoopHarness();
     const admission = jest.fn().mockResolvedValue({
@@ -1153,66 +1123,4 @@ describe("InputHandler hosted tool loop", () => {
     expect(chatContainer.querySelector(".systemsculpt-streaming-status")).toBeNull();
   });
 
-  it("refreshes the fixed identity without catalog cache state", () => {
-    const app = new App();
-    const container = document.createElement("div");
-    const chatContainer = document.createElement("div");
-    container.appendChild(chatContainer);
-    const onModelChange = jest.fn();
-
-    const plugin = {
-      app,
-      settings: {
-        licenseKey: "license",
-        licenseValid: true,
-        autoSubmitAfterTranscription: false,
-      },
-      modelService: {
-        getModels: jest.fn(async () => []),
-      },
-    } as any;
-
-    const handler = new InputHandler({
-      managedChatAdmission,
-      commitAcceptedUserMessage: (input) => commitAccepted([], input),
-      claimAcceptedUserCommit: () => true,
-      app,
-      container,
-      aiService: { streamMessage: jest.fn() } as any,
-      getMessages: () => [],
-      isChatReady: () => true,
-      chatContainer,
-      scrollManager: {
-        requestStickToBottom: jest.fn(),
-        setGenerating: jest.fn(),
-      } as any,
-      messageRenderer: {
-        addMessageButtonToolbar: jest.fn(),
-        normalizeMessageToParts: jest.fn(() => ({ parts: [] })),
-        renderUnifiedMessageParts: jest.fn(),
-      } as any,
-      onMessageSubmit: jest.fn().mockResolvedValue(undefined),
-      onAssistantResponse: jest.fn().mockResolvedValue(undefined),
-      onError: jest.fn(),
-      onAddContextFile: jest.fn(),
-      onOpenChatSettings: jest.fn(),
-      plugin,
-      getChatMarkdown: jest.fn().mockResolvedValue(""),
-      getChatTitle: jest.fn(() => "Chat"),
-      addFileToContext: jest.fn(),
-      getChatId: jest.fn(() => "chat-model-change"),
-      onModelChange,
-      chatView: {},
-    });
-
-    const controller = (handler as any).modelSelectionController;
-    const refreshSpy = jest.spyOn(controller, "refresh");
-
-    handler.onModelChange({ refreshOptions: true });
-
-    expect("modelPickerOptionsCache" in controller).toBe(false);
-    expect("modelPickerOptionsPromise" in controller).toBe(false);
-    expect(refreshSpy).toHaveBeenCalledWith();
-    expect(onModelChange).toHaveBeenCalledWith({ refreshOptions: true });
-  });
 });

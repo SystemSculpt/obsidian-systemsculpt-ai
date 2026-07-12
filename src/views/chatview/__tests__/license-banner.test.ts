@@ -1,11 +1,3 @@
-jest.mock("../../../utils/modelUtils", () => ({
-  createCanonicalId: jest.fn((p: string, m: string) => `${p}@@${m}`),
-  ensureCanonicalId: jest.fn((id: string) => id || ""),
-  getModelLabelWithProvider: jest.fn((id: string) => id || ""),
-  getDisplayName: jest.fn((id: string) => id || ""),
-  getImageCompatibilityInfo: jest.fn(),
-}));
-
 import { JSDOM } from "jsdom";
 import { uiSetup } from "../uiSetup";
 

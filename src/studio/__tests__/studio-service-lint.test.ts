@@ -1,5 +1,6 @@
 import { createEmptyStudioProject, serializeStudioProject } from "../schema";
 import { StudioService } from "../StudioService";
+import { createManagedCapabilityGraphStub, getManagedStudioTestVaultName } from "./managed-capability-graph.stub";
 
 function createPluginStub(): any {
   const adapter = {
@@ -12,6 +13,7 @@ function createPluginStub(): any {
     app: {
       vault: {
         adapter,
+        getName: getManagedStudioTestVaultName,
         configDir: ".obsidian",
       },
     },
@@ -31,6 +33,7 @@ function createPluginStub(): any {
       warn: jest.fn(),
       error: jest.fn(),
     }),
+    getManagedCapabilityGraph: createManagedCapabilityGraphStub,
   };
 }
 

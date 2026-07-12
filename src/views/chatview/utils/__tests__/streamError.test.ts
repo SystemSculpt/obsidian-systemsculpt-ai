@@ -62,8 +62,7 @@ describe("classifyStreamError", () => {
     it("detects unauthorized", () => {
       const result = classifyStreamError("Unauthorized: invalid API key");
       expect(result.kind).toBe("auth");
-      expect(result.userMessage).toContain("Authentication failed");
-      expect(result.userMessage).toContain("Providers");
+      expect(result.userMessage).toContain("Open Account");
     });
 
     it("detects bad credentials", () => {
@@ -81,7 +80,7 @@ describe("classifyStreamError", () => {
     it("detects model not found", () => {
       const result = classifyStreamError("Model not found: gpt-5-turbo");
       expect(result.kind).toBe("model_not_found");
-      expect(result.userMessage).toContain("not available");
+      expect(result.userMessage).toContain("SystemSculpt");
     });
 
     it("detects unknown model", () => {

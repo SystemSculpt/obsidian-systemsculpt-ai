@@ -52,9 +52,12 @@ describe("built bundle (main.js)", () => {
     // Settings migration ran: loadData returned null, so defaults applied.
     expect(plugin.settings).toBeDefined();
     expect(typeof plugin.settings).toBe("object");
-    expect(plugin.settings.settingsMode).toBe("standard");
-    expect(Array.isArray(plugin.settings.customProviders)).toBe(true);
-    expect(plugin.settings.selectedModelId).toBe("systemsculpt@@systemsculpt/ai-agent");
+    expect(plugin.settings.schemaVersion).toBe(4);
+    expect(plugin.settings.licenseKey).toBe("");
+    expect(plugin.settings).not.toHaveProperty("settingsMode");
+    expect(plugin.settings).not.toHaveProperty("customProviders");
+    expect(plugin.settings).not.toHaveProperty("selectedModelId");
+    expect(plugin.settings).not.toHaveProperty("serverUrl");
 
     // Core surface registered through the mock host.
     expect(plugin._commands.length).toBeGreaterThan(0);

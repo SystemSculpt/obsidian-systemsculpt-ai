@@ -601,8 +601,8 @@ export class InputHandler extends Component {
   }
 
   /**
-   * React to a global settings change. Refresh the generating-state UI and
-   * model options, and re-sync the composer toggles whose active state follows
+       * React to a global settings change. Refresh the generating-state UI and
+       * re-sync the composer toggles whose active state follows
    * a per-chat value with a global-default fallback — a chat that follows the
    * global default (per-chat value unset) would otherwise show a stale toggle
    * after the global setting changes (#210, #213).

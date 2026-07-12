@@ -10,11 +10,10 @@ import { InputHandler } from "../InputHandler";
 // workspace "systemsculpt:settings-updated" listener delegates to
 // handleSettingsUpdated(); this guards that it re-syncs BOTH global-fallback
 // toggles (agent mode #210/#149/#185, hide-system #213/#174/#167) in addition
-// to the generating-state UI and model options.
+// to the generating-state UI.
 const makeHandler = (): any =>
   Object.assign(Object.create(InputHandler.prototype), {
     updateGeneratingState: jest.fn(),
-    onModelChange: jest.fn(),
     syncAgentModeButton: jest.fn(),
     syncHideSystemMessagesButton: jest.fn(),
   });
@@ -27,11 +26,9 @@ describe("InputHandler.handleSettingsUpdated (#210, #213)", () => {
     expect(handler.syncHideSystemMessagesButton).toHaveBeenCalledTimes(1);
   });
 
-  it("still refreshes generating state and model options", () => {
+  it("still refreshes generating state", () => {
     const handler = makeHandler();
     handler.handleSettingsUpdated();
     expect(handler.updateGeneratingState).toHaveBeenCalledTimes(1);
-    expect(handler.onModelChange).toHaveBeenCalledTimes(1);
-    expect(handler.onModelChange).toHaveBeenNthCalledWith(1, { refreshOptions: true });
   });
 });

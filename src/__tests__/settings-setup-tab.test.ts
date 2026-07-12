@@ -204,8 +204,6 @@ describe("Setup tab SystemSculpt-only layout", () => {
       expect(plugin.getSettingsManager().updateSettings).toHaveBeenLastCalledWith({
         licenseKey: "skss-still-valid",
         licenseValid: true,
-        enableSystemSculptProvider: true,
-        useSystemSculptAsFallback: true,
       });
       expect(licenseInput.value).toBe("");
       expect(container.innerHTML).not.toContain("skss-still-valid");
@@ -229,8 +227,6 @@ describe("Setup tab SystemSculpt-only layout", () => {
     await flushSetupSectionRender();
     expect(plugin.getSettingsManager().updateSettings).toHaveBeenCalledWith({
       licenseValid: false,
-      enableSystemSculptProvider: false,
-      useSystemSculptAsFallback: false,
     });
     expect(container.innerHTML).not.toContain("skss-saved-secret");
   });

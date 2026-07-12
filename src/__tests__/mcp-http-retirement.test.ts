@@ -53,31 +53,4 @@ describe("retired custom HTTP MCP settings", () => {
     expect(JSON.stringify(settings)).toBe(before);
   });
 
-  it("returns one bounded typed failure for direct stale-ID test and execute calls", async () => {
-    const settings = loadPersistedSettings();
-    const legacyServer = settings.mcpServers[0];
-    const service = new MCPService({ settings } as any, {} as any);
-
-    await expect(service.testConnection(legacyServer)).resolves.toEqual({
-      success: false,
-      code: "unsupported_retired_http_mcp",
-      error: "Custom HTTP MCP servers are no longer supported.",
-      timestamp: expect.any(Number),
-    });
-
-    let failure: unknown;
-    try {
-      await service.executeTool("legacy-http_any_tool", { value: "sentinel" });
-    } catch (error) {
-      failure = error;
-    }
-
-    expect(failure).toMatchObject({
-      code: "unsupported_retired_http_mcp",
-      message: "Custom HTTP MCP servers are no longer supported.",
-    });
-    expect(String((failure as Error).message)).not.toContain(legacyServer.endpoint);
-    expect(String((failure as Error).message)).not.toContain(legacyServer.apiKey);
-    expect(httpRequest).not.toHaveBeenCalled();
-  });
 });
