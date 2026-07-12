@@ -126,21 +126,17 @@ export class ChatRequestPreparationService {
     operation: AcceptedChatOperation,
     input: AuthoritativeChatPreparationInput,
     dependencies: ChatPreparationDependencies,
-    managedDependencies: ManagedChatPreparationDependencies,
+    _managedDependencies: ManagedChatPreparationDependencies,
   ): Promise<AcceptedChatRequestSnapshot> {
     const existing = this.retained.get(operation);
     if (existing) return existing;
     if (this.failed.has(operation)) return Promise.reject(new Error("Accepted Chat request preparation already failed."));
-    const pending = (async () => {
-      const managed = await prepareManagedAcceptedChatRequest(operation, input, managedDependencies);
-      const legacy = await prepareChatRequestAuthoritatively({
-        ...input,
-        messages: managed.messages,
-        contextFiles: new Set<string>(),
-        systemPromptOverride: undefined,
-      }, dependencies, true, managed.tools);
-      return { legacy, managed };
-    })().then(({ legacy, managed }) => {
+    const pending = prepareChatRequestAuthoritatively(input, dependencies)
+      .then((legacy) => ({
+        legacy,
+        managed: { messages: legacy.prepared.preparedMessages, tools: legacy.prepared.tools },
+      }))
+      .then(({ legacy, managed }) => {
         const contextFiles = new Set(input.contextFiles ?? []);
         const policy: AcceptedChatPolicyAudit = {
           prompt: input.systemPromptOverride?.trim() ? "selected" : "none", contextCount: contextFiles.size,

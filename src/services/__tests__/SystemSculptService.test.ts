@@ -211,16 +211,38 @@ describe("SystemSculptService", () => {
     const accepted = await service.prepareAcceptedChatRequest(operation, { model: "m", contextFiles: new Set(), systemPromptOverride: "selected" });
     expect(modelManagementService.getModelInfo).toHaveBeenCalledTimes(1);
     expect(contextFileService.prepareMessagesWithContext).toHaveBeenCalledTimes(1);
-    // Fixed ai-agent preparation resolves tool definitions once even when the legacy provider is not tool-capable.
-    expect(mcpService.getAvailableTools).toHaveBeenCalledTimes(1);
-    expect(accepted.tools).toHaveLength(1);
-    expect(Object.isFrozen(accepted.tools)).toBe(true);
+    expect(mcpService.getAvailableTools).not.toHaveBeenCalled();
+    expect(accepted.tools).toBeUndefined();
     jest.clearAllMocks();
     await collectEvents(service.streamMessage({ messages: [], model: "ignored", preparedRequest: accepted.legacyPreparation as never }));
     expect(modelManagementService.getModelInfo).not.toHaveBeenCalled();
     expect(contextFileService.prepareMessagesWithContext).not.toHaveBeenCalled();
     expect(mcpService.getAvailableTools).not.toHaveBeenCalled();
     expect(localPiStreamExecutor.executeLocalPiStream).toHaveBeenCalledWith(expect.objectContaining({ prepared: accepted.legacyPreparation }));
+  });
+
+  it.each([
+    ["selected prompt", `selected prompt\n\n${AGENT_TOOL_INSTRUCTIONS}`],
+    [undefined, AGENT_PRESET.systemPrompt],
+  ])("keeps established legacy prompt preparation in accepted snapshots (%s)", async (systemPromptOverride, expectedPrompt) => {
+    const service = SystemSculptService.getInstance(createPlugin());
+    const message = { role: "user", content: "accepted", message_id: "u" } as const;
+    const durable = Object.freeze({ chatId: "c", version: 1, messages: Object.freeze([message]) });
+    const operation = Object.freeze({ lease: {} as never, durableTurnId: "u", acceptedUserMessage: message, initialDurableSnapshot: durable, turnBoundaryId: "b" });
+
+    const accepted = await service.prepareAcceptedChatRequest(operation, {
+      model: "systemsculpt@@systemsculpt/ai-agent",
+      contextFiles: new Set(["context.md"]),
+      systemPromptOverride,
+      allowTools: true,
+    });
+
+    expect(accepted.legacyPreparation.finalSystemPrompt).toBe(expectedPrompt);
+    expect(contextFileService.prepareMessagesWithContext).toHaveBeenCalledTimes(1);
+    expect(contextFileService.prepareMessagesWithContext).toHaveBeenCalledWith(
+      [message], new Set(["context.md"]), true, expectedPrompt,
+    );
+    expect(accepted.legacyPreparation.tools).toEqual(accepted.tools);
   });
 
   it("initializes with the resolved base url and updates dependent services", () => {

@@ -390,7 +390,7 @@ export class SystemSculptService {
   private managedPreparationDependencies() {
     return {
       contextFileService: this.contextFileService,
-      // Managed ai-agent tool definitions are resolved independently of legacy model/provider capability.
+      // Resolve once for the accepted operation; legacy preparation consumes the same normalized definitions when supported.
       getAvailableTools: () => this.mcpService.getAvailableTools(),
     };
   }

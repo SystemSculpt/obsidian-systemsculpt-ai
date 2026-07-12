@@ -66,4 +66,22 @@ describe("AcceptedChatRequestSnapshot", () => {
     expect(legacy.tools).toEqual(accepted.legacyPreparation.tools);
     expect(Object.isFrozen(legacy)).toBe(true);
   });
+
+  it("adds an empty-continuation retry hint from frozen preparation only", () => {
+    const accepted = snapshot();
+    const next = Object.freeze({ chatId: "c", version: 2, messages: accepted.durableSnapshot.messages });
+    const hinted = composeAcceptedLegacyContinuation(
+      accepted,
+      next,
+      "The previous continuation attempt returned no content after tool execution. Continue from the committed tool results.",
+    );
+
+    expect(hinted.finalSystemPrompt).toBe(
+      "frozen prompt\n\nThe previous continuation attempt returned no content after tool execution. Continue from the committed tool results.",
+    );
+    expect(hinted.preparedMessages[0].content).toBe(
+      "frozen prompt and context\n\nThe previous continuation attempt returned no content after tool execution. Continue from the committed tool results.",
+    );
+    expect(accepted.legacyPreparation.finalSystemPrompt).toBe("frozen prompt");
+  });
 });
