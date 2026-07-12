@@ -53,8 +53,6 @@ const createPluginStub = () => {
       customProviders: [],
       activeProvider: null,
       selectedModelId: "",
-      titleGenerationPromptType: "precise",
-      titleGenerationPromptPath: "",
       postProcessingPromptType: "summary",
       postProcessingPromptFilePath: "",
       embeddingsEnabled: false,

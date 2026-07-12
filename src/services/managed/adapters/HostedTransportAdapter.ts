@@ -85,6 +85,7 @@ export class HostedTransportAdapter {
     const response = await this.client.request({
       url: this.url(operation.path), method: operation.method ?? "POST", headers,
       body: operation.body, stream, preserveResponseHeaders: true,
+      allowTransportFallback: operation.capability !== "text_generation",
       signal: operation.signal, licenseKey,
     });
     const errorText = response.ok || !readErrorBody ? "" : (await response.clone().text()).slice(0, 2048);

@@ -1,6 +1,5 @@
 import { App } from "obsidian";
 import { StandardModal } from "./StandardModal";
-import { DEFAULT_TITLE_GENERATION_PROMPT } from "src/types";
 
 
 export interface TextEditOptions {
@@ -10,8 +9,6 @@ export interface TextEditOptions {
   initialValue?: string;
   submitButtonText?: string;
   cancelButtonText?: string;
-  withTitleGeneration?: boolean;
-  titleGenerationCallback?: (text: string) => Promise<string>;
   size?: "small" | "medium" | "large" | "fullwidth";
   minHeight?: number;
   maxHeight?: number;
@@ -26,9 +23,7 @@ export class TextEditModal extends StandardModal {
   private options: TextEditOptions;
   private textArea: HTMLTextAreaElement | null = null;
   private resolvePromise: ((text: string) => void) | null = null;
-  private generateTitleButton: HTMLElement | null = null;
   private submitButton: HTMLElement | null = null;
-  private titleGenerationLoading: boolean = false;
 
   constructor(app: App, options: TextEditOptions) {
     super(app);
@@ -36,7 +31,6 @@ export class TextEditModal extends StandardModal {
     this.options = {
       submitButtonText: "Save",
       cancelButtonText: "Cancel",
-      withTitleGeneration: false,
       size: "medium",
       minHeight: 100,
       maxHeight: 400,
@@ -58,11 +52,6 @@ export class TextEditModal extends StandardModal {
     
     // Create text area
     this.createTextArea();
-    
-    // Add title generation button if enabled
-    if (this.options.withTitleGeneration && this.options.titleGenerationCallback) {
-      this.createTitleGenerationButton();
-    }
     
     // Add footer buttons
     this.addActionButton(this.options.cancelButtonText || "Cancel", () => this.close(), false);
@@ -116,64 +105,6 @@ export class TextEditModal extends StandardModal {
     
     // Initial resize
     setTimeout(() => this.autoResizeTextArea(), 0);
-      // Create Reset to Default Prompt button (styled in modals/modal.css)
-      const resetButton = textAreaContainer.createEl("button", {
-        text: "Reset to Default Prompt",
-        cls: "ss-modal__textarea-reset",
-      });
-
-      resetButton.addEventListener("click", () => {
-          if (this.textArea) {
-              this.textArea.value = DEFAULT_TITLE_GENERATION_PROMPT;
-              // Trigger input event to update UI state
-              this.textArea.dispatchEvent(new Event("input", { bubbles: true }));
-          }
-      });
-  }
-
-  /**
-   * Create the title generation button
-   */
-  private createTitleGenerationButton() {
-    const buttonContainer = this.contentEl.createDiv("ss-modal__title-generation");
-    this.generateTitleButton = buttonContainer.createEl("button", {
-      text: "Generate Title",
-      cls: "ss-button ss-button--small"
-    });
-    
-    this.generateTitleButton.addEventListener("click", this.handleTitleGeneration.bind(this));
-  }
-
-  /**
-   * Handle title generation
-   */
-  private async handleTitleGeneration() {
-    if (!this.options.titleGenerationCallback || !this.textArea || this.titleGenerationLoading) return;
-    
-    const text = this.textArea.value;
-    if (!text) return;
-    
-    // Update button state
-    this.titleGenerationLoading = true;
-    if (this.generateTitleButton) {
-      this.generateTitleButton.textContent = "Generating...";
-      this.generateTitleButton.setAttribute("disabled", "true");
-    }
-    
-    try {
-      const generatedTitle = await this.options.titleGenerationCallback(text);
-      this.textArea.value = generatedTitle;
-      this.autoResizeTextArea();
-      this.updateSubmitButtonState();
-    } catch (error) {
-    } finally {
-      // Reset button state
-      this.titleGenerationLoading = false;
-      if (this.generateTitleButton) {
-        this.generateTitleButton.textContent = "Generate Title";
-        this.generateTitleButton.removeAttribute("disabled");
-      }
-    }
   }
 
   /**

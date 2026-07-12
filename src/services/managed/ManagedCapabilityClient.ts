@@ -1,4 +1,8 @@
 import { ManagedAdmission } from "./ManagedAdmission";
+import {
+  ManagedTextGenerationAdapter,
+  type ManagedTextGenerationOperation,
+} from "./ManagedTextGenerationAdapter";
 import { HostedTransportAdapter, type ManagedChatTransportTicket } from "./adapters/HostedTransportAdapter";
 import {
   ManagedAdmissionOutcome, ManagedAllowedLease, ManagedCapabilityAlias, ManagedChatLeaseResult, ManagedLease,
@@ -28,12 +32,17 @@ type ClientOperation = {
 };
 
 export class ManagedCapabilityClient {
-  constructor(private readonly dependencies: { admission: ManagedAdmission; transport: HostedTransportAdapter }) {}
+  private readonly textGeneration: ManagedTextGenerationAdapter;
+
+  constructor(private readonly dependencies: { admission: ManagedAdmission; transport: HostedTransportAdapter }) {
+    this.textGeneration = new ManagedTextGenerationAdapter(dependencies);
+  }
   getCatalog() { return this.dependencies.transport.getCatalog(); }
   getAdmission() { return this.dependencies.transport.getAdmission(); }
   request(operation: ClientOperation) { return this.execute("request", operation); }
   stream(operation: ClientOperation) { return this.execute("stream", operation); }
   job(operation: ClientOperation) { return this.execute("job", operation); }
+  generateText(operation: ManagedTextGenerationOperation) { return this.textGeneration.generate(operation); }
   public beginAcceptedChatDispatch(): ManagedChatTransportTicket | null {
     return this.dependencies.transport.beginManagedChatDispatch();
   }

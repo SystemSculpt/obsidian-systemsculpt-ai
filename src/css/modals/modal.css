@@ -530,20 +530,6 @@
   outline: none;
 }
 
-.ss-modal__textarea-reset {
-  display: block;
-  margin-top: var(--ss-space-2);
-  padding: var(--ss-space-1) var(--ss-space-3);
-  font-size: var(--ss-text-sm);
-  cursor: pointer;
-}
-
-.ss-modal__title-generation {
-  padding: 0 var(--ss-space-5) var(--ss-space-3);
-  font-size: var(--ss-text-sm);
-  color: var(--ss-ink-muted);
-}
-
 /* ------------------------------------------------------------------ *
  * Footer
  * ------------------------------------------------------------------ */

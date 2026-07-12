@@ -12,7 +12,7 @@ import { LogLevel } from "./utils/errorHandling";
 import { ToolCall } from "./types/toolCalls";
 import type { ChatExportPreferences } from "./types/chatExport";
 import { createDefaultChatExportOptions } from "./types/chatExport";
-import type { WorkflowEngineSettings, WorkflowAutomationState, WorkflowAutomationId, WorkflowSkipEntry } from "./types/workflows";
+import type { WorkflowEngineSettings, WorkflowAutomationState, WorkflowAutomationId, WorkflowSkipEntry, WorkflowManagedTextOperation, WorkflowManagedTextPhase } from "./types/workflows";
 import { createDefaultWorkflowEngineSettings, createDefaultWorkflowAutomationsState, WORKFLOW_AUTOMATION_IDS } from "./types/workflows";
 import type { ReadwiseImportOptions, ReadwiseOrganization, ReadwiseSyncMode, ReadwiseTweetOrganization } from "./types/readwise";
 import { DEFAULT_READWISE_IMPORT_OPTIONS } from "./types/readwise";
@@ -44,6 +44,8 @@ export type {
   WorkflowAutomationState,
   WorkflowAutomationId,
   WorkflowSkipEntry,
+  WorkflowManagedTextOperation,
+  WorkflowManagedTextPhase,
   WorkflowTrigger,
   WorkflowCondition,
   WorkflowStep,
@@ -52,20 +54,6 @@ export type {
 export { createDefaultWorkflowEngineSettings, createDefaultWorkflowAutomationsState, WORKFLOW_AUTOMATION_IDS } from "./types/workflows";
 
 export const LICENSE_URL = "https://systemsculpt.com/resources?tab=license";
-
-export const DEFAULT_TITLE_GENERATION_PROMPT = `You are a specialized title generation assistant focused on creating precise, meaningful titles.
-
-Your task is to analyze the provided conversation and generate a single, concise title that:
-- Captures the main topic or central theme of the conversation
-- Uses clear, descriptive language
-- Is between 3-8 words long
-- Avoids unnecessary articles (a, an, the) unless essential
-- Maintains professional tone and proper capitalization
-- Includes key technical terms when relevant
-- NEVER includes characters that are invalid in filenames: \\ / : * ? " < > |
-- Uses proper spacing between all words
-
-Output ONLY the title itself - no additional text, no "Title:" prefix, no quotes, no explanation.`;
 
 export interface SystemSculptSettings {
   /**
@@ -158,10 +146,6 @@ export interface SystemSculptSettings {
    * Path to the selected file (if postProcessingPromptType is "file")
    */
   postProcessingPromptFilePath: string;
-  /** Provider ID used specifically for post-processing (e.g., "systemsculpt", "openai-custom") */
-  postProcessingProviderId: string;
-  /** Canonical model ID used specifically for post-processing (e.g., "systemsculpt@@gpt-4") */
-  postProcessingModelId: string;
   /**
    * When enabled, transcription output will be clean text only without timestamps, titles, or metadata
    */
@@ -231,16 +215,6 @@ export interface SystemSculptSettings {
   skipEmptyNoteWarning: boolean;
 
   /**
-   * Title generation prompt settings
-   */
-  titleGenerationPrompt: string;
-  titleGenerationPromptType: "precise" | "movie-style" | "custom";
-  titleGenerationPromptPath: string;
-  /** Provider ID used specifically for title generation (e.g., "systemsculpt", "openai-custom") */
-  titleGenerationProviderId: string;
-  /** Canonical model ID used specifically for title generation (e.g., "systemsculpt@@gpt-4") */
-  titleGenerationModelId: string;
-  /**
    * Custom provider settings
    */
   customProviders: CustomProvider[];
@@ -268,11 +242,6 @@ export interface SystemSculptSettings {
   favoriteStudioSessions: string[];
 
   activeProvider: ActiveProvider;
-
-  /**
-   * Last used folder for Save As Note modal
-   */
-  lastSaveAsNoteFolder: string;
 
   /**
    * Remembers export preferences for chat exports (toggle selections, folder, etc.)
@@ -456,23 +425,6 @@ export interface SystemSculptSettings {
   preserveReasoningVerbatim: boolean;
 
   /**
-   * Meeting processor default outputs
-   */
-  meetingProcessorOptions?: MeetingProcessorOptions;
-  meetingProcessorOutputDirectory?: string;
-  meetingProcessorOutputNameTemplate?: string;
-
-  /**
-   * YouTube Canvas settings
-   */
-  youtubeNotesFolder?: string;
-  youtubeCanvasToggles?: {
-    summary: boolean;
-    keyPoints: boolean;
-    studyNotes: boolean;
-  };
-
-  /**
    * Readwise integration settings
    */
   readwiseEnabled: boolean;
@@ -497,15 +449,6 @@ export interface SystemSculptSettings {
    * Maps model ID to timestamp when discovered.
    */
   runtimeImageIncompatibleModels?: Record<string, number>;
-}
-
-export interface MeetingProcessorOptions {
-  summary: boolean;
-  actionItems: boolean;
-  decisions: boolean;
-  risks: boolean;
-  questions: boolean;
-  transcriptCleanup: boolean;
 }
 
 export interface ImageGenerationModelCatalogCacheModel {
@@ -567,8 +510,6 @@ Raw transcript:`,
   postProcessingPromptType: "preset",
   postProcessingPromptPresetId: "transcript-cleaner",
   postProcessingPromptFilePath: "",
-  postProcessingProviderId: "systemsculpt", // Default to native provider
-  postProcessingModelId: "", // Default to empty; logic should handle fallback if unset
   cleanTranscriptionOutput: false,
   autoSubmitAfterTranscription: false,
   transcriptionOutputFormat: "markdown",
@@ -590,14 +531,6 @@ Raw transcript:`,
 
   skipEmptyNoteWarning: false,
 
-  /**
-   * Title generation prompt defaults
-   */
-  titleGenerationPrompt: DEFAULT_TITLE_GENERATION_PROMPT,
-  titleGenerationPromptType: "precise",
-  titleGenerationPromptPath: "",
-  titleGenerationProviderId: "systemsculpt", // Default to native provider
-  titleGenerationModelId: "", // Default to empty; logic should handle fallback if unset
   /**
    * Custom provider defaults
    */
@@ -622,7 +555,6 @@ Raw transcript:`,
     type: "native",
   },
 
-  lastSaveAsNoteFolder: "SystemSculpt/AI Responses",
   chatExportPreferences: {
     options: createDefaultChatExportOptions(),
     lastFolder: "",
@@ -705,30 +637,6 @@ Raw transcript:`,
   lastAutomaticBackup: 0, // No automatic backup yet
   
   // preserveReasoningVerbatim default already defined above
-
-  /**
-   * Meeting processor defaults
-   */
-  meetingProcessorOptions: {
-    summary: true,
-    actionItems: true,
-    decisions: true,
-    risks: false,
-    questions: false,
-    transcriptCleanup: true,
-  },
-  meetingProcessorOutputDirectory: "SystemSculpt/Extractions",
-  meetingProcessorOutputNameTemplate: "{{basename}}-processed.md",
-
-  /**
-   * YouTube Canvas defaults
-   */
-  youtubeNotesFolder: "SystemSculpt/YouTube",
-  youtubeCanvasToggles: {
-    summary: true,
-    keyPoints: false,
-    studyNotes: false,
-  },
 
   /**
    * Readwise integration defaults

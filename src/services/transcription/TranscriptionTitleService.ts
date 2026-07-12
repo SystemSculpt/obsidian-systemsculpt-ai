@@ -1,23 +1,8 @@
 import { App, TFile } from "obsidian";
 import type SystemSculptPlugin from "../../main";
-import {
-  getManagedSystemSculptModelId,
-  hasManagedSystemSculptAccess,
-} from "../systemsculpt/ManagedSystemSculptModel";
 import { sanitizeChatTitle } from "../../utils/titleUtils";
 
-const TITLE_PROMPT = [
-  "You generate short, meaningful Obsidian note titles for audio transcripts.",
-  "Rules:",
-  "- Respond with ONLY the title (no quotes, no markdown).",
-  "- Keep it concise and specific (2–8 words).",
-  "- Use Title Case.",
-  "- Do NOT include characters invalid in filenames: \\ / : * ? \" < > |",
-  "- Do NOT include the file extension (like .md).",
-].join("\n");
-
 const TRANSCRIPT_LABEL = "transcript";
-const TITLE_TIMEOUT_MS = 15_000;
 const MAX_TITLE_CONTEXT_CHARS = 2_800;
 const MAX_TITLE_CHARS = 120;
 const MAX_COLLISION_ATTEMPTS = 50;
@@ -25,8 +10,7 @@ const MAX_COLLISION_ATTEMPTS = 50;
 export class TranscriptionTitleService {
   private static instance: TranscriptionTitleService | null = null;
 
-  private constructor(private readonly plugin: SystemSculptPlugin) {
-  }
+  private constructor(_plugin: SystemSculptPlugin) {}
 
   public static getInstance(plugin: SystemSculptPlugin): TranscriptionTitleService {
     if (!TranscriptionTitleService.instance) {
@@ -74,57 +58,15 @@ export class TranscriptionTitleService {
   }
 
   public async tryGenerateTitle(transcriptText: string): Promise<string | null> {
-    try {
-      if (!hasManagedSystemSculptAccess(this.plugin)) {
-        return null;
-      }
-
-      const model = getManagedSystemSculptModelId();
-      const excerpt = this.buildTitleContext(transcriptText);
-      if (!excerpt.trim()) {
-        return null;
-      }
-
-      const messages = [
-        {
-          role: "user" as const,
-          content: excerpt,
-          message_id: crypto.randomUUID(),
-        },
-      ];
-
-      const timeoutPromise = new Promise<never>((_, reject) => {
-        setTimeout(() => reject(new Error("Title generation timed out")), TITLE_TIMEOUT_MS);
-      });
-
-      const streamingPromise = (async () => {
-        let output = "";
-        const { SystemSculptService } = await import("../SystemSculptService");
-        const stream = SystemSculptService.getInstance(this.plugin).streamMessage({
-          messages,
-          model,
-          systemPromptOverride: TITLE_PROMPT,
-          allowTools: false,
-        });
-
-        for await (const event of stream) {
-          if (event.type === "content") {
-            output += event.text;
-          }
-        }
-
-        return output;
-      })();
-
-      const rawTitle = await Promise.race([streamingPromise, timeoutPromise]);
-      const safeTitle = this.sanitizeGeneratedTitle(rawTitle);
-      if (!this.isUsableTitle(safeTitle)) {
-        return null;
-      }
-      return safeTitle;
-    } catch (_) {
-      return null;
-    }
+    const excerpt = this.buildTitleContext(transcriptText).trim();
+    if (!excerpt) return null;
+    const candidate = excerpt
+      .split(/\r?\n/u)
+      .map((line) => line.replace(/^\s*(?:\[[^\]]+\]|\d{1,2}:\d{2}(?::\d{2})?|[-*#]+)\s*/u, "").trim())
+      .find((line) => line.length > 0) ?? "";
+    const words = candidate.replace(/\s+/gu, " ").split(" ").filter(Boolean).slice(0, 8);
+    const safeTitle = this.sanitizeGeneratedTitle(words.join(" "));
+    return this.isUsableTitle(safeTitle) ? safeTitle : null;
   }
 
   public async tryRenameTranscriptionFile(

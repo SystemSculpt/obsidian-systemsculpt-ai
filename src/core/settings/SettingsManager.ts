@@ -594,10 +594,6 @@ export class SettingsManager {
       ? validatedSettings.selectedModelId
       : "";
 
-    if (typeof validatedSettings.titleGenerationModelId !== 'string') {
-      validatedSettings.titleGenerationModelId = defaultSettings.titleGenerationModelId;
-    }
-
     if (typeof validatedSettings.licenseKey !== 'string') {
       validatedSettings.licenseKey = defaultSettings.licenseKey;
     }

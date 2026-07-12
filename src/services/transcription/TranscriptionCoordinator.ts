@@ -135,7 +135,10 @@ export class TranscriptionCoordinator {
       const timestamped = request.timestamped === true;
       if (!timestamped && this.plugin.settings.postProcessingEnabled) request.onStatus?.("Post-processing…");
       const processedText = !timestamped && this.plugin.settings.postProcessingEnabled
-        ? await this.postProcessing.processTranscription(remote.text)
+        ? await this.postProcessing.processTranscription(remote.text, {
+          operationId: `${remote.operationId}:postprocess`,
+          signal: controller.signal,
+        })
         : remote.text;
       throwIfAborted(controller.signal);
       const finalText = timestamped ? remote.text.trim() : this.composeFinalText(resolvedFile, remote.text, processedText, isChat);

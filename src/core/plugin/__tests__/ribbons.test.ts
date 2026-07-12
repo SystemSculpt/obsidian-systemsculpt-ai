@@ -4,8 +4,6 @@ import { App, Plugin } from "obsidian";
 import { RibbonManager } from "../ribbons";
 
 const SYSTEMSCULPT_TOP_TITLES = [
-  "YouTube Canvas",
-  "Process Meeting Audio",
   "Audio Recorder",
   "Open SystemSculpt Search",
   "Open SystemSculpt Janitor",
@@ -59,7 +57,7 @@ describe("RibbonManager", () => {
     await flushAsyncWork();
 
     const ribbons = getRibbonElements(plugin);
-    expect(ribbons).toHaveLength(8);
+    expect(ribbons).toHaveLength(6);
 
     const handles = [...ribbons];
     manager.cleanup();
@@ -78,7 +76,7 @@ describe("RibbonManager", () => {
     manager.initialize();
     await flushAsyncWork();
 
-    expect(getRibbonElements(plugin)).toHaveLength(8);
+    expect(getRibbonElements(plugin)).toHaveLength(6);
   });
 
   it("registers the expected SystemSculpt ribbon actions without removing native ribbons", async () => {

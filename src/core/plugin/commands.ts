@@ -91,7 +91,6 @@ export class CommandManager {
     this.registerOpenChat();
     this.registerOpenSystemSculptHistory();
     this.registerOpenJanitor();
-    this.registerMeetingProcessor();
     this.registerTranscribeAudioFile();
     this.registerOpenSystemSculptSearch();
     this.registerReloadObsidian();
@@ -106,7 +105,6 @@ export class CommandManager {
     this.registerEmbeddingsDatabaseCommands();
     this.registerRunAutomationCommand();
     this.registerAutomationBacklogCommand();
-    this.registerYouTubeCanvas();
     this.registerSystemSculptStudioCommands();
   }
 
@@ -188,18 +186,6 @@ export class CommandManager {
       name: "Open SystemSculpt Janitor",
       callback: () => {
         this.ribbonManager.openJanitorModal();
-      },
-    });
-  }
-
-  private registerMeetingProcessor() {
-    this.plugin.addCommand({
-      id: "open-meeting-processor",
-      name: "Open Meeting Processor",
-      callback: async () => {
-        const { MeetingProcessorModal } = await import("../../modals/MeetingProcessorModal");
-        const modal = new MeetingProcessorModal(this.plugin);
-        modal.open();
       },
     });
   }
@@ -320,12 +306,12 @@ export class CommandManager {
 
 
   /**
-   * Register command to change/generate title for chats and notes
+   * Register deterministic local title creation for chats and notes.
    */
   private registerChangeChatTitle() {
     this.plugin.addCommand({
       id: "change-chat-title",
-      name: "Change/Generate Title",
+      name: "Create Title from Content",
       checkCallback: (checking: boolean) => {
         // First check if we're in a chat view
         const chatView = this.getActiveChatView();
@@ -334,7 +320,7 @@ export class CommandManager {
           if (!checking) {
             (async () => {
               // Show initial notice
-              const notice = new Notice("Generating title...", 0);
+              const notice = new Notice("Creating title from content...", 0);
 
               try {
                 const { TitleGenerationService } = await loadTitleGenerationServiceModule();
@@ -346,7 +332,7 @@ export class CommandManager {
                   },
                   (progress: number, status: string) => {
                     // Update notice text with progress
-                    notice.setMessage(`Generating title... ${status}`);
+                    notice.setMessage(status);
                   }
                 );
 
@@ -359,7 +345,7 @@ export class CommandManager {
                 }
               } catch (error) {
                 const errorMessage = error instanceof Error ? error.message : String(error);
-                notice.setMessage(`Failed to generate title: ${errorMessage}`);
+                notice.setMessage(`Could not create title: ${errorMessage}`);
                 notice.hide();
               }
             })();
@@ -379,7 +365,7 @@ export class CommandManager {
         // Only allow for markdown notes and Studio workflow files
         if (!this.canGenerateTitleForFile(activeFile)) {
           if (!checking) {
-            new Notice("Title generation is only available for markdown and .systemsculpt files.", 5000);
+            new Notice("Titles can be created only for markdown and .systemsculpt files.", 5000);
           }
           return false;
         }
@@ -387,7 +373,7 @@ export class CommandManager {
         if (!checking) {
           (async () => {
             // Show initial notice
-            const notice = new Notice("Generating title...", 0);
+            const notice = new Notice("Creating title from content...", 0);
 
             try {
               const { TitleGenerationService } = await loadTitleGenerationServiceModule();
@@ -399,7 +385,7 @@ export class CommandManager {
                 },
                 (progress: number, status: string) => {
                   // Update notice text with progress
-                  notice.setMessage(`Generating title... ${status}`);
+                  notice.setMessage(status);
                 }
               );
 
@@ -421,7 +407,7 @@ export class CommandManager {
               }
             } catch (error) {
               const errorMessage = error instanceof Error ? error.message : String(error);
-              notice.setMessage(`Failed to generate title: ${errorMessage}`);
+              notice.setMessage(`Could not create title: ${errorMessage}`);
               notice.hide();
             }
           })();
@@ -515,17 +501,6 @@ export class CommandManager {
         title: definition.title,
         subtitle: state?.destinationFolder || definition.destinationPlaceholder,
       };
-    });
-  }
-
-  private registerYouTubeCanvas() {
-    this.plugin.addCommand({
-      id: "open-youtube-canvas",
-      name: "YouTube Canvas - Extract transcript and create note",
-      callback: async () => {
-        const { YouTubeCanvasModal } = await import("../../modals/YouTubeCanvasModal");
-        new YouTubeCanvasModal(this.app, this.plugin).open();
-      },
     });
   }
 

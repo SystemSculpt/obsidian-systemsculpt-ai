@@ -99,7 +99,7 @@ describe("DocumentContextManager", () => {
       return receipt;
     });
     mockTranscribeFile.mockResolvedValue("Transcribed text content");
-    (mockApp.vault.create as jest.Mock).mockResolvedValue({});
+    (mockApp.vault.create as jest.Mock).mockImplementation(async (path: string) => new TFile({ path }));
     (mockApp.vault.modify as jest.Mock).mockResolvedValue({});
 
     manager = DocumentContextManager.getInstance(mockApp, mockPlugin);

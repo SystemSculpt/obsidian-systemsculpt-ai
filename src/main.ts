@@ -2529,10 +2529,6 @@ export default class SystemSculptPlugin extends Plugin {
     return this.versionCheckerService;
   }
 
-  public async updateLastSaveAsNoteFolder(folder: string) {
-    await this.settingsManager.updateSettings({ lastSaveAsNoteFolder: folder });
-  }
-
   // Embeddings methods removed
 
   // --- Status bar methods removed ---

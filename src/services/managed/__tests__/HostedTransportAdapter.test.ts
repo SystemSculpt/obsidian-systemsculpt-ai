@@ -94,6 +94,18 @@ describe("HostedTransportAdapter", () => {
     }));
   });
 
+  it("forbids hidden transport fallback replay for managed text generation", async () => {
+    const adapter = new HostedTransportAdapter({ baseUrl: "https://api.test", pluginVersion: "6.0.0", licenseKey: () => "key" });
+    await adapter.request({
+      path: "/api/v1/chat/completions",
+      method: "POST",
+      capability: "text_generation",
+      idempotencyKey: "workflow:operation_1",
+      body: { model: "ai-agent", stream: false, purpose: "workflow_automation", messages: [{ role: "user", content: "x" }] },
+    });
+    expect(request).toHaveBeenCalledWith(expect.objectContaining({ allowTransportFallback: false }));
+  });
+
   it("forwards exact lowercase operation-scoped job headers without forcing plugin version", async () => {
     const adapter = new HostedTransportAdapter({ baseUrl: "https://api.test", pluginVersion: "6", licenseKey: () => "key" });
     await adapter.job({ path: "/job", headers: {

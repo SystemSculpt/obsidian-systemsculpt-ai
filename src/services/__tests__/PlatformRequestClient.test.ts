@@ -93,4 +93,22 @@ describe("PlatformRequestClient", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toBe("text/event-stream");
   });
+
+  it("does not replay through requestUrl when transport fallback is forbidden", async () => {
+    const client = new PlatformRequestClient();
+    const failure = new Error("Outcome unknown");
+    global.fetch = jest.fn().mockRejectedValue(failure) as any;
+
+    await expect(client.request({
+      url: "https://api.systemsculpt.com/api/v1/chat/completions",
+      method: "POST",
+      body: { purpose: "workflow_automation" },
+      stream: false,
+      licenseKey: "license",
+      allowTransportFallback: false,
+    })).rejects.toBe(failure);
+
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(requestUrl).not.toHaveBeenCalled();
+  });
 });

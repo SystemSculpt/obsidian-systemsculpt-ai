@@ -43,25 +43,6 @@ export class RibbonManager {
    */
   private registerRibbonIcons() {
     this.registerRibbonIcon(
-      "youtube",
-      "YouTube Canvas",
-      async () => {
-        const { YouTubeCanvasModal } = await import("../../modals/YouTubeCanvasModal");
-        new YouTubeCanvasModal(this.app, this.plugin).open();
-      }
-    );
-
-    this.registerRibbonIcon(
-      "file-audio",
-      "Process Meeting Audio",
-      async () => {
-        const { MeetingProcessorModal } = await import("../../modals/MeetingProcessorModal");
-        const modal = new MeetingProcessorModal(this.plugin);
-        modal.open();
-      }
-    );
-
-    this.registerRibbonIcon(
       "mic",
       "Audio Recorder",
       async () => {

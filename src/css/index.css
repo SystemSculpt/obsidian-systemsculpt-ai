@@ -33,7 +33,6 @@
 @import 'components/recorder.css';
 @import 'components/quick-edit.css';
 @import 'components/diff-viewer.css';
-@import 'components/youtube-canvas.css';
 @import 'components/automations.css';
 @import 'components/update-drawer.css';
 @import 'components/mermaid.css';
@@ -51,7 +50,6 @@
 @import 'modals/file-pickers.css';
 @import 'modals/search.css';
 @import 'modals/misc-modals.css';
-@import 'modals/ai-response.css';
 
 /* Views */
 @import 'views/chat.css';

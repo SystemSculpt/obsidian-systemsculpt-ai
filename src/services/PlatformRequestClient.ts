@@ -12,6 +12,7 @@ export type PlatformRequestInput = {
   cache?: RequestCache;
   licenseKey?: string;
   preserveResponseHeaders?: boolean;
+  allowTransportFallback?: boolean;
 };
 
 export class PlatformRequestClient {
@@ -49,6 +50,7 @@ export class PlatformRequestClient {
         if (input.signal?.aborted || (error instanceof DOMException && error.name === "AbortError")) {
           throw error;
         }
+        if (input.allowTransportFallback === false) throw error;
       }
     }
 

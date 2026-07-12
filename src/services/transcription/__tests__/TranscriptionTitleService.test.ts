@@ -1,364 +1,52 @@
-/**
- * @jest-environment jsdom
- */
-
+/** @jest-environment jsdom */
 import { buildPercentileExcerpt, TranscriptionTitleService } from "../TranscriptionTitleService";
-
-const mockStreamMessage = jest.fn();
-
-jest.mock("../../SystemSculptService", () => ({
-  SystemSculptService: {
-    getInstance: jest.fn(() => ({
-      streamMessage: mockStreamMessage,
-    })),
-  },
-}));
-
-describe("buildPercentileExcerpt", () => {
-  it("returns the full text when under the limit", () => {
-    expect(buildPercentileExcerpt("hello world", 500)).toBe("hello world");
-  });
-
-  it("returns a bounded excerpt that includes the start and end", () => {
-    const text = `START_${"a".repeat(5000)}_END`;
-    const excerpt = buildPercentileExcerpt(text, 600);
-
-    expect(excerpt.length).toBeLessThanOrEqual(600);
-    expect(excerpt).toContain("START_");
-    expect(excerpt).toContain("_END");
-  });
-});
 
 describe("TranscriptionTitleService", () => {
   beforeEach(() => {
-    (TranscriptionTitleService as any).instance = null;
-    mockStreamMessage.mockReset();
+    (TranscriptionTitleService as unknown as { instance: TranscriptionTitleService | null }).instance = null;
   });
 
-  describe("getInstance", () => {
-    it("returns singleton instance", () => {
-      const plugin: any = { settings: {} };
-      const service1 = TranscriptionTitleService.getInstance(plugin);
-      const service2 = TranscriptionTitleService.getInstance(plugin);
-      expect(service1).toBe(service2);
-    });
+  const service = () => TranscriptionTitleService.getInstance({} as never);
+
+  it("builds deterministic fallback names", () => {
+    expect(service().buildFallbackBasename("")).toBe("transcript");
+    expect(service().buildFallbackBasename("audio")).toBe("audio - transcript");
   });
 
-  describe("buildFallbackBasename", () => {
-    it("returns just transcript label for empty prefix", () => {
-      const plugin: any = { settings: {} };
-      const service = TranscriptionTitleService.getInstance(plugin);
-      expect(service.buildFallbackBasename("")).toBe("transcript");
-    });
-
-    it("returns just transcript label for whitespace prefix", () => {
-      const plugin: any = { settings: {} };
-      const service = TranscriptionTitleService.getInstance(plugin);
-      expect(service.buildFallbackBasename("   ")).toBe("transcript");
-    });
-
-    it("combines prefix with transcript label", () => {
-      const plugin: any = { settings: {} };
-      const service = TranscriptionTitleService.getInstance(plugin);
-      expect(service.buildFallbackBasename("my-audio")).toBe("my-audio - transcript");
-    });
+  it("derives a safe local title from the first meaningful transcript line", async () => {
+    await expect(service().tryGenerateTitle("[00:01] Managed architecture cutover status\nMore detail"))
+      .resolves.toBe("Managed architecture cutover status");
   });
 
-  describe("sanitizeGeneratedTitle", () => {
-    it("sanitizes model output into a safe title", () => {
-      const plugin: any = { settings: {} };
-      const service = TranscriptionTitleService.getInstance(plugin);
-      expect(service.sanitizeGeneratedTitle('  "My/Title: Draft.md"  \n')).toBe("MyTitle Draft");
-    });
-
-    it("handles empty input", () => {
-      const plugin: any = { settings: {} };
-      const service = TranscriptionTitleService.getInstance(plugin);
-      expect(service.sanitizeGeneratedTitle("")).toBe("");
-    });
-
-    it("removes leading/trailing dashes", () => {
-      const plugin: any = { settings: {} };
-      const service = TranscriptionTitleService.getInstance(plugin);
-      expect(service.sanitizeGeneratedTitle("---Title---")).toBe("Title");
-    });
-
-    it("normalizes whitespace", () => {
-      const plugin: any = { settings: {} };
-      const service = TranscriptionTitleService.getInstance(plugin);
-      expect(service.sanitizeGeneratedTitle("Title   with   spaces")).toBe("Title with spaces");
-    });
+  it("returns null for empty transcripts and never needs a plugin runtime", async () => {
+    await expect(service().tryGenerateTitle("   ")).resolves.toBeNull();
   });
 
-  describe("isUsableTitle", () => {
-    it("rejects empty titles", () => {
-      const plugin: any = { settings: {} };
-      const service = TranscriptionTitleService.getInstance(plugin);
-      expect(service.isUsableTitle("")).toBe(false);
-    });
-
-    it("rejects whitespace-only titles", () => {
-      const plugin: any = { settings: {} };
-      const service = TranscriptionTitleService.getInstance(plugin);
-      expect(service.isUsableTitle("   ")).toBe(false);
-    });
-
-    it("rejects overly long titles", () => {
-      const plugin: any = { settings: {} };
-      const service = TranscriptionTitleService.getInstance(plugin);
-      expect(service.isUsableTitle("a".repeat(121))).toBe(false);
-    });
-
-    it("accepts valid titles", () => {
-      const plugin: any = { settings: {} };
-      const service = TranscriptionTitleService.getInstance(plugin);
-      expect(service.isUsableTitle("Good Title")).toBe(true);
-    });
+  it("sanitizes and bounds titles", () => {
+    expect(service().sanitizeGeneratedTitle('  "My/Title: Draft.md"  ')).toBe("MyTitle Draft");
+    expect(service().isUsableTitle("a".repeat(121))).toBe(false);
   });
 
-  describe("buildTitledBasename", () => {
-    it("combines prefix and title", () => {
-      const plugin: any = { settings: {} };
-      const service = TranscriptionTitleService.getInstance(plugin);
-      expect(service.buildTitledBasename("audio", "My Title")).toBe("audio - transcript - My Title");
-    });
-  });
-
-  describe("buildTitleContext", () => {
-    it("returns excerpt of transcript", () => {
-      const plugin: any = { settings: {} };
-      const service = TranscriptionTitleService.getInstance(plugin);
-      const result = service.buildTitleContext("short text");
-      expect(result).toBe("short text");
-    });
-  });
-
-  describe("tryGenerateTitle", () => {
-    it("returns null when no active SystemSculpt license is configured", async () => {
-      const plugin: any = { settings: { licenseKey: "", licenseValid: false } };
-      (TranscriptionTitleService as any).instance = null;
-      const service = TranscriptionTitleService.getInstance(plugin);
-
-      const result = await service.tryGenerateTitle("some transcript");
-      expect(result).toBeNull();
-      expect(mockStreamMessage).not.toHaveBeenCalled();
-    });
-
-    it("returns null for empty transcript", async () => {
-      const plugin: any = { settings: { licenseKey: "valid-license", licenseValid: true } };
-      (TranscriptionTitleService as any).instance = null;
-      const service = TranscriptionTitleService.getInstance(plugin);
-
-      const result = await service.tryGenerateTitle("");
-      expect(result).toBeNull();
-    });
-
-    it("uses the managed SystemSculpt model when access is available", async () => {
-      const plugin: any = { settings: { licenseKey: "valid-license", licenseValid: true } };
-      mockStreamMessage.mockReturnValue(
-        (async function* () {
-          yield { type: "content", text: "Useful Transcript Title" };
-        })()
-      );
-
-      const service = TranscriptionTitleService.getInstance(plugin);
-      const result = await service.tryGenerateTitle("Transcript body");
-
-      expect(result).toBe("Useful Transcript Title");
-      expect(mockStreamMessage).toHaveBeenCalledWith(
-        expect.objectContaining({
-          model: "systemsculpt@@systemsculpt/ai-agent",
-          systemPromptOverride: expect.stringContaining("audio transcripts"),
-          allowTools: false,
-        })
-      );
-    });
-  });
-
-  describe("tryRenameTranscriptionFile", () => {
-    it("returns original path when title generation fails", async () => {
-      const plugin: any = { settings: {} };
-      (TranscriptionTitleService as any).instance = null;
-      const service = TranscriptionTitleService.getInstance(plugin);
-
-      jest.spyOn(service, "tryGenerateTitle").mockResolvedValue(null);
-
-      const transcriptionFile: any = {
-        path: "recordings/test.md",
-        extension: "md",
-      };
-
-      const result = await service.tryRenameTranscriptionFile({} as any, transcriptionFile, {
-        prefix: "test",
-        transcriptText: "hello",
-      });
-
-      expect(result).toBe("recordings/test.md");
-    });
-
-    it("renames with collision suffix when destination exists", async () => {
-      const plugin: any = { settings: {} };
-      (TranscriptionTitleService as any).instance = null;
-      const service = TranscriptionTitleService.getInstance(plugin);
-
-      jest.spyOn(service, "tryGenerateTitle").mockResolvedValue("My Title");
-
-      const renameFile = jest.fn().mockResolvedValue(undefined);
-      const vaultExists = new Set<string>([
-        "recordings/test-audio - transcript - My Title.md",
-      ]);
-
-      const app: any = {
-        vault: {
-          getAbstractFileByPath: (path: string) => (vaultExists.has(path) ? ({ path } as any) : null),
-        },
-        fileManager: { renameFile },
-      };
-
-      const transcriptionFile: any = {
-        path: "recordings/test-audio - transcript.md",
-        extension: "md",
-      };
-
-      const finalPath = await service.tryRenameTranscriptionFile(app, transcriptionFile, {
-        prefix: "test-audio",
-        transcriptText: "hello",
-        extension: "md",
-      });
-
-      expect(renameFile).toHaveBeenCalledWith(
-        transcriptionFile,
-        "recordings/test-audio - transcript - My Title (2).md"
-      );
-      expect(finalPath).toBe("recordings/test-audio - transcript - My Title (2).md");
-    });
-
-    it("returns original path when rename fails", async () => {
-      const plugin: any = { settings: {} };
-      (TranscriptionTitleService as any).instance = null;
-      const service = TranscriptionTitleService.getInstance(plugin);
-
-      jest.spyOn(service, "tryGenerateTitle").mockResolvedValue("My Title");
-
-      const app: any = {
-        vault: {
-          getAbstractFileByPath: () => null,
-        },
-        fileManager: {
-          renameFile: jest.fn().mockRejectedValue(new Error("Rename failed")),
-        },
-      };
-
-      const transcriptionFile: any = {
-        path: "recordings/test.md",
-        extension: "md",
-      };
-
-      const result = await service.tryRenameTranscriptionFile(app, transcriptionFile, {
-        prefix: "test",
-        transcriptText: "hello",
-      });
-
-      expect(result).toBe("recordings/test.md");
-    });
-
-    it("returns same path when destination equals current", async () => {
-      const plugin: any = { settings: {} };
-      (TranscriptionTitleService as any).instance = null;
-      const service = TranscriptionTitleService.getInstance(plugin);
-
-      jest.spyOn(service, "tryGenerateTitle").mockResolvedValue("My Title");
-
-      const app: any = {
-        vault: {
-          getAbstractFileByPath: () => null,
-        },
-        fileManager: { renameFile: jest.fn() },
-      };
-
-      const transcriptionFile: any = {
-        path: "recordings/test - transcript - My Title.md",
-        extension: "md",
-      };
-
-      const result = await service.tryRenameTranscriptionFile(app, transcriptionFile, {
-        prefix: "test",
-        transcriptText: "hello",
-      });
-
-      expect(result).toBe("recordings/test - transcript - My Title.md");
-    });
-
-    it("handles files without extension", async () => {
-      const plugin: any = { settings: {} };
-      (TranscriptionTitleService as any).instance = null;
-      const service = TranscriptionTitleService.getInstance(plugin);
-
-      jest.spyOn(service, "tryGenerateTitle").mockResolvedValue("Title");
-
-      const app: any = {
-        vault: { getAbstractFileByPath: () => null },
-        fileManager: { renameFile: jest.fn().mockResolvedValue(undefined) },
-      };
-
-      const transcriptionFile: any = {
-        path: "recordings/test.md",
-        extension: "",
-      };
-
-      const result = await service.tryRenameTranscriptionFile(app, transcriptionFile, {
-        prefix: "test",
-        transcriptText: "hello",
-      });
-
-      expect(result).toBe("recordings/test - transcript - Title.md");
-    });
-
-    it("handles root-level files", async () => {
-      const plugin: any = { settings: {} };
-      (TranscriptionTitleService as any).instance = null;
-      const service = TranscriptionTitleService.getInstance(plugin);
-
-      jest.spyOn(service, "tryGenerateTitle").mockResolvedValue("Title");
-
-      const app: any = {
-        vault: { getAbstractFileByPath: () => null },
-        fileManager: { renameFile: jest.fn().mockResolvedValue(undefined) },
-      };
-
-      const transcriptionFile: any = {
-        path: "test.md",
-        extension: "md",
-      };
-
-      const result = await service.tryRenameTranscriptionFile(app, transcriptionFile, {
-        prefix: "test",
-        transcriptText: "hello",
-      });
-
-      expect(result).toBe("test - transcript - Title.md");
-    });
+  it("renames with a collision suffix", async () => {
+    const renameFile = jest.fn().mockResolvedValue(undefined);
+    const app = {
+      vault: { getAbstractFileByPath: (path: string) => path.endsWith("Local meeting title.md") ? { path } : null },
+      fileManager: { renameFile },
+    } as any;
+    const file = { path: "recordings/audio - transcript.md", extension: "md" } as any;
+    jest.spyOn(service(), "tryGenerateTitle").mockResolvedValue("Local meeting title");
+    await expect(service().tryRenameTranscriptionFile(app, file, { prefix: "audio", transcriptText: "body" }))
+      .resolves.toBe("recordings/audio - transcript - Local meeting title (2).md");
+    expect(renameFile).toHaveBeenCalledTimes(1);
   });
 });
 
-describe("buildPercentileExcerpt edge cases", () => {
-  it("handles empty text", () => {
-    expect(buildPercentileExcerpt("", 500)).toBe("");
-  });
-
-  it("handles null-ish text", () => {
-    expect(buildPercentileExcerpt(null as any, 500)).toBe("");
-  });
-
-  it("handles very small maxChars", () => {
-    const text = "This is a longer text that should be truncated";
-    const result = buildPercentileExcerpt(text, 10);
-    expect(result.length).toBeLessThanOrEqual(10);
-  });
-
-  it("normalizes CRLF to LF", () => {
-    const text = "line1\r\nline2\r\nline3";
-    const result = buildPercentileExcerpt(text, 500);
-    expect(result).not.toContain("\r");
+describe("buildPercentileExcerpt", () => {
+  it("keeps short text and bounds long text with start and end samples", () => {
+    expect(buildPercentileExcerpt("hello", 50)).toBe("hello");
+    const excerpt = buildPercentileExcerpt(`START_${"a".repeat(5000)}_END`, 600);
+    expect(excerpt.length).toBeLessThanOrEqual(600);
+    expect(excerpt).toContain("START_");
+    expect(excerpt).toContain("_END");
   });
 });

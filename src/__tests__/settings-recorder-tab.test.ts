@@ -33,7 +33,6 @@ describe("Recorder settings tab", () => {
         preferredMicrophoneId: "default",
       },
       getSettingsManager: jest.fn(() => ({ updateSettings: jest.fn() })),
-      modelService: { getModels: jest.fn().mockResolvedValue([]) },
     } as any;
     const container = document.createElement("div");
 
@@ -46,5 +45,6 @@ describe("Recorder settings tab", () => {
     expect(names).not.toContain("Custom endpoint URL");
     expect(names).not.toContain("API key");
     expect(names).not.toContain("Model name");
+    expect(names).not.toContain("Post-processing model");
   });
 });
