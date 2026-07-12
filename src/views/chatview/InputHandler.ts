@@ -49,6 +49,11 @@ import { extractPrimaryPathArg, requiresUserApproval } from "../../utils/toolPol
 import { ChatModelSelectionController } from "./ChatModelSelectionController";
 import { ChatTurn } from "./turn/ChatTurn";
 import type { AcceptedChatOperation, ManagedChatAdmissionPort } from "../../services/managed/ManagedTypes";
+import type { AcceptedChatRequestSnapshot } from "../../services/chat/AcceptedChatRequestSnapshot";
+import { ChatRequestPreparationService } from "../../services/chat/ChatRequestPreparationService";
+import { ContextFileService } from "../../services/ContextFileService";
+import { MCPService } from "./MCPService";
+import { normalizeOpenAITools, type OpenAITool } from "../../utils/tooling";
 import type { AcceptedUserCommitInput, AcceptedUserCommitResult } from "./ChatView";
 
 export interface InputHandlerOptions {
@@ -175,6 +180,10 @@ export class InputHandler extends Component {
   private turnLifecycle: ChatTurnLifecycleController | null = null;
   private pendingSubmissionIntent: PendingSubmissionIntent = Object.freeze({ kind: "append" });
   private acceptedOperation: AcceptedChatOperation | null = null;
+  private acceptedRequestSnapshot: AcceptedChatRequestSnapshot | null = null;
+  private compatibilityResult: Readonly<{ kind: "contract_unsupported"; feature: "web_search"; action: "disable_web_search" }> | null = null;
+  private acceptedRequestPreparation: ChatRequestPreparationService;
+  private acceptedRequestMcp: MCPService;
 
   constructor(options: InputHandlerOptions) {
     super();
@@ -196,6 +205,8 @@ export class InputHandler extends Component {
     this.onAddContextFile = options.onAddContextFile;
     this.onOpenChatSettings = options.onOpenChatSettings;
     this.plugin = options.plugin;
+    this.acceptedRequestPreparation = new ChatRequestPreparationService(new ContextFileService(this.app));
+    this.acceptedRequestMcp = new MCPService(this.plugin, this.app);
     // Provide light wrappers for external callers to read/write input
     this.getValue = () => this.input?.value ?? "";
     this.setValue = (text: string) => { if (this.input) { this.input.value = text; this.adjustInputHeight(); } };
@@ -809,8 +820,6 @@ export class InputHandler extends Component {
     rethrowErrors?: boolean;
   }): Promise<void> {
     const candidateMessageId = this.generateMessageId();
-    const admission = await this.managedChatAdmission.acquireChatTurnLease();
-    if (admission.outcome !== "allowed") return;
     const originalInputValue = this.input.value;
     const originalPendingLargeText = this.pendingLargeTextContent;
     let consumedLargeText = false;
@@ -824,15 +833,8 @@ export class InputHandler extends Component {
       consumedLargeText = true;
     }
 
-    if (!this.isChatReady()) {
-      new Notice("Chat is still loading—please wait a moment.");
-      return;
-    }
-
-    if (this.chatView?.isLegacyReadOnlyChat?.()) {
-      new Notice("This archived chat is read-only. Open a new chat to continue the conversation.", 6000);
-      return;
-    }
+    if (!this.isChatReady()) return;
+    if (this.chatView?.isLegacyReadOnlyChat?.()) return;
 
     const providerReady = await this.ensureProviderReadyForChat();
     if (
@@ -843,6 +845,14 @@ export class InputHandler extends Component {
     ) {
       return;
     }
+
+    if (this.webSearchEnabled) {
+      this.compatibilityResult = Object.freeze({ kind: "contract_unsupported", feature: "web_search", action: "disable_web_search" });
+      return;
+    }
+    this.compatibilityResult = null;
+    const admission = await this.managedChatAdmission.acquireChatTurnLease();
+    if (admission.outcome !== "allowed") return;
 
     const includeContextFiles = overrides?.includeContextFiles ?? true;
 
@@ -866,6 +876,19 @@ export class InputHandler extends Component {
         initialDurableSnapshot: accepted.snapshot, turnBoundaryId: candidateMessageId,
       });
       this.acceptedOperation = acceptedOperation;
+      const acceptedContextFiles = includeContextFiles ? this.chatView.contextManager.getContextFiles() : new Set<string>();
+      let acceptedPrompt: string | undefined;
+      if (this.selectedPromptPath) acceptedPrompt = await this.promptService.readPromptContent(this.selectedPromptPath) || undefined;
+      let acceptedTools: OpenAITool[] = [];
+      if (this.chatView?.isAgentModeActive?.() ?? true) {
+        try { acceptedTools = normalizeOpenAITools(await this.acceptedRequestMcp.getAvailableTools()); } catch { acceptedTools = []; }
+      }
+      this.acceptedRequestSnapshot = await this.acceptedRequestPreparation.prepare(acceptedOperation, {
+        contextFiles: acceptedContextFiles,
+        selectedPrompt: acceptedPrompt,
+        includeImages: true,
+        tools: acceptedTools,
+      });
       this.submittedInputSnapshot = { messageId: durableTurnId, rawText: submittedRawText };
       this.input.value = "";
       this.adjustInputHeight();

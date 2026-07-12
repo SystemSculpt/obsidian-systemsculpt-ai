@@ -1,15 +1,17 @@
-import type { ChatMessage, MultiPartContent } from "../../../types";
 import type { ManagedCapabilityClient } from "../../../services/managed/ManagedCapabilityClient";
 import type { AcceptedChatOperation, JsonContractValue } from "../../../services/managed/ManagedTypes";
-import type { ChatTranscriptSnapshot } from "../transcript/ChatTranscriptTypes";
+import type { AcceptedChatRequestSnapshot, ManagedPreparedMessage } from "../../../services/chat/AcceptedChatRequestSnapshot";
+import { composeAcceptedChatContinuation } from "../../../services/chat/AcceptedChatRequestSnapshot";
 
 export type ManagedChatRuntimeEvent =
   | Readonly<{ kind: "content_delta"; text: string }>
   | Readonly<{ kind: "reasoning_delta"; text: string }>
   | Readonly<{ kind: "tool_call_delta"; index: number; id?: string; name?: string; arguments?: string }>
+  | Readonly<{ kind: "tool_call_completed"; index: number; id?: string; name?: string }>
   | Readonly<{ kind: "finish_reason"; reason: string }>
   | Readonly<{ kind: "request_id"; requestId: string }>
-  | Readonly<{ kind: "usage"; promptTokens?: number; completionTokens?: number; totalTokens?: number; costTotal?: number }>;
+  | Readonly<{ kind: "usage"; promptTokens?: number; completionTokens?: number; totalTokens?: number; costTotal?: number }>
+  | Readonly<{ kind: "done" }>;
 
 export type ManagedChatDiagnostic = Readonly<{ status?: number; code?: string; requestId?: string }>;
 
@@ -17,22 +19,15 @@ type FailureKind = "transport_failure" | "aborted" | "capability_request" | "lic
   | "operation_in_progress" | "operation_already_completed" | "operation_terminal" | "settlement_pending"
   | "plugin_version" | "rate_limit" | "unavailable";
 export type ManagedChatDispatchResult =
-  | Readonly<{ kind: "success"; events: readonly ManagedChatRuntimeEvent[]; diagnostic: ManagedChatDiagnostic }>
+  | Readonly<{ kind: "success"; events: AsyncIterable<ManagedChatRuntimeEvent>; diagnostic: ManagedChatDiagnostic }>
   | Readonly<{ kind: "empty"; diagnostic: ManagedChatDiagnostic }>
   | Readonly<{ kind: FailureKind; diagnostic: ManagedChatDiagnostic }>;
 
-export type ManagedChatTool = Readonly<{
-  type: "function";
-  function: Readonly<{ name: string; description?: string; parameters?: Readonly<{ [key: string]: JsonContractValue }> }>;
-}>;
-export type ManagedChatToolChoice = "auto" | "none" | "required";
 export type ManagedChatDispatchInput = Readonly<{
-  operation: AcceptedChatOperation;
-  snapshot: ChatTranscriptSnapshot;
+  acceptedRequestSnapshot: AcceptedChatRequestSnapshot;
   phase: "initial" | "continuation";
   continuationIndex: number;
-  tools?: readonly ManagedChatTool[];
-  toolChoice?: ManagedChatToolChoice;
+  postCheckpointDurableSnapshot?: import("../transcript/ChatTranscriptTypes").ChatTranscriptSnapshot;
   signal?: AbortSignal;
 }>;
 
@@ -54,85 +49,6 @@ function statusValue(status: number): number | undefined {
 function ownKeysExactly(value: object, allowed: readonly string[]): boolean {
   const keys = Object.keys(value);
   return keys.length === allowed.length && keys.every((key) => allowed.includes(key));
-}
-
-function isDataUrl(value: string): boolean {
-  return /^data:[^,]+,[\s\S]*$/.test(value);
-}
-
-function wireContent(content: string | readonly MultiPartContent[]): JsonContractValue | null {
-  if (typeof content === "string") return content;
-  const parts: JsonContractValue[] = [];
-  for (const part of content) {
-    if (part.type === "text") {
-      if (!ownKeysExactly(part, ["type", "text"]) || typeof part.text !== "string") return null;
-      parts.push({ type: "text", text: part.text });
-    } else {
-      if (!ownKeysExactly(part, ["type", "image_url"]) || !ownKeysExactly(part.image_url, ["url"]) || !isDataUrl(part.image_url.url)) return null;
-      parts.push({ type: "image_url", image_url: { url: part.image_url.url } });
-    }
-  }
-  return parts.length > 0 ? parts : null;
-}
-
-function isJsonValue(value: JsonContractValue): boolean {
-  if (value === null || typeof value === "string" || typeof value === "boolean") return true;
-  if (typeof value === "number") return Number.isFinite(value);
-  if (Array.isArray(value)) return value.every(isJsonValue);
-  return (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null) && Object.values(value).every(isJsonValue);
-}
-
-function isJsonSchemaObject(value: Readonly<{ [key: string]: JsonContractValue }>): boolean {
-  return (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null) && Object.values(value).every(isJsonValue);
-}
-
-function validateTools(tools: readonly ManagedChatTool[]): JsonContractValue[] | null {
-  const serialized: JsonContractValue[] = [];
-  for (const tool of tools) {
-    if (!ownKeysExactly(tool, ["type", "function"]) || tool.type !== "function") return null;
-    const fn = tool.function;
-    const allowed = ["name", ...(typeof fn.description === "undefined" ? [] : ["description"]), ...(typeof fn.parameters === "undefined" ? [] : ["parameters"])];
-    if (!ownKeysExactly(fn, allowed) || typeof fn.name !== "string" || fn.name.length === 0) return null;
-    if (typeof fn.description !== "undefined" && typeof fn.description !== "string") return null;
-    if (typeof fn.parameters !== "undefined" && !isJsonSchemaObject(fn.parameters)) return null;
-    serialized.push({ type: "function", function: {
-      name: fn.name,
-      ...(typeof fn.description === "string" ? { description: fn.description } : {}),
-      ...(fn.parameters ? { parameters: fn.parameters } : {}),
-    } });
-  }
-  return serialized;
-}
-
-function wireMessage(message: Readonly<ChatMessage>): JsonObject | null {
-  const result: Record<string, JsonContractValue> = { role: message.role };
-  if (message.role === "system") {
-    if (typeof message.content !== "string") return null;
-    result.content = message.content;
-  } else if (message.role === "user") {
-    if (message.content === null) return null;
-    const content = wireContent(message.content);
-    if (content === null) return null;
-    result.content = content;
-  } else if (message.role === "tool") {
-    if (typeof message.content !== "string" || !message.tool_call_id) return null;
-    result.content = message.content;
-    result.tool_call_id = message.tool_call_id;
-    if (message.name) result.name = message.name;
-  } else {
-    if (typeof message.content === "string") result.content = message.content;
-    else if (message.content !== null) return null;
-    if (message.reasoning) result.reasoning_content = message.reasoning;
-    if (message.tool_calls?.length) {
-      result.tool_calls = message.tool_calls.map((call) => ({
-        id: call.id,
-        type: "function",
-        function: { name: call.request.function.name, arguments: call.request.function.arguments },
-      }));
-    }
-    if (typeof result.content === "undefined" && typeof result.reasoning_content === "undefined" && typeof result.tool_calls === "undefined") return null;
-  }
-  return result;
 }
 
 function isJsonArray(value: JsonContractValue): value is readonly JsonContractValue[] {
@@ -262,13 +178,13 @@ export class ManagedChatRuntimeAdapter {
 
   public dispatch(input: ManagedChatDispatchInput): Promise<ManagedChatDispatchResult> {
     const validOrdinal = Number.isInteger(input.continuationIndex) && input.continuationIndex >= 0 &&
-      (input.phase === "continuation" || (input.continuationIndex === 0 && input.snapshot === input.operation.initialDurableSnapshot));
+      (input.phase === "continuation" || (input.continuationIndex === 0 && input.acceptedRequestSnapshot.durableSnapshot === input.acceptedRequestSnapshot.operation.initialDurableSnapshot));
     if (!validOrdinal) return Promise.resolve({ kind: "transport_failure", diagnostic: {} });
-    if (this.terminal.has(input.operation)) return Promise.resolve({ kind: "operation_terminal", diagnostic: {} });
-    let operations = this.registry.get(input.operation);
+    if (this.terminal.has(input.acceptedRequestSnapshot.operation)) return Promise.resolve({ kind: "operation_terminal", diagnostic: {} });
+    let operations = this.registry.get(input.acceptedRequestSnapshot.operation);
     if (!operations) {
       operations = new Map();
-      this.registry.set(input.operation, operations);
+      this.registry.set(input.acceptedRequestSnapshot.operation, operations);
     }
     const localKey = `${input.phase}:${input.phase === "initial" ? 0 : input.continuationIndex}`;
     const existing = operations.get(localKey);
@@ -291,35 +207,23 @@ export class ManagedChatRuntimeAdapter {
     const ticket = this.client.beginAcceptedChatDispatch();
     if (!ticket) return { kind: "transport_failure", diagnostic: {} };
     if (
-      !input.operation.durableTurnId || input.continuationIndex < 0 || !Number.isInteger(input.continuationIndex) ||
-      (input.phase === "initial" && (input.continuationIndex !== 0 || input.snapshot !== input.operation.initialDurableSnapshot))
+      !input.acceptedRequestSnapshot.operation.durableTurnId || input.continuationIndex < 0 || !Number.isInteger(input.continuationIndex) ||
+      (input.phase === "initial" && (input.continuationIndex !== 0 || input.acceptedRequestSnapshot.durableSnapshot !== input.acceptedRequestSnapshot.operation.initialDurableSnapshot))
     ) {
       return { kind: "transport_failure", diagnostic: {} };
     }
-    const messages: JsonContractValue[] = [];
-    for (const message of input.snapshot.messages) {
-      const serialized = wireMessage(message);
-      if (!serialized) return { kind: "transport_failure", diagnostic: {} };
-      messages.push(serialized);
-    }
-    if (messages.length === 0) return { kind: "transport_failure", diagnostic: {} };
-    const body: Record<string, JsonContractValue> = {
-      model: "ai-agent",
-      stream: true,
-      messages,
-    };
-    if (input.tools) {
-      const tools = validateTools(input.tools);
-      if (!tools) return { kind: "transport_failure", diagnostic: {} };
-      body.tools = tools;
-    }
-    if (typeof input.toolChoice !== "undefined") {
-      if (input.toolChoice !== "auto" && input.toolChoice !== "none" && input.toolChoice !== "required") return { kind: "transport_failure", diagnostic: {} };
-      body.tool_choice = input.toolChoice;
-    }
-    const key = await managedChatOperationKey(input.operation.durableTurnId, input.phase, input.continuationIndex);
+    const accepted = input.acceptedRequestSnapshot;
+    const messages: readonly ManagedPreparedMessage[] = input.phase === "initial"
+      ? accepted.messages
+      : input.postCheckpointDurableSnapshot
+        ? composeAcceptedChatContinuation(accepted, input.postCheckpointDurableSnapshot)
+        : [];
+    if (messages.length === 0 || accepted.model !== "ai-agent") return { kind: "transport_failure", diagnostic: {} };
+    const body: Record<string, JsonContractValue> = { model: accepted.model, stream: true, messages };
+    if (accepted.tools?.length) body.tools = accepted.tools;
+    const key = await managedChatOperationKey(input.acceptedRequestSnapshot.operation.durableTurnId, input.phase, input.continuationIndex);
     try {
-      const transport = await this.client.streamAcceptedChat(ticket, input.operation.lease, body, key, input.signal);
+      const transport = await this.client.streamAcceptedChat(ticket, input.acceptedRequestSnapshot.operation.lease, body, key, input.signal);
       const status = statusValue(transport.response.status);
       const requestId = bounded(transport.diagnostics.requestId, 128);
       const diagnostic: ManagedChatDiagnostic = {
@@ -327,7 +231,7 @@ export class ManagedChatRuntimeAdapter {
         ...(requestId ? { requestId } : {}),
       };
       if (!transport.response.ok) return this.statusResult(transport.response.status, transport.diagnostics.errorText, diagnostic);
-      return await this.parseStream(transport.response, diagnostic, input.signal);
+      return { kind: "success", events: this.parseStream(transport.response, diagnostic, input.signal), diagnostic };
     } catch {
       if (input.signal?.aborted) return { kind: "aborted", diagnostic: {} };
       return { kind: "transport_failure", diagnostic: {} };
@@ -362,11 +266,12 @@ export class ManagedChatRuntimeAdapter {
     return { kind: "transport_failure", diagnostic };
   }
 
-  private async parseStream(response: Response, diagnostic: ManagedChatDiagnostic, signal?: AbortSignal): Promise<ManagedChatDispatchResult> {
-    if (!response.body) return { kind: "transport_failure", diagnostic };
+  private async *parseStream(response: Response, diagnostic: ManagedChatDiagnostic, signal?: AbortSignal): AsyncGenerator<ManagedChatRuntimeEvent> {
+    if (!response.body) throw Object.freeze({ kind: "transport_failure", diagnostic });
     const reader = response.body.getReader();
     const decoder = new TextDecoder("utf-8", { fatal: true });
-    const events: ManagedChatRuntimeEvent[] = [];
+    const queued: ManagedChatRuntimeEvent[] = [];
+    const toolState = new Map<number, { id?: string; name?: string }>();
     let line = "";
     let pendingCr = false;
     let data: string[] = [];
@@ -385,7 +290,13 @@ export class ManagedChatRuntimeAdapter {
         const parsed: JsonContractValue = JSON.parse(payload) as JsonContractValue;
         const normalized = normalizeFrame(parsed);
         if (!normalized) return false;
-        events.push(...normalized);
+        for (const event of normalized) {
+          if (event.kind === "tool_call_delta") {
+            const previous = toolState.get(event.index) ?? {};
+            toolState.set(event.index, { id: event.id ?? previous.id, name: event.name ?? previous.name });
+          }
+          queued.push(event);
+        }
         return true;
       } catch { return false; }
     };
@@ -420,7 +331,7 @@ export class ManagedChatRuntimeAdapter {
     };
     try {
       while (true) {
-        if (signal?.aborted) { await reader.cancel(); return { kind: "aborted", diagnostic }; }
+        if (signal?.aborted) { await reader.cancel(); throw Object.freeze({ kind: "aborted", diagnostic }); }
         const chunk = signal
           ? await new Promise<ReadableStreamReadResult<Uint8Array>>((resolve, reject) => {
               const abort = () => reject(new DOMException("The operation was aborted", "AbortError"));
@@ -429,19 +340,22 @@ export class ManagedChatRuntimeAdapter {
             })
           : await reader.read();
         if (chunk.done) break;
-        if (!consume(decoder.decode(chunk.value, { stream: true }))) return { kind: "transport_failure", diagnostic };
+        if (!consume(decoder.decode(chunk.value, { stream: true }))) throw Object.freeze({ kind: "transport_failure", diagnostic });
+        while (queued.length > 0) yield queued.shift()!;
       }
-      if (!consume(decoder.decode())) return { kind: "transport_failure", diagnostic };
+      if (!consume(decoder.decode())) throw Object.freeze({ kind: "transport_failure", diagnostic });
+      while (queued.length > 0) yield queued.shift()!;
       if (pendingCr) line += "\r";
-      if (line.length > 0 || data.length > 0) return { kind: "transport_failure", diagnostic };
-      if (!doneSeen) return { kind: "transport_failure", diagnostic };
-      return events.length > 0 ? { kind: "success", events, diagnostic } : { kind: "empty", diagnostic };
+      if (line.length > 0 || data.length > 0) throw Object.freeze({ kind: "transport_failure", diagnostic });
+      if (!doneSeen) throw Object.freeze({ kind: "transport_failure", diagnostic });
+      for (const [index, state] of toolState) yield { kind: "tool_call_completed", index, ...state };
+      yield { kind: "done" };
     } catch {
       if (signal?.aborted) {
         await reader.cancel();
-        return { kind: "aborted", diagnostic };
+        throw Object.freeze({ kind: "aborted", diagnostic });
       }
-      return { kind: "transport_failure", diagnostic };
+      throw Object.freeze({ kind: "transport_failure", diagnostic });
     } finally {
       reader.releaseLock();
     }
