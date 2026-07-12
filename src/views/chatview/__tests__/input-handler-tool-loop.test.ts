@@ -352,6 +352,42 @@ describe("InputHandler hosted tool loop", () => {
     expect((handler as any).submissionReserved).toBe(false);
   });
 
+  it("does not read payload getters before compatibility/admission and reads them once after acceptance", async () => {
+    const { aiService, chatView, handler } = createHostedToolLoopHarness();
+    handler.setValue("accepted payload");
+    const input = (handler as unknown as { input: HTMLTextAreaElement }).input;
+    let stored = input.value;
+    const inputReads: string[] = [];
+    Object.defineProperty(input, "value", {
+      configurable: true,
+      get: () => { inputReads.push(stored); return stored; },
+      set: (value: string) => { stored = value; },
+    });
+    const contextGetter = chatView.contextManager.getContextFiles as jest.Mock;
+    contextGetter.mockClear();
+    (handler as unknown as { webSearchEnabled: boolean }).webSearchEnabled = true;
+    await handler.submitWithOverrides({ includeContextFiles: true });
+    expect(inputReads).toHaveLength(0);
+    expect(contextGetter).not.toHaveBeenCalled();
+    expect(aiService.prepareAcceptedChatRequest).not.toHaveBeenCalled();
+
+    (handler as unknown as { webSearchEnabled: boolean }).webSearchEnabled = false;
+    const admission = jest.spyOn(managedChatAdmission, "acquireChatTurnLease").mockResolvedValueOnce({ outcome: "unavailable" } as never);
+    await handler.submitWithOverrides({ includeContextFiles: true });
+    expect(inputReads).toHaveLength(0);
+    expect(contextGetter).not.toHaveBeenCalled();
+
+    admission.mockRestore();
+    jest.spyOn(handler as never, "streamAssistantTurn" as never).mockResolvedValue({
+      messageId: "assistant", message: { role: "assistant", content: "done", message_id: "assistant" },
+      messageEl: document.createElement("div"), completed: true, completionState: "completed",
+    } as never);
+    await handler.submitWithOverrides({ includeContextFiles: true });
+    expect(inputReads.filter((value) => value === "accepted payload")).toHaveLength(1);
+    expect(contextGetter).toHaveBeenCalledTimes(1);
+    expect(aiService.prepareAcceptedChatRequest).toHaveBeenCalledTimes(1);
+  });
+
   it("does not create a lifecycle or stream when a durable commit is no longer current", async () => {
     const { handler, messages } = createHostedToolLoopHarness();
     handler.setValue("old chat message");

@@ -32,6 +32,39 @@ describe("managed accepted request preparation", () => {
     expect(result.tools).toHaveLength(1);
   });
 
+  it.each([0, 1, 3])("preserves established context output exactly with %i normalized tools", async (toolCount) => {
+    const privatePath = "/vault/PRIVATE-7f91/context.md";
+    const privateMetadata = "PRIVATE_FRONTMATTER_4c82";
+    const contextFiles = new Set(["one.md", "two.md", "wiki:[[linked]]", "doc:report.pdf"]);
+    const established = [
+      { role: "system" as const, content: "selected prompt\n\n# one\nbody\n\n[[linked]]\n\nDOCUMENT_TEXT", message_id: "system" },
+      ...operation().initialDurableSnapshot.messages,
+      { role: "assistant" as const, content: null, message_id: "assistant", tool_calls: [{ id: "call", messageId: "assistant", state: "completed" as const, timestamp: 1, request: { id: "call", type: "function" as const, function: { name: "search", arguments: "{}" } } }] },
+      { role: "tool" as const, content: "tool result", message_id: "tool", tool_call_id: "call" },
+      { role: "user" as const, content: "oversized-".repeat(20_000), message_id: "large" },
+    ];
+    const tools = Array.from({ length: toolCount }, (_, index) => ({ type: "function" as const, function: { name: `tool_${index}`, description: "", parameters: {} } }));
+    const result = await prepareManagedAcceptedChatRequest(operation(), {
+      contextFiles, systemPromptOverride: "selected prompt", allowTools: true,
+    }, {
+      contextFileService: { prepareMessagesWithContext: async (_messages: never[], files: Set<string>, images: boolean, prompt: string) => {
+        expect([...files]).toEqual([...contextFiles]);
+        expect(images).toBe(true);
+        expect(prompt).toBe("selected prompt");
+        return established;
+      } } as never,
+      getAvailableTools: async () => tools,
+    });
+    expect(result.messages).toEqual(established);
+    expect(result.tools).toEqual(tools);
+    const serialized = JSON.stringify(result);
+    expect(serialized).not.toContain(privatePath);
+    expect(serialized).not.toContain(privateMetadata);
+    expect(serialized).toContain("DOCUMENT_TEXT");
+    expect(serialized).toContain("tool result");
+    expect(serialized).toContain("oversized-");
+  });
+
   it("does not resolve tools when tools are disabled", async () => {
     let toolReads = 0;
     await prepareManagedAcceptedChatRequest(operation(), { allowTools: false }, {

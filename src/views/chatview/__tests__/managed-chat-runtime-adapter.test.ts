@@ -97,6 +97,43 @@ describe("ManagedChatRuntimeAdapter live events", () => {
     expect(effects.filter((effect) => effect === "read")).toHaveLength(readsAfterReturn);
   });
 
+  it("releases the reader lock even when early-return cancellation rejects", async () => {
+    const state = setup();
+    const effects: string[] = [];
+    let reads = 0;
+    const reader = {
+      read: async () => {
+        reads += 1;
+        return { done: false, value: bytes('data: {"choices":[{"delta":{"content":"first"}}]}\n\n') };
+      },
+      cancel: async () => { effects.push("cancel"); throw new Error("cancel rejected"); },
+      releaseLock: () => { effects.push("release"); },
+    };
+    const fakeResponse = { ok: true, status: 200, headers: new Headers(), body: { getReader: () => reader } } as unknown as Response;
+    state.requestClient.responses.push(fakeResponse);
+    const result = await state.adapter.dispatch({ acceptedRequestSnapshot: state.acceptedRequestSnapshot, phase: "initial", continuationIndex: 0 });
+    if (result.kind !== "success") throw new Error(result.kind);
+    await expect((async () => {
+      for await (const event of result.events) {
+        expect(event).toEqual({ kind: "content_delta", text: "first" });
+        break;
+      }
+    })()).rejects.toThrow("cancel rejected");
+    expect(effects).toEqual(["cancel", "release"]);
+    expect(reads).toBe(1);
+  });
+
+  it("returns the typed server rejection without trimming oversized prepared history", async () => {
+    const state = setup();
+    const large = "oversized-".repeat(20_000);
+    const snapshot = { ...state.acceptedRequestSnapshot, operation: state.operation, messages: Object.freeze([{ role: "user", content: large }]) } as typeof state.acceptedRequestSnapshot;
+    state.requestClient.responses.push(new Response(JSON.stringify({ code: "request_too_large" }), { status: 400 }));
+    await expect(state.adapter.dispatch({ acceptedRequestSnapshot: snapshot, phase: "initial", continuationIndex: 0 })).resolves.toMatchObject({
+      kind: "capability_request", diagnostic: { status: 400, code: "request_too_large" },
+    });
+    expect(JSON.stringify(state.requestClient.inputs[0].body)).toContain(large);
+  });
+
   it("resolves typed statuses before exposing a stream", async () => {
     const state = setup();
     state.requestClient.responses.push(new Response(JSON.stringify({ code: "operation_in_progress" }), { status: 409 }));

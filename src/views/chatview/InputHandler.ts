@@ -807,19 +807,7 @@ export class InputHandler extends Component {
     rethrowErrors?: boolean;
   }): Promise<void> {
     const candidateMessageId = this.generateMessageId();
-    const originalInputValue = this.input.value;
-    const originalPendingLargeText = this.pendingLargeTextContent;
-    let consumedLargeText = false;
-    let userCommitted = false;
-    let messageText: string = originalInputValue.trim();
-    if (!messageText) return;
-
-    if (originalPendingLargeText && LargeTextHelpers.containsPlaceholder(messageText)) {
-      const placeholderRegex = /\[PASTED TEXT - \d+ LINES OF TEXT\]/g;
-      messageText = messageText.replace(placeholderRegex, originalPendingLargeText);
-      consumedLargeText = true;
-    }
-
+    if (this.input.textLength === 0) return;
     if (!this.isChatReady()) return;
     if (this.chatView?.isLegacyReadOnlyChat?.()) return;
 
@@ -841,8 +829,19 @@ export class InputHandler extends Component {
     const admission = await this.managedChatAdmission.acquireChatTurnLease();
     if (admission.outcome !== "allowed") return;
 
-    const includeContextFiles = overrides?.includeContextFiles ?? true;
+    const originalInputValue = this.input.value;
+    const originalPendingLargeText = this.pendingLargeTextContent;
+    let consumedLargeText = false;
+    let userCommitted = false;
+    let messageText: string = originalInputValue.trim();
+    if (!messageText) return;
+    if (originalPendingLargeText && LargeTextHelpers.containsPlaceholder(messageText)) {
+      const placeholderRegex = /\[PASTED TEXT - \d+ LINES OF TEXT\]/g;
+      messageText = messageText.replace(placeholderRegex, originalPendingLargeText);
+      consumedLargeText = true;
+    }
 
+    const includeContextFiles = overrides?.includeContextFiles ?? true;
     const submittedRawText = messageText;
     if (consumedLargeText) {
       this.pendingLargeTextContent = null;
@@ -1439,7 +1438,7 @@ export class InputHandler extends Component {
     }
 
     try {
-      // Set the value directly
+      // Set the value directly.
       this.input.value = value;
 
       // Trigger input event for any listeners

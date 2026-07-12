@@ -369,8 +369,11 @@ export class ManagedChatRuntimeAdapter {
       }
       throw Object.freeze({ kind: "transport_failure", diagnostic });
     } finally {
-      if (!iterationCompleted) await cancelReader();
-      reader.releaseLock();
+      try {
+        if (!iterationCompleted) await cancelReader();
+      } finally {
+        reader.releaseLock();
+      }
     }
   }
 }
