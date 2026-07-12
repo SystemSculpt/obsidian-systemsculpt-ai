@@ -49,5 +49,25 @@ describe("YouTubeCanvasModal", () => {
 
     expect(transcriptSpy).toHaveBeenCalled();
   });
-});
 
+  it("renders a local icon placeholder instead of a remote thumbnail", () => {
+    const app = new App();
+    const modal = new YouTubeCanvasModal(app, buildPluginStub());
+    modal.open();
+
+    (modal as any).metadata = {
+      title: "YouTube video",
+      author_name: "Video ID dQw4w9WgXcQ",
+      author_url: "",
+      thumbnailDataUrl: null,
+      videoId: "dQw4w9WgXcQ",
+    };
+    (modal as any).renderPreview();
+
+    const preview = (modal as any).previewSection as HTMLElement;
+    expect(preview.querySelector("img")).toBeNull();
+    expect(preview.querySelector(".ss-youtube-canvas-modal__thumbnail-placeholder")).not.toBeNull();
+    expect(preview.textContent).toContain("YouTube video");
+    expect(preview.textContent).toContain("Video ID dQw4w9WgXcQ");
+  });
+});

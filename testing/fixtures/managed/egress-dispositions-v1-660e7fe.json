@@ -853,6 +853,2001 @@
       },
       "previousTransitionHash": "c0a4bdec75e43e1101c39e2ecb85c0e3fee12ef6f62a6d5a625649348d306ebb",
       "transitionHash": "fa555cb9aab17626f55ae54dbe783f863ce87188543661689e17a61d1ec5318f"
+    },
+    {
+      "sequence": 9,
+      "historicalRecordId": "57fb99c67310c1334f9b016234f7d65244c03489d5a304a2d088a22b3f60e3ac",
+      "v2OccurrenceId": "f012d0954e62c32117631c2a09bf5823f1fd5a54a724b2ecca4e850c2b900594",
+      "ownerPlan": "026",
+      "from": "present",
+      "to": "removed",
+      "predecessorSourceTree": "c07e41eaf372e57dd169ec73a4f0d97052c23e68",
+      "stagedSourceTree": "641457ed18e923bd64c8337d511fe92f0d3da928",
+      "sourceEvidence": [
+        {
+          "path": "src/css/components/youtube-canvas.css",
+          "beforeGitBlobOrNull": "eef40b431e3487adf7065159915dd3278cc2732b",
+          "afterGitBlobOrNull": "c15fce082de5a64050cc123d4640ffa554ab09e4"
+        },
+        {
+          "path": "src/main.ts",
+          "beforeGitBlobOrNull": "465505c25acaa1b8f1cec0e2f9036030be4e17f1",
+          "afterGitBlobOrNull": "d2a4d00cfa7cb7d2c95df04144accce2d721ddc5"
+        },
+        {
+          "path": "src/modals/YouTubeCanvasModal.ts",
+          "beforeGitBlobOrNull": "90c859bb8a1e899cbc748f5ebad6f19294aec7c7",
+          "afterGitBlobOrNull": "30c4cb6963922f4e389aa44ed05c94aa69da7d6d"
+        },
+        {
+          "path": "src/modals/__tests__/YouTubeCanvasModal.test.ts",
+          "beforeGitBlobOrNull": "cda2983e2b09e13786f863fa411982a5472ec2e4",
+          "afterGitBlobOrNull": "186cb669a46fabb1105a70ca9088ed2f486f7e8d"
+        },
+        {
+          "path": "src/services/ChangeLogService.ts",
+          "beforeGitBlobOrNull": "7da3f034357e1fd6e5072e61fe11574be338cb07",
+          "afterGitBlobOrNull": "95965594cfbe697ae1c0ea480f5a346aaffbc3c6"
+        },
+        {
+          "path": "src/services/VersionCheckerService.ts",
+          "beforeGitBlobOrNull": "755b3b53e34a6f247233454303ec84f20d3f4b2a",
+          "afterGitBlobOrNull": "f25a8e6ec866100f7fb64feb2f8e8cef13b56dd9"
+        },
+        {
+          "path": "src/services/YouTubeMetadataService.ts",
+          "beforeGitBlobOrNull": "31e558dd1eb475abda98c5476d8ff62b9307adb1",
+          "afterGitBlobOrNull": "c59b10cbc794c20d79e97bc1983548a7729c712a"
+        },
+        {
+          "path": "src/services/YouTubeTranscriptService.ts",
+          "beforeGitBlobOrNull": "2bd74a7e128e7095d9ccbe892218cdff4669f929",
+          "afterGitBlobOrNull": "9aed1f984cbdcfaad3e5991e0781a4052a274575"
+        },
+        {
+          "path": "src/services/__tests__/ChangeLogService.test.ts",
+          "beforeGitBlobOrNull": "53ce68d88de25b438e5e9f7cb78557591171f6db",
+          "afterGitBlobOrNull": "1dc1218b0efdbbbf8fd4e9bad38626cba15102a1"
+        },
+        {
+          "path": "src/services/__tests__/VersionCheckerService.test.ts",
+          "beforeGitBlobOrNull": "576d654cbed5bea26c1bb96f38de111eba250b7a",
+          "afterGitBlobOrNull": "cbaa17a1f507f9fc6dd76c5fe34f0242511f02b8"
+        },
+        {
+          "path": "src/services/__tests__/WebResearchApiService.test.ts",
+          "beforeGitBlobOrNull": "83da021d09625c0d19a7109d6f7a24d2af7374d1",
+          "afterGitBlobOrNull": "337ffa88fd88d8a480bf1fc269a1f2d432cde6be"
+        },
+        {
+          "path": "src/services/__tests__/YouTubeMetadataService.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "5c0323df1223543b6cc9b78cd8c6a88bc45c168d"
+        },
+        {
+          "path": "src/services/__tests__/YouTubeTranscriptService.test.ts",
+          "beforeGitBlobOrNull": "6fe372762f3bec37dcd52a652210a82c3681b0fc",
+          "afterGitBlobOrNull": "5cd75fd12f6314b1c2b80dd10fb6f8a165f4b902"
+        },
+        {
+          "path": "src/services/managed/ManagedProductIntegrationClient.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "3893ce0c8906a8145bd60cdd390abb65d133cae2"
+        },
+        {
+          "path": "src/services/managed/__tests__/ManagedProductIntegrationClient.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "dedb9a65b4898cb58cf625db1f9e543465ba0085"
+        },
+        {
+          "path": "src/services/web/WebResearchApiService.ts",
+          "beforeGitBlobOrNull": "92829178d69150316a01a7b747536f66be127fe0",
+          "afterGitBlobOrNull": "501448c958ef2f99c651d78aee0baaf39306880b"
+        },
+        {
+          "path": "src/testing/automation/DesktopAutomationBridge.ts",
+          "beforeGitBlobOrNull": "7a82d22f75de99356d03c5f82314b40da74a565c",
+          "afterGitBlobOrNull": "7a82d22f75de99356d03c5f82314b40da74a565c"
+        }
+      ],
+      "predecessorLedger": {
+        "gitBlob": "1076a4fc3049270ec39e89923e3de29e41887a95",
+        "sha256": "62328b5f8f0e9794d027a77dd3eda2408bd2fc783b048cc63d5c94b0b84f7617",
+        "transitionCount": 9,
+        "finalTransitionHash": "fa555cb9aab17626f55ae54dbe783f863ce87188543661689e17a61d1ec5318f"
+      },
+      "previousTransitionHash": "fa555cb9aab17626f55ae54dbe783f863ce87188543661689e17a61d1ec5318f",
+      "transitionHash": "7dafe381ad4fcbc5585c4f28739ec72110cf2cb2a5aae9734704bc4c8cc64760"
+    },
+    {
+      "sequence": 10,
+      "historicalRecordId": "311da6389b1aa32cbe8fce290f6b956af0e211eb3b6d1a8cee41258ff3507e8b",
+      "v2OccurrenceId": "2606d3dc1e027ecf0037a743afee9369a966688313245215e1d91ca0910a17f2",
+      "ownerPlan": "026",
+      "from": "present",
+      "to": "removed",
+      "predecessorSourceTree": "c07e41eaf372e57dd169ec73a4f0d97052c23e68",
+      "stagedSourceTree": "641457ed18e923bd64c8337d511fe92f0d3da928",
+      "sourceEvidence": [
+        {
+          "path": "src/css/components/youtube-canvas.css",
+          "beforeGitBlobOrNull": "eef40b431e3487adf7065159915dd3278cc2732b",
+          "afterGitBlobOrNull": "c15fce082de5a64050cc123d4640ffa554ab09e4"
+        },
+        {
+          "path": "src/main.ts",
+          "beforeGitBlobOrNull": "465505c25acaa1b8f1cec0e2f9036030be4e17f1",
+          "afterGitBlobOrNull": "d2a4d00cfa7cb7d2c95df04144accce2d721ddc5"
+        },
+        {
+          "path": "src/modals/YouTubeCanvasModal.ts",
+          "beforeGitBlobOrNull": "90c859bb8a1e899cbc748f5ebad6f19294aec7c7",
+          "afterGitBlobOrNull": "30c4cb6963922f4e389aa44ed05c94aa69da7d6d"
+        },
+        {
+          "path": "src/modals/__tests__/YouTubeCanvasModal.test.ts",
+          "beforeGitBlobOrNull": "cda2983e2b09e13786f863fa411982a5472ec2e4",
+          "afterGitBlobOrNull": "186cb669a46fabb1105a70ca9088ed2f486f7e8d"
+        },
+        {
+          "path": "src/services/ChangeLogService.ts",
+          "beforeGitBlobOrNull": "7da3f034357e1fd6e5072e61fe11574be338cb07",
+          "afterGitBlobOrNull": "95965594cfbe697ae1c0ea480f5a346aaffbc3c6"
+        },
+        {
+          "path": "src/services/VersionCheckerService.ts",
+          "beforeGitBlobOrNull": "755b3b53e34a6f247233454303ec84f20d3f4b2a",
+          "afterGitBlobOrNull": "f25a8e6ec866100f7fb64feb2f8e8cef13b56dd9"
+        },
+        {
+          "path": "src/services/YouTubeMetadataService.ts",
+          "beforeGitBlobOrNull": "31e558dd1eb475abda98c5476d8ff62b9307adb1",
+          "afterGitBlobOrNull": "c59b10cbc794c20d79e97bc1983548a7729c712a"
+        },
+        {
+          "path": "src/services/YouTubeTranscriptService.ts",
+          "beforeGitBlobOrNull": "2bd74a7e128e7095d9ccbe892218cdff4669f929",
+          "afterGitBlobOrNull": "9aed1f984cbdcfaad3e5991e0781a4052a274575"
+        },
+        {
+          "path": "src/services/__tests__/ChangeLogService.test.ts",
+          "beforeGitBlobOrNull": "53ce68d88de25b438e5e9f7cb78557591171f6db",
+          "afterGitBlobOrNull": "1dc1218b0efdbbbf8fd4e9bad38626cba15102a1"
+        },
+        {
+          "path": "src/services/__tests__/VersionCheckerService.test.ts",
+          "beforeGitBlobOrNull": "576d654cbed5bea26c1bb96f38de111eba250b7a",
+          "afterGitBlobOrNull": "cbaa17a1f507f9fc6dd76c5fe34f0242511f02b8"
+        },
+        {
+          "path": "src/services/__tests__/WebResearchApiService.test.ts",
+          "beforeGitBlobOrNull": "83da021d09625c0d19a7109d6f7a24d2af7374d1",
+          "afterGitBlobOrNull": "337ffa88fd88d8a480bf1fc269a1f2d432cde6be"
+        },
+        {
+          "path": "src/services/__tests__/YouTubeMetadataService.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "5c0323df1223543b6cc9b78cd8c6a88bc45c168d"
+        },
+        {
+          "path": "src/services/__tests__/YouTubeTranscriptService.test.ts",
+          "beforeGitBlobOrNull": "6fe372762f3bec37dcd52a652210a82c3681b0fc",
+          "afterGitBlobOrNull": "5cd75fd12f6314b1c2b80dd10fb6f8a165f4b902"
+        },
+        {
+          "path": "src/services/managed/ManagedProductIntegrationClient.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "3893ce0c8906a8145bd60cdd390abb65d133cae2"
+        },
+        {
+          "path": "src/services/managed/__tests__/ManagedProductIntegrationClient.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "dedb9a65b4898cb58cf625db1f9e543465ba0085"
+        },
+        {
+          "path": "src/services/web/WebResearchApiService.ts",
+          "beforeGitBlobOrNull": "92829178d69150316a01a7b747536f66be127fe0",
+          "afterGitBlobOrNull": "501448c958ef2f99c651d78aee0baaf39306880b"
+        },
+        {
+          "path": "src/testing/automation/DesktopAutomationBridge.ts",
+          "beforeGitBlobOrNull": "7a82d22f75de99356d03c5f82314b40da74a565c",
+          "afterGitBlobOrNull": "7a82d22f75de99356d03c5f82314b40da74a565c"
+        }
+      ],
+      "predecessorLedger": {
+        "gitBlob": "1076a4fc3049270ec39e89923e3de29e41887a95",
+        "sha256": "62328b5f8f0e9794d027a77dd3eda2408bd2fc783b048cc63d5c94b0b84f7617",
+        "transitionCount": 9,
+        "finalTransitionHash": "fa555cb9aab17626f55ae54dbe783f863ce87188543661689e17a61d1ec5318f"
+      },
+      "previousTransitionHash": "7dafe381ad4fcbc5585c4f28739ec72110cf2cb2a5aae9734704bc4c8cc64760",
+      "transitionHash": "1569508726fb0c06c4c3f786443907bbd5dcd5f37ad5e604a1782889f7d6db58"
+    },
+    {
+      "sequence": 11,
+      "historicalRecordId": "dda453d9ade64b48094d472c49e10fd4ee9dad69e0325d734b2032f49f0ee7ea",
+      "v2OccurrenceId": "2d2bbe1a8bec5be38a2fd47fa136239fdbf00cf9ac35a61a577c4da81bcc402a",
+      "ownerPlan": "026",
+      "from": "present",
+      "to": "removed",
+      "predecessorSourceTree": "c07e41eaf372e57dd169ec73a4f0d97052c23e68",
+      "stagedSourceTree": "641457ed18e923bd64c8337d511fe92f0d3da928",
+      "sourceEvidence": [
+        {
+          "path": "src/css/components/youtube-canvas.css",
+          "beforeGitBlobOrNull": "eef40b431e3487adf7065159915dd3278cc2732b",
+          "afterGitBlobOrNull": "c15fce082de5a64050cc123d4640ffa554ab09e4"
+        },
+        {
+          "path": "src/main.ts",
+          "beforeGitBlobOrNull": "465505c25acaa1b8f1cec0e2f9036030be4e17f1",
+          "afterGitBlobOrNull": "d2a4d00cfa7cb7d2c95df04144accce2d721ddc5"
+        },
+        {
+          "path": "src/modals/YouTubeCanvasModal.ts",
+          "beforeGitBlobOrNull": "90c859bb8a1e899cbc748f5ebad6f19294aec7c7",
+          "afterGitBlobOrNull": "30c4cb6963922f4e389aa44ed05c94aa69da7d6d"
+        },
+        {
+          "path": "src/modals/__tests__/YouTubeCanvasModal.test.ts",
+          "beforeGitBlobOrNull": "cda2983e2b09e13786f863fa411982a5472ec2e4",
+          "afterGitBlobOrNull": "186cb669a46fabb1105a70ca9088ed2f486f7e8d"
+        },
+        {
+          "path": "src/services/ChangeLogService.ts",
+          "beforeGitBlobOrNull": "7da3f034357e1fd6e5072e61fe11574be338cb07",
+          "afterGitBlobOrNull": "95965594cfbe697ae1c0ea480f5a346aaffbc3c6"
+        },
+        {
+          "path": "src/services/VersionCheckerService.ts",
+          "beforeGitBlobOrNull": "755b3b53e34a6f247233454303ec84f20d3f4b2a",
+          "afterGitBlobOrNull": "f25a8e6ec866100f7fb64feb2f8e8cef13b56dd9"
+        },
+        {
+          "path": "src/services/YouTubeMetadataService.ts",
+          "beforeGitBlobOrNull": "31e558dd1eb475abda98c5476d8ff62b9307adb1",
+          "afterGitBlobOrNull": "c59b10cbc794c20d79e97bc1983548a7729c712a"
+        },
+        {
+          "path": "src/services/YouTubeTranscriptService.ts",
+          "beforeGitBlobOrNull": "2bd74a7e128e7095d9ccbe892218cdff4669f929",
+          "afterGitBlobOrNull": "9aed1f984cbdcfaad3e5991e0781a4052a274575"
+        },
+        {
+          "path": "src/services/__tests__/ChangeLogService.test.ts",
+          "beforeGitBlobOrNull": "53ce68d88de25b438e5e9f7cb78557591171f6db",
+          "afterGitBlobOrNull": "1dc1218b0efdbbbf8fd4e9bad38626cba15102a1"
+        },
+        {
+          "path": "src/services/__tests__/VersionCheckerService.test.ts",
+          "beforeGitBlobOrNull": "576d654cbed5bea26c1bb96f38de111eba250b7a",
+          "afterGitBlobOrNull": "cbaa17a1f507f9fc6dd76c5fe34f0242511f02b8"
+        },
+        {
+          "path": "src/services/__tests__/WebResearchApiService.test.ts",
+          "beforeGitBlobOrNull": "83da021d09625c0d19a7109d6f7a24d2af7374d1",
+          "afterGitBlobOrNull": "337ffa88fd88d8a480bf1fc269a1f2d432cde6be"
+        },
+        {
+          "path": "src/services/__tests__/YouTubeMetadataService.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "5c0323df1223543b6cc9b78cd8c6a88bc45c168d"
+        },
+        {
+          "path": "src/services/__tests__/YouTubeTranscriptService.test.ts",
+          "beforeGitBlobOrNull": "6fe372762f3bec37dcd52a652210a82c3681b0fc",
+          "afterGitBlobOrNull": "5cd75fd12f6314b1c2b80dd10fb6f8a165f4b902"
+        },
+        {
+          "path": "src/services/managed/ManagedProductIntegrationClient.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "3893ce0c8906a8145bd60cdd390abb65d133cae2"
+        },
+        {
+          "path": "src/services/managed/__tests__/ManagedProductIntegrationClient.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "dedb9a65b4898cb58cf625db1f9e543465ba0085"
+        },
+        {
+          "path": "src/services/web/WebResearchApiService.ts",
+          "beforeGitBlobOrNull": "92829178d69150316a01a7b747536f66be127fe0",
+          "afterGitBlobOrNull": "501448c958ef2f99c651d78aee0baaf39306880b"
+        },
+        {
+          "path": "src/testing/automation/DesktopAutomationBridge.ts",
+          "beforeGitBlobOrNull": "7a82d22f75de99356d03c5f82314b40da74a565c",
+          "afterGitBlobOrNull": "7a82d22f75de99356d03c5f82314b40da74a565c"
+        }
+      ],
+      "predecessorLedger": {
+        "gitBlob": "1076a4fc3049270ec39e89923e3de29e41887a95",
+        "sha256": "62328b5f8f0e9794d027a77dd3eda2408bd2fc783b048cc63d5c94b0b84f7617",
+        "transitionCount": 9,
+        "finalTransitionHash": "fa555cb9aab17626f55ae54dbe783f863ce87188543661689e17a61d1ec5318f"
+      },
+      "previousTransitionHash": "1569508726fb0c06c4c3f786443907bbd5dcd5f37ad5e604a1782889f7d6db58",
+      "transitionHash": "405f3ee0b3bad35f627aad2d9954ad61b2968d0e4fd6dbc4ff817d2d50a47cab"
+    },
+    {
+      "sequence": 12,
+      "historicalRecordId": "da80787fe53b4f97c534232be1cfe997790e90a3a748fa76e9dc09145bff9d52",
+      "v2OccurrenceId": "bbacceacbe7dcedbe4866cf511356e4c0b72a9a6ff80e1bee627dd6c5742c861",
+      "ownerPlan": "026",
+      "from": "present",
+      "to": "removed",
+      "predecessorSourceTree": "c07e41eaf372e57dd169ec73a4f0d97052c23e68",
+      "stagedSourceTree": "641457ed18e923bd64c8337d511fe92f0d3da928",
+      "sourceEvidence": [
+        {
+          "path": "src/css/components/youtube-canvas.css",
+          "beforeGitBlobOrNull": "eef40b431e3487adf7065159915dd3278cc2732b",
+          "afterGitBlobOrNull": "c15fce082de5a64050cc123d4640ffa554ab09e4"
+        },
+        {
+          "path": "src/main.ts",
+          "beforeGitBlobOrNull": "465505c25acaa1b8f1cec0e2f9036030be4e17f1",
+          "afterGitBlobOrNull": "d2a4d00cfa7cb7d2c95df04144accce2d721ddc5"
+        },
+        {
+          "path": "src/modals/YouTubeCanvasModal.ts",
+          "beforeGitBlobOrNull": "90c859bb8a1e899cbc748f5ebad6f19294aec7c7",
+          "afterGitBlobOrNull": "30c4cb6963922f4e389aa44ed05c94aa69da7d6d"
+        },
+        {
+          "path": "src/modals/__tests__/YouTubeCanvasModal.test.ts",
+          "beforeGitBlobOrNull": "cda2983e2b09e13786f863fa411982a5472ec2e4",
+          "afterGitBlobOrNull": "186cb669a46fabb1105a70ca9088ed2f486f7e8d"
+        },
+        {
+          "path": "src/services/ChangeLogService.ts",
+          "beforeGitBlobOrNull": "7da3f034357e1fd6e5072e61fe11574be338cb07",
+          "afterGitBlobOrNull": "95965594cfbe697ae1c0ea480f5a346aaffbc3c6"
+        },
+        {
+          "path": "src/services/VersionCheckerService.ts",
+          "beforeGitBlobOrNull": "755b3b53e34a6f247233454303ec84f20d3f4b2a",
+          "afterGitBlobOrNull": "f25a8e6ec866100f7fb64feb2f8e8cef13b56dd9"
+        },
+        {
+          "path": "src/services/YouTubeMetadataService.ts",
+          "beforeGitBlobOrNull": "31e558dd1eb475abda98c5476d8ff62b9307adb1",
+          "afterGitBlobOrNull": "c59b10cbc794c20d79e97bc1983548a7729c712a"
+        },
+        {
+          "path": "src/services/YouTubeTranscriptService.ts",
+          "beforeGitBlobOrNull": "2bd74a7e128e7095d9ccbe892218cdff4669f929",
+          "afterGitBlobOrNull": "9aed1f984cbdcfaad3e5991e0781a4052a274575"
+        },
+        {
+          "path": "src/services/__tests__/ChangeLogService.test.ts",
+          "beforeGitBlobOrNull": "53ce68d88de25b438e5e9f7cb78557591171f6db",
+          "afterGitBlobOrNull": "1dc1218b0efdbbbf8fd4e9bad38626cba15102a1"
+        },
+        {
+          "path": "src/services/__tests__/VersionCheckerService.test.ts",
+          "beforeGitBlobOrNull": "576d654cbed5bea26c1bb96f38de111eba250b7a",
+          "afterGitBlobOrNull": "cbaa17a1f507f9fc6dd76c5fe34f0242511f02b8"
+        },
+        {
+          "path": "src/services/__tests__/WebResearchApiService.test.ts",
+          "beforeGitBlobOrNull": "83da021d09625c0d19a7109d6f7a24d2af7374d1",
+          "afterGitBlobOrNull": "337ffa88fd88d8a480bf1fc269a1f2d432cde6be"
+        },
+        {
+          "path": "src/services/__tests__/YouTubeMetadataService.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "5c0323df1223543b6cc9b78cd8c6a88bc45c168d"
+        },
+        {
+          "path": "src/services/__tests__/YouTubeTranscriptService.test.ts",
+          "beforeGitBlobOrNull": "6fe372762f3bec37dcd52a652210a82c3681b0fc",
+          "afterGitBlobOrNull": "5cd75fd12f6314b1c2b80dd10fb6f8a165f4b902"
+        },
+        {
+          "path": "src/services/managed/ManagedProductIntegrationClient.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "3893ce0c8906a8145bd60cdd390abb65d133cae2"
+        },
+        {
+          "path": "src/services/managed/__tests__/ManagedProductIntegrationClient.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "dedb9a65b4898cb58cf625db1f9e543465ba0085"
+        },
+        {
+          "path": "src/services/web/WebResearchApiService.ts",
+          "beforeGitBlobOrNull": "92829178d69150316a01a7b747536f66be127fe0",
+          "afterGitBlobOrNull": "501448c958ef2f99c651d78aee0baaf39306880b"
+        },
+        {
+          "path": "src/testing/automation/DesktopAutomationBridge.ts",
+          "beforeGitBlobOrNull": "7a82d22f75de99356d03c5f82314b40da74a565c",
+          "afterGitBlobOrNull": "7a82d22f75de99356d03c5f82314b40da74a565c"
+        }
+      ],
+      "predecessorLedger": {
+        "gitBlob": "1076a4fc3049270ec39e89923e3de29e41887a95",
+        "sha256": "62328b5f8f0e9794d027a77dd3eda2408bd2fc783b048cc63d5c94b0b84f7617",
+        "transitionCount": 9,
+        "finalTransitionHash": "fa555cb9aab17626f55ae54dbe783f863ce87188543661689e17a61d1ec5318f"
+      },
+      "previousTransitionHash": "405f3ee0b3bad35f627aad2d9954ad61b2968d0e4fd6dbc4ff817d2d50a47cab",
+      "transitionHash": "07025e16c435a2e554dc7efa89c08ced44fccdd84e48b78017afa39ce867a05a"
+    },
+    {
+      "sequence": 13,
+      "historicalRecordId": "15b027bd438d0f31ceb07f00eedabeb0c0800f0e0b312e76fb0266281004242d",
+      "v2OccurrenceId": "7c7f8e265c47700156a675b789d1d9c1a239a8a8c332d14f5a289b8cce075689",
+      "ownerPlan": "026",
+      "from": "present",
+      "to": "removed",
+      "predecessorSourceTree": "c07e41eaf372e57dd169ec73a4f0d97052c23e68",
+      "stagedSourceTree": "641457ed18e923bd64c8337d511fe92f0d3da928",
+      "sourceEvidence": [
+        {
+          "path": "src/css/components/youtube-canvas.css",
+          "beforeGitBlobOrNull": "eef40b431e3487adf7065159915dd3278cc2732b",
+          "afterGitBlobOrNull": "c15fce082de5a64050cc123d4640ffa554ab09e4"
+        },
+        {
+          "path": "src/main.ts",
+          "beforeGitBlobOrNull": "465505c25acaa1b8f1cec0e2f9036030be4e17f1",
+          "afterGitBlobOrNull": "d2a4d00cfa7cb7d2c95df04144accce2d721ddc5"
+        },
+        {
+          "path": "src/modals/YouTubeCanvasModal.ts",
+          "beforeGitBlobOrNull": "90c859bb8a1e899cbc748f5ebad6f19294aec7c7",
+          "afterGitBlobOrNull": "30c4cb6963922f4e389aa44ed05c94aa69da7d6d"
+        },
+        {
+          "path": "src/modals/__tests__/YouTubeCanvasModal.test.ts",
+          "beforeGitBlobOrNull": "cda2983e2b09e13786f863fa411982a5472ec2e4",
+          "afterGitBlobOrNull": "186cb669a46fabb1105a70ca9088ed2f486f7e8d"
+        },
+        {
+          "path": "src/services/ChangeLogService.ts",
+          "beforeGitBlobOrNull": "7da3f034357e1fd6e5072e61fe11574be338cb07",
+          "afterGitBlobOrNull": "95965594cfbe697ae1c0ea480f5a346aaffbc3c6"
+        },
+        {
+          "path": "src/services/VersionCheckerService.ts",
+          "beforeGitBlobOrNull": "755b3b53e34a6f247233454303ec84f20d3f4b2a",
+          "afterGitBlobOrNull": "f25a8e6ec866100f7fb64feb2f8e8cef13b56dd9"
+        },
+        {
+          "path": "src/services/YouTubeMetadataService.ts",
+          "beforeGitBlobOrNull": "31e558dd1eb475abda98c5476d8ff62b9307adb1",
+          "afterGitBlobOrNull": "c59b10cbc794c20d79e97bc1983548a7729c712a"
+        },
+        {
+          "path": "src/services/YouTubeTranscriptService.ts",
+          "beforeGitBlobOrNull": "2bd74a7e128e7095d9ccbe892218cdff4669f929",
+          "afterGitBlobOrNull": "9aed1f984cbdcfaad3e5991e0781a4052a274575"
+        },
+        {
+          "path": "src/services/__tests__/ChangeLogService.test.ts",
+          "beforeGitBlobOrNull": "53ce68d88de25b438e5e9f7cb78557591171f6db",
+          "afterGitBlobOrNull": "1dc1218b0efdbbbf8fd4e9bad38626cba15102a1"
+        },
+        {
+          "path": "src/services/__tests__/VersionCheckerService.test.ts",
+          "beforeGitBlobOrNull": "576d654cbed5bea26c1bb96f38de111eba250b7a",
+          "afterGitBlobOrNull": "cbaa17a1f507f9fc6dd76c5fe34f0242511f02b8"
+        },
+        {
+          "path": "src/services/__tests__/WebResearchApiService.test.ts",
+          "beforeGitBlobOrNull": "83da021d09625c0d19a7109d6f7a24d2af7374d1",
+          "afterGitBlobOrNull": "337ffa88fd88d8a480bf1fc269a1f2d432cde6be"
+        },
+        {
+          "path": "src/services/__tests__/YouTubeMetadataService.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "5c0323df1223543b6cc9b78cd8c6a88bc45c168d"
+        },
+        {
+          "path": "src/services/__tests__/YouTubeTranscriptService.test.ts",
+          "beforeGitBlobOrNull": "6fe372762f3bec37dcd52a652210a82c3681b0fc",
+          "afterGitBlobOrNull": "5cd75fd12f6314b1c2b80dd10fb6f8a165f4b902"
+        },
+        {
+          "path": "src/services/managed/ManagedProductIntegrationClient.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "3893ce0c8906a8145bd60cdd390abb65d133cae2"
+        },
+        {
+          "path": "src/services/managed/__tests__/ManagedProductIntegrationClient.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "dedb9a65b4898cb58cf625db1f9e543465ba0085"
+        },
+        {
+          "path": "src/services/web/WebResearchApiService.ts",
+          "beforeGitBlobOrNull": "92829178d69150316a01a7b747536f66be127fe0",
+          "afterGitBlobOrNull": "501448c958ef2f99c651d78aee0baaf39306880b"
+        },
+        {
+          "path": "src/testing/automation/DesktopAutomationBridge.ts",
+          "beforeGitBlobOrNull": "7a82d22f75de99356d03c5f82314b40da74a565c",
+          "afterGitBlobOrNull": "7a82d22f75de99356d03c5f82314b40da74a565c"
+        }
+      ],
+      "predecessorLedger": {
+        "gitBlob": "1076a4fc3049270ec39e89923e3de29e41887a95",
+        "sha256": "62328b5f8f0e9794d027a77dd3eda2408bd2fc783b048cc63d5c94b0b84f7617",
+        "transitionCount": 9,
+        "finalTransitionHash": "fa555cb9aab17626f55ae54dbe783f863ce87188543661689e17a61d1ec5318f"
+      },
+      "previousTransitionHash": "07025e16c435a2e554dc7efa89c08ced44fccdd84e48b78017afa39ce867a05a",
+      "transitionHash": "2afd781efdea900a324ed01fea87604cb28fa89a3058623335c040cc50fdd374"
+    },
+    {
+      "sequence": 14,
+      "historicalRecordId": "0ce1fe1a1041e495c6d6b622637f5f2e0bf440ae012cd8bd2b3d8730022c8ab2",
+      "v2OccurrenceId": "42d513213fa2ef5ae0c291913231426a7d1cdece92f00a24075de029f54d2280",
+      "ownerPlan": "026",
+      "from": "present",
+      "to": "removed",
+      "predecessorSourceTree": "c07e41eaf372e57dd169ec73a4f0d97052c23e68",
+      "stagedSourceTree": "641457ed18e923bd64c8337d511fe92f0d3da928",
+      "sourceEvidence": [
+        {
+          "path": "src/css/components/youtube-canvas.css",
+          "beforeGitBlobOrNull": "eef40b431e3487adf7065159915dd3278cc2732b",
+          "afterGitBlobOrNull": "c15fce082de5a64050cc123d4640ffa554ab09e4"
+        },
+        {
+          "path": "src/main.ts",
+          "beforeGitBlobOrNull": "465505c25acaa1b8f1cec0e2f9036030be4e17f1",
+          "afterGitBlobOrNull": "d2a4d00cfa7cb7d2c95df04144accce2d721ddc5"
+        },
+        {
+          "path": "src/modals/YouTubeCanvasModal.ts",
+          "beforeGitBlobOrNull": "90c859bb8a1e899cbc748f5ebad6f19294aec7c7",
+          "afterGitBlobOrNull": "30c4cb6963922f4e389aa44ed05c94aa69da7d6d"
+        },
+        {
+          "path": "src/modals/__tests__/YouTubeCanvasModal.test.ts",
+          "beforeGitBlobOrNull": "cda2983e2b09e13786f863fa411982a5472ec2e4",
+          "afterGitBlobOrNull": "186cb669a46fabb1105a70ca9088ed2f486f7e8d"
+        },
+        {
+          "path": "src/services/ChangeLogService.ts",
+          "beforeGitBlobOrNull": "7da3f034357e1fd6e5072e61fe11574be338cb07",
+          "afterGitBlobOrNull": "95965594cfbe697ae1c0ea480f5a346aaffbc3c6"
+        },
+        {
+          "path": "src/services/VersionCheckerService.ts",
+          "beforeGitBlobOrNull": "755b3b53e34a6f247233454303ec84f20d3f4b2a",
+          "afterGitBlobOrNull": "f25a8e6ec866100f7fb64feb2f8e8cef13b56dd9"
+        },
+        {
+          "path": "src/services/YouTubeMetadataService.ts",
+          "beforeGitBlobOrNull": "31e558dd1eb475abda98c5476d8ff62b9307adb1",
+          "afterGitBlobOrNull": "c59b10cbc794c20d79e97bc1983548a7729c712a"
+        },
+        {
+          "path": "src/services/YouTubeTranscriptService.ts",
+          "beforeGitBlobOrNull": "2bd74a7e128e7095d9ccbe892218cdff4669f929",
+          "afterGitBlobOrNull": "9aed1f984cbdcfaad3e5991e0781a4052a274575"
+        },
+        {
+          "path": "src/services/__tests__/ChangeLogService.test.ts",
+          "beforeGitBlobOrNull": "53ce68d88de25b438e5e9f7cb78557591171f6db",
+          "afterGitBlobOrNull": "1dc1218b0efdbbbf8fd4e9bad38626cba15102a1"
+        },
+        {
+          "path": "src/services/__tests__/VersionCheckerService.test.ts",
+          "beforeGitBlobOrNull": "576d654cbed5bea26c1bb96f38de111eba250b7a",
+          "afterGitBlobOrNull": "cbaa17a1f507f9fc6dd76c5fe34f0242511f02b8"
+        },
+        {
+          "path": "src/services/__tests__/WebResearchApiService.test.ts",
+          "beforeGitBlobOrNull": "83da021d09625c0d19a7109d6f7a24d2af7374d1",
+          "afterGitBlobOrNull": "337ffa88fd88d8a480bf1fc269a1f2d432cde6be"
+        },
+        {
+          "path": "src/services/__tests__/YouTubeMetadataService.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "5c0323df1223543b6cc9b78cd8c6a88bc45c168d"
+        },
+        {
+          "path": "src/services/__tests__/YouTubeTranscriptService.test.ts",
+          "beforeGitBlobOrNull": "6fe372762f3bec37dcd52a652210a82c3681b0fc",
+          "afterGitBlobOrNull": "5cd75fd12f6314b1c2b80dd10fb6f8a165f4b902"
+        },
+        {
+          "path": "src/services/managed/ManagedProductIntegrationClient.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "3893ce0c8906a8145bd60cdd390abb65d133cae2"
+        },
+        {
+          "path": "src/services/managed/__tests__/ManagedProductIntegrationClient.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "dedb9a65b4898cb58cf625db1f9e543465ba0085"
+        },
+        {
+          "path": "src/services/web/WebResearchApiService.ts",
+          "beforeGitBlobOrNull": "92829178d69150316a01a7b747536f66be127fe0",
+          "afterGitBlobOrNull": "501448c958ef2f99c651d78aee0baaf39306880b"
+        },
+        {
+          "path": "src/testing/automation/DesktopAutomationBridge.ts",
+          "beforeGitBlobOrNull": "7a82d22f75de99356d03c5f82314b40da74a565c",
+          "afterGitBlobOrNull": "7a82d22f75de99356d03c5f82314b40da74a565c"
+        }
+      ],
+      "predecessorLedger": {
+        "gitBlob": "1076a4fc3049270ec39e89923e3de29e41887a95",
+        "sha256": "62328b5f8f0e9794d027a77dd3eda2408bd2fc783b048cc63d5c94b0b84f7617",
+        "transitionCount": 9,
+        "finalTransitionHash": "fa555cb9aab17626f55ae54dbe783f863ce87188543661689e17a61d1ec5318f"
+      },
+      "previousTransitionHash": "2afd781efdea900a324ed01fea87604cb28fa89a3058623335c040cc50fdd374",
+      "transitionHash": "237b4ff97cf323f40b10d3f5344178d5c12a6c2a75c51fc9370dbf38f66fc96c"
+    },
+    {
+      "sequence": 15,
+      "historicalRecordId": "304e94c1aff53a8ee25b1a5bef13fb0f8564dc317b24b78057e209a5dad2cd8b",
+      "v2OccurrenceId": "85b4a0446ebafd4ed816ab8ab0d076cfe2a97dbd3b13d40ae802cec1e299844d",
+      "ownerPlan": "026",
+      "from": "present",
+      "to": "removed",
+      "predecessorSourceTree": "c07e41eaf372e57dd169ec73a4f0d97052c23e68",
+      "stagedSourceTree": "641457ed18e923bd64c8337d511fe92f0d3da928",
+      "sourceEvidence": [
+        {
+          "path": "src/css/components/youtube-canvas.css",
+          "beforeGitBlobOrNull": "eef40b431e3487adf7065159915dd3278cc2732b",
+          "afterGitBlobOrNull": "c15fce082de5a64050cc123d4640ffa554ab09e4"
+        },
+        {
+          "path": "src/main.ts",
+          "beforeGitBlobOrNull": "465505c25acaa1b8f1cec0e2f9036030be4e17f1",
+          "afterGitBlobOrNull": "d2a4d00cfa7cb7d2c95df04144accce2d721ddc5"
+        },
+        {
+          "path": "src/modals/YouTubeCanvasModal.ts",
+          "beforeGitBlobOrNull": "90c859bb8a1e899cbc748f5ebad6f19294aec7c7",
+          "afterGitBlobOrNull": "30c4cb6963922f4e389aa44ed05c94aa69da7d6d"
+        },
+        {
+          "path": "src/modals/__tests__/YouTubeCanvasModal.test.ts",
+          "beforeGitBlobOrNull": "cda2983e2b09e13786f863fa411982a5472ec2e4",
+          "afterGitBlobOrNull": "186cb669a46fabb1105a70ca9088ed2f486f7e8d"
+        },
+        {
+          "path": "src/services/ChangeLogService.ts",
+          "beforeGitBlobOrNull": "7da3f034357e1fd6e5072e61fe11574be338cb07",
+          "afterGitBlobOrNull": "95965594cfbe697ae1c0ea480f5a346aaffbc3c6"
+        },
+        {
+          "path": "src/services/VersionCheckerService.ts",
+          "beforeGitBlobOrNull": "755b3b53e34a6f247233454303ec84f20d3f4b2a",
+          "afterGitBlobOrNull": "f25a8e6ec866100f7fb64feb2f8e8cef13b56dd9"
+        },
+        {
+          "path": "src/services/YouTubeMetadataService.ts",
+          "beforeGitBlobOrNull": "31e558dd1eb475abda98c5476d8ff62b9307adb1",
+          "afterGitBlobOrNull": "c59b10cbc794c20d79e97bc1983548a7729c712a"
+        },
+        {
+          "path": "src/services/YouTubeTranscriptService.ts",
+          "beforeGitBlobOrNull": "2bd74a7e128e7095d9ccbe892218cdff4669f929",
+          "afterGitBlobOrNull": "9aed1f984cbdcfaad3e5991e0781a4052a274575"
+        },
+        {
+          "path": "src/services/__tests__/ChangeLogService.test.ts",
+          "beforeGitBlobOrNull": "53ce68d88de25b438e5e9f7cb78557591171f6db",
+          "afterGitBlobOrNull": "1dc1218b0efdbbbf8fd4e9bad38626cba15102a1"
+        },
+        {
+          "path": "src/services/__tests__/VersionCheckerService.test.ts",
+          "beforeGitBlobOrNull": "576d654cbed5bea26c1bb96f38de111eba250b7a",
+          "afterGitBlobOrNull": "cbaa17a1f507f9fc6dd76c5fe34f0242511f02b8"
+        },
+        {
+          "path": "src/services/__tests__/WebResearchApiService.test.ts",
+          "beforeGitBlobOrNull": "83da021d09625c0d19a7109d6f7a24d2af7374d1",
+          "afterGitBlobOrNull": "337ffa88fd88d8a480bf1fc269a1f2d432cde6be"
+        },
+        {
+          "path": "src/services/__tests__/YouTubeMetadataService.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "5c0323df1223543b6cc9b78cd8c6a88bc45c168d"
+        },
+        {
+          "path": "src/services/__tests__/YouTubeTranscriptService.test.ts",
+          "beforeGitBlobOrNull": "6fe372762f3bec37dcd52a652210a82c3681b0fc",
+          "afterGitBlobOrNull": "5cd75fd12f6314b1c2b80dd10fb6f8a165f4b902"
+        },
+        {
+          "path": "src/services/managed/ManagedProductIntegrationClient.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "3893ce0c8906a8145bd60cdd390abb65d133cae2"
+        },
+        {
+          "path": "src/services/managed/__tests__/ManagedProductIntegrationClient.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "dedb9a65b4898cb58cf625db1f9e543465ba0085"
+        },
+        {
+          "path": "src/services/web/WebResearchApiService.ts",
+          "beforeGitBlobOrNull": "92829178d69150316a01a7b747536f66be127fe0",
+          "afterGitBlobOrNull": "501448c958ef2f99c651d78aee0baaf39306880b"
+        },
+        {
+          "path": "src/testing/automation/DesktopAutomationBridge.ts",
+          "beforeGitBlobOrNull": "7a82d22f75de99356d03c5f82314b40da74a565c",
+          "afterGitBlobOrNull": "7a82d22f75de99356d03c5f82314b40da74a565c"
+        }
+      ],
+      "predecessorLedger": {
+        "gitBlob": "1076a4fc3049270ec39e89923e3de29e41887a95",
+        "sha256": "62328b5f8f0e9794d027a77dd3eda2408bd2fc783b048cc63d5c94b0b84f7617",
+        "transitionCount": 9,
+        "finalTransitionHash": "fa555cb9aab17626f55ae54dbe783f863ce87188543661689e17a61d1ec5318f"
+      },
+      "previousTransitionHash": "237b4ff97cf323f40b10d3f5344178d5c12a6c2a75c51fc9370dbf38f66fc96c",
+      "transitionHash": "0e7dbc61f3a04660208d3c52a2c09e70ca29574be8a9b07fae9c5dbcd2c0f19d"
+    },
+    {
+      "sequence": 16,
+      "historicalRecordId": "3743b1227037ae49c976456378edd725bf99ba03610439e28d9d2198f520b1ac",
+      "v2OccurrenceId": "7cf6f56e74872f21869a6b8cbef5c9c104112ea7bf7aed94c0e8621928643f1f",
+      "ownerPlan": "026",
+      "from": "present",
+      "to": "removed",
+      "predecessorSourceTree": "c07e41eaf372e57dd169ec73a4f0d97052c23e68",
+      "stagedSourceTree": "641457ed18e923bd64c8337d511fe92f0d3da928",
+      "sourceEvidence": [
+        {
+          "path": "src/css/components/youtube-canvas.css",
+          "beforeGitBlobOrNull": "eef40b431e3487adf7065159915dd3278cc2732b",
+          "afterGitBlobOrNull": "c15fce082de5a64050cc123d4640ffa554ab09e4"
+        },
+        {
+          "path": "src/main.ts",
+          "beforeGitBlobOrNull": "465505c25acaa1b8f1cec0e2f9036030be4e17f1",
+          "afterGitBlobOrNull": "d2a4d00cfa7cb7d2c95df04144accce2d721ddc5"
+        },
+        {
+          "path": "src/modals/YouTubeCanvasModal.ts",
+          "beforeGitBlobOrNull": "90c859bb8a1e899cbc748f5ebad6f19294aec7c7",
+          "afterGitBlobOrNull": "30c4cb6963922f4e389aa44ed05c94aa69da7d6d"
+        },
+        {
+          "path": "src/modals/__tests__/YouTubeCanvasModal.test.ts",
+          "beforeGitBlobOrNull": "cda2983e2b09e13786f863fa411982a5472ec2e4",
+          "afterGitBlobOrNull": "186cb669a46fabb1105a70ca9088ed2f486f7e8d"
+        },
+        {
+          "path": "src/services/ChangeLogService.ts",
+          "beforeGitBlobOrNull": "7da3f034357e1fd6e5072e61fe11574be338cb07",
+          "afterGitBlobOrNull": "95965594cfbe697ae1c0ea480f5a346aaffbc3c6"
+        },
+        {
+          "path": "src/services/VersionCheckerService.ts",
+          "beforeGitBlobOrNull": "755b3b53e34a6f247233454303ec84f20d3f4b2a",
+          "afterGitBlobOrNull": "f25a8e6ec866100f7fb64feb2f8e8cef13b56dd9"
+        },
+        {
+          "path": "src/services/YouTubeMetadataService.ts",
+          "beforeGitBlobOrNull": "31e558dd1eb475abda98c5476d8ff62b9307adb1",
+          "afterGitBlobOrNull": "c59b10cbc794c20d79e97bc1983548a7729c712a"
+        },
+        {
+          "path": "src/services/YouTubeTranscriptService.ts",
+          "beforeGitBlobOrNull": "2bd74a7e128e7095d9ccbe892218cdff4669f929",
+          "afterGitBlobOrNull": "9aed1f984cbdcfaad3e5991e0781a4052a274575"
+        },
+        {
+          "path": "src/services/__tests__/ChangeLogService.test.ts",
+          "beforeGitBlobOrNull": "53ce68d88de25b438e5e9f7cb78557591171f6db",
+          "afterGitBlobOrNull": "1dc1218b0efdbbbf8fd4e9bad38626cba15102a1"
+        },
+        {
+          "path": "src/services/__tests__/VersionCheckerService.test.ts",
+          "beforeGitBlobOrNull": "576d654cbed5bea26c1bb96f38de111eba250b7a",
+          "afterGitBlobOrNull": "cbaa17a1f507f9fc6dd76c5fe34f0242511f02b8"
+        },
+        {
+          "path": "src/services/__tests__/WebResearchApiService.test.ts",
+          "beforeGitBlobOrNull": "83da021d09625c0d19a7109d6f7a24d2af7374d1",
+          "afterGitBlobOrNull": "337ffa88fd88d8a480bf1fc269a1f2d432cde6be"
+        },
+        {
+          "path": "src/services/__tests__/YouTubeMetadataService.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "5c0323df1223543b6cc9b78cd8c6a88bc45c168d"
+        },
+        {
+          "path": "src/services/__tests__/YouTubeTranscriptService.test.ts",
+          "beforeGitBlobOrNull": "6fe372762f3bec37dcd52a652210a82c3681b0fc",
+          "afterGitBlobOrNull": "5cd75fd12f6314b1c2b80dd10fb6f8a165f4b902"
+        },
+        {
+          "path": "src/services/managed/ManagedProductIntegrationClient.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "3893ce0c8906a8145bd60cdd390abb65d133cae2"
+        },
+        {
+          "path": "src/services/managed/__tests__/ManagedProductIntegrationClient.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "dedb9a65b4898cb58cf625db1f9e543465ba0085"
+        },
+        {
+          "path": "src/services/web/WebResearchApiService.ts",
+          "beforeGitBlobOrNull": "92829178d69150316a01a7b747536f66be127fe0",
+          "afterGitBlobOrNull": "501448c958ef2f99c651d78aee0baaf39306880b"
+        },
+        {
+          "path": "src/testing/automation/DesktopAutomationBridge.ts",
+          "beforeGitBlobOrNull": "7a82d22f75de99356d03c5f82314b40da74a565c",
+          "afterGitBlobOrNull": "7a82d22f75de99356d03c5f82314b40da74a565c"
+        }
+      ],
+      "predecessorLedger": {
+        "gitBlob": "1076a4fc3049270ec39e89923e3de29e41887a95",
+        "sha256": "62328b5f8f0e9794d027a77dd3eda2408bd2fc783b048cc63d5c94b0b84f7617",
+        "transitionCount": 9,
+        "finalTransitionHash": "fa555cb9aab17626f55ae54dbe783f863ce87188543661689e17a61d1ec5318f"
+      },
+      "previousTransitionHash": "0e7dbc61f3a04660208d3c52a2c09e70ca29574be8a9b07fae9c5dbcd2c0f19d",
+      "transitionHash": "d4675e03622bc23af8ae941b60378dc663118064dabf3d3c806d518f07e514d9"
+    },
+    {
+      "sequence": 17,
+      "historicalRecordId": "4f8c8b7764e1519c4ca8c7e1345620f807759bb8f9ba61ba5fc9501d0e5488d9",
+      "v2OccurrenceId": "d241159e4e6a39cfb02bc54af922b69030c456801dda0f2eee7898bf749c6e11",
+      "ownerPlan": "026",
+      "from": "present",
+      "to": "removed",
+      "predecessorSourceTree": "c07e41eaf372e57dd169ec73a4f0d97052c23e68",
+      "stagedSourceTree": "641457ed18e923bd64c8337d511fe92f0d3da928",
+      "sourceEvidence": [
+        {
+          "path": "src/css/components/youtube-canvas.css",
+          "beforeGitBlobOrNull": "eef40b431e3487adf7065159915dd3278cc2732b",
+          "afterGitBlobOrNull": "c15fce082de5a64050cc123d4640ffa554ab09e4"
+        },
+        {
+          "path": "src/main.ts",
+          "beforeGitBlobOrNull": "465505c25acaa1b8f1cec0e2f9036030be4e17f1",
+          "afterGitBlobOrNull": "d2a4d00cfa7cb7d2c95df04144accce2d721ddc5"
+        },
+        {
+          "path": "src/modals/YouTubeCanvasModal.ts",
+          "beforeGitBlobOrNull": "90c859bb8a1e899cbc748f5ebad6f19294aec7c7",
+          "afterGitBlobOrNull": "30c4cb6963922f4e389aa44ed05c94aa69da7d6d"
+        },
+        {
+          "path": "src/modals/__tests__/YouTubeCanvasModal.test.ts",
+          "beforeGitBlobOrNull": "cda2983e2b09e13786f863fa411982a5472ec2e4",
+          "afterGitBlobOrNull": "186cb669a46fabb1105a70ca9088ed2f486f7e8d"
+        },
+        {
+          "path": "src/services/ChangeLogService.ts",
+          "beforeGitBlobOrNull": "7da3f034357e1fd6e5072e61fe11574be338cb07",
+          "afterGitBlobOrNull": "95965594cfbe697ae1c0ea480f5a346aaffbc3c6"
+        },
+        {
+          "path": "src/services/VersionCheckerService.ts",
+          "beforeGitBlobOrNull": "755b3b53e34a6f247233454303ec84f20d3f4b2a",
+          "afterGitBlobOrNull": "f25a8e6ec866100f7fb64feb2f8e8cef13b56dd9"
+        },
+        {
+          "path": "src/services/YouTubeMetadataService.ts",
+          "beforeGitBlobOrNull": "31e558dd1eb475abda98c5476d8ff62b9307adb1",
+          "afterGitBlobOrNull": "c59b10cbc794c20d79e97bc1983548a7729c712a"
+        },
+        {
+          "path": "src/services/YouTubeTranscriptService.ts",
+          "beforeGitBlobOrNull": "2bd74a7e128e7095d9ccbe892218cdff4669f929",
+          "afterGitBlobOrNull": "9aed1f984cbdcfaad3e5991e0781a4052a274575"
+        },
+        {
+          "path": "src/services/__tests__/ChangeLogService.test.ts",
+          "beforeGitBlobOrNull": "53ce68d88de25b438e5e9f7cb78557591171f6db",
+          "afterGitBlobOrNull": "1dc1218b0efdbbbf8fd4e9bad38626cba15102a1"
+        },
+        {
+          "path": "src/services/__tests__/VersionCheckerService.test.ts",
+          "beforeGitBlobOrNull": "576d654cbed5bea26c1bb96f38de111eba250b7a",
+          "afterGitBlobOrNull": "cbaa17a1f507f9fc6dd76c5fe34f0242511f02b8"
+        },
+        {
+          "path": "src/services/__tests__/WebResearchApiService.test.ts",
+          "beforeGitBlobOrNull": "83da021d09625c0d19a7109d6f7a24d2af7374d1",
+          "afterGitBlobOrNull": "337ffa88fd88d8a480bf1fc269a1f2d432cde6be"
+        },
+        {
+          "path": "src/services/__tests__/YouTubeMetadataService.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "5c0323df1223543b6cc9b78cd8c6a88bc45c168d"
+        },
+        {
+          "path": "src/services/__tests__/YouTubeTranscriptService.test.ts",
+          "beforeGitBlobOrNull": "6fe372762f3bec37dcd52a652210a82c3681b0fc",
+          "afterGitBlobOrNull": "5cd75fd12f6314b1c2b80dd10fb6f8a165f4b902"
+        },
+        {
+          "path": "src/services/managed/ManagedProductIntegrationClient.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "3893ce0c8906a8145bd60cdd390abb65d133cae2"
+        },
+        {
+          "path": "src/services/managed/__tests__/ManagedProductIntegrationClient.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "dedb9a65b4898cb58cf625db1f9e543465ba0085"
+        },
+        {
+          "path": "src/services/web/WebResearchApiService.ts",
+          "beforeGitBlobOrNull": "92829178d69150316a01a7b747536f66be127fe0",
+          "afterGitBlobOrNull": "501448c958ef2f99c651d78aee0baaf39306880b"
+        },
+        {
+          "path": "src/testing/automation/DesktopAutomationBridge.ts",
+          "beforeGitBlobOrNull": "7a82d22f75de99356d03c5f82314b40da74a565c",
+          "afterGitBlobOrNull": "7a82d22f75de99356d03c5f82314b40da74a565c"
+        }
+      ],
+      "predecessorLedger": {
+        "gitBlob": "1076a4fc3049270ec39e89923e3de29e41887a95",
+        "sha256": "62328b5f8f0e9794d027a77dd3eda2408bd2fc783b048cc63d5c94b0b84f7617",
+        "transitionCount": 9,
+        "finalTransitionHash": "fa555cb9aab17626f55ae54dbe783f863ce87188543661689e17a61d1ec5318f"
+      },
+      "previousTransitionHash": "d4675e03622bc23af8ae941b60378dc663118064dabf3d3c806d518f07e514d9",
+      "transitionHash": "9ec7a34186af1649e3daab41032f8cf4f15b168669dd5dfba29ddbf991485d4c"
+    },
+    {
+      "sequence": 18,
+      "historicalRecordId": "59c931221bd69aa1c7dff035db9ddcbd4bd4e9b70826f311dcd904773ac27b87",
+      "v2OccurrenceId": "63fdeba18c8af8356a12794c83b3a5ea7f2baed7734e3b22d58f61127a8239f8",
+      "ownerPlan": "026",
+      "from": "present",
+      "to": "removed",
+      "predecessorSourceTree": "c07e41eaf372e57dd169ec73a4f0d97052c23e68",
+      "stagedSourceTree": "641457ed18e923bd64c8337d511fe92f0d3da928",
+      "sourceEvidence": [
+        {
+          "path": "src/css/components/youtube-canvas.css",
+          "beforeGitBlobOrNull": "eef40b431e3487adf7065159915dd3278cc2732b",
+          "afterGitBlobOrNull": "c15fce082de5a64050cc123d4640ffa554ab09e4"
+        },
+        {
+          "path": "src/main.ts",
+          "beforeGitBlobOrNull": "465505c25acaa1b8f1cec0e2f9036030be4e17f1",
+          "afterGitBlobOrNull": "d2a4d00cfa7cb7d2c95df04144accce2d721ddc5"
+        },
+        {
+          "path": "src/modals/YouTubeCanvasModal.ts",
+          "beforeGitBlobOrNull": "90c859bb8a1e899cbc748f5ebad6f19294aec7c7",
+          "afterGitBlobOrNull": "30c4cb6963922f4e389aa44ed05c94aa69da7d6d"
+        },
+        {
+          "path": "src/modals/__tests__/YouTubeCanvasModal.test.ts",
+          "beforeGitBlobOrNull": "cda2983e2b09e13786f863fa411982a5472ec2e4",
+          "afterGitBlobOrNull": "186cb669a46fabb1105a70ca9088ed2f486f7e8d"
+        },
+        {
+          "path": "src/services/ChangeLogService.ts",
+          "beforeGitBlobOrNull": "7da3f034357e1fd6e5072e61fe11574be338cb07",
+          "afterGitBlobOrNull": "95965594cfbe697ae1c0ea480f5a346aaffbc3c6"
+        },
+        {
+          "path": "src/services/VersionCheckerService.ts",
+          "beforeGitBlobOrNull": "755b3b53e34a6f247233454303ec84f20d3f4b2a",
+          "afterGitBlobOrNull": "f25a8e6ec866100f7fb64feb2f8e8cef13b56dd9"
+        },
+        {
+          "path": "src/services/YouTubeMetadataService.ts",
+          "beforeGitBlobOrNull": "31e558dd1eb475abda98c5476d8ff62b9307adb1",
+          "afterGitBlobOrNull": "c59b10cbc794c20d79e97bc1983548a7729c712a"
+        },
+        {
+          "path": "src/services/YouTubeTranscriptService.ts",
+          "beforeGitBlobOrNull": "2bd74a7e128e7095d9ccbe892218cdff4669f929",
+          "afterGitBlobOrNull": "9aed1f984cbdcfaad3e5991e0781a4052a274575"
+        },
+        {
+          "path": "src/services/__tests__/ChangeLogService.test.ts",
+          "beforeGitBlobOrNull": "53ce68d88de25b438e5e9f7cb78557591171f6db",
+          "afterGitBlobOrNull": "1dc1218b0efdbbbf8fd4e9bad38626cba15102a1"
+        },
+        {
+          "path": "src/services/__tests__/VersionCheckerService.test.ts",
+          "beforeGitBlobOrNull": "576d654cbed5bea26c1bb96f38de111eba250b7a",
+          "afterGitBlobOrNull": "cbaa17a1f507f9fc6dd76c5fe34f0242511f02b8"
+        },
+        {
+          "path": "src/services/__tests__/WebResearchApiService.test.ts",
+          "beforeGitBlobOrNull": "83da021d09625c0d19a7109d6f7a24d2af7374d1",
+          "afterGitBlobOrNull": "337ffa88fd88d8a480bf1fc269a1f2d432cde6be"
+        },
+        {
+          "path": "src/services/__tests__/YouTubeMetadataService.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "5c0323df1223543b6cc9b78cd8c6a88bc45c168d"
+        },
+        {
+          "path": "src/services/__tests__/YouTubeTranscriptService.test.ts",
+          "beforeGitBlobOrNull": "6fe372762f3bec37dcd52a652210a82c3681b0fc",
+          "afterGitBlobOrNull": "5cd75fd12f6314b1c2b80dd10fb6f8a165f4b902"
+        },
+        {
+          "path": "src/services/managed/ManagedProductIntegrationClient.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "3893ce0c8906a8145bd60cdd390abb65d133cae2"
+        },
+        {
+          "path": "src/services/managed/__tests__/ManagedProductIntegrationClient.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "dedb9a65b4898cb58cf625db1f9e543465ba0085"
+        },
+        {
+          "path": "src/services/web/WebResearchApiService.ts",
+          "beforeGitBlobOrNull": "92829178d69150316a01a7b747536f66be127fe0",
+          "afterGitBlobOrNull": "501448c958ef2f99c651d78aee0baaf39306880b"
+        },
+        {
+          "path": "src/testing/automation/DesktopAutomationBridge.ts",
+          "beforeGitBlobOrNull": "7a82d22f75de99356d03c5f82314b40da74a565c",
+          "afterGitBlobOrNull": "7a82d22f75de99356d03c5f82314b40da74a565c"
+        }
+      ],
+      "predecessorLedger": {
+        "gitBlob": "1076a4fc3049270ec39e89923e3de29e41887a95",
+        "sha256": "62328b5f8f0e9794d027a77dd3eda2408bd2fc783b048cc63d5c94b0b84f7617",
+        "transitionCount": 9,
+        "finalTransitionHash": "fa555cb9aab17626f55ae54dbe783f863ce87188543661689e17a61d1ec5318f"
+      },
+      "previousTransitionHash": "9ec7a34186af1649e3daab41032f8cf4f15b168669dd5dfba29ddbf991485d4c",
+      "transitionHash": "3c1624a2cf3a639da0d8688f6e5f5c24b92ddad520a7740e082bf852f99d4dbf"
+    },
+    {
+      "sequence": 19,
+      "historicalRecordId": "cc540427a09601815f5e2850891d1a5097365fe11876a7b349af90e0b9dcdc23",
+      "v2OccurrenceId": "d85086b0a0ad058663e907b426c5ed825845691a50204c91f64e711785dfb0de",
+      "ownerPlan": "026",
+      "from": "present",
+      "to": "removed",
+      "predecessorSourceTree": "c07e41eaf372e57dd169ec73a4f0d97052c23e68",
+      "stagedSourceTree": "641457ed18e923bd64c8337d511fe92f0d3da928",
+      "sourceEvidence": [
+        {
+          "path": "src/css/components/youtube-canvas.css",
+          "beforeGitBlobOrNull": "eef40b431e3487adf7065159915dd3278cc2732b",
+          "afterGitBlobOrNull": "c15fce082de5a64050cc123d4640ffa554ab09e4"
+        },
+        {
+          "path": "src/main.ts",
+          "beforeGitBlobOrNull": "465505c25acaa1b8f1cec0e2f9036030be4e17f1",
+          "afterGitBlobOrNull": "d2a4d00cfa7cb7d2c95df04144accce2d721ddc5"
+        },
+        {
+          "path": "src/modals/YouTubeCanvasModal.ts",
+          "beforeGitBlobOrNull": "90c859bb8a1e899cbc748f5ebad6f19294aec7c7",
+          "afterGitBlobOrNull": "30c4cb6963922f4e389aa44ed05c94aa69da7d6d"
+        },
+        {
+          "path": "src/modals/__tests__/YouTubeCanvasModal.test.ts",
+          "beforeGitBlobOrNull": "cda2983e2b09e13786f863fa411982a5472ec2e4",
+          "afterGitBlobOrNull": "186cb669a46fabb1105a70ca9088ed2f486f7e8d"
+        },
+        {
+          "path": "src/services/ChangeLogService.ts",
+          "beforeGitBlobOrNull": "7da3f034357e1fd6e5072e61fe11574be338cb07",
+          "afterGitBlobOrNull": "95965594cfbe697ae1c0ea480f5a346aaffbc3c6"
+        },
+        {
+          "path": "src/services/VersionCheckerService.ts",
+          "beforeGitBlobOrNull": "755b3b53e34a6f247233454303ec84f20d3f4b2a",
+          "afterGitBlobOrNull": "f25a8e6ec866100f7fb64feb2f8e8cef13b56dd9"
+        },
+        {
+          "path": "src/services/YouTubeMetadataService.ts",
+          "beforeGitBlobOrNull": "31e558dd1eb475abda98c5476d8ff62b9307adb1",
+          "afterGitBlobOrNull": "c59b10cbc794c20d79e97bc1983548a7729c712a"
+        },
+        {
+          "path": "src/services/YouTubeTranscriptService.ts",
+          "beforeGitBlobOrNull": "2bd74a7e128e7095d9ccbe892218cdff4669f929",
+          "afterGitBlobOrNull": "9aed1f984cbdcfaad3e5991e0781a4052a274575"
+        },
+        {
+          "path": "src/services/__tests__/ChangeLogService.test.ts",
+          "beforeGitBlobOrNull": "53ce68d88de25b438e5e9f7cb78557591171f6db",
+          "afterGitBlobOrNull": "1dc1218b0efdbbbf8fd4e9bad38626cba15102a1"
+        },
+        {
+          "path": "src/services/__tests__/VersionCheckerService.test.ts",
+          "beforeGitBlobOrNull": "576d654cbed5bea26c1bb96f38de111eba250b7a",
+          "afterGitBlobOrNull": "cbaa17a1f507f9fc6dd76c5fe34f0242511f02b8"
+        },
+        {
+          "path": "src/services/__tests__/WebResearchApiService.test.ts",
+          "beforeGitBlobOrNull": "83da021d09625c0d19a7109d6f7a24d2af7374d1",
+          "afterGitBlobOrNull": "337ffa88fd88d8a480bf1fc269a1f2d432cde6be"
+        },
+        {
+          "path": "src/services/__tests__/YouTubeMetadataService.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "5c0323df1223543b6cc9b78cd8c6a88bc45c168d"
+        },
+        {
+          "path": "src/services/__tests__/YouTubeTranscriptService.test.ts",
+          "beforeGitBlobOrNull": "6fe372762f3bec37dcd52a652210a82c3681b0fc",
+          "afterGitBlobOrNull": "5cd75fd12f6314b1c2b80dd10fb6f8a165f4b902"
+        },
+        {
+          "path": "src/services/managed/ManagedProductIntegrationClient.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "3893ce0c8906a8145bd60cdd390abb65d133cae2"
+        },
+        {
+          "path": "src/services/managed/__tests__/ManagedProductIntegrationClient.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "dedb9a65b4898cb58cf625db1f9e543465ba0085"
+        },
+        {
+          "path": "src/services/web/WebResearchApiService.ts",
+          "beforeGitBlobOrNull": "92829178d69150316a01a7b747536f66be127fe0",
+          "afterGitBlobOrNull": "501448c958ef2f99c651d78aee0baaf39306880b"
+        },
+        {
+          "path": "src/testing/automation/DesktopAutomationBridge.ts",
+          "beforeGitBlobOrNull": "7a82d22f75de99356d03c5f82314b40da74a565c",
+          "afterGitBlobOrNull": "7a82d22f75de99356d03c5f82314b40da74a565c"
+        }
+      ],
+      "predecessorLedger": {
+        "gitBlob": "1076a4fc3049270ec39e89923e3de29e41887a95",
+        "sha256": "62328b5f8f0e9794d027a77dd3eda2408bd2fc783b048cc63d5c94b0b84f7617",
+        "transitionCount": 9,
+        "finalTransitionHash": "fa555cb9aab17626f55ae54dbe783f863ce87188543661689e17a61d1ec5318f"
+      },
+      "previousTransitionHash": "3c1624a2cf3a639da0d8688f6e5f5c24b92ddad520a7740e082bf852f99d4dbf",
+      "transitionHash": "e25d28c79c9ae02f75bd09d8f18640788b19486ce989a2140e7a13e1f3e647f8"
+    },
+    {
+      "sequence": 20,
+      "historicalRecordId": "793ec3029011f74af6cd745fcfb05b0fff310cddedb92ef6929416f7fd1ed731",
+      "v2OccurrenceId": "ff6b29a34079a3f36176294f44afe4dd32707e3bdaee41139ce01f8766938ded",
+      "ownerPlan": "026",
+      "from": "present",
+      "to": "removed",
+      "predecessorSourceTree": "c07e41eaf372e57dd169ec73a4f0d97052c23e68",
+      "stagedSourceTree": "641457ed18e923bd64c8337d511fe92f0d3da928",
+      "sourceEvidence": [
+        {
+          "path": "src/css/components/youtube-canvas.css",
+          "beforeGitBlobOrNull": "eef40b431e3487adf7065159915dd3278cc2732b",
+          "afterGitBlobOrNull": "c15fce082de5a64050cc123d4640ffa554ab09e4"
+        },
+        {
+          "path": "src/main.ts",
+          "beforeGitBlobOrNull": "465505c25acaa1b8f1cec0e2f9036030be4e17f1",
+          "afterGitBlobOrNull": "d2a4d00cfa7cb7d2c95df04144accce2d721ddc5"
+        },
+        {
+          "path": "src/modals/YouTubeCanvasModal.ts",
+          "beforeGitBlobOrNull": "90c859bb8a1e899cbc748f5ebad6f19294aec7c7",
+          "afterGitBlobOrNull": "30c4cb6963922f4e389aa44ed05c94aa69da7d6d"
+        },
+        {
+          "path": "src/modals/__tests__/YouTubeCanvasModal.test.ts",
+          "beforeGitBlobOrNull": "cda2983e2b09e13786f863fa411982a5472ec2e4",
+          "afterGitBlobOrNull": "186cb669a46fabb1105a70ca9088ed2f486f7e8d"
+        },
+        {
+          "path": "src/services/ChangeLogService.ts",
+          "beforeGitBlobOrNull": "7da3f034357e1fd6e5072e61fe11574be338cb07",
+          "afterGitBlobOrNull": "95965594cfbe697ae1c0ea480f5a346aaffbc3c6"
+        },
+        {
+          "path": "src/services/VersionCheckerService.ts",
+          "beforeGitBlobOrNull": "755b3b53e34a6f247233454303ec84f20d3f4b2a",
+          "afterGitBlobOrNull": "f25a8e6ec866100f7fb64feb2f8e8cef13b56dd9"
+        },
+        {
+          "path": "src/services/YouTubeMetadataService.ts",
+          "beforeGitBlobOrNull": "31e558dd1eb475abda98c5476d8ff62b9307adb1",
+          "afterGitBlobOrNull": "c59b10cbc794c20d79e97bc1983548a7729c712a"
+        },
+        {
+          "path": "src/services/YouTubeTranscriptService.ts",
+          "beforeGitBlobOrNull": "2bd74a7e128e7095d9ccbe892218cdff4669f929",
+          "afterGitBlobOrNull": "9aed1f984cbdcfaad3e5991e0781a4052a274575"
+        },
+        {
+          "path": "src/services/__tests__/ChangeLogService.test.ts",
+          "beforeGitBlobOrNull": "53ce68d88de25b438e5e9f7cb78557591171f6db",
+          "afterGitBlobOrNull": "1dc1218b0efdbbbf8fd4e9bad38626cba15102a1"
+        },
+        {
+          "path": "src/services/__tests__/VersionCheckerService.test.ts",
+          "beforeGitBlobOrNull": "576d654cbed5bea26c1bb96f38de111eba250b7a",
+          "afterGitBlobOrNull": "cbaa17a1f507f9fc6dd76c5fe34f0242511f02b8"
+        },
+        {
+          "path": "src/services/__tests__/WebResearchApiService.test.ts",
+          "beforeGitBlobOrNull": "83da021d09625c0d19a7109d6f7a24d2af7374d1",
+          "afterGitBlobOrNull": "337ffa88fd88d8a480bf1fc269a1f2d432cde6be"
+        },
+        {
+          "path": "src/services/__tests__/YouTubeMetadataService.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "5c0323df1223543b6cc9b78cd8c6a88bc45c168d"
+        },
+        {
+          "path": "src/services/__tests__/YouTubeTranscriptService.test.ts",
+          "beforeGitBlobOrNull": "6fe372762f3bec37dcd52a652210a82c3681b0fc",
+          "afterGitBlobOrNull": "5cd75fd12f6314b1c2b80dd10fb6f8a165f4b902"
+        },
+        {
+          "path": "src/services/managed/ManagedProductIntegrationClient.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "3893ce0c8906a8145bd60cdd390abb65d133cae2"
+        },
+        {
+          "path": "src/services/managed/__tests__/ManagedProductIntegrationClient.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "dedb9a65b4898cb58cf625db1f9e543465ba0085"
+        },
+        {
+          "path": "src/services/web/WebResearchApiService.ts",
+          "beforeGitBlobOrNull": "92829178d69150316a01a7b747536f66be127fe0",
+          "afterGitBlobOrNull": "501448c958ef2f99c651d78aee0baaf39306880b"
+        },
+        {
+          "path": "src/testing/automation/DesktopAutomationBridge.ts",
+          "beforeGitBlobOrNull": "7a82d22f75de99356d03c5f82314b40da74a565c",
+          "afterGitBlobOrNull": "7a82d22f75de99356d03c5f82314b40da74a565c"
+        }
+      ],
+      "predecessorLedger": {
+        "gitBlob": "1076a4fc3049270ec39e89923e3de29e41887a95",
+        "sha256": "62328b5f8f0e9794d027a77dd3eda2408bd2fc783b048cc63d5c94b0b84f7617",
+        "transitionCount": 9,
+        "finalTransitionHash": "fa555cb9aab17626f55ae54dbe783f863ce87188543661689e17a61d1ec5318f"
+      },
+      "previousTransitionHash": "e25d28c79c9ae02f75bd09d8f18640788b19486ce989a2140e7a13e1f3e647f8",
+      "transitionHash": "86a282e892961651cc4938384464132a0367d64d2db1a04b6f06404f1cbee81a"
+    },
+    {
+      "sequence": 21,
+      "historicalRecordId": "5aa5299fe30525a0fce478b06d13187919a3473b27fad411740a74f55e7ed2dc",
+      "v2OccurrenceId": "b702b16573047fda5f59a91d0e4348479af1b09d43d704d2a6846407d86b6d15",
+      "ownerPlan": "026",
+      "from": "present",
+      "to": "removed",
+      "predecessorSourceTree": "c07e41eaf372e57dd169ec73a4f0d97052c23e68",
+      "stagedSourceTree": "641457ed18e923bd64c8337d511fe92f0d3da928",
+      "sourceEvidence": [
+        {
+          "path": "src/css/components/youtube-canvas.css",
+          "beforeGitBlobOrNull": "eef40b431e3487adf7065159915dd3278cc2732b",
+          "afterGitBlobOrNull": "c15fce082de5a64050cc123d4640ffa554ab09e4"
+        },
+        {
+          "path": "src/main.ts",
+          "beforeGitBlobOrNull": "465505c25acaa1b8f1cec0e2f9036030be4e17f1",
+          "afterGitBlobOrNull": "d2a4d00cfa7cb7d2c95df04144accce2d721ddc5"
+        },
+        {
+          "path": "src/modals/YouTubeCanvasModal.ts",
+          "beforeGitBlobOrNull": "90c859bb8a1e899cbc748f5ebad6f19294aec7c7",
+          "afterGitBlobOrNull": "30c4cb6963922f4e389aa44ed05c94aa69da7d6d"
+        },
+        {
+          "path": "src/modals/__tests__/YouTubeCanvasModal.test.ts",
+          "beforeGitBlobOrNull": "cda2983e2b09e13786f863fa411982a5472ec2e4",
+          "afterGitBlobOrNull": "186cb669a46fabb1105a70ca9088ed2f486f7e8d"
+        },
+        {
+          "path": "src/services/ChangeLogService.ts",
+          "beforeGitBlobOrNull": "7da3f034357e1fd6e5072e61fe11574be338cb07",
+          "afterGitBlobOrNull": "95965594cfbe697ae1c0ea480f5a346aaffbc3c6"
+        },
+        {
+          "path": "src/services/VersionCheckerService.ts",
+          "beforeGitBlobOrNull": "755b3b53e34a6f247233454303ec84f20d3f4b2a",
+          "afterGitBlobOrNull": "f25a8e6ec866100f7fb64feb2f8e8cef13b56dd9"
+        },
+        {
+          "path": "src/services/YouTubeMetadataService.ts",
+          "beforeGitBlobOrNull": "31e558dd1eb475abda98c5476d8ff62b9307adb1",
+          "afterGitBlobOrNull": "c59b10cbc794c20d79e97bc1983548a7729c712a"
+        },
+        {
+          "path": "src/services/YouTubeTranscriptService.ts",
+          "beforeGitBlobOrNull": "2bd74a7e128e7095d9ccbe892218cdff4669f929",
+          "afterGitBlobOrNull": "9aed1f984cbdcfaad3e5991e0781a4052a274575"
+        },
+        {
+          "path": "src/services/__tests__/ChangeLogService.test.ts",
+          "beforeGitBlobOrNull": "53ce68d88de25b438e5e9f7cb78557591171f6db",
+          "afterGitBlobOrNull": "1dc1218b0efdbbbf8fd4e9bad38626cba15102a1"
+        },
+        {
+          "path": "src/services/__tests__/VersionCheckerService.test.ts",
+          "beforeGitBlobOrNull": "576d654cbed5bea26c1bb96f38de111eba250b7a",
+          "afterGitBlobOrNull": "cbaa17a1f507f9fc6dd76c5fe34f0242511f02b8"
+        },
+        {
+          "path": "src/services/__tests__/WebResearchApiService.test.ts",
+          "beforeGitBlobOrNull": "83da021d09625c0d19a7109d6f7a24d2af7374d1",
+          "afterGitBlobOrNull": "337ffa88fd88d8a480bf1fc269a1f2d432cde6be"
+        },
+        {
+          "path": "src/services/__tests__/YouTubeMetadataService.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "5c0323df1223543b6cc9b78cd8c6a88bc45c168d"
+        },
+        {
+          "path": "src/services/__tests__/YouTubeTranscriptService.test.ts",
+          "beforeGitBlobOrNull": "6fe372762f3bec37dcd52a652210a82c3681b0fc",
+          "afterGitBlobOrNull": "5cd75fd12f6314b1c2b80dd10fb6f8a165f4b902"
+        },
+        {
+          "path": "src/services/managed/ManagedProductIntegrationClient.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "3893ce0c8906a8145bd60cdd390abb65d133cae2"
+        },
+        {
+          "path": "src/services/managed/__tests__/ManagedProductIntegrationClient.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "dedb9a65b4898cb58cf625db1f9e543465ba0085"
+        },
+        {
+          "path": "src/services/web/WebResearchApiService.ts",
+          "beforeGitBlobOrNull": "92829178d69150316a01a7b747536f66be127fe0",
+          "afterGitBlobOrNull": "501448c958ef2f99c651d78aee0baaf39306880b"
+        },
+        {
+          "path": "src/testing/automation/DesktopAutomationBridge.ts",
+          "beforeGitBlobOrNull": "7a82d22f75de99356d03c5f82314b40da74a565c",
+          "afterGitBlobOrNull": "7a82d22f75de99356d03c5f82314b40da74a565c"
+        }
+      ],
+      "predecessorLedger": {
+        "gitBlob": "1076a4fc3049270ec39e89923e3de29e41887a95",
+        "sha256": "62328b5f8f0e9794d027a77dd3eda2408bd2fc783b048cc63d5c94b0b84f7617",
+        "transitionCount": 9,
+        "finalTransitionHash": "fa555cb9aab17626f55ae54dbe783f863ce87188543661689e17a61d1ec5318f"
+      },
+      "previousTransitionHash": "86a282e892961651cc4938384464132a0367d64d2db1a04b6f06404f1cbee81a",
+      "transitionHash": "87651380dae3a4579def33a2a8ac6fda76e7773146238f25b3311dbeac90ac66"
+    },
+    {
+      "sequence": 22,
+      "historicalRecordId": "6981b82e72bbf600394383f7ab11727845e4507627cc3e4d315ee0824f4754ce",
+      "v2OccurrenceId": "6433f27bc64de1c7e00957330d447d9ab20a2affd112a881c03535aeb041344b",
+      "ownerPlan": "026",
+      "from": "present",
+      "to": "removed",
+      "predecessorSourceTree": "c07e41eaf372e57dd169ec73a4f0d97052c23e68",
+      "stagedSourceTree": "641457ed18e923bd64c8337d511fe92f0d3da928",
+      "sourceEvidence": [
+        {
+          "path": "src/css/components/youtube-canvas.css",
+          "beforeGitBlobOrNull": "eef40b431e3487adf7065159915dd3278cc2732b",
+          "afterGitBlobOrNull": "c15fce082de5a64050cc123d4640ffa554ab09e4"
+        },
+        {
+          "path": "src/main.ts",
+          "beforeGitBlobOrNull": "465505c25acaa1b8f1cec0e2f9036030be4e17f1",
+          "afterGitBlobOrNull": "d2a4d00cfa7cb7d2c95df04144accce2d721ddc5"
+        },
+        {
+          "path": "src/modals/YouTubeCanvasModal.ts",
+          "beforeGitBlobOrNull": "90c859bb8a1e899cbc748f5ebad6f19294aec7c7",
+          "afterGitBlobOrNull": "30c4cb6963922f4e389aa44ed05c94aa69da7d6d"
+        },
+        {
+          "path": "src/modals/__tests__/YouTubeCanvasModal.test.ts",
+          "beforeGitBlobOrNull": "cda2983e2b09e13786f863fa411982a5472ec2e4",
+          "afterGitBlobOrNull": "186cb669a46fabb1105a70ca9088ed2f486f7e8d"
+        },
+        {
+          "path": "src/services/ChangeLogService.ts",
+          "beforeGitBlobOrNull": "7da3f034357e1fd6e5072e61fe11574be338cb07",
+          "afterGitBlobOrNull": "95965594cfbe697ae1c0ea480f5a346aaffbc3c6"
+        },
+        {
+          "path": "src/services/VersionCheckerService.ts",
+          "beforeGitBlobOrNull": "755b3b53e34a6f247233454303ec84f20d3f4b2a",
+          "afterGitBlobOrNull": "f25a8e6ec866100f7fb64feb2f8e8cef13b56dd9"
+        },
+        {
+          "path": "src/services/YouTubeMetadataService.ts",
+          "beforeGitBlobOrNull": "31e558dd1eb475abda98c5476d8ff62b9307adb1",
+          "afterGitBlobOrNull": "c59b10cbc794c20d79e97bc1983548a7729c712a"
+        },
+        {
+          "path": "src/services/YouTubeTranscriptService.ts",
+          "beforeGitBlobOrNull": "2bd74a7e128e7095d9ccbe892218cdff4669f929",
+          "afterGitBlobOrNull": "9aed1f984cbdcfaad3e5991e0781a4052a274575"
+        },
+        {
+          "path": "src/services/__tests__/ChangeLogService.test.ts",
+          "beforeGitBlobOrNull": "53ce68d88de25b438e5e9f7cb78557591171f6db",
+          "afterGitBlobOrNull": "1dc1218b0efdbbbf8fd4e9bad38626cba15102a1"
+        },
+        {
+          "path": "src/services/__tests__/VersionCheckerService.test.ts",
+          "beforeGitBlobOrNull": "576d654cbed5bea26c1bb96f38de111eba250b7a",
+          "afterGitBlobOrNull": "cbaa17a1f507f9fc6dd76c5fe34f0242511f02b8"
+        },
+        {
+          "path": "src/services/__tests__/WebResearchApiService.test.ts",
+          "beforeGitBlobOrNull": "83da021d09625c0d19a7109d6f7a24d2af7374d1",
+          "afterGitBlobOrNull": "337ffa88fd88d8a480bf1fc269a1f2d432cde6be"
+        },
+        {
+          "path": "src/services/__tests__/YouTubeMetadataService.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "5c0323df1223543b6cc9b78cd8c6a88bc45c168d"
+        },
+        {
+          "path": "src/services/__tests__/YouTubeTranscriptService.test.ts",
+          "beforeGitBlobOrNull": "6fe372762f3bec37dcd52a652210a82c3681b0fc",
+          "afterGitBlobOrNull": "5cd75fd12f6314b1c2b80dd10fb6f8a165f4b902"
+        },
+        {
+          "path": "src/services/managed/ManagedProductIntegrationClient.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "3893ce0c8906a8145bd60cdd390abb65d133cae2"
+        },
+        {
+          "path": "src/services/managed/__tests__/ManagedProductIntegrationClient.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "dedb9a65b4898cb58cf625db1f9e543465ba0085"
+        },
+        {
+          "path": "src/services/web/WebResearchApiService.ts",
+          "beforeGitBlobOrNull": "92829178d69150316a01a7b747536f66be127fe0",
+          "afterGitBlobOrNull": "501448c958ef2f99c651d78aee0baaf39306880b"
+        },
+        {
+          "path": "src/testing/automation/DesktopAutomationBridge.ts",
+          "beforeGitBlobOrNull": "7a82d22f75de99356d03c5f82314b40da74a565c",
+          "afterGitBlobOrNull": "7a82d22f75de99356d03c5f82314b40da74a565c"
+        }
+      ],
+      "predecessorLedger": {
+        "gitBlob": "1076a4fc3049270ec39e89923e3de29e41887a95",
+        "sha256": "62328b5f8f0e9794d027a77dd3eda2408bd2fc783b048cc63d5c94b0b84f7617",
+        "transitionCount": 9,
+        "finalTransitionHash": "fa555cb9aab17626f55ae54dbe783f863ce87188543661689e17a61d1ec5318f"
+      },
+      "previousTransitionHash": "87651380dae3a4579def33a2a8ac6fda76e7773146238f25b3311dbeac90ac66",
+      "transitionHash": "58d0a3ccec01a594339767e9f383673b303f1e4d26d8ee100c6253d4ea968834"
+    },
+    {
+      "sequence": 23,
+      "historicalRecordId": "2dba1e76a832bc0e067d1526b8a573dc2568ea7202f5f8358b18bcf76c4dad4b",
+      "v2OccurrenceId": "85ed78a13f0300d64969e6907bd43372c906e1476dc3c05610cd5fe63fffecbd",
+      "ownerPlan": "026",
+      "from": "present",
+      "to": "removed",
+      "predecessorSourceTree": "c07e41eaf372e57dd169ec73a4f0d97052c23e68",
+      "stagedSourceTree": "641457ed18e923bd64c8337d511fe92f0d3da928",
+      "sourceEvidence": [
+        {
+          "path": "src/css/components/youtube-canvas.css",
+          "beforeGitBlobOrNull": "eef40b431e3487adf7065159915dd3278cc2732b",
+          "afterGitBlobOrNull": "c15fce082de5a64050cc123d4640ffa554ab09e4"
+        },
+        {
+          "path": "src/main.ts",
+          "beforeGitBlobOrNull": "465505c25acaa1b8f1cec0e2f9036030be4e17f1",
+          "afterGitBlobOrNull": "d2a4d00cfa7cb7d2c95df04144accce2d721ddc5"
+        },
+        {
+          "path": "src/modals/YouTubeCanvasModal.ts",
+          "beforeGitBlobOrNull": "90c859bb8a1e899cbc748f5ebad6f19294aec7c7",
+          "afterGitBlobOrNull": "30c4cb6963922f4e389aa44ed05c94aa69da7d6d"
+        },
+        {
+          "path": "src/modals/__tests__/YouTubeCanvasModal.test.ts",
+          "beforeGitBlobOrNull": "cda2983e2b09e13786f863fa411982a5472ec2e4",
+          "afterGitBlobOrNull": "186cb669a46fabb1105a70ca9088ed2f486f7e8d"
+        },
+        {
+          "path": "src/services/ChangeLogService.ts",
+          "beforeGitBlobOrNull": "7da3f034357e1fd6e5072e61fe11574be338cb07",
+          "afterGitBlobOrNull": "95965594cfbe697ae1c0ea480f5a346aaffbc3c6"
+        },
+        {
+          "path": "src/services/VersionCheckerService.ts",
+          "beforeGitBlobOrNull": "755b3b53e34a6f247233454303ec84f20d3f4b2a",
+          "afterGitBlobOrNull": "f25a8e6ec866100f7fb64feb2f8e8cef13b56dd9"
+        },
+        {
+          "path": "src/services/YouTubeMetadataService.ts",
+          "beforeGitBlobOrNull": "31e558dd1eb475abda98c5476d8ff62b9307adb1",
+          "afterGitBlobOrNull": "c59b10cbc794c20d79e97bc1983548a7729c712a"
+        },
+        {
+          "path": "src/services/YouTubeTranscriptService.ts",
+          "beforeGitBlobOrNull": "2bd74a7e128e7095d9ccbe892218cdff4669f929",
+          "afterGitBlobOrNull": "9aed1f984cbdcfaad3e5991e0781a4052a274575"
+        },
+        {
+          "path": "src/services/__tests__/ChangeLogService.test.ts",
+          "beforeGitBlobOrNull": "53ce68d88de25b438e5e9f7cb78557591171f6db",
+          "afterGitBlobOrNull": "1dc1218b0efdbbbf8fd4e9bad38626cba15102a1"
+        },
+        {
+          "path": "src/services/__tests__/VersionCheckerService.test.ts",
+          "beforeGitBlobOrNull": "576d654cbed5bea26c1bb96f38de111eba250b7a",
+          "afterGitBlobOrNull": "cbaa17a1f507f9fc6dd76c5fe34f0242511f02b8"
+        },
+        {
+          "path": "src/services/__tests__/WebResearchApiService.test.ts",
+          "beforeGitBlobOrNull": "83da021d09625c0d19a7109d6f7a24d2af7374d1",
+          "afterGitBlobOrNull": "337ffa88fd88d8a480bf1fc269a1f2d432cde6be"
+        },
+        {
+          "path": "src/services/__tests__/YouTubeMetadataService.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "5c0323df1223543b6cc9b78cd8c6a88bc45c168d"
+        },
+        {
+          "path": "src/services/__tests__/YouTubeTranscriptService.test.ts",
+          "beforeGitBlobOrNull": "6fe372762f3bec37dcd52a652210a82c3681b0fc",
+          "afterGitBlobOrNull": "5cd75fd12f6314b1c2b80dd10fb6f8a165f4b902"
+        },
+        {
+          "path": "src/services/managed/ManagedProductIntegrationClient.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "3893ce0c8906a8145bd60cdd390abb65d133cae2"
+        },
+        {
+          "path": "src/services/managed/__tests__/ManagedProductIntegrationClient.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "dedb9a65b4898cb58cf625db1f9e543465ba0085"
+        },
+        {
+          "path": "src/services/web/WebResearchApiService.ts",
+          "beforeGitBlobOrNull": "92829178d69150316a01a7b747536f66be127fe0",
+          "afterGitBlobOrNull": "501448c958ef2f99c651d78aee0baaf39306880b"
+        },
+        {
+          "path": "src/testing/automation/DesktopAutomationBridge.ts",
+          "beforeGitBlobOrNull": "7a82d22f75de99356d03c5f82314b40da74a565c",
+          "afterGitBlobOrNull": "7a82d22f75de99356d03c5f82314b40da74a565c"
+        }
+      ],
+      "predecessorLedger": {
+        "gitBlob": "1076a4fc3049270ec39e89923e3de29e41887a95",
+        "sha256": "62328b5f8f0e9794d027a77dd3eda2408bd2fc783b048cc63d5c94b0b84f7617",
+        "transitionCount": 9,
+        "finalTransitionHash": "fa555cb9aab17626f55ae54dbe783f863ce87188543661689e17a61d1ec5318f"
+      },
+      "previousTransitionHash": "58d0a3ccec01a594339767e9f383673b303f1e4d26d8ee100c6253d4ea968834",
+      "transitionHash": "b0f787385528c540402d8aa26f6f8701948f3fb4721142bc12bf71be4a6accce"
+    },
+    {
+      "sequence": 24,
+      "historicalRecordId": "380a6afef4612ce4f2ba962c69b3ac4628cd0b8734f27dbf1eb1a63a9849edec",
+      "v2OccurrenceId": "e4c6a1385659fab4a9bf021d1422c1509d79c9ebba384ad16f239c1ac07b0c1f",
+      "ownerPlan": "026",
+      "from": "present",
+      "to": "removed",
+      "predecessorSourceTree": "c07e41eaf372e57dd169ec73a4f0d97052c23e68",
+      "stagedSourceTree": "641457ed18e923bd64c8337d511fe92f0d3da928",
+      "sourceEvidence": [
+        {
+          "path": "src/css/components/youtube-canvas.css",
+          "beforeGitBlobOrNull": "eef40b431e3487adf7065159915dd3278cc2732b",
+          "afterGitBlobOrNull": "c15fce082de5a64050cc123d4640ffa554ab09e4"
+        },
+        {
+          "path": "src/main.ts",
+          "beforeGitBlobOrNull": "465505c25acaa1b8f1cec0e2f9036030be4e17f1",
+          "afterGitBlobOrNull": "d2a4d00cfa7cb7d2c95df04144accce2d721ddc5"
+        },
+        {
+          "path": "src/modals/YouTubeCanvasModal.ts",
+          "beforeGitBlobOrNull": "90c859bb8a1e899cbc748f5ebad6f19294aec7c7",
+          "afterGitBlobOrNull": "30c4cb6963922f4e389aa44ed05c94aa69da7d6d"
+        },
+        {
+          "path": "src/modals/__tests__/YouTubeCanvasModal.test.ts",
+          "beforeGitBlobOrNull": "cda2983e2b09e13786f863fa411982a5472ec2e4",
+          "afterGitBlobOrNull": "186cb669a46fabb1105a70ca9088ed2f486f7e8d"
+        },
+        {
+          "path": "src/services/ChangeLogService.ts",
+          "beforeGitBlobOrNull": "7da3f034357e1fd6e5072e61fe11574be338cb07",
+          "afterGitBlobOrNull": "95965594cfbe697ae1c0ea480f5a346aaffbc3c6"
+        },
+        {
+          "path": "src/services/VersionCheckerService.ts",
+          "beforeGitBlobOrNull": "755b3b53e34a6f247233454303ec84f20d3f4b2a",
+          "afterGitBlobOrNull": "f25a8e6ec866100f7fb64feb2f8e8cef13b56dd9"
+        },
+        {
+          "path": "src/services/YouTubeMetadataService.ts",
+          "beforeGitBlobOrNull": "31e558dd1eb475abda98c5476d8ff62b9307adb1",
+          "afterGitBlobOrNull": "c59b10cbc794c20d79e97bc1983548a7729c712a"
+        },
+        {
+          "path": "src/services/YouTubeTranscriptService.ts",
+          "beforeGitBlobOrNull": "2bd74a7e128e7095d9ccbe892218cdff4669f929",
+          "afterGitBlobOrNull": "9aed1f984cbdcfaad3e5991e0781a4052a274575"
+        },
+        {
+          "path": "src/services/__tests__/ChangeLogService.test.ts",
+          "beforeGitBlobOrNull": "53ce68d88de25b438e5e9f7cb78557591171f6db",
+          "afterGitBlobOrNull": "1dc1218b0efdbbbf8fd4e9bad38626cba15102a1"
+        },
+        {
+          "path": "src/services/__tests__/VersionCheckerService.test.ts",
+          "beforeGitBlobOrNull": "576d654cbed5bea26c1bb96f38de111eba250b7a",
+          "afterGitBlobOrNull": "cbaa17a1f507f9fc6dd76c5fe34f0242511f02b8"
+        },
+        {
+          "path": "src/services/__tests__/WebResearchApiService.test.ts",
+          "beforeGitBlobOrNull": "83da021d09625c0d19a7109d6f7a24d2af7374d1",
+          "afterGitBlobOrNull": "337ffa88fd88d8a480bf1fc269a1f2d432cde6be"
+        },
+        {
+          "path": "src/services/__tests__/YouTubeMetadataService.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "5c0323df1223543b6cc9b78cd8c6a88bc45c168d"
+        },
+        {
+          "path": "src/services/__tests__/YouTubeTranscriptService.test.ts",
+          "beforeGitBlobOrNull": "6fe372762f3bec37dcd52a652210a82c3681b0fc",
+          "afterGitBlobOrNull": "5cd75fd12f6314b1c2b80dd10fb6f8a165f4b902"
+        },
+        {
+          "path": "src/services/managed/ManagedProductIntegrationClient.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "3893ce0c8906a8145bd60cdd390abb65d133cae2"
+        },
+        {
+          "path": "src/services/managed/__tests__/ManagedProductIntegrationClient.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "dedb9a65b4898cb58cf625db1f9e543465ba0085"
+        },
+        {
+          "path": "src/services/web/WebResearchApiService.ts",
+          "beforeGitBlobOrNull": "92829178d69150316a01a7b747536f66be127fe0",
+          "afterGitBlobOrNull": "501448c958ef2f99c651d78aee0baaf39306880b"
+        },
+        {
+          "path": "src/testing/automation/DesktopAutomationBridge.ts",
+          "beforeGitBlobOrNull": "7a82d22f75de99356d03c5f82314b40da74a565c",
+          "afterGitBlobOrNull": "7a82d22f75de99356d03c5f82314b40da74a565c"
+        }
+      ],
+      "predecessorLedger": {
+        "gitBlob": "1076a4fc3049270ec39e89923e3de29e41887a95",
+        "sha256": "62328b5f8f0e9794d027a77dd3eda2408bd2fc783b048cc63d5c94b0b84f7617",
+        "transitionCount": 9,
+        "finalTransitionHash": "fa555cb9aab17626f55ae54dbe783f863ce87188543661689e17a61d1ec5318f"
+      },
+      "previousTransitionHash": "b0f787385528c540402d8aa26f6f8701948f3fb4721142bc12bf71be4a6accce",
+      "transitionHash": "61ebe2e835e127327ce7aead06578ab2ee2d61aac627d15e8dd61d93cc9c6326"
+    },
+    {
+      "sequence": 25,
+      "historicalRecordId": "565bb258942178f9e8df5a4890522d3804d65aa9a73c52aba50d6de3f5c660f8",
+      "v2OccurrenceId": "8de58e02dd2316de486498644fe0d1e0ecb57c5049e31d89e2f8352889a600f5",
+      "ownerPlan": "026",
+      "from": "present",
+      "to": "removed",
+      "predecessorSourceTree": "c07e41eaf372e57dd169ec73a4f0d97052c23e68",
+      "stagedSourceTree": "641457ed18e923bd64c8337d511fe92f0d3da928",
+      "sourceEvidence": [
+        {
+          "path": "src/css/components/youtube-canvas.css",
+          "beforeGitBlobOrNull": "eef40b431e3487adf7065159915dd3278cc2732b",
+          "afterGitBlobOrNull": "c15fce082de5a64050cc123d4640ffa554ab09e4"
+        },
+        {
+          "path": "src/main.ts",
+          "beforeGitBlobOrNull": "465505c25acaa1b8f1cec0e2f9036030be4e17f1",
+          "afterGitBlobOrNull": "d2a4d00cfa7cb7d2c95df04144accce2d721ddc5"
+        },
+        {
+          "path": "src/modals/YouTubeCanvasModal.ts",
+          "beforeGitBlobOrNull": "90c859bb8a1e899cbc748f5ebad6f19294aec7c7",
+          "afterGitBlobOrNull": "30c4cb6963922f4e389aa44ed05c94aa69da7d6d"
+        },
+        {
+          "path": "src/modals/__tests__/YouTubeCanvasModal.test.ts",
+          "beforeGitBlobOrNull": "cda2983e2b09e13786f863fa411982a5472ec2e4",
+          "afterGitBlobOrNull": "186cb669a46fabb1105a70ca9088ed2f486f7e8d"
+        },
+        {
+          "path": "src/services/ChangeLogService.ts",
+          "beforeGitBlobOrNull": "7da3f034357e1fd6e5072e61fe11574be338cb07",
+          "afterGitBlobOrNull": "95965594cfbe697ae1c0ea480f5a346aaffbc3c6"
+        },
+        {
+          "path": "src/services/VersionCheckerService.ts",
+          "beforeGitBlobOrNull": "755b3b53e34a6f247233454303ec84f20d3f4b2a",
+          "afterGitBlobOrNull": "f25a8e6ec866100f7fb64feb2f8e8cef13b56dd9"
+        },
+        {
+          "path": "src/services/YouTubeMetadataService.ts",
+          "beforeGitBlobOrNull": "31e558dd1eb475abda98c5476d8ff62b9307adb1",
+          "afterGitBlobOrNull": "c59b10cbc794c20d79e97bc1983548a7729c712a"
+        },
+        {
+          "path": "src/services/YouTubeTranscriptService.ts",
+          "beforeGitBlobOrNull": "2bd74a7e128e7095d9ccbe892218cdff4669f929",
+          "afterGitBlobOrNull": "9aed1f984cbdcfaad3e5991e0781a4052a274575"
+        },
+        {
+          "path": "src/services/__tests__/ChangeLogService.test.ts",
+          "beforeGitBlobOrNull": "53ce68d88de25b438e5e9f7cb78557591171f6db",
+          "afterGitBlobOrNull": "1dc1218b0efdbbbf8fd4e9bad38626cba15102a1"
+        },
+        {
+          "path": "src/services/__tests__/VersionCheckerService.test.ts",
+          "beforeGitBlobOrNull": "576d654cbed5bea26c1bb96f38de111eba250b7a",
+          "afterGitBlobOrNull": "cbaa17a1f507f9fc6dd76c5fe34f0242511f02b8"
+        },
+        {
+          "path": "src/services/__tests__/WebResearchApiService.test.ts",
+          "beforeGitBlobOrNull": "83da021d09625c0d19a7109d6f7a24d2af7374d1",
+          "afterGitBlobOrNull": "337ffa88fd88d8a480bf1fc269a1f2d432cde6be"
+        },
+        {
+          "path": "src/services/__tests__/YouTubeMetadataService.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "5c0323df1223543b6cc9b78cd8c6a88bc45c168d"
+        },
+        {
+          "path": "src/services/__tests__/YouTubeTranscriptService.test.ts",
+          "beforeGitBlobOrNull": "6fe372762f3bec37dcd52a652210a82c3681b0fc",
+          "afterGitBlobOrNull": "5cd75fd12f6314b1c2b80dd10fb6f8a165f4b902"
+        },
+        {
+          "path": "src/services/managed/ManagedProductIntegrationClient.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "3893ce0c8906a8145bd60cdd390abb65d133cae2"
+        },
+        {
+          "path": "src/services/managed/__tests__/ManagedProductIntegrationClient.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "dedb9a65b4898cb58cf625db1f9e543465ba0085"
+        },
+        {
+          "path": "src/services/web/WebResearchApiService.ts",
+          "beforeGitBlobOrNull": "92829178d69150316a01a7b747536f66be127fe0",
+          "afterGitBlobOrNull": "501448c958ef2f99c651d78aee0baaf39306880b"
+        },
+        {
+          "path": "src/testing/automation/DesktopAutomationBridge.ts",
+          "beforeGitBlobOrNull": "7a82d22f75de99356d03c5f82314b40da74a565c",
+          "afterGitBlobOrNull": "7a82d22f75de99356d03c5f82314b40da74a565c"
+        }
+      ],
+      "predecessorLedger": {
+        "gitBlob": "1076a4fc3049270ec39e89923e3de29e41887a95",
+        "sha256": "62328b5f8f0e9794d027a77dd3eda2408bd2fc783b048cc63d5c94b0b84f7617",
+        "transitionCount": 9,
+        "finalTransitionHash": "fa555cb9aab17626f55ae54dbe783f863ce87188543661689e17a61d1ec5318f"
+      },
+      "previousTransitionHash": "61ebe2e835e127327ce7aead06578ab2ee2d61aac627d15e8dd61d93cc9c6326",
+      "transitionHash": "12743f42482596febb68848ee98a6288806e9508d815d5d37b2f997f978e13ae"
+    },
+    {
+      "sequence": 26,
+      "historicalRecordId": "234f94e92812cd883bd99f4f11d0c13b1b595471d30808fa035c81f6d37fb9fd",
+      "v2OccurrenceId": "deeb6d0fd9b55ea87a49f2a070c7992cbc893c6859dc1465b59510a47e5a8a72",
+      "ownerPlan": "026",
+      "from": "present",
+      "to": "removed",
+      "predecessorSourceTree": "c07e41eaf372e57dd169ec73a4f0d97052c23e68",
+      "stagedSourceTree": "641457ed18e923bd64c8337d511fe92f0d3da928",
+      "sourceEvidence": [
+        {
+          "path": "src/css/components/youtube-canvas.css",
+          "beforeGitBlobOrNull": "eef40b431e3487adf7065159915dd3278cc2732b",
+          "afterGitBlobOrNull": "c15fce082de5a64050cc123d4640ffa554ab09e4"
+        },
+        {
+          "path": "src/main.ts",
+          "beforeGitBlobOrNull": "465505c25acaa1b8f1cec0e2f9036030be4e17f1",
+          "afterGitBlobOrNull": "d2a4d00cfa7cb7d2c95df04144accce2d721ddc5"
+        },
+        {
+          "path": "src/modals/YouTubeCanvasModal.ts",
+          "beforeGitBlobOrNull": "90c859bb8a1e899cbc748f5ebad6f19294aec7c7",
+          "afterGitBlobOrNull": "30c4cb6963922f4e389aa44ed05c94aa69da7d6d"
+        },
+        {
+          "path": "src/modals/__tests__/YouTubeCanvasModal.test.ts",
+          "beforeGitBlobOrNull": "cda2983e2b09e13786f863fa411982a5472ec2e4",
+          "afterGitBlobOrNull": "186cb669a46fabb1105a70ca9088ed2f486f7e8d"
+        },
+        {
+          "path": "src/services/ChangeLogService.ts",
+          "beforeGitBlobOrNull": "7da3f034357e1fd6e5072e61fe11574be338cb07",
+          "afterGitBlobOrNull": "95965594cfbe697ae1c0ea480f5a346aaffbc3c6"
+        },
+        {
+          "path": "src/services/VersionCheckerService.ts",
+          "beforeGitBlobOrNull": "755b3b53e34a6f247233454303ec84f20d3f4b2a",
+          "afterGitBlobOrNull": "f25a8e6ec866100f7fb64feb2f8e8cef13b56dd9"
+        },
+        {
+          "path": "src/services/YouTubeMetadataService.ts",
+          "beforeGitBlobOrNull": "31e558dd1eb475abda98c5476d8ff62b9307adb1",
+          "afterGitBlobOrNull": "c59b10cbc794c20d79e97bc1983548a7729c712a"
+        },
+        {
+          "path": "src/services/YouTubeTranscriptService.ts",
+          "beforeGitBlobOrNull": "2bd74a7e128e7095d9ccbe892218cdff4669f929",
+          "afterGitBlobOrNull": "9aed1f984cbdcfaad3e5991e0781a4052a274575"
+        },
+        {
+          "path": "src/services/__tests__/ChangeLogService.test.ts",
+          "beforeGitBlobOrNull": "53ce68d88de25b438e5e9f7cb78557591171f6db",
+          "afterGitBlobOrNull": "1dc1218b0efdbbbf8fd4e9bad38626cba15102a1"
+        },
+        {
+          "path": "src/services/__tests__/VersionCheckerService.test.ts",
+          "beforeGitBlobOrNull": "576d654cbed5bea26c1bb96f38de111eba250b7a",
+          "afterGitBlobOrNull": "cbaa17a1f507f9fc6dd76c5fe34f0242511f02b8"
+        },
+        {
+          "path": "src/services/__tests__/WebResearchApiService.test.ts",
+          "beforeGitBlobOrNull": "83da021d09625c0d19a7109d6f7a24d2af7374d1",
+          "afterGitBlobOrNull": "337ffa88fd88d8a480bf1fc269a1f2d432cde6be"
+        },
+        {
+          "path": "src/services/__tests__/YouTubeMetadataService.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "5c0323df1223543b6cc9b78cd8c6a88bc45c168d"
+        },
+        {
+          "path": "src/services/__tests__/YouTubeTranscriptService.test.ts",
+          "beforeGitBlobOrNull": "6fe372762f3bec37dcd52a652210a82c3681b0fc",
+          "afterGitBlobOrNull": "5cd75fd12f6314b1c2b80dd10fb6f8a165f4b902"
+        },
+        {
+          "path": "src/services/managed/ManagedProductIntegrationClient.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "3893ce0c8906a8145bd60cdd390abb65d133cae2"
+        },
+        {
+          "path": "src/services/managed/__tests__/ManagedProductIntegrationClient.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "dedb9a65b4898cb58cf625db1f9e543465ba0085"
+        },
+        {
+          "path": "src/services/web/WebResearchApiService.ts",
+          "beforeGitBlobOrNull": "92829178d69150316a01a7b747536f66be127fe0",
+          "afterGitBlobOrNull": "501448c958ef2f99c651d78aee0baaf39306880b"
+        },
+        {
+          "path": "src/testing/automation/DesktopAutomationBridge.ts",
+          "beforeGitBlobOrNull": "7a82d22f75de99356d03c5f82314b40da74a565c",
+          "afterGitBlobOrNull": "7a82d22f75de99356d03c5f82314b40da74a565c"
+        }
+      ],
+      "predecessorLedger": {
+        "gitBlob": "1076a4fc3049270ec39e89923e3de29e41887a95",
+        "sha256": "62328b5f8f0e9794d027a77dd3eda2408bd2fc783b048cc63d5c94b0b84f7617",
+        "transitionCount": 9,
+        "finalTransitionHash": "fa555cb9aab17626f55ae54dbe783f863ce87188543661689e17a61d1ec5318f"
+      },
+      "previousTransitionHash": "12743f42482596febb68848ee98a6288806e9508d815d5d37b2f997f978e13ae",
+      "transitionHash": "40fa79314b2a70c171cfd01df3d28d1be73122dce6730e7f76786cbc9d2b054c"
+    },
+    {
+      "sequence": 27,
+      "historicalRecordId": "ee4e36b5b65b017f818e8a80a91fea62cea8815b43bd27ecbc2f592801c23d60",
+      "v2OccurrenceId": "9fe8d6c993282e7cbb7effb66b13af76e480b6f115ba06a86da700f8075a4627",
+      "ownerPlan": "026",
+      "from": "present",
+      "to": "removed",
+      "predecessorSourceTree": "c07e41eaf372e57dd169ec73a4f0d97052c23e68",
+      "stagedSourceTree": "641457ed18e923bd64c8337d511fe92f0d3da928",
+      "sourceEvidence": [
+        {
+          "path": "src/css/components/youtube-canvas.css",
+          "beforeGitBlobOrNull": "eef40b431e3487adf7065159915dd3278cc2732b",
+          "afterGitBlobOrNull": "c15fce082de5a64050cc123d4640ffa554ab09e4"
+        },
+        {
+          "path": "src/main.ts",
+          "beforeGitBlobOrNull": "465505c25acaa1b8f1cec0e2f9036030be4e17f1",
+          "afterGitBlobOrNull": "d2a4d00cfa7cb7d2c95df04144accce2d721ddc5"
+        },
+        {
+          "path": "src/modals/YouTubeCanvasModal.ts",
+          "beforeGitBlobOrNull": "90c859bb8a1e899cbc748f5ebad6f19294aec7c7",
+          "afterGitBlobOrNull": "30c4cb6963922f4e389aa44ed05c94aa69da7d6d"
+        },
+        {
+          "path": "src/modals/__tests__/YouTubeCanvasModal.test.ts",
+          "beforeGitBlobOrNull": "cda2983e2b09e13786f863fa411982a5472ec2e4",
+          "afterGitBlobOrNull": "186cb669a46fabb1105a70ca9088ed2f486f7e8d"
+        },
+        {
+          "path": "src/services/ChangeLogService.ts",
+          "beforeGitBlobOrNull": "7da3f034357e1fd6e5072e61fe11574be338cb07",
+          "afterGitBlobOrNull": "95965594cfbe697ae1c0ea480f5a346aaffbc3c6"
+        },
+        {
+          "path": "src/services/VersionCheckerService.ts",
+          "beforeGitBlobOrNull": "755b3b53e34a6f247233454303ec84f20d3f4b2a",
+          "afterGitBlobOrNull": "f25a8e6ec866100f7fb64feb2f8e8cef13b56dd9"
+        },
+        {
+          "path": "src/services/YouTubeMetadataService.ts",
+          "beforeGitBlobOrNull": "31e558dd1eb475abda98c5476d8ff62b9307adb1",
+          "afterGitBlobOrNull": "c59b10cbc794c20d79e97bc1983548a7729c712a"
+        },
+        {
+          "path": "src/services/YouTubeTranscriptService.ts",
+          "beforeGitBlobOrNull": "2bd74a7e128e7095d9ccbe892218cdff4669f929",
+          "afterGitBlobOrNull": "9aed1f984cbdcfaad3e5991e0781a4052a274575"
+        },
+        {
+          "path": "src/services/__tests__/ChangeLogService.test.ts",
+          "beforeGitBlobOrNull": "53ce68d88de25b438e5e9f7cb78557591171f6db",
+          "afterGitBlobOrNull": "1dc1218b0efdbbbf8fd4e9bad38626cba15102a1"
+        },
+        {
+          "path": "src/services/__tests__/VersionCheckerService.test.ts",
+          "beforeGitBlobOrNull": "576d654cbed5bea26c1bb96f38de111eba250b7a",
+          "afterGitBlobOrNull": "cbaa17a1f507f9fc6dd76c5fe34f0242511f02b8"
+        },
+        {
+          "path": "src/services/__tests__/WebResearchApiService.test.ts",
+          "beforeGitBlobOrNull": "83da021d09625c0d19a7109d6f7a24d2af7374d1",
+          "afterGitBlobOrNull": "337ffa88fd88d8a480bf1fc269a1f2d432cde6be"
+        },
+        {
+          "path": "src/services/__tests__/YouTubeMetadataService.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "5c0323df1223543b6cc9b78cd8c6a88bc45c168d"
+        },
+        {
+          "path": "src/services/__tests__/YouTubeTranscriptService.test.ts",
+          "beforeGitBlobOrNull": "6fe372762f3bec37dcd52a652210a82c3681b0fc",
+          "afterGitBlobOrNull": "5cd75fd12f6314b1c2b80dd10fb6f8a165f4b902"
+        },
+        {
+          "path": "src/services/managed/ManagedProductIntegrationClient.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "3893ce0c8906a8145bd60cdd390abb65d133cae2"
+        },
+        {
+          "path": "src/services/managed/__tests__/ManagedProductIntegrationClient.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "dedb9a65b4898cb58cf625db1f9e543465ba0085"
+        },
+        {
+          "path": "src/services/web/WebResearchApiService.ts",
+          "beforeGitBlobOrNull": "92829178d69150316a01a7b747536f66be127fe0",
+          "afterGitBlobOrNull": "501448c958ef2f99c651d78aee0baaf39306880b"
+        },
+        {
+          "path": "src/testing/automation/DesktopAutomationBridge.ts",
+          "beforeGitBlobOrNull": "7a82d22f75de99356d03c5f82314b40da74a565c",
+          "afterGitBlobOrNull": "7a82d22f75de99356d03c5f82314b40da74a565c"
+        }
+      ],
+      "predecessorLedger": {
+        "gitBlob": "1076a4fc3049270ec39e89923e3de29e41887a95",
+        "sha256": "62328b5f8f0e9794d027a77dd3eda2408bd2fc783b048cc63d5c94b0b84f7617",
+        "transitionCount": 9,
+        "finalTransitionHash": "fa555cb9aab17626f55ae54dbe783f863ce87188543661689e17a61d1ec5318f"
+      },
+      "previousTransitionHash": "40fa79314b2a70c171cfd01df3d28d1be73122dce6730e7f76786cbc9d2b054c",
+      "transitionHash": "0521e3f5718adc9b61e6b02be1b350420e633bdbdb02f46d994fc29104f342fb"
     }
   ]
 }

@@ -70,9 +70,10 @@ import { type Extension } from "@codemirror/state";
 import type { StudioService } from "./studio/StudioService";
 import { SYSTEMSCULPT_STUDIO_VIEW_TYPE } from "./core/plugin/viewTypes";
 import type { DesktopAutomationBridge } from "./testing/automation/DesktopAutomationBridge";
-import { API_BASE_URL } from "./constants/api";
+import { API_BASE_URL, WEBSITE_API_BASE_URL } from "./constants/api";
 import { ManagedCapabilityClient } from "./services/managed/ManagedCapabilityClient";
 import { ManagedCapabilityClientFactory } from "./services/managed/ManagedCapabilityClientFactory";
+import { ManagedProductIntegrationClient } from "./services/managed/ManagedProductIntegrationClient";
 
 type ViewManagerModule = typeof import("./core/plugin/views");
 type CommandManagerModule = typeof import("./core/plugin/commands");
@@ -166,6 +167,7 @@ export default class SystemSculptPlugin extends Plugin {
   private fileExplorerStudioButtonManager: FileExplorerStudioButtonManager | null = null;
   private desktopAutomationBridge: DesktopAutomationBridge | null = null;
   private managedCapabilityClient: ManagedCapabilityClient | null = null;
+  private managedProductIntegrationClient: ManagedProductIntegrationClient | null = null;
   /** Live-reconfigurable slot for the relative line number gutter editor extension. */
   private readonly relativeLineNumberExtensions: Extension[] = [];
   private relativeLineNumbersApplied = false;
@@ -196,6 +198,18 @@ export default class SystemSculptPlugin extends Plugin {
       licenseKey: () => this.settings.licenseKey,
     });
     return this.managedCapabilityClient;
+  }
+
+  public getManagedProductIntegrationClient(): ManagedProductIntegrationClient {
+    if (!this.managedProductIntegrationClient) {
+      this.managedProductIntegrationClient = new ManagedProductIntegrationClient({
+        baseUrl: WEBSITE_API_BASE_URL.replace(/\/api\/plugin\/?$/, ""),
+        pluginVersion: this.manifest.version,
+        licenseKey: () => this.settings.licenseKey,
+        acquireAdmission: () => this.getManagedCapabilityClient().getAdmission(),
+      });
+    }
+    return this.managedProductIntegrationClient;
   }
 
   public get modelService(): UnifiedModelService {
@@ -2156,6 +2170,7 @@ export default class SystemSculptPlugin extends Plugin {
       RuntimeIncompatibilityService.clearInstance();
       SystemSculptService.clearInstance(); // Clear SystemSculptService singleton
       this.managedCapabilityClient = null;
+      this.managedProductIntegrationClient = null;
       
       // Clear service references without reassignment
       // @ts-ignore - Cleanup is handled by garbage collection
@@ -2489,11 +2504,6 @@ export default class SystemSculptPlugin extends Plugin {
     }
 
     this.isPreloadingDone = true;
-
-    // Best-effort warmup so changelog works offline and avoids repeated GitHub calls.
-    void import("./services/ChangeLogService")
-      .then(({ ChangeLogService }) => ChangeLogService.warmCache(this))
-      .catch(() => {});
 
     // Migrate legacy CustomProvider[] API keys into Pi auth storage (one-time, desktop only).
     if (

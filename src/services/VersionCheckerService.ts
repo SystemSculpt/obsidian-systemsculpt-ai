@@ -3,11 +3,9 @@
  * Handles checking for updates by comparing the current plugin version
  * with the latest release from the GitHub repository.
  */
-import { requestUrl, Notice, App } from "obsidian";
+import { Notice, App } from "obsidian";
 import SystemSculptPlugin from "../main";
 import { DEVELOPMENT_MODE } from "../constants/api";
-import { GITHUB_API } from "../constants/externalServices";
-import { API_BASE_URL, SYSTEMSCULPT_API_ENDPOINTS } from "../constants/api";
 import { compareNumericVersions, parseNumericVersion } from "../utils/semver";
 
 export interface VersionInfo {
@@ -563,33 +561,13 @@ export class VersionCheckerService {
     }
   }
 
-  /**
-   * Fetches the latest version from GitHub releases
-   * @returns The latest version string
-   */
+  /** Fetches the public latest-release record through the fixed SystemSculpt route. */
   private async fetchLatestVersion(): Promise<string> {
-    // Prefer our server endpoint for latest version to avoid GitHub rate limits
-    const apiUrl = `${API_BASE_URL}${SYSTEMSCULPT_API_ENDPOINTS.PLUGINS.LATEST(this.pluginId)}`;
-    
     try {
-      const { httpRequest } = await import('../utils/httpClient');
-      const response = await httpRequest({
-        url: apiUrl,
-        method: 'GET',
-        headers: { "Accept": "application/json" }
-      });
-
-      if (response.status === 403) {
-        return this.currentVersion;
-      }
-
-      if (!response.status || response.status !== 200) {
-        // Gracefully degrade on network errors in Obsidian Electron (e.g., net::ERR_FAILED)
-        return this.currentVersion;
-      }
-
-      const data = response.json || (response.text ? JSON.parse(response.text) : {});
-      const version = data?.data?.latestVersion;
+      const response = await this.plugin
+        .getManagedProductIntegrationClient()
+        .latestPluginRelease();
+      const version = response.data.latestVersion;
       // Only trust a strictly-numeric version string. A malformed/sentinel value
       // ("latest", "v5.8.1-beta", an HTML error page, "99.99.99") must fail safe
       // to "you're up to date" rather than trigger a false update loop (#168).

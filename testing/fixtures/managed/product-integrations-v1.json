@@ -1,0 +1,77 @@
+{
+  "contract_version": "product-integrations-v1",
+  "negotiation_header": {
+    "name": "x-systemsculpt-product-contract",
+    "value": "product-integrations-v1"
+  },
+  "request_id_header": "x-request-id",
+  "error_envelope": {
+    "status": "error",
+    "fields": ["status", "error", "requestId"],
+    "error_fields": ["code", "message"]
+  },
+  "error_codes": [
+    "invalid_request",
+    "authentication_failed",
+    "version_unsupported",
+    "idempotency_required",
+    "payment_required",
+    "rate_limited",
+    "temporarily_unavailable",
+    "not_found",
+    "operation_failed",
+    "request_cancelled"
+  ],
+  "forbidden_response_fields": [
+    "provider",
+    "upstream",
+    "upstreamHostname",
+    "credential",
+    "token",
+    "apiKey",
+    "model",
+    "framework"
+  ],
+  "operations": {
+    "web_search": {
+      "method": "POST",
+      "path": "/api/plugin/web/search",
+      "auth": "license",
+      "plugin_version_gate": true,
+      "idempotency": "required",
+      "request_fields": ["query", "max_results"],
+      "response_fields": ["query", "results", "fetchedAt"],
+      "cancellation": "request_abort_propagated"
+    },
+    "web_fetch": {
+      "method": "POST",
+      "path": "/api/plugin/web/fetch",
+      "auth": "license",
+      "plugin_version_gate": true,
+      "idempotency": "required",
+      "request_fields": ["url", "max_chars"],
+      "response_fields": ["url", "finalUrl", "title", "markdown", "contentType", "fetchedAt", "truncated"],
+      "output": "bounded_markdown",
+      "cancellation": "request_abort_propagated"
+    },
+    "youtube_transcript": {
+      "method": "POST",
+      "path": "/api/plugin/youtube/transcripts",
+      "status_method": "GET",
+      "status_path": "/api/plugin/youtube/transcripts/{jobId}",
+      "auth": "license",
+      "plugin_version_gate": true,
+      "idempotency": "required_on_start",
+      "response_discriminants": ["cached", "synchronous", "job_started", "pending", "completed", "failed"],
+      "cancellation": "client_abort_stops_response_wait; dispatched_upstream_work_may_complete"
+    },
+    "plugin_release_info": {
+      "method": "GET",
+      "path": "/api/plugin/plugins/{pluginId}/latest",
+      "auth": "public",
+      "query_fields": ["includePrerelease"],
+      "response_fields": ["status", "data"],
+      "data_fields": ["pluginId", "latestVersion", "releaseUrl", "publishedAt", "critical", "yanked"]
+    }
+  }
+}

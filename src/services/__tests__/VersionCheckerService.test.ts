@@ -3,11 +3,7 @@
  */
 import { App, Notice } from "obsidian";
 import { VersionCheckerService, VersionInfo } from "../VersionCheckerService";
-
-// Mock httpClient
-jest.mock("../../utils/httpClient", () => ({
-  httpRequest: jest.fn(),
-}));
+import { ManagedProductIntegrationError } from "../managed/ManagedProductIntegrationClient";
 
 // Mock ChangeLogModal
 jest.mock("../../modals/ChangeLogModal", () => ({
@@ -31,6 +27,19 @@ describe("VersionCheckerService", () => {
   let app: App;
   let plugin: any;
   let service: VersionCheckerService;
+  let latestPluginRelease: jest.Mock;
+
+  const release = (latestVersion: string) => ({
+    status: "success",
+    data: {
+      pluginId: "systemsculpt-ai",
+      latestVersion,
+      releaseUrl: null,
+      publishedAt: null,
+      critical: false,
+      yanked: false,
+    },
+  });
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -43,6 +52,7 @@ describe("VersionCheckerService", () => {
     localStorage.clear();
 
     app = new App();
+    latestPluginRelease = jest.fn();
     plugin = {
       settings: {
         showUpdateNotifications: true,
@@ -51,6 +61,7 @@ describe("VersionCheckerService", () => {
       getSettingsManager: jest.fn().mockReturnValue({
         updateSettings: jest.fn().mockResolvedValue(undefined),
       }),
+      getManagedProductIntegrationClient: jest.fn(() => ({ latestPluginRelease })),
     };
 
     service = VersionCheckerService.getInstance("1.0.0", app, plugin);
@@ -109,40 +120,28 @@ describe("VersionCheckerService", () => {
 
   describe("checkVersion", () => {
     it("returns cached result if not expired", async () => {
-      const { httpRequest } = await import("../../utils/httpClient");
-      (httpRequest as jest.Mock).mockResolvedValue({
-        status: 200,
-        json: { data: { latestVersion: "1.0.0" } },
-      });
+      latestPluginRelease.mockResolvedValue(release("1.0.0"));
 
       // First call
       const result1 = await service.checkVersion();
       // Second call should use cache
       const result2 = await service.checkVersion();
 
-      expect(httpRequest).toHaveBeenCalledTimes(1);
+      expect(latestPluginRelease).toHaveBeenCalledTimes(1);
       expect(result2).toEqual(result1);
     });
 
     it("fetches fresh result when forceRefresh is true", async () => {
-      const { httpRequest } = await import("../../utils/httpClient");
-      (httpRequest as jest.Mock).mockResolvedValue({
-        status: 200,
-        json: { data: { latestVersion: "1.0.0" } },
-      });
+      latestPluginRelease.mockResolvedValue(release("1.0.0"));
 
       await service.checkVersion();
       await service.checkVersion(true);
 
-      expect(httpRequest).toHaveBeenCalledTimes(2);
+      expect(latestPluginRelease).toHaveBeenCalledTimes(2);
     });
 
     it("returns isLatest true when on latest version", async () => {
-      const { httpRequest } = await import("../../utils/httpClient");
-      (httpRequest as jest.Mock).mockResolvedValue({
-        status: 200,
-        json: { data: { latestVersion: "1.0.0" } },
-      });
+      latestPluginRelease.mockResolvedValue(release("1.0.0"));
 
       const result = await service.checkVersion();
 
@@ -152,11 +151,7 @@ describe("VersionCheckerService", () => {
     });
 
     it("returns isLatest false when update available", async () => {
-      const { httpRequest } = await import("../../utils/httpClient");
-      (httpRequest as jest.Mock).mockResolvedValue({
-        status: 200,
-        json: { data: { latestVersion: "2.0.0" } },
-      });
+      latestPluginRelease.mockResolvedValue(release("2.0.0"));
 
       const result = await service.checkVersion();
 
@@ -165,8 +160,7 @@ describe("VersionCheckerService", () => {
     });
 
     it("handles API errors gracefully", async () => {
-      const { httpRequest } = await import("../../utils/httpClient");
-      (httpRequest as jest.Mock).mockRejectedValue(new Error("Network error"));
+      latestPluginRelease.mockRejectedValue(new Error("Network error"));
 
       const result = await service.checkVersion();
 
@@ -175,11 +169,10 @@ describe("VersionCheckerService", () => {
       expect(result.latestVersion).toBe("1.0.0"); // Falls back to current version
     });
 
-    it("handles 403 rate limit errors", async () => {
-      const { httpRequest } = await import("../../utils/httpClient");
-      (httpRequest as jest.Mock).mockResolvedValue({
-        status: 403,
-      });
+    it("handles typed first-party rate limit errors", async () => {
+      latestPluginRelease.mockRejectedValue(
+        new ManagedProductIntegrationError("rate_limited", "Please retry later.", 429, "request-1"),
+      );
 
       const result = await service.checkVersion();
 
@@ -187,12 +180,8 @@ describe("VersionCheckerService", () => {
     });
 
     it("ignores a malformed remote latestVersion and stays on latest (#168)", async () => {
-      const { httpRequest } = await import("../../utils/httpClient");
       for (const bad of ["latest", "v2.0.0-beta", "<html>error</html>", ""]) {
-        (httpRequest as jest.Mock).mockResolvedValue({
-          status: 200,
-          json: { data: { latestVersion: bad } },
-        });
+        latestPluginRelease.mockResolvedValue(release(bad));
 
         const result = await service.checkVersion(true);
 
@@ -203,11 +192,7 @@ describe("VersionCheckerService", () => {
     });
 
     it("includes releaseUrl and updateUrl", async () => {
-      const { httpRequest } = await import("../../utils/httpClient");
-      (httpRequest as jest.Mock).mockResolvedValue({
-        status: 200,
-        json: { data: { latestVersion: "1.0.0" } },
-      });
+      latestPluginRelease.mockResolvedValue(release("1.0.0"));
 
       const result = await service.checkVersion();
 
@@ -364,16 +349,12 @@ describe("VersionCheckerService", () => {
 
   describe("checkForUpdatesOnStartup", () => {
     it("waits for delay before checking", async () => {
-      const { httpRequest } = await import("../../utils/httpClient");
-      (httpRequest as jest.Mock).mockResolvedValue({
-        status: 200,
-        json: { data: { latestVersion: "1.0.0" } },
-      });
+      latestPluginRelease.mockResolvedValue(release("1.0.0"));
 
       const promise = service.checkForUpdatesOnStartup(1000);
 
       // Should not have made request yet
-      expect(httpRequest).not.toHaveBeenCalled();
+      expect(latestPluginRelease).not.toHaveBeenCalled();
 
       // Advance timer
       jest.advanceTimersByTime(1000);
@@ -386,11 +367,7 @@ describe("VersionCheckerService", () => {
 
     it("does not check if notifications disabled", async () => {
       plugin.settings.showUpdateNotifications = false;
-      const { httpRequest } = await import("../../utils/httpClient");
-      (httpRequest as jest.Mock).mockResolvedValue({
-        status: 200,
-        json: { data: { latestVersion: "2.0.0" } },
-      });
+      latestPluginRelease.mockResolvedValue(release("2.0.0"));
 
       const promise = service.checkForUpdatesOnStartup(100);
 
@@ -402,11 +379,7 @@ describe("VersionCheckerService", () => {
 
     it("shows post-update drawer if version increased", async () => {
       plugin.settings.lastKnownVersion = "0.9.0"; // Previous version
-      const { httpRequest } = await import("../../utils/httpClient");
-      (httpRequest as jest.Mock).mockResolvedValue({
-        status: 200,
-        json: { data: { latestVersion: "1.0.0" } },
-      });
+      latestPluginRelease.mockResolvedValue(release("1.0.0"));
 
       VersionCheckerService.clearInstance();
       service = VersionCheckerService.getInstance("1.0.0", app, plugin);

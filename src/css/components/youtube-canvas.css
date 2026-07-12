@@ -80,6 +80,20 @@
   object-fit: cover;
 }
 
+.ss-youtube-canvas-modal__thumbnail-placeholder {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+  color: var(--ss-ink-muted);
+  background: var(--ss-surface-2);
+}
+
+.ss-youtube-canvas-modal__thumbnail-placeholder svg {
+  width: 32px;
+  height: 32px;
+}
+
 .ss-youtube-canvas-modal__info {
   min-width: 0;
 }

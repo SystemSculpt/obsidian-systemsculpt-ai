@@ -323,9 +323,8 @@ export class YouTubeCanvasModal extends StandardModal {
         this.tabContent.empty();
       }
 
-      // Only fetch metadata up front.
-      // Caption languages are sourced from Supadata transcript metadata (returned by our backend)
-      // after "Get Transcript", which avoids fragile YouTube HTML scraping and extra network calls.
+      // Build the preview locally. Caption languages and transcript metadata
+      // arrive only after the managed transcript request.
       const metadata = await this.metadataService.getMetadata(url);
 
       this.metadata = metadata;
@@ -354,12 +353,17 @@ export class YouTubeCanvasModal extends StandardModal {
     this.previewSection.style.display = "flex";
 
     const thumbnailContainer = this.previewSection.createDiv("ss-youtube-canvas-modal__thumbnail");
-    thumbnailContainer.createEl("img", {
-      attr: {
-        src: this.metadataService.getThumbnailUrl(this.metadata.videoId, "mq"),
-        alt: this.metadata.title,
-      },
-    });
+    if (this.metadata.thumbnailDataUrl) {
+      thumbnailContainer.createEl("img", {
+        attr: { src: this.metadata.thumbnailDataUrl, alt: this.metadata.title },
+      });
+    } else {
+      const placeholder = thumbnailContainer.createDiv({
+        cls: "ss-youtube-canvas-modal__thumbnail-placeholder",
+        attr: { "aria-label": "YouTube video preview" },
+      });
+      setIcon(placeholder, "youtube");
+    }
 
     const infoContainer = this.previewSection.createDiv("ss-youtube-canvas-modal__info");
     infoContainer.createDiv({
