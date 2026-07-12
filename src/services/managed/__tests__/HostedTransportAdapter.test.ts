@@ -64,6 +64,13 @@ describe("HostedTransportAdapter", () => {
     expect((await adapter.getAdmission()).outcome).toBe("temporarily_unavailable");
   });
 
+  it.each([
+    ["key", "6", true], ["", "6", false], ["key", "", false], ["   ", "6", false], ["key", "   ", false],
+  ])("preflights non-empty managed Chat configuration without returning credentials", (license, version, expected) => {
+    const adapter = new HostedTransportAdapter({ baseUrl: "https://api.test", pluginVersion: version, licenseKey: () => license });
+    expect(adapter.hasManagedChatConfiguration()).toBe(expected);
+  });
+
   it("adds operation contract headers and only explicit idempotency keys", async () => {
     const adapter = new HostedTransportAdapter({ baseUrl: "https://api.test", pluginVersion: "6", licenseKey: () => " key " });
     await adapter.request({ path: "/op", method: "POST", body: { a: 1 }, capability: "embeddings", idempotencyKey: "idem" });

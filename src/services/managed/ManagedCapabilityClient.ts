@@ -2,7 +2,7 @@ import { ManagedAdmission } from "./ManagedAdmission";
 import { HostedTransportAdapter } from "./adapters/HostedTransportAdapter";
 import {
   ManagedAdmissionOutcome, ManagedAllowedLease, ManagedCapabilityAlias, ManagedChatLeaseResult, ManagedLease,
-  ManagedRequestContractId, ManagedTransportOperation,
+  ManagedRequestContractId, ManagedTransportOperation, ManagedTransportResult,
 } from "./ManagedTypes";
 
 function deepFreeze<T>(value: T, seen = new WeakSet<object>()): T {
@@ -34,6 +34,36 @@ export class ManagedCapabilityClient {
   request(operation: ClientOperation) { return this.execute("request", operation); }
   stream(operation: ClientOperation) { return this.execute("stream", operation); }
   job(operation: ClientOperation) { return this.execute("job", operation); }
+  public managedChatConfigurationReady(): boolean {
+    return this.dependencies.transport.hasManagedChatConfiguration();
+  }
+
+  public streamAcceptedChat(
+    lease: ManagedAllowedLease,
+    body: Readonly<Record<string, import("./ManagedTypes").JsonContractValue>>,
+    idempotencyKey: string,
+    signal?: AbortSignal,
+  ): Promise<ManagedTransportResult> {
+    if (
+      lease.outcome !== "allowed" || lease.descriptor.alias !== "systemsculpt/chat" ||
+      lease.descriptor.mode !== "stream" || lease.descriptor.endpoint !== "/api/v1/chat/completions" ||
+      lease.descriptor.cancellation_supported !== false || lease.requestContract.capability !== "chat_turn" ||
+      lease.requestContract.background_eligible !== false || lease.requestContract.cancellation_supported !== false ||
+      !lease.descriptor.request_contracts.includes(lease.requestContract) ||
+      lease.requestContract.request?.path !== "/api/v1/chat/completions" || lease.requestContract.request.method !== "POST"
+    ) {
+      return Promise.reject(new Error("Accepted managed Chat lease does not match the required contract."));
+    }
+    return this.dependencies.transport.streamAcceptedChat({
+      path: lease.requestContract.request.path,
+      method: lease.requestContract.request.method,
+      capability: lease.requestContract.capability,
+      idempotencyKey,
+      body,
+      signal,
+    });
+  }
+
   async acquireChatTurnLease(): Promise<ManagedChatLeaseResult> {
     const lease = await this.dependencies.admission.acquireLease({ alias: "systemsculpt/chat", requestContract: "chat_turn" });
     if (!isAllowedChatLease(lease)) return { outcome: lease.outcome === "allowed" ? "capability_unavailable" : lease.outcome, lease };

@@ -37,8 +37,13 @@ export class HostedTransportAdapter {
     };
   }
 
+  public hasManagedChatConfiguration(): boolean {
+    return this.options.licenseKey().trim().length > 0 && this.options.pluginVersion.trim().length > 0;
+  }
+
   request(operation: ManagedTransportOperation) { return this.send(operation); }
   stream(operation: ManagedTransportOperation) { return this.send({ ...operation, method: operation.method ?? "POST" }, {}, true); }
+  streamAcceptedChat(operation: ManagedTransportOperation) { return this.send({ ...operation, method: "POST" }, {}, true, false, true); }
   job(operation: ManagedTransportOperation) { return this.send(operation, operation.headers ?? {}, false, true); }
 
   async uploadSignedInput(url: string, method: string, headers: Record<string, string>, body: ArrayBuffer, signal?: AbortSignal): Promise<void> {
@@ -54,15 +59,17 @@ export class HostedTransportAdapter {
     return this.client.request({ url, method: "GET", headers: {}, stream: false, preserveResponseHeaders: true, signal });
   }
 
-  private async send(operation: ManagedTransportOperation, extra: Record<string, string> = {}, stream = false, scopedHeaders = false): Promise<ManagedTransportResult> {
+  private async send(operation: ManagedTransportOperation, extra: Record<string, string> = {}, stream = false, scopedHeaders = false, exposeLicenseHeader = false): Promise<ManagedTransportResult> {
     const headers: Record<string, string> = scopedHeaders ? { ...extra } : { "x-plugin-version": this.options.pluginVersion, ...extra };
     if (!extra["x-systemsculpt-admission-contract"]) headers["x-systemsculpt-contract"] = MANAGED_CAPABILITY_CONTRACT;
     if (operation.capability) headers["x-systemsculpt-capability"] = operation.capability;
     if (operation.idempotencyKey) headers["Idempotency-Key"] = operation.idempotencyKey;
+    const licenseKey = this.key();
+    if (exposeLicenseHeader && licenseKey) headers["x-license-key"] = licenseKey;
     const response = await this.client.request({
       url: this.url(operation.path), method: operation.method ?? "POST", headers,
       body: operation.body, stream, preserveResponseHeaders: true,
-      signal: operation.signal, licenseKey: this.key(),
+      signal: operation.signal, licenseKey,
     });
     const errorText = response.ok ? "" : (await response.clone().text()).slice(0, 2048);
     return { response, diagnostics: {
