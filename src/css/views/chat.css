@@ -429,16 +429,16 @@ textarea.systemsculpt-chat-input::placeholder {
 }
 
 /* ------------------------------------------------------------------ *
- * Model trigger pill (composer)
+ * Fixed Chat identity (composer)
  * ------------------------------------------------------------------ */
-.systemsculpt-chat-model-picker {
+.systemsculpt-chat-identity-slot {
   display: flex;
   align-items: center;
   min-width: 0;
   flex: 1 1 auto;
 }
 
-.systemsculpt-chat-model-trigger {
+.systemsculpt-chat-identity {
   display: inline-flex;
   align-items: center;
   gap: var(--ss-space-1);
@@ -451,82 +451,36 @@ textarea.systemsculpt-chat-input::placeholder {
   border-radius: var(--ss-radius-full);
   color: var(--ss-ink);
   font-size: var(--ss-text-sm);
-  cursor: pointer;
-  transition: var(--ss-transition-colors);
 }
 
-.systemsculpt-chat-model-trigger:hover {
-  background-color: var(--ss-surface-2);
-  border-color: var(--ss-line-strong);
-}
-
-.systemsculpt-chat-model-trigger-icon {
+.systemsculpt-chat-identity-icon {
   display: inline-flex;
   align-items: center;
   flex-shrink: 0;
-  color: var(--ss-ink-muted);
+  color: var(--ss-ink-accent);
 }
 
-.systemsculpt-chat-model-trigger-body {
+.systemsculpt-chat-identity-body {
   display: flex;
   align-items: center;
   gap: var(--ss-space-1);
   min-width: 0;
 }
 
-.systemsculpt-chat-model-trigger-label {
+.systemsculpt-chat-identity-label {
   min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.systemsculpt-chat-model-trigger-badge {
+.systemsculpt-chat-identity-model {
   flex-shrink: 0;
   padding: 0 var(--ss-space-1);
   border-radius: var(--ss-radius-full);
-  background-color: var(--ss-surface-2);
-  font-size: var(--ss-text-xs);
-  color: var(--ss-ink-muted);
-}
-
-.systemsculpt-chat-model-trigger-chevron {
-  display: inline-flex;
-  align-items: center;
-  flex-shrink: 0;
-  color: var(--ss-ink-faint);
-}
-
-/* Provider-state variants */
-.systemsculpt-chat-model-trigger.is-provider-authenticated .systemsculpt-chat-model-trigger-icon {
-  color: var(--ss-success);
-}
-
-.systemsculpt-chat-model-trigger.is-provider-authenticated .systemsculpt-chat-model-trigger-badge {
-  background-color: var(--ss-success-tint);
-  color: var(--ss-success);
-}
-
-.systemsculpt-chat-model-trigger.is-managed .systemsculpt-chat-model-trigger-icon {
-  color: var(--ss-ink-accent);
-}
-
-.systemsculpt-chat-model-trigger.is-managed .systemsculpt-chat-model-trigger-badge {
   background-color: var(--ss-accent-tint);
+  font-size: var(--ss-text-xs);
   color: var(--ss-ink-accent);
-}
-
-.systemsculpt-chat-model-trigger.is-setup-required {
-  border-color: var(--ss-warning-line);
-}
-
-.systemsculpt-chat-model-trigger.is-setup-required .systemsculpt-chat-model-trigger-icon,
-.systemsculpt-chat-model-trigger.is-setup-required .systemsculpt-chat-model-trigger-badge {
-  color: var(--ss-warning);
-}
-
-.systemsculpt-chat-model-trigger.is-setup-required .systemsculpt-chat-model-trigger-badge {
-  background-color: var(--ss-warning-tint);
 }
 
 /* The empty-chat status card (.systemsculpt-chat-status) is styled in
@@ -554,8 +508,8 @@ textarea.systemsculpt-chat-input::placeholder {
     order: 3;
   }
 
-  .systemsculpt-chat-model-picker,
-  .systemsculpt-chat-model-trigger {
+  .systemsculpt-chat-identity-slot,
+  .systemsculpt-chat-identity {
     width: 100%;
     max-width: 100%;
   }

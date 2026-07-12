@@ -68,6 +68,7 @@
     "check:types": "tsc --noEmit --skipLibCheck",
     "check:egress": "node scripts/network-egress-inventory.mjs current --fixture testing/fixtures/managed/egress-baseline-660e7fe.json",
     "check:egress:verify": "node scripts/network-egress-inventory.mjs verify --fixture testing/fixtures/managed/egress-baseline-660e7fe.json",
+    "check:chat-model-graph": "node scripts/check-standard-chat-model-graph.mjs",
     "check:all": "npm run check:plugin && npm test",
     "dev": "node esbuild.config.mjs",
     "devmode": "node scripts/toggle-devmode.mjs",

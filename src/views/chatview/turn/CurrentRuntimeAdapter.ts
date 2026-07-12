@@ -1,5 +1,5 @@
-import type { AcceptedChatOperation } from "../../../services/managed/ManagedTypes";
-import type { AcceptedChatRequestSnapshot } from "../../../services/chat/AcceptedChatRequestSnapshot";
+import type { AcceptedManagedChatOperation } from "../../../services/managed/ManagedTypes";
+import type { AcceptedManagedChatRequestSnapshot } from "../../../services/chat/AcceptedChatRequestSnapshot";
 import type { StreamEvent } from "../../../streaming/types";
 import type { ChatTranscriptSnapshot } from "../transcript/ChatTranscriptTypes";
 import type { ChatTurnFence } from "./ChatTurnEffects";
@@ -16,7 +16,8 @@ export type ManagedChatRecoveryDisposition =
   | "settlement_pending";
 
 export type CurrentRuntimeDispatchInput = Readonly<{
-  acceptedRequestSnapshot: AcceptedChatRequestSnapshot;
+  operation: AcceptedManagedChatOperation;
+  acceptedRequestSnapshot: AcceptedManagedChatRequestSnapshot;
   phase: "initial" | "continuation";
   continuationIndex: number;
   postCheckpointDurableSnapshot?: ChatTranscriptSnapshot;
@@ -61,10 +62,15 @@ export class CurrentRuntimeAdapter {
   constructor(private readonly managed: ManagedChatRuntimeAdapter) {}
 
   public async dispatch(input: CurrentRuntimeDispatchInput): Promise<CurrentRuntimeDispatchResult> {
-    if (input.signal.aborted || !input.fence.isOpen(input.acceptedRequestSnapshot.operation)) {
+    if (
+      input.acceptedRequestSnapshot.operation !== input.operation ||
+      input.signal.aborted ||
+      !input.fence.isOpen(input.operation)
+    ) {
       throw new ManagedChatRuntimeFailure("aborted", {});
     }
     const result = await this.managed.dispatch({
+      operation: input.operation,
       acceptedRequestSnapshot: input.acceptedRequestSnapshot,
       phase: input.phase,
       continuationIndex: input.continuationIndex,
@@ -73,7 +79,7 @@ export class CurrentRuntimeAdapter {
         : {}),
       signal: input.signal,
     });
-    if (input.signal.aborted || !input.fence.isOpen(input.acceptedRequestSnapshot.operation)) {
+    if (input.signal.aborted || !input.fence.isOpen(input.operation)) {
       throw new ManagedChatRuntimeFailure("aborted", result.diagnostic);
     }
     if (result.kind === "success") {
@@ -93,7 +99,7 @@ export class CurrentRuntimeAdapter {
     throw new ManagedChatRuntimeFailure(result.kind, result.diagnostic);
   }
 
-  public notifyDurablyTerminal(operation: AcceptedChatOperation): void {
+  public notifyDurablyTerminal(operation: AcceptedManagedChatOperation): void {
     this.managed.notifyDurablyTerminal(operation);
   }
 }

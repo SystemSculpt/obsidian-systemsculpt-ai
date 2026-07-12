@@ -14,11 +14,6 @@ import { InputHandler, type AutomationApprovalMode } from "./InputHandler";
 import { FileContextManager } from "./FileContextManager";
 import { generateDefaultChatTitle, sanitizeChatTitle } from "../../utils/titleUtils";
 
-import {
-  ensureCanonicalId,
-  findModelById,
-  getModelLabelWithProvider,
-} from "../../utils/modelUtils";
 import { errorLogger } from "../../utils/errorLogger";
 import { AGENT_PRESET, GENERAL_USE_PRESET } from "../../constants/prompts";
 import { ChatExportService } from "./export/ChatExportService";
@@ -34,20 +29,14 @@ import { tryCopyToClipboard } from "../../utils/clipboard";
 import { resolveAbsoluteVaultPath } from "../../utils/vaultPathUtils";
 import type { DocumentProcessingProgressEvent } from "../../types/documentProcessing";
 import { ChatDebugLogService } from "./ChatDebugLogService";
-import { resolveProviderLabel } from "../../studio/piAuth/StudioPiProviderRegistry";
 import { PlatformContext } from "../../services/PlatformContext";
 import { loadDesktopOnly } from "../../platform/desktopOnly";
-import {
-  getManagedSystemSculptModelId,
-  isManagedSystemSculptModelId,
-} from "../../services/systemsculpt/ManagedSystemSculptModel";
 import {
   normalizePiSessionState,
   resolveChatBackend,
   type ChatBackend,
   type PiSessionState,
 } from "./storage/ChatPersistenceTypes";
-import { loadPiTextMigrationModule } from "./runtimeModules";
 import { ChatIdAllocationError, ChatIdAllocator } from "./persistence/ChatIdAllocator";
 import { ChatPersistenceError, type ChatPersistenceOperation } from "./persistence/ChatPersistenceError";
 import { ChatTranscript } from "./transcript/ChatTranscript";
@@ -55,7 +44,6 @@ import type { ChatTranscriptStorage } from "./transcript/ChatTranscriptStorage";
 import type { ChatTranscriptSnapshot } from "./transcript/ChatTranscriptTypes";
 import type { AcceptedChatOperation, ManagedChatAdmissionPort } from "../../services/managed/ManagedTypes";
 import { mergePiTranscriptMessages } from "./piTranscriptMerge";
-import type { SystemSculptModel } from "../../types/llm";
 import { ManagedChatRuntimeAdapter } from "./turn/ManagedChatRuntimeAdapter";
 import { CurrentRuntimeAdapter } from "./turn/CurrentRuntimeAdapter";
 import type { ChatTurnFence } from "./turn/ChatTurnEffects";
@@ -67,22 +55,13 @@ import { chatSettingsHandling } from "./chatSettingsHandling";
 import { renderChatStatusSurface } from "./ui/ChatStatusSurface";
 import {
   getChatModelDisplayName,
-  getChatModelSetupSurface,
-  openChatModelSetupTab,
+  normalizeStandardChatModelId,
+  openChatAccount,
   promptChatModelSetup,
   type ChatModelSetupPromptOverrides,
-  type ChatModelSetupSurface,
-  type ChatModelSetupTab,
 } from "./modelSelection";
 
 export { CHAT_VIEW_TYPE };
-
-const OPENAI_CODEX_CHATGPT_SUPPORTED_MODEL_IDS = new Set([
-  "gpt-5.2",
-  "gpt-5.3-codex",
-  "gpt-5.4",
-  "gpt-5.4-mini",
-]);
 
 function escapeMessageIdForSelector(messageId: string): string {
   const cssEscape = (globalThis as any)?.CSS?.escape;
@@ -91,12 +70,6 @@ function escapeMessageIdForSelector(messageId: string): string {
   }
 
   return String(messageId).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-}
-
-function isSupportedPersistedOpenAiCodexChatModel(modelId: string): boolean {
-  return OPENAI_CODEX_CHATGPT_SUPPORTED_MODEL_IDS.has(
-    String(modelId || "").trim().toLowerCase()
-  );
 }
 
 type NodeFileSystem = Pick<typeof import("node:fs"), "existsSync">;
@@ -149,6 +122,7 @@ export class ChatView extends ItemView {
   public piSessionId?: string;
   public piLastEntryId?: string;
   public piLastSyncedAt?: string;
+  private retainedPiModelId?: string;
   /** Tools trusted for this chat session (cleared on chat reload/close) */
   private dragDropCleanup: (() => void) | null = null;
   public chatFontSize: "small" | "medium" | "large";
@@ -160,7 +134,6 @@ export class ChatView extends ItemView {
   public agentModeEnabled: boolean | undefined;
   private chatExportService: ChatExportService | null = null;
   private debugLogService: ChatDebugLogService | null = null;
-  private warnedImageIncompatModels: Set<string> = new Set();
   /**
    * Virtualized chat rendering state
    * --------------------------------
@@ -261,32 +234,17 @@ export class ChatView extends ItemView {
 
   private resolveLeafSelectedModelId(
     nextSelectedModelId?: unknown,
-    options?: { preserveCurrent?: boolean },
+    _options?: { preserveCurrent?: boolean },
   ): string {
-    const requestedModelId = ensureCanonicalId(String(nextSelectedModelId || "").trim());
-    if (requestedModelId) {
-      return requestedModelId;
-    }
-
-    if (options?.preserveCurrent !== false) {
-      const currentModelId = ensureCanonicalId(String(this.selectedModelId || "").trim());
-      if (currentModelId) {
-        return currentModelId;
-      }
-    }
-
-    return (
-      ensureCanonicalId(String(this.plugin.settings.selectedModelId || "").trim()) ||
-      getManagedSystemSculptModelId()
-    );
+    return normalizeStandardChatModelId(String(nextSelectedModelId ?? ""));
   }
 
   private getActiveSystemPromptType(): "general-use" | "agent" {
-    return isManagedSystemSculptModelId(this.getEffectiveSelectedModelId()) ? "agent" : "general-use";
+    return this.isPiBackedChat() ? "general-use" : "agent";
   }
 
   public getCurrentModelName(): string {
-    return getChatModelDisplayName(this.selectedModelId, this.plugin.settings.selectedModelId);
+    return getChatModelDisplayName(this.selectedModelId);
   }
 
   public getManagedChatAdmission(): ManagedChatAdmissionPort { return this.plugin.getManagedCapabilityClient(); }
@@ -317,7 +275,6 @@ export class ChatView extends ItemView {
   }
   updateSystemPromptIndicator = () => uiSetup.updateSystemPromptIndicator(this);
   updateCreditsIndicator = () => uiSetup.updateCreditsIndicator(this);
-  updateToolCompatibilityWarning = () => uiSetup.updateToolCompatibilityWarning(this);
   addMessage = (role: ChatRole, content: string | MultiPartContent[] | null, existingMessageId?: string, completeMessage?: ChatMessage) =>
     messageHandling.addMessage(this, role, content, existingMessageId, completeMessage);
   loadMessages = () => messageHandling.loadMessages(this);
@@ -916,7 +873,7 @@ export class ChatView extends ItemView {
         if (purchaseUrl) {
           window.open(purchaseUrl, '_blank');
         } else {
-          this.openSetupTab('account');
+          this.openAccountSettings();
         }
       }
 
@@ -932,9 +889,7 @@ export class ChatView extends ItemView {
       await this.resetFailedAssistantTurn();
 
       // A rejected managed license is no longer valid — reflect that across the
-      // UI so gating, the account panel, and the banner all agree (#249). A BYOK
-      // provider key failure is excluded by isManagedLicenseFailure, so it never
-      // wrongly flips licenseValid or shows the renewal flow.
+      // UI so the account panel and banner agree (#249).
       try {
         await this.plugin.getSettingsManager().updateSettings({ licenseValid: false });
       } catch {}
@@ -969,7 +924,7 @@ export class ChatView extends ItemView {
       if (result?.action === "primary" || result?.confirmed) {
         void openExternalUrl(renewUrl);
       } else if (result?.action === "secondary") {
-        this.openSetupTab("account");
+        this.openAccountSettings();
       }
       return;
     }
@@ -1005,9 +960,9 @@ export class ChatView extends ItemView {
           title: "Usage limit reached",
           icon: "alert-octagon",
           message:
-            "Usage quota is exhausted for your SystemSculpt account. Add credits or wait for the next reset to continue using this provider.",
+            "Usage quota is exhausted for your SystemSculpt account. Add credits or wait for the next reset to continue.",
           primaryActionLabel: "Open Account",
-          onPrimaryAction: () => this.openSetupTab("account"),
+          onPrimaryAction: () => this.openAccountSettings(),
         }).open();
       }
       return;
@@ -1017,30 +972,16 @@ export class ChatView extends ItemView {
       error instanceof SystemSculptError &&
       (error.code === "MODEL_UNAVAILABLE" || error.code === "MODEL_REQUEST_ERROR")
     ) {
-      const isManagedSelection = this.isManagedSelectedModel();
-
-      if (isManagedSelection && !this.hasConfiguredProvider()) {
-        await this.resetFailedAssistantTurn();
-        if (!automationRequestActive) {
-          await this.promptProviderSetup(
-            "Finish setup in Settings → Account before starting a chat."
-          );
-        }
-        return;
-      }
-
       await this.resetFailedAssistantTurn();
       if (!automationRequestActive) {
         new ChatErrorModal({
           app: this.app,
-          title: isManagedSelection ? "SystemSculpt is unavailable" : "Selected model is unavailable",
+          title: "SystemSculpt is unavailable",
           icon: "alert-triangle",
-          message: isManagedSelection
-            ? "SystemSculpt could not complete this request right now. Try again in a moment, or check Account for license and account status."
-            : "The selected Pi model could not complete this request right now. Try again in a moment, or check Providers to confirm the selected model and provider are configured.",
-          primaryActionLabel: isManagedSelection ? "Open Account" : "Open Providers",
-          onPrimaryAction: () =>
-            this.openSetupTab(isManagedSelection ? "account" : "providers"),
+          message:
+            "SystemSculpt could not complete this request right now. Try again in a moment, or check Account for license and account status.",
+          primaryActionLabel: "Open Account",
+          onPrimaryAction: () => this.openAccountSettings(),
         }).open();
       }
     } else {
@@ -1054,20 +995,20 @@ export class ChatView extends ItemView {
           new Notice(classification.userMessage, duration);
         } else {
           const isHardRateLimit = classification.kind === "rate_limit";
-          const isAuth = classification.kind === "auth";
-          const wantsProvidersAction = isAuth || isHardRateLimit;
+          const wantsAccountAction =
+            classification.kind === "auth" || isHardRateLimit;
           new ChatErrorModal({
             app: this.app,
             title: isHardRateLimit
-              ? "Provider usage limit reached"
+              ? "Usage limit reached"
               : this.titleForStreamErrorKind(classification.kind),
             icon: isHardRateLimit
               ? "alert-octagon"
               : this.iconForStreamErrorKind(classification.kind),
             message: classification.userMessage,
-            primaryActionLabel: wantsProvidersAction ? "Open Providers" : undefined,
-            onPrimaryAction: wantsProvidersAction
-              ? () => this.openSetupTab("providers")
+            primaryActionLabel: wantsAccountAction ? "Open Account" : undefined,
+            onPrimaryAction: wantsAccountAction
+              ? () => this.openAccountSettings()
               : undefined,
           }).open();
         }
@@ -1080,9 +1021,9 @@ export class ChatView extends ItemView {
       case "auth":
         return "Authentication required";
       case "model_not_found":
-        return "Model not available";
+        return "Request not available";
       case "server":
-        return "Provider error";
+        return "SystemSculpt error";
       case "rate_limit":
       case "network":
       case "unknown":
@@ -1107,34 +1048,8 @@ export class ChatView extends ItemView {
     }
   }
 
-  public async notifyCompatibilityNotice(info: { modelId: string; tools?: boolean; images?: boolean; source?: "cached" | "runtime" }): Promise<void> {
-    const images = !!info.images;
-    if (!images) return;
-
-    const canonicalId = info.modelId ? ensureCanonicalId(info.modelId) : "";
-    const modelLabel = canonicalId ? getModelLabelWithProvider(canonicalId) : (info.modelId || "this model");
-
-    if (!this.warnedImageIncompatModels.has(canonicalId)) {
-      this.warnedImageIncompatModels.add(canonicalId);
-      const reason = info.source === "runtime" ? " because the backend rejected image inputs" : "";
-      try {
-        new Notice(
-          `Image context was skipped for ${modelLabel}${reason}. Switch to a vision-capable model to include images.`,
-          8000
-        );
-      } catch {}
-    }
-
-    // Refresh the warning banner so it reflects runtime incompatibility updates.
-    try {
-      await uiSetup.updateToolCompatibilityWarning(this);
-    } catch {}
-  }
-
   public async refreshCreditsBalance(): Promise<void> {
-    const isProActive = this.plugin.getEntitlementService().hasSystemSculptLicense();
-
-    if (!isProActive) {
+    if (!String(this.plugin.settings.licenseKey || "").trim()) {
       this.creditsBalance = null;
       try {
         await this.updateCreditsIndicator();
@@ -1202,138 +1117,37 @@ export class ChatView extends ItemView {
     });
   }
 
-  public hasConfiguredProvider(): boolean {
-    // Ask the single entitlement owner (#209) rather than checking license here.
-    // For a BYOK user with a configured custom provider this is always true —
-    // resolveDefaultModel keeps them off the license-walled managed model — so
-    // they never hit a SystemSculpt setup wall in chat.
-    return this.plugin
-      .getEntitlementService()
-      .canUseChat(this.selectedModelId, this.plugin.settings.selectedModelId).allowed;
-  }
-
-  public openSetupTab(targetTab: ChatModelSetupTab = "account"): void {
-    openChatModelSetupTab(
-      (nextTargetTab) => {
-        this.plugin.openSettingsTab(nextTargetTab);
-      },
-      targetTab,
-    );
+  public openAccountSettings(): void {
+    openChatAccount(() => {
+      this.plugin.openSettingsTab("account");
+    });
   }
 
   public getEffectiveSelectedModelId(): string {
-    // The model chat actually runs on, accounting for entitlement (#209): a BYOK
-    // user with no license is resolved onto their configured custom model rather
-    // than the license-walled managed default. The stored selection is left
-    // untouched, so activating a license restores the managed model.
-    return this.plugin
-      .getEntitlementService()
-      .resolveDefaultModel(this.selectedModelId, this.plugin.settings.selectedModelId);
+    return normalizeStandardChatModelId(this.selectedModelId);
   }
 
-  /**
-   * The user's actual stored selection, WITHOUT entitlement resolution — for
-   * persistence only (chat file + leaf state). Persisting the entitlement-
-   * resolved value would let a no-license BYOK user's runtime fallback overwrite
-   * their managed selection, so it would not come back after a license is
-   * activated (#209). Runtime execution/gating uses getEffectiveSelectedModelId.
-   */
   private getPersistedSelectedModelId(): string {
-    return (
-      ensureCanonicalId(String(this.selectedModelId || "").trim()) ||
-      ensureCanonicalId(String(this.plugin.settings.selectedModelId || "").trim()) ||
-      getManagedSystemSculptModelId()
-    );
+    return normalizeStandardChatModelId(this.selectedModelId);
   }
 
   public isManagedSelectedModel(): boolean {
-    return isManagedSystemSculptModelId(this.getEffectiveSelectedModelId());
-  }
-
-  public async getSelectedModelRecord(): Promise<SystemSculptModel | undefined> {
-    return await this.plugin.modelService.getModelById(this.getEffectiveSelectedModelId());
-  }
-
-  public getSelectedModelSetupSurface(): ChatModelSetupSurface {
-    return getChatModelSetupSurface(this.selectedModelId, this.plugin.settings.selectedModelId);
+    return true;
   }
 
   private async resolveLoadedSelectedModelId(savedModelId: string): Promise<string> {
-    const rawModelId = String(savedModelId || "").trim();
-    if (!rawModelId) {
-      return getManagedSystemSculptModelId();
-    }
-
-    const platform = PlatformContext.get();
-    const supportsDesktopOnlyFeatures = platform.supportsDesktopOnlyFeatures();
-    const customProviders = this.plugin.settings.customProviders || [];
-    const {
-      normalizeLegacyPiTextSelectionId,
-      resolveLegacyPiTextSelectionId,
-    } = await loadPiTextMigrationModule();
-    const normalizedRawModelId = normalizeLegacyPiTextSelectionId(rawModelId);
-    const parsedLocalPiMatch = normalizedRawModelId.match(/^local-pi-openai-codex@@(.+)$/i);
-    if (
-      parsedLocalPiMatch &&
-      !isSupportedPersistedOpenAiCodexChatModel(parsedLocalPiMatch[1])
-    ) {
-      return getManagedSystemSculptModelId();
-    }
-
-    const tryResolve = (models: any[]): string => {
-      const directMatch = findModelById(models, rawModelId);
-      if (directMatch?.id) {
-        return directMatch.id;
-      }
-      const normalizedDirectMatch = findModelById(models, normalizedRawModelId);
-      if (normalizedDirectMatch?.id) {
-        return normalizedDirectMatch.id;
-      }
-      return resolveLegacyPiTextSelectionId(rawModelId, models, customProviders);
-    };
-
-    try {
-      const cachedModels = this.plugin.modelService.getCachedModels();
-      const cachedResolved = tryResolve(cachedModels);
-      if (cachedResolved !== rawModelId || !!findModelById(cachedModels, cachedResolved)) {
-        return cachedResolved;
-      }
-    } catch {
-      // Fall back to the last persisted id if the cache is not ready yet.
-    }
-
-    if (!supportsDesktopOnlyFeatures) {
-      return getManagedSystemSculptModelId();
-    }
-
-    try {
-      const models = await this.plugin.modelService.getModels();
-      const resolved = tryResolve(models);
-      if (resolved) {
-        return resolved;
-      }
-    } catch {
-      // Keep the saved id when live model resolution isn't available.
-    }
-
-    if (isManagedSystemSculptModelId(rawModelId) || isManagedSystemSculptModelId(normalizedRawModelId)) {
-      return getManagedSystemSculptModelId();
-    }
-
-    return normalizedRawModelId || rawModelId;
+    return normalizeStandardChatModelId(savedModelId);
   }
 
-  public async promptProviderSetup(
+  public async promptAccountSetup(
     customMessage?: string,
     overrides?: ChatModelSetupPromptOverrides
   ): Promise<void> {
     await promptChatModelSetup({
       app: this.app,
-      openSettingsTab: (targetTab) => {
-        this.plugin.openSettingsTab(targetTab);
+      openAccount: () => {
+        this.plugin.openSettingsTab("account");
       },
-      selectedModelId: this.selectedModelId,
-      fallbackModelId: this.plugin.settings.selectedModelId,
       message: customMessage,
       retryHint: true,
       overrides,
@@ -1456,14 +1270,9 @@ export class ChatView extends ItemView {
 
   public async getCurrentSystemPrompt(): Promise<string> {
     this.ensureCoreServicesReady();
-    try {
-      return this.getActiveSystemPromptType() === "agent"
-        ? AGENT_PRESET.systemPrompt
-        : GENERAL_USE_PRESET.systemPrompt;
-    } catch (error) {
-      // Fall back to the general-use preset
-      return GENERAL_USE_PRESET.systemPrompt;
-    }
+    return this.isPiBackedChat()
+      ? GENERAL_USE_PRESET.systemPrompt
+      : AGENT_PRESET.systemPrompt;
   }
 
   /**
@@ -1485,7 +1294,6 @@ export class ChatView extends ItemView {
       });
     }
 
-    const needsProviderSetup = !this.hasConfiguredProvider();
     const contextCount = this.contextManager?.getContextFiles?.().size ?? 0;
     const contextLabel = contextCount === 0 ? "No context yet" : `${contextCount} file${contextCount === 1 ? "" : "s"} attached`;
     const historyPath = this.getChatHistoryFilePath();
@@ -1502,31 +1310,14 @@ export class ChatView extends ItemView {
     const contextActionSpec = {
       label: "Add Context",
       icon: "paperclip",
-      primary: !needsProviderSetup,
+      primary: true,
       title: "Attach notes, documents, images, or audio to this chat",
       onClick: async () => {
         await this.contextManager?.addContextFile?.();
       },
     };
 
-    const setupSurface = this.getSelectedModelSetupSurface();
-
-    if (needsProviderSetup) {
-      actionSpecs.push({
-        label: setupSurface.primaryButton,
-        icon: "plug-zap",
-        primary: true,
-        title:
-          setupSurface.targetTab === "account"
-            ? "Open Account and activate your SystemSculpt license"
-            : "Open Providers and connect the selected Pi provider",
-        onClick: () => {
-          this.openSetupTab(setupSurface.targetTab);
-        },
-      });
-    } else {
-      actionSpecs.push(contextActionSpec);
-    }
+    actionSpecs.push(contextActionSpec);
 
     if (hasHistoryFile) {
       actionSpecs.push({
@@ -1539,19 +1330,12 @@ export class ChatView extends ItemView {
       });
     }
 
-    const isManagedSelection = this.isManagedSelectedModel();
-    const readyDescription = isManagedSelection
-      ? "Type below or attach context. SystemSculpt handles the rest."
-      : `Type below or attach context. Pi will run ${this.getCurrentModelName() || "the selected model"} locally on this desktop.`;
-    const setupDescription =
-      setupSurface.targetTab === "account"
-        ? "Add and validate your SystemSculpt license to start chatting."
-        : "Connect the selected Pi provider in Settings before starting this chat.";
-
+    const readyDescription =
+      "Type below or attach context. SystemSculpt handles the rest.";
     renderChatStatusSurface(statusContainer, {
-      eyebrow: needsProviderSetup ? "Setup required" : "Ready",
-      title: needsProviderSetup ? setupSurface.title : "New chat",
-      description: needsProviderSetup ? setupDescription : readyDescription,
+      eyebrow: "Ready",
+      title: "New chat",
+      description: readyDescription,
       chips: [
         {
           label: "Context",
@@ -1678,7 +1462,6 @@ export class ChatView extends ItemView {
   private async refreshModelMetadata(): Promise<void> {
     this.inputHandler?.refreshTokenCounter();
     this.inputHandler?.onModelChange();
-    await uiSetup.updateToolCompatibilityWarning(this);
     this.refreshChatStatusIfEmpty();
   }
 
@@ -1798,8 +1581,8 @@ export class ChatView extends ItemView {
     if (!state?.chatId) {
       this.chatId = "";
       this.initializeChatTitle();
-      // Preserve an explicitly requested model for fresh chats, including
-      // automation resets that open an empty composer with a non-default model.
+      // Normalize command/automation migration input before the fresh composer
+      // can observe or persist it.
       this.chatBackend = this.defaultChatBackend();
       this.applyPiSessionState({}, { reset: true, updateViewState: false });
       this.selectedModelId = this.resolveLeafSelectedModelId(state?.selectedModelId);
@@ -1842,7 +1625,7 @@ export class ChatView extends ItemView {
     }
     this.virtualStartIndex = 0;
     this.hasAdjustedInitialWindow = false;
-    // When loading an existing chat, use the stored model selection as-is
+    // Normalize restored leaf input before loading persisted Chat state.
     this.selectedModelId = this.resolveLeafSelectedModelId(state?.selectedModelId);
     this.initializeChatTitle(state.chatTitle);
     this.chatVersion = state.version !== undefined ? state.version : -1;
@@ -1959,6 +1742,7 @@ export class ChatView extends ItemView {
         this.chatVersion = chatData.version || 0;
 
         this.applyChatLeafState({
+          selectedModelId: chatData.selectedModelId,
           chatBackend: chatData.chatBackend,
           piSessionFile: chatData.piSessionFile,
           piSessionId: chatData.piSessionId,
@@ -2940,6 +2724,7 @@ export class ChatView extends ItemView {
   }
 
   private applyChatLeafState(state: {
+    selectedModelId?: string;
     chatBackend?: ChatBackend;
     piSessionFile?: string;
     piSessionId?: string;
@@ -2968,10 +2753,18 @@ export class ChatView extends ItemView {
         updateViewState: false,
       }
     );
+    const migrationModelId = String(state.selectedModelId || "").trim();
+    this.retainedPiModelId = this.isPiBackedChat() && migrationModelId
+      ? migrationModelId
+      : undefined;
   }
 
   public getSelectedModelId(): string {
     return this.getEffectiveSelectedModelId();
+  }
+
+  public getRetainedPiModelId(): string | undefined {
+    return this.isPiBackedChat() ? this.retainedPiModelId : undefined;
   }
 
   public getPiSessionFile(): string | undefined {
@@ -2987,7 +2780,10 @@ export class ChatView extends ItemView {
   }
 
   public isPiBackedChat(): boolean {
-    return this.chatBackend === "systemsculpt";
+    return (
+      this.chatBackend === "systemsculpt" &&
+      Boolean(this.getPiSessionFile() || this.getPiSessionId())
+    );
   }
 
   public isLegacyReadOnlyChat(): boolean {
@@ -3133,6 +2929,10 @@ export class ChatView extends ItemView {
         .map((message) => String(message.pi_entry_id || "").trim())
         .filter(Boolean),
     });
+    const mirroredModelId = String(snapshot.actualModelId || "").trim();
+    if (mirroredModelId) {
+      this.retainedPiModelId = mirroredModelId;
+    }
 
     const nextLastEntryId = String(snapshot.lastEntryId || "").trim() || this.piLastEntryId;
     const shouldReplaceTranscript =
@@ -3375,6 +3175,7 @@ export class ChatView extends ItemView {
   public clearPiSessionState(options?: { save?: boolean; updateViewState?: boolean }): void {
     const hadSession = !!this.piSessionFile || !!this.piSessionId;
     this.applyPiSessionState({}, { reset: true, updateViewState: options?.updateViewState });
+    this.retainedPiModelId = undefined;
 
     if (hadSession && options?.save && this.chatId && this.isFullyLoaded) {
       void this.saveChat();
@@ -3402,37 +3203,13 @@ export class ChatView extends ItemView {
     modelId: string,
     options?: { focusInput?: boolean },
   ): Promise<void> {
-    const requestedModelId = ensureCanonicalId(modelId);
-    const canonicalId = requestedModelId || getManagedSystemSculptModelId();
-    const previousModelId = this.getEffectiveSelectedModelId();
-
+    const canonicalId = normalizeStandardChatModelId(modelId);
     this.selectedModelId = canonicalId;
-    if (canonicalId !== previousModelId && (this.getPiSessionFile() || this.getPiSessionId())) {
-      this.clearPiSessionState({ save: false, updateViewState: true });
-    }
-    // If global policy is to use latest everywhere (or Standard mode), make this the global default
     try {
-      const useLatestEverywhere = this.plugin.settings.useLatestModelEverywhere ?? true;
-      const isStandardMode = this.plugin.settings.settingsMode !== 'advanced';
-      if (useLatestEverywhere || isStandardMode) {
-        await this.plugin.getSettingsManager().updateSettings({ selectedModelId: canonicalId });
-      }
+      await this.plugin
+        .getSettingsManager()
+        .updateSettings({ selectedModelId: canonicalId });
     } catch {}
-
-    try {
-      const model = await this.plugin.modelService.getModelById(canonicalId);
-
-      if (model) {
-        await this.plugin.getSettingsManager().updateSettings({
-          activeProvider: {
-            id: model.provider,
-            name: resolveProviderLabel(model.sourceProviderId || model.provider),
-            type: "native",
-          }
-        });
-      }
-    } catch (error) {
-    }
 
     // Save the chat to persist the model change
     await this.saveChat();

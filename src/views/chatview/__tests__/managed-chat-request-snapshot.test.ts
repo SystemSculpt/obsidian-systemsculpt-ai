@@ -1,15 +1,15 @@
 import fixture from "../../../../testing/fixtures/managed/managed-capabilities-v2.json";
 import { ChatRequestPreparationService } from "../../../services/chat/ChatRequestPreparationService";
 import { composeAcceptedChatContinuation } from "../../../services/chat/AcceptedChatRequestSnapshot";
-import type { AcceptedChatOperation, ManagedAllowedLease } from "../../../services/managed/ManagedTypes";
+import type { AcceptedManagedChatOperation, ManagedAllowedLease } from "../../../services/managed/ManagedTypes";
 
-function operation(id = "u"): AcceptedChatOperation {
+function operation(id = "u"): AcceptedManagedChatOperation {
   const descriptor = fixture.capabilities.find((item) => item.alias === "systemsculpt/chat")!;
   const requestContract = descriptor.request_contracts.find((item) => item.capability === "chat_turn")!;
   const lease = Object.freeze({ outcome: "allowed", descriptor, requestContract }) as ManagedAllowedLease;
   const message = Object.freeze({ role: "user", content: "accepted", message_id: id } as const);
   const initialDurableSnapshot = Object.freeze({ chatId: "c", version: 1, messages: Object.freeze([message]) });
-  return Object.freeze({ lease, durableTurnId: id, acceptedUserMessage: message, initialDurableSnapshot, turnBoundaryId: id });
+  return Object.freeze({ runtime: "managed", lease, durableTurnId: id, acceptedUserMessage: message, initialDurableSnapshot, turnBoundaryId: id });
 }
 
 const model = { id: "legacy", supported_parameters: ["tools"], architecture: { modality: "text->text" } } as never;
@@ -48,6 +48,7 @@ describe("accepted request snapshot ownership", () => {
     expect(composeAcceptedChatContinuation(first, one).at(-1)).toMatchObject({ content: "one" });
     expect(composeAcceptedChatContinuation(first, two).at(-1)).toMatchObject({ content: "two" });
     expect(reads.context).toBe(1);
+    expect(reads.model).toBe(0);
     const resend = operation("second");
     const second = await service.prepare(resend, { messages: resend.initialDurableSnapshot.messages, model: "legacy" }, dependencies(reads), dependencies(reads));
     expect(second).not.toBe(first);

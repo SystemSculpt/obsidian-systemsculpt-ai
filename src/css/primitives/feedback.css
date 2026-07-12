@@ -44,7 +44,6 @@
  * Inline banners (chat warnings, license) — danger grammar.
  * Hidden by default; TS flips them on.
  * ------------------------------------------------------------------ */
-.systemsculpt-tool-warning-banner,
 .systemsculpt-license-banner {
   display: none;
   align-items: center;
@@ -58,21 +57,18 @@
   font-size: var(--ss-text-sm);
 }
 
-.systemsculpt-tool-warning-icon,
 .systemsculpt-license-banner-icon {
   flex-shrink: 0;
   display: flex;
   align-items: center;
 }
 
-.systemsculpt-tool-warning-icon svg,
 .systemsculpt-license-banner-icon svg {
   width: var(--ss-icon-size);
   height: var(--ss-icon-size);
   stroke: var(--ss-danger);
 }
 
-.systemsculpt-tool-warning-text,
 .systemsculpt-license-banner-text {
   flex: 1;
 }

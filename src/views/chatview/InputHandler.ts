@@ -29,7 +29,6 @@ import { PromptService } from "../../services/PromptService";
 import { ListSelectionModal, type ListItem } from "../../core/ui/modals/standard/ListSelectionModal";
 import {
   getEffectiveChatModelId,
-  type ChatModelSetupPromptOverrides,
 } from "./modelSelection";
 import { renderContextAttachmentPill } from "./ui/ContextAttachmentPills";
 import { handlePaste as handlePasteExternal, handleLargeTextPaste as handleLargeTextPasteExternal, showLargeTextWarning as showLargeTextWarningExternal } from "./handlers/LargePasteHandlers";
@@ -49,7 +48,14 @@ import { extractPrimaryPathArg, requiresUserApproval } from "../../utils/toolPol
 import { ChatModelSelectionController } from "./ChatModelSelectionController";
 import { ChatTurn } from "./turn/ChatTurn";
 import type { ChatTurnFence } from "./turn/ChatTurnEffects";
-import type { AcceptedChatOperation, ManagedChatAdmissionPort } from "../../services/managed/ManagedTypes";
+import type {
+  AcceptedChatOperation,
+  AcceptedManagedChatOperation,
+  AcceptedPiChatOperation,
+  ManagedAllowedLease,
+  ManagedAdmissionOutcome,
+  ManagedChatAdmissionPort,
+} from "../../services/managed/ManagedTypes";
 import { composeAcceptedLegacyContinuation, type AcceptedChatRequestSnapshot, type FrozenPreparedChatRequest } from "../../services/chat/AcceptedChatRequestSnapshot";
 import type { AcceptedUserCommitInput, AcceptedUserCommitResult } from "./ChatView";
 import type { ChatTranscriptSnapshot } from "./transcript/ChatTranscriptTypes";
@@ -221,18 +227,15 @@ export class InputHandler extends Component {
     this.modelSelectionController = new ChatModelSelectionController({
       app: this.app,
       container: this.container,
-      plugin: this.plugin,
-      getSelectedModelId: () => this.getSelectedModelIdForChat(),
-      getSelectedModelRecord: async () => await this.getSelectedModelRecordForChat(),
       isAutomationRequestActive: () => this.isAutomationRequestActive(),
-      setSelectedModelId: async (value: string) => {
-        await this.chatView?.setSelectedModelId?.(value);
+      openAccount: () => {
+        this.plugin.openSettingsTab("account");
       },
-      promptProviderSetup: async (message, overrides) => {
-        if (typeof this.chatView?.promptProviderSetup !== "function") {
+      promptAccountSetup: async (message) => {
+        if (typeof this.chatView?.promptAccountSetup !== "function") {
           return false;
         }
-        await this.chatView.promptProviderSetup(message, overrides);
+        await this.chatView.promptAccountSetup(message);
         return true;
       },
     });
@@ -297,19 +300,22 @@ export class InputHandler extends Component {
 
   private getSelectedModelIdForChat(): string {
     const selectedModelId =
-      typeof this.chatView?.getSelectedModelId === "function"
-        ? this.chatView.getSelectedModelId()
-        : this.chatView?.selectedModelId || this.plugin.settings.selectedModelId || "";
-    return getEffectiveChatModelId(selectedModelId, this.plugin.settings.selectedModelId);
-  }
-
-  private async getSelectedModelRecordForChat() {
-    if (typeof this.chatView?.getSelectedModelRecord === "function") {
-      return await this.chatView.getSelectedModelRecord();
+      this.chatView?.isPiBackedChat?.() === true &&
+      typeof this.chatView?.getRetainedPiModelId === "function"
+        ? this.chatView.getRetainedPiModelId()
+        : typeof this.chatView?.getSelectedModelId === "function"
+          ? this.chatView.getSelectedModelId()
+          : this.chatView?.selectedModelId;
+    if (this.chatView?.isPiBackedChat?.() === true) {
+      const retainedModelId = String(selectedModelId || "").trim();
+      if (!retainedModelId) {
+        throw new Error(
+          "The retained Pi session model is unavailable. Reopen the chat to sync its Pi session before sending.",
+        );
+      }
+      return retainedModelId;
     }
-
-    const modelId = this.getSelectedModelIdForChat();
-    return await this.plugin.modelService?.getModelById?.(modelId);
+    return getEffectiveChatModelId(selectedModelId);
   }
 
   private async streamAssistantTurn(
@@ -326,14 +332,14 @@ export class InputHandler extends Component {
       fence?: ChatTurnFence;
     },
   ): Promise<StreamTurnResult> {
-    if (options?.runtime === "pi") {
+    if (acceptedOperation.runtime === "pi") {
       return this.streamPiAssistantTurn(acceptedOperation, signal, includeContextFiles, turnProgress, options);
     }
     return this.streamManagedAssistantTurn(acceptedOperation, signal, turnProgress, options);
   }
 
   private async streamManagedAssistantTurn(
-    acceptedOperation: AcceptedChatOperation,
+    acceptedOperation: AcceptedManagedChatOperation,
     signal: AbortSignal,
     turnProgress?: ChatTurnProgressController,
     options?: {
@@ -344,7 +350,11 @@ export class InputHandler extends Component {
     },
   ): Promise<StreamTurnResult> {
     const acceptedRequest = this.acceptedRequestSnapshot;
-    if (!acceptedRequest || acceptedRequest.operation !== acceptedOperation) {
+    if (
+      !acceptedRequest ||
+      acceptedRequest.runtime !== "managed" ||
+      acceptedRequest.operation !== acceptedOperation
+    ) {
       throw new Error("Accepted Chat request snapshot is unavailable for the active operation.");
     }
     if (!options?.fence || !options.fence.isOpen(acceptedOperation)) {
@@ -360,6 +370,7 @@ export class InputHandler extends Component {
     }
     const runtime = this.chatView.getCurrentRuntimeAdapter();
     const dispatched = await runtime.dispatch({
+      operation: acceptedOperation,
       acceptedRequestSnapshot: acceptedRequest,
       phase,
       continuationIndex,
@@ -397,14 +408,18 @@ export class InputHandler extends Component {
   }
 
   private async streamPiAssistantTurn(
-    acceptedOperation: AcceptedChatOperation,
+    acceptedOperation: AcceptedPiChatOperation,
     signal: AbortSignal,
     includeContextFiles: boolean,
     turnProgress?: ChatTurnProgressController,
     options?: { phase?: "initial" | "continuation"; transientSystemPromptSuffix?: string },
   ): Promise<StreamTurnResult> {
     const acceptedRequest = this.acceptedRequestSnapshot;
-    if (!acceptedRequest || acceptedRequest.operation !== acceptedOperation) {
+    if (
+      !acceptedRequest ||
+      acceptedRequest.runtime !== "pi" ||
+      acceptedRequest.operation !== acceptedOperation
+    ) {
       throw new Error("Accepted Chat request snapshot is unavailable for the active operation.");
     }
     const continuationTarget = options?.phase === "initial"
@@ -499,7 +514,7 @@ export class InputHandler extends Component {
     const toolCalls = Array.isArray(message.tool_calls) ? message.tool_calls : [];
 
     // The model signalled it wants to use a tool (stopReason "toolUse") but no
-    // tool call materialised on the message — e.g. a provider continuation error
+    // tool call materialised on the message — e.g. a continuation error
     // dropped the call. Continuing would re-prompt with nothing to execute, and
     // returning here would look like the agent silently died after its first
     // tool call (#146). Surface it as an actionable error, never a silent stall
@@ -920,23 +935,30 @@ export class InputHandler extends Component {
     if (!this.isChatReady()) return;
     if (this.chatView?.isLegacyReadOnlyChat?.()) return;
 
-    const providerReady = await this.ensureProviderReadyForChat();
+    if (this.webSearchEnabled) {
+      this.compatibilityResult = Object.freeze({ kind: "contract_unsupported", feature: "web_search", action: "disable_web_search" });
+      return;
+    }
+    this.compatibilityResult = null;
+    const runtimeKind: "managed" | "pi" =
+      this.chatView?.isPiBackedChat?.() === true ? "pi" : "managed";
+    const requestModelId = this.getSelectedModelIdForChat();
+    let managedLease: ManagedAllowedLease | null = null;
+    if (runtimeKind === "managed") {
+      const admission = await this.managedChatAdmission.acquireChatTurnLease();
+      if (admission.outcome !== "allowed") {
+        await this.handleManagedAdmissionDenied(admission.outcome);
+        return;
+      }
+      managedLease = admission.lease;
+    }
     if (
-      !providerReady ||
       reservationGeneration !== this.submissionReservationGeneration ||
       this.localResourcesDisposed ||
       this.localResourcesDisposing
     ) {
       return;
     }
-
-    if (this.webSearchEnabled) {
-      this.compatibilityResult = Object.freeze({ kind: "contract_unsupported", feature: "web_search", action: "disable_web_search" });
-      return;
-    }
-    this.compatibilityResult = null;
-    const admission = await this.managedChatAdmission.acquireChatTurnLease();
-    if (admission.outcome !== "allowed") return;
 
     let consumedLargeText = false;
     let userCommitted = false;
@@ -963,21 +985,25 @@ export class InputHandler extends Component {
       const durableTurnId = String(accepted.message.message_id || "").trim();
       if (!durableTurnId) throw new Error("Accepted chat operation requires a durable turn ID.");
       this.pendingSubmissionIntent = Object.freeze({ kind: "append" });
-      const acceptedOperation: AcceptedChatOperation = Object.freeze({
-        lease: admission.lease, durableTurnId, acceptedUserMessage: accepted.message,
-        initialDurableSnapshot: accepted.snapshot, turnBoundaryId: candidateMessageId,
-      });
+      const operationBase = {
+        durableTurnId,
+        acceptedUserMessage: accepted.message,
+        initialDurableSnapshot: accepted.snapshot,
+        turnBoundaryId: candidateMessageId,
+      } as const;
+      const acceptedOperation: AcceptedChatOperation = runtimeKind === "managed"
+        ? Object.freeze({ ...operationBase, runtime: "managed", lease: managedLease! })
+        : Object.freeze({ ...operationBase, runtime: "pi" });
       this.acceptedOperation = acceptedOperation;
       const acceptedContextFiles = includeContextFiles ? this.chatView.contextManager.getContextFiles() : new Set<string>();
       let acceptedPrompt: string | undefined;
       if (this.selectedPromptPath) acceptedPrompt = await this.promptService.readPromptContent(this.selectedPromptPath) || undefined;
       this.acceptedRequestSnapshot = await this.aiService.prepareAcceptedChatRequest(acceptedOperation, {
-        model: this.getSelectedModelIdForChat(),
+        model: requestModelId,
         contextFiles: acceptedContextFiles,
         systemPromptOverride: acceptedPrompt,
         allowTools: this.chatView?.isAgentModeActive?.() ?? true,
       });
-      const runtimeKind: "managed" | "pi" = this.chatView?.isPiBackedChat?.() === true ? "pi" : "managed";
       for (const notice of this.acceptedRequestSnapshot.notices) new Notice(notice.message, notice.timeoutMs);
       this.submittedInputSnapshot = { messageId: durableTurnId, rawText: submittedRawText };
       this.input.value = "";
@@ -1083,7 +1109,9 @@ export class InputHandler extends Component {
           },
           retryEmptyStream: runtimeKind === "pi",
           onTerminal: (_outcome, operation) => {
-            if (runtimeKind === "managed") this.chatView.getCurrentRuntimeAdapter().notifyDurablyTerminal(operation);
+            if (operation.runtime === "managed") {
+              this.chatView.getCurrentRuntimeAdapter().notifyDurablyTerminal(operation);
+            }
           },
           onInitialRetryExhausted: (latest) => this.failHostedToolTurn(
             "The hosted agent returned an empty response.", 502, {
@@ -1865,9 +1893,7 @@ export class InputHandler extends Component {
   }
 
   public onModelChange(options?: { refreshOptions?: boolean }): void {
-    this.modelSelectionController.refresh({
-      reloadOptions: options?.refreshOptions,
-    });
+    this.modelSelectionController.refresh();
     this.notifyModelChange(options);
   }
 
@@ -1988,14 +2014,27 @@ export class InputHandler extends Component {
     }
   }
 
-  private async ensureProviderReadyForChat(): Promise<boolean> {
-    return await this.modelSelectionController.ensureProviderReadyForChat();
-  }
-
-  private async invokeProviderSetupPrompt(
-    message?: string,
-    overrides?: ChatModelSetupPromptOverrides
+  private async handleManagedAdmissionDenied(
+    outcome: Exclude<ManagedAdmissionOutcome, "allowed">,
   ): Promise<void> {
-    await this.modelSelectionController.invokeProviderSetupPrompt(message, overrides);
+    if (outcome === "license_required" || outcome === "license_rejected") {
+      await this.modelSelectionController.invokeAccountSetupPrompt(
+        outcome === "license_required"
+          ? "Activate your SystemSculpt license in Account before starting a chat."
+          : "Your SystemSculpt license was rejected. Check Account before starting a chat.",
+      );
+      return;
+    }
+
+    const message =
+      outcome === "rate_limited"
+        ? "SystemSculpt is rate-limited. Try again in a moment."
+        : outcome === "capability_unavailable"
+          ? "SystemSculpt Chat is unavailable right now."
+          : "SystemSculpt is temporarily unavailable. Try again in a moment.";
+    if (this.isAutomationRequestActive()) {
+      throw new Error(message);
+    }
+    new Notice(message, 8000);
   }
 }

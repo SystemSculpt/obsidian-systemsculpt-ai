@@ -1,14 +1,16 @@
 import fixture from "../../../../testing/fixtures/managed/managed-capabilities-v2.json";
-import type { AcceptedChatOperation, ManagedAllowedLease } from "../../managed/ManagedTypes";
+import { AGENT_PRESET } from "../../../constants/prompts";
+import { AGENT_TOOL_INSTRUCTIONS } from "../../../constants/prompts/agent";
+import type { AcceptedManagedChatOperation, ManagedAllowedLease } from "../../managed/ManagedTypes";
 import { prepareManagedAcceptedChatRequest } from "../ChatRequestPreparationService";
 
-function operation(): AcceptedChatOperation {
+function operation(): AcceptedManagedChatOperation {
   const descriptor = fixture.capabilities.find((item) => item.alias === "systemsculpt/chat")!;
   const requestContract = descriptor.request_contracts.find((item) => item.capability === "chat_turn")!;
   const lease = Object.freeze({ outcome: "allowed", descriptor, requestContract }) as ManagedAllowedLease;
   const message = Object.freeze({ role: "user", content: [{ type: "text", text: "body" }, { type: "image_url", image_url: { url: "data:image/png;base64,PRIVATE_IMAGE" } }], message_id: "u" } as const);
   const initialDurableSnapshot = Object.freeze({ chatId: "c", version: 1, messages: Object.freeze([message]) });
-  return Object.freeze({ lease, durableTurnId: "u", acceptedUserMessage: message, initialDurableSnapshot, turnBoundaryId: "b" }) as AcceptedChatOperation;
+  return Object.freeze({ runtime: "managed", lease, durableTurnId: "u", acceptedUserMessage: message, initialDurableSnapshot, turnBoundaryId: "b" });
 }
 
 describe("managed accepted request preparation", () => {
@@ -22,7 +24,7 @@ describe("managed accepted request preparation", () => {
         reads.context += 1;
         expect(files).toEqual(new Set(["context.md"]));
         expect(images).toBe(true);
-        expect(prompt).toBe("selected prompt");
+        expect(prompt).toBe(`selected prompt\n\n${AGENT_TOOL_INSTRUCTIONS}`);
         return messages;
       } } as never,
       getAvailableTools: async () => { reads.tools += 1; return [{ type: "function", function: { name: "search", description: "", parameters: {} } }]; },
@@ -50,7 +52,7 @@ describe("managed accepted request preparation", () => {
       contextFileService: { prepareMessagesWithContext: async (_messages: never[], files: Set<string>, images: boolean, prompt: string) => {
         expect([...files]).toEqual([...contextFiles]);
         expect(images).toBe(true);
-        expect(prompt).toBe("selected prompt");
+        expect(prompt).toBe(`selected prompt\n\n${AGENT_TOOL_INSTRUCTIONS}`);
         return established;
       } } as never,
       getAvailableTools: async () => tools,
@@ -65,12 +67,36 @@ describe("managed accepted request preparation", () => {
     expect(serialized).toContain("oversized-");
   });
 
-  it("does not resolve tools when tools are disabled", async () => {
+  it("uses the managed agent preset when no prompt is selected", async () => {
+    let observedPrompt: string | undefined;
+    await prepareManagedAcceptedChatRequest(operation(), {}, {
+      contextFileService: {
+        prepareMessagesWithContext: async (messages: never[], _files: Set<string>, _images: boolean, prompt?: string) => {
+          observedPrompt = prompt;
+          return messages;
+        },
+      } as never,
+      getAvailableTools: async () => [],
+    });
+    expect(observedPrompt).toBe(AGENT_PRESET.systemPrompt);
+  });
+
+  it("keeps a selected prompt unchanged and does not resolve tools when tools are disabled", async () => {
     let toolReads = 0;
-    await prepareManagedAcceptedChatRequest(operation(), { allowTools: false }, {
-      contextFileService: { prepareMessagesWithContext: async (messages: never[]) => messages } as never,
+    let observedPrompt: string | undefined;
+    await prepareManagedAcceptedChatRequest(operation(), {
+      allowTools: false,
+      systemPromptOverride: "selected without tools",
+    }, {
+      contextFileService: {
+        prepareMessagesWithContext: async (messages: never[], _files: Set<string>, _images: boolean, prompt?: string) => {
+          observedPrompt = prompt;
+          return messages;
+        },
+      } as never,
       getAvailableTools: async () => { toolReads += 1; return []; },
     });
     expect(toolReads).toBe(0);
+    expect(observedPrompt).toBe("selected without tools");
   });
 });

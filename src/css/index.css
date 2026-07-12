@@ -41,7 +41,6 @@
 /* Modal system */
 @import 'modals/modal.css';
 @import 'modals/model-selection.css';
-@import 'modals/chat-model-picker.css';
 @import 'modals/chat-settings.css';
 @import 'modals/janitor.css';
 @import 'modals/changelog.css';

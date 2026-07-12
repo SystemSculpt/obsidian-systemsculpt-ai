@@ -1,81 +1,159 @@
 import fixture from "../../../../testing/fixtures/managed/managed-capabilities-v2.json";
-import type { AcceptedChatOperation, ManagedAllowedLease } from "../../managed/ManagedTypes";
-import { composeAcceptedChatContinuation, composeAcceptedLegacyContinuation, createAcceptedChatRequestSnapshot } from "../AcceptedChatRequestSnapshot";
+import type {
+  AcceptedManagedChatOperation,
+  AcceptedPiChatOperation,
+  ManagedAllowedLease,
+} from "../../managed/ManagedTypes";
+import {
+  composeAcceptedChatContinuation,
+  composeAcceptedLegacyContinuation,
+  createAcceptedManagedChatRequestSnapshot,
+  createAcceptedPiChatRequestSnapshot,
+} from "../AcceptedChatRequestSnapshot";
 import { ChatRequestPreparationService } from "../ChatRequestPreparationService";
 
-function operation(): AcceptedChatOperation {
+function base(id = "u") {
+  const message = Object.freeze({ role: "user", content: "accepted", message_id: id } as const);
+  const initialDurableSnapshot = Object.freeze({
+    chatId: "c",
+    version: 1,
+    messages: Object.freeze([message]),
+  });
+  return {
+    durableTurnId: id,
+    acceptedUserMessage: message,
+    initialDurableSnapshot,
+    turnBoundaryId: "b",
+  } as const;
+}
+
+function managedOperation(id = "u"): AcceptedManagedChatOperation {
   const descriptor = fixture.capabilities.find((item) => item.alias === "systemsculpt/chat")!;
   const requestContract = descriptor.request_contracts.find((item) => item.capability === "chat_turn")!;
   const lease = Object.freeze({ outcome: "allowed", descriptor, requestContract }) as ManagedAllowedLease;
-  const message = Object.freeze({ role: "user", content: "accepted", message_id: "u" } as const);
-  const initialDurableSnapshot = Object.freeze({ chatId: "c", version: 1, messages: Object.freeze([message]) });
-  return Object.freeze({ lease, durableTurnId: "u", acceptedUserMessage: message, initialDurableSnapshot, turnBoundaryId: "b" });
+  return Object.freeze({ ...base(id), runtime: "managed", lease });
 }
-const model = { id: "m", supported_parameters: ["tools"], architecture: { modality: "text->text" } } as never;
-const policy = { prompt: "selected" as const, contextCount: 1, imageContextIncluded: true, documentContextIncluded: false, tools: "normalized" as const };
-function snapshot(op = operation()) {
-  return createAcceptedChatRequestSnapshot({ operation: op, preparation: {
-    prepared: { modelSource: "systemsculpt", resolvedModel: model, actualModelId: "provider/model", preparedMessages: [
-      { role: "system", content: "frozen prompt and context", message_id: "s" }, ...op.initialDurableSnapshot.messages,
-    ], finalSystemPrompt: "frozen prompt", tools: [{ type: "function", function: { name: "search" } }] }, notices: [], diagnostics: [],
-  }, policy });
+
+function piOperation(id = "u"): AcceptedPiChatOperation {
+  return Object.freeze({ ...base(id), runtime: "pi" });
 }
+
+const policy = {
+  prompt: "selected" as const,
+  contextCount: 1,
+  imageContextIncluded: true,
+  documentContextIncluded: false,
+  tools: "normalized" as const,
+};
 
 describe("AcceptedChatRequestSnapshot", () => {
-  it("deep-copies and freezes authoritative legacy and managed preparation", () => {
-    const accepted = snapshot();
-    expect(accepted.operation.durableTurnId).toBe("u");
+  it("freezes a managed snapshot without a legacy/provider preparation payload", () => {
+    const operation = managedOperation();
+    const accepted = createAcceptedManagedChatRequestSnapshot({
+      operation,
+      policy,
+      managedMessages: operation.initialDurableSnapshot.messages,
+      managedTools: [{ type: "function", function: { name: "search" } }],
+    });
+
+    expect(accepted.runtime).toBe("managed");
     expect(accepted.model).toBe("ai-agent");
-    expect(accepted.legacyPreparation.preparedMessages[0].content).toBe("frozen prompt and context");
-    expect(Object.isFrozen(accepted.legacyPreparation.preparedMessages)).toBe(true);
+    expect(accepted).not.toHaveProperty("legacyPreparation");
+    expect(Object.isFrozen(accepted.messages)).toBe(true);
     expect(Object.keys(accepted)).not.toContain("operation");
-    expect(JSON.stringify(accepted)).not.toContain("tool_choice");
   });
 
-  it("reads model, tools, and context exactly once and joins duplicate callers", async () => {
-    const op = operation();
-    const reads = { model: 0, tools: 0, context: 0 };
+  it("keeps legacy preparation only on retained Pi operations", () => {
+    const operation = piOperation();
+    const accepted = createAcceptedPiChatRequestSnapshot({
+      operation,
+      policy,
+      preparation: {
+        prepared: {
+          modelSource: "pi_local",
+          resolvedModel: {} as never,
+          actualModelId: "openai/gpt-4.1",
+          preparedMessages: [...operation.initialDurableSnapshot.messages],
+          finalSystemPrompt: "retained Pi prompt",
+          tools: [],
+        },
+        notices: [],
+        diagnostics: [],
+      },
+    });
+
+    expect(accepted.runtime).toBe("pi");
+    expect(accepted).not.toHaveProperty("model");
+    expect(accepted.legacyPreparation.actualModelId).toBe("openai/gpt-4.1");
+  });
+
+  it("prepares managed requests without reading legacy model resolution", async () => {
+    const operation = managedOperation();
     const service = new ChatRequestPreparationService();
+    const reads = { model: 0, context: 0, tools: 0 };
     const dependencies = {
-      getModelInfo: async () => { reads.model += 1; return { modelSource: "systemsculpt" as const, actualModelId: "provider/model", model }; },
-      getAvailableTools: async () => { reads.tools += 1; return [{ type: "function", function: { name: "search" } }]; },
+      getModelInfo: async () => {
+        reads.model += 1;
+        throw new Error("managed preparation must not resolve a model");
+      },
+      getAvailableTools: async () => { reads.tools += 1; return []; },
       countImageContextFiles: () => 0,
-      contextFileService: { prepareMessagesWithContext: async (messages: never[]) => { reads.context += 1; return messages; } } as never,
+      contextFileService: {
+        prepareMessagesWithContext: async (messages: never[]) => {
+          reads.context += 1;
+          return messages;
+        },
+      } as never,
     };
-    const input = { messages: op.initialDurableSnapshot.messages, model: "m", contextFiles: new Set<string>(), systemPromptOverride: "selected" };
-    const first = service.prepare(op, input, dependencies, dependencies);
-    expect(service.prepare(op, input, dependencies, dependencies)).toBe(first);
-    const settled = await first;
-    expect(await service.prepare(op, input, dependencies, dependencies)).toBe(settled);
-    expect(reads).toEqual({ model: 1, tools: 1, context: 1 });
-    expect(service.has(op)).toBe(true);
-    service.release(op);
-    expect(service.has(op)).toBe(false);
+
+    const first = service.prepare(
+      operation,
+      { messages: operation.initialDurableSnapshot.messages, model: "legacy-must-not-run" },
+      dependencies as never,
+      dependencies,
+    );
+    expect(service.prepare(
+      operation,
+      { messages: operation.initialDurableSnapshot.messages, model: "legacy-must-not-run" },
+      dependencies as never,
+      dependencies,
+    )).toBe(first);
+    const accepted = await first;
+
+    expect(accepted.runtime).toBe("managed");
+    expect(reads).toEqual({ model: 0, context: 1, tools: 1 });
   });
 
-  it("preserves frozen prompt/context/tools and appends durable tool checkpoints purely", () => {
-    const accepted = snapshot();
-    const checkpoint = { role: "assistant" as const, content: null, message_id: "a", tool_calls: [{ id: "call", messageId: "a", state: "completed" as const, timestamp: 1, request: { id: "call", type: "function" as const, function: { name: "search", arguments: "{\"q\":1}" } } }] };
-    const resultMessage = { role: "tool" as const, content: "ok", message_id: "t", tool_call_id: "call" };
-    const next = Object.freeze({ chatId: "c", version: 2, messages: Object.freeze([...accepted.durableSnapshot.messages, checkpoint, resultMessage]) });
-    const managed = composeAcceptedChatContinuation(accepted, next);
-    const legacy = composeAcceptedLegacyContinuation(accepted, next);
-    expect(managed[0]).toMatchObject({ role: "system", content: "frozen prompt and context" });
-    expect(managed.at(-1)).toMatchObject({ role: "tool", content: "ok", tool_call_id: "call" });
-    expect(legacy.preparedMessages[0].content).toBe("frozen prompt and context");
-    expect(legacy.tools).toEqual(accepted.legacyPreparation.tools);
-    expect(Object.isFrozen(legacy)).toBe(true);
-  });
+  it("composes managed and Pi continuations through their separate contracts", () => {
+    const managedOperationValue = managedOperation();
+    const managed = createAcceptedManagedChatRequestSnapshot({
+      operation: managedOperationValue,
+      policy,
+      managedMessages: managedOperationValue.initialDurableSnapshot.messages,
+      managedTools: [],
+    });
+    const piOperationValue = piOperation();
+    const pi = createAcceptedPiChatRequestSnapshot({
+      operation: piOperationValue,
+      policy,
+      preparation: {
+        prepared: {
+          modelSource: "pi_local",
+          resolvedModel: {} as never,
+          actualModelId: "openai/gpt-4.1",
+          preparedMessages: [...piOperationValue.initialDurableSnapshot.messages],
+          finalSystemPrompt: "",
+          tools: [],
+        },
+        notices: [],
+        diagnostics: [],
+      },
+    });
+    const checkpoint = { role: "tool" as const, content: "ok", message_id: "t", tool_call_id: "call" };
+    const managedNext = Object.freeze({ chatId: "c", version: 2, messages: Object.freeze([...managed.durableSnapshot.messages, checkpoint]) });
+    const piNext = Object.freeze({ chatId: "c", version: 2, messages: Object.freeze([...pi.durableSnapshot.messages, checkpoint]) });
 
-  it("keeps the future managed continuation composer strictly two-input and snapshot-only", () => {
-    const accepted = snapshot();
-    const checkpoint = { role: "tool" as const, content: "committed result", message_id: "t", tool_call_id: "call" };
-    const next = Object.freeze({ chatId: "c", version: 2, messages: Object.freeze([...accepted.durableSnapshot.messages, checkpoint]) });
-
-    expect(composeAcceptedChatContinuation.length).toBe(2);
-    expect(composeAcceptedChatContinuation(accepted, next)).toEqual([
-      ...accepted.messages,
-      expect.objectContaining({ role: "tool", content: "committed result", tool_call_id: "call" }),
-    ]);
+    expect(composeAcceptedChatContinuation(managed, managedNext).at(-1)).toMatchObject({ role: "tool", content: "ok" });
+    expect(composeAcceptedLegacyContinuation(pi, piNext).preparedMessages.at(-1)).toMatchObject({ role: "tool", content: "ok" });
   });
 });

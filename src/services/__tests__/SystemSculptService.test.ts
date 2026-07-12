@@ -200,7 +200,7 @@ describe("SystemSculptService", () => {
     });
     const message = { role: "user", content: "accepted", message_id: "u" } as const;
     const durable = Object.freeze({ chatId: "c", version: 1, messages: Object.freeze([message]) });
-    const operation = Object.freeze({ lease: {} as never, durableTurnId: "u", acceptedUserMessage: message, initialDurableSnapshot: durable, turnBoundaryId: "b" });
+    const operation = Object.freeze({ runtime: "pi" as const, durableTurnId: "u", acceptedUserMessage: message, initialDurableSnapshot: durable, turnBoundaryId: "b" });
     const accepted = await service.prepareAcceptedChatRequest(operation, { model: "m", contextFiles: new Set(), systemPromptOverride: "selected" });
     expect(modelManagementService.getModelInfo).toHaveBeenCalledTimes(1);
     expect(contextFileService.prepareMessagesWithContext).toHaveBeenCalledTimes(1);
@@ -221,7 +221,7 @@ describe("SystemSculptService", () => {
     const service = SystemSculptService.getInstance(createPlugin());
     const message = { role: "user", content: "accepted", message_id: "u" } as const;
     const durable = Object.freeze({ chatId: "c", version: 1, messages: Object.freeze([message]) });
-    const operation = Object.freeze({ lease: {} as never, durableTurnId: "u", acceptedUserMessage: message, initialDurableSnapshot: durable, turnBoundaryId: "b" });
+    const operation = Object.freeze({ runtime: "pi" as const, durableTurnId: "u", acceptedUserMessage: message, initialDurableSnapshot: durable, turnBoundaryId: "b" });
 
     const accepted = await service.prepareAcceptedChatRequest(operation, {
       model: "systemsculpt@@systemsculpt/ai-agent",
@@ -235,7 +235,8 @@ describe("SystemSculptService", () => {
     expect(contextFileService.prepareMessagesWithContext).toHaveBeenCalledWith(
       [message], new Set(["context.md"]), true, expectedPrompt,
     );
-    expect(accepted.legacyPreparation.tools).toEqual(accepted.tools);
+    expect(accepted.legacyPreparation.tools).toEqual(expect.any(Array));
+    expect(accepted).not.toHaveProperty("model");
   });
 
   it("initializes with the resolved base url and updates dependent services", () => {

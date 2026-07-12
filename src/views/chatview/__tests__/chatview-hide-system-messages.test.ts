@@ -10,7 +10,6 @@ jest.mock("../uiSetup", () => ({
   uiSetup: {
     showLicenseBanner: jest.fn(),
     hideLicenseBanner: jest.fn(),
-    updateToolCompatibilityWarning: jest.fn().mockResolvedValue(undefined),
   },
 }));
 

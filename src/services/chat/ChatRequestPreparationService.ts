@@ -6,8 +6,15 @@ import { getImageCompatibilityInfo } from "../../utils/modelUtils";
 import { normalizeOpenAITools, type OpenAITool } from "../../utils/tooling";
 import type { PreparedChatRequest } from "../StreamExecutionTypes";
 import type { ContextFileService } from "../ContextFileService";
-import type { AcceptedChatOperation } from "../managed/ManagedTypes";
-import { createAcceptedChatRequestSnapshot, type AcceptedChatPolicyAudit, type AcceptedChatRequestSnapshot } from "./AcceptedChatRequestSnapshot";
+import type {
+  AcceptedChatOperation,
+  AcceptedManagedChatOperation,
+} from "../managed/ManagedTypes";
+import {
+  createAcceptedManagedChatRequestSnapshot,
+  createAcceptedPiChatRequestSnapshot,
+  type AcceptedChatRequestSnapshot,
+} from "./AcceptedChatRequestSnapshot";
 
 export type ChatPreparationNotice = Readonly<{ kind: "image_incompatible"; modelKey: string; message: string; timeoutMs: 7000 }>;
 export type ChatPreparationDiagnostic = Readonly<{ kind: "tool_resolution_failed"; model: string; actualModelId: string; message: string }>;
@@ -103,19 +110,29 @@ export type ManagedChatPreparationDependencies = Readonly<{
 }>;
 
 export async function prepareManagedAcceptedChatRequest(
-  operation: AcceptedChatOperation,
+  operation: AcceptedManagedChatOperation,
   input: Pick<AuthoritativeChatPreparationInput, "contextFiles" | "systemPromptOverride" | "allowTools">,
   dependencies: ManagedChatPreparationDependencies,
 ): Promise<Readonly<{ messages: readonly Readonly<ChatMessage>[]; tools: readonly OpenAITool[] }>> {
   const contextFiles = new Set(input.contextFiles ?? []);
-  const prompt = input.systemPromptOverride?.trim() || undefined;
+  const toolsAllowed = input.allowTools !== false;
+  const selectedPrompt = input.systemPromptOverride?.trim() || undefined;
+  const prompt = selectedPrompt
+    ? toolsAllowed
+      ? `${selectedPrompt}\n\n${AGENT_TOOL_INSTRUCTIONS}`
+      : selectedPrompt
+    : toolsAllowed
+      ? AGENT_PRESET.systemPrompt
+      : undefined;
   const messages = await dependencies.contextFileService.prepareMessagesWithContext(
     operation.initialDurableSnapshot.messages.map((message) => ({ ...message })) as ChatMessage[],
     contextFiles,
     true,
     prompt,
   );
-  const tools = input.allowTools === false ? [] : normalizeOpenAITools(await dependencies.getAvailableTools());
+  const tools = toolsAllowed
+    ? normalizeOpenAITools(await dependencies.getAvailableTools())
+    : [];
   return { messages, tools };
 }
 
@@ -131,20 +148,35 @@ export class ChatRequestPreparationService {
     const existing = this.retained.get(operation);
     if (existing) return existing;
     if (this.failed.has(operation)) return Promise.reject(new Error("Accepted Chat request preparation already failed."));
-    const pending = prepareChatRequestAuthoritatively(input, dependencies)
-      .then((legacy) => ({
-        legacy,
-        managed: { messages: legacy.prepared.preparedMessages, tools: legacy.prepared.tools },
-      }))
-      .then(({ legacy, managed }) => {
-        const contextFiles = new Set(input.contextFiles ?? []);
-        const policy: AcceptedChatPolicyAudit = {
-          prompt: input.systemPromptOverride?.trim() ? "selected" : "none", contextCount: contextFiles.size,
-          imageContextIncluded: true,
-          documentContextIncluded: [...contextFiles].some((item) => item.startsWith("doc:")), tools: managed.tools.length ? "normalized" : "omitted",
-        };
-        return createAcceptedChatRequestSnapshot({ operation, preparation: legacy, policy, managedMessages: managed.messages, managedTools: managed.tools });
-      })
+    const contextFiles = new Set(input.contextFiles ?? []);
+    const policyBase = {
+      prompt: input.systemPromptOverride?.trim() ? "selected" as const : "none" as const,
+      contextCount: contextFiles.size,
+      imageContextIncluded: true,
+      documentContextIncluded: [...contextFiles].some((item) => item.startsWith("doc:")),
+    };
+    const pending = (operation.runtime === "managed"
+      ? prepareManagedAcceptedChatRequest(operation, input, _managedDependencies)
+          .then((managed) => createAcceptedManagedChatRequestSnapshot({
+            operation,
+            policy: {
+              ...policyBase,
+              tools: managed.tools.length ? "normalized" : "omitted",
+            },
+            managedMessages: managed.messages,
+            managedTools: managed.tools,
+          }))
+      : operation.runtime === "pi"
+        ? prepareChatRequestAuthoritatively(input, dependencies)
+            .then((legacy) => createAcceptedPiChatRequestSnapshot({
+              operation,
+              preparation: legacy,
+              policy: {
+                ...policyBase,
+                tools: legacy.prepared.tools.length ? "normalized" : "omitted",
+              },
+            }))
+        : Promise.reject(new Error("Accepted Chat operation has no runtime identity.")))
       .catch((error: Error) => { this.failed.add(operation); throw error; });
     this.retained.set(operation, pending);
     return pending;

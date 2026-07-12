@@ -6,11 +6,6 @@ import { App } from "obsidian";
 import type { ChatMessage } from "../../../types";
 import { InputHandler } from "../InputHandler";
 import { messageHandling } from "../messageHandling";
-import { ensureProviderRuntimeReady } from "../../../services/providerRuntime/ProviderRuntime";
-import { getConfiguredRemoteProviderApiKey } from "../../../services/providerRuntime/RemoteProviderCatalog";
-import {
-  buildPiTextProviderSetupMessage,
-} from "../../../services/pi-native/PiTextAuth";
 import { createDeterministicManagedChatClient } from "../../../services/managed/__tests__/ManagedChatTestHarness";
 import type { AcceptedUserCommitInput } from "../ChatView";
 import { ChatTurnLifecycleController } from "../controllers/ChatTurnLifecycleController";
@@ -89,24 +84,6 @@ jest.mock("../messageHandling", () => ({
   },
 }));
 
-jest.mock("../../../services/providerRuntime/ProviderRuntime", () => ({
-  ensureProviderRuntimeReady: jest.fn(),
-}));
-
-jest.mock("../../../services/providerRuntime/RemoteProviderCatalog", () => ({
-  getConfiguredRemoteProviderApiKey: jest.fn(() => ""),
-}));
-
-jest.mock("../../../services/pi-native/PiTextAuth", () => ({
-  buildPiTextProviderSetupMessage: jest.fn((providerId: string, actualModelId?: string) =>
-    actualModelId
-      ? `Connect ${providerId} in Pi before running "${actualModelId}".`
-      : `Connect ${providerId} in Pi before using this model.`
-  ),
-  loadPiTextProviderAuth: jest.fn(async () => new Map()),
-  piTextProviderRequiresAuth: jest.fn(() => true),
-}));
-
 describe("InputHandler hosted tool loop", () => {
   it("uses the production managed fixture admission path", async () => {
     await expect(managedHarness.transport.getCatalog()).resolves.toMatchObject({ contract_version: "managed-capabilities-v2" });
@@ -115,7 +92,6 @@ describe("InputHandler hosted tool loop", () => {
   });
   beforeEach(() => {
     jest.clearAllMocks();
-    (getConfiguredRemoteProviderApiKey as jest.Mock).mockReturnValue("");
   });
 
   const createHostedToolLoopHarness = () => {
@@ -128,6 +104,7 @@ describe("InputHandler hosted tool loop", () => {
     const aiService = {
       streamMessage: jest.fn(),
       prepareAcceptedChatRequest: jest.fn(async (operation: any) => ({
+        runtime: operation.runtime,
         operation,
         durableTurnId: operation.durableTurnId,
         durableSnapshot: operation.initialDurableSnapshot,
@@ -236,10 +213,13 @@ describe("InputHandler hosted tool loop", () => {
       chatView,
     });
 
-    const bindAcceptedRequest = async () => {
+    const bindAcceptedRequest = async (runtime: "managed" | "pi" = "managed") => {
       const message = messages.find((entry) => entry.role === "user") ?? { role: "user", content: "accepted", message_id: "u" } as ChatMessage;
       const durable = Object.freeze({ chatId: "chat-1", version: 1, messages: Object.freeze([message]) });
-      const operation = Object.freeze({ lease: {} as never, durableTurnId: message.message_id || "u", acceptedUserMessage: message, initialDurableSnapshot: durable, turnBoundaryId: "b" });
+      const base = { durableTurnId: message.message_id || "u", acceptedUserMessage: message, initialDurableSnapshot: durable, turnBoundaryId: "b" } as const;
+      const operation = runtime === "pi"
+        ? Object.freeze({ ...base, runtime: "pi" as const })
+        : Object.freeze({ ...base, runtime: "managed" as const, lease: {} as never });
       (handler as any).acceptedOperation = operation;
       (handler as any).acceptedRequestSnapshot = await aiService.prepareAcceptedChatRequest(operation);
       return operation;
@@ -263,12 +243,16 @@ describe("InputHandler hosted tool loop", () => {
     };
   };
 
-  it("synchronously reserves one of two idle submissions before deferred readiness or large-paste consumption", async () => {
+  it("synchronously reserves one of two idle submissions before deferred admission or large-paste consumption", async () => {
     const { aiService, currentRuntimeAdapter, handler, onMessageSubmit } = createHostedToolLoopHarness();
-    let resolveReadiness!: (ready: boolean) => void;
-    const readiness = new Promise<boolean>((resolve) => { resolveReadiness = resolve; });
-    const ensureReady = jest.fn(() => readiness);
-    (handler as any).ensureProviderReadyForChat = ensureReady;
+    const allowed = await managedChatAdmission.acquireChatTurnLease();
+    let resolveAdmission!: (value: typeof allowed) => void;
+    const deferredAdmission = new Promise<typeof allowed>((resolve) => {
+      resolveAdmission = resolve;
+    });
+    const admission = jest
+      .spyOn(managedChatAdmission, "acquireChatTurnLease")
+      .mockImplementationOnce(() => deferredAdmission);
     (handler as any).pendingLargeTextContent = "full large paste";
     (handler as any).createAssistantMessageContainer = jest.fn(() => {
       const messageEl = document.createElement("div");
@@ -288,13 +272,13 @@ describe("InputHandler hosted tool loop", () => {
       state: "reserved",
     }));
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(ensureReady).toHaveBeenCalledTimes(1);
+    expect(admission).toHaveBeenCalledTimes(1);
     expect(handler.getValue()).toBe("Summarize [PASTED TEXT - 20 LINES OF TEXT]");
     expect((handler as any).pendingLargeTextContent).toBe("full large paste");
     expect(onMessageSubmit).not.toHaveBeenCalled();
     expect(aiService.streamMessage).not.toHaveBeenCalled();
 
-    resolveReadiness(true);
+    resolveAdmission(allowed);
     await first;
 
     expect(onMessageSubmit).toHaveBeenCalledTimes(1);
@@ -802,7 +786,7 @@ describe("InputHandler hosted tool loop", () => {
       });
 
     chatView.isPiBackedChat.mockReturnValue(true);
-    const operation = await bindAcceptedRequest();
+    const operation = await bindAcceptedRequest("pi");
     await (handler as any).streamAssistantTurn(operation, new AbortController().signal, false, undefined, { runtime: "pi" });
 
     expect(createAssistantMessageContainerSpy).not.toHaveBeenCalled();
@@ -1299,9 +1283,9 @@ describe("InputHandler hosted tool loop", () => {
 
     const message = { role: "user", content: "accepted", message_id: "u" } as const;
     const durable = Object.freeze({ chatId: "chat-1", version: 1, messages: Object.freeze([message]) });
-    const operation = Object.freeze({ lease: {} as never, durableTurnId: "u", acceptedUserMessage: message, initialDurableSnapshot: durable, turnBoundaryId: "b" });
+    const operation = Object.freeze({ runtime: "pi" as const, durableTurnId: "u", acceptedUserMessage: message, initialDurableSnapshot: durable, turnBoundaryId: "b" });
     (handler as any).acceptedOperation = operation;
-    (handler as any).acceptedRequestSnapshot = { operation, legacyPreparation: { modelSource: "pi_local", resolvedModel: {}, actualModelId: "local-pi-openai@@gpt-4.1", preparedMessages: [message], finalSystemPrompt: "", tools: [] } };
+    (handler as any).acceptedRequestSnapshot = { runtime: "pi", operation, legacyPreparation: { modelSource: "pi_local", resolvedModel: {}, actualModelId: "local-pi-openai@@gpt-4.1", preparedMessages: [message], finalSystemPrompt: "", tools: [] } };
     await (handler as any).streamAssistantTurn(operation, new AbortController().signal, false, undefined, { phase: "initial", runtime: "pi" });
 
     expect(aiService.streamMessage).toHaveBeenCalledWith(
@@ -1312,246 +1296,97 @@ describe("InputHandler hosted tool loop", () => {
     expect(chatView.getCurrentRuntimeAdapter).not.toHaveBeenCalled();
   });
 
-  it("routes local Pi setup failures to Providers instead of forcing managed fallback", async () => {
-    const app = new App();
-    const container = document.createElement("div");
-    const chatContainer = document.createElement("div");
-    container.appendChild(chatContainer);
-
-    const plugin = {
-      app,
-      settings: {
-        licenseKey: "",
-        licenseValid: false,
-        autoSubmitAfterTranscription: false,
-      },
-      modelService: {
-        getModels: jest.fn(async () => []),
-      },
-    } as any;
-
-    const localModel = {
-      id: "local-pi-openai@@gpt-4.1",
-      name: "gpt-4.1",
-      provider: "openai",
-      sourceMode: "pi_local",
-      sourceProviderId: "openai",
-      piExecutionModelId: "openai/gpt-4.1",
-      piLocalAvailable: true,
-      context_length: 1000000,
-      capabilities: ["chat"],
-      architecture: { modality: "text->text" },
-      pricing: { prompt: "0", completion: "0", image: "0", request: "0" },
-    };
-
-    const chatView = {
-      getSelectedModelId: jest.fn(() => "local-pi-openai@@gpt-4.1"),
-      getSelectedModelRecord: jest.fn(async () => localModel),
-      promptProviderSetup: jest.fn().mockResolvedValue(undefined),
-    } as any;
-
-    const handler = new InputHandler({
-      managedChatAdmission,
-      commitAcceptedUserMessage: (input) => commitAccepted([], input),
-      claimAcceptedUserCommit: () => true,
-      app,
-      container,
-      aiService: {
-        streamMessage: jest.fn(),
-      } as any,
-      getMessages: () => [],
-      isChatReady: () => true,
-      chatContainer,
-      scrollManager: {
-        requestStickToBottom: jest.fn(),
-        setGenerating: jest.fn(),
-      } as any,
-      messageRenderer: {
-        addMessageButtonToolbar: jest.fn(),
-        normalizeMessageToParts: jest.fn(() => ({ parts: [] })),
-        renderUnifiedMessageParts: jest.fn(),
-      } as any,
-      onMessageSubmit: jest.fn().mockResolvedValue(undefined),
-      onAssistantResponse: jest.fn().mockResolvedValue(undefined),
-      onError: jest.fn(),
-      onAddContextFile: jest.fn(),
-      onOpenChatSettings: jest.fn(),
-      plugin,
-      getChatMarkdown: jest.fn().mockResolvedValue(""),
-      getChatTitle: jest.fn(() => "Chat"),
-      addFileToContext: jest.fn(),
-      getChatId: jest.fn(() => "chat-1"),
-      chatView,
-    });
-
-    (ensureProviderRuntimeReady as jest.Mock).mockRejectedValue(
-      new Error('Connect OpenAI in Pi before running "openai/gpt-4.1".')
-    );
-
-    await expect((handler as any).ensureProviderReadyForChat()).resolves.toBe(false);
-    expect(chatView.promptProviderSetup).toHaveBeenCalledWith(
-      'Connect OpenAI in Pi before running "openai/gpt-4.1".',
-      expect.objectContaining({
-        targetTab: "providers",
-        primaryButton: "Open Providers",
-      })
-    );
-  });
-
-  it("fails fast instead of opening setup UI during automation", async () => {
-    const app = new App();
-    const container = document.createElement("div");
-    const chatContainer = document.createElement("div");
-    container.appendChild(chatContainer);
-
-    const chatView = {
-      promptProviderSetup: jest.fn().mockResolvedValue(undefined),
-    } as any;
-
-    const handler = new InputHandler({
-      managedChatAdmission,
-      commitAcceptedUserMessage: (input) => commitAccepted([], input),
-      claimAcceptedUserCommit: () => true,
-      app,
-      container,
-      aiService: {
-        streamMessage: jest.fn(),
-      } as any,
-      getMessages: () => [],
-      isChatReady: () => true,
-      chatContainer,
-      scrollManager: {
-        requestStickToBottom: jest.fn(),
-        setGenerating: jest.fn(),
-      } as any,
-      messageRenderer: {
-        addMessageButtonToolbar: jest.fn(),
-        normalizeMessageToParts: jest.fn(() => ({ parts: [] })),
-        renderUnifiedMessageParts: jest.fn(),
-      } as any,
-      onMessageSubmit: jest.fn().mockResolvedValue(undefined),
-      onAssistantResponse: jest.fn().mockResolvedValue(undefined),
-      onError: jest.fn(),
-      onAddContextFile: jest.fn(),
-      onOpenChatSettings: jest.fn(),
-      plugin: {
-        app,
-        settings: {
-          licenseKey: "",
-          licenseValid: false,
-          autoSubmitAfterTranscription: false,
-        },
-        modelService: {
-          getModels: jest.fn(async () => []),
-        },
-      } as any,
-      getChatMarkdown: jest.fn().mockResolvedValue(""),
-      getChatTitle: jest.fn(() => "Chat"),
-      addFileToContext: jest.fn(),
-      getChatId: jest.fn(() => "chat-1"),
-      chatView,
-    });
-
-    (handler as any).automationRequestDepth = 1;
-
-    await expect(
-      (handler as any).invokeProviderSetupPrompt("Automation setup failure.", {
-        targetTab: "providers",
-      })
-    ).rejects.toThrow("Automation setup failure.");
-
-    expect(chatView.promptProviderSetup).not.toHaveBeenCalled();
-  });
-
-  it("accepts remote-provider mobile chats when plugin settings already contain the API key", async () => {
-    const { handler, chatView, plugin } = createHostedToolLoopHarness();
+  it("normalizes legacy model input before request preparation without reading legacy authorities", async () => {
+    const { aiService, chatView, handler, plugin } = createHostedToolLoopHarness();
     chatView.getSelectedModelId = jest.fn(() => "openrouter@@openai/gpt-5.4-mini");
-    plugin.settings.selectedModelId = "openrouter@@openai/gpt-5.4-mini";
-    plugin.modelService.getModelById = jest.fn(async () => ({
-      id: "openrouter@@openai/gpt-5.4-mini",
-      provider: "openrouter",
-      sourceProviderId: "openrouter",
-      sourceMode: "custom_endpoint",
-      piRemoteAvailable: true,
-      piExecutionModelId: "openai/gpt-5.4-mini",
-    }));
-    (ensureProviderRuntimeReady as jest.Mock).mockResolvedValue({
-      mode: "remote",
-      actualModelId: "openai/gpt-5.4-mini",
-      providerId: "openrouter",
-      authMode: "byok",
-      endpoint: "https://openrouter.ai/api/v1",
-      supportsTools: true,
-      supportsImages: true,
+    Object.defineProperty(plugin, "modelService", {
+      configurable: true,
+      get: () => { throw new Error("forbidden modelService read"); },
     });
+    Object.defineProperty(plugin, "getEntitlementService", {
+      configurable: true,
+      get: () => { throw new Error("forbidden entitlement read"); },
+    });
+    jest.spyOn(handler as any, "streamAssistantTurn").mockResolvedValue({
+      messageId: "assistant",
+      message: { role: "assistant", content: "done", message_id: "assistant" },
+      messageEl: document.createElement("div"),
+      completed: true,
+      completionState: "completed",
+    });
+    handler.setValue("use the managed identity");
 
-    await expect((handler as any).ensureProviderReadyForChat()).resolves.toBe(true);
-    expect(ensureProviderRuntimeReady).toHaveBeenCalled();
+    await handler.submitForAutomation();
+
+    expect(aiService.prepareAcceptedChatRequest).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({
+        model: "systemsculpt@@systemsculpt/ai-agent",
+      }),
+    );
   });
 
-  it("uses the selected model setup target when automation blocks a setup prompt without overrides", async () => {
-    const app = new App();
-    const container = document.createElement("div");
-    const chatContainer = document.createElement("div");
-    container.appendChild(chatContainer);
-
-    const chatView = {
-      promptProviderSetup: jest.fn().mockResolvedValue(undefined),
-      getSelectedModelId: jest.fn(() => "openai@@gpt-4.1"),
-    } as any;
-
-    const handler = new InputHandler({
-      managedChatAdmission,
-      commitAcceptedUserMessage: (input) => commitAccepted([], input),
-      claimAcceptedUserCommit: () => true,
-      app,
-      container,
-      aiService: {
-        streamMessage: jest.fn(),
-      } as any,
-      getMessages: () => [],
-      isChatReady: () => true,
-      chatContainer,
-      scrollManager: {
-        requestStickToBottom: jest.fn(),
-        setGenerating: jest.fn(),
-      } as any,
-      messageRenderer: {
-        addMessageButtonToolbar: jest.fn(),
-        normalizeMessageToParts: jest.fn(() => ({ parts: [] })),
-        renderUnifiedMessageParts: jest.fn(),
-      } as any,
-      onMessageSubmit: jest.fn().mockResolvedValue(undefined),
-      onAssistantResponse: jest.fn().mockResolvedValue(undefined),
-      onError: jest.fn(),
-      onAddContextFile: jest.fn(),
-      onOpenChatSettings: jest.fn(),
-      plugin: {
-        app,
-        settings: {
-          licenseKey: "",
-          licenseValid: false,
-          autoSubmitAfterTranscription: false,
-          selectedModelId: "systemsculpt@@systemsculpt/ai-agent",
-        },
-        modelService: {
-          getModels: jest.fn(async () => []),
-        },
-      } as any,
-      getChatMarkdown: jest.fn().mockResolvedValue(""),
-      getChatTitle: jest.fn(() => "Chat"),
-      addFileToContext: jest.fn(),
-      getChatId: jest.fn(() => "chat-1"),
-      chatView,
+  it("uses one managed admission result and fails automation before payload preparation", async () => {
+    const { aiService, handler } = createHostedToolLoopHarness();
+    const admission = jest.fn().mockResolvedValue({
+      outcome: "license_required",
+      lease: { outcome: "license_required" },
     });
+    (handler as any).managedChatAdmission = { acquireChatTurnLease: admission };
+    handler.setValue("blocked before preparation");
 
-    (handler as any).automationRequestDepth = 1;
-
-    await expect((handler as any).invokeProviderSetupPrompt()).rejects.toThrow(
-      "Open Settings -> Providers to connect the selected provider."
+    await expect(handler.submitForAutomation()).rejects.toThrow(
+      "Activate your SystemSculpt license in Account",
     );
 
-    expect(chatView.promptProviderSetup).not.toHaveBeenCalled();
+    expect(admission).toHaveBeenCalledTimes(1);
+    expect(aiService.prepareAcceptedChatRequest).not.toHaveBeenCalled();
+  });
+
+  it("never acquires a managed lease for a retained Pi-backed session", async () => {
+    const { aiService, chatView, handler } = createHostedToolLoopHarness();
+    chatView.isPiBackedChat = jest.fn(() => true);
+    chatView.getSelectedModelId = jest.fn(() => "local-pi-openai@@gpt-5.4");
+    const acquireChatTurnLease = jest.fn(() => {
+      throw new Error("Pi must not request managed admission");
+    });
+    (handler as any).managedChatAdmission = { acquireChatTurnLease };
+    jest.spyOn(handler as any, "streamAssistantTurn").mockResolvedValue({
+      messageId: "assistant",
+      message: { role: "assistant", content: "done", message_id: "assistant" },
+      messageEl: document.createElement("div"),
+      completed: true,
+      completionState: "completed",
+    });
+    handler.setValue("continue retained Pi session");
+
+    await handler.submitForAutomation();
+
+    expect(acquireChatTurnLease).not.toHaveBeenCalled();
+    const operation = aiService.prepareAcceptedChatRequest.mock.calls[0]?.[0];
+    const preparation = aiService.prepareAcceptedChatRequest.mock.calls[0]?.[1];
+    expect(operation).toEqual(expect.objectContaining({ runtime: "pi" }));
+    expect(operation).not.toHaveProperty("lease");
+    expect(preparation).toEqual(expect.objectContaining({
+      model: "local-pi-openai@@gpt-5.4",
+    }));
+  });
+
+  it("fails closed before admission or commit when a Pi session has no retained model", async () => {
+    const { aiService, chatView, handler, onMessageSubmit } = createHostedToolLoopHarness();
+    chatView.isPiBackedChat = jest.fn(() => true);
+    chatView.getSelectedModelId = jest.fn(() => "");
+    const acquireChatTurnLease = jest.fn();
+    (handler as any).managedChatAdmission = { acquireChatTurnLease };
+    handler.setValue("must not fall back to managed identity");
+
+    await expect(handler.submitForAutomation()).rejects.toThrow(
+      "retained Pi session model is unavailable",
+    );
+
+    expect(acquireChatTurnLease).not.toHaveBeenCalled();
+    expect(onMessageSubmit).not.toHaveBeenCalled();
+    expect(aiService.prepareAcceptedChatRequest).not.toHaveBeenCalled();
   });
 
   it("auto-approves destructive hosted tool calls during automation when configured", async () => {
@@ -1777,7 +1612,7 @@ describe("InputHandler hosted tool loop", () => {
     expect(chatContainer.querySelector(".systemsculpt-streaming-status")).toBeNull();
   });
 
-  it("preserves refreshOptions when model changes are forwarded", () => {
+  it("refreshes the fixed identity without catalog cache state", () => {
     const app = new App();
     const container = document.createElement("div");
     const chatContainer = document.createElement("div");
@@ -1831,15 +1666,12 @@ describe("InputHandler hosted tool loop", () => {
 
     const controller = (handler as any).modelSelectionController;
     const refreshSpy = jest.spyOn(controller, "refresh");
-    (controller as any).modelPickerOptionsCache = [{ value: "model-a" } as any];
-    const stalePromise = Promise.resolve([]);
-    (controller as any).modelPickerOptionsPromise = stalePromise;
 
     handler.onModelChange({ refreshOptions: true });
 
-    expect((controller as any).modelPickerOptionsCache).toBeNull();
-    expect((controller as any).modelPickerOptionsPromise).not.toBe(stalePromise);
-    expect(refreshSpy).toHaveBeenCalledWith({ reloadOptions: true });
+    expect("modelPickerOptionsCache" in controller).toBe(false);
+    expect("modelPickerOptionsPromise" in controller).toBe(false);
+    expect(refreshSpy).toHaveBeenCalledWith();
     expect(onModelChange).toHaveBeenCalledWith({ refreshOptions: true });
   });
 });

@@ -77,13 +77,22 @@ export type ManagedChatLeaseResult =
   | Readonly<{ outcome: "allowed"; lease: ManagedAllowedLease }>
   | Readonly<{ outcome: Exclude<ManagedAdmissionOutcome, "allowed">; lease: ManagedLease }>;
 export interface ManagedChatAdmissionPort { acquireChatTurnLease(): Promise<ManagedChatLeaseResult>; }
-export type AcceptedChatOperation = Readonly<{
-  lease: ManagedAllowedLease;
+export type AcceptedChatOperationBase = Readonly<{
   durableTurnId: string;
   acceptedUserMessage: Readonly<ChatMessage>;
   initialDurableSnapshot: ChatTranscriptSnapshot;
   turnBoundaryId: string;
 }>;
+export type AcceptedManagedChatOperation = AcceptedChatOperationBase & Readonly<{
+  runtime: "managed";
+  lease: ManagedAllowedLease;
+}>;
+export type AcceptedPiChatOperation = AcceptedChatOperationBase & Readonly<{
+  runtime: "pi";
+}>;
+export type AcceptedChatOperation =
+  | AcceptedManagedChatOperation
+  | AcceptedPiChatOperation;
 export interface ManagedResponseDiagnostics {
   status: number; requestId: string | null; contentType: string | null;
   rateLimitLimit: string | null; rateLimitRemaining: string | null; rateLimitReset: string | null;

@@ -1,6 +1,6 @@
 import type { ManagedCapabilityClient } from "../../../services/managed/ManagedCapabilityClient";
-import type { AcceptedChatOperation, JsonContractValue } from "../../../services/managed/ManagedTypes";
-import type { AcceptedChatRequestSnapshot, ManagedPreparedMessage } from "../../../services/chat/AcceptedChatRequestSnapshot";
+import type { AcceptedManagedChatOperation, JsonContractValue } from "../../../services/managed/ManagedTypes";
+import type { AcceptedManagedChatRequestSnapshot, ManagedPreparedMessage } from "../../../services/chat/AcceptedChatRequestSnapshot";
 import { composeAcceptedChatContinuation } from "../../../services/chat/AcceptedChatRequestSnapshot";
 import type { StreamEvent, StreamToolCall } from "../../../streaming/types";
 
@@ -25,7 +25,8 @@ export type ManagedChatDispatchResult =
   | Readonly<{ kind: FailureKind; diagnostic: ManagedChatDiagnostic }>;
 
 export type ManagedChatDispatchInput = Readonly<{
-  acceptedRequestSnapshot: AcceptedChatRequestSnapshot;
+  operation: AcceptedManagedChatOperation;
+  acceptedRequestSnapshot: AcceptedManagedChatRequestSnapshot;
   phase: "initial" | "continuation";
   continuationIndex: number;
   postCheckpointDurableSnapshot?: import("../transcript/ChatTranscriptTypes").ChatTranscriptSnapshot;
@@ -280,20 +281,23 @@ export async function managedChatOperationKey(durableTurnId: string, phase: "ini
 }
 
 export class ManagedChatRuntimeAdapter {
-  private readonly registry = new WeakMap<AcceptedChatOperation, OperationRegistry>();
-  private readonly terminal = new WeakSet<AcceptedChatOperation>();
+  private readonly registry = new WeakMap<AcceptedManagedChatOperation, OperationRegistry>();
+  private readonly terminal = new WeakSet<AcceptedManagedChatOperation>();
 
   public constructor(private readonly client: ManagedCapabilityClient) {}
 
   public dispatch(input: ManagedChatDispatchInput): Promise<ManagedChatDispatchResult> {
+    if (input.acceptedRequestSnapshot.operation !== input.operation) {
+      return Promise.resolve({ kind: "transport_failure", diagnostic: {} });
+    }
     const validOrdinal = Number.isInteger(input.continuationIndex) && input.continuationIndex >= 0 &&
       (input.phase === "continuation" || (input.continuationIndex === 0 && input.acceptedRequestSnapshot.durableSnapshot === input.acceptedRequestSnapshot.operation.initialDurableSnapshot));
     if (!validOrdinal) return Promise.resolve({ kind: "transport_failure", diagnostic: {} });
-    if (this.terminal.has(input.acceptedRequestSnapshot.operation)) return Promise.resolve({ kind: "operation_terminal", diagnostic: {} });
-    let operations = this.registry.get(input.acceptedRequestSnapshot.operation);
+    if (this.terminal.has(input.operation)) return Promise.resolve({ kind: "operation_terminal", diagnostic: {} });
+    let operations = this.registry.get(input.operation);
     if (!operations) {
       operations = new Map();
-      this.registry.set(input.acceptedRequestSnapshot.operation, operations);
+      this.registry.set(input.operation, operations);
     }
     const localKey = `${input.phase}:${input.phase === "initial" ? 0 : input.continuationIndex}`;
     const existing = operations.get(localKey);
@@ -303,12 +307,12 @@ export class ManagedChatRuntimeAdapter {
     return pending;
   }
 
-  public notifyDurablyTerminal(operation: AcceptedChatOperation): void {
+  public notifyDurablyTerminal(operation: AcceptedManagedChatOperation): void {
     this.terminal.add(operation);
     this.registry.delete(operation);
   }
 
-  public hasRetainedEntries(operation: AcceptedChatOperation): boolean {
+  public hasRetainedEntries(operation: AcceptedManagedChatOperation): boolean {
     return (this.registry.get(operation)?.size ?? 0) > 0;
   }
 
@@ -332,7 +336,7 @@ export class ManagedChatRuntimeAdapter {
     if (accepted.tools?.length) body.tools = accepted.tools;
     const key = await managedChatOperationKey(input.acceptedRequestSnapshot.operation.durableTurnId, input.phase, input.continuationIndex);
     try {
-      const transport = await this.client.streamAcceptedChat(ticket, input.acceptedRequestSnapshot.operation.lease, body, key, input.signal);
+      const transport = await this.client.streamAcceptedChat(ticket, input.operation.lease, body, key, input.signal);
       const status = statusValue(transport.response.status);
       const requestId = bounded(transport.diagnostics.requestId, 128);
       const diagnostic: ManagedChatDiagnostic = {

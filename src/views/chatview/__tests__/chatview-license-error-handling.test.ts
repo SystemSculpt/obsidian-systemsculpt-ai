@@ -16,7 +16,6 @@ jest.mock("../uiSetup", () => ({
   uiSetup: {
     showLicenseBanner: jest.fn(),
     hideLicenseBanner: jest.fn(),
-    updateToolCompatibilityWarning: jest.fn().mockResolvedValue(undefined),
   },
 }));
 jest.mock("../modals/ChatErrorModal", () => ({
@@ -33,14 +32,14 @@ const makeHandleErrorView = (opts: { automation?: boolean; updateSettings: jest.
   inputHandler: { isAutomationRequestActive: jest.fn(() => opts.automation === true) },
   getEffectiveSelectedModelId: jest.fn(() => "systemsculpt@@systemsculpt/ai-agent"),
   resetFailedAssistantTurn: jest.fn().mockResolvedValue(undefined),
-  openSetupTab: jest.fn(),
+  openAccountSettings: jest.fn(),
   messages: [],
   chatId: "chat-license",
   isGenerating: false,
   app: {},
   plugin: {
     getSettingsManager: () => ({ updateSettings: opts.updateSettings }),
-    settings: { licenseValid: true },
+    settings: { licenseValid: true, licenseKey: "license" },
   },
 });
 
@@ -50,9 +49,8 @@ const makeRefreshView = (opts: {
   updateSettings: jest.Mock;
 }) => ({
   plugin: {
-    getEntitlementService: () => ({ hasSystemSculptLicense: () => true }),
     getSettingsManager: () => ({ updateSettings: opts.updateSettings }),
-    settings: { licenseValid: opts.licenseValid },
+    settings: { licenseValid: opts.licenseValid, licenseKey: "license" },
   },
   aiService: { getCreditsBalance: opts.getCreditsBalance },
   updateCreditsIndicator: jest.fn().mockResolvedValue(undefined),
@@ -83,7 +81,7 @@ describe("ChatView license error handling (#249)", () => {
     });
     expect(showPopupMock).toHaveBeenCalledTimes(1);
     expect(openExternalUrlMock).toHaveBeenCalledWith("https://systemsculpt.com/renew");
-    expect(view.openSetupTab).not.toHaveBeenCalled();
+    expect(view.openAccountSettings).not.toHaveBeenCalled();
   });
 
   it("invalid license: shows an invalid banner, opens settings on the secondary action, and falls back to the license URL", async () => {
@@ -103,7 +101,7 @@ describe("ChatView license error handling (#249)", () => {
       expired: false,
       renewUrl: SYSTEMSCULPT_WEBSITE.LICENSE,
     });
-    expect(view.openSetupTab).toHaveBeenCalledWith("account");
+    expect(view.openAccountSettings).toHaveBeenCalledTimes(1);
     expect(openExternalUrlMock).not.toHaveBeenCalled();
   });
 
@@ -131,7 +129,7 @@ describe("ChatView license error handling (#249)", () => {
     expect(view.resetFailedAssistantTurn).toHaveBeenCalled();
   });
 
-  it("BYOK provider auth failure (non-automation) surfaces the provider-recovery action instead of the renewal flow (#249)", async () => {
+  it("a non-managed auth failure uses the bounded Account recovery action", async () => {
     const updateSettings = jest.fn().mockResolvedValue(undefined);
     // automation: false so the interactive recovery UI actually runs — this is
     // the positive half of the #249 fix and must stay permanently guarded.
@@ -155,13 +153,11 @@ describe("ChatView license error handling (#249)", () => {
     expect(showBannerMock).not.toHaveBeenCalled();
     expect(showPopupMock).not.toHaveBeenCalled();
 
-    // Instead the auth failure routes the user to reconnect their own provider
-    // key via the "Open Providers" recovery action.
     expect(ChatErrorModalMock).toHaveBeenCalledTimes(1);
     const modalArgs = ChatErrorModalMock.mock.calls[0][0];
-    expect(modalArgs.primaryActionLabel).toBe("Open Providers");
+    expect(modalArgs.primaryActionLabel).toBe("Open Account");
     modalArgs.onPrimaryAction();
-    expect(view.openSetupTab).toHaveBeenCalledWith("providers");
+    expect(view.openAccountSettings).toHaveBeenCalledTimes(1);
     expect(ChatErrorModalMock.mock.results[0].value.open).toHaveBeenCalledTimes(1);
   });
 

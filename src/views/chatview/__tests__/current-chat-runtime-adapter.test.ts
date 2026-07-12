@@ -1,15 +1,15 @@
 /** @jest-environment jsdom */
 
-import type { AcceptedChatRequestSnapshot } from "../../../services/chat/AcceptedChatRequestSnapshot";
-import type { AcceptedChatOperation } from "../../../services/managed/ManagedTypes";
+import type { AcceptedManagedChatRequestSnapshot } from "../../../services/chat/AcceptedChatRequestSnapshot";
+import type { AcceptedManagedChatOperation } from "../../../services/managed/ManagedTypes";
 import {
   CurrentRuntimeAdapter,
   ManagedChatRuntimeFailure,
 } from "../turn/CurrentRuntimeAdapter";
 import type { ManagedChatRuntimeEvent } from "../turn/ManagedChatRuntimeAdapter";
 
-const operation = Object.freeze({ durableTurnId: "turn" }) as AcceptedChatOperation;
-const snapshot = Object.freeze({ operation, durableTurnId: "turn" }) as AcceptedChatRequestSnapshot;
+const operation = Object.freeze({ runtime: "managed", lease: {}, durableTurnId: "turn" }) as AcceptedManagedChatOperation;
+const snapshot = Object.freeze({ runtime: "managed", operation, durableTurnId: "turn" }) as AcceptedManagedChatRequestSnapshot;
 
 async function* events(): AsyncGenerator<ManagedChatRuntimeEvent> {
   yield { kind: "content_delta", text: "hello" };
@@ -26,6 +26,7 @@ describe("CurrentRuntimeAdapter", () => {
     const signal = new AbortController().signal;
     const fence = { isOpen: () => true };
     const result = await runtime.dispatch({
+      operation,
       acceptedRequestSnapshot: snapshot,
       phase: "initial",
       continuationIndex: 0,
@@ -35,6 +36,7 @@ describe("CurrentRuntimeAdapter", () => {
 
     expect(result.kind).toBe("stream");
     expect(managed.dispatch).toHaveBeenCalledWith({
+      operation,
       acceptedRequestSnapshot: snapshot,
       phase: "initial",
       continuationIndex: 0,
@@ -57,6 +59,7 @@ describe("CurrentRuntimeAdapter", () => {
       messages: Object.freeze([]),
     });
     await runtime.dispatch({
+      operation,
       acceptedRequestSnapshot: snapshot,
       phase: "continuation",
       continuationIndex: 1,
@@ -65,6 +68,7 @@ describe("CurrentRuntimeAdapter", () => {
       fence: { isOpen: () => true },
     });
     expect(managed.dispatch).toHaveBeenCalledWith({
+      operation,
       acceptedRequestSnapshot: snapshot,
       phase: "continuation",
       continuationIndex: 1,
@@ -81,6 +85,7 @@ describe("CurrentRuntimeAdapter", () => {
     const abort = new AbortController();
     abort.abort();
     const error = await runtime.dispatch({
+      operation,
       acceptedRequestSnapshot: snapshot,
       phase: "initial",
       continuationIndex: 0,
@@ -100,6 +105,7 @@ describe("CurrentRuntimeAdapter", () => {
     const runtime = new CurrentRuntimeAdapter(managed as never);
     const abort = new AbortController();
     const pending = runtime.dispatch({
+      operation,
       acceptedRequestSnapshot: snapshot,
       phase: "initial",
       continuationIndex: 0,
@@ -124,6 +130,7 @@ describe("CurrentRuntimeAdapter", () => {
     };
     const runtime = new CurrentRuntimeAdapter(managed as never);
     await expect(runtime.dispatch({
+      operation,
       acceptedRequestSnapshot: snapshot,
       phase: "initial",
       continuationIndex: 0,
@@ -139,6 +146,7 @@ describe("CurrentRuntimeAdapter", () => {
     };
     const runtime = new CurrentRuntimeAdapter(managed as never);
     const error = await runtime.dispatch({
+      operation,
       acceptedRequestSnapshot: snapshot,
       phase: "initial",
       continuationIndex: 0,
