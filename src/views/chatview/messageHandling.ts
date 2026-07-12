@@ -86,28 +86,6 @@ export const messageHandling = {
       return { status: "error" };
     }
 
-    if (chatView.getPiSessionFile() || chatView.getPiSessionId()) {
-      try {
-        const forkResult = await chatView.forkPiSessionFromMessage(messageId);
-        if (forkResult.cancelled) {
-          new Notice("The SystemSculpt session cancelled the branch request for that message.");
-          return { status: "cancelled" };
-        }
-        if (chatView.inputHandler) {
-          const piResendText = String(forkResult.text || "").trim();
-          chatView.inputHandler.setValue(piResendText || String(content || "").trim());
-          chatView.inputHandler.focus();
-        }
-        new Notice("Branched chat to that message and restored it to the composer.");
-        return { status: "success" };
-      } catch (error) {
-        new Notice(
-          `Unable to branch this chat from that message: ${error instanceof Error ? error.message : String(error)}`
-        );
-        return { status: "error" };
-      }
-    }
-
     const identity = chatView.getPendingResendIdentity(messageId);
     if (!identity || !chatView.inputHandler) return { status: "error" };
     chatView.inputHandler.setPendingResendIntent(identity);

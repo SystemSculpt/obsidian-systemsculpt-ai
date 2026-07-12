@@ -5,8 +5,7 @@ import * as obsidianApi from "obsidian";
 const { parseYaml } = obsidianApi as any;
 import { MessagePartList } from "../utils/MessagePartList";
 import {
-  normalizePiSessionState,
-  resolveChatBackend,
+  detectLoadedChatBackend,
   type ChatMetadata,
   type ParsedChatMarkdown,
 } from "./ChatPersistenceTypes";
@@ -63,7 +62,6 @@ export class ChatMarkdownSerializer {
 
       const roleMatch = attrs.match(/role="(.*?)"/);
       const idMatch = attrs.match(/message-id="(.*?)"/);
-      const piEntryIdMatch = attrs.match(/pi-entry-id="(.*?)"/);
       if (!roleMatch || !idMatch) continue;
 
       const role = roleMatch[1] as ChatRole;
@@ -165,11 +163,7 @@ export class ChatMarkdownSerializer {
       }
 
       if (parts.length > 0) {
-        const message = this.reconstructMessageFromParts(role, message_id, parts);
-        if (piEntryIdMatch?.[1]) {
-          message.pi_entry_id = piEntryIdMatch[1];
-        }
-        messages.push(message);
+        messages.push(this.reconstructMessageFromParts(role, message_id, parts));
       }
     }
 
@@ -187,7 +181,6 @@ export class ChatMarkdownSerializer {
 
       const roleMatch = attrs.match(/role="(.*?)"/);
       const idMatch = attrs.match(/message-id="(.*?)"/);
-      const piEntryIdMatch = attrs.match(/pi-entry-id="(.*?)"/);
       if (!roleMatch || !idMatch) continue;
 
       const role = roleMatch[1] as ChatRole;
@@ -252,11 +245,7 @@ export class ChatMarkdownSerializer {
       }
 
       if (parts.length > 0) {
-        const message = this.reconstructMessageFromParts(role, message_id, parts);
-        if (piEntryIdMatch?.[1]) {
-          message.pi_entry_id = piEntryIdMatch[1];
-        }
-        messages.push(message);
+        messages.push(this.reconstructMessageFromParts(role, message_id, parts));
       }
     }
 
@@ -349,13 +338,6 @@ export class ChatMarkdownSerializer {
       };
     }
 
-    const piState = normalizePiSessionState({
-      sessionFile: parsed.piSessionFile,
-      sessionId: parsed.piSessionId,
-      lastEntryId: parsed.piLastEntryId,
-      lastSyncedAt: parsed.piLastSyncedAt,
-    });
-
     return {
       id,
       model,
@@ -371,16 +353,13 @@ export class ChatMarkdownSerializer {
         : undefined,
       agentModeEnabled: typeof parsed.agentModeEnabled === "boolean" ? parsed.agentModeEnabled : undefined,
       hideSystemMessages: typeof parsed.hideSystemMessages === "boolean" ? parsed.hideSystemMessages : undefined,
-      chatBackend: resolveChatBackend({
+      chatBackend: detectLoadedChatBackend({
         explicitBackend: parsed.chatBackend,
-        piSessionFile: piState.sessionFile,
-        piSessionId: piState.sessionId,
-        defaultBackend: legacySystemMessage ? "legacy" : "systemsculpt",
+        piSessionFile: parsed.piSessionFile,
+        piSessionId: parsed.piSessionId,
+        model,
+        hasPiEntryId: legacySystemMessage !== undefined || /\bpi[_-]entry[_-]id\b/i.test(content),
       }),
-      piSessionFile: piState.sessionFile,
-      piSessionId: piState.sessionId,
-      piLastEntryId: piState.lastEntryId,
-      piLastSyncedAt: piState.lastSyncedAt,
     };
   }
 
@@ -449,7 +428,6 @@ export class ChatMarkdownSerializer {
     const isStreaming = !!msg.streaming;
 
     let attributes = `role="${msg.role}" message-id="${msg.message_id}"`;
-    if (msg.pi_entry_id) attributes += ` pi-entry-id="${msg.pi_entry_id}"`;
     if (hasToolCalls) attributes += " has-tool-calls=\"true\"";
     if (hasReasoning) attributes += " has-reasoning=\"true\"";
     if (isStreaming) attributes += " streaming=\"true\"";

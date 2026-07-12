@@ -12,46 +12,30 @@ function methodSlice(source: string, start: string, end: string): string {
 }
 
 describe("standard Chat runtime sibling preservation", () => {
-  it("keeps standard Chat unconditional on the managed adapter while Pi retains its session stream path", () => {
+  it("keeps standard Chat unconditional on the managed adapter with no legacy stream path", () => {
     const input = read("src/views/chatview/InputHandler.ts");
     const router = methodSlice(input, "private async streamAssistantTurn", "private async streamManagedAssistantTurn");
-    const managed = methodSlice(input, "private async streamManagedAssistantTurn", "private async streamPiAssistantTurn");
-    const pi = methodSlice(input, "private async streamPiAssistantTurn", "private getHostedContinuationTarget");
+    const managed = methodSlice(input, "private async streamManagedAssistantTurn", "private shouldContinueHostedToolLoop");
 
-    expect(router).toContain('options?.runtime === "pi"');
     expect(router).toContain("this.streamManagedAssistantTurn");
     expect(managed).toContain("getCurrentRuntimeAdapter()");
     expect(managed).not.toContain("streamMessage(");
     expect(managed).not.toContain("getMessages()");
     expect(managed).not.toContain("composeAcceptedLegacyContinuation");
     expect(managed).not.toMatch(/fallback|NODE_ENV|acquireLease|withLease/);
-    expect(pi).toContain("this.aiService.streamMessage(");
-    expect(pi).toContain("getPiSessionFile");
-    expect(pi).toContain("getPiSessionId");
-    expect(pi).toContain("onPiSessionReady");
-    expect(pi).not.toContain("getCurrentRuntimeAdapter");
+    expect(input).not.toContain("streamMessage(");
+    expect(input).not.toMatch(/PiSession|getPiSession|runtime:\s*["']pi["']/);
   });
 
-  it("keeps the shared streamMessage interface and every non-Chat production consumer", () => {
+  it("keeps the shared streamMessage interface only for Studio", () => {
     const service = read("src/services/SystemSculptService.ts");
     expect(service).toMatch(/async \*streamMessage\(options:/);
-
-    const expectedConsumers = [
-      "src/modals/MeetingProcessorModal.ts",
-      "src/modals/StandardAIResponseModal.ts",
-      "src/modals/YouTubeCanvasModal.ts",
-      "src/services/PostProcessingService.ts",
-      "src/services/TitleGenerationService.ts",
-      "src/services/transcription/TranscriptionTitleService.ts",
-      "src/services/workflow/WorkflowEngineService.ts",
-      "src/studio/StudioApiExecutionAdapter.ts",
-    ] as const;
-    for (const relative of expectedConsumers) expect(read(relative)).toContain(".streamMessage(");
+    expect(read("src/studio/StudioApiExecutionAdapter.ts")).toContain(".streamMessage(");
   });
 
-  it("keeps one legacy stream call isolated inside the Pi method and one managed selection seam", () => {
+  it("keeps only the managed selection seam", () => {
     const input = read("src/views/chatview/InputHandler.ts");
-    expect(input.match(/this\.aiService\.streamMessage\(/g)).toHaveLength(1);
+    expect(input).not.toContain("this.aiService.streamMessage(");
     expect(input.match(/getCurrentRuntimeAdapter\(\)/g)).toHaveLength(2);
     const view = read("src/views/chatview/ChatView.ts");
     expect(view).toContain("new CurrentRuntimeAdapter(");

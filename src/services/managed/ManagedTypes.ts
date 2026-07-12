@@ -87,12 +87,7 @@ export type AcceptedManagedChatOperation = AcceptedChatOperationBase & Readonly<
   runtime: "managed";
   lease: ManagedAllowedLease;
 }>;
-export type AcceptedPiChatOperation = AcceptedChatOperationBase & Readonly<{
-  runtime: "pi";
-}>;
-export type AcceptedChatOperation =
-  | AcceptedManagedChatOperation
-  | AcceptedPiChatOperation;
+export type AcceptedChatOperation = AcceptedManagedChatOperation;
 export interface ManagedResponseDiagnostics {
   status: number; requestId: string | null; contentType: string | null;
   rateLimitLimit: string | null; rateLimitRemaining: string | null; rateLimitReset: string | null;

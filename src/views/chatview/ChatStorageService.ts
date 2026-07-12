@@ -5,11 +5,7 @@ import { getManagedSystemSculptModelId } from "../../services/systemsculpt/Manag
 import { ChatMarkdownSerializer } from "./storage/ChatMarkdownSerializer";
 import { mergeAdjacentReasoningParts } from "./utils/MessagePartCoalescing";
 import type { ChatBackend, ChatMetadata, ChatResumeDescriptor } from "./storage/ChatPersistenceTypes";
-import {
-  getLastMessagePiEntryId,
-  normalizePiSessionState,
-  resolveChatBackend,
-} from "./storage/ChatPersistenceTypes";
+import { detectLoadedChatBackend } from "./storage/ChatPersistenceTypes";
 
 type LoadedChatRecord = {
   id: string;
@@ -25,10 +21,6 @@ type LoadedChatRecord = {
   hideSystemMessages?: boolean;
   chatPath: string;
   chatBackend: ChatBackend;
-  piSessionFile?: string;
-  piSessionId?: string;
-  piLastEntryId?: string;
-  piLastSyncedAt?: string;
 };
 
 type SaveChatOptions = {
@@ -39,11 +31,6 @@ type SaveChatOptions = {
   selectedPromptPath?: string;
   agentModeEnabled?: boolean;
   hideSystemMessages?: boolean;
-  piSessionFile?: string;
-  piSessionId?: string;
-  piLastEntryId?: string;
-  piLastSyncedAt?: string;
-  chatBackend?: ChatBackend;
 };
 
 export class ChatStorageService {
@@ -175,31 +162,16 @@ export class ChatStorageService {
       const existingTags = existingMetadata?.tags ?? [];
       const defaultChatTag = this.resolveDefaultChatTag();
       const mergedTags = this.mergeTags(existingTags, defaultChatTag);
-      const piState = normalizePiSessionState({
-        sessionFile: options.piSessionFile,
-        sessionId: options.piSessionId,
-        lastEntryId: options.piLastEntryId,
-        lastSyncedAt: options.piLastSyncedAt,
-      });
-      const resolvedBackend = resolveChatBackend({
-        explicitBackend: options.chatBackend ?? existingMetadata?.chatBackend,
-        piSessionFile: piState.sessionFile,
-        piSessionId: piState.sessionId,
-      });
-      const allowsEmptyVisibleTranscript =
-        resolvedBackend === "systemsculpt" && (!!piState.sessionFile || !!piState.sessionId);
       // CRITICAL: Only increment version if we're actually changing content
       // If messages are empty and file exists with content, preserve the version
       const currentVersion = Number(existingMetadata?.version) || 0;
       let newVersion = currentVersion + 1;
       
       // Safety check: Don't overwrite an existing local chat with an empty transcript.
-      // Pi first-turn forks are a legitimate exception because the new branch can be
-      // empty on-screen until the next assistant turn is written.
       if (messages.length === 0 && fileExists && existingMetadata && file instanceof TFile) {
         // Check if the existing file has messages (simple heuristic: check for message markers)
         const existingContent = await vault.read(file);
-        if (existingContent.includes('SYSTEMSCULPT-MESSAGE-START') && !allowsEmptyVisibleTranscript) {
+        if (existingContent.includes('SYSTEMSCULPT-MESSAGE-START')) {
           throw new Error('Cannot save empty messages over existing chat content');
         }
       }
@@ -214,10 +186,6 @@ export class ChatStorageService {
         selectedPromptPath: options.selectedPromptPath || existingMetadata?.selectedPromptPath || undefined,
         agentModeEnabled: typeof options.agentModeEnabled === "boolean" ? options.agentModeEnabled : existingMetadata?.agentModeEnabled,
         hideSystemMessages: typeof options.hideSystemMessages === "boolean" ? options.hideSystemMessages : existingMetadata?.hideSystemMessages,
-        piSessionFile: piState.sessionFile,
-        piSessionId: piState.sessionId,
-        piLastEntryId: piState.lastEntryId || getLastMessagePiEntryId(messages),
-        piLastSyncedAt: piState.lastSyncedAt,
       };
       const selectedModelId = String(options.selectedModelId ?? existingMetadata?.model ?? "").trim();
 
@@ -225,7 +193,7 @@ export class ChatStorageService {
         metadata.model = selectedModelId;
       }
 
-      if (resolvedBackend === "legacy") {
+      if (existingMetadata?.chatBackend === "legacy") {
         metadata.chatBackend = "legacy";
       }
 
@@ -421,12 +389,6 @@ export class ChatStorageService {
         };
       }
 
-      const piState = normalizePiSessionState({
-        sessionFile: (parsed as any).piSessionFile,
-        sessionId: (parsed as any).piSessionId,
-        lastEntryId: (parsed as any).piLastEntryId,
-        lastSyncedAt: (parsed as any).piLastSyncedAt,
-      });
       return {
         id,
         model,
@@ -441,16 +403,14 @@ export class ChatStorageService {
         selectedPromptPath: typeof (parsed as any).selectedPromptPath === "string" && (parsed as any).selectedPromptPath.trim()
           ? (parsed as any).selectedPromptPath.trim()
           : undefined,
-        chatBackend: resolveChatBackend({
+        chatBackend: detectLoadedChatBackend({
           explicitBackend: (parsed as any).chatBackend,
-          piSessionFile: piState.sessionFile,
-          piSessionId: piState.sessionId,
-          defaultBackend: legacySystemMessage ? "legacy" : "systemsculpt",
+          piSessionFile: (parsed as any).piSessionFile,
+          piSessionId: (parsed as any).piSessionId,
+          model,
+          hasPiEntryId:
+            legacySystemMessage !== undefined || /\bpi[_-]entry[_-]id\b/i.test(content),
         }),
-        piSessionFile: piState.sessionFile,
-        piSessionId: piState.sessionId,
-        piLastEntryId: piState.lastEntryId,
-        piLastSyncedAt: piState.lastSyncedAt,
       };
     } catch (error) {
       return null;
@@ -471,17 +431,10 @@ export class ChatStorageService {
   // Utility to finalize the parsed data into the expected return format
   private finalizeParsedData(metadata: ChatMetadata, messages: ChatMessage[], filePath?: string): LoadedChatRecord {
     const hasStandaloneLegacyToolMessages = messages.some((message) => message.role === "tool");
-    const piState = normalizePiSessionState({
-      sessionFile: metadata.piSessionFile,
-      sessionId: metadata.piSessionId,
-      lastEntryId: metadata.piLastEntryId,
-      lastSyncedAt: metadata.piLastSyncedAt,
-    });
-    const chatBackend = resolveChatBackend({
+    const chatBackend = detectLoadedChatBackend({
       explicitBackend: metadata.chatBackend,
-      piSessionFile: piState.sessionFile,
-      piSessionId: piState.sessionId,
-      defaultBackend: metadata.systemMessage || hasStandaloneLegacyToolMessages ? "legacy" : "systemsculpt",
+      model: metadata.model,
+      hasPiEntryId: !!metadata.systemMessage || hasStandaloneLegacyToolMessages,
     });
     const normalizedMessages =
       chatBackend === "legacy" || hasStandaloneLegacyToolMessages
@@ -501,10 +454,6 @@ export class ChatStorageService {
       hideSystemMessages: metadata.hideSystemMessages,
       chatPath: filePath || `${this.chatDirectory}/${metadata.id}.md`,
       chatBackend,
-      piSessionFile: piState.sessionFile,
-      piSessionId: piState.sessionId,
-      piLastEntryId: piState.lastEntryId || getLastMessagePiEntryId(normalizedMessages),
-      piLastSyncedAt: piState.lastSyncedAt,
     };
   }
 

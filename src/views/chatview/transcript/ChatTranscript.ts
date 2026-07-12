@@ -202,55 +202,6 @@ export class ChatTranscript {
     return this.replaceProjection("", 0, []);
   }
 
-  public acceptAuthoritativePiProjection(messages: readonly ChatMessage[]): ChatTranscriptSnapshot {
-    this.assertWritable();
-    return this.replaceProjection(this.current.chatId, this.current.version, messages);
-  }
-
-  public commitPiReplacement(
-    messages: readonly ChatMessage[],
-    persist: (messages: readonly ChatMessage[]) => Promise<{ chatId?: string; version: number }>,
-  ): Promise<ChatTranscriptSnapshot> {
-    return this.commitPersistedProjection("pi_sync", messages, persist);
-  }
-
-  public commitPiFork(
-    messageId: string,
-    persist: (messages: readonly ChatMessage[]) => Promise<{ chatId?: string; version: number }>,
-  ): Promise<ChatTranscriptSnapshot> {
-    const index = this.current.messages.findIndex(
-      (message) => message.message_id === messageId && message.role === "user",
-    );
-    if (index < 0) return Promise.reject(new Error("Pi could not resolve the chat message selected for forking."));
-    return this.commitPersistedProjection(
-      "pi_fork",
-      this.current.messages.slice(0, index) as readonly ChatMessage[],
-      persist,
-    );
-  }
-
-  private commitPersistedProjection(
-    operation: "pi_sync" | "pi_fork",
-    messages: readonly ChatMessage[],
-    persist: (messages: readonly ChatMessage[]) => Promise<{ chatId?: string; version: number }>,
-  ): Promise<ChatTranscriptSnapshot> {
-    const base = this.current;
-    const baseRevision = this.revision;
-    return this.serializeTransition(async () => {
-      this.assertWritable();
-      this.assertCurrentBase(operation, baseRevision, { snapshot: base, revision: baseRevision });
-      try {
-        const saved = await persist(deepClone(messages));
-        this.current = snapshot(saved.chatId || base.chatId, saved.version, messages);
-        this.revision += 1;
-        return this.current;
-      } catch (cause) {
-        if (cause instanceof ChatPersistenceError) throw cause;
-        throw new ChatPersistenceError({ operation, chatId: base.chatId, cause });
-      }
-    });
-  }
-
   public previewAssistant(message: ChatMessage): ChatTranscriptSnapshot {
     this.assertWritable();
     return this.replaceProjection(this.current.chatId, this.current.version, upsert(this.current.messages, message));
@@ -469,7 +420,7 @@ export class ChatTranscript {
   }
 
   private assertCurrentBase(
-    operation: ChatTranscriptCandidate["operation"] | "resend_branch" | "resend_user_commit" | "pi_sync" | "pi_fork",
+    operation: ChatTranscriptCandidate["operation"] | "resend_branch" | "resend_user_commit",
     baseRevision: number,
     base: { snapshot: ChatTranscriptSnapshot; revision: number } | undefined,
   ): void {

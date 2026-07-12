@@ -520,7 +520,6 @@ export class SystemSculptService {
     return this.acceptedChatPreparation.prepare(
       operation,
       { ...options, messages: operation.initialDurableSnapshot.messages },
-      this.preparationDependencies(),
       this.managedPreparationDependencies(),
     );
   }

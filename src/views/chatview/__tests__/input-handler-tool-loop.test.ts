@@ -111,7 +111,6 @@ describe("InputHandler hosted tool loop", () => {
         acceptedMessageCount: operation.initialDurableSnapshot.messages.length,
         model: "ai-agent",
         policy: { prompt: "none", contextCount: 0, imageContextIncluded: true, documentContextIncluded: false, tools: "omitted" },
-        legacyPreparation: { modelSource: "systemsculpt", resolvedModel: {}, actualModelId: "systemsculpt/ai-agent", preparedMessages: operation.initialDurableSnapshot.messages, finalSystemPrompt: "", tools: [] },
         notices: [], diagnostics: [], messages: operation.initialDurableSnapshot.messages.map((message: ChatMessage) => ({ role: message.role, content: message.content })),
       })),
       releaseAcceptedChatRequest: jest.fn(),
@@ -168,11 +167,8 @@ describe("InputHandler hosted tool loop", () => {
       })),
       refreshCreditsBalance: jest.fn(),
       isLegacyReadOnlyChat: jest.fn(() => false),
-      isPiBackedChat: jest.fn(() => false),
       getCurrentRuntimeAdapter: jest.fn(() => currentRuntimeAdapter),
       recoverManagedChatConflict: jest.fn().mockResolvedValue(true),
-      getPiSessionFile: jest.fn(() => undefined),
-      getPiSessionId: jest.fn(() => undefined),
       getSelectedModelId: jest.fn(() => "systemsculpt@@systemsculpt/ai-agent"),
       saveChat: jest.fn().mockResolvedValue(undefined),
       getDurableTranscriptSnapshot: jest.fn(() => Object.freeze({ chatId: "chat-1", version: 1, messages: Object.freeze([...messages]) })),
@@ -213,13 +209,11 @@ describe("InputHandler hosted tool loop", () => {
       chatView,
     });
 
-    const bindAcceptedRequest = async (runtime: "managed" | "pi" = "managed") => {
+    const bindAcceptedRequest = async () => {
       const message = messages.find((entry) => entry.role === "user") ?? { role: "user", content: "accepted", message_id: "u" } as ChatMessage;
       const durable = Object.freeze({ chatId: "chat-1", version: 1, messages: Object.freeze([message]) });
       const base = { durableTurnId: message.message_id || "u", acceptedUserMessage: message, initialDurableSnapshot: durable, turnBoundaryId: "b" } as const;
-      const operation = runtime === "pi"
-        ? Object.freeze({ ...base, runtime: "pi" as const })
-        : Object.freeze({ ...base, runtime: "managed" as const, lease: {} as never });
+      const operation = Object.freeze({ ...base, runtime: "managed" as const, lease: {} as never });
       (handler as any).acceptedOperation = operation;
       (handler as any).acceptedRequestSnapshot = await aiService.prepareAcceptedChatRequest(operation);
       return operation;
@@ -306,9 +300,8 @@ describe("InputHandler hosted tool loop", () => {
     await (handler as any).streamAssistantTurn(
       operation,
       new AbortController().signal,
-      true,
       undefined,
-      { runtime: "managed", phase: "initial", fence },
+      { phase: "initial", fence },
     );
     expect(currentRuntimeAdapter.dispatch).toHaveBeenCalledTimes(1);
     expect(currentRuntimeAdapter.dispatch.mock.calls[0]?.[0]?.acceptedRequestSnapshot).toBe(acceptedRequestSnapshot);
@@ -330,10 +323,8 @@ describe("InputHandler hosted tool loop", () => {
     await (handler as any).streamAssistantTurn(
       operation,
       new AbortController().signal,
-      true,
       undefined,
       {
-        runtime: "managed",
         phase: "continuation",
         postCheckpointSnapshot: postCheckpointDurableSnapshot,
         durableContinuationIndex: 1,
@@ -362,9 +353,8 @@ describe("InputHandler hosted tool loop", () => {
     await expect((handler as any).streamAssistantTurn(
       operation,
       new AbortController().signal,
-      true,
       undefined,
-      { runtime: "managed", phase: "initial", fence },
+      { phase: "initial", fence },
     )).rejects.toThrow("Explicit resend is required");
 
     expect(chatView.recoverManagedChatConflict).toHaveBeenCalledTimes(1);
@@ -388,9 +378,8 @@ describe("InputHandler hosted tool loop", () => {
     const pending = (handler as any).streamAssistantTurn(
       operation,
       abort.signal,
-      true,
       undefined,
-      { runtime: "managed", phase: "initial", fence: { isOpen: () => true } },
+      { phase: "initial", fence: { isOpen: () => true } },
     );
     abort.abort();
     resolveDispatch({ kind: "recovery", disposition: "operation_in_progress", diagnostic: { status: 409 } });
@@ -720,308 +709,8 @@ describe("InputHandler hosted tool loop", () => {
     expect(chatView.refreshCreditsBalance).toHaveBeenCalledTimes(1);
   });
 
-  it("reuses the last assistant root when a hosted continuation round starts", async () => {
-    const { aiService, chatContainer, chatView, handler, messages, bindAcceptedRequest } = createHostedToolLoopHarness();
-
-    const existingMessageEl = document.createElement("div");
-    existingMessageEl.classList.add("systemsculpt-message", "systemsculpt-assistant-message");
-    existingMessageEl.dataset.messageId = "assistant-root";
-    chatContainer.appendChild(existingMessageEl);
-
-    const existingToolCall = {
-      id: "call_1",
-      messageId: "assistant-root",
-      request: {
-        id: "call_1",
-        type: "function",
-        function: {
-          name: "mcp-filesystem_read",
-          arguments: "{\"paths\":[\"alpha.md\"]}",
-        },
-      },
-      state: "completed",
-      timestamp: 1,
-      executionStartedAt: 1,
-      executionCompletedAt: 2,
-      result: {
-        success: true,
-        data: { contents: ["alpha"] },
-      },
-    };
-
-    const existingParts = [
-      {
-        id: "tool_call_part-call_1",
-        type: "tool_call",
-        timestamp: 1,
-        data: existingToolCall,
-      },
-    ];
-
-    messages.push({
-      role: "assistant",
-      content: "",
-      message_id: "assistant-root",
-      tool_calls: [existingToolCall],
-      messageParts: existingParts,
-    } as any);
-
-    aiService.streamMessage.mockReturnValue((async function* () {
-      yield { type: "content", text: "Done." } as any;
-    })());
-
-    const createAssistantMessageContainerSpy = jest.spyOn(handler as any, "createAssistantMessageContainer");
-    const streamSpy = jest
-      .spyOn((handler as any).streamingController, "stream")
-      .mockResolvedValue({
-        messageId: "assistant-root",
-        message: {
-          role: "assistant",
-          content: "Done.",
-          message_id: "assistant-root",
-        },
-        messageEl: existingMessageEl,
-        completed: true,
-        completionState: "completed",
-      });
-
-    chatView.isPiBackedChat.mockReturnValue(true);
-    const operation = await bindAcceptedRequest("pi");
-    await (handler as any).streamAssistantTurn(operation, new AbortController().signal, false, undefined, { runtime: "pi" });
-
-    expect(createAssistantMessageContainerSpy).not.toHaveBeenCalled();
-    expect(streamSpy).toHaveBeenCalledTimes(1);
-    expect(streamSpy.mock.calls[0]?.[1]).toBe(existingMessageEl);
-    expect(streamSpy.mock.calls[0]?.[2]).toBe("assistant-root");
-    expect(streamSpy.mock.calls[0]?.[4]).toEqual(existingParts);
-  });
-
-  it("does not continue the hosted tool loop when a local Pi tool call is already completed", async () => {
-    const { aiService, handler, messages } = createHostedToolLoopHarness();
-
-    const localPiAssistantMessage: ChatMessage = {
-      role: "assistant",
-      content: "Read the file locally.",
-      message_id: "assistant-local-pi",
-      tool_calls: [
-        {
-          id: "pi_call_1",
-          messageId: "assistant-local-pi",
-          request: {
-            id: "pi_call_1",
-            type: "function",
-            function: {
-              name: "read",
-              arguments: "{\"filePath\":\"alpha.md\"}",
-            },
-          },
-          state: "completed",
-          timestamp: 1,
-          executionStartedAt: 1,
-          executionCompletedAt: 2,
-          result: {
-            success: true,
-            data: { content: [{ type: "text", text: "ALPHA_20260311-194643" }] },
-          },
-        },
-      ],
-      messageParts: [],
-    } as any;
-
-    const streamAssistantTurn = jest.spyOn(handler as any, "streamAssistantTurn");
-    streamAssistantTurn.mockImplementationOnce(async () => {
-      await (handler as any).onAssistantResponse(localPiAssistantMessage);
-      return {
-        messageId: "assistant-local-pi",
-        message: localPiAssistantMessage,
-        messageEl: document.createElement("div"),
-        completed: true,
-        completionState: "completed",
-        stopReason: "toolUse",
-      };
-    });
-
-    handler.setValue("Use local Pi tools.");
-    await handler.submitWithOverrides({ includeContextFiles: false });
-
-    expect(streamAssistantTurn).toHaveBeenCalledTimes(1);
-    expect(aiService.executeHostedToolCall).not.toHaveBeenCalled();
-    expect(messages).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ role: "user", content: "Use local Pi tools." }),
-        expect.objectContaining({
-          message_id: "assistant-local-pi",
-          content: "Read the file locally.",
-          tool_calls: [
-            expect.objectContaining({
-              id: "pi_call_1",
-              state: "completed",
-            }),
-          ],
-        }),
-      ])
-    );
-  });
-
-  it("retries a reasoning-only continuation after hosted tool execution and finishes the turn", async () => {
-    const { aiService, chatView, handler, messages, onError } = createHostedToolLoopHarness();
-    chatView.isPiBackedChat.mockReturnValue(true);
-
-    const firstAssistantMessage: ChatMessage = {
-      role: "assistant",
-      content: "",
-      message_id: "assistant-1",
-      tool_calls: [
-        {
-          id: "call_1",
-          messageId: "assistant-1",
-          request: {
-            id: "call_1",
-            type: "function",
-            function: {
-              name: "mcp-filesystem_write",
-              arguments: "{\"path\":\"alpha.md\",\"content\":\"Hello\"}",
-            },
-          },
-          state: "executing",
-          timestamp: 1,
-          executionStartedAt: 1,
-        },
-      ],
-      messageParts: [],
-    } as any;
-
-    const finalAssistantMessage: ChatMessage = {
-      role: "assistant",
-      content: "Saved the file and verified it.",
-      message_id: "assistant-2",
-    } as any;
-
-    const streamAssistantTurn = jest.spyOn(handler as any, "streamAssistantTurn");
-    streamAssistantTurn
-      .mockResolvedValueOnce({
-        messageId: "assistant-1",
-        message: firstAssistantMessage,
-        messageEl: document.createElement("div"),
-        completed: true,
-        completionState: "completed",
-        stopReason: "toolUse",
-      })
-      .mockResolvedValueOnce({
-        messageId: "assistant-empty",
-        message: {
-          role: "assistant",
-          content: "",
-          reasoning: "I already know the answer but failed to emit final content.",
-          message_id: "assistant-empty",
-        } as any,
-        messageEl: document.createElement("div"),
-        completed: false,
-        completionState: "reasoning_only",
-      })
-      .mockImplementationOnce(async () => {
-        await (handler as any).onAssistantResponse(finalAssistantMessage);
-        return {
-          messageId: "assistant-2",
-          message: finalAssistantMessage,
-          messageEl: document.createElement("div"),
-          completed: true,
-          completionState: "completed",
-        };
-      });
-
-    handler.setValue("Retry the continuation if needed.");
-    await handler.submitWithOverrides({ includeContextFiles: false });
-
-    expect(streamAssistantTurn).toHaveBeenCalledTimes(3);
-    expect(streamAssistantTurn.mock.calls[2]?.[4]).toEqual(expect.objectContaining({
-      phase: "continuation",
-      runtime: "pi",
-      transientSystemPromptSuffix: expect.stringMatching(
-        /previous continuation attempt returned reasoning but no visible assistant content or tool call.*retry 1/i,
-      ),
-    }));
-    expect(aiService.executeHostedToolCall).toHaveBeenCalledTimes(1);
-    expect(onError).not.toHaveBeenCalled();
-    expect(messages).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          message_id: "assistant-1",
-          tool_calls: [
-            expect.objectContaining({
-              id: "call_1",
-              state: "completed",
-            }),
-          ],
-        }),
-        expect.objectContaining({
-          message_id: "assistant-2",
-          content: "Saved the file and verified it.",
-        }),
-      ])
-    );
-  });
-
-  it("retries an initial empty hosted turn before failing the user task", async () => {
-    const { chatView, handler, messages, onError } = createHostedToolLoopHarness();
-    chatView.isPiBackedChat.mockReturnValue(true);
-
-    const finalAssistantMessage: ChatMessage = {
-      role: "assistant",
-      content: "Found the note, wrote the handoff, and verified the output.",
-      message_id: "assistant-final",
-    } as any;
-
-    const streamAssistantTurn = jest.spyOn(handler as any, "streamAssistantTurn");
-    streamAssistantTurn
-      .mockResolvedValueOnce({
-        messageId: "assistant-empty",
-        message: {
-          role: "assistant",
-          content: "",
-          message_id: "assistant-empty",
-        } as any,
-        messageEl: document.createElement("div"),
-        completed: false,
-        completionState: "no_events",
-      })
-      .mockImplementationOnce(async () => {
-        await (handler as any).onAssistantResponse(finalAssistantMessage);
-        return {
-          messageId: "assistant-final",
-          message: finalAssistantMessage,
-          messageEl: document.createElement("div"),
-          completed: true,
-          completionState: "completed",
-        };
-      });
-
-    handler.setValue("Find a vault note, write a handoff file, then read it back.");
-    await handler.submitForAutomation({
-      includeContextFiles: false,
-      approvalMode: "auto-approve",
-      focusAfterSend: false,
-    });
-
-    expect(streamAssistantTurn).toHaveBeenCalledTimes(2);
-    expect(onError).not.toHaveBeenCalled();
-    expect(messages).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          role: "user",
-          content: "Find a vault note, write a handoff file, then read it back.",
-        }),
-        expect.objectContaining({
-          message_id: "assistant-final",
-          content: "Found the note, wrote the handoff, and verified the output.",
-        }),
-      ])
-    );
-  });
-
   it("surfaces an unrecoverable empty hosted turn instead of silently succeeding", async () => {
-    const { chatView, handler, onError } = createHostedToolLoopHarness();
-    chatView.isPiBackedChat.mockReturnValue(true);
+    const { handler, onError } = createHostedToolLoopHarness();
 
     const streamAssistantTurn = jest.spyOn(handler as any, "streamAssistantTurn").mockResolvedValue({
       messageId: "assistant-empty",
@@ -1055,7 +744,7 @@ describe("InputHandler hosted tool loop", () => {
         committedPhase: "submitted_user",
       })
     );
-    expect(streamAssistantTurn).toHaveBeenCalledTimes(3);
+    expect(streamAssistantTurn).toHaveBeenCalledTimes(1);
   });
 
   it("surfaces a toolUse stop with no tool calls instead of stalling silently (#210, #146)", async () => {
@@ -1103,8 +792,7 @@ describe("InputHandler hosted tool loop", () => {
   });
 
   it("keeps the submitted user message and completed tool result when continuation retries are exhausted", async () => {
-    const { aiService, chatView, handler, messages, onError } = createHostedToolLoopHarness();
-    chatView.isPiBackedChat.mockReturnValue(true);
+    const { aiService, handler, messages, onError } = createHostedToolLoopHarness();
 
     const firstAssistantMessage: ChatMessage = {
       role: "assistant",
@@ -1162,7 +850,7 @@ describe("InputHandler hosted tool loop", () => {
       })
     ).rejects.toThrow("empty continuation");
 
-    expect(streamAssistantTurn).toHaveBeenCalledTimes(5);
+    expect(streamAssistantTurn).toHaveBeenCalledTimes(2);
     expect(aiService.executeHostedToolCall).toHaveBeenCalledTimes(1);
     expect(messages).toEqual(
       expect.arrayContaining([
@@ -1193,107 +881,6 @@ describe("InputHandler hosted tool loop", () => {
         committedAssistantMessageId: "assistant-1",
       })
     );
-  });
-
-  it("keeps Pi-backed Chat on its selected Pi stream and never enters CurrentRuntimeAdapter", async () => {
-    const app = new App();
-    const container = document.createElement("div");
-    const chatContainer = document.createElement("div");
-    container.appendChild(chatContainer);
-
-    const aiService = {
-      streamMessage: jest.fn(() => ({}) as any),
-      releaseAcceptedChatRequest: jest.fn(),
-    } as any;
-
-    const plugin = {
-      app,
-      settings: {
-        licenseKey: "license",
-        licenseValid: true,
-        autoSubmitAfterTranscription: false,
-      },
-      modelService: {
-        getModels: jest.fn(async () => []),
-      },
-    } as any;
-
-    const chatView = {
-      contextManager: {
-        getContextFiles: jest.fn(() => new Set<string>()),
-      },
-      getDebugLogService: jest.fn(() => ({
-        createStreamLogger: jest.fn(() => undefined),
-      })),
-      getPiSessionFile: jest.fn(() => undefined),
-      getPiSessionId: jest.fn(() => undefined),
-      getSelectedModelId: jest.fn(() => "local-pi-openai@@gpt-4.1"),
-      isPiBackedChat: jest.fn(() => true),
-      getCurrentRuntimeAdapter: jest.fn(() => { throw new Error("Pi must not enter managed runtime"); }),
-      getDurableTranscriptSnapshot: jest.fn(),
-      setPiSessionState: jest.fn(),
-    } as any;
-
-    const handler = new InputHandler({
-      managedChatAdmission,
-      commitAcceptedUserMessage: (input) => commitAccepted([], input),
-      claimAcceptedUserCommit: () => true,
-      app,
-      container,
-      aiService,
-      getMessages: () => [],
-      isChatReady: () => true,
-      chatContainer,
-      scrollManager: {
-        requestStickToBottom: jest.fn(),
-        setGenerating: jest.fn(),
-      } as any,
-      messageRenderer: {
-        addMessageButtonToolbar: jest.fn(),
-        normalizeMessageToParts: jest.fn(() => ({ parts: [] })),
-        renderUnifiedMessageParts: jest.fn(),
-      } as any,
-      onMessageSubmit: jest.fn().mockResolvedValue(undefined),
-      onAssistantResponse: jest.fn().mockResolvedValue(undefined),
-      onError: jest.fn(),
-      onAddContextFile: jest.fn(),
-      onOpenChatSettings: jest.fn(),
-      plugin,
-      getChatMarkdown: jest.fn().mockResolvedValue(""),
-      getChatTitle: jest.fn(() => "Chat"),
-      addFileToContext: jest.fn(),
-      getChatId: jest.fn(() => "chat-1"),
-      chatView,
-    });
-
-    jest.spyOn(handler as any, "createAssistantMessageContainer").mockReturnValue({
-      messageEl: document.createElement("div"),
-    });
-    jest.spyOn((handler as any).streamingController, "stream").mockResolvedValue({
-      messageId: "assistant-1",
-      message: {
-        role: "assistant",
-        content: "Done",
-        message_id: "assistant-1",
-      },
-      messageEl: document.createElement("div"),
-      completed: true,
-      completionState: "completed",
-    });
-
-    const message = { role: "user", content: "accepted", message_id: "u" } as const;
-    const durable = Object.freeze({ chatId: "chat-1", version: 1, messages: Object.freeze([message]) });
-    const operation = Object.freeze({ runtime: "pi" as const, durableTurnId: "u", acceptedUserMessage: message, initialDurableSnapshot: durable, turnBoundaryId: "b" });
-    (handler as any).acceptedOperation = operation;
-    (handler as any).acceptedRequestSnapshot = { runtime: "pi", operation, legacyPreparation: { modelSource: "pi_local", resolvedModel: {}, actualModelId: "local-pi-openai@@gpt-4.1", preparedMessages: [message], finalSystemPrompt: "", tools: [] } };
-    await (handler as any).streamAssistantTurn(operation, new AbortController().signal, false, undefined, { phase: "initial", runtime: "pi" });
-
-    expect(aiService.streamMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        model: "local-pi-openai@@gpt-4.1",
-      })
-    );
-    expect(chatView.getCurrentRuntimeAdapter).not.toHaveBeenCalled();
   });
 
   it("normalizes legacy model input before request preparation without reading legacy authorities", async () => {
@@ -1340,52 +927,6 @@ describe("InputHandler hosted tool loop", () => {
     );
 
     expect(admission).toHaveBeenCalledTimes(1);
-    expect(aiService.prepareAcceptedChatRequest).not.toHaveBeenCalled();
-  });
-
-  it("never acquires a managed lease for a retained Pi-backed session", async () => {
-    const { aiService, chatView, handler } = createHostedToolLoopHarness();
-    chatView.isPiBackedChat = jest.fn(() => true);
-    chatView.getSelectedModelId = jest.fn(() => "local-pi-openai@@gpt-5.4");
-    const acquireChatTurnLease = jest.fn(() => {
-      throw new Error("Pi must not request managed admission");
-    });
-    (handler as any).managedChatAdmission = { acquireChatTurnLease };
-    jest.spyOn(handler as any, "streamAssistantTurn").mockResolvedValue({
-      messageId: "assistant",
-      message: { role: "assistant", content: "done", message_id: "assistant" },
-      messageEl: document.createElement("div"),
-      completed: true,
-      completionState: "completed",
-    });
-    handler.setValue("continue retained Pi session");
-
-    await handler.submitForAutomation();
-
-    expect(acquireChatTurnLease).not.toHaveBeenCalled();
-    const operation = aiService.prepareAcceptedChatRequest.mock.calls[0]?.[0];
-    const preparation = aiService.prepareAcceptedChatRequest.mock.calls[0]?.[1];
-    expect(operation).toEqual(expect.objectContaining({ runtime: "pi" }));
-    expect(operation).not.toHaveProperty("lease");
-    expect(preparation).toEqual(expect.objectContaining({
-      model: "local-pi-openai@@gpt-5.4",
-    }));
-  });
-
-  it("fails closed before admission or commit when a Pi session has no retained model", async () => {
-    const { aiService, chatView, handler, onMessageSubmit } = createHostedToolLoopHarness();
-    chatView.isPiBackedChat = jest.fn(() => true);
-    chatView.getSelectedModelId = jest.fn(() => "");
-    const acquireChatTurnLease = jest.fn();
-    (handler as any).managedChatAdmission = { acquireChatTurnLease };
-    handler.setValue("must not fall back to managed identity");
-
-    await expect(handler.submitForAutomation()).rejects.toThrow(
-      "retained Pi session model is unavailable",
-    );
-
-    expect(acquireChatTurnLease).not.toHaveBeenCalled();
-    expect(onMessageSubmit).not.toHaveBeenCalled();
     expect(aiService.prepareAcceptedChatRequest).not.toHaveBeenCalled();
   });
 

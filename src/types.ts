@@ -682,7 +682,6 @@ export interface ChatMessage {
   role: ChatRole;
   content: string | MultiPartContent[] | null;
   message_id: string;
-  pi_entry_id?: string;
   documentContext?: {
     documentIds: string[];
   };

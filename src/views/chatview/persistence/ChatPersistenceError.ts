@@ -3,8 +3,6 @@ export type ChatPersistenceOperation =
   | "assistant_commit"
   | "tool_checkpoint"
   | "history_delete"
-  | "pi_sync"
-  | "pi_fork"
   | "resend_branch"
   | "resend_user_commit"
   | "flush";

@@ -43,8 +43,6 @@ const createRecoverableView = (messages: ChatMessage[]) => {
   };
   view.getEffectiveSelectedModelId = jest.fn(() => "systemsculpt@@systemsculpt/ai-agent");
   view.saveChat = jest.fn().mockResolvedValue(undefined);
-  view.isPiBackedChat = jest.fn(() => false);
-  view.getPiSessionFile = jest.fn(() => undefined);
   view.generateMessageId = jest.fn(() => "assistant-failure");
   view.addMessage = jest.fn().mockResolvedValue(undefined);
   view.chatId = "chat-recovery";

@@ -103,7 +103,6 @@ export class SlashCommandMenu extends Component {
               try {
                 // Reset transcript identity and projection so the next save starts a fresh conversation.
                 chatView.clearTranscriptProjection();
-                chatView.clearPiSessionState({ save: false });
 
                 // Clear UI
                 chatView.chatContainer.empty();

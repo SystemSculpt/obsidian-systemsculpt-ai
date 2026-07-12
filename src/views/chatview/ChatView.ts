@@ -15,7 +15,7 @@ import { FileContextManager } from "./FileContextManager";
 import { generateDefaultChatTitle, sanitizeChatTitle } from "../../utils/titleUtils";
 
 import { errorLogger } from "../../utils/errorLogger";
-import { AGENT_PRESET, GENERAL_USE_PRESET } from "../../constants/prompts";
+import { AGENT_PRESET } from "../../constants/prompts";
 import { ChatExportService } from "./export/ChatExportService";
 import type { ChatExportOptions } from "../../types/chatExport";
 import type { ChatExportResult } from "./export/ChatExportTypes";
@@ -29,21 +29,13 @@ import { tryCopyToClipboard } from "../../utils/clipboard";
 import { resolveAbsoluteVaultPath } from "../../utils/vaultPathUtils";
 import type { DocumentProcessingProgressEvent } from "../../types/documentProcessing";
 import { ChatDebugLogService } from "./ChatDebugLogService";
-import { PlatformContext } from "../../services/PlatformContext";
-import { loadDesktopOnly } from "../../platform/desktopOnly";
-import {
-  normalizePiSessionState,
-  resolveChatBackend,
-  type ChatBackend,
-  type PiSessionState,
-} from "./storage/ChatPersistenceTypes";
+import { detectLoadedChatBackend, type ChatBackend } from "./storage/ChatPersistenceTypes";
 import { ChatIdAllocationError, ChatIdAllocator } from "./persistence/ChatIdAllocator";
 import { ChatPersistenceError, type ChatPersistenceOperation } from "./persistence/ChatPersistenceError";
 import { ChatTranscript } from "./transcript/ChatTranscript";
 import type { ChatTranscriptStorage } from "./transcript/ChatTranscriptStorage";
 import type { ChatTranscriptSnapshot } from "./transcript/ChatTranscriptTypes";
 import type { AcceptedChatOperation, ManagedChatAdmissionPort } from "../../services/managed/ManagedTypes";
-import { mergePiTranscriptMessages } from "./piTranscriptMerge";
 import { ManagedChatRuntimeAdapter } from "./turn/ManagedChatRuntimeAdapter";
 import { CurrentRuntimeAdapter } from "./turn/CurrentRuntimeAdapter";
 import type { ChatTurnFence } from "./turn/ChatTurnEffects";
@@ -72,7 +64,6 @@ function escapeMessageIdForSelector(messageId: string): string {
   return String(messageId).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
 
-type NodeFileSystem = Pick<typeof import("node:fs"), "existsSync">;
 type ChatSaveOptions = NonNullable<Parameters<ChatStorageService["saveChat"]>[2]>;
 export type AcceptedUserCommitInput =
   | Readonly<{ kind: "append"; message: ChatMessage }>
@@ -81,20 +72,6 @@ export type ChatOwnershipToken = Readonly<{ transcriptIdentity: object; generati
 export type AcceptedUserCommitResult =
   | Readonly<{ status: "accepted_current"; snapshot: ChatTranscriptSnapshot; message: Readonly<ChatMessage>; ownership: ChatOwnershipToken }>
   | Readonly<{ status: "accepted_not_current"; snapshot: ChatTranscriptSnapshot; message: Readonly<ChatMessage> }>;
-
-type PendingCommittedPiProjection = {
-  kind: "sync" | "fork";
-  state: PiSessionState;
-  title?: string;
-  render: boolean;
-  shouldReplaceTranscript: boolean;
-  forkMessageId?: string;
-  forkResult?: { text: string; cancelled: boolean };
-};
-
-function nodeFileSystem(): NodeFileSystem | null {
-  return loadDesktopOnly(() => require("node:fs") as NodeFileSystem);
-}
 
 export class ChatView extends ItemView {
   public readonly messages: readonly ChatMessage[] = [];
@@ -118,11 +95,6 @@ export class ChatView extends ItemView {
   public chatVersion: number = 0;
   public currentPrompt?: string;
   public chatBackend: ChatBackend;
-  public piSessionFile?: string;
-  public piSessionId?: string;
-  public piLastEntryId?: string;
-  public piLastSyncedAt?: string;
-  private retainedPiModelId?: string;
   /** Tools trusted for this chat session (cleared on chat reload/close) */
   private dragDropCleanup: (() => void) | null = null;
   public chatFontSize: "small" | "medium" | "large";
@@ -150,7 +122,6 @@ export class ChatView extends ItemView {
   private chatOwnershipGeneration: number = 0;
   private activeLoad: { chatId: string; promise: Promise<void> } | null = null;
   private chatTranscript: ChatTranscript | null = null;
-  private pendingCommittedPiProjection: PendingCommittedPiProjection | null = null;
   private currentRuntimeAdapter: CurrentRuntimeAdapter | null = null;
   private resourcesDisposed = false;
   private resourceDisposalPromise: Promise<void> | null = null;
@@ -178,10 +149,6 @@ export class ChatView extends ItemView {
         version?: number;
         chatFontSize?: "small" | "medium" | "large";
         chatBackend?: ChatBackend;
-        piSessionFile?: string;
-        piSessionId?: string;
-        piLastEntryId?: string;
-        piLastSyncedAt?: string;
         hideSystemMessages?: boolean;
         agentModeEnabled?: boolean;
     }) || {};
@@ -240,7 +207,7 @@ export class ChatView extends ItemView {
   }
 
   private getActiveSystemPromptType(): "general-use" | "agent" {
-    return this.isPiBackedChat() ? "general-use" : "agent";
+    return "agent";
   }
 
   public getCurrentModelName(): string {
@@ -296,11 +263,6 @@ export class ChatView extends ItemView {
       selectedPromptPath: this.inputHandler?.getSelectedPromptPath?.() || "",
       agentModeEnabled: this.agentModeEnabled,
       hideSystemMessages: this.hideSystemMessages,
-      piSessionFile: this.piSessionFile,
-      piSessionId: this.piSessionId,
-      piLastEntryId: this.piLastEntryId,
-      piLastSyncedAt: this.piLastSyncedAt,
-      chatBackend: this.chatBackend,
       ...overrides,
     };
   }
@@ -555,7 +517,7 @@ export class ChatView extends ItemView {
 
   public async persistAssistantMessage(
     message: ChatMessage,
-    options?: { syncPiTranscript?: boolean; operation?: "assistant_commit" | "tool_checkpoint" }
+    options?: { operation?: "assistant_commit" | "tool_checkpoint" }
   ): Promise<ChatMessage> {
     await this.waitForLegacyPersistenceIdle();
     const existingIndex = this.messages.findIndex((entry) => entry.message_id === message.message_id);
@@ -574,9 +536,6 @@ export class ChatView extends ItemView {
     if (existingIndex >= 0) candidate[existingIndex] = mergedMessage;
     else candidate.push(mergedMessage);
 
-    const shouldSyncPiTranscript =
-      options?.syncPiTranscript !== false && this.isPiBackedChat() && !!this.getPiSessionFile();
-
     const operation: ChatPersistenceOperation = options?.operation
       ?? (mergedMessage.tool_calls?.length ? "tool_checkpoint" : "assistant_commit");
     const transcript = this.ensureChatTranscript();
@@ -594,21 +553,6 @@ export class ChatView extends ItemView {
       await this.recoverPersistedProjection(saved.chatId, candidate);
     }
 
-    if (shouldSyncPiTranscript) {
-      try {
-        await this.syncPiSessionTranscript({
-          syncTitle: true,
-          render: false,
-          persist: true,
-          force: true,
-        });
-      } catch {
-        new Notice(
-          "Pi finished the turn, but transcript sync failed. The committed chat snapshot is still preserved.",
-          7000
-        );
-      }
-    }
     return mergedMessage;
   }
 
@@ -753,7 +697,7 @@ export class ChatView extends ItemView {
       } as ChatMessage);
 
     const updatedMessage = this.appendFailurePart(message, failureText);
-    await this.persistAssistantMessage(updatedMessage, { syncPiTranscript: false });
+    await this.persistAssistantMessage(updatedMessage);
     await this.renderAssistantMessageUpdate(updatedMessage);
   }
 
@@ -1270,9 +1214,7 @@ export class ChatView extends ItemView {
 
   public async getCurrentSystemPrompt(): Promise<string> {
     this.ensureCoreServicesReady();
-    return this.isPiBackedChat()
-      ? GENERAL_USE_PRESET.systemPrompt
-      : AGENT_PRESET.systemPrompt;
+    return AGENT_PRESET.systemPrompt;
   }
 
   /**
@@ -1342,15 +1284,6 @@ export class ChatView extends ItemView {
           value: contextLabel,
           icon: "paperclip",
         },
-        ...(this.getPiSessionFile()
-          ? [
-              {
-                label: "Session",
-                value: "Linked",
-                icon: "git-fork",
-              },
-            ]
-          : []),
       ],
       actions: actionSpecs,
       note: hasHistoryFile
@@ -1426,10 +1359,6 @@ export class ChatView extends ItemView {
         chatTitle: this.chatTitle || null,
         modelId: this.getEffectiveSelectedModelId() || null,
         chatBackend: this.chatBackend || null,
-        piSessionFile: this.piSessionFile || null,
-        piSessionId: this.piSessionId || null,
-        piLastEntryId: this.piLastEntryId || null,
-        piLastSyncedAt: this.piLastSyncedAt || null,
       },
       history: {
         path: historyPath,
@@ -1557,10 +1486,6 @@ export class ChatView extends ItemView {
       hideSystemMessages: this.hideSystemMessages,
       agentModeEnabled: this.agentModeEnabled,
       chatBackend: this.chatBackend,
-      piSessionFile: this.piSessionFile,
-      piSessionId: this.piSessionId,
-      piLastEntryId: this.piLastEntryId,
-      piLastSyncedAt: this.piLastSyncedAt,
       file: this.getExpectedChatHistoryFilePath() || undefined,
     };
   }
@@ -1584,7 +1509,6 @@ export class ChatView extends ItemView {
       // Normalize command/automation migration input before the fresh composer
       // can observe or persist it.
       this.chatBackend = this.defaultChatBackend();
-      this.applyPiSessionState({}, { reset: true, updateViewState: false });
       this.selectedModelId = this.resolveLeafSelectedModelId(state?.selectedModelId);
  
       // Restore chat font size for new chats if provided in state
@@ -1663,7 +1587,6 @@ export class ChatView extends ItemView {
       this.projectTranscript();
       this.contextManager?.clearContext();
       this.chatBackend = this.defaultChatBackend();
-      this.applyPiSessionState({}, { reset: true, updateViewState: false });
       this.inputHandler?.resetForFreshChat?.();
       // Don't render here if UI not ready yet
       if (this.chatContainer) {
@@ -1723,7 +1646,6 @@ export class ChatView extends ItemView {
           this.chatContainer?.empty();
           this.setTitle("Chat not found");
           this.chatBackend = this.defaultChatBackend();
-          this.applyPiSessionState({}, { reset: true, updateViewState: false });
           this.contextManager?.clearContext();
           this.isFullyLoaded = true; // Mark as loaded even when chat not found
           this.inputHandler?.notifyChatReadyChanged?.();
@@ -1744,13 +1666,7 @@ export class ChatView extends ItemView {
         this.applyChatLeafState({
           selectedModelId: chatData.selectedModelId,
           chatBackend: chatData.chatBackend,
-          piSessionFile: chatData.piSessionFile,
-          piSessionId: chatData.piSessionId,
-          piLastEntryId: chatData.piLastEntryId,
-          piLastSyncedAt: chatData.piLastSyncedAt,
         });
-        const hasPiSession = this.isPiBackedChat() && (!!this.getPiSessionFile() || !!this.getPiSessionId());
-        const canHydratePiTranscript = !!this.getPiSessionFile();
         this.chatTranscript = ChatTranscript.loadStored(this.transcriptStorage(), {
           chatId,
           version: this.chatVersion,
@@ -1789,53 +1705,8 @@ export class ChatView extends ItemView {
           }
         }
 
-        if (persistedMessages.length > 0 || !hasPiSession) {
-          await this.renderMessagesInChunks();
-          if (loadEpoch !== this.loadEpoch) return;
-        }
-
-        if (hasPiSession && canHydratePiTranscript) {
-          this.showChatLoadingBanner(
-            persistedMessages.length > 0 ? "Syncing SystemSculpt session..." : "Restoring SystemSculpt chat..."
-          );
-          await yieldToPaint();
-          try {
-            await this.syncPiSessionTranscript({
-              sessionFile: this.piSessionFile,
-              sessionId: this.piSessionId,
-              syncTitle: true,
-              render: true,
-              persist: false,
-            });
-            if (loadEpoch !== this.loadEpoch) return;
-          } catch (error) {
-            try {
-              errorLogger.warn("Failed to hydrate chat history from SystemSculpt session file", {
-                source: "ChatView",
-                method: "loadChatById",
-                metadata: {
-                  chatId,
-                  sessionFile: this.piSessionFile,
-                  error: error instanceof Error ? error.message : String(error),
-                },
-              });
-            } catch {}
-
-            if (persistedMessages.length === 0) {
-              this.chatTranscript = ChatTranscript.loadStored(this.transcriptStorage(), {
-                chatId,
-                version: this.chatVersion,
-                messages: persistedMessages,
-                readOnly: chatData.chatBackend === "legacy",
-              });
-              this.projectTranscript();
-              await this.renderMessagesInChunks();
-              if (loadEpoch !== this.loadEpoch) return;
-            }
-          }
-
-          this.removeChatLoadingBanner();
-        }
+        await this.renderMessagesInChunks();
+        if (loadEpoch !== this.loadEpoch) return;
 
         this.isFullyLoaded = true; // Mark as loaded after messages are rendered
         this.inputHandler?.notifyChatReadyChanged?.();
@@ -2191,10 +2062,6 @@ export class ChatView extends ItemView {
           modelId: this.getEffectiveSelectedModelId() || null,
           chatVersion: this.chatVersion,
           chatBackend: this.chatBackend || null,
-          piSessionFile: this.piSessionFile || null,
-          piSessionId: this.piSessionId || null,
-          piLastEntryId: this.piLastEntryId || null,
-          piLastSyncedAt: this.piLastSyncedAt || null,
         },
         logFiles: {
           ui: {
@@ -2667,12 +2534,6 @@ export class ChatView extends ItemView {
       messageCount: serializedMessages.length,
       messages: serializedMessages,
       contextFiles: Array.from(this.contextManager?.getContextFiles?.() || []),
-      piSession: {
-        sessionFile: this.getPiSessionFile() ?? null,
-        sessionId: this.getPiSessionId() ?? null,
-        lastEntryId: this.piLastEntryId ?? null,
-        lastSyncedAt: this.piLastSyncedAt ?? null,
-      },
       input: {
         value: this.getInputText(),
         webSearchEnabled: this.isWebSearchEnabled(),
@@ -2682,521 +2543,26 @@ export class ChatView extends ItemView {
     };
   }
 
-  private readPiSessionState(): PiSessionState {
-    return normalizePiSessionState({
-      sessionFile: this.piSessionFile,
-      sessionId: this.piSessionId,
-      lastEntryId: this.piLastEntryId,
-      lastSyncedAt: this.piLastSyncedAt,
-    });
-  }
-
-  private applyPiSessionState(
-    next: Partial<PiSessionState>,
-    options?: {
-      backend?: ChatBackend;
-      reset?: boolean;
-      touchSyncedAt?: boolean;
-      updateViewState?: boolean;
-    }
-  ): void {
-    const current = options?.reset ? {} : this.readPiSessionState();
-    const merged = normalizePiSessionState({
-      sessionFile: next.sessionFile ?? current.sessionFile,
-      sessionId: next.sessionId ?? current.sessionId,
-      lastEntryId: next.lastEntryId ?? current.lastEntryId,
-      lastSyncedAt: next.lastSyncedAt ?? current.lastSyncedAt,
-    });
-
-    if (options?.backend) {
-      this.chatBackend = options.backend;
-    }
-
-    this.piSessionFile = merged.sessionFile;
-    this.piSessionId = merged.sessionId;
-    this.piLastEntryId = merged.lastEntryId;
-    this.piLastSyncedAt =
-      options?.touchSyncedAt ? new Date().toISOString() : merged.lastSyncedAt;
-
-    if (options?.updateViewState !== false) {
-      this.updateViewState();
-    }
-  }
-
   private applyChatLeafState(state: {
     selectedModelId?: string;
     chatBackend?: ChatBackend;
     piSessionFile?: string;
     piSessionId?: string;
-    piLastEntryId?: string;
-    piLastSyncedAt?: string;
   }): void {
-    const chatBackend = resolveChatBackend({
+    this.chatBackend = detectLoadedChatBackend({
       explicitBackend: state.chatBackend,
       piSessionFile: state.piSessionFile,
       piSessionId: state.piSessionId,
-      defaultBackend: this.defaultChatBackend(),
+      model: state.selectedModelId,
     });
-    const canPreserveSessionState = PlatformContext.get().supportsDesktopOnlyFeatures();
-    this.applyPiSessionState(
-      chatBackend === "systemsculpt" && canPreserveSessionState
-        ? {
-            sessionFile: state.piSessionFile,
-            sessionId: state.piSessionId,
-            lastEntryId: state.piLastEntryId,
-            lastSyncedAt: state.piLastSyncedAt,
-          }
-        : {},
-      {
-        backend: chatBackend,
-        reset: true,
-        updateViewState: false,
-      }
-    );
-    const migrationModelId = String(state.selectedModelId || "").trim();
-    this.retainedPiModelId = this.isPiBackedChat() && migrationModelId
-      ? migrationModelId
-      : undefined;
   }
 
   public getSelectedModelId(): string {
     return this.getEffectiveSelectedModelId();
   }
 
-  public getRetainedPiModelId(): string | undefined {
-    return this.isPiBackedChat() ? this.retainedPiModelId : undefined;
-  }
-
-  public getPiSessionFile(): string | undefined {
-    return typeof this.piSessionFile === "string" && this.piSessionFile.trim().length > 0
-      ? this.piSessionFile
-      : undefined;
-  }
-
-  public getPiSessionId(): string | undefined {
-    return typeof this.piSessionId === "string" && this.piSessionId.trim().length > 0
-      ? this.piSessionId
-      : undefined;
-  }
-
-  public isPiBackedChat(): boolean {
-    return (
-      this.chatBackend === "systemsculpt" &&
-      Boolean(this.getPiSessionFile() || this.getPiSessionId())
-    );
-  }
-
   public isLegacyReadOnlyChat(): boolean {
     return this.chatBackend === "legacy" && String(this.chatId || "").trim().length > 0;
-  }
-
-  private resolvePiSessionRef(nextState?: {
-    sessionFile?: string;
-    sessionId?: string;
-  }): { sessionFile?: string; sessionId?: string } {
-    const current = this.readPiSessionState();
-    const sessionFile = String(nextState?.sessionFile || current.sessionFile || "").trim();
-    const sessionId = String(nextState?.sessionId || current.sessionId || "").trim();
-    return {
-      sessionFile: sessionFile || undefined,
-      sessionId: sessionId || undefined,
-    };
-  }
-
-  private buildPiTransitionState(next: Partial<PiSessionState>, reset: boolean = false): PiSessionState {
-    const current = reset ? {} : this.readPiSessionState();
-    return normalizePiSessionState({
-      sessionFile: next.sessionFile ?? current.sessionFile,
-      sessionId: next.sessionId ?? current.sessionId,
-      lastEntryId: next.lastEntryId ?? current.lastEntryId,
-      lastSyncedAt: next.lastSyncedAt ?? new Date().toISOString(),
-    });
-  }
-
-  private async persistPiTransition(
-    messages: readonly ChatMessage[],
-    state: PiSessionState,
-    title: string,
-    operation: "pi_sync" | "pi_fork",
-  ): Promise<{ chatId?: string; version: number }> {
-    const options = this.getChatSaveOptions({
-      title,
-      chatBackend: "systemsculpt",
-      piSessionFile: state.sessionFile,
-      piSessionId: state.sessionId,
-      piLastEntryId: state.lastEntryId,
-      piLastSyncedAt: state.lastSyncedAt,
-    });
-    try {
-      if (this.chatId) {
-        const saved = await this.chatStorage.saveChat(this.chatId, [...messages], options);
-        return { chatId: this.chatId, version: saved.version };
-      }
-      const allocated = await new ChatIdAllocator(
-        (chatId) => this.chatStorage.createChatExclusive(chatId, [...messages], options),
-      ).allocate();
-      return { chatId: allocated.chatId, version: allocated.value.version };
-    } catch (cause) {
-      const allocationError = cause instanceof ChatIdAllocationError ? cause : null;
-      throw new ChatPersistenceError({
-        operation,
-        chatId: allocationError?.chatId || this.chatId,
-        cause: allocationError?.cause || cause,
-      });
-    }
-  }
-
-  private async applyPendingCommittedPiProjection(): Promise<PendingCommittedPiProjection | null> {
-    const pending = this.pendingCommittedPiProjection;
-    if (!pending) return null;
-
-    this.projectTranscript();
-    this.applyPiSessionState(pending.state, {
-      backend: "systemsculpt",
-      reset: true,
-      updateViewState: false,
-    });
-    if (pending.title && pending.title !== this.chatTitle) {
-      await this.setTitle(pending.title, false);
-    }
-    this.updateViewState();
-    if (pending.render) await this.renderMessagesInChunks();
-    this.pendingCommittedPiProjection = null;
-    return pending;
-  }
-
-  private async recoverCommittedPiProjection(): Promise<void> {
-    try {
-      await this.applyPendingCommittedPiProjection();
-    } catch {
-      await this.applyPendingCommittedPiProjection();
-    }
-  }
-
-  public async syncPiSessionTranscript(options?: {
-    sessionFile?: string;
-    sessionId?: string;
-    syncTitle?: boolean;
-    render?: boolean;
-    persist?: boolean;
-    force?: boolean;
-    pendingFork?: { messageId: string; result: { text: string; cancelled: boolean } };
-  }): Promise<boolean> {
-    if (this.pendingCommittedPiProjection?.kind === "sync") {
-      const pending = this.pendingCommittedPiProjection;
-      await this.applyPendingCommittedPiProjection();
-      return pending.shouldReplaceTranscript;
-    }
-
-    const sessionRef = this.resolvePiSessionRef(options);
-    if (!PlatformContext.get().supportsDesktopOnlyFeatures()) {
-      return false;
-    }
-    if (!this.isPiBackedChat()) {
-      return false;
-    }
-    if (!sessionRef.sessionFile) {
-      const candidateState = this.buildPiTransitionState({
-        sessionFile: sessionRef.sessionFile,
-        sessionId: sessionRef.sessionId,
-      });
-      const transcript = this.ensureChatTranscript();
-      if (options?.persist === true) {
-        await transcript.commitPiReplacement(this.messages, (messages) =>
-          this.persistPiTransition(messages, candidateState, this.chatTitle, "pi_sync")
-        );
-      } else {
-        transcript.acceptAuthoritativePiProjection(this.messages);
-      }
-      this.pendingCommittedPiProjection = {
-        kind: options?.pendingFork ? "fork" : "sync",
-        state: candidateState,
-        render: false,
-        shouldReplaceTranscript: false,
-        forkMessageId: options?.pendingFork?.messageId,
-        forkResult: options?.pendingFork?.result,
-      };
-      await this.recoverCommittedPiProjection();
-      return false;
-    }
-
-    const { loadPiSessionMirrorWithRecovery } = await import("../../services/pi/PiSessionMirror");
-    const snapshot = await loadPiSessionMirrorWithRecovery({
-      plugin: this.plugin,
-      sessionFile: sessionRef.sessionFile,
-      lastEntryId: this.piLastEntryId,
-      messageEntryIds: this.messages
-        .map((message) => String(message.pi_entry_id || "").trim())
-        .filter(Boolean),
-    });
-    const mirroredModelId = String(snapshot.actualModelId || "").trim();
-    if (mirroredModelId) {
-      this.retainedPiModelId = mirroredModelId;
-    }
-
-    const nextLastEntryId = String(snapshot.lastEntryId || "").trim() || this.piLastEntryId;
-    const shouldReplaceTranscript =
-      options?.force === true ||
-      this.messages.length === 0 ||
-      !this.piLastEntryId ||
-      (!!nextLastEntryId && nextLastEntryId !== this.piLastEntryId);
-
-    const candidateMessages = shouldReplaceTranscript && snapshot.messages.length > 0
-      ? mergePiTranscriptMessages(this.messages, snapshot.messages, {
-          hadSyncedPiTranscript: !!this.piLastEntryId,
-        })
-      : [...this.messages];
-    const candidateState = this.buildPiTransitionState({
-      sessionFile: snapshot.sessionFile || sessionRef.sessionFile,
-      sessionId: snapshot.sessionId || sessionRef.sessionId,
-      lastEntryId: nextLastEntryId,
-    });
-    const sessionName = String(snapshot.sessionName || "").trim();
-    const candidateTitle = options?.syncTitle !== false && sessionName ? sessionName : this.chatTitle;
-    const transcript = this.ensureChatTranscript();
-
-    if (options?.persist === true) {
-      await transcript.commitPiReplacement(candidateMessages, (messages) =>
-        this.persistPiTransition(messages, candidateState, candidateTitle, "pi_sync")
-      );
-    } else {
-      transcript.acceptAuthoritativePiProjection(candidateMessages);
-    }
-    this.pendingCommittedPiProjection = {
-      kind: options?.pendingFork ? "fork" : "sync",
-      state: candidateState,
-      title: candidateTitle !== this.chatTitle ? candidateTitle : undefined,
-      render: options?.render !== false && shouldReplaceTranscript,
-      shouldReplaceTranscript,
-      forkMessageId: options?.pendingFork?.messageId,
-      forkResult: options?.pendingFork?.result,
-    };
-    await this.recoverCommittedPiProjection();
-
-    return shouldReplaceTranscript;
-  }
-
-  private async applyLocalPiForkState(options: {
-    forkMessageId: string;
-    forkText: string;
-    sessionFile?: string;
-    sessionId?: string;
-    sessionName?: string;
-  }): Promise<void> {
-    // Pi restores the selected user prompt into the editor, so the visible transcript should
-    // stop immediately before that message while the new branch waits for its first assistant turn.
-    const transcript = this.ensureChatTranscript();
-    const sessionName = String(options.sessionName || "").trim();
-    const candidateTitle = sessionName || this.chatTitle;
-    let candidateState: PiSessionState | null = null;
-    await transcript.commitPiFork(options.forkMessageId, async (messages) => {
-      candidateState = this.buildPiTransitionState({
-        sessionFile: options.sessionFile,
-        sessionId: options.sessionId,
-        lastEntryId: String(messages[messages.length - 1]?.pi_entry_id || "").trim() || undefined,
-      }, !options.sessionFile && !options.sessionId);
-      return this.persistPiTransition(messages, candidateState, candidateTitle, "pi_fork");
-    });
-    this.pendingCommittedPiProjection = {
-      kind: "fork",
-      state: candidateState!,
-      title: candidateTitle !== this.chatTitle ? candidateTitle : undefined,
-      render: true,
-      shouldReplaceTranscript: true,
-      forkMessageId: options.forkMessageId,
-      forkResult: { text: options.forkText, cancelled: false },
-    };
-    await this.recoverCommittedPiProjection();
-  }
-
-  public async hydrateFromPiSession(options?: {
-    sessionFile?: string;
-    sessionId?: string;
-    syncTitle?: boolean;
-    render?: boolean;
-    save?: boolean;
-  }): Promise<void> {
-    await this.syncPiSessionTranscript({
-      sessionFile: options?.sessionFile,
-      sessionId: options?.sessionId,
-      syncTitle: options?.syncTitle,
-      render: options?.render,
-      persist: options?.save,
-      force: true,
-    });
-  }
-
-  private async resolvePiForkEntryId(
-    sessionFile: string,
-    messageId: string,
-  ): Promise<string> {
-    const userMessages = this.messages.filter((message) => message.role === "user");
-    const userIndex = userMessages.findIndex((message) => message.message_id === messageId);
-    if (userIndex === -1) {
-      return "";
-    }
-
-    const { listPiForkMessages } = await import("../../services/pi/PiSessionService");
-    const forkMessages = await listPiForkMessages(sessionFile);
-    if (userIndex >= forkMessages.length) {
-      return "";
-    }
-
-    return String(forkMessages[userIndex]?.entryId || "").trim();
-  }
-
-  public async forkPiSessionFromMessage(messageId: string): Promise<{
-    text: string;
-    cancelled: boolean;
-  }> {
-    if (
-      this.pendingCommittedPiProjection?.kind === "fork" &&
-      this.pendingCommittedPiProjection.forkMessageId === messageId
-    ) {
-      const result = this.pendingCommittedPiProjection.forkResult!;
-      await this.applyPendingCommittedPiProjection();
-      return result;
-    }
-
-    const sessionFile = this.getPiSessionFile();
-    const sessionId = this.getPiSessionId();
-    const targetMessage = this.messages.find(
-      (message) => message.message_id === messageId && message.role === "user"
-    );
-    if (!targetMessage) {
-      throw new Error("Only SystemSculpt session user messages can be branched.");
-    }
-    const targetText = typeof targetMessage.content === "string"
-      ? targetMessage.content
-      : JSON.stringify(targetMessage.content ?? "");
-
-    if (!sessionFile && !sessionId) {
-      throw new Error("This chat does not have an active SystemSculpt session to branch.");
-    }
-    if (sessionFile) {
-      if (!nodeFileSystem()?.existsSync(sessionFile)) {
-        throw new Error(
-          "The linked session file no longer exists. Reopen the chat to recover it, or start a new chat."
-        );
-      }
-    }
-
-    if (!sessionFile && sessionId) {
-      await this.applyLocalPiForkState({
-        forkMessageId: messageId,
-        forkText: targetText,
-      });
-      return { text: targetText, cancelled: false };
-    }
-
-    const { forkPiSession } = await import("../../services/pi/PiSessionService");
-    const entryId =
-      String(targetMessage.pi_entry_id || "").trim() ||
-      (await this.resolvePiForkEntryId(sessionFile!, messageId));
-    if (!entryId) {
-      throw new Error("Pi could not resolve a fork point for this message.");
-    }
-
-    const result = await forkPiSession({
-      plugin: this.plugin,
-      sessionFile: sessionFile!,
-      entryId,
-    });
-    if (result.cancelled) {
-      return result;
-    }
-
-    const nextSessionFile = String(result.sessionFile || "").trim() || sessionFile;
-    const nextSessionId = String(result.sessionId || "").trim() || this.piSessionId;
-    const nextSessionName = String(result.sessionName || "").trim();
-
-    if (nextSessionFile) {
-      if (!nodeFileSystem()?.existsSync(nextSessionFile)) {
-        await this.applyLocalPiForkState({
-          forkMessageId: messageId,
-          forkText: result.text || targetText,
-          sessionFile: nextSessionFile,
-          sessionId: nextSessionId,
-          sessionName: nextSessionName,
-        });
-      } else {
-        await this.syncPiSessionTranscript({
-          sessionFile: nextSessionFile,
-          sessionId: nextSessionId,
-          syncTitle: true,
-          render: true,
-          persist: true,
-          force: true,
-          pendingFork: { messageId, result },
-        });
-      }
-    } else {
-      await this.syncPiSessionTranscript({
-        sessionFile: nextSessionFile,
-        sessionId: nextSessionId,
-        syncTitle: true,
-        render: true,
-        persist: true,
-        force: true,
-        pendingFork: { messageId, result },
-      });
-    }
-
-    return {
-      text: result.text,
-      cancelled: result.cancelled,
-    };
-  }
-
-  private async syncPiSessionName(name: string): Promise<void> {
-    const sessionFile = this.getPiSessionFile();
-    const sessionName = String(name || "").trim();
-    if (!PlatformContext.get().supportsDesktopOnlyFeatures() || !sessionFile || !sessionName) {
-      return;
-    }
-
-    const { setPiSessionName } = await import("../../services/pi/PiSessionService");
-    const state = await setPiSessionName({
-      plugin: this.plugin,
-      sessionFile,
-      name: sessionName,
-    });
-    this.applyPiSessionState(
-      {
-        sessionFile: String(state.sessionFile || "").trim() || sessionFile,
-        sessionId: String(state.sessionId || "").trim() || this.piSessionId,
-      },
-      {
-        backend: "systemsculpt",
-      }
-    );
-  }
-
-  public clearPiSessionState(options?: { save?: boolean; updateViewState?: boolean }): void {
-    const hadSession = !!this.piSessionFile || !!this.piSessionId;
-    this.applyPiSessionState({}, { reset: true, updateViewState: options?.updateViewState });
-    this.retainedPiModelId = undefined;
-
-    if (hadSession && options?.save && this.chatId && this.isFullyLoaded) {
-      void this.saveChat();
-    }
-  }
-
-  public setPiSessionState(session: { sessionFile?: string; sessionId: string }): void {
-    const nextState = normalizePiSessionState({
-      sessionFile: session.sessionFile,
-      sessionId: session.sessionId,
-    });
-
-    if (this.piSessionFile === nextState.sessionFile && this.piSessionId === nextState.sessionId) {
-      return;
-    }
-
-    this.applyPiSessionState(nextState, { backend: "systemsculpt" });
-
-    if (this.chatId && this.isFullyLoaded) {
-      void this.saveChat();
-    }
   }
 
   public async setSelectedModelId(
@@ -3263,7 +2629,6 @@ export class ChatView extends ItemView {
     this.updateViewState();
 
     if (shouldSave) {
-      await this.syncPiSessionName(newTitle);
       await this.saveChat();
       this.app.workspace.requestSaveLayout();
     }

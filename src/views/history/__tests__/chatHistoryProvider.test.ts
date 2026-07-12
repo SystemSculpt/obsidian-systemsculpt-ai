@@ -32,10 +32,6 @@ describe("chatHistoryProvider", () => {
         messages: [{ role: "user", content: "Hello" }, { role: "assistant", content: "Hi" }],
         chatPath: "SystemSculpt/Chats/chat-1.md",
         chatBackend: "systemsculpt",
-        piSessionFile: "/tmp/chat-1.jsonl",
-        piSessionId: "session-1",
-        piLastEntryId: "entry-1",
-        piLastSyncedAt: "2026-03-10T10:00:00.000Z",
       },
     ]);
     (ChatStorageService as jest.Mock).mockImplementation(() => ({ loadChats }));

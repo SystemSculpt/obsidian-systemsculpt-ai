@@ -347,10 +347,6 @@ describe("ChatStorageService resume descriptor contract", () => {
       title: "Chat 9",
       chatPath: "SystemSculpt/Chats/chat-9.md",
       chatBackend: "systemsculpt",
-      piSessionFile: "/tmp/chat-9.jsonl",
-      piSessionId: "session-9",
-      piLastEntryId: "entry-9",
-      piLastSyncedAt: "2026-03-10T10:00:00.000Z",
     });
 
     await expect(service.getChatResumeDescriptor("chat-9")).resolves.toEqual({
@@ -576,7 +572,7 @@ Hello
       ).rejects.toThrow();
     });
 
-    it("allows managed-session chats to save an empty visible transcript after a branch", async () => {
+    it("does not let legacy session metadata bypass empty-overwrite protection", async () => {
       const mockFile = new TFile({ path: "SystemSculpt/Chats/pi-fork.md" });
       mockVault.getAbstractFileByPath.mockReturnValue(mockFile);
       mockVault.read.mockResolvedValue(`---
@@ -606,11 +602,11 @@ Hello
             piSessionId: "new-session",
             piLastSyncedAt: "2026-03-09T02:32:48.935Z",
             chatBackend: "systemsculpt",
-          }
+          } as any
         )
-      ).resolves.toEqual({ version: 2 });
+      ).rejects.toThrow("Failed to save chat");
 
-      expect(mockVault.modify).toHaveBeenCalled();
+      expect(mockVault.modify).not.toHaveBeenCalled();
     });
 
     it("includes title in save", async () => {
@@ -660,6 +656,23 @@ Hello
       expect(mockVault.create).toHaveBeenCalled();
       const createCall = mockVault.create.mock.calls[0];
       expect(createCall[1]).not.toContain("chatBackend:");
+    });
+
+    it("never emits legacy Pi session fields in new frontmatter", async () => {
+      await service.saveChat(
+        "managed-chat",
+        [{ role: "user" as ChatRole, content: "Hello" }],
+        {
+          piSessionFile: "/tmp/session.jsonl",
+          piSessionId: "session-1",
+          piLastEntryId: "entry-1",
+          piLastSyncedAt: "2026-03-09T02:32:48.935Z",
+          chatBackend: "pi",
+        } as any,
+      );
+
+      const created = mockVault.create.mock.calls[0][1] as string;
+      expect(created).not.toMatch(/piSession|piLast|chatBackend/);
     });
   });
 

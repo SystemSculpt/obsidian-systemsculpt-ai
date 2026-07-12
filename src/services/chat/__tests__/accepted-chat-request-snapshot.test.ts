@@ -1,14 +1,11 @@
 import fixture from "../../../../testing/fixtures/managed/managed-capabilities-v2.json";
 import type {
   AcceptedManagedChatOperation,
-  AcceptedPiChatOperation,
   ManagedAllowedLease,
 } from "../../managed/ManagedTypes";
 import {
   composeAcceptedChatContinuation,
-  composeAcceptedLegacyContinuation,
   createAcceptedManagedChatRequestSnapshot,
-  createAcceptedPiChatRequestSnapshot,
 } from "../AcceptedChatRequestSnapshot";
 import { ChatRequestPreparationService } from "../ChatRequestPreparationService";
 
@@ -32,10 +29,6 @@ function managedOperation(id = "u"): AcceptedManagedChatOperation {
   const requestContract = descriptor.request_contracts.find((item) => item.capability === "chat_turn")!;
   const lease = Object.freeze({ outcome: "allowed", descriptor, requestContract }) as ManagedAllowedLease;
   return Object.freeze({ ...base(id), runtime: "managed", lease });
-}
-
-function piOperation(id = "u"): AcceptedPiChatOperation {
-  return Object.freeze({ ...base(id), runtime: "pi" });
 }
 
 const policy = {
@@ -63,30 +56,6 @@ describe("AcceptedChatRequestSnapshot", () => {
     expect(Object.keys(accepted)).not.toContain("operation");
   });
 
-  it("keeps legacy preparation only on retained Pi operations", () => {
-    const operation = piOperation();
-    const accepted = createAcceptedPiChatRequestSnapshot({
-      operation,
-      policy,
-      preparation: {
-        prepared: {
-          modelSource: "pi_local",
-          resolvedModel: {} as never,
-          actualModelId: "openai/gpt-4.1",
-          preparedMessages: [...operation.initialDurableSnapshot.messages],
-          finalSystemPrompt: "retained Pi prompt",
-          tools: [],
-        },
-        notices: [],
-        diagnostics: [],
-      },
-    });
-
-    expect(accepted.runtime).toBe("pi");
-    expect(accepted).not.toHaveProperty("model");
-    expect(accepted.legacyPreparation.actualModelId).toBe("openai/gpt-4.1");
-  });
-
   it("prepares managed requests without reading legacy model resolution", async () => {
     const operation = managedOperation();
     const service = new ChatRequestPreparationService();
@@ -109,13 +78,11 @@ describe("AcceptedChatRequestSnapshot", () => {
     const first = service.prepare(
       operation,
       { messages: operation.initialDurableSnapshot.messages, model: "legacy-must-not-run" },
-      dependencies as never,
       dependencies,
     );
     expect(service.prepare(
       operation,
       { messages: operation.initialDurableSnapshot.messages, model: "legacy-must-not-run" },
-      dependencies as never,
       dependencies,
     )).toBe(first);
     const accepted = await first;
@@ -124,7 +91,7 @@ describe("AcceptedChatRequestSnapshot", () => {
     expect(reads).toEqual({ model: 0, context: 1, tools: 1 });
   });
 
-  it("composes managed and Pi continuations through their separate contracts", () => {
+  it("composes managed continuations from the accepted durable snapshot", () => {
     const managedOperationValue = managedOperation();
     const managed = createAcceptedManagedChatRequestSnapshot({
       operation: managedOperationValue,
@@ -132,28 +99,9 @@ describe("AcceptedChatRequestSnapshot", () => {
       managedMessages: managedOperationValue.initialDurableSnapshot.messages,
       managedTools: [],
     });
-    const piOperationValue = piOperation();
-    const pi = createAcceptedPiChatRequestSnapshot({
-      operation: piOperationValue,
-      policy,
-      preparation: {
-        prepared: {
-          modelSource: "pi_local",
-          resolvedModel: {} as never,
-          actualModelId: "openai/gpt-4.1",
-          preparedMessages: [...piOperationValue.initialDurableSnapshot.messages],
-          finalSystemPrompt: "",
-          tools: [],
-        },
-        notices: [],
-        diagnostics: [],
-      },
-    });
     const checkpoint = { role: "tool" as const, content: "ok", message_id: "t", tool_call_id: "call" };
     const managedNext = Object.freeze({ chatId: "c", version: 2, messages: Object.freeze([...managed.durableSnapshot.messages, checkpoint]) });
-    const piNext = Object.freeze({ chatId: "c", version: 2, messages: Object.freeze([...pi.durableSnapshot.messages, checkpoint]) });
 
     expect(composeAcceptedChatContinuation(managed, managedNext).at(-1)).toMatchObject({ role: "tool", content: "ok" });
-    expect(composeAcceptedLegacyContinuation(pi, piNext).preparedMessages.at(-1)).toMatchObject({ role: "tool", content: "ok" });
   });
 });

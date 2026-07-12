@@ -12,7 +12,6 @@ import type {
 } from "../managed/ManagedTypes";
 import {
   createAcceptedManagedChatRequestSnapshot,
-  createAcceptedPiChatRequestSnapshot,
   type AcceptedChatRequestSnapshot,
 } from "./AcceptedChatRequestSnapshot";
 
@@ -142,8 +141,7 @@ export class ChatRequestPreparationService {
   public prepare(
     operation: AcceptedChatOperation,
     input: AuthoritativeChatPreparationInput,
-    dependencies: ChatPreparationDependencies,
-    _managedDependencies: ManagedChatPreparationDependencies,
+    managedDependencies: ManagedChatPreparationDependencies,
   ): Promise<AcceptedChatRequestSnapshot> {
     const existing = this.retained.get(operation);
     if (existing) return existing;
@@ -155,28 +153,16 @@ export class ChatRequestPreparationService {
       imageContextIncluded: true,
       documentContextIncluded: [...contextFiles].some((item) => item.startsWith("doc:")),
     };
-    const pending = (operation.runtime === "managed"
-      ? prepareManagedAcceptedChatRequest(operation, input, _managedDependencies)
-          .then((managed) => createAcceptedManagedChatRequestSnapshot({
-            operation,
-            policy: {
-              ...policyBase,
-              tools: managed.tools.length ? "normalized" : "omitted",
-            },
-            managedMessages: managed.messages,
-            managedTools: managed.tools,
-          }))
-      : operation.runtime === "pi"
-        ? prepareChatRequestAuthoritatively(input, dependencies)
-            .then((legacy) => createAcceptedPiChatRequestSnapshot({
-              operation,
-              preparation: legacy,
-              policy: {
-                ...policyBase,
-                tools: legacy.prepared.tools.length ? "normalized" : "omitted",
-              },
-            }))
-        : Promise.reject(new Error("Accepted Chat operation has no runtime identity.")))
+    const pending = prepareManagedAcceptedChatRequest(operation, input, managedDependencies)
+      .then((managed) => createAcceptedManagedChatRequestSnapshot({
+        operation,
+        policy: {
+          ...policyBase,
+          tools: managed.tools.length ? "normalized" : "omitted",
+        },
+        managedMessages: managed.messages,
+        managedTools: managed.tools,
+      }))
       .catch((error: Error) => { this.failed.add(operation); throw error; });
     this.retained.set(operation, pending);
     return pending;

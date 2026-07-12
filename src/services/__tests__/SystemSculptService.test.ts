@@ -183,53 +183,6 @@ describe("SystemSculptService", () => {
     delete (global as any).fetch;
   });
 
-  it("reuses one accepted authoritative preparation for active legacy dispatch without rereading sources", async () => {
-    const service = SystemSculptService.getInstance(createPlugin());
-    modelManagementService.getModelInfo.mockResolvedValueOnce({
-      isCustom: false, actualModelId: "provider/model", modelSource: "pi_local",
-      model: { id: "m", provider: "provider", sourceMode: "pi_local", sourceProviderId: "provider", piExecutionModelId: "provider/model", piLocalAvailable: true, piRemoteAvailable: false, piAuthMode: "local", supported_parameters: [] },
-    });
-    const message = { role: "user", content: "accepted", message_id: "u" } as const;
-    const durable = Object.freeze({ chatId: "c", version: 1, messages: Object.freeze([message]) });
-    const operation = Object.freeze({ runtime: "pi" as const, durableTurnId: "u", acceptedUserMessage: message, initialDurableSnapshot: durable, turnBoundaryId: "b" });
-    const accepted = await service.prepareAcceptedChatRequest(operation, { model: "m", contextFiles: new Set(), systemPromptOverride: "selected" });
-    expect(modelManagementService.getModelInfo).toHaveBeenCalledTimes(1);
-    expect(contextFileService.prepareMessagesWithContext).toHaveBeenCalledTimes(1);
-    expect(mcpService.getAvailableTools).not.toHaveBeenCalled();
-    expect(accepted.tools).toBeUndefined();
-    jest.clearAllMocks();
-    await collectEvents(service.streamMessage({ messages: [], model: "ignored", preparedRequest: accepted.legacyPreparation as never }));
-    expect(modelManagementService.getModelInfo).not.toHaveBeenCalled();
-    expect(contextFileService.prepareMessagesWithContext).not.toHaveBeenCalled();
-    expect(mcpService.getAvailableTools).not.toHaveBeenCalled();
-    expect(localPiStreamExecutor.executeLocalPiStream).toHaveBeenCalledWith(expect.objectContaining({ prepared: accepted.legacyPreparation }));
-  });
-
-  it.each([
-    ["selected prompt", `selected prompt\n\n${AGENT_TOOL_INSTRUCTIONS}`],
-    [undefined, AGENT_PRESET.systemPrompt],
-  ])("keeps established legacy prompt preparation in accepted snapshots (%s)", async (systemPromptOverride, expectedPrompt) => {
-    const service = SystemSculptService.getInstance(createPlugin());
-    const message = { role: "user", content: "accepted", message_id: "u" } as const;
-    const durable = Object.freeze({ chatId: "c", version: 1, messages: Object.freeze([message]) });
-    const operation = Object.freeze({ runtime: "pi" as const, durableTurnId: "u", acceptedUserMessage: message, initialDurableSnapshot: durable, turnBoundaryId: "b" });
-
-    const accepted = await service.prepareAcceptedChatRequest(operation, {
-      model: "systemsculpt@@systemsculpt/ai-agent",
-      contextFiles: new Set(["context.md"]),
-      systemPromptOverride,
-      allowTools: true,
-    });
-
-    expect(accepted.legacyPreparation.finalSystemPrompt).toBe(expectedPrompt);
-    expect(contextFileService.prepareMessagesWithContext).toHaveBeenCalledTimes(1);
-    expect(contextFileService.prepareMessagesWithContext).toHaveBeenCalledWith(
-      [message], new Set(["context.md"]), true, expectedPrompt,
-    );
-    expect(accepted.legacyPreparation.tools).toEqual(expect.any(Array));
-    expect(accepted).not.toHaveProperty("model");
-  });
-
   it("initializes with the resolved base url and updates dependent services", () => {
     const plugin = createPlugin();
     const service = SystemSculptService.getInstance(plugin);

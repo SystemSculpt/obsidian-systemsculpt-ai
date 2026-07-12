@@ -48,14 +48,14 @@ describe("ChatMarkdownSerializer", () => {
       expect(result).toContain("<!-- SYSTEMSCULPT-MESSAGE-END -->");
     });
 
-    it("persists pi entry ids on serialized messages", () => {
+    it("does not emit legacy Pi entry ids when serializing messages", () => {
       const messages: ChatMessage[] = [
-        { role: "user", content: "Hello!", message_id: "user-1", pi_entry_id: "entry-user-1" },
+        { role: "user", content: "Hello!", message_id: "user-1", pi_entry_id: "entry-user-1" } as any,
       ];
 
       const result = ChatMarkdownSerializer.serializeMessages(messages);
 
-      expect(result).toContain('pi-entry-id="entry-user-1"');
+      expect(result).not.toContain("pi-entry-id");
     });
 
     it("serializes assistant message", () => {
@@ -235,7 +235,7 @@ describe("ChatMarkdownSerializer", () => {
       expect(result).toBeNull();
     });
 
-    it("parses pi entry ids from message markers", () => {
+    it("detects a Pi entry marker as legacy without retaining its runtime identity", () => {
       const content = createMarkdown(
         { id: "chat-1", model: "gpt-4", created: "2026-03-06T00:00:00.000Z", lastModified: "2026-03-06T00:00:00.000Z", title: "Test" },
         `<!-- SYSTEMSCULPT-MESSAGE-START role="user" message-id="user-1" pi-entry-id="entry-user-1" -->
@@ -245,13 +245,9 @@ Hello!
 
       const result = ChatMarkdownSerializer.parseMarkdown(content);
 
-      expect(result?.messages[0]).toEqual(
-        expect.objectContaining({
-          role: "user",
-          message_id: "user-1",
-          pi_entry_id: "entry-user-1",
-        }),
-      );
+      expect(result?.metadata.chatBackend).toBe("legacy");
+      expect(result?.messages[0]).toEqual(expect.objectContaining({ role: "user", message_id: "user-1" }));
+      expect(result?.messages[0]).not.toHaveProperty("pi_entry_id");
       expect(String(result?.messages[0]?.content || "").trim()).toBe("Hello!");
     });
 
@@ -259,7 +255,7 @@ Hello!
       const content = createMarkdown(
         {
           id: "chat-123",
-          model: "gpt-4",
+          model: "systemsculpt@@systemsculpt/ai-agent",
           title: "Test Chat",
           created: "2024-01-01T00:00:00Z",
           lastModified: "2024-01-01T12:00:00Z",
@@ -271,7 +267,7 @@ Hello!
 
       expect(result).not.toBeNull();
       expect(result?.metadata.id).toBe("chat-123");
-      expect(result?.metadata.model).toBe("gpt-4");
+      expect(result?.metadata.model).toBe("systemsculpt@@systemsculpt/ai-agent");
       expect(result?.metadata.title).toBe("Test Chat");
       expect(result?.metadata.chatBackend).toBe("systemsculpt");
       expect(result?.metadata.systemMessage).toBeUndefined();

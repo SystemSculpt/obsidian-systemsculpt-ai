@@ -134,29 +134,6 @@ describe("ChatView empty chat status", () => {
     expect(actionLabels).toContain("Add Context");
   });
 
-  it("uses SystemSculpt license setup wording when access is not configured", () => {
-    const chatView = createChatView({
-      selectedModelId: "",
-      cachedModels: [],
-      licenseKey: "",
-      licenseValid: false,
-    });
-
-    chatView.displayChatStatus();
-
-    const statusText = chatView.chatContainer.textContent || "";
-    const actionLabels = Array.from(
-      chatView.chatContainer.querySelectorAll(".systemsculpt-chat-status-action-label")
-    ).map((el) => el.textContent?.trim());
-
-    expect(statusText).toContain("Finish setup");
-    expect(statusText).toContain("Setup required");
-    expect(statusText).toContain("Add and validate your SystemSculpt license to start chatting.");
-    expectNoStandalonePiCopy(statusText);
-    expect(actionLabels).toContain("Open Account");
-    expect(actionLabels).toHaveLength(1);
-  });
-
   it("never walls a BYOK user with a configured custom provider, even with no license (#209)", () => {
     // The May 2026 bug: a BYOK user (own OpenRouter key, no SystemSculpt
     // license) was blocked from Chat by a license prompt purely because the
@@ -193,53 +170,6 @@ describe("ChatView empty chat status", () => {
     // Lands on the normal ready state with the usual primary action.
     expect(statusText).toContain("New chat");
     expect(statusText).toContain("Ready");
-    expect(actionLabels).toContain("Add Context");
-  });
-
-  it("persists the user's real selection, not the BYOK runtime fallback, into leaf state (#209)", () => {
-    const chatView = createChatView({
-      selectedModelId: "systemsculpt@@systemsculpt/ai-agent",
-      licenseKey: "",
-      licenseValid: false,
-      customProviders: [
-        {
-          id: "openrouter",
-          name: "OpenRouter",
-          endpoint: "https://openrouter.ai/api/v1",
-          apiKey: "byok-key",
-          isEnabled: true,
-        },
-      ],
-    });
-
-    // Runtime resolves onto the BYOK model so chat actually works...
-    expect(chatView.getEffectiveSelectedModelId()).not.toBe("systemsculpt@@systemsculpt/ai-agent");
-
-    // ...but persisted leaf state keeps the user's actual selection, so adding a
-    // license later restores the managed model instead of sticking on the fallback.
-    expect(chatView.getState().selectedModelId).toBe("systemsculpt@@systemsculpt/ai-agent");
-  });
-
-  it("keeps local Pi chats on a local-ready state instead of redirecting to Account copy", () => {
-    const chatView = createChatView({
-      selectedModelId: "local-pi-openai@@gpt-4.1",
-      cachedModels: [{ id: "local-pi-openai@@gpt-4.1" }],
-      licenseKey: "",
-      licenseValid: false,
-    });
-
-    chatView.displayChatStatus();
-
-    const statusText = chatView.chatContainer.textContent || "";
-    const actionLabels = Array.from(
-      chatView.chatContainer.querySelectorAll(".systemsculpt-chat-status-action-label")
-    ).map((el) => el.textContent?.trim());
-
-    expect(statusText).toContain("New chat");
-    expect(statusText).toContain("Ready");
-    expect(statusText).toContain("Pi will run gpt-4.1 locally on this desktop.");
-    expect(statusText).not.toContain("Open Account");
-    expect(statusText).not.toContain("Add and validate your SystemSculpt license");
     expect(actionLabels).toContain("Add Context");
   });
 

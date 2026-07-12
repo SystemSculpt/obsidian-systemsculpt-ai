@@ -4,14 +4,8 @@ import type { PreparedChatRequest } from "../StreamExecutionTypes";
 import type {
   AcceptedChatOperation,
   AcceptedManagedChatOperation,
-  AcceptedPiChatOperation,
   JsonContractValue,
 } from "../managed/ManagedTypes";
-import type {
-  AuthoritativeChatPreparation,
-  ChatPreparationDiagnostic,
-  ChatPreparationNotice,
-} from "./ChatRequestPreparationService";
 
 export type ManagedPreparedMessage = Readonly<{
   readonly [key: string]: JsonContractValue;
@@ -23,13 +17,6 @@ export type AcceptedChatPolicyAudit = Readonly<{
   documentContextIncluded: boolean;
   tools: "omitted" | "normalized";
 }>;
-export type FrozenPreparedChatRequest = Readonly<
-  Omit<PreparedChatRequest, "preparedMessages" | "tools"> & {
-    preparedMessages: readonly Readonly<ChatMessage>[];
-    tools: readonly PreparedChatRequest["tools"][number][];
-  }
->;
-
 type AcceptedChatRequestBase<TOperation extends AcceptedChatOperation> = Readonly<{
   runtime: TOperation["runtime"];
   operation: TOperation;
@@ -37,8 +24,6 @@ type AcceptedChatRequestBase<TOperation extends AcceptedChatOperation> = Readonl
   durableSnapshot: ChatTranscriptSnapshot;
   acceptedMessageCount: number;
   policy: AcceptedChatPolicyAudit;
-  notices: readonly ChatPreparationNotice[];
-  diagnostics: readonly ChatPreparationDiagnostic[];
 }>;
 
 export type AcceptedManagedChatRequestSnapshot =
@@ -50,16 +35,7 @@ export type AcceptedManagedChatRequestSnapshot =
     tools?: readonly Readonly<{ [key: string]: JsonContractValue }>[];
   }>;
 
-export type AcceptedPiChatRequestSnapshot =
-  AcceptedChatRequestBase<AcceptedPiChatOperation> &
-  Readonly<{
-    runtime: "pi";
-    legacyPreparation: FrozenPreparedChatRequest;
-  }>;
-
-export type AcceptedChatRequestSnapshot =
-  | AcceptedManagedChatRequestSnapshot
-  | AcceptedPiChatRequestSnapshot;
+export type AcceptedChatRequestSnapshot = AcceptedManagedChatRequestSnapshot;
 
 function deepCopy<T>(value: T): T {
   if (Array.isArray(value)) return value.map(deepCopy) as T;
@@ -131,8 +107,6 @@ function prepareTool(
 function commonSnapshot<TOperation extends AcceptedChatOperation>(
   operation: TOperation,
   policy: AcceptedChatPolicyAudit,
-  notices: readonly ChatPreparationNotice[],
-  diagnostics: readonly ChatPreparationDiagnostic[],
 ) {
   return {
     runtime: operation.runtime,
@@ -140,8 +114,6 @@ function commonSnapshot<TOperation extends AcceptedChatOperation>(
     durableSnapshot: operation.initialDurableSnapshot,
     acceptedMessageCount: operation.initialDurableSnapshot.messages.length,
     policy: deepCopy(policy),
-    notices: deepCopy(notices),
-    diagnostics: deepCopy(diagnostics),
   };
 }
 
@@ -167,7 +139,7 @@ export function createAcceptedManagedChatRequestSnapshot(input: Readonly<{
   const messages = input.managedMessages.map(prepareManagedMessage);
   const tools = input.managedTools.map(prepareTool);
   const snapshot = {
-    ...commonSnapshot(input.operation, input.policy, [], []),
+    ...commonSnapshot(input.operation, input.policy),
     runtime: "managed" as const,
     model: "ai-agent" as const,
     messages,
@@ -178,31 +150,8 @@ export function createAcceptedManagedChatRequestSnapshot(input: Readonly<{
   ) as AcceptedManagedChatRequestSnapshot;
 }
 
-export function createAcceptedPiChatRequestSnapshot(input: Readonly<{
-  operation: AcceptedPiChatOperation;
-  preparation: AuthoritativeChatPreparation;
-  policy: AcceptedChatPolicyAudit;
-}>): AcceptedPiChatRequestSnapshot {
-  const legacyPreparation = deepFreezeAccepted(
-    deepCopy(input.preparation.prepared) as FrozenPreparedChatRequest,
-  );
-  const snapshot = {
-    ...commonSnapshot(
-      input.operation,
-      input.policy,
-      input.preparation.notices,
-      input.preparation.diagnostics,
-    ),
-    runtime: "pi" as const,
-    legacyPreparation,
-  };
-  return deepFreezeAccepted(
-    attachOperation(snapshot, input.operation),
-  ) as AcceptedPiChatRequestSnapshot;
-}
-
 function continuationSuffix(
-  accepted: AcceptedChatRequestSnapshot,
+  accepted: AcceptedManagedChatRequestSnapshot,
   next: ChatTranscriptSnapshot,
 ): readonly Readonly<ChatMessage>[] {
   if (next.messages.length < accepted.acceptedMessageCount) {
@@ -219,18 +168,4 @@ export function composeAcceptedChatContinuation(
     ...accepted.messages,
     ...continuationSuffix(accepted, next).map(prepareManagedMessage),
   ]);
-}
-
-export function composeAcceptedLegacyContinuation(
-  accepted: AcceptedPiChatRequestSnapshot,
-  next: ChatTranscriptSnapshot,
-): FrozenPreparedChatRequest {
-  const preparedMessages = [
-    ...deepCopy(accepted.legacyPreparation.preparedMessages),
-    ...deepCopy(continuationSuffix(accepted, next)),
-  ];
-  return deepFreezeAccepted({
-    ...deepCopy(accepted.legacyPreparation),
-    preparedMessages,
-  } as FrozenPreparedChatRequest);
 }

@@ -4,7 +4,6 @@
 
 import type { ChatMessage } from "../../../types";
 import { ChatView } from "../ChatView";
-import { ChatTurn } from "../turn/ChatTurn";
 
 function msg(message_id: string, role: "user" | "assistant" | "tool", content = message_id): ChatMessage {
   return { message_id, role, content } as ChatMessage;
@@ -29,7 +28,6 @@ function createView(initial: ChatMessage[] = []) {
   view.getPersistedSelectedModelId = jest.fn(() => "model");
   view.updateViewState = jest.fn();
   view.addMessage = jest.fn(async () => {});
-  view.clearPiSessionState = jest.fn();
   view.chatStorage = {
     saveChat: jest.fn(async (_id: string, messages: ChatMessage[]) => {
       durable = clone(messages);
@@ -57,7 +55,7 @@ describe("ChatView ChatTranscript integration", () => {
 
   it("keeps assistant durable and mutable projections in parity", async () => {
     const { view, durable } = createView([msg("u1", "user")]);
-    await view.persistAssistantMessage(msg("a1", "assistant"), { syncPiTranscript: false });
+    await view.persistAssistantMessage(msg("a1", "assistant"));
     expect(view.messages).toEqual(durable());
   });
 
@@ -70,7 +68,7 @@ describe("ChatView ChatTranscript integration", () => {
   it("uses one transcript across sequential user and assistant commits", async () => {
     const { view } = createView();
     await view.persistSubmittedUserMessage(msg("u1", "user"));
-    await view.persistAssistantMessage(msg("a1", "assistant"), { syncPiTranscript: false });
+    await view.persistAssistantMessage(msg("a1", "assistant"));
     expect(view.messages.map((entry) => entry.message_id)).toEqual(["u1", "a1"]);
   });
 
@@ -92,7 +90,7 @@ describe("ChatView ChatTranscript integration", () => {
     const original = [msg("u1", "user")];
     const { view } = createView(original);
     view.chatStorage.saveChat.mockRejectedValueOnce(new Error("disk"));
-    await expect(view.persistAssistantMessage(msg("a1", "assistant"), { syncPiTranscript: false })).rejects.toMatchObject({ operation: "assistant_commit" });
+    await expect(view.persistAssistantMessage(msg("a1", "assistant"))).rejects.toMatchObject({ operation: "assistant_commit" });
     expect(view.messages).toBe(original);
   });
 
@@ -160,7 +158,7 @@ describe("ChatView ChatTranscript integration", () => {
       };
     }));
 
-    const commit = view.persistAssistantMessage(msg("a-race", "assistant"), { syncPiTranscript: false });
+    const commit = view.persistAssistantMessage(msg("a-race", "assistant"));
     expect(view.chatStorage.saveChat).not.toHaveBeenCalled();
     expect(view.app.workspace.trigger).not.toHaveBeenCalled();
     release();
@@ -201,76 +199,9 @@ describe("ChatView ChatTranscript integration", () => {
     expect(view.app.workspace.trigger).not.toHaveBeenCalled();
   });
 
-  it("keeps a durable tool checkpoint and truthful continuation when Pi transcript sync rejects", async () => {
-    const pendingTool = {
-      id: "tool-1",
-      state: "pending",
-      request: { function: { name: "search", arguments: "{}" } },
-    } as any;
-    const initialAssistant = {
-      role: "assistant",
-      content: "",
-      message_id: "a-tool",
-      tool_calls: [pendingTool],
-    } as ChatMessage;
-    const { view, durable } = createView([msg("u1", "user")]);
-    view.isPiBackedChat = jest.fn(() => true);
-    view.getPiSessionFile = jest.fn(() => "/tmp/session.jsonl");
-    const piFailure = new Error("Pi transcript unavailable");
-    view.syncPiSessionTranscript = jest.fn().mockRejectedValue(piFailure);
-    const continuation = jest.fn(async () => ({
-      message: msg("a-final", "assistant", "done"),
-      messageId: "a-final",
-      messageEl: {} as HTMLElement,
-      completionState: "content",
-      stopReason: "stop",
-    }));
-    const turn = new ChatTurn({
-      signal: new AbortController().signal,
-      commitUser: async () => {},
-      commitAssistant: async () => {},
-      runInitialStream: async () => ({
-        message: initialAssistant,
-        messageId: "a-tool",
-        messageEl: {} as HTMLElement,
-        completionState: "content",
-        stopReason: "tool_calls",
-      }),
-      shouldContinueTools: () => true,
-      requestToolApproval: async () => true,
-      executeTool: async (toolCall) => {
-        toolCall.state = "completed";
-        toolCall.result = { success: true, data: "result" };
-      },
-      commitToolCheckpoint: (message) => view.persistAssistantMessage(message, { operation: "tool_checkpoint" }).then(() => undefined),
-      renderToolCheckpoint: async () => {},
-      runContinuationStream: continuation,
-    });
-
-    await turn.run(msg("turn-user", "user", "search"));
-
-    expect(view.syncPiSessionTranscript).toHaveBeenCalledTimes(1);
-    expect(view.syncPiSessionTranscript).toHaveBeenCalledWith({ syncTitle: true, render: false, persist: true, force: true });
-    expect(turn.outcome).toBe("completed");
-    expect(continuation).toHaveBeenCalledTimes(1);
-    expect(durable()).toEqual([
-      msg("u1", "user"),
-      expect.objectContaining({
-        message_id: "a-tool",
-        tool_calls: [expect.objectContaining({
-          id: "tool-1",
-          state: "completed",
-          result: { success: true, data: "result" },
-        })],
-      }),
-    ]);
-    expect(view.messages).toEqual(durable());
-    expect(view.messages.some((entry) => entry.message_id === "a-tool")).toBe(true);
-  });
-
   it("keeps the accepted projection readonly and the durable snapshot isolated", async () => {
     const { view, durable } = createView();
-    await view.persistAssistantMessage(msg("a1", "assistant"), { syncPiTranscript: false });
+    await view.persistAssistantMessage(msg("a1", "assistant"));
     expect(() => { view.messages[0].content = "legacy mutation"; }).toThrow();
     expect(durable()[0].content).toBe("a1");
   });

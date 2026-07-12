@@ -1,8 +1,7 @@
 /** @jest-environment jsdom */
 
 import { App, WorkspaceLeaf } from "obsidian";
-import { AGENT_PRESET, GENERAL_USE_PRESET } from "../../../constants/prompts";
-import { PlatformContext } from "../../../services/PlatformContext";
+import { AGENT_PRESET } from "../../../constants/prompts";
 import { SystemSculptService } from "../../../services/SystemSculptService";
 import { ChatView } from "../ChatView";
 
@@ -11,9 +10,6 @@ const CANONICAL_ID = "systemsculpt@@systemsculpt/ai-agent";
 describe("ChatView standard identity migration", () => {
   beforeEach(() => {
     jest.spyOn(SystemSculptService, "getInstance").mockReturnValue({} as never);
-    jest.spyOn(PlatformContext, "get").mockReturnValue({
-      supportsDesktopOnlyFeatures: () => true,
-    } as never);
   });
 
   afterEach(() => jest.restoreAllMocks());
@@ -94,7 +90,7 @@ describe("ChatView standard identity migration", () => {
     expect(updateSettings).toHaveBeenCalledWith({ selectedModelId: CANONICAL_ID });
   });
 
-  it("preserves retained Pi session state while standardizing its stored identity", async () => {
+  it("loads a historical Pi-shaped leaf as legacy without retaining session state", async () => {
     const { chatView } = createChatView();
     (chatView as ChatView & {
       applyChatLeafState(state: object): void;
@@ -104,46 +100,14 @@ describe("ChatView standard identity migration", () => {
       piSessionFile: "/tmp/pi-session.jsonl",
       piSessionId: "session-123",
     });
-    jest.spyOn(chatView, "saveChat").mockResolvedValue(undefined);
-    jest.spyOn(chatView as never, "refreshModelMetadata").mockResolvedValue(undefined);
-    jest.spyOn(chatView, "focusInput").mockImplementation(() => undefined);
-    jest.spyOn(chatView as never, "notifySettingsChanged").mockImplementation(() => undefined);
-
-    await chatView.setSelectedModelId("local-pi-openai@@gpt-4.1");
-
-    expect(chatView.selectedModelId).toBe(CANONICAL_ID);
-    expect(chatView.getPiSessionFile()).toBe("/tmp/pi-session.jsonl");
-    expect(chatView.getPiSessionId()).toBe("session-123");
-    expect(chatView.isPiBackedChat()).toBe(true);
-    expect(chatView.getRetainedPiModelId()).toBe("local-pi-openai@@gpt-4.1");
-    await expect(chatView.getCurrentSystemPrompt()).resolves.toBe(
-      GENERAL_USE_PRESET.systemPrompt,
-    );
+    expect(chatView.chatBackend).toBe("legacy");
+    expect(chatView.getState()).not.toHaveProperty("piSessionFile");
+    expect(chatView.getState()).not.toHaveProperty("piSessionId");
+    await expect(chatView.getCurrentSystemPrompt()).resolves.toBe(AGENT_PRESET.systemPrompt);
   });
 
   it("keeps fresh standard Chat on managed prompt semantics", async () => {
     const { chatView } = createChatView();
-    expect(chatView.isPiBackedChat()).toBe(false);
     await expect(chatView.getCurrentSystemPrompt()).resolves.toBe(AGENT_PRESET.systemPrompt);
-  });
-
-  it("keeps the backend label on mobile while dropping desktop Pi session state", () => {
-    (PlatformContext.get as jest.Mock).mockReturnValue({
-      supportsDesktopOnlyFeatures: () => false,
-    });
-    const { chatView } = createChatView();
-
-    (chatView as ChatView & {
-      applyChatLeafState(state: object): void;
-    }).applyChatLeafState({
-      chatBackend: "systemsculpt",
-      piSessionFile: "/tmp/pi-session.jsonl",
-      piSessionId: "session-123",
-    });
-
-    expect(chatView.chatBackend).toBe("systemsculpt");
-    expect(chatView.getPiSessionFile()).toBeUndefined();
-    expect(chatView.getPiSessionId()).toBeUndefined();
-    expect(chatView.isPiBackedChat()).toBe(false);
   });
 });

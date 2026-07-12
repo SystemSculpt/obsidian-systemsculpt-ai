@@ -7,7 +7,6 @@ jest.mock("obsidian", () => ({
   Notice: jest.fn(),
 }));
 
-import { Notice } from "obsidian";
 import { messageHandling } from "../messageHandling";
 
 describe("messageHandling resubmit behavior", () => {
@@ -35,37 +34,11 @@ describe("messageHandling resubmit behavior", () => {
     expect(chatContainer.childElementCount).toBe(0);
   });
 
-  it("branches managed-session chats and restores the resent prompt into the composer", async () => {
-    const chatView: any = {
-      messages: [{ message_id: "user_pi_1", role: "user", content: "Hello Pi" }],
-      isLegacyReadOnlyChat: jest.fn(() => false),
-      getPiSessionFile: jest.fn(() => undefined),
-      getPiSessionId: jest.fn(() => "remote-session-1"),
-      forkPiSessionFromMessage: jest.fn(async () => ({ text: "Hello Pi", cancelled: false })),
-      inputHandler: {
-        setValue: jest.fn(),
-        focus: jest.fn(),
-      },
-    };
-
-    const result = await messageHandling.runResendAction(chatView, {
-      messageId: "user_pi_1",
-      content: "Hello Pi",
-    });
-
-    expect(chatView.forkPiSessionFromMessage).toHaveBeenCalledWith("user_pi_1");
-    expect(chatView.inputHandler.setValue).toHaveBeenCalledWith("Hello Pi");
-    expect(chatView.inputHandler.focus).toHaveBeenCalledTimes(1);
-    expect(result).toEqual({ status: "success" });
-    expect(Notice).toHaveBeenCalledWith("Branched chat to that message and restored it to the composer.");
-  });
-
   it("installs resend intent without changing the accepted transcript", async () => {
     const messages = [{ message_id: "user-1", role: "user", content: "First" }, { message_id: "assistant-1", role: "assistant", content: "Reply" }];
     const setPendingResendIntent = jest.fn();
     const chatView: any = {
       messages, chatId: "chat-original", isLegacyReadOnlyChat: jest.fn(() => false),
-      getPiSessionFile: jest.fn(() => ""), getPiSessionId: jest.fn(() => undefined),
       getPendingResendIdentity: jest.fn(() => ({ targetMessageId: "user-1", expectedIndex: 0, expectedVersion: 1 })),
       inputHandler: { setPendingResendIntent, setValue: jest.fn(), focus: jest.fn() },
     };
@@ -88,7 +61,7 @@ describe("messageHandling resubmit behavior", () => {
       { message_id: "assistant_2", role: "assistant", content: "Latest reply" },
     ];
     const chatView: any = {
-      messages, isLegacyReadOnlyChat: jest.fn(() => false), getPiSessionFile: jest.fn(() => ""), getPiSessionId: jest.fn(() => undefined),
+      messages, isLegacyReadOnlyChat: jest.fn(() => false),
       getPendingResendIdentity: jest.fn(() => ({ targetMessageId: "user_2", expectedIndex: 2, expectedVersion: 1 })),
       inputHandler: { setPendingResendIntent: jest.fn(), setValue: jest.fn(), focus: jest.fn() },
     };

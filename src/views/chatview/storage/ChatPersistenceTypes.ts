@@ -2,6 +2,33 @@ import type { ChatMessage } from "../../../types";
 
 export type ChatBackend = "systemsculpt" | "legacy";
 
+export function detectLoadedChatBackend(options: {
+  explicitBackend?: unknown;
+  piSessionFile?: unknown;
+  piSessionId?: unknown;
+  hasPiEntryId?: boolean;
+  model?: unknown;
+}): ChatBackend {
+  const explicitBackend = typeof options.explicitBackend === "string"
+    ? options.explicitBackend.trim().toLowerCase()
+    : "";
+  const hasPiSessionMetadata = [options.piSessionFile, options.piSessionId]
+    .some((value) => typeof value === "string" && value.trim().length > 0);
+  const model = typeof options.model === "string" ? options.model.trim().toLowerCase() : "";
+  const providerSeparator = model.indexOf("@@");
+  const providerId = providerSeparator >= 0 ? model.slice(0, providerSeparator) : "";
+  const hasHistoricalModelIdentity =
+    model.startsWith("local-pi-") ||
+    (providerSeparator >= 0 && providerId !== "systemsculpt");
+  return explicitBackend === "pi" ||
+    explicitBackend === "legacy" ||
+    hasPiSessionMetadata ||
+    options.hasPiEntryId === true ||
+    hasHistoricalModelIdentity
+    ? "legacy"
+    : "systemsculpt";
+}
+
 export interface ChatContextFileMetadata {
   path: string;
   type: "source" | "extraction";
@@ -28,17 +55,6 @@ export interface ChatMetadata {
   agentModeEnabled?: boolean;
   hideSystemMessages?: boolean;
   chatBackend?: ChatBackend;
-  piSessionFile?: string;
-  piSessionId?: string;
-  piLastEntryId?: string;
-  piLastSyncedAt?: string;
-}
-
-export interface PiSessionState {
-  sessionFile?: string;
-  sessionId?: string;
-  lastEntryId?: string;
-  lastSyncedAt?: string;
 }
 
 export interface ParsedChatMarkdown {
@@ -54,54 +70,6 @@ export interface ChatResumeDescriptor {
   messageCount: number;
 }
 
-function normalizeOptionalString(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
-}
-
-export function normalizePiSessionState(options?: {
-  sessionFile?: unknown;
-  sessionId?: unknown;
-  lastEntryId?: unknown;
-  lastSyncedAt?: unknown;
-}): PiSessionState {
-  return {
-    sessionFile: normalizeOptionalString(options?.sessionFile),
-    sessionId: normalizeOptionalString(options?.sessionId),
-    lastEntryId: normalizeOptionalString(options?.lastEntryId),
-    lastSyncedAt: normalizeOptionalString(options?.lastSyncedAt),
-  };
-}
-
-export function resolveChatBackend(options: {
-  explicitBackend?: unknown;
-  piSessionFile?: unknown;
-  piSessionId?: unknown;
-  defaultBackend?: ChatBackend;
-}): ChatBackend {
-  const fallbackBackend = options.defaultBackend ?? "systemsculpt";
-  const explicitBackend = typeof options.explicitBackend === "string"
-    ? options.explicitBackend.trim().toLowerCase()
-    : "";
-
-  if (explicitBackend === "legacy") {
-    return "legacy";
-  }
-
-  if (explicitBackend === "pi" || explicitBackend === "systemsculpt") {
-    return "systemsculpt";
-  }
-
-  const piState = normalizePiSessionState({
-    sessionFile: options.piSessionFile,
-    sessionId: options.piSessionId,
-  });
-  if (piState.sessionFile || piState.sessionId) {
-    return "systemsculpt";
-  }
-
-  return fallbackBackend;
-}
-
 export function buildChatLeafState(input: {
   chatId: string;
   title: string;
@@ -112,15 +80,4 @@ export function buildChatLeafState(input: {
     chatTitle: input.title,
     file: input.chatPath,
   };
-}
-
-export function getLastMessagePiEntryId(messages: ChatMessage[]): string | undefined {
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const candidate = String(messages[index]?.pi_entry_id || "").trim();
-    if (candidate.length > 0) {
-      return candidate;
-    }
-  }
-
-  return undefined;
 }

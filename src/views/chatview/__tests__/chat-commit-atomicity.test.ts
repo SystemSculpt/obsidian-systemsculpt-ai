@@ -49,7 +49,6 @@ function createView(messages: ChatMessage[] = []) {
   view.getPersistedSelectedModelId = jest.fn(() => "model");
   view.generateMessageId = jest.fn(() => "generated");
   view.initializeChatTitle = jest.fn();
-  view.clearPiSessionState = jest.fn();
   view.renderMessagesInChunks = jest.fn(async () => {});
   view.addMessage = jest.fn(async (_role: string, _content: unknown, messageId: string) => {
     const node = document.createElement("div");
@@ -116,7 +115,7 @@ describe("authoritative transcript commits", () => {
 
     await expect(view.persistAssistantMessage({
       role: "assistant", content: "reply", message_id: "assistant-1",
-    } as ChatMessage, { syncPiTranscript: false })).rejects.toEqual(expect.objectContaining({
+    } as ChatMessage)).rejects.toEqual(expect.objectContaining({
       operation: "assistant_commit",
     }));
 
@@ -132,7 +131,7 @@ describe("authoritative transcript commits", () => {
 
     await expect(view.persistAssistantMessage({
       role: "assistant", content: "", message_id: "assistant-tool", tool_calls: [{ id: "call-1" }],
-    } as ChatMessage, { syncPiTranscript: false, operation: "assistant_commit" })).rejects.toEqual(expect.objectContaining({
+    } as ChatMessage, { operation: "assistant_commit" })).rejects.toEqual(expect.objectContaining({
       code: "chat_persistence_failed",
       operation: "assistant_commit",
       cause,
@@ -146,7 +145,7 @@ describe("authoritative transcript commits", () => {
 
     await expect(view.persistAssistantMessage({
       role: "assistant", content: "", message_id: "assistant-tool", tool_calls: [{ id: "call-1" }],
-    } as ChatMessage, { syncPiTranscript: false })).rejects.toEqual(expect.objectContaining({
+    } as ChatMessage)).rejects.toEqual(expect.objectContaining({
       operation: "tool_checkpoint",
     }));
 
@@ -177,7 +176,7 @@ describe("authoritative transcript commits", () => {
     const view = createView([]);
     (view.chatStorage.saveChat as jest.Mock).mockReturnValue(new Promise((resolve) => { release = resolve; }));
 
-    const promise = view.persistAssistantMessage({ role: "assistant", content: "reply", message_id: "assistant-1" } as ChatMessage, { syncPiTranscript: false });
+    const promise = view.persistAssistantMessage({ role: "assistant", content: "reply", message_id: "assistant-1" } as ChatMessage);
     expect(view.messages).toEqual([]);
     expect(view.app.workspace.trigger).not.toHaveBeenCalled();
 
@@ -194,7 +193,7 @@ describe("authoritative transcript commits", () => {
 
     const promise = view.persistAssistantMessage({
       role: "assistant", content: "", message_id: "assistant-tool", tool_calls: [{ id: "call-1" }],
-    } as ChatMessage, { syncPiTranscript: false });
+    } as ChatMessage);
     expect(view.messages).toEqual([]);
     expect(view.app.workspace.trigger).not.toHaveBeenCalled();
 

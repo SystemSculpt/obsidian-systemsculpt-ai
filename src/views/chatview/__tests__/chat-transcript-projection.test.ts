@@ -49,39 +49,6 @@ describe("ChatTranscript projection ownership", () => {
     expect(state.durable().map((entry) => entry.message_id)).toEqual(["kept", "failed"]);
   });
 
-  it("keeps Pi hydration pending until save succeeds and retry cannot revive stale messages", async () => {
-    const state = harness([message("old")]);
-    const next = [message("pi-user"), message("pi-answer", "assistant")];
-    const persist = jest.fn()
-      .mockRejectedValueOnce(new Error("disk full"))
-      .mockResolvedValueOnce({ version: 2 });
-
-    await expect(state.transcript.commitPiReplacement(next, persist)).rejects.toThrow("disk full");
-    expect(state.transcript.snapshot().messages.map((entry) => entry.message_id)).toEqual(["old"]);
-
-    await state.transcript.commitPiReplacement(next, persist);
-    await state.transcript.commit(state.transcript.candidateAssistant(message("next", "assistant")));
-
-    expect(state.transcript.snapshot().messages.map((entry) => entry.message_id)).toEqual(["pi-user", "pi-answer", "next"]);
-    expect(persist).toHaveBeenCalledTimes(2);
-  });
-
-  it("keeps a Pi fork pending until save succeeds and retries from the prior branch", async () => {
-    const state = harness([message("one"), message("fork"), message("answer", "assistant")]);
-    const persist = jest.fn()
-      .mockRejectedValueOnce(new Error("disk full"))
-      .mockResolvedValueOnce({ version: 2 });
-
-    await expect(state.transcript.commitPiFork("fork", persist)).rejects.toThrow("disk full");
-    expect(state.transcript.snapshot().messages.map((entry) => entry.message_id)).toEqual(["one", "fork", "answer"]);
-
-    await state.transcript.commitPiFork("fork", persist);
-    await state.transcript.commit(state.transcript.candidateAssistant(message("new-answer", "assistant")));
-
-    expect(state.transcript.snapshot().messages.map((entry) => entry.message_id)).toEqual(["one", "new-answer"]);
-    expect(persist).toHaveBeenCalledTimes(2);
-  });
-
   it("clears chat identity and projection for slash clear", () => {
     const state = harness([message("one")]);
 
@@ -125,11 +92,4 @@ describe("ChatTranscript projection ownership", () => {
     expect(state.transcript.snapshot().messages).toHaveLength(1);
   });
 
-  it("rejects a Pi fork whose selected message is absent", async () => {
-    const state = harness([message("one")]);
-
-    await expect(state.transcript.commitPiFork("missing", async () => ({ version: 2 })))
-      .rejects.toThrow("selected for forking");
-    expect(state.transcript.snapshot().messages.map((entry) => entry.message_id)).toEqual(["one"]);
-  });
 });

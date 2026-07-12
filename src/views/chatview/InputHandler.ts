@@ -13,9 +13,8 @@ import { MessageRenderer } from "../chatview/MessageRenderer";
 import { RecorderService } from "../../services/RecorderService";
 import type SystemSculptPlugin from "../../main";
 import { validateBrowserFileSize } from "../../utils/FileValidator";
-import { MessagePart } from "../../types";
 import { SlashCommandMenu, SlashCommand } from "./SlashCommandMenu";
-import { StreamingController, type StreamCompletionState, type StreamTurnResult } from "./controllers/StreamingController";
+import { StreamingController, type StreamTurnResult } from "./controllers/StreamingController";
 import { ChatTurnProgressController } from "./controllers/ChatTurnProgressController";
 import { messageHandling } from "./messageHandling";
 import { AtMentionMenu } from "../../components/AtMentionMenu";
@@ -51,12 +50,11 @@ import type { ChatTurnFence } from "./turn/ChatTurnEffects";
 import type {
   AcceptedChatOperation,
   AcceptedManagedChatOperation,
-  AcceptedPiChatOperation,
   ManagedAllowedLease,
   ManagedAdmissionOutcome,
   ManagedChatAdmissionPort,
 } from "../../services/managed/ManagedTypes";
-import { composeAcceptedLegacyContinuation, type AcceptedChatRequestSnapshot, type FrozenPreparedChatRequest } from "../../services/chat/AcceptedChatRequestSnapshot";
+import type { AcceptedChatRequestSnapshot } from "../../services/chat/AcceptedChatRequestSnapshot";
 import type { AcceptedUserCommitInput, AcceptedUserCommitResult } from "./ChatView";
 import type { ChatTranscriptSnapshot } from "./transcript/ChatTranscriptTypes";
 
@@ -91,17 +89,6 @@ export type AutomationApprovalMode = "interactive" | "auto-approve" | "deny";
 type PendingSubmissionIntent =
   | Readonly<{ kind: "append" }>
   | Readonly<{ kind: "resend"; targetMessageId: string; expectedIndex: number; expectedVersion: number }>;
-
-type HostedTurnTransaction = {
-  turnId: string;
-  submittedUserMessageId?: string;
-  submittedUserText?: string;
-  assistantMessageId?: string;
-  committedAssistantMessageId?: string;
-  committedPhase: "submitted_user" | "assistant_committed" | "tool_execution_committed";
-  completedToolCount: number;
-  latestStreamCompletionState?: StreamCompletionState;
-};
 
 export class InputHandler extends Component {
   private app: App;
@@ -300,41 +287,23 @@ export class InputHandler extends Component {
 
   private getSelectedModelIdForChat(): string {
     const selectedModelId =
-      this.chatView?.isPiBackedChat?.() === true &&
-      typeof this.chatView?.getRetainedPiModelId === "function"
-        ? this.chatView.getRetainedPiModelId()
-        : typeof this.chatView?.getSelectedModelId === "function"
-          ? this.chatView.getSelectedModelId()
-          : this.chatView?.selectedModelId;
-    if (this.chatView?.isPiBackedChat?.() === true) {
-      const retainedModelId = String(selectedModelId || "").trim();
-      if (!retainedModelId) {
-        throw new Error(
-          "The retained Pi session model is unavailable. Reopen the chat to sync its Pi session before sending.",
-        );
-      }
-      return retainedModelId;
-    }
+      typeof this.chatView?.getSelectedModelId === "function"
+        ? this.chatView.getSelectedModelId()
+        : this.chatView?.selectedModelId;
     return getEffectiveChatModelId(selectedModelId);
   }
 
   private async streamAssistantTurn(
     acceptedOperation: AcceptedChatOperation,
     signal: AbortSignal,
-    includeContextFiles: boolean,
     turnProgress?: ChatTurnProgressController,
     options?: {
       phase?: "initial" | "continuation";
-      transientSystemPromptSuffix?: string;
-      runtime?: "managed" | "pi";
       postCheckpointSnapshot?: ChatTranscriptSnapshot;
       durableContinuationIndex?: number;
       fence?: ChatTurnFence;
     },
   ): Promise<StreamTurnResult> {
-    if (acceptedOperation.runtime === "pi") {
-      return this.streamPiAssistantTurn(acceptedOperation, signal, includeContextFiles, turnProgress, options);
-    }
     return this.streamManagedAssistantTurn(acceptedOperation, signal, turnProgress, options);
   }
 
@@ -407,109 +376,6 @@ export class InputHandler extends Component {
     );
   }
 
-  private async streamPiAssistantTurn(
-    acceptedOperation: AcceptedPiChatOperation,
-    signal: AbortSignal,
-    includeContextFiles: boolean,
-    turnProgress?: ChatTurnProgressController,
-    options?: { phase?: "initial" | "continuation"; transientSystemPromptSuffix?: string },
-  ): Promise<StreamTurnResult> {
-    const acceptedRequest = this.acceptedRequestSnapshot;
-    if (
-      !acceptedRequest ||
-      acceptedRequest.runtime !== "pi" ||
-      acceptedRequest.operation !== acceptedOperation
-    ) {
-      throw new Error("Accepted Chat request snapshot is unavailable for the active operation.");
-    }
-    const continuationTarget = options?.phase === "initial"
-      ? null
-      : this.getHostedContinuationTarget();
-    const { messageEl } = continuationTarget ?? this.createAssistantMessageContainer();
-    let messageId = continuationTarget?.messageId || messageEl.dataset.messageId;
-    if (!messageId || messageId.trim().length === 0) {
-      messageId = this.generateMessageId();
-      messageEl.dataset.messageId = messageId;
-    } else if (!messageEl.dataset.messageId || messageEl.dataset.messageId.trim().length === 0) {
-      messageEl.dataset.messageId = messageId;
-    }
-
-    void includeContextFiles;
-    const selectedModelId = acceptedRequest.legacyPreparation.actualModelId;
-    turnProgress?.attach(messageEl);
-    const continuationPreparation = options?.phase === "initial"
-      ? acceptedRequest.legacyPreparation
-      : composeAcceptedLegacyContinuation(
-          acceptedRequest,
-          this.chatView.getDurableTranscriptSnapshot(),
-        );
-    const preparedRequest = options?.transientSystemPromptSuffix
-      ? this.applyLegacyContinuationRetryHint(continuationPreparation, options.transientSystemPromptSuffix)
-      : continuationPreparation;
-
-    const stream = this.aiService.streamMessage({
-      messages: preparedRequest.preparedMessages as ChatMessage[],
-      model: selectedModelId,
-      preparedRequest: preparedRequest as import("../../services/StreamExecutionTypes").PreparedChatRequest,
-      signal,
-        sessionFile: this.chatView?.getPiSessionFile?.(),
-        sessionId: this.chatView?.getPiSessionId?.(),
-        onPiSessionReady: (session) => {
-          this.chatView?.setPiSessionState?.(session);
-        },
-        webSearchEnabled: false,
-      debug: this.chatView.getDebugLogService?.()?.createStreamLogger({
-        chatId: this.getChatId(),
-        assistantMessageId: messageId,
-        modelId: selectedModelId,
-      }) || undefined,
-    });
-
-    return await this.streamingController.stream(
-      stream,
-      messageEl,
-      messageId,
-      signal,
-      continuationTarget?.seedParts,
-      turnProgress?.getTracker(),
-      !!turnProgress
-    );
-  }
-
-  private getHostedContinuationTarget():
-    | { messageEl: HTMLElement; messageId: string; seedParts: MessagePart[] }
-    | null {
-    const messages = this.getMessages();
-    const lastMessage = messages.length > 0 ? messages[messages.length - 1] : null;
-    if (!lastMessage || lastMessage.role !== "assistant") {
-      return null;
-    }
-
-    const messageId = String(lastMessage.message_id || "").trim();
-    if (!messageId) {
-      return null;
-    }
-
-    const messageEl = this.findRenderedMessageElement(messageId);
-    if (!messageEl) {
-      return null;
-    }
-
-    const normalizedParts = this.messageRenderer.normalizeMessageToParts(lastMessage);
-    return {
-      messageEl,
-      messageId,
-      seedParts: Array.isArray(normalizedParts?.parts) ? normalizedParts.parts : [],
-    };
-  }
-
-  private findRenderedMessageElement(messageId: string): HTMLElement | null {
-    const renderedMessages = Array.from(
-      this.chatContainer.querySelectorAll<HTMLElement>(".systemsculpt-message")
-    );
-    return renderedMessages.find((messageEl) => messageEl.dataset.messageId === messageId) ?? null;
-  }
-
   private shouldContinueHostedToolLoop(message: ChatMessage, stopReason?: string): boolean {
     const toolCalls = Array.isArray(message.tool_calls) ? message.tool_calls : [];
 
@@ -542,28 +408,11 @@ export class InputHandler extends Component {
 
   private async renderPersistedAssistantMessage(
     message: ChatMessage,
-    options?: { forceRerender?: boolean }
+    _options?: { forceRerender?: boolean }
   ): Promise<void> {
-    const shouldSkipPiPostPersistRerender =
-      !options?.forceRerender &&
-      !!this.chatView?.isPiBackedChat?.() &&
-      !!this.chatView?.getPiSessionFile?.();
-
     const currentMessageEl = this.chatContainer.querySelector(`.systemsculpt-message[data-message-id="${message.message_id}"]`) as HTMLElement | null;
     if (currentMessageEl) {
       try {
-        if (shouldSkipPiPostPersistRerender) {
-          if (!currentMessageEl.querySelector(".systemsculpt-message-toolbar")) {
-            this.messageRenderer.addMessageButtonToolbar(
-              currentMessageEl,
-              typeof message.content === "string" ? message.content : JSON.stringify(message.content ?? ""),
-              message.role,
-              message.message_id
-            );
-          }
-          return;
-        }
-
         this.messageRenderer.renderUnifiedMessageParts(
           currentMessageEl,
           this.messageRenderer.normalizeMessageToParts(message).parts,
@@ -582,10 +431,6 @@ export class InputHandler extends Component {
       } catch {
         // Fall back to the full message reload path below if an in-place update fails.
       }
-    }
-
-    if (shouldSkipPiPostPersistRerender) {
-      return;
     }
 
     await messageHandling.addMessage(this.chatView, message.role, message.content, message.message_id, message);
@@ -671,39 +516,6 @@ export class InputHandler extends Component {
     } catch {}
 
     throw error;
-  }
-
-  private applyLegacyContinuationRetryHint(
-    prepared: FrozenPreparedChatRequest,
-    transientSystemPromptSuffix: string,
-  ): FrozenPreparedChatRequest {
-    const suffix = transientSystemPromptSuffix.trim();
-    if (!suffix) return prepared;
-    let hintApplied = false;
-    const preparedMessages = prepared.preparedMessages.map((message) => {
-      if (!hintApplied && message.role === "system" && typeof message.content === "string") {
-        hintApplied = true;
-        return { ...message, content: `${message.content.trim()}\n\n${suffix}` };
-      }
-      return { ...message };
-    });
-    const finalSystemPrompt = [prepared.finalSystemPrompt.trim(), suffix].filter(Boolean).join("\n\n");
-    return { ...prepared, finalSystemPrompt, preparedMessages };
-  }
-
-  private buildEmptyContinuationRetryHint(completionState: StreamCompletionState, retryAttempt: number): string {
-    const classification =
-      completionState === "reasoning_only"
-        ? "reasoning but no visible assistant content or tool call"
-        : completionState === "empty_after_seed"
-          ? "no new assistant output after the existing tool results"
-          : "no assistant output";
-
-    return [
-      `The previous continuation attempt returned ${classification}.`,
-      `This is retry ${retryAttempt}. Continue from the completed tool results already in the transcript.`,
-      "Either call the next needed tool or provide the final answer. Do not return an empty response.",
-    ].join(" ");
   }
 
   private setupInput(): void {
@@ -940,18 +752,13 @@ export class InputHandler extends Component {
       return;
     }
     this.compatibilityResult = null;
-    const runtimeKind: "managed" | "pi" =
-      this.chatView?.isPiBackedChat?.() === true ? "pi" : "managed";
     const requestModelId = this.getSelectedModelIdForChat();
-    let managedLease: ManagedAllowedLease | null = null;
-    if (runtimeKind === "managed") {
-      const admission = await this.managedChatAdmission.acquireChatTurnLease();
-      if (admission.outcome !== "allowed") {
-        await this.handleManagedAdmissionDenied(admission.outcome);
-        return;
-      }
-      managedLease = admission.lease;
+    const admission = await this.managedChatAdmission.acquireChatTurnLease();
+    if (admission.outcome !== "allowed") {
+      await this.handleManagedAdmissionDenied(admission.outcome);
+      return;
     }
+    const managedLease: ManagedAllowedLease = admission.lease;
     if (
       reservationGeneration !== this.submissionReservationGeneration ||
       this.localResourcesDisposed ||
@@ -991,9 +798,11 @@ export class InputHandler extends Component {
         initialDurableSnapshot: accepted.snapshot,
         turnBoundaryId: candidateMessageId,
       } as const;
-      const acceptedOperation: AcceptedChatOperation = runtimeKind === "managed"
-        ? Object.freeze({ ...operationBase, runtime: "managed", lease: managedLease! })
-        : Object.freeze({ ...operationBase, runtime: "pi" });
+      const acceptedOperation: AcceptedChatOperation = Object.freeze({
+        ...operationBase,
+        runtime: "managed",
+        lease: managedLease,
+      });
       this.acceptedOperation = acceptedOperation;
       const acceptedContextFiles = includeContextFiles ? this.chatView.contextManager.getContextFiles() : new Set<string>();
       let acceptedPrompt: string | undefined;
@@ -1004,13 +813,11 @@ export class InputHandler extends Component {
         systemPromptOverride: acceptedPrompt,
         allowTools: this.chatView?.isAgentModeActive?.() ?? true,
       });
-      for (const notice of this.acceptedRequestSnapshot.notices) new Notice(notice.message, notice.timeoutMs);
       this.submittedInputSnapshot = { messageId: durableTurnId, rawText: submittedRawText };
       this.input.value = "";
       this.adjustInputHeight();
       this.turnLifecycle = new ChatTurnLifecycleController({ getIsGenerating: () => this.isGenerating, setGenerating: (generating) => this.setGeneratingState(generating) });
       const lifecycleTurn = this.turnLifecycle.runTurn(async (signal) => {
-        let latestLegacyStreamResult: StreamTurnResult | undefined;
         const streamWithProgress = async (
           turnSignal: AbortSignal,
           phase: "initial" | "continuation",
@@ -1028,19 +835,12 @@ export class InputHandler extends Component {
           progress.begin();
           try {
             progress.setStatus(retryCount > 0 ? "retrying" : "preparing");
-            const retryProvenance = latestLegacyStreamResult ?? previous;
-            const streamed = await this.streamAssistantTurn(acceptedOperation, turnSignal, includeContextFiles, progress, {
+            return await this.streamAssistantTurn(acceptedOperation, turnSignal, progress, {
               phase,
-              runtime: runtimeKind,
               postCheckpointSnapshot,
               durableContinuationIndex,
               fence,
-              transientSystemPromptSuffix: runtimeKind === "pi" && phase === "continuation" && retryCount > 0 && retryProvenance
-                ? this.buildEmptyContinuationRetryHint(retryProvenance.completionState, retryCount)
-                : undefined,
             });
-            latestLegacyStreamResult = streamed;
-            return streamed;
           } finally {
             progress.end();
           }
@@ -1107,11 +907,9 @@ export class InputHandler extends Component {
               fence,
             );
           },
-          retryEmptyStream: runtimeKind === "pi",
+          retryEmptyStream: false,
           onTerminal: (_outcome, operation) => {
-            if (operation.runtime === "managed") {
-              this.chatView.getCurrentRuntimeAdapter().notifyDurablyTerminal(operation);
-            }
+            this.chatView.getCurrentRuntimeAdapter().notifyDurablyTerminal(operation);
           },
           onInitialRetryExhausted: (latest) => this.failHostedToolTurn(
             "The hosted agent returned an empty response.", 502, {
