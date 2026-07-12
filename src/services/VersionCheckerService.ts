@@ -28,7 +28,7 @@ export class VersionCheckerService {
   private plugin: SystemSculptPlugin;
   private updateDrawerEl: HTMLElement | null = null;
   private periodicCheckIntervalMs: number = 1000 * 60 * 60; // 1 hour
-  private periodicCheckTimeout: NodeJS.Timeout | null = null;
+  private periodicCheckTimeout: number | null = null;
   private startupCheckAbortController: AbortController | null = null;
   
   // Internal update-flow state used by local release testing

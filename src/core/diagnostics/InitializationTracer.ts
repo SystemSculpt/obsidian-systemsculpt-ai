@@ -129,8 +129,8 @@ export class InitializationPhaseHandle {
   private readonly options: InternalPhaseOptions;
   private readonly cleanup: (id: number) => void;
   private readonly startedAt = performance.now();
-  private readonly slowTimer?: ReturnType<typeof setTimeout>;
-  private readonly timeoutTimer?: ReturnType<typeof setTimeout>;
+  private readonly slowTimer?: number;
+  private readonly timeoutTimer?: number;
   private hasCompleted = false;
 
   private timedOut = false;

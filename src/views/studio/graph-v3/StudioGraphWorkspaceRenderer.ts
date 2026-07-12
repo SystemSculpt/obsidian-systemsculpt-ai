@@ -257,7 +257,7 @@ export function renderStudioGraphWorkspace(
     cls: "ss-studio-graph-workspace-control-button is-run",
     text: "Run",
     attr: {
-      "aria-label": "Run studio graph",
+      "aria-label": "Run Studio graph",
       title: "Run graph",
     },
   });

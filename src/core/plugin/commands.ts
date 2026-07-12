@@ -446,7 +446,7 @@ export class CommandManager {
 
         const options = this.buildAutomationOptions();
         if (options.length === 0) {
-          new Notice("No automations available. Enable one in Workflow settings.", 5000);
+          new Notice("No automations available. Enable one in workflow settings.", 5000);
           return;
         }
 

@@ -54,7 +54,7 @@ export class EmbeddingsStatusBar extends Component {
   }
 
   private claimSingleton(): void {
-    const globalScope = window as Record<string, unknown>;
+    const globalScope = window as unknown as Record<string, unknown>;
     const existing = globalScope[
       EMBEDDINGS_STATUS_BAR_SINGLETON_KEY
     ] as EmbeddingsStatusBarSingletonEntry | undefined;
@@ -74,7 +74,7 @@ export class EmbeddingsStatusBar extends Component {
   }
 
   private releaseSingleton(): void {
-    const globalScope = window as Record<string, unknown>;
+    const globalScope = window as unknown as Record<string, unknown>;
     const existing = globalScope[
       EMBEDDINGS_STATUS_BAR_SINGLETON_KEY
     ] as EmbeddingsStatusBarSingletonEntry | undefined;

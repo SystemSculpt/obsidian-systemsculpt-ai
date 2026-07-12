@@ -73,7 +73,7 @@ export async function httpRequest(opts: HttpRequestOptions): Promise<HttpRespons
     if (!timeoutMs && !opts.signal) return promise;
     return await new Promise<T>((resolve, reject) => {
       let settled = false;
-      let timer: ReturnType<typeof setTimeout> | null = null;
+      let timer: number | null = null;
       const finish = (callback: () => void) => {
         if (settled) return;
         settled = true;

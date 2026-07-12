@@ -30,7 +30,7 @@ export class AutomationBacklogModal extends Modal {
     this.contentWrapper = contentEl.createDiv({ cls: "ss-automation-backlog" });
 
     contentEl.createEl("p", {
-      text: "Backlog items run through systemsculpt automatically. Instructions and execution are handled for you.",
+      text: "Backlog items run through SystemSculpt automatically. Instructions and execution are handled for you.",
       cls: "setting-item-description",
     });
     this.renderControls();

@@ -14,7 +14,7 @@ export class ChatPersistenceManager {
   private readonly onAssistantResponse: (message: ChatMessage) => Promise<void>;
   private readonly debounceMs: number;
   private readonly chatId: () => string;
-  private autosaveTimer: ReturnType<typeof setTimeout> | null = null;
+  private autosaveTimer: number | null = null;
   // Save queue semantics: ensure we never lose a final save when a prior save is in flight
   private inFlight: Promise<void> | null = null;
   private flushRequested = false;

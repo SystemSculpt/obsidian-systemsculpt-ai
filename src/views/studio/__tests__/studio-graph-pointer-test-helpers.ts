@@ -3,8 +3,19 @@ type PointerListenerType = "pointermove" | "pointerup" | "pointercancel";
 export function createElementStub(): HTMLElement {
   const classes = new Set<string>();
   const style: Record<string, string> = {};
-  return {
+  const stub = {
     style,
+    setCssStyles: (styles: Record<string, string>) => {
+      Object.assign(style, styles);
+    },
+    setCssProps: (styles: Record<string, string>) => {
+      Object.entries(styles).forEach(([name, value]) => {
+        style[name] = value;
+      });
+    },
+    setText: (text: string) => {
+      (stub as any).textContent = text;
+    },
     classList: {
       add: (...tokens: string[]) => {
         for (const token of tokens) {
@@ -34,7 +45,8 @@ export function createElementStub(): HTMLElement {
         return true;
       },
     },
-  } as unknown as HTMLElement;
+  };
+  return stub as unknown as HTMLElement;
 }
 
 export function installWindowPointerListenerHarness(): {

@@ -116,7 +116,7 @@ export function renderNodeMediaPreview(options: {
     if (mediaPreview.kind === "image") {
       previewEl.addClass("is-contained-image");
     }
-    previewEl.setAttribute("title", "Double-click to reveal in finder");
+    previewEl.setAttribute("title", "Double-click to reveal in Finder");
   }
   previewEl.addEventListener("dblclick", (event) => {
     event.stopPropagation();

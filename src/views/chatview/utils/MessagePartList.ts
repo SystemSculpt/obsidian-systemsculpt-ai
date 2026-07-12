@@ -20,7 +20,7 @@ export class MessagePartList {
 
   /** Return all parts matching the given type */
   private _ofType<T extends MessagePart["type"]>(type: T): Extract<MessagePart, { type: T }>[] {
-     
+
     return this.parts.filter((p) => p.type === type) as any;
   }
 
@@ -60,4 +60,4 @@ export class MessagePartList {
   public get hasToolCalls(): boolean {
     return this.toolCalls.length > 0;
   }
-} 
+}

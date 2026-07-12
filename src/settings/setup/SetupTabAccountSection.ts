@@ -36,7 +36,7 @@ export function renderAccountSection(
   };
 
   const statusSetting = new Setting(root)
-    .setName("SystemSculpt account")
+    .setName("Account")
     .setDesc(
       isProActive
         ? userStatus.greeting || "Pro features enabled."

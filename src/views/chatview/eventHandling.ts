@@ -342,7 +342,7 @@ export const eventHandling = {
     };
 
     let dragCounter = 0;
-    let dragOverTimeout: NodeJS.Timeout | null = null;
+    let dragOverTimeout: number | null = null;
     const handlers: DragHandlers = {
       dragenter: (e: DragEvent) => {
         e.preventDefault();

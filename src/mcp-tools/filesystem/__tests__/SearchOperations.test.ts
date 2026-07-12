@@ -89,6 +89,12 @@ describe("SearchOperations", () => {
         chatHistoryFolder: "ChatHistory",
         customPromptsFolder: "Prompts",
       },
+      app: {
+        vault: {
+          configDir: ".obsidian",
+          getConfig: jest.fn().mockReturnValue([]),
+        },
+      },
     };
 
     searchOps = new SearchOperations(app, ["/"], plugin);

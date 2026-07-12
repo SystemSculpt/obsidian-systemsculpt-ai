@@ -37,7 +37,7 @@ export class FilesystemAdapter {
     if (!options?.signal && !options?.timeoutMs) return await execution;
     return await new Promise<T>((resolve, reject) => {
       let settled = false;
-      let timer: ReturnType<typeof setTimeout> | undefined;
+      let timer: number | undefined;
       const finish = (callback: () => void) => {
         if (settled) return;
         settled = true;

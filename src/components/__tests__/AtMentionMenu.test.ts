@@ -56,6 +56,16 @@ const applyObsidianDomHelpers = (win: Window) => {
     };
   }
 
+  if (!proto.setCssStyles) {
+    proto.setCssStyles = function (styles: Record<string, string>) {
+      if (!styles || typeof styles !== "object") {
+        return this;
+      }
+      Object.assign(this.style, styles);
+      return this;
+    };
+  }
+
   if (!proto.createEl) {
     proto.createEl = function (tag: string, options?: any) {
       const normalized = typeof options === "string" ? { cls: options } : options ?? {};

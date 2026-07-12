@@ -61,7 +61,7 @@ new Setting(containerEl)
 
 // --- Reduced Motion Preference ---
 new Setting(containerEl)
-    .setName("Honor os reduced motion")
+    .setName("Honor OS reduced motion")
     .setDesc("When enabled, SystemSculpt animations/transitions are minimized if your system prefers reduced motion. Disable this if you want full animations.")
     .addToggle((toggle: ToggleComponent) => {
         toggle

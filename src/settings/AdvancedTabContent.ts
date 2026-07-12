@@ -17,7 +17,7 @@ export function displayAdvancedTabContent(containerEl: HTMLElement, tabInstance:
 
     new Setting(containerEl)
         .setName("Relative line numbers")
-        .setDesc("Show a vim-style line number gutter in the editor: the current line shows its absolute number, every other line shows its distance from the Cursor. Tip: turn off Obsidian's core \"show line number\" to avoid a doubled gutter.")
+        .setDesc("Show a vim-style line number gutter in the editor: the current line shows its absolute number, every other line shows its distance from the cursor. Tip: turn off Obsidian's core \"Show line number\" to avoid a doubled gutter.")
         .addToggle((toggle) => {
             toggle
                 .setValue(Boolean(plugin.settings.relativeLineNumbersEnabled))

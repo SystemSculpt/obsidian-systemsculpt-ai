@@ -58,7 +58,14 @@ export default defineConfig(
         "warn",
         {
           enforceCamelCaseLower: true,
-          ignoreWords: ["SystemSculpt", "Studio"],
+          // Preserve product/technical names and exact quoted control labels.
+          ignoreRegex: [
+            "^SystemSculpt/Studio$",
+            "^Show a vim-style line number gutter",
+            "^SRT subtitle file",
+            "^Keep the Markdown/SRT picker visible",
+          ],
+          ignoreWords: ["SystemSculpt", "Studio", "OS", "SRT", "Finder"],
         },
       ],
       // The plugin is intentionally desktop-only and still exposes guarded Node-backed features.

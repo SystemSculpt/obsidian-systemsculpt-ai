@@ -1,7 +1,7 @@
 import { ChatMessage, MessagePart, ChatRole } from "../../../types";
 import * as obsidianApi from "obsidian";
 // Dynamically extract to support stub in tests
- 
+
 const { parseYaml } = obsidianApi as any;
 import { MessagePartList } from "../utils/MessagePartList";
 import {

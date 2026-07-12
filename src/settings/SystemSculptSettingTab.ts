@@ -596,7 +596,7 @@ export class SystemSculptSettingTab extends PluginSettingTab {
           event.preventDefault();
           window.open(versionInfo.updateUrl, "_blank");
           new Notice(
-            "Opening SystemSculpt AI in community plugins...\n\nIf nothing happens, update it manually in Settings > community plugins.",
+            "Opening the plugin in community plugins...\n\nIf nothing happens, update it manually in settings > community plugins.",
             10000,
           );
         });

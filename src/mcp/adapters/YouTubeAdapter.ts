@@ -31,7 +31,7 @@ export class YouTubeAdapter {
     if (!options?.signal && !options?.timeoutMs) return await execution;
     return await new Promise<unknown>((resolve, reject) => {
       let settled = false;
-      let timer: ReturnType<typeof setTimeout> | undefined;
+      let timer: number | undefined;
       const finish = (callback: () => void) => {
         if (settled) return;
         settled = true;

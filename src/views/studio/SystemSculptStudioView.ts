@@ -4374,7 +4374,7 @@ export class SystemSculptStudioView extends ItemView {
     }
 
     if (dropped.folderPaths.length > 0) {
-      new Notice("Dropping folders into studio is not supported yet.");
+      new Notice("Dropping folders into Studio is not supported yet.");
     }
 
     const anchor =
@@ -4404,7 +4404,7 @@ export class SystemSculptStudioView extends ItemView {
     }
 
     if (!handledSomething && dropped.unsupportedPaths.length > 0) {
-      new Notice("Only Markdown notes and media files can be dropped into studio.");
+      new Notice("Only Markdown notes and media files can be dropped into Studio.");
     }
   }
 
@@ -4488,7 +4488,7 @@ export class SystemSculptStudioView extends ItemView {
       return;
     }
     if (!Platform.isDesktopApp) {
-      new Notice("Reveal in finder is desktop-only.");
+      new Notice("Reveal in Finder is desktop-only.");
       return;
     }
 

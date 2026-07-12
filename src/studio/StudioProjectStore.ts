@@ -53,7 +53,7 @@ export class StudioProjectStore {
     const base = normalized.slice(0, -STUDIO_PROJECT_EXTENSION.length);
     for (let suffix = 2; suffix < 10_000; suffix += 1) {
       const candidate = `${base} (${suffix})${STUDIO_PROJECT_EXTENSION}`;
-       
+
       if (await this.generations.isProjectionLocatorAvailable({ vaultRelativeProjectPath: candidate })) return candidate;
     }
     throw new Error(`Unable to allocate unique Studio project path for "${normalized}".`);
@@ -208,10 +208,10 @@ export class StudioProjectStore {
     for (let attempt = 0; result.status === "stale_revision" && options?.refresh && attempt < 8; attempt += 1) {
       // Commutative runtime/support publications reload the serialized token;
       // project-document saves intentionally do not enter this retry path.
-       
+
       const reopened = await this.generations.open(command.projectId, { vaultRelativeProjectPath: path });
       if (reopened.status !== "ready") throw new Error(`Studio project is read-only (${reopened.status}).`);
-       
+
       result = await this.generations.commitWholeGeneration(command, reopened.expectedGeneration);
     }
     if (result.status !== "committed") throw new Error(`Studio generation commit failed (${result.status}).`);

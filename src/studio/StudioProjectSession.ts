@@ -76,7 +76,7 @@ type StudioProjectSessionAsyncMutator = (project: StudioProjectV1) => Promise<bo
 export class StudioProjectSession {
   private projectPath: string;
   private project: StudioProjectV1;
-  private saveTimer: ReturnType<typeof window.setTimeout> | null = null;
+  private saveTimer: number | null = null;
   private saveTimerMode: StudioProjectSessionAutosaveMode | null = null;
   private saveInFlight = false;
   private saveInFlightPromise: Promise<void> | null = null;

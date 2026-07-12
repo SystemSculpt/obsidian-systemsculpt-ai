@@ -644,6 +644,7 @@ describe("shouldExcludeFromSearch", () => {
     },
     app: {
       vault: {
+        configDir: ".obsidian",
         getConfig: jest.fn().mockReturnValue([]),
       },
     },

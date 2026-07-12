@@ -15,7 +15,7 @@ export class TranscriptionProgressManager {
     lastProgress: number;
     lastStatus: string;
     detailedInfo: string | null;
-    cleanupTimeout: NodeJS.Timeout | null;
+    cleanupTimeout: number | null;
   }> = new Map();
 
   // Private constructor for singleton pattern

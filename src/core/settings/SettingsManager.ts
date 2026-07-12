@@ -639,7 +639,7 @@ export class SettingsManager {
     this.lastSaveFailureNoticeAt = now;
     try {
       new Notice(
-        "Failed to save systemsculpt settings — your last change may not persist.",
+        "Failed to save SystemSculpt settings — your last change may not persist.",
         8000,
       );
     } catch {

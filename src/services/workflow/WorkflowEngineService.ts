@@ -46,7 +46,7 @@ export class WorkflowEngineService {
   private readonly app: App;
   private disposed = false;
   private pendingFiles: PendingFileEvent[] = [];
-  private debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  private debounceTimer: number | null = null;
   private isProcessingBulk = false;
   private progressWidget: BulkProgressWidget | null = null;
   private abortController: AbortController | null = null;

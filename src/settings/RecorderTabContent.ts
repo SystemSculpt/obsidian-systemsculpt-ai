@@ -116,11 +116,11 @@ export async function displayRecorderTabContent(containerEl: HTMLElement, tabIns
 
   new Setting(containerEl)
     .setName("Default transcription output format")
-    .setDesc("Choose whether transcriptions are saved as Markdown (.md) or srt (.srt) by default.")
+    .setDesc("Choose whether transcriptions are saved as Markdown (.md) or SRT (.srt) by default.")
     .addDropdown((dropdown) => {
       dropdown
         .addOption("markdown", "Markdown (.md)")
-        .addOption("srt", "Srt subtitle file (.srt)")
+        .addOption("srt", "SRT subtitle file (.srt)")
         .setValue(plugin.settings.transcriptionOutputFormat ?? "markdown")
         .onChange(async (value: "markdown" | "srt") => {
           await plugin.getSettingsManager().updateSettings({ transcriptionOutputFormat: value });
@@ -129,7 +129,7 @@ export async function displayRecorderTabContent(containerEl: HTMLElement, tabIns
 
   new Setting(containerEl)
     .setName("Show output format chooser in transcribe modal")
-    .setDesc('Keep the Markdown/srt picker visible in the modal. Re-enable this here if you selected "do not show this again".')
+    .setDesc('Keep the Markdown/SRT picker visible in the modal. Re-enable this here if you selected "Do not show this again".')
     .addToggle((toggle) => {
       toggle
         .setValue(plugin.settings.showTranscriptionFormatChooserInModal ?? true)

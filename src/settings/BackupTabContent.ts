@@ -16,7 +16,7 @@ export function displayBackupTabContent(containerEl: HTMLElement, tabInstance: S
 
   new Setting(containerEl)
     .setName('Automatic backups')
-    .setDesc('Create a backup every 24 hours. Backups include systemsculpt preferences and feature settings, but exclude secret keys and tokens.')
+    .setDesc('Create a backup every 24 hours. Backups include SystemSculpt preferences and feature settings, but exclude secret keys and tokens.')
     .addToggle((toggle) => {
       toggle
         .setValue(plugin.settings.automaticBackupsEnabled)
@@ -110,5 +110,5 @@ Continue?`
 
   new Setting(containerEl)
     .setName('Tips')
-    .setDesc('Automatic backups run in the background. Manual backups with custom names are useful before big changes. You can copy backup files to other devices to share your systemsculpt configuration.');
+    .setDesc('Automatic backups run in the background. Manual backups with custom names are useful before big changes. You can copy backup files to other devices to share your SystemSculpt configuration.');
 }

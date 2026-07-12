@@ -54,8 +54,8 @@ describe("AutomaticBackupService", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     jest.useFakeTimers();
-    setIntervalSpy = jest.spyOn(global, "setInterval");
-    clearIntervalSpy = jest.spyOn(global, "clearInterval");
+    setIntervalSpy = jest.spyOn(window, "setInterval");
+    clearIntervalSpy = jest.spyOn(window, "clearInterval");
     mockPlugin = createMockPlugin();
     service = new AutomaticBackupService(mockPlugin);
   });

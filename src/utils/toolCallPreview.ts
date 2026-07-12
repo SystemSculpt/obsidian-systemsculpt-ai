@@ -210,7 +210,7 @@ export async function renderWriteEditInlineDiff(app: App, hostElement: HTMLEleme
   // Diff content only (no header/actions to keep UI clean)
   const body = container.createDiv({ cls: "systemsculpt-inline-diff__body" });
   // Lazy import DiffViewer to avoid any circular dependencies
-   
+
   const { DiffViewer } = require("../components/DiffViewer");
   const viewer = new DiffViewer({
     container: body,

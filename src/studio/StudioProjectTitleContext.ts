@@ -609,7 +609,7 @@ export async function buildStudioProjectTitleContext(options: {
     if (eligibleSections.length >= MAX_INCLUDED_NODE_SECTIONS) {
       break;
     }
-     
+
     const section = await buildNodeSection(options.app, project, node, maps);
     if (section) {
       eligibleSections.push(section);

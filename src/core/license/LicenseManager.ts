@@ -21,7 +21,7 @@ export class LicenseManager {
       // Only update and notify if it was previously considered valid or was undefined.
       if (previousLicenseValidState === true) {
         await this.plugin.getSettingsManager().updateSettings({ licenseValid: false });
-        new Notice("SystemSculpt license key is empty. Premium features disabled.", 5000);
+        new Notice("License key is empty. Premium features disabled.", 5000);
       } else if (typeof previousLicenseValidState === 'undefined') {
         // Handles fresh installs or scenarios where the setting might not exist yet
         await this.plugin.getSettingsManager().updateSettings({ licenseValid: false });

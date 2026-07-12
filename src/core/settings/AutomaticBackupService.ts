@@ -7,7 +7,7 @@ import { redactSettingsForBackup } from "./backupSanitizer";
  */
 export class AutomaticBackupService {
     private plugin: SystemSculptPlugin;
-    private backupTimer: NodeJS.Timeout | null = null;
+    private backupTimer: number | null = null;
     private readonly CHECK_INTERVAL_MS = 60 * 60 * 1000; // Check every hour
 
     constructor(plugin: SystemSculptPlugin) {

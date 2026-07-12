@@ -38,7 +38,7 @@ export class RecorderService {
   private sessionCompletionResolver: (() => void) | null = null;
   private toggleQueue: Promise<void> = Promise.resolve();
   private stopRequestedDuringStart = false;
-  private errorCleanupTimer: ReturnType<typeof setTimeout> | null = null;
+  private errorCleanupTimer: number | null = null;
 
   private constructor(app: App, plugin: SystemSculptPlugin, options: RecorderOptions) {
     this.app = app;
