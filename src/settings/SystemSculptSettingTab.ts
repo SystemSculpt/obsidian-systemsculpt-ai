@@ -320,7 +320,7 @@ export class SystemSculptSettingTab extends PluginSettingTab {
       cls: ["search-input", "ss-settings-search-input"],
       attr: {
         type: "search",
-        placeholder: "Search settings, providers, studio, vault...",
+        placeholder: "Search account, chat, studio, vault...",
         autocomplete: "off",
         spellcheck: "false",
         "aria-label": "Search SystemSculpt settings",
@@ -971,7 +971,7 @@ export class SystemSculptSettingTab extends PluginSettingTab {
       });
       emptyState.createDiv({
         cls: "ss-search-empty-state__description",
-        text: "Try a broader phrase, a tab name, or a feature like studio, provider, or embeddings.",
+        text: "Try a broader phrase, a tab name, or a feature like Studio, transcription, or embeddings.",
       });
       return;
     }

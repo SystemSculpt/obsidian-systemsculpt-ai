@@ -12,7 +12,7 @@ export async function displayChatTabContent(containerEl: HTMLElement, tabInstanc
     containerEl.createEl("h3", { text: "Chat settings" });
 
     containerEl.createEl('p', {
-        text: 'SystemSculpt chat works the same way across desktop and mobile. Use this tab for chat preferences and display choices.',
+        text: 'Use this tab for chat preferences and display choices.',
         cls: 'setting-item-description'
     });
 

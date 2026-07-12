@@ -20,15 +20,14 @@ Recording controls include:
 
 Transcription controls include:
 
-- SystemSculpt transcription
-- Optional auto audio format conversion (advanced/desktop path)
+- Optional automatic audio format conversion
 - Default output format (`Markdown` or `SRT`)
 - Output format chooser toggle
 
 ## Commands and ribbon
 
 - `Toggle Audio Recorder` (`Mod+R`)
-- `Open Meeting Processor`
+- `Transcribe an audio file`
 - Ribbon: `Process Meeting Audio`
 
 ## Supported recording/transcription extensions
@@ -37,12 +36,12 @@ Transcription controls include:
 
 ## Pipeline behavior notes
 
-- SystemSculpt transcription now uses the hosted jobs pipeline on every platform.
-- Large recordings upload through the multipart jobs path instead of the older direct-upload path.
-- Custom provider uploads still follow the provider's direct-upload limit, so near-limit files may chunk client-side first.
+- Every transcription is admitted through the SystemSculpt account and runs as a managed job.
+- The plugin fingerprints and uploads the source file, reports job progress, and can recover acknowledged work before committing the local output.
+- Post-processing, output persistence, optional insertion, and recording retention happen after the managed result is ready.
 
 ## If transcription fails
 
 1. Re-run license validation and retry the request.
 2. Confirm credits or quota are still available for your SystemSculpt account.
-3. If you are using a custom provider, retry with a smaller file or let the plugin chunk the upload automatically.
+3. Keep the source recording in the vault until the retry completes.

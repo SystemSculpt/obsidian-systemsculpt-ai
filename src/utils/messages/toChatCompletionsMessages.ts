@@ -1,6 +1,6 @@
 import type { ChatMessage } from "../../types";
 import { deterministicId } from "../id";
-import { mapAssistantToolCallsForApi } from "../tooling";
+import { mapAssistantToolCallsForManagedApi } from "../tooling";
 
 type ChatCompletionsMessageOptions = {
   includeDocumentContext?: boolean;
@@ -129,7 +129,7 @@ export function toChatCompletionsMessages(
     const assistantToolCallIdMap = new Map<string, string>();
     if (Array.isArray((msg as any).tool_calls) && (msg as any).tool_calls.length > 0) {
       const rawToolCalls = (msg as any).tool_calls as any[];
-      const normalizedToolCalls = mapAssistantToolCallsForApi(rawToolCalls);
+      const normalizedToolCalls = mapAssistantToolCallsForManagedApi(rawToolCalls);
       toolCallsForApi = normalizedToolCalls.map((tc, index) => {
         const rawToolCall = rawToolCalls[index];
         const originalToolCallId = typeof rawToolCall?.id === "string"

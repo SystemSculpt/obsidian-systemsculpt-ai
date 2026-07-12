@@ -5,7 +5,7 @@
  */
 import { Notice, App } from "obsidian";
 import SystemSculptPlugin from "../main";
-import { DEVELOPMENT_MODE } from "../constants/api";
+import { IS_DEVELOPMENT_BUILD } from "../constants/api";
 import { compareNumericVersions, parseNumericVersion } from "../utils/semver";
 
 export interface VersionInfo {
@@ -40,7 +40,7 @@ export class VersionCheckerService {
     this.plugin = plugin;
     
     // Load dev mode state from localStorage if in development mode
-    if (DEVELOPMENT_MODE === "DEVELOPMENT") {
+    if (IS_DEVELOPMENT_BUILD) {
       const savedState = localStorage.getItem("systemsculpt-dev-update-state");
       if (savedState === "show-post-update" || savedState === "show-update") {
         this.devModeUpdateState = savedState;
@@ -52,7 +52,7 @@ export class VersionCheckerService {
    * Simulates an update in development mode
    */
   private simulateUpdate(): void {
-    if (DEVELOPMENT_MODE === "DEVELOPMENT") {
+    if (IS_DEVELOPMENT_BUILD) {
       this.devModeUpdateState = "show-post-update";
       localStorage.setItem("systemsculpt-dev-update-state", "show-post-update");
     }
@@ -62,7 +62,7 @@ export class VersionCheckerService {
    * Resets the development mode update flow
    */
   public resetDevUpdateFlow(): void {
-    if (DEVELOPMENT_MODE === "DEVELOPMENT") {
+    if (IS_DEVELOPMENT_BUILD) {
       this.devModeUpdateState = "show-update";
       localStorage.setItem("systemsculpt-dev-update-state", "show-update");
     }
@@ -83,7 +83,7 @@ export class VersionCheckerService {
    */
   public startPeriodicUpdateCheck(): void {
     // Don't start periodic checks if notifications are disabled (unless in development mode)
-    if (DEVELOPMENT_MODE !== "DEVELOPMENT" && !this.plugin.settings.showUpdateNotifications) {
+    if (!IS_DEVELOPMENT_BUILD && !this.plugin.settings.showUpdateNotifications) {
       return;
     }
     
@@ -112,7 +112,7 @@ export class VersionCheckerService {
    */
   private async checkForUpdatesQuietly(): Promise<void> {
     // Don't check if notifications are disabled (unless in development mode)
-    if (DEVELOPMENT_MODE !== "DEVELOPMENT" && !this.plugin.settings.showUpdateNotifications) {
+    if (!IS_DEVELOPMENT_BUILD && !this.plugin.settings.showUpdateNotifications) {
       return;
     }
     
@@ -120,7 +120,7 @@ export class VersionCheckerService {
       let versionInfo = await this.checkVersion(true); // Force refresh
       
       // In development mode, always show update available if we're in show-update state
-      if (DEVELOPMENT_MODE === "DEVELOPMENT" && this.devModeUpdateState === "show-update") {
+      if (IS_DEVELOPMENT_BUILD && this.devModeUpdateState === "show-update") {
         versionInfo = {
           currentVersion: this.currentVersion,
           latestVersion: "99.99.99",
@@ -204,7 +204,7 @@ export class VersionCheckerService {
     await new Promise(resolve => setTimeout(resolve, delayMs));
 
     // Handle development mode flow
-    if (DEVELOPMENT_MODE === "DEVELOPMENT") {
+    if (IS_DEVELOPMENT_BUILD) {
       if (this.devModeUpdateState === "show-post-update") {
         this.showPostUpdateDrawer();
         // Reset to show-update for next time
@@ -257,7 +257,7 @@ export class VersionCheckerService {
     this.startupCheckAbortController = controller;
 
     this.enqueueIdle(async () => {
-      if (controller.signal.aborted || (!this.plugin.settings.showUpdateNotifications && DEVELOPMENT_MODE !== "DEVELOPMENT")) {
+      if (controller.signal.aborted || (!this.plugin.settings.showUpdateNotifications && !IS_DEVELOPMENT_BUILD)) {
         return;
       }
       try {
@@ -518,7 +518,7 @@ export class VersionCheckerService {
    */
   private handleUpdateButtonClick(versionInfo: VersionInfo): void {
     // In development mode, simulate the update
-    if (DEVELOPMENT_MODE === "DEVELOPMENT") {
+    if (IS_DEVELOPMENT_BUILD) {
       this.simulateUpdate();
       new Notice(
         "Development Mode: Simulating update...\n\n" +

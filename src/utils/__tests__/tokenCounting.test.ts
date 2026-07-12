@@ -16,7 +16,6 @@ import {
   countToolCallArgumentsTokens,
   countToolCallPayloadTokens,
   countToolResultTokens,
-  countToolCallTokensForProvider,
 } from "../tokenCounting";
 import { TokenEstimator } from "../../services/embeddings/utils/TokenEstimator";
 
@@ -495,64 +494,6 @@ describe("countToolResultTokens", () => {
       result: { success: false },
     };
     const tokens = countToolResultTokens(toolCall);
-    expect(tokens).toBeGreaterThan(0);
-  });
-});
-
-describe("countToolCallTokensForProvider", () => {
-  const toolCall = {
-    id: "call_123",
-    request: {
-      function: {
-        name: "search",
-        arguments: '{"query":"test"}',
-      },
-    },
-  };
-
-  it("returns tokens for minimal structure even with null/undefined", () => {
-    // These still produce a minimal JSON structure with empty values
-    expect(countToolCallTokensForProvider(null)).toBeGreaterThan(0);
-    expect(countToolCallTokensForProvider(undefined)).toBeGreaterThan(0);
-  });
-
-  it("counts tokens for openai format", () => {
-    const tokens = countToolCallTokensForProvider(toolCall, "openai");
-    expect(tokens).toBeGreaterThan(0);
-  });
-
-  it("counts tokens for anthropic format", () => {
-    const tokens = countToolCallTokensForProvider(toolCall, "anthropic");
-    expect(tokens).toBeGreaterThan(0);
-  });
-
-  it("counts tokens for native format", () => {
-    const tokens = countToolCallTokensForProvider(toolCall, "native");
-    expect(tokens).toBeGreaterThan(0);
-  });
-
-  it("defaults to openai format", () => {
-    const defaultTokens = countToolCallTokensForProvider(toolCall);
-    const openaiTokens = countToolCallTokensForProvider(toolCall, "openai");
-    expect(defaultTokens).toBe(openaiTokens);
-  });
-
-  it("handles object arguments for anthropic", () => {
-    const toolCallWithObj = {
-      id: "call_456",
-      request: {
-        function: {
-          name: "create",
-          arguments: { title: "Test", content: "Body" },
-        },
-      },
-    };
-    const tokens = countToolCallTokensForProvider(toolCallWithObj, "anthropic");
-    expect(tokens).toBeGreaterThan(0);
-  });
-
-  it("handles string arguments for anthropic", () => {
-    const tokens = countToolCallTokensForProvider(toolCall, "anthropic");
     expect(tokens).toBeGreaterThan(0);
   });
 });

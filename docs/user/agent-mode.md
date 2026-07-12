@@ -1,4 +1,4 @@
-# Tool Use In Chat
+# Tool use in Chat
 
 SystemSculpt can use built-in tools during chat when the current flow needs them. There is no separate Agent Mode toggle in the plugin.
 
@@ -34,7 +34,6 @@ Approval logic is policy-based (`src/utils/toolPolicy.ts`).
 - Auto-run by default: non-destructive filesystem tools, `youtube_transcript`, and web research tools.
 - Approval required by default: destructive filesystem tools (`write`, `edit`, `move`, `trash`).
 - Trusted/allowlisted tools can auto-run.
-- External MCP servers (non-internal) require approval unless allowlisted.
 
 ## Paths and arguments
 

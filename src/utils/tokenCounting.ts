@@ -66,7 +66,7 @@ function contentToText(content: string | MultiPartContent[] | null | undefined):
         buffer += (part as any).text || "";
         buffer += "\n";
       }
-      // image_url parts contribute no prompt tokens in most providers; ignore
+      // Image payload cost is server-authoritative; omit it from this text estimate.
     }
     return buffer.trim();
   }
@@ -85,7 +85,7 @@ export function countMessageTokens(message: ChatMessage | any): number {
     total += countTextTokens(contentToText((message as any).content));
   }
 
-  // Tool calls (OpenAI-style)
+  // Canonical function tool calls.
   if (Array.isArray((message as any).tool_calls)) {
     try {
       const serialized = JSON.stringify((message as any).tool_calls);
@@ -96,7 +96,7 @@ export function countMessageTokens(message: ChatMessage | any): number {
     }
   }
 
-  // Tool message payloads (Anthropic tool_result or OpenAI tool role)
+  // Canonical managed tool-result payloads.
   if ((message as any).role === "tool" && typeof (message as any).content === "string") {
     total += countTextTokens((message as any).content);
   }
@@ -289,39 +289,6 @@ export function countToolResultTokens(toolCall: any): number {
 
     if (!contentToSend) return 0;
     return countTextTokens(contentToSend);
-  } catch {
-    return 0;
-  }
-}
-
-export function countToolCallTokensForProvider(toolCall: any, providerKind: 'openai' | 'anthropic' | 'native' | string = 'openai'): number {
-  try {
-    const fn = toolCall?.request?.function || toolCall?.function || toolCall?.request?.tool?.function;
-    const name = String(fn?.name || "");
-    const id = toolCall?.id || "";
-
-    if ((providerKind as string).toLowerCase().includes('anthropic')) {
-      // Anthropic tool_use block: arguments as parsed object
-      let input: any = {};
-      try {
-        const raw = fn?.arguments;
-        if (typeof raw === 'string') {
-          try { input = JSON.parse(raw); } catch { input = {}; }
-        } else if (raw && typeof raw === 'object') {
-          input = raw;
-        }
-      } catch { input = {}; }
-      const toolUse = { type: 'tool_use', id, name, input };
-      return countTextTokens(JSON.stringify(toolUse));
-    }
-
-    // Default/OpenAI/native: function call with JSON-string arguments
-    let argsStr = '';
-    const ra = fn?.arguments;
-    argsStr = typeof ra === 'string' ? ra : JSON.stringify(ra ?? {});
-    const openAiShape: any = { type: 'function', function: { name, arguments: argsStr } };
-    if (id) openAiShape.id = id;
-    return countTextTokens(JSON.stringify(openAiShape));
   } catch {
     return 0;
   }

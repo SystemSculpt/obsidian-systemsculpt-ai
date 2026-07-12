@@ -1,7 +1,6 @@
 import { App, TFile, parseYaml, stringifyYaml } from "obsidian";
 import { ChatMessage, MessagePart } from "../../types";
 import type { SerializedToolCall, ToolCall, ToolCallResult } from "../../types/toolCalls";
-import { getManagedSystemSculptModelId } from "../../services/systemsculpt/ManagedSystemSculptModel";
 import { ChatMarkdownSerializer } from "./storage/ChatMarkdownSerializer";
 import { mergeAdjacentReasoningParts } from "./utils/MessagePartCoalescing";
 import type { ChatBackend, ChatMetadata, ChatResumeDescriptor } from "./storage/ChatPersistenceTypes";
@@ -10,7 +9,8 @@ import { detectLoadedChatBackend } from "./storage/ChatPersistenceTypes";
 type LoadedChatRecord = {
   id: string;
   messages: ChatMessage[];
-  selectedModelId: string;
+  /** Historical model metadata used only to classify retired Pi/provider chats. */
+  legacyModelId?: string;
   lastModified: number;
   title: string;
   version?: number;
@@ -24,7 +24,6 @@ type LoadedChatRecord = {
 };
 
 type SaveChatOptions = {
-  selectedModelId?: string;
   contextFiles?: Set<string>;
   title?: string;
   chatFontSize?: "small" | "medium" | "large";
@@ -187,12 +186,6 @@ export class ChatStorageService {
         agentModeEnabled: typeof options.agentModeEnabled === "boolean" ? options.agentModeEnabled : existingMetadata?.agentModeEnabled,
         hideSystemMessages: typeof options.hideSystemMessages === "boolean" ? options.hideSystemMessages : existingMetadata?.hideSystemMessages,
       };
-      const selectedModelId = String(options.selectedModelId ?? existingMetadata?.model ?? "").trim();
-
-      if (selectedModelId) {
-        metadata.model = selectedModelId;
-      }
-
       if (existingMetadata?.chatBackend === "legacy") {
         metadata.chatBackend = "legacy";
       }
@@ -443,7 +436,7 @@ export class ChatStorageService {
     return {
       id: metadata.id,
       messages: normalizedMessages,
-      selectedModelId: metadata.model || getManagedSystemSculptModelId(),
+      legacyModelId: metadata.model,
       lastModified: new Date(metadata.lastModified).getTime(),
       title: metadata.title,
       version: metadata.version || 0,

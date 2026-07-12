@@ -2,7 +2,7 @@ import { ChatView } from "./ChatView";
 import { ChatRole, MultiPartContent, ChatMessage, MessagePart, UrlCitation } from "../../types";
 import { ButtonComponent, Notice } from "obsidian";
 import { appendMessageToGroupedContainer } from "./utils/MessageGrouping";
-// Tool call rendering is fully status-driven from PI tool events.
+// Tool call rendering is fully status-driven from managed tool events.
 
 export const messageHandling = {
   addMessage: async function(chatView: ChatView, role: ChatRole, content: string | MultiPartContent[] | null, existingMessageId?: string, completeMessage?: ChatMessage, targetContainer?: HTMLElement | DocumentFragment): Promise<void> {

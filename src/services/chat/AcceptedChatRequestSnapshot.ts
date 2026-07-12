@@ -1,6 +1,6 @@
 import type { ChatMessage, MultiPartContent } from "../../types";
 import type { ChatTranscriptSnapshot } from "../../views/chatview/transcript/ChatTranscriptTypes";
-import type { PreparedChatRequest } from "../StreamExecutionTypes";
+import type { ManagedToolDefinition } from "../../utils/tooling";
 import type {
   AcceptedChatOperation,
   AcceptedManagedChatOperation,
@@ -97,7 +97,7 @@ export function prepareManagedMessage(
 }
 
 function prepareTool(
-  tool: PreparedChatRequest["tools"][number],
+  tool: ManagedToolDefinition,
 ): Readonly<{ [key: string]: JsonContractValue }> {
   return deepFreezeAccepted(
     deepCopy(tool) as Readonly<{ [key: string]: JsonContractValue }>,
@@ -134,7 +134,7 @@ export function createAcceptedManagedChatRequestSnapshot(input: Readonly<{
   operation: AcceptedManagedChatOperation;
   policy: AcceptedChatPolicyAudit;
   managedMessages: readonly Readonly<ChatMessage>[];
-  managedTools: readonly PreparedChatRequest["tools"][number][];
+  managedTools: readonly ManagedToolDefinition[];
 }>): AcceptedManagedChatRequestSnapshot {
   const messages = input.managedMessages.map(prepareManagedMessage);
   const tools = input.managedTools.map(prepareTool);

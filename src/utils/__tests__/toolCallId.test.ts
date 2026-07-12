@@ -41,7 +41,7 @@ describe("sanitizeToolCallId", () => {
       expect(result).toBe(raw);
     });
 
-    it("preserves Anthropic-style toolu_ ids", () => {
+    it("preserves gateway-issued toolu_ ids", () => {
       const raw = "toolu_01A2B3C4D5E6F7G8H9";
       const result = sanitizeToolCallId(raw, 0, state);
       expect(result).toBe(raw);

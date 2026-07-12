@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { validateReleasePackage } from "./release-plugin.mjs";
+import { CANONICAL_API_BASE_URL } from "./plugin-build-options.mjs";
 
 function fixture(t, overrides = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "systemsculpt-release-"));
@@ -19,7 +20,11 @@ function fixture(t, overrides = {}) {
   for (const [name, value] of Object.entries(files)) {
     fs.writeFileSync(path.join(root, name), `${JSON.stringify(value)}\n`);
   }
-  for (const name of ["main.js", "styles.css"]) fs.writeFileSync(path.join(root, name), "production\n");
+  fs.writeFileSync(
+    path.join(root, "main.js"),
+    `const SYSTEMSCULPT_API = ${JSON.stringify(CANONICAL_API_BASE_URL)};\n`,
+  );
+  fs.writeFileSync(path.join(root, "styles.css"), "production\n");
   return root;
 }
 

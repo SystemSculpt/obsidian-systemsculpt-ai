@@ -12,7 +12,6 @@ export const OBSOLETE_PLUGIN_FILES = [
   "versions.json",
   "studio-terminal-sidecar.cjs",
   "studio-terminal-server.cjs",
-  "systemsculpt-pi-provider-extension.mjs",
   "node_modules",
   ".systemsculpt-runtime-sync.json",
 ];

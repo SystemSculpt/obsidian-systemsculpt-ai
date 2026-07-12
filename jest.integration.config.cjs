@@ -15,19 +15,15 @@ module.exports = {
 	testTimeout: 30000,
 	moduleNameMapper: {
 		'^obsidian$': '<rootDir>/testing/integration/mocks/obsidian-host.js',
-		'^@mariozechner/pi-coding-agent$': '<rootDir>/src/tests/mocks/pi-coding-agent.js',
-		'^@mariozechner/pi-ai$': '<rootDir>/node_modules/@mariozechner/pi-ai/dist/index.js',
-		'^@mariozechner/pi-ai/oauth$': '<rootDir>/node_modules/@mariozechner/pi-ai/dist/oauth.js',
 		'^@/(.*)$': '<rootDir>/src/$1',
 		'^src/(.*)$': '<rootDir>/src/$1'
 	},
 	setupFilesAfterEnv: ['<rootDir>/src/tests/setup.ts'],
 	moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'cjs', 'json', 'node'],
 	// The compiled bundle is already CommonJS — loading it through the
-	// transformer would re-parse ~14MB for nothing. Everything else matches
+	// transformer would re-parse the production artifact for nothing.
 	// the root config.
 	transformIgnorePatterns: [
-		'node_modules/(?!@mariozechner/pi-coding-agent|@mariozechner/pi-ai)',
 		'<rootDir>/main\\.js$'
 	],
 	transform: {

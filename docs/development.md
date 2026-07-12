@@ -16,6 +16,14 @@ or integration suites. Use compiled integration for bundle/composition
 changes; run the full unit and integration suites once at combined checkpoints
 or release.
 
+`npm run build` accepts `SYSTEMSCULPT_API_BASE_URL` as a build-time local-QA
+override. The URL is compiled into `main.js`; it is never read from plugin
+settings or the Obsidian runtime.
+
+```bash
+SYSTEMSCULPT_API_BASE_URL=http://127.0.0.1:3001/api/v1 npm run build
+```
+
 ## Local Obsidian loop
 
 Copy `systemsculpt-sync.config.json.example` to the ignored
@@ -34,9 +42,13 @@ npm run sync:local
 npm run release:plugin
 ```
 
-`release:plugin` verifies semantic version consistency, builds the production
-plugin, and validates exactly `manifest.json`, `main.js`, and `styles.css`.
-Publishing still requires the applicable human approval.
+`release:plugin` verifies semantic version consistency, forces
+`https://api.systemsculpt.com/api/v1` even when the shell contains a local QA
+override, builds the plugin, and validates exactly `manifest.json`, `main.js`,
+and `styles.css`. Artifact inspection requires the canonical production API,
+rejects loopback API bases and retired client AI runtimes/provider SDKs, and
+rejects inline source maps. Publishing still requires the applicable human
+approval.
 
 ## Canonical source files for docs
 

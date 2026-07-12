@@ -21,19 +21,3 @@ export type StreamEvent =
   | { type: "meta"; key: "inline-footnote" | "stop-reason"; value: any }
   | { type: "footnote"; text: string }
   | { type: "annotations"; annotations: Annotation[] };
-
-export interface StreamPipelineOptions {
-  model: string;
-  isCustomProvider?: boolean;
-  onRawEvent?: (data: { line: string; payload: string }) => void;
-}
-
-export interface StreamPipelineDiagnostics {
-  discardedPayloadCount: number;
-  discardedPayloadSamples: string[];
-}
-
-export interface StreamPipelineResult {
-  events: StreamEvent[];
-  done: boolean;
-}

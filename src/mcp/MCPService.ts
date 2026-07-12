@@ -1,9 +1,8 @@
 import { normalizePath, type App } from "obsidian";
 import SystemSculptPlugin from "../main";
-import { MCPServer, MCPToolInfo } from "../types/mcp";
-import { buildOpenAIToolDefinition, type OpenAITool } from "../utils/tooling";
+import { MCPToolInfo } from "../types/mcp";
+import { buildManagedToolDefinition, type ManagedToolDefinition } from "../utils/tooling";
 import { resolveCanonicalToolAlias } from "../utils/toolPolicy";
-import type { SystemSculptSettings } from "../types";
 
 // Adapters
 import { FilesystemAdapter } from "./adapters/FilesystemAdapter";
@@ -18,8 +17,7 @@ export class MCPToolExecutionError extends Error {
   constructor(
     public readonly code:
       | 'TOOL_CANCELLED_BEFORE_START'
-      | 'TOOL_CANCEL_REQUESTED_OUTCOME_UNKNOWN'
-      | 'unsupported_retired_http_mcp',
+      | 'TOOL_CANCEL_REQUESTED_OUTCOME_UNKNOWN',
     message: string,
     public readonly cause?: unknown,
   ) {
@@ -30,10 +28,14 @@ export class MCPToolExecutionError extends Error {
 
 interface MCPConnectionResult {
   success: boolean;
-  code?: 'unsupported_retired_http_mcp';
   error?: string;
   tools?: MCPToolInfo[];
   timestamp: number;
+}
+
+interface InternalMCPServer {
+  id: "mcp-filesystem" | "mcp-youtube";
+  name: string;
 }
 
 /**
@@ -43,7 +45,6 @@ export class MCPService {
   private app: App;
   private plugin: SystemSculptPlugin;
   private logger: Console;
-  private settingsProvider: () => SystemSculptSettings;
   private filesystemRoot: string | null = null;
   private filesystemRootAliases: string[] = [];
 
@@ -55,21 +56,20 @@ export class MCPService {
   private static connectionTestPromises: Map<string, Promise<MCPConnectionResult>> = new Map();
 
   private readonly CACHE_DURATION = 30 * 60 * 1000; // 30 minutes
-  constructor(plugin: SystemSculptPlugin, app: App, settingsProvider?: () => SystemSculptSettings) {
+  constructor(plugin: SystemSculptPlugin, app: App) {
     this.plugin = plugin;
     this.app = app;
     this.logger = console;
-    this.settingsProvider = settingsProvider ?? (() => this.plugin.settings);
   }
 
-  private getAdapterForServer(server: MCPServer): FilesystemAdapter | YouTubeAdapter {
+  private getAdapterForServer(server: InternalMCPServer): FilesystemAdapter | YouTubeAdapter {
     const existing = this.adapters.get(server.id);
     if (existing) return existing;
 
     let adapter: FilesystemAdapter | YouTubeAdapter;
-    if (server.transport === "internal" && server.id === "mcp-filesystem") {
+    if (server.id === "mcp-filesystem") {
       adapter = new FilesystemAdapter(this.plugin, this.app);
-    } else if (server.transport === "internal" && server.id === "mcp-youtube") {
+    } else if (server.id === "mcp-youtube") {
       adapter = new YouTubeAdapter(this.plugin, this.app);
     } else {
       throw new Error("Only built-in internal MCP servers are supported");
@@ -84,16 +84,7 @@ export class MCPService {
     MCPService.connectionTestPromises.clear();
   }
 
-  async testConnection(server: MCPServer): Promise<MCPConnectionResult> {
-    if (server.transport === "http") {
-      return {
-        success: false,
-        code: 'unsupported_retired_http_mcp',
-        error: 'Custom HTTP MCP servers are no longer supported.',
-        timestamp: Date.now(),
-      };
-    }
-
+  async testConnection(server: InternalMCPServer): Promise<MCPConnectionResult> {
     const cached = MCPService.connectionTestCache.get(server.id);
     if (cached && Date.now() - cached.result.timestamp < this.CACHE_DURATION) {
       return cached.result;
@@ -115,7 +106,7 @@ export class MCPService {
     }
   }
 
-  private async performConnectionTest(server: MCPServer): Promise<MCPConnectionResult> {
+  private async performConnectionTest(server: InternalMCPServer): Promise<MCPConnectionResult> {
     try {
       const tools = await this.discoverTools(server);
       return { success: true, tools, timestamp: Date.now() };
@@ -125,7 +116,7 @@ export class MCPService {
     }
   }
 
-  private async discoverTools(server: MCPServer): Promise<MCPToolInfo[]> {
+  private async discoverTools(server: InternalMCPServer): Promise<MCPToolInfo[]> {
     const adapter = this.getAdapterForServer(server);
     return await adapter.listTools();
   }
@@ -134,28 +125,20 @@ export class MCPService {
    * Returns internal servers that are always available (filesystem, youtube).
    * These are hardcoded to always provide tools regardless of settings.
    */
-  private getInternalServers(): MCPServer[] {
+  private getInternalServers(): InternalMCPServer[] {
     return [
       {
         id: "mcp-filesystem",
         name: "Filesystem Tools",
-        transport: "internal" as const,
-        isEnabled: true,
-        connectionStatus: "connected",
-        availableTools: []
       },
       {
         id: "mcp-youtube",
         name: "YouTube Tools",
-        transport: "internal" as const,
-        isEnabled: true,
-        connectionStatus: "connected",
-        availableTools: []
       }
     ];
   }
 
-  async getAvailableTools(): Promise<OpenAITool[]> {
+  async getAvailableTools(): Promise<ManagedToolDefinition[]> {
     // Internal servers (filesystem, youtube) are ALWAYS available - no settings checks
     const internalServers = this.getInternalServers();
 
@@ -163,13 +146,13 @@ export class MCPService {
       internalServers.map(async (server) => {
         try {
           const connectionResult = await this.testConnection(server);
-          if (!connectionResult.success || !connectionResult.tools) return [] as OpenAITool[];
+          if (!connectionResult.success || !connectionResult.tools) return [] as ManagedToolDefinition[];
 
           // Convert ALL tools from the server - no per-tool filtering
-          const converted: OpenAITool[] = [];
+          const converted: ManagedToolDefinition[] = [];
           for (const tool of connectionResult.tools) {
             try {
-              converted.push(this.convertToOpenAITool(tool, server));
+              converted.push(this.convertToManagedTool(tool, server));
             } catch (error) {
               this.logger.warn(`[SystemSculpt] Failed to convert tool ${tool.name || 'unnamed'} from server ${server.name}:`, error);
             }
@@ -178,17 +161,17 @@ export class MCPService {
           return converted;
         } catch (error) {
           this.logger.warn(`Failed to get tools from MCP server ${server.name}:`, error);
-          return [] as OpenAITool[];
+          return [] as ManagedToolDefinition[];
         }
       })
     );
 
-    const allTools: OpenAITool[] = [];
+    const allTools: ManagedToolDefinition[] = [];
     for (const arr of serverToolsArrays) allTools.push(...arr);
     return allTools;
   }
 
-  private convertToOpenAITool(tool: MCPToolInfo, server: MCPServer): OpenAITool {
+  private convertToManagedTool(tool: MCPToolInfo, server: InternalMCPServer): ManagedToolDefinition {
     if (!tool || !tool.name || tool.name.trim() === '') {
       this.logger.warn(`[SystemSculpt] Skipping tool with invalid name:`, tool);
       throw new Error(`Tool missing required name property`);
@@ -198,18 +181,18 @@ export class MCPService {
       throw new Error(`Server missing required id property`);
     }
 
-    const openAITool: OpenAITool = buildOpenAIToolDefinition({
+    const managedTool: ManagedToolDefinition = buildManagedToolDefinition({
       name: `${server.id}_${tool.name}`,
       description: `[${server.name}] ${tool.description || 'No description provided'}`,
       parameters: tool.inputSchema || {},
     });
 
-    if (!openAITool.function.name || typeof openAITool.function.name !== 'string') {
-      this.logger.error(`[SystemSculpt] Generated invalid OpenAI tool:`, openAITool);
-      throw new Error(`Failed to generate valid OpenAI tool`);
+    if (!managedTool.function.name || typeof managedTool.function.name !== 'string') {
+      this.logger.error(`[SystemSculpt] Generated invalid managed tool:`, managedTool);
+      throw new Error(`Failed to generate valid managed tool`);
     }
 
-    return openAITool;
+    return managedTool;
   }
 
   async executeTool(
@@ -236,26 +219,10 @@ export class MCPService {
 
     // Internal servers are always available - no settings lookup needed
     const internalServerIds = ["mcp-filesystem", "mcp-youtube"];
-    let server: MCPServer;
-
-    if (internalServerIds.includes(serverId)) {
-      // Use hardcoded internal server definition
-      server = this.getInternalServers().find(s => s.id === serverId)!;
-    } else {
-      // Legacy entries remain byte-compatible in settings until the closed v6
-      // migration, but they are no longer executable.
-      const settings = this.settingsProvider();
-      const retiredServer = (settings.mcpServers || []).find(
-        (candidate) => candidate.id === serverId && candidate.transport === "http",
-      );
-      if (retiredServer) {
-        throw new MCPToolExecutionError(
-          'unsupported_retired_http_mcp',
-          'Custom HTTP MCP servers are no longer supported.',
-        );
-      }
+    if (!internalServerIds.includes(serverId)) {
       throw new Error(`MCP server not found: ${serverId}`);
     }
+    const server = this.getInternalServers().find(s => s.id === serverId)!;
 
     const adapter = this.getAdapterForServer(server);
     const mappedArgs = serverId === "mcp-filesystem"
@@ -279,11 +246,9 @@ export class MCPService {
   }
 
   public setFilesystemAllowedPaths(paths: string[]): void {
-    const server: MCPServer = {
+    const server: InternalMCPServer = {
       id: "mcp-filesystem",
       name: "Filesystem",
-      transport: "internal",
-      isEnabled: true,
     };
     const adapter = this.getAdapterForServer(server);
     if (typeof (adapter as any)?.setAllowedPaths === "function") {

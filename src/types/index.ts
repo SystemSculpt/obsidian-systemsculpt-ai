@@ -9,7 +9,6 @@ export * from "./toolCalls";
  */
 export interface ChatState {
   chatId: string;
-  selectedModelId: string;
   chatTitle: string;
   messages?: ChatMessage[];
 } 

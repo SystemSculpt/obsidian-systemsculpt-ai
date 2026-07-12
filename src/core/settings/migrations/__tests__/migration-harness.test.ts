@@ -10,6 +10,7 @@
 import { DEFAULT_SETTINGS } from "../../../../types";
 import {
   CURRENT_SCHEMA_VERSION,
+  LEGACY_CLIENT_MODEL_KEYS_REMOVED_IN_V4,
   LEGACY_KEYS_REMOVED_IN_V1,
   migrateSettingsToCurrentSchema,
 } from "../SettingsMigrator";
@@ -18,6 +19,8 @@ import {
 const v4Legacy = require("../../../../../testing/fixtures/settings/v4.x-legacy.json");
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const v5PreVersioning = require("../../../../../testing/fixtures/settings/v5.x-pre-versioning.json");
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const v3ClientAuthority = require("../../../../../testing/fixtures/settings/v3-client-authority.json");
 
 interface SettingsFixture {
   name: string;
@@ -32,6 +35,7 @@ function stripFixtureMeta(fixture: Record<string, unknown>): Record<string, unkn
 const FIXTURES: SettingsFixture[] = [
   { name: "v4.x legacy", raw: stripFixtureMeta(v4Legacy) },
   { name: "v5.x pre-versioning", raw: stripFixtureMeta(v5PreVersioning) },
+  { name: "schema v3 client authority", raw: stripFixtureMeta(v3ClientAuthority) },
 ];
 
 describe("settings migration harness — past releases load cleanly into HEAD (#212)", () => {
@@ -51,11 +55,10 @@ describe("settings migration harness — past releases load cleanly into HEAD (#
         }
       });
 
-      it("preserves the user's custom providers — never wiped by an update (#112)", () => {
-        const original = (fixture.raw.customProviders as Array<{ id: string }>) ?? [];
-        const migrated = (result.settings.customProviders as Array<{ id: string }>) ?? [];
-        expect(migrated).toHaveLength(original.length);
-        expect(migrated.map((p) => p.id).sort()).toEqual(original.map((p) => p.id).sort());
+      it("removes retired client authority and secret fields", () => {
+        for (const key of LEGACY_CLIENT_MODEL_KEYS_REMOVED_IN_V4) {
+          expect(result.settings).not.toHaveProperty(key);
+        }
       });
 
       it("preserves the user's license fields", () => {

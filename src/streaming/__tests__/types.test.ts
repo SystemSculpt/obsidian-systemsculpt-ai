@@ -4,8 +4,6 @@
 import type {
   StreamToolCall,
   StreamEvent,
-  StreamPipelineOptions,
-  StreamPipelineResult,
 } from "../types";
 
 describe("StreamToolCall type", () => {
@@ -117,17 +115,17 @@ describe("StreamEvent type", () => {
   });
 
   describe("meta event", () => {
-    it("can create web-search-enabled meta event", () => {
+    it("can create stop-reason meta event", () => {
       const event: StreamEvent = {
         type: "meta",
-        key: "web-search-enabled",
-        value: true,
+        key: "stop-reason",
+        value: "end_turn",
       };
 
       expect(event.type).toBe("meta");
       if (event.type === "meta") {
-        expect(event.key).toBe("web-search-enabled");
-        expect(event.value).toBe(true);
+        expect(event.key).toBe("stop-reason");
+        expect(event.value).toBe("end_turn");
       }
     });
 
@@ -184,83 +182,5 @@ describe("StreamEvent type", () => {
         expect(event.annotations.length).toBe(0);
       }
     });
-  });
-});
-
-describe("StreamPipelineOptions type", () => {
-  it("can create with required model", () => {
-    const options: StreamPipelineOptions = {
-      model: "gpt-4",
-    };
-
-    expect(options.model).toBe("gpt-4");
-    expect(options.isCustomProvider).toBeUndefined();
-  });
-
-  it("can create with optional isCustomProvider", () => {
-    const options: StreamPipelineOptions = {
-      model: "local-model",
-      isCustomProvider: true,
-    };
-
-    expect(options.isCustomProvider).toBe(true);
-  });
-
-  it("can set isCustomProvider to false", () => {
-    const options: StreamPipelineOptions = {
-      model: "gpt-3.5-turbo",
-      isCustomProvider: false,
-    };
-
-    expect(options.isCustomProvider).toBe(false);
-  });
-});
-
-describe("StreamPipelineResult type", () => {
-  it("can create result with events", () => {
-    const result: StreamPipelineResult = {
-      events: [
-        { type: "content", text: "Hello" },
-        { type: "content", text: " World" },
-      ],
-      done: false,
-    };
-
-    expect(result.events.length).toBe(2);
-    expect(result.done).toBe(false);
-  });
-
-  it("can create completed result", () => {
-    const result: StreamPipelineResult = {
-      events: [{ type: "content", text: "Complete message" }],
-      done: true,
-    };
-
-    expect(result.done).toBe(true);
-  });
-
-  it("can create result with empty events", () => {
-    const result: StreamPipelineResult = {
-      events: [],
-      done: true,
-    };
-
-    expect(result.events.length).toBe(0);
-  });
-
-  it("can create result with mixed event types", () => {
-    const result: StreamPipelineResult = {
-      events: [
-        { type: "reasoning", text: "Thinking..." },
-        { type: "content", text: "Answer" },
-        { type: "footnote", text: "[1] Source" },
-      ],
-      done: true,
-    };
-
-    expect(result.events.length).toBe(3);
-    expect(result.events[0].type).toBe("reasoning");
-    expect(result.events[1].type).toBe("content");
-    expect(result.events[2].type).toBe("footnote");
   });
 });

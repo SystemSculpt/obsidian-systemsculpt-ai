@@ -134,7 +134,6 @@ export class RibbonManager {
       type: CHAT_VIEW_TYPE,
       state: {
         chatId: "",
-        selectedModelId: this.plugin.settings.selectedModelId,
         chatTitle: generateDefaultChatTitle(),
       },
     });

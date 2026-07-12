@@ -13,6 +13,16 @@ const GITHUB_REPO = "obsidian-systemsculpt-ai";
 
 export const BUNDLED_CHANGELOG_ENTRIES: readonly ChangeLogEntry[] = Object.freeze([
   Object.freeze({
+    version: "6.0.0",
+    date: "Jul 2026",
+    notes: [
+      "Chat, transcription, embeddings, and Studio now use one managed SystemSculpt architecture.",
+      "Provider keys, model setup, custom endpoints, and retired client runtimes were removed.",
+      "SystemSculpt 6 is desktop-only. Existing chats remain available, and retired Pi/provider chats open read-only.",
+    ].join("\n\n"),
+    url: GITHUB_API.RELEASE_URL(GITHUB_OWNER, GITHUB_REPO),
+  }),
+  Object.freeze({
     version: "5.11.0",
     date: "Jul 2026",
     notes: [

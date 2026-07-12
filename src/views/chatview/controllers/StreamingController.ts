@@ -264,8 +264,8 @@ export class StreamingController extends Component {
       assistantMessage.tool_calls = this.collectToolCalls(summary.parts);
       assistantMessage.reasoning_details = collectedReasoningDetails.length > 0 ? collectedReasoningDetails : undefined;
 
-      // OpenRouter -> Gemini sometimes omits `reasoning_details[].id` even though follow-up
-      // tool continuations require it for thought signatures. When possible, backfill it
+      // The managed gateway may omit `reasoning_details[].id` even though follow-up
+      // tool continuations require it. When possible, backfill it
       // from the tool_calls array using `reasoning_details[].index` (tool call index).
       if (Array.isArray(assistantMessage.tool_calls) && Array.isArray((assistantMessage as any).reasoning_details)) {
         const toolCalls = assistantMessage.tool_calls as any[];
@@ -299,7 +299,7 @@ export class StreamingController extends Component {
         (assistantMessage as any).stopReason = stopReason;
       }
 
-      // Reasoning alone is not a valid terminal assistant answer. If a provider
+      // Reasoning alone is not a valid terminal assistant answer. If the gateway
       // finishes with only hidden reasoning and no visible content or tool calls,
       // treat the turn as empty so higher-level retry/error policy can recover.
       if (!abortedBySignal && completedNaturally && !emittedRenderableOutput) {

@@ -2,64 +2,63 @@
  * @jest-environment node
  */
 import {
-  isValidOpenAITool,
-  normalizeOpenAITools,
-  transformToolsForModel,
-  mapAssistantToolCallsForApi,
+  isValidManagedTool,
+  normalizeManagedTools,
+  mapAssistantToolCallsForManagedApi,
   buildToolResultMessagesFromToolCalls,
   normalizeJsonSchema,
 } from "../tooling";
 
-describe("isValidOpenAITool", () => {
+describe("isValidManagedTool", () => {
   it("returns true for valid tool", () => {
     const tool = {
       type: "function",
       function: { name: "search", description: "Search" },
     };
-    expect(isValidOpenAITool(tool)).toBe(true);
+    expect(isValidManagedTool(tool)).toBe(true);
   });
 
   it("returns false for missing type", () => {
     const tool = { function: { name: "search" } };
-    expect(isValidOpenAITool(tool)).toBe(false);
+    expect(isValidManagedTool(tool)).toBe(false);
   });
 
   it("returns false for wrong type", () => {
     const tool = { type: "other", function: { name: "search" } };
-    expect(isValidOpenAITool(tool)).toBe(false);
+    expect(isValidManagedTool(tool)).toBe(false);
   });
 
   it("returns false for missing function", () => {
     const tool = { type: "function" };
-    expect(isValidOpenAITool(tool)).toBe(false);
+    expect(isValidManagedTool(tool)).toBe(false);
   });
 
   it("returns false for missing function name", () => {
     const tool = { type: "function", function: {} };
-    expect(isValidOpenAITool(tool)).toBe(false);
+    expect(isValidManagedTool(tool)).toBe(false);
   });
 
   it("returns false for empty function name", () => {
     const tool = { type: "function", function: { name: "" } };
-    expect(isValidOpenAITool(tool)).toBe(false);
+    expect(isValidManagedTool(tool)).toBe(false);
   });
 
   it("returns false for null", () => {
-    expect(isValidOpenAITool(null)).toBe(false);
+    expect(isValidManagedTool(null)).toBe(false);
   });
 
   it("returns false for undefined", () => {
-    expect(isValidOpenAITool(undefined)).toBe(false);
+    expect(isValidManagedTool(undefined)).toBe(false);
   });
 });
 
-describe("normalizeOpenAITools", () => {
+describe("normalizeManagedTools", () => {
   it("returns empty array for empty input", () => {
-    expect(normalizeOpenAITools([])).toEqual([]);
+    expect(normalizeManagedTools([])).toEqual([]);
   });
 
   it("returns empty array for null input", () => {
-    expect(normalizeOpenAITools(null as any)).toEqual([]);
+    expect(normalizeManagedTools(null as any)).toEqual([]);
   });
 
   it("filters out invalid tools", () => {
@@ -68,7 +67,7 @@ describe("normalizeOpenAITools", () => {
       { type: "invalid" },
       { type: "function", function: {} },
     ];
-    const result = normalizeOpenAITools(tools);
+    const result = normalizeManagedTools(tools);
     expect(result).toHaveLength(1);
     expect(result[0].function.name).toBe("valid");
   });
@@ -78,13 +77,13 @@ describe("normalizeOpenAITools", () => {
       { type: "function", function: { name: "search" } },
       { type: "function", function: { name: "search" } },
     ];
-    const result = normalizeOpenAITools(tools);
+    const result = normalizeManagedTools(tools);
     expect(result).toHaveLength(1);
   });
 
   it("trims tool names", () => {
     const tools = [{ type: "function", function: { name: "  search  " } }];
-    const result = normalizeOpenAITools(tools);
+    const result = normalizeManagedTools(tools);
     expect(result[0].function.name).toBe("search");
   });
 
@@ -92,13 +91,13 @@ describe("normalizeOpenAITools", () => {
     const tools = [
       { type: "function", function: { name: "search", description: "Search stuff" } },
     ];
-    const result = normalizeOpenAITools(tools);
+    const result = normalizeManagedTools(tools);
     expect(result[0].function.description).toBe("Search stuff");
   });
 
   it("defaults description to empty string", () => {
     const tools = [{ type: "function", function: { name: "search" } }];
-    const result = normalizeOpenAITools(tools);
+    const result = normalizeManagedTools(tools);
     expect(result[0].function.description).toBe("");
   });
 
@@ -112,7 +111,7 @@ describe("normalizeOpenAITools", () => {
         },
       },
     ];
-    const result = normalizeOpenAITools(tools);
+    const result = normalizeManagedTools(tools);
     expect(result[0].function.parameters).toEqual({
       type: "object",
       properties: { q: { type: "string" } },
@@ -121,7 +120,7 @@ describe("normalizeOpenAITools", () => {
 
   it("defaults parameters to empty object", () => {
     const tools = [{ type: "function", function: { name: "search" } }];
-    const result = normalizeOpenAITools(tools);
+    const result = normalizeManagedTools(tools);
     expect(result[0].function.parameters).toEqual({});
   });
 
@@ -129,7 +128,7 @@ describe("normalizeOpenAITools", () => {
     const tools = [
       { type: "function", function: { name: "search", strict: true } },
     ];
-    const result = normalizeOpenAITools(tools);
+    const result = normalizeManagedTools(tools);
     expect(result[0].function.strict).toBe(true);
   });
 
@@ -137,115 +136,18 @@ describe("normalizeOpenAITools", () => {
     const tools = [
       { type: "function", function: { name: "search", strict: false } },
     ];
-    const result = normalizeOpenAITools(tools);
+    const result = normalizeManagedTools(tools);
     expect(result[0].function.strict).toBeUndefined();
   });
 });
 
-describe("transformToolsForModel", () => {
-  const basicTool = {
-    type: "function" as const,
-    function: {
-      name: "search",
-      description: "Search",
-      parameters: { type: "object", properties: {} },
-    },
-  };
-
-  it("returns empty array for empty tools", () => {
-    expect(transformToolsForModel("gpt-4", undefined, [])).toEqual([]);
-  });
-
-  it("returns empty array for null tools", () => {
-    expect(transformToolsForModel("gpt-4", undefined, null as any)).toEqual([]);
-  });
-
-  it("returns tools unchanged for non-OpenRouter endpoint", () => {
-    const result = transformToolsForModel("gpt-4", "https://api.openai.com", [basicTool]);
-    expect(result).toHaveLength(1);
-    expect(result[0].function.name).toBe("search");
-    expect(result[0].function.parameters).toMatchObject({
-      type: "object",
-      properties: {},
-    });
-  });
-
-  it("transforms tools for OpenRouter", () => {
-    const result = transformToolsForModel(
-      "gpt-4",
-      "https://openrouter.ai/api/v1",
-      [basicTool]
-    );
-    expect(result[0].type).toBe("function");
-    expect(result[0].function.name).toBe("search");
-  });
-
-  it("transforms tools for o4-mini on OpenRouter", () => {
-    const result = transformToolsForModel(
-      "openai/o4-mini",
-      "https://openrouter.ai/api/v1",
-      [basicTool]
-    );
-    // o4-mini format has name directly on tool
-    expect(result[0].name).toBe("search");
-    expect(result[0].function).toBeUndefined();
-  });
-
-  it("adds required array for all properties on OpenRouter", () => {
-    const toolWithProps = {
-      type: "function" as const,
-      function: {
-        name: "search",
-        description: "Search",
-        parameters: {
-          type: "object",
-          properties: {
-            query: { type: "string" },
-            limit: { type: "number" },
-          },
-        },
-      },
-    };
-    const result = transformToolsForModel(
-      "gpt-4",
-      "https://openrouter.ai/api/v1",
-      [toolWithProps]
-    );
-    expect(result[0].function.parameters.required).toEqual(expect.arrayContaining(["query", "limit"]));
-  });
-
-  it("adds required array for all properties on Groq", () => {
-    const toolWithProps = {
-      type: "function" as const,
-      function: {
-        name: "read",
-        description: "Read",
-        parameters: {
-          type: "object",
-          properties: {
-            paths: { type: "array" },
-            offset: { type: "number" },
-            length: { type: "number" },
-          },
-        },
-      },
-    };
-    const result = transformToolsForModel(
-      "llama-3.3-70b",
-      "https://api.groq.com/openai/v1",
-      [toolWithProps]
-    );
-    expect(result[0].function.parameters.required).toEqual(expect.arrayContaining(["paths", "offset", "length"]));
-  });
-});
-
-describe("mapAssistantToolCallsForApi", () => {
+describe("mapAssistantToolCallsForManagedApi", () => {
   it("returns empty array for empty input", () => {
-    expect(mapAssistantToolCallsForApi([])).toEqual([]);
+    expect(mapAssistantToolCallsForManagedApi([])).toEqual([]);
   });
 
   it("returns empty array for non-array input", () => {
-    expect(mapAssistantToolCallsForApi(null as any)).toEqual([]);
+    expect(mapAssistantToolCallsForManagedApi(null as any)).toEqual([]);
   });
 
   it("maps tool call with request property", () => {
@@ -257,7 +159,7 @@ describe("mapAssistantToolCallsForApi", () => {
         },
       },
     ];
-    const result = mapAssistantToolCallsForApi(toolCalls);
+    const result = mapAssistantToolCallsForManagedApi(toolCalls);
     expect(result).toHaveLength(1);
     expect(result[0].id).toBe("call_123");
     expect(result[0].function.name).toBe("search");
@@ -268,7 +170,7 @@ describe("mapAssistantToolCallsForApi", () => {
     const toolCalls = [
       { id: "call_456", function: { name: "read", arguments: '{"path":"/"}' } },
     ];
-    const result = mapAssistantToolCallsForApi(toolCalls);
+    const result = mapAssistantToolCallsForManagedApi(toolCalls);
     expect(result).toHaveLength(1);
     expect(result[0].id).toBe("call_456");
     expect(result[0].function.name).toBe("read");
@@ -276,7 +178,7 @@ describe("mapAssistantToolCallsForApi", () => {
 
   it("generates deterministic ID when missing", () => {
     const toolCalls = [{ function: { name: "search", arguments: {} } }];
-    const result = mapAssistantToolCallsForApi(toolCalls);
+    const result = mapAssistantToolCallsForManagedApi(toolCalls);
     expect(result[0].id).toMatch(/^call_/);
   });
 
@@ -285,7 +187,7 @@ describe("mapAssistantToolCallsForApi", () => {
       { function: { arguments: {} } },
       { function: { name: "valid" } },
     ];
-    const result = mapAssistantToolCallsForApi(toolCalls);
+    const result = mapAssistantToolCallsForManagedApi(toolCalls);
     expect(result).toHaveLength(1);
     expect(result[0].function.name).toBe("valid");
   });
@@ -294,7 +196,7 @@ describe("mapAssistantToolCallsForApi", () => {
     const toolCalls = [
       { function: { name: "test", arguments: { key: "value" } } },
     ];
-    const result = mapAssistantToolCallsForApi(toolCalls);
+    const result = mapAssistantToolCallsForManagedApi(toolCalls);
     expect(result[0].function.arguments).toBe('{"key":"value"}');
   });
 
@@ -302,7 +204,7 @@ describe("mapAssistantToolCallsForApi", () => {
     const toolCalls = [
       { function: { name: "test", arguments: '{"pre":"stringified"}' } },
     ];
-    const result = mapAssistantToolCallsForApi(toolCalls);
+    const result = mapAssistantToolCallsForManagedApi(toolCalls);
     expect(result[0].function.arguments).toBe('{"pre":"stringified"}');
   });
 
@@ -319,7 +221,7 @@ describe("mapAssistantToolCallsForApi", () => {
         },
       },
     ];
-    const result = mapAssistantToolCallsForApi(toolCalls);
+    const result = mapAssistantToolCallsForManagedApi(toolCalls);
     expect(result).toHaveLength(1);
     expect(result[0].thought_signature).toBe("top-sig");
     expect(result[0].extra_field).toBe("keep-me");

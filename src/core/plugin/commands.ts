@@ -100,7 +100,6 @@ export class CommandManager {
     this.registerResumeChat();
     this.registerChangeChatTitle();
     this.registerOpenEmbeddingsView();
-    this.registerQuickFileEdit();
     this.registerDebugCommands();
     this.registerEmbeddingsDatabaseCommands();
     this.registerRunAutomationCommand();
@@ -429,24 +428,6 @@ export class CommandManager {
           new Notice(`Error opening similar notes panel: ${error.message}`);
         }
       },
-    });
-  }
-
-  private registerQuickFileEdit() {
-    this.plugin.addCommand({
-      id: "quick-file-edit",
-      name: "Quick Edit (Active File)",
-      checkCallback: (checking: boolean) => {
-        const activeFile = this.app.workspace.getActiveFile();
-        if (!activeFile) return false;
-        if (!checking) {
-          (async () => {
-            const { showQuickEditWidget } = await import("../../components/QuickEditWidget");
-            showQuickEditWidget(this.app, this.plugin);
-          })();
-        }
-        return true;
-      }
     });
   }
 

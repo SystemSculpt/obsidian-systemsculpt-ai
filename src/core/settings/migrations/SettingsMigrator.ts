@@ -49,6 +49,62 @@ export const LEGACY_EMBEDDINGS_KEYS_REMOVED_IN_V3: readonly string[] = [
   "embeddingsRebuildRetryAt",
 ];
 
+/**
+ * Client-owned text-model routing was retired in schema v4. These values can
+ * contain provider credentials, so migration deletes the complete legacy
+ * surface instead of carrying inert secrets into managed-only settings.
+ */
+export const LEGACY_CLIENT_MODEL_KEYS_REMOVED_IN_V4: readonly string[] = [
+  "serverUrl",
+  "settingsMode",
+  "selectedModelId",
+  "useLatestModelEverywhere",
+  "showModelTooltips",
+  "showVisionModelsOnly",
+  "showTopPicksOnly",
+  "customProviders",
+  "studioPiAuthMigrationVersion",
+  "modelFilterSettings",
+  "favoriteModels",
+  "favoritesFilterSettings",
+  "activeProvider",
+  "lastUsedModel",
+  "enableSystemSculptProvider",
+  "useSystemSculptAsFallback",
+  "contextWindowPercentage",
+  "openAiApiKey",
+  "runtimeToolIncompatibleModels",
+  "runtimeImageIncompatibleModels",
+  "piAuth",
+  "piAuthStorage",
+  "piModels",
+  "localPiModelId",
+  "defaultModelId",
+  "transcriptionProvider",
+  "customTranscriptionEndpoint",
+  "customTranscriptionApiKey",
+  "customTranscriptionModel",
+  "imageGenerationDefaultModelId",
+  "imageGenerationLastUsedModelId",
+  "imageGenerationModelCatalogCache",
+  "imageGenerationLastUsedCount",
+  "imageGenerationLastUsedAspectRatio",
+  "imageGenerationPollIntervalMs",
+  "imageGenerationOutputDir",
+  "imageGenerationSaveMetadataSidecar",
+  "readwiseEnabled",
+  "readwiseApiToken",
+  "readwiseDestinationFolder",
+  "readwiseOrganization",
+  "readwiseTweetOrganization",
+  "readwiseSyncMode",
+  "readwiseSyncIntervalMinutes",
+  "readwiseLastSyncTimestamp",
+  "readwiseLastSyncCursor",
+  "readwiseImportOptions",
+  "mcpServers",
+] as const;
+
 export interface SettingsMigrationStep {
   /** The schema version this step upgrades the settings TO (from `to - 1`). */
   readonly to: number;
@@ -106,6 +162,17 @@ export const SETTINGS_MIGRATIONS: readonly SettingsMigrationStep[] = [
     migrate: (settings) => {
       const next = { ...settings };
       for (const key of LEGACY_EMBEDDINGS_KEYS_REMOVED_IN_V3) {
+        delete next[key];
+      }
+      return next;
+    },
+  },
+  {
+    to: 4,
+    describe: "Remove retired client-side provider, model, Pi auth, and BYOK settings",
+    migrate: (settings) => {
+      const next = { ...settings };
+      for (const key of LEGACY_CLIENT_MODEL_KEYS_REMOVED_IN_V4) {
         delete next[key];
       }
       return next;

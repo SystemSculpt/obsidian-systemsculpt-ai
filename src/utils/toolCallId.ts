@@ -43,8 +43,7 @@ function isValidToolCallId(id: string): boolean {
   const trimmed = typeof id === "string" ? id.trim() : "";
   if (trimmed.length === 0) return false;
 
-  // Keep IDs stable across providers (OpenAI uses call_*, OpenRouter/Gemini uses tool_*,
-  // Anthropic uses toolu_*, and some gateways emit custom prefixes). We only reject
+  // Keep gateway-issued IDs stable across turns. Several prefixes are valid; reject only
   // obviously unsafe shapes (whitespace, extremely long strings, trailing separators).
   if (trimmed.length > 200) return false;
 

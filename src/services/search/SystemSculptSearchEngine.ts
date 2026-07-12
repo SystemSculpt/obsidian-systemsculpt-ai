@@ -1424,7 +1424,7 @@ export class SystemSculptSearchEngine {
   /**
    * Invoke the plugin's lazy embeddings-manager factory if it exists. Used for
    * explicit semantic searches so a missing manager doesn't silently degrade to
-   * lexical-only results. Errors (missing license, misconfigured provider) are
+   * lexical-only results. Errors (missing license or managed-service failure) are
    * swallowed because the subsequent indicator check will report them.
    */
   private ensureEmbeddingsManager(): void {

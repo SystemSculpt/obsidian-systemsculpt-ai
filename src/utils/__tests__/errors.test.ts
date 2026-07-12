@@ -131,7 +131,7 @@ describe("errors", () => {
 
   describe("isAuthFailureMessage", () => {
     it("detects common authentication failure messages", () => {
-      expect(isAuthFailureMessage("Invalid API key")).toBe(true);
+      expect(isAuthFailureMessage("Invalid license key")).toBe(true);
       expect(isAuthFailureMessage("401 Unauthorized")).toBe(true);
       expect(isAuthFailureMessage("Too many authentication failures")).toBe(true);
     });
@@ -149,26 +149,16 @@ describe("errors", () => {
       expect(isManagedLicenseFailure(error)).toBe(true);
     });
 
-    it("matches LICENSE_EXPIRED even without the flag (no BYOK path produces it)", () => {
+    it("matches LICENSE_EXPIRED without metadata", () => {
       const error = new SystemSculptError("expired", ERROR_CODES.LICENSE_EXPIRED, 401, {});
       expect(isManagedLicenseFailure(error)).toBe(true);
     });
 
-    it("matches a managed INVALID_LICENSE only when licenseFailure is set", () => {
+    it("matches INVALID_LICENSE because v6 has one account authority", () => {
       const managed = new SystemSculptError("invalid", ERROR_CODES.INVALID_LICENSE, 401, {
         licenseFailure: true,
       });
       expect(isManagedLicenseFailure(managed)).toBe(true);
-    });
-
-    it("does NOT match a BYOK provider auth failure mapped to INVALID_LICENSE (no licenseFailure)", () => {
-      // The custom-provider path maps a 401 to INVALID_LICENSE with a provider
-      // but never sets licenseFailure — it is the user's own key, not a
-      // SystemSculpt subscription, so it must not read as a renewal problem.
-      const byok = new SystemSculptError("Invalid API key", ERROR_CODES.INVALID_LICENSE, 401, {
-        provider: "openrouter",
-      });
-      expect(isManagedLicenseFailure(byok)).toBe(false);
     });
 
     it("does not match non-license codes or non-SystemSculpt errors", () => {
@@ -184,7 +174,7 @@ describe("errors", () => {
   });
 
   describe("isContextOverflowErrorMessage", () => {
-    it("detects llama.cpp / LM Studio context length errors", () => {
+    it("detects generic context length errors", () => {
       expect(
         isContextOverflowErrorMessage(
           "The number of tokens to keep from the initial prompt is greater than the context length. Try to load the model with a larger context length, or provide a shorter input"
@@ -192,7 +182,7 @@ describe("errors", () => {
       ).toBe(true);
     });
 
-    it("detects OpenAI-style maximum context length errors", () => {
+    it("detects maximum context length errors", () => {
       expect(
         isContextOverflowErrorMessage(
           "This model's maximum context length is 8192 tokens. However, your messages resulted in 9000 tokens."
@@ -202,7 +192,7 @@ describe("errors", () => {
 
     it("does not flag unrelated errors", () => {
       expect(isContextOverflowErrorMessage("Rate limit exceeded")).toBe(false);
-      expect(isContextOverflowErrorMessage("Invalid API key")).toBe(false);
+      expect(isContextOverflowErrorMessage("Invalid license key")).toBe(false);
     });
   });
 
@@ -234,26 +224,13 @@ describe("errors", () => {
     it("returns message for MODEL_UNAVAILABLE without model", () => {
       const message = getErrorMessage(ERROR_CODES.MODEL_UNAVAILABLE);
 
-      expect(message).toContain("unavailable");
-    });
-
-    it("returns message for MODEL_UNAVAILABLE with model", () => {
-      const message = getErrorMessage(ERROR_CODES.MODEL_UNAVAILABLE, "gpt-4");
-
-      expect(message).toContain("gpt-4");
-      expect(message).toContain("unavailable");
+      expect(message).toContain("SystemSculpt");
     });
 
     it("returns message for MODEL_REQUEST_ERROR without model", () => {
       const message = getErrorMessage(ERROR_CODES.MODEL_REQUEST_ERROR);
 
-      expect(message).toContain("Error processing");
-    });
-
-    it("returns message for MODEL_REQUEST_ERROR with model", () => {
-      const message = getErrorMessage(ERROR_CODES.MODEL_REQUEST_ERROR, "claude-3");
-
-      expect(message).toContain("claude-3");
+      expect(message).toContain("SystemSculpt");
     });
 
     it("returns message for STREAM_ERROR", () => {

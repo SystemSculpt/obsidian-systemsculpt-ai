@@ -13,6 +13,11 @@ Canonical guidance for agents working on the SystemSculpt AI Obsidian plugin.
   `testing/integration/` import the production bundle in the desktop host mock.
 - Managed-service contracts and fixtures live under `testing/fixtures/managed/`.
   Tests and CI must not require hosted provider credentials or live services.
+- The plugin owns no provider SDK, provider credential, model catalog, or local
+  AI runtime. The SystemSculpt API owns model and provider decisions.
+- `SYSTEMSCULPT_API_BASE_URL` is a build-time local-QA seam only. Release and
+  plugin checks force `https://api.systemsculpt.com/api/v1` and inspect the
+  emitted bundle before accepting it.
 
 ## Checks by scope
 

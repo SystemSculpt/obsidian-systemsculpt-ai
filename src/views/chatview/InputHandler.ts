@@ -26,9 +26,7 @@ import { createChatComposer } from "./ui/createInputUI";
 import { createPromptChip, updatePromptChip } from "./PromptSelector";
 import { PromptService } from "../../services/PromptService";
 import { ListSelectionModal, type ListItem } from "../../core/ui/modals/standard/ListSelectionModal";
-import {
-  getEffectiveChatModelId,
-} from "./modelSelection";
+import { promptChatAccountSetup } from "./ChatAccountSetup";
 import { renderContextAttachmentPill } from "./ui/ContextAttachmentPills";
 import { handlePaste as handlePasteExternal, handleLargeTextPaste as handleLargeTextPasteExternal, showLargeTextWarning as showLargeTextWarningExternal } from "./handlers/LargePasteHandlers";
 import { handleKeyDown as handleKeyDownExternal, handleInputChange as handleInputChangeExternal } from "./handlers/UIKeyHandlers";
@@ -44,7 +42,6 @@ import {
 import { errorLogger } from "../../utils/errorLogger";
 import { TOOL_LOOP_ERROR_CODE } from "../../utils/tooling";
 import { extractPrimaryPathArg, requiresUserApproval } from "../../utils/toolPolicy";
-import { ChatModelSelectionController } from "./ChatModelSelectionController";
 import { ChatTurn } from "./turn/ChatTurn";
 import type { ChatTurnFence } from "./turn/ChatTurnEffects";
 import type {
@@ -80,7 +77,6 @@ export interface InputHandlerOptions {
   getChatTitle: () => string;
   addFileToContext: (file: TFile) => Promise<void>;
   getChatId: () => string;
-  onModelChange?: (options?: { refreshOptions?: boolean }) => void;
   chatView: any; // ChatView reference for message grouping
 }
 
@@ -110,7 +106,6 @@ export class InputHandler extends Component {
   private onOpenChatSettings: () => void;
   private input: HTMLTextAreaElement;
   private inputWrapper: HTMLDivElement | null = null;
-  private modelSelectionController!: ChatModelSelectionController;
   private attachmentsEl: HTMLDivElement | null = null;
   private attachmentPillsByKey: Map<string, HTMLElement> = new Map();
   private isGenerating = false;
@@ -152,7 +147,6 @@ export class InputHandler extends Component {
   private micButton: ButtonComponent;
   private sendButton: ButtonComponent;
   private getChatId: () => string;
-  private notifyModelChange: (options?: { refreshOptions?: boolean }) => void;
   private chatView: any;
   private slashCommandMenu?: SlashCommandMenu;
   private atMentionMenu?: AtMentionMenu;
@@ -201,7 +195,6 @@ export class InputHandler extends Component {
     this.getChatTitle = options.getChatTitle;
     this.addFileToContext = options.addFileToContext;
     this.getChatId = options.getChatId;
-    this.notifyModelChange = options.onModelChange || (() => {});
     this.chatView = options.chatView;
     this.selectedPromptPath = this.plugin.settings.lastUsedPromptPath || null;
     this.promptService = new PromptService(
@@ -211,23 +204,6 @@ export class InputHandler extends Component {
     if (this.selectedPromptPath) {
       this.selectedPromptName = this.selectedPromptPath.split("/").pop()?.replace(/\.md$/, "") || null;
     }
-    this.modelSelectionController = new ChatModelSelectionController({
-      app: this.app,
-      container: this.container,
-      isAutomationRequestActive: () => this.isAutomationRequestActive(),
-      openAccount: () => {
-        this.plugin.openSettingsTab("account");
-      },
-      promptAccountSetup: async (message) => {
-        if (typeof this.chatView?.promptAccountSetup !== "function") {
-          return false;
-        }
-        await this.chatView.promptAccountSetup(message);
-        return true;
-      },
-    });
-    this.addChild(this.modelSelectionController);
-
     // InputHandler initialized with RecorderService - silent setup
     this.recorderService = RecorderService.getInstance(this.app, this.plugin, {
       onTranscriptionComplete: (text: string) => {
@@ -283,14 +259,6 @@ export class InputHandler extends Component {
 
   public waitForPersistenceIdle(): Promise<void> {
     return this.streamingController.waitForPersistenceIdle();
-  }
-
-  private getSelectedModelIdForChat(): string {
-    const selectedModelId =
-      typeof this.chatView?.getSelectedModelId === "function"
-        ? this.chatView.getSelectedModelId()
-        : this.chatView?.selectedModelId;
-    return getEffectiveChatModelId(selectedModelId);
   }
 
   private async streamAssistantTurn(
@@ -556,12 +524,6 @@ export class InputHandler extends Component {
     this.attachButton = composer.attachButton;
     this.agentModeButtonEl = composer.agentModeButton?.buttonEl || null;
     this.hideSystemButton = composer.hideSystemButton || null;
-    this.modelSelectionController.ensureHost({
-      modelSlot: (composer as any).modelSlot,
-      toolbar: (composer as any).toolbar,
-    });
-    this.modelSelectionController.render();
-
     // Render prompt selector chip
     const promptSlot = (composer as any).promptSlot as HTMLDivElement;
     if (promptSlot) {
@@ -647,7 +609,6 @@ export class InputHandler extends Component {
    */
   public handleSettingsUpdated(): void {
     this.updateGeneratingState();
-    this.onModelChange({ refreshOptions: true });
     this.syncAgentModeButton();
     this.syncHideSystemMessagesButton();
   }
@@ -752,7 +713,6 @@ export class InputHandler extends Component {
       return;
     }
     this.compatibilityResult = null;
-    const requestModelId = this.getSelectedModelIdForChat();
     const admission = await this.managedChatAdmission.acquireChatTurnLease();
     if (admission.outcome !== "allowed") {
       await this.handleManagedAdmissionDenied(admission.outcome);
@@ -808,7 +768,6 @@ export class InputHandler extends Component {
       let acceptedPrompt: string | undefined;
       if (this.selectedPromptPath) acceptedPrompt = await this.promptService.readPromptContent(this.selectedPromptPath) || undefined;
       this.acceptedRequestSnapshot = await this.aiService.prepareAcceptedChatRequest(acceptedOperation, {
-        model: requestModelId,
         contextFiles: acceptedContextFiles,
         systemPromptOverride: acceptedPrompt,
         allowTools: this.chatView?.isAgentModeActive?.() ?? true,
@@ -964,7 +923,7 @@ export class InputHandler extends Component {
         errorLogger.debug("Chat turn failed", {
           source: "InputHandler",
           method: "handleSendMessage",
-          metadata: { modelId: this.getSelectedModelIdForChat() },
+          metadata: { runtime: "managed" },
         });
       } catch {}
 
@@ -1690,11 +1649,6 @@ export class InputHandler extends Component {
     // Token counter has been removed
   }
 
-  public onModelChange(options?: { refreshOptions?: boolean }): void {
-    this.modelSelectionController.refresh();
-    this.notifyModelChange(options);
-  }
-
   public async handleOpenChatHistoryFile(): Promise<void> {
     return handleOpenChatHistoryFileExternal(this as any);
   }
@@ -1736,7 +1690,7 @@ export class InputHandler extends Component {
   /**
    * Extract annotations from the response text
    * This method parses markdown links in the format [domain](url) and extracts them as citations
-   * Based on the actual OpenRouter response format observed in logs
+   * Based on the managed gateway response format observed in logs.
    */
   private extractAnnotationsFromResponse(responseText: string): Annotation[] {
     return extractAnnotationsFromResponseExternal(responseText);
@@ -1816,11 +1770,19 @@ export class InputHandler extends Component {
     outcome: Exclude<ManagedAdmissionOutcome, "allowed">,
   ): Promise<void> {
     if (outcome === "license_required" || outcome === "license_rejected") {
-      await this.modelSelectionController.invokeAccountSetupPrompt(
-        outcome === "license_required"
-          ? "Activate your SystemSculpt license in Account before starting a chat."
-          : "Your SystemSculpt license was rejected. Check Account before starting a chat.",
-      );
+      const message = outcome === "license_required"
+        ? "Activate your SystemSculpt license in Account before starting a chat."
+        : "Your SystemSculpt license was rejected. Check Account before starting a chat.";
+      if (this.isAutomationRequestActive()) throw new Error(message);
+      if (typeof this.chatView?.promptAccountSetup === "function") {
+        await this.chatView.promptAccountSetup(message);
+      } else {
+        await promptChatAccountSetup({
+          app: this.app,
+          openAccount: () => this.plugin.openSettingsTab("account"),
+          message,
+        });
+      }
       return;
     }
 

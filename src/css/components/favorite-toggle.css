@@ -1,7 +1,6 @@
 /**
- * Favorite toggle — star button used on model/chat list rows.
- * TS: src/components/FavoriteToggle.ts, src/views/chatview/ChatFavoriteToggle.ts,
- *     src/core/ui/modals/standard/ListSelectionModal.ts
+ * Favorite toggle — star button used on chat history rows.
+ * TS: src/views/chatview/ChatFavoriteToggle.ts
  */
 
 .systemsculpt-favorite-button-container {

@@ -1,9 +1,6 @@
 import { App, setIcon, debounce } from "obsidian";
 import { StandardModal } from "./StandardModal";
 import { KeyboardNavigationService } from "../../services/KeyboardNavigationService";
-import { SystemSculptModel } from "../../../../types/llm";
-import { FavoritesService } from "../../../../services/FavoritesService";
-import { FavoriteToggle } from "../../../../components/FavoriteToggle";
 import { PlatformContext } from "../../../../services/PlatformContext";
 
 export interface ListItem {
@@ -17,11 +14,9 @@ export interface ListItem {
   thumbnail?: string; // URL or path to thumbnail image
   filePath?: string;  // Full file path for retrieval
   fileType?: string;  // File type/extension for identifying images
-  _ssModel?: SystemSculptModel;
   metadata?: {
     provider?: string;
     contextLength?: number;
-    isFavorite?: boolean;
     isNew?: boolean;
     isBeta?: boolean;
     isDeprecated?: boolean;
@@ -47,7 +42,6 @@ export interface ListSelectionOptions {
   closeOnSelect?: boolean;
   multiSelect?: boolean;
   customContent?: (containerEl: HTMLElement) => void;
-  favoritesService?: FavoritesService;
 }
 
 /**
@@ -67,8 +61,6 @@ export class ListSelectionModal extends StandardModal {
   private itemElements: HTMLElement[] = [];
   private keyboardNavService: KeyboardNavigationService;
   private customSearchHandler: ((query: string) => Promise<ListItem[]>) | null = null;
-  private favoritesService: FavoritesService | null = null;
-  private favoritesFilterButton: HTMLElement | null = null;
 
   constructor(app: App, items: ListItem[], options: ListSelectionOptions) {
     super(app);
@@ -85,9 +77,6 @@ export class ListSelectionModal extends StandardModal {
       size: "medium",
       ...options
     };
-    
-    // Store favoritesService if provided
-    this.favoritesService = options.favoritesService || null;
     
     // Setup initial selection state
     this.items.forEach(item => {
@@ -127,11 +116,6 @@ export class ListSelectionModal extends StandardModal {
       );
     }
     
-    // Add favorites filter button if favoritesService is provided
-    if (this.favoritesService) {
-      this.renderFavoritesFilterButton();
-    }
-
     // Add filters if enabled
     if (this.options.withFilters && this.options.filters && this.options.filters.length > 0) {
       this.addFilterButtons(
@@ -195,32 +179,6 @@ export class ListSelectionModal extends StandardModal {
   }
 
   /**
-   * Render the favorites filter button that toggles "show favorites only" mode.
-   * Only called when this.favoritesService is present.
-   */
-  private renderFavoritesFilterButton() {
-    if (!this.favoritesService) return;
-
-    this.favoritesFilterButton = this.contentEl.createDiv("systemsculpt-favorites-filter");
-
-    // Add star icon
-    setIcon(this.favoritesFilterButton, "star");
-
-    // Set initial active state based on current filter state
-    if (this.favoritesService.getShowFavoritesOnly()) {
-      this.favoritesFilterButton.classList.add("is-active");
-    }
-
-    // Click handler: toggle filter and update button state
-    this.registerDomEvent(this.favoritesFilterButton, "click", async () => {
-      if (!this.favoritesService || !this.favoritesFilterButton) return;
-      await this.favoritesService.toggleShowFavoritesOnly();
-      this.favoritesFilterButton.classList.toggle("is-active");
-      this.handleSearch(this.searchInput?.value ?? "");
-    });
-  }
-
-  /**
    * Handle search input changes
    * - If a custom search handler is set, use that
    * - Otherwise, use the default filtering
@@ -262,13 +220,6 @@ export class ListSelectionModal extends StandardModal {
         this.filteredItems = this.items.filter(item =>
           item.title.toLowerCase().includes(lowerQuery) ||
           (item.description && item.description.toLowerCase().includes(lowerQuery))
-        );
-      }
-
-      // Apply favorites filter if active
-      if (this.favoritesService && this.favoritesService.getShowFavoritesOnly()) {
-        this.filteredItems = this.filteredItems.filter(
-          item => item.metadata?.isFavorite === true
         );
       }
 
@@ -360,10 +311,7 @@ export class ListSelectionModal extends StandardModal {
     
     // Create item elements
     this.filteredItems.forEach((item, index) => {
-      const itemEl = this.createListItem(
-        item,
-        index
-      );
+      const itemEl = this.createListItem(item);
       
       // Add selected state
       if (this.selectedIds.has(item.id)) {
@@ -439,25 +387,10 @@ export class ListSelectionModal extends StandardModal {
     }
   }
 
-  /**
-   * Create a list item component specifically for this modal,
-   * handling model-specific data and favorite toggles.
-   * Renamed from createItem to avoid conflict with base class signature.
-   */
-  createListItem(
-    itemData: ListItem,
-    index: number
-  ) {
+  /** Create a list item for this modal. */
+  createListItem(itemData: ListItem) {
     const itemEl = document.createElement("div");
     itemEl.className = "ss-modal__item";
-    
-    // Add data attribute for potential styling based on underlying model provider
-    if (itemData._ssModel) {
-       itemEl.setAttribute('data-provider', itemData._ssModel.provider);
-       if (itemData._ssModel.isFavorite) {
-          itemEl.classList.add('has-favorite');
-       }
-    }
     
     // Add additional classes if provided
     if ((itemData as any).additionalClasses) {
@@ -467,9 +400,6 @@ export class ListSelectionModal extends StandardModal {
        if (additionalClasses.length > 0) {
          itemEl.classList.add(...additionalClasses);
        }
-    }
-    if ((itemData as any).providerAuthenticated || itemData.metadata?.providerAuthenticated) {
-      itemEl.classList.add("ss-provider-authenticated-model");
     }
     if (itemData.disabled) {
       itemEl.classList.add("is-disabled");
@@ -495,33 +425,6 @@ export class ListSelectionModal extends StandardModal {
     // Add badge if provided
     if (badge) {
       const badgeEl = itemEl.createSpan({ text: badge, cls: "ss-modal__item-badge" });
-    }
-
-    // Add favorite toggle if applicable
-    if (this.favoritesService && itemData._ssModel) {
-       const model = itemData._ssModel;
-       const buttonContainer = itemEl.createDiv('systemsculpt-favorite-button-container');
-
-       // Create the toggle inside the container
-       const favoriteToggle = new FavoriteToggle(
-         buttonContainer,
-         model,
-         this.favoritesService,
-         (updatedModel, isFavorite) => {
-           // Update the item's class based on favorite status
-           if (isFavorite) {
-             itemEl.classList.add('has-favorite');
-           } else {
-             itemEl.classList.remove('has-favorite');
-           }
-           
-           // Emit a custom event from the item element for the parent modal to handle
-           itemEl.dispatchEvent(new CustomEvent('ss-list-item-favorite-toggled', {
-             bubbles: true, // Allow event to bubble up
-             detail: { modelId: updatedModel.id, isFavorite: isFavorite, index: index }
-           }));
-         }
-       );
     }
 
     // Add thumbnail for image files

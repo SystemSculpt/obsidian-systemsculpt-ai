@@ -26,8 +26,7 @@ Chat always runs through SystemSculpt. There are no separate chat-model commands
 
 | Command | Default hotkey | Command ID | Notes |
 | --- | --- | --- | --- |
-| Change/Generate Title | `Mod+Shift+T` | `change-chat-title` | Works in chat and markdown notes |
-| Quick Edit (Active File) |  | `quick-file-edit` | Opens Quick Edit widget |
+| Create Title from Content | `Mod+Shift+T` | `change-chat-title` | Works in chat and markdown notes |
 | Chat with File |  | `chat-with-file` | Opens chat with current file preloaded |
 
 ## Search and embeddings
@@ -47,8 +46,7 @@ Chat always runs through SystemSculpt. There are no separate chat-model commands
 | Command | Default hotkey | Command ID | Notes |
 | --- | --- | --- | --- |
 | Toggle Audio Recorder | `Mod+R` | `toggle-audio-recorder` | Starts/stops recording |
-| Open Meeting Processor |  | `open-meeting-processor` | Opens meeting processor modal |
-| YouTube Canvas - Extract transcript and create note |  | `open-youtube-canvas` | Opens YouTube Canvas modal |
+| Transcribe an audio file |  | `transcribe-audio-file` | Transcribes a vault audio file through SystemSculpt |
 | Run Audio Chunking Analysis |  | `audio-chunking-analysis` | Developer-facing analysis command |
 
 ## Automations and SystemSculpt Canvas
@@ -65,6 +63,8 @@ Chat always runs through SystemSculpt. There are no separate chat-model commands
 | New SystemSculpt Studio Project |  | `new-systemsculpt-studio-project` | Creates a new `.systemsculpt` project and opens Studio |
 | Open SystemSculpt Studio |  | `open-systemsculpt-studio` | Opens the current/first available `.systemsculpt` project in Studio, or creates one automatically when none exists |
 | Run Current SystemSculpt Studio Project |  | `run-systemsculpt-studio-project` | Runs the active/current Studio project |
+| SystemSculpt Studio: Fit Selection in Viewport |  | `fit-systemsculpt-studio-selection-in-viewport` | Frames selected Studio nodes |
+| SystemSculpt Studio: Overview Graph in Viewport |  | `overview-systemsculpt-studio-graph-in-viewport` | Frames the full Studio graph |
 
 ## Diagnostics
 
@@ -72,4 +72,3 @@ Chat always runs through SystemSculpt. There are no separate chat-model commands
 | --- | --- | --- | --- |
 | Open SystemSculpt Janitor |  | `open-systemsculpt-janitor` | Opens janitor modal |
 | Copy Resource Usage Report |  | `systemsculpt-copy-resource-report` | Copies/saves resource report |
-| Toggle Mobile Emulation Mode |  | `toggle-mobile-emulation` | Developer tool for supported builds |

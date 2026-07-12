@@ -18,13 +18,12 @@ ErrorCollectorService.initializeEarlyLogsCapture();
  * SystemSculpt AI Plugin for Obsidian
  * Version: 1.5.3
  */
-import { Plugin, Notice, MarkdownView, Platform, setIcon, WorkspaceLeaf, debounce, TFile, FileSystemAdapter, normalizePath, apiVersion } from "obsidian";
+import { Plugin, Notice, MarkdownView, Platform, setIcon, WorkspaceLeaf, debounce, TFile, FileSystemAdapter, apiVersion } from "obsidian";
 export { StudioProjectGenerationStore } from "./studio/persistence/StudioProjectGenerationStore";
 export { ObsidianStudioGenerationAdapter } from "./studio/persistence/ObsidianStudioGenerationAdapter";
 import { checkObsidianCompatibility, MINIMUM_OBSIDIAN_VERSION } from "./core/plugin/lifecycle/ObsidianCompat";
 import { initializeNotificationQueue } from "./core/ui/notifications";
 import { SystemSculptSettings, DEFAULT_SETTINGS, LogLevel, LICENSE_URL } from "./types";
-import { SystemSculptModel } from "./types/llm";
 import { SystemSculptService, type CreditsBalanceSnapshot } from "./services/SystemSculptService";
 import { SystemSculptSettingTab } from "./settings/SystemSculptSettingTab";
 import type { RecorderService } from "./services/RecorderService";
@@ -37,13 +36,8 @@ import type { ViewManager } from "./core/plugin/views";
 import type { CommandManager } from "./core/plugin/commands";
 import { setLogLevel } from "./utils/errorHandling";
 import { errorLogger } from "./utils/errorLogger";
-import { UnifiedModelService } from "./services/providers/UnifiedModelService";
-import { EntitlementService } from "./services/entitlement/EntitlementService";
 import { DirectoryManager } from "./core/DirectoryManager";
 import { VersionCheckerService } from "./services/VersionCheckerService";
-import { FavoritesService } from "./services/FavoritesService";
-import { RuntimeIncompatibilityService } from "./services/RuntimeIncompatibilityService";
-import { PreviewService } from './services/PreviewService';
 import { StorageManager } from "./core/storage";
 import { ResumeChatService } from "./views/chatview/ResumeChatService";
 import { EmbeddingsManager } from "./services/embeddings/EmbeddingsManager";
@@ -56,7 +50,6 @@ import { PluginLogger } from "./utils/PluginLogger";
 import { InitializationTracer } from "./core/diagnostics/InitializationTracer";
 import { yieldToEventLoop } from "./utils/yieldToEventLoop";
 import { PlatformContext } from "./services/PlatformContext";
-import { detectPlatformEnvironment } from "./utils/PlatformEnvironment";
 import { tryCopyToClipboard } from "./utils/clipboard";
 import { EventEmitter } from "./core/EventEmitter";
 import { LifecycleCoordinator, LifecycleFailureEvent } from "./core/plugin/lifecycle/LifecycleCoordinator";
@@ -64,7 +57,6 @@ import { WorkflowEngineService } from "./services/workflow/WorkflowEngineService
 import type { SystemSculptSearchEngine } from "./services/search/SystemSculptSearchEngine";
 import { WebResearchApiService } from "./services/web/WebResearchApiService";
 import { WebResearchCorpusService } from "./services/web/WebResearchCorpusService";
-import { guardQuickEditEditorDiffLeaks, quickEditEditorDiffExtension } from "./quick-edit/editor-diff";
 import { relativeLineNumbersExtension } from "./editor/relative-line-numbers";
 import { type Extension } from "@codemirror/state";
 import type { StudioService } from "./studio/StudioService";
@@ -123,8 +115,6 @@ export default class SystemSculptPlugin extends Plugin {
   private viewManager: ViewManager;
   private commandManager: CommandManager;
   private fileContextMenuService: FileContextMenuService | null = null;
-  private _modelService: UnifiedModelService | undefined;
-  private _entitlementService: EntitlementService | null = null;
   private isUnloading = false;
   private isPreloadingDone = false;
   private failures: string[] = [];
@@ -134,7 +124,6 @@ export default class SystemSculptPlugin extends Plugin {
   directoryManager: DirectoryManager;
   public versionCheckerService: VersionCheckerService;
   private errorCollectorService: ErrorCollectorService;
-  private favoritesService: FavoritesService;
   public resumeChatService: ResumeChatService;
   private statusBarEl: HTMLElement | null = null;
   private statusIconEl: HTMLElement | null = null;
@@ -144,7 +133,6 @@ export default class SystemSculptPlugin extends Plugin {
   public storage: StorageManager;
   private pluginLogger: PluginLogger | null = null;
   private initializationTracer: InitializationTracer | null = null;
-  public hasPromptedForDefaultModel = false;
   public embeddingsManager: EmbeddingsManager | null = null;
   public vaultFileCache: VaultFileCache;
   public embeddingsStatusBar: EmbeddingsStatusBar | null = null;
@@ -165,7 +153,6 @@ export default class SystemSculptPlugin extends Plugin {
   private readonly relativeLineNumberExtensions: Extension[] = [];
   private relativeLineNumbersApplied = false;
   private pendingSettingsFocusTab: string | null = null;
-  private readonly mobileStartupProbePath = normalizePath("SystemSculpt/Diagnostics/mobile-startup.json");
   // Removed complex settings callback system - embeddings are now completely on-demand
 
   // Simple initialization tracking
@@ -209,13 +196,6 @@ export default class SystemSculptPlugin extends Plugin {
     return this.managedProductIntegrationClient;
   }
 
-  public get modelService(): UnifiedModelService {
-    if (!this._modelService) {
-      this._modelService = UnifiedModelService.getInstance(this);
-    }
-    return this._modelService;
-  }
-  
   /**
    * Get or create embeddings manager - simple and reliable
    */
@@ -247,44 +227,6 @@ export default class SystemSculptPlugin extends Plugin {
     }
     return this.searchEngine;
   }
-
-  private async writeMobileStartupProbe(
-    stage: string,
-    extra: Record<string, unknown> = {}
-  ): Promise<void> {
-    const environment = detectPlatformEnvironment();
-    if (environment.runtime !== "mobile" && environment.surface !== "mobile") {
-      return;
-    }
-
-    try {
-      await this.app.vault.adapter.mkdir("SystemSculpt");
-    } catch {}
-
-    try {
-      await this.app.vault.adapter.mkdir(normalizePath("SystemSculpt/Diagnostics"));
-    } catch {}
-
-    try {
-      await this.app.vault.adapter.write(
-        this.mobileStartupProbePath,
-        JSON.stringify(
-          {
-            stage,
-            pluginVersion: this.manifest.version,
-            runtime: environment.runtime,
-            surface: environment.surface,
-            isMobileEmulation: environment.isMobileEmulation,
-            timestamp: new Date().toISOString(),
-            ...extra,
-          },
-          null,
-          2
-        )
-      );
-    } catch {}
-  }
-
 
   public getPluginLogger(): PluginLogger | null {
     return this.pluginLogger;
@@ -464,8 +406,6 @@ export default class SystemSculptPlugin extends Plugin {
       },
     });
 
-    void this.writeMobileStartupProbe("onload-entered");
-
     try {
       this.warnIfObsidianVersionUnsupported();
       this.configureLifecycle(loadStart);
@@ -483,25 +423,11 @@ export default class SystemSculptPlugin extends Plugin {
         totalMs: Number((performance.now() - loadStart).toFixed(1)),
         failureCount: this.failures.length,
       });
-      void this.writeMobileStartupProbe("onload-complete", {
-        failureCount: this.failures.length,
-      });
     } catch (error) {
       this.failures.push("core initialization");
       onloadPhase.fail(error, {
         failureCount: this.failures.length,
       });
-      void this.writeMobileStartupProbe("onload-catch", {
-        failureCount: this.failures.length,
-        error:
-          error instanceof Error
-            ? {
-                name: error.name,
-                message: error.message,
-              }
-            : String(error),
-      });
-
       tracer.flushOpenPhases("plugin.onload-error");
 
       if (this.errorCollectorService) {
@@ -641,16 +567,9 @@ export default class SystemSculptPlugin extends Plugin {
         });
 
         PlatformContext.initialize();
-        this.registerEditorExtension(quickEditEditorDiffExtension);
         // Registered empty; filled in / cleared by syncRelativeLineNumbersExtension()
         // once settings load and whenever the toggle changes.
         this.registerEditorExtension(this.relativeLineNumberExtensions);
-        this.registerEvent(
-          this.app.workspace.on("file-open", () => {
-            guardQuickEditEditorDiffLeaks(this.app);
-          })
-        );
-
         this.ensureSettingsManagerInstance();
       },
     });
@@ -1498,18 +1417,9 @@ export default class SystemSculptPlugin extends Plugin {
 
     try {
       this._aiService = SystemSculptService.getInstance(this);
-      this.favoritesService = FavoritesService.getInstance(this);
-      // Initialize runtime incompatibility tracking (persists model tool/image rejections)
-      RuntimeIncompatibilityService.getInstance(this);
-      this._modelService = UnifiedModelService.getInstance(this);
 
       const metadata = {
-        services: [
-          "SystemSculptService",
-          "FavoritesService",
-          "RuntimeIncompatibilityService",
-          "UnifiedModelService",
-        ],
+        services: ["SystemSculptService"],
       };
 
       logger.info("Core AI services initialized", {
@@ -1521,11 +1431,7 @@ export default class SystemSculptPlugin extends Plugin {
     } catch (error) {
       this.failures.push("basic services");
       phase.fail(error, {
-        services: [
-          "SystemSculptService",
-          "FavoritesService",
-          "UnifiedModelService",
-        ],
+        services: ["SystemSculptService"],
       });
 
       logger.error("Failed to initialize core AI services", error, {
@@ -2090,26 +1996,13 @@ export default class SystemSculptPlugin extends Plugin {
       }
 
       // Clear singleton instances and static caches
-      UnifiedModelService.clearInstance(); // Clear the new unified service
-      FavoritesService.clearInstance();
-      RuntimeIncompatibilityService.clearInstance();
       SystemSculptService.clearInstance(); // Clear SystemSculptService singleton
       this.managedCapabilityGraph = null;
       this.managedProductIntegrationClient = null;
       
       // Clear service references without reassignment
       // @ts-ignore - Cleanup is handled by garbage collection
-      this._modelService = undefined;
-      // @ts-ignore - Cleanup is handled by garbage collection
       this._aiService = undefined;
-
-      // Clean up the PreviewService
-      try {
-        // Cleaning up PreviewService silently
-        PreviewService.hideAllPreviews();
-        PreviewService.cleanup();
-      } catch (error) {
-      }
 
       // Clean up status bar elements
       try {
@@ -2394,24 +2287,8 @@ export default class SystemSculptPlugin extends Plugin {
     return this.licenseManager;
   }
 
-  /**
-   * The single owner of chat and recorder gating decisions — #209.
-   * Stateless and memoized: it reads live settings, so callers never hold a
-   * stale license view. UI must ask this instead of inlining license checks.
-   */
-  getEntitlementService(): EntitlementService {
-    return (this._entitlementService ??= new EntitlementService(this));
-  }
-
   getSettingsManager(): SettingsManager {
     return this.settingsManager;
-  }
-
-  /**
-   * Get fresh models from the model service
-   */
-  public getInitialModels(): Promise<SystemSculptModel[]> {
-    return this.modelService.getModels();
   }
 
   private async preloadDataInBackground() {
@@ -2429,14 +2306,6 @@ export default class SystemSculptPlugin extends Plugin {
     }
 
     this.isPreloadingDone = true;
-
-    // Migrate legacy CustomProvider[] API keys into Pi auth storage (one-time, desktop only).
-    if (
-      PlatformContext.get().supportsDesktopOnlyFeatures() &&
-      this.settings.studioPiAuthMigrationVersion < 1
-    ) {
-      void this.migrateCustomProviderKeysToPiAuth().catch(() => {});
-    }
 
     logger.debug("Background preload completed", {
       source: "SystemSculptPlugin",
@@ -2594,95 +2463,6 @@ export default class SystemSculptPlugin extends Plugin {
       }),
     });
 
-    this.addCommand({
-      id: 'toggle-mobile-emulation',
-      name: 'Toggle Mobile Emulation Mode',
-      callback: this.wrapCommandCallback('toggle-mobile-emulation', () => {
-        const appAny = this.app as any;
-        if (typeof appAny.emulateMobile !== 'function') {
-          new Notice('Mobile emulation is not available in this Obsidian build.', 4000);
-          return;
-        }
-
-        const nextState = !appAny.isMobile;
-        try {
-          appAny.emulateMobile(nextState);
-          PlatformContext.get().resetDetectionCache();
-          const status = nextState ? 'enabled' : 'disabled';
-          new Notice(`Mobile emulation ${status}.`, 2500);
-        } catch (error) {
-          new Notice(`Failed to toggle mobile emulation: ${error instanceof Error ? error.message : String(error)}`);
-        }
-      }),
-    });
-
   }
 
-  // Removed complex settings callback system - no longer needed for simplified embeddings
-
-  /**
-   * One-time migration: move legacy CustomProvider[] API keys into Pi auth storage.
-   * After migration, preserves provider metadata and only clears keys that were safely moved.
-   */
-  private async migrateCustomProviderKeysToPiAuth(): Promise<void> {
-    const customProviders = this.settings.customProviders;
-    if (!Array.isArray(customProviders) || customProviders.length === 0) {
-      // Nothing to migrate — just bump the version
-      await this.settingsManager.updateSettings({ studioPiAuthMigrationVersion: 1 });
-      return;
-    }
-
-    const { migrateStudioPiProviderApiKeys } = await import("./studio/piAuth/StudioPiAuthStorage");
-    const { resolvePiProviderFromEndpoint } = await import("./studio/piAuth/StudioPiProviderRegistry");
-
-    const candidates = customProviders
-      .filter((cp) => cp.apiKey && cp.endpoint)
-      .map((cp) => {
-        const providerId = resolvePiProviderFromEndpoint(cp.endpoint) || cp.name || cp.id;
-        return {
-          providerId,
-          apiKey: cp.apiKey,
-          origin: `legacy-custom-provider:${cp.id}`,
-        };
-      })
-      .filter((c) => c.providerId);
-
-    const report =
-      candidates.length > 0
-        ? await migrateStudioPiProviderApiKeys(candidates, { plugin: this })
-        : { migrated: [], skipped: [], errors: [] };
-
-    const safeToRedactOrigins = new Set<string>();
-    for (const entry of report.migrated) {
-      const origin = String(entry.origin || "").trim();
-      if (origin) {
-        safeToRedactOrigins.add(origin);
-      }
-    }
-    for (const entry of report.skipped) {
-      const origin = String(entry.origin || "").trim();
-      if (!origin) {
-        continue;
-      }
-      if (
-        entry.reason === "existing_api_key" ||
-        entry.reason === "existing_oauth" ||
-        entry.reason === "existing_stored_credential"
-      ) {
-        safeToRedactOrigins.add(origin);
-      }
-    }
-
-    const redactedCustomProviders = customProviders.map((provider) => ({
-      ...provider,
-      apiKey: safeToRedactOrigins.has(`legacy-custom-provider:${String(provider.id || "").trim()}`)
-        ? ""
-        : provider.apiKey,
-    }));
-
-    await this.settingsManager.updateSettings({
-      customProviders: redactedCustomProviders,
-      studioPiAuthMigrationVersion: 1,
-    });
-  }
 }

@@ -1,76 +1,68 @@
-# Chat request flow
+# Managed Chat request flow
 
-Last verified against code: **2026-02-11**.
+Last verified against code: **2026-07-12**.
 
-This doc describes the current send/stream pipeline for ChatView.
+Chat has one execution path: an accepted SystemSculpt request followed by a
+managed stream. The plugin does not select a provider or model.
 
-## Main pipeline
+## Main flow
 
-1. User sends a message in `ChatView`.
-2. `InputHandler` appends the user message and starts `streamAssistantTurn(...)`.
-3. `SystemSculptService.streamMessage(...)` prepares model, prompt, context, and tools.
-4. Service opens a provider stream and yields normalized `StreamEvent` chunks.
-5. `StreamingController.stream(...)` renders chunks, tracks tool calls, and persists final assistant output.
-6. If PI indicates tool continuation (`stopReason = toolUse`), `InputHandler` decides whether to continue the turn.
+1. `InputHandler` commits the user message and captures a durable transcript
+   snapshot.
+2. Managed admission returns a lease for the accepted chat turn.
+3. `ChatRequestPreparationService` prepares context, the selected prompt, and
+   normalized built-in tools once for that accepted operation.
+4. `AcceptedChatRequestSnapshot` freezes the managed request (`ai-agent`) and
+   its policy audit before dispatch.
+5. `ManagedChatRuntimeAdapter` creates a transport ticket, derives an
+   idempotency key, and streams the accepted request through
+   `ManagedCapabilityClient`.
+6. `StreamingController` renders stream events and persists the assistant
+   result.
+7. When the managed response requests tool use, `InputHandler` applies the
+   local approval policy, executes the built-in vault tool, persists the tool
+   checkpoint, and sends a continuation from the new durable snapshot.
 
-## Key components
+## Key modules
 
-- Entry UI: `src/views/chatview/ChatView.ts`
-- Send orchestration: `src/views/chatview/InputHandler.ts`
-- Request assembly + provider routing: `src/services/SystemSculptService.ts`
-- Prompt composition: `src/services/SystemSculptService.ts`, `src/views/chatview/ChatView.ts`
-- Context + tool-message shaping: `src/services/ContextFileService.ts`
-- Streaming/render/persist: `src/views/chatview/controllers/StreamingController.ts`
-- Tool execution + policy: `src/views/chatview/ToolCallManager.ts`, `src/utils/toolPolicy.ts`
+- UI and turn orchestration: `src/views/chatview/InputHandler.ts`
+- Accepted request preparation: `src/services/chat/ChatRequestPreparationService.ts`
+- Immutable wire snapshot: `src/services/chat/AcceptedChatRequestSnapshot.ts`
+- Managed dispatch: `src/views/chatview/turn/ManagedChatRuntimeAdapter.ts`
+- Managed capability contract: `src/services/managed/ManagedCapabilityClient.ts`
+- Hosted transport: `src/services/managed/adapters/HostedTransportAdapter.ts`
+- Stream rendering and persistence: `src/views/chatview/controllers/StreamingController.ts`
+- Tool execution and policy: `src/views/chatview/ToolCallManager.ts`, `src/utils/toolPolicy.ts`
 
-## Request assembly order
+## Request ownership
 
-`ContextFileService.prepareMessagesWithContext(...)` and `SystemSculptService.prepareChatRequest(...)` produce the request payload.
+The frozen request contains:
 
-1. System message is added first.
-2. Conversation history is normalized.
-3. Context file messages are inserted before the latest user message.
-4. Document references (`doc:<id>`) are attached to the latest user message.
-5. Tool declarations are added when Agent Mode is active and tool-compatible.
+- the fixed managed model identity `ai-agent`;
+- normalized conversation history;
+- selected vault context and document references;
+- an optional selected prompt;
+- normalized built-in tool declarations.
 
-## Tool surfaces currently injected in chat
+The API base is compiled into the plugin. Settings never own network routing,
+provider credentials, or model selection.
 
-- Filesystem MCP tools
-- YouTube transcript MCP tool
+## Built-in tool surfaces
+
+- Filesystem tools
+- YouTube transcript tool
 - Web research tools (`web_search`, `web_fetch`)
 
-Web tools are registered in `ChatView.ensureCoreServicesReady()` via `registerWebResearchTools(...)`.
+Read-only tools can run automatically under the local policy. Destructive vault
+tools require approval unless the user has explicitly trusted them.
 
-## Compatibility and fallback behavior
+## Continuations and failure behavior
 
-`SystemSculptService` checks model compatibility for tools and images.
+Tool continuations reuse the accepted request and append only messages that
+were durably committed after its original snapshot. Each phase gets a stable
+idempotency key. The turn fails with a typed managed error when admission,
+transport, continuation identity, or the maximum continuation depth fails; it
+does not fall back to a local runtime or external provider.
 
-- If tools are unsupported, tool declarations are removed.
-- If image input is unsupported, image context is removed.
-- Service can retry without tools/images when provider responses indicate incompatibility.
-- PI/SystemSculpt turns auto-retry transient upstream rate-limit errors (before any assistant output is emitted), so users usually do not need to resend the prompt.
-
-## Streaming events handled
-
-`StreamingController` processes these event types:
-
-- `reasoning`
-- `reasoning-details`
-- `content`
-- `tool-call`
-- `annotations`
-- `meta`
-- `footnote`
-
-Final assistant message includes merged content, parts, tool calls, annotations, and optional stop reason.
-
-## Continuation logic
-
-After a streamed turn completes, `InputHandler.shouldContinuePiTurn(...)` checks:
-
-- Agent Mode is active
-- Turn completed successfully
-- `stopReason` is `toolUse`
-- Tool calls for that message reached a settled state
-
-If true, the next PI-managed turn is started.
+`StreamingController` handles content, reasoning, tool-call, annotation, meta,
+and footnote events and persists the final stop reason with the assistant turn.

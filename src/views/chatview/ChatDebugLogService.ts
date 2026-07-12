@@ -1,7 +1,6 @@
 import type SystemSculptPlugin from "../../main";
 import type { ChatView } from "./ChatView";
-import type { StreamEvent, StreamPipelineDiagnostics } from "../../streaming/types";
-import type { StreamDebugCallbacks } from "../../services/SystemSculptService";
+import type { StreamEvent } from "../../streaming/types";
 
 type StreamLogContext = {
   chatId?: string;
@@ -37,43 +36,10 @@ export class ChatDebugLogService {
   private streamSequence = 0;
   private streamTruncated = false;
   private lastRetentionCheck = 0;
-  private lastStreamDiagnostics: StreamPipelineDiagnostics | null = null;
 
   constructor(plugin: SystemSculptPlugin, chatView: ChatView) {
     this.plugin = plugin;
     this.chatView = chatView;
-  }
-
-  public createStreamLogger(context: StreamLogContext): StreamDebugCallbacks {
-    const base = {
-      chatId: context.chatId || this.chatView.chatId || undefined,
-      assistantMessageId: context.assistantMessageId,
-      modelId: context.modelId,
-    };
-
-    return {
-      onRequest: (data) => {
-        this.recordStreamEntry("request", { ...base, ...data });
-      },
-      onResponse: (data) => {
-        this.recordStreamEntry("response", { ...base, ...data });
-      },
-      onRawEvent: (data) => {
-        this.recordStreamEntry("raw", { ...base, ...data });
-      },
-      onStreamEvent: (data) => {
-        this.recordStreamEntry("event", { ...base, ...data });
-      },
-      onStreamEnd: (data) => {
-        if (data.diagnostics) {
-          this.lastStreamDiagnostics = data.diagnostics;
-        }
-        this.recordStreamEntry("stream-end", { ...base, ...data });
-      },
-      onError: (data) => {
-        this.recordStreamEntry("error", { ...base, ...data });
-      },
-    };
   }
 
   public recordStreamEvent(event: StreamEvent, context?: StreamLogContext): void {
@@ -94,16 +60,11 @@ export class ChatDebugLogService {
     };
   }
 
-  public getLastStreamDiagnostics(): StreamPipelineDiagnostics | null {
-    return this.lastStreamDiagnostics;
-  }
-
   public resetStreamBuffer(): void {
     this.streamEntries = [];
     this.streamBytes = 0;
     this.streamSequence = 0;
     this.streamTruncated = false;
-    this.lastStreamDiagnostics = null;
   }
 
   public async writeUiLog(content: string): Promise<LogWriteResult> {

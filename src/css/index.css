@@ -29,9 +29,7 @@
 @import 'components/large-text.css';
 @import 'components/context-selection.css';
 @import 'components/history.css';
-@import 'components/floating-widget.css';
 @import 'components/recorder.css';
-@import 'components/quick-edit.css';
 @import 'components/diff-viewer.css';
 @import 'components/automations.css';
 @import 'components/update-drawer.css';
@@ -39,7 +37,6 @@
 
 /* Modal system */
 @import 'modals/modal.css';
-@import 'modals/model-selection.css';
 @import 'modals/chat-settings.css';
 @import 'modals/janitor.css';
 @import 'modals/changelog.css';
@@ -54,7 +51,6 @@
 /* Views */
 @import 'views/chat.css';
 @import 'views/settings.css';
-@import 'views/providers-settings.css';
 @import 'views/similar-notes.css';
 @import 'views/preview.css';
 @import 'views/studio.css';

@@ -1,74 +1,24 @@
-import { TFile, requestUrl } from "obsidian";
-import {
-  ChatMessage,
-  SystemSculptModel,
-  SystemSculptSettings,
-  ApiStatusResponse,
-} from "../types";
+import { requestUrl } from "obsidian";
+import { SystemSculptSettings } from "../types";
 import {
   SystemSculptError,
   ERROR_CODES,
 } from "../utils/errors";
 import SystemSculptPlugin from "../main";
 
-import { toChatCompletionsMessages } from "../utils/messages/toChatCompletionsMessages";
-import { Notice } from "obsidian";
 import { PlatformContext } from "./PlatformContext";
-import { PlatformRequestClient } from "./PlatformRequestClient";
 import { SystemSculptEnvironment } from "./api/SystemSculptEnvironment";
 import { SYSTEMSCULPT_API_ENDPOINTS } from "../constants/api";
 import { SYSTEMSCULPT_WEBSITE } from "../constants/externalServices";
 
-// Import the new service classes
-import { StreamingService } from "./StreamingService";
 import { StreamingErrorHandler } from "./StreamingErrorHandler";
-import type { StreamEvent } from "../streaming/types";
 import { LicenseService } from "./LicenseService";
-import { ModelManagementService } from "./ModelManagementService";
 import { ContextFileService } from "./ContextFileService";
-import { errorLogger } from "../utils/errorLogger";
-import type { PreparedChatRequest, StreamDebugCallbacks } from "./StreamExecutionTypes";
-import { ChatRequestPreparationService, prepareChatRequestAuthoritatively, type AuthoritativeChatPreparationInput } from "./chat/ChatRequestPreparationService";
+import { ChatRequestPreparationService, type ManagedChatPreparationInput } from "./chat/ChatRequestPreparationService";
 import type { AcceptedChatRequestSnapshot } from "./chat/AcceptedChatRequestSnapshot";
 import type { AcceptedChatOperation } from "./managed/ManagedTypes";
 import { MCPService } from "../mcp/MCPService";
 import type { ToolCall, ToolCallRequest, ToolCallResult } from "../types/toolCalls";
-import { normalizeProviderId } from "./providerRuntime/RemoteProviderCatalog";
-
-export type { StreamDebugCallbacks } from "./StreamExecutionTypes";
-
-let localPiStreamExecutorModulePromise: Promise<typeof import("./LocalPiStreamExecutor")> | null = null;
-let remoteProviderStreamExecutorModulePromise: Promise<typeof import("./providerRuntime/OpenRouterRemoteStreamExecutor")> | null = null;
-let anthropicRemoteStreamExecutorModulePromise: Promise<typeof import("./providerRuntime/AnthropicRemoteStreamExecutor")> | null = null;
-let geminiRemoteStreamExecutorModulePromise: Promise<typeof import("./providerRuntime/GeminiRemoteStreamExecutor")> | null = null;
-
-async function loadLocalPiStreamExecutorModule(): Promise<typeof import("./LocalPiStreamExecutor")> {
-  if (!localPiStreamExecutorModulePromise) {
-    localPiStreamExecutorModulePromise = import("./LocalPiStreamExecutor");
-  }
-  return await localPiStreamExecutorModulePromise;
-}
-
-async function loadRemoteProviderStreamExecutorModule(): Promise<typeof import("./providerRuntime/OpenRouterRemoteStreamExecutor")> {
-  if (!remoteProviderStreamExecutorModulePromise) {
-    remoteProviderStreamExecutorModulePromise = import("./providerRuntime/OpenRouterRemoteStreamExecutor");
-  }
-  return await remoteProviderStreamExecutorModulePromise;
-}
-
-async function loadAnthropicRemoteStreamExecutorModule(): Promise<typeof import("./providerRuntime/AnthropicRemoteStreamExecutor")> {
-  if (!anthropicRemoteStreamExecutorModulePromise) {
-    anthropicRemoteStreamExecutorModulePromise = import("./providerRuntime/AnthropicRemoteStreamExecutor");
-  }
-  return await anthropicRemoteStreamExecutorModulePromise;
-}
-
-async function loadGeminiRemoteStreamExecutorModule(): Promise<typeof import("./providerRuntime/GeminiRemoteStreamExecutor")> {
-  if (!geminiRemoteStreamExecutorModulePromise) {
-    geminiRemoteStreamExecutorModulePromise = import("./providerRuntime/GeminiRemoteStreamExecutor");
-  }
-  return await geminiRemoteStreamExecutorModulePromise;
-}
 
 export type CreditsBalanceSnapshot = {
   includedRemaining: number;
@@ -237,55 +187,6 @@ export type CreditsUsageHistoryPage = {
   nextBefore: string | null;
 };
 
-function serializeResponseHeaders(headers: unknown): Record<string, string> {
-  const serialized: Record<string, string> = {};
-  if (!headers) {
-    return serialized;
-  }
-
-  const maybeHeaders = headers as {
-    forEach?: (callback: (value: unknown, key: unknown) => void) => void;
-    entries?: () => Iterable<[unknown, unknown]>;
-  };
-
-  if (typeof maybeHeaders.forEach === "function") {
-    maybeHeaders.forEach((value, key) => {
-      serialized[String(key)] = String(value);
-    });
-    return serialized;
-  }
-
-  if (typeof maybeHeaders.entries === "function") {
-    try {
-      for (const [key, value] of maybeHeaders.entries()) {
-        serialized[String(key)] = String(value);
-      }
-      return serialized;
-    } catch {
-      // Fall through to object-style normalization below.
-    }
-  }
-
-  if (Array.isArray(headers)) {
-    for (const entry of headers) {
-      if (Array.isArray(entry) && entry.length >= 2) {
-        serialized[String(entry[0])] = String(entry[1]);
-      }
-    }
-    return serialized;
-  }
-
-  for (const [key, value] of Object.entries(headers as Record<string, unknown>)) {
-    if (Array.isArray(value)) {
-      serialized[String(key)] = value.map((item) => String(item)).join(", ");
-    } else if (value !== undefined) {
-      serialized[String(key)] = String(value);
-    }
-  }
-
-  return serialized;
-}
-
 /**
  * Main service facade that delegates to specialized services
  */
@@ -294,232 +195,26 @@ export class SystemSculptService {
   private static instance: SystemSculptService | null = null;
   public baseUrl: string;
   private plugin: SystemSculptPlugin;
-  private warnedImageIncompatibilityModels = new Set<string>();
-
-  // Specialized service instances
-  private streamingService: StreamingService;
   private licenseService: LicenseService;
-  private modelManagementService: ModelManagementService;
   private contextFileService: ContextFileService;
-  private platformRequestClient: PlatformRequestClient;
   private mcpService: MCPService;
   private acceptedChatPreparation = new ChatRequestPreparationService();
-
-  public get extractionsDirectory(): string {
-    return this.settings.extractionsDirectory ?? "";
-  }
-
-  private shouldRetryRateLimitedStreamTurn(error: unknown): { retryAfterSeconds?: number } | null {
-    const parseSeconds = (value: unknown): number | undefined => {
-      if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
-        return value;
-      }
-      if (typeof value === "string") {
-        const parsed = Number(value);
-        if (Number.isFinite(parsed) && parsed >= 0) {
-          return parsed;
-        }
-      }
-      return undefined;
-    };
-
-    const isRateLimitLikeMessage = (message: string): boolean => {
-      const lc = String(message || "").toLowerCase();
-      if (!lc) return false;
-      return (
-        lc.includes("rate-limited upstream") ||
-        lc.includes("rate limited upstream") ||
-        lc.includes("temporarily rate-limited") ||
-        lc.includes("temporarily rate limited") ||
-        lc.includes("throttled") ||
-        lc.includes("too many requests") ||
-        lc.includes("retry after") ||
-        lc.includes("retry shortly") ||
-        lc.includes("rate limit") ||
-        lc.includes("rate_limit")
-      );
-    };
-
-    const isHardQuotaLikeMessage = (message: string): boolean => {
-      const lc = String(message || "").toLowerCase();
-      if (!lc) return false;
-      return (
-        lc.includes("insufficient_quota") ||
-        lc.includes("insufficient quota") ||
-        lc.includes("quota exhausted") ||
-        lc.includes("usage quota exceeded") ||
-        lc.includes("insufficient credits") ||
-        lc.includes("out of credits") ||
-        lc.includes("credits exhausted") ||
-        lc.includes("add credits") ||
-        lc.includes("purchase credits") ||
-        lc.includes("billing") ||
-        lc.includes("payment")
-      );
-    };
-
-    if (error instanceof SystemSculptError) {
-      const metadata = (error.metadata || {}) as Record<string, any>;
-      const rawError = (metadata.rawError || {}) as Record<string, any>;
-      const upstreamMessage =
-        typeof metadata.upstreamMessage === "string"
-          ? metadata.upstreamMessage
-          : "";
-      const rawMessage =
-        typeof rawError.message === "string"
-          ? rawError.message
-          : typeof rawError.errorMessage === "string"
-            ? rawError.errorMessage
-            : "";
-      const rawCode = typeof rawError.code === "string" ? rawError.code : "";
-      const rawType = typeof rawError.type === "string" ? rawError.type : "";
-      const nestedRawError =
-        rawError.error && typeof rawError.error === "object"
-          ? (rawError.error as Record<string, any>)
-          : {};
-      const nestedRawCode = typeof nestedRawError.code === "string" ? nestedRawError.code : "";
-      const nestedRawType = typeof nestedRawError.type === "string" ? nestedRawError.type : "";
-      const metadataErrorCode = typeof metadata.errorCode === "string" ? metadata.errorCode : "";
-      const metadataType = typeof metadata.type === "string" ? metadata.type : "";
-      const fullMessage = [
-        error.message,
-        upstreamMessage,
-        rawMessage,
-        rawCode,
-        rawType,
-        nestedRawCode,
-        nestedRawType,
-        metadataErrorCode,
-        metadataType,
-      ]
-        .join(" ")
-        .trim();
-      const statusCode = Number(metadata.statusCode ?? error.statusCode ?? 0);
-      const explicitRetry = metadata.shouldRetry === true || metadata.isRateLimited === true;
-      const retryAfterSeconds =
-        parseSeconds(metadata.retryAfterSeconds) ??
-        parseSeconds(metadata.retryAfter) ??
-        parseSeconds(metadata.retry_after_seconds) ??
-        parseSeconds(metadata.retry_after) ??
-        parseSeconds(rawError.retryAfterSeconds) ??
-        parseSeconds(rawError.retry_after_seconds) ??
-        parseSeconds(rawError.retry_after);
-      const hasRetryAfter = typeof retryAfterSeconds === "number";
-      const rateLimitLike = isRateLimitLikeMessage(fullMessage);
-      const hardQuotaLike = isHardQuotaLikeMessage(fullMessage);
-      const statusSuggestsRateLimit = statusCode === 429 && rateLimitLike;
-      const isTransientRateLimit =
-        !hardQuotaLike &&
-        (explicitRetry || hasRetryAfter || rateLimitLike || statusSuggestsRateLimit);
-
-      if (isTransientRateLimit) {
-        return typeof retryAfterSeconds === "number"
-          ? { retryAfterSeconds }
-          : {};
-      }
-    }
-
-    const message = error instanceof Error ? error.message : String(error || "");
-    if (isHardQuotaLikeMessage(message)) {
-      return null;
-    }
-    if (isRateLimitLikeMessage(message)) {
-      return {};
-    }
-
-    return null;
-  }
-
-  private getRateLimitedRetryDelayMs(retryAfterSeconds: number | undefined, retryAttempt: number): number {
-    if (typeof retryAfterSeconds === "number" && Number.isFinite(retryAfterSeconds) && retryAfterSeconds >= 0) {
-      return Math.max(0, Math.min(15000, Math.round(retryAfterSeconds * 1000)));
-    }
-
-    const cappedAttempt = Math.max(1, Math.min(5, retryAttempt));
-    const baseMs = 750;
-    return Math.min(15000, baseMs * (2 ** (cappedAttempt - 1)));
-  }
-
-  private async waitForRetryWindow(delayMs: number, signal?: AbortSignal): Promise<void> {
-    if (!Number.isFinite(delayMs) || delayMs < 0) return;
-    if (signal?.aborted) return;
-
-    await new Promise<void>((resolve) => {
-      let resolved = false;
-      let timeoutId: ReturnType<typeof setTimeout> | null = null;
-
-      const cleanup = () => {
-        if (timeoutId) {
-          clearTimeout(timeoutId);
-          timeoutId = null;
-        }
-        if (signal) {
-          signal.removeEventListener("abort", onAbort);
-        }
-      };
-
-      const finish = () => {
-        if (resolved) return;
-        resolved = true;
-        cleanup();
-        resolve();
-      };
-
-      const onAbort = () => finish();
-      if (signal) {
-        signal.addEventListener("abort", onAbort, { once: true });
-      }
-
-      timeoutId = setTimeout(() => finish(), delayMs);
-    });
-  }
-
-  private toSystemSculptApiMessages(messages: ChatMessage[]): any[] {
-    return toChatCompletionsMessages(messages);
-  }
-
-  private preparationDependencies() {
-    return {
-      contextFileService: this.contextFileService,
-      getModelInfo: (model: string) => this.modelManagementService.getModelInfo(model),
-      getAvailableTools: () => this.mcpService.getAvailableTools(),
-      countImageContextFiles: (files: ReadonlySet<string>) => this.countImageContextFiles(new Set(files)),
-    };
-  }
 
   private managedPreparationDependencies() {
     return {
       contextFileService: this.contextFileService,
-      // Resolve once for the accepted operation; legacy preparation consumes the same normalized definitions when supported.
       getAvailableTools: () => this.mcpService.getAvailableTools(),
     };
   }
 
-  private async prepareChatRequest(options: AuthoritativeChatPreparationInput & { emitNotices?: boolean }): Promise<PreparedChatRequest> {
-    this.refreshSettings();
-    const result = await prepareChatRequestAuthoritatively(options, this.preparationDependencies());
-    for (const diagnostic of result.diagnostics) {
-      errorLogger.warn("Failed to resolve available MCP tools for chat request", {
-        source: "SystemSculptService", method: "prepareChatRequest",
-        metadata: { model: diagnostic.model, actualModelId: diagnostic.actualModelId, error: diagnostic.message },
-      });
-    }
-    if (options.emitNotices) {
-      for (const notice of result.notices) {
-        if (!this.warnedImageIncompatibilityModels.has(notice.modelKey)) {
-          this.warnedImageIncompatibilityModels.add(notice.modelKey);
-          new Notice(notice.message, notice.timeoutMs);
-        }
-      }
-    }
-    return result.prepared;
-  }
-
-  public prepareAcceptedChatRequest(operation: AcceptedChatOperation, options: Omit<AuthoritativeChatPreparationInput, "messages">): Promise<AcceptedChatRequestSnapshot> {
+  public prepareAcceptedChatRequest(
+    operation: AcceptedChatOperation,
+    options: ManagedChatPreparationInput,
+  ): Promise<AcceptedChatRequestSnapshot> {
     this.refreshSettings();
     return this.acceptedChatPreparation.prepare(
       operation,
-      { ...options, messages: operation.initialDurableSnapshot.messages },
+      options,
       this.managedPreparationDependencies(),
     );
   }
@@ -528,283 +223,15 @@ export class SystemSculptService {
     this.acceptedChatPreparation.release(operation);
   }
 
-  public hasAcceptedChatRequest(operation: AcceptedChatOperation): boolean {
-    return this.acceptedChatPreparation.has(operation);
-  }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-  private buildHostedChatRequestBody(options: {
-    prepared: PreparedChatRequest;
-    forcedToolName?: string;
-    maxTokens?: number;
-    reasoningEffort?: string;
-    webSearchEnabled?: boolean;
-  }): Record<string, any> {
-    const body: Record<string, any> = {
-      model: options.prepared.actualModelId,
-      messages: this.toSystemSculptApiMessages(options.prepared.preparedMessages),
-      stream: true,
-    };
-
-    if (
-      typeof options.maxTokens === "number"
-      && Number.isFinite(options.maxTokens)
-      && options.maxTokens > 0
-    ) {
-      body.max_completion_tokens = Math.max(1, Math.floor(options.maxTokens));
-    }
-
-    const forcedToolName = String(options.forcedToolName || "").trim();
-    if (forcedToolName) {
-      body.tool_choice = {
-        type: "function",
-        function: {
-          name: forcedToolName,
-        },
-      };
-    }
-
-    const normalizedReasoningEffort = this.normalizeReasoningEffort(options.reasoningEffort);
-    if (normalizedReasoningEffort) {
-      body.reasoning_effort = normalizedReasoningEffort;
-    }
-
-    if (Array.isArray(options.prepared.tools) && options.prepared.tools.length > 0) {
-      body.tools = options.prepared.tools;
-    }
-
-    if (options.webSearchEnabled) {
-      body.plugins = [{ id: "web" }];
-    }
-
-    return body;
-  }
-
-  /**
-   * Vercel serverless functions enforce a hard 4.5 MB request-body limit
-   * (`FUNCTION_PAYLOAD_TOO_LARGE`).  When a conversation includes base64
-   * images the payload can easily exceed this.
-   *
-   * This method strips `image_url` blocks from older messages (oldest first)
-   * until the serialised body fits within the budget.  The most-recent user
-   * message's images are stripped only as a last resort.
-   *
-   * @returns `true` if any images were removed.
-   */
-  private trimPayloadImages(body: Record<string, any>): boolean {
-    const BUDGET = 3_500_000; // 3.5 MB -- leaves ~1 MB headroom for headers/overhead
-
-    let currentSize = JSON.stringify(body).length;
-    if (currentSize <= BUDGET) {
-      return false;
-    }
-
-    const messages: any[] | undefined = body.messages;
-    if (!Array.isArray(messages)) return false;
-
-    // Locate the last user message so we can preserve its images longest.
-    let lastUserIndex = -1;
-    for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i]?.role === "user") {
-        lastUserIndex = i;
-        break;
-      }
-    }
-
-    const stripImagesFromMessage = (msg: any): number => {
-      if (!Array.isArray(msg.content)) return 0;
-      const hasImage = msg.content.some((p: any) => p?.type === "image_url");
-      if (!hasImage) return 0;
-
-      const beforeSize = JSON.stringify(msg.content).length;
-
-      const textParts = msg.content.filter((p: any) => p?.type !== "image_url");
-      textParts.push({ type: "text", text: "[image omitted to reduce message size]" });
-
-      // Flatten to plain string when only text remains.
-      const allText = textParts.every((p: any) => p?.type === "text");
-      msg.content = allText
-        ? textParts.map((p: any) => String(p?.text ?? "")).join("\n")
-        : textParts;
-
-      const afterSize = JSON.stringify(msg.content).length;
-      return beforeSize - afterSize;
-    };
-
-    let trimmed = false;
-
-    // Pass 1: strip images from history messages (oldest first), skip latest user msg.
-    for (let i = 0; i < messages.length; i++) {
-      if (i === lastUserIndex) continue;
-      const saved = stripImagesFromMessage(messages[i]);
-      if (saved > 0) {
-        trimmed = true;
-        currentSize -= saved;
-        if (currentSize <= BUDGET) break;
-      }
-    }
-
-    // Pass 2: if still over budget, strip the latest user message's images too.
-    if (currentSize > BUDGET && lastUserIndex >= 0) {
-      if (stripImagesFromMessage(messages[lastUserIndex]) > 0) {
-        trimmed = true;
-      }
-    }
-
-    return trimmed;
-  }
-
-  private buildLocalPiRequestPreview(options: {
-    prepared: PreparedChatRequest;
-    sessionFile?: string;
-    reasoningEffort?: string;
-  }): Record<string, any> {
-    const body: Record<string, any> = {
-      transport: "pi-sdk",
-      model: options.prepared.actualModelId,
-      messageCount: options.prepared.preparedMessages.length,
-      messages: this.toSystemSculptApiMessages(options.prepared.preparedMessages),
-      sourceMode: options.prepared.modelSource,
-    };
-
-    const systemPrompt = String(options.prepared.finalSystemPrompt || "").trim();
-    if (systemPrompt) {
-      body.system_prompt = systemPrompt;
-    }
-
-    const normalizedReasoningEffort = this.normalizeReasoningEffort(options.reasoningEffort);
-    if (normalizedReasoningEffort) {
-      body.reasoning_effort = normalizedReasoningEffort;
-    }
-
-    const sessionFile = String(options.sessionFile || "").trim();
-    if (sessionFile) {
-      body.session_file = sessionFile;
-    }
-
-    return body;
-  }
-
   private constructor(plugin: SystemSculptPlugin) {
     this.plugin = plugin;
     this.settings = plugin.settings;
     
-    // Ensure baseUrl is never empty - use development mode aware default if needed
+    // The endpoint is injected at build time; settings never own network routing.
     this.baseUrl = this.getValidServerUrl();
 
-    // Initialize specialized services
-    this.streamingService = new StreamingService();
     this.licenseService = new LicenseService(plugin, this.baseUrl);
-    this.modelManagementService = new ModelManagementService(plugin, this.baseUrl);
     this.contextFileService = new ContextFileService(plugin.app);
-    this.platformRequestClient = new PlatformRequestClient();
     this.mcpService = new MCPService(plugin, plugin.app);
   }
 
@@ -837,80 +264,19 @@ export class SystemSculptService {
   }
 
   private getValidServerUrl(): string {
-    return SystemSculptEnvironment.resolveBaseUrl(this.settings);
-  }
-
-  private countImageContextFiles(contextFiles: Set<string>): number {
-    if (!contextFiles || contextFiles.size === 0) {
-      return 0;
-    }
-
-    let count = 0;
-
-    for (const entry of contextFiles) {
-      if (!entry || typeof entry !== "string") continue;
-      if (entry.startsWith("doc:")) continue;
-
-      const linkText = entry.replace(/^\[\[(.*?)\]\]$/, "$1");
-      const cleanPath = linkText.replace(/\$begin:math:display\$\[(.*?)\$end:math:display\$]/g, "$1");
-      const ext = (cleanPath.split(".").pop() || "").toLowerCase();
-      if (ext && ["jpg", "jpeg", "png", "webp"].includes(ext)) {
-        count++;
-        continue;
-      }
-
-      const resolved =
-        this.plugin.app.metadataCache.getFirstLinkpathDest(cleanPath, "") ??
-        this.plugin.app.vault.getAbstractFileByPath(cleanPath);
-      if (
-        resolved instanceof TFile &&
-        ["jpg", "jpeg", "png", "webp"].includes((resolved.extension || "").toLowerCase())
-      ) {
-        count++;
-      }
-    }
-
-    return count;
-  }
-
-  private normalizeReasoningEffort(value: unknown): string | undefined {
-    const normalized = String(value || "").trim().toLowerCase();
-    if (
-      normalized === "off" ||
-      normalized === "minimal" ||
-      normalized === "low" ||
-      normalized === "medium" ||
-      normalized === "high" ||
-      normalized === "xhigh"
-    ) {
-      return normalized;
-    }
-    return undefined;
+    return SystemSculptEnvironment.resolveBaseUrl();
   }
 
   private refreshSettings(): void {
     this.settings = this.plugin.settings;
     this.baseUrl = this.getValidServerUrl();
-    
-    // Update specialized services with new configuration
     this.licenseService.updateBaseUrl(this.baseUrl);
-    this.modelManagementService.updateBaseUrl(this.baseUrl);
   }
 
   // DELEGATE TO LICENSE SERVICE
   async validateLicense(forceCheck = false): Promise<boolean> {
     this.refreshSettings(); // Ensure settings are current before validation
     return this.licenseService.validateLicense(forceCheck);
-  }
-
-  // DELEGATE TO MODEL MANAGEMENT SERVICE
-  async getModels(): Promise<SystemSculptModel[]> {
-    this.refreshSettings();
-    return this.modelManagementService.getModels();
-  }
-
-  async preloadModels(): Promise<void> {
-    return this.modelManagementService.preloadModels();
   }
 
   public async getCreditsBalance(): Promise<CreditsBalanceSnapshot> {
@@ -922,8 +288,7 @@ export class SystemSculptService {
         "License key required to fetch credits balance.",
         ERROR_CODES.INVALID_LICENSE,
         401,
-        // A missing managed license key is a genuine SystemSculpt license
-        // failure (not a BYOK provider key issue), so tag it accordingly (#249).
+        // Route missing credentials through the managed Account recovery flow.
         { licenseFailure: true }
       );
     }
@@ -965,10 +330,8 @@ export class SystemSculptService {
     }
 
     if (!response.ok) {
-      await StreamingErrorHandler.handleStreamError(response, false, {
-        provider: "systemsculpt",
+      await StreamingErrorHandler.handleResponseError(response, {
         endpoint: url,
-        model: "credits",
       });
     }
 
@@ -1052,10 +415,8 @@ export class SystemSculptService {
     }
 
     if (!response.ok) {
-      await StreamingErrorHandler.handleStreamError(response, false, {
-        provider: "systemsculpt",
+      await StreamingErrorHandler.handleResponseError(response, {
         endpoint: requestUrlValue.toString(),
-        model: "credits-usage",
       });
     }
 
@@ -1138,376 +499,6 @@ export class SystemSculptService {
       nextBefore: asNullableString(payload?.next_before),
     };
   }
-
-  /**
-   * Public chat-stream entry point.
-   *
-   * Wraps {@link streamMessageOnce} in a bounded, abort-aware retry for transient
-   * upstream rate limits (BUG-07). The retry is gated by a single invariant: it
-   * may only fire when **no event has been yielded yet** (`hasYielded` latches on
-   * the one and only `yield` below), so already-streamed content can never be
-   * double-emitted. Once any event is emitted, the retry branch is unreachable
-   * and a later failure propagates exactly as before.
-   *
-   * Terminal error handling (abort swallow, logging, `debug.onError`, the
-   * `onError` callback, and the rethrow) lives here so it runs once, on the final
-   * outcome — never per inner attempt.
-   */
-  async *streamMessage(options: {
-    messages: ChatMessage[];
-    model: string;
-    onError?: (error: string) => void;
-    contextFiles?: Set<string>;
-    systemPromptOverride?: string;
-    transientSystemPromptSuffix?: string;
-    signal?: AbortSignal;
-    forcedToolName?: string;
-    maxTokens?: number;
-    reasoningEffort?: string;
-    allowTools?: boolean;
-    includeReasoning?: boolean;
-    debug?: StreamDebugCallbacks;
-    sessionFile?: string;
-    sessionId?: string;
-    onPiSessionReady?: (session: { sessionFile?: string; sessionId: string }) => void;
-    webSearchEnabled?: boolean; preparedRequest?: PreparedChatRequest;
-  }): AsyncGenerator<StreamEvent, void, unknown> {
-    const { model, onError, debug, signal } = options;
-    const MAX_RATE_LIMIT_RETRIES = 1;
-
-    let hasYielded = false;
-    let attempt = 0;
-
-    while (true) {
-      try {
-        for await (const event of this.streamMessageOnce(options)) {
-          // The single yield site: the moment one event leaves, retry is off the
-          // table for the rest of this turn (no double-emit, structurally).
-          hasYielded = true;
-          yield event;
-        }
-        return;
-      } catch (error) {
-        if (error instanceof DOMException && error.name === "AbortError") {
-          return;
-        }
-
-        // Only retry a transient rate limit, only before any output, only while
-        // attempts remain, and never after an abort.
-        const retry =
-          !hasYielded && attempt < MAX_RATE_LIMIT_RETRIES && !signal?.aborted
-            ? this.shouldRetryRateLimitedStreamTurn(error)
-            : null;
-        if (retry) {
-          attempt += 1;
-          await this.waitForRetryWindow(
-            this.getRateLimitedRetryDelayMs(retry.retryAfterSeconds, attempt),
-            signal,
-          );
-          if (signal?.aborted) {
-            return;
-          }
-          continue;
-        }
-
-        try {
-          errorLogger.error("Stream error in streamMessage", error, {
-            source: "SystemSculptService",
-            method: "streamMessage",
-            metadata: { model },
-          });
-        } catch {}
-        try {
-          debug?.onError?.({
-            error: error instanceof Error ? error.message : String(error),
-            details: error,
-          });
-        } catch {}
-        if (onError) {
-          let errorMessage = error instanceof Error ? error.message : "An unknown error occurred";
-
-          if (
-            error instanceof SystemSculptError &&
-            error.code === ERROR_CODES.STREAM_ERROR &&
-            error.statusCode === 400
-          ) {
-            errorMessage +=
-              "\nPlease try again in a few moments. If the issue persists, try selecting a different model.";
-          }
-          onError(errorMessage);
-        }
-        throw error;
-      }
-    }
-  }
-
-  /**
-   * Execute a single chat-stream attempt end to end (prepare → route → stream).
-   * Errors propagate raw so {@link streamMessage} can decide whether to retry;
-   * this method must not invoke the user-facing error callbacks.
-   */
-  private async *streamMessageOnce({
-    messages,
-    model,
-    contextFiles,
-    systemPromptOverride,
-    transientSystemPromptSuffix,
-    signal,
-    forcedToolName,
-    maxTokens,
-    reasoningEffort,
-    allowTools,
-    includeReasoning,
-    debug,
-    sessionFile,
-    sessionId,
-    onPiSessionReady,
-    webSearchEnabled, preparedRequest,
-  }: {
-    messages: ChatMessage[];
-    model: string;
-    contextFiles?: Set<string>;
-    systemPromptOverride?: string;
-    transientSystemPromptSuffix?: string;
-    signal?: AbortSignal;
-    forcedToolName?: string;
-    maxTokens?: number;
-    reasoningEffort?: string;
-    allowTools?: boolean;
-    includeReasoning?: boolean;
-    debug?: StreamDebugCallbacks;
-    sessionFile?: string;
-    sessionId?: string;
-    onPiSessionReady?: (session: { sessionFile?: string; sessionId: string }) => void;
-    webSearchEnabled?: boolean; preparedRequest?: PreparedChatRequest;
-  }): AsyncGenerator<StreamEvent, void, unknown> {
-    this.refreshSettings();
-
-    errorLogger.debug("Starting streamMessage", {
-      source: "SystemSculptService",
-      method: "streamMessage",
-      metadata: { model },
-    });
-
-    const prepared = preparedRequest ?? await this.prepareChatRequest({
-      messages,
-      model,
-      contextFiles,
-      systemPromptOverride,
-      transientSystemPromptSuffix,
-      emitNotices: true,
-      allowTools,
-    });
-
-    const {
-      resolvedModel,
-    } = prepared;
-
-    if (prepared.modelSource === "pi_local") {
-      const { executeLocalPiStream } = await loadLocalPiStreamExecutorModule();
-      const preview = this.buildLocalPiRequestPreview({
-        prepared,
-        sessionFile,
-        reasoningEffort,
-      });
-
-      try {
-        debug?.onRequest?.({
-          provider: String(resolvedModel.sourceProviderId || resolvedModel.provider || "unknown"),
-          endpoint: "local-pi-sdk",
-          headers: {},
-          body: preview,
-          transport: "pi-sdk",
-          canStream: true,
-          isCustomProvider: false,
-        });
-      } catch {}
-
-      for await (const event of executeLocalPiStream({
-        plugin: this.plugin,
-        prepared,
-        sessionFile,
-        onSessionReady: onPiSessionReady,
-        signal,
-        reasoningEffort,
-        debug,
-      })) {
-        yield event;
-      }
-
-      try {
-        debug?.onStreamEnd?.({
-          completed: !signal?.aborted,
-          aborted: !!signal?.aborted,
-        });
-      } catch {}
-      return;
-    }
-
-    if (prepared.modelSource === "custom_endpoint") {
-      const remoteProviderId = normalizeProviderId(
-        String(prepared.resolvedModel.sourceProviderId || prepared.resolvedModel.provider || ""),
-      );
-
-      // Anthropic/Claude runs through the native Messages API executor; the
-      // OpenAI-compatible /chat/completions path cannot serve it (#230).
-      if (remoteProviderId === "anthropic") {
-        const { executeAnthropicRemoteStream } = await loadAnthropicRemoteStreamExecutorModule();
-        for await (const event of executeAnthropicRemoteStream({
-          plugin: this.plugin,
-          prepared,
-          signal,
-          reasoningEffort,
-          debug,
-        })) {
-          yield event;
-        }
-        return;
-      }
-
-      // Gemini uses the native generateContent streaming API, not the
-      // OpenAI-compatible /chat/completions executor (#231).
-      if (remoteProviderId === "google") {
-        const { executeGeminiRemoteStream } = await loadGeminiRemoteStreamExecutorModule();
-        for await (const event of executeGeminiRemoteStream({
-          plugin: this.plugin,
-          prepared,
-          signal,
-          reasoningEffort,
-          debug,
-        })) {
-          yield event;
-        }
-        return;
-      }
-
-
-      const { executeOpenRouterRemoteStream } = await loadRemoteProviderStreamExecutorModule();
-      for await (const event of executeOpenRouterRemoteStream({
-        plugin: this.plugin,
-        prepared,
-        signal,
-        reasoningEffort,
-        debug,
-      })) {
-        yield event;
-      }
-      return;
-    }
-
-    const endpoint = `${this.baseUrl}${SYSTEMSCULPT_API_ENDPOINTS.CHAT.COMPLETIONS}`;
-    const requestBody = this.buildHostedChatRequestBody({
-      prepared,
-      forcedToolName,
-      maxTokens,
-      reasoningEffort,
-      webSearchEnabled,
-    });
-
-    if (this.trimPayloadImages(requestBody)) {
-      new Notice(
-        "Some images were removed from older messages to fit within the server's request size limit.",
-        8000,
-      );
-    }
-
-    const transport = PlatformContext.get().preferredTransport({ endpoint });
-
-    debug?.onRequest?.({
-      provider: String(resolvedModel.provider || "systemsculpt"),
-      endpoint,
-      // The license key is a credential: never write it to the debug payload,
-      // which is persisted to the vault and copied to the clipboard. Reuse the
-      // real header shape but with a redacted placeholder (mirrors the BYOK
-      // executors). The genuine key is sent on the real request below.
-      headers: SystemSculptEnvironment.buildHeaders("[redacted]"),
-      body: requestBody,
-      transport,
-      canStream: true,
-      isCustomProvider: false,
-    });
-
-    const response = await this.platformRequestClient.request({
-      url: endpoint,
-      method: "POST",
-      body: requestBody,
-      stream: true,
-      signal,
-      licenseKey: (this.settings.licenseKey || "").trim(),
-    });
-
-    debug?.onResponse?.({
-      provider: String(resolvedModel.provider || "systemsculpt"),
-      endpoint,
-      status: response.status,
-      headers: serializeResponseHeaders(response.headers),
-      isCustomProvider: false,
-    });
-
-    if (!response.ok) {
-      await StreamingErrorHandler.handleStreamError(response, false, {
-        provider: String(resolvedModel.provider || "systemsculpt"),
-        endpoint,
-        model: prepared.actualModelId,
-      });
-    }
-
-    let diagnostics: any;
-    for await (
-      const event of this.streamingService.streamResponse(response, {
-        model: prepared.actualModelId,
-        isCustomProvider: false,
-        signal,
-        onRawEvent: debug?.onRawEvent,
-        onDiagnostics: (value) => {
-          diagnostics = value;
-        },
-      })
-    ) {
-      try {
-        debug?.onStreamEvent?.({ event });
-      } catch {}
-      yield event;
-    }
-
-    try {
-      debug?.onStreamEnd?.({
-        completed: !signal?.aborted,
-        aborted: !!signal?.aborted,
-        diagnostics,
-      });
-    } catch {}
-  }
-
-  /**
-   * Build a faithful preview of the next chat request body without sending it
-   */
-  public async buildRequestPreview({
-    messages,
-    model,
-    contextFiles,
-  }: {
-    messages: ChatMessage[];
-    model: string;
-    contextFiles?: Set<string>;
-  }): Promise<{ requestBody: Record<string, any>; preparedMessages: ChatMessage[]; actualModelId: string }> {
-    const prepared = await this.prepareChatRequest({
-      messages,
-      model,
-      contextFiles,
-      emitNotices: false,
-    });
-    const requestBody = prepared.modelSource === "pi_local"
-      ? this.buildLocalPiRequestPreview({ prepared })
-      : this.buildHostedChatRequestBody({ prepared });
-
-    return {
-      requestBody,
-      preparedMessages: prepared.preparedMessages,
-      actualModelId: prepared.actualModelId,
-    };
-  }
-
   public async executeHostedToolCall(options: {
     toolCall: ToolCall | ToolCallRequest;
     chatView?: any;
@@ -1568,7 +559,6 @@ export class SystemSculptService {
         error: {
           code: executionCode === 'TOOL_CANCELLED_BEFORE_START'
             || executionCode === 'TOOL_CANCEL_REQUESTED_OUTCOME_UNKNOWN'
-            || executionCode === 'unsupported_retired_http_mcp'
             ? executionCode
             : "TOOL_EXECUTION_FAILED",
           message: error instanceof Error ? error.message : `Tool execution failed for ${functionName}.`,
@@ -1578,26 +568,4 @@ export class SystemSculptService {
     }
   }
 
-  public async getApiStatus(): Promise<ApiStatusResponse | null> {
-    this.refreshSettings();
-    const endpoint = `${this.baseUrl}/status`;
-    try {
-      const { httpRequest } = await import('../utils/httpClient');
-      const response = await httpRequest({
-        url: endpoint,
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(this.settings.licenseKey && { 'x-license-key': this.settings.licenseKey }) as any
-        }
-      });
-      if (!response.status || response.status >= 400) {
-        return { status: "error", message: `API request failed with status ${response.status}` };
-      }
-      const data = response.json || (response.text ? JSON.parse(response.text) : {});
-      return data as ApiStatusResponse;
-    } catch (error) {
-      return { status: "error", message: "Failed to connect to SystemSculpt API. Please check your network connection."};
-    }
-  }
 }

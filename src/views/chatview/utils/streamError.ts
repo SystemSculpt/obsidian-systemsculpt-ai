@@ -16,7 +16,7 @@ export type StreamErrorClassification = {
   retryAfterSeconds: number;
   /**
    * True when the error is expected to clear on its own quickly — short
-   * provider rate limits, transient network blips. False when the user needs
+   * managed-service rate limits and transient network blips. False when the user needs
    * to take action (hard usage caps, multi-hour cooldowns, plan exhaustion).
    * UI surfaces use this to choose Notice vs. modal.
    */
@@ -104,8 +104,8 @@ export function classifyStreamError(
     const userMessage = hard
       ? messageHasRetryHint
         ? message
-        : `${message || "Provider usage limit reached."}${suffix}`
-      : `Provider rate limit reached.${suffix}`;
+        : `${message || "SystemSculpt usage limit reached."}${suffix}`
+      : `SystemSculpt is temporarily rate-limited.${suffix}`;
     return {
       kind: "rate_limit",
       userMessage,
@@ -121,7 +121,7 @@ export function classifyStreamError(
   if (code === ERROR_CODES.NETWORK_ERROR) {
     return {
       kind: "network",
-      userMessage: "Could not reach the provider. Check your internet connection and try again.",
+      userMessage: "Could not reach SystemSculpt. Check your internet connection and try again.",
       retryAfterSeconds: 0,
       transient: true,
     };
@@ -129,7 +129,7 @@ export function classifyStreamError(
   if (code === ERROR_CODES.SERVICE_UNAVAILABLE) {
     return {
       kind: "server",
-      userMessage: "The provider is temporarily unavailable. Please try again in a moment.",
+      userMessage: "SystemSculpt is temporarily unavailable. Please try again in a moment.",
       retryAfterSeconds: 0,
       transient: true,
     };
@@ -137,7 +137,7 @@ export function classifyStreamError(
   if (code === ERROR_CODES.MODEL_UNAVAILABLE) {
     return {
       kind: "model_not_found",
-      userMessage: "The selected model is not available. Try switching to a different model.",
+      userMessage: "SystemSculpt could not run this request. Please try again in a moment.",
       retryAfterSeconds: 0,
       transient: false,
     };
@@ -162,7 +162,7 @@ export function classifyStreamError(
   if (isAuthFailureMessage(combined)) {
     return {
       kind: "auth",
-      userMessage: "Authentication failed for this provider. Check Settings \u2192 Providers to reconnect.",
+      userMessage: "SystemSculpt account authentication failed. Open Account and check your license.",
       retryAfterSeconds: 0,
       transient: false,
     };
@@ -181,7 +181,7 @@ export function classifyStreamError(
   ) {
     return {
       kind: "model_not_found",
-      userMessage: "The selected model is not available. Try switching to a different model.",
+      userMessage: "SystemSculpt could not run this request. Please try again in a moment.",
       retryAfterSeconds: 0,
       transient: false,
     };
@@ -200,7 +200,7 @@ export function classifyStreamError(
   ) {
     return {
       kind: "server",
-      userMessage: "The provider is temporarily unavailable. Please try again in a moment.",
+      userMessage: "SystemSculpt is temporarily unavailable. Please try again in a moment.",
       retryAfterSeconds: 0,
       transient: true,
     };
@@ -220,7 +220,7 @@ export function classifyStreamError(
   ) {
     return {
       kind: "network",
-      userMessage: "Could not reach the provider. Check your internet connection and try again.",
+      userMessage: "Could not reach SystemSculpt. Check your internet connection and try again.",
       retryAfterSeconds: 0,
       transient: true,
     };

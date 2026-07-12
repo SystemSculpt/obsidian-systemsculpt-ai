@@ -1,6 +1,6 @@
 # SystemSculpt AI docs
 
-Last verified against code: **2026-03-12**.
+Last verified against code: **2026-07-12**.
 
 This folder includes both user docs and engineering docs for the Obsidian plugin.
 
@@ -9,6 +9,7 @@ This folder includes both user docs and engineering docs for the Obsidian plugin
 - [Getting started](user/getting-started.md)
 - [Settings](user/settings.md)
 - [Commands](user/commands.md)
+- [Tool use in Chat](user/agent-mode.md)
 - [Ribbon icons](user/ribbon-icons.md)
 - [Similar Notes (embeddings)](user/similar-notes.md)
 - [Audio & transcription](user/audio-transcription.md)
@@ -22,14 +23,8 @@ This folder includes both user docs and engineering docs for the Obsidian plugin
 - [Studio foundation](studio-foundation.md)
 - [Testing coverage map](testing-coverage-map.md)
 
-## Archive docs
-
-- [Archive index](archive/README.md)
-- [On-device embeddings PRD (archival draft)](prd-on-device-embeddings.md)
-- [Design notes (snapshot docs)](design/)
-- [Research notes (time-bound snapshots)](research/)
-
-Operational guidance should come from the root engineering docs above. Historical plans and audits live under `docs/archive/`.
+Historical product drafts and research snapshots are non-operational. Current
+behavior is documented by the user and engineering references above.
 
 ## Canonical code references
 

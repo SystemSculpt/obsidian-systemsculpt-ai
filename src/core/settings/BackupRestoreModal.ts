@@ -259,15 +259,11 @@ export class BackupRestoreModal {
                     
                     // Extract key information
                     if (backupSettings) {
-                        const customProviders = Array.isArray(backupSettings.customProviders) ? backupSettings.customProviders.length : 0;
-                        const favoriteModels = Array.isArray(backupSettings.favoriteModels) ? backupSettings.favoriteModels.length : 0;
-                        const selectedModel = backupSettings.selectedModelId || 'None';
                         const hasLicense = backupSettings.licenseValid === true ? 'Yes' : 'No';
-                        
-                        details = `👤 ${customProviders} provider${customProviders !== 1 ? 's' : ''}\n` +
-                                  `⭐ ${favoriteModels} favorite${favoriteModels !== 1 ? 's' : ''}\n` +
-                                  `🤖 ${selectedModel.split(':').pop()}\n` +
-                                  `🔑 License: ${hasLicense}`;
+                        const schemaVersion = Number.isFinite(backupSettings.schemaVersion)
+                          ? backupSettings.schemaVersion
+                          : "Legacy";
+                        details = `License active: ${hasLicense}\nSchema: ${schemaVersion}`;
             
                         // Removed development mode badge details
                         // if (backupSettings.developmentMode) {

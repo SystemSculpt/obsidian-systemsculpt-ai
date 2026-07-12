@@ -2,7 +2,6 @@ import { SystemSculptSettingTab } from "./SystemSculptSettingTab";
 import { PlatformContext } from "../services/PlatformContext";
 
 type SetupTabContentModule = typeof import("./SetupTabContent");
-type ProvidersTabContentModule = typeof import("./ProvidersTabContent");
 type ChatTabContentModule = typeof import("./ChatTabContent");
 type RecorderTabContentModule = typeof import("./RecorderTabContent");
 type DirectoriesTabContentModule = typeof import("./DirectoriesTabContent");
@@ -13,10 +12,6 @@ type AdvancedTabContentModule = typeof import("./AdvancedTabContent");
 
 function loadSetupTabContentModule(): SetupTabContentModule {
   return require("./SetupTabContent") as SetupTabContentModule;
-}
-
-function loadProvidersTabContentModule(): ProvidersTabContentModule {
-  return require("./ProvidersTabContent") as ProvidersTabContentModule;
 }
 
 function loadChatTabContentModule(): ChatTabContentModule {
@@ -73,20 +68,6 @@ export function buildSettingsTabConfigs(tab: SystemSculptSettingTab): SettingsTa
       },
     },
   ];
-
-  configs.push({
-    id: "providers",
-    label: "Providers",
-    sections: [
-      (parent) => {
-        void loadProvidersTabContentModule().displayProvidersTabContent(parent, tab);
-      },
-    ],
-    anchor: {
-      title: "AI Providers, API Keys, OAuth, BYOK",
-      desc: "Connect your own AI provider accounts (OpenAI, Anthropic, Google, OpenRouter, etc.) to use their models in Chat and Studio.",
-    },
-  });
 
   configs.push(
     {

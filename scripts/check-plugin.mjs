@@ -25,6 +25,7 @@ const FAST_SCRIPT_TESTS = [
   "scripts/check-plugin.test.mjs",
   "scripts/github-workflows.test.mjs",
   "scripts/lint-css.test.mjs",
+  "scripts/plugin-build-options.test.mjs",
   "scripts/check/managed-only-policy.test.mjs",
 ];
 

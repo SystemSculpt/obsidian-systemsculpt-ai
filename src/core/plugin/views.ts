@@ -188,7 +188,7 @@ export class ViewManager {
       await this.processRestoreQueue();
 
       // Lazy-load change: do not fetch models here. We will fetch
-      // on-demand when user opens the model selection or triggers a run.
+      // on demand when a user opens the view or starts a run.
 
       this.isInitialized = true;
 
@@ -234,7 +234,6 @@ export class ViewManager {
       try {
         const minimalState = {
           chatId: state.chatId,
-          selectedModelId: state.selectedModelId || this.plugin.settings.selectedModelId,
           chatTitle: state.chatTitle || "Recovered Chat"
         };
         await view.setState(minimalState);
@@ -270,16 +269,6 @@ export class ViewManager {
 
     this.plugin.registerView(viewType, viewCreator);
     this.registeredViewTypes.add(viewType);
-  }
-
-  private async initializeModels() {
-    try {
-      const models = await this.plugin.modelService.getModels();
-      return models;
-    } catch (error) {
-      // Continue with initialization - models can load on demand
-      return [];
-    }
   }
 
   // Method to defer a view initialization

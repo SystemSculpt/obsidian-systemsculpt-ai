@@ -429,58 +429,6 @@ textarea.systemsculpt-chat-input::placeholder {
 }
 
 /* ------------------------------------------------------------------ *
- * Fixed Chat identity (composer)
- * ------------------------------------------------------------------ */
-.systemsculpt-chat-identity-slot {
-  display: flex;
-  align-items: center;
-  min-width: 0;
-  flex: 1 1 auto;
-}
-
-.systemsculpt-chat-identity {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--ss-space-1);
-  min-width: 0;
-  max-width: 100%;
-  min-height: var(--ss-control-height-sm);
-  padding: 0 var(--ss-space-2);
-  background-color: var(--ss-surface-1);
-  border: 1px solid var(--ss-line);
-  border-radius: var(--ss-radius-full);
-  color: var(--ss-ink);
-  font-size: var(--ss-text-sm);
-}
-
-.systemsculpt-chat-identity-icon {
-  display: inline-flex;
-  align-items: center;
-  flex-shrink: 0;
-  color: var(--ss-ink-accent);
-}
-
-.systemsculpt-chat-identity-body {
-  display: flex;
-  align-items: center;
-  gap: var(--ss-space-1);
-  min-width: 0;
-}
-
-.systemsculpt-chat-identity-label {
-  min-width: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.systemsculpt-chat-identity-model {
-  flex-shrink: 0;
-  padding: 0 var(--ss-space-1);
-  border-radius: var(--ss-radius-full);
-  background-color: var(--ss-accent-tint);
-  font-size: var(--ss-text-xs);
-  color: var(--ss-ink-accent);
 }
 
 /* The empty-chat status card (.systemsculpt-chat-status) is styled in

@@ -23,7 +23,6 @@ This document describes the new hard-switch Studio architecture in the Obsidian 
 - `src/studio/StudioNodeResultCacheStore.ts`: persistent per-node output cache + input fingerprinting.
 - `src/studio/StudioRunScope.ts`: reusable run-scope projection for graph/node runs.
 - `src/studio/StudioApiExecutionAdapter.ts`: Studio execution adapter for the SystemSculpt path.
-- `src/studio/piAuth/StudioPiAuthStorage.ts`: desktop Pi auth storage bridge for provider discovery, OAuth state, and API-key management.
 - `src/studio/StudioRuntime.ts`: run queue, immutable snapshots, events, retention.
 - `src/studio/StudioService.ts`: plugin-facing Studio orchestration service.
 - `src/views/studio/SystemSculptStudioView.ts`: thin Studio leaf orchestrator.
@@ -75,7 +74,9 @@ Given `My Project.systemsculpt`, Studio stores sibling assets in:
 - `studio.dataset` resolves data through a user-configurable adapter command + argument list.
 - `studio.dataset` authentication is adapter-driven: credentials are resolved in the configured working directory/environment (for example from `.env.local`/`DATABASE_URL`), not stored in node output ports.
 - `studio.dataset` inline card includes a read-only latest-result preview so operators can verify fetched data after runs.
-- `studio.http_request` is the canonical outbound API/action node for single or batched requests, including keychain/plaintext auth, retries, throttling, and request-body shaping.
+- Retired `studio.http_request` nodes migrate to a non-executable placeholder.
+  Studio does not store arbitrary API credentials or expose a general outbound
+  HTTP execution node.
 
 ## Grouping Contracts
 - Grouping is graph-native metadata (`project.graph.groups`) persisted in `.systemsculpt`.

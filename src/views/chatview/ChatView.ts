@@ -46,12 +46,10 @@ import { eventHandling } from "./eventHandling";
 import { chatSettingsHandling } from "./chatSettingsHandling";
 import { renderChatStatusSurface } from "./ui/ChatStatusSurface";
 import {
-  getChatModelDisplayName,
-  normalizeStandardChatModelId,
   openChatAccount,
-  promptChatModelSetup,
-  type ChatModelSetupPromptOverrides,
-} from "./modelSelection";
+  promptChatAccountSetup,
+  type ChatAccountSetupPromptOverrides,
+} from "./ChatAccountSetup";
 
 export { CHAT_VIEW_TYPE };
 
@@ -81,7 +79,6 @@ export class ChatView extends ItemView {
   public inputHandler: InputHandler;
   public plugin: SystemSculptPlugin;
   public chatId: string;
-  public selectedModelId: string;
   public systemPromptIndicator: HTMLElement;
   public creditsIndicator: HTMLElement;
   public isGenerating = false;
@@ -158,16 +155,16 @@ export class ChatView extends ItemView {
     // Initialize the chat title
     this.initializeChatTitle(initialState.chatTitle);
 
-    this.selectedModelId = this.resolveLeafSelectedModelId(initialState.selectedModelId, {
-      preserveCurrent: false,
-    });
     this.isGenerating = false;
     this.isFullyLoaded = false; // Start as not loaded
 
     // Use -1 as uninitialized state to distinguish from actual version 0
     this.chatVersion = initialState.version !== undefined ? initialState.version : -1;
     this.chatBackend = this.defaultChatBackend();
-    this.applyChatLeafState(initialState);
+    this.applyChatLeafState({
+      chatBackend: initialState.chatBackend,
+      legacyModelId: initialState.selectedModelId,
+    });
 
     this.ensureCoreServicesReady();
 
@@ -199,19 +196,8 @@ export class ChatView extends ItemView {
     return "systemsculpt";
   }
 
-  private resolveLeafSelectedModelId(
-    nextSelectedModelId?: unknown,
-    _options?: { preserveCurrent?: boolean },
-  ): string {
-    return normalizeStandardChatModelId(String(nextSelectedModelId ?? ""));
-  }
-
   private getActiveSystemPromptType(): "general-use" | "agent" {
     return "agent";
-  }
-
-  public getCurrentModelName(): string {
-    return getChatModelDisplayName(this.selectedModelId);
   }
 
   public getManagedChatAdmission(): ManagedChatAdmissionPort { return this.plugin.getManagedCapabilityClient(); }
@@ -237,7 +223,7 @@ export class ChatView extends ItemView {
   async onOpen(): Promise<void> {
     this.ensureCoreServicesReady();
     await uiSetup.onOpen(this);
-    await this.refreshModelMetadata();
+    this.refreshChatStatusIfEmpty();
     void this.refreshCreditsBalance();
   }
   updateSystemPromptIndicator = () => uiSetup.updateSystemPromptIndicator(this);
@@ -256,7 +242,6 @@ export class ChatView extends ItemView {
 
   private getChatSaveOptions(overrides?: Partial<ChatSaveOptions>): ChatSaveOptions {
     return {
-      selectedModelId: this.getPersistedSelectedModelId(),
       contextFiles: this.contextManager?.getContextFiles() || new Set<string>(),
       title: this.chatTitle,
       chatFontSize: this.chatFontSize,
@@ -709,8 +694,8 @@ export class ChatView extends ItemView {
     const errorContext = {
       source: 'ChatView',
       method: 'handleError',
-      modelId: this.getEffectiveSelectedModelId(),
       metadata: {
+        runtime: "managed",
         chatId: this.chatId,
         messageCount: this.messages.length,
         isGenerating: this.isGenerating,
@@ -855,8 +840,8 @@ export class ChatView extends ItemView {
       const result = await showPopup(
         this.app,
         expired
-          ? "Your SystemSculpt subscription has expired, so the managed AI can't run.\n\nRenew to continue, or switch to your own API key in Settings."
-          : "Your SystemSculpt license key is invalid or was changed, so the managed AI can't run.\n\nRenew or re-enter your key, or switch to your own API key in Settings.",
+          ? "Your SystemSculpt subscription has expired, so the managed AI can't run.\n\nRenew to continue."
+          : "Your SystemSculpt license key is invalid or was changed, so the managed AI can't run.\n\nRenew or re-enter your key in Account.",
         {
           title: expired ? "Subscription expired" : "License problem",
           icon: "key-round",
@@ -1067,27 +1052,11 @@ export class ChatView extends ItemView {
     });
   }
 
-  public getEffectiveSelectedModelId(): string {
-    return normalizeStandardChatModelId(this.selectedModelId);
-  }
-
-  private getPersistedSelectedModelId(): string {
-    return normalizeStandardChatModelId(this.selectedModelId);
-  }
-
-  public isManagedSelectedModel(): boolean {
-    return true;
-  }
-
-  private async resolveLoadedSelectedModelId(savedModelId: string): Promise<string> {
-    return normalizeStandardChatModelId(savedModelId);
-  }
-
   public async promptAccountSetup(
     customMessage?: string,
-    overrides?: ChatModelSetupPromptOverrides
+    overrides?: ChatAccountSetupPromptOverrides
   ): Promise<void> {
-    await promptChatModelSetup({
+    await promptChatAccountSetup({
       app: this.app,
       openAccount: () => {
         this.plugin.openSettingsTab("account");
@@ -1357,7 +1326,7 @@ export class ChatView extends ItemView {
       chat: {
         chatId: this.chatId || null,
         chatTitle: this.chatTitle || null,
-        modelId: this.getEffectiveSelectedModelId() || null,
+        runtime: "managed",
         chatBackend: this.chatBackend || null,
       },
       history: {
@@ -1386,12 +1355,6 @@ export class ChatView extends ItemView {
     }
 
     new Notice("Chat file and log paths copied to clipboard.", 4000);
-  }
-
-  private async refreshModelMetadata(): Promise<void> {
-    this.inputHandler?.refreshTokenCounter();
-    this.inputHandler?.onModelChange();
-    this.refreshChatStatusIfEmpty();
   }
 
   /**
@@ -1480,7 +1443,6 @@ export class ChatView extends ItemView {
     return {
       chatId: this.chatId,
       chatTitle: this.chatTitle,
-      selectedModelId: this.getPersistedSelectedModelId(),
       version: this.chatVersion,
       chatFontSize: this.chatFontSize,
       hideSystemMessages: this.hideSystemMessages,
@@ -1506,10 +1468,7 @@ export class ChatView extends ItemView {
     if (!state?.chatId) {
       this.chatId = "";
       this.initializeChatTitle();
-      // Normalize command/automation migration input before the fresh composer
-      // can observe or persist it.
       this.chatBackend = this.defaultChatBackend();
-      this.selectedModelId = this.resolveLeafSelectedModelId(state?.selectedModelId);
  
       // Restore chat font size for new chats if provided in state
       if (state?.chatFontSize) {
@@ -1526,7 +1485,7 @@ export class ChatView extends ItemView {
       this.projectTranscript();
       this.contextManager?.clearContext();
       this.inputHandler?.resetForFreshChat?.();
-      void this.refreshModelMetadata();
+      this.refreshChatStatusIfEmpty();
       this.updateSystemPromptIndicator();
       // Don't render messages here - let onOpen handle it after UI is ready
       // this.renderMessagesInChunks();
@@ -1549,8 +1508,6 @@ export class ChatView extends ItemView {
     }
     this.virtualStartIndex = 0;
     this.hasAdjustedInitialWindow = false;
-    // Normalize restored leaf input before loading persisted Chat state.
-    this.selectedModelId = this.resolveLeafSelectedModelId(state?.selectedModelId);
     this.initializeChatTitle(state.chatTitle);
     this.chatVersion = state.version !== undefined ? state.version : -1;
 
@@ -1650,21 +1607,17 @@ export class ChatView extends ItemView {
           this.isFullyLoaded = true; // Mark as loaded even when chat not found
           this.inputHandler?.notifyChatReadyChanged?.();
           // UI indicators can update asynchronously
-          void this.refreshModelMetadata();
+          this.refreshChatStatusIfEmpty();
           void this.updateSystemPromptIndicator();
           return;
         }
 
-        // Restore all chat properties
-        this.selectedModelId = await this.resolveLoadedSelectedModelId(
-          chatData.selectedModelId || this.plugin.settings.selectedModelId
-        );
         this.setTitle(chatData.title || generateDefaultChatTitle(), false);
         const persistedMessages = chatData.messages || [];
         this.chatVersion = chatData.version || 0;
 
         this.applyChatLeafState({
-          selectedModelId: chatData.selectedModelId,
+          legacyModelId: chatData.legacyModelId,
           chatBackend: chatData.chatBackend,
         });
         this.chatTranscript = ChatTranscript.loadStored(this.transcriptStorage(), {
@@ -1712,7 +1665,7 @@ export class ChatView extends ItemView {
         this.inputHandler?.notifyChatReadyChanged?.();
 
         // Update UI indicators (async; do not block chat readiness)
-        void this.refreshModelMetadata();
+        this.refreshChatStatusIfEmpty();
         void this.updateSystemPromptIndicator();
 
         // Validate context files in the background
@@ -2047,7 +2000,6 @@ export class ChatView extends ItemView {
       const uiLog = logger ? await logger.writeUiLog(snapshot) : { errors: ["Debug logger unavailable"], bytes: snapshot.length };
       const streamLog = logger ? await logger.writeStreamLog() : { errors: ["Debug logger unavailable"], bytes: 0 };
       const streamStats = logger?.getStreamStats();
-      const streamDiagnostics = logger?.getLastStreamDiagnostics();
       const expectedPaths = logger?.buildLogPathsDetailed();
 
       const index = {
@@ -2059,7 +2011,7 @@ export class ChatView extends ItemView {
         chat: {
           chatId: this.chatId || null,
           chatTitle: this.chatTitle || null,
-          modelId: this.getEffectiveSelectedModelId() || null,
+          runtime: "managed",
           chatVersion: this.chatVersion,
           chatBackend: this.chatBackend || null,
         },
@@ -2079,8 +2031,6 @@ export class ChatView extends ItemView {
             bufferBytes: streamStats?.bytes ?? null,
             bufferMaxBytes: streamStats?.maxBytes ?? null,
             truncated: streamStats?.truncated ?? null,
-            discardedPayloadCount: streamDiagnostics?.discardedPayloadCount ?? null,
-            discardedPayloadSamples: streamDiagnostics?.discardedPayloadSamples ?? null,
             expectedPath: expectedPaths?.stream.relative ?? null,
             expectedAbsolutePath: expectedPaths?.stream.absolute ?? null,
           },
@@ -2374,8 +2324,7 @@ export class ChatView extends ItemView {
         chatVersion: this.chatVersion,
         isFullyLoaded: this.isFullyLoaded,
         isGenerating: this.isGenerating,
-        selectedModelId: this.getEffectiveSelectedModelId(),
-        currentModelName: this.getCurrentModelName(),
+        runtime: "managed",
         promptProfile,
         systemPrompt: systemPromptDetails,
         currentPrompt: this.currentPrompt,
@@ -2529,8 +2478,7 @@ export class ChatView extends ItemView {
       backend: this.chatBackend,
       isFullyLoaded: this.isFullyLoaded,
       isGenerating: this.isGenerating,
-      selectedModelId: this.getEffectiveSelectedModelId(),
-      currentModelName: this.getCurrentModelName(),
+      runtime: "managed",
       messageCount: serializedMessages.length,
       messages: serializedMessages,
       contextFiles: Array.from(this.contextManager?.getContextFiles?.() || []),
@@ -2544,7 +2492,7 @@ export class ChatView extends ItemView {
   }
 
   private applyChatLeafState(state: {
-    selectedModelId?: string;
+    legacyModelId?: string;
     chatBackend?: ChatBackend;
     piSessionFile?: string;
     piSessionId?: string;
@@ -2553,39 +2501,14 @@ export class ChatView extends ItemView {
       explicitBackend: state.chatBackend,
       piSessionFile: state.piSessionFile,
       piSessionId: state.piSessionId,
-      model: state.selectedModelId,
+      model: state.legacyModelId,
     });
-  }
-
-  public getSelectedModelId(): string {
-    return this.getEffectiveSelectedModelId();
   }
 
   public isLegacyReadOnlyChat(): boolean {
     return this.chatBackend === "legacy" && String(this.chatId || "").trim().length > 0;
   }
 
-  public async setSelectedModelId(
-    modelId: string,
-    options?: { focusInput?: boolean },
-  ): Promise<void> {
-    const canonicalId = normalizeStandardChatModelId(modelId);
-    this.selectedModelId = canonicalId;
-    try {
-      await this.plugin
-        .getSettingsManager()
-        .updateSettings({ selectedModelId: canonicalId });
-    } catch {}
-
-    // Save the chat to persist the model change
-    await this.saveChat();
-    await this.refreshModelMetadata();
-    if (options?.focusInput !== false) {
-      this.focusInput();
-    }
-    // Centralized sync + broadcast
-    this.notifySettingsChanged();
-  }
 
   private getChatExportService(): ChatExportService {
     if (!this.chatExportService) {

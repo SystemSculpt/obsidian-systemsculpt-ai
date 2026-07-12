@@ -1,76 +1,23 @@
-// API configuration and environment toggles
-// Set DEVELOPMENT_MODE to "PRODUCTION" for release builds.
+declare const __SYSTEMSCULPT_API_BASE_URL__: string | undefined;
 
-export const DEVELOPMENT_MODE: "DEVELOPMENT" | "PRODUCTION" = "PRODUCTION";
+export const PRODUCTION_API_BASE_URL = "https://api.systemsculpt.com/api/v1";
 
-export function getServerUrl(productionUrl: string, developmentUrl: string): string {
-  return DEVELOPMENT_MODE === "DEVELOPMENT" ? developmentUrl : productionUrl;
-}
+/** Build-time API ownership. Local QA overrides this through esbuild only. */
+export const API_BASE_URL =
+  typeof __SYSTEMSCULPT_API_BASE_URL__ === "string" && __SYSTEMSCULPT_API_BASE_URL__.trim()
+    ? __SYSTEMSCULPT_API_BASE_URL__.replace(/\/+$/, "")
+    : PRODUCTION_API_BASE_URL;
 
-export const API_BASE_URL = getServerUrl(
-  "https://api.systemsculpt.com/api/v1",
-  "http://localhost:3001/api/v1",
-);
-
-export const WEBSITE_API_BASE_URL = getServerUrl(
-  "https://systemsculpt.com/api/plugin",
-  "http://localhost:3000/api/plugin",
-);
+export const WEBSITE_API_BASE_URL = "https://systemsculpt.com/api/plugin";
+export const IS_DEVELOPMENT_BUILD = API_BASE_URL !== PRODUCTION_API_BASE_URL;
 
 export const SYSTEMSCULPT_API_ENDPOINTS = {
-  PLUGINS: {
-    LATEST: (pluginId: string) => `/plugins/${pluginId}/latest`,
-    RELEASES: (pluginId: string) => `/plugins/${pluginId}/releases`,
-  },
-  LICENSE: {
-    VALIDATE: () => `/license/validate`,
-  },
-  MODELS: {
-    LIST: "/models",
-    GET: (modelId: string) => `/models/${modelId}`,
-  },
-  CHAT: {
-    COMPLETIONS: "/chat/completions",
-  },
+  LICENSE: { VALIDATE: () => "/license/validate" },
   CREDITS: {
     BALANCE: "/credits/balance",
     USAGE: "/credits/usage",
   },
-  EMBEDDINGS: {
-    GENERATE: "/embeddings",
-  },
-  IMAGES: {
-    MODELS: "/images/models",
-    INPUTS_PREPARE: "/images/inputs/prepare",
-    GENERATION_JOBS: "/images/generations/jobs",
-    GENERATION_JOB: (jobId: string) => `/images/generations/jobs/${encodeURIComponent(jobId)}`,
-  },
-  SYSTEM_PROMPTS: {
-    GET: (id: string) => `/system-prompts/${id}`,
-    LIST: "/system-prompts",
-  },
-  DOCUMENTS: {
-    PROCESS: "/documents/process",
-    GET: (id: string) => `/documents/${id}`,
-    DOWNLOAD: (id: string) => `/documents/${id}/download`,
-  },
-  YOUTUBE: {
-    TRANSCRIPTS: "/youtube/transcripts",
-    TRANSCRIPT_STATUS: (jobId: string) => `/youtube/transcripts/${jobId}`,
-  },
 } as const;
-
-export interface ApiErrorDetails {
-  message: string;
-  code: string;
-  statusCode: number;
-}
-
-export interface ApiResponse<T> {
-  status: "success" | "error";
-  data: T | null;
-  error?: ApiErrorDetails;
-}
 
 export interface LicenseValidationResponse {
   email: string;

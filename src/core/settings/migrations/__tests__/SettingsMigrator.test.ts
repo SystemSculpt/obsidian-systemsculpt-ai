@@ -1,6 +1,7 @@
 import { DEFAULT_SETTINGS } from "../../../../types";
 import {
   CURRENT_SCHEMA_VERSION,
+  LEGACY_CLIENT_MODEL_KEYS_REMOVED_IN_V4,
   LEGACY_EMBEDDINGS_KEYS_REMOVED_IN_V3,
   LEGACY_KEYS_REMOVED_IN_V1,
   deepMergeDefaults,
@@ -92,7 +93,7 @@ describe("migrateSettingsToCurrentSchema", () => {
     }
   });
 
-  it("preserves the user's custom providers and license through migration (#112)", () => {
+  it("removes retired provider credentials while preserving managed account state", () => {
     const raw = {
       licenseKey: "user-key",
       licenseValid: true,
@@ -101,9 +102,38 @@ describe("migrateSettingsToCurrentSchema", () => {
       ],
     };
     const result = migrateSettingsToCurrentSchema(raw, DEFAULT_SETTINGS);
-    expect(result.settings.customProviders).toEqual(raw.customProviders);
+    expect(result.settings).not.toHaveProperty("customProviders");
     expect(result.settings.licenseKey).toBe("user-key");
     expect(result.settings.licenseValid).toBe(true);
+  });
+
+  it("upgrades schema v3 to v4 by deleting every retired client authority key", () => {
+    const raw: Record<string, unknown> = {
+      schemaVersion: 3,
+      licenseKey: "managed-license",
+      licenseValid: true,
+      chatsDirectory: "Vault/Chats",
+    };
+    for (const key of LEGACY_CLIENT_MODEL_KEYS_REMOVED_IN_V4) {
+      raw[key] = key.includes("Key") || key.includes("Auth")
+        ? "sentinel-secret"
+        : { retired: true };
+    }
+
+    const result = migrateSettingsToCurrentSchema(raw, DEFAULT_SETTINGS);
+
+    expect(result.appliedSteps).toContain(
+      "Remove retired client-side provider, model, Pi auth, and BYOK settings",
+    );
+    for (const key of LEGACY_CLIENT_MODEL_KEYS_REMOVED_IN_V4) {
+      expect(result.settings).not.toHaveProperty(key);
+    }
+    expect(result.settings).toMatchObject({
+      schemaVersion: 4,
+      licenseKey: "managed-license",
+      licenseValid: true,
+      chatsDirectory: "Vault/Chats",
+    });
   });
 
   it("prunes retired disclosure acceptance when upgrading a schema-v1 settings file", () => {
@@ -132,7 +162,6 @@ describe("migrateSettingsToCurrentSchema", () => {
 
   it("back-fills brand-new install defaults for empty persisted data", () => {
     const result = migrateSettingsToCurrentSchema({}, DEFAULT_SETTINGS);
-    expect(result.settings.selectedModelId).toBe(DEFAULT_SETTINGS.selectedModelId);
     expect(result.settings.chatsDirectory).toBe(DEFAULT_SETTINGS.chatsDirectory);
     expect(result.settings.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
   });

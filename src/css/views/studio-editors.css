@@ -645,10 +645,6 @@
   border-color: var(--ss-line-strong);
 }
 
-.ss-studio-searchable-select-trigger.is-provider-authenticated {
-  border-left: 2px solid var(--ss-success);
-}
-
 .ss-studio-searchable-select-trigger-label {
   min-width: 0;
   white-space: nowrap;
@@ -721,10 +717,6 @@
 
 .ss-studio-searchable-select-item.is-selected {
   background-color: var(--ss-accent-tint);
-}
-
-.ss-studio-searchable-select-item.is-provider-authenticated {
-  border-left: 2px solid var(--ss-success);
 }
 
 .ss-studio-searchable-select-item-label,

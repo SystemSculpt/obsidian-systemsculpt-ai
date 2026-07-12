@@ -3,7 +3,6 @@ import { SystemSculptSettings, DEFAULT_SETTINGS, LogLevel, createDefaultWorkflow
 import SystemSculptPlugin from "../../main";
 import { AutomaticBackupService } from "./AutomaticBackupService";
 import { applyCurrentSecretsToBackup, redactSettingsForBackup } from "./backupSanitizer";
-import { canonicalizeSystemSculptServerUrlSetting } from "../../utils/urlHelpers";
 import { resolveAbsoluteVaultPath } from "../../utils/vaultPathUtils";
 import {
   CURRENT_SCHEMA_VERSION,
@@ -67,11 +66,6 @@ export class SettingsManager {
     // Settings migration - silent process
     // Deep merge with defaults to ensure nested objects are properly initialized
     const migratedSettings = { ...settingsToMigrate };
-    // Ensure settings mode exists; default to standard for a simpler UX
-    if (!migratedSettings.settingsMode || (migratedSettings.settingsMode !== 'standard' && migratedSettings.settingsMode !== 'advanced')) {
-      migratedSettings.settingsMode = DEFAULT_SETTINGS.settingsMode;
-    }
-
     const generateVaultInstanceId = (): string => {
       try {
         const globalCrypto: any = (globalThis as any).crypto;
@@ -94,36 +88,6 @@ export class SettingsManager {
 
     // Legacy/dead keys are pruned by the versioned migrator's v0→v1 step
     // (SettingsMigrator.LEGACY_KEYS_REMOVED_IN_V1) — no ad-hoc deletes here.
-
-    // Ensure other nested objects are properly initialized
-    if (!migratedSettings.favoritesFilterSettings) {
-      migratedSettings.favoritesFilterSettings = DEFAULT_SETTINGS.favoritesFilterSettings;
-    }
-    
-    if (!migratedSettings.modelFilterSettings) {
-      migratedSettings.modelFilterSettings = DEFAULT_SETTINGS.modelFilterSettings;
-    }
-    
-    if (!migratedSettings.activeProvider) {
-      migratedSettings.activeProvider = DEFAULT_SETTINGS.activeProvider;
-    }
-    
-    // Ensure arrays are initialized
-    if (!Array.isArray(migratedSettings.customProviders)) {
-      migratedSettings.customProviders = DEFAULT_SETTINGS.customProviders;
-    }
-
-    if (
-      typeof migratedSettings.studioPiAuthMigrationVersion !== "number" ||
-      !Number.isFinite(migratedSettings.studioPiAuthMigrationVersion) ||
-      migratedSettings.studioPiAuthMigrationVersion < 0
-    ) {
-      migratedSettings.studioPiAuthMigrationVersion = DEFAULT_SETTINGS.studioPiAuthMigrationVersion;
-    }
-    
-    if (!Array.isArray(migratedSettings.favoriteModels)) {
-      migratedSettings.favoriteModels = DEFAULT_SETTINGS.favoriteModels;
-    }
 
     const defaultWorkflowEngine = createDefaultWorkflowEngineSettings();
     if (!migratedSettings.workflowEngine) {
@@ -172,10 +136,6 @@ export class SettingsManager {
       delete (migratedSettings.workflowEngine as any).templates;
     }
     
-    if (!Array.isArray(migratedSettings.mcpServers)) {
-      migratedSettings.mcpServers = DEFAULT_SETTINGS.mcpServers;
-    }
-
     if (typeof migratedSettings.debugMode !== "boolean") {
       migratedSettings.debugMode = DEFAULT_SETTINGS.debugMode;
     }
@@ -459,30 +419,7 @@ export class SettingsManager {
   private validateSettings(settings: SystemSculptSettings): SystemSculptSettings {
     // Create a copy to avoid modifying the original
     const validatedSettings = { ...settings };
-    // Validate settings mode
-    if (validatedSettings.settingsMode !== 'standard' && validatedSettings.settingsMode !== 'advanced') {
-      validatedSettings.settingsMode = DEFAULT_SETTINGS.settingsMode;
-    }
     const defaultSettings = DEFAULT_SETTINGS;
-
-    // Ensure critical arrays exist
-    if (!Array.isArray(validatedSettings.customProviders)) {
-      validatedSettings.customProviders = [];
-    }
-
-    if (
-      typeof validatedSettings.studioPiAuthMigrationVersion !== "number" ||
-      !Number.isFinite(validatedSettings.studioPiAuthMigrationVersion) ||
-      validatedSettings.studioPiAuthMigrationVersion < 0
-    ) {
-      validatedSettings.studioPiAuthMigrationVersion = defaultSettings.studioPiAuthMigrationVersion;
-    } else {
-      validatedSettings.studioPiAuthMigrationVersion = Math.floor(validatedSettings.studioPiAuthMigrationVersion);
-    }
-
-    if (!Array.isArray(validatedSettings.favoriteModels)) {
-      validatedSettings.favoriteModels = [];
-    }
 
     // Validate directories - these are critical for proper functioning
     // Using a simpler approach to avoid TypeScript errors
@@ -515,10 +452,6 @@ export class SettingsManager {
     if (typeof validatedSettings.licenseValid !== 'boolean') {
       validatedSettings.licenseValid = defaultSettings.licenseValid;
     }
-
-    const hasActiveLicense = !!validatedSettings.licenseKey?.trim() && validatedSettings.licenseValid === true;
-    validatedSettings.enableSystemSculptProvider = hasActiveLicense;
-    validatedSettings.useSystemSculptAsFallback = hasActiveLicense;
 
     if (typeof validatedSettings.autoTranscribeRecordings !== 'boolean') {
       validatedSettings.autoTranscribeRecordings = defaultSettings.autoTranscribeRecordings;
@@ -560,42 +493,8 @@ export class SettingsManager {
       validatedSettings.embeddingsEnabled = defaultSettings.embeddingsEnabled;
     }
 
-    // Validate string settings that should never be null - using a simpler approach
-    if (typeof validatedSettings.selectedModelId !== 'string') {
-      validatedSettings.selectedModelId =
-        typeof defaultSettings.selectedModelId === "string" ? defaultSettings.selectedModelId : "";
-    }
-    validatedSettings.selectedModelId = validatedSettings.selectedModelId.trim().length > 0
-      ? validatedSettings.selectedModelId
-      : "";
-
     if (typeof validatedSettings.licenseKey !== 'string') {
       validatedSettings.licenseKey = defaultSettings.licenseKey;
-    }
-
-    // Keep openAiApiKey validation for backward compatibility
-    // Users can still use OpenAI through custom providers
-    if (!validatedSettings.openAiApiKey) {
-      validatedSettings.openAiApiKey = '';
-    }
-
-    if (typeof validatedSettings.imageGenerationDefaultModelId !== "string") {
-      validatedSettings.imageGenerationDefaultModelId = defaultSettings.imageGenerationDefaultModelId;
-    }
-
-    if (typeof validatedSettings.imageGenerationLastUsedModelId !== "string") {
-      validatedSettings.imageGenerationLastUsedModelId = defaultSettings.imageGenerationLastUsedModelId;
-    }
-
-    if (typeof validatedSettings.imageGenerationLastUsedAspectRatio !== "string") {
-      validatedSettings.imageGenerationLastUsedAspectRatio = defaultSettings.imageGenerationLastUsedAspectRatio;
-    }
-
-    const lastUsedCount = Number(validatedSettings.imageGenerationLastUsedCount);
-    if (!Number.isFinite(lastUsedCount)) {
-      validatedSettings.imageGenerationLastUsedCount = defaultSettings.imageGenerationLastUsedCount;
-    } else {
-      validatedSettings.imageGenerationLastUsedCount = Math.max(1, Math.min(4, Math.floor(lastUsedCount)));
     }
 
     if (typeof validatedSettings.defaultChatTag !== "string") {
@@ -621,34 +520,6 @@ export class SettingsManager {
       validatedSettings.studioJsonEditorDefaultMode = defaultSettings.studioJsonEditorDefaultMode;
     }
 
-    // Validate activeProvider
-    if (!validatedSettings.activeProvider ||
-        typeof validatedSettings.activeProvider !== 'object' ||
-        !validatedSettings.activeProvider.id ||
-        !validatedSettings.activeProvider.name ||
-        !validatedSettings.activeProvider.type) {
-      validatedSettings.activeProvider = { ...defaultSettings.activeProvider };
-    }
-
-    // Validate favoritesFilterSettings
-    if (!validatedSettings.favoritesFilterSettings ||
-        typeof validatedSettings.favoritesFilterSettings !== 'object') {
-      validatedSettings.favoritesFilterSettings = { ...defaultSettings.favoritesFilterSettings };
-    } else {
-      // Validate individual properties of favoritesFilterSettings
-      if (typeof validatedSettings.favoritesFilterSettings.showFavoritesOnly !== 'boolean') {
-        validatedSettings.favoritesFilterSettings.showFavoritesOnly = defaultSettings.favoritesFilterSettings.showFavoritesOnly;
-      }
-
-      if (typeof validatedSettings.favoritesFilterSettings.favoritesFirst !== 'boolean') {
-        validatedSettings.favoritesFilterSettings.favoritesFirst = defaultSettings.favoritesFilterSettings.favoritesFirst;
-      }
-
-      if (typeof validatedSettings.favoritesFilterSettings.modelSortOrder !== 'string') {
-        validatedSettings.favoritesFilterSettings.modelSortOrder = defaultSettings.favoritesFilterSettings.modelSortOrder;
-      }
-    }
-
     if (!Array.isArray(validatedSettings.favoriteChats)) {
       validatedSettings.favoriteChats = defaultSettings.favoriteChats;
     }
@@ -660,12 +531,6 @@ export class SettingsManager {
     // Legacy/dead keys (cachedEmbeddingStats, selectedProvider, systemPrompt*, …)
     // are pruned once by the versioned migrator's v0→v1 step, not on every
     // validate pass. See SettingsMigrator.LEGACY_KEYS_REMOVED_IN_V1.
-
-    // Persist the canonical hosted API origin. Production builds always pin this to the
-    // real SystemSculpt API, while development builds still normalize local overrides.
-    validatedSettings.serverUrl = canonicalizeSystemSculptServerUrlSetting(
-      typeof validatedSettings.serverUrl === "string" ? validatedSettings.serverUrl : ""
-    );
 
     const defaultWorkflowEngine = createDefaultWorkflowEngineSettings();
     const providedWorkflowEngine = validatedSettings.workflowEngine;
@@ -1205,14 +1070,6 @@ export class SettingsManager {
 
   public async setLicenseKey(key: string): Promise<void> {
     await this.updateSettings({ licenseKey: key });
-  }
-
-  public getServerUrl(): string {
-    return this.getSettings().serverUrl;
-  }
-  
-  public async setServerUrl(url: string): Promise<void> {
-    await this.updateSettings({ serverUrl: canonicalizeSystemSculptServerUrlSetting(url) });
   }
 
   /**

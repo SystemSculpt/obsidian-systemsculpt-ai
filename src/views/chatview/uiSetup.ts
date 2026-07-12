@@ -9,7 +9,7 @@ import { renderChatCreditsIndicator } from "./ui/ChatComposerIndicators";
 import { openExternalUrl } from "../../utils/externalUrl";
 
 // ────────────────────────────────────────────────────────────────────────────
-// Utility helpers for desktop Pi chat UI
+// Utility helpers for the managed desktop chat UI.
 // ────────────────────────────────────────────────────────────────────────────
 const LICENSE_BANNER_CLASS = "systemsculpt-license-banner";
 
@@ -166,15 +166,10 @@ export const uiSetup = {
       getChatTitle: () => chatView.getChatTitle(),
       addFileToContext: (file: TFile) => chatView.addFileToContext(file),
       getChatId: () => chatView.chatId,
-      onModelChange: () => {
-        if (chatView.messages.length === 0) {
-          chatView.displayChatStatus();
-        }
-      },
       chatView: chatView,
     });
 
-    chatView.inputHandler.onModelChange();
+    if (chatView.messages.length === 0) chatView.displayChatStatus();
 
     chatView.registerEvent(
       chatView.app.workspace.on("active-leaf-change", (leaf) => {
@@ -309,8 +304,8 @@ export const uiSetup = {
     const textSpan = document.createElement("span");
     textSpan.className = "systemsculpt-license-banner-text";
     textSpan.textContent = options.expired
-      ? "Your SystemSculpt subscription has expired. Renew to keep using the managed AI, or switch to your own API key in Settings."
-      : "Your SystemSculpt license is invalid. Renew or update your key to keep using the managed AI, or switch to your own API key in Settings.";
+      ? "Your SystemSculpt subscription has expired. Renew to keep using the managed AI."
+      : "Your SystemSculpt license is invalid. Renew or update your key in Account.";
     banner.appendChild(textSpan);
 
     const renewBtn = document.createElement("button");

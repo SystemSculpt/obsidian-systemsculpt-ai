@@ -11,5 +11,6 @@
  *  - 1: schema versioning introduced; legacy/dead keys pruned (see #212).
  *  - 2: retired client-side managed disclosure acceptance removed.
  *  - 3: legacy configurable embeddings provider and retry controls removed.
+ *  - 4: client-side provider, model selection, Pi auth, and BYOK state removed.
  */
-export const CURRENT_SCHEMA_VERSION = 3;
+export const CURRENT_SCHEMA_VERSION = 4;

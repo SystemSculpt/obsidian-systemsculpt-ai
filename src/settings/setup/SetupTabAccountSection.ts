@@ -25,9 +25,6 @@ export function renderAccountSection(
         new Notice("Invalid license key. Please check and try again.");
         return false;
       }
-      try {
-        await plugin.modelService.refreshModels();
-      } catch {}
       new Notice("License activated successfully.");
       tabInstance.display();
       return true;
@@ -55,8 +52,6 @@ export function renderAccountSection(
             button.setDisabled(true).setButtonText("Working...");
             await plugin.getSettingsManager().updateSettings({
               licenseValid: false,
-              enableSystemSculptProvider: false,
-              useSystemSculptAsFallback: false,
             });
             new Notice("License deactivated.");
             tabInstance.display();
@@ -125,8 +120,6 @@ export function renderAccountSection(
       const priorLicenseState = {
         licenseKey: plugin.settings.licenseKey,
         licenseValid: plugin.settings.licenseValid === true,
-        enableSystemSculptProvider: plugin.settings.enableSystemSculptProvider === true,
-        useSystemSculptAsFallback: plugin.settings.useSystemSculptAsFallback === true,
       };
 
       try {
