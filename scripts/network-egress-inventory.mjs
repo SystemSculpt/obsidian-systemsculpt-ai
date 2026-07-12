@@ -537,25 +537,51 @@ function semanticOccurrences(file, source, checker, programSourceFile, semanticB
 export function semanticTree(root, mode, ref, semanticOptions = {}) {
   const files = mode === 'source-ref' ? baselineFiles(root, ref) : mode === 'index' ? indexFiles(root) : worktreeFiles(root);
   const sources = new Map(files.map(file => [path.resolve(root, file), sourceFor(root, mode, ref, file)]));
+  const sourceRoot = path.resolve(root, 'src');
+  const isVirtualSourcePath = resolved => resolved === sourceRoot || resolved.startsWith(`${sourceRoot}${path.sep}`);
+  const virtualDirectories = new Set([sourceRoot]);
+  for (const sourcePath of sources.keys()) {
+    let directory = path.dirname(sourcePath);
+    while (isVirtualSourcePath(directory)) {
+      virtualDirectories.add(directory);
+      if (directory === sourceRoot) break;
+      directory = path.dirname(directory);
+    }
+  }
   const options = { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext, moduleResolution: ts.ModuleResolutionKind.Bundler, allowJs: true, skipLibCheck: true, noResolve: false };
   const base = ts.createCompilerHost(options, true);
   const host = {
     ...base,
+    directoryExists(name) {
+      const resolved = path.resolve(name);
+      if (isVirtualSourcePath(resolved)) return virtualDirectories.has(resolved);
+      return base.directoryExists?.(name) ?? false;
+    },
+    getDirectories(name) {
+      const resolved = path.resolve(name);
+      if (isVirtualSourcePath(resolved)) {
+        return [...virtualDirectories]
+          .filter(directory => directory !== resolved && path.dirname(directory) === resolved)
+          .map(directory => path.basename(directory))
+          .sort((left, right) => left.localeCompare(right, 'en'));
+      }
+      return base.getDirectories?.(name) ?? [];
+    },
     fileExists(name) {
       const resolved = path.resolve(name);
-      if (resolved.startsWith(`${path.resolve(root, 'src')}${path.sep}`)) return sources.has(resolved);
+      if (isVirtualSourcePath(resolved)) return sources.has(resolved);
       return sources.has(resolved) || base.fileExists(name);
     },
     readFile(name) {
       const resolved = path.resolve(name);
-      if (resolved.startsWith(`${path.resolve(root, 'src')}${path.sep}`)) return sources.get(resolved);
+      if (isVirtualSourcePath(resolved)) return sources.get(resolved);
       return sources.get(resolved) ?? base.readFile(name);
     },
     getSourceFile(name, languageVersion) {
       const resolved = path.resolve(name);
       const text = sources.get(resolved);
       if (text !== undefined) return ts.createSourceFile(resolved, text, languageVersion, true, name.endsWith('x') ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
-      if (resolved.startsWith(`${path.resolve(root, 'src')}${path.sep}`)) return undefined;
+      if (isVirtualSourcePath(resolved)) return undefined;
       return base.getSourceFile(name, languageVersion);
     },
     writeFile() {}

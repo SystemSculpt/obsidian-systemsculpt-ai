@@ -341,6 +341,21 @@ test('source-ref resolution never reads absent production modules from the files
   assert.deepEqual(first, generateVerificationV2({ root, fixture, sourceRef: ref, historicalFixturePath: 'fixture.json' }));
 });
 
+test('source-ref resolution preserves callers after an entire imported source directory is deleted', () => {
+  const root = repo({
+    'src/transport/client.ts': 'export function send(url: string) { return fetch(url); }\n',
+    'src/callers/run.ts': 'import { send } from "../transport/client"; export function run() { return send("https://approved.invalid"); }\n',
+  });
+  const ref = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
+  const fixture = writeFixture(root, generateInventory({ root, ref, sourceRef: ref }));
+  const before = generateVerificationV2({ root, fixture, sourceRef: ref, historicalFixturePath: 'fixture.json' });
+  execFileSync('git', ['rm', '-qr', 'src/callers', 'src/transport'], { cwd: root });
+  const after = generateVerificationV2({ root, fixture, sourceRef: ref, historicalFixturePath: 'fixture.json' });
+  assert.deepEqual(after, before);
+  const wrapper = after.records.find(record => record.primitiveOrImport === 'wrapper:send->fetch');
+  assert.ok(wrapper?.provenance.wrapperCallChain.some(edge => edge.path === 'src/callers/run.ts'));
+});
+
 test('v2 resolves cross-file wrapper callers and fails when the caller edge changes', () => {
   const files = {
     'src/transport.ts': 'export function send(url: string) { return fetch(url); }\n',
