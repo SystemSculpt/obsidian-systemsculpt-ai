@@ -130,7 +130,7 @@ export function inspectPluginArtifacts({ root = process.cwd() } = {}) {
     mainBundle.hasInlineSourceMap = INLINE_SOURCE_MAP_PATTERN.test(tail);
     if (mainBundle.hasInlineSourceMap) {
       problems.push(
-        `main.js still contains an inline source map (${mainBundle.formattedSize}); Android/mobile sync must use a production build.`
+        `main.js still contains an inline source map (${mainBundle.formattedSize}); plugin sync must use a production build.`
       );
     }
 

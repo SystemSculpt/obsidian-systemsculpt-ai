@@ -1046,7 +1046,7 @@ function printPlan({
   console.log(`[release] - Commits included: ${commitCount}`);
   console.log("[release] - Local GitHub draft release via gh: yes");
   console.log(`[release] - GitHub auth mode: ${githubAuthStrategyName}`);
-  console.log("[release] - Native validation: required macOS + Windows + Android; iOS when available");
+  console.log("[release] - Local validation: fast + unit + built integration + egress + release surfaces");
   console.log(`[release] - Dry run: ${dryRun ? "yes" : "no"}`);
 }
 
@@ -1075,17 +1075,26 @@ function runChecks(skipChecks) {
     return;
   }
 
-  logStep("Running npm run check:plugin");
-  run("npm", ["run", "check:plugin"]);
+  logStep("Running npm run check:plugin:fast");
+  run("npm", ["run", "check:plugin:fast"]);
 
   logStep("Running npm test");
   run("npm", ["test"]);
 
+  logStep("Running npm run test:embeddings");
+  run("npm", ["run", "test:embeddings"]);
+
   logStep("Running npm run build");
   run("npm", ["run", "build"]);
 
-  logStep("Running npm run check:release:native");
-  run("npm", ["run", "check:release:native"]);
+  logStep("Running npm run test:integration:ci");
+  run("npm", ["run", "test:integration:ci"]);
+
+  logStep("Running npm run check:egress:verify");
+  run("npm", ["run", "check:egress:verify"]);
+
+  logStep("Running npm run check:release-surfaces -- --check-artifacts");
+  run("npm", ["run", "check:release-surfaces", "--", "--check-artifacts"]);
 }
 
 function ensureReleaseAssets() {

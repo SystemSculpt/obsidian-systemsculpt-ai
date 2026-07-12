@@ -7,11 +7,9 @@
  * survives `onload()` on phones/tablets — not just desktop.
  *
  * Why this exists: the desktop bundle-load smoke never exercises the mobile
- * code paths (Platform.isDesktop defaults true in the mock), and the real
- * device harness (`test:native:android/ios`) is local-only and never gates a
- * PR. A v5 mobile-startup regression (the #207 class) can therefore ship green.
- * This test runs in the required `ci.yml` integration job — no device, no
- * secrets — so a broken mobile onload red-builds immediately.
+ * code paths (Platform.isDesktop defaults true in the mock). This deterministic
+ * simulated host runs in the required `ci.yml` integration job, so the #207
+ * class of mobile-startup regression red-builds immediately.
  *
  * Run `npm run build` first (npm run test:integration does this for you).
  */

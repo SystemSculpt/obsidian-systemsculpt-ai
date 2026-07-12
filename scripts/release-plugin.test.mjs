@@ -320,3 +320,22 @@ remote: - Changes must have workflow scope.
   assert.equal(emitted.length, 1);
   assert.equal(emitted[0].stdout, "main -> main");
 });
+
+test("release checks compose only canonical local gates", () => {
+  const source = fs.readFileSync(new URL("./release-plugin.mjs", import.meta.url), "utf8");
+  const start = source.indexOf("function runChecks");
+  const end = source.indexOf("function ensureReleaseAssets", start);
+  const checks = source.slice(start, end);
+
+  const fast = checks.indexOf('"check:plugin:fast"');
+  const unit = checks.indexOf('["test"]');
+  const embeddings = checks.indexOf('"test:embeddings"');
+  const build = checks.indexOf('["run", "build"]');
+  const integration = checks.indexOf('"test:integration:ci"');
+  const egress = checks.indexOf('"check:egress:verify"');
+  const surfaces = checks.indexOf('"check:release-surfaces"');
+
+  assert.ok(fast < unit && unit < embeddings && embeddings < build && build < integration);
+  assert.ok(integration < egress && egress < surfaces);
+  assert.doesNotMatch(checks, /native|device|provider|android|windows/i);
+});

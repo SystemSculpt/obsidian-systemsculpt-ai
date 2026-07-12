@@ -169,3 +169,19 @@ test("inspectReleaseSurfaces reports missing JSON files once", () => {
   assert.match(result.problems.join("\n"), /Required release source file is missing: manifest\.json/);
   assert.doesNotMatch(result.problems.join("\n"), /manifest\.json is not valid JSON/);
 });
+
+test("inspectReleaseSurfaces rejects reintroduced native or provider release gates", () => {
+  const root = createReleaseRoot("9.9.9");
+  const packagePath = path.join(root, "package.json");
+  const pkg = JSON.parse(fs.readFileSync(packagePath, "utf8"));
+  pkg.scripts = {
+    "check:release:native": "node scripts/check-native-release-gates.mjs",
+    "test:integration": "node testing/fixtures/providers/serve.mjs",
+  };
+  fs.writeFileSync(packagePath, JSON.stringify(pkg, null, 2), "utf8");
+
+  const result = inspectReleaseSurfaces({ root, version: "9.9.9" });
+  assert.equal(result.ok, false);
+  assert.match(result.problems.join("\n"), /check:release:native/);
+  assert.match(result.problems.join("\n"), /test:integration/);
+});

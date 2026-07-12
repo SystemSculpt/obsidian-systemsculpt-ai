@@ -3,31 +3,31 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 
-function workflowText(name) {
-  return fs.readFileSync(path.join(process.cwd(), ".github", "workflows", name), "utf8");
-}
+const workflowsDir = path.join(process.cwd(), ".github", "workflows");
+const workflowNames = fs.readdirSync(workflowsDir).filter((name) => /\.ya?ml$/.test(name)).sort();
+const ci = fs.readFileSync(path.join(workflowsDir, "ci.yml"), "utf8");
 
-function indexOfRequired(text, needle) {
-  const index = text.indexOf(needle);
-  assert.notEqual(index, -1, `Expected workflow to contain: ${needle}`);
-  return index;
-}
+test("CI is the only hosted workflow", () => {
+  assert.deepEqual(workflowNames, ["ci.yml"]);
+});
 
-test("Windows E2E workflow keeps the canonical build, bootstrap, clean-install, baselines order", () => {
-  const text = workflowText("windows-e2e.yml");
+test("CI preserves only the secret-free Ubuntu unit and desktop-baselines contexts", () => {
+  assert.match(ci, /^\s{2}unit:$/m);
+  assert.match(ci, /^\s{2}desktop-baselines:$/m);
+  assert.equal((ci.match(/runs-on: ubuntu-latest/g) || []).length, 2);
+  assert.doesNotMatch(ci, /secrets\.|pull_request_target|macos-|windows-|android|\bios\b/i);
+  assert.doesNotMatch(ci, /native|provider|runtime.smoke|hosted/i);
+});
 
-  assert.match(text, /^\s*windows-e2e:/m);
-  assert.match(text, /^\s*name: windows-e2e$/m);
-  assert.match(text, /runs-on: windows-2025-vs2026/);
-  assert.match(text, /XAI_API_KEY: \$\{\{ secrets\.XAI_API_KEY \}\}/);
-  assert.match(text, /--skip-trust-prompt/);
+test("unit and desktop-baselines own distinct canonical gates", () => {
+  const desktopStart = ci.indexOf("  desktop-baselines:");
+  const unit = ci.slice(ci.indexOf("  unit:"), desktopStart);
+  const desktop = ci.slice(desktopStart);
 
-  const build = indexOfRequired(text, "npm run build");
-  const bootstrap = indexOfRequired(text, "node testing/native/device/windows/bootstrap.mjs");
-  const cleanInstall = indexOfRequired(text, "node testing/native/device/windows/run-clean-install-parity.mjs");
-  const baselines = indexOfRequired(text, "npm run test:native:windows:baselines");
+  assert.match(unit, /npm run check:plugin:fast/);
+  assert.doesNotMatch(unit, /npm test|npm run build|test:integration/);
 
-  assert.ok(build < bootstrap, "build must happen before bootstrap copies artifacts");
-  assert.ok(bootstrap < cleanInstall, "bootstrap must launch the vault before clean-install parity");
-  assert.ok(cleanInstall < baselines, "baselines must reuse the clean-install vault");
+  assert.match(desktop, /npm run build/);
+  assert.match(desktop, /npm run test:integration:ci/);
+  assert.doesNotMatch(desktop, /npm test|check:plugin/);
 });

@@ -1,8 +1,7 @@
 #!/usr/bin/env node
 import path from "node:path";
 import process from "node:process";
-import { bootstrapDesktopAutomationClient } from "../testing/native/desktop-automation/bootstrap.mjs";
-import { createDesktopAutomationClient } from "../testing/native/desktop-automation/client.mjs";
+import { bootstrapObsidianReloadClient } from "./obsidian-reload/bootstrap.mjs";
 
 function parseArgs(argv) {
   const options = {
@@ -66,56 +65,21 @@ function parseArgs(argv) {
   return options;
 }
 
-function hasExplicitTargetSelection(options) {
-  return (
-    options.targetIndex !== null ||
-    String(options.vaultName || "").trim().length > 0 ||
-    String(options.vaultPath || "").trim().length > 0
-  );
-}
-
-async function inferTargetFromLiveBridge(options) {
-  if (hasExplicitTargetSelection(options)) {
-    return options;
-  }
-
-  const client = await createDesktopAutomationClient({
-    pluginId: options.pluginId,
-  });
-  const liveVaultPath = String(client.record?.vaultPath || "").trim();
-  const liveVaultName = String(client.record?.vaultName || "").trim();
-
-  if (!liveVaultPath && !liveVaultName) {
-    throw new Error(
-      "A live desktop automation bridge was found, but it did not report a vault selector."
-    );
-  }
-
-  return {
-    ...options,
-    vaultPath: liveVaultPath || options.vaultPath,
-    vaultName: liveVaultName || options.vaultName,
-  };
-}
-
 async function main() {
-  const parsedOptions = parseArgs(process.argv.slice(2));
-  let resolvedOptions = null;
+  const options = parseArgs(process.argv.slice(2));
   try {
-    resolvedOptions = await inferTargetFromLiveBridge(parsedOptions);
-    const bootstrap = await bootstrapDesktopAutomationClient({
-      pluginId: resolvedOptions.pluginId,
-      syncConfigPath: resolvedOptions.syncConfigPath,
-      targetIndex: resolvedOptions.targetIndex,
-      vaultName: resolvedOptions.vaultName,
-      vaultPath: resolvedOptions.vaultPath,
-      reload: true,
-      timeoutMs: resolvedOptions.timeoutMs || (resolvedOptions.quietUnavailable ? 8000 : undefined),
+    const bootstrap = await bootstrapObsidianReloadClient({
+      pluginId: options.pluginId,
+      syncConfigPath: options.syncConfigPath,
+      targetIndex: options.targetIndex,
+      vaultName: options.vaultName,
+      vaultPath: options.vaultPath,
+      timeoutMs: options.timeoutMs || (options.quietUnavailable ? 8000 : undefined),
     });
 
-    if (!resolvedOptions.quietSuccess) {
+    if (!options.quietSuccess) {
       console.log(
-        `[reload] Reloaded ${resolvedOptions.pluginId} in ${bootstrap.target.vaultName} via ${bootstrap.reload.method}` +
+        `[reload] Reloaded ${options.pluginId} in ${bootstrap.target.vaultName} via ${bootstrap.reload.method}` +
           (bootstrap.client.record?.startedAt
             ? ` (bridge started ${bootstrap.client.record.startedAt})`
             : "")
@@ -124,8 +88,8 @@ async function main() {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error || "Unknown error");
     if (
-      (resolvedOptions?.quietUnavailable || parsedOptions.quietUnavailable) &&
-      /No live desktop automation bridge|No plugin targets|external settings sync|manual plugin reload once|did not report a vault selector/i.test(
+      options.quietUnavailable &&
+      /Obsidian reload is unavailable|No local Obsidian plugin targets|manual plugin reload/i.test(
         message
       )
     ) {

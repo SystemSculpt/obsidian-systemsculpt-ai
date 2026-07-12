@@ -3,8 +3,8 @@
  *
  * Unlike jest.config.cjs (source-level unit tests), this suite loads the
  * compiled `main.js` artifact and exercises it against the enriched host mock
- * in testing/integration/mocks/ plus the deterministic provider fixtures in
- * testing/fixtures/providers/. Run via `npm run test:integration` (builds
+ * in testing/integration/mocks/ plus deterministic managed fixtures in
+ * testing/fixtures/managed/. Run via `npm run test:integration` (builds
  * first) or `npm run test:integration:ci` (assumes a fresh build).
  */
 

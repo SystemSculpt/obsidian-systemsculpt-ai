@@ -1,211 +1,138 @@
 #!/usr/bin/env node
 
 /**
- * Unified, quiet checker for the Obsidian plugin.
- * - TypeScript typecheck (noEmit)
- * - Real production build + artifact validation
- * - CSS lint (Obsidian-override scoping hygiene)
- * - Release workflow node:test coverage
- * - Jest unit tests
- * Prints concise summary on success; details only on failure or --verbose.
+ * Plugin checks have two intentionally different tiers:
+ * - --fast: TypeScript, a production artifact build, CSS, and tiny policy tests
+ * - default: the fast tier followed by broader bounded script guards
+ *
+ * Full unit, integration, and egress work belong to their dedicated commands.
  */
 
-import { execSync } from 'node:child_process';
-import * as path from 'node:path';
-import * as fs from 'node:fs';
-import { buildProductionPlugin } from './plugin-artifacts.mjs';
-import { lintCssDirectory } from './lint-css.mjs';
+import { execSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
+import { buildProductionPlugin } from "./plugin-artifacts.mjs";
+import { lintCssDirectory } from "./lint-css.mjs";
 
 const args = process.argv.slice(2);
-const verbose = args.includes('--verbose');
-const summary = args.includes('--summary') || args.includes('--quiet');
-const skipTests = args.includes('--skip-tests');
-const fast = args.includes('--fast');
-
-const defaultTimeoutMs = Number(process.env.SYSTEMSCULPT_CHECK_TIMEOUT_MS || '') || 20 * 60 * 1000;
-
+const verbose = args.includes("--verbose");
+const fast = args.includes("--fast");
+const skipTests = args.includes("--skip-tests");
 const root = process.cwd();
+const defaultTimeoutMs = Number(process.env.SYSTEMSCULPT_CHECK_TIMEOUT_MS || "") || 20 * 60 * 1000;
 
-function run(cmd, opts = {}) {
+const FAST_SCRIPT_TESTS = [
+  "scripts/check-plugin.test.mjs",
+  "scripts/github-workflows.test.mjs",
+  "scripts/lint-css.test.mjs",
+];
+
+const NORMAL_SCRIPT_TESTS = [
+  "scripts/check/managed-only-policy.test.mjs",
+  "scripts/check-release-surfaces.test.mjs",
+  "scripts/plugin-artifacts.test.mjs",
+  "scripts/plugin-sync.test.mjs",
+  "scripts/release-plugin.test.mjs",
+  "scripts/obsidian-reload/*.test.mjs",
+];
+
+function run(command, options = {}) {
+  const startedAt = Date.now();
   try {
-    const started = Date.now();
-    const { timeoutMs = defaultTimeoutMs, ...restOpts } = opts;
-    const out = execSync(cmd, { encoding: 'utf8', stdio: summary ? 'pipe' : 'pipe', timeout: timeoutMs, ...restOpts });
-    return { ok: true, ms: Date.now() - started, stdout: out };
-  } catch (e) {
-    return { ok: false, ms: 0, stdout: e.stdout?.toString?.() || '', stderr: e.stderr?.toString?.() || '', error: e };
-  }
-}
-
-function listChangedFiles() {
-  const commands = [
-    'git diff --name-only --cached --diff-filter=ACMRT',
-    'git diff --name-only --diff-filter=ACMRT',
-  ];
-
-  for (const cmd of commands) {
-    try {
-      const out = execSync(cmd, { encoding: 'utf8', stdio: 'pipe', timeout: 10_000 });
-      const files = out
-        .split('\n')
-        .map(line => line.trim())
-        .filter(Boolean);
-      if (files.length > 0) return files;
-    } catch (_) {
-      // Ignore: not in a git repo, or git unavailable, etc.
-    }
-  }
-  return [];
-}
-
-async function checkBundle() {
-  const entry = path.join(root, 'src', 'main.ts');
-  if (!fs.existsSync(entry)) {
-    return { ok: true, ms: 0, note: 'no-entry' };
-  }
-
-  const started = Date.now();
-  try {
-    const inspection = buildProductionPlugin({
-      root,
-      stdio: 'pipe',
+    const { timeoutMs = defaultTimeoutMs, ...execOptions } = options;
+    const stdout = execSync(command, {
+      cwd: root,
+      encoding: "utf8",
+      stdio: "pipe",
+      timeout: timeoutMs,
+      ...execOptions,
     });
-    return {
-      ok: true,
-      ms: Date.now() - started,
-      note: inspection.mainBundle.formattedSize,
-    };
+    return { ok: true, ms: Date.now() - startedAt, stdout };
   } catch (error) {
-    const message = error?.message || String(error);
-    return { ok: false, ms: Date.now() - started, message };
+    return {
+      ok: false,
+      ms: Date.now() - startedAt,
+      stdout: error.stdout?.toString?.() || "",
+      stderr: error.stderr?.toString?.() || "",
+      error,
+    };
   }
 }
 
 function checkCss() {
-  const cssDir = path.join(root, 'src', 'css');
-  if (!fs.existsSync(cssDir)) {
-    return { ok: true, ms: 0, note: 'no-css' };
+  const cssDir = path.join(root, "src", "css");
+  if (!fs.existsSync(cssDir)) return { ok: true, ms: 0, note: "no-css" };
+
+  const startedAt = Date.now();
+  const report = lintCssDirectory({ cssDir });
+  if (report.errorCount === 0) {
+    return { ok: true, ms: Date.now() - startedAt, note: `${report.fileCount} files` };
   }
 
-  const started = Date.now();
-  const report = lintCssDirectory({ cssDir });
-  const ms = Date.now() - started;
+  const details = report.issues
+    .filter((issue) => issue.severity === "error")
+    .map((issue) => `${issue.file}:${issue.line} ${issue.message} (selector: ${issue.selector})`)
+    .join("\n");
+  return {
+    ok: false,
+    ms: Date.now() - startedAt,
+    stderr: `${report.errorCount} CSS error(s):\n${details}`,
+  };
+}
 
-  if (report.errorCount > 0) {
-    const lines = report.issues
-      .filter(issue => issue.severity === 'error')
-      .map(issue => `${issue.file}:${issue.line} ${issue.message} (selector: ${issue.selector})`);
+function checkBundle() {
+  const startedAt = Date.now();
+  try {
+    const inspection = buildProductionPlugin({ root, stdio: "pipe" });
+    return {
+      ok: true,
+      ms: Date.now() - startedAt,
+      stdout: inspection.mainBundle.formattedSize,
+    };
+  } catch (error) {
     return {
       ok: false,
-      ms,
-      message: `${report.errorCount} CSS error(s):\n${lines.join('\n')}`,
+      ms: Date.now() - startedAt,
+      stderr: error instanceof Error ? error.message : String(error),
     };
   }
-
-  return { ok: true, ms, note: `${report.fileCount} files` };
 }
 
 async function main() {
-  const results = [];
-  const checks = ['egress', 'tsc', 'bundle', 'css'];
-  const jestRunner = path.join(root, 'scripts', 'jest.mjs');
-  const jestCmdPrefix = fs.existsSync(jestRunner) ? `node ${JSON.stringify(jestRunner)}` : 'npx jest';
-
-  const egress = run('node scripts/network-egress-inventory.mjs current --fixture testing/fixtures/managed/egress-baseline-660e7fe.json');
-  results.push({ name: 'egress', ...egress });
-
-  const tsc = run('npx tsc --noEmit --skipLibCheck');
-  results.push({ name: 'tsc', ...tsc });
-
-  const bundle = await checkBundle();
-  results.push({ name: 'bundle', ...bundle });
-
-  const css = checkCss();
-  results.push({ name: 'css', ...css });
+  const results = [
+    { name: "css", ...checkCss() },
+    { name: "types", ...run("npm run check:types") },
+    { name: "bundle", ...checkBundle() },
+  ];
 
   if (!skipTests) {
-    checks.push('script-tests', 'tests');
-    const scriptTests = run(
-      'node --test ' +
-        [
-          'scripts/release-plugin.test.mjs',
-          'scripts/network-egress-inventory.test.mjs',
-          'scripts/check-plugin.test.mjs',
-          'scripts/plugin-artifacts.test.mjs',
-          'scripts/lint-css.test.mjs',
-          'scripts/check-github-required-checks.test.mjs',
-          'scripts/check-native-release-gates.test.mjs',
-          'scripts/github-workflows.test.mjs',
-          'testing/native/device/android/utils.test.mjs',
-          'testing/native/device/windows/bootstrap.test.mjs',
-          'testing/native/device/windows/clean-install-parity.test.mjs',
-          'testing/native/device/windows/interactive-task.test.mjs',
-          'testing/native/device/windows/remote-run.test.mjs',
-          'testing/native/device/windows/run-clean-install-parity.test.mjs',
-          'testing/native/device/windows/run-desktop-automation.test.mjs',
-        ].join(' ')
-    );
-    results.push({ name: 'script-tests', ...scriptTests });
-
-    let tests;
-    if (fast) {
-      const changedFiles = listChangedFiles().filter(file => file.startsWith('src/'));
-      if (changedFiles.length === 0) {
-        tests = { ok: true, ms: 0, stdout: '' };
-      } else {
-        const quotedFiles = changedFiles.map(file => JSON.stringify(file)).join(' ');
-        const testCmd = `${jestCmdPrefix} --config jest.config.cjs --findRelatedTests ${quotedFiles} --passWithNoTests`;
-        tests = run(testCmd);
-      }
-    } else {
-      tests = run(`${jestCmdPrefix} --config jest.config.cjs --passWithNoTests`);
-    }
-    results.push({ name: 'tests', ...tests });
+    results.push({
+      name: "script-policy",
+      ...run(`node --test ${FAST_SCRIPT_TESTS.join(" ")}`),
+    });
   }
 
-  const failed = results.filter(r => !r.ok);
-
-  if (failed.length === 0) {
-    const totalMs = results.reduce((s, r) => s + (r.ms || 0), 0);
-    const mode = fast ? ' [fast]' : '';
-    console.log(`[plugin] PASS${mode}: ${checks.join(', ')} (${Math.round(totalMs/100)/10}s)`);
-    process.exit(0);
+  if (!fast) {
+    results.push({
+      name: "script-guards",
+      ...run(`node --test ${NORMAL_SCRIPT_TESTS.join(" ")}`),
+    });
   }
 
-  for (const r of failed) {
-    if (r.name === 'egress') {
-      console.error('[plugin] FAIL: Network egress inventory mismatch');
-      console.error(r.stdout || r.stderr || '');
-    } else if (r.name === 'tsc') {
-      console.error('[plugin] FAIL: TypeScript errors found');
-      if (verbose) {
-        console.error(r.stdout || r.stderr || '');
-      }
-    } else if (r.name === 'bundle') {
-      console.error('[plugin] FAIL: Bundle/build check failed');
-      if (verbose) {
-        console.error(r.message || '');
-      }
-    } else if (r.name === 'css') {
-      console.error('[plugin] FAIL: CSS lint found unscoped Obsidian-override selectors');
-      console.error(r.message || '');
-    } else if (r.name === 'script-tests') {
-      console.error('[plugin] FAIL: Script-level tests failed');
-      if (verbose) {
-        console.error(r.stdout || r.stderr || '');
-      }
-    } else if (r.name === 'tests') {
-      console.error('[plugin] FAIL: Unit tests failed');
-      if (verbose) {
-        console.error(r.stdout || r.stderr || '');
+  const failures = results.filter((result) => !result.ok);
+  if (failures.length > 0) {
+    for (const failure of failures) {
+      console.error(`[plugin] FAIL: ${failure.name}`);
+      if (verbose || failure.name === "css") {
+        console.error(failure.stderr || failure.stdout || "No diagnostic output.");
       }
     }
+    process.exit(1);
   }
-  process.exit(1);
+
+  const elapsedMs = results.reduce((total, result) => total + result.ms, 0);
+  const names = results.map((result) => result.name).join(", ");
+  console.log(`[plugin] PASS${fast ? " [fast]" : ""}: ${names} (${(elapsedMs / 1000).toFixed(1)}s)`);
 }
 
-main().catch((e) => {
-  console.error('[plugin] FAIL: Unexpected checker error');
-  if (verbose) console.error(e);
-  process.exit(1);
-});
+await main();

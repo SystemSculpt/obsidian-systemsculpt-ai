@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { parseJsonText } from "../shared/json.mjs";
+import { parseJsonText } from "./json.mjs";
 
 export const DEFAULT_DISCOVERY_DIR = path.join(os.homedir(), ".systemsculpt", "obsidian-automation");
 export const DEFAULT_PLUGIN_ID = "systemsculpt-ai";

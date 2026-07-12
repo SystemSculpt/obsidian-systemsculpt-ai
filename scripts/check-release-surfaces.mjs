@@ -35,6 +35,12 @@ export const REQUIRED_GITIGNORE_PATTERNS = [
 ];
 
 const SEMVER_PATTERN = /^\d+\.\d+\.\d+$/;
+const FORBIDDEN_SCRIPT_NAME_PATTERN =
+  /(^|:)(native|android|ios|windows)(:|$)|runtime:smoke|provider[-:]connected|device/i;
+const FORBIDDEN_SCRIPT_COMMAND_PATTERN =
+  /testing\/native|testing\/fixtures\/providers|(?:macos|linux|windows)-e2e|check-native-release|run-runtime-smoke|sync-android|provider-fixtures/i;
+const FORBIDDEN_WORKFLOW_PATTERN =
+  /secrets\.|pull_request_target|testing\/native|testing\/fixtures\/providers|(?:macos|linux|windows)-e2e|runtime.smoke|provider.connected/i;
 
 function readText(filePath) {
   return fs.readFileSync(filePath, "utf8");
@@ -93,6 +99,29 @@ export function inspectReleaseSurfaces({
   const lockfile = readJson(resolvedRoot, "package-lock.json", problems);
   const versions = readJson(resolvedRoot, "versions.json", problems);
   const targetVersion = version || manifest?.version || "";
+
+  for (const [scriptName, command] of Object.entries(pkg?.scripts || {})) {
+    if (
+      FORBIDDEN_SCRIPT_NAME_PATTERN.test(scriptName) ||
+      FORBIDDEN_SCRIPT_COMMAND_PATTERN.test(String(command || ""))
+    ) {
+      problems.push(`package.json exposes obsolete release reachability through script '${scriptName}'`);
+    }
+  }
+
+  const workflowsDir = path.join(resolvedRoot, ".github", "workflows");
+  if (fs.existsSync(workflowsDir)) {
+    const workflowNames = fs.readdirSync(workflowsDir).filter((name) => /\.ya?ml$/.test(name));
+    if (workflowNames.length !== 1 || workflowNames[0] !== "ci.yml") {
+      problems.push("Hosted workflow surface must contain only .github/workflows/ci.yml");
+    }
+    for (const workflowName of workflowNames) {
+      const workflow = readText(path.join(workflowsDir, workflowName));
+      if (FORBIDDEN_WORKFLOW_PATTERN.test(workflow)) {
+        problems.push(`${workflowName} exposes obsolete native/device/provider or secret-backed CI reachability`);
+      }
+    }
+  }
 
   if (!SEMVER_PATTERN.test(targetVersion)) {
     problems.push(`Target version must be semver x.y.z: ${targetVersion || "(empty)"}`);
