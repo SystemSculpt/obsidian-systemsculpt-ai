@@ -97,6 +97,15 @@ export interface ManagedTransportOperation {
 }
 
 export type ManagedJobCapability = "transcription" | "document_processing" | "image_generation";
+export type ManagedImageOutputMetadata = Readonly<{
+  index: number;
+  mime_type: "image/png" | "image/jpeg" | "image/webp";
+  size_bytes: number;
+  sha256: string;
+  width: number | null;
+  height: number | null;
+}>;
+export type ManagedImageOutputBytes = Readonly<{ metadata: ManagedImageOutputMetadata; bytes: ArrayBuffer }>;
 export type ManagedJobStatus = "uploading" | "queued" | "processing" | "succeeded" | "completed" | "failed" | "expired";
 export type ManagedRecoveryPhase =
   | "admitted" | "content_ready" | "prepare_dispatching" | "prepared" | "create_dispatching" | "created"

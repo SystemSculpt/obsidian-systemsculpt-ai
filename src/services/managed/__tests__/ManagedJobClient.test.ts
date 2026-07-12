@@ -1,5 +1,9 @@
 import fixture from "../../../../testing/fixtures/managed/managed-job-protocol-v1.json";
-import { ManagedJobClient, MANAGED_JOB_DESCRIPTORS, MANAGED_JOB_OPERATION_STATUSES, MANAGED_JOB_PROTOCOL } from "../ManagedJobClient";
+import imageOutputFixture from "../../../../testing/fixtures/managed/managed-image-output-v1.json";
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { ManagedJobClient, MANAGED_IMAGE_OUTPUT_DESCRIPTOR, MANAGED_JOB_DESCRIPTORS, MANAGED_JOB_OPERATION_STATUSES, MANAGED_JOB_PROTOCOL } from "../ManagedJobClient";
 import { HostedTransportAdapter } from "../adapters/HostedTransportAdapter";
 
 const json = (value: unknown, status = 200, headers: Record<string, string> = {}) => new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json", "x-request-id": "req-1", ...headers } });
@@ -12,6 +16,19 @@ describe("ManagedJobClient exact wire contract", () => {
   const transport = new HostedTransportAdapter({ baseUrl: "https://api.test", pluginVersion: "6.0.0", licenseKey: () => "license", requestClient: { request } as any });
   const client = new ManagedJobClient(transport);
   beforeEach(() => { request.mockReset(); });
+
+  it("pins the exact closed managed image output companion fixture", () => {
+    const bytes = readFileSync(path.resolve(__dirname, "../../../../testing/fixtures/managed/managed-image-output-v1.json"));
+    expect(createHash("sha256").update(bytes).digest("hex")).toBe("8b8437a586ad727c5afd777bb47f4ecc4866e7b51b19f8decdb17cea68f55dff");
+    expect(MANAGED_IMAGE_OUTPUT_DESCRIPTOR).toEqual(imageOutputFixture);
+    expect(imageOutputFixture.contract_version).toBe("managed-image-output-v1");
+    expect(imageOutputFixture.operations).toEqual([
+      { name: "generation_status_metadata", method: "GET", path: "/api/plugin/images/generations/jobs/{jobId}", response_transport: "json", output_fields: ["index", "mime_type", "size_bytes", "sha256", "width", "height"] },
+      { name: "generation_list_metadata", method: "GET", path: "/api/plugin/images/generations/jobs", query: ["limit", "before", "status"], response_transport: "json", output_fields: ["index", "mime_type", "size_bytes", "sha256", "width", "height"] },
+      expect.objectContaining({ name: "generation_output_download", method: "GET", path: "/api/plugin/images/generations/jobs/{jobId}/outputs/{outputIndex}", response_transport: "binary" }),
+    ]);
+    expect(imageOutputFixture.forbidden_response_fields).toEqual(["url", "signed_url", "object_key", "r2_object_key", "provider", "model", "storage", "etag"]);
+  });
 
   it("pins every fixture operation/status/header declaration", () => {
     for (const f of fixture.descriptors) {
@@ -126,6 +143,18 @@ describe("ManagedJobClient exact wire contract", () => {
     ["image output expiry", () => client.images.status("img"), { job: { ...imageJob("succeeded"), processing_started_at: "2026-01-01T00:00:01Z", completed_at: "2026-01-01T00:00:02Z" }, outputs: [{ index: 0, mime_type: "image/png", size_bytes: 1, width: 1, height: 1, url: "https://signed/x", url_expires_in_seconds: 1799 }], usage: { raw_usd: 1, cost_source: "provider", estimated: false } }],
   ] as const)("rejects malformed actual %s parser", async (_name, invoke, payload) => { request.mockResolvedValue(json(payload)); await expect(invoke()).rejects.toMatchObject({ code: "malformed_response" }); });
 
+  it("negotiates metadata-only status/list and rejects legacy signed output fields", async () => {
+    const metadata = { index: 0, mime_type: "image/png", size_bytes: 2, sha256: "a".repeat(64), width: null, height: 20 };
+    request.mockResolvedValueOnce(json({ job: { ...imageJob("succeeded"), processing_started_at: "2026-01-01T00:00:01Z", completed_at: "2026-01-01T00:00:02Z" }, outputs: [metadata], usage: { raw_usd: 1, cost_source: "provider", estimated: false } }));
+    expect((await client.images.status("img-1")).outputs).toEqual([metadata]);
+    expect(request.mock.calls[0][0].headers).toMatchObject({ "x-systemsculpt-image-output-contract": "managed-image-output-v1", "x-request-id": expect.stringMatching(/^[A-Za-z0-9._:-]{1,128}$/) });
+    request.mockResolvedValueOnce(json({ items: [{ job: imageJob(), outputs: [], usage: { raw_usd: 0, cost_source: "provider", estimated: false } }], next_before: null }));
+    await client.images.list();
+    expect(request.mock.calls[1][0].headers["x-systemsculpt-image-output-contract"]).toBe("managed-image-output-v1");
+    request.mockResolvedValueOnce(json({ job: { ...imageJob("succeeded"), processing_started_at: "2026-01-01T00:00:01Z", completed_at: "2026-01-01T00:00:02Z" }, outputs: [{ ...metadata, url: "https://signed/output" }], usage: { raw_usd: 1, cost_source: "provider", estimated: false } }));
+    await expect(client.images.status("img-1")).rejects.toMatchObject({ code: "malformed_response" });
+  });
+
   it("constructs generation list query from typed fields", async () => {
     request.mockResolvedValue(json({ items: [], next_before: null })); await client.images.list({ limit: 10, before: "2026-01-01T00:00:00Z", status: "failed" });
     expect(request.mock.calls[0][0].url).toContain("limit=10&before=2026-01-01T00%3A00%3A00Z&status=failed");
@@ -176,17 +205,49 @@ describe("ManagedJobClient exact wire contract", () => {
     request.mockReset(); controller.abort(); await expect(client.transcription.uploadPart("job", 1, new ArrayBuffer(1), controller.signal)).rejects.toMatchObject({ name: "AbortError" }); expect(request).not.toHaveBeenCalled();
   });
 
-  it("downloads succeeded image outputs call-locally without exposing signed URLs", async () => {
-    const output = { index: 0, mime_type: "image/png", size_bytes: 2, width: 10, height: 20, url: "https://signed/output", url_expires_in_seconds: 1800 };
-    request.mockResolvedValueOnce(json({ job: { ...imageJob("succeeded"), processing_started_at: "2026-01-01T00:00:01Z", completed_at: "2026-01-01T00:00:02Z" }, outputs: [output], usage: { raw_usd: 1, cost_source: "provider", estimated: false } })).mockResolvedValueOnce(new Response(new Uint8Array([1, 2]), { status: 200, headers: { "content-type": "image/png" } }));
-    const results = await client.images.downloadOutputs("img-1"); expect(results).toHaveLength(1); expect(results[0]).toMatchObject({ index: 0, mime_type: "image/png", size_bytes: 2, width: 10, height: 20 }); expect([...new Uint8Array(results[0].bytes)]).toEqual([1, 2]); expect(JSON.stringify(results)).not.toContain("signed/output");
-    expect(request.mock.calls[1][0]).toEqual(expect.objectContaining({ url: "https://signed/output", method: "GET", preserveResponseHeaders: true }));
+  it("downloads one named first-party image output and verifies its bytes and headers", async () => {
+    const bytes = new Uint8Array([1, 2]);
+    const metadata = { index: 0, mime_type: "image/png" as const, size_bytes: 2, sha256: "a12871fee210fb8619291eaea194581cbd2531e4b23759d225f6806923f63222", width: 10, height: 20 };
+    request.mockResolvedValue(new Response(bytes, { status: 200, headers: { "x-request-id": "req-1", "x-systemsculpt-contract": "managed-capabilities-v2", "x-systemsculpt-job-contract": MANAGED_JOB_PROTOCOL, "x-systemsculpt-image-output-contract": "managed-image-output-v1", "x-systemsculpt-capability": "image_generation", "x-systemsculpt-output-index": "0", "x-systemsculpt-content-sha256": metadata.sha256, "content-type": "image/png", "content-length": "2", "cache-control": "no-store, max-age=0", "x-content-type-options": "nosniff", "content-disposition": "attachment; filename=\"systemsculpt-image-0.png\"" } }));
+    const result = await client.images.downloadOutput("123e4567-e89b-42d3-a456-426614174000", 0, metadata);
+    expect([...new Uint8Array(result.bytes)]).toEqual([1, 2]);
+    expect(result.metadata).toEqual(metadata);
+    expect(request.mock.calls[0][0]).toEqual(expect.objectContaining({ url: "https://api.test/api/plugin/images/generations/jobs/123e4567-e89b-42d3-a456-426614174000/outputs/0", method: "GET", preserveResponseHeaders: true }));
+    expect(request.mock.calls[0][0].headers["x-systemsculpt-image-output-contract"]).toBe("managed-image-output-v1");
+    expect(JSON.stringify(request.mock.calls[0][0])).not.toContain("signed");
+  });
 
-    request.mockReset(); request.mockResolvedValueOnce(json({ job: { ...imageJob("succeeded"), processing_started_at: "2026-01-01T00:00:01Z", completed_at: "2026-01-01T00:00:02Z" }, outputs: [output], usage: { raw_usd: 1, cost_source: "provider", estimated: false } })).mockResolvedValueOnce(new Response(new Uint8Array([1]), { status: 200 }));
-    await expect(client.images.downloadOutputs("img-1")).rejects.toMatchObject({ code: "malformed_response" });
-    request.mockReset(); request.mockResolvedValueOnce(json({ job: { ...imageJob("succeeded"), processing_started_at: "2026-01-01T00:00:01Z", completed_at: "2026-01-01T00:00:02Z" }, outputs: [output], usage: { raw_usd: 1, cost_source: "provider", estimated: false } })).mockResolvedValueOnce(new Response("denied", { status: 403 }));
-    await expect(client.images.downloadOutputs("img-1")).rejects.toMatchObject({ code: "managed_job_error", status: 403 });
-    const controller = new AbortController(); controller.abort(); request.mockReset(); await expect(client.images.downloadOutputs("img-1", controller.signal)).rejects.toMatchObject({ name: "AbortError" }); expect(request).not.toHaveBeenCalled();
+  it.each([
+    ["content length", { "content-length": "1" }], ["content type", { "content-type": "image/jpeg" }],
+    ["index", { "x-systemsculpt-output-index": "1" }], ["hash header", { "x-systemsculpt-content-sha256": "b".repeat(64) }],
+    ["contract", { "x-systemsculpt-image-output-contract": "other" }], ["disposition", { "content-disposition": "inline" }],
+  ])("rejects image output %s mismatch without returning bytes", async (_name, override) => {
+    const metadata = { index: 0, mime_type: "image/png" as const, size_bytes: 2, sha256: "a12871fee210fb8619291eaea194581cbd2531e4b23759d225f6806923f63222", width: 1, height: 1 };
+    request.mockResolvedValue(new Response(new Uint8Array([1, 2]), { status: 200, headers: { "x-request-id": "req-1", "x-systemsculpt-contract": "managed-capabilities-v2", "x-systemsculpt-job-contract": MANAGED_JOB_PROTOCOL, "x-systemsculpt-image-output-contract": "managed-image-output-v1", "x-systemsculpt-capability": "image_generation", "x-systemsculpt-output-index": "0", "x-systemsculpt-content-sha256": metadata.sha256, "content-type": "image/png", "content-length": "2", "cache-control": "no-store, max-age=0", "x-content-type-options": "nosniff", "content-disposition": "attachment; filename=\"systemsculpt-image-0.png\"", ...override } }));
+    await expect(client.images.downloadOutput("123e4567-e89b-42d3-a456-426614174000", 0, metadata)).rejects.toMatchObject({ code: "malformed_response" });
+  });
+
+  it.each([[400, "invalid_request", false], [401, "license_required", false], [403, "license_rejected", false], [404, "not_found", false], [409, "output_not_ready", false], [426, "upgrade_required", false], [429, "rate_limited", true], [500, "internal_error", false], [503, "temporarily_unavailable", true]] as const)("maps image output HTTP %s to %s without consuming an error body", async (status, code, retryable) => {
+    const metadata = { index: 0, mime_type: "image/png" as const, size_bytes: 2, sha256: "a".repeat(64), width: null, height: null };
+    request.mockResolvedValue(new Response("secret storage diagnostic", { status, headers: { "x-request-id": "req-error" } }));
+    await expect(client.images.downloadOutput("123e4567-e89b-42d3-a456-426614174000", 0, metadata)).rejects.toMatchObject({ code, status, requestId: "req-error", retryable });
+  });
+
+  it("returns AbortError with no partial result when aborted while reading output bytes", async () => {
+    const metadata = { index: 0, mime_type: "image/png" as const, size_bytes: 2, sha256: "a".repeat(64), width: null, height: null };
+    const controller = new AbortController();
+    const headers = { "x-request-id": "req-1", "x-systemsculpt-contract": "managed-capabilities-v2", "x-systemsculpt-job-contract": MANAGED_JOB_PROTOCOL, "x-systemsculpt-image-output-contract": "managed-image-output-v1", "x-systemsculpt-capability": "image_generation", "x-systemsculpt-output-index": "0", "x-systemsculpt-content-sha256": metadata.sha256, "content-type": "image/png", "content-length": "2", "cache-control": "no-store, max-age=0", "x-content-type-options": "nosniff", "content-disposition": "attachment; filename=\"systemsculpt-image-0.png\"" };
+    request.mockResolvedValue(new Response(new ReadableStream({ pull(stream) { controller.abort(); stream.error(new DOMException("Aborted", "AbortError")); } }), { status: 200, headers }));
+    await expect(client.images.downloadOutput("123e4567-e89b-42d3-a456-426614174000", 0, metadata, controller.signal)).rejects.toMatchObject({ name: "AbortError" });
+  });
+
+  it("rejects invalid image output identity/metadata and pre-abort before dispatch", async () => {
+    const metadata = { index: 0, mime_type: "image/png" as const, size_bytes: 2, sha256: "a".repeat(64), width: null, height: null };
+    await expect(client.images.downloadOutput("https://signed/output", 0, metadata)).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(client.images.downloadOutput("123e4567-e89b-42d3-a456-426614174000", 1, metadata)).rejects.toMatchObject({ code: "invalid_request" });
+    const controller = new AbortController(); controller.abort();
+    await expect(client.images.downloadOutput("123e4567-e89b-42d3-a456-426614174000", 0, metadata, controller.signal)).rejects.toMatchObject({ name: "AbortError" });
+    expect(request).not.toHaveBeenCalled();
   });
 
   it("maps terminal status errors exactly and omits forbidden status headers", async () => {

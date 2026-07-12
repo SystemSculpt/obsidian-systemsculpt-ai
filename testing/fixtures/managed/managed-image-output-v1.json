@@ -1,0 +1,52 @@
+{
+  "contract_version": "managed-image-output-v1",
+  "negotiation": {
+    "header": "x-systemsculpt-image-output-contract",
+    "required_value": "managed-image-output-v1",
+    "required_headers": {
+      "x-systemsculpt-contract": "managed-capabilities-v2",
+      "x-systemsculpt-job-contract": "managed-job-protocol-v1",
+      "x-systemsculpt-capability": "image_generation",
+      "x-license-key": "<license-key>",
+      "x-request-id": "<1-128 characters matching [A-Za-z0-9._:-]+>"
+    },
+    "legacy_when_absent": true
+  },
+  "operations": [
+    {
+      "name": "generation_status_metadata",
+      "method": "GET",
+      "path": "/api/plugin/images/generations/jobs/{jobId}",
+      "response_transport": "json",
+      "output_fields": ["index", "mime_type", "size_bytes", "sha256", "width", "height"]
+    },
+    {
+      "name": "generation_list_metadata",
+      "method": "GET",
+      "path": "/api/plugin/images/generations/jobs",
+      "query": ["limit", "before", "status"],
+      "response_transport": "json",
+      "output_fields": ["index", "mime_type", "size_bytes", "sha256", "width", "height"]
+    },
+    {
+      "name": "generation_output_download",
+      "method": "GET",
+      "path": "/api/plugin/images/generations/jobs/{jobId}/outputs/{outputIndex}",
+      "response_transport": "binary",
+      "success_headers": ["x-request-id", "x-systemsculpt-contract", "x-systemsculpt-job-contract", "x-systemsculpt-image-output-contract", "x-systemsculpt-capability", "x-systemsculpt-output-index", "x-systemsculpt-content-sha256", "content-type", "content-length", "cache-control", "x-content-type-options", "content-disposition"]
+    }
+  ],
+  "errors": {
+    "invalid_request": { "status": 400, "message": "The managed image output request is invalid." },
+    "unsupported_image_output_contract": { "status": 400, "message": "Expected managed-image-output-v1." },
+    "license_required": { "status": 401, "message": "A valid license is required." },
+    "license_rejected": { "status": 403, "message": "License access is forbidden." },
+    "not_found": { "status": 404, "message": "Image output was not found." },
+    "output_not_ready": { "status": 409, "message": "Image output is not ready." },
+    "upgrade_required": { "status": 426, "message": "A newer SystemSculpt plugin version is required." },
+    "rate_limited": { "status": 429, "message": "Too many image output requests." },
+    "internal_error": { "status": 500, "message": "The managed image output request could not be completed." },
+    "temporarily_unavailable": { "status": 503, "message": "The managed image output is temporarily unavailable." }
+  },
+  "forbidden_response_fields": ["url", "signed_url", "object_key", "r2_object_key", "provider", "model", "storage", "etag"]
+}

@@ -67,11 +67,14 @@ export class HostedTransportAdapter {
     return this.client.request({ url, method, headers, body, stream: false, preserveResponseHeaders: true, signal });
   }
 
-  async downloadSignedImageOutput(url: string, signal?: AbortSignal): Promise<Response> {
-    return this.client.request({ url, method: "GET", headers: {}, stream: false, preserveResponseHeaders: true, signal });
+  managedImageOutput(path: string, headers: Record<string, string>, signal?: AbortSignal): Promise<ManagedTransportResult> {
+    if (!/^\/api\/plugin\/images\/generations\/jobs\/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\/outputs\/[0-3]$/.test(path)) {
+      return Promise.reject(new Error("Invalid managed image output path."));
+    }
+    return this.send({ path, method: "GET", headers, signal }, headers, false, true, undefined, false);
   }
 
-  private async send(operation: ManagedTransportOperation, extra: Record<string, string> = {}, stream = false, scopedHeaders = false, managedChatConfiguration?: ManagedChatConfiguration): Promise<ManagedTransportResult> {
+  private async send(operation: ManagedTransportOperation, extra: Record<string, string> = {}, stream = false, scopedHeaders = false, managedChatConfiguration?: ManagedChatConfiguration, readErrorBody = true): Promise<ManagedTransportResult> {
     const pluginVersion = managedChatConfiguration?.pluginVersion ?? this.options.pluginVersion;
     const headers: Record<string, string> = scopedHeaders ? { ...extra } : { "x-plugin-version": pluginVersion, ...extra };
     if (!extra["x-systemsculpt-admission-contract"]) headers["x-systemsculpt-contract"] = MANAGED_CAPABILITY_CONTRACT;
@@ -84,7 +87,7 @@ export class HostedTransportAdapter {
       body: operation.body, stream, preserveResponseHeaders: true,
       signal: operation.signal, licenseKey,
     });
-    const errorText = response.ok ? "" : (await response.clone().text()).slice(0, 2048);
+    const errorText = response.ok || !readErrorBody ? "" : (await response.clone().text()).slice(0, 2048);
     return { response, diagnostics: {
       status: response.status, requestId: response.headers.get("x-request-id"), contentType: response.headers.get("content-type"),
       rateLimitLimit: response.headers.get("x-ratelimit-limit"), rateLimitRemaining: response.headers.get("x-ratelimit-remaining"), rateLimitReset: response.headers.get("x-ratelimit-reset"),

@@ -111,6 +111,15 @@ describe("HostedTransportAdapter", () => {
     expect(request.mock.calls[0][0].headers).not.toHaveProperty("x-plugin-version");
   });
 
+  it("uses the fixed first-party managed image output route through the existing transport sink", async () => {
+    const adapter = new HostedTransportAdapter({ baseUrl: "https://api.test", pluginVersion: "6", licenseKey: () => "secret" });
+    const headers = { "x-systemsculpt-image-output-contract": "managed-image-output-v1" };
+    await adapter.managedImageOutput("/api/plugin/images/generations/jobs/123e4567-e89b-42d3-a456-426614174000/outputs/0", headers);
+    expect(request).toHaveBeenCalledWith(expect.objectContaining({ url: "https://api.test/api/plugin/images/generations/jobs/123e4567-e89b-42d3-a456-426614174000/outputs/0", method: "GET", headers: expect.objectContaining(headers), preserveResponseHeaders: true, licenseKey: "secret" }));
+    await expect(adapter.managedImageOutput("https://signed.test/output", headers)).rejects.toThrow("Invalid managed image output path");
+    await expect(adapter.managedImageOutput("/api/plugin/documents/id/download", headers)).rejects.toThrow("Invalid managed image output path");
+  });
+
   it("uses the existing transport sink for signed uploads without adding license or managed headers", async () => {
     const adapter = new HostedTransportAdapter({ baseUrl: "https://api.test", pluginVersion: "6", licenseKey: () => "secret" });
     await (adapter as any).uploadSignedInput("https://signed.test/input", "PUT", { "content-type": "image/png" }, new Uint8Array([1]).buffer);
