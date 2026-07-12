@@ -19,7 +19,6 @@ export const IS_DEVELOPMENT_BUILD =
   WEBSITE_API_BASE_URL !== PRODUCTION_WEBSITE_API_BASE_URL;
 
 export const SYSTEMSCULPT_API_ENDPOINTS = {
-  LICENSE: { VALIDATE: () => "/license/validate" },
   CREDITS: {
     BALANCE: "/credits/balance",
     USAGE: "/credits/usage",

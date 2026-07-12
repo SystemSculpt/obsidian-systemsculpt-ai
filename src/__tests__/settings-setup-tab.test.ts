@@ -211,7 +211,7 @@ describe("Setup tab SystemSculpt-only layout", () => {
     },
   );
 
-  it("deactivates without exposing or clearing the stored license through the DOM", async () => {
+  it("deactivates durably by clearing the stored license and account identity", async () => {
     const plugin = createPluginStub();
     plugin.settings.licenseValid = true;
     plugin.settings.licenseKey = "skss-saved-secret";
@@ -226,7 +226,13 @@ describe("Setup tab SystemSculpt-only layout", () => {
     deactivate.click();
     await flushSetupSectionRender();
     expect(plugin.getSettingsManager().updateSettings).toHaveBeenCalledWith({
+      licenseKey: "",
       licenseValid: false,
+      userEmail: "",
+      userName: "",
+      displayName: "",
+      subscriptionStatus: "",
+      lastValidated: 0,
     });
     expect(container.innerHTML).not.toContain("skss-saved-secret");
   });

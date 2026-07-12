@@ -1,22 +1,19 @@
-import { App, Notice } from "obsidian";
+import type { App } from "obsidian";
+import { Notice } from "obsidian";
 import SystemSculptPlugin from "../../main";
-import { showPopup } from "../ui";
 
 export class LicenseManager {
   private plugin: SystemSculptPlugin;
-  private app: App;
   private lastValidationTime: number = 0;
   private pendingValidation: Promise<void> | null = null;
   private static readonly VALIDATION_INTERVAL = 24 * 60 * 60 * 1000; // 24 hours
 
-  constructor(plugin: SystemSculptPlugin, app: App) {
+  constructor(plugin: SystemSculptPlugin, _app: App) {
     this.plugin = plugin;
-    this.app = app;
   }
 
   async initializeLicense(): Promise<void> {
     const licenseKey = this.plugin.settings.licenseKey?.trim();
-    const SPath = 'licenseValid'; // Settings path for clarity, though not strictly needed here
     const previousLicenseValidState = this.plugin.settings.licenseValid; // Cache state before validation
 
     if (!licenseKey) {
@@ -47,7 +44,7 @@ export class LicenseManager {
     this.scheduleDeferredValidation(previousLicenseValidState === true);
   }
 
-  async validateLicenseKey(force = false, showReloadPrompt = true): Promise<boolean> {
+  async validateLicenseKey(force = false, _showReloadPrompt = true): Promise<boolean> {
     if (!this.plugin.settings.licenseKey) {
       await this.plugin.getSettingsManager().updateSettings({ licenseValid: false });
       return false;
@@ -55,7 +52,6 @@ export class LicenseManager {
 
     try {
       const isValid = await this.plugin.aiService.validateLicense(force);
-      await this.plugin.getSettingsManager().updateSettings({ licenseValid: isValid });
 
       if (isValid) {
         this.lastValidationTime = Date.now();
@@ -63,8 +59,7 @@ export class LicenseManager {
 
       return isValid;
     } catch (error) {
-      await this.plugin.getSettingsManager().updateSettings({ licenseValid: false });
-      return false;
+      return !!this.plugin.settings.licenseValid;
     }
   }
 

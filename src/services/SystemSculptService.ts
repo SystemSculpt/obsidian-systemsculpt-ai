@@ -230,7 +230,7 @@ export class SystemSculptService {
     // The endpoint is injected at build time; settings never own network routing.
     this.baseUrl = this.getValidServerUrl();
 
-    this.licenseService = new LicenseService(plugin, this.baseUrl);
+    this.licenseService = new LicenseService(plugin);
     this.contextFileService = new ContextFileService(plugin.app);
     this.mcpService = new MCPService(plugin, plugin.app);
   }
@@ -270,7 +270,6 @@ export class SystemSculptService {
   private refreshSettings(): void {
     this.settings = this.plugin.settings;
     this.baseUrl = this.getValidServerUrl();
-    this.licenseService.updateBaseUrl(this.baseUrl);
   }
 
   // DELEGATE TO LICENSE SERVICE

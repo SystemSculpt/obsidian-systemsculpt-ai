@@ -1,7 +1,5 @@
-import { Notice } from "obsidian";
-import { SystemSculptSettings } from "../types";
 import { SystemSculptError, ERROR_CODES } from "../utils/errors";
-import { SYSTEMSCULPT_API_ENDPOINTS, SYSTEMSCULPT_API_HEADERS } from "../constants/api";
+import { WEBSITE_API_BASE_URL, SYSTEMSCULPT_API_HEADERS } from "../constants/api";
 import { CACHE_BUSTER } from "../utils/urlHelpers";
 import SystemSculptPlugin from "../main";
 
@@ -9,20 +7,7 @@ import SystemSculptPlugin from "../main";
  * Service responsible for license validation and entitlement handling
  */
 export class LicenseService {
-  private plugin: SystemSculptPlugin;
-  private baseUrl: string;
-  
-  constructor(plugin: SystemSculptPlugin, baseUrl: string) {
-    this.plugin = plugin;
-    this.baseUrl = baseUrl;
-  }
-
-  /**
-   * Update the base URL
-   */
-  public updateBaseUrl(baseUrl: string): void {
-    this.baseUrl = baseUrl;
-  }
+  constructor(private readonly plugin: SystemSculptPlugin) {}
 
   /**
    * Get current license key from settings
@@ -42,15 +27,14 @@ export class LicenseService {
       return false;
     }
 
-    const validationEndpoint = SYSTEMSCULPT_API_ENDPOINTS.LICENSE.VALIDATE();
-    
     // Apply cache busting using centralized utility
     // This permanently prevents redirect caching issues in Electron/Obsidian
-    const endpointWithCacheBuster = CACHE_BUSTER.apply(validationEndpoint);
+    const fullUrl = CACHE_BUSTER.apply(`${WEBSITE_API_BASE_URL}/license/validate`);
     
-    const fullUrl = `${this.baseUrl}${endpointWithCacheBuster}`;
-    
-    const headersToSend = SYSTEMSCULPT_API_HEADERS.WITH_LICENSE(this.licenseKey);
+    const headersToSend = {
+      ...SYSTEMSCULPT_API_HEADERS.WITH_LICENSE(this.licenseKey),
+      "x-plugin-version": this.plugin.manifest.version,
+    };
 
     try {
       const { httpRequest } = await import('../utils/httpClient');
@@ -84,17 +68,14 @@ export class LicenseService {
           lastValidated: Date.now(),
         });
 
-        try {
-        } catch {}
-
         return true;
       }
 
       // Unexpected body shape; keep existing state but report as invalid this round
       return !!this.plugin.settings.licenseValid;
     } catch (error) {
-      // An authoritative reject (server says the key is no longer valid —
-      // revoked / expired / refunded) arrives as a 401/403 and MUST downgrade
+      // An authoritative reject (invalid request/key, revoked, expired, refunded)
+      // arrives as a 400/401/403/404 and MUST downgrade
       // the cached validity, otherwise a revoked license keeps granting
       // managed-model access indefinitely. Any other failure (offline, DNS
       // blip, timeout, 5xx) is transient: preserve last-known-good validity so
@@ -109,13 +90,13 @@ export class LicenseService {
 
   /**
    * Whether an error from license validation is the server *authoritatively*
-   * rejecting the key (HTTP 401/403), as opposed to a transient/offline
+   * rejecting the key (HTTP 400/401/403/404), as opposed to a transient/offline
    * failure. Only an authoritative reject should flip `licenseValid` to false.
    */
   private isAuthoritativeReject(error: unknown): boolean {
     return (
       error instanceof SystemSculptError &&
-      (error.statusCode === 401 || error.statusCode === 403)
+      [400, 401, 403, 404].includes(error.statusCode)
     );
   }
 

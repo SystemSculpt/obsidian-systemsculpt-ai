@@ -18,10 +18,8 @@ describe("managed API constants", () => {
 
   it("exposes only current license and credits endpoints", () => {
     expect(SYSTEMSCULPT_API_ENDPOINTS).toEqual({
-      LICENSE: { VALIDATE: expect.any(Function) },
       CREDITS: { BALANCE: "/credits/balance", USAGE: "/credits/usage" },
     });
-    expect(SYSTEMSCULPT_API_ENDPOINTS.LICENSE.VALIDATE()).toBe("/license/validate");
   });
 
   it("adds the managed license key to standard headers", () => {

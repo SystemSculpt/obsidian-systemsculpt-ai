@@ -51,7 +51,13 @@ export function renderAccountSection(
           try {
             button.setDisabled(true).setButtonText("Working...");
             await plugin.getSettingsManager().updateSettings({
+              licenseKey: "",
               licenseValid: false,
+              userEmail: "",
+              userName: "",
+              displayName: "",
+              subscriptionStatus: "",
+              lastValidated: 0,
             });
             new Notice("License deactivated.");
             tabInstance.display();
