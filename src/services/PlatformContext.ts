@@ -1,10 +1,5 @@
-import { MobileDetection } from "../utils/MobileDetection";
-import {
-  detectPlatformEnvironment,
-  type PlatformRuntime,
-} from "../utils/PlatformEnvironment";
-
 export type PlatformTransport = "fetch" | "requestUrl";
+export type PlatformRuntime = "desktop" | "mobile";
 export type PlatformUIVariant = "mobile" | "desktop";
 
 export interface PlatformTransportOptions {
@@ -13,11 +8,9 @@ export interface PlatformTransportOptions {
 
 export class PlatformContext {
   private static instance: PlatformContext | null = null;
-  private readonly mobileDetection = MobileDetection.getInstance();
   private readonly fetchAvailable: boolean;
-  // By default, allow direct `fetch` on desktop for all hosts.
-  // Mobile still uses `requestUrl`, and `postJsonStreaming`/transport layers can fall back
-  // to `requestUrl` if `fetch` fails for a given endpoint.
+  // The managed desktop-only build prefers direct `fetch` by default, while
+  // keeping `requestUrl` available as a host-specific fallback.
   private static readonly DEFAULT_FETCH_AVOID_SUFFIXES: string[] = [];
   private static readonly FETCH_AVOID_SUFFIXES = new Set<string>(PlatformContext.DEFAULT_FETCH_AVOID_SUFFIXES);
 
@@ -49,55 +42,51 @@ export class PlatformContext {
   }
 
   public isMobile(): boolean {
-    return detectPlatformEnvironment().surface === "mobile";
+    return false;
   }
 
   public runtime(): PlatformRuntime {
-    return detectPlatformEnvironment().runtime;
+    return "desktop";
   }
 
   public isDesktopRuntime(): boolean {
-    return this.runtime() === "desktop";
+    return true;
   }
 
   public isMobileRuntime(): boolean {
-    return this.runtime() === "mobile";
+    return false;
   }
 
   public supportsDesktopOnlyFeatures(): boolean {
-    return this.isDesktopRuntime();
+    return true;
   }
 
   public supportsStatusBar(): boolean {
-    return this.isDesktopRuntime();
+    return true;
   }
 
   public supportsEagerVaultWrites(): boolean {
-    return this.isDesktopRuntime();
+    return true;
   }
 
   /**
-   * True iff a Node.js runtime is available (desktop/Electron). This is THE gate
-   * for touching Node builtins (`fs`, `path`, `child_process`, …) or loading any
-   * desktop-only subsystem that does. Obsidian's mobile runtime has no Node, so
-   * an eager Node `require` on the startup path crashes load there (#207) — all
-   * such access must go through a capability-gated lazy boundary (see
-   * `src/platform/desktopOnly.ts`).
+   * The desktop-only plugin manifest guarantees a Node-capable Electron runtime.
+   * Keep this seam so callers still route Node-only imports through the shared
+   * boundary in `src/platform/desktopOnly.ts`.
    */
   public supportsNodeApis(): boolean {
-    return this.isDesktopRuntime();
+    return true;
   }
 
   public uiVariant(): PlatformUIVariant {
-    return this.isMobile() ? "mobile" : "desktop";
+    return "desktop";
   }
 
   public preferredTransport(options: PlatformTransportOptions = {}): PlatformTransport {
     const { endpoint } = options;
-    const isMobile = this.isMobile();
     const avoidFetch = this.shouldAvoidDirectFetch(endpoint);
 
-    if (isMobile || avoidFetch) {
+    if (avoidFetch) {
       return "requestUrl";
     }
     return "fetch";
@@ -107,24 +96,8 @@ export class PlatformContext {
     if (!this.fetchAvailable) {
       return false;
     }
-    const isMobile = this.isMobile();
-    if (isMobile) {
-      return false;
-    }
     const avoidFetch = this.shouldAvoidDirectFetch(options.endpoint);
     return !avoidFetch;
-  }
-
-  public getDeviceInfo() {
-    return this.mobileDetection.getDeviceInfo();
-  }
-
-  public resetDetectionCache(): void {
-    this.mobileDetection.resetCache();
-  }
-
-  public getDetection(): MobileDetection {
-    return this.mobileDetection;
   }
 
   private shouldAvoidDirectFetch(endpoint?: string): boolean {

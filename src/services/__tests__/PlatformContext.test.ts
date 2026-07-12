@@ -2,316 +2,79 @@
  * @jest-environment node
  */
 
-import type { PlatformEnvironment } from "../../utils/PlatformEnvironment";
-
-// Mock MobileDetection
-// `jest.mock(...)` is hoisted, so avoid TDZ issues by using `var` and assigning
-// inside the mock factory.
-var mockMobileDetection: {
-  isMobileDevice: jest.Mock;
-  getDeviceInfo: jest.Mock;
-};
-var mockEnvironment: PlatformEnvironment;
-
-jest.mock("../../utils/MobileDetection", () => {
-  mockMobileDetection = {
-    isMobileDevice: jest.fn().mockReturnValue(false),
-    getDeviceInfo: jest.fn().mockReturnValue({ platform: "desktop" }),
-  };
-
-  return {
-    MobileDetection: {
-      getInstance: jest.fn().mockReturnValue(mockMobileDetection),
-    },
-  };
-});
-
-jest.mock("../../utils/PlatformEnvironment", () => {
-  mockEnvironment = {
-    runtime: "desktop",
-    surface: "desktop",
-    isMobileEmulation: false,
-  };
-
-  return {
-    detectPlatformEnvironment: jest.fn(() => mockEnvironment),
-  };
-});
-
 import { PlatformContext } from "../PlatformContext";
 
 describe("PlatformContext", () => {
+  const originalFetch = global.fetch;
+
+  function resetPlatformContextInstance(): void {
+    (PlatformContext as unknown as { instance: PlatformContext | null }).instance = null;
+  }
+
   beforeEach(() => {
-    jest.clearAllMocks();
-    mockMobileDetection.isMobileDevice.mockReturnValue(false);
-    mockEnvironment = {
-      runtime: "desktop",
-      surface: "desktop",
-      isMobileEmulation: false,
-    };
-
-    // Clear and reset fetch avoid suffixes
+    resetPlatformContextInstance();
     PlatformContext.clearFetchAvoidSuffixes();
+    global.fetch = originalFetch;
   });
 
-  describe("singleton", () => {
-    it("initialize returns instance", () => {
-      const instance = PlatformContext.initialize();
-
-      expect(instance).toBeDefined();
-      expect(instance).toBeInstanceOf(PlatformContext);
-    });
-
-    it("get returns same instance", () => {
-      const instance1 = PlatformContext.get();
-      const instance2 = PlatformContext.get();
-
-      expect(instance1).toBe(instance2);
-    });
-
-    it("initialize returns same instance on multiple calls", () => {
-      const instance1 = PlatformContext.initialize();
-      const instance2 = PlatformContext.initialize();
-
-      expect(instance1).toBe(instance2);
-    });
+  afterAll(() => {
+    global.fetch = originalFetch;
   });
 
-  describe("isMobile", () => {
-    it("returns false on desktop", () => {
-      const context = PlatformContext.get();
-
-      expect(context.isMobile()).toBe(false);
-    });
-
-    it("returns true on mobile", () => {
-      mockEnvironment = {
-        runtime: "mobile",
-        surface: "mobile",
-        isMobileEmulation: false,
-      };
-      const context = PlatformContext.get();
-
-      expect(context.isMobile()).toBe(true);
-    });
+  it("remains a singleton", () => {
+    expect(PlatformContext.initialize()).toBe(PlatformContext.get());
   });
 
-  describe("runtime", () => {
-    it("reports desktop runtime for desktop", () => {
-      const context = PlatformContext.get();
+  it("reports the desktop-only plugin capabilities", () => {
+    const context = PlatformContext.get();
 
-      expect(context.isDesktopRuntime()).toBe(true);
-      expect(context.supportsDesktopOnlyFeatures()).toBe(true);
-    });
-
-    it("keeps desktop runtime during mobile emulation", () => {
-      mockEnvironment = {
-        runtime: "desktop",
-        surface: "mobile",
-        isMobileEmulation: true,
-      };
-      const context = PlatformContext.get();
-
-      expect(context.isMobile()).toBe(true);
-      expect(context.isDesktopRuntime()).toBe(true);
-      expect(context.supportsDesktopOnlyFeatures()).toBe(true);
-    });
+    expect(context.isMobile()).toBe(false);
+    expect(context.runtime()).toBe("desktop");
+    expect(context.isDesktopRuntime()).toBe(true);
+    expect(context.isMobileRuntime()).toBe(false);
+    expect(context.supportsDesktopOnlyFeatures()).toBe(true);
+    expect(context.supportsStatusBar()).toBe(true);
+    expect(context.supportsEagerVaultWrites()).toBe(true);
+    expect(context.supportsNodeApis()).toBe(true);
+    expect(context.uiVariant()).toBe("desktop");
   });
 
-  describe("supportsNodeApis", () => {
-    it("is true on desktop (Node available)", () => {
-      const context = PlatformContext.get();
+  it('prefers "fetch" when no avoid suffix is registered', () => {
+    const context = PlatformContext.get();
 
-      expect(context.supportsNodeApis()).toBe(true);
-    });
-
-    it("is false on mobile (no Node runtime)", () => {
-      mockEnvironment = {
-        runtime: "mobile",
-        surface: "mobile",
-        isMobileEmulation: false,
-      };
-      const context = PlatformContext.get();
-
-      expect(context.supportsNodeApis()).toBe(false);
-    });
-
-    it("stays true during desktop mobile-emulation (capability follows runtime, not surface)", () => {
-      mockEnvironment = {
-        runtime: "desktop",
-        surface: "mobile",
-        isMobileEmulation: true,
-      };
-      const context = PlatformContext.get();
-
-      expect(context.supportsNodeApis()).toBe(true);
-    });
+    expect(context.preferredTransport()).toBe("fetch");
+    expect(context.preferredTransport({ endpoint: "https://api.openai.com/v1" })).toBe("fetch");
+    expect(context.supportsStreaming({ endpoint: "https://api.openai.com/v1" })).toBe(true);
   });
 
-  describe("uiVariant", () => {
-    it('returns "desktop" on desktop', () => {
-      const context = PlatformContext.get();
+  it('falls back to "requestUrl" for registered host suffixes', () => {
+    PlatformContext.registerFetchAvoidSuffix("example.com");
+    const context = PlatformContext.get();
 
-      expect(context.uiVariant()).toBe("desktop");
-    });
-
-    it('returns "mobile" on mobile', () => {
-      mockEnvironment = {
-        runtime: "mobile",
-        surface: "mobile",
-        isMobileEmulation: false,
-      };
-      const context = PlatformContext.get();
-
-      expect(context.uiVariant()).toBe("mobile");
-    });
+    expect(context.preferredTransport({ endpoint: "https://api.example.com/v1" })).toBe("requestUrl");
+    expect(context.supportsStreaming({ endpoint: "https://api.example.com/v1" })).toBe(false);
   });
 
-  describe("preferredTransport", () => {
-    it('returns "fetch" on desktop by default', () => {
-      const context = PlatformContext.get();
+  it("handles invalid endpoints without throwing", () => {
+    const context = PlatformContext.get();
 
-      expect(context.preferredTransport()).toBe("fetch");
-    });
-
-    it('returns "requestUrl" on mobile', () => {
-      mockEnvironment = {
-        runtime: "mobile",
-        surface: "mobile",
-        isMobileEmulation: false,
-      };
-      const context = PlatformContext.get();
-
-      expect(context.preferredTransport()).toBe("requestUrl");
-    });
-
-    it('returns "fetch" for openrouter.ai on desktop by default', () => {
-      const context = PlatformContext.get();
-
-      expect(context.preferredTransport({ endpoint: "https://openrouter.ai/v1" })).toBe("fetch");
-    });
-
-    it('returns "fetch" for systemsculpt.com on desktop', () => {
-      const context = PlatformContext.get();
-
-      expect(context.preferredTransport({ endpoint: "https://systemsculpt.com/api/plugin/youtube/transcripts" })).toBe("fetch");
-    });
-
-    it('returns "fetch" for non-blocked endpoints on desktop', () => {
-      const context = PlatformContext.get();
-
-      expect(context.preferredTransport({ endpoint: "https://api.openai.com/v1" })).toBe("fetch");
-    });
-
-    it("handles empty endpoint", () => {
-      const context = PlatformContext.get();
-
-      expect(context.preferredTransport({ endpoint: "" })).toBe("fetch");
-    });
+    expect(context.preferredTransport({ endpoint: "not-a-valid-url" })).toBe("fetch");
+    expect(context.supportsStreaming({ endpoint: "not-a-valid-url" })).toBe(true);
   });
 
-  describe("supportsStreaming", () => {
-    it("returns true on desktop for allowed endpoints", () => {
-      const context = PlatformContext.get();
+  it("clears non-default avoid suffixes", () => {
+    PlatformContext.registerFetchAvoidSuffix("custom.com");
+    PlatformContext.clearFetchAvoidSuffixes();
+    const context = PlatformContext.get();
 
-      expect(context.supportsStreaming({ endpoint: "https://api.openai.com/v1" })).toBe(true);
-    });
-
-    it("returns false on mobile", () => {
-      mockEnvironment = {
-        runtime: "mobile",
-        surface: "mobile",
-        isMobileEmulation: false,
-      };
-      const context = PlatformContext.get();
-
-      expect(context.supportsStreaming()).toBe(false);
-    });
-
-    it("returns true for openrouter.ai on desktop by default", () => {
-      const context = PlatformContext.get();
-
-      expect(context.supportsStreaming({ endpoint: "https://openrouter.ai/v1" })).toBe(true);
-    });
-
-    it("returns true for systemsculpt.com on desktop", () => {
-      const context = PlatformContext.get();
-
-      expect(context.supportsStreaming({ endpoint: "https://systemsculpt.com/api/plugin/youtube/transcripts" })).toBe(true);
-    });
-
-    it("returns true when no endpoint specified on desktop", () => {
-      const context = PlatformContext.get();
-
-      expect(context.supportsStreaming()).toBe(true);
-    });
+    expect(context.preferredTransport({ endpoint: "https://custom.com/api" })).toBe("fetch");
   });
 
-  describe("registerFetchAvoidSuffix", () => {
-    it("adds new suffix", () => {
-      PlatformContext.registerFetchAvoidSuffix("custom-api.example.com");
-      const context = PlatformContext.get();
+  it("disables streaming when fetch is unavailable", () => {
+    global.fetch = undefined as typeof global.fetch;
+    resetPlatformContextInstance();
+    const context = PlatformContext.get();
 
-      expect(context.preferredTransport({ endpoint: "https://custom-api.example.com/v1" })).toBe("requestUrl");
-    });
-
-    it("ignores empty suffix", () => {
-      PlatformContext.registerFetchAvoidSuffix("");
-      // No error should be thrown
-    });
-
-    it("handles case insensitively", () => {
-      PlatformContext.registerFetchAvoidSuffix("EXAMPLE.COM");
-      const context = PlatformContext.get();
-
-      expect(context.preferredTransport({ endpoint: "https://test.example.com/api" })).toBe("requestUrl");
-    });
-  });
-
-  describe("clearFetchAvoidSuffixes", () => {
-    it("restores default suffixes", () => {
-      PlatformContext.registerFetchAvoidSuffix("custom.com");
-      PlatformContext.clearFetchAvoidSuffixes();
-      const context = PlatformContext.get();
-
-      // Custom suffix should be removed
-      expect(context.preferredTransport({ endpoint: "https://custom.com/api" })).toBe("fetch");
-      // No default suffixes
-      expect(context.preferredTransport({ endpoint: "https://openrouter.ai/v1" })).toBe("fetch");
-    });
-  });
-
-  describe("getDeviceInfo", () => {
-    it("returns device info from detection", () => {
-      mockMobileDetection.getDeviceInfo.mockReturnValue({ platform: "iOS", browser: "Safari" });
-      const context = PlatformContext.get();
-
-      const info = context.getDeviceInfo();
-
-      expect(info).toEqual({ platform: "iOS", browser: "Safari" });
-    });
-  });
-
-  describe("getDetection", () => {
-    it("returns MobileDetection instance", () => {
-      const context = PlatformContext.get();
-
-      expect(context.getDetection()).toBe(mockMobileDetection);
-    });
-  });
-
-  describe("shouldAvoidDirectFetch (via preferredTransport)", () => {
-    it("handles invalid URL gracefully", () => {
-      const context = PlatformContext.get();
-
-      // Invalid URL should not cause error, should return default
-      expect(context.preferredTransport({ endpoint: "not-a-valid-url" })).toBe("fetch");
-    });
-
-    it("handles subdomains of blocked suffixes", () => {
-      const context = PlatformContext.get();
-
-      expect(context.preferredTransport({ endpoint: "https://api.openrouter.ai/v1" })).toBe("fetch");
-    });
+    expect(context.supportsStreaming({ endpoint: "https://api.openai.com/v1" })).toBe(false);
   });
 });
