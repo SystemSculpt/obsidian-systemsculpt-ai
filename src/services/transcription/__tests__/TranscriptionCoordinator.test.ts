@@ -1,389 +1,161 @@
-/**
- * @jest-environment jsdom
- */
-
-// Assigned inside the Jest mock factory (jest.mock calls are hoisted).
-// eslint-disable-next-line no-var
-var MockTFile: any;
-
-// Mock navigator.clipboard
-Object.defineProperty(navigator, "clipboard", {
-  value: {
-    writeText: jest.fn().mockResolvedValue(undefined),
-  },
-  writable: true,
-});
-
-// Mock obsidian
-jest.mock("obsidian", () => {
-  MockTFile = class MockTFile {
-    path: string;
-    basename: string;
-    stat: { mtime: number };
-
-    constructor(path: string) {
-      this.path = path;
-      this.basename = path.split("/").pop()?.replace(/\.[^.]+$/, "") || path;
-      this.stat = { mtime: Date.now() };
-    }
-  };
-
-  return {
-    App: jest.fn(),
-    Notice: jest.fn(),
-    TFile: MockTFile,
-    MarkdownView: jest.fn(),
-  };
-});
-
-// Mock AudioTranscriptionModal
-jest.mock("../../../modals/AudioTranscriptionModal", () => ({
-  AudioTranscriptionModal: jest.fn().mockImplementation((app: any, options: any) => ({
-    open: jest.fn(() => {
-      // Simulate modal completion
-      if (options.onTranscriptionComplete) {
-        setTimeout(() => options.onTranscriptionComplete("Modal transcription"), 0);
-      }
-    }),
-  })),
-}));
-
-// Mock PlatformContext
-jest.mock("../../PlatformContext", () => ({
-  PlatformContext: {
-    get: jest.fn(() => ({
-      isMobile: jest.fn(() => false),
-    })),
-  },
-}));
-
-// Mock ChatView
-jest.mock("../../../views/chatview/ChatView", () => ({
-  CHAT_VIEW_TYPE: "systemsculpt-chat-view",
-}));
-
-// Mock TranscriptionService
-// eslint-disable-next-line no-var
-var mockTranscribeFile: jest.Mock;
-jest.mock("../../TranscriptionService", () => {
-  mockTranscribeFile = jest.fn();
-  return {
-    TranscriptionService: {
-      getInstance: jest.fn(() => ({
-        transcribeFile: mockTranscribeFile,
-      })),
-    },
-  };
-});
-
-// Mock PostProcessingService
-// eslint-disable-next-line no-var
-var mockProcessTranscription: jest.Mock;
-jest.mock("../../PostProcessingService", () => {
-  mockProcessTranscription = jest.fn();
-  return {
-    PostProcessingService: {
-      getInstance: jest.fn(() => ({
-        processTranscription: mockProcessTranscription,
-      })),
-    },
-  };
-});
-
-// Mock TranscriptionProgressManager
-// eslint-disable-next-line no-var
-var mockCreateProgressHandler: jest.Mock;
-// eslint-disable-next-line no-var
-var mockHandleCompletion: jest.Mock;
-// eslint-disable-next-line no-var
-var mockClearProgress: jest.Mock;
-jest.mock("../../TranscriptionProgressManager", () => {
-  mockCreateProgressHandler = jest.fn();
-  mockHandleCompletion = jest.fn();
-  mockClearProgress = jest.fn();
-  return {
-    TranscriptionProgressManager: {
-      getInstance: jest.fn(() => ({
-        createProgressHandler: mockCreateProgressHandler,
-        handleCompletion: mockHandleCompletion,
-        clearProgress: mockClearProgress,
-      })),
-    },
-  };
-});
-
+/** @jest-environment jsdom */
+import { App, TFile } from "obsidian";
 import { TranscriptionCoordinator } from "../TranscriptionCoordinator";
-import { TranscriptionTitleService } from "../TranscriptionTitleService";
+
+Object.defineProperty(navigator, "clipboard", {
+  configurable: true,
+  value: { writeText: jest.fn(async () => undefined) },
+});
+
+jest.mock("../../PostProcessingService", () => ({
+  PostProcessingService: { getInstance: jest.fn(() => ({ processTranscription: jest.fn(async (text: string) => `processed:${text}`) })) },
+}));
+
+jest.mock("../TranscriptionTitleService", () => ({
+  TranscriptionTitleService: { getInstance: jest.fn(() => ({
+    buildFallbackBasename: (name: string) => `${name} - transcript`,
+    tryRenameTranscriptionFile: jest.fn(async (_app: any, file: any) => file.path),
+  })) },
+}));
+
+function harness(overrides: { keep?: boolean; timestamped?: boolean } = {}) {
+  const app = new App();
+  const file = new TFile({ path: "Recordings/demo.webm", name: "demo.webm", stat: { size: 4 } });
+  (app.vault as any).readBinary = jest.fn();
+  (app.vault as any).delete = jest.fn();
+  (app.vault as any).modify = jest.fn();
+  (app.vault.getAbstractFileByPath as jest.Mock).mockImplementation((path: string) => path === file.path ? file : null);
+  (app.vault.readBinary as jest.Mock).mockResolvedValue(new Uint8Array([1, 2, 3, 4]).buffer);
+  (app.vault.create as jest.Mock).mockImplementation(async (path: string) => new TFile({ path, name: path.split("/").pop() }));
+  const events: string[] = [];
+  const adapter = {
+    transcribe: jest.fn(async (source: any) => {
+      events.push("remote");
+      await source.load();
+      return { operationId: "transcription-op-1", text: "managed transcript" };
+    }),
+    beginLocalCommit: jest.fn(async () => { events.push("commit:begin"); }),
+    completeLocalCommit: jest.fn(async () => { events.push("commit:complete"); }),
+  };
+  (app.vault.create as jest.Mock).mockImplementation(async (path: string) => {
+    events.push(`write:${path}`);
+    return new TFile({ path, name: path.split("/").pop() });
+  });
+  (app.vault.delete as jest.Mock).mockImplementation(async () => { events.push("delete-source"); });
+  const plugin = {
+    app,
+    settings: {
+      postProcessingEnabled: false,
+      autoPasteTranscription: false,
+      keepRecordingsAfterTranscription: overrides.keep ?? true,
+      cleanTranscriptionOutput: true,
+    },
+  } as any;
+  const coordinator = new TranscriptionCoordinator(app, plugin, { isMobile: () => false } as any, adapter as any);
+  return { adapter, app, coordinator, events, file };
+}
 
 describe("TranscriptionCoordinator", () => {
-  let coordinator: TranscriptionCoordinator;
-  let mockApp: any;
-  let mockPlugin: any;
-  let mockTFile: any;
+  it("commits one Markdown output before optionally deleting the recoverable source", async () => {
+    const { adapter, coordinator, events } = harness({ keep: false });
+    await coordinator.start({ filePath: "Recordings/demo.webm", useModal: false, onTranscriptionComplete: jest.fn() });
 
-  beforeEach(() => {
-    jest.clearAllMocks();
-    (TranscriptionTitleService as any).instance = null;
-
-    // Use MockTFile instance for instanceof checks
-    mockTFile = new MockTFile("recordings/test-audio.webm");
-
-    mockApp = {
-      vault: {
-        getAbstractFileByPath: jest.fn((path: string) => (path === mockTFile.path ? mockTFile : null)),
-        delete: jest.fn().mockResolvedValue(undefined),
-        create: jest.fn().mockImplementation(async (path: string) => new MockTFile(path)),
-        modify: jest.fn().mockResolvedValue(undefined),
-      },
-      workspace: {
-        activeLeaf: {
-          view: {
-            getViewType: jest.fn(() => "markdown"),
-          },
-        },
-        getActiveViewOfType: jest.fn(() => null),
-      },
-    };
-
-    mockPlugin = {
-      settings: {
-        postProcessingEnabled: false,
-        autoPasteTranscription: false,
-        keepRecordingsAfterTranscription: true,
-        cleanTranscriptionOutput: true,
-      },
-    };
-
-    // Setup default mocks
-    mockTranscribeFile.mockResolvedValue("Transcribed text");
-    mockProcessTranscription.mockResolvedValue("Processed text");
-    mockCreateProgressHandler.mockReturnValue({
-      onProgress: jest.fn(),
-    });
-
-    const mockPlatform = {
-      isMobile: jest.fn(() => false),
-    };
-
-    coordinator = new TranscriptionCoordinator(mockApp, mockPlugin, mockPlatform as any);
+    expect(events).toEqual([
+      "remote",
+      "commit:begin",
+      "write:Recordings/demo - transcript.md",
+      "commit:complete",
+      "delete-source",
+    ]);
+    expect(adapter.completeLocalCommit).toHaveBeenCalledWith("transcription-op-1", expect.any(AbortSignal));
   });
 
-  describe("constructor", () => {
-    it("creates instance with app and plugin", () => {
-      expect(coordinator).toBeInstanceOf(TranscriptionCoordinator);
-    });
+  it("preserves the source and pending recovery when the local output write fails", async () => {
+    const { adapter, app, coordinator } = harness({ keep: false });
+    (app.vault.create as jest.Mock).mockRejectedValue(new Error("disk full"));
+
+    await expect(coordinator.start({ filePath: "Recordings/demo.webm", useModal: false, onTranscriptionComplete: jest.fn() })).rejects.toThrow("disk full");
+
+    expect(adapter.beginLocalCommit).toHaveBeenCalled();
+    expect(adapter.completeLocalCommit).not.toHaveBeenCalled();
+    expect(app.vault.delete).not.toHaveBeenCalled();
   });
 
-  describe("start", () => {
-    describe("modal mode", () => {
-      it("opens modal when useModal is true", async () => {
-        const { AudioTranscriptionModal } = require("../../../modals/AudioTranscriptionModal");
-
-        await coordinator.start({
-          filePath: "recordings/test-audio.webm",
-          useModal: true,
-        });
-
-        expect(AudioTranscriptionModal).toHaveBeenCalled();
-      });
-    });
-
-    describe("inline mode", () => {
-      it("runs inline transcription when callbacks provided", async () => {
-        const onComplete = jest.fn();
-
-        await coordinator.start({
-          filePath: "recordings/test-audio.webm",
-          onTranscriptionComplete: onComplete,
-        });
-
-        expect(mockTranscribeFile).toHaveBeenCalled();
-        expect(onComplete).toHaveBeenCalledWith("Transcribed text");
-      });
-
-      it("reports status updates during transcription", async () => {
-        const onStatus = jest.fn();
-
-        await coordinator.start({
-          filePath: "recordings/test-audio.webm",
-          onTranscriptionComplete: jest.fn(),
-          onStatus,
-        });
-
-        expect(onStatus).toHaveBeenCalledWith("Transcribing…");
-      });
-
-      it("applies post-processing when enabled", async () => {
-        mockPlugin.settings.postProcessingEnabled = true;
-        mockPlugin.settings.cleanTranscriptionOutput = true;
-        const onComplete = jest.fn();
-
-        await coordinator.start({
-          filePath: "recordings/test-audio.webm",
-          onTranscriptionComplete: onComplete,
-        });
-
-        expect(mockProcessTranscription).toHaveBeenCalledWith("Transcribed text");
-        expect(onComplete).toHaveBeenCalledWith("Processed text");
-      });
-
-      it("skips post-processing when disabled", async () => {
-        mockPlugin.settings.postProcessingEnabled = false;
-
-        await coordinator.start({
-          filePath: "recordings/test-audio.webm",
-          onTranscriptionComplete: jest.fn(),
-        });
-
-        expect(mockProcessTranscription).not.toHaveBeenCalled();
-      });
-
-      it("creates markdown file for transcription", async () => {
-        // Make getAbstractFileByPath return null for .md file (doesn't exist)
-        mockApp.vault.getAbstractFileByPath.mockImplementation((path: string) => {
-          if (path.endsWith(".md")) return null;
-          return mockTFile;
-        });
-
-        await coordinator.start({
-          filePath: "recordings/test-audio.webm",
-          onTranscriptionComplete: jest.fn(),
-        });
-
-        expect(mockApp.vault.create).toHaveBeenCalledWith(
-          "recordings/test-audio - transcript.md",
-          expect.any(String)
-        );
-      });
-
-      it("reports renamed path to progress manager when title service returns one", async () => {
-        mockApp.vault.getAbstractFileByPath.mockImplementation((path: string) => {
-          if (path.endsWith(".md")) return null;
-          return mockTFile;
-        });
-
-        const titleService = TranscriptionTitleService.getInstance(mockPlugin);
-        jest.spyOn(titleService, "tryRenameTranscriptionFile").mockResolvedValue(
-          "recordings/test-audio - transcript - My Title.md"
-        );
-
-        await coordinator.start({
-          filePath: "recordings/test-audio.webm",
-          onTranscriptionComplete: jest.fn(),
-        });
-
-        expect(mockHandleCompletion).toHaveBeenCalledWith(
-          "recordings/test-audio.webm",
-          "recordings/test-audio - transcript - My Title.md"
-        );
-      });
-
-      it("keeps recording when keepRecordingsAfterTranscription is true", async () => {
-        mockPlugin.settings.keepRecordingsAfterTranscription = true;
-
-        await coordinator.start({
-          filePath: "recordings/test-audio.webm",
-          onTranscriptionComplete: jest.fn(),
-        });
-
-        expect(mockApp.vault.delete).not.toHaveBeenCalled();
-      });
-    });
-
-    describe("error handling", () => {
-      it("throws error when file not found", async () => {
-        mockApp.vault.getAbstractFileByPath.mockReturnValue(null);
-
-        await expect(
-          coordinator.start({
-            filePath: "nonexistent.webm",
-            onTranscriptionComplete: jest.fn(),
-          })
-        ).rejects.toThrow("Recording file not found");
-      });
-
-      it("calls onError callback on transcription failure", async () => {
-        const error = new Error("Transcription failed");
-        mockTranscribeFile.mockRejectedValue(error);
-        const onError = jest.fn();
-
-        await expect(
-          coordinator.start({
-            filePath: "recordings/test-audio.webm",
-            onTranscriptionComplete: jest.fn(),
-            onError,
-          })
-        ).rejects.toThrow("Transcription failed");
-
-        expect(onError).toHaveBeenCalledWith(error);
-      });
-
-      it("clears progress on error", async () => {
-        mockTranscribeFile.mockRejectedValue(new Error("Failure"));
-
-        await expect(
-          coordinator.start({
-            filePath: "recordings/test-audio.webm",
-            onTranscriptionComplete: jest.fn(),
-          })
-        ).rejects.toThrow();
-
-        expect(mockClearProgress).toHaveBeenCalledWith("recordings/test-audio.webm");
-      });
-    });
-
-    describe("context detection", () => {
-      it("respects explicit isChatContext setting", async () => {
-        await coordinator.start({
-          filePath: "recordings/test-audio.webm",
-          onTranscriptionComplete: jest.fn(),
-          isChatContext: true,
-        });
-
-        // Should pass chat context to transcription service
-        expect(mockTranscribeFile).toHaveBeenCalledWith(
-          expect.anything(),
-          expect.objectContaining({ type: "chat" })
-        );
-      });
-    });
-
-    describe("timestamped transcription", () => {
-      it("passes timestamped option to transcription service", async () => {
-        await coordinator.start({
-          filePath: "recordings/test-audio.webm",
-          onTranscriptionComplete: jest.fn(),
-          timestamped: true,
-        });
-
-        expect(mockTranscribeFile).toHaveBeenCalledWith(
-          expect.anything(),
-          expect.objectContaining({ timestamped: true })
-        );
-      });
-    });
+  it("writes timestamped results as SRT without post-processing", async () => {
+    const { app, coordinator } = harness();
+    await coordinator.start({ filePath: "Recordings/demo.webm", useModal: false, timestamped: true, onTranscriptionComplete: jest.fn() });
+    expect(app.vault.create).toHaveBeenCalledWith("Recordings/demo.srt", "managed transcript");
   });
 
-  describe("transcription flow", () => {
-    it("copies transcription to clipboard", async () => {
-      await coordinator.start({
-        filePath: "recordings/test-audio.webm",
-        onTranscriptionComplete: jest.fn(),
-      });
-
-      expect(navigator.clipboard.writeText).toHaveBeenCalledWith("Transcribed text");
+  it("fences every local write after explicit abort", async () => {
+    const { adapter, app, coordinator } = harness();
+    let release!: () => void;
+    let entered!: () => void;
+    const waiting = new Promise<void>((resolve) => { entered = resolve; });
+    adapter.transcribe.mockImplementation(async (source: any) => {
+      await source.load();
+      entered();
+      await new Promise<void>((resolve) => { release = resolve; });
+      return { operationId: "transcription-op-1", text: "late transcript" };
     });
+    const running = coordinator.start({ filePath: "Recordings/demo.webm", useModal: false, onTranscriptionComplete: jest.fn() });
+    await waiting;
+    coordinator.abort();
+    release();
 
-    it("calls handleCompletion on progress manager", async () => {
-      await coordinator.start({
-        filePath: "recordings/test-audio.webm",
-        onTranscriptionComplete: jest.fn(),
-      });
+    await expect(running).rejects.toMatchObject({ name: "AbortError" });
+    expect(app.vault.create).not.toHaveBeenCalled();
+    expect(app.vault.delete).not.toHaveBeenCalled();
+  });
 
-      expect(mockHandleCompletion).toHaveBeenCalledWith(
-        "recordings/test-audio.webm",
-        "recordings/test-audio - transcript.md"
-      );
+  it("owns an active operation ID before remote dispatch settles", async () => {
+    const { adapter, coordinator, file } = harness();
+    let acceptedOperationId = "";
+    let entered!: () => void;
+    let release!: () => void;
+    const waiting = new Promise<void>((resolve) => { entered = resolve; });
+    const delayed = new Promise<void>((resolve) => { release = resolve; });
+    adapter.transcribe.mockImplementation(async (source: any, context: any) => {
+      await source.load();
+      acceptedOperationId = context.operationId;
+      entered();
+      await delayed;
+      return { operationId: context.operationId, text: "managed transcript" };
     });
+    const running = coordinator.transcribeFile(file, { type: "note" });
+    await waiting;
+
+    expect(acceptedOperationId).toMatch(/^transcription-/);
+    expect(coordinator.getActiveOperationId()).toBe(acceptedOperationId);
+    coordinator.abort();
+    release();
+    await expect(running).rejects.toMatchObject({ name: "AbortError" });
+  });
+
+  it("keeps raw result handoffs resumable instead of falsely completing a durable commit", async () => {
+    const { adapter, coordinator, file } = harness();
+    await expect(coordinator.transcribeFile(file, { type: "note" })).resolves.toBe("managed transcript");
+    expect(adapter.beginLocalCommit).not.toHaveBeenCalled();
+    expect(adapter.completeLocalCommit).not.toHaveBeenCalled();
+  });
+
+  it("does not write output when abort wins a delayed commit transition", async () => {
+    const { adapter, app, coordinator } = harness();
+    let entered!: () => void;
+    let release!: () => void;
+    const waiting = new Promise<void>((resolve) => { entered = resolve; });
+    const delayed = new Promise<void>((resolve) => { release = resolve; });
+    adapter.beginLocalCommit.mockImplementation(async () => {
+      entered();
+      await delayed;
+    });
+    const running = coordinator.start({ filePath: "Recordings/demo.webm", useModal: false, onTranscriptionComplete: jest.fn() });
+    await waiting;
+    coordinator.abort();
+    release();
+
+    await expect(running).rejects.toMatchObject({ name: "AbortError" });
+    expect(app.vault.create).not.toHaveBeenCalled();
+    expect(adapter.completeLocalCommit).not.toHaveBeenCalled();
   });
 });

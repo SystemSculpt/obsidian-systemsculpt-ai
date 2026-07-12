@@ -2,10 +2,6 @@ import { Setting, Notice, DropdownComponent } from "obsidian";
 import { SystemSculptSettingTab } from "./SystemSculptSettingTab";
 import { PlatformContext } from "../services/PlatformContext";
 import { DEFAULT_SETTINGS } from "../types";
-import {
-  CUSTOM_WHISPER_CONTRACT,
-  validateCustomWhisperConfig,
-} from "../services/transcription/providers/customWhisperConfig";
 
 export async function displayRecorderTabContent(containerEl: HTMLElement, tabInstance: SystemSculptSettingTab) {
   containerEl.empty();
@@ -159,25 +155,6 @@ export async function displayRecorderTabContent(containerEl: HTMLElement, tabIns
   containerEl.createEl("h3", { text: "Transcription" });
 
   new Setting(containerEl)
-    .setName("Transcription provider")
-    .setDesc("Transcribe through SystemSculpt (managed) or your own self-hosted / third-party Whisper-compatible endpoint.")
-    .addDropdown((dropdown) => {
-      dropdown
-        .addOption("systemsculpt", "SystemSculpt (managed)")
-        .addOption("custom", "Custom / self-hosted Whisper")
-        .setValue(plugin.settings.transcriptionProvider ?? "systemsculpt")
-        .onChange(async (value: "systemsculpt" | "custom") => {
-          await plugin.getSettingsManager().updateSettings({ transcriptionProvider: value });
-          // Re-render so the custom fields appear/disappear with the choice.
-          await displayRecorderTabContent(containerEl, tabInstance);
-        });
-    });
-
-  if (plugin.settings.transcriptionProvider === "custom") {
-    renderCustomTranscriptionSettings(containerEl, tabInstance);
-  }
-
-  new Setting(containerEl)
     .setName("Default transcription output format")
     .setDesc("Choose whether transcriptions are saved as Markdown (.md) or SRT (.srt) by default.")
     .addDropdown((dropdown) => {
@@ -219,81 +196,6 @@ export async function displayRecorderTabContent(containerEl: HTMLElement, tabIns
           });
       });
   }
-}
-
-function renderCustomTranscriptionSettings(containerEl: HTMLElement, tabInstance: SystemSculptSettingTab) {
-  const { plugin } = tabInstance;
-  let statusEl: HTMLElement | null = null;
-
-  const refreshValidation = () => {
-    if (!statusEl) return;
-    statusEl.empty();
-    const result = validateCustomWhisperConfig({
-      endpoint: plugin.settings.customTranscriptionEndpoint || "",
-      apiKey: plugin.settings.customTranscriptionApiKey || "",
-      model: plugin.settings.customTranscriptionModel || "",
-    });
-    if (result.ok && result.warnings.length === 0) {
-      statusEl.createDiv({ cls: "ss-inline-note ss-inline-note--ok", text: "✓ Endpoint looks compatible." });
-      return;
-    }
-    for (const error of result.errors) {
-      statusEl.createDiv({ cls: "ss-inline-note ss-inline-note--error", text: `⛔ ${error}` });
-    }
-    for (const warning of result.warnings) {
-      statusEl.createDiv({ cls: "ss-inline-note ss-inline-note--warning", text: `⚠️ ${warning}` });
-    }
-  };
-
-  new Setting(containerEl)
-    .setName("Custom endpoint URL")
-    .setDesc(
-      "Full URL of your Whisper-compatible endpoint, e.g. https://api.groq.com/openai/v1/audio/transcriptions, https://api.openai.com/v1/audio/transcriptions, or http://localhost:9000/v1/audio/transcriptions."
-    )
-    .addText((text) => {
-      text
-        .setPlaceholder("https://.../v1/audio/transcriptions")
-        .setValue(plugin.settings.customTranscriptionEndpoint || "")
-        .onChange(async (value) => {
-          await plugin.getSettingsManager().updateSettings({ customTranscriptionEndpoint: value.trim() });
-          refreshValidation();
-        });
-    });
-
-  new Setting(containerEl)
-    .setName("API key")
-    .setDesc("Optional. Sent as 'Authorization: Bearer <key>'. Required by most hosted endpoints; leave blank for a local server that needs none.")
-    .addText((text) => {
-      text.inputEl.type = "password";
-      text
-        .setPlaceholder("sk-... / gsk_...")
-        .setValue(plugin.settings.customTranscriptionApiKey || "")
-        .onChange(async (value) => {
-          await plugin.getSettingsManager().updateSettings({ customTranscriptionApiKey: value.trim() });
-          refreshValidation();
-        });
-    });
-
-  new Setting(containerEl)
-    .setName("Model name")
-    .setDesc("Model identifier sent to the endpoint, e.g. whisper-large-v3 (Groq) or whisper-1 (OpenAI). Leave blank to use the server default.")
-    .addText((text) => {
-      text
-        .setPlaceholder("whisper-large-v3")
-        .setValue(plugin.settings.customTranscriptionModel || "")
-        .onChange(async (value) => {
-          await plugin.getSettingsManager().updateSettings({ customTranscriptionModel: value.trim() });
-          refreshValidation();
-        });
-    });
-
-  containerEl.createEl("p", {
-    text: CUSTOM_WHISPER_CONTRACT,
-    cls: "setting-item-description",
-  });
-
-  statusEl = containerEl.createDiv({ cls: "ss-inline-note" });
-  refreshValidation();
 }
 
 async function renderMicrophoneSetting(containerEl: HTMLElement, tabInstance: SystemSculptSettingTab) {

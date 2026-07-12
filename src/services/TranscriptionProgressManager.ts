@@ -1,5 +1,5 @@
 import { TFile } from "obsidian";
-import { TranscriptionContext } from "./TranscriptionService";
+import type { TranscriptionContext } from "./transcription/TranscriptionCoordinator";
 
 /**
  * Unified manager for transcription progress reporting

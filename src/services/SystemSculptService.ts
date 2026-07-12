@@ -27,7 +27,6 @@ import { LicenseService } from "./LicenseService";
 import { ModelManagementService } from "./ModelManagementService";
 import { ContextFileService } from "./ContextFileService";
 import { DocumentUploadService } from "./DocumentUploadService";
-import { AudioUploadService } from "./AudioUploadService";
 import { errorLogger } from "../utils/errorLogger";
 import type { PreparedChatRequest, StreamDebugCallbacks } from "./StreamExecutionTypes";
 import { ChatRequestPreparationService, prepareChatRequestAuthoritatively, type AuthoritativeChatPreparationInput } from "./chat/ChatRequestPreparationService";
@@ -304,7 +303,6 @@ export class SystemSculptService {
   private modelManagementService: ModelManagementService;
   private contextFileService: ContextFileService;
   private documentUploadService: DocumentUploadService;
-  private audioUploadService: AudioUploadService;
   private platformRequestClient: PlatformRequestClient;
   private mcpService: MCPService;
   private acceptedChatPreparation = new ChatRequestPreparationService();
@@ -815,7 +813,6 @@ export class SystemSculptService {
       this.settings.licenseKey,
       this.plugin.manifest?.version ?? "0.0.0"
     );
-    this.audioUploadService = new AudioUploadService(plugin.app, this.baseUrl, this.settings.licenseKey);
     this.platformRequestClient = new PlatformRequestClient();
     this.mcpService = new MCPService(plugin, plugin.app);
   }
@@ -912,7 +909,6 @@ export class SystemSculptService {
       this.settings.licenseKey,
       this.plugin.manifest?.version ?? "0.0.0"
     );
-    this.audioUploadService.updateConfig(this.baseUrl, this.settings.licenseKey);
   }
 
   // DELEGATE TO LICENSE SERVICE
@@ -936,13 +932,6 @@ export class SystemSculptService {
     file: TFile
   ): Promise<{ documentId: string; status: string; cached?: boolean }> {
     return this.documentUploadService.uploadDocument(file);
-  }
-
-  // DELEGATE TO AUDIO UPLOAD SERVICE
-  public async uploadAudio(
-    file: TFile
-  ): Promise<{ documentId: string; status: string; cached?: boolean }> {
-    return this.audioUploadService.uploadAudio(file);
   }
 
   public async getCreditsBalance(): Promise<CreditsBalanceSnapshot> {

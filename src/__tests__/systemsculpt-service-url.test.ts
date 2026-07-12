@@ -66,13 +66,6 @@ jest.mock('../services/DocumentUploadService', () => ({
   })),
 }));
 
-jest.mock('../services/AudioUploadService', () => ({
-  AudioUploadService: jest.fn().mockImplementation(() => ({
-    updateConfig: jest.fn(),
-    uploadAudio: jest.fn(),
-  })),
-}));
-
 jest.mock('../views/chatview/MCPService', () => ({
   MCPService: jest.fn().mockImplementation(() => ({
     getAvailableTools: jest.fn().mockResolvedValue([]),

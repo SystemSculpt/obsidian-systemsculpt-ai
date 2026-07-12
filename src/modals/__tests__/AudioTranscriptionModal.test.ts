@@ -4,112 +4,71 @@
 import { App, TFile } from "obsidian";
 import { AudioTranscriptionModal } from "../AudioTranscriptionModal";
 
-const mockTranscribeFile = jest.fn();
-const mockProcessTranscription = jest.fn(async (text: string) => text);
-const mockTryCopyToClipboard = jest.fn(async () => true);
+const start = jest.fn();
+const abort = jest.fn();
 
-jest.mock("../../services/TranscriptionService", () => ({
-  TranscriptionService: {
-    getInstance: jest.fn(() => ({
-      transcribeFile: mockTranscribeFile,
-    })),
-  },
+jest.mock("../../services/transcription/TranscriptionCoordinator", () => ({
+  TranscriptionCoordinator: jest.fn().mockImplementation(() => ({ start, abort })),
 }));
 
-jest.mock("../../services/PostProcessingService", () => ({
-  PostProcessingService: {
-    getInstance: jest.fn(() => ({
-      processTranscription: mockProcessTranscription,
-    })),
-  },
-}));
+jest.mock("../../utils/clipboard", () => ({ tryCopyToClipboard: jest.fn(async () => true) }));
 
-jest.mock("../../services/transcription/TranscriptionTitleService", () => ({
-  TranscriptionTitleService: {
-    getInstance: jest.fn(() => ({
-      buildFallbackBasename: jest.fn((name: string) => `${name}-transcription`),
-      tryRenameTranscriptionFile: jest.fn(async (_app: any, file: any) => file.path),
-    })),
-  },
-}));
-
-jest.mock("../../utils/clipboard", () => ({
-  tryCopyToClipboard: (...args: any[]) => mockTryCopyToClipboard(...args),
-}));
+function createModal() {
+  const app = new App();
+  const file = new TFile({ path: "Recordings/test.wav", name: "test.wav", stat: { size: 1234 } });
+  const plugin = { app, settings: {}, register: jest.fn() } as any;
+  return { modal: new AudioTranscriptionModal(app, { file, timestamped: true, isChat: false, plugin }), plugin };
+}
 
 describe("AudioTranscriptionModal", () => {
   beforeEach(() => {
     document.body.innerHTML = "";
-    mockTranscribeFile.mockReset();
-    mockProcessTranscription.mockClear();
-    mockTryCopyToClipboard.mockClear();
+    jest.clearAllMocks();
+    start.mockImplementation(async (request: any) => {
+      request.onProgress?.(50, "Uploading audio (1/2)…");
+      request.onOutput?.("Recordings/test.srt");
+      request.onTranscriptionComplete?.("managed transcript");
+      return "managed transcript";
+    });
   });
 
-  it("renders progress UI and writes timestamped transcriptions as .srt", async () => {
-    const app = new App();
-    const file = new TFile({
-      path: "Recordings/test.wav",
-      name: "test.wav",
-      stat: { size: 1234 },
-    });
-
-    (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(null);
-    (app.vault.modify as jest.Mock).mockImplementation(async () => {});
-    (app.vault.create as jest.Mock).mockImplementation(async (path: string) => {
-      return new TFile({ path, name: path.split("/").pop() ?? path });
-    });
-
-    mockTranscribeFile.mockImplementation(async (_tFile: any, ctx: any) => {
-      ctx?.onProgress?.(2, "Preparing upload...");
-      ctx?.onProgress?.(50, "Uploading audio (1/2)...");
-      ctx?.onProgress?.(75, "Chunking audio...");
-      return "00:00:00,000 --> 00:00:01,000\nhello world";
-    });
-
-    const plugin = {
-      app,
-      settings: {
-        postProcessingEnabled: true, // should be ignored for timestamped mode
-        cleanTranscriptionOutput: false,
-        keepRecordingsAfterTranscription: true,
-        autoPasteTranscription: false,
-      },
-      register: jest.fn(),
-    } as any;
-
-    const modal = new AudioTranscriptionModal(app, {
-      file,
-      timestamped: true,
-      isChat: false,
-      plugin,
-      onTranscriptionComplete: jest.fn(),
-    });
-
+  it("renders the managed operation and preserves the timestamped output path", async () => {
+    const { modal } = createModal();
     modal.open();
 
-    expect(document.querySelector(".systemsculpt-progress-modal")).toBeTruthy();
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
-    const waitFor = async (predicate: () => boolean, timeoutMs: number): Promise<void> => {
-      const deadline = Date.now() + timeoutMs;
-      while (Date.now() < deadline) {
-        if (predicate()) return;
-        await new Promise((resolve) => setTimeout(resolve, 5));
-      }
-      throw new Error("Timed out waiting for condition");
-    };
+    expect(start).toHaveBeenCalledWith(expect.objectContaining({
+      filePath: "Recordings/test.wav",
+      timestamped: true,
+      useModal: false,
+    }));
+    expect(document.querySelector(".systemsculpt-progress-status-text")?.textContent).toContain("Transcription complete");
+    expect(document.body.textContent).toContain("Saved to Recordings/test.srt");
+  });
 
-    await waitFor(() => {
-      const statusText = document.querySelector(".systemsculpt-progress-status-text")?.textContent ?? "";
-      return statusText.includes("Transcription complete");
-    }, 1000);
+  it("treats Hide as presentation detachment, not cancellation", () => {
+    const { modal } = createModal();
+    modal.open();
+    const hide = [...document.querySelectorAll("button")].find((button) => button.textContent === "Hide") as HTMLButtonElement;
+    hide.click();
+    expect(abort).not.toHaveBeenCalled();
+  });
 
-    const statusText = document.querySelector(".systemsculpt-progress-status-text")?.textContent ?? "";
-    expect(statusText).toContain("Transcription complete");
+  it("only explicit Cancel aborts the managed operation", () => {
+    const { modal } = createModal();
+    modal.open();
+    const cancel = [...document.querySelectorAll("button")].find((button) => button.textContent === "Cancel") as HTMLButtonElement;
+    cancel.click();
+    expect(abort).toHaveBeenCalledTimes(1);
+  });
 
-    expect(app.vault.create).toHaveBeenCalled();
-    const createdPath = (app.vault.create as jest.Mock).mock.calls[0]?.[0];
-    expect(String(createdPath)).toMatch(/\.srt$/);
-
-    expect(mockProcessTranscription).not.toHaveBeenCalled();
+  it("aborts before detaching when the plugin unloads", () => {
+    const { modal, plugin } = createModal();
+    modal.open();
+    const unload = plugin.register.mock.calls[0][0];
+    unload();
+    expect(abort).toHaveBeenCalledTimes(1);
+    expect(document.querySelector(".systemsculpt-progress-modal")).toBeNull();
   });
 });

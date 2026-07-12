@@ -2848,6 +2848,4086 @@
       },
       "previousTransitionHash": "40fa79314b2a70c171cfd01df3d28d1be73122dce6730e7f76786cbc9d2b054c",
       "transitionHash": "0521e3f5718adc9b61e6b02be1b350420e633bdbdb02f46d994fc29104f342fb"
+    },
+    {
+      "sequence": 28,
+      "historicalRecordId": "e75fb273338602ee8a7ed3d8d709c6f98d23d1ca80b5e61df732f4b410d7b868",
+      "v2OccurrenceId": "1210e8ab9f8bf1f391deebdd5dbbd486446527e1b0fa6950626f4c5486f851b3",
+      "ownerPlan": "020",
+      "from": "present",
+      "to": "removed",
+      "predecessorSourceTree": "81eca7885bda37aa6bca65f8e5494ce9b3a8a850",
+      "stagedSourceTree": "ba5e9269c0b9cde03540ce36052f61e86559854e",
+      "sourceEvidence": [
+        {
+          "path": "src/__tests__/settings-recorder-tab.test.ts",
+          "beforeGitBlobOrNull": "0040c460ec8ba7723d6c076aeea048c5b9f17251",
+          "afterGitBlobOrNull": "1602f649901273f246ef8b44ed6d6fe1b575d2d5"
+        },
+        {
+          "path": "src/__tests__/systemsculpt-service-url.test.ts",
+          "beforeGitBlobOrNull": "f9b69a804f4df926782348f5244a2cf0be92ecbf",
+          "afterGitBlobOrNull": "0fed9b1947a1133a7f3ab9fbe02dbacc02f78285"
+        },
+        {
+          "path": "src/main.ts",
+          "beforeGitBlobOrNull": "d2a4d00cfa7cb7d2c95df04144accce2d721ddc5",
+          "afterGitBlobOrNull": "96de219948c85849ee49916da772fd716eb276d3"
+        },
+        {
+          "path": "src/modals/AudioTranscriptionModal.ts",
+          "beforeGitBlobOrNull": "4e5c4aeb9170a8b6e547c1efe7c231f8e3661e3d",
+          "afterGitBlobOrNull": "95530b0dc96c5b780aaf4baf56cd2837c8012754"
+        },
+        {
+          "path": "src/modals/__tests__/AudioTranscriptionModal.test.ts",
+          "beforeGitBlobOrNull": "d2649d613c588cb09620ef8363d75d4255618a6e",
+          "afterGitBlobOrNull": "d4befdecae40d365d16901ceda9d3c2ef062a247"
+        },
+        {
+          "path": "src/services/AudioUploadService.ts",
+          "beforeGitBlobOrNull": "1dd6b2ef59d3a7cba9a5e7110ff35bc9aeab60ca",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/RecorderService.ts",
+          "beforeGitBlobOrNull": "a401f721602f26f09aae81005a3c1baac2a0b566",
+          "afterGitBlobOrNull": "0ba00b4013361844eb0bea6c9d3d0c9e1519f8f2"
+        },
+        {
+          "path": "src/services/SystemSculptService.ts",
+          "beforeGitBlobOrNull": "7a15db08319292c049de42a6e8539ac7900aa4f4",
+          "afterGitBlobOrNull": "d5c4b9bd622186fc5cdcf52bcb7d1c1a44e5e00d"
+        },
+        {
+          "path": "src/services/TranscriptionProgressManager.ts",
+          "beforeGitBlobOrNull": "13e205a7046957413f7c1c9fa782fa127c4665dd",
+          "afterGitBlobOrNull": "0a074f9734395a0aab6ed2641edbaf0e7d43baa8"
+        },
+        {
+          "path": "src/services/TranscriptionService.ts",
+          "beforeGitBlobOrNull": "61108948a71ea4d7194ba9f7d1559bce3706484a",
+          "afterGitBlobOrNull": "2cedc4964b68eac8a0b3ca635240b2140f057469"
+        },
+        {
+          "path": "src/services/__tests__/AudioUploadService.test.ts",
+          "beforeGitBlobOrNull": "e487d764ce03733219c3d5d2577cdae7a2989197",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/__tests__/RecorderService.test.ts",
+          "beforeGitBlobOrNull": "68e2ddb86fd1f8a7ac74275f3f53a76e7facfa31",
+          "afterGitBlobOrNull": "e7fe907800ec04048a6dab67c589b239422e1a38"
+        },
+        {
+          "path": "src/services/__tests__/SystemSculptService.test.ts",
+          "beforeGitBlobOrNull": "e8c956ece149693e57994fd7de555516b5387281",
+          "afterGitBlobOrNull": "da7a2c84cf66331ae401098de3bc2bafe48b8641"
+        },
+        {
+          "path": "src/services/__tests__/TranscriptionService.test.ts",
+          "beforeGitBlobOrNull": "b22f1103ea2f06ef75511d79221b1c164a4727dc",
+          "afterGitBlobOrNull": "b05da7e98fe50545b2ca557d406d360058b751c1"
+        },
+        {
+          "path": "src/services/__tests__/TranscriptionServiceChunkingE2E.test.ts",
+          "beforeGitBlobOrNull": "ec69654e1dc34a98f0bcaefc4ff3590a50c37ba3",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/managed/adapters/ObsidianManagedRecoveryAdapter.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "0e392963bc1177c555f5eb09a35fc27e5d0c6ccb"
+        },
+        {
+          "path": "src/services/transcription/ManagedTranscriptionAdapter.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "4a206c131005c18388652cb0e39a6063180664fa"
+        },
+        {
+          "path": "src/services/transcription/TranscriptionCoordinator.ts",
+          "beforeGitBlobOrNull": "ddc2db7848ff8ff625bbc46eebba5a03cfa091a0",
+          "afterGitBlobOrNull": "e1a7c16f0a35f0f304a74029321093031c817dec"
+        },
+        {
+          "path": "src/services/transcription/__tests__/ManagedTranscriptionAdapter.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "284259ac9cc30d7590bfe766554b930993c4af7f"
+        },
+        {
+          "path": "src/services/transcription/__tests__/TranscriptionCoordinator.test.ts",
+          "beforeGitBlobOrNull": "b7585350135c33e16acfb49674d4542285ea6ad1",
+          "afterGitBlobOrNull": "df340a020bdf5edfd6dcef029bd6b31142409254"
+        },
+        {
+          "path": "src/services/transcription/providers/ProviderError.ts",
+          "beforeGitBlobOrNull": "2a0f2626ca0c17fd98d648e73554b48a51b0cb3c",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/TranscriptionProvider.ts",
+          "beforeGitBlobOrNull": "2d7959de355ef00ad762245b2aba397a96f40a49",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/ProviderError.test.ts",
+          "beforeGitBlobOrNull": "35e0c0034ac6c3b272f544b81d5a9cdf09f70f6b",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/customWhisperConfig.test.ts",
+          "beforeGitBlobOrNull": "60a41f886749b9dee9cce0dc09fdc29c7b14474b",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/providerHttpErrors.test.ts",
+          "beforeGitBlobOrNull": "7473acf134f4c3ba161223d64d2562632e9753da",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/transcriptionResponse.test.ts",
+          "beforeGitBlobOrNull": "b7b3fd88263b993cb2049bc1606d563849e2fa63",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/customWhisperConfig.ts",
+          "beforeGitBlobOrNull": "3717e34c1485f98bdb08022501c4cd456d340638",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/providerHttpErrors.ts",
+          "beforeGitBlobOrNull": "1e78360dc8105c41da8e6f51fdb8a82540d116ba",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/transcriptionResponse.ts",
+          "beforeGitBlobOrNull": "d0c563a5239c6344f71f5ece89697d5b5d70b51f",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/settings/RecorderTabContent.ts",
+          "beforeGitBlobOrNull": "3897b92db3c199c218bd9e5bee704eb136a8ff4a",
+          "afterGitBlobOrNull": "7837a7349f91ef3d79063b5f68c74cef93a3953e"
+        }
+      ],
+      "predecessorLedger": {
+        "gitBlob": "f3e5caa32c2e2fbcd6012efbc257d2cdff0684e0",
+        "sha256": "2d75ab8e8f4be223be9b2ed9be2a27eb1079648de48a4c3850d31c3eff00765d",
+        "transitionCount": 28,
+        "finalTransitionHash": "0521e3f5718adc9b61e6b02be1b350420e633bdbdb02f46d994fc29104f342fb"
+      },
+      "previousTransitionHash": "0521e3f5718adc9b61e6b02be1b350420e633bdbdb02f46d994fc29104f342fb",
+      "transitionHash": "7d4a3f11cde09234026ea94bc9bb75de025555b11a08d2d6f39a453ed026bcc3"
+    },
+    {
+      "sequence": 29,
+      "historicalRecordId": "3d473d96aa79a5019d1a91761aec213f8563641c3c6f9f06908ea1eb1adf63ba",
+      "v2OccurrenceId": "4a69dc89149666dc562b000c17bfff1c57d734a4b2473b4ff9c33741bb78fe4a",
+      "ownerPlan": "020",
+      "from": "present",
+      "to": "removed",
+      "predecessorSourceTree": "81eca7885bda37aa6bca65f8e5494ce9b3a8a850",
+      "stagedSourceTree": "ba5e9269c0b9cde03540ce36052f61e86559854e",
+      "sourceEvidence": [
+        {
+          "path": "src/__tests__/settings-recorder-tab.test.ts",
+          "beforeGitBlobOrNull": "0040c460ec8ba7723d6c076aeea048c5b9f17251",
+          "afterGitBlobOrNull": "1602f649901273f246ef8b44ed6d6fe1b575d2d5"
+        },
+        {
+          "path": "src/__tests__/systemsculpt-service-url.test.ts",
+          "beforeGitBlobOrNull": "f9b69a804f4df926782348f5244a2cf0be92ecbf",
+          "afterGitBlobOrNull": "0fed9b1947a1133a7f3ab9fbe02dbacc02f78285"
+        },
+        {
+          "path": "src/main.ts",
+          "beforeGitBlobOrNull": "d2a4d00cfa7cb7d2c95df04144accce2d721ddc5",
+          "afterGitBlobOrNull": "96de219948c85849ee49916da772fd716eb276d3"
+        },
+        {
+          "path": "src/modals/AudioTranscriptionModal.ts",
+          "beforeGitBlobOrNull": "4e5c4aeb9170a8b6e547c1efe7c231f8e3661e3d",
+          "afterGitBlobOrNull": "95530b0dc96c5b780aaf4baf56cd2837c8012754"
+        },
+        {
+          "path": "src/modals/__tests__/AudioTranscriptionModal.test.ts",
+          "beforeGitBlobOrNull": "d2649d613c588cb09620ef8363d75d4255618a6e",
+          "afterGitBlobOrNull": "d4befdecae40d365d16901ceda9d3c2ef062a247"
+        },
+        {
+          "path": "src/services/AudioUploadService.ts",
+          "beforeGitBlobOrNull": "1dd6b2ef59d3a7cba9a5e7110ff35bc9aeab60ca",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/RecorderService.ts",
+          "beforeGitBlobOrNull": "a401f721602f26f09aae81005a3c1baac2a0b566",
+          "afterGitBlobOrNull": "0ba00b4013361844eb0bea6c9d3d0c9e1519f8f2"
+        },
+        {
+          "path": "src/services/SystemSculptService.ts",
+          "beforeGitBlobOrNull": "7a15db08319292c049de42a6e8539ac7900aa4f4",
+          "afterGitBlobOrNull": "d5c4b9bd622186fc5cdcf52bcb7d1c1a44e5e00d"
+        },
+        {
+          "path": "src/services/TranscriptionProgressManager.ts",
+          "beforeGitBlobOrNull": "13e205a7046957413f7c1c9fa782fa127c4665dd",
+          "afterGitBlobOrNull": "0a074f9734395a0aab6ed2641edbaf0e7d43baa8"
+        },
+        {
+          "path": "src/services/TranscriptionService.ts",
+          "beforeGitBlobOrNull": "61108948a71ea4d7194ba9f7d1559bce3706484a",
+          "afterGitBlobOrNull": "2cedc4964b68eac8a0b3ca635240b2140f057469"
+        },
+        {
+          "path": "src/services/__tests__/AudioUploadService.test.ts",
+          "beforeGitBlobOrNull": "e487d764ce03733219c3d5d2577cdae7a2989197",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/__tests__/RecorderService.test.ts",
+          "beforeGitBlobOrNull": "68e2ddb86fd1f8a7ac74275f3f53a76e7facfa31",
+          "afterGitBlobOrNull": "e7fe907800ec04048a6dab67c589b239422e1a38"
+        },
+        {
+          "path": "src/services/__tests__/SystemSculptService.test.ts",
+          "beforeGitBlobOrNull": "e8c956ece149693e57994fd7de555516b5387281",
+          "afterGitBlobOrNull": "da7a2c84cf66331ae401098de3bc2bafe48b8641"
+        },
+        {
+          "path": "src/services/__tests__/TranscriptionService.test.ts",
+          "beforeGitBlobOrNull": "b22f1103ea2f06ef75511d79221b1c164a4727dc",
+          "afterGitBlobOrNull": "b05da7e98fe50545b2ca557d406d360058b751c1"
+        },
+        {
+          "path": "src/services/__tests__/TranscriptionServiceChunkingE2E.test.ts",
+          "beforeGitBlobOrNull": "ec69654e1dc34a98f0bcaefc4ff3590a50c37ba3",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/managed/adapters/ObsidianManagedRecoveryAdapter.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "0e392963bc1177c555f5eb09a35fc27e5d0c6ccb"
+        },
+        {
+          "path": "src/services/transcription/ManagedTranscriptionAdapter.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "4a206c131005c18388652cb0e39a6063180664fa"
+        },
+        {
+          "path": "src/services/transcription/TranscriptionCoordinator.ts",
+          "beforeGitBlobOrNull": "ddc2db7848ff8ff625bbc46eebba5a03cfa091a0",
+          "afterGitBlobOrNull": "e1a7c16f0a35f0f304a74029321093031c817dec"
+        },
+        {
+          "path": "src/services/transcription/__tests__/ManagedTranscriptionAdapter.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "284259ac9cc30d7590bfe766554b930993c4af7f"
+        },
+        {
+          "path": "src/services/transcription/__tests__/TranscriptionCoordinator.test.ts",
+          "beforeGitBlobOrNull": "b7585350135c33e16acfb49674d4542285ea6ad1",
+          "afterGitBlobOrNull": "df340a020bdf5edfd6dcef029bd6b31142409254"
+        },
+        {
+          "path": "src/services/transcription/providers/ProviderError.ts",
+          "beforeGitBlobOrNull": "2a0f2626ca0c17fd98d648e73554b48a51b0cb3c",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/TranscriptionProvider.ts",
+          "beforeGitBlobOrNull": "2d7959de355ef00ad762245b2aba397a96f40a49",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/ProviderError.test.ts",
+          "beforeGitBlobOrNull": "35e0c0034ac6c3b272f544b81d5a9cdf09f70f6b",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/customWhisperConfig.test.ts",
+          "beforeGitBlobOrNull": "60a41f886749b9dee9cce0dc09fdc29c7b14474b",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/providerHttpErrors.test.ts",
+          "beforeGitBlobOrNull": "7473acf134f4c3ba161223d64d2562632e9753da",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/transcriptionResponse.test.ts",
+          "beforeGitBlobOrNull": "b7b3fd88263b993cb2049bc1606d563849e2fa63",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/customWhisperConfig.ts",
+          "beforeGitBlobOrNull": "3717e34c1485f98bdb08022501c4cd456d340638",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/providerHttpErrors.ts",
+          "beforeGitBlobOrNull": "1e78360dc8105c41da8e6f51fdb8a82540d116ba",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/transcriptionResponse.ts",
+          "beforeGitBlobOrNull": "d0c563a5239c6344f71f5ece89697d5b5d70b51f",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/settings/RecorderTabContent.ts",
+          "beforeGitBlobOrNull": "3897b92db3c199c218bd9e5bee704eb136a8ff4a",
+          "afterGitBlobOrNull": "7837a7349f91ef3d79063b5f68c74cef93a3953e"
+        }
+      ],
+      "predecessorLedger": {
+        "gitBlob": "f3e5caa32c2e2fbcd6012efbc257d2cdff0684e0",
+        "sha256": "2d75ab8e8f4be223be9b2ed9be2a27eb1079648de48a4c3850d31c3eff00765d",
+        "transitionCount": 28,
+        "finalTransitionHash": "0521e3f5718adc9b61e6b02be1b350420e633bdbdb02f46d994fc29104f342fb"
+      },
+      "previousTransitionHash": "7d4a3f11cde09234026ea94bc9bb75de025555b11a08d2d6f39a453ed026bcc3",
+      "transitionHash": "c248e5ae44eccc57d94f789c98767e1f545b9e83adfeed5a80285667115b3310"
+    },
+    {
+      "sequence": 30,
+      "historicalRecordId": "e448a4198aef6823800407cc6b5b91d5b3975501751f3ffb071ef9628c83f5bd",
+      "v2OccurrenceId": "d41979d12bb64a00db4291d1b1cecb9bfd8bc132791282a06846c79aaecc367b",
+      "ownerPlan": "020",
+      "from": "present",
+      "to": "removed",
+      "predecessorSourceTree": "81eca7885bda37aa6bca65f8e5494ce9b3a8a850",
+      "stagedSourceTree": "ba5e9269c0b9cde03540ce36052f61e86559854e",
+      "sourceEvidence": [
+        {
+          "path": "src/__tests__/settings-recorder-tab.test.ts",
+          "beforeGitBlobOrNull": "0040c460ec8ba7723d6c076aeea048c5b9f17251",
+          "afterGitBlobOrNull": "1602f649901273f246ef8b44ed6d6fe1b575d2d5"
+        },
+        {
+          "path": "src/__tests__/systemsculpt-service-url.test.ts",
+          "beforeGitBlobOrNull": "f9b69a804f4df926782348f5244a2cf0be92ecbf",
+          "afterGitBlobOrNull": "0fed9b1947a1133a7f3ab9fbe02dbacc02f78285"
+        },
+        {
+          "path": "src/main.ts",
+          "beforeGitBlobOrNull": "d2a4d00cfa7cb7d2c95df04144accce2d721ddc5",
+          "afterGitBlobOrNull": "96de219948c85849ee49916da772fd716eb276d3"
+        },
+        {
+          "path": "src/modals/AudioTranscriptionModal.ts",
+          "beforeGitBlobOrNull": "4e5c4aeb9170a8b6e547c1efe7c231f8e3661e3d",
+          "afterGitBlobOrNull": "95530b0dc96c5b780aaf4baf56cd2837c8012754"
+        },
+        {
+          "path": "src/modals/__tests__/AudioTranscriptionModal.test.ts",
+          "beforeGitBlobOrNull": "d2649d613c588cb09620ef8363d75d4255618a6e",
+          "afterGitBlobOrNull": "d4befdecae40d365d16901ceda9d3c2ef062a247"
+        },
+        {
+          "path": "src/services/AudioUploadService.ts",
+          "beforeGitBlobOrNull": "1dd6b2ef59d3a7cba9a5e7110ff35bc9aeab60ca",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/RecorderService.ts",
+          "beforeGitBlobOrNull": "a401f721602f26f09aae81005a3c1baac2a0b566",
+          "afterGitBlobOrNull": "0ba00b4013361844eb0bea6c9d3d0c9e1519f8f2"
+        },
+        {
+          "path": "src/services/SystemSculptService.ts",
+          "beforeGitBlobOrNull": "7a15db08319292c049de42a6e8539ac7900aa4f4",
+          "afterGitBlobOrNull": "d5c4b9bd622186fc5cdcf52bcb7d1c1a44e5e00d"
+        },
+        {
+          "path": "src/services/TranscriptionProgressManager.ts",
+          "beforeGitBlobOrNull": "13e205a7046957413f7c1c9fa782fa127c4665dd",
+          "afterGitBlobOrNull": "0a074f9734395a0aab6ed2641edbaf0e7d43baa8"
+        },
+        {
+          "path": "src/services/TranscriptionService.ts",
+          "beforeGitBlobOrNull": "61108948a71ea4d7194ba9f7d1559bce3706484a",
+          "afterGitBlobOrNull": "2cedc4964b68eac8a0b3ca635240b2140f057469"
+        },
+        {
+          "path": "src/services/__tests__/AudioUploadService.test.ts",
+          "beforeGitBlobOrNull": "e487d764ce03733219c3d5d2577cdae7a2989197",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/__tests__/RecorderService.test.ts",
+          "beforeGitBlobOrNull": "68e2ddb86fd1f8a7ac74275f3f53a76e7facfa31",
+          "afterGitBlobOrNull": "e7fe907800ec04048a6dab67c589b239422e1a38"
+        },
+        {
+          "path": "src/services/__tests__/SystemSculptService.test.ts",
+          "beforeGitBlobOrNull": "e8c956ece149693e57994fd7de555516b5387281",
+          "afterGitBlobOrNull": "da7a2c84cf66331ae401098de3bc2bafe48b8641"
+        },
+        {
+          "path": "src/services/__tests__/TranscriptionService.test.ts",
+          "beforeGitBlobOrNull": "b22f1103ea2f06ef75511d79221b1c164a4727dc",
+          "afterGitBlobOrNull": "b05da7e98fe50545b2ca557d406d360058b751c1"
+        },
+        {
+          "path": "src/services/__tests__/TranscriptionServiceChunkingE2E.test.ts",
+          "beforeGitBlobOrNull": "ec69654e1dc34a98f0bcaefc4ff3590a50c37ba3",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/managed/adapters/ObsidianManagedRecoveryAdapter.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "0e392963bc1177c555f5eb09a35fc27e5d0c6ccb"
+        },
+        {
+          "path": "src/services/transcription/ManagedTranscriptionAdapter.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "4a206c131005c18388652cb0e39a6063180664fa"
+        },
+        {
+          "path": "src/services/transcription/TranscriptionCoordinator.ts",
+          "beforeGitBlobOrNull": "ddc2db7848ff8ff625bbc46eebba5a03cfa091a0",
+          "afterGitBlobOrNull": "e1a7c16f0a35f0f304a74029321093031c817dec"
+        },
+        {
+          "path": "src/services/transcription/__tests__/ManagedTranscriptionAdapter.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "284259ac9cc30d7590bfe766554b930993c4af7f"
+        },
+        {
+          "path": "src/services/transcription/__tests__/TranscriptionCoordinator.test.ts",
+          "beforeGitBlobOrNull": "b7585350135c33e16acfb49674d4542285ea6ad1",
+          "afterGitBlobOrNull": "df340a020bdf5edfd6dcef029bd6b31142409254"
+        },
+        {
+          "path": "src/services/transcription/providers/ProviderError.ts",
+          "beforeGitBlobOrNull": "2a0f2626ca0c17fd98d648e73554b48a51b0cb3c",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/TranscriptionProvider.ts",
+          "beforeGitBlobOrNull": "2d7959de355ef00ad762245b2aba397a96f40a49",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/ProviderError.test.ts",
+          "beforeGitBlobOrNull": "35e0c0034ac6c3b272f544b81d5a9cdf09f70f6b",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/customWhisperConfig.test.ts",
+          "beforeGitBlobOrNull": "60a41f886749b9dee9cce0dc09fdc29c7b14474b",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/providerHttpErrors.test.ts",
+          "beforeGitBlobOrNull": "7473acf134f4c3ba161223d64d2562632e9753da",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/transcriptionResponse.test.ts",
+          "beforeGitBlobOrNull": "b7b3fd88263b993cb2049bc1606d563849e2fa63",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/customWhisperConfig.ts",
+          "beforeGitBlobOrNull": "3717e34c1485f98bdb08022501c4cd456d340638",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/providerHttpErrors.ts",
+          "beforeGitBlobOrNull": "1e78360dc8105c41da8e6f51fdb8a82540d116ba",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/transcriptionResponse.ts",
+          "beforeGitBlobOrNull": "d0c563a5239c6344f71f5ece89697d5b5d70b51f",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/settings/RecorderTabContent.ts",
+          "beforeGitBlobOrNull": "3897b92db3c199c218bd9e5bee704eb136a8ff4a",
+          "afterGitBlobOrNull": "7837a7349f91ef3d79063b5f68c74cef93a3953e"
+        }
+      ],
+      "predecessorLedger": {
+        "gitBlob": "f3e5caa32c2e2fbcd6012efbc257d2cdff0684e0",
+        "sha256": "2d75ab8e8f4be223be9b2ed9be2a27eb1079648de48a4c3850d31c3eff00765d",
+        "transitionCount": 28,
+        "finalTransitionHash": "0521e3f5718adc9b61e6b02be1b350420e633bdbdb02f46d994fc29104f342fb"
+      },
+      "previousTransitionHash": "c248e5ae44eccc57d94f789c98767e1f545b9e83adfeed5a80285667115b3310",
+      "transitionHash": "7570afdeed7032132195177db9f077c9f3d779e9cf057c6b6e6e8b65af874b0a"
+    },
+    {
+      "sequence": 31,
+      "historicalRecordId": "b8166d5b99049540972fc8faaa5adafc0480f98cd9a525f89c09d34bd1c8ed66",
+      "v2OccurrenceId": "bfd75a5e2d2e9d49e41fd9a19e5fd2a2e498e72d7e213be7156c2200e43c64e9",
+      "ownerPlan": "020",
+      "from": "present",
+      "to": "removed",
+      "predecessorSourceTree": "81eca7885bda37aa6bca65f8e5494ce9b3a8a850",
+      "stagedSourceTree": "ba5e9269c0b9cde03540ce36052f61e86559854e",
+      "sourceEvidence": [
+        {
+          "path": "src/__tests__/settings-recorder-tab.test.ts",
+          "beforeGitBlobOrNull": "0040c460ec8ba7723d6c076aeea048c5b9f17251",
+          "afterGitBlobOrNull": "1602f649901273f246ef8b44ed6d6fe1b575d2d5"
+        },
+        {
+          "path": "src/__tests__/systemsculpt-service-url.test.ts",
+          "beforeGitBlobOrNull": "f9b69a804f4df926782348f5244a2cf0be92ecbf",
+          "afterGitBlobOrNull": "0fed9b1947a1133a7f3ab9fbe02dbacc02f78285"
+        },
+        {
+          "path": "src/main.ts",
+          "beforeGitBlobOrNull": "d2a4d00cfa7cb7d2c95df04144accce2d721ddc5",
+          "afterGitBlobOrNull": "96de219948c85849ee49916da772fd716eb276d3"
+        },
+        {
+          "path": "src/modals/AudioTranscriptionModal.ts",
+          "beforeGitBlobOrNull": "4e5c4aeb9170a8b6e547c1efe7c231f8e3661e3d",
+          "afterGitBlobOrNull": "95530b0dc96c5b780aaf4baf56cd2837c8012754"
+        },
+        {
+          "path": "src/modals/__tests__/AudioTranscriptionModal.test.ts",
+          "beforeGitBlobOrNull": "d2649d613c588cb09620ef8363d75d4255618a6e",
+          "afterGitBlobOrNull": "d4befdecae40d365d16901ceda9d3c2ef062a247"
+        },
+        {
+          "path": "src/services/AudioUploadService.ts",
+          "beforeGitBlobOrNull": "1dd6b2ef59d3a7cba9a5e7110ff35bc9aeab60ca",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/RecorderService.ts",
+          "beforeGitBlobOrNull": "a401f721602f26f09aae81005a3c1baac2a0b566",
+          "afterGitBlobOrNull": "0ba00b4013361844eb0bea6c9d3d0c9e1519f8f2"
+        },
+        {
+          "path": "src/services/SystemSculptService.ts",
+          "beforeGitBlobOrNull": "7a15db08319292c049de42a6e8539ac7900aa4f4",
+          "afterGitBlobOrNull": "d5c4b9bd622186fc5cdcf52bcb7d1c1a44e5e00d"
+        },
+        {
+          "path": "src/services/TranscriptionProgressManager.ts",
+          "beforeGitBlobOrNull": "13e205a7046957413f7c1c9fa782fa127c4665dd",
+          "afterGitBlobOrNull": "0a074f9734395a0aab6ed2641edbaf0e7d43baa8"
+        },
+        {
+          "path": "src/services/TranscriptionService.ts",
+          "beforeGitBlobOrNull": "61108948a71ea4d7194ba9f7d1559bce3706484a",
+          "afterGitBlobOrNull": "2cedc4964b68eac8a0b3ca635240b2140f057469"
+        },
+        {
+          "path": "src/services/__tests__/AudioUploadService.test.ts",
+          "beforeGitBlobOrNull": "e487d764ce03733219c3d5d2577cdae7a2989197",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/__tests__/RecorderService.test.ts",
+          "beforeGitBlobOrNull": "68e2ddb86fd1f8a7ac74275f3f53a76e7facfa31",
+          "afterGitBlobOrNull": "e7fe907800ec04048a6dab67c589b239422e1a38"
+        },
+        {
+          "path": "src/services/__tests__/SystemSculptService.test.ts",
+          "beforeGitBlobOrNull": "e8c956ece149693e57994fd7de555516b5387281",
+          "afterGitBlobOrNull": "da7a2c84cf66331ae401098de3bc2bafe48b8641"
+        },
+        {
+          "path": "src/services/__tests__/TranscriptionService.test.ts",
+          "beforeGitBlobOrNull": "b22f1103ea2f06ef75511d79221b1c164a4727dc",
+          "afterGitBlobOrNull": "b05da7e98fe50545b2ca557d406d360058b751c1"
+        },
+        {
+          "path": "src/services/__tests__/TranscriptionServiceChunkingE2E.test.ts",
+          "beforeGitBlobOrNull": "ec69654e1dc34a98f0bcaefc4ff3590a50c37ba3",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/managed/adapters/ObsidianManagedRecoveryAdapter.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "0e392963bc1177c555f5eb09a35fc27e5d0c6ccb"
+        },
+        {
+          "path": "src/services/transcription/ManagedTranscriptionAdapter.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "4a206c131005c18388652cb0e39a6063180664fa"
+        },
+        {
+          "path": "src/services/transcription/TranscriptionCoordinator.ts",
+          "beforeGitBlobOrNull": "ddc2db7848ff8ff625bbc46eebba5a03cfa091a0",
+          "afterGitBlobOrNull": "e1a7c16f0a35f0f304a74029321093031c817dec"
+        },
+        {
+          "path": "src/services/transcription/__tests__/ManagedTranscriptionAdapter.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "284259ac9cc30d7590bfe766554b930993c4af7f"
+        },
+        {
+          "path": "src/services/transcription/__tests__/TranscriptionCoordinator.test.ts",
+          "beforeGitBlobOrNull": "b7585350135c33e16acfb49674d4542285ea6ad1",
+          "afterGitBlobOrNull": "df340a020bdf5edfd6dcef029bd6b31142409254"
+        },
+        {
+          "path": "src/services/transcription/providers/ProviderError.ts",
+          "beforeGitBlobOrNull": "2a0f2626ca0c17fd98d648e73554b48a51b0cb3c",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/TranscriptionProvider.ts",
+          "beforeGitBlobOrNull": "2d7959de355ef00ad762245b2aba397a96f40a49",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/ProviderError.test.ts",
+          "beforeGitBlobOrNull": "35e0c0034ac6c3b272f544b81d5a9cdf09f70f6b",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/customWhisperConfig.test.ts",
+          "beforeGitBlobOrNull": "60a41f886749b9dee9cce0dc09fdc29c7b14474b",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/providerHttpErrors.test.ts",
+          "beforeGitBlobOrNull": "7473acf134f4c3ba161223d64d2562632e9753da",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/transcriptionResponse.test.ts",
+          "beforeGitBlobOrNull": "b7b3fd88263b993cb2049bc1606d563849e2fa63",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/customWhisperConfig.ts",
+          "beforeGitBlobOrNull": "3717e34c1485f98bdb08022501c4cd456d340638",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/providerHttpErrors.ts",
+          "beforeGitBlobOrNull": "1e78360dc8105c41da8e6f51fdb8a82540d116ba",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/transcriptionResponse.ts",
+          "beforeGitBlobOrNull": "d0c563a5239c6344f71f5ece89697d5b5d70b51f",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/settings/RecorderTabContent.ts",
+          "beforeGitBlobOrNull": "3897b92db3c199c218bd9e5bee704eb136a8ff4a",
+          "afterGitBlobOrNull": "7837a7349f91ef3d79063b5f68c74cef93a3953e"
+        }
+      ],
+      "predecessorLedger": {
+        "gitBlob": "f3e5caa32c2e2fbcd6012efbc257d2cdff0684e0",
+        "sha256": "2d75ab8e8f4be223be9b2ed9be2a27eb1079648de48a4c3850d31c3eff00765d",
+        "transitionCount": 28,
+        "finalTransitionHash": "0521e3f5718adc9b61e6b02be1b350420e633bdbdb02f46d994fc29104f342fb"
+      },
+      "previousTransitionHash": "7570afdeed7032132195177db9f077c9f3d779e9cf057c6b6e6e8b65af874b0a",
+      "transitionHash": "c2cb55860c31e1538023a5284b1e568b557d5b22dc4fce0b2c08ecdb0fa63a5b"
+    },
+    {
+      "sequence": 32,
+      "historicalRecordId": "db2cc0fe92c694e64a94d5188246c6685aec9210ce45e973813a340ae6fe8657",
+      "v2OccurrenceId": "ddc4b60ff48f7eec8b77dced3c461ae8f4bc794853a172ab83338f275bd0458e",
+      "ownerPlan": "020",
+      "from": "present",
+      "to": "removed",
+      "predecessorSourceTree": "81eca7885bda37aa6bca65f8e5494ce9b3a8a850",
+      "stagedSourceTree": "ba5e9269c0b9cde03540ce36052f61e86559854e",
+      "sourceEvidence": [
+        {
+          "path": "src/__tests__/settings-recorder-tab.test.ts",
+          "beforeGitBlobOrNull": "0040c460ec8ba7723d6c076aeea048c5b9f17251",
+          "afterGitBlobOrNull": "1602f649901273f246ef8b44ed6d6fe1b575d2d5"
+        },
+        {
+          "path": "src/__tests__/systemsculpt-service-url.test.ts",
+          "beforeGitBlobOrNull": "f9b69a804f4df926782348f5244a2cf0be92ecbf",
+          "afterGitBlobOrNull": "0fed9b1947a1133a7f3ab9fbe02dbacc02f78285"
+        },
+        {
+          "path": "src/main.ts",
+          "beforeGitBlobOrNull": "d2a4d00cfa7cb7d2c95df04144accce2d721ddc5",
+          "afterGitBlobOrNull": "96de219948c85849ee49916da772fd716eb276d3"
+        },
+        {
+          "path": "src/modals/AudioTranscriptionModal.ts",
+          "beforeGitBlobOrNull": "4e5c4aeb9170a8b6e547c1efe7c231f8e3661e3d",
+          "afterGitBlobOrNull": "95530b0dc96c5b780aaf4baf56cd2837c8012754"
+        },
+        {
+          "path": "src/modals/__tests__/AudioTranscriptionModal.test.ts",
+          "beforeGitBlobOrNull": "d2649d613c588cb09620ef8363d75d4255618a6e",
+          "afterGitBlobOrNull": "d4befdecae40d365d16901ceda9d3c2ef062a247"
+        },
+        {
+          "path": "src/services/AudioUploadService.ts",
+          "beforeGitBlobOrNull": "1dd6b2ef59d3a7cba9a5e7110ff35bc9aeab60ca",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/RecorderService.ts",
+          "beforeGitBlobOrNull": "a401f721602f26f09aae81005a3c1baac2a0b566",
+          "afterGitBlobOrNull": "0ba00b4013361844eb0bea6c9d3d0c9e1519f8f2"
+        },
+        {
+          "path": "src/services/SystemSculptService.ts",
+          "beforeGitBlobOrNull": "7a15db08319292c049de42a6e8539ac7900aa4f4",
+          "afterGitBlobOrNull": "d5c4b9bd622186fc5cdcf52bcb7d1c1a44e5e00d"
+        },
+        {
+          "path": "src/services/TranscriptionProgressManager.ts",
+          "beforeGitBlobOrNull": "13e205a7046957413f7c1c9fa782fa127c4665dd",
+          "afterGitBlobOrNull": "0a074f9734395a0aab6ed2641edbaf0e7d43baa8"
+        },
+        {
+          "path": "src/services/TranscriptionService.ts",
+          "beforeGitBlobOrNull": "61108948a71ea4d7194ba9f7d1559bce3706484a",
+          "afterGitBlobOrNull": "2cedc4964b68eac8a0b3ca635240b2140f057469"
+        },
+        {
+          "path": "src/services/__tests__/AudioUploadService.test.ts",
+          "beforeGitBlobOrNull": "e487d764ce03733219c3d5d2577cdae7a2989197",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/__tests__/RecorderService.test.ts",
+          "beforeGitBlobOrNull": "68e2ddb86fd1f8a7ac74275f3f53a76e7facfa31",
+          "afterGitBlobOrNull": "e7fe907800ec04048a6dab67c589b239422e1a38"
+        },
+        {
+          "path": "src/services/__tests__/SystemSculptService.test.ts",
+          "beforeGitBlobOrNull": "e8c956ece149693e57994fd7de555516b5387281",
+          "afterGitBlobOrNull": "da7a2c84cf66331ae401098de3bc2bafe48b8641"
+        },
+        {
+          "path": "src/services/__tests__/TranscriptionService.test.ts",
+          "beforeGitBlobOrNull": "b22f1103ea2f06ef75511d79221b1c164a4727dc",
+          "afterGitBlobOrNull": "b05da7e98fe50545b2ca557d406d360058b751c1"
+        },
+        {
+          "path": "src/services/__tests__/TranscriptionServiceChunkingE2E.test.ts",
+          "beforeGitBlobOrNull": "ec69654e1dc34a98f0bcaefc4ff3590a50c37ba3",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/managed/adapters/ObsidianManagedRecoveryAdapter.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "0e392963bc1177c555f5eb09a35fc27e5d0c6ccb"
+        },
+        {
+          "path": "src/services/transcription/ManagedTranscriptionAdapter.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "4a206c131005c18388652cb0e39a6063180664fa"
+        },
+        {
+          "path": "src/services/transcription/TranscriptionCoordinator.ts",
+          "beforeGitBlobOrNull": "ddc2db7848ff8ff625bbc46eebba5a03cfa091a0",
+          "afterGitBlobOrNull": "e1a7c16f0a35f0f304a74029321093031c817dec"
+        },
+        {
+          "path": "src/services/transcription/__tests__/ManagedTranscriptionAdapter.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "284259ac9cc30d7590bfe766554b930993c4af7f"
+        },
+        {
+          "path": "src/services/transcription/__tests__/TranscriptionCoordinator.test.ts",
+          "beforeGitBlobOrNull": "b7585350135c33e16acfb49674d4542285ea6ad1",
+          "afterGitBlobOrNull": "df340a020bdf5edfd6dcef029bd6b31142409254"
+        },
+        {
+          "path": "src/services/transcription/providers/ProviderError.ts",
+          "beforeGitBlobOrNull": "2a0f2626ca0c17fd98d648e73554b48a51b0cb3c",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/TranscriptionProvider.ts",
+          "beforeGitBlobOrNull": "2d7959de355ef00ad762245b2aba397a96f40a49",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/ProviderError.test.ts",
+          "beforeGitBlobOrNull": "35e0c0034ac6c3b272f544b81d5a9cdf09f70f6b",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/customWhisperConfig.test.ts",
+          "beforeGitBlobOrNull": "60a41f886749b9dee9cce0dc09fdc29c7b14474b",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/providerHttpErrors.test.ts",
+          "beforeGitBlobOrNull": "7473acf134f4c3ba161223d64d2562632e9753da",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/transcriptionResponse.test.ts",
+          "beforeGitBlobOrNull": "b7b3fd88263b993cb2049bc1606d563849e2fa63",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/customWhisperConfig.ts",
+          "beforeGitBlobOrNull": "3717e34c1485f98bdb08022501c4cd456d340638",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/providerHttpErrors.ts",
+          "beforeGitBlobOrNull": "1e78360dc8105c41da8e6f51fdb8a82540d116ba",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/transcriptionResponse.ts",
+          "beforeGitBlobOrNull": "d0c563a5239c6344f71f5ece89697d5b5d70b51f",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/settings/RecorderTabContent.ts",
+          "beforeGitBlobOrNull": "3897b92db3c199c218bd9e5bee704eb136a8ff4a",
+          "afterGitBlobOrNull": "7837a7349f91ef3d79063b5f68c74cef93a3953e"
+        }
+      ],
+      "predecessorLedger": {
+        "gitBlob": "f3e5caa32c2e2fbcd6012efbc257d2cdff0684e0",
+        "sha256": "2d75ab8e8f4be223be9b2ed9be2a27eb1079648de48a4c3850d31c3eff00765d",
+        "transitionCount": 28,
+        "finalTransitionHash": "0521e3f5718adc9b61e6b02be1b350420e633bdbdb02f46d994fc29104f342fb"
+      },
+      "previousTransitionHash": "c2cb55860c31e1538023a5284b1e568b557d5b22dc4fce0b2c08ecdb0fa63a5b",
+      "transitionHash": "62a7538c555d21fa3ba54e04681af62273bb51a8634e80c0d73d4370a8254e6d"
+    },
+    {
+      "sequence": 33,
+      "historicalRecordId": "b7ee9c0fccfa2ca7f0daf63247173467232a2c7f597d129c9be1353b0273d3e1",
+      "v2OccurrenceId": "7657b15dea2d51343240c979048bfcb2412e2580b390ad21b7a1a1f3538715ae",
+      "ownerPlan": "020",
+      "from": "present",
+      "to": "removed",
+      "predecessorSourceTree": "81eca7885bda37aa6bca65f8e5494ce9b3a8a850",
+      "stagedSourceTree": "ba5e9269c0b9cde03540ce36052f61e86559854e",
+      "sourceEvidence": [
+        {
+          "path": "src/__tests__/settings-recorder-tab.test.ts",
+          "beforeGitBlobOrNull": "0040c460ec8ba7723d6c076aeea048c5b9f17251",
+          "afterGitBlobOrNull": "1602f649901273f246ef8b44ed6d6fe1b575d2d5"
+        },
+        {
+          "path": "src/__tests__/systemsculpt-service-url.test.ts",
+          "beforeGitBlobOrNull": "f9b69a804f4df926782348f5244a2cf0be92ecbf",
+          "afterGitBlobOrNull": "0fed9b1947a1133a7f3ab9fbe02dbacc02f78285"
+        },
+        {
+          "path": "src/main.ts",
+          "beforeGitBlobOrNull": "d2a4d00cfa7cb7d2c95df04144accce2d721ddc5",
+          "afterGitBlobOrNull": "96de219948c85849ee49916da772fd716eb276d3"
+        },
+        {
+          "path": "src/modals/AudioTranscriptionModal.ts",
+          "beforeGitBlobOrNull": "4e5c4aeb9170a8b6e547c1efe7c231f8e3661e3d",
+          "afterGitBlobOrNull": "95530b0dc96c5b780aaf4baf56cd2837c8012754"
+        },
+        {
+          "path": "src/modals/__tests__/AudioTranscriptionModal.test.ts",
+          "beforeGitBlobOrNull": "d2649d613c588cb09620ef8363d75d4255618a6e",
+          "afterGitBlobOrNull": "d4befdecae40d365d16901ceda9d3c2ef062a247"
+        },
+        {
+          "path": "src/services/AudioUploadService.ts",
+          "beforeGitBlobOrNull": "1dd6b2ef59d3a7cba9a5e7110ff35bc9aeab60ca",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/RecorderService.ts",
+          "beforeGitBlobOrNull": "a401f721602f26f09aae81005a3c1baac2a0b566",
+          "afterGitBlobOrNull": "0ba00b4013361844eb0bea6c9d3d0c9e1519f8f2"
+        },
+        {
+          "path": "src/services/SystemSculptService.ts",
+          "beforeGitBlobOrNull": "7a15db08319292c049de42a6e8539ac7900aa4f4",
+          "afterGitBlobOrNull": "d5c4b9bd622186fc5cdcf52bcb7d1c1a44e5e00d"
+        },
+        {
+          "path": "src/services/TranscriptionProgressManager.ts",
+          "beforeGitBlobOrNull": "13e205a7046957413f7c1c9fa782fa127c4665dd",
+          "afterGitBlobOrNull": "0a074f9734395a0aab6ed2641edbaf0e7d43baa8"
+        },
+        {
+          "path": "src/services/TranscriptionService.ts",
+          "beforeGitBlobOrNull": "61108948a71ea4d7194ba9f7d1559bce3706484a",
+          "afterGitBlobOrNull": "2cedc4964b68eac8a0b3ca635240b2140f057469"
+        },
+        {
+          "path": "src/services/__tests__/AudioUploadService.test.ts",
+          "beforeGitBlobOrNull": "e487d764ce03733219c3d5d2577cdae7a2989197",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/__tests__/RecorderService.test.ts",
+          "beforeGitBlobOrNull": "68e2ddb86fd1f8a7ac74275f3f53a76e7facfa31",
+          "afterGitBlobOrNull": "e7fe907800ec04048a6dab67c589b239422e1a38"
+        },
+        {
+          "path": "src/services/__tests__/SystemSculptService.test.ts",
+          "beforeGitBlobOrNull": "e8c956ece149693e57994fd7de555516b5387281",
+          "afterGitBlobOrNull": "da7a2c84cf66331ae401098de3bc2bafe48b8641"
+        },
+        {
+          "path": "src/services/__tests__/TranscriptionService.test.ts",
+          "beforeGitBlobOrNull": "b22f1103ea2f06ef75511d79221b1c164a4727dc",
+          "afterGitBlobOrNull": "b05da7e98fe50545b2ca557d406d360058b751c1"
+        },
+        {
+          "path": "src/services/__tests__/TranscriptionServiceChunkingE2E.test.ts",
+          "beforeGitBlobOrNull": "ec69654e1dc34a98f0bcaefc4ff3590a50c37ba3",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/managed/adapters/ObsidianManagedRecoveryAdapter.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "0e392963bc1177c555f5eb09a35fc27e5d0c6ccb"
+        },
+        {
+          "path": "src/services/transcription/ManagedTranscriptionAdapter.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "4a206c131005c18388652cb0e39a6063180664fa"
+        },
+        {
+          "path": "src/services/transcription/TranscriptionCoordinator.ts",
+          "beforeGitBlobOrNull": "ddc2db7848ff8ff625bbc46eebba5a03cfa091a0",
+          "afterGitBlobOrNull": "e1a7c16f0a35f0f304a74029321093031c817dec"
+        },
+        {
+          "path": "src/services/transcription/__tests__/ManagedTranscriptionAdapter.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "284259ac9cc30d7590bfe766554b930993c4af7f"
+        },
+        {
+          "path": "src/services/transcription/__tests__/TranscriptionCoordinator.test.ts",
+          "beforeGitBlobOrNull": "b7585350135c33e16acfb49674d4542285ea6ad1",
+          "afterGitBlobOrNull": "df340a020bdf5edfd6dcef029bd6b31142409254"
+        },
+        {
+          "path": "src/services/transcription/providers/ProviderError.ts",
+          "beforeGitBlobOrNull": "2a0f2626ca0c17fd98d648e73554b48a51b0cb3c",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/TranscriptionProvider.ts",
+          "beforeGitBlobOrNull": "2d7959de355ef00ad762245b2aba397a96f40a49",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/ProviderError.test.ts",
+          "beforeGitBlobOrNull": "35e0c0034ac6c3b272f544b81d5a9cdf09f70f6b",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/customWhisperConfig.test.ts",
+          "beforeGitBlobOrNull": "60a41f886749b9dee9cce0dc09fdc29c7b14474b",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/providerHttpErrors.test.ts",
+          "beforeGitBlobOrNull": "7473acf134f4c3ba161223d64d2562632e9753da",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/transcriptionResponse.test.ts",
+          "beforeGitBlobOrNull": "b7b3fd88263b993cb2049bc1606d563849e2fa63",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/customWhisperConfig.ts",
+          "beforeGitBlobOrNull": "3717e34c1485f98bdb08022501c4cd456d340638",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/providerHttpErrors.ts",
+          "beforeGitBlobOrNull": "1e78360dc8105c41da8e6f51fdb8a82540d116ba",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/transcriptionResponse.ts",
+          "beforeGitBlobOrNull": "d0c563a5239c6344f71f5ece89697d5b5d70b51f",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/settings/RecorderTabContent.ts",
+          "beforeGitBlobOrNull": "3897b92db3c199c218bd9e5bee704eb136a8ff4a",
+          "afterGitBlobOrNull": "7837a7349f91ef3d79063b5f68c74cef93a3953e"
+        }
+      ],
+      "predecessorLedger": {
+        "gitBlob": "f3e5caa32c2e2fbcd6012efbc257d2cdff0684e0",
+        "sha256": "2d75ab8e8f4be223be9b2ed9be2a27eb1079648de48a4c3850d31c3eff00765d",
+        "transitionCount": 28,
+        "finalTransitionHash": "0521e3f5718adc9b61e6b02be1b350420e633bdbdb02f46d994fc29104f342fb"
+      },
+      "previousTransitionHash": "62a7538c555d21fa3ba54e04681af62273bb51a8634e80c0d73d4370a8254e6d",
+      "transitionHash": "2b341ebcb30b9fd46eb0867c4d82f80fddce400cfce587934fe55700ddbc3935"
+    },
+    {
+      "sequence": 34,
+      "historicalRecordId": "33c9e9a1faf2b655398b81e370e3e6f1b3e42cc2da92d42a377035936dd8f401",
+      "v2OccurrenceId": "d363763fb40f3c84147e1c9282dfe811e5b786b5d00002730203e4a9eff58b60",
+      "ownerPlan": "020",
+      "from": "present",
+      "to": "removed",
+      "predecessorSourceTree": "81eca7885bda37aa6bca65f8e5494ce9b3a8a850",
+      "stagedSourceTree": "ba5e9269c0b9cde03540ce36052f61e86559854e",
+      "sourceEvidence": [
+        {
+          "path": "src/__tests__/settings-recorder-tab.test.ts",
+          "beforeGitBlobOrNull": "0040c460ec8ba7723d6c076aeea048c5b9f17251",
+          "afterGitBlobOrNull": "1602f649901273f246ef8b44ed6d6fe1b575d2d5"
+        },
+        {
+          "path": "src/__tests__/systemsculpt-service-url.test.ts",
+          "beforeGitBlobOrNull": "f9b69a804f4df926782348f5244a2cf0be92ecbf",
+          "afterGitBlobOrNull": "0fed9b1947a1133a7f3ab9fbe02dbacc02f78285"
+        },
+        {
+          "path": "src/main.ts",
+          "beforeGitBlobOrNull": "d2a4d00cfa7cb7d2c95df04144accce2d721ddc5",
+          "afterGitBlobOrNull": "96de219948c85849ee49916da772fd716eb276d3"
+        },
+        {
+          "path": "src/modals/AudioTranscriptionModal.ts",
+          "beforeGitBlobOrNull": "4e5c4aeb9170a8b6e547c1efe7c231f8e3661e3d",
+          "afterGitBlobOrNull": "95530b0dc96c5b780aaf4baf56cd2837c8012754"
+        },
+        {
+          "path": "src/modals/__tests__/AudioTranscriptionModal.test.ts",
+          "beforeGitBlobOrNull": "d2649d613c588cb09620ef8363d75d4255618a6e",
+          "afterGitBlobOrNull": "d4befdecae40d365d16901ceda9d3c2ef062a247"
+        },
+        {
+          "path": "src/services/AudioUploadService.ts",
+          "beforeGitBlobOrNull": "1dd6b2ef59d3a7cba9a5e7110ff35bc9aeab60ca",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/RecorderService.ts",
+          "beforeGitBlobOrNull": "a401f721602f26f09aae81005a3c1baac2a0b566",
+          "afterGitBlobOrNull": "0ba00b4013361844eb0bea6c9d3d0c9e1519f8f2"
+        },
+        {
+          "path": "src/services/SystemSculptService.ts",
+          "beforeGitBlobOrNull": "7a15db08319292c049de42a6e8539ac7900aa4f4",
+          "afterGitBlobOrNull": "d5c4b9bd622186fc5cdcf52bcb7d1c1a44e5e00d"
+        },
+        {
+          "path": "src/services/TranscriptionProgressManager.ts",
+          "beforeGitBlobOrNull": "13e205a7046957413f7c1c9fa782fa127c4665dd",
+          "afterGitBlobOrNull": "0a074f9734395a0aab6ed2641edbaf0e7d43baa8"
+        },
+        {
+          "path": "src/services/TranscriptionService.ts",
+          "beforeGitBlobOrNull": "61108948a71ea4d7194ba9f7d1559bce3706484a",
+          "afterGitBlobOrNull": "2cedc4964b68eac8a0b3ca635240b2140f057469"
+        },
+        {
+          "path": "src/services/__tests__/AudioUploadService.test.ts",
+          "beforeGitBlobOrNull": "e487d764ce03733219c3d5d2577cdae7a2989197",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/__tests__/RecorderService.test.ts",
+          "beforeGitBlobOrNull": "68e2ddb86fd1f8a7ac74275f3f53a76e7facfa31",
+          "afterGitBlobOrNull": "e7fe907800ec04048a6dab67c589b239422e1a38"
+        },
+        {
+          "path": "src/services/__tests__/SystemSculptService.test.ts",
+          "beforeGitBlobOrNull": "e8c956ece149693e57994fd7de555516b5387281",
+          "afterGitBlobOrNull": "da7a2c84cf66331ae401098de3bc2bafe48b8641"
+        },
+        {
+          "path": "src/services/__tests__/TranscriptionService.test.ts",
+          "beforeGitBlobOrNull": "b22f1103ea2f06ef75511d79221b1c164a4727dc",
+          "afterGitBlobOrNull": "b05da7e98fe50545b2ca557d406d360058b751c1"
+        },
+        {
+          "path": "src/services/__tests__/TranscriptionServiceChunkingE2E.test.ts",
+          "beforeGitBlobOrNull": "ec69654e1dc34a98f0bcaefc4ff3590a50c37ba3",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/managed/adapters/ObsidianManagedRecoveryAdapter.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "0e392963bc1177c555f5eb09a35fc27e5d0c6ccb"
+        },
+        {
+          "path": "src/services/transcription/ManagedTranscriptionAdapter.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "4a206c131005c18388652cb0e39a6063180664fa"
+        },
+        {
+          "path": "src/services/transcription/TranscriptionCoordinator.ts",
+          "beforeGitBlobOrNull": "ddc2db7848ff8ff625bbc46eebba5a03cfa091a0",
+          "afterGitBlobOrNull": "e1a7c16f0a35f0f304a74029321093031c817dec"
+        },
+        {
+          "path": "src/services/transcription/__tests__/ManagedTranscriptionAdapter.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "284259ac9cc30d7590bfe766554b930993c4af7f"
+        },
+        {
+          "path": "src/services/transcription/__tests__/TranscriptionCoordinator.test.ts",
+          "beforeGitBlobOrNull": "b7585350135c33e16acfb49674d4542285ea6ad1",
+          "afterGitBlobOrNull": "df340a020bdf5edfd6dcef029bd6b31142409254"
+        },
+        {
+          "path": "src/services/transcription/providers/ProviderError.ts",
+          "beforeGitBlobOrNull": "2a0f2626ca0c17fd98d648e73554b48a51b0cb3c",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/TranscriptionProvider.ts",
+          "beforeGitBlobOrNull": "2d7959de355ef00ad762245b2aba397a96f40a49",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/ProviderError.test.ts",
+          "beforeGitBlobOrNull": "35e0c0034ac6c3b272f544b81d5a9cdf09f70f6b",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/customWhisperConfig.test.ts",
+          "beforeGitBlobOrNull": "60a41f886749b9dee9cce0dc09fdc29c7b14474b",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/providerHttpErrors.test.ts",
+          "beforeGitBlobOrNull": "7473acf134f4c3ba161223d64d2562632e9753da",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/transcriptionResponse.test.ts",
+          "beforeGitBlobOrNull": "b7b3fd88263b993cb2049bc1606d563849e2fa63",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/customWhisperConfig.ts",
+          "beforeGitBlobOrNull": "3717e34c1485f98bdb08022501c4cd456d340638",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/providerHttpErrors.ts",
+          "beforeGitBlobOrNull": "1e78360dc8105c41da8e6f51fdb8a82540d116ba",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/transcriptionResponse.ts",
+          "beforeGitBlobOrNull": "d0c563a5239c6344f71f5ece89697d5b5d70b51f",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/settings/RecorderTabContent.ts",
+          "beforeGitBlobOrNull": "3897b92db3c199c218bd9e5bee704eb136a8ff4a",
+          "afterGitBlobOrNull": "7837a7349f91ef3d79063b5f68c74cef93a3953e"
+        }
+      ],
+      "predecessorLedger": {
+        "gitBlob": "f3e5caa32c2e2fbcd6012efbc257d2cdff0684e0",
+        "sha256": "2d75ab8e8f4be223be9b2ed9be2a27eb1079648de48a4c3850d31c3eff00765d",
+        "transitionCount": 28,
+        "finalTransitionHash": "0521e3f5718adc9b61e6b02be1b350420e633bdbdb02f46d994fc29104f342fb"
+      },
+      "previousTransitionHash": "2b341ebcb30b9fd46eb0867c4d82f80fddce400cfce587934fe55700ddbc3935",
+      "transitionHash": "06e56b361e25c756eba22c3b386686eb2225fc10c3f64a0fcd21c49b44e8af56"
+    },
+    {
+      "sequence": 35,
+      "historicalRecordId": "3f70ebe0bab01e8f7248c98cffa4efc00326059c0918b8664b646dd621a8275d",
+      "v2OccurrenceId": "90ab7a3bee05cca541a6cfa86d105195d198046fa22ddf8bfcaba6e611b48dc5",
+      "ownerPlan": "020",
+      "from": "present",
+      "to": "removed",
+      "predecessorSourceTree": "81eca7885bda37aa6bca65f8e5494ce9b3a8a850",
+      "stagedSourceTree": "ba5e9269c0b9cde03540ce36052f61e86559854e",
+      "sourceEvidence": [
+        {
+          "path": "src/__tests__/settings-recorder-tab.test.ts",
+          "beforeGitBlobOrNull": "0040c460ec8ba7723d6c076aeea048c5b9f17251",
+          "afterGitBlobOrNull": "1602f649901273f246ef8b44ed6d6fe1b575d2d5"
+        },
+        {
+          "path": "src/__tests__/systemsculpt-service-url.test.ts",
+          "beforeGitBlobOrNull": "f9b69a804f4df926782348f5244a2cf0be92ecbf",
+          "afterGitBlobOrNull": "0fed9b1947a1133a7f3ab9fbe02dbacc02f78285"
+        },
+        {
+          "path": "src/main.ts",
+          "beforeGitBlobOrNull": "d2a4d00cfa7cb7d2c95df04144accce2d721ddc5",
+          "afterGitBlobOrNull": "96de219948c85849ee49916da772fd716eb276d3"
+        },
+        {
+          "path": "src/modals/AudioTranscriptionModal.ts",
+          "beforeGitBlobOrNull": "4e5c4aeb9170a8b6e547c1efe7c231f8e3661e3d",
+          "afterGitBlobOrNull": "95530b0dc96c5b780aaf4baf56cd2837c8012754"
+        },
+        {
+          "path": "src/modals/__tests__/AudioTranscriptionModal.test.ts",
+          "beforeGitBlobOrNull": "d2649d613c588cb09620ef8363d75d4255618a6e",
+          "afterGitBlobOrNull": "d4befdecae40d365d16901ceda9d3c2ef062a247"
+        },
+        {
+          "path": "src/services/AudioUploadService.ts",
+          "beforeGitBlobOrNull": "1dd6b2ef59d3a7cba9a5e7110ff35bc9aeab60ca",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/RecorderService.ts",
+          "beforeGitBlobOrNull": "a401f721602f26f09aae81005a3c1baac2a0b566",
+          "afterGitBlobOrNull": "0ba00b4013361844eb0bea6c9d3d0c9e1519f8f2"
+        },
+        {
+          "path": "src/services/SystemSculptService.ts",
+          "beforeGitBlobOrNull": "7a15db08319292c049de42a6e8539ac7900aa4f4",
+          "afterGitBlobOrNull": "d5c4b9bd622186fc5cdcf52bcb7d1c1a44e5e00d"
+        },
+        {
+          "path": "src/services/TranscriptionProgressManager.ts",
+          "beforeGitBlobOrNull": "13e205a7046957413f7c1c9fa782fa127c4665dd",
+          "afterGitBlobOrNull": "0a074f9734395a0aab6ed2641edbaf0e7d43baa8"
+        },
+        {
+          "path": "src/services/TranscriptionService.ts",
+          "beforeGitBlobOrNull": "61108948a71ea4d7194ba9f7d1559bce3706484a",
+          "afterGitBlobOrNull": "2cedc4964b68eac8a0b3ca635240b2140f057469"
+        },
+        {
+          "path": "src/services/__tests__/AudioUploadService.test.ts",
+          "beforeGitBlobOrNull": "e487d764ce03733219c3d5d2577cdae7a2989197",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/__tests__/RecorderService.test.ts",
+          "beforeGitBlobOrNull": "68e2ddb86fd1f8a7ac74275f3f53a76e7facfa31",
+          "afterGitBlobOrNull": "e7fe907800ec04048a6dab67c589b239422e1a38"
+        },
+        {
+          "path": "src/services/__tests__/SystemSculptService.test.ts",
+          "beforeGitBlobOrNull": "e8c956ece149693e57994fd7de555516b5387281",
+          "afterGitBlobOrNull": "da7a2c84cf66331ae401098de3bc2bafe48b8641"
+        },
+        {
+          "path": "src/services/__tests__/TranscriptionService.test.ts",
+          "beforeGitBlobOrNull": "b22f1103ea2f06ef75511d79221b1c164a4727dc",
+          "afterGitBlobOrNull": "b05da7e98fe50545b2ca557d406d360058b751c1"
+        },
+        {
+          "path": "src/services/__tests__/TranscriptionServiceChunkingE2E.test.ts",
+          "beforeGitBlobOrNull": "ec69654e1dc34a98f0bcaefc4ff3590a50c37ba3",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/managed/adapters/ObsidianManagedRecoveryAdapter.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "0e392963bc1177c555f5eb09a35fc27e5d0c6ccb"
+        },
+        {
+          "path": "src/services/transcription/ManagedTranscriptionAdapter.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "4a206c131005c18388652cb0e39a6063180664fa"
+        },
+        {
+          "path": "src/services/transcription/TranscriptionCoordinator.ts",
+          "beforeGitBlobOrNull": "ddc2db7848ff8ff625bbc46eebba5a03cfa091a0",
+          "afterGitBlobOrNull": "e1a7c16f0a35f0f304a74029321093031c817dec"
+        },
+        {
+          "path": "src/services/transcription/__tests__/ManagedTranscriptionAdapter.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "284259ac9cc30d7590bfe766554b930993c4af7f"
+        },
+        {
+          "path": "src/services/transcription/__tests__/TranscriptionCoordinator.test.ts",
+          "beforeGitBlobOrNull": "b7585350135c33e16acfb49674d4542285ea6ad1",
+          "afterGitBlobOrNull": "df340a020bdf5edfd6dcef029bd6b31142409254"
+        },
+        {
+          "path": "src/services/transcription/providers/ProviderError.ts",
+          "beforeGitBlobOrNull": "2a0f2626ca0c17fd98d648e73554b48a51b0cb3c",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/TranscriptionProvider.ts",
+          "beforeGitBlobOrNull": "2d7959de355ef00ad762245b2aba397a96f40a49",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/ProviderError.test.ts",
+          "beforeGitBlobOrNull": "35e0c0034ac6c3b272f544b81d5a9cdf09f70f6b",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/customWhisperConfig.test.ts",
+          "beforeGitBlobOrNull": "60a41f886749b9dee9cce0dc09fdc29c7b14474b",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/providerHttpErrors.test.ts",
+          "beforeGitBlobOrNull": "7473acf134f4c3ba161223d64d2562632e9753da",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/transcriptionResponse.test.ts",
+          "beforeGitBlobOrNull": "b7b3fd88263b993cb2049bc1606d563849e2fa63",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/customWhisperConfig.ts",
+          "beforeGitBlobOrNull": "3717e34c1485f98bdb08022501c4cd456d340638",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/providerHttpErrors.ts",
+          "beforeGitBlobOrNull": "1e78360dc8105c41da8e6f51fdb8a82540d116ba",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/transcriptionResponse.ts",
+          "beforeGitBlobOrNull": "d0c563a5239c6344f71f5ece89697d5b5d70b51f",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/settings/RecorderTabContent.ts",
+          "beforeGitBlobOrNull": "3897b92db3c199c218bd9e5bee704eb136a8ff4a",
+          "afterGitBlobOrNull": "7837a7349f91ef3d79063b5f68c74cef93a3953e"
+        }
+      ],
+      "predecessorLedger": {
+        "gitBlob": "f3e5caa32c2e2fbcd6012efbc257d2cdff0684e0",
+        "sha256": "2d75ab8e8f4be223be9b2ed9be2a27eb1079648de48a4c3850d31c3eff00765d",
+        "transitionCount": 28,
+        "finalTransitionHash": "0521e3f5718adc9b61e6b02be1b350420e633bdbdb02f46d994fc29104f342fb"
+      },
+      "previousTransitionHash": "06e56b361e25c756eba22c3b386686eb2225fc10c3f64a0fcd21c49b44e8af56",
+      "transitionHash": "260ceb148b2d445e656c23d043c5bbe3fdec5f9877d150f0bc59839448d1c558"
+    },
+    {
+      "sequence": 36,
+      "historicalRecordId": "489a0629b56e6651318395c8f2bfbc03126bae61e12dde8cea21d279eda3c1e2",
+      "v2OccurrenceId": "60d1cafb0346718bd4787c00825fb189f2f03b7dc30951cf73f46c54f55834ce",
+      "ownerPlan": "020",
+      "from": "present",
+      "to": "removed",
+      "predecessorSourceTree": "81eca7885bda37aa6bca65f8e5494ce9b3a8a850",
+      "stagedSourceTree": "ba5e9269c0b9cde03540ce36052f61e86559854e",
+      "sourceEvidence": [
+        {
+          "path": "src/__tests__/settings-recorder-tab.test.ts",
+          "beforeGitBlobOrNull": "0040c460ec8ba7723d6c076aeea048c5b9f17251",
+          "afterGitBlobOrNull": "1602f649901273f246ef8b44ed6d6fe1b575d2d5"
+        },
+        {
+          "path": "src/__tests__/systemsculpt-service-url.test.ts",
+          "beforeGitBlobOrNull": "f9b69a804f4df926782348f5244a2cf0be92ecbf",
+          "afterGitBlobOrNull": "0fed9b1947a1133a7f3ab9fbe02dbacc02f78285"
+        },
+        {
+          "path": "src/main.ts",
+          "beforeGitBlobOrNull": "d2a4d00cfa7cb7d2c95df04144accce2d721ddc5",
+          "afterGitBlobOrNull": "96de219948c85849ee49916da772fd716eb276d3"
+        },
+        {
+          "path": "src/modals/AudioTranscriptionModal.ts",
+          "beforeGitBlobOrNull": "4e5c4aeb9170a8b6e547c1efe7c231f8e3661e3d",
+          "afterGitBlobOrNull": "95530b0dc96c5b780aaf4baf56cd2837c8012754"
+        },
+        {
+          "path": "src/modals/__tests__/AudioTranscriptionModal.test.ts",
+          "beforeGitBlobOrNull": "d2649d613c588cb09620ef8363d75d4255618a6e",
+          "afterGitBlobOrNull": "d4befdecae40d365d16901ceda9d3c2ef062a247"
+        },
+        {
+          "path": "src/services/AudioUploadService.ts",
+          "beforeGitBlobOrNull": "1dd6b2ef59d3a7cba9a5e7110ff35bc9aeab60ca",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/RecorderService.ts",
+          "beforeGitBlobOrNull": "a401f721602f26f09aae81005a3c1baac2a0b566",
+          "afterGitBlobOrNull": "0ba00b4013361844eb0bea6c9d3d0c9e1519f8f2"
+        },
+        {
+          "path": "src/services/SystemSculptService.ts",
+          "beforeGitBlobOrNull": "7a15db08319292c049de42a6e8539ac7900aa4f4",
+          "afterGitBlobOrNull": "d5c4b9bd622186fc5cdcf52bcb7d1c1a44e5e00d"
+        },
+        {
+          "path": "src/services/TranscriptionProgressManager.ts",
+          "beforeGitBlobOrNull": "13e205a7046957413f7c1c9fa782fa127c4665dd",
+          "afterGitBlobOrNull": "0a074f9734395a0aab6ed2641edbaf0e7d43baa8"
+        },
+        {
+          "path": "src/services/TranscriptionService.ts",
+          "beforeGitBlobOrNull": "61108948a71ea4d7194ba9f7d1559bce3706484a",
+          "afterGitBlobOrNull": "2cedc4964b68eac8a0b3ca635240b2140f057469"
+        },
+        {
+          "path": "src/services/__tests__/AudioUploadService.test.ts",
+          "beforeGitBlobOrNull": "e487d764ce03733219c3d5d2577cdae7a2989197",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/__tests__/RecorderService.test.ts",
+          "beforeGitBlobOrNull": "68e2ddb86fd1f8a7ac74275f3f53a76e7facfa31",
+          "afterGitBlobOrNull": "e7fe907800ec04048a6dab67c589b239422e1a38"
+        },
+        {
+          "path": "src/services/__tests__/SystemSculptService.test.ts",
+          "beforeGitBlobOrNull": "e8c956ece149693e57994fd7de555516b5387281",
+          "afterGitBlobOrNull": "da7a2c84cf66331ae401098de3bc2bafe48b8641"
+        },
+        {
+          "path": "src/services/__tests__/TranscriptionService.test.ts",
+          "beforeGitBlobOrNull": "b22f1103ea2f06ef75511d79221b1c164a4727dc",
+          "afterGitBlobOrNull": "b05da7e98fe50545b2ca557d406d360058b751c1"
+        },
+        {
+          "path": "src/services/__tests__/TranscriptionServiceChunkingE2E.test.ts",
+          "beforeGitBlobOrNull": "ec69654e1dc34a98f0bcaefc4ff3590a50c37ba3",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/managed/adapters/ObsidianManagedRecoveryAdapter.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "0e392963bc1177c555f5eb09a35fc27e5d0c6ccb"
+        },
+        {
+          "path": "src/services/transcription/ManagedTranscriptionAdapter.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "4a206c131005c18388652cb0e39a6063180664fa"
+        },
+        {
+          "path": "src/services/transcription/TranscriptionCoordinator.ts",
+          "beforeGitBlobOrNull": "ddc2db7848ff8ff625bbc46eebba5a03cfa091a0",
+          "afterGitBlobOrNull": "e1a7c16f0a35f0f304a74029321093031c817dec"
+        },
+        {
+          "path": "src/services/transcription/__tests__/ManagedTranscriptionAdapter.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "284259ac9cc30d7590bfe766554b930993c4af7f"
+        },
+        {
+          "path": "src/services/transcription/__tests__/TranscriptionCoordinator.test.ts",
+          "beforeGitBlobOrNull": "b7585350135c33e16acfb49674d4542285ea6ad1",
+          "afterGitBlobOrNull": "df340a020bdf5edfd6dcef029bd6b31142409254"
+        },
+        {
+          "path": "src/services/transcription/providers/ProviderError.ts",
+          "beforeGitBlobOrNull": "2a0f2626ca0c17fd98d648e73554b48a51b0cb3c",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/TranscriptionProvider.ts",
+          "beforeGitBlobOrNull": "2d7959de355ef00ad762245b2aba397a96f40a49",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/ProviderError.test.ts",
+          "beforeGitBlobOrNull": "35e0c0034ac6c3b272f544b81d5a9cdf09f70f6b",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/customWhisperConfig.test.ts",
+          "beforeGitBlobOrNull": "60a41f886749b9dee9cce0dc09fdc29c7b14474b",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/providerHttpErrors.test.ts",
+          "beforeGitBlobOrNull": "7473acf134f4c3ba161223d64d2562632e9753da",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/transcriptionResponse.test.ts",
+          "beforeGitBlobOrNull": "b7b3fd88263b993cb2049bc1606d563849e2fa63",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/customWhisperConfig.ts",
+          "beforeGitBlobOrNull": "3717e34c1485f98bdb08022501c4cd456d340638",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/providerHttpErrors.ts",
+          "beforeGitBlobOrNull": "1e78360dc8105c41da8e6f51fdb8a82540d116ba",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/transcriptionResponse.ts",
+          "beforeGitBlobOrNull": "d0c563a5239c6344f71f5ece89697d5b5d70b51f",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/settings/RecorderTabContent.ts",
+          "beforeGitBlobOrNull": "3897b92db3c199c218bd9e5bee704eb136a8ff4a",
+          "afterGitBlobOrNull": "7837a7349f91ef3d79063b5f68c74cef93a3953e"
+        }
+      ],
+      "predecessorLedger": {
+        "gitBlob": "f3e5caa32c2e2fbcd6012efbc257d2cdff0684e0",
+        "sha256": "2d75ab8e8f4be223be9b2ed9be2a27eb1079648de48a4c3850d31c3eff00765d",
+        "transitionCount": 28,
+        "finalTransitionHash": "0521e3f5718adc9b61e6b02be1b350420e633bdbdb02f46d994fc29104f342fb"
+      },
+      "previousTransitionHash": "260ceb148b2d445e656c23d043c5bbe3fdec5f9877d150f0bc59839448d1c558",
+      "transitionHash": "01d6f0cf384379dfbcbf747980964ba61b7663a4cc38d55c443638a848b53f17"
+    },
+    {
+      "sequence": 37,
+      "historicalRecordId": "d5a817e56177fca6029c22af65b4504cf338adb4c7fb697e8923512a4f098cfc",
+      "v2OccurrenceId": "2eefde7a9af0a989fcd0fc510a4143cf0c9b679002a179ef94ea8f278931fa59",
+      "ownerPlan": "020",
+      "from": "present",
+      "to": "removed",
+      "predecessorSourceTree": "81eca7885bda37aa6bca65f8e5494ce9b3a8a850",
+      "stagedSourceTree": "ba5e9269c0b9cde03540ce36052f61e86559854e",
+      "sourceEvidence": [
+        {
+          "path": "src/__tests__/settings-recorder-tab.test.ts",
+          "beforeGitBlobOrNull": "0040c460ec8ba7723d6c076aeea048c5b9f17251",
+          "afterGitBlobOrNull": "1602f649901273f246ef8b44ed6d6fe1b575d2d5"
+        },
+        {
+          "path": "src/__tests__/systemsculpt-service-url.test.ts",
+          "beforeGitBlobOrNull": "f9b69a804f4df926782348f5244a2cf0be92ecbf",
+          "afterGitBlobOrNull": "0fed9b1947a1133a7f3ab9fbe02dbacc02f78285"
+        },
+        {
+          "path": "src/main.ts",
+          "beforeGitBlobOrNull": "d2a4d00cfa7cb7d2c95df04144accce2d721ddc5",
+          "afterGitBlobOrNull": "96de219948c85849ee49916da772fd716eb276d3"
+        },
+        {
+          "path": "src/modals/AudioTranscriptionModal.ts",
+          "beforeGitBlobOrNull": "4e5c4aeb9170a8b6e547c1efe7c231f8e3661e3d",
+          "afterGitBlobOrNull": "95530b0dc96c5b780aaf4baf56cd2837c8012754"
+        },
+        {
+          "path": "src/modals/__tests__/AudioTranscriptionModal.test.ts",
+          "beforeGitBlobOrNull": "d2649d613c588cb09620ef8363d75d4255618a6e",
+          "afterGitBlobOrNull": "d4befdecae40d365d16901ceda9d3c2ef062a247"
+        },
+        {
+          "path": "src/services/AudioUploadService.ts",
+          "beforeGitBlobOrNull": "1dd6b2ef59d3a7cba9a5e7110ff35bc9aeab60ca",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/RecorderService.ts",
+          "beforeGitBlobOrNull": "a401f721602f26f09aae81005a3c1baac2a0b566",
+          "afterGitBlobOrNull": "0ba00b4013361844eb0bea6c9d3d0c9e1519f8f2"
+        },
+        {
+          "path": "src/services/SystemSculptService.ts",
+          "beforeGitBlobOrNull": "7a15db08319292c049de42a6e8539ac7900aa4f4",
+          "afterGitBlobOrNull": "d5c4b9bd622186fc5cdcf52bcb7d1c1a44e5e00d"
+        },
+        {
+          "path": "src/services/TranscriptionProgressManager.ts",
+          "beforeGitBlobOrNull": "13e205a7046957413f7c1c9fa782fa127c4665dd",
+          "afterGitBlobOrNull": "0a074f9734395a0aab6ed2641edbaf0e7d43baa8"
+        },
+        {
+          "path": "src/services/TranscriptionService.ts",
+          "beforeGitBlobOrNull": "61108948a71ea4d7194ba9f7d1559bce3706484a",
+          "afterGitBlobOrNull": "2cedc4964b68eac8a0b3ca635240b2140f057469"
+        },
+        {
+          "path": "src/services/__tests__/AudioUploadService.test.ts",
+          "beforeGitBlobOrNull": "e487d764ce03733219c3d5d2577cdae7a2989197",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/__tests__/RecorderService.test.ts",
+          "beforeGitBlobOrNull": "68e2ddb86fd1f8a7ac74275f3f53a76e7facfa31",
+          "afterGitBlobOrNull": "e7fe907800ec04048a6dab67c589b239422e1a38"
+        },
+        {
+          "path": "src/services/__tests__/SystemSculptService.test.ts",
+          "beforeGitBlobOrNull": "e8c956ece149693e57994fd7de555516b5387281",
+          "afterGitBlobOrNull": "da7a2c84cf66331ae401098de3bc2bafe48b8641"
+        },
+        {
+          "path": "src/services/__tests__/TranscriptionService.test.ts",
+          "beforeGitBlobOrNull": "b22f1103ea2f06ef75511d79221b1c164a4727dc",
+          "afterGitBlobOrNull": "b05da7e98fe50545b2ca557d406d360058b751c1"
+        },
+        {
+          "path": "src/services/__tests__/TranscriptionServiceChunkingE2E.test.ts",
+          "beforeGitBlobOrNull": "ec69654e1dc34a98f0bcaefc4ff3590a50c37ba3",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/managed/adapters/ObsidianManagedRecoveryAdapter.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "0e392963bc1177c555f5eb09a35fc27e5d0c6ccb"
+        },
+        {
+          "path": "src/services/transcription/ManagedTranscriptionAdapter.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "4a206c131005c18388652cb0e39a6063180664fa"
+        },
+        {
+          "path": "src/services/transcription/TranscriptionCoordinator.ts",
+          "beforeGitBlobOrNull": "ddc2db7848ff8ff625bbc46eebba5a03cfa091a0",
+          "afterGitBlobOrNull": "e1a7c16f0a35f0f304a74029321093031c817dec"
+        },
+        {
+          "path": "src/services/transcription/__tests__/ManagedTranscriptionAdapter.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "284259ac9cc30d7590bfe766554b930993c4af7f"
+        },
+        {
+          "path": "src/services/transcription/__tests__/TranscriptionCoordinator.test.ts",
+          "beforeGitBlobOrNull": "b7585350135c33e16acfb49674d4542285ea6ad1",
+          "afterGitBlobOrNull": "df340a020bdf5edfd6dcef029bd6b31142409254"
+        },
+        {
+          "path": "src/services/transcription/providers/ProviderError.ts",
+          "beforeGitBlobOrNull": "2a0f2626ca0c17fd98d648e73554b48a51b0cb3c",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/TranscriptionProvider.ts",
+          "beforeGitBlobOrNull": "2d7959de355ef00ad762245b2aba397a96f40a49",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/ProviderError.test.ts",
+          "beforeGitBlobOrNull": "35e0c0034ac6c3b272f544b81d5a9cdf09f70f6b",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/customWhisperConfig.test.ts",
+          "beforeGitBlobOrNull": "60a41f886749b9dee9cce0dc09fdc29c7b14474b",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/providerHttpErrors.test.ts",
+          "beforeGitBlobOrNull": "7473acf134f4c3ba161223d64d2562632e9753da",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/transcriptionResponse.test.ts",
+          "beforeGitBlobOrNull": "b7b3fd88263b993cb2049bc1606d563849e2fa63",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/customWhisperConfig.ts",
+          "beforeGitBlobOrNull": "3717e34c1485f98bdb08022501c4cd456d340638",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/providerHttpErrors.ts",
+          "beforeGitBlobOrNull": "1e78360dc8105c41da8e6f51fdb8a82540d116ba",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/transcriptionResponse.ts",
+          "beforeGitBlobOrNull": "d0c563a5239c6344f71f5ece89697d5b5d70b51f",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/settings/RecorderTabContent.ts",
+          "beforeGitBlobOrNull": "3897b92db3c199c218bd9e5bee704eb136a8ff4a",
+          "afterGitBlobOrNull": "7837a7349f91ef3d79063b5f68c74cef93a3953e"
+        }
+      ],
+      "predecessorLedger": {
+        "gitBlob": "f3e5caa32c2e2fbcd6012efbc257d2cdff0684e0",
+        "sha256": "2d75ab8e8f4be223be9b2ed9be2a27eb1079648de48a4c3850d31c3eff00765d",
+        "transitionCount": 28,
+        "finalTransitionHash": "0521e3f5718adc9b61e6b02be1b350420e633bdbdb02f46d994fc29104f342fb"
+      },
+      "previousTransitionHash": "01d6f0cf384379dfbcbf747980964ba61b7663a4cc38d55c443638a848b53f17",
+      "transitionHash": "76d15250a094afcbcdc8cafc7ef62bf78657d9817147492d70e4d9cb014f51bd"
+    },
+    {
+      "sequence": 38,
+      "historicalRecordId": "beaa86e6bfb831c775f514a83a4981b6f34695c46fa5d3aa5f5766be7990bc1d",
+      "v2OccurrenceId": "7adf3014d4a223a7a2a5b3177dbc37d32d39dc0b63722569eed1ef89858c1fa8",
+      "ownerPlan": "020",
+      "from": "present",
+      "to": "removed",
+      "predecessorSourceTree": "81eca7885bda37aa6bca65f8e5494ce9b3a8a850",
+      "stagedSourceTree": "ba5e9269c0b9cde03540ce36052f61e86559854e",
+      "sourceEvidence": [
+        {
+          "path": "src/__tests__/settings-recorder-tab.test.ts",
+          "beforeGitBlobOrNull": "0040c460ec8ba7723d6c076aeea048c5b9f17251",
+          "afterGitBlobOrNull": "1602f649901273f246ef8b44ed6d6fe1b575d2d5"
+        },
+        {
+          "path": "src/__tests__/systemsculpt-service-url.test.ts",
+          "beforeGitBlobOrNull": "f9b69a804f4df926782348f5244a2cf0be92ecbf",
+          "afterGitBlobOrNull": "0fed9b1947a1133a7f3ab9fbe02dbacc02f78285"
+        },
+        {
+          "path": "src/main.ts",
+          "beforeGitBlobOrNull": "d2a4d00cfa7cb7d2c95df04144accce2d721ddc5",
+          "afterGitBlobOrNull": "96de219948c85849ee49916da772fd716eb276d3"
+        },
+        {
+          "path": "src/modals/AudioTranscriptionModal.ts",
+          "beforeGitBlobOrNull": "4e5c4aeb9170a8b6e547c1efe7c231f8e3661e3d",
+          "afterGitBlobOrNull": "95530b0dc96c5b780aaf4baf56cd2837c8012754"
+        },
+        {
+          "path": "src/modals/__tests__/AudioTranscriptionModal.test.ts",
+          "beforeGitBlobOrNull": "d2649d613c588cb09620ef8363d75d4255618a6e",
+          "afterGitBlobOrNull": "d4befdecae40d365d16901ceda9d3c2ef062a247"
+        },
+        {
+          "path": "src/services/AudioUploadService.ts",
+          "beforeGitBlobOrNull": "1dd6b2ef59d3a7cba9a5e7110ff35bc9aeab60ca",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/RecorderService.ts",
+          "beforeGitBlobOrNull": "a401f721602f26f09aae81005a3c1baac2a0b566",
+          "afterGitBlobOrNull": "0ba00b4013361844eb0bea6c9d3d0c9e1519f8f2"
+        },
+        {
+          "path": "src/services/SystemSculptService.ts",
+          "beforeGitBlobOrNull": "7a15db08319292c049de42a6e8539ac7900aa4f4",
+          "afterGitBlobOrNull": "d5c4b9bd622186fc5cdcf52bcb7d1c1a44e5e00d"
+        },
+        {
+          "path": "src/services/TranscriptionProgressManager.ts",
+          "beforeGitBlobOrNull": "13e205a7046957413f7c1c9fa782fa127c4665dd",
+          "afterGitBlobOrNull": "0a074f9734395a0aab6ed2641edbaf0e7d43baa8"
+        },
+        {
+          "path": "src/services/TranscriptionService.ts",
+          "beforeGitBlobOrNull": "61108948a71ea4d7194ba9f7d1559bce3706484a",
+          "afterGitBlobOrNull": "2cedc4964b68eac8a0b3ca635240b2140f057469"
+        },
+        {
+          "path": "src/services/__tests__/AudioUploadService.test.ts",
+          "beforeGitBlobOrNull": "e487d764ce03733219c3d5d2577cdae7a2989197",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/__tests__/RecorderService.test.ts",
+          "beforeGitBlobOrNull": "68e2ddb86fd1f8a7ac74275f3f53a76e7facfa31",
+          "afterGitBlobOrNull": "e7fe907800ec04048a6dab67c589b239422e1a38"
+        },
+        {
+          "path": "src/services/__tests__/SystemSculptService.test.ts",
+          "beforeGitBlobOrNull": "e8c956ece149693e57994fd7de555516b5387281",
+          "afterGitBlobOrNull": "da7a2c84cf66331ae401098de3bc2bafe48b8641"
+        },
+        {
+          "path": "src/services/__tests__/TranscriptionService.test.ts",
+          "beforeGitBlobOrNull": "b22f1103ea2f06ef75511d79221b1c164a4727dc",
+          "afterGitBlobOrNull": "b05da7e98fe50545b2ca557d406d360058b751c1"
+        },
+        {
+          "path": "src/services/__tests__/TranscriptionServiceChunkingE2E.test.ts",
+          "beforeGitBlobOrNull": "ec69654e1dc34a98f0bcaefc4ff3590a50c37ba3",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/managed/adapters/ObsidianManagedRecoveryAdapter.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "0e392963bc1177c555f5eb09a35fc27e5d0c6ccb"
+        },
+        {
+          "path": "src/services/transcription/ManagedTranscriptionAdapter.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "4a206c131005c18388652cb0e39a6063180664fa"
+        },
+        {
+          "path": "src/services/transcription/TranscriptionCoordinator.ts",
+          "beforeGitBlobOrNull": "ddc2db7848ff8ff625bbc46eebba5a03cfa091a0",
+          "afterGitBlobOrNull": "e1a7c16f0a35f0f304a74029321093031c817dec"
+        },
+        {
+          "path": "src/services/transcription/__tests__/ManagedTranscriptionAdapter.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "284259ac9cc30d7590bfe766554b930993c4af7f"
+        },
+        {
+          "path": "src/services/transcription/__tests__/TranscriptionCoordinator.test.ts",
+          "beforeGitBlobOrNull": "b7585350135c33e16acfb49674d4542285ea6ad1",
+          "afterGitBlobOrNull": "df340a020bdf5edfd6dcef029bd6b31142409254"
+        },
+        {
+          "path": "src/services/transcription/providers/ProviderError.ts",
+          "beforeGitBlobOrNull": "2a0f2626ca0c17fd98d648e73554b48a51b0cb3c",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/TranscriptionProvider.ts",
+          "beforeGitBlobOrNull": "2d7959de355ef00ad762245b2aba397a96f40a49",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/ProviderError.test.ts",
+          "beforeGitBlobOrNull": "35e0c0034ac6c3b272f544b81d5a9cdf09f70f6b",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/customWhisperConfig.test.ts",
+          "beforeGitBlobOrNull": "60a41f886749b9dee9cce0dc09fdc29c7b14474b",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/providerHttpErrors.test.ts",
+          "beforeGitBlobOrNull": "7473acf134f4c3ba161223d64d2562632e9753da",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/transcriptionResponse.test.ts",
+          "beforeGitBlobOrNull": "b7b3fd88263b993cb2049bc1606d563849e2fa63",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/customWhisperConfig.ts",
+          "beforeGitBlobOrNull": "3717e34c1485f98bdb08022501c4cd456d340638",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/providerHttpErrors.ts",
+          "beforeGitBlobOrNull": "1e78360dc8105c41da8e6f51fdb8a82540d116ba",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/transcriptionResponse.ts",
+          "beforeGitBlobOrNull": "d0c563a5239c6344f71f5ece89697d5b5d70b51f",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/settings/RecorderTabContent.ts",
+          "beforeGitBlobOrNull": "3897b92db3c199c218bd9e5bee704eb136a8ff4a",
+          "afterGitBlobOrNull": "7837a7349f91ef3d79063b5f68c74cef93a3953e"
+        }
+      ],
+      "predecessorLedger": {
+        "gitBlob": "f3e5caa32c2e2fbcd6012efbc257d2cdff0684e0",
+        "sha256": "2d75ab8e8f4be223be9b2ed9be2a27eb1079648de48a4c3850d31c3eff00765d",
+        "transitionCount": 28,
+        "finalTransitionHash": "0521e3f5718adc9b61e6b02be1b350420e633bdbdb02f46d994fc29104f342fb"
+      },
+      "previousTransitionHash": "76d15250a094afcbcdc8cafc7ef62bf78657d9817147492d70e4d9cb014f51bd",
+      "transitionHash": "52ccfc7734609325addb10128de2408a2e0e1ebc34625196625c47481a8c9756"
+    },
+    {
+      "sequence": 39,
+      "historicalRecordId": "11843b19f4d0e070a00ade70ad0aefe77e92d22303eaeb7b16739e22658222ce",
+      "v2OccurrenceId": "1052bf5b95f5ea05c96773f64a56e2b81ce70ac111e9cb6bef1c5f9f025debd1",
+      "ownerPlan": "020",
+      "from": "present",
+      "to": "removed",
+      "predecessorSourceTree": "81eca7885bda37aa6bca65f8e5494ce9b3a8a850",
+      "stagedSourceTree": "ba5e9269c0b9cde03540ce36052f61e86559854e",
+      "sourceEvidence": [
+        {
+          "path": "src/__tests__/settings-recorder-tab.test.ts",
+          "beforeGitBlobOrNull": "0040c460ec8ba7723d6c076aeea048c5b9f17251",
+          "afterGitBlobOrNull": "1602f649901273f246ef8b44ed6d6fe1b575d2d5"
+        },
+        {
+          "path": "src/__tests__/systemsculpt-service-url.test.ts",
+          "beforeGitBlobOrNull": "f9b69a804f4df926782348f5244a2cf0be92ecbf",
+          "afterGitBlobOrNull": "0fed9b1947a1133a7f3ab9fbe02dbacc02f78285"
+        },
+        {
+          "path": "src/main.ts",
+          "beforeGitBlobOrNull": "d2a4d00cfa7cb7d2c95df04144accce2d721ddc5",
+          "afterGitBlobOrNull": "96de219948c85849ee49916da772fd716eb276d3"
+        },
+        {
+          "path": "src/modals/AudioTranscriptionModal.ts",
+          "beforeGitBlobOrNull": "4e5c4aeb9170a8b6e547c1efe7c231f8e3661e3d",
+          "afterGitBlobOrNull": "95530b0dc96c5b780aaf4baf56cd2837c8012754"
+        },
+        {
+          "path": "src/modals/__tests__/AudioTranscriptionModal.test.ts",
+          "beforeGitBlobOrNull": "d2649d613c588cb09620ef8363d75d4255618a6e",
+          "afterGitBlobOrNull": "d4befdecae40d365d16901ceda9d3c2ef062a247"
+        },
+        {
+          "path": "src/services/AudioUploadService.ts",
+          "beforeGitBlobOrNull": "1dd6b2ef59d3a7cba9a5e7110ff35bc9aeab60ca",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/RecorderService.ts",
+          "beforeGitBlobOrNull": "a401f721602f26f09aae81005a3c1baac2a0b566",
+          "afterGitBlobOrNull": "0ba00b4013361844eb0bea6c9d3d0c9e1519f8f2"
+        },
+        {
+          "path": "src/services/SystemSculptService.ts",
+          "beforeGitBlobOrNull": "7a15db08319292c049de42a6e8539ac7900aa4f4",
+          "afterGitBlobOrNull": "d5c4b9bd622186fc5cdcf52bcb7d1c1a44e5e00d"
+        },
+        {
+          "path": "src/services/TranscriptionProgressManager.ts",
+          "beforeGitBlobOrNull": "13e205a7046957413f7c1c9fa782fa127c4665dd",
+          "afterGitBlobOrNull": "0a074f9734395a0aab6ed2641edbaf0e7d43baa8"
+        },
+        {
+          "path": "src/services/TranscriptionService.ts",
+          "beforeGitBlobOrNull": "61108948a71ea4d7194ba9f7d1559bce3706484a",
+          "afterGitBlobOrNull": "2cedc4964b68eac8a0b3ca635240b2140f057469"
+        },
+        {
+          "path": "src/services/__tests__/AudioUploadService.test.ts",
+          "beforeGitBlobOrNull": "e487d764ce03733219c3d5d2577cdae7a2989197",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/__tests__/RecorderService.test.ts",
+          "beforeGitBlobOrNull": "68e2ddb86fd1f8a7ac74275f3f53a76e7facfa31",
+          "afterGitBlobOrNull": "e7fe907800ec04048a6dab67c589b239422e1a38"
+        },
+        {
+          "path": "src/services/__tests__/SystemSculptService.test.ts",
+          "beforeGitBlobOrNull": "e8c956ece149693e57994fd7de555516b5387281",
+          "afterGitBlobOrNull": "da7a2c84cf66331ae401098de3bc2bafe48b8641"
+        },
+        {
+          "path": "src/services/__tests__/TranscriptionService.test.ts",
+          "beforeGitBlobOrNull": "b22f1103ea2f06ef75511d79221b1c164a4727dc",
+          "afterGitBlobOrNull": "b05da7e98fe50545b2ca557d406d360058b751c1"
+        },
+        {
+          "path": "src/services/__tests__/TranscriptionServiceChunkingE2E.test.ts",
+          "beforeGitBlobOrNull": "ec69654e1dc34a98f0bcaefc4ff3590a50c37ba3",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/managed/adapters/ObsidianManagedRecoveryAdapter.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "0e392963bc1177c555f5eb09a35fc27e5d0c6ccb"
+        },
+        {
+          "path": "src/services/transcription/ManagedTranscriptionAdapter.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "4a206c131005c18388652cb0e39a6063180664fa"
+        },
+        {
+          "path": "src/services/transcription/TranscriptionCoordinator.ts",
+          "beforeGitBlobOrNull": "ddc2db7848ff8ff625bbc46eebba5a03cfa091a0",
+          "afterGitBlobOrNull": "e1a7c16f0a35f0f304a74029321093031c817dec"
+        },
+        {
+          "path": "src/services/transcription/__tests__/ManagedTranscriptionAdapter.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "284259ac9cc30d7590bfe766554b930993c4af7f"
+        },
+        {
+          "path": "src/services/transcription/__tests__/TranscriptionCoordinator.test.ts",
+          "beforeGitBlobOrNull": "b7585350135c33e16acfb49674d4542285ea6ad1",
+          "afterGitBlobOrNull": "df340a020bdf5edfd6dcef029bd6b31142409254"
+        },
+        {
+          "path": "src/services/transcription/providers/ProviderError.ts",
+          "beforeGitBlobOrNull": "2a0f2626ca0c17fd98d648e73554b48a51b0cb3c",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/TranscriptionProvider.ts",
+          "beforeGitBlobOrNull": "2d7959de355ef00ad762245b2aba397a96f40a49",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/ProviderError.test.ts",
+          "beforeGitBlobOrNull": "35e0c0034ac6c3b272f544b81d5a9cdf09f70f6b",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/customWhisperConfig.test.ts",
+          "beforeGitBlobOrNull": "60a41f886749b9dee9cce0dc09fdc29c7b14474b",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/providerHttpErrors.test.ts",
+          "beforeGitBlobOrNull": "7473acf134f4c3ba161223d64d2562632e9753da",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/transcriptionResponse.test.ts",
+          "beforeGitBlobOrNull": "b7b3fd88263b993cb2049bc1606d563849e2fa63",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/customWhisperConfig.ts",
+          "beforeGitBlobOrNull": "3717e34c1485f98bdb08022501c4cd456d340638",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/providerHttpErrors.ts",
+          "beforeGitBlobOrNull": "1e78360dc8105c41da8e6f51fdb8a82540d116ba",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/transcriptionResponse.ts",
+          "beforeGitBlobOrNull": "d0c563a5239c6344f71f5ece89697d5b5d70b51f",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/settings/RecorderTabContent.ts",
+          "beforeGitBlobOrNull": "3897b92db3c199c218bd9e5bee704eb136a8ff4a",
+          "afterGitBlobOrNull": "7837a7349f91ef3d79063b5f68c74cef93a3953e"
+        }
+      ],
+      "predecessorLedger": {
+        "gitBlob": "f3e5caa32c2e2fbcd6012efbc257d2cdff0684e0",
+        "sha256": "2d75ab8e8f4be223be9b2ed9be2a27eb1079648de48a4c3850d31c3eff00765d",
+        "transitionCount": 28,
+        "finalTransitionHash": "0521e3f5718adc9b61e6b02be1b350420e633bdbdb02f46d994fc29104f342fb"
+      },
+      "previousTransitionHash": "52ccfc7734609325addb10128de2408a2e0e1ebc34625196625c47481a8c9756",
+      "transitionHash": "e9dcd6fd5694427435914028a1c24a11c97aaee82e4b42fec8676b807c24990d"
+    },
+    {
+      "sequence": 40,
+      "historicalRecordId": "bc51614e4e6330c10cfd69929b53101bc0db92f6f66a3111a279bf464e1470a9",
+      "v2OccurrenceId": "73dab3e331c3659801e29edb0e5a379015dc44f950040a7836406acaf00564e9",
+      "ownerPlan": "020",
+      "from": "present",
+      "to": "removed",
+      "predecessorSourceTree": "81eca7885bda37aa6bca65f8e5494ce9b3a8a850",
+      "stagedSourceTree": "ba5e9269c0b9cde03540ce36052f61e86559854e",
+      "sourceEvidence": [
+        {
+          "path": "src/__tests__/settings-recorder-tab.test.ts",
+          "beforeGitBlobOrNull": "0040c460ec8ba7723d6c076aeea048c5b9f17251",
+          "afterGitBlobOrNull": "1602f649901273f246ef8b44ed6d6fe1b575d2d5"
+        },
+        {
+          "path": "src/__tests__/systemsculpt-service-url.test.ts",
+          "beforeGitBlobOrNull": "f9b69a804f4df926782348f5244a2cf0be92ecbf",
+          "afterGitBlobOrNull": "0fed9b1947a1133a7f3ab9fbe02dbacc02f78285"
+        },
+        {
+          "path": "src/main.ts",
+          "beforeGitBlobOrNull": "d2a4d00cfa7cb7d2c95df04144accce2d721ddc5",
+          "afterGitBlobOrNull": "96de219948c85849ee49916da772fd716eb276d3"
+        },
+        {
+          "path": "src/modals/AudioTranscriptionModal.ts",
+          "beforeGitBlobOrNull": "4e5c4aeb9170a8b6e547c1efe7c231f8e3661e3d",
+          "afterGitBlobOrNull": "95530b0dc96c5b780aaf4baf56cd2837c8012754"
+        },
+        {
+          "path": "src/modals/__tests__/AudioTranscriptionModal.test.ts",
+          "beforeGitBlobOrNull": "d2649d613c588cb09620ef8363d75d4255618a6e",
+          "afterGitBlobOrNull": "d4befdecae40d365d16901ceda9d3c2ef062a247"
+        },
+        {
+          "path": "src/services/AudioUploadService.ts",
+          "beforeGitBlobOrNull": "1dd6b2ef59d3a7cba9a5e7110ff35bc9aeab60ca",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/RecorderService.ts",
+          "beforeGitBlobOrNull": "a401f721602f26f09aae81005a3c1baac2a0b566",
+          "afterGitBlobOrNull": "0ba00b4013361844eb0bea6c9d3d0c9e1519f8f2"
+        },
+        {
+          "path": "src/services/SystemSculptService.ts",
+          "beforeGitBlobOrNull": "7a15db08319292c049de42a6e8539ac7900aa4f4",
+          "afterGitBlobOrNull": "d5c4b9bd622186fc5cdcf52bcb7d1c1a44e5e00d"
+        },
+        {
+          "path": "src/services/TranscriptionProgressManager.ts",
+          "beforeGitBlobOrNull": "13e205a7046957413f7c1c9fa782fa127c4665dd",
+          "afterGitBlobOrNull": "0a074f9734395a0aab6ed2641edbaf0e7d43baa8"
+        },
+        {
+          "path": "src/services/TranscriptionService.ts",
+          "beforeGitBlobOrNull": "61108948a71ea4d7194ba9f7d1559bce3706484a",
+          "afterGitBlobOrNull": "2cedc4964b68eac8a0b3ca635240b2140f057469"
+        },
+        {
+          "path": "src/services/__tests__/AudioUploadService.test.ts",
+          "beforeGitBlobOrNull": "e487d764ce03733219c3d5d2577cdae7a2989197",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/__tests__/RecorderService.test.ts",
+          "beforeGitBlobOrNull": "68e2ddb86fd1f8a7ac74275f3f53a76e7facfa31",
+          "afterGitBlobOrNull": "e7fe907800ec04048a6dab67c589b239422e1a38"
+        },
+        {
+          "path": "src/services/__tests__/SystemSculptService.test.ts",
+          "beforeGitBlobOrNull": "e8c956ece149693e57994fd7de555516b5387281",
+          "afterGitBlobOrNull": "da7a2c84cf66331ae401098de3bc2bafe48b8641"
+        },
+        {
+          "path": "src/services/__tests__/TranscriptionService.test.ts",
+          "beforeGitBlobOrNull": "b22f1103ea2f06ef75511d79221b1c164a4727dc",
+          "afterGitBlobOrNull": "b05da7e98fe50545b2ca557d406d360058b751c1"
+        },
+        {
+          "path": "src/services/__tests__/TranscriptionServiceChunkingE2E.test.ts",
+          "beforeGitBlobOrNull": "ec69654e1dc34a98f0bcaefc4ff3590a50c37ba3",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/managed/adapters/ObsidianManagedRecoveryAdapter.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "0e392963bc1177c555f5eb09a35fc27e5d0c6ccb"
+        },
+        {
+          "path": "src/services/transcription/ManagedTranscriptionAdapter.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "4a206c131005c18388652cb0e39a6063180664fa"
+        },
+        {
+          "path": "src/services/transcription/TranscriptionCoordinator.ts",
+          "beforeGitBlobOrNull": "ddc2db7848ff8ff625bbc46eebba5a03cfa091a0",
+          "afterGitBlobOrNull": "e1a7c16f0a35f0f304a74029321093031c817dec"
+        },
+        {
+          "path": "src/services/transcription/__tests__/ManagedTranscriptionAdapter.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "284259ac9cc30d7590bfe766554b930993c4af7f"
+        },
+        {
+          "path": "src/services/transcription/__tests__/TranscriptionCoordinator.test.ts",
+          "beforeGitBlobOrNull": "b7585350135c33e16acfb49674d4542285ea6ad1",
+          "afterGitBlobOrNull": "df340a020bdf5edfd6dcef029bd6b31142409254"
+        },
+        {
+          "path": "src/services/transcription/providers/ProviderError.ts",
+          "beforeGitBlobOrNull": "2a0f2626ca0c17fd98d648e73554b48a51b0cb3c",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/TranscriptionProvider.ts",
+          "beforeGitBlobOrNull": "2d7959de355ef00ad762245b2aba397a96f40a49",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/ProviderError.test.ts",
+          "beforeGitBlobOrNull": "35e0c0034ac6c3b272f544b81d5a9cdf09f70f6b",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/customWhisperConfig.test.ts",
+          "beforeGitBlobOrNull": "60a41f886749b9dee9cce0dc09fdc29c7b14474b",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/providerHttpErrors.test.ts",
+          "beforeGitBlobOrNull": "7473acf134f4c3ba161223d64d2562632e9753da",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/transcriptionResponse.test.ts",
+          "beforeGitBlobOrNull": "b7b3fd88263b993cb2049bc1606d563849e2fa63",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/customWhisperConfig.ts",
+          "beforeGitBlobOrNull": "3717e34c1485f98bdb08022501c4cd456d340638",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/providerHttpErrors.ts",
+          "beforeGitBlobOrNull": "1e78360dc8105c41da8e6f51fdb8a82540d116ba",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/transcriptionResponse.ts",
+          "beforeGitBlobOrNull": "d0c563a5239c6344f71f5ece89697d5b5d70b51f",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/settings/RecorderTabContent.ts",
+          "beforeGitBlobOrNull": "3897b92db3c199c218bd9e5bee704eb136a8ff4a",
+          "afterGitBlobOrNull": "7837a7349f91ef3d79063b5f68c74cef93a3953e"
+        }
+      ],
+      "predecessorLedger": {
+        "gitBlob": "f3e5caa32c2e2fbcd6012efbc257d2cdff0684e0",
+        "sha256": "2d75ab8e8f4be223be9b2ed9be2a27eb1079648de48a4c3850d31c3eff00765d",
+        "transitionCount": 28,
+        "finalTransitionHash": "0521e3f5718adc9b61e6b02be1b350420e633bdbdb02f46d994fc29104f342fb"
+      },
+      "previousTransitionHash": "e9dcd6fd5694427435914028a1c24a11c97aaee82e4b42fec8676b807c24990d",
+      "transitionHash": "751616b5d0ad45a34abfd5415d0088cb57b5ef6efd1a2360aa03464a3a86cacd"
+    },
+    {
+      "sequence": 41,
+      "historicalRecordId": "c3679ab0997aebbf31b454415c6b524f648c68c7bbce428cb346443129765889",
+      "v2OccurrenceId": "30451615f88ee0bf527433059b7831b15e810f59569d13ed99ab0a889262bc9d",
+      "ownerPlan": "020",
+      "from": "present",
+      "to": "removed",
+      "predecessorSourceTree": "81eca7885bda37aa6bca65f8e5494ce9b3a8a850",
+      "stagedSourceTree": "ba5e9269c0b9cde03540ce36052f61e86559854e",
+      "sourceEvidence": [
+        {
+          "path": "src/__tests__/settings-recorder-tab.test.ts",
+          "beforeGitBlobOrNull": "0040c460ec8ba7723d6c076aeea048c5b9f17251",
+          "afterGitBlobOrNull": "1602f649901273f246ef8b44ed6d6fe1b575d2d5"
+        },
+        {
+          "path": "src/__tests__/systemsculpt-service-url.test.ts",
+          "beforeGitBlobOrNull": "f9b69a804f4df926782348f5244a2cf0be92ecbf",
+          "afterGitBlobOrNull": "0fed9b1947a1133a7f3ab9fbe02dbacc02f78285"
+        },
+        {
+          "path": "src/main.ts",
+          "beforeGitBlobOrNull": "d2a4d00cfa7cb7d2c95df04144accce2d721ddc5",
+          "afterGitBlobOrNull": "96de219948c85849ee49916da772fd716eb276d3"
+        },
+        {
+          "path": "src/modals/AudioTranscriptionModal.ts",
+          "beforeGitBlobOrNull": "4e5c4aeb9170a8b6e547c1efe7c231f8e3661e3d",
+          "afterGitBlobOrNull": "95530b0dc96c5b780aaf4baf56cd2837c8012754"
+        },
+        {
+          "path": "src/modals/__tests__/AudioTranscriptionModal.test.ts",
+          "beforeGitBlobOrNull": "d2649d613c588cb09620ef8363d75d4255618a6e",
+          "afterGitBlobOrNull": "d4befdecae40d365d16901ceda9d3c2ef062a247"
+        },
+        {
+          "path": "src/services/AudioUploadService.ts",
+          "beforeGitBlobOrNull": "1dd6b2ef59d3a7cba9a5e7110ff35bc9aeab60ca",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/RecorderService.ts",
+          "beforeGitBlobOrNull": "a401f721602f26f09aae81005a3c1baac2a0b566",
+          "afterGitBlobOrNull": "0ba00b4013361844eb0bea6c9d3d0c9e1519f8f2"
+        },
+        {
+          "path": "src/services/SystemSculptService.ts",
+          "beforeGitBlobOrNull": "7a15db08319292c049de42a6e8539ac7900aa4f4",
+          "afterGitBlobOrNull": "d5c4b9bd622186fc5cdcf52bcb7d1c1a44e5e00d"
+        },
+        {
+          "path": "src/services/TranscriptionProgressManager.ts",
+          "beforeGitBlobOrNull": "13e205a7046957413f7c1c9fa782fa127c4665dd",
+          "afterGitBlobOrNull": "0a074f9734395a0aab6ed2641edbaf0e7d43baa8"
+        },
+        {
+          "path": "src/services/TranscriptionService.ts",
+          "beforeGitBlobOrNull": "61108948a71ea4d7194ba9f7d1559bce3706484a",
+          "afterGitBlobOrNull": "2cedc4964b68eac8a0b3ca635240b2140f057469"
+        },
+        {
+          "path": "src/services/__tests__/AudioUploadService.test.ts",
+          "beforeGitBlobOrNull": "e487d764ce03733219c3d5d2577cdae7a2989197",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/__tests__/RecorderService.test.ts",
+          "beforeGitBlobOrNull": "68e2ddb86fd1f8a7ac74275f3f53a76e7facfa31",
+          "afterGitBlobOrNull": "e7fe907800ec04048a6dab67c589b239422e1a38"
+        },
+        {
+          "path": "src/services/__tests__/SystemSculptService.test.ts",
+          "beforeGitBlobOrNull": "e8c956ece149693e57994fd7de555516b5387281",
+          "afterGitBlobOrNull": "da7a2c84cf66331ae401098de3bc2bafe48b8641"
+        },
+        {
+          "path": "src/services/__tests__/TranscriptionService.test.ts",
+          "beforeGitBlobOrNull": "b22f1103ea2f06ef75511d79221b1c164a4727dc",
+          "afterGitBlobOrNull": "b05da7e98fe50545b2ca557d406d360058b751c1"
+        },
+        {
+          "path": "src/services/__tests__/TranscriptionServiceChunkingE2E.test.ts",
+          "beforeGitBlobOrNull": "ec69654e1dc34a98f0bcaefc4ff3590a50c37ba3",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/managed/adapters/ObsidianManagedRecoveryAdapter.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "0e392963bc1177c555f5eb09a35fc27e5d0c6ccb"
+        },
+        {
+          "path": "src/services/transcription/ManagedTranscriptionAdapter.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "4a206c131005c18388652cb0e39a6063180664fa"
+        },
+        {
+          "path": "src/services/transcription/TranscriptionCoordinator.ts",
+          "beforeGitBlobOrNull": "ddc2db7848ff8ff625bbc46eebba5a03cfa091a0",
+          "afterGitBlobOrNull": "e1a7c16f0a35f0f304a74029321093031c817dec"
+        },
+        {
+          "path": "src/services/transcription/__tests__/ManagedTranscriptionAdapter.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "284259ac9cc30d7590bfe766554b930993c4af7f"
+        },
+        {
+          "path": "src/services/transcription/__tests__/TranscriptionCoordinator.test.ts",
+          "beforeGitBlobOrNull": "b7585350135c33e16acfb49674d4542285ea6ad1",
+          "afterGitBlobOrNull": "df340a020bdf5edfd6dcef029bd6b31142409254"
+        },
+        {
+          "path": "src/services/transcription/providers/ProviderError.ts",
+          "beforeGitBlobOrNull": "2a0f2626ca0c17fd98d648e73554b48a51b0cb3c",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/TranscriptionProvider.ts",
+          "beforeGitBlobOrNull": "2d7959de355ef00ad762245b2aba397a96f40a49",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/ProviderError.test.ts",
+          "beforeGitBlobOrNull": "35e0c0034ac6c3b272f544b81d5a9cdf09f70f6b",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/customWhisperConfig.test.ts",
+          "beforeGitBlobOrNull": "60a41f886749b9dee9cce0dc09fdc29c7b14474b",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/providerHttpErrors.test.ts",
+          "beforeGitBlobOrNull": "7473acf134f4c3ba161223d64d2562632e9753da",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/transcriptionResponse.test.ts",
+          "beforeGitBlobOrNull": "b7b3fd88263b993cb2049bc1606d563849e2fa63",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/customWhisperConfig.ts",
+          "beforeGitBlobOrNull": "3717e34c1485f98bdb08022501c4cd456d340638",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/providerHttpErrors.ts",
+          "beforeGitBlobOrNull": "1e78360dc8105c41da8e6f51fdb8a82540d116ba",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/transcriptionResponse.ts",
+          "beforeGitBlobOrNull": "d0c563a5239c6344f71f5ece89697d5b5d70b51f",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/settings/RecorderTabContent.ts",
+          "beforeGitBlobOrNull": "3897b92db3c199c218bd9e5bee704eb136a8ff4a",
+          "afterGitBlobOrNull": "7837a7349f91ef3d79063b5f68c74cef93a3953e"
+        }
+      ],
+      "predecessorLedger": {
+        "gitBlob": "f3e5caa32c2e2fbcd6012efbc257d2cdff0684e0",
+        "sha256": "2d75ab8e8f4be223be9b2ed9be2a27eb1079648de48a4c3850d31c3eff00765d",
+        "transitionCount": 28,
+        "finalTransitionHash": "0521e3f5718adc9b61e6b02be1b350420e633bdbdb02f46d994fc29104f342fb"
+      },
+      "previousTransitionHash": "751616b5d0ad45a34abfd5415d0088cb57b5ef6efd1a2360aa03464a3a86cacd",
+      "transitionHash": "0b8e6fd0aa8f8383d8a71f9078dba9c1e0ccaa9adca6cb29f2dfc6d94f8c31f4"
+    },
+    {
+      "sequence": 42,
+      "historicalRecordId": "66c71b083354a4c5c76ac725f6c0af4fbdb2691bb57220c8986e940b47c18e94",
+      "v2OccurrenceId": "9640f127dc4d488053694d46fcf66b4199d11ecb239cd768867ee887e106f8fe",
+      "ownerPlan": "020",
+      "from": "present",
+      "to": "removed",
+      "predecessorSourceTree": "81eca7885bda37aa6bca65f8e5494ce9b3a8a850",
+      "stagedSourceTree": "ba5e9269c0b9cde03540ce36052f61e86559854e",
+      "sourceEvidence": [
+        {
+          "path": "src/__tests__/settings-recorder-tab.test.ts",
+          "beforeGitBlobOrNull": "0040c460ec8ba7723d6c076aeea048c5b9f17251",
+          "afterGitBlobOrNull": "1602f649901273f246ef8b44ed6d6fe1b575d2d5"
+        },
+        {
+          "path": "src/__tests__/systemsculpt-service-url.test.ts",
+          "beforeGitBlobOrNull": "f9b69a804f4df926782348f5244a2cf0be92ecbf",
+          "afterGitBlobOrNull": "0fed9b1947a1133a7f3ab9fbe02dbacc02f78285"
+        },
+        {
+          "path": "src/main.ts",
+          "beforeGitBlobOrNull": "d2a4d00cfa7cb7d2c95df04144accce2d721ddc5",
+          "afterGitBlobOrNull": "96de219948c85849ee49916da772fd716eb276d3"
+        },
+        {
+          "path": "src/modals/AudioTranscriptionModal.ts",
+          "beforeGitBlobOrNull": "4e5c4aeb9170a8b6e547c1efe7c231f8e3661e3d",
+          "afterGitBlobOrNull": "95530b0dc96c5b780aaf4baf56cd2837c8012754"
+        },
+        {
+          "path": "src/modals/__tests__/AudioTranscriptionModal.test.ts",
+          "beforeGitBlobOrNull": "d2649d613c588cb09620ef8363d75d4255618a6e",
+          "afterGitBlobOrNull": "d4befdecae40d365d16901ceda9d3c2ef062a247"
+        },
+        {
+          "path": "src/services/AudioUploadService.ts",
+          "beforeGitBlobOrNull": "1dd6b2ef59d3a7cba9a5e7110ff35bc9aeab60ca",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/RecorderService.ts",
+          "beforeGitBlobOrNull": "a401f721602f26f09aae81005a3c1baac2a0b566",
+          "afterGitBlobOrNull": "0ba00b4013361844eb0bea6c9d3d0c9e1519f8f2"
+        },
+        {
+          "path": "src/services/SystemSculptService.ts",
+          "beforeGitBlobOrNull": "7a15db08319292c049de42a6e8539ac7900aa4f4",
+          "afterGitBlobOrNull": "d5c4b9bd622186fc5cdcf52bcb7d1c1a44e5e00d"
+        },
+        {
+          "path": "src/services/TranscriptionProgressManager.ts",
+          "beforeGitBlobOrNull": "13e205a7046957413f7c1c9fa782fa127c4665dd",
+          "afterGitBlobOrNull": "0a074f9734395a0aab6ed2641edbaf0e7d43baa8"
+        },
+        {
+          "path": "src/services/TranscriptionService.ts",
+          "beforeGitBlobOrNull": "61108948a71ea4d7194ba9f7d1559bce3706484a",
+          "afterGitBlobOrNull": "2cedc4964b68eac8a0b3ca635240b2140f057469"
+        },
+        {
+          "path": "src/services/__tests__/AudioUploadService.test.ts",
+          "beforeGitBlobOrNull": "e487d764ce03733219c3d5d2577cdae7a2989197",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/__tests__/RecorderService.test.ts",
+          "beforeGitBlobOrNull": "68e2ddb86fd1f8a7ac74275f3f53a76e7facfa31",
+          "afterGitBlobOrNull": "e7fe907800ec04048a6dab67c589b239422e1a38"
+        },
+        {
+          "path": "src/services/__tests__/SystemSculptService.test.ts",
+          "beforeGitBlobOrNull": "e8c956ece149693e57994fd7de555516b5387281",
+          "afterGitBlobOrNull": "da7a2c84cf66331ae401098de3bc2bafe48b8641"
+        },
+        {
+          "path": "src/services/__tests__/TranscriptionService.test.ts",
+          "beforeGitBlobOrNull": "b22f1103ea2f06ef75511d79221b1c164a4727dc",
+          "afterGitBlobOrNull": "b05da7e98fe50545b2ca557d406d360058b751c1"
+        },
+        {
+          "path": "src/services/__tests__/TranscriptionServiceChunkingE2E.test.ts",
+          "beforeGitBlobOrNull": "ec69654e1dc34a98f0bcaefc4ff3590a50c37ba3",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/managed/adapters/ObsidianManagedRecoveryAdapter.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "0e392963bc1177c555f5eb09a35fc27e5d0c6ccb"
+        },
+        {
+          "path": "src/services/transcription/ManagedTranscriptionAdapter.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "4a206c131005c18388652cb0e39a6063180664fa"
+        },
+        {
+          "path": "src/services/transcription/TranscriptionCoordinator.ts",
+          "beforeGitBlobOrNull": "ddc2db7848ff8ff625bbc46eebba5a03cfa091a0",
+          "afterGitBlobOrNull": "e1a7c16f0a35f0f304a74029321093031c817dec"
+        },
+        {
+          "path": "src/services/transcription/__tests__/ManagedTranscriptionAdapter.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "284259ac9cc30d7590bfe766554b930993c4af7f"
+        },
+        {
+          "path": "src/services/transcription/__tests__/TranscriptionCoordinator.test.ts",
+          "beforeGitBlobOrNull": "b7585350135c33e16acfb49674d4542285ea6ad1",
+          "afterGitBlobOrNull": "df340a020bdf5edfd6dcef029bd6b31142409254"
+        },
+        {
+          "path": "src/services/transcription/providers/ProviderError.ts",
+          "beforeGitBlobOrNull": "2a0f2626ca0c17fd98d648e73554b48a51b0cb3c",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/TranscriptionProvider.ts",
+          "beforeGitBlobOrNull": "2d7959de355ef00ad762245b2aba397a96f40a49",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/ProviderError.test.ts",
+          "beforeGitBlobOrNull": "35e0c0034ac6c3b272f544b81d5a9cdf09f70f6b",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/customWhisperConfig.test.ts",
+          "beforeGitBlobOrNull": "60a41f886749b9dee9cce0dc09fdc29c7b14474b",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/providerHttpErrors.test.ts",
+          "beforeGitBlobOrNull": "7473acf134f4c3ba161223d64d2562632e9753da",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/transcriptionResponse.test.ts",
+          "beforeGitBlobOrNull": "b7b3fd88263b993cb2049bc1606d563849e2fa63",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/customWhisperConfig.ts",
+          "beforeGitBlobOrNull": "3717e34c1485f98bdb08022501c4cd456d340638",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/providerHttpErrors.ts",
+          "beforeGitBlobOrNull": "1e78360dc8105c41da8e6f51fdb8a82540d116ba",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/transcriptionResponse.ts",
+          "beforeGitBlobOrNull": "d0c563a5239c6344f71f5ece89697d5b5d70b51f",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/settings/RecorderTabContent.ts",
+          "beforeGitBlobOrNull": "3897b92db3c199c218bd9e5bee704eb136a8ff4a",
+          "afterGitBlobOrNull": "7837a7349f91ef3d79063b5f68c74cef93a3953e"
+        }
+      ],
+      "predecessorLedger": {
+        "gitBlob": "f3e5caa32c2e2fbcd6012efbc257d2cdff0684e0",
+        "sha256": "2d75ab8e8f4be223be9b2ed9be2a27eb1079648de48a4c3850d31c3eff00765d",
+        "transitionCount": 28,
+        "finalTransitionHash": "0521e3f5718adc9b61e6b02be1b350420e633bdbdb02f46d994fc29104f342fb"
+      },
+      "previousTransitionHash": "0b8e6fd0aa8f8383d8a71f9078dba9c1e0ccaa9adca6cb29f2dfc6d94f8c31f4",
+      "transitionHash": "d5646c8f82edec184a54feac45848827281b1d9747a60c3d33595babca87e061"
+    },
+    {
+      "sequence": 43,
+      "historicalRecordId": "ae52144aac03c5bf4fd3be11cc6fd1dc963146869892e1808becd45336b0b520",
+      "v2OccurrenceId": "4fe5e175e1066e61065271b1e91305c76f06b88287e72ff897f5539576a1efcb",
+      "ownerPlan": "020",
+      "from": "present",
+      "to": "removed",
+      "predecessorSourceTree": "81eca7885bda37aa6bca65f8e5494ce9b3a8a850",
+      "stagedSourceTree": "ba5e9269c0b9cde03540ce36052f61e86559854e",
+      "sourceEvidence": [
+        {
+          "path": "src/__tests__/settings-recorder-tab.test.ts",
+          "beforeGitBlobOrNull": "0040c460ec8ba7723d6c076aeea048c5b9f17251",
+          "afterGitBlobOrNull": "1602f649901273f246ef8b44ed6d6fe1b575d2d5"
+        },
+        {
+          "path": "src/__tests__/systemsculpt-service-url.test.ts",
+          "beforeGitBlobOrNull": "f9b69a804f4df926782348f5244a2cf0be92ecbf",
+          "afterGitBlobOrNull": "0fed9b1947a1133a7f3ab9fbe02dbacc02f78285"
+        },
+        {
+          "path": "src/main.ts",
+          "beforeGitBlobOrNull": "d2a4d00cfa7cb7d2c95df04144accce2d721ddc5",
+          "afterGitBlobOrNull": "96de219948c85849ee49916da772fd716eb276d3"
+        },
+        {
+          "path": "src/modals/AudioTranscriptionModal.ts",
+          "beforeGitBlobOrNull": "4e5c4aeb9170a8b6e547c1efe7c231f8e3661e3d",
+          "afterGitBlobOrNull": "95530b0dc96c5b780aaf4baf56cd2837c8012754"
+        },
+        {
+          "path": "src/modals/__tests__/AudioTranscriptionModal.test.ts",
+          "beforeGitBlobOrNull": "d2649d613c588cb09620ef8363d75d4255618a6e",
+          "afterGitBlobOrNull": "d4befdecae40d365d16901ceda9d3c2ef062a247"
+        },
+        {
+          "path": "src/services/AudioUploadService.ts",
+          "beforeGitBlobOrNull": "1dd6b2ef59d3a7cba9a5e7110ff35bc9aeab60ca",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/RecorderService.ts",
+          "beforeGitBlobOrNull": "a401f721602f26f09aae81005a3c1baac2a0b566",
+          "afterGitBlobOrNull": "0ba00b4013361844eb0bea6c9d3d0c9e1519f8f2"
+        },
+        {
+          "path": "src/services/SystemSculptService.ts",
+          "beforeGitBlobOrNull": "7a15db08319292c049de42a6e8539ac7900aa4f4",
+          "afterGitBlobOrNull": "d5c4b9bd622186fc5cdcf52bcb7d1c1a44e5e00d"
+        },
+        {
+          "path": "src/services/TranscriptionProgressManager.ts",
+          "beforeGitBlobOrNull": "13e205a7046957413f7c1c9fa782fa127c4665dd",
+          "afterGitBlobOrNull": "0a074f9734395a0aab6ed2641edbaf0e7d43baa8"
+        },
+        {
+          "path": "src/services/TranscriptionService.ts",
+          "beforeGitBlobOrNull": "61108948a71ea4d7194ba9f7d1559bce3706484a",
+          "afterGitBlobOrNull": "2cedc4964b68eac8a0b3ca635240b2140f057469"
+        },
+        {
+          "path": "src/services/__tests__/AudioUploadService.test.ts",
+          "beforeGitBlobOrNull": "e487d764ce03733219c3d5d2577cdae7a2989197",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/__tests__/RecorderService.test.ts",
+          "beforeGitBlobOrNull": "68e2ddb86fd1f8a7ac74275f3f53a76e7facfa31",
+          "afterGitBlobOrNull": "e7fe907800ec04048a6dab67c589b239422e1a38"
+        },
+        {
+          "path": "src/services/__tests__/SystemSculptService.test.ts",
+          "beforeGitBlobOrNull": "e8c956ece149693e57994fd7de555516b5387281",
+          "afterGitBlobOrNull": "da7a2c84cf66331ae401098de3bc2bafe48b8641"
+        },
+        {
+          "path": "src/services/__tests__/TranscriptionService.test.ts",
+          "beforeGitBlobOrNull": "b22f1103ea2f06ef75511d79221b1c164a4727dc",
+          "afterGitBlobOrNull": "b05da7e98fe50545b2ca557d406d360058b751c1"
+        },
+        {
+          "path": "src/services/__tests__/TranscriptionServiceChunkingE2E.test.ts",
+          "beforeGitBlobOrNull": "ec69654e1dc34a98f0bcaefc4ff3590a50c37ba3",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/managed/adapters/ObsidianManagedRecoveryAdapter.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "0e392963bc1177c555f5eb09a35fc27e5d0c6ccb"
+        },
+        {
+          "path": "src/services/transcription/ManagedTranscriptionAdapter.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "4a206c131005c18388652cb0e39a6063180664fa"
+        },
+        {
+          "path": "src/services/transcription/TranscriptionCoordinator.ts",
+          "beforeGitBlobOrNull": "ddc2db7848ff8ff625bbc46eebba5a03cfa091a0",
+          "afterGitBlobOrNull": "e1a7c16f0a35f0f304a74029321093031c817dec"
+        },
+        {
+          "path": "src/services/transcription/__tests__/ManagedTranscriptionAdapter.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "284259ac9cc30d7590bfe766554b930993c4af7f"
+        },
+        {
+          "path": "src/services/transcription/__tests__/TranscriptionCoordinator.test.ts",
+          "beforeGitBlobOrNull": "b7585350135c33e16acfb49674d4542285ea6ad1",
+          "afterGitBlobOrNull": "df340a020bdf5edfd6dcef029bd6b31142409254"
+        },
+        {
+          "path": "src/services/transcription/providers/ProviderError.ts",
+          "beforeGitBlobOrNull": "2a0f2626ca0c17fd98d648e73554b48a51b0cb3c",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/TranscriptionProvider.ts",
+          "beforeGitBlobOrNull": "2d7959de355ef00ad762245b2aba397a96f40a49",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/ProviderError.test.ts",
+          "beforeGitBlobOrNull": "35e0c0034ac6c3b272f544b81d5a9cdf09f70f6b",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/customWhisperConfig.test.ts",
+          "beforeGitBlobOrNull": "60a41f886749b9dee9cce0dc09fdc29c7b14474b",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/providerHttpErrors.test.ts",
+          "beforeGitBlobOrNull": "7473acf134f4c3ba161223d64d2562632e9753da",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/transcriptionResponse.test.ts",
+          "beforeGitBlobOrNull": "b7b3fd88263b993cb2049bc1606d563849e2fa63",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/customWhisperConfig.ts",
+          "beforeGitBlobOrNull": "3717e34c1485f98bdb08022501c4cd456d340638",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/providerHttpErrors.ts",
+          "beforeGitBlobOrNull": "1e78360dc8105c41da8e6f51fdb8a82540d116ba",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/transcriptionResponse.ts",
+          "beforeGitBlobOrNull": "d0c563a5239c6344f71f5ece89697d5b5d70b51f",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/settings/RecorderTabContent.ts",
+          "beforeGitBlobOrNull": "3897b92db3c199c218bd9e5bee704eb136a8ff4a",
+          "afterGitBlobOrNull": "7837a7349f91ef3d79063b5f68c74cef93a3953e"
+        }
+      ],
+      "predecessorLedger": {
+        "gitBlob": "f3e5caa32c2e2fbcd6012efbc257d2cdff0684e0",
+        "sha256": "2d75ab8e8f4be223be9b2ed9be2a27eb1079648de48a4c3850d31c3eff00765d",
+        "transitionCount": 28,
+        "finalTransitionHash": "0521e3f5718adc9b61e6b02be1b350420e633bdbdb02f46d994fc29104f342fb"
+      },
+      "previousTransitionHash": "d5646c8f82edec184a54feac45848827281b1d9747a60c3d33595babca87e061",
+      "transitionHash": "1a1d26db5d7f7ee3527e961be5a0e2bb25a7549357b78512676566544329566e"
+    },
+    {
+      "sequence": 44,
+      "historicalRecordId": "b0d48fd5e7d4c3821974ef370838d1b01c3815e787eab4b53f8b847a9992aaac",
+      "v2OccurrenceId": "c0651ac5ca0ea21f30eb49975b4f57c17a58abf87588f487cf62f91de44acedf",
+      "ownerPlan": "020",
+      "from": "present",
+      "to": "removed",
+      "predecessorSourceTree": "81eca7885bda37aa6bca65f8e5494ce9b3a8a850",
+      "stagedSourceTree": "ba5e9269c0b9cde03540ce36052f61e86559854e",
+      "sourceEvidence": [
+        {
+          "path": "src/__tests__/settings-recorder-tab.test.ts",
+          "beforeGitBlobOrNull": "0040c460ec8ba7723d6c076aeea048c5b9f17251",
+          "afterGitBlobOrNull": "1602f649901273f246ef8b44ed6d6fe1b575d2d5"
+        },
+        {
+          "path": "src/__tests__/systemsculpt-service-url.test.ts",
+          "beforeGitBlobOrNull": "f9b69a804f4df926782348f5244a2cf0be92ecbf",
+          "afterGitBlobOrNull": "0fed9b1947a1133a7f3ab9fbe02dbacc02f78285"
+        },
+        {
+          "path": "src/main.ts",
+          "beforeGitBlobOrNull": "d2a4d00cfa7cb7d2c95df04144accce2d721ddc5",
+          "afterGitBlobOrNull": "96de219948c85849ee49916da772fd716eb276d3"
+        },
+        {
+          "path": "src/modals/AudioTranscriptionModal.ts",
+          "beforeGitBlobOrNull": "4e5c4aeb9170a8b6e547c1efe7c231f8e3661e3d",
+          "afterGitBlobOrNull": "95530b0dc96c5b780aaf4baf56cd2837c8012754"
+        },
+        {
+          "path": "src/modals/__tests__/AudioTranscriptionModal.test.ts",
+          "beforeGitBlobOrNull": "d2649d613c588cb09620ef8363d75d4255618a6e",
+          "afterGitBlobOrNull": "d4befdecae40d365d16901ceda9d3c2ef062a247"
+        },
+        {
+          "path": "src/services/AudioUploadService.ts",
+          "beforeGitBlobOrNull": "1dd6b2ef59d3a7cba9a5e7110ff35bc9aeab60ca",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/RecorderService.ts",
+          "beforeGitBlobOrNull": "a401f721602f26f09aae81005a3c1baac2a0b566",
+          "afterGitBlobOrNull": "0ba00b4013361844eb0bea6c9d3d0c9e1519f8f2"
+        },
+        {
+          "path": "src/services/SystemSculptService.ts",
+          "beforeGitBlobOrNull": "7a15db08319292c049de42a6e8539ac7900aa4f4",
+          "afterGitBlobOrNull": "d5c4b9bd622186fc5cdcf52bcb7d1c1a44e5e00d"
+        },
+        {
+          "path": "src/services/TranscriptionProgressManager.ts",
+          "beforeGitBlobOrNull": "13e205a7046957413f7c1c9fa782fa127c4665dd",
+          "afterGitBlobOrNull": "0a074f9734395a0aab6ed2641edbaf0e7d43baa8"
+        },
+        {
+          "path": "src/services/TranscriptionService.ts",
+          "beforeGitBlobOrNull": "61108948a71ea4d7194ba9f7d1559bce3706484a",
+          "afterGitBlobOrNull": "2cedc4964b68eac8a0b3ca635240b2140f057469"
+        },
+        {
+          "path": "src/services/__tests__/AudioUploadService.test.ts",
+          "beforeGitBlobOrNull": "e487d764ce03733219c3d5d2577cdae7a2989197",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/__tests__/RecorderService.test.ts",
+          "beforeGitBlobOrNull": "68e2ddb86fd1f8a7ac74275f3f53a76e7facfa31",
+          "afterGitBlobOrNull": "e7fe907800ec04048a6dab67c589b239422e1a38"
+        },
+        {
+          "path": "src/services/__tests__/SystemSculptService.test.ts",
+          "beforeGitBlobOrNull": "e8c956ece149693e57994fd7de555516b5387281",
+          "afterGitBlobOrNull": "da7a2c84cf66331ae401098de3bc2bafe48b8641"
+        },
+        {
+          "path": "src/services/__tests__/TranscriptionService.test.ts",
+          "beforeGitBlobOrNull": "b22f1103ea2f06ef75511d79221b1c164a4727dc",
+          "afterGitBlobOrNull": "b05da7e98fe50545b2ca557d406d360058b751c1"
+        },
+        {
+          "path": "src/services/__tests__/TranscriptionServiceChunkingE2E.test.ts",
+          "beforeGitBlobOrNull": "ec69654e1dc34a98f0bcaefc4ff3590a50c37ba3",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/managed/adapters/ObsidianManagedRecoveryAdapter.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "0e392963bc1177c555f5eb09a35fc27e5d0c6ccb"
+        },
+        {
+          "path": "src/services/transcription/ManagedTranscriptionAdapter.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "4a206c131005c18388652cb0e39a6063180664fa"
+        },
+        {
+          "path": "src/services/transcription/TranscriptionCoordinator.ts",
+          "beforeGitBlobOrNull": "ddc2db7848ff8ff625bbc46eebba5a03cfa091a0",
+          "afterGitBlobOrNull": "e1a7c16f0a35f0f304a74029321093031c817dec"
+        },
+        {
+          "path": "src/services/transcription/__tests__/ManagedTranscriptionAdapter.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "284259ac9cc30d7590bfe766554b930993c4af7f"
+        },
+        {
+          "path": "src/services/transcription/__tests__/TranscriptionCoordinator.test.ts",
+          "beforeGitBlobOrNull": "b7585350135c33e16acfb49674d4542285ea6ad1",
+          "afterGitBlobOrNull": "df340a020bdf5edfd6dcef029bd6b31142409254"
+        },
+        {
+          "path": "src/services/transcription/providers/ProviderError.ts",
+          "beforeGitBlobOrNull": "2a0f2626ca0c17fd98d648e73554b48a51b0cb3c",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/TranscriptionProvider.ts",
+          "beforeGitBlobOrNull": "2d7959de355ef00ad762245b2aba397a96f40a49",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/ProviderError.test.ts",
+          "beforeGitBlobOrNull": "35e0c0034ac6c3b272f544b81d5a9cdf09f70f6b",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/customWhisperConfig.test.ts",
+          "beforeGitBlobOrNull": "60a41f886749b9dee9cce0dc09fdc29c7b14474b",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/providerHttpErrors.test.ts",
+          "beforeGitBlobOrNull": "7473acf134f4c3ba161223d64d2562632e9753da",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/transcriptionResponse.test.ts",
+          "beforeGitBlobOrNull": "b7b3fd88263b993cb2049bc1606d563849e2fa63",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/customWhisperConfig.ts",
+          "beforeGitBlobOrNull": "3717e34c1485f98bdb08022501c4cd456d340638",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/providerHttpErrors.ts",
+          "beforeGitBlobOrNull": "1e78360dc8105c41da8e6f51fdb8a82540d116ba",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/transcriptionResponse.ts",
+          "beforeGitBlobOrNull": "d0c563a5239c6344f71f5ece89697d5b5d70b51f",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/settings/RecorderTabContent.ts",
+          "beforeGitBlobOrNull": "3897b92db3c199c218bd9e5bee704eb136a8ff4a",
+          "afterGitBlobOrNull": "7837a7349f91ef3d79063b5f68c74cef93a3953e"
+        }
+      ],
+      "predecessorLedger": {
+        "gitBlob": "f3e5caa32c2e2fbcd6012efbc257d2cdff0684e0",
+        "sha256": "2d75ab8e8f4be223be9b2ed9be2a27eb1079648de48a4c3850d31c3eff00765d",
+        "transitionCount": 28,
+        "finalTransitionHash": "0521e3f5718adc9b61e6b02be1b350420e633bdbdb02f46d994fc29104f342fb"
+      },
+      "previousTransitionHash": "1a1d26db5d7f7ee3527e961be5a0e2bb25a7549357b78512676566544329566e",
+      "transitionHash": "6ce6f5838d960e17525ee1bc317eebc26e0d178e12b324b194f5eb94689a344d"
+    },
+    {
+      "sequence": 45,
+      "historicalRecordId": "72086b15cc24a07a1edc3032ac881b19bc0e34bcb402e6140670a68d0378bc05",
+      "v2OccurrenceId": "ab8e35a4617130ac5ac9ffd4c8e976addad9bd44ff1415c69bab5259d204d24f",
+      "ownerPlan": "020",
+      "from": "present",
+      "to": "removed",
+      "predecessorSourceTree": "81eca7885bda37aa6bca65f8e5494ce9b3a8a850",
+      "stagedSourceTree": "ba5e9269c0b9cde03540ce36052f61e86559854e",
+      "sourceEvidence": [
+        {
+          "path": "src/__tests__/settings-recorder-tab.test.ts",
+          "beforeGitBlobOrNull": "0040c460ec8ba7723d6c076aeea048c5b9f17251",
+          "afterGitBlobOrNull": "1602f649901273f246ef8b44ed6d6fe1b575d2d5"
+        },
+        {
+          "path": "src/__tests__/systemsculpt-service-url.test.ts",
+          "beforeGitBlobOrNull": "f9b69a804f4df926782348f5244a2cf0be92ecbf",
+          "afterGitBlobOrNull": "0fed9b1947a1133a7f3ab9fbe02dbacc02f78285"
+        },
+        {
+          "path": "src/main.ts",
+          "beforeGitBlobOrNull": "d2a4d00cfa7cb7d2c95df04144accce2d721ddc5",
+          "afterGitBlobOrNull": "96de219948c85849ee49916da772fd716eb276d3"
+        },
+        {
+          "path": "src/modals/AudioTranscriptionModal.ts",
+          "beforeGitBlobOrNull": "4e5c4aeb9170a8b6e547c1efe7c231f8e3661e3d",
+          "afterGitBlobOrNull": "95530b0dc96c5b780aaf4baf56cd2837c8012754"
+        },
+        {
+          "path": "src/modals/__tests__/AudioTranscriptionModal.test.ts",
+          "beforeGitBlobOrNull": "d2649d613c588cb09620ef8363d75d4255618a6e",
+          "afterGitBlobOrNull": "d4befdecae40d365d16901ceda9d3c2ef062a247"
+        },
+        {
+          "path": "src/services/AudioUploadService.ts",
+          "beforeGitBlobOrNull": "1dd6b2ef59d3a7cba9a5e7110ff35bc9aeab60ca",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/RecorderService.ts",
+          "beforeGitBlobOrNull": "a401f721602f26f09aae81005a3c1baac2a0b566",
+          "afterGitBlobOrNull": "0ba00b4013361844eb0bea6c9d3d0c9e1519f8f2"
+        },
+        {
+          "path": "src/services/SystemSculptService.ts",
+          "beforeGitBlobOrNull": "7a15db08319292c049de42a6e8539ac7900aa4f4",
+          "afterGitBlobOrNull": "d5c4b9bd622186fc5cdcf52bcb7d1c1a44e5e00d"
+        },
+        {
+          "path": "src/services/TranscriptionProgressManager.ts",
+          "beforeGitBlobOrNull": "13e205a7046957413f7c1c9fa782fa127c4665dd",
+          "afterGitBlobOrNull": "0a074f9734395a0aab6ed2641edbaf0e7d43baa8"
+        },
+        {
+          "path": "src/services/TranscriptionService.ts",
+          "beforeGitBlobOrNull": "61108948a71ea4d7194ba9f7d1559bce3706484a",
+          "afterGitBlobOrNull": "2cedc4964b68eac8a0b3ca635240b2140f057469"
+        },
+        {
+          "path": "src/services/__tests__/AudioUploadService.test.ts",
+          "beforeGitBlobOrNull": "e487d764ce03733219c3d5d2577cdae7a2989197",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/__tests__/RecorderService.test.ts",
+          "beforeGitBlobOrNull": "68e2ddb86fd1f8a7ac74275f3f53a76e7facfa31",
+          "afterGitBlobOrNull": "e7fe907800ec04048a6dab67c589b239422e1a38"
+        },
+        {
+          "path": "src/services/__tests__/SystemSculptService.test.ts",
+          "beforeGitBlobOrNull": "e8c956ece149693e57994fd7de555516b5387281",
+          "afterGitBlobOrNull": "da7a2c84cf66331ae401098de3bc2bafe48b8641"
+        },
+        {
+          "path": "src/services/__tests__/TranscriptionService.test.ts",
+          "beforeGitBlobOrNull": "b22f1103ea2f06ef75511d79221b1c164a4727dc",
+          "afterGitBlobOrNull": "b05da7e98fe50545b2ca557d406d360058b751c1"
+        },
+        {
+          "path": "src/services/__tests__/TranscriptionServiceChunkingE2E.test.ts",
+          "beforeGitBlobOrNull": "ec69654e1dc34a98f0bcaefc4ff3590a50c37ba3",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/managed/adapters/ObsidianManagedRecoveryAdapter.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "0e392963bc1177c555f5eb09a35fc27e5d0c6ccb"
+        },
+        {
+          "path": "src/services/transcription/ManagedTranscriptionAdapter.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "4a206c131005c18388652cb0e39a6063180664fa"
+        },
+        {
+          "path": "src/services/transcription/TranscriptionCoordinator.ts",
+          "beforeGitBlobOrNull": "ddc2db7848ff8ff625bbc46eebba5a03cfa091a0",
+          "afterGitBlobOrNull": "e1a7c16f0a35f0f304a74029321093031c817dec"
+        },
+        {
+          "path": "src/services/transcription/__tests__/ManagedTranscriptionAdapter.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "284259ac9cc30d7590bfe766554b930993c4af7f"
+        },
+        {
+          "path": "src/services/transcription/__tests__/TranscriptionCoordinator.test.ts",
+          "beforeGitBlobOrNull": "b7585350135c33e16acfb49674d4542285ea6ad1",
+          "afterGitBlobOrNull": "df340a020bdf5edfd6dcef029bd6b31142409254"
+        },
+        {
+          "path": "src/services/transcription/providers/ProviderError.ts",
+          "beforeGitBlobOrNull": "2a0f2626ca0c17fd98d648e73554b48a51b0cb3c",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/TranscriptionProvider.ts",
+          "beforeGitBlobOrNull": "2d7959de355ef00ad762245b2aba397a96f40a49",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/ProviderError.test.ts",
+          "beforeGitBlobOrNull": "35e0c0034ac6c3b272f544b81d5a9cdf09f70f6b",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/customWhisperConfig.test.ts",
+          "beforeGitBlobOrNull": "60a41f886749b9dee9cce0dc09fdc29c7b14474b",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/providerHttpErrors.test.ts",
+          "beforeGitBlobOrNull": "7473acf134f4c3ba161223d64d2562632e9753da",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/transcriptionResponse.test.ts",
+          "beforeGitBlobOrNull": "b7b3fd88263b993cb2049bc1606d563849e2fa63",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/customWhisperConfig.ts",
+          "beforeGitBlobOrNull": "3717e34c1485f98bdb08022501c4cd456d340638",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/providerHttpErrors.ts",
+          "beforeGitBlobOrNull": "1e78360dc8105c41da8e6f51fdb8a82540d116ba",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/transcriptionResponse.ts",
+          "beforeGitBlobOrNull": "d0c563a5239c6344f71f5ece89697d5b5d70b51f",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/settings/RecorderTabContent.ts",
+          "beforeGitBlobOrNull": "3897b92db3c199c218bd9e5bee704eb136a8ff4a",
+          "afterGitBlobOrNull": "7837a7349f91ef3d79063b5f68c74cef93a3953e"
+        }
+      ],
+      "predecessorLedger": {
+        "gitBlob": "f3e5caa32c2e2fbcd6012efbc257d2cdff0684e0",
+        "sha256": "2d75ab8e8f4be223be9b2ed9be2a27eb1079648de48a4c3850d31c3eff00765d",
+        "transitionCount": 28,
+        "finalTransitionHash": "0521e3f5718adc9b61e6b02be1b350420e633bdbdb02f46d994fc29104f342fb"
+      },
+      "previousTransitionHash": "6ce6f5838d960e17525ee1bc317eebc26e0d178e12b324b194f5eb94689a344d",
+      "transitionHash": "2cb6ed34cca0e0a18ee8e6a93406821b6f456001633a5040575a9f17ccbee04b"
+    },
+    {
+      "sequence": 46,
+      "historicalRecordId": "3530cea900964006b6231386d7f51c2461ab207040bd2c6c0fb85657d86dd36c",
+      "v2OccurrenceId": "e35128add048a15a3a450e50932542c52d71bf713ef0f773dfb5f03be6b389fd",
+      "ownerPlan": "020",
+      "from": "present",
+      "to": "removed",
+      "predecessorSourceTree": "81eca7885bda37aa6bca65f8e5494ce9b3a8a850",
+      "stagedSourceTree": "ba5e9269c0b9cde03540ce36052f61e86559854e",
+      "sourceEvidence": [
+        {
+          "path": "src/__tests__/settings-recorder-tab.test.ts",
+          "beforeGitBlobOrNull": "0040c460ec8ba7723d6c076aeea048c5b9f17251",
+          "afterGitBlobOrNull": "1602f649901273f246ef8b44ed6d6fe1b575d2d5"
+        },
+        {
+          "path": "src/__tests__/systemsculpt-service-url.test.ts",
+          "beforeGitBlobOrNull": "f9b69a804f4df926782348f5244a2cf0be92ecbf",
+          "afterGitBlobOrNull": "0fed9b1947a1133a7f3ab9fbe02dbacc02f78285"
+        },
+        {
+          "path": "src/main.ts",
+          "beforeGitBlobOrNull": "d2a4d00cfa7cb7d2c95df04144accce2d721ddc5",
+          "afterGitBlobOrNull": "96de219948c85849ee49916da772fd716eb276d3"
+        },
+        {
+          "path": "src/modals/AudioTranscriptionModal.ts",
+          "beforeGitBlobOrNull": "4e5c4aeb9170a8b6e547c1efe7c231f8e3661e3d",
+          "afterGitBlobOrNull": "95530b0dc96c5b780aaf4baf56cd2837c8012754"
+        },
+        {
+          "path": "src/modals/__tests__/AudioTranscriptionModal.test.ts",
+          "beforeGitBlobOrNull": "d2649d613c588cb09620ef8363d75d4255618a6e",
+          "afterGitBlobOrNull": "d4befdecae40d365d16901ceda9d3c2ef062a247"
+        },
+        {
+          "path": "src/services/AudioUploadService.ts",
+          "beforeGitBlobOrNull": "1dd6b2ef59d3a7cba9a5e7110ff35bc9aeab60ca",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/RecorderService.ts",
+          "beforeGitBlobOrNull": "a401f721602f26f09aae81005a3c1baac2a0b566",
+          "afterGitBlobOrNull": "0ba00b4013361844eb0bea6c9d3d0c9e1519f8f2"
+        },
+        {
+          "path": "src/services/SystemSculptService.ts",
+          "beforeGitBlobOrNull": "7a15db08319292c049de42a6e8539ac7900aa4f4",
+          "afterGitBlobOrNull": "d5c4b9bd622186fc5cdcf52bcb7d1c1a44e5e00d"
+        },
+        {
+          "path": "src/services/TranscriptionProgressManager.ts",
+          "beforeGitBlobOrNull": "13e205a7046957413f7c1c9fa782fa127c4665dd",
+          "afterGitBlobOrNull": "0a074f9734395a0aab6ed2641edbaf0e7d43baa8"
+        },
+        {
+          "path": "src/services/TranscriptionService.ts",
+          "beforeGitBlobOrNull": "61108948a71ea4d7194ba9f7d1559bce3706484a",
+          "afterGitBlobOrNull": "2cedc4964b68eac8a0b3ca635240b2140f057469"
+        },
+        {
+          "path": "src/services/__tests__/AudioUploadService.test.ts",
+          "beforeGitBlobOrNull": "e487d764ce03733219c3d5d2577cdae7a2989197",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/__tests__/RecorderService.test.ts",
+          "beforeGitBlobOrNull": "68e2ddb86fd1f8a7ac74275f3f53a76e7facfa31",
+          "afterGitBlobOrNull": "e7fe907800ec04048a6dab67c589b239422e1a38"
+        },
+        {
+          "path": "src/services/__tests__/SystemSculptService.test.ts",
+          "beforeGitBlobOrNull": "e8c956ece149693e57994fd7de555516b5387281",
+          "afterGitBlobOrNull": "da7a2c84cf66331ae401098de3bc2bafe48b8641"
+        },
+        {
+          "path": "src/services/__tests__/TranscriptionService.test.ts",
+          "beforeGitBlobOrNull": "b22f1103ea2f06ef75511d79221b1c164a4727dc",
+          "afterGitBlobOrNull": "b05da7e98fe50545b2ca557d406d360058b751c1"
+        },
+        {
+          "path": "src/services/__tests__/TranscriptionServiceChunkingE2E.test.ts",
+          "beforeGitBlobOrNull": "ec69654e1dc34a98f0bcaefc4ff3590a50c37ba3",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/managed/adapters/ObsidianManagedRecoveryAdapter.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "0e392963bc1177c555f5eb09a35fc27e5d0c6ccb"
+        },
+        {
+          "path": "src/services/transcription/ManagedTranscriptionAdapter.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "4a206c131005c18388652cb0e39a6063180664fa"
+        },
+        {
+          "path": "src/services/transcription/TranscriptionCoordinator.ts",
+          "beforeGitBlobOrNull": "ddc2db7848ff8ff625bbc46eebba5a03cfa091a0",
+          "afterGitBlobOrNull": "e1a7c16f0a35f0f304a74029321093031c817dec"
+        },
+        {
+          "path": "src/services/transcription/__tests__/ManagedTranscriptionAdapter.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "284259ac9cc30d7590bfe766554b930993c4af7f"
+        },
+        {
+          "path": "src/services/transcription/__tests__/TranscriptionCoordinator.test.ts",
+          "beforeGitBlobOrNull": "b7585350135c33e16acfb49674d4542285ea6ad1",
+          "afterGitBlobOrNull": "df340a020bdf5edfd6dcef029bd6b31142409254"
+        },
+        {
+          "path": "src/services/transcription/providers/ProviderError.ts",
+          "beforeGitBlobOrNull": "2a0f2626ca0c17fd98d648e73554b48a51b0cb3c",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/TranscriptionProvider.ts",
+          "beforeGitBlobOrNull": "2d7959de355ef00ad762245b2aba397a96f40a49",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/ProviderError.test.ts",
+          "beforeGitBlobOrNull": "35e0c0034ac6c3b272f544b81d5a9cdf09f70f6b",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/customWhisperConfig.test.ts",
+          "beforeGitBlobOrNull": "60a41f886749b9dee9cce0dc09fdc29c7b14474b",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/providerHttpErrors.test.ts",
+          "beforeGitBlobOrNull": "7473acf134f4c3ba161223d64d2562632e9753da",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/transcriptionResponse.test.ts",
+          "beforeGitBlobOrNull": "b7b3fd88263b993cb2049bc1606d563849e2fa63",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/customWhisperConfig.ts",
+          "beforeGitBlobOrNull": "3717e34c1485f98bdb08022501c4cd456d340638",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/providerHttpErrors.ts",
+          "beforeGitBlobOrNull": "1e78360dc8105c41da8e6f51fdb8a82540d116ba",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/transcriptionResponse.ts",
+          "beforeGitBlobOrNull": "d0c563a5239c6344f71f5ece89697d5b5d70b51f",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/settings/RecorderTabContent.ts",
+          "beforeGitBlobOrNull": "3897b92db3c199c218bd9e5bee704eb136a8ff4a",
+          "afterGitBlobOrNull": "7837a7349f91ef3d79063b5f68c74cef93a3953e"
+        }
+      ],
+      "predecessorLedger": {
+        "gitBlob": "f3e5caa32c2e2fbcd6012efbc257d2cdff0684e0",
+        "sha256": "2d75ab8e8f4be223be9b2ed9be2a27eb1079648de48a4c3850d31c3eff00765d",
+        "transitionCount": 28,
+        "finalTransitionHash": "0521e3f5718adc9b61e6b02be1b350420e633bdbdb02f46d994fc29104f342fb"
+      },
+      "previousTransitionHash": "2cb6ed34cca0e0a18ee8e6a93406821b6f456001633a5040575a9f17ccbee04b",
+      "transitionHash": "7112edc7085fb49fdb463a6e7aec85152dd700422b72bf0a79004e15873a4939"
+    },
+    {
+      "sequence": 47,
+      "historicalRecordId": "832ff50f85ca6934e2c9073ea4faefc6b248642be09302a23736fa95fc9faac2",
+      "v2OccurrenceId": "57efe4fa97a28d57fcf55e2e471ab524ffabd6673e7339915cf6909a9ffdf63d",
+      "ownerPlan": "020",
+      "from": "present",
+      "to": "removed",
+      "predecessorSourceTree": "81eca7885bda37aa6bca65f8e5494ce9b3a8a850",
+      "stagedSourceTree": "ba5e9269c0b9cde03540ce36052f61e86559854e",
+      "sourceEvidence": [
+        {
+          "path": "src/__tests__/settings-recorder-tab.test.ts",
+          "beforeGitBlobOrNull": "0040c460ec8ba7723d6c076aeea048c5b9f17251",
+          "afterGitBlobOrNull": "1602f649901273f246ef8b44ed6d6fe1b575d2d5"
+        },
+        {
+          "path": "src/__tests__/systemsculpt-service-url.test.ts",
+          "beforeGitBlobOrNull": "f9b69a804f4df926782348f5244a2cf0be92ecbf",
+          "afterGitBlobOrNull": "0fed9b1947a1133a7f3ab9fbe02dbacc02f78285"
+        },
+        {
+          "path": "src/main.ts",
+          "beforeGitBlobOrNull": "d2a4d00cfa7cb7d2c95df04144accce2d721ddc5",
+          "afterGitBlobOrNull": "96de219948c85849ee49916da772fd716eb276d3"
+        },
+        {
+          "path": "src/modals/AudioTranscriptionModal.ts",
+          "beforeGitBlobOrNull": "4e5c4aeb9170a8b6e547c1efe7c231f8e3661e3d",
+          "afterGitBlobOrNull": "95530b0dc96c5b780aaf4baf56cd2837c8012754"
+        },
+        {
+          "path": "src/modals/__tests__/AudioTranscriptionModal.test.ts",
+          "beforeGitBlobOrNull": "d2649d613c588cb09620ef8363d75d4255618a6e",
+          "afterGitBlobOrNull": "d4befdecae40d365d16901ceda9d3c2ef062a247"
+        },
+        {
+          "path": "src/services/AudioUploadService.ts",
+          "beforeGitBlobOrNull": "1dd6b2ef59d3a7cba9a5e7110ff35bc9aeab60ca",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/RecorderService.ts",
+          "beforeGitBlobOrNull": "a401f721602f26f09aae81005a3c1baac2a0b566",
+          "afterGitBlobOrNull": "0ba00b4013361844eb0bea6c9d3d0c9e1519f8f2"
+        },
+        {
+          "path": "src/services/SystemSculptService.ts",
+          "beforeGitBlobOrNull": "7a15db08319292c049de42a6e8539ac7900aa4f4",
+          "afterGitBlobOrNull": "d5c4b9bd622186fc5cdcf52bcb7d1c1a44e5e00d"
+        },
+        {
+          "path": "src/services/TranscriptionProgressManager.ts",
+          "beforeGitBlobOrNull": "13e205a7046957413f7c1c9fa782fa127c4665dd",
+          "afterGitBlobOrNull": "0a074f9734395a0aab6ed2641edbaf0e7d43baa8"
+        },
+        {
+          "path": "src/services/TranscriptionService.ts",
+          "beforeGitBlobOrNull": "61108948a71ea4d7194ba9f7d1559bce3706484a",
+          "afterGitBlobOrNull": "2cedc4964b68eac8a0b3ca635240b2140f057469"
+        },
+        {
+          "path": "src/services/__tests__/AudioUploadService.test.ts",
+          "beforeGitBlobOrNull": "e487d764ce03733219c3d5d2577cdae7a2989197",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/__tests__/RecorderService.test.ts",
+          "beforeGitBlobOrNull": "68e2ddb86fd1f8a7ac74275f3f53a76e7facfa31",
+          "afterGitBlobOrNull": "e7fe907800ec04048a6dab67c589b239422e1a38"
+        },
+        {
+          "path": "src/services/__tests__/SystemSculptService.test.ts",
+          "beforeGitBlobOrNull": "e8c956ece149693e57994fd7de555516b5387281",
+          "afterGitBlobOrNull": "da7a2c84cf66331ae401098de3bc2bafe48b8641"
+        },
+        {
+          "path": "src/services/__tests__/TranscriptionService.test.ts",
+          "beforeGitBlobOrNull": "b22f1103ea2f06ef75511d79221b1c164a4727dc",
+          "afterGitBlobOrNull": "b05da7e98fe50545b2ca557d406d360058b751c1"
+        },
+        {
+          "path": "src/services/__tests__/TranscriptionServiceChunkingE2E.test.ts",
+          "beforeGitBlobOrNull": "ec69654e1dc34a98f0bcaefc4ff3590a50c37ba3",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/managed/adapters/ObsidianManagedRecoveryAdapter.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "0e392963bc1177c555f5eb09a35fc27e5d0c6ccb"
+        },
+        {
+          "path": "src/services/transcription/ManagedTranscriptionAdapter.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "4a206c131005c18388652cb0e39a6063180664fa"
+        },
+        {
+          "path": "src/services/transcription/TranscriptionCoordinator.ts",
+          "beforeGitBlobOrNull": "ddc2db7848ff8ff625bbc46eebba5a03cfa091a0",
+          "afterGitBlobOrNull": "e1a7c16f0a35f0f304a74029321093031c817dec"
+        },
+        {
+          "path": "src/services/transcription/__tests__/ManagedTranscriptionAdapter.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "284259ac9cc30d7590bfe766554b930993c4af7f"
+        },
+        {
+          "path": "src/services/transcription/__tests__/TranscriptionCoordinator.test.ts",
+          "beforeGitBlobOrNull": "b7585350135c33e16acfb49674d4542285ea6ad1",
+          "afterGitBlobOrNull": "df340a020bdf5edfd6dcef029bd6b31142409254"
+        },
+        {
+          "path": "src/services/transcription/providers/ProviderError.ts",
+          "beforeGitBlobOrNull": "2a0f2626ca0c17fd98d648e73554b48a51b0cb3c",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/TranscriptionProvider.ts",
+          "beforeGitBlobOrNull": "2d7959de355ef00ad762245b2aba397a96f40a49",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/ProviderError.test.ts",
+          "beforeGitBlobOrNull": "35e0c0034ac6c3b272f544b81d5a9cdf09f70f6b",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/customWhisperConfig.test.ts",
+          "beforeGitBlobOrNull": "60a41f886749b9dee9cce0dc09fdc29c7b14474b",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/providerHttpErrors.test.ts",
+          "beforeGitBlobOrNull": "7473acf134f4c3ba161223d64d2562632e9753da",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/transcriptionResponse.test.ts",
+          "beforeGitBlobOrNull": "b7b3fd88263b993cb2049bc1606d563849e2fa63",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/customWhisperConfig.ts",
+          "beforeGitBlobOrNull": "3717e34c1485f98bdb08022501c4cd456d340638",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/providerHttpErrors.ts",
+          "beforeGitBlobOrNull": "1e78360dc8105c41da8e6f51fdb8a82540d116ba",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/transcriptionResponse.ts",
+          "beforeGitBlobOrNull": "d0c563a5239c6344f71f5ece89697d5b5d70b51f",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/settings/RecorderTabContent.ts",
+          "beforeGitBlobOrNull": "3897b92db3c199c218bd9e5bee704eb136a8ff4a",
+          "afterGitBlobOrNull": "7837a7349f91ef3d79063b5f68c74cef93a3953e"
+        }
+      ],
+      "predecessorLedger": {
+        "gitBlob": "f3e5caa32c2e2fbcd6012efbc257d2cdff0684e0",
+        "sha256": "2d75ab8e8f4be223be9b2ed9be2a27eb1079648de48a4c3850d31c3eff00765d",
+        "transitionCount": 28,
+        "finalTransitionHash": "0521e3f5718adc9b61e6b02be1b350420e633bdbdb02f46d994fc29104f342fb"
+      },
+      "previousTransitionHash": "7112edc7085fb49fdb463a6e7aec85152dd700422b72bf0a79004e15873a4939",
+      "transitionHash": "106e25bb9d6c26a0f6401dfec8a8a1c9d5b2210d0c1f3209550d6bd665584faf"
+    },
+    {
+      "sequence": 48,
+      "historicalRecordId": "6bfb4697db029454fea749f04f2d6af998dce985feec839fba30eb61e59cca02",
+      "v2OccurrenceId": "859c2fd22c3b157ad02e8bed53723a07b1e4702203606edc62b08fd9273626aa",
+      "ownerPlan": "020",
+      "from": "present",
+      "to": "removed",
+      "predecessorSourceTree": "81eca7885bda37aa6bca65f8e5494ce9b3a8a850",
+      "stagedSourceTree": "ba5e9269c0b9cde03540ce36052f61e86559854e",
+      "sourceEvidence": [
+        {
+          "path": "src/__tests__/settings-recorder-tab.test.ts",
+          "beforeGitBlobOrNull": "0040c460ec8ba7723d6c076aeea048c5b9f17251",
+          "afterGitBlobOrNull": "1602f649901273f246ef8b44ed6d6fe1b575d2d5"
+        },
+        {
+          "path": "src/__tests__/systemsculpt-service-url.test.ts",
+          "beforeGitBlobOrNull": "f9b69a804f4df926782348f5244a2cf0be92ecbf",
+          "afterGitBlobOrNull": "0fed9b1947a1133a7f3ab9fbe02dbacc02f78285"
+        },
+        {
+          "path": "src/main.ts",
+          "beforeGitBlobOrNull": "d2a4d00cfa7cb7d2c95df04144accce2d721ddc5",
+          "afterGitBlobOrNull": "96de219948c85849ee49916da772fd716eb276d3"
+        },
+        {
+          "path": "src/modals/AudioTranscriptionModal.ts",
+          "beforeGitBlobOrNull": "4e5c4aeb9170a8b6e547c1efe7c231f8e3661e3d",
+          "afterGitBlobOrNull": "95530b0dc96c5b780aaf4baf56cd2837c8012754"
+        },
+        {
+          "path": "src/modals/__tests__/AudioTranscriptionModal.test.ts",
+          "beforeGitBlobOrNull": "d2649d613c588cb09620ef8363d75d4255618a6e",
+          "afterGitBlobOrNull": "d4befdecae40d365d16901ceda9d3c2ef062a247"
+        },
+        {
+          "path": "src/services/AudioUploadService.ts",
+          "beforeGitBlobOrNull": "1dd6b2ef59d3a7cba9a5e7110ff35bc9aeab60ca",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/RecorderService.ts",
+          "beforeGitBlobOrNull": "a401f721602f26f09aae81005a3c1baac2a0b566",
+          "afterGitBlobOrNull": "0ba00b4013361844eb0bea6c9d3d0c9e1519f8f2"
+        },
+        {
+          "path": "src/services/SystemSculptService.ts",
+          "beforeGitBlobOrNull": "7a15db08319292c049de42a6e8539ac7900aa4f4",
+          "afterGitBlobOrNull": "d5c4b9bd622186fc5cdcf52bcb7d1c1a44e5e00d"
+        },
+        {
+          "path": "src/services/TranscriptionProgressManager.ts",
+          "beforeGitBlobOrNull": "13e205a7046957413f7c1c9fa782fa127c4665dd",
+          "afterGitBlobOrNull": "0a074f9734395a0aab6ed2641edbaf0e7d43baa8"
+        },
+        {
+          "path": "src/services/TranscriptionService.ts",
+          "beforeGitBlobOrNull": "61108948a71ea4d7194ba9f7d1559bce3706484a",
+          "afterGitBlobOrNull": "2cedc4964b68eac8a0b3ca635240b2140f057469"
+        },
+        {
+          "path": "src/services/__tests__/AudioUploadService.test.ts",
+          "beforeGitBlobOrNull": "e487d764ce03733219c3d5d2577cdae7a2989197",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/__tests__/RecorderService.test.ts",
+          "beforeGitBlobOrNull": "68e2ddb86fd1f8a7ac74275f3f53a76e7facfa31",
+          "afterGitBlobOrNull": "e7fe907800ec04048a6dab67c589b239422e1a38"
+        },
+        {
+          "path": "src/services/__tests__/SystemSculptService.test.ts",
+          "beforeGitBlobOrNull": "e8c956ece149693e57994fd7de555516b5387281",
+          "afterGitBlobOrNull": "da7a2c84cf66331ae401098de3bc2bafe48b8641"
+        },
+        {
+          "path": "src/services/__tests__/TranscriptionService.test.ts",
+          "beforeGitBlobOrNull": "b22f1103ea2f06ef75511d79221b1c164a4727dc",
+          "afterGitBlobOrNull": "b05da7e98fe50545b2ca557d406d360058b751c1"
+        },
+        {
+          "path": "src/services/__tests__/TranscriptionServiceChunkingE2E.test.ts",
+          "beforeGitBlobOrNull": "ec69654e1dc34a98f0bcaefc4ff3590a50c37ba3",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/managed/adapters/ObsidianManagedRecoveryAdapter.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "0e392963bc1177c555f5eb09a35fc27e5d0c6ccb"
+        },
+        {
+          "path": "src/services/transcription/ManagedTranscriptionAdapter.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "4a206c131005c18388652cb0e39a6063180664fa"
+        },
+        {
+          "path": "src/services/transcription/TranscriptionCoordinator.ts",
+          "beforeGitBlobOrNull": "ddc2db7848ff8ff625bbc46eebba5a03cfa091a0",
+          "afterGitBlobOrNull": "e1a7c16f0a35f0f304a74029321093031c817dec"
+        },
+        {
+          "path": "src/services/transcription/__tests__/ManagedTranscriptionAdapter.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "284259ac9cc30d7590bfe766554b930993c4af7f"
+        },
+        {
+          "path": "src/services/transcription/__tests__/TranscriptionCoordinator.test.ts",
+          "beforeGitBlobOrNull": "b7585350135c33e16acfb49674d4542285ea6ad1",
+          "afterGitBlobOrNull": "df340a020bdf5edfd6dcef029bd6b31142409254"
+        },
+        {
+          "path": "src/services/transcription/providers/ProviderError.ts",
+          "beforeGitBlobOrNull": "2a0f2626ca0c17fd98d648e73554b48a51b0cb3c",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/TranscriptionProvider.ts",
+          "beforeGitBlobOrNull": "2d7959de355ef00ad762245b2aba397a96f40a49",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/ProviderError.test.ts",
+          "beforeGitBlobOrNull": "35e0c0034ac6c3b272f544b81d5a9cdf09f70f6b",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/customWhisperConfig.test.ts",
+          "beforeGitBlobOrNull": "60a41f886749b9dee9cce0dc09fdc29c7b14474b",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/providerHttpErrors.test.ts",
+          "beforeGitBlobOrNull": "7473acf134f4c3ba161223d64d2562632e9753da",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/transcriptionResponse.test.ts",
+          "beforeGitBlobOrNull": "b7b3fd88263b993cb2049bc1606d563849e2fa63",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/customWhisperConfig.ts",
+          "beforeGitBlobOrNull": "3717e34c1485f98bdb08022501c4cd456d340638",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/providerHttpErrors.ts",
+          "beforeGitBlobOrNull": "1e78360dc8105c41da8e6f51fdb8a82540d116ba",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/transcriptionResponse.ts",
+          "beforeGitBlobOrNull": "d0c563a5239c6344f71f5ece89697d5b5d70b51f",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/settings/RecorderTabContent.ts",
+          "beforeGitBlobOrNull": "3897b92db3c199c218bd9e5bee704eb136a8ff4a",
+          "afterGitBlobOrNull": "7837a7349f91ef3d79063b5f68c74cef93a3953e"
+        }
+      ],
+      "predecessorLedger": {
+        "gitBlob": "f3e5caa32c2e2fbcd6012efbc257d2cdff0684e0",
+        "sha256": "2d75ab8e8f4be223be9b2ed9be2a27eb1079648de48a4c3850d31c3eff00765d",
+        "transitionCount": 28,
+        "finalTransitionHash": "0521e3f5718adc9b61e6b02be1b350420e633bdbdb02f46d994fc29104f342fb"
+      },
+      "previousTransitionHash": "106e25bb9d6c26a0f6401dfec8a8a1c9d5b2210d0c1f3209550d6bd665584faf",
+      "transitionHash": "2c114b909a72ccf2cc890f1f9c7d8bf1384bc79058e3e60a6946b0e079607f12"
+    },
+    {
+      "sequence": 49,
+      "historicalRecordId": "c8def1efae0c57b42b3bc43d8bbe89c3310c9cbccd104889b763891a2b9ef80c",
+      "v2OccurrenceId": "b12913d48fc2ffff7b2a26e4f3c9b8b55fa877be1effcc4a2c3bd0208c1ec924",
+      "ownerPlan": "020",
+      "from": "present",
+      "to": "removed",
+      "predecessorSourceTree": "81eca7885bda37aa6bca65f8e5494ce9b3a8a850",
+      "stagedSourceTree": "ba5e9269c0b9cde03540ce36052f61e86559854e",
+      "sourceEvidence": [
+        {
+          "path": "src/__tests__/settings-recorder-tab.test.ts",
+          "beforeGitBlobOrNull": "0040c460ec8ba7723d6c076aeea048c5b9f17251",
+          "afterGitBlobOrNull": "1602f649901273f246ef8b44ed6d6fe1b575d2d5"
+        },
+        {
+          "path": "src/__tests__/systemsculpt-service-url.test.ts",
+          "beforeGitBlobOrNull": "f9b69a804f4df926782348f5244a2cf0be92ecbf",
+          "afterGitBlobOrNull": "0fed9b1947a1133a7f3ab9fbe02dbacc02f78285"
+        },
+        {
+          "path": "src/main.ts",
+          "beforeGitBlobOrNull": "d2a4d00cfa7cb7d2c95df04144accce2d721ddc5",
+          "afterGitBlobOrNull": "96de219948c85849ee49916da772fd716eb276d3"
+        },
+        {
+          "path": "src/modals/AudioTranscriptionModal.ts",
+          "beforeGitBlobOrNull": "4e5c4aeb9170a8b6e547c1efe7c231f8e3661e3d",
+          "afterGitBlobOrNull": "95530b0dc96c5b780aaf4baf56cd2837c8012754"
+        },
+        {
+          "path": "src/modals/__tests__/AudioTranscriptionModal.test.ts",
+          "beforeGitBlobOrNull": "d2649d613c588cb09620ef8363d75d4255618a6e",
+          "afterGitBlobOrNull": "d4befdecae40d365d16901ceda9d3c2ef062a247"
+        },
+        {
+          "path": "src/services/AudioUploadService.ts",
+          "beforeGitBlobOrNull": "1dd6b2ef59d3a7cba9a5e7110ff35bc9aeab60ca",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/RecorderService.ts",
+          "beforeGitBlobOrNull": "a401f721602f26f09aae81005a3c1baac2a0b566",
+          "afterGitBlobOrNull": "0ba00b4013361844eb0bea6c9d3d0c9e1519f8f2"
+        },
+        {
+          "path": "src/services/SystemSculptService.ts",
+          "beforeGitBlobOrNull": "7a15db08319292c049de42a6e8539ac7900aa4f4",
+          "afterGitBlobOrNull": "d5c4b9bd622186fc5cdcf52bcb7d1c1a44e5e00d"
+        },
+        {
+          "path": "src/services/TranscriptionProgressManager.ts",
+          "beforeGitBlobOrNull": "13e205a7046957413f7c1c9fa782fa127c4665dd",
+          "afterGitBlobOrNull": "0a074f9734395a0aab6ed2641edbaf0e7d43baa8"
+        },
+        {
+          "path": "src/services/TranscriptionService.ts",
+          "beforeGitBlobOrNull": "61108948a71ea4d7194ba9f7d1559bce3706484a",
+          "afterGitBlobOrNull": "2cedc4964b68eac8a0b3ca635240b2140f057469"
+        },
+        {
+          "path": "src/services/__tests__/AudioUploadService.test.ts",
+          "beforeGitBlobOrNull": "e487d764ce03733219c3d5d2577cdae7a2989197",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/__tests__/RecorderService.test.ts",
+          "beforeGitBlobOrNull": "68e2ddb86fd1f8a7ac74275f3f53a76e7facfa31",
+          "afterGitBlobOrNull": "e7fe907800ec04048a6dab67c589b239422e1a38"
+        },
+        {
+          "path": "src/services/__tests__/SystemSculptService.test.ts",
+          "beforeGitBlobOrNull": "e8c956ece149693e57994fd7de555516b5387281",
+          "afterGitBlobOrNull": "da7a2c84cf66331ae401098de3bc2bafe48b8641"
+        },
+        {
+          "path": "src/services/__tests__/TranscriptionService.test.ts",
+          "beforeGitBlobOrNull": "b22f1103ea2f06ef75511d79221b1c164a4727dc",
+          "afterGitBlobOrNull": "b05da7e98fe50545b2ca557d406d360058b751c1"
+        },
+        {
+          "path": "src/services/__tests__/TranscriptionServiceChunkingE2E.test.ts",
+          "beforeGitBlobOrNull": "ec69654e1dc34a98f0bcaefc4ff3590a50c37ba3",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/managed/adapters/ObsidianManagedRecoveryAdapter.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "0e392963bc1177c555f5eb09a35fc27e5d0c6ccb"
+        },
+        {
+          "path": "src/services/transcription/ManagedTranscriptionAdapter.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "4a206c131005c18388652cb0e39a6063180664fa"
+        },
+        {
+          "path": "src/services/transcription/TranscriptionCoordinator.ts",
+          "beforeGitBlobOrNull": "ddc2db7848ff8ff625bbc46eebba5a03cfa091a0",
+          "afterGitBlobOrNull": "e1a7c16f0a35f0f304a74029321093031c817dec"
+        },
+        {
+          "path": "src/services/transcription/__tests__/ManagedTranscriptionAdapter.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "284259ac9cc30d7590bfe766554b930993c4af7f"
+        },
+        {
+          "path": "src/services/transcription/__tests__/TranscriptionCoordinator.test.ts",
+          "beforeGitBlobOrNull": "b7585350135c33e16acfb49674d4542285ea6ad1",
+          "afterGitBlobOrNull": "df340a020bdf5edfd6dcef029bd6b31142409254"
+        },
+        {
+          "path": "src/services/transcription/providers/ProviderError.ts",
+          "beforeGitBlobOrNull": "2a0f2626ca0c17fd98d648e73554b48a51b0cb3c",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/TranscriptionProvider.ts",
+          "beforeGitBlobOrNull": "2d7959de355ef00ad762245b2aba397a96f40a49",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/ProviderError.test.ts",
+          "beforeGitBlobOrNull": "35e0c0034ac6c3b272f544b81d5a9cdf09f70f6b",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/customWhisperConfig.test.ts",
+          "beforeGitBlobOrNull": "60a41f886749b9dee9cce0dc09fdc29c7b14474b",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/providerHttpErrors.test.ts",
+          "beforeGitBlobOrNull": "7473acf134f4c3ba161223d64d2562632e9753da",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/transcriptionResponse.test.ts",
+          "beforeGitBlobOrNull": "b7b3fd88263b993cb2049bc1606d563849e2fa63",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/customWhisperConfig.ts",
+          "beforeGitBlobOrNull": "3717e34c1485f98bdb08022501c4cd456d340638",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/providerHttpErrors.ts",
+          "beforeGitBlobOrNull": "1e78360dc8105c41da8e6f51fdb8a82540d116ba",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/transcriptionResponse.ts",
+          "beforeGitBlobOrNull": "d0c563a5239c6344f71f5ece89697d5b5d70b51f",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/settings/RecorderTabContent.ts",
+          "beforeGitBlobOrNull": "3897b92db3c199c218bd9e5bee704eb136a8ff4a",
+          "afterGitBlobOrNull": "7837a7349f91ef3d79063b5f68c74cef93a3953e"
+        }
+      ],
+      "predecessorLedger": {
+        "gitBlob": "f3e5caa32c2e2fbcd6012efbc257d2cdff0684e0",
+        "sha256": "2d75ab8e8f4be223be9b2ed9be2a27eb1079648de48a4c3850d31c3eff00765d",
+        "transitionCount": 28,
+        "finalTransitionHash": "0521e3f5718adc9b61e6b02be1b350420e633bdbdb02f46d994fc29104f342fb"
+      },
+      "previousTransitionHash": "2c114b909a72ccf2cc890f1f9c7d8bf1384bc79058e3e60a6946b0e079607f12",
+      "transitionHash": "825b2b7302f87e591883ebdeddafd83b82a246689a2ee19727f1c8b2c3bb0e10"
+    },
+    {
+      "sequence": 50,
+      "historicalRecordId": "b5dba1ec70f9a1eeaab82f9a5d55c882fe69862e30d4a88c6e2c77e0b24854ef",
+      "v2OccurrenceId": "6964847f6e58f2e9a5430e65cf73136b4439c8dc6f3d59694de70bb3d3c1cb44",
+      "ownerPlan": "020",
+      "from": "present",
+      "to": "removed",
+      "predecessorSourceTree": "81eca7885bda37aa6bca65f8e5494ce9b3a8a850",
+      "stagedSourceTree": "ba5e9269c0b9cde03540ce36052f61e86559854e",
+      "sourceEvidence": [
+        {
+          "path": "src/__tests__/settings-recorder-tab.test.ts",
+          "beforeGitBlobOrNull": "0040c460ec8ba7723d6c076aeea048c5b9f17251",
+          "afterGitBlobOrNull": "1602f649901273f246ef8b44ed6d6fe1b575d2d5"
+        },
+        {
+          "path": "src/__tests__/systemsculpt-service-url.test.ts",
+          "beforeGitBlobOrNull": "f9b69a804f4df926782348f5244a2cf0be92ecbf",
+          "afterGitBlobOrNull": "0fed9b1947a1133a7f3ab9fbe02dbacc02f78285"
+        },
+        {
+          "path": "src/main.ts",
+          "beforeGitBlobOrNull": "d2a4d00cfa7cb7d2c95df04144accce2d721ddc5",
+          "afterGitBlobOrNull": "96de219948c85849ee49916da772fd716eb276d3"
+        },
+        {
+          "path": "src/modals/AudioTranscriptionModal.ts",
+          "beforeGitBlobOrNull": "4e5c4aeb9170a8b6e547c1efe7c231f8e3661e3d",
+          "afterGitBlobOrNull": "95530b0dc96c5b780aaf4baf56cd2837c8012754"
+        },
+        {
+          "path": "src/modals/__tests__/AudioTranscriptionModal.test.ts",
+          "beforeGitBlobOrNull": "d2649d613c588cb09620ef8363d75d4255618a6e",
+          "afterGitBlobOrNull": "d4befdecae40d365d16901ceda9d3c2ef062a247"
+        },
+        {
+          "path": "src/services/AudioUploadService.ts",
+          "beforeGitBlobOrNull": "1dd6b2ef59d3a7cba9a5e7110ff35bc9aeab60ca",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/RecorderService.ts",
+          "beforeGitBlobOrNull": "a401f721602f26f09aae81005a3c1baac2a0b566",
+          "afterGitBlobOrNull": "0ba00b4013361844eb0bea6c9d3d0c9e1519f8f2"
+        },
+        {
+          "path": "src/services/SystemSculptService.ts",
+          "beforeGitBlobOrNull": "7a15db08319292c049de42a6e8539ac7900aa4f4",
+          "afterGitBlobOrNull": "d5c4b9bd622186fc5cdcf52bcb7d1c1a44e5e00d"
+        },
+        {
+          "path": "src/services/TranscriptionProgressManager.ts",
+          "beforeGitBlobOrNull": "13e205a7046957413f7c1c9fa782fa127c4665dd",
+          "afterGitBlobOrNull": "0a074f9734395a0aab6ed2641edbaf0e7d43baa8"
+        },
+        {
+          "path": "src/services/TranscriptionService.ts",
+          "beforeGitBlobOrNull": "61108948a71ea4d7194ba9f7d1559bce3706484a",
+          "afterGitBlobOrNull": "2cedc4964b68eac8a0b3ca635240b2140f057469"
+        },
+        {
+          "path": "src/services/__tests__/AudioUploadService.test.ts",
+          "beforeGitBlobOrNull": "e487d764ce03733219c3d5d2577cdae7a2989197",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/__tests__/RecorderService.test.ts",
+          "beforeGitBlobOrNull": "68e2ddb86fd1f8a7ac74275f3f53a76e7facfa31",
+          "afterGitBlobOrNull": "e7fe907800ec04048a6dab67c589b239422e1a38"
+        },
+        {
+          "path": "src/services/__tests__/SystemSculptService.test.ts",
+          "beforeGitBlobOrNull": "e8c956ece149693e57994fd7de555516b5387281",
+          "afterGitBlobOrNull": "da7a2c84cf66331ae401098de3bc2bafe48b8641"
+        },
+        {
+          "path": "src/services/__tests__/TranscriptionService.test.ts",
+          "beforeGitBlobOrNull": "b22f1103ea2f06ef75511d79221b1c164a4727dc",
+          "afterGitBlobOrNull": "b05da7e98fe50545b2ca557d406d360058b751c1"
+        },
+        {
+          "path": "src/services/__tests__/TranscriptionServiceChunkingE2E.test.ts",
+          "beforeGitBlobOrNull": "ec69654e1dc34a98f0bcaefc4ff3590a50c37ba3",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/managed/adapters/ObsidianManagedRecoveryAdapter.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "0e392963bc1177c555f5eb09a35fc27e5d0c6ccb"
+        },
+        {
+          "path": "src/services/transcription/ManagedTranscriptionAdapter.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "4a206c131005c18388652cb0e39a6063180664fa"
+        },
+        {
+          "path": "src/services/transcription/TranscriptionCoordinator.ts",
+          "beforeGitBlobOrNull": "ddc2db7848ff8ff625bbc46eebba5a03cfa091a0",
+          "afterGitBlobOrNull": "e1a7c16f0a35f0f304a74029321093031c817dec"
+        },
+        {
+          "path": "src/services/transcription/__tests__/ManagedTranscriptionAdapter.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "284259ac9cc30d7590bfe766554b930993c4af7f"
+        },
+        {
+          "path": "src/services/transcription/__tests__/TranscriptionCoordinator.test.ts",
+          "beforeGitBlobOrNull": "b7585350135c33e16acfb49674d4542285ea6ad1",
+          "afterGitBlobOrNull": "df340a020bdf5edfd6dcef029bd6b31142409254"
+        },
+        {
+          "path": "src/services/transcription/providers/ProviderError.ts",
+          "beforeGitBlobOrNull": "2a0f2626ca0c17fd98d648e73554b48a51b0cb3c",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/TranscriptionProvider.ts",
+          "beforeGitBlobOrNull": "2d7959de355ef00ad762245b2aba397a96f40a49",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/ProviderError.test.ts",
+          "beforeGitBlobOrNull": "35e0c0034ac6c3b272f544b81d5a9cdf09f70f6b",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/customWhisperConfig.test.ts",
+          "beforeGitBlobOrNull": "60a41f886749b9dee9cce0dc09fdc29c7b14474b",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/providerHttpErrors.test.ts",
+          "beforeGitBlobOrNull": "7473acf134f4c3ba161223d64d2562632e9753da",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/transcriptionResponse.test.ts",
+          "beforeGitBlobOrNull": "b7b3fd88263b993cb2049bc1606d563849e2fa63",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/customWhisperConfig.ts",
+          "beforeGitBlobOrNull": "3717e34c1485f98bdb08022501c4cd456d340638",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/providerHttpErrors.ts",
+          "beforeGitBlobOrNull": "1e78360dc8105c41da8e6f51fdb8a82540d116ba",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/transcriptionResponse.ts",
+          "beforeGitBlobOrNull": "d0c563a5239c6344f71f5ece89697d5b5d70b51f",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/settings/RecorderTabContent.ts",
+          "beforeGitBlobOrNull": "3897b92db3c199c218bd9e5bee704eb136a8ff4a",
+          "afterGitBlobOrNull": "7837a7349f91ef3d79063b5f68c74cef93a3953e"
+        }
+      ],
+      "predecessorLedger": {
+        "gitBlob": "f3e5caa32c2e2fbcd6012efbc257d2cdff0684e0",
+        "sha256": "2d75ab8e8f4be223be9b2ed9be2a27eb1079648de48a4c3850d31c3eff00765d",
+        "transitionCount": 28,
+        "finalTransitionHash": "0521e3f5718adc9b61e6b02be1b350420e633bdbdb02f46d994fc29104f342fb"
+      },
+      "previousTransitionHash": "825b2b7302f87e591883ebdeddafd83b82a246689a2ee19727f1c8b2c3bb0e10",
+      "transitionHash": "82ab832bce048c6137538a2767ba57d19bd34442f7a6975f8b89436e763d5987"
+    },
+    {
+      "sequence": 51,
+      "historicalRecordId": "a076905e60ad80efd11defe0a15ac738cc3c827bdf5ced70fb49358303ba8ffc",
+      "v2OccurrenceId": "806712783a38715323860f7ea811320aac878ee583805c3f605de0df27dcccd8",
+      "ownerPlan": "020",
+      "from": "present",
+      "to": "removed",
+      "predecessorSourceTree": "81eca7885bda37aa6bca65f8e5494ce9b3a8a850",
+      "stagedSourceTree": "ba5e9269c0b9cde03540ce36052f61e86559854e",
+      "sourceEvidence": [
+        {
+          "path": "src/__tests__/settings-recorder-tab.test.ts",
+          "beforeGitBlobOrNull": "0040c460ec8ba7723d6c076aeea048c5b9f17251",
+          "afterGitBlobOrNull": "1602f649901273f246ef8b44ed6d6fe1b575d2d5"
+        },
+        {
+          "path": "src/__tests__/systemsculpt-service-url.test.ts",
+          "beforeGitBlobOrNull": "f9b69a804f4df926782348f5244a2cf0be92ecbf",
+          "afterGitBlobOrNull": "0fed9b1947a1133a7f3ab9fbe02dbacc02f78285"
+        },
+        {
+          "path": "src/main.ts",
+          "beforeGitBlobOrNull": "d2a4d00cfa7cb7d2c95df04144accce2d721ddc5",
+          "afterGitBlobOrNull": "96de219948c85849ee49916da772fd716eb276d3"
+        },
+        {
+          "path": "src/modals/AudioTranscriptionModal.ts",
+          "beforeGitBlobOrNull": "4e5c4aeb9170a8b6e547c1efe7c231f8e3661e3d",
+          "afterGitBlobOrNull": "95530b0dc96c5b780aaf4baf56cd2837c8012754"
+        },
+        {
+          "path": "src/modals/__tests__/AudioTranscriptionModal.test.ts",
+          "beforeGitBlobOrNull": "d2649d613c588cb09620ef8363d75d4255618a6e",
+          "afterGitBlobOrNull": "d4befdecae40d365d16901ceda9d3c2ef062a247"
+        },
+        {
+          "path": "src/services/AudioUploadService.ts",
+          "beforeGitBlobOrNull": "1dd6b2ef59d3a7cba9a5e7110ff35bc9aeab60ca",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/RecorderService.ts",
+          "beforeGitBlobOrNull": "a401f721602f26f09aae81005a3c1baac2a0b566",
+          "afterGitBlobOrNull": "0ba00b4013361844eb0bea6c9d3d0c9e1519f8f2"
+        },
+        {
+          "path": "src/services/SystemSculptService.ts",
+          "beforeGitBlobOrNull": "7a15db08319292c049de42a6e8539ac7900aa4f4",
+          "afterGitBlobOrNull": "d5c4b9bd622186fc5cdcf52bcb7d1c1a44e5e00d"
+        },
+        {
+          "path": "src/services/TranscriptionProgressManager.ts",
+          "beforeGitBlobOrNull": "13e205a7046957413f7c1c9fa782fa127c4665dd",
+          "afterGitBlobOrNull": "0a074f9734395a0aab6ed2641edbaf0e7d43baa8"
+        },
+        {
+          "path": "src/services/TranscriptionService.ts",
+          "beforeGitBlobOrNull": "61108948a71ea4d7194ba9f7d1559bce3706484a",
+          "afterGitBlobOrNull": "2cedc4964b68eac8a0b3ca635240b2140f057469"
+        },
+        {
+          "path": "src/services/__tests__/AudioUploadService.test.ts",
+          "beforeGitBlobOrNull": "e487d764ce03733219c3d5d2577cdae7a2989197",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/__tests__/RecorderService.test.ts",
+          "beforeGitBlobOrNull": "68e2ddb86fd1f8a7ac74275f3f53a76e7facfa31",
+          "afterGitBlobOrNull": "e7fe907800ec04048a6dab67c589b239422e1a38"
+        },
+        {
+          "path": "src/services/__tests__/SystemSculptService.test.ts",
+          "beforeGitBlobOrNull": "e8c956ece149693e57994fd7de555516b5387281",
+          "afterGitBlobOrNull": "da7a2c84cf66331ae401098de3bc2bafe48b8641"
+        },
+        {
+          "path": "src/services/__tests__/TranscriptionService.test.ts",
+          "beforeGitBlobOrNull": "b22f1103ea2f06ef75511d79221b1c164a4727dc",
+          "afterGitBlobOrNull": "b05da7e98fe50545b2ca557d406d360058b751c1"
+        },
+        {
+          "path": "src/services/__tests__/TranscriptionServiceChunkingE2E.test.ts",
+          "beforeGitBlobOrNull": "ec69654e1dc34a98f0bcaefc4ff3590a50c37ba3",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/managed/adapters/ObsidianManagedRecoveryAdapter.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "0e392963bc1177c555f5eb09a35fc27e5d0c6ccb"
+        },
+        {
+          "path": "src/services/transcription/ManagedTranscriptionAdapter.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "4a206c131005c18388652cb0e39a6063180664fa"
+        },
+        {
+          "path": "src/services/transcription/TranscriptionCoordinator.ts",
+          "beforeGitBlobOrNull": "ddc2db7848ff8ff625bbc46eebba5a03cfa091a0",
+          "afterGitBlobOrNull": "e1a7c16f0a35f0f304a74029321093031c817dec"
+        },
+        {
+          "path": "src/services/transcription/__tests__/ManagedTranscriptionAdapter.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "284259ac9cc30d7590bfe766554b930993c4af7f"
+        },
+        {
+          "path": "src/services/transcription/__tests__/TranscriptionCoordinator.test.ts",
+          "beforeGitBlobOrNull": "b7585350135c33e16acfb49674d4542285ea6ad1",
+          "afterGitBlobOrNull": "df340a020bdf5edfd6dcef029bd6b31142409254"
+        },
+        {
+          "path": "src/services/transcription/providers/ProviderError.ts",
+          "beforeGitBlobOrNull": "2a0f2626ca0c17fd98d648e73554b48a51b0cb3c",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/TranscriptionProvider.ts",
+          "beforeGitBlobOrNull": "2d7959de355ef00ad762245b2aba397a96f40a49",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/ProviderError.test.ts",
+          "beforeGitBlobOrNull": "35e0c0034ac6c3b272f544b81d5a9cdf09f70f6b",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/customWhisperConfig.test.ts",
+          "beforeGitBlobOrNull": "60a41f886749b9dee9cce0dc09fdc29c7b14474b",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/providerHttpErrors.test.ts",
+          "beforeGitBlobOrNull": "7473acf134f4c3ba161223d64d2562632e9753da",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/__tests__/transcriptionResponse.test.ts",
+          "beforeGitBlobOrNull": "b7b3fd88263b993cb2049bc1606d563849e2fa63",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/customWhisperConfig.ts",
+          "beforeGitBlobOrNull": "3717e34c1485f98bdb08022501c4cd456d340638",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/providerHttpErrors.ts",
+          "beforeGitBlobOrNull": "1e78360dc8105c41da8e6f51fdb8a82540d116ba",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/transcription/providers/transcriptionResponse.ts",
+          "beforeGitBlobOrNull": "d0c563a5239c6344f71f5ece89697d5b5d70b51f",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/settings/RecorderTabContent.ts",
+          "beforeGitBlobOrNull": "3897b92db3c199c218bd9e5bee704eb136a8ff4a",
+          "afterGitBlobOrNull": "7837a7349f91ef3d79063b5f68c74cef93a3953e"
+        }
+      ],
+      "predecessorLedger": {
+        "gitBlob": "f3e5caa32c2e2fbcd6012efbc257d2cdff0684e0",
+        "sha256": "2d75ab8e8f4be223be9b2ed9be2a27eb1079648de48a4c3850d31c3eff00765d",
+        "transitionCount": 28,
+        "finalTransitionHash": "0521e3f5718adc9b61e6b02be1b350420e633bdbdb02f46d994fc29104f342fb"
+      },
+      "previousTransitionHash": "82ab832bce048c6137538a2767ba57d19bd34442f7a6975f8b89436e763d5987",
+      "transitionHash": "bd54c3b0d8e7d3ce6ed4b61934b7ffd085634a32c9466e741effd0f35390ea35"
     }
   ]
 }

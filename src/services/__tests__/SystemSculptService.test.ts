@@ -35,10 +35,6 @@ const documentUploadService = {
   uploadDocument: jest.fn().mockResolvedValue({ documentId: "doc", status: "ok" }),
   updateConfig: jest.fn(),
 };
-const audioUploadService = {
-  uploadAudio: jest.fn().mockResolvedValue({ documentId: "audio", status: "ok" }),
-  updateConfig: jest.fn(),
-};
 const contextFileService = {
   prepareMessagesWithContext: jest.fn(async (messages: any[]) => messages),
 };
@@ -76,9 +72,6 @@ jest.mock("../DocumentUploadService", () => ({
   DocumentUploadService: jest.fn().mockImplementation(() => documentUploadService),
 }));
 
-jest.mock("../AudioUploadService", () => ({
-  AudioUploadService: jest.fn().mockImplementation(() => audioUploadService),
-}));
 
 jest.mock("../LocalPiStreamExecutor", () => ({
   executeLocalPiStream: jest.fn((...args) => localPiStreamExecutor.executeLocalPiStream(...args)),
@@ -260,10 +253,6 @@ describe("SystemSculptService", () => {
       "https://api.systemsculpt.test/api/v1",
       "license",
       "4.13.0"
-    );
-    expect(audioUploadService.updateConfig).toHaveBeenCalledWith(
-      "https://api.systemsculpt.test/api/v1",
-      "license"
     );
   });
 
@@ -1111,19 +1100,17 @@ describe("SystemSculptService", () => {
     expect(count).toBe(1);
   });
 
-  it("delegates license validation, model retrieval, and uploads", async () => {
+  it("delegates license validation, model retrieval, and document uploads", async () => {
     const plugin = createPlugin();
     const service = SystemSculptService.getInstance(plugin);
 
     await service.validateLicense(true);
     await service.getModels();
     await service.uploadDocument(new TFile({ path: "doc.pdf", name: "doc.pdf" }));
-    await service.uploadAudio(new TFile({ path: "audio.wav", name: "audio.wav" }));
 
     expect(licenseService.validateLicense).toHaveBeenCalledWith(true);
     expect(modelManagementService.getModels).toHaveBeenCalled();
     expect(documentUploadService.uploadDocument).toHaveBeenCalled();
-    expect(audioUploadService.uploadAudio).toHaveBeenCalled();
   });
 
   it("fetches credits balance from the SystemSculpt API", async () => {

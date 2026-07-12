@@ -87,6 +87,7 @@ export class RecorderService {
   }
 
   public unload(): void {
+    this.transcriptionCoordinator.abort();
     if (this.isRecording) {
       void this.stopRecording();
     }

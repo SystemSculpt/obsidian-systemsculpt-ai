@@ -1,9 +1,6 @@
-import { App, Notice, TFile, MarkdownView, setIcon } from "obsidian";
-import { TranscriptionService } from "../services/TranscriptionService";
+import { App, Notice, TFile, setIcon } from "obsidian";
 import type SystemSculptPlugin from "../main";
-import { PostProcessingService } from "../services/PostProcessingService";
-import { TranscriptionProgressManager } from "../services/TranscriptionProgressManager";
-import { TranscriptionTitleService } from "../services/transcription/TranscriptionTitleService";
+import { TranscriptionCoordinator } from "../services/transcription/TranscriptionCoordinator";
 import { formatFileSize } from "../utils/FileValidator";
 import { tryCopyToClipboard } from "../utils/clipboard";
 
@@ -16,8 +13,7 @@ export interface AudioTranscriptionOptions {
 }
 
 export class AudioTranscriptionModal {
-  private readonly transcriptionService: TranscriptionService;
-  private readonly postProcessingService: PostProcessingService;
+  private readonly coordinator: TranscriptionCoordinator;
   private readonly options: AudioTranscriptionOptions;
   private readonly plugin: SystemSculptPlugin;
   private readonly app: App;
@@ -36,12 +32,7 @@ export class AudioTranscriptionModal {
     this.app = app;
     this.options = options;
     this.plugin = options.plugin;
-    this.transcriptionService = TranscriptionService.getInstance(
-      options.plugin
-    );
-    this.postProcessingService = PostProcessingService.getInstance(
-      options.plugin
-    );
+    this.coordinator = new TranscriptionCoordinator(app, options.plugin);
   }
 
   open(): void {
@@ -123,12 +114,22 @@ export class AudioTranscriptionModal {
         label: "Hide",
         onClick: () => this.close(),
       },
+      {
+        label: "Cancel",
+        onClick: () => {
+          this.coordinator.abort();
+          this.close();
+        },
+      },
     ]);
 
     // Ensure we never leave dangling DOM on plugin unload.
     try {
       if (typeof (this.plugin as any)?.register === "function") {
-        (this.plugin as any).register(() => this.close());
+        (this.plugin as any).register(() => {
+          this.coordinator.abort();
+          this.close();
+        });
       }
     } catch (_) {}
   }
@@ -184,33 +185,6 @@ export class AudioTranscriptionModal {
     }
   }
 
-  /**
-   * Insert transcribed text into the active view
-   */
-  private insertTranscribedText(text: string): void {
-    try {
-      // For markdown view, insert directly
-      const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-      if (view?.editor) {
-        view.editor.replaceSelection(text);
-        new Notice("✓ Transcription inserted into document");
-      } else {
-        // Fallback to clipboard if no active editor
-        new Notice("✓ Transcription copied to clipboard (no active editor)");
-        navigator.clipboard.writeText(text);
-      }
-    } catch (error) {
-      new Notice("❌ Failed to insert transcription");
-
-      // Try clipboard as fallback
-      try {
-        navigator.clipboard.writeText(text);
-        new Notice("✓ Transcription copied to clipboard instead");
-      } catch (e) {
-      }
-    }
-  }
-
   private async openOutput(path: string): Promise<void> {
     const output = this.app.vault.getAbstractFileByPath(path);
     if (!(output instanceof TFile)) {
@@ -227,127 +201,23 @@ export class AudioTranscriptionModal {
   }
 
   private async startTranscription(): Promise<void> {
-    const progressManager = TranscriptionProgressManager.getInstance();
-
     try {
-      const progressHandler = progressManager.createProgressHandler(
-        this.options.file,
-        (progress, status, icon, details) => {
-          this.updateStatus({
-            label: status,
-            icon: icon || "loader-2",
-            progress,
-            details,
-          });
-        }
-      );
-
-      const text = await this.transcriptionService.transcribeFile(this.options.file, {
-        ...progressHandler,
-        type: this.options.isChat ? "chat" : "note",
-        timestamped: this.options.timestamped
+      let finalPath = "";
+      await this.coordinator.start({
+        filePath: this.options.file.path,
+        isChatContext: this.options.isChat,
+        timestamped: this.options.timestamped,
+        useModal: false,
+        suppressNotices: true,
+        onProgress: (progress, status) => this.updateStatus({
+          label: status,
+          icon: status.includes("Uploading") ? "upload" : status.includes("Saving") ? "hard-drive" : "loader-2",
+          progress,
+        }),
+        onStatus: (status) => this.updateStatus({ label: status, icon: "loader-2", progress: status.includes("Saving") ? 92 : 75 }),
+        onOutput: (path) => { finalPath = path; },
+        onTranscriptionComplete: this.options.onTranscriptionComplete,
       });
-
-      if (!text) {
-        throw new Error("Failed to get transcription text");
-      }
-
-      const timestamped = !!this.options.timestamped;
-      let finalText = text;
-      let processedText = text;
-
-      if (!timestamped && this.plugin.settings.postProcessingEnabled) {
-        processedText = await this.postProcessingService.processTranscription(text);
-      }
-
-      if (timestamped) {
-        finalText = text.trim();
-      } else if (this.plugin.settings.cleanTranscriptionOutput || this.options.isChat) {
-        finalText = processedText;
-      } else if (this.plugin.settings.postProcessingEnabled) {
-        let audioPlayerSection = "";
-        if (this.plugin.settings.keepRecordingsAfterTranscription) {
-          const audioLink = `![[${this.options.file.path}]]`;
-          audioPlayerSection = `
-## Audio Recording
-${audioLink}
-
-`;
-        }
-
-        finalText = `# Audio Transcription
-Source: ${this.options.file.basename}
-Transcribed: ${new Date().toISOString()}
-
-${audioPlayerSection}## Raw Transcription
-${text}
-
-## Processed Transcription
-${processedText}`;
-      } else {
-        let audioPlayerSection = "";
-        if (this.plugin.settings.keepRecordingsAfterTranscription) {
-          const audioLink = `![[${this.options.file.path}]]`;
-          audioPlayerSection = `
-## Audio Recording
-${audioLink}
-
-`;
-        }
-
-        finalText = `# Audio Transcription
-Source: ${this.options.file.basename}
-Transcribed: ${new Date().toISOString()}
-
-${audioPlayerSection}## Raw Transcription
-${text}`;
-      }
-
-      if (!this.options.isChat && this.plugin.settings.autoPasteTranscription) {
-        this.insertTranscribedText(finalText);
-      }
-
-      if (this.options.onTranscriptionComplete) {
-        this.options.onTranscriptionComplete(finalText);
-      } else {
-        new Notice("Transcription ready.");
-      }
-
-      await tryCopyToClipboard(finalText).catch(() => {});
-
-      const titleService = TranscriptionTitleService.getInstance(this.plugin);
-      const folderPath = this.options.file.path.split("/").slice(0, -1).join("/");
-      const extension = timestamped ? "srt" : "md";
-      const fallbackBasename = timestamped
-        ? this.options.file.basename
-        : titleService.buildFallbackBasename(this.options.file.basename);
-      const fallbackPath = folderPath
-        ? `${folderPath}/${fallbackBasename}.${extension}`
-        : `${fallbackBasename}.${extension}`;
-
-      this.updateStatus({
-        label: "Saving transcription…",
-        icon: "hard-drive",
-        progress: 92,
-      });
-
-      const existingFile = this.app.vault.getAbstractFileByPath(fallbackPath);
-      let transcriptionFile: TFile;
-
-      if (existingFile instanceof TFile) {
-        await this.app.vault.modify(existingFile, finalText);
-        transcriptionFile = existingFile;
-      } else {
-        transcriptionFile = await this.app.vault.create(fallbackPath, finalText);
-      }
-
-      const finalPath = timestamped
-        ? transcriptionFile.path
-        : await titleService.tryRenameTranscriptionFile(this.app, transcriptionFile, {
-            prefix: this.options.file.basename,
-            transcriptText: processedText,
-            extension: "md",
-          });
 
       this.updateStatus({
         label: "Transcription complete!",
@@ -368,8 +238,8 @@ ${text}`;
         },
       ]);
 
-      progressManager.handleCompletion(this.options.file.path, finalPath);
     } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") return;
       const errorMessage = error instanceof Error ? error.message : String(error);
       new Notice(`Transcription failed: ${errorMessage}`, 6000);
       this.updateStatus({
@@ -399,7 +269,6 @@ ${text}`;
           onClick: () => this.close(),
         },
       ]);
-      progressManager.clearProgress(this.options.file.path);
     }
   }
 }

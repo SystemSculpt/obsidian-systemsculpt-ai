@@ -56,6 +56,7 @@ jest.mock("../recorder/RecordingSession", () => ({
 jest.mock("../transcription/TranscriptionCoordinator", () => ({
   TranscriptionCoordinator: jest.fn().mockImplementation(() => ({
     start: jest.fn().mockResolvedValue("Transcribed text"),
+    abort: jest.fn(),
   })),
 }));
 
@@ -164,6 +165,16 @@ describe("RecorderService", () => {
       service.unload();
 
       expect(stopSpy).toHaveBeenCalled();
+    });
+
+    it("aborts managed transcription even after recording capture has already stopped", () => {
+      const service = RecorderService.getInstance(mockApp, mockPlugin);
+      const coordinator = (service as any).transcriptionCoordinator;
+      (service as any).isRecording = false;
+
+      service.unload();
+
+      expect(coordinator.abort).toHaveBeenCalledTimes(1);
     });
   });
 

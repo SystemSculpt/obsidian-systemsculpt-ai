@@ -72,7 +72,7 @@ import { SYSTEMSCULPT_STUDIO_VIEW_TYPE } from "./core/plugin/viewTypes";
 import type { DesktopAutomationBridge } from "./testing/automation/DesktopAutomationBridge";
 import { API_BASE_URL, WEBSITE_API_BASE_URL } from "./constants/api";
 import { ManagedCapabilityClient } from "./services/managed/ManagedCapabilityClient";
-import { ManagedCapabilityClientFactory } from "./services/managed/ManagedCapabilityClientFactory";
+import { ManagedCapabilityClientFactory, type ManagedCapabilityClientGraph } from "./services/managed/ManagedCapabilityClientFactory";
 import { ManagedProductIntegrationClient } from "./services/managed/ManagedProductIntegrationClient";
 
 type ViewManagerModule = typeof import("./core/plugin/views");
@@ -166,7 +166,7 @@ export default class SystemSculptPlugin extends Plugin {
   private studioService: StudioService | null = null;
   private fileExplorerStudioButtonManager: FileExplorerStudioButtonManager | null = null;
   private desktopAutomationBridge: DesktopAutomationBridge | null = null;
-  private managedCapabilityClient: ManagedCapabilityClient | null = null;
+  private managedCapabilityGraph: ManagedCapabilityClientGraph | null = null;
   private managedProductIntegrationClient: ManagedProductIntegrationClient | null = null;
   /** Live-reconfigurable slot for the relative line number gutter editor extension. */
   private readonly relativeLineNumberExtensions: Extension[] = [];
@@ -193,11 +193,15 @@ export default class SystemSculptPlugin extends Plugin {
   }
 
   public getManagedCapabilityClient(): ManagedCapabilityClient {
-    if (!this.managedCapabilityClient) this.managedCapabilityClient = ManagedCapabilityClientFactory.create({
+    return this.getManagedCapabilityGraph().client;
+  }
+
+  public getManagedCapabilityGraph(): ManagedCapabilityClientGraph {
+    if (!this.managedCapabilityGraph) this.managedCapabilityGraph = ManagedCapabilityClientFactory.createGraph({
       baseUrl: API_BASE_URL.replace(/\/api\/v1\/?$/, ""), pluginVersion: this.manifest.version,
       licenseKey: () => this.settings.licenseKey,
     });
-    return this.managedCapabilityClient;
+    return this.managedCapabilityGraph;
   }
 
   public getManagedProductIntegrationClient(): ManagedProductIntegrationClient {
@@ -2169,7 +2173,7 @@ export default class SystemSculptPlugin extends Plugin {
       FavoritesService.clearInstance();
       RuntimeIncompatibilityService.clearInstance();
       SystemSculptService.clearInstance(); // Clear SystemSculptService singleton
-      this.managedCapabilityClient = null;
+      this.managedCapabilityGraph = null;
       this.managedProductIntegrationClient = null;
       
       // Clear service references without reassignment
