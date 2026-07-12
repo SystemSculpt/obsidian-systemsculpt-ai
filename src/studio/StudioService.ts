@@ -47,7 +47,7 @@ export class StudioService {
 
   constructor(private readonly plugin: SystemSculptPlugin) {
     this.projectStore = new StudioProjectStore(plugin.app);
-    this.assetStore = new StudioAssetStore(plugin.app);
+    this.assetStore = new StudioAssetStore(this.projectStore);
     this.apiAdapter = new StudioApiExecutionAdapter(plugin, this.assetStore);
     this.runtime = new StudioRuntime(
       plugin.app,

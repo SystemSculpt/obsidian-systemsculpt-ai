@@ -65,10 +65,14 @@ describe("StudioRuntime session snapshot runs", () => {
         debug: jest.fn(),
       }),
     } as any;
+    const generationFiles = new Map<string, Uint8Array>();
     const projectStore = {
       loadProject: jest.fn(async () => {
         throw new Error("runProjectSnapshot should not reload the project from disk");
       }),
+      supportRelativePath: jest.fn((_projectPath: string, path: string) => path),
+      commitSupportFiles: jest.fn(async (_projectPath: string, _projectId: string, _kind: string, mutate: (files: Map<string, Uint8Array>) => void) => mutate(generationFiles)),
+      readSupportFile: jest.fn(async (_projectPath: string, path: string) => generationFiles.get(path) || null),
       loadPolicy: jest.fn(async () => ({
         schema: "studio.policy.v1",
         version: 1,
@@ -113,10 +117,9 @@ describe("StudioRuntime session snapshot runs", () => {
     expect(summary.status).toBe("success");
     expect(projectStore.loadProject).not.toHaveBeenCalled();
     expect(projectStore.loadPolicy).toHaveBeenCalledWith(project.permissionsRef.policyPath);
-    const snapshotWrite = adapter.write.mock.calls.find(([path]: [string]) => path.endsWith("/snapshot.json"));
-    expect(snapshotWrite).toBeDefined();
-    const snapshotText = snapshotWrite?.[1] as string;
-    expect(snapshotText).toContain("Live Session Snapshot");
+    const snapshotBytes = [...generationFiles].find(([path]) => path.endsWith("/snapshot.json"))?.[1];
+    expect(snapshotBytes).toBeDefined();
+    expect(new TextDecoder().decode(snapshotBytes)).toContain("Live Session Snapshot");
     expect(compiler.compile).toHaveBeenCalledWith(
       expect.objectContaining({ name: "Live Session Snapshot" }),
       expect.anything()

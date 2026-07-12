@@ -63,6 +63,16 @@ function findTokenMatches(token: RegExp): string[] {
 }
 
 describe("Studio persistence architecture lint", () => {
+  it("keeps Studio project-local adapter mutations behind the generation store", () => {
+    const mutation = /(?:adapter|vault|fileManager)\.(?:write|writeBinary|append|remove|rename|mkdir|rmdir|create|createBinary|modify|modifyBinary|delete|renameFile)\s*\(/g;
+    const allowed = new Set([
+      "src/studio/StudioApiExecutionAdapter.ts", // ephemeral upload cleanup, not project-local persistence
+      "src/studio/persistence/ObsidianStudioGenerationAdapter.ts",
+      "src/studio/persistence/StudioProjectGenerationStore.ts",
+    ]);
+    expect(findTokenMatches(mutation).filter((path) => !allowed.has(path))).toEqual([]);
+  });
+
   it("removes the old scheduleProjectSave seam from production Studio source", () => {
     expect(findTokenMatches(/scheduleProjectSave\(/g)).toEqual([]);
   });

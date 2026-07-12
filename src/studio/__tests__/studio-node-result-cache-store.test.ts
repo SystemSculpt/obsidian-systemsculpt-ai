@@ -39,15 +39,23 @@ function createCacheStore() {
     }),
   };
 
-  const app: InMemoryApp = {
-    vault: {
-      adapter,
-    },
+  const projectStore = {
+    readSupportFile: jest.fn(async (_projectPath: string, path: string) => {
+      const value = files.get(path);
+      return typeof value === "string" ? new TextEncoder().encode(value) : null;
+    }),
+    supportRelativePath: jest.fn((_projectPath: string, path: string) => path),
+    commitSupportFiles: jest.fn(async (_projectPath: string, _projectId: string, _kind: string, mutate: (generationFiles: Map<string, Uint8Array>) => void) => {
+      const generationFiles = new Map([...files].map(([path, value]) => [path, new TextEncoder().encode(value)]));
+      mutate(generationFiles);
+      files.clear();
+      for (const [path, value] of generationFiles) files.set(path, new TextDecoder().decode(value));
+    }),
   };
 
   return {
     files,
-    store: new StudioNodeResultCacheStore(app as any),
+    store: new StudioNodeResultCacheStore(projectStore as any),
   };
 }
 

@@ -1,8 +1,5 @@
-import { App, TFile, normalizePath } from "obsidian";
-import type {
-  StudioPermissionPolicyV1,
-  StudioProjectV1,
-} from "./types";
+import { App } from "obsidian";
+import type { StudioPermissionPolicyV1, StudioProjectV1 } from "./types";
 import {
   createDefaultStudioPolicy,
   createEmptyStudioProject,
@@ -13,15 +10,20 @@ import {
 } from "./schema";
 import {
   DEFAULT_STUDIO_PROJECTS_DIR,
-  deriveStudioAssetBlobDir,
   deriveStudioAssetsDir,
   deriveStudioPolicyPath,
-  deriveStudioRunsDir,
   normalizeStudioProjectPath,
 } from "./paths";
 import { STUDIO_PROJECT_EXTENSION } from "./types";
 import { cloneStudioProjectSnapshot } from "./StudioProjectSnapshots";
-import { asString, isRecord, nowIso } from "./utils";
+import { nowIso } from "./utils";
+import {
+  StudioProjectGenerationStore,
+  type ExpectedGeneration,
+  type SelectedGeneration,
+  type StudioGenerationCommandKind,
+} from "./persistence/StudioProjectGenerationStore";
+import { ObsidianStudioGenerationAdapter } from "./persistence/ObsidianStudioGenerationAdapter";
 
 type CreateProjectOptions = {
   name: string;
@@ -31,319 +33,159 @@ type CreateProjectOptions = {
   maxArtifactsMb: number;
 };
 
+const encoder = new TextEncoder();
+const decoder = new TextDecoder();
+
 export class StudioProjectStore {
-  constructor(private readonly app: App) {}
+  readonly generations: StudioProjectGenerationStore;
+  private readonly selectedByPath = new Map<string, { token: ExpectedGeneration; generation: SelectedGeneration }>();
 
-  private get adapter() {
-    return this.app.vault.adapter;
-  }
-
-  private get fileManager(): { renameFile?: (file: TFile, newPath: string) => Promise<void> } | null {
-    return ((this.app as unknown as { fileManager?: { renameFile?: (file: TFile, newPath: string) => Promise<void> } })
-      .fileManager || null);
-  }
-
-  private async ensureDir(path: string): Promise<void> {
-    const normalized = normalizePath(path);
-    const segments = normalized.split("/").filter(Boolean);
-    let current = "";
-    for (const segment of segments) {
-      current = current ? `${current}/${segment}` : segment;
-      try {
-        const exists = await this.adapter.exists(current);
-        if (!exists) {
-          await this.adapter.mkdir(current);
-        }
-      } catch {
-        // Best effort because concurrent workers may already have created it.
-      }
-    }
-  }
-
-  private dirname(path: string): string {
-    const normalized = normalizePath(path);
-    const index = normalized.lastIndexOf("/");
-    return index > 0 ? normalized.slice(0, index) : "";
+  constructor(private readonly app: App) {
+    this.generations = new StudioProjectGenerationStore(
+      new ObsidianStudioGenerationAdapter(app.vault.adapter)
+    );
   }
 
   private async resolveUniqueProjectPath(path: string): Promise<string> {
     const normalized = normalizeStudioProjectPath(path);
-    const exists = await this.adapter.exists(normalized);
-    const assetsDirExists = await this.adapter.exists(deriveStudioAssetsDir(normalized));
-    if (!exists && !assetsDirExists) {
-      return normalized;
-    }
-
-    const base = normalized.endsWith(STUDIO_PROJECT_EXTENSION)
-      ? normalized.slice(0, -STUDIO_PROJECT_EXTENSION.length)
-      : normalized;
-
+    if (await this.generations.isProjectionLocatorAvailable({ vaultRelativeProjectPath: normalized })) return normalized;
+    const base = normalized.slice(0, -STUDIO_PROJECT_EXTENSION.length);
     for (let suffix = 2; suffix < 10_000; suffix += 1) {
-      const candidate = normalizePath(`${base} (${suffix})${STUDIO_PROJECT_EXTENSION}`);
+      const candidate = `${base} (${suffix})${STUDIO_PROJECT_EXTENSION}`;
       // eslint-disable-next-line no-await-in-loop
-      const candidateExists = await this.adapter.exists(candidate);
-      if (!candidateExists) {
-        return candidate;
-      }
+      if (await this.generations.isProjectionLocatorAvailable({ vaultRelativeProjectPath: candidate })) return candidate;
     }
-
     throw new Error(`Unable to allocate unique Studio project path for "${normalized}".`);
   }
 
-  private async ensureProjectSupportDirs(projectPath: string): Promise<void> {
-    await this.ensureDir(this.dirname(projectPath));
-    await this.ensureDir(deriveStudioAssetsDir(projectPath));
-    await this.ensureDir(this.dirname(deriveStudioPolicyPath(projectPath)));
-    await this.ensureDir(deriveStudioAssetBlobDir(projectPath));
-    await this.ensureDir(deriveStudioRunsDir(projectPath));
-  }
-
-  private async writeProjectManifest(projectPath: string, projectId: string): Promise<void> {
-    const assetsDir = deriveStudioAssetsDir(projectPath);
-    await this.ensureDir(assetsDir);
-    const manifestPath = normalizePath(`${assetsDir}/project.manifest.json`);
-    await this.adapter.write(
-      manifestPath,
-      `${JSON.stringify(
-        {
-          schema: "studio.manifest.v1",
-          projectId,
-          projectPath,
-          assetsDir,
-          createdAt: nowIso(),
-        },
-        null,
-        2
-      )}\n`
-    );
-  }
-
-  private async renameProjectFile(oldPath: string, newPath: string): Promise<void> {
-    if (oldPath === newPath) {
-      return;
-    }
-
-    const abstract = this.app.vault.getAbstractFileByPath?.(oldPath);
-    if (abstract instanceof TFile && typeof this.fileManager?.renameFile === "function") {
-      await this.fileManager.renameFile(abstract, newPath);
-      return;
-    }
-
-    const adapterRename = (this.adapter as { rename?: (source: string, destination: string) => Promise<void> }).rename;
-    if (typeof adapterRename === "function") {
-      await adapterRename.call(this.adapter, oldPath, newPath);
-      return;
-    }
-
-    throw new Error(`Unable to rename Studio project file "${oldPath}".`);
-  }
-
-  private async canRenameAdapterPath(oldPath: string, newPath: string): Promise<boolean> {
-    if (!oldPath || !newPath || oldPath === newPath) {
-      return false;
-    }
-    const adapterRename = (this.adapter as { rename?: (source: string, destination: string) => Promise<void> }).rename;
-    if (typeof adapterRename !== "function") {
-      return false;
-    }
-    const oldExists = await this.adapter.exists(oldPath);
-    if (!oldExists) {
-      return false;
-    }
-    const newExists = await this.adapter.exists(newPath);
-    return !newExists;
-  }
-
-  private async renameAdapterPath(oldPath: string, newPath: string): Promise<void> {
-    if (!oldPath || !newPath || oldPath === newPath) {
-      return;
-    }
-    const adapterRename = (this.adapter as { rename?: (source: string, destination: string) => Promise<void> }).rename;
-    if (typeof adapterRename !== "function") {
-      return;
-    }
-    await this.ensureDir(this.dirname(newPath));
-    await adapterRename.call(this.adapter, oldPath, newPath);
-  }
-
   async listProjects(): Promise<string[]> {
-    const files = this.app.vault.getFiles();
-    const projects = files
-      .map((file) => file.path)
-      .filter((path) => path.toLowerCase().endsWith(".systemsculpt"))
+    return this.app.vault.getFiles().map((file) => file.path)
+      .filter((path) => path.toLowerCase().endsWith(STUDIO_PROJECT_EXTENSION))
+      .filter((path) => !path.startsWith(".systemsculpt/studio/projects/"))
       .sort((a, b) => a.localeCompare(b));
-    return projects;
+  }
+
+  private remember(path: string, token: ExpectedGeneration, generation: SelectedGeneration): void {
+    this.selectedByPath.set(normalizeStudioProjectPath(path), { token, generation });
+  }
+
+  private async openSelected(projectPath: string): Promise<{ token: ExpectedGeneration; generation: SelectedGeneration }> {
+    const path = normalizeStudioProjectPath(projectPath);
+    const cached = this.selectedByPath.get(path);
+    if (cached) return cached;
+    const adopted = await this.generations.discoverAndAdopt({ vaultRelativeProjectPath: path });
+    if (adopted.status !== "committed") throw new Error(`Studio project is read-only (${adopted.status}): ${"message" in adopted ? adopted.message : "conflict"}`);
+    this.remember(path, adopted.expectedGeneration, adopted.generation);
+    return { token: adopted.expectedGeneration, generation: adopted.generation };
+  }
+
+  private relativeSupportPath(projectPath: string, absolutePath: string): string {
+    const supportRoot = deriveStudioAssetsDir(projectPath);
+    if (absolutePath === supportRoot || !absolutePath.startsWith(`${supportRoot}/`)) throw new Error("Path is outside the Studio project support tree.");
+    return `support/${absolutePath.slice(supportRoot.length + 1)}`;
   }
 
   async createProject(options: CreateProjectOptions): Promise<{ path: string; project: StudioProjectV1 }> {
     const fileName = `${options.name.trim() || "Untitled"}.systemsculpt`;
-    const initialPath = normalizePath(
-      options.projectPath && options.projectPath.trim().length > 0
-        ? options.projectPath
-        : `${DEFAULT_STUDIO_PROJECTS_DIR}/${fileName}`
-    );
+    const initialPath = options.projectPath?.trim() || `${DEFAULT_STUDIO_PROJECTS_DIR}/${fileName}`;
     const projectPath = await this.resolveUniqueProjectPath(initialPath);
     const policyPath = deriveStudioPolicyPath(projectPath);
-
-    await this.ensureProjectSupportDirs(projectPath);
-
-    const project = createEmptyStudioProject({
-      name: options.name.trim() || "Untitled Studio Project",
-      policyPath,
-      minPluginVersion: options.minPluginVersion,
-      maxRuns: options.maxRuns,
-      maxArtifactsMb: options.maxArtifactsMb,
-    });
-
-    const policy = createDefaultStudioPolicy();
-    await this.adapter.write(policyPath, serializeStudioPolicy(policy));
-    await this.adapter.write(projectPath, serializeStudioProject(project));
-    await this.writeProjectManifest(projectPath, project.projectId);
-
+    const project = createEmptyStudioProject({ name: options.name.trim() || "Untitled Studio Project", policyPath, minPluginVersion: options.minPluginVersion, maxRuns: options.maxRuns, maxArtifactsMb: options.maxArtifactsMb });
+    const result = await this.generations.create({
+      projectId: project.projectId,
+      commandKind: "create",
+      transform: (files) => {
+        files.set("project.systemsculpt", encoder.encode(serializeStudioProject(project)));
+        files.set(this.relativeSupportPath(projectPath, policyPath), encoder.encode(serializeStudioPolicy(createDefaultStudioPolicy())));
+        files.set("support/project.manifest.json", encoder.encode(`${JSON.stringify({ schema: "studio.manifest.v1", projectId: project.projectId, projectPath, assetsDir: deriveStudioAssetsDir(projectPath), createdAt: nowIso() }, null, 2)}\n`));
+        return files;
+      },
+    }, { vaultRelativeProjectPath: projectPath });
+    if (result.status !== "committed") throw new Error(`Unable to create Studio project (${result.status}).`);
+    this.remember(projectPath, result.expectedGeneration, result.generation);
     return { path: projectPath, project };
   }
 
-  async renameProject(
-    projectPath: string,
-    nextName: string,
-    options?: { project?: StudioProjectV1 }
-  ): Promise<{ oldPath: string; newPath: string; project: StudioProjectV1 }> {
-    const normalizedOldPath = normalizeStudioProjectPath(projectPath);
-    const folderPath = this.dirname(normalizedOldPath);
-    const desiredPath = normalizeStudioProjectPath(
-      folderPath ? `${folderPath}/${nextName}` : nextName
-    );
-    const normalizedNewPath =
-      desiredPath === normalizedOldPath
-        ? desiredPath
-        : await this.resolveUniqueProjectPath(desiredPath);
-
-    const previousProject = options?.project
-      ? cloneStudioProjectSnapshot(options.project)
-      : await this.loadProject(normalizedOldPath);
-    const nextPolicyPath = deriveStudioPolicyPath(normalizedNewPath);
-    const nextProject: StudioProjectV1 = {
-      ...cloneStudioProjectSnapshot(previousProject),
-      name: nextName,
-      permissionsRef: {
-        ...previousProject.permissionsRef,
-        policyPath: nextPolicyPath,
-      },
-    };
-
-    if (normalizedNewPath === normalizedOldPath) {
-      await this.ensureProjectSupportDirs(normalizedOldPath);
-      await this.saveProject(normalizedOldPath, nextProject);
-      await this.writeProjectManifest(normalizedOldPath, nextProject.projectId);
-      return {
-        oldPath: normalizedOldPath,
-        newPath: normalizedOldPath,
-        project: await this.loadProject(normalizedOldPath),
-      };
-    }
-
-    const oldAssetsDir = deriveStudioAssetsDir(normalizedOldPath);
-    const newAssetsDir = deriveStudioAssetsDir(normalizedNewPath);
-    const oldAssetsExist = await this.adapter.exists(oldAssetsDir);
-    if (oldAssetsExist) {
-      const canRenameAssets = await this.canRenameAdapterPath(oldAssetsDir, newAssetsDir);
-      if (!canRenameAssets) {
-        throw new Error(`Unable to rename Studio project assets to "${newAssetsDir}".`);
-      }
-    }
-
-    await this.renameProjectFile(normalizedOldPath, normalizedNewPath);
-    if (oldAssetsExist) {
-      await this.renameAdapterPath(oldAssetsDir, newAssetsDir);
-    }
-    await this.ensureProjectSupportDirs(normalizedNewPath);
-    await this.saveProject(normalizedNewPath, nextProject);
-    await this.writeProjectManifest(normalizedNewPath, nextProject.projectId);
-
-    return {
-      oldPath: normalizedOldPath,
-      newPath: normalizedNewPath,
-      project: await this.loadProject(normalizedNewPath),
-    };
-  }
-
-  private async writeMigrationBackup(projectPath: string, rawText: string): Promise<void> {
-    const timestamp = nowIso().replace(/[:.]/g, "-");
-    const backupPath = normalizePath(`${projectPath}.bak.${timestamp}.json`);
-    await this.adapter.write(backupPath, rawText);
+  async renameProject(projectPath: string, nextName: string, options?: { project?: StudioProjectV1 }): Promise<{ oldPath: string; newPath: string; project: StudioProjectV1 }> {
+    const oldPath = normalizeStudioProjectPath(projectPath);
+    const slash = oldPath.lastIndexOf("/");
+    const folder = slash < 0 ? "" : oldPath.slice(0, slash);
+    const desired = normalizeStudioProjectPath(folder ? `${folder}/${nextName}` : nextName);
+    const newPath = desired === oldPath ? oldPath : await this.resolveUniqueProjectPath(desired);
+    const previous = options?.project ? cloneStudioProjectSnapshot(options.project) : await this.loadProject(oldPath);
+    const project = { ...cloneStudioProjectSnapshot(previous), name: nextName, permissionsRef: { ...previous.permissionsRef, policyPath: deriveStudioPolicyPath(newPath) } };
+    const selected = await this.openSelected(oldPath);
+    const result = await this.generations.commitWholeGeneration({ projectId: project.projectId, commandKind: "logical_rename", locator: { vaultRelativeProjectPath: newPath }, transform: (files) => {
+      files.set("project.systemsculpt", encoder.encode(serializeStudioProject(project)));
+      files.set("support/project.manifest.json", encoder.encode(`${JSON.stringify({ schema: "studio.manifest.v1", projectId: project.projectId, projectPath: newPath, assetsDir: deriveStudioAssetsDir(newPath), createdAt: nowIso() }, null, 2)}\n`));
+      return files;
+    } }, selected.token);
+    if (result.status !== "committed") throw new Error(`Unable to rename Studio project (${result.status}).`);
+    this.selectedByPath.delete(oldPath); this.remember(newPath, result.expectedGeneration, result.generation);
+    return { oldPath, newPath, project: parseStudioProject(decoder.decode(result.generation.files.get("project.systemsculpt")!)) };
   }
 
   async readProjectRawText(projectPath: string): Promise<string | null> {
-    const normalizedPath = normalizeStudioProjectPath(projectPath);
-    const exists = await this.adapter.exists(normalizedPath);
-    if (!exists) {
-      return null;
-    }
-    return this.adapter.read(normalizedPath);
+    try { const selected = await this.openSelected(projectPath); return decoder.decode(selected.generation.files.get("project.systemsculpt")!); }
+    catch { return null; }
   }
 
   async loadProject(projectPath: string): Promise<StudioProjectV1> {
-    const normalizedPath = normalizeStudioProjectPath(projectPath);
-    const rawText = await this.readProjectRawText(normalizedPath);
-    if (rawText == null) {
-      throw new Error(`Studio project not found: ${normalizedPath}`);
-    }
-    let rawSchema = "";
-    try {
-      const parsed: unknown = JSON.parse(rawText);
-      if (isRecord(parsed)) {
-        rawSchema = asString(parsed.schema).trim();
-      }
-    } catch {}
-
-    const project = parseStudioProject(rawText);
-    const migrated = rawSchema !== "studio.project.v1";
-    if (migrated) {
-      await this.writeMigrationBackup(normalizedPath, rawText);
-      await this.saveProject(normalizedPath, project);
-    }
-
-    const policyExists = await this.adapter.exists(project.permissionsRef.policyPath);
-    if (!policyExists) {
-      const defaultPolicy = createDefaultStudioPolicy();
-      await this.savePolicy(project.permissionsRef.policyPath, defaultPolicy);
-    }
-
-    return project;
+    const raw = await this.readProjectRawText(projectPath);
+    if (raw == null) throw new Error(`Studio project not found: ${normalizeStudioProjectPath(projectPath)}`);
+    return parseStudioProject(raw);
   }
 
   async saveProject(projectPath: string, project: StudioProjectV1): Promise<void> {
-    const normalizedPath = normalizeStudioProjectPath(projectPath);
-    const next: StudioProjectV1 = {
-      ...project,
-      updatedAt: nowIso(),
-    };
-    await this.ensureDir(this.dirname(normalizedPath));
-    await this.adapter.write(normalizedPath, serializeStudioProject(next));
+    const path = normalizeStudioProjectPath(projectPath);
+    await this.commitFiles(path, project.projectId, "discrete_save", (files) => {
+      files.set("project.systemsculpt", encoder.encode(serializeStudioProject({ ...project, updatedAt: nowIso() })));
+    });
   }
 
   async loadPolicy(policyPath: string): Promise<StudioPermissionPolicyV1> {
-    const normalizedPath = normalizePath(policyPath);
-    const exists = await this.adapter.exists(normalizedPath);
-    if (!exists) {
-      const policy = createDefaultStudioPolicy();
-      await this.savePolicy(normalizedPath, policy);
-      return policy;
+    const projects = [...this.selectedByPath.keys()];
+    let projectPath = projects.find((path) => policyPath.startsWith(`${deriveStudioAssetsDir(path)}/`));
+    if (!projectPath) {
+      projectPath = (await this.listProjects()).find((path) => policyPath.startsWith(`${deriveStudioAssetsDir(path)}/`));
     }
-
-    const raw = await this.adapter.read(normalizedPath);
-    return parseStudioPolicy(raw);
+    if (!projectPath) throw new Error("Policy path does not belong to an adopted Studio project.");
+    const selected = await this.openSelected(projectPath);
+    const bytes = selected.generation.files.get(this.relativeSupportPath(projectPath, policyPath));
+    return bytes ? parseStudioPolicy(decoder.decode(bytes)) : createDefaultStudioPolicy();
   }
 
   async savePolicy(policyPath: string, policy: StudioPermissionPolicyV1): Promise<void> {
-    const normalizedPath = normalizePath(policyPath);
-    await this.ensureDir(this.dirname(normalizedPath));
-    await this.adapter.write(
-      normalizedPath,
-      serializeStudioPolicy({
-        ...policy,
-        updatedAt: nowIso(),
-      })
-    );
+    const projectPath = [...this.selectedByPath.keys()].find((path) => policyPath.startsWith(`${deriveStudioAssetsDir(path)}/`));
+    if (!projectPath) throw new Error("Policy path does not belong to an open Studio project.");
+    const project = await this.loadProject(projectPath);
+    await this.commitFiles(projectPath, project.projectId, "policy", (files) => files.set(this.relativeSupportPath(projectPath, policyPath), encoder.encode(serializeStudioPolicy({ ...policy, updatedAt: nowIso() }))));
   }
+
+  async readSupportFile(projectPath: string, absolutePath: string): Promise<Uint8Array | null> {
+    const selected = await this.openSelected(projectPath);
+    return selected.generation.files.get(this.relativeSupportPath(projectPath, absolutePath))?.slice() || null;
+  }
+
+  async readSupportFileByAbsolutePath(absolutePath: string): Promise<Uint8Array | null> {
+    const candidates = new Set([...this.selectedByPath.keys(), ...(await this.listProjects())]);
+    for (const projectPath of candidates) {
+      if (!absolutePath.startsWith(`${deriveStudioAssetsDir(projectPath)}/`)) continue;
+      return this.readSupportFile(projectPath, absolutePath);
+    }
+    return null;
+  }
+
+  async commitSupportFiles(projectPath: string, projectId: string, commandKind: StudioGenerationCommandKind, mutate: (files: Map<string, Uint8Array>) => void): Promise<void> {
+    await this.commitFiles(projectPath, projectId, commandKind, mutate);
+  }
+
+  private async commitFiles(projectPath: string, projectId: string, commandKind: StudioGenerationCommandKind, mutate: (files: Map<string, Uint8Array>) => void): Promise<void> {
+    const path = normalizeStudioProjectPath(projectPath); const selected = await this.openSelected(path);
+    const result = await this.generations.commitWholeGeneration({ projectId, commandKind, transform: (files) => { mutate(files); return files; } }, selected.token);
+    if (result.status !== "committed") throw new Error(`Studio generation commit failed (${result.status}).`);
+    this.remember(path, result.expectedGeneration, result.generation);
+  }
+
+  supportRelativePath(projectPath: string, absolutePath: string): string { return this.relativeSupportPath(projectPath, absolutePath); }
 }

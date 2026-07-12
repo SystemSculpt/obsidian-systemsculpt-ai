@@ -75,36 +75,16 @@ export class StudioRuntime {
     private readonly assetStore: StudioAssetStore,
     private readonly apiAdapter: StudioApiAdapter
   ) {
-    this.nodeResultCacheStore = new StudioNodeResultCacheStore(app);
+    this.nodeResultCacheStore = new StudioNodeResultCacheStore(projectStore);
   }
 
-  private get adapter() {
-    return this.app.vault.adapter as any;
-  }
-
-  private async ensureDir(path: string): Promise<void> {
-    const segments = normalizePath(path).split("/").filter(Boolean);
-    let current = "";
-    for (const segment of segments) {
-      current = current ? `${current}/${segment}` : segment;
-      try {
-        const exists = await this.adapter.exists(current);
-        if (!exists) {
-          await this.adapter.mkdir(current);
-        }
-      } catch {}
-    }
-  }
-
-  private async appendLine(path: string, line: string): Promise<void> {
-    if (typeof this.adapter.append === "function") {
-      await this.adapter.append(path, line);
-      return;
-    }
-
-    const exists = await this.adapter.exists(path);
-    const previous = exists ? await this.adapter.read(path) : "";
-    await this.adapter.write(path, `${previous}${line}`);
+  private async appendLine(projectPath: string, projectId: string, path: string, line: string): Promise<void> {
+    const relative = this.projectStore.supportRelativePath(projectPath, path);
+    await this.projectStore.commitSupportFiles(projectPath, projectId, "run", (files) => {
+      const previous = files.get(relative);
+      const text = previous ? new TextDecoder().decode(previous) : "";
+      files.set(relative, new TextEncoder().encode(`${text}${line}`));
+    });
   }
 
   private runIndexPath(projectPath: string): string {
@@ -113,11 +93,11 @@ export class StudioRuntime {
 
   private async readRunIndex(projectPath: string): Promise<StudioRunSummary[]> {
     const indexPath = this.runIndexPath(projectPath);
-    const exists = await this.adapter.exists(indexPath);
-    if (!exists) return [];
+    const bytes = await this.projectStore.readSupportFile(projectPath, indexPath);
+    if (!bytes) return [];
 
     try {
-      const raw = await this.adapter.read(indexPath);
+      const raw = new TextDecoder().decode(bytes);
       const parsed = JSON.parse(raw);
       if (!Array.isArray(parsed)) return [];
       return parsed
@@ -141,13 +121,13 @@ export class StudioRuntime {
     }
   }
 
-  private async writeRunIndex(projectPath: string, runs: StudioRunSummary[]): Promise<void> {
+  private async writeRunIndex(projectPath: string, projectId: string, runs: StudioRunSummary[]): Promise<void> {
     const path = this.runIndexPath(projectPath);
-    await this.ensureDir(path.slice(0, path.lastIndexOf("/")));
-    await this.adapter.write(path, `${JSON.stringify(runs, null, 2)}\n`);
+    const relative = this.projectStore.supportRelativePath(projectPath, path);
+    await this.projectStore.commitSupportFiles(projectPath, projectId, "run", (files) => files.set(relative, new TextEncoder().encode(`${JSON.stringify(runs, null, 2)}\n`)));
   }
 
-  private async pruneRunRetention(projectPath: string, maxRuns: number): Promise<void> {
+  private async pruneRunRetention(projectPath: string, projectId: string, maxRuns: number): Promise<void> {
     const runs = await this.readRunIndex(projectPath);
     if (runs.length <= maxRuns) return;
 
@@ -157,18 +137,13 @@ export class StudioRuntime {
     const retained = runs.filter((run) => keepSet.has(run.runId));
 
     const runsDir = deriveStudioRunsDir(projectPath);
-    for (const dropped of toDrop) {
-      const runDir = normalizePath(`${runsDir}/${dropped.runId}`);
-      try {
-        if (typeof this.adapter.rmdir === "function") {
-          await this.adapter.rmdir(runDir, true);
-        } else if (typeof this.adapter.remove === "function") {
-          await this.adapter.remove(runDir);
-        }
-      } catch {}
-    }
-
-    await this.writeRunIndex(projectPath, retained);
+    await this.projectStore.commitSupportFiles(projectPath, projectId, "run", (files) => {
+      for (const dropped of toDrop) {
+        const prefix = this.projectStore.supportRelativePath(projectPath, normalizePath(`${runsDir}/${dropped.runId}`));
+        for (const path of [...files.keys()]) if (path === prefix || path.startsWith(`${prefix}/`)) files.delete(path);
+      }
+      files.set(this.projectStore.supportRelativePath(projectPath, this.runIndexPath(projectPath)), new TextEncoder().encode(`${JSON.stringify(retained, null, 2)}\n`));
+    });
   }
 
   async getRecentRuns(projectPath: string): Promise<StudioRunSummary[]> {
@@ -364,7 +339,6 @@ export class StudioRuntime {
 
     const compiled = this.compiler.compile(project, this.registry);
     const runDir = normalizePath(`${deriveStudioRunsDir(projectPath)}/${runId}`);
-    await this.ensureDir(runDir);
 
     const snapshot: StudioRunSnapshotV1 = {
       schema: "studio.run.v1",
@@ -377,13 +351,14 @@ export class StudioRuntime {
     };
 
     const snapshotHash = await this.buildSnapshotHash(snapshot);
-    await this.adapter.write(normalizePath(`${runDir}/snapshot.json`), `${JSON.stringify(snapshot, null, 2)}\n`);
-
     const eventsPath = normalizePath(`${runDir}/events.ndjson`);
-    await this.adapter.write(eventsPath, "");
+    await this.projectStore.commitSupportFiles(projectPath, project.projectId, "run", (files) => {
+      files.set(this.projectStore.supportRelativePath(projectPath, normalizePath(`${runDir}/snapshot.json`)), new TextEncoder().encode(`${JSON.stringify(snapshot, null, 2)}\n`));
+      files.set(this.projectStore.supportRelativePath(projectPath, eventsPath), new Uint8Array());
+    });
 
     const emit = async (event: StudioRunEvent): Promise<void> => {
-      await this.appendLine(eventsPath, `${JSON.stringify(event)}\n`);
+      await this.appendLine(projectPath, project.projectId, eventsPath, `${JSON.stringify(event)}\n`);
       if (typeof options?.onEvent === "function") {
         try {
           await options.onEvent(event);
@@ -795,8 +770,8 @@ export class StudioRuntime {
 
     const currentRuns = await this.readRunIndex(projectPath);
     currentRuns.push(summary);
-    await this.writeRunIndex(projectPath, currentRuns);
-    await this.pruneRunRetention(projectPath, project.settings.retention.maxRuns);
+    await this.writeRunIndex(projectPath, project.projectId, currentRuns);
+    await this.pruneRunRetention(projectPath, project.projectId, project.settings.retention.maxRuns);
 
     if (status === "failed") {
       throw new Error(errorMessage || "Studio run failed.");

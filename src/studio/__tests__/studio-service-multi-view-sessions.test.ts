@@ -87,6 +87,7 @@ function nodeIdForPath(projectPath: string): string {
 
 function createServiceWithStubbedLoads(): StudioService {
   const service = new StudioService(createPluginStub());
+  jest.spyOn((service as any).projectStore, "saveProject").mockResolvedValue(undefined);
   jest
     .spyOn(service as any, "loadProjectForSession")
     .mockImplementation(async (...args: unknown[]) => {
@@ -100,8 +101,18 @@ function createServiceWithStubbedLoads(): StudioService {
 }
 
 describe("StudioService multi-view session ownership", () => {
-  it("keeps project 1's session open when project 2 is opened by another view", async () => {
+  const services: StudioService[] = [];
+  afterEach(async () => {
+    await Promise.all(services.splice(0).map((service) => service.dispose()));
+  });
+  const createService = (): StudioService => {
     const service = createServiceWithStubbedLoads();
+    services.push(service);
+    return service;
+  };
+
+  it("keeps project 1's session open when project 2 is opened by another view", async () => {
+    const service = createService();
 
     const sessionP1 = await service.retainProjectSession("Studio/P1.systemsculpt");
     const sessionP2 = await service.retainProjectSession("Studio/P2.systemsculpt");
@@ -112,7 +123,7 @@ describe("StudioService multi-view session ownership", () => {
   });
 
   it("routes path-scoped mutations to the matching project graph while both projects are open", async () => {
-    const service = createServiceWithStubbedLoads();
+    const service = createService();
 
     const sessionP1 = await service.retainProjectSession("Studio/P1.systemsculpt");
     const sessionP2 = await service.retainProjectSession("Studio/P2.systemsculpt");
@@ -132,7 +143,7 @@ describe("StudioService multi-view session ownership", () => {
   });
 
   it("keeps a project session open until every retaining view has released it", async () => {
-    const service = createServiceWithStubbedLoads();
+    const service = createService();
 
     const first = await service.retainProjectSession("Studio/P1.systemsculpt");
     const second = await service.retainProjectSession("Studio/P1.systemsculpt");
