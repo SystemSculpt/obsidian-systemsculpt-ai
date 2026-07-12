@@ -4,7 +4,6 @@
 
 import { ChatView } from "../ChatView";
 import { ChatIdAllocator } from "../persistence/ChatIdAllocator";
-import { ChatPersistenceError } from "../persistence/ChatPersistenceError";
 import type { ChatMessage } from "../../../types";
 
 const fixedDate = new Date(2026, 6, 10, 12, 34, 56);
@@ -205,104 +204,57 @@ describe("authoritative transcript commits", () => {
     expect(view.app.workspace.trigger).toHaveBeenCalledTimes(1);
   });
 
-  it("skips suffix collisions and keeps resend retries and projection recovery authoritative", async () => {
-    const existing = new Set([
-      "2026-07-10 12-34-56",
-      "2026-07-10 12-34-56-2",
-      "2026-07-10 12-34-56-3",
-    ]);
-    const createExclusive = async (id: string) => {
-      if (existing.has(id)) return null;
-      existing.add(id);
-      return id;
-    };
-    const allocator = new ChatIdAllocator(createExclusive, () => fixedDate);
-    await expect(allocator.allocate()).resolves.toEqual({
-      chatId: "2026-07-10 12-34-56-4",
-      value: "2026-07-10 12-34-56-4",
+  it("atomically replaces a resend suffix only after one durable save", async () => {
+    const original = [
+      { role: "user", content: "first", message_id: "user-1" },
+      { role: "assistant", content: "reply", message_id: "assistant-1" },
+      { role: "user", content: "again", message_id: "user-2" },
+      { role: "assistant", content: "later", message_id: "assistant-2" },
+    ] as ChatMessage[];
+    const view = createView(original);
+    let release!: (value: { version: number }) => void;
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => { markStarted = resolve; });
+    (view.chatStorage.saveChat as jest.Mock).mockImplementation(() => {
+      markStarted();
+      return new Promise((resolve) => { release = resolve; });
     });
+    const replacement = { role: "user", content: "replacement", message_id: "user-3" } as ChatMessage;
 
-    const concurrentIds = new Set<string>();
-    const concurrentCreate = async (id: string) => {
-      if (concurrentIds.has(id)) return null;
-      concurrentIds.add(id);
-      await Promise.resolve();
-      return id;
-    };
-    const [first, second] = await Promise.all([
-      new ChatIdAllocator(concurrentCreate, () => fixedDate).allocate(),
-      new ChatIdAllocator(concurrentCreate, () => fixedDate).allocate(),
-    ]);
-    expect([first.chatId, second.chatId].sort()).toEqual([
-      "2026-07-10 12-34-56",
-      "2026-07-10 12-34-56-2",
-    ]);
+    const commit = view.commitAcceptedUserMessage({
+      kind: "resend", message: replacement, targetMessageId: "user-2", expectedIndex: 2, expectedVersion: 1,
+    });
+    expect(view.messages).toBe(original);
+    await started;
+    expect(view.chatStorage.saveChat).toHaveBeenCalledTimes(1);
+    expect(view.chatStorage.saveChat).toHaveBeenCalledWith("chat-existing", [original[0], original[1], replacement], expect.anything());
 
-    for (const index of [0, 2]) {
-      const original = [
-        { role: "user", content: "first", message_id: "user-1" },
-        { role: "assistant", content: "reply", message_id: "assistant-1" },
-        { role: "user", content: "again", message_id: "user-2" },
-      ] as ChatMessage[];
-      const view = createView(original);
-      const failure = new Error("disk failed");
-      (view.chatStorage.saveChat as jest.Mock).mockRejectedValue(failure);
-      (view.chatStorage.createChatExclusive as jest.Mock).mockRejectedValue(failure);
-      await expect(view.commitResendBranch(index)).rejects.toEqual(expect.objectContaining({
-        operation: "resend_branch",
-      }));
-      expect(view.messages).toBe(original);
-      expect(view.chatId).toBe("chat-existing");
-    }
-
-    const retryView = createView([
-      { role: "user", content: "first", message_id: "user-1" },
-      { role: "assistant", content: "reply", message_id: "assistant-1" },
-      { role: "user", content: "again", message_id: "user-2" },
-    ] as ChatMessage[]);
-    (retryView.chatStorage.saveChat as jest.Mock)
-      .mockRejectedValueOnce(new Error("retry"))
-      .mockResolvedValueOnce({ version: 2 });
-    await expect(retryView.commitResendBranch(2)).rejects.toBeInstanceOf(ChatPersistenceError);
-    await retryView.commitResendBranch(2);
-    expect(retryView.messages.map((message) => message.message_id)).toEqual(["user-1", "assistant-1"]);
-
-    const recoveryView = createView([
-      { role: "user", content: "first", message_id: "user-1" },
-      { role: "assistant", content: "reply", message_id: "assistant-1" },
-      { role: "user", content: "again", message_id: "user-2" },
-    ] as ChatMessage[]);
-    const durable = recoveryView.messages.slice(0, 2);
-    (recoveryView.chatStorage.loadChat as jest.Mock).mockResolvedValue({ messages: durable, version: 2 });
-    (recoveryView.renderMessagesInChunks as jest.Mock)
-      .mockRejectedValueOnce(new Error("projection failed"))
-      .mockResolvedValueOnce(undefined);
-    await recoveryView.commitResendBranch(2);
-    expect(recoveryView.chatStorage.loadChat).toHaveBeenCalledWith("chat-existing");
-    expect(recoveryView.messages).toEqual(durable);
-    expect(recoveryView.renderMessagesInChunks).toHaveBeenCalledTimes(2);
-
-    const firstMessageRetryView = createView([
-      { role: "user", content: "first", message_id: "user-first" },
-      { role: "assistant", content: "reply", message_id: "assistant-first" },
-    ] as ChatMessage[]);
-    (firstMessageRetryView.chatStorage.createChatExclusive as jest.Mock).mockResolvedValue({ version: 1 });
-    (firstMessageRetryView.chatStorage.loadChat as jest.Mock).mockResolvedValue({ messages: [], version: 1 });
-    (firstMessageRetryView.renderMessagesInChunks as jest.Mock)
-      .mockRejectedValueOnce(new Error("initial projection failed"))
-      .mockRejectedValueOnce(new Error("recovery projection failed"))
-      .mockResolvedValueOnce(undefined);
-
-    await expect(firstMessageRetryView.commitResendBranch(0, "user-first")).rejects.toThrow(
-      "recovery projection failed"
-    );
-    const durableBranchId = firstMessageRetryView.chatId;
-    expect(durableBranchId).not.toBe("chat-existing");
-    expect(firstMessageRetryView.chatStorage.createChatExclusive).toHaveBeenCalledTimes(1);
-
-    await expect(firstMessageRetryView.retryPendingResend("user-first")).resolves.toBe(true);
-    expect(firstMessageRetryView.chatId).toBe(durableBranchId);
-    expect(firstMessageRetryView.chatStorage.createChatExclusive).toHaveBeenCalledTimes(1);
-    expect(firstMessageRetryView.chatStorage.saveChat).not.toHaveBeenCalled();
+    release({ version: 2 });
+    const accepted = await commit;
+    expect(accepted.status).toBe("accepted_current");
+    expect(view.messages.map((message) => message.message_id)).toEqual(["user-1", "assistant-1", "user-3"]);
+    expect(accepted.message).toBe(accepted.snapshot.messages[2]);
   });
+
+  it("keeps the accepted transcript unchanged when the single atomic resend save fails", async () => {
+    const original = [
+      { role: "user", content: "first", message_id: "user-1" },
+      { role: "assistant", content: "reply", message_id: "assistant-1" },
+      { role: "user", content: "again", message_id: "user-2" },
+    ] as ChatMessage[];
+    const view = createView(original);
+    const failure = new Error("disk failed");
+    (view.chatStorage.saveChat as jest.Mock).mockRejectedValue(failure);
+
+    await expect(view.commitAcceptedUserMessage({
+      kind: "resend",
+      message: { role: "user", content: "replacement", message_id: "user-3" } as ChatMessage,
+      targetMessageId: "user-2", expectedIndex: 2, expectedVersion: 1,
+    })).rejects.toEqual(expect.objectContaining({ operation: "resend_user_commit", cause: failure }));
+    expect(view.chatStorage.saveChat).toHaveBeenCalledTimes(1);
+    expect(view.messages).toBe(original);
+    expect(view.chatContainer.childElementCount).toBe(0);
+    expect(view.app.workspace.trigger).not.toHaveBeenCalled();
+  });
+
 });

@@ -173,7 +173,6 @@ export class ChatView extends ItemView {
   private loadEpoch: number = 0;
   private chatOwnershipGeneration: number = 0;
   private activeLoad: { chatId: string; promise: Promise<void> } | null = null;
-  private pendingResendProjection: { targetMessageId: string; chatId: string } | null = null;
   private chatTranscript: ChatTranscript | null = null;
   private pendingCommittedPiProjection: PendingCommittedPiProjection | null = null;
   private resourcesDisposed = false;
@@ -619,45 +618,6 @@ export class ChatView extends ItemView {
       }
     }
     return mergedMessage;
-  }
-
-  private async projectResendSnapshot(): Promise<void> {
-    this.projectTranscript();
-    this.clearPiSessionState({ save: false });
-    this.updateViewState();
-    await messageHandling.reloadAllMessages(this);
-  }
-
-  public async commitResendBranch(index: number, targetMessageId?: string): Promise<void> {
-    const resolvedTargetMessageId = targetMessageId || String(this.messages[index]?.message_id || "");
-    await this.waitForLegacyPersistenceIdle();
-    const transcript = this.ensureChatTranscript();
-    const saved = await transcript.branchFrom(index);
-    this.pendingResendProjection = {
-      targetMessageId: resolvedTargetMessageId,
-      chatId: saved.chatId,
-    };
-
-    try {
-      await this.projectResendSnapshot();
-      this.pendingResendProjection = null;
-    } catch (projectionError) {
-      await transcript.recover();
-      await this.projectResendSnapshot();
-      this.pendingResendProjection = null;
-    }
-  }
-
-  public async retryPendingResend(targetMessageId: string): Promise<boolean> {
-    const pending = this.pendingResendProjection;
-    if (!pending || pending.targetMessageId !== targetMessageId) return false;
-
-    const transcript = this.ensureChatTranscript();
-    if (transcript.snapshot().chatId !== pending.chatId) return false;
-    await transcript.recover();
-    await this.projectResendSnapshot();
-    this.pendingResendProjection = null;
-    return true;
   }
 
   private shouldRecoverCommittedChatTurn(error: string | SystemSculptError): error is SystemSculptError {

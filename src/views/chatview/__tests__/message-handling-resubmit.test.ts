@@ -74,11 +74,10 @@ describe("messageHandling resubmit behavior", () => {
     expect(chatView.messages).toBe(messages);
   });
 
-  it("never reaches interrupted durable-branch recovery from the active resend action", async () => {
-    const retryPendingResend = jest.fn();
-    const chatView: any = { messages: [], retryPendingResend, inputHandler: { setValue: jest.fn(), focus: jest.fn() } };
-    await expect(messageHandling.runResendAction(chatView, { messageId: "user-first", content: "Retry" })).resolves.toEqual({ status: "error" });
-    expect(retryPendingResend).not.toHaveBeenCalled();
+  it("returns an error for a missing resend target without persistence work", async () => {
+    const chatView: any = { messages: [], inputHandler: { setValue: jest.fn(), focus: jest.fn() } };
+    await expect(messageHandling.runResendAction(chatView, { messageId: "missing", content: "Retry" })).resolves.toEqual({ status: "error" });
+    expect(chatView.inputHandler.setValue).not.toHaveBeenCalled();
   });
 
   it("queues standard resend without eagerly truncating durable messages", async () => {

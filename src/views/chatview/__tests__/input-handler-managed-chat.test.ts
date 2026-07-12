@@ -72,6 +72,8 @@ describe("managed chat ownership structure", () => {
     expect(factory.match(/new ManagedAdmission\(/g)).toHaveLength(1);
     expect(factory.match(/new ManagedCapabilityClient\(/g)).toHaveLength(1);
     expect(setup).not.toMatch(/managedChatAdmission\?/);
+    expect(view).not.toMatch(/pendingResendProjection|projectResendSnapshot|commitResendBranch|retryPendingResend/);
+    expect(read("src/views/chatview/messageHandling.ts")).not.toMatch(/commitResendBranch|retryPendingResend|branchFrom/);
   });
 
   it("orders candidate, admission, commit, ownership claim, operation, then lifecycle", () => {
