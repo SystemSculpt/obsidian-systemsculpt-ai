@@ -50,6 +50,17 @@ describe("ManagedChatRuntimeAdapter", () => {
     await expect(managedChatOperationKey("turn-017b-vector", "continuation", 12)).resolves.toBe("7e21ca272f4c6bfe9237b53890bde6c51af1137cb100a5b45722e5a0cf3ae0e4");
   });
 
+  it("accepts continuation ordinal zero and rejects a nonzero initial ordinal before transport", async () => {
+    const continuation = setup();
+    continuation.requestClient.responses.push(streamResponse([bytes('data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n')]));
+    await expect(continuation.adapter.dispatch({ operation: continuation.operation, snapshot: continuation.snapshot, phase: "continuation", continuationIndex: 0 })).resolves.toMatchObject({ kind: "success" });
+    expect(continuation.requestClient.inputs[0].headers?.["Idempotency-Key"]).toBe(await managedChatOperationKey("turn-017b-vector", "continuation", 0));
+
+    const initial = setup();
+    await expect(initial.adapter.dispatch({ operation: initial.operation, snapshot: initial.snapshot, phase: "initial", continuationIndex: 12 })).resolves.toEqual({ kind: "transport_failure", diagnostic: {} });
+    expect(initial.requestClient.inputs).toHaveLength(0);
+  });
+
   it("sends the exact body and five actual non-empty managed headers", async () => {
     const { adapter, requestClient, operation, snapshot } = setup();
     requestClient.responses.push(streamResponse([bytes('data: {"id":"r1","choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n')]));
@@ -217,6 +228,14 @@ describe("ManagedChatRuntimeAdapter", () => {
     });
   });
 
+  it("accepts an explicitly present empty arguments fragment without degrading to index-only", async () => {
+    const state = setup();
+    state.requestClient.responses.push(streamResponse([bytes('data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":""}}]}}]}\n\ndata: [DONE]\n\n')]));
+    await expect(state.adapter.dispatch({ operation: state.operation, snapshot: state.snapshot, phase: "initial", continuationIndex: 0 })).resolves.toEqual({
+      kind: "success", diagnostic: { status: 200 }, events: [{ kind: "tool_call_delta", index: 0, arguments: "" }],
+    });
+  });
+
   it("parses every byte split of ASCII and multibyte SSE with CRLF, comments, unsupported fields and multi-data", async () => {
     const wire = ': comment\r\nevent: ignored\r\ndata: {"choices":[{"delta":{"content":"hé"}}],\r\ndata: "usage":{"total_tokens":2}}\r\n\r\ndata: [DONE]\r\n\r\n';
     const encoded = bytes(wire);
@@ -233,6 +252,12 @@ describe("ManagedChatRuntimeAdapter", () => {
     ["data: {\"choices\":{}}\n\ndata: [DONE]\n\n", "nonarray choices"], ["data: {\"choices\":[{}]}\n\ndata: [DONE]\n\n", "empty choice"],
     ["data: {\"choices\":[{\"delta\":1}]}\n\ndata: [DONE]\n\n", "nonobject delta"], ["data: {\"choices\":[{\"delta\":{\"content\":1}}]}\n\ndata: [DONE]\n\n", "bad content"],
     ["data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0}]}}]}\n\ndata: [DONE]\n\n", "index-only tool"],
+    ["data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"\"}]}}]}\n\ndata: [DONE]\n\n", "empty id"],
+    ["data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"   \"}]}}]}\n\ndata: [DONE]\n\n", "whitespace id"],
+    ["data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"x\",\"function\":{\"name\":\"\"}}]}}]}\n\ndata: [DONE]\n\n", "empty function name"],
+    [`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"${"x".repeat(257)}"}]}}]}\n\ndata: [DONE]\n\n`, "oversized id"],
+    [`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"${"x".repeat(257)}"}}]}}]}\n\ndata: [DONE]\n\n`, "oversized function name"],
+    ["data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{}}]}}]}\n\ndata: [DONE]\n\n", "empty function object"],
     ["data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":1}]}}]}\n\ndata: [DONE]\n\n", "nonobject function"],
     ["data: {\"choices\":[],\"usage\":1}\n\ndata: [DONE]\n\n", "nonobject usage"], ["data: {\"choices\":[],\"usage\":{}}\n\ndata: [DONE]\n\n", "empty usage"],
     ["data: {\"choices\":[]}\n\n", "missing done"], ["data:\n\ndata: [DONE]\n\n", "empty data"],

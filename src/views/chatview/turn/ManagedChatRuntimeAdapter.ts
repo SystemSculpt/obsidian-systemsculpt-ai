@@ -38,6 +38,8 @@ export type ManagedChatDispatchInput = Readonly<{
 
 type JsonObject = { readonly [key: string]: JsonContractValue };
 type OperationRegistry = Map<string, Promise<ManagedChatDispatchResult>>;
+const MAX_TOOL_CALL_ID_LENGTH = 256;
+const MAX_TOOL_NAME_LENGTH = 256;
 
 function bounded(value: string | null, limit: number): string | undefined {
   if (value === null) return undefined;
@@ -151,6 +153,10 @@ function finiteNumber(object: JsonObject, key: string): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
+function isUsableBoundedToolIdentifier(value: string, limit: number): boolean {
+  return value.length <= limit && value.trim().length > 0 && !/[\u0000-\u001f\u007f-\u009f]/.test(value);
+}
+
 function optionalFiniteNumber(object: JsonObject, key: string): number | undefined | null {
   if (typeof object[key] === "undefined") return undefined;
   const value = finiteNumber(object, key);
@@ -193,14 +199,14 @@ function normalizeFrame(value: JsonContractValue): readonly ManagedChatRuntimeEv
           for (const field of Object.keys(call)) if (!["index", "id", "type", "function"].includes(field)) return null;
           const index = finiteNumber(call, "index");
           if (typeof index === "undefined" || !Number.isInteger(index) || index < 0) return null;
-          if (typeof call.id !== "undefined" && typeof call.id !== "string") return null;
+          if (typeof call.id !== "undefined" && (typeof call.id !== "string" || !isUsableBoundedToolIdentifier(call.id, MAX_TOOL_CALL_ID_LENGTH))) return null;
           if (typeof call.type !== "undefined" && call.type !== "function") return null;
           let name: string | undefined;
           let argumentsDelta: string | undefined;
           if (typeof call.function !== "undefined") {
             const fn = asObject(call.function);
             if (!fn || !Object.keys(fn).every((field) => field === "name" || field === "arguments")) return null;
-            if (typeof fn.name !== "undefined" && typeof fn.name !== "string") return null;
+            if (typeof fn.name !== "undefined" && (typeof fn.name !== "string" || !isUsableBoundedToolIdentifier(fn.name, MAX_TOOL_NAME_LENGTH))) return null;
             if (typeof fn.arguments !== "undefined" && typeof fn.arguments !== "string") return null;
             name = stringField(fn, "name");
             argumentsDelta = stringField(fn, "arguments");
@@ -255,6 +261,9 @@ export class ManagedChatRuntimeAdapter {
   public constructor(private readonly client: ManagedCapabilityClient) {}
 
   public dispatch(input: ManagedChatDispatchInput): Promise<ManagedChatDispatchResult> {
+    const validOrdinal = Number.isInteger(input.continuationIndex) && input.continuationIndex >= 0 &&
+      (input.phase === "continuation" || (input.continuationIndex === 0 && input.snapshot === input.operation.initialDurableSnapshot));
+    if (!validOrdinal) return Promise.resolve({ kind: "transport_failure", diagnostic: {} });
     if (this.terminal.has(input.operation)) return Promise.resolve({ kind: "operation_terminal", diagnostic: {} });
     let operations = this.registry.get(input.operation);
     if (!operations) {
@@ -283,7 +292,7 @@ export class ManagedChatRuntimeAdapter {
     if (!ticket) return { kind: "transport_failure", diagnostic: {} };
     if (
       !input.operation.durableTurnId || input.continuationIndex < 0 || !Number.isInteger(input.continuationIndex) ||
-      (input.phase === "initial" && input.snapshot !== input.operation.initialDurableSnapshot)
+      (input.phase === "initial" && (input.continuationIndex !== 0 || input.snapshot !== input.operation.initialDurableSnapshot))
     ) {
       return { kind: "transport_failure", diagnostic: {} };
     }
