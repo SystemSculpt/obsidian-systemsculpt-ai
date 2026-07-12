@@ -15,6 +15,35 @@ jest.mock("../../utils/errorLogger", () => ({
 }));
 
 describe("FileContextMenuService", () => {
+  it("owns one conversion-scoped AbortController and suppresses late success after cancel", async () => {
+    const app = new App() as any;
+    app.workspace.layoutReady = true;
+    app.workspace.on = jest.fn(() => ({ id: "evt-ref" }));
+    const plugin = { settings: { licenseKey: "test", licenseValid: true }, register: jest.fn(), registerEvent: jest.fn(), getPluginLogger: jest.fn(() => null) } as any;
+    let resolveProcessing!: (path: string) => void;
+    const processDocument = jest.fn((_file, options) => new Promise<string>((resolve) => {
+      resolveProcessing = resolve;
+      expect(options.signal).toBeInstanceOf(AbortSignal);
+    }));
+    let cancel!: () => void;
+    const modal = { updateProgress: jest.fn(), markSuccess: jest.fn(), markFailure: jest.fn(), close: jest.fn() };
+    const service = new FileContextMenuService({
+      app, plugin, documentProcessor: { processDocument }, chatLauncher: { open: jest.fn() },
+      launchProcessingModal: jest.fn((options) => { cancel = options.onCancel!; return modal; }),
+    });
+    const file = new TFile({ path: "document.pdf", name: "document.pdf", extension: "pdf" });
+
+    const pending = (service as any).handleDocumentConversion(file);
+    const signal = processDocument.mock.calls[0][1].signal as AbortSignal;
+    cancel();
+    expect(signal.aborted).toBe(true);
+    resolveProcessing("output.md");
+    await pending;
+
+    expect(modal.markSuccess).not.toHaveBeenCalled();
+    expect(modal.markFailure).not.toHaveBeenCalled();
+  });
+
   it("uses markdown mode for Convert Audio to Markdown flow", async () => {
     const app = new App() as any;
     app.workspace.layoutReady = true;

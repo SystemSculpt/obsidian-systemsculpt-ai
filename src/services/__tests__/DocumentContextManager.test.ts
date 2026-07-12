@@ -70,6 +70,8 @@ describe("DocumentContextManager", () => {
 
     mockApp = new App();
     mockPlugin = {
+      loadData: jest.fn().mockResolvedValue({ settingsSentinel: true }),
+      saveData: jest.fn().mockResolvedValue(undefined),
       settings: {
         extractionsDirectory: "Extractions",
         cleanTranscriptionOutput: false,
@@ -98,6 +100,70 @@ describe("DocumentContextManager", () => {
       const instance2 = DocumentContextManager.getInstance(mockApp, mockPlugin);
 
       expect(instance1).toBe(instance2);
+    });
+  });
+
+  describe("document conversion context effects", () => {
+    const effect = {
+      effectId: "a".repeat(64),
+      operationId: "operation-1",
+      outputIdentity: "output-1",
+      outputPath: "Extractions/document.md",
+      markdownSha256: "b".repeat(64),
+    };
+
+    it("persists identity before projecting and applies once", async () => {
+      const order: string[] = [];
+      mockPlugin.saveData.mockImplementation(async () => { order.push("persist"); });
+      (mockContextManager.addToContextFiles as jest.Mock).mockImplementation(() => { order.push("project"); return true; });
+
+      await expect(manager.applyDocumentConversionContextEffect(effect, mockContextManager)).resolves.toBe("applied");
+
+      expect(order).toEqual(["persist", "project"]);
+      expect(mockPlugin.saveData).toHaveBeenCalledWith(expect.objectContaining({
+        settingsSentinel: true,
+        managedDocumentContextEffectsV1: { [effect.effectId]: expect.objectContaining({ outputPath: effect.outputPath }) },
+      }));
+    });
+
+    it("returns already_applied for an exact durable replay without duplicating context", async () => {
+      mockPlugin.loadData.mockResolvedValue({ managedDocumentContextEffectsV1: { [effect.effectId]: {
+        operationId: effect.operationId, outputIdentity: effect.outputIdentity,
+        outputPath: effect.outputPath, markdownSha256: effect.markdownSha256,
+      } } });
+      (mockContextManager.hasContextFile as jest.Mock).mockReturnValue(true);
+
+      await expect(manager.applyDocumentConversionContextEffect(effect, mockContextManager)).resolves.toBe("already_applied");
+      expect(mockContextManager.addToContextFiles).not.toHaveBeenCalled();
+      expect(mockPlugin.saveData).not.toHaveBeenCalled();
+    });
+
+    it("repairs a missing projection after durable identity was recorded", async () => {
+      mockPlugin.loadData.mockResolvedValue({ managedDocumentContextEffectsV1: { [effect.effectId]: {
+        operationId: effect.operationId, outputIdentity: effect.outputIdentity,
+        outputPath: effect.outputPath, markdownSha256: effect.markdownSha256,
+      } } });
+
+      await expect(manager.applyDocumentConversionContextEffect(effect, mockContextManager)).resolves.toBe("repaired");
+      expect(mockContextManager.addToContextFiles).toHaveBeenCalledTimes(1);
+      expect(mockPlugin.saveData).not.toHaveBeenCalled();
+    });
+
+    it("rejects effect ID reuse with different data", async () => {
+      mockPlugin.loadData.mockResolvedValue({ managedDocumentContextEffectsV1: { [effect.effectId]: {
+        operationId: effect.operationId, outputIdentity: effect.outputIdentity,
+        outputPath: "different.md", markdownSha256: effect.markdownSha256,
+      } } });
+      await expect(manager.applyDocumentConversionContextEffect(effect, mockContextManager)).rejects.toThrow("identity conflict");
+      expect(mockContextManager.addToContextFiles).not.toHaveBeenCalled();
+    });
+
+    it("does not project when aborted while durable persistence is awaiting", async () => {
+      const controller = new AbortController();
+      mockPlugin.saveData.mockImplementation(async () => { controller.abort(); });
+      await expect(manager.applyDocumentConversionContextEffect({ ...effect, signal: controller.signal }, mockContextManager))
+        .rejects.toMatchObject({ name: "AbortError" });
+      expect(mockContextManager.addToContextFiles).not.toHaveBeenCalled();
     });
   });
 

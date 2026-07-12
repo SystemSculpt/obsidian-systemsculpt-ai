@@ -59,6 +59,30 @@ export interface DocumentProcessingFailurePayload {
   file: TFile;
 }
 
+export function describeDocumentProcessingFailure(error: unknown): string {
+  const code = typeof error === "object" && error !== null && "code" in error
+    ? String((error as { code: unknown }).code)
+    : "";
+  const messages: Record<string, string> = {
+    license_required: "An active SystemSculpt Pro license is required.",
+    license_rejected: "Your SystemSculpt license could not be verified.",
+    capability_unavailable: "Document conversion is temporarily unavailable.",
+    temporarily_unavailable: "Document conversion is temporarily unavailable. Try again shortly.",
+    rate_limited: "Too many document conversions. Try again shortly.",
+    document_processing_failed: "The document could not be converted.",
+    malformed_response: "The document service returned an invalid response.",
+    blocked_ambiguous: "Conversion state could not be verified. Retry from recovery.",
+    local_staging_corrupt: "Downloaded conversion data could not be verified.",
+    local_output_conflict: "Existing output conflicts with this conversion.",
+    ephemeral_download_failed: "The converted document could not be downloaded. Try again.",
+    cleanup_pending: "Conversion completed; private temporary files will be cleaned up later.",
+    local_abort: "Conversion cancelled.",
+  };
+  if (messages[code]) return messages[code];
+  if (error instanceof DOMException && error.name === "AbortError") return messages.local_abort;
+  return error instanceof Error ? error.message : String(error ?? "Unknown error");
+}
+
 export interface DocumentProcessingModalHandle {
   updateProgress(event: DocumentProcessingProgressEvent): void;
   markSuccess(payload: DocumentProcessingSuccessPayload): void;
@@ -242,8 +266,7 @@ class DocumentProcessingModal implements DocumentProcessingModalHandle {
     this.container.addClass("is-error");
     this.statusIcon.empty();
     setIcon(this.statusIcon, STAGE_ICON.error ?? "x-circle");
-    const message =
-      payload.error instanceof Error ? payload.error.message : String(payload.error ?? "Unknown error");
+    const message = describeDocumentProcessingFailure(payload.error);
     this.statusLabel.setText("Conversion failed");
     this.percentLabel.setText("");
     this.detailEl.removeClass("is-hidden");

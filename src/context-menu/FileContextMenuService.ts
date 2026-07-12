@@ -62,6 +62,7 @@ export interface DocumentProcessor {
       addToContext?: boolean;
       showNotices?: boolean;
       flow?: DocumentProcessingFlow;
+      signal?: AbortSignal;
     }
   ): Promise<string>;
 }
@@ -114,6 +115,7 @@ export class FileContextMenuService {
   private started = false;
   private awaitingLayoutReady = false;
   private cleanupRegistered = false;
+  private activeDocumentConversion: AbortController | null = null;
 
   constructor(options: FileContextMenuServiceOptions) {
     this.app = options.app;
@@ -208,6 +210,8 @@ export class FileContextMenuService {
   }
 
   stop(): void {
+    this.activeDocumentConversion?.abort();
+    this.activeDocumentConversion = null;
     if (!this.started) {
       return;
     }
@@ -450,6 +454,9 @@ export class FileContextMenuService {
     const startedAt = Date.now();
     this.info("Document conversion started", { filePath: file.path });
     let modalHandle: DocumentProcessingModalHandle | null = null;
+    const controller = new AbortController();
+    this.activeDocumentConversion?.abort();
+    this.activeDocumentConversion = controller;
 
     try {
       modalHandle = this.launchProcessingModal({
@@ -457,6 +464,7 @@ export class FileContextMenuService {
         plugin: this.plugin,
         file,
         source: "context-menu",
+        onCancel: () => controller.abort(),
       });
 
       const extractionPath = await this.documentProcessor.processDocument(file, {
@@ -467,8 +475,10 @@ export class FileContextMenuService {
         showNotices: false,
         addToContext: false,
         flow: "document",
+        signal: controller.signal,
       });
 
+      if (controller.signal.aborted) return;
       const durationMs = Date.now() - startedAt;
       await this.handleDocumentSuccess(file, extractionPath, durationMs);
 
@@ -483,6 +493,7 @@ export class FileContextMenuService {
         openOutput,
       });
     } catch (error: any) {
+      if (controller.signal.aborted || error?.name === "AbortError") return;
       const message = error instanceof Error ? error.message : String(error);
       this.error("Document conversion failed", error, {
         filePath: file.path,
@@ -502,6 +513,10 @@ export class FileContextMenuService {
       }
 
       new Notice(`Document conversion failed: ${message}`, 6000);
+    } finally {
+      if (this.activeDocumentConversion === controller) {
+        this.activeDocumentConversion = null;
+      }
     }
   }
 

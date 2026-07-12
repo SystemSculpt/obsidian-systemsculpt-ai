@@ -20,6 +20,26 @@ export interface ChatContextManager {
   updateProcessingStatus: (file: TFile, event: DocumentProcessingProgressEvent) => void;
 }
 
+export interface DocumentConversionContextEffect {
+  effectId: string;
+  operationId: string;
+  outputIdentity: string;
+  outputPath: string;
+  markdownSha256: string;
+  signal?: AbortSignal;
+}
+
+export type DocumentConversionContextEffectResult = "applied" | "already_applied" | "repaired";
+
+interface PersistedDocumentContextEffect {
+  operationId: string;
+  outputIdentity: string;
+  outputPath: string;
+  markdownSha256: string;
+}
+
+const DOCUMENT_CONTEXT_EFFECTS_KEY = "managedDocumentContextEffectsV1";
+
 /**
  * Centralized service for managing document context
  * Handles adding files to context, processing documents, and updating UI
@@ -47,6 +67,49 @@ export class DocumentContextManager {
       DocumentContextManager.instance = new DocumentContextManager(app, plugin);
     }
     return DocumentContextManager.instance;
+  }
+
+  /**
+   * Durably records and idempotently projects a document-conversion context effect.
+   * Existing context APIs intentionally remain unchanged.
+   */
+  public async applyDocumentConversionContextEffect(
+    effect: DocumentConversionContextEffect,
+    contextManager: ChatContextManager
+  ): Promise<DocumentConversionContextEffectResult> {
+    throwIfAborted(effect.signal);
+    validateContextEffect(effect);
+    const data = ((await this.plugin.loadData?.()) ?? {}) as Record<string, unknown>;
+    throwIfAborted(effect.signal);
+    const ledger = readContextEffectLedger(data[DOCUMENT_CONTEXT_EFFECTS_KEY]);
+    const persisted = ledger[effect.effectId];
+    const requested: PersistedDocumentContextEffect = {
+      operationId: effect.operationId,
+      outputIdentity: effect.outputIdentity,
+      outputPath: effect.outputPath,
+      markdownSha256: effect.markdownSha256,
+    };
+    if (persisted && JSON.stringify(persisted) !== JSON.stringify(requested)) {
+      throw new Error("Document context effect identity conflict.");
+    }
+
+    const wikiLink = `[[${effect.outputPath}]]`;
+    if (!persisted) {
+      ledger[effect.effectId] = requested;
+      await this.plugin.saveData?.({ ...data, [DOCUMENT_CONTEXT_EFFECTS_KEY]: ledger });
+      throwIfAborted(effect.signal);
+    }
+
+    if (contextManager.hasContextFile(wikiLink)) {
+      return "already_applied";
+    }
+
+    throwIfAborted(effect.signal);
+    contextManager.addToContextFiles(wikiLink);
+    throwIfAborted(effect.signal);
+    await contextManager.triggerContextChange();
+    throwIfAborted(effect.signal);
+    return persisted ? "repaired" : "applied";
   }
 
   /**
@@ -427,4 +490,25 @@ export class DocumentContextManager {
 
     return finalPath;
   }
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+}
+
+function validateContextEffect(effect: DocumentConversionContextEffect): void {
+  if (
+    !/^[a-f0-9]{64}$/.test(effect.effectId) ||
+    !effect.operationId ||
+    !effect.outputIdentity ||
+    !effect.outputPath ||
+    !/^[a-f0-9]{64}$/.test(effect.markdownSha256)
+  ) {
+    throw new Error("Invalid document context effect.");
+  }
+}
+
+function readContextEffectLedger(value: unknown): Record<string, PersistedDocumentContextEffect> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return { ...(value as Record<string, PersistedDocumentContextEffect>) };
 }
