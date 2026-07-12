@@ -177,6 +177,10 @@ test('v2 fails closed on dynamic and computed transport bypasses even beside an 
     'global["XMLHttpRequest"]();',
     'const transport = globalThis.fetch; transport("https://b.invalid");',
     'const name = "fetch"; globalThis[name]("https://b.invalid");',
+    'const name = "fe" + "tch"; globalThis[name]("https://b.invalid");',
+    'const prefix = "fe"; const name = `${prefix}tch`; globalThis[name]("https://b.invalid");',
+    'const name = ("fetch"); globalThis[name]("https://b.invalid");',
+    'declare const name: string; globalThis[name]("https://b.invalid");',
     'const moduleName = "openai"; import(moduleName);',
     'const moduleName = "openai"; require(moduleName);',
     'eval("fetch(\\"https://b.invalid\\")");',
@@ -355,14 +359,36 @@ test('v2 keeps same-named methods collision-safe', () => {
   assert.doesNotThrow(() => generateVerificationV2({ root, fixture, sourceRef: ref, historicalFixturePath: 'fixture.json' }));
 });
 
-test('default current and verify pin the trust-boundary refs and immutable history', () => {
+test('default verify pins trust-boundary refs while current supports deterministic source-ref verification', () => {
   const cwd = process.cwd();
   const fixture = 'testing/fixtures/managed/egress-baseline-660e7fe.json';
   for (const args of [
     ['verify', '--ref', 'HEAD', '--fixture', fixture],
-    ['verify', '--source-ref', 'HEAD', '--fixture', fixture],
-    ['current', '--source-ref', 'HEAD', '--fixture', fixture]
+    ['verify', '--source-ref', 'HEAD', '--fixture', fixture]
   ]) assert.throws(() => execFileSync(process.execPath, ['scripts/network-egress-inventory.mjs', ...args], { cwd, encoding: 'utf8', stdio: 'pipe' }), /history_tampered/);
+  assert.match(execFileSync(process.execPath, ['scripts/network-egress-inventory.mjs', 'current', '--source-ref', 'c4f81ebc35aa836f787f198b8341d9496bc367ba', '--fixture', fixture], { cwd, encoding: 'utf8', stdio: 'pipe' }), /PASS/);
+});
+
+test('default verify rejects a companion regenerated from laundered source semantics', () => {
+  const root = process.cwd();
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'egress-source-launder-'));
+  execFileSync('git', ['clone', '-q', '--no-checkout', root, temp]);
+  execFileSync('git', ['checkout', '-q', 'c4f81ebc35aa836f787f198b8341d9496bc367ba'], { cwd: temp });
+  execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: temp });
+  execFileSync('git', ['config', 'user.name', 'Test'], { cwd: temp });
+  const fixture = path.join(temp, 'testing/fixtures/managed/egress-baseline-660e7fe.json');
+  fs.copyFileSync(path.join(root, 'testing/fixtures/managed/egress-baseline-660e7fe.json'), fixture);
+  const source = path.join(temp, 'src/services/SystemSculptService.ts');
+  const original = fs.readFileSync(source, 'utf8');
+  fs.writeFileSync(source, original.replace('method: "GET"', 'method: "POST"'));
+  execFileSync('git', ['add', 'src/services/SystemSculptService.ts'], { cwd: temp });
+  execFileSync('git', ['commit', '-qm', 'launder reviewed egress semantics'], { cwd: temp });
+  const changedRef = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: temp, encoding: 'utf8' }).trim();
+  const laundered = generateVerificationV2({ root: temp, fixture, sourceRef: changedRef, historicalFixturePath: 'testing/fixtures/managed/egress-baseline-660e7fe.json' });
+  assert.equal(laundered.approvedSource.commit, changedRef);
+  const launderedPath = path.join(temp, 'testing/fixtures/managed/egress-verification-v2-660e7fe.json');
+  fs.writeFileSync(launderedPath, JSON.stringify(laundered, null, 2) + '\n');
+  assert.throws(() => execFileSync(process.execPath, [path.join(root, 'scripts/network-egress-inventory.mjs'), 'verify', '--fixture', fixture, '--verification-artifact', launderedPath], { cwd: temp, encoding: 'utf8', stdio: 'pipe' }), /history_tampered.*approvedSource\.commit/);
 });
 
 test('default verify rejects coordinated historical fixture and companion tampering', () => {

@@ -13,6 +13,7 @@ const NODE_NETWORK = new Set(['http', 'https', 'net', 'tls', 'dns', 'node:http',
 const IMMUTABLE_BASELINE_REF = '660e7fe';
 const IMMUTABLE_HISTORY_BLOB = 'cb3ee69ab4f7b42cef1f2aa8546e830a3fefa664';
 const IMMUTABLE_HISTORY_SHA256 = 'f2d8a626080e6e474852fa6951a2e0c76d4ef8dd1798eaf5809ac089db6c1b1f';
+const FROZEN_APPROVED_SOURCE_COMMIT = 'c4f81ebc35aa836f787f198b8341d9496bc367ba';
 const hash = value => crypto.createHash('sha256').update(value).digest('hex');
 const normalize = value => String(value).replace(/\s+/g, ' ').trim();
 const git = (root, args) => execFileSync('git', args, { cwd: root, encoding: 'utf8' });
@@ -366,20 +367,41 @@ function semanticOccurrences(file, source, checker, programSourceFile, semanticB
   const transportNames = new Set(['fetch', 'requestUrl', 'httpRequest', 'request', 'get', 'connect', 'WebSocket', 'XMLHttpRequest']);
   const unmistakableTransportNames = new Set(['fetch', 'requestUrl', 'httpRequest', 'WebSocket', 'XMLHttpRequest']);
   const hazard = (node, reason) => { const lc = lineColumn(sf, node.getStart(sf)); hazards.push(`${file}:${lc.line}:${lc.column} dynamic_or_computed_access: ${reason}; replace it with a statically resolved transport binding`); };
+  const constantString = (node, seen = new Set()) => {
+    if (!node) return undefined;
+    if (ts.isStringLiteralLike(node) || ts.isNoSubstitutionTemplateLiteral(node)) return node.text;
+    if (ts.isParenthesizedExpression(node)) return constantString(node.expression, seen);
+    if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+      const left = constantString(node.left, seen); const right = constantString(node.right, seen);
+      return left === undefined || right === undefined ? undefined : left + right;
+    }
+    if (ts.isTemplateExpression(node)) {
+      let value = node.head.text;
+      for (const span of node.templateSpans) { const expression = constantString(span.expression, seen); if (expression === undefined) return undefined; value += expression + span.literal.text; }
+      return value;
+    }
+    if (ts.isIdentifier(node) && checker) {
+      const symbol = checker.getSymbolAtLocation(node);
+      if (!symbol || seen.has(symbol)) return undefined;
+      const next = new Set(seen); next.add(symbol);
+      const declaration = [...(symbol.declarations || []), ...(symbol.valueDeclaration ? [symbol.valueDeclaration] : [])].find(d => ts.isVariableDeclaration(d) && d.initializer);
+      return declaration ? constantString(declaration.initializer, next) : undefined;
+    }
+    return undefined;
+  };
   const visit = (node, stack = []) => {
     let next = stack;
     if (ts.isElementAccessExpression(node)) {
       const key = ts.isStringLiteralLike(node.argumentExpression) ? node.argumentExpression.text : '<computed>';
       const base = node.expression.getText(sf);
       const baseAlias = ts.isIdentifier(node.expression) ? aliases.get(node.expression.text) : undefined;
-      let computedTransport = false;
-      if (!ts.isStringLiteralLike(node.argumentExpression) && checker) {
-        const keySymbol = checker.getSymbolAtLocation(node.argumentExpression);
-        const keyDeclarations = [...(keySymbol?.declarations || []), ...(keySymbol?.valueDeclaration ? [keySymbol.valueDeclaration] : [])];
-        computedTransport = keyDeclarations.some(d => ts.isVariableDeclaration(d) && d.initializer && ts.isStringLiteralLike(d.initializer) && transportNames.has(d.initializer.text));
-        if (!computedTransport && ts.isIdentifier(node.argumentExpression)) computedTransport = new RegExp(`\\b(?:const|let|var)\\s+${node.argumentExpression.text}\\s*=\\s*["'](?:${[...transportNames].join('|')})["']`).test(source);
-      }
-      if (unmistakableTransportNames.has(key) || (/^(?:globalThis|window|self|global)$/.test(base) && computedTransport) || (baseAlias && (SDK_PACKAGES.test(baseAlias.module) || NODE_NETWORK.has(baseAlias.module)) && transportNames.has(key))) hazard(node, `computed transport member ${base}[${key}]`);
+      const foldedKey = constantString(node.argumentExpression);
+      const computedTransport = foldedKey !== undefined && transportNames.has(foldedKey);
+      const receiverSymbol = ts.isIdentifier(node.expression) ? checker?.getSymbolAtLocation(node.expression) : undefined;
+      const receiverIsLocallyDeclared = receiverSymbol?.declarations?.some(declaration => declaration.getSourceFile() === sf);
+      const globalReceiver = /^(?:globalThis|window|self|global)$/.test(base) && !receiverIsLocallyDeclared;
+      const networkReceiver = baseAlias && (SDK_PACKAGES.test(baseAlias.module) || NODE_NETWORK.has(baseAlias.module));
+      if (unmistakableTransportNames.has(key) || (globalReceiver && (!ts.isStringLiteralLike(node.argumentExpression) || computedTransport)) || (networkReceiver && (!ts.isStringLiteralLike(node.argumentExpression) || transportNames.has(key)))) hazard(node, `computed transport member ${base}[${foldedKey || key}]`);
     }
     if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword && (!node.arguments[0] || !ts.isStringLiteralLike(node.arguments[0]))) hazard(node, 'dynamic import specifier');
     if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'require' && (!node.arguments[0] || !ts.isStringLiteralLike(node.arguments[0]))) hazard(node, 'dynamic require specifier');
@@ -714,7 +736,6 @@ async function cli() {
     if (analyzerVersion === '1') verifyCurrent({ root, fixture });
     else {
       assertDefaultTrustBoundary();
-      if (value('--source-ref')) throw new Error('history_tampered: default current rejects --source-ref; use --analyzer-version 1 for archaeology');
       if (!fs.existsSync(companion)) throw new Error(`verification_companion_missing: create ${companion}; refusing silent v1 fallback`);
       verifyVerificationV2({ root, fixture, verificationArtifact: companion, sourceRef: value('--source-ref') });
     }
@@ -727,11 +748,13 @@ async function cli() {
       console.log('[egress] PASS: historical v1 fixture is byte-identical');
     } else {
       assertDefaultTrustBoundary();
-      if (value('--source-ref') && value('--source-ref') !== 'c4f81ebc35aa836f787f198b8341d9496bc367ba') throw new Error('history_tampered: default verify rejects caller source-ref overrides; use --analyzer-version 1 for archaeology');
+      if (value('--source-ref') && value('--source-ref') !== FROZEN_APPROVED_SOURCE_COMMIT) throw new Error('history_tampered: default verify rejects caller source-ref overrides; use --analyzer-version 1 for archaeology');
       const historicalRegeneration = Buffer.from(stableJson(generateInventory({ root, ref: IMMUTABLE_BASELINE_REF, sourceRef: '98a67bf8a2778248f4b76262448b1a3a23c649f2' })));
       if (!historicalRegeneration.equals(fs.readFileSync(fixture))) throw new Error(`history_tampered: v1 fixture is not the deterministic Plan 025 record; restore ${fixture}`);
       if (!fs.existsSync(companion)) throw new Error(`verification_companion_missing: create ${companion}; refusing silent v1 fallback`);
-      const sourceRef = value('--source-ref') || JSON.parse(fs.readFileSync(companion, 'utf8')).approvedSource.commit;
+      const artifact = JSON.parse(fs.readFileSync(companion, 'utf8'));
+      if (artifact.approvedSource?.commit !== FROZEN_APPROVED_SOURCE_COMMIT) throw new Error(`history_tampered: companion approvedSource.commit must be ${FROZEN_APPROVED_SOURCE_COMMIT}; restore the reviewed companion`);
+      const sourceRef = FROZEN_APPROVED_SOURCE_COMMIT;
       const actual = Buffer.from(stableJson(generateVerificationV2({ root, fixture, sourceRef, historicalFixturePath: path.relative(root, fixture).replaceAll(path.sep, '/') })));
       const expected = fs.readFileSync(companion);
       if (!actual.equals(expected)) throw new Error(`occurrence_changed: v2 companion differs from approved-source regeneration; review ${companion}`);
