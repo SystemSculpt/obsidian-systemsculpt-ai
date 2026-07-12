@@ -123,6 +123,6 @@ export function attachOverlapInsetManager(component: Component, options: Overlap
     cleanupObservers();
     anchorEl = null;
     container.style.removeProperty("padding-bottom");
-    container.style.setProperty(cssVariable, "0px", "important");
+    container.setCssProps({ [cssVariable]: "0px" });
   });
 }

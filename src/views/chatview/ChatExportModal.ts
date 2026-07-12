@@ -42,7 +42,7 @@ export class ChatExportModal extends Modal {
   async onOpen(): Promise<void> {
     const { contentEl } = this;
     contentEl.empty();
-    contentEl.createEl('h2', { text: 'Export Chat' });
+    contentEl.createEl('h2', { text: 'Export chat' });
 
     await this.renderSummary(contentEl);
     this.renderOptions(contentEl);
@@ -61,7 +61,7 @@ export class ChatExportModal extends Modal {
       const result = await this.chatView.exportChat(this.state.options);
       const { summary } = result.context;
 
-      container.createEl('h3', { text: 'Conversation Summary' });
+      container.createEl('h3', { text: 'Conversation summary' });
 
       const totalsSetting = new Setting(container)
         .setName('Messages')
@@ -102,7 +102,7 @@ export class ChatExportModal extends Modal {
   }
 
   private renderOptions(container: HTMLElement): void {
-    container.createEl('h3', { text: 'Include Sections' });
+    container.createEl('h3', { text: 'Include sections' });
 
     const groups: Array<{ label: string; keys: Array<{ key: keyof ChatExportOptions; label: string; description?: string }> }> = [
       {
@@ -180,7 +180,7 @@ export class ChatExportModal extends Modal {
 
     const fileSetting = new Setting(container)
       .setName('File name')
-      .setDesc('Name of the exported markdown note (without extension).');
+      .setDesc('Name of the exported Markdown note (without extension).');
 
     fileSetting.addText((text) => {
       text.setPlaceholder('File name');

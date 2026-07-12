@@ -180,7 +180,7 @@ export function renderTextNodeInlineEditor(options: RenderStudioTextNodeInlineEd
 
   const controlsEl = editorWrapEl.createDiv({ cls: "ss-studio-node-text-editor-controls" });
   const modeToggleEl = controlsEl.createDiv({ cls: "ss-studio-node-text-display-mode" });
-  modeToggleEl.createEl("span", {
+  modeToggleEl.createSpan({
     cls: "ss-studio-node-text-display-mode-label",
     text: "Mode",
   });
@@ -189,7 +189,7 @@ export function renderTextNodeInlineEditor(options: RenderStudioTextNodeInlineEd
     cls: "ss-studio-node-text-display-mode-button",
     text: "Raw",
     attr: {
-      "aria-label": "Show raw markdown source",
+      "aria-label": "Show raw Markdown source",
     },
   });
   rawModeButtonEl.type = "button";
@@ -199,7 +199,7 @@ export function renderTextNodeInlineEditor(options: RenderStudioTextNodeInlineEd
     cls: "ss-studio-node-text-display-mode-button",
     text: "Rendered",
     attr: {
-      "aria-label": "Show rendered markdown preview",
+      "aria-label": "Show rendered Markdown preview",
     },
   });
   renderedModeButtonEl.type = "button";

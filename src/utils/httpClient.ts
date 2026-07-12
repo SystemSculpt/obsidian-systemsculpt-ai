@@ -77,13 +77,13 @@ export async function httpRequest(opts: HttpRequestOptions): Promise<HttpRespons
       const finish = (callback: () => void) => {
         if (settled) return;
         settled = true;
-        if (timer) clearTimeout(timer);
+        if (timer) window.clearTimeout(timer);
         opts.signal?.removeEventListener('abort', onAbort);
         callback();
       };
       const onAbort = () => finish(() => reject(abortError()));
       if (timeoutMs) {
-        timer = setTimeout(() => finish(() => reject(new Error('Request timed out'))), timeoutMs);
+        timer = window.setTimeout(() => finish(() => reject(new Error('Request timed out'))), timeoutMs);
       }
       opts.signal?.addEventListener('abort', onAbort, { once: true });
 
@@ -137,9 +137,9 @@ export async function httpRequest(opts: HttpRequestOptions): Promise<HttpRespons
 
       const onAbort = () => req.destroy(abortError());
       opts.signal?.addEventListener('abort', onAbort, { once: true });
-      const timer = timeoutMs ? setTimeout(() => req.destroy(new Error("Request timed out")), timeoutMs) : null;
+      const timer = timeoutMs ? window.setTimeout(() => req.destroy(new Error("Request timed out")), timeoutMs) : null;
       const clearTimer = () => {
-        if (timer) clearTimeout(timer);
+        if (timer) window.clearTimeout(timer);
         opts.signal?.removeEventListener('abort', onAbort);
       };
 

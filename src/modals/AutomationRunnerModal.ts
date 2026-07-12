@@ -30,7 +30,7 @@ export class AutomationRunnerModal extends SuggestModal<AutomationOption> {
   }
 
   renderSuggestion(option: AutomationOption, el: HTMLElement): void {
-    el.createEl("div", { text: option.title, cls: "ss-automation-suggestion-title" });
+    el.createDiv({ text: option.title, cls: "ss-automation-suggestion-title" });
     if (option.subtitle) {
       el.createEl("small", { text: option.subtitle, cls: "ss-automation-suggestion-subtitle" });
     }

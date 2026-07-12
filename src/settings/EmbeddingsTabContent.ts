@@ -169,7 +169,7 @@ async function renderExclusionsSection(containerEl: HTMLElement, tabInstance: Sy
 
   new Setting(containerEl)
     .setName("Respect Obsidian exclusions")
-    .setDesc("Reuse the ignored files configured in Settings → Files & Links.")
+    .setDesc("Reuse the ignored files configured in settings → files & links.")
     .addToggle((toggle) => {
       toggle
         .setValue(exclusions.respectObsidianExclusions)
@@ -218,7 +218,7 @@ async function renderExclusionsSection(containerEl: HTMLElement, tabInstance: Sy
 
   const patternSetting = new Setting(containerEl)
     .setName("Excluded patterns")
-    .setDesc("File name patterns (glob) to skip, e.g., *.png.");
+    .setDesc("File name patterns (glob) to skip, e.g., *.PNG.");
 
   patternSetting.addText((text) => {
     text.setPlaceholder("pattern e.g. *.png");

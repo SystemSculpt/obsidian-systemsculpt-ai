@@ -275,7 +275,7 @@ export class RecorderUIManager {
       if (x > this.visualizerCanvas.width) break;
     }
 
-    this.animationId = requestAnimationFrame(() => this.renderVisualization());
+    this.animationId = window.requestAnimationFrame(() => this.renderVisualization());
   }
 
   private stopVisualization(): void {

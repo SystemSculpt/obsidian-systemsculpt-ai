@@ -63,7 +63,8 @@ export function shouldExcludeFromSearch(file: TFile, plugin: SystemSculptPlugin)
     }
   }
 
-  if (file.path.startsWith(".obsidian/") || file.path.includes("node_modules/")) {
+  const configDir = plugin.app.vault.configDir;
+  if (file.path.startsWith(`${configDir}/`) || file.path.includes("node_modules/")) {
     return true;
   }
 

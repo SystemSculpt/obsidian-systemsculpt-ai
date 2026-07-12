@@ -61,9 +61,9 @@ export class AtMentionMenu extends Component {
     this.chatView = chatView;
     this.inputElement = inputElement;
 
-    this.menuEl = document.createElement("div");
+    this.menuEl = createDiv();
     this.menuEl.addClass("suggestion-container", "systemsculpt-at-mention-suggest");
-    this.menuEl.style.display = "none";
+    this.menuEl.setCssStyles({ display: "none" });
 
     this.listEl = this.menuEl.createDiv({ cls: "suggestion" });
     document.body.appendChild(this.menuEl);
@@ -99,7 +99,7 @@ export class AtMentionMenu extends Component {
       this.selectedIndex = 0;
     }
 
-    this.menuEl.style.display = "block";
+    this.menuEl.setCssStyles({ display: "block" });
     this.positionMenu();
     this.scheduleSearch({ resetSelection: !wasVisible || triggerChanged, immediate: true });
   }
@@ -119,7 +119,7 @@ export class AtMentionMenu extends Component {
   public hide(): void {
     if (!this.isVisible) return;
     this.isVisible = false;
-    this.menuEl.style.display = "none";
+    this.menuEl.setCssStyles({ display: "none" });
     this.triggerIndex = -1;
     this.tokenEndIndex = -1;
     this.query = "";
@@ -481,10 +481,10 @@ export class AtMentionMenu extends Component {
     this.menuEl.style.width = `${width}px`;
 
     if (preferAbove && spaceAbove >= 200) {
-      this.menuEl.style.top = "auto";
+      this.menuEl.setCssStyles({ top: "auto" });
       this.menuEl.style.bottom = `${window.innerHeight - inputRect.top + 8}px`;
     } else {
-      this.menuEl.style.bottom = "auto";
+      this.menuEl.setCssStyles({ bottom: "auto" });
       this.menuEl.style.top = `${inputRect.bottom + 8}px`;
     }
   }

@@ -264,7 +264,7 @@ export default class SystemSculptPlugin extends Plugin {
       } else if (typeof window !== "undefined" && typeof window.setTimeout === "function") {
         window.setTimeout(runner, timeoutMs);
       } else {
-        setTimeout(runner, timeoutMs);
+        window.setTimeout(runner, timeoutMs);
       }
     });
   }
@@ -385,7 +385,7 @@ export default class SystemSculptPlugin extends Plugin {
       typeof __SS_BUILD_STAMP__ !== "undefined" ? __SS_BUILD_STAMP__ : "dev";
     // Plain console line (not just the plugin logger) so any vault can
     // answer "which build am I running?" straight from devtools.
-    console.info(
+    console.debug(
       `[SystemSculpt] v${this.manifest.version} build ${buildStamp}`
     );
     const tracer = this.getInitializationTracer();
@@ -2126,7 +2126,7 @@ export default class SystemSculptPlugin extends Plugin {
       }
       focusPluginTab();
     } catch {
-      new Notice("Open Settings → SystemSculpt AI to manage your account and plugin preferences.", 6000);
+      new Notice("Open SystemSculpt AI settings to manage your account and plugin preferences.", 6000);
     }
   }
 
@@ -2339,7 +2339,7 @@ export default class SystemSculptPlugin extends Plugin {
 
     this.addCommand({
       id: "systemsculpt-copy-resource-report",
-      name: "Copy Resource Usage Report",
+      name: "Copy resource usage report",
       callback: this.wrapCommandCallback("copy-resource-report", async () => {
         const monitor = this.getResourceMonitor();
         if (!monitor) {
@@ -2362,7 +2362,7 @@ export default class SystemSculptPlugin extends Plugin {
     // Command: Audio Chunking Analysis
     this.addCommand({
       id: 'audio-chunking-analysis',
-      name: 'Run Audio Chunking Analysis',
+      name: 'Run audio chunking analysis',
       callback: this.wrapCommandCallback('audio-chunking-analysis', () => {
         // Import and run the analysis
         import("./commands/RunAudioAnalysis").then(module => {
@@ -2376,7 +2376,7 @@ export default class SystemSculptPlugin extends Plugin {
     // Command: Find Similar Notes (Current Note)
     this.addCommand({
       id: 'find-similar-current-note',
-      name: 'Find Similar Notes (Current Note)',
+      name: 'Find similar notes (current note)',
       editorCallback: this.wrapCommandCallback('find-similar-current-note', async (editor, view) => {
         if (!view.file) {
           new Notice("No active file selected.");
@@ -2394,7 +2394,7 @@ export default class SystemSculptPlugin extends Plugin {
         try {
           // Check if embeddings are enabled
           if (!this.settings.embeddingsEnabled) {
-            new Notice("Enable embeddings in Settings > SystemSculpt AI > Embeddings to find similar notes.");
+            new Notice("Enable embeddings in SystemSculpt AI settings to find similar notes.");
             return;
           }
 
@@ -2412,11 +2412,11 @@ export default class SystemSculptPlugin extends Plugin {
     // Command: Process Embeddings
     this.addCommand({
       id: 'process-embeddings',
-      name: 'Process Embeddings',
+      name: 'Process embeddings',
       callback: this.wrapCommandCallback('process-embeddings', async () => {
         try {
           if (!this.settings.embeddingsEnabled) {
-            new Notice("Embeddings are disabled. Enable them in Settings > SystemSculpt AI > Embeddings.");
+            new Notice("Embeddings are disabled. Enable them in SystemSculpt AI settings.");
             return;
           }
 
@@ -2431,11 +2431,11 @@ export default class SystemSculptPlugin extends Plugin {
     // Command: Rebuild Embeddings
     this.addCommand({
       id: 'rebuild-embeddings',
-      name: 'Rebuild Embeddings',
+      name: 'Rebuild embeddings',
       callback: this.wrapCommandCallback('rebuild-embeddings', async () => {
         try {
           if (!this.settings.embeddingsEnabled) {
-            new Notice("Embeddings are disabled. Enable them in Settings > SystemSculpt AI > Embeddings.");
+            new Notice("Embeddings are disabled. Enable them in SystemSculpt AI settings.");
             return;
           }
 

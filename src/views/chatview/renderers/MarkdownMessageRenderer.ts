@@ -72,7 +72,7 @@ export class MarkdownMessageRenderer extends Component {
 
     // If this is a final render ensure any queued update is flushed first
     if (state?.timeoutId) {
-      clearTimeout(state.timeoutId);
+      window.clearTimeout(state.timeoutId);
       state.timeoutId = null;
     }
 
@@ -136,7 +136,7 @@ export class MarkdownMessageRenderer extends Component {
 
     if (state.timeoutId) return; // Already scheduled
 
-    state.timeoutId = setTimeout(async () => {
+    state.timeoutId = window.setTimeout(async () => {
       const current = this.throttledRenderers.get(containerEl);
       if (!current) return;
       current.timeoutId = null;
@@ -175,7 +175,7 @@ export class MarkdownMessageRenderer extends Component {
 
       // Avoid duplicating copy buttons on re-renders
       if (!pre.querySelector('.copy-code-button')) {
-        const btn = document.createElement('button');
+        const btn = createEl('button');
         btn.className = 'copy-code-button';
         btn.type = 'button';
         btn.setAttribute('aria-label', 'Copy code');
@@ -188,7 +188,7 @@ export class MarkdownMessageRenderer extends Component {
             const text = codeEl ? (codeEl as HTMLElement).innerText : pre.innerText;
             await navigator.clipboard.writeText(text);
             btn.textContent = 'Copied';
-            setTimeout(() => (btn.textContent = 'Copy'), 1200);
+            window.setTimeout(() => (btn.textContent = 'Copy'), 1200);
             new Notice('Code copied to clipboard', 1500);
           } catch {
             new Notice('Failed to copy code', 2000);
@@ -202,7 +202,7 @@ export class MarkdownMessageRenderer extends Component {
     // Obsidian's proprietary app:// URL scheme.
     container.querySelectorAll("img").forEach((img) => {
       img.addClass("systemsculpt-message-image");
-      img.style.cursor = "pointer";
+      img.setCssStyles({ cursor: "pointer" });
 
       img.addEventListener("click", async (e) => {
         e.preventDefault();
@@ -301,12 +301,12 @@ export class MarkdownMessageRenderer extends Component {
     const contentContainer = getBlockContent(block);
     if (!contentContainer) return;
 
-    const citationsList = contentContainer.createEl("div", {
+    const citationsList = contentContainer.createDiv({
       cls: "systemsculpt-citations-list",
     });
 
     for (const citation of citations) {
-      const li = citationsList.createEl("div", { cls: "systemsculpt-citation-item" });
+      const li = citationsList.createDiv({ cls: "systemsculpt-citation-item" });
 
       const titleLink = li.createEl("a", {
         cls: "systemsculpt-citation-title",
@@ -323,7 +323,7 @@ export class MarkdownMessageRenderer extends Component {
         window.open(citation.url, "_blank");
       });
 
-      li.createEl("div", {
+      li.createDiv({
         cls: "systemsculpt-citation-url",
         text: citation.url,
       });
@@ -353,7 +353,7 @@ export class MarkdownMessageRenderer extends Component {
         div.textContent = fixed;
       }
 
-      const m = (globalThis as any).mermaid;
+      const m = (window as any).mermaid;
       if (m && typeof m.init === "function") {
         try {
           m.init(undefined, div);

@@ -50,7 +50,7 @@ class AutomationProcessingModal implements AutomationProcessingModalHandle {
     setIcon(headerIcon, "sparkles");
 
     const headerContent = header.createDiv({ cls: "systemsculpt-progress-title" });
-    headerContent.setText("Workflow Automation");
+    headerContent.setText("Workflow automation");
 
     const fileMeta = this.container.createDiv({ cls: "systemsculpt-progress-status" });
     const fileIcon = fileMeta.createSpan({ cls: "systemsculpt-progress-status-icon" });

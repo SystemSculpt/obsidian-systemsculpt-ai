@@ -23,7 +23,7 @@ const BATCH_SIZE = 3;
 const INTER_BATCH_DELAY_MS = 1000;
 
 function createWorkflowOperationId(): string {
-  const random = globalThis.crypto?.randomUUID?.().replace(/-/g, "")
+  const random = window.crypto?.randomUUID?.().replace(/-/g, "")
     ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`;
   return `workflow:${random}`.slice(0, 128);
 }
@@ -91,7 +91,7 @@ export class WorkflowEngineService {
 
   private clearDebounceTimer(): void {
     if (this.debounceTimer !== null) {
-      clearTimeout(this.debounceTimer);
+      window.clearTimeout(this.debounceTimer);
       this.debounceTimer = null;
     }
   }
@@ -306,7 +306,7 @@ export class WorkflowEngineService {
     this.pendingFiles.push(pending);
     this.clearDebounceTimer();
 
-    this.debounceTimer = setTimeout(() => {
+    this.debounceTimer = window.setTimeout(() => {
       void this.flushPendingFiles();
     }, DEBOUNCE_MS);
   }
@@ -595,7 +595,7 @@ export class WorkflowEngineService {
   }
 
   private delay(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+    return new Promise((resolve) => window.setTimeout(resolve, ms));
   }
 
   private getWorkflowSettings(): WorkflowEngineSettings {

@@ -118,7 +118,7 @@ export class StudioSimpleContextMenuOverlay {
     this.renderItems(Array.isArray(options.items) ? options.items : []);
 
     this.cancelPendingFocus();
-    this.rootEl.style.display = "flex";
+    this.rootEl.setCssStyles({ display: "flex" });
     this.rootEl.removeAttribute("inert");
     this.rootEl.setAttribute("aria-hidden", "false");
     this.isVisible = true;
@@ -152,7 +152,7 @@ export class StudioSimpleContextMenuOverlay {
       if (activeElement && this.rootEl.contains(activeElement) && typeof activeElement.blur === "function") {
         activeElement.blur();
       }
-      this.rootEl.style.display = "none";
+      this.rootEl.setCssStyles({ display: "none" });
       this.rootEl.setAttribute("inert", "");
       this.rootEl.setAttribute("aria-hidden", "true");
     }
@@ -173,7 +173,7 @@ export class StudioSimpleContextMenuOverlay {
     }
 
     const root = this.viewportEl.createDiv({ cls: "ss-studio-simple-context-menu" });
-    root.style.display = "none";
+    root.setCssStyles({ display: "none" });
     root.setAttribute("inert", "");
     root.setAttribute("role", "menu");
     root.setAttribute("aria-hidden", "true");

@@ -50,7 +50,7 @@ export class PopupComponent {
 
   private createPopup() {
     // Create container
-    this.containerEl = document.createElement("div");
+    this.containerEl = createDiv();
     this.containerEl.addClass("systemsculpt-popup-container");
     document.body.appendChild(this.containerEl);
 
@@ -87,10 +87,10 @@ export class PopupComponent {
     // Add checkbox if provided
     if (this.options.checkboxLabel) {
       const checkboxContainer = content.createDiv({ cls: "systemsculpt-popup-checkbox-container" });
-      const checkbox = document.createElement("input");
+      const checkbox = createEl("input");
       checkbox.type = "checkbox";
       checkbox.id = "systemsculpt-popup-checkbox";
-      const label = document.createElement("label");
+      const label = createEl("label");
       label.htmlFor = "systemsculpt-popup-checkbox";
       label.textContent = this.options.checkboxLabel;
       checkboxContainer.appendChild(checkbox);
@@ -206,7 +206,7 @@ export class PopupComponent {
 
   private close() {
     this.containerEl.addClass("systemsculpt-popup-closing");
-    setTimeout(() => {
+    window.setTimeout(() => {
       this.removeAllListeners();
       this.containerEl.remove();
       if (this.resolvePromise) {

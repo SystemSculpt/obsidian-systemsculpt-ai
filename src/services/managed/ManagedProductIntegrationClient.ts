@@ -126,7 +126,7 @@ function rejectForbiddenFields(value: unknown): void {
 }
 
 function requestId(): string {
-  if (typeof globalThis.crypto?.randomUUID === "function") return globalThis.crypto.randomUUID();
+  if (typeof window.crypto?.randomUUID === "function") return window.crypto.randomUUID();
   return `local-${Date.now()}-${Math.random().toString(36).slice(2, 14)}`;
 }
 

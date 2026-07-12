@@ -56,7 +56,7 @@ export class ResumeChatService {
   }
 
   private scheduleInitialRefresh() {
-    setTimeout(() => {
+    window.setTimeout(() => {
       this.app.workspace.iterateAllLeaves((leaf) => {
         void this.handleLeafChange(leaf);
       });
@@ -69,7 +69,7 @@ export class ResumeChatService {
       if (scheduled) return;
       scheduled = true;
       // Defer and coalesce repeated layout-change bursts
-      setTimeout(() => {
+      window.setTimeout(() => {
         try {
           this.app.workspace.iterateAllLeaves((leaf) => {
             this.handleLeafChange(leaf);
@@ -152,10 +152,10 @@ export class ResumeChatService {
   }
 
   private createResumeChatButton(chatId: string, file: TFile): HTMLElement {
-    const buttonContainer = document.createElement('div');
+    const buttonContainer = createDiv();
     buttonContainer.className = 'systemsculpt-resume-chat-button';
 
-    const button = document.createElement('button');
+    const button = createEl('button');
     button.className = 'systemsculpt-resume-chat-btn';
     button.textContent = 'Resume this chat';
 

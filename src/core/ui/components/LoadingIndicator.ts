@@ -1,5 +1,5 @@
 export const createLoadingIndicator = () => {
-  const indicator = document.createElement("div");
+  const indicator = createDiv();
   indicator.className = "systemsculpt-loading";
   indicator.textContent = "●";
   return indicator;

@@ -132,7 +132,7 @@ export class ListSelectionModal extends StandardModal {
       cls: "ss-modal__empty-state",
       text: this.options.emptyText 
     });
-    this.emptyStateEl.style.display = "none";
+    this.emptyStateEl.setCssStyles({ display: "none" });
     
     // Render initial items
     this.renderItems();
@@ -145,7 +145,7 @@ export class ListSelectionModal extends StandardModal {
     
     // Focus search input if present
     if (this.searchInput) {
-      setTimeout(() => this.searchInput?.focus(), 50);
+      window.setTimeout(() => this.searchInput?.focus(), 50);
     }
     
     // Initialize keyboard navigation
@@ -206,7 +206,7 @@ export class ListSelectionModal extends StandardModal {
         
         if (this.emptyStateEl) {
           this.emptyStateEl.textContent = "Error searching files. Please try again.";
-          this.emptyStateEl.style.display = "flex";
+          this.emptyStateEl.setCssStyles({ display: "flex" });
         }
         
         this.keyboardNavService.setItemCount(0);
@@ -296,14 +296,14 @@ export class ListSelectionModal extends StandardModal {
     // Show empty state if no items
     if (this.filteredItems.length === 0) {
       if (this.emptyStateEl) {
-        this.emptyStateEl.style.display = "flex";
+        this.emptyStateEl.setCssStyles({ display: "flex" });
       }
       return;
     }
     
     // Hide empty state
     if (this.emptyStateEl) {
-      this.emptyStateEl.style.display = "none";
+      this.emptyStateEl.setCssStyles({ display: "none" });
     }
 
     // Remove any existing previews
@@ -389,7 +389,7 @@ export class ListSelectionModal extends StandardModal {
 
   /** Create a list item for this modal. */
   createListItem(itemData: ListItem) {
-    const itemEl = document.createElement("div");
+    const itemEl = createDiv();
     itemEl.className = "ss-modal__item";
     
     // Add additional classes if provided
@@ -430,7 +430,7 @@ export class ListSelectionModal extends StandardModal {
     // Add thumbnail for image files
     if (thumbnail && fileType && this.isImageType(fileType)) {
       const thumbnailContainer = itemEl.createDiv("ss-modal__item-thumbnail");
-      const img = document.createElement("img");
+      const img = createEl("img");
       img.src = thumbnail;
       img.alt = title;
       img.loading = "lazy"; // Lazy load images for better performance
@@ -480,17 +480,17 @@ export class ListSelectionModal extends StandardModal {
   private showPreview(imageUrl: string, title: string, event: MouseEvent): void {
     this.removePreviewContainer(); // Remove any existing previews
     
-    const previewContainer = document.createElement("div");
+    const previewContainer = createDiv();
     previewContainer.className = "ss-preview-container";
     
     // Add image title
-    const titleEl = document.createElement("div");
+    const titleEl = createDiv();
     titleEl.className = "ss-preview-title";
     titleEl.textContent = title;
     previewContainer.appendChild(titleEl);
     
     // Add image
-    const previewImg = document.createElement("img");
+    const previewImg = createEl("img");
     previewImg.src = imageUrl;
     previewImg.alt = title;
     previewImg.onload = () => {
@@ -561,10 +561,10 @@ export class ListSelectionModal extends StandardModal {
       itemEl.classList.add("expanded");
       
       // Create and add preview element
-      const previewContainer = document.createElement("div");
+      const previewContainer = createDiv();
       previewContainer.className = "ss-modal__item-preview";
       
-      const previewImg = document.createElement("img");
+      const previewImg = createEl("img");
       previewImg.src = imageUrl;
       previewImg.alt = title;
       

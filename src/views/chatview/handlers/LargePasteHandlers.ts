@@ -34,14 +34,14 @@ export async function handleLargeTextPaste(ctx: LargePasteContext, text: string)
 export function showLargeTextWarning(ctx: LargePasteContext, sizeKB: number, text: string): Promise<boolean> {
   return new Promise((resolve) => {
     const modal = new Modal(ctx.app);
-    modal.titleEl.setText('Large Text Detected');
+    modal.titleEl.setText('Large text detected');
 
     const content = modal.contentEl;
     content.createEl('p', {
       text: `You're trying to paste ${Math.round(sizeKB)}KB of text. This might cause performance issues.`
     });
 
-    const preview = content.createEl('div', { cls: 'systemsculpt-large-text-preview' });
+    const preview = content.createDiv({ cls: 'systemsculpt-large-text-preview' });
     preview.createEl('p', { text: 'Preview (first 200 characters):' });
     preview.createEl('pre', {
       text: text.substring(0, 200) + (text.length > 200 ? '...' : ''),
@@ -50,7 +50,7 @@ export function showLargeTextWarning(ctx: LargePasteContext, sizeKB: number, tex
 
     const buttonContainer = content.createDiv({ cls: 'systemsculpt-modal-buttons' });
 
-    const proceedBtn = buttonContainer.createEl('button', { text: 'Proceed Anyway' });
+    const proceedBtn = buttonContainer.createEl('button', { text: 'Proceed anyway' });
     proceedBtn.addEventListener('click', () => {
       modal.close();
       resolve(true);

@@ -31,7 +31,7 @@ const DEFAULT_ICONS: Record<InlineBlockType, string> = {
 export function createInlineBlock(options: InlineBlockOptions): HTMLElement {
   const { type, partId, isStreaming, title, icon, statusText, statusState } = options;
 
-  const wrapper = document.createElement("div");
+  const wrapper = createDiv();
   wrapper.className = `systemsculpt-inline-collapsible systemsculpt-inline-${type}`;
   wrapper.dataset.partId = partId;
   wrapper.dataset.blockType = type;
@@ -139,7 +139,7 @@ export function setStatus(block: HTMLElement, statusText?: string, statusState?:
     const header = block.querySelector(".systemsculpt-inline-collapsible-header") as HTMLElement | null;
     const chevron = block.querySelector(".systemsculpt-inline-collapsible-chevron");
     if (!header) return;
-    statusEl = document.createElement("div");
+    statusEl = createDiv();
     statusEl.className = "systemsculpt-inline-collapsible-status";
     if (chevron) {
       header.insertBefore(statusEl, chevron);

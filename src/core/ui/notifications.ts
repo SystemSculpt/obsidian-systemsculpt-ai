@@ -111,7 +111,7 @@ export async function showConfirm(
  * @param options - Notification options.
  */
 export function displayNotice(app: App, parts: { title: string; path?: string; message?: string }, options: NotificationOptions = {}) {
-  const fragment = document.createDocumentFragment();
+  const fragment = createFragment();
 
   // Title (e.g., "Switched to tab")
   const titleEl = fragment.createDiv({ cls: 'systemsculpt-notice-title' });

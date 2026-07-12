@@ -16,24 +16,24 @@ export class StreamingIndicator {
   private visible: boolean = false;
 
   constructor() {
-    this.element = document.createElement("div");
+    this.element = createDiv();
     this.element.className = "ss-streaming-indicator";
     this.element.setAttribute("role", "status");
     this.element.setAttribute("aria-live", "polite");
 
     // Header: dots + label
-    const headerEl = document.createElement("div");
+    const headerEl = createDiv();
     headerEl.className = "ss-streaming-header";
 
-    const dotsEl = document.createElement("div");
+    const dotsEl = createDiv();
     dotsEl.className = "ss-typing-dots";
     for (let i = 0; i < 3; i++) {
-      const dot = document.createElement("span");
+      const dot = createSpan();
       dot.className = "ss-dot";
       dotsEl.appendChild(dot);
     }
 
-    this.labelEl = document.createElement("span");
+    this.labelEl = createSpan();
     this.labelEl.className = "ss-streaming-label";
     this.labelEl.textContent = "Preparing\u2026";
 
@@ -41,10 +41,10 @@ export class StreamingIndicator {
     headerEl.appendChild(this.labelEl);
 
     // Metrics row: elapsed time only
-    const metricsEl = document.createElement("div");
+    const metricsEl = createDiv();
     metricsEl.className = "ss-streaming-metrics";
 
-    this.elapsedEl = document.createElement("span");
+    this.elapsedEl = createSpan();
     this.elapsedEl.className = "ss-metric ss-elapsed";
     this.elapsedEl.textContent = "0:00";
 
@@ -87,7 +87,7 @@ export class StreamingIndicator {
     this.element.addEventListener("animationend", handleEnd);
 
     // Fallback in case animation doesn't fire
-    setTimeout(() => {
+    window.setTimeout(() => {
       if (!this.visible) {
         onComplete?.();
       }

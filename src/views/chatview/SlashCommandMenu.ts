@@ -129,7 +129,7 @@ export class SlashCommandMenu extends Component {
             });
             
             // Focus the clear button so Enter works immediately
-            setTimeout(() => clearBtn.focus(), 0);
+            window.setTimeout(() => clearBtn.focus(), 0);
           };
           
           // After the modal fully closes, focus the input for immediate typing
@@ -235,7 +235,7 @@ export class SlashCommandMenu extends Component {
             cancelBtn.addEventListener('click', () => confirmModal.close());
             
             const deleteBtn = buttonContainer.createEl('button', { 
-              text: 'Delete Chat',
+              text: 'Delete chat',
               cls: 'mod-warning'
             });
             
@@ -248,7 +248,7 @@ export class SlashCommandMenu extends Component {
 
                 // Delete the chat file if it exists
                 if (file) {
-                  await this.plugin.app.vault.trash(file, true);
+                  await this.plugin.app.fileManager.trashFile(file);
                 }
 
                 // Close the ChatView
@@ -276,7 +276,7 @@ export class SlashCommandMenu extends Component {
             });
 
             // Focus the delete button so Enter works immediately
-            setTimeout(() => deleteBtn.focus(), 0);
+            window.setTimeout(() => deleteBtn.focus(), 0);
           };
 
           confirmModal.open();
@@ -288,16 +288,16 @@ export class SlashCommandMenu extends Component {
   }
 
   private createMenuElement(): void {
-    this.menuElement = document.createElement('div');
+    this.menuElement = createDiv();
     this.menuElement.className = 'systemsculpt-slash-command-menu';
     
     // Create results container first (so it appears at the top)
-    this.resultsContainer = this.menuElement.createEl('div', { cls: 'systemsculpt-slash-results-container' });
+    this.resultsContainer = this.menuElement.createDiv({ cls: 'systemsculpt-slash-results-container' });
     
     // Create search input at the bottom
-    const searchContainer = this.menuElement.createEl('div', { cls: 'systemsculpt-slash-search-container' });
+    const searchContainer = this.menuElement.createDiv({ cls: 'systemsculpt-slash-search-container' });
     
-    const searchIcon = searchContainer.createEl('div', { cls: 'systemsculpt-slash-search-icon' });
+    const searchIcon = searchContainer.createDiv({ cls: 'systemsculpt-slash-search-icon' });
     setIcon(searchIcon, 'search');
     
     this.searchInput = searchContainer.createEl('input', {
@@ -306,7 +306,7 @@ export class SlashCommandMenu extends Component {
     });
     
     // Initially hidden
-    this.menuElement.style.display = 'none';
+    this.menuElement.setCssStyles({ display: 'none' });
     
     // Add to document body to avoid positioning issues
     document.body.appendChild(this.menuElement);
@@ -345,22 +345,22 @@ export class SlashCommandMenu extends Component {
     
     if (this.filteredCommands.length === 0) {
       // Show empty state
-      const emptyState = this.resultsContainer.createEl('div', { cls: 'systemsculpt-slash-empty-state' });
+      const emptyState = this.resultsContainer.createDiv({ cls: 'systemsculpt-slash-empty-state' });
       emptyState.textContent = 'No commands found';
       return;
     }
     
     this.filteredCommands.forEach((command, index) => {
-      const item = this.resultsContainer.createEl('div', {
+      const item = this.resultsContainer.createDiv({
         cls: `systemsculpt-slash-result-item ${index === this.selectedIndex ? 'is-selected' : ''}`
       });
       
-      const icon = item.createEl('div', { cls: 'systemsculpt-slash-result-icon' });
+      const icon = item.createDiv({ cls: 'systemsculpt-slash-result-icon' });
       setIcon(icon, command.icon);
       
-      const content = item.createEl('div', { cls: 'systemsculpt-slash-result-content' });
-      const title = content.createEl('div', { cls: 'systemsculpt-slash-result-title', text: command.name });
-      const description = content.createEl('div', { cls: 'systemsculpt-slash-result-description', text: command.description });
+      const content = item.createDiv({ cls: 'systemsculpt-slash-result-content' });
+      const title = content.createDiv({ cls: 'systemsculpt-slash-result-title', text: command.name });
+      const description = content.createDiv({ cls: 'systemsculpt-slash-result-description', text: command.description });
       
       this.registerDomEvent(item, 'click', () => {
         this.executeCommand(command);
@@ -434,7 +434,7 @@ export class SlashCommandMenu extends Component {
     // Position the menu relative to the input
     this.positionMenu();
     
-    this.menuElement.style.display = 'block';
+    this.menuElement.setCssStyles({ display: 'block' });
     this.searchInput.focus();
   }
 
@@ -442,7 +442,7 @@ export class SlashCommandMenu extends Component {
     if (!this.isVisible) return;
     
     this.isVisible = false;
-    this.menuElement.style.display = 'none';
+    this.menuElement.setCssStyles({ display: 'none' });
     this.searchInput.value = '';
     this.onClose();
   }
@@ -488,10 +488,10 @@ export class SlashCommandMenu extends Component {
     // Check if there's enough space above the input
     if (inputRect.top < 320) { // Not enough space above, position below instead
       this.menuElement.style.top = `${inputRect.bottom + 10}px`;
-      this.menuElement.style.bottom = 'auto';
+      this.menuElement.setCssStyles({ bottom: 'auto' });
     } else {
       // Position above input, anchored to bottom so it shrinks downward
-      this.menuElement.style.top = 'auto';
+      this.menuElement.setCssStyles({ top: 'auto' });
       this.menuElement.style.bottom = `${bottom}px`;
     }
 

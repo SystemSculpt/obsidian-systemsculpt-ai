@@ -55,7 +55,7 @@ export class SystemSculptSearchModal extends StandardModal {
     this.registerDomEvent(this.listEl, "keydown", (event) => void this.handleResultKeydown(event as KeyboardEvent));
     this.registerDomEvent(this.listEl, "focusin", (event) => this.handleResultFocus(event));
 
-    setTimeout(() => this.searchInputEl?.focus(), 0);
+    window.setTimeout(() => this.searchInputEl?.focus(), 0);
     void this.renderRecents();
   }
 
@@ -104,7 +104,7 @@ export class SystemSculptSearchModal extends StandardModal {
       },
     });
     setIcon(clear, "x");
-    clear.style.display = "none";
+    clear.setCssStyles({ display: "none" });
 
     this.registerDomEvent(input, "input", () => {
       clear.style.display = input.value ? "flex" : "none";
@@ -122,7 +122,7 @@ export class SystemSculptSearchModal extends StandardModal {
 
     this.registerDomEvent(clear, "click", () => {
       input.value = "";
-      clear.style.display = "none";
+      clear.setCssStyles({ display: "none" });
       onInput("");
       this.focusSearchInput();
     });
@@ -279,7 +279,7 @@ export class SystemSculptSearchModal extends StandardModal {
     }
 
     orderedResults.forEach((result, index) => {
-      const item = document.createElement("div");
+      const item = createDiv();
       item.className = "ss-search__item";
       item.id = this.resultId(index);
       item.setAttr("data-path", result.path);

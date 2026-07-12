@@ -1,7 +1,7 @@
 import { ChatMessage, MessagePart, ChatRole } from "../../../types";
 import * as obsidianApi from "obsidian";
 // Dynamically extract to support stub in tests
-// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+ 
 const { parseYaml } = obsidianApi as any;
 import { MessagePartList } from "../utils/MessagePartList";
 import {

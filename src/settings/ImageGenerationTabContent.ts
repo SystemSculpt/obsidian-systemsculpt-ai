@@ -61,7 +61,7 @@ export function displayImageGenerationTabContent(
     });
 
   new Setting(containerEl)
-    .setName("Artifact retention (MB)")
+    .setName("Artifact retention (mb)")
     .setDesc("Target artifact storage per project before oldest run assets are pruned.")
     .addText((text) => {
       text

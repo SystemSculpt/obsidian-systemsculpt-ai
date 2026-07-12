@@ -73,7 +73,7 @@ export class StudioSandboxRunner {
         return value.slice(0, maxOutputBytes);
       };
 
-      const timeout = setTimeout(() => {
+      const timeout = window.setTimeout(() => {
         timedOut = true;
         try {
           child.kill("SIGKILL");
@@ -91,14 +91,14 @@ export class StudioSandboxRunner {
       child.on("error", (error) => {
         if (settled) return;
         settled = true;
-        clearTimeout(timeout);
+        window.clearTimeout(timeout);
         reject(error);
       });
 
       child.on("close", (code) => {
         if (settled) return;
         settled = true;
-        clearTimeout(timeout);
+        window.clearTimeout(timeout);
         resolve({
           exitCode: typeof code === "number" ? code : 1,
           stdout,

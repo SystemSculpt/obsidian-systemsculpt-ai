@@ -81,7 +81,7 @@ export class ImageProcessor {
       height = Math.round(height * scale);
     }
 
-    const canvas = document.createElement("canvas");
+    const canvas = createEl("canvas");
     canvas.width = width;
     canvas.height = height;
     const ctx = canvas.getContext("2d");

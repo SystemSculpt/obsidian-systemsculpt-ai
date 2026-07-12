@@ -3,6 +3,7 @@
  */
 import { Notice } from 'obsidian';
 import { errorLogger } from './errorLogger';
+import { detectPlatformEnvironment } from "./PlatformEnvironment";
 
 /**
  * Log levels for controlling verbosity
@@ -126,10 +127,7 @@ export async function logMobileError(context: string, message: string, error: an
 export async function logMobilePerformance(operation: string, startTime: number, threshold: number = 1000): Promise<void> {
     const duration = performance.now() - startTime;
     
-    // Check if we're on mobile
-    const isMobile = typeof window !== 'undefined' && 
-                    ((window as any).app?.isMobile || 
-                     /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent));
+    const isMobile = detectPlatformEnvironment().surface === "mobile";
     
     if (isMobile && duration > threshold) {
         // Log performance warning to console instead of DebugLogger
@@ -220,7 +218,7 @@ export async function safeExecuteWithRetry<T>(
 
             if (attempt < maxRetries) {
                 // Wait before retrying
-                await new Promise(resolve => setTimeout(resolve, delayMs));
+                await new Promise(resolve => window.setTimeout(resolve, delayMs));
             }
         }
     }

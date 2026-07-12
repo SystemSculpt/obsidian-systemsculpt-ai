@@ -110,7 +110,7 @@ const saveStoredPosition = (positionKey: string, layout: HoverShellLayout, value
 
 export function createHoverShell(options: HoverShellOptions): HoverShellHandle {
   const host = options.host ?? document.body;
-  const root = document.createElement("div");
+  const root = createDiv();
   root.className = "ss-hover-shell";
   root.dataset.layout = options.layout;
   root.dataset.state = "idle";
@@ -124,15 +124,15 @@ export function createHoverShell(options: HoverShellOptions): HoverShellHandle {
     root.style.width = options.width;
   }
 
-  const header = document.createElement("div");
+  const header = createDiv();
   header.className = "ss-hover-shell__header";
   root.appendChild(header);
 
-  const dragHandleEl = document.createElement("div");
+  const dragHandleEl = createDiv();
   dragHandleEl.className = "ss-hover-shell__drag-handle";
   header.appendChild(dragHandleEl);
 
-  const iconWrap = document.createElement("span");
+  const iconWrap = createSpan();
   iconWrap.className = "ss-hover-shell__icon";
   if (options.icon) {
     setIcon(iconWrap, options.icon);
@@ -141,16 +141,16 @@ export function createHoverShell(options: HoverShellOptions): HoverShellHandle {
   }
   dragHandleEl.appendChild(iconWrap);
 
-  const titleStack = document.createElement("div");
+  const titleStack = createDiv();
   titleStack.className = "ss-hover-shell__title-stack";
   dragHandleEl.appendChild(titleStack);
 
-  const titleEl = document.createElement("div");
+  const titleEl = createDiv();
   titleEl.className = "ss-hover-shell__title";
   titleEl.textContent = options.title;
   titleStack.appendChild(titleEl);
 
-  const subtitleEl = document.createElement("div");
+  const subtitleEl = createDiv();
   subtitleEl.className = "ss-hover-shell__subtitle";
   subtitleEl.textContent = options.subtitle ?? "";
   if (!options.subtitle) {
@@ -158,11 +158,11 @@ export function createHoverShell(options: HoverShellOptions): HoverShellHandle {
   }
   titleStack.appendChild(subtitleEl);
 
-  const headerActionsEl = document.createElement("div");
+  const headerActionsEl = createDiv();
   headerActionsEl.className = "ss-hover-shell__header-actions";
   header.appendChild(headerActionsEl);
 
-  const statusEl = document.createElement("div");
+  const statusEl = createDiv();
   statusEl.className = "ss-hover-shell__status";
   statusEl.textContent = options.statusText ?? "";
   if (options.showStatusRow === false) {
@@ -170,11 +170,11 @@ export function createHoverShell(options: HoverShellOptions): HoverShellHandle {
   }
   root.appendChild(statusEl);
 
-  const contentEl = document.createElement("div");
+  const contentEl = createDiv();
   contentEl.className = "ss-hover-shell__content";
   root.appendChild(contentEl);
 
-  const footerActionsEl = document.createElement("div");
+  const footerActionsEl = createDiv();
   footerActionsEl.className = "ss-hover-shell__footer-actions";
   root.appendChild(footerActionsEl);
 
@@ -191,8 +191,8 @@ export function createHoverShell(options: HoverShellOptions): HoverShellHandle {
     const top = Math.max(0, Math.min(rect.top, maxTop));
     root.style.left = `${left}px`;
     root.style.top = `${top}px`;
-    root.style.right = "auto";
-    root.style.bottom = "auto";
+    root.setCssStyles({ right: "auto" });
+    root.setCssStyles({ bottom: "auto" });
   };
 
   const persistCurrentPosition = (): void => {
@@ -213,8 +213,8 @@ export function createHoverShell(options: HoverShellOptions): HoverShellHandle {
     if (fromStorage) {
       root.style.left = `${fromStorage.left}px`;
       root.style.top = `${fromStorage.top}px`;
-      root.style.right = "auto";
-      root.style.bottom = "auto";
+      root.setCssStyles({ right: "auto" });
+      root.setCssStyles({ bottom: "auto" });
       clampToViewport();
       return;
     }
@@ -231,8 +231,8 @@ export function createHoverShell(options: HoverShellOptions): HoverShellHandle {
 
     root.style.left = `${Math.max(0, left)}px`;
     root.style.top = `${Math.max(0, top)}px`;
-    root.style.right = "auto";
-    root.style.bottom = "auto";
+    root.setCssStyles({ right: "auto" });
+    root.setCssStyles({ bottom: "auto" });
     clampToViewport();
   };
 
@@ -245,7 +245,7 @@ export function createHoverShell(options: HoverShellOptions): HoverShellHandle {
     container.removeAttribute("hidden");
 
     for (const action of actions) {
-      const button = document.createElement("button");
+      const button = createEl("button");
       button.type = "button";
       button.className = "ss-hover-shell__action";
       button.dataset.actionId = action.id;
@@ -256,7 +256,7 @@ export function createHoverShell(options: HoverShellOptions): HoverShellHandle {
         button.classList.add("mod-warning");
       }
       if (action.icon) {
-        const iconEl = document.createElement("span");
+        const iconEl = createSpan();
         iconEl.className = "ss-hover-shell__action-icon";
         setIcon(iconEl, action.icon);
         button.prepend(iconEl);
@@ -299,8 +299,8 @@ export function createHoverShell(options: HoverShellOptions): HoverShellHandle {
       const top = Math.max(0, Math.min(event.clientY - offsetY, maxTop));
       root.style.left = `${left}px`;
       root.style.top = `${top}px`;
-      root.style.right = "auto";
-      root.style.bottom = "auto";
+      root.setCssStyles({ right: "auto" });
+      root.setCssStyles({ bottom: "auto" });
     };
 
     const endDrag = (pointerId?: number) => {
@@ -338,7 +338,7 @@ export function createHoverShell(options: HoverShellOptions): HoverShellHandle {
   window.addEventListener("resize", onResize);
   unsubscribers.push(() => window.removeEventListener("resize", onResize));
 
-  requestAnimationFrame(() => {
+  window.requestAnimationFrame(() => {
     applyInitialPosition();
   });
 
@@ -375,7 +375,7 @@ export function createHoverShell(options: HoverShellOptions): HoverShellHandle {
       root.dataset.state = state;
     },
     show: () => {
-      requestAnimationFrame(() => root.classList.add("is-visible"));
+      window.requestAnimationFrame(() => root.classList.add("is-visible"));
     },
     destroy: () => {
       for (const unsubscribe of unsubscribers) {

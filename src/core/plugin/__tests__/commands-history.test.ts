@@ -19,7 +19,7 @@ describe("CommandManager history commands", () => {
     expect(primary).toEqual(
       expect.objectContaining({
         id: "open-systemsculpt-history",
-        name: "Open SystemSculpt History",
+        name: "Open history",
         callback: expect.any(Function),
       })
     );
@@ -27,7 +27,7 @@ describe("CommandManager history commands", () => {
     expect(legacy).toEqual(
       expect.objectContaining({
         id: "open-chat-history",
-        name: "Open SystemSculpt Chat History (Legacy Alias)",
+        name: "Open chat history (legacy alias)",
         callback: expect.any(Function),
       })
     );

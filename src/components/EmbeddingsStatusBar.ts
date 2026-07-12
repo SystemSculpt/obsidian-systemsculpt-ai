@@ -54,7 +54,7 @@ export class EmbeddingsStatusBar extends Component {
   }
 
   private claimSingleton(): void {
-    const globalScope = globalThis as Record<string, unknown>;
+    const globalScope = window as Record<string, unknown>;
     const existing = globalScope[
       EMBEDDINGS_STATUS_BAR_SINGLETON_KEY
     ] as EmbeddingsStatusBarSingletonEntry | undefined;
@@ -74,7 +74,7 @@ export class EmbeddingsStatusBar extends Component {
   }
 
   private releaseSingleton(): void {
-    const globalScope = globalThis as Record<string, unknown>;
+    const globalScope = window as Record<string, unknown>;
     const existing = globalScope[
       EMBEDDINGS_STATUS_BAR_SINGLETON_KEY
     ] as EmbeddingsStatusBarSingletonEntry | undefined;
@@ -416,7 +416,7 @@ export class EmbeddingsStatusBar extends Component {
 
     const staleItems = Array.from(document.querySelectorAll(`.${pluginStatusBarClass}`)).filter(
       (element): element is HTMLElement =>
-        element instanceof HTMLElement && String(element.textContent || "").includes("Embeddings:")
+        element.instanceOf(HTMLElement) && String(element.textContent || "").includes("Embeddings:")
     );
 
     for (const staleItem of staleItems) {
@@ -446,7 +446,7 @@ export class EmbeddingsStatusBar extends Component {
       this.statusBarEl.style.removeProperty("display");
       this.statusBarEl.removeAttribute("aria-hidden");
     } else {
-      this.statusBarEl.style.display = "none";
+      this.statusBarEl.setCssStyles({ display: "none" });
       this.statusBarEl.setAttr("aria-hidden", "true");
     }
   }

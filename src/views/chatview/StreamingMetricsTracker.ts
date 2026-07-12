@@ -72,7 +72,7 @@ export class StreamingMetricsTracker {
   private tick = (): void => {
     if (!this.running) return;
     this.onUpdate?.(this.getMetrics());
-    this.rafId = requestAnimationFrame(this.tick);
+    this.rafId = window.requestAnimationFrame(this.tick);
   };
 
   private formatElapsed(ms: number): string {

@@ -671,9 +671,9 @@ export class EmbeddingsProcessor {
   }
 
   private createRunId(): string {
-    const randomUUID = globalThis.crypto?.randomUUID;
+    const randomUUID = window.crypto?.randomUUID;
     if (typeof randomUUID === "function") {
-      return randomUUID.call(globalThis.crypto).replace(/-/g, "").slice(0, 32);
+      return randomUUID.call(window.crypto).replace(/-/g, "").slice(0, 32);
     }
     return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 14)}`;
   }

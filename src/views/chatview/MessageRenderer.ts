@@ -103,12 +103,12 @@ export class MessageRenderer extends Component {
     annotations?: Annotation[];
     onResend?: (input: { messageId: string; content: string }) => Promise<MessageToolbarResendResult>;
   }): Promise<{ messageEl: HTMLElement; contentEl: HTMLElement }> {
-    const messageEl = document.createElement("div");
+    const messageEl = createDiv();
     messageEl.classList.add("systemsculpt-message");
     messageEl.classList.add(`systemsculpt-${role}-message`);
     messageEl.dataset.messageId = messageId;
 
-    const contentEl = messageEl.createEl("div", {
+    const contentEl = messageEl.createDiv({
       cls: "systemsculpt-message-content",
     });
 
@@ -190,7 +190,7 @@ export class MessageRenderer extends Component {
       return; // A render is already scheduled
     }
 
-    state.timeoutId = setTimeout(async () => {
+    state.timeoutId = window.setTimeout(async () => {
       const currentState = this.throttledRenderers.get(containerEl);
       if (currentState) {
         currentState.timeoutId = null; // A render is happening, clear the timeoutId
@@ -238,7 +238,7 @@ export class MessageRenderer extends Component {
       }
 
       // Re-initialize Mermaid on this div, but guard against parse errors to avoid log spam
-      const m = (globalThis as any).mermaid;
+      const m = (window as any).mermaid;
       if (m && typeof m.init === 'function') {
         try {
           m.init(undefined, div);
@@ -376,7 +376,7 @@ export class MessageRenderer extends Component {
 
   private clearMessageContentAnchor(contentEl: HTMLElement): void {
     Array.from(contentEl.childNodes).forEach((node) => {
-      if (!(node instanceof HTMLElement)) {
+      if (!(node.instanceOf(HTMLElement))) {
         node.parentNode?.removeChild(node);
         return;
       }
@@ -873,7 +873,7 @@ export class MessageRenderer extends Component {
   }
 
   private createReasoningStructure(isStreaming: boolean): { wrapper: HTMLElement; contentEl: HTMLElement } {
-    const wrapper = document.createElement('div');
+    const wrapper = createDiv();
     wrapper.className = 'systemsculpt-reasoning-wrapper systemsculpt-unified-part';
 
     const block = wrapper.createDiv({ cls: 'systemsculpt-reasoning-block systemsculpt-chat-structured-block systemsculpt-chat-tree' });
@@ -996,7 +996,7 @@ export class MessageRenderer extends Component {
         return;
       }
     } catch {}
-    state.timeoutId = setTimeout(async () => {
+    state.timeoutId = window.setTimeout(async () => {
       const current = this.reasoningThrottledRenderers.get(contentEl);
       if (!current) return;
       current.timeoutId = null;
@@ -1014,7 +1014,7 @@ export class MessageRenderer extends Component {
   private async finalizeReasoningStream(contentEl: HTMLElement, markdown: string): Promise<void> {
     const state = this.reasoningThrottledRenderers.get(contentEl);
     if (state?.timeoutId) {
-      clearTimeout(state.timeoutId);
+      window.clearTimeout(state.timeoutId);
       state.timeoutId = null;
     }
     // Always render reasoning verbatim on finalize to preserve original formatting
@@ -1031,9 +1031,9 @@ export class MessageRenderer extends Component {
     const debugMode = plugin?.settingsManager?.settings?.debugMode ?? false;
 
     if (debugMode) {
-      console.log('[Reasoning Verbatim] Input length:', markdown.length);
-      console.log('[Reasoning Verbatim] First 60 chars:', markdown.substring(0, 60));
-      console.log('[Reasoning Verbatim] Contains bold markers:', markdown.includes('**'));
+      console.debug('[Reasoning Verbatim] Input length:', markdown.length);
+      console.debug('[Reasoning Verbatim] First 60 chars:', markdown.substring(0, 60));
+      console.debug('[Reasoning Verbatim] Contains bold markers:', markdown.includes('**'));
     }
 
     const formattedMarkdown = formatReasoningForDisplay(markdown);
@@ -1057,8 +1057,8 @@ export class MessageRenderer extends Component {
     this.scrollReasoningContainerToBottom(containerEl);
     
     if (debugMode) {
-      console.log('[Reasoning Verbatim] Rendered HTML length:', containerEl.innerHTML.length);
-      console.log('[Reasoning Verbatim] Contains <strong> tags:', containerEl.innerHTML.includes('<strong>'));
+      console.debug('[Reasoning Verbatim] Rendered HTML length:', containerEl.innerHTML.length);
+      console.debug('[Reasoning Verbatim] Contains <strong> tags:', containerEl.innerHTML.includes('<strong>'));
     }
     
     // Emit DOM change event for scroll management
@@ -1199,7 +1199,7 @@ export class MessageRenderer extends Component {
       return null;
     }
 
-    const container = document.createElement("div");
+    const container = createDiv();
     container.className = "systemsculpt-unified-part systemsculpt-content-part";
     container.dataset.partType = "content";
 
@@ -1254,7 +1254,7 @@ export class MessageRenderer extends Component {
       preEl.classList.add("systemsculpt-code-block");
 
       if (!preEl.querySelector('.copy-code-button')) {
-        const btn = document.createElement('button');
+        const btn = createEl('button');
         btn.className = 'copy-code-button';
         btn.type = 'button';
         btn.setAttribute('aria-label', 'Copy code');
@@ -1267,7 +1267,7 @@ export class MessageRenderer extends Component {
             const text = codeEl ? (codeEl as HTMLElement).innerText : preEl.innerText;
             await navigator.clipboard.writeText(text);
             btn.textContent = 'Copied';
-            setTimeout(() => (btn.textContent = 'Copy'), 1200);
+            window.setTimeout(() => (btn.textContent = 'Copy'), 1200);
             new Notice('Code copied to clipboard', 1500);
           } catch {
             new Notice('Failed to copy code', 2000);
@@ -1587,7 +1587,7 @@ export class MessageRenderer extends Component {
     }
 
     // Use requestAnimationFrame to ensure smooth animation
-    requestAnimationFrame(() => {
+    window.requestAnimationFrame(() => {
       if (shouldCollapse) {
         drawerEl.classList.add('systemsculpt-collapsed');
       } else {
@@ -1651,7 +1651,7 @@ export class MessageRenderer extends Component {
 
     // Create the "Open File" button
     const openFileBtn = new ButtonComponent(headerEl)
-      .setButtonText("Open File")
+      .setButtonText("Open file")
       .setClass("systemsculpt-tool-call-open-file-btn")
       .setClass("mod-small")
       .setTooltip(`Open ${filePath}`)
@@ -1728,14 +1728,14 @@ export class MessageRenderer extends Component {
     const sizeKB = Math.round(LargeTextHelpers.getTextSizeKB(content));
 
     // Create container for collapsed content
-    const collapsedContainer = contentEl.createEl("div", {
+    const collapsedContainer = contentEl.createDiv({
       cls: "systemsculpt-large-text-container"
     });
 
     // Show preview of first few lines
     const previewContent = LargeTextHelpers.getPreviewContent(content);
 
-    const previewEl = collapsedContainer.createEl("div", {
+    const previewEl = collapsedContainer.createDiv({
       cls: "systemsculpt-large-text-preview"
     });
 
@@ -1744,14 +1744,14 @@ export class MessageRenderer extends Component {
 
     // Add truncation indicator
     if (lineCount > LARGE_TEXT_THRESHOLDS.MAX_LINES_PREVIEW) {
-      const truncationEl = previewEl.createEl("div", {
+      const truncationEl = previewEl.createDiv({
         cls: "systemsculpt-text-truncation",
         text: LARGE_TEXT_MESSAGES.TRUNCATION_INDICATOR
       });
     }
 
     // Add collapse indicator with external access options
-    const collapseIndicator = collapsedContainer.createEl("div", {
+    const collapseIndicator = collapsedContainer.createDiv({
       cls: "systemsculpt-large-text-indicator"
     });
 
@@ -1788,8 +1788,8 @@ export class MessageRenderer extends Component {
     copyButton.addEventListener('click', () => {
       navigator.clipboard.writeText(content);
       // Show temporary feedback
-      copyButton.textContent = '✓ Copied';
-      setTimeout(() => {
+      copyButton.textContent = '✓ copied';
+      window.setTimeout(() => {
         copyButton.innerHTML = '📋 Copy to Clipboard';
       }, 1000);
     });
@@ -1812,7 +1812,7 @@ export class MessageRenderer extends Component {
       const url = URL.createObjectURL(blob);
 
       // Create download link
-      const a = document.createElement('a');
+      const a = createEl('a');
       a.href = url;
       a.download = `large-text-${Date.now()}.txt`;
       document.body.appendChild(a);
@@ -1823,12 +1823,12 @@ export class MessageRenderer extends Component {
       URL.revokeObjectURL(url);
 
       // Show success message
-      const notice = document.createElement('div');
+      const notice = createDiv();
       notice.className = 'systemsculpt-notice';
       notice.textContent = `✓ Large text saved to file (${LargeTextHelpers.formatSize(sizeKB)})`;
       document.body.appendChild(notice);
 
-      setTimeout(() => {
+      window.setTimeout(() => {
         notice.remove();
       }, 3000);
     } catch (error) {
@@ -1856,7 +1856,7 @@ class LargeTextModal extends Modal {
     // Set modal title
     this.titleEl.setText(this.title);
 
-    const container = contentEl.createEl("div", {
+    const container = contentEl.createDiv({
       cls: "systemsculpt-large-text-modal-container"
     });
 
@@ -1871,26 +1871,26 @@ class LargeTextModal extends Modal {
     textarea.value = this.content;
 
     // Add copy button
-    const buttonContainer = container.createEl("div", {
+    const buttonContainer = container.createDiv({
       cls: "systemsculpt-large-text-modal-buttons"
     });
 
     const copyButton = buttonContainer.createEl("button", {
-      text: "Copy to Clipboard",
+      text: "Copy to clipboard",
       cls: "mod-cta"
     });
 
     copyButton.addEventListener("click", async () => {
       try {
         await navigator.clipboard.writeText(this.content);
-        copyButton.setText("✓ Copied!");
-        setTimeout(() => {
-          copyButton.setText("Copy to Clipboard");
+        copyButton.setText("Copied!");
+        window.setTimeout(() => {
+          copyButton.setText("Copy to clipboard");
         }, 1500);
       } catch (error) {
         copyButton.setText("Copy failed");
-        setTimeout(() => {
-          copyButton.setText("Copy to Clipboard");
+        window.setTimeout(() => {
+          copyButton.setText("Copy to clipboard");
         }, 1500);
       }
     });

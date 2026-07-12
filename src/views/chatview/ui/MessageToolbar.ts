@@ -42,7 +42,7 @@ function createIconButton(
   ariaLabel: string,
   onClick: (ev: MouseEvent) => void
 ): HTMLButtonElement {
-  const btn = document.createElement("button");
+  const btn = createEl("button");
   btn.className = "systemsculpt-toolbar-btn";
   btn.setAttribute("type", "button");
   btn.setAttribute("aria-label", ariaLabel);
@@ -71,7 +71,7 @@ export function attachMessageToolbar(options: ToolbarOptions): void {
         ".systemsculpt-message-content"
       ) as HTMLElement | null) || messageEl;
 
-  const toolbar = document.createElement("div");
+  const toolbar = createDiv();
   toolbar.className = "systemsculpt-message-toolbar";
   const platform = PlatformContext.get();
   const isMobile = platform.uiVariant() === "mobile";
@@ -92,7 +92,7 @@ export function attachMessageToolbar(options: ToolbarOptions): void {
       setIcon(copyBtn, "check");
       copyBtn.classList.add("ss-success");
       copyBtn.setAttribute("aria-label", "Copied");
-      setTimeout(() => {
+      window.setTimeout(() => {
         setIcon(copyBtn, "copy");
         copyBtn.classList.remove("ss-success");
         copyBtn.setAttribute("aria-label", "Copy message");
@@ -196,7 +196,7 @@ export function attachMessageToolbar(options: ToolbarOptions): void {
       container?.getBoundingClientRect() ||
       document.body.getBoundingClientRect();
 
-    toolbar.style.setProperty("--ss-toolbar-shift-x", "0px");
+    toolbar.setCssProps({ ["--ss-toolbar-shift-x"]: "0px" });
 
     const anchorRect = anchor.getBoundingClientRect();
     const availableBelow = containerRect.bottom - anchorRect.bottom;
@@ -243,7 +243,7 @@ export function attachMessageToolbar(options: ToolbarOptions): void {
   toolbar.addEventListener("mouseenter", updateToolbarPosition, { passive: true });
 
   // Ensure initial layout is correct once the toolbar is in the DOM.
-  requestAnimationFrame(() => {
+  window.requestAnimationFrame(() => {
     updateToolbarPosition();
   });
 

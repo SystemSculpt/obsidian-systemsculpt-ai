@@ -1218,7 +1218,7 @@ export class EmbeddingsStorage {
 
       deleteRequest.onerror = () => reject(deleteRequest.error);
       deleteRequest.onblocked = () => {
-        setTimeout(() => resolve(), 1000);
+        window.setTimeout(() => resolve(), 1000);
       };
     });
   }

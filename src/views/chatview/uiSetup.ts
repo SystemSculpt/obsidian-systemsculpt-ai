@@ -18,7 +18,7 @@ const ensureLicenseBanner = (container: HTMLElement): HTMLElement | null => {
   if (!banner) {
     const composer = container.querySelector(".systemsculpt-chat-composer");
     if (!composer) return null;
-    banner = document.createElement("div");
+    banner = createDiv();
     banner.className = LICENSE_BANNER_CLASS;
     composer.parentNode?.insertBefore(banner, composer);
   }
@@ -106,7 +106,7 @@ export const uiSetup = {
     });
 
     // Messages container
-    chatView.chatContainer = container.createEl("div", { cls: "systemsculpt-messages-container" });
+    chatView.chatContainer = container.createDiv({ cls: "systemsculpt-messages-container" });
 
     // Apply initial chat font size class without saving
     chatView.chatContainer.classList.add(`systemsculpt-chat-${chatView.chatFontSize}`);
@@ -116,7 +116,7 @@ export const uiSetup = {
     // with more selective and less verbose logging
 
     // Create scroll-to-bottom button
-    const scrollToBottomButton = document.createElement('button');
+    const scrollToBottomButton = createEl('button');
     scrollToBottomButton.className = 'systemsculpt-scroll-to-bottom';
     scrollToBottomButton.setAttribute('aria-label', 'Scroll to bottom');
     scrollToBottomButton.innerHTML = `
@@ -124,7 +124,7 @@ export const uiSetup = {
         <path d="M8 3v10m0 0l-4-4m4 4l4-4"/>
       </svg>
     `;
-    scrollToBottomButton.style.display = 'none';
+    scrollToBottomButton.setCssStyles({ display: 'none' });
     container.appendChild(scrollToBottomButton);
 
     chatView.scrollManager = new ScrollManagerService({
@@ -186,7 +186,7 @@ export const uiSetup = {
 
     // After ensuring Mermaid is enabled, configure theme variables once
     try {
-      const m = (globalThis as any).mermaid;
+      const m = (window as any).mermaid;
       if (m && !m.__ssConfigured) {
         const rootStyle = getComputedStyle(document.body);
         const accent = rootStyle.getPropertyValue('--interactive-accent').trim() || '#666';
@@ -241,7 +241,7 @@ export const uiSetup = {
 
     if (!isProActive) {
       if (chatView.creditsIndicator) {
-        chatView.creditsIndicator.style.display = "none";
+        chatView.creditsIndicator.setCssStyles({ display: "none" });
       }
       return;
     }
@@ -269,7 +269,7 @@ export const uiSetup = {
       targetSection.insertBefore(chatView.creditsIndicator, settingsButton);
     }
 
-    chatView.creditsIndicator.style.display = "";
+    chatView.creditsIndicator.setCssStyles({ display: "" });
     chatView.creditsIndicator.classList.toggle("is-loading", !chatView.creditsBalance);
 
     const rendered = renderChatCreditsIndicator(chatView.creditsIndicator, {
@@ -296,19 +296,19 @@ export const uiSetup = {
 
     banner.empty();
 
-    const iconSpan = document.createElement("span");
+    const iconSpan = createSpan();
     iconSpan.className = "systemsculpt-license-banner-icon";
     setIcon(iconSpan, "key-round");
     banner.appendChild(iconSpan);
 
-    const textSpan = document.createElement("span");
+    const textSpan = createSpan();
     textSpan.className = "systemsculpt-license-banner-text";
     textSpan.textContent = options.expired
       ? "Your SystemSculpt subscription has expired. Renew to keep using the managed AI."
       : "Your SystemSculpt license is invalid. Renew or update your key in Account.";
     banner.appendChild(textSpan);
 
-    const renewBtn = document.createElement("button");
+    const renewBtn = createEl("button");
     renewBtn.className = "systemsculpt-license-banner-renew";
     renewBtn.textContent = "Renew";
     renewBtn.addEventListener("click", () => {
@@ -316,22 +316,22 @@ export const uiSetup = {
     });
     banner.appendChild(renewBtn);
 
-    const dismissBtn = document.createElement("button");
+    const dismissBtn = createEl("button");
     dismissBtn.className = "systemsculpt-license-banner-dismiss";
     dismissBtn.setAttribute("aria-label", "Dismiss");
     setIcon(dismissBtn, "x");
     dismissBtn.addEventListener("click", () => {
-      banner.style.display = "none";
+      banner.setCssStyles({ display: "none" });
     });
     banner.appendChild(dismissBtn);
 
-    banner.style.display = "flex";
+    banner.setCssStyles({ display: "flex" });
   },
 
   /** Hide the license banner (e.g. once a credits refresh succeeds). */
   hideLicenseBanner: function(chatView: ChatView): void {
     const container = chatView.containerEl.children[1] as HTMLElement | undefined;
     const banner = container?.querySelector(`.${LICENSE_BANNER_CLASS}`) as HTMLElement | null;
-    if (banner) banner.style.display = "none";
+    if (banner) banner.setCssStyles({ display: "none" });
   },
 };

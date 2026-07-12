@@ -212,7 +212,7 @@ export class InputHandler extends Component {
         // Auto-submit if enabled
         if (this.plugin.settings.autoSubmitAfterTranscription) {
           // Use a small delay to ensure text is fully inserted before submitting
-          setTimeout(() => {
+          window.setTimeout(() => {
             this.handleSendMessage();
           }, 100);
         }
@@ -489,7 +489,7 @@ export class InputHandler extends Component {
   private setupInput(): void {
     // Create an aria-live region for streaming status updates (a11y)
     if (!this.liveRegionEl) {
-      this.liveRegionEl = this.container.createEl("div", {
+      this.liveRegionEl = this.container.createDiv({
         cls: "systemsculpt-visually-hidden",
         attr: { "aria-live": "polite", "aria-atomic": "true" },
       });
@@ -1057,7 +1057,7 @@ export class InputHandler extends Component {
   private adjustInputHeight(): void {
     if (!this.input) return;
 
-    this.input.style.height = "auto";
+    this.input.setCssStyles({ height: "auto" });
     const newHeight = Math.min(Math.max(this.input.scrollHeight, 48), 200); // Min 48px, max 200px
     this.input.style.height = newHeight + "px";
   }
@@ -1122,11 +1122,11 @@ export class InputHandler extends Component {
     }
 
     if (items.length === 0) {
-      this.attachmentsEl.style.display = "none";
+      this.attachmentsEl.setCssStyles({ display: "none" });
       return;
     }
 
-    this.attachmentsEl.style.display = "flex";
+    this.attachmentsEl.setCssStyles({ display: "flex" });
 
     for (const item of items) {
       let pill = this.attachmentPillsByKey.get(item.key);
@@ -1545,7 +1545,7 @@ export class InputHandler extends Component {
       this.localResourcesDisposing = false;
 
       if (this.renderTimeout) {
-        clearTimeout(this.renderTimeout);
+        window.clearTimeout(this.renderTimeout);
       }
 
       if (this.recorderVisualizer) {

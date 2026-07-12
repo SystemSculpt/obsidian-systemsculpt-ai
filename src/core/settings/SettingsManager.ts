@@ -37,7 +37,7 @@ export class SettingsManager {
     const migratedSettings = { ...settingsToMigrate };
     const generateVaultInstanceId = (): string => {
       try {
-        const globalCrypto: any = (globalThis as any).crypto;
+        const globalCrypto: any = (window as any).crypto;
         if (globalCrypto?.randomUUID) return globalCrypto.randomUUID();
       } catch {}
       return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
@@ -611,7 +611,6 @@ export class SettingsManager {
     }
   }
 
-
   /**
    * Surface a settings-persistence failure instead of swallowing it. The failure
    * is always logged via the plugin logger (for diagnostics), and a single
@@ -640,7 +639,7 @@ export class SettingsManager {
     this.lastSaveFailureNoticeAt = now;
     try {
       new Notice(
-        "Failed to save SystemSculpt settings — your last change may not persist.",
+        "Failed to save systemsculpt settings — your last change may not persist.",
         8000,
       );
     } catch {

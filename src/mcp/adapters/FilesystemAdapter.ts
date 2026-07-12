@@ -41,7 +41,7 @@ export class FilesystemAdapter {
       const finish = (callback: () => void) => {
         if (settled) return;
         settled = true;
-        if (timer) clearTimeout(timer);
+        if (timer) window.clearTimeout(timer);
         options?.signal?.removeEventListener('abort', onAbort);
         callback();
       };
@@ -52,7 +52,7 @@ export class FilesystemAdapter {
       const onAbort = () => finish(() => reject(unknown(new Error('Tool execution aborted'))));
       options?.signal?.addEventListener('abort', onAbort, { once: true });
       if (options?.timeoutMs) {
-        timer = setTimeout(() => finish(() => reject(unknown(new Error('Tool execution timed out')))), options.timeoutMs);
+        timer = window.setTimeout(() => finish(() => reject(unknown(new Error('Tool execution timed out')))), options.timeoutMs);
       }
       execution.then((value) => finish(() => resolve(value)), (error) => finish(() => reject(error)));
     });

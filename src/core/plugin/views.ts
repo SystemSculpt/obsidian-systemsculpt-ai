@@ -103,7 +103,7 @@ export class ViewManager {
     this.registerView();
 
     // Initialize ribbon manager in the background
-    setTimeout(() => this.ribbonManager.initialize(), 0);
+    window.setTimeout(() => this.ribbonManager.initialize(), 0);
 
     // Wait for layout to be ready before minimal initialization
     this.app.workspace.onLayoutReady(() => {
@@ -202,7 +202,7 @@ export class ViewManager {
       this.deferredViews.clear();
 
       if (hiddenLeaves.length > 0) {
-        setTimeout(() => {
+        window.setTimeout(() => {
           for (const leaf of hiddenLeaves) {
             this.scheduleChatRestore(leaf, "low");
           }
@@ -336,7 +336,7 @@ export class ViewManager {
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         if (attempt > 1) {
-          await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt - 1) * 1000));
+          await new Promise(resolve => window.setTimeout(resolve, Math.pow(2, attempt - 1) * 1000));
         }
 
         await view.setState(state);

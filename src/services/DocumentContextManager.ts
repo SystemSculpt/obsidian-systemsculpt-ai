@@ -160,7 +160,7 @@ export class DocumentContextManager {
     try {
       const extension = normalizeFileExtension(file.extension);
       if (isUnsupportedOfficeFileExtension(extension)) {
-        if (showNotices) new Notice("This Office file type is not supported for Chat context.", 4000);
+        if (showNotices) new Notice("This office file type is not supported for chat context.", 4000);
         return false;
       }
       

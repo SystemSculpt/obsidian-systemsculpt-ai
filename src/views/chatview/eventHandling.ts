@@ -37,9 +37,9 @@ interface DragHandlers {
 
 export const eventHandling = {
   setupDragAndDrop: function(chatView: ChatView, container: HTMLElement): () => void {
-    const overlay = container.createEl("div", { cls: "systemsculpt-drag-overlay" });
-    const message = overlay.createEl("div", { cls: "systemsculpt-drag-message", text: "Drop files, folders, or search results to add to context" });
-    const detailMessage = overlay.createEl("div", { cls: "systemsculpt-drag-detail", text: "" });
+    const overlay = container.createDiv({ cls: "systemsculpt-drag-overlay" });
+    const message = overlay.createDiv({ cls: "systemsculpt-drag-message", text: "Drop files, folders, or search results to add to context" });
+    const detailMessage = overlay.createDiv({ cls: "systemsculpt-drag-detail", text: "" });
     const MAX_FILES = 100;
     const isFolder = (file: any): file is TFolder => !!file && Array.isArray((file as any).children);
     const isFile = (file: any): file is TFile => !!file && typeof (file as any).extension === "string";
@@ -369,8 +369,8 @@ export const eventHandling = {
         e.stopPropagation();
         
         // Debounce the message updates to improve performance
-        if (dragOverTimeout) clearTimeout(dragOverTimeout);
-        dragOverTimeout = setTimeout(async () => {
+        if (dragOverTimeout) window.clearTimeout(dragOverTimeout);
+        dragOverTimeout = window.setTimeout(async () => {
           if (e.dataTransfer) await updateMessage(e.dataTransfer);
         }, 100);
       },
@@ -585,8 +585,8 @@ export const eventHandling = {
           } else if ((dropType === 'folder' || dropType === 'folders') && filesToProcess.length > 0) {
             // Empty folder case
             const folderNames = filesToProcess
-              .filter(isFolder)
-              .map(folder => (folder as TFolder).name);
+              .filter((entry): entry is TFolder => isFolder(entry) && entry instanceof TFolder)
+              .map((folder) => folder.name);
             
             if (folderNames.length === 1) {
               new Notice(`The "${folderNames[0]}" folder is empty - no files to add to context`, 4000);
@@ -616,7 +616,7 @@ export const eventHandling = {
       
       // Clean up timeout
       if (dragOverTimeout) {
-        clearTimeout(dragOverTimeout);
+        window.clearTimeout(dragOverTimeout);
         dragOverTimeout = null;
       }
     };

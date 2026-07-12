@@ -65,7 +65,7 @@ export class TextEditModal extends StandardModal {
     this.updateSubmitButtonState();
     
     // Focus text area
-    setTimeout(() => this.textArea?.focus(), 50);
+    window.setTimeout(() => this.textArea?.focus(), 50);
   }
 
   /**
@@ -104,7 +104,7 @@ export class TextEditModal extends StandardModal {
     });
     
     // Initial resize
-    setTimeout(() => this.autoResizeTextArea(), 0);
+    window.setTimeout(() => this.autoResizeTextArea(), 0);
   }
 
   /**
@@ -114,7 +114,7 @@ export class TextEditModal extends StandardModal {
     if (!this.textArea) return;
     
     // Reset height to auto to get the correct scrollHeight
-    this.textArea.style.height = "auto";
+    this.textArea.setCssStyles({ height: "auto" });
     
     // Set the height to the scrollHeight
     const newHeight = Math.min(

@@ -196,7 +196,7 @@ export class DocumentProcessingService {
         icon: STAGE_ICONS.ready,
         documentId: remote.documentId,
       }, meta, flow);
-      if (showNotices) new Notice("Document successfully converted to markdown");
+      if (showNotices) new Notice("Document successfully converted to Markdown");
       return receipt;
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") throw error;
@@ -500,7 +500,7 @@ export class DocumentProcessingService {
 
   private base64ToArrayBuffer(value: string): ArrayBuffer {
     const base64 = value.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, "");
-    const binary = globalThis.atob(base64);
+    const binary = window.atob(base64);
     const bytes = new Uint8Array(binary.length);
     for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
     return bytes.buffer;

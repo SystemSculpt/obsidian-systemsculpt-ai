@@ -111,7 +111,7 @@ export class CommandManager {
   private registerToggleAudioRecorder() {
     this.plugin.addCommand({
       id: "toggle-audio-recorder",
-      name: "Toggle Audio Recorder",
+      name: "Toggle audio recorder",
       callback: async () => {
         const alreadyInitialized = this.plugin.hasRecorderService();
         const logger = this.plugin.getLogger();
@@ -147,14 +147,13 @@ export class CommandManager {
           new Notice("Unable to toggle the audio recorder.", 8000);
         }
       },
-      hotkeys: [{ modifiers: ["Mod"], key: "r" }],
     });
   }
 
   private registerOpenChat() {
     this.plugin.addCommand({
       id: "open-systemsculpt-chat",
-      name: "Open SystemSculpt Chat",
+      name: "Open chat",
       callback: async () => {
         await this.ribbonManager.openChatView();
       },
@@ -164,7 +163,7 @@ export class CommandManager {
   private registerOpenSystemSculptHistory() {
     this.plugin.addCommand({
       id: "open-systemsculpt-history",
-      name: "Open SystemSculpt History",
+      name: "Open history",
       callback: () => {
         this.ribbonManager.openSystemSculptHistoryModal();
       },
@@ -172,7 +171,7 @@ export class CommandManager {
 
     this.plugin.addCommand({
       id: "open-chat-history",
-      name: "Open SystemSculpt Chat History (Legacy Alias)",
+      name: "Open chat history (legacy alias)",
       callback: () => {
         this.ribbonManager.openSystemSculptHistoryModal();
       },
@@ -182,7 +181,7 @@ export class CommandManager {
   private registerOpenJanitor() {
     this.plugin.addCommand({
       id: "open-systemsculpt-janitor",
-      name: "Open SystemSculpt Janitor",
+      name: "Open janitor",
       callback: () => {
         this.ribbonManager.openJanitorModal();
       },
@@ -204,13 +203,12 @@ export class CommandManager {
   private registerOpenSystemSculptSearch() {
     this.plugin.addCommand({
       id: "open-systemsculpt-search",
-      name: "Open SystemSculpt Search",
+      name: "Open search",
       callback: async () => {
         const { SystemSculptSearchModal } = await import("../../modals/SystemSculptSearchModal");
         const modal = new SystemSculptSearchModal(this.plugin);
         modal.open();
       },
-      hotkeys: [{ modifiers: ["Mod"], key: "k" }],
     });
   }
 
@@ -227,7 +225,7 @@ export class CommandManager {
   private registerOpenSettings() {
     this.plugin.addCommand({
       id: "open-systemsculpt-settings",
-      name: "Open SystemSculpt AI Settings",
+      name: "Open AI settings",
       callback: () => {
         this.plugin.openSettingsTab("account");
       },
@@ -237,7 +235,7 @@ export class CommandManager {
   private registerOpenCreditsBalance() {
     this.plugin.addCommand({
       id: "open-credits-balance",
-      name: "Open Credits & Usage",
+      name: "Open credits & usage",
       callback: async () => {
         await this.plugin.openCreditsBalanceModal({
           settingsTab: "account",
@@ -249,7 +247,7 @@ export class CommandManager {
   private registerChatWithFile() {
     this.plugin.addCommand({
       id: "chat-with-file",
-      name: "Chat with File",
+      name: "Chat with file",
       checkCallback: (checking: boolean) => {
         const activeFile = this.app.workspace.getActiveFile();
         if (!activeFile) return false;
@@ -263,7 +261,7 @@ export class CommandManager {
           const { ChatView } = loadChatViewModule();
           const view = new ChatView(leaf, this.plugin);
           leaf.open(view).then(async () => {
-            await new Promise((resolve) => setTimeout(resolve, 50));
+            await new Promise((resolve) => window.setTimeout(resolve, 50));
             this.app.workspace.setActiveLeaf(leaf, { focus: true });
             await view.addFileToContext(activeFile);
             view.focusInput();
@@ -277,7 +275,7 @@ export class CommandManager {
   private registerResumeChat() {
     this.plugin.addCommand({
       id: "resume-chat-from-history",
-      name: "Resume Chat from Current History File",
+      name: "Resume chat from current history file",
       checkCallback: (checking: boolean) => {
         const activeFile = this.app.workspace.getActiveFile();
         
@@ -310,7 +308,7 @@ export class CommandManager {
   private registerChangeChatTitle() {
     this.plugin.addCommand({
       id: "change-chat-title",
-      name: "Create Title from Content",
+      name: "Create title from content",
       checkCallback: (checking: boolean) => {
         // First check if we're in a chat view
         const chatView = this.getActiveChatView();
@@ -364,7 +362,7 @@ export class CommandManager {
         // Only allow for markdown notes and Studio workflow files
         if (!this.canGenerateTitleForFile(activeFile)) {
           if (!checking) {
-            new Notice("Titles can be created only for markdown and .systemsculpt files.", 5000);
+            new Notice("Titles can be created only for Markdown and .systemsculpt files.", 5000);
           }
           return false;
         }
@@ -413,14 +411,13 @@ export class CommandManager {
         }
         return true;
       },
-      hotkeys: [{ modifiers: ["Mod", "Shift"], key: "t" }],
     });
   }
 
   private registerOpenEmbeddingsView() {
     this.plugin.addCommand({
       id: "open-embeddings-view",
-      name: "Open Similar Notes Panel",
+      name: "Open similar notes panel",
       callback: async () => {
         try {
           await this.plugin.getViewManager().activateEmbeddingsView();
@@ -434,7 +431,7 @@ export class CommandManager {
   private registerRunAutomationCommand() {
     this.plugin.addCommand({
       id: "run-workflow-automation",
-      name: "Run Workflow Automation",
+      name: "Run workflow automation",
       callback: async () => {
         const file = this.app.workspace.getActiveFile();
         if (!file) {
@@ -443,13 +440,13 @@ export class CommandManager {
         }
 
         if (file.extension.toLowerCase() !== "md") {
-          new Notice("Automations currently support markdown notes only.", 5000);
+          new Notice("Automations currently support Markdown notes only.", 5000);
           return;
         }
 
         const options = this.buildAutomationOptions();
         if (options.length === 0) {
-          new Notice("No automations available. Enable one under Settings → Workflow.", 5000);
+          new Notice("No automations available. Enable one in Workflow settings.", 5000);
           return;
         }
 
@@ -463,7 +460,7 @@ export class CommandManager {
   private registerAutomationBacklogCommand() {
     this.plugin.addCommand({
       id: "open-automation-backlog",
-      name: "Show Automation Backlog",
+      name: "Show automation backlog",
       callback: async () => {
         const { AutomationBacklogModal } = await loadAutomationBacklogModalModule();
         const modal = new AutomationBacklogModal(this.app, this.plugin);
@@ -488,10 +485,10 @@ export class CommandManager {
   private registerSystemSculptStudioCommands() {
     this.plugin.addCommand({
       id: "new-systemsculpt-studio-project",
-      name: "New SystemSculpt Studio Project",
+      name: "New Studio project",
       callback: async () => {
         if (!PlatformContext.get().supportsDesktopOnlyFeatures()) {
-          new Notice("SystemSculpt Studio is desktop-only.");
+          new Notice("Studio is desktop-only.");
           return;
         }
 
@@ -506,10 +503,10 @@ export class CommandManager {
 
     this.plugin.addCommand({
       id: "open-systemsculpt-studio",
-      name: "Open SystemSculpt Studio",
+      name: "Open Studio",
       callback: async () => {
         if (!PlatformContext.get().supportsDesktopOnlyFeatures()) {
-          new Notice("SystemSculpt Studio is desktop-only.");
+          new Notice("Studio is desktop-only.");
           return;
         }
 
@@ -532,17 +529,17 @@ export class CommandManager {
 
           await this.plugin.getViewManager().activateSystemSculptStudioView(fallbackStudioFile.path);
         } catch (error: any) {
-          new Notice(`Unable to open SystemSculpt Studio: ${error?.message || error}`);
+          new Notice(`Unable to open Studio: ${error?.message || error}`);
         }
       },
     });
 
     this.plugin.addCommand({
       id: "run-systemsculpt-studio-project",
-      name: "Run Current SystemSculpt Studio Project",
+      name: "Run current Studio project",
       callback: async () => {
         if (!PlatformContext.get().supportsDesktopOnlyFeatures()) {
-          new Notice("SystemSculpt Studio is desktop-only.");
+          new Notice("Studio is desktop-only.");
           return;
         }
 
@@ -567,7 +564,7 @@ export class CommandManager {
 
     this.plugin.addCommand({
       id: "fit-systemsculpt-studio-selection-in-viewport",
-      name: "SystemSculpt Studio: Fit Selection in Viewport",
+      name: "Studio: fit selection in viewport",
       checkCallback: (checking: boolean) => {
         const activeStudioView = this.getActiveStudioView();
         if (!activeStudioView) {
@@ -578,12 +575,11 @@ export class CommandManager {
         }
         return true;
       },
-      hotkeys: [{ modifiers: ["Mod", "Shift"], key: "1" }],
     });
 
     this.plugin.addCommand({
       id: "overview-systemsculpt-studio-graph-in-viewport",
-      name: "SystemSculpt Studio: Overview Graph in Viewport",
+      name: "Studio: overview graph in viewport",
       checkCallback: (checking: boolean) => {
         const activeStudioView = this.getActiveStudioView();
         if (!activeStudioView) {
@@ -598,7 +594,7 @@ export class CommandManager {
 
     this.plugin.addCommand({
       id: "copy-current-file-path",
-      name: "Copy Current File Path",
+      name: "Copy current file path",
       checkCallback: (checking: boolean) => {
         const currentFilePath = this.getCurrentActiveFilePath();
         if (!currentFilePath) {
@@ -610,7 +606,6 @@ export class CommandManager {
         }
         return true;
       },
-      hotkeys: [{ modifiers: ["Mod", "Shift"], key: "c" }],
     });
   }
 
@@ -747,7 +742,7 @@ export class CommandManager {
   private resolveTitleTargetFile(): TFile | null {
     const activeFile = this.app.workspace.getActiveFile();
     if (this.canGenerateTitleForFile(activeFile)) {
-      return activeFile as TFile;
+      return activeFile;
     }
 
     const resolvedPath = this.getCurrentActiveFilePath();
@@ -819,7 +814,7 @@ Without dedicated logs, clear reproduction details are the quickest path to a fi
     // Diagnostic command for developers/debugging only - not shown in command palette 
     this.plugin.addCommand({
       id: "embeddings-database-stats",
-      name: "Show Embeddings Database Statistics (Debug)",
+      name: "Show embeddings database statistics (debug)",
       checkCallback: (checking: boolean) => {
         // Only show if embeddings are enabled
         const embeddingsEnabled = this.plugin.settings.embeddingsEnabled;
@@ -835,7 +830,7 @@ Without dedicated logs, clear reproduction details are the quickest path to a fi
     // User-visible: rebuild the immutable managed index.
     this.plugin.addCommand({
       id: "rebuild-embeddings-current-model",
-      name: "Rebuild Managed Embeddings",
+      name: "Rebuild managed embeddings",
       checkCallback: (checking: boolean) => {
         // Only show if embeddings are enabled
         const enabled = this.plugin.settings.embeddingsEnabled;

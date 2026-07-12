@@ -92,7 +92,7 @@ export function showStreamingStatus(messageEl: HTMLElement, liveRegionEl: HTMLEl
 export function setStreamingFootnote(messageEl: HTMLElement, text: string): void {
   let footnoteEl = messageEl.querySelector('.systemsculpt-streaming-footnote') as HTMLElement | null;
   if (!footnoteEl) {
-    footnoteEl = messageEl.createEl('div', { cls: 'systemsculpt-streaming-footnote' });
+    footnoteEl = messageEl.createDiv({ cls: 'systemsculpt-streaming-footnote' });
   }
 
   const lower = (text || "").toLowerCase();

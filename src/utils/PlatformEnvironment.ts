@@ -9,8 +9,6 @@ export interface PlatformEnvironment {
   isMobileEmulation: boolean;
 }
 
-const MOBILE_USER_AGENT_PATTERN = /Mobi|Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i;
-
 function readPlatformFlag(flag: string): boolean {
   const platformAny = Platform as unknown as Record<string, unknown>;
   return platformAny?.[flag] === true;
@@ -22,14 +20,6 @@ function readAppShell(): { isMobile?: unknown; emulateMobile?: unknown } | undef
   }
 
   return (window as unknown as { app?: { isMobile?: unknown; emulateMobile?: unknown } }).app;
-}
-
-function readUserAgent(): string {
-  if (typeof navigator === "undefined") {
-    return "";
-  }
-
-  return typeof navigator.userAgent === "string" ? navigator.userAgent : "";
 }
 
 export function detectPlatformEnvironment(): PlatformEnvironment {
@@ -45,19 +35,18 @@ export function detectPlatformEnvironment(): PlatformEnvironment {
     isNativeMobileRuntime;
   const appShell = readAppShell();
   const appShellIsMobile = appShell?.isMobile === true;
-  const hasMobileUserAgent = MOBILE_USER_AGENT_PATTERN.test(readUserAgent());
   const isMobileEmulation =
     isDesktopRuntime && (platformPrefersMobileSurface || appShellIsMobile);
 
   const runtime: PlatformRuntime =
     isDesktopRuntime
       ? "desktop"
-      : isNativeMobileRuntime || hasMobileUserAgent
+      : isNativeMobileRuntime
         ? "mobile"
         : "desktop";
 
   const surface: PlatformSurface =
-    platformPrefersMobileSurface || appShellIsMobile || hasMobileUserAgent
+    platformPrefersMobileSurface || appShellIsMobile
       ? "mobile"
       : "desktop";
 

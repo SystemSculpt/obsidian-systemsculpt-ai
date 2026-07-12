@@ -57,7 +57,7 @@ export class DirectoryManager {
 
     // Create a timeout promise
     const timeoutPromise = new Promise<void>((_, reject) => {
-      setTimeout(() => {
+      window.setTimeout(() => {
         reject(new Error(`Directory initialization timed out after ${timeoutMs}ms`));
       }, timeoutMs);
     });
@@ -352,7 +352,7 @@ export class DirectoryManager {
 
     // Create a timeout promise
     const timeoutPromise = new Promise<void>((_, reject) => {
-      setTimeout(() => {
+      window.setTimeout(() => {
         reject(new Error(`Directory operation timed out after ${timeoutMs}ms: ${normalizedPath}`));
       }, timeoutMs);
     });
@@ -367,7 +367,7 @@ export class DirectoryManager {
         // Retry with exponential backoff
         const backoffMs = 1000 * Math.pow(2, retryCount);
         
-        await new Promise(resolve => setTimeout(resolve, backoffMs));
+        await new Promise(resolve => window.setTimeout(resolve, backoffMs));
         
         // Retry with a longer timeout
         return this.createDirectory(dirPath, createMarker, timeoutMs * 1.5, retryCount + 1);
@@ -489,7 +489,7 @@ export class DirectoryManager {
     if (idle) {
       idle(() => callback());
     } else {
-      setTimeout(callback, 0);
+      window.setTimeout(callback, 0);
     }
   }
 

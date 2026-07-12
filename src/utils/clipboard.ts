@@ -27,8 +27,8 @@ type ElectronLike = {
 
 function resolveElectron(): ElectronLike | null {
   const candidates = [
-    (globalThis as any)?.require,
-    (globalThis as any)?.window?.require,
+    (window as any)?.require,
+    (window as any)?.window?.require,
   ];
 
   for (const candidate of candidates) {
@@ -48,7 +48,7 @@ function resolveElectron(): ElectronLike | null {
 
 function toBase64(bytes: ArrayBuffer): string | null {
   const uint8 = new Uint8Array(bytes);
-  const BufferCtor = (globalThis as any)?.Buffer;
+  const BufferCtor = (window as any)?.Buffer;
   if (BufferCtor && typeof BufferCtor.from === "function") {
     try {
       return BufferCtor.from(uint8).toString("base64");
@@ -127,11 +127,11 @@ export async function tryCopyToClipboard(text: string): Promise<boolean> {
   }
 
   if (typeof document !== "undefined") {
-    const textarea = document.createElement("textarea");
+    const textarea = createEl("textarea");
     textarea.value = text;
     textarea.setAttribute("readonly", "");
-    textarea.style.position = "fixed";
-    textarea.style.opacity = "0";
+    textarea.setCssStyles({ position: "fixed" });
+    textarea.setCssStyles({ opacity: "0" });
     document.body.appendChild(textarea);
     textarea.select();
     try {

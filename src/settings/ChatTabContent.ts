@@ -23,7 +23,7 @@ export async function displayChatTabContent(containerEl: HTMLElement, tabInstanc
         .setDesc("Optional. Adds this tag to new chat history notes (frontmatter `tags`).")
         .addText((text) => {
             text
-                .setPlaceholder("ai-chat")
+                .setPlaceholder("Ai-chat")
                 .setValue(plugin.settings.defaultChatTag || "")
                 .onChange(async (value) => {
                     const normalized = normalizeDefaultChatTag(value);
@@ -33,7 +33,7 @@ export async function displayChatTabContent(containerEl: HTMLElement, tabInstanc
 
 // --- Default Chat Font Size ---
 new Setting(containerEl)
-    .setName("Default Chat Font Size")
+    .setName("Default chat font size")
     .setDesc("Select the default text size for new chat messages.")
     .addDropdown(dropdown => {
         dropdown
@@ -61,8 +61,8 @@ new Setting(containerEl)
 
 // --- Reduced Motion Preference ---
 new Setting(containerEl)
-    .setName("Honor OS Reduced Motion")
-    .setDesc("When enabled, SystemSculpt animations/transitions are minimized if your system prefers reduced motion. Disable if you want full animations.")
+    .setName("Honor os reduced motion")
+    .setDesc("When enabled, SystemSculpt animations/transitions are minimized if your system prefers reduced motion. Disable this if you want full animations.")
     .addToggle((toggle: ToggleComponent) => {
         toggle
             .setValue(plugin.settings.respectReducedMotion ?? true)

@@ -68,7 +68,7 @@ export class BackupRestoreModal {
 
                     // Create backup button
                     const createBackupButton = manualBackupContainer.createEl('button', {
-                        text: 'Create Manual Backup',
+                        text: 'Create manual backup',
                         cls: 'mod-cta ss-backup-manual__submit' // Obsidian's call-to-action button style
                     });
 

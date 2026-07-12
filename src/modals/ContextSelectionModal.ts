@@ -57,7 +57,7 @@ export class ContextSelectionModal extends Modal {
     this.renderedCount = 0;
     
     // Simple title using Obsidian's titleEl
-    this.titleEl.setText("Add Context Files");
+    this.titleEl.setText("Add context files");
     
     // Search using native Setting component
     new Setting(contentEl)
@@ -71,7 +71,7 @@ export class ContextSelectionModal extends Modal {
             this.applyFilters();
           });
         if (this.autoFocusSearch) {
-          setTimeout(() => text.inputEl.focus(), 100);
+          window.setTimeout(() => text.inputEl.focus(), 100);
         }
       });
 
@@ -315,7 +315,7 @@ export class ContextSelectionModal extends Modal {
   private updateAddButton(btn: ButtonComponent) {
     const count = this.selectedFiles.size;
     if (count === 0) {
-      btn.setButtonText("Add Files").setDisabled(true);
+      btn.setButtonText("Add files").setDisabled(true);
     } else {
       btn.setButtonText(`Add ${count} File${count === 1 ? '' : 's'}`).setDisabled(false).setCta();
     }
@@ -343,7 +343,7 @@ export class ContextSelectionModal extends Modal {
       // Disable file selection during processing
       const fileItems = this.contentEl.querySelectorAll(".ss-context-file-item");
       fileItems.forEach(item => {
-        (item as HTMLElement).style.pointerEvents = "none";
+        (item as HTMLElement).setCssStyles({ pointerEvents: "none" });
         item.addClass("is-disabled");
       });
     } else {
@@ -357,7 +357,7 @@ export class ContextSelectionModal extends Modal {
       // Re-enable file selection
       const fileItems = this.contentEl.querySelectorAll(".ss-context-file-item");
       fileItems.forEach(item => {
-        (item as HTMLElement).style.pointerEvents = "auto";
+        (item as HTMLElement).setCssStyles({ pointerEvents: "auto" });
         item.removeClass("is-disabled");
       });
     }

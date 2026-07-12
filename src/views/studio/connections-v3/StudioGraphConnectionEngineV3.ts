@@ -370,7 +370,7 @@ export class StudioGraphConnectionEngineV3 {
       return;
     }
     if (!this.autoCreateHintEl) {
-      this.autoCreateHintEl = document.createElement("div");
+      this.autoCreateHintEl = createDiv();
       this.autoCreateHintEl.className = "ss-studio-connection-autocreate-hint";
       viewport.appendChild(this.autoCreateHintEl);
     }

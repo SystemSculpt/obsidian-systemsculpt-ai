@@ -596,7 +596,7 @@ function renderInlineConfigNoteSelectorField(options: {
   const statusEl = summaryEl.createSpan({ cls: "ss-studio-note-selector-status" });
   const addButton = toolbarEl.createEl("button", {
     cls: "ss-studio-note-selector-add-button",
-    text: "Add Note",
+    text: "Add note",
     attr: {
       "aria-label": "Add note entry",
     },
@@ -611,7 +611,7 @@ function renderInlineConfigNoteSelectorField(options: {
     const skipped = total - enabled;
     countBadgeEl.setText(`${total} ${total === 1 ? "note" : "notes"}`);
     if (total === 0) {
-      statusEl.setText("Add markdown notes to include in this node.");
+      statusEl.setText("Add Markdown notes to include in this node.");
       return;
     }
     if (enabled === total) {
@@ -778,7 +778,7 @@ function renderInlineConfigNoteSelectorField(options: {
         type: "text",
         cls: "ss-studio-node-inline-config-input ss-studio-node-inline-config-path-input",
         attr: {
-          placeholder: "Vault path to markdown note",
+          placeholder: "Vault path to Markdown note",
           "aria-label": `Markdown path for note ${i + 1}`,
         },
       });

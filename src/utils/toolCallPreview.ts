@@ -203,14 +203,14 @@ export async function renderWriteEditInlineDiff(app: App, hostElement: HTMLEleme
   const existing = hostElement.querySelector(".systemsculpt-inline-diff");
   if (existing) existing.remove();
 
-  const container = document.createElement("div");
+  const container = createDiv();
   container.className = "systemsculpt-inline-diff";
   hostElement.appendChild(container);
 
   // Diff content only (no header/actions to keep UI clean)
   const body = container.createDiv({ cls: "systemsculpt-inline-diff__body" });
   // Lazy import DiffViewer to avoid any circular dependencies
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
+   
   const { DiffViewer } = require("../components/DiffViewer");
   const viewer = new DiffViewer({
     container: body,
@@ -336,7 +336,7 @@ export async function renderOperationsInlinePreview(hostElement: HTMLElement, to
   const existing = hostElement.querySelector(".systemsculpt-inline-ops");
   if (existing) existing.remove();
 
-  const container = document.createElement("div");
+  const container = createDiv();
   container.className = "systemsculpt-inline-ops";
   hostElement.appendChild(container);
 

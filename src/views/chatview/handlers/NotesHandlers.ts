@@ -57,7 +57,7 @@ export async function handleSaveChatAsNote(self: IH): Promise<void> {
           const modal = new (class extends Modal {
             constructor(app: App) { super(app); }
             onOpen() {
-              this.titleEl.setText("File Already Exists");
+              this.titleEl.setText("File already exists");
               this.contentEl.createEl("p", { text: `"${fileName}.md" already exists. Do you want to overwrite it with the latest chat content?` });
               new Setting(this.contentEl)
                 .addButton(btn => btn.setButtonText("Cancel").onClick(() => { this.close(); resolve(false); }))

@@ -103,7 +103,7 @@ export function displayDirectoriesTabContent(containerEl: HTMLElement, tabInstan
     }
     const { plugin } = tabInstance;
 
-    containerEl.createEl("h3", { text: "Directory Settings" });
+    containerEl.createEl("h3", { text: "Directory settings" });
 
     // Core directories (always available)
     createDirectorySetting(
@@ -163,7 +163,7 @@ export function displayDirectoriesTabContent(containerEl: HTMLElement, tabInstan
     );
 
     // Add directory diagnostics section
-    containerEl.createEl("h3", { text: "Directory Diagnostics" });
+    containerEl.createEl("h3", { text: "Directory diagnostics" });
 
     const diagnosticsSetting = new Setting(containerEl)
       .setName('Directory diagnostics')

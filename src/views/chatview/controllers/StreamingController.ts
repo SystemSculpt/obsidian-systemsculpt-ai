@@ -561,7 +561,7 @@ export class StreamingController extends Component {
     if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
       window.requestAnimationFrame(() => run());
     } else {
-      setTimeout(run, 0);
+      window.setTimeout(run, 0);
     }
   }
 }

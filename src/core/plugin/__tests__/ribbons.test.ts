@@ -5,10 +5,10 @@ import { RibbonManager } from "../ribbons";
 
 const SYSTEMSCULPT_TOP_TITLES = [
   "Audio Recorder",
-  "Open SystemSculpt Search",
-  "Open SystemSculpt Janitor",
-  "Open SystemSculpt History",
-  "Open SystemSculpt Chat",
+  "Open search",
+  "Open janitor",
+  "Open history",
+  "Open chat",
 ];
 
 const createPlugin = () => {

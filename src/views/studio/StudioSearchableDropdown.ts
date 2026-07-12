@@ -80,7 +80,7 @@ export function renderStudioSearchableDropdown(options: StudioSearchableDropdown
   triggerChevronEl.setText("▾");
 
   const panelEl = rootEl.createDiv({ cls: "ss-studio-searchable-select-panel" });
-  panelEl.style.display = "none";
+  panelEl.setCssStyles({ display: "none" });
   const searchEl = panelEl.createEl("input", {
     cls: "ss-studio-searchable-select-search",
     type: "text",
@@ -102,8 +102,8 @@ export function renderStudioSearchableDropdown(options: StudioSearchableDropdown
     // empty "Loading options..." state) writes a collapsed list max-height,
     // and every later re-measure reads the panel WITH that stale constraint
     // applied — a feedback loop that pins the list at a few pixels tall.
-    panelEl.style.maxHeight = "";
-    listEl.style.maxHeight = "";
+    panelEl.setCssStyles({ maxHeight: "" });
+    listEl.setCssStyles({ maxHeight: "" });
 
     // The panel renders inside the zoomed graph canvas (CSS scale()), so a
     // CSS pixel applied here occupies `scale` visual pixels. Measure the
@@ -119,9 +119,9 @@ export function renderStudioSearchableDropdown(options: StudioSearchableDropdown
     if (!viewportWidth) {
       // Static full-width reset lives in views/studio-editors.css.
       panelEl.classList.add("ss-studio-searchable-select-panel--full-width");
-      panelEl.style.left = "";
-      panelEl.style.right = "";
-      panelEl.style.width = "";
+      panelEl.setCssStyles({ left: "" });
+      panelEl.setCssStyles({ right: "" });
+      panelEl.setCssStyles({ width: "" });
     } else {
       panelEl.classList.remove("ss-studio-searchable-select-panel--full-width");
       const viewportMargin = STUDIO_DROPDOWN_VIEWPORT_MARGIN_PX;
@@ -148,14 +148,14 @@ export function renderStudioSearchableDropdown(options: StudioSearchableDropdown
       }
 
       panelEl.style.left = `${Math.round(toLocalPx(leftOffsetVisual))}px`;
-      panelEl.style.right = "auto";
+      panelEl.setCssStyles({ right: "auto" });
       panelEl.style.width = `${Math.round(panelWidth)}px`;
     }
 
     if (!viewportHeight) {
       rootEl.classList.remove("is-open-upward");
       panelEl.style.top = `calc(100% + ${STUDIO_DROPDOWN_PANEL_GAP_PX}px)`;
-      panelEl.style.bottom = "auto";
+      panelEl.setCssStyles({ bottom: "auto" });
       return;
     }
 
@@ -367,7 +367,7 @@ export function renderStudioSearchableDropdown(options: StudioSearchableDropdown
     open = true;
     // Restore the stylesheet's flex-column layout (an inline display value
     // would override it and break the list's flex sizing).
-    panelEl.style.display = "";
+    panelEl.setCssStyles({ display: "" });
     bindViewportListeners();
     positionPanel();
     rootEl.addClass("is-open");
@@ -384,7 +384,7 @@ export function renderStudioSearchableDropdown(options: StudioSearchableDropdown
       return;
     }
     open = false;
-    panelEl.style.display = "none";
+    panelEl.setCssStyles({ display: "none" });
     rootEl.removeClass("is-open");
     rootEl.removeClass("is-open-upward");
     triggerEl.setAttribute("aria-expanded", "false");

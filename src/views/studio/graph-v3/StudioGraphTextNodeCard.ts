@@ -399,7 +399,7 @@ export function renderTextNodeCard(options: RenderTextNodeCardOptions): void {
     // content exactly like the display surface reflows: keep the textarea's
     // height synced to its scrollHeight while typing.
     const syncEditorHeight = (): void => {
-      textAreaEl.style.height = "auto";
+      textAreaEl.setCssStyles({ height: "auto" });
       const scrollHeight = textAreaEl.scrollHeight;
       if (scrollHeight > 0) {
         textAreaEl.style.height = `${scrollHeight}px`;

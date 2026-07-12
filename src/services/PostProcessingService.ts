@@ -8,7 +8,7 @@ export type PostProcessingContext = Readonly<{
 }>;
 
 function createOperationId(): string {
-  const random = globalThis.crypto?.randomUUID?.().replace(/-/g, "")
+  const random = window.crypto?.randomUUID?.().replace(/-/g, "")
     ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`;
   return `postprocess:${random}`.slice(0, 128);
 }

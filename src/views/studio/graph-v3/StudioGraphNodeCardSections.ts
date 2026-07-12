@@ -183,7 +183,7 @@ export function renderNodePorts(options: {
       pin.dataset.portId = port.id;
       pin.dataset.portDirection = "in";
       pin.disabled = interactionLocked;
-      row.createEl("span", {
+      row.createSpan({
         cls: "ss-studio-port-label",
         text: `${port.id}${port.required ? "*" : ""}`,
       });
@@ -203,7 +203,7 @@ export function renderNodePorts(options: {
     const outputsCol = ports.createDiv({ cls: "ss-studio-node-ports-col" });
     for (const port of outputPorts) {
       const row = outputsCol.createDiv({ cls: "ss-studio-port-row is-output" });
-      row.createEl("span", { cls: "ss-studio-port-label", text: port.id });
+      row.createSpan({ cls: "ss-studio-port-label", text: port.id });
       const pin = row.createEl("button", {
         cls: `ss-studio-port-pin is-output ${
           graphInteraction.isPendingConnectionSource(node.id, port.id) ? "is-active" : ""

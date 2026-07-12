@@ -91,7 +91,7 @@ export class VersionCheckerService {
     this.stopPeriodicUpdateCheck();
     
     // Schedule periodic checks
-    this.periodicCheckTimeout = setInterval(() => {
+    this.periodicCheckTimeout = window.setInterval(() => {
       this.checkForUpdatesQuietly();
     }, this.periodicCheckIntervalMs);
   }
@@ -101,7 +101,7 @@ export class VersionCheckerService {
    */
   public stopPeriodicUpdateCheck(): void {
     if (this.periodicCheckTimeout) {
-      clearInterval(this.periodicCheckTimeout);
+      window.clearInterval(this.periodicCheckTimeout);
       this.periodicCheckTimeout = null;
     }
   }
@@ -201,7 +201,7 @@ export class VersionCheckerService {
    */
   public async checkForUpdatesOnStartup(delayMs: number = 3000): Promise<void> {
     // Wait a bit to avoid overwhelming the user with notifications on startup
-    await new Promise(resolve => setTimeout(resolve, delayMs));
+    await new Promise(resolve => window.setTimeout(resolve, delayMs));
 
     // Handle development mode flow
     if (IS_DEVELOPMENT_BUILD) {
@@ -312,7 +312,7 @@ export class VersionCheckerService {
       return;
     }
 
-    setTimeout(runner, timeoutMs);
+    window.setTimeout(runner, timeoutMs);
   }
 
   /**
@@ -323,7 +323,7 @@ export class VersionCheckerService {
     this.removeUpdateDrawer();
     
     // Create drawer element
-    this.updateDrawerEl = document.createElement('div');
+    this.updateDrawerEl = createDiv();
     this.updateDrawerEl.classList.add('systemsculpt-update-drawer');
     
     // Add accessibility attributes
@@ -394,14 +394,14 @@ export class VersionCheckerService {
     document.addEventListener('keydown', handleEscape);
     
     // Show drawer with animation
-    setTimeout(() => {
+    window.setTimeout(() => {
       if (this.updateDrawerEl) {
         this.updateDrawerEl.classList.add('visible');
       }
     }, 100);
     
     // Auto-hide after 20 seconds
-    setTimeout(() => {
+    window.setTimeout(() => {
       this.removeUpdateDrawer();
     }, 20000);
   }
@@ -429,7 +429,7 @@ export class VersionCheckerService {
     this.removeUpdateDrawer();
     
     // Create drawer element
-    this.updateDrawerEl = document.createElement('div');
+    this.updateDrawerEl = createDiv();
     this.updateDrawerEl.classList.add('systemsculpt-update-drawer');
     
     // Add accessibility attributes
@@ -500,14 +500,14 @@ export class VersionCheckerService {
     document.addEventListener('keydown', handleEscape);
     
     // Show drawer with animation
-    setTimeout(() => {
+    window.setTimeout(() => {
       if (this.updateDrawerEl) {
         this.updateDrawerEl.classList.add('visible');
       }
     }, 100);
     
     // Auto-hide after 20 seconds (increased from 15 to give users more time)
-    setTimeout(() => {
+    window.setTimeout(() => {
       this.removeUpdateDrawer();
     }, 20000);
   }
@@ -552,7 +552,7 @@ export class VersionCheckerService {
       this.updateDrawerEl.classList.remove('visible');
       
       // Then remove from DOM after transition completes
-      setTimeout(() => {
+      window.setTimeout(() => {
         if (this.updateDrawerEl && this.updateDrawerEl.parentNode) {
           this.updateDrawerEl.parentNode.removeChild(this.updateDrawerEl);
           this.updateDrawerEl = null;

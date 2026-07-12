@@ -80,7 +80,7 @@ export class CreditsBalanceModal extends StandardModal {
     this.usageHintEl = this.usagePanelEl.createDiv({ cls: "ss-credits-usage__hint" });
     this.usageLoadMoreButton = this.usagePanelEl.createEl("button", {
       cls: "ss-credits-usage__load-more",
-      text: "Load More",
+      text: "Load more",
       attr: { type: "button" },
     });
     this.registerDomEvent(this.usageLoadMoreButton, "click", () => {
@@ -265,7 +265,7 @@ export class CreditsBalanceModal extends StandardModal {
     }
 
     if (!this.usageLoaded && this.usage.items.length === 0) {
-      this.usageHintEl.setText("Open the Usage tab and press Refresh to load recent usage.");
+      this.usageHintEl.setText("Open the usage tab and press refresh to load recent usage.");
       this.usageHintEl.removeClass("is-warning");
       this.updateUsageLoadMoreButton();
       return;
@@ -356,7 +356,7 @@ export class CreditsBalanceModal extends StandardModal {
       text: "Refresh to try again",
     });
 
-    this.hintEl.setText("We could not load your latest credits. You can refresh or open Account to verify your license.");
+    this.hintEl.setText("We could not load your latest credits. You can refresh or open account to verify your license.");
     this.hintEl.removeClass("is-warning");
   }
 

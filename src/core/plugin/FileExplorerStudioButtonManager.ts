@@ -109,7 +109,7 @@ export class FileExplorerStudioButtonManager {
   }
 
   private createButton(): HTMLElement {
-    const button = document.createElement("div");
+    const button = createDiv();
     button.classList.add(
       "clickable-icon",
       "nav-action-button",

@@ -174,7 +174,7 @@ export class StandardModal extends Modal {
     // Add clear button
     const clearButton = searchContainer.createDiv("ss-modal__search-clear");
     setIcon(clearButton, "x");
-    clearButton.style.display = "none";
+    clearButton.setCssStyles({ display: "none" });
     
     // Event listeners
     this.registerDomEvent(searchInput, "input", () => {
@@ -185,7 +185,7 @@ export class StandardModal extends Modal {
     
     this.registerDomEvent(clearButton, "click", () => {
       searchInput.value = "";
-      clearButton.style.display = "none";
+      clearButton.setCssStyles({ display: "none" });
       callback("");
       searchInput.focus();
     });
@@ -235,7 +235,7 @@ export class StandardModal extends Modal {
    * @param badge Optional badge text
    */
   createItem(title: string, description?: string, icon?: string, badge?: string) {
-    const item = document.createElement("div");
+    const item = createDiv();
     item.className = "ss-modal__item";
     
     // Add icon if provided

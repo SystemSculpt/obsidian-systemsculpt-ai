@@ -49,7 +49,7 @@ describe("CommandManager studio fit-selection command", () => {
     expect(fitCommand).toEqual(
       expect.objectContaining({
         id: "fit-systemsculpt-studio-selection-in-viewport",
-        name: "SystemSculpt Studio: Fit Selection in Viewport",
+        name: "Studio: fit selection in viewport",
         checkCallback: expect.any(Function),
         hotkeys: [{ modifiers: ["Mod", "Shift"], key: "1" }],
       })

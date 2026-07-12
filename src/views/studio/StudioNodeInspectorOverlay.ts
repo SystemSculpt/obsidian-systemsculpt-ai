@@ -213,7 +213,7 @@ export class StudioNodeInspectorOverlay {
     this.clearAllTransientErrors();
     this.activeNodeId = null;
     if (this.rootEl) {
-      this.rootEl.style.display = "none";
+      this.rootEl.setCssStyles({ display: "none" });
     }
   }
 
@@ -233,7 +233,7 @@ export class StudioNodeInspectorOverlay {
       this.activeNodeId = node.id;
     }
 
-    this.rootEl.style.display = "flex";
+    this.rootEl.setCssStyles({ display: "flex" });
     this.headerTitleEl.setText(`${node.title || node.kind}`);
     this.statusEl.setText("");
     this.positionNearNode(options?.anchorEl || null);
@@ -246,7 +246,7 @@ export class StudioNodeInspectorOverlay {
     }
 
     const root = this.viewportEl.createDiv({ cls: "ss-studio-node-inspector" });
-    root.style.display = "none";
+    root.setCssStyles({ display: "none" });
     root.addEventListener("pointerdown", (event) => {
       event.stopPropagation();
     });
@@ -686,7 +686,7 @@ export class StudioNodeInspectorOverlay {
     const statusEl = summaryEl.createSpan({ cls: "ss-studio-note-selector-status" });
     const addButton = toolbarEl.createEl("button", {
       cls: "ss-studio-note-selector-add-button",
-      text: "Add Note",
+      text: "Add note",
       attr: {
         "aria-label": "Add note entry",
       },
@@ -701,7 +701,7 @@ export class StudioNodeInspectorOverlay {
       const skipped = total - enabled;
       countBadgeEl.setText(`${total} ${total === 1 ? "note" : "notes"}`);
       if (total === 0) {
-        statusEl.setText("Add markdown notes to include in this node.");
+        statusEl.setText("Add Markdown notes to include in this node.");
         return;
       }
       if (enabled === total) {
@@ -861,7 +861,7 @@ export class StudioNodeInspectorOverlay {
           type: "text",
           cls: "ss-studio-node-inspector-input ss-studio-node-inspector-path-input",
           attr: {
-            placeholder: "Vault path to markdown note",
+            placeholder: "Vault path to Markdown note",
             "aria-label": `Markdown path for note ${i + 1}`,
           },
         });
@@ -1028,7 +1028,7 @@ export class StudioNodeInspectorOverlay {
       input.addEventListener("change", (event) => {
         applyValue((event.target as HTMLInputElement).checked);
       });
-      row.createEl("span", {
+      row.createSpan({
         text: field.placeholder || "Enabled",
       });
       return;
@@ -1090,7 +1090,7 @@ export class StudioNodeInspectorOverlay {
       }
 
       const select = wrapper.createEl("select", { cls: "ss-studio-node-inspector-select" });
-      const empty = select.createEl("option", { text: "(none)" });
+      const empty = select.createEl("option", { text: "(None)" });
       empty.value = "";
       for (const option of field.options || []) {
         const next = select.createEl("option", { text: option.label });

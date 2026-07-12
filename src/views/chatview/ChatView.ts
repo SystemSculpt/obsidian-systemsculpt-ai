@@ -1,4 +1,4 @@
-import { ItemView, WorkspaceLeaf, TFile, Notice, App, MarkdownRenderer, Component } from "obsidian";
+import { ItemView, WorkspaceLeaf, TFile, Notice, App, MarkdownRenderer, Component, Platform } from "obsidian";
 import { CHAT_VIEW_TYPE } from "../../core/plugin/viewTypes";
 import { SystemSculptService, type CreditsBalanceSnapshot } from "../../services/SystemSculptService";
 import { ChatMessage, ChatRole, MultiPartContent } from "../../types";
@@ -54,7 +54,7 @@ import {
 export { CHAT_VIEW_TYPE };
 
 function escapeMessageIdForSelector(messageId: string): string {
-  const cssEscape = (globalThis as any)?.CSS?.escape;
+  const cssEscape = (window as any)?.CSS?.escape;
   if (typeof cssEscape === "function") {
     return cssEscape(messageId);
   }
@@ -1200,7 +1200,7 @@ export class ChatView extends ItemView {
       statusContainer.addClass('no-animate');
     } else {
       // Create status container (first render can animate)
-      statusContainer = this.chatContainer.createEl("div", {
+      statusContainer = this.chatContainer.createDiv({
         cls: "systemsculpt-chat-status"
       });
     }
@@ -1392,7 +1392,7 @@ export class ChatView extends ItemView {
   }
 
   private scheduleChatFontSizeClassSync(delayMs: number = 0): void {
-    globalThis.setTimeout(() => this.applyChatFontSizeClass(), delayMs);
+    window.setTimeout(() => this.applyChatFontSizeClass(), delayMs);
   }
 
   private disposeViewResources(): Promise<void> {
@@ -1522,7 +1522,7 @@ export class ChatView extends ItemView {
     if (state.chatFontSize) {
       this.chatFontSize = state.chatFontSize;
       // Apply visually without saving
-      setTimeout(() => {
+      window.setTimeout(() => {
         if (this.chatContainer) {
           this.chatContainer.classList.remove("systemsculpt-chat-small", "systemsculpt-chat-medium", "systemsculpt-chat-large");
           this.chatContainer.classList.add(`systemsculpt-chat-${this.chatFontSize}`);
@@ -1579,9 +1579,9 @@ export class ChatView extends ItemView {
 
       const yieldToPaint = () => new Promise<void>((resolve) => {
         if (typeof requestAnimationFrame !== "undefined") {
-          requestAnimationFrame(() => resolve());
+          window.requestAnimationFrame(() => resolve());
         } else {
-          setTimeout(() => resolve(), 0);
+          window.setTimeout(() => resolve(), 0);
         }
       });
 
@@ -1703,7 +1703,7 @@ export class ChatView extends ItemView {
     ) as HTMLElement | null;
 
     if (!banner) {
-      banner = document.createElement("div");
+      banner = createDiv();
       banner.className = "systemsculpt-chat-loading-banner";
       banner.setAttribute("role", "status");
       banner.setAttribute("aria-live", "polite");
@@ -1779,9 +1779,9 @@ export class ChatView extends ItemView {
 
     const yieldToPaint = () => new Promise<void>((resolve) => {
       if (typeof requestAnimationFrame !== "undefined") {
-        requestAnimationFrame(() => resolve());
+        window.requestAnimationFrame(() => resolve());
       } else {
-        setTimeout(() => resolve(), 0);
+        window.setTimeout(() => resolve(), 0);
       }
     });
 
@@ -1791,7 +1791,7 @@ export class ChatView extends ItemView {
     for (let start = this.virtualStartIndex; start < total; start += chunkSize) {
       if (renderEpoch !== this.renderEpoch) return;
 
-      const frag = document.createDocumentFragment();
+      const frag = createFragment();
       const end = Math.min(total, start + chunkSize);
       for (let i = start; i < end; i++) {
         if (renderEpoch !== this.renderEpoch) return;
@@ -1812,7 +1812,7 @@ export class ChatView extends ItemView {
     // mode).  When they are reviewing earlier history we leave the scroll
     // position untouched.
     if (this.scrollManager?.isAutoScrollEnabled()) {
-      setTimeout(() => {
+      window.setTimeout(() => {
         this.scrollManager?.forceScrollToBottom();
       }, 0);
     }
@@ -1828,7 +1828,7 @@ export class ChatView extends ItemView {
    */
   private createLoadMoreButton(): HTMLElement {
     // Use a semantic <button> so we get native accessibility/keyboard behaviour
-    const btn = document.createElement('button');
+    const btn = createEl('button');
     btn.type = 'button';
     btn.className = 'systemsculpt-load-more';
 
@@ -2299,8 +2299,17 @@ export class ChatView extends ItemView {
       ],
       timezone: safe<string | null>("timezone", () => Intl.DateTimeFormat().resolvedOptions().timeZone, null),
       locale: typeof navigator !== "undefined" ? navigator.language : null,
-      userAgent: typeof navigator !== "undefined" ? navigator.userAgent : null,
-      platform: typeof navigator !== "undefined" ? navigator.platform : null,
+      platform: Platform.isMacOS
+        ? "macOS"
+        : Platform.isWin
+          ? "Windows"
+          : Platform.isLinux
+            ? "Linux"
+            : Platform.isIosApp
+              ? "iOS"
+              : Platform.isAndroidApp
+                ? "Android"
+                : "Unknown",
       viewport: typeof window !== "undefined"
         ? {
             innerWidth: window.innerWidth,

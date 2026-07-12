@@ -90,7 +90,7 @@ export class VectorSearch {
 
       // Yield to the event loop so the UI remains responsive
       if (end < total) {
-        await new Promise<void>((resolve) => setTimeout(resolve, yieldMs));
+        await new Promise<void>((resolve) => window.setTimeout(resolve, yieldMs));
       }
     }
 

@@ -279,7 +279,7 @@ export class TranscribeAudioFileModal extends StandardModal {
         attr: { for: hideId },
         cls: "ss-transcribe-audio__output-hide-label",
       });
-      hideLabel.setText("Do not show this again (re-enable in Settings).");
+      hideLabel.setText("Do not show this again (re-enable in settings).");
 
       this.registerDomEvent(hideInput, "change", () => {
         this.hideFormatChooserNextTime = hideInput.checked;
@@ -617,7 +617,7 @@ export class TranscribeAudioFileModal extends StandardModal {
         error
       );
       new Notice(
-        "Could not save transcription format preferences. You can still change them in Settings.",
+        "Could not save transcription format preferences. You can still change them in settings.",
         5000
       );
     }

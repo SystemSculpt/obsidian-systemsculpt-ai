@@ -57,13 +57,13 @@ export type ManagedDocumentProcessingDependencies = Readonly<{
 }>;
 
 function defaultOperationId(): string {
-  const random = globalThis.crypto?.randomUUID?.().replace(/-/g, "")
+  const random = window.crypto?.randomUUID?.().replace(/-/g, "")
     ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`;
   return `document-${random}`.slice(0, 128);
 }
 
 function defaultRequestId(): string {
-  return globalThis.crypto?.randomUUID?.() ?? `dispatch-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return window.crypto?.randomUUID?.() ?? `dispatch-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
 function abortError(): DOMException {
@@ -77,9 +77,9 @@ function throwIfAborted(signal: AbortSignal): void {
 async function defaultWait(milliseconds: number, signal: AbortSignal): Promise<void> {
   throwIfAborted(signal);
   await new Promise<void>((resolve, reject) => {
-    const timeout = setTimeout(resolve, milliseconds);
+    const timeout = window.setTimeout(resolve, milliseconds);
     const onAbort = () => {
-      clearTimeout(timeout);
+      window.clearTimeout(timeout);
       reject(abortError());
     };
     signal.addEventListener("abort", onAbort, { once: true });

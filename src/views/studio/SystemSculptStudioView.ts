@@ -1851,7 +1851,7 @@ export class SystemSculptStudioView extends ItemView {
       this.syncInspectorSelection();
       this.clearProjectLiveSyncState();
       if (options?.notifyOnError !== false) {
-        new Notice("SystemSculpt Studio only opens .systemsculpt files.");
+        new Notice("Studio only opens .systemsculpt files.");
       }
       return;
     }
@@ -4368,13 +4368,13 @@ export class SystemSculptStudioView extends ItemView {
       const hasPayload =
         (event.dataTransfer.types?.length || 0) > 0 || (event.dataTransfer.files?.length || 0) > 0;
       if (hasPayload) {
-        new Notice("Drop a markdown note or media file to create a node.");
+        new Notice("Drop a Markdown note or media file to create a node.");
       }
       return;
     }
 
     if (dropped.folderPaths.length > 0) {
-      new Notice("Dropping folders into Studio is not supported yet.");
+      new Notice("Dropping folders into studio is not supported yet.");
     }
 
     const anchor =
@@ -4404,7 +4404,7 @@ export class SystemSculptStudioView extends ItemView {
     }
 
     if (!handledSomething && dropped.unsupportedPaths.length > 0) {
-      new Notice("Only markdown notes and media files can be dropped into Studio.");
+      new Notice("Only Markdown notes and media files can be dropped into studio.");
     }
   }
 
@@ -4488,7 +4488,7 @@ export class SystemSculptStudioView extends ItemView {
       return;
     }
     if (!Platform.isDesktopApp) {
-      new Notice("Reveal in Finder is desktop-only.");
+      new Notice("Reveal in finder is desktop-only.");
       return;
     }
 
@@ -4802,20 +4802,20 @@ export class SystemSculptStudioView extends ItemView {
     if (!Platform.isDesktopApp) {
       this.inspectorOverlay?.hide();
       root.createEl("p", {
-        text: "SystemSculpt Studio is desktop-only.",
+        text: "Studio is desktop-only.",
         cls: "ss-studio-warning",
       });
       return;
     }
 
     if (this.lastError) {
-      root.createEl("div", {
+      root.createDiv({
         text: this.lastError,
         cls: "ss-studio-error",
       });
     }
     if (this.projectLiveSyncWarning) {
-      root.createEl("div", {
+      root.createDiv({
         text: this.projectLiveSyncWarning,
         cls: "ss-studio-warning",
       });

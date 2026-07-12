@@ -368,7 +368,7 @@ export class DirectoryOperations {
     for (let i = 0; i < items.length; i += CHUNK_SIZE) {
       const chunk = items.slice(i, i + CHUNK_SIZE);
       // Run this chunk serially to preserve predictable ordering
-      /* eslint-disable no-await-in-loop */
+       
       for (const { source, destination } of chunk) {
         try {
           // Validate paths
@@ -414,7 +414,7 @@ export class DirectoryOperations {
           results.push({ source, destination, success: false, error: error?.message || String(error) });
         }
       }
-      /* eslint-enable no-await-in-loop */
+       
     }
 
     // User feedback summary

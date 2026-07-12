@@ -54,7 +54,7 @@ export function createChatComposer(parent: HTMLElement, deps: ChatComposerDeps):
 
   // Attached context files, shown as compact pills
   const attachments = root.createDiv({ cls: "systemsculpt-chat-composer-attachments" });
-  attachments.style.display = "none";
+  attachments.setCssStyles({ display: "none" });
 
   const attachButton = new ButtonComponent(leftGroup)
     .setIcon("paperclip")
@@ -160,7 +160,7 @@ export function createChatComposer(parent: HTMLElement, deps: ChatComposerDeps):
     .onClick(() => void deps.onStop());
   stopButton.buttonEl.setAttribute("aria-label", "Stop generation");
   stopButton.buttonEl.classList.add("systemsculpt-chat-composer-action", "mod-stop");
-  stopButton.buttonEl.style.display = "none";
+  stopButton.buttonEl.setCssStyles({ display: "none" });
 
   const sendButton = new ButtonComponent(actions)
     .setIcon("send")

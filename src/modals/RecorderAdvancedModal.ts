@@ -14,7 +14,7 @@ export class RecorderAdvancedModal extends Modal {
     contentEl.empty();
     contentEl.addClass("ss-recorder-advanced-modal");
 
-    contentEl.createEl("h2", { text: "Recorder Advanced Controls" });
+    contentEl.createEl("h2", { text: "Recorder advanced controls" });
     contentEl.createEl("p", {
       text: "Audio recorder active. Update capture behavior below without leaving your workflow.",
       cls: "setting-item-description",
@@ -24,7 +24,7 @@ export class RecorderAdvancedModal extends Modal {
 
     new Setting(contentEl)
       .setName("Open full recording settings")
-      .setDesc("Jump to the Recording tab for the full settings panel.")
+      .setDesc("Jump to the recording tab for the full settings panel.")
       .addButton((button) => {
         button
           .setButtonText("Open settings")
@@ -37,7 +37,7 @@ export class RecorderAdvancedModal extends Modal {
   }
 
   private renderAudioSection(containerEl: HTMLElement): void {
-    containerEl.createEl("h3", { text: "Audio Recording" });
+    containerEl.createEl("h3", { text: "Audio recording" });
     this.renderMicrophoneSetting(containerEl);
 
     this.addToggleSetting(

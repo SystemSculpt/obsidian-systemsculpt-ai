@@ -20,7 +20,7 @@ export class MessagePartList {
 
   /** Return all parts matching the given type */
   private _ofType<T extends MessagePart["type"]>(type: T): Extract<MessagePart, { type: T }>[] {
-    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
+     
     return this.parts.filter((p) => p.type === type) as any;
   }
 

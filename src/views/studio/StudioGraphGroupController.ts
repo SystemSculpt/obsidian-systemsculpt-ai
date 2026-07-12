@@ -239,7 +239,7 @@ export class StudioGraphGroupController {
         },
       });
       colorButtonEl.type = "button";
-      const colorChipEl = document.createElement("span");
+      const colorChipEl = createSpan();
       colorChipEl.className = "ss-studio-group-color-chip";
       colorButtonEl.appendChild(colorChipEl);
       colorButtonEl.addEventListener("pointerdown", (event) => {
@@ -286,12 +286,12 @@ export class StudioGraphGroupController {
       }
       const bounds = this.computeGroupBounds(group);
       if (!bounds) {
-        elements.frameEl.style.display = "none";
-        elements.tagEl.style.display = "none";
+        elements.frameEl.setCssStyles({ display: "none" });
+        elements.tagEl.setCssStyles({ display: "none" });
         continue;
       }
-      elements.frameEl.style.display = "";
-      elements.tagEl.style.display = "";
+      elements.frameEl.setCssStyles({ display: "" });
+      elements.tagEl.setCssStyles({ display: "" });
       elements.frameEl.classList.toggle("is-drop-target", group.id === this.dropTargetGroupId);
       elements.frameEl.style.left = `${bounds.left}px`;
       elements.frameEl.style.top = `${bounds.top}px`;

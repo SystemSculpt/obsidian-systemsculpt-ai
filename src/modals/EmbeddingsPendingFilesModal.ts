@@ -176,7 +176,7 @@ export class EmbeddingsPendingFilesModal extends StandardModal {
     if (!this.summaryTextEl) return;
 
     if (this.allFiles.length === 0) {
-      this.summaryTextEl.setText("All eligible markdown files already have embeddings.");
+      this.summaryTextEl.setText("All eligible Markdown files already have embeddings.");
       return;
     }
 
@@ -227,11 +227,11 @@ export class EmbeddingsPendingFilesModal extends StandardModal {
   }
 
   private copyViaFallback(text: string): void {
-    const textarea = document.createElement("textarea");
+    const textarea = createEl("textarea");
     textarea.value = text;
     textarea.setAttribute("readonly", "true");
-    textarea.style.position = "absolute";
-    textarea.style.left = "-9999px";
+    textarea.setCssStyles({ position: "absolute" });
+    textarea.setCssStyles({ left: "-9999px" });
     document.body.appendChild(textarea);
     textarea.select();
     document.execCommand("copy");

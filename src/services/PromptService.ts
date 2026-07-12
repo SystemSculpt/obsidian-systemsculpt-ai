@@ -18,12 +18,12 @@ export class PromptService {
 
   async listPrompts(): Promise<PromptEntry[]> {
     const folder = this.app.vault.getAbstractFileByPath(this.folderPath);
-    if (!folder || !("children" in folder)) return [];
+    if (!(folder instanceof TFolder)) return [];
 
     const entries: PromptEntry[] = [];
-    for (const child of (folder as TFolder).children) {
-      if (!("extension" in child) || (child as TFile).extension !== "md") continue;
-      const file = child as TFile;
+    for (const child of folder.children) {
+      if (!(child instanceof TFile) || child.extension !== "md") continue;
+      const file = child;
       const meta = await this.readFrontmatter(file);
       entries.push({
         name: file.basename,
@@ -38,9 +38,9 @@ export class PromptService {
 
   async readPromptContent(filePath: string): Promise<string | null> {
     const file = this.app.vault.getAbstractFileByPath(filePath);
-    if (!file || !("extension" in file)) return null;
+    if (!(file instanceof TFile)) return null;
 
-    const raw = await this.app.vault.read(file as TFile);
+    const raw = await this.app.vault.read(file);
     return this.stripFrontmatter(raw);
   }
 

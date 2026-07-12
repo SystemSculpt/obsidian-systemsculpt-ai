@@ -216,7 +216,7 @@ export function detectStudioImageDimensions(bytes: ArrayBuffer, mimeType: string
 }
 
 function base64FromArrayBuffer(bytes: ArrayBuffer): string {
-  const bufferCtor = (globalThis as any)?.Buffer;
+  const bufferCtor = (window as any)?.Buffer;
   if (bufferCtor && typeof bufferCtor.from === "function") {
     return bufferCtor.from(bytes).toString("base64");
   }
@@ -517,7 +517,7 @@ function supportsCanvasBoardRender(): boolean {
     return false;
   }
   try {
-    const canvas = document.createElement("canvas");
+    const canvas = createEl("canvas");
     return typeof canvas.getContext === "function" && Boolean(canvas.getContext("2d"));
   } catch {
     return false;
@@ -525,7 +525,7 @@ function supportsCanvasBoardRender(): boolean {
 }
 
 function createCanvas(width: number, height: number): HTMLCanvasElement {
-  const canvas = document.createElement("canvas");
+  const canvas = createEl("canvas");
   canvas.width = Math.max(1, Math.floor(width));
   canvas.height = Math.max(1, Math.floor(height));
   return canvas;
@@ -546,7 +546,7 @@ async function canvasToArrayBuffer(canvas: HTMLCanvasElement, mimeType: string):
   }
   const dataUrl = canvas.toDataURL(mimeType);
   const base64 = dataUrl.split(",")[1] || "";
-  const bufferCtor = (globalThis as any)?.Buffer;
+  const bufferCtor = (window as any)?.Buffer;
   if (bufferCtor && typeof bufferCtor.from === "function") {
     const buffer = bufferCtor.from(base64, "base64");
     return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength) as ArrayBuffer;

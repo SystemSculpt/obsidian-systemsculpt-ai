@@ -14,7 +14,7 @@ export class MermaidPreviewModal extends Modal {
 
     /* ------------------------- Header ------------------------- */
     const header = contentEl.createDiv({ cls: "ss-mermaid-preview-header" });
-    header.createEl("h2", { text: "Mermaid Diagram" });
+    header.createEl("h2", { text: "Mermaid diagram" });
 
     const closeBtn = header.createDiv({ cls: "ss-mermaid-preview-close" });
     setIcon(closeBtn, "x");
@@ -25,7 +25,7 @@ export class MermaidPreviewModal extends Modal {
     diagramContainer.textContent = this.code;
 
     // Render via global Mermaid (core plugin)
-    const m = (globalThis as any).mermaid;
+    const m = (window as any).mermaid;
     if (m && typeof m.init === "function") {
       try {
         // Ensure our diagram picks up theme overrides
@@ -36,7 +36,7 @@ export class MermaidPreviewModal extends Modal {
 
     /* ------------------------- Footer ------------------------- */
     const footer = contentEl.createDiv({ cls: "ss-mermaid-preview-footer" });
-    const copyBtn = footer.createEl("button", { cls: "ss-mermaid-copy-btn", text: "Copy Code" });
+    const copyBtn = footer.createEl("button", { cls: "ss-mermaid-copy-btn", text: "Copy code" });
 
     copyBtn.addEventListener("click", () => {
       navigator.clipboard.writeText(this.code).then(() => {

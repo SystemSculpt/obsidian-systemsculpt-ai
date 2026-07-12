@@ -12,12 +12,12 @@ export function displayAdvancedTabContent(containerEl: HTMLElement, tabInstance:
     }
     const { app, plugin } = tabInstance;
 
-    containerEl.createEl("h3", { text: "Advanced Settings" }); // Added header for clarity
+    containerEl.createEl("h3", { text: "Advanced settings" }); // Added header for clarity
     tabInstance.renderQuickActionsSection(containerEl);
 
     new Setting(containerEl)
         .setName("Relative line numbers")
-        .setDesc("Show a vim-style line number gutter in the editor: the current line shows its absolute number, every other line shows its distance from the cursor. Tip: turn off Obsidian's core \"Show line number\" to avoid a doubled gutter.")
+        .setDesc("Show a vim-style line number gutter in the editor: the current line shows its absolute number, every other line shows its distance from the Cursor. Tip: turn off Obsidian's core \"show line number\" to avoid a doubled gutter.")
         .addToggle((toggle) => {
             toggle
                 .setValue(Boolean(plugin.settings.relativeLineNumbersEnabled))
@@ -52,7 +52,7 @@ export function displayAdvancedTabContent(containerEl: HTMLElement, tabInstance:
                             });
                             // Notify version checker to stop checking
                             plugin.versionCheckerService?.onUpdateNotificationsDisabled();
-                            new Notice("Update notifications disabled. You can re-enable them anytime in Advanced settings.");
+                            new Notice("Update notifications disabled. You can re-enable them anytime in advanced settings.");
                         } else {
                             // User cancelled, reset toggle
                             toggle.setValue(true);
@@ -72,7 +72,7 @@ export function displayAdvancedTabContent(containerEl: HTMLElement, tabInstance:
 
     // Reset to Factory Settings button
     const resetSetting = new Setting(containerEl)
-        .setName("Reset to Factory Settings")
+        .setName("Reset to factory settings")
         .setDesc(
             "Clear all custom settings and restore defaults for this plugin."
         );
@@ -106,7 +106,7 @@ export function displayAdvancedTabContent(containerEl: HTMLElement, tabInstance:
 
             // Force reload to ensure clean state
              new Notice("Settings reset. Reloading Obsidian...", 3000);
-             setTimeout(() => window.location.reload(), 1000); // Delay reload slightly
+             window.setTimeout(() => window.location.reload(), 1000); // Delay reload slightly
 
         } catch (error) {
             showPopup(app, "Failed to reset: " + String(error));
@@ -122,7 +122,7 @@ export function displayAdvancedTabContent(containerEl: HTMLElement, tabInstance:
         .setName("Copy diagnostics snapshot")
         .setDesc("Copies recent logs and resource metrics for support tickets.")
         .addButton((button) => {
-            button.setButtonText("Copy Snapshot").onClick(async () => {
+            button.setButtonText("Copy snapshot").onClick(async () => {
                 const { text, path } = await plugin.exportDiagnosticsSnapshot();
                 const copied = await tryCopyToClipboard(text);
                 if (copied) {
@@ -139,7 +139,7 @@ export function displayAdvancedTabContent(containerEl: HTMLElement, tabInstance:
         .setName("Open diagnostics folder")
         .setDesc("Opens the .systemsculpt/diagnostics folder inside your vault.")
         .addButton((button) => {
-            button.setButtonText("Open Folder").onClick(async () => {
+            button.setButtonText("Open folder").onClick(async () => {
                 const opened = await plugin.openDiagnosticsFolder();
                 if (opened) {
                     new Notice("Opened diagnostics folder in your file manager.", 4000);

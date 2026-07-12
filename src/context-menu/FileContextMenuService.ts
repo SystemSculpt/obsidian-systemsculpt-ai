@@ -99,7 +99,7 @@ class DefaultChatWithFileLauncher implements ChatWithFileLauncher {
   }
 
   private async focusLeaf(leaf: WorkspaceLeaf) {
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await new Promise((resolve) => window.setTimeout(resolve, 50));
     this.app.workspace.setActiveLeaf(leaf, { focus: true });
   }
 }
@@ -359,7 +359,7 @@ export class FileContextMenuService {
   private addChatWithFileMenuItem(menu: Menu, file: TFile, context: MenuContext): void {
     menu.addItem((item) => {
       item
-        .setTitle("SystemSculpt - Chat with File")
+        .setTitle("Chat with file")
         .setIcon("message-square")
         .setSection("systemsculpt")
         .onClick(async () => {
@@ -382,7 +382,7 @@ export class FileContextMenuService {
   private addCopyImageToClipboardMenuItem(menu: Menu, file: TFile, context: MenuContext): void {
     menu.addItem((item) => {
       item
-        .setTitle("SystemSculpt - Copy Image to Clipboard")
+        .setTitle("Copy image to clipboard")
         .setIcon("copy")
         .setSection("systemsculpt")
         .onClick(async () => {
@@ -490,7 +490,7 @@ export class FileContextMenuService {
 
       if (message?.toLowerCase().includes("license")) {
         new Notice(
-          "Document conversion requires an active SystemSculpt Pro license.",
+          "Document conversion requires an active SystemSculpt license.",
           6000
         );
         return;

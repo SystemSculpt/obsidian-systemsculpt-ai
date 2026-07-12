@@ -93,7 +93,7 @@ export class ScrollManagerService {
       this.cancelScheduledFrame();
       this.programmaticScroll = true;
       this.container.scrollTop = state.scrollTop;
-      setTimeout(() => {
+      window.setTimeout(() => {
         this.programmaticScroll = false;
       }, 16);
       this.setAutoScroll(false, { reason: "restore" });
@@ -126,7 +126,7 @@ export class ScrollManagerService {
 
   private initializeSentinel(): void {
     // Styled in views/chat.css (.systemsculpt-scroll-sentinel)
-    this.sentinel = document.createElement("div");
+    this.sentinel = createDiv();
     this.sentinel.className = "systemsculpt-scroll-sentinel";
     this.sentinel.setAttribute("aria-hidden", "true");
     this.container.appendChild(this.sentinel);
@@ -206,11 +206,11 @@ export class ScrollManagerService {
   private hasMeaningfulNodes(nodes: NodeList): boolean {
     for (const node of Array.from(nodes)) {
       if (node === this.sentinel) continue;
-      if (node instanceof HTMLElement) {
+      if (node.instanceOf(HTMLElement)) {
         if (node.classList.contains("systemsculpt-scroll-sentinel")) continue;
         return true;
       }
-      if (node instanceof Text) {
+      if (node.instanceOf(Text)) {
         return true;
       }
     }
@@ -228,7 +228,7 @@ export class ScrollManagerService {
     }
 
     this.log("ScrollManager re-anchor scheduled", { reason, immediate });
-    this.scheduledFrame = requestAnimationFrame(() => {
+    this.scheduledFrame = window.requestAnimationFrame(() => {
       this.scheduledFrame = null;
       const reasonToApply = this.pendingReason;
       const immediateToApply = this.pendingImmediate;
@@ -273,7 +273,7 @@ export class ScrollManagerService {
     this.programmaticScroll = true;
     this.ensureSentinel();
     this.container.scrollTop = this.container.scrollHeight;
-    setTimeout(() => {
+    window.setTimeout(() => {
       this.programmaticScroll = false;
     }, 16);
   }
@@ -283,7 +283,7 @@ export class ScrollManagerService {
     this.ensureSentinel();
     this.container.scrollTo({ top: this.container.scrollHeight, behavior });
     const delay = behavior === "smooth" ? 250 : 16;
-    setTimeout(() => {
+    window.setTimeout(() => {
       this.programmaticScroll = false;
     }, delay);
   }

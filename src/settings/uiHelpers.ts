@@ -12,7 +12,7 @@ const RESTORE_DEFAULTS_DESCRIPTION = "Restore the recommended defaults";
 const RESTORE_DEFAULTS_LABEL = "Restore Recommended Defaults";
 
 export function createExternalHelpLink(container: HTMLElement, options: ExternalHelpLinkOptions): HTMLAnchorElement {
-  const link = document.createElement("a");
+  const link = createEl("a");
   link.textContent = options.text;
   link.href = options.href;
   link.classList.add("ss-help-link");
@@ -30,7 +30,7 @@ export function createExternalHelpLink(container: HTMLElement, options: External
     link.dataset.testId = options.datasetTestId;
   }
 
-  const icon = document.createElement("span");
+  const icon = createSpan();
   icon.classList.add("ss-help-link-icon");
   setIcon(icon, "external-link");
   link.appendChild(icon);

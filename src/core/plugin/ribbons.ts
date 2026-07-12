@@ -52,7 +52,7 @@ export class RibbonManager {
 
     this.registerRibbonIcon(
       "search",
-      "Open SystemSculpt Search",
+      "Open search",
       async () => {
         const { SystemSculptSearchModal } = await import("../../modals/SystemSculptSearchModal");
         const modal = new SystemSculptSearchModal(this.plugin);
@@ -60,13 +60,13 @@ export class RibbonManager {
       }
     );
 
-    this.registerRibbonIcon("trash", "Open SystemSculpt Janitor", () => {
+    this.registerRibbonIcon("trash", "Open janitor", () => {
       this.openJanitorModal();
     });
 
     this.registerRibbonIcon(
       "history",
-      "Open SystemSculpt History",
+      "Open history",
       () => {
         this.openSystemSculptHistoryModal();
       }
@@ -74,7 +74,7 @@ export class RibbonManager {
 
     this.registerRibbonIcon(
       "message-square",
-      "Open SystemSculpt Chat",
+      "Open chat",
       async () => {
         await this.openChatView();
       }
@@ -152,7 +152,7 @@ export class RibbonManager {
       const modal = new SystemSculptHistoryModal(this.plugin);
       modal.open();
     }).catch(() => {
-      new Notice("Unable to open SystemSculpt History right now.", 5000);
+      new Notice("Unable to open history right now.", 5000);
     });
   }
 
@@ -170,7 +170,7 @@ export class RibbonManager {
     void import("../../modals/JanitorModal").then(({ JanitorModal }) => {
       new JanitorModal(this.app, this.plugin).open();
     }).catch(() => {
-      new Notice("Unable to open SystemSculpt Janitor right now.", 5000);
+      new Notice("Unable to open janitor right now.", 5000);
     });
   }
 

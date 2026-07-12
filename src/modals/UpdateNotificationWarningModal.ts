@@ -36,7 +36,7 @@ export class UpdateNotificationWarningModal extends Modal {
         iconEl.addClass("ss-modal-icon--warning");
 
         const titleEl = headerEl.createDiv({ cls: "modal-title" });
-        titleEl.textContent = "Disable Update Notifications";
+        titleEl.textContent = "Disable update notifications";
 
         // Add warning message
         const messageEl = contentEl.createDiv({ cls: "modal-content" });
@@ -70,7 +70,7 @@ export class UpdateNotificationWarningModal extends Modal {
                     });
             })
             .addButton((btn) => {
-                btn.setButtonText("Disable Notifications")
+                btn.setButtonText("Disable notifications")
                     .setWarning()
                     .onClick(() => {
                         this.result.confirmed = true;

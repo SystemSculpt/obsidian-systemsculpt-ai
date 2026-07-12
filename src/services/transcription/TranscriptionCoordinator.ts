@@ -54,7 +54,7 @@ function throwIfAborted(signal: AbortSignal): void {
 }
 
 function createOperationId(): string {
-  const random = globalThis.crypto?.randomUUID?.().replace(/-/g, "")
+  const random = window.crypto?.randomUUID?.().replace(/-/g, "")
     ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`;
   return `transcription-${random}`.slice(0, 128);
 }
@@ -164,7 +164,7 @@ export class TranscriptionCoordinator {
 
       if (!this.plugin.settings.keepRecordingsAfterTranscription) {
         throwIfAborted(controller.signal);
-        await this.app.vault.delete(resolvedFile);
+        await this.app.fileManager.trashFile(resolvedFile);
         throwIfAborted(controller.signal);
       }
       throwIfAborted(controller.signal);
@@ -269,9 +269,9 @@ export class TranscriptionCoordinator {
     const view = this.app.workspace.getActiveViewOfType(MarkdownView);
     if (view?.editor) {
       view.editor.replaceSelection(text);
-      if (!suppressNotices) new Notice("✓ Transcription inserted into document");
+      if (!suppressNotices) new Notice("✓ transcription inserted into document");
     } else if (!suppressNotices) {
-      new Notice("✓ Transcription copied to clipboard (no active editor)");
+      new Notice("✓ transcription copied to clipboard (no active editor)");
     }
   }
 

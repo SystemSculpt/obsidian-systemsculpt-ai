@@ -20,13 +20,13 @@ export function renderCitationFooter(
     return;
   }
 
-  const citationsContainer = contentEl.createEl("div", {
+  const citationsContainer = contentEl.createDiv({
     cls: "systemsculpt-citations-container",
   });
 
   citationsContainer.createEl("hr", { cls: "systemsculpt-citations-divider" });
 
-  citationsContainer.createEl("div", {
+  citationsContainer.createDiv({
     cls: "systemsculpt-citations-header",
     text: "Sources",
   });
@@ -48,13 +48,13 @@ export function renderCitationFooter(
       },
     });
 
-    li.createEl("div", {
+    li.createDiv({
       cls: "systemsculpt-citation-url",
       text: citation.url,
     });
 
     if (citation.content?.trim()) {
-      li.createEl("div", {
+      li.createDiv({
         cls: "systemsculpt-citation-snippet",
         text: citation.content,
       });

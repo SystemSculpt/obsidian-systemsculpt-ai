@@ -28,9 +28,9 @@ export class ChatPersistenceManager {
 
   public scheduleAutosave(): void {
     if (this.autosaveTimer) {
-      clearTimeout(this.autosaveTimer);
+      window.clearTimeout(this.autosaveTimer);
     }
-    this.autosaveTimer = setTimeout(() => {
+    this.autosaveTimer = window.setTimeout(() => {
       this.autosaveTimer = null;
       void this.requestFlush("autosave").catch(() => {
         // Autosave has no awaiting caller; the failure is logged in requestFlush.
@@ -40,7 +40,7 @@ export class ChatPersistenceManager {
 
   public cancelAutosave(): void {
     if (this.autosaveTimer) {
-      clearTimeout(this.autosaveTimer);
+      window.clearTimeout(this.autosaveTimer);
       this.autosaveTimer = null;
     }
   }

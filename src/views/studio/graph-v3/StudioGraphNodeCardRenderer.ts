@@ -244,7 +244,7 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
     onRemoveNode,
   });
 
-  nodeEl.createEl("div", {
+  nodeEl.createDiv({
     cls: "ss-studio-node-kind",
     text: `${node.kind}@${node.version}`,
   });

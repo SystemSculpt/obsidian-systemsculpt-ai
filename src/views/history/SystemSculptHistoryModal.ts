@@ -29,7 +29,7 @@ export class SystemSculptHistoryModal extends StandardModal {
   async onOpen(): Promise<void> {
     super.onOpen();
 
-    this.addTitle("Open SystemSculpt History", "Search chats and Studio sessions in one place.");
+    this.addTitle("Open history", "Search chats and Studio sessions in one place.");
     this.renderSearchBar();
     this.renderContainers();
     this.addActionButton("Close", () => this.close(), false);
@@ -59,7 +59,7 @@ export class SystemSculptHistoryModal extends StandardModal {
   private renderContainers(): void {
     this.listEl = this.contentEl.createDiv("systemsculpt-history-list");
     this.emptyStateEl = this.contentEl.createDiv("systemsculpt-history-empty");
-    this.emptyStateEl.style.display = "none";
+    this.emptyStateEl.setCssStyles({ display: "none" });
 
     const emptyIcon = this.emptyStateEl.createDiv("systemsculpt-history-empty-icon");
     setIcon(emptyIcon, "history");
@@ -185,7 +185,7 @@ export class SystemSculptHistoryModal extends StandardModal {
   }
 
   private showEmptyState(message: string): void {
-    this.emptyStateEl.style.display = "flex";
+    this.emptyStateEl.setCssStyles({ display: "flex" });
     const textEl = this.emptyStateEl.querySelector(".systemsculpt-history-empty-text");
     if (textEl) {
       textEl.textContent = message;
@@ -193,7 +193,7 @@ export class SystemSculptHistoryModal extends StandardModal {
   }
 
   private hideEmptyState(): void {
-    this.emptyStateEl.style.display = "none";
+    this.emptyStateEl.setCssStyles({ display: "none" });
   }
 
   private handleSearchKeydown(event: KeyboardEvent): void {

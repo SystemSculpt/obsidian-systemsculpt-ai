@@ -90,7 +90,7 @@ export class BulkAutomationConfirmModal {
 
     const buttons = this.container.createDiv({ cls: "systemsculpt-bulk-widget-buttons" });
 
-    const skipBtn = buttons.createEl("button", { text: "Skip All (mark skipped)" });
+    const skipBtn = buttons.createEl("button", { text: "Skip all (mark skipped)" });
     skipBtn.onclick = () => {
       this.onCancel();
       this.close();
@@ -302,7 +302,7 @@ export class BulkProgressWidget {
       },
     ]);
 
-    setTimeout(() => this.close(), 5000);
+    window.setTimeout(() => this.close(), 5000);
   }
 
   markFailed(options: { status: string; detailLines?: string[]; copyText?: string }): void {
@@ -400,10 +400,10 @@ export class BulkProgressWidget {
     if (!this.actionsContainer) return;
     this.actionsContainer.empty();
     if (actions.length === 0) {
-      this.actionsContainer.style.display = "none";
+      this.actionsContainer.setCssStyles({ display: "none" });
       return;
     }
-    this.actionsContainer.style.display = "flex";
+    this.actionsContainer.setCssStyles({ display: "flex" });
     actions.forEach((action) => {
       const classes = ["systemsculpt-bulk-widget-button"];
       if (action.variant === "primary") {

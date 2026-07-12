@@ -137,7 +137,7 @@ function isLikelyHtmlFieldKey(key: string): boolean {
 }
 
 function sanitizeHtmlPreviewSource(rawHtml: string): string {
-  const template = document.createElement("template");
+  const template = createEl("template");
   template.innerHTML = rawHtml;
 
   for (const selector of ["script", "iframe", "object", "embed", "meta", "base", "link"]) {
@@ -499,7 +499,7 @@ export function renderJsonNodeEditor(options: RenderStudioJsonNodeEditorOptions)
   });
 
   const modeToggleEl = controlsEl.createDiv({ cls: "ss-studio-node-text-display-mode" });
-  modeToggleEl.createEl("span", {
+  modeToggleEl.createSpan({
     cls: "ss-studio-node-text-display-mode-label",
     text: "View",
   });
@@ -710,7 +710,7 @@ export function renderJsonNodeEditor(options: RenderStudioJsonNodeEditorOptions)
           cls: "ss-studio-node-json-row-key",
           type: "text",
           attr: {
-            placeholder: "key",
+            placeholder: "Key",
             "aria-label": "JSON key",
           },
         });
@@ -804,7 +804,7 @@ export function renderJsonNodeEditor(options: RenderStudioJsonNodeEditorOptions)
           const valueEl = htmlSourceSurfaceEl.createEl("textarea", {
             cls: `${valueInputClass} ss-studio-node-json-row-html-source`,
             attr: {
-              placeholder: "html source",
+              placeholder: "HTML source",
               "aria-label": `HTML value for ${row.key || "row"}`,
             },
           });
@@ -947,7 +947,7 @@ export function renderJsonNodeEditor(options: RenderStudioJsonNodeEditorOptions)
     const footerActionsEl = footerEl.createDiv({ cls: "ss-studio-node-json-composer-footer-actions" });
     const addRowEl = footerEl.createEl("button", {
       cls: "ss-studio-node-json-row-button",
-      text: "Add Field",
+      text: "Add field",
       attr: {
         "aria-label": "Add JSON field",
       },
@@ -969,7 +969,7 @@ export function renderJsonNodeEditor(options: RenderStudioJsonNodeEditorOptions)
 
     const quickEmailPresetEl = footerEl.createEl("button", {
       cls: "ss-studio-node-json-row-button",
-      text: "Email Preset",
+      text: "Email preset",
       attr: {
         "aria-label": "Insert email payload fields",
       },
@@ -1007,7 +1007,7 @@ export function renderJsonNodeEditor(options: RenderStudioJsonNodeEditorOptions)
     });
 
     const hintEl = footerEl.createDiv({ cls: "ss-studio-node-json-composer-hint" });
-    hintEl.setText("Choose value type per row. HTML rows support Source/Preview. Use Raw for advanced nested JSON.");
+    hintEl.setText("Choose value type per row. HTML rows support source/preview. Use raw for advanced nested JSON.");
     refreshComposerValidation();
     refreshJsonEditorSourceState();
   };

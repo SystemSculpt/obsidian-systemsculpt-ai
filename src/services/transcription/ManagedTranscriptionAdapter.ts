@@ -50,13 +50,13 @@ export type ManagedTranscriptionDependencies = Readonly<{
 }>;
 
 function defaultOperationId(): string {
-  const random = globalThis.crypto?.randomUUID?.().replace(/-/g, "")
+  const random = window.crypto?.randomUUID?.().replace(/-/g, "")
     ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`;
   return `transcription-${random}`.slice(0, 128);
 }
 
 function defaultRequestId(): string {
-  return globalThis.crypto?.randomUUID?.() ?? `dispatch-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return window.crypto?.randomUUID?.() ?? `dispatch-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
 function abortError(): DOMException {
@@ -71,12 +71,12 @@ async function defaultWait(milliseconds: number, signal: AbortSignal): Promise<v
   throwIfAborted(signal);
   await new Promise<void>((resolve, reject) => {
     const cleanup = () => signal.removeEventListener("abort", onAbort);
-    const timeout = setTimeout(() => {
+    const timeout = window.setTimeout(() => {
       cleanup();
       resolve();
     }, milliseconds);
     const onAbort = () => {
-      clearTimeout(timeout);
+      window.clearTimeout(timeout);
       cleanup();
       reject(abortError());
     };

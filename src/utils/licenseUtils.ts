@@ -34,7 +34,7 @@ export function verifyPremiumAccess(
 
   if (!status.isPremium) {
     if (showNotice) {
-      new Notice("Premium Pro license required for this feature");
+      new Notice("Premium pro license required for this feature");
     }
     return false;
   }

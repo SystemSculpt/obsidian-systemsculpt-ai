@@ -76,8 +76,8 @@ function resolveElectronDialogRuntime():
     }
   | null {
   const candidates = [
-    (globalThis as unknown as { require?: unknown })?.require,
-    (globalThis as unknown as { window?: { require?: unknown } })?.window?.require,
+    (window as unknown as { require?: unknown })?.require,
+    (window as unknown as { window?: { require?: unknown } })?.window?.require,
   ];
 
   for (const runtimeRequire of candidates) {
@@ -223,11 +223,11 @@ export async function browseForNodeConfigPath(
   }
 
   return await new Promise<string | null>((resolve) => {
-    const input = document.createElement("input");
+    const input = createEl("input");
     input.type = "file";
-    input.style.position = "fixed";
-    input.style.left = "-9999px";
-    input.style.top = "-9999px";
+    input.setCssStyles({ position: "fixed" });
+    input.setCssStyles({ left: "-9999px" });
+    input.setCssStyles({ top: "-9999px" });
 
     if (field.type === "directory_path") {
       (input as unknown as { webkitdirectory?: boolean }).webkitdirectory = true;

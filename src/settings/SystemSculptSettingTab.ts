@@ -32,6 +32,12 @@ type SettingsSearchViewState = {
   selectedIndex: number;
 };
 
+type SystemSculptSettingDefinition = {
+  id: string;
+  name: string;
+  description?: string;
+};
+
 export class SystemSculptSettingTab extends PluginSettingTab {
   plugin: SystemSculptPlugin;
   private listeners: {
@@ -64,6 +70,14 @@ export class SystemSculptSettingTab extends PluginSettingTab {
   constructor(app: App, plugin: SystemSculptPlugin) {
     super(app, plugin);
     this.plugin = plugin;
+  }
+
+  getSettingDefinitions(): SystemSculptSettingDefinition[] {
+    return buildSettingsTabConfigs(this).map((config) => ({
+      id: config.id,
+      name: config.anchor?.title || config.label,
+      description: config.anchor?.desc || `${config.label} settings`,
+    }));
   }
 
   registerListener(
@@ -259,7 +273,7 @@ export class SystemSculptSettingTab extends PluginSettingTab {
 
     const titleRow = containerEl.createDiv({ cls: "ss-settings-title-row" });
     const titleGroup = titleRow.createDiv({ cls: "ss-settings-title-group" });
-    titleGroup.createEl("h2", { text: "SystemSculpt AI" });
+    ;
     const titleMeta = titleGroup.createDiv({ cls: "ss-settings-title-meta" });
     this.versionInfoContainer = titleMeta.createDiv({
       cls: "ss-settings-title-version",
@@ -574,7 +588,7 @@ export class SystemSculptSettingTab extends PluginSettingTab {
             href: versionInfo.updateUrl,
             target: "_blank",
             rel: "noopener",
-            "aria-label": "Open in Community Plugins",
+            "aria-label": "Open in community plugins",
           },
         });
 
@@ -582,7 +596,7 @@ export class SystemSculptSettingTab extends PluginSettingTab {
           event.preventDefault();
           window.open(versionInfo.updateUrl, "_blank");
           new Notice(
-            "Opening SystemSculpt AI in Community Plugins...\n\nIf nothing happens, please update manually via Settings → Community plugins",
+            "Opening SystemSculpt AI in community plugins...\n\nIf nothing happens, update it manually in Settings > community plugins.",
             10000,
           );
         });
@@ -1156,11 +1170,11 @@ export class SystemSculptSettingTab extends PluginSettingTab {
     this.activateTab(tabId);
 
     // Scroll to element and highlight
-    setTimeout(() => {
+    window.setTimeout(() => {
       try {
         element.scrollIntoView({ behavior: "smooth", block: "center" });
         element.addClass("ss-search-highlight");
-        setTimeout(() => element.removeClass("ss-search-highlight"), 1200);
+        window.setTimeout(() => element.removeClass("ss-search-highlight"), 1200);
       } catch (e) {
         // If element no longer exists (mode switch), just ensure tab is visible
       }

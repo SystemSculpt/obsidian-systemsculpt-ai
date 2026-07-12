@@ -17,7 +17,7 @@ export interface AppendMessageResult {
 }
 
 function isHTMLElement(node: Element | null): node is HTMLElement {
-  return !!node && node instanceof HTMLElement;
+  return !!node && node.instanceOf(HTMLElement);
 }
 
 function findLastGroup(container: HTMLElement | DocumentFragment): HTMLElement | null {
@@ -64,7 +64,7 @@ export function appendMessageToGroupedContainer(
 
   const isNewGroup = !groupEl;
   if (!groupEl) {
-    groupEl = document.createElement("div");
+    groupEl = createDiv();
     groupEl.classList.add(GROUP_CLASS, `systemsculpt-${role}-group`);
     groupEl.dataset[GROUP_ROLE_DATA_ATTR] = role;
     insertGroup(container, groupEl);

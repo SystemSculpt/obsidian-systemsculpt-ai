@@ -9,7 +9,7 @@ export function renderAccountSection(
   tabInstance: SystemSculptSettingTab,
   isProActive: boolean
 ): void {
-  root.createEl("h3", { text: "Account & License" });
+  root.createEl("h3", { text: "Account & license" });
 
   const { plugin } = tabInstance;
   const userStatus = checkPremiumUserStatus(plugin.settings);
@@ -286,12 +286,12 @@ export function renderAccountSection(
 
   const managedDataSetting = new Setting(root).setName("Managed data");
   managedDataSetting.descEl.append("Managed features send request content to SystemSculpt. See ");
-  const termsLink = document.createElement("a");
+  const termsLink = createEl("a");
   termsLink.href = SYSTEMSCULPT_LEGAL_URLS.TERMS;
   termsLink.target = "_blank";
   termsLink.rel = "noopener noreferrer";
   termsLink.textContent = "Terms";
-  const privacyLink = document.createElement("a");
+  const privacyLink = createEl("a");
   privacyLink.href = SYSTEMSCULPT_LEGAL_URLS.PRIVACY;
   privacyLink.target = "_blank";
   privacyLink.rel = "noopener noreferrer";

@@ -52,7 +52,7 @@ export const messageHandling = {
         if (window.requestIdleCallback) {
           window.requestIdleCallback(() => chatView.manageDomSize(), { timeout: 1000 });
         } else {
-          setTimeout(() => chatView.manageDomSize(), 50);
+          window.setTimeout(() => chatView.manageDomSize(), 50);
         }
       } else {
         chatView.manageDomSize();

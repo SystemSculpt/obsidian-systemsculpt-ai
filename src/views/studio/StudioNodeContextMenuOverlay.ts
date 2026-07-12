@@ -130,7 +130,7 @@ export class StudioNodeContextMenuOverlay {
     this.applyFilter("");
 
     this.cancelPendingFocus();
-    this.rootEl.style.display = "flex";
+    this.rootEl.setCssStyles({ display: "flex" });
     this.rootEl.removeAttribute("inert");
     this.rootEl.setAttribute("aria-hidden", "false");
     this.isVisible = true;
@@ -174,7 +174,7 @@ export class StudioNodeContextMenuOverlay {
       if (activeElement && this.rootEl.contains(activeElement) && typeof activeElement.blur === "function") {
         activeElement.blur();
       }
-      this.rootEl.style.display = "none";
+      this.rootEl.setCssStyles({ display: "none" });
       this.rootEl.setAttribute("inert", "");
       this.rootEl.setAttribute("aria-hidden", "true");
     }
@@ -186,7 +186,7 @@ export class StudioNodeContextMenuOverlay {
     }
     if (this.actionsEl) {
       this.actionsEl.empty();
-      this.actionsEl.style.display = "none";
+      this.actionsEl.setCssStyles({ display: "none" });
     }
   }
 
@@ -196,7 +196,7 @@ export class StudioNodeContextMenuOverlay {
     }
 
     const root = this.viewportEl.createDiv({ cls: "ss-studio-node-context-menu" });
-    root.style.display = "none";
+    root.setCssStyles({ display: "none" });
     root.setAttribute("inert", "");
     root.setAttribute("role", "menu");
     root.setAttribute("aria-hidden", "true");
@@ -218,7 +218,7 @@ export class StudioNodeContextMenuOverlay {
     });
 
     const actions = root.createDiv({ cls: "ss-studio-node-context-menu-actions" });
-    actions.style.display = "none";
+    actions.setCssStyles({ display: "none" });
 
     const searchWrap = root.createDiv({ cls: "ss-studio-node-context-menu-search-wrap" });
     const searchInput = searchWrap.createEl("input", {
@@ -274,11 +274,11 @@ export class StudioNodeContextMenuOverlay {
     }
     this.actionsEl.empty();
     if (this.actions.length === 0) {
-      this.actionsEl.style.display = "none";
+      this.actionsEl.setCssStyles({ display: "none" });
       return;
     }
 
-    this.actionsEl.style.display = "grid";
+    this.actionsEl.setCssStyles({ display: "grid" });
     for (const action of this.actions) {
       const button = this.actionsEl.createEl("button", {
         cls: "ss-studio-node-context-menu-action",

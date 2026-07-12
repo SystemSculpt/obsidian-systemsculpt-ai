@@ -378,11 +378,11 @@ export class RecorderService {
     this.resolveSessionLifecycle();
 
     if (this.errorCleanupTimer) {
-      clearTimeout(this.errorCleanupTimer);
+      window.clearTimeout(this.errorCleanupTimer);
       this.errorCleanupTimer = null;
     }
 
-    const timer = setTimeout(() => {
+    const timer = window.setTimeout(() => {
       this.errorCleanupTimer = null;
       this.cleanup(true);
     }, hasBackup ? 3000 : 2000);
@@ -408,7 +408,7 @@ export class RecorderService {
   private cleanup(hideUI: boolean = false): void {
     this.debug("cleanup invoked", { hideUI });
     if (this.errorCleanupTimer) {
-      clearTimeout(this.errorCleanupTimer);
+      window.clearTimeout(this.errorCleanupTimer);
       this.errorCleanupTimer = null;
     }
     if (this.session) {

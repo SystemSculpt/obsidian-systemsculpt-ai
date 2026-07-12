@@ -178,7 +178,7 @@ export class MicrophoneRecorder {
 
     const streamPromise = navigator.mediaDevices.getUserMedia({ audio: constrained });
     const timeoutPromise = new Promise<MediaStream>((_, reject) => {
-      setTimeout(
+      window.setTimeout(
         () =>
           reject(
             new Error(

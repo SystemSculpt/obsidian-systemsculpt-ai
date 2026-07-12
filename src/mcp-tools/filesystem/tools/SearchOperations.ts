@@ -585,7 +585,7 @@ export class SearchOperations {
       await Promise.all(batch.map((file) => processFile(file)));
       
       // Yield control to prevent UI freeze (critical for performance)
-      await new Promise(resolve => setTimeout(resolve, 0));
+      await new Promise(resolve => window.setTimeout(resolve, 0));
     }
     
     // Add performance summary if processing took significant time or had issues

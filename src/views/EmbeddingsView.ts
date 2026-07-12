@@ -53,7 +53,7 @@ export class EmbeddingsView extends ItemView {
   }
   
   getDisplayText(): string {
-    return 'Similar Notes';
+    return 'Similar notes';
   }
   
   getIcon(): string {
@@ -91,7 +91,7 @@ export class EmbeddingsView extends ItemView {
     
     // File name element (initially hidden)
     this.fileNameEl = this.titleEl.createDiv({ cls: 'ss-embeddings-view__file-name' });
-    this.fileNameEl.style.display = 'none';
+    this.fileNameEl.setCssStyles({ display: 'none' });
     
     // Create hidden status element (kept for compatibility but hidden)
     this.statusEl = this.contentEl.createDiv({ cls: 'ss-embeddings-view__status', attr: { style: 'display: none;' } });
@@ -259,11 +259,11 @@ export class EmbeddingsView extends ItemView {
   
   private updateFileName(fileName: string): void {
     this.fileNameEl.textContent = fileName;
-    this.fileNameEl.style.display = 'block';
+    this.fileNameEl.setCssStyles({ display: 'block' });
   }
   
   private hideFileName(): void {
-    this.fileNameEl.style.display = 'none';
+    this.fileNameEl.setCssStyles({ display: 'none' });
   }
 
   private isViewVisible(): boolean {
@@ -327,7 +327,7 @@ export class EmbeddingsView extends ItemView {
       this.currentChatView = null; // Clear chat since we're now on a file
       this.updateFileName(activeFile.basename);
       // Defer search slightly to allow editor to finish focusing and avoid jank
-      setTimeout(() => this.searchForSimilar(activeFile), 50);
+      window.setTimeout(() => this.searchForSimilar(activeFile), 50);
     } else if (hasNewChat) {
       if (!activeChatView) return;
       // Switch to a different chat
@@ -338,7 +338,7 @@ export class EmbeddingsView extends ItemView {
       this.currentChatView = activeChatView;
       this.currentFile = null; // Clear file since we're now on a chat
       this.updateFileName(chatTitle || 'Chat');
-      setTimeout(() => this.searchForSimilarFromChat(activeChatView), 50);
+      window.setTimeout(() => this.searchForSimilarFromChat(activeChatView), 50);
     } else if (isRefocusingOnChat) {
       if (!activeChatView) return;
       // Re-focusing on the same chat - check if content changed
@@ -347,7 +347,7 @@ export class EmbeddingsView extends ItemView {
       const contentHash = this.hashContent(chatContent);
       if (forceRefresh || contentHash !== this.lastFileHash) {
         // Content changed, refresh the results
-        setTimeout(() => this.searchForSimilarFromChat(activeChatView), 50);
+        window.setTimeout(() => this.searchForSimilarFromChat(activeChatView), 50);
       }
     } else if (switchingFromNonContentView) {
       // Switching from settings/file explorer back to content
@@ -356,13 +356,13 @@ export class EmbeddingsView extends ItemView {
         this.currentFile = activeFile;
         this.currentChatView = null;
         this.updateFileName(activeFile.basename);
-        setTimeout(() => this.searchForSimilar(activeFile), 50);
+        window.setTimeout(() => this.searchForSimilar(activeFile), 50);
       } else if (activeChatView) {
         // No need to log returning to same chat
         this.currentChatView = activeChatView;
         this.currentFile = null;
         this.updateFileName(activeChatView.getChatTitle() || 'Chat');
-        setTimeout(() => this.searchForSimilarFromChat(activeChatView), 50);
+        window.setTimeout(() => this.searchForSimilarFromChat(activeChatView), 50);
       }
     } else if (forceRefresh) {
       // Force refresh current context after an indexing setting or vault change.
@@ -370,12 +370,12 @@ export class EmbeddingsView extends ItemView {
         this.currentFile = activeFile;
         this.currentChatView = null;
         this.updateFileName(activeFile.basename);
-        setTimeout(() => this.searchForSimilar(activeFile), 50);
+        window.setTimeout(() => this.searchForSimilar(activeFile), 50);
       } else if (activeChatView) {
         this.currentChatView = activeChatView;
         this.currentFile = null;
         this.updateFileName(activeChatView.getChatTitle() || 'Chat');
-        setTimeout(() => this.searchForSimilarFromChat(activeChatView), 50);
+        window.setTimeout(() => this.searchForSimilarFromChat(activeChatView), 50);
       }
     }
     // If none of the above, preserve current state
@@ -843,7 +843,7 @@ export class EmbeddingsView extends ItemView {
         resultEl.removeClass('is-dragging');
         
         // Small delay before checking active file to allow focus to settle
-        setTimeout(() => {
+        window.setTimeout(() => {
           this.debouncedCheckActiveFile();
         }, 100);
       });
@@ -1086,9 +1086,9 @@ export class EmbeddingsView extends ItemView {
     this.pendingSearch = null;
     if (pending.type === 'file' && pending.file) {
       // Small defer to allow layout to settle
-      setTimeout(() => this.searchForSimilar(pending.file), 10);
+      window.setTimeout(() => this.searchForSimilar(pending.file), 10);
     } else if (pending.type === 'chat' && pending.chatView) {
-      setTimeout(() => this.searchForSimilarFromChat(pending.chatView), 10);
+      window.setTimeout(() => this.searchForSimilarFromChat(pending.chatView), 10);
     }
   }
   
@@ -1134,7 +1134,7 @@ export class EmbeddingsView extends ItemView {
       const actionsEl = processingEl.createDiv({ cls: 'ss-embeddings-view__processing-actions' });
       
       const startBtn = actionsEl.createEl('button', {
-        text: 'Start Processing',
+        text: 'Start processing',
         cls: 'mod-cta'
       });
       startBtn.addEventListener('click', async () => {

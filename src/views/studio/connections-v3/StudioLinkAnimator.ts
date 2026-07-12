@@ -45,14 +45,14 @@ export class StudioLinkAnimator {
       ((cb) =>
         typeof window !== "undefined" && typeof window.requestAnimationFrame === "function"
           ? window.requestAnimationFrame(cb)
-          : (setTimeout(() => cb(this.now()), 16) as unknown as number));
+          : (window.setTimeout(() => cb(this.now()), 16) as unknown as number));
     this.cancelFrame =
       options.cancelFrame ||
       ((handle) => {
         if (typeof window !== "undefined" && typeof window.cancelAnimationFrame === "function") {
           window.cancelAnimationFrame(handle);
         } else {
-          clearTimeout(handle as unknown as ReturnType<typeof setTimeout>);
+          window.clearTimeout(handle as unknown as ReturnType<typeof setTimeout>);
         }
       });
   }
@@ -131,7 +131,7 @@ export class StudioLinkAnimator {
     const group = this.getEdgeGroupElement(edgeId);
     if (!group) return;
     this.store.setEdgeFlareT(edgeId, 0.0001);
-    group.style.setProperty("--ss-link-flare-t", "0");
+    group.setCssProps({ ["--ss-link-flare-t"]: "0" });
     this.ensureRunning();
   }
 
@@ -147,7 +147,7 @@ export class StudioLinkAnimator {
     for (const edge of this.store.listEdges()) {
       const group = this.getEdgeGroupElement(edge.id);
       if (!group) continue;
-      group.style.setProperty("--ss-link-flow-phase", "0");
+      group.setCssProps({ ["--ss-link-flow-phase"]: "0" });
       group.style.setProperty("--ss-link-flare-t", edge.flareT > 0 ? "1" : "0");
     }
   }

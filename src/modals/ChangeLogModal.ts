@@ -214,7 +214,7 @@ export class ChangeLogModal extends StandardModal {
     const select = this.versionSelectEl;
     select.empty();
     this.entries.forEach((e, i) => {
-      const option = document.createElement("option");
+      const option = createEl("option");
       option.value = String(i);
       option.text = `${e.version} — ${e.date}`;
       select.appendChild(option);

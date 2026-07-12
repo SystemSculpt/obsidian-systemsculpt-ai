@@ -429,7 +429,7 @@ export class JanitorModal extends StandardModal {
 
     // Move files to trash
     for (const file of files) {
-      await this.app.vault.trash(file, true);
+      await this.app.fileManager.trashFile(file);
     }
 
     // Clean up empty directories
@@ -441,12 +441,12 @@ export class JanitorModal extends StandardModal {
 
       for (const subdir of subdirs) {
         if (subdir.children.length === 0) {
-          await this.app.vault.trash(subdir, true);
+          await this.app.fileManager.trashFile(subdir);
         }
       }
 
       if (folder.children.length === 0) {
-        await this.app.vault.trash(folder, true);
+        await this.app.fileManager.trashFile(folder);
       }
     }
   }
@@ -499,7 +499,7 @@ export class JanitorModal extends StandardModal {
       try {
         // Delete empty files first
         for (const file of emptyFiles) {
-          await this.app.vault.trash(file, true);
+          await this.app.fileManager.trashFile(file);
         }
 
         // Then delete empty folders (deepest first)
@@ -507,7 +507,7 @@ export class JanitorModal extends StandardModal {
           (a, b) => b.path.length - a.path.length
         );
         for (const folder of sortedFolders) {
-          await this.app.vault.trash(folder, true);
+          await this.app.fileManager.trashFile(folder);
         }
 
         const totalEmpty = emptyFiles.length + emptyFolders.length;

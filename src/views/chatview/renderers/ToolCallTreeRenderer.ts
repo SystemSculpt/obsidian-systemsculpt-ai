@@ -269,7 +269,7 @@ export class ToolCallTreeRenderer extends Component {
       }
     }
 
-    const wrapper = document.createElement("div");
+    const wrapper = createDiv();
     wrapper.classList.add("systemsculpt-chat-structured-block", "systemsculpt-tool-call-group", "systemsculpt-chat-tree", "systemsculpt-chat-tree--empty");
     wrapper.dataset.treeConnector = "group";
 
@@ -352,7 +352,7 @@ export class ToolCallTreeRenderer extends Component {
       if (factory.createSpan) {
         factory.createSpan({ cls, text });
       } else {
-        const span = document.createElement("span");
+        const span = createSpan();
         span.className = cls;
         span.textContent = text;
         textEl.appendChild(span);
@@ -454,7 +454,7 @@ export class ToolCallTreeRenderer extends Component {
 
       for (const hiddenLine of bucket.lines.slice(1)) {
         hiddenLine.dataset.treeHidden = "true";
-        hiddenLine.style.display = "none";
+        hiddenLine.setCssStyles({ display: "none" });
         hiddenToolCallIds.push(hiddenLine.dataset.toolCallId ?? "");
       }
     }
@@ -972,7 +972,7 @@ export class ToolCallTreeRenderer extends Component {
 
     void representativeToolCall;
     actions.empty();
-    actions.style.display = "none";
+    actions.setCssStyles({ display: "none" });
   }
 
   private isMutatingToolCall(toolCall: ToolCall): boolean {

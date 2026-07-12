@@ -255,7 +255,7 @@ class StudioCaptionBoardModal extends Modal {
       this.titleEl.setText(title);
     }
     this.titleEl.empty();
-    this.titleEl.style.display = "none";
+    this.titleEl.setCssStyles({ display: "none" });
 
     this.modalEl.addClass("ss-studio-caption-board-modal-shell");
     this.contentEl.empty();
@@ -646,7 +646,7 @@ class StudioCaptionBoardModal extends Modal {
     cropEl.style.top = `${crop.y * layout.stageHeight}px`;
     cropEl.style.width = `${crop.width * layout.stageWidth}px`;
     cropEl.style.height = `${crop.height * layout.stageHeight}px`;
-    cropEl.style.zIndex = "40";
+    cropEl.setCssStyles({ zIndex: "40" });
     cropEl.addEventListener("pointerdown", (event) => this.handleItemPointerDown(event, selection, "move"));
 
     if (isSelected) {

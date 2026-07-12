@@ -327,9 +327,10 @@ export class VaultFileCache {
    */
   private isUserContentFile(file: TFile): boolean {
     const path = file.path;
+    const configDir = this.app.vault.configDir;
     
-    // Exclude .obsidian directory and its subdirectories
-    if (path.startsWith('.obsidian/')) {
+    // Exclude the active Obsidian config directory and its subdirectories
+    if (path.startsWith(`${configDir}/`)) {
       return false;
     }
     

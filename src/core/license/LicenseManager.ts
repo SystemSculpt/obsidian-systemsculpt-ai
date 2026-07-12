@@ -21,7 +21,7 @@ export class LicenseManager {
       // Only update and notify if it was previously considered valid or was undefined.
       if (previousLicenseValidState === true) {
         await this.plugin.getSettingsManager().updateSettings({ licenseValid: false });
-        new Notice("SystemSculpt license key is empty. Pro features disabled.", 5000);
+        new Notice("SystemSculpt license key is empty. Premium features disabled.", 5000);
       } else if (typeof previousLicenseValidState === 'undefined') {
         // Handles fresh installs or scenarios where the setting might not exist yet
         await this.plugin.getSettingsManager().updateSettings({ licenseValid: false });
@@ -71,14 +71,14 @@ export class LicenseManager {
     const scheduler =
       typeof window !== "undefined" && typeof (window as any).requestIdleCallback === "function"
         ? (callback: () => void) => (window as any).requestIdleCallback(callback)
-        : (callback: () => void) => setTimeout(callback, 0);
+        : (callback: () => void) => window.setTimeout(callback, 0);
 
     this.pendingValidation = new Promise<void>((resolve) => {
       scheduler(() => {
         void this.validateLicenseKey(true, false).then((isValidNow) => {
           if (hadValidLicense && !isValidNow) {
             new Notice(
-              "Your SystemSculpt Pro license is no longer valid or failed to validate. Pro features may be unavailable.",
+              "Your SystemSculpt license is no longer valid or failed to validate. Premium features may be unavailable.",
               7000
             );
           }

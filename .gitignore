@@ -47,6 +47,7 @@ systemsculpt-sync.windows.generated.json
 .serena/
 .conductor/
 .cache/
+.eslintcache
 
 # Obsidian vaults / local state
 .obsidian/

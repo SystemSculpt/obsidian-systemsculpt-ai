@@ -114,12 +114,12 @@ async function defaultWait(milliseconds: number, signal: AbortSignal): Promise<v
   throwIfAborted(signal);
   await new Promise<void>((resolve, reject) => {
     const cleanup = () => signal.removeEventListener("abort", onAbort);
-    const timeout = globalThis.setTimeout(() => {
+    const timeout = window.setTimeout(() => {
       cleanup();
       resolve();
     }, milliseconds);
     const onAbort = () => {
-      globalThis.clearTimeout(timeout);
+      window.clearTimeout(timeout);
       cleanup();
       reject(abortError());
     };
@@ -130,7 +130,7 @@ async function defaultWait(milliseconds: number, signal: AbortSignal): Promise<v
 }
 
 function defaultRequestId(): string {
-  return globalThis.crypto?.randomUUID?.() ?? `image-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return window.crypto?.randomUUID?.() ?? `image-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
 function normalizePayload(payload: ManagedImageGenerationPayload): {

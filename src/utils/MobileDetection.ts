@@ -124,10 +124,9 @@ export class MobileDetection {
   }
 
   private detectDeviceInfo(): MobileDeviceInfo {
-    const userAgent = navigator.userAgent;
     const environment = this.getEnvironment();
-    const platform = this.detectPlatform(userAgent);
-    const device = this.detectDevice(userAgent);
+    const platform = this.detectPlatform(environment);
+    const device = this.detectDevice(environment);
     const capabilities = this.detectCapabilities();
     const network = this.detectNetwork();
     const performance = this.detectPerformance();
@@ -148,85 +147,30 @@ export class MobileDetection {
     };
   }
 
-  private detectPlatform(userAgent: string): MobileDeviceInfo['platform'] {
-    let os: MobileDeviceInfo['platform']['os'] = 'Unknown';
-    let name = 'Unknown';
-    let version = 'Unknown';
-
-    if (/iPhone|iPad|iPod/i.test(userAgent)) {
-      os = 'iOS';
-      name = 'iOS';
-      const match = userAgent.match(/OS (\d+_\d+)/);
-      if (match) {
-        version = match[1].replace('_', '.');
-      }
-    } else if (/Android/i.test(userAgent)) {
-      os = 'Android';
-      name = 'Android';
-      const match = userAgent.match(/Android (\d+\.?\d*)/);
-      if (match) {
-        version = match[1];
-      }
-    } else if (/Windows/i.test(userAgent)) {
-      os = 'Windows';
-      name = 'Windows';
-      if (/Windows NT (\d+\.\d+)/i.test(userAgent)) {
-        const match = userAgent.match(/Windows NT (\d+\.\d+)/i);
-        if (match) version = match[1];
-      }
-    } else if (/Mac OS X/i.test(userAgent)) {
-      os = 'macOS';
-      name = 'macOS';
-      const match = userAgent.match(/Mac OS X (\d+[_\d]*)/i);
-      if (match) {
-        version = match[1].replace(/_/g, '.');
-      }
-    } else if (/Linux/i.test(userAgent)) {
-      os = 'Linux';
-      name = 'Linux';
+  private detectPlatform(environment: PlatformEnvironment): MobileDeviceInfo['platform'] {
+    if (environment.runtime === "mobile") {
+      return {
+        name: "Mobile",
+        version: "Unknown",
+        os: "Unknown",
+      };
     }
 
-    return { name, version, os };
+    return {
+      name: "Desktop",
+      version: "Unknown",
+      os: "Unknown",
+    };
   }
 
-  private detectDevice(userAgent: string): MobileDeviceInfo['device'] {
+  private detectDevice(environment: PlatformEnvironment): MobileDeviceInfo['device'] {
     let type: MobileDeviceInfo['device']['type'] = 'unknown';
-    let model = 'Unknown';
-    let vendor = 'Unknown';
-
-    if (/iPhone/i.test(userAgent)) {
-      type = 'smartphone';
-      vendor = 'Apple';
-      const match = userAgent.match(/iPhone[^;]*/i);
-      if (match) model = match[0];
-    } else if (/iPad/i.test(userAgent)) {
-      type = 'tablet';
-      vendor = 'Apple';
-      model = 'iPad';
-    } else if (/Android/i.test(userAgent)) {
-      if (/Mobile/i.test(userAgent)) {
-        type = 'smartphone';
-      } else {
-        type = 'tablet';
-      }
-      
-      // Try to extract device model
-      const samsungMatch = userAgent.match(/SM-[A-Z0-9]+/i);
-      const pixelMatch = userAgent.match(/Pixel [0-9a-zA-Z ]+/i);
-      
-      if (samsungMatch) {
-        vendor = 'Samsung';
-        model = samsungMatch[0];
-      } else if (pixelMatch) {
-        vendor = 'Google';
-        model = pixelMatch[0];
-      } else if (/Huawei/i.test(userAgent)) {
-        vendor = 'Huawei';
-      } else if (/OnePlus/i.test(userAgent)) {
-        vendor = 'OnePlus';
-      }
-    } else {
-      type = 'desktop';
+    if (environment.surface === "mobile") {
+      type = typeof window !== "undefined" && Math.max(window.innerWidth, window.innerHeight) >= 900
+        ? "tablet"
+        : "smartphone";
+    } else if (environment.runtime === "desktop") {
+      type = "desktop";
     }
 
     const screenAny = (typeof screen !== 'undefined' ? (screen as any) : undefined) as
@@ -239,7 +183,7 @@ export class MobileDetection {
     const height = screenAny?.height ?? windowAny?.innerHeight ?? 0;
     const screenSize = `${width}x${height}`;
 
-    return { type, model, vendor, screenSize };
+    return { type, model: "Unknown", vendor: "Unknown", screenSize };
   }
 
   private detectCapabilities(): MobileDeviceInfo['capabilities'] {
@@ -263,7 +207,7 @@ export class MobileDetection {
 
   private detectWebGL(): boolean {
     try {
-      const canvas = document.createElement('canvas');
+      const canvas = createEl('canvas');
       return !!(window.WebGLRenderingContext && canvas.getContext('webgl'));
     } catch (e) {
       return false;

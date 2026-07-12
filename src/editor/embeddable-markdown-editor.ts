@@ -146,7 +146,7 @@ function resolveInternalMarkdownEmbedClass(app: App): InternalMarkdownEmbedConst
       };
     }).embedRegistry?.embedByExtension?.md;
     if (typeof embedCreator === "function") {
-      const probeEl = document.createElement("div");
+      const probeEl = createDiv();
       widget = embedCreator({ app, containerEl: probeEl }, null, "") as
         | InternalMarkdownEmbedInstance
         | null;

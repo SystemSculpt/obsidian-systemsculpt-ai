@@ -518,8 +518,8 @@ export class StudioGraphSelectionController {
       window.removeEventListener("pointerup", finishSelection);
       window.removeEventListener("pointercancel", finishSelection);
       marquee.classList.remove("is-active");
-      marquee.style.width = "0px";
-      marquee.style.height = "0px";
+      marquee.setCssStyles({ width: "0px" });
+      marquee.setCssStyles({ height: "0px" });
 
       if (typeof viewport.releasePointerCapture === "function") {
         try {
@@ -574,7 +574,7 @@ export class StudioGraphSelectionController {
       return;
     }
     this.graphCanvasEl.style.transform = `scale(${zoom})`;
-    this.graphCanvasEl.style.transformOrigin = "0 0";
+    this.graphCanvasEl.setCssStyles({ transformOrigin: "0 0" });
     this.syncGraphSurfaceSize();
     if (this.graphZoomLabelEl) {
       this.graphZoomLabelEl.setText(`${Math.round(zoom * 100)}%`);
