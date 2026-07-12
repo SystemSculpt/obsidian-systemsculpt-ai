@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { execFileSync } from 'node:child_process';
-import { generateInventory, verifyCurrent } from './network-egress-inventory.mjs';
+import { generateInventory, generateVerificationV2, verifyCurrent, verifyVerificationV2 } from './network-egress-inventory.mjs';
 import { createPluginBuildOptions } from './plugin-build-options.mjs';
 
 function repo(files) {
@@ -127,6 +127,69 @@ test('pure build options preserve the production contract without touching artif
   assert.equal(options.define.__SS_BUILD_STAMP__, '"fixed"');
   assert.ok(options.external.includes('obsidian'));
   assert.deepEqual(fs.readdirSync(sentinel), before);
+});
+
+test('v2 ignores enclosing class edits but detects semantic sink mutations precisely', () => {
+  const original = `import { requestUrl } from "obsidian";
+export class Client {
+  unrelated() { return "before"; }
+  send(base: string) { return requestUrl({ url: base + "/v1", method: "POST" }); }
+}
+`;
+  const root = repo({ 'src/client.ts': original });
+  const ref = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
+  const fixture = writeFixture(root, generateInventory({ root, ref, sourceRef: ref }));
+  const verificationArtifact = path.join(root, 'verification.json');
+  fs.writeFileSync(verificationArtifact, JSON.stringify(generateVerificationV2({ root, fixture, sourceRef: ref, historicalFixturePath: 'fixture.json' }), null, 2) + '\n');
+  const verify = () => verifyVerificationV2({ root, fixture, verificationArtifact });
+
+  fs.writeFileSync(path.join(root, 'src/client.ts'), original.replace('unrelated() { return "before"; }', 'added() { return 1; }\n  unrelated() { return "after"; }'));
+  assert.doesNotThrow(verify);
+  fs.writeFileSync(path.join(root, 'src/client.ts'), original.replace('base + "/v1"', 'base + "/v2"'));
+  assert.throws(verify, /arguments_changed/);
+  fs.writeFileSync(path.join(root, 'src/client.ts'), original.replace('requestUrl({', 'requestUrl?.({'));
+  assert.throws(verify, /callee_changed|dynamic_or_computed_access|wrapper_chain_changed/);
+  fs.writeFileSync(path.join(root, 'src/client.ts'), original.replace('from "obsidian"', 'from "other-transport"'));
+  assert.throws(verify, /import_chain_changed/);
+  fs.writeFileSync(path.join(root, 'src/client.ts'), original.replace('return requestUrl', 'return requestUrl') + '\nrequestUrl({ url: "https://duplicate.invalid" });\n');
+  assert.throws(verify, /occurrence_count_changed/);
+  fs.writeFileSync(path.join(root, 'src/client.ts'), 'export const clean = true;\n');
+  assert.throws(verify, /occurrence_missing/);
+  fs.mkdirSync(path.join(root, 'src/moved'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'src/moved/client.ts'), original);
+  assert.throws(verify, /occurrence_moved|occurrence_missing/);
+});
+
+test('v2 maps wrappers by signature and direct sink edge, not enclosing class text', () => {
+  const original = `export class Api {
+  noise() { return 1; }
+  getStatus(url: string): Promise<Response> { return fetch(url); }
+  caller(url: string) { return this.getStatus(url); }
+}
+`;
+  const root = repo({ 'src/api.ts': original });
+  const ref = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
+  const fixture = writeFixture(root, generateInventory({ root, ref, sourceRef: ref }));
+  const verificationArtifact = path.join(root, 'verification.json');
+  const generated = generateVerificationV2({ root, fixture, sourceRef: ref, historicalFixturePath: 'fixture.json' });
+  fs.writeFileSync(verificationArtifact, JSON.stringify(generated, null, 2) + '\n');
+  fs.writeFileSync(path.join(root, 'src/api.ts'), original.replace('noise() { return 1; }', 'noise() { return 2; }\n  extra() { return 3; }'));
+  assert.doesNotThrow(() => verifyVerificationV2({ root, fixture, verificationArtifact }));
+  fs.writeFileSync(path.join(root, 'src/api.ts'), original.replace('getStatus(url: string)', 'getStatus(url: URL)'));
+  assert.throws(() => verifyVerificationV2({ root, fixture, verificationArtifact }), /wrapper_chain_changed|occurrence_changed|arguments_changed/);
+});
+
+test('v2 generation is deterministic and fails closed on tampered history and metadata', () => {
+  const root = repo({ 'src/a.ts': 'fetch("https://a.invalid");\n' });
+  const ref = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
+  const fixture = writeFixture(root, generateInventory({ root, ref, sourceRef: ref }));
+  const one = generateVerificationV2({ root, fixture, sourceRef: ref, historicalFixturePath: 'fixture.json' });
+  const two = generateVerificationV2({ root, fixture, sourceRef: ref, historicalFixturePath: 'fixture.json' });
+  assert.deepEqual(one, two);
+  const verificationArtifact = path.join(root, 'verification.json');
+  fs.writeFileSync(verificationArtifact, JSON.stringify(one, null, 2) + '\n');
+  const history = JSON.parse(fs.readFileSync(fixture, 'utf8')); history.records[0].ownerPlan = '017'; fs.writeFileSync(fixture, JSON.stringify(history, null, 2) + '\n');
+  assert.throws(() => verifyVerificationV2({ root, fixture, verificationArtifact }), /history_tampered/);
 });
 
 test('generation is deterministic', () => {
