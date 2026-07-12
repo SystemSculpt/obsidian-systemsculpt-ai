@@ -67,21 +67,15 @@ describe("AcceptedChatRequestSnapshot", () => {
     expect(Object.isFrozen(legacy)).toBe(true);
   });
 
-  it("adds an empty-continuation retry hint from frozen preparation only", () => {
+  it("keeps the future managed continuation composer strictly two-input and snapshot-only", () => {
     const accepted = snapshot();
-    const next = Object.freeze({ chatId: "c", version: 2, messages: accepted.durableSnapshot.messages });
-    const hinted = composeAcceptedLegacyContinuation(
-      accepted,
-      next,
-      "The previous continuation attempt returned no content after tool execution. Continue from the committed tool results.",
-    );
+    const checkpoint = { role: "tool" as const, content: "committed result", message_id: "t", tool_call_id: "call" };
+    const next = Object.freeze({ chatId: "c", version: 2, messages: Object.freeze([...accepted.durableSnapshot.messages, checkpoint]) });
 
-    expect(hinted.finalSystemPrompt).toBe(
-      "frozen prompt\n\nThe previous continuation attempt returned no content after tool execution. Continue from the committed tool results.",
-    );
-    expect(hinted.preparedMessages[0].content).toBe(
-      "frozen prompt and context\n\nThe previous continuation attempt returned no content after tool execution. Continue from the committed tool results.",
-    );
-    expect(accepted.legacyPreparation.finalSystemPrompt).toBe("frozen prompt");
+    expect(composeAcceptedChatContinuation.length).toBe(2);
+    expect(composeAcceptedChatContinuation(accepted, next)).toEqual([
+      ...accepted.messages,
+      expect.objectContaining({ role: "tool", content: "committed result", tool_call_id: "call" }),
+    ]);
   });
 });

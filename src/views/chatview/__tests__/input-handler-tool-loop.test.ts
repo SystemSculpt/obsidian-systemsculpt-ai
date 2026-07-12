@@ -287,6 +287,33 @@ describe("InputHandler hosted tool loop", () => {
     expect(aiService.streamMessage).toHaveBeenCalledTimes(1);
   });
 
+  it("submits the immutable composer candidate captured before awaited readiness", async () => {
+    const { handler, onMessageSubmit } = createHostedToolLoopHarness();
+    let resolveReadiness!: (ready: boolean) => void;
+    const readiness = new Promise<boolean>((resolve) => { resolveReadiness = resolve; });
+    (handler as any).ensureProviderReadyForChat = jest.fn(() => readiness);
+    handler.setValue("captured before readiness");
+
+    jest.spyOn(handler as any, "streamAssistantTurn").mockResolvedValue({
+      messageId: "assistant",
+      message: { role: "assistant", content: "done", message_id: "assistant" },
+      messageEl: document.createElement("div"),
+      completed: true,
+      completionState: "completed",
+    });
+    const submission = handler.submitForAutomation();
+    await Promise.resolve();
+    handler.setValue("   \n\t");
+    resolveReadiness(true);
+    await submission;
+
+    expect(onMessageSubmit).toHaveBeenCalledTimes(1);
+    expect(onMessageSubmit).toHaveBeenCalledWith(expect.objectContaining({
+      role: "user",
+      content: "captured before readiness",
+    }));
+  });
+
   it("invalidates and awaits deferred readiness when disposed before lifecycle promotion", async () => {
     const { aiService, handler, onMessageSubmit } = createHostedToolLoopHarness();
     let resolveReadiness!: (ready: boolean) => void;
@@ -404,7 +431,7 @@ describe("InputHandler hosted tool loop", () => {
       messageEl: document.createElement("div"), completed: true, completionState: "completed",
     } as never);
     await handler.submitWithOverrides({ includeContextFiles: true });
-    expect(inputReads.filter((value) => value === "accepted payload")).toHaveLength(2);
+    expect(inputReads.filter((value) => value === "accepted payload")).toHaveLength(1);
     expect(contextGetter).toHaveBeenCalledTimes(1);
     expect(aiService.prepareAcceptedChatRequest).toHaveBeenCalledTimes(1);
   });
@@ -750,7 +777,9 @@ describe("InputHandler hosted tool loop", () => {
     expect(streamAssistantTurn).toHaveBeenCalledTimes(3);
     expect(streamAssistantTurn.mock.calls[2]?.[4]).toEqual({
       phase: "continuation",
-      transientSystemPromptSuffix: expect.stringContaining("retry 1"),
+      transientSystemPromptSuffix: expect.stringMatching(
+        /previous continuation attempt returned reasoning but no visible assistant content or tool call.*retry 1/i,
+      ),
     });
     expect(aiService.executeHostedToolCall).toHaveBeenCalledTimes(1);
     expect(onError).not.toHaveBeenCalled();

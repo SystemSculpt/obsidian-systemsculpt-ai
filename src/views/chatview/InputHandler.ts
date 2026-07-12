@@ -49,7 +49,7 @@ import { extractPrimaryPathArg, requiresUserApproval } from "../../utils/toolPol
 import { ChatModelSelectionController } from "./ChatModelSelectionController";
 import { ChatTurn } from "./turn/ChatTurn";
 import type { AcceptedChatOperation, ManagedChatAdmissionPort } from "../../services/managed/ManagedTypes";
-import { composeAcceptedLegacyContinuation, type AcceptedChatRequestSnapshot } from "../../services/chat/AcceptedChatRequestSnapshot";
+import { composeAcceptedLegacyContinuation, type AcceptedChatRequestSnapshot, type FrozenPreparedChatRequest } from "../../services/chat/AcceptedChatRequestSnapshot";
 import type { AcceptedUserCommitInput, AcceptedUserCommitResult } from "./ChatView";
 
 export interface InputHandlerOptions {
@@ -336,13 +336,15 @@ export class InputHandler extends Component {
     void includeContextFiles;
     const selectedModelId = acceptedRequest.legacyPreparation.actualModelId;
     turnProgress?.attach(messageEl);
-    const preparedRequest = options?.phase === "initial"
+    const continuationPreparation = options?.phase === "initial"
       ? acceptedRequest.legacyPreparation
       : composeAcceptedLegacyContinuation(
           acceptedRequest,
           this.chatView.getDurableTranscriptSnapshot(),
-          options?.transientSystemPromptSuffix,
         );
+    const preparedRequest = options?.transientSystemPromptSuffix
+      ? this.applyLegacyContinuationRetryHint(continuationPreparation, options.transientSystemPromptSuffix)
+      : continuationPreparation;
 
     const stream = this.aiService.streamMessage({
       messages: preparedRequest.preparedMessages as ChatMessage[],
@@ -569,6 +571,24 @@ export class InputHandler extends Component {
     } catch {}
 
     throw error;
+  }
+
+  private applyLegacyContinuationRetryHint(
+    prepared: FrozenPreparedChatRequest,
+    transientSystemPromptSuffix: string,
+  ): FrozenPreparedChatRequest {
+    const suffix = transientSystemPromptSuffix.trim();
+    if (!suffix) return prepared;
+    let hintApplied = false;
+    const preparedMessages = prepared.preparedMessages.map((message) => {
+      if (!hintApplied && message.role === "system" && typeof message.content === "string") {
+        hintApplied = true;
+        return { ...message, content: `${message.content.trim()}\n\n${suffix}` };
+      }
+      return { ...message };
+    });
+    const finalSystemPrompt = [prepared.finalSystemPrompt.trim(), suffix].filter(Boolean).join("\n\n");
+    return { ...prepared, finalSystemPrompt, preparedMessages };
   }
 
   private buildEmptyContinuationRetryHint(completionState: StreamCompletionState, retryAttempt: number): string {
@@ -808,7 +828,10 @@ export class InputHandler extends Component {
     rethrowErrors?: boolean;
   }): Promise<void> {
     const candidateMessageId = this.generateMessageId();
-    if (this.input.value.trim().length === 0) return;
+    const originalInputValue = this.input.value;
+    const originalPendingLargeText = this.pendingLargeTextContent;
+    const candidateText = originalInputValue.trim();
+    if (!candidateText) return;
     if (!this.isChatReady()) return;
     if (this.chatView?.isLegacyReadOnlyChat?.()) return;
 
@@ -830,12 +853,9 @@ export class InputHandler extends Component {
     const admission = await this.managedChatAdmission.acquireChatTurnLease();
     if (admission.outcome !== "allowed") return;
 
-    const originalInputValue = this.input.value;
-    const originalPendingLargeText = this.pendingLargeTextContent;
     let consumedLargeText = false;
     let userCommitted = false;
-    let messageText: string = originalInputValue.trim();
-    if (!messageText) return;
+    let messageText = candidateText;
     if (originalPendingLargeText && LargeTextHelpers.containsPlaceholder(messageText)) {
       const placeholderRegex = /\[PASTED TEXT - \d+ LINES OF TEXT\]/g;
       messageText = messageText.replace(placeholderRegex, originalPendingLargeText);
@@ -878,6 +898,7 @@ export class InputHandler extends Component {
       this.adjustInputHeight();
       this.turnLifecycle = new ChatTurnLifecycleController({ getIsGenerating: () => this.isGenerating, setGenerating: (generating) => this.setGeneratingState(generating) });
       const lifecycleTurn = this.turnLifecycle.runTurn(async (signal) => {
+        let latestLegacyStreamResult: StreamTurnResult | undefined;
         const streamWithProgress = async (
           turnSignal: AbortSignal,
           phase: "initial" | "continuation",
@@ -892,12 +913,15 @@ export class InputHandler extends Component {
           progress.begin();
           try {
             progress.setStatus(retryCount > 0 ? "retrying" : "preparing");
-            return await this.streamAssistantTurn(acceptedOperation, turnSignal, includeContextFiles, progress, {
+            const retryProvenance = latestLegacyStreamResult ?? previous;
+            const streamed = await this.streamAssistantTurn(acceptedOperation, turnSignal, includeContextFiles, progress, {
               phase,
-              transientSystemPromptSuffix: phase === "continuation" && retryCount > 0 && previous
-                ? this.buildEmptyContinuationRetryHint(previous.completionState, retryCount)
+              transientSystemPromptSuffix: phase === "continuation" && retryCount > 0 && retryProvenance
+                ? this.buildEmptyContinuationRetryHint(retryProvenance.completionState, retryCount)
                 : undefined,
             });
+            latestLegacyStreamResult = streamed;
+            return streamed;
           } finally {
             progress.end();
           }

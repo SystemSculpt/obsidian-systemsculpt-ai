@@ -95,21 +95,9 @@ export function composeAcceptedChatContinuation(accepted: AcceptedChatRequestSna
 export function composeAcceptedLegacyContinuation(
   accepted: AcceptedChatRequestSnapshot,
   next: ChatTranscriptSnapshot,
-  transientSystemPromptSuffix?: string,
 ): FrozenPreparedChatRequest {
   const preparedMessages = [
     ...deepCopy(accepted.legacyPreparation.preparedMessages), ...deepCopy(continuationSuffix(accepted, next)),
   ];
-  const suffix = transientSystemPromptSuffix?.trim() ?? "";
-  const finalSystemPrompt = suffix
-    ? [accepted.legacyPreparation.finalSystemPrompt.trim(), suffix].filter(Boolean).join("\n\n")
-    : accepted.legacyPreparation.finalSystemPrompt;
-  if (suffix) {
-    const systemIndex = preparedMessages.findIndex((message) => message.role === "system");
-    const systemMessage = preparedMessages[systemIndex];
-    if (systemIndex >= 0 && systemMessage && typeof systemMessage.content === "string") {
-      preparedMessages[systemIndex] = { ...systemMessage, content: `${systemMessage.content.trim()}\n\n${suffix}` };
-    }
-  }
-  return deepFreezeAccepted({ ...deepCopy(accepted.legacyPreparation), finalSystemPrompt, preparedMessages } as FrozenPreparedChatRequest);
+  return deepFreezeAccepted({ ...deepCopy(accepted.legacyPreparation), preparedMessages } as FrozenPreparedChatRequest);
 }
