@@ -26,7 +26,6 @@ import type { StreamEvent } from "../streaming/types";
 import { LicenseService } from "./LicenseService";
 import { ModelManagementService } from "./ModelManagementService";
 import { ContextFileService } from "./ContextFileService";
-import { DocumentUploadService } from "./DocumentUploadService";
 import { errorLogger } from "../utils/errorLogger";
 import type { PreparedChatRequest, StreamDebugCallbacks } from "./StreamExecutionTypes";
 import { ChatRequestPreparationService, prepareChatRequestAuthoritatively, type AuthoritativeChatPreparationInput } from "./chat/ChatRequestPreparationService";
@@ -302,7 +301,6 @@ export class SystemSculptService {
   private licenseService: LicenseService;
   private modelManagementService: ModelManagementService;
   private contextFileService: ContextFileService;
-  private documentUploadService: DocumentUploadService;
   private platformRequestClient: PlatformRequestClient;
   private mcpService: MCPService;
   private acceptedChatPreparation = new ChatRequestPreparationService();
@@ -807,12 +805,6 @@ export class SystemSculptService {
     this.licenseService = new LicenseService(plugin, this.baseUrl);
     this.modelManagementService = new ModelManagementService(plugin, this.baseUrl);
     this.contextFileService = new ContextFileService(plugin.app);
-    this.documentUploadService = new DocumentUploadService(
-      plugin.app,
-      this.baseUrl,
-      this.settings.licenseKey,
-      this.plugin.manifest?.version ?? "0.0.0"
-    );
     this.platformRequestClient = new PlatformRequestClient();
     this.mcpService = new MCPService(plugin, plugin.app);
   }
@@ -904,11 +896,6 @@ export class SystemSculptService {
     // Update specialized services with new configuration
     this.licenseService.updateBaseUrl(this.baseUrl);
     this.modelManagementService.updateBaseUrl(this.baseUrl);
-    this.documentUploadService.updateConfig(
-      this.baseUrl,
-      this.settings.licenseKey,
-      this.plugin.manifest?.version ?? "0.0.0"
-    );
   }
 
   // DELEGATE TO LICENSE SERVICE
@@ -925,13 +912,6 @@ export class SystemSculptService {
 
   async preloadModels(): Promise<void> {
     return this.modelManagementService.preloadModels();
-  }
-
-  // DELEGATE TO DOCUMENT UPLOAD SERVICE
-  public async uploadDocument(
-    file: TFile
-  ): Promise<{ documentId: string; status: string; cached?: boolean }> {
-    return this.documentUploadService.uploadDocument(file);
   }
 
   public async getCreditsBalance(): Promise<CreditsBalanceSnapshot> {

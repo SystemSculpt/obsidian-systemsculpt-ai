@@ -31,10 +31,6 @@ const modelManagementService = {
   preloadModels: jest.fn().mockResolvedValue(undefined),
   updateBaseUrl: jest.fn(),
 };
-const documentUploadService = {
-  uploadDocument: jest.fn().mockResolvedValue({ documentId: "doc", status: "ok" }),
-  updateConfig: jest.fn(),
-};
 const contextFileService = {
   prepareMessagesWithContext: jest.fn(async (messages: any[]) => messages),
 };
@@ -67,11 +63,6 @@ jest.mock("../ModelManagementService", () => ({
 jest.mock("../ContextFileService", () => ({
   ContextFileService: jest.fn().mockImplementation(() => contextFileService),
 }));
-
-jest.mock("../DocumentUploadService", () => ({
-  DocumentUploadService: jest.fn().mockImplementation(() => documentUploadService),
-}));
-
 
 jest.mock("../LocalPiStreamExecutor", () => ({
   executeLocalPiStream: jest.fn((...args) => localPiStreamExecutor.executeLocalPiStream(...args)),
@@ -250,11 +241,6 @@ describe("SystemSculptService", () => {
 
     expect(licenseService.updateBaseUrl).toHaveBeenCalled();
     expect(modelManagementService.updateBaseUrl).toHaveBeenCalled();
-    expect(documentUploadService.updateConfig).toHaveBeenCalledWith(
-      "https://api.systemsculpt.test/api/v1",
-      "license",
-      "4.13.0"
-    );
   });
 
   it("builds hosted SystemSculpt request previews from the prepared chat payload", async () => {
@@ -1101,17 +1087,15 @@ describe("SystemSculptService", () => {
     expect(count).toBe(1);
   });
 
-  it("delegates license validation, model retrieval, and document uploads", async () => {
+  it("delegates license validation and model retrieval", async () => {
     const plugin = createPlugin();
     const service = SystemSculptService.getInstance(plugin);
 
     await service.validateLicense(true);
     await service.getModels();
-    await service.uploadDocument(new TFile({ path: "doc.pdf", name: "doc.pdf" }));
 
     expect(licenseService.validateLicense).toHaveBeenCalledWith(true);
     expect(modelManagementService.getModels).toHaveBeenCalled();
-    expect(documentUploadService.uploadDocument).toHaveBeenCalled();
   });
 
   it("fetches credits balance from the SystemSculpt API", async () => {

@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { App, TFile, Notice, TFolder } from "obsidian";
+import { App, TFile, Notice } from "obsidian";
 import { DocumentContextManager, ChatContextManager } from "../DocumentContextManager";
 
 // Mock dependencies
@@ -16,10 +16,26 @@ const mockProcessDocument = jest.fn();
 jest.mock("../DocumentProcessingService", () => ({
   DocumentProcessingService: {
     getInstance: jest.fn(() => ({
-      processDocument: mockProcessDocument,
+      processDocumentWithReceipt: mockProcessDocument,
     })),
   },
 }));
+
+const documentReceipt = (extractionPath: string, imagePaths: string[] = []) => ({
+  extractionPath,
+  imagePaths,
+  operationId: "document-operation-1",
+  outputIdentity: `vault:${extractionPath}`,
+  markdownSha256: "b".repeat(64),
+  contextEffectId: "a".repeat(64),
+});
+
+const resolveDocument = (extractionPath: string, imagePaths: string[] = []) =>
+  mockProcessDocument.mockImplementationOnce(async (_file: TFile, options: any) => {
+    const receipt = documentReceipt(extractionPath, imagePaths);
+    await options.commitContextEffect?.(receipt, new AbortController().signal);
+    return receipt;
+  });
 
 const mockTranscribeFile = jest.fn();
 jest.mock("../TranscriptionService", () => ({
@@ -86,7 +102,11 @@ describe("DocumentContextManager", () => {
 
     // Default mock behaviors
     mockCheckLicenseForFile.mockResolvedValue(true);
-    mockProcessDocument.mockResolvedValue("Extractions/document/document.md");
+    mockProcessDocument.mockImplementation(async (_file: TFile, options: any) => {
+      const receipt = documentReceipt("Extractions/document/document.md");
+      await options.commitContextEffect?.(receipt, new AbortController().signal);
+      return receipt;
+    });
     mockTranscribeFile.mockResolvedValue("Transcribed text content");
     (mockApp.vault.create as jest.Mock).mockResolvedValue({});
     (mockApp.vault.modify as jest.Mock).mockResolvedValue({});
@@ -243,7 +263,7 @@ describe("DocumentContextManager", () => {
     describe("document files", () => {
       it("processes PDF and adds extracted content to context", async () => {
         const file = createMockFile({ path: "test/doc.pdf", extension: "pdf", basename: "doc" });
-        mockProcessDocument.mockResolvedValue("Extractions/doc/doc.md");
+        resolveDocument("Extractions/doc/doc.md");
         (mockApp.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(null);
         (mockApp.vault.getAllLoadedFiles as jest.Mock).mockReturnValue([]);
 
@@ -264,7 +284,7 @@ describe("DocumentContextManager", () => {
 
       it("processes DOCX files", async () => {
         const file = createMockFile({ path: "test/doc.docx", extension: "docx", basename: "doc" });
-        mockProcessDocument.mockResolvedValue("Extractions/doc/doc.md");
+        resolveDocument("Extractions/doc/doc.md");
         (mockApp.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(null);
         (mockApp.vault.getAllLoadedFiles as jest.Mock).mockReturnValue([]);
 
@@ -276,7 +296,7 @@ describe("DocumentContextManager", () => {
 
       it("handles document processing error", async () => {
         const file = createMockFile({ path: "test/doc.pdf", extension: "pdf" });
-        mockProcessDocument.mockRejectedValue(new Error("Processing failed"));
+        mockProcessDocument.mockRejectedValueOnce(new Error("Processing failed"));
 
         const result = await manager.addFileToContext(file, mockContextManager);
 
@@ -292,16 +312,7 @@ describe("DocumentContextManager", () => {
 
       it("adds extracted images to context", async () => {
         const file = createMockFile({ path: "test/doc.pdf", extension: "pdf", basename: "doc" });
-        mockProcessDocument.mockResolvedValue("Extractions/doc/doc.md");
-
-        const mockExtractedFile = new TFile({ path: "Extractions/doc/doc.md" });
-        const mockParentFolder = new TFolder({ path: "Extractions/doc" });
-        (mockExtractedFile as any).parent = mockParentFolder;
-
-        const mockImageFile = new TFile({ path: "Extractions/doc/images-123/image1.png" });
-
-        (mockApp.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(mockExtractedFile);
-        (mockApp.vault.getAllLoadedFiles as jest.Mock).mockReturnValue([mockImageFile]);
+        resolveDocument("Extractions/doc/doc.md", ["Extractions/doc/images-123/image1.png"]);
 
         const result = await manager.addFileToContext(file, mockContextManager);
 

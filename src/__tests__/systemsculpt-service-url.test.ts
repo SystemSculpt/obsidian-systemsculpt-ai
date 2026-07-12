@@ -59,13 +59,6 @@ jest.mock('../services/ContextFileService', () => ({
   })),
 }));
 
-jest.mock('../services/DocumentUploadService', () => ({
-  DocumentUploadService: jest.fn().mockImplementation(() => ({
-    updateConfig: jest.fn(),
-    uploadDocument: jest.fn(),
-  })),
-}));
-
 jest.mock('../views/chatview/MCPService', () => ({
   MCPService: jest.fn().mockImplementation(() => ({
     getAvailableTools: jest.fn().mockResolvedValue([]),

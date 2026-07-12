@@ -167,6 +167,7 @@ export class DocumentContextManager {
       
       // Determine how to process the file based on its extension
       let contextPath: string;
+      let contextEffectCommitted = false;
       
       if (isDocumentFileExtension(extension)) {
         // Process document file
@@ -179,7 +180,7 @@ export class DocumentContextManager {
             flow: "document",
           });
 
-          const extractionPath = await this.documentProcessingService.processDocument(file, {
+          const receipt = await this.documentProcessingService.processDocumentWithReceipt(file, {
             onProgress: (event: DocumentProcessingProgressEvent) => {
               contextManager.updateProcessingStatus(file, {
                 ...event,
@@ -188,7 +189,24 @@ export class DocumentContextManager {
             },
             showNotices: false,
             addToContext: false,
+            commitContextEffect: async (effect, signal) => {
+              for (const imagePath of effect.imagePaths) {
+                throwIfAborted(signal);
+                const imageWikiLink = `[[${imagePath}]]`;
+                if (!contextManager.hasContextFile(imageWikiLink)) contextManager.addToContextFiles(imageWikiLink);
+              }
+              await this.applyDocumentConversionContextEffect({
+                effectId: effect.contextEffectId,
+                operationId: effect.operationId,
+                outputIdentity: effect.outputIdentity,
+                outputPath: effect.extractionPath,
+                markdownSha256: effect.markdownSha256,
+                signal,
+              }, contextManager);
+              contextEffectCommitted = true;
+            },
           });
+          const extractionPath = receipt.extractionPath;
 
           contextManager.updateProcessingStatus(file, {
             stage: "contextualizing",
@@ -198,13 +216,6 @@ export class DocumentContextManager {
             flow: "document",
           });
 
-          // Add the markdown file to context
-          const mdWikiLink = `[[${extractionPath}]]`;
-          contextManager.addToContextFiles(mdWikiLink);
-          
-          // Find and add any images that were extracted
-          await this.addExtractedImagesToContext(extractionPath, contextManager);
-          
           contextPath = extractionPath;
 
           contextManager.updateProcessingStatus(file, {
@@ -279,7 +290,7 @@ export class DocumentContextManager {
       }
       
       // Save changes if requested
-      if (saveChanges) {
+      if (saveChanges && !contextEffectCommitted) {
         await contextManager.triggerContextChange();
       }
       
@@ -295,56 +306,6 @@ export class DocumentContextManager {
         new Notice(`Error adding ${file.basename} to context: ${message}`, 5000);
       }
       return false;
-    }
-  }
-  
-  /**
-   * Add extracted images to context
-   * @param extractionPath The path to the extraction file
-   * @param contextManager The chat context manager to update
-   */
-  private async addExtractedImagesToContext(
-    extractionPath: string,
-    contextManager: ChatContextManager
-  ): Promise<void> {
-    try {
-      // Find and add any images that were extracted
-      const extractionFile = this.app.vault.getAbstractFileByPath(extractionPath);
-      if (!extractionFile) {
-        return;
-      }
-      
-      const parentFolder = extractionFile.parent;
-      if (!parentFolder) {
-        return;
-      }
-      
-      // Get all files in the vault and filter for images in the parent folder
-      const allFiles = this.app.vault.getAllLoadedFiles();
-      const imageFiles = allFiles.filter(file => {
-        // Check if it's a file (not a folder)
-        if (!(file instanceof TFile)) return false;
-        
-        // Check if it's in a subfolder of the parent folder
-        const filePath = file.path;
-        if (!filePath.startsWith(parentFolder.path)) return false;
-        
-        // Check if it's in an images folder
-        if (!filePath.includes('images-')) return false;
-        
-        // Check if it's an image file
-        return filePath.endsWith('.png') ||
-               filePath.endsWith('.jpg') ||
-               filePath.endsWith('.jpeg');
-      });
-      
-      // Add all found images to context
-      for (const imageFile of imageFiles) {
-        const imageWikiLink = `[[${imageFile.path}]]`;
-        contextManager.addToContextFiles(imageWikiLink);
-      }
-      
-    } catch (error) {
     }
   }
   
