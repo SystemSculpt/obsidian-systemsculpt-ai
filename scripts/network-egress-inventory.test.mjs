@@ -19,6 +19,13 @@ function repo(files) {
   return root;
 }
 const writeFixture = (root, value) => { const file = path.join(root, 'fixture.json'); fs.writeFileSync(file, JSON.stringify(value, null, 2) + '\n'); return file; };
+const writeEmptyDispositionLedger = root => {
+  const reviewed = JSON.parse(fs.readFileSync(path.join(root, 'testing/fixtures/managed/egress-dispositions-v1-660e7fe.json'), 'utf8'));
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'egress-empty-disposition-'));
+  const file = path.join(directory, 'egress-dispositions-v1-660e7fe.json');
+  fs.writeFileSync(file, JSON.stringify({ ...reviewed, transitions: [] }, null, 2) + '\n');
+  return file;
+};
 
 test('baseline reads committed blobs while current reads staged, unstaged, untracked, and omits deleted files', () => {
   const root = repo({ 'src/a.ts': 'export const a = () => fetch("https://old.invalid");\n', 'src/deleted.ts': 'new WebSocket("ws://old.invalid");\n' });
@@ -471,7 +478,8 @@ test('default verify pins trust-boundary refs while current supports determinist
     ['verify', '--ref', 'HEAD', '--fixture', fixture],
     ['verify', '--source-ref', 'HEAD', '--fixture', fixture]
   ]) assert.throws(() => execFileSync(process.execPath, ['scripts/network-egress-inventory.mjs', ...args], { cwd, encoding: 'utf8', stdio: 'pipe' }), /history_tampered/);
-  assert.match(execFileSync(process.execPath, ['scripts/network-egress-inventory.mjs', 'current', '--source-ref', 'c4f81ebc35aa836f787f198b8341d9496bc367ba', '--fixture', fixture], { cwd, encoding: 'utf8', stdio: 'pipe' }), /PASS/);
+  const sourceRef = execFileSync('git', ['rev-parse', 'HEAD'], { cwd, encoding: 'utf8' }).trim();
+  assert.match(execFileSync(process.execPath, ['scripts/network-egress-inventory.mjs', 'current', '--source-ref', sourceRef, '--fixture', fixture], { cwd, encoding: 'utf8', stdio: 'pipe' }), /PASS/);
 });
 
 test('default verify rejects a companion regenerated from laundered source semantics', () => {
@@ -524,7 +532,7 @@ test('empty disposition ledger classifies all historical records without rewriti
   const root = process.cwd();
   const fixture = path.join(root, 'testing/fixtures/managed/egress-baseline-660e7fe.json');
   const verificationArtifact = path.join(root, 'testing/fixtures/managed/egress-verification-v2-660e7fe.json');
-  const dispositionLedger = path.join(root, 'testing/fixtures/managed/egress-dispositions-v1-660e7fe.json');
+  const dispositionLedger = writeEmptyDispositionLedger(root);
   const result = verifyDispositionLedger({ root, fixture, verificationArtifact, dispositionLedger });
   assert.equal(result.transitions, 0);
   const states = [...result.effective.values()];
@@ -537,7 +545,7 @@ test('disposition ledger rejects malformed versions, anchors, mappings, and non-
   const root = process.cwd();
   const fixture = path.join(root, 'testing/fixtures/managed/egress-baseline-660e7fe.json');
   const verificationArtifact = path.join(root, 'testing/fixtures/managed/egress-verification-v2-660e7fe.json');
-  const original = JSON.parse(fs.readFileSync(path.join(root, 'testing/fixtures/managed/egress-dispositions-v1-660e7fe.json'), 'utf8'));
+  const original = JSON.parse(fs.readFileSync(writeEmptyDispositionLedger(root), 'utf8'));
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'egress-disposition-'));
   const check = (mutation, pattern) => {
     const dispositionLedger = path.join(temp, 'ledger.json');
@@ -699,10 +707,11 @@ test('analyzer-v2 success text does not claim the disposition ledger is empty', 
 test('default disposition discovery resolves the exact sibling ledger', () => {
   const root = process.cwd(), fixture = path.join(root, 'testing/fixtures/managed/egress-baseline-660e7fe.json');
   const verificationArtifact = path.join(root, 'testing/fixtures/managed/egress-verification-v2-660e7fe.json');
+  const verificationArtifactV3 = path.join(root, 'testing/fixtures/managed/egress-verification-v3-660e7fe.json');
   const ledger = path.join(root, 'testing/fixtures/managed/egress-dispositions-v1-660e7fe.json');
   assert.equal(defaultDispositionLedgerPath(fixture), ledger);
-  const automatic = verifyDispositionLedger({ root, fixture, verificationArtifact });
-  const explicit = verifyDispositionLedger({ root, fixture, verificationArtifact, dispositionLedger: ledger });
+  const automatic = verifyDispositionLedger({ root, fixture, verificationArtifact, verificationArtifactV3 });
+  const explicit = verifyDispositionLedger({ root, fixture, verificationArtifact, verificationArtifactV3, dispositionLedger: ledger });
   assert.deepEqual([...automatic.effective.values()], [...explicit.effective.values()]);
 });
 
