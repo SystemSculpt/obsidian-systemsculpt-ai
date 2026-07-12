@@ -691,12 +691,8 @@ describe("InputHandler hosted tool loop", () => {
     await handler.submitWithOverrides({ includeContextFiles: false });
 
     expect(streamAssistantTurn).toHaveBeenCalledTimes(3);
-    expect(streamAssistantTurn.mock.calls[2]?.[4]?.transientSystemPromptSuffix).toContain(
-      "previous continuation attempt"
-    );
-    expect(streamAssistantTurn.mock.calls[2]?.[4]?.transientSystemPromptSuffix).toContain(
-      "Do not return an empty response"
-    );
+    expect(streamAssistantTurn.mock.calls[2]?.[4]).toEqual({ phase: "continuation" });
+    expect(streamAssistantTurn.mock.calls[2]?.[4]).not.toHaveProperty("transientSystemPromptSuffix");
     expect(aiService.executeHostedToolCall).toHaveBeenCalledTimes(1);
     expect(onError).not.toHaveBeenCalled();
     expect(messages).toEqual(

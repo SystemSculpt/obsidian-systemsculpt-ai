@@ -48,6 +48,8 @@ function fallbackModel(model: string, modelSource: SystemSculptTextModelSourceMo
 export async function prepareChatRequestAuthoritatively(
   input: AuthoritativeChatPreparationInput,
   dependencies: ChatPreparationDependencies,
+  messagesAlreadyPrepared = false,
+  preResolvedTools?: readonly OpenAITool[],
 ): Promise<AuthoritativeChatPreparation> {
   const modelInfo = await dependencies.getModelInfo(input.model);
   const { modelSource, actualModelId } = modelInfo;
@@ -81,34 +83,71 @@ export async function prepareChatRequestAuthoritatively(
   const diagnostics: ChatPreparationDiagnostic[] = [];
   let tools: OpenAITool[] = [];
   if (toolsAllowed && toolCapableModelSource && resolvedModel.supported_parameters?.includes("tools")) {
-    try { tools = normalizeOpenAITools(await dependencies.getAvailableTools()); }
+    try { tools = preResolvedTools ? [...preResolvedTools] : normalizeOpenAITools(await dependencies.getAvailableTools()); }
     catch (error) {
       void error;
       diagnostics.push({ kind: "tool_resolution_failed", model: input.model, actualModelId, message: "Tool definition resolution failed." });
     }
   }
-  const preparedMessages = await dependencies.contextFileService.prepareMessagesWithContext(
-    input.messages.map((message) => ({ ...message })) as ChatMessage[], contextFiles, imagesEnabledForRequest, finalSystemPrompt,
-  );
+  const preparedMessages = messagesAlreadyPrepared
+    ? input.messages.map((message) => ({ ...message })) as ChatMessage[]
+    : await dependencies.contextFileService.prepareMessagesWithContext(
+      input.messages.map((message) => ({ ...message })) as ChatMessage[], contextFiles, imagesEnabledForRequest, finalSystemPrompt,
+    );
   return { prepared: { modelSource, resolvedModel, actualModelId, preparedMessages, finalSystemPrompt: finalSystemPrompt ?? "", tools }, notices, diagnostics };
+}
+
+export type ManagedChatPreparationDependencies = Readonly<{
+  contextFileService: ContextFileService;
+  getAvailableTools: () => Promise<Parameters<typeof normalizeOpenAITools>[0]>;
+}>;
+
+export async function prepareManagedAcceptedChatRequest(
+  operation: AcceptedChatOperation,
+  input: Pick<AuthoritativeChatPreparationInput, "contextFiles" | "systemPromptOverride" | "allowTools">,
+  dependencies: ManagedChatPreparationDependencies,
+): Promise<Readonly<{ messages: readonly Readonly<ChatMessage>[]; tools: readonly OpenAITool[] }>> {
+  const contextFiles = new Set(input.contextFiles ?? []);
+  const prompt = input.systemPromptOverride?.trim() || undefined;
+  const messages = await dependencies.contextFileService.prepareMessagesWithContext(
+    operation.initialDurableSnapshot.messages.map((message) => ({ ...message })) as ChatMessage[],
+    contextFiles,
+    true,
+    prompt,
+  );
+  const tools = input.allowTools === false ? [] : normalizeOpenAITools(await dependencies.getAvailableTools());
+  return { messages, tools };
 }
 
 export class ChatRequestPreparationService {
   private readonly retained = new WeakMap<AcceptedChatOperation, Promise<AcceptedChatRequestSnapshot>>();
   private readonly failed = new WeakSet<AcceptedChatOperation>();
-  public prepare(operation: AcceptedChatOperation, input: AuthoritativeChatPreparationInput, dependencies: ChatPreparationDependencies): Promise<AcceptedChatRequestSnapshot> {
+  public prepare(
+    operation: AcceptedChatOperation,
+    input: AuthoritativeChatPreparationInput,
+    dependencies: ChatPreparationDependencies,
+    managedDependencies: ManagedChatPreparationDependencies,
+  ): Promise<AcceptedChatRequestSnapshot> {
     const existing = this.retained.get(operation);
     if (existing) return existing;
     if (this.failed.has(operation)) return Promise.reject(new Error("Accepted Chat request preparation already failed."));
-    const pending = prepareChatRequestAuthoritatively({ ...input, messages: operation.initialDurableSnapshot.messages }, dependencies)
-      .then((result) => {
+    const pending = (async () => {
+      const managed = await prepareManagedAcceptedChatRequest(operation, input, managedDependencies);
+      const legacy = await prepareChatRequestAuthoritatively({
+        ...input,
+        messages: managed.messages,
+        contextFiles: new Set<string>(),
+        systemPromptOverride: undefined,
+      }, dependencies, true, managed.tools);
+      return { legacy, managed };
+    })().then(({ legacy, managed }) => {
         const contextFiles = new Set(input.contextFiles ?? []);
         const policy: AcceptedChatPolicyAudit = {
           prompt: input.systemPromptOverride?.trim() ? "selected" : "none", contextCount: contextFiles.size,
-          imageContextIncluded: !result.notices.some((notice) => notice.kind === "image_incompatible"),
-          documentContextIncluded: [...contextFiles].some((item) => item.startsWith("doc:")), tools: result.prepared.tools.length ? "normalized" : "omitted",
+          imageContextIncluded: true,
+          documentContextIncluded: [...contextFiles].some((item) => item.startsWith("doc:")), tools: managed.tools.length ? "normalized" : "omitted",
         };
-        return createAcceptedChatRequestSnapshot({ operation, preparation: result, policy });
+        return createAcceptedChatRequestSnapshot({ operation, preparation: legacy, policy, managedMessages: managed.messages, managedTools: managed.tools });
       })
       .catch((error: Error) => { this.failed.add(operation); throw error; });
     this.retained.set(operation, pending);

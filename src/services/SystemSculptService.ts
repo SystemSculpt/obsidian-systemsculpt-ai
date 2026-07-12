@@ -387,6 +387,14 @@ export class SystemSculptService {
     };
   }
 
+  private managedPreparationDependencies() {
+    return {
+      contextFileService: this.contextFileService,
+      // Managed ai-agent tool definitions are resolved independently of legacy model/provider capability.
+      getAvailableTools: () => this.mcpService.getAvailableTools(),
+    };
+  }
+
   private async prepareChatRequest(options: AuthoritativeChatPreparationInput & { emitNotices?: boolean }): Promise<PreparedChatRequest> {
     this.refreshSettings();
     const result = await prepareChatRequestAuthoritatively(options, this.preparationDependencies());
@@ -409,7 +417,12 @@ export class SystemSculptService {
 
   public prepareAcceptedChatRequest(operation: AcceptedChatOperation, options: Omit<AuthoritativeChatPreparationInput, "messages">): Promise<AcceptedChatRequestSnapshot> {
     this.refreshSettings();
-    return this.acceptedChatPreparation.prepare(operation, { ...options, messages: operation.initialDurableSnapshot.messages }, this.preparationDependencies());
+    return this.acceptedChatPreparation.prepare(
+      operation,
+      { ...options, messages: operation.initialDurableSnapshot.messages },
+      this.preparationDependencies(),
+      this.managedPreparationDependencies(),
+    );
   }
 
   public releaseAcceptedChatRequest(operation: AcceptedChatOperation): void {

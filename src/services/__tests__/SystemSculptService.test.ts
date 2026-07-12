@@ -211,7 +211,10 @@ describe("SystemSculptService", () => {
     const accepted = await service.prepareAcceptedChatRequest(operation, { model: "m", contextFiles: new Set(), systemPromptOverride: "selected" });
     expect(modelManagementService.getModelInfo).toHaveBeenCalledTimes(1);
     expect(contextFileService.prepareMessagesWithContext).toHaveBeenCalledTimes(1);
-    expect(mcpService.getAvailableTools).not.toHaveBeenCalled();
+    // Fixed ai-agent preparation resolves tool definitions once even when the legacy provider is not tool-capable.
+    expect(mcpService.getAvailableTools).toHaveBeenCalledTimes(1);
+    expect(accepted.tools).toHaveLength(1);
+    expect(Object.isFrozen(accepted.tools)).toBe(true);
     jest.clearAllMocks();
     await collectEvents(service.streamMessage({ messages: [], model: "ignored", preparedRequest: accepted.legacyPreparation as never }));
     expect(modelManagementService.getModelInfo).not.toHaveBeenCalled();

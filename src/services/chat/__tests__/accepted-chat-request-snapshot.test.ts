@@ -43,10 +43,10 @@ describe("AcceptedChatRequestSnapshot", () => {
       contextFileService: { prepareMessagesWithContext: async (messages: never[]) => { reads.context += 1; return messages; } } as never,
     };
     const input = { messages: op.initialDurableSnapshot.messages, model: "m", contextFiles: new Set<string>(), systemPromptOverride: "selected" };
-    const first = service.prepare(op, input, dependencies);
-    expect(service.prepare(op, input, dependencies)).toBe(first);
+    const first = service.prepare(op, input, dependencies, dependencies);
+    expect(service.prepare(op, input, dependencies, dependencies)).toBe(first);
     const settled = await first;
-    expect(await service.prepare(op, input, dependencies)).toBe(settled);
+    expect(await service.prepare(op, input, dependencies, dependencies)).toBe(settled);
     expect(reads).toEqual({ model: 1, tools: 1, context: 1 });
     expect(service.has(op)).toBe(true);
     service.release(op);
@@ -59,10 +59,10 @@ describe("AcceptedChatRequestSnapshot", () => {
     const resultMessage = { role: "tool" as const, content: "ok", message_id: "t", tool_call_id: "call" };
     const next = Object.freeze({ chatId: "c", version: 2, messages: Object.freeze([...accepted.durableSnapshot.messages, checkpoint, resultMessage]) });
     const managed = composeAcceptedChatContinuation(accepted, next);
-    const legacy = composeAcceptedLegacyContinuation(accepted, next, "retry hint");
+    const legacy = composeAcceptedLegacyContinuation(accepted, next);
     expect(managed[0]).toMatchObject({ role: "system", content: "frozen prompt and context" });
     expect(managed.at(-1)).toMatchObject({ role: "tool", content: "ok", tool_call_id: "call" });
-    expect(legacy.preparedMessages[0].content).toContain("retry hint");
+    expect(legacy.preparedMessages[0].content).toBe("frozen prompt and context");
     expect(legacy.tools).toEqual(accepted.legacyPreparation.tools);
     expect(Object.isFrozen(legacy)).toBe(true);
   });

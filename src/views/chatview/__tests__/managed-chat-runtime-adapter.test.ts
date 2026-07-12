@@ -75,6 +75,28 @@ describe("ManagedChatRuntimeAdapter live events", () => {
     expect(pulls).toBeGreaterThanOrEqual(pullsBeforeIteration);
   });
 
+  it("cancels the reader before releasing its lock when the consumer returns early", async () => {
+    const state = setup();
+    const effects: string[] = [];
+    state.requestClient.responses.push(new Response(new ReadableStream<Uint8Array>({
+      pull(controller) {
+        effects.push("read");
+        controller.enqueue(bytes('data: {"choices":[{"delta":{"content":"first"}}]}\n\n'));
+      },
+      cancel() { effects.push("cancel"); },
+    })));
+    const result = await state.adapter.dispatch({ acceptedRequestSnapshot: state.acceptedRequestSnapshot, phase: "initial", continuationIndex: 0 });
+    if (result.kind !== "success") throw new Error(result.kind);
+    for await (const event of result.events) {
+      expect(event).toEqual({ kind: "content_delta", text: "first" });
+      break;
+    }
+    expect(effects.at(-1)).toBe("cancel");
+    const readsAfterReturn = effects.filter((effect) => effect === "read").length;
+    await Promise.resolve();
+    expect(effects.filter((effect) => effect === "read")).toHaveLength(readsAfterReturn);
+  });
+
   it("resolves typed statuses before exposing a stream", async () => {
     const state = setup();
     state.requestClient.responses.push(new Response(JSON.stringify({ code: "operation_in_progress" }), { status: 409 }));

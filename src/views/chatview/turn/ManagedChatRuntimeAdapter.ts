@@ -276,6 +276,13 @@ export class ManagedChatRuntimeAdapter {
     let pendingCr = false;
     let data: string[] = [];
     let doneSeen = false;
+    let iterationCompleted = false;
+    let readerCancelled = false;
+    const cancelReader = async (): Promise<void> => {
+      if (readerCancelled) return;
+      readerCancelled = true;
+      await reader.cancel();
+    };
     const dispatchEvent = (): boolean => {
       if (data.length === 0) return true;
       const payload = data.join("\n");
@@ -335,7 +342,7 @@ export class ManagedChatRuntimeAdapter {
     };
     try {
       while (true) {
-        if (signal?.aborted) { await reader.cancel(); throw Object.freeze({ kind: "aborted", diagnostic }); }
+        if (signal?.aborted) { await cancelReader(); throw Object.freeze({ kind: "aborted", diagnostic }); }
         const chunk = signal
           ? await new Promise<ReadableStreamReadResult<Uint8Array>>((resolve, reject) => {
               const abort = () => reject(new DOMException("The operation was aborted", "AbortError"));
@@ -354,13 +361,15 @@ export class ManagedChatRuntimeAdapter {
       if (!doneSeen) throw Object.freeze({ kind: "transport_failure", diagnostic });
       for (const [index, state] of toolState) yield { kind: "tool_call_completed", index, ...state };
       yield { kind: "done" };
+      iterationCompleted = true;
     } catch {
       if (signal?.aborted) {
-        await reader.cancel();
+        await cancelReader();
         throw Object.freeze({ kind: "aborted", diagnostic });
       }
       throw Object.freeze({ kind: "transport_failure", diagnostic });
     } finally {
+      if (!iterationCompleted) await cancelReader();
       reader.releaseLock();
     }
   }

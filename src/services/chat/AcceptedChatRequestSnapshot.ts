@@ -68,6 +68,8 @@ function prepareTool(tool: PreparedChatRequest["tools"][number]): Readonly<{ [ke
 }
 export function createAcceptedChatRequestSnapshot(input: Readonly<{
   operation: AcceptedChatOperation; preparation: AuthoritativeChatPreparation; policy: AcceptedChatPolicyAudit;
+  managedMessages?: readonly Readonly<ChatMessage>[];
+  managedTools?: readonly PreparedChatRequest["tools"][number][];
 }>): AcceptedChatRequestSnapshot {
   const legacyPreparation = deepFreezeAccepted(deepCopy(input.preparation.prepared) as FrozenPreparedChatRequest);
   const snapshot = {
@@ -77,8 +79,8 @@ export function createAcceptedChatRequestSnapshot(input: Readonly<{
     model: "ai-agent" as const,
     policy: deepCopy(input.policy), legacyPreparation,
     notices: deepCopy(input.preparation.notices), diagnostics: deepCopy(input.preparation.diagnostics),
-    messages: legacyPreparation.preparedMessages.map(prepareManagedMessage),
-    ...(legacyPreparation.tools.length ? { tools: legacyPreparation.tools.map(prepareTool) } : {}),
+    messages: (input.managedMessages ?? legacyPreparation.preparedMessages).map(prepareManagedMessage),
+    ...((input.managedTools ?? legacyPreparation.tools).length ? { tools: (input.managedTools ?? legacyPreparation.tools).map(prepareTool) } : {}),
   } as unknown as AcceptedChatRequestSnapshot;
   Object.defineProperty(snapshot, "operation", { value: input.operation, enumerable: false, writable: false, configurable: false });
   return deepFreezeAccepted(snapshot);
@@ -93,19 +95,9 @@ export function composeAcceptedChatContinuation(accepted: AcceptedChatRequestSna
 export function composeAcceptedLegacyContinuation(
   accepted: AcceptedChatRequestSnapshot,
   next: ChatTranscriptSnapshot,
-  transientSystemPromptSuffix?: string,
 ): FrozenPreparedChatRequest {
   const preparedMessages = [
     ...deepCopy(accepted.legacyPreparation.preparedMessages), ...deepCopy(continuationSuffix(accepted, next)),
   ];
-  const suffix = transientSystemPromptSuffix?.trim() ?? "";
-  if (suffix) {
-    const systemIndex = preparedMessages.findIndex((message) => message.role === "system");
-    if (systemIndex >= 0 && typeof preparedMessages[systemIndex].content === "string") {
-      preparedMessages[systemIndex] = { ...preparedMessages[systemIndex], content: `${preparedMessages[systemIndex].content}\n\n${suffix}` };
-    } else {
-      preparedMessages.unshift({ role: "system", content: suffix, message_id: `continuation-${accepted.durableTurnId}` });
-    }
-  }
   return deepFreezeAccepted({ ...deepCopy(accepted.legacyPreparation), preparedMessages } as FrozenPreparedChatRequest);
 }

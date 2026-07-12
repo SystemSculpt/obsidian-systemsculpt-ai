@@ -315,7 +315,7 @@ export class InputHandler extends Component {
     signal: AbortSignal,
     includeContextFiles: boolean,
     turnProgress?: ChatTurnProgressController,
-    options?: { transientSystemPromptSuffix?: string; phase?: "initial" | "continuation" }
+    options?: { phase?: "initial" | "continuation" }
   ): Promise<StreamTurnResult> {
     const acceptedRequest = this.acceptedRequestSnapshot;
     if (!acceptedRequest || acceptedRequest.operation !== acceptedOperation) {
@@ -341,7 +341,6 @@ export class InputHandler extends Component {
       : composeAcceptedLegacyContinuation(
           acceptedRequest,
           this.chatView.getDurableTranscriptSnapshot(),
-          options?.transientSystemPromptSuffix,
         );
 
     const stream = this.aiService.streamMessage({
@@ -893,12 +892,9 @@ export class InputHandler extends Component {
           progress.begin();
           try {
             progress.setStatus(retryCount > 0 ? "retrying" : "preparing");
-            return await this.streamAssistantTurn(acceptedOperation, turnSignal, includeContextFiles, progress, {
-              phase,
-              transientSystemPromptSuffix: phase === "continuation" && retryCount > 0 && previous
-                ? this.buildEmptyContinuationRetryHint(previous.completionState, retryCount)
-                : undefined,
-            });
+            void retryCount;
+            void previous;
+            return await this.streamAssistantTurn(acceptedOperation, turnSignal, includeContextFiles, progress, { phase });
           } finally {
             progress.end();
           }
