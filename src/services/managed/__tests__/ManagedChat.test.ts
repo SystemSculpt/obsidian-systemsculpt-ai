@@ -21,8 +21,9 @@ describe("ManagedCapabilityClient accepted Chat dispatch", () => {
       rateLimitReset: null, retryAfter: null, errorText: "",
     } });
     const body = { model: "ai-agent", stream: true, messages: [] } as const;
-    await client.streamAcceptedChat(lease, body, "key-1");
-    expect(dispatch).toHaveBeenCalledWith({ path: "/api/v1/chat/completions", method: "POST", capability: "chat_turn", idempotencyKey: "key-1", body, signal: undefined });
+    const ticket = client.beginAcceptedChatDispatch()!;
+    await client.streamAcceptedChat(ticket, lease, body, "key-1");
+    expect(dispatch).toHaveBeenCalledWith(ticket, { path: "/api/v1/chat/completions", method: "POST", capability: "chat_turn", idempotencyKey: "key-1", body, signal: undefined });
     expect(admission.acquireLease).not.toHaveBeenCalled();
     expect(admission.withLease).not.toHaveBeenCalled();
   });
@@ -31,7 +32,8 @@ describe("ManagedCapabilityClient accepted Chat dispatch", () => {
     const { client, transport, lease } = setup();
     const dispatch = jest.spyOn(transport, "streamAcceptedChat");
     const mismatched = { ...lease, requestContract: { ...lease.requestContract, background_eligible: true } } as ManagedAllowedLease;
-    await expect(client.streamAcceptedChat(mismatched, { model: "ai-agent" }, "key")).rejects.toThrow("required contract");
+    const ticket = client.beginAcceptedChatDispatch()!;
+    await expect(client.streamAcceptedChat(ticket, mismatched, { model: "ai-agent" }, "key")).rejects.toThrow("required contract");
     expect(dispatch).not.toHaveBeenCalled();
   });
 });

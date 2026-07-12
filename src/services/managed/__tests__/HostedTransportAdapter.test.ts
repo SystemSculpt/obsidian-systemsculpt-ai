@@ -66,9 +66,20 @@ describe("HostedTransportAdapter", () => {
 
   it.each([
     ["key", "6", true], ["", "6", false], ["key", "", false], ["   ", "6", false], ["key", "   ", false],
-  ])("preflights non-empty managed Chat configuration without returning credentials", (license, version, expected) => {
-    const adapter = new HostedTransportAdapter({ baseUrl: "https://api.test", pluginVersion: version, licenseKey: () => license });
-    expect(adapter.hasManagedChatConfiguration()).toBe(expected);
+  ])("atomically snapshots non-empty managed Chat configuration without returning credentials", (license, version, expected) => {
+    const supplier = jest.fn(() => license);
+    const adapter = new HostedTransportAdapter({ baseUrl: "https://api.test", pluginVersion: version, licenseKey: supplier });
+    expect(adapter.beginManagedChatDispatch() !== null).toBe(expected);
+    expect(supplier).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses one immutable managed Chat configuration snapshot without re-reading its supplier", async () => {
+    const supplier = jest.fn().mockReturnValueOnce("first-key").mockReturnValue("changed-key");
+    const adapter = new HostedTransportAdapter({ baseUrl: "https://api.test", pluginVersion: " 6.0.0 ", licenseKey: supplier });
+    const ticket = adapter.beginManagedChatDispatch()!;
+    await adapter.streamAcceptedChat(ticket, { path: "/api/v1/chat/completions", capability: "chat_turn", idempotencyKey: "idem", body: {} });
+    expect(supplier).toHaveBeenCalledTimes(1);
+    expect(request.mock.calls[0][0]).toMatchObject({ licenseKey: "first-key", headers: { "x-license-key": "first-key", "x-plugin-version": "6.0.0" } });
   });
 
   it("adds operation contract headers and only explicit idempotency keys", async () => {

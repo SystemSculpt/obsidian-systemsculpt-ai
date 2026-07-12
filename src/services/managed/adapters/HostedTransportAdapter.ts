@@ -6,9 +6,12 @@ import {
 import { ManagedCapabilityCatalog } from "../ManagedCapabilityCatalog";
 
 export interface HostedTransportOptions { baseUrl: string; pluginVersion: string; licenseKey: () => string; requestClient?: PlatformRequestClient; }
+export type ManagedChatTransportTicket = Readonly<{ kind: "managed_chat_transport_ticket" }>;
+type ManagedChatConfiguration = Readonly<{ licenseKey: string; pluginVersion: string }>;
 
 export class HostedTransportAdapter {
   private readonly client: PlatformRequestClient;
+  private readonly managedChatConfigurations = new WeakMap<ManagedChatTransportTicket, ManagedChatConfiguration>();
   constructor(private readonly options: HostedTransportOptions) { this.client = options.requestClient ?? new PlatformRequestClient(); }
 
   private url(path: string): string { return `${this.options.baseUrl.replace(/\/$/, "")}${path}`; }
@@ -37,13 +40,22 @@ export class HostedTransportAdapter {
     };
   }
 
-  public hasManagedChatConfiguration(): boolean {
-    return this.options.licenseKey().trim().length > 0 && this.options.pluginVersion.trim().length > 0;
+  public beginManagedChatDispatch(): ManagedChatTransportTicket | null {
+    const licenseKey = this.options.licenseKey().trim();
+    const pluginVersion = this.options.pluginVersion.trim();
+    if (!licenseKey || !pluginVersion) return null;
+    const ticket: ManagedChatTransportTicket = Object.freeze({ kind: "managed_chat_transport_ticket" });
+    this.managedChatConfigurations.set(ticket, Object.freeze({ licenseKey, pluginVersion }));
+    return ticket;
   }
 
   request(operation: ManagedTransportOperation) { return this.send(operation); }
   stream(operation: ManagedTransportOperation) { return this.send({ ...operation, method: operation.method ?? "POST" }, {}, true); }
-  streamAcceptedChat(operation: ManagedTransportOperation) { return this.send({ ...operation, method: "POST" }, {}, true, false, true); }
+  streamAcceptedChat(ticket: ManagedChatTransportTicket, operation: ManagedTransportOperation) {
+    const configuration = this.managedChatConfigurations.get(ticket);
+    if (!configuration) return Promise.reject(new Error("Managed Chat transport configuration is unavailable."));
+    return this.send({ ...operation, method: "POST" }, {}, true, false, configuration);
+  }
   job(operation: ManagedTransportOperation) { return this.send(operation, operation.headers ?? {}, false, true); }
 
   async uploadSignedInput(url: string, method: string, headers: Record<string, string>, body: ArrayBuffer, signal?: AbortSignal): Promise<void> {
@@ -59,13 +71,14 @@ export class HostedTransportAdapter {
     return this.client.request({ url, method: "GET", headers: {}, stream: false, preserveResponseHeaders: true, signal });
   }
 
-  private async send(operation: ManagedTransportOperation, extra: Record<string, string> = {}, stream = false, scopedHeaders = false, exposeLicenseHeader = false): Promise<ManagedTransportResult> {
-    const headers: Record<string, string> = scopedHeaders ? { ...extra } : { "x-plugin-version": this.options.pluginVersion, ...extra };
+  private async send(operation: ManagedTransportOperation, extra: Record<string, string> = {}, stream = false, scopedHeaders = false, managedChatConfiguration?: ManagedChatConfiguration): Promise<ManagedTransportResult> {
+    const pluginVersion = managedChatConfiguration?.pluginVersion ?? this.options.pluginVersion;
+    const headers: Record<string, string> = scopedHeaders ? { ...extra } : { "x-plugin-version": pluginVersion, ...extra };
     if (!extra["x-systemsculpt-admission-contract"]) headers["x-systemsculpt-contract"] = MANAGED_CAPABILITY_CONTRACT;
     if (operation.capability) headers["x-systemsculpt-capability"] = operation.capability;
     if (operation.idempotencyKey) headers["Idempotency-Key"] = operation.idempotencyKey;
-    const licenseKey = this.key();
-    if (exposeLicenseHeader && licenseKey) headers["x-license-key"] = licenseKey;
+    const licenseKey = managedChatConfiguration?.licenseKey ?? this.key();
+    if (managedChatConfiguration) headers["x-license-key"] = managedChatConfiguration.licenseKey;
     const response = await this.client.request({
       url: this.url(operation.path), method: operation.method ?? "POST", headers,
       body: operation.body, stream, preserveResponseHeaders: true,

@@ -21,13 +21,18 @@ export type ManagedChatDispatchResult =
   | Readonly<{ kind: "empty"; diagnostic: ManagedChatDiagnostic }>
   | Readonly<{ kind: FailureKind; diagnostic: ManagedChatDiagnostic }>;
 
+export type ManagedChatTool = Readonly<{
+  type: "function";
+  function: Readonly<{ name: string; description?: string; parameters?: Readonly<{ [key: string]: JsonContractValue }> }>;
+}>;
+export type ManagedChatToolChoice = "auto" | "none" | "required";
 export type ManagedChatDispatchInput = Readonly<{
   operation: AcceptedChatOperation;
   snapshot: ChatTranscriptSnapshot;
   phase: "initial" | "continuation";
   continuationIndex: number;
-  tools?: readonly JsonContractValue[];
-  toolChoice?: JsonContractValue;
+  tools?: readonly ManagedChatTool[];
+  toolChoice?: ManagedChatToolChoice;
   signal?: AbortSignal;
 }>;
 
@@ -44,15 +49,57 @@ function statusValue(status: number): number | undefined {
   return Number.isFinite(status) && Number.isInteger(status) ? status : undefined;
 }
 
-function wireContent(content: string | readonly MultiPartContent[] | null): JsonContractValue {
-  if (content === null || typeof content === "string") return content;
+function ownKeysExactly(value: object, allowed: readonly string[]): boolean {
+  const keys = Object.keys(value);
+  return keys.length === allowed.length && keys.every((key) => allowed.includes(key));
+}
+
+function isDataUrl(value: string): boolean {
+  return /^data:[^,]+,[\s\S]*$/.test(value);
+}
+
+function wireContent(content: string | readonly MultiPartContent[]): JsonContractValue | null {
+  if (typeof content === "string") return content;
   const parts: JsonContractValue[] = [];
   for (const part of content) {
-    parts.push(part.type === "text"
-      ? { type: "text", text: part.text }
-      : { type: "image_url", image_url: { url: part.image_url.url } });
+    if (part.type === "text") {
+      if (!ownKeysExactly(part, ["type", "text"]) || typeof part.text !== "string") return null;
+      parts.push({ type: "text", text: part.text });
+    } else {
+      if (!ownKeysExactly(part, ["type", "image_url"]) || !ownKeysExactly(part.image_url, ["url"]) || !isDataUrl(part.image_url.url)) return null;
+      parts.push({ type: "image_url", image_url: { url: part.image_url.url } });
+    }
   }
-  return parts;
+  return parts.length > 0 ? parts : null;
+}
+
+function isJsonValue(value: JsonContractValue): boolean {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return true;
+  if (typeof value === "number") return Number.isFinite(value);
+  if (Array.isArray(value)) return value.every(isJsonValue);
+  return (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null) && Object.values(value).every(isJsonValue);
+}
+
+function isJsonSchemaObject(value: Readonly<{ [key: string]: JsonContractValue }>): boolean {
+  return (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null) && Object.values(value).every(isJsonValue);
+}
+
+function validateTools(tools: readonly ManagedChatTool[]): JsonContractValue[] | null {
+  const serialized: JsonContractValue[] = [];
+  for (const tool of tools) {
+    if (!ownKeysExactly(tool, ["type", "function"]) || tool.type !== "function") return null;
+    const fn = tool.function;
+    const allowed = ["name", ...(typeof fn.description === "undefined" ? [] : ["description"]), ...(typeof fn.parameters === "undefined" ? [] : ["parameters"])];
+    if (!ownKeysExactly(fn, allowed) || typeof fn.name !== "string" || fn.name.length === 0) return null;
+    if (typeof fn.description !== "undefined" && typeof fn.description !== "string") return null;
+    if (typeof fn.parameters !== "undefined" && !isJsonSchemaObject(fn.parameters)) return null;
+    serialized.push({ type: "function", function: {
+      name: fn.name,
+      ...(typeof fn.description === "string" ? { description: fn.description } : {}),
+      ...(fn.parameters ? { parameters: fn.parameters } : {}),
+    } });
+  }
+  return serialized;
 }
 
 function wireMessage(message: Readonly<ChatMessage>): JsonObject | null {
@@ -62,7 +109,9 @@ function wireMessage(message: Readonly<ChatMessage>): JsonObject | null {
     result.content = message.content;
   } else if (message.role === "user") {
     if (message.content === null) return null;
-    result.content = wireContent(message.content);
+    const content = wireContent(message.content);
+    if (content === null) return null;
+    result.content = content;
   } else if (message.role === "tool") {
     if (typeof message.content !== "string" || !message.tool_call_id) return null;
     result.content = message.content;
@@ -84,8 +133,12 @@ function wireMessage(message: Readonly<ChatMessage>): JsonObject | null {
   return result;
 }
 
+function isJsonArray(value: JsonContractValue): value is readonly JsonContractValue[] {
+  return Array.isArray(value);
+}
+
 function asObject(value: JsonContractValue): JsonObject | null {
-  return value !== null && typeof value === "object" && !Array.isArray(value) ? value as JsonObject : null;
+  return value !== null && typeof value === "object" && !isJsonArray(value) ? value as JsonObject : null;
 }
 
 function stringField(object: JsonObject, key: string): string | undefined {
@@ -98,44 +151,88 @@ function finiteNumber(object: JsonObject, key: string): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
+function optionalFiniteNumber(object: JsonObject, key: string): number | undefined | null {
+  if (typeof object[key] === "undefined") return undefined;
+  const value = finiteNumber(object, key);
+  return typeof value === "number" ? value : null;
+}
+
 function normalizeFrame(value: JsonContractValue): readonly ManagedChatRuntimeEvent[] | null {
   const object = asObject(value);
-  if (!object || asObject(object.error ?? null)) return null;
+  if (!object || typeof object.error !== "undefined") return null;
+  if (!isJsonArray(object.choices)) return null;
   const events: ManagedChatRuntimeEvent[] = [];
+  if (typeof object.id !== "undefined" && typeof object.id !== "string") return null;
   const requestId = stringField(object, "id");
   if (requestId) events.push({ kind: "request_id", requestId });
-  const choices = object.choices;
-  if (Array.isArray(choices)) {
-    for (const choiceValue of choices) {
-      const choice = asObject(choiceValue);
-      if (!choice) return null;
+  for (const choiceValue of object.choices) {
+    const choice = asObject(choiceValue);
+    if (!choice) return null;
+    const hasDelta = typeof choice.delta !== "undefined";
+    const hasFinish = typeof choice.finish_reason !== "undefined" && choice.finish_reason !== null;
+    if (!hasDelta && !hasFinish) return null;
+    if (hasDelta) {
       const delta = asObject(choice.delta ?? null);
-      if (delta) {
-        const content = stringField(delta, "content") ?? stringField(delta, "text");
-        if (content) events.push({ kind: "content_delta", text: content });
-        const reasoning = stringField(delta, "reasoning_content");
-        if (reasoning) events.push({ kind: "reasoning_delta", text: reasoning });
-        const calls = delta.tool_calls;
-        if (Array.isArray(calls)) {
-          for (const callValue of calls) {
-            const call = asObject(callValue);
-            if (!call) return null;
-            const index = finiteNumber(call, "index");
-            if (typeof index === "undefined" || !Number.isInteger(index) || index < 0) return null;
-            const fn = asObject(call.function ?? null);
-            events.push({ kind: "tool_call_delta", index, id: stringField(call, "id"), name: fn ? stringField(fn, "name") : undefined, arguments: fn ? stringField(fn, "arguments") : undefined });
+      if (!delta) return null;
+      for (const field of Object.keys(delta)) {
+        if (!["role", "content", "text", "reasoning_content", "tool_calls"].includes(field)) return null;
+      }
+      if (typeof delta.role !== "undefined" && typeof delta.role !== "string") return null;
+      if (typeof delta.content !== "undefined" && typeof delta.content !== "string" && delta.content !== null) return null;
+      if (typeof delta.text !== "undefined" && typeof delta.text !== "string") return null;
+      if (typeof delta.reasoning_content !== "undefined" && typeof delta.reasoning_content !== "string" && delta.reasoning_content !== null) return null;
+      const content = stringField(delta, "content") ?? stringField(delta, "text");
+      if (content) events.push({ kind: "content_delta", text: content });
+      const reasoning = stringField(delta, "reasoning_content");
+      if (reasoning) events.push({ kind: "reasoning_delta", text: reasoning });
+      if (typeof delta.tool_calls !== "undefined") {
+        if (!isJsonArray(delta.tool_calls)) return null;
+        for (const callValue of delta.tool_calls) {
+          const call = asObject(callValue);
+          if (!call) return null;
+          for (const field of Object.keys(call)) if (!["index", "id", "type", "function"].includes(field)) return null;
+          const index = finiteNumber(call, "index");
+          if (typeof index === "undefined" || !Number.isInteger(index) || index < 0) return null;
+          if (typeof call.id !== "undefined" && typeof call.id !== "string") return null;
+          if (typeof call.type !== "undefined" && call.type !== "function") return null;
+          let name: string | undefined;
+          let argumentsDelta: string | undefined;
+          if (typeof call.function !== "undefined") {
+            const fn = asObject(call.function);
+            if (!fn || !Object.keys(fn).every((field) => field === "name" || field === "arguments")) return null;
+            if (typeof fn.name !== "undefined" && typeof fn.name !== "string") return null;
+            if (typeof fn.arguments !== "undefined" && typeof fn.arguments !== "string") return null;
+            name = stringField(fn, "name");
+            argumentsDelta = stringField(fn, "arguments");
+            if (typeof name === "undefined" && typeof argumentsDelta === "undefined") return null;
           }
+          const id = stringField(call, "id");
+          if (typeof id === "undefined" && typeof name === "undefined" && typeof argumentsDelta === "undefined") return null;
+          events.push({ kind: "tool_call_delta", index, ...(id ? { id } : {}), ...(name ? { name } : {}), ...(typeof argumentsDelta === "string" ? { arguments: argumentsDelta } : {}) });
         }
       }
-      const finish = choice.finish_reason;
-      if (typeof finish === "string") events.push({ kind: "finish_reason", reason: finish });
-      else if (finish !== null && typeof finish !== "undefined") return null;
     }
-  } else if (typeof choices !== "undefined") return null;
-  const usage = asObject(object.usage ?? null);
-  if (usage) {
-    const cost = asObject(usage.cost ?? null);
-    events.push({ kind: "usage", promptTokens: finiteNumber(usage, "prompt_tokens"), completionTokens: finiteNumber(usage, "completion_tokens"), totalTokens: finiteNumber(usage, "total_tokens"), costTotal: cost ? finiteNumber(cost, "total") : undefined });
+    if (typeof choice.finish_reason === "string") events.push({ kind: "finish_reason", reason: choice.finish_reason });
+    else if (choice.finish_reason !== null && typeof choice.finish_reason !== "undefined") return null;
+  }
+  if (typeof object.usage !== "undefined" && object.usage !== null) {
+    const usage = asObject(object.usage);
+    if (!usage) return null;
+    for (const field of Object.keys(usage)) if (!["prompt_tokens", "completion_tokens", "total_tokens", "cost"].includes(field)) return null;
+    const promptTokens = optionalFiniteNumber(usage, "prompt_tokens");
+    const completionTokens = optionalFiniteNumber(usage, "completion_tokens");
+    const totalTokens = optionalFiniteNumber(usage, "total_tokens");
+    if (promptTokens === null || completionTokens === null || totalTokens === null) return null;
+    let costTotal: number | undefined;
+    if (typeof usage.cost !== "undefined") {
+      const cost = asObject(usage.cost);
+      if (!cost || !ownKeysExactly(cost, ["total"])) return null;
+      const total = optionalFiniteNumber(cost, "total");
+      if (total === null || typeof total === "undefined") return null;
+      costTotal = total;
+    }
+    if (typeof promptTokens === "undefined" && typeof completionTokens === "undefined" && typeof totalTokens === "undefined" && typeof costTotal === "undefined") return null;
+    events.push({ kind: "usage", ...(typeof promptTokens === "number" ? { promptTokens } : {}), ...(typeof completionTokens === "number" ? { completionTokens } : {}), ...(typeof totalTokens === "number" ? { totalTokens } : {}), ...(typeof costTotal === "number" ? { costTotal } : {}) });
   }
   return events;
 }
@@ -182,7 +279,8 @@ export class ManagedChatRuntimeAdapter {
   }
 
   private async perform(input: ManagedChatDispatchInput): Promise<ManagedChatDispatchResult> {
-    if (!this.client.managedChatConfigurationReady()) return { kind: "transport_failure", diagnostic: {} };
+    const ticket = this.client.beginAcceptedChatDispatch();
+    if (!ticket) return { kind: "transport_failure", diagnostic: {} };
     if (
       !input.operation.durableTurnId || input.continuationIndex < 0 || !Number.isInteger(input.continuationIndex) ||
       (input.phase === "initial" && input.snapshot !== input.operation.initialDurableSnapshot)
@@ -201,11 +299,18 @@ export class ManagedChatRuntimeAdapter {
       stream: true,
       messages,
     };
-    if (input.tools) body.tools = input.tools;
-    if (typeof input.toolChoice !== "undefined") body.tool_choice = input.toolChoice;
+    if (input.tools) {
+      const tools = validateTools(input.tools);
+      if (!tools) return { kind: "transport_failure", diagnostic: {} };
+      body.tools = tools;
+    }
+    if (typeof input.toolChoice !== "undefined") {
+      if (input.toolChoice !== "auto" && input.toolChoice !== "none" && input.toolChoice !== "required") return { kind: "transport_failure", diagnostic: {} };
+      body.tool_choice = input.toolChoice;
+    }
     const key = await managedChatOperationKey(input.operation.durableTurnId, input.phase, input.continuationIndex);
     try {
-      const transport = await this.client.streamAcceptedChat(input.operation.lease, body, key, input.signal);
+      const transport = await this.client.streamAcceptedChat(ticket, input.operation.lease, body, key, input.signal);
       const status = statusValue(transport.response.status);
       const requestId = bounded(transport.diagnostics.requestId, 128);
       const diagnostic: ManagedChatDiagnostic = {
@@ -214,19 +319,20 @@ export class ManagedChatRuntimeAdapter {
       };
       if (!transport.response.ok) return this.statusResult(transport.response.status, transport.diagnostics.errorText, diagnostic);
       return await this.parseStream(transport.response, diagnostic, input.signal);
-    } catch (error) {
-      if (input.signal?.aborted || (error instanceof DOMException && error.name === "AbortError")) return { kind: "aborted", diagnostic: {} };
+    } catch {
+      if (input.signal?.aborted) return { kind: "aborted", diagnostic: {} };
       return { kind: "transport_failure", diagnostic: {} };
     }
   }
 
   private statusResult(status: number, errorText: string, base: ManagedChatDiagnostic): ManagedChatDispatchResult {
-    let code: string | undefined;
+    let rawCode: string | undefined;
     try {
       const parsed: JsonContractValue = JSON.parse(errorText) as JsonContractValue;
       const object = asObject(parsed);
-      code = object ? bounded(stringField(object, "code") ?? null, 64) : undefined;
-    } catch { code = undefined; }
+      rawCode = object ? stringField(object, "code") : undefined;
+    } catch { rawCode = undefined; }
+    const code = bounded(rawCode ?? null, 64);
     const diagnostic: ManagedChatDiagnostic = { ...base, ...(code ? { code } : {}) };
     if (status === 400) return { kind: "capability_request", diagnostic };
     if (status === 401 || status === 403) return { kind: "license", diagnostic };
@@ -241,7 +347,7 @@ export class ManagedChatRuntimeAdapter {
         operation_terminal: "operation_terminal",
         settlement_pending: "settlement_pending",
       };
-      const kind = code ? exact[code] : undefined;
+      const kind = rawCode ? exact[rawCode] : undefined;
       if (kind) return { kind, diagnostic };
     }
     return { kind: "transport_failure", diagnostic };

@@ -1,5 +1,5 @@
 import { ManagedAdmission } from "./ManagedAdmission";
-import { HostedTransportAdapter } from "./adapters/HostedTransportAdapter";
+import { HostedTransportAdapter, type ManagedChatTransportTicket } from "./adapters/HostedTransportAdapter";
 import {
   ManagedAdmissionOutcome, ManagedAllowedLease, ManagedCapabilityAlias, ManagedChatLeaseResult, ManagedLease,
   ManagedRequestContractId, ManagedTransportOperation, ManagedTransportResult,
@@ -34,11 +34,12 @@ export class ManagedCapabilityClient {
   request(operation: ClientOperation) { return this.execute("request", operation); }
   stream(operation: ClientOperation) { return this.execute("stream", operation); }
   job(operation: ClientOperation) { return this.execute("job", operation); }
-  public managedChatConfigurationReady(): boolean {
-    return this.dependencies.transport.hasManagedChatConfiguration();
+  public beginAcceptedChatDispatch(): ManagedChatTransportTicket | null {
+    return this.dependencies.transport.beginManagedChatDispatch();
   }
 
   public streamAcceptedChat(
+    ticket: ManagedChatTransportTicket,
     lease: ManagedAllowedLease,
     body: Readonly<Record<string, import("./ManagedTypes").JsonContractValue>>,
     idempotencyKey: string,
@@ -54,7 +55,7 @@ export class ManagedCapabilityClient {
     ) {
       return Promise.reject(new Error("Accepted managed Chat lease does not match the required contract."));
     }
-    return this.dependencies.transport.streamAcceptedChat({
+    return this.dependencies.transport.streamAcceptedChat(ticket, {
       path: lease.requestContract.request.path,
       method: lease.requestContract.request.method,
       capability: lease.requestContract.capability,
