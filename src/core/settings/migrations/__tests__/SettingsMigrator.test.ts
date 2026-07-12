@@ -1,6 +1,7 @@
 import { DEFAULT_SETTINGS } from "../../../../types";
 import {
   CURRENT_SCHEMA_VERSION,
+  LEGACY_EMBEDDINGS_KEYS_REMOVED_IN_V3,
   LEGACY_KEYS_REMOVED_IN_V1,
   deepMergeDefaults,
   findMissingMigrationVersions,
@@ -113,6 +114,19 @@ describe("migrateSettingsToCurrentSchema", () => {
     }, DEFAULT_SETTINGS);
     expect(result.appliedSteps).toContain("Remove retired managed disclosure acceptance");
     expect(result.settings).not.toHaveProperty("managedDisclosureAcceptance");
+    expect(result.settings.licenseKey).toBe("user-key");
+  });
+
+  it("prunes configurable embeddings provider and retry fields when upgrading schema v2", () => {
+    const raw: Record<string, unknown> = { schemaVersion: 2, licenseKey: "user-key" };
+    for (const key of LEGACY_EMBEDDINGS_KEYS_REMOVED_IN_V3) raw[key] = "legacy-value";
+
+    const result = migrateSettingsToCurrentSchema(raw, DEFAULT_SETTINGS);
+
+    expect(result.appliedSteps).toContain("Remove legacy configurable embeddings provider and retry controls");
+    for (const key of LEGACY_EMBEDDINGS_KEYS_REMOVED_IN_V3) {
+      expect(result.settings).not.toHaveProperty(key);
+    }
     expect(result.settings.licenseKey).toBe("user-key");
   });
 

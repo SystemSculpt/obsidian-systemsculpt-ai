@@ -21,9 +21,6 @@ const createMockManager = (overrides: Record<string, any> = {}) => ({
 const createMockPlugin = (manager = createMockManager()) => ({
   settings: {
     embeddingsEnabled: true,
-    embeddingsProvider: "systemsculpt",
-    embeddingsCustomEndpoint: "",
-    embeddingsCustomModel: "",
     embeddingsExclusions: {},
   },
   getOrCreateEmbeddingsManager: jest.fn().mockReturnValue(manager),
@@ -456,18 +453,12 @@ describe("EmbeddingsView", () => {
     it("generates different config keys for different settings", () => {
       const settings1 = {
         embeddingsEnabled: true,
-        embeddingsProvider: "systemsculpt",
-        embeddingsCustomEndpoint: "",
-        embeddingsCustomModel: "",
-        embeddingsExclusions: {},
+        embeddingsExclusions: { folders: [] },
       };
 
       const settings2 = {
         embeddingsEnabled: true,
-        embeddingsProvider: "custom",
-        embeddingsCustomEndpoint: "http://localhost:1234",
-        embeddingsCustomModel: "text-embedding-3-small",
-        embeddingsExclusions: {},
+        embeddingsExclusions: { folders: ["Private"] },
       };
 
       const key1 = (view as any).getEmbeddingsConfigKey(settings1);
@@ -479,9 +470,6 @@ describe("EmbeddingsView", () => {
     it("generates same config key for same settings", () => {
       const settings = {
         embeddingsEnabled: true,
-        embeddingsProvider: "systemsculpt",
-        embeddingsCustomEndpoint: "",
-        embeddingsCustomModel: "",
         embeddingsExclusions: { folders: [] },
       };
 

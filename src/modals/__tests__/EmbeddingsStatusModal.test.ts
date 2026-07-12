@@ -14,11 +14,6 @@ const createMockManager = (overrides: Record<string, any> = {}) => ({
     needsProcessing: 20,
     failed: 0,
   }),
-  getCurrentNamespaceDescriptor: jest.fn().mockReturnValue({
-    provider: "systemsculpt",
-    model: "text-embedding-3-small",
-    schema: 2,
-  }),
   processVault: jest.fn().mockResolvedValue({ status: "complete" }),
   retryFailedFiles: jest.fn().mockResolvedValue(undefined),
   suspendProcessing: jest.fn(),
@@ -206,52 +201,19 @@ describe("EmbeddingsStatusModal", () => {
     });
   });
 
-  describe("provider info display", () => {
-    it("renders provider name", async () => {
+  describe("managed index display", () => {
+    it("renders the managed index identity", async () => {
       await modal.onOpen();
 
       const providerInfo = (modal as any).providerInfoEl;
-      expect(providerInfo?.textContent).toContain("SystemSculpt");
+      expect(providerInfo?.textContent).toContain("SystemSculpt managed");
     });
 
     it("renders schema version", async () => {
       await modal.onOpen();
 
       const providerInfo = (modal as any).providerInfoEl;
-      expect(providerInfo?.textContent).toContain("v2");
-    });
-
-    it("formats custom provider name", async () => {
-      mockManager.getCurrentNamespaceDescriptor.mockReturnValue({
-        provider: "custom",
-        model: "nomic-embed-text",
-        schema: 2,
-      });
-
-      await modal.onOpen();
-
-      const providerInfo = (modal as any).providerInfoEl;
-      expect(providerInfo?.textContent).toContain("Custom");
-    });
-
-    it("shows model name for custom provider", async () => {
-      mockManager.getCurrentNamespaceDescriptor.mockReturnValue({
-        provider: "custom",
-        model: "nomic-embed-text",
-        schema: 2,
-      });
-
-      await modal.onOpen();
-
-      const providerInfo = (modal as any).providerInfoEl;
-      expect(providerInfo?.textContent).toContain("nomic-embed-text");
-    });
-
-    it("truncates long model names", () => {
-      const longModel = "very-long-model-name-that-exceeds-thirty-characters";
-      const formatted = (modal as any).formatModelName(longModel);
-      expect(formatted.length).toBeLessThanOrEqual(30);
-      expect(formatted.endsWith("...")).toBe(true);
+      expect(providerInfo?.textContent).toContain("v1");
     });
 
     it("shows Ready status when not processing", async () => {
@@ -276,17 +238,17 @@ describe("EmbeddingsStatusModal", () => {
       mockManager.isCurrentlyProcessing.mockReturnValue(false);
       await modal.onOpen();
 
-      expect((modal as any).progressSectionEl?.style.display).toBe("none");
+      expect((modal as any).progressSectionEl?.classList.contains("is-hidden")).toBe(true);
     });
 
     it("shows progress section when processing", async () => {
       mockManager.isCurrentlyProcessing.mockReturnValue(true);
       await modal.onOpen();
 
-      expect((modal as any).progressSectionEl?.style.display).toBe("block");
+      expect((modal as any).progressSectionEl?.classList.contains("is-hidden")).toBe(false);
     });
 
-    it("updates progress bar width", async () => {
+    it("updates progress value", async () => {
       mockManager.isCurrentlyProcessing.mockReturnValue(true);
       mockManager.getStats.mockReturnValue({
         total: 100,
@@ -298,7 +260,7 @@ describe("EmbeddingsStatusModal", () => {
 
       await modal.onOpen();
 
-      expect((modal as any).progressBarEl?.style.width).toBe("50%");
+      expect((modal as any).progressBarEl?.value).toBe(50);
     });
 
     it("updates progress text", async () => {
@@ -322,14 +284,14 @@ describe("EmbeddingsStatusModal", () => {
       mockManager.isCurrentlyProcessing.mockReturnValue(false);
       await modal.onOpen();
 
-      expect((modal as any).processButton?.style.display).toBe("flex");
+      expect((modal as any).processButton?.classList.contains("is-hidden")).toBe(false);
     });
 
     it("hides Process Vault button when processing", async () => {
       mockManager.isCurrentlyProcessing.mockReturnValue(true);
       await modal.onOpen();
 
-      expect((modal as any).processButton?.style.display).toBe("none");
+      expect((modal as any).processButton?.classList.contains("is-hidden")).toBe(true);
     });
 
     it("disables Process Vault button when nothing to process", async () => {
@@ -349,14 +311,14 @@ describe("EmbeddingsStatusModal", () => {
       mockManager.isCurrentlyProcessing.mockReturnValue(true);
       await modal.onOpen();
 
-      expect((modal as any).stopButton?.style.display).toBe("flex");
+      expect((modal as any).stopButton?.classList.contains("is-hidden")).toBe(false);
     });
 
     it("hides Stop button when not processing", async () => {
       mockManager.isCurrentlyProcessing.mockReturnValue(false);
       await modal.onOpen();
 
-      expect((modal as any).stopButton?.style.display).toBe("none");
+      expect((modal as any).stopButton?.classList.contains("is-hidden")).toBe(true);
     });
 
     it("shows Retry Failed button when failed > 0 and not processing", async () => {
@@ -370,7 +332,7 @@ describe("EmbeddingsStatusModal", () => {
       });
       await modal.onOpen();
 
-      expect((modal as any).retryButton?.style.display).toBe("flex");
+      expect((modal as any).retryButton?.classList.contains("is-hidden")).toBe(false);
     });
 
     it("hides Retry Failed button when failed is 0", async () => {
@@ -383,7 +345,7 @@ describe("EmbeddingsStatusModal", () => {
       });
       await modal.onOpen();
 
-      expect((modal as any).retryButton?.style.display).toBe("none");
+      expect((modal as any).retryButton?.classList.contains("is-hidden")).toBe(true);
     });
 
     it("hides Retry Failed button when processing", async () => {
@@ -397,7 +359,7 @@ describe("EmbeddingsStatusModal", () => {
       });
       await modal.onOpen();
 
-      expect((modal as any).retryButton?.style.display).toBe("none");
+      expect((modal as any).retryButton?.classList.contains("is-hidden")).toBe(true);
     });
   });
 
@@ -475,7 +437,7 @@ describe("EmbeddingsStatusModal", () => {
 
       expect((modal as any).isInErrorState).toBe(true);
       expect((modal as any).currentErrorMessage).toBe("Test error");
-      expect((modal as any).errorSectionEl?.style.display).toBe("flex");
+      expect((modal as any).errorSectionEl?.classList.contains("is-hidden")).toBe(false);
     });
 
     it("clears error on recovered event", async () => {
@@ -486,7 +448,7 @@ describe("EmbeddingsStatusModal", () => {
 
       expect((modal as any).isInErrorState).toBe(false);
       expect((modal as any).currentErrorMessage).toBeNull();
-      expect((modal as any).errorSectionEl?.style.display).toBe("none");
+      expect((modal as any).errorSectionEl?.classList.contains("is-hidden")).toBe(true);
     });
 
     it("clears error on processing-start event", async () => {
@@ -551,39 +513,4 @@ describe("EmbeddingsStatusModal", () => {
     });
   });
 
-  describe("formatProviderName", () => {
-    it("formats systemsculpt as SystemSculpt", () => {
-      expect((modal as any).formatProviderName("systemsculpt")).toBe("SystemSculpt");
-    });
-
-    it("formats custom as Custom", () => {
-      expect((modal as any).formatProviderName("custom")).toBe("Custom");
-    });
-
-    it("formats openai as OpenAI", () => {
-      expect((modal as any).formatProviderName("openai")).toBe("OpenAI");
-    });
-
-    it("formats ollama as Ollama", () => {
-      expect((modal as any).formatProviderName("ollama")).toBe("Ollama");
-    });
-
-    it("returns unknown provider as-is", () => {
-      expect((modal as any).formatProviderName("newprovider")).toBe("newprovider");
-    });
-  });
-
-  describe("formatModelName", () => {
-    it("returns model name for short names", () => {
-      expect((modal as any).formatModelName("text-embedding-3-small")).toBe("text-embedding-3-small");
-    });
-
-    it("returns 'Not configured' for unknown", () => {
-      expect((modal as any).formatModelName("unknown")).toBe("Not configured");
-    });
-
-    it("returns 'Not configured' for empty string", () => {
-      expect((modal as any).formatModelName("")).toBe("Not configured");
-    });
-  });
 });

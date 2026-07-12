@@ -1,5 +1,23 @@
 import { DEFAULT_EMBEDDING_MODEL, EMBEDDING_SCHEMA_VERSION } from '../../../constants/embeddings';
 
+export const MANAGED_EMBEDDING_PROVIDER = "systemsculpt" as const;
+export const MANAGED_EMBEDDING_MODEL = "managed" as const;
+export const MANAGED_EMBEDDING_SCHEMA_VERSION = 1 as const;
+export const MANAGED_EMBEDDING_NAMESPACE_PREFIX = "systemsculpt:managed:v1:" as const;
+
+export function buildManagedNamespace(dimension: number): `systemsculpt:managed:v1:${number}` {
+  if (!Number.isInteger(dimension) || dimension <= 0) {
+    throw new Error("Managed embedding dimension must be a positive integer.");
+  }
+  return `${MANAGED_EMBEDDING_NAMESPACE_PREFIX}${dimension}`;
+}
+
+export function isManagedNamespace(namespace: string | null | undefined): boolean {
+  return typeof namespace === "string"
+    && namespace.startsWith(MANAGED_EMBEDDING_NAMESPACE_PREFIX)
+    && parseNamespace(namespace)?.dimension !== null;
+}
+
 export interface ParsedNamespace {
   provider: string;
   model: string;

@@ -560,27 +560,6 @@ export class SettingsManager {
       validatedSettings.embeddingsEnabled = defaultSettings.embeddingsEnabled;
     }
 
-    // Validate embeddings provider selection (protect against manual edits / stale configs)
-    const rawEmbeddingsProvider = (validatedSettings as any).embeddingsProvider;
-    if (rawEmbeddingsProvider !== "systemsculpt" && rawEmbeddingsProvider !== "custom") {
-      const hasCustomEndpoint =
-        typeof validatedSettings.embeddingsCustomEndpoint === "string" &&
-        validatedSettings.embeddingsCustomEndpoint.trim().length > 0;
-      validatedSettings.embeddingsProvider = hasCustomEndpoint ? "custom" : defaultSettings.embeddingsProvider;
-    }
-
-    if (typeof validatedSettings.embeddingsCustomEndpoint !== "string") {
-      validatedSettings.embeddingsCustomEndpoint = defaultSettings.embeddingsCustomEndpoint;
-    }
-
-    if (typeof validatedSettings.embeddingsCustomApiKey !== "string") {
-      validatedSettings.embeddingsCustomApiKey = defaultSettings.embeddingsCustomApiKey;
-    }
-
-    if (typeof validatedSettings.embeddingsCustomModel !== "string") {
-      validatedSettings.embeddingsCustomModel = defaultSettings.embeddingsCustomModel;
-    }
-
     // Validate string settings that should never be null - using a simpler approach
     if (typeof validatedSettings.selectedModelId !== 'string') {
       validatedSettings.selectedModelId =

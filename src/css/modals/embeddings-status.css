@@ -158,10 +158,20 @@
 }
 
 .ss-embeddings-progress-bar {
-  width: 0%;
+  width: 100%;
   height: 100%;
-  background-color: var(--ss-accent);
+  appearance: none;
+  border: 0;
   border-radius: var(--ss-radius-full);
+  overflow: hidden;
+}
+
+.ss-embeddings-progress-bar::-webkit-progress-bar {
+  background-color: var(--ss-line);
+}
+
+.ss-embeddings-progress-bar::-webkit-progress-value {
+  background-color: var(--ss-accent);
   transition: width var(--ss-dur-slow) var(--ss-ease);
 }
 

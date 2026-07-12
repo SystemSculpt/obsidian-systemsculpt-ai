@@ -5,6 +5,7 @@ jest.mock("../embeddings/storage/EmbeddingsStorage", () => {
     clear: jest.fn(),
     getAllVectors: jest.fn(() => []),
     getVectorsByPath: jest.fn(() => []),
+    peekBestNamespaceForPrefix: jest.fn(() => null),
     size: jest.fn(() => 0),
     storeVectors: jest.fn(),
     removeByNamespacePrefix: jest.fn(),
@@ -32,7 +33,8 @@ jest.mock("../embeddings/processing/EmbeddingsProcessor", () => {
     EmbeddingsProcessor: jest.fn().mockImplementation(() => ({
       processFiles: jest.fn(),
       cancel: jest.fn(),
-      setProvider: jest.fn(),
+      setConfig: jest.fn(),
+      cleanup: jest.fn(),
     })),
   };
 });
@@ -47,12 +49,6 @@ function createPluginStub(overrides?: Partial<any>) {
   const settings = {
     vaultInstanceId: "test-vault",
     embeddingsVectorFormatVersion: 2,
-    embeddingsProvider: "systemsculpt",
-    embeddingsCustomEndpoint: "",
-    embeddingsCustomApiKey: "",
-    embeddingsCustomModel: "",
-    embeddingsModel: "",
-    embeddingsBatchSize: 8,
     embeddingsAutoProcess: false,
     embeddingsExclusions: {
       folders: [],
@@ -60,9 +56,7 @@ function createPluginStub(overrides?: Partial<any>) {
       ignoreChatHistory: true,
       respectObsidianExclusions: true,
     },
-    embeddingsRateLimitPerMinute: 30,
     embeddingsEnabled: true,
-    embeddingsQuietPeriodMs: 500,
     licenseKey: "fake-license",
     licenseValid: true,
     serverUrl: "https://api.systemsculpt.com/api/v1",
@@ -88,6 +82,7 @@ function createPluginStub(overrides?: Partial<any>) {
       emit: jest.fn(),
       on: jest.fn(() => jest.fn()),
     },
+    getManagedCapabilityClient: jest.fn(() => ({ request: jest.fn() })),
     ...(overrides || {}),
   };
 }

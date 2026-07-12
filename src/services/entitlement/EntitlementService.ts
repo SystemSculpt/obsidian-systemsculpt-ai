@@ -19,8 +19,8 @@ export type ChatEntitlement = {
 };
 
 /**
- * Single owner of every gating decision (issue #209): chat, embeddings, and
- * recorder/transcription. UI components must consult this service instead of
+ * Single owner of chat and recorder/transcription gating decisions (issue #209).
+ * UI components must consult this service instead of
  * inlining `licenseKey && licenseValid` or deciding "the managed model needs a
  * license" themselves — that scattering is exactly what made a BYOK user with a
  * working custom provider hit a SystemSculpt license wall on Chat (the May 2026
@@ -93,11 +93,6 @@ export class EntitlementService {
   canUseChat(selectedModelId?: string | null, fallbackModelId?: string | null): ChatEntitlement {
     const effectiveId = this.resolveDefaultModel(selectedModelId, fallbackModelId);
     return this.canUseModel(effectiveId) ? { allowed: true } : { allowed: false, reason: "license" };
-  }
-
-  /** Embeddings: the managed/systemsculpt provider needs a license; custom providers never do. */
-  canUseEmbeddings(providerId?: string | null): boolean {
-    return this.providerNeedsLicense(providerId) ? this.hasSystemSculptLicense() : true;
   }
 
   /** Transcription/recorder: same rule — only the systemsculpt provider needs a license. */

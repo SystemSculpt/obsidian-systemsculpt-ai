@@ -4,7 +4,7 @@ import { EMBEDDINGS_VIEW_TYPE } from "../core/plugin/viewTypes";
 import { CHAT_VIEW_TYPE } from "../core/plugin/viewTypes";
 import { SearchResult } from '../services/embeddings/types';
 import type { ChatView } from './chatview/ChatView';
-import { ChatMessage } from '../types';
+import { ChatMessage, SystemSculptSettings } from '../types';
 import { EmbeddingsPendingFilesModal } from '../modals/EmbeddingsPendingFilesModal';
 
 export { EMBEDDINGS_VIEW_TYPE };
@@ -67,7 +67,7 @@ export class EmbeddingsView extends ItemView {
     
     this.setupUI();
     this.registerEvents();
-    this.lastEmbeddingsConfigKey = this.getEmbeddingsConfigKey(this.plugin.settings as any);
+    this.lastEmbeddingsConfigKey = this.getEmbeddingsConfigKey(this.plugin.settings);
     
     // Show empty state initially - no automatic searches
     this.showEmptyState();
@@ -127,9 +127,9 @@ export class EmbeddingsView extends ItemView {
       })
     );
 
-    // Refresh results when embeddings settings change (provider/model/exclusions, etc)
+    // Refresh results when managed indexing settings change.
     this.registerEvent(
-      this.app.workspace.on("systemsculpt:settings-updated", (_oldSettings, newSettings: any) => {
+      this.app.workspace.on("systemsculpt:settings-updated", (_oldSettings, newSettings: SystemSculptSettings) => {
         const nextKey = this.getEmbeddingsConfigKey(newSettings);
         if (nextKey === this.lastEmbeddingsConfigKey) {
           return;
@@ -365,7 +365,7 @@ export class EmbeddingsView extends ItemView {
         setTimeout(() => this.searchForSimilarFromChat(activeChatView), 50);
       }
     } else if (forceRefresh) {
-      // Force refresh current context (e.g. embeddings model/provider switch, vault rename/delete, refocus)
+      // Force refresh current context after an indexing setting or vault change.
       if (activeFile) {
         this.currentFile = activeFile;
         this.currentChatView = null;
@@ -381,17 +381,11 @@ export class EmbeddingsView extends ItemView {
     // If none of the above, preserve current state
   }
 
-  private getEmbeddingsConfigKey(settings: any): string {
-    const provider = String(settings?.embeddingsProvider || "");
-    const endpoint = String(settings?.embeddingsCustomEndpoint || "");
-    const model = String(settings?.embeddingsCustomModel || "");
+  private getEmbeddingsConfigKey(settings: SystemSculptSettings): string {
     const enabled = settings?.embeddingsEnabled ? "1" : "0";
     const exclusions = settings?.embeddingsExclusions ?? {};
     return JSON.stringify({
       enabled,
-      provider,
-      endpoint,
-      model,
       exclusions,
     });
   }
@@ -454,8 +448,8 @@ export class EmbeddingsView extends ItemView {
           return;
         } else {
           this.showProcessingState(
-            "Embeddings not ready for this model",
-            "Your vault has embeddings, but not for the current embeddings provider/model. Run embeddings processing to refresh.",
+            "Managed embeddings are not ready",
+            "Run embeddings processing to build the managed semantic index.",
           );
           return;
         }
@@ -522,8 +516,8 @@ export class EmbeddingsView extends ItemView {
       // Search for similar notes using extracted content with non-blocking search underneath
       if (!hasAnyEmbeddings) {
         this.showProcessingState(
-          "Embeddings not ready for this model",
-          "Your vault has embeddings, but not for the current embeddings provider/model. Run embeddings processing to refresh.",
+          "Managed embeddings are not ready",
+          "Run embeddings processing to build the managed semantic index.",
         );
         return;
       }
@@ -960,16 +954,6 @@ export class EmbeddingsView extends ItemView {
 
       this.showProcessingStatus();
 
-      // Prevent processing when using an incomplete custom provider configuration
-      if (this.plugin.settings.embeddingsProvider === 'custom') {
-        const endpoint = (this.plugin.settings.embeddingsCustomEndpoint || '').trim();
-        const model = (this.plugin.settings.embeddingsCustomModel || this.plugin.settings.embeddingsModel || '').trim();
-        if (!endpoint || !model) {
-          this.showError('Custom embeddings provider is not configured. Set API Endpoint and Model in settings.');
-          return;
-        }
-      }
-
       const result = await manager.processVault((progress) => {
         this.updateProcessingStatus(progress);
       });
@@ -978,12 +962,8 @@ export class EmbeddingsView extends ItemView {
         if (this.currentFile) {
           await this.searchForSimilar(this.currentFile);
         }
-      } else if (result.status === 'cooldown') {
-        this.showError(result.message || 'Embeddings processing is temporarily paused.');
       } else {
-        const retrySeconds = result.retryAt ? Math.max(1, Math.ceil((result.retryAt - Date.now()) / 1000)) : null;
-        const message = result.message || 'Embeddings processing paused due to provider error.';
-        this.showError(retrySeconds ? `${message} Retry in ~${retrySeconds}s.` : message);
+        this.showError(result.message || 'Managed embeddings processing stopped.');
       }
 
     } catch (error) {

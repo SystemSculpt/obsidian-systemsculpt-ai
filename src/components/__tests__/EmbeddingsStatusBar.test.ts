@@ -50,12 +50,10 @@ describe("EmbeddingsStatusBar", () => {
         embeddingsEnabled: true,
       },
       embeddingsManager: {
-        getProcessingStatus: jest.fn().mockResolvedValue({
-          processedCount: 50,
-          totalCount: 100,
-          isProcessing: false,
-        }),
-        on: jest.fn().mockReturnValue(jest.fn()),
+        awaitReady: jest.fn().mockResolvedValue(undefined),
+        isCurrentlyProcessing: jest.fn().mockReturnValue(false),
+        getStats: jest.fn().mockReturnValue({ total: 100, processed: 50, present: 50, needsProcessing: 50, failed: 0 }),
+        hasAnyEmbeddings: jest.fn().mockReturnValue(true),
       },
       emitter: {
         on: jest.fn().mockReturnValue(jest.fn()),

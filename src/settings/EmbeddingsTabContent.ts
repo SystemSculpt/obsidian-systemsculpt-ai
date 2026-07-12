@@ -43,9 +43,9 @@ async function renderCoreSettingsSection(containerEl: HTMLElement, tabInstance: 
             plugin.embeddingsStatusBar?.startMonitoring();
             try {
               plugin.getOrCreateEmbeddingsManager();
-            } catch (error: any) {
-              const message = error?.message || error || "Failed to initialize embeddings.";
-              new Notice(typeof message === "string" ? message : "Failed to initialize embeddings.");
+            } catch (error: unknown) {
+              const message = error instanceof Error ? error.message : "Failed to initialize embeddings.";
+              new Notice(message);
             }
           } else {
             new Notice("Embeddings disabled.");
@@ -60,19 +60,6 @@ async function renderCoreSettingsSection(containerEl: HTMLElement, tabInstance: 
   if (!enabled) {
     return false;
   }
-
-  if ((plugin.settings.embeddingsProvider || "systemsculpt") !== "systemsculpt") {
-    plugin.settings.embeddingsProvider = "systemsculpt";
-    await plugin.getSettingsManager().updateSettings({ embeddingsProvider: "systemsculpt" });
-  }
-
-  new Setting(containerEl)
-    .setName("Embeddings execution")
-    .setDesc(
-      plugin.settings.licenseKey?.trim()
-        ? "Embeddings always run through SystemSculpt across desktop and mobile."
-        : "Embeddings run through SystemSculpt and require an active SystemSculpt license."
-    );
 
   return true;
 }
@@ -109,11 +96,11 @@ async function renderProcessingSection(containerEl: HTMLElement, tabInstance: Sy
         button.setDisabled(true);
         try {
           const manager = plugin.getOrCreateEmbeddingsManager();
-          await manager.awaitReady?.();
+          await manager.awaitReady();
           new EmbeddingsPendingFilesModal(plugin.app, plugin).open();
-        } catch (error: any) {
-          const message = error?.message || error || "Unable to open remaining files.";
-          new Notice(typeof message === "string" ? message : "Unable to open remaining files.");
+        } catch (error: unknown) {
+          const message = error instanceof Error ? error.message : "Unable to open remaining files.";
+          new Notice(message);
         } finally {
           button.setDisabled(false);
         }
@@ -149,8 +136,8 @@ async function renderProcessingSection(containerEl: HTMLElement, tabInstance: Sy
               new Notice("No embeddings data to clear.");
             }
             await refreshStatus();
-          } catch (error: any) {
-            new Notice(`Failed to clear embeddings data: ${error?.message || error}`);
+          } catch (error: unknown) {
+            new Notice(`Failed to clear embeddings data: ${error instanceof Error ? error.message : "Unknown error"}`);
           }
         });
     });

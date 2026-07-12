@@ -851,20 +851,20 @@ Without dedicated logs, clear reproduction details are the quickest path to a fi
       }
     });
 
-    // User-visible: force refresh embeddings for current provider/model/schema
+    // User-visible: rebuild the immutable managed index.
     this.plugin.addCommand({
       id: "rebuild-embeddings-current-model",
-      name: "Rebuild Embeddings (Current Model)",
+      name: "Rebuild Managed Embeddings",
       checkCallback: (checking: boolean) => {
         // Only show if embeddings are enabled
         const enabled = this.plugin.settings.embeddingsEnabled;
         if (!enabled) return false;
         if (!checking) {
-          (async () => {
+          void (async () => {
             try {
               const { confirmed } = await showConfirm(
                 this.app,
-                "This will delete and rebuild embeddings for the current provider/model/schema only.",
+                "This will delete and rebuild the managed embeddings index.",
                 {
                   title: "Rebuild Embeddings",
                   primaryButton: "Rebuild",
@@ -873,12 +873,13 @@ Without dedicated logs, clear reproduction details are the quickest path to a fi
                 }
               );
               if (!confirmed) return;
-              new Notice('Rebuilding embeddings for current model…', 4000);
+              new Notice('Rebuilding managed embeddings…', 4000);
               const manager = this.plugin.getOrCreateEmbeddingsManager();
               await manager.forceRefreshCurrentNamespace();
               new Notice('Embeddings rebuild complete.', 4000);
-            } catch (e: any) {
-              new Notice(`Failed to rebuild embeddings: ${e?.message || e}`, 8000);
+            } catch (error: unknown) {
+              const message = error instanceof Error ? error.message : String(error);
+              new Notice(`Failed to rebuild embeddings: ${message}`, 8000);
             }
           })();
         }
@@ -889,14 +890,8 @@ Without dedicated logs, clear reproduction details are the quickest path to a fi
 
   private async showEmbeddingsDatabaseStats(): Promise<void> {
     try {
-      const { Notice } = require("obsidian");
-      
       // Get embeddings manager for stats
       const embeddingsManager = this.plugin.getOrCreateEmbeddingsManager();
-      if (!embeddingsManager) {
-        new Notice("Embeddings manager not available", 5000);
-        return;
-      }
       
       // Get basic stats from embeddings manager
       const isProcessing = embeddingsManager.isCurrentlyProcessing();
@@ -914,9 +909,9 @@ Without dedicated logs, clear reproduction details are the quickest path to a fi
       // Show user-friendly summary
       new Notice(statsText, 8000);
       
-    } catch (error) {
-      const { Notice } = require("obsidian");
-      new Notice(`Error getting database stats: ${error.message}`, 5000);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      new Notice(`Error getting database stats: ${message}`, 5000);
     }
   }
 

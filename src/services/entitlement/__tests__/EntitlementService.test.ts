@@ -1,6 +1,6 @@
 /**
  * Issue #209 — the entitlement/gating service is the single owner of every
- * gating decision (chat, embeddings, recorder/transcription). UI must never
+ * gating decision for chat and recorder/transcription. UI must never
  * inline `licenseKey && licenseValid` or decide "managed needs a license"
  * itself — it asks this service.
  *
@@ -133,11 +133,8 @@ describe("EntitlementService — canUseChat (the bug surface)", () => {
   });
 });
 
-describe("EntitlementService — feature gates (embeddings, transcription)", () => {
+describe("EntitlementService — transcription feature gate", () => {
   it("gates the managed/systemsculpt provider on a license but never a custom provider", () => {
-    expect(entitlement(LICENSED).canUseEmbeddings("systemsculpt")).toBe(true);
-    expect(entitlement({}).canUseEmbeddings("systemsculpt")).toBe(false);
-    expect(entitlement({}).canUseEmbeddings("openai")).toBe(true);
 
     expect(entitlement(LICENSED).canUseTranscription("systemsculpt")).toBe(true);
     expect(entitlement({}).canUseTranscription("systemsculpt")).toBe(false);

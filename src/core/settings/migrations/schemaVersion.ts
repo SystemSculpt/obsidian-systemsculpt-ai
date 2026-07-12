@@ -10,5 +10,6 @@
  *  - 0: pre-versioning data (no `schemaVersion` field). Migrated on first load.
  *  - 1: schema versioning introduced; legacy/dead keys pruned (see #212).
  *  - 2: retired client-side managed disclosure acceptance removed.
+ *  - 3: legacy configurable embeddings provider and retry controls removed.
  */
-export const CURRENT_SCHEMA_VERSION = 2;
+export const CURRENT_SCHEMA_VERSION = 3;

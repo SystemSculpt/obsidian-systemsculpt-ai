@@ -84,9 +84,7 @@ export class LicenseService {
           lastValidated: Date.now(),
         });
 
-        // Reset embeddings cooldown so user can immediately use embeddings after fixing their license
         try {
-          this.plugin.embeddingsManager?.resetLicenseCooldown();
         } catch {}
 
         return true;

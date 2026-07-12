@@ -1,7 +1,7 @@
 import { Component } from "obsidian";
-import { EMBEDDING_SCHEMA_VERSION } from "../constants/embeddings";
 import type SystemSculptPlugin from "../main";
 import { EmbeddingsStatusModal } from "../modals/EmbeddingsStatusModal";
+import type { EmbeddingsManager } from "../services/embeddings/EmbeddingsManager";
 
 interface CachedStatus {
   /** Files that have embeddings in the current namespace (may still be sealing). */
@@ -185,11 +185,7 @@ export class EmbeddingsStatusBar extends Component {
       await this.refreshCachedStatus(manager);
 
       const stats = this.cachedStatus;
-      const namespaceDescriptor = (manager as any).getCurrentNamespaceDescriptor?.() || {
-        provider: "unknown",
-        model: "unknown",
-        schema: EMBEDDING_SCHEMA_VERSION,
-      };
+      const namespaceLabel = "managed • v1";
 
       if (!stats) {
         this.scheduleUpdates(this.IDLE_INTERVAL_MS);
@@ -237,9 +233,7 @@ export class EmbeddingsStatusBar extends Component {
             ? ` • sealed ${this.formatCompact(safeProcessed)}/${this.formatCompact(totalFiles)}`
             : "";
         const failedSuffix = failedFiles > 0 ? ` • ${failedFiles} failed` : "";
-        this.statusBarEl.title = namespaceDescriptor
-          ? `Embeddings processing • ${this.formatNamespaceInfo(namespaceDescriptor)} • ${countsLabel}${sealSuffix}${failedSuffix}`
-          : `Embeddings processing • ${countsLabel}${sealSuffix}${failedSuffix}`;
+        this.statusBarEl.title = `Embeddings processing • ${namespaceLabel} • ${countsLabel}${sealSuffix}${failedSuffix}`;
         return;
       }
 
@@ -249,9 +243,7 @@ export class EmbeddingsStatusBar extends Component {
         const mainText = compactInlineCounts || (totalFiles ? `${this.formatCompact(totalFiles)} files` : "ready");
         this.setMainText(mainText, `Embeddings ready ${mainText}`);
         this.updateDetail(null);
-        this.statusBarEl.title = namespaceDescriptor
-          ? `Embeddings ready • ${this.formatNamespaceInfo(namespaceDescriptor)} • ${countsLabel || (totalFiles ? `${this.formatCompact(totalFiles)} files` : "")}`
-          : `Embeddings ready • ${countsLabel || (totalFiles ? `${this.formatCompact(totalFiles)} files` : "")}`;
+        this.statusBarEl.title = `Embeddings ready • ${namespaceLabel} • ${countsLabel || (totalFiles ? `${this.formatCompact(totalFiles)} files` : "")}`;
         return;
       }
 
@@ -263,9 +255,7 @@ export class EmbeddingsStatusBar extends Component {
           ? ` • sealed ${this.formatCompact(safeProcessed)}/${this.formatCompact(totalFiles)}`
           : "";
       const failedSuffix = failedFiles > 0 ? ` • ${failedFiles} failed (click to retry)` : "";
-      this.statusBarEl.title = namespaceDescriptor
-        ? `Embeddings coverage • ${this.formatNamespaceInfo(namespaceDescriptor)} • ${countsLabel}${sealSuffix}${failedSuffix}`
-        : `Embeddings coverage • ${countsLabel}${sealSuffix}${failedSuffix}`;
+      this.statusBarEl.title = `Embeddings coverage • ${namespaceLabel} • ${countsLabel}${sealSuffix}${failedSuffix}`;
     } catch {
       this.scheduleUpdates(this.IDLE_INTERVAL_MS);
       this.setMainText("idle", "Embeddings idle");
@@ -273,7 +263,7 @@ export class EmbeddingsStatusBar extends Component {
     }
   }
 
-  private async refreshCachedStatus(manager: any): Promise<void> {
+  private async refreshCachedStatus(manager: EmbeddingsManager): Promise<void> {
     const now = Date.now();
     if (!this.isFirstUpdate && this.cachedStatus && now - this.cachedStatus.lastUpdate < this.CACHE_DURATION) {
       return;
@@ -282,7 +272,7 @@ export class EmbeddingsStatusBar extends Component {
     this.isFirstUpdate = false;
 
     try {
-      await manager.awaitReady?.();
+      await manager.awaitReady();
     } catch {
     }
 
@@ -295,9 +285,9 @@ export class EmbeddingsStatusBar extends Component {
     let sealedPercentage: number | null = null;
 
     try {
-      isProcessing = !!manager.isCurrentlyProcessing?.();
-      const stats = manager.getStats?.();
-      if (stats && typeof stats.total === "number") {
+      isProcessing = manager.isCurrentlyProcessing();
+      const stats = manager.getStats();
+      if (typeof stats.total === "number") {
         totalFiles = Math.max(0, stats.total);
         processedFiles = Math.min(Math.max(0, stats.processed || 0), totalFiles);
         presentFiles = Math.min(Math.max(0, stats.present || 0), totalFiles);
@@ -308,7 +298,7 @@ export class EmbeddingsStatusBar extends Component {
         presentPercentage = Math.max(0, Math.min(100, Math.round((presentFiles / totalFiles) * 100)));
         sealedPercentage = Math.max(0, Math.min(100, Math.round((processedFiles / totalFiles) * 100)));
       } else {
-        presentPercentage = manager.hasAnyEmbeddings?.() ? 100 : null;
+        presentPercentage = manager.hasAnyEmbeddings() ? 100 : null;
         sealedPercentage = presentPercentage;
       }
     } catch {
@@ -572,13 +562,6 @@ export class EmbeddingsStatusBar extends Component {
 
   private updateDetail(text: string | null): void {
     this.detailEl.textContent = text ? ` • ${text}` : "";
-  }
-
-  private formatNamespaceInfo(descriptor: { provider: string; model: string; schema: number }): string {
-    if (descriptor.provider === "systemsculpt") {
-      return `${descriptor.provider} • v${descriptor.schema}`;
-    }
-    return `${descriptor.provider} • ${descriptor.model} • v${descriptor.schema}`;
   }
 
   private summarizeErrorMessage(

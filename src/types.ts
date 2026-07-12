@@ -355,9 +355,8 @@ export interface SystemSculptSettings {
 
   /**
    * Embeddings settings for the new embeddings system
-   */
+  */
   embeddingsEnabled: boolean;
-  embeddingsModel: string;
   embeddingsAutoProcess: boolean;
   embeddingsExclusions: {
     folders: string[];
@@ -365,22 +364,6 @@ export interface SystemSculptSettings {
     ignoreChatHistory: boolean;
     respectObsidianExclusions: boolean;
   };
-  
-  /**
-   * Embeddings provider configuration
-   */
-  embeddingsProvider: 'systemsculpt' | 'custom';
-  embeddingsCustomEndpoint?: string;
-  embeddingsCustomApiKey?: string;
-  embeddingsCustomModel?: string;
-  
-  /**
-   * Configurable processing settings
-   */
-  embeddingsBatchSize?: number; // Number of embeddings to process in parallel
-  embeddingsRateLimitPerMinute?: number; // Maximum requests per minute
-  /** Quiet period after edits before re-embedding on modify events (ms) */
-  embeddingsQuietPeriodMs?: number;
   /**
    * When true (default), persist a portable copy of the embedding index into the
    * synced vault (`.systemsculpt/embeddings/`) so Obsidian Sync/backup restores
@@ -388,19 +371,11 @@ export interface SystemSculptSettings {
    */
   embeddingsPortableIndex?: boolean;
   /**
-   * Set true when a bulk rebuild is interrupted by a non-license fatal error
-   * (e.g. a sustained rate limit). Persisted so the rebuild resumes on the next
-   * load even when autoProcess is OFF — the durable per-file completeness markers
-   * make the resumed run skip already-embedded files. Cleared on a clean vault
-   * completion. See #208 / #127.
+   * Set true while a managed bulk rebuild is incomplete. On the next load the
+   * durable per-file completeness markers let the run resume without repeating
+   * completed files. Cleared after a clean vault completion.
    */
   embeddingsRebuildPending?: boolean;
-  /**
-   * Earliest epoch-ms at which an interrupted rebuild should resume, derived from
-   * the server's Retry-After cooldown. Honored on the next load so resume waits
-   * out the cooldown instead of immediately re-hitting the rate limit. 0 = ASAP.
-   */
-  embeddingsRebuildRetryAt?: number;
   // Embeddings search behavior settings removed; use internal defaults
   
   /**
@@ -599,9 +574,8 @@ Raw transcript:`,
 
   /**
    * Embeddings defaults
-   */
+  */
   embeddingsEnabled: false,
-  embeddingsModel: "openrouter/openai/text-embedding-3-small",
   embeddingsAutoProcess: true,
   embeddingsExclusions: {
     folders: [],
@@ -609,16 +583,8 @@ Raw transcript:`,
     ignoreChatHistory: true,
     respectObsidianExclusions: true
   },
-  embeddingsProvider: 'systemsculpt',
-  embeddingsCustomEndpoint: '',
-  embeddingsCustomApiKey: '',
-  embeddingsCustomModel: '',
-  embeddingsBatchSize: 20, // Optimized batch size for parallel processing
-  embeddingsRateLimitPerMinute: 50, // Default rate limiting
-  embeddingsQuietPeriodMs: 1200,
   embeddingsPortableIndex: true,
   embeddingsRebuildPending: false,
-  embeddingsRebuildRetryAt: 0,
   // Search behavior defaults removed; handled internally
   
   /**

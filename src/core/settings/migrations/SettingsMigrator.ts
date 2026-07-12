@@ -37,6 +37,18 @@ export const LEGACY_KEYS_REMOVED_IN_V1: readonly string[] = [
   "showVideoRecordingPermissionPopup",
 ];
 
+export const LEGACY_EMBEDDINGS_KEYS_REMOVED_IN_V3: readonly string[] = [
+  "embeddingsModel",
+  "embeddingsProvider",
+  "embeddingsCustomEndpoint",
+  "embeddingsCustomApiKey",
+  "embeddingsCustomModel",
+  "embeddingsBatchSize",
+  "embeddingsRateLimitPerMinute",
+  "embeddingsQuietPeriodMs",
+  "embeddingsRebuildRetryAt",
+];
+
 export interface SettingsMigrationStep {
   /** The schema version this step upgrades the settings TO (from `to - 1`). */
   readonly to: number;
@@ -85,6 +97,17 @@ export const SETTINGS_MIGRATIONS: readonly SettingsMigrationStep[] = [
     migrate: (settings) => {
       const next = { ...settings };
       delete next.managedDisclosureAcceptance;
+      return next;
+    },
+  },
+  {
+    to: 3,
+    describe: "Remove legacy configurable embeddings provider and retry controls",
+    migrate: (settings) => {
+      const next = { ...settings };
+      for (const key of LEGACY_EMBEDDINGS_KEYS_REMOVED_IN_V3) {
+        delete next[key];
+      }
       return next;
     },
   },

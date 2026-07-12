@@ -221,26 +221,6 @@ export default class SystemSculptPlugin extends Plugin {
    */
   public getOrCreateEmbeddingsManager(): EmbeddingsManager {
     if (!this.embeddingsManager) {
-      // Validate prerequisites based on provider
-      const provider = (this.settings as any).embeddingsProvider || "systemsculpt";
-      if (provider === 'systemsculpt') {
-        // Route through the single entitlement owner (#209) — no inline license check.
-        if (!this.getEntitlementService().canUseEmbeddings(provider)) {
-          throw new Error('Embeddings require an active SystemSculpt license. Validate your license in settings.');
-        }
-      } else if (provider === 'custom') {
-        // Custom embeddings do not depend on the hosted SystemSculpt API base URL.
-        const endpoint = (this.settings.embeddingsCustomEndpoint || '').trim();
-        const model = (this.settings.embeddingsCustomModel || this.settings.embeddingsModel || '').trim();
-        if (!endpoint || !model) {
-          throw new Error('Custom embeddings provider is not configured. Set API Endpoint and Model in settings.');
-        }
-      } else {
-        throw new Error(
-          `Unknown embeddings provider: ${String(provider)}. Open SystemSculpt → Settings → Embeddings and select "SystemSculpt" or "Custom provider".`
-        );
-      }
-
       this.embeddingsManager = new EmbeddingsManager(this.app, this);
 
       // Initialize in background if not already done
@@ -252,9 +232,6 @@ export default class SystemSculptPlugin extends Plugin {
             const logger = this.getLogger();
             logger.error("Embeddings manager background initialization failed", error, {
               source: "SystemSculptPlugin",
-              metadata: {
-                provider,
-              },
             });
           });
       }
@@ -2418,7 +2395,7 @@ export default class SystemSculptPlugin extends Plugin {
   }
 
   /**
-   * The single owner of gating decisions (chat/embeddings/recorder) — #209.
+   * The single owner of chat and recorder gating decisions — #209.
    * Stateless and memoized: it reads live settings, so callers never hold a
    * stale license view. UI must ask this instead of inlining license checks.
    */

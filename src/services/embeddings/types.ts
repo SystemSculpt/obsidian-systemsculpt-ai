@@ -97,7 +97,8 @@ export interface ProcessingResult {
   completed: number;
   failed: number;
   failedPaths: string[];
-  fatalError: import('./providers/ProviderError').EmbeddingsProviderError | null;
+  cancelled: boolean;
+  fatalError: import('./providers/ManagedEmbeddingsAdapter').ManagedEmbeddingsError | null;
   failedDetails?: Record<string, FailedProcessingDetail>;
 }
 
@@ -124,42 +125,20 @@ export interface EmbeddingBatchMetadata {
 export interface EmbeddingsGenerateOptions {
   inputType?: 'document' | 'query';
   batchMetadata?: EmbeddingBatchMetadata;
+  idempotencyKey: string;
+  signal?: AbortSignal;
 }
 
 export interface EmbeddingsProvider {
-  readonly id: string;
-  readonly name: string;
-  readonly supportsModels: boolean;
-  /** Best-effort hint of the embedding vector dimension produced by this provider. */
+  readonly id: 'systemsculpt';
+  readonly model: 'managed';
   expectedDimension?: number;
-
-  /**
-   * Returns one slot per input text, in order. A slot is `null` when the
-   * provider produced no vector for that input (e.g. a whitespace-only chunk
-   * that must not be sent to the API). Callers MUST pair `result[i]` with
-   * `texts[i]` and skip `null` slots — never assume a 1:1 dense array.
-   */
-  generateEmbeddings(texts: string[], options?: EmbeddingsGenerateOptions): Promise<(number[] | null)[]>;
-  validateConfiguration(): Promise<boolean>;
-  getModels?(): Promise<string[]>;
-  /**
-   * Maximum number of texts the provider accepts per embeddings request.
-   * Implementations should return a conservative limit; callers will fall back
-   * to sensible defaults when undefined.
-   */
-  getMaxBatchSize?(): number;
-}
-
-export interface EmbeddingsProviderConfig {
-  providerId: 'systemsculpt' | 'custom';
-  customEndpoint?: string;
-  customApiKey?: string;
-  customModel?: string;
-  model: string;
+  activeNamespace?: `systemsculpt:managed:v1:${number}`;
+  generateEmbeddings(texts: string[], options: EmbeddingsGenerateOptions): Promise<number[][]>;
+  getMaxBatchSize(): number;
 }
 
 export interface EmbeddingsManagerConfig {
-  provider: EmbeddingsProviderConfig;
   batchSize: number;
   maxConcurrency: number;
   autoProcess: boolean;

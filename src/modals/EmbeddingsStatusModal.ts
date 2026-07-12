@@ -1,7 +1,6 @@
 import { App, setIcon, Notice } from "obsidian";
 import type SystemSculptPlugin from "../main";
 import { StandardModal } from "../core/ui/modals/standard/StandardModal";
-import { EMBEDDING_SCHEMA_VERSION } from "../constants/embeddings";
 import { EmbeddingsPendingFilesModal } from "./EmbeddingsPendingFilesModal";
 
 interface EmbeddingsStats {
@@ -10,12 +9,6 @@ interface EmbeddingsStats {
   present: number;
   needsProcessing: number;
   failed: number;
-}
-
-interface NamespaceDescriptor {
-  provider: string;
-  model: string;
-  schema: number;
 }
 
 export class EmbeddingsStatusModal extends StandardModal {
@@ -27,7 +20,7 @@ export class EmbeddingsStatusModal extends StandardModal {
   private providerInfoEl: HTMLElement | null = null;
   private statsGridEl: HTMLElement | null = null;
   private progressSectionEl: HTMLElement | null = null;
-  private progressBarEl: HTMLElement | null = null;
+  private progressBarEl: HTMLProgressElement | null = null;
   private progressTextEl: HTMLElement | null = null;
   private errorSectionEl: HTMLElement | null = null;
   private errorTextEl: HTMLElement | null = null;
@@ -50,7 +43,7 @@ export class EmbeddingsStatusModal extends StandardModal {
 
     this.setSize("medium");
     this.modalEl.addClass("systemsculpt-embeddings-status-modal");
-    this.addTitle("Embeddings Status", "Real-time view of your semantic search index");
+    this.addTitle("Embeddings Status", "Your managed semantic index");
 
     this.buildModalContent();
     this.setupEventListeners();
@@ -72,18 +65,19 @@ export class EmbeddingsStatusModal extends StandardModal {
     this.statsGridEl = this.statusContainerEl.createDiv({ cls: "ss-embeddings-stats-grid" });
 
     this.progressSectionEl = this.statusContainerEl.createDiv({ cls: "ss-embeddings-progress-section" });
-    this.progressSectionEl.style.display = "none";
+    this.progressSectionEl.addClass("is-hidden");
 
     const progressHeader = this.progressSectionEl.createDiv({ cls: "ss-embeddings-progress-header" });
     const progressIcon = progressHeader.createSpan({ cls: "ss-embeddings-progress-icon" });
     setIcon(progressIcon, "loader");
     this.progressTextEl = progressHeader.createSpan({ cls: "ss-embeddings-progress-text", text: "Processing..." });
 
-    const progressTrack = this.progressSectionEl.createDiv({ cls: "ss-embeddings-progress-track" });
-    this.progressBarEl = progressTrack.createDiv({ cls: "ss-embeddings-progress-bar" });
+    this.progressBarEl = this.progressSectionEl.createEl("progress", { cls: "ss-embeddings-progress-bar" });
+    this.progressBarEl.max = 100;
+    this.progressBarEl.value = 0;
 
     this.errorSectionEl = this.statusContainerEl.createDiv({ cls: "ss-embeddings-error-section" });
-    this.errorSectionEl.style.display = "none";
+    this.errorSectionEl.addClass("is-hidden");
     const errorIcon = this.errorSectionEl.createSpan({ cls: "ss-embeddings-error-icon" });
     setIcon(errorIcon, "alert-triangle");
     this.errorTextEl = this.errorSectionEl.createSpan({ cls: "ss-embeddings-error-text" });
@@ -114,7 +108,7 @@ export class EmbeddingsStatusModal extends StandardModal {
     const retryIcon = this.retryButton.createSpan({ cls: "ss-embeddings-action-icon" });
     setIcon(retryIcon, "refresh-cw");
     this.retryButton.appendText("Retry Failed");
-    this.retryButton.style.display = "none";
+    this.retryButton.addClass("is-hidden");
     this.retryButton.addEventListener("click", () => this.retryFailedFiles());
 
     this.stopButton = this.actionsContainerEl.createEl("button", {
@@ -123,14 +117,13 @@ export class EmbeddingsStatusModal extends StandardModal {
     const stopIcon = this.stopButton.createSpan({ cls: "ss-embeddings-action-icon" });
     setIcon(stopIcon, "square");
     this.stopButton.appendText("Stop");
-    this.stopButton.style.display = "none";
+    this.stopButton.addClass("is-hidden");
     this.stopButton.addEventListener("click", () => this.stopProcessing());
   }
 
   private setupEventListeners(): void {
     try {
-      const emitter = (this.plugin as any).emitter;
-      if (!emitter || typeof emitter.on !== "function") return;
+      const emitter = this.plugin.emitter;
 
       this.unsubscribes.push(
         emitter.on("embeddings:processing-start", () => {
@@ -152,8 +145,8 @@ export class EmbeddingsStatusModal extends StandardModal {
       );
 
       this.unsubscribes.push(
-        emitter.on("embeddings:error", (payload: any) => {
-          const message = payload?.error?.message || "An error occurred";
+        emitter.on("embeddings:error", (payload: unknown) => {
+          const message = this.readErrorMessage(payload);
           this.displayError(message);
         })
       );
@@ -200,19 +193,14 @@ export class EmbeddingsStatusModal extends StandardModal {
     }
 
     try {
-      await manager.awaitReady?.();
+      await manager.awaitReady();
     } catch {
     }
 
-    const isProcessing = manager.isCurrentlyProcessing?.() ?? false;
-    const stats = manager.getStats?.() ?? { total: 0, processed: 0, present: 0, needsProcessing: 0, failed: 0 };
-    const namespaceDescriptor = (manager as any).getCurrentNamespaceDescriptor?.() ?? {
-      provider: "unknown",
-      model: "unknown",
-      schema: EMBEDDING_SCHEMA_VERSION
-    };
+    const isProcessing = manager.isCurrentlyProcessing();
+    const stats = manager.getStats();
 
-    this.renderProviderInfo(namespaceDescriptor, isProcessing);
+    this.renderManagedInfo(isProcessing);
     this.renderStats(stats, isProcessing);
     this.renderProgress(stats, isProcessing);
     this.updateActionButtons(isProcessing, stats);
@@ -238,7 +226,7 @@ export class EmbeddingsStatusModal extends StandardModal {
     }
 
     if (this.progressSectionEl) {
-      this.progressSectionEl.style.display = "none";
+      this.progressSectionEl.addClass("is-hidden");
     }
 
     if (this.processButton) {
@@ -246,13 +234,13 @@ export class EmbeddingsStatusModal extends StandardModal {
     }
   }
 
-  private renderProviderInfo(descriptor: NamespaceDescriptor, isProcessing: boolean): void {
+  private renderManagedInfo(isProcessing: boolean): void {
     if (!this.providerInfoEl) return;
     this.providerInfoEl.empty();
 
     const headerRow = this.providerInfoEl.createDiv({ cls: "ss-embeddings-provider-header" });
 
-    const statusIndicator = headerRow.createDiv({
+    headerRow.createDiv({
       cls: `ss-embeddings-status-indicator ${isProcessing ? "ss-embeddings-status-indicator--active" : "ss-embeddings-status-indicator--idle"}`
     });
 
@@ -261,11 +249,8 @@ export class EmbeddingsStatusModal extends StandardModal {
 
     const detailsGrid = this.providerInfoEl.createDiv({ cls: "ss-embeddings-provider-details" });
 
-    this.createDetailItem(detailsGrid, "cpu", "Service", this.formatProviderName(descriptor.provider));
-    if (descriptor.provider !== "systemsculpt") {
-      this.createDetailItem(detailsGrid, "box", "Model", this.formatModelName(descriptor.model));
-    }
-    this.createDetailItem(detailsGrid, "tag", "Schema", `v${descriptor.schema}`);
+    this.createDetailItem(detailsGrid, "cpu", "Index", "SystemSculpt managed");
+    this.createDetailItem(detailsGrid, "tag", "Schema", "v1");
   }
 
   private createDetailItem(parent: HTMLElement, icon: string, label: string, value: string): void {
@@ -304,14 +289,14 @@ export class EmbeddingsStatusModal extends StandardModal {
     if (!this.progressSectionEl || !this.progressBarEl || !this.progressTextEl) return;
 
     if (!isProcessing) {
-      this.progressSectionEl.style.display = "none";
+      this.progressSectionEl.addClass("is-hidden");
       return;
     }
 
-    this.progressSectionEl.style.display = "block";
+    this.progressSectionEl.removeClass("is-hidden");
 
     const percentage = stats.total > 0 ? Math.round((stats.processed / stats.total) * 100) : 0;
-    this.progressBarEl.style.width = `${percentage}%`;
+    this.progressBarEl.value = percentage;
     this.progressTextEl.setText(`Processing ${stats.processed} of ${stats.total} files (${percentage}%)`);
   }
 
@@ -320,7 +305,7 @@ export class EmbeddingsStatusModal extends StandardModal {
     this.currentErrorMessage = message;
 
     if (this.errorSectionEl && this.errorTextEl) {
-      this.errorSectionEl.style.display = "flex";
+      this.errorSectionEl.removeClass("is-hidden");
       this.errorTextEl.setText(message);
     }
   }
@@ -330,42 +315,24 @@ export class EmbeddingsStatusModal extends StandardModal {
     this.currentErrorMessage = null;
 
     if (this.errorSectionEl) {
-      this.errorSectionEl.style.display = "none";
+      this.errorSectionEl.addClass("is-hidden");
     }
   }
 
   private updateActionButtons(isProcessing: boolean, stats: EmbeddingsStats): void {
     if (this.processButton) {
-      this.processButton.style.display = isProcessing ? "none" : "flex";
+      this.processButton.toggleClass("is-hidden", isProcessing);
       this.processButton.disabled = stats.needsProcessing === 0;
     }
 
     if (this.retryButton) {
       const showRetry = !isProcessing && stats.failed > 0;
-      this.retryButton.style.display = showRetry ? "flex" : "none";
+      this.retryButton.toggleClass("is-hidden", !showRetry);
     }
 
     if (this.stopButton) {
-      this.stopButton.style.display = isProcessing ? "flex" : "none";
+      this.stopButton.toggleClass("is-hidden", !isProcessing);
     }
-  }
-
-  private formatProviderName(provider: string): string {
-    const names: Record<string, string> = {
-      systemsculpt: "SystemSculpt",
-      custom: "Custom",
-      openai: "OpenAI",
-      ollama: "Ollama"
-    };
-    return names[provider.toLowerCase()] || provider;
-  }
-
-  private formatModelName(model: string): string {
-    if (!model || model === "unknown") return "Not configured";
-    if (model.length > 30) {
-      return model.substring(0, 27) + "...";
-    }
-    return model;
   }
 
   private async startProcessing(): Promise<void> {
@@ -391,13 +358,21 @@ export class EmbeddingsStatusModal extends StandardModal {
   private stopProcessing(): void {
     try {
       const manager = this.plugin.embeddingsManager;
-      if (manager && typeof (manager as any).suspendProcessing === "function") {
-        (manager as any).suspendProcessing();
+      if (manager) {
+        manager.suspendProcessing();
         new Notice("Processing stopped");
       }
     } catch {
       new Notice("Failed to stop processing");
     }
+  }
+
+  private readErrorMessage(payload: unknown): string {
+    if (!payload || typeof payload !== "object") return "An error occurred";
+    const error = (payload as { error?: unknown }).error;
+    if (!error || typeof error !== "object") return "An error occurred";
+    const message = (error as { message?: unknown }).message;
+    return typeof message === "string" && message.length > 0 ? message : "An error occurred";
   }
 
   private openPendingFiles(): void {
