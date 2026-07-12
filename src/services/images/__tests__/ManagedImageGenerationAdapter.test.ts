@@ -100,7 +100,7 @@ describe("ManagedImageGenerationAdapter", () => {
       },
     });
 
-    expect(events.slice(0, 3)).toEqual(["admission", "recovery:admitted", "payload"]);
+    expect(events.slice(0, 3)).toEqual(["admission", "payload", "recovery:admitted"]);
     expect(result.operationId).toBe("studio-image-run-node");
     expect(result.outputs).toHaveLength(1);
     expect(prepareInputs).toHaveBeenCalledTimes(1);
@@ -109,6 +109,43 @@ describe("ManagedImageGenerationAdapter", () => {
       "studio-image-run-node",
       expect.any(AbortSignal),
     );
+  });
+
+  it("fingerprints accepted payload content instead of only operation identity", async () => {
+    const fingerprints: string[] = [];
+    const load = jest.fn(async () => new Uint8Array([1]).buffer);
+    const adapter = new ManagedImageGenerationAdapter({
+      admission: { acquireLease: jest.fn(async () => ({ outcome: "allowed" })) } as never,
+      recovery: {
+        createAdmitted: jest.fn(async input => {
+          fingerprints.push(input.source.fingerprint);
+          throw new Error("fingerprint captured");
+        }),
+      } as never,
+      jobs: {} as never,
+    });
+
+    await expect(adapter.generate({
+      operationId: "image-content-one",
+      sourceIdentity: "studio:same-project:unique-run-node",
+      buildPayload: () => ({
+        prompt: "Draw the first accepted payload",
+        inputImages: [{ mimeType: "image/png", sizeBytes: 1, sha256: HASH_A, load }],
+      }),
+    })).rejects.toThrow("fingerprint captured");
+    await expect(adapter.generate({
+      operationId: "image-content-two",
+      sourceIdentity: "studio:same-project:unique-run-node",
+      buildPayload: () => ({
+        prompt: "Draw the second accepted payload",
+        inputImages: [{ mimeType: "image/png", sizeBytes: 1, sha256: HASH_B, load }],
+      }),
+    })).rejects.toThrow("fingerprint captured");
+
+    expect(fingerprints).toHaveLength(2);
+    expect(fingerprints[0]).toMatch(/^sha256:[a-f0-9]{64}$/);
+    expect(fingerprints[1]).not.toBe(fingerprints[0]);
+    expect(load).not.toHaveBeenCalled();
   });
 
   it("removes each polling abort listener after a normal timer resolution", async () => {

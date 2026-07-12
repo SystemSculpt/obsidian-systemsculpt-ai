@@ -124,6 +124,56 @@ describe("managed-only Studio remote nodes", () => {
     expect(pathReads).toBeGreaterThan(0);
   });
 
+  it("fingerprints transcription audio bytes after admission and memoizes the source read", async () => {
+    const bytesByRun = [
+      new Uint8Array([1, 2, 3]).buffer,
+      new Uint8Array([1, 2, 4]).buffer,
+    ];
+    const events: string[] = [];
+    const fingerprints: string[] = [];
+    let runIndex = 0;
+    const readLocalFileBinary = jest.fn(async () => {
+      events.push(`read:${runIndex}`);
+      return bytesByRun[runIndex];
+    });
+    const transcribeAudio = jest.fn(async request => {
+      events.push(`admission:${runIndex}`);
+      const readsBeforeFingerprint = readLocalFileBinary.mock.calls.length;
+      const fingerprint = await request.source.fingerprint();
+      const loaded = await request.source.load();
+      expect(readLocalFileBinary).toHaveBeenCalledTimes(readsBeforeFingerprint + 1);
+      expect([...new Uint8Array(loaded.bytes)]).toEqual([...new Uint8Array(bytesByRun[runIndex])]);
+      fingerprints.push(fingerprint);
+      runIndex += 1;
+      return {
+        text: "done",
+        operation: { capability: "transcription", operationId: `transcription-op-${runIndex}` },
+      };
+    });
+
+    const execute = async () => {
+      const nodeServices = services({ transcribeAudio });
+      nodeServices.readLocalFileBinary = readLocalFileBinary;
+      await transcriptionNode.execute({
+        runId: `run-${runIndex}`,
+        projectPath: "Studio/Test.systemsculpt",
+        signal: new AbortController().signal,
+        node: { id: "transcription", kind: transcriptionNode.kind, version: transcriptionNode.version, title: "Transcription", position: { x: 0, y: 0 }, config: {} },
+        inputs: { path: "audio.wav" },
+        services: nodeServices as never,
+        log: jest.fn(),
+      });
+    };
+
+    await execute();
+    await execute();
+
+    expect(events).toEqual(["admission:0", "read:0", "admission:1", "read:1"]);
+    expect(fingerprints[0]).toMatch(/^sha256:[a-f0-9]{64}$/);
+    expect(fingerprints[1]).not.toBe(fingerprints[0]);
+    expect(readLocalFileBinary).toHaveBeenCalledTimes(2);
+  });
+
   it("contains no Studio generic stream, provider, model, credit, or arbitrary network path", () => {
     const root = join(__dirname, "../..");
     const adapter = readFileSync(join(root, "studio/StudioApiExecutionAdapter.ts"), "utf8");

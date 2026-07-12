@@ -10,6 +10,7 @@ import type {
   ManagedJobRecoveryRecord,
   ManagedPendingDispatch,
 } from "../managed/ManagedTypes";
+import { sha256HexFromBytesPortable } from "../../studio/hash";
 
 const CAPABILITY = "image_generation" as const;
 const DEFAULT_POLL_INTERVAL_MS = 2_000;
@@ -132,12 +133,6 @@ function defaultRequestId(): string {
   return globalThis.crypto?.randomUUID?.() ?? `image-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-async function identityFingerprint(identity: string): Promise<string> {
-  const bytes = new TextEncoder().encode(identity);
-  const digest = await globalThis.crypto.subtle.digest("SHA-256", bytes);
-  return `sha256:${Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("")}`;
-}
-
 function normalizePayload(payload: ManagedImageGenerationPayload): {
   prompt: string;
   inputs: ManagedImageGenerationInput[];
@@ -167,6 +162,19 @@ function normalizePayload(payload: ManagedImageGenerationPayload): {
       ...(payload.seed === undefined ? {} : { seed: payload.seed }),
     },
   };
+}
+
+function contentFingerprint(payload: ReturnType<typeof normalizePayload>): string {
+  const acceptedContent = JSON.stringify({
+    prompt: payload.prompt,
+    input_images: payload.inputs.map(input => ({
+      mime_type: input.mimeType,
+      size_bytes: input.sizeBytes,
+      sha256: input.sha256,
+    })),
+    options: payload.options,
+  });
+  return `sha256:${sha256HexFromBytesPortable(new TextEncoder().encode(acceptedContent))}`;
 }
 
 function terminalStatusFromError(error: unknown): "failed" | "expired" | null {
@@ -203,15 +211,14 @@ export class ManagedImageGenerationAdapter {
     throwIfAborted(signal);
     if (lease.outcome !== "allowed") throw new Error(`Managed image generation is unavailable (${lease.outcome}).`);
 
-    const fingerprint = await identityFingerprint(operation.sourceIdentity);
+    const payload = normalizePayload(await operation.buildPayload());
+    throwIfAborted(signal);
+    const fingerprint = contentFingerprint(payload);
     let record = await this.dependencies.recovery.createAdmitted({
       capability: CAPABILITY,
       operationId: operation.operationId,
       source: { identity: operation.sourceIdentity, fingerprint },
     });
-    throwIfAborted(signal);
-
-    const payload = normalizePayload(await operation.buildPayload());
     throwIfAborted(signal);
     record = await this.dependencies.recovery.markContentReady(CAPABILITY, operation.operationId, record.revision);
 
