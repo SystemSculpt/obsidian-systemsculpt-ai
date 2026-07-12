@@ -3,7 +3,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { CANONICAL_API_BASE_URL } from "./plugin-build-options.mjs";
+import {
+  CANONICAL_API_BASE_URL,
+  CANONICAL_WEBSITE_API_BASE_URL,
+} from "./plugin-build-options.mjs";
 
 export const REQUIRED_PLUGIN_ARTIFACTS = ["manifest.json", "main.js", "styles.css"];
 
@@ -33,7 +36,7 @@ const FORBIDDEN_CLIENT_BUNDLE_FRAGMENTS = [
 ];
 
 const LOOPBACK_API_BASE_PATTERN =
-  /https?:\/\/(?:localhost|127(?:\.\d{1,3}){3}|0\.0\.0\.0|\[::1\])(?::\d+)?\/api\/v1\b/gi;
+  /https?:\/\/(?:localhost|127(?:\.\d{1,3}){3}|0\.0\.0\.0|\[::1\])(?::\d+)?\/api\/(?:v1|plugin)\b/gi;
 
 function readFileTail(filePath, maxBytes = DEFAULT_TAIL_BYTES) {
   const stats = fs.statSync(filePath);
@@ -102,6 +105,7 @@ export function inspectPluginArtifacts({ root = process.cwd() } = {}) {
     formattedSize: mainFile.exists ? formatBytes(mainFile.sizeBytes) : "missing",
     hasInlineSourceMap: false,
     hasCanonicalApiBase: false,
+    hasCanonicalWebsiteApiBase: false,
     loopbackApiBases: [],
     forbiddenClientFragments: [],
   };
@@ -120,6 +124,13 @@ export function inspectPluginArtifacts({ root = process.cwd() } = {}) {
     if (!mainBundle.hasCanonicalApiBase) {
       problems.push(
         `main.js does not contain the canonical SystemSculpt API base ${CANONICAL_API_BASE_URL}.`,
+      );
+    }
+
+    mainBundle.hasCanonicalWebsiteApiBase = bundleText.includes(CANONICAL_WEBSITE_API_BASE_URL);
+    if (!mainBundle.hasCanonicalWebsiteApiBase) {
+      problems.push(
+        `main.js does not contain the canonical SystemSculpt website API base ${CANONICAL_WEBSITE_API_BASE_URL}.`,
       );
     }
 
@@ -180,6 +191,7 @@ export function buildProductionPlugin({
   const releaseEnv = {
     ...env,
     SYSTEMSCULPT_API_BASE_URL: CANONICAL_API_BASE_URL,
+    SYSTEMSCULPT_WEBSITE_API_BASE_URL: CANONICAL_WEBSITE_API_BASE_URL,
   };
   const result = spawnSyncImpl("npm", ["run", "build"], {
     cwd: resolvedRoot,

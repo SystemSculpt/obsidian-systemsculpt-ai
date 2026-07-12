@@ -4,6 +4,7 @@ import {
 	CANONICAL_API_BASE_URL,
 	createPluginBuildOptions,
 	normalizeApiBaseUrl,
+	resolveWebsiteApiBaseUrl,
 } from "./scripts/plugin-build-options.mjs";
 import fs from "fs";
 import path from "path";
@@ -14,6 +15,10 @@ const prod = (process.argv[2] === "production");
 const apiBaseUrl = normalizeApiBaseUrl(
 	process.env.SYSTEMSCULPT_API_BASE_URL || CANONICAL_API_BASE_URL,
 );
+const websiteApiBaseUrl = resolveWebsiteApiBaseUrl({
+	apiBaseUrl,
+	websiteApiBaseUrl: process.env.SYSTEMSCULPT_WEBSITE_API_BASE_URL,
+});
 const logger = new BuildLogger("Build");
 const cssLogger = new BuildLogger("CSS");
 
@@ -96,6 +101,7 @@ const watchCss = () => {
 const buildOptions = createPluginBuildOptions({
 	production: prod,
 	apiBaseUrl,
+	websiteApiBaseUrl,
 	plugins: [
 		{
 			name: "build-reporter",

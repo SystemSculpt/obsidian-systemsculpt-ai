@@ -5,6 +5,7 @@ if you want to view the source, please visit the github repository of this plugi
 `;
 
 export const CANONICAL_API_BASE_URL = 'https://api.systemsculpt.com/api/v1';
+export const CANONICAL_WEBSITE_API_BASE_URL = 'https://systemsculpt.com/api/plugin';
 
 export const builtinExternals = [
   'node:*',
@@ -34,6 +35,27 @@ export function normalizeApiBaseUrl(value = CANONICAL_API_BASE_URL) {
   return raw;
 }
 
+export function resolveWebsiteApiBaseUrl({
+  apiBaseUrl = CANONICAL_API_BASE_URL,
+  websiteApiBaseUrl,
+} = {}) {
+  if (String(websiteApiBaseUrl || '').trim()) {
+    return normalizeApiBaseUrl(websiteApiBaseUrl);
+  }
+
+  const normalizedApiBaseUrl = normalizeApiBaseUrl(apiBaseUrl);
+  const parsed = new URL(normalizedApiBaseUrl);
+  const hostname = parsed.hostname.toLowerCase();
+  const loopback = hostname === 'localhost'
+    || hostname === '0.0.0.0'
+    || hostname === '::1'
+    || /^127(?:\.\d{1,3}){3}$/.test(hostname);
+  if (loopback) {
+    return `${parsed.origin}/api/plugin`;
+  }
+  return CANONICAL_WEBSITE_API_BASE_URL;
+}
+
 export function createPluginBuildOptions({
   entryPoint = 'src/main.ts',
   outfile = 'main.js',
@@ -43,8 +65,13 @@ export function createPluginBuildOptions({
   plugins = [],
   buildStamp = new Date().toISOString(),
   apiBaseUrl = CANONICAL_API_BASE_URL,
+  websiteApiBaseUrl,
 } = {}) {
   const normalizedApiBaseUrl = normalizeApiBaseUrl(apiBaseUrl);
+  const normalizedWebsiteApiBaseUrl = resolveWebsiteApiBaseUrl({
+    apiBaseUrl: normalizedApiBaseUrl,
+    websiteApiBaseUrl,
+  });
   return {
     banner: { js: pluginBanner },
     entryPoints: [entryPoint],
@@ -55,6 +82,7 @@ export function createPluginBuildOptions({
     define: {
       '__SS_BUILD_STAMP__': JSON.stringify(buildStamp),
       '__SYSTEMSCULPT_API_BASE_URL__': JSON.stringify(normalizedApiBaseUrl),
+      '__SYSTEMSCULPT_WEBSITE_API_BASE_URL__': JSON.stringify(normalizedWebsiteApiBaseUrl),
     },
     external: [
       'obsidian', 'electron', 'proper-lockfile', 'graceful-fs',

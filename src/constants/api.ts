@@ -1,6 +1,8 @@
 declare const __SYSTEMSCULPT_API_BASE_URL__: string | undefined;
+declare const __SYSTEMSCULPT_WEBSITE_API_BASE_URL__: string | undefined;
 
 export const PRODUCTION_API_BASE_URL = "https://api.systemsculpt.com/api/v1";
+export const PRODUCTION_WEBSITE_API_BASE_URL = "https://systemsculpt.com/api/plugin";
 
 /** Build-time API ownership. Local QA overrides this through esbuild only. */
 export const API_BASE_URL =
@@ -8,8 +10,13 @@ export const API_BASE_URL =
     ? __SYSTEMSCULPT_API_BASE_URL__.replace(/\/+$/, "")
     : PRODUCTION_API_BASE_URL;
 
-export const WEBSITE_API_BASE_URL = "https://systemsculpt.com/api/plugin";
-export const IS_DEVELOPMENT_BUILD = API_BASE_URL !== PRODUCTION_API_BASE_URL;
+export const WEBSITE_API_BASE_URL =
+  typeof __SYSTEMSCULPT_WEBSITE_API_BASE_URL__ === "string" && __SYSTEMSCULPT_WEBSITE_API_BASE_URL__.trim()
+    ? __SYSTEMSCULPT_WEBSITE_API_BASE_URL__.replace(/\/+$/, "")
+    : PRODUCTION_WEBSITE_API_BASE_URL;
+export const IS_DEVELOPMENT_BUILD =
+  API_BASE_URL !== PRODUCTION_API_BASE_URL ||
+  WEBSITE_API_BASE_URL !== PRODUCTION_WEBSITE_API_BASE_URL;
 
 export const SYSTEMSCULPT_API_ENDPOINTS = {
   LICENSE: { VALIDATE: () => "/license/validate" },

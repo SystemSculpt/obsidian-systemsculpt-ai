@@ -2,6 +2,8 @@
 import {
   API_BASE_URL,
   PRODUCTION_API_BASE_URL,
+  PRODUCTION_WEBSITE_API_BASE_URL,
+  WEBSITE_API_BASE_URL,
   IS_DEVELOPMENT_BUILD,
   SYSTEMSCULPT_API_ENDPOINTS,
   SYSTEMSCULPT_API_HEADERS,
@@ -10,6 +12,7 @@ import {
 describe("managed API constants", () => {
   it("defaults tests to the production compiled base", () => {
     expect(API_BASE_URL).toBe(PRODUCTION_API_BASE_URL);
+    expect(WEBSITE_API_BASE_URL).toBe(PRODUCTION_WEBSITE_API_BASE_URL);
     expect(IS_DEVELOPMENT_BUILD).toBe(false);
   });
 

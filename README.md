@@ -46,8 +46,9 @@ npm run test:integration
 ```
 
 The compiled desktop plugin is the integration boundary. `npm run build` may use
-`SYSTEMSCULPT_API_BASE_URL` for local QA; release validation always rebuilds
-against the production SystemSculpt API. See [development.md](docs/development.md)
+`SYSTEMSCULPT_API_BASE_URL` and `SYSTEMSCULPT_WEBSITE_API_BASE_URL` for local QA;
+one loopback API-v1 override automatically covers `/api/plugin` on the same origin.
+Release validation always rebuilds against both production SystemSculpt APIs. See [development.md](docs/development.md)
 and [CONTRIBUTING.md](CONTRIBUTING.md) for the supported checks.
 
 ## Current release

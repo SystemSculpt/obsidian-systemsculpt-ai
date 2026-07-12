@@ -9,14 +9,17 @@ import {
   buildProductionPlugin,
   inspectPluginArtifacts,
 } from "./plugin-artifacts.mjs";
-import { CANONICAL_API_BASE_URL } from "./plugin-build-options.mjs";
+import {
+  CANONICAL_API_BASE_URL,
+  CANONICAL_WEBSITE_API_BASE_URL,
+} from "./plugin-build-options.mjs";
 
 function createTempPluginDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "systemsculpt-plugin-artifacts-"));
 }
 
 function productionBundle(contents = "") {
-  return `const SYSTEMSCULPT_API = ${JSON.stringify(CANONICAL_API_BASE_URL)};\n${contents}`;
+  return `const SYSTEMSCULPT_API = ${JSON.stringify(CANONICAL_API_BASE_URL)};\nconst SYSTEMSCULPT_WEBSITE_API = ${JSON.stringify(CANONICAL_WEBSITE_API_BASE_URL)};\n${contents}`;
 }
 
 function writeRequiredArtifacts(root, mainJsContents = productionBundle()) {
@@ -56,6 +59,7 @@ test("assertProductionPluginArtifacts accepts production-style bundles", () => {
   assert.equal(inspection.ok, true);
   assert.equal(inspection.mainBundle.hasInlineSourceMap, false);
   assert.equal(inspection.mainBundle.hasCanonicalApiBase, true);
+  assert.equal(inspection.mainBundle.hasCanonicalWebsiteApiBase, true);
   assert.deepEqual(inspection.mainBundle.loopbackApiBases, []);
   assert.deepEqual(inspection.mainBundle.forbiddenClientFragments, []);
 });
@@ -70,11 +74,37 @@ test("assertProductionPluginArtifacts requires the canonical managed API base", 
   );
 });
 
+test("assertProductionPluginArtifacts requires the canonical website API base", () => {
+  const root = createTempPluginDir();
+  writeRequiredArtifacts(
+    root,
+    `const SYSTEMSCULPT_API = ${JSON.stringify(CANONICAL_API_BASE_URL)};\n`,
+  );
+
+  assert.throws(
+    () => assertProductionPluginArtifacts({ root }),
+    /does not contain the canonical SystemSculpt website API base/i,
+  );
+});
+
 test("assertProductionPluginArtifacts rejects loopback QA API bases", () => {
   const root = createTempPluginDir();
   writeRequiredArtifacts(
     root,
     productionBundle('const QA_API = "http://127.0.0.1:3001/api/v1";\n'),
+  );
+
+  assert.throws(
+    () => assertProductionPluginArtifacts({ root }),
+    /loopback QA API base/i,
+  );
+});
+
+test("assertProductionPluginArtifacts rejects loopback website API bases", () => {
+  const root = createTempPluginDir();
+  writeRequiredArtifacts(
+    root,
+    productionBundle('const QA_WEBSITE_API = "http://127.0.0.1:3001/api/plugin";\n'),
   );
 
   assert.throws(
@@ -102,12 +132,19 @@ test("buildProductionPlugin revalidates the post-build artifact set", () => {
   const inspection = buildProductionPlugin({
     root,
     stdio: "pipe",
-    env: { SYSTEMSCULPT_API_BASE_URL: "http://127.0.0.1:3001/api/v1" },
+    env: {
+      SYSTEMSCULPT_API_BASE_URL: "http://127.0.0.1:3001/api/v1",
+      SYSTEMSCULPT_WEBSITE_API_BASE_URL: "http://127.0.0.1:3001/api/plugin",
+    },
     spawnSyncImpl(command, args, options) {
       assert.equal(command, "npm");
       assert.deepEqual(args, ["run", "build"]);
       assert.equal(options.cwd, root);
       assert.equal(options.env.SYSTEMSCULPT_API_BASE_URL, CANONICAL_API_BASE_URL);
+      assert.equal(
+        options.env.SYSTEMSCULPT_WEBSITE_API_BASE_URL,
+        CANONICAL_WEBSITE_API_BASE_URL,
+      );
       writeRequiredArtifacts(root, productionBundle("console.log('rebuilt bundle');\n"));
       return {
         status: 0,
@@ -120,4 +157,5 @@ test("buildProductionPlugin revalidates the post-build artifact set", () => {
   assert.equal(inspection.ok, true);
   assert.equal(inspection.mainBundle.hasInlineSourceMap, false);
   assert.equal(inspection.mainBundle.hasCanonicalApiBase, true);
+  assert.equal(inspection.mainBundle.hasCanonicalWebsiteApiBase, true);
 });
