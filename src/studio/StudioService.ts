@@ -14,15 +14,11 @@ import {
   type StudioProjectSessionMutationReason,
 } from "./StudioProjectSession";
 import { StudioProjectSessionManager } from "./StudioProjectSessionManager";
-import { resolveStudioDynamicSelectOptions } from "./StudioDynamicSelectOptions";
 import { isBlanketCliCommandPattern, randomId } from "./utils";
 import type {
   StudioAssetRef,
   StudioCapability,
   StudioCapabilityGrant,
-  StudioNodeConfigDynamicOptionsSource,
-  StudioNodeConfigSelectOption,
-  StudioNodeInstance,
   StudioNodeCacheSnapshotV1,
   StudioProjectLintResult,
   StudioProjectV1,
@@ -48,7 +44,7 @@ export class StudioService {
   constructor(private readonly plugin: SystemSculptPlugin) {
     this.projectStore = new StudioProjectStore(plugin.app);
     this.assetStore = new StudioAssetStore(this.projectStore);
-    this.apiAdapter = new StudioApiExecutionAdapter(plugin, this.assetStore);
+    this.apiAdapter = new StudioApiExecutionAdapter(plugin);
     this.runtime = new StudioRuntime(
       plugin.app,
       plugin,
@@ -196,24 +192,6 @@ export class StudioService {
         id: randomId("grant"),
         capability: "filesystem",
         scope: { allowedPaths: ["/"] },
-        grantedAt: new Date().toISOString(),
-        grantedByUser: true,
-      });
-      changed = true;
-    }
-
-    const hasStudioNetwork = policy.grants.some(
-      (grant) =>
-        grant.capability === "network" &&
-        (grant.scope.allowedDomains || []).some((domain) => domain === "api.systemsculpt.com")
-    );
-    if (!hasStudioNetwork) {
-      policy.grants.push({
-        id: randomId("grant"),
-        capability: "network",
-        scope: {
-          allowedDomains: ["api.systemsculpt.com", "systemsculpt.com"],
-        },
         grantedAt: new Date().toISOString(),
         grantedByUser: true,
       });
@@ -472,13 +450,4 @@ export class StudioService {
     return this.registry.list();
   }
 
-  async resolveDynamicSelectOptions(
-    source: StudioNodeConfigDynamicOptionsSource,
-    _node: StudioNodeInstance
-  ): Promise<StudioNodeConfigSelectOption[]> {
-    return await resolveStudioDynamicSelectOptions({
-      plugin: this.plugin,
-      source,
-    });
-  }
 }

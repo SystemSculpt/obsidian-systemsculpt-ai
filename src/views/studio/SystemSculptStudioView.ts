@@ -15,8 +15,6 @@ import { randomId } from "../../studio/utils";
 import type {
   StudioAssetRef,
   StudioJsonValue,
-  StudioNodeConfigDynamicOptionsSource,
-  StudioNodeConfigSelectOption,
   StudioNodeDefinition,
   StudioNodeInstance,
   StudioNodeOutputMap,
@@ -2322,13 +2320,6 @@ export class SystemSculptStudioView extends ItemView {
     this.transientFieldErrorsByNodeId.delete(String(nodeId || "").trim());
   }
 
-  private async resolveDynamicSelectOptionsForNode(
-    source: StudioNodeConfigDynamicOptionsSource,
-    node: StudioNodeInstance
-  ): Promise<StudioNodeConfigSelectOption[]> {
-    return this.plugin.getStudioService().resolveDynamicSelectOptions(source, node);
-  }
-
   private readJsonEditorPreferredMode(): "composer" | "raw" {
     const rawMode = String(this.plugin.settings.studioJsonEditorDefaultMode || "")
       .trim()
@@ -2468,8 +2459,6 @@ export class SystemSculptStudioView extends ItemView {
         onTransientFieldError: (nodeId, fieldKey, message) => {
           this.setTransientFieldError(nodeId, fieldKey, message);
         },
-        resolveDynamicSelectOptions: (source, node) =>
-          this.resolveDynamicSelectOptionsForNode(source, node),
         getRuntimeDetails: (nodeId) => this.buildInspectorRuntimeDetails(nodeId),
         onLayoutChanged: (layout) => {
           this.inspectorLayout = { ...layout };
@@ -4650,8 +4639,6 @@ export class SystemSculptStudioView extends ItemView {
       onNodeGeometryMutated: () => {
         this.graphInteraction.notifyNodePositionsChanged();
       },
-      resolveDynamicSelectOptions: (source, node) =>
-        this.resolveDynamicSelectOptionsForNode(source, node),
       isTextNodeEditing: (nodeId) => this.isTextNodeEditing(nodeId),
       consumeTextNodeAutoFocus: (nodeId) => this.consumeTextNodeAutoFocus(nodeId),
       consumeTextNodeFocusPoint: (nodeId) => this.consumeTextNodeFocusPoint(nodeId),

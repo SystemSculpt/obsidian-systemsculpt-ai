@@ -19,8 +19,7 @@ const NODE_DESCRIPTION_BY_KIND: Record<string, string> = {
   "studio.transcription": "Transcribes audio media into text.",
   "studio.dataset":
     "Runs a custom query through a configurable adapter, caches results, and outputs text plus discovered structured fields.",
-  "studio.http_request":
-    "Makes a straightforward API request with typed URL/header/query/body bindings, then returns status/body/json.",
+  "studio.retired_http_request": "Retired HTTP Request placeholder. This node cannot execute.",
   "studio.cli_command": "Runs a local shell command and captures output.",
   "studio.terminal":
     "Legacy terminal placeholder kept so older Studio workflows still load. Interactive terminal sessions are no longer supported.",

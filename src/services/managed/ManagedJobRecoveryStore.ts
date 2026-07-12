@@ -65,6 +65,7 @@ export class ManagedJobRecoveryStore {
     });
   }
   acknowledgeCreated(c: ManagedJobCapability, id: string, rev: number, jobId: string) { return this.ack(c, id, rev, "create_dispatching", "created", { jobId }); }
+  acknowledgeImageCreated(id: string, rev: number, jobId: string) { return this.ack("image_generation", id, rev, "create_dispatching", "processing", { jobId }); }
   acknowledgePrepared(id: string, rev: number) { return this.ack("image_generation", id, rev, "prepare_dispatching", "prepared"); }
   acknowledgePart(c: Exclude<ManagedJobCapability, "image_generation">, id: string, rev: number, part: { partNumber: number; etag: string }) { return this.mutate(c, id, rev, r => { if (r.phase !== "part_dispatching" || r.pendingDispatch?.partNumber !== part.partNumber || !part.etag || part.etag.length > 1024) this.illegal(); return { ...r, phase: "uploading", pendingDispatch: undefined, completedParts: [...(r.completedParts ?? []).filter(x => x.partNumber !== part.partNumber), part] }; }); }
   acknowledgeComplete(c: Exclude<ManagedJobCapability, "image_generation">, id: string, rev: number) { return this.ack(c, id, rev, "complete_dispatching", "upload_completed"); }

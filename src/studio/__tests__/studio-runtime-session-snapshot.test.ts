@@ -57,13 +57,10 @@ describe("StudioRuntime session snapshot runs", () => {
         readBinary: jest.fn(),
       },
     } as any;
+    const logger = { warn: jest.fn(), error: jest.fn(), debug: jest.fn() };
     const plugin = {
       app,
-      getLogger: () => ({
-        warn: jest.fn(),
-        error: jest.fn(),
-        debug: jest.fn(),
-      }),
+      getLogger: () => logger,
     } as any;
     const generationFiles = new Map<string, Uint8Array>();
     const projectStore = {
@@ -96,7 +93,8 @@ describe("StudioRuntime session snapshot runs", () => {
       readArrayBuffer: jest.fn(),
     } as any;
     const apiAdapter = {
-      estimateRunCredits: jest.fn(async () => ({ ok: true })),
+      beginLocalCommit: jest.fn(async () => undefined),
+      completeLocalCommit: jest.fn(async () => { throw new Error("cleanup unavailable"); }),
     } as any;
     const runtime = new StudioRuntime(
       app,
@@ -122,6 +120,14 @@ describe("StudioRuntime session snapshot runs", () => {
     expect(summary.status).toBe("success");
     expect(projectStore.loadProject).not.toHaveBeenCalled();
     expect(projectStore.publishRun).toHaveBeenCalledTimes(1);
+    expect(apiAdapter.beginLocalCommit.mock.invocationCallOrder[0]).toBeLessThan(
+      projectStore.publishRun.mock.invocationCallOrder[0]
+    );
+    expect(apiAdapter.completeLocalCommit).toHaveBeenCalledTimes(1);
+    expect(logger.warn).toHaveBeenCalledWith(
+      "Studio managed-operation cleanup remains pending after run publication",
+      expect.objectContaining({ metadata: expect.objectContaining({ error: "cleanup unavailable" }) }),
+    );
     const publication = projectStore.publishRun.mock.calls[0][1];
     expect(new TextDecoder().decode(publication.snapshotDocument)).toContain("Live Session Snapshot");
     expect(new TextDecoder().decode(publication.eventsDocument)).toContain("run.completed");
@@ -168,7 +174,10 @@ describe("StudioRuntime session snapshot runs", () => {
       inboundEdges: [{ fromNodeId: "producer", fromPortId: "asset", toNodeId: "consumer", toPortId: "asset" }], dependencyNodeIds: ["producer"],
     };
     const compiler = { compile: () => ({ executionOrder: ["producer", "consumer"], nodesById: new Map([["producer", producer], ["consumer", consumer]]) }) } as any;
-    const runtime = new StudioRuntime(app, plugin, projectStore, {} as any, compiler, assetStore, { estimateRunCredits: async () => ({ ok: true }) } as any);
+    const runtime = new StudioRuntime(app, plugin, projectStore, {} as any, compiler, assetStore, {
+      beginLocalCommit: async () => undefined,
+      completeLocalCommit: async () => undefined,
+    } as any);
     (runtime as any).nodeResultCacheStore = { load: async () => ({ projectId: "proj_live_runtime", updatedAt: "2026-03-22T00:00:00.000Z", entries: {} }) };
     const project = projectFixture();
     project.graph.nodes = [producer.node as any, consumer.node as any];

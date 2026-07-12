@@ -89,6 +89,38 @@ describe("ManagedTranscriptionAdapter", () => {
     expect(persisted).not.toContain("managed transcript");
   });
 
+  it("removes each polling abort listener after a normal timer resolution", async () => {
+    jest.useFakeTimers();
+    try {
+      const { admission, jobs, recovery } = harness([
+        { job: { id: jobId, status: "processing" }, transcript: null, progress: 0.5 },
+        { job: { id: jobId, status: "succeeded" }, transcript: "managed transcript", progress: 1 },
+      ]);
+      const adapter = new ManagedTranscriptionAdapter({
+        admission,
+        jobs,
+        recovery,
+        createOperationId: () => "listener-cleanup-op",
+        maxPolls: 2,
+      });
+      const controller = new AbortController();
+      const add = jest.spyOn(controller.signal, "addEventListener");
+      const remove = jest.spyOn(controller.signal, "removeEventListener");
+      const running = adapter.transcribe({
+        identity: "vault:recordings/listener.webm",
+        fingerprint: () => `sha256:${"2".repeat(64)}`,
+        load: async () => ({ filename: "listener.webm", contentType: "audio/webm", bytes: new Uint8Array([1, 2, 3, 4, 5, 6]).buffer }),
+      }, { signal: controller.signal });
+
+      await jest.advanceTimersByTimeAsync(2_000);
+      await expect(running).resolves.toMatchObject({ operationId: "listener-cleanup-op" });
+      expect(add).toHaveBeenCalledTimes(1);
+      expect(remove).toHaveBeenCalledTimes(1);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it("blocks before audio reads or recovery creation when admission is denied", async () => {
     const { adapter, admission, events, storage } = harness();
     admission.acquireLease.mockResolvedValueOnce({ outcome: "license_required" } as any);

@@ -441,17 +441,20 @@ export function parseStudioPolicy(rawText: string): StudioPermissionPolicyV1 {
   const grantsRaw = ensureArray<unknown>(parsed.grants);
   const grants: StudioCapabilityGrant[] = grantsRaw
     .filter(isRecord)
-    .map((rawGrant) => {
-      const capability = asString(rawGrant.capability).trim() as StudioCapabilityGrant["capability"];
+    .flatMap<StudioCapabilityGrant>((rawGrant) => {
+      const rawCapability = asString(rawGrant.capability).trim();
       const id = asString(rawGrant.id).trim() || randomId("grant");
-      if (capability !== "cli" && capability !== "filesystem" && capability !== "network") {
+      if (rawCapability === "network") {
+        return [];
+      }
+      if (rawCapability !== "cli" && rawCapability !== "filesystem") {
         throw new Error(`Invalid Studio policy grant "${id}": unsupported capability.`);
       }
 
       const scope = isRecord(rawGrant.scope) ? rawGrant.scope : {};
-      return {
+      return [{
         id,
-        capability,
+        capability: rawCapability,
         scope: {
           allowedPaths: ensureArray<unknown>(scope.allowedPaths).map((entry) => asString(entry).trim()).filter(Boolean),
           allowedCommandPatterns: ensureArray<unknown>(scope.allowedCommandPatterns)
@@ -461,11 +464,10 @@ export function parseStudioPolicy(rawText: string): StudioPermissionPolicyV1 {
             // a bare "*". Drop it here so a shared project still opens, just
             // without the blanket grant; legitimate per-command patterns survive.
             .filter((pattern) => !isBlanketCliCommandPattern(pattern)),
-          allowedDomains: ensureArray<unknown>(scope.allowedDomains).map((entry) => asString(entry).trim()).filter(Boolean),
         },
         grantedAt: asString(rawGrant.grantedAt).trim() || nowIso(),
         grantedByUser: rawGrant.grantedByUser === true,
-      };
+      }];
     });
 
   return {

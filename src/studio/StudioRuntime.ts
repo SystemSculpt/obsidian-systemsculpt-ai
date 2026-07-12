@@ -9,12 +9,12 @@ import { StudioNodeRegistry } from "./StudioNodeRegistry";
 import { buildNodeInputFingerprint, StudioNodeResultCacheStore } from "./StudioNodeResultCacheStore";
 import { StudioPermissionManager } from "./StudioPermissionManager";
 import { StudioSandboxRunner } from "./StudioSandboxRunner";
-import { StudioSecretStore } from "./StudioSecretStore";
 import { StudioProjectStore } from "./StudioProjectStore";
 import { scopeProjectForRun } from "./StudioRunScope";
 import type {
   StudioApiAdapter,
   StudioNodeCacheSnapshotV1,
+  StudioManagedOperationRef,
   StudioNodeInputMap,
   StudioNodeOutputMap,
   StudioProjectV1,
@@ -26,7 +26,6 @@ import type {
 import { deriveStudioRunsDir } from "./paths";
 import { cloneStudioProjectSnapshot } from "./StudioProjectSnapshots";
 import { nowIso, randomId } from "./utils";
-import { sha256HexFromArrayBuffer } from "./hash";
 
 type PendingRun = {
   runId: string;
@@ -210,11 +209,6 @@ export class StudioRuntime {
     }
   }
 
-  private buildSnapshotHash(snapshot: StudioRunSnapshotV1): Promise<string> {
-    const encoded = new TextEncoder().encode(JSON.stringify(snapshot));
-    return sha256HexFromArrayBuffer(encoded.buffer);
-  }
-
   private mapNodeInputs(compiled: StudioCompiledGraph, nodeId: string, outputsByNode: Map<string, StudioNodeOutputMap>): StudioNodeInputMap {
     const current = compiled.nodesById.get(nodeId);
     if (!current) return {};
@@ -296,15 +290,7 @@ export class StudioRuntime {
     const policy = await this.projectStore.loadPolicy(project.permissionsRef.policyPath);
     const permissions = new StudioPermissionManager(policy);
     const sandbox = new StudioSandboxRunner(permissions);
-    const secretStore = new StudioSecretStore();
-
-    const preflight = await this.apiAdapter.estimateRunCredits(project);
-    if (!preflight.ok) {
-      throw new Error(preflight.reason || "Studio preflight credit check failed.");
-    }
-
     const compiled = this.compiler.compile(project, this.registry);
-    const runDir = normalizePath(`${deriveStudioRunsDir(projectPath)}/${runId}`);
 
     const snapshot: StudioRunSnapshotV1 = {
       schema: "studio.run.v1",
@@ -316,8 +302,6 @@ export class StudioRuntime {
       policy,
     };
 
-    const snapshotHash = await this.buildSnapshotHash(snapshot);
-    const eventsPath = normalizePath(`${runDir}/events.ndjson`);
     const persistedEvents: string[] = [];
     const stagedAssetFiles = new Map<string, Uint8Array>();
     const stagedAssetBytesByProjectionPath = new Map<string, Uint8Array>();
@@ -342,7 +326,6 @@ export class StudioRuntime {
     await emit({
       type: "run.started",
       runId,
-      snapshotHash,
       at: nowIso(),
     });
 
@@ -354,6 +337,7 @@ export class StudioRuntime {
     );
     const executedNodeIds: string[] = [];
     const cachedNodeIds: string[] = [];
+    const managedOperations = new Map<string, StudioManagedOperationRef>();
 
     const outputsByNode = new Map<string, StudioNodeOutputMap>();
     const dependencyCount = new Map<string, number>();
@@ -398,8 +382,10 @@ export class StudioRuntime {
 
       const promise = (async () => {
         const inputs = this.mapNodeInputs(compiled, nodeId, outputsByNode);
-        const inputFingerprint = await buildNodeInputFingerprint(compiledNode.node, inputs);
         const cachePolicy = compiledNode.definition.cachePolicy || "by_inputs";
+        const inputFingerprint = cachePolicy === "by_inputs"
+          ? await buildNodeInputFingerprint(compiledNode.node, inputs)
+          : null;
 
         if (cachePolicy === "by_inputs" && !forceNodeIds.has(nodeId)) {
           const cacheEntry = nodeCacheSnapshot.entries[nodeId];
@@ -446,7 +432,6 @@ export class StudioRuntime {
           signal: abortController.signal,
           services: {
             api: this.apiAdapter,
-            secretStore,
             storeAsset: async (bytes, mimeType) => {
               const staged = await this.assetStore.stageArrayBuffer(projectPath, bytes, mimeType);
               stagedAssetFiles.set(staged.generationFile.contentAddressedPath, staged.generationFile.bytes);
@@ -562,7 +547,6 @@ export class StudioRuntime {
             },
             runCli: (request) => sandbox.runCli(request),
             assertFilesystemPath: (path) => permissions.assertFilesystemPath(path),
-            assertNetworkUrl: (url) => permissions.assertNetworkUrl(url),
           },
           log: (message) => {
             this.plugin.getLogger().debug("Studio node log", {
@@ -577,6 +561,9 @@ export class StudioRuntime {
         });
 
         outputsByNode.set(nodeId, result.outputs);
+        for (const operation of result.managedOperations || []) {
+          managedOperations.set(`${operation.capability}:${operation.operationId}`, operation);
+        }
         state.set(nodeId, "done");
         executedNodeIds.push(nodeId);
         if (cachePolicy === "by_inputs") {
@@ -584,7 +571,7 @@ export class StudioRuntime {
             nodeId,
             nodeKind: compiledNode.node.kind,
             nodeVersion: compiledNode.node.version,
-            inputFingerprint,
+            inputFingerprint: inputFingerprint!,
             outputs: result.outputs,
             artifacts: result.artifacts,
             updatedAt: nowIso(),
@@ -600,6 +587,9 @@ export class StudioRuntime {
           outputRef: `${runId}:${nodeId}`,
           outputSource: "execution",
           outputs: result.outputs,
+          ...(result.managedOperations?.length
+            ? { managedOperations: result.managedOperations }
+            : {}),
           at: nowIso(),
         });
 
@@ -735,6 +725,8 @@ export class StudioRuntime {
     const retainedRuns = sortedRuns.slice(Math.max(0, sortedRuns.length - project.settings.retention.maxRuns));
     const retainedIds = new Set(retainedRuns.map((run) => run.runId));
     nodeCacheSnapshot.updatedAt = nowIso();
+    const managedOperationRefs = [...managedOperations.values()];
+    await this.apiAdapter.beginLocalCommit(managedOperationRefs);
     await this.projectStore.publishRun(projectPath, {
       projectId: project.projectId,
       runId,
@@ -745,6 +737,17 @@ export class StudioRuntime {
       assets: [...stagedAssetFiles].map(([contentAddressedPath, bytes]) => ({ contentAddressedPath, bytes })),
       removeRunIds: currentRuns.filter((run) => !retainedIds.has(run.runId)).map((run) => run.runId),
     });
+    try {
+      await this.apiAdapter.completeLocalCommit(managedOperationRefs);
+    } catch (error) {
+      this.plugin.getLogger().warn("Studio managed-operation cleanup remains pending after run publication", {
+        source: "StudioRuntime",
+        metadata: {
+          runId,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      });
+    }
 
     if (status === "failed") {
       throw new Error(errorMessage || "Studio run failed.");

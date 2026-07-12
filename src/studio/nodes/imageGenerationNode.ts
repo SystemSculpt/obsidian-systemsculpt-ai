@@ -1,5 +1,6 @@
 import type {
   StudioAssetRef,
+  StudioImageGenerationInput,
   StudioJsonValue,
   StudioNodeDefinition,
   StudioNodeExecutionContext,
@@ -14,7 +15,7 @@ import {
 } from "./shared";
 
 const IMAGE_PROMPT_MAX_CHARS = 7_900;
-const IMAGE_INPUT_MAX_COUNT = 8;
+const IMAGE_INPUT_MAX_COUNT = 4;
 const IMAGE_OUTPUT_MAX_COUNT = 4;
 const DEFAULT_IMAGE_ASPECT_RATIO = "16:9";
 const IMAGE_SIZE_OPTIONS: { value: string; label: string }[] = [
@@ -24,12 +25,6 @@ const IMAGE_SIZE_OPTIONS: { value: string; label: string }[] = [
   { value: "2K", label: "2K" },
   { value: "4K", label: "4K" },
 ];
-const LEGACY_LOCAL_PROVIDER_IDS = new Set([
-  "local_macos_image_generation",
-  "local_macos",
-  "local_macos_image",
-]);
-
 function normalizeInputMimeType(mimeType: string): "image/png" | "image/jpeg" | "image/webp" | null {
   const normalized = String(mimeType || "").trim().toLowerCase();
   if (normalized === "image/png") return "image/png";
@@ -97,13 +92,13 @@ function resolveImagePrompt(context: StudioNodeExecutionContext): {
 async function resolveInputImages(
   context: StudioNodeExecutionContext,
   structuredInputImages: StudioImageInputCandidate[]
-): Promise<StudioAssetRef[]> {
+): Promise<StudioImageGenerationInput[]> {
   const merged = [...structuredInputImages, ...extractImageInputCandidates(context.inputs.images)];
   if (merged.length === 0) {
     return [];
   }
 
-  const output: StudioAssetRef[] = [];
+  const output: StudioImageGenerationInput[] = [];
   const seen = new Set<string>();
   let ignoredOverflow = 0;
   for (const candidate of merged) {
@@ -120,7 +115,10 @@ async function resolveInputImages(
     if (existing) {
       if (!seen.has(existing.hash)) {
         seen.add(existing.hash);
-        output.push(existing);
+        output.push({
+          asset: existing,
+          load: () => context.services.readAsset(existing),
+        });
       }
       continue;
     }
@@ -144,7 +142,10 @@ async function resolveInputImages(
     const stored = await context.services.storeAsset(bytes, mimeHint);
     if (!seen.has(stored.hash)) {
       seen.add(stored.hash);
-      output.push(stored);
+      output.push({
+        asset: stored,
+        load: () => context.services.readAsset(stored),
+      });
     }
   }
 
@@ -161,7 +162,7 @@ export const imageGenerationNode: StudioNodeDefinition = {
   kind: "studio.image_generation",
   version: "1.0.0",
   capabilityClass: "api",
-  cachePolicy: "by_inputs",
+  cachePolicy: "never",
   inputPorts: [
     { id: "prompt", type: "text", required: false },
     { id: "images", type: "any", required: false },
@@ -169,7 +170,6 @@ export const imageGenerationNode: StudioNodeDefinition = {
   outputPorts: [{ id: "images", type: "json" }],
   configDefaults: {
     prompt: "",
-    modelId: "",
     count: 1,
     aspectRatio: DEFAULT_IMAGE_ASPECT_RATIO,
     imageSize: "",
@@ -182,15 +182,6 @@ export const imageGenerationNode: StudioNodeDefinition = {
         type: "textarea",
         required: false,
         placeholder: "Describe the image to generate — or how to edit the connected images. A wired prompt input overrides this.",
-      },
-      {
-        key: "modelId",
-        label: "Model",
-        type: "select",
-        required: false,
-        description: "Image model routed through SystemSculpt (OpenRouter). Leave on Default to let SystemSculpt choose.",
-        selectPresentation: "searchable_dropdown",
-        optionsSource: "studio.systemsculpt_image_models",
       },
       {
         key: "count",
@@ -241,49 +232,49 @@ export const imageGenerationNode: StudioNodeDefinition = {
     allowUnknownKeys: true,
   },
   async execute(context) {
-    const { prompt, structuredInputImages } = resolveImagePrompt(context);
-    if (!prompt) {
-      throw new Error(
-        `Image generation node "${context.node.id}" requires a prompt. Type one in the node's Prompt box or connect a text input.`
-      );
-    }
-    const inputImages = await resolveInputImages(context, structuredInputImages);
-    const providerRaw = getText(context.node.config.provider as StudioJsonValue).trim();
-    if (LEGACY_LOCAL_PROVIDER_IDS.has(providerRaw.toLowerCase())) {
-      throw new Error(
-        `Image generation node "${context.node.id}" is configured for removed provider "${providerRaw}". Switch this node to SystemSculpt AI and rerun.`
-      );
-    }
-    const countRaw = Number(context.node.config.count as StudioJsonValue);
-    const count =
-      Number.isFinite(countRaw) && countRaw > 0
-        ? Math.min(IMAGE_OUTPUT_MAX_COUNT, Math.floor(countRaw))
-        : 1;
-    const configuredAspectRatio = getText(context.node.config.aspectRatio as StudioJsonValue).trim();
-    const aspectRatio = configuredAspectRatio || DEFAULT_IMAGE_ASPECT_RATIO;
-    const modelId = getText(context.node.config.modelId as StudioJsonValue).trim();
-    const imageSize = getText(context.node.config.imageSize as StudioJsonValue).trim();
-    const seedConfig = context.node.config.seed;
-    const seedText =
-      typeof seedConfig === "number" ? String(seedConfig) : getText(seedConfig as StudioJsonValue).trim();
-    const seedNum = seedText.length > 0 ? Number(seedText) : Number.NaN;
-    const seed = Number.isFinite(seedNum) && seedNum >= 0 ? Math.floor(seedNum) : undefined;
     const result = await context.services.api.generateImage({
-      prompt,
-      modelId: modelId || undefined,
-      count,
-      aspectRatio,
-      imageSize: imageSize || undefined,
-      seed,
-      inputImages,
       runId: context.runId,
+      nodeId: context.node.id,
       projectPath: context.projectPath,
+      signal: context.signal,
+      storeOutput: context.services.storeAsset,
+      buildPayload: async () => {
+        const { prompt, structuredInputImages } = resolveImagePrompt(context);
+        if (!prompt) {
+          throw new Error(
+            `Image generation node "${context.node.id}" requires a prompt. Type one in the node's Prompt box or connect a text input.`
+          );
+        }
+        const inputImages = await resolveInputImages(context, structuredInputImages);
+        const countRaw = Number(context.node.config.count as StudioJsonValue);
+        const count =
+          Number.isFinite(countRaw) && countRaw > 0
+            ? Math.min(IMAGE_OUTPUT_MAX_COUNT, Math.floor(countRaw))
+            : 1;
+        const configuredAspectRatio = getText(context.node.config.aspectRatio as StudioJsonValue).trim();
+        const aspectRatio = configuredAspectRatio || DEFAULT_IMAGE_ASPECT_RATIO;
+        const imageSize = getText(context.node.config.imageSize as StudioJsonValue).trim();
+        const seedConfig = context.node.config.seed;
+        const seedText =
+          typeof seedConfig === "number" ? String(seedConfig) : getText(seedConfig as StudioJsonValue).trim();
+        const seedNum = seedText.length > 0 ? Number(seedText) : Number.NaN;
+        const seed = Number.isFinite(seedNum) && seedNum >= 0 ? Math.floor(seedNum) : undefined;
+        return {
+          prompt,
+          count,
+          aspectRatio,
+          imageSize: imageSize || undefined,
+          seed,
+          inputImages,
+        };
+      },
     });
     return {
       outputs: {
         images: result.images as unknown as StudioJsonValue,
       },
       artifacts: result.images,
+      managedOperations: [result.operation],
     };
   },
 };

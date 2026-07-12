@@ -113,7 +113,8 @@ describe("ManagedJobRecoveryStore hardening", () => {
     await expect(store.beginDispatch("transcription", "op-1", record.revision, { operation: "create", requestId: "https://credential.example", idempotencyKey: "op-1:create", dispatchedAt: "2026-01-01T00:00:00Z" })).rejects.toMatchObject({ code: "invalid_record" });
     const image = await create(store, { capability: "image_generation", operationId: "img-1", source: { identity: "vault:image.png", fingerprint: `sha256:${"b".repeat(64)}` } }); const ready = await store.markContentReady("image_generation", "img-1", image.revision);
     await expect(store.beginDispatch("image_generation", "img-1", ready.revision, { operation: "part", requestId: "r", dispatchedAt: "2026-01-01T00:00:00Z" })).rejects.toMatchObject({ code: "illegal_transition" });
-    await expect(store.beginDispatch("image_generation", "img-1", ready.revision, { operation: "create", requestId: "r", idempotencyKey: "img-1:create", dispatchedAt: "2026-01-01T00:00:00Z" })).resolves.toMatchObject({ phase: "create_dispatching" });
+    const imageDispatch = await store.beginDispatch("image_generation", "img-1", ready.revision, { operation: "create", requestId: "r", idempotencyKey: "img-1:create", dispatchedAt: "2026-01-01T00:00:00Z" });
+    await expect(store.acknowledgeImageCreated("img-1", imageDispatch.revision, "job-1")).resolves.toMatchObject({ phase: "processing", jobId: "job-1" });
   });
 
   it("enforces exhaustive phase/pendingDispatch/capability canonical coherence", async () => {

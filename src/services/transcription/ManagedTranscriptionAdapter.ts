@@ -70,9 +70,14 @@ function throwIfAborted(signal: AbortSignal): void {
 async function defaultWait(milliseconds: number, signal: AbortSignal): Promise<void> {
   throwIfAborted(signal);
   await new Promise<void>((resolve, reject) => {
-    const timeout = setTimeout(resolve, milliseconds);
+    const cleanup = () => signal.removeEventListener("abort", onAbort);
+    const timeout = setTimeout(() => {
+      cleanup();
+      resolve();
+    }, milliseconds);
     const onAbort = () => {
       clearTimeout(timeout);
+      cleanup();
       reject(abortError());
     };
     signal.addEventListener("abort", onAbort, { once: true });

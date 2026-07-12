@@ -384,8 +384,6 @@ async function collectNodeFields(
       break;
     }
     case "studio.text_generation": {
-      usedKeys.add("modelId");
-      usedKeys.add("reasoningEffort");
       usedKeys.add("systemPrompt");
       usedKeys.add("value");
       usedKeys.add("textDisplayMode");
@@ -393,14 +391,6 @@ async function collectNodeFields(
       const promptSources = promptSourceLabels(node.id, project, maps);
       if (promptSources.length > 0) {
         pushField(fields, "Prompt Sources", promptSources.join(", "));
-      }
-      const modelId = trimText(getText(config.modelId));
-      const reasoningEffort = trimText(getText(config.reasoningEffort));
-      if (modelId || reasoningEffort) {
-        const settings = [modelId ? `Model: ${modelId}` : "", reasoningEffort ? `Reasoning: ${reasoningEffort}` : ""]
-          .filter(Boolean)
-          .join("\n");
-        pushField(fields, "Generation Settings", settings);
       }
       pushField(fields, "System Prompt", getText(config.systemPrompt), "text");
       pushField(fields, "Saved Output", getText(config.value), "markdown");
@@ -467,44 +457,9 @@ async function collectNodeFields(
       pushField(fields, "Image Generation Settings", settings);
       break;
     }
-    case "studio.http_request": {
-      usedKeys.add("method");
-      usedKeys.add("url");
-      usedKeys.add("headers");
-      usedKeys.add("bearerToken");
-      usedKeys.add("bodyMode");
-      usedKeys.add("body");
-      usedKeys.add("maxRetries");
-      const method = trimText(getText(config.method)) || "GET";
-      const url = trimText(getText(config.url));
-      pushField(fields, "Request", compactInline(`${method} ${url}`));
-      const bodyMode = trimText(getText(config.bodyMode));
-      const maxRetries = trimText(getText(config.maxRetries));
-      if (bodyMode || maxRetries) {
-        const settings = [
-          bodyMode ? `Body Mode: ${bodyMode}` : "",
-          maxRetries ? `Max Retries: ${maxRetries}` : "",
-        ]
-          .filter(Boolean)
-          .join("\n");
-        pushField(fields, "Request Settings", settings);
-      }
-      const headersValue = config.headers;
-      if (headersValue && typeof headersValue === "object" && !Array.isArray(headersValue)) {
-        const headerKeys = Object.keys(headersValue as Record<string, unknown>)
-          .filter((key) => !SENSITIVE_KEY_PATTERN.test(key))
-          .slice(0, 12);
-        if (headerKeys.length > 0) {
-          pushField(fields, "Header Keys", headerKeys.join(", "));
-        }
-      }
-      if (isMeaningfulJsonValue(config.body)) {
-        fields.push({
-          label: "Default Body",
-          value: truncateText(formatValueForField(config.body), MAX_FIELD_CHARS),
-          language: inferFieldLanguage(config.body),
-        });
-      }
+    case "studio.retired_http_request": {
+      usedKeys.add("reason");
+      pushField(fields, "Status", getText(config.reason), "text");
       break;
     }
     case "studio.dataset": {

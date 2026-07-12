@@ -101,13 +101,26 @@ describe("ManagedJobClient exact wire contract", () => {
     expect((await client.images.list()).items).toHaveLength(1);
   });
 
-  it("keeps image signed URL/headers/storage keys internal while uploading supplied bytes", async () => {
+  it("keeps signed upload material internal and returns uploaded keys in declared index order", async () => {
     const signed = jest.spyOn(transport as any, "uploadSignedInput").mockResolvedValue(undefined);
-    request.mockResolvedValue(json({ contract: MANAGED_JOB_PROTOCOL, upload_id: "up-1", expires_at: futureUploadExpiry(), input_uploads: [{ index: 0, upload: { method: "PUT", url: "https://signed/x", headers: { authorization: "secret" }, expires_in_seconds: 900, expires_at: futureUploadExpiry() }, input_image: { type: "uploaded", key: "storage-key", mime_type: "image/png", size_bytes: 1, sha256: "a".repeat(64) } }] }));
-    const publicResult = await client.images.prepareInputs([{ mime_type: "image/png", size_bytes: 1, sha256: "a".repeat(64) }], async index => { expect(index).toBe(0); return new Uint8Array([1]).buffer; });
-    expect(publicResult).toEqual({ uploadId: "up-1", inputs: [{ index: 0, mime_type: "image/png", size_bytes: 1, sha256: "a".repeat(64) }] });
-    expect(JSON.stringify(publicResult)).not.toMatch(/signed|authorization|storage-key/);
-    expect(signed).toHaveBeenCalled(); signed.mockRestore();
+    request.mockResolvedValue(json({ contract: MANAGED_JOB_PROTOCOL, upload_id: "up-1", expires_at: futureUploadExpiry(), input_uploads: [
+      { index: 1, upload: { method: "PUT", url: "https://signed/b", headers: { authorization: "secret-b" }, expires_in_seconds: 900, expires_at: futureUploadExpiry() }, input_image: { type: "uploaded", key: "key-b", mime_type: "image/webp", size_bytes: 2, sha256: "b".repeat(64) } },
+      { index: 0, upload: { method: "PUT", url: "https://signed/a", headers: { authorization: "secret-a" }, expires_in_seconds: 900, expires_at: futureUploadExpiry() }, input_image: { type: "uploaded", key: "key-a", mime_type: "image/png", size_bytes: 1, sha256: "a".repeat(64) } },
+    ] }));
+    const publicResult = await client.images.prepareInputs([
+      { mime_type: "image/png", size_bytes: 1, sha256: "a".repeat(64) },
+      { mime_type: "image/webp", size_bytes: 2, sha256: "b".repeat(64) },
+    ], async index => new Uint8Array(index === 0 ? [1] : [2, 2]).buffer);
+    expect(publicResult).toEqual({ uploadId: "up-1", inputs: [
+      { type: "uploaded", key: "key-a", mime_type: "image/png", size_bytes: 1, sha256: "a".repeat(64) },
+      { type: "uploaded", key: "key-b", mime_type: "image/webp", size_bytes: 2, sha256: "b".repeat(64) },
+    ] });
+    expect(JSON.stringify(publicResult)).not.toMatch(/signed|authorization/);
+    expect(signed.mock.calls.map(call => [call[0], call[3].byteLength])).toEqual([
+      ["https://signed/b", 2],
+      ["https://signed/a", 1],
+    ]);
+    signed.mockRestore();
   });
 
   it.each([
