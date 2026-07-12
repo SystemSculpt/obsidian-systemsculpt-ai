@@ -78,15 +78,6 @@ export class StudioRuntime {
     this.nodeResultCacheStore = new StudioNodeResultCacheStore(projectStore);
   }
 
-  private async appendLine(projectPath: string, projectId: string, path: string, line: string): Promise<void> {
-    const relative = this.projectStore.supportRelativePath(projectPath, path);
-    await this.projectStore.commitSupportFiles(projectPath, projectId, "run", (files) => {
-      const previous = files.get(relative);
-      const text = previous ? new TextDecoder().decode(previous) : "";
-      files.set(relative, new TextEncoder().encode(`${text}${line}`));
-    });
-  }
-
   private runIndexPath(projectPath: string): string {
     return normalizePath(`${deriveStudioRunsDir(projectPath)}/index.json`);
   }
@@ -119,31 +110,6 @@ export class StudioRuntime {
     } catch {
       return [];
     }
-  }
-
-  private async writeRunIndex(projectPath: string, projectId: string, runs: StudioRunSummary[]): Promise<void> {
-    const path = this.runIndexPath(projectPath);
-    const relative = this.projectStore.supportRelativePath(projectPath, path);
-    await this.projectStore.commitSupportFiles(projectPath, projectId, "run", (files) => files.set(relative, new TextEncoder().encode(`${JSON.stringify(runs, null, 2)}\n`)));
-  }
-
-  private async pruneRunRetention(projectPath: string, projectId: string, maxRuns: number): Promise<void> {
-    const runs = await this.readRunIndex(projectPath);
-    if (runs.length <= maxRuns) return;
-
-    const sorted = [...runs].sort((a, b) => a.startedAt.localeCompare(b.startedAt));
-    const toDrop = sorted.slice(0, sorted.length - maxRuns);
-    const keepSet = new Set(sorted.slice(sorted.length - maxRuns).map((run) => run.runId));
-    const retained = runs.filter((run) => keepSet.has(run.runId));
-
-    const runsDir = deriveStudioRunsDir(projectPath);
-    await this.projectStore.commitSupportFiles(projectPath, projectId, "run", (files) => {
-      for (const dropped of toDrop) {
-        const prefix = this.projectStore.supportRelativePath(projectPath, normalizePath(`${runsDir}/${dropped.runId}`));
-        for (const path of [...files.keys()]) if (path === prefix || path.startsWith(`${prefix}/`)) files.delete(path);
-      }
-      files.set(this.projectStore.supportRelativePath(projectPath, this.runIndexPath(projectPath)), new TextEncoder().encode(`${JSON.stringify(retained, null, 2)}\n`));
-    });
   }
 
   async getRecentRuns(projectPath: string): Promise<StudioRunSummary[]> {
@@ -352,13 +318,11 @@ export class StudioRuntime {
 
     const snapshotHash = await this.buildSnapshotHash(snapshot);
     const eventsPath = normalizePath(`${runDir}/events.ndjson`);
-    await this.projectStore.commitSupportFiles(projectPath, project.projectId, "run", (files) => {
-      files.set(this.projectStore.supportRelativePath(projectPath, normalizePath(`${runDir}/snapshot.json`)), new TextEncoder().encode(`${JSON.stringify(snapshot, null, 2)}\n`));
-      files.set(this.projectStore.supportRelativePath(projectPath, eventsPath), new Uint8Array());
-    });
+    const persistedEvents: string[] = [];
+    const stagedAssetFiles = new Map<string, Uint8Array>();
 
     const emit = async (event: StudioRunEvent): Promise<void> => {
-      await this.appendLine(projectPath, project.projectId, eventsPath, `${JSON.stringify(event)}\n`);
+      persistedEvents.push(`${JSON.stringify(event)}\n`);
       if (typeof options?.onEvent === "function") {
         try {
           await options.onEvent(event);
@@ -482,7 +446,11 @@ export class StudioRuntime {
           services: {
             api: this.apiAdapter,
             secretStore,
-            storeAsset: (bytes, mimeType) => this.assetStore.storeArrayBuffer(projectPath, bytes, mimeType),
+            storeAsset: async (bytes, mimeType) => {
+              const staged = await this.assetStore.stageArrayBuffer(projectPath, bytes, mimeType);
+              stagedAssetFiles.set(staged.generationFile.contentAddressedPath, staged.generationFile.bytes);
+              return staged.asset;
+            },
             readAsset: (asset) => this.assetStore.readArrayBuffer(asset),
             resolveAbsolutePath: (path) => {
               const normalized = String(path || "").trim();
@@ -713,18 +681,6 @@ export class StudioRuntime {
 
       await Promise.allSettled(Array.from(runningPromises.values()));
     } finally {
-      try {
-        await this.nodeResultCacheStore.save(projectPath, nodeCacheSnapshot);
-      } catch (error) {
-        this.plugin.getLogger().warn("Failed to persist Studio node cache", {
-          source: "StudioRuntime",
-          metadata: {
-            projectPath,
-            runId,
-            error: error instanceof Error ? error.message : String(error),
-          },
-        });
-      }
       if (tempRootDir) {
         try {
           await rm(tempRootDir, { recursive: true, force: true });
@@ -770,8 +726,20 @@ export class StudioRuntime {
 
     const currentRuns = await this.readRunIndex(projectPath);
     currentRuns.push(summary);
-    await this.writeRunIndex(projectPath, project.projectId, currentRuns);
-    await this.pruneRunRetention(projectPath, project.projectId, project.settings.retention.maxRuns);
+    const sortedRuns = [...currentRuns].sort((a, b) => a.startedAt.localeCompare(b.startedAt));
+    const retainedRuns = sortedRuns.slice(Math.max(0, sortedRuns.length - project.settings.retention.maxRuns));
+    const retainedIds = new Set(retainedRuns.map((run) => run.runId));
+    nodeCacheSnapshot.updatedAt = nowIso();
+    await this.projectStore.publishRun(projectPath, {
+      projectId: project.projectId,
+      runId,
+      snapshotDocument: new TextEncoder().encode(`${JSON.stringify(snapshot, null, 2)}\n`),
+      eventsDocument: new TextEncoder().encode(persistedEvents.join("")),
+      runIndexDocument: new TextEncoder().encode(`${JSON.stringify(retainedRuns, null, 2)}\n`),
+      cacheDocument: new TextEncoder().encode(`${JSON.stringify(nodeCacheSnapshot, null, 2)}\n`),
+      assets: [...stagedAssetFiles].map(([contentAddressedPath, bytes]) => ({ contentAddressedPath, bytes })),
+      removeRunIds: currentRuns.filter((run) => !retainedIds.has(run.runId)).map((run) => run.runId),
+    });
 
     if (status === "failed") {
       throw new Error(errorMessage || "Studio run failed.");

@@ -1,11 +1,14 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
+import ts from "typescript";
 
 const REPO_ROOT = resolve(__dirname, "../../..");
 const SOURCE_ROOTS = [
   resolve(REPO_ROOT, "src/studio"),
   resolve(REPO_ROOT, "src/views/studio"),
+  resolve(REPO_ROOT, "src/views/history"),
 ];
+const SOURCE_FILES = [resolve(REPO_ROOT, "src/main.ts")];
 const WRAPPER_FILES = new Set<string>([
   "src/views/studio/StudioManagedOutputNodes.ts",
   "src/views/studio/systemsculpt-studio-view/StudioRunOutputProjectors.ts",
@@ -43,6 +46,7 @@ function listSourceFiles(): string[] {
   for (const root of SOURCE_ROOTS) {
     visit(root);
   }
+  files.push(...SOURCE_FILES);
   return files.sort();
 }
 
@@ -63,14 +67,70 @@ function findTokenMatches(token: RegExp): string[] {
 }
 
 describe("Studio persistence architecture lint", () => {
-  it("keeps Studio project-local adapter mutations behind the generation store", () => {
-    const mutation = /(?:adapter|vault|fileManager)\.(?:write|writeBinary|append|remove|rename|mkdir|rmdir|create|createBinary|modify|modifyBinary|delete|renameFile)\s*\(/g;
-    const allowed = new Set([
-      "src/studio/StudioApiExecutionAdapter.ts", // ephemeral upload cleanup, not project-local persistence
+  it("keeps Studio project-local mutations behind the generation store using AST call and import analysis", () => {
+    const mutationMethods = new Set(["write", "writeBinary", "append", "remove", "rename", "mkdir", "rmdir", "create", "createBinary", "modify", "modifyBinary", "delete", "renameFile"]);
+    const persistenceFiles = new Set([
       "src/studio/persistence/ObsidianStudioGenerationAdapter.ts",
       "src/studio/persistence/StudioProjectGenerationStore.ts",
     ]);
-    expect(findTokenMatches(mutation).filter((path) => !allowed.has(path))).toEqual([]);
+    const allowedNonProjectContexts = new Set([
+      "src/main.ts#writeMobileStartupProbe",
+      "src/main.ts#rotateDiagnosticsFile",
+      "src/studio/StudioApiExecutionAdapter.ts#removeTempPath",
+      "src/studio/StudioApiExecutionAdapter.ts#ensureDir",
+      "src/studio/StudioApiExecutionAdapter.ts#writeBinary",
+      "src/studio/StudioApiExecutionAdapter.ts#writeTempAudioFile",
+    ]);
+    const violations: string[] = [];
+    for (const filePath of listSourceFiles()) {
+      const relativePath = relative(REPO_ROOT, filePath).replace(/\\/g, "/");
+      const source = ts.createSourceFile(filePath, readFileSync(filePath, "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+      const destructuredMutationAliases = new Set<string>();
+      const visit = (node: ts.Node, context = "<module>"): void => {
+        let nextContext = context;
+        if (ts.isMethodDeclaration(node) && node.name && ts.isIdentifier(node.name)) nextContext = node.name.text;
+        if (ts.isFunctionDeclaration(node) && node.name) nextContext = node.name.text;
+        if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
+          const imported = node.moduleSpecifier.text;
+          if (relativePath.startsWith("src/views/") && imported.includes("studio/persistence")) violations.push(`${relativePath}: imports persistence internals`);
+        }
+        if (ts.isVariableDeclaration(node) && ts.isObjectBindingPattern(node.name) && node.initializer && /adapter|vault|fileManager/i.test(node.initializer.getText(source))) {
+          for (const element of node.name.elements) {
+            if (!ts.isIdentifier(element.name)) continue;
+            const property = element.propertyName && ts.isIdentifier(element.propertyName) ? element.propertyName.text : element.name.text;
+            if (mutationMethods.has(property)) destructuredMutationAliases.add(element.name.text);
+          }
+        }
+        if (ts.isCallExpression(node)) {
+          let method: string | null = null;
+          let storageReceiver = false;
+          if (ts.isPropertyAccessExpression(node.expression)) {
+            method = node.expression.name.text;
+            storageReceiver = /adapter|vault|fileManager/i.test(node.expression.expression.getText(source));
+          } else if (ts.isElementAccessExpression(node.expression) && ts.isStringLiteral(node.expression.argumentExpression)) {
+            method = node.expression.argumentExpression.text;
+            storageReceiver = /adapter|vault|fileManager/i.test(node.expression.expression.getText(source));
+          } else if (ts.isIdentifier(node.expression) && destructuredMutationAliases.has(node.expression.text)) {
+            method = node.expression.text;
+            storageReceiver = true;
+          }
+          if (storageReceiver && method && mutationMethods.has(method) && !persistenceFiles.has(relativePath) && !allowedNonProjectContexts.has(`${relativePath}#${nextContext}`)) {
+            const line = source.getLineAndCharacterOfPosition(node.getStart()).line + 1;
+            violations.push(`${relativePath}:${line}:${nextContext}:${method}`);
+          }
+        }
+        ts.forEachChild(node, (child) => visit(child, nextContext));
+      };
+      visit(source);
+    }
+    expect(violations).toEqual([]);
+  });
+
+  it("exposes only closed typed generation commands, never raw Map transforms", () => {
+    const source = readRepoFile("src/studio/persistence/StudioProjectGenerationStore.ts");
+    expect(source).not.toContain("transform:");
+    expect(source).not.toMatch(/commitWholeGeneration\([^)]*Map/);
+    expect(source).toContain('kind: "publish_run"');
   });
 
   it("removes the old scheduleProjectSave seam from production Studio source", () => {

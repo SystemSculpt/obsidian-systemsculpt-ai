@@ -49,8 +49,7 @@ export class StudioNodeResultCacheStore {
     } catch { return createEmptySnapshot(projectId); }
   }
   async save(projectPath: string, snapshot: StudioNodeCacheSnapshotV1): Promise<void> {
-    const path = this.projectStore.supportRelativePath(projectPath, deriveStudioNodeCachePath(projectPath));
     const normalized: StudioNodeCacheSnapshotV1 = { schema: NODE_CACHE_SCHEMA, projectId: String(snapshot.projectId || ""), updatedAt: nowIso(), entries: snapshot.entries || {} };
-    await this.projectStore.commitSupportFiles(projectPath, normalized.projectId, "cache", (files) => files.set(path, encoder.encode(`${JSON.stringify(normalized, null, 2)}\n`)));
+    await this.projectStore.replaceCache(projectPath, normalized.projectId, encoder.encode(`${JSON.stringify(normalized, null, 2)}\n`));
   }
 }

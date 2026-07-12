@@ -171,6 +171,19 @@ describe("StudioProjectStore", () => {
     expect(created.path).toBe("Custom/Flow (2).systemsculpt");
   });
 
+  it("serializes concurrent support publications by reloading ExpectedGeneration", async () => {
+    const { store } = createStore();
+    const created = await store.createProject({ name: "Concurrent", minPluginVersion: "4.13.0", maxRuns: 100, maxArtifactsMb: 512 });
+    await Promise.all([0, 1, 2].map((index) => store.putAsset(created.path, created.project.projectId, {
+      contentAddressedPath: `0${index}/${String(index).repeat(64)}.bin`,
+      bytes: new Uint8Array([index]),
+    })));
+    for (let index = 0; index < 3; index += 1) {
+      const absolute = `${deriveStudioAssetsDir(created.path)}/assets/sha256/0${index}/${String(index).repeat(64)}.bin`;
+      expect(await store.readSupportFile(created.path, absolute)).toEqual(new Uint8Array([index]));
+    }
+  });
+
   it("renames the Studio project file and assets tree together", async () => {
     const { store, files, dirs } = createStore();
 
@@ -181,8 +194,9 @@ describe("StudioProjectStore", () => {
       maxArtifactsMb: 512,
     });
     const oldAssetsDir = deriveStudioAssetsDir(created.path);
-    await store.commitSupportFiles(created.path, created.project.projectId, "asset", (generationFiles) => {
-      generationFiles.set("support/assets/sha256/blob.txt", new TextEncoder().encode("blob"));
+    await store.putAsset(created.path, created.project.projectId, {
+      contentAddressedPath: `aa/${"a".repeat(64)}.txt`,
+      bytes: new TextEncoder().encode("blob"),
     });
 
     const renamed = await store.renameProject(created.path, "Renamed", {
@@ -197,8 +211,8 @@ describe("StudioProjectStore", () => {
     expect(files.has("SystemSculpt/Studio/Renamed.systemsculpt")).toBe(true);
     expect(files.has(`${oldAssetsDir}/project.manifest.json`)).toBe(false);
     expect(files.has(`${newAssetsDir}/project.manifest.json`)).toBe(true);
-    expect(files.has(`${oldAssetsDir}/assets/sha256/blob.txt`)).toBe(false);
-    expect(files.has(`${newAssetsDir}/assets/sha256/blob.txt`)).toBe(true);
+    expect(files.has(`${oldAssetsDir}/assets/sha256/aa/${"a".repeat(64)}.txt`)).toBe(false);
+    expect(files.has(`${newAssetsDir}/assets/sha256/aa/${"a".repeat(64)}.txt`)).toBe(true);
     expect(renamedProject.name).toBe("Renamed");
     expect(renamedProject.permissionsRef.policyPath).toBe(deriveStudioPolicyPath(renamed.newPath));
   });

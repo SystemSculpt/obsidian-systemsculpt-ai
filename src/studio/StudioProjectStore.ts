@@ -21,7 +21,8 @@ import {
   StudioProjectGenerationStore,
   type ExpectedGeneration,
   type SelectedGeneration,
-  type StudioGenerationCommandKind,
+  type StudioProjectGenerationCommand,
+  type StudioAssetGenerationFile,
 } from "./persistence/StudioProjectGenerationStore";
 import { ObsidianStudioGenerationAdapter } from "./persistence/ObsidianStudioGenerationAdapter";
 
@@ -92,14 +93,11 @@ export class StudioProjectStore {
     const policyPath = deriveStudioPolicyPath(projectPath);
     const project = createEmptyStudioProject({ name: options.name.trim() || "Untitled Studio Project", policyPath, minPluginVersion: options.minPluginVersion, maxRuns: options.maxRuns, maxArtifactsMb: options.maxArtifactsMb });
     const result = await this.generations.create({
+      kind: "create",
       projectId: project.projectId,
-      commandKind: "create",
-      transform: (files) => {
-        files.set("project.systemsculpt", encoder.encode(serializeStudioProject(project)));
-        files.set(this.relativeSupportPath(projectPath, policyPath), encoder.encode(serializeStudioPolicy(createDefaultStudioPolicy())));
-        files.set("support/project.manifest.json", encoder.encode(`${JSON.stringify({ schema: "studio.manifest.v1", projectId: project.projectId, projectPath, assetsDir: deriveStudioAssetsDir(projectPath), createdAt: nowIso() }, null, 2)}\n`));
-        return files;
-      },
+      projectDocument: encoder.encode(serializeStudioProject(project)),
+      policyDocument: encoder.encode(serializeStudioPolicy(createDefaultStudioPolicy())),
+      projectManifest: encoder.encode(`${JSON.stringify({ schema: "studio.manifest.v1", projectId: project.projectId, projectPath, assetsDir: deriveStudioAssetsDir(projectPath), createdAt: nowIso() }, null, 2)}\n`),
     }, { vaultRelativeProjectPath: projectPath });
     if (result.status !== "committed") throw new Error(`Unable to create Studio project (${result.status}).`);
     this.remember(projectPath, result.expectedGeneration, result.generation);
@@ -115,11 +113,13 @@ export class StudioProjectStore {
     const previous = options?.project ? cloneStudioProjectSnapshot(options.project) : await this.loadProject(oldPath);
     const project = { ...cloneStudioProjectSnapshot(previous), name: nextName, permissionsRef: { ...previous.permissionsRef, policyPath: deriveStudioPolicyPath(newPath) } };
     const selected = await this.openSelected(oldPath);
-    const result = await this.generations.commitWholeGeneration({ projectId: project.projectId, commandKind: "logical_rename", locator: { vaultRelativeProjectPath: newPath }, transform: (files) => {
-      files.set("project.systemsculpt", encoder.encode(serializeStudioProject(project)));
-      files.set("support/project.manifest.json", encoder.encode(`${JSON.stringify({ schema: "studio.manifest.v1", projectId: project.projectId, projectPath: newPath, assetsDir: deriveStudioAssetsDir(newPath), createdAt: nowIso() }, null, 2)}\n`));
-      return files;
-    } }, selected.token);
+    const result = await this.generations.commitWholeGeneration({
+      kind: "logical_rename",
+      projectId: project.projectId,
+      locator: { vaultRelativeProjectPath: newPath },
+      projectDocument: encoder.encode(serializeStudioProject(project)),
+      projectManifest: encoder.encode(`${JSON.stringify({ schema: "studio.manifest.v1", projectId: project.projectId, projectPath: newPath, assetsDir: deriveStudioAssetsDir(newPath), createdAt: nowIso() }, null, 2)}\n`),
+    }, selected.token);
     if (result.status !== "committed") throw new Error(`Unable to rename Studio project (${result.status}).`);
     this.selectedByPath.delete(oldPath); this.remember(newPath, result.expectedGeneration, result.generation);
     return { oldPath, newPath, project: parseStudioProject(decoder.decode(result.generation.files.get("project.systemsculpt")!)) };
@@ -138,8 +138,11 @@ export class StudioProjectStore {
 
   async saveProject(projectPath: string, project: StudioProjectV1): Promise<void> {
     const path = normalizeStudioProjectPath(projectPath);
-    await this.commitFiles(path, project.projectId, "discrete_save", (files) => {
-      files.set("project.systemsculpt", encoder.encode(serializeStudioProject({ ...project, updatedAt: nowIso() })));
+    await this.commitCommand(path, {
+      kind: "replace_project",
+      projectId: project.projectId,
+      reason: "discrete_save",
+      projectDocument: encoder.encode(serializeStudioProject({ ...project, updatedAt: nowIso() })),
     });
   }
 
@@ -159,7 +162,11 @@ export class StudioProjectStore {
     const projectPath = [...this.selectedByPath.keys()].find((path) => policyPath.startsWith(`${deriveStudioAssetsDir(path)}/`));
     if (!projectPath) throw new Error("Policy path does not belong to an open Studio project.");
     const project = await this.loadProject(projectPath);
-    await this.commitFiles(projectPath, project.projectId, "policy", (files) => files.set(this.relativeSupportPath(projectPath, policyPath), encoder.encode(serializeStudioPolicy({ ...policy, updatedAt: nowIso() }))));
+    await this.commitCommand(projectPath, {
+      kind: "replace_policy",
+      projectId: project.projectId,
+      policyDocument: encoder.encode(serializeStudioPolicy({ ...policy, updatedAt: nowIso() })),
+    });
   }
 
   async readSupportFile(projectPath: string, absolutePath: string): Promise<Uint8Array | null> {
@@ -176,13 +183,37 @@ export class StudioProjectStore {
     return null;
   }
 
-  async commitSupportFiles(projectPath: string, projectId: string, commandKind: StudioGenerationCommandKind, mutate: (files: Map<string, Uint8Array>) => void): Promise<void> {
-    await this.commitFiles(projectPath, projectId, commandKind, mutate);
+  async putAsset(projectPath: string, projectId: string, asset: StudioAssetGenerationFile): Promise<void> {
+    await this.commitCommand(projectPath, { kind: "put_asset", projectId, asset }, { refresh: true });
   }
 
-  private async commitFiles(projectPath: string, projectId: string, commandKind: StudioGenerationCommandKind, mutate: (files: Map<string, Uint8Array>) => void): Promise<void> {
-    const path = normalizeStudioProjectPath(projectPath); const selected = await this.openSelected(path);
-    const result = await this.generations.commitWholeGeneration({ projectId, commandKind, transform: (files) => { mutate(files); return files; } }, selected.token);
+  async replaceCache(projectPath: string, projectId: string, cacheDocument: Uint8Array): Promise<void> {
+    await this.commitCommand(projectPath, { kind: "replace_cache", projectId, cacheDocument }, { refresh: true });
+  }
+
+  async publishRun(projectPath: string, command: Omit<Extract<StudioProjectGenerationCommand, { kind: "publish_run" }>, "kind">): Promise<void> {
+    await this.commitCommand(projectPath, { kind: "publish_run", ...command }, { refresh: true });
+  }
+
+  private async commitCommand(projectPath: string, command: StudioProjectGenerationCommand, options?: { refresh?: boolean }): Promise<void> {
+    const path = normalizeStudioProjectPath(projectPath);
+    let selected = await this.openSelected(path);
+    if (options?.refresh) {
+      const opened = await this.generations.open(command.projectId, { vaultRelativeProjectPath: path });
+      if (opened.status !== "ready") throw new Error(`Studio project is read-only (${opened.status}).`);
+      selected = { token: opened.expectedGeneration, generation: opened.generation };
+      this.remember(path, selected.token, selected.generation);
+    }
+    let result = await this.generations.commitWholeGeneration(command, selected.token);
+    for (let attempt = 0; result.status === "stale_revision" && options?.refresh && attempt < 8; attempt += 1) {
+      // Commutative runtime/support publications reload the serialized token;
+      // project-document saves intentionally do not enter this retry path.
+      // eslint-disable-next-line no-await-in-loop
+      const reopened = await this.generations.open(command.projectId, { vaultRelativeProjectPath: path });
+      if (reopened.status !== "ready") throw new Error(`Studio project is read-only (${reopened.status}).`);
+      // eslint-disable-next-line no-await-in-loop
+      result = await this.generations.commitWholeGeneration(command, reopened.expectedGeneration);
+    }
     if (result.status !== "committed") throw new Error(`Studio generation commit failed (${result.status}).`);
     this.remember(path, result.expectedGeneration, result.generation);
   }

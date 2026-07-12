@@ -22,7 +22,7 @@ type GenerationManifestBody = {
   parentRevision: number | null;
   parentGenerationHash: string | null;
   createdAt: string;
-  commandKind: string;
+  commandKind: StudioGenerationCommandKind;
   entries: GenerationManifestEntry[];
   projection: { canonicalPath: string; supportRoot: string };
 };
@@ -37,6 +37,8 @@ type CommitDescriptor = {
   logicallyCommittedAt: string;
 };
 type ValidGeneration = { manifest: GenerationManifest; files: Map<string, Uint8Array>; directory: string };
+type ProjectionMarker = { schemaVersion: 1; projectId: string; revision: number; generationHash: string; projectDocumentSha256: string; supportManifestSha256: string };
+type ProjectionSnapshot = { files: Map<string, Uint8Array>; markerRaw: string | null; supportMarkerRaw: string | null };
 
 export type SelectedGeneration = { files: ReadonlyMap<string, Uint8Array>; metadata: GenerationManifest };
 export type ReadyResult = { status: "ready"; expectedGeneration: ExpectedGeneration; generation: SelectedGeneration; projectionStatus: "matching" | "repaired" };
@@ -48,13 +50,25 @@ export type OpenResult = ReadyResult | Exclude<CommitResult, { status: "committe
 export type RecoveryResult =
   | { status: "ready"; expectedGeneration: ExpectedGeneration; generation: SelectedGeneration }
   | { status: "fork_detected" | "recovery_required" | "future_unsupported" | "storage_unavailable"; message: string };
-export type StudioGenerationCommandKind = "create" | "discrete_save" | "autosave" | "policy" | "manifest" | "asset" | "run" | "cache" | "migration" | "repair" | "external_sync" | "logical_rename";
-export type WholeGenerationCommand = {
+export type StudioAssetGenerationFile = { contentAddressedPath: string; bytes: Uint8Array };
+export type StudioProjectGenerationCreateCommand = {
+  kind: "create";
   projectId: string;
-  commandKind: StudioGenerationCommandKind;
-  transform: (files: Map<string, Uint8Array>) => Map<string, Uint8Array>;
-  locator?: ProjectionLocator;
+  projectDocument: Uint8Array;
+  policyDocument: Uint8Array;
+  projectManifest: Uint8Array;
 };
+export type StudioProjectGenerationCommand =
+  | { kind: "replace_project"; projectId: string; projectDocument: Uint8Array; reason: "discrete_save" | "autosave" | "migration" | "repair" }
+  | { kind: "replace_policy"; projectId: string; policyDocument: Uint8Array }
+  | { kind: "put_asset"; projectId: string; asset: StudioAssetGenerationFile }
+  | { kind: "replace_cache"; projectId: string; cacheDocument: Uint8Array }
+  | { kind: "replace_manifest"; projectId: string; projectManifest: Uint8Array }
+  | { kind: "publish_run"; projectId: string; runId: string; snapshotDocument: Uint8Array; eventsDocument: Uint8Array; runIndexDocument: Uint8Array; cacheDocument: Uint8Array; assets: readonly StudioAssetGenerationFile[]; removeRunIds: readonly string[] }
+  | { kind: "logical_rename"; projectId: string; locator: ProjectionLocator; projectDocument: Uint8Array; projectManifest: Uint8Array };
+type InternalStudioProjectGenerationCommand = StudioProjectGenerationCommand | { kind: "external_sync"; projectId: string; projectDocument: Uint8Array; supportFiles: readonly { relativePath: string; bytes: Uint8Array }[] };
+
+type StudioGenerationCommandKind = "create" | "discrete_save" | "autosave" | "policy" | "manifest" | "asset" | "run" | "cache" | "migration" | "repair" | "external_sync" | "logical_rename";
 
 const AUTHORITY_ROOT = ".systemsculpt/studio/projects";
 const PROJECT_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
@@ -114,6 +128,15 @@ function authority(projectId: string): string {
   return `${AUTHORITY_ROOT}/${projectId}`;
 }
 function generationRoot(projectId: string): string { return `${authority(projectId)}/generations`; }
+function assetGenerationPath(path: string): string {
+  const normalized = normalizeRelativePath(path);
+  if (!/^[0-9a-f]{2}\/[0-9a-f]{64}\.[a-z0-9]+$/.test(normalized)) throw new Error("Asset command requires a SHA-256 content-addressed path.");
+  return `support/assets/sha256/${normalized}`;
+}
+function validateRunId(runId: string): string {
+  if (!PROJECT_ID.test(runId)) throw new Error("Invalid Studio run ID.");
+  return runId;
+}
 function generationToken(g: ValidGeneration): ExpectedGeneration { return { revision: g.manifest.revision, generationHash: g.manifest.generationHash }; }
 function selected(g: ValidGeneration): SelectedGeneration { return { files: new Map([...g.files].map(([p, b]) => [p, b.slice()])), metadata: g.manifest }; }
 
@@ -148,15 +171,21 @@ export class StudioProjectGenerationStore {
     }
   }
 
+  private async authorityHasCandidates(projectId: string): Promise<boolean> {
+    try { const listed = await this.adapter.list(generationRoot(projectId)); return listed.files.length > 0 || listed.folders.length > 0; }
+    catch { return false; }
+  }
+
   private async exclusive<T>(projectId: string, action: () => Promise<T>): Promise<T> {
     let map = StudioProjectGenerationStore.coordinators.get(this.adapter as object);
     if (!map) { map = new Map(); StudioProjectGenerationStore.coordinators.set(this.adapter as object, map); }
     const prior = map.get(projectId) || Promise.resolve();
     let release!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; });
-    map.set(projectId, prior.then(() => gate));
+    const queued = prior.then(() => gate);
+    map.set(projectId, queued);
     await prior;
-    try { return await action(); } finally { release(); if (map.get(projectId) === gate) map.delete(projectId); }
+    try { return await action(); } finally { release(); if (map.get(projectId) === queued) map.delete(projectId); }
   }
 
   async discoverAndAdopt(locatorInput: ProjectionLocator): Promise<CommitResult> {
@@ -173,8 +202,13 @@ export class StudioProjectGenerationStore {
     return this.exclusive(projectId, async () => {
       const existing = await this.recover(projectId);
       if (existing.status === "ready") {
+        if (existing.generation.metadata.projection.canonicalPath !== locator.vaultRelativeProjectPath) {
+          return { status: "fork_detected", message: "A second projection locator claims an existing project ID." };
+        }
         const existingDocument = existing.generation.files.get("project.systemsculpt");
         if (existingDocument && bytesEqual(existingDocument, documentBytes)) {
+          const projection = await this.readProjection(locator);
+          if (projection && !this.generationFilesEqual(existing.generation.files, projection.files) && !this.projectionIsAuthoritySubset(existing.generation.files, projection.files)) return { status: "fork_detected", message: "Projection support tree conflicts with existing authority." };
           try { await this.ensureProjection(existing.generation); }
           catch (error) { return { status: "storage_unavailable", message: String(error) }; }
           return { status: "committed", expectedGeneration: existing.expectedGeneration, generation: existing.generation, logicallyCommitted: true };
@@ -182,6 +216,7 @@ export class StudioProjectGenerationStore {
         return { status: "fork_detected", message: "Projection and existing authority disagree." };
       }
       if (existing.status === "fork_detected" || existing.status === "future_unsupported") return existing;
+      if (await this.authorityHasCandidates(projectId)) return { status: "recovery_required", message: "Existing authority candidates failed validation; legacy bytes were preserved." };
       const files = new Map<string, Uint8Array>(); files.set("project.systemsculpt", documentBytes);
       try { await this.captureTree(deriveStudioAssetsDir(locator.vaultRelativeProjectPath), "support", files); }
       catch (error) { return { status: "storage_unavailable", message: String(error) }; }
@@ -189,28 +224,74 @@ export class StudioProjectGenerationStore {
     });
   }
 
-  async create(command: WholeGenerationCommand, locator: ProjectionLocator): Promise<CommitResult> {
+  async create(command: StudioProjectGenerationCreateCommand, locatorInput: ProjectionLocator): Promise<CommitResult> {
     return this.exclusive(command.projectId, async () => {
       const recovered = await this.recover(command.projectId);
       if (recovered.status === "ready") return { status: "stale_revision", expectedGeneration: recovered.expectedGeneration };
-      const files = command.transform(new Map());
-      return this.publish(command.projectId, files, null, command.commandKind, validateProjectionLocator(locator));
+      if (await this.authorityHasCandidates(command.projectId)) return { status: "recovery_required", message: "Existing authority candidates failed validation." };
+      try {
+        const files = new Map<string, Uint8Array>([
+          ["project.systemsculpt", command.projectDocument.slice()],
+          ["support/policy/grants.json", command.policyDocument.slice()],
+          ["support/project.manifest.json", command.projectManifest.slice()],
+        ]);
+        return this.publish(command.projectId, files, null, "create", validateProjectionLocator(locatorInput));
+      } catch (error) { return { status: "invalid_candidate", message: String(error) }; }
     });
   }
 
-  async commit(command: WholeGenerationCommand, expected: ExpectedGeneration): Promise<CommitResult> { return this.commitWholeGeneration(command, expected); }
+  async commit(command: StudioProjectGenerationCommand, expected: ExpectedGeneration): Promise<CommitResult> { return this.commitWholeGeneration(command, expected); }
 
-  async commitWholeGeneration(command: WholeGenerationCommand, expected: ExpectedGeneration): Promise<CommitResult> {
+  async commitWholeGeneration(command: StudioProjectGenerationCommand, expected: ExpectedGeneration): Promise<CommitResult> {
+    return this.commitInternal(command, expected);
+  }
+
+  private async commitInternal(command: InternalStudioProjectGenerationCommand, expected: ExpectedGeneration): Promise<CommitResult> {
     return this.exclusive(command.projectId, async () => {
       const recovered = await this.recover(command.projectId);
       if (recovered.status !== "ready") return recovered;
       if (recovered.expectedGeneration.revision !== expected.revision || recovered.expectedGeneration.generationHash !== expected.generationHash) return { status: "stale_revision", expectedGeneration: recovered.expectedGeneration };
-      let files: Map<string, Uint8Array>;
-      try { files = command.transform(new Map([...recovered.generation.files].map(([p, b]) => [p, b.slice()]))); }
-      catch (error) { return { status: "invalid_candidate", message: String(error) }; }
-      const locator = command.locator ? validateProjectionLocator(command.locator) : { vaultRelativeProjectPath: recovered.generation.metadata.projection.canonicalPath };
-      return this.publish(command.projectId, files, recovered.generation.metadata, command.commandKind, locator);
+      try {
+        const files = this.applyCommand(command, recovered.generation.files);
+        const locator = command.kind === "logical_rename" ? validateProjectionLocator(command.locator) : { vaultRelativeProjectPath: recovered.generation.metadata.projection.canonicalPath };
+        return this.publish(command.projectId, files, recovered.generation.metadata, this.commandKind(command), locator);
+      } catch (error) { return { status: "invalid_candidate", message: String(error) }; }
     });
+  }
+
+  private applyCommand(command: InternalStudioProjectGenerationCommand, current: ReadonlyMap<string, Uint8Array>): Map<string, Uint8Array> {
+    const files = new Map([...current].map(([path, bytes]) => [path, bytes.slice()]));
+    switch (command.kind) {
+      case "replace_project": files.set("project.systemsculpt", command.projectDocument.slice()); break;
+      case "replace_policy": files.set("support/policy/grants.json", command.policyDocument.slice()); break;
+      case "put_asset": files.set(assetGenerationPath(command.asset.contentAddressedPath), command.asset.bytes.slice()); break;
+      case "replace_cache": files.set("support/cache/node-results.json", command.cacheDocument.slice()); break;
+      case "replace_manifest": files.set("support/project.manifest.json", command.projectManifest.slice()); break;
+      case "publish_run": {
+        const runId = validateRunId(command.runId);
+        for (const removeRunId of command.removeRunIds.map(validateRunId)) {
+          const prefix = `support/runs/${removeRunId}`;
+          for (const path of [...files.keys()]) if (path === prefix || path.startsWith(`${prefix}/`)) files.delete(path);
+        }
+        files.set(`support/runs/${runId}/snapshot.json`, command.snapshotDocument.slice());
+        files.set(`support/runs/${runId}/events.ndjson`, command.eventsDocument.slice());
+        files.set("support/runs/index.json", command.runIndexDocument.slice());
+        files.set("support/cache/node-results.json", command.cacheDocument.slice());
+        for (const asset of command.assets) files.set(assetGenerationPath(asset.contentAddressedPath), asset.bytes.slice());
+        break;
+      }
+      case "logical_rename": files.set("project.systemsculpt", command.projectDocument.slice()); files.set("support/project.manifest.json", command.projectManifest.slice()); break;
+      case "external_sync":
+        files.clear(); files.set("project.systemsculpt", command.projectDocument.slice());
+        for (const file of command.supportFiles) files.set(normalizeRelativePath(file.relativePath), file.bytes.slice());
+        break;
+    }
+    return files;
+  }
+
+  private commandKind(command: InternalStudioProjectGenerationCommand): StudioGenerationCommandKind {
+    if (command.kind === "replace_project") return command.reason;
+    return ({ replace_policy: "policy", put_asset: "asset", replace_cache: "cache", replace_manifest: "manifest", publish_run: "run", logical_rename: "logical_rename", external_sync: "external_sync" } as const)[command.kind];
   }
 
   async open(projectId: string, locatorInput: ProjectionLocator): Promise<OpenResult> {
@@ -219,22 +300,38 @@ export class StudioProjectGenerationStore {
     const recovered = await this.recover(projectId);
     if (recovered.status !== "ready") return recovered;
     if (recovered.generation.metadata.projection.canonicalPath !== locator.vaultRelativeProjectPath) return { status: "read_only", message: "Projection locator does not match selected generation." };
-    try {
-      const sidecarRaw = await this.adapter.read(`${locator.vaultRelativeProjectPath}.identity.json`);
-      const sidecar = JSON.parse(sidecarRaw) as Record<string, unknown>;
-      const expectedMarker = canonicalJson(await this.buildMarker(recovered.generation));
-      if (sidecarRaw !== expectedMarker && sidecar.revision === recovered.expectedGeneration.revision && sidecar.generationHash === recovered.expectedGeneration.generationHash) {
-        const reconciled = await this.reconcileExternalCandidate(locator, recovered.expectedGeneration);
-        if (reconciled.status !== "committed") return { status: "read_only", message: `External candidate was preserved (${reconciled.status}).` };
-        return { status: "ready", expectedGeneration: reconciled.expectedGeneration, generation: reconciled.generation, projectionStatus: "matching" };
-      }
-    } catch {
-      // Missing/torn markers are repaired below from immutable authority.
+    const projection = await this.readProjection(locator);
+    const exact = projection !== null && this.generationFilesEqual(recovered.generation.files, projection.files);
+    if (projection && !exact && this.projectionIsAuthoritySubset(recovered.generation.files, projection.files)) {
+      const authorityMarker = canonicalJson(await this.buildMarker(recovered.generation));
+      if (projection.markerRaw === authorityMarker && projection.supportMarkerRaw === authorityMarker) return { status: "read_only", message: "Selected-token projection is missing support content; bytes were preserved as a partial replacement." };
+      try {
+        await this.writeProjection(recovered.generation);
+        return { ...recovered, projectionStatus: "repaired" };
+      } catch (error) { return { status: "storage_unavailable", message: String(error) }; }
     }
-    try {
-      const status = await this.ensureProjection(recovered.generation);
-      return { ...recovered, projectionStatus: status };
-    } catch (error) { return { status: "storage_unavailable", message: String(error) }; }
+    if (exact) {
+      try {
+        const status = await this.ensureProjection(recovered.generation);
+        return { ...recovered, projectionStatus: status };
+      } catch (error) { return { status: "storage_unavailable", message: String(error) }; }
+    }
+    if (!projection || !projection.markerRaw || projection.markerRaw !== projection.supportMarkerRaw) {
+      return { status: "read_only", message: "Changed projection has missing or mismatched identity markers; bytes were preserved." };
+    }
+    const marker = this.parseProjectionMarker(projection.markerRaw);
+    if (!marker || marker.projectId !== projectId || marker.revision !== recovered.expectedGeneration.revision || marker.generationHash !== recovered.expectedGeneration.generationHash) {
+      return { status: "fork_detected", message: "Changed projection is based on an untrusted or stale generation; bytes were preserved." };
+    }
+    const authorityMarker = canonicalJson(await this.buildMarker(recovered.generation));
+    const candidateMarker = await this.buildMarker({ files: projection.files, metadata: recovered.generation.metadata });
+    const candidateHashesMatch = marker.projectDocumentSha256 === candidateMarker.projectDocumentSha256 && marker.supportManifestSha256 === candidateMarker.supportManifestSha256;
+    if (projection.markerRaw !== authorityMarker && !candidateHashesMatch) {
+      return { status: "read_only", message: "Changed projection marker is not a trusted selected-generation base; bytes were preserved." };
+    }
+    const reconciled = await this.reconcileExternalCandidate(locator, recovered.expectedGeneration);
+    if (reconciled.status !== "committed") return { status: reconciled.status === "fork_detected" ? "fork_detected" : "read_only", message: `External candidate was preserved (${reconciled.status}).` };
+    return { status: "ready", expectedGeneration: reconciled.expectedGeneration, generation: reconciled.generation, projectionStatus: "matching" };
   }
 
   async recover(projectId: string): Promise<RecoveryResult> {
@@ -277,6 +374,13 @@ export class StudioProjectGenerationStore {
 
   async repairProjection(projectId: string): Promise<OpenResult> {
     const recovered = await this.recover(projectId); if (recovered.status !== "ready") return recovered;
+    const locator = { vaultRelativeProjectPath: recovered.generation.metadata.projection.canonicalPath };
+    const projection = await this.readProjection(locator);
+    if (projection && !this.generationFilesEqual(recovered.generation.files, projection.files)) {
+      if (!this.projectionIsAuthoritySubset(recovered.generation.files, projection.files)) return { status: "read_only", message: "Changed projection bytes were preserved for reconciliation." };
+      const marker = canonicalJson(await this.buildMarker(recovered.generation));
+      if (projection.markerRaw === marker && projection.supportMarkerRaw === marker) return { status: "read_only", message: "Selected-token projection is missing support content; bytes were preserved." };
+    }
     try { await this.writeProjection(recovered.generation); return { ...recovered, projectionStatus: "repaired" }; }
     catch (error) { return { status: "storage_unavailable", message: String(error) }; }
   }
@@ -284,26 +388,35 @@ export class StudioProjectGenerationStore {
     let locator: ProjectionLocator;
     try { locator = validateProjectionLocator(candidate); } catch (error) { return { status: "invalid_candidate", message: String(error) }; }
     try {
-      const markerRaw = await this.adapter.read(`${locator.vaultRelativeProjectPath}.identity.json`);
-      const supportMarkerRaw = await this.adapter.read(`${deriveStudioAssetsDir(locator.vaultRelativeProjectPath)}/.studio-projection.json`);
-      if (markerRaw !== supportMarkerRaw) return { status: "fork_detected", message: "Projection identity markers disagree." };
-      const marker = JSON.parse(markerRaw) as Record<string, unknown>;
-      const projectId = String(marker.projectId || ""); authority(projectId);
+      const projection = await this.readProjection(locator);
+      if (!projection || !projection.markerRaw || projection.markerRaw !== projection.supportMarkerRaw) return { status: "fork_detected", message: "Projection identity markers are missing or disagree." };
+      const marker = this.parseProjectionMarker(projection.markerRaw);
+      if (!marker) return { status: "invalid_candidate", message: "Projection marker schema is invalid." };
+      const projectId = marker.projectId; authority(projectId);
       if (marker.revision !== expected.revision || marker.generationHash !== expected.generationHash) return { status: "fork_detected", message: "External projection is based on a stale generation." };
-      const files = new Map<string, Uint8Array>();
-      const document = new Uint8Array(await this.adapter.readBinary(locator.vaultRelativeProjectPath));
-      files.set("project.systemsculpt", document);
-      await this.captureTree(deriveStudioAssetsDir(locator.vaultRelativeProjectPath), "support", files);
+      const document = projection.files.get("project.systemsculpt");
+      if (!document) return { status: "invalid_candidate", message: "External projection lacks a project document." };
+      const parsed = JSON.parse(decoder.decode(document)) as Record<string, unknown>;
+      if (parsed.schema !== "studio.project.v1" || parsed.projectId !== projectId) return { status: "invalid_candidate", message: "External project document identity is invalid." };
       const recovered = await this.recover(projectId);
       if (recovered.status !== "ready") return recovered;
-      const candidateGeneration: SelectedGeneration = { files, metadata: recovered.generation.metadata };
-      const computed = await this.buildMarker(candidateGeneration);
-      if (computed.projectDocumentSha256 !== marker.projectDocumentSha256 || computed.supportManifestSha256 !== marker.supportManifestSha256) return { status: "invalid_candidate", message: "External projection marker hashes do not validate complete candidate bytes." };
-      return this.commitWholeGeneration({ projectId, commandKind: "external_sync", transform: () => files }, expected);
+      for (const path of recovered.generation.files.keys()) {
+        if (path.startsWith("support/") && !projection.files.has(path)) return { status: "invalid_candidate", message: "External projection is missing selected-generation support content." };
+      }
+      const authorityMarker = canonicalJson(await this.buildMarker(recovered.generation));
+      const computed = await this.buildMarker({ files: projection.files, metadata: recovered.generation.metadata });
+      const candidateHashesMatch = marker.projectDocumentSha256 === computed.projectDocumentSha256 && marker.supportManifestSha256 === computed.supportManifestSha256;
+      if (projection.markerRaw !== authorityMarker && !candidateHashesMatch) return { status: "invalid_candidate", message: "External projection marker is not a trusted base or complete candidate hash." };
+      return this.commitInternal({
+        kind: "external_sync",
+        projectId,
+        projectDocument: document,
+        supportFiles: [...projection.files].filter(([path]) => path.startsWith("support/")).map(([relativePath, bytes]) => ({ relativePath, bytes })),
+      }, expected);
     } catch (error) { return { status: "invalid_candidate", message: String(error) }; }
   }
 
-  private async publish(projectId: string, inputFiles: Map<string, Uint8Array>, parent: GenerationManifest | null, commandKind: string, locator: ProjectionLocator): Promise<CommitResult> {
+  private async publish(projectId: string, inputFiles: Map<string, Uint8Array>, parent: GenerationManifest | null, commandKind: StudioGenerationCommandKind, locator: ProjectionLocator): Promise<CommitResult> {
     try {
       const createdAt = this.now(); if (!RFC3339_MS.test(createdAt)) throw new Error("Timestamp must be RFC3339 with milliseconds.");
       const files = new Map<string, Uint8Array>(); const folded = new Set<string>();
@@ -341,7 +454,7 @@ export class StudioProjectGenerationStore {
     if (manifest.schemaVersion !== 1) throw new Error("future schema");
     if (!hasExactKeys(manifest as unknown as Record<string, unknown>, ["schemaVersion", "projectId", "revision", "parentRevision", "parentGenerationHash", "generationHash", "createdAt", "commandKind", "entries", "projection"])) throw new Error("manifest schema is not closed");
     authority(manifest.projectId);
-    if (!HASH.test(manifest.generationHash) || !Number.isSafeInteger(manifest.revision) || manifest.revision < 0 || !RFC3339_MS.test(manifest.createdAt)) throw new Error("invalid manifest identity");
+    if (!HASH.test(manifest.generationHash) || !Number.isSafeInteger(manifest.revision) || manifest.revision < 0 || !RFC3339_MS.test(manifest.createdAt) || !["create", "discrete_save", "autosave", "policy", "manifest", "asset", "run", "cache", "migration", "repair", "external_sync", "logical_rename"].includes(manifest.commandKind)) throw new Error("invalid manifest identity");
     if (!hasExactKeys(manifest.projection as unknown as Record<string, unknown>, ["canonicalPath", "supportRoot"]) || validateProjectionLocator({ vaultRelativeProjectPath: manifest.projection.canonicalPath }).vaultRelativeProjectPath !== manifest.projection.canonicalPath || deriveStudioAssetsDir(manifest.projection.canonicalPath) !== manifest.projection.supportRoot) throw new Error("invalid manifest projection");
     if ((manifest.revision === 0) !== (manifest.parentRevision === null && manifest.parentGenerationHash === null)) throw new Error("invalid root lineage");
     if (manifest.revision > 0 && (!Number.isSafeInteger(manifest.parentRevision) || manifest.parentRevision !== manifest.revision - 1 || !HASH.test(String(manifest.parentGenerationHash)))) throw new Error("invalid descendant lineage");
@@ -358,6 +471,11 @@ export class StudioProjectGenerationStore {
     if (rawManifest !== canonicalJson(manifest)) throw new Error("noncanonical manifest");
     const descriptorRaw = await this.adapter.read(`${directory}/commit.json`); const descriptor = JSON.parse(descriptorRaw) as CommitDescriptor;
     if (!hasExactKeys(descriptor as unknown as Record<string, unknown>, ["schemaVersion", "projectId", "revision", "generationHash", "manifestSha256", "entryCount", "logicallyCommittedAt"]) || descriptor.schemaVersion !== 1 || descriptor.projectId !== manifest.projectId || descriptor.revision !== manifest.revision || descriptor.generationHash !== generationHash || descriptor.entryCount !== manifest.entries.length || descriptor.manifestSha256 !== await hash(manifestBytes) || !RFC3339_MS.test(descriptor.logicallyCommittedAt) || descriptorRaw !== canonicalJson(descriptor)) throw new Error("invalid commit descriptor");
+    const rootListing = await this.adapter.list(directory);
+    if (rootListing.files.slice().sort(compareUtf8).join("\n") !== [`${directory}/commit.json`, `${directory}/manifest.json`].sort(compareUtf8).join("\n") || rootListing.folders.slice().sort(compareUtf8).join("\n") !== [`${directory}/files`].join("\n")) throw new Error("unmanifested generation metadata entry");
+    const manifestedPaths = manifest.entries.map((entry) => `${directory}/files/${entry.relativePath}`).sort(compareUtf8);
+    const actualPaths = await this.listTreeFiles(`${directory}/files`);
+    if (actualPaths.join("\n") !== manifestedPaths.join("\n")) throw new Error("unmanifested generation content entry");
     const files = new Map<string, Uint8Array>();
     for (const entry of manifest.entries) { const path = normalizeRelativePath(entry.relativePath); const bytes = new Uint8Array(await this.adapter.readBinary(`${directory}/files/${path}`)); if (bytes.byteLength !== entry.sizeBytes || await hash(bytes) !== entry.sha256) throw new Error("entry validation failed"); files.set(path, bytes); }
     return { manifest, files, directory };
@@ -368,23 +486,57 @@ export class StudioProjectGenerationStore {
     const manifestRead = await this.adapter.read(`${directory}/manifest.json`); if (manifestRead !== canonicalJson(manifest)) throw new Error("manifest fresh read validation failed");
   }
 
-  private async ensureProjection(generation: SelectedGeneration): Promise<"matching" | "repaired"> {
-    const marker = await this.buildMarker(generation);
+  private parseProjectionMarker(raw: string): ProjectionMarker | null {
     try {
-      const document = new Uint8Array(await this.adapter.readBinary(generation.metadata.projection.canonicalPath));
-      const sidecar = await this.adapter.read(`${generation.metadata.projection.canonicalPath}.identity.json`);
-      const support = await this.adapter.read(`${generation.metadata.projection.supportRoot}/.studio-projection.json`);
-      if (bytesEqual(document, generation.files.get("project.systemsculpt")!) && sidecar === canonicalJson(marker) && support === canonicalJson(marker)) return "matching";
-    } catch {}
-    await this.writeProjection(generation); return "repaired";
+      const marker = JSON.parse(raw) as Record<string, unknown>;
+      if (!hasExactKeys(marker, ["schemaVersion", "projectId", "revision", "generationHash", "projectDocumentSha256", "supportManifestSha256"])) return null;
+      if (marker.schemaVersion !== 1 || typeof marker.projectId !== "string" || !PROJECT_ID.test(marker.projectId) || !Number.isSafeInteger(marker.revision) || !HASH.test(String(marker.generationHash)) || !HASH.test(String(marker.projectDocumentSha256)) || !HASH.test(String(marker.supportManifestSha256))) return null;
+      return marker as ProjectionMarker;
+    } catch { return null; }
+  }
+
+  private async readProjection(locator: ProjectionLocator): Promise<ProjectionSnapshot | null> {
+    try {
+      const files = new Map<string, Uint8Array>();
+      files.set("project.systemsculpt", new Uint8Array(await this.adapter.readBinary(locator.vaultRelativeProjectPath)));
+      await this.captureTree(deriveStudioAssetsDir(locator.vaultRelativeProjectPath), "support", files);
+      let markerRaw: string | null = null; let supportMarkerRaw: string | null = null;
+      try { markerRaw = await this.adapter.read(`${locator.vaultRelativeProjectPath}.identity.json`); } catch {}
+      try { supportMarkerRaw = await this.adapter.read(`${deriveStudioAssetsDir(locator.vaultRelativeProjectPath)}/.studio-projection.json`); } catch {}
+      return { files, markerRaw, supportMarkerRaw };
+    } catch { return null; }
+  }
+
+  private generationFilesEqual(expected: ReadonlyMap<string, Uint8Array>, actual: ReadonlyMap<string, Uint8Array>): boolean {
+    return expected.size === actual.size && this.projectionIsAuthoritySubset(expected, actual);
+  }
+
+  private projectionIsAuthoritySubset(authorityFiles: ReadonlyMap<string, Uint8Array>, projectionFiles: ReadonlyMap<string, Uint8Array>): boolean {
+    for (const [path, bytes] of projectionFiles) { const authorityBytes = authorityFiles.get(path); if (!authorityBytes || !bytesEqual(bytes, authorityBytes)) return false; }
+    return true;
+  }
+
+  private async ensureProjection(generation: SelectedGeneration): Promise<"matching" | "repaired"> {
+    const marker = canonicalJson(await this.buildMarker(generation));
+    const locator = { vaultRelativeProjectPath: generation.metadata.projection.canonicalPath };
+    const projection = await this.readProjection(locator);
+    if (projection && this.generationFilesEqual(generation.files, projection.files) && projection.markerRaw === marker && projection.supportMarkerRaw === marker) return "matching";
+    if (projection && !this.generationFilesEqual(generation.files, projection.files)) throw new Error("Projection bytes differ from authority and require reconciliation.");
+    await this.writeProjection(generation);
+    return "repaired";
   }
 
   private async writeProjection(generation: SelectedGeneration): Promise<void> {
     const document = generation.files.get("project.systemsculpt"); if (!document) throw new Error("Generation lacks project document.");
     const path = generation.metadata.projection.canonicalPath; const supportRoot = generation.metadata.projection.supportRoot;
+    const expectedSupport = new Set([...generation.files.keys()].filter((entry) => entry.startsWith("support/")).map((entry) => `${supportRoot}/${entry.slice(8)}`));
+    const existing = await this.listTreeFiles(supportRoot);
+    for (const stale of existing) if (stale !== `${supportRoot}/.studio-projection.json` && !expectedSupport.has(stale)) await this.adapter.remove(stale);
     await this.mkdirRecursive(dirname(path)); await this.adapter.writeBinary(path, arrayBuffer(document));
     for (const [relativePath, bytes] of generation.files) if (relativePath.startsWith("support/")) { const target = `${supportRoot}/${relativePath.slice(8)}`; await this.mkdirRecursive(dirname(target)); await this.adapter.writeBinary(target, arrayBuffer(bytes)); }
     const marker = canonicalJson(await this.buildMarker(generation)); await this.adapter.write(`${path}.identity.json`, marker); await this.mkdirRecursive(supportRoot); await this.adapter.write(`${supportRoot}/.studio-projection.json`, marker);
+    const verified = await this.readProjection({ vaultRelativeProjectPath: path });
+    if (!verified || !this.generationFilesEqual(generation.files, verified.files) || verified.markerRaw !== marker || verified.supportMarkerRaw !== marker) throw new Error("Projection fresh-read validation failed.");
   }
 
   private async retirePreviousProjection(previous: GenerationManifest): Promise<void> {
@@ -401,6 +553,14 @@ export class StudioProjectGenerationStore {
     for (const [path, bytes] of generation.files) if (path.startsWith("support/") && !path.endsWith("/.studio-projection.json")) supportEntries.push({ relativePath: path.slice(8), sizeBytes: bytes.byteLength, sha256: await hash(bytes) });
     supportEntries.sort((a, b) => compareUtf8(a.relativePath, b.relativePath));
     return { schemaVersion: 1, projectId: generation.metadata.projectId, revision: generation.metadata.revision, generationHash: generation.metadata.generationHash, projectDocumentSha256: await hash(generation.files.get("project.systemsculpt")!), supportManifestSha256: await hash(encoder.encode(canonicalJson({ entries: supportEntries }))) };
+  }
+
+  private async listTreeFiles(root: string): Promise<string[]> {
+    let listed: { files: string[]; folders: string[] };
+    try { listed = await this.adapter.list(root); } catch { return []; }
+    const files = [...listed.files];
+    for (const folder of listed.folders) files.push(...await this.listTreeFiles(folder));
+    return files.sort(compareUtf8);
   }
 
   private async captureTree(root: string, prefix: string, output: Map<string, Uint8Array>): Promise<void> {

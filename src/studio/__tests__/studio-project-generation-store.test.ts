@@ -10,6 +10,7 @@ class MemoryAdapter implements StudioGenerationAdapter {
   readonly dirs = new Set<string>();
   failAfterWrites: number | null = null;
   private writes = 0;
+  readonly corruptReads = new Set<string>();
 
   armFailure(afterWrites: number | null): void {
     this.failAfterWrites = afterWrites;
@@ -29,6 +30,11 @@ class MemoryAdapter implements StudioGenerationAdapter {
   async readBinary(path: string): Promise<ArrayBuffer> {
     const value = this.files.get(path);
     if (!value) throw new Error(`missing ${path}`);
+    if (this.corruptReads.has(path)) {
+      const corrupted = value.slice();
+      corrupted[0] = corrupted[0] ^ 0xff;
+      return corrupted.buffer;
+    }
     return value.slice().buffer;
   }
   async write(path: string, data: string): Promise<void> {
@@ -66,6 +72,8 @@ class MemoryAdapter implements StudioGenerationAdapter {
 }
 
 const locator = { vaultRelativeProjectPath: "SystemSculpt/Studio/Alpha.systemsculpt" };
+const TEST_HASH_A = "a".repeat(64);
+const TEST_HASH_B = "b".repeat(64);
 const legacyProject = JSON.stringify({
   schema: "studio.project.v1",
   projectId: "project_alpha",
@@ -128,6 +136,117 @@ describe("StudioProjectGenerationStore", () => {
     }
   });
 
+  it("ingests changed document bytes with an unchanged selected-generation sidecar", async () => {
+    const adapter = new MemoryAdapter(); await seedLegacy(adapter);
+    const root = await new StudioProjectGenerationStore(adapter, { now: () => "2026-07-11T01:02:03.004Z" }).discoverAndAdopt(locator);
+    if (root.status !== "committed") throw new Error("adoption failed");
+    const changed = legacyProject.replace('"Alpha"', '"Externally edited"');
+    adapter.files.set(locator.vaultRelativeProjectPath, new TextEncoder().encode(changed));
+
+    const opened = await new StudioProjectGenerationStore(adapter, { now: () => "2026-07-11T02:02:03.004Z" }).open("project_alpha", locator);
+    expect(opened.status).toBe("ready");
+    if (opened.status === "ready") {
+      expect(opened.expectedGeneration.revision).toBe(1);
+      expect(new TextDecoder().decode(opened.generation.files.get("project.systemsculpt"))).toBe(changed);
+    }
+  });
+
+  it("ingests changed support bytes with an unchanged selected-generation sidecar", async () => {
+    const adapter = new MemoryAdapter(); await seedLegacy(adapter);
+    const root = await new StudioProjectGenerationStore(adapter, { now: () => "2026-07-11T01:02:03.004Z" }).discoverAndAdopt(locator);
+    if (root.status !== "committed") throw new Error("adoption failed");
+    const policyPath = "SystemSculpt/Studio/Alpha.systemsculpt-assets/policy/grants.json";
+    adapter.files.set(policyPath, new TextEncoder().encode("{\"schema\":\"studio.policy.v1\",\"external\":true}\n"));
+    const opened = await new StudioProjectGenerationStore(adapter, { now: () => "2026-07-11T02:02:03.004Z" }).open("project_alpha", locator);
+    expect(opened.status).toBe("ready");
+    if (opened.status === "ready") expect(new TextDecoder().decode(opened.generation.files.get("support/policy/grants.json"))).toContain("external");
+  });
+
+  it("preserves partial support replacement as read-only", async () => {
+    const adapter = new MemoryAdapter(); await seedLegacy(adapter);
+    const root = await new StudioProjectGenerationStore(adapter, { now: () => "2026-07-11T01:02:03.004Z" }).discoverAndAdopt(locator);
+    if (root.status !== "committed") throw new Error("adoption failed");
+    adapter.files.delete("SystemSculpt/Studio/Alpha.systemsculpt-assets/policy/grants.json");
+    const opened = await new StudioProjectGenerationStore(adapter).open("project_alpha", locator);
+    expect(opened.status).toBe("read_only");
+  });
+
+  it("preserves changed bytes with missing or stale markers instead of repairing over them", async () => {
+    const adapter = new MemoryAdapter(); await seedLegacy(adapter);
+    const root = await new StudioProjectGenerationStore(adapter, { now: () => "2026-07-11T01:02:03.004Z" }).discoverAndAdopt(locator);
+    if (root.status !== "committed") throw new Error("adoption failed");
+    const changed = legacyProject.replace('"Alpha"', '"Untrusted edit"');
+    adapter.files.set(locator.vaultRelativeProjectPath, new TextEncoder().encode(changed));
+    adapter.files.delete(`${locator.vaultRelativeProjectPath}.identity.json`);
+
+    const opened = await new StudioProjectGenerationStore(adapter).open("project_alpha", locator);
+    expect(opened.status).toBe("read_only");
+    expect(new TextDecoder().decode(adapter.files.get(locator.vaultRelativeProjectPath)!)).toBe(changed);
+  });
+
+  it("forks when a second locator claims the same project ID even with identical bytes", async () => {
+    const adapter = new MemoryAdapter(); await seedLegacy(adapter);
+    const root = await new StudioProjectGenerationStore(adapter, { now: () => "2026-07-11T01:02:03.004Z" }).discoverAndAdopt(locator);
+    if (root.status !== "committed") throw new Error("adoption failed");
+    const other = { vaultRelativeProjectPath: "SystemSculpt/Studio/Copy.systemsculpt" };
+    adapter.files.set(other.vaultRelativeProjectPath, new TextEncoder().encode(legacyProject));
+    const adopted = await new StudioProjectGenerationStore(adapter).discoverAndAdopt(other);
+    expect(adopted.status).toBe("fork_detected");
+  });
+
+  it("does not retire the old rename projection until destination fresh-read validation passes", async () => {
+    const adapter = new MemoryAdapter(); await seedLegacy(adapter);
+    const store = new StudioProjectGenerationStore(adapter, { now: () => "2026-07-11T01:02:03.004Z" });
+    const root = await store.discoverAndAdopt(locator);
+    if (root.status !== "committed") throw new Error("adoption failed");
+    const destination = { vaultRelativeProjectPath: "SystemSculpt/Studio/Renamed.systemsculpt" };
+    adapter.corruptReads.add(destination.vaultRelativeProjectPath);
+    const renamed = await store.commitWholeGeneration({
+      kind: "logical_rename", projectId: "project_alpha", locator: destination,
+      projectDocument: new TextEncoder().encode(legacyProject.replace('"Alpha"', '"Renamed"')),
+      projectManifest: new TextEncoder().encode("{}"),
+    }, root.expectedGeneration);
+    expect(renamed.status).toBe("storage_unavailable");
+    expect(adapter.files.has(locator.vaultRelativeProjectPath)).toBe(true);
+  });
+
+  it("projection repair removes stale support files and validates exact output", async () => {
+    const adapter = new MemoryAdapter(); await seedLegacy(adapter);
+    const root = await new StudioProjectGenerationStore(adapter, { now: () => "2026-07-11T01:02:03.004Z" }).discoverAndAdopt(locator);
+    if (root.status !== "committed") throw new Error("adoption failed");
+    const stale = "SystemSculpt/Studio/Alpha.systemsculpt-assets/stale.txt";
+    adapter.files.set(stale, new TextEncoder().encode("stale"));
+    adapter.files.delete(locator.vaultRelativeProjectPath);
+    const repaired = await new StudioProjectGenerationStore(adapter).repairProjection("project_alpha");
+    expect(repaired.status).toBe("ready");
+    expect(adapter.files.has(stale)).toBe(false);
+  });
+
+  it("rejects unmanifested generation files and bounded scan overflow", async () => {
+    const adapter = new MemoryAdapter(); await seedLegacy(adapter);
+    const root = await new StudioProjectGenerationStore(adapter, { now: () => "2026-07-11T01:02:03.004Z" }).discoverAndAdopt(locator);
+    if (root.status !== "committed") throw new Error("adoption failed");
+    const generationDir = [...adapter.dirs].find((path) => path.includes(`/0-${root.expectedGeneration.generationHash}`));
+    if (!generationDir) throw new Error("missing generation");
+    adapter.files.set(`${generationDir}/files/unmanifested.bin`, new Uint8Array([9]));
+    expect((await new StudioProjectGenerationStore(adapter).recover("project_alpha")).status).toBe("recovery_required");
+
+    adapter.files.delete(`${generationDir}/files/unmanifested.bin`);
+    adapter.dirs.add(".systemsculpt/studio/projects/project_alpha/generations/extra-a");
+    adapter.dirs.add(".systemsculpt/studio/projects/project_alpha/generations/extra-b");
+    expect((await new StudioProjectGenerationStore(adapter, { maxCandidates: 2 }).recover("project_alpha")).status).toBe("recovery_required");
+  });
+
+  it("keeps secret sentinels out of manifest and descriptor metadata", async () => {
+    const adapter = new MemoryAdapter();
+    const secretProject = legacyProject.replace('"Alpha"', '"SECRET_SENTINEL"');
+    adapter.files.set(locator.vaultRelativeProjectPath, new TextEncoder().encode(secretProject));
+    const result = await new StudioProjectGenerationStore(adapter, { now: () => "2026-07-11T01:02:03.004Z" }).discoverAndAdopt(locator);
+    if (result.status !== "committed") throw new Error("adoption failed");
+    const metadata = [...adapter.files].filter(([path]) => path.endsWith("manifest.json") || path.endsWith("commit.json")).map(([, bytes]) => new TextDecoder().decode(bytes)).join("\n");
+    expect(metadata).not.toContain("SECRET_SENTINEL");
+  });
+
   it("publishes a whole generation with exact revision+hash CAS and rejects stale writers", async () => {
     const adapter = new MemoryAdapter();
     await seedLegacy(adapter);
@@ -136,21 +255,36 @@ describe("StudioProjectGenerationStore", () => {
     if (adopted.status !== "committed") throw new Error("adoption failed");
 
     const committed = await store.commitWholeGeneration({
+      kind: "replace_project",
       projectId: "project_alpha",
-      commandKind: "discrete_save",
-      transform: (files) => {
-        files.set("project.systemsculpt", new TextEncoder().encode(legacyProject.replace('"Alpha"', '"Beta"')));
-        return files;
-      },
+      reason: "discrete_save",
+      projectDocument: new TextEncoder().encode(legacyProject.replace('"Alpha"', '"Beta"')),
     }, adopted.expectedGeneration);
     expect(committed.status).toBe("committed");
 
     const stale = await store.commitWholeGeneration({
+      kind: "replace_project",
       projectId: "project_alpha",
-      commandKind: "autosave",
-      transform: (files) => files,
+      reason: "autosave",
+      projectDocument: new TextEncoder().encode(legacyProject),
     }, adopted.expectedGeneration);
     expect(stale.status).toBe("stale_revision");
+  });
+
+  it("recovers deterministically after every descendant publication write cut", async () => {
+    for (let cut = 0; cut < 12; cut += 1) {
+      const adapter = new MemoryAdapter(); await seedLegacy(adapter);
+      const root = await new StudioProjectGenerationStore(adapter, { now: () => "2026-07-11T01:02:03.004Z" }).discoverAndAdopt(locator);
+      if (root.status !== "committed") throw new Error("adoption failed");
+      adapter.armFailure(cut);
+      await new StudioProjectGenerationStore(adapter, { now: () => "2026-07-11T02:02:03.004Z" }).commitWholeGeneration({
+        kind: "put_asset", projectId: "project_alpha", asset: { contentAddressedPath: `aa/${TEST_HASH_A}.bin`, bytes: new Uint8Array([1, 2, 3]) },
+      }, root.expectedGeneration);
+      adapter.armFailure(null);
+      const recovered = await new StudioProjectGenerationStore(adapter).recover("project_alpha");
+      expect(recovered.status).toBe("ready");
+      if (recovered.status === "ready") expect([0, 1]).toContain(recovered.expectedGeneration.revision);
+    }
   });
 
   it("never exposes a torn generation after restart", async () => {
@@ -161,12 +295,9 @@ describe("StudioProjectGenerationStore", () => {
     if (adopted.status !== "committed") throw new Error("adoption failed");
     adapter.armFailure(1);
     const result = await store.commitWholeGeneration({
+      kind: "put_asset",
       projectId: "project_alpha",
-      commandKind: "asset",
-      transform: (files) => {
-        files.set("support/assets/sha256/aa/blob.bin", new Uint8Array([0, 1, 2, 255]));
-        return files;
-      },
+      asset: { contentAddressedPath: `aa/${TEST_HASH_A}.bin`, bytes: new Uint8Array([0, 1, 2, 255]) },
     }, adopted.expectedGeneration);
     expect(result.status).toBe("storage_unavailable");
     adapter.armFailure(null);
@@ -176,19 +307,36 @@ describe("StudioProjectGenerationStore", () => {
     if (reopened.status === "ready") expect(reopened.expectedGeneration).toEqual(adopted.expectedGeneration);
   });
 
+  it("ignores corrupted newest manifest and descriptor candidates", async () => {
+    for (const target of ["manifest.json", "commit.json"]) {
+      const adapter = new MemoryAdapter(); await seedLegacy(adapter);
+      const store = new StudioProjectGenerationStore(adapter, { now: () => "2026-07-11T01:02:03.004Z" });
+      const root = await store.discoverAndAdopt(locator);
+      if (root.status !== "committed") throw new Error("adoption failed");
+      const child = await new StudioProjectGenerationStore(adapter, { now: () => "2026-07-11T02:02:03.004Z" }).commitWholeGeneration({ kind: "put_asset", projectId: "project_alpha", asset: { contentAddressedPath: `aa/${TEST_HASH_A}.bin`, bytes: new Uint8Array([1]) } }, root.expectedGeneration);
+      if (child.status !== "committed") throw new Error("commit failed");
+      const dir = [...adapter.dirs].find((path) => path.includes(`/1-${child.expectedGeneration.generationHash}`));
+      if (!dir) throw new Error("missing child");
+      const path = `${dir}/${target}`; const bytes = adapter.files.get(path)!; bytes[0] ^= 1;
+      const recovered = await new StudioProjectGenerationStore(adapter).recover("project_alpha");
+      expect(recovered.status).toBe("ready");
+      if (recovered.status === "ready") expect(recovered.expectedGeneration).toEqual(root.expectedGeneration);
+    }
+  });
+
   it("detects two valid children as a fork instead of choosing a winner", async () => {
     const adapter = new MemoryAdapter();
     await seedLegacy(adapter);
     const store = new StudioProjectGenerationStore(adapter, { now: () => "2026-07-11T01:02:03.004Z" });
     const root = await store.discoverAndAdopt(locator);
     if (root.status !== "committed") throw new Error("adoption failed");
-    const first = await store.commitWholeGeneration({ projectId: "project_alpha", commandKind: "autosave", transform: (f) => { f.set("support/a", new Uint8Array([1])); return f; } }, root.expectedGeneration);
+    const first = await store.commitWholeGeneration({ kind: "put_asset", projectId: "project_alpha", asset: { contentAddressedPath: `aa/${TEST_HASH_A}.bin`, bytes: new Uint8Array([1]) } }, root.expectedGeneration);
     if (first.status !== "committed") throw new Error("first commit failed");
     const firstDir = [...adapter.dirs].find((path) => path.includes(`/1-${first.expectedGeneration.generationHash}`));
     if (!firstDir) throw new Error("missing first generation");
     const copied = new Map([...adapter.files].filter(([path]) => path.startsWith(firstDir)).map(([path, bytes]) => [path, bytes.slice()]));
     await adapter.remove(firstDir);
-    const second = await new StudioProjectGenerationStore(adapter, { now: () => "2026-07-11T02:02:03.004Z" }).commitWholeGeneration({ projectId: "project_alpha", commandKind: "autosave", transform: (f) => { f.set("support/b", new Uint8Array([2])); return f; } }, root.expectedGeneration);
+    const second = await new StudioProjectGenerationStore(adapter, { now: () => "2026-07-11T02:02:03.004Z" }).commitWholeGeneration({ kind: "put_asset", projectId: "project_alpha", asset: { contentAddressedPath: `bb/${TEST_HASH_B}.bin`, bytes: new Uint8Array([2]) } }, root.expectedGeneration);
     if (second.status !== "committed") throw new Error("second commit failed");
     for (const [path, bytes] of copied) adapter.files.set(path, bytes);
     adapter.dirs.add(firstDir);

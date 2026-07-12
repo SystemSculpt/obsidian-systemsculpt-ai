@@ -21,16 +21,21 @@ function mimeToExtension(mimeType: string): string {
 export class StudioAssetStore {
   constructor(private readonly projectStore: StudioProjectStore) {}
 
-  async storeArrayBuffer(projectPath: string, bytes: ArrayBuffer, mimeType: string): Promise<StudioAssetRef> {
-    const project = await this.projectStore.loadProject(projectPath);
+  async stageArrayBuffer(projectPath: string, bytes: ArrayBuffer, mimeType: string): Promise<{ asset: StudioAssetRef; generationFile: { contentAddressedPath: string; bytes: Uint8Array } }> {
     const hash = await sha256HexFromArrayBuffer(bytes);
     const blobDir = deriveStudioAssetBlobDir(projectPath);
     const relativePath = normalizePath(`${blobDir}/${hash.slice(0, 2)}/${hash}.${mimeToExtension(mimeType)}`);
-    const generationPath = this.projectStore.supportRelativePath(projectPath, relativePath);
-    await this.projectStore.commitSupportFiles(projectPath, project.projectId, "asset", (files) => {
-      if (!files.has(generationPath)) files.set(generationPath, new Uint8Array(bytes.slice(0)));
-    });
-    return { hash, mimeType: String(mimeType || "application/octet-stream"), sizeBytes: bytes.byteLength, path: relativePath };
+    return {
+      asset: { hash, mimeType: String(mimeType || "application/octet-stream"), sizeBytes: bytes.byteLength, path: relativePath },
+      generationFile: { contentAddressedPath: `${hash.slice(0, 2)}/${hash}.${mimeToExtension(mimeType)}`, bytes: new Uint8Array(bytes.slice(0)) },
+    };
+  }
+
+  async storeArrayBuffer(projectPath: string, bytes: ArrayBuffer, mimeType: string): Promise<StudioAssetRef> {
+    const project = await this.projectStore.loadProject(projectPath);
+    const staged = await this.stageArrayBuffer(projectPath, bytes, mimeType);
+    await this.projectStore.putAsset(projectPath, project.projectId, staged.generationFile);
+    return staged.asset;
   }
 
   async readArrayBuffer(asset: StudioAssetRef, projectPath?: string): Promise<ArrayBuffer> {
