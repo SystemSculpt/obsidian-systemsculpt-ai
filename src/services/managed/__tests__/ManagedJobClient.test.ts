@@ -10,11 +10,13 @@ const json = (value: unknown, status = 200, headers: Record<string, string> = {}
 const txJob = (status = "uploading") => ({ id: "job-1", status, filename: "a.wav", content_type: "audio/wav", content_length_bytes: 5, expires_at: "2099-01-01T00:00:00Z" });
 const futureUploadExpiry = () => new Date(Date.now() + 600_000).toISOString();
 const imageJob = (status = "queued") => ({ id: "img-1", status, created_at: "2026-01-01T00:00:00Z", processing_started_at: null, completed_at: null, expires_at: "2099-01-01T00:00:00Z", error: null, attempt_count: 1 });
+const imageContractHeaders = (requestId = "req-1") => ({ "x-request-id": requestId, "x-systemsculpt-contract": "managed-capabilities-v2", "x-systemsculpt-job-contract": MANAGED_JOB_PROTOCOL, "x-systemsculpt-image-output-contract": "managed-image-output-v1", "x-systemsculpt-capability": "image_generation" });
+const imageError = (status: number, code: string, message: string, requestId = "req-1") => json({ contract_version: "managed-image-output-v1", code, message, request_id: requestId }, status, imageContractHeaders(requestId));
 
 describe("ManagedJobClient exact wire contract", () => {
   const request = jest.fn();
   const transport = new HostedTransportAdapter({ baseUrl: "https://api.test", pluginVersion: "6.0.0", licenseKey: () => "license", requestClient: { request } as any });
-  const client = new ManagedJobClient(transport);
+  const client = new ManagedJobClient(transport, undefined, () => "req-1");
   beforeEach(() => { request.mockReset(); });
 
   it("pins the exact closed managed image output companion fixture", () => {
@@ -227,10 +229,40 @@ describe("ManagedJobClient exact wire contract", () => {
     await expect(client.images.downloadOutput("123e4567-e89b-42d3-a456-426614174000", 0, metadata)).rejects.toMatchObject({ code: "malformed_response" });
   });
 
-  it.each([[400, "invalid_request", false], [401, "license_required", false], [403, "license_rejected", false], [404, "not_found", false], [409, "output_not_ready", false], [426, "upgrade_required", false], [429, "rate_limited", true], [500, "internal_error", false], [503, "temporarily_unavailable", true]] as const)("maps image output HTTP %s to %s without consuming an error body", async (status, code, retryable) => {
+  it.each([
+    [400, "invalid_request", "The managed image output request is invalid.", false],
+    [400, "unsupported_image_output_contract", "Expected managed-image-output-v1.", false],
+    [401, "license_required", "A valid license is required.", false], [403, "license_rejected", "License access is forbidden.", false],
+    [404, "not_found", "Image output was not found.", false], [409, "output_not_ready", "Image output is not ready.", false],
+    [426, "upgrade_required", "A newer SystemSculpt plugin version is required.", false], [429, "rate_limited", "Too many image output requests.", true],
+    [500, "internal_error", "The managed image output request could not be completed.", false], [503, "temporarily_unavailable", "The managed image output is temporarily unavailable.", true],
+  ] as const)("maps exact image companion envelope %s/%s for download, status, and list", async (status, code, message, retryable) => {
     const metadata = { index: 0, mime_type: "image/png" as const, size_bytes: 2, sha256: "a".repeat(64), width: null, height: null };
-    request.mockResolvedValue(new Response("secret storage diagnostic", { status, headers: { "x-request-id": "req-error" } }));
-    await expect(client.images.downloadOutput("123e4567-e89b-42d3-a456-426614174000", 0, metadata)).rejects.toMatchObject({ code, status, requestId: "req-error", retryable });
+    for (const invoke of [
+      () => client.images.downloadOutput("123e4567-e89b-42d3-a456-426614174000", 0, metadata),
+      () => client.images.status("img-1"),
+      () => client.images.list(),
+    ]) {
+      request.mockResolvedValueOnce(imageError(status, code, message));
+      await expect(invoke()).rejects.toMatchObject({ code, status, requestId: "req-1", retryable, message });
+    }
+  });
+
+  it("rejects mismatched companion response request IDs for download, status, and list", async () => {
+    const metadata = { index: 0, mime_type: "image/png" as const, size_bytes: 2, sha256: "a12871fee210fb8619291eaea194581cbd2531e4b23759d225f6806923f63222", width: 1, height: 1 };
+    request.mockResolvedValueOnce(new Response(new Uint8Array([1, 2]), { status: 200, headers: { ...imageContractHeaders("different-id"), "x-systemsculpt-output-index": "0", "x-systemsculpt-content-sha256": metadata.sha256, "content-type": "image/png", "content-length": "2", "cache-control": "no-store, max-age=0", "x-content-type-options": "nosniff", "content-disposition": "attachment; filename=\"systemsculpt-image-0.png\"" } }));
+    await expect(client.images.downloadOutput("123e4567-e89b-42d3-a456-426614174000", 0, metadata)).rejects.toMatchObject({ code: "malformed_response" });
+    request.mockResolvedValueOnce(json({ job: imageJob(), outputs: [], usage: { raw_usd: 0, cost_source: "provider", estimated: false } }, 200, imageContractHeaders("different-id")));
+    await expect(client.images.status("img-1")).rejects.toMatchObject({ code: "malformed_response" });
+    request.mockResolvedValueOnce(json({ items: [], next_before: null }, 200, imageContractHeaders("different-id")));
+    await expect(client.images.list()).rejects.toMatchObject({ code: "malformed_response" });
+  });
+
+  it("rejects non-closed image companion error envelopes without exposing arbitrary fields", async () => {
+    request.mockResolvedValue(imageError(404, "not_found", "Image output was not found.", "different-id"));
+    await expect(client.images.status("img-1")).rejects.toMatchObject({ code: "malformed_response" });
+    request.mockResolvedValue(json({ contract_version: "managed-image-output-v1", code: "not_found", message: "Image output was not found.", request_id: "req-1", storage: "secret" }, 404, imageContractHeaders()));
+    await expect(client.images.list()).rejects.toMatchObject({ code: "malformed_response", message: expect.not.stringContaining("secret") });
   });
 
   it("returns AbortError with no partial result when aborted while reading output bytes", async () => {

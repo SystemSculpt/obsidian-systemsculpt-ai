@@ -56,7 +56,7 @@ export class HostedTransportAdapter {
     if (!configuration) return Promise.reject(new Error("Managed Chat transport configuration is unavailable."));
     return this.send({ ...operation, method: "POST" }, {}, true, false, configuration);
   }
-  job(operation: ManagedTransportOperation) { return this.send(operation, operation.headers ?? {}, false, true); }
+  job(operation: ManagedTransportOperation, readErrorBody = true) { return this.send(operation, operation.headers ?? {}, false, true, undefined, readErrorBody); }
 
   async uploadSignedInput(url: string, method: string, headers: Record<string, string>, body: ArrayBuffer, signal?: AbortSignal): Promise<void> {
     const response = await this.client.request({ url, method, headers, body, stream: false, preserveResponseHeaders: false, signal });
