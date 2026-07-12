@@ -73,6 +73,7 @@ export function redactSettingsForBackup<T extends Record<string, unknown>>(setti
   for (const key of TOP_LEVEL_SECRET_KEYS) {
     redacted[key] = "";
   }
+  delete redacted.managedDisclosureAcceptance;
 
   redacted.customProviders = redactArrayApiKeys(settings.customProviders);
   redacted.mcpServers = redactArrayApiKeys(settings.mcpServers);

@@ -79,6 +79,15 @@ export const SETTINGS_MIGRATIONS: readonly SettingsMigrationStep[] = [
     describe: "Prune legacy keys removed before schema versioning was introduced",
     migrate: pruneLegacyKeysV1,
   },
+  {
+    to: 2,
+    describe: "Remove retired managed disclosure acceptance",
+    migrate: (settings) => {
+      const next = { ...settings };
+      delete next.managedDisclosureAcceptance;
+      return next;
+    },
+  },
 ];
 
 /** Read a non-negative integer schema version from raw data; 0 if absent/garbage. */

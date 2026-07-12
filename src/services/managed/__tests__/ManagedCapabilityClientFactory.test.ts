@@ -9,13 +9,12 @@ function responseFor(url: string): Response {
 }
 
 describe("ManagedCapabilityClientFactory", () => {
-  it("shares one graph and evaluates live credential/disclosure accessors on every invalidated admission", async () => {
+  it("shares one graph and evaluates the live credential accessor on every invalidated admission", async () => {
     const request = jest.spyOn(PlatformRequestClient.prototype, "request").mockImplementation(async (input) => responseFor(input.url));
     let key = "first";
-    let disclosure = { version: "disclosure-test-v1", acceptedAt: "first" };
     const graph = ManagedCapabilityClientFactory.createGraph({
       baseUrl: "https://api.test", pluginVersion: "1.0.0",
-      licenseKey: () => key, disclosureAcceptance: () => disclosure,
+      licenseKey: () => key,
     });
     const acquire = jest.spyOn(graph.admission, "acquireLease");
 
@@ -32,13 +31,10 @@ describe("ManagedCapabilityClientFactory", () => {
     expect(first.lease.descriptor.request_contracts).toContain(first.lease.requestContract);
     expect(request.mock.calls.some(([input]) => input.licenseKey === "first")).toBe(true);
 
-    disclosure = { version: "other-disclosure", acceptedAt: "changed" };
-    await expect(graph.client.acquireChatTurnLease()).resolves.toMatchObject({ outcome: "disclosure_required" });
     key = "second";
-    disclosure = { version: "disclosure-test-v1", acceptedAt: "second" };
     const second = await graph.client.acquireChatTurnLease();
     expect(second.outcome).toBe("allowed");
-    expect(acquire).toHaveBeenCalledTimes(3);
+    expect(acquire).toHaveBeenCalledTimes(2);
     expect(request.mock.calls.some(([input]) => input.licenseKey === "second")).toBe(true);
     expect(Object.isFrozen(graph)).toBe(true);
     expect(acquire.mock.instances.every((owner) => owner === graph.admission)).toBe(true);

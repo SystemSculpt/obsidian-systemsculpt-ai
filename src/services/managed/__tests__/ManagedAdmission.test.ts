@@ -9,7 +9,6 @@ describe("ManagedAdmission", () => {
   const getCatalog = jest.fn();
   const getAdmission = jest.fn();
   const licenseKey = jest.fn();
-  const disclosure = jest.fn();
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -17,10 +16,9 @@ describe("ManagedAdmission", () => {
     getCatalog.mockResolvedValue(catalog);
     getAdmission.mockResolvedValue({ outcome: "allowed", diagnostics: { status: 200 } });
     licenseKey.mockReturnValue("license");
-    disclosure.mockReturnValue({ version: "disclosure-test-v1", acceptedAt: "2026-07-11T00:00:00Z" });
   });
 
-  const create = () => new ManagedAdmission({ transport: { getCatalog, getAdmission } as any, licenseKey, disclosureAcceptance: disclosure, now: () => now });
+  const create = () => new ManagedAdmission({ transport: { getCatalog, getAdmission } as any, licenseKey, now: () => now });
 
   it.each(["allowed", "license_required", "license_rejected", "temporarily_unavailable", "rate_limited"] as const)(
     "preserves server outcome %s", async (outcome) => {
@@ -29,21 +27,24 @@ describe("ManagedAdmission", () => {
     },
   );
 
-  it("composes disclosure and capability states before payload creation", async () => {
+  it.each([null, "disclosure-compatibility-metadata"]) (
+    "treats disclosure metadata %p as non-authoritative and keeps payload creation lazy",
+    async (disclosureVersion) => {
     const payload = jest.fn();
-    disclosure.mockReturnValue(null);
+    const compatible = structuredClone(fixture) as any;
+    compatible.disclosure_version = disclosureVersion;
+    getCatalog.mockResolvedValue(ManagedCapabilityCatalog.parse(compatible));
     const admission = create();
     const first = await admission.withLease({ alias: "systemsculpt/chat", requestContract: "chat_turn" }, payload);
-    expect(first.outcome).toBe("disclosure_required");
-    expect(payload).not.toHaveBeenCalled();
+    expect(first).toBeUndefined();
+    expect(payload).toHaveBeenCalledTimes(1);
 
-    disclosure.mockReturnValue({ version: "disclosure-test-v1", acceptedAt: "then" });
     const unavailable = structuredClone(fixture) as any;
     unavailable.capabilities[0].availability = "unavailable";
     getCatalog.mockResolvedValue(ManagedCapabilityCatalog.parse(unavailable));
     const second = await create().withLease({ alias: "systemsculpt/chat" }, payload);
     expect(second.outcome).toBe("capability_unavailable");
-    expect(payload).not.toHaveBeenCalled();
+    expect(payload).toHaveBeenCalledTimes(1);
   });
 
   it("uses one deterministic cache entry, expiring at the exact boundary", async () => {
@@ -57,14 +58,12 @@ describe("ManagedAdmission", () => {
     expect(getCatalog).toHaveBeenCalledTimes(2);
   });
 
-  it("invalidates synchronously for license, exact disclosure snapshot, and contract version changes", async () => {
+  it("invalidates synchronously for license changes", async () => {
     const admission = create();
     await admission.acquireLease({ alias: "systemsculpt/chat" });
     licenseKey.mockReturnValue("other");
     await admission.acquireLease({ alias: "systemsculpt/chat" });
-    disclosure.mockReturnValue({ version: "disclosure-test-v1", acceptedAt: "later" });
-    await admission.acquireLease({ alias: "systemsculpt/chat" });
-    expect(getCatalog).toHaveBeenCalledTimes(3);
+    expect(getCatalog).toHaveBeenCalledTimes(2);
   });
 
   it.each([undefined, null, false, "300", {}, [], 0, -1, 1, 299, 301, 1.5, Number.NaN, Number.NEGATIVE_INFINITY, Number.POSITIVE_INFINITY])(
@@ -114,7 +113,7 @@ describe("ManagedAdmission", () => {
     await Promise.resolve();
     await Promise.resolve();
     expect(getCatalog).toHaveBeenCalledTimes(2);
-    disclosure.mockReturnValue({ version: "disclosure-test-v1", acceptedAt: "second-mutation" });
+    licenseKey.mockReturnValue("second-mutation");
     resolveSecond(catalog);
     expect((await pending).outcome).toBe("temporarily_unavailable");
     expect(getCatalog).toHaveBeenCalledTimes(2);

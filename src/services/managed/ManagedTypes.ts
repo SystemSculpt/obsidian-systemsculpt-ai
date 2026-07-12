@@ -14,8 +14,7 @@ export type ManagedRequestContractId = "chat_turn" | "text_generation" | "embedd
 export type ManagedMode = "stream" | "request" | "job";
 export type ManagedAvailability = "available" | "unavailable";
 export type ManagedServerOutcome = "allowed" | "license_required" | "license_rejected" | "temporarily_unavailable" | "rate_limited";
-export type ManagedAdmissionOutcome = ManagedServerOutcome | "disclosure_required" | "capability_unavailable";
-export type ManagedDisclosureAcceptance = { version: string; acceptedAt: string };
+export type ManagedAdmissionOutcome = ManagedServerOutcome | "capability_unavailable";
 
 export type JsonContractValue = string | number | boolean | null | readonly JsonContractValue[] | { readonly [key: string]: JsonContractValue };
 

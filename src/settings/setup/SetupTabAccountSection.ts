@@ -13,6 +13,29 @@ export function renderAccountSection(
 
   const { plugin } = tabInstance;
   const userStatus = checkPremiumUserStatus(plugin.settings);
+  const hasSavedLicense = (plugin.settings.licenseKey || "").trim().length > 0;
+
+  const validateCurrentLicense = async (): Promise<boolean> => {
+    const validatingNotice = new Notice("Validating license key...", 0);
+    try {
+      const success = await plugin.getLicenseManager().validateLicenseKey(true, false);
+      validatingNotice.hide?.();
+      if (!success) {
+        new Notice("Invalid license key. Please check and try again.");
+        return false;
+      }
+      try {
+        await plugin.modelService.refreshModels();
+      } catch {}
+      new Notice("License activated successfully.");
+      tabInstance.display();
+      return true;
+    } catch {
+      validatingNotice.hide?.();
+      new Notice("Unable to validate license. Try again.");
+      return false;
+    }
+  };
 
   const statusSetting = new Setting(root)
     .setName("SystemSculpt account")
@@ -22,111 +45,113 @@ export function renderAccountSection(
         : "Activate your license to turn on SystemSculpt chat, search, transcription, and workspace services."
     );
 
-  if (!isProActive) {
+  if (isProActive) {
     statusSetting.addButton((button) => {
       button
-        .setButtonText("View plans")
-        .setCta()
-        .onClick(() => window.open(SYSTEMSCULPT_WEBSITE.LIFETIME, "_blank"));
+        .setButtonText("Deactivate")
+        .onClick(async () => {
+          try {
+            button.setDisabled(true).setButtonText("Working...");
+            await plugin.getSettingsManager().updateSettings({
+              licenseValid: false,
+              enableSystemSculptProvider: false,
+              useSystemSculptAsFallback: false,
+            });
+            new Notice("License deactivated.");
+            tabInstance.display();
+          } finally {
+            button.setDisabled(false).setButtonText("Deactivate");
+          }
+        });
     });
-  } else {
     statusSetting.addExtraButton((button) => {
       button
         .setIcon("external-link")
         .setTooltip("Manage account")
         .onClick(() => window.open(SYSTEMSCULPT_WEBSITE.LICENSE, "_blank"));
     });
+  } else {
+    if (hasSavedLicense) {
+      statusSetting.addButton((button) => {
+        button.setButtonText("Retry").setCta().onClick(async () => {
+          try {
+            button.setDisabled(true).setButtonText("Working...");
+            await validateCurrentLicense();
+          } finally {
+            button.setDisabled(false).setButtonText("Retry");
+          }
+        });
+      });
+    }
+    statusSetting.addButton((button) => {
+      button
+        .setButtonText("View plans")
+        .onClick(() => window.open(SYSTEMSCULPT_WEBSITE.LIFETIME, "_blank"));
+    });
   }
 
   const licenseSetting = new Setting(root)
     .setName("License key")
-    .setDesc(isProActive ? "License validated." : "Paste your license key to activate SystemSculpt.");
+    .setDesc(
+      hasSavedLicense
+        ? "Saved key is hidden. Enter a new key only to replace it."
+        : "Enter a license key to activate SystemSculpt."
+    );
 
   let licenseInput: TextComponent | null = null;
+  let submitLicense: (() => Promise<void>) | null = null;
+  let licenseActionInFlight = false;
   licenseSetting.addText((text) => {
     licenseInput = text;
     text
-      .setPlaceholder("skss-...")
-      .setValue(plugin.settings.licenseKey || "")
-      .onChange(async (value) => {
-        await plugin.getSettingsManager().updateSettings({ licenseKey: value });
-      });
+      .setPlaceholder(hasSavedLicense ? "Saved key ••••••••" : "skss-...")
+      .setValue("");
     text.inputEl.type = "password";
-    tabInstance.registerListener(text.inputEl, "focus", () => {
-      text.inputEl.type = "text";
-    });
-    tabInstance.registerListener(text.inputEl, "blur", () => {
-      text.inputEl.type = "password";
+    tabInstance.registerListener(text.inputEl, "keydown", (event: KeyboardEvent) => {
+      if (event.key !== "Enter" || !submitLicense) return;
+      event.preventDefault();
+      void submitLicense();
     });
   });
 
   licenseSetting.addButton((button) => {
-    button.setButtonText(isProActive ? "Deactivate" : "Activate");
-    if (!isProActive) {
-      button.setCta();
-    }
-
-    button.onClick(async () => {
-      if (!licenseInput) return;
+    const idleLabel = hasSavedLicense ? "Replace" : "Activate";
+    button.setButtonText(idleLabel).setCta();
+    submitLicense = async () => {
+      if (!licenseInput || licenseActionInFlight) return;
+      licenseActionInFlight = true;
       const currentValue = (licenseInput.getValue() || "").trim();
+      const priorLicenseState = {
+        licenseKey: plugin.settings.licenseKey,
+        licenseValid: plugin.settings.licenseValid === true,
+        enableSystemSculptProvider: plugin.settings.enableSystemSculptProvider === true,
+        useSystemSculptAsFallback: plugin.settings.useSystemSculptAsFallback === true,
+      };
 
       try {
         button.setDisabled(true);
         button.setButtonText("Working...");
-
-        if (isProActive) {
-          await plugin.getSettingsManager().updateSettings({
-            licenseValid: false,
-            enableSystemSculptProvider: false,
-            useSystemSculptAsFallback: false,
-          });
-          new Notice("License deactivated.");
-          tabInstance.display();
-          return;
-        }
-
         if (!currentValue) {
           new Notice("Please enter a license key first.");
           return;
         }
 
         await plugin.getSettingsManager().updateSettings({ licenseKey: currentValue });
-        const validatingNotice = new Notice("Validating license key...", 0);
-        try {
-          const success = await plugin.getLicenseManager().validateLicenseKey(true, false);
-          validatingNotice.hide();
-          if (success) {
-            try {
-              await plugin.modelService.refreshModels();
-            } catch {}
-            new Notice("License activated successfully.");
-            tabInstance.display();
-          } else {
-            new Notice("Invalid license key. Please check and try again.");
-          }
-        } catch (error: any) {
-          validatingNotice.hide();
-          new Notice(`License validation failed: ${error?.message || error}`);
+        if (!(await validateCurrentLicense())) {
+          await plugin.getSettingsManager().updateSettings(priorLicenseState);
         }
+      } catch {
+        await plugin.getSettingsManager().updateSettings(priorLicenseState).catch(() => {});
+        new Notice("Unable to update license. Try again.");
       } finally {
+        licenseInput.setValue("");
+        licenseActionInFlight = false;
         button.setDisabled(false);
-        button.setButtonText(isProActive ? "Deactivate" : "Activate");
+        button.setButtonText(idleLabel);
       }
-    });
+    };
+    button.onClick(() => submitLicense?.());
   });
-
-  if (isProActive && (plugin.settings.licenseKey || "").length > 0) {
-    licenseSetting.addExtraButton((button) => {
-      button
-        .setIcon("copy")
-        .setTooltip("Copy license key")
-        .onClick(async () => {
-          if (!plugin.settings.licenseKey) return;
-          await navigator.clipboard.writeText(plugin.settings.licenseKey);
-          new Notice("License key copied to clipboard.");
-        });
-    });
-  }
 
   if (isProActive && (plugin.settings.licenseKey || "").trim().length > 0) {
     const creditsSetting = new Setting(root).setName("Credits").setDesc("Fetching credits balance…");
@@ -205,11 +230,10 @@ export function renderAccountSection(
           )}). Resets ${formatDate(balance.cycleEndsAt)}.${annualSavingsSuffix}`
         );
         refreshAnnualUpgradeButton?.();
-      } catch (error: any) {
+      } catch {
         annualUpgradeOffer = null;
         refreshAnnualUpgradeButton?.();
-        const message = error?.message || String(error);
-        creditsSetting.setDesc(`Unable to fetch credits balance. (${message})`);
+        creditsSetting.setDesc("Unable to fetch credits balance. Try again.");
       }
     };
 
@@ -249,10 +273,9 @@ export function renderAccountSection(
       applyState();
     });
 
-    creditsSetting.addExtraButton((button) => {
+    creditsSetting.addButton((button) => {
       button
-        .setIcon("external-link")
-        .setTooltip("Buy more credits")
+        .setButtonText("Buy credits")
         .onClick(() => {
           window.open(purchaseUrl || SYSTEMSCULPT_WEBSITE.LICENSE, "_blank");
         });
@@ -260,4 +283,18 @@ export function renderAccountSection(
 
     void syncCredits();
   }
+
+  const managedDataSetting = new Setting(root).setName("Managed data");
+  managedDataSetting.descEl.append("Managed features send request content to SystemSculpt. See ");
+  const termsLink = document.createElement("a");
+  termsLink.href = SYSTEMSCULPT_WEBSITE.TERMS;
+  termsLink.target = "_blank";
+  termsLink.rel = "noopener noreferrer";
+  termsLink.textContent = "Terms";
+  const privacyLink = document.createElement("a");
+  privacyLink.href = SYSTEMSCULPT_WEBSITE.PRIVACY;
+  privacyLink.target = "_blank";
+  privacyLink.rel = "noopener noreferrer";
+  privacyLink.textContent = "Privacy";
+  managedDataSetting.descEl.append(termsLink, " and ", privacyLink, ".");
 }

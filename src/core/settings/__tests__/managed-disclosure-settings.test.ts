@@ -1,4 +1,3 @@
-import { DEFAULT_SETTINGS } from "../../../types";
 import { SettingsManager } from "../SettingsManager";
 
 function pluginWith(loadDataResult: unknown) {
@@ -17,20 +16,18 @@ async function load(value: unknown) {
 }
 
 describe("managed disclosure settings", () => {
-  it("defaults to null and normalizes legacy missing/malformed values", async () => {
-    expect(DEFAULT_SETTINGS.managedDisclosureAcceptance).toBeNull();
-    for (const value of [undefined, {}, { version: "", acceptedAt: "x" }, { version: "v", acceptedAt: " " }, "v"]) {
-      const raw = value === undefined ? {} : { managedDisclosureAcceptance: value };
-      expect((await load(raw)).manager.getSettings().managedDisclosureAcceptance).toBeNull();
-    }
-  });
+  it.each([undefined, null, {}, { version: "legacy", acceptedAt: "2026-07-11T12:00:00.000Z" }, "legacy"])(
+    "removes legacy disclosure data %p from the current in-memory and persisted settings shape",
+    async (value) => {
+      const raw = value === undefined ? {} : { schemaVersion: 1, managedDisclosureAcceptance: value };
+      const { plugin, manager } = await load(raw);
+      expect(manager.getSettings()).not.toHaveProperty("managedDisclosureAcceptance");
+      expect(plugin.saveData).toHaveBeenLastCalledWith(expect.not.objectContaining({ managedDisclosureAcceptance: expect.anything() }));
+    },
+  );
 
-  it("round-trips exact valid values and persists updates through saveData", async () => {
-    const acceptance = { version: "disclosure-v2", acceptedAt: "2026-07-11T12:00:00.000Z" };
-    const { plugin, manager } = await load({ managedDisclosureAcceptance: acceptance });
-    expect(manager.getSettings().managedDisclosureAcceptance).toEqual(acceptance);
-    const next = { version: "disclosure-v3", acceptedAt: "later" };
-    await manager.updateSettings({ managedDisclosureAcceptance: next });
-    expect(plugin.saveData).toHaveBeenLastCalledWith(expect.objectContaining({ managedDisclosureAcceptance: next }));
+  it("does not make the removed setting writable through the current settings interface", async () => {
+    const { manager } = await load({});
+    expect("managedDisclosureAcceptance" in manager.getSettings()).toBe(false);
   });
 });

@@ -197,7 +197,7 @@ export default class SystemSculptPlugin extends Plugin {
   public getManagedCapabilityClient(): ManagedCapabilityClient {
     if (!this.managedCapabilityClient) this.managedCapabilityClient = ManagedCapabilityClientFactory.create({
       baseUrl: API_BASE_URL.replace(/\/api\/v1\/?$/, ""), pluginVersion: this.manifest.version,
-      licenseKey: () => this.settings.licenseKey, disclosureAcceptance: () => this.settings.managedDisclosureAcceptance,
+      licenseKey: () => this.settings.licenseKey,
     });
     return this.managedCapabilityClient;
   }

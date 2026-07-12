@@ -154,6 +154,11 @@ describe("SYSTEMSCULPT_WEBSITE", () => {
     expect(SYSTEMSCULPT_WEBSITE.LICENSE).toContain("license");
   });
 
+  it("has canonical Terms and Privacy URLs", () => {
+    expect(SYSTEMSCULPT_WEBSITE.TERMS).toBe("https://systemsculpt.com/terms");
+    expect(SYSTEMSCULPT_WEBSITE.PRIVACY).toBe("https://systemsculpt.com/privacy");
+  });
+
   it("has correct feedback URL pointing to GitHub issues", () => {
     expect(SYSTEMSCULPT_WEBSITE.FEEDBACK).toContain("github.com");
     expect(SYSTEMSCULPT_WEBSITE.FEEDBACK).toContain("issues/new");

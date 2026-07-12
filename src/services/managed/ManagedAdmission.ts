@@ -1,5 +1,5 @@
 import {
-  MANAGED_CAPABILITY_CONTRACT, ManagedCapabilityCatalogContract, ManagedDisclosureAcceptance,
+  MANAGED_CAPABILITY_CONTRACT, ManagedCapabilityCatalogContract,
   ManagedLease, ManagedOperation,
 } from "./ManagedTypes";
 import { HostedTransportAdapter } from "./adapters/HostedTransportAdapter";
@@ -7,10 +7,9 @@ import { HostedTransportAdapter } from "./adapters/HostedTransportAdapter";
 type Options = {
   transport: Pick<HostedTransportAdapter, "getCatalog" | "getAdmission">;
   licenseKey: () => string;
-  disclosureAcceptance: () => ManagedDisclosureAcceptance | null;
   now?: () => number;
 };
-type Snapshot = { licenseKey: string; disclosure: string; contractVersion: string };
+type Snapshot = { licenseKey: string; contractVersion: string };
 type Cache = { catalog: ManagedCapabilityCatalogContract; snapshots: Snapshot; fetchedAt: number };
 const CATALOG_TTL_MS = 300_000;
 
@@ -18,17 +17,14 @@ export class ManagedAdmission {
   private cache: Cache | null = null;
   constructor(private readonly options: Options) {}
 
-  private disclosureSnapshot(): string { return JSON.stringify(this.options.disclosureAcceptance()); }
   private snapshot(): Snapshot {
     return {
       licenseKey: this.options.licenseKey().trim(),
-      disclosure: this.disclosureSnapshot(),
       contractVersion: MANAGED_CAPABILITY_CONTRACT,
     };
   }
   private sameSnapshot(left: Snapshot, right: Snapshot): boolean {
     return left.licenseKey === right.licenseKey
-      && left.disclosure === right.disclosure
       && left.contractVersion === right.contractVersion;
   }
   private cacheMatches(now: number): boolean {
@@ -67,10 +63,6 @@ export class ManagedAdmission {
     if (!descriptor || descriptor.availability !== "available" || catalog.status !== "available") return { outcome: "capability_unavailable", descriptor, diagnostics: server.diagnostics };
     const requestContract = operation.requestContract ? descriptor.request_contracts.find((entry) => entry.capability === operation.requestContract) : undefined;
     if (operation.requestContract && !requestContract) return { outcome: "capability_unavailable", descriptor, diagnostics: server.diagnostics };
-    const acceptance = this.options.disclosureAcceptance();
-    if (catalog.disclosure_version !== null && (!acceptance || acceptance.version !== catalog.disclosure_version)) {
-      return { outcome: "disclosure_required", descriptor, requestContract, diagnostics: server.diagnostics };
-    }
     return { outcome: "allowed", descriptor, requestContract, diagnostics: server.diagnostics };
   }
 

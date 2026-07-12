@@ -1,7 +1,7 @@
 {
   "contract_version": "managed-capabilities-v2",
   "status": "available",
-  "disclosure_version": "disclosure-test-v1",
+  "disclosure_version": null,
   "cache_ttl_seconds": 300,
   "capabilities": [
     {

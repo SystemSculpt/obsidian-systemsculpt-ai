@@ -105,6 +105,17 @@ describe("migrateSettingsToCurrentSchema", () => {
     expect(result.settings.licenseValid).toBe(true);
   });
 
+  it("prunes retired disclosure acceptance when upgrading a schema-v1 settings file", () => {
+    const result = migrateSettingsToCurrentSchema({
+      schemaVersion: 1,
+      licenseKey: "user-key",
+      managedDisclosureAcceptance: { version: "legacy", acceptedAt: "2026-07-11T00:00:00Z" },
+    }, DEFAULT_SETTINGS);
+    expect(result.appliedSteps).toContain("Remove retired managed disclosure acceptance");
+    expect(result.settings).not.toHaveProperty("managedDisclosureAcceptance");
+    expect(result.settings.licenseKey).toBe("user-key");
+  });
+
   it("back-fills brand-new install defaults for empty persisted data", () => {
     const result = migrateSettingsToCurrentSchema({}, DEFAULT_SETTINGS);
     expect(result.settings.selectedModelId).toBe(DEFAULT_SETTINGS.selectedModelId);

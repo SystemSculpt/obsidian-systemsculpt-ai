@@ -2,7 +2,6 @@ import fixture from "../../../../testing/fixtures/managed/managed-capabilities-v
 import { PlatformRequestClient, type PlatformRequestInput } from "../../PlatformRequestClient";
 import { ManagedAdmission } from "../ManagedAdmission";
 import { ManagedCapabilityClient } from "../ManagedCapabilityClient";
-import type { ManagedDisclosureAcceptance } from "../ManagedTypes";
 import { HostedTransportAdapter } from "../adapters/HostedTransportAdapter";
 
 class AdmissionResponse extends Response {
@@ -27,19 +26,16 @@ export class DeterministicManagedRequestClient extends PlatformRequestClient {
 
 export function createDeterministicManagedChatClient(options?: {
   licenseKey?: () => string;
-  disclosureAcceptance?: () => ManagedDisclosureAcceptance | null;
 }) {
   const requestClient = new DeterministicManagedRequestClient();
   const licenseKey = options?.licenseKey ?? (() => "fixture-license");
-  const disclosureAcceptance = options?.disclosureAcceptance
-    ?? (() => ({ version: "disclosure-test-v1", acceptedAt: "2026-07-11T00:00:00Z" }));
   const transport = new HostedTransportAdapter({
     baseUrl: "https://api.test",
     pluginVersion: "5.11.0-test",
     licenseKey,
     requestClient,
   });
-  const admission = new ManagedAdmission({ transport, licenseKey, disclosureAcceptance });
+  const admission = new ManagedAdmission({ transport, licenseKey });
   return Object.freeze({
     client: new ManagedCapabilityClient({ admission, transport }),
     admission,

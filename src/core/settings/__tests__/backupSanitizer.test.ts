@@ -15,6 +15,7 @@ describe("backupSanitizer", () => {
         { id: "mcp-a", transport: "http", endpoint: "https://mcp.example.com", apiKey: "mcp-secret" },
       ],
       selectedModelId: "systemsculpt@@systemsculpt/ai-agent",
+      managedDisclosureAcceptance: { version: "retired", acceptedAt: "2026-07-11T00:00:00Z" },
     };
 
     const redacted = redactSettingsForBackup(source);
@@ -28,6 +29,7 @@ describe("backupSanitizer", () => {
     expect(redacted.mcpServers[0].apiKey).toBe("");
     expect(redacted.customProviders[0].endpoint).toBe("https://api.example.com");
     expect(redacted.selectedModelId).toBe("systemsculpt@@systemsculpt/ai-agent");
+    expect(redacted).not.toHaveProperty("managedDisclosureAcceptance");
   });
 
   it("restores backups while preserving current secrets instead of trusting backup secrets", () => {

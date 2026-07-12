@@ -1,9 +1,8 @@
 [
-  { "id": "success", "operation": "chat_turn", "evidence": { "server": "allowed", "disclosure": "accepted", "capability": "available" }, "expected": "allowed" },
+  { "id": "success", "operation": "chat_turn", "evidence": { "server": "allowed", "capability": "available" }, "expected": "allowed" },
   { "id": "authoritative_rejection", "operation": "chat_turn", "evidence": { "server": "license_rejected" }, "expected": "license_rejected" },
   { "id": "transient_auth_unavailable", "operation": "embeddings", "evidence": { "server": "temporarily_unavailable" }, "expected": "temporarily_unavailable" },
   { "id": "rate_limited", "operation": "text_generation", "evidence": { "server": "rate_limited", "retryAfterSeconds": 5 }, "expected": "rate_limited" },
-  { "id": "disclosure_required", "operation": "chat_turn", "evidence": { "server": "allowed", "disclosure": "not_accepted" }, "expected": "disclosure_required" },
   { "id": "credits_exhausted", "operation": "text_generation", "evidence": { "server": "allowed", "credits": "exhausted" }, "expected": "credits_exhausted" },
   { "id": "capability_unavailable", "operation": "systemsculpt/images", "evidence": { "server": "allowed", "capability": "unavailable" }, "expected": "capability_unavailable" },
   { "id": "malformed_contract", "operation": "capability_negotiation", "evidence": { "descriptor": "malformed" }, "expected": "malformed_contract" },

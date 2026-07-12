@@ -92,6 +92,110 @@ export type CreditsBalanceSnapshot = {
   } | null;
 };
 
+const invalidCreditsBalance = (): never => {
+  throw new SystemSculptError(
+    "Unable to read credits balance.",
+    ERROR_CODES.INVALID_RESPONSE,
+    502,
+  );
+};
+
+const creditsInteger = (value: unknown): number => {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+    return invalidCreditsBalance();
+  }
+  return value;
+};
+
+const creditsTimestamp = (value: unknown): string => {
+  if (typeof value !== "string") return invalidCreditsBalance();
+  const normalized = value.trim();
+  if (!normalized || !Number.isFinite(Date.parse(normalized))) return invalidCreditsBalance();
+  return normalized;
+};
+
+const creditsCheckoutUrl = (value: unknown): string | null => {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim();
+  if (!normalized) return null;
+  if (/^https?:\/\//i.test(normalized)) return normalized;
+  if (!normalized.startsWith("/")) return null;
+  try {
+    return new URL(normalized, SYSTEMSCULPT_WEBSITE.BASE_URL).toString();
+  } catch {
+    return null;
+  }
+};
+
+function decodeCreditsBalance(payload: unknown): CreditsBalanceSnapshot {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return invalidCreditsBalance();
+  }
+  const value = payload as Record<string, unknown>;
+  const includedRemaining = creditsInteger(value.included_remaining);
+  const addOnRemaining = creditsInteger(value.add_on_remaining);
+  const totalRemaining = creditsInteger(value.total_remaining);
+  const includedPerMonth = creditsInteger(value.included_per_month);
+  if (!Number.isSafeInteger(includedRemaining + addOnRemaining) || totalRemaining !== includedRemaining + addOnRemaining) {
+    return invalidCreditsBalance();
+  }
+
+  const cycleAnchorAt = creditsTimestamp(value.cycle_anchor_at);
+  const cycleStartedAt = creditsTimestamp(value.cycle_started_at);
+  const cycleEndsAt = creditsTimestamp(value.cycle_ends_at);
+  const turnInFlightUntil = value.turn_in_flight_until === null
+    ? null
+    : creditsTimestamp(value.turn_in_flight_until);
+
+  const billingCycleValue = typeof value.billing_cycle === "string"
+    ? value.billing_cycle.trim().toLowerCase()
+    : "";
+  const billingCycle: "monthly" | "annual" | "unknown" =
+    billingCycleValue === "monthly" || billingCycleValue === "annual"
+      ? billingCycleValue
+      : "unknown";
+
+  let annualUpgradeOffer: CreditsBalanceSnapshot["annualUpgradeOffer"] = null;
+  const offer = value.annual_upgrade_offer;
+  if (offer && typeof offer === "object" && !Array.isArray(offer)) {
+    const candidate = offer as Record<string, unknown>;
+    const amountSavedCents = candidate.amount_saved_cents;
+    const percentSaved = candidate.percent_saved;
+    const annualPriceCents = candidate.annual_price_cents;
+    const monthlyEquivalentAnnualCents = candidate.monthly_equivalent_annual_cents;
+    const checkoutUrl = creditsCheckoutUrl(candidate.checkout_path);
+    if (
+      typeof amountSavedCents === "number" && Number.isSafeInteger(amountSavedCents) && amountSavedCents > 0 &&
+      typeof percentSaved === "number" && Number.isSafeInteger(percentSaved) && percentSaved > 0 &&
+      typeof annualPriceCents === "number" && Number.isSafeInteger(annualPriceCents) && annualPriceCents > 0 &&
+      typeof monthlyEquivalentAnnualCents === "number" && Number.isSafeInteger(monthlyEquivalentAnnualCents) &&
+      monthlyEquivalentAnnualCents > annualPriceCents && checkoutUrl
+    ) {
+      annualUpgradeOffer = {
+        amountSavedCents,
+        percentSaved,
+        annualPriceCents,
+        monthlyEquivalentAnnualCents,
+        checkoutUrl,
+      };
+    }
+  }
+
+  return {
+    includedRemaining,
+    addOnRemaining,
+    totalRemaining,
+    includedPerMonth,
+    cycleEndsAt,
+    cycleStartedAt,
+    cycleAnchorAt,
+    turnInFlightUntil,
+    purchaseUrl: creditsCheckoutUrl(value.purchase_url),
+    billingCycle,
+    annualUpgradeOffer,
+  };
+}
+
 export type CreditsUsageSnapshot = {
   id: string;
   createdAt: string;
@@ -900,89 +1004,14 @@ export class SystemSculptService {
       });
     }
 
-    const payload = (await response.json()) as any;
-    const asNumber = (value: unknown): number => {
-      if (typeof value === "number" && Number.isFinite(value)) return value;
-      if (typeof value === "string") {
-        const parsed = Number(value);
-        if (Number.isFinite(parsed)) return parsed;
+    try {
+      return decodeCreditsBalance(await response.json());
+    } catch (error) {
+      if (error instanceof SystemSculptError && error.code === ERROR_CODES.INVALID_RESPONSE) {
+        throw error;
       }
-      return 0;
-    };
-    const asString = (value: unknown): string => (typeof value === "string" ? value : "");
-    const resolveBillingCycle = (value: unknown): "monthly" | "annual" | "unknown" => {
-      const normalized = String(value || "").trim().toLowerCase();
-      if (normalized === "monthly" || normalized === "annual") {
-        return normalized;
-      }
-      return "unknown";
-    };
-    const resolveCheckoutUrl = (value: unknown): string | null => {
-      if (typeof value !== "string") return null;
-      const trimmed = value.trim();
-      if (!trimmed) return null;
-      if (/^https?:\/\//i.test(trimmed)) {
-        return trimmed;
-      }
-      if (!trimmed.startsWith("/")) {
-        return null;
-      }
-      try {
-        return new URL(trimmed, SYSTEMSCULPT_WEBSITE.BASE_URL).toString();
-      } catch {
-        return null;
-      }
-    };
-    const resolveAnnualUpgradeOffer = (value: unknown): CreditsBalanceSnapshot["annualUpgradeOffer"] => {
-      if (!value || typeof value !== "object") {
-        return null;
-      }
-
-      const payloadValue = value as Record<string, unknown>;
-      const amountSavedCents = Math.floor(asNumber(payloadValue.amount_saved_cents));
-      const percentSaved = Math.floor(asNumber(payloadValue.percent_saved));
-      const annualPriceCents = Math.floor(asNumber(payloadValue.annual_price_cents));
-      const monthlyEquivalentAnnualCents = Math.floor(asNumber(payloadValue.monthly_equivalent_annual_cents));
-      const checkoutUrl = resolveCheckoutUrl(payloadValue.checkout_path);
-
-      if (
-        amountSavedCents <= 0 ||
-        percentSaved <= 0 ||
-        annualPriceCents <= 0 ||
-        monthlyEquivalentAnnualCents <= annualPriceCents ||
-        !checkoutUrl
-      ) {
-        return null;
-      }
-
-      return {
-        amountSavedCents,
-        percentSaved,
-        annualPriceCents,
-        monthlyEquivalentAnnualCents,
-        checkoutUrl,
-      };
-    };
-
-    const billingCycle = resolveBillingCycle(payload?.billing_cycle);
-    const annualUpgradeOffer = resolveAnnualUpgradeOffer(payload?.annual_upgrade_offer);
-
-    return {
-      includedRemaining: asNumber(payload?.included_remaining),
-      addOnRemaining: asNumber(payload?.add_on_remaining),
-      totalRemaining: asNumber(payload?.total_remaining),
-      includedPerMonth: asNumber(payload?.included_per_month),
-      cycleEndsAt: asString(payload?.cycle_ends_at),
-      cycleStartedAt: asString(payload?.cycle_started_at),
-      cycleAnchorAt: asString(payload?.cycle_anchor_at),
-      turnInFlightUntil: asString(payload?.turn_in_flight_until) || null,
-      purchaseUrl:
-        typeof payload?.purchase_url === "string" && payload.purchase_url.trim().length > 0
-          ? payload.purchase_url.trim()
-          : null,
-      billingCycle,
-      annualUpgradeOffer,
-    };
+      return invalidCreditsBalance();
+    }
   }
 
   public async getCreditsUsage(params?: {

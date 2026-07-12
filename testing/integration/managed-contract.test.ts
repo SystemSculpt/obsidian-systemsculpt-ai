@@ -17,7 +17,7 @@ function managedFixture(name: string): any {
 const canonicalHashes: Record<string, string> = {
   "admission-v1.json": "fc9938f0c6d6584815b1a59813cad2649554eadda0455fd789f604877fa01fcd",
   "managed-capabilities-v2.schema.json": "79c8f10d0cd00479573dc4b119347d5f99884bb368f460b82746db6f92d40b2d",
-  "managed-capabilities-v2.json": "820bf19d153938e0965eb375792612c10e024f4fddbfa4b53c1508d7428f75c0",
+  "managed-capabilities-v2.json": "92cf74114b087016d699242b926a5e2c7b7d258b0f048ceafe036917219c6a09",
 };
 
 const forbiddenSettingsKey = /(provider|model|endpoint|api.?key|oauth|pi(auth|session)?|session|fallback|readwise|mcpservers|catalog|licensevalid|lastvalidated|serverurl)/i;
@@ -59,6 +59,7 @@ describe("managed product contract fixtures", () => {
   it("publishes five first-party descriptors and preserves all descriptor fields", () => {
     const contract = managedFixture("managed-capabilities-v2.json");
     expect(contract.contract_version).toBe("managed-capabilities-v2");
+    expect(contract.disclosure_version).toBeNull();
     expect(contract.capabilities.map((entry: any) => entry.alias)).toEqual([
       "systemsculpt/chat",
       "systemsculpt/embeddings",
@@ -198,14 +199,14 @@ describe("managed product contract fixtures", () => {
     const scenarios = managedFixture("scenarios.json");
     expect(scenarios.map((entry: any) => entry.id)).toEqual([
       "success", "authoritative_rejection", "transient_auth_unavailable", "rate_limited",
-      "disclosure_required", "credits_exhausted", "capability_unavailable", "malformed_contract",
+      "credits_exhausted", "capability_unavailable", "malformed_contract",
       "stream_cancellation", "malformed_stream_frame", "missing_stream_terminal_marker",
       "empty_successful_stream", "in_stream_error", "job_cancellation", "job_resume",
       "platform_unsupported", "contract_version_mismatch",
     ]);
     expect(new Set(scenarios.map((entry: any) => entry.expected))).toEqual(new Set([
       "allowed", "license_rejected", "temporarily_unavailable", "rate_limited",
-      "disclosure_required", "credits_exhausted", "capability_unavailable", "malformed_contract",
+      "credits_exhausted", "capability_unavailable", "malformed_contract",
       "cancelled", "malformed_frame", "missing_terminal_marker", "empty_successful_stream",
       "in_stream_error", "resumed", "platform_unsupported", "contract_version_mismatch",
     ]));

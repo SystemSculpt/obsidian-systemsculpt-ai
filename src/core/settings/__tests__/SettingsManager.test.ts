@@ -93,6 +93,7 @@ jest.mock("../../../types", () => ({
 import { SettingsManager } from "../SettingsManager";
 import { Notice } from "obsidian";
 import { DEFAULT_SETTINGS, LogLevel } from "../../../types";
+import { CURRENT_SCHEMA_VERSION } from "../migrations/schemaVersion";
 import { migrateSettingsToCurrentSchema } from "../migrations/SettingsMigrator";
 
 const NoticeMock = Notice as unknown as jest.Mock;
@@ -581,7 +582,7 @@ describe("SettingsManager", () => {
 
       await settingsManager.loadSettings();
 
-      expect(settingsManager.settings.schemaVersion).toBe(1);
+      expect(settingsManager.settings.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
       expect(settingsManager.settings).not.toHaveProperty("selectedProvider");
       expect(settingsManager.settings).not.toHaveProperty("canvasFlowEnabled");
       expect(settingsManager.settings).not.toHaveProperty("recordSystemAudio");
@@ -602,7 +603,7 @@ describe("SettingsManager", () => {
       });
 
       // Restored data is migrated to the current schema, not written back stale.
-      expect(settingsManager.settings.schemaVersion).toBe(1);
+      expect(settingsManager.settings.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
       expect(settingsManager.settings).not.toHaveProperty("selectedProvider");
       expect(settingsManager.settings).not.toHaveProperty("canvasFlowEnabled");
       expect(settingsManager.settings).not.toHaveProperty("recordSystemAudio");
@@ -626,7 +627,7 @@ describe("SettingsManager", () => {
       await settingsManager.reloadSettingsFromDisk();
 
       // The disk-reload entry point migrates exactly like load/restore.
-      expect(settingsManager.settings.schemaVersion).toBe(1);
+      expect(settingsManager.settings.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
       expect(settingsManager.settings).not.toHaveProperty("selectedProvider");
       expect(settingsManager.settings).not.toHaveProperty("canvasFlowEnabled");
       expect(settingsManager.settings).not.toHaveProperty("recordSystemAudio");

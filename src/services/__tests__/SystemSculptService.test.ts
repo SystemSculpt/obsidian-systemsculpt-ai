@@ -1181,6 +1181,70 @@ describe("SystemSculptService", () => {
     });
   });
 
+  it.each([
+    ["missing included balance", { included_remaining: undefined }],
+    ["NaN included balance", { included_remaining: Number.NaN }],
+    ["negative add-on balance", { add_on_remaining: -1 }],
+    ["fractional total balance", { total_remaining: 8999.5 }],
+    ["numeric strings", { included_per_month: "10000" }],
+    ["inconsistent total", { total_remaining: 8999 }],
+    ["invalid cycle end", { cycle_ends_at: "not-a-date" }],
+    ["missing cycle start", { cycle_started_at: undefined }],
+  ])("rejects malformed credits balance data: %s", async (_label, override) => {
+    const plugin = createPlugin();
+    const service = SystemSculptService.getInstance(plugin);
+    const payload = {
+      included_remaining: 9000,
+      add_on_remaining: 0,
+      total_remaining: 9000,
+      included_per_month: 10000,
+      cycle_anchor_at: "2026-02-01T00:00:00.000Z",
+      cycle_started_at: "2026-02-01T00:00:00.000Z",
+      cycle_ends_at: "2026-03-01T00:00:00.000Z",
+      turn_in_flight_until: null,
+      purchase_url: null,
+      ...override,
+    };
+    global.fetch = jest.fn().mockResolvedValue(
+      new Response(JSON.stringify(payload), { status: 200, headers: { "content-type": "application/json" } })
+    ) as any;
+
+    await expect(service.getCreditsBalance()).rejects.toMatchObject({
+      name: "SystemSculptError",
+      code: ERROR_CODES.INVALID_RESPONSE,
+      statusCode: 502,
+      message: "Unable to read credits balance.",
+    });
+  });
+
+  it("fails closed when optional annual upgrade data is malformed", async () => {
+    const plugin = createPlugin();
+    const service = SystemSculptService.getInstance(plugin);
+    global.fetch = jest.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        included_remaining: 9000,
+        add_on_remaining: 0,
+        total_remaining: 9000,
+        included_per_month: 10000,
+        cycle_anchor_at: "2026-02-01T00:00:00.000Z",
+        cycle_started_at: "2026-02-01T00:00:00.000Z",
+        cycle_ends_at: "2026-03-01T00:00:00.000Z",
+        turn_in_flight_until: null,
+        purchase_url: null,
+        billing_cycle: "monthly",
+        annual_upgrade_offer: {
+          amount_saved_cents: "12900",
+          percent_saved: 57,
+          annual_price_cents: 9900,
+          monthly_equivalent_annual_cents: 22800,
+          checkout_path: "/checkout",
+        },
+      }), { status: 200, headers: { "content-type": "application/json" } })
+    ) as any;
+
+    await expect(service.getCreditsBalance()).resolves.toMatchObject({ annualUpgradeOffer: null });
+  });
+
   it("fetches credits usage history from the SystemSculpt API", async () => {
     const plugin = createPlugin();
     const service = SystemSculptService.getInstance(plugin);
