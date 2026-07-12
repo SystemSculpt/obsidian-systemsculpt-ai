@@ -392,7 +392,18 @@ function semanticOccurrences(file, source, checker, programSourceFile, semanticB
       destinationExpressionFingerprint: destination
     };
     provenance.semanticCallChainFingerprint = canonicalHash({ classification, primitive, occurrence: occurrence.minimalOccurrenceFingerprint, binding, importChain: chain, wrapperCallChain, destination });
-    occurrences.push({ path: file, classification, primitiveOrImport: primitive, occurrence, provenance, sourceSpan: span(sf, node) });
+    const dependencyPathSet = new Set(dependencies.map(dependency => dependency.path).filter(dependencyPath => dependencyPath.startsWith('src/')));
+    const collectDependencyPaths = dependencyNode => {
+      if (checker && ts.isIdentifier(dependencyNode)) {
+        let symbol = checker.getSymbolAtLocation(dependencyNode); if (symbol?.flags & ts.SymbolFlags.Alias) symbol = checker.getAliasedSymbol(symbol);
+        for (const declaration of symbol?.declarations || []) { const dependencyPath = portablePath(declaration.getSourceFile().fileName); if (dependencyPath.startsWith('src/')) dependencyPathSet.add(dependencyPath); }
+      }
+      ts.forEachChild(dependencyNode, collectDependencyPaths);
+    };
+    for (const argument of args) collectDependencyPaths(argument);
+    const finding = { path: file, classification, primitiveOrImport: primitive, occurrence, provenance, sourceSpan: span(sf, node) };
+    Object.defineProperty(finding, 'dependencyPaths', { value: [...dependencyPathSet].sort(), enumerable: false });
+    occurrences.push(finding);
   };
   for (const item of imports) if (!item.typeOnly && SDK_PACKAGES.test(item.module)) add(item.node, item.module, 'sdk_runtime', { localSymbol: item.module });
   const transportNames = new Set(['fetch', 'requestUrl', 'httpRequest', 'request', 'get', 'connect', 'WebSocket', 'XMLHttpRequest']);
@@ -523,7 +534,7 @@ function semanticOccurrences(file, source, checker, programSourceFile, semanticB
   if (hazards.length) throw new Error(hazards.join('\n'));
   return occurrences.sort((a, b) => compareRecords(a, b));
 }
-function semanticTree(root, mode, ref, semanticOptions = {}) {
+export function semanticTree(root, mode, ref, semanticOptions = {}) {
   const files = mode === 'source-ref' ? baselineFiles(root, ref) : mode === 'index' ? indexFiles(root) : worktreeFiles(root);
   const sources = new Map(files.map(file => [path.resolve(root, file), sourceFor(root, mode, ref, file)]));
   const options = { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext, moduleResolution: ts.ModuleResolutionKind.Bundler, allowJs: true, skipLibCheck: true, noResolve: false };
@@ -659,14 +670,34 @@ function semanticTree(root, mode, ref, semanticOptions = {}) {
   }
   return occurrences;
 }
+function cachedSemanticTree(cache, root, mode, ref, semanticOptions = {}) {
+  if (!(cache instanceof Map) || (mode !== 'source-ref' && mode !== 'index')) return semanticTree(root, mode, ref, semanticOptions);
+  const tree = mode === 'source-ref' ? git(root, ['rev-parse', `${ref}^{tree}`]).trim() : git(root, ['write-tree']).trim();
+  const key = canonical({ root: fs.realpathSync(root), tree, stableDeclarationPaths: Boolean(semanticOptions.stableDeclarationPaths) });
+  if (!cache.has(key)) cache.set(key, semanticTree(root, 'source-ref', tree, semanticOptions));
+  return cache.get(key);
+}
 function mappingKey(record) { return `${record.path}|${record.classification}|${record.primitiveOrImport}`; }
 export function defaultDispositionLedgerPath(fixturePath) {
   const suffix = path.basename(fixturePath).match(/^egress-baseline-(.+)\.json$/)?.[1] || IMMUTABLE_BASELINE_REF;
   return path.join(path.dirname(fixturePath), `egress-dispositions-v1-${suffix}.json`);
 }
-function artifactPath(root, file) { return path.relative(root, path.resolve(file)).replaceAll(path.sep, '/'); }
+function artifactPath(root, file) { const canonicalRoot = fs.realpathSync(root), canonicalFile = fs.realpathSync(file); return path.relative(canonicalRoot, canonicalFile).replaceAll(path.sep, '/'); }
 function exactKeys(value, expected, category, label) {
   if (!value || typeof value !== 'object' || Array.isArray(value) || canonical(Object.keys(value).sort()) !== canonical([...expected].sort())) throw new Error(`${category}: ${label} has malformed fields; restore the reviewed disposition ledger`);
+}
+const TRANSITION_FIELDS = ['sequence', 'historicalRecordId', 'v2OccurrenceId', 'ownerPlan', 'from', 'to', 'predecessorSourceTree', 'stagedSourceTree', 'sourceEvidence', 'predecessorLedger', 'previousTransitionHash', 'transitionHash'];
+const dispositionHash = transition => hash(`network-egress-disposition-v1\0${canonical(Object.fromEntries(Object.entries(transition).filter(([key]) => key !== 'transitionHash')))}`);
+function requireGitObject(root, object, type, category = 'disposition_source_tree_missing') {
+  try { if (git(root, ['cat-file', '-t', object]).trim() !== type) throw new Error(); return git(root, ['cat-file', '-p', object]); }
+  catch { throw new Error(`${category}: Git ${type} ${String(object).slice(0, 12)} is unavailable; restore reviewed objects`); }
+}
+function treeBlob(root, tree, file) {
+  const line = git(root, ['ls-tree', tree, '--', file]).trim();
+  if (!line) return null;
+  const match = line.match(/^100644 blob ([0-9a-f]{40})\t/);
+  if (!match) throw new Error(`disposition_source_blob_mismatch: ${file}:1:1 is not a regular reviewed blob`);
+  return match[1];
 }
 export function loadAndValidateDispositionLedger({ dispositionLedger } = {}) {
   let ledger;
@@ -675,9 +706,18 @@ export function loadAndValidateDispositionLedger({ dispositionLedger } = {}) {
   exactKeys(ledger, ['schemaVersion', 'ledgerVersion', 'historicalFixture', 'semanticCatalog', 'transitions'], 'disposition_history_tampered', 'ledger');
   exactKeys(ledger.historicalFixture, ['path', 'gitBlob', 'sha256'], 'disposition_history_tampered', 'historicalFixture');
   exactKeys(ledger.semanticCatalog, ['path', 'gitBlob', 'sha256', 'mappingCount', 'mappingSha256'], 'disposition_history_tampered', 'semanticCatalog');
-  if (ledger.schemaVersion !== 1 || ledger.ledgerVersion !== 'network-egress-dispositions-v1') throw new Error('disposition_history_tampered: unsupported disposition schemaVersion or ledgerVersion; restore the version 1 ledger');
-  if (!Array.isArray(ledger.transitions)) throw new Error('disposition_history_tampered: transitions must be an array; restore the reviewed disposition ledger');
-  if (ledger.transitions.length) throw new Error('disposition_transition_unsupported: this Plan025b core checkpoint accepts only an empty transition ledger; use the reviewed transition-generator checkpoint');
+  if (ledger.schemaVersion !== 1 || ledger.ledgerVersion !== 'network-egress-dispositions-v1') throw new Error('disposition_history_tampered: unsupported disposition schemaVersion or ledgerVersion; restore version 1');
+  if (!Array.isArray(ledger.transitions)) throw new Error('disposition_history_tampered: transitions must be an array');
+  const seen = new Set();
+  ledger.transitions.forEach((entry, index) => {
+    exactKeys(entry, TRANSITION_FIELDS, 'disposition_history_tampered', `transition ${index}`);
+    exactKeys(entry.predecessorLedger, ['gitBlob', 'sha256', 'transitionCount', 'finalTransitionHash'], 'disposition_history_tampered', `transition ${index} predecessor`);
+    if (entry.sequence !== index || entry.from !== 'present' || entry.to !== 'removed') throw new Error(`disposition_not_append_only: transition ${index} is reordered or unsupported`);
+    if (seen.has(entry.historicalRecordId)) throw new Error(`disposition_duplicate: ${entry.historicalRecordId} transitions twice`); seen.add(entry.historicalRecordId);
+    if (entry.previousTransitionHash !== (index ? ledger.transitions[index - 1].transitionHash : null) || entry.transitionHash !== dispositionHash(entry)) throw new Error(`disposition_history_tampered: transition ${index} hash chain differs`);
+    if (!Array.isArray(entry.sourceEvidence) || !entry.sourceEvidence.length) throw new Error(`disposition_source_blob_mismatch: transition ${index} lacks evidence`);
+    entry.sourceEvidence.forEach((evidence, evidenceIndex) => exactKeys(evidence, ['path', 'beforeGitBlobOrNull', 'afterGitBlobOrNull'], 'disposition_history_tampered', `transition ${index} evidence ${evidenceIndex}`));
+  });
   return ledger;
 }
 export function validateDispositionAnchors({ root = process.cwd(), fixture, verificationArtifact, ledger }) {
@@ -691,51 +731,131 @@ export function validateDispositionAnchors({ root = process.cwd(), fixture, veri
   return { historical: JSON.parse(historicalBytes), catalog };
 }
 export function buildEffectiveDispositionMap({ historical, catalog, ledger }) {
-  if (ledger.transitions.length) throw new Error('disposition_transition_unsupported: this Plan025b core checkpoint accepts only an empty transition ledger; use the reviewed transition-generator checkpoint');
   const identity = record => `${record.id || record.historicalRecordId}|${record.origin || record.historicalOrigin}|${record.occurrenceIdentity || record.historicalOccurrenceIdentity}`;
   const mappings = new Map();
-  for (const mapped of catalog.records || []) {
-    const key = identity(mapped);
-    if (mappings.has(key)) throw new Error(`disposition_mapping_mismatch: duplicate v2 mapping for ${mapped.historicalRecordId}; restore the reviewed semantic catalog`);
-    mappings.set(key, mapped);
-  }
+  for (const mapped of catalog.records || []) { const key = identity(mapped); if (mappings.has(key)) throw new Error(`disposition_mapping_mismatch: duplicate mapping ${mapped.historicalRecordId}`); mappings.set(key, mapped); }
+  const transitions = new Map(ledger.transitions.map(entry => [entry.historicalRecordId, entry]));
   const records = (historical.records || []).map(record => {
-    const key = identity(record);
-    const mapped = mappings.get(key);
-    if (record.currentStatus === 'removed') {
-      if (mapped) throw new Error(`disposition_mapping_mismatch: historical removed record ${record.id} has a v2 mapping; restore the reviewed artifacts`);
-      return { historicalRecordId: record.id, historicalOccurrenceIdentity: record.occurrenceIdentity, ownerPlan: record.ownerPlan, effectiveStatus: 'historical_removed' };
-    }
-    if (record.currentStatus !== 'present' || !mapped) throw new Error(`disposition_mapping_mismatch: present historical record ${record.id} requires exactly one v2 mapping; restore the reviewed artifacts`);
-    mappings.delete(key);
-    return { historicalRecordId: record.id, historicalOccurrenceIdentity: record.occurrenceIdentity, v2OccurrenceId: mapped.v2OccurrenceId, ownerPlan: record.ownerPlan, effectiveStatus: 'present' };
+    const key = identity(record), mapped = mappings.get(key), transition = transitions.get(record.id);
+    if (record.currentStatus === 'removed') { if (mapped || transition) throw new Error(`disposition_mapping_mismatch: historical-only removed ${record.id} cannot be mapped or transitioned`); return { historicalRecordId: record.id, historicalOccurrenceIdentity: record.occurrenceIdentity, ownerPlan: record.ownerPlan, effectiveStatus: 'historical_removed' }; }
+    if (record.currentStatus !== 'present' || !mapped) throw new Error(`disposition_mapping_mismatch: present record ${record.id} requires one mapping`);
+    if (transition?.v2OccurrenceId !== undefined && transition.v2OccurrenceId !== mapped.v2OccurrenceId) throw new Error(`disposition_mapping_mismatch: ${record.id} v2 identity differs`);
+    if (transition && transition.ownerPlan !== record.ownerPlan) throw new Error(`disposition_owner_mismatch: ${record.id} belongs to ${record.ownerPlan}`);
+    mappings.delete(key); transitions.delete(record.id);
+    return { historicalRecordId: record.id, historicalOccurrenceIdentity: record.occurrenceIdentity, v2OccurrenceId: mapped.v2OccurrenceId, ownerPlan: record.ownerPlan, effectiveStatus: transition ? 'removed' : 'present' };
   });
-  if (mappings.size) throw new Error(`disposition_mapping_mismatch: semantic catalog contains ${mappings.size} unknown historical mappings; restore the reviewed artifacts`);
+  if (mappings.size || transitions.size) throw new Error('disposition_mapping_mismatch: unknown catalog or transition identity');
   return new Map(records.map(record => [`${record.historicalRecordId}|${record.historicalOccurrenceIdentity}`, record]));
 }
-export function verifyDispositionLedger({ root = process.cwd(), fixture, verificationArtifact, dispositionLedger = defaultDispositionLedgerPath(fixture) } = {}) {
+function requireCheckpointCommit(root, tree, ledgerPath, ledgerBlob) {
+  const commits = git(root, ['rev-list', 'HEAD']).split('\n').filter(Boolean);
+  const matched = commits.some(commit => git(root, ['rev-parse', `${commit}^{tree}`]).trim() === tree && treeBlob(root, tree, ledgerPath) === ledgerBlob);
+  if (!matched) throw new Error('disposition_predecessor_mismatch: predecessor source tree and ledger blob are not paired in one repository commit');
+}
+function verifyPredecessor(root, ledger, entry, index) {
+  const bytes = Buffer.from(requireGitObject(root, entry.predecessorLedger.gitBlob, 'blob', 'disposition_predecessor_mismatch'));
+  if (hash(bytes) !== entry.predecessorLedger.sha256) throw new Error(`disposition_predecessor_mismatch: transition ${index} predecessor SHA differs`);
+  let predecessor; try { predecessor = JSON.parse(bytes); } catch { throw new Error(`disposition_predecessor_mismatch: transition ${index} predecessor is malformed`); }
+  const count = entry.predecessorLedger.transitionCount, prefix = ledger.transitions.slice(0, count);
+  if (count > index || entry.predecessorLedger.finalTransitionHash !== (count ? prefix.at(-1).transitionHash : null) || canonical(predecessor.transitions) !== canonical(prefix) || canonical({ ...predecessor, transitions: [] }) !== canonical({ ...ledger, transitions: [] })) throw new Error(`disposition_predecessor_mismatch: transition ${index} does not pin the reviewed prefix`);
+}
+function occurrenceMatches(record, actual) { return Boolean(actual && record.occurrence.minimalOccurrenceFingerprint === actual.occurrence.minimalOccurrenceFingerprint && record.provenance.semanticCallChainFingerprint === actual.provenance.semanticCallChainFingerprint); }
+function exactOccurrence(record, occurrences) { return occurrences.filter(item => mappingKey(item) === mappingKey(record)).some(actual => occurrenceMatches(record, actual)); }
+function dispositionOccurrenceErrors(v3, statusById, occurrences) {
+  const semanticOwners = new Map();
+  for (const record of v3.records) { const key = `${mappingKey(record)}|${record.occurrence.minimalOccurrenceFingerprint}|${record.provenance.semanticCallChainFingerprint}`; if (!semanticOwners.has(key)) semanticOwners.set(key, new Set()); semanticOwners.get(key).add(record.ownerPlan); }
+  if ([...semanticOwners.values()].some(owners => owners.size > 1)) return ['disposition_owner_mismatch: cross-owner identical semantic occurrences are ambiguous'];
+  const remaining = new Map(); for (const occurrence of occurrences) { const key = mappingKey(occurrence); if (!remaining.has(key)) remaining.set(key, []); remaining.get(key).push(occurrence); }
+  const errors = [];
+  for (const record of v3.records.filter(item => statusById.get(item.historicalRecordId) === 'present')) {
+    const candidates = remaining.get(mappingKey(record)) || [], index = candidates.findIndex(actual => occurrenceMatches(record, actual));
+    if (index < 0) errors.push(`present_occurrence_missing: ${record.path}:1:1 ${record.historicalRecordId} owner ${record.ownerPlan}`);
+    else candidates.splice(index, 1);
+  }
+  for (const record of v3.records.filter(item => statusById.get(item.historicalRecordId) === 'removed')) {
+    const candidates = remaining.get(mappingKey(record)) || [], index = candidates.findIndex(actual => occurrenceMatches(record, actual));
+    if (index >= 0) errors.push(`removed_occurrence_present: ${record.path}:1:1 ${record.historicalRecordId} owner ${record.ownerPlan}`);
+  }
+  for (const candidates of remaining.values()) for (const actual of candidates) errors.push(`unreviewed_occurrence: ${actual.path}:${actual.sourceSpan.startLine}:${actual.sourceSpan.startColumn} extra same-key or unknown occurrence`);
+  return errors;
+}
+export function validateDispositionState(root, v3, effective, sourceRef, ledger, semanticAnalysisCache = new Map()) {
+  const states = sourceRef ? [['source-ref', cachedSemanticTree(semanticAnalysisCache, root, 'source-ref', sourceRef, { stableDeclarationPaths: true })]] : [['index', cachedSemanticTree(semanticAnalysisCache, root, 'index', undefined, { stableDeclarationPaths: true })], ['worktree', semanticTree(root, 'worktree', undefined, { stableDeclarationPaths: true })]];
+  const status = new Map([...effective.values()].filter(item => item.effectiveStatus !== 'historical_removed').map(item => [item.historicalRecordId, item.effectiveStatus])), errors = [];
+  for (const [state, occurrences] of states) errors.push(...dispositionOccurrenceErrors(v3, status, occurrences).map(error => `${state} ${error}`));
+  if (errors.length) throw new Error(errors.join('\n'));
+}
+export function verifyDispositionLedger({ root = process.cwd(), fixture, verificationArtifact, verificationArtifactV3, dispositionLedger = defaultDispositionLedgerPath(fixture), semanticAnalysisCache = new Map() } = {}) {
   const ledger = loadAndValidateDispositionLedger({ dispositionLedger });
+  if (ledger.transitions.length && !verificationArtifactV3) throw new Error('disposition_mapping_mismatch: non-empty disposition ledgers require the immutable v3 semantic catalog');
   const { historical, catalog } = validateDispositionAnchors({ root, fixture, verificationArtifact, ledger });
   const effective = buildEffectiveDispositionMap({ historical, catalog, ledger });
+  const v3 = verificationArtifactV3 ? JSON.parse(fs.readFileSync(verificationArtifactV3, 'utf8')) : null, canonicalLedgerPath = artifactPath(root, defaultDispositionLedgerPath(fixture));
+  const checkpointCommits = new Set(), availableTrees = new Set(), treeBlobs = new Map();
+  const requireCheckpoint = entry => { const key = `${entry.predecessorSourceTree}|${entry.predecessorLedger.gitBlob}`; if (!checkpointCommits.has(key)) { requireCheckpointCommit(root, entry.predecessorSourceTree, canonicalLedgerPath, entry.predecessorLedger.gitBlob); checkpointCommits.add(key); } };
+  const requireTree = tree => { if (!availableTrees.has(tree)) { requireGitObject(root, tree, 'tree'); availableTrees.add(tree); } };
+  const blobAt = (tree, file) => { const key = `${tree}\0${file}`; if (!treeBlobs.has(key)) treeBlobs.set(key, treeBlob(root, tree, file)); return treeBlobs.get(key); };
+  ledger.transitions.forEach((entry, index) => {
+    verifyPredecessor(root, ledger, entry, index); requireCheckpoint(entry); requireTree(entry.predecessorSourceTree); requireTree(entry.stagedSourceTree);
+    for (const evidence of entry.sourceEvidence) if (blobAt(entry.predecessorSourceTree, evidence.path) !== evidence.beforeGitBlobOrNull || blobAt(entry.stagedSourceTree, evidence.path) !== evidence.afterGitBlobOrNull) throw new Error(`disposition_source_blob_mismatch: ${evidence.path}:1:1 transition ${index} evidence differs`);
+    const checkpointPeers = ledger.transitions.filter(item => canonical(item.predecessorLedger) === canonical(entry.predecessorLedger));
+    if (checkpointPeers.some(peer => peer.predecessorSourceTree !== entry.predecessorSourceTree || peer.stagedSourceTree !== entry.stagedSourceTree)) throw new Error('disposition_predecessor_mismatch: one predecessor batch must bind one predecessor source tree and one staged source tree');
+    if (v3) {
+      const record = v3.records.find(item => item.historicalRecordId === entry.historicalRecordId), stagedOccurrences = cachedSemanticTree(semanticAnalysisCache, root, 'source-ref', entry.stagedSourceTree, { stableDeclarationPaths: true });
+      const lastAtTree = ledger.transitions.reduce((last, item, position) => item.stagedSourceTree === entry.stagedSourceTree ? position : last, index), removedAtTree = new Set(ledger.transitions.slice(0, lastAtTree + 1).map(item => item.historicalRecordId)), historicalStatus = new Map(v3.records.map(item => [item.historicalRecordId, removedAtTree.has(item.historicalRecordId) ? 'removed' : 'present']));
+      const historicalErrors = dispositionOccurrenceErrors(v3, historicalStatus, stagedOccurrences);
+      if (historicalErrors.length) throw new Error(historicalErrors.join('\n'));
+      const predecessorOccurrences = cachedSemanticTree(semanticAnalysisCache, root, 'source-ref', entry.predecessorSourceTree, { stableDeclarationPaths: true });
+      const changed = git(root, ['diff-tree', '--no-commit-id', '--name-only', '-r', entry.predecessorSourceTree, entry.stagedSourceTree, '--', 'src']).split('\n').filter(Boolean), peerRecords = checkpointPeers.map(peer => v3.records.find(item => item.historicalRecordId === peer.historicalRecordId)), required = [...new Set([...changed, ...peerRecords.flatMap(record => analyzedEvidencePaths(record, predecessorOccurrences))])].sort(), recorded = entry.sourceEvidence.map(item => item.path);
+      if (canonical(recorded) !== canonical(required) || new Set(recorded).size !== recorded.length) throw new Error(`disposition_source_blob_mismatch: transition ${index} source evidence is incomplete, extra, duplicated, or unsorted`);
+      const expectedOrder = [...checkpointPeers].sort((a, b) => v3.records.findIndex(item => item.historicalRecordId === a.historicalRecordId) - v3.records.findIndex(item => item.historicalRecordId === b.historicalRecordId));
+      if (canonical(checkpointPeers.map(item => item.historicalRecordId)) !== canonical(expectedOrder.map(item => item.historicalRecordId))) throw new Error('disposition_not_append_only: transition suffix order differs from immutable v3 catalog');
+    }
+  });
   return { transitions: ledger.transitions.length, records: effective.size, effective };
 }
-export function effectiveDisposition({ root = process.cwd(), fixture, verificationArtifact, verificationArtifactV3, dispositionLedger = defaultDispositionLedgerPath(fixture), sourceRef } = {}) {
+export function effectiveDisposition({ root = process.cwd(), fixture, verificationArtifact, verificationArtifactV3, dispositionLedger = defaultDispositionLedgerPath(fixture), sourceRef, semanticAnalysisCache = new Map() } = {}) {
   const suffix = path.basename(fixture).match(/^egress-baseline-(.+)\.json$/)?.[1] || IMMUTABLE_BASELINE_REF;
-  const discoveredV3 = verificationArtifactV3 || path.join(path.dirname(fixture), `egress-verification-v3-${suffix}.json`);
-  verificationArtifactV3 = fs.existsSync(discoveredV3) ? discoveredV3 : undefined;
-  if (verificationArtifactV3) {
-    verifyFrozenV2Artifact({ root, fixture, verificationArtifact });
-    verifyVerificationV3({ root, fixture, verificationArtifactV2: verificationArtifact, verificationArtifactV3, sourceRef });
-  } else verifyVerificationV2({ root, fixture, verificationArtifact, sourceRef });
-  const result = verifyDispositionLedger({ root, fixture, verificationArtifact, dispositionLedger });
-  const v3ByHistory = verificationArtifactV3 ? new Map(JSON.parse(fs.readFileSync(verificationArtifactV3, 'utf8')).records.map(record => [record.historicalRecordId, record])) : new Map();
-  return { records: [...result.effective.values()].map(record => ({ ...record, ...(v3ByHistory.has(record.historicalRecordId) ? { v3OccurrenceId: v3ByHistory.get(record.historicalRecordId).v3OccurrenceId } : {}) })) };
+  verificationArtifactV3 ||= path.join(path.dirname(fixture), `egress-verification-v3-${suffix}.json`);
+  verifyFrozenV2Artifact({ root, fixture, verificationArtifact });
+  verifyVerificationV3({ root, fixture, verificationArtifactV2: verificationArtifact, verificationArtifactV3, sourceRef: FROZEN_APPROVED_SOURCE_COMMIT, semanticAnalysisCache });
+  const result = verifyDispositionLedger({ root, fixture, verificationArtifact, verificationArtifactV3, dispositionLedger, semanticAnalysisCache }), v3 = JSON.parse(fs.readFileSync(verificationArtifactV3, 'utf8'));
+  validateDispositionState(root, v3, result.effective, sourceRef, loadAndValidateDispositionLedger({ dispositionLedger }), semanticAnalysisCache);
+  const byId = new Map(v3.records.map(record => [record.historicalRecordId, record]));
+  return { records: [...result.effective.values()].map(record => ({ ...record, ...(byId.has(record.historicalRecordId) ? { v3OccurrenceId: byId.get(record.historicalRecordId).v3OccurrenceId } : {}) })) };
 }
-export function generateVerificationV2({ root = process.cwd(), fixture, sourceRef, historicalFixturePath } = {}) {
+function analyzedEvidencePaths(record, occurrences) { const actual = occurrences.filter(item => mappingKey(item) === mappingKey(record)).find(item => occurrenceMatches(record, item)); return [...new Set([...evidencePaths(record), ...(actual?.dependencyPaths || [])])].sort(); }
+function evidencePaths(record) { return [...new Set([record.path, ...(record.provenance.resolvedImportChain || []).flatMap(edge => [edge.fromPath, edge.toPath]), ...(record.provenance.wrapperCallChain || []).map(edge => edge.path)].filter(file => typeof file === 'string' && file.startsWith('src/')))].sort(); }
+export function generateDispositionTransitions({ root = process.cwd(), verificationArtifactV3, dispositionLedger, ownerPlan, recordIds = [], predecessorSourceTree, predecessorLedgerBlob, predecessorLedgerSha256, predecessorTransitionCount, predecessorFinalTransitionHash, semanticAnalysisCache = new Map() } = {}) {
+  if (git(root, ['ls-files', '-u']).trim()) throw new Error('disposition_predecessor_mismatch: unmerged index entries are forbidden');
+  const ledger = loadAndValidateDispositionLedger({ dispositionLedger }), ledgerBytes = fs.readFileSync(dispositionLedger), actualBlob = git(root, ['hash-object', dispositionLedger]).trim(), finalHash = ledger.transitions.at(-1)?.transitionHash || null;
+  if (actualBlob !== predecessorLedgerBlob || hash(ledgerBytes) !== predecessorLedgerSha256 || ledger.transitions.length !== Number(predecessorTransitionCount) || finalHash !== (predecessorFinalTransitionHash === 'NONE' ? null : predecessorFinalTransitionHash)) throw new Error('disposition_predecessor_mismatch: predecessor ledger checkpoint differs');
+  requireGitObject(root, predecessorSourceTree, 'tree');
+  if (git(root, ['rev-parse', 'HEAD^{tree}']).trim() !== predecessorSourceTree) throw new Error('disposition_predecessor_mismatch: source tree differs from clean execution-base HEAD');
+  requireCheckpointCommit(root, predecessorSourceTree, artifactPath(root, dispositionLedger), predecessorLedgerBlob);
+  const stagedTree = git(root, ['write-tree']).trim(), allChanged = git(root, ['diff-tree', '--no-commit-id', '--name-only', '-r', predecessorSourceTree, stagedTree]).split('\n').filter(Boolean);
+  if (allChanged.some(file => !file.startsWith('src/'))) throw new Error(`disposition_predecessor_mismatch: staged non-production paths are forbidden: ${allChanged.filter(file => !file.startsWith('src/')).join(', ')}`);
+  const v3 = JSON.parse(fs.readFileSync(verificationArtifactV3, 'utf8')), existing = new Set(ledger.transitions.map(entry => entry.historicalRecordId));
+  const selected = v3.records.filter(record => record.ownerPlan === ownerPlan && (!recordIds.length || recordIds.includes(record.historicalRecordId)));
+  if (!selected.length || (recordIds.length && selected.length !== recordIds.length)) throw new Error('disposition_owner_mismatch: requested records do not exactly belong to owner');
+  if (selected.some(record => existing.has(record.historicalRecordId))) throw new Error('disposition_duplicate: selected record already transitioned');
+  const staged = cachedSemanticTree(semanticAnalysisCache, root, 'source-ref', stagedTree, { stableDeclarationPaths: true }), selectedIds = new Set(selected.map(record => record.historicalRecordId));
+  const stagedStatus = new Map(v3.records.map(record => [record.historicalRecordId, selectedIds.has(record.historicalRecordId) || existing.has(record.historicalRecordId) ? 'removed' : 'present']));
+  const stagedErrors = dispositionOccurrenceErrors(v3, stagedStatus, staged);
+  if (stagedErrors.length) throw new Error(stagedErrors.join('\n'));
+  const worktreeMatchesIndex = !git(root, ['diff', '--name-only', '--', 'src']).trim() && !git(root, ['ls-files', '--others', '--exclude-standard', '--', 'src']).trim();
+  const worktreeErrors = dispositionOccurrenceErrors(v3, stagedStatus, worktreeMatchesIndex ? staged : semanticTree(root, 'worktree', undefined, { stableDeclarationPaths: true }));
+  if (worktreeErrors.length) throw new Error(`disposition_predecessor_mismatch: index/worktree confusion\n${worktreeErrors.join('\n')}`);
+  const changed = git(root, ['diff-tree', '--no-commit-id', '--name-only', '-r', predecessorSourceTree, stagedTree, '--', 'src']).split('\n').filter(Boolean), predecessorOccurrences = cachedSemanticTree(semanticAnalysisCache, root, 'source-ref', predecessorSourceTree, { stableDeclarationPaths: true }), paths = [...new Set([...changed, ...selected.flatMap(record => analyzedEvidencePaths(record, predecessorOccurrences))])].sort();
+  const checkpoint = { gitBlob: predecessorLedgerBlob, sha256: predecessorLedgerSha256, transitionCount: ledger.transitions.length, finalTransitionHash: finalHash }, transitions = [...ledger.transitions];
+  for (const record of selected.sort((a, b) => v3.records.indexOf(a) - v3.records.indexOf(b))) { const entry = { sequence: transitions.length, historicalRecordId: record.historicalRecordId, v2OccurrenceId: record.v2OccurrenceId, ownerPlan, from: 'present', to: 'removed', predecessorSourceTree, stagedSourceTree: stagedTree, sourceEvidence: paths.map(file => ({ path: file, beforeGitBlobOrNull: treeBlob(root, predecessorSourceTree, file), afterGitBlobOrNull: treeBlob(root, stagedTree, file) })), predecessorLedger: checkpoint, previousTransitionHash: transitions.at(-1)?.transitionHash || null }; entry.transitionHash = dispositionHash(entry); transitions.push(entry); }
+  return { ...ledger, transitions };
+}
+export function generateVerificationV2({ root = process.cwd(), fixture, sourceRef, historicalFixturePath, semanticAnalysisCache = new Map() } = {}) {
   const historicalBytes = fs.readFileSync(fixture);
   const historical = JSON.parse(historicalBytes);
   const present = historical.records.filter(record => record.currentStatus === 'present');
-  const occurrences = semanticTree(root, sourceRef ? 'source-ref' : 'worktree', sourceRef);
+  const occurrences = sourceRef ? cachedSemanticTree(semanticAnalysisCache, root, 'source-ref', sourceRef) : semanticTree(root, 'worktree');
   const groups = new Map();
   for (const occurrence of occurrences) { const key = mappingKey(occurrence); if (!groups.has(key)) groups.set(key, []); groups.get(key).push(occurrence); }
   const used = new Map();
@@ -758,13 +878,13 @@ export function generateVerificationV2({ root = process.cwd(), fixture, sourceRe
     records
   };
 }
-export function generateVerificationV3({ root = process.cwd(), fixture, verificationArtifactV2, sourceRef, historicalFixturePath, priorSemanticCatalogPath } = {}) {
+export function generateVerificationV3({ root = process.cwd(), fixture, verificationArtifactV2, sourceRef, historicalFixturePath, priorSemanticCatalogPath, semanticAnalysisCache = new Map() } = {}) {
   const historicalBytes = fs.readFileSync(fixture);
   const historical = JSON.parse(historicalBytes);
   const priorBytes = fs.readFileSync(verificationArtifactV2);
   const prior = JSON.parse(priorBytes);
   const historyById = new Map(historical.records.filter(record => record.currentStatus === 'present').map(record => [record.id, record]));
-  const occurrences = semanticTree(root, sourceRef ? 'source-ref' : 'worktree', sourceRef, { stableDeclarationPaths: true });
+  const occurrences = sourceRef ? cachedSemanticTree(semanticAnalysisCache, root, 'source-ref', sourceRef, { stableDeclarationPaths: true }) : semanticTree(root, 'worktree', undefined, { stableDeclarationPaths: true });
   const groups = new Map();
   for (const occurrence of occurrences) { const key = mappingKey(occurrence); if (!groups.has(key)) groups.set(key, []); groups.get(key).push(occurrence); }
   const records = prior.records.map(mappedV2 => {
@@ -801,10 +921,10 @@ export function generateVerificationV3({ root = process.cwd(), fixture, verifica
   if (serialized.includes(leakedRoot) || /(?:[A-Za-z]:\\|\/Users\/|\/home\/|\/tmp\/|\/private\/var\/)/.test(serialized)) throw new Error('absolute_path_leak: v3 artifact contains a checkout or temporary absolute path');
   return artifact;
 }
-export function verifyVerificationV3({ root = process.cwd(), fixture, verificationArtifactV2, verificationArtifactV3, sourceRef } = {}) {
+export function verifyVerificationV3({ root = process.cwd(), fixture, verificationArtifactV2, verificationArtifactV3, sourceRef, semanticAnalysisCache = new Map() } = {}) {
   const artifact = JSON.parse(fs.readFileSync(verificationArtifactV3, 'utf8'));
   if (artifact.schemaVersion !== 3 || artifact.analyzerVersion !== 'network-egress-occurrence-v3') throw new Error('unsupported_analyzer_version: migrate the v3 verification companion');
-  const expected = generateVerificationV3({ root, fixture, verificationArtifactV2, sourceRef: artifact.approvedSource?.commit, historicalFixturePath: artifact.historicalFixture?.path, priorSemanticCatalogPath: artifact.priorSemanticCatalog?.path });
+  const expected = generateVerificationV3({ root, fixture, verificationArtifactV2, sourceRef: artifact.approvedSource?.commit, historicalFixturePath: artifact.historicalFixture?.path, priorSemanticCatalogPath: artifact.priorSemanticCatalog?.path, semanticAnalysisCache });
   if (canonical(artifact.historicalFixture) !== canonical(expected.historicalFixture)) throw new Error('history_tampered: v3 historical fixture anchor differs from immutable history');
   if (canonical(artifact.priorSemanticCatalog) !== canonical(expected.priorSemanticCatalog)) throw new Error('v2_v3_linkage_mismatch: v3 prior semantic catalog anchor differs from immutable v2');
   const artifactV3Ids = artifact.records.map(record => record.v3OccurrenceId);
@@ -816,7 +936,7 @@ export function verifyVerificationV3({ root = process.cwd(), fixture, verificati
     if (!expectedRecord || record.v2OccurrenceId !== expectedRecord.v2OccurrenceId || canonical(record) !== canonical(expectedRecord)) throw new Error(`v2_v3_linkage_mismatch: ${record.historicalRecordId} differs from deterministic v2-linked v3 identity`);
   }
   const errors = [];
-  const states = sourceRef ? [['source-ref', semanticTree(root, 'source-ref', sourceRef, { stableDeclarationPaths: true })]] : [['index', semanticTree(root, 'index', undefined, { stableDeclarationPaths: true })], ['worktree', semanticTree(root, 'worktree', undefined, { stableDeclarationPaths: true })]];
+  const states = sourceRef ? [['source-ref', cachedSemanticTree(semanticAnalysisCache, root, 'source-ref', sourceRef, { stableDeclarationPaths: true })]] : [['index', cachedSemanticTree(semanticAnalysisCache, root, 'index', undefined, { stableDeclarationPaths: true })], ['worktree', semanticTree(root, 'worktree', undefined, { stableDeclarationPaths: true })]];
   for (const [state, live] of states) {
     const groups = new Map(); for (const item of live) { const key = mappingKey(item); if (!groups.has(key)) groups.set(key, []); groups.get(key).push(item); }
     const approvedKeys = new Set(artifact.records.map(mappingKey));
@@ -876,7 +996,7 @@ function verifyFrozenV2Artifact({ root, fixture, verificationArtifact }) {
   }
   return artifact;
 }
-export function verifyVerificationV2({ root = process.cwd(), fixture, verificationArtifact, sourceRef } = {}) {
+export function verifyVerificationV2({ root = process.cwd(), fixture, verificationArtifact, sourceRef, semanticAnalysisCache = new Map() } = {}) {
   const historicalBytes = fs.readFileSync(fixture);
   const artifact = JSON.parse(fs.readFileSync(verificationArtifact, 'utf8'));
   if (artifact.schemaVersion !== 2 || artifact.analyzerVersion !== 'network-egress-occurrence-v2') throw new Error('unsupported_analyzer_version: migrate the verification companion');
@@ -890,7 +1010,7 @@ export function verifyVerificationV2({ root = process.cwd(), fixture, verificati
   }
   if (artifact.records.length !== present.length || new Set(artifact.records.map(r => r.historicalRecordId)).size !== artifact.records.length) throw new Error('mapping_count_mismatch: regenerate and review the complete v2 companion');
   const errors = [];
-  const states = sourceRef ? [['source-ref', semanticTree(root, 'source-ref', sourceRef)]] : [['index', semanticTree(root, 'index')], ['worktree', semanticTree(root, 'worktree')]];
+  const states = sourceRef ? [['source-ref', cachedSemanticTree(semanticAnalysisCache, root, 'source-ref', sourceRef)]] : [['index', cachedSemanticTree(semanticAnalysisCache, root, 'index')], ['worktree', semanticTree(root, 'worktree')]];
   for (const [state, live] of states) {
     const groups = new Map(); for (const item of live) { const key = mappingKey(item); if (!groups.has(key)) groups.set(key, []); groups.get(key).push(item); }
     const approvedKeys = new Set(artifact.records.map(mappingKey));
@@ -929,6 +1049,7 @@ async function cli() {
   const companion = value('--verification-artifact') || (fixture ? path.join(path.dirname(fixture), `egress-verification-v2-${suffix}.json`) : undefined);
   const companionV3 = value('--verification-artifact-v3') || (fixture ? path.join(path.dirname(fixture), `egress-verification-v3-${suffix}.json`) : undefined);
   const dispositionLedger = value('--disposition-ledger') || (fixture ? defaultDispositionLedgerPath(fixture) : undefined);
+  const semanticAnalysisCache = new Map();
   const assertDefaultTrustBoundary = () => {
     if (value('--ref') && value('--ref') !== IMMUTABLE_BASELINE_REF) throw new Error(`history_tampered: default verification pins --ref ${IMMUTABLE_BASELINE_REF}; use --analyzer-version 1 for archaeology`);
     const bytes = fs.readFileSync(fixture);
@@ -943,20 +1064,33 @@ async function cli() {
     const version = analyzerVersion || '2';
     const output = value('--output') || (version === '3' ? companionV3 : companion);
     if (!fixture || !output) throw new Error('--fixture and --output are required');
-    if (version === '2') fs.writeFileSync(output, stableJson(generateVerificationV2({ root, fixture, sourceRef: value('--source-ref'), historicalFixturePath: path.relative(root, fixture).replaceAll(path.sep, '/') })));
-    else if (version === '3') fs.writeFileSync(output, stableJson(generateVerificationV3({ root, fixture, verificationArtifactV2: companion, sourceRef: value('--source-ref'), historicalFixturePath: path.relative(root, fixture).replaceAll(path.sep, '/'), priorSemanticCatalogPath: path.relative(root, companion).replaceAll(path.sep, '/') })));
+    if (version === '2') fs.writeFileSync(output, stableJson(generateVerificationV2({ root, fixture, sourceRef: value('--source-ref'), historicalFixturePath: path.relative(root, fixture).replaceAll(path.sep, '/'), semanticAnalysisCache })));
+    else if (version === '3') fs.writeFileSync(output, stableJson(generateVerificationV3({ root, fixture, verificationArtifactV2: companion, sourceRef: value('--source-ref'), historicalFixturePath: path.relative(root, fixture).replaceAll(path.sep, '/'), priorSemanticCatalogPath: path.relative(root, companion).replaceAll(path.sep, '/'), semanticAnalysisCache })));
     else throw new Error('unsupported_analyzer_version: verification supports analyzer versions 2 and 3');
+  } else if (command === 'transition') {
+    const output = value('--output');
+    if (!output || value('--to') !== 'removed') throw new Error('--output and --to removed are required');
+    const next = generateDispositionTransitions({ root, verificationArtifactV3: companionV3, dispositionLedger, ownerPlan: value('--owner-plan'), recordIds: args.flatMap((arg, index) => arg === '--record-id' ? [args[index + 1]] : []), predecessorSourceTree: value('--predecessor-source-tree'), predecessorLedgerBlob: value('--predecessor-ledger-blob'), predecessorLedgerSha256: value('--predecessor-ledger-sha256'), predecessorTransitionCount: value('--predecessor-transition-count'), predecessorFinalTransitionHash: value('--predecessor-final-transition-hash'), semanticAnalysisCache });
+    const temporaryOutput = `${output}.tmp-${process.pid}`;
+    try {
+      fs.writeFileSync(temporaryOutput, stableJson(next));
+      verifyDispositionLedger({ root, fixture, verificationArtifact: companion, verificationArtifactV3: companionV3, dispositionLedger: temporaryOutput, semanticAnalysisCache });
+      fs.renameSync(temporaryOutput, output);
+    } catch (error) {
+      fs.rmSync(temporaryOutput, { force: true });
+      throw error;
+    }
   } else if (command === 'current') {
     if (analyzerVersion === '1') verifyCurrent({ root, fixture });
     else {
       assertDefaultTrustBoundary();
       if (!fs.existsSync(companion)) throw new Error(`verification_companion_missing: create ${companion}; refusing silent v1 fallback`);
       if (!fs.existsSync(dispositionLedger)) throw new Error(`disposition_history_tampered: create ${dispositionLedger}; refusing silent disposition fallback`);
-      if (analyzerVersion === '2') effectiveDisposition({ root, fixture, verificationArtifact: companion, dispositionLedger, sourceRef: value('--source-ref') });
+      if (analyzerVersion === '2') effectiveDisposition({ root, fixture, verificationArtifact: companion, dispositionLedger, sourceRef: value('--source-ref'), semanticAnalysisCache });
       else {
         if (analyzerVersion && analyzerVersion !== '3') throw new Error('unsupported_analyzer_version: current supports analyzer versions 1, 2, and 3');
         if (!fs.existsSync(companionV3)) throw new Error(`verification_companion_missing: create ${companionV3}; refusing silent v2 fallback`);
-        effectiveDisposition({ root, fixture, verificationArtifact: companion, verificationArtifactV3: companionV3, dispositionLedger, sourceRef: value('--source-ref') });
+        effectiveDisposition({ root, fixture, verificationArtifact: companion, verificationArtifactV3: companionV3, dispositionLedger, sourceRef: value('--source-ref'), semanticAnalysisCache });
       }
     }
     console.log('[egress] PASS: live production inventory matches reviewed fixture');
@@ -975,22 +1109,25 @@ async function cli() {
       const artifact = JSON.parse(fs.readFileSync(companion, 'utf8'));
       if (artifact.approvedSource?.commit !== FROZEN_APPROVED_SOURCE_COMMIT) throw new Error(`history_tampered: companion approvedSource.commit must be ${FROZEN_APPROVED_SOURCE_COMMIT}; restore the reviewed companion`);
       const sourceRef = FROZEN_APPROVED_SOURCE_COMMIT;
-      const actual = Buffer.from(stableJson(generateVerificationV2({ root, fixture, sourceRef, historicalFixturePath: path.relative(root, fixture).replaceAll(path.sep, '/') })));
+      const actual = Buffer.from(stableJson(generateVerificationV2({ root, fixture, sourceRef, historicalFixturePath: path.relative(root, fixture).replaceAll(path.sep, '/'), semanticAnalysisCache })));
       const expected = fs.readFileSync(companion);
       if (!actual.equals(expected)) throw new Error(`occurrence_changed: v2 companion differs from approved-source regeneration; review ${companion}`);
-      verifyVerificationV2({ root, fixture, verificationArtifact: companion, sourceRef });
+      verifyVerificationV2({ root, fixture, verificationArtifact: companion, sourceRef, semanticAnalysisCache });
       if (!fs.existsSync(dispositionLedger)) throw new Error(`disposition_history_tampered: create ${dispositionLedger}; refusing silent disposition fallback`);
-      verifyDispositionLedger({ root, fixture, verificationArtifact: companion, dispositionLedger });
-      if (analyzerVersion === '2') console.log('[egress] PASS: historical v1 bytes, semantic v2 companion, and empty disposition ledger verified');
-      else {
+      if (analyzerVersion === '2') {
+        verifyDispositionLedger({ root, fixture, verificationArtifact: companion, dispositionLedger, semanticAnalysisCache });
+        console.log('[egress] PASS: historical v1 bytes, semantic v2 companion, and disposition ledger verified');
+      } else {
         if (analyzerVersion && analyzerVersion !== '3') throw new Error('unsupported_analyzer_version: verify supports analyzer versions 1, 2, and 3');
         if (!fs.existsSync(companionV3)) throw new Error(`verification_companion_missing: create ${companionV3}; refusing silent v2 fallback`);
+        verifyDispositionLedger({ root, fixture, verificationArtifact: companion, verificationArtifactV3: companionV3, dispositionLedger, semanticAnalysisCache });
         const v3 = JSON.parse(fs.readFileSync(companionV3, 'utf8'));
         if (v3.approvedSource?.commit !== FROZEN_APPROVED_SOURCE_COMMIT) throw new Error(`history_tampered: v3 companion approvedSource.commit must be ${FROZEN_APPROVED_SOURCE_COMMIT}; restore the reviewed companion`);
-        const actualV3 = Buffer.from(stableJson(generateVerificationV3({ root, fixture, verificationArtifactV2: companion, sourceRef, historicalFixturePath: path.relative(root, fixture).replaceAll(path.sep, '/'), priorSemanticCatalogPath: path.relative(root, companion).replaceAll(path.sep, '/') })));
+        const actualV3 = Buffer.from(stableJson(generateVerificationV3({ root, fixture, verificationArtifactV2: companion, sourceRef, historicalFixturePath: path.relative(root, fixture).replaceAll(path.sep, '/'), priorSemanticCatalogPath: path.relative(root, companion).replaceAll(path.sep, '/'), semanticAnalysisCache })));
         if (!actualV3.equals(fs.readFileSync(companionV3))) throw new Error(`occurrence_changed: v3 companion differs from approved-source regeneration; review ${companionV3}`);
-        verifyVerificationV3({ root, fixture, verificationArtifactV2: companion, verificationArtifactV3: companionV3, sourceRef });
-        console.log('[egress] PASS: historical v1 bytes, semantic v2/v3 companions, and empty disposition ledger verified');
+        verifyVerificationV3({ root, fixture, verificationArtifactV2: companion, verificationArtifactV3: companionV3, sourceRef, semanticAnalysisCache });
+        effectiveDisposition({ root, fixture, verificationArtifact: companion, verificationArtifactV3: companionV3, dispositionLedger, semanticAnalysisCache });
+        console.log('[egress] PASS: historical v1 bytes, semantic v2/v3 companions, disposition ledger, and current source verified');
       }
     }
   } else throw new Error(`unknown command: ${command}`);
