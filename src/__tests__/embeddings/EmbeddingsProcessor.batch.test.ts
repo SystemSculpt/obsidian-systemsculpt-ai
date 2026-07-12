@@ -79,19 +79,29 @@ describe("EmbeddingsProcessor managed batching", () => {
     expect(result.failedDetails?.["Note.md"]).toMatchObject({ code: "rate_limited", status: 429 });
   });
 
-  it("stores an empty sentinel only after the managed dimension is authoritative", async () => {
+  it("completes an empty note locally without a vector or remote dispatch", async () => {
     const { storage, processor, file, app } = fixture({ chunks: 0 });
 
     const result = await processor.processFiles([file] as never, app as never);
 
     expect(result).toMatchObject({ completed: 1, failed: 0 });
-    expect(storage.storeVectors).toHaveBeenCalledWith([
-      expect.objectContaining({
-        id: buildVectorId(buildManagedNamespace(3), "Note.md", 0),
-        vector: expect.any(Float32Array),
-        metadata: expect.objectContaining({ isEmpty: true, dimension: 3, complete: true }),
-      }),
-    ]);
+    expect(storage.storeVectors).not.toHaveBeenCalled();
+    expect(storage.removeByPathExceptIds).not.toHaveBeenCalled();
+  });
+
+  it("records a file preparation failure and aborts rather than reporting success", async () => {
+    const { processor, file, app } = fixture({ chunks: 1 });
+    app.vault.read.mockRejectedValueOnce(new Error("disk read failed"));
+
+    const result = await processor.processFiles([file] as never, app as never);
+
+    expect(result).toMatchObject({
+      completed: 0,
+      failed: 1,
+      cancelled: true,
+      failedPaths: ["Note.md"],
+      fatalError: { code: "local_preparation_failed", status: 0 },
+    });
   });
 
   it("suppresses an already-dispatched result after local cancellation without claiming a transport cancellation", async () => {

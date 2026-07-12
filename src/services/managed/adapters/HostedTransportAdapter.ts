@@ -9,6 +9,10 @@ export interface HostedTransportOptions { baseUrl: string; pluginVersion: string
 export type ManagedChatTransportTicket = Readonly<{ kind: "managed_chat_transport_ticket" }>;
 type ManagedChatConfiguration = Readonly<{ licenseKey: string; pluginVersion: string }>;
 
+function isReplaySafeManagedRead(operation: ManagedTransportOperation): boolean {
+  return (operation.method ?? "POST").toUpperCase() === "GET";
+}
+
 export class HostedTransportAdapter {
   private readonly client: PlatformRequestClient;
   private readonly managedChatConfigurations = new WeakMap<ManagedChatTransportTicket, ManagedChatConfiguration>();
@@ -85,7 +89,7 @@ export class HostedTransportAdapter {
     const response = await this.client.request({
       url: this.url(operation.path), method: operation.method ?? "POST", headers,
       body: operation.body, stream, preserveResponseHeaders: true,
-      allowTransportFallback: operation.capability !== "text_generation",
+      allowTransportFallback: isReplaySafeManagedRead(operation),
       signal: operation.signal, licenseKey,
     });
     const errorText = response.ok || !readErrorBody ? "" : (await response.clone().text()).slice(0, 2048);

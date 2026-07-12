@@ -157,9 +157,16 @@ export class EmbeddingsManager {
 
     return this.processingMutex.runExclusive(async () => {
       await this.setRebuildPending(true);
-      const files = this.app.vault.getMarkdownFiles().filter((file) => this.shouldProcessFile(file));
+      const eligibleFiles = this.app.vault.getMarkdownFiles().filter((file) => !this.isFileExcluded(file));
+      const emptyFiles = eligibleFiles.filter((file) => this.isLocallyEmpty(file));
+      for (const file of emptyFiles) {
+        await this.storage.removeByPath(file.path);
+        this.failedFiles.delete(file.path);
+      }
+      const files = eligibleFiles.filter((file) => !this.isLocallyEmpty(file) && this.shouldProcessFile(file));
       if (files.length === 0) {
         await this.setRebuildPending(false);
+        if (emptyFiles.length > 0) await this.writePortableIndexSnapshot();
         return { status: "complete", processed: 0 };
       }
 
@@ -175,21 +182,6 @@ export class EmbeddingsManager {
       });
       this.recordFailures(result.failedPaths, result.failedDetails, result.fatalError);
 
-      if (result.cancelled) {
-        this.emit("embeddings:processing-complete", {
-          scope: "vault",
-          processed: result.completed,
-          failed: result.failed,
-          status: "aborted",
-        });
-        return {
-          status: "aborted",
-          processed: result.completed,
-          message: "Embeddings processing was stopped locally.",
-          partialSuccess: result.completed > 0,
-        };
-      }
-
       if (result.fatalError) {
         this.emit("embeddings:processing-complete", {
           scope: "vault",
@@ -202,6 +194,21 @@ export class EmbeddingsManager {
           processed: result.completed,
           failure: result.fatalError,
           message: result.fatalError.message,
+          partialSuccess: result.completed > 0,
+        };
+      }
+
+      if (result.cancelled) {
+        this.emit("embeddings:processing-complete", {
+          scope: "vault",
+          processed: result.completed,
+          failed: result.failed,
+          status: "aborted",
+        });
+        return {
+          status: "aborted",
+          processed: result.completed,
+          message: "Embeddings processing was stopped locally.",
           partialSuccess: result.completed > 0,
         };
       }
@@ -492,9 +499,22 @@ export class EmbeddingsManager {
 
   private requestFileProcessing(file: TFile, reason: string): void {
     if (!this.plugin.settings.embeddingsEnabled || this.processingSuspended) return;
-    if (!this.shouldProcessFile(file)) return;
     void this.processingMutex.runExclusive(async () => {
-      if (!this.plugin.settings.embeddingsEnabled || this.processingSuspended || !this.shouldProcessFile(file)) return;
+      if (!this.plugin.settings.embeddingsEnabled || this.processingSuspended) return;
+      if (this.isLocallyEmpty(file)) {
+        await this.storage.removeByPath(file.path);
+        this.failedFiles.delete(file.path);
+        await this.writePortableIndexSnapshot();
+        this.emit("embeddings:processing-complete", {
+          scope: "file",
+          path: file.path,
+          processed: 0,
+          failed: 0,
+          status: "success",
+        });
+        return;
+      }
+      if (!this.shouldProcessFile(file)) return;
       this.emit("embeddings:processing-start", { scope: "file", path: file.path, reason });
       const result = await this.processor.processFiles([file], this.app);
       this.recordFailures(result.failedPaths, result.failedDetails, result.fatalError);
@@ -555,11 +575,14 @@ export class EmbeddingsManager {
     if (!file.stat || typeof file.stat.mtime !== "number") {
       return { needsProcessing: true, reason: "metadata-missing", lastEmbedded: null };
     }
+    if (this.isLocallyEmpty(file)) {
+      return { needsProcessing: false, reason: "empty", lastEmbedded: null };
+    }
     const namespace = this.getActiveNamespace();
     if (!namespace) {
       return {
         needsProcessing: true,
-        reason: file.stat.size <= 1 ? "empty" : "missing",
+        reason: "missing",
         lastEmbedded: null,
       };
     }
@@ -567,7 +590,7 @@ export class EmbeddingsManager {
     if (!existing) {
       return {
         needsProcessing: true,
-        reason: file.stat.size <= 1 ? "empty" : "missing",
+        reason: "missing",
         lastEmbedded: null,
       };
     }
@@ -611,6 +634,10 @@ export class EmbeddingsManager {
 
   private isFileExcluded(file: TFile): boolean {
     return this.isPathExcluded(file.path);
+  }
+
+  private isLocallyEmpty(file: TFile): boolean {
+    return typeof file.stat?.size === "number" && file.stat.size <= 1;
   }
 
   private isPathExcluded(path: string): boolean {

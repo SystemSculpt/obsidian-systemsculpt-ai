@@ -16,6 +16,7 @@ export type ManagedEmbeddingsErrorCode =
   | "temporarily_unavailable"
   | "capability_unavailable"
   | "invalid_response"
+  | "local_preparation_failed"
   | "request_cancelled";
 
 export class ManagedEmbeddingsError extends Error {

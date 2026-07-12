@@ -104,7 +104,6 @@ export class EmbeddingsProcessor {
     const namespaceByPath: Map<string, string> = new Map();
     const chunkCountsByPath: Map<string, number> = new Map();
     const fileByPath: Map<string, TFile> = new Map();
-    const deferredEmptyFiles: TFile[] = [];
 
     const finalizePath = async (path: string): Promise<void> => {
       const keepChunkIds = keepChunkIdsByPath.get(path);
@@ -198,8 +197,9 @@ export class EmbeddingsProcessor {
         const processed = this.preprocessor.process(content, file);
 
         if (!processed) {
-          deferredEmptyFiles.push(file);
           fileByPath.delete(file.path);
+          completedFiles += 1;
+          reportProgress();
           continue;
         }
 
@@ -210,8 +210,9 @@ export class EmbeddingsProcessor {
         );
 
         if (chunks.length === 0) {
-          deferredEmptyFiles.push(file);
           fileByPath.delete(file.path);
+          completedFiles += 1;
+          reportProgress();
           continue;
         }
 
@@ -323,6 +324,18 @@ export class EmbeddingsProcessor {
           if (this.cancelled) break;
         }
       } catch (error) {
+        const failure = new ManagedEmbeddingsError(
+          "local_preparation_failed",
+          "A note could not be prepared for managed embeddings.",
+          0,
+        );
+        this.failedBatchPaths.add(file.path);
+        this.failedBatchDetails.set(file.path, {
+          code: failure.code,
+          message: failure.message,
+          status: failure.status,
+        });
+        this.fatalError = failure;
         errorLogger.warn('Failed to prepare file for embeddings processing', {
           source: 'EmbeddingsProcessor',
           method: 'processFiles',
@@ -332,22 +345,12 @@ export class EmbeddingsProcessor {
             message: error instanceof Error ? error.message : String(error)
           }
         });
+        this.cancel();
       }
     }
 
     if (!this.cancelled) {
       await flushPendingWork();
-    }
-
-    if (!this.cancelled) {
-      const dimension = this.getExpectedDimensionHint();
-      if (dimension) {
-        for (const file of deferredEmptyFiles) {
-          await this.storeEmptyVector(file, dimension);
-          completedFiles += 1;
-          reportProgress();
-        }
-      }
     }
 
     const failedPaths = Array.from(this.failedBatchPaths);
@@ -551,34 +554,6 @@ export class EmbeddingsProcessor {
     }
 
     await this.storage.removeByPathExceptIds(file.path, namespace, keepIds);
-  }
-
-  private async storeEmptyVector(file: TFile, dimension: number): Promise<void> {
-    const namespace = buildManagedNamespace(dimension);
-    const id = buildVectorId(namespace, file.path, 0);
-    await this.storage.storeVectors([{
-      id,
-      path: file.path,
-      chunkId: 0,
-      vector: new Float32Array(dimension),
-      metadata: {
-        title: file.basename,
-        excerpt: "",
-        mtime: file.stat?.mtime || Date.now(),
-        contentHash: "empty",
-        isEmpty: true,
-        provider: MANAGED_EMBEDDING_PROVIDER,
-        model: MANAGED_EMBEDDING_MODEL,
-        dimension,
-        createdAt: Date.now(),
-        namespace,
-        complete: true,
-        partial: false,
-        failedChunkCount: 0,
-        chunkCount: 0,
-      },
-    }]);
-    await this.storage.removeByPathExceptIds(file.path, namespace, new Set([id]));
   }
 
   private isReusableCandidate(
