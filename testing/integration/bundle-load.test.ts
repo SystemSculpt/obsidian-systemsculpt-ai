@@ -79,6 +79,13 @@ describe("built bundle (main.js)", () => {
     await exerciseBuiltStudioGenerations(bundleModule);
   });
 
+  it("does not ship the retired Readwise integration", () => {
+    const code = readFileSync(BUNDLE_PATH, "utf8");
+
+    expect(code).not.toContain("ReadwiseService");
+    expect(code).not.toContain("ReadwiseSyncWidget");
+  });
+
   it("does not ship browser-native dynamic imports for Node builtins (#235)", () => {
     const code = readFileSync(BUNDLE_PATH, "utf8");
     const source = ts.createSourceFile(

@@ -13,5 +13,606 @@
     "mappingCount": 131,
     "mappingSha256": "a27f8f5c5270e42672bc3829d5d1b84939e4f1a74d20f8992ce1738483351db1"
   },
-  "transitions": []
+  "transitions": [
+    {
+      "sequence": 0,
+      "historicalRecordId": "a5e5c87851ed958329c32f7133e6bc21d1a6c155b20e54d44179340bda617184",
+      "v2OccurrenceId": "590475612c36a4c043cf18f216001817d6452872b727dfc7c55379e5d4de8bcb",
+      "ownerPlan": "026a",
+      "from": "present",
+      "to": "removed",
+      "predecessorSourceTree": "0cf2bd0be1fb606a2e09c9cbd4f57b606dd59511",
+      "stagedSourceTree": "101b6a2516919323eb3476e6e81a3e289db45097",
+      "sourceEvidence": [
+        {
+          "path": "src/__tests__/readwise-retirement.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "f556df23b62c579c0587bd2be4bc8feb09f8892c"
+        },
+        {
+          "path": "src/__tests__/settings-tab-registry.test.ts",
+          "beforeGitBlobOrNull": "bcbd92b06e354c9bd1def2b48582bb8b37a32aab",
+          "afterGitBlobOrNull": "cbfaff0e927a4e4ab6fab93ccb4dad9f57a28c29"
+        },
+        {
+          "path": "src/components/ReadwiseSyncWidget.ts",
+          "beforeGitBlobOrNull": "f0aebed43f96628089b8961e20905b03ea5483e0",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/constants/externalServices.ts",
+          "beforeGitBlobOrNull": "1ff7c7835da1a42a383e5f390719e063f5f07197",
+          "afterGitBlobOrNull": "fafe5b03baab8d0e923f58125533b36fdbe52c0e"
+        },
+        {
+          "path": "src/core/settings/__tests__/AutomaticBackupService.test.ts",
+          "beforeGitBlobOrNull": "86e66344e2f2ddd3cf33bd67c9755e043e6c4ba5",
+          "afterGitBlobOrNull": "c6fdf20d5995ebd3bfe733ef52120a88208f97d9"
+        },
+        {
+          "path": "src/core/settings/__tests__/backupSanitizer.test.ts",
+          "beforeGitBlobOrNull": "e2514cab1bff13a7f574b8ea12d59f4287f3b1c9",
+          "afterGitBlobOrNull": "3099727fe0d3b06084ce094e8b08d4474fb86591"
+        },
+        {
+          "path": "src/core/settings/backupSanitizer.ts",
+          "beforeGitBlobOrNull": "8fac0c699ed7a2380ad099016134a1c796a79768",
+          "afterGitBlobOrNull": "831c9e54af363d99086693644f4bbff1a93c1615"
+        },
+        {
+          "path": "src/css/views/settings.css",
+          "beforeGitBlobOrNull": "9256c10cc191f397a1cc57c745a01436323d153c",
+          "afterGitBlobOrNull": "e9780de61982a18deb4ad5c93a472aeaaa18781e"
+        },
+        {
+          "path": "src/main.ts",
+          "beforeGitBlobOrNull": "1fe707635de1bdaa04bca42d81b11c5d406d6c11",
+          "afterGitBlobOrNull": "465505c25acaa1b8f1cec0e2f9036030be4e17f1"
+        },
+        {
+          "path": "src/services/readwise/ReadwiseError.ts",
+          "beforeGitBlobOrNull": "03df1907625aa7bb503b987a05145e1617eb4795",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/readwise/ReadwiseRateLimiter.ts",
+          "beforeGitBlobOrNull": "e5dd70422b60b0568f8b9395b2598fe1852dc9c6",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/readwise/ReadwiseService.ts",
+          "beforeGitBlobOrNull": "7e7d390ad764f5777f5a08d146932b977e48e93a",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/readwise/__tests__/ReadwiseService.test.ts",
+          "beforeGitBlobOrNull": "a052f78960254fbab2b4d6a44fd064b988fe3585",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/readwise/index.ts",
+          "beforeGitBlobOrNull": "7c245b86c37b4ddda5eac32286e72f57f30c27c0",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/settings/DataTabContent.ts",
+          "beforeGitBlobOrNull": "70e987a1fac373e0428e8bb51022cd6ecf5e7317",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/settings/SettingsTabRegistry.ts",
+          "beforeGitBlobOrNull": "7726808bfad2347fea0a27474fafb3e7aa7bb736",
+          "afterGitBlobOrNull": "6997c62aff110b43c9ba3a0b4a763e3d9e5106bc"
+        },
+        {
+          "path": "src/settings/__tests__/uiHelpers.test.ts",
+          "beforeGitBlobOrNull": "ce325314f15974a0a3d1f0890970eaca0ec621fb",
+          "afterGitBlobOrNull": "d93506e1f9756d58d495e81a42bbe203462c79ef"
+        },
+        {
+          "path": "src/settings/uiHelpers.ts",
+          "beforeGitBlobOrNull": "13703e1911628ae4ed61a23da216887f77b4d1e8",
+          "afterGitBlobOrNull": "adc9a8bdd9e7b637815d90a0284d53b4048bb4a7"
+        },
+        {
+          "path": "src/types.ts",
+          "beforeGitBlobOrNull": "182c6658c1a7c18dcf2585f427b5fca4dd2966a8",
+          "afterGitBlobOrNull": "182c6658c1a7c18dcf2585f427b5fca4dd2966a8"
+        },
+        {
+          "path": "src/types/readwise.ts",
+          "beforeGitBlobOrNull": "e537a3cc266a7ac735df4dbc06b9251fbf9e02da",
+          "afterGitBlobOrNull": "e537a3cc266a7ac735df4dbc06b9251fbf9e02da"
+        }
+      ],
+      "predecessorLedger": {
+        "gitBlob": "2540a682179562fd14182b788168887649179f37",
+        "sha256": "40cea29868a8665d42ae8b4b6f250c082a08b3c46c8083e51fc5455076ac0f98",
+        "transitionCount": 0,
+        "finalTransitionHash": null
+      },
+      "previousTransitionHash": null,
+      "transitionHash": "dcd35d5e8c34a33239944241012df0f0ace0ca98ec9e8e60d0262cc2e71a0be0"
+    },
+    {
+      "sequence": 1,
+      "historicalRecordId": "0789977141c851ed35bb679c0216896cbed4b6f4a233f7eb30856ba57c473623",
+      "v2OccurrenceId": "2d8a54572c9c68211e2c412ede89d25c3f3bb6fce5ddcf121b72c3d4ceae70f3",
+      "ownerPlan": "026a",
+      "from": "present",
+      "to": "removed",
+      "predecessorSourceTree": "0cf2bd0be1fb606a2e09c9cbd4f57b606dd59511",
+      "stagedSourceTree": "101b6a2516919323eb3476e6e81a3e289db45097",
+      "sourceEvidence": [
+        {
+          "path": "src/__tests__/readwise-retirement.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "f556df23b62c579c0587bd2be4bc8feb09f8892c"
+        },
+        {
+          "path": "src/__tests__/settings-tab-registry.test.ts",
+          "beforeGitBlobOrNull": "bcbd92b06e354c9bd1def2b48582bb8b37a32aab",
+          "afterGitBlobOrNull": "cbfaff0e927a4e4ab6fab93ccb4dad9f57a28c29"
+        },
+        {
+          "path": "src/components/ReadwiseSyncWidget.ts",
+          "beforeGitBlobOrNull": "f0aebed43f96628089b8961e20905b03ea5483e0",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/constants/externalServices.ts",
+          "beforeGitBlobOrNull": "1ff7c7835da1a42a383e5f390719e063f5f07197",
+          "afterGitBlobOrNull": "fafe5b03baab8d0e923f58125533b36fdbe52c0e"
+        },
+        {
+          "path": "src/core/settings/__tests__/AutomaticBackupService.test.ts",
+          "beforeGitBlobOrNull": "86e66344e2f2ddd3cf33bd67c9755e043e6c4ba5",
+          "afterGitBlobOrNull": "c6fdf20d5995ebd3bfe733ef52120a88208f97d9"
+        },
+        {
+          "path": "src/core/settings/__tests__/backupSanitizer.test.ts",
+          "beforeGitBlobOrNull": "e2514cab1bff13a7f574b8ea12d59f4287f3b1c9",
+          "afterGitBlobOrNull": "3099727fe0d3b06084ce094e8b08d4474fb86591"
+        },
+        {
+          "path": "src/core/settings/backupSanitizer.ts",
+          "beforeGitBlobOrNull": "8fac0c699ed7a2380ad099016134a1c796a79768",
+          "afterGitBlobOrNull": "831c9e54af363d99086693644f4bbff1a93c1615"
+        },
+        {
+          "path": "src/css/views/settings.css",
+          "beforeGitBlobOrNull": "9256c10cc191f397a1cc57c745a01436323d153c",
+          "afterGitBlobOrNull": "e9780de61982a18deb4ad5c93a472aeaaa18781e"
+        },
+        {
+          "path": "src/main.ts",
+          "beforeGitBlobOrNull": "1fe707635de1bdaa04bca42d81b11c5d406d6c11",
+          "afterGitBlobOrNull": "465505c25acaa1b8f1cec0e2f9036030be4e17f1"
+        },
+        {
+          "path": "src/services/readwise/ReadwiseError.ts",
+          "beforeGitBlobOrNull": "03df1907625aa7bb503b987a05145e1617eb4795",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/readwise/ReadwiseRateLimiter.ts",
+          "beforeGitBlobOrNull": "e5dd70422b60b0568f8b9395b2598fe1852dc9c6",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/readwise/ReadwiseService.ts",
+          "beforeGitBlobOrNull": "7e7d390ad764f5777f5a08d146932b977e48e93a",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/readwise/__tests__/ReadwiseService.test.ts",
+          "beforeGitBlobOrNull": "a052f78960254fbab2b4d6a44fd064b988fe3585",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/readwise/index.ts",
+          "beforeGitBlobOrNull": "7c245b86c37b4ddda5eac32286e72f57f30c27c0",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/settings/DataTabContent.ts",
+          "beforeGitBlobOrNull": "70e987a1fac373e0428e8bb51022cd6ecf5e7317",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/settings/SettingsTabRegistry.ts",
+          "beforeGitBlobOrNull": "7726808bfad2347fea0a27474fafb3e7aa7bb736",
+          "afterGitBlobOrNull": "6997c62aff110b43c9ba3a0b4a763e3d9e5106bc"
+        },
+        {
+          "path": "src/settings/__tests__/uiHelpers.test.ts",
+          "beforeGitBlobOrNull": "ce325314f15974a0a3d1f0890970eaca0ec621fb",
+          "afterGitBlobOrNull": "d93506e1f9756d58d495e81a42bbe203462c79ef"
+        },
+        {
+          "path": "src/settings/uiHelpers.ts",
+          "beforeGitBlobOrNull": "13703e1911628ae4ed61a23da216887f77b4d1e8",
+          "afterGitBlobOrNull": "adc9a8bdd9e7b637815d90a0284d53b4048bb4a7"
+        },
+        {
+          "path": "src/types.ts",
+          "beforeGitBlobOrNull": "182c6658c1a7c18dcf2585f427b5fca4dd2966a8",
+          "afterGitBlobOrNull": "182c6658c1a7c18dcf2585f427b5fca4dd2966a8"
+        },
+        {
+          "path": "src/types/readwise.ts",
+          "beforeGitBlobOrNull": "e537a3cc266a7ac735df4dbc06b9251fbf9e02da",
+          "afterGitBlobOrNull": "e537a3cc266a7ac735df4dbc06b9251fbf9e02da"
+        }
+      ],
+      "predecessorLedger": {
+        "gitBlob": "2540a682179562fd14182b788168887649179f37",
+        "sha256": "40cea29868a8665d42ae8b4b6f250c082a08b3c46c8083e51fc5455076ac0f98",
+        "transitionCount": 0,
+        "finalTransitionHash": null
+      },
+      "previousTransitionHash": "dcd35d5e8c34a33239944241012df0f0ace0ca98ec9e8e60d0262cc2e71a0be0",
+      "transitionHash": "24fbe917ac08b0ccab1f578c5d70c9278b5687483894cd127ef983c688596e5b"
+    },
+    {
+      "sequence": 2,
+      "historicalRecordId": "709f90369877b1c33e2ffe27b7c486dde3c0cb4fc4efd1c0478701c970d855f8",
+      "v2OccurrenceId": "d80a7ee27bebde9bea1b883f833e660115518d6e8a5b426dbfe3af41198ea490",
+      "ownerPlan": "026a",
+      "from": "present",
+      "to": "removed",
+      "predecessorSourceTree": "0cf2bd0be1fb606a2e09c9cbd4f57b606dd59511",
+      "stagedSourceTree": "101b6a2516919323eb3476e6e81a3e289db45097",
+      "sourceEvidence": [
+        {
+          "path": "src/__tests__/readwise-retirement.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "f556df23b62c579c0587bd2be4bc8feb09f8892c"
+        },
+        {
+          "path": "src/__tests__/settings-tab-registry.test.ts",
+          "beforeGitBlobOrNull": "bcbd92b06e354c9bd1def2b48582bb8b37a32aab",
+          "afterGitBlobOrNull": "cbfaff0e927a4e4ab6fab93ccb4dad9f57a28c29"
+        },
+        {
+          "path": "src/components/ReadwiseSyncWidget.ts",
+          "beforeGitBlobOrNull": "f0aebed43f96628089b8961e20905b03ea5483e0",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/constants/externalServices.ts",
+          "beforeGitBlobOrNull": "1ff7c7835da1a42a383e5f390719e063f5f07197",
+          "afterGitBlobOrNull": "fafe5b03baab8d0e923f58125533b36fdbe52c0e"
+        },
+        {
+          "path": "src/core/settings/__tests__/AutomaticBackupService.test.ts",
+          "beforeGitBlobOrNull": "86e66344e2f2ddd3cf33bd67c9755e043e6c4ba5",
+          "afterGitBlobOrNull": "c6fdf20d5995ebd3bfe733ef52120a88208f97d9"
+        },
+        {
+          "path": "src/core/settings/__tests__/backupSanitizer.test.ts",
+          "beforeGitBlobOrNull": "e2514cab1bff13a7f574b8ea12d59f4287f3b1c9",
+          "afterGitBlobOrNull": "3099727fe0d3b06084ce094e8b08d4474fb86591"
+        },
+        {
+          "path": "src/core/settings/backupSanitizer.ts",
+          "beforeGitBlobOrNull": "8fac0c699ed7a2380ad099016134a1c796a79768",
+          "afterGitBlobOrNull": "831c9e54af363d99086693644f4bbff1a93c1615"
+        },
+        {
+          "path": "src/css/views/settings.css",
+          "beforeGitBlobOrNull": "9256c10cc191f397a1cc57c745a01436323d153c",
+          "afterGitBlobOrNull": "e9780de61982a18deb4ad5c93a472aeaaa18781e"
+        },
+        {
+          "path": "src/main.ts",
+          "beforeGitBlobOrNull": "1fe707635de1bdaa04bca42d81b11c5d406d6c11",
+          "afterGitBlobOrNull": "465505c25acaa1b8f1cec0e2f9036030be4e17f1"
+        },
+        {
+          "path": "src/services/readwise/ReadwiseError.ts",
+          "beforeGitBlobOrNull": "03df1907625aa7bb503b987a05145e1617eb4795",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/readwise/ReadwiseRateLimiter.ts",
+          "beforeGitBlobOrNull": "e5dd70422b60b0568f8b9395b2598fe1852dc9c6",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/readwise/ReadwiseService.ts",
+          "beforeGitBlobOrNull": "7e7d390ad764f5777f5a08d146932b977e48e93a",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/readwise/__tests__/ReadwiseService.test.ts",
+          "beforeGitBlobOrNull": "a052f78960254fbab2b4d6a44fd064b988fe3585",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/readwise/index.ts",
+          "beforeGitBlobOrNull": "7c245b86c37b4ddda5eac32286e72f57f30c27c0",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/settings/DataTabContent.ts",
+          "beforeGitBlobOrNull": "70e987a1fac373e0428e8bb51022cd6ecf5e7317",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/settings/SettingsTabRegistry.ts",
+          "beforeGitBlobOrNull": "7726808bfad2347fea0a27474fafb3e7aa7bb736",
+          "afterGitBlobOrNull": "6997c62aff110b43c9ba3a0b4a763e3d9e5106bc"
+        },
+        {
+          "path": "src/settings/__tests__/uiHelpers.test.ts",
+          "beforeGitBlobOrNull": "ce325314f15974a0a3d1f0890970eaca0ec621fb",
+          "afterGitBlobOrNull": "d93506e1f9756d58d495e81a42bbe203462c79ef"
+        },
+        {
+          "path": "src/settings/uiHelpers.ts",
+          "beforeGitBlobOrNull": "13703e1911628ae4ed61a23da216887f77b4d1e8",
+          "afterGitBlobOrNull": "adc9a8bdd9e7b637815d90a0284d53b4048bb4a7"
+        },
+        {
+          "path": "src/types.ts",
+          "beforeGitBlobOrNull": "182c6658c1a7c18dcf2585f427b5fca4dd2966a8",
+          "afterGitBlobOrNull": "182c6658c1a7c18dcf2585f427b5fca4dd2966a8"
+        },
+        {
+          "path": "src/types/readwise.ts",
+          "beforeGitBlobOrNull": "e537a3cc266a7ac735df4dbc06b9251fbf9e02da",
+          "afterGitBlobOrNull": "e537a3cc266a7ac735df4dbc06b9251fbf9e02da"
+        }
+      ],
+      "predecessorLedger": {
+        "gitBlob": "2540a682179562fd14182b788168887649179f37",
+        "sha256": "40cea29868a8665d42ae8b4b6f250c082a08b3c46c8083e51fc5455076ac0f98",
+        "transitionCount": 0,
+        "finalTransitionHash": null
+      },
+      "previousTransitionHash": "24fbe917ac08b0ccab1f578c5d70c9278b5687483894cd127ef983c688596e5b",
+      "transitionHash": "f9b52051ee084a346102cfe401cfc074f9acc340b2a29cdd21d594fdb05adf24"
+    },
+    {
+      "sequence": 3,
+      "historicalRecordId": "ebb4d691ea0286f8c725b85c40f051d791888d0a894cd45624c749dc0d46a9da",
+      "v2OccurrenceId": "f96da44613c32cb1e0f26cb621bd372d48060eb436ce36bf74623c1e090cc2ea",
+      "ownerPlan": "026a",
+      "from": "present",
+      "to": "removed",
+      "predecessorSourceTree": "0cf2bd0be1fb606a2e09c9cbd4f57b606dd59511",
+      "stagedSourceTree": "101b6a2516919323eb3476e6e81a3e289db45097",
+      "sourceEvidence": [
+        {
+          "path": "src/__tests__/readwise-retirement.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "f556df23b62c579c0587bd2be4bc8feb09f8892c"
+        },
+        {
+          "path": "src/__tests__/settings-tab-registry.test.ts",
+          "beforeGitBlobOrNull": "bcbd92b06e354c9bd1def2b48582bb8b37a32aab",
+          "afterGitBlobOrNull": "cbfaff0e927a4e4ab6fab93ccb4dad9f57a28c29"
+        },
+        {
+          "path": "src/components/ReadwiseSyncWidget.ts",
+          "beforeGitBlobOrNull": "f0aebed43f96628089b8961e20905b03ea5483e0",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/constants/externalServices.ts",
+          "beforeGitBlobOrNull": "1ff7c7835da1a42a383e5f390719e063f5f07197",
+          "afterGitBlobOrNull": "fafe5b03baab8d0e923f58125533b36fdbe52c0e"
+        },
+        {
+          "path": "src/core/settings/__tests__/AutomaticBackupService.test.ts",
+          "beforeGitBlobOrNull": "86e66344e2f2ddd3cf33bd67c9755e043e6c4ba5",
+          "afterGitBlobOrNull": "c6fdf20d5995ebd3bfe733ef52120a88208f97d9"
+        },
+        {
+          "path": "src/core/settings/__tests__/backupSanitizer.test.ts",
+          "beforeGitBlobOrNull": "e2514cab1bff13a7f574b8ea12d59f4287f3b1c9",
+          "afterGitBlobOrNull": "3099727fe0d3b06084ce094e8b08d4474fb86591"
+        },
+        {
+          "path": "src/core/settings/backupSanitizer.ts",
+          "beforeGitBlobOrNull": "8fac0c699ed7a2380ad099016134a1c796a79768",
+          "afterGitBlobOrNull": "831c9e54af363d99086693644f4bbff1a93c1615"
+        },
+        {
+          "path": "src/css/views/settings.css",
+          "beforeGitBlobOrNull": "9256c10cc191f397a1cc57c745a01436323d153c",
+          "afterGitBlobOrNull": "e9780de61982a18deb4ad5c93a472aeaaa18781e"
+        },
+        {
+          "path": "src/main.ts",
+          "beforeGitBlobOrNull": "1fe707635de1bdaa04bca42d81b11c5d406d6c11",
+          "afterGitBlobOrNull": "465505c25acaa1b8f1cec0e2f9036030be4e17f1"
+        },
+        {
+          "path": "src/services/readwise/ReadwiseError.ts",
+          "beforeGitBlobOrNull": "03df1907625aa7bb503b987a05145e1617eb4795",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/readwise/ReadwiseRateLimiter.ts",
+          "beforeGitBlobOrNull": "e5dd70422b60b0568f8b9395b2598fe1852dc9c6",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/readwise/ReadwiseService.ts",
+          "beforeGitBlobOrNull": "7e7d390ad764f5777f5a08d146932b977e48e93a",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/readwise/__tests__/ReadwiseService.test.ts",
+          "beforeGitBlobOrNull": "a052f78960254fbab2b4d6a44fd064b988fe3585",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/readwise/index.ts",
+          "beforeGitBlobOrNull": "7c245b86c37b4ddda5eac32286e72f57f30c27c0",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/settings/DataTabContent.ts",
+          "beforeGitBlobOrNull": "70e987a1fac373e0428e8bb51022cd6ecf5e7317",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/settings/SettingsTabRegistry.ts",
+          "beforeGitBlobOrNull": "7726808bfad2347fea0a27474fafb3e7aa7bb736",
+          "afterGitBlobOrNull": "6997c62aff110b43c9ba3a0b4a763e3d9e5106bc"
+        },
+        {
+          "path": "src/settings/__tests__/uiHelpers.test.ts",
+          "beforeGitBlobOrNull": "ce325314f15974a0a3d1f0890970eaca0ec621fb",
+          "afterGitBlobOrNull": "d93506e1f9756d58d495e81a42bbe203462c79ef"
+        },
+        {
+          "path": "src/settings/uiHelpers.ts",
+          "beforeGitBlobOrNull": "13703e1911628ae4ed61a23da216887f77b4d1e8",
+          "afterGitBlobOrNull": "adc9a8bdd9e7b637815d90a0284d53b4048bb4a7"
+        },
+        {
+          "path": "src/types.ts",
+          "beforeGitBlobOrNull": "182c6658c1a7c18dcf2585f427b5fca4dd2966a8",
+          "afterGitBlobOrNull": "182c6658c1a7c18dcf2585f427b5fca4dd2966a8"
+        },
+        {
+          "path": "src/types/readwise.ts",
+          "beforeGitBlobOrNull": "e537a3cc266a7ac735df4dbc06b9251fbf9e02da",
+          "afterGitBlobOrNull": "e537a3cc266a7ac735df4dbc06b9251fbf9e02da"
+        }
+      ],
+      "predecessorLedger": {
+        "gitBlob": "2540a682179562fd14182b788168887649179f37",
+        "sha256": "40cea29868a8665d42ae8b4b6f250c082a08b3c46c8083e51fc5455076ac0f98",
+        "transitionCount": 0,
+        "finalTransitionHash": null
+      },
+      "previousTransitionHash": "f9b52051ee084a346102cfe401cfc074f9acc340b2a29cdd21d594fdb05adf24",
+      "transitionHash": "0c3ca7518f45b5865e8d315f2fee8d4a0f06855357468be7cf896c766da6da79"
+    },
+    {
+      "sequence": 4,
+      "historicalRecordId": "1c71307d89a776132f269e75c330cff4be84a8255102bab1dff1cbd66a9b4e93",
+      "v2OccurrenceId": "79cd94512ef769cf04b8a92d6c79a01ca5ceb740058bcf223638e062e3b1b954",
+      "ownerPlan": "026a",
+      "from": "present",
+      "to": "removed",
+      "predecessorSourceTree": "0cf2bd0be1fb606a2e09c9cbd4f57b606dd59511",
+      "stagedSourceTree": "101b6a2516919323eb3476e6e81a3e289db45097",
+      "sourceEvidence": [
+        {
+          "path": "src/__tests__/readwise-retirement.test.ts",
+          "beforeGitBlobOrNull": null,
+          "afterGitBlobOrNull": "f556df23b62c579c0587bd2be4bc8feb09f8892c"
+        },
+        {
+          "path": "src/__tests__/settings-tab-registry.test.ts",
+          "beforeGitBlobOrNull": "bcbd92b06e354c9bd1def2b48582bb8b37a32aab",
+          "afterGitBlobOrNull": "cbfaff0e927a4e4ab6fab93ccb4dad9f57a28c29"
+        },
+        {
+          "path": "src/components/ReadwiseSyncWidget.ts",
+          "beforeGitBlobOrNull": "f0aebed43f96628089b8961e20905b03ea5483e0",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/constants/externalServices.ts",
+          "beforeGitBlobOrNull": "1ff7c7835da1a42a383e5f390719e063f5f07197",
+          "afterGitBlobOrNull": "fafe5b03baab8d0e923f58125533b36fdbe52c0e"
+        },
+        {
+          "path": "src/core/settings/__tests__/AutomaticBackupService.test.ts",
+          "beforeGitBlobOrNull": "86e66344e2f2ddd3cf33bd67c9755e043e6c4ba5",
+          "afterGitBlobOrNull": "c6fdf20d5995ebd3bfe733ef52120a88208f97d9"
+        },
+        {
+          "path": "src/core/settings/__tests__/backupSanitizer.test.ts",
+          "beforeGitBlobOrNull": "e2514cab1bff13a7f574b8ea12d59f4287f3b1c9",
+          "afterGitBlobOrNull": "3099727fe0d3b06084ce094e8b08d4474fb86591"
+        },
+        {
+          "path": "src/core/settings/backupSanitizer.ts",
+          "beforeGitBlobOrNull": "8fac0c699ed7a2380ad099016134a1c796a79768",
+          "afterGitBlobOrNull": "831c9e54af363d99086693644f4bbff1a93c1615"
+        },
+        {
+          "path": "src/css/views/settings.css",
+          "beforeGitBlobOrNull": "9256c10cc191f397a1cc57c745a01436323d153c",
+          "afterGitBlobOrNull": "e9780de61982a18deb4ad5c93a472aeaaa18781e"
+        },
+        {
+          "path": "src/main.ts",
+          "beforeGitBlobOrNull": "1fe707635de1bdaa04bca42d81b11c5d406d6c11",
+          "afterGitBlobOrNull": "465505c25acaa1b8f1cec0e2f9036030be4e17f1"
+        },
+        {
+          "path": "src/services/readwise/ReadwiseError.ts",
+          "beforeGitBlobOrNull": "03df1907625aa7bb503b987a05145e1617eb4795",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/readwise/ReadwiseRateLimiter.ts",
+          "beforeGitBlobOrNull": "e5dd70422b60b0568f8b9395b2598fe1852dc9c6",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/readwise/ReadwiseService.ts",
+          "beforeGitBlobOrNull": "7e7d390ad764f5777f5a08d146932b977e48e93a",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/readwise/__tests__/ReadwiseService.test.ts",
+          "beforeGitBlobOrNull": "a052f78960254fbab2b4d6a44fd064b988fe3585",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/services/readwise/index.ts",
+          "beforeGitBlobOrNull": "7c245b86c37b4ddda5eac32286e72f57f30c27c0",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/settings/DataTabContent.ts",
+          "beforeGitBlobOrNull": "70e987a1fac373e0428e8bb51022cd6ecf5e7317",
+          "afterGitBlobOrNull": null
+        },
+        {
+          "path": "src/settings/SettingsTabRegistry.ts",
+          "beforeGitBlobOrNull": "7726808bfad2347fea0a27474fafb3e7aa7bb736",
+          "afterGitBlobOrNull": "6997c62aff110b43c9ba3a0b4a763e3d9e5106bc"
+        },
+        {
+          "path": "src/settings/__tests__/uiHelpers.test.ts",
+          "beforeGitBlobOrNull": "ce325314f15974a0a3d1f0890970eaca0ec621fb",
+          "afterGitBlobOrNull": "d93506e1f9756d58d495e81a42bbe203462c79ef"
+        },
+        {
+          "path": "src/settings/uiHelpers.ts",
+          "beforeGitBlobOrNull": "13703e1911628ae4ed61a23da216887f77b4d1e8",
+          "afterGitBlobOrNull": "adc9a8bdd9e7b637815d90a0284d53b4048bb4a7"
+        },
+        {
+          "path": "src/types.ts",
+          "beforeGitBlobOrNull": "182c6658c1a7c18dcf2585f427b5fca4dd2966a8",
+          "afterGitBlobOrNull": "182c6658c1a7c18dcf2585f427b5fca4dd2966a8"
+        },
+        {
+          "path": "src/types/readwise.ts",
+          "beforeGitBlobOrNull": "e537a3cc266a7ac735df4dbc06b9251fbf9e02da",
+          "afterGitBlobOrNull": "e537a3cc266a7ac735df4dbc06b9251fbf9e02da"
+        }
+      ],
+      "predecessorLedger": {
+        "gitBlob": "2540a682179562fd14182b788168887649179f37",
+        "sha256": "40cea29868a8665d42ae8b4b6f250c082a08b3c46c8083e51fc5455076ac0f98",
+        "transitionCount": 0,
+        "finalTransitionHash": null
+      },
+      "previousTransitionHash": "0c3ca7518f45b5865e8d315f2fee8d4a0f06855357468be7cf896c766da6da79",
+      "transitionHash": "bae8cca1dda3def6dfbc12f74113affa74542b5e3c447d30707bc714a9fd3233"
+    }
+  ]
 }

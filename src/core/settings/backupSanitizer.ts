@@ -3,8 +3,9 @@ const TOP_LEVEL_SECRET_KEYS = [
   "openAiApiKey",
   "customTranscriptionApiKey",
   "embeddingsCustomApiKey",
-  "readwiseApiToken",
 ] as const;
+
+const RETIRED_SETTINGS_KEYS = ["readwiseApiToken"] as const;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
@@ -75,6 +76,10 @@ export function redactSettingsForBackup<T extends Record<string, unknown>>(setti
   }
   delete redacted.managedDisclosureAcceptance;
 
+  for (const key of RETIRED_SETTINGS_KEYS) {
+    delete redacted[key];
+  }
+
   redacted.customProviders = redactArrayApiKeys(settings.customProviders);
   redacted.mcpServers = redactArrayApiKeys(settings.mcpServers);
 
@@ -91,6 +96,10 @@ export function applyCurrentSecretsToBackup<T extends Record<string, unknown>>(
 
   for (const key of TOP_LEVEL_SECRET_KEYS) {
     merged[key] = typeof currentSettings[key] === "string" ? currentSettings[key] : "";
+  }
+
+  for (const key of RETIRED_SETTINGS_KEYS) {
+    delete merged[key];
   }
 
   merged.customProviders = applyCurrentApiKeys(backup.customProviders, currentSettings.customProviders);

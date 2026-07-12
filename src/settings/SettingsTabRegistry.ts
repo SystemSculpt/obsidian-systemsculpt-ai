@@ -9,7 +9,6 @@ type DirectoriesTabContentModule = typeof import("./DirectoriesTabContent");
 type BackupTabContentModule = typeof import("./BackupTabContent");
 type EmbeddingsTabContentModule = typeof import("./EmbeddingsTabContent");
 type ImageGenerationTabContentModule = typeof import("./ImageGenerationTabContent");
-type DataTabContentModule = typeof import("./DataTabContent");
 type AdvancedTabContentModule = typeof import("./AdvancedTabContent");
 
 function loadSetupTabContentModule(): SetupTabContentModule {
@@ -42,10 +41,6 @@ function loadEmbeddingsTabContentModule(): EmbeddingsTabContentModule {
 
 function loadImageGenerationTabContentModule(): ImageGenerationTabContentModule {
   return require("./ImageGenerationTabContent") as ImageGenerationTabContentModule;
-}
-
-function loadDataTabContentModule(): DataTabContentModule {
-  return require("./DataTabContent") as DataTabContentModule;
 }
 
 function loadAdvancedTabContentModule(): AdvancedTabContentModule {
@@ -132,19 +127,6 @@ export function buildSettingsTabConfigs(tab: SystemSculptSettingTab): SettingsTa
       anchor: {
         title: "Embeddings, Similar Notes",
         desc: "Manage semantic search and related note discovery while SystemSculpt handles the processing.",
-      },
-    },
-    {
-      id: "readwise",
-      label: "Readwise",
-      sections: [
-        (parent) => {
-          loadDataTabContentModule().displayDataTabContent(parent, tab);
-        },
-      ],
-      anchor: {
-        title: "Readwise Imports, Sync, Highlights",
-        desc: "Manage your Readwise connection, import options, sync schedule, and manual sync actions.",
       },
     },
     {

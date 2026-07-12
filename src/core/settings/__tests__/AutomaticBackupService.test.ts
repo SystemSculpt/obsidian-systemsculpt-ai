@@ -250,7 +250,7 @@ describe("AutomaticBackupService", () => {
       expect(backupData.openAiApiKey).toBe("");
       expect(backupData.customTranscriptionApiKey).toBe("");
       expect(backupData.embeddingsCustomApiKey).toBe("");
-      expect(backupData.readwiseApiToken).toBe("");
+      expect(backupData).not.toHaveProperty("readwiseApiToken");
       expect(backupData.customProviders[0].apiKey).toBe("");
       expect(backupData.customProviders[0].endpoint).toBe("https://api.example.com");
       expect(backupData.mcpServers[0].apiKey).toBe("");

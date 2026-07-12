@@ -62,7 +62,6 @@ import { EventEmitter } from "./core/EventEmitter";
 import { LifecycleCoordinator, LifecycleFailureEvent } from "./core/plugin/lifecycle/LifecycleCoordinator";
 import { WorkflowEngineService } from "./services/workflow/WorkflowEngineService";
 import type { SystemSculptSearchEngine } from "./services/search/SystemSculptSearchEngine";
-import { ReadwiseService } from "./services/readwise";
 import { WebResearchApiService } from "./services/web/WebResearchApiService";
 import { WebResearchCorpusService } from "./services/web/WebResearchCorpusService";
 import { guardQuickEditEditorDiffLeaks, quickEditEditorDiffExtension } from "./quick-edit/editor-diff";
@@ -173,9 +172,6 @@ export default class SystemSculptPlugin extends Plugin {
   private pendingSettingsFocusTab: string | null = null;
   private readonly mobileStartupProbePath = normalizePath("SystemSculpt/Diagnostics/mobile-startup.json");
   // Removed complex settings callback system - embeddings are now completely on-demand
-
-  // Readwise integration
-  private readwiseService: ReadwiseService | null = null;
 
   // Simple initialization tracking
   private embeddingsInitialized = false;
@@ -304,53 +300,6 @@ export default class SystemSculptPlugin extends Plugin {
 
   public getPluginLogger(): PluginLogger | null {
     return this.pluginLogger;
-  }
-
-  /**
-   * Get or create the Readwise service for importing highlights
-   */
-  public getReadwiseService(): ReadwiseService {
-    if (!this.readwiseService) {
-      this.readwiseService = new ReadwiseService(this);
-      // Initialize the service (loads sync state, starts scheduled sync if configured)
-      this.readwiseService.initialize().catch((error) => {
-        const logger = this.getLogger();
-        logger.warn("Readwise service failed to initialize", {
-          source: "SystemSculptPlugin",
-          metadata: {
-            error: error instanceof Error ? error.message : String(error),
-          },
-        });
-      });
-    }
-    return this.readwiseService;
-  }
-
-  private handleReadwiseSettingsUpdated(oldSettings: SystemSculptSettings, newSettings: SystemSculptSettings): void {
-    const relevantChange =
-      oldSettings.readwiseEnabled !== newSettings.readwiseEnabled ||
-      oldSettings.readwiseSyncMode !== newSettings.readwiseSyncMode ||
-      oldSettings.readwiseSyncIntervalMinutes !== newSettings.readwiseSyncIntervalMinutes ||
-      oldSettings.readwiseApiToken !== newSettings.readwiseApiToken;
-
-    if (!relevantChange) {
-      return;
-    }
-
-    if (!newSettings.readwiseEnabled) {
-      if (this.readwiseService) {
-        this.readwiseService.stopScheduledSync();
-        this.readwiseService.cancelSync();
-      }
-      return;
-    }
-
-    const service = this.getReadwiseService();
-    if (newSettings.readwiseSyncMode === "interval") {
-      service.startScheduledSync();
-    } else {
-      service.stopScheduledSync();
-    }
   }
 
   private getInitializationTracer(): InitializationTracer {
@@ -758,21 +707,12 @@ export default class SystemSculptPlugin extends Plugin {
         );
 
         this.registerEvent(
-          this.app.workspace.on("systemsculpt:settings-updated", (oldSettings, newSettings) => {
+          this.app.workspace.on("systemsculpt:settings-updated", () => {
             try {
               this.embeddingsManager?.syncFromSettings();
             } catch (error) {
               const logger = this.getLogger();
               logger.error("Embeddings manager settings sync failed", error, {
-                source: "SystemSculptPlugin",
-              });
-            }
-
-            try {
-              this.handleReadwiseSettingsUpdated(oldSettings, newSettings);
-            } catch (error) {
-              const logger = this.getLogger();
-              logger.error("Readwise settings sync failed", error, {
                 source: "SystemSculptPlugin",
               });
             }
@@ -1816,11 +1756,6 @@ export default class SystemSculptPlugin extends Plugin {
           this.ensureRecorderService();
         }
       }),
-      wrap("readwise", "readwise service", () => {
-        if (this.settings.readwiseEnabled) {
-          this.getReadwiseService();
-        }
-      }),
       wrap("fileContextMenu", "file context menu service", () => {
         if (!PlatformContext.get().isMobileRuntime()) {
           this.setupFileContextMenuService();
@@ -2140,12 +2075,6 @@ export default class SystemSculptPlugin extends Plugin {
       if (this.studioService) {
         await this.studioService.dispose().catch(() => {});
         this.studioService = null;
-      }
-
-      // Cleanup Readwise service
-      if (this.readwiseService) {
-        this.readwiseService.destroy();
-        this.readwiseService = null;
       }
 
       // Cleanup UI components first

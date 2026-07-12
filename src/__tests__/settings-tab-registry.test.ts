@@ -21,7 +21,6 @@ describe("SettingsTabRegistry SystemSculpt-only anchors", () => {
       { id: "chat", label: "Chat" },
       { id: "workflow", label: "Workflow" },
       { id: "knowledge", label: "Knowledge" },
-      { id: "readwise", label: "Readwise" },
       { id: "workspace", label: "Workspace" },
       { id: "studio", label: "Studio" },
       { id: "advanced", label: "Advanced" },
@@ -32,7 +31,6 @@ describe("SettingsTabRegistry SystemSculpt-only anchors", () => {
     const chat = configs.find((config) => config.id === "chat");
     const workflow = configs.find((config) => config.id === "workflow");
     const knowledge = configs.find((config) => config.id === "knowledge");
-    const readwise = configs.find((config) => config.id === "readwise");
     const workspace = configs.find((config) => config.id === "workspace");
     const studio = configs.find((config) => config.id === "studio");
     const advanced = configs.find((config) => config.id === "advanced");
@@ -60,9 +58,6 @@ describe("SettingsTabRegistry SystemSculpt-only anchors", () => {
     expect(knowledge?.anchor?.desc).toContain("related note discovery");
     expect(knowledge?.anchor?.desc).not.toContain("Readwise");
     expect(knowledge?.anchor?.desc).not.toMatch(/custom provider|your own api/i);
-
-    expect(readwise?.anchor?.title).toContain("Readwise");
-    expect(readwise?.anchor?.desc).toContain("sync");
 
     expect(workspace?.anchor?.title).toContain("Directories");
     expect(workspace?.anchor?.desc).toContain("backup");

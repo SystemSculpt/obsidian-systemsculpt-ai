@@ -24,7 +24,7 @@ describe("backupSanitizer", () => {
     expect(redacted.openAiApiKey).toBe("");
     expect(redacted.customTranscriptionApiKey).toBe("");
     expect(redacted.embeddingsCustomApiKey).toBe("");
-    expect(redacted.readwiseApiToken).toBe("");
+    expect(redacted).not.toHaveProperty("readwiseApiToken");
     expect(redacted.customProviders[0].apiKey).toBe("");
     expect(redacted.mcpServers[0].apiKey).toBe("");
     expect(redacted.customProviders[0].endpoint).toBe("https://api.example.com");
@@ -66,7 +66,7 @@ describe("backupSanitizer", () => {
     expect(restored.openAiApiKey).toBe("current-openai-key");
     expect(restored.customTranscriptionApiKey).toBe("current-transcription-key");
     expect(restored.embeddingsCustomApiKey).toBe("current-embeddings-key");
-    expect(restored.readwiseApiToken).toBe("current-readwise-key");
+    expect(restored).not.toHaveProperty("readwiseApiToken");
     expect(restored.customProviders[0].apiKey).toBe("current-provider-a-key");
     expect(restored.customProviders[1].apiKey).toBe("");
     expect(restored.mcpServers[0].apiKey).toBe("current-mcp-key");
