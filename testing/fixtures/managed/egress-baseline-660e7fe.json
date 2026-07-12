@@ -2096,7 +2096,7 @@
         "endLine": 973,
         "endColumn": 4
       },
-      "lineFingerprint": "2d04536cc8ff70a4b016710ed7a2ca666522c493ddcb17c831e99da32dc6aefc",
+      "lineFingerprint": "62d1573359eb32b82363957ce0e130a6c331fd9ed6709d76d66f731e0a48e185",
       "primitiveOrImport": "wrapper:getCreditsBalance->obsidian.requestUrl",
       "classification": "wrapper_boundary",
       "destinationClass": "systemsculpt",
@@ -2111,7 +2111,7 @@
         ]
       },
       "occurrenceIndex": 0,
-      "occurrenceIdentity": "a26e358b0bd806818bbd674e2d3b03a6ff733021220dfc379c18fffd8be74321",
+      "occurrenceIdentity": "13135f7f2aee9e98efdebf9da2cbfbc4655439c7ebf13249aee88bfe04ccf365",
       "origin": "reviewed_current_addition",
       "currentStatus": "present"
     },
@@ -2205,7 +2205,7 @@
         "endLine": 1130,
         "endColumn": 4
       },
-      "lineFingerprint": "2d04536cc8ff70a4b016710ed7a2ca666522c493ddcb17c831e99da32dc6aefc",
+      "lineFingerprint": "62d1573359eb32b82363957ce0e130a6c331fd9ed6709d76d66f731e0a48e185",
       "primitiveOrImport": "wrapper:getCreditsUsage->obsidian.requestUrl",
       "classification": "wrapper_boundary",
       "destinationClass": "systemsculpt",
@@ -2220,7 +2220,7 @@
         ]
       },
       "occurrenceIndex": 0,
-      "occurrenceIdentity": "1f33e5e22146bca63c6592b1cea178d1eda157ff8b176ccc698deeed3de973f9",
+      "occurrenceIdentity": "916138323f233ed152c9c3ff0c9b635128d06c29f45124fc06242fc6de36e15d",
       "origin": "reviewed_current_addition",
       "currentStatus": "present"
     },
@@ -2342,7 +2342,7 @@
         "endLine": 1590,
         "endColumn": 4
       },
-      "lineFingerprint": "2d04536cc8ff70a4b016710ed7a2ca666522c493ddcb17c831e99da32dc6aefc",
+      "lineFingerprint": "62d1573359eb32b82363957ce0e130a6c331fd9ed6709d76d66f731e0a48e185",
       "primitiveOrImport": "wrapper:getApiStatus->project.httpRequest",
       "classification": "wrapper_boundary",
       "destinationClass": "systemsculpt",
@@ -2357,7 +2357,7 @@
         ]
       },
       "occurrenceIndex": 0,
-      "occurrenceIdentity": "14faeaaa766f30982546930c66f3d291541e0af15fd859db5efead1faeef3659",
+      "occurrenceIdentity": "f7e360a91f120d8feeb80d211844fc8dfa3bc6c33f43ec30d3c27ccb1e52072d",
       "origin": "reviewed_current_addition",
       "currentStatus": "present"
     },

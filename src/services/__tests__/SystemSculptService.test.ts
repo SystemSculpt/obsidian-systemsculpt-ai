@@ -106,6 +106,7 @@ jest.mock("../../utils/errorLogger", () => ({
   errorLogger: {
     debug: jest.fn(),
     error: jest.fn(),
+    warn: jest.fn(),
   },
 }));
 
@@ -196,6 +197,27 @@ describe("SystemSculptService", () => {
     ]);
     mcpService.executeTool.mockResolvedValue({ content: "hello" });
     delete (global as any).fetch;
+  });
+
+  it("reuses one accepted authoritative preparation for active legacy dispatch without rereading sources", async () => {
+    const service = SystemSculptService.getInstance(createPlugin());
+    modelManagementService.getModelInfo.mockResolvedValueOnce({
+      isCustom: false, actualModelId: "provider/model", modelSource: "pi_local",
+      model: { id: "m", provider: "provider", sourceMode: "pi_local", sourceProviderId: "provider", piExecutionModelId: "provider/model", piLocalAvailable: true, piRemoteAvailable: false, piAuthMode: "local", supported_parameters: [] },
+    });
+    const message = { role: "user", content: "accepted", message_id: "u" } as const;
+    const durable = Object.freeze({ chatId: "c", version: 1, messages: Object.freeze([message]) });
+    const operation = Object.freeze({ lease: {} as never, durableTurnId: "u", acceptedUserMessage: message, initialDurableSnapshot: durable, turnBoundaryId: "b" });
+    const accepted = await service.prepareAcceptedChatRequest(operation, { model: "m", contextFiles: new Set(), systemPromptOverride: "selected" });
+    expect(modelManagementService.getModelInfo).toHaveBeenCalledTimes(1);
+    expect(contextFileService.prepareMessagesWithContext).toHaveBeenCalledTimes(1);
+    expect(mcpService.getAvailableTools).not.toHaveBeenCalled();
+    jest.clearAllMocks();
+    await collectEvents(service.streamMessage({ messages: [], model: "ignored", preparedRequest: accepted.legacyPreparation as never }));
+    expect(modelManagementService.getModelInfo).not.toHaveBeenCalled();
+    expect(contextFileService.prepareMessagesWithContext).not.toHaveBeenCalled();
+    expect(mcpService.getAvailableTools).not.toHaveBeenCalled();
+    expect(localPiStreamExecutor.executeLocalPiStream).toHaveBeenCalledWith(expect.objectContaining({ prepared: accepted.legacyPreparation }));
   });
 
   it("initializes with the resolved base url and updates dependent services", () => {

@@ -1,6 +1,6 @@
 import fixture from "../../../../testing/fixtures/managed/managed-capabilities-v2.json";
 import type { AcceptedChatOperation, ManagedAllowedLease } from "../../managed/ManagedTypes";
-import { composeAcceptedChatContinuation, createAcceptedChatRequestSnapshot } from "../AcceptedChatRequestSnapshot";
+import { composeAcceptedChatContinuation, composeAcceptedLegacyContinuation, createAcceptedChatRequestSnapshot } from "../AcceptedChatRequestSnapshot";
 import { ChatRequestPreparationService } from "../ChatRequestPreparationService";
 
 function operation(): AcceptedChatOperation {
@@ -11,40 +11,59 @@ function operation(): AcceptedChatOperation {
   const initialDurableSnapshot = Object.freeze({ chatId: "c", version: 1, messages: Object.freeze([message]) });
   return Object.freeze({ lease, durableTurnId: "u", acceptedUserMessage: message, initialDurableSnapshot, turnBoundaryId: "b" });
 }
+const model = { id: "m", supported_parameters: ["tools"], architecture: { modality: "text->text" } } as never;
+const policy = { prompt: "selected" as const, contextCount: 1, imageContextIncluded: true, documentContextIncluded: false, tools: "normalized" as const };
+function snapshot(op = operation()) {
+  return createAcceptedChatRequestSnapshot({ operation: op, preparation: {
+    prepared: { modelSource: "systemsculpt", resolvedModel: model, actualModelId: "provider/model", preparedMessages: [
+      { role: "system", content: "frozen prompt and context", message_id: "s" }, ...op.initialDurableSnapshot.messages,
+    ], finalSystemPrompt: "frozen prompt", tools: [{ type: "function", function: { name: "search" } }] }, notices: [], diagnostics: [],
+  }, policy });
+}
 
 describe("AcceptedChatRequestSnapshot", () => {
-  it("deep-copies and freezes closed request data without tool_choice", () => {
-    const op = operation();
-    const message = { role: "user" as const, content: [{ type: "text" as const, text: "original" }], message_id: "u" };
-    const snapshot = createAcceptedChatRequestSnapshot({ operation: op, preparedMessages: [message], tools: [], policy: { prompt: "none", contextCount: 0, imageContextIncluded: true, documentContextIncluded: false, tools: "omitted" } });
-    message.content[0].text = "mutated";
-    expect(snapshot.operation).toBe(op);
-    expect(snapshot.model).toBe("ai-agent");
-    expect(JSON.stringify(snapshot.messages)).toContain("original");
-    expect(JSON.stringify(snapshot)).not.toContain("tool_choice");
-    expect(Object.isFrozen(snapshot)).toBe(true);
-    expect(Object.isFrozen(snapshot.messages[0])).toBe(true);
+  it("deep-copies and freezes authoritative legacy and managed preparation", () => {
+    const accepted = snapshot();
+    expect(accepted.operation.durableTurnId).toBe("u");
+    expect(accepted.model).toBe("ai-agent");
+    expect(accepted.legacyPreparation.preparedMessages[0].content).toBe("frozen prompt and context");
+    expect(Object.isFrozen(accepted.legacyPreparation.preparedMessages)).toBe(true);
+    expect(Object.keys(accepted)).not.toContain("operation");
+    expect(JSON.stringify(accepted)).not.toContain("tool_choice");
   });
 
-  it("joins duplicate preparation and preserves settled object identity", async () => {
+  it("reads model, tools, and context exactly once and joins duplicate callers", async () => {
     const op = operation();
-    let calls = 0;
-    const context = { prepareMessagesWithContext: async (messages: never[]) => { calls += 1; return messages; } };
-    const service = new ChatRequestPreparationService(context as never);
-    const sources = { contextFiles: new Set<string>(), includeImages: true, tools: [] };
-    const first = service.prepare(op, sources);
-    expect(service.prepare(op, sources)).toBe(first);
+    const reads = { model: 0, tools: 0, context: 0 };
+    const service = new ChatRequestPreparationService();
+    const dependencies = {
+      getModelInfo: async () => { reads.model += 1; return { modelSource: "systemsculpt" as const, actualModelId: "provider/model", model }; },
+      getAvailableTools: async () => { reads.tools += 1; return [{ type: "function", function: { name: "search" } }]; },
+      countImageContextFiles: () => 0,
+      contextFileService: { prepareMessagesWithContext: async (messages: never[]) => { reads.context += 1; return messages; } } as never,
+    };
+    const input = { messages: op.initialDurableSnapshot.messages, model: "m", contextFiles: new Set<string>(), systemPromptOverride: "selected" };
+    const first = service.prepare(op, input, dependencies);
+    expect(service.prepare(op, input, dependencies)).toBe(first);
     const settled = await first;
-    expect(await service.prepare(op, sources)).toBe(settled);
-    expect(calls).toBe(1);
+    expect(await service.prepare(op, input, dependencies)).toBe(settled);
+    expect(reads).toEqual({ model: 1, tools: 1, context: 1 });
+    expect(service.has(op)).toBe(true);
+    service.release(op);
+    expect(service.has(op)).toBe(false);
   });
 
-  it("composes continuations only from frozen request data and the new durable snapshot", () => {
-    const op = operation();
-    const accepted = createAcceptedChatRequestSnapshot({ operation: op, preparedMessages: op.initialDurableSnapshot.messages, tools: [], policy: { prompt: "none", contextCount: 0, imageContextIncluded: true, documentContextIncluded: false, tools: "omitted" } });
-    const next = Object.freeze({ chatId: "c", version: 2, messages: Object.freeze([...op.initialDurableSnapshot.messages, { role: "assistant" as const, content: "done", message_id: "a" }]) });
-    const result = composeAcceptedChatContinuation(accepted, next);
-    expect(result).toHaveLength(2);
-    expect(Object.isFrozen(result)).toBe(true);
+  it("preserves frozen prompt/context/tools and appends durable tool checkpoints purely", () => {
+    const accepted = snapshot();
+    const checkpoint = { role: "assistant" as const, content: null, message_id: "a", tool_calls: [{ id: "call", messageId: "a", state: "completed" as const, timestamp: 1, request: { id: "call", type: "function" as const, function: { name: "search", arguments: "{\"q\":1}" } } }] };
+    const resultMessage = { role: "tool" as const, content: "ok", message_id: "t", tool_call_id: "call" };
+    const next = Object.freeze({ chatId: "c", version: 2, messages: Object.freeze([...accepted.durableSnapshot.messages, checkpoint, resultMessage]) });
+    const managed = composeAcceptedChatContinuation(accepted, next);
+    const legacy = composeAcceptedLegacyContinuation(accepted, next, "retry hint");
+    expect(managed[0]).toMatchObject({ role: "system", content: "frozen prompt and context" });
+    expect(managed.at(-1)).toMatchObject({ role: "tool", content: "ok", tool_call_id: "call" });
+    expect(legacy.preparedMessages[0].content).toContain("retry hint");
+    expect(legacy.tools).toEqual(accepted.legacyPreparation.tools);
+    expect(Object.isFrozen(legacy)).toBe(true);
   });
 });

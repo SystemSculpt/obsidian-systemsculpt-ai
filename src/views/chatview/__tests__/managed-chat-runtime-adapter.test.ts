@@ -25,7 +25,11 @@ function setup() {
   const message = Object.freeze({ role: "user", content: "hello", message_id: "u1" } as const);
   const durable = Object.freeze({ chatId: "c", version: 1, messages: Object.freeze([message]) });
   const operation = Object.freeze({ lease, durableTurnId: "turn-017b-vector", acceptedUserMessage: message, initialDurableSnapshot: durable, turnBoundaryId: "b" }) as AcceptedChatOperation;
-  const acceptedRequestSnapshot = createAcceptedChatRequestSnapshot({ operation, preparedMessages: [message], tools: [], policy: { prompt: "none", contextCount: 0, imageContextIncluded: true, documentContextIncluded: false, tools: "omitted" } });
+  const acceptedRequestSnapshot = createAcceptedChatRequestSnapshot({
+    operation,
+    preparation: { prepared: { modelSource: "systemsculpt", resolvedModel: {} as never, actualModelId: "ai-agent", preparedMessages: [message], finalSystemPrompt: "", tools: [] }, notices: [], diagnostics: [] },
+    policy: { prompt: "none", contextCount: 0, imageContextIncluded: true, documentContextIncluded: false, tools: "omitted" },
+  });
   return { requestClient, adapter: new ManagedChatRuntimeAdapter(client), operation, acceptedRequestSnapshot };
 }
 
@@ -46,13 +50,14 @@ describe("ManagedChatRuntimeAdapter live events", () => {
 
   it("emits tool completion before explicit done", async () => {
     const state = setup();
-    state.requestClient.responses.push(response('data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call","function":{"name":"search","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}\n\ndata: [DONE]\n\n'));
+    state.requestClient.responses.push(response('data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call","function":{"name":"search","arguments":"{\\"q\\":"}}]}}]}\n\ndata: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"1}"}}]},"finish_reason":"tool_calls"}]}\n\ndata: [DONE]\n\n'));
     const result = await state.adapter.dispatch({ acceptedRequestSnapshot: state.acceptedRequestSnapshot, phase: "initial", continuationIndex: 0 });
     if (result.kind !== "success") throw new Error(result.kind);
     await expect(collect(result.events)).resolves.toEqual([
-      { kind: "tool_call_delta", index: 0, id: "call", name: "search", arguments: "{}" },
+      { kind: "tool_call_delta", index: 0, id: "call", name: "search", arguments: '{"q":' },
+      { kind: "tool_call_delta", index: 0, arguments: "1}" },
       { kind: "finish_reason", reason: "tool_calls" },
-      { kind: "tool_call_completed", index: 0, id: "call", name: "search" },
+      { kind: "tool_call_completed", index: 0, id: "call", name: "search", arguments: '{"q":1}' },
       { kind: "done" },
     ]);
   });

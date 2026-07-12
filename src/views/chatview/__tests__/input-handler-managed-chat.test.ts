@@ -227,6 +227,15 @@ describe("managed chat ownership structure", () => {
     expect(chatSources).not.toContain("NODE_ENV");
     expect(chatSources).not.toContain("acquireLease(");
     expect(input).not.toContain("commitUser:");
+    expect(input).toContain("preparedRequest: preparedRequest");
+    const streamMethod = input.slice(input.indexOf("private async streamAssistantTurn"), input.indexOf("private getHostedContinuationTarget"));
+    expect(streamMethod).toContain("composeAcceptedLegacyContinuation");
+    expect(streamMethod).not.toContain("this.getMessages()");
+    expect(streamMethod).not.toContain("getContextFiles()");
+    expect(streamMethod).not.toContain("readPromptContent");
+    expect(input).toContain("this.aiService.releaseAcceptedChatRequest(operation)");
+    expect(input).toContain("this.acceptedRequestSnapshot = null");
+    expect(input).toContain("this.releaseAcceptedRequestIfTerminal()");
     expect(read("src/views/chatview/turn/ChatTurnTypes.ts")).not.toMatch(/PERSIST_USER|committing_user|USER_COMMITTED/);
     const client = read("src/services/managed/ManagedCapabilityClient.ts");
     const factory = read("src/services/managed/ManagedCapabilityClientFactory.ts");

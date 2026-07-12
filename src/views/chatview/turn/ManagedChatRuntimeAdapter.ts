@@ -7,7 +7,7 @@ export type ManagedChatRuntimeEvent =
   | Readonly<{ kind: "content_delta"; text: string }>
   | Readonly<{ kind: "reasoning_delta"; text: string }>
   | Readonly<{ kind: "tool_call_delta"; index: number; id?: string; name?: string; arguments?: string }>
-  | Readonly<{ kind: "tool_call_completed"; index: number; id?: string; name?: string }>
+  | Readonly<{ kind: "tool_call_completed"; index: number; id?: string; name?: string; arguments: string }>
   | Readonly<{ kind: "finish_reason"; reason: string }>
   | Readonly<{ kind: "request_id"; requestId: string }>
   | Readonly<{ kind: "usage"; promptTokens?: number; completionTokens?: number; totalTokens?: number; costTotal?: number }>
@@ -271,7 +271,7 @@ export class ManagedChatRuntimeAdapter {
     const reader = response.body.getReader();
     const decoder = new TextDecoder("utf-8", { fatal: true });
     const queued: ManagedChatRuntimeEvent[] = [];
-    const toolState = new Map<number, { id?: string; name?: string }>();
+    const toolState = new Map<number, { id?: string; name?: string; arguments: string }>();
     let line = "";
     let pendingCr = false;
     let data: string[] = [];
@@ -292,8 +292,12 @@ export class ManagedChatRuntimeAdapter {
         if (!normalized) return false;
         for (const event of normalized) {
           if (event.kind === "tool_call_delta") {
-            const previous = toolState.get(event.index) ?? {};
-            toolState.set(event.index, { id: event.id ?? previous.id, name: event.name ?? previous.name });
+            const previous = toolState.get(event.index) ?? { arguments: "" };
+            toolState.set(event.index, {
+              id: event.id ?? previous.id,
+              name: event.name ?? previous.name,
+              arguments: previous.arguments + (event.arguments ?? ""),
+            });
           }
           queued.push(event);
         }

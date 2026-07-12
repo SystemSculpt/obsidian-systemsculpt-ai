@@ -49,11 +49,7 @@ import { extractPrimaryPathArg, requiresUserApproval } from "../../utils/toolPol
 import { ChatModelSelectionController } from "./ChatModelSelectionController";
 import { ChatTurn } from "./turn/ChatTurn";
 import type { AcceptedChatOperation, ManagedChatAdmissionPort } from "../../services/managed/ManagedTypes";
-import type { AcceptedChatRequestSnapshot } from "../../services/chat/AcceptedChatRequestSnapshot";
-import { ChatRequestPreparationService } from "../../services/chat/ChatRequestPreparationService";
-import { ContextFileService } from "../../services/ContextFileService";
-import { MCPService } from "./MCPService";
-import { normalizeOpenAITools, type OpenAITool } from "../../utils/tooling";
+import { composeAcceptedLegacyContinuation, type AcceptedChatRequestSnapshot } from "../../services/chat/AcceptedChatRequestSnapshot";
 import type { AcceptedUserCommitInput, AcceptedUserCommitResult } from "./ChatView";
 
 export interface InputHandlerOptions {
@@ -182,8 +178,6 @@ export class InputHandler extends Component {
   private acceptedOperation: AcceptedChatOperation | null = null;
   private acceptedRequestSnapshot: AcceptedChatRequestSnapshot | null = null;
   private compatibilityResult: Readonly<{ kind: "contract_unsupported"; feature: "web_search"; action: "disable_web_search" }> | null = null;
-  private acceptedRequestPreparation: ChatRequestPreparationService;
-  private acceptedRequestMcp: MCPService;
 
   constructor(options: InputHandlerOptions) {
     super();
@@ -205,8 +199,6 @@ export class InputHandler extends Component {
     this.onAddContextFile = options.onAddContextFile;
     this.onOpenChatSettings = options.onOpenChatSettings;
     this.plugin = options.plugin;
-    this.acceptedRequestPreparation = new ChatRequestPreparationService(new ContextFileService(this.app));
-    this.acceptedRequestMcp = new MCPService(this.plugin, this.app);
     // Provide light wrappers for external callers to read/write input
     this.getValue = () => this.input?.value ?? "";
     this.setValue = (text: string) => { if (this.input) { this.input.value = text; this.adjustInputHeight(); } };
@@ -325,7 +317,10 @@ export class InputHandler extends Component {
     turnProgress?: ChatTurnProgressController,
     options?: { transientSystemPromptSuffix?: string; phase?: "initial" | "continuation" }
   ): Promise<StreamTurnResult> {
-    void acceptedOperation;
+    const acceptedRequest = this.acceptedRequestSnapshot;
+    if (!acceptedRequest || acceptedRequest.operation !== acceptedOperation) {
+      throw new Error("Accepted Chat request snapshot is unavailable for the active operation.");
+    }
     const continuationTarget = options?.phase === "initial"
       ? null
       : this.getHostedContinuationTarget();
@@ -338,35 +333,28 @@ export class InputHandler extends Component {
       messageEl.dataset.messageId = messageId;
     }
 
-    const contextFiles = includeContextFiles ? this.chatView.contextManager.getContextFiles() : new Set<string>();
-    const selectedModelId = this.getSelectedModelIdForChat();
+    void includeContextFiles;
+    const selectedModelId = acceptedRequest.legacyPreparation.actualModelId;
     turnProgress?.attach(messageEl);
-
-    // Read the selected prompt content if one is active
-    let systemPromptOverride: string | undefined;
-    if (this.selectedPromptPath) {
-      const content = await this.promptService.readPromptContent(this.selectedPromptPath);
-      if (content) {
-        systemPromptOverride = content;
-      }
-    }
+    const preparedRequest = options?.phase === "initial"
+      ? acceptedRequest.legacyPreparation
+      : composeAcceptedLegacyContinuation(
+          acceptedRequest,
+          this.chatView.getDurableTranscriptSnapshot(),
+          options?.transientSystemPromptSuffix,
+        );
 
     const stream = this.aiService.streamMessage({
-      messages: this.getMessages(),
+      messages: preparedRequest.preparedMessages as ChatMessage[],
       model: selectedModelId,
-      contextFiles,
+      preparedRequest: preparedRequest as import("../../services/StreamExecutionTypes").PreparedChatRequest,
       signal,
         sessionFile: this.chatView?.getPiSessionFile?.(),
         sessionId: this.chatView?.getPiSessionId?.(),
         onPiSessionReady: (session) => {
           this.chatView?.setPiSessionState?.(session);
         },
-        webSearchEnabled: this.webSearchEnabled,
-        ...((this.chatView?.isAgentModeActive?.() ?? true) ? {} : { allowTools: false }),
-        ...(systemPromptOverride ? { systemPromptOverride } : {}),
-        ...(options?.transientSystemPromptSuffix
-          ? { transientSystemPromptSuffix: options.transientSystemPromptSuffix }
-          : {}),
+        webSearchEnabled: false,
       debug: this.chatView.getDebugLogService?.()?.createStreamLogger({
         chatId: this.getChatId(),
         assistantMessageId: messageId,
@@ -879,16 +867,13 @@ export class InputHandler extends Component {
       const acceptedContextFiles = includeContextFiles ? this.chatView.contextManager.getContextFiles() : new Set<string>();
       let acceptedPrompt: string | undefined;
       if (this.selectedPromptPath) acceptedPrompt = await this.promptService.readPromptContent(this.selectedPromptPath) || undefined;
-      let acceptedTools: OpenAITool[] = [];
-      if (this.chatView?.isAgentModeActive?.() ?? true) {
-        try { acceptedTools = normalizeOpenAITools(await this.acceptedRequestMcp.getAvailableTools()); } catch { acceptedTools = []; }
-      }
-      this.acceptedRequestSnapshot = await this.acceptedRequestPreparation.prepare(acceptedOperation, {
+      this.acceptedRequestSnapshot = await this.aiService.prepareAcceptedChatRequest(acceptedOperation, {
+        model: this.getSelectedModelIdForChat(),
         contextFiles: acceptedContextFiles,
-        selectedPrompt: acceptedPrompt,
-        includeImages: true,
-        tools: acceptedTools,
+        systemPromptOverride: acceptedPrompt,
+        allowTools: this.chatView?.isAgentModeActive?.() ?? true,
       });
+      for (const notice of this.acceptedRequestSnapshot.notices) new Notice(notice.message, notice.timeoutMs);
       this.submittedInputSnapshot = { messageId: durableTurnId, rawText: submittedRawText };
       this.input.value = "";
       this.adjustInputHeight();
@@ -989,8 +974,13 @@ export class InputHandler extends Component {
       }
       this.submissionReserved = false;
       this.submissionReservationPromise = null;
-      await lifecycleTurn;
+      try {
+        await lifecycleTurn;
+      } finally {
+        this.releaseAcceptedRequestIfTerminal();
+      }
     } catch (err) {
+      this.releaseAcceptedRequestIfTerminal();
       if (!userCommitted) {
         this.input.value = originalInputValue;
         this.pendingLargeTextContent = originalPendingLargeText;
@@ -1524,7 +1514,18 @@ export class InputHandler extends Component {
     }
   }
 
+  private releaseAcceptedRequestIfTerminal(): void {
+    const operation = this.acceptedOperation;
+    if (!operation || (this.turnLifecycle && this.turnLifecycle.getState() !== "terminal")) return;
+    this.aiService.releaseAcceptedChatRequest(operation);
+    if (this.acceptedOperation === operation) {
+      this.acceptedOperation = null;
+      this.acceptedRequestSnapshot = null;
+    }
+  }
+
   public resetForFreshChat(): void {
+    this.releaseAcceptedRequestIfTerminal();
     this.pendingLargeTextContent = null;
     this.webSearchEnabled = false;
     this.syncAgentModeButton();
@@ -1613,6 +1614,7 @@ export class InputHandler extends Component {
 
     const cleanup = () => {
       if (this.localResourcesDisposed) return;
+      this.releaseAcceptedRequestIfTerminal();
       this.localResourcesDisposed = true;
       this.localResourcesDisposing = false;
 

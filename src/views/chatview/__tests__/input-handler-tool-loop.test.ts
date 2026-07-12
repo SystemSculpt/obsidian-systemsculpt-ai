@@ -127,6 +127,17 @@ describe("InputHandler hosted tool loop", () => {
     const messages: ChatMessage[] = [];
     const aiService = {
       streamMessage: jest.fn(),
+      prepareAcceptedChatRequest: jest.fn(async (operation: any) => ({
+        operation,
+        durableTurnId: operation.durableTurnId,
+        durableSnapshot: operation.initialDurableSnapshot,
+        acceptedMessageCount: operation.initialDurableSnapshot.messages.length,
+        model: "ai-agent",
+        policy: { prompt: "none", contextCount: 0, imageContextIncluded: true, documentContextIncluded: false, tools: "omitted" },
+        legacyPreparation: { modelSource: "systemsculpt", resolvedModel: {}, actualModelId: "systemsculpt/ai-agent", preparedMessages: operation.initialDurableSnapshot.messages, finalSystemPrompt: "", tools: [] },
+        notices: [], diagnostics: [], messages: operation.initialDurableSnapshot.messages.map((message: ChatMessage) => ({ role: message.role, content: message.content })),
+      })),
+      releaseAcceptedChatRequest: jest.fn(),
       executeHostedToolCall: jest.fn().mockResolvedValue({
         success: true,
         data: { contents: ["alpha", "beta"] },
@@ -173,6 +184,7 @@ describe("InputHandler hosted tool loop", () => {
       getPiSessionId: jest.fn(() => undefined),
       getSelectedModelId: jest.fn(() => "systemsculpt@@systemsculpt/ai-agent"),
       saveChat: jest.fn().mockResolvedValue(undefined),
+      getDurableTranscriptSnapshot: jest.fn(() => Object.freeze({ chatId: "chat-1", version: 1, messages: Object.freeze([...messages]) })),
       isFullyLoaded: true,
     } as any;
 
@@ -210,6 +222,15 @@ describe("InputHandler hosted tool loop", () => {
       chatView,
     });
 
+    const bindAcceptedRequest = async () => {
+      const message = messages.find((entry) => entry.role === "user") ?? { role: "user", content: "accepted", message_id: "u" } as ChatMessage;
+      const durable = Object.freeze({ chatId: "chat-1", version: 1, messages: Object.freeze([message]) });
+      const operation = Object.freeze({ lease: {} as never, durableTurnId: message.message_id || "u", acceptedUserMessage: message, initialDurableSnapshot: durable, turnBoundaryId: "b" });
+      (handler as any).acceptedOperation = operation;
+      (handler as any).acceptedRequestSnapshot = await aiService.prepareAcceptedChatRequest(operation);
+      return operation;
+    };
+
     return {
       app,
       container,
@@ -222,6 +243,7 @@ describe("InputHandler hosted tool loop", () => {
       onError,
       chatView,
       handler,
+      bindAcceptedRequest,
     };
   };
 
@@ -458,7 +480,7 @@ describe("InputHandler hosted tool loop", () => {
   });
 
   it("reuses the last assistant root when a hosted continuation round starts", async () => {
-    const { aiService, chatContainer, handler, messages } = createHostedToolLoopHarness();
+    const { aiService, chatContainer, handler, messages, bindAcceptedRequest } = createHostedToolLoopHarness();
 
     const existingMessageEl = document.createElement("div");
     existingMessageEl.classList.add("systemsculpt-message", "systemsculpt-assistant-message");
@@ -522,7 +544,8 @@ describe("InputHandler hosted tool loop", () => {
         completionState: "completed",
       });
 
-    await (handler as any).streamAssistantTurn(new AbortController().signal, false);
+    const operation = await bindAcceptedRequest();
+    await (handler as any).streamAssistantTurn(operation, new AbortController().signal, false);
 
     expect(createAssistantMessageContainerSpy).not.toHaveBeenCalled();
     expect(streamSpy).toHaveBeenCalledTimes(1);
@@ -933,6 +956,7 @@ describe("InputHandler hosted tool loop", () => {
 
     const aiService = {
       streamMessage: jest.fn(() => ({}) as any),
+      releaseAcceptedChatRequest: jest.fn(),
     } as any;
 
     const plugin = {
@@ -957,6 +981,7 @@ describe("InputHandler hosted tool loop", () => {
       getPiSessionFile: jest.fn(() => undefined),
       getPiSessionId: jest.fn(() => undefined),
       getSelectedModelId: jest.fn(() => "local-pi-openai@@gpt-4.1"),
+      getDurableTranscriptSnapshot: jest.fn(),
       setPiSessionState: jest.fn(),
     } as any;
 
@@ -1007,7 +1032,12 @@ describe("InputHandler hosted tool loop", () => {
       completionState: "completed",
     });
 
-    await (handler as any).streamAssistantTurn(new AbortController().signal, false);
+    const message = { role: "user", content: "accepted", message_id: "u" } as const;
+    const durable = Object.freeze({ chatId: "chat-1", version: 1, messages: Object.freeze([message]) });
+    const operation = Object.freeze({ lease: {} as never, durableTurnId: "u", acceptedUserMessage: message, initialDurableSnapshot: durable, turnBoundaryId: "b" });
+    (handler as any).acceptedOperation = operation;
+    (handler as any).acceptedRequestSnapshot = { operation, legacyPreparation: { modelSource: "pi_local", resolvedModel: {}, actualModelId: "local-pi-openai@@gpt-4.1", preparedMessages: [message], finalSystemPrompt: "", tools: [] } };
+    await (handler as any).streamAssistantTurn(operation, new AbortController().signal, false, undefined, { phase: "initial" });
 
     expect(aiService.streamMessage).toHaveBeenCalledWith(
       expect.objectContaining({

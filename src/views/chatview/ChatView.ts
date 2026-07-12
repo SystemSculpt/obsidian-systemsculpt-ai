@@ -504,6 +504,10 @@ export class ChatView extends ItemView {
     return Object.freeze({ status: "accepted_current", snapshot: accepted.snapshot, message: accepted.message, ownership });
   }
 
+  public getDurableTranscriptSnapshot(): ChatTranscriptSnapshot {
+    return this.ensureChatTranscript().snapshot();
+  }
+
   private projectAcceptedTranscriptSnapshot(accepted: ChatTranscriptSnapshot): void {
     // @ts-expect-error Transcript ownership intentionally centralizes this readonly field assignment.
     this.messages = accepted.messages;
