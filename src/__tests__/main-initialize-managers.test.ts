@@ -85,10 +85,6 @@ describe("SystemSculptPlugin.initializeManagers", () => {
       .spyOn(plugin as any, "getInitializationTracer")
       .mockReturnValue(createTracer() as any);
     jest.spyOn(plugin, "getLogger").mockReturnValue(createLogger() as any);
-    jest
-      .spyOn(plugin as any, "syncDesktopAutomationBridge")
-      .mockResolvedValue(undefined);
-
     const registerExtensionsSpy = jest.spyOn(plugin, "registerExtensions");
 
     mockRegisterCommands

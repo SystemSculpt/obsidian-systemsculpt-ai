@@ -122,11 +122,8 @@ const createPiSdkBuildFixPlugins = () => {
 						export { SessionManager } from ${toPiImportPath("core/session-manager.js")};
 						export { SettingsManager } from ${toPiImportPath("core/settings-manager.js")};
 
-						// sdk.js pulls in bash-executor, agent-session, and tools/bash which
-						// eagerly initialize Node-only deps (events, stream, dockerode, etc.)
-						// at module evaluation time. On Obsidian mobile these crash because
-						// Node globals do not exist. Lazy-load so the cost is only paid on
-						// desktop when createAgentSession/createCodingTools are actually called.
+						// sdk.js pulls in bash-executor, agent-session, and tools/bash.
+						// Lazy-load that large surface until an agent session actually needs it.
 						let _sdk;
 						function _loadSdk() {
 							if (!_sdk) _sdk = require(${toPiImportPath("core/sdk.js")});
@@ -303,30 +300,6 @@ const buildOptions = createPluginBuildOptions({
 	production: prod,
 	plugins: [
 		...createPiSdkBuildFixPlugins(),
-		{
-			// Wrap externalized Node-only modules in try/catch so they degrade
-			// gracefully on mobile (no Node.js) while still resolving on desktop
-			// (Electron has Node.js).  Runs as onEnd to post-process the bundle.
-			name: "safe-node-externals",
-			setup(build) {
-				const safeExternals = ["proper-lockfile", "graceful-fs"];
-				build.onEnd(async () => {
-					const { readFileSync, writeFileSync } = await import("fs");
-					const outfile = build.initialOptions.outfile || "main.js";
-					let code = readFileSync(outfile, "utf8");
-					for (const mod of safeExternals) {
-						const escaped = mod.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-						const pattern = new RegExp(`\\brequire\\("${escaped}"\\)`, "g");
-						code = code.replace(
-							pattern,
-							`(() => { try { return require("${mod}"); } catch { return {}; } })()`
-						);
-					}
-
-					writeFileSync(outfile, code);
-				});
-			}
-		},
 		{
 			name: "build-reporter",
 			setup(build) {

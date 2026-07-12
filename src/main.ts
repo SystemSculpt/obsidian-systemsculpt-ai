@@ -69,7 +69,6 @@ import { relativeLineNumbersExtension } from "./editor/relative-line-numbers";
 import { type Extension } from "@codemirror/state";
 import type { StudioService } from "./studio/StudioService";
 import { SYSTEMSCULPT_STUDIO_VIEW_TYPE } from "./core/plugin/viewTypes";
-import type { DesktopAutomationBridge } from "./testing/automation/DesktopAutomationBridge";
 import { API_BASE_URL, WEBSITE_API_BASE_URL } from "./constants/api";
 import { ManagedCapabilityClient } from "./services/managed/ManagedCapabilityClient";
 import { ManagedCapabilityClientFactory, type ManagedCapabilityClientGraph } from "./services/managed/ManagedCapabilityClientFactory";
@@ -81,7 +80,6 @@ type StudioServiceModule = typeof import("./studio/StudioService");
 type SystemSculptSearchEngineModule = typeof import("./services/search/SystemSculptSearchEngine");
 type RecorderServiceModule = typeof import("./services/RecorderService");
 type FileContextMenuServiceModule = typeof import("./context-menu/FileContextMenuService");
-type DesktopAutomationBridgeModule = typeof import("./testing/automation/DesktopAutomationBridge");
 
 function loadViewManagerModule(): ViewManagerModule {
   return require("./core/plugin/views");
@@ -105,10 +103,6 @@ function loadRecorderServiceModule(): RecorderServiceModule {
 
 function loadFileContextMenuServiceModule(): FileContextMenuServiceModule {
   return require("./context-menu/FileContextMenuService");
-}
-
-function loadDesktopAutomationBridgeModule(): DesktopAutomationBridgeModule {
-  return require("./testing/automation/DesktopAutomationBridge");
 }
 
 export default class SystemSculptPlugin extends Plugin {
@@ -165,7 +159,6 @@ export default class SystemSculptPlugin extends Plugin {
   private webResearchCorpusService: WebResearchCorpusService | null = null;
   private studioService: StudioService | null = null;
   private fileExplorerStudioButtonManager: FileExplorerStudioButtonManager | null = null;
-  private desktopAutomationBridge: DesktopAutomationBridge | null = null;
   private managedCapabilityGraph: ManagedCapabilityClientGraph | null = null;
   private managedProductIntegrationClient: ManagedProductIntegrationClient | null = null;
   /** Live-reconfigurable slot for the relative line number gutter editor extension. */
@@ -735,13 +728,6 @@ export default class SystemSculptPlugin extends Plugin {
               });
             }
 
-            this.syncDesktopAutomationBridge().catch((error) => {
-              const logger = this.getLogger();
-              logger.error("Desktop automation bridge settings sync failed", error, {
-                source: "SystemSculptPlugin",
-              });
-            });
-
             try {
               this.syncRelativeLineNumbersExtension();
             } catch (error) {
@@ -753,16 +739,6 @@ export default class SystemSculptPlugin extends Plugin {
           })
         );
 
-        this.registerEvent(
-          this.app.workspace.on("systemsculpt:settings-file-touched", () => {
-            this.syncDesktopAutomationBridge({ forceRestart: true }).catch((error) => {
-              const logger = this.getLogger();
-              logger.error("Desktop automation bridge file-touch sync failed", error, {
-                source: "SystemSculptPlugin",
-              });
-            });
-          })
-        );
       },
     });
 
@@ -1811,30 +1787,8 @@ export default class SystemSculptPlugin extends Plugin {
     });
   }
 
-  private async syncDesktopAutomationBridge(options?: { forceRestart?: boolean }): Promise<void> {
-    if (this.isUnloading || !PlatformContext.get().supportsDesktopOnlyFeatures()) {
-      return;
-    }
-
-    if (!this.desktopAutomationBridge) {
-      const { DesktopAutomationBridge } = loadDesktopAutomationBridgeModule();
-      this.desktopAutomationBridge = new DesktopAutomationBridge(this);
-    }
-
-    await this.desktopAutomationBridge.syncFromSettings(options);
-  }
-
   public isPluginUnloading(): boolean {
     return this.isUnloading;
-  }
-
-  private async stopDesktopAutomationBridge(): Promise<void> {
-    if (!this.desktopAutomationBridge) {
-      return;
-    }
-
-    await this.desktopAutomationBridge.stop().catch(() => {});
-    this.desktopAutomationBridge = null;
   }
 
   /**
@@ -1948,14 +1902,6 @@ export default class SystemSculptPlugin extends Plugin {
       this.startFileExplorerStudioButtonIfNeeded();
       this.ensureCommandManager();
 
-      try {
-        await this.syncDesktopAutomationBridge();
-      } catch (error) {
-        logger.error("Desktop automation bridge failed to initialize", error, {
-          source: "SystemSculptPlugin",
-        });
-      }
-
       const metadata = {
         managers: [
           "LicenseManager",
@@ -2055,8 +2001,6 @@ export default class SystemSculptPlugin extends Plugin {
         this.resourceMonitor.stop();
         this.resourceMonitor = null;
       }
-
-      await this.stopDesktopAutomationBridge();
 
       if (this.fileExplorerStudioButtonManager) {
         this.fileExplorerStudioButtonManager.dispose();

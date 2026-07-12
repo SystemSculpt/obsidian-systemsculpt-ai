@@ -60,29 +60,20 @@ test("syncConfiguredTargets copies local artifacts and removes obsolete extras",
   assert.equal(fs.existsSync(path.join(pluginDir, "node_modules")), false);
 });
 
-test("createBuildSyncController reloads only after a local plugin sync succeeds", async (t) => {
+test("createBuildSyncController copies artifacts without a reload transport", async (t) => {
   const root = createTempRoot(t);
   writePluginArtifacts(root);
   const pluginDir = path.join(root, "vault", ".obsidian", "plugins", "systemsculpt-ai");
   const configPath = writeSyncConfig(root, { pluginTargets: [{ path: pluginDir }] });
-  const calls = [];
-  const spawnSyncImpl = (command, args) => {
-    calls.push({ command, args });
-    return { status: 0, stdout: "", stderr: "" };
-  };
   const controller = createBuildSyncController({
     root,
     configPath,
-    env: { SYSTEMSCULPT_AUTO_SYNC: "1", SYSTEMSCULPT_AUTO_RELOAD: "1" },
+    env: { SYSTEMSCULPT_AUTO_SYNC: "1" },
     logger: silentLogger,
-    spawnSyncImpl,
-    quiet: true,
   });
 
   assert.equal(controller.isEnabled(), true);
   controller.schedule();
   await new Promise((resolve) => setTimeout(resolve, 20));
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0].command, "node");
   assert.equal(fs.existsSync(path.join(pluginDir, "main.js")), true);
 });

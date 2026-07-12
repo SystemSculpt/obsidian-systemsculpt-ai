@@ -68,23 +68,6 @@ test("assertProductionPluginArtifacts rejects Pi CLI interactive fragments in ma
   );
 });
 
-test("assertProductionPluginArtifacts rejects the mobile-breaking node:url import-meta banner", () => {
-  const root = createTempPluginDir();
-  writeRequiredArtifacts(
-    root,
-    [
-      'const __systemsculpt_import_meta_url__ = require("node:url").pathToFileURL(__filename).href;',
-      "console.log('production build');",
-      "",
-    ].join("\n")
-  );
-
-  assert.throws(
-    () => assertProductionPluginArtifacts({ root }),
-    /breaks mobile plugin startup/i
-  );
-});
-
 test("assertProductionPluginArtifacts rejects eager Pi extension alias resolution", () => {
   const root = createTempPluginDir();
   writeRequiredArtifacts(

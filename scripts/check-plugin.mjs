@@ -5,7 +5,7 @@
  * - --fast: TypeScript, a production artifact build, CSS, and tiny policy tests
  * - default: the fast tier followed by broader bounded script guards
  *
- * Full unit, integration, and egress work belong to their dedicated commands.
+ * Full unit and integration work belong to their dedicated commands.
  */
 
 import { execSync } from "node:child_process";
@@ -25,15 +25,13 @@ const FAST_SCRIPT_TESTS = [
   "scripts/check-plugin.test.mjs",
   "scripts/github-workflows.test.mjs",
   "scripts/lint-css.test.mjs",
+  "scripts/check/managed-only-policy.test.mjs",
 ];
 
 const NORMAL_SCRIPT_TESTS = [
-  "scripts/check/managed-only-policy.test.mjs",
-  "scripts/check-release-surfaces.test.mjs",
   "scripts/plugin-artifacts.test.mjs",
   "scripts/plugin-sync.test.mjs",
   "scripts/release-plugin.test.mjs",
-  "scripts/obsidian-reload/*.test.mjs",
 ];
 
 function run(command, options = {}) {

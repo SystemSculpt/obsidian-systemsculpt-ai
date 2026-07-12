@@ -7,8 +7,6 @@
 | Unit (`src/**/__tests__/`) | Logic and modules with mockable seams | `npm test` |
 | Compiled integration (`testing/integration/`) | Production bundle loading, managed contracts, host composition, and import safety | `npm run test:integration` |
 | Script policy (`scripts/*.test.mjs`) | Build, release, sync, workflow, and repository invariants | `node --test <test>` |
-| Local reload (`scripts/obsidian-reload/`) | Discovery, strict JSON, bridge recovery, and reload stability | `npm run test:reload` |
-| Egress inventory | Source-level outbound network ownership and disposition history | `npm run check:egress` |
 
 Start behavioral fixes with a failing test at the cheapest layer that observes
 the real failure. Keep managed-service tests deterministic and credential-free;
@@ -22,10 +20,7 @@ npm run test:related -- <changed src files>
 ```
 
 Use the focused test command for the module being changed instead of the full
-suite. Add compiled integration only for bundle/composition changes and
-`npm run check:egress` only for network-capable source changes. Run
-`npm run test:egress-analyzer` only for analyzer changes. Full unit and full
-integration run once at combined checkpoints and release.
+suite. Add compiled integration only for bundle/composition changes.
 
 ## Conventions
 

@@ -257,7 +257,6 @@ Plugin build and live reload:
 ```bash
 npm run build
 npm run sync:local
-node scripts/reload-local-obsidian-plugin.mjs
 ```
 
 ## Implementation Notes

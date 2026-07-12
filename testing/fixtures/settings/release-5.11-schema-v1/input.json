@@ -17,7 +17,6 @@
     "licenseValid": true,
     "lastValidated": 1720000000000,
     "settingsMode": "standard",
-    "desktopAutomationBridgeEnabled": false,
     "selectedModelId": "legacy-provider@@legacy-model",
     "postProcessingProviderId": "legacy-provider",
     "postProcessingModelId": "legacy-model",

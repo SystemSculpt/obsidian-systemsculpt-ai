@@ -75,7 +75,7 @@ export class RecorderService {
 
   /**
    * Observe completed transcriptions without replacing the service-level
-   * onTranscriptionComplete callback (used by the desktop automation bridge).
+   * onTranscriptionComplete callback.
    */
   public onTranscription(callback: (text: string) => void): () => void {
     this.transcriptionListeners.add(callback);

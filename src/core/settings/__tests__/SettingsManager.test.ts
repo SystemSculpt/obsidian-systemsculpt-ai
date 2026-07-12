@@ -744,7 +744,6 @@ describe("SettingsManager", () => {
       mockPlugin.loadData.mockResolvedValue({
         settingsMode: "advanced",
         debugMode: true,
-        desktopAutomationBridgeEnabled: true,
       });
 
       const changed = await settingsManager.reloadSettingsFromDisk();
@@ -752,14 +751,12 @@ describe("SettingsManager", () => {
       expect(changed).toBe(true);
       expect(settingsManager.settings.settingsMode).toBe("advanced");
       expect(settingsManager.settings.debugMode).toBe(true);
-      expect(settingsManager.settings.desktopAutomationBridgeEnabled).toBe(true);
       expect(mockPlugin.app.workspace.trigger).toHaveBeenCalledWith(
         "systemsculpt:settings-updated",
         expect.anything(),
         expect.objectContaining({
           settingsMode: "advanced",
           debugMode: true,
-          desktopAutomationBridgeEnabled: true,
         })
       );
     });

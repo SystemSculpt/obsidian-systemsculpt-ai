@@ -10,11 +10,6 @@ const INLINE_SOURCE_MAP_PATTERN = /[#@]\s*sourceMappingURL=data:/;
 const DEFAULT_TAIL_BYTES = 2 * 1024 * 1024;
 const FORBIDDEN_MAIN_BUNDLE_FRAGMENTS = [
   {
-    fragment: 'const __systemsculpt_import_meta_url__ = require("node:url").pathToFileURL(__filename).href;',
-    message:
-      "main.js still uses a node:url import-meta banner that breaks mobile plugin startup before load.",
-  },
-  {
     fragment: '"@mariozechner/pi-agent-core": resolveWorkspaceOrImport(',
     message:
       "main.js still eagerly resolves Pi extension aliases during Obsidian plugin startup.",

@@ -63,11 +63,7 @@ describe("built bundle (main.js)", () => {
     const commandIds = plugin._commands.map((command: { id: string }) => command.id);
     expect(new Set(commandIds).size).toBe(commandIds.length);
 
-    // Contrast with the mobile guard (bundle-load.mobile.test.ts): the
-    // desktop-only recorder service that mobile withholds DOES initialize
-    // off-mobile. This is what makes "withheld on mobile" a real gate
-    // (src/main.ts:1689) rather than a vacuous default — a regression in either
-    // direction (recorder on mobile, or recorder missing on desktop) red-builds.
+    // The desktop recorder is part of the normal installed plugin surface.
     expect(plugin.recorderService).not.toBeNull();
 
     plugin.unload();
@@ -111,11 +107,8 @@ describe("built bundle (main.js)", () => {
     };
     visit(source);
 
-    // Electron's renderer treats native import() as a URL fetch. A specifier
-    // such as node:fs therefore rejects with "Failed to fetch dynamically
-    // imported module: node:fs" instead of loading the Node builtin. Desktop
-    // code must use the plugin's lazy loadDesktopOnly(() => require(...))
-    // boundary, which also keeps mobile startup safe.
+    // Electron's renderer treats native import() as a URL fetch. Desktop code
+    // must use the plugin's lazy loadDesktopOnly(() => require(...)) seam.
     expect(dynamicNodeImports).toEqual([]);
   });
 

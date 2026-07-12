@@ -3,7 +3,6 @@
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
-import { spawnSync } from "node:child_process";
 import { inspectPluginArtifacts, REQUIRED_PLUGIN_ARTIFACTS } from "./plugin-artifacts.mjs";
 
 export const DEFAULT_SYNC_CONFIG_PATH = path.resolve(process.cwd(), "systemsculpt-sync.config.json");
@@ -21,21 +20,6 @@ export const OBSOLETE_PLUGIN_FILES = [
 function booleanFlag(value, fallback) {
   if (value === undefined || value === null || value === "") return fallback;
   return !/^(?:0|false|no|off)$/i.test(String(value).trim());
-}
-
-function runCommand(command, args, options = {}) {
-  const result = (options.spawnSyncImpl || spawnSync)(command, args, {
-    cwd: options.cwd || process.cwd(),
-    encoding: "utf8",
-    stdio: "pipe",
-    env: options.env || process.env,
-  });
-  if (result?.error) throw result.error;
-  if ((result?.status ?? 1) !== 0) {
-    const output = [result?.stdout, result?.stderr].filter(Boolean).join("\n").trim();
-    throw new Error(`${command} ${args.join(" ")} failed.${output ? `\n${output}` : ""}`);
-  }
-  return result;
 }
 
 export function resolveSyncConfigPath(
@@ -106,21 +90,6 @@ export function syncConfiguredTargets(options = {}) {
   return { ...loaded, succeeded: loaded.targets };
 }
 
-function runHotReload(options) {
-  const args = [
-    path.join(process.cwd(), "scripts", "reload-local-obsidian-plugin.mjs"),
-    "--plugin-id",
-    "systemsculpt-ai",
-    "--quiet-unavailable",
-    "--timeout-ms",
-    "8000",
-    "--sync-config",
-    resolveSyncConfigPath(options.configPath),
-  ];
-  if (options.quiet) args.push("--quiet-success");
-  runCommand("node", args, options);
-}
-
 export function createBuildSyncController(options = {}) {
   const env = options.env || process.env;
   const root = path.resolve(String(options.root || process.cwd()));
@@ -131,9 +100,8 @@ export function createBuildSyncController(options = {}) {
 
   const syncOnce = async () => {
     if (!booleanFlag(env.SYSTEMSCULPT_AUTO_SYNC, true)) return;
-    let result;
     try {
-      result = syncConfiguredTargets({
+      syncConfiguredTargets({
         root,
         configPath,
         failWhenNoTargets: false,
@@ -144,18 +112,6 @@ export function createBuildSyncController(options = {}) {
       return;
     }
 
-    if (booleanFlag(env.SYSTEMSCULPT_AUTO_RELOAD, false) && result.succeeded.length > 0) {
-      try {
-        runHotReload({
-          configPath,
-          env,
-          quiet: Boolean(options.quiet),
-          spawnSyncImpl: options.spawnSyncImpl,
-        });
-      } catch (error) {
-        logger.warn?.(`[sync] Reload failed: ${error instanceof Error ? error.message : String(error)}`);
-      }
-    }
   };
 
   const pump = async () => {

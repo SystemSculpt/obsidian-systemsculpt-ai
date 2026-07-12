@@ -88,10 +88,6 @@ export class SettingsManager {
       migratedSettings.vaultInstanceId = generateVaultInstanceId();
     }
 
-    if (typeof migratedSettings.desktopAutomationBridgeEnabled !== "boolean") {
-      migratedSettings.desktopAutomationBridgeEnabled = DEFAULT_SETTINGS.desktopAutomationBridgeEnabled;
-    }
-
     if (typeof migratedSettings.embeddingsVectorFormatVersion !== "number" || !Number.isFinite(migratedSettings.embeddingsVectorFormatVersion)) {
       migratedSettings.embeddingsVectorFormatVersion = DEFAULT_SETTINGS.embeddingsVectorFormatVersion;
     }

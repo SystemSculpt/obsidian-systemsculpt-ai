@@ -70,12 +70,6 @@ export interface SystemSculptSettings {
   vaultInstanceId?: string;
 
   /**
-   * When enabled on desktop, expose a token-protected localhost bridge for
-   * no-focus automation against the already-running Obsidian instance.
-   */
-  desktopAutomationBridgeEnabled?: boolean;
-
-  /**
    * When enabled, render a vim-style relative line number gutter in the markdown
    * editor: the current line shows its absolute number, every other line shows
    * its distance from the cursor.
@@ -477,7 +471,6 @@ export const DEFAULT_SETTINGS: SystemSculptSettings = {
   // Default to a simple, friendly experience
   settingsMode: "standard",
   vaultInstanceId: "",
-  desktopAutomationBridgeEnabled: false,
   relativeLineNumbersEnabled: false,
   schemaVersion: CURRENT_SCHEMA_VERSION,
   embeddingsVectorFormatVersion: 0,
