@@ -86,11 +86,10 @@ export class MicrophoneRecorder {
         await this.finalizeRecording(outputPath);
       };
       this.mediaRecorder.onerror = (event: Event) => {
-        // iOS can revoke the mic track when the screen locks and surface it as a
-        // MediaRecorder "error" rather than a clean visibilitychange/onstop.
-        // Without this handler the in-progress recording is dropped silently
-        // (#162). Treat any error while recording as an interruption so the
-        // captured chunks are still flushed to disk.
+        // Browsers can surface a lost mic track or recorder pipeline failure as
+        // a MediaRecorder "error" rather than a clean onstop transition.
+        // Treat any error while recording as an interruption so buffered audio
+        // is still flushed to disk instead of being dropped (#162).
         if (this.state !== "recording") return;
         logError(
           "MicrophoneRecorder",
@@ -131,7 +130,7 @@ export class MicrophoneRecorder {
     } else if (reason === "interrupted") {
       this.onStatus("Recording interrupted. Saving captured audio...");
     } else {
-      this.onStatus("App moved to background. Saving captured audio...");
+      this.onStatus("Window or tab moved to the background. Saving captured audio...");
     }
 
     try {
@@ -268,10 +267,10 @@ export class MicrophoneRecorder {
       this.swapMicStream(next);
       this.onStatus("Microphone reconnected");
     } catch (error) {
-      // A lock/background transition can end the mic track and then block
-      // re-acquisition (getUserMedia is unavailable while the page is hidden).
+      // A hidden tab or window can end the mic track and then block
+      // re-acquisition because getUserMedia is unavailable while hidden.
       // Preserve the background classification so the captured audio is saved
-      // and flagged, instead of being treated as a hard failure (#162).
+      // and flagged instead of being treated as a hard failure (#162).
       const hiddenNow = typeof document !== "undefined" && document.hidden;
       if (hiddenNow) {
         this.stop("background-hidden");
@@ -352,7 +351,7 @@ export class MicrophoneRecorder {
   private notifyWakeLockHint(): void {
     if (this.wakeLockHintShown) return;
     this.wakeLockHintShown = true;
-    this.onStatus("Recording started. Keep your screen awake for uninterrupted iOS capture.");
+    this.onStatus("Recording started. Keep this window visible and your screen awake for uninterrupted capture.");
   }
 
   private async releaseWakeLock(): Promise<void> {
@@ -406,7 +405,7 @@ export class MicrophoneRecorder {
     try {
       if (this.chunks.length === 0) {
         if (this.stopReason !== "manual") {
-          throw new Error("No audio data captured before app lock/background transition");
+          throw new Error("No audio data captured before the window or tab left the foreground");
         }
         throw new Error("No audio data recorded");
       }
@@ -420,7 +419,7 @@ export class MicrophoneRecorder {
         } else if (this.stopReason === "interrupted") {
           this.onStatus("Recording saved after interruption");
         } else {
-          this.onStatus("Recording saved after app lock/background");
+          this.onStatus("Recording saved after the window or tab left the foreground");
         }
         this.onComplete(targetPath, blob, this.stopReason);
       } else {

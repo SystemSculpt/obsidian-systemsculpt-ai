@@ -385,7 +385,7 @@ export class DirectoryOperations {
             if (destFolder) {
               await ensureAdapterFolder(adapter, destFolder);
             }
-            // Desktop uses the Node fast-path; mobile renames through the adapter.
+            // Desktop uses the Node fast-path; adapter fallbacks rename through the adapter.
             await renameAdapterPath(adapter, source, destination);
             results.push({ source, destination, success: true });
             continue;
@@ -474,7 +474,7 @@ export class DirectoryOperations {
 
     if (this.shouldUseAdapter(path)) {
       const adapter: any = this.app.vault.adapter as any;
-      // Desktop uses the Node fast-path; mobile removes through the adapter.
+      // Desktop uses the Node fast-path; adapter fallbacks remove through the adapter.
       await removeAdapterPath(adapter, path);
       return { path, success: true };
     }

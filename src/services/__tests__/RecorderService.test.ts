@@ -4,18 +4,9 @@
 
 import { App } from "obsidian";
 import { RecorderService } from "../RecorderService";
-import { PlatformContext } from "../PlatformContext";
 import { pickRecorderFormat } from "../recorder/RecorderFormats";
 
 // Mock dependencies
-jest.mock("../PlatformContext", () => ({
-  PlatformContext: {
-    get: jest.fn().mockReturnValue({
-      isMobile: jest.fn().mockReturnValue(false),
-    }),
-  },
-}));
-
 jest.mock("../recorder/RecorderUIManager", () => ({
   RecorderUIManager: jest.fn().mockImplementation(() => ({
     open: jest.fn(),
@@ -37,9 +28,6 @@ jest.mock("../recorder/RecorderFormats", () => ({
     mimeType: "audio/webm;codecs=opus",
     extension: "webm",
   }),
-  pickRecorderAudioBitsPerSecond: jest.fn(({ isMobile }: { isMobile?: boolean } = {}) =>
-    isMobile ? 48000 : undefined
-  ),
 }));
 
 jest.mock("../recorder/RecordingSession", () => ({
@@ -73,9 +61,6 @@ describe("RecorderService", () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    (PlatformContext.get as jest.Mock).mockReturnValue({
-      isMobile: jest.fn().mockReturnValue(false),
-    });
 
     // Reset singleton
     (RecorderService as any).instance = null;
@@ -179,16 +164,12 @@ describe("RecorderService", () => {
   });
 
   describe("toggleRecording", () => {
-    it("prefers m4a recorder formats on mobile", async () => {
+    it("selects a recorder format before starting", async () => {
       const { pickRecorderFormat } = require("../recorder/RecorderFormats");
-      (PlatformContext.get as jest.Mock).mockReturnValue({
-        isMobile: jest.fn().mockReturnValue(true),
-      });
-
       const service = RecorderService.getInstance(mockApp, mockPlugin);
       await (service as any).startRecording();
 
-      expect(pickRecorderFormat).toHaveBeenCalledWith({ preferM4a: true });
+      expect(pickRecorderFormat).toHaveBeenCalledTimes(1);
     });
 
     it("queues toggle operations", async () => {
@@ -278,18 +259,6 @@ describe("RecorderService", () => {
 
       expect(stopMock).toHaveBeenCalledTimes(1);
       expect((service as any).isRecording).toBe(false);
-    });
-
-    it("selects the recorder format with the current mobile preference", async () => {
-      const { PlatformContext } = require("../PlatformContext");
-      (PlatformContext.get as jest.Mock).mockReturnValueOnce({
-        isMobile: jest.fn().mockReturnValue(true),
-      });
-      const service = RecorderService.getInstance(mockApp, mockPlugin);
-
-      await (service as any).startRecording();
-
-      expect(pickRecorderFormat as jest.Mock).toHaveBeenCalledWith({ preferM4a: true });
     });
   });
 
@@ -523,7 +492,7 @@ describe("RecorderService", () => {
       expect((service as any).ui.setRecordingState).toHaveBeenCalledWith(false);
       expect((service as any).ui.stopTimer).toHaveBeenCalled();
       expect((service as any).ui.linger).toHaveBeenCalledWith(
-        expect.stringContaining("iOS stopped recording when the app locked/backgrounded"),
+        expect.stringContaining("window or tab left the foreground"),
         4200
       );
     });

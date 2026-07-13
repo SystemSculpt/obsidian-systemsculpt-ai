@@ -1,6 +1,7 @@
 import { SystemSculptError, ERROR_CODES } from "../utils/errors";
 import { WEBSITE_API_BASE_URL, SYSTEMSCULPT_API_HEADERS } from "../constants/api";
 import { CACHE_BUSTER } from "../utils/urlHelpers";
+import type { HttpRequestError } from "../utils/httpClient";
 import SystemSculptPlugin from "../main";
 
 /**
@@ -94,11 +95,22 @@ export class LicenseService {
    * failure. Only an authoritative reject should flip `licenseValid` to false.
    */
   private isAuthoritativeReject(error: unknown): boolean {
-    return (
-      error instanceof SystemSculptError &&
-      [400, 401, 403, 404].includes(error.statusCode)
-    );
+    const status = error instanceof SystemSculptError
+      ? error.statusCode
+      : this.isHttpRequestError(error)
+        ? error.status
+        : undefined;
+
+    return status !== undefined && [400, 401, 403, 404].includes(status);
   }
 
+  private isHttpRequestError(error: unknown): error is HttpRequestError {
+    return (
+      typeof error === "object" &&
+      error !== null &&
+      "status" in error &&
+      typeof error.status === "number"
+    );
+  }
 
 }

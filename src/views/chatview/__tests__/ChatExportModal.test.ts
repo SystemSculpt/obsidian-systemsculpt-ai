@@ -181,7 +181,7 @@ describe("ChatExportModal", () => {
 
       const heading = modal.contentEl.querySelector("h2");
       expect(heading).not.toBeNull();
-      expect(heading?.textContent).toBe("Export Chat");
+      expect(heading?.textContent).toBe("Export chat");
     });
 
     it("calls renderSummary", async () => {

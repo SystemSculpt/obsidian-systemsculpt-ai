@@ -1,6 +1,4 @@
 export type PlatformTransport = "fetch" | "requestUrl";
-export type PlatformRuntime = "desktop" | "mobile";
-export type PlatformUIVariant = "mobile" | "desktop";
 
 export interface PlatformTransportOptions {
   endpoint?: string;
@@ -39,47 +37,6 @@ export class PlatformContext {
     for (const suffix of PlatformContext.DEFAULT_FETCH_AVOID_SUFFIXES) {
       PlatformContext.FETCH_AVOID_SUFFIXES.add(suffix);
     }
-  }
-
-  public isMobile(): boolean {
-    return false;
-  }
-
-  public runtime(): PlatformRuntime {
-    return "desktop";
-  }
-
-  public isDesktopRuntime(): boolean {
-    return true;
-  }
-
-  public isMobileRuntime(): boolean {
-    return false;
-  }
-
-  public supportsDesktopOnlyFeatures(): boolean {
-    return true;
-  }
-
-  public supportsStatusBar(): boolean {
-    return true;
-  }
-
-  public supportsEagerVaultWrites(): boolean {
-    return true;
-  }
-
-  /**
-   * The desktop-only plugin manifest guarantees a Node-capable Electron runtime.
-   * Keep this seam so callers still route Node-only imports through the shared
-   * boundary in `src/platform/desktopOnly.ts`.
-   */
-  public supportsNodeApis(): boolean {
-    return true;
-  }
-
-  public uiVariant(): PlatformUIVariant {
-    return "desktop";
   }
 
   public preferredTransport(options: PlatformTransportOptions = {}): PlatformTransport {

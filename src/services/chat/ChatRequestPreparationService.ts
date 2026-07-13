@@ -16,6 +16,7 @@ export type ManagedChatPreparationInput = Readonly<{
   contextFiles?: ReadonlySet<string>;
   systemPromptOverride?: string;
   allowTools?: boolean;
+  webSearch?: boolean;
 }>;
 
 export type ManagedChatPreparationDependencies = Readonly<{
@@ -77,6 +78,7 @@ export class ChatRequestPreparationService {
         },
         managedMessages: managed.messages,
         managedTools: managed.tools,
+        webSearch: input.webSearch === true,
       }))
       .catch((error: Error) => { this.failed.add(operation); throw error; });
     this.retained.set(operation, pending);

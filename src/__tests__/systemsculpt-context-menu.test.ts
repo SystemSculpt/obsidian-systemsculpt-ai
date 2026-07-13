@@ -343,7 +343,7 @@ const bootstrap = (
     emitFileMenu(handlers, menu, file, "preview");
 
     const titles = menu.recordedItems.map((item) => item.title);
-    expect(titles).toContain("SystemSculpt - Copy Image to Clipboard");
+    expect(titles).toContain("Copy image to clipboard");
   });
 
   it("copies image to clipboard when copy image menu item is clicked", async () => {
@@ -354,7 +354,7 @@ const bootstrap = (
     emitFileMenu(handlers, menu, file, "file-explorer");
 
     const entry = menu.recordedItems.find(
-      (item) => item.title === "SystemSculpt - Copy Image to Clipboard"
+      (item) => item.title === "Copy image to clipboard"
     );
     expect(entry).toBeDefined();
     await entry!.onClick?.();
@@ -376,7 +376,7 @@ const bootstrap = (
     emitFileMenu(handlers, menu, file, "file-explorer");
 
     const entry = menu.recordedItems.find(
-      (item) => item.title === "SystemSculpt - Copy Image to Clipboard"
+      (item) => item.title === "Copy image to clipboard"
     );
     expect(entry).toBeDefined();
     await entry!.onClick?.();

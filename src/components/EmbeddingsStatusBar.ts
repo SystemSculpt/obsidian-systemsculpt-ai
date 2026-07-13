@@ -596,7 +596,7 @@ export class EmbeddingsStatusBar extends Component {
     }
     if (code === "HOST_UNAVAILABLE") {
       return {
-        text: "Provider unavailable",
+        text: "SystemSculpt unavailable",
         hint: "Server temporarily down",
         tooltip,
       };

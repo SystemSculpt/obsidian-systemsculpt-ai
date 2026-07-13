@@ -1,6 +1,5 @@
 import { Setting, Notice, DropdownComponent } from "obsidian";
 import { SystemSculptSettingTab } from "./SystemSculptSettingTab";
-import { PlatformContext } from "../services/PlatformContext";
 import { DEFAULT_SETTINGS } from "../types";
 
 export async function displayRecorderTabContent(containerEl: HTMLElement, tabInstance: SystemSculptSettingTab) {
@@ -9,7 +8,6 @@ export async function displayRecorderTabContent(containerEl: HTMLElement, tabIns
     containerEl.dataset.tab = "workflow";
   }
   const { plugin } = tabInstance;
-  const isMobile = PlatformContext.get().isMobile();
 
   containerEl.createEl("h3", { text: "Recording" });
 
@@ -143,19 +141,17 @@ export async function displayRecorderTabContent(containerEl: HTMLElement, tabIns
     cls: "setting-item-description",
   });
 
-  if (!isMobile) {
-    new Setting(containerEl)
-      .setName("Automatic audio format conversion")
-      .setDesc("Convert incompatible audio files before transcription.")
-      .addToggle((toggle) => {
-        toggle
-          .setValue(plugin.settings.enableAutoAudioResampling ?? true)
-          .onChange(async (value) => {
-            await plugin.getSettingsManager().updateSettings({ enableAutoAudioResampling: value });
-            new Notice(value ? "Audio conversion enabled" : "Audio conversion disabled");
-          });
-      });
-  }
+  new Setting(containerEl)
+    .setName("Automatic audio format conversion")
+    .setDesc("Convert incompatible audio files before transcription.")
+    .addToggle((toggle) => {
+      toggle
+        .setValue(plugin.settings.enableAutoAudioResampling ?? true)
+        .onChange(async (value) => {
+          await plugin.getSettingsManager().updateSettings({ enableAutoAudioResampling: value });
+          new Notice(value ? "Audio conversion enabled" : "Audio conversion disabled");
+        });
+    });
 }
 
 async function renderMicrophoneSetting(containerEl: HTMLElement, tabInstance: SystemSculptSettingTab) {

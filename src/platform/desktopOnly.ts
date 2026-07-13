@@ -1,5 +1,3 @@
-import { PlatformContext } from "../services/PlatformContext";
-
 /**
  * Canonical boundary for Node-dependent desktop code (#207).
  *
@@ -8,16 +6,15 @@ import { PlatformContext } from "../services/PlatformContext";
  * lazy boundary so those subsystems are only evaluated when needed.
  */
 
-/** True iff the current platform seam allows Node.js access. */
+/** The managed build always runs inside Obsidian's desktop Electron runtime. */
 export function hasNodeRuntime(): boolean {
-  return PlatformContext.get().supportsNodeApis();
+  return true;
 }
 
 /**
- * Lazily load a desktop-only module. The loader MUST perform the `require`
- * itself so it stays lazy, e.g.
- * `loadDesktopOnly(() => require("./PiSdkDesktopSupport"))`.
+ * Lazily load a desktop-only module. The loader performs the `require` so
+ * startup-sensitive Node modules remain demand-loaded.
  */
-export function loadDesktopOnly<T>(loader: () => T): T | null {
-  return hasNodeRuntime() ? loader() : null;
+export function loadDesktopOnly<T>(loader: () => T): T {
+  return loader();
 }

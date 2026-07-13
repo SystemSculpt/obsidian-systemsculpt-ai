@@ -18,7 +18,6 @@
 
 /* Shared components */
 @import 'components/system-feedback.css';
-@import 'components/favorite-toggle.css';
 @import 'components/messages.css';
 @import 'components/chat-blocks.css';
 @import 'components/chat-chips.css';
@@ -55,6 +54,3 @@
 @import 'views/preview.css';
 @import 'views/studio.css';
 @import 'views/studio-editors.css';
-
-/* Platform */
-@import 'platform/mobile.css';

@@ -93,7 +93,7 @@ describe("Setup tab SystemSculpt-only layout", () => {
     expect(container.querySelectorAll(".setting-item").length).toBeGreaterThan(0);
     expect(container.querySelector('input[type="password"]')).not.toBeNull();
     expect(container.querySelector(".ss-help-link")).not.toBeNull();
-    expect(container.textContent).toContain("Account & License");
+    expect(container.textContent).toContain("Account & license");
     expect(container.textContent).toContain("Help & resources");
     expect(container.textContent).not.toContain("Release notes");
     expect(container.textContent).not.toContain("View changelog");

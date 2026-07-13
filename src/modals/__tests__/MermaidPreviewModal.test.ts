@@ -40,7 +40,7 @@ describe("MermaidPreviewModal", () => {
 
     it("creates title in header", () => {
       const h2 = modal.contentEl.querySelector("h2");
-      expect(h2?.textContent).toBe("Mermaid Diagram");
+      expect(h2?.textContent).toBe("Mermaid diagram");
     });
 
     it("creates close button in header", () => {
@@ -71,7 +71,7 @@ describe("MermaidPreviewModal", () => {
     it("creates copy button in footer", () => {
       const copyBtn = modal.contentEl.querySelector(".ss-mermaid-copy-btn");
       expect(copyBtn).not.toBeNull();
-      expect(copyBtn?.textContent).toBe("Copy Code");
+      expect(copyBtn?.textContent).toBe("Copy code");
     });
   });
 

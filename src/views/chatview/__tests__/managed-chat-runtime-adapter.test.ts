@@ -15,7 +15,7 @@ const bytes = (text: string) => new TextEncoder().encode(text);
 const response = (wire: string, status = 200) => new Response(new ReadableStream<Uint8Array>({ start(c) { c.enqueue(bytes(wire)); c.close(); } }), { status });
 async function collect(events: AsyncIterable<ManagedChatRuntimeEvent>) { const result = []; for await (const event of events) result.push(event); return result; }
 
-function setup() {
+function setup(webSearch = false) {
   const requestClient = new QueueClient();
   const transport = new HostedTransportAdapter({ baseUrl: "https://api.test", pluginVersion: "5.11.0", licenseKey: () => "key", requestClient });
   const client = new ManagedCapabilityClient({ admission: null as never, transport });
@@ -30,6 +30,7 @@ function setup() {
     policy: { prompt: "none", contextCount: 0, imageContextIncluded: true, documentContextIncluded: false, tools: "omitted" },
     managedMessages: [message],
     managedTools: [],
+    webSearch,
   });
   return { requestClient, adapter: new ManagedChatRuntimeAdapter(client), operation, acceptedRequestSnapshot };
 }
@@ -46,6 +47,20 @@ describe("ManagedChatRuntimeAdapter live events", () => {
     expect(result.kind).toBe("success");
     expect(state.requestClient.inputs[0].body).toEqual({ model: "ai-agent", stream: true, messages: [{ role: "user", content: "hello" }] });
     expect(state.requestClient.inputs[0].body).not.toHaveProperty("tool_choice");
+    if (result.kind === "success") await expect(collect(result.events)).resolves.toEqual([{ kind: "content_delta", text: "ok" }, { kind: "done" }]);
+  });
+
+  it("dispatches managed web search through the accepted request snapshot", async () => {
+    const state = setup(true);
+    state.requestClient.responses.push(response('data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n'));
+    const result = await state.adapter.dispatch({ operation: state.operation, acceptedRequestSnapshot: state.acceptedRequestSnapshot, phase: "initial", continuationIndex: 0 });
+    expect(result.kind).toBe("success");
+    expect(state.requestClient.inputs[0].body).toEqual({
+      model: "ai-agent",
+      stream: true,
+      messages: [{ role: "user", content: "hello" }],
+      plugins: [{ id: "web" }],
+    });
     if (result.kind === "success") await expect(collect(result.events)).resolves.toEqual([{ kind: "content_delta", text: "ok" }, { kind: "done" }]);
   });
 

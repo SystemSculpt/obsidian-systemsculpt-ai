@@ -1,6 +1,5 @@
 import { App, setIcon } from "obsidian";
 import type { ChatRole } from "../../../types";
-import { PlatformContext } from "../../../services/PlatformContext";
 
 export type MessageToolbarResendResult = {
   status: "success" | "cancelled" | "error";
@@ -73,17 +72,12 @@ export function attachMessageToolbar(options: ToolbarOptions): void {
 
   const toolbar = createDiv();
   toolbar.className = "systemsculpt-message-toolbar";
-  const platform = PlatformContext.get();
-  const isMobile = platform.uiVariant() === "mobile";
-  toolbar.classList.add(`platform-ui-${isMobile ? "mobile" : "desktop"}`);
 
   if (messageEl.classList.contains("systemsculpt-user-message")) {
     toolbar.classList.add("is-user");
   } else if (messageEl.classList.contains("systemsculpt-assistant-message")) {
     toolbar.classList.add("is-assistant");
   }
-
-  if (isMobile) toolbar.classList.add("is-mobile");
 
   const copyBtn = createIconButton("copy", "Copy message", async () => {
     const text = getMessageText(messageEl) || messageEl.dataset.content || "";
@@ -99,15 +93,6 @@ export function attachMessageToolbar(options: ToolbarOptions): void {
       }, 1200);
     } catch {}
   });
-
-  // On mobile, show a compact "more" toggle to expand actions
-  if (isMobile) {
-    const moreBtn = createIconButton("more-horizontal", "More", () => {
-      toolbar.classList.toggle("ss-open");
-    });
-    moreBtn.classList.add("systemsculpt-toolbar-more");
-    toolbar.appendChild(moreBtn);
-  }
 
   toolbar.appendChild(copyBtn);
 

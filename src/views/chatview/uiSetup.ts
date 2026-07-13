@@ -210,8 +210,6 @@ export const uiSetup = {
     } catch (e) {
     }
 
-    // Token counter update removed
-    
     // Now that UI is set up, render messages or status
     if (chatView.messages.length === 0) {
       // For empty chats, display the status

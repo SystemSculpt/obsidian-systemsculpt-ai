@@ -22,8 +22,8 @@ function harness(overrides: { keep?: boolean; timestamped?: boolean } = {}) {
   const app = new App();
   const file = new TFile({ path: "Recordings/demo.webm", name: "demo.webm", stat: { size: 4 } });
   (app.vault as any).readBinary = jest.fn();
-  (app.vault as any).delete = jest.fn();
   (app.vault as any).modify = jest.fn();
+  (app.fileManager as any).trashFile = jest.fn();
   (app.vault.getAbstractFileByPath as jest.Mock).mockImplementation((path: string) => path === file.path ? file : null);
   (app.vault.readBinary as jest.Mock).mockResolvedValue(new Uint8Array([1, 2, 3, 4]).buffer);
   (app.vault.create as jest.Mock).mockImplementation(async (path: string) => new TFile({ path, name: path.split("/").pop() }));
@@ -41,7 +41,7 @@ function harness(overrides: { keep?: boolean; timestamped?: boolean } = {}) {
     events.push(`write:${path}`);
     return new TFile({ path, name: path.split("/").pop() });
   });
-  (app.vault.delete as jest.Mock).mockImplementation(async () => { events.push("delete-source"); });
+  (app.fileManager.trashFile as jest.Mock).mockImplementation(async () => { events.push("delete-source"); });
   const plugin = {
     app,
     settings: {
@@ -51,7 +51,7 @@ function harness(overrides: { keep?: boolean; timestamped?: boolean } = {}) {
       cleanTranscriptionOutput: true,
     },
   } as any;
-  const coordinator = new TranscriptionCoordinator(app, plugin, { isMobile: () => false } as any, adapter as any);
+  const coordinator = new TranscriptionCoordinator(app, plugin, adapter as any);
   return { adapter, app, coordinator, events, file };
 }
 
@@ -78,7 +78,7 @@ describe("TranscriptionCoordinator", () => {
 
     expect(adapter.beginLocalCommit).toHaveBeenCalled();
     expect(adapter.completeLocalCommit).not.toHaveBeenCalled();
-    expect(app.vault.delete).not.toHaveBeenCalled();
+    expect(app.fileManager.trashFile).not.toHaveBeenCalled();
   });
 
   it("writes timestamped results as SRT without post-processing", async () => {
@@ -105,7 +105,7 @@ describe("TranscriptionCoordinator", () => {
 
     await expect(running).rejects.toMatchObject({ name: "AbortError" });
     expect(app.vault.create).not.toHaveBeenCalled();
-    expect(app.vault.delete).not.toHaveBeenCalled();
+    expect(app.fileManager.trashFile).not.toHaveBeenCalled();
   });
 
   it("owns an active operation ID before remote dispatch settles", async () => {

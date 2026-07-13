@@ -144,7 +144,7 @@ export class TranscribeAudioFileModal extends StandardModal {
     });
     header.createDiv({
       cls: "ss-transcribe-audio__section-hint",
-      text: "Drag in a file or tap to choose from your computer or phone.",
+      text: "Drag in a file or click to choose from your computer.",
     });
 
     const dropzone = container.createDiv({
@@ -291,13 +291,13 @@ export class TranscribeAudioFileModal extends StandardModal {
       });
       section.createDiv({
         cls: "ss-transcribe-audio__section-hint",
-        text: "You can re-enable the format chooser anytime in Settings > Audio & Transcription.",
+        text: "You can re-enable the format chooser anytime in Settings > Workflow.",
       });
     }
 
     section.createDiv({
       cls: "ss-transcribe-audio__section-hint",
-      text: "You can always change this in Settings > Audio & Transcription.",
+      text: "You can always change this in Settings > Workflow.",
     });
   }
 

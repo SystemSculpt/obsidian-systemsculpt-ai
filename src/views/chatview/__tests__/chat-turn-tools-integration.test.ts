@@ -199,11 +199,11 @@ describe("ChatTurn tool ownership", () => {
     expect(continuation).not.toHaveBeenCalled();
   });
 
-  it("keeps a durable checkpoint when Pi sync/render fails", async () => {
-    const { turn, order } = harness({ renderToolCheckpoint: async () => { order.push("pi-sync-failed"); } });
+  it("keeps a durable checkpoint when checkpoint rendering fails", async () => {
+    const { turn, order } = harness({ renderToolCheckpoint: async () => { order.push("render-failed"); } });
     await turn.run(user);
     expect(turn.outcome).toBe("completed");
-    expect(order.indexOf("checkpoint")).toBeLessThan(order.indexOf("pi-sync-failed"));
+    expect(order.indexOf("checkpoint")).toBeLessThan(order.indexOf("render-failed"));
   });
 
   it("retries empty continuations and then completes", async () => {

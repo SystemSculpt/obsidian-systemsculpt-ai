@@ -64,12 +64,12 @@ describe("PluginLogger", () => {
   });
 
   describe("logging methods", () => {
-    it("info logs message at info level", () => {
+    it("routes info messages to Obsidian-safe debug output", () => {
       mockPlugin.settings.debugMode = true;
 
       logger.info("Test info message");
 
-      expect(consoleSpy.info).toHaveBeenCalledWith(
+      expect(consoleSpy.debug).toHaveBeenCalledWith(
         expect.stringContaining("Test info message")
       );
     });
@@ -108,7 +108,7 @@ describe("PluginLogger", () => {
 
       logger.info("Message with context", { source: "TestSource" });
 
-      expect(consoleSpy.info).toHaveBeenCalledWith(
+      expect(consoleSpy.debug).toHaveBeenCalledWith(
         expect.stringContaining("Message with context"),
         expect.objectContaining({ source: "TestSource" })
       );
@@ -125,7 +125,7 @@ describe("PluginLogger", () => {
       logger.error("Error message");
 
       expect(consoleSpy.debug).toHaveBeenCalled();
-      expect(consoleSpy.info).toHaveBeenCalled();
+      expect(consoleSpy.info).not.toHaveBeenCalled();
       expect(consoleSpy.warn).toHaveBeenCalled();
       expect(consoleSpy.error).toHaveBeenCalled();
     });

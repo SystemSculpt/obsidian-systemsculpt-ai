@@ -25,15 +25,6 @@ export const SYSTEMSCULPT_API_ENDPOINTS = {
   },
 } as const;
 
-export interface LicenseValidationResponse {
-  email: string;
-  subscription_status: string;
-  license_key: string;
-  user_name?: string;
-  display_name?: string;
-  has_agents_pack_access?: boolean;
-}
-
 export const SYSTEMSCULPT_API_HEADERS = {
   DEFAULT: {
     "Content-Type": "application/json",

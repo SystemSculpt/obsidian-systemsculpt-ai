@@ -3,7 +3,7 @@
  * 
  * Features:
  * - Parallel processing with concurrency control
- * - Smart batching for optimal API usage
+ * - Fixed-size managed batching
  * - Progress tracking and cancellation
  * - One managed dispatch per prepared batch
  */
@@ -14,8 +14,7 @@ import {
   ProcessingProgress,
   ProcessingResult,
   FailedProcessingDetail,
-  EmbeddingsProvider,
-  EmbeddingBatchMetadata
+  EmbeddingsProvider
 } from '../types';
 import { EmbeddingsStorage } from '../storage/EmbeddingsStorage';
 import {
@@ -27,7 +26,6 @@ import {
 import { buildVectorId } from "../utils/vectorId";
 import { normalizeInPlace, toFloat32Array } from '../utils/vector';
 import { ContentPreprocessor, PreparedChunk } from "./ContentPreprocessor";
-import { tokenCounter } from '../../../utils/TokenCounter';
 import { errorLogger } from '../../../utils/errorLogger';
 import { ManagedEmbeddingsError } from '../providers/ManagedEmbeddingsAdapter';
 
@@ -47,9 +45,8 @@ type PendingChunkWork = {
 };
 
 export class EmbeddingsProcessor {
-  private static readonly DEFAULT_MAX_TEXTS_PER_REQUEST = 25;
+  private static readonly DEFAULT_BATCH_SIZE = 20;
   private cancelled = false;
-  private maxTextsPerRequest: number;
   private fatalError: ManagedEmbeddingsError | null = null;
   private failedBatchPaths: Set<string> = new Set();
   private failedBatchDetails: Map<string, FailedProcessingDetail> = new Map();
@@ -61,9 +58,7 @@ export class EmbeddingsProcessor {
     private readonly storage: EmbeddingsStorage,
     private readonly preprocessor: ContentPreprocessor,
     private config: ProcessorConfig
-  ) {
-    this.maxTextsPerRequest = this.resolveProviderBatchLimit(provider);
-  }
+  ) {}
 
   /**
    * Process files with progress tracking
@@ -80,11 +75,10 @@ export class EmbeddingsProcessor {
     this.failedBatchPaths.clear();
     this.failedBatchDetails.clear();
     const totalFiles = files.length;
-    const providerLimit = this.maxTextsPerRequest || EmbeddingsProcessor.DEFAULT_MAX_TEXTS_PER_REQUEST;
-    const configuredBatchSize = this.config.batchSize && this.config.batchSize > 0
-      ? this.config.batchSize
-      : providerLimit;
-    const safeBatchSize = Math.max(1, Math.min(configuredBatchSize, providerLimit));
+    const configuredBatchSize = Number.isFinite(this.config.batchSize) && this.config.batchSize > 0
+      ? Math.floor(this.config.batchSize)
+      : EmbeddingsProcessor.DEFAULT_BATCH_SIZE;
+    const safeBatchSize = Math.max(1, configuredBatchSize);
     const maxConcurrency = Math.max(1, this.config.maxConcurrency || 1);
     const flushThreshold = Math.max(safeBatchSize * maxConcurrency * 6, safeBatchSize * 4);
 
@@ -134,8 +128,10 @@ export class EmbeddingsProcessor {
       if (pendingWork.length === 0 || this.cancelled) return;
 
       const work = pendingWork.splice(0, pendingWork.length);
-      const rawBatches = tokenCounter.createOptimizedBatches(work);
-      const batches = this.enforceBatchSizeLimit(rawBatches, safeBatchSize);
+      const batches: PendingChunkWork[][] = [];
+      for (let index = 0; index < work.length; index += safeBatchSize) {
+        batches.push(work.slice(index, index + safeBatchSize));
+      }
 
       const inFlight = new Set<Promise<void>>();
       let cursor = 0;
@@ -398,32 +394,26 @@ export class EmbeddingsProcessor {
   ): Promise<boolean> {
     if (this.cancelled) return false;
 
-    const texts = batch.map(item => {
-      const truncated = tokenCounter.truncateToTokenLimit(item.content);
-      return truncated;
-    });
-    const metadata = this.buildBatchMetadata(batch, texts, batchIndex);
-    const batchStats = tokenCounter.getBatchStatistics(texts);
+    const texts = batch.map((item) => item.content);
     errorLogger.debug('Embeddings batch prepared', {
       source: 'EmbeddingsProcessor',
       method: 'processBatch',
       providerId: this.provider.id,
       metadata: {
         batchIndex,
-        batchSize: metadata.batchSize,
-        estimatedTotalTokens: metadata.estimatedTotalTokens,
-        maxEstimatedTokens: metadata.maxEstimatedTokens,
-        truncatedCount: metadata.truncatedCount,
-        stats: batchStats,
-        sampleItems: metadata.items.slice(0, 10)
+        batchSize: batch.length,
+        sampleItems: batch.slice(0, 10).map((item) => ({
+          path: item.file.path,
+          chunkId: item.chunkId,
+          hash: item.hash,
+          length: item.content.length,
+        })),
       }
     });
 
     try {
       const embeddings = await this.provider.generateEmbeddings(texts, {
-        inputType: "document",
-        batchMetadata: metadata,
-        idempotencyKey: this.batchIdempotencyKey(metadata),
+        idempotencyKey: this.batchIdempotencyKey(batchIndex),
         signal: this.operationController.signal,
       });
       if (this.cancelled) return false;
@@ -502,7 +492,7 @@ export class EmbeddingsProcessor {
       errorLogger.warn("Managed embeddings batch stopped", {
         source: "EmbeddingsProcessor",
         method: "processBatch",
-        metadata: { batchIndex, batchSize: metadata.batchSize, code: managedError.code, status: managedError.status },
+        metadata: { batchIndex, batchSize: batch.length, code: managedError.code, status: managedError.status },
       });
       return false;
     }
@@ -643,18 +633,6 @@ export class EmbeddingsProcessor {
     return false;
   }
 
-  private resolveProviderBatchLimit(provider: EmbeddingsProvider): number {
-    try {
-      const candidate = provider.getMaxBatchSize();
-      if (typeof candidate === 'number' && Number.isFinite(candidate) && candidate > 0) {
-        return Math.max(1, Math.floor(candidate));
-      }
-    } catch {
-      // A malformed local limit must not change the managed contract limit.
-    }
-    return EmbeddingsProcessor.DEFAULT_MAX_TEXTS_PER_REQUEST;
-  }
-
   /**
    * A dimension only becomes authoritative after a validated managed response.
    */
@@ -666,8 +644,8 @@ export class EmbeddingsProcessor {
     return null;
   }
 
-  private batchIdempotencyKey(metadata: EmbeddingBatchMetadata): string {
-    return `emb:${this.runId}:${metadata.batchIndex ?? 0}`;
+  private batchIdempotencyKey(batchIndex: number): string {
+    return `emb:${this.runId}:${batchIndex}`;
   }
 
   private createRunId(): string {
@@ -688,58 +666,4 @@ export class EmbeddingsProcessor {
     return base;
   }
 
-  private buildBatchMetadata(
-    batch: PendingChunkWork[],
-    texts: string[],
-    batchIndex: number
-  ): EmbeddingBatchMetadata {
-    const items = batch.map((item, idx) => {
-      const processed = texts[idx] || '';
-      const originalTokens = tokenCounter.estimateTokens(item.content);
-      const processedTokens = tokenCounter.estimateTokens(processed);
-      return {
-        path: item.file.path,
-        chunkId: item.chunkId,
-        hash: item.hash,
-        originalLength: item.content.length,
-        processedLength: processed.length,
-        originalEstimatedTokens: originalTokens,
-        estimatedTokens: processedTokens,
-        truncated: processed !== item.content
-      };
-    });
-
-    const estimatedTotalTokens = items.reduce((sum, item) => sum + item.estimatedTokens, 0);
-    const maxEstimatedTokens = items.reduce((max, item) => Math.max(max, item.estimatedTokens), 0);
-    const truncatedCount = items.reduce((count, item) => count + (item.truncated ? 1 : 0), 0);
-
-    return {
-      batchIndex,
-      batchSize: batch.length,
-      estimatedTotalTokens,
-      maxEstimatedTokens,
-      truncatedCount,
-      items
-    };
-  }
-
-  private enforceBatchSizeLimit(
-    batches: PendingChunkWork[][],
-    limit: number
-  ): PendingChunkWork[][] {
-    const bounded: PendingChunkWork[][] = [];
-    const providerLimit = this.maxTextsPerRequest || EmbeddingsProcessor.DEFAULT_MAX_TEXTS_PER_REQUEST;
-    const effectiveLimit = Math.max(1, Math.min(limit, providerLimit));
-    for (const batch of batches) {
-      if (batch.length <= effectiveLimit) {
-        bounded.push(batch);
-        continue;
-      }
-
-      for (let idx = 0; idx < batch.length; idx += effectiveLimit) {
-        bounded.push(batch.slice(idx, idx + effectiveLimit));
-      }
-    }
-    return bounded;
-  }
 }

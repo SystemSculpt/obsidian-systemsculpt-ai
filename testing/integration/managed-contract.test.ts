@@ -16,8 +16,8 @@ function managedFixture(name: string): any {
 
 const canonicalHashes: Record<string, string> = {
   "admission-v1.json": "fc9938f0c6d6584815b1a59813cad2649554eadda0455fd789f604877fa01fcd",
-  "managed-capabilities-v2.schema.json": "79c8f10d0cd00479573dc4b119347d5f99884bb368f460b82746db6f92d40b2d",
-  "managed-capabilities-v2.json": "92cf74114b087016d699242b926a5e2c7b7d258b0f048ceafe036917219c6a09",
+  "managed-capabilities-v2.schema.json": "691be55d418534e9dec08c03ca66be0ce8e5b28288ed50a765833c5380927866",
+  "managed-capabilities-v2.json": "1460ed2998a5f7f3da62152d7ea9f26c7341fb6a443f05aad71169272b1283d6",
 };
 
 const forbiddenSettingsKey = /(provider|model|endpoint|api.?key|oauth|pi(auth|session)?|session|fallback|readwise|mcpservers|catalog|licensevalid|lastvalidated|serverurl)/i;
@@ -93,6 +93,7 @@ describe("managed product contract fixtures", () => {
     expect(request.capability).toBe("embeddings");
     expect(request.request.required_headers).toContain("idempotency-key");
     expect(request.request.body).toEqual({ input: "string|string[]", additional_properties: false });
+    expect(embeddings.limits).toEqual({ max_texts: 128, max_chars_per_text: 8000, max_total_chars: 200000 });
     expect(request.response.index_schema_version).toBe(1);
     expect(request.response.index_namespace).toBe("systemsculpt:managed:v1:<dimensions>");
     expect(contract.capabilities).not.toEqual(expect.arrayContaining([
@@ -118,13 +119,14 @@ describe("managed product contract fixtures", () => {
     expect(chatTurn.request.body).toEqual({
       schema: "managed_chat_request_v1",
       required_fields: ["model", "messages", "stream"],
-      optional_fields: ["tools", "tool_choice"],
+      optional_fields: ["tools", "tool_choice", "plugins"],
       additional_properties: false,
       model: "ai-agent",
       stream: true,
       messages: "managed_chat_messages_v1",
       tools: "managed_chat_tools_v1",
       tool_choice: ["auto", "none", "required"],
+      plugins: "managed_chat_plugins_v1",
     });
 
     const messages = chatTurn.request.definitions.managed_chat_messages_v1;
@@ -136,6 +138,13 @@ describe("managed product contract fixtures", () => {
       wire_type: "string", encoding: "json", decoded_type: "non_array_object",
     });
     expect(chatTurn.request.definitions.managed_chat_tools_v1.item.function.parameters).toBe("json_schema_object");
+    expect(chatTurn.request.definitions.managed_chat_plugins_v1).toEqual({
+      type: "array",
+      min_items: 1,
+      max_items: 1,
+      additional_properties: false,
+      items: { required_fields: ["id"], optional_fields: [], id: ["web"] },
+    });
 
     expect(chatTurn.response).toEqual(expect.objectContaining({
       status: 200,

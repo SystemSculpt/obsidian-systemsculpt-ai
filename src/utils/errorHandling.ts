@@ -3,7 +3,6 @@
  */
 import { Notice } from 'obsidian';
 import { errorLogger } from './errorLogger';
-import { detectPlatformEnvironment } from "./PlatformEnvironment";
 
 /**
  * Log levels for controlling verbosity
@@ -100,40 +99,6 @@ export function logDebug(context: string, message: string, data?: any): void {
     }
 }
 
-
-/**
- * Mobile-specific error logger that captures additional mobile context
- * @param context The context or component where the error occurred
- * @param message The error message
- * @param error The error object
- * @param additionalInfo Optional additional information specific to mobile
- */
-export async function logMobileError(context: string, message: string, error: any, additionalInfo?: any): Promise<void> {
-    // Always log errors to console first
-    const text = context ? `${context}: ${message}` : message;
-    errorLogger.error(text, error, {
-        source: context,
-        metadata: typeof additionalInfo !== 'undefined' ? { additionalInfo } : undefined
-    });
-}
-
-
-/**
- * Check if running on mobile and log mobile-specific performance issues
- * @param operation Name of the operation being timed
- * @param startTime Performance start time
- * @param threshold Warning threshold in milliseconds
- */
-export async function logMobilePerformance(operation: string, startTime: number, threshold: number = 1000): Promise<void> {
-    const duration = performance.now() - startTime;
-    
-    const isMobile = detectPlatformEnvironment().surface === "mobile";
-    
-    if (isMobile && duration > threshold) {
-        // Log performance warning to console instead of DebugLogger
-        logWarning('Performance', `${operation} took ${duration}ms on mobile (threshold: ${threshold}ms)`);
-    }
-}
 
 /**
  * Standardized error handling for embedding operations

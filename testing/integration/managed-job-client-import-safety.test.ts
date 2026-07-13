@@ -4,7 +4,7 @@ import { ManagedJobClient } from "../../src/services/managed/ManagedJobClient";
 import { ManagedJobRecoveryStore } from "../../src/services/managed/ManagedJobRecoveryStore";
 
 describe("managed job primitives import safety", () => {
-  it("uses mobile-safe modules with no eager Node builtin or fixture import", () => {
+  it("uses bundle-safe modules with no eager Node builtin or fixture import", () => {
     const sources = [ManagedJobClient.toString(), ManagedJobRecoveryStore.toString()].join("\n");
     expect(sources).not.toMatch(/node:|require\(["'](?:fs|path|crypto)["']\)/);
     expect(sources).not.toContain("testing/fixtures");

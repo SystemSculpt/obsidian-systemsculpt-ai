@@ -1323,9 +1323,9 @@ describe("normalizeLineEndings additional coverage", () => {
   });
 });
 
-// Robust folder creation for the agent write path (#142). On mobile a note
-// write must create every missing ancestor through the Vault API alone, never a
-// fragile single `createFolder` whose errors are swallowed.
+// Robust folder creation for the agent write path (#142). A note write must
+// create every missing ancestor through the Vault API alone, never a fragile
+// single `createFolder` whose errors are swallowed.
 describe("ensureVaultFolder", () => {
   const { ensureVaultFolder } = require("../utils");
   const { TFolder, TFile } = require("obsidian");
@@ -1387,13 +1387,13 @@ describe("ensureVaultFolder", () => {
   });
 });
 
-// Mobile move/trash for hidden (.systemsculpt) paths must run through the
-// adapter API — there is no Node `fs` and no base path on a phone (#142).
-describe("renameAdapterPath (mobile, no base path)", () => {
+// Hidden (.systemsculpt) paths must move through the adapter fallback whenever
+// there is no Node `fs` fast-path and no adapter base path (#142).
+describe("renameAdapterPath (adapter without base path)", () => {
   const { renameAdapterPath } = require("../utils");
 
   it("renames via the adapter API using normalized vault paths", async () => {
-    const adapter = { rename: jest.fn(async () => {}) }; // no getBasePath → mobile
+    const adapter = { rename: jest.fn(async () => {}) }; // no getBasePath → adapter fallback
     await renameAdapterPath(adapter, "\\Notes\\a.md", "/Notes/b.md");
     expect(adapter.rename).toHaveBeenCalledWith("Notes/a.md", "Notes/b.md");
   });
@@ -1403,7 +1403,7 @@ describe("renameAdapterPath (mobile, no base path)", () => {
   });
 });
 
-describe("removeAdapterPath (mobile, no base path)", () => {
+describe("removeAdapterPath (adapter without base path)", () => {
   const { removeAdapterPath } = require("../utils");
 
   it("removes a file via adapter.remove", async () => {
@@ -1428,9 +1428,10 @@ describe("removeAdapterPath (mobile, no base path)", () => {
   });
 });
 
-// CapacitorAdapter.mkdir is not recursive, so a missing mid-level folder used to
-// abort the whole create on mobile. ensureAdapterFolder must build each ancestor.
-describe("ensureAdapterFolder (mobile, no base path)", () => {
+// Some adapter fallbacks expose non-recursive mkdir, so a missing mid-level
+// folder used to abort the whole create. ensureAdapterFolder must build each
+// ancestor.
+describe("ensureAdapterFolder (adapter without base path)", () => {
   const { ensureAdapterFolder } = require("../utils");
   const mkdirPaths = (mkdir: jest.Mock) => mkdir.mock.calls.map((c) => c[0]);
 

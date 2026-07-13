@@ -1,7 +1,7 @@
 import type { DataAdapter } from "obsidian";
 import type { StudioGenerationAdapter } from "./StudioProjectGenerationStore";
 
-/** Common desktop/mobile adapter. No Node APIs or rename-based authority. */
+/** Common vault DataAdapter wrapper. No Node APIs or rename-based authority. */
 export class ObsidianStudioGenerationAdapter implements StudioGenerationAdapter {
   constructor(private readonly adapter: DataAdapter) {}
   read(path: string): Promise<string> { return this.adapter.read(path); }
@@ -12,8 +12,3 @@ export class ObsidianStudioGenerationAdapter implements StudioGenerationAdapter 
   mkdir(path: string): Promise<void> { return this.adapter.mkdir(path); }
   remove(path: string): Promise<void> { return this.adapter.remove(path); }
 }
-
-// Separate names make platform qualification explicit while preserving one
-// correctness contract based only on DataAdapter's common operations.
-export class ObsidianDesktopStudioGenerationAdapter extends ObsidianStudioGenerationAdapter {}
-export class ObsidianMobileStudioGenerationAdapter extends ObsidianStudioGenerationAdapter {}

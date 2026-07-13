@@ -1,6 +1,5 @@
 import { Notice, normalizePath, setIcon } from "obsidian";
 import type SystemSculptPlugin from "../../main";
-import { PlatformContext } from "../../services/PlatformContext";
 
 export const FILE_EXPLORER_STUDIO_BUTTON_CLASS = "systemsculpt-file-explorer-new-studio-button";
 
@@ -25,10 +24,6 @@ export class FileExplorerStudioButtonManager {
   constructor(private readonly plugin: FileExplorerStudioButtonPlugin) {}
 
   start(): void {
-    if (!PlatformContext.get().supportsDesktopOnlyFeatures()) {
-      return;
-    }
-
     this.syncButtons();
 
     if (this.observer || typeof MutationObserver === "undefined" || !document.body) {
@@ -54,11 +49,6 @@ export class FileExplorerStudioButtonManager {
   }
 
   syncButtons(): void {
-    if (!PlatformContext.get().supportsDesktopOnlyFeatures()) {
-      this.removeButtons();
-      return;
-    }
-
     const containers = document.querySelectorAll<HTMLElement>(FILE_EXPLORER_BUTTONS_SELECTOR);
     containers.forEach((container) => this.syncButton(container));
   }

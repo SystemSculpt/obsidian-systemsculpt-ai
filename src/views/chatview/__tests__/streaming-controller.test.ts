@@ -119,7 +119,7 @@ describe("StreamingController stream behavior", () => {
     expect(messageEl.isConnected).toBe(true);
   });
 
-  test("captures PI stop reason metadata on the assistant message", async () => {
+  test("captures stop reason metadata on the assistant message", async () => {
     const { controller } = createController();
     const stream = (async function* () {
       yield { type: "content", text: "Tool phase done." } as any;
@@ -196,14 +196,14 @@ describe("StreamingController stream behavior", () => {
     expect((result.message as any).reasoning_details[0].id).toBe(toolCallId);
   });
 
-  test("updates an existing tool call when a later event marks the local Pi execution completed", async () => {
+  test("updates an existing tool call when a later event marks execution completed", async () => {
     const { controller } = createController();
     const stream = (async function* () {
       yield {
         type: "tool-call",
         phase: "final",
         call: {
-          id: "pi_tool_1",
+          id: "tool_1",
           index: 0,
           type: "function",
           function: { name: "read", arguments: "{\"filePath\":\"alpha.md\"}" },
@@ -213,7 +213,7 @@ describe("StreamingController stream behavior", () => {
         type: "tool-call",
         phase: "final",
         call: {
-          id: "pi_tool_1",
+          id: "tool_1",
           index: 0,
           type: "function",
           function: { name: "read", arguments: "{\"filePath\":\"alpha.md\"}" },
@@ -228,18 +228,18 @@ describe("StreamingController stream behavior", () => {
     })();
 
     const messageEl = document.createElement("div");
-    messageEl.dataset.messageId = "assistant-local-pi-tool";
+    messageEl.dataset.messageId = "assistant-tool";
 
     const abortController = new AbortController();
     const result = await controller.stream(
       stream,
       messageEl,
-      "assistant-local-pi-tool",
+      "assistant-tool",
       abortController.signal
     );
 
     expect(result.completed).toBe(true);
-    expect(result.message.tool_calls?.[0]?.id).toBe("pi_tool_1");
+    expect(result.message.tool_calls?.[0]?.id).toBe("tool_1");
     expect(result.message.tool_calls?.[0]?.state).toBe("completed");
     expect(result.message.tool_calls?.[0]?.result).toEqual({
       success: true,

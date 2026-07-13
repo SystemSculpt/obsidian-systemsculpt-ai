@@ -8,20 +8,18 @@ export { fuzzyMatchScore, shouldExcludeFromSearch } from "./searchUtils";
  */
 
 /**
- * Node `fs`/`path` are reached ONLY through the canonical desktop-only boundary
- * (#207, #142): the `require` runs inside a thunk so it is lazy — never an eager
- * module-eval touch that would crash mobile bundle load — and `loadDesktopOnly`
- * returns null on a phone, where the Vault/adapter APIs take over. A static
- * `import … from "node:…"` here would hard-crash Obsidian on Android/iOS.
+ * Node `fs`/`path` are reached through the canonical desktop boundary so they
+ * stay demand-loaded instead of adding work to plugin startup. Vault APIs
+ * remain the fallback when an adapter does not expose an absolute base path.
  */
 type NodeFsPromises = typeof import("node:fs/promises");
 type NodePath = typeof import("node:path");
 
-function nodeFs(): NodeFsPromises | null {
+function nodeFs(): NodeFsPromises {
   return loadDesktopOnly(() => require("node:fs/promises") as NodeFsPromises);
 }
 
-function nodePath(): NodePath | null {
+function nodePath(): NodePath {
   return loadDesktopOnly(() => require("node:path") as NodePath);
 }
 
@@ -89,7 +87,7 @@ function assertWithinBase(nodePathMod: NodePath, basePath: string, resolvedPath:
 /**
  * Resolve a vault path to an absolute filesystem path for the Node fast-path
  * (desktop only). Returns null when there is no Node runtime or the adapter
- * exposes no base path (mobile) — callers then fall back to the adapter API.
+ * exposes no base path — callers then fall back to the adapter API.
  */
 export function resolveAdapterPath(adapter: any, vaultPath: string): string | null {
   if (!adapter || typeof adapter.getBasePath !== "function") return null;
@@ -112,7 +110,7 @@ export async function ensureAdapterFolder(adapter: any, folderPath: string): Pro
     await fsMod.mkdir(fullPath, { recursive: true });
     return;
   }
-  // Mobile / no-base-path: CapacitorAdapter.mkdir is NOT recursive, so build each
+  // No-base-path adapter fallback: mkdir may be non-recursive, so build each
   // ancestor segment-by-segment, skipping ones that already exist (#142).
   if (adapter && typeof adapter.mkdir === "function") {
     const normalized = normalizeVaultPath(String(folderPath ?? ""));
@@ -289,8 +287,8 @@ export async function listAdapterDirectory(adapter: any, dirPath: string): Promi
 }
 
 /**
- * Move a vault path on disk. Desktop uses the Node fast-path; mobile (no base
- * path / no Node) renames through the adapter API (#142).
+ * Move a vault path on disk. Desktop uses the Node fast-path; adapter fallbacks
+ * (no base path / no Node) rename through the adapter API (#142).
  */
 export async function renameAdapterPath(adapter: any, sourcePath: string, destPath: string): Promise<void> {
   const sourceFull = resolveAdapterPath(adapter, sourcePath);
@@ -311,9 +309,9 @@ export async function renameAdapterPath(adapter: any, sourcePath: string, destPa
 }
 
 /**
- * Permanently remove a vault path on disk (mirrors the desktop `fs.rm`). Mobile
- * (no base path / no Node) removes files via `adapter.remove` and folders via
- * `adapter.rmdir(path, recursive)` (#142).
+ * Permanently remove a vault path on disk (mirrors the desktop `fs.rm`).
+ * Adapter fallbacks (no base path / no Node) remove files via `adapter.remove`
+ * and folders via `adapter.rmdir(path, recursive)` (#142).
  */
 export async function removeAdapterPath(adapter: any, vaultPath: string): Promise<void> {
   const fullPath = resolveAdapterPath(adapter, vaultPath);
@@ -350,9 +348,9 @@ export async function removeAdapterPath(adapter: any, vaultPath: string): Promis
 
 /**
  * Ensure a folder (and every missing ancestor) exists via the Vault API alone —
- * mobile-safe (no Node). Each ancestor is created segment-by-segment, skipping
- * those that already exist and tolerating "already exists" races, so a note
- * write never fails because a mid-level folder was missing (#142).
+ * no Node required. Each ancestor is created segment-by-segment, skipping those
+ * that already exist and tolerating "already exists" races, so a note write
+ * never fails because a mid-level folder was missing (#142).
  */
 export async function ensureVaultFolder(app: App, folderPath: string): Promise<void> {
   const normalized = normalizePath(normalizeVaultPath(String(folderPath ?? "")));

@@ -9,11 +9,6 @@ const SOURCE_ROOTS = [
   resolve(REPO_ROOT, "src/views/history"),
 ];
 const SOURCE_FILES = [resolve(REPO_ROOT, "src/main.ts")];
-const WRAPPER_FILES = new Set<string>([
-  "src/views/studio/StudioManagedOutputNodes.ts",
-  "src/views/studio/systemsculpt-studio-view/StudioRunOutputProjectors.ts",
-  "src/views/studio/graph-v3/StudioGraphGroupModel.ts",
-]);
 const ALLOWED_LEGACY_NODE_MUTATION_FILES = [
   "src/views/studio/graph-v3/StudioGraphImageEditorModal.ts",
   "src/views/studio/graph-v3/StudioGraphInlineConfigPanel.ts",
@@ -74,7 +69,6 @@ describe("Studio persistence architecture lint", () => {
       "src/studio/persistence/StudioProjectGenerationStore.ts",
     ]);
     const allowedNonProjectContexts = new Set([
-      "src/main.ts#writeMobileStartupProbe",
       "src/main.ts#rotateDiagnosticsFile",
       "src/studio/StudioApiExecutionAdapter.ts#removeTempPath",
       "src/studio/StudioApiExecutionAdapter.ts#ensureDir",
@@ -159,9 +153,6 @@ describe("Studio persistence architecture lint", () => {
     ];
     for (const filePath of viewOnlyFiles) {
       const relativePath = relative(REPO_ROOT, filePath).replace(/\\/g, "/");
-      if (WRAPPER_FILES.has(relativePath)) {
-        continue;
-      }
       const content = readFileSync(filePath, "utf8");
       if (forbiddenImports.some((token) => content.includes(token))) {
         offendingFiles.push(relativePath);

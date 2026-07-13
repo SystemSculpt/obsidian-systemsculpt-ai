@@ -1,8 +1,7 @@
 import { App } from "obsidian";
 import type SystemSculptPlugin from "../main";
-import { PlatformContext } from "./PlatformContext";
 import { RecorderUIManager } from "./recorder/RecorderUIManager";
-import { pickRecorderFormat, pickRecorderAudioBitsPerSecond } from "./recorder/RecorderFormats";
+import { pickRecorderFormat } from "./recorder/RecorderFormats";
 import { RecordingSession, RecordingResult } from "./recorder/RecordingSession";
 import { TranscriptionCoordinator } from "./transcription/TranscriptionCoordinator";
 import { logDebug, logInfo, logWarning, logError } from "../utils/errorHandling";
@@ -21,7 +20,6 @@ export class RecorderService {
 
   private readonly app: App;
   private readonly plugin: SystemSculptPlugin;
-  private readonly platform: PlatformContext;
   private readonly ui: RecorderUIManager;
   private readonly transcriptionCoordinator: TranscriptionCoordinator;
 
@@ -43,9 +41,8 @@ export class RecorderService {
   private constructor(app: App, plugin: SystemSculptPlugin, options: RecorderOptions) {
     this.app = app;
     this.plugin = plugin;
-    this.platform = PlatformContext.get();
-    this.ui = new RecorderUIManager({ app, plugin, platform: this.platform });
-    this.transcriptionCoordinator = new TranscriptionCoordinator(app, plugin, this.platform);
+    this.ui = new RecorderUIManager({ app, plugin });
+    this.transcriptionCoordinator = new TranscriptionCoordinator(app, plugin);
 
     this.onTranscriptionDone = options.onTranscriptionComplete ?? null;
   }
@@ -129,15 +126,7 @@ export class RecorderService {
 
     try {
       const directoryPath = this.plugin.settings.recordingsDirectory || "SystemSculpt/Recordings";
-      const format = pickRecorderFormat({
-        preferM4a: this.platform.isMobile(),
-      });
-      // Cap mobile recordings at a speech-optimized bitrate so meeting-length
-      // audio stays under the transcription direct-upload limit and avoids the
-      // mobile chunk/decode path that can't handle webm/opus (#169).
-      const audioBitsPerSecond = pickRecorderAudioBitsPerSecond({
-        isMobile: this.platform.isMobile(),
-      });
+      const format = pickRecorderFormat();
       const directoryManager = this.plugin.directoryManager;
       if (!directoryManager) {
         throw new Error("Recorder directories are not initialized yet. Please wait and try again.");
@@ -158,7 +147,6 @@ export class RecorderService {
           await directoryManager.ensureDirectoryByPath(path);
         },
         format,
-        audioBitsPerSecond,
         preferredMicrophoneId: this.plugin.settings.preferredMicrophoneId,
         onStatus: (status) => this.updateStatus(status),
         onError: (error) => this.handleError(error),
@@ -284,7 +272,7 @@ export class RecorderService {
       const savedMessage = fileName ? `Saved to ${fileName}` : "Recording saved.";
       if (stoppedFromBackground) {
         this.ui.linger(
-          `${savedMessage} iOS stopped recording when the app locked/backgrounded; keep the app unlocked for continuous recording.`,
+          `${savedMessage} Recording stopped when the window or tab left the foreground; saved what was captured.`,
           4200
         );
       } else if (stoppedByInterruption) {
@@ -361,13 +349,13 @@ export class RecorderService {
 
   private handleError(error: Error): void {
     this.error("Recorder failure encountered", error);
-    const isMobile = this.platform.isMobile();
-    const hasBackup = this.lastRecordingPath && this.offlineRecordings.has(this.lastRecordingPath);
+    const hasBackup = !!(this.lastRecordingPath && this.offlineRecordings.has(this.lastRecordingPath));
+    const savedFileName = this.lastRecordingPath?.split("/").pop();
 
     const errorMessage = hasBackup
-      ? isMobile
-        ? "Recording saved, but processing failed. Your audio is safe."
-        : `Recording saved to ${this.lastRecordingPath?.split("/").pop()}, but processing failed`
+      ? savedFileName
+        ? `Recording saved to ${savedFileName}, but processing failed`
+        : "Recording saved, but processing failed."
       : `Recording error: ${error.message}`;
 
     this.updateStatus(errorMessage);

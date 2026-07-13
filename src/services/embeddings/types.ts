@@ -102,29 +102,7 @@ export interface ProcessingResult {
   failedDetails?: Record<string, FailedProcessingDetail>;
 }
 
-export interface EmbeddingBatchItemMetadata {
-  path: string;
-  chunkId: number;
-  hash: string;
-  originalLength: number;
-  processedLength: number;
-  originalEstimatedTokens: number;
-  estimatedTokens: number;
-  truncated: boolean;
-}
-
-export interface EmbeddingBatchMetadata {
-  batchIndex?: number;
-  batchSize: number;
-  estimatedTotalTokens: number;
-  maxEstimatedTokens: number;
-  truncatedCount: number;
-  items: EmbeddingBatchItemMetadata[];
-}
-
 export interface EmbeddingsGenerateOptions {
-  inputType?: 'document' | 'query';
-  batchMetadata?: EmbeddingBatchMetadata;
   idempotencyKey: string;
   signal?: AbortSignal;
 }
@@ -135,7 +113,6 @@ export interface EmbeddingsProvider {
   expectedDimension?: number;
   activeNamespace?: `systemsculpt:managed:v1:${number}`;
   generateEmbeddings(texts: string[], options: EmbeddingsGenerateOptions): Promise<number[][]>;
-  getMaxBatchSize(): number;
 }
 
 export interface EmbeddingsManagerConfig {

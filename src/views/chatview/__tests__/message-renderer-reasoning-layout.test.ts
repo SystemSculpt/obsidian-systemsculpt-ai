@@ -133,7 +133,7 @@ describe("MessageRenderer reasoning layout", () => {
     renderer.unload();
   });
 
-  test("renders a mixed Pi turn in exact chronological order", async () => {
+  test("renders a mixed structured turn in exact chronological order", async () => {
     const app = new App();
     const renderer = new TestMessageRenderer(app as any);
 

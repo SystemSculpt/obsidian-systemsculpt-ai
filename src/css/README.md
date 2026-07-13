@@ -15,7 +15,6 @@ primitives/   buttons.css, feedback.css (spinners, notices, banners)
 components/   feature components (chat, widgets, diff, recorder, …)
 modals/       modal.css (the one shell) + per-modal sheets
 views/        chat, settings, providers, similar-notes, studio, …
-platform/     mobile.css (.is-mobile adjustments)
 ```
 
 ## The rules (enforced by `npm run lint:css`, part of `check:plugin`)

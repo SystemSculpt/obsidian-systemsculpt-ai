@@ -62,6 +62,11 @@ describe("TranscribeAudioFileModal", () => {
     const modal = new TranscribeAudioFileModal(plugin);
     modal.onOpen();
 
+    expect(modal.modalEl.textContent).toContain(
+      "click to choose from your computer"
+    );
+    expect(modal.modalEl.textContent).not.toContain("phone");
+
     const openFileButton = modal.modalEl.querySelector(
       ".ss-transcribe-audio__open-file-btn"
     ) as HTMLButtonElement | null;
@@ -133,6 +138,9 @@ describe("TranscribeAudioFileModal", () => {
     );
     expect(outputRadio).toBeNull();
     expect(modal.modalEl.textContent).toContain(
+      "Settings > Workflow"
+    );
+    expect(modal.modalEl.textContent).not.toContain(
       "Settings > Audio & Transcription"
     );
 

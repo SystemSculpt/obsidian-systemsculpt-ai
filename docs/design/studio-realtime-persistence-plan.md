@@ -70,9 +70,9 @@ The biggest remaining hotspots are:
 - `src/views/studio/graph-v3/StudioGraphLabelNodeCard.ts`
 - `src/views/studio/graph-v3/StudioGraphImageEditorModal.ts`
 - `src/views/studio/graph-v3/StudioGraphNodeResizeHandle.ts`
-- `src/views/studio/StudioManagedOutputNodes.ts`
-- `src/views/studio/systemsculpt-studio-view/StudioRunOutputProjectors.ts`
-- `src/views/studio/graph-v3/StudioGraphGroupModel.ts`
+- `src/studio/StudioManagedOutputNodes.ts`
+- `src/studio/StudioRunOutputProjectors.ts`
+- `src/studio/StudioGraphGroupModel.ts`
 
 ### The remaining architectural gaps
 
@@ -475,9 +475,9 @@ That means:
 
 These are deterministic graph mutation helpers and should live in `src/studio`, not under a view tree:
 
-- `src/views/studio/StudioManagedOutputNodes.ts`
-- `src/views/studio/systemsculpt-studio-view/StudioRunOutputProjectors.ts`
-- `src/views/studio/graph-v3/StudioGraphGroupModel.ts`
+- `src/studio/StudioManagedOutputNodes.ts`
+- `src/studio/StudioRunOutputProjectors.ts`
+- `src/studio/StudioGraphGroupModel.ts`
 - `src/views/studio/graph-v3/StudioGraphGroupAutoLayout.ts` (or split into pure layout + core mutation applier)
 
 ### Why

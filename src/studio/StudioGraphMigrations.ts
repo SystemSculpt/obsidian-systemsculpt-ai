@@ -7,7 +7,7 @@ const PATH_ONLY_PORTS_MIGRATION_ID = "studio.path-only-ports.v1";
 const PROMPT_TEMPLATE_INLINE_MIGRATION_ID = "studio.inline-prompt-template.v1";
 const RESEND_TO_HTTP_REQUEST_MIGRATION_ID = "studio.resend-http-request.v1";
 const NOTE_NODE_CANONICAL_MIGRATION_ID = "studio.note-canonical-config.v1";
-const PI_TEXT_NODE_MODEL_MIGRATION_ID = "studio.pi-text-model-selector.v1";
+const LEGACY_TEXT_NODE_MODEL_MIGRATION_ID = "studio.pi-text-model-selector.v1";
 const IMAGE_NODE_LEVERS_MIGRATION_ID = "studio.image-node-levers.v1";
 const MANAGED_NODE_CONFIG_MIGRATION_ID = "studio.managed-node-config.v1";
 export const RETIRED_HTTP_NODE_MIGRATION_ID = "studio.retire-http-request.v1";
@@ -719,9 +719,9 @@ export function migrateStudioProjectToPathOnlyPorts(project: StudioProjectV1): {
       at: nowIso(),
     });
   }
-  if (textGenerationMigration.changed && !appliedMigrationIds.has(PI_TEXT_NODE_MODEL_MIGRATION_ID)) {
+  if (textGenerationMigration.changed && !appliedMigrationIds.has(LEGACY_TEXT_NODE_MODEL_MIGRATION_ID)) {
     nextApplied.push({
-      id: PI_TEXT_NODE_MODEL_MIGRATION_ID,
+      id: LEGACY_TEXT_NODE_MODEL_MIGRATION_ID,
       at: nowIso(),
     });
   }

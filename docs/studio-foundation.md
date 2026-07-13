@@ -33,7 +33,7 @@ This document describes the new hard-switch Studio architecture in the Obsidian 
 - `src/views/studio/StudioSearchableDropdown.ts`: reusable fuzzy-searchable dropdown control for large option sets.
 - `src/views/studio/graph-v3/StudioGraphMediaPreview.ts`: media preview inference for node outputs.
 - `src/views/studio/graph-v3/StudioGraphMediaPreviewModal.ts`: vault resource resolution + modal preview rendering.
-- `src/views/studio/graph-v3/StudioGraphGroupModel.ts`: group model helpers (create/rename/sanitize/remove).
+- `src/studio/StudioGraphGroupModel.ts`: group model helpers (create/rename/sanitize/remove).
 - `src/views/studio/graph-v3/StudioGraphViewStateStore.ts`: graph viewport state normalization/persistence helpers.
 - `src/views/studio/StudioNodeInspectorOverlay.ts`: inspector overlay with visibility-aware field rendering.
 - `src/views/studio/StudioViewHelpers.ts`: shared Studio view helpers.

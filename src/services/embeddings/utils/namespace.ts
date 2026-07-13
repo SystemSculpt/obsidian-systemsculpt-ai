@@ -1,9 +1,10 @@
-import { DEFAULT_EMBEDDING_MODEL, EMBEDDING_SCHEMA_VERSION } from '../../../constants/embeddings';
+import { EMBEDDING_SCHEMA_VERSION } from '../../../constants/embeddings';
 
 export const MANAGED_EMBEDDING_PROVIDER = "systemsculpt" as const;
 export const MANAGED_EMBEDDING_MODEL = "managed" as const;
 export const MANAGED_EMBEDDING_SCHEMA_VERSION = 1 as const;
 export const MANAGED_EMBEDDING_NAMESPACE_PREFIX = "systemsculpt:managed:v1:" as const;
+const LEGACY_SYSTEMSCULPT_EMBEDDING_MODEL = "openrouter/openai/text-embedding-3-small";
 
 export function buildManagedNamespace(dimension: number): `systemsculpt:managed:v1:${number}` {
   if (!Number.isInteger(dimension) || dimension <= 0) {
@@ -46,7 +47,7 @@ export function normalizeModelForNamespace(providerId: string, model: string): s
   if (provider !== "systemsculpt") return rawModel;
 
   const lower = rawModel.toLowerCase();
-  const canonical = DEFAULT_EMBEDDING_MODEL;
+  const canonical = LEGACY_SYSTEMSCULPT_EMBEDDING_MODEL;
   if (lower === canonical.toLowerCase()) return canonical;
 
   // Legacy/alternate IDs for the same underlying embedding model.

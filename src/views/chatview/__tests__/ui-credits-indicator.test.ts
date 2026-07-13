@@ -88,7 +88,6 @@ const createMockChatView = () => {
   const content = root.createDiv();
   const composer = content.createDiv({ cls: "systemsculpt-chat-composer" });
   const toolbar = composer.createDiv({ cls: "systemsculpt-chat-composer-toolbar" });
-  toolbar.createDiv({ cls: "systemsculpt-model-indicator-section inline systemsculpt-chat-composer-chips" });
   const rightGroup = toolbar.createDiv({ cls: "systemsculpt-chat-composer-toolbar-group mod-right" });
   const settingsButton = rightGroup.createEl("button", {
     cls: "clickable-icon systemsculpt-chat-composer-button systemsculpt-chat-settings-button",

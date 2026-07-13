@@ -1341,10 +1341,6 @@ export class ChatView extends ItemView {
           expectedPath: logPaths?.ui.relative ?? null,
           expectedAbsolutePath: logPaths?.ui.absolute ?? null,
         },
-        stream: {
-          expectedPath: logPaths?.stream.relative ?? null,
-          expectedAbsolutePath: logPaths?.stream.absolute ?? null,
-        },
       },
     };
 
@@ -1462,7 +1458,6 @@ export class ChatView extends ItemView {
     } catch (e) {
     }
 
-    const previousChatId = this.chatId;
     this.chatOwnershipGeneration += 1;
 
     if (!state?.chatId) {
@@ -1492,9 +1487,6 @@ export class ChatView extends ItemView {
       this.isFullyLoaded = true; // New chat is immediately loaded
       // Notify listeners that a chat has been loaded (new empty chat)
       this.app.workspace.trigger("systemsculpt:chat-loaded", this.chatId);
-      if (previousChatId !== this.chatId) {
-        this.debugLogService?.resetStreamBuffer();
-      }
       return;
     }
 
@@ -1503,9 +1495,6 @@ export class ChatView extends ItemView {
     }
     
     this.chatId = state.chatId;
-    if (previousChatId !== this.chatId) {
-      this.debugLogService?.resetStreamBuffer();
-    }
     this.virtualStartIndex = 0;
     this.hasAdjustedInitialWindow = false;
     this.initializeChatTitle(state.chatTitle);
@@ -1998,15 +1987,12 @@ export class ChatView extends ItemView {
       const snapshot = await this.buildChatDebugSnapshot();
       const logger = this.getDebugLogService();
       const uiLog = logger ? await logger.writeUiLog(snapshot) : { errors: ["Debug logger unavailable"], bytes: snapshot.length };
-      const streamLog = logger ? await logger.writeStreamLog() : { errors: ["Debug logger unavailable"], bytes: 0 };
-      const streamStats = logger?.getStreamStats();
       const expectedPaths = logger?.buildLogPathsDetailed();
 
       const index = {
         generatedAt: new Date().toISOString(),
         warnings: [
           "Debug logs include full chat content, system prompts, and settings. Review for sensitive data before sharing.",
-          "Streaming logs are capped in-memory and may be truncated when very large.",
         ],
         chat: {
           chatId: this.chatId || null,
@@ -2023,19 +2009,8 @@ export class ChatView extends ItemView {
             expectedPath: expectedPaths?.ui.relative ?? null,
             expectedAbsolutePath: expectedPaths?.ui.absolute ?? null,
           },
-          stream: {
-            path: streamLog.path,
-            absolutePath: streamLog.path && logger ? logger.resolveAbsolutePath(streamLog.path) : null,
-            bytes: streamLog.bytes,
-            entryCount: streamStats?.entryCount ?? null,
-            bufferBytes: streamStats?.bytes ?? null,
-            bufferMaxBytes: streamStats?.maxBytes ?? null,
-            truncated: streamStats?.truncated ?? null,
-            expectedPath: expectedPaths?.stream.relative ?? null,
-            expectedAbsolutePath: expectedPaths?.stream.absolute ?? null,
-          },
         },
-        errors: [...(uiLog.errors || []), ...(streamLog.errors || [])],
+        errors: uiLog.errors || [],
       };
 
       const copied = await tryCopyToClipboard(JSON.stringify(index, null, 2));
@@ -2305,11 +2280,7 @@ export class ChatView extends ItemView {
           ? "Windows"
           : Platform.isLinux
             ? "Linux"
-            : Platform.isIosApp
-              ? "iOS"
-              : Platform.isAndroidApp
-                ? "Android"
-                : "Unknown",
+            : "Unknown",
       viewport: typeof window !== "undefined"
         ? {
             innerWidth: window.innerWidth,

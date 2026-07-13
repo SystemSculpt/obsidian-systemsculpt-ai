@@ -34,7 +34,7 @@ function isLikelyUnsafeRegex(pattern: string): boolean {
 
 /**
  * Check if a file should be excluded from search results.
- * This lives in a mobile-safe module so search surfaces do not pull Node helpers.
+ * This lives in a vault-only module so search surfaces do not pull Node helpers.
  */
 export function shouldExcludeFromSearch(file: TFile, plugin: SystemSculptPlugin): boolean {
   const settings = plugin.settings;

@@ -94,14 +94,6 @@ describe("debugLogger", () => {
         expect(() => instance.logError(new Error("test"))).not.toThrow();
       });
 
-      it("logMobileError does not throw", () => {
-        expect(() => instance.logMobileError(new Error("mobile error"))).not.toThrow();
-      });
-
-      it("logMobilePerformance does not throw", () => {
-        expect(() => instance.logMobilePerformance("operation", 100)).not.toThrow();
-      });
-
       it("logGlobalUncaughtError does not throw", () => {
         expect(() => instance.logGlobalUncaughtError(new Error("uncaught"))).not.toThrow();
       });
@@ -123,11 +115,6 @@ describe("debugLogger", () => {
         expect(() => instance.clearLog()).not.toThrow();
       });
 
-      it("exportMobileLogs returns empty string", async () => {
-        const result = await instance.exportMobileLogs();
-
-        expect(result).toBe("");
-      });
     });
   });
 

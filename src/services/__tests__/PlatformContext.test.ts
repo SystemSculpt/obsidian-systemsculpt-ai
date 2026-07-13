@@ -25,18 +25,11 @@ describe("PlatformContext", () => {
     expect(PlatformContext.initialize()).toBe(PlatformContext.get());
   });
 
-  it("reports the desktop-only plugin capabilities", () => {
+  it("exposes transport defaults for the managed desktop build", () => {
     const context = PlatformContext.get();
 
-    expect(context.isMobile()).toBe(false);
-    expect(context.runtime()).toBe("desktop");
-    expect(context.isDesktopRuntime()).toBe(true);
-    expect(context.isMobileRuntime()).toBe(false);
-    expect(context.supportsDesktopOnlyFeatures()).toBe(true);
-    expect(context.supportsStatusBar()).toBe(true);
-    expect(context.supportsEagerVaultWrites()).toBe(true);
-    expect(context.supportsNodeApis()).toBe(true);
-    expect(context.uiVariant()).toBe("desktop");
+    expect(context.preferredTransport()).toBe("fetch");
+    expect(context.supportsStreaming()).toBe(true);
   });
 
   it('prefers "fetch" when no avoid suffix is registered', () => {

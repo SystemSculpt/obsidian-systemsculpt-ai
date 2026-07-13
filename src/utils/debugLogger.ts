@@ -33,13 +33,10 @@ export class DebugLogger {
   logError(..._args: unknown[]): void {}
   setEnabled(_enabled: boolean): void {}
   clearLog(): void {}
-  async exportMobileLogs(): Promise<string> { return ""; }
-  logMobileError(..._args: unknown[]): void {}
-  logMobilePerformance(..._args: unknown[]): void {}
   logGlobalUncaughtError(..._args: unknown[]): void {}
 }
 
 // Utility wrapper previously exposed by the old implementation.
 export async function debugLog(..._args: unknown[]): Promise<void> {
   // Intentionally left blank – logging disabled for production.
-} 
+}

@@ -166,7 +166,6 @@ export class InputHandler extends Component {
   private pendingSubmissionIntent: PendingSubmissionIntent = Object.freeze({ kind: "append" });
   private acceptedOperation: AcceptedChatOperation | null = null;
   private acceptedRequestSnapshot: AcceptedChatRequestSnapshot | null = null;
-  private compatibilityResult: Readonly<{ kind: "contract_unsupported"; feature: "web_search"; action: "disable_web_search" }> | null = null;
 
   constructor(options: InputHandlerOptions) {
     super();
@@ -567,33 +566,8 @@ export class InputHandler extends Component {
     });
 
     // Update UI when generating state changes
-    this.updateGeneratingState = () => {
-      // Keep input enabled to allow typing next message
-      this.input.disabled = false;
-      
-      // Keep most controls enabled - they only affect future messages, not current generation
-      this.settingsButton.setDisabled(false); // Settings changes only affect next message
-      this.attachButton.setDisabled(false); // Users can add context for their next message
-      this.micButton.setDisabled(!this.hasProLicense()); // Voice input just adds text to input field
-      // Note: Save As Note functionality moved to slash command menu
-      
-      if (this.stopButton) {
-        this.stopButton.setDisabled(!this.isGenerating);
-        this.stopButton.buttonEl.style.display = this.isGenerating ? "flex" : "none";
-        // Reduce clutter: show Stop while generating, Send otherwise
-        this.sendButton.buttonEl.style.display = this.isGenerating ? "none" : "flex";
-      }
-
-      this.input.placeholder = this.isGenerating
-        ? "Type your next message…"
-        : "Write a message…";
-
-      // Remove visual disabled state since input stays enabled
-      this.input.classList.remove("disabled");
-
-      this.updateSendButtonState();
-      this.scrollManager.setGenerating(this.isGenerating);
-    };
+    this.updateGeneratingState = () => this.syncComposerAvailability();
+    this.syncComposerAvailability();
 
     this.registerEvent(
       this.app.workspace.on("systemsculpt:settings-updated", () => this.handleSettingsUpdated())
@@ -708,11 +682,6 @@ export class InputHandler extends Component {
     if (!this.isChatReady()) return;
     if (this.chatView?.isLegacyReadOnlyChat?.()) return;
 
-    if (this.webSearchEnabled) {
-      this.compatibilityResult = Object.freeze({ kind: "contract_unsupported", feature: "web_search", action: "disable_web_search" });
-      return;
-    }
-    this.compatibilityResult = null;
     const admission = await this.managedChatAdmission.acquireChatTurnLease();
     if (admission.outcome !== "allowed") {
       await this.handleManagedAdmissionDenied(admission.outcome);
@@ -771,6 +740,7 @@ export class InputHandler extends Component {
         contextFiles: acceptedContextFiles,
         systemPromptOverride: acceptedPrompt,
         allowTools: this.chatView?.isAgentModeActive?.() ?? true,
+        webSearch: this.webSearchEnabled,
       });
       this.submittedInputSnapshot = { messageId: durableTurnId, rawText: submittedRawText };
       this.input.value = "";
@@ -1066,13 +1036,58 @@ export class InputHandler extends Component {
     return !!(this.plugin.settings.licenseKey?.trim() && this.plugin.settings.licenseValid);
   }
 
+  private isLegacyReadOnlyChat(): boolean {
+    return this.chatView?.isLegacyReadOnlyChat?.() === true;
+  }
+
+  /**
+   * Keep composer affordances aligned with the currently loaded chat. History
+   * views reuse one InputHandler while switching between managed and archived
+   * chats, so this must derive state on every readiness notification instead
+   * of capturing the backend once during construction.
+   */
+  private syncComposerAvailability(): void {
+    const readOnly = this.isLegacyReadOnlyChat();
+
+    this.input.disabled = readOnly;
+    this.input.placeholder = readOnly
+      ? "This archived chat is read-only."
+      : this.isGenerating
+        ? "Type your next message…"
+        : "Write a message…";
+    this.input.classList.toggle("disabled", readOnly);
+    this.input.setAttribute("aria-readonly", readOnly ? "true" : "false");
+    this.input.setAttribute(
+      "aria-label",
+      readOnly ? "Archived chat is read-only" : "Chat message",
+    );
+    this.inputWrapper?.classList.toggle("is-read-only", readOnly);
+
+    // Display preferences remain available, while controls that can change
+    // transcript or context state are inert for archived chats.
+    this.settingsButton.setDisabled(false);
+    this.attachButton.setDisabled(readOnly);
+    this.micButton.setDisabled(readOnly || !this.hasProLicense());
+
+    if (this.stopButton) {
+      this.stopButton.setDisabled(!this.isGenerating);
+      this.stopButton.buttonEl.style.display = this.isGenerating ? "flex" : "none";
+      this.sendButton.buttonEl.style.display = this.isGenerating ? "none" : "flex";
+    }
+
+    this.updateSendButtonState();
+    this.scrollManager.setGenerating(this.isGenerating);
+  }
+
   private updateSendButtonState(): void {
     const hasText = this.input.value.trim().length > 0;
-    this.sendButton.setDisabled(this.isGenerating || !hasText || !this.isChatReady());
+    this.sendButton.setDisabled(
+      this.isLegacyReadOnlyChat() || this.isGenerating || !hasText || !this.isChatReady(),
+    );
   }
 
   public notifyChatReadyChanged(): void {
-    this.updateSendButtonState();
+    this.syncComposerAvailability();
   }
 
   public refreshContextAttachments(): void {
@@ -1464,6 +1479,7 @@ export class InputHandler extends Component {
     }
     this.automationApprovalMode = "interactive";
     this.setValue("", { focus: false });
+    this.syncComposerAvailability();
   }
 
   private async openPromptSelector(): Promise<void> {
@@ -1643,10 +1659,6 @@ export class InputHandler extends Component {
 
     // Focus the input after insertion
     this.input.focus();
-  }
-
-  public refreshTokenCounter(): void {
-    // Token counter has been removed
   }
 
   public async handleOpenChatHistoryFile(): Promise<void> {

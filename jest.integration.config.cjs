@@ -21,9 +21,11 @@ module.exports = {
 	setupFilesAfterEnv: ['<rootDir>/src/tests/setup.ts'],
 	moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'cjs', 'json', 'node'],
 	// The compiled bundle is already CommonJS — loading it through the
-	// transformer would re-parse the production artifact for nothing.
-	// the root config.
+	// transformer would re-parse the production artifact for nothing. Preserve
+	// Jest's default node_modules exclusion as well, so dependencies are not
+	// needlessly recompiled by SWC.
 	transformIgnorePatterns: [
+		'<rootDir>/node_modules/',
 		'<rootDir>/main\\.js$'
 	],
 	transform: {

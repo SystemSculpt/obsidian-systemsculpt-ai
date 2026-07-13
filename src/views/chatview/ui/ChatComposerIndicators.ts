@@ -50,7 +50,7 @@ export function renderChatCreditsIndicator(
 ): ChatCreditsIndicatorRenderResult {
   target.empty();
 
-  const iconSpan = target.createSpan({ cls: "systemsculpt-model-indicator-icon" });
+  const iconSpan = target.createSpan({ cls: "systemsculpt-credits-indicator-icon" });
   setIcon(iconSpan, "coins");
 
   const balance = options.balance;

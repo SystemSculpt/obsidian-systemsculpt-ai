@@ -6,9 +6,9 @@
  * `.systemsculpt/diagnostics`) is what lets Obsidian Sync/backup capture and
  * restore the index — unlike the per-device IndexedDB store.
  *
- * Uses only the Obsidian `DataAdapter` (read/write/exists/mkdir), which is the
- * mobile-safe path (CapacitorAdapter on phones); no `node:fs`, so this stays
- * within the no-eager-node-import boundary the embeddings tree relies on.
+ * Uses only the Obsidian `DataAdapter` (read/write/exists/mkdir), including
+ * adapters without a Node base path; no `node:fs`, so this stays within the
+ * no-eager-node-import boundary the embeddings tree relies on.
  */
 
 import type { DataAdapter } from "obsidian";

@@ -209,7 +209,8 @@
                             "stream",
                             "messages",
                             "tools",
-                            "tool_choice"
+                            "tool_choice",
+                            "plugins"
                           ],
                           "properties": {
                             "schema": {
@@ -234,14 +235,17 @@
                             },
                             "optional_fields": {
                               "type": "array",
-                              "minItems": 2,
-                              "maxItems": 2,
+                              "minItems": 3,
+                              "maxItems": 3,
                               "prefixItems": [
                                 {
                                   "const": "tools"
                                 },
                                 {
                                   "const": "tool_choice"
+                                },
+                                {
+                                  "const": "plugins"
                                 }
                               ],
                               "items": false
@@ -277,6 +281,9 @@
                                 }
                               ],
                               "items": false
+                            },
+                            "plugins": {
+                              "const": "managed_chat_plugins_v1"
                             }
                           }
                         },
@@ -285,7 +292,8 @@
                           "additionalProperties": false,
                           "required": [
                             "managed_chat_messages_v1",
-                            "managed_chat_tools_v1"
+                            "managed_chat_tools_v1",
+                            "managed_chat_plugins_v1"
                           ],
                           "properties": {
                             "managed_chat_messages_v1": {
@@ -869,6 +877,71 @@
                                           "const": "json_schema_object"
                                         }
                                       }
+                                    }
+                                  }
+                                }
+                              }
+                            },
+                            "managed_chat_plugins_v1": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "type",
+                                "min_items",
+                                "max_items",
+                                "additional_properties",
+                                "items"
+                              ],
+                              "properties": {
+                                "type": {
+                                  "const": "array"
+                                },
+                                "min_items": {
+                                  "const": 1
+                                },
+                                "max_items": {
+                                  "const": 1
+                                },
+                                "additional_properties": {
+                                  "const": false
+                                },
+                                "items": {
+                                  "type": "object",
+                                  "additionalProperties": false,
+                                  "required": [
+                                    "required_fields",
+                                    "optional_fields",
+                                    "id"
+                                  ],
+                                  "properties": {
+                                    "required_fields": {
+                                      "type": "array",
+                                      "minItems": 1,
+                                      "maxItems": 1,
+                                      "prefixItems": [
+                                        {
+                                          "const": "id"
+                                        }
+                                      ],
+                                      "items": false
+                                    },
+                                    "optional_fields": {
+                                      "type": "array",
+                                      "minItems": 0,
+                                      "maxItems": 0,
+                                      "prefixItems": [],
+                                      "items": false
+                                    },
+                                    "id": {
+                                      "type": "array",
+                                      "minItems": 1,
+                                      "maxItems": 1,
+                                      "prefixItems": [
+                                        {
+                                          "const": "web"
+                                        }
+                                      ],
+                                      "items": false
                                     }
                                   }
                                 }

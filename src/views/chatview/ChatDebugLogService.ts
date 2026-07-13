@@ -1,19 +1,5 @@
 import type SystemSculptPlugin from "../../main";
 import type { ChatView } from "./ChatView";
-import type { StreamEvent } from "../../streaming/types";
-
-type StreamLogContext = {
-  chatId?: string;
-  assistantMessageId?: string;
-  modelId?: string;
-};
-
-type StreamLogStats = {
-  entryCount: number;
-  bytes: number;
-  maxBytes: number;
-  truncated: boolean;
-};
 
 type LogWriteResult = {
   path?: string;
@@ -21,7 +7,6 @@ type LogWriteResult = {
   errors: string[];
 };
 
-const STREAM_BUFFER_MAX_BYTES = 2 * 1024 * 1024; // 2MB in-memory cap
 const LOG_RETENTION_MAX_FILES = 40;
 const LOG_RETENTION_MAX_BYTES = 50 * 1024 * 1024; // 50MB
 const LOG_RETENTION_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000; // 14 days
@@ -31,40 +16,11 @@ export class ChatDebugLogService {
   private readonly plugin: SystemSculptPlugin;
   private readonly chatView: ChatView;
 
-  private streamEntries: string[] = [];
-  private streamBytes = 0;
-  private streamSequence = 0;
-  private streamTruncated = false;
   private lastRetentionCheck = 0;
 
   constructor(plugin: SystemSculptPlugin, chatView: ChatView) {
     this.plugin = plugin;
     this.chatView = chatView;
-  }
-
-  public recordStreamEvent(event: StreamEvent, context?: StreamLogContext): void {
-    this.recordStreamEntry("event", {
-      chatId: context?.chatId || this.chatView.chatId || undefined,
-      assistantMessageId: context?.assistantMessageId,
-      modelId: context?.modelId,
-      event,
-    });
-  }
-
-  public getStreamStats(): StreamLogStats {
-    return {
-      entryCount: this.streamEntries.length,
-      bytes: this.streamBytes,
-      maxBytes: STREAM_BUFFER_MAX_BYTES,
-      truncated: this.streamTruncated,
-    };
-  }
-
-  public resetStreamBuffer(): void {
-    this.streamEntries = [];
-    this.streamBytes = 0;
-    this.streamSequence = 0;
-    this.streamTruncated = false;
   }
 
   public async writeUiLog(content: string): Promise<LogWriteResult> {
@@ -92,56 +48,17 @@ export class ChatDebugLogService {
     return { path: result.path, bytes: content.length, errors };
   }
 
-  public async writeStreamLog(): Promise<LogWriteResult> {
-    const errors: string[] = [];
-    const storage = this.plugin.storage;
-    const content = this.streamEntries.length > 0 ? `${this.streamEntries.join("\n")}\n` : "";
-    if (!storage) {
-      return { bytes: content.length, errors: ["Storage manager unavailable"] };
-    }
-
-    try {
-      await storage.initialize();
-      await this.ensureLogDirectory();
-    } catch (error) {
-      errors.push(error instanceof Error ? error.message : String(error));
-      return { bytes: content.length, errors };
-    }
-
-    const fileName = `${this.getFileBaseName()}-stream.ndjson`;
-    const result = await storage.writeFile("diagnostics", `${LOG_SUBDIR}/${fileName}`, content);
-    if (!result.success) {
-      errors.push(result.error || "Failed to write stream log");
-    }
-
-    await this.maybePruneLogs();
-    return { path: result.path, bytes: content.length, errors };
-  }
-
-  public buildLogPaths(): { ui: string; stream: string } {
+  public buildLogPathsDetailed(): {
+    ui: { relative: string; absolute: string | null };
+  } {
     const base = this.getFileBaseName();
     const ui = this.plugin.storage
       ? this.plugin.storage.getPath("diagnostics", LOG_SUBDIR, `${base}-ui.json`)
       : `.systemsculpt/diagnostics/${LOG_SUBDIR}/${base}-ui.json`;
-    const stream = this.plugin.storage
-      ? this.plugin.storage.getPath("diagnostics", LOG_SUBDIR, `${base}-stream.ndjson`)
-      : `.systemsculpt/diagnostics/${LOG_SUBDIR}/${base}-stream.ndjson`;
-    return { ui, stream };
-  }
-
-  public buildLogPathsDetailed(): {
-    ui: { relative: string; absolute: string | null };
-    stream: { relative: string; absolute: string | null };
-  } {
-    const paths = this.buildLogPaths();
     return {
       ui: {
-        relative: paths.ui,
-        absolute: this.resolveAbsolutePath(paths.ui),
-      },
-      stream: {
-        relative: paths.stream,
-        absolute: this.resolveAbsolutePath(paths.stream),
+        relative: ui,
+        absolute: this.resolveAbsolutePath(ui),
       },
     };
   }
@@ -158,45 +75,6 @@ export class ChatDebugLogService {
       return `${trimmedBase}/${trimmedRel}`;
     } catch {
       return null;
-    }
-  }
-
-  private recordStreamEntry(kind: string, payload: Record<string, unknown>): void {
-    const entry = {
-      timestamp: new Date().toISOString(),
-      seq: ++this.streamSequence,
-      kind,
-      ...payload,
-    };
-
-    let serialized = "";
-    try {
-      serialized = JSON.stringify(entry);
-    } catch (error) {
-      serialized = JSON.stringify({
-        timestamp: entry.timestamp,
-        seq: entry.seq,
-        kind: "serialization-error",
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-
-    const bytes = serialized.length + 1;
-    if (bytes > STREAM_BUFFER_MAX_BYTES) {
-      this.streamEntries = [serialized.slice(0, STREAM_BUFFER_MAX_BYTES - 1)];
-      this.streamBytes = this.streamEntries[0].length + 1;
-      this.streamTruncated = true;
-      return;
-    }
-
-    this.streamEntries.push(serialized);
-    this.streamBytes += bytes;
-
-    while (this.streamBytes > STREAM_BUFFER_MAX_BYTES && this.streamEntries.length > 0) {
-      const removed = this.streamEntries.shift();
-      if (!removed) break;
-      this.streamBytes -= removed.length + 1;
-      this.streamTruncated = true;
     }
   }
 

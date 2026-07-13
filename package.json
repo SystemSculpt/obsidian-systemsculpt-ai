@@ -45,7 +45,6 @@
     "check:types": "tsc --noEmit --skipLibCheck",
     "check:all": "npm run check:plugin && npm test",
     "dev": "node esbuild.config.mjs",
-    "devmode": "node scripts/toggle-devmode.mjs",
     "sync:local": "node scripts/sync-local-vaults.mjs",
     "test": "node scripts/jest.mjs --config jest.config.cjs --passWithNoTests",
     "test:strict": "node scripts/jest.mjs --strict-console --config jest.config.cjs --passWithNoTests",
@@ -57,7 +56,7 @@
     "test:leaks": "node scripts/jest.mjs --config jest.config.cjs --maxWorkers=1 --openHandlesTimeout=200 --passWithNoTests",
     "test:embeddings": "node scripts/jest.mjs --config jest.embeddings.config.cjs --passWithNoTests",
     "test:integration": "npm run build && npm run test:integration:ci",
-    "test:integration:ci": "node scripts/jest.mjs --config jest.integration.config.cjs --runInBand --forceExit",
+    "test:integration:ci": "node scripts/jest.mjs --config jest.integration.config.cjs --runInBand",
     "test:embeddings:serial": "node scripts/jest.mjs --config jest.embeddings.config.cjs --runInBand --passWithNoTests",
     "test:release-script": "node --test scripts/plugin-build-options.test.mjs scripts/plugin-artifacts.test.mjs scripts/release-plugin.test.mjs",
     "release:plugin": "node scripts/release-plugin.mjs"

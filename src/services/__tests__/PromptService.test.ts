@@ -29,6 +29,7 @@ jest.mock("obsidian", () => ({
 }));
 
 import { PromptService, type PromptEntry } from "../PromptService";
+import { TFile, TFolder } from "obsidian";
 
 describe("PromptService", () => {
   let mockApp: any;
@@ -53,14 +54,12 @@ describe("PromptService", () => {
     });
 
     it("returns prompt entries from markdown files in folder", async () => {
-      const mockFolder = {
-        path: "SystemSculpt/Prompts",
-        children: [
-          { path: "SystemSculpt/Prompts/Python Expert.md", basename: "Python Expert", extension: "md" },
-          { path: "SystemSculpt/Prompts/Concise.md", basename: "Concise", extension: "md" },
-          { path: "SystemSculpt/Prompts/subfolder", extension: undefined },
-        ],
-      };
+      const mockFolder = new TFolder("SystemSculpt/Prompts") as any;
+      mockFolder.children = [
+        new TFile("SystemSculpt/Prompts/Python Expert.md"),
+        new TFile("SystemSculpt/Prompts/Concise.md"),
+        new TFolder("SystemSculpt/Prompts/subfolder"),
+      ];
       mockVault.getAbstractFileByPath.mockReturnValue(mockFolder);
       mockVault.read.mockResolvedValue("---\ndescription: A prompt\nicon: code\n---\nPrompt body");
 
@@ -75,7 +74,7 @@ describe("PromptService", () => {
 
   describe("readPromptContent", () => {
     it("returns the body text without frontmatter", async () => {
-      const mockFile = { path: "SystemSculpt/Prompts/Test.md", basename: "Test", extension: "md" };
+      const mockFile = new TFile("SystemSculpt/Prompts/Test.md");
       mockVault.getAbstractFileByPath.mockReturnValue(mockFile);
       mockVault.read.mockResolvedValue("---\ndescription: desc\n---\nYou are a helpful assistant.");
 

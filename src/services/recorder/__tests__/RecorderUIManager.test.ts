@@ -18,11 +18,10 @@ const latestStopButton = (): HTMLButtonElement => {
   return buttons[buttons.length - 1];
 };
 
-const createManager = (variant: "mobile" | "desktop" = "mobile"): RecorderUIManager =>
+const createManager = (): RecorderUIManager =>
   new RecorderUIManager({
     app: {} as any,
     plugin: {} as any,
-    platform: { uiVariant: () => variant } as any,
   });
 
 describe("RecorderUIManager one-tap stop (#148)", () => {
@@ -52,10 +51,9 @@ describe("RecorderUIManager one-tap stop (#148)", () => {
 
     // The reported bug: the first tap looked like it did nothing, so the user
     // tapped Stop five times. Hold the original (enabled) button reference to
-    // mimic taps that land before the UI repaints the button as disabled — the
-    // exact race seen on the Android webview in #148. Each tap must be a no-op
-    // after the first, which relies on the idempotency guard, not just the
-    // disabled attribute.
+    // mimic taps that land before the UI repaints the button as disabled. Each
+    // tap must be a no-op after the first, which relies on the idempotency
+    // guard, not just the disabled attribute.
     const button = latestStopButton();
     for (let i = 0; i < 5; i++) {
       button.click();
@@ -95,17 +93,5 @@ describe("RecorderUIManager one-tap stop (#148)", () => {
 
     expect(secondStop).toHaveBeenCalledTimes(1);
     expect(firstStop).toHaveBeenCalledTimes(1);
-  });
-
-  it("wires one-tap stop the same way on desktop", () => {
-    const onStop = jest.fn();
-    const ui = createManager("desktop");
-    ui.open(onStop);
-
-    const button = latestStopButton();
-    button.click();
-    button.click();
-
-    expect(onStop).toHaveBeenCalledTimes(1);
   });
 });

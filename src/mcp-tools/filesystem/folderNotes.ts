@@ -12,8 +12,8 @@ import { App, TFile, TFolder } from "obsidian";
  *
  * This module centralises the fallback so it behaves identically across read,
  * edit, move, trash, and context tools — previously only `editFile` handled it.
- * It is intentionally dependency-free (only the mobile-safe `obsidian` vault
- * lookup) so it can run on every platform.
+ * It is intentionally dependency-free (only `obsidian` vault lookups) so it can
+ * run on every platform.
  */
 
 /**

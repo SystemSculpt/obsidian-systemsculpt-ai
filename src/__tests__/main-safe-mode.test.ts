@@ -53,7 +53,7 @@ describe("SystemSculptPlugin safe mode + version gate (#212)", () => {
 
   it("does not flag a supported Obsidian version (fail-soft no-op)", () => {
     const plugin = makePlugin();
-    // The obsidian mock reports apiVersion 1.5.0 (>= minimum).
+    jest.spyOn(plugin, "getObsidianApiVersion").mockReturnValue("1.7.2");
     plugin.warnIfObsidianVersionUnsupported();
     expect(plugin.failures).not.toContain("unsupported Obsidian version");
   });

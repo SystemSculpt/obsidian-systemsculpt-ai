@@ -1,4 +1,4 @@
-import { App, Component, MarkdownRenderer, setIcon, ButtonComponent, Modal, TextAreaComponent, TFile, normalizePath, Notice, WorkspaceLeaf, TAbstractFile } from "obsidian";
+import { App, Component, MarkdownRenderer, setIcon, ButtonComponent, Modal, TextAreaComponent, Notice, TAbstractFile } from "obsidian";
 import type {
   Annotation,
   ChatMessage,
@@ -34,7 +34,6 @@ import { resolveCanonicalToolAlias } from "../../utils/toolPolicy";
 import { MermaidPreviewModal } from "../../modals/MermaidPreviewModal";
 import { LARGE_TEXT_THRESHOLDS, LARGE_TEXT_MESSAGES, LARGE_TEXT_UI, LargeTextHelpers } from "../../constants/largeText";
 import { errorLogger } from "../../utils/errorLogger";
-import { PlatformContext } from "../../services/PlatformContext";
 // REMOVED: DiffViewer, diffUtils, inline-diff imports - logic now in ToolCallTreeRenderer
 
 const REASONING_MEANINGFUL_CHILD_TAGS = new Set([
@@ -1422,77 +1421,14 @@ export class MessageRenderer extends Component {
       // Get current chat view leaf to maintain focus later
       const currentLeaf = this.app.workspace.activeLeaf;
 
-      // We always want to open in a specific location for the side-by-side workflow
-      const file = this.app.vault.getAbstractFileByPath(filePath);
-      if (!file || !(file instanceof TFile)) {
+      const { action } = await openFileInMainWorkspace(this.app, filePath);
+      if (action === "error") {
         new Notice('File not found or is not a valid file.');
         return;
       }
 
-      // First check if file is already open anywhere
-      const allLeaves = this.app.workspace.getLeavesOfType('markdown');
-      let existingFileLeaf = null;
-
-      // Normalize the path for comparison
-      const normalizedPath = normalizePath(filePath);
-
-      for (const leaf of allLeaves) {
-        const view = leaf.view as any;
-        if (view.file && normalizePath(view.file.path) === normalizedPath) {
-          existingFileLeaf = leaf;
-          break;
-        }
-      }
-
-      if (existingFileLeaf) {
-        // File is already open, just switch to it
-            try { (window as any).FreezeMonitor?.mark?.('message-renderer:setActiveLeaf:existing'); } catch {}
-            this.app.workspace.setActiveLeaf(existingFileLeaf, { focus: false });
-        // Apply diff overlay after switching
-      } else {
-        // File not open, create a new leaf for it.
-        let targetLeaf: WorkspaceLeaf | null = null;
-
-        const platform = PlatformContext.get();
-        const isMobileVariant = platform.uiVariant() === 'mobile';
-        if (isMobileVariant) {
-          targetLeaf = this.app.workspace.getLeaf('tab');
-        } else {
-          // --- DESKTOP LOGIC ---
-          // This logic ensures the new file opens in the main workspace, not a sidebar.
-
-          // 1. Try to find an existing pane in the main work area to add a tab to.
-          let suitablePane: WorkspaceLeaf | null = null;
-          this.app.workspace.iterateAllLeaves(leaf => {
-            if (leaf.getRoot() === this.app.workspace.rootSplit && leaf !== currentLeaf) {
-              if (!suitablePane) suitablePane = leaf;
-            }
-          });
-
-          if (suitablePane) {
-            // We found a pane in the main area. Activate it and create a new tab.
-            try { (window as any).FreezeMonitor?.mark?.('message-renderer:setActiveLeaf:suitable'); } catch {}
-            this.app.workspace.setActiveLeaf(suitablePane, { focus: false });
-            targetLeaf = this.app.workspace.getLeaf('tab');
-          } else {
-            // The main area is empty (or only contains the chat view). Create a new split.
-            if (currentLeaf && currentLeaf.getRoot() === this.app.workspace.rootSplit) {
-              // If chat view is in the main area, split from it.
-              targetLeaf = this.app.workspace.createLeafBySplit(currentLeaf, 'vertical', true);
-            } else {
-              // Chat is in sidebar or there's no leaf. `getLeaf(true)` creates a new leaf with a split in the main area.
-              targetLeaf = this.app.workspace.getLeaf(true);
-            }
-          }
-        }
-
-        if (targetLeaf) {
-            await targetLeaf.openFile(file);
-        }
-      }
-
       // Keep focus on the chat view
-      if (currentLeaf) {
+      if (action !== "switched_in_pane" && currentLeaf) {
         try { (window as any).FreezeMonitor?.mark?.('message-renderer:restoreFocus'); } catch {}
         this.app.workspace.setActiveLeaf(currentLeaf, { focus: true });
       }
@@ -1616,7 +1552,7 @@ export class MessageRenderer extends Component {
       'edit': 'path'
     };
 
-    // Extract the base tool name (normalize PI canonical aliases, then strip mcp prefix)
+    // Extract the base tool name (normalize canonical aliases, then strip the MCP prefix).
     const normalizedToolName = resolveCanonicalToolAlias(functionData.name);
     const baseName = normalizedToolName.replace(/^mcp-filesystem_/, '');
 

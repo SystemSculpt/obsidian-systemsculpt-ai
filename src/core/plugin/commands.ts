@@ -7,7 +7,6 @@ import { tryCopyToClipboard } from "../../utils/clipboard";
 import { resolveAbsoluteVaultPath } from "../../utils/vaultPathUtils";
 import { WORKFLOW_AUTOMATIONS } from "../../constants/workflowAutomations";
 import { showConfirm } from "../ui/notifications";
-import { PlatformContext } from "../../services/PlatformContext";
 import type { ChatMessage } from "../../types";
 import { CHAT_VIEW_TYPE, SYSTEMSCULPT_STUDIO_VIEW_TYPE } from "./viewTypes";
 import { STUDIO_PROJECT_EXTENSION } from "../../studio/types";
@@ -487,11 +486,6 @@ export class CommandManager {
       id: "new-systemsculpt-studio-project",
       name: "New Studio project",
       callback: async () => {
-        if (!PlatformContext.get().supportsDesktopOnlyFeatures()) {
-          new Notice("Studio is desktop-only.");
-          return;
-        }
-
         try {
           const project = await this.createAndOpenStudioProject();
           new Notice(`Created Studio project: ${project.name}`);
@@ -505,11 +499,6 @@ export class CommandManager {
       id: "open-systemsculpt-studio",
       name: "Open Studio",
       callback: async () => {
-        if (!PlatformContext.get().supportsDesktopOnlyFeatures()) {
-          new Notice("Studio is desktop-only.");
-          return;
-        }
-
         try {
           const activeFile = this.app.workspace.getActiveFile();
           const activeStudioFile =
@@ -538,11 +527,6 @@ export class CommandManager {
       id: "run-systemsculpt-studio-project",
       name: "Run current Studio project",
       callback: async () => {
-        if (!PlatformContext.get().supportsDesktopOnlyFeatures()) {
-          new Notice("Studio is desktop-only.");
-          return;
-        }
-
         try {
           const studio = this.plugin.getStudioService();
           const projectPath = this.resolveActiveStudioProjectPath();
@@ -650,10 +634,6 @@ export class CommandManager {
   }
 
   private getCurrentActiveFilePath(): string | null {
-    if (!PlatformContext.get().supportsDesktopOnlyFeatures()) {
-      return null;
-    }
-
     const activeFile = this.app.workspace.getActiveFile();
     if (activeFile instanceof TFile && activeFile.path) {
       return activeFile.path;

@@ -25,15 +25,6 @@ describe("MCPService", () => {
   let service: MCPService;
   let mockPlugin: any;
 
-  const internalServer = (
-    id: "mcp-filesystem" | "mcp-youtube" = "mcp-filesystem",
-  ): MCPServer => ({
-    id,
-    name: id === "mcp-filesystem" ? "Filesystem" : "YouTube",
-    transport: "internal",
-    isEnabled: true,
-  });
-
   const retiredHTTPServer = (): MCPServer => ({
     id: "legacy-http",
     name: "Legacy HTTP",
@@ -45,8 +36,6 @@ describe("MCPService", () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    (MCPService as any).connectionTestCache = new Map();
-    (MCPService as any).connectionTestPromises = new Map();
     mockPlugin = {
       settings: {
         mcpEnabled: true,
@@ -59,30 +48,6 @@ describe("MCPService", () => {
     mockYouTubeAdapter.listTools.mockResolvedValue([]);
     mockFilesystemAdapter.executeTool.mockResolvedValue({ result: "filesystem" });
     mockYouTubeAdapter.executeTool.mockResolvedValue({ result: "youtube" });
-  });
-
-  it("constructs and clears its built-in connection cache", async () => {
-    expect(service).toBeInstanceOf(MCPService);
-    await service.testConnection(internalServer());
-    expect((MCPService as any).connectionTestCache.size).toBe(1);
-
-    service.clearCache();
-
-    expect((MCPService as any).connectionTestCache.size).toBe(0);
-    expect((MCPService as any).connectionTestPromises.size).toBe(0);
-  });
-
-  it("discovers and caches tools only for retained built-in servers", async () => {
-    mockFilesystemAdapter.listTools.mockResolvedValue([
-      { name: "read", description: "Read file" },
-    ]);
-
-    const first = await service.testConnection(internalServer());
-    const second = await service.testConnection(internalServer());
-
-    expect(first).toMatchObject({ success: true, tools: [{ name: "read" }] });
-    expect(second).toEqual(first);
-    expect(mockFilesystemAdapter.listTools).toHaveBeenCalledTimes(1);
   });
 
   it("lists built-in filesystem and YouTube tools while ignoring legacy settings", async () => {
@@ -200,16 +165,6 @@ describe("MCPService", () => {
     expect(mockFilesystemAdapter.setAllowedPaths).toHaveBeenCalledWith(["Inbox"]);
   });
 
-  it("tests only the two retained built-in servers", async () => {
-    mockPlugin.settings.mcpServers = [retiredHTTPServer()];
-
-    const results = await service.testAllServers();
-
-    expect(Object.keys(results).sort()).toEqual(["mcp-filesystem", "mcp-youtube"]);
-    expect(results["mcp-filesystem"].success).toBe(true);
-    expect(results["mcp-youtube"].success).toBe(true);
-  });
-
   it("rejects non-built-in adapter construction", () => {
     expect(() => (service as any).getAdapterForServer({
       id: "stdio-server",
@@ -220,9 +175,8 @@ describe("MCPService", () => {
   });
 
   it("reuses the retained filesystem adapter", async () => {
-    await service.testConnection(internalServer());
-    service.clearCache();
-    await service.testConnection(internalServer());
+    await service.getAvailableTools();
+    await service.getAvailableTools();
 
     const { FilesystemAdapter } = require("../adapters/FilesystemAdapter");
     expect(FilesystemAdapter).toHaveBeenCalledTimes(1);

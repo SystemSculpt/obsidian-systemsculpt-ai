@@ -5,7 +5,6 @@ import { ChatState } from "../../types/index";
 import type { EmbeddingsView } from "../../views/EmbeddingsView";
 import type { SystemSculptStudioView } from "../../views/studio/SystemSculptStudioView";
 import { yieldToEventLoop } from "../../utils/yieldToEventLoop";
-import { PlatformContext } from "../../services/PlatformContext";
 import {
   CHAT_VIEW_TYPE,
   EMBEDDINGS_VIEW_TYPE,
@@ -41,37 +40,6 @@ function loadStudioViewModule(): StudioViewModule {
 
 interface ChatViewState {
   state: ChatState;
-}
-
-class DesktopOnlyPlaceholderView extends ItemView {
-  private readonly viewType: string;
-  private readonly displayText: string;
-  private readonly description: string;
-
-  constructor(
-    leaf: WorkspaceLeaf,
-    options: { viewType: string; displayText: string; description: string }
-  ) {
-    super(leaf);
-    this.viewType = options.viewType;
-    this.displayText = options.displayText;
-    this.description = options.description;
-  }
-
-  getViewType(): string {
-    return this.viewType;
-  }
-
-  getDisplayText(): string {
-    return this.displayText;
-  }
-
-  async onOpen(): Promise<void> {
-    this.containerEl.empty();
-    const container = this.containerEl.createDiv({ cls: "systemsculpt-desktop-only-placeholder" });
-    container.createEl("h3", { text: this.displayText });
-    container.createEl("p", { text: this.description });
-  }
 }
 
 export class ViewManager {
@@ -352,7 +320,6 @@ export class ViewManager {
   }
 
   registerView() {
-    const platform = PlatformContext.get();
     this.registerViewType(
       CHAT_VIEW_TYPE,
       (leaf: WorkspaceLeaf) => {
@@ -373,13 +340,6 @@ export class ViewManager {
     this.registerViewType(
       SYSTEMSCULPT_STUDIO_VIEW_TYPE,
       (leaf: WorkspaceLeaf) => {
-        if (!platform.supportsDesktopOnlyFeatures()) {
-          return new DesktopOnlyPlaceholderView(leaf, {
-            viewType: SYSTEMSCULPT_STUDIO_VIEW_TYPE,
-            displayText: "SystemSculpt Studio",
-            description: "SystemSculpt Studio is desktop-only right now.",
-          });
-        }
         const { SystemSculptStudioView } = loadStudioViewModule();
         return new SystemSculptStudioView(leaf, this.plugin);
       }
@@ -414,10 +374,6 @@ export class ViewManager {
   }
 
   async activateSystemSculptStudioView(projectPath?: string): Promise<SystemSculptStudioView> {
-    if (!PlatformContext.get().supportsDesktopOnlyFeatures()) {
-      throw new Error("SystemSculpt Studio is desktop-only.");
-    }
-
     const normalizedTarget = String(projectPath || "").trim();
     if (normalizedTarget) {
       const existingLeaves = this.app.workspace.getLeavesOfType(SYSTEMSCULPT_STUDIO_VIEW_TYPE);

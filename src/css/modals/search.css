@@ -187,11 +187,6 @@ body.ss-search-open .tooltip {
   color: var(--ss-ink-faint);
 }
 
-.is-mobile .ss-search__footer,
-.is-phone .ss-search__footer {
-  display: none;
-}
-
 @media (max-width: 700px) {
   .ss-modal.ss-search-modal {
     width: 96vw;

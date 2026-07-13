@@ -279,10 +279,6 @@ export default class SystemSculptPlugin extends Plugin {
       return;
     }
 
-    if (!PlatformContext.get().supportsEagerVaultWrites()) {
-      return;
-    }
-
     if (!this.storage) {
       this.storage = new StorageManager(this.app, this);
     }
@@ -551,9 +547,7 @@ export default class SystemSculptPlugin extends Plugin {
         if (!this.storage) {
           this.storage = new StorageManager(this.app, this);
         }
-        if (PlatformContext.get().supportsEagerVaultWrites()) {
-          await this.prepareDiagnosticsSession();
-        }
+        await this.prepareDiagnosticsSession();
       },
     });
 
@@ -684,9 +678,6 @@ export default class SystemSculptPlugin extends Plugin {
       label: "resource monitor",
       optional: true,
       run: () => {
-        if (!PlatformContext.get().supportsEagerVaultWrites()) {
-          return;
-        }
         this.resourceMonitor = new ResourceMonitorService(this, {
           metricsFileName: this.diagnosticsMetricsFileName,
           sessionId: this.diagnosticsSessionId ?? undefined,
@@ -700,9 +691,6 @@ export default class SystemSculptPlugin extends Plugin {
       label: "storage",
       optional: true,
       run: () => {
-        if (!PlatformContext.get().supportsEagerVaultWrites()) {
-          return;
-        }
         this.scheduleStorageInitialization(tracer);
       },
     });
@@ -1183,13 +1171,6 @@ export default class SystemSculptPlugin extends Plugin {
 
     try {
       this.directoryManager = new DirectoryManager(this.app, this);
-      if (!PlatformContext.get().supportsEagerVaultWrites()) {
-        phase.complete({
-          deferred: true,
-        });
-        return;
-      }
-
       await this.directoryManager.initialize();
 
       logger.info("Directory manager initialized", {
@@ -1448,9 +1429,7 @@ export default class SystemSculptPlugin extends Plugin {
       if (!this.directoryManager) {
         this.directoryManager = new DirectoryManager(this.app, this);
       } else if (!this.directoryManager.isInitialized()) {
-        if (PlatformContext.get().supportsEagerVaultWrites()) {
-          await this.directoryManager.initialize();
-        }
+        await this.directoryManager.initialize();
       }
 
       if (this.isUnloading) {
@@ -1458,7 +1437,7 @@ export default class SystemSculptPlugin extends Plugin {
         return;
       }
 
-      if (PlatformContext.get().supportsStatusBar() && !this.embeddingsStatusBar) {
+      if (!this.embeddingsStatusBar) {
         this.embeddingsStatusBar = new EmbeddingsStatusBar(this);
         this.register(() => {
           this.embeddingsStatusBar?.unload();
@@ -1617,14 +1596,10 @@ export default class SystemSculptPlugin extends Plugin {
         this.transcriptionService = TranscriptionService.getInstance(this);
       }),
       wrap("recorder", "recorder service", () => {
-        if (!PlatformContext.get().isMobileRuntime()) {
-          this.ensureRecorderService();
-        }
+        this.ensureRecorderService();
       }),
       wrap("fileContextMenu", "file context menu service", () => {
-        if (!PlatformContext.get().isMobileRuntime()) {
-          this.setupFileContextMenuService();
-        }
+        this.setupFileContextMenuService();
       }),
       wrap("workflowEngine", "workflow engine service", () => {
         this.ensureWorkflowEngineService();
@@ -1718,10 +1693,7 @@ export default class SystemSculptPlugin extends Plugin {
   }
 
   private registerStudioExtensionsIfNeeded(): void {
-    if (
-      !PlatformContext.get().supportsDesktopOnlyFeatures() ||
-      this.hasRegisteredStudioExtensions
-    ) {
+    if (this.hasRegisteredStudioExtensions) {
       return;
     }
 
@@ -1730,10 +1702,6 @@ export default class SystemSculptPlugin extends Plugin {
   }
 
   private startFileExplorerStudioButtonIfNeeded(): void {
-    if (!PlatformContext.get().supportsDesktopOnlyFeatures()) {
-      return;
-    }
-
     if (!this.fileExplorerStudioButtonManager) {
       this.fileExplorerStudioButtonManager = new FileExplorerStudioButtonManager(this);
     }
@@ -2323,10 +2291,6 @@ export default class SystemSculptPlugin extends Plugin {
   }
 
   getStudioService(): StudioService {
-    if (!PlatformContext.get().supportsDesktopOnlyFeatures()) {
-      throw new Error("SystemSculpt Studio is desktop-only.");
-    }
-
     if (!this.studioService) {
       const { StudioService } = loadStudioServiceModule();
       this.studioService = new StudioService(this);

@@ -1,13 +1,11 @@
 import type { App } from "obsidian";
 import type SystemSculptPlugin from "../../main";
-import { createHoverShell, type HoverShellHandle, type HoverShellLayout } from "../../components/HoverShell";
+import { createHoverShell, type HoverShellHandle } from "../../components/HoverShell";
 import { openRecorderAdvancedModal } from "../../modals/RecorderAdvancedModal";
-import { PlatformContext } from "../PlatformContext";
 
 export interface RecorderUIManagerOptions {
   app: App;
   plugin: SystemSculptPlugin;
-  platform?: PlatformContext;
 }
 
 /**
@@ -16,7 +14,6 @@ export interface RecorderUIManagerOptions {
 export class RecorderUIManager {
   private readonly app: App;
   private readonly plugin: SystemSculptPlugin;
-  private readonly platform: PlatformContext;
   private hoverShell: HoverShellHandle | null = null;
   private statusTextEl: HTMLElement | null = null;
   private timerValueEl: HTMLElement | null = null;
@@ -39,7 +36,6 @@ export class RecorderUIManager {
   constructor(options: RecorderUIManagerOptions) {
     this.app = options.app;
     this.plugin = options.plugin;
-    this.platform = options.platform ?? PlatformContext.get();
   }
 
   public open(onStop: () => void): void {
@@ -48,8 +44,7 @@ export class RecorderUIManager {
     this.stopRequested = false;
     this.stopCallback = onStop;
 
-    const variant = this.platform.uiVariant();
-    this.createHover(variant);
+    this.createHover();
     this.visible = true;
   }
 
@@ -140,17 +135,16 @@ export class RecorderUIManager {
     this.stopVisualization();
   }
 
-  private createHover(variant: HoverShellLayout): void {
+  private createHover(): void {
     this.hoverShell = createHoverShell({
       title: "Audio Recorder",
       subtitle: "In progress",
       icon: "mic",
       statusText: "Preparing recorder...",
       className: "ss-recorder-hover",
-      width: variant === "mobile" ? "min(420px, calc(100vw - 24px))" : "300px",
-      layout: variant,
-      draggable: variant === "desktop",
-      defaultPosition: variant === "desktop" ? { top: "72px", right: "24px" } : { bottom: "18px", left: "12px" },
+      width: "300px",
+      draggable: true,
+      defaultPosition: { top: "72px", right: "24px" },
       positionKey: "recorder-hover:audio",
       showStatusRow: true,
     });

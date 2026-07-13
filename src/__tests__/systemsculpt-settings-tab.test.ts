@@ -177,7 +177,7 @@ describe("SystemSculptSettingTab native layout", () => {
     expect(text).not.toContain("Configure AI models");
   });
 
-  it("shows plugin version inline with the title instead of as its own settings row", async () => {
+  it("shows the plugin version without duplicating Obsidian's settings title", async () => {
     const tab = await renderTab();
     const titleRow = tab.containerEl.querySelector(".ss-settings-title-row");
     const title = titleRow?.querySelector("h2");
@@ -186,7 +186,7 @@ describe("SystemSculptSettingTab native layout", () => {
       'button[aria-label="Check for updates"]',
     ) as HTMLButtonElement | null;
 
-    expect(title?.textContent).toBe("SystemSculpt AI");
+    expect(title).toBeNull();
     expect(versionPill?.textContent).toContain("v1.2.3");
     expect(refreshButton).not.toBeNull();
     expect(

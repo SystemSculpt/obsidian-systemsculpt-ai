@@ -79,7 +79,7 @@ describe("toMcpToolKey", () => {
     expect(result).toBeNull();
   });
 
-  it("maps PI canonical filesystem aliases to mcp tool keys", () => {
+  it("maps canonical filesystem aliases to MCP tool keys", () => {
     expect(toMcpToolKey("read")).toBe("mcp-filesystem:read");
     expect(toMcpToolKey("write")).toBe("mcp-filesystem:write");
     expect(toMcpToolKey("grep")).toBe("mcp-filesystem:search");

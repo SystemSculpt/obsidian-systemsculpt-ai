@@ -334,6 +334,7 @@ export class ManagedChatRuntimeAdapter {
     if (messages.length === 0 || accepted.model !== "ai-agent") return { kind: "transport_failure", diagnostic: {} };
     const body: Record<string, JsonContractValue> = { model: accepted.model, stream: true, messages };
     if (accepted.tools?.length) body.tools = accepted.tools;
+    if (accepted.webSearch) body.plugins = [{ id: "web" }];
     const key = await managedChatOperationKey(input.acceptedRequestSnapshot.operation.durableTurnId, input.phase, input.continuationIndex);
     try {
       const transport = await this.client.streamAcceptedChat(ticket, input.operation.lease, body, key, input.signal);

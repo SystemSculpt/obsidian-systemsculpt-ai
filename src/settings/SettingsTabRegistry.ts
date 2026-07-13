@@ -1,9 +1,9 @@
 import { SystemSculptSettingTab } from "./SystemSculptSettingTab";
-import { PlatformContext } from "../services/PlatformContext";
 
 type SetupTabContentModule = typeof import("./SetupTabContent");
 type ChatTabContentModule = typeof import("./ChatTabContent");
 type RecorderTabContentModule = typeof import("./RecorderTabContent");
+type AutomationsTabContentModule = typeof import("./AutomationsTabContent");
 type DirectoriesTabContentModule = typeof import("./DirectoriesTabContent");
 type BackupTabContentModule = typeof import("./BackupTabContent");
 type EmbeddingsTabContentModule = typeof import("./EmbeddingsTabContent");
@@ -20,6 +20,10 @@ function loadChatTabContentModule(): ChatTabContentModule {
 
 function loadRecorderTabContentModule(): RecorderTabContentModule {
   return require("./RecorderTabContent") as RecorderTabContentModule;
+}
+
+function loadAutomationsTabContentModule(): AutomationsTabContentModule {
+  return require("./AutomationsTabContent") as AutomationsTabContentModule;
 }
 
 function loadDirectoriesTabContentModule(): DirectoriesTabContentModule {
@@ -89,12 +93,17 @@ export function buildSettingsTabConfigs(tab: SystemSculptSettingTab): SettingsTa
       label: "Workflow",
       sections: [
         (parent) => {
-          void loadRecorderTabContentModule().displayRecorderTabContent(parent, tab);
+          const section = parent.createDiv();
+          void loadRecorderTabContentModule().displayRecorderTabContent(section, tab);
+        },
+        (parent) => {
+          const section = parent.createDiv();
+          loadAutomationsTabContentModule().displayAutomationsTabContent(section, tab);
         },
       ],
       anchor: {
-        title: "Audio Capture, Recording, Transcription",
-        desc: "Configure recording, transcription, and post-processing preferences for SystemSculpt.",
+        title: "Audio Capture, Recording, Transcription, Automations",
+        desc: "Configure recording, transcription, post-processing, and managed workflow automations.",
       },
     },
     {

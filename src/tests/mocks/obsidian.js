@@ -247,16 +247,10 @@ const MarkdownRenderer = {
 
 const Platform = {
   isDesktop: true,
-  isMobile: false,
   isWin: false,
   isMacOS: false,
   isLinux: false,
-  isIosApp: false,
-  isAndroidApp: false,
   isDesktopApp: true,
-  isMobileApp: false,
-  isPhone: false,
-  isTablet: false,
 };
 
 class App {
@@ -275,8 +269,8 @@ class App {
       createFolder: jest.fn(),
       modify: jest.fn(),
       configDir: "/.obsidian",
-      // Mobile-shaped DataAdapter (CapacitorAdapter): no getBasePath, so the
-      // filesystem tools take the Vault/adapter path that runs on a phone (#142).
+      // Adapter without getBasePath: filesystem tools must stay on the
+      // Vault/adapter path rather than assuming a desktop filesystem handle.
       adapter: {
         exists: jest.fn(),
         read: jest.fn(),

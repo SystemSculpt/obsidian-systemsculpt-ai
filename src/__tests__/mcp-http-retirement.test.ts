@@ -44,10 +44,6 @@ describe("retired custom HTTP MCP settings", () => {
     const service = new MCPService({ settings } as any, {} as any);
 
     await expect(service.getAvailableTools()).resolves.toEqual([]);
-    await expect(service.testAllServers()).resolves.toMatchObject({
-      "mcp-filesystem": { success: true },
-      "mcp-youtube": { success: true },
-    });
 
     expect(httpRequest).not.toHaveBeenCalled();
     expect(JSON.stringify(settings)).toBe(before);

@@ -5,16 +5,7 @@ import { attachMessageToolbar } from "../MessageToolbar";
 import { setIcon } from "obsidian";
 
 jest.mock("obsidian", () => ({
-  Platform: { isMobile: false },
   setIcon: jest.fn(),
-}));
-
-jest.mock("../../../../services/PlatformContext", () => ({
-  PlatformContext: {
-    get: () => ({
-      uiVariant: () => "desktop",
-    }),
-  },
 }));
 
 describe("MessageToolbar", () => {

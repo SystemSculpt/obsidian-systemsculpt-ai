@@ -289,7 +289,7 @@
   font-size: var(--ss-text-sm);
 }
 
-/* Mobile / accessibility */
+/* Narrow-window accessibility */
 @media (max-width: 768px) {
   .ss-janitor-modal {
     width: 95vw;

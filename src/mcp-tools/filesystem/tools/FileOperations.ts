@@ -246,9 +246,9 @@ export class FileOperations {
         assertValidObsidianBasesYaml(normalizedPath || path, content);
       }
       // Ensure parent directories exist if requested. ensureVaultFolder builds
-      // every missing ancestor through the Vault API (mobile-safe) and only
-      // swallows "already exists", so a missing mid-level folder no longer
-      // silently fails the write (#142).
+      // every missing ancestor through the Vault API alone and only swallows
+      // "already exists", so a missing mid-level folder no longer silently
+      // fails the write (#142).
       if (createDirs) {
         const lastSlash = normalizedPath.lastIndexOf('/');
         if (lastSlash > 0) {

@@ -4,7 +4,6 @@ export interface ErrorContext {
   source?: string;
   method?: string;
   userId?: string;
-  modelId?: string;
   providerId?: string;
   metadata?: Record<string, any>;
 }

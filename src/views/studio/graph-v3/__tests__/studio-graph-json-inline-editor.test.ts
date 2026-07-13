@@ -81,7 +81,7 @@ describe("StudioGraphNodeInlineEditors JSON composer", () => {
       onNodeConfigMutated,
     });
 
-    const addButton = findButtonByText(nodeEl, "Add Field");
+    const addButton = findButtonByText(nodeEl, "Add field");
     expect(addButton).toBeDefined();
     click(addButton!);
 
@@ -262,7 +262,7 @@ describe("StudioGraphNodeInlineEditors JSON composer", () => {
       onNodeConfigMutated: jest.fn(),
     });
 
-    const addButton = findButtonByText(nodeEl, "Add Field");
+    const addButton = findButtonByText(nodeEl, "Add field");
     expect(addButton).toBeDefined();
     click(addButton!);
 
@@ -327,7 +327,7 @@ describe("StudioGraphNodeInlineEditors JSON composer", () => {
       onNodeConfigMutated: jest.fn(),
     });
 
-    const addButton = findButtonByText(nodeEl, "Add Field");
+    const addButton = findButtonByText(nodeEl, "Add field");
     expect(addButton).toBeDefined();
     click(addButton!);
     click(addButton!);
@@ -356,7 +356,7 @@ describe("StudioGraphNodeInlineEditors JSON composer", () => {
       onNodeConfigMutated: jest.fn(),
     });
 
-    const presetButton = findButtonByText(nodeEl, "Email Preset");
+    const presetButton = findButtonByText(nodeEl, "Email preset");
     expect(presetButton).toBeDefined();
     click(presetButton!);
 

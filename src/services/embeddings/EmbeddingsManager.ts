@@ -247,7 +247,6 @@ export class EmbeddingsManager {
       queryVector = cached.vector;
     } else {
       const vectors = await this.provider.generateEmbeddings([prepared], {
-        inputType: "query",
         idempotencyKey: this.nextIdempotencyKey("query"),
         signal,
       });

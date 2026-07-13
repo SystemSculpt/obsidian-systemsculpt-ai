@@ -41,7 +41,7 @@ class MockMediaRecorder {
   });
 
   /**
-   * Simulate the device revoking the mic (e.g. iOS lock): a real MediaRecorder
+   * Simulate the browser revoking the mic track mid-recording: a real MediaRecorder
    * fires "error" and transitions to "inactive" without a clean onstop.
    */
   public emitError = (error?: unknown): void => {
@@ -61,7 +61,7 @@ class MockMediaRecorder {
 }
 
 const createTrack = (): MockTrack => ({
-  label: "iPhone Microphone",
+  label: "External Microphone",
   stop: jest.fn(),
   addEventListener: jest.fn(),
   removeEventListener: jest.fn(),
@@ -216,8 +216,8 @@ describe("MicrophoneRecorder", () => {
     const instance = MockMediaRecorder.instances[MockMediaRecorder.instances.length - 1];
     // A timeslice chunk lands before the interruption (start(800) on a device).
     instance.requestData();
-    // iOS lock revokes the track: the recorder errors and goes inactive without
-    // a clean visibilitychange/onstop. The captured audio must still be saved.
+    // The recorder errors and goes inactive without a clean
+    // visibilitychange/onstop. The captured audio must still be saved.
     instance.emitError(new Error("The operation could not be performed"));
     await flushPromises();
 
@@ -402,6 +402,6 @@ describe("MicrophoneRecorder", () => {
 
     await recorder.start("SystemSculpt/Recordings/no-wakelock.webm");
 
-    expect(onStatus).toHaveBeenCalledWith(expect.stringContaining("Keep your screen awake"));
+    expect(onStatus).toHaveBeenCalledWith(expect.stringContaining("screen awake"));
   });
 });

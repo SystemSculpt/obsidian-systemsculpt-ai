@@ -45,9 +45,10 @@ describe("SettingsTabRegistry SystemSculpt-only anchors", () => {
     expect(chat?.anchor?.desc).not.toMatch(/prompt|model picker|templates/i);
 
     expect(workflow?.anchor?.title).toContain("Audio");
-    expect(workflow?.anchor?.title).not.toContain("Automation");
+    expect(workflow?.anchor?.title).toContain("Automations");
     expect(workflow?.anchor?.desc).toContain("recording");
-    expect(workflow?.anchor?.desc).not.toContain("automation");
+    expect(workflow?.anchor?.desc).toContain("managed workflow automations");
+    expect(workflow?.sections).toHaveLength(2);
 
     expect(knowledge?.anchor?.desc).toContain("semantic search");
     expect(knowledge?.anchor?.desc).toContain("related note discovery");

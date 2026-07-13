@@ -23,10 +23,6 @@ build/
 !.env.local.example
 config.json
 systemsculpt-sync.config.json
-systemsculpt-sync.ios.json
-systemsculpt-sync.android.json
-systemsculpt-sync.android.appdata.json
-systemsculpt-sync.windows.generated.json
 /autoresearch*
 
 # OS / editors

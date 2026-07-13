@@ -166,7 +166,7 @@ describe("EmbeddingsPendingFilesModal", () => {
       await modal.onOpen();
 
       const emptyState = (modal as any).listEl?.querySelector(".ss-modal__empty-state");
-      expect(emptyState?.textContent).toContain("All eligible markdown files already have embeddings");
+      expect(emptyState?.textContent).toContain("All eligible Markdown files already have embeddings");
     });
 
     it("shows 'no matches' when filter returns empty", async () => {
@@ -337,8 +337,8 @@ describe("EmbeddingsPendingFilesModal", () => {
       expect((modal as any).formatReason("modified")).toBe("Needs refresh after edits");
     });
 
-    it("formats 'schema-mismatch' as 'Provider/config changed'", () => {
-      expect((modal as any).formatReason("schema-mismatch")).toBe("Provider/config changed");
+    it("formats 'schema-mismatch' as a managed configuration change", () => {
+      expect((modal as any).formatReason("schema-mismatch")).toBe("Managed configuration changed");
     });
 
     it("formats 'metadata-missing' correctly", () => {
@@ -492,7 +492,7 @@ describe("EmbeddingsPendingFilesModal", () => {
       mockManager.listPendingFiles.mockResolvedValue([]);
       await modal.onOpen();
 
-      expect((modal as any).summaryTextEl?.textContent).toContain("All eligible markdown files");
+      expect((modal as any).summaryTextEl?.textContent).toContain("All eligible Markdown files");
     });
   });
 });

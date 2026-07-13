@@ -33,6 +33,7 @@ export type AcceptedManagedChatRequestSnapshot =
     model: "ai-agent";
     messages: readonly ManagedPreparedMessage[];
     tools?: readonly Readonly<{ [key: string]: JsonContractValue }>[];
+    webSearch: boolean;
   }>;
 
 export type AcceptedChatRequestSnapshot = AcceptedManagedChatRequestSnapshot;
@@ -135,6 +136,7 @@ export function createAcceptedManagedChatRequestSnapshot(input: Readonly<{
   policy: AcceptedChatPolicyAudit;
   managedMessages: readonly Readonly<ChatMessage>[];
   managedTools: readonly ManagedToolDefinition[];
+  webSearch: boolean;
 }>): AcceptedManagedChatRequestSnapshot {
   const messages = input.managedMessages.map(prepareManagedMessage);
   const tools = input.managedTools.map(prepareTool);
@@ -143,6 +145,7 @@ export function createAcceptedManagedChatRequestSnapshot(input: Readonly<{
     runtime: "managed" as const,
     model: "ai-agent" as const,
     messages,
+    webSearch: input.webSearch,
     ...(tools.length ? { tools } : {}),
   };
   return deepFreezeAccepted(

@@ -44,7 +44,8 @@
               ],
               "optional_fields": [
                 "tools",
-                "tool_choice"
+                "tool_choice",
+                "plugins"
               ],
               "additional_properties": false,
               "model": "ai-agent",
@@ -55,7 +56,8 @@
                 "auto",
                 "none",
                 "required"
-              ]
+              ],
+              "plugins": "managed_chat_plugins_v1"
             },
             "definitions": {
               "managed_chat_messages_v1": {
@@ -194,6 +196,17 @@
                     "parameters": "json_schema_object"
                   }
                 }
+              },
+              "managed_chat_plugins_v1": {
+                "type": "array",
+                "min_items": 1,
+                "max_items": 1,
+                "additional_properties": false,
+                "items": {
+                  "required_fields": ["id"],
+                  "optional_fields": [],
+                  "id": ["web"]
+                }
               }
             }
           },
@@ -298,7 +311,11 @@
       "metering": "metered_operation",
       "cancellation_supported": false,
       "background_eligible": true,
-      "limits": {},
+      "limits": {
+        "max_texts": 128,
+        "max_chars_per_text": 8000,
+        "max_total_chars": 200000
+      },
       "request_contracts": [
         {
           "capability": "embeddings",

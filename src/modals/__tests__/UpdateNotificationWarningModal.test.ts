@@ -42,7 +42,7 @@ describe("UpdateNotificationWarningModal", () => {
 
     it("creates title", () => {
       const title = modal.contentEl.querySelector(".modal-title");
-      expect(title?.textContent).toBe("Disable Update Notifications");
+      expect(title?.textContent).toBe("Disable update notifications");
     });
 
     it("creates warning message content", () => {

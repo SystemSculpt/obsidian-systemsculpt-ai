@@ -1,7 +1,6 @@
 import { App, MarkdownView, Notice, TFile } from "obsidian";
 import type SystemSculptPlugin from "../../main";
 import { CHAT_VIEW_TYPE } from "../../core/plugin/viewTypes";
-import { PlatformContext } from "../PlatformContext";
 import { PostProcessingService } from "../PostProcessingService";
 import { TranscriptionProgressManager } from "../TranscriptionProgressManager";
 import { ManagedJobClient } from "../managed/ManagedJobClient";
@@ -69,7 +68,6 @@ export class TranscriptionCoordinator {
   constructor(
     private readonly app: App,
     private readonly plugin: SystemSculptPlugin,
-    private readonly platform: PlatformContext = PlatformContext.get(),
     managedAdapter?: ManagedTranscriptionAdapter,
   ) {
     this.managedAdapter = managedAdapter ?? null;
@@ -303,10 +301,7 @@ export class TranscriptionCoordinator {
 
   private handleError(error: Error, filePath: string, suppressNotices: boolean): void {
     if (suppressNotices || error.name === "AbortError") return;
-    const fileName = filePath.split("/").pop();
-    const message = this.platform.isMobile()
-      ? `⚠️ Transcription failed, but your recording "${fileName}" is safely saved`
-      : `❌ Transcription failed: ${error.message}`;
+    const message = `❌ Transcription failed: ${error.message}`;
     new Notice(message);
   }
 }

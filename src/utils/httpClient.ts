@@ -16,6 +16,14 @@ export interface HttpResponseShim {
   headers?: Record<string, string>;
 }
 
+export interface HttpRequestError {
+  status: number;
+  message: string;
+  json?: unknown;
+  text?: string;
+  headers?: Record<string, string>;
+}
+
 // Simple per-host circuit breaker to avoid hammering unreachable hosts
 // failures: consecutive networkish failures count
 // disabledUntil: epoch ms when we will attempt again
@@ -182,7 +190,14 @@ export async function httpRequest(opts: HttpRequestOptions): Promise<HttpRespons
     try { parsed = text ? JSON.parse(text) : undefined; } catch {}
     if (!status || status >= 400) {
       const hdrs = ((r as any).headers || {}) as Record<string, string>;
-      throw { status: status || 500, text, json: parsed, headers: hdrs, message: text || (parsed && (parsed.error?.message || parsed.message)) || `HTTP ${status}` };
+      const requestError: HttpRequestError = {
+        status: status || 500,
+        text,
+        json: parsed,
+        headers: hdrs,
+        message: text || (parsed && (parsed.error?.message || parsed.message)) || `HTTP ${status}`,
+      };
+      throw requestError;
     }
     const hdrs = ((r as any).headers || {}) as Record<string, string>;
     // Success resets circuit breaker for this host

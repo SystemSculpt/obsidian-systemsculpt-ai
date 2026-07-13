@@ -9,14 +9,6 @@ const mockViewManagerInitialize = jest.fn();
 const mockCommandManagerCtor = jest.fn();
 const mockRegisterCommands = jest.fn();
 
-jest.mock("../services/PlatformContext", () => ({
-  PlatformContext: {
-    get: () => ({
-      supportsDesktopOnlyFeatures: () => true,
-    }),
-  },
-}));
-
 jest.mock("../core/license/LicenseManager", () => ({
   LicenseManager: jest.fn().mockImplementation(() => {
     mockLicenseManagerCtor();

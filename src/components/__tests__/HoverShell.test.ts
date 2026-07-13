@@ -14,7 +14,6 @@ describe("HoverShell", () => {
     const onStop = jest.fn();
     const shell = createHoverShell({
       title: "Recorder",
-      layout: "desktop",
       showStatusRow: true,
     });
 
@@ -37,7 +36,6 @@ describe("HoverShell", () => {
     const shell = createHoverShell({
       title: "Recorder",
       subtitle: "",
-      layout: "desktop",
     });
 
     expect(shell.subtitleEl.hasAttribute("hidden")).toBe(true);
@@ -49,4 +47,3 @@ describe("HoverShell", () => {
     expect(shell.root.dataset.state).toBe("recording");
   });
 });
-

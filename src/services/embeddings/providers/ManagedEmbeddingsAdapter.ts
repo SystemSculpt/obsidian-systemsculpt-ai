@@ -92,10 +92,6 @@ export class ManagedEmbeddingsAdapter implements EmbeddingsProvider {
     return result.vectors.map((vector) => [...vector]);
   }
 
-  getMaxBatchSize(): number {
-    return 25;
-  }
-
   async generate(call: ManagedEmbeddingsCall): Promise<ManagedEmbeddingsResult> {
     if (!IDEMPOTENCY_KEY.test(call.idempotencyKey)) {
       throw new ManagedEmbeddingsError("invalid_request", "A valid idempotency key is required.", 400);

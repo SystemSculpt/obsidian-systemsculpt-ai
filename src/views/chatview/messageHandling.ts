@@ -58,8 +58,6 @@ export const messageHandling = {
         chatView.manageDomSize();
       }
     }
-
-    // Token counter has been removed
   },
 
   restoreResendInput: async function(chatView: ChatView, content: string): Promise<void> {

@@ -271,9 +271,9 @@ describe("FileOperations", () => {
     });
 
     it("creates parent directories via ensureVaultFolder when createDirs is true", async () => {
-      // Robust, mobile-safe nested folder creation (#142): writeFile must
-      // delegate to ensureVaultFolder, not the fragile inline createFolder whose
-      // errors were swallowed.
+      // Robust nested folder creation (#142): writeFile must delegate to
+      // ensureVaultFolder, not the fragile inline createFolder whose errors
+      // were swallowed.
       (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(null);
       const { ensureVaultFolder } = require("../../utils");
 

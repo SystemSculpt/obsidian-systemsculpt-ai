@@ -107,7 +107,7 @@ describe("StudioGraphNodeInlineEditors note selector", () => {
     });
 
     const addButton = Array.from(nodeEl.querySelectorAll<HTMLButtonElement>("button")).find(
-      (button) => button.textContent?.trim() === "Add Note"
+      (button) => button.textContent?.trim() === "Add note"
     );
     expect(addButton).toBeDefined();
     click(addButton!);
@@ -135,7 +135,7 @@ describe("StudioGraphNodeInlineEditors note selector", () => {
     });
 
     const addButton = Array.from(nodeEl.querySelectorAll<HTMLButtonElement>("button")).find(
-      (button) => button.textContent?.trim() === "Add Note"
+      (button) => button.textContent?.trim() === "Add note"
     );
     click(addButton!);
 

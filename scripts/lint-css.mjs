@@ -216,18 +216,16 @@ const IMPORTANT_ALLOWLIST = new Set([
   "components/messages.css", // markdown font-size inheritance + hidden copy button
   "components/chat-blocks.css", // per-chat hide-tool-activity toggle (#213)
   "components/resume-chat.css", // beats reading/source-mode content styles
-  "components/floating-widget.css", // mobile pinning beats inline drag positioning
-  "components/quick-edit.css", // mobile pinning beats inline drag positioning
-  "components/slash-commands.css", // mobile positioning beats inline JS placement
+  "components/floating-widget.css", // floating position rules beat inline drag positioning
+  "components/slash-commands.css", // overlay positioning beats inline JS placement
   "components/youtube-canvas.css", // input icon padding vs generic input rules
   "modals/search.css", // hide Obsidian tooltips while the overlay is open
-  "platform/mobile.css", // force favorites filter visible on mobile
   "views/studio.css", // edge hover must beat inline SVG strokes; zoom-micro perf
 ]);
 
 /** font-size values allowed besides var(--ss-*)/var(--chat-*)/calc/inherit. */
 const FONT_SIZE_LITERAL_ALLOW = new Set([
-  "16px", // iOS: inputs under 16px trigger focus zoom
+  "16px", // keeps narrow-window text inputs readable
   "inherit",
   "1em",
 ]);

@@ -369,6 +369,12 @@
   box-shadow: var(--ss-ring);
 }
 
+.systemsculpt-chat-composer-input.is-read-only {
+  background-color: var(--background-modifier-form-field);
+  border-color: var(--background-modifier-border);
+  opacity: 0.78;
+}
+
 .systemsculpt-chat-composer-input.has-value .mod-mic,
 .systemsculpt-chat-composer-input.has-value .mod-video {
   display: none;
@@ -395,6 +401,11 @@ textarea.systemsculpt-chat-input:focus {
 
 textarea.systemsculpt-chat-input::placeholder {
   color: var(--ss-ink-faint);
+}
+
+textarea.systemsculpt-chat-input:disabled {
+  color: var(--ss-ink-muted);
+  cursor: not-allowed;
 }
 
 .systemsculpt-chat-composer-actions {
@@ -436,7 +447,7 @@ textarea.systemsculpt-chat-input::placeholder {
    hero card ChatView.displayChatStatus() renders via ChatStatusSurface. */
 
 /* ------------------------------------------------------------------ *
- * Mobile
+ * Narrow desktop window
  * ------------------------------------------------------------------ */
 @media (max-width: 768px) {
   .systemsculpt-messages-container {

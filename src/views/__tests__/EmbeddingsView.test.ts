@@ -86,7 +86,7 @@ describe("EmbeddingsView", () => {
     });
 
     it("returns correct display text", () => {
-      expect(view.getDisplayText()).toBe("Similar Notes");
+      expect(view.getDisplayText()).toBe("Similar notes");
     });
 
     it("returns correct icon", () => {

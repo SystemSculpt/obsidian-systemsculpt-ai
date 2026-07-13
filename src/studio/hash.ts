@@ -10,9 +10,8 @@ function bytesToHex(bytes: Uint8Array): string {
   return out;
 }
 
-// Portable SHA-256 for mobile/no-WebCrypto adapters. This is deliberately
-// self-contained: generation identity must never degrade to a non-cryptographic
-// hash when Obsidian runs without Node or WebCrypto.
+// Self-contained SHA-256 fallback for runtimes without WebCrypto. Generation
+// identity must never degrade to a non-cryptographic hash.
 export function sha256HexFromBytesPortable(input: Uint8Array): string {
   const constants = new Uint32Array([
     0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
@@ -79,4 +78,3 @@ export async function sha256HexFromArrayBuffer(arrayBuffer: ArrayBuffer): Promis
 
   return sha256HexFromBytesPortable(bytes);
 }
-

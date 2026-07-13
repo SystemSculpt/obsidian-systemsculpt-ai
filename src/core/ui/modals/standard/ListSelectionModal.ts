@@ -1,7 +1,6 @@
 import { App, setIcon, debounce } from "obsidian";
 import { StandardModal } from "./StandardModal";
 import { KeyboardNavigationService } from "../../services/KeyboardNavigationService";
-import { PlatformContext } from "../../../../services/PlatformContext";
 
 export interface ListItem {
   id: string;
@@ -14,15 +13,6 @@ export interface ListItem {
   thumbnail?: string; // URL or path to thumbnail image
   filePath?: string;  // Full file path for retrieval
   fileType?: string;  // File type/extension for identifying images
-  metadata?: {
-    provider?: string;
-    contextLength?: number;
-    isNew?: boolean;
-    isBeta?: boolean;
-    isDeprecated?: boolean;
-    capabilities?: string[];
-    [key: string]: any; // Allow additional metadata
-  };
 }
 
 export interface ListSelectionOptions {
@@ -46,7 +36,7 @@ export interface ListSelectionOptions {
 
 /**
  * ListSelectionModal is a standardized modal for selecting items from a list,
- * such as models, contexts, saved items, etc.
+ * such as contexts, backups, and saved items.
  */
 export class ListSelectionModal extends StandardModal {
   private items: ListItem[] = [];
@@ -328,16 +318,12 @@ export class ListSelectionModal extends StandardModal {
       // Store item element for keyboard navigation
       this.itemElements.push(itemEl);
       
-      // Add click handler for selection (ignore clicks on favorite toggle)
+      // Add click handler for selection.
       this.registerDomEvent(itemEl, "click", (ev: MouseEvent) => {
         if (item.disabled) {
           ev.preventDefault();
           ev.stopPropagation();
           return;
-        }
-        const target = ev.target as HTMLElement;
-        if (target && target.closest && target.closest('.systemsculpt-favorite-toggle')) {
-          return; // Let the favorite toggle handle its own click
         }
         if (this.options.multiSelect) {
           // Toggle selection
@@ -442,18 +428,9 @@ export class ListSelectionModal extends StandardModal {
         e.stopPropagation(); // Prevent triggering item selection
       };
       
-      // For desktop: add hover and click preview
-      if (!this.isMobileDevice()) {
-        this.registerDomEvent(thumbnailContainer, "mouseenter", showPreviewHandler);
-        this.registerDomEvent(thumbnailContainer, "mouseleave", () => this.hidePreview());
-        this.registerDomEvent(thumbnailContainer, "click", showPreviewHandler);
-      } else {
-        // For mobile: add tap to expand behavior
-        this.registerDomEvent(thumbnailContainer, "click", (e) => {
-          e.stopPropagation(); // Prevent item selection
-          this.toggleExpandedPreview(itemEl, thumbnail!, title);
-        });
-      }
+      this.registerDomEvent(thumbnailContainer, "mouseenter", showPreviewHandler);
+      this.registerDomEvent(thumbnailContainer, "mouseleave", () => this.hidePreview());
+      this.registerDomEvent(thumbnailContainer, "click", showPreviewHandler);
     }
     
     return itemEl;
@@ -465,13 +442,6 @@ export class ListSelectionModal extends StandardModal {
   private isImageType(fileType: string): boolean {
     const imageTypes = ['png', 'jpg', 'jpeg', 'svg', 'webp'];
     return imageTypes.includes(fileType.toLowerCase());
-  }
-
-  /**
-   * Detect if the device is mobile
-   */
-  private isMobileDevice(): boolean {
-    return PlatformContext.get().isMobile();
   }
 
   /**
@@ -542,35 +512,6 @@ export class ListSelectionModal extends StandardModal {
    */
   private hidePreview(): void {
     this.removePreviewContainer();
-  }
-
-  /**
-   * Toggle expanded preview (for mobile)
-   */
-  private toggleExpandedPreview(itemEl: HTMLElement, imageUrl: string, title: string): void {
-    // Check if already expanded
-    if (itemEl.classList.contains("expanded")) {
-      // Remove expanded class and preview
-      itemEl.classList.remove("expanded");
-      const previewEl = itemEl.querySelector(".ss-modal__item-preview");
-      if (previewEl) {
-        previewEl.remove();
-      }
-    } else {
-      // Expand and add preview
-      itemEl.classList.add("expanded");
-      
-      // Create and add preview element
-      const previewContainer = createDiv();
-      previewContainer.className = "ss-modal__item-preview";
-      
-      const previewImg = createEl("img");
-      previewImg.src = imageUrl;
-      previewImg.alt = title;
-      
-      previewContainer.appendChild(previewImg);
-      itemEl.appendChild(previewContainer);
-    }
   }
 
   /**

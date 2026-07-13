@@ -3,7 +3,7 @@ import { ManagedCapabilityCatalog } from "../../src/services/managed/ManagedCapa
 import { ManagedCapabilityClient } from "../../src/services/managed/ManagedCapabilityClient";
 
 describe("managed capability client built-bundle foundation", () => {
-  it("loads the canonical contract through mobile-safe modules", () => {
+  it("loads the canonical contract through bundle-safe modules", () => {
     const catalog = ManagedCapabilityCatalog.parse(fixture);
     expect(catalog.contract_version).toBe("managed-capabilities-v2");
     expect(catalog.capabilities).toHaveLength(5);

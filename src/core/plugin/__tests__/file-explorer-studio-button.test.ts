@@ -6,16 +6,6 @@ import {
   FileExplorerStudioButtonManager,
 } from "../FileExplorerStudioButtonManager";
 
-let mockSupportsDesktopOnlyFeatures = true;
-
-jest.mock("../../../services/PlatformContext", () => ({
-  PlatformContext: {
-    get: () => ({
-      supportsDesktopOnlyFeatures: () => mockSupportsDesktopOnlyFeatures,
-    }),
-  },
-}));
-
 function appendExplorer(options?: {
   activeFolderPath?: string;
   activeFilePath?: string;
@@ -82,7 +72,6 @@ describe("FileExplorerStudioButtonManager", () => {
   beforeEach(() => {
     document.body.empty();
     jest.clearAllMocks();
-    mockSupportsDesktopOnlyFeatures = true;
   });
 
   it("adds one native New Studio action beside New note in the file explorer header", () => {
@@ -160,15 +149,5 @@ describe("FileExplorerStudioButtonManager", () => {
       name: "New Studio Project",
       projectPath: "Selected/New Studio Project.systemsculpt",
     });
-  });
-
-  it("does not add the explorer action on non-desktop surfaces", () => {
-    mockSupportsDesktopOnlyFeatures = false;
-    const buttons = appendExplorer();
-    const { manager } = createHarness();
-
-    manager.syncButtons();
-
-    expect(buttons.querySelector(`.${FILE_EXPLORER_STUDIO_BUTTON_CLASS}`)).toBeNull();
   });
 });

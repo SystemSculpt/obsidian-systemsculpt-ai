@@ -39,7 +39,6 @@ Primary source: `src/css/README.md` (the design-system contract).
 - Modal system: `src/css/modals/*` (`modal.css` is the one shell)
 - View-specific styles: `src/css/views/*` (each view's scoped Obsidian
   overrides live with its sheet, e.g. `views/chat.css`)
-- Mobile: `src/css/platform/mobile.css`
 
 ## Authoring workflow
 

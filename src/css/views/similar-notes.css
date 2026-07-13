@@ -363,7 +363,7 @@
   animation: ss-shimmer 1.5s linear infinite;
 }
 
-/* Mobile density */
+/* Narrow-window density */
 @media (max-width: 768px) {
   .ss-embeddings-view__header {
     padding: var(--ss-space-2) var(--ss-space-3);

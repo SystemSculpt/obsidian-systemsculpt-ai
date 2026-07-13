@@ -3,10 +3,6 @@
 import { App } from "obsidian";
 import { displayRecorderTabContent } from "../settings/RecorderTabContent";
 
-jest.mock("../services/PlatformContext", () => ({
-  PlatformContext: { get: jest.fn(() => ({ isMobile: jest.fn(() => false) })) },
-}));
-
 describe("Recorder settings tab", () => {
   it("offers local recorder/output controls without provider, endpoint, key, or model configuration", async () => {
     Object.defineProperty(global.navigator, "mediaDevices", {
@@ -41,6 +37,7 @@ describe("Recorder settings tab", () => {
     const names = [...container.querySelectorAll(".setting-item-name")].map((element) => element.textContent?.trim());
     expect(names).toContain("Auto-transcribe recordings");
     expect(names).toContain("Default transcription output format");
+    expect(names).toContain("Automatic audio format conversion");
     expect(names).not.toContain("Transcription provider");
     expect(names).not.toContain("Custom endpoint URL");
     expect(names).not.toContain("API key");

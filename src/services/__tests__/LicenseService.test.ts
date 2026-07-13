@@ -97,7 +97,7 @@ describe("LicenseService website-owned validation", () => {
     "treats HTTP %s as an authoritative rejection",
     async (status) => {
       const plugin = createPlugin({ licenseValid: true });
-      httpRequest.mockResolvedValue({ status, json: { error: "rejected" } });
+      httpRequest.mockRejectedValue({ status, json: { error: "rejected" } });
 
       await expect(new LicenseService(plugin).validateLicense()).resolves.toBe(false);
 
@@ -109,7 +109,7 @@ describe("LicenseService website-owned validation", () => {
     "preserves last-known-good validity for transient HTTP %s",
     async (status) => {
       const plugin = createPlugin({ licenseValid: true });
-      httpRequest.mockResolvedValue({ status, json: { error: "transient" } });
+      httpRequest.mockRejectedValue({ status, json: { error: "transient" } });
 
       await expect(new LicenseService(plugin).validateLicense()).resolves.toBe(true);
 

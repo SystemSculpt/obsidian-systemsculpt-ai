@@ -1,6 +1,5 @@
 import { setIcon } from "obsidian";
 
-export type HoverShellLayout = "desktop" | "mobile";
 export type HoverShellActionVariant = "default" | "primary" | "danger";
 
 export interface HoverShellAction {
@@ -27,7 +26,6 @@ export interface HoverShellOptions {
   statusText?: string;
   className?: string;
   width?: string;
-  layout: HoverShellLayout;
   draggable?: boolean;
   defaultPosition?: HoverShellPosition;
   positionKey?: string;
@@ -91,20 +89,17 @@ const writePositionMap = (map: Record<string, StoredHoverPosition>): void => {
   }
 };
 
-const makeStorageKey = (positionKey: string, layout: HoverShellLayout): string => `${positionKey}:${layout}`;
-
-const loadStoredPosition = (positionKey: string, layout: HoverShellLayout): StoredHoverPosition | null => {
+const loadStoredPosition = (positionKey: string): StoredHoverPosition | null => {
   const map = readPositionMap();
-  const key = makeStorageKey(positionKey, layout);
-  const entry = map[key];
+  const entry = map[positionKey];
   if (!entry) return null;
   if (typeof entry.left !== "number" || typeof entry.top !== "number") return null;
   return entry;
 };
 
-const saveStoredPosition = (positionKey: string, layout: HoverShellLayout, value: StoredHoverPosition): void => {
+const saveStoredPosition = (positionKey: string, value: StoredHoverPosition): void => {
   const map = readPositionMap();
-  map[makeStorageKey(positionKey, layout)] = value;
+  map[positionKey] = value;
   writePositionMap(map);
 };
 
@@ -112,7 +107,7 @@ export function createHoverShell(options: HoverShellOptions): HoverShellHandle {
   const host = options.host ?? document.body;
   const root = createDiv();
   root.className = "ss-hover-shell";
-  root.dataset.layout = options.layout;
+  root.dataset.layout = "desktop";
   root.dataset.state = "idle";
   if (options.className) {
     root.classList.add(...options.className.split(/\s+/).filter(Boolean));
@@ -183,7 +178,6 @@ export function createHoverShell(options: HoverShellOptions): HoverShellHandle {
   const unsubscribers: Array<() => void> = [];
 
   const clampToViewport = (): void => {
-    if (options.layout === "mobile") return;
     const rect = root.getBoundingClientRect();
     const maxLeft = Math.max(0, window.innerWidth - rect.width);
     const maxTop = Math.max(0, window.innerHeight - rect.height);
@@ -196,19 +190,17 @@ export function createHoverShell(options: HoverShellOptions): HoverShellHandle {
   };
 
   const persistCurrentPosition = (): void => {
-    if (!options.positionKey || options.layout === "mobile") return;
+    if (!options.positionKey) return;
     const rect = root.getBoundingClientRect();
-    saveStoredPosition(options.positionKey, options.layout, {
+    saveStoredPosition(options.positionKey, {
       left: rect.left,
       top: rect.top,
     });
   };
 
   const applyInitialPosition = (): void => {
-    if (options.layout === "mobile") return;
-
     const fromStorage = options.positionKey
-      ? loadStoredPosition(options.positionKey, options.layout)
+      ? loadStoredPosition(options.positionKey)
       : null;
     if (fromStorage) {
       root.style.left = `${fromStorage.left}px`;
@@ -276,7 +268,7 @@ export function createHoverShell(options: HoverShellOptions): HoverShellHandle {
     }
   };
 
-  if (options.draggable !== false && options.layout === "desktop") {
+  if (options.draggable !== false) {
     let dragging = false;
     let offsetX = 0;
     let offsetY = 0;
@@ -388,4 +380,3 @@ export function createHoverShell(options: HoverShellOptions): HoverShellHandle {
     },
   };
 }
-

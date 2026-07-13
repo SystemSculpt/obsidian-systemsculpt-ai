@@ -26,20 +26,13 @@ export class MCPToolExecutionError extends Error {
   }
 }
 
-interface MCPConnectionResult {
-  success: boolean;
-  error?: string;
-  tools?: MCPToolInfo[];
-  timestamp: number;
-}
-
 interface InternalMCPServer {
   id: "mcp-filesystem" | "mcp-youtube";
   name: string;
 }
 
 /**
- * Central MCP service with pluggable server adapters.
+ * Built-in filesystem and YouTube tool service.
  */
 export class MCPService {
   private app: App;
@@ -51,11 +44,6 @@ export class MCPService {
   // Adapter instances keyed by server id
   private adapters: Map<string, FilesystemAdapter | YouTubeAdapter> = new Map();
 
-  // Static caches shared across instances
-  private static connectionTestCache: Map<string, { result: MCPConnectionResult; timestamp: number }> = new Map();
-  private static connectionTestPromises: Map<string, Promise<MCPConnectionResult>> = new Map();
-
-  private readonly CACHE_DURATION = 30 * 60 * 1000; // 30 minutes
   constructor(plugin: SystemSculptPlugin, app: App) {
     this.plugin = plugin;
     this.app = app;
@@ -77,48 +65,6 @@ export class MCPService {
 
     this.adapters.set(server.id, adapter);
     return adapter;
-  }
-
-  public clearCache(): void {
-    MCPService.connectionTestCache.clear();
-    MCPService.connectionTestPromises.clear();
-  }
-
-  async testConnection(server: InternalMCPServer): Promise<MCPConnectionResult> {
-    const cached = MCPService.connectionTestCache.get(server.id);
-    if (cached && Date.now() - cached.result.timestamp < this.CACHE_DURATION) {
-      return cached.result;
-    }
-
-    const existingPromise = MCPService.connectionTestPromises.get(server.id);
-    if (existingPromise) return existingPromise;
-
-    const testPromise = this.performConnectionTest(server);
-    MCPService.connectionTestPromises.set(server.id, testPromise);
-    try {
-      const result = await testPromise;
-      if (result.success) {
-        MCPService.connectionTestCache.set(server.id, { result, timestamp: Date.now() });
-      }
-      return result;
-    } finally {
-      MCPService.connectionTestPromises.delete(server.id);
-    }
-  }
-
-  private async performConnectionTest(server: InternalMCPServer): Promise<MCPConnectionResult> {
-    try {
-      const tools = await this.discoverTools(server);
-      return { success: true, tools, timestamp: Date.now() };
-    } catch (error) {
-      this.logger.error(`MCP connection test failed for ${server.name}:`, error);
-      return { success: false, error: this.getErrorMessage(error), timestamp: Date.now() };
-    }
-  }
-
-  private async discoverTools(server: InternalMCPServer): Promise<MCPToolInfo[]> {
-    const adapter = this.getAdapterForServer(server);
-    return await adapter.listTools();
   }
 
   /**
@@ -145,12 +91,11 @@ export class MCPService {
     const serverToolsArrays = await Promise.all(
       internalServers.map(async (server) => {
         try {
-          const connectionResult = await this.testConnection(server);
-          if (!connectionResult.success || !connectionResult.tools) return [] as ManagedToolDefinition[];
+          const tools = await this.getAdapterForServer(server).listTools();
 
           // Convert ALL tools from the server - no per-tool filtering
           const converted: ManagedToolDefinition[] = [];
-          for (const tool of connectionResult.tools) {
+          for (const tool of tools) {
             try {
               converted.push(this.convertToManagedTool(tool, server));
             } catch (error) {
@@ -229,20 +174,6 @@ export class MCPService {
       ? this.mapFilesystemArgs(actualToolName, args)
       : args;
     return await adapter.executeTool(actualToolName, mappedArgs, chatView, options);
-  }
-
-  async testAllServers(): Promise<{ [serverId: string]: MCPConnectionResult }> {
-    const results: { [serverId: string]: MCPConnectionResult } = {};
-
-    // Always include internal servers
-    const internalServers = this.getInternalServers();
-
-    const testResults = await Promise.all(internalServers.map(async (server) => {
-      const result = await this.testConnection(server);
-      return { serverId: server.id, result };
-    }));
-    for (const { serverId, result } of testResults) results[serverId] = result;
-    return results;
   }
 
   public setFilesystemAllowedPaths(paths: string[]): void {
@@ -370,11 +301,4 @@ export class MCPService {
     return withoutLeading;
   }
 
-  private getErrorMessage(error: any): string {
-    if (error instanceof Error) {
-      if (error.name === "AbortError") return "Connection timed out. Please check your internet connection and try again.";
-      return error.message;
-    }
-    return "An unexpected error occurred. Please try again or contact support if the issue persists.";
-  }
 }

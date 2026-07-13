@@ -41,7 +41,6 @@ module.exports = {
 		'!src/core/ui/**',
 		'!src/core/settings/*Modal.ts',
 		'!src/services/recorder/**',
-		'!src/services/AudioResampler.ts',
 		'!src/services/embeddings/**',
 		'!src/**/__tests__/**',
 		'!src/**/*.d.ts'

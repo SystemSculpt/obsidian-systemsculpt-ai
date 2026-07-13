@@ -47,10 +47,12 @@ describe("AcceptedChatRequestSnapshot", () => {
       policy,
       managedMessages: operation.initialDurableSnapshot.messages,
       managedTools: [{ type: "function", function: { name: "search" } }],
+      webSearch: true,
     });
 
     expect(accepted.runtime).toBe("managed");
     expect(accepted.model).toBe("ai-agent");
+    expect(accepted.webSearch).toBe(true);
     expect(accepted).not.toHaveProperty("legacyPreparation");
     expect(Object.isFrozen(accepted.messages)).toBe(true);
     expect(Object.keys(accepted)).not.toContain("operation");
@@ -98,6 +100,7 @@ describe("AcceptedChatRequestSnapshot", () => {
       policy,
       managedMessages: managedOperationValue.initialDurableSnapshot.messages,
       managedTools: [],
+      webSearch: false,
     });
     const checkpoint = { role: "tool" as const, content: "ok", message_id: "t", tool_call_id: "call" };
     const managedNext = Object.freeze({ chatId: "c", version: 2, messages: Object.freeze([...managed.durableSnapshot.messages, checkpoint]) });

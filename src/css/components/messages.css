@@ -199,7 +199,7 @@
 /* ------------------------------------------------------------------ *
  * Floating message toolbar
  * TS writes --ss-toolbar-shift-x (overflow correction) and toggles
- * .ss-flip-up / .ss-open — see MessageToolbar.ts.
+ * .ss-flip-up — see MessageToolbar.ts.
  * ------------------------------------------------------------------ */
 .systemsculpt-message-toolbar {
   position: absolute;
@@ -274,46 +274,8 @@
   color: var(--ss-danger);
 }
 
-.systemsculpt-toolbar-more {
-  display: none;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  border-radius: var(--ss-radius-round);
-  color: var(--ss-ink-muted);
-  cursor: pointer;
-  transition: var(--ss-transition-colors);
-}
-
-.systemsculpt-toolbar-more:hover {
-  background-color: var(--ss-state-hover);
-  color: var(--ss-ink);
-}
-
-/* Mobile: toolbar always visible, collapsed behind "more" */
-@media (max-width: 700px) {
-  .systemsculpt-message-toolbar {
-    opacity: 1;
-    pointer-events: auto;
-    transform: translate3d(var(--ss-toolbar-shift-x, 0px), 2px, 0);
-  }
-
-  .systemsculpt-toolbar-more {
-    display: inline-flex;
-  }
-
-  .systemsculpt-message-toolbar:not(.ss-open) .systemsculpt-toolbar-btn {
-    display: none;
-  }
-
-  .systemsculpt-message-toolbar.ss-open .systemsculpt-toolbar-btn {
-    display: inline-flex;
-  }
-}
-
 /* ------------------------------------------------------------------ *
- * Mobile bubble sizing
+ * Narrow-window bubble sizing
  * ------------------------------------------------------------------ */
 @media (max-width: 768px) {
   .systemsculpt-user-message,

@@ -544,7 +544,7 @@ describe("InputHandler hosted tool loop", () => {
     expect((handler as any).turnLifecycle).toBeNull();
   });
 
-  it("reads only composer emptiness before compatibility/admission and defers other payload sources until acceptance", async () => {
+  it("reads only composer emptiness before admission and defers other payload sources until acceptance", async () => {
     const { aiService, chatView, handler } = createHostedToolLoopHarness();
     handler.setValue("accepted payload");
     const input = (handler as unknown as { input: HTMLTextAreaElement }).input;
@@ -557,14 +557,6 @@ describe("InputHandler hosted tool loop", () => {
     });
     const contextGetter = chatView.contextManager.getContextFiles as jest.Mock;
     contextGetter.mockClear();
-    (handler as unknown as { webSearchEnabled: boolean }).webSearchEnabled = true;
-    await handler.submitWithOverrides({ includeContextFiles: true });
-    expect(inputReads).toEqual(["accepted payload"]);
-    expect(contextGetter).not.toHaveBeenCalled();
-    expect(aiService.prepareAcceptedChatRequest).not.toHaveBeenCalled();
-
-    inputReads.length = 0;
-    (handler as unknown as { webSearchEnabled: boolean }).webSearchEnabled = false;
     const admission = jest.spyOn(managedChatAdmission, "acquireChatTurnLease").mockResolvedValueOnce({ outcome: "unavailable" } as never);
     await handler.submitWithOverrides({ includeContextFiles: true });
     expect(inputReads).toEqual(["accepted payload"]);

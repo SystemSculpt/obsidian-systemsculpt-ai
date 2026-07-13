@@ -48,7 +48,7 @@ describe("errorLogger", () => {
       errorLogger.setMinimumLevel("info");
       errorLogger.log("info", "Test info message");
 
-      expect(console.info).toHaveBeenCalled();
+      expect(console.debug).toHaveBeenCalled();
     });
 
     it("logs debug level when debug mode enabled", () => {
@@ -156,7 +156,7 @@ describe("errorLogger", () => {
       errorLogger.setMinimumLevel("info");
       errorLogger.info("Info message");
 
-      expect(console.info).toHaveBeenCalled();
+      expect(console.debug).toHaveBeenCalled();
       const history = errorLogger.getHistory();
       expect(history.some((e) => e.level === "info")).toBe(true);
     });
@@ -285,7 +285,7 @@ describe("errorLogger", () => {
       errorLogger.setMinimumLevel("info");
       errorLogger.info("Should emit");
 
-      expect(console.info).toHaveBeenCalled();
+      expect(console.debug).toHaveBeenCalled();
     });
 
     it("sets minimum log level to debug", () => {
@@ -398,12 +398,11 @@ describe("errorLogger", () => {
   });
 
   describe("context handling", () => {
-    it("includes all context fields", () => {
+    it("includes the supported context fields", () => {
       const context: ErrorContext = {
         source: "TestSource",
         method: "testMethod",
         userId: "user123",
-        modelId: "model456",
         providerId: "provider789",
         metadata: { extra: "data" },
       };

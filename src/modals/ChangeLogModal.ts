@@ -20,9 +20,6 @@ export class ChangeLogModal extends StandardModal {
   private component: Component;
   private versionSelectEl: HTMLSelectElement | null = null;
   private scrollContainer: HTMLElement | null = null;
-  private touchStartX: number | null = null;
-  private touchStartY: number | null = null;
-  private touchStartTime: number | null = null;
 
   constructor(app: App, plugin: Pick<SystemSculptPlugin, "storage">, options: ChangeLogModalOptions = {}) {
     super(app);
@@ -103,32 +100,6 @@ export class ChangeLogModal extends StandardModal {
       if (ke.key === "End") {
         this.currentIndex = Math.max(0, this.entries.length - 1);
         this.renderCurrent();
-      }
-    });
-
-    // Basic swipe navigation for mobile
-    this.registerDomEvent(this.modalEl, "touchstart", (e: Event) => {
-      const te = e as TouchEvent;
-      if (te.touches.length !== 1) return;
-      const t = te.touches[0];
-      this.touchStartX = t.clientX;
-      this.touchStartY = t.clientY;
-      this.touchStartTime = Date.now();
-    });
-
-    this.registerDomEvent(this.modalEl, "touchend", (e: Event) => {
-      const te = e as TouchEvent;
-      if (this.touchStartX == null || this.touchStartY == null || this.touchStartTime == null) return;
-      const t = te.changedTouches && te.changedTouches[0];
-      if (!t) return;
-      const dx = t.clientX - this.touchStartX;
-      const dy = t.clientY - this.touchStartY;
-      const dt = Date.now() - this.touchStartTime;
-      this.touchStartX = this.touchStartY = this.touchStartTime = null;
-      if (dt > 600) return; // too slow
-      if (Math.abs(dx) > 60 && Math.abs(dy) < 40) {
-        if (dx < 0) this.goNext();
-        else this.goPrevious();
       }
     });
 
@@ -229,4 +200,3 @@ export class ChangeLogModal extends StandardModal {
     } catch {}
   }
 }
-

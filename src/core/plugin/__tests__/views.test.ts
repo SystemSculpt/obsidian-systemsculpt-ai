@@ -8,14 +8,6 @@ import {
   SYSTEMSCULPT_STUDIO_VIEW_TYPE,
 } from "../viewTypes";
 
-jest.mock("../../../services/PlatformContext", () => ({
-  PlatformContext: {
-    get: () => ({
-      supportsDesktopOnlyFeatures: () => true,
-    }),
-  },
-}));
-
 type TestApp = App & {
   viewRegistry?: {
     viewByType: Record<string, unknown>;

@@ -18,7 +18,8 @@ describe("renderChatCreditsIndicator", () => {
 
     expect(rendered.isLoading).toBe(false);
     expect(rendered.isLow).toBe(false);
-    expect(target.querySelector(".systemsculpt-model-indicator-arrow")).toBeNull();
+    expect(target.querySelector(".systemsculpt-credits-indicator-icon")).not.toBeNull();
+    expect(target.innerHTML).not.toMatch(/model/i);
     expect(target.textContent).toBe("");
     expect(rendered.title).toContain("Credits remaining:");
   });

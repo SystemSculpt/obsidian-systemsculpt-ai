@@ -234,7 +234,7 @@ describe("ContextSelectionModal", () => {
 
       (modal as any).updateAddButton(btn);
 
-      expect(btn.setButtonText).toHaveBeenCalledWith("Add Files");
+      expect(btn.setButtonText).toHaveBeenCalledWith("Add files");
       expect(btn.setDisabled).toHaveBeenCalledWith(true);
     });
 
@@ -339,7 +339,7 @@ describe("ContextSelectionModal", () => {
     it("sets modal title", () => {
       modal.onOpen();
 
-      expect(modal.titleEl.textContent).toBe("Add Context Files");
+      expect(modal.titleEl.textContent).toBe("Add context files");
     });
 
     it("creates filter container", () => {

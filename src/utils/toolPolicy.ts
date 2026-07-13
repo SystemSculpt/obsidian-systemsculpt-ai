@@ -5,11 +5,11 @@ export type ToolNameParts = {
 };
 
 /**
- * PI-style canonical tool aliases mapped onto our filesystem MCP tool surface.
+ * Canonical tool aliases mapped onto the built-in filesystem MCP surface.
  * This lets the model call canonical names (e.g. `read`, `ls`, `grep`) while
  * still executing through the stable `mcp-filesystem_*` implementation.
  */
-const PI_FILESYSTEM_TOOL_ALIASES: Record<string, string> = Object.freeze({
+const FILESYSTEM_TOOL_ALIASES: Record<string, string> = Object.freeze({
   read: "mcp-filesystem_read",
   write: "mcp-filesystem_write",
   edit: "mcp-filesystem_edit",
@@ -23,23 +23,23 @@ const PI_FILESYSTEM_TOOL_ALIASES: Record<string, string> = Object.freeze({
   context: "mcp-filesystem_context",
 });
 
-const MCP_TO_PI_ALIAS: Map<string, string> = new Map();
-for (const [alias, mapped] of Object.entries(PI_FILESYSTEM_TOOL_ALIASES)) {
-  if (!MCP_TO_PI_ALIAS.has(mapped)) {
-    MCP_TO_PI_ALIAS.set(mapped, alias);
+const MCP_TO_CANONICAL_ALIAS: Map<string, string> = new Map();
+for (const [alias, mapped] of Object.entries(FILESYSTEM_TOOL_ALIASES)) {
+  if (!MCP_TO_CANONICAL_ALIAS.has(mapped)) {
+    MCP_TO_CANONICAL_ALIAS.set(mapped, alias);
   }
 }
 
 export function resolveCanonicalToolAlias(fullName: string): string {
   const raw = String(fullName ?? "").trim();
   if (!raw) return "";
-  const mapped = PI_FILESYSTEM_TOOL_ALIASES[raw.toLowerCase()];
+  const mapped = FILESYSTEM_TOOL_ALIASES[raw.toLowerCase()];
   return mapped || raw;
 }
 
 export function getCanonicalAliasForMcpTool(fullName: string): string | null {
   const mapped = resolveCanonicalToolAlias(fullName).toLowerCase();
-  return MCP_TO_PI_ALIAS.get(mapped) || null;
+  return MCP_TO_CANONICAL_ALIAS.get(mapped) || null;
 }
 
 export function splitToolName(fullName: string): ToolNameParts {

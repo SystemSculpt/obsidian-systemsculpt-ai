@@ -23,14 +23,12 @@ export class ChatFavoritesService {
 
     const updated = [...this.plugin.settings.favoriteChats, chatId];
     await this.plugin.getSettingsManager().updateSettings({ favoriteChats: updated });
-    this.emitFavoritesChanged();
   }
 
   /** Remove a chat from favorites */
   public async removeFavorite(chatId: string): Promise<void> {
     const updated = this.plugin.settings.favoriteChats.filter(id => id !== chatId);
     await this.plugin.getSettingsManager().updateSettings({ favoriteChats: updated });
-    this.emitFavoritesChanged();
   }
 
   /** Toggle favorite status */
@@ -47,17 +45,4 @@ export class ChatFavoritesService {
     return this.plugin.settings.favoriteChats.includes(chatId);
   }
 
-  /** Get all favorite chat IDs */
-  public getFavorites(): string[] {
-    return [...this.plugin.settings.favoriteChats];
-  }
-
-  /** Emit an event when favorites change */
-  private emitFavoritesChanged(): void {
-    document.dispatchEvent(
-      new CustomEvent('systemsculpt:chat-favorites-changed', {
-        detail: { favorites: this.plugin.settings.favoriteChats }
-      })
-    );
-  }
 }

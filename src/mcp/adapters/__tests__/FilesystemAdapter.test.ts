@@ -12,7 +12,6 @@ jest.mock("../../../mcp-tools/filesystem/MCPFilesystemServer", () => ({
 }));
 
 import { FilesystemAdapter } from "../FilesystemAdapter";
-import { PlatformContext } from "../../../services/PlatformContext";
 
 const getLastServerInstance = () => {
   if (!lastServerInstance) {
@@ -62,53 +61,13 @@ describe("FilesystemAdapter", () => {
     expect(server.executeTool).toHaveBeenCalledTimes(1);
   });
 
-  // Since #142 the filesystem tool graph is pure Vault-API code (no Node), so it
-  // runs on mobile too. The adapter must NOT gate the server off when the
-  // runtime reports mobile — agent file tools must work on a phone.
-  describe("on mobile (no Node runtime, #142)", () => {
-    beforeEach(() => {
-      jest
-        .spyOn(PlatformContext, "get")
-        .mockReturnValue({ supportsNodeApis: () => false } as unknown as PlatformContext);
-    });
+  it("forwards allowed paths to the filesystem server", () => {
+    const adapter = new FilesystemAdapter({} as any, {} as any);
+    const server = getLastServerInstance() as unknown as { setAllowedPaths?: jest.Mock };
+    server.setAllowedPaths = jest.fn();
 
-    afterEach(() => {
-      jest.restoreAllMocks();
-    });
+    adapter.setAllowedPaths(["/vault"]);
 
-    it("still constructs the filesystem server (no desktop-only gate)", () => {
-      new FilesystemAdapter({} as any, {} as any);
-
-      expect(lastServerInstance).not.toBeNull();
-    });
-
-    it("delegates listTools to the server instead of degrading", async () => {
-      const adapter = new FilesystemAdapter({} as any, {} as any);
-      const server = getLastServerInstance();
-      server.getTools.mockResolvedValue([{ name: "write" }]);
-
-      await expect(adapter.listTools()).resolves.toEqual([{ name: "write" }]);
-    });
-
-    it("executes tools on mobile instead of throwing a desktop-only error", async () => {
-      const adapter = new FilesystemAdapter({} as any, {} as any);
-      const server = getLastServerInstance();
-      server.executeTool.mockResolvedValue({ ok: true });
-
-      await expect(adapter.executeTool("write", { path: "note.md" })).resolves.toEqual({
-        ok: true,
-      });
-      expect(server.executeTool).toHaveBeenCalledWith("write", { path: "note.md" }, undefined);
-    });
-
-    it("forwards setAllowedPaths to the server", () => {
-      const adapter = new FilesystemAdapter({} as any, {} as any);
-      const server = getLastServerInstance() as unknown as { setAllowedPaths?: jest.Mock };
-      server.setAllowedPaths = jest.fn();
-
-      adapter.setAllowedPaths(["/vault"]);
-
-      expect(server.setAllowedPaths).toHaveBeenCalledWith(["/vault"]);
-    });
+    expect(server.setAllowedPaths).toHaveBeenCalledWith(["/vault"]);
   });
 });

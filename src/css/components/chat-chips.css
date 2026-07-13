@@ -1,29 +1,14 @@
 /**
- * Composer chips — model indicator pill, prompt selector chip, agent
- * toggle, and generic status chips.
- * TS: ChatModelSelectionController.ts, PromptSelector.ts, createInputUI.ts.
+ * Composer chips — credits, prompt selection, and agent-mode status.
+ * TS: ChatComposerIndicators.ts, PromptSelector.ts, createInputUI.ts.
  */
 
-/* Model indicator pill */
-.systemsculpt-model-indicator-section {
-  display: flex;
-  align-items: center;
-  gap: var(--ss-space-1);
-  min-width: 0;
-}
-
-.systemsculpt-model-indicator-icon {
+/* Credits indicator */
+.systemsculpt-credits-indicator-icon {
   display: inline-flex;
   align-items: center;
   flex-shrink: 0;
   color: var(--ss-ink-muted);
-}
-
-.systemsculpt-model-indicator-arrow {
-  display: inline-flex;
-  align-items: center;
-  flex-shrink: 0;
-  color: var(--ss-ink-faint);
 }
 
 /* Prompt selector chip */

@@ -114,10 +114,6 @@ export class SystemSculptSettingTab extends PluginSettingTab {
       os = "macOS";
     } else if (Platform.isLinux) {
       os = "Linux";
-    } else if (Platform.isIosApp) {
-      os = "iOS";
-    } else if (Platform.isAndroidApp) {
-      os = "Android";
     }
     if (os) {
       environmentInfo.push(`- OS: ${os}`);
@@ -127,10 +123,6 @@ export class SystemSculptSettingTab extends PluginSettingTab {
     let deviceType = "";
     if (Platform.isDesktopApp) {
       deviceType = "Desktop";
-    } else if (Platform.isMobileApp) {
-      deviceType = "Mobile";
-    } else if (Platform.isTablet) {
-      deviceType = "Tablet";
     }
     if (deviceType) {
       environmentInfo.push(`- Device type: ${deviceType}`);
@@ -273,7 +265,6 @@ export class SystemSculptSettingTab extends PluginSettingTab {
 
     const titleRow = containerEl.createDiv({ cls: "ss-settings-title-row" });
     const titleGroup = titleRow.createDiv({ cls: "ss-settings-title-group" });
-    ;
     const titleMeta = titleGroup.createDiv({ cls: "ss-settings-title-meta" });
     this.versionInfoContainer = titleMeta.createDiv({
       cls: "ss-settings-title-version",

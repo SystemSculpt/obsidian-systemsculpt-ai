@@ -12,7 +12,7 @@
  * record `id`/`namespace` already encode `provider:model:vSchema:dimension` with
  * no device identity, so a restored snapshot needs no remapping.
  *
- * Pure module: no IndexedDB, no Obsidian, no Node — safe to load on mobile.
+ * Pure module: no IndexedDB, no Obsidian, no Node — safe to load in any runtime.
  */
 
 import type { EmbeddingVector } from "../types";

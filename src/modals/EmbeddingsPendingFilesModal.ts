@@ -105,7 +105,7 @@ export class EmbeddingsPendingFilesModal extends StandardModal {
       emptyState.createSpan({
         text:
           this.allFiles.length === 0
-            ? "All eligible markdown files already have embeddings."
+            ? "All eligible Markdown files already have embeddings."
             : "No files match this filter."
       });
       return;
@@ -278,7 +278,7 @@ export class EmbeddingsPendingFilesModal extends StandardModal {
       case "modified":
         return "Needs refresh after edits";
       case "schema-mismatch":
-        return "Provider/config changed";
+        return "Managed configuration changed";
       case "metadata-missing":
         return "File metadata missing";
       case "incomplete":
