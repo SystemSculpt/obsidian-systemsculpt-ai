@@ -2,9 +2,8 @@ import { TFile } from "obsidian";
 import type { TranscriptionContext } from "./transcription/TranscriptionCoordinator";
 
 /**
- * Unified manager for transcription progress reporting
- * This class handles progress reporting for both the AudioTranscriptionModal
- * and the FileContextManager interfaces
+ * Unified manager for transcription progress reporting.
+ * This class feeds both the transcription progress panel and file-context flows.
  */
 export class TranscriptionProgressManager {
   private static instance: TranscriptionProgressManager;

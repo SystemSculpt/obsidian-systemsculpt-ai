@@ -1,7 +1,9 @@
 import { DEFAULT_SETTINGS } from "../../../../types";
 import {
   CURRENT_SCHEMA_VERSION,
+  LEGACY_CHAT_KEYS_REMOVED_IN_V5,
   LEGACY_CLIENT_MODEL_KEYS_REMOVED_IN_V4,
+  LEGACY_DIRECTORY_KEYS_REMOVED_IN_V5,
   LEGACY_EMBEDDINGS_KEYS_REMOVED_IN_V3,
   LEGACY_KEYS_REMOVED_IN_V1,
   deepMergeDefaults,
@@ -129,7 +131,7 @@ describe("migrateSettingsToCurrentSchema", () => {
       expect(result.settings).not.toHaveProperty(key);
     }
     expect(result.settings).toMatchObject({
-      schemaVersion: 4,
+      schemaVersion: 5,
       licenseKey: "managed-license",
       licenseValid: true,
       chatsDirectory: "Vault/Chats",
@@ -158,6 +160,20 @@ describe("migrateSettingsToCurrentSchema", () => {
       expect(result.settings).not.toHaveProperty(key);
     }
     expect(result.settings.licenseKey).toBe("user-key");
+  });
+
+  it("removes client-owned chat prompts, modes, reasoning preferences, and obsolete directory state in v5", () => {
+    const raw: Record<string, unknown> = { schemaVersion: 4, licenseKey: "managed-license" };
+    for (const key of LEGACY_CHAT_KEYS_REMOVED_IN_V5) raw[key] = "retired";
+    for (const key of LEGACY_DIRECTORY_KEYS_REMOVED_IN_V5) raw[key] = "retired";
+
+    const result = migrateSettingsToCurrentSchema(raw, DEFAULT_SETTINGS);
+
+    expect(result.appliedSteps).toContain("Remove retired client-owned chat prompt, mode, and directory settings");
+    for (const key of LEGACY_CHAT_KEYS_REMOVED_IN_V5) expect(result.settings).not.toHaveProperty(key);
+    for (const key of LEGACY_DIRECTORY_KEYS_REMOVED_IN_V5) expect(result.settings).not.toHaveProperty(key);
+    expect(result.settings.schemaVersion).toBe(5);
+    expect(result.settings.licenseKey).toBe("managed-license");
   });
 
   it("back-fills brand-new install defaults for empty persisted data", () => {

@@ -164,4 +164,57 @@ describe("EmbeddingsManager local empty-note lifecycle", () => {
     expect(state.manager.getStats()).toMatchObject({ failed: 1, needsProcessing: 1 });
     expect(state.request).not.toHaveBeenCalled();
   });
+
+  it("embeds a short non-empty note and closes coverage in one run", async () => {
+    const state = harness("Tiny idea");
+    await state.manager.initialize();
+
+    const result = await state.manager.processVault();
+
+    expect(result).toMatchObject({ status: "complete", processed: 1 });
+    expect(state.request).toHaveBeenCalledTimes(1);
+    expect(state.manager.getStats()).toEqual({
+      total: 1,
+      processed: 1,
+      present: 1,
+      needsProcessing: 0,
+      failed: 0,
+    });
+    await expect(state.manager.listPendingFiles()).resolves.toEqual([]);
+  });
+
+  it("persists normalized-empty notes as complete without polluting the managed namespace", async () => {
+    const state = harness("---\ntags: [image]\n---\n![[cover.png]]");
+    await state.manager.initialize();
+
+    const first = await state.manager.processVault();
+
+    expect(first).toMatchObject({ status: "complete", processed: 1 });
+    expect(state.request).not.toHaveBeenCalled();
+    expect(state.manager.getStats()).toEqual({
+      total: 1,
+      processed: 1,
+      present: 0,
+      needsProcessing: 0,
+      failed: 0,
+    });
+    expect([...mockVectors.values()]).toEqual([
+      expect.objectContaining({
+        path: "Note.md",
+        metadata: expect.objectContaining({
+          namespace: "systemsculpt:local-empty:v1:1",
+          isEmpty: true,
+          complete: true,
+        }),
+      }),
+    ]);
+
+    await expect(state.manager.processVault()).resolves.toMatchObject({ status: "complete", processed: 0 });
+    expect(state.request).not.toHaveBeenCalled();
+
+    state.setContent("Tiny but meaningful");
+    await expect(state.manager.processVault()).resolves.toMatchObject({ status: "complete", processed: 1 });
+    expect(state.request).toHaveBeenCalledTimes(1);
+    expect(state.manager.getStats()).toMatchObject({ processed: 1, present: 1, needsProcessing: 0 });
+  });
 });

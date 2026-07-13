@@ -157,7 +157,7 @@ export class SystemSculptSettingTab extends PluginSettingTab {
     environmentInfo.push(`- Vault size: ${vaultSize}`);
 
     // Enabled Features
-    const enabledFeatures: string[] = ["MCP"]; // MCP is always enabled (internal servers)
+    const enabledFeatures: string[] = ["Vault tools"];
     if (this.plugin.settings.embeddingsEnabled)
       enabledFeatures.push("Embeddings");
 

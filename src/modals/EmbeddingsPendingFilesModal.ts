@@ -278,7 +278,7 @@ export class EmbeddingsPendingFilesModal extends StandardModal {
       case "modified":
         return "Needs refresh after edits";
       case "schema-mismatch":
-        return "Managed configuration changed";
+        return "AI configuration changed";
       case "metadata-missing":
         return "File metadata missing";
       case "incomplete":

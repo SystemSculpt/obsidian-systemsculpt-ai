@@ -1,4 +1,4 @@
-import { Notice, Setting, ToggleComponent } from "obsidian";
+import { Notice, Setting } from "obsidian";
 import SystemSculptPlugin from "../main";
 import { SystemSculptSettingTab } from "./SystemSculptSettingTab";
 
@@ -47,23 +47,11 @@ new Setting(containerEl)
             });
 	    });
 
-new Setting(containerEl)
-    .setName("Hide SystemSculpt system & tool messages")
-    .setDesc("Default for new chats: keep system and tool messages in the saved history but hide them from the chat view. Each chat has its own toggle in the composer toolbar that overrides this default.")
-    .addToggle((toggle: ToggleComponent) => {
-        toggle
-            .setValue(plugin.settings.hideSystemMessagesInChat ?? false)
-            .onChange(async (value) => {
-                await plugin.getSettingsManager().updateSettings({ hideSystemMessagesInChat: value });
-                new Notice(`System messages ${value ? 'hidden' : 'shown'} in chat.`);
-            });
-    });
-
 // --- Reduced Motion Preference ---
 new Setting(containerEl)
     .setName("Honor OS reduced motion")
     .setDesc("When enabled, SystemSculpt animations/transitions are minimized if your system prefers reduced motion. Disable this if you want full animations.")
-    .addToggle((toggle: ToggleComponent) => {
+    .addToggle((toggle) => {
         toggle
             .setValue(plugin.settings.respectReducedMotion ?? true)
             .onChange(async (value) => {

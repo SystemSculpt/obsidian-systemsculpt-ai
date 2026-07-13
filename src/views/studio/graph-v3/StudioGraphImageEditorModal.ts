@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
-import { App, Modal, Notice } from "obsidian";
+import { App, Notice } from "obsidian";
+import { StandardModal } from "../../../core/ui/modals/standard/StandardModal";
 import {
   boardStateHasRenderableEdits,
   countStudioCaptionBoardEdits,
@@ -211,7 +212,7 @@ function normalizeSelection(state: StudioCaptionBoardState, selection: BoardSele
   return null;
 }
 
-class StudioCaptionBoardModal extends Modal {
+class StudioCaptionBoardModal extends StandardModal {
   private boardState: StudioCaptionBoardState;
   private selectedItem: BoardSelection | null;
   private viewportEl!: HTMLElement;
@@ -243,35 +244,21 @@ class StudioCaptionBoardModal extends Modal {
 
   constructor(private readonly options: StudioCaptionBoardModalOptions) {
     super(options.app);
+    this.setSize("fullwidth");
+    this.modalEl.addClass("ss-studio-caption-board-modal-shell");
     this.boardState = readStudioCaptionBoardState(options.node.config);
     this.selectedItem = normalizeSelection(this.boardState, null);
   }
 
   onOpen(): void {
+    super.onOpen();
     const title = this.options.node.title || "Image Editor";
-    if (typeof (this as unknown as { setTitle?: (value: string) => void }).setTitle === "function") {
-      (this as unknown as { setTitle: (value: string) => void }).setTitle(title);
-    } else {
-      this.titleEl.setText(title);
-    }
-    this.titleEl.empty();
-    this.titleEl.setCssStyles({ display: "none" });
-
-    this.modalEl.addClass("ss-studio-caption-board-modal-shell");
-    this.contentEl.empty();
+    this.addTitle(title);
+    this.footerEl.toggleAttribute("hidden", true);
     this.contentEl.addClass("ss-studio-caption-board-modal");
 
     const root = this.contentEl.createDiv({ cls: "ss-studio-caption-board" });
     this.toolbarEl = root.createDiv({ cls: "ss-studio-caption-board__toolbar" });
-    const titleStack = this.toolbarEl.createDiv({ cls: "ss-studio-caption-board__toolbar-title-stack" });
-    titleStack.createDiv({
-      cls: "ss-studio-caption-board__toolbar-eyebrow",
-      text: "Image Editor",
-    });
-    titleStack.createDiv({
-      cls: "ss-studio-caption-board__toolbar-title",
-      text: title,
-    });
     const actionsEl = this.toolbarEl.createDiv({ cls: "ss-studio-caption-board__toolbar-actions" });
     this.addTextButtonEl = this.createToolbarButton(actionsEl, "Text", () => this.handleAddLabel());
     this.highlightRectButtonEl = this.createToolbarButton(actionsEl, "Box", () => this.handleAddAnnotation("highlight_rect"));
@@ -282,7 +269,6 @@ class StudioCaptionBoardModal extends Modal {
     this.doneButtonEl = this.createToolbarButton(actionsEl, "Done", () => {
       void this.handleDone();
     });
-    this.createToolbarButton(actionsEl, "Close", () => this.close());
 
     const bodyEl = root.createDiv({ cls: "ss-studio-caption-board__body" });
     this.viewportEl = bodyEl.createDiv({ cls: "ss-studio-caption-board__viewport" });
@@ -308,7 +294,7 @@ class StudioCaptionBoardModal extends Modal {
         // noop
       }
     }
-    this.contentEl.empty();
+    super.onClose();
   }
 
   private bindGlobalListeners(): void {

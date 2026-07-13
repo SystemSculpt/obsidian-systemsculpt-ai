@@ -31,6 +31,6 @@ behavior is documented by the user and engineering references above.
 - Settings tabs: `src/settings/SettingsTabRegistry.ts`
 - Commands: `src/core/plugin/commands.ts`, `src/main.ts`
 - Ribbon icons: `src/core/plugin/ribbons.ts`
-- Filesystem MCP tools: `src/mcp-tools/filesystem/toolDefinitions/*.ts`
-- YouTube MCP tool: `src/mcp-tools/youtube/MCPYouTubeServer.ts`
-- Web research tools: `src/services/web/registerWebResearchTools.ts`
+- First-party tool service: `src/tools/FirstPartyToolService.ts`
+- Vault tools: `src/tools/vault/toolDefinitions.ts`
+- YouTube transcript tool: `src/tools/youtube/YouTubeToolModule.ts`

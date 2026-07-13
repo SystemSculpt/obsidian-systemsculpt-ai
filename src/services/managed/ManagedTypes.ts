@@ -1,5 +1,5 @@
 import type { ChatMessage } from "../../types";
-import type { ChatTranscriptSnapshot } from "../../views/chatview/transcript/ChatTranscriptTypes";
+import type { AgentTranscriptSnapshot as ChatTranscriptSnapshot } from "../../views/chatview/AgentTranscriptRepository";
 
 export const MANAGED_CAPABILITY_CONTRACT = "managed-capabilities-v2" as const;
 export const MANAGED_ADMISSION_CONTRACT = "admission-v1" as const;
@@ -58,6 +58,12 @@ export interface ManagedCapabilityCatalogContract {
   cache_ttl_seconds: number;
   capabilities: ManagedCapabilityDescriptor[];
 }
+export type ManagedChatSessionBudgetState = Readonly<{
+  messageCount: number;
+  imageCount: number;
+  attachmentBytes: number;
+  storedJsonBytes: number;
+}>;
 export interface ManagedAdmissionContractResponse {
   status: number; code: ManagedServerOutcome; message: string;
   reasons?: string[]; retryable?: boolean; grace_eligible?: boolean;

@@ -210,7 +210,8 @@
                             "messages",
                             "tools",
                             "tool_choice",
-                            "plugins"
+                            "plugins",
+                            "session"
                           ],
                           "properties": {
                             "schema": {
@@ -235,8 +236,8 @@
                             },
                             "optional_fields": {
                               "type": "array",
-                              "minItems": 3,
-                              "maxItems": 3,
+                              "minItems": 4,
+                              "maxItems": 4,
                               "prefixItems": [
                                 {
                                   "const": "tools"
@@ -246,6 +247,9 @@
                                 },
                                 {
                                   "const": "plugins"
+                                },
+                                {
+                                  "const": "session"
                                 }
                               ],
                               "items": false
@@ -284,6 +288,9 @@
                             },
                             "plugins": {
                               "const": "managed_chat_plugins_v1"
+                            },
+                            "session": {
+                              "const": "managed_chat_session_v1"
                             }
                           }
                         },
@@ -293,7 +300,8 @@
                           "required": [
                             "managed_chat_messages_v1",
                             "managed_chat_tools_v1",
-                            "managed_chat_plugins_v1"
+                            "managed_chat_plugins_v1",
+                            "managed_chat_session_v1"
                           ],
                           "properties": {
                             "managed_chat_messages_v1": {
@@ -317,83 +325,11 @@
                                   "type": "object",
                                   "additionalProperties": false,
                                   "required": [
-                                    "system",
-                                    "developer",
                                     "user",
                                     "assistant",
                                     "tool"
                                   ],
                                   "properties": {
-                                    "system": {
-                                      "type": "object",
-                                      "additionalProperties": false,
-                                      "required": [
-                                        "required_fields",
-                                        "optional_fields",
-                                        "content"
-                                      ],
-                                      "properties": {
-                                        "required_fields": {
-                                          "type": "array",
-                                          "minItems": 2,
-                                          "maxItems": 2,
-                                          "prefixItems": [
-                                            {
-                                              "const": "role"
-                                            },
-                                            {
-                                              "const": "content"
-                                            }
-                                          ],
-                                          "items": false
-                                        },
-                                        "optional_fields": {
-                                          "type": "array",
-                                          "minItems": 0,
-                                          "maxItems": 0,
-                                          "prefixItems": [],
-                                          "items": false
-                                        },
-                                        "content": {
-                                          "const": "string"
-                                        }
-                                      }
-                                    },
-                                    "developer": {
-                                      "type": "object",
-                                      "additionalProperties": false,
-                                      "required": [
-                                        "required_fields",
-                                        "optional_fields",
-                                        "content"
-                                      ],
-                                      "properties": {
-                                        "required_fields": {
-                                          "type": "array",
-                                          "minItems": 2,
-                                          "maxItems": 2,
-                                          "prefixItems": [
-                                            {
-                                              "const": "role"
-                                            },
-                                            {
-                                              "const": "content"
-                                            }
-                                          ],
-                                          "items": false
-                                        },
-                                        "optional_fields": {
-                                          "type": "array",
-                                          "minItems": 0,
-                                          "maxItems": 0,
-                                          "prefixItems": [],
-                                          "items": false
-                                        },
-                                        "content": {
-                                          "const": "string"
-                                        }
-                                      }
-                                    },
                                     "user": {
                                       "type": "object",
                                       "additionalProperties": false,
@@ -453,14 +389,11 @@
                                         },
                                         "optional_fields": {
                                           "type": "array",
-                                          "minItems": 3,
-                                          "maxItems": 3,
+                                          "minItems": 2,
+                                          "maxItems": 2,
                                           "prefixItems": [
                                             {
                                               "const": "content"
-                                            },
-                                            {
-                                              "const": "reasoning_content"
                                             },
                                             {
                                               "const": "tool_calls"
@@ -473,14 +406,11 @@
                                         },
                                         "at_least_one": {
                                           "type": "array",
-                                          "minItems": 3,
-                                          "maxItems": 3,
+                                          "minItems": 2,
+                                          "maxItems": 2,
                                           "prefixItems": [
                                             {
                                               "const": "content"
-                                            },
-                                            {
-                                              "const": "reasoning_content"
                                             },
                                             {
                                               "const": "tool_calls"
@@ -890,7 +820,10 @@
                                 "min_items",
                                 "max_items",
                                 "additional_properties",
-                                "items"
+                                "items",
+                                "scope",
+                                "tool_result_continuation",
+                                "new_user_turn_behavior"
                               ],
                               "properties": {
                                 "type": {
@@ -944,7 +877,90 @@
                                       "items": false
                                     }
                                   }
+                                },
+                                "scope": {
+                                  "const": "active_agent_turn"
+                                },
+                                "tool_result_continuation": {
+                                  "const": "server_inherit_or_exact_match"
+                                },
+                                "new_user_turn_behavior": {
+                                  "const": "reset_unless_explicit"
                                 }
+                              }
+                            },
+                            "managed_chat_session_v1": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "type",
+                                "one_of",
+                                "absence_behavior",
+                                "create_behavior",
+                                "resume_behavior"
+                              ],
+                              "properties": {
+                                "type": {
+                                  "const": "object"
+                                },
+                                "one_of": {
+                                  "type": "array",
+                                  "minItems": 2,
+                                  "maxItems": 2,
+                                  "prefixItems": [
+                                    {
+                                      "type": "object",
+                                      "additionalProperties": false,
+                                      "required": ["shape", "required_fields", "optional_fields", "mode"],
+                                      "properties": {
+                                        "shape": { "const": "create" },
+                                        "required_fields": {
+                                          "type": "array",
+                                          "minItems": 1,
+                                          "maxItems": 1,
+                                          "prefixItems": [{ "const": "mode" }],
+                                          "items": false
+                                        },
+                                        "optional_fields": {
+                                          "type": "array",
+                                          "minItems": 0,
+                                          "maxItems": 0,
+                                          "prefixItems": [],
+                                          "items": false
+                                        },
+                                        "mode": { "const": "create" }
+                                      }
+                                    },
+                                    {
+                                      "type": "object",
+                                      "additionalProperties": false,
+                                      "required": ["shape", "required_fields", "optional_fields", "id", "revision"],
+                                      "properties": {
+                                        "shape": { "const": "resume" },
+                                        "required_fields": {
+                                          "type": "array",
+                                          "minItems": 2,
+                                          "maxItems": 2,
+                                          "prefixItems": [{ "const": "id" }, { "const": "revision" }],
+                                          "items": false
+                                        },
+                                        "optional_fields": {
+                                          "type": "array",
+                                          "minItems": 0,
+                                          "maxItems": 0,
+                                          "prefixItems": [],
+                                          "items": false
+                                        },
+                                        "id": { "const": "mchat_<32 lowercase hex>" },
+                                        "revision": { "const": "nonnegative_integer" }
+                                      }
+                                    }
+                                  ],
+                                  "items": false
+                                },
+                                "absence_behavior": { "const": "full_history_compatibility" },
+                                "create_behavior": { "const": "full_history_snapshot_and_pin_tools" },
+                                "resume_behavior": { "const": "delta_user_or_tool_messages_only" }
                               }
                             }
                           }
@@ -958,6 +974,8 @@
                         "status",
                         "content_type",
                         "request_id_header",
+                        "session_id_header",
+                        "session_revision_header",
                         "frame_delimiter",
                         "data_prefix",
                         "json_frames",
@@ -977,6 +995,12 @@
                         "request_id_header": {
                           "const": "x-request-id"
                         },
+                        "session_id_header": {
+                          "const": "x-systemsculpt-session-id"
+                        },
+                        "session_revision_header": {
+                          "const": "x-systemsculpt-session-revision"
+                        },
                         "frame_delimiter": {
                           "const": "\n\n"
                         },
@@ -985,11 +1009,14 @@
                         },
                         "json_frames": {
                           "type": "array",
-                          "minItems": 2,
-                          "maxItems": 2,
+                          "minItems": 3,
+                          "maxItems": 3,
                           "prefixItems": [
                             {
                               "const": "managed_chat_delta_v1"
+                            },
+                            {
+                              "const": "managed_chat_session_commit_v1"
                             },
                             {
                               "const": "managed_chat_error_v1"
@@ -1002,6 +1029,7 @@
                           "additionalProperties": false,
                           "required": [
                             "managed_chat_delta_v1",
+                            "managed_chat_session_commit_v1",
                             "managed_chat_error_v1"
                           ],
                           "properties": {
@@ -1023,17 +1051,14 @@
                                 },
                                 "allowed_delta_fields": {
                                   "type": "array",
-                                  "minItems": 4,
-                                  "maxItems": 4,
+                                  "minItems": 3,
+                                  "maxItems": 3,
                                   "prefixItems": [
                                     {
                                       "const": "role"
                                     },
                                     {
                                       "const": "content"
-                                    },
-                                    {
-                                      "const": "reasoning_content"
                                     },
                                     {
                                       "const": "tool_calls"
@@ -1052,6 +1077,7 @@
                               "required": [
                                 "required_fields",
                                 "error_required_fields",
+                                "error_optional_fields",
                                 "bounded",
                                 "implementation_identity_forbidden"
                               ],
@@ -1081,12 +1107,50 @@
                                   ],
                                   "items": false
                                 },
+                                "error_optional_fields": {
+                                  "type": "array",
+                                  "minItems": 3,
+                                  "maxItems": 3,
+                                  "prefixItems": [
+                                    { "const": "session_id" },
+                                    { "const": "current_revision" },
+                                    { "const": "retry_same_idempotency_key" }
+                                  ],
+                                  "items": false
+                                },
                                 "bounded": {
                                   "const": true
                                 },
                                 "implementation_identity_forbidden": {
                                   "const": true
                                 }
+                              }
+                            },
+                            "managed_chat_session_commit_v1": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "required_fields",
+                                "object",
+                                "revision",
+                                "state"
+                              ],
+                              "properties": {
+                                "required_fields": {
+                                  "type": "array",
+                                  "minItems": 4,
+                                  "maxItems": 4,
+                                  "prefixItems": [
+                                    { "const": "object" },
+                                    { "const": "session_id" },
+                                    { "const": "revision" },
+                                    { "const": "state" }
+                                  ],
+                                  "items": false
+                                },
+                                "object": { "const": "systemsculpt.chat.session" },
+                                "revision": { "const": "positive_integer" },
+                                "state": { "const": "committed" }
                               }
                             }
                           }
@@ -1162,7 +1226,7 @@
                                   "const": "in_stream_error"
                                 },
                                 "retry_same_idempotency_key": {
-                                  "const": false
+                                  "const": "error_frame_boolean"
                                 }
                               }
                             }
@@ -1180,13 +1244,14 @@
                       "required": [
                         "statuses",
                         "conflict_codes",
+                        "session_codes",
                         "bounded_first_party_messages"
                       ],
                       "properties": {
                         "statuses": {
                           "type": "array",
-                          "minItems": 9,
-                          "maxItems": 9,
+                          "minItems": 11,
+                          "maxItems": 11,
                           "prefixItems": [
                             {
                               "const": 400
@@ -1201,7 +1266,13 @@
                               "const": 402
                             },
                             {
+                              "const": 404
+                            },
+                            {
                               "const": 409
+                            },
+                            {
+                              "const": 410
                             },
                             {
                               "const": 426
@@ -1235,6 +1306,25 @@
                             {
                               "const": "settlement_pending"
                             }
+                          ],
+                          "items": false
+                        },
+                        "session_codes": {
+                          "type": "array",
+                          "minItems": 11,
+                          "maxItems": 11,
+                          "prefixItems": [
+                            { "const": "session_not_found" },
+                            { "const": "session_expired" },
+                            { "const": "session_revision_conflict" },
+                            { "const": "session_turn_conflict" },
+                            { "const": "session_limit_exceeded" },
+                            { "const": "session_storage_limit_exceeded" },
+                            { "const": "session_state_unavailable" },
+                            { "const": "session_storage_unavailable" },
+                            { "const": "session_turn_superseded" },
+                            { "const": "session_finalization_failed" },
+                            { "const": "idempotency_key_reused" }
                           ],
                           "items": false
                         },

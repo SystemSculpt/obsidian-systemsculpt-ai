@@ -30,21 +30,6 @@ type ProductAdmissionOutcome =
   | "temporarily_unavailable"
   | "rate_limited";
 
-export type WebSearchResult = Readonly<{ title: string; url: string; snippet: string }>;
-export type ManagedWebSearchResponse = Readonly<{
-  query: string;
-  results: readonly WebSearchResult[];
-  fetchedAt: string;
-}>;
-export type ManagedWebFetchResponse = Readonly<{
-  url: string;
-  finalUrl: string;
-  title: string | null;
-  markdown: string;
-  contentType: string | null;
-  fetchedAt: string;
-  truncated: boolean;
-}>;
 export type ManagedYouTubeTranscriptResponse =
   | Readonly<{ status: "cached"; text: string; lang: string; metadata: { videoId: string; availableLangs: string[]; cached: true } }>
   | Readonly<{ status: "synchronous"; text: string; lang: string; metadata: { videoId: string; availableLangs: string[] } }>
@@ -139,28 +124,6 @@ export class ManagedProductIntegrationClient {
     this.requestClient = options.requestClient ?? new PlatformRequestClient();
     this.baseUrl = options.baseUrl.replace(/\/$/, "");
     this.createRequestId = options.createRequestId ?? requestId;
-  }
-
-  async webSearch(call: LicensedCall<{ query: string; maxResults?: number }>): Promise<ManagedWebSearchResponse> {
-    return this.licensed("/api/plugin/web/search", "POST", call, (prepared) => {
-      const query = this.nonEmpty(prepared.query, "query", 4_000);
-      const maxResults = this.optionalInteger(prepared.maxResults, "maxResults", 1, 10);
-      return {
-        body: { query, ...(typeof maxResults === "number" ? { max_results: maxResults } : {}) },
-        parse: (value: unknown) => this.parseWebSearch(value),
-      };
-    });
-  }
-
-  async webFetch(call: LicensedCall<{ url: string; maxChars?: number }>): Promise<ManagedWebFetchResponse> {
-    return this.licensed("/api/plugin/web/fetch", "POST", call, (prepared) => {
-      const url = this.httpUrl(prepared.url, "url");
-      const maxChars = this.optionalInteger(prepared.maxChars, "maxChars", 1, 200_000);
-      return {
-        body: { url, ...(typeof maxChars === "number" ? { max_chars: maxChars } : {}) },
-        parse: (value: unknown) => this.parseWebFetch(value),
-      };
-    });
   }
 
   async startYouTubeTranscript(call: LicensedCall<{ url: string; lang?: string }>): Promise<ManagedYouTubeTranscriptResponse> {
@@ -321,35 +284,6 @@ export class ManagedProductIntegrationClient {
     }
   }
 
-  private parseWebSearch(value: unknown): ManagedWebSearchResponse {
-    const response = record(value, "web search response");
-    exactKeys(response, ["query", "results", "fetchedAt"], "web search response");
-    if (typeof response.query !== "string" || typeof response.fetchedAt !== "string" || !Array.isArray(response.results)) {
-      throw new Error("invalid web search response");
-    }
-    for (const result of response.results) {
-      const item = record(result, "web search result");
-      exactKeys(item, ["title", "url", "snippet"], "web search result");
-      if (typeof item.title !== "string" || typeof item.url !== "string" || typeof item.snippet !== "string") {
-        throw new Error("invalid web search result");
-      }
-    }
-    return response as unknown as ManagedWebSearchResponse;
-  }
-
-  private parseWebFetch(value: unknown): ManagedWebFetchResponse {
-    const response = record(value, "web fetch response");
-    exactKeys(response, ["url", "finalUrl", "title", "markdown", "contentType", "fetchedAt", "truncated"], "web fetch response");
-    if (
-      typeof response.url !== "string" || typeof response.finalUrl !== "string"
-      || (response.title !== null && typeof response.title !== "string")
-      || typeof response.markdown !== "string"
-      || (response.contentType !== null && typeof response.contentType !== "string")
-      || typeof response.fetchedAt !== "string" || typeof response.truncated !== "boolean"
-    ) throw new Error("invalid web fetch response");
-    return response as unknown as ManagedWebFetchResponse;
-  }
-
   private parseYouTube(value: unknown): ManagedYouTubeTranscriptResponse {
     const response = record(value, "YouTube transcript response");
     const status = response.status;
@@ -414,14 +348,6 @@ export class ManagedProductIntegrationClient {
       throw this.localError("invalid_request", `Invalid ${label}.`);
     }
     return raw;
-  }
-
-  private optionalInteger(value: unknown, label: string, minimum: number, maximum: number): number | undefined {
-    if (typeof value === "undefined") return undefined;
-    if (typeof value !== "number" || !Number.isInteger(value) || value < minimum || value > maximum) {
-      throw this.localError("invalid_request", `Invalid ${label}.`);
-    }
-    return value;
   }
 
   private isErrorCode(value: unknown): value is ProductIntegrationErrorCode {

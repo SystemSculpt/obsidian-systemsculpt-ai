@@ -1,6 +1,4 @@
 import type { ChatMessage } from "../../types";
-import { AGENT_PRESET } from "../../constants/prompts";
-import { AGENT_TOOL_INSTRUCTIONS } from "../../constants/prompts/agent";
 import { normalizeManagedTools, type ManagedToolDefinition } from "../../utils/tooling";
 import type { ContextFileService } from "../ContextFileService";
 import type {
@@ -14,8 +12,6 @@ import {
 
 export type ManagedChatPreparationInput = Readonly<{
   contextFiles?: ReadonlySet<string>;
-  systemPromptOverride?: string;
-  allowTools?: boolean;
   webSearch?: boolean;
 }>;
 
@@ -30,24 +26,12 @@ export async function prepareManagedAcceptedChatRequest(
   dependencies: ManagedChatPreparationDependencies,
 ): Promise<Readonly<{ messages: readonly Readonly<ChatMessage>[]; tools: readonly ManagedToolDefinition[] }>> {
   const contextFiles = new Set(input.contextFiles ?? []);
-  const toolsAllowed = input.allowTools !== false;
-  const selectedPrompt = input.systemPromptOverride?.trim() || undefined;
-  const prompt = selectedPrompt
-    ? toolsAllowed
-      ? `${selectedPrompt}\n\n${AGENT_TOOL_INSTRUCTIONS}`
-      : selectedPrompt
-    : toolsAllowed
-      ? AGENT_PRESET.systemPrompt
-      : undefined;
   const messages = await dependencies.contextFileService.prepareMessagesWithContext(
     operation.initialDurableSnapshot.messages.map((message) => ({ ...message })) as ChatMessage[],
     contextFiles,
     true,
-    prompt,
   );
-  const tools = toolsAllowed
-    ? normalizeManagedTools(await dependencies.getAvailableTools())
-    : [];
+  const tools = normalizeManagedTools(await dependencies.getAvailableTools());
   return { messages, tools };
 }
 
@@ -64,7 +48,6 @@ export class ChatRequestPreparationService {
     if (this.failed.has(operation)) return Promise.reject(new Error("Accepted Chat request preparation already failed."));
     const contextFiles = new Set(input.contextFiles ?? []);
     const policyBase = {
-      prompt: input.systemPromptOverride?.trim() ? "selected" as const : "none" as const,
       contextCount: contextFiles.size,
       imageContextIncluded: true,
       documentContextIncluded: [...contextFiles].some((item) => item.startsWith("doc:")),

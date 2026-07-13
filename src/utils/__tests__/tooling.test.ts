@@ -176,6 +176,13 @@ describe("mapAssistantToolCallsForManagedApi", () => {
     expect(result[0].function.name).toBe("read");
   });
 
+  it("preserves canonical names for managed transport", () => {
+    const result = mapAssistantToolCallsForManagedApi([
+      { id: "canonical", function: { name: "search", arguments: "{}" } },
+    ]);
+    expect(result[0].function.name).toBe("search");
+  });
+
   it("generates deterministic ID when missing", () => {
     const toolCalls = [{ function: { name: "search", arguments: {} } }];
     const result = mapAssistantToolCallsForManagedApi(toolCalls);

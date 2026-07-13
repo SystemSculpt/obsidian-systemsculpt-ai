@@ -37,7 +37,7 @@ describe("mergeAdjacentReasoningParts", () => {
       request: {
         id: "call_1",
         type: "function",
-        function: { name: "mcp-filesystem_read", arguments: "{}" },
+        function: { name: "read", arguments: "{}" },
       },
       state: "completed",
       timestamp: 2,
@@ -57,4 +57,3 @@ describe("mergeAdjacentReasoningParts", () => {
     expect(merged[2].type).toBe("reasoning");
   });
 });
-

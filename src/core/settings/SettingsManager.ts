@@ -137,11 +137,6 @@ export class SettingsManager {
       migratedSettings.lastAutomaticBackup = DEFAULT_SETTINGS.lastAutomaticBackup;
     }
     
-    // Ensure preserveReasoningVerbatim is properly initialized (migration for existing users)
-    if (typeof migratedSettings.preserveReasoningVerbatim !== 'boolean') {
-      migratedSettings.preserveReasoningVerbatim = DEFAULT_SETTINGS.preserveReasoningVerbatim;
-    }
-
     // Ensure respectReducedMotion is properly initialized (migration for existing users)
     if (typeof migratedSettings.respectReducedMotion !== "boolean") {
       migratedSettings.respectReducedMotion = DEFAULT_SETTINGS.respectReducedMotion;
@@ -149,18 +144,6 @@ export class SettingsManager {
 
     if (typeof migratedSettings.defaultChatTag !== "string") {
       migratedSettings.defaultChatTag = DEFAULT_SETTINGS.defaultChatTag;
-    }
-
-    if (typeof migratedSettings.hideSystemMessagesInChat !== "boolean") {
-      migratedSettings.hideSystemMessagesInChat = DEFAULT_SETTINGS.hideSystemMessagesInChat;
-    }
-
-    if (typeof migratedSettings.agentModeEnabled !== "boolean") {
-      migratedSettings.agentModeEnabled = DEFAULT_SETTINGS.agentModeEnabled;
-    }
-
-    if (typeof migratedSettings.lastUsedPromptPath !== "string") {
-      migratedSettings.lastUsedPromptPath = DEFAULT_SETTINGS.lastUsedPromptPath;
     }
 
     if (typeof migratedSettings.studioDefaultProjectsFolder !== "string" || !migratedSettings.studioDefaultProjectsFolder.trim()) {
@@ -408,11 +391,6 @@ export class SettingsManager {
       validatedSettings.extractionsDirectory = defaultSettings.extractionsDirectory;
     }
 
-    if (typeof validatedSettings.systemPromptsDirectory !== 'string') {
-      validatedSettings.systemPromptsDirectory = defaultSettings.systemPromptsDirectory;
-    }
-
-
     // Validate saved chats directory
     if (typeof validatedSettings.savedChatsDirectory !== 'string') {
       validatedSettings.savedChatsDirectory = defaultSettings.savedChatsDirectory;
@@ -468,18 +446,6 @@ export class SettingsManager {
 
     if (typeof validatedSettings.defaultChatTag !== "string") {
       validatedSettings.defaultChatTag = defaultSettings.defaultChatTag;
-    }
-
-    if (typeof validatedSettings.hideSystemMessagesInChat !== "boolean") {
-      validatedSettings.hideSystemMessagesInChat = defaultSettings.hideSystemMessagesInChat;
-    }
-
-    if (typeof validatedSettings.agentModeEnabled !== "boolean") {
-      validatedSettings.agentModeEnabled = defaultSettings.agentModeEnabled;
-    }
-
-    if (typeof validatedSettings.lastUsedPromptPath !== "string") {
-      validatedSettings.lastUsedPromptPath = defaultSettings.lastUsedPromptPath;
     }
 
     if (

@@ -233,13 +233,13 @@ describe("ManagedJobClient exact wire contract", () => {
   });
 
   it.each([
-    ["content length", { "content-length": "1" }], ["content type", { "content-type": "image/jpeg" }],
-    ["index", { "x-systemsculpt-output-index": "1" }], ["hash header", { "x-systemsculpt-content-sha256": "b".repeat(64) }],
-    ["contract", { "x-systemsculpt-image-output-contract": "other" }], ["disposition", { "content-disposition": "inline" }],
-  ])("rejects image output %s mismatch without returning bytes", async (_name, override) => {
+    ["content length", { "content-length": "1" }, "content-length"], ["content type", { "content-type": "image/jpeg" }, "content-type"],
+    ["index", { "x-systemsculpt-output-index": "1" }, "x-systemsculpt-output-index"], ["hash header", { "x-systemsculpt-content-sha256": "b".repeat(64) }, "x-systemsculpt-content-sha256"],
+    ["contract", { "x-systemsculpt-image-output-contract": "other" }, "x-systemsculpt-image-output-contract"], ["disposition", { "content-disposition": "inline" }, "disposition"],
+  ])("rejects image output %s mismatch without returning bytes", async (_name, override, diagnostic) => {
     const metadata = { index: 0, mime_type: "image/png" as const, size_bytes: 2, sha256: "a12871fee210fb8619291eaea194581cbd2531e4b23759d225f6806923f63222", width: 1, height: 1 };
     request.mockResolvedValue(new Response(new Uint8Array([1, 2]), { status: 200, headers: { "x-request-id": "req-1", "x-systemsculpt-contract": "managed-capabilities-v2", "x-systemsculpt-job-contract": MANAGED_JOB_PROTOCOL, "x-systemsculpt-image-output-contract": "managed-image-output-v1", "x-systemsculpt-capability": "image_generation", "x-systemsculpt-output-index": "0", "x-systemsculpt-content-sha256": metadata.sha256, "content-type": "image/png", "content-length": "2", "cache-control": "no-store, max-age=0", "x-content-type-options": "nosniff", "content-disposition": "attachment; filename=\"systemsculpt-image-0.png\"", ...override } }));
-    await expect(client.images.downloadOutput("123e4567-e89b-42d3-a456-426614174000", 0, metadata)).rejects.toMatchObject({ code: "malformed_response" });
+    await expect(client.images.downloadOutput("123e4567-e89b-42d3-a456-426614174000", 0, metadata)).rejects.toMatchObject({ code: "malformed_response", message: expect.stringContaining(diagnostic) });
   });
 
   it.each([

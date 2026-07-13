@@ -16,7 +16,6 @@ const createPluginStub = (app: App) => {
       settingsMode: "standard",
       defaultChatTag: "",
       respectReducedMotion: true,
-      hideSystemMessagesInChat: false,
     },
     getSettingsManager: jest.fn(() => settingsManager),
   } as any;
@@ -46,7 +45,7 @@ describe("Chat tab native layout", () => {
     const names = Array.from(container.querySelectorAll('.setting-item .setting-item-name')).map((el) => el.textContent?.trim());
     expect(names).toContain("Default chat tag");
     expect(names).toContain("Default chat font size");
-    expect(names).toContain("Hide SystemSculpt system & tool messages");
+    expect(names).not.toContain("Hide SystemSculpt system & tool messages");
     expect(names).toContain("Honor OS reduced motion");
     expect(names).not.toContain("Default system prompt");
     expect(names).not.toContain("Favorite models");

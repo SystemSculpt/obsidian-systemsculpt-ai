@@ -59,9 +59,14 @@ export class VectorSearch {
     queryVector: Float32Array,
     vectors: EmbeddingVector[],
     limit: number = 20,
-    options?: { chunkSize?: number; yieldMs?: number; onProgress?: (processed: number, total: number) => void }
+    options?: {
+      chunkSize?: number;
+      yieldMs?: number;
+      onProgress?: (processed: number, total: number) => void;
+      signal?: AbortSignal;
+    }
   ): Promise<SearchResult[]> {
-    if (vectors.length === 0) return [];
+    if (vectors.length === 0 || options?.signal?.aborted) return [];
     if (!(queryVector instanceof Float32Array) || queryVector.length === 0) return [];
 
     const k = Math.max(0, Math.floor(limit));
@@ -73,6 +78,7 @@ export class VectorSearch {
     const yieldMs = options?.yieldMs ?? this.defaultYieldMs;
 
     for (let start = 0; start < total; start += chunkSize) {
+      if (options?.signal?.aborted) return [];
       const end = Math.min(start + chunkSize, total);
       for (let i = start; i < end; i++) {
         const v = vectors[i];
@@ -90,11 +96,31 @@ export class VectorSearch {
 
       // Yield to the event loop so the UI remains responsive
       if (end < total) {
-        await new Promise<void>((resolve) => window.setTimeout(resolve, yieldMs));
+        await this.yieldToEventLoop(yieldMs, options?.signal);
+        if (options?.signal?.aborted) return [];
       }
     }
 
     return top.map(item => this.toSearchResult(item));
+  }
+
+  /** Yield without keeping cancelled searches parked behind a pending timer. */
+  private async yieldToEventLoop(delay: number, signal?: AbortSignal): Promise<void> {
+    if (signal?.aborted) return;
+    await new Promise<void>((resolve) => {
+      let timer: number | undefined;
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        if (typeof timer !== "undefined") window.clearTimeout(timer);
+        signal?.removeEventListener("abort", finish);
+        resolve();
+      };
+      timer = window.setTimeout(finish, delay);
+      signal?.addEventListener("abort", finish, { once: true });
+      if (signal?.aborted) finish();
+    });
   }
 
   /**

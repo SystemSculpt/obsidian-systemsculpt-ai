@@ -1,6 +1,6 @@
 import { App, Notice, SuggestModal, TFile } from "obsidian";
 import type SystemSculptPlugin from "../main";
-import { launchAutomationProcessingModal } from "./AutomationProcessingModal";
+import { launchAutomationProcessingPanel } from "./AutomationProcessingPanel";
 
 export interface AutomationOption {
   id: string;
@@ -37,11 +37,10 @@ export class AutomationRunnerModal extends SuggestModal<AutomationOption> {
   }
 
   async onChooseSuggestion(option: AutomationOption): Promise<void> {
-    // Close the selection modal so only the progress modal is visible
+    // Close the selection modal so only the progress panel is visible.
     this.close();
 
-    const automationModal = launchAutomationProcessingModal({
-      app: this.app,
+    const progressPanel = launchAutomationProcessingPanel({
       plugin: this.plugin,
       file: this.file,
       automationTitle: option.title,
@@ -50,21 +49,21 @@ export class AutomationRunnerModal extends SuggestModal<AutomationOption> {
     try {
       const resultFile = await this.plugin.runAutomationOnFile(option.id, this.file, {
         onStatus: (status, progress) => {
-          automationModal.setStatus(status, progress);
+          progressPanel.setStatus(status, progress);
         },
       });
       if (resultFile) {
-        automationModal.markSuccess({
+        progressPanel.markSuccess({
           resultFile,
           openOutput: () => this.app.workspace.openLinkText(resultFile.path, "", true),
         });
       } else {
-        automationModal.markFailure({
+        progressPanel.markFailure({
           error: `Automation finished but no note was created for ${this.file.basename}`,
         });
       }
     } catch (error) {
-      automationModal.markFailure({ error });
+      progressPanel.markFailure({ error });
     }
   }
 }

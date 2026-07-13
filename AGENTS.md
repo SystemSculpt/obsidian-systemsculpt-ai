@@ -22,10 +22,11 @@ Canonical guidance for agents working on the SystemSculpt AI Obsidian plugin.
 ## Checks by scope
 
 ```bash
-npm run check:plugin:fast # normal edit loop
+npm run check # normal edit loop
 npm run test:related -- <changed src files> # focused source behavior
 npm run test:integration # bundle/composition changes
 npm run test:release-script # release validator changes
+npm run check:full # exhaustive checkpoint or release verification
 ```
 
 The normal edit loop is the fast check plus focused tests for the touched

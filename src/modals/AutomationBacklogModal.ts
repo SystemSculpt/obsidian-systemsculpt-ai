@@ -1,21 +1,25 @@
-import { App, Modal, Notice, Setting, TFile } from "obsidian";
+import { App, Notice, Setting } from "obsidian";
 import type SystemSculptPlugin from "../main";
+import { StandardModal } from "../core/ui/modals/standard/StandardModal";
 import { AutomationRunnerModal } from "./AutomationRunnerModal";
 import type { AutomationBacklogEntry } from "../services/workflow/WorkflowEngineService";
 import { WORKFLOW_AUTOMATIONS } from "../constants/workflowAutomations";
 
-export class AutomationBacklogModal extends Modal {
+export class AutomationBacklogModal extends StandardModal {
   private plugin: SystemSculptPlugin;
   private backlog: AutomationBacklogEntry[] = [];
-  private contentWrapper: HTMLElement | null = null;
 
   constructor(app: App, plugin: SystemSculptPlugin) {
     super(app);
     this.plugin = plugin;
-    this.setTitle("Automation backlog");
+    this.setSize("large");
+    this.modalEl.addClass("ss-automation-backlog-modal");
   }
 
   async onOpen(): Promise<void> {
+    super.onOpen();
+    this.addTitle("Automation backlog");
+    this.addActionButton("Close", () => this.close());
     await this.loadBacklog();
     this.render();
   }
@@ -27,12 +31,8 @@ export class AutomationBacklogModal extends Modal {
   private render(): void {
     const { contentEl } = this;
     contentEl.empty();
-    this.contentWrapper = contentEl.createDiv({ cls: "ss-automation-backlog" });
+    contentEl.addClass("ss-automation-backlog");
 
-    contentEl.createEl("p", {
-      text: "Backlog items run through SystemSculpt automatically. Instructions and execution are handled for you.",
-      cls: "setting-item-description",
-    });
     this.renderControls();
     this.renderBacklogList();
   }

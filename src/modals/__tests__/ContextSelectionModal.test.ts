@@ -1,561 +1,159 @@
-/**
- * @jest-environment jsdom
- */
+/** @jest-environment jsdom */
+
 import { App, TFile } from "obsidian";
 import { ContextSelectionModal } from "../ContextSelectionModal";
 
-const createMockFiles = (): TFile[] => [
-  new TFile({ path: "notes/meeting.md" }),
-  new TFile({ path: "notes/project.md" }),
-  new TFile({ path: "docs/readme.txt" }),
-  new TFile({ path: "images/diagram.png" }),
-  new TFile({ path: "images/photo.jpg" }),
-  new TFile({ path: "documents/report.pdf" }),
-  new TFile({ path: "documents/legacy.docx" }),
-  new TFile({ path: "documents/slides.pptx" }),
-  new TFile({ path: "documents/sheet.xlsx" }),
-  new TFile({ path: "audio/recording.mp3" }),
-  new TFile({ path: "folder/subfolder/nested.md" }),
-];
+function files(): TFile[] {
+  return [
+    new TFile({ path: "notes/meeting.md" }),
+    new TFile({ path: "notes/project.md" }),
+    new TFile({ path: "docs/readme.txt" }),
+    new TFile({ path: "images/diagram.png" }),
+    new TFile({ path: "images/photo.jpg" }),
+    new TFile({ path: "documents/report.pdf" }),
+    new TFile({ path: "documents/legacy.docx" }),
+    new TFile({ path: "audio/recording.mp3" }),
+  ];
+}
 
-const createMockApp = () => {
+function harness(options: ConstructorParameters<typeof ContextSelectionModal>[3] = {}) {
   const app = new App();
-  (app.vault as any).getFiles = jest.fn().mockReturnValue(createMockFiles());
-  return app;
-};
-
-const createMockPlugin = () => ({
-  settings: {},
-} as any);
+  (app.vault.getFiles as jest.Mock).mockReturnValue(files());
+  const onSelect = jest.fn().mockResolvedValue(undefined);
+  const modal = new ContextSelectionModal(app, onSelect, {}, options);
+  modal.open();
+  return { app, modal, onSelect };
+}
 
 describe("ContextSelectionModal", () => {
-  let app: App;
-  let plugin: any;
-  let onSelect: jest.Mock;
-  let modal: ContextSelectionModal;
-
-  beforeEach(() => {
-    jest.clearAllMocks();
-    app = createMockApp();
-    plugin = createMockPlugin();
-    onSelect = jest.fn().mockResolvedValue(undefined);
-    modal = new ContextSelectionModal(app, onSelect, plugin);
+  afterEach(() => {
+    jest.useRealTimers();
+    document.body.empty();
   });
 
-  describe("initialization", () => {
-    it("stores onSelect callback", () => {
-      expect((modal as any).onSelect).toBe(onSelect);
-    });
+  it("uses the shared labelled dialog and only includes supported files", () => {
+    const { modal } = harness({ autoFocusSearch: false });
 
-    it("initializes files from vault", () => {
-      expect((modal as any).files.length).toBeGreaterThan(0);
-    });
-
-    it("initializes with 'all' filter", () => {
-      expect((modal as any).currentFilter).toBe("all");
-    });
-
-    it("initializes with empty search query", () => {
-      expect((modal as any).searchQuery).toBe("");
-    });
-
-    it("initializes with empty selection", () => {
-      expect((modal as any).selectedFiles.size).toBe(0);
-    });
-
-    it("applies initial filter, search, and selected paths", () => {
-      modal = new ContextSelectionModal(app, onSelect, plugin, {
-        initialFilter: "documents",
-        initialSearchQuery: "report",
-        initialSelectedPaths: ["documents/report.pdf"],
-      });
-
-      expect((modal as any).currentFilter).toBe("documents");
-      expect((modal as any).searchQuery).toBe("report");
-      expect((modal as any).filteredFiles).toHaveLength(1);
-      expect((modal as any).selectedFiles.size).toBe(1);
-    });
+    expect(modal.modalEl.classList.contains("ss-modal")).toBe(true);
+    expect(modal.modalEl.getAttribute("role")).toBe("dialog");
+    expect(modal.modalEl.textContent).toContain("Add context files");
+    expect(modal.modalEl.textContent).not.toContain("legacy");
+    expect(modal.modalEl.querySelectorAll(".ss-context-file-item")).toHaveLength(7);
   });
 
-  describe("file listing", () => {
-    it("loads all supported files from vault", () => {
-      const files = (modal as any).files;
-      expect(files.length).toBe(8);
-      expect(files.map((item: any) => item.file.extension)).not.toEqual(expect.arrayContaining(["docx", "pptx", "xlsx"]));
+  it("applies initial filter, query, and selection", () => {
+    const { modal } = harness({
+      autoFocusSearch: false,
+      initialFilter: "documents",
+      initialSearchQuery: "report",
+      initialSelectedPaths: ["documents/report.pdf"],
     });
 
-    it("categorizes files by type", () => {
-      const files = (modal as any).files as Array<{ type: string }>;
-      const types = files.map((f) => f.type);
-      expect(types).toContain("text");
-      expect(types).toContain("images");
-      expect(types).toContain("documents");
-      expect(types).toContain("audio");
-    });
-
-    it("sorts files by basename", () => {
-      const files = (modal as any).files as Array<{ file: TFile }>;
-      for (let i = 1; i < files.length; i++) {
-        expect(files[i - 1].file.basename.localeCompare(files[i].file.basename)).toBeLessThanOrEqual(0);
-      }
-    });
-
-    it("creates searchText for each file", () => {
-      const files = (modal as any).files as Array<{ searchText: string }>;
-      expect(files.every((f) => f.searchText.length > 0)).toBe(true);
-    });
-
-    it("searchText includes basename", () => {
-      const files = (modal as any).files as Array<{ file: TFile; searchText: string }>;
-      files.forEach((f) => {
-        expect(f.searchText).toContain(f.file.basename.toLowerCase());
-      });
-    });
+    expect(modal.modalEl.querySelector<HTMLInputElement>(".ss-modal__search-input")?.value).toBe("report");
+    expect(modal.modalEl.querySelector(".ss-context-filter-btn.is-active")?.textContent).toContain("Documents");
+    expect(modal.modalEl.querySelectorAll(".ss-context-file-item")).toHaveLength(1);
+    expect(modal.modalEl.querySelector<HTMLInputElement>('.ss-context-file-item input[type="checkbox"]')?.checked).toBe(true);
+    expect(modal.modalEl.textContent).toContain("Add 1 file");
   });
 
-  describe("filtering", () => {
-    it("filters by text type", () => {
-      (modal as any).setFilter("text", document.createElement("button"));
+  it("filters by type and search through semantic controls", () => {
+    const { modal } = harness({ autoFocusSearch: false });
+    const imageFilter = Array.from(modal.modalEl.querySelectorAll<HTMLButtonElement>(".ss-context-filter-btn"))
+      .find((button) => button.textContent?.includes("Images"))!;
+    imageFilter.click();
+    expect(imageFilter.getAttribute("aria-pressed")).toBe("true");
+    expect(modal.modalEl.querySelectorAll(".ss-context-file-item")).toHaveLength(2);
 
-      const filtered = (modal as any).filteredFiles;
-      expect(filtered.every((f: any) => f.type === "text")).toBe(true);
-    });
-
-    it("filters by images type", () => {
-      (modal as any).setFilter("images", document.createElement("button"));
-
-      const filtered = (modal as any).filteredFiles;
-      expect(filtered.every((f: any) => f.type === "images")).toBe(true);
-    });
-
-    it("filters by documents type", () => {
-      (modal as any).setFilter("documents", document.createElement("button"));
-
-      const filtered = (modal as any).filteredFiles;
-      expect(filtered.every((f: any) => f.type === "documents")).toBe(true);
-    });
-
-    it("filters by audio type", () => {
-      (modal as any).setFilter("audio", document.createElement("button"));
-
-      const filtered = (modal as any).filteredFiles;
-      expect(filtered.every((f: any) => f.type === "audio")).toBe(true);
-    });
-
-    it("shows all files with 'all' filter", () => {
-      (modal as any).setFilter("text", document.createElement("button"));
-      (modal as any).setFilter("all", document.createElement("button"));
-
-      const filtered = (modal as any).filteredFiles;
-      expect(filtered.length).toBe(8);
-    });
+    const search = modal.modalEl.querySelector<HTMLInputElement>(".ss-modal__search-input")!;
+    search.value = "diagram";
+    search.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(modal.modalEl.querySelectorAll(".ss-context-file-item")).toHaveLength(1);
+    expect(modal.modalEl.textContent).toContain("diagram");
   });
 
-  describe("search filtering", () => {
-    it("filters by search query", () => {
-      (modal as any).searchQuery = "meeting";
-      (modal as any).applyFilters();
+  it("uses native labelled checkboxes so keyboard focus and toggling update one selection state", () => {
+    const { modal } = harness({ autoFocusSearch: false });
+    const checkbox = modal.modalEl.querySelector<HTMLInputElement>('.ss-context-file-item input[type="checkbox"]')!;
+    const label = checkbox.closest("label");
 
-      const filtered = (modal as any).filteredFiles;
-      expect(filtered.length).toBe(1);
-      expect(filtered[0].file.basename).toBe("meeting");
-    });
-
-    it("search is case-insensitive", () => {
-      (modal as any).searchQuery = "meeting";
-      (modal as any).applyFilters();
-
-      const filtered = (modal as any).filteredFiles;
-      expect(filtered.length).toBe(1);
-    });
-
-    it("searches in path", () => {
-      (modal as any).searchQuery = "subfolder";
-      (modal as any).applyFilters();
-
-      const filtered = (modal as any).filteredFiles;
-      expect(filtered.length).toBe(1);
-      expect(filtered[0].file.path).toContain("subfolder");
-    });
-
-    it("combines type and search filters", () => {
-      (modal as any).currentFilter = "text";
-      (modal as any).searchQuery = "nested";
-      (modal as any).applyFilters();
-
-      const filtered = (modal as any).filteredFiles;
-      expect(filtered.length).toBe(1);
-      expect(filtered[0].type).toBe("text");
-    });
-
-    it("returns empty when no match", () => {
-      (modal as any).searchQuery = "nonexistent-xyz";
-      (modal as any).applyFilters();
-
-      const filtered = (modal as any).filteredFiles;
-      expect(filtered.length).toBe(0);
-    });
+    expect(label).not.toBeNull();
+    expect(checkbox.getAttribute("aria-label")).toContain("Add");
+    checkbox.focus();
+    expect(document.activeElement).toBe(checkbox);
+    checkbox.click();
+    expect(checkbox.checked).toBe(true);
+    expect(modal.modalEl.textContent).toContain("Add 1 file");
+    expect(checkbox.closest("li")?.classList.contains("is-selected")).toBe(true);
   });
 
-  describe("selection", () => {
-    it("toggles selection on file", () => {
-      const file = (modal as any).files[0].file;
-      (modal as any).toggleFileSelection(file);
-
-      expect((modal as any).selectedFiles.has(file)).toBe(true);
+  it("marks existing context as checked and immutable", () => {
+    const { modal } = harness({
+      autoFocusSearch: false,
+      isFileAlreadyInContext: (file) => file.path === "notes/meeting.md",
     });
+    const checkbox = Array.from(modal.modalEl.querySelectorAll<HTMLInputElement>('.ss-context-file-item input[type="checkbox"]'))
+      .find((input) => input.getAttribute("aria-label")?.includes("meeting"))!;
 
-    it("toggles selection off file", () => {
-      const file = (modal as any).files[0].file;
-      (modal as any).toggleFileSelection(file);
-      (modal as any).toggleFileSelection(file);
-
-      expect((modal as any).selectedFiles.has(file)).toBe(false);
-    });
-
-    it("tracks multiple selections", () => {
-      const file1 = (modal as any).files[0].file;
-      const file2 = (modal as any).files[1].file;
-
-      (modal as any).toggleFileSelection(file1);
-      (modal as any).toggleFileSelection(file2);
-
-      expect((modal as any).selectedFiles.size).toBe(2);
-    });
+    expect(checkbox.checked).toBe(true);
+    expect(checkbox.disabled).toBe(true);
+    expect(checkbox.closest("li")?.classList.contains("is-attached")).toBe(true);
   });
 
-  describe("add button state", () => {
-    it("button is disabled when no selection", () => {
-      const btn = {
-        setButtonText: jest.fn().mockReturnThis(),
-        setDisabled: jest.fn().mockReturnThis(),
-        setCta: jest.fn().mockReturnThis(),
-      };
+  it("submits the selected files and closes", async () => {
+    const { modal, onSelect } = harness({ autoFocusSearch: false });
+    const checkbox = modal.modalEl.querySelector<HTMLInputElement>('.ss-context-file-item input[type="checkbox"]')!;
+    checkbox.click();
+    const add = Array.from(modal.modalEl.querySelectorAll<HTMLButtonElement>("button"))
+      .find((button) => button.textContent === "Add 1 file")!;
+    add.click();
+    await Promise.resolve();
 
-      (modal as any).updateAddButton(btn);
-
-      expect(btn.setButtonText).toHaveBeenCalledWith("Add files");
-      expect(btn.setDisabled).toHaveBeenCalledWith(true);
-    });
-
-    it("button shows count when files selected", () => {
-      const file = (modal as any).files[0].file;
-      (modal as any).selectedFiles.add(file);
-
-      const btn = {
-        setButtonText: jest.fn().mockReturnThis(),
-        setDisabled: jest.fn().mockReturnThis(),
-        setCta: jest.fn().mockReturnThis(),
-      };
-
-      (modal as any).updateAddButton(btn);
-
-      expect(btn.setButtonText).toHaveBeenCalledWith("Add 1 File");
-      expect(btn.setDisabled).toHaveBeenCalledWith(false);
-    });
-
-    it("button pluralizes correctly for multiple files", () => {
-      (modal as any).selectedFiles.add((modal as any).files[0].file);
-      (modal as any).selectedFiles.add((modal as any).files[1].file);
-
-      const btn = {
-        setButtonText: jest.fn().mockReturnThis(),
-        setDisabled: jest.fn().mockReturnThis(),
-        setCta: jest.fn().mockReturnThis(),
-      };
-
-      (modal as any).updateAddButton(btn);
-
-      expect(btn.setButtonText).toHaveBeenCalledWith("Add 2 Files");
-    });
+    expect(onSelect).toHaveBeenCalledWith([expect.objectContaining({ path: checkbox.closest("li")?.querySelector(".ss-context-file-path")?.textContent })]);
+    expect(document.body.contains(modal.modalEl)).toBe(false);
   });
 
-  describe("submission", () => {
-    it("calls onSelect with selected files", async () => {
-      const file1 = (modal as any).files[0].file;
-      const file2 = (modal as any).files[1].file;
-      (modal as any).selectedFiles.add(file1);
-      (modal as any).selectedFiles.add(file2);
+  it("keeps the dialog open and restores controls when adding fails", async () => {
+    const { modal, onSelect } = harness({ autoFocusSearch: false });
+    onSelect.mockRejectedValueOnce(new Error("Processing failed"));
+    modal.modalEl.querySelector<HTMLInputElement>('.ss-context-file-item input[type="checkbox"]')!.click();
+    Array.from(modal.modalEl.querySelectorAll<HTMLButtonElement>("button"))
+      .find((button) => button.textContent === "Add 1 file")!
+      .click();
+    await Promise.resolve();
+    await Promise.resolve();
 
-      await (modal as any).handleSelection();
-
-      expect(onSelect).toHaveBeenCalled();
-      const selectedArray = onSelect.mock.calls[0][0];
-      expect(selectedArray).toContain(file1);
-      expect(selectedArray).toContain(file2);
-    });
-
-    it("does not call onSelect when nothing selected", async () => {
-      await (modal as any).handleSelection();
-
-      expect(onSelect).not.toHaveBeenCalled();
-    });
-
-    it("keeps modal open on error", async () => {
-      const file = (modal as any).files[0].file;
-      (modal as any).selectedFiles.add(file);
-      onSelect.mockRejectedValue(new Error("Processing failed"));
-
-      const closeSpy = jest.spyOn(modal, "close");
-      await (modal as any).handleSelection();
-
-      expect(closeSpy).not.toHaveBeenCalled();
-    });
+    expect(document.body.contains(modal.modalEl)).toBe(true);
+    expect(modal.modalEl.textContent).toContain("Add 1 file");
   });
 
-  describe("loading state", () => {
-    it("shows loading text on button during processing", () => {
-      (modal as any).addButton = {
-        setButtonText: jest.fn().mockReturnThis(),
-        setDisabled: jest.fn().mockReturnThis(),
-        buttonEl: {
-          removeClass: jest.fn(),
-        },
-      };
-
-      (modal as any).setLoadingState(true);
-
-      expect((modal as any).addButton.setButtonText).toHaveBeenCalledWith("Processing...");
-      expect((modal as any).addButton.setDisabled).toHaveBeenCalledWith(true);
-    });
-
-    it("restores button state after processing", () => {
-      (modal as any).addButton = {
-        setButtonText: jest.fn().mockReturnThis(),
-        setDisabled: jest.fn().mockReturnThis(),
-        setCta: jest.fn().mockReturnThis(),
-        buttonEl: {
-          removeClass: jest.fn(),
-        },
-      };
-
-      (modal as any).setLoadingState(false);
-
-      expect((modal as any).addButton.setButtonText).toHaveBeenCalled();
-    });
+  it("renders an honest empty state", () => {
+    const { modal } = harness({ autoFocusSearch: false, initialSearchQuery: "missing-file" });
+    expect(modal.modalEl.querySelector(".ss-context-empty")?.textContent).toContain("No files found");
   });
 
-  describe("onOpen", () => {
-    it("sets modal title", () => {
-      modal.onOpen();
+  it("renders large vaults in bounded batches", () => {
+    const app = new App();
+    (app.vault.getFiles as jest.Mock).mockReturnValue(
+      Array.from({ length: 150 }, (_, index) => new TFile({ path: `notes/file-${index}.md` })),
+    );
+    const modal = new ContextSelectionModal(app, jest.fn(), {}, { autoFocusSearch: false });
+    modal.open();
 
-      expect(modal.titleEl.textContent).toBe("Add context files");
-    });
-
-    it("creates filter container", () => {
-      modal.onOpen();
-
-      const filterContainer = modal.contentEl.querySelector(".ss-context-filter-container");
-      expect(filterContainer).not.toBeNull();
-    });
-
-    it("creates file list container", () => {
-      modal.onOpen();
-
-      const listContainer = modal.contentEl.querySelector(".ss-context-file-list");
-      expect(listContainer).not.toBeNull();
-    });
-
-    it("creates filter buttons", () => {
-      modal.onOpen();
-
-      const buttons = modal.contentEl.querySelectorAll(".ss-context-filter-btn");
-      expect(buttons.length).toBe(5);
-    });
-
-    it("sets 'All' button as active by default", () => {
-      modal.onOpen();
-
-      const allBtn = modal.contentEl.querySelector(".ss-context-filter-btn.is-active");
-      expect(allBtn?.textContent).toBe("All");
-    });
-
-    it("renders the initial search query and active filter", () => {
-      modal = new ContextSelectionModal(app, onSelect, plugin, {
-        initialFilter: "documents",
-        initialSearchQuery: "report",
-      });
-
-      modal.onOpen();
-
-      const searchInput = modal.contentEl.querySelector(
-        ".setting-item-control input"
-      ) as HTMLInputElement | null;
-      const activeFilter = modal.contentEl.querySelector(
-        ".ss-context-filter-btn.is-active"
-      ) as HTMLButtonElement | null;
-
-      expect(searchInput?.value).toBe("report");
-      expect(activeFilter?.textContent).toContain("Documents");
-    });
-
-    it("auto-focuses the search input by default", () => {
-      jest.useFakeTimers();
-      const focusSpy = jest.spyOn(HTMLInputElement.prototype, "focus");
-
-      modal.onOpen();
-      jest.runAllTimers();
-
-      expect(focusSpy).toHaveBeenCalled();
-
-      focusSpy.mockRestore();
-      jest.useRealTimers();
-    });
-
-    it("skips search autofocus when disabled", () => {
-      jest.useFakeTimers();
-      const focusSpy = jest.spyOn(HTMLInputElement.prototype, "focus");
-      modal = new ContextSelectionModal(app, onSelect, plugin, {
-        autoFocusSearch: false,
-      });
-
-      modal.onOpen();
-      jest.runAllTimers();
-
-      expect(focusSpy).not.toHaveBeenCalled();
-
-      focusSpy.mockRestore();
-      jest.useRealTimers();
-    });
+    expect(modal.modalEl.querySelectorAll(".ss-context-file-item")).toHaveLength(100);
+    modal.modalEl.querySelector<HTMLButtonElement>(".ss-context-load-more")!.click();
+    expect(modal.modalEl.querySelectorAll(".ss-context-file-item")).toHaveLength(150);
+    expect(modal.modalEl.querySelector(".ss-context-load-more")).toBeNull();
   });
 
-  describe("onClose", () => {
-    it("clears content", () => {
-      modal.onOpen();
-      modal.onClose();
+  it("focuses search by default and can opt out", () => {
+    jest.useFakeTimers();
+    const first = harness();
+    jest.runOnlyPendingTimers();
+    expect(document.activeElement).toBe(first.modal.modalEl.querySelector(".ss-modal__search-input"));
 
-      expect(modal.contentEl.children.length).toBe(0);
-    });
-
-    it("clears selection", () => {
-      const file = (modal as any).files[0].file;
-      (modal as any).selectedFiles.add(file);
-
-      modal.onClose();
-
-      expect((modal as any).selectedFiles.size).toBe(0);
-    });
-  });
-
-  describe("empty state", () => {
-    it("shows empty message when no files match", () => {
-      modal.onOpen();
-      (modal as any).searchQuery = "nonexistent-xyz-abc";
-      (modal as any).applyFilters();
-
-      const emptyEl = modal.contentEl.querySelector(".ss-context-empty");
-      expect(emptyEl).not.toBeNull();
-      expect(emptyEl?.textContent).toContain("No files found");
-    });
-  });
-
-  describe("file list display limit", () => {
-    it("limits display to 100 files", () => {
-      const manyFiles = Array.from({ length: 150 }, (_, i) => new TFile({ path: `file${i}.md` }));
-      (app.vault as any).getFiles = jest.fn().mockReturnValue(manyFiles);
-      modal = new ContextSelectionModal(app, onSelect, plugin);
-      modal.onOpen();
-
-      const items = modal.contentEl.querySelectorAll(".ss-context-file-item");
-      expect(items.length).toBeLessThanOrEqual(100);
-    });
-
-    it("shows 'show more' link when files exceed 100", () => {
-      const manyFiles = Array.from({ length: 150 }, (_, i) => new TFile({ path: `file${i}.md` }));
-      (app.vault as any).getFiles = jest.fn().mockReturnValue(manyFiles);
-      modal = new ContextSelectionModal(app, onSelect, plugin);
-      modal.onOpen();
-
-      const loadMore = modal.contentEl.querySelector(".ss-context-load-more");
-      expect(loadMore).not.toBeNull();
-    });
-
-    it("loads more files when 'show more' is clicked", () => {
-      const manyFiles = Array.from({ length: 150 }, (_, i) => new TFile({ path: `file${i}.md` }));
-      (app.vault as any).getFiles = jest.fn().mockReturnValue(manyFiles);
-      modal = new ContextSelectionModal(app, onSelect, plugin);
-      modal.onOpen();
-
-      const loadMore = modal.contentEl.querySelector(".ss-context-load-more") as HTMLButtonElement | null;
-      expect(loadMore).not.toBeNull();
-      loadMore?.click();
-
-      const items = modal.contentEl.querySelectorAll(".ss-context-file-item");
-      expect(items.length).toBe(150);
-      expect(modal.contentEl.querySelector(".ss-context-load-more")).toBeNull();
-    });
-  });
-
-  describe("file rendering", () => {
-    it("renders file items", () => {
-      modal.onOpen();
-
-      const items = modal.contentEl.querySelectorAll(".ss-context-file-item");
-      expect(items.length).toBeGreaterThan(0);
-    });
-
-    it("renders file name", () => {
-      modal.onOpen();
-
-      const nameEl = modal.contentEl.querySelector(".ss-context-file-name");
-      expect(nameEl).not.toBeNull();
-    });
-
-    it("renders file path", () => {
-      modal.onOpen();
-
-      const pathEl = modal.contentEl.querySelector(".ss-context-file-path");
-      expect(pathEl).not.toBeNull();
-    });
-
-    it("renders checkbox for each file", () => {
-      modal.onOpen();
-
-      const checkboxes = modal.contentEl.querySelectorAll("input");
-      expect(checkboxes.length).toBeGreaterThan(0);
-    });
-
-    it("applies selected class to selected files", () => {
-      modal.onOpen();
-
-      const file = (modal as any).files[0].file;
-      (modal as any).toggleFileSelection(file);
-
-      const selectedItems = modal.contentEl.querySelectorAll(".ss-context-file-item.is-selected");
-      expect(selectedItems.length).toBe(1);
-    });
-  });
-
-  describe("filter button click", () => {
-    it("updates current filter on button click", () => {
-      modal.onOpen();
-
-      const btn = document.createElement("button");
-      const container = document.createElement("div");
-      container.appendChild(btn);
-      btn.addClass("ss-context-filter-btn");
-
-      (modal as any).setFilter("images", btn);
-
-      expect((modal as any).currentFilter).toBe("images");
-    });
-
-    it("updates button active state", () => {
-      modal.onOpen();
-
-      const btn = document.createElement("button");
-      const container = document.createElement("div");
-      const otherBtn = document.createElement("button");
-      otherBtn.addClass("ss-context-filter-btn");
-      otherBtn.addClass("is-active");
-      container.appendChild(otherBtn);
-      container.appendChild(btn);
-      btn.addClass("ss-context-filter-btn");
-
-      (modal as any).setFilter("images", btn);
-
-      expect(btn.classList.contains("is-active")).toBe(true);
-      expect(otherBtn.classList.contains("is-active")).toBe(false);
-    });
+    first.modal.close();
+    const second = harness({ autoFocusSearch: false });
+    jest.runOnlyPendingTimers();
+    expect(document.activeElement).not.toBe(second.modal.modalEl.querySelector(".ss-modal__search-input"));
   });
 });

@@ -35,7 +35,6 @@ interface ParagraphBlock {
  * - Optimizes chunk size with controlled overlap
  */
 export class ContentPreprocessor {
-  private readonly MIN_CONTENT_LENGTH = 80;
   private readonly HARD_TRUNCATE_LENGTH = 1_200_000; // Safety ceiling ~1.2M characters
 
   private readonly TARGET_TOKEN_LENGTH = 600;
@@ -52,7 +51,10 @@ export class ContentPreprocessor {
     const normalized = this.normalizeLineEndings(this.stripFrontMatter(content));
     const cleaned = this.cleanContent(normalized);
 
-    if (cleaned.length < this.MIN_CONTENT_LENGTH) {
+    // Short notes are first-class Obsidian content. A title, name, date, or
+    // single sentence can carry real semantic value, so only truly empty
+    // normalized content is excluded from managed embedding work.
+    if (cleaned.length === 0) {
       return null;
     }
 

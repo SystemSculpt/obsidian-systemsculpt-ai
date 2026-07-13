@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 6,
+  "schemaVersion": 5,
   "licenseKey": "license-sentinel",
   "disclosure": {
     "acceptedVersion": null,
@@ -14,11 +14,9 @@
   "folders": {
     "chats": "Workspace/Chats",
     "savedChats": "Workspace/Saved Chats",
-    "webResearch": "Workspace/Research",
     "recordings": "Workspace/Recordings",
     "attachments": "Workspace/Attachments",
     "extractions": "Workspace/Extractions",
-    "systemPrompts": "Workspace/Prompts",
     "meetingProcessor": "Workspace/Meetings"
   },
   "exclusions": {
@@ -41,7 +39,6 @@
   "ui": {
     "settingsMode": "standard",
     "chatFontSize": "small",
-    "hideSystemMessagesInChat": true,
     "respectReducedMotion": true,
     "showDiagnostics": false
   },
@@ -60,7 +57,7 @@
     "receipt": {
       "sourcePluginReleaseFixtureId": "release-5.11-schema-v1",
       "sourceSchemaVersion": 1,
-      "targetSchemaVersion": 6,
+      "targetSchemaVersion": 5,
       "timestamp": "2000-01-01T00:00:00.000Z",
       "removedFieldCategories": {
         "cachedAuthority": 2,

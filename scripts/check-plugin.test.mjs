@@ -3,6 +3,19 @@ import fs from "node:fs";
 import test from "node:test";
 
 const source = fs.readFileSync(new URL("./check-plugin.mjs", import.meta.url), "utf8");
+const packageJson = JSON.parse(
+  fs.readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+);
+
+test("package scripts preserve fast edit and exhaustive verification tiers", () => {
+  assert.equal(packageJson.scripts.check, "npm run check:plugin:fast");
+  assert.equal(packageJson.scripts["check:all"], "npm run check:full");
+  assert.equal(
+    packageJson.scripts["check:full"],
+    "npm run check:plugin:obsidian && npm run check:plugin && npm test "
+      + "&& npm run test:embeddings && npm run test:integration && npm run test:release-script",
+  );
+});
 
 test("fast plugin checks stay on the measured deterministic tier", () => {
   assert.match(source, /const FAST_SCRIPT_TESTS = \[/);

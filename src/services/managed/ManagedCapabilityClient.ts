@@ -8,6 +8,10 @@ import {
   ManagedAdmissionOutcome, ManagedAllowedLease, ManagedCapabilityAlias, ManagedChatLeaseResult, ManagedLease,
   ManagedRequestContractId, ManagedTransportOperation, ManagedTransportResult,
 } from "./ManagedTypes";
+import {
+  managedChatInputLimitsFromCatalog,
+  type ManagedChatInputLimits,
+} from "./ManagedChatInputLimits";
 
 function deepFreeze<T>(value: T, seen = new WeakSet<object>()): T {
   if (value === null || typeof value !== "object" || seen.has(value as object)) return value;
@@ -38,6 +42,9 @@ export class ManagedCapabilityClient {
     this.textGeneration = new ManagedTextGenerationAdapter(dependencies);
   }
   getCatalog() { return this.dependencies.transport.getCatalog(); }
+  async getChatInputLimits(): Promise<ManagedChatInputLimits> {
+    return managedChatInputLimitsFromCatalog(await this.getCatalog());
+  }
   getAdmission() { return this.dependencies.transport.getAdmission(); }
   request(operation: ClientOperation) { return this.execute("request", operation); }
   stream(operation: ClientOperation) { return this.execute("stream", operation); }

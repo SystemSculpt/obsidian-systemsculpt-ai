@@ -15,12 +15,13 @@ extend `testing/fixtures/managed/` when a contract needs another fixture.
 ## Normal edit loop
 
 ```bash
-npm run check:plugin:fast
+npm run check
 npm run test:related -- <changed src files>
 ```
 
 Use the focused test command for the module being changed instead of the full
-suite. Add compiled integration only for bundle/composition changes.
+suite. Add compiled integration only for bundle/composition changes. Run
+`npm run check:full` at combined checkpoints and before release.
 
 ## Conventions
 

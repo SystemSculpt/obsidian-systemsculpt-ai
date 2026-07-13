@@ -1,6 +1,7 @@
 import type { ChatMessage } from "../types";
 import type { ToolCall } from "../types/toolCalls";
 import { deterministicId } from "./id";
+import { normalizeFirstPartyToolName } from "../tools/toolNames";
 
 export const TOOL_LOOP_ERROR_CODE = "TOOL_LOOP_DETECTED";
 
@@ -77,11 +78,12 @@ export function mapAssistantToolCallsForManagedApi(rawToolCalls: any[]): any[] {
       const req: any = (toolCall && (toolCall.request || toolCall)) || {};
       const fn: any = req.function || toolCall.function || (req.name ? { name: req.name, arguments: req.arguments } : {});
       if (!fn || !fn.name) return null;
+      const canonicalName = normalizeFirstPartyToolName(fn.name) || String(fn.name);
       const normalizedArgs = typeof fn.arguments === "string" ? fn.arguments : JSON.stringify(fn.arguments ?? {});
       const preferredId = typeof toolCall?.id === "string" && toolCall.id.length > 0 ? toolCall.id : undefined;
       const id = preferredId ?? (typeof req.id === "string" && req.id.length > 0
         ? req.id
-        : deterministicId(String(fn.name) + normalizedArgs, "call"));
+        : deterministicId(canonicalName + normalizedArgs, "call"));
 
       const safeTopLevel = new Set([
         "request",
@@ -118,7 +120,7 @@ export function mapAssistantToolCallsForManagedApi(rawToolCalls: any[]): any[] {
         type: "function",
         function: {
           ...preservedFunction,
-          name: String(fn.name),
+          name: canonicalName,
           arguments: normalizedArgs,
         },
       };
@@ -147,7 +149,7 @@ export function normalizeToolCallArguments(rawArgs: unknown): string {
 }
 
 export function buildToolCallSignature(toolName: string, rawArgs: unknown): string {
-  const safeName = String(toolName || "").trim();
+  const safeName = normalizeFirstPartyToolName(toolName) || String(toolName || "").trim();
   const normalizedArgs = normalizeToolCallArguments(rawArgs);
   return `${safeName}::${normalizedArgs}`;
 }

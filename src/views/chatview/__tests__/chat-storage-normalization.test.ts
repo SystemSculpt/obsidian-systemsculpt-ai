@@ -26,8 +26,8 @@ describe("ChatStorageService.normalizeLegacyToolMessages", () => {
   const service = new ChatStorageService({} as any, "");
 
   it("coalesces consecutive assistant messages into one assistant turn", () => {
-    const firstToolCall = createToolCall("call_emlistitems0", "msg-1", "mcp-filesystem_list_items");
-    const secondToolCall = createToolCall("call_esystemread1", "msg-2", "mcp-filesystem_read");
+    const firstToolCall = createToolCall("call_emlistitems0", "msg-1", "list_items");
+    const secondToolCall = createToolCall("call_esystemread1", "msg-2", "read");
 
     const toolMessageA: ChatMessage = {
       role: "assistant",

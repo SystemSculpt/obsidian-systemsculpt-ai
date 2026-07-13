@@ -33,27 +33,6 @@
     "framework"
   ],
   "operations": {
-    "web_search": {
-      "method": "POST",
-      "path": "/api/plugin/web/search",
-      "auth": "license",
-      "plugin_version_gate": true,
-      "idempotency": "required",
-      "request_fields": ["query", "max_results"],
-      "response_fields": ["query", "results", "fetchedAt"],
-      "cancellation": "request_abort_propagated"
-    },
-    "web_fetch": {
-      "method": "POST",
-      "path": "/api/plugin/web/fetch",
-      "auth": "license",
-      "plugin_version_gate": true,
-      "idempotency": "required",
-      "request_fields": ["url", "max_chars"],
-      "response_fields": ["url", "finalUrl", "title", "markdown", "contentType", "fetchedAt", "truncated"],
-      "output": "bounded_markdown",
-      "cancellation": "request_abort_propagated"
-    },
     "youtube_transcript": {
       "method": "POST",
       "path": "/api/plugin/youtube/transcripts",

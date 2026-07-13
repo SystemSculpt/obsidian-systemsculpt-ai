@@ -1,135 +1,159 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { ReadableStream } from "node:stream/web";
 import fixture from "../fixtures/managed/managed-capabilities-v2.json";
+
+function managedStream(text: string): Response {
+  const sessionId = "mchat_0123456789abcdef0123456789abcdef";
+  const body = [
+    `data: ${JSON.stringify({ choices: [{ delta: { content: text } }] })}`,
+    "",
+    `data: ${JSON.stringify({
+      object: "systemsculpt.chat.session",
+      session_id: sessionId,
+      revision: 1,
+      state: "committed",
+    })}`,
+    "",
+    "data: [DONE]",
+    "",
+    "",
+  ].join("\n");
+  const encoded = new TextEncoder().encode(body);
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(encoded);
+      controller.close();
+    },
+  });
+  return new Response(stream, {
+    status: 200,
+    headers: {
+      "content-type": "text/event-stream",
+      "x-systemsculpt-session-id": sessionId,
+      "x-systemsculpt-session-revision": "1",
+    },
+  });
+}
 
 export async function exerciseBuiltStandardChatIdentity(
   bundleModule: { default?: new (...args: never[]) => object } | (new (...args: never[]) => object),
 ): Promise<void> {
   const PluginClass = (bundleModule as { default?: new (...args: never[]) => object }).default ?? bundleModule;
   const { App, WorkspaceLeaf } = require("obsidian");
+  const { webcrypto } = require("node:crypto");
+  if (!window.crypto?.subtle) {
+    Object.defineProperty(window, "crypto", { configurable: true, value: webcrypto });
+  }
   const app = new App();
   const manifest = JSON.parse(
     readFileSync(path.resolve(__dirname, "..", "..", "manifest.json"), "utf8"),
   );
-  const plugin = new (PluginClass as new (app: object, manifest: object) => Record<string, unknown>)(app, manifest);
-  await (plugin.onload as () => Promise<void>)();
+  const plugin = new (PluginClass as new (app: object, manifest: object) => Record<string, any>)(app, manifest);
+  await plugin.onload();
   await plugin.criticalInitializationPromise;
   await plugin.deferredInitializationPromise;
-  await (plugin.initializeManagers as () => Promise<void>)();
-  (plugin.ensureViewManager as () => { initialize(): void })().initialize();
+  await plugin.initializeManagers();
+  plugin.ensureViewManager().initialize();
 
-  const viewCreator = (plugin._views as Map<string, (leaf: object) => Record<string, unknown>>)
-    .get("systemsculpt-chat-view");
-  expect(viewCreator).toEqual(expect.any(Function));
+  const descriptor = fixture.capabilities.find((item) => item.alias === "systemsculpt/chat")!;
+  const requestContract = descriptor.request_contracts.find((item) => item.capability === "chat_turn")!;
+  const lease = Object.freeze({ outcome: "allowed", descriptor, requestContract });
+  const acquireChatTurnLease = jest.fn(async () => ({ outcome: "allowed", lease }));
+  const beginAcceptedChatDispatch = jest.fn(() => ({ id: "bundle-ticket" }));
+  const transportEnvelope = {
+    response: managedStream("Managed agent bundle proof"),
+    diagnostics: {
+      status: 200,
+      requestId: "bundle-request",
+      contentType: "text/event-stream",
+      rateLimitLimit: null,
+      rateLimitRemaining: null,
+      rateLimitReset: null,
+      retryAfter: null,
+      errorText: "",
+    },
+  };
+  const streamAcceptedChat = jest.fn(async () => transportEnvelope);
+  const managedClient = {
+    acquireChatTurnLease,
+    beginAcceptedChatDispatch,
+    streamAcceptedChat,
+  };
+  plugin.getManagedCapabilityClient = () => managedClient;
 
-  Object.defineProperty(plugin, "modelService", {
-    configurable: true,
-    get: () => { throw new Error("forbidden built modelService read"); },
-  });
-  Object.defineProperty(plugin, "getEntitlementService", {
-    configurable: true,
-    get: () => { throw new Error("forbidden built entitlement read"); },
-  });
-  for (const key of ["providerRegistry", "piAuth", "favorites"]) {
+  for (const key of ["modelService", "getEntitlementService", "providerRegistry", "piAuth", "favorites"]) {
     Object.defineProperty(plugin, key, {
       configurable: true,
       get: () => { throw new Error(`forbidden built ${key} read`); },
     });
   }
-  const settings = plugin.settings as Record<string, unknown>;
   for (const key of ["activeProvider", "customProviders", "credentials", "endpoints"]) {
-    Object.defineProperty(settings, key, {
+    Object.defineProperty(plugin.settings, key, {
       configurable: true,
       get: () => { throw new Error(`forbidden built settings.${key} read`); },
     });
   }
 
+  const viewCreator = plugin._views.get("systemsculpt-chat-view") as
+    | ((leaf: object) => Record<string, any>)
+    | undefined;
+  expect(viewCreator).toEqual(expect.any(Function));
   const leaf = new WorkspaceLeaf(app);
-  await leaf.setViewState({
-    type: "systemsculpt-chat-view",
-    state: {},
-  });
+  await leaf.setViewState({ type: "systemsculpt-chat-view", state: {} });
   const view = viewCreator!(leaf);
-  if (!(globalThis as { IntersectionObserver?: unknown }).IntersectionObserver) {
-    (globalThis as { IntersectionObserver?: unknown }).IntersectionObserver = class {
-      observe(): void {}
-      unobserve(): void {}
-      disconnect(): void {}
-    };
-  }
-  if (!(globalThis as { ResizeObserver?: unknown }).ResizeObserver) {
-    (globalThis as { ResizeObserver?: unknown }).ResizeObserver = class {
-      observe(): void {}
-      unobserve(): void {}
-      disconnect(): void {}
-    };
-  }
-  await (view.onOpen as () => Promise<void>)();
-  view.isFullyLoaded = true;
 
-  expect((view.getState as () => Record<string, unknown>)()).not.toHaveProperty("selectedModelId");
-  expect((view.isLegacyReadOnlyChat as () => boolean)()).toBe(false);
+  let durableMessages: Array<Record<string, unknown>> = [];
+  let version = 0;
+  view.chatStorage.createChatExclusive = jest.fn(async (_id: string, messages: Array<Record<string, unknown>>) => {
+    durableMessages = JSON.parse(JSON.stringify(messages));
+    version += 1;
+    return { version };
+  });
+  view.chatStorage.saveChat = jest.fn(async (_id: string, messages: Array<Record<string, unknown>>) => {
+    durableMessages = JSON.parse(JSON.stringify(messages));
+    version += 1;
+    return { version };
+  });
 
-  const content = (view.containerEl as HTMLElement).children[1] as HTMLElement;
-  expect(content.querySelector(".systemsculpt-chat-identity")).toBeNull();
-  expect(content.querySelector(".systemsculpt-chat-composer-chips")).toBeNull();
-  expect(content.querySelector("[aria-haspopup]")).toBeNull();
-
-  const descriptor = fixture.capabilities.find((item) => item.alias === "systemsculpt/chat")!;
-  const requestContract = descriptor.request_contracts.find((item) => item.capability === "chat_turn")!;
-  const lease = Object.freeze({ outcome: "allowed", descriptor, requestContract });
-  const inputHandler = view.inputHandler as Record<string, unknown>;
-  view.commitAcceptedUserMessage = async (input: { message: Record<string, unknown> }) => {
-    const snapshot = Object.freeze({
-      chatId: "built-chat",
-      version: 1,
-      messages: Object.freeze([Object.freeze({ ...input.message })]),
-    });
-    return Object.freeze({
-      status: "accepted_current",
-      snapshot,
-      message: snapshot.messages[0],
-      ownership: Object.freeze({
-        transcriptIdentity: snapshot,
-        generation: 1,
-        originalChatId: "built-chat",
-        acceptedChatId: "built-chat",
-      }),
-    });
-  };
-  view.claimAcceptedUserCommit = () => true;
-  view.persistAssistantMessage = async (message: Record<string, unknown>) => message;
-  view.saveChat = async () => undefined;
-  const acquireChatTurnLease = jest.fn().mockResolvedValue({ outcome: "allowed", lease });
-  inputHandler.managedChatAdmission = { acquireChatTurnLease };
-
-  const aiService = view.aiService as Record<string, unknown>;
-  const originalPrepare = (aiService.prepareAcceptedChatRequest as (...args: unknown[]) => Promise<Record<string, unknown>>)
-    .bind(aiService);
-  let acceptedSnapshot: Record<string, unknown> | null = null;
-  aiService.prepareAcceptedChatRequest = async (...args: unknown[]) => {
+  let acceptedSnapshot: Record<string, any> | null = null;
+  const originalPrepare = view.aiService.prepareAcceptedChatRequest.bind(view.aiService);
+  view.aiService.prepareAcceptedChatRequest = async (...args: unknown[]) => {
     acceptedSnapshot = await originalPrepare(...args);
     return acceptedSnapshot;
   };
-  inputHandler.streamAssistantTurn = jest.fn().mockResolvedValue({
-    messageId: "assistant-built",
-    message: { role: "assistant", content: "done", message_id: "assistant-built" },
-    messageEl: document.createElement("div"),
-    completed: true,
-    completionState: "completed",
-  });
 
-  (inputHandler.setValue as (value: string) => void)("built identity proof");
-  await (inputHandler.submitForAutomation as () => Promise<void>)();
+  await view.onOpen();
+  const content = view.containerEl.children[1] as HTMLElement;
+  expect(content.querySelector(".systemsculpt-agent-workspace")).not.toBeNull();
+  expect(content.querySelector(".systemsculpt-agent-prompt-input")).not.toBeNull();
+  expect(content.querySelector(".systemsculpt-chat-identity")).toBeNull();
+  expect(content.querySelector("[aria-haspopup]")).toBeNull();
+  expect(view.getState()).not.toHaveProperty("selectedModelId");
+  expect(view.isLegacyReadOnlyChat()).toBe(false);
+
+  await view.sendAutomationMessage({
+    message: "built identity proof",
+    includeContextFiles: false,
+    focusAfterSend: false,
+  });
+  await Promise.resolve();
 
   expect(acquireChatTurnLease).toHaveBeenCalledTimes(1);
-  expect(acceptedSnapshot).toEqual(expect.objectContaining({
-    runtime: "managed",
-    model: "ai-agent",
-  }));
+  expect(beginAcceptedChatDispatch).toHaveBeenCalledTimes(1);
+  expect(streamAcceptedChat).toHaveBeenCalledTimes(1);
+  expect(acceptedSnapshot).toEqual(expect.objectContaining({ runtime: "managed", model: "ai-agent" }));
   expect(acceptedSnapshot).not.toHaveProperty("legacyPreparation");
-  expect((acceptedSnapshot?.operation as { runtime: string }).runtime).toBe("managed");
-  expect((acceptedSnapshot?.operation as object)).toHaveProperty("lease", lease);
+  expect(acceptedSnapshot?.operation.runtime).toBe("managed");
+  expect(acceptedSnapshot?.operation.lease).toBe(lease);
+  expect(durableMessages).toEqual(expect.arrayContaining([
+    expect.objectContaining({ role: "user", content: "built identity proof" }),
+    expect.objectContaining({ role: "assistant", content: "Managed agent bundle proof" }),
+  ]));
+  expect(view.messages).toEqual(expect.arrayContaining([
+    expect.objectContaining({ role: "assistant", content: "Managed agent bundle proof" }),
+  ]));
 
-  (plugin.unload as () => void)();
+  await view.onClose();
+  plugin.unload();
 }

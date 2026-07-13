@@ -39,7 +39,6 @@ export interface TranscriptionRequest {
   onProgress?: (progress: number, status: string) => void;
   onError?: (error: Error) => void;
   /** Presentation is owned by the caller; the coordinator never opens UI. */
-  useModal?: false;
   timestamped?: boolean;
   suppressNotices?: boolean;
 }

@@ -284,8 +284,8 @@ export function renderAccountSection(
     void syncCredits();
   }
 
-  const managedDataSetting = new Setting(root).setName("Managed data");
-  managedDataSetting.descEl.append("Managed features send request content to SystemSculpt. See ");
+  const managedDataSetting = new Setting(root).setName("AI data");
+  managedDataSetting.descEl.append("AI features send request content to SystemSculpt. See ");
   const termsLink = createEl("a");
   termsLink.href = SYSTEMSCULPT_LEGAL_URLS.TERMS;
   termsLink.target = "_blank";

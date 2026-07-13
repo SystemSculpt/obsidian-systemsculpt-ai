@@ -6,6 +6,7 @@
 import { Notice, App } from "obsidian";
 import SystemSculptPlugin from "../main";
 import { IS_DEVELOPMENT_BUILD } from "../constants/api";
+import { VersionUpdateModal, type VersionUpdateModalVariant } from "../modals/VersionUpdateModal";
 import { compareNumericVersions, parseNumericVersion } from "../utils/semver";
 
 export interface VersionInfo {
@@ -26,7 +27,8 @@ export class VersionCheckerService {
   private cacheTimeMs: number = 1000 * 60 * 60; // 1 hour cache
   private app: App;
   private plugin: SystemSculptPlugin;
-  private updateDrawerEl: HTMLElement | null = null;
+  private updateModal: VersionUpdateModal | null = null;
+  private updateModalAutoCloseTimer: number | null = null;
   private periodicCheckIntervalMs: number = 1000 * 60 * 60; // 1 hour
   private periodicCheckTimeout: number | null = null;
   private startupCheckAbortController: AbortController | null = null;
@@ -132,7 +134,7 @@ export class VersionCheckerService {
       
       // Only show notification if an update is available
       if (!versionInfo.isLatest) {
-        this.showUpdateDrawer(versionInfo);
+        this.showUpdateModal(versionInfo);
       }
     } catch (error) {
       // Check if this is a rate limit error (403)
@@ -206,7 +208,7 @@ export class VersionCheckerService {
     // Handle development mode flow
     if (IS_DEVELOPMENT_BUILD) {
       if (this.devModeUpdateState === "show-post-update") {
-        this.showPostUpdateDrawer();
+        this.showPostUpdateModal();
         // Reset to show-update for next time
         this.devModeUpdateState = "show-update";
         localStorage.setItem("systemsculpt-dev-update-state", "show-update");
@@ -219,7 +221,7 @@ export class VersionCheckerService {
           releaseUrl: `https://github.com/${this.githubRepo}/releases/latest`,
           updateUrl: `obsidian://show-plugin?id=${this.pluginId}`
         };
-        this.showUpdateDrawer(fakeVersionInfo);
+        this.showUpdateModal(fakeVersionInfo);
       }
       // Start periodic checks
       this.startPeriodicUpdateCheck();
@@ -239,7 +241,7 @@ export class VersionCheckerService {
     
     // Show post-update notification if user just updated
     if (hasJustUpdated) {
-      this.showPostUpdateDrawer();
+      this.showPostUpdateModal();
     }
     
     // Don't check for new updates if notifications are disabled
@@ -266,7 +268,7 @@ export class VersionCheckerService {
           return;
         }
         if (!versionInfo.isLatest) {
-          this.showUpdateDrawer(versionInfo);
+          this.showUpdateModal(versionInfo);
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -316,94 +318,10 @@ export class VersionCheckerService {
   }
 
   /**
-   * Shows a post-update notification drawer
+   * Shows the post-update notice.
    */
-  private showPostUpdateDrawer(): void {
-    // Remove any existing drawer
-    this.removeUpdateDrawer();
-    
-    // Create drawer element
-    this.updateDrawerEl = createDiv();
-    this.updateDrawerEl.classList.add('systemsculpt-update-drawer');
-    
-    // Add accessibility attributes
-    this.updateDrawerEl.setAttribute('role', 'dialog');
-    this.updateDrawerEl.setAttribute('aria-labelledby', 'update-drawer-title');
-    this.updateDrawerEl.setAttribute('aria-describedby', 'update-drawer-message');
-    
-    // Add drawer content for post-update notification
-    this.updateDrawerEl.innerHTML = `
-      <div class="systemsculpt-update-drawer-header">
-        <div id="update-drawer-title" class="systemsculpt-update-drawer-title">SystemSculpt AI Updated</div>
-        <button class="systemsculpt-update-drawer-close" aria-label="Close" type="button"></button>
-      </div>
-      <div class="systemsculpt-update-drawer-content">
-        <div id="update-drawer-message" class="systemsculpt-update-drawer-message">
-          Update completed successfully!
-        </div>
-        <div class="systemsculpt-update-drawer-versions" aria-label="Current version">
-          <span class="systemsculpt-update-drawer-latest">v${this.currentVersion}</span>
-        </div>
-        <button class="systemsculpt-update-drawer-button" type="button">View Changelog</button>
-      </div>
-    `;
-    
-    // Add to document
-    document.body.appendChild(this.updateDrawerEl);
-    
-    // Add event listeners
-    const closeButton = this.updateDrawerEl.querySelector('.systemsculpt-update-drawer-close');
-    if (closeButton) {
-      closeButton.addEventListener('click', () => {
-        this.removeUpdateDrawer();
-      });
-      
-      // Add keyboard support for close button
-      closeButton.addEventListener('keydown', (e: KeyboardEvent) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          this.removeUpdateDrawer();
-        }
-      });
-    }
-    
-    const changelogButton = this.updateDrawerEl.querySelector('.systemsculpt-update-drawer-button');
-    if (changelogButton) {
-      changelogButton.addEventListener('click', () => {
-        this.openChangelogTab();
-        this.removeUpdateDrawer();
-      });
-      
-      // Add keyboard support for changelog button
-      changelogButton.addEventListener('keydown', (e: KeyboardEvent) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          this.openChangelogTab();
-          this.removeUpdateDrawer();
-        }
-      });
-    }
-    
-    // Add global keyboard listener for Escape key
-    const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        this.removeUpdateDrawer();
-        document.removeEventListener('keydown', handleEscape);
-      }
-    };
-    document.addEventListener('keydown', handleEscape);
-    
-    // Show drawer with animation
-    window.setTimeout(() => {
-      if (this.updateDrawerEl) {
-        this.updateDrawerEl.classList.add('visible');
-      }
-    }, 100);
-    
-    // Auto-hide after 20 seconds
-    window.setTimeout(() => {
-      this.removeUpdateDrawer();
-    }, 20000);
+  private showPostUpdateModal(): void {
+    this.presentUpdateModal("updated");
   }
 
   /**
@@ -421,95 +339,11 @@ export class VersionCheckerService {
   }
 
   /**
-   * Shows a custom update drawer in the bottom right corner
+   * Shows the update-available notice.
    * @param versionInfo Version information to display
    */
-  private showUpdateDrawer(versionInfo: VersionInfo): void {
-    // Remove any existing drawer
-    this.removeUpdateDrawer();
-    
-    // Create drawer element
-    this.updateDrawerEl = createDiv();
-    this.updateDrawerEl.classList.add('systemsculpt-update-drawer');
-    
-    // Add accessibility attributes
-    this.updateDrawerEl.setAttribute('role', 'dialog');
-    this.updateDrawerEl.setAttribute('aria-labelledby', 'update-drawer-title');
-    this.updateDrawerEl.setAttribute('aria-describedby', 'update-drawer-message');
-    
-    // Add drawer content with minimal styling
-    this.updateDrawerEl.innerHTML = `
-      <div class="systemsculpt-update-drawer-header">
-        <div id="update-drawer-title" class="systemsculpt-update-drawer-title">SystemSculpt AI Update</div>
-        <button class="systemsculpt-update-drawer-close" aria-label="Close" type="button"></button>
-      </div>
-      <div class="systemsculpt-update-drawer-content">
-        <div id="update-drawer-message" class="systemsculpt-update-drawer-message">
-          Version ${versionInfo.latestVersion} is available.
-        </div>
-        <div class="systemsculpt-update-drawer-versions" aria-label="Version information">
-          <span class="systemsculpt-update-drawer-current">v${versionInfo.currentVersion}</span>
-          <span class="systemsculpt-update-drawer-arrow">→</span>
-          <span class="systemsculpt-update-drawer-latest">v${versionInfo.latestVersion}</span>
-        </div>
-        <button class="systemsculpt-update-drawer-button" type="button">Update</button>
-      </div>
-    `;
-    
-    // Add to document (CSS is now loaded via CSS import)
-    document.body.appendChild(this.updateDrawerEl);
-    
-    // Add event listeners
-    const closeButton = this.updateDrawerEl.querySelector('.systemsculpt-update-drawer-close');
-    if (closeButton) {
-      closeButton.addEventListener('click', () => {
-        this.removeUpdateDrawer();
-      });
-      
-      // Add keyboard support for close button
-      closeButton.addEventListener('keydown', (e: KeyboardEvent) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          this.removeUpdateDrawer();
-        }
-      });
-    }
-    
-    const updateButton = this.updateDrawerEl.querySelector('.systemsculpt-update-drawer-button');
-    if (updateButton) {
-      updateButton.addEventListener('click', () => {
-        this.handleUpdateButtonClick(versionInfo);
-      });
-      
-      // Add keyboard support for update button
-      updateButton.addEventListener('keydown', (e: KeyboardEvent) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          this.handleUpdateButtonClick(versionInfo);
-        }
-      });
-    }
-    
-    // Add global keyboard listener for Escape key
-    const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        this.removeUpdateDrawer();
-        document.removeEventListener('keydown', handleEscape);
-      }
-    };
-    document.addEventListener('keydown', handleEscape);
-    
-    // Show drawer with animation
-    window.setTimeout(() => {
-      if (this.updateDrawerEl) {
-        this.updateDrawerEl.classList.add('visible');
-      }
-    }, 100);
-    
-    // Auto-hide after 20 seconds (increased from 15 to give users more time)
-    window.setTimeout(() => {
-      this.removeUpdateDrawer();
-    }, 20000);
+  private showUpdateModal(versionInfo: VersionInfo): void {
+    this.presentUpdateModal("available", versionInfo);
   }
   
   /**
@@ -525,7 +359,6 @@ export class VersionCheckerService {
         "The post-update notification will appear on next reload.",
         5000
       );
-      this.removeUpdateDrawer();
       return;
     }
     
@@ -538,26 +371,58 @@ export class VersionCheckerService {
       "If nothing happens, please update manually via Settings → Community plugins",
       10000 // Show for 10 seconds
     );
-    
-    // Remove the drawer
-    this.removeUpdateDrawer();
   }
 
   /**
-   * Removes the update drawer from the DOM
+   * Opens a shared modal for update lifecycle notices.
    */
-  private removeUpdateDrawer(): void {
-    if (this.updateDrawerEl) {
-      // First fade out with CSS transition
-      this.updateDrawerEl.classList.remove('visible');
-      
-      // Then remove from DOM after transition completes
-      window.setTimeout(() => {
-        if (this.updateDrawerEl && this.updateDrawerEl.parentNode) {
-          this.updateDrawerEl.parentNode.removeChild(this.updateDrawerEl);
-          this.updateDrawerEl = null;
+  private presentUpdateModal(variant: VersionUpdateModalVariant, versionInfo?: VersionInfo): void {
+    this.closeUpdateModal();
+
+    const modal = new VersionUpdateModal(this.app, {
+      variant,
+      currentVersion: this.currentVersion,
+      latestVersion: versionInfo?.latestVersion,
+      onPrimaryAction: () => {
+        if (variant === "available" && versionInfo) {
+          this.handleUpdateButtonClick(versionInfo);
+          return;
         }
-      }, 300); // Match this with the CSS transition duration
+        this.openChangelogTab();
+      },
+      onClose: () => {
+        if (this.updateModal === modal) {
+          this.updateModal = null;
+        }
+        this.clearUpdateModalAutoCloseTimer();
+      },
+    });
+
+    this.updateModal = modal;
+    modal.open();
+    this.scheduleUpdateModalAutoClose();
+  }
+
+  private scheduleUpdateModalAutoClose(timeoutMs: number = 20000): void {
+    this.clearUpdateModalAutoCloseTimer();
+    this.updateModalAutoCloseTimer = window.setTimeout(() => {
+      this.closeUpdateModal();
+    }, timeoutMs);
+  }
+
+  private clearUpdateModalAutoCloseTimer(): void {
+    if (this.updateModalAutoCloseTimer !== null) {
+      window.clearTimeout(this.updateModalAutoCloseTimer);
+      this.updateModalAutoCloseTimer = null;
+    }
+  }
+
+  private closeUpdateModal(): void {
+    this.clearUpdateModalAutoCloseTimer();
+    if (this.updateModal) {
+      const modal = this.updateModal;
+      this.updateModal = null;
+      modal.close();
     }
   }
 
@@ -621,7 +486,7 @@ export class VersionCheckerService {
    */
   public onUpdateNotificationsDisabled(): void {
     this.stopPeriodicUpdateCheck();
-    this.removeUpdateDrawer();
+    this.closeUpdateModal();
   }
 
   /**
@@ -629,7 +494,7 @@ export class VersionCheckerService {
    */
   public unload(): void {
     this.stopPeriodicUpdateCheck();
-    this.removeUpdateDrawer();
+    this.closeUpdateModal();
   }
 
   /**

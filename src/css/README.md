@@ -14,7 +14,7 @@ foundation/   tokens.css   ← every visual decision (color, space, type,
 primitives/   buttons.css, feedback.css (spinners, notices, banners)
 components/   feature components (chat, widgets, diff, recorder, …)
 modals/       modal.css (the one shell) + per-modal sheets
-views/        chat, settings, providers, similar-notes, studio, …
+views/        agent workspace, settings, similar-notes, studio, …
 ```
 
 ## The rules (enforced by `npm run lint:css`, part of `check:plugin`)
@@ -48,18 +48,14 @@ views/        chat, settings, providers, similar-notes, studio, …
 
 ## Runtime CSS-variable contracts (written by TS — never rename)
 
-- `--systemsculpt-status-bar-offset` — OverlapInsetService → chat container
-- `--ss-toolbar-shift-x` — MessageToolbar overflow correction
 - `--ss-studio-group-accent`, `--ss-studio-chip-color`,
   `--ss-studio-swatch-color`, `--ss-studio-*-scale`,
   `--ss-studio-text-node-font-size`, `--ss-studio-annotation-color/-stroke`,
   `--ss-link-flow-phase`, `--ss-link-flare-t` — Studio runtime
 - `--ss-studio-link-*` — read by StudioEdgeRenderer for inline SVG strokes
-- `systemsculpt-chat-{small|medium|large}` — the chat font-scale contract
-  is these *classes*, toggled by ChatView on the messages container. CSS
-  maps them to `--chat-font-scale` (`views/chat.css`), and the
-  `--chat-*-font-size` vars are computed from it in CSS — TS never writes
-  any `--chat-*` variable directly.
+- `.systemsculpt-agent-workspace.is-font-{small|medium|large}` — the agent
+  workspace font-scale contract, toggled by `AgentChatView` and implemented in
+  `views/agent-workspace.css`.
 
 ## Workflow
 

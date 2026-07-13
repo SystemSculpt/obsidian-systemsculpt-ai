@@ -294,7 +294,6 @@ export class RecorderService {
         onStatus: (status) => this.updateStatus(status),
         onTranscriptionComplete: (text: string) => this.handleTranscriptionComplete(text),
         suppressNotices: true,
-        useModal: false
       });
     } catch (error) {
       const normalized = error instanceof Error ? error : new Error(String(error));

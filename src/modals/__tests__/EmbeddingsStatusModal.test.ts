@@ -15,7 +15,7 @@ const createMockManager = (overrides: Record<string, any> = {}) => ({
     failed: 0,
   }),
   processVault: jest.fn().mockResolvedValue({ status: "complete" }),
-  retryFailedFiles: jest.fn().mockResolvedValue(undefined),
+  retryFailedFiles: jest.fn().mockResolvedValue({ status: "complete", processed: 1 }),
   suspendProcessing: jest.fn(),
   ...overrides,
 });
@@ -216,12 +216,28 @@ describe("EmbeddingsStatusModal", () => {
       expect(providerInfo?.textContent).toContain("v1");
     });
 
-    it("shows Ready status when not processing", async () => {
+    it("shows Needs processing when work remains", async () => {
       mockManager.isCurrentlyProcessing.mockReturnValue(false);
       await modal.onOpen();
 
       const providerInfo = (modal as any).providerInfoEl;
+      expect(providerInfo?.textContent).toContain("Needs processing");
+      expect(providerInfo?.textContent).not.toContain("Ready");
+    });
+
+    it("shows Ready only when no work or failures remain", async () => {
+      mockManager.getStats.mockReturnValue({
+        total: 100,
+        processed: 100,
+        present: 100,
+        needsProcessing: 0,
+        failed: 0,
+      });
+      await modal.onOpen();
+
+      const providerInfo = (modal as any).providerInfoEl;
       expect(providerInfo?.textContent).toContain("Ready");
+      expect(providerInfo?.textContent).not.toContain("Needs processing");
     });
 
     it("shows Processing status when processing", async () => {
@@ -231,6 +247,30 @@ describe("EmbeddingsStatusModal", () => {
       const providerInfo = (modal as any).providerInfoEl;
       expect(providerInfo?.textContent).toContain("Processing");
     });
+
+    it("lets failures override a transient processing lock everywhere", async () => {
+      mockManager.isCurrentlyProcessing.mockReturnValue(true);
+      mockManager.getStats.mockReturnValue({
+        total: 4,
+        processed: 3,
+        present: 3,
+        needsProcessing: 1,
+        failed: 1,
+      });
+
+      await modal.onOpen();
+
+      const providerText = (modal as any).providerInfoEl?.textContent;
+      expect(providerText).toContain("Needs attention");
+      expect(providerText).not.toContain("Ready");
+      expect(providerText).not.toContain("Processing");
+      expect((modal as any).progressSectionEl?.hidden).toBe(true);
+      expect((modal as any).errorSectionEl?.hidden).toBe(false);
+      expect((modal as any).errorTextEl?.textContent).toBe("1 file couldn’t be embedded. Retry it.");
+      expect((modal as any).processButton?.hidden).toBe(true);
+      expect((modal as any).retryButton?.hidden).toBe(true);
+      expect((modal as any).stopButton?.hidden).toBe(true);
+    });
   });
 
   describe("progress display", () => {
@@ -238,14 +278,14 @@ describe("EmbeddingsStatusModal", () => {
       mockManager.isCurrentlyProcessing.mockReturnValue(false);
       await modal.onOpen();
 
-      expect((modal as any).progressSectionEl?.classList.contains("is-hidden")).toBe(true);
+      expect((modal as any).progressSectionEl?.hidden).toBe(true);
     });
 
     it("shows progress section when processing", async () => {
       mockManager.isCurrentlyProcessing.mockReturnValue(true);
       await modal.onOpen();
 
-      expect((modal as any).progressSectionEl?.classList.contains("is-hidden")).toBe(false);
+      expect((modal as any).progressSectionEl?.hidden).toBe(false);
     });
 
     it("updates progress value", async () => {
@@ -284,14 +324,14 @@ describe("EmbeddingsStatusModal", () => {
       mockManager.isCurrentlyProcessing.mockReturnValue(false);
       await modal.onOpen();
 
-      expect((modal as any).processButton?.classList.contains("is-hidden")).toBe(false);
+      expect((modal as any).processButton?.hidden).toBe(false);
     });
 
     it("hides Process Vault button when processing", async () => {
       mockManager.isCurrentlyProcessing.mockReturnValue(true);
       await modal.onOpen();
 
-      expect((modal as any).processButton?.classList.contains("is-hidden")).toBe(true);
+      expect((modal as any).processButton?.hidden).toBe(true);
     });
 
     it("disables Process Vault button when nothing to process", async () => {
@@ -311,14 +351,14 @@ describe("EmbeddingsStatusModal", () => {
       mockManager.isCurrentlyProcessing.mockReturnValue(true);
       await modal.onOpen();
 
-      expect((modal as any).stopButton?.classList.contains("is-hidden")).toBe(false);
+      expect((modal as any).stopButton?.hidden).toBe(false);
     });
 
     it("hides Stop button when not processing", async () => {
       mockManager.isCurrentlyProcessing.mockReturnValue(false);
       await modal.onOpen();
 
-      expect((modal as any).stopButton?.classList.contains("is-hidden")).toBe(true);
+      expect((modal as any).stopButton?.hidden).toBe(true);
     });
 
     it("shows Retry Failed button when failed > 0 and not processing", async () => {
@@ -332,7 +372,7 @@ describe("EmbeddingsStatusModal", () => {
       });
       await modal.onOpen();
 
-      expect((modal as any).retryButton?.classList.contains("is-hidden")).toBe(false);
+      expect((modal as any).retryButton?.hidden).toBe(false);
     });
 
     it("hides Retry Failed button when failed is 0", async () => {
@@ -345,7 +385,7 @@ describe("EmbeddingsStatusModal", () => {
       });
       await modal.onOpen();
 
-      expect((modal as any).retryButton?.classList.contains("is-hidden")).toBe(true);
+      expect((modal as any).retryButton?.hidden).toBe(true);
     });
 
     it("hides Retry Failed button when processing", async () => {
@@ -359,7 +399,7 @@ describe("EmbeddingsStatusModal", () => {
       });
       await modal.onOpen();
 
-      expect((modal as any).retryButton?.classList.contains("is-hidden")).toBe(true);
+      expect((modal as any).retryButton?.hidden).toBe(true);
     });
   });
 
@@ -425,9 +465,40 @@ describe("EmbeddingsStatusModal", () => {
       mockManager.getStats.mockClear();
 
       mockEmitter.emit("embeddings:processing-complete");
+      jest.advanceTimersByTime(0);
       await Promise.resolve();
 
       expect(mockManager.getStats).toHaveBeenCalled();
+    });
+
+    it("reads settled manager state after completion instead of leaving stale progress", async () => {
+      mockManager.isCurrentlyProcessing.mockReturnValue(true);
+      mockManager.getStats.mockReturnValue({
+        total: 3,
+        processed: 1,
+        present: 1,
+        needsProcessing: 2,
+        failed: 0,
+      });
+      await modal.onOpen();
+      expect((modal as any).progressSectionEl?.hidden).toBe(false);
+
+      mockManager.isCurrentlyProcessing.mockReturnValue(false);
+      mockManager.getStats.mockReturnValue({
+        total: 3,
+        processed: 3,
+        present: 3,
+        needsProcessing: 0,
+        failed: 0,
+      });
+      mockEmitter.emit("embeddings:processing-complete", { status: "success" });
+      jest.advanceTimersByTime(0);
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect((modal as any).providerInfoEl?.textContent).toContain("Ready");
+      expect((modal as any).providerInfoEl?.textContent).not.toContain("Processing");
+      expect((modal as any).progressSectionEl?.hidden).toBe(true);
     });
 
     it("displays error on error event", async () => {
@@ -435,9 +506,18 @@ describe("EmbeddingsStatusModal", () => {
 
       mockEmitter.emit("embeddings:error", { error: { message: "Test error" } });
 
-      expect((modal as any).isInErrorState).toBe(true);
       expect((modal as any).currentErrorMessage).toBe("Test error");
-      expect((modal as any).errorSectionEl?.classList.contains("is-hidden")).toBe(false);
+      expect((modal as any).errorSectionEl?.hidden).toBe(false);
+    });
+
+    it("replaces a whitespace-only error payload with useful copy", async () => {
+      await modal.onOpen();
+
+      mockEmitter.emit("embeddings:error", { error: { message: "   \n  " } });
+
+      expect((modal as any).currentErrorMessage).toBe("Embeddings failed. Try again.");
+      expect((modal as any).errorTextEl?.textContent).toBe("Embeddings failed. Try again.");
+      expect((modal as any).errorSectionEl?.hidden).toBe(false);
     });
 
     it("clears error on recovered event", async () => {
@@ -446,9 +526,8 @@ describe("EmbeddingsStatusModal", () => {
       mockEmitter.emit("embeddings:error", { error: { message: "Test error" } });
       mockEmitter.emit("embeddings:recovered");
 
-      expect((modal as any).isInErrorState).toBe(false);
       expect((modal as any).currentErrorMessage).toBeNull();
-      expect((modal as any).errorSectionEl?.classList.contains("is-hidden")).toBe(true);
+      expect((modal as any).errorSectionEl?.hidden).toBe(true);
     });
 
     it("clears error on processing-start event", async () => {
@@ -458,7 +537,7 @@ describe("EmbeddingsStatusModal", () => {
       mockEmitter.emit("embeddings:processing-start");
       await Promise.resolve();
 
-      expect((modal as any).isInErrorState).toBe(false);
+      expect((modal as any).currentErrorMessage).toBeNull();
     });
   });
 

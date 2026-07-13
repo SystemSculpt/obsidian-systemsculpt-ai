@@ -1,24 +1,32 @@
 import { App, TFile, parseYaml, stringifyYaml } from "obsidian";
-import { ChatMessage, MessagePart } from "../../types";
-import type { SerializedToolCall, ToolCall, ToolCallResult } from "../../types/toolCalls";
+import { ChatMessage, MessagePart, type MultiPartContent } from "../../types";
+import type { ToolCall, ToolCallResult } from "../../types/toolCalls";
+import { parseAttachedTextContent } from "./attachments/ChatAttachmentContent";
+import { ChatAttachmentVaultStore } from "./attachments/ChatAttachmentVaultStore";
 import { ChatMarkdownSerializer } from "./storage/ChatMarkdownSerializer";
 import { mergeAdjacentReasoningParts } from "./utils/MessagePartCoalescing";
-import type { ChatBackend, ChatMetadata, ChatResumeDescriptor } from "./storage/ChatPersistenceTypes";
-import { detectLoadedChatBackend } from "./storage/ChatPersistenceTypes";
+import type {
+  ChatApprovalMode,
+  ChatBackend,
+  ChatMetadata,
+  ChatResumeDescriptor,
+  ManagedChatSessionBinding,
+} from "./storage/ChatPersistenceTypes";
+import {
+  detectLoadedChatBackend,
+  parseManagedChatSessionBinding,
+} from "./storage/ChatPersistenceTypes";
 
 type LoadedChatRecord = {
   id: string;
   messages: ChatMessage[];
-  /** Historical model metadata used only to classify retired Pi/provider chats. */
-  legacyModelId?: string;
   lastModified: number;
   title: string;
   version?: number;
   context_files?: string[];
   chatFontSize?: "small" | "medium" | "large";
-  selectedPromptPath?: string;
-  agentModeEnabled?: boolean;
-  hideSystemMessages?: boolean;
+  approvalMode?: ChatApprovalMode;
+  managedSession?: ManagedChatSessionBinding;
   chatPath: string;
   chatBackend: ChatBackend;
 };
@@ -27,18 +35,26 @@ type SaveChatOptions = {
   contextFiles?: Set<string>;
   title?: string;
   chatFontSize?: "small" | "medium" | "large";
-  selectedPromptPath?: string;
-  agentModeEnabled?: boolean;
-  hideSystemMessages?: boolean;
+  approvalMode?: ChatApprovalMode;
+  managedSession?: ManagedChatSessionBinding;
 };
 
 export class ChatStorageService {
   private app: App;
   private chatDirectory: string;
+  private readonly attachmentStore: ChatAttachmentVaultStore | null;
 
   constructor(app: App, chatDirectory: string) {
     this.app = app;
     this.chatDirectory = chatDirectory;
+    const adapter = (app as any)?.vault?.adapter;
+    this.attachmentStore = adapter
+      && typeof adapter.exists === "function"
+      && typeof adapter.mkdir === "function"
+      && typeof adapter.readBinary === "function"
+      && typeof adapter.writeBinary === "function"
+      ? new ChatAttachmentVaultStore(adapter)
+      : null;
   }
 
   private normalizeTag(tag: string): string {
@@ -112,7 +128,12 @@ export class ChatStorageService {
       );
       return { version };
     } catch (error) {
-      throw new Error(`Failed to save chat to ${chatId}.md`);
+      const detail = error instanceof Error && error.message.trim()
+        ? error.message.trim()
+        : "Unknown Obsidian vault error";
+      const wrapped = new Error(`Failed to save chat to ${chatId}.md: ${detail}`) as Error & { cause?: unknown };
+      wrapped.cause = error;
+      throw wrapped;
     }
   }
   
@@ -182,12 +203,13 @@ export class ChatStorageService {
         title: options.title || existingMetadata?.title || "Untitled Chat",
         version: newVersion,
         chatFontSize: options.chatFontSize || "medium",
-        selectedPromptPath: options.selectedPromptPath || existingMetadata?.selectedPromptPath || undefined,
-        agentModeEnabled: typeof options.agentModeEnabled === "boolean" ? options.agentModeEnabled : existingMetadata?.agentModeEnabled,
-        hideSystemMessages: typeof options.hideSystemMessages === "boolean" ? options.hideSystemMessages : existingMetadata?.hideSystemMessages,
+        approvalMode: options.approvalMode === "full-access" ? "full-access" : "ask",
       };
       if (existingMetadata?.chatBackend === "legacy") {
         metadata.chatBackend = "legacy";
+      }
+      if (options.managedSession?.boundChatId === chatId) {
+        metadata.managedSession = options.managedSession;
       }
 
       if (mergedTags.length > 0) {
@@ -285,11 +307,6 @@ export class ChatStorageService {
     }
   }
 
-  /** @deprecated Streaming writes are now handled by debounced saveChat() */
-  async saveStreamingMessage(): Promise<void> {
-    return;
-  }
-
   async loadChat(chatId: string): Promise<LoadedChatRecord | null> {
     try {
       const filePath = `${this.chatDirectory}/${chatId}.md`;
@@ -300,7 +317,12 @@ export class ChatStorageService {
       }
 
       const content = await this.app.vault.read(file);
-      return this.parseMarkdownContent(content, filePath);
+      const parsed = this.parseMarkdownContent(content, filePath);
+      if (!parsed) return null;
+      return {
+        ...parsed,
+        messages: await this.hydrateLoadedMessages(parsed.messages),
+      };
     } catch (error) {
       return null;
     }
@@ -393,9 +415,8 @@ export class ChatStorageService {
         context_files: processedContextFiles,
         systemMessage: legacySystemMessage,
         chatFontSize: parsed.chatFontSize as "small" | "medium" | "large" | undefined,
-        selectedPromptPath: typeof (parsed as any).selectedPromptPath === "string" && (parsed as any).selectedPromptPath.trim()
-          ? (parsed as any).selectedPromptPath.trim()
-          : undefined,
+        approvalMode: parsed.approvalMode === "full-access" ? "full-access" : "ask",
+        managedSession: parseManagedChatSessionBinding((parsed as any).managedSession, id),
         chatBackend: detectLoadedChatBackend({
           explicitBackend: (parsed as any).chatBackend,
           piSessionFile: (parsed as any).piSessionFile,
@@ -436,15 +457,13 @@ export class ChatStorageService {
     return {
       id: metadata.id,
       messages: normalizedMessages,
-      legacyModelId: metadata.model,
       lastModified: new Date(metadata.lastModified).getTime(),
       title: metadata.title,
       version: metadata.version || 0,
       context_files: metadata.context_files?.map((f) => f.path) || [],
       chatFontSize: metadata.chatFontSize,
-      selectedPromptPath: metadata.selectedPromptPath,
-      agentModeEnabled: metadata.agentModeEnabled,
-      hideSystemMessages: metadata.hideSystemMessages,
+      approvalMode: metadata.approvalMode === "full-access" ? "full-access" : "ask",
+      managedSession: parseManagedChatSessionBinding(metadata.managedSession, metadata.id),
       chatPath: filePath || `${this.chatDirectory}/${metadata.id}.md`,
       chatBackend,
     };
@@ -462,6 +481,51 @@ export class ChatStorageService {
       chatPath: record.chatPath,
       lastModified: record.lastModified,
       messageCount: record.messages.length,
+    };
+  }
+
+  private async hydrateLoadedMessages(messages: ChatMessage[]): Promise<ChatMessage[]> {
+    if (!this.attachmentStore) return messages;
+    return Promise.all(messages.map(async (message) => {
+      if (!message.attachmentMetadata?.length) return message;
+      if (!message.attachmentMetadata.every((metadata) => metadata.contentRef)) return message;
+      const hydrated = await this.hydrateMessageAttachments(message);
+      return hydrated ?? message;
+    }));
+  }
+
+  private async hydrateMessageAttachments(message: ChatMessage): Promise<ChatMessage | null> {
+    if (!message.attachmentMetadata?.length || !this.attachmentStore) return null;
+    const baseParts = Array.isArray(message.content)
+      ? [...message.content]
+      : (typeof message.content === "string" && message.content.trim().length > 0)
+        ? [{ type: "text" as const, text: message.content }]
+        : [];
+    const prefixText = baseParts
+      .map((part) => {
+        if (part.type !== "text") return "";
+        return parseAttachedTextContent(part.text) ? "" : part.text;
+      })
+      .filter((text) => text.trim().length > 0);
+    const rebuilt: MultiPartContent[] = [];
+    if (prefixText.length > 0) {
+      rebuilt.push({ type: "text", text: prefixText.join("\n\n").replace(/^\r?\n/, "") });
+    }
+    const rebuiltMetadata = [...message.attachmentMetadata]
+      .sort((left, right) => left.contentPartIndex - right.contentPartIndex);
+    for (const metadata of rebuiltMetadata) {
+      if (!metadata.contentRef) continue;
+      const part = await this.attachmentStore.hydrateContentPart(metadata, { strict: false });
+      if (part) rebuilt.push(part);
+    }
+    if (rebuilt.length === 0) return null;
+    return {
+      ...message,
+      content: rebuilt,
+      attachmentMetadata: rebuiltMetadata.map((metadata, index) => ({
+        ...metadata,
+        contentPartIndex: prefixText.length > 0 ? index + 1 : index,
+      })),
     };
   }
 
@@ -832,22 +896,6 @@ export class ChatStorageService {
     return hasYamlStructure || hasExpectedFields;
   }
 
-  async getMetadata(chatId: string): Promise<ChatMetadata | null> {
-    try {
-      const filePath = `${this.chatDirectory}/${chatId}.md`;
-      const file = this.app.vault.getAbstractFileByPath(filePath);
-
-      if (!(file instanceof TFile)) {
-        return null;
-      }
-
-      const content = await this.app.vault.read(file);
-      return this.parseMetadata(content);
-    } catch (error) {
-      return null;
-    }
-  }
-
   private generateMessageId(): string {
     return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
       const r = (Math.random() * 16) | 0;
@@ -856,57 +904,4 @@ export class ChatStorageService {
     });
   }
 
-  private standardizeToolCalls(
-    toolCalls: any[],
-    messageId: string
-  ): ToolCall[] {
-    if (!toolCalls) return [];
-    const normalizeToolState = (state: unknown): ToolCall["state"] => {
-      if (state === "executing" || state === "completed" || state === "failed") {
-        return state;
-      }
-      return "completed";
-    };
-
-    return toolCalls.map((tc) => {
-      // It's already in the new format if it has a `request` object.
-      if (tc.request?.function) {
-        // Ensure result is properly structured, guarding against older data.
-        if (tc.result && tc.result.success === undefined) {
-          tc.result = { success: true, data: tc.result };
-        }
-        tc.state = normalizeToolState(tc.state);
-        return tc as ToolCall;
-      }
-
-      // It's in the old, flat format. Convert it.
-      if (tc.function) {
-        const result = tc.result;
-        let standardizedResult: ToolCallResult | undefined = undefined;
-        if (result) {
-          if (result.success !== undefined) {
-            standardizedResult = result as ToolCallResult;
-          } else {
-            standardizedResult = { success: true, data: result };
-          }
-        }
-
-        return {
-          id: tc.id,
-          messageId: messageId,
-          request: {
-            id: tc.id,
-            type: tc.type,
-            function: tc.function,
-          },
-          state: normalizeToolState(tc.state),
-          timestamp: tc.timestamp || Date.now(),
-          result: standardizedResult,
-        } as ToolCall;
-      }
-
-      // Return as-is if the format is unrecognized
-      return tc;
-    });
-  }
 }

@@ -18,27 +18,20 @@
 
 /* Shared components */
 @import 'components/system-feedback.css';
-@import 'components/messages.css';
-@import 'components/chat-blocks.css';
-@import 'components/chat-chips.css';
-@import 'components/chat-status.css';
-@import 'components/streaming-indicator.css';
-@import 'components/slash-commands.css';
 @import 'components/resume-chat.css';
-@import 'components/large-text.css';
 @import 'components/context-selection.css';
+@import 'components/chat-attachments.css';
 @import 'components/history.css';
 @import 'components/recorder.css';
 @import 'components/diff-viewer.css';
 @import 'components/automations.css';
-@import 'components/update-drawer.css';
-@import 'components/mermaid.css';
 
 /* Modal system */
 @import 'modals/modal.css';
 @import 'modals/chat-settings.css';
 @import 'modals/janitor.css';
 @import 'modals/changelog.css';
+@import 'modals/version-update.css';
 @import 'modals/embeddings-status.css';
 @import 'modals/credits-balance.css';
 @import 'modals/bulk-automation.css';
@@ -48,7 +41,7 @@
 @import 'modals/misc-modals.css';
 
 /* Views */
-@import 'views/chat.css';
+@import 'views/agent-workspace.css';
 @import 'views/settings.css';
 @import 'views/similar-notes.css';
 @import 'views/preview.css';

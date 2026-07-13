@@ -8,7 +8,7 @@
  * Full unit and integration work belong to their dedicated commands.
  */
 
-import { execSync } from "node:child_process";
+import { exec, execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { buildProductionPlugin } from "./plugin-artifacts.mjs";
@@ -58,6 +58,23 @@ function run(command, options = {}) {
   }
 }
 
+function runAsync(command, options = {}) {
+  const startedAt = Date.now();
+  const { timeoutMs = defaultTimeoutMs, ...execOptions } = options;
+  return new Promise((resolve) => {
+    exec(command, {
+      cwd: root,
+      encoding: "utf8",
+      timeout: timeoutMs,
+      ...execOptions,
+    }, (error, stdout, stderr) => {
+      resolve(error
+        ? { ok: false, ms: Date.now() - startedAt, stdout: stdout || "", stderr: stderr || "", error }
+        : { ok: true, ms: Date.now() - startedAt, stdout: stdout || "" });
+    });
+  });
+}
+
 function checkCss() {
   const cssDir = path.join(root, "src", "css");
   if (!fs.existsSync(cssDir)) return { ok: true, ms: 0, note: "no-css" };
@@ -98,18 +115,26 @@ function checkBundle() {
 }
 
 async function main() {
-  const results = [
-    { name: "css", ...checkCss() },
-    { name: "types", ...run("npm run check:types") },
-    { name: "bundle", ...checkBundle() },
+  const startedAt = Date.now();
+  // TypeScript and the tiny policy suite are independent child processes.
+  // Start them before the synchronous artifact build so the common edit loop
+  // pays only for the slowest gate instead of the sum of every gate.
+  const parallel = [
+    runAsync("npm run check:types").then((result) => ({ name: "types", ...result })),
   ];
 
   if (!skipTests) {
-    results.push({
-      name: "script-policy",
-      ...run(`node --test ${FAST_SCRIPT_TESTS.join(" ")}`),
-    });
+    parallel.push(
+      runAsync(`node --test ${FAST_SCRIPT_TESTS.join(" ")}`)
+        .then((result) => ({ name: "script-policy", ...result })),
+    );
   }
+
+  const results = [
+    { name: "css", ...checkCss() },
+    { name: "bundle", ...checkBundle() },
+    ...await Promise.all(parallel),
+  ];
 
   if (!fast) {
     results.push({
@@ -129,7 +154,7 @@ async function main() {
     process.exit(1);
   }
 
-  const elapsedMs = results.reduce((total, result) => total + result.ms, 0);
+  const elapsedMs = Date.now() - startedAt;
   const names = results.map((result) => result.name).join(", ");
   console.log(`[plugin] PASS${fast ? " [fast]" : ""}: ${names} (${(elapsedMs / 1000).toFixed(1)}s)`);
 }

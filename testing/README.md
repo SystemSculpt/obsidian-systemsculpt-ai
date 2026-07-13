@@ -14,16 +14,17 @@ hosted service, an installed desktop app, a physical device, or a remote host.
 ## Commands
 
 ```bash
-npm run check:plugin:fast
+npm run check
 npm test
 npm run test:embeddings
 npm run test:integration
+npm run check:full
 ```
 
-`check:plugin:fast` plus focused tests is the normal edit loop. It is bounded:
+`check` plus focused tests is the normal edit loop. It is bounded:
 TypeScript, a production artifact build, CSS, and tiny deterministic policy
-tests. Run compiled integration for bundle/composition work; reserve full unit
-and full integration for combined checkpoints.
+tests. `check:full` adds exhaustive Obsidian source and metadata lint, full unit
+and embeddings suites, compiled integration, and release-script verification.
 
 ## Local plugin reload
 

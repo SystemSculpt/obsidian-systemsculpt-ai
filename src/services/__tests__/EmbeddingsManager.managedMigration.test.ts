@@ -12,10 +12,17 @@ const legacyVector = {
   vector: new Float32Array([1, 0]),
   metadata: { namespace: "custom:old:v2:2" },
 };
+const localEmptyVector = {
+  id: "local-empty",
+  path: "Empty.md",
+  chunkId: 0,
+  vector: new Float32Array([0]),
+  metadata: { namespace: "systemsculpt:local-empty:v1:1", isEmpty: true },
+};
 const storage = {
   initialize: jest.fn(async () => undefined),
   loadEmbeddings: jest.fn(async () => undefined),
-  getAllVectors: jest.fn(async () => [managedVector, legacyVector]),
+  getAllVectors: jest.fn(async () => [managedVector, legacyVector, localEmptyVector]),
   removeIds: jest.fn(async () => undefined),
   peekBestNamespaceForPrefix: jest.fn(() => "systemsculpt:managed:v1:2"),
   purgeCorruptedVectors: jest.fn(async () => ({ removedCount: 0, correctedCount: 0, removedPaths: [], correctedPaths: [] })),
@@ -75,7 +82,7 @@ describe("EmbeddingsManager managed namespace migration", () => {
     await manager.initialize();
 
     expect(storage.removeIds).toHaveBeenCalledWith(["legacy"]);
-    expect(updateSettings).toHaveBeenCalledWith({ embeddingsVectorFormatVersion: 5 });
+    expect(updateSettings).toHaveBeenCalledWith({ embeddingsVectorFormatVersion: 6 });
     expect((manager as unknown as { provider: { expectedDimension?: number; activeNamespace?: string } }).provider)
       .toMatchObject({ expectedDimension: 2, activeNamespace: "systemsculpt:managed:v1:2" });
   });

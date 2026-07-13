@@ -17,8 +17,93 @@ import { ContextFileService } from "./ContextFileService";
 import { ChatRequestPreparationService, type ManagedChatPreparationInput } from "./chat/ChatRequestPreparationService";
 import type { AcceptedChatRequestSnapshot } from "./chat/AcceptedChatRequestSnapshot";
 import type { AcceptedChatOperation } from "./managed/ManagedTypes";
-import { MCPService } from "../mcp/MCPService";
+import { FirstPartyToolService } from "../tools/FirstPartyToolService";
 import type { ToolCall, ToolCallRequest, ToolCallResult } from "../types/toolCalls";
+
+type LocalToolFailure = {
+  location: string;
+  message: string;
+};
+
+const localToolFailureMessage = (value: unknown): string | null => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  if (typeof record.error === "string" && record.error.trim()) return record.error.trim();
+  if (record.error && typeof record.error === "object") {
+    const nestedMessage = (record.error as Record<string, unknown>).message;
+    if (typeof nestedMessage === "string" && nestedMessage.trim()) return nestedMessage.trim();
+  }
+  if (record.success === false) return "Operation reported failure.";
+  return null;
+};
+
+/**
+ * First-party tools often return an honest structured result instead of throwing.
+ * Translate those resolved failures into the same ToolCallResult failure channel
+ * used for thrown errors, while retaining the full result for agent recovery.
+ */
+export function normalizeLocalToolOutcome(data: unknown): ToolCallResult {
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    return { success: true, data };
+  }
+
+  const record = data as Record<string, unknown>;
+  const failures: LocalToolFailure[] = [];
+  let successfulOperations = 0;
+
+  const inspectEntries = (key: "results" | "files") => {
+    const entries = record[key];
+    if (!Array.isArray(entries)) return;
+    entries.forEach((entry, index) => {
+      const failureMessage = localToolFailureMessage(entry);
+      if (failureMessage) {
+        const item = entry && typeof entry === "object" && !Array.isArray(entry)
+          ? entry as Record<string, unknown>
+          : {};
+        const identity = item.path ?? item.source ?? item.file ?? index;
+        failures.push({ location: `${key}[${String(identity)}]`, message: failureMessage });
+      } else {
+        successfulOperations += 1;
+      }
+    });
+  };
+
+  inspectEntries("results");
+  inspectEntries("files");
+
+  if (Array.isArray(record.errors)) {
+    record.errors.forEach((error, index) => {
+      const message = typeof error === "string"
+        ? error.trim()
+        : localToolFailureMessage(error);
+      if (message) failures.push({ location: `errors[${index}]`, message });
+    });
+  }
+
+  const topLevelFailure = record.success === false || localToolFailureMessage(record) !== null;
+  if (!topLevelFailure && failures.length === 0) {
+    return { success: true, data };
+  }
+
+  const appliedFiles = typeof record.appliedFiles === "number" ? record.appliedFiles : 0;
+  const partial = appliedFiles > 0 || successfulOperations > 0;
+  const firstFailure = failures[0]?.message
+    ?? (typeof record.error === "string" && record.error.trim() ? record.error.trim() : null)
+    ?? "Tool operation reported failure.";
+
+  return {
+    success: false,
+    data,
+    error: {
+      code: partial ? "TOOL_PARTIAL_FAILURE" : "TOOL_OPERATION_FAILED",
+      message: partial ? `Tool operation partially failed: ${firstFailure}` : firstFailure,
+      details: {
+        failures,
+        result: data,
+      },
+    },
+  };
+}
 
 export type CreditsBalanceSnapshot = {
   includedRemaining: number;
@@ -197,13 +282,13 @@ export class SystemSculptService {
   private plugin: SystemSculptPlugin;
   private licenseService: LicenseService;
   private contextFileService: ContextFileService;
-  private mcpService: MCPService;
+  private toolService: FirstPartyToolService;
   private acceptedChatPreparation = new ChatRequestPreparationService();
 
   private managedPreparationDependencies() {
     return {
       contextFileService: this.contextFileService,
-      getAvailableTools: () => this.mcpService.getAvailableTools(),
+      getAvailableTools: () => this.toolService.getAvailableTools(),
     };
   }
 
@@ -232,7 +317,7 @@ export class SystemSculptService {
 
     this.licenseService = new LicenseService(plugin);
     this.contextFileService = new ContextFileService(plugin.app);
-    this.mcpService = new MCPService(plugin, plugin.app);
+    this.toolService = new FirstPartyToolService(plugin, plugin.app);
   }
 
   /**
@@ -543,14 +628,11 @@ export class SystemSculptService {
     }
 
     try {
-      const data = await this.mcpService.executeTool(functionName, parsedArgs, options.chatView, {
+      const data = await this.toolService.executeTool(functionName, parsedArgs, {
         timeoutMs: options.timeoutMs,
         signal: options.signal,
       });
-      return {
-        success: true,
-        data,
-      };
+      return normalizeLocalToolOutcome(data);
     } catch (error) {
       const executionCode = (error as { code?: unknown })?.code;
       return {

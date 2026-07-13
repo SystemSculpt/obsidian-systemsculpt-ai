@@ -85,7 +85,11 @@ export class ManagedJobClient {
     if (!result.response.ok) await this.imageOutputError(result, requestId);
     const response = result.response, responseRequestId = response.headers.get("x-request-id");
     const required: Record<string, string> = { "x-systemsculpt-contract": MANAGED_CAPABILITY_CONTRACT, "x-systemsculpt-job-contract": MANAGED_JOB_PROTOCOL, "x-systemsculpt-image-output-contract": MANAGED_IMAGE_OUTPUT_PROTOCOL, "x-systemsculpt-capability": "image_generation", "x-systemsculpt-output-index": String(outputIndex), "x-systemsculpt-content-sha256": expected.sha256, "content-type": expected.mime_type, "content-length": String(expected.size_bytes), "cache-control": "no-store, max-age=0", "x-content-type-options": "nosniff" };
-    if (responseRequestId !== requestId || Object.entries(required).some(([name, value]) => response.headers.get(name) !== value)) malformed("Invalid managed image output headers.");
+    const mismatchedHeaders = [
+      ...(responseRequestId === requestId ? [] : ["x-request-id"]),
+      ...Object.entries(required).filter(([name, value]) => response.headers.get(name) !== value).map(([name]) => name),
+    ];
+    if (mismatchedHeaders.length > 0) malformed(`Invalid managed image output headers: ${mismatchedHeaders.join(", ")}.`);
     const extension = expected.mime_type === "image/png" ? "png" : expected.mime_type === "image/jpeg" ? "jpg" : "webp";
     if (response.headers.get("content-disposition") !== `attachment; filename="systemsculpt-image-${outputIndex}.${extension}"`) malformed("Invalid managed image output disposition.");
     let bytes: ArrayBuffer; try { bytes = await response.arrayBuffer(); } catch (error) { if (signal?.aborted) { try { await response.body?.cancel(); } catch {} throw new DOMException("Aborted", "AbortError"); } throw error; }

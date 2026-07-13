@@ -36,7 +36,7 @@ describe("sanitizeToolCallId", () => {
     });
 
     it("preserves OpenRouter namespaced tool ids", () => {
-      const raw = "tool_default_api:mcp-filesystem_search_szyfwOy5FpnrUXatzq4y";
+      const raw = "tool_default_api:search_szyfwOy5FpnrUXatzq4y";
       const result = sanitizeToolCallId(raw, 0, state);
       expect(result).toBe(raw);
     });

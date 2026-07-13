@@ -62,7 +62,6 @@ const createPluginStub = () => {
       savedChatsDirectory: "",
       attachmentsDirectory: "",
       extractionsDirectory: "",
-      systemPromptsDirectory: "",
       showUpdateNotifications: true,
       debugMode: false,
       useLatestModelEverywhere: true,

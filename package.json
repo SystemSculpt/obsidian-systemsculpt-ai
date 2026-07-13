@@ -6,7 +6,7 @@
     "async-mutex": "^0.5.0",
     "yaml": "^2.8.1"
   },
-  "description": "Managed AI chat, transcription, semantic search, and Studio workflows inside your vault",
+  "description": "SystemSculpt AI chat, transcription, semantic search, and Studio workflows inside your vault",
   "devDependencies": {
     "@eslint/json": "^0.14.0",
     "@swc/core": "^1.15.11",
@@ -34,7 +34,7 @@
   "scripts": {
     "prepare": "node scripts/install-git-hooks.mjs",
     "build": "node esbuild.config.mjs production",
-    "check": "npm run check:plugin",
+    "check": "npm run check:plugin:fast",
     "lint:obsidian": "eslint --cache --cache-location .eslintcache -c eslint.config.mjs --max-warnings 0 \"src/**/*.{ts,tsx,mts,cts}\"",
     "lint:obsidian:fix": "npm run lint:obsidian -- --fix",
     "lint:obsidian:meta": "eslint -c eslint.meta.config.mjs --max-warnings 0 manifest.json LICENSE",
@@ -42,8 +42,9 @@
     "lint:css": "node scripts/lint-css.mjs",
     "check:plugin": "node scripts/check-plugin.mjs",
     "check:plugin:fast": "node scripts/check-plugin.mjs --fast",
-    "check:types": "tsc --noEmit --skipLibCheck",
-    "check:all": "npm run check:plugin && npm test",
+    "check:types": "tsc --noEmit --skipLibCheck --incremental --tsBuildInfoFile .cache/tsc.check.tsbuildinfo",
+    "check:full": "npm run check:plugin:obsidian && npm run check:plugin && npm test && npm run test:embeddings && npm run test:integration && npm run test:release-script",
+    "check:all": "npm run check:full",
     "dev": "node esbuild.config.mjs",
     "sync:local": "node scripts/sync-local-vaults.mjs",
     "test": "node scripts/jest.mjs --config jest.config.cjs --passWithNoTests",

@@ -1,5 +1,6 @@
 import { App, Notice, TFile, setIcon } from "obsidian";
 import type SystemSculptPlugin from "../main";
+import { StandardModal } from "../core/ui/modals/standard/StandardModal";
 
 export interface PendingAutomationFile {
   file: TFile;
@@ -16,91 +17,86 @@ export interface BulkAutomationConfirmModalOptions {
   onCancel: () => void;
 }
 
-export class BulkAutomationConfirmModal {
-  private app: App;
-  private plugin: SystemSculptPlugin;
-  private pendingFiles: PendingAutomationFile[];
-  private onConfirm: (files: PendingAutomationFile[]) => void;
-  private onCancel: () => void;
-  private container: HTMLElement | null = null;
-  private destroyed = false;
+export class BulkAutomationConfirmModal extends StandardModal {
+  private readonly pendingFiles: PendingAutomationFile[];
+  private readonly onConfirm: (files: PendingAutomationFile[]) => void;
+  private readonly onCancel: () => void;
+  private settled = false;
 
   constructor(options: BulkAutomationConfirmModalOptions) {
-    this.app = options.app;
-    this.plugin = options.plugin;
+    super(options.app);
     this.pendingFiles = options.pendingFiles;
     this.onConfirm = options.onConfirm;
     this.onCancel = options.onCancel;
+    this.setSize("small");
+    this.modalEl.addClass("ss-bulk-automation-modal");
   }
 
   open(): void {
-    this.render();
+    super.open();
   }
 
-  close(): void {
-    if (this.destroyed) return;
-    this.destroyed = true;
-    if (this.container?.parentElement) {
-      this.container.remove();
-    }
-  }
+  onOpen(): void {
+    super.onOpen();
+    const count = this.pendingFiles.length;
+    const transcriptionCount = this.pendingFiles.filter((file) => file.automationType === "transcription").length;
+    const automationCount = this.pendingFiles.filter((file) => file.automationType === "automation").length;
 
-  private render(): void {
-    this.container = document.body.createDiv({ cls: "systemsculpt-bulk-confirm-widget" });
-
-    const header = this.container.createDiv({ cls: "systemsculpt-bulk-widget-header" });
-    const iconEl = header.createDiv({ cls: "systemsculpt-bulk-widget-icon" });
-    setIcon(iconEl, "alert-triangle");
-    header.createDiv({ cls: "systemsculpt-bulk-widget-title", text: "Bulk Workflow Detected" });
-
-    const closeBtn = header.createDiv({ cls: "systemsculpt-bulk-widget-close" });
-    setIcon(closeBtn, "x");
-    closeBtn.onclick = () => {
-      this.onCancel();
-      this.close();
-    };
-
-    const body = this.container.createDiv({ cls: "systemsculpt-bulk-widget-body" });
-
-    const transcriptionCount = this.pendingFiles.filter(f => f.automationType === "transcription").length;
-    const automationCount = this.pendingFiles.filter(f => f.automationType === "automation").length;
-
-    const parts: string[] = [];
+    const summaryParts: string[] = [];
     if (transcriptionCount > 0) {
-      parts.push(`${transcriptionCount} transcription${transcriptionCount > 1 ? "s" : ""}`);
+      summaryParts.push(`${transcriptionCount} transcription${transcriptionCount > 1 ? "s" : ""}`);
     }
     if (automationCount > 0) {
-      parts.push(`${automationCount} automation${automationCount > 1 ? "s" : ""}`);
+      summaryParts.push(`${automationCount} automation${automationCount > 1 ? "s" : ""}`);
     }
 
-    body.createDiv({
-      cls: "systemsculpt-bulk-widget-description",
-      text: `${this.pendingFiles.length} files detected (${parts.join(", ")})`
+    this.addTitle("Bulk workflow detected", `${count} files are ready for automatic work.`);
+
+    const body = this.contentEl.createDiv({
+      cls: "ss-modal__custom-content ss-bulk-automation-modal__body",
+    });
+    body.createEl("p", {
+      cls: "ss-bulk-automation-modal__summary",
+      text: summaryParts.length > 0 ? summaryParts.join(" • ") : `${count} files`,
     });
 
-    body.createDiv({
-      cls: "systemsculpt-bulk-widget-info",
-      text: "Files will be processed in batches of 3 and stop on the first error"
+    const notes = body.createEl("ul", { cls: "ss-bulk-automation-modal__notes" });
+    notes.createEl("li", {
+      text: "Runs in batches of 3 and stops on the first error.",
+    });
+    notes.createEl("li", {
+      text: "Skip all marks these files as skipped until you clear them in settings > workflow.",
     });
 
-    body.createDiv({
-      cls: "systemsculpt-bulk-widget-info",
-      text: "Skip All will mark these files as skipped so they do not auto-process. Clear skips in Settings -> Workflow."
-    });
+    this.addActionButton("Skip all", () => this.handleCancel(), false);
+    this.addActionButton(`Process ${count} file${count === 1 ? "" : "s"}`, () => this.handleConfirm(), true);
+  }
 
-    const buttons = this.container.createDiv({ cls: "systemsculpt-bulk-widget-buttons" });
-
-    const skipBtn = buttons.createEl("button", { text: "Skip all (mark skipped)" });
-    skipBtn.onclick = () => {
+  onClose(): void {
+    const shouldCancel = !this.settled;
+    super.onClose();
+    if (shouldCancel) {
+      this.settled = true;
       this.onCancel();
-      this.close();
-    };
+    }
+  }
 
-    const processBtn = buttons.createEl("button", { text: `Process ${this.pendingFiles.length}`, cls: "mod-cta" });
-    processBtn.onclick = () => {
-      this.close();
-      this.onConfirm(this.pendingFiles);
-    };
+  private handleConfirm(): void {
+    if (this.settled) {
+      return;
+    }
+    this.settled = true;
+    this.onConfirm(this.pendingFiles);
+    this.close();
+  }
+
+  private handleCancel(): void {
+    if (this.settled) {
+      return;
+    }
+    this.settled = true;
+    this.onCancel();
+    this.close();
   }
 }
 
@@ -121,6 +117,7 @@ export class BulkProgressWidget {
   private totalFiles: number;
   private onStop?: () => void;
   private container: HTMLElement | null = null;
+  private minimizeButton: HTMLButtonElement | null = null;
   private progressFill: HTMLElement | null = null;
   private statusLabel: HTMLElement | null = null;
   private countLabel: HTMLElement | null = null;
@@ -141,24 +138,47 @@ export class BulkProgressWidget {
   }
 
   private render(): void {
-    this.container = document.body.createDiv({ cls: "systemsculpt-bulk-progress-widget" });
+    this.container = document.body.createDiv({
+      cls: "systemsculpt-bulk-progress-widget",
+      attr: {
+        role: "region",
+        "aria-label": "Bulk workflow progress",
+      },
+    });
 
     const header = this.container.createDiv({ cls: "systemsculpt-bulk-widget-header" });
     const iconEl = header.createDiv({ cls: "systemsculpt-bulk-widget-icon processing" });
     setIcon(iconEl, "loader");
-    header.createDiv({ cls: "systemsculpt-bulk-widget-title", text: "Processing Workflows" });
+    header.createDiv({ cls: "systemsculpt-bulk-widget-title", text: "Processing workflows" });
 
-    const hideBtn = header.createDiv({ cls: "systemsculpt-bulk-widget-close" });
-    setIcon(hideBtn, "minus");
-    hideBtn.setAttribute("aria-label", "Minimize");
-    hideBtn.onclick = () => this.toggleMinimize();
+    this.minimizeButton = header.createEl("button", {
+      cls: "systemsculpt-bulk-widget-close",
+      attr: {
+        type: "button",
+        "aria-label": "Minimize",
+        "aria-expanded": "true",
+      },
+    });
+    setIcon(this.minimizeButton, "minus");
+    this.minimizeButton.onclick = () => this.toggleMinimize();
 
     const body = this.container.createDiv({ cls: "systemsculpt-bulk-widget-body" });
 
-    this.statusLabel = body.createDiv({ cls: "systemsculpt-bulk-widget-status" });
-    this.statusLabel.setText("Starting...");
+    this.statusLabel = body.createDiv({
+      cls: "systemsculpt-bulk-widget-status",
+      attr: {
+        role: "status",
+        "aria-live": "polite",
+      },
+    });
+    this.statusLabel.setText("Starting…");
 
-    this.countLabel = body.createDiv({ cls: "systemsculpt-bulk-widget-count" });
+    this.countLabel = body.createDiv({
+      cls: "systemsculpt-bulk-widget-count",
+      attr: {
+        "aria-live": "polite",
+      },
+    });
     this.updateCountLabel();
 
     const progressTrack = body.createDiv({ cls: "systemsculpt-bulk-widget-progress-track" });
@@ -177,7 +197,14 @@ export class BulkProgressWidget {
   }
 
   private toggleMinimize(): void {
-    this.container?.toggleClass("is-minimized", !this.container.hasClass("is-minimized"));
+    const nextMinimized = !this.container?.hasClass("is-minimized");
+    this.container?.toggleClass("is-minimized", nextMinimized);
+    if (this.minimizeButton) {
+      this.minimizeButton.setAttribute("aria-expanded", nextMinimized ? "false" : "true");
+      this.minimizeButton.setAttribute("aria-label", nextMinimized ? "Expand" : "Minimize");
+      this.minimizeButton.empty();
+      setIcon(this.minimizeButton, nextMinimized ? "plus" : "minus");
+    }
   }
 
   private updateCountLabel(): void {

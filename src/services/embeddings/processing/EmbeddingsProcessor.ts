@@ -28,6 +28,10 @@ import { normalizeInPlace, toFloat32Array } from '../utils/vector';
 import { ContentPreprocessor, PreparedChunk } from "./ContentPreprocessor";
 import { errorLogger } from '../../../utils/errorLogger';
 import { ManagedEmbeddingsError } from '../providers/ManagedEmbeddingsAdapter';
+import {
+  createLocalEmptyEmbeddingMarker,
+  isLocalEmptyEmbeddingMarker,
+} from "../LocalEmptyEmbeddingMarker";
 
 export interface ProcessorConfig {
   batchSize: number;
@@ -193,6 +197,7 @@ export class EmbeddingsProcessor {
         const processed = this.preprocessor.process(content, file);
 
         if (!processed) {
+          await this.sealLocallyEmptyFile(file, content);
           fileByPath.delete(file.path);
           completedFiles += 1;
           reportProgress();
@@ -206,6 +211,7 @@ export class EmbeddingsProcessor {
         );
 
         if (chunks.length === 0) {
+          await this.sealLocallyEmptyFile(file, content);
           fileByPath.delete(file.path);
           completedFiles += 1;
           reportProgress();
@@ -213,6 +219,12 @@ export class EmbeddingsProcessor {
         }
 
         const existingVectors = await this.storage.getVectorsByPath(file.path);
+        const localEmptyMarkerIds = existingVectors
+          .filter(isLocalEmptyEmbeddingMarker)
+          .map((vector) => vector.id);
+        if (localEmptyMarkerIds.length > 0) {
+          await this.storage.removeIds(localEmptyMarkerIds);
+        }
         const vectorsByHash: Map<string, EmbeddingVector[]> = new Map();
         for (const vector of existingVectors) {
           const hash = vector.metadata?.contentHash || '';
@@ -496,6 +508,11 @@ export class EmbeddingsProcessor {
       });
       return false;
     }
+  }
+
+  private async sealLocallyEmptyFile(file: TFile, source: string): Promise<void> {
+    await this.storage.removeByPath(file.path);
+    await this.storage.storeVectors([createLocalEmptyEmbeddingMarker(file, source)]);
   }
 
 

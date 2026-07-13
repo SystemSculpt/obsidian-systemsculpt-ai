@@ -55,8 +55,6 @@ import { EventEmitter } from "./core/EventEmitter";
 import { LifecycleCoordinator, LifecycleFailureEvent } from "./core/plugin/lifecycle/LifecycleCoordinator";
 import { WorkflowEngineService } from "./services/workflow/WorkflowEngineService";
 import type { SystemSculptSearchEngine } from "./services/search/SystemSculptSearchEngine";
-import { WebResearchApiService } from "./services/web/WebResearchApiService";
-import { WebResearchCorpusService } from "./services/web/WebResearchCorpusService";
 import { relativeLineNumbersExtension } from "./editor/relative-line-numbers";
 import { type Extension } from "@codemirror/state";
 import type { StudioService } from "./studio/StudioService";
@@ -143,8 +141,6 @@ export default class SystemSculptPlugin extends Plugin {
   private diagnosticsMetricsFileName = "resource-metrics-latest.ndjson";
   private workflowEngineService: WorkflowEngineService | null = null;
   private searchEngine: SystemSculptSearchEngine | null = null;
-  private webResearchApiService: WebResearchApiService | null = null;
-  private webResearchCorpusService: WebResearchCorpusService | null = null;
   private studioService: StudioService | null = null;
   private fileExplorerStudioButtonManager: FileExplorerStudioButtonManager | null = null;
   private managedCapabilityGraph: ManagedCapabilityClientGraph | null = null;
@@ -1889,11 +1885,9 @@ export default class SystemSculptPlugin extends Plugin {
           "toggle-audio-recorder",
           "open-systemsculpt-chat",
           "open-systemsculpt-history",
-          "open-chat-history",
           "open-systemsculpt-janitor",
           "reload-obsidian",
           "open-systemsculpt-settings",
-          "change-chat-model",
           "chat-with-file",
           "suggest-edits",
           "clear-suggested-edits"
@@ -2211,20 +2205,6 @@ export default class SystemSculptPlugin extends Plugin {
     return this.youtubeTranscriptService;
   }
 
-  getWebResearchApiService(): WebResearchApiService {
-    if (!this.webResearchApiService) {
-      this.webResearchApiService = new WebResearchApiService(this);
-    }
-    return this.webResearchApiService;
-  }
-
-  getWebResearchCorpusService(): WebResearchCorpusService {
-    if (!this.webResearchCorpusService) {
-      this.webResearchCorpusService = new WebResearchCorpusService(this);
-    }
-    return this.webResearchCorpusService;
-  }
-
   public async runAutomationOnFile(
     automationId: string,
     file: TFile,
@@ -2369,29 +2349,6 @@ export default class SystemSculptPlugin extends Plugin {
         }
       }),
     });
-
-
-    
-
-    // Command: Process Embeddings
-    this.addCommand({
-      id: 'process-embeddings',
-      name: 'Process embeddings',
-      callback: this.wrapCommandCallback('process-embeddings', async () => {
-        try {
-          if (!this.settings.embeddingsEnabled) {
-            new Notice("Embeddings are disabled. Enable them in SystemSculpt AI settings.");
-            return;
-          }
-
-          // Embeddings are now fully automatic - no manual processing needed
-          new Notice("Embeddings processing is automatic. Files are processed in the background as needed.");
-        } catch (error) {
-          new Notice(`Failed to process embeddings: ${error.message}`);
-        }
-      }),
-    });
-
     // Command: Rebuild Embeddings
     this.addCommand({
       id: 'rebuild-embeddings',

@@ -1,0 +1,847 @@
+/**
+ * Agent workspace — current chat shell, conversation primitives, tools,
+ * approvals, artifacts, follow-up queue, and prompt composer.
+ */
+
+.workspace-leaf-content[data-type="systemsculpt-chat-view"] > .view-content {
+  padding: 0;
+  width: 100%;
+  max-width: none;
+}
+
+.systemsculpt-agent-workspace {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  color: var(--ss-ink);
+  background: var(--ss-surface-0);
+  font-family: var(--ss-font);
+  font-size: var(--ss-text-base);
+  container-type: inline-size;
+}
+
+/* Obsidian's button styles can override the browser's low-specificity hidden
+   rule. Keep every workspace disclosure genuinely absent when hidden. */
+.systemsculpt-agent-workspace [hidden] {
+  display: none;
+}
+
+.systemsculpt-agent-workspace.is-font-small {
+  font-size: var(--ss-text-sm);
+}
+
+.systemsculpt-agent-workspace.is-font-medium {
+  font-size: var(--ss-text-base);
+}
+
+.systemsculpt-agent-workspace.is-font-large {
+  font-size: var(--ss-text-lg);
+}
+
+.systemsculpt-agent-header {
+  z-index: var(--ss-z-raised);
+  display: flex;
+  align-items: center;
+  min-height: var(--ss-control-height-lg);
+  padding: var(--ss-space-2) var(--ss-space-3);
+  border-bottom: 1px solid var(--ss-line);
+  background: var(--ss-surface-0);
+}
+
+.systemsculpt-agent-header-title {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: var(--ss-weight-semibold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.systemsculpt-agent-header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-1);
+  margin-left: auto;
+}
+
+.systemsculpt-agent-credits {
+  min-height: var(--ss-control-height-sm);
+  padding: 0 var(--ss-space-2);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-full);
+  background: transparent;
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-xs);
+}
+
+.systemsculpt-agent-credits.is-low {
+  border-color: var(--ss-warning-line);
+  background: var(--ss-warning-tint);
+  color: var(--ss-warning);
+}
+
+.systemsculpt-agent-viewport {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.systemsculpt-agent-conversation {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ss-space-6);
+  width: min(100%, var(--ss-agent-content-width));
+  min-height: 100%;
+  margin: 0 auto;
+  padding: var(--ss-space-6) var(--ss-space-5) var(--ss-space-10);
+}
+
+.systemsculpt-agent-history,
+.systemsculpt-agent-active-run {
+  display: flex;
+  flex-direction: column;
+}
+
+.systemsculpt-agent-history {
+  gap: 0;
+}
+
+.systemsculpt-agent-active-run {
+  gap: var(--ss-space-5);
+}
+
+.systemsculpt-agent-history > .systemsculpt-agent-turn + .systemsculpt-agent-turn {
+  margin-top: var(--ss-space-5);
+}
+
+.systemsculpt-agent-history > .systemsculpt-agent-turn.is-tool-only + .systemsculpt-agent-turn.is-tool-only {
+  margin-top: var(--ss-space-1);
+}
+
+.systemsculpt-agent-turn {
+  position: relative;
+  min-width: 0;
+}
+
+.systemsculpt-agent-turn.is-user {
+  align-self: flex-end;
+  max-width: min(86%, var(--ss-agent-user-width));
+}
+
+.systemsculpt-agent-turn.is-user .systemsculpt-agent-turn-body {
+  padding: var(--ss-space-3) var(--ss-space-4);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-lg);
+  background: var(--ss-surface-2);
+}
+
+.systemsculpt-agent-turn.is-assistant {
+  width: 100%;
+}
+
+.systemsculpt-agent-message-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ss-space-2);
+  margin-top: var(--ss-space-2);
+}
+
+.systemsculpt-agent-message-attachment {
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-2);
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-md);
+  background: var(--ss-surface-1);
+}
+
+.systemsculpt-agent-message-attachment.is-file {
+  max-width: 100%;
+  min-height: var(--ss-control-height-lg);
+  padding: var(--ss-space-2) var(--ss-space-3);
+}
+
+.systemsculpt-agent-message-attachment.is-image {
+  width: min(12rem, 100%);
+  aspect-ratio: 4 / 3;
+}
+
+.systemsculpt-agent-message-attachment.is-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.systemsculpt-agent-message-attachment-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: var(--ss-ink-muted);
+}
+
+.systemsculpt-agent-message-attachment-copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.systemsculpt-agent-message-attachment-copy strong,
+.systemsculpt-agent-message-attachment-copy span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.systemsculpt-agent-message-attachment-copy span {
+  color: var(--ss-ink-faint);
+  font-size: var(--ss-text-xs);
+}
+
+.systemsculpt-agent-turn-body > :first-child,
+.systemsculpt-agent-part.is-text > :first-child {
+  margin-top: 0;
+}
+
+.systemsculpt-agent-turn-body > :last-child,
+.systemsculpt-agent-part.is-text > :last-child {
+  margin-bottom: 0;
+}
+
+.systemsculpt-agent-message-actions {
+  display: flex;
+  gap: var(--ss-space-1);
+  min-height: var(--ss-control-height-sm);
+  margin-top: var(--ss-space-1);
+  opacity: 0;
+  transition: opacity var(--ss-dur-fast) var(--ss-ease);
+}
+
+.systemsculpt-agent-turn:hover .systemsculpt-agent-message-actions,
+.systemsculpt-agent-turn:focus-within .systemsculpt-agent-message-actions {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .systemsculpt-agent-message-actions {
+    opacity: 1;
+  }
+}
+
+.systemsculpt-agent-part {
+  min-width: 0;
+}
+
+.systemsculpt-agent-part.is-status {
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-2);
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-sm);
+}
+
+.systemsculpt-agent-part.is-status .systemsculpt-agent-status-icon {
+  color: var(--ss-accent);
+}
+
+.systemsculpt-agent-part.is-status:not(.is-complete) .systemsculpt-agent-status-icon svg,
+.systemsculpt-agent-tool-icon.is-animated svg {
+  animation: ss-spin 0.9s linear infinite;
+}
+
+.systemsculpt-agent-part.is-text.is-streaming::after {
+  content: "";
+  display: inline-block;
+  width: 0.45em;
+  height: 0.9em;
+  margin-left: 0.2em;
+  border-radius: var(--ss-radius-xs);
+  background: var(--ss-accent);
+  vertical-align: -0.1em;
+  animation: ss-pulse 0.9s var(--ss-ease) infinite;
+}
+
+.systemsculpt-agent-workspace.is-reduced-motion *,
+.systemsculpt-agent-workspace.is-reduced-motion *::before,
+.systemsculpt-agent-workspace.is-reduced-motion *::after {
+  animation-duration: 0.01ms;
+  animation-iteration-count: 1;
+  scroll-behavior: auto;
+  transition-duration: 0.01ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .systemsculpt-agent-workspace *,
+  .systemsculpt-agent-workspace *::before,
+  .systemsculpt-agent-workspace *::after {
+    animation-duration: 0.01ms;
+    animation-iteration-count: 1;
+    scroll-behavior: auto;
+    transition-duration: 0.01ms;
+  }
+}
+
+.systemsculpt-agent-part.is-status svg {
+  width: var(--ss-icon-size-sm);
+  height: var(--ss-icon-size-sm);
+}
+
+.systemsculpt-agent-part.is-tool {
+  overflow: visible;
+}
+
+.systemsculpt-agent-part.is-error {
+  overflow: hidden;
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-md);
+  background: var(--ss-surface-1);
+}
+
+.systemsculpt-agent-tool-details {
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-sm);
+}
+
+.systemsculpt-agent-tool-details.is-static .systemsculpt-agent-tool-disclosure,
+.systemsculpt-agent-tool-details.is-static .systemsculpt-agent-tool-details-body {
+  display: none;
+}
+
+.systemsculpt-agent-tool-details.is-static > .systemsculpt-agent-tool-header {
+  cursor: default;
+}
+
+.systemsculpt-agent-tool-header {
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-1);
+  min-height: var(--ss-control-height-sm);
+  padding: 0 var(--ss-space-1);
+  border-radius: var(--ss-radius-sm);
+  cursor: pointer;
+  list-style: none;
+  transition: var(--ss-transition-colors);
+}
+
+.systemsculpt-agent-tool-header::-webkit-details-marker {
+  display: none;
+}
+
+.systemsculpt-agent-tool-header:hover,
+.systemsculpt-agent-tool-header:focus-visible,
+.systemsculpt-agent-tool-details[open] > .systemsculpt-agent-tool-header {
+  background: var(--ss-state-hover);
+}
+
+.systemsculpt-agent-tool-header:focus-visible {
+  outline: none;
+  box-shadow: var(--ss-ring);
+}
+
+.systemsculpt-agent-tool-disclosure,
+.systemsculpt-agent-tool-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: var(--ss-ink-faint);
+}
+
+.systemsculpt-agent-tool-disclosure {
+  transition: transform var(--ss-dur-fast) var(--ss-ease);
+}
+
+.systemsculpt-agent-tool-details[open] .systemsculpt-agent-tool-disclosure {
+  transform: rotate(90deg);
+}
+
+.systemsculpt-agent-tool-header svg {
+  width: var(--ss-icon-size-sm);
+  height: var(--ss-icon-size-sm);
+}
+
+.systemsculpt-agent-tool-state {
+  margin-left: auto;
+  flex: 0 0 auto;
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-xs);
+}
+
+.systemsculpt-agent-tool-header strong {
+  flex: 0 0 auto;
+  font-size: var(--ss-text-sm);
+  font-weight: var(--ss-weight-medium);
+}
+
+.systemsculpt-agent-tool-summary {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ss-ink-faint);
+  font-size: var(--ss-text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.systemsculpt-agent-part.is-tool.is-succeeded .systemsculpt-agent-tool-icon {
+  color: var(--ss-success);
+}
+
+.systemsculpt-agent-part.is-tool.is-failed,
+.systemsculpt-agent-part.is-tool.is-cancelled,
+.systemsculpt-agent-part.is-tool.is-outcome-unknown,
+.systemsculpt-agent-part.is-error {
+  color: var(--ss-danger);
+}
+
+.systemsculpt-agent-tool-details-body {
+  margin: var(--ss-space-1) 0 var(--ss-space-1) var(--ss-space-4);
+  overflow: hidden;
+  border-left: 1px solid var(--ss-line);
+  border-radius: 0 var(--ss-radius-sm) var(--ss-radius-sm) 0;
+  background: var(--ss-surface-1);
+}
+
+.systemsculpt-agent-tool-details-body pre {
+  max-height: var(--ss-agent-tool-details-height);
+  margin: 0;
+  padding: var(--ss-space-2) var(--ss-space-3);
+  overflow: auto;
+  background: var(--ss-surface-sunken);
+  font-family: var(--ss-font-mono);
+  font-size: var(--ss-text-xs);
+  white-space: pre-wrap;
+}
+
+.systemsculpt-agent-tool-details-body pre + .systemsculpt-agent-tool-details-label,
+.systemsculpt-agent-tool-details-body pre + .systemsculpt-agent-artifact {
+  border-top: 1px solid var(--ss-line);
+}
+
+.systemsculpt-agent-tool-details-label {
+  padding: var(--ss-space-2) var(--ss-space-3) var(--ss-space-1);
+  color: var(--ss-ink-faint);
+  font-size: var(--ss-text-xs);
+  font-weight: var(--ss-weight-semibold);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.systemsculpt-agent-tool-error {
+  padding: var(--ss-space-2) var(--ss-space-3);
+  font-size: var(--ss-text-sm);
+  color: var(--ss-danger);
+}
+
+.systemsculpt-agent-error-retry {
+  align-self: flex-start;
+  margin-top: var(--ss-space-2);
+}
+
+.systemsculpt-agent-approval {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--ss-space-3);
+  margin-top: var(--ss-space-1);
+  padding: var(--ss-space-3);
+  border: 1px solid var(--ss-warning-line);
+  border-radius: var(--ss-radius-md);
+  background: var(--ss-warning-tint);
+}
+
+.systemsculpt-agent-approval-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--ss-space-2);
+}
+
+.systemsculpt-agent-approval-actions button {
+  min-height: var(--ss-control-height);
+  padding: 0 var(--ss-space-3);
+  border-radius: var(--ss-radius-sm);
+}
+
+.systemsculpt-agent-approval-preview {
+  grid-column: 1 / -1;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--ss-warning-line);
+  border-radius: var(--ss-radius-sm);
+  background: var(--ss-surface-0);
+}
+
+.systemsculpt-agent-approval-preview .systemsculpt-inline-ops__body {
+  padding: var(--ss-space-2) var(--ss-space-3);
+}
+
+.systemsculpt-agent-approval-preview .systemsculpt-inline-diff__body + .systemsculpt-inline-diff__body {
+  border-top: 1px solid var(--ss-warning-line);
+}
+
+.systemsculpt-agent-approval-preview .systemsculpt-inline-ops ul {
+  margin: 0;
+  padding-left: var(--ss-space-4);
+}
+
+.systemsculpt-agent-approval-preview code {
+  overflow-wrap: anywhere;
+}
+
+.systemsculpt-agent-artifact {
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-2);
+  min-height: var(--ss-control-height);
+  padding: var(--ss-space-1) var(--ss-space-2) var(--ss-space-1) var(--ss-space-3);
+}
+
+.systemsculpt-agent-artifact-copy {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.systemsculpt-agent-artifact-copy > div {
+  overflow: hidden;
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.systemsculpt-agent-artifact-actions,
+.systemsculpt-agent-inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ss-space-1);
+  margin-left: auto;
+}
+
+.systemsculpt-agent-inline-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--ss-control-height-sm);
+  height: var(--ss-control-height-sm);
+  color: var(--ss-ink-muted);
+}
+
+.systemsculpt-agent-empty {
+  position: absolute;
+  inset: 0;
+  z-index: var(--ss-z-base);
+  display: grid;
+  place-content: center;
+  gap: var(--ss-space-2);
+  min-height: var(--ss-agent-empty-height);
+  color: var(--ss-ink-muted);
+  pointer-events: none;
+  text-align: center;
+}
+
+.systemsculpt-agent-empty strong {
+  color: var(--ss-ink);
+  font-size: var(--ss-text-xl);
+}
+
+.systemsculpt-agent-jump {
+  position: absolute;
+  right: var(--ss-space-5);
+  bottom: var(--ss-space-4);
+  z-index: var(--ss-z-sticky);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ss-space-2);
+  min-height: var(--ss-control-height);
+  padding: 0 var(--ss-space-3);
+  border: 1px solid var(--ss-line-strong);
+  border-radius: var(--ss-radius-full);
+  background: var(--ss-surface-2);
+  box-shadow: var(--ss-elevation-2);
+  color: var(--ss-ink);
+}
+
+.systemsculpt-agent-jump[aria-hidden="true"] {
+  display: none;
+}
+
+.systemsculpt-agent-queue {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ss-space-2);
+  width: min(100%, var(--ss-agent-content-width));
+  margin: 0 auto;
+  padding: 0 var(--ss-space-5) var(--ss-space-2);
+}
+
+.systemsculpt-agent-queue-item {
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-2);
+  padding: var(--ss-space-2) var(--ss-space-3);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-sm);
+  background: var(--ss-surface-1);
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-sm);
+}
+
+.systemsculpt-agent-queue-item span:nth-child(2) {
+  min-width: 0;
+  overflow: hidden;
+  flex: 1 1 auto;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.systemsculpt-agent-banner {
+  width: min(100%, var(--ss-agent-content-width));
+  margin: var(--ss-space-2) auto 0;
+  padding: var(--ss-space-2) var(--ss-space-3);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-sm);
+  background: var(--ss-surface-1);
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-sm);
+}
+
+.systemsculpt-agent-banner.is-error {
+  border-color: var(--ss-danger-line);
+  background: var(--ss-danger-tint);
+  color: var(--ss-danger);
+}
+
+.systemsculpt-agent-composer {
+  flex: 0 0 auto;
+  width: min(100%, var(--ss-agent-content-width));
+  margin: 0 auto;
+  padding: var(--ss-space-2) var(--ss-space-5) var(--ss-space-4);
+}
+
+.systemsculpt-agent-composer-attachments {
+  display: flex;
+  gap: var(--ss-space-2);
+  padding-bottom: var(--ss-space-2);
+  overflow-x: auto;
+}
+
+.systemsculpt-agent-composer-attachments.is-empty {
+  display: none;
+}
+
+.systemsculpt-agent-attachment {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ss-space-1);
+  min-width: 0;
+  max-width: var(--ss-agent-attachment-width);
+  padding: var(--ss-space-1) var(--ss-space-2);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-full);
+  background: var(--ss-surface-1);
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-sm);
+}
+
+.systemsculpt-agent-attachment-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.systemsculpt-agent-attachment-remove {
+  flex: 0 0 auto;
+  width: var(--ss-icon-size-lg);
+  height: var(--ss-icon-size-lg);
+}
+
+.systemsculpt-agent-prompt {
+  overflow: hidden;
+  border: 1px solid var(--ss-line-strong);
+  border-radius: var(--ss-radius-lg);
+  background: var(--ss-surface-1);
+  box-shadow: var(--ss-elevation-1);
+  transition: var(--ss-transition-colors);
+}
+
+.systemsculpt-agent-prompt:focus-within {
+  border-color: var(--ss-line-accent);
+  box-shadow: var(--ss-ring);
+}
+
+.systemsculpt-agent-prompt-input {
+  display: block;
+  width: 100%;
+  min-height: var(--ss-control-height-lg);
+  max-height: var(--ss-agent-composer-max-height);
+  padding: var(--ss-space-3) var(--ss-space-3) var(--ss-space-1);
+  overflow-y: auto;
+  resize: none;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--ss-ink);
+  font: inherit;
+  line-height: var(--ss-leading-base);
+}
+
+.systemsculpt-agent-prompt-toolbar,
+.systemsculpt-agent-prompt-tools,
+.systemsculpt-agent-prompt-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-1);
+}
+
+.systemsculpt-agent-approval-mode {
+  width: auto;
+  max-width: var(--ss-agent-attachment-width);
+  min-height: var(--ss-control-height);
+  padding: 0 var(--ss-space-6) 0 var(--ss-space-2);
+  border-color: var(--ss-line);
+  border-radius: var(--ss-radius-sm);
+  background-color: transparent;
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-xs);
+}
+
+.systemsculpt-agent-approval-mode.is-full-access {
+  border-color: var(--ss-warning-line);
+  background-color: var(--ss-warning-tint);
+  color: var(--ss-warning);
+}
+
+.systemsculpt-agent-prompt-toolbar {
+  flex-wrap: wrap;
+  min-height: var(--ss-control-height-lg);
+  padding: var(--ss-space-1) var(--ss-space-2) var(--ss-space-2);
+}
+
+.systemsculpt-agent-prompt-hint {
+  margin-left: auto;
+  color: var(--ss-ink-faint);
+  font-size: var(--ss-text-xs);
+}
+
+.systemsculpt-agent-prompt-actions {
+  margin-left: var(--ss-space-1);
+}
+
+.systemsculpt-agent-icon-button,
+.systemsculpt-agent-send,
+.systemsculpt-agent-stop {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--ss-control-height);
+  height: var(--ss-control-height);
+  border-radius: var(--ss-radius-sm);
+  color: var(--ss-ink-muted);
+}
+
+.systemsculpt-agent-icon-button.is-active {
+  background: var(--ss-accent-tint);
+  color: var(--ss-ink-accent);
+}
+
+.systemsculpt-agent-send {
+  background: var(--ss-accent);
+  color: var(--ss-ink-on-accent);
+}
+
+.systemsculpt-agent-send:hover:not(:disabled) {
+  background: var(--ss-accent-hover);
+}
+
+.systemsculpt-agent-stop {
+  background: var(--ss-danger-tint);
+  color: var(--ss-danger);
+}
+
+.systemsculpt-agent-icon-button:disabled,
+.systemsculpt-agent-send:disabled,
+.systemsculpt-agent-stop:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+@media (max-width: 500px) {
+  .systemsculpt-agent-conversation {
+    padding-right: var(--ss-space-3);
+    padding-left: var(--ss-space-3);
+  }
+
+  .systemsculpt-agent-composer,
+  .systemsculpt-agent-queue {
+    padding-right: var(--ss-space-3);
+    padding-left: var(--ss-space-3);
+  }
+
+  .systemsculpt-agent-prompt-hint {
+    display: none;
+  }
+}
+
+@container (max-width: 500px) {
+  .systemsculpt-agent-conversation {
+    padding-right: var(--ss-space-3);
+    padding-left: var(--ss-space-3);
+  }
+
+  .systemsculpt-agent-composer,
+  .systemsculpt-agent-queue {
+    padding-right: var(--ss-space-3);
+    padding-left: var(--ss-space-3);
+  }
+
+  .systemsculpt-agent-prompt-hint {
+    display: none;
+  }
+
+  .systemsculpt-agent-artifact {
+    flex-wrap: wrap;
+  }
+
+  .systemsculpt-agent-approval {
+    grid-template-columns: 1fr;
+  }
+
+  .systemsculpt-agent-approval-actions,
+  .systemsculpt-agent-approval-preview {
+    grid-column: 1;
+  }
+
+  .systemsculpt-agent-approval-actions {
+    justify-content: flex-start;
+  }
+}
+
+@container (max-width: 360px) {
+  .systemsculpt-agent-header-title {
+    max-width: 7rem;
+  }
+
+  .systemsculpt-agent-credits {
+    max-width: 4.5rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .systemsculpt-agent-approval-mode {
+    max-width: 6.5rem;
+  }
+
+  .systemsculpt-agent-tool-header {
+    align-items: center;
+    flex-wrap: nowrap;
+  }
+
+  .systemsculpt-agent-tool-summary {
+    display: none;
+  }
+}

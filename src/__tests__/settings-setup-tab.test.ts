@@ -34,7 +34,6 @@ const createPluginStub = () => {
       customProviders: [],
       enableSystemSculptProvider: false,
       useSystemSculptAsFallback: false,
-      systemPromptsDirectory: "SystemSculpt/System Prompts",
     },
     getSettingsManager: jest.fn(() => settingsManager),
     getLicenseManager: jest.fn(() => licenseManager),

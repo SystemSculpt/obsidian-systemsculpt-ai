@@ -1,5 +1,5 @@
 import { requestUrl } from "obsidian";
-import { PlatformContext } from "./PlatformContext";
+import { PlatformContext, type PlatformTransport } from "./PlatformContext";
 import { postJsonStreaming } from "../utils/streaming";
 
 export type PlatformRequestInput = {
@@ -13,19 +13,32 @@ export type PlatformRequestInput = {
   licenseKey?: string;
   preserveResponseHeaders?: boolean;
   allowTransportFallback?: boolean;
+  transport?: PlatformTransport;
+  bodyEncoding?: "json" | "raw";
+  responseEncoding?: "text" | "arrayBuffer";
 };
 
 export class PlatformRequestClient {
   public async request(input: PlatformRequestInput): Promise<Response> {
-    const platform = PlatformContext.get();
-    const transport = platform.preferredTransport({ endpoint: input.url });
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-      Accept: input.stream ? "text/event-stream" : "application/json",
-      ...(input.licenseKey ? { "x-license-key": input.licenseKey } : {}),
-      ...(input.headers || {}),
-    };
-    const body = typeof input.body === "undefined" ? undefined : JSON.stringify(input.body);
+    const rawBody = input.bodyEncoding === "raw";
+    if (rawBody && input.body !== undefined && !(input.body instanceof ArrayBuffer)) {
+      throw new TypeError("Raw platform request bodies must be an ArrayBuffer.");
+    }
+    const transport = input.transport
+      ?? PlatformContext.get().preferredTransport({ endpoint: input.url });
+    const headers: Record<string, string> = rawBody
+      ? { ...(input.headers || {}) }
+      : {
+          "Content-Type": "application/json",
+          Accept: input.stream ? "text/event-stream" : "application/json",
+          ...(input.licenseKey ? { "x-license-key": input.licenseKey } : {}),
+          ...(input.headers || {}),
+        };
+    const body = typeof input.body === "undefined"
+      ? undefined
+      : rawBody
+        ? input.body as ArrayBuffer
+        : JSON.stringify(input.body);
 
     if (input.stream && !input.preserveResponseHeaders) {
       return await postJsonStreaming(
@@ -74,8 +87,11 @@ export class PlatformRequestClient {
       : await requestPromise;
 
     const status = result.status || 500;
-    const textBody =
-      typeof result.text === "string" ? result.text : JSON.stringify(result.json || {});
+    const responseBody = input.responseEncoding === "arrayBuffer"
+      ? result.arrayBuffer
+      : typeof result.text === "string"
+        ? result.text
+        : JSON.stringify(result.json || {});
     const responseHeaders = new Headers();
     const nativeHeaders = (result as typeof result & { headers?: Record<string, string> }).headers;
     if (nativeHeaders) {
@@ -87,6 +103,6 @@ export class PlatformRequestClient {
       responseHeaders.set("Content-Type", input.stream ? "text/event-stream" : "application/json");
     }
 
-    return new Response(textBody, { status, headers: responseHeaders });
+    return new Response(responseBody, { status, headers: responseHeaders });
   }
 }

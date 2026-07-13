@@ -1,0 +1,36 @@
+/* Ephemeral message attachments. Durable vault context keeps its own owner. */
+
+.systemsculpt-agent-file-picker {
+  display: none;
+}
+
+.systemsculpt-agent-composer.is-dragging-files .systemsculpt-agent-prompt {
+  border-color: var(--ss-line-accent);
+  background: var(--ss-accent-tint);
+  box-shadow: var(--ss-ring);
+}
+
+.systemsculpt-agent-attachment.is-message {
+  background: var(--ss-surface-2);
+  color: var(--ss-ink);
+}
+
+.systemsculpt-agent-attachment.is-message.is-failed {
+  border-color: var(--ss-danger-line);
+  background: var(--ss-danger-tint);
+  color: var(--ss-danger);
+}
+
+.systemsculpt-agent-attachment-retry {
+  flex: 0 0 auto;
+  width: var(--ss-icon-size-lg);
+  height: var(--ss-icon-size-lg);
+}
+
+.systemsculpt-agent-attachment-preview {
+  width: var(--ss-icon-size-lg);
+  height: var(--ss-icon-size-lg);
+  flex: 0 0 auto;
+  border-radius: var(--ss-radius-sm);
+  object-fit: cover;
+}

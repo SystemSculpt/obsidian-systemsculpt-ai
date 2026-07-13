@@ -197,6 +197,14 @@ body {
   --ss-icon-size-sm: 14px;
   --ss-icon-size-lg: 20px;
   --ss-touch-target: 44px;
+
+  /* Agent workspace layout bounds. */
+  --ss-agent-content-width: 780px;
+  --ss-agent-user-width: 620px;
+  --ss-agent-empty-height: 320px;
+  --ss-agent-tool-details-height: 240px;
+  --ss-agent-composer-max-height: 180px;
+  --ss-agent-attachment-width: 240px;
 }
 
 /* Light themes need gentler shadows and a slightly stronger hairline. */

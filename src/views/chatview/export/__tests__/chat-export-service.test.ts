@@ -40,7 +40,7 @@ describe("ChatExportService", () => {
     const toolCall = {
       id: "call-1",
       type: "function",
-      function: { name: "mcp-filesystem_search", arguments: "{}" },
+      function: { name: "search", arguments: "{}" },
     };
 
     chatView.messages = [

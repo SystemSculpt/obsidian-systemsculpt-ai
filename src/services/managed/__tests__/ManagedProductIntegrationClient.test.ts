@@ -46,78 +46,25 @@ function createHarness(outcome: "allowed" | "license_required" = "allowed") {
 describe("ManagedProductIntegrationClient", () => {
   it("consumes the exact product-integrations-v1 fixture and exposes no generic request escape hatch", () => {
     expect(fixture.contract_version).toBe("product-integrations-v1");
+    expect(Object.keys(fixture.operations)).toEqual(["youtube_transcript", "plugin_release_info"]);
     expect(fixture.operations.plugin_release_info.path).toBe("/api/plugin/plugins/{pluginId}/latest");
     const { client } = createHarness();
     expect((client as unknown as Record<string, unknown>).request).toBeUndefined();
+    expect((client as unknown as Record<string, unknown>).webSearch).toBeUndefined();
+    expect((client as unknown as Record<string, unknown>).webFetch).toBeUndefined();
   });
 
-  it("acquires licensed admission before evaluating lazy web-search content", async () => {
+  it("acquires licensed admission before evaluating lazy YouTube content", async () => {
     const { client, requestClient, admission, licenseKey } = createHarness("license_required");
-    const prepare = jest.fn(() => ({ query: "private query", maxResults: 3 }));
+    const prepare = jest.fn(() => ({ url: "https://www.youtube.com/watch?v=ABCDEFGHIJK" }));
 
-    await expect(client.webSearch({ prepare, idempotencyKey: "web-search:stable" }))
+    await expect(client.startYouTubeTranscript({ prepare, idempotencyKey: "youtube:stable" }))
       .rejects.toMatchObject({ name: "ManagedProductIntegrationError", code: "authentication_failed" });
 
     expect(admission).toHaveBeenCalledTimes(1);
     expect(prepare).not.toHaveBeenCalled();
     expect(licenseKey).not.toHaveBeenCalled();
     expect(requestClient.inputs).toHaveLength(0);
-  });
-
-  it("sends and validates a fixed licensed web-search request", async () => {
-    const { client, requestClient } = createHarness();
-    requestClient.responses.push(jsonResponse({
-      query: "systemsculpt",
-      results: [{ title: "Result", url: "https://example.com", snippet: "Snippet" }],
-      fetchedAt: "2026-07-12T00:00:00.000Z",
-    }));
-
-    const result = await client.webSearch({
-      prepare: () => ({ query: "systemsculpt", maxResults: 3 }),
-      idempotencyKey: "web-search:stable",
-    });
-
-    expect(result.results).toHaveLength(1);
-    expect(requestClient.inputs).toEqual([expect.objectContaining({
-      url: "https://systemsculpt.com/api/plugin/web/search",
-      method: "POST",
-      licenseKey: "license-secret",
-      body: { query: "systemsculpt", max_results: 3 },
-      headers: expect.objectContaining({
-        "x-plugin-version": "6.0.0",
-        "x-request-id": REQUEST_ID,
-        "x-systemsculpt-product-contract": "product-integrations-v1",
-        "Idempotency-Key": "web-search:stable",
-      }),
-    })]);
-  });
-
-  it("requires a stable caller idempotency key for web fetch and uses the fixed route", async () => {
-    const { client, requestClient } = createHarness();
-    await expect(client.webFetch({
-      prepare: () => ({ url: "https://example.com" }),
-      idempotencyKey: "has spaces",
-    })).rejects.toThrow("idempotency");
-    expect(requestClient.inputs).toHaveLength(0);
-
-    requestClient.responses.push(jsonResponse({
-      url: "https://example.com",
-      finalUrl: "https://example.com/final",
-      title: null,
-      markdown: "# Example",
-      contentType: "text/html",
-      fetchedAt: "2026-07-12T00:00:00.000Z",
-      truncated: false,
-    }));
-    const response = await client.webFetch({
-      prepare: () => ({ url: "https://example.com", maxChars: 1000 }),
-      idempotencyKey: "web-fetch:stable",
-    });
-    expect(response.markdown).toBe("# Example");
-    expect(requestClient.inputs[0]).toMatchObject({
-      url: "https://systemsculpt.com/api/plugin/web/fetch",
-      body: { url: "https://example.com", max_chars: 1000 },
-    });
   });
 
   it("starts and polls YouTube through only the declared job routes", async () => {
@@ -170,21 +117,34 @@ describe("ManagedProductIntegrationClient", () => {
   it("rejects mismatched request IDs, forbidden fields, and malformed errors without leaking bodies", async () => {
     const { client, requestClient } = createHarness();
     requestClient.responses.push(jsonResponse(
-      { query: "q", results: [], fetchedAt: "now" },
+      { status: "synchronous", text: "transcript", lang: "en", metadata: { videoId: "ABCDEFGHIJK", availableLangs: ["en"] } },
       200,
       { ...contractHeaders, "x-request-id": "wrong" },
     ));
-    await expect(client.webSearch({ prepare: () => ({ query: "q" }), idempotencyKey: "web:q" }))
+    await expect(client.startYouTubeTranscript({
+      prepare: () => ({ url: "https://www.youtube.com/watch?v=ABCDEFGHIJK" }),
+      idempotencyKey: "youtube:mismatch",
+    }))
       .rejects.toThrow("invalid");
 
     requestClient.responses.push(jsonResponse({
-      query: "q", results: [], fetchedAt: "now", provider: "secret-vendor",
+      status: "synchronous",
+      text: "transcript",
+      lang: "en",
+      metadata: { videoId: "ABCDEFGHIJK", availableLangs: ["en"] },
+      provider: "secret-vendor",
     }));
-    await expect(client.webSearch({ prepare: () => ({ query: "q" }), idempotencyKey: "web:q2" }))
+    await expect(client.startYouTubeTranscript({
+      prepare: () => ({ url: "https://www.youtube.com/watch?v=ABCDEFGHIJK" }),
+      idempotencyKey: "youtube:forbidden",
+    }))
       .rejects.not.toThrow("secret-vendor");
 
     requestClient.responses.push(jsonResponse({ raw: "license-secret" }, 500));
-    const error = await client.webSearch({ prepare: () => ({ query: "q" }), idempotencyKey: "web:q3" })
+    const error = await client.startYouTubeTranscript({
+      prepare: () => ({ url: "https://www.youtube.com/watch?v=ABCDEFGHIJK" }),
+      idempotencyKey: "youtube:malformed",
+    })
       .catch((caught) => caught as Error);
     expect(error.message).not.toContain("license-secret");
   });

@@ -105,6 +105,19 @@ export const LEGACY_CLIENT_MODEL_KEYS_REMOVED_IN_V4: readonly string[] = [
   "mcpServers",
 ] as const;
 
+export const LEGACY_CHAT_KEYS_REMOVED_IN_V5: readonly string[] = [
+  "systemPromptsDirectory",
+  "lastUsedPromptPath",
+  "agentModeEnabled",
+  "hideSystemMessagesInChat",
+  "preserveReasoningVerbatim",
+] as const;
+
+export const LEGACY_DIRECTORY_KEYS_REMOVED_IN_V5: readonly string[] = [
+  "webResearchDirectory",
+  "verifiedDirectories",
+] as const;
+
 export interface SettingsMigrationStep {
   /** The schema version this step upgrades the settings TO (from `to - 1`). */
   readonly to: number;
@@ -175,6 +188,16 @@ export const SETTINGS_MIGRATIONS: readonly SettingsMigrationStep[] = [
       for (const key of LEGACY_CLIENT_MODEL_KEYS_REMOVED_IN_V4) {
         delete next[key];
       }
+      return next;
+    },
+  },
+  {
+    to: 5,
+    describe: "Remove retired client-owned chat prompt, mode, and directory settings",
+    migrate: (settings) => {
+      const next = { ...settings };
+      for (const key of LEGACY_CHAT_KEYS_REMOVED_IN_V5) delete next[key];
+      for (const key of LEGACY_DIRECTORY_KEYS_REMOVED_IN_V5) delete next[key];
       return next;
     },
   },

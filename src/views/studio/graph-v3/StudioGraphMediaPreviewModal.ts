@@ -1,4 +1,5 @@
-import { App, Modal, TFile } from "obsidian";
+import { App, TFile } from "obsidian";
+import { StandardModal } from "../../../core/ui/modals/standard/StandardModal";
 
 export type StudioGraphMediaPreviewModalOptions = {
   kind: "image" | "video";
@@ -50,37 +51,50 @@ export function openStudioMediaPreviewModal(
   app: App,
   options: StudioGraphMediaPreviewModalOptions
 ): void {
-  const modal = new Modal(app);
-  modal.setTitle(options.title || "Media Preview");
-  modal.contentEl.addClass("ss-studio-media-preview-modal");
+  new StudioGraphMediaPreviewModal(app, options).open();
+}
 
-  if (options.kind === "image") {
-    const imageEl = modal.contentEl.createEl("img", {
-      cls: "ss-studio-media-preview-modal-image",
-    });
-    imageEl.src = options.src;
-    imageEl.alt = options.title || "Image preview";
-    imageEl.decoding = "async";
-    imageEl.loading = "eager";
-    imageEl.draggable = false;
-  } else {
-    const videoEl = modal.contentEl.createEl("video", {
-      cls: "ss-studio-media-preview-modal-video",
-    });
-    videoEl.src = options.src;
-    videoEl.controls = true;
-    videoEl.muted = false;
-    videoEl.preload = "metadata";
-    videoEl.playsInline = true;
-    videoEl.setAttribute("aria-label", options.title || "Video preview");
+class StudioGraphMediaPreviewModal extends StandardModal {
+  constructor(app: App, private readonly options: StudioGraphMediaPreviewModalOptions) {
+    super(app);
+    this.setSize("fullwidth");
+    this.modalEl.addClass("ss-studio-media-preview-modal-shell");
   }
 
-  if (options.path) {
-    const pathEl = modal.contentEl.createEl("p", {
-      cls: "ss-studio-media-preview-modal-path",
-    });
-    pathEl.setText(options.path);
-  }
+  onOpen(): void {
+    super.onOpen();
+    const options = this.options;
+    this.addTitle(options.title || "Media preview");
+    this.contentEl.addClass("ss-studio-media-preview-modal");
 
-  modal.open();
+    if (options.kind === "image") {
+      const imageEl = this.contentEl.createEl("img", {
+        cls: "ss-studio-media-preview-modal-image",
+      });
+      imageEl.src = options.src;
+      imageEl.alt = options.title || "Image preview";
+      imageEl.decoding = "async";
+      imageEl.loading = "eager";
+      imageEl.draggable = false;
+    } else {
+      const videoEl = this.contentEl.createEl("video", {
+        cls: "ss-studio-media-preview-modal-video",
+      });
+      videoEl.src = options.src;
+      videoEl.controls = true;
+      videoEl.muted = false;
+      videoEl.preload = "metadata";
+      videoEl.playsInline = true;
+      videoEl.setAttribute("aria-label", options.title || "Video preview");
+    }
+
+    if (options.path) {
+      this.contentEl.createEl("p", {
+        cls: "ss-studio-media-preview-modal-path",
+        text: options.path,
+      });
+    }
+
+    this.addActionButton("Close", () => this.close(), true);
+  }
 }

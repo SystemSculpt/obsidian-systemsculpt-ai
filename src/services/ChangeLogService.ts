@@ -16,9 +16,10 @@ export const BUNDLED_CHANGELOG_ENTRIES: readonly ChangeLogEntry[] = Object.freez
     version: "6.0.0",
     date: "Jul 2026",
     notes: [
-      "Chat, transcription, embeddings, and Studio now use one managed SystemSculpt architecture.",
-      "Provider keys, model setup, custom endpoints, and retired client runtimes were removed.",
-      "SystemSculpt 6 is desktop-only. Existing chats remain available, and retired Pi/provider chats open read-only.",
+      "Chat, transcription, embeddings, and Studio now share one fast, reliable SystemSculpt service.",
+      "Chat is rebuilt as a native agent workspace with live tool progress, inline approvals, artifacts, retries, and queued follow-ups.",
+      "Setup is simpler, with no model or endpoint configuration required.",
+      "SystemSculpt 6 is desktop-only. Existing chats remain available; older unsupported chats open read-only.",
     ].join("\n\n"),
     url: GITHUB_API.RELEASE_URL(GITHUB_OWNER, GITHUB_REPO),
   }),

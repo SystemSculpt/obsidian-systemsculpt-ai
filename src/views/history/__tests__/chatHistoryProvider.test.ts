@@ -51,7 +51,7 @@ describe("chatHistoryProvider", () => {
     const provider = createChatHistoryProvider(plugin);
     const [entry] = await provider.loadEntries();
 
-    expect(entry.badge).toBe("Managed");
+    expect(entry.badge).toBeUndefined();
     expect(entry.subtitle).toBe("2 messages");
 
     await entry.openPrimary();

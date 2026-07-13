@@ -4,9 +4,8 @@ SystemSculpt can use built-in tools during chat when the current flow needs them
 
 ## Where tools come from
 
-- Filesystem MCP server: `src/mcp-tools/filesystem/toolDefinitions/*.ts`
-- YouTube MCP server: `src/mcp-tools/youtube/MCPYouTubeServer.ts`
-- Web research tools: `src/services/web/registerWebResearchTools.ts`
+Vault actions and YouTube transcripts are built directly into SystemSculpt. No
+separate tool server or client-side model runtime is required.
 
 ## Built-in tool list
 
@@ -15,6 +14,7 @@ SystemSculpt can use built-in tools during chat when the current flow needs them
 | `read` | Read file contents (supports pagination) |
 | `write` | Create/overwrite/append files |
 | `edit` | Apply structured edits to existing files |
+| `multi_edit` | Apply an atomic batch of edits across multiple files |
 | `create_folders` | Create folders |
 | `list_items` | List files/folders |
 | `move` | Move/rename files and folders |
@@ -24,16 +24,24 @@ SystemSculpt can use built-in tools during chat when the current flow needs them
 | `open` | Open files in Obsidian workspace |
 | `context` | Add/remove files from chat context |
 | `youtube_transcript` | Extract transcript from YouTube URL |
-| `web_search` | Search web and save corpus entries |
-| `web_fetch` | Fetch URL content and save corpus entry |
+
+## Server-owned web search
+
+The Web control asks SystemSculpt to use web search
+for that turn. Search and page retrieval happen on the server; the plugin
+receives the resulting agent events and citations. There are no client-side
+web-search tools, direct web endpoints, or web-research corpus directory.
 
 ## Approval behavior
 
-Approval logic is policy-based (`src/utils/toolPolicy.ts`).
+Choose the approval mode in the chat composer:
 
-- Auto-run by default: non-destructive filesystem tools, `youtube_transcript`, and web research tools.
-- Approval required by default: destructive filesystem tools (`write`, `edit`, `move`, `trash`).
-- Trusted/allowlisted tools can auto-run.
+- **Ask Approval** pauses before vault changes. You can deny, allow once, or allow that action until the chat closes.
+- **Full Access** runs all vault actions without pausing, including moving files or folders to trash.
+
+Read, list, find, search, open, context, and YouTube transcript actions run
+without approval. Write, edit, multi-edit, folder creation, move, and trash
+actions follow the selected approval mode.
 
 ## Paths and arguments
 
@@ -45,4 +53,4 @@ Approval logic is policy-based (`src/utils/toolPolicy.ts`).
 
 - Prefer read/search/list tools before edit/write/move/trash.
 - Deny any unclear destructive request and ask the model for a plan first.
-- Keep an allowlist only for tools you trust repeatedly.
+- Use **Allow until closed** only when you expect the same kind of change repeatedly.

@@ -1,6 +1,7 @@
 /**
  * @jest-environment node
  */
+import { TFile } from "obsidian";
 import {
   isWriteOrEditTool,
   isMoveTool,
@@ -8,8 +9,77 @@ import {
   isCreateFoldersTool,
   applyEditsLocally,
   prepareOperationsPreview,
+  prepareWriteEditPreview,
+  prepareWriteEditPreviews,
   type ToolFileEdit,
 } from "../toolCallPreview";
+
+describe("prepareWriteEditPreview", () => {
+  it("shows the true appended file instead of replacing the existing content", async () => {
+    const file = new TFile({ path: "Notes/Log.md" });
+    const app = {
+      vault: {
+        getAbstractFileByPath: jest.fn(() => file),
+        read: jest.fn(async () => "BEFORE"),
+      },
+    };
+    const preview = await prepareWriteEditPreview(app as any, {
+      id: "call-1",
+      messageId: "assistant-1",
+      request: {
+        id: "call-1",
+        type: "function",
+        function: {
+          name: "write",
+          arguments: JSON.stringify({
+            path: "Notes/Log.md",
+            content: "AFTER",
+            ifExists: "append",
+            appendNewline: true,
+          }),
+        },
+      },
+      state: "executing",
+      timestamp: 1,
+    });
+
+    expect(preview?.oldContent).toBe("BEFORE");
+    expect(preview?.newContent).toBe("BEFORE\nAFTER");
+  });
+
+  it("previews every file in a multi-file edit", async () => {
+    const first = new TFile({ path: "One.md" });
+    const second = new TFile({ path: "Two.md" });
+    const app = {
+      vault: {
+        getAbstractFileByPath: jest.fn((path: string) => path === "One.md" ? first : second),
+        read: jest.fn(async (file: TFile) => file.path === "One.md" ? "ONE" : "TWO"),
+      },
+    };
+    const previews = await prepareWriteEditPreviews(app as any, {
+      id: "call-multi",
+      messageId: "assistant-1",
+      request: {
+        id: "call-multi",
+        type: "function",
+        function: {
+          name: "multi_edit",
+          arguments: JSON.stringify({ files: [
+            { path: "One.md", edits: [{ oldText: "ONE", newText: "FIRST" }] },
+            { path: "Two.md", edits: [{ oldText: "TWO", newText: "SECOND" }] },
+          ] }),
+        },
+      },
+      state: "executing",
+      timestamp: 1,
+    });
+
+    expect(previews.map((preview) => [preview.path, preview.newContent])).toEqual([
+      ["One.md", "FIRST"],
+      ["Two.md", "SECOND"],
+    ]);
+  });
+});
 
 describe("isWriteOrEditTool", () => {
   it("returns true for write", () => {
@@ -18,14 +88,6 @@ describe("isWriteOrEditTool", () => {
 
   it("returns true for edit", () => {
     expect(isWriteOrEditTool("edit")).toBe(true);
-  });
-
-  it("returns true for mcp-prefixed write", () => {
-    expect(isWriteOrEditTool("mcp-filesystem_write")).toBe(true);
-  });
-
-  it("returns true for mcp-prefixed edit", () => {
-    expect(isWriteOrEditTool("mcp-filesystem_edit")).toBe(true);
   });
 
   it("returns false for read", () => {
@@ -46,10 +108,6 @@ describe("isMoveTool", () => {
     expect(isMoveTool("move")).toBe(true);
   });
 
-  it("returns true for mcp-prefixed move", () => {
-    expect(isMoveTool("mcp-filesystem_move")).toBe(true);
-  });
-
   it("returns false for write", () => {
     expect(isMoveTool("write")).toBe(false);
   });
@@ -62,10 +120,6 @@ describe("isMoveTool", () => {
 describe("isTrashTool", () => {
   it("returns true for trash", () => {
     expect(isTrashTool("trash")).toBe(true);
-  });
-
-  it("returns true for mcp-prefixed trash", () => {
-    expect(isTrashTool("mcp-filesystem_trash")).toBe(true);
   });
 
   it("returns false for delete", () => {
@@ -82,16 +136,12 @@ describe("isCreateFoldersTool", () => {
     expect(isCreateFoldersTool("create_folders")).toBe(true);
   });
 
-  it("returns true for mcp-prefixed create_folders", () => {
-    expect(isCreateFoldersTool("mcp-filesystem_create_folders")).toBe(true);
-  });
-
   it("returns false for create", () => {
     expect(isCreateFoldersTool("create")).toBe(false);
   });
 
-  it("returns true for mkdir alias", () => {
-    expect(isCreateFoldersTool("mkdir")).toBe(true);
+  it("rejects non-canonical aliases", () => {
+    expect(isCreateFoldersTool("mkdir")).toBe(false);
   });
 });
 
@@ -377,11 +427,11 @@ describe("prepareOperationsPreview", () => {
       expect(prepareOperationsPreview(toolCall as any)).toBeNull();
     });
 
-    it("handles mcp-prefixed move", () => {
+    it("handles canonical move", () => {
       const toolCall = {
         request: {
           function: {
-            name: "mcp-filesystem_move",
+            name: "move",
             arguments: {
               items: [{ source: "a.md", destination: "b.md" }],
             },

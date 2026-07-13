@@ -1,14 +1,5 @@
-/**
- * File-picker modals — Meeting Processor + Transcribe Audio share one
- * design language: two-column layout, searchable file list, dropzone,
- * status badges. Selectors are grouped so the two can never drift apart.
- * TS: MeetingProcessorModal.ts, TranscribeAudioFileModal.ts.
- */
+/** Audio transcription file picker. */
 
-/* ------------------------------------------------------------------ *
- * Two-column layout
- * ------------------------------------------------------------------ */
-.ss-meeting-processor,
 .ss-transcribe-audio {
   display: grid;
   grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
@@ -16,55 +7,38 @@
   padding: var(--ss-space-4) var(--ss-space-5);
 }
 
-.ss-meeting-processor--options {
-  grid-template-columns: 1fr;
-}
-
-.ss-meeting-processor__column,
 .ss-transcribe-audio__column {
   display: flex;
   flex-direction: column;
   gap: var(--ss-space-3);
+  min-width: 0;
   padding: var(--ss-space-4);
   background-color: var(--ss-surface-0);
   border: 1px solid var(--ss-line);
   border-radius: var(--ss-radius-md);
-  min-width: 0;
-}
-
-.ss-meeting-processor__column--panel {
-  background-color: var(--ss-accent-tint);
-  border-color: var(--ss-line-accent);
 }
 
 .ss-transcribe-audio__column--panel {
   background-color: var(--ss-surface-1);
 }
 
-.ss-meeting-processor__section-title,
 .ss-transcribe-audio__section-title {
   font-size: var(--ss-text-base);
   font-weight: var(--ss-weight-semibold);
   letter-spacing: var(--ss-tracking-tight);
 }
 
-.ss-meeting-processor__section-hint,
 .ss-transcribe-audio__section-hint {
-  font-size: var(--ss-text-sm);
   color: var(--ss-ink-muted);
+  font-size: var(--ss-text-sm);
 }
 
-/* ------------------------------------------------------------------ *
- * Search
- * ------------------------------------------------------------------ */
-.ss-meeting-processor__search,
 .ss-transcribe-audio__search {
   position: relative;
   display: flex;
   align-items: center;
 }
 
-.ss-meeting-processor__search-icon,
 .ss-transcribe-audio__search-icon {
   position: absolute;
   left: var(--ss-space-3);
@@ -74,7 +48,6 @@
   pointer-events: none;
 }
 
-.ss-meeting-processor__search-input,
 .ss-transcribe-audio__search-input {
   width: 100%;
   min-height: var(--ss-control-height);
@@ -87,58 +60,20 @@
   transition: var(--ss-transition-colors);
 }
 
-.ss-meeting-processor__search-input:focus,
 .ss-transcribe-audio__search-input:focus {
   border-color: var(--ss-accent);
   box-shadow: var(--ss-ring);
   outline: none;
 }
 
-/* Filters */
-.ss-meeting-processor__filters {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--ss-space-2);
-}
-
-.ss-meeting-processor__filter {
-  display: inline-flex;
-  align-items: center;
-  min-height: var(--ss-control-height-sm);
-  padding: 0 var(--ss-space-3);
-  background-color: var(--ss-surface-1);
-  border: 1px solid var(--ss-line);
-  border-radius: var(--ss-radius-full);
-  color: var(--ss-ink-muted);
-  font-size: var(--ss-text-sm);
-  cursor: pointer;
-  transition: var(--ss-transition-colors);
-}
-
-.ss-meeting-processor__filter:hover {
-  background-color: var(--ss-surface-2);
-  color: var(--ss-ink);
-}
-
-.ss-meeting-processor__filter.is-active {
-  background-color: var(--ss-accent-tint-strong);
-  border-color: var(--ss-line-accent);
-  color: var(--ss-ink-accent);
-}
-
-/* ------------------------------------------------------------------ *
- * File list
- * ------------------------------------------------------------------ */
-.ss-meeting-processor__list,
 .ss-transcribe-audio__list {
-  max-height: 400px;
-  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: var(--ss-space-0);
+  max-height: 400px;
+  overflow-y: auto;
 }
 
-.ss-meeting-processor__file,
 .ss-transcribe-audio__file {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -151,36 +86,15 @@
   transition: var(--ss-transition-colors);
 }
 
-.ss-meeting-processor__file:hover,
 .ss-transcribe-audio__file:hover {
   background-color: var(--ss-state-hover);
 }
 
-.ss-meeting-processor__file.is-selected,
 .ss-transcribe-audio__file.is-selected {
   background-color: var(--ss-accent-tint);
   border-color: var(--ss-line-accent);
 }
 
-.ss-meeting-processor__file-name,
-.ss-transcribe-audio__file-name {
-  font-size: var(--ss-text-base);
-  font-weight: var(--ss-weight-medium);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.ss-meeting-processor__file-path,
-.ss-transcribe-audio__file-path {
-  font-size: var(--ss-text-xs);
-  color: var(--ss-ink-muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.ss-meeting-processor__file-meta,
 .ss-transcribe-audio__file-meta {
   display: flex;
   flex-direction: column;
@@ -188,59 +102,52 @@
   min-width: 0;
 }
 
-.ss-meeting-processor__file-badge-stack,
+.ss-transcribe-audio__file-name {
+  overflow: hidden;
+  font-size: var(--ss-text-base);
+  font-weight: var(--ss-weight-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ss-transcribe-audio__file-path {
+  overflow: hidden;
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .ss-transcribe-audio__file-badge-stack {
   display: flex;
   align-items: center;
   gap: var(--ss-space-1);
 }
 
-.ss-meeting-processor__file-badge,
 .ss-transcribe-audio__file-badge {
   display: inline-flex;
   align-items: center;
   gap: var(--ss-space-1);
   padding: 0 var(--ss-space-2);
+  background-color: var(--ss-surface-1);
   border: 1px solid var(--ss-line);
   border-radius: var(--ss-radius-full);
-  background-color: var(--ss-surface-1);
-  font-size: var(--ss-text-xs);
   color: var(--ss-ink-muted);
+  font-size: var(--ss-text-xs);
   white-space: nowrap;
 }
 
-.ss-meeting-processor__file-badge-icon,
 .ss-transcribe-audio__file-badge-icon {
   display: inline-flex;
   align-items: center;
 }
 
-.ss-meeting-processor__file-badge--modified,
 .ss-transcribe-audio__file-badge--modified {
   background-color: var(--ss-info-tint);
   border-color: var(--ss-info-line);
   color: var(--ss-info);
 }
 
-/* Processed-state badges */
-.ss-meeting-processor__file-badge--status.is-processed {
-  background-color: var(--ss-success-tint);
-  border-color: var(--ss-success-line);
-  color: var(--ss-success);
-}
-
-.ss-meeting-processor__file-badge--status.is-stale {
-  background-color: var(--ss-warning-tint);
-  border-color: var(--ss-warning-line);
-  color: var(--ss-warning);
-}
-
-.ss-meeting-processor__file-badge--status.is-unprocessed {
-  color: var(--ss-ink-faint);
-}
-
-/* Empty / more */
-.ss-meeting-processor__empty,
 .ss-transcribe-audio__empty {
   display: flex;
   flex-direction: column;
@@ -251,28 +158,21 @@
   text-align: center;
 }
 
-.ss-meeting-processor__empty-icon,
 .ss-transcribe-audio__empty-icon {
   color: var(--ss-ink-faint);
 }
 
-.ss-meeting-processor__empty-text,
 .ss-transcribe-audio__empty-text {
   font-size: var(--ss-text-sm);
 }
 
-.ss-meeting-processor__more,
 .ss-transcribe-audio__more {
   padding: var(--ss-space-2);
-  font-size: var(--ss-text-xs);
   color: var(--ss-ink-faint);
+  font-size: var(--ss-text-xs);
   text-align: center;
 }
 
-/* ------------------------------------------------------------------ *
- * Dropzone
- * ------------------------------------------------------------------ */
-.ss-meeting-processor__dropzone,
 .ss-transcribe-audio__dropzone {
   display: flex;
   flex-direction: column;
@@ -287,33 +187,27 @@
   transition: var(--ss-transition-colors);
 }
 
-.ss-meeting-processor__dropzone.is-dragging,
 .ss-transcribe-audio__dropzone.is-dragging {
-  border-color: var(--ss-accent);
   background-color: var(--ss-accent-tint);
+  border-color: var(--ss-accent);
   color: var(--ss-ink-accent);
 }
 
-.ss-meeting-processor__drop-main,
 .ss-transcribe-audio__drop-main {
+  color: var(--ss-ink);
   font-size: var(--ss-text-base);
   font-weight: var(--ss-weight-medium);
-  color: var(--ss-ink);
 }
 
-.ss-meeting-processor__drop-sub,
-.ss-meeting-processor__drop-hint,
 .ss-transcribe-audio__drop-sub,
 .ss-transcribe-audio__drop-hint {
   font-size: var(--ss-text-sm);
 }
 
-.ss-meeting-processor__drop-icon,
 .ss-transcribe-audio__drop-icon {
   color: var(--ss-ink-faint);
 }
 
-.ss-meeting-processor__file-input,
 .ss-transcribe-audio__file-input {
   display: none;
 }
@@ -324,136 +218,41 @@
   gap: var(--ss-space-2);
 }
 
-/* ------------------------------------------------------------------ *
- * Selection + preview
- * ------------------------------------------------------------------ */
-.ss-meeting-processor__selection,
 .ss-transcribe-audio__selection {
   font-size: var(--ss-text-sm);
 }
 
-.ss-meeting-processor__selection-path,
 .ss-transcribe-audio__selection-path {
+  color: var(--ss-ink-muted);
   font-family: var(--ss-font-mono);
   font-size: var(--ss-text-xs);
-  color: var(--ss-ink-muted);
   word-break: break-all;
 }
 
 .ss-transcribe-audio__selection-output {
-  font-size: var(--ss-text-xs);
   color: var(--ss-ink-muted);
+  font-size: var(--ss-text-xs);
 }
 
-.ss-meeting-processor__selection-empty,
 .ss-transcribe-audio__selection-empty {
-  font-size: var(--ss-text-sm);
   color: var(--ss-ink-faint);
+  font-size: var(--ss-text-sm);
   font-style: italic;
 }
 
-.ss-meeting-processor__preview,
-.ss-transcribe-audio__preview {
-  display: flex;
-  flex-direction: column;
-  gap: var(--ss-space-2);
-}
-
-.ss-meeting-processor__audio,
-.ss-transcribe-audio__audio {
-  width: 100%;
-}
-
-.ss-meeting-processor__process-btn,
-.ss-transcribe-audio__transcribe-btn {
-  align-self: flex-start;
-}
-
-.ss-meeting-processor__progress {
-  display: none;
-}
-
-/* ------------------------------------------------------------------ *
- * Options step (meeting processor)
- * ------------------------------------------------------------------ */
-.ss-meeting-processor__option-list {
-  display: flex;
-  flex-direction: column;
-  gap: var(--ss-space-2);
-}
-
-.ss-meeting-processor__option {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: var(--ss-space-2);
-  padding: var(--ss-space-2) var(--ss-space-3);
-  border: 1px solid var(--ss-line);
-  border-radius: var(--ss-radius-sm);
-  cursor: pointer;
-  transition: var(--ss-transition-colors);
-}
-
-.ss-meeting-processor__option:hover {
-  background-color: var(--ss-state-hover);
-}
-
-.ss-meeting-processor__option-checkbox {
-  accent-color: var(--ss-accent);
-}
-
-.ss-meeting-processor__option-body {
-  min-width: 0;
-}
-
-.ss-meeting-processor__option-title {
-  font-size: var(--ss-text-base);
-  font-weight: var(--ss-weight-medium);
-}
-
-.ss-meeting-processor__option-desc {
-  font-size: var(--ss-text-sm);
-  color: var(--ss-ink-muted);
-}
-
-.ss-meeting-processor__field {
-  display: flex;
-  flex-direction: column;
-  gap: var(--ss-space-1);
-}
-
-.ss-meeting-processor__field-label {
-  font-size: var(--ss-text-sm);
-  font-weight: var(--ss-weight-medium);
-}
-
-.ss-meeting-processor__field-input {
-  min-height: var(--ss-control-height);
-  padding: 0 var(--ss-space-3);
-  background-color: var(--ss-surface-sunken);
-  border: 1px solid var(--ss-line);
-  border-radius: var(--ss-radius-sm);
-  color: var(--ss-ink);
-  transition: var(--ss-transition-colors);
-}
-
-.ss-meeting-processor__field-input:focus {
-  border-color: var(--ss-accent);
-  box-shadow: var(--ss-ring);
-  outline: none;
-}
-
-.ss-meeting-processor__field-hint {
-  font-size: var(--ss-text-xs);
-  color: var(--ss-ink-faint);
-}
-
-/* ------------------------------------------------------------------ *
- * Output options (transcribe audio)
- * ------------------------------------------------------------------ */
+.ss-transcribe-audio__preview,
 .ss-transcribe-audio__output {
   display: flex;
   flex-direction: column;
   gap: var(--ss-space-2);
+}
+
+.ss-transcribe-audio__audio {
+  width: 100%;
+}
+
+.ss-transcribe-audio__transcribe-btn {
+  align-self: flex-start;
 }
 
 .ss-transcribe-audio__output-options {
@@ -481,7 +280,8 @@
   border-color: var(--ss-line-accent);
 }
 
-.ss-transcribe-audio__output-radio {
+.ss-transcribe-audio__output-radio,
+.ss-transcribe-audio__output-hide-checkbox {
   accent-color: var(--ss-accent);
 }
 
@@ -495,8 +295,8 @@
 }
 
 .ss-transcribe-audio__output-option-detail {
-  font-size: var(--ss-text-sm);
   color: var(--ss-ink-muted);
+  font-size: var(--ss-text-sm);
 }
 
 .ss-transcribe-audio__output-hide {
@@ -505,28 +305,20 @@
   gap: var(--ss-space-2);
 }
 
-.ss-transcribe-audio__output-hide-checkbox {
-  accent-color: var(--ss-accent);
-}
-
 .ss-transcribe-audio__output-hide-label {
-  font-size: var(--ss-text-sm);
   color: var(--ss-ink-muted);
+  font-size: var(--ss-text-sm);
 }
 
 .ss-transcribe-audio__output-static {
   padding: var(--ss-space-2) var(--ss-space-3);
   border: 1px dashed var(--ss-line-strong);
   border-radius: var(--ss-radius-sm);
-  font-size: var(--ss-text-sm);
   color: var(--ss-ink-muted);
+  font-size: var(--ss-text-sm);
 }
 
-/* ------------------------------------------------------------------ *
- * Responsive
- * ------------------------------------------------------------------ */
 @media (max-width: 960px) {
-  .ss-meeting-processor,
   .ss-transcribe-audio {
     grid-template-columns: 1fr;
   }

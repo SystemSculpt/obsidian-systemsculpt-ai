@@ -45,14 +45,23 @@
 }
 
 .ss-context-file-item {
-  display: flex;
+  border: 1px solid transparent;
+  border-radius: var(--ss-radius-sm);
+  transition: var(--ss-transition-colors);
+}
+
+.ss-context-file-label {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
   align-items: center;
   gap: var(--ss-space-2);
   padding: var(--ss-space-2) var(--ss-space-3);
-  border: 1px solid transparent;
-  border-radius: var(--ss-radius-sm);
   cursor: pointer;
-  transition: var(--ss-transition-colors);
+}
+
+.ss-context-file-label > input {
+  margin: 0;
+  accent-color: var(--ss-accent);
 }
 
 .ss-context-file-item:hover {
@@ -64,13 +73,12 @@
   border-color: var(--ss-line-accent);
 }
 
-.ss-context-file-item.is-disabled {
-  opacity: 0.5;
-  pointer-events: none;
-}
-
 .ss-context-file-item.is-attached {
   border-left: 2px solid var(--ss-success);
+}
+
+.ss-context-file-item.is-attached .ss-context-file-label {
+  cursor: default;
 }
 
 .ss-context-file-icon {
@@ -120,4 +128,9 @@
 .ss-context-load-more {
   align-self: center;
   margin: var(--ss-space-2) 0;
+}
+
+.ss-context-load-more-item {
+  display: flex;
+  justify-content: center;
 }

@@ -1,217 +1,141 @@
 /** @jest-environment jsdom */
 
-/**
- * Tests for PopupModal — the popup used for OAuth code input.
- *
- * These tests expose the UX problems with the current popup:
- * - Input is not auto-focused
- * - Long URLs are hard to paste (single-line text input, not a textarea)
- * - No visual context about what's happening (generic message)
- */
-
 import { App } from "obsidian";
 import { PopupComponent, showPopup } from "../PopupModal";
 
 describe("PopupModal", () => {
-  beforeEach(() => {
-    document.body.textContent = "";
-  });
+  afterEach(() => document.body.empty());
 
-  it("creates a popup with the correct structure", async () => {
-    const popup = new PopupComponent(new App(), "Test message", {
+  it("uses the shared modal shell and focuses the first field", () => {
+    const popup = new PopupComponent(new App(), "Paste the redirect URL.", {
+      title: "Connect account",
+      description: "Use Cmd/Ctrl+Enter to submit a textarea.",
+      icon: "link",
       primaryButton: "Submit",
-      secondaryButton: "Cancel",
+      inputs: [{ type: "textarea", placeholder: "https://...", required: true }],
     });
 
-    // Start the popup (don't await — it blocks until user action)
-    const resultPromise = popup.open();
+    void popup.open();
 
-    const container = document.querySelector(".systemsculpt-popup-container");
-    expect(container).toBeTruthy();
+    const textarea = popup.modalEl.querySelector<HTMLTextAreaElement>("textarea");
+    expect(popup.modalEl.classList.contains("ss-modal")).toBe(true);
+    expect(popup.modalEl.classList.contains("ss-popup-modal")).toBe(true);
+    expect(popup.modalEl.getAttribute("role")).toBe("dialog");
+    expect(popup.modalEl.textContent).toContain("Connect account");
+    expect(popup.modalEl.textContent).toContain("Paste the redirect URL.");
+    expect(popup.modalEl.textContent).toContain("Use Cmd/Ctrl+Enter");
+    expect(popup.modalEl.querySelector(".systemsculpt-popup-container")).toBeNull();
+    expect(textarea).not.toBeNull();
+    expect(document.activeElement).toBe(textarea);
 
-    const message = container?.querySelector(".systemsculpt-popup-message");
-    expect(message?.textContent).toBe("Test message");
-
-    const buttons = container?.querySelectorAll("button");
-    expect(buttons?.length).toBe(2);
-
-    // Close it
-    const cancelBtn = buttons?.[0];
-    cancelBtn?.click();
-
-    // Wait for close animation
-    await new Promise((resolve) => setTimeout(resolve, 250));
-    const result = await resultPromise;
-    expect(result?.confirmed).toBe(false);
+    const submit = Array.from(popup.modalEl.querySelectorAll<HTMLButtonElement>("button"))
+      .find((button) => button.textContent === "Submit");
+    expect(submit?.disabled).toBe(true);
   });
 
-  it("creates text inputs when configured", async () => {
-    const resultPromise = showPopup(new App(), "Paste the authorization code or redirect URL:", {
+  it("submits values without leaking the checkbox into the inputs array", async () => {
+    const resultPromise = showPopup(new App(), "Paste the authorization code.", {
+      title: "Manual sign in",
       primaryButton: "Submit",
-      secondaryButton: "Cancel",
-      inputs: [{ type: "text", placeholder: "https://..." }],
+      checkboxLabel: "Remember this choice",
+      inputs: [{ type: "text", placeholder: "Code", required: true }],
     });
 
-    const container = document.querySelector(".systemsculpt-popup-container");
-    const input = container?.querySelector("input.systemsculpt-popup-input") as HTMLInputElement;
+    const modalEl = document.body.querySelector<HTMLElement>(".ss-popup-modal")!;
+    const input = modalEl.querySelector<HTMLInputElement>('input[type="text"]')!;
+    const checkbox = modalEl.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
+    const submit = Array.from(modalEl.querySelectorAll<HTMLButtonElement>("button"))
+      .find((button) => button.textContent === "Submit")!;
 
-    expect(input).toBeTruthy();
-    expect(input?.type).toBe("text");
+    input.value = "oauth-code";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    checkbox.checked = true;
+    submit.click();
 
-    // NOTE: The Obsidian mock's createEl doesn't propagate the `placeholder`
-    // property from the options object (only `cls`, `text`, `attr`, `value`).
-    // In real Obsidian, the placeholder IS set. The test documents the gap.
-
-    // BUG: Input is NOT auto-focused after popup creation.
-    // In a real browser, the user has to manually click into the input.
-    // This is extra friction when they're trying to paste a URL.
-    expect(document.activeElement).not.toBe(input);
-
-    // Clean up - cancel the popup
-    const cancelBtn = Array.from(container?.querySelectorAll("button") ?? []).find(
-      (b) => b.textContent === "Cancel"
-    );
-    cancelBtn?.click();
-    await new Promise((resolve) => setTimeout(resolve, 250));
-    await resultPromise;
+    await expect(resultPromise).resolves.toEqual({
+      confirmed: true,
+      action: "primary",
+      inputs: ["oauth-code"],
+      checkboxChecked: true,
+    });
   });
 
-  it("uses a text input instead of textarea for long URLs (UX issue)", async () => {
-    // The OAuth redirect URL can be very long:
-    // http://localhost:1455/auth/callback?code=VERY_LONG_CODE&state=LONG_STATE
-    // A single-line <input type="text"> truncates the visible content,
-    // making it hard to verify what was pasted.
+  it("resolves the secondary action separately from cancellation", async () => {
+    const popup = new PopupComponent(new App(), "Discard the current draft?", {
+      title: "Discard draft",
+      primaryButton: "Discard",
+      secondaryButton: "Keep editing",
+    });
 
-    const resultPromise = showPopup(new App(), "Paste the authorization code or redirect URL:", {
+    const result = popup.open();
+    Array.from(popup.modalEl.querySelectorAll<HTMLButtonElement>("button"))
+      .find((button) => button.textContent === "Keep editing")
+      ?.click();
+
+    await expect(result).resolves.toEqual({
+      confirmed: false,
+      action: "secondary",
+    });
+  });
+
+  it("cancels from Escape and the close button", async () => {
+    const first = new PopupComponent(new App(), "Test message");
+    const firstResult = first.open();
+    first.modalEl.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await expect(firstResult).resolves.toEqual({
+      confirmed: false,
+      action: "cancel",
+    });
+
+    const second = new PopupComponent(new App(), "Another message", { title: "Heads up" });
+    const secondResult = second.open();
+    second.modalEl.querySelector<HTMLButtonElement>('[aria-label="Close"]')?.click();
+    await expect(secondResult).resolves.toEqual({
+      confirmed: false,
+      action: "cancel",
+    });
+  });
+
+  it("submits from Enter on single-line fields and keeps textarea Enter free", async () => {
+    const singleLine = showPopup(new App(), "Enter should submit here.", {
       primaryButton: "Submit",
-      secondaryButton: "Cancel",
-      inputs: [{ type: "text", placeholder: "https://..." }],
+      inputs: [{ type: "text", placeholder: "Code", required: true }],
     });
 
-    const container = document.querySelector(".systemsculpt-popup-container");
-    const input = container?.querySelector("input") as HTMLInputElement;
-    const textarea = container?.querySelector("textarea");
+    const singleLineModal = document.body.querySelectorAll<HTMLElement>(".ss-popup-modal")[0]!;
+    const singleLineInput = singleLineModal.querySelector<HTMLInputElement>('input[type="text"]')!;
+    singleLineInput.value = "pasted-code";
+    singleLineInput.dispatchEvent(new Event("input", { bubbles: true }));
+    singleLineInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
 
-    // Current: uses <input type="text"> -- single line, truncates long URLs
-    expect(input).toBeTruthy();
-    expect(textarea).toBeNull();
+    await expect(singleLine).resolves.toEqual({
+      confirmed: true,
+      action: "primary",
+      inputs: ["pasted-code"],
+      checkboxChecked: false,
+    });
 
-    // Better: should use <textarea> or a dedicated URL-friendly input
-    // that can show the full pasted content
-
-    const cancelBtn = Array.from(container?.querySelectorAll("button") ?? []).find(
-      (b) => b.textContent === "Cancel"
-    );
-    cancelBtn?.click();
-    await new Promise((resolve) => setTimeout(resolve, 250));
-    await resultPromise;
-  });
-
-  it("handles Enter key to submit", async () => {
-    const resultPromise = showPopup(new App(), "Test", {
+    const textareaPopup = new PopupComponent(new App(), "Textarea should not submit on plain Enter.", {
       primaryButton: "Submit",
-      inputs: [{ type: "text" }],
+      inputs: [{ type: "textarea", placeholder: "Notes", required: true, value: "draft" }],
     });
+    const textareaResult = textareaPopup.open();
+    const textarea = textareaPopup.modalEl.querySelector<HTMLTextAreaElement>("textarea")!;
 
-    const container = document.querySelector(".systemsculpt-popup-container") as HTMLElement;
-    const input = container?.querySelector("input") as HTMLInputElement;
+    textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    expect(document.body.contains(textareaPopup.modalEl)).toBe(true);
 
-    // Set a value in the input
-    if (input) {
-      input.value = "pasted-code";
-    }
+    textarea.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "Enter",
+      metaKey: true,
+      bubbles: true,
+    }));
 
-    // Press Enter
-    const event = new KeyboardEvent("keydown", { key: "Enter", bubbles: true });
-    container?.dispatchEvent(event);
-
-    await new Promise((resolve) => setTimeout(resolve, 250));
-    const result = await resultPromise;
-
-    expect(result?.confirmed).toBe(true);
-    expect(result?.inputs?.[0]).toBe("pasted-code");
-  });
-
-  it("handles Escape key to cancel", async () => {
-    const resultPromise = showPopup(new App(), "Test", {
-      primaryButton: "Submit",
-      secondaryButton: "Cancel",
+    await expect(textareaResult).resolves.toEqual({
+      confirmed: true,
+      action: "primary",
+      inputs: ["draft"],
+      checkboxChecked: false,
     });
-
-    const container = document.querySelector(".systemsculpt-popup-container") as HTMLElement;
-
-    // Press Escape
-    const event = new KeyboardEvent("keydown", { key: "Escape", bubbles: true });
-    container?.dispatchEvent(event);
-
-    await new Promise((resolve) => setTimeout(resolve, 250));
-    const result = await resultPromise;
-
-    expect(result?.confirmed).toBe(false);
-    expect(result?.action).toBe("cancel");
-  });
-
-  it("closes on background click", async () => {
-    const resultPromise = showPopup(new App(), "Test", {
-      primaryButton: "OK",
-    });
-
-    const container = document.querySelector(".systemsculpt-popup-container") as HTMLElement;
-
-    // Click on the background (container itself, not the popup content)
-    const event = new MouseEvent("mousedown", { bubbles: true });
-    Object.defineProperty(event, "target", { value: container });
-    container?.dispatchEvent(event);
-
-    await new Promise((resolve) => setTimeout(resolve, 250));
-    const result = await resultPromise;
-
-    expect(result?.confirmed).toBe(false);
-  });
-
-  it("shows generic message with no OAuth-specific context (UX issue)", async () => {
-    // The current OAuth popup shows:
-    //   "Paste the authorization code or redirect URL:"
-    // with a text input and Submit/Cancel buttons.
-    //
-    // Missing context that would help the user:
-    // - Which provider they're authenticating with
-    // - That a browser window should have opened
-    // - That the callback server might handle it automatically
-    // - What format the code should be in
-    // - A timeout/progress indicator
-
-    const resultPromise = showPopup(
-      new App(),
-      "Paste the authorization code or redirect URL:",
-      {
-        primaryButton: "Submit",
-        secondaryButton: "Cancel",
-        inputs: [{ type: "text", placeholder: "https://..." }],
-      }
-    );
-
-    const container = document.querySelector(".systemsculpt-popup-container");
-    const message = container?.querySelector(".systemsculpt-popup-message");
-    const title = container?.querySelector(".systemsculpt-popup-title");
-    const description = container?.querySelector(".systemsculpt-popup-description");
-
-    // No title shown -- user doesn't know this is for OAuth
-    expect(title).toBeNull();
-
-    // No description -- user doesn't know what to do
-    expect(description).toBeNull();
-
-    // Generic message with no provider name
-    expect(message?.textContent).toBe("Paste the authorization code or redirect URL:");
-    expect(message?.textContent).not.toContain("OpenAI");
-    expect(message?.textContent).not.toContain("ChatGPT");
-
-    const cancelBtn = Array.from(container?.querySelectorAll("button") ?? []).find(
-      (b) => b.textContent === "Cancel"
-    );
-    cancelBtn?.click();
-    await new Promise((resolve) => setTimeout(resolve, 250));
-    await resultPromise;
   });
 });

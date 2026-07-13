@@ -24,7 +24,7 @@ const RULES: DescriptorRule[] = [
 ];
 
 const CONTRACT_FINGERPRINTS: Record<ManagedRequestContractId, string> = {
-  chat_turn: "3843:2c6ce66f:108f7337",
+  chat_turn: "4962:a1134a74:5658bfd0",
   text_generation: "221:3f90c440:a11ba950",
   embeddings: "878:465dee3a:a586d62e",
 };

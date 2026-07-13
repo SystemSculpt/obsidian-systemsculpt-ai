@@ -5,16 +5,17 @@
 ```bash
 npm run dev
 npm run build
-npm run check:plugin:fast
+npm run check
 npm run check:plugin
+npm run check:full
 ```
 
-The fast check is deliberately bounded to TypeScript, a production build, CSS,
-and tiny policy tests. Pair it with focused tests for the touched module. The
-normal plugin check adds bounded script guards but does not hide the full unit
-or integration suites. Use compiled integration for bundle/composition
-changes; run the full unit and integration suites once at combined checkpoints
-or release.
+The default check is deliberately bounded to TypeScript, a production build,
+CSS, and tiny policy tests. Pair it with focused tests for the touched module.
+`check:plugin` adds bounded release/script guards without changing the normal
+edit loop. `check:full` is the explicit exhaustive path: Obsidian source and
+metadata lint, artifact guards, full unit and embeddings suites, compiled
+integration, and release-script verification.
 
 `npm run build` accepts `SYSTEMSCULPT_API_BASE_URL` and
 `SYSTEMSCULPT_WEBSITE_API_BASE_URL` as build-time local-QA overrides. The URLs
@@ -60,6 +61,6 @@ rejects inline source maps. Publishing still requires the applicable human appro
 - Settings tabs: `src/settings/SettingsTabRegistry.ts`
 - Commands: `src/core/plugin/commands.ts`, `src/main.ts`
 - Ribbon icons: `src/core/plugin/ribbons.ts`
-- Filesystem MCP tools: `src/mcp-tools/filesystem/toolDefinitions/*.ts`
-- YouTube MCP tool: `src/mcp-tools/youtube/MCPYouTubeServer.ts`
-- Web research tools: `src/services/web/registerWebResearchTools.ts`
+- First-party tool service: `src/tools/FirstPartyToolService.ts`
+- Vault tools: `src/tools/vault/toolDefinitions.ts`
+- YouTube transcript tool: `src/tools/youtube/YouTubeToolModule.ts`

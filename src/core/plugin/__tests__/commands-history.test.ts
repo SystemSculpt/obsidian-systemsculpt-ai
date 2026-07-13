@@ -4,7 +4,7 @@ import { App } from "obsidian";
 import { CommandManager } from "../commands";
 
 describe("CommandManager history commands", () => {
-  it("registers new history command and legacy alias", () => {
+  it("registers the canonical history command only", () => {
     const app = new App();
     const addCommand = jest.fn();
     const plugin = { addCommand } as any;
@@ -14,7 +14,6 @@ describe("CommandManager history commands", () => {
 
     const registered = addCommand.mock.calls.map((call) => call[0]);
     const primary = registered.find((command: any) => command.id === "open-systemsculpt-history");
-    const legacy = registered.find((command: any) => command.id === "open-chat-history");
 
     expect(primary).toEqual(
       expect.objectContaining({
@@ -23,13 +22,6 @@ describe("CommandManager history commands", () => {
         callback: expect.any(Function),
       })
     );
-
-    expect(legacy).toEqual(
-      expect.objectContaining({
-        id: "open-chat-history",
-        name: "Open chat history (legacy alias)",
-        callback: expect.any(Function),
-      })
-    );
+    expect(registered).toHaveLength(1);
   });
 });

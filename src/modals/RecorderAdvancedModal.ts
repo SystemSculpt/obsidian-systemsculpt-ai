@@ -1,39 +1,29 @@
-import { App, DropdownComponent, Modal, Notice, Setting } from "obsidian";
+import { App, DropdownComponent, Notice, Setting } from "obsidian";
 import type SystemSculptPlugin from "../main";
+import { StandardModal } from "../core/ui/modals/standard/StandardModal";
 
-export class RecorderAdvancedModal extends Modal {
+export class RecorderAdvancedModal extends StandardModal {
   private readonly plugin: SystemSculptPlugin;
 
   constructor(app: App, plugin: SystemSculptPlugin) {
     super(app);
     this.plugin = plugin;
+    this.setSize("medium");
+    this.modalEl.addClass("ss-recorder-advanced-modal-shell");
   }
 
   onOpen(): void {
+    super.onOpen();
     const { contentEl } = this;
-    contentEl.empty();
     contentEl.addClass("ss-recorder-advanced-modal");
-
-    contentEl.createEl("h2", { text: "Recorder advanced controls" });
-    contentEl.createEl("p", {
-      text: "Audio recorder active. Update capture behavior below without leaving your workflow.",
-      cls: "setting-item-description",
-    });
+    this.addTitle("Recorder controls");
 
     this.renderAudioSection(contentEl);
-
-    new Setting(contentEl)
-      .setName("Open full recording settings")
-      .setDesc("Jump to the recording tab for the full settings panel.")
-      .addButton((button) => {
-        button
-          .setButtonText("Open settings")
-          .setCta()
-          .onClick(() => {
-            this.close();
-            this.plugin.openSettingsTab("workflow");
-          });
-      });
+    this.addActionButton("Done", () => this.close());
+    this.addActionButton("Open Settings", () => {
+      this.close();
+      this.plugin.openSettingsTab("workflow");
+    }, true);
   }
 
   private renderAudioSection(containerEl: HTMLElement): void {

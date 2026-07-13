@@ -5,6 +5,7 @@ import type {
   ManagedTransportResult,
 } from "../../managed/ManagedTypes";
 import type { EmbeddingsGenerateOptions, EmbeddingsProvider } from "../types";
+import { MANAGED_EMBEDDING_MAX_CHARS_PER_TEXT } from "../ManagedEmbeddingsContract";
 
 export type ManagedEmbeddingsErrorCode =
   | "invalid_request"
@@ -112,14 +113,20 @@ export class ManagedEmbeddingsAdapter implements EmbeddingsProvider {
           throw new ManagedEmbeddingsError("invalid_request", "Embeddings input is invalid.", 400);
         }
         if (typeof prepared.input === "string") {
-          if (!prepared.input.length) throw new ManagedEmbeddingsError("invalid_request", "Embeddings input is empty.", 400);
+          if (!prepared.input.length || prepared.input.length > MANAGED_EMBEDDING_MAX_CHARS_PER_TEXT) {
+            throw new ManagedEmbeddingsError("invalid_request", "Embeddings input is invalid.", 400);
+          }
           cardinality = "single";
           expectedCount = 1;
           return { input: prepared.input };
         }
         if (
           !Array.isArray(prepared.input) || prepared.input.length === 0
-          || prepared.input.some((entry) => typeof entry !== "string" || entry.length === 0)
+          || prepared.input.some((entry) => (
+            typeof entry !== "string"
+            || entry.length === 0
+            || entry.length > MANAGED_EMBEDDING_MAX_CHARS_PER_TEXT
+          ))
         ) {
           throw new ManagedEmbeddingsError("invalid_request", "Embeddings input is invalid.", 400);
         }

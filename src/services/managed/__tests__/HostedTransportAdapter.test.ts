@@ -159,20 +159,46 @@ describe("HostedTransportAdapter", () => {
     expect(request.mock.calls[0][0].headers).not.toHaveProperty("x-plugin-version");
   });
 
-  it("uses the fixed first-party managed image output route through the existing transport sink", async () => {
+  it("uses native binary transport for the fixed first-party managed image output route", async () => {
     const adapter = new HostedTransportAdapter({ baseUrl: "https://api.test", pluginVersion: "6", licenseKey: () => "secret" });
     const headers = { "x-systemsculpt-image-output-contract": "managed-image-output-v1" };
     await adapter.managedImageOutput("/api/plugin/images/generations/jobs/123e4567-e89b-42d3-a456-426614174000/outputs/0", headers);
-    expect(request).toHaveBeenCalledWith(expect.objectContaining({ url: "https://api.test/api/plugin/images/generations/jobs/123e4567-e89b-42d3-a456-426614174000/outputs/0", method: "GET", headers: expect.objectContaining(headers), preserveResponseHeaders: true, licenseKey: "secret" }));
+    expect(request).toHaveBeenCalledWith(expect.objectContaining({
+      url: "https://api.test/api/plugin/images/generations/jobs/123e4567-e89b-42d3-a456-426614174000/outputs/0",
+      method: "GET", headers: expect.objectContaining(headers), preserveResponseHeaders: true, licenseKey: "secret",
+      transport: "requestUrl", responseEncoding: "arrayBuffer",
+    }));
     await expect(adapter.managedImageOutput("https://signed.test/output", headers)).rejects.toThrow("Invalid managed image output path");
     await expect(adapter.managedImageOutput("/api/plugin/documents/id/download", headers)).rejects.toThrow("Invalid managed image output path");
   });
 
-  it("uses the existing transport sink for signed uploads without adding license or managed headers", async () => {
+  it("forces native raw transport for signed image input uploads without adding managed headers", async () => {
     const adapter = new HostedTransportAdapter({ baseUrl: "https://api.test", pluginVersion: "6", licenseKey: () => "secret" });
-    await (adapter as any).uploadSignedInput("https://signed.test/input", "PUT", { "content-type": "image/png" }, new Uint8Array([1]).buffer);
-    expect(request).toHaveBeenCalledWith(expect.objectContaining({ url: "https://signed.test/input", method: "PUT", headers: { "content-type": "image/png" }, preserveResponseHeaders: false }));
-    expect(request.mock.calls[0][0].licenseKey).toBeUndefined();
+    const body = new Uint8Array([1, 2, 3]).buffer;
+    await adapter.uploadSignedInput("https://signed.test/input", "PUT", { "content-type": "image/png" }, body);
+    expect(request).toHaveBeenCalledWith({
+      url: "https://signed.test/input", method: "PUT", headers: { "content-type": "image/png" }, body,
+      signal: undefined, stream: false, preserveResponseHeaders: false,
+      transport: "requestUrl", bodyEncoding: "raw",
+    });
+    expect(request.mock.calls[0][0]).not.toHaveProperty("licenseKey");
+  });
+
+  it("forces native raw transport and returns the exact signed multipart response", async () => {
+    const signedResponse = new Response("", { status: 200, headers: { etag: '"0123456789abcdef"' } });
+    request.mockResolvedValue(signedResponse);
+    const adapter = new HostedTransportAdapter({ baseUrl: "https://api.test", pluginVersion: "6", licenseKey: () => "secret" });
+    const body = new Uint8Array([4, 5, 6]).buffer;
+
+    const result = await adapter.uploadSignedJobPart("https://signed.test/part", "PUT", {}, body);
+
+    expect(request).toHaveBeenCalledWith({
+      url: "https://signed.test/part", method: "PUT", headers: {}, body,
+      signal: undefined, stream: false, preserveResponseHeaders: true,
+      transport: "requestUrl", bodyEncoding: "raw",
+    });
+    expect(result).toBe(signedResponse);
+    expect(result.headers.get("etag")).toBe('"0123456789abcdef"');
   });
 
   it("returns bounded diagnostics with preserved response metadata", async () => {

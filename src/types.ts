@@ -1,5 +1,5 @@
 import { LogLevel } from "./utils/errorHandling";
-import { ToolCall } from "./types/toolCalls";
+import type { ToolCall } from "./types/toolCalls";
 import type { ChatExportPreferences } from "./types/chatExport";
 import { createDefaultChatExportOptions } from "./types/chatExport";
 import type { WorkflowEngineSettings, WorkflowAutomationState, WorkflowAutomationId, WorkflowSkipEntry, WorkflowManagedTextOperation, WorkflowManagedTextPhase } from "./types/workflows";
@@ -8,10 +8,6 @@ import { CURRENT_SCHEMA_VERSION } from "./core/settings/migrations/schemaVersion
 
 export { LogLevel };
 export type { ToolCall };
-
-export type {
-  MCPToolInfo,
-} from "./types/mcp";
 
 export type {
   WorkflowEngineSettings,
@@ -66,10 +62,6 @@ export interface SystemSculptSettings {
    * Directory where notes created via the "Save chat as note" feature are stored
    */
   savedChatsDirectory: string;
-  /**
-   * Directory where web research corpus artifacts are stored.
-   */
-  webResearchDirectory: string;
   lastValidated: number;
   recordingsDirectory: string;
   preferredMicrophoneId: string;
@@ -119,24 +111,12 @@ export interface SystemSculptSettings {
   enableAutoAudioResampling: boolean;
   attachmentsDirectory: string;
   extractionsDirectory: string;
-  systemPromptsDirectory: string;
-  /** Cached list of directories we've already verified to avoid redundant fs checks */
-  verifiedDirectories?: string[];
   workflowEngine: WorkflowEngineSettings;
 
   /**
    * Skip empty note warning confirmation modal
    */
   skipEmptyNoteWarning: boolean;
-
-  /**
-   * Whether agent mode is enabled in the chat UI.
-   * When false, the AI behaves as a plain chat assistant without tool access.
-   * Defaults to true to preserve existing always-on behavior.
-   */
-  agentModeEnabled: boolean;
-
-  lastUsedPromptPath: string;
 
   favoriteChats: string[];
   favoriteStudioSessions: string[];
@@ -169,11 +149,6 @@ export interface SystemSculptSettings {
   defaultChatTag: string;
 
   chatFontSize: "small" | "medium" | "large";
-
-  /**
-   * When enabled, system-role messages stay in history but are hidden from the chat UI.
-   */
-  hideSystemMessagesInChat: boolean;
 
   /**
    * When enabled, SystemSculpt UI will honor the OS "reduced motion" preference
@@ -221,13 +196,6 @@ export interface SystemSculptSettings {
   automaticBackupRetentionDays: number; // How many days to keep automatic backups
   lastAutomaticBackup: number; // Timestamp of last automatic backup
 
-  /**
-   * Preserve reasoning content verbatim without any markdown processing
-   * When enabled, reasoning blocks are rendered exactly as authored without
-   * transformation, preserving bold markers, paragraph spacing, etc.
-   */
-  preserveReasoningVerbatim: boolean;
-
 }
 
 export const DEFAULT_SETTINGS: SystemSculptSettings = {
@@ -240,7 +208,6 @@ export const DEFAULT_SETTINGS: SystemSculptSettings = {
   suppressLicenseUpgradePrompt: false,
   chatsDirectory: "SystemSculpt/Chats",
   savedChatsDirectory: "SystemSculpt/Saved Chats",
-  webResearchDirectory: "SystemSculpt/Web Research",
   lastValidated: 0,
   recordingsDirectory: "SystemSculpt/Recordings",
   preferredMicrophoneId: "",
@@ -268,14 +235,9 @@ Raw transcript:`,
   enableAutoAudioResampling: true,
   attachmentsDirectory: "SystemSculpt/Attachments",
   extractionsDirectory: "SystemSculpt/Extractions",
-  systemPromptsDirectory: "SystemSculpt/System Prompts",
-  verifiedDirectories: [],
   workflowEngine: createDefaultWorkflowEngineSettings(),
 
   skipEmptyNoteWarning: false,
-
-  agentModeEnabled: true,
-  lastUsedPromptPath: "",
 
   favoriteChats: [],
   favoriteStudioSessions: [],
@@ -291,12 +253,10 @@ Raw transcript:`,
   enableExperimentalFeatures: false,
   logLevel: LogLevel.WARNING,
   debugMode: false,
-  preserveReasoningVerbatim: true,
   showUpdateNotifications: true,
 
   defaultChatTag: "",
   chatFontSize: "medium",
-  hideSystemMessagesInChat: false,
   respectReducedMotion: true,
 
   studioDefaultProjectsFolder: "SystemSculpt/Studio",
@@ -344,6 +304,24 @@ export interface TextContent {
 
 export type MultiPartContent = TextContent | ImageContent;
 
+export interface ChatAttachmentContentRef {
+  schema: "systemsculpt-chat-attachment-v1";
+  payload: "image-bytes" | "utf8-content-part";
+  sha256: string;
+  byteLength: number;
+}
+
+/** Durable identity for a composer attachment represented by one content part. */
+export interface ChatAttachmentMetadata {
+  id: string;
+  name: string;
+  mimeType: string;
+  byteLength: number;
+  kind: "document" | "image" | "text";
+  contentPartIndex: number;
+  contentRef?: ChatAttachmentContentRef;
+}
+
 export interface UrlCitation {
   url: string;
   title: string;
@@ -385,11 +363,14 @@ export interface ChatMessage {
   role: ChatRole;
   content: string | MultiPartContent[] | null;
   message_id: string;
+  /**
+   * Presentation/retry metadata only. Model transports intentionally read the
+   * content parts and never send this local descriptor.
+   */
+  attachmentMetadata?: ChatAttachmentMetadata[];
   documentContext?: {
     documentIds: string[];
   };
-  systemPromptType?: string;
-  systemPromptPath?: string;
   annotations?: Annotation[];
   // Additional fields for tool messages
   tool_call_id?: string;
@@ -444,21 +425,6 @@ export interface SystemSculptStreamChunk {
 	    model?: string;
 	  };
 	}
-
-export interface SystemPromptPreset {
-  id: string;
-  label: string;
-  description?: string;
-  isUserConfigurable: boolean;
-  systemPrompt: string;
-}
-
-export interface SystemPromptType {
-  id: string; // e.g., "text_modification"
-  label: string; // e.g., "Text Modification"
-  description?: string; // Optional description of what this prompt type does
-  isUserConfigurable: boolean; // Whether user can customize the prompt
-}
 
 export interface TextModificationState {
   originalText: string;

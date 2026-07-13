@@ -1,6 +1,6 @@
 /**
  * Migration harness (#212): settings fixtures captured from past releases must
- * load cleanly into HEAD — no throw, no lost custom providers/license, legacy
+ * load cleanly into HEAD — no throw, managed account state preserved, retired
  * keys pruned, new nested defaults back-filled, and the schema version stamped.
  *
  * Add a fixture here whenever the persisted settings shape changes across a
@@ -10,7 +10,9 @@
 import { DEFAULT_SETTINGS } from "../../../../types";
 import {
   CURRENT_SCHEMA_VERSION,
+  LEGACY_CHAT_KEYS_REMOVED_IN_V5,
   LEGACY_CLIENT_MODEL_KEYS_REMOVED_IN_V4,
+  LEGACY_DIRECTORY_KEYS_REMOVED_IN_V5,
   LEGACY_KEYS_REMOVED_IN_V1,
   migrateSettingsToCurrentSchema,
 } from "../SettingsMigrator";
@@ -57,6 +59,18 @@ describe("settings migration harness — past releases load cleanly into HEAD (#
 
       it("removes retired client authority and secret fields", () => {
         for (const key of LEGACY_CLIENT_MODEL_KEYS_REMOVED_IN_V4) {
+          expect(result.settings).not.toHaveProperty(key);
+        }
+      });
+
+      it("removes retired client-owned chat prompt and mode fields", () => {
+        for (const key of LEGACY_CHAT_KEYS_REMOVED_IN_V5) {
+          expect(result.settings).not.toHaveProperty(key);
+        }
+      });
+
+      it("removes retired client-owned directory storage and cache fields", () => {
+        for (const key of LEGACY_DIRECTORY_KEYS_REMOVED_IN_V5) {
           expect(result.settings).not.toHaveProperty(key);
         }
       });

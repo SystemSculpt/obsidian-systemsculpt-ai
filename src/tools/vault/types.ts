@@ -1,0 +1,228 @@
+/**
+ * Type definitions for first-party vault tools.
+ */
+
+/**
+ * Metadata for file read operations with windowing
+ */
+export interface FileReadMetadata {
+  fileSize: number;
+  created: string;
+  modified: string;
+  windowStart: number;
+  windowEnd: number;
+  hasMore: boolean;
+}
+
+/**
+ * File information for list_items results
+ */
+export interface FileInfo {
+  path: string;
+  name: string;
+  size: number;
+  created: string;
+  modified: string;
+  extension: string;
+  preview?: string;
+}
+
+/**
+ * Directory information for list_items results
+ */
+export interface DirectoryInfo {
+  path: string;
+  name: string;
+  itemCount: number;
+  modified?: string;
+}
+
+export interface ListDirectoryResult {
+  path: string;
+  files?: FileInfo[];
+  directories?: DirectoryInfo[];
+  summary?: string;
+  error?: string;
+  offset: number;
+  totalItems: number;
+  nextOffset: number | null;
+}
+
+/**
+ * Tool operation result types
+ */
+export interface ToolResult {
+  success: boolean;
+  error?: string;
+}
+
+export interface FileOperationResult extends ToolResult {
+  path: string;
+}
+
+export interface MoveOperationResult extends ToolResult {
+  source: string;
+  destination: string;
+}
+
+export interface ContextManagementResult {
+  action: string;
+  processed: number;
+  results: Array<{ path: string; success: boolean; reason?: string }>;
+  summary: string;
+}
+
+export interface WorkspaceManagementResult {
+  opened: string[];
+  errors: string[];
+}
+
+export interface DuplicateSearchResult {
+  duplicate_sets: string[][];
+}
+
+/**
+ * Tool execution parameters
+ */
+export interface ReadFilesParams {
+  paths: string[];
+  offset?: number | null;
+  length?: number | null;
+}
+
+export interface WriteFileParams {
+  path: string;
+  content: string;
+  createDirs?: boolean | null;
+  ifExists?: "overwrite" | "skip" | "error" | "append" | null;
+  appendNewline?: boolean | null;
+}
+
+export interface FileEditRange {
+  startLine?: number | null;
+  endLine?: number | null;
+  startIndex?: number | null;
+  endIndex?: number | null;
+}
+
+export interface FileEdit {
+  oldText: string;
+  newText: string;
+  isRegex?: boolean | null;
+  flags?: string | null;
+  occurrence?: "first" | "last" | "all" | null;
+  mode?: "exact" | "loose" | null;
+  range?: FileEditRange | null;
+  preserveIndent?: boolean | null;
+}
+
+export interface EditFileParams {
+  path: string;
+  edits: FileEdit[];
+  strict?: boolean | null;
+}
+
+export interface MultiEditFileParams {
+  path: string;
+  edits: FileEdit[];
+  strict?: boolean | null;
+}
+
+export interface MultiEditParams {
+  files: MultiEditFileParams[];
+}
+
+/**
+ * An edit that was requested but did not apply (only collected under
+ * `strict:false`; under `strict:true` a non-matching edit throws instead).
+ */
+export interface SkippedEdit {
+  /** Zero-based index of the edit within the requested `edits` array. */
+  index: number;
+  /** Human-readable reason the edit did not apply (e.g. "Edit produced no changes"). */
+  reason: string;
+}
+
+/**
+ * Result of an `edit` operation. Carries the human-readable `diff` (kept for
+ * backward compatibility) plus an honest accounting of how many edits actually
+ * landed. `appliedCount === 0` means nothing changed and the file was not
+ * written — callers must treat that as a failure, not a phantom success.
+ */
+export interface EditFileResult {
+  diff: string;
+  appliedCount: number;
+  requestedCount: number;
+  skipped: SkippedEdit[];
+}
+
+export interface MultiEditFileResult {
+  path: string;
+  success: boolean;
+  appliedCount: number;
+  requestedCount: number;
+  skipped: SkippedEdit[];
+  diff?: string;
+  error?: string;
+}
+
+export interface MultiEditResult {
+  success: boolean;
+  requestedFiles: number;
+  appliedFiles: number;
+  preflightFailed: boolean;
+  results: MultiEditFileResult[];
+}
+
+export interface CreateDirectoriesParams {
+  paths: string[];
+}
+
+export interface ListDirectoriesParams {
+  paths: string[];
+  filter?: "all" | "files" | "directories" | null | { semantic: string };
+  sort?: "modified" | "size" | "name" | "created" | null;
+  recursive?: boolean | null;
+  offset?: number | null;
+  limit?: number | null;
+  intelligentGrouping?: boolean;
+  includeSuggestions?: boolean;
+  anomalyDetection?: boolean;
+}
+
+export interface MoveItemsParams {
+  items: Array<{ source: string; destination: string }>;
+}
+
+export interface TrashFilesParams {
+  paths: string[];
+}
+
+export interface FindFilesParams {
+  patterns: string[];
+  mode?: "keyword" | "semantic" | "hybrid" | "graph" | "smart";
+  includeRelated?: boolean;
+  maxResults?: number;
+  sessionId?: string;
+}
+
+export interface GrepVaultParams {
+  patterns: string[];
+  patternMode?: "literal" | "regex" | null;
+  contextSize?: "small" | "medium" | "large";
+  includeRelated?: boolean;
+  highlightStyle?: "inline" | "separate";
+  sessionId?: string;
+  searchIn?: "content" | "frontmatter" | "both" | null;
+  pageTokens?: number | null;
+  cursor?: string | null;
+}
+
+export interface ManageWorkspaceParams {
+  files: Array<{ path: string; intent?: string }>;
+}
+
+export interface ManageContextParams {
+  action: "add" | "remove";
+  paths: string[];
+}

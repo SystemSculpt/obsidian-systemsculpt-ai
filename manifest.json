@@ -1,7 +1,7 @@
 {
   "author": "SystemSculpt",
   "authorUrl": "https://systemsculpt.com",
-  "description": "Managed AI chat, transcription, semantic search, and Studio workflows inside your vault.",
+  "description": "SystemSculpt AI chat, vault actions, transcription, semantic search, and Studio workflows inside Obsidian.",
   "fundingUrl": "https://www.patreon.com/SystemSculpt",
   "id": "systemsculpt-ai",
   "isDesktopOnly": true,

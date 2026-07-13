@@ -148,11 +148,7 @@ describe("ChatStorageService", () => {
     });
 
     it("omits retired model and client-side prompt metadata", async () => {
-      await service.saveChat(
-        "test-chat",
-        testMessages,
-        { selectedModelId: "local-pi-openai@@gpt-4.1" }
-      );
+      await service.saveChat("test-chat", testMessages);
 
       const createdContent = mockVault.create.mock.calls[0][1] as string;
       expect(createdContent).not.toContain("model:");
@@ -160,14 +156,32 @@ describe("ChatStorageService", () => {
       expect(createdContent).not.toContain("prompts/custom.md");
     });
 
-    it("persists the per-chat hide system/tool preference to frontmatter (#213, #174, #167)", async () => {
-      await service.saveChat("chat-hidden", testMessages, { hideSystemMessages: true });
-      expect(mockVault.create.mock.calls[0][1] as string).toContain("hideSystemMessages: true");
-    });
+    it("persists only a chat-bound managed session checkpoint", async () => {
+      await service.saveChat("session-chat", testMessages, {
+        managedSession: {
+          id: "mchat_0123456789abcdef0123456789abcdef",
+          revision: 2,
+          boundChatId: "session-chat",
+          checkpointMessageId: "assistant-2",
+          toolsetFingerprint: "2:741638a5:5967d5",
+          budget: { messageCount: 2, imageCount: 0, attachmentBytes: 0, storedJsonBytes: 256 },
+        },
+      });
+      expect(mockVault.create.mock.calls[0][1]).toContain("managedSession:");
 
-    it("persists an explicit show preference so it can override a hidden global default", async () => {
-      await service.saveChat("chat-shown", testMessages, { hideSystemMessages: false });
-      expect(mockVault.create.mock.calls[0][1] as string).toContain("hideSystemMessages: false");
+      jest.clearAllMocks();
+      mockVault.getAbstractFileByPath.mockReturnValue(null);
+      await service.saveChat("other-chat", testMessages, {
+        managedSession: {
+          id: "mchat_0123456789abcdef0123456789abcdef",
+          revision: 2,
+          boundChatId: "session-chat",
+          checkpointMessageId: "assistant-2",
+          toolsetFingerprint: "2:741638a5:5967d5",
+          budget: { messageCount: 2, imageCount: 0, attachmentBytes: 0, storedJsonBytes: 256 },
+        },
+      });
+      expect(mockVault.create.mock.calls[0][1]).not.toContain("managedSession:");
     });
 
     it("adds default chat tag to new history files", async () => {
@@ -483,52 +497,6 @@ Hello
     });
   });
 
-  describe("getMetadata", () => {
-    it("returns null when file does not exist", async () => {
-      mockVault.getAbstractFileByPath.mockReturnValue(null);
-
-      const result = await service.getMetadata("nonexistent");
-
-      expect(result).toBeNull();
-    });
-
-    it("returns parsed metadata from file", async () => {
-      const mockFile = new TFile({ path: "SystemSculpt/Chats/meta-test.md" });
-      mockVault.getAbstractFileByPath.mockReturnValue(mockFile);
-      mockVault.read.mockResolvedValue(`---
-id: meta-test
-model: gpt-4
-title: Metadata Test
-created: 2024-01-01T00:00:00.000Z
-lastModified: 2024-01-02T00:00:00.000Z
-version: 5
----
-
-Content here`);
-
-      const result = await service.getMetadata("meta-test");
-
-      expect(result).not.toBeNull();
-      expect(result?.id).toBe("meta-test");
-    });
-
-    it("returns null on error", async () => {
-      const mockFile = new TFile({ path: "SystemSculpt/Chats/error.md" });
-      mockVault.getAbstractFileByPath.mockReturnValue(mockFile);
-      mockVault.read.mockRejectedValue(new Error("Read error"));
-
-      const result = await service.getMetadata("error");
-
-      expect(result).toBeNull();
-    });
-  });
-
-  describe("saveStreamingMessage", () => {
-    it("is a no-op deprecated method", async () => {
-      await expect(service.saveStreamingMessage()).resolves.toBeUndefined();
-    });
-  });
-
   describe("saveChat edge cases", () => {
     it("modifies existing file instead of creating new", async () => {
       const mockFile = new TFile({ path: "SystemSculpt/Chats/existing.md" });
@@ -834,46 +802,6 @@ title: No ID
       const id2 = (service as any).generateMessageId();
 
       expect(id1).not.toBe(id2);
-    });
-  });
-
-  describe("standardizeToolCalls", () => {
-    it("returns empty array for null input", () => {
-      const result = (service as any).standardizeToolCalls(null, "msg-1");
-      expect(result).toEqual([]);
-    });
-
-    it("passes through already standardized tool calls", () => {
-      const toolCalls = [
-        {
-          id: "call_123",
-          request: {
-            function: { name: "test", arguments: "{}" },
-          },
-          state: "completed",
-        },
-      ];
-
-      const result = (service as any).standardizeToolCalls(toolCalls, "msg-1");
-
-      expect(result[0].id).toBe("call_123");
-      expect(result[0].request.function.name).toBe("test");
-    });
-
-    it("converts old flat format to new format", () => {
-      const toolCalls = [
-        {
-          id: "call_456",
-          type: "function",
-          function: { name: "old_tool", arguments: "{}" },
-        },
-      ];
-
-      const result = (service as any).standardizeToolCalls(toolCalls, "msg-1");
-
-      expect(result[0].id).toBe("call_456");
-      expect(result[0].request.function.name).toBe("old_tool");
-      expect(result[0].messageId).toBe("msg-1");
     });
   });
 

@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { App, Modal, Notice, Setting, TFile } from "obsidian";
+import { App, Notice, TFile } from "obsidian";
 import { AutomationBacklogModal } from "../AutomationBacklogModal";
 
 // Mock obsidian
@@ -9,35 +9,6 @@ jest.mock("obsidian", () => {
   const actual = jest.requireActual("obsidian");
   return {
     ...actual,
-    Modal: class MockModal {
-      app: App;
-      contentEl: HTMLElement;
-
-      constructor(app: App) {
-        this.app = app;
-        this.contentEl = document.createElement("div");
-      }
-
-      setTitle() {}
-      open() {}
-      close() {}
-    },
-    Setting: jest.fn().mockImplementation(() => {
-      const settingEl = document.createElement("div");
-      return {
-        setName: jest.fn().mockReturnThis(),
-        setDesc: jest.fn().mockReturnThis(),
-        addButton: jest.fn().mockImplementation(function (this: any, cb: (btn: any) => void) {
-          cb({
-            setButtonText: jest.fn().mockReturnThis(),
-            setCta: jest.fn().mockReturnThis(),
-            onClick: jest.fn().mockReturnThis(),
-          });
-          return this;
-        }),
-        settingEl,
-      };
-    }),
     Notice: jest.fn(),
   };
 });
@@ -118,10 +89,11 @@ describe("AutomationBacklogModal", () => {
       expect(modal.contentEl.children.length).toBeGreaterThan(0);
     });
 
-    it("creates content wrapper", async () => {
+    it("uses the shared modal shell", async () => {
       await modal.onOpen();
 
-      expect((modal as any).contentWrapper).not.toBeNull();
+      expect(modal.modalEl.classList.contains("ss-modal")).toBe(true);
+      expect(modal.modalEl.getAttribute("role")).toBe("dialog");
     });
   });
 
@@ -225,15 +197,14 @@ describe("AutomationBacklogModal", () => {
     });
   });
 
-  describe("managed execution copy", () => {
-    it("describes backlog processing as managed by SystemSculpt without a model chooser", async () => {
+  describe("managed execution surface", () => {
+    it("keeps the actions obvious without a model or provider chooser", async () => {
       await modal.onOpen();
 
       const text = modal.contentEl.textContent || "";
-      expect(text).toContain("SystemSculpt");
+      expect(text).toContain("Process backlog");
       expect(text).not.toContain("Change model");
       expect(text).not.toContain("Select a model");
-      expect(text).toContain("run through SystemSculpt automatically");
     });
   });
 });

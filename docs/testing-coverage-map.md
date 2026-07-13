@@ -25,7 +25,9 @@ use provider credentials or live services.
 
 ## Repository policy
 
-- `npm run check:plugin:fast`: types, production artifacts, CSS, tiny policy.
+- `npm run check`: types, production artifacts, CSS, tiny policy.
+- `npm run check:full`: Obsidian lint plus all local artifact, unit, embeddings,
+  compiled integration, and release-script gates.
 - `npm test`: full unit suite.
 - `npm run test:release-script`: semantic version and three-artifact release policy.
 

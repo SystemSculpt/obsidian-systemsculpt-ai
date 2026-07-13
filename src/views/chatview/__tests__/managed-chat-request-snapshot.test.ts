@@ -1,6 +1,10 @@
 import fixture from "../../../../testing/fixtures/managed/managed-capabilities-v2.json";
 import { ChatRequestPreparationService } from "../../../services/chat/ChatRequestPreparationService";
-import { composeAcceptedChatContinuation } from "../../../services/chat/AcceptedChatRequestSnapshot";
+import {
+  composeAcceptedChatContinuation,
+  composeAcceptedChatContinuationDelta,
+  prepareManagedMessage,
+} from "../../../services/chat/AcceptedChatRequestSnapshot";
 import type { AcceptedManagedChatOperation, ManagedAllowedLease } from "../../../services/managed/ManagedTypes";
 
 function operation(id = "u"): AcceptedManagedChatOperation {
@@ -12,12 +16,9 @@ function operation(id = "u"): AcceptedManagedChatOperation {
   return Object.freeze({ runtime: "managed", lease, durableTurnId: id, acceptedUserMessage: message, initialDurableSnapshot, turnBoundaryId: id });
 }
 
-const model = { id: "legacy", supported_parameters: ["tools"], architecture: { modality: "text->text" } } as never;
-function dependencies(reads: { context: number; tools: number; model: number }) {
+function dependencies(reads: { context: number; tools: number }) {
   return {
-    getModelInfo: async () => { reads.model += 1; return { modelSource: "systemsculpt" as const, actualModelId: "provider/model", model }; },
     getAvailableTools: async () => { reads.tools += 1; return []; },
-    countImageContextFiles: () => 0,
     contextFileService: { prepareMessagesWithContext: async (messages: never[]) => { reads.context += 1; return messages; } } as never,
   };
 }
@@ -27,32 +28,102 @@ describe("accepted request snapshot ownership", () => {
     const service = new ChatRequestPreparationService();
     const op = operation();
     let attempts = 0;
-    const deps = dependencies({ context: 0, tools: 0, model: 0 });
+    const deps = dependencies({ context: 0, tools: 0 });
     deps.contextFileService = { prepareMessagesWithContext: async () => { attempts += 1; throw new Error("private failure"); } } as never;
-    const first = service.prepare(op, { messages: [], model: "legacy" }, deps, deps);
-    expect(service.prepare(op, { messages: [], model: "legacy" }, deps, deps)).toBe(first);
+    const first = service.prepare(op, {}, deps);
+    expect(service.prepare(op, {}, deps)).toBe(first);
     await expect(first).rejects.toThrow("private failure");
-    await expect(service.prepare(op, { messages: [], model: "legacy" }, deps, deps)).rejects.toThrow("private failure");
+    await expect(service.prepare(op, {}, deps)).rejects.toThrow("private failure");
     expect(attempts).toBe(1);
   });
 
   it("keeps live rebind identity, creates a new resend identity, and composes multiple continuations without rereads", async () => {
-    const reads = { context: 0, tools: 0, model: 0 };
+    const reads = { context: 0, tools: 0 };
     const service = new ChatRequestPreparationService();
     const op = operation("first");
-    const input = { messages: op.initialDurableSnapshot.messages, model: "legacy" };
-    const first = await service.prepare(op, input, dependencies(reads), dependencies(reads));
-    expect(await service.prepare(op, input, dependencies(reads), dependencies(reads))).toBe(first);
+    const input = {};
+    const first = await service.prepare(op, input, dependencies(reads));
+    expect(await service.prepare(op, input, dependencies(reads))).toBe(first);
     const one = Object.freeze({ chatId: "c", version: 2, messages: Object.freeze([...op.initialDurableSnapshot.messages, { role: "assistant" as const, content: "one", message_id: "a1" }]) });
     const two = Object.freeze({ chatId: "c", version: 3, messages: Object.freeze([...one.messages, { role: "assistant" as const, content: "two", message_id: "a2" }]) });
     expect(composeAcceptedChatContinuation(first, one).at(-1)).toMatchObject({ content: "one" });
     expect(composeAcceptedChatContinuation(first, two).at(-1)).toMatchObject({ content: "two" });
     expect(reads.context).toBe(1);
-    expect(reads.model).toBe(0);
     const resend = operation("second");
-    const second = await service.prepare(resend, { messages: resend.initialDurableSnapshot.messages, model: "legacy" }, dependencies(reads), dependencies(reads));
+    const second = await service.prepare(resend, {}, dependencies(reads));
     expect(second).not.toBe(first);
     expect(second.operation).toBe(resend);
     expect(Object.isFrozen(second.messages)).toBe(true);
+  });
+
+  it("composes only the latest completed tool-result batch for a resumed session", async () => {
+    const service = new ChatRequestPreparationService();
+    const op = operation("first");
+    const accepted = await service.prepare(op, {}, dependencies({ context: 0, tools: 0 }));
+    const durable = Object.freeze({
+      chatId: "c",
+      version: 6,
+      messages: Object.freeze([
+        ...op.initialDurableSnapshot.messages,
+        {
+          role: "assistant" as const,
+          content: "",
+          message_id: "assistant-1",
+          tool_calls: [{
+            id: "call-1",
+            messageId: "assistant-1",
+            request: { id: "call-1", type: "function" as const, function: { name: "read", arguments: "{}" } },
+            state: "completed" as const,
+            timestamp: 1,
+            result: { success: true, data: "one" },
+          }],
+        },
+        {
+          role: "assistant" as const,
+          content: "",
+          message_id: "assistant-2",
+          tool_calls: [
+            {
+              id: "call-2a",
+              messageId: "assistant-2",
+              request: { id: "call-2a", type: "function" as const, function: { name: "read", arguments: "{}" } },
+              state: "completed" as const,
+              timestamp: 2,
+              result: { success: true, data: "two-a" },
+            },
+            {
+              id: "call-2b",
+              messageId: "assistant-2",
+              request: { id: "call-2b", type: "function" as const, function: { name: "read", arguments: "{}" } },
+              state: "completed" as const,
+              timestamp: 3,
+              result: { success: true, data: "two-b" },
+            },
+          ],
+        },
+      ]),
+    });
+
+    expect(composeAcceptedChatContinuationDelta(accepted, durable)).toEqual([
+      { role: "tool", content: '"two-a"', tool_call_id: "call-2a", name: "read" },
+      { role: "tool", content: '"two-b"', tool_call_id: "call-2b", name: "read" },
+    ]);
+    expect(Object.isFrozen(composeAcceptedChatContinuationDelta(accepted, durable))).toBe(true);
+  });
+
+  it("emits message names only on the server-supported tool role", () => {
+    expect(prepareManagedMessage({
+      role: "user",
+      content: "hello",
+      message_id: "user",
+      name: "legacy-name",
+    })).toEqual({ role: "user", content: "hello" });
+    expect(prepareManagedMessage({
+      role: "tool",
+      content: "done",
+      message_id: "tool",
+      tool_call_id: "call",
+      name: "read",
+    })).toEqual({ role: "tool", content: "done", tool_call_id: "call", name: "read" });
   });
 });

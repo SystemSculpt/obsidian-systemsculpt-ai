@@ -1,24 +1,46 @@
 import type { ManagedCapabilityClient } from "../../../services/managed/ManagedCapabilityClient";
-import type { AcceptedManagedChatOperation, JsonContractValue } from "../../../services/managed/ManagedTypes";
+import type {
+  AcceptedManagedChatOperation,
+  JsonContractValue,
+  ManagedTransportResult,
+} from "../../../services/managed/ManagedTypes";
 import type { AcceptedManagedChatRequestSnapshot, ManagedPreparedMessage } from "../../../services/chat/AcceptedChatRequestSnapshot";
-import { composeAcceptedChatContinuation } from "../../../services/chat/AcceptedChatRequestSnapshot";
+import {
+  composeAcceptedChatContinuation,
+  composeAcceptedChatContinuationDelta,
+  managedToolsetFingerprint,
+} from "../../../services/chat/AcceptedChatRequestSnapshot";
+import {
+  hasUnavailableManagedAttachment,
+  inspectManagedChatDispatchBudget,
+} from "../../../services/managed/ManagedChatSessionBudget";
 import type { StreamEvent, StreamToolCall } from "../../../streaming/types";
+import {
+  parseManagedChatSessionBinding,
+  type ManagedChatSessionBinding,
+} from "../storage/ChatPersistenceTypes";
+
+export type ManagedChatSessionCheckpoint = Readonly<{
+  id: string;
+  revision: number;
+}>;
 
 export type ManagedChatRuntimeEvent =
+  | Readonly<{ kind: "phase_restarted"; attempt: number }>
   | Readonly<{ kind: "content_delta"; text: string }>
-  | Readonly<{ kind: "reasoning_delta"; text: string }>
   | Readonly<{ kind: "tool_call_delta"; index: number; id?: string; name?: string; arguments?: string }>
   | Readonly<{ kind: "tool_call_completed"; index: number; id?: string; name?: string; arguments: string }>
   | Readonly<{ kind: "finish_reason"; reason: string }>
   | Readonly<{ kind: "request_id"; requestId: string }>
   | Readonly<{ kind: "usage"; promptTokens?: number; completionTokens?: number; totalTokens?: number; costTotal?: number }>
+  | Readonly<{ kind: "session_committed"; checkpoint: ManagedChatSessionCheckpoint }>
   | Readonly<{ kind: "done" }>;
 
 export type ManagedChatDiagnostic = Readonly<{ status?: number; code?: string; requestId?: string }>;
 
 type FailureKind = "transport_failure" | "aborted" | "capability_request" | "license" | "credits"
   | "operation_in_progress" | "operation_already_completed" | "operation_terminal" | "settlement_pending"
-  | "plugin_version" | "rate_limit" | "unavailable";
+  | "plugin_version" | "rate_limit" | "unavailable" | "session" | "attachment_unavailable";
 export type ManagedChatDispatchResult =
   | Readonly<{ kind: "success"; events: AsyncIterable<ManagedChatRuntimeEvent>; diagnostic: ManagedChatDiagnostic }>
   | Readonly<{ kind: "empty"; diagnostic: ManagedChatDiagnostic }>
@@ -29,11 +51,15 @@ export type ManagedChatDispatchInput = Readonly<{
   acceptedRequestSnapshot: AcceptedManagedChatRequestSnapshot;
   phase: "initial" | "continuation";
   continuationIndex: number;
-  postCheckpointDurableSnapshot?: import("../transcript/ChatTranscriptTypes").ChatTranscriptSnapshot;
+  postCheckpointDurableSnapshot?: import("../AgentTranscriptRepository").AgentTranscriptSnapshot;
   signal?: AbortSignal;
 }>;
 
 export type ManagedChatTranslationFence = Readonly<{ isOpen: () => boolean }>;
+export type ManagedChatSessionStatePort = Readonly<{
+  get: () => ManagedChatSessionBinding | undefined;
+  invalidate: () => Promise<void>;
+}>;
 const LOCAL_ABORT = Symbol("managed-chat-local-abort");
 
 function unreachableManagedEvent(event: never): never {
@@ -78,11 +104,14 @@ export async function* translateManagedChatEvents(
       if (signal.aborted || !fence.isOpen()) return;
       const event = step.value;
       switch (event.kind) {
+        case "phase_restarted":
+          // This legacy translation seam has no mutable partial-message model.
+          // The first-party controller consumes the restart event directly.
+          toolIdentity.clear();
+          finishReasonSeen = false;
+          break;
         case "content_delta":
           yield { type: "content", text: event.text };
-          break;
-        case "reasoning_delta":
-          yield { type: "reasoning", text: event.text };
           break;
         case "tool_call_delta": {
           const previous = toolIdentity.get(event.index) ?? {};
@@ -124,6 +153,7 @@ export async function* translateManagedChatEvents(
           break;
         case "request_id":
         case "usage":
+        case "session_committed":
           break;
         case "done":
           return;
@@ -145,6 +175,21 @@ type JsonObject = { readonly [key: string]: JsonContractValue };
 type OperationRegistry = Map<string, Promise<ManagedChatDispatchResult>>;
 const MAX_TOOL_CALL_ID_LENGTH = 256;
 const MAX_TOOL_NAME_LENGTH = 256;
+const MAX_SAME_KEY_RETRIES = 2;
+const RETRY_BASE_DELAY_MS = 100;
+
+type ManagedChatErrorFrame = Readonly<{
+  code: string;
+  message: string;
+  retrySameIdempotencyKey: boolean;
+}>;
+
+class ManagedChatStreamFrameError extends Error {
+  public constructor(public readonly frame: ManagedChatErrorFrame) {
+    super(frame.message);
+    this.name = "ManagedChatStreamFrameError";
+  }
+}
 
 function bounded(value: string | null, limit: number): string | undefined {
   if (value === null) return undefined;
@@ -189,9 +234,50 @@ function optionalFiniteNumber(object: JsonObject, key: string): number | undefin
   return typeof value === "number" ? value : null;
 }
 
+function normalizeErrorFrame(value: JsonContractValue): ManagedChatErrorFrame | null {
+  const envelope = asObject(value);
+  if (!envelope || !ownKeysExactly(envelope, ["error"])) return null;
+  const error = asObject(envelope.error ?? null);
+  if (!error) return null;
+  const allowed = ["code", "message", "session_id", "current_revision", "retry_same_idempotency_key"];
+  if (!Object.keys(error).every((key) => allowed.includes(key))) return null;
+  const code = stringField(error, "code");
+  const message = stringField(error, "message");
+  if (
+    !code || code.length > 64 || /[\u0000-\u001f\u007f-\u009f]/.test(code)
+    || !message || message.length > 512 || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/.test(message)
+  ) return null;
+  if (typeof error.retry_same_idempotency_key !== "undefined" && typeof error.retry_same_idempotency_key !== "boolean") return null;
+  if (typeof error.session_id !== "undefined") {
+    if (typeof error.session_id !== "string" || !/^mchat_[0-9a-f]{32}$/.test(error.session_id)) return null;
+  }
+  if (typeof error.current_revision !== "undefined") {
+    if (!Number.isSafeInteger(error.current_revision) || (error.current_revision as number) < 0) return null;
+  }
+  return Object.freeze({
+    code,
+    message,
+    retrySameIdempotencyKey: error.retry_same_idempotency_key === true,
+  });
+}
+
 function normalizeFrame(value: JsonContractValue): readonly ManagedChatRuntimeEvent[] | null {
   const object = asObject(value);
   if (!object || typeof object.error !== "undefined") return null;
+  if (object.object === "systemsculpt.chat.session") {
+    if (!ownKeysExactly(object, ["object", "session_id", "revision", "state"])) return null;
+    const sessionId = stringField(object, "session_id");
+    const revision = finiteNumber(object, "revision");
+    if (
+      object.state !== "committed"
+      || !sessionId
+      || !/^mchat_[0-9a-f]{32}$/.test(sessionId)
+      || typeof revision !== "number"
+      || !Number.isSafeInteger(revision)
+      || revision < 1
+    ) return null;
+    return [{ kind: "session_committed", checkpoint: { id: sessionId, revision } }];
+  }
   if (!isJsonArray(object.choices)) return null;
   const events: ManagedChatRuntimeEvent[] = [];
   if (typeof object.id !== "undefined" && typeof object.id !== "string") return null;
@@ -207,16 +293,12 @@ function normalizeFrame(value: JsonContractValue): readonly ManagedChatRuntimeEv
       const delta = asObject(choice.delta ?? null);
       if (!delta) return null;
       for (const field of Object.keys(delta)) {
-        if (!["role", "content", "text", "reasoning_content", "tool_calls"].includes(field)) return null;
+        if (!["role", "content", "tool_calls"].includes(field)) return null;
       }
       if (typeof delta.role !== "undefined" && typeof delta.role !== "string") return null;
       if (typeof delta.content !== "undefined" && typeof delta.content !== "string" && delta.content !== null) return null;
-      if (typeof delta.text !== "undefined" && typeof delta.text !== "string") return null;
-      if (typeof delta.reasoning_content !== "undefined" && typeof delta.reasoning_content !== "string" && delta.reasoning_content !== null) return null;
-      const content = stringField(delta, "content") ?? stringField(delta, "text");
+      const content = stringField(delta, "content");
       if (content) events.push({ kind: "content_delta", text: content });
-      const reasoning = stringField(delta, "reasoning_content");
-      if (reasoning) events.push({ kind: "reasoning_delta", text: reasoning });
       if (typeof delta.tool_calls !== "undefined") {
         if (!isJsonArray(delta.tool_calls)) return null;
         for (const callValue of delta.tool_calls) {
@@ -250,7 +332,6 @@ function normalizeFrame(value: JsonContractValue): readonly ManagedChatRuntimeEv
   if (typeof object.usage !== "undefined" && object.usage !== null) {
     const usage = asObject(object.usage);
     if (!usage) return null;
-    for (const field of Object.keys(usage)) if (!["prompt_tokens", "completion_tokens", "total_tokens", "cost"].includes(field)) return null;
     const promptTokens = optionalFiniteNumber(usage, "prompt_tokens");
     const completionTokens = optionalFiniteNumber(usage, "completion_tokens");
     const totalTokens = optionalFiniteNumber(usage, "total_tokens");
@@ -277,14 +358,110 @@ async function hashKey(preimage: string): Promise<string> {
 
 export async function managedChatOperationKey(durableTurnId: string, phase: "initial" | "continuation", continuationIndex: number): Promise<string> {
   const index = phase === "initial" ? 0 : continuationIndex;
-  return hashKey(`managed-chat-v1|${durableTurnId}|${phase}|${index}`);
+  return hashKey(`managed-chat-v2|${durableTurnId}|${phase}|${index}`);
+}
+
+const SESSION_REBASE_CODES = new Set([
+  "session_not_found",
+  "session_expired",
+  "session_revision_conflict",
+  "session_turn_conflict",
+  "idempotency_key_reused",
+]);
+
+function responseErrorCode(errorText: string): string | undefined {
+  try {
+    const parsed: JsonContractValue = JSON.parse(errorText) as JsonContractValue;
+    const object = asObject(parsed);
+    const nestedError = object ? asObject(object.error ?? null) : null;
+    return nestedError
+      ? stringField(nestedError, "code")
+      : object
+        ? stringField(object, "code")
+        : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function responseRetrySameIdempotencyKey(errorText: string): boolean {
+  try {
+    const parsed = JSON.parse(errorText) as JsonContractValue;
+    return normalizeErrorFrame(parsed)?.retrySameIdempotencyKey === true;
+  } catch {
+    return false;
+  }
+}
+
+function transportDiagnostic(transport: ManagedTransportResult): ManagedChatDiagnostic {
+  const status = statusValue(transport.response.status);
+  const requestId = bounded(transport.diagnostics.requestId, 128);
+  return {
+    ...(typeof status === "number" ? { status } : {}),
+    ...(requestId ? { requestId } : {}),
+  };
+}
+
+async function abortableRetryDelay(attempt: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) throw new DOMException("The operation was aborted", "AbortError");
+  await new Promise<void>((resolve, reject) => {
+    let timer = 0;
+    const abort = (): void => {
+      window.clearTimeout(timer);
+      signal?.removeEventListener("abort", abort);
+      reject(new DOMException("The operation was aborted", "AbortError"));
+    };
+    timer = window.setTimeout(() => {
+      signal?.removeEventListener("abort", abort);
+      resolve();
+    }, RETRY_BASE_DELAY_MS * attempt);
+    signal?.addEventListener("abort", abort, { once: true });
+  });
+}
+
+function responseSessionCheckpoint(response: Response): ManagedChatSessionCheckpoint | null {
+  const id = response.headers.get("x-systemsculpt-session-id")?.trim() ?? "";
+  const revisionText = response.headers.get("x-systemsculpt-session-revision")?.trim() ?? "";
+  const revision = Number(revisionText);
+  if (
+    !/^mchat_[0-9a-f]{32}$/.test(id)
+    || !/^\d+$/.test(revisionText)
+    || !Number.isSafeInteger(revision)
+    || revision < 1
+  ) return null;
+  return Object.freeze({ id, revision });
+}
+
+function requestByteLimit(
+  operation: AcceptedManagedChatOperation,
+  resumed: boolean,
+): number | null {
+  const limits = operation.lease.descriptor.limits;
+  const value = resumed
+    ? limits.max_delta_request_bytes ?? limits.max_request_bytes
+    : limits.max_request_bytes;
+  return Number.isSafeInteger(value) && (value as number) > 0 ? value as number : null;
+}
+
+function requestBodyByteLength(body: Readonly<Record<string, JsonContractValue>>): number | null {
+  try {
+    return new TextEncoder().encode(JSON.stringify(body)).byteLength;
+  } catch {
+    return null;
+  }
 }
 
 export class ManagedChatRuntimeAdapter {
   private readonly registry = new WeakMap<AcceptedManagedChatOperation, OperationRegistry>();
   private readonly terminal = new WeakSet<AcceptedManagedChatOperation>();
 
-  public constructor(private readonly client: ManagedCapabilityClient) {}
+  public constructor(
+    private readonly client: ManagedCapabilityClient,
+    private readonly sessions: ManagedChatSessionStatePort = {
+      get: () => undefined,
+      invalidate: async () => undefined,
+    },
+  ) {}
 
   public dispatch(input: ManagedChatDispatchInput): Promise<ManagedChatDispatchResult> {
     if (input.acceptedRequestSnapshot.operation !== input.operation) {
@@ -326,39 +503,215 @@ export class ManagedChatRuntimeAdapter {
       return { kind: "transport_failure", diagnostic: {} };
     }
     const accepted = input.acceptedRequestSnapshot;
-    const messages: readonly ManagedPreparedMessage[] = input.phase === "initial"
-      ? accepted.messages
-      : input.postCheckpointDurableSnapshot
-        ? composeAcceptedChatContinuation(accepted, input.postCheckpointDurableSnapshot)
-        : [];
-    if (messages.length === 0 || accepted.model !== "ai-agent") return { kind: "transport_failure", diagnostic: {} };
-    const body: Record<string, JsonContractValue> = { model: accepted.model, stream: true, messages };
-    if (accepted.tools?.length) body.tools = accepted.tools;
-    if (accepted.webSearch) body.plugins = [{ id: "web" }];
-    const key = await managedChatOperationKey(input.acceptedRequestSnapshot.operation.durableTurnId, input.phase, input.continuationIndex);
+    if (accepted.model !== "ai-agent") return { kind: "transport_failure", diagnostic: {} };
     try {
-      const transport = await this.client.streamAcceptedChat(ticket, input.operation.lease, body, key, input.signal);
-      const status = statusValue(transport.response.status);
-      const requestId = bounded(transport.diagnostics.requestId, 128);
-      const diagnostic: ManagedChatDiagnostic = {
-        ...(typeof status === "number" ? { status } : {}),
-        ...(requestId ? { requestId } : {}),
+      const toolsetFingerprint = managedToolsetFingerprint(accepted.tools);
+      let binding = await this.sessionBinding(input, toolsetFingerprint);
+      let fullMessages: readonly ManagedPreparedMessage[];
+      let deltaMessages: readonly ManagedPreparedMessage[];
+      try {
+        fullMessages = this.requestMessages(input, false);
+        deltaMessages = this.requestMessages(input, true);
+      } catch {
+        return { kind: "transport_failure", diagnostic: { code: "local_transcript_invalid" } };
+      }
+      if (fullMessages.length === 0 || deltaMessages.length === 0) {
+        return { kind: "transport_failure", diagnostic: { code: "local_transcript_invalid" } };
+      }
+      const budget = inspectManagedChatDispatchBudget({
+        limits: input.operation.lease.descriptor.limits,
+        fullMessages,
+        deltaMessages,
+        tools: accepted.tools,
+        ...(binding ? { sessionBudget: binding.budget } : {}),
+      });
+      if (binding && budget.resumeIssue) {
+        await this.sessions.invalidate();
+        binding = undefined;
+      }
+      if (!binding && budget.createIssue) {
+        return { kind: "capability_request", diagnostic: { code: budget.createIssue.code } };
+      }
+      const messages = binding ? deltaMessages : fullMessages;
+      let body: Record<string, JsonContractValue> | null;
+      try {
+        body = this.requestBody(input, binding, messages);
+      } catch {
+        return { kind: "transport_failure", diagnostic: { code: "local_transcript_invalid" } };
+      }
+      if (!body) return { kind: "transport_failure", diagnostic: { code: "local_transcript_invalid" } };
+      if (!binding && hasUnavailableManagedAttachment(body as JsonContractValue)) {
+        return { kind: "attachment_unavailable", diagnostic: { code: "local_attachment_unavailable" } };
+      }
+      let bodyBytes = requestBodyByteLength(body);
+      let byteLimit = requestByteLimit(input.operation, !!binding);
+      if (bodyBytes === null || byteLimit === null) {
+        return { kind: "transport_failure", diagnostic: { code: "local_contract_invalid" } };
+      }
+      if (bodyBytes > byteLimit) {
+        return { kind: "capability_request", diagnostic: { code: "local_request_too_large" } };
+      }
+      const key = await managedChatOperationKey(input.acceptedRequestSnapshot.operation.durableTurnId, input.phase, input.continuationIndex);
+      let transport = await this.client.streamAcceptedChat(ticket, input.operation.lease, body, key, input.signal);
+      const firstErrorCode = transport.response.ok
+        ? undefined
+        : responseErrorCode(transport.diagnostics.errorText);
+      if (binding && firstErrorCode && SESSION_REBASE_CODES.has(firstErrorCode)) {
+        await this.sessions.invalidate();
+        binding = undefined;
+        if (budget.createIssue) {
+          return { kind: "capability_request", diagnostic: { code: budget.createIssue.code } };
+        }
+        try {
+          body = this.requestBody(input, undefined, fullMessages);
+        } catch {
+          return { kind: "transport_failure", diagnostic: { code: "local_transcript_invalid" } };
+        }
+        if (!body) return { kind: "transport_failure", diagnostic: {} };
+        if (hasUnavailableManagedAttachment(body as JsonContractValue)) {
+          return { kind: "attachment_unavailable", diagnostic: { code: "local_attachment_unavailable" } };
+        }
+        bodyBytes = requestBodyByteLength(body);
+        byteLimit = requestByteLimit(input.operation, false);
+        if (bodyBytes === null || byteLimit === null) {
+          return { kind: "transport_failure", diagnostic: { code: "local_contract_invalid" } };
+        }
+        if (bodyBytes > byteLimit) {
+          return { kind: "capability_request", diagnostic: { code: "local_request_too_large" } };
+        }
+        transport = await this.client.streamAcceptedChat(ticket, input.operation.lease, body, key, input.signal);
+      }
+      const diagnostic = transportDiagnostic(transport);
+      if (
+        !transport.response.ok
+        && !responseRetrySameIdempotencyKey(transport.diagnostics.errorText)
+      ) return this.statusResult(transport.response.status, transport.diagnostics.errorText, diagnostic);
+      const expectedCheckpoint = responseSessionCheckpoint(transport.response);
+      const expectedRevision = binding ? binding.revision + 1 : 1;
+      if (
+        transport.response.ok
+        && (!expectedCheckpoint
+          || expectedCheckpoint.revision !== expectedRevision
+          || (binding && expectedCheckpoint.id !== binding.id))
+      ) return { kind: "transport_failure", diagnostic };
+      return {
+        kind: "success",
+        events: this.retryingStream({
+          initialTransport: transport,
+          ticket,
+          input,
+          body,
+          key,
+          expectedRevision,
+          expectedSessionId: binding?.id,
+        }),
+        diagnostic,
       };
-      if (!transport.response.ok) return this.statusResult(transport.response.status, transport.diagnostics.errorText, diagnostic);
-      return { kind: "success", events: this.parseStream(transport.response, diagnostic, input.signal), diagnostic };
     } catch {
       if (input.signal?.aborted) return { kind: "aborted", diagnostic: {} };
       return { kind: "transport_failure", diagnostic: {} };
     }
   }
 
+  private async sessionBinding(
+    input: ManagedChatDispatchInput,
+    toolsetFingerprint: string,
+  ): Promise<ManagedChatSessionBinding | undefined> {
+    const accepted = input.acceptedRequestSnapshot;
+    const savedBinding = this.sessions.get();
+    if (!savedBinding) return undefined;
+    const binding = parseManagedChatSessionBinding(
+      savedBinding,
+      accepted.durableSnapshot.chatId,
+    );
+    if (!binding) {
+      await this.sessions.invalidate();
+      return undefined;
+    }
+    const snapshot = input.phase === "initial"
+      ? accepted.durableSnapshot
+      : input.postCheckpointDurableSnapshot;
+    let anchorValid = false;
+    if (snapshot) {
+      if (input.phase === "initial") {
+        const boundaries = snapshot.messages
+          .map((message, index) => ({ message, index }))
+          .filter(({ message }) => message.message_id === accepted.durableTurnId);
+        if (boundaries.length === 1 && boundaries[0].message.role === "user") {
+          const preceding = snapshot.messages
+            .slice(0, boundaries[0].index)
+            .filter((message) => message.role !== "system");
+          const previous = preceding[preceding.length - 1];
+          anchorValid = previous?.role === "assistant"
+            && previous.message_id === binding.checkpointMessageId
+            && !previous.tool_calls?.length;
+        }
+      } else {
+        let latestAssistantIndex = -1;
+        for (let index = snapshot.messages.length - 1; index >= 0; index -= 1) {
+          if (snapshot.messages[index].role === "assistant") {
+            latestAssistantIndex = index;
+            break;
+          }
+        }
+        const assistant = latestAssistantIndex >= 0 ? snapshot.messages[latestAssistantIndex] : undefined;
+        const tail = latestAssistantIndex >= 0
+          ? snapshot.messages.slice(latestAssistantIndex + 1).filter((message) => message.role !== "system")
+          : [];
+        anchorValid = assistant?.message_id === binding.checkpointMessageId
+          && !!assistant.tool_calls?.length
+          && assistant.tool_calls.every((call) => call.state === "completed" || call.state === "failed")
+          && tail.length === 0;
+      }
+    }
+    if (
+      binding.boundChatId !== accepted.durableSnapshot.chatId
+      || binding.revision < 1
+      || binding.toolsetFingerprint !== toolsetFingerprint
+      || !anchorValid
+    ) {
+      await this.sessions.invalidate();
+      return undefined;
+    }
+    return binding;
+  }
+
+  private requestBody(
+    input: ManagedChatDispatchInput,
+    binding: ManagedChatSessionBinding | undefined,
+    messages: readonly ManagedPreparedMessage[],
+  ): Record<string, JsonContractValue> | null {
+    const accepted = input.acceptedRequestSnapshot;
+    if (messages.length === 0) return null;
+    const body: Record<string, JsonContractValue> = {
+      model: accepted.model,
+      stream: true,
+      session: binding
+        ? { id: binding.id, revision: binding.revision }
+        : { mode: "create" },
+      messages,
+    };
+    if (!binding && accepted.tools?.length) body.tools = accepted.tools;
+    if (input.phase === "initial" && accepted.webSearch) body.plugins = [{ id: "web" }];
+    return body;
+  }
+
+  private requestMessages(
+    input: ManagedChatDispatchInput,
+    resumed: boolean,
+  ): readonly ManagedPreparedMessage[] {
+    const accepted = input.acceptedRequestSnapshot;
+    if (input.phase === "initial") {
+      return resumed ? accepted.turnMessages : accepted.messages;
+    }
+    if (!input.postCheckpointDurableSnapshot) return [];
+    return resumed
+      ? composeAcceptedChatContinuationDelta(accepted, input.postCheckpointDurableSnapshot)
+      : composeAcceptedChatContinuation(accepted, input.postCheckpointDurableSnapshot);
+  }
+
   private statusResult(status: number, errorText: string, base: ManagedChatDiagnostic): ManagedChatDispatchResult {
-    let rawCode: string | undefined;
-    try {
-      const parsed: JsonContractValue = JSON.parse(errorText) as JsonContractValue;
-      const object = asObject(parsed);
-      rawCode = object ? stringField(object, "code") : undefined;
-    } catch { rawCode = undefined; }
+    const rawCode = responseErrorCode(errorText);
     const code = bounded(rawCode ?? null, 64);
     const diagnostic: ManagedChatDiagnostic = { ...base, ...(code ? { code } : {}) };
     if (status === 400) return { kind: "capability_request", diagnostic };
@@ -367,6 +720,9 @@ export class ManagedChatRuntimeAdapter {
     if (status === 426) return { kind: "plugin_version", diagnostic };
     if (status === 429) return { kind: "rate_limit", diagnostic };
     if (status === 503) return { kind: "unavailable", diagnostic };
+    if (status === 404 || status === 410 || rawCode?.startsWith("session_")) {
+      return { kind: "session", diagnostic };
+    }
     if (status === 409) {
       const exact: Readonly<Record<string, FailureKind>> = {
         operation_in_progress: "operation_in_progress",
@@ -380,7 +736,87 @@ export class ManagedChatRuntimeAdapter {
     return { kind: "transport_failure", diagnostic };
   }
 
-  private async *parseStream(response: Response, diagnostic: ManagedChatDiagnostic, signal?: AbortSignal): AsyncGenerator<ManagedChatRuntimeEvent> {
+  /**
+   * A staged provider response can outlive a transient session-finalization
+   * failure. Replaying the exact body and idempotency key recovers that same
+   * response without charging or running tools twice.
+   */
+  private async *retryingStream(params: Readonly<{
+    initialTransport: ManagedTransportResult;
+    ticket: NonNullable<ReturnType<ManagedCapabilityClient["beginAcceptedChatDispatch"]>>;
+    input: ManagedChatDispatchInput;
+    body: Readonly<Record<string, JsonContractValue>>;
+    key: string;
+    expectedRevision: number;
+    expectedSessionId?: string;
+  }>): AsyncGenerator<ManagedChatRuntimeEvent> {
+    let transport = params.initialTransport;
+    let retries = 0;
+    while (true) {
+      const diagnostic = transportDiagnostic(transport);
+      if (!transport.response.ok) {
+        if (
+          !responseRetrySameIdempotencyKey(transport.diagnostics.errorText)
+          || retries >= MAX_SAME_KEY_RETRIES
+        ) {
+          throw this.statusResult(
+            transport.response.status,
+            transport.diagnostics.errorText,
+            diagnostic,
+          );
+        }
+        retries += 1;
+        yield { kind: "phase_restarted", attempt: retries };
+        await abortableRetryDelay(retries, params.input.signal);
+        transport = await this.client.streamAcceptedChat(
+          params.ticket,
+          params.input.operation.lease,
+          params.body,
+          params.key,
+          params.input.signal,
+        );
+        continue;
+      }
+
+      const checkpoint = responseSessionCheckpoint(transport.response);
+      if (
+        !checkpoint
+        || checkpoint.revision !== params.expectedRevision
+        || (params.expectedSessionId && checkpoint.id !== params.expectedSessionId)
+      ) {
+        throw Object.freeze({ kind: "transport_failure", diagnostic });
+      }
+      try {
+        yield* this.parseStream(transport.response, checkpoint, diagnostic, params.input.signal);
+        return;
+      } catch (error) {
+        if (!(error instanceof ManagedChatStreamFrameError)) throw error;
+        if (!error.frame.retrySameIdempotencyKey || retries >= MAX_SAME_KEY_RETRIES) {
+          throw Object.freeze({
+            kind: "transport_failure",
+            diagnostic: { ...diagnostic, code: error.frame.code },
+          });
+        }
+        retries += 1;
+        yield { kind: "phase_restarted", attempt: retries };
+        await abortableRetryDelay(retries, params.input.signal);
+        transport = await this.client.streamAcceptedChat(
+          params.ticket,
+          params.input.operation.lease,
+          params.body,
+          params.key,
+          params.input.signal,
+        );
+      }
+    }
+  }
+
+  private async *parseStream(
+    response: Response,
+    expectedCheckpoint: ManagedChatSessionCheckpoint,
+    diagnostic: ManagedChatDiagnostic,
+    signal?: AbortSignal,
+  ): AsyncGenerator<ManagedChatRuntimeEvent> {
     if (!response.body) throw Object.freeze({ kind: "transport_failure", diagnostic });
     const reader = response.body.getReader();
     const decoder = new TextDecoder("utf-8", { fatal: true });
@@ -390,6 +826,7 @@ export class ManagedChatRuntimeAdapter {
     let pendingCr = false;
     let data: string[] = [];
     let doneSeen = false;
+    let committedCheckpoint: ManagedChatSessionCheckpoint | null = null;
     let iterationCompleted = false;
     let readerCancelled = false;
     const cancelReader = async (): Promise<void> => {
@@ -409,9 +846,19 @@ export class ManagedChatRuntimeAdapter {
       if (doneSeen) return false;
       try {
         const parsed: JsonContractValue = JSON.parse(payload) as JsonContractValue;
+        const streamError = normalizeErrorFrame(parsed);
+        if (streamError) throw new ManagedChatStreamFrameError(streamError);
         const normalized = normalizeFrame(parsed);
         if (!normalized) return false;
         for (const event of normalized) {
+          if (event.kind === "session_committed") {
+            if (
+              committedCheckpoint
+              || event.checkpoint.id !== expectedCheckpoint.id
+              || event.checkpoint.revision !== expectedCheckpoint.revision
+            ) return false;
+            committedCheckpoint = event.checkpoint;
+          }
           if (event.kind === "tool_call_delta") {
             const previous = toolState.get(event.index) ?? { arguments: "" };
             toolState.set(event.index, {
@@ -423,7 +870,10 @@ export class ManagedChatRuntimeAdapter {
           queued.push(event);
         }
         return true;
-      } catch { return false; }
+      } catch (error) {
+        if (error instanceof ManagedChatStreamFrameError) throw error;
+        return false;
+      }
     };
     const processLine = (value: string): boolean => {
       if (value === "") return dispatchEvent();
@@ -473,13 +923,18 @@ export class ManagedChatRuntimeAdapter {
       if (pendingCr) line += "\r";
       if (line.length > 0 || data.length > 0) throw Object.freeze({ kind: "transport_failure", diagnostic });
       if (!doneSeen) throw Object.freeze({ kind: "transport_failure", diagnostic });
+      if (!committedCheckpoint) throw Object.freeze({ kind: "transport_failure", diagnostic });
       for (const [index, state] of toolState) yield { kind: "tool_call_completed", index, ...state };
       yield { kind: "done" };
       iterationCompleted = true;
-    } catch {
+    } catch (error) {
       if (signal?.aborted) {
         await cancelReader();
         throw Object.freeze({ kind: "aborted", diagnostic });
+      }
+      if (error instanceof ManagedChatStreamFrameError) {
+        try { await cancelReader(); } catch { /* the typed retry contract remains authoritative */ }
+        throw error;
       }
       throw Object.freeze({ kind: "transport_failure", diagnostic });
     } finally {

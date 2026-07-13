@@ -1,9 +1,9 @@
 /**
- * Bulk automation widgets — fixed bottom-right confirm/progress toasts
- * (BulkAutomationConfirmModal.ts / AutomationProcessingModal.ts).
+ * Bulk workflow surfaces:
+ * - StandardModal confirmation copy (`.ss-bulk-automation-modal__*`)
+ * - Fixed progress widget for multi-file runs (`.systemsculpt-bulk-progress-widget`)
  */
 
-.systemsculpt-bulk-confirm-widget,
 .systemsculpt-bulk-progress-widget {
   position: fixed;
   bottom: var(--ss-space-5);
@@ -32,6 +32,31 @@
   color: var(--ss-ink-muted);
 }
 
+.ss-bulk-automation-modal__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ss-space-3);
+}
+
+.ss-bulk-automation-modal__summary {
+  margin: 0;
+  color: var(--ss-ink);
+  font-size: var(--ss-text-sm);
+  font-weight: var(--ss-weight-medium);
+}
+
+.ss-bulk-automation-modal__notes {
+  margin: 0;
+  padding-left: var(--ss-space-4);
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-sm);
+  line-height: var(--ss-leading-base);
+}
+
+.ss-bulk-automation-modal__notes li + li {
+  margin-top: var(--ss-space-1);
+}
+
 .systemsculpt-bulk-progress-widget:not(.is-complete):not(.is-error):not(.is-stopped)
   .systemsculpt-bulk-widget-icon svg {
   animation: ss-spin 1s linear infinite;
@@ -46,16 +71,27 @@
 .systemsculpt-bulk-widget-close {
   display: flex;
   align-items: center;
-  padding: var(--ss-space-0);
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  background: transparent;
   border-radius: var(--ss-radius-xs);
   color: var(--ss-ink-muted);
   cursor: pointer;
   transition: var(--ss-transition-colors);
 }
 
-.systemsculpt-bulk-widget-close:hover {
+.systemsculpt-bulk-widget-close:hover,
+.systemsculpt-bulk-widget-close:focus-visible {
   background-color: var(--ss-state-hover);
   color: var(--ss-ink);
+}
+
+.systemsculpt-bulk-widget-close:focus-visible {
+  box-shadow: var(--ss-ring);
+  outline: none;
 }
 
 .systemsculpt-bulk-widget-body {

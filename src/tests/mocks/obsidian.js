@@ -256,6 +256,7 @@ const Platform = {
 class App {
   constructor() {
     this.vault = {
+      getName: jest.fn(() => "Test Vault"),
       getMarkdownFiles: jest.fn(() => []),
       read: jest.fn(),
       cachedRead: jest.fn(),
@@ -405,6 +406,7 @@ class ItemView extends Component {
     this.containerEl = document.createElement("div");
     this.containerEl.appendChild(document.createElement("div"));
     this.containerEl.appendChild(document.createElement("div"));
+    this.contentEl = this.containerEl.children[1];
   }
 
   getViewType() {

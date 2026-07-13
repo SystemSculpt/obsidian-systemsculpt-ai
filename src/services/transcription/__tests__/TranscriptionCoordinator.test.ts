@@ -58,7 +58,7 @@ function harness(overrides: { keep?: boolean; timestamped?: boolean } = {}) {
 describe("TranscriptionCoordinator", () => {
   it("commits one Markdown output before optionally deleting the recoverable source", async () => {
     const { adapter, coordinator, events } = harness({ keep: false });
-    await coordinator.start({ filePath: "Recordings/demo.webm", useModal: false, onTranscriptionComplete: jest.fn() });
+    await coordinator.start({ filePath: "Recordings/demo.webm", onTranscriptionComplete: jest.fn() });
 
     expect(events).toEqual([
       "remote",
@@ -74,7 +74,7 @@ describe("TranscriptionCoordinator", () => {
     const { adapter, app, coordinator } = harness({ keep: false });
     (app.vault.create as jest.Mock).mockRejectedValue(new Error("disk full"));
 
-    await expect(coordinator.start({ filePath: "Recordings/demo.webm", useModal: false, onTranscriptionComplete: jest.fn() })).rejects.toThrow("disk full");
+    await expect(coordinator.start({ filePath: "Recordings/demo.webm", onTranscriptionComplete: jest.fn() })).rejects.toThrow("disk full");
 
     expect(adapter.beginLocalCommit).toHaveBeenCalled();
     expect(adapter.completeLocalCommit).not.toHaveBeenCalled();
@@ -83,7 +83,7 @@ describe("TranscriptionCoordinator", () => {
 
   it("writes timestamped results as SRT without post-processing", async () => {
     const { app, coordinator } = harness();
-    await coordinator.start({ filePath: "Recordings/demo.webm", useModal: false, timestamped: true, onTranscriptionComplete: jest.fn() });
+    await coordinator.start({ filePath: "Recordings/demo.webm", timestamped: true, onTranscriptionComplete: jest.fn() });
     expect(app.vault.create).toHaveBeenCalledWith("Recordings/demo.srt", "managed transcript");
   });
 
@@ -98,7 +98,7 @@ describe("TranscriptionCoordinator", () => {
       await new Promise<void>((resolve) => { release = resolve; });
       return { operationId: "transcription-op-1", text: "late transcript" };
     });
-    const running = coordinator.start({ filePath: "Recordings/demo.webm", useModal: false, onTranscriptionComplete: jest.fn() });
+    const running = coordinator.start({ filePath: "Recordings/demo.webm", onTranscriptionComplete: jest.fn() });
     await waiting;
     coordinator.abort();
     release();
@@ -149,7 +149,7 @@ describe("TranscriptionCoordinator", () => {
       entered();
       await delayed;
     });
-    const running = coordinator.start({ filePath: "Recordings/demo.webm", useModal: false, onTranscriptionComplete: jest.fn() });
+    const running = coordinator.start({ filePath: "Recordings/demo.webm", onTranscriptionComplete: jest.fn() });
     await waiting;
     coordinator.abort();
     release();

@@ -2,13 +2,12 @@ import { App, TFile } from "obsidian";
 import { ChatMessage, MessagePart, MultiPartContent } from "../types";
 import { ImageProcessor } from "../utils/ImageProcessor";
 import { simpleHash } from "../utils/cryptoUtils";
-import { mentionsObsidianBases } from "../utils/obsidianBases";
-import { OBSIDIAN_BASES_SYNTAX_GUIDE } from "../constants/prompts/obsidianBasesSyntaxGuide";
 import {
   buildToolResultMessagesFromToolCalls,
   pruneToolMessagesNotFollowingToolCalls,
 } from "../utils/tooling";
 import type { ToolCall } from "../types/toolCalls";
+import { normalizeFirstPartyToolName } from "../tools/toolNames";
 
 /**
  * Service responsible for handling context files and message preparation
@@ -29,41 +28,6 @@ export class ContextFileService {
     // Pad with more hashing if needed to get 24 chars
     const extendedHash = simpleHash(hash + input) + simpleHash(input + hash);
     return `${prefix}_${extendedHash.slice(0, 24)}`;
-  }
-
-  private shouldInjectObsidianBasesGuide(messages: ChatMessage[], contextFiles: Set<string>): boolean {
-    // Trigger if the latest user message mentions Bases, or if any context/tool call references a `.base`.
-    const lastUserMessage = [...messages].reverse().find((m) => m?.role === "user");
-    if (typeof lastUserMessage?.content === "string" && mentionsObsidianBases(lastUserMessage.content)) {
-      return true;
-    }
-
-    for (const entry of contextFiles) {
-      if (!entry || typeof entry !== "string") continue;
-      if (entry.toLowerCase().includes(".base")) return true;
-    }
-
-    for (const msg of messages) {
-      if (msg?.role !== "assistant") continue;
-      const toolCalls = (msg as any)?.tool_calls;
-      if (!Array.isArray(toolCalls)) continue;
-
-      for (const tc of toolCalls) {
-        const rawArgs = tc?.request?.function?.arguments;
-        if (typeof rawArgs !== "string") continue;
-        try {
-          const parsed = JSON.parse(rawArgs);
-          const p = parsed?.path;
-          if (typeof p === "string" && p.toLowerCase().endsWith(".base")) {
-            return true;
-          }
-        } catch {
-          if (rawArgs.toLowerCase().includes(".base")) return true;
-        }
-      }
-    }
-
-    return false;
   }
 
   private expandCompactAssistantMessages(messages: ChatMessage[]): ChatMessage[] {
@@ -241,6 +205,17 @@ export class ContextFileService {
   }
 
   private cloneToolCallForTransport(toolCall: ToolCall, messageId?: string): ToolCall {
+    const directFunction = (toolCall as any)?.function;
+    if (!toolCall?.request && directFunction && typeof directFunction === "object") {
+      return {
+        ...(toolCall as any),
+        function: {
+          ...directFunction,
+          name: normalizeFirstPartyToolName(directFunction.name)
+            || String(directFunction.name ?? ""),
+        },
+      } as ToolCall;
+    }
     const result = toolCall.result;
     const clonedResult = result
       ? {
@@ -272,6 +247,8 @@ export class ContextFileService {
         ...toolCall.request,
         function: {
           ...(toolCall.request?.function ?? {}),
+          name: normalizeFirstPartyToolName(toolCall.request?.function?.name)
+            || String(toolCall.request?.function?.name ?? ""),
         },
       },
       ...(clonedResult !== undefined ? { result: clonedResult } : {}),
@@ -469,40 +446,21 @@ export class ContextFileService {
   }
 
   /**
-   * Prepare messages with context files and an optional server-managed
-   * instruction override.
+   * Prepare client-owned conversation messages and vault context for the
+   * managed chat endpoint. System instructions are owned by the server, so
+   * legacy system-role transcript entries are intentionally excluded.
    */
   public async prepareMessagesWithContext(
     messages: ChatMessage[],
     contextFiles: Set<string>,
-    includeImages?: boolean,
-    finalSystemPrompt?: string
+    includeImages?: boolean
   ): Promise<ChatMessage[]> {
-    const expandedMessages = this.expandCompactAssistantMessages(messages || []);
+    const expandedMessages = this.expandCompactAssistantMessages(messages || [])
+      .filter((message) => message.role !== "system");
     const { messages: sanitizedMessages } = pruneToolMessagesNotFollowingToolCalls(expandedMessages);
     const shouldIncludeImages = includeImages !== false;
     const preparedMessages: ChatMessage[] = [];
 
-    let systemPromptContent =
-      typeof finalSystemPrompt === "string" && finalSystemPrompt.trim().length > 0
-        ? finalSystemPrompt.trim()
-        : undefined;
-
-    // Only augment explicit server-supplied prompt content; the thin client
-    // no longer invents its own prompt when none is provided.
-    if (systemPromptContent && this.shouldInjectObsidianBasesGuide(sanitizedMessages, contextFiles)) {
-      systemPromptContent = `${systemPromptContent}\n\n${OBSIDIAN_BASES_SYNTAX_GUIDE}`;
-    }
-
-    // Add system message if we have content
-    if (systemPromptContent) {
-      preparedMessages.push({
-        role: "system",
-        content: systemPromptContent,
-        message_id: this.deterministicId(systemPromptContent, "sys")
-      });
-    }
-    
     // Process context files and collect document IDs for the server
     const documentIds: string[] = [];
     const contextMessages: ChatMessage[] = [];
@@ -551,7 +509,7 @@ export class ContextFileService {
         }
       }
 
-      // For any other message (user, system), pass it through as-is.
+      // Preserve the conversation message without introducing instructions.
       const messageToPush: Partial<ChatMessage> = {
         role: msg.role,
         message_id: msg.message_id,
@@ -583,10 +541,14 @@ export class ContextFileService {
           (toolCall) => typeof toolCall?.id === "string" && satisfiedToolCallIds.has(toolCall.id)
         );
         if (preservedToolCalls.length > 0) {
-          (messageToPush as any).tool_calls = preservedToolCalls;
+          (messageToPush as any).tool_calls = preservedToolCalls.map((toolCall) =>
+            this.cloneToolCallForTransport(toolCall)
+          );
         }
       } else if (msg.tool_calls && msg.tool_calls.length > 0) {
-        (messageToPush as any).tool_calls = msg.tool_calls;
+        (messageToPush as any).tool_calls = msg.tool_calls.map((toolCall) =>
+          this.cloneToolCallForTransport(toolCall)
+        );
       }
 
       if (msg.content !== undefined) {

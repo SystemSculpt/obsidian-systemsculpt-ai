@@ -24,6 +24,7 @@ function fixture(options: { chunks?: number; batchSize?: number; chunkText?: str
     getVectorsByPath: jest.fn(async () => []),
     moveVectorId: jest.fn(async () => undefined),
     removeIds: jest.fn(async () => undefined),
+    removeByPath: jest.fn(async () => undefined),
   };
   const preprocessor = {
     process: jest.fn(() => ({ content: "processed", source: "processed", hash: "doc", length: 1000 })),
@@ -101,13 +102,21 @@ describe("EmbeddingsProcessor managed batching", () => {
     expect(result.failedDetails?.["Note.md"]).toMatchObject({ code: "rate_limited", status: 429 });
   });
 
-  it("completes an empty note locally without a vector or remote dispatch", async () => {
+  it("seals normalized-empty content locally without a remote dispatch", async () => {
     const { storage, processor, file, app } = fixture({ chunks: 0 });
 
     const result = await processor.processFiles([file] as never, app as never);
 
     expect(result).toMatchObject({ completed: 1, failed: 0 });
-    expect(storage.storeVectors).not.toHaveBeenCalled();
+    expect(storage.removeByPath).toHaveBeenCalledWith("Note.md");
+    expect(storage.storeVectors).toHaveBeenCalledWith([
+      expect.objectContaining({
+        path: "Note.md",
+        vector: expect.any(Float32Array),
+        metadata: expect.objectContaining({ isEmpty: true, complete: true, chunkCount: 0 }),
+      }),
+    ]);
+    expect(storage.storeVectors.mock.calls[0][0][0].vector).toHaveLength(1);
     expect(storage.removeByPathExceptIds).not.toHaveBeenCalled();
   });
 

@@ -49,7 +49,7 @@ systemsculpt-sync.config.json
 .obsidian/
 .obsidian-cache/
 .obsidian-cache.broken*/
-vault/
+/vault/
 
 # Misc local dirs
 plans/

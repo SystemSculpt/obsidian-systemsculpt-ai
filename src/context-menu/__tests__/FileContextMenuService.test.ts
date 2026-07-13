@@ -1,9 +1,9 @@
 import { App, TFile } from "obsidian";
 import { FileContextMenuService } from "../FileContextMenuService";
-import { showAudioTranscriptionModal } from "../../modals/AudioTranscriptionModal";
+import { launchAudioTranscriptionPanel } from "../../modals/AudioTranscriptionPanel";
 
-jest.mock("../../modals/AudioTranscriptionModal", () => ({
-  showAudioTranscriptionModal: jest.fn(),
+jest.mock("../../modals/AudioTranscriptionPanel", () => ({
+  launchAudioTranscriptionPanel: jest.fn(),
 }));
 
 jest.mock("../../utils/errorLogger", () => ({
@@ -26,10 +26,10 @@ describe("FileContextMenuService", () => {
       expect(options.signal).toBeInstanceOf(AbortSignal);
     }));
     let cancel!: () => void;
-    const modal = { updateProgress: jest.fn(), markSuccess: jest.fn(), markFailure: jest.fn(), close: jest.fn() };
+    const panel = { updateProgress: jest.fn(), markSuccess: jest.fn(), markFailure: jest.fn(), close: jest.fn() };
     const service = new FileContextMenuService({
       app, plugin, documentProcessor: { processDocument }, chatLauncher: { open: jest.fn() },
-      launchProcessingModal: jest.fn((options) => { cancel = options.onCancel!; return modal; }),
+      launchProcessingPanel: jest.fn((options) => { cancel = options.onCancel!; return panel; }),
     });
     const file = new TFile({ path: "document.pdf", name: "document.pdf", extension: "pdf" });
 
@@ -40,8 +40,8 @@ describe("FileContextMenuService", () => {
     resolveProcessing("output.md");
     await pending;
 
-    expect(modal.markSuccess).not.toHaveBeenCalled();
-    expect(modal.markFailure).not.toHaveBeenCalled();
+    expect(panel.markSuccess).not.toHaveBeenCalled();
+    expect(panel.markFailure).not.toHaveBeenCalled();
   });
 
   it("suppresses late progress and success when cancelled during success effects", async () => {
@@ -53,10 +53,10 @@ describe("FileContextMenuService", () => {
     const processDocument = jest.fn(async (_file, options) => { processingOptions = options; return "output.md"; });
     let cancel!: () => void;
     let finishSuccess!: () => void;
-    const modal = { updateProgress: jest.fn(), markSuccess: jest.fn(), markFailure: jest.fn(), close: jest.fn() };
+    const panel = { updateProgress: jest.fn(), markSuccess: jest.fn(), markFailure: jest.fn(), close: jest.fn() };
     const service = new FileContextMenuService({
       app, plugin, documentProcessor: { processDocument }, chatLauncher: { open: jest.fn() },
-      launchProcessingModal: jest.fn((options) => { cancel = options.onCancel!; return modal; }),
+      launchProcessingPanel: jest.fn((options) => { cancel = options.onCancel!; return panel; }),
     });
     jest.spyOn(service as any, "handleDocumentSuccess").mockImplementation(() => new Promise<void>((resolve) => { finishSuccess = resolve; }));
     const file = new TFile({ path: "document.pdf", name: "document.pdf", extension: "pdf" });
@@ -69,9 +69,9 @@ describe("FileContextMenuService", () => {
     finishSuccess();
     await pending;
 
-    expect(modal.updateProgress).not.toHaveBeenCalled();
-    expect(modal.markSuccess).not.toHaveBeenCalled();
-    expect(modal.markFailure).not.toHaveBeenCalled();
+    expect(panel.updateProgress).not.toHaveBeenCalled();
+    expect(panel.markSuccess).not.toHaveBeenCalled();
+    expect(panel.markFailure).not.toHaveBeenCalled();
   });
 
   it("uses markdown mode for Convert Audio to Markdown flow", async () => {
@@ -98,7 +98,7 @@ describe("FileContextMenuService", () => {
       chatLauncher: {
         open: jest.fn(),
       },
-      launchProcessingModal: jest.fn() as any,
+      launchProcessingPanel: jest.fn() as any,
     });
 
     const audioFile = new TFile({
@@ -109,8 +109,8 @@ describe("FileContextMenuService", () => {
 
     await (service as any).handleAudioConversion(audioFile);
 
-    expect(showAudioTranscriptionModal).toHaveBeenCalledTimes(1);
-    expect(showAudioTranscriptionModal).toHaveBeenCalledWith(
+    expect(launchAudioTranscriptionPanel).toHaveBeenCalledTimes(1);
+    expect(launchAudioTranscriptionPanel).toHaveBeenCalledWith(
       app,
       expect.objectContaining({
         file: audioFile,

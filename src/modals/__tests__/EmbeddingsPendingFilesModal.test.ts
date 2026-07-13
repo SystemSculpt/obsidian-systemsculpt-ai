@@ -338,7 +338,7 @@ describe("EmbeddingsPendingFilesModal", () => {
     });
 
     it("formats 'schema-mismatch' as a managed configuration change", () => {
-      expect((modal as any).formatReason("schema-mismatch")).toBe("Managed configuration changed");
+      expect((modal as any).formatReason("schema-mismatch")).toBe("AI configuration changed");
     });
 
     it("formats 'metadata-missing' correctly", () => {

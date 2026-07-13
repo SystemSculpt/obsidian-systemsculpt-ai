@@ -4,6 +4,7 @@ import {
   ManagedEmbeddingsAdapter,
   ManagedEmbeddingsError,
 } from "../ManagedEmbeddingsAdapter";
+import { MANAGED_EMBEDDING_MAX_CHARS_PER_TEXT } from "../../ManagedEmbeddingsContract";
 
 function transport(body: unknown, status = 200): ManagedTransportResult {
   return {
@@ -88,6 +89,19 @@ describe("ManagedEmbeddingsAdapter", () => {
       idempotencyKey: "embeddings:query:1",
     });
     expect(result.vectors).toEqual([[0.25, -0.5]]);
+  });
+
+  it("rejects text beyond the first-party per-input contract before transport", async () => {
+    const request = jest.fn(async (operation) => {
+      operation.body();
+      throw new Error("unreachable");
+    });
+    const adapter = new ManagedEmbeddingsAdapter(clientWith(request));
+
+    await expect(adapter.generate({
+      prepare: () => ({ input: "x".repeat(MANAGED_EMBEDDING_MAX_CHARS_PER_TEXT + 1) }),
+      idempotencyKey: "embeddings:too-long:1",
+    })).rejects.toMatchObject({ code: "invalid_request", status: 400 });
   });
 
   it.each([

@@ -1,4 +1,12 @@
-import { ChatMessage, MessagePart, ChatRole } from "../../../types";
+import {
+  ChatMessage,
+  MessagePart,
+  ChatRole,
+  MultiPartContent,
+  type ChatAttachmentMetadata,
+} from "../../../types";
+import { parseAttachedTextContent } from "../attachments/ChatAttachmentContent";
+import { isChatAttachmentContentRef } from "../attachments/ChatAttachmentVaultStore";
 import * as obsidianApi from "obsidian";
 // Dynamically extract to support stub in tests
 
@@ -6,6 +14,7 @@ const { parseYaml } = obsidianApi as any;
 import { MessagePartList } from "../utils/MessagePartList";
 import {
   detectLoadedChatBackend,
+  parseManagedChatSessionBinding,
   type ChatMetadata,
   type ParsedChatMarkdown,
 } from "./ChatPersistenceTypes";
@@ -58,7 +67,8 @@ export class ChatMarkdownSerializer {
 
     while ((match = messageRegex.exec(content)) !== null) {
       const attrs = match[1];
-      const body = match[2];
+      const storedMultipart = this.extractStoredMultipart(match[2]);
+      const body = storedMultipart.body;
 
       const roleMatch = attrs.match(/role="(.*?)"/);
       const idMatch = attrs.match(/message-id="(.*?)"/);
@@ -132,7 +142,7 @@ export class ChatMarkdownSerializer {
       for (const block of extractedBlocks) {
         if (block.start > cursor) {
           pushContentChunk(body.slice(cursor, block.start), {
-            trimLeadingBoundary: cursor > 0,
+            trimLeadingBoundary: true,
             trimTrailingBoundary: true,
           });
         }
@@ -162,8 +172,15 @@ export class ChatMarkdownSerializer {
         });
       }
 
-      if (parts.length > 0) {
-        messages.push(this.reconstructMessageFromParts(role, message_id, parts));
+      const attachmentMetadata = this.extractAttachmentMetadata(attrs, storedMultipart.content);
+      if (parts.length > 0 || attachmentMetadata) {
+        const reconstructed = parts.length > 0
+          ? this.reconstructMessageFromParts(role, message_id, parts)
+          : { role, message_id, content: "" as const };
+        const restored = storedMultipart.content
+          ? { ...reconstructed, content: storedMultipart.content, messageParts: undefined }
+          : reconstructed;
+        messages.push(attachmentMetadata ? { ...restored, attachmentMetadata } : restored);
       }
     }
 
@@ -177,7 +194,8 @@ export class ChatMarkdownSerializer {
 
     while ((match = messageRegex.exec(content)) !== null) {
       const attrs = match[1];
-      const body = match[2];
+      const storedMultipart = this.extractStoredMultipart(match[2]);
+      const body = storedMultipart.body;
 
       const roleMatch = attrs.match(/role="(.*?)"/);
       const idMatch = attrs.match(/message-id="(.*?)"/);
@@ -244,8 +262,15 @@ export class ChatMarkdownSerializer {
         parts.push({ id: partId, type: "tool_call", data: toolCall, timestamp: ts++ });
       }
 
-      if (parts.length > 0) {
-        messages.push(this.reconstructMessageFromParts(role, message_id, parts));
+      const attachmentMetadata = this.extractAttachmentMetadata(attrs, storedMultipart.content);
+      if (parts.length > 0 || attachmentMetadata) {
+        const reconstructed = parts.length > 0
+          ? this.reconstructMessageFromParts(role, message_id, parts)
+          : { role, message_id, content: "" as const };
+        const restored = storedMultipart.content
+          ? { ...reconstructed, content: storedMultipart.content, messageParts: undefined }
+          : reconstructed;
+        messages.push(attachmentMetadata ? { ...restored, attachmentMetadata } : restored);
       }
     }
 
@@ -257,11 +282,108 @@ export class ChatMarkdownSerializer {
     return {
       role,
       message_id,
-      content: list.contentMarkdown(),
+      content: list.contentMarkdown(""),
       reasoning: list.reasoningMarkdown(),
       tool_calls: list.toolCalls,
       messageParts,
     };
+  }
+
+  private static extractStoredMultipart(body: string): { body: string; content: MultiPartContent[] | null } {
+    const marker = /\n?<!-- SYSTEMSCULPT-CONTENT-PARTS base64\n([A-Za-z0-9+/=]+)\n-->/;
+    const match = body.match(marker);
+    if (!match) return { body, content: null };
+    try {
+      const binary = atob(match[1]);
+      const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+      const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
+      if (!Array.isArray(parsed) || parsed.length === 0 || !parsed.every((part) => this.isStoredContentPart(part))) {
+        return { body, content: null };
+      }
+      return { body: body.replace(match[0], ""), content: parsed as MultiPartContent[] };
+    } catch {
+      return { body, content: null };
+    }
+  }
+
+  private static isStoredContentPart(value: unknown): value is MultiPartContent {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+    const part = value as Record<string, unknown>;
+    if (part.type === "text") return Object.keys(part).length === 2 && typeof part.text === "string";
+    if (part.type !== "image_url" || Object.keys(part).length !== 2) return false;
+    const image = part.image_url;
+    return !!image && typeof image === "object" && !Array.isArray(image)
+      && Object.keys(image).length === 1
+      && typeof (image as Record<string, unknown>).url === "string"
+      && /^data:image\/(?:png|jpeg|webp);base64,/.test((image as Record<string, unknown>).url as string);
+  }
+
+  private static encodeStoredMultipart(content: MultiPartContent[]): string {
+    return this.encodeBase64Json(content);
+  }
+
+  private static encodeBase64Json(value: unknown): string {
+    const bytes = new TextEncoder().encode(JSON.stringify(value));
+    let binary = "";
+    const chunkSize = 0x8000;
+    for (let offset = 0; offset < bytes.byteLength; offset += chunkSize) {
+      binary += String.fromCharCode(...bytes.subarray(offset, Math.min(offset + chunkSize, bytes.byteLength)));
+    }
+    return btoa(binary);
+  }
+
+  private static decodeBase64Json(value: string): unknown {
+    const binary = atob(value);
+    const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+    return JSON.parse(new TextDecoder().decode(bytes)) as unknown;
+  }
+
+  private static extractAttachmentMetadata(
+    attributes: string,
+    content: MultiPartContent[] | null,
+  ): ChatAttachmentMetadata[] | null {
+    const match = attributes.match(/(?:^|\s)attachment-metadata="([A-Za-z0-9+/=]+)"(?:\s|$)/);
+    if (!match) return null;
+    try {
+      const parsed = this.decodeBase64Json(match[1]);
+      if (!Array.isArray(parsed) || parsed.length === 0) return null;
+      const indices = new Set<number>();
+      const valid = parsed.every((value) => {
+        if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+        const item = value as Record<string, unknown>;
+        if (!Object.keys(item).every((key) => [
+          "id", "name", "mimeType", "byteLength", "kind", "contentPartIndex", "contentRef",
+        ].includes(key))) return false;
+        if (typeof item.id !== "string" || !item.id.trim()) return false;
+        if (typeof item.name !== "string" || !item.name.trim()) return false;
+        if (typeof item.mimeType !== "string" || !item.mimeType.trim()) return false;
+        if (!Number.isSafeInteger(item.byteLength) || (item.byteLength as number) < 0) return false;
+        if (!Number.isSafeInteger(item.contentPartIndex) || (item.contentPartIndex as number) < 0) return false;
+        if (!new Set(["document", "image", "text"]).has(String(item.kind))) return false;
+        if (typeof item.contentRef !== "undefined" && !isChatAttachmentContentRef(item.contentRef)) return false;
+        const partIndex = item.contentPartIndex as number;
+        if (indices.has(partIndex)) return false;
+        const part = content?.[partIndex];
+        if (part && (item.kind === "image" ? part.type !== "image_url" : part.type !== "text")) return false;
+        indices.add(partIndex);
+        return true;
+      });
+      return valid ? parsed as ChatAttachmentMetadata[] : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private static multipartDisplay(content: MultiPartContent[]): string {
+    let imageIndex = 0;
+    return content.map((part) => {
+      if (part.type === "image_url") {
+        imageIndex += 1;
+        return `> [!info] Attached image ${imageIndex}`;
+      }
+      const attachmentName = part.text.match(/^--- BEGIN ATTACHED FILE: (.+?) \(/)?.[1];
+      return attachmentName ? `> [!info] Attached file: ${attachmentName}` : part.text;
+    }).filter(Boolean).join("\n\n");
   }
 
   private static normalizeSequentialContentChunk(
@@ -348,11 +470,8 @@ export class ChatMarkdownSerializer {
       context_files: processedContextFiles,
       systemMessage: legacySystemMessage,
       chatFontSize: parsed.chatFontSize as "small" | "medium" | "large" | undefined,
-      selectedPromptPath: typeof parsed.selectedPromptPath === "string" && parsed.selectedPromptPath.trim()
-        ? parsed.selectedPromptPath.trim()
-        : undefined,
-      agentModeEnabled: typeof parsed.agentModeEnabled === "boolean" ? parsed.agentModeEnabled : undefined,
-      hideSystemMessages: typeof parsed.hideSystemMessages === "boolean" ? parsed.hideSystemMessages : undefined,
+      approvalMode: parsed.approvalMode === "full-access" ? "full-access" : "ask",
+      managedSession: parseManagedChatSessionBinding(parsed.managedSession, id),
       chatBackend: detectLoadedChatBackend({
         explicitBackend: parsed.chatBackend,
         piSessionFile: parsed.piSessionFile,
@@ -398,15 +517,13 @@ export class ChatMarkdownSerializer {
       let contentString = "";
       if (typeof msg.content === "string") {
         contentString = msg.content;
+      } else if (Array.isArray(msg.content) && this.canPersistAttachmentRefs(msg)) {
+        contentString = this.multipartTextWithoutAttachments(msg.content, msg.attachmentMetadata ?? []);
       } else if (Array.isArray(msg.content)) {
-        contentString = msg.content
-          .map((part: any) => {
-            if (part.type === "text") return part.text;
-            if (part.type === "image_url")
-              return `![Image Context](${part.image_url.url})`;
-            return "";
-          })
-          .join("\n");
+        contentString = [
+          this.multipartDisplay(msg.content),
+          `<!-- SYSTEMSCULPT-CONTENT-PARTS base64\n${this.encodeStoredMultipart(msg.content)}\n-->`,
+        ].filter(Boolean).join("\n");
       }
       messageBody = contentString;
 
@@ -431,10 +548,44 @@ export class ChatMarkdownSerializer {
     if (hasToolCalls) attributes += " has-tool-calls=\"true\"";
     if (hasReasoning) attributes += " has-reasoning=\"true\"";
     if (isStreaming) attributes += " streaming=\"true\"";
+    if (Array.isArray(msg.content) && msg.attachmentMetadata?.length) {
+      attributes += ` attachment-metadata="${this.encodeBase64Json(msg.attachmentMetadata)}"`;
+    }
 
     const messageStart = `<!-- SYSTEMSCULPT-MESSAGE-START ${attributes} -->`;
 
     return `${messageStart}\n${messageBody}\n<!-- SYSTEMSCULPT-MESSAGE-END -->`;
+  }
+
+  private static canPersistAttachmentRefs(message: ChatMessage): boolean {
+    if (!Array.isArray(message.content) || !message.attachmentMetadata?.length) return false;
+    const parts = message.content;
+    const attachmentIndices = new Set<number>();
+    return message.attachmentMetadata.every((metadata) => {
+      if (!metadata.contentRef || !isChatAttachmentContentRef(metadata.contentRef)) return false;
+      if (!Number.isSafeInteger(metadata.contentPartIndex) || metadata.contentPartIndex < 0) return false;
+      if (attachmentIndices.has(metadata.contentPartIndex)) return false;
+      const part = parts[metadata.contentPartIndex];
+      if (!part) return false;
+      if (metadata.kind === "image" ? part.type !== "image_url" : part.type !== "text") return false;
+      attachmentIndices.add(metadata.contentPartIndex);
+      return true;
+    });
+  }
+
+  private static multipartTextWithoutAttachments(
+    content: MultiPartContent[],
+    attachmentMetadata: readonly ChatAttachmentMetadata[],
+  ): string {
+    const attachmentIndices = new Set(attachmentMetadata.map((metadata) => metadata.contentPartIndex));
+    return content
+      .map((part, index) => {
+        if (attachmentIndices.has(index) || part.type !== "text") return "";
+        const attached = parseAttachedTextContent(part.text);
+        return attached ? "" : part.text;
+      })
+      .filter((part) => part.trim().length > 0)
+      .join("\n\n");
   }
 }
 

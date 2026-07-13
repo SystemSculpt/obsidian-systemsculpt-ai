@@ -1,18 +1,13 @@
 import { App, Modal, setIcon } from "obsidian";
 
-export interface Filter {
-  id: string;
-  label: string;
-  icon?: string;
-  active?: boolean;
-}
-
 /**
  * StandardModal provides a consistent base for all modals in the application.
  * It includes standardized header, content, and footer sections, as well as
- * helper methods for common elements like search bars and filter buttons.
+ * focused helpers for titles, actions, and search fields.
  */
 export class StandardModal extends Modal {
+  private static nextTitleId = 0;
+
   protected headerEl: HTMLElement;
   public contentEl: HTMLElement;
   protected footerEl: HTMLElement;
@@ -115,15 +110,36 @@ export class StandardModal extends Modal {
    */
   addTitle(title: string, description?: string) {
     const titleContainer = this.headerEl.createDiv({ cls: "ss-modal__title-container" });
-    titleContainer.createEl("h2", { text: title, cls: "ss-modal__title" });
+    const titleId = `ss-modal-title-${++StandardModal.nextTitleId}`;
+    titleContainer.createEl("h2", {
+      text: title,
+      cls: "ss-modal__title",
+      attr: { id: titleId },
+    });
+
+    this.modalEl.setAttr("role", "dialog");
+    this.modalEl.setAttr("aria-modal", "true");
+    this.modalEl.setAttr("aria-labelledby", titleId);
     
     // Add close button to the title container
-    const closeButton = titleContainer.createDiv({ cls: "ss-modal__close-button" });
+    const closeButton = titleContainer.createEl("button", {
+      cls: "ss-modal__close-button",
+      attr: {
+        type: "button",
+        "aria-label": "Close",
+      },
+    });
     setIcon(closeButton, "x");
     this.registerDomEvent(closeButton, "click", () => this.close());
     
     if (description) {
-      this.headerEl.createDiv({ text: description, cls: "ss-modal__description" });
+      const descriptionId = `${titleId}-description`;
+      this.headerEl.createDiv({
+        text: description,
+        cls: "ss-modal__description",
+        attr: { id: descriptionId },
+      });
+      this.modalEl.setAttr("aria-describedby", descriptionId);
     }
   }
 
@@ -172,7 +188,14 @@ export class StandardModal extends Modal {
     });
     
     // Add clear button
-    const clearButton = searchContainer.createDiv("ss-modal__search-clear");
+    const clearButton = searchContainer.createEl("button", {
+      cls: "ss-modal__search-clear",
+      attr: {
+        type: "button",
+        "aria-label": "Clear search",
+        title: "Clear search",
+      },
+    });
     setIcon(clearButton, "x");
     clearButton.setCssStyles({ display: "none" });
     
@@ -193,70 +216,4 @@ export class StandardModal extends Modal {
     return searchInput;
   }
 
-  /**
-   * Add filter buttons to the modal
-   * @param filters Array of filter objects
-   * @param callback Function called when a filter is toggled
-   */
-  addFilterButtons(filters: Filter[], callback: (filterId: string, active: boolean) => void) {
-    const filterContainer = this.contentEl.createDiv("ss-modal__filter");
-    const filterGroup = filterContainer.createDiv("ss-modal__filter-group");
-    
-    filters.forEach(filter => {
-      const button = filterGroup.createEl("button", {
-        cls: `ss-button ss-button--small ${filter.active ? "ss-active" : ""}`,
-        attr: {
-          "data-filter-id": filter.id,
-        },
-      });
-      
-      if (filter.icon) {
-        const iconContainer = button.createSpan("ss-button__icon");
-        setIcon(iconContainer, filter.icon);
-      }
-      
-      // Add text as a separate node to ensure proper spacing
-      button.appendChild(document.createTextNode(filter.label));
-      
-      this.registerDomEvent(button, "click", () => {
-        const isActive = button.classList.toggle("ss-active");
-        callback(filter.id, isActive);
-      });
-    });
-    
-    return filterContainer;
-  }
-
-  /**
-   * Create an item component for displaying model/context/search results
-   * @param title Item title
-   * @param description Optional description
-   * @param icon Optional icon name
-   * @param badge Optional badge text
-   */
-  createItem(title: string, description?: string, icon?: string, badge?: string) {
-    const item = createDiv();
-    item.className = "ss-modal__item";
-    
-    // Add icon if provided
-    if (icon) {
-      const iconEl = item.createDiv("ss-modal__item-icon");
-      setIcon(iconEl, icon);
-    }
-    
-    // Add content (title and description)
-    const content = item.createDiv("ss-modal__item-content");
-    content.createDiv({ text: title, cls: "ss-modal__item-title" });
-    
-    if (description) {
-      content.createDiv({ text: description, cls: "ss-modal__item-description" });
-    }
-    
-    // Add badge if provided
-    if (badge) {
-      const badgeEl = item.createSpan({ text: badge, cls: "ss-modal__item-badge" });
-    }
-    
-    return item;
-  }
-} 
+}

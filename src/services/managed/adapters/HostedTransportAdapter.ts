@@ -1,4 +1,4 @@
-import { PlatformRequestClient } from "../../PlatformRequestClient";
+import { PlatformRequestClient, type PlatformRequestInput } from "../../PlatformRequestClient";
 import {
   MANAGED_ADMISSION_CONTRACT, MANAGED_CAPABILITY_CONTRACT,
   ManagedServerOutcome, ManagedTransportOperation, ManagedTransportResult,
@@ -63,22 +63,34 @@ export class HostedTransportAdapter {
   job(operation: ManagedTransportOperation, readErrorBody = true) { return this.send(operation, operation.headers ?? {}, false, true, undefined, readErrorBody); }
 
   async uploadSignedInput(url: string, method: string, headers: Record<string, string>, body: ArrayBuffer, signal?: AbortSignal): Promise<void> {
-    const response = await this.client.request({ url, method, headers, body, stream: false, preserveResponseHeaders: false, signal });
+    const response = await this.client.request({
+      url, method, headers, body, signal,
+      stream: false, preserveResponseHeaders: false,
+      transport: "requestUrl", bodyEncoding: "raw",
+    });
     if (!response.ok) throw new Error(`Signed upload failed (${response.status})`);
   }
 
   async uploadSignedJobPart(url: string, method: string, headers: Record<string, string>, body: ArrayBuffer, signal?: AbortSignal): Promise<Response> {
-    return this.client.request({ url, method, headers, body, stream: false, preserveResponseHeaders: true, signal });
+    return this.client.request({
+      url, method, headers, body, signal,
+      stream: false, preserveResponseHeaders: true,
+      transport: "requestUrl", bodyEncoding: "raw",
+    });
   }
 
   managedImageOutput(path: string, headers: Record<string, string>, signal?: AbortSignal): Promise<ManagedTransportResult> {
     if (!/^\/api\/plugin\/images\/generations\/jobs\/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\/outputs\/[0-3]$/.test(path)) {
       return Promise.reject(new Error("Invalid managed image output path."));
     }
-    return this.send({ path, method: "GET", headers, signal }, headers, false, true, undefined, false);
+    return this.send(
+      { path, method: "GET", headers, signal },
+      headers, false, true, undefined, false,
+      { transport: "requestUrl", responseEncoding: "arrayBuffer" },
+    );
   }
 
-  private async send(operation: ManagedTransportOperation, extra: Record<string, string> = {}, stream = false, scopedHeaders = false, managedChatConfiguration?: ManagedChatConfiguration, readErrorBody = true): Promise<ManagedTransportResult> {
+  private async send(operation: ManagedTransportOperation, extra: Record<string, string> = {}, stream = false, scopedHeaders = false, managedChatConfiguration?: ManagedChatConfiguration, readErrorBody = true, requestOverrides: Pick<PlatformRequestInput, "transport" | "responseEncoding"> = {}): Promise<ManagedTransportResult> {
     const pluginVersion = managedChatConfiguration?.pluginVersion ?? this.options.pluginVersion;
     const headers: Record<string, string> = scopedHeaders ? { ...extra } : { "x-plugin-version": pluginVersion, ...extra };
     if (!extra["x-systemsculpt-admission-contract"]) headers["x-systemsculpt-contract"] = MANAGED_CAPABILITY_CONTRACT;
@@ -91,6 +103,7 @@ export class HostedTransportAdapter {
       body: operation.body, stream, preserveResponseHeaders: true,
       allowTransportFallback: isReplaySafeManagedRead(operation),
       signal: operation.signal, licenseKey,
+      ...requestOverrides,
     });
     const errorText = response.ok || !readErrorBody ? "" : (await response.clone().text()).slice(0, 2048);
     return { response, diagnostics: {

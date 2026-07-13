@@ -24,11 +24,10 @@ Transcription controls include:
 - Default output format (`Markdown` or `SRT`)
 - Output format chooser toggle
 
-## Commands and ribbon
+## Commands
 
 - `Toggle Audio Recorder` (`Mod+R`)
 - `Transcribe an audio file`
-- Ribbon: `Process Meeting Audio`
 
 ## Supported recording/transcription extensions
 

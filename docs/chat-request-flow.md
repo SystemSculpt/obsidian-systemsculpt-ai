@@ -10,8 +10,9 @@ managed stream. The plugin does not select a provider or model.
 1. `InputHandler` commits the user message and captures a durable transcript
    snapshot.
 2. Managed admission returns a lease for the accepted chat turn.
-3. `ChatRequestPreparationService` prepares context, the selected prompt, and
-   normalized built-in tools once for that accepted operation.
+3. `ChatRequestPreparationService` prepares context and normalized built-in
+   tools once for that accepted operation. The server owns the chat system
+   prompt.
 4. `AcceptedChatRequestSnapshot` freezes the managed request (`ai-agent`) and
    its policy audit before dispatch.
 5. `ManagedChatRuntimeAdapter` creates a transport ticket, derives an
@@ -41,7 +42,6 @@ The frozen request contains:
 - the fixed managed model identity `ai-agent`;
 - normalized conversation history;
 - selected vault context and document references;
-- an optional selected prompt;
 - normalized built-in tool declarations.
 
 The API base is compiled into the plugin. Settings never own network routing,
@@ -49,9 +49,11 @@ provider credentials, or model selection.
 
 ## Built-in tool surfaces
 
-- Filesystem tools
-- YouTube transcript tool
-- Web research tools (`web_search`, `web_fetch`)
+- Local filesystem tools
+- Local YouTube transcript tool
+
+Web search is negotiated as a managed chat capability and executes on the
+server. The plugin has no direct `web_search`/`web_fetch` tool or corpus writer.
 
 Read-only tools can run automatically under the local policy. Destructive vault
 tools require approval unless the user has explicitly trusted them.

@@ -10,7 +10,7 @@ import {
   formatFileSize,
   validateBrowserFileSize,
 } from "../utils/FileValidator";
-import { showAudioTranscriptionModal } from "./AudioTranscriptionModal";
+import { launchAudioTranscriptionPanel } from "./AudioTranscriptionPanel";
 import type { SystemSculptSettings } from "../types";
 
 type TranscribeAudioSelection =
@@ -653,7 +653,7 @@ export class TranscribeAudioFileModal extends StandardModal {
       const file = await this.resolveAudioFile(this.selected);
       await this.persistOutputPreferences();
       this.close();
-      await showAudioTranscriptionModal(this.app, {
+      launchAudioTranscriptionPanel(this.app, {
         file,
         timestamped: this.outputFormat === "srt",
         plugin: this.plugin,

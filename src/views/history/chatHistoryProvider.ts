@@ -58,7 +58,7 @@ export function createChatHistoryProvider(plugin: SystemSculptPlugin): SystemScu
           subtitle,
           timestampMs,
           searchText,
-          badge: summary.chatBackend === "legacy" ? "Read-only" : "Managed",
+          ...(summary.chatBackend === "legacy" ? { badge: "Read-only" } : {}),
           metadataPath: summary.chatPath,
           isFavorite,
           toggleFavorite: async () => {

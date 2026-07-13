@@ -7,6 +7,11 @@
   max-width: 480px;
 }
 
+/* Do not depend on Obsidian theme utility classes for semantic visibility. */
+.systemsculpt-embeddings-status-modal [hidden] {
+  display: none;
+}
+
 /* Status-bar meter value (EmbeddingsStatusBar.ts) */
 .ss-embeddings-status-bar-value {
   margin-left: var(--ss-space-0);
@@ -50,13 +55,17 @@
   animation: ss-pulse 1.4s var(--ss-ease) infinite;
 }
 
-.ss-embeddings-provider-title {
-  font-weight: var(--ss-weight-semibold);
+.ss-embeddings-status-indicator--attention {
+  background-color: var(--ss-danger);
+}
+
+.ss-embeddings-status-indicator--pending {
+  background-color: var(--ss-warning);
 }
 
 .ss-embeddings-provider-status {
-  margin-left: auto;
   font-size: var(--ss-text-sm);
+  font-weight: var(--ss-weight-semibold);
   color: var(--ss-ink-muted);
 }
 
@@ -150,13 +159,6 @@
   color: var(--ss-ink-muted);
 }
 
-.ss-embeddings-progress-track {
-  height: 6px;
-  background-color: var(--ss-line);
-  border-radius: var(--ss-radius-full);
-  overflow: hidden;
-}
-
 .ss-embeddings-progress-bar {
   width: 100%;
   height: 100%;
@@ -177,6 +179,9 @@
 
 /* Error */
 .ss-embeddings-error-section {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--ss-space-2);
   padding: var(--ss-space-3);
   background-color: var(--ss-danger-tint);
   border: 1px solid var(--ss-danger-line);

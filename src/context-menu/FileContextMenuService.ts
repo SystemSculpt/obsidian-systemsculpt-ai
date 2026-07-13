@@ -19,14 +19,14 @@ import {
   DocumentProcessingFlow,
   DocumentProcessingProgressEvent,
 } from "../types/documentProcessing";
-import { showAudioTranscriptionModal } from "../modals/AudioTranscriptionModal";
+import { launchAudioTranscriptionPanel } from "../modals/AudioTranscriptionPanel";
 import { errorLogger } from "../utils/errorLogger";
 import type { PluginLogger } from "../utils/PluginLogger";
 import {
-  launchDocumentProcessingModal,
-  type DocumentProcessingModalHandle,
-  type DocumentProcessingModalLauncher,
-} from "../modals/DocumentProcessingModal";
+  launchDocumentProcessingPanel,
+  type DocumentProcessingPanelHandle,
+  type DocumentProcessingPanelLauncher,
+} from "../modals/DocumentProcessingPanel";
 import { TranscriptionTitleService } from "../services/transcription/TranscriptionTitleService";
 import { tryCopyImageFileToClipboard } from "../utils/clipboard";
 
@@ -77,7 +77,7 @@ interface FileContextMenuServiceOptions {
   documentProcessor?: DocumentProcessor;
   chatLauncher?: ChatWithFileLauncher;
   pluginLogger?: PluginLogger | null;
-  launchProcessingModal?: DocumentProcessingModalLauncher;
+  launchProcessingPanel?: DocumentProcessingPanelLauncher;
 }
 
 interface MenuContext {
@@ -110,7 +110,7 @@ export class FileContextMenuService {
   private readonly documentProcessor: DocumentProcessor;
   private readonly chatLauncher: ChatWithFileLauncher;
   private readonly pluginLogger: PluginLogger | null;
-  private readonly launchProcessingModal: DocumentProcessingModalLauncher;
+  private readonly launchProcessingPanel: DocumentProcessingPanelLauncher;
   private eventRefs: EventRef[] = [];
   private started = false;
   private awaitingLayoutReady = false;
@@ -130,16 +130,7 @@ export class FileContextMenuService {
       (typeof (this.plugin as any).getPluginLogger === "function"
         ? (this.plugin as any).getPluginLogger()
         : null);
-    this.launchProcessingModal =
-      options.launchProcessingModal ??
-      ((modalOptions) =>
-        launchDocumentProcessingModal({
-          app: modalOptions.app ?? this.app,
-          plugin: modalOptions.plugin ?? this.plugin,
-          file: modalOptions.file,
-          onCancel: modalOptions.onCancel,
-          source: modalOptions.source,
-        }));
+    this.launchProcessingPanel = options.launchProcessingPanel ?? launchDocumentProcessingPanel;
 
     this.start();
   }
@@ -434,17 +425,15 @@ export class FileContextMenuService {
   private async handleDocumentConversion(file: TFile): Promise<void> {
     const startedAt = Date.now();
     this.info("Document conversion started", { filePath: file.path });
-    let modalHandle: DocumentProcessingModalHandle | null = null;
+    let progressPanel: DocumentProcessingPanelHandle | null = null;
     const controller = new AbortController();
     this.activeDocumentConversion?.abort();
     this.activeDocumentConversion = controller;
 
     try {
-      modalHandle = this.launchProcessingModal({
-        app: this.app,
+      progressPanel = this.launchProcessingPanel({
         plugin: this.plugin,
         file,
-        source: "context-menu",
         onCancel: () => controller.abort(),
       });
 
@@ -453,7 +442,7 @@ export class FileContextMenuService {
           if (controller.signal.aborted) return;
           this.handleProgressEvent(file, event);
           if (controller.signal.aborted) return;
-          modalHandle?.updateProgress(event);
+          progressPanel?.updateProgress(event);
         },
         showNotices: false,
         flow: "document",
@@ -470,7 +459,7 @@ export class FileContextMenuService {
       };
 
       if (controller.signal.aborted || this.activeDocumentConversion !== controller) return;
-      modalHandle?.markSuccess({
+      progressPanel?.markSuccess({
         extractionPath,
         durationMs,
         file,
@@ -483,7 +472,7 @@ export class FileContextMenuService {
         filePath: file.path,
       });
 
-      modalHandle?.markFailure({
+      progressPanel?.markFailure({
         error,
         file,
       });
@@ -565,7 +554,7 @@ export class FileContextMenuService {
     file: TFile,
     timestamped: boolean
   ): Promise<void> {
-    await showAudioTranscriptionModal(this.app, {
+    launchAudioTranscriptionPanel(this.app, {
       file,
       timestamped,
       plugin: this.plugin,

@@ -1,102 +1,80 @@
 /**
- * System feedback + shared scaffolding — popups, drag-drop overlay,
- * and the surviving layout helpers.
- * (Consolidates the live remains of the old misc.css / containers.css /
- * grid.css.)
+ * System feedback + shared scaffolding — compact popup modal styling,
+ * drag-drop overlay, and the surviving layout helpers.
  */
 
-/* ------------------------------------------------------------------ *
- * Popups
- * ------------------------------------------------------------------ */
-.systemsculpt-popup-container {
-  position: fixed;
-  inset: 0;
-  z-index: var(--ss-z-modal);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background-color: var(--ss-scrim);
-  animation: ss-fade-in var(--ss-dur-base) var(--ss-ease-out);
-}
-
-.systemsculpt-popup-container.systemsculpt-popup-closing {
-  animation: ss-fade-out var(--ss-dur-base) var(--ss-ease) forwards;
-}
-
-.systemsculpt-popup {
-  width: min(480px, 92vw);
-  padding: var(--ss-space-5);
-  background-color: var(--ss-surface-0);
-  border: 1px solid var(--ss-line);
-  border-radius: var(--ss-radius-lg);
-  box-shadow: var(--ss-elevation-4);
-  animation: ss-slide-up var(--ss-dur-base) var(--ss-ease-out);
-}
-
-.systemsculpt-popup-container.systemsculpt-popup-closing .systemsculpt-popup {
-  animation: ss-fade-out var(--ss-dur-base) var(--ss-ease) forwards;
-}
-
-.systemsculpt-popup-content {
+.ss-popup-modal__body {
   display: flex;
   flex-direction: column;
-  gap: var(--ss-space-3);
+  gap: var(--ss-space-4);
 }
 
-.systemsculpt-popup-title {
-  font-size: var(--ss-text-lg);
-  font-weight: var(--ss-weight-semibold);
-  letter-spacing: var(--ss-tracking-tight);
+.ss-popup-modal__title-lead {
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-2);
+  min-width: 0;
 }
 
-.systemsculpt-popup-icon {
+.ss-popup-modal__title-icon {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
   color: var(--ss-ink-muted);
 }
 
-.systemsculpt-popup-description {
-  font-size: var(--ss-text-sm);
-  color: var(--ss-ink-muted);
+.ss-popup-modal__message {
+  margin: 0;
+  font-size: var(--ss-text-base);
   line-height: var(--ss-leading-base);
+  color: var(--ss-ink);
 }
 
-.systemsculpt-popup-textarea {
+.ss-popup-modal__inputs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ss-space-2);
+}
+
+.ss-popup-modal__field {
   width: 100%;
-  min-height: 120px;
-  padding: var(--ss-space-2);
+  min-height: var(--ss-control-height);
+  padding: var(--ss-space-2) var(--ss-space-3);
   background-color: var(--ss-surface-sunken);
   border: 1px solid var(--ss-line);
   border-radius: var(--ss-radius-sm);
   color: var(--ss-ink);
   font-size: var(--ss-text-base);
+  transition: var(--ss-transition-colors);
+}
+
+.ss-popup-modal__field--textarea {
+  min-height: 140px;
   resize: vertical;
 }
 
-.systemsculpt-popup-textarea:focus {
+.ss-popup-modal__field:focus {
   border-color: var(--ss-accent);
   box-shadow: var(--ss-ring);
   outline: none;
 }
 
-.systemsculpt-popup-message {
-  font-size: var(--ss-text-base);
-  line-height: var(--ss-leading-base);
+.ss-popup-modal__field.is-invalid,
+.ss-popup-modal__field[aria-invalid="true"] {
+  border-color: var(--text-error);
 }
 
-.systemsculpt-popup-inputs {
+.ss-popup-modal__checkbox {
   display: flex;
-  flex-direction: column;
+  align-items: flex-start;
   gap: var(--ss-space-2);
+  font-size: var(--ss-text-sm);
+  color: var(--ss-ink-muted);
 }
 
-.systemsculpt-popup-checkbox-container {
-  display: flex;
-  align-items: center;
-  gap: var(--ss-space-2);
-}
-
-.systemsculpt-popup-checkbox {
+.ss-popup-modal__checkbox input[type="checkbox"] {
+  margin-top: 0.15rem;
   accent-color: var(--ss-accent);
 }
 
@@ -165,4 +143,3 @@
   flex-direction: column;
   gap: var(--ss-space-1);
 }
-

@@ -135,8 +135,10 @@ export class SystemSculptHistoryModal extends StandardModal {
       const header = row.createDiv("systemsculpt-history-item-header");
 
       const left = header.createDiv("systemsculpt-history-item-header-left");
-      const badge = left.createSpan("systemsculpt-history-item-badge");
-      badge.setText(entry.badge);
+      if (entry.badge) {
+        const badge = left.createSpan("systemsculpt-history-item-badge");
+        badge.setText(entry.badge);
+      }
 
       const timestamp = header.createDiv("systemsculpt-history-item-time");
       timestamp.setText(this.formatRelativeTime(entry.timestampMs));

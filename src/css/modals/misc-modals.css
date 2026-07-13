@@ -1,6 +1,4 @@
-/**
- * Small shared modal pieces that predate the ss-modal shell.
- */
+/** Native settings modals and lightweight progress surfaces. */
 
 /* Recorder advanced-controls modal (native Obsidian modal, class on contentEl) */
 .ss-recorder-advanced-modal {
@@ -25,8 +23,7 @@
   color: var(--ss-ink-muted);
 }
 
-/* Transcription / automation progress rows (AudioTranscriptionModal.ts,
-   AutomationProcessingModal.ts) */
+/* Shared operation progress rows (audio/document/workflow progress panels) */
 .systemsculpt-progress-status {
   display: flex;
   align-items: center;
@@ -53,18 +50,17 @@
   cursor: help;
 }
 
-/* Generic modal button row (legacy hook) */
-.systemsculpt-modal-buttons {
-  display: flex;
-  justify-content: flex-end;
-  gap: var(--ss-space-2);
-  margin-top: var(--ss-space-4);
+/* ------------------------------------------------------------------ *
+ * Settings backup restore. Manual-backup form + focused backup choices.
+ * ------------------------------------------------------------------ */
+.ss-backup-selection__item {
+  width: 100%;
+  color: inherit;
+  text-align: left;
+  background: transparent;
+  box-shadow: none;
 }
 
-/* ------------------------------------------------------------------ *
- * Settings backup restore (BackupRestoreModal.ts — ListSelectionModal
- * shell). Manual-backup form + per-item detail badges.
- * ------------------------------------------------------------------ */
 .ss-backup-manual {
   margin-bottom: var(--ss-space-3);
   padding: var(--ss-space-3);
@@ -102,30 +98,4 @@
   padding: var(--ss-space-0) var(--ss-space-1);
   background-color: var(--ss-surface-sunken);
   border-radius: var(--ss-radius-xs);
-}
-
-/* Chat error modal (ChatErrorModal.ts — StandardModal shell) */
-.ss-chat-error-modal__body {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--ss-space-3);
-  padding: var(--ss-space-4) var(--ss-space-5);
-}
-
-.ss-chat-error-modal__icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  width: 32px;
-  height: 32px;
-  border-radius: var(--ss-radius-round);
-  background-color: var(--ss-danger-tint);
-  color: var(--ss-danger);
-}
-
-.ss-chat-error-modal__message {
-  font-size: var(--ss-text-base);
-  line-height: var(--ss-leading-base);
-  overflow-wrap: anywhere;
 }

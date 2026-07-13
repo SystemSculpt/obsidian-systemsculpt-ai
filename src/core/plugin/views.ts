@@ -155,9 +155,6 @@ export class ViewManager {
       // Restore the currently-visible chats first so the UI is ready quickly.
       await this.processRestoreQueue();
 
-      // Lazy-load change: do not fetch models here. We will fetch
-      // on demand when a user opens the view or starts a run.
-
       this.isInitialized = true;
 
       // Process any deferred views

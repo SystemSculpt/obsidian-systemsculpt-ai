@@ -1,0 +1,40 @@
+/**
+ * Version update notice modal — shared shell styling for update-available and
+ * post-update states from VersionUpdateModal.ts.
+ */
+
+.ss-version-update-modal__body {
+  gap: var(--ss-space-3);
+}
+
+.ss-version-update-modal__body p {
+  margin: 0;
+  color: var(--ss-ink-muted);
+  line-height: var(--ss-leading-base);
+}
+
+.ss-version-update-modal__versions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--ss-space-2);
+  padding: var(--ss-space-3);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-sm);
+  background-color: var(--ss-surface-sunken);
+  font-family: var(--ss-font-mono);
+  font-size: var(--ss-text-xs);
+}
+
+.ss-version-update-modal__version.is-current {
+  color: var(--ss-ink-faint);
+}
+
+.ss-version-update-modal__version.is-latest {
+  color: var(--ss-ink);
+  font-weight: var(--ss-weight-semibold);
+}
+
+.ss-version-update-modal__arrow {
+  color: var(--ss-ink-faint);
+}

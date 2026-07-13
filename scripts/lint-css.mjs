@@ -212,7 +212,6 @@ const TOKEN_SOURCE_FILES = new Set(["foundation/tokens.css"]);
 /** Files allowed to use !important, each for a documented reason. */
 const IMPORTANT_ALLOWLIST = new Set([
   "foundation/base.css", // .systemsculpt-visually-hidden (a11y, beats inline styles)
-  "components/mermaid.css", // fights Mermaid's inline SVG attributes
   "components/messages.css", // markdown font-size inheritance + hidden copy button
   "components/chat-blocks.css", // per-chat hide-tool-activity toggle (#213)
   "components/resume-chat.css", // beats reading/source-mode content styles

@@ -85,15 +85,24 @@
   width: 28px;
   height: 28px;
   flex-shrink: 0;
+  padding: 0;
+  background: transparent;
+  border: 0;
   border-radius: var(--ss-radius-xs);
   color: var(--ss-ink-muted);
   cursor: pointer;
   transition: var(--ss-transition-colors);
 }
 
-.ss-modal__close-button:hover {
+.ss-modal__close-button:hover,
+.ss-modal__close-button:focus-visible {
   background-color: var(--ss-state-hover);
   color: var(--ss-ink);
+}
+
+.ss-modal__close-button:focus-visible {
+  box-shadow: var(--ss-ring);
+  outline: none;
 }
 
 .ss-modal__description {
@@ -195,24 +204,6 @@
 }
 
 /* ------------------------------------------------------------------ *
- * Filters
- * ------------------------------------------------------------------ */
-.ss-modal__filter {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--ss-space-2);
-  flex-shrink: 0;
-  padding: 0 var(--ss-space-5) var(--ss-space-3);
-}
-
-.ss-modal__filter-group {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--ss-space-2);
-  align-items: center;
-}
-
-/* ------------------------------------------------------------------ *
  * List + items
  * ------------------------------------------------------------------ */
 .ss-modal__list {
@@ -239,15 +230,6 @@
 .ss-modal__item:hover,
 .ss-modal__item:focus {
   background-color: var(--ss-state-hover);
-}
-
-.ss-modal__item.ss-active {
-  background-color: var(--ss-accent-tint);
-  border-color: var(--ss-line-accent);
-}
-
-.ss-modal__item.ss-active .ss-modal__item-icon {
-  color: var(--ss-ink-accent);
 }
 
 .ss-modal__item--failed {
@@ -285,102 +267,6 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.ss-modal__item-badge {
-  flex-shrink: 0;
-  padding: var(--ss-space-0) var(--ss-space-2);
-  border: 1px solid var(--ss-line);
-  border-radius: var(--ss-radius-full);
-  background-color: var(--ss-surface-1);
-  color: var(--ss-ink-muted);
-  font-size: var(--ss-text-xs);
-  font-weight: var(--ss-weight-medium);
-  letter-spacing: var(--ss-tracking-wide);
-  text-transform: uppercase;
-  white-space: nowrap;
-}
-
-/* Thumbnails + hover preview */
-.ss-modal__item-thumbnail {
-  position: relative;
-  flex-shrink: 0;
-  width: 48px;
-  height: 48px;
-  border-radius: var(--ss-radius-xs);
-  overflow: hidden;
-  border: 1px solid var(--ss-line);
-}
-
-.ss-modal__item-thumbnail img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  transition: var(--ss-transition-transform);
-}
-
-.ss-modal__item-thumbnail:hover img {
-  transform: scale(1.06);
-}
-
-.ss-preview-container {
-  position: fixed;
-  z-index: var(--ss-z-popover);
-  max-width: 360px;
-  padding: var(--ss-space-2);
-  background: var(--ss-surface-2);
-  border: 1px solid var(--ss-line);
-  border-radius: var(--ss-radius-md);
-  box-shadow: var(--ss-elevation-3);
-  pointer-events: none;
-  animation: ss-fade-in var(--ss-dur-fast) var(--ss-ease-out);
-}
-
-.ss-preview-container img {
-  max-width: 100%;
-  border-radius: var(--ss-radius-xs);
-}
-
-/* Aspect-ratio size presets (ListSelectionModal.ts, applied on image load;
-   the cursor-relative left/top stay inline). */
-.ss-preview-container--landscape {
-  width: 350px;
-  height: auto;
-}
-
-.ss-preview-container--portrait {
-  width: auto;
-  height: 350px;
-}
-
-.ss-preview-container--square {
-  width: 300px;
-  height: 300px;
-}
-
-.ss-preview-title {
-  margin-top: var(--ss-space-1);
-  font-size: var(--ss-text-xs);
-  color: var(--ss-ink-muted);
-  text-align: center;
-}
-
-.ss-modal__item-preview {
-  width: 100%;
-  max-height: 200px;
-  overflow: hidden;
-  border-radius: var(--ss-radius-sm);
-  margin-top: var(--ss-space-2);
-}
-
-.ss-modal__item-preview img {
-  width: 100%;
-  object-fit: contain;
-}
-
-.ss-modal__item.expanded {
-  flex-direction: column;
-  align-items: stretch;
 }
 
 /* ------------------------------------------------------------------ *
@@ -458,7 +344,7 @@
   color: var(--ss-ink-faint);
 }
 
-/* Plain stacked body copy (PostProcessingModelPromptModal.ts) */
+/* Plain stacked body copy for short modal content blocks. */
 .ss-modal__stack {
   display: flex;
   flex-direction: column;
@@ -497,37 +383,6 @@
   background-color: var(--ss-accent-tint-strong);
   color: var(--ss-ink);
   border-radius: 2px;
-}
-
-/* ------------------------------------------------------------------ *
- * Text edit modal bits (TextEditModal.ts)
- * ------------------------------------------------------------------ */
-.ss-modal__textarea-container {
-  display: flex;
-  flex-direction: column;
-  flex: 1 1 auto;
-  min-height: 0;
-  padding: var(--ss-space-4) var(--ss-space-5);
-}
-
-.ss-modal__textarea {
-  width: 100%;
-  min-height: 160px;
-  padding: var(--ss-space-3);
-  background-color: var(--ss-surface-sunken);
-  border: 1px solid var(--ss-line);
-  border-radius: var(--ss-radius-sm);
-  color: var(--ss-ink);
-  font-size: var(--ss-text-base);
-  line-height: var(--ss-leading-base);
-  resize: vertical;
-  transition: var(--ss-transition-colors);
-}
-
-.ss-modal__textarea:focus {
-  border-color: var(--ss-accent);
-  box-shadow: var(--ss-ring);
-  outline: none;
 }
 
 /* ------------------------------------------------------------------ *

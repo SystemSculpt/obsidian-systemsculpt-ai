@@ -1,452 +1,389 @@
-import { App, Notice, TextComponent } from "obsidian";
-import { ListSelectionModal, ListItem } from "../ui/modals/standard/ListSelectionModal";
+import { App, Notice, TextComponent, setIcon } from "obsidian";
+import { StandardModal } from "../ui/modals/standard/StandardModal";
 import SystemSculptPlugin from "../../main";
 import { applyCurrentSecretsToBackup, redactSettingsForBackup } from "./backupSanitizer";
 
-/**
- * Modal for displaying and restoring settings backups
- */
+export interface BackupEntry {
+  path: string;
+  name: string;
+  date: string;
+  details?: string;
+}
+
+export class BackupSelectionModal extends StandardModal {
+  private resolveSelection: ((path: string | null) => void) | null = null;
+  private listEl: HTMLElement | null = null;
+  private query = "";
+
+  constructor(
+    app: App,
+    private readonly backups: readonly BackupEntry[],
+    private readonly renderManualForm?: (container: HTMLElement, modal: BackupSelectionModal) => void,
+  ) {
+    super(app);
+    this.setSize("medium");
+  }
+
+  onOpen(): void {
+    super.onOpen();
+    this.addTitle(
+      "Restore settings backup",
+      "Choose a backup to restore. Your current settings will be replaced.",
+    );
+
+    if (this.renderManualForm) {
+      const manual = this.contentEl.createDiv({ cls: "ss-modal__custom-content" });
+      this.renderManualForm(manual, this);
+    }
+
+    const search = this.addSearchBar("Search backups…", (query) => {
+      this.query = query.trim().toLowerCase();
+      this.renderBackups();
+    });
+    this.listEl = this.contentEl.createDiv({ cls: "ss-modal__list" });
+    this.renderBackups();
+    window.setTimeout(() => search.focus(), 50);
+  }
+
+  onClose(): void {
+    this.settle(null);
+    this.listEl = null;
+    super.onClose();
+  }
+
+  openAndSelect(): Promise<string | null> {
+    return new Promise((resolve) => {
+      this.resolveSelection = resolve;
+      this.open();
+    });
+  }
+
+  private renderBackups(): void {
+    if (!this.listEl) return;
+    this.listEl.empty();
+    const filtered = this.query
+      ? this.backups.filter((backup) =>
+          `${backup.name}\n${backup.date}\n${backup.details ?? ""}`.toLowerCase().includes(this.query))
+      : this.backups;
+    if (filtered.length === 0) {
+      this.listEl.createDiv({ cls: "ss-modal__empty-state", text: "No backups found" });
+      return;
+    }
+
+    filtered.forEach((backup) => {
+      const button = this.listEl!.createEl("button", {
+        cls: "ss-modal__item ss-backup-selection__item",
+        attr: { type: "button", "data-backup-path": backup.path },
+      });
+      const icon = button.createDiv({ cls: "ss-modal__item-icon" });
+      setIcon(icon, "save");
+      const content = button.createDiv({ cls: "ss-modal__item-content" });
+      content.createDiv({ text: backup.name, cls: "ss-modal__item-title" });
+      const detailLines = backup.details?.split("\n").map((line) => line.trim()).filter(Boolean) ?? [];
+      if (detailLines.length > 0) {
+        const details = content.createDiv({ cls: "ss-backup-details" });
+        detailLines.forEach((line) => details.createSpan({ text: line, cls: "ss-backup-details__item" }));
+      } else {
+        content.createDiv({ text: backup.date, cls: "ss-modal__item-description" });
+      }
+      this.registerDomEvent(button, "click", () => {
+        this.settle(backup.path);
+        this.close();
+      });
+    });
+  }
+
+  private settle(path: string | null): void {
+    const resolve = this.resolveSelection;
+    if (!resolve) return;
+    this.resolveSelection = null;
+    resolve(path);
+  }
+}
+
 export class BackupRestoreModal {
-    private plugin: SystemSculptPlugin;
-    private app: App;
+  constructor(
+    private readonly app: App,
+    private readonly plugin: SystemSculptPlugin
+  ) {}
 
-    constructor(app: App, plugin: SystemSculptPlugin) {
-        this.app = app;
-        this.plugin = plugin;
+  async open(): Promise<string | null> {
+    try {
+      const backups = await this.getAvailableBackups();
+      if (backups.length === 0) {
+        new Notice("No settings backups found", 3000);
+        return null;
+      }
+
+      const modal = new BackupSelectionModal(
+        this.app,
+        backups,
+        (containerEl, selection) => this.renderManualBackupForm(containerEl, selection),
+      );
+      return await modal.openAndSelect();
+    } catch (error) {
+      new Notice(`Error loading backups: ${error}`, 3000);
+      return null;
+    }
+  }
+
+  async restoreFromBackup(backupPath: string): Promise<boolean> {
+    try {
+      const exists = await this.plugin.app.vault.adapter.exists(backupPath);
+      if (!exists) {
+        new Notice("Backup file not found", 3000);
+        return false;
+      }
+
+      const backupData = await this.plugin.app.vault.adapter.read(backupPath);
+      const backupSettings = JSON.parse(backupData);
+      if (!backupSettings || typeof backupSettings !== "object") {
+        new Notice("Invalid backup file format", 3000);
+        return false;
+      }
+
+      const currentSettings = this.plugin.getSettingsManager().getSettings() as unknown as Record<string, unknown>;
+      const restoredSettings = applyCurrentSecretsToBackup(
+        backupSettings as Record<string, unknown>,
+        currentSettings,
+      );
+
+      await this.plugin.getSettingsManager().restoreFromExternalSettings(restoredSettings);
+      new Notice("Settings restored successfully", 3000);
+      return true;
+    } catch (error) {
+      new Notice(`Error restoring settings: ${error}`, 3000);
+      return false;
+    }
+  }
+
+  private renderManualBackupForm(containerEl: HTMLElement, modal: BackupSelectionModal): void {
+    const manualBackupContainer = containerEl.createDiv({ cls: "ss-backup-manual" });
+    manualBackupContainer.createEl("p", {
+      text: "Create a manual backup before restoring anything.",
+      cls: "ss-backup-manual__prompt",
+    });
+
+    const defaultName = `Manual backup ${new Date().toLocaleString()}`;
+    const backupNameInput = new TextComponent(manualBackupContainer)
+      .setPlaceholder(defaultName)
+      .setValue(defaultName);
+    backupNameInput.inputEl.addClass("ss-backup-manual__input");
+
+    const createBackupButton = manualBackupContainer.createEl("button", {
+      text: "Create manual backup",
+      cls: "mod-cta ss-backup-manual__submit",
+    });
+
+    createBackupButton.addEventListener("click", () => {
+      const backupName = backupNameInput.getValue().trim();
+      if (!backupName) {
+        new Notice("Please enter a name for the backup.", 3000);
+        return;
+      }
+
+      createBackupButton.disabled = true;
+      void this.saveManualBackup(backupName)
+        .then(() => {
+          modal.close();
+          void this.open();
+        })
+        // saveManualBackup already reports the actionable error.
+        .catch(() => undefined)
+        .finally(() => { createBackupButton.disabled = false; });
+    });
+  }
+
+  private async saveManualBackup(backupName: string): Promise<void> {
+    try {
+      const safeNamePart = backupName.replace(/[^a-z0-9]/gi, "-").toLowerCase();
+      const timestamp = Date.now();
+      const fileName = `settings-manual-${safeNamePart}-${timestamp}.json`;
+      const backupDir = ".systemsculpt/settings-backups";
+
+      await this.ensureBackupDirectory(backupDir);
+
+      const currentSettings = this.plugin.getSettingsManager().getSettings();
+      const redactedSettings = redactSettingsForBackup(currentSettings as unknown as Record<string, unknown>);
+      const backupData = {
+        ...redactedSettings,
+        _backupMeta: {
+          type: "manual",
+          name: backupName,
+          timestamp,
+          createdAt: new Date().toISOString(),
+          redactedSecrets: true,
+        },
+      };
+
+      const backupPath = `${backupDir}/${fileName}`;
+      await this.plugin.app.vault.adapter.write(
+        backupPath,
+        JSON.stringify(backupData, null, 2)
+      );
+
+      new Notice(`Manual backup "${backupName}" created successfully`, 3000);
+    } catch (error) {
+      new Notice(`Error saving backup: ${error}`, 3000);
+      throw error;
+    }
+  }
+
+  private async getAvailableBackups(): Promise<BackupEntry[]> {
+    try {
+      const backupDir = ".systemsculpt/settings-backups";
+      const exists = await this.plugin.app.vault.adapter.exists(backupDir);
+      if (!exists) {
+        return [];
+      }
+
+      const files = await this.plugin.app.vault.adapter.list(backupDir);
+      const backupFiles = files.files
+        .filter((filePath) => filePath.includes("settings-") && filePath.endsWith(".json"))
+        .sort((left, right) => right.localeCompare(left));
+
+      const backups = await Promise.all(backupFiles.map(async (filePath) => this.describeBackup(filePath)));
+      return backups.sort((left, right) => this.compareBackups(left, right));
+    } catch {
+      return [];
+    }
+  }
+
+  private async describeBackup(filePath: string): Promise<BackupEntry> {
+    const fileName = filePath.split("/").pop() || "";
+    const backupSettings = await this.readBackupSettings(filePath);
+    const details = this.describeBackupDetails(backupSettings);
+
+    if (backupSettings?._backupMeta?.type === "manual") {
+      const meta = backupSettings._backupMeta as { name: string; timestamp: number };
+      return {
+        path: filePath,
+        name: `📝 ${meta.name}`,
+        date: new Date(meta.timestamp).toLocaleString(),
+        details,
+      };
     }
 
-    /**
-     * Opens the backup restore modal and returns the selected backup file path,
-     * or null if cancelled
-     */
-    async open(): Promise<string | null> {
-        try {
-            // Get all backup files
-            const backups = await this.getAvailableBackups();
-            
-            if (backups.length === 0) {
-                // No backups found
-                new Notice("No settings backups found", 3000);
-                return null;
-            }
-
-            // Convert backups to list items with special handling for descriptions
-            const items: ListItem[] = backups.map(backup => ({
-                id: backup.path,
-                title: backup.name,
-                description: '', // We'll handle description specially
-                icon: 'save',
-                // Store details in a custom property
-                _backupDetails: backup.details || backup.date
-            }));
-
-            // Open selection modal
-            const modal = new ListSelectionModal(this.app, items, {
-                title: "Restore Settings from Backup",
-                description: "Select a backup to restore. This will replace your current settings.",
-                placeholder: "Search backups...",
-                emptyText: "No backups found",
-                size: "medium",
-                closeOnSelect: true,
-                // Add custom content handler to display details properly and add create backup button
-                customContent: (containerEl) => {
-                    // Styles live in src/css/modals/misc-modals.css (.ss-backup-*)
-
-                    // Container for manual backup input and button
-                    const manualBackupContainer = containerEl.createDiv({ cls: 'ss-backup-manual' });
-
-                    manualBackupContainer.createEl('p', {
-                        text: 'Enter a name for the new manual backup:',
-                        cls: 'ss-backup-manual__prompt'
-                    });
-
-                    const backupNameInput = new TextComponent(manualBackupContainer)
-                        .setPlaceholder(`Manual backup ${new Date().toLocaleString()}`)
-                        .setValue(`Manual backup ${new Date().toLocaleString()}`); // Pre-fill with default
-
-                    backupNameInput.inputEl.addClass('ss-backup-manual__input');
-
-                    // Create backup button
-                    const createBackupButton = manualBackupContainer.createEl('button', {
-                        text: 'Create manual backup',
-                        cls: 'mod-cta ss-backup-manual__submit' // Obsidian's call-to-action button style
-                    });
-
-                    createBackupButton.addEventListener('click', async () => {
-                        const backupName = backupNameInput.getValue().trim();
-                        if (!backupName) {
-                            new Notice("Please enter a name for the backup.", 3000);
-                            return;
-                        }
-                        
-                        try {
-                            await this.saveManualBackup(backupName);
-                            new Notice("Manual backup created successfully.", 3000);
-                            // Refresh the list after creating a backup
-                            modal.close();
-                            this.open(); 
-                        } catch (error) {
-                            // saveManualBackup handles its own errors and notices
-                        }
-                    });
-
-                    // Add it before the list
-                    if (containerEl.firstChild) {
-                        containerEl.insertBefore(manualBackupContainer, containerEl.firstChild);
-                    } else {
-                        containerEl.appendChild(manualBackupContainer);
-                    }
-
-                    
-                    // Override the createListItem method to add our custom details display
-                    const originalCreateListItem = modal.createListItem.bind(modal);
-                    // @ts-ignore - Temporarily override the method
-                    modal.createListItem = (itemData: ListItem & { _backupDetails?: string }, index: number) => {
-                        const itemEl = originalCreateListItem(itemData, index);
-                        
-                        // Replace the standard description with our custom formatted one
-                        if (itemData._backupDetails) {
-                            // Remove the default description element
-                            const defaultDesc = itemEl.querySelector('.ss-modal__item-description');
-                            if (defaultDesc) {
-                                defaultDesc.remove();
-                            }
-                            
-                            // Add our custom details element
-                            const content = itemEl.querySelector('.ss-modal__item-content');
-                            if (content) {
-                                const detailsEl = content.createDiv({ cls: 'ss-backup-details' });
-                                
-                                // Format details as nice badges
-                                const details = itemData._backupDetails;
-                                if (details.includes('\n')) {
-                                    const detailItems = details.split('\n');
-                                    detailItems.forEach(item => {
-                                        detailsEl.createSpan({
-                                            text: item,
-                                            cls: 'ss-backup-details__item'
-                                        });
-                                    });
-                                } else {
-                                    detailsEl.setText(details);
-                                }
-                            }
-                        }
-                        
-                        return itemEl;
-                    };
-                }
-            });
-
-            const selectedItems = await modal.openAndGetSelection();
-            
-            if (selectedItems.length === 0) {
-                return null;
-            }
-
-            return selectedItems[0].id;
-        } catch (error) {
-            new Notice("Error loading backups: " + error, 3000);
-            return null;
-        }
+    if (fileName === "settings-backup-latest.json") {
+      return {
+        path: filePath,
+        name: "Latest automatic backup",
+        date: "Most recent save",
+        details,
+      };
     }
 
-    /**
-     * Save a manual backup with the given name
-     */
-    private async saveManualBackup(backupName: string): Promise<void> {
-        try {
-            // Normalize the name for file safety
-            const safeNamePart = backupName.replace(/[^a-z0-9]/gi, '-').toLowerCase();
-            const timestamp = Date.now();
-            const fileName = `settings-manual-${safeNamePart}-${timestamp}.json`;
-            
-            // Get vault root directory
-            const backupDir = ".systemsculpt/settings-backups";
-            
-            // Ensure backup directory exists
-            try {
-                await this.plugin.app.vault.createFolder(backupDir);
-            } catch (e) {
-                // Directory might already exist, which is fine
-                // @ts-ignore - Check error message if available
-                if (!e.message || !e.message.includes("already exists")) {
-                    throw e;
-                }
-            }
-            
-            // Get current settings
-            const currentSettings = this.plugin.getSettingsManager().getSettings();
-            const redactedSettings = redactSettingsForBackup(currentSettings as unknown as Record<string, unknown>);
-            
-            // Add metadata to identify this as a manual backup
-            const backupData = {
-                ...redactedSettings,
-                _backupMeta: {
-                    type: 'manual',
-                    name: backupName,
-                    timestamp: timestamp,
-                    createdAt: new Date().toISOString(),
-                    redactedSecrets: true,
-                }
-            };
-            
-            // Save to file
-            const backupPath = `.systemsculpt/settings-backups/${fileName}`;
-            await this.plugin.app.vault.adapter.write(
-                backupPath,
-                JSON.stringify(backupData, null, 2)
-            );
-            
-            new Notice(`Manual backup "${backupName}" created successfully`, 3000);
-        } catch (error) {
-            new Notice("Error saving backup: " + error, 3000);
-            throw error;
-        }
+    const datedBackup = fileName.match(/settings-backup-(\d{4}-\d{2}-\d{2})\.json/);
+    if (datedBackup) {
+      const [_, dateString] = datedBackup;
+      const readableDate = new Date(dateString).toLocaleDateString(undefined, {
+        weekday: "long",
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+      });
+      return {
+        path: filePath,
+        name: `Backup from ${readableDate}`,
+        date: dateString,
+        details,
+      };
     }
 
-    /**
-     * Get all available backup files
-     */
-    private async getAvailableBackups(): Promise<{ path: string; name: string; date: string; details?: string }[]> {
-        try {
-            // Get vault root directory
-            const backupDir = ".systemsculpt/settings-backups";
-            
-            // Check if backup directory exists
-            const exists = await this.plugin.app.vault.adapter.exists(backupDir);
-            if (!exists) {
-                return [];
-            }
-
-            // List all files in backup directory
-            const files = await this.plugin.app.vault.adapter.list(backupDir);
-            
-            // Filter and sort backup files (latest first)
-            const backupFiles = files.files
-                .filter(f => f.includes('settings-') && f.endsWith('.json'))
-                .sort((a, b) => {
-                    // Extract timestamps/dates for proper sorting
-                    const aMatch = a.match(/(\d{4}-\d{2}-\d{2})|(\d+)/);
-                    const bMatch = b.match(/(\d{4}-\d{2}-\d{2})|(\d+)/);
-                    
-                    if (aMatch && bMatch) {
-                        // If both have timestamps, sort by them
-                        if (aMatch[2] && bMatch[2]) {
-                            return parseInt(bMatch[2]) - parseInt(aMatch[2]); // Newest first
-                        }
-                        // If both have dates, sort by them
-                        if (aMatch[1] && bMatch[1]) {
-                            return bMatch[1].localeCompare(aMatch[1]); // Newest first
-                        }
-                    }
-                    
-                    // Fallback to filename sort (newest first)
-                    return b.localeCompare(a);
-                });
-
-            // Process each backup file
-            const backupsPromises = backupFiles.map(async filePath => {
-                let name = filePath.split('/').pop() || '';
-                let date = 'Unknown date';
-                let details = '';
-                let backupSettings: any = null;
-
-                try {
-                    // Read the backup file to extract key information
-                    const backupData = await this.plugin.app.vault.adapter.read(filePath);
-                    backupSettings = JSON.parse(backupData);
-                    
-                    // Extract key information
-                    if (backupSettings) {
-                        const hasLicense = backupSettings.licenseValid === true ? 'Yes' : 'No';
-                        const schemaVersion = Number.isFinite(backupSettings.schemaVersion)
-                          ? backupSettings.schemaVersion
-                          : "Legacy";
-                        details = `License active: ${hasLicense}\nSchema: ${schemaVersion}`;
-            
-                        // Removed development mode badge details
-                        // if (backupSettings.developmentMode) {
-                        //     details += `\n🛠️ Dev Mode`;
-                        // }
-                    }
-                } catch (error) {
-                    details = 'Could not read backup contents';
-                }
-
-                // Check for manual backups first (they have special metadata)
-                if (backupSettings && backupSettings._backupMeta && backupSettings._backupMeta.type === 'manual') {
-                    const meta = backupSettings._backupMeta;
-                    const backupDate = new Date(meta.timestamp);
-                    
-                    return {
-                        path: filePath,
-                        name: `📝 ${meta.name}`,
-                        date: backupDate.toLocaleString(),
-                        details
-                    };
-                }
-
-                // Handle "latest" backup
-                if (name === 'settings-backup-latest.json') {
-                    return {
-                        path: filePath,
-                        name: 'Latest Automatic Backup',
-                        date: 'Most recent save',
-                        details
-                    };
-                }
-
-                // Handle daily backups
-                const dateMatch = name.match(/settings-backup-(\d{4}-\d{2}-\d{2})\.json/);
-                if (dateMatch) {
-                    const [, dateStr] = dateMatch;
-                    // Format as readable date
-                    const dateObj = new Date(dateStr);
-                    date = dateObj.toLocaleDateString(undefined, { 
-                        weekday: 'long', 
-                        year: 'numeric', 
-                        month: 'long', 
-                        day: 'numeric' 
-                    });
-                    
-                    return {
-                        path: filePath,
-                        name: `Backup from ${date}`,
-                        date: dateStr,
-                        details
-                    };
-                }
-
-                // Handle emergency backups
-                const emergencyMatch = name.match(/settings-emergency-(\d+)\.json/);
-                if (emergencyMatch) {
-                    const [, timestamp] = emergencyMatch;
-                    const dateObj = new Date(parseInt(timestamp));
-                    date = dateObj.toLocaleString();
-                    
-                    return {
-                        path: filePath,
-                        name: `Emergency Backup`,
-                        date: date,
-                        details
-                    };
-                }
-
-                // Manual backups (old format without metadata)
-                const manualMatch = name.match(/settings-manual-(.*)-(\d+)\.json/);
-                if (manualMatch) {
-                    const [, safeName, timestamp] = manualMatch;
-                    const dateObj = new Date(parseInt(timestamp));
-                    const readableName = safeName.replace(/-/g, ' ');
-                    
-                    return {
-                        path: filePath,
-                        name: `📝 ${readableName}`,
-                        date: dateObj.toLocaleString(),
-                        details
-                    };
-                }
-
-                // Other backup formats
-                return {
-                    path: filePath,
-                    name,
-                    date,
-                    details
-                };
-            });
-
-            // Wait for all backups to be processed and sort by creation time (newest first)
-            const processedBackups = await Promise.all(backupsPromises);
-            
-            // Sort the final results by actual creation time (newest first)
-            return processedBackups.sort((a, b) => {
-                // Handle special cases - put "latest" first
-                if (a.name.includes('Latest')) return -1;
-                if (b.name.includes('Latest')) return 1;
-                
-                // Extract actual creation dates from different backup types
-                let dateA: number = 0;
-                let dateB: number = 0;
-                
-                // For manual backups, extract timestamp from filename
-                const aManualMatch = a.path.match(/settings-manual-.*-(\d+)\.json/);
-                if (aManualMatch) {
-                    dateA = parseInt(aManualMatch[1]); // Timestamp in milliseconds
-                }
-                
-                const bManualMatch = b.path.match(/settings-manual-.*-(\d+)\.json/);
-                if (bManualMatch) {
-                    dateB = parseInt(bManualMatch[1]); // Timestamp in milliseconds
-                }
-                
-                // For automatic backups, extract date and convert to timestamp
-                const aAutoMatch = a.path.match(/settings-backup-(\d{4}-\d{2}-\d{2})\.json/);
-                if (aAutoMatch && !aManualMatch) {
-                    dateA = new Date(aAutoMatch[1]).getTime(); // Convert date to timestamp
-                }
-                
-                const bAutoMatch = b.path.match(/settings-backup-(\d{4}-\d{2}-\d{2})\.json/);
-                if (bAutoMatch && !bManualMatch) {
-                    dateB = new Date(bAutoMatch[1]).getTime(); // Convert date to timestamp
-                }
-                
-                // Compare actual creation times (newer first)
-                if (dateA && dateB) {
-                    return dateB - dateA; // Newest first
-                }
-                
-                // If one has a date and other doesn't, prioritize the one with a date
-                if (dateA && !dateB) return -1;
-                if (!dateA && dateB) return 1;
-                
-                // Fallback to path comparison (newest first)
-                return b.path.localeCompare(a.path);
-            });
-        } catch (error) {
-            return [];
-        }
+    const emergencyBackup = fileName.match(/settings-emergency-(\d+)\.json/);
+    if (emergencyBackup) {
+      const timestamp = Number.parseInt(emergencyBackup[1], 10);
+      return {
+        path: filePath,
+        name: "Emergency backup",
+        date: new Date(timestamp).toLocaleString(),
+        details,
+      };
     }
 
-    /**
-     * Restore settings from the selected backup
-     * @param backupPath The path to the backup file
-     */
-    async restoreFromBackup(backupPath: string): Promise<boolean> {
-        try {
-            // Check if file exists
-            const exists = await this.plugin.app.vault.adapter.exists(backupPath);
-            if (!exists) {
-                new Notice("Backup file not found", 3000);
-                return false;
-            }
-
-            // Read backup file
-            const backupData = await this.plugin.app.vault.adapter.read(backupPath);
-            const backupSettings = JSON.parse(backupData);
-
-            // Validate backup data
-            if (!backupSettings || typeof backupSettings !== 'object') {
-                new Notice("Invalid backup file format", 3000);
-                return false;
-            }
-
-            const currentSettings = this.plugin.getSettingsManager().getSettings() as unknown as Record<string, unknown>;
-            const restoredSettings = applyCurrentSecretsToBackup(
-                backupSettings as Record<string, unknown>,
-                currentSettings,
-            );
-
-            // Apply settings THROUGH the versioned migrator so an old backup is
-            // migrated to the current schema on restore, exactly like a load (#212).
-            await this.plugin.getSettingsManager().restoreFromExternalSettings(restoredSettings);
-            new Notice("Settings restored successfully", 3000);
-            
-            return true;
-        } catch (error) {
-            new Notice("Error restoring settings: " + error, 3000);
-            return false;
-        }
+    const legacyManualBackup = fileName.match(/settings-manual-(.*)-(\d+)\.json/);
+    if (legacyManualBackup) {
+      const readableName = legacyManualBackup[1].replace(/-/g, " ");
+      const timestamp = Number.parseInt(legacyManualBackup[2], 10);
+      return {
+        path: filePath,
+        name: `📝 ${readableName}`,
+        date: new Date(timestamp).toLocaleString(),
+        details,
+      };
     }
-} 
+
+    return {
+      path: filePath,
+      name: fileName,
+      date: "Unknown date",
+      details,
+    };
+  }
+
+  private async readBackupSettings(filePath: string): Promise<Record<string, any> | null> {
+    try {
+      const backupData = await this.plugin.app.vault.adapter.read(filePath);
+      return JSON.parse(backupData);
+    } catch {
+      return null;
+    }
+  }
+
+  private describeBackupDetails(backupSettings: Record<string, any> | null): string {
+    if (!backupSettings) {
+      return "Could not read backup contents";
+    }
+
+    const hasLicense = backupSettings.licenseValid === true ? "Yes" : "No";
+    const schemaVersion = Number.isFinite(backupSettings.schemaVersion)
+      ? backupSettings.schemaVersion
+      : "Legacy";
+
+    return `License active: ${hasLicense}\nSchema: ${schemaVersion}`;
+  }
+
+  private compareBackups(left: BackupEntry, right: BackupEntry): number {
+    if (left.name.includes("Latest")) return -1;
+    if (right.name.includes("Latest")) return 1;
+
+    const leftTimestamp = this.extractBackupTimestamp(left.path);
+    const rightTimestamp = this.extractBackupTimestamp(right.path);
+
+    if (leftTimestamp && rightTimestamp) {
+      return rightTimestamp - leftTimestamp;
+    }
+    if (leftTimestamp && !rightTimestamp) return -1;
+    if (!leftTimestamp && rightTimestamp) return 1;
+    return right.path.localeCompare(left.path);
+  }
+
+  private extractBackupTimestamp(path: string): number {
+    const manualMatch = path.match(/settings-manual-.*-(\d+)\.json/);
+    if (manualMatch) {
+      return Number.parseInt(manualMatch[1], 10);
+    }
+
+    const datedMatch = path.match(/settings-backup-(\d{4}-\d{2}-\d{2})\.json/);
+    if (datedMatch) {
+      return new Date(datedMatch[1]).getTime();
+    }
+
+    const emergencyMatch = path.match(/settings-emergency-(\d+)\.json/);
+    if (emergencyMatch) {
+      return Number.parseInt(emergencyMatch[1], 10);
+    }
+
+    return 0;
+  }
+
+  private async ensureBackupDirectory(backupDir: string): Promise<void> {
+    try {
+      await this.plugin.app.vault.createFolder(backupDir);
+    } catch (error: any) {
+      if (!error?.message?.includes("already exists")) {
+        throw error;
+      }
+    }
+  }
+}

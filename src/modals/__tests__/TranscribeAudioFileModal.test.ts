@@ -3,16 +3,16 @@
  */
 import { App } from "obsidian";
 import { TranscribeAudioFileModal } from "../TranscribeAudioFileModal";
-import { showAudioTranscriptionModal } from "../AudioTranscriptionModal";
+import { launchAudioTranscriptionPanel } from "../AudioTranscriptionPanel";
 
-jest.mock("../AudioTranscriptionModal", () => ({
-  showAudioTranscriptionModal: jest.fn(),
+jest.mock("../AudioTranscriptionPanel", () => ({
+  launchAudioTranscriptionPanel: jest.fn(),
 }));
 
 describe("TranscribeAudioFileModal", () => {
-  const mockedShowAudioTranscriptionModal =
-    showAudioTranscriptionModal as jest.MockedFunction<
-      typeof showAudioTranscriptionModal
+  const mockedLaunchAudioTranscriptionPanel =
+    launchAudioTranscriptionPanel as jest.MockedFunction<
+      typeof launchAudioTranscriptionPanel
     >;
 
   const createAudioFile = () =>
@@ -52,7 +52,7 @@ describe("TranscribeAudioFileModal", () => {
   };
 
   beforeEach(() => {
-    mockedShowAudioTranscriptionModal.mockReset();
+    mockedLaunchAudioTranscriptionPanel.mockReset();
   });
 
   it("provides an Open file button that triggers the system file picker input", () => {
@@ -112,7 +112,7 @@ describe("TranscribeAudioFileModal", () => {
         showTranscriptionFormatChooserInModal: false,
       })
     );
-    expect(mockedShowAudioTranscriptionModal).toHaveBeenCalledWith(
+    expect(mockedLaunchAudioTranscriptionPanel).toHaveBeenCalledWith(
       app,
       expect.objectContaining({
         file: audioFile,
@@ -148,7 +148,7 @@ describe("TranscribeAudioFileModal", () => {
     await (modal as any).handleTranscribe();
 
     expect(updateSettings).not.toHaveBeenCalled();
-    expect(mockedShowAudioTranscriptionModal).toHaveBeenCalledWith(
+    expect(mockedLaunchAudioTranscriptionPanel).toHaveBeenCalledWith(
       app,
       expect.objectContaining({
         file: audioFile,

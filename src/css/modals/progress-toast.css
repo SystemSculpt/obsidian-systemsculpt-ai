@@ -1,10 +1,9 @@
 /**
- * Document-processing progress toast — fixed bottom-right widget
- * (DocumentProcessingModal.ts). Status rows (.systemsculpt-progress-status*)
- * are shared with the transcription/automation modals — see misc-modals.css.
+ * Shared operation progress panel — fixed bottom-right widget for long-running
+ * transcription, document conversion, and workflow automation tasks.
  */
 
-.systemsculpt-progress-modal {
+.systemsculpt-progress-panel {
   position: fixed;
   bottom: var(--ss-space-8);
   right: var(--ss-space-8);
@@ -38,6 +37,32 @@
   font-size: var(--ss-text-sm);
 }
 
+.systemsculpt-progress-dismiss {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--ss-radius-xs);
+  background: transparent;
+  color: var(--ss-ink-muted);
+  cursor: pointer;
+  transition: var(--ss-transition-colors);
+}
+
+.systemsculpt-progress-dismiss:hover,
+.systemsculpt-progress-dismiss:focus-visible {
+  background-color: var(--ss-state-hover);
+  color: var(--ss-ink);
+}
+
+.systemsculpt-progress-dismiss:focus-visible {
+  box-shadow: var(--ss-ring);
+  outline: none;
+}
+
 .systemsculpt-progress-percent {
   font-variant-numeric: tabular-nums;
   font-size: var(--ss-text-sm);
@@ -60,11 +85,11 @@
   transition: width var(--ss-dur-slow) var(--ss-ease);
 }
 
-.systemsculpt-progress-modal.is-complete .systemsculpt-progress-bar {
+.systemsculpt-progress-panel.is-complete .systemsculpt-progress-bar {
   background-color: var(--ss-success);
 }
 
-.systemsculpt-progress-modal.is-error .systemsculpt-progress-bar {
+.systemsculpt-progress-panel.is-error .systemsculpt-progress-bar {
   background-color: var(--ss-danger);
 }
 
@@ -118,6 +143,10 @@
   margin-top: var(--ss-space-3);
 }
 
+.systemsculpt-progress-buttons.is-hidden {
+  display: none;
+}
+
 .systemsculpt-progress-button {
   flex: 1;
   min-height: var(--ss-control-height-sm);
@@ -144,6 +173,18 @@
 
 .systemsculpt-progress-button.primary:hover {
   background-color: var(--ss-accent-hover);
+}
+
+.systemsculpt-progress-button.danger {
+  background-color: var(--ss-danger-tint);
+  border-color: var(--ss-danger-line);
+  color: var(--ss-danger);
+}
+
+.systemsculpt-progress-button.danger:hover {
+  background-color: var(--ss-danger);
+  border-color: var(--ss-danger);
+  color: var(--ss-ink-on-accent);
 }
 
 .systemsculpt-progress-detail {

@@ -1,6 +1,6 @@
 # SystemSculpt AI for Obsidian
 
-SystemSculpt brings managed AI chat, transcription, semantic search, and visual workflows into your Obsidian vault. Activate a SystemSculpt license once; there are no provider keys or model catalogs to configure.
+SystemSculpt brings AI chat, transcription, semantic search, and visual workflows into your Obsidian vault. Activate a SystemSculpt license once; there are no provider keys or model catalogs to configure.
 
 ## What it does
 
@@ -22,7 +22,7 @@ SystemSculpt 6 is desktop-only.
 
 ## Privacy and safety
 
-- AI requests use SystemSculpt's managed services.
+- AI requests use the SystemSculpt API.
 - Provider credentials, model catalogs, and provider SDKs are not part of the plugin.
 - Built-in tools operate against the current vault and use the plugin's approval policy.
 - License keys are removed from exported diagnostics and settings backups.
@@ -41,9 +41,13 @@ SystemSculpt 6 is desktop-only.
 
 ```bash
 npm install
-npm run check:plugin:fast
+npm run check
 npm run test:integration
 ```
+
+`npm run check` is the bounded edit-loop gate. Run `npm run check:full` for the
+exhaustive Obsidian lint, artifact, unit, embeddings, integration, and release
+verification path.
 
 The compiled desktop plugin is the integration boundary. `npm run build` may use
 `SYSTEMSCULPT_API_BASE_URL` and `SYSTEMSCULPT_WEBSITE_API_BASE_URL` for local QA;

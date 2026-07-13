@@ -6,9 +6,10 @@ import { VersionCheckerService, VersionInfo } from "../VersionCheckerService";
 import { ManagedProductIntegrationError } from "../managed/ManagedProductIntegrationClient";
 
 // Mock ChangeLogModal
+const mockOpenChangeLogModal = jest.fn();
 jest.mock("../../modals/ChangeLogModal", () => ({
   ChangeLogModal: jest.fn().mockImplementation(() => ({
-    open: jest.fn(),
+    open: mockOpenChangeLogModal,
   })),
 }));
 
@@ -70,8 +71,7 @@ describe("VersionCheckerService", () => {
   afterEach(() => {
     jest.useRealTimers();
     VersionCheckerService.clearInstance();
-    // Clean up any drawers
-    document.querySelectorAll(".systemsculpt-update-drawer").forEach((el) => el.remove());
+    document.querySelectorAll(".ss-version-update-modal").forEach((el) => el.remove());
   });
 
   describe("getInstance", () => {
@@ -391,6 +391,59 @@ describe("VersionCheckerService", () => {
 
       // Should have updated settings
       expect(plugin.getSettingsManager().updateSettings).toHaveBeenCalled();
+    });
+  });
+
+  describe("update notice modal", () => {
+    it("renders the available-update modal and auto-closes it", () => {
+      (service as any).showUpdateModal({
+        currentVersion: "1.0.0",
+        latestVersion: "2.0.0",
+        isLatest: false,
+        releaseUrl: "https://github.com/example/releases/latest",
+        updateUrl: "obsidian://show-plugin?id=systemsculpt-ai",
+      } satisfies VersionInfo);
+
+      expect(document.body.textContent).toContain("Update available");
+      expect(document.body.textContent).toContain("Version 2.0.0 is available.");
+
+      jest.advanceTimersByTime(20000);
+      expect(document.querySelector(".ss-version-update-modal")).toBeNull();
+    });
+
+    it("opens Community Plugins from the modal action", () => {
+      const openSpy = jest.spyOn(window, "open").mockImplementation(() => null as any);
+      (service as any).showUpdateModal({
+        currentVersion: "1.0.0",
+        latestVersion: "2.0.0",
+        isLatest: false,
+        releaseUrl: "https://github.com/example/releases/latest",
+        updateUrl: "obsidian://show-plugin?id=systemsculpt-ai",
+      } satisfies VersionInfo);
+
+      const updateButton = [...document.querySelectorAll("button")].find((button) =>
+        button.textContent === "Update"
+      ) as HTMLButtonElement;
+      updateButton.click();
+
+      expect(openSpy).toHaveBeenCalledWith("obsidian://show-plugin?id=systemsculpt-ai", "_blank");
+      expect(document.querySelector(".ss-version-update-modal")).toBeNull();
+      openSpy.mockRestore();
+    });
+
+    it("opens the changelog from the post-update modal", async () => {
+      const openChangelogSpy = jest.spyOn(service as any, "openChangelogTab").mockResolvedValue(undefined);
+      (service as any).showPostUpdateModal();
+
+      const changelogButton = [...document.querySelectorAll("button")].find((button) =>
+        button.textContent === "View changelog"
+      ) as HTMLButtonElement;
+      changelogButton.click();
+      await Promise.resolve();
+
+      expect(openChangelogSpy).toHaveBeenCalledTimes(1);
+      expect(document.querySelector(".ss-version-update-modal")).toBeNull();
+      openChangelogSpy.mockRestore();
     });
   });
 

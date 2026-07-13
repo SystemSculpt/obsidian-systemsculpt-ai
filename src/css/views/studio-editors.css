@@ -872,27 +872,10 @@
 .ss-studio-caption-board__toolbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: var(--ss-space-3);
   padding: var(--ss-space-3) var(--ss-space-4);
   border-bottom: 1px solid var(--ss-line);
-}
-
-.ss-studio-caption-board__toolbar-title-stack {
-  min-width: 0;
-}
-
-.ss-studio-caption-board__toolbar-eyebrow {
-  font-size: var(--ss-text-xs);
-  color: var(--ss-ink-faint);
-  letter-spacing: var(--ss-tracking-wide);
-  text-transform: uppercase;
-}
-
-.ss-studio-caption-board__toolbar-title {
-  font-size: var(--ss-text-lg);
-  font-weight: var(--ss-weight-semibold);
-  letter-spacing: var(--ss-tracking-tight);
 }
 
 .ss-studio-caption-board__toolbar-actions {

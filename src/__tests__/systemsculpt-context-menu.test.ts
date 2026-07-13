@@ -4,9 +4,9 @@ import { FileContextMenuService } from "../context-menu/FileContextMenuService";
 import { errorLogger } from "../utils/errorLogger";
 import { tryCopyImageFileToClipboard } from "../utils/clipboard";
 import type {
-  DocumentProcessingModalHandle,
-  DocumentProcessingModalLauncher,
-} from "../modals/DocumentProcessingModal";
+  DocumentProcessingPanelHandle,
+  DocumentProcessingPanelLauncher,
+} from "../modals/DocumentProcessingPanel";
 
 jest.mock("../views/chatview/ChatView", () => ({
   ChatView: jest.fn().mockImplementation(() => ({
@@ -159,23 +159,23 @@ const bootstrap = (
     open: jest.fn(async () => undefined),
   };
 
-  const modalHandle: DocumentProcessingModalHandle = {
+  const progressPanel: DocumentProcessingPanelHandle = {
     updateProgress: jest.fn(),
     markSuccess: jest.fn(),
     markFailure: jest.fn(),
     close: jest.fn(),
   };
 
-  const processingModalLauncher: DocumentProcessingModalLauncher = jest
+  const processingPanelLauncher: DocumentProcessingPanelLauncher = jest
     .fn()
-    .mockReturnValue(modalHandle);
+    .mockReturnValue(progressPanel);
 
   const service = new FileContextMenuService({
     app,
     plugin,
     documentProcessor,
     chatLauncher,
-    launchProcessingModal: processingModalLauncher,
+    launchProcessingPanel: processingPanelLauncher,
   } as any);
 
   if (options.autoStart ?? true) {
@@ -192,8 +192,8 @@ const bootstrap = (
     handlers,
     documentProcessor,
     chatLauncher,
-    processingModalLauncher,
-    modalHandle,
+    processingPanelLauncher,
+    progressPanel,
     triggerLayoutReady,
   };
 };
@@ -263,8 +263,8 @@ const bootstrap = (
     );
   });
 
-  it("opens the processing modal and forwards progress events", async () => {
-    const { handlers, documentProcessor, processingModalLauncher, modalHandle } = bootstrap();
+  it("opens the processing panel and forwards progress events", async () => {
+    const { handlers, documentProcessor, processingPanelLauncher, progressPanel } = bootstrap();
     const menu = createMenuStub();
     const file = createFile("pdf");
 
@@ -275,9 +275,8 @@ const bootstrap = (
 
     await entry!.onClick?.();
 
-    expect(processingModalLauncher).toHaveBeenCalledWith(
+    expect(processingPanelLauncher).toHaveBeenCalledWith(
       expect.objectContaining({
-        app: expect.any(Object),
         file,
       })
     );
@@ -294,16 +293,16 @@ const bootstrap = (
 
     options.onProgress?.(progressEvent);
 
-    expect(modalHandle.updateProgress).toHaveBeenCalledWith(progressEvent);
-    expect(modalHandle.markSuccess).toHaveBeenCalledWith(
+    expect(progressPanel.updateProgress).toHaveBeenCalledWith(progressEvent);
+    expect(progressPanel.markSuccess).toHaveBeenCalledWith(
       expect.objectContaining({
         extractionPath: "site/extracted.md",
       })
     );
   });
 
-  it("marks the modal as failed when conversion errors", async () => {
-    const { handlers, documentProcessor, processingModalLauncher, modalHandle } = bootstrap();
+  it("marks the progress panel as failed when conversion errors", async () => {
+    const { handlers, documentProcessor, processingPanelLauncher, progressPanel } = bootstrap();
     const menu = createMenuStub();
     const file = createFile("pdf");
 
@@ -317,8 +316,8 @@ const bootstrap = (
 
     await entry!.onClick?.();
 
-    expect(processingModalLauncher).toHaveBeenCalled();
-    expect(modalHandle.markFailure).toHaveBeenCalledWith(
+    expect(processingPanelLauncher).toHaveBeenCalled();
+    expect(progressPanel.markFailure).toHaveBeenCalledWith(
       expect.objectContaining({
         error,
       })

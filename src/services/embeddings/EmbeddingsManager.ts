@@ -25,6 +25,11 @@ import {
 } from "./utils/namespace";
 import { buildVectorId } from "./utils/vectorId";
 import { normalizeInPlace, toFloat32Array } from "./utils/vector";
+import {
+  isCurrentLocalEmptyEmbeddingMarker,
+  isLocalEmptyEmbeddingMarker,
+  localEmptyEmbeddingMarkerId,
+} from "./LocalEmptyEmbeddingMarker";
 
 export type EmbeddingsRunStatus = "complete" | "aborted";
 
@@ -262,6 +267,7 @@ export class EmbeddingsManager {
 
     const namespace = buildManagedNamespace(queryVector.length);
     const vectors = await this.storage.getVectorsByNamespace(namespace);
+    if (signal?.aborted) return [];
     const eligiblePaths = this.collectSearchableRootPaths(vectors);
     const candidates = vectors.filter((vector) => (
       vector.metadata.isEmpty !== true
@@ -269,24 +275,32 @@ export class EmbeddingsManager {
       && !this.isPathExcluded(vector.path)
     ));
     if (signal?.aborted) return [];
-    const rawResults = await this.search.findSimilarAsync(queryVector, candidates, Math.max(limit * 4, limit));
+    const rawResults = await this.search.findSimilarAsync(
+      queryVector,
+      candidates,
+      Math.max(limit * 4, limit),
+      { signal },
+    );
     if (signal?.aborted) return [];
     return this.applyLexicalSignals(prepared, this.mergeChunkResults([rawResults], limit));
   }
 
-  async findSimilar(filePath: string, limit = 15): Promise<SearchResult[]> {
+  async findSimilar(filePath: string, limit = 15, signal?: AbortSignal): Promise<SearchResult[]> {
     await this.awaitReady();
-    if (!filePath || this.isPathExcluded(filePath)) return [];
+    if (signal?.aborted || !filePath || this.isPathExcluded(filePath)) return [];
     const namespace = this.getActiveNamespace();
     if (!namespace) return [];
 
-    const sourceVectors = (await this.storage.getVectorsByPath(filePath)).filter((vector) => (
+    const storedSourceVectors = await this.storage.getVectorsByPath(filePath);
+    if (signal?.aborted) return [];
+    const sourceVectors = storedSourceVectors.filter((vector) => (
       vector.metadata.namespace === namespace && vector.metadata.isEmpty !== true
     ));
     const queryVectors = this.selectQueryVectors(sourceVectors);
     if (queryVectors.length === 0) return [];
 
     const allVectors = await this.storage.getVectorsByNamespace(namespace);
+    if (signal?.aborted) return [];
     const eligiblePaths = this.collectSearchableRootPaths(allVectors);
     const candidates = allVectors.filter((vector) => (
       vector.path !== filePath
@@ -298,8 +312,15 @@ export class EmbeddingsManager {
 
     const sets: SearchResult[][] = [];
     for (const vector of queryVectors) {
-      sets.push(await this.search.findSimilarAsync(vector.vector, candidates, Math.max(limit * 4, limit)));
+      if (signal?.aborted) return [];
+      sets.push(await this.search.findSimilarAsync(
+        vector.vector,
+        candidates,
+        Math.max(limit * 4, limit),
+        { signal },
+      ));
     }
+    if (signal?.aborted) return [];
     return this.mergeChunkResults(sets, limit, filePath);
   }
 
@@ -577,6 +598,15 @@ export class EmbeddingsManager {
     if (this.isLocallyEmpty(file)) {
       return { needsProcessing: false, reason: "empty", lastEmbedded: null };
     }
+    const localEmptyMarker = this.storage.getVectorSync(localEmptyEmbeddingMarkerId(file.path));
+    if (isCurrentLocalEmptyEmbeddingMarker(localEmptyMarker, file)) {
+      return {
+        needsProcessing: false,
+        reason: "empty",
+        lastEmbedded: localEmptyMarker?.metadata.mtime ?? null,
+        existingNamespace: localEmptyMarker?.metadata.namespace,
+      };
+    }
     const namespace = this.getActiveNamespace();
     if (!namespace) {
       return {
@@ -793,10 +823,12 @@ export class EmbeddingsManager {
 
   private async migrateToManagedNamespaceContract(): Promise<void> {
     const vectors = await this.storage.getAllVectors();
-    const legacyIds = vectors.filter((vector) => !isManagedNamespace(vector.metadata.namespace)).map((vector) => vector.id);
+    const legacyIds = vectors
+      .filter((vector) => !isManagedNamespace(vector.metadata.namespace) && !isLocalEmptyEmbeddingMarker(vector))
+      .map((vector) => vector.id);
     if (legacyIds.length > 0) await this.storage.removeIds(legacyIds);
 
-    const version = 5;
+    const version = 6;
     if ((this.plugin.settings.embeddingsVectorFormatVersion || 0) < version) {
       await this.plugin.getSettingsManager().updateSettings({ embeddingsVectorFormatVersion: version });
     }

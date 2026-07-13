@@ -52,7 +52,7 @@ describe("built bundle (main.js)", () => {
     // Settings migration ran: loadData returned null, so defaults applied.
     expect(plugin.settings).toBeDefined();
     expect(typeof plugin.settings).toBe("object");
-    expect(plugin.settings.schemaVersion).toBe(4);
+    expect(plugin.settings.schemaVersion).toBe(5);
     expect(plugin.settings.licenseKey).toBe("");
     expect(plugin.settings).not.toHaveProperty("settingsMode");
     expect(plugin.settings).not.toHaveProperty("customProviders");

@@ -21,8 +21,7 @@ async function handleDirectoryChange(
         | "recordingsDirectory"
         | "chatsDirectory"
         | "extractionsDirectory"
-        | "savedChatsDirectory"
-        | "webResearchDirectory",
+        | "savedChatsDirectory",
     createFolder: boolean = false
 ) {
     const { app, plugin } = tabInstance;
@@ -57,8 +56,7 @@ function createDirectorySetting(
         | "recordingsDirectory"
         | "chatsDirectory"
         | "extractionsDirectory"
-        | "savedChatsDirectory"
-        | "webResearchDirectory",
+        | "savedChatsDirectory",
     placeholder: string
 ) {
     const { app, plugin } = tabInstance;
@@ -123,15 +121,6 @@ export function displayDirectoriesTabContent(containerEl: HTMLElement, tabInstan
         "Select the directory where notes created via \"Save chat as note\" are stored",
         "savedChatsDirectory",
         "Path relative to vault root (empty = SystemSculpt/Saved Chats)"
-    );
-
-    createDirectorySetting(
-        containerEl,
-        tabInstance,
-        "Web Research Directory",
-        "Select the directory where web search and fetch corpus files are stored",
-        "webResearchDirectory",
-        "Path relative to vault root (empty = SystemSculpt/Web Research)"
     );
 
     createDirectorySetting(

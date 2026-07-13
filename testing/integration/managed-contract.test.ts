@@ -16,8 +16,8 @@ function managedFixture(name: string): any {
 
 const canonicalHashes: Record<string, string> = {
   "admission-v1.json": "fc9938f0c6d6584815b1a59813cad2649554eadda0455fd789f604877fa01fcd",
-  "managed-capabilities-v2.schema.json": "691be55d418534e9dec08c03ca66be0ce8e5b28288ed50a765833c5380927866",
-  "managed-capabilities-v2.json": "1460ed2998a5f7f3da62152d7ea9f26c7341fb6a443f05aad71169272b1283d6",
+  "managed-capabilities-v2.schema.json": "b70a464284e5f48b74912a202e48e1562b8b23d0871c9de81b4f553a03f6caeb",
+  "managed-capabilities-v2.json": "23a9d4d1343058a247c768b48c6e0422f61143f9a06dd1811a0abc9db5988fb7",
 };
 
 const forbiddenSettingsKey = /(provider|model|endpoint|api.?key|oauth|pi(auth|session)?|session|fallback|readwise|mcpservers|catalog|licensevalid|lastvalidated|serverurl)/i;
@@ -119,7 +119,7 @@ describe("managed product contract fixtures", () => {
     expect(chatTurn.request.body).toEqual({
       schema: "managed_chat_request_v1",
       required_fields: ["model", "messages", "stream"],
-      optional_fields: ["tools", "tool_choice", "plugins"],
+      optional_fields: ["tools", "tool_choice", "plugins", "session"],
       additional_properties: false,
       model: "ai-agent",
       stream: true,
@@ -127,11 +127,12 @@ describe("managed product contract fixtures", () => {
       tools: "managed_chat_tools_v1",
       tool_choice: ["auto", "none", "required"],
       plugins: "managed_chat_plugins_v1",
+      session: "managed_chat_session_v1",
     });
 
     const messages = chatTurn.request.definitions.managed_chat_messages_v1;
-    expect(Object.keys(messages.roles)).toEqual(["system", "developer", "user", "assistant", "tool"]);
-    expect(messages.roles.assistant.at_least_one).toEqual(["content", "reasoning_content", "tool_calls"]);
+    expect(Object.keys(messages.roles)).toEqual(["user", "assistant", "tool"]);
+    expect(messages.roles.assistant.at_least_one).toEqual(["content", "tool_calls"]);
     expect(messages.user_content_blocks.image_url.image_url.url).toBe("data_url");
     expect(messages.user_content_blocks.input_image.image_url).toBe("data_url");
     expect(messages.tool_calls.function.arguments).toEqual({
@@ -144,15 +145,36 @@ describe("managed product contract fixtures", () => {
       max_items: 1,
       additional_properties: false,
       items: { required_fields: ["id"], optional_fields: [], id: ["web"] },
+      scope: "active_agent_turn",
+      tool_result_continuation: "server_inherit_or_exact_match",
+      new_user_turn_behavior: "reset_unless_explicit",
+    });
+    expect(chatTurn.request.definitions.managed_chat_session_v1).toEqual({
+      type: "object",
+      one_of: [
+        { shape: "create", required_fields: ["mode"], optional_fields: [], mode: "create" },
+        {
+          shape: "resume",
+          required_fields: ["id", "revision"],
+          optional_fields: [],
+          id: "mchat_<32 lowercase hex>",
+          revision: "nonnegative_integer",
+        },
+      ],
+      absence_behavior: "full_history_compatibility",
+      create_behavior: "full_history_snapshot_and_pin_tools",
+      resume_behavior: "delta_user_or_tool_messages_only",
     });
 
     expect(chatTurn.response).toEqual(expect.objectContaining({
       status: 200,
       content_type: "text/event-stream",
       request_id_header: "x-request-id",
+      session_id_header: "x-systemsculpt-session-id",
+      session_revision_header: "x-systemsculpt-session-revision",
       frame_delimiter: "\n\n",
       data_prefix: "data: ",
-      json_frames: ["managed_chat_delta_v1", "managed_chat_error_v1"],
+      json_frames: ["managed_chat_delta_v1", "managed_chat_session_commit_v1", "managed_chat_error_v1"],
       successful_terminal_marker: "data: [DONE]\n\n",
       successful_terminal_marker_count: 1,
       cancellation_behavior: "client_abort_stops_waiting_server_work_may_continue",
@@ -160,25 +182,38 @@ describe("managed product contract fixtures", () => {
     expect(chatTurn.response.definitions.managed_chat_delta_v1).toEqual({
       format: "openai_chat_completion_chunk",
       model_alias: "systemsculpt/ai-agent",
-      allowed_delta_fields: ["role", "content", "reasoning_content", "tool_calls"],
+      allowed_delta_fields: ["role", "content", "tool_calls"],
       implementation_identity_forbidden: true,
     });
     expect(chatTurn.response.definitions.managed_chat_error_v1).toEqual({
       required_fields: ["error"],
       error_required_fields: ["code", "message"],
+      error_optional_fields: ["session_id", "current_revision", "retry_same_idempotency_key"],
       bounded: true,
       implementation_identity_forbidden: true,
+    });
+    expect(chatTurn.response.definitions.managed_chat_session_commit_v1).toEqual({
+      required_fields: ["object", "session_id", "revision", "state"],
+      object: "systemsculpt.chat.session",
+      revision: "positive_integer",
+      state: "committed",
     });
     expect(chatTurn.response.terminal_failures).toEqual([
       { code: "malformed_frame", retry_same_idempotency_key: false },
       { code: "missing_terminal_marker", retry_same_idempotency_key: false },
       { code: "empty_successful_stream", retry_same_idempotency_key: false },
-      { code: "in_stream_error", retry_same_idempotency_key: false },
+      { code: "in_stream_error", retry_same_idempotency_key: "error_frame_boolean" },
     ]);
     expect(chatTurn.errors).toEqual({
-      statuses: [400, 401, 403, 402, 409, 426, 429, 502, 503],
+      statuses: [400, 401, 403, 402, 404, 409, 410, 426, 429, 502, 503],
       conflict_codes: [
         "operation_in_progress", "operation_already_completed", "operation_terminal", "settlement_pending",
+      ],
+      session_codes: [
+        "session_not_found", "session_expired", "session_revision_conflict", "session_turn_conflict",
+        "session_limit_exceeded", "session_storage_limit_exceeded", "session_state_unavailable",
+        "session_storage_unavailable", "session_turn_superseded", "session_finalization_failed",
+        "idempotency_key_reused",
       ],
       bounded_first_party_messages: true,
     });
@@ -251,11 +286,15 @@ describe("historical settings contract fixtures", () => {
     expect(serialized.match(/legacy-(?:provider|model)/g) ?? []).not.toContain("production");
   });
 
-  it("defines an explicit deterministic v6 managed-only output", () => {
+  it("defines an explicit deterministic v6 managed-only output on the current settings schema", () => {
     const expected = readJson(join(settingsRoot, "expected-v6-managed-settings.json"));
-    expect(expected.schemaVersion).toBe(6);
+    expect(expected.schemaVersion).toBe(5);
     expect(expected.licenseKey).toBe("license-sentinel");
     expect(expected.managedMigrationState.phase).toBe("auth_cleanup_pending");
+    expect(expected.managedMigrationState.receipt.targetSchemaVersion).toBe(5);
+    expect(expected.folders).not.toHaveProperty("systemPrompts");
+    expect(expected.folders).not.toHaveProperty("webResearch");
+    expect(expected.ui).not.toHaveProperty("hideSystemMessagesInChat");
     const forbidden = walkKeys(expected).filter((path) => forbiddenSettingsKey.test(path.split(".").at(-1)!));
     expect(forbidden).toEqual([]);
     expect(expected).toEqual(expect.objectContaining({

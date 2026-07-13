@@ -13,7 +13,32 @@
       "metering": "metered_turn",
       "cancellation_supported": false,
       "background_eligible": false,
-      "limits": {},
+      "limits": {
+        "image_mime_types": "image/png,image/jpeg,image/webp",
+        "max_request_bytes": 100663296,
+        "max_delta_request_bytes": 25165824,
+        "max_messages_on_create": 255,
+        "max_messages_per_delta": 16,
+        "max_session_messages": 256,
+        "max_content_blocks_per_message": 16,
+        "max_images_per_turn": 6,
+        "max_images_on_create": 64,
+        "max_session_images": 64,
+        "max_image_bytes": 6291456,
+        "max_total_image_bytes": 16777216,
+        "max_total_image_bytes_on_create": 67108864,
+        "max_text_bytes_per_block": 1048576,
+        "max_total_text_bytes": 2097152,
+        "max_total_text_bytes_on_create": 16777216,
+        "max_tools": 64,
+        "max_tools_json_bytes": 524288,
+        "max_active_sessions_per_user": 20,
+        "max_session_attachment_bytes": 67108864,
+        "max_session_stored_json_bytes": 16777216,
+        "max_idempotency_key_chars": 128,
+        "session_ttl_days": 30,
+        "pending_turn_lease_seconds": 300
+      },
       "request_contracts": [
         {
           "capability": "chat_turn",
@@ -45,7 +70,8 @@
               "optional_fields": [
                 "tools",
                 "tool_choice",
-                "plugins"
+                "plugins",
+                "session"
               ],
               "additional_properties": false,
               "model": "ai-agent",
@@ -57,29 +83,14 @@
                 "none",
                 "required"
               ],
-              "plugins": "managed_chat_plugins_v1"
+              "plugins": "managed_chat_plugins_v1",
+              "session": "managed_chat_session_v1"
             },
             "definitions": {
               "managed_chat_messages_v1": {
                 "type": "non_empty_array",
                 "additional_properties": false,
                 "roles": {
-                  "system": {
-                    "required_fields": [
-                      "role",
-                      "content"
-                    ],
-                    "optional_fields": [],
-                    "content": "string"
-                  },
-                  "developer": {
-                    "required_fields": [
-                      "role",
-                      "content"
-                    ],
-                    "optional_fields": [],
-                    "content": "string"
-                  },
                   "user": {
                     "required_fields": [
                       "role",
@@ -94,13 +105,11 @@
                     ],
                     "optional_fields": [
                       "content",
-                      "reasoning_content",
                       "tool_calls"
                     ],
                     "content": "string",
                     "at_least_one": [
                       "content",
-                      "reasoning_content",
                       "tool_calls"
                     ],
                     "tool_calls": "managed_chat_tool_calls_v1"
@@ -206,7 +215,31 @@
                   "required_fields": ["id"],
                   "optional_fields": [],
                   "id": ["web"]
-                }
+                },
+                "scope": "active_agent_turn",
+                "tool_result_continuation": "server_inherit_or_exact_match",
+                "new_user_turn_behavior": "reset_unless_explicit"
+              },
+              "managed_chat_session_v1": {
+                "type": "object",
+                "one_of": [
+                  {
+                    "shape": "create",
+                    "required_fields": ["mode"],
+                    "optional_fields": [],
+                    "mode": "create"
+                  },
+                  {
+                    "shape": "resume",
+                    "required_fields": ["id", "revision"],
+                    "optional_fields": [],
+                    "id": "mchat_<32 lowercase hex>",
+                    "revision": "nonnegative_integer"
+                  }
+                ],
+                "absence_behavior": "full_history_compatibility",
+                "create_behavior": "full_history_snapshot_and_pin_tools",
+                "resume_behavior": "delta_user_or_tool_messages_only"
               }
             }
           },
@@ -214,10 +247,13 @@
             "status": 200,
             "content_type": "text/event-stream",
             "request_id_header": "x-request-id",
+            "session_id_header": "x-systemsculpt-session-id",
+            "session_revision_header": "x-systemsculpt-session-revision",
             "frame_delimiter": "\n\n",
             "data_prefix": "data: ",
             "json_frames": [
               "managed_chat_delta_v1",
+              "managed_chat_session_commit_v1",
               "managed_chat_error_v1"
             ],
             "definitions": {
@@ -227,7 +263,6 @@
                 "allowed_delta_fields": [
                   "role",
                   "content",
-                  "reasoning_content",
                   "tool_calls"
                 ],
                 "implementation_identity_forbidden": true
@@ -240,8 +275,19 @@
                   "code",
                   "message"
                 ],
+                "error_optional_fields": [
+                  "session_id",
+                  "current_revision",
+                  "retry_same_idempotency_key"
+                ],
                 "bounded": true,
                 "implementation_identity_forbidden": true
+              },
+              "managed_chat_session_commit_v1": {
+                "required_fields": ["object", "session_id", "revision", "state"],
+                "object": "systemsculpt.chat.session",
+                "revision": "positive_integer",
+                "state": "committed"
               }
             },
             "successful_terminal_marker": "data: [DONE]\n\n",
@@ -261,7 +307,7 @@
               },
               {
                 "code": "in_stream_error",
-                "retry_same_idempotency_key": false
+                "retry_same_idempotency_key": "error_frame_boolean"
               }
             ],
             "cancellation_behavior": "client_abort_stops_waiting_server_work_may_continue"
@@ -272,7 +318,9 @@
               401,
               403,
               402,
+              404,
               409,
+              410,
               426,
               429,
               502,
@@ -283,6 +331,19 @@
               "operation_already_completed",
               "operation_terminal",
               "settlement_pending"
+            ],
+            "session_codes": [
+              "session_not_found",
+              "session_expired",
+              "session_revision_conflict",
+              "session_turn_conflict",
+              "session_limit_exceeded",
+              "session_storage_limit_exceeded",
+              "session_state_unavailable",
+              "session_storage_unavailable",
+              "session_turn_superseded",
+              "session_finalization_failed",
+              "idempotency_key_reused"
             ],
             "bounded_first_party_messages": true
           }
@@ -399,7 +460,9 @@
       "metering": "metered_job",
       "cancellation_supported": false,
       "background_eligible": true,
-      "limits": {},
+      "limits": {
+        "max_input_bytes": 26214400
+      },
       "request_contracts": []
     },
     {

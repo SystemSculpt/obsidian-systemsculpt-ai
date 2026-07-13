@@ -13,7 +13,6 @@ Source of truth:
 | --- | --- | --- | --- |
 | Open SystemSculpt Chat |  | `open-systemsculpt-chat` | Opens a new chat view |
 | Open SystemSculpt History |  | `open-systemsculpt-history` | Opens unified history modal (Chats + Studio sessions) |
-| Open SystemSculpt Chat History (Legacy Alias) |  | `open-chat-history` | Deprecated alias for `open-systemsculpt-history` |
 | Resume Chat from Current History File |  | `resume-chat-from-history` | Only when active file is a chat history file |
 | Open SystemSculpt AI Settings |  | `open-systemsculpt-settings` | Opens plugin settings tab |
 | Open Credits & Usage |  | `open-credits-balance` | Opens the credits/usage modal |
@@ -36,9 +35,8 @@ Chat always runs through SystemSculpt. There are no separate chat-model commands
 | Open SystemSculpt Search | `Mod+K` | `open-systemsculpt-search` | Opens search modal |
 | Open Similar Notes Panel |  | `open-embeddings-view` | Opens embeddings/similar-notes view |
 | Find Similar Notes (Current Note) |  | `find-similar-current-note` | Added in `src/main.ts`; requires active note |
-| Process Embeddings |  | `process-embeddings` | Starts embeddings processing |
 | Rebuild Embeddings |  | `rebuild-embeddings` | Clears all embeddings data |
-| Rebuild Embeddings (Current Model) |  | `rebuild-embeddings-current-model` | Rebuilds only the current SystemSculpt embeddings namespace |
+| Rebuild SystemSculpt Embeddings |  | `rebuild-embeddings-current-model` | Rebuilds the current SystemSculpt embeddings index |
 | Show Embeddings Database Statistics (Debug) |  | `embeddings-database-stats` | Visible only when embeddings are enabled |
 
 ## Audio and media

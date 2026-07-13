@@ -167,14 +167,6 @@ export class CommandManager {
         this.ribbonManager.openSystemSculptHistoryModal();
       },
     });
-
-    this.plugin.addCommand({
-      id: "open-chat-history",
-      name: "Open chat history (legacy alias)",
-      callback: () => {
-        this.ribbonManager.openSystemSculptHistoryModal();
-      },
-    });
   }
 
   private registerOpenJanitor() {
@@ -807,10 +799,10 @@ Without dedicated logs, clear reproduction details are the quickest path to a fi
       }
     });
 
-    // User-visible: rebuild the immutable managed index.
+    // User-visible: rebuild the immutable first-party index.
     this.plugin.addCommand({
       id: "rebuild-embeddings-current-model",
-      name: "Rebuild managed embeddings",
+      name: "Rebuild SystemSculpt embeddings",
       checkCallback: (checking: boolean) => {
         // Only show if embeddings are enabled
         const enabled = this.plugin.settings.embeddingsEnabled;
@@ -820,7 +812,7 @@ Without dedicated logs, clear reproduction details are the quickest path to a fi
             try {
               const { confirmed } = await showConfirm(
                 this.app,
-                "This will delete and rebuild the managed embeddings index.",
+                "This will delete and rebuild the current SystemSculpt embeddings index.",
                 {
                   title: "Rebuild Embeddings",
                   primaryButton: "Rebuild",
@@ -829,7 +821,7 @@ Without dedicated logs, clear reproduction details are the quickest path to a fi
                 }
               );
               if (!confirmed) return;
-              new Notice('Rebuilding managed embeddings…', 4000);
+              new Notice('Rebuilding SystemSculpt embeddings…', 4000);
               const manager = this.plugin.getOrCreateEmbeddingsManager();
               await manager.forceRefreshCurrentNamespace();
               new Notice('Embeddings rebuild complete.', 4000);

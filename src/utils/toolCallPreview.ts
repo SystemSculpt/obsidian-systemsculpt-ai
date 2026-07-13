@@ -13,7 +13,39 @@ export interface WriteEditPreview {
 
 export function isWriteOrEditTool(toolName: string): boolean {
   const { canonicalName } = splitToolName(toolName);
-  return canonicalName === "write" || canonicalName === "edit";
+  return canonicalName === "write" || canonicalName === "edit" || canonicalName === "multi_edit";
+}
+
+export async function prepareWriteEditPreviews(app: App, toolCall: ToolCall): Promise<WriteEditPreview[]> {
+  const fn = getFunctionDataFromToolCall(toolCall);
+  if (!fn) return [];
+  if (splitToolName(fn.name).canonicalName !== "multi_edit") {
+    const preview = await prepareWriteEditPreview(app, toolCall);
+    return preview ? [preview] : [];
+  }
+  const files = Array.isArray((fn.arguments as { files?: unknown }).files)
+    ? (fn.arguments as { files: Array<Record<string, unknown>> }).files
+    : [];
+  const previews: WriteEditPreview[] = [];
+  for (const [index, file] of files.entries()) {
+    const path = typeof file.path === "string" ? file.path : "";
+    const edits = Array.isArray(file.edits) ? file.edits : [];
+    if (!path || edits.length === 0) continue;
+    const preview = await prepareWriteEditPreview(app, {
+      ...toolCall,
+      id: `${toolCall.id}:file:${index}`,
+      request: {
+        ...toolCall.request,
+        id: `${toolCall.request.id}:file:${index}`,
+        function: {
+          name: "edit",
+          arguments: JSON.stringify({ path, edits, strict: file.strict }),
+        },
+      },
+    });
+    if (preview) previews.push(preview);
+  }
+  return previews;
 }
 
 export async function prepareWriteEditPreview(app: App, toolCall: ToolCall): Promise<WriteEditPreview | null> {
@@ -35,7 +67,16 @@ export async function prepareWriteEditPreview(app: App, toolCall: ToolCall): Pro
   let newContent = "";
   const { canonicalName: base } = splitToolName(fn.name);
   if (base === "write") {
-    newContent = String((fn.arguments as any).content ?? "");
+    const content = String((fn.arguments as any).content ?? "");
+    const ifExists = String((fn.arguments as any).ifExists ?? "overwrite");
+    if (file && file instanceof TFile && ifExists === "append") {
+      const appendNewline = (fn.arguments as any).appendNewline === true;
+      newContent = oldContent + (appendNewline && !oldContent.endsWith("\n") ? "\n" : "") + content;
+    } else if (file && file instanceof TFile && ifExists === "skip") {
+      newContent = oldContent;
+    } else {
+      newContent = content;
+    }
   } else if (base === "edit") {
     const edits = Array.isArray((fn.arguments as any).edits) ? (fn.arguments as any).edits : [];
     newContent = applyEditsLocally(oldContent, edits);
@@ -196,8 +237,8 @@ function replaceLoose(target: string, oldText: string, newText: string, preserve
  * Returns the created diff container or null if not applicable.
  */
 export async function renderWriteEditInlineDiff(app: App, hostElement: HTMLElement, toolCall: ToolCall): Promise<HTMLElement | null> {
-  const preview = await prepareWriteEditPreview(app, toolCall);
-  if (!preview) return null;
+  const previews = await prepareWriteEditPreviews(app, toolCall);
+  if (previews.length === 0) return null;
 
   // Remove any existing inline diff to avoid duplicates
   const existing = hostElement.querySelector(".systemsculpt-inline-diff");
@@ -207,19 +248,19 @@ export async function renderWriteEditInlineDiff(app: App, hostElement: HTMLEleme
   container.className = "systemsculpt-inline-diff";
   hostElement.appendChild(container);
 
-  // Diff content only (no header/actions to keep UI clean)
-  const body = container.createDiv({ cls: "systemsculpt-inline-diff__body" });
   // Lazy import DiffViewer to avoid any circular dependencies
-
   const { DiffViewer } = require("../components/DiffViewer");
-  const viewer = new DiffViewer({
-    container: body,
-    diffResult: preview.diff,
-    fileName: preview.path,
-    maxContextLines: 3,
-    showLineNumbers: true,
-  });
-  viewer.render();
+  for (const preview of previews) {
+    const body = container.createDiv({ cls: "systemsculpt-inline-diff__body" });
+    const viewer = new DiffViewer({
+      container: body,
+      diffResult: preview.diff,
+      fileName: preview.path,
+      maxContextLines: 3,
+      showLineNumbers: true,
+    });
+    viewer.render();
+  }
 
   return container;
 }
