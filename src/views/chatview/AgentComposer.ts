@@ -51,6 +51,7 @@ function createButton(
     icon,
     size: "icon",
     tone,
+    tooltip: false,
   });
   className.split(/\s+/).filter(Boolean).forEach((name) => button.addClass(name));
   return button;
@@ -121,7 +122,7 @@ export class AgentComposer extends Component {
     this.webButton.setAttribute("aria-pressed", "false");
     this.approvalMode = tools.createEl("select", {
       cls: "dropdown systemsculpt-agent-approval-mode",
-      attr: { "aria-label": "Vault changes", title: "Vault changes" },
+      attr: { "aria-label": "Vault changes" },
     });
     // eslint-disable-next-line obsidianmd/ui/sentence-case -- Familiar product mode name.
     this.approvalMode.createEl("option", { value: "ask", text: "Ask Approval" });
@@ -229,9 +230,6 @@ export class AgentComposer extends Component {
   public setApprovalMode(mode: "ask" | "full-access"): void {
     this.approvalMode.value = mode;
     this.approvalMode.classList.toggle("is-full-access", mode === "full-access");
-    this.approvalMode.setAttribute("title", mode === "full-access"
-      ? "Full Access: make vault changes without pausing"
-      : "Ask Approval before vault changes");
   }
 
   public setRunning(running: boolean): void {

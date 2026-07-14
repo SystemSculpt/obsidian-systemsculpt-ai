@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { App } from "obsidian";
+import { App, MarkdownRenderer } from "obsidian";
 import { AgentComposer } from "../AgentComposer";
 import {
   applyManagedAgentEvent,
@@ -297,8 +297,10 @@ describe("AgentComposer", () => {
     composer.load();
     const select = parent.querySelector<HTMLSelectElement>('[aria-label="Vault changes"]')!;
     expect(Array.from(select.options).map((option) => option.text)).toEqual(["Ask Approval", "Full Access"]);
+    expect(select.hasAttribute("title")).toBe(false);
     composer.setApprovalMode("full-access");
     expect(select.value).toBe("full-access");
+    expect(select.hasAttribute("title")).toBe(false);
     select.value = "ask";
     select.dispatchEvent(new Event("change"));
     expect(onApprovalModeChange).toHaveBeenCalledWith("ask");
@@ -307,6 +309,17 @@ describe("AgentComposer", () => {
 });
 
 describe("AgentWorkspace", () => {
+  const originalClipboardDescriptor = Object.getOwnPropertyDescriptor(window.navigator, "clipboard");
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+    if (originalClipboardDescriptor) {
+      Object.defineProperty(window.navigator, "clipboard", originalClipboardDescriptor);
+      return;
+    }
+    delete (window.navigator as Navigator & { clipboard?: Clipboard }).clipboard;
+  });
+
   it("renders detail-free tool status as static non-focusable content", async () => {
     const host = document.body.createDiv();
     const renderer = new AgentConversationRenderer(host, {
@@ -354,8 +367,18 @@ describe("AgentWorkspace", () => {
     expect(parent.querySelector('[aria-label="Chat history"]')?.classList.contains("ss-button--icon")).toBe(true);
     expect(parent.querySelector('[aria-label="Attach files"]')?.classList.contains("ss-button--icon")).toBe(true);
     expect(parent.querySelector('[aria-label="Jump to latest"]')?.classList.contains("ss-button")).toBe(true);
+    for (const label of ["Chat history", "New chat", "Chat settings", "Attach files", "Jump to latest"]) {
+      expect(parent.querySelector(`[aria-label="${label}"]`)?.hasAttribute("title")).toBe(false);
+    }
     expect(parent.querySelector(".systemsculpt-agent-header-title")?.getAttribute("role"))
       .toBe("heading");
+    const title = parent.querySelector<HTMLElement>(".systemsculpt-agent-header-title")!;
+    const conversation = parent.querySelector<HTMLElement>(".systemsculpt-agent-conversation")!;
+    expect(conversation.hasAttribute("aria-label")).toBe(false);
+    expect(conversation.getAttribute("aria-labelledby")).toBe(title.id);
+    expect(parent.querySelector(".systemsculpt-agent-viewport")?.hasAttribute("aria-label")).toBe(false);
+    workspace.setTitle("Conversation");
+    expect(title.hasAttribute("title")).toBe(false);
 
     workspace.setBanner("Connection failed", "error");
     expect(parent.querySelector(".systemsculpt-agent-banner")?.getAttribute("role"))
@@ -367,6 +390,84 @@ describe("AgentWorkspace", () => {
       .toBe("listitem");
 
     workspace.unload();
+  });
+
+  it("keeps the current transcript mounted until an asynchronous replacement is ready", async () => {
+    const host = document.body.createDiv();
+    const renderer = new AgentConversationRenderer(host, {
+      app: new App(),
+      sourcePath: () => "",
+      onApprove: jest.fn(),
+      onOpenArtifact: jest.fn(),
+      onCopyArtifactPath: jest.fn(),
+    });
+    const render = jest.spyOn(MarkdownRenderer, "render");
+    render.mockImplementation(async (_app, markdown, parent) => {
+      parent.setText(String(markdown));
+    });
+    await renderer.renderHistory([{ role: "assistant", message_id: "old", content: "Old answer" }]);
+
+    let finish!: () => void;
+    render.mockImplementation(async (_app, markdown, parent) => {
+      await new Promise<void>((resolve) => { finish = resolve; });
+      parent.setText(String(markdown));
+    });
+    const replacing = renderer.renderHistory([{
+      role: "assistant",
+      message_id: "new",
+      content: "New answer",
+    }]);
+
+    expect(host.textContent).toContain("Old answer");
+    expect(host.textContent).not.toContain("New answer");
+    finish();
+    await replacing;
+    expect(host.textContent).not.toContain("Old answer");
+    expect(host.textContent).toContain("New answer");
+    render.mockRestore();
+  });
+
+  it("containerizes rendered code and shows compact copy success feedback", async () => {
+    const host = document.body.createDiv();
+    const renderer = new AgentConversationRenderer(host, {
+      app: new App(),
+      sourcePath: () => "",
+      onApprove: jest.fn(),
+      onOpenArtifact: jest.fn(),
+      onCopyArtifactPath: jest.fn(),
+    });
+    renderer.load();
+    const render = jest.spyOn(MarkdownRenderer, "render").mockImplementation(
+      async (_app, _markdown, parent) => {
+        parent.innerHTML = '<pre><button class="copy-code-button">Copy code</button><code>const answer = 42;</code></pre>';
+      },
+    );
+    const writeText = jest.fn(async () => undefined);
+    Object.defineProperty(window.navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+
+    await (renderer as any).renderMarkdown("```ts\nconst answer = 42;\n```", host);
+    const pre = host.querySelector("pre")!;
+    const copy = host.querySelector<HTMLButtonElement>(".systemsculpt-agent-code-copy")!;
+    expect(pre.classList.contains("systemsculpt-agent-code-block")).toBe(true);
+    expect(host.querySelector(".copy-code-button")).toBeNull();
+    expect(copy.textContent).toContain("Copy");
+    expect(copy.hasAttribute("title")).toBe(false);
+
+    copy.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(writeText).toHaveBeenCalledWith("const answer = 42;");
+    expect(copy.textContent).toContain("Copied");
+    expect(copy.classList.contains("is-copied")).toBe(true);
+    expect(copy.getAttribute("aria-label")).toBe("Code copied");
+    expect((renderer as any).copyFeedbackTimers.size).toBe(1);
+    renderer.unload();
+    expect((renderer as any).copyFeedbackTimers.size).toBe(0);
+    render.mockRestore();
   });
 
   it("classifies tool-only history turns without action chrome", async () => {
@@ -627,6 +728,105 @@ describe("AgentWorkspace", () => {
     workspace.unload();
   });
 
+  it("keeps continuation progress after the streamed content instead of above it", async () => {
+    const parent = document.body.createDiv();
+    const workspace = new AgentWorkspace(parent, {
+      app: new App(),
+      sourcePath: () => "SystemSculpt/Chats/chat.md",
+      onSubmit: jest.fn(),
+      onStop: jest.fn(),
+      onAttach: jest.fn(),
+      onRemoveAttachment: jest.fn(),
+      onApprove: jest.fn(),
+      onOpenArtifact: jest.fn(),
+      onCopyArtifactPath: jest.fn(),
+      onNewChat: jest.fn(),
+      onOpenHistory: jest.fn(),
+      onOpenSettings: jest.fn(),
+    });
+    workspace.load();
+
+    let snapshot = createInitialAgentConversation();
+    snapshot = applyManagedAgentEvent(snapshot, envelope(1, { type: "run.started" }));
+    snapshot = applyManagedAgentEvent(snapshot, envelope(2, {
+      type: "run.status",
+      phase: "working",
+      label: "Continuing",
+    }));
+    snapshot = applyManagedAgentEvent(snapshot, envelope(3, {
+      type: "message.started",
+      messageId: "assistant-continuing",
+      role: "assistant",
+    }));
+    snapshot = applyManagedAgentEvent(snapshot, envelope(4, {
+      type: "text.delta",
+      messageId: "assistant-continuing",
+      partId: "text-continuing",
+      delta: "Working through the result",
+    }));
+    await workspace.setAgentSnapshot(snapshot);
+
+    const parts = Array.from(parent.querySelectorAll<HTMLElement>(
+      ".systemsculpt-agent-active-run > .systemsculpt-agent-part",
+    ));
+    expect(parts.map((part) => part.classList.contains("is-status"))).toEqual([false, true]);
+    expect(parts.at(-1)?.textContent).toContain("Continuing");
+    workspace.unload();
+  });
+
+  it("settles a completed live run into history without leaving duplicate active content", async () => {
+    const parent = document.body.createDiv();
+    const workspace = new AgentWorkspace(parent, {
+      app: new App(),
+      sourcePath: () => "SystemSculpt/Chats/chat.md",
+      onSubmit: jest.fn(),
+      onStop: jest.fn(),
+      onAttach: jest.fn(),
+      onRemoveAttachment: jest.fn(),
+      onApprove: jest.fn(),
+      onOpenArtifact: jest.fn(),
+      onCopyArtifactPath: jest.fn(),
+      onNewChat: jest.fn(),
+      onOpenHistory: jest.fn(),
+      onOpenSettings: jest.fn(),
+    });
+    workspace.load();
+    const user = { role: "user" as const, message_id: "user-settle", content: "Finish this" };
+    await workspace.setHistory([user]);
+
+    let snapshot = createInitialAgentConversation();
+    snapshot = applyManagedAgentEvent(snapshot, envelope(1, { type: "run.started" }));
+    snapshot = applyManagedAgentEvent(snapshot, envelope(2, {
+      type: "message.started",
+      messageId: "assistant-settle",
+      role: "assistant",
+    }));
+    snapshot = applyManagedAgentEvent(snapshot, envelope(3, {
+      type: "text.delta",
+      messageId: "assistant-settle",
+      partId: "text-settle",
+      delta: "Final answer",
+    }));
+    snapshot = applyManagedAgentEvent(snapshot, envelope(4, {
+      type: "text.completed",
+      messageId: "assistant-settle",
+      partId: "text-settle",
+    }));
+    snapshot = applyManagedAgentEvent(snapshot, envelope(5, { type: "run.completed" }));
+    await workspace.setAgentSnapshot(snapshot);
+    expect(parent.querySelector(".systemsculpt-agent-active-run")?.textContent).toContain("Final answer");
+
+    await workspace.settleCompletedRun([
+      user,
+      { role: "assistant", message_id: "assistant-settle", content: "Final answer" },
+    ]);
+
+    expect(parent.querySelector(".systemsculpt-agent-active-run")?.childElementCount).toBe(0);
+    expect(parent.querySelectorAll(".systemsculpt-agent-history .systemsculpt-agent-turn")).toHaveLength(2);
+    expect(parent.textContent?.match(/Final answer/g)).toHaveLength(1);
+    workspace.unload();
+  });
+
   it("shows the proposed change before approval and exposes bounded result details", async () => {
     const parent = document.body.createDiv();
     const workspace = new AgentWorkspace(parent, {
@@ -842,7 +1042,15 @@ describe("AgentWorkspace", () => {
     });
     workspace.load();
     const started = applyManagedAgentEvent(createInitialAgentConversation(), envelope(1, { type: "run.started" }));
-    const failed = applyManagedAgentEvent(started, envelope(2, {
+    const continuing = applyManagedAgentEvent(started, envelope(2, {
+      type: "run.status",
+      phase: "working",
+      label: "Continuing",
+    }));
+    await workspace.setAgentSnapshot(continuing);
+    expect(parent.querySelector(".systemsculpt-agent-part.is-status")?.textContent).toContain("Continuing");
+
+    const failed = applyManagedAgentEvent(continuing, envelope(3, {
       type: "run.failed",
       error: { code: "transport", message: "Connection lost." },
     }));
@@ -850,6 +1058,7 @@ describe("AgentWorkspace", () => {
     await workspace.setAgentSnapshot(failed);
 
     expect(parent.textContent).toContain("Connection lost.");
+    expect(parent.querySelector(".systemsculpt-agent-part.is-status")).toBeNull();
     parent.querySelector<HTMLButtonElement>(".systemsculpt-agent-error-retry")!.click();
     expect(onRetryMessage).toHaveBeenCalledWith("user-1");
     workspace.unload();

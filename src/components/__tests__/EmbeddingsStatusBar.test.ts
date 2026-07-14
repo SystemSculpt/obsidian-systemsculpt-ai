@@ -23,17 +23,7 @@ function snapshot(overrides: Partial<SemanticIndexSnapshot> = {}): SemanticIndex
 function installObsidianDomHelpers(element: HTMLElement): void {
   (element as any).addClass = (...names: string[]) => element.classList.add(...names);
   (element as any).setAttr = (name: string, value: string) => element.setAttribute(name, value);
-  (element as any).createSpan = (options: any = {}) => {
-    const span = document.createElement("span");
-    if (options.cls) span.className = options.cls;
-    if (options.text) span.textContent = options.text;
-    for (const [name, value] of Object.entries(options.attr ?? {})) {
-      span.setAttribute(name, String(value));
-    }
-    (span as any).setText = (value: string) => { span.textContent = value; };
-    element.appendChild(span);
-    return span;
-  };
+  (element as any).setText = (value: string) => { element.textContent = value; };
 }
 
 describe("EmbeddingsStatusBar", () => {
@@ -63,31 +53,37 @@ describe("EmbeddingsStatusBar", () => {
       addStatusBarItem: jest.fn(() => element),
       settings: { embeddingsEnabled: true },
       embeddingsManager: manager,
+      getOrCreateEmbeddingsManager: jest.fn(() => manager),
       getViewManager: jest.fn(() => ({ activateEmbeddingsView })),
     };
     statusBar = new EmbeddingsStatusBar(plugin);
+    statusBar.load();
   });
 
   afterEach(() => {
-    statusBar.onunload();
+    statusBar.unload();
     document.body.innerHTML = "";
   });
 
-  it("renders one accessible compact lifecycle projection", () => {
-    expect(element.dataset.ssSurface).toBe("embedded");
+  it("renders one accessible compact lifecycle projection in native Obsidian chrome", () => {
+    expect(plugin.addStatusBarItem).toHaveBeenCalledTimes(1);
+    expect(element.classList).toContain("mod-clickable");
+    expect(element.className).not.toContain("ss-");
+    expect(element.dataset.ssSurface).toBeUndefined();
     expect(element.getAttribute("role")).toBe("button");
+    expect(element.getAttribute("tabindex")).toBe("0");
     expect(element.getAttribute("aria-label")).toBe("Semantic index ready, 12 notes");
-    expect(element.querySelector(".ss-embeddings-status-bar__value")?.textContent).toBe("12");
-    expect(element.querySelector("progress")).toBeNull();
+    expect(element.textContent).toBe("12");
+    expect(element.children).toHaveLength(0);
   });
 
   it("updates immediately from lifecycle snapshots without polling", () => {
     listener?.(snapshot({ phase: "reconciling", total: 20, completed: 7, pending: 13, currentPath: "Notes/Now.md" }));
-    expect(element.querySelector(".ss-embeddings-status-bar__value")?.textContent).toBe("7/20");
+    expect(element.textContent).toBe("7/20");
     expect(element.title).toContain("Now.md");
 
     listener?.(snapshot({ phase: "error", failed: 2, lastError: { code: "managed", message: "Try again later." } }));
-    expect(element.querySelector(".ss-embeddings-status-bar__value")?.textContent).toBe("2 failed");
+    expect(element.textContent).toBe("2 failed");
     expect(element.title).toContain("Try again later");
   });
 
@@ -99,22 +95,23 @@ describe("EmbeddingsStatusBar", () => {
   });
 
   it("is absent while embeddings are disabled", () => {
-    statusBar.onunload();
+    statusBar.unload();
     const disabledElement = document.createElement("div");
     installObsidianDomHelpers(disabledElement);
     plugin.addStatusBarItem.mockReturnValue(disabledElement);
     plugin.settings.embeddingsEnabled = false;
 
     const disabled = new EmbeddingsStatusBar(plugin);
+    disabled.load();
     expect(disabledElement.hidden).toBe(true);
-    expect(disabledElement.getAttribute("aria-hidden")).toBe("");
-    disabled.onunload();
+    expect(disabledElement.getAttribute("aria-hidden")).toBe("true");
+    disabled.unload();
   });
 
   it("rebinds exactly once and releases the lifecycle listener on unload", () => {
     statusBar.startMonitoring(plugin.embeddingsManager);
     expect(unsubscribe).not.toHaveBeenCalled();
-    statusBar.onunload();
+    statusBar.unload();
     expect(unsubscribe).toHaveBeenCalledTimes(1);
     expect(element.isConnected).toBe(false);
   });

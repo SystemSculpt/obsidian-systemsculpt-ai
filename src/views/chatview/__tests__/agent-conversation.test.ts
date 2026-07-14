@@ -202,6 +202,31 @@ describe("AgentConversation", () => {
     expect(selectAgentPart(continued, "text-1")).toMatchObject({ markdown: "One" });
   });
 
+  it("removes transient progress at completion instead of projecting a Done frame", () => {
+    const snapshot = replayManagedAgentEvents([
+      envelope(1, { type: "run.started" }),
+      envelope(2, { type: "run.status", phase: "working", label: "Continuing" }),
+      envelope(3, { type: "message.started", messageId: "assistant-1", role: "assistant" }),
+      envelope(4, {
+        type: "text.delta",
+        messageId: "assistant-1",
+        partId: "text-1",
+        delta: "Finished.",
+      }),
+      envelope(5, { type: "text.completed", messageId: "assistant-1", partId: "text-1" }),
+      envelope(6, { type: "run.completed" }),
+    ]);
+
+    expect(snapshot.status).toBe("completed");
+    expect(snapshot.statusLabel).toBeUndefined();
+    expect(snapshot.parts.some((part) => part.kind === "status")).toBe(false);
+    expect(selectAgentPart(snapshot, "text-1")).toMatchObject({
+      kind: "text",
+      state: "complete",
+      markdown: "Finished.",
+    });
+  });
+
   it("streams a bounded reasoning summary as its own ordered message part", () => {
     const snapshot = replayManagedAgentEvents([
       envelope(1, { type: "run.started" }),
@@ -334,8 +359,9 @@ describe("AgentConversation", () => {
   it("projects tool errors and terminal run errors independently", () => {
     const toolFailed = replayManagedAgentEvents([
       envelope(1, { type: "run.started" }),
-      envelope(2, { type: "message.started", messageId: "assistant-1", role: "assistant" }),
-      envelope(3, {
+      envelope(2, { type: "run.status", phase: "working", label: "Reading" }),
+      envelope(3, { type: "message.started", messageId: "assistant-1", role: "assistant" }),
+      envelope(4, {
         type: "tool.requested",
         call: {
           callId: "call-1",
@@ -346,9 +372,9 @@ describe("AgentConversation", () => {
           input: { path: "missing.md" },
         },
       }),
-      envelope(4, { type: "tool.started", callId: "call-1" }),
-      envelope(5, { type: "tool.failed", callId: "call-1", error: { code: "not_found", message: "Missing" } }),
-      envelope(6, { type: "run.failed", error: { code: "agent_failed", message: "Could not finish" } }),
+      envelope(5, { type: "tool.started", callId: "call-1" }),
+      envelope(6, { type: "tool.failed", callId: "call-1", error: { code: "not_found", message: "Missing" } }),
+      envelope(7, { type: "run.failed", error: { code: "agent_failed", message: "Could not finish" } }),
     ]);
     expect(selectToolCall(toolFailed, "call-1")).toMatchObject({
       state: "failed",
@@ -356,8 +382,10 @@ describe("AgentConversation", () => {
     });
     expect(toolFailed).toMatchObject({
       status: "failed",
+      statusLabel: undefined,
       terminalError: { code: "agent_failed" },
     });
+    expect(toolFailed.parts.some((part) => part.kind === "status")).toBe(false);
     expect(toolFailed.parts.at(-1)).toMatchObject({ kind: "error", retryable: true });
   });
 

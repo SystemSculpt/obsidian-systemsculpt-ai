@@ -116,6 +116,7 @@ describe("SystemSculptSettingTab native layout", () => {
 
   afterEach(() => {
     jest.useRealTimers();
+    jest.restoreAllMocks();
   });
 
   const renderTab = async () => {
@@ -138,7 +139,11 @@ describe("SystemSculptSettingTab native layout", () => {
     expect(surface?.classList.contains("ss-surface")).toBe(true);
     expect(surface?.getAttribute("data-ss-surface")).toBe("view");
     expect(searchInput).not.toBeNull();
-    expect(searchInput!.classList.contains("ss-search-field__input")).toBe(true);
+    const nativeSearchContainer = searchInput?.closest(".search-input-container");
+    expect(nativeSearchContainer).not.toBeNull();
+    expect(nativeSearchContainer?.parentElement?.classList.contains("ss-search-field")).toBe(true);
+    expect(tab.containerEl.querySelector(".search-input-clear-button")).not.toBeNull();
+    expect(tab.containerEl.querySelector(".ss-search-field__icon")).toBeNull();
     expect(
       tab.containerEl.querySelector(".ss-settings-search-shell"),
     ).not.toBeNull();
@@ -403,12 +408,10 @@ describe("SystemSculptSettingTab native layout", () => {
     expect(
       tab.containerEl.querySelectorAll("mark.ss-search-mark").length,
     ).toBeGreaterThan(0);
-    expect(
-      tab.containerEl.querySelector(".ss-search-field__clear"),
-    ).toHaveProperty("hidden", false);
+    expect(tab.containerEl.querySelector(".search-input-clear-button")).not.toBeNull();
   });
 
-  it("shows a polished empty state and clears search on escape", async () => {
+  it("shows a polished empty state and clears through the native search control", async () => {
     const tab = await renderTab();
     const searchInput = tab.containerEl.querySelector(
       "input[type='search']",
@@ -421,13 +424,54 @@ describe("SystemSculptSettingTab native layout", () => {
         ?.textContent,
     ).toContain("No settings found");
 
-    searchInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    searchInput.value = "";
+    searchInput.dispatchEvent(new Event("input"));
 
     expect(searchInput.value).toBe("");
     expect(tab.containerEl.querySelector(".ss-ui-state.is-empty")).toBeNull();
     expect(
       tab.containerEl.querySelector(".ss-settings-search-meta")?.textContent,
     ).toContain("settings in");
+  });
+
+  it("clears settings search and restores tabs when Escape is pressed", async () => {
+    const tab = await renderTab();
+    const searchInput = tab.containerEl.querySelector(
+      "input[type='search']",
+    ) as HTMLInputElement;
+    const tabBar = tab.containerEl.querySelector(
+      ".ss-settings-tab-bar",
+    ) as HTMLElement;
+    const results = tab.containerEl.querySelector(
+      ".ss-settings-search-results",
+    ) as HTMLElement;
+    const focus = jest.spyOn(searchInput, "focus");
+
+    searchInput.value = "account";
+    searchInput.dispatchEvent(new Event("input"));
+    expect(searchInput.getAttribute("aria-expanded")).toBe("true");
+    expect(tabBar.hidden).toBe(true);
+    expect(results.hidden).toBe(false);
+    focus.mockClear();
+
+    const escape = new KeyboardEvent("keydown", {
+      key: "Escape",
+      bubbles: true,
+      cancelable: true,
+    });
+    searchInput.dispatchEvent(escape);
+
+    expect(escape.defaultPrevented).toBe(true);
+    expect(searchInput.value).toBe("");
+    expect(searchInput.getAttribute("aria-expanded")).toBe("false");
+    expect(tabBar.hidden).toBe(false);
+    expect(results.hidden).toBe(true);
+    expect(focus).toHaveBeenCalledTimes(1);
+
+    searchInput.value = "account";
+    searchInput.dispatchEvent(new Event("input"));
+    expect(searchInput.getAttribute("aria-expanded")).toBe("true");
+    expect(results.hidden).toBe(false);
   });
 
   it("supports keyboard selection and enter-to-jump for search results", async () => {

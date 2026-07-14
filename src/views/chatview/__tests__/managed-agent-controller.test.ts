@@ -230,7 +230,11 @@ describe("ManagedAgentController", () => {
   it("streams an answer through the closed first-party event contract", async () => {
     const harness = createHarness([textEvents("Hello from the agent")]);
     const envelopes: string[] = [];
-    harness.controller.subscribe((_snapshot, envelope) => envelopes.push(envelope.event.type));
+    const statusLabels: string[] = [];
+    harness.controller.subscribe((_snapshot, envelope) => {
+      envelopes.push(envelope.event.type);
+      if (envelope.event.type === "run.status") statusLabels.push(envelope.event.label);
+    });
 
     const result = await harness.controller.start({ commit: { kind: "append", message: user() } });
 
@@ -248,6 +252,7 @@ describe("ManagedAgentController", () => {
       "usage.updated",
       "run.completed",
     ]));
+    expect(statusLabels).not.toContain("Done");
     expect(harness.persisted).toHaveLength(1);
     expect(harness.persisted[0].message).toMatchObject({
       role: "assistant",

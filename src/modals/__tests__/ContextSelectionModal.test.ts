@@ -49,7 +49,7 @@ describe("ContextSelectionModal", () => {
       initialSelectedPaths: ["documents/report.pdf"],
     });
 
-    expect(modal.modalEl.querySelector<HTMLInputElement>(".ss-modal__search-input")?.value).toBe("report");
+    expect(modal.modalEl.querySelector<HTMLInputElement>(".ss-modal__search input[type='search']")?.value).toBe("report");
     const selectedFilter = modal.modalEl.querySelector(
       ".ss-context-filter-btn.is-selected",
     );
@@ -68,7 +68,7 @@ describe("ContextSelectionModal", () => {
     expect(imageFilter.getAttribute("aria-pressed")).toBe("true");
     expect(modal.modalEl.querySelectorAll(".ss-context-file-item")).toHaveLength(2);
 
-    const search = modal.modalEl.querySelector<HTMLInputElement>(".ss-modal__search-input")!;
+    const search = modal.modalEl.querySelector<HTMLInputElement>(".ss-modal__search input[type='search']")!;
     search.value = "diagram";
     search.dispatchEvent(new Event("input", { bubbles: true }));
     expect(modal.modalEl.querySelectorAll(".ss-context-file-item")).toHaveLength(1);
@@ -153,11 +153,11 @@ describe("ContextSelectionModal", () => {
     jest.useFakeTimers();
     const first = harness();
     jest.runOnlyPendingTimers();
-    expect(document.activeElement).toBe(first.modal.modalEl.querySelector(".ss-modal__search-input"));
+    expect(document.activeElement).toBe(first.modal.modalEl.querySelector(".ss-modal__search input[type='search']"));
 
     first.modal.close();
     const second = harness({ autoFocusSearch: false });
     jest.runOnlyPendingTimers();
-    expect(document.activeElement).not.toBe(second.modal.modalEl.querySelector(".ss-modal__search-input"));
+    expect(document.activeElement).not.toBe(second.modal.modalEl.querySelector(".ss-modal__search input[type='search']"));
   });
 });

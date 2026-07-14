@@ -745,7 +745,11 @@ export class EmbeddingsStorage {
         const chunkId = typeof value.chunkId === "number"
           ? value.chunkId
           : this.parseChunkIdFromId(value.id);
-        cursor.delete();
+        // Delete through the owning store. Some Chromium/Obsidian IndexedDB
+        // implementations throw from IDBCursor.delete() while an index cursor
+        // is advancing, which escapes the event callback as an unhandled
+        // exception and aborts the whole vault operation.
+        store.delete(cursor.primaryKey);
         if (namespace) {
           const relativePath = (value.path || "").slice(oldPrefix.length);
           const newPath = `${newPrefix}${relativePath}`;
@@ -793,7 +797,7 @@ export class EmbeddingsStorage {
         const cursor = cursorRequest.result;
         if (!cursor) return;
         deletedIds.push(String(cursor.primaryKey));
-        cursor.delete();
+        store.delete(cursor.primaryKey);
         cursor.continue();
       };
     });
@@ -826,7 +830,7 @@ export class EmbeddingsStorage {
         const cursor = cursorRequest.result;
         if (!cursor) return;
         deletedIds.push(String(cursor.primaryKey));
-        cursor.delete();
+        store.delete(cursor.primaryKey);
         cursor.continue();
       };
     });

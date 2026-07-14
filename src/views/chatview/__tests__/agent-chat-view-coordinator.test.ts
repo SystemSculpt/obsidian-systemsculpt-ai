@@ -16,6 +16,7 @@ function executionHarness(result: Record<string, unknown>) {
   const workspace = {
     setHistory: jest.fn(async () => undefined),
     setAgentSnapshot: jest.fn(async () => undefined),
+    settleCompletedRun: jest.fn(async () => undefined),
     setRunPending: jest.fn(),
     setBanner: jest.fn(),
     setInputText: jest.fn(),
@@ -365,8 +366,13 @@ describe("AgentChatView coordinator", () => {
     await (AgentChatView.prototype as any).executeSubmission.call(view, submit);
 
     expect(view.pendingRetry).toBeNull();
-    expect(workspace.setHistory).toHaveBeenCalledTimes(2);
-    expect(workspace.setAgentSnapshot).toHaveBeenLastCalledWith(null);
+    expect(workspace.setHistory).toHaveBeenCalledTimes(1);
+    expect(workspace.setAgentSnapshot).toHaveBeenCalledTimes(1);
+    expect(workspace.setAgentSnapshot).toHaveBeenCalledWith(null);
+    expect(workspace.settleCompletedRun).toHaveBeenCalledTimes(1);
+    expect(workspace.settleCompletedRun).toHaveBeenCalledWith(
+      view.transcript.snapshot().messages,
+    );
     expect(view.drainQueue).toHaveBeenCalledTimes(1);
   });
 

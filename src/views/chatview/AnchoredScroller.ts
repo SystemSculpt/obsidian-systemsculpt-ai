@@ -18,6 +18,7 @@ export type AnchoredScrollerOptions = Readonly<{
   endThreshold?: number;
   previousItemPeek?: number;
   reducedMotion?: boolean | (() => boolean);
+  labelledBy?: string;
 }>;
 
 type RegisteredRow = Readonly<{
@@ -71,7 +72,12 @@ export class AnchoredScroller {
     });
 
     this.viewport.setAttribute("role", this.viewport.getAttribute("role") || "region");
-    this.viewport.setAttribute("aria-label", this.viewport.getAttribute("aria-label") || "Messages");
+    if (options.labelledBy) {
+      this.viewport.removeAttribute("aria-label");
+      this.viewport.setAttribute("aria-labelledby", options.labelledBy);
+    } else {
+      this.viewport.setAttribute("aria-label", this.viewport.getAttribute("aria-label") || "Messages");
+    }
     this.viewport.setAttribute("tabindex", this.viewport.getAttribute("tabindex") || "0");
     this.content.setAttribute("role", this.content.getAttribute("role") || "log");
     this.content.setAttribute("aria-relevant", this.content.getAttribute("aria-relevant") || "additions");

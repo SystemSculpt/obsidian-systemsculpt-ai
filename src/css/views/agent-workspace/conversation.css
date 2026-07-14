@@ -6,7 +6,7 @@
 .systemsculpt-agent-conversation {
   display: flex;
   flex-direction: column;
-  gap: var(--ss-space-6);
+  gap: 0;
   width: min(100%, var(--ss-agent-content-width));
   min-height: 100%;
   margin: 0 auto;
@@ -25,6 +25,10 @@
 
 .systemsculpt-agent-active-run {
   gap: var(--ss-space-5);
+}
+
+.systemsculpt-agent-active-run:not(:empty) {
+  margin-top: var(--ss-space-5);
 }
 
 .systemsculpt-agent-history > .systemsculpt-agent-turn + .systemsculpt-agent-turn {
@@ -123,6 +127,67 @@
 .systemsculpt-agent-turn-body > :last-child,
 .systemsculpt-agent-part.is-text > :last-child {
   margin-bottom: 0;
+}
+
+.systemsculpt-agent-conversation .systemsculpt-agent-code-block {
+  position: relative;
+  max-width: 100%;
+  margin: var(--ss-space-3) 0;
+  padding: var(--ss-space-8) var(--ss-space-3) var(--ss-space-3);
+  overflow: auto;
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-md);
+  background: var(--ss-surface-sunken);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--ss-ink) 4%, transparent);
+  color: var(--ss-ink);
+}
+
+.systemsculpt-agent-conversation .systemsculpt-agent-code-block > code {
+  display: block;
+  min-width: max-content;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-family: var(--ss-font-mono);
+  font-size: var(--ss-text-sm);
+  line-height: var(--ss-leading-base);
+}
+
+.systemsculpt-agent-conversation .copy-code-button {
+  display: none;
+}
+
+.systemsculpt-agent-conversation .systemsculpt-agent-code-copy {
+  position: absolute;
+  inset-block-start: var(--ss-space-1);
+  inset-inline-end: var(--ss-space-1);
+  min-height: var(--ss-control-height-sm);
+  padding: 0 var(--ss-space-2);
+  border-color: var(--ss-line);
+  background: var(--ss-surface-1);
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-xs);
+  opacity: 0.78;
+}
+
+.systemsculpt-agent-conversation .systemsculpt-agent-code-block:hover > .systemsculpt-agent-code-copy,
+.systemsculpt-agent-conversation .systemsculpt-agent-code-copy:focus-visible,
+.systemsculpt-agent-conversation .systemsculpt-agent-code-copy.is-copied,
+.systemsculpt-agent-conversation .systemsculpt-agent-code-copy.is-copy-failed {
+  opacity: 1;
+}
+
+.systemsculpt-agent-conversation .systemsculpt-agent-code-copy.is-copied {
+  border-color: var(--ss-success-line);
+  background: var(--ss-success-tint);
+  color: var(--ss-success);
+}
+
+.systemsculpt-agent-conversation .systemsculpt-agent-code-copy.is-copy-failed {
+  border-color: var(--ss-danger-line);
+  background: var(--ss-danger-tint);
+  color: var(--ss-danger);
 }
 
 .systemsculpt-agent-message-actions {

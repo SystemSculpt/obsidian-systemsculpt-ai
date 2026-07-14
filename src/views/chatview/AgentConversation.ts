@@ -769,14 +769,16 @@ function reduceEvent(
       if (hasUnsettledParts(snapshot)) {
         protocolError("illegal_transition", "A run cannot complete while message or tool parts are unsettled.");
       }
-      const completed = snapshot.statusLabel
-        ? upsertStatusPart(snapshot, "complete", snapshot.statusLabel)
-        : snapshot;
       return {
-        ...completed,
+        ...snapshot,
         status: "completed",
         phase: "complete",
+        statusLabel: undefined,
         waitingReason: undefined,
+        // Progress belongs to the active lifecycle, not the durable answer.
+        // Dropping it at the terminal boundary avoids a one-frame "Done"
+        // card while the committed assistant turn replaces the live run.
+        parts: snapshot.parts.filter((part) => part.kind !== "status"),
       };
     }
 
@@ -808,8 +810,10 @@ function reduceEvent(
       return {
         ...withError,
         status: "failed",
+        statusLabel: undefined,
         waitingReason: undefined,
         terminalError: event.error,
+        parts: withError.parts.filter((part) => part.kind !== "status"),
       };
     }
 

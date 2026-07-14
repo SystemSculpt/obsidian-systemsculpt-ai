@@ -16,9 +16,8 @@ ErrorCollectorService.initializeEarlyLogsCapture();
 
 /**
  * SystemSculpt AI Plugin for Obsidian
- * Version: 1.5.3
  */
-import { Plugin, Notice, TFile, FileSystemAdapter, apiVersion } from "obsidian";
+import { Plugin, Notice, TFile, FileSystemAdapter, Platform, apiVersion } from "obsidian";
 export { StudioProjectGenerationStore } from "./studio/persistence/StudioProjectGenerationStore";
 export { ObsidianStudioGenerationAdapter } from "./studio/persistence/ObsidianStudioGenerationAdapter";
 import { checkObsidianCompatibility, MINIMUM_OBSIDIAN_VERSION } from "./core/plugin/lifecycle/ObsidianCompat";
@@ -38,7 +37,6 @@ import { DirectoryManager } from "./core/DirectoryManager";
 import { StorageManager } from "./core/storage";
 import { ResumeChatService } from "./views/chatview/ResumeChatService";
 import { EmbeddingsManager } from "./services/embeddings/EmbeddingsManager";
-import { FileExplorerStudioButtonManager } from "./core/plugin/FileExplorerStudioButtonManager";
 import { VaultFileCache } from "./utils/VaultFileCache";
 import { EmbeddingsStatusBar } from "./components/EmbeddingsStatusBar";
 import { FreezeMonitor } from "./services/FreezeMonitor";
@@ -105,7 +103,7 @@ export default class SystemSculptPlugin extends Plugin {
   private transcriptionService: TranscriptionService;
   private settingsManager: SettingsManager;
   private licenseManager: LicenseManager;
-  private viewManager: ViewManager;
+  private viewManager: ViewManager | null = null;
   private commandManager: CommandManager;
   private fileContextMenuService: FileContextMenuService | null = null;
   private isUnloading = false;
@@ -131,7 +129,6 @@ export default class SystemSculptPlugin extends Plugin {
   private workflowEngineService: WorkflowEngineService | null = null;
   private searchEngine: SystemSculptSearchEngine | null = null;
   private studioService: StudioService | null = null;
-  private fileExplorerStudioButtonManager: FileExplorerStudioButtonManager | null = null;
   private managedCapabilityGraph: ManagedCapabilityClientGraph | null = null;
   /** Live-reconfigurable slot for the relative line number gutter editor extension. */
   private readonly relativeLineNumberExtensions: Extension[] = [];
@@ -189,7 +186,11 @@ export default class SystemSculptPlugin extends Plugin {
       }
     }
 
-    return this.embeddingsManager;
+    const manager = this.embeddingsManager;
+    if (this.settings.embeddingsEnabled) {
+      this.embeddingsStatusBar?.startMonitoring(manager);
+    }
+    return manager;
   }
 
   public getSearchEngine(): SystemSculptSearchEngine {
@@ -1244,12 +1245,8 @@ export default class SystemSculptPlugin extends Plugin {
         return;
       }
 
-      if (!this.embeddingsStatusBar) {
-        this.embeddingsStatusBar = new EmbeddingsStatusBar(this);
-        this.register(() => {
-          this.embeddingsStatusBar?.unload();
-          this.embeddingsStatusBar = null;
-        });
+      if (Platform.isDesktop && !this.embeddingsStatusBar) {
+        this.embeddingsStatusBar = this.addChild(new EmbeddingsStatusBar(this));
       }
 
       logger.info("Primary UI components ready", {
@@ -1488,7 +1485,6 @@ export default class SystemSculptPlugin extends Plugin {
 
   private ensureViewManager(): ViewManager {
     if (this.viewManager) {
-      this.viewManager.initialize();
       return this.viewManager;
     }
 
@@ -1506,14 +1502,6 @@ export default class SystemSculptPlugin extends Plugin {
 
     this.registerExtensions(["systemsculpt"], SYSTEMSCULPT_STUDIO_VIEW_TYPE);
     this.hasRegisteredStudioExtensions = true;
-  }
-
-  private startFileExplorerStudioButtonIfNeeded(): void {
-    if (!this.fileExplorerStudioButtonManager) {
-      this.fileExplorerStudioButtonManager = new FileExplorerStudioButtonManager(this);
-    }
-
-    this.fileExplorerStudioButtonManager.start();
   }
 
   private ensureCommandManager(): CommandManager {
@@ -1545,7 +1533,6 @@ export default class SystemSculptPlugin extends Plugin {
       }
       this.ensureViewManager();
       this.registerStudioExtensionsIfNeeded();
-      this.startFileExplorerStudioButtonIfNeeded();
       this.ensureCommandManager();
 
       const metadata = {
@@ -1643,26 +1630,21 @@ export default class SystemSculptPlugin extends Plugin {
         this.resourceMonitor = null;
       }
 
-      if (this.fileExplorerStudioButtonManager) {
-        this.fileExplorerStudioButtonManager.dispose();
-        this.fileExplorerStudioButtonManager = null;
-      }
-
       // Clean up settings manager (stop automatic backups)
       if (this.settingsManager) {
         // Cleaning up settings manager silently
         this.settingsManager.destroy();
       }
 
+      if (this.embeddingsStatusBar) {
+        this.removeChild(this.embeddingsStatusBar);
+        this.embeddingsStatusBar = null;
+      }
+
       // Clean up embeddings manager
       if (this.embeddingsManager) {
         await this.embeddingsManager.cleanup();
         this.embeddingsManager = null;
-      }
-
-      if (this.embeddingsStatusBar) {
-        this.embeddingsStatusBar.unload();
-        this.embeddingsStatusBar = null;
       }
 
       if (this.workflowEngineService) {
@@ -2039,9 +2021,7 @@ export default class SystemSculptPlugin extends Plugin {
    * Public getter for the ViewManager instance.
    */
   getViewManager(): ViewManager {
-      if (!this.viewManager) {
-      }
-      return this.viewManager;
+    return this.ensureViewManager();
   }
 
   getStudioService(): StudioService {
@@ -2116,7 +2096,7 @@ export default class SystemSculptPlugin extends Plugin {
           }
 
           // Activate embeddings view - processing happens automatically
-          await this.viewManager.activateEmbeddingsView();
+          await this.getViewManager().activateEmbeddingsView();
         } catch (error) {
           new Notice(`Error finding similar notes: ${error.message}`);
         }

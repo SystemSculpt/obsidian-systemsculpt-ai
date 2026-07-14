@@ -1,7 +1,13 @@
 import { App, Component, MarkdownRenderer, setIcon } from "obsidian";
-import { createUiAction } from "../../core/ui/surface";
+import {
+  createSurfaceElement,
+  createUiAction,
+  getSurfaceOwnerWindow,
+  updateUiAction,
+} from "../../core/ui/surface";
 import type { ChatMessage, MessagePart } from "../../types";
 import type { ToolCall } from "../../types/toolCalls";
+import { tryCopyToClipboard } from "../../utils/clipboard";
 import { collectSuccessfulToolArtifactPaths, collectToolArtifactPaths } from "../../utils/toolArtifacts";
 import {
   renderOperationsInlinePreview,
@@ -24,6 +30,7 @@ import {
 export type AgentConversationRendererOptions = Readonly<{
   app: App;
   sourcePath: () => string;
+  labelledBy?: string;
   onApprove: (approvalId: string, approved: boolean, rememberForChat?: boolean) => void | Promise<void>;
   onOpenArtifact: (artifact: AgentArtifact) => void | Promise<void>;
   onCopyArtifactPath: (artifact: AgentArtifact) => void | Promise<void>;
@@ -36,6 +43,7 @@ function button(parent: HTMLElement, label: string, icon?: string): HTMLButtonEl
     label,
     icon,
     size: icon ? "icon" : "small",
+    tooltip: false,
   });
   element.addClass("systemsculpt-agent-inline-button");
   return element;
@@ -138,6 +146,7 @@ export class AgentConversationRenderer extends Component {
   private readonly activeRoot: HTMLElement;
   private readonly activeNodes = new Map<string, HTMLElement>();
   private readonly activePartRefs = new Map<string, AgentPart>();
+  private readonly copyFeedbackTimers = new Map<HTMLButtonElement, number>();
   private renderGeneration = 0;
 
   constructor(parent: HTMLElement, private readonly options: AgentConversationRendererOptions) {
@@ -146,7 +155,9 @@ export class AgentConversationRenderer extends Component {
       cls: "systemsculpt-agent-conversation",
       attr: {
         role: "log",
-        "aria-label": "SystemSculpt conversation",
+        ...(options.labelledBy
+          ? { "aria-labelledby": options.labelledBy }
+          : { "aria-label": "Messages" }),
         "aria-live": "off",
         "aria-relevant": "additions text",
       },
@@ -157,7 +168,7 @@ export class AgentConversationRenderer extends Component {
 
   public async renderHistory(messages: readonly ChatMessage[]): Promise<void> {
     const generation = ++this.renderGeneration;
-    this.historyRoot.empty();
+    const nextHistory = createSurfaceElement(this.historyRoot.ownerDocument, "div");
     for (const message of messages) {
       if (generation !== this.renderGeneration) return;
       if (message.role !== "user" && message.role !== "assistant") continue;
@@ -165,7 +176,7 @@ export class AgentConversationRenderer extends Component {
       const orderedParts = message.role === "assistant" ? this.orderedDurableParts(message) : [];
       const semantics = classifyHistoricalTurn(message, content, orderedParts);
       if (!semantics.hasVisibleContent && !semantics.hasTools) continue;
-      const row = this.historyRoot.createDiv({
+      const row = nextHistory.createDiv({
         cls: `systemsculpt-agent-turn is-${message.role}${semantics.isToolOnly ? " is-tool-only" : ""}`,
         attr: { "data-message-id": message.message_id },
       });
@@ -180,6 +191,8 @@ export class AgentConversationRenderer extends Component {
         this.renderMessageActions(row, message, semantics.copyText);
       }
     }
+    if (generation !== this.renderGeneration) return;
+    this.historyRoot.replaceChildren(...Array.from(nextHistory.childNodes));
   }
 
   /** Durable message parts are the chronology source for managed chats. */
@@ -216,7 +229,12 @@ export class AgentConversationRenderer extends Component {
     this.element.setAttribute("aria-busy", String(snapshot.status === "running" || snapshot.status === "waiting"));
     const wanted = new Set<string>();
     const hasReasoning = snapshot.parts.some((part) => part.kind === "reasoning");
-    for (const part of [...snapshot.parts].sort((left, right) => left.order - right.order)) {
+    const orderedParts = [...snapshot.parts].sort((left, right) => {
+      if (left.kind === "status" && right.kind !== "status") return 1;
+      if (left.kind !== "status" && right.kind === "status") return -1;
+      return left.order - right.order;
+    });
+    for (const part of orderedParts) {
       if (hasReasoning && part.kind === "status" && part.phase === "thinking") continue;
       const key = `${part.kind}:${part.id}`;
       wanted.add(key);
@@ -254,6 +272,12 @@ export class AgentConversationRenderer extends Component {
     this.activeNodes.clear();
     this.activePartRefs.clear();
     this.element.setAttribute("aria-busy", "false");
+  }
+
+  public override onunload(): void {
+    const ownerWindow = getSurfaceOwnerWindow(this.element);
+    for (const timer of this.copyFeedbackTimers.values()) ownerWindow.clearTimeout(timer);
+    this.copyFeedbackTimers.clear();
   }
 
   private async renderPart(node: HTMLElement, part: AgentPart, previousPart?: AgentPart): Promise<void> {
@@ -550,5 +574,52 @@ export class AgentConversationRenderer extends Component {
   private async renderMarkdown(markdown: string, parent: HTMLElement): Promise<void> {
     parent.empty();
     await MarkdownRenderer.render(this.options.app, markdown, parent, this.options.sourcePath(), this);
+    this.enhanceCodeBlocks(parent);
+  }
+
+  private enhanceCodeBlocks(parent: HTMLElement): void {
+    for (const pre of Array.from(parent.querySelectorAll<HTMLPreElement>("pre"))) {
+      const code = pre.querySelector<HTMLElement>("code");
+      if (!code) continue;
+
+      pre.addClass("systemsculpt-agent-code-block");
+      pre.querySelectorAll(".copy-code-button").forEach((button) => button.remove());
+      if (pre.querySelector(".systemsculpt-agent-code-copy")) continue;
+
+      const copyButton = createUiAction(pre, {
+        label: "Copy",
+        icon: "copy",
+        size: "small",
+      });
+      copyButton.addClass("systemsculpt-agent-code-copy");
+      copyButton.setAttrs({ "aria-label": "Copy code", "aria-live": "polite" });
+      copyButton.onclick = async () => {
+        const copied = await tryCopyToClipboard(code.textContent ?? "", pre);
+        this.showCopyFeedback(copyButton, copied);
+      };
+    }
+  }
+
+  private showCopyFeedback(button: HTMLButtonElement, copied: boolean): void {
+    const ownerWindow = getSurfaceOwnerWindow(button);
+    const previousTimer = this.copyFeedbackTimers.get(button);
+    if (typeof previousTimer === "number") ownerWindow.clearTimeout(previousTimer);
+
+    button.classList.toggle("is-copied", copied);
+    button.classList.toggle("is-copy-failed", !copied);
+    updateUiAction(button, {
+      label: copied ? "Copied" : "Try again",
+      icon: copied ? "check" : "circle-alert",
+    });
+    button.setAttribute("aria-label", copied ? "Code copied" : "Could not copy code");
+
+    const timer = ownerWindow.setTimeout(() => {
+      this.copyFeedbackTimers.delete(button);
+      if (!button.isConnected) return;
+      button.removeClass("is-copied", "is-copy-failed");
+      updateUiAction(button, { label: "Copy", icon: "copy" });
+      button.setAttribute("aria-label", "Copy code");
+    }, 1_600);
+    this.copyFeedbackTimers.set(button, timer);
   }
 }

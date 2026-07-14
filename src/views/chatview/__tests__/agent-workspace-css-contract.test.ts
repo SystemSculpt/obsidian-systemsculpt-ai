@@ -45,6 +45,37 @@ describe("agent workspace CSS contract", () => {
     expect(css).toMatch(/\.systemsculpt-agent-active-run\s*\{[^}]*gap:\s*var\(--ss-space-5\)/s);
   });
 
+  it("keeps the live-to-durable turn boundary visually stable", () => {
+    const css = readAgentWorkspaceCss();
+
+    expect(css).toMatch(/\.systemsculpt-agent-conversation\s*\{[^}]*gap:\s*0;/s);
+    expect(css).toMatch(
+      /\.systemsculpt-agent-active-run:not\(:empty\)\s*\{[^}]*margin-top:\s*var\(--ss-space-5\)/s,
+    );
+  });
+
+  it("containerizes code with a compact local copy-feedback control", () => {
+    const css = readAgentWorkspaceCss();
+
+    expect(css).toMatch(
+      /\.systemsculpt-agent-conversation\s+\.systemsculpt-agent-code-block\s*\{[^}]*position:\s*relative;[^}]*overflow:\s*auto;[^}]*border:\s*1px solid var\(--ss-line\);/s,
+    );
+    expect(css).toMatch(
+      /\.systemsculpt-agent-conversation\s+\.systemsculpt-agent-code-copy\s*\{[^}]*position:\s*absolute;[^}]*min-height:\s*var\(--ss-control-height-sm\);/s,
+    );
+    expect(css).toMatch(
+      /\.systemsculpt-agent-conversation\s+\.systemsculpt-agent-code-copy\.is-copied\s*\{[^}]*color:\s*var\(--ss-success\);/s,
+    );
+  });
+
+  it("keeps the composer textarea visually joined to its toolbar", () => {
+    const css = readAgentWorkspaceCss();
+
+    expect(css).toMatch(
+      /\.systemsculpt-agent-prompt\s*>\s*\.systemsculpt-agent-prompt-input\s*\{[^}]*border:\s*0;[^}]*border-bottom:\s*0;[^}]*border-radius:\s*0;/s,
+    );
+  });
+
   it("overlays the empty state without pushing the live conversation below the viewport", () => {
     const css = readAgentWorkspaceCss();
 

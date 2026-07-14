@@ -57,10 +57,13 @@ function iconButton(parent: HTMLElement, label: string, icon: string): HTMLButto
     label,
     icon,
     size: "icon",
+    tooltip: false,
   });
   element.addClass("systemsculpt-agent-icon-button");
   return element;
 }
+
+let workspaceLabelSequence = 0;
 
 /** Complete native shell for the managed agent experience inside Obsidian. */
 export class AgentWorkspace extends Component {
@@ -92,17 +95,18 @@ export class AgentWorkspace extends Component {
     this.element.classList.toggle("is-reduced-motion", options.reducedMotion?.() === true);
 
     const header = this.element.createDiv({ cls: "systemsculpt-agent-header" });
+    const titleId = `systemsculpt-agent-title-${++workspaceLabelSequence}`;
     this.titleElement = header.createDiv({
       cls: "systemsculpt-agent-header-title",
       text: "New chat",
-      attr: { role: "heading", "aria-level": "2" },
+      attr: { id: titleId, role: "heading", "aria-level": "2" },
     });
     const headerActions = header.createDiv({ cls: "systemsculpt-agent-header-actions" });
     this.creditsButton = options.onOpenCredits
       ? createUiAction(headerActions, {
           label: "—",
           size: "small",
-          title: "Credits",
+          tooltip: false,
         })
       : null;
     if (this.creditsButton) {
@@ -125,7 +129,7 @@ export class AgentWorkspace extends Component {
 
     this.viewport = this.element.createDiv({
       cls: "systemsculpt-agent-viewport",
-      attr: { "aria-label": "Agent conversation", tabindex: "0" },
+      attr: { tabindex: "0" },
     });
     this.emptyState = this.viewport.createDiv({ cls: "systemsculpt-agent-empty" });
     this.emptyState.createEl("strong", { text: "What should we work on?" });
@@ -134,6 +138,7 @@ export class AgentWorkspace extends Component {
     this.renderer = new AgentConversationRenderer(this.viewport, {
       app: options.app,
       sourcePath: options.sourcePath,
+      labelledBy: titleId,
       onApprove: options.onApprove,
       onOpenArtifact: options.onOpenArtifact,
       onCopyArtifactPath: options.onCopyArtifactPath,
@@ -145,7 +150,7 @@ export class AgentWorkspace extends Component {
     this.jumpButton = createUiAction(this.element, {
       label: "Latest",
       icon: "arrow-down",
-      title: "Jump to latest",
+      tooltip: false,
     });
     this.jumpButton.addClass("systemsculpt-agent-jump");
     this.jumpButton.setAttribute("aria-label", "Jump to latest");
@@ -155,6 +160,7 @@ export class AgentWorkspace extends Component {
       content: this.renderer.element,
       scrollButton: this.jumpButton,
       reducedMotion: options.reducedMotion,
+      labelledBy: titleId,
     });
     this.register(() => this.scroller.destroy());
 
@@ -185,7 +191,6 @@ export class AgentWorkspace extends Component {
   public setTitle(title: string): void {
     const normalized = title.trim() || "New chat";
     this.titleElement.setText(normalized);
-    this.titleElement.setAttribute("title", normalized);
   }
 
   public setCredits(label: string | null, low = false): void {
@@ -266,6 +271,24 @@ export class AgentWorkspace extends Component {
       this.syncRows();
       this.scroller.restorePrependAnchor(anchor && this.registeredRows.has(anchor.rowId) ? anchor : null);
       this.syncEmpty();
+    });
+  }
+
+  /** Atomically replaces the live run with its newly committed transcript. */
+  public settleCompletedRun(messages: readonly ChatMessage[]): Promise<void> {
+    this.history = messages;
+    this.snapshot = null;
+    return this.scheduleRender(async () => {
+      const anchor = this.scroller.capturePrependAnchor();
+      for (const id of this.registeredRows) this.scroller.unregisterRow(id);
+      this.registeredRows.clear();
+      await this.renderer.renderHistory(messages);
+      this.renderer.clearActive();
+      this.syncRows();
+      this.scroller.restorePrependAnchor(anchor && this.registeredRows.has(anchor.rowId) ? anchor : null);
+      this.scroller.notifyContentChanged({ streaming: false });
+      this.syncEmpty();
+      this.renderedTurnId = null;
     });
   }
 

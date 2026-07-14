@@ -652,7 +652,6 @@ export class ManagedAgentController {
         this.assertOpen(active);
 
         if (streamed.result.tools.length === 0) {
-          this.emit(active, { type: "run.status", phase: "complete", label: "Done" });
           active.checkpointMessage = undefined;
           this.emit(active, { type: "run.completed" }, true);
           this.notifyTerminal(active);

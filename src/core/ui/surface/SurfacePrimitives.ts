@@ -1,4 +1,4 @@
-import { setIcon } from "obsidian";
+import { SearchComponent, setIcon } from "obsidian";
 
 export type UiActionTone = "default" | "primary" | "danger" | "warning";
 export type UiActionSize = "default" | "small" | "icon";
@@ -12,6 +12,7 @@ export interface UiActionOptions {
   selected?: boolean;
   busy?: boolean;
   title?: string;
+  tooltip?: boolean;
   onSelect?: (event: MouseEvent) => void;
 }
 
@@ -35,7 +36,7 @@ export interface UiSearchHandle {
   root: HTMLElement;
   input: HTMLInputElement;
   clear(): void;
-  setValue(value: string): void;
+  setValue(value: string, options?: Readonly<{ notify?: boolean }>): void;
   destroy(): void;
 }
 
@@ -82,7 +83,8 @@ export function createUiAction(
     button.createSpan({ cls: "ss-button__label", text: options.label });
   }
 
-  if (options.title || options.size === "icon") {
+  if (options.tooltip === false) button.dataset.ssTooltip = "off";
+  if (options.tooltip !== false && (options.title || options.size === "icon")) {
     button.title = options.title ?? options.label;
   }
   updateUiAction(button, options);
@@ -99,6 +101,7 @@ export function updateUiAction(
   state: UiActionState,
 ): void {
   const iconOnly = button.dataset.ssAction === "icon";
+  const tooltipEnabled = button.dataset.ssTooltip !== "off";
   const previousLabel = iconOnly
     ? button.getAttribute("aria-label") ?? ""
     : button.querySelector<HTMLElement>(".ss-button__label")?.textContent ?? "";
@@ -110,7 +113,7 @@ export function updateUiAction(
       const label = button.querySelector<HTMLElement>(".ss-button__label");
       if (label) label.textContent = state.label;
     }
-    if (iconOnly && (!button.title || button.title === previousLabel)) {
+    if (tooltipEnabled && iconOnly && (!button.title || button.title === previousLabel)) {
       button.title = state.label;
     }
   }
@@ -132,7 +135,10 @@ export function updateUiAction(
     }
   }
 
-  if (state.title !== undefined) button.title = state.title;
+  if (state.title !== undefined) {
+    if (tooltipEnabled) button.title = state.title;
+    else button.removeAttribute("title");
+  }
   if (state.disabled !== undefined) button.disabled = state.disabled;
   if (state.selected !== undefined) {
     button.classList.toggle("is-selected", state.selected);
@@ -150,55 +156,39 @@ export function createUiSearch(
   options: UiSearchOptions,
 ): UiSearchHandle {
   const root = parent.createDiv({ cls: "ss-search-field" });
-
-  const searchIcon = root.createSpan({
-    cls: "ss-search-field__icon",
-    attr: { "aria-hidden": "true" },
-  });
-  setIcon(searchIcon, "search");
-
-  const input = root.createEl("input", { cls: "ss-search-field__input" });
-  input.type = "search";
-  input.placeholder = options.placeholder;
-  input.value = options.value ?? "";
+  const search = new SearchComponent(root)
+    .setPlaceholder(options.placeholder)
+    .setValue(options.value ?? "");
+  const input = search.inputEl;
   input.setAttribute("aria-label", options.label ?? options.placeholder);
+  let destroyed = false;
 
-  const clearButton = createUiAction(root, {
-    label: "Clear search",
-    icon: "x",
-    size: "icon",
+  search.onChange((query) => {
+    if (!destroyed) options.onQuery(query);
   });
-  clearButton.classList.add("ss-search-field__clear");
 
-  const syncClearButton = (): void => {
-    clearButton.hidden = input.value.length === 0;
+  const setValue = (
+    value: string,
+    updateOptions: Readonly<{ notify?: boolean }> = {},
+  ): void => {
+    if (destroyed) return;
+    search.setValue(value);
+    if (updateOptions.notify !== false) {
+      options.onQuery(value);
+    }
   };
-  const emitQuery = (): void => {
-    syncClearButton();
-    options.onQuery(input.value);
-  };
-  const onInput = (): void => emitQuery();
-  const onClear = (): void => {
-    input.value = "";
-    emitQuery();
-    input.focus();
-  };
-
-  input.addEventListener("input", onInput);
-  clearButton.addEventListener("click", onClear);
-  syncClearButton();
 
   return {
     root,
     input,
-    clear: onClear,
-    setValue(value: string): void {
-      input.value = value;
-      emitQuery();
+    clear(): void {
+      if (destroyed) return;
+      setValue("");
+      input.focus();
     },
+    setValue,
     destroy(): void {
-      input.removeEventListener("input", onInput);
-      clearButton.removeEventListener("click", onClear);
+      destroyed = true;
       root.remove();
     },
   };

@@ -66,6 +66,21 @@ describe("SystemSculptPlugin.initializeManagers", () => {
     mockViewManagerInitialize.mockImplementation(() => undefined);
   });
 
+  it("lazily initializes and reuses the view manager before deferred managers run", () => {
+    const app = new App();
+    const plugin = new SystemSculptPlugin(app, {
+      id: "systemsculpt-ai",
+      version: "1.0.0",
+    } as any);
+
+    const first = plugin.getViewManager();
+    const second = plugin.getViewManager();
+
+    expect(first).toBe(second);
+    expect(mockViewManagerCtor).toHaveBeenCalledTimes(1);
+    expect(mockViewManagerInitialize).toHaveBeenCalledTimes(1);
+  });
+
   it("retries command registration when the first registration attempt fails", async () => {
     const app = new App();
     const plugin = new SystemSculptPlugin(app, {

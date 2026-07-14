@@ -51,21 +51,80 @@ describe("SurfacePrimitives", () => {
     expect(button.disabled).toBe(true);
   });
 
+  it("suppresses hover tooltips without removing accessible action labels", () => {
+    const parent = document.createElement("div");
+    const button = createUiAction(parent, {
+      label: "Chat history",
+      icon: "history",
+      size: "icon",
+      tooltip: false,
+    });
+
+    expect(button.getAttribute("aria-label")).toBe("Chat history");
+    expect(button.hasAttribute("title")).toBe(false);
+
+    updateUiAction(button, { label: "Conversation history", title: "History" });
+
+    expect(button.getAttribute("aria-label")).toBe("Conversation history");
+    expect(button.hasAttribute("title")).toBe(false);
+  });
+
   it("keeps search clear state and query callbacks synchronized", () => {
     const parent = document.createElement("div");
     const onQuery = jest.fn();
     const search = createUiSearch(parent, {
+      label: "Search vault notes",
       placeholder: "Search notes",
+      value: "inbox",
       onQuery,
     });
 
+    expect(search.input.value).toBe("inbox");
+    expect(search.input.placeholder).toBe("Search notes");
+    expect(search.input.getAttribute("aria-label")).toBe("Search vault notes");
     search.setValue("daily");
     expect(onQuery).toHaveBeenLastCalledWith("daily");
-    expect(search.root.querySelector("button")?.hidden).toBe(false);
+    const nativeContainer = search.root.querySelector(":scope > .search-input-container");
+    expect(nativeContainer).not.toBeNull();
+    expect(search.input.closest(".search-input-container")).toBe(nativeContainer);
+    expect(nativeContainer?.parentElement).toBe(search.root);
+    expect(search.root.querySelector(".search-input-clear-button")).not.toBeNull();
+    expect(search.root.querySelector(".ss-search-field__icon")).toBeNull();
 
+    search.setValue("", { notify: false });
+    expect(onQuery).toHaveBeenLastCalledWith("daily");
+
+    const focus = jest.spyOn(search.input, "focus");
     search.clear();
     expect(onQuery).toHaveBeenLastCalledWith("");
-    expect(search.root.querySelector("button")?.hidden).toBe(true);
+    expect(focus).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops delivering native search callbacks after cleanup", () => {
+    const parent = document.createElement("div");
+    document.body.appendChild(parent);
+    const onQuery = jest.fn();
+    const search = createUiSearch(parent, {
+      label: "Search notes",
+      placeholder: "Search notes",
+      onQuery,
+    });
+    expect(parent.contains(search.root)).toBe(true);
+
+    search.input.value = "before cleanup";
+    search.input.dispatchEvent(new Event("input", { bubbles: true }));
+    const focus = jest.spyOn(search.input, "focus");
+    search.destroy();
+    search.clear();
+    search.setValue("ignored");
+    search.input.value = "after cleanup";
+    search.input.dispatchEvent(new Event("input", { bubbles: true }));
+
+    expect(onQuery).toHaveBeenCalledTimes(1);
+    expect(onQuery).toHaveBeenLastCalledWith("before cleanup");
+    expect(focus).not.toHaveBeenCalled();
+    expect(parent.contains(search.root)).toBe(false);
+    parent.remove();
   });
 
   it.each(["empty", "loading", "error", "success", "info"] as const)(

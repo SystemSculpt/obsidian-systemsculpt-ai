@@ -3,9 +3,11 @@ import {
   Notice,
   TAbstractFile,
   TFile,
+  TFolder,
   Menu,
   WorkspaceLeaf,
   EventRef,
+  normalizePath,
 } from "obsidian";
 import type SystemSculptPlugin from "../main";
 import {
@@ -47,6 +49,8 @@ const COPYABLE_IMAGE_EXTENSIONS = new Set([
 ]);
 
 const CONVERT_MENU_TITLE = "Convert to Markdown";
+const NEW_STUDIO_PROJECT_NAME = "New Studio Project";
+const NEW_STUDIO_PROJECT_FILE_NAME = `${NEW_STUDIO_PROJECT_NAME}.systemsculpt`;
 
 type ProcessingFlow = "document" | "audio";
 
@@ -225,11 +229,17 @@ export class FileContextMenuService {
     source: string,
     leaf?: WorkspaceLeaf
   ): void {
+    const context = { source, leafType: leaf?.view?.getViewType() };
+    if (file instanceof TFolder) {
+      this.populateFolderMenu(menu, file, context);
+      return;
+    }
+
     if (!(file instanceof TFile)) {
       return;
     }
 
-    this.populateMenu(menu, file, { source, leafType: leaf?.view?.getViewType() });
+    this.populateMenu(menu, file, context);
   }
 
   private handleFilesMenu(
@@ -265,6 +275,65 @@ export class FileContextMenuService {
     });
   }
 
+  private populateFolderMenu(menu: Menu, folder: TFolder, context: MenuContext): void {
+    menu.addItem((item) => {
+      item
+        .setTitle("New Studio project")
+        .setIcon("workflow")
+        .setSection("action")
+        .onClick(async () => {
+          await this.createStudioProjectInFolder(folder, context);
+        });
+    });
+  }
+
+  private async createStudioProjectInFolder(
+    folder: TFolder,
+    context: MenuContext,
+  ): Promise<void> {
+    const folderPath = folder.isRoot() ? "" : folder.path;
+    const projectPath = normalizePath(
+      folderPath
+        ? `${folderPath}/${NEW_STUDIO_PROJECT_FILE_NAME}`
+        : NEW_STUDIO_PROJECT_FILE_NAME,
+    );
+
+    this.info("New Studio project triggered", {
+      folderPath: folder.path,
+      projectPath,
+      source: context.source,
+    });
+
+    let created: Awaited<ReturnType<ReturnType<SystemSculptPlugin["getStudioService"]>["createProjectFile"]>>;
+    try {
+      created = await this.plugin.getStudioService().createProjectFile({
+        name: NEW_STUDIO_PROJECT_NAME,
+        projectPath,
+      });
+    } catch (error) {
+      this.error("New Studio project failed", error, {
+        folderPath: folder.path,
+        projectPath,
+        source: context.source,
+      });
+      const message = error instanceof Error ? error.message : String(error);
+      new Notice(`Unable to create Studio project: ${message}`);
+      return;
+    }
+
+    try {
+      await this.plugin.getViewManager().activateSystemSculptStudioView(created.path);
+      new Notice(`Created Studio project: ${created.project.name}`);
+    } catch (error) {
+      this.error("Opening new Studio project failed", error, {
+        folderPath: folder.path,
+        projectPath: created.path,
+        source: context.source,
+      });
+      new Notice(`Created Studio project, but couldn't open it: ${created.path}`);
+    }
+  }
+
   private populateMenu(menu: Menu, file: TFile, context: MenuContext): void {
     const extension = normalizeFileExtension(file.extension);
     this.logMenuOpen(file, extension, context);
@@ -288,9 +357,6 @@ export class FileContextMenuService {
     if (!shouldChat && !shouldCopyImage && !shouldConvertDocument && !shouldConvertAudio) {
       return;
     }
-
-    menu.setUseNativeMenu(false);
-    menu.addSeparator();
 
     if (shouldChat) {
       this.addChatWithFileMenuItem(menu, file, context);
@@ -353,7 +419,7 @@ export class FileContextMenuService {
       item
         .setTitle("Chat with file")
         .setIcon("message-square")
-        .setSection("systemsculpt")
+        .setSection("action")
         .onClick(async () => {
           this.info("Chat with file triggered", {
             filePath: file.path,
@@ -376,7 +442,7 @@ export class FileContextMenuService {
       item
         .setTitle("Copy image to clipboard")
         .setIcon("copy")
-        .setSection("systemsculpt")
+        .setSection("action")
         .onClick(async () => {
           this.info("Copy image to clipboard triggered", {
             filePath: file.path,
@@ -406,7 +472,7 @@ export class FileContextMenuService {
       item
         .setTitle(title)
         .setIcon(icon)
-        .setSection("systemsculpt")
+        .setSection("action")
         .onClick(async () => {
           this.info("Convert to Markdown triggered", {
             filePath: file.path,

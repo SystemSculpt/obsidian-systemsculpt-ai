@@ -117,4 +117,46 @@ describe("EmbeddingsStorage.storeVectors", () => {
     await expect(removal).resolves.toBeUndefined();
     expect((storage as any).cache.has(existing.id)).toBe(false);
   });
+
+  it("deletes a managed generation through the object store while iterating its index", async () => {
+    const storage = new EmbeddingsStorage("SystemSculptEmbeddings::test");
+    const existing = makeVector("Managed.md");
+    (storage as any).cache.set(existing.id, existing);
+    (storage as any).pathsSet.add(existing.path);
+
+    const cursorRequest: any = {};
+    const index = { openKeyCursor: jest.fn(() => cursorRequest) };
+    const store = {
+      delete: jest.fn(),
+      index: jest.fn(() => index),
+    };
+    const transaction: any = { objectStore: jest.fn(() => store) };
+    (storage as any).db = { transaction: jest.fn(() => transaction) };
+    const previousKeyRange = globalThis.IDBKeyRange;
+    Object.defineProperty(globalThis, "IDBKeyRange", {
+      configurable: true,
+      value: { bound: jest.fn(() => ({ lower: "managed", upper: "managed-max" })) },
+    });
+
+    try {
+      const removal = storage.removeCurrentManagedGeneration();
+      const cursor = { primaryKey: existing.id, continue: jest.fn() };
+      cursorRequest.result = cursor;
+      cursorRequest.onsuccess();
+
+      expect(store.delete).toHaveBeenCalledWith(existing.id);
+      expect(cursor.continue).toHaveBeenCalledTimes(1);
+      expect((storage as any).cache.has(existing.id)).toBe(true);
+
+      transaction.oncomplete();
+      await expect(removal).resolves.toBeUndefined();
+      expect((storage as any).cache.has(existing.id)).toBe(false);
+      expect((storage as any).pathsSet.has(existing.path)).toBe(false);
+    } finally {
+      Object.defineProperty(globalThis, "IDBKeyRange", {
+        configurable: true,
+        value: previousKeyRange,
+      });
+    }
+  });
 });

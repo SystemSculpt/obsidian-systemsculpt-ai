@@ -57,7 +57,10 @@ function createIconButton(parent: HTMLElement, label: string, icon: string): HTM
 
 function stateKind(kind: StatePaneOptions["kind"]): UiStateKind {
   if (kind === "error") return "error";
-  if (kind === "processing") return "loading";
+  // The large processing pane owns an explicit progress treatment. Keep its
+  // semantics informational and reserve the shared loading spinner for compact
+  // lifecycle strips that opt into motion.
+  if (kind === "processing") return "info";
   return "empty";
 }
 

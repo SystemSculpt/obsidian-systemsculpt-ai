@@ -234,6 +234,15 @@ describe("SimilarNotesPresentation", () => {
     expect(root.querySelector(".ss-embeddings-view__progress-label")?.textContent).toBe("100% · Current.md");
   });
 
+  it("keeps the large processing pane out of the shared loading-spinner state", () => {
+    const presentation = new SimilarNotesPresentation(root, createActions());
+
+    presentation.render({ state: "processing" });
+
+    expect(root.querySelector(".ss-embeddings-view__state--processing.is-info")).not.toBeNull();
+    expect(root.querySelector(".ss-embeddings-view__state--processing.is-loading")).toBeNull();
+  });
+
   it("keeps stale results visible while marking a refresh busy", () => {
     const presentation = new SimilarNotesPresentation(root, createActions());
     presentation.render({ state: "results", sourceName: "Current note", results: [result], chatContext: false });
