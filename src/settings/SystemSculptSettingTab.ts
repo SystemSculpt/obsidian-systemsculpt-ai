@@ -554,6 +554,7 @@ export class SystemSculptSettingTab extends PluginSettingTab {
       },
       onResultsChange: () => this.searchResultGroupEls.clear(),
       onCommit: ({ item }) => this.navigateToSetting(item.tabId, item.element),
+      onEscape: () => this.clearSearch(true),
     });
   }
 
