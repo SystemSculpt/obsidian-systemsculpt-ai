@@ -61,8 +61,8 @@ describe("ResumeChatService", () => {
       const service = new ResumeChatService(plugin);
 
       expect(service).toBeInstanceOf(ResumeChatService);
-      // Should register 3 events: active-leaf-change, layout-change, metadata-changed
-      expect(plugin.registerEvent).toHaveBeenCalledTimes(3);
+      // Should register 4 events: active-leaf-change, file-open, layout-change, metadata-changed
+      expect(plugin.registerEvent).toHaveBeenCalledTimes(4);
     });
 
     it("refreshes existing leaves on startup", () => {
@@ -507,6 +507,91 @@ describe("ResumeChatService", () => {
 
       expect(() => service.cleanup()).not.toThrow();
     });
+
+    it("refreshes the native action when file-open swaps chat files in the same leaf", () => {
+      jest.useFakeTimers();
+      try {
+        const { app, plugin } = createPluginStub();
+        const service = new ResumeChatService(plugin);
+        jest.runOnlyPendingTimers();
+        const firstFile = new TFile({ path: "SystemSculpt/Chats/chat-one.md" });
+        const secondFile = new TFile({ path: "SystemSculpt/Chats/chat-two.md" });
+        const { view, action, leaf } = createHistoryView(firstFile);
+        const remove = jest.spyOn(action, "remove");
+
+        app.metadataCache.getCache.mockImplementation((path: string) => {
+          if (path === firstFile.path) {
+            return { frontmatter: { id: "chat-one", created: "2025-01-01" } };
+          }
+          if (path === secondFile.path) {
+            return { frontmatter: { id: "chat-two", created: "2025-01-01" } };
+          }
+          return null;
+        });
+        app.workspace.iterateAllLeaves.mockImplementation((callback: (leaf: any) => void) => callback(leaf));
+
+        (service as any).handleLeafChange(leaf);
+        view.file = secondFile;
+
+        const fileOpenHandler = app.workspace.on.mock.calls.find(
+          (call: any[]) => call[0] === "file-open"
+        )?.[1];
+        fileOpenHandler?.(secondFile);
+
+        expect(remove).not.toHaveBeenCalled();
+        expect(view.addAction).toHaveBeenCalledTimes(1);
+
+        jest.runOnlyPendingTimers();
+
+        expect(remove).toHaveBeenCalledTimes(1);
+        expect(view.addAction).toHaveBeenCalledTimes(2);
+        expect((service as any).resumeActionByView.get(view)).toMatchObject({
+          filePath: secondFile.path,
+          chatId: "chat-two",
+        });
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it("removes the native action when file-open swaps a chat file to a normal note in the same leaf", () => {
+      jest.useFakeTimers();
+      try {
+        const { app, plugin } = createPluginStub();
+        const service = new ResumeChatService(plugin);
+        jest.runOnlyPendingTimers();
+        const chatFile = new TFile({ path: "SystemSculpt/Chats/chat-one.md" });
+        const noteFile = new TFile({ path: "Notes/Plain.md" });
+        const { view, action, leaf } = createHistoryView(chatFile);
+        const remove = jest.spyOn(action, "remove");
+
+        app.metadataCache.getCache.mockImplementation((path: string) => {
+          if (path === chatFile.path) {
+            return { frontmatter: { id: "chat-one", created: "2025-01-01" } };
+          }
+          return null;
+        });
+        app.workspace.iterateAllLeaves.mockImplementation((callback: (leaf: any) => void) => callback(leaf));
+
+        (service as any).handleLeafChange(leaf);
+        view.file = noteFile;
+
+        const fileOpenHandler = app.workspace.on.mock.calls.find(
+          (call: any[]) => call[0] === "file-open"
+        )?.[1];
+        fileOpenHandler?.(noteFile);
+
+        expect(remove).not.toHaveBeenCalled();
+        expect((service as any).resumeActionByView.has(view)).toBe(true);
+
+        jest.runOnlyPendingTimers();
+
+        expect(remove).toHaveBeenCalledTimes(1);
+        expect((service as any).resumeActionByView.has(view)).toBe(false);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
   });
 
   describe("workspace event handlers", () => {
@@ -530,6 +615,17 @@ describe("ResumeChatService", () => {
         (call: any[]) => call[0] === "layout-change"
       );
       expect(layoutCall).toBeDefined();
+    });
+
+    it("registers file-open event", () => {
+      const { app, plugin } = createPluginStub();
+      new ResumeChatService(plugin);
+
+      const onCalls = app.workspace.on.mock.calls;
+      const fileOpenCall = onCalls.find(
+        (call: any[]) => call[0] === "file-open"
+      );
+      expect(fileOpenCall).toBeDefined();
     });
 
     it("registers metadata-cache changed event", () => {

@@ -16,6 +16,7 @@ export class ResumeChatService {
   }>();
   private readonly schedulerWindow: Window;
   private initialRefreshHandle: number | null = null;
+  private fileOpenRefreshHandle: number | null = null;
   private layoutRefreshHandle: number | null = null;
   private disposed = false;
 
@@ -40,6 +41,14 @@ export class ResumeChatService {
         if (leaf) {
           this.handleLeafChange(leaf);
         }
+      })
+    );
+
+    // Also listen for direct file-open events which can fire without a leaf switch.
+    this.plugin.registerEvent(
+      // @ts-ignore - 'file-open' exists on workspace event bus
+      this.app.workspace.on('file-open', () => {
+        this.scheduleFileOpenRefresh();
       })
     );
 
@@ -80,6 +89,15 @@ export class ResumeChatService {
         this.refreshAllLeaves();
       }, 50);
     };
+  }
+
+  private scheduleFileOpenRefresh(): void {
+    if (this.disposed || this.fileOpenRefreshHandle !== null) return;
+    this.fileOpenRefreshHandle = this.schedulerWindow.setTimeout(() => {
+      this.fileOpenRefreshHandle = null;
+      if (this.disposed) return;
+      this.refreshAllLeaves();
+    }, 0);
   }
 
   private refreshAllLeaves(): void {
@@ -203,6 +221,10 @@ export class ResumeChatService {
     if (this.layoutRefreshHandle !== null) {
       this.schedulerWindow.clearTimeout(this.layoutRefreshHandle);
       this.layoutRefreshHandle = null;
+    }
+    if (this.fileOpenRefreshHandle !== null) {
+      this.schedulerWindow.clearTimeout(this.fileOpenRefreshHandle);
+      this.fileOpenRefreshHandle = null;
     }
     for (const action of this.resumeActionByView.values()) {
       action.element.remove();
