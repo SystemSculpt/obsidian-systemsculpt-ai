@@ -106,6 +106,7 @@ describe("SurfacePrimitives", () => {
     expect(onQuery).toHaveBeenLastCalledWith("before cleanup");
     expect(focus).not.toHaveBeenCalled();
     expect(parent.contains(search.root)).toBe(false);
+    parent.remove();
   });
 
   it.each(["empty", "loading", "error", "success", "info"] as const)(

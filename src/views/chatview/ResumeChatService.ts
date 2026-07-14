@@ -46,7 +46,6 @@ export class ResumeChatService {
 
     // Also listen for direct file-open events which can fire without a leaf switch.
     this.plugin.registerEvent(
-      // @ts-ignore - 'file-open' exists on workspace event bus
       this.app.workspace.on('file-open', () => {
         this.scheduleFileOpenRefresh();
       })
