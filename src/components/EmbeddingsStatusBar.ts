@@ -130,7 +130,11 @@ export class EmbeddingsStatusBar extends Component {
 
   private setVisibility(visible: boolean): void {
     this.statusBarEl.toggleAttribute("hidden", !visible);
-    this.statusBarEl.toggleAttribute("aria-hidden", !visible);
+    if (!visible) {
+      this.statusBarEl.setAttribute("aria-hidden", "true");
+    } else {
+      this.statusBarEl.removeAttribute("aria-hidden");
+    }
   }
 
   private formatCompact(value: number): string {

@@ -312,6 +312,25 @@ const bootstrap = (
     );
   });
 
+  it("reports Studio project creation failures without opening a view", async () => {
+    const {
+      handlers,
+      createProjectFile,
+      activateSystemSculptStudioView,
+    } = bootstrap();
+    const menu = createMenuStub();
+    createProjectFile.mockRejectedValueOnce(new Error("vault write failed"));
+
+    emitFileMenu(handlers, menu, createFolder("Projects/Client"), "file-explorer");
+    const entry = menu.recordedItems.find((item) => item.title === "New Studio project");
+    await entry?.onClick?.();
+
+    expect(activateSystemSculptStudioView).not.toHaveBeenCalled();
+    expect(Notice).toHaveBeenCalledWith(
+      "Unable to create Studio project: vault write failed",
+    );
+  });
+
   it("adds Convert to Markdown for supported documents", () => {
     const { handlers } = bootstrap();
     const menu = createMenuStub();

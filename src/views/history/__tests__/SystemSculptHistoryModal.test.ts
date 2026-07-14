@@ -77,9 +77,11 @@ describe("SystemSculptHistoryModal lifecycle", () => {
     expect(filteredOption?.textContent).toContain("Second chat");
     const stableSecondId = filteredOption?.id;
 
-    modal.modalEl.querySelector<HTMLElement>(
+    const clearButton = modal.modalEl.querySelector<HTMLElement>(
       ".ss-modal__search .search-input-clear-button",
-    )?.click();
+    );
+    expect(clearButton).not.toBeNull();
+    clearButton!.click();
     expect(input!.value).toBe("");
     expect(listbox?.querySelectorAll("[role=option]")).toHaveLength(2);
     input!.dispatchEvent(new KeyboardEvent("keydown", {

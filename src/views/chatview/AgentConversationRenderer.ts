@@ -154,7 +154,9 @@ export class AgentConversationRenderer extends Component {
       cls: "systemsculpt-agent-conversation",
       attr: {
         role: "log",
-        ...(options.labelledBy ? { "aria-labelledby": options.labelledBy } : {}),
+        ...(options.labelledBy
+          ? { "aria-labelledby": options.labelledBy }
+          : { "aria-label": "Messages" }),
         "aria-live": "off",
         "aria-relevant": "additions text",
       },

@@ -104,7 +104,7 @@ describe("EmbeddingsStatusBar", () => {
     const disabled = new EmbeddingsStatusBar(plugin);
     disabled.load();
     expect(disabledElement.hidden).toBe(true);
-    expect(disabledElement.getAttribute("aria-hidden")).toBe("");
+    expect(disabledElement.getAttribute("aria-hidden")).toBe("true");
     disabled.unload();
   });
 

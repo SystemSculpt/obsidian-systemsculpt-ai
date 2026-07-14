@@ -307,6 +307,17 @@ describe("AgentComposer", () => {
 });
 
 describe("AgentWorkspace", () => {
+  const originalClipboardDescriptor = Object.getOwnPropertyDescriptor(window.navigator, "clipboard");
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+    if (originalClipboardDescriptor) {
+      Object.defineProperty(window.navigator, "clipboard", originalClipboardDescriptor);
+      return;
+    }
+    delete (window.navigator as Navigator & { clipboard?: Clipboard }).clipboard;
+  });
+
   it("renders detail-free tool status as static non-focusable content", async () => {
     const host = document.body.createDiv();
     const renderer = new AgentConversationRenderer(host, {

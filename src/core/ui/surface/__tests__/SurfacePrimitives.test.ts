@@ -84,12 +84,14 @@ describe("SurfacePrimitives", () => {
 
   it("stops delivering native search callbacks after cleanup", () => {
     const parent = document.createElement("div");
+    document.body.appendChild(parent);
     const onQuery = jest.fn();
     const search = createUiSearch(parent, {
       label: "Search notes",
       placeholder: "Search notes",
       onQuery,
     });
+    expect(parent.contains(search.root)).toBe(true);
 
     search.input.value = "before cleanup";
     search.input.dispatchEvent(new Event("input", { bubbles: true }));
@@ -103,7 +105,7 @@ describe("SurfacePrimitives", () => {
     expect(onQuery).toHaveBeenCalledTimes(1);
     expect(onQuery).toHaveBeenLastCalledWith("before cleanup");
     expect(focus).not.toHaveBeenCalled();
-    expect(search.root.isConnected).toBe(false);
+    expect(parent.contains(search.root)).toBe(false);
   });
 
   it.each(["empty", "loading", "error", "success", "info"] as const)(
