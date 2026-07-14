@@ -43,6 +43,7 @@ function button(parent: HTMLElement, label: string, icon?: string): HTMLButtonEl
     label,
     icon,
     size: icon ? "icon" : "small",
+    tooltip: false,
   });
   element.addClass("systemsculpt-agent-inline-button");
   return element;

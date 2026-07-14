@@ -51,6 +51,24 @@ describe("SurfacePrimitives", () => {
     expect(button.disabled).toBe(true);
   });
 
+  it("suppresses hover tooltips without removing accessible action labels", () => {
+    const parent = document.createElement("div");
+    const button = createUiAction(parent, {
+      label: "Chat history",
+      icon: "history",
+      size: "icon",
+      tooltip: false,
+    });
+
+    expect(button.getAttribute("aria-label")).toBe("Chat history");
+    expect(button.hasAttribute("title")).toBe(false);
+
+    updateUiAction(button, { label: "Conversation history", title: "History" });
+
+    expect(button.getAttribute("aria-label")).toBe("Conversation history");
+    expect(button.hasAttribute("title")).toBe(false);
+  });
+
   it("keeps search clear state and query callbacks synchronized", () => {
     const parent = document.createElement("div");
     const onQuery = jest.fn();

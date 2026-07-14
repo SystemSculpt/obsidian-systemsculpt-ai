@@ -57,6 +57,7 @@ function iconButton(parent: HTMLElement, label: string, icon: string): HTMLButto
     label,
     icon,
     size: "icon",
+    tooltip: false,
   });
   element.addClass("systemsculpt-agent-icon-button");
   return element;
@@ -105,7 +106,7 @@ export class AgentWorkspace extends Component {
       ? createUiAction(headerActions, {
           label: "—",
           size: "small",
-          title: "Credits",
+          tooltip: false,
         })
       : null;
     if (this.creditsButton) {
@@ -149,7 +150,7 @@ export class AgentWorkspace extends Component {
     this.jumpButton = createUiAction(this.element, {
       label: "Latest",
       icon: "arrow-down",
-      title: "Jump to latest",
+      tooltip: false,
     });
     this.jumpButton.addClass("systemsculpt-agent-jump");
     this.jumpButton.setAttribute("aria-label", "Jump to latest");

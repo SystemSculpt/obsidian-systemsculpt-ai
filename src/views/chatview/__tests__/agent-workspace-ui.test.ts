@@ -297,8 +297,10 @@ describe("AgentComposer", () => {
     composer.load();
     const select = parent.querySelector<HTMLSelectElement>('[aria-label="Vault changes"]')!;
     expect(Array.from(select.options).map((option) => option.text)).toEqual(["Ask Approval", "Full Access"]);
+    expect(select.hasAttribute("title")).toBe(false);
     composer.setApprovalMode("full-access");
     expect(select.value).toBe("full-access");
+    expect(select.hasAttribute("title")).toBe(false);
     select.value = "ask";
     select.dispatchEvent(new Event("change"));
     expect(onApprovalModeChange).toHaveBeenCalledWith("ask");
@@ -365,6 +367,9 @@ describe("AgentWorkspace", () => {
     expect(parent.querySelector('[aria-label="Chat history"]')?.classList.contains("ss-button--icon")).toBe(true);
     expect(parent.querySelector('[aria-label="Attach files"]')?.classList.contains("ss-button--icon")).toBe(true);
     expect(parent.querySelector('[aria-label="Jump to latest"]')?.classList.contains("ss-button")).toBe(true);
+    for (const label of ["Chat history", "New chat", "Chat settings", "Attach files", "Jump to latest"]) {
+      expect(parent.querySelector(`[aria-label="${label}"]`)?.hasAttribute("title")).toBe(false);
+    }
     expect(parent.querySelector(".systemsculpt-agent-header-title")?.getAttribute("role"))
       .toBe("heading");
     const title = parent.querySelector<HTMLElement>(".systemsculpt-agent-header-title")!;
@@ -449,6 +454,7 @@ describe("AgentWorkspace", () => {
     expect(pre.classList.contains("systemsculpt-agent-code-block")).toBe(true);
     expect(host.querySelector(".copy-code-button")).toBeNull();
     expect(copy.textContent).toContain("Copy");
+    expect(copy.hasAttribute("title")).toBe(false);
 
     copy.click();
     await Promise.resolve();

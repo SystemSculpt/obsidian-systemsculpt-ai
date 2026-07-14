@@ -12,6 +12,7 @@ export interface UiActionOptions {
   selected?: boolean;
   busy?: boolean;
   title?: string;
+  tooltip?: boolean;
   onSelect?: (event: MouseEvent) => void;
 }
 
@@ -82,7 +83,8 @@ export function createUiAction(
     button.createSpan({ cls: "ss-button__label", text: options.label });
   }
 
-  if (options.title || options.size === "icon") {
+  if (options.tooltip === false) button.dataset.ssTooltip = "off";
+  if (options.tooltip !== false && (options.title || options.size === "icon")) {
     button.title = options.title ?? options.label;
   }
   updateUiAction(button, options);
@@ -99,6 +101,7 @@ export function updateUiAction(
   state: UiActionState,
 ): void {
   const iconOnly = button.dataset.ssAction === "icon";
+  const tooltipEnabled = button.dataset.ssTooltip !== "off";
   const previousLabel = iconOnly
     ? button.getAttribute("aria-label") ?? ""
     : button.querySelector<HTMLElement>(".ss-button__label")?.textContent ?? "";
@@ -110,7 +113,7 @@ export function updateUiAction(
       const label = button.querySelector<HTMLElement>(".ss-button__label");
       if (label) label.textContent = state.label;
     }
-    if (iconOnly && (!button.title || button.title === previousLabel)) {
+    if (tooltipEnabled && iconOnly && (!button.title || button.title === previousLabel)) {
       button.title = state.label;
     }
   }
@@ -132,7 +135,10 @@ export function updateUiAction(
     }
   }
 
-  if (state.title !== undefined) button.title = state.title;
+  if (state.title !== undefined) {
+    if (tooltipEnabled) button.title = state.title;
+    else button.removeAttribute("title");
+  }
   if (state.disabled !== undefined) button.disabled = state.disabled;
   if (state.selected !== undefined) {
     button.classList.toggle("is-selected", state.selected);
