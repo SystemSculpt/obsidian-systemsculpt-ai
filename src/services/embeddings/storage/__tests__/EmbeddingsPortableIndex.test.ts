@@ -2,6 +2,7 @@ import { describe, expect, it, jest } from "@jest/globals";
 import {
   restoreEmbeddingsIndexIfEmpty,
   writeEmbeddingsIndexSnapshot,
+  PortableCheckpointCoordinator,
   type PortableIndexFile,
   type PortableIndexStore,
 } from "../EmbeddingsPortableIndex";
@@ -100,5 +101,65 @@ describe("writeEmbeddingsIndexSnapshot", () => {
 
     expect(file.write).not.toHaveBeenCalled();
     expect(result).toEqual({ written: false, count: 0 });
+  });
+});
+
+describe("PortableCheckpointCoordinator", () => {
+  it("coalesces ordinary edits into one atomic snapshot flush", async () => {
+    const store = makeStore({ exportAll: jest.fn(async () => index(3)) });
+    const file = makeFile();
+    const checkpoint = new PortableCheckpointCoordinator({ store, file }, 60_000, 60_000);
+
+    checkpoint.markChanged();
+    checkpoint.markChanged();
+    checkpoint.markChanged();
+    expect(store.exportAll).not.toHaveBeenCalled();
+
+    await checkpoint.flush();
+
+    expect(store.exportAll).toHaveBeenCalledTimes(1);
+    expect(file.write).toHaveBeenCalledTimes(1);
+    expect(checkpoint.status().pending).toBe(false);
+    checkpoint.cancel();
+  });
+
+  it("commits destructive mutations immediately and deletes an empty checkpoint", async () => {
+    const store = makeStore({ exportAll: jest.fn(async () => index(0)) });
+    const file = makeFile({ remove: jest.fn(async () => undefined) });
+    const checkpoint = new PortableCheckpointCoordinator({ store, file }, 60_000, 60_000);
+
+    await checkpoint.commitDestructiveMutation();
+
+    expect(store.exportAll).toHaveBeenCalledTimes(1);
+    expect(file.write).not.toHaveBeenCalled();
+    expect(file.remove).toHaveBeenCalledTimes(1);
+    checkpoint.cancel();
+  });
+
+  it("clear always removes the portable checkpoint instead of preserving ghost notes", async () => {
+    const store = makeStore({ exportAll: jest.fn(async () => index(4)) });
+    const file = makeFile({ remove: jest.fn(async () => undefined) });
+    const checkpoint = new PortableCheckpointCoordinator({ store, file }, 60_000, 60_000);
+    checkpoint.markChanged();
+
+    await checkpoint.clear();
+
+    expect(file.remove).toHaveBeenCalledTimes(1);
+    expect(file.write).not.toHaveBeenCalled();
+    expect(checkpoint.status().pending).toBe(false);
+  });
+
+  it("deletes a stale checkpoint when a destructive rewrite fails", async () => {
+    const store = makeStore({ exportAll: jest.fn(async () => index(2)) });
+    const file = makeFile({
+      write: jest.fn(async () => { throw new Error("sync adapter failed"); }),
+      remove: jest.fn(async () => undefined),
+    });
+    const checkpoint = new PortableCheckpointCoordinator({ store, file }, 60_000, 60_000);
+
+    await expect(checkpoint.commitDestructiveMutation()).rejects.toThrow("sync adapter failed");
+
+    expect(file.remove).toHaveBeenCalledTimes(1);
+    expect(checkpoint.status().pending).toBe(false);
   });
 });

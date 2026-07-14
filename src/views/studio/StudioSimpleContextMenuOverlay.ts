@@ -1,7 +1,14 @@
+import { applyPluginSurface } from "../../core/ui/surface";
 import {
   normalizeStudioMenuScale,
   resolveStudioAnchoredMenuPosition,
 } from "./StudioFloatingMenuUtils";
+import {
+  cancelStudioAnimationFrame,
+  getStudioOwnerDocument,
+  getStudioOwnerWindow,
+  requestStudioAnimationFrame,
+} from "./StudioDomContext";
 
 const CONTEXT_MENU_DEFAULT_WIDTH = 220;
 
@@ -24,7 +31,9 @@ export class StudioSimpleContextMenuOverlay {
   private anchorY = 0;
   private menuWidth = CONTEXT_MENU_DEFAULT_WIDTH;
   private isVisible = false;
+  private itemButtons: HTMLButtonElement[] = [];
   private focusRafId: number | null = null;
+  private listenerWindow: Window | null = null;
 
   private readonly onWindowPointerDown = (event: PointerEvent): void => {
     if (!this.isVisible || !this.rootEl) {
@@ -79,6 +88,7 @@ export class StudioSimpleContextMenuOverlay {
     this.titleEl = null;
     this.subtitleEl = null;
     this.listEl = null;
+    this.itemButtons = [];
   }
 
   setGraphZoom(zoom: number): void {
@@ -114,31 +124,24 @@ export class StudioSimpleContextMenuOverlay {
     this.headerEl.style.display = hasHeader ? "grid" : "none";
     this.titleEl.setText(title);
     this.subtitleEl.setText(subtitle);
+    this.rootEl.setAttribute("aria-label", title || "Studio actions");
 
     this.renderItems(Array.isArray(options.items) ? options.items : []);
 
     this.cancelPendingFocus();
-    this.rootEl.style.display = "flex";
+    this.rootEl.setCssStyles({ display: "flex" });
     this.rootEl.removeAttribute("inert");
     this.rootEl.setAttribute("aria-hidden", "false");
     this.isVisible = true;
     this.bindGlobalListeners();
     this.applyLayout();
 
-    this.focusRafId = window.requestAnimationFrame(() => {
+    this.focusRafId = requestStudioAnimationFrame(this.rootEl, () => {
       this.focusRafId = null;
-      if (!this.isVisible || !this.listEl) {
+      if (!this.isVisible) {
         return;
       }
-      const firstButton = this.listEl.querySelector<HTMLButtonElement>(".ss-studio-simple-context-menu-item");
-      if (!firstButton) {
-        return;
-      }
-      try {
-        firstButton.focus({ preventScroll: true });
-      } catch {
-        firstButton.focus();
-      }
+      this.focusMenuItem(0);
       this.applyLayout();
     });
   }
@@ -148,17 +151,18 @@ export class StudioSimpleContextMenuOverlay {
     this.unbindGlobalListeners();
     this.isVisible = false;
     if (this.rootEl) {
-      const activeElement = document.activeElement as HTMLElement | null;
+      const activeElement = getStudioOwnerDocument(this.rootEl).activeElement as HTMLElement | null;
       if (activeElement && this.rootEl.contains(activeElement) && typeof activeElement.blur === "function") {
         activeElement.blur();
       }
-      this.rootEl.style.display = "none";
+      this.rootEl.setCssStyles({ display: "none" });
       this.rootEl.setAttribute("inert", "");
       this.rootEl.setAttribute("aria-hidden", "true");
     }
     if (this.listEl) {
       this.listEl.empty();
     }
+    this.itemButtons = [];
     if (this.titleEl) {
       this.titleEl.empty();
     }
@@ -173,7 +177,8 @@ export class StudioSimpleContextMenuOverlay {
     }
 
     const root = this.viewportEl.createDiv({ cls: "ss-studio-simple-context-menu" });
-    root.style.display = "none";
+    applyPluginSurface(root, "transient");
+    root.setCssStyles({ display: "none" });
     root.setAttribute("inert", "");
     root.setAttribute("role", "menu");
     root.setAttribute("aria-hidden", "true");
@@ -185,9 +190,11 @@ export class StudioSimpleContextMenuOverlay {
     });
 
     const header = root.createDiv({ cls: "ss-studio-simple-context-menu-header" });
+    header.setAttribute("role", "presentation");
     const title = header.createDiv({ cls: "ss-studio-simple-context-menu-title" });
     const subtitle = header.createDiv({ cls: "ss-studio-simple-context-menu-subtitle" });
     const list = root.createDiv({ cls: "ss-studio-simple-context-menu-list" });
+    list.setAttribute("role", "presentation");
 
     this.rootEl = root;
     this.headerEl = header;
@@ -202,12 +209,15 @@ export class StudioSimpleContextMenuOverlay {
       return;
     }
     this.listEl.empty();
-    for (const item of items) {
+    this.itemButtons = [];
+    for (const [index, item] of items.entries()) {
       const button = this.listEl.createEl("button", {
         cls: "ss-studio-simple-context-menu-item",
       });
       button.type = "button";
       button.setAttribute("role", "menuitem");
+      button.tabIndex = index === 0 ? 0 : -1;
+      this.itemButtons.push(button);
       const content = button.createDiv({ cls: "ss-studio-simple-context-menu-item-content" });
       content.createDiv({
         cls: "ss-studio-simple-context-menu-item-title",
@@ -227,6 +237,51 @@ export class StudioSimpleContextMenuOverlay {
         this.hide();
         onSelect();
       });
+      button.addEventListener("pointermove", () => {
+        this.setMenuTabStop(index);
+      });
+      button.addEventListener("keydown", (event) => {
+        let nextIndex: number | null = null;
+        if (event.key === "ArrowDown") {
+          nextIndex = index + 1;
+        } else if (event.key === "ArrowUp") {
+          nextIndex = index - 1;
+        } else if (event.key === "Home") {
+          nextIndex = 0;
+        } else if (event.key === "End") {
+          nextIndex = this.itemButtons.length - 1;
+        }
+        if (nextIndex === null) {
+          return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        this.focusMenuItem(nextIndex);
+      });
+    }
+  }
+
+  private setMenuTabStop(index: number): void {
+    for (const [buttonIndex, button] of this.itemButtons.entries()) {
+      button.tabIndex = buttonIndex === index ? 0 : -1;
+    }
+  }
+
+  private focusMenuItem(index: number): void {
+    if (this.itemButtons.length === 0) {
+      return;
+    }
+    const count = this.itemButtons.length;
+    const wrappedIndex = ((index % count) + count) % count;
+    const button = this.itemButtons[wrappedIndex];
+    if (!button) {
+      return;
+    }
+    this.setMenuTabStop(wrappedIndex);
+    try {
+      button.focus({ preventScroll: true });
+    } catch {
+      button.focus();
     }
   }
 
@@ -234,7 +289,9 @@ export class StudioSimpleContextMenuOverlay {
     if (this.focusRafId === null) {
       return;
     }
-    window.cancelAnimationFrame(this.focusRafId);
+    if (this.rootEl) {
+      cancelStudioAnimationFrame(this.rootEl, this.focusRafId);
+    }
     this.focusRafId = null;
   }
 
@@ -262,14 +319,21 @@ export class StudioSimpleContextMenuOverlay {
   }
 
   private bindGlobalListeners(): void {
-    window.addEventListener("pointerdown", this.onWindowPointerDown, true);
-    window.addEventListener("keydown", this.onWindowKeyDown, true);
-    window.addEventListener("contextmenu", this.onWindowContextMenu, true);
+    if (!this.rootEl) {
+      return;
+    }
+    this.unbindGlobalListeners();
+    const ownerWindow = getStudioOwnerWindow(this.rootEl);
+    ownerWindow.addEventListener("pointerdown", this.onWindowPointerDown, true);
+    ownerWindow.addEventListener("keydown", this.onWindowKeyDown, true);
+    ownerWindow.addEventListener("contextmenu", this.onWindowContextMenu, true);
+    this.listenerWindow = ownerWindow;
   }
 
   private unbindGlobalListeners(): void {
-    window.removeEventListener("pointerdown", this.onWindowPointerDown, true);
-    window.removeEventListener("keydown", this.onWindowKeyDown, true);
-    window.removeEventListener("contextmenu", this.onWindowContextMenu, true);
+    this.listenerWindow?.removeEventListener("pointerdown", this.onWindowPointerDown, true);
+    this.listenerWindow?.removeEventListener("keydown", this.onWindowKeyDown, true);
+    this.listenerWindow?.removeEventListener("contextmenu", this.onWindowContextMenu, true);
+    this.listenerWindow = null;
   }
 }

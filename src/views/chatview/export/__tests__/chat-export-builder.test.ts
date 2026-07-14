@@ -63,7 +63,6 @@ describe('ChatExportBuilder', () => {
       totalMessages: 2,
       assistantMessages: 1,
       userMessages: 1,
-      toolMessages: 0,
       toolCallCount: 1,
       reasoningBlockCount: 1,
       imageCount: 0
@@ -76,8 +75,6 @@ describe('ChatExportBuilder', () => {
 
     expect(markdown.startsWith('---\n')).toBe(true);
     expect(markdown).toContain('title: "Exported Chat"');
-    expect(markdown).not.toContain('model:');
-    expect(markdown).not.toContain('## System Prompt');
 
     expect(markdown).toContain('## Summary');
     expect(markdown).toContain('## Context Files');
@@ -107,7 +104,6 @@ describe('ChatExportBuilder', () => {
 
     expect(markdown).not.toContain('```reasoning');
     expect(markdown).not.toContain('Assess user question and gather context.');
-    expect(markdown).not.toContain('## System Prompt');
   });
 
   test('omits tool call details when includeToolCalls is false', () => {

@@ -4,7 +4,6 @@ export interface ErrorContext {
   source?: string;
   method?: string;
   userId?: string;
-  modelId?: string;
   providerId?: string;
   metadata?: Record<string, any>;
 }
@@ -77,8 +76,8 @@ class ErrorLogger {
     try {
       this.resolveConsoleMethod(level).apply(console, consoleArgs);
     } catch {
-      // Fallback to console.log if target console method is unavailable
-      console.log(`[SystemSculpt][${level.toUpperCase()}] ${message}`);
+      // Fallback to console.debug if the target console method is unavailable.
+      console.debug(`[SystemSculpt][${level.toUpperCase()}] ${message}`);
     }
   }
 
@@ -125,13 +124,13 @@ class ErrorLogger {
     }
     switch (level) {
       case 'error':
-        return console.error ? console.error.bind(console) : console.log.bind(console);
+        return console.error ? console.error.bind(console) : console.warn.bind(console);
       case 'warn':
-        return console.warn ? console.warn.bind(console) : console.log.bind(console);
+        return console.warn ? console.warn.bind(console) : console.debug.bind(console);
       case 'info':
-        return console.info ? console.info.bind(console) : console.log.bind(console);
+        return console.debug ? console.debug.bind(console) : console.warn.bind(console);
       default:
-        return console.debug ? console.debug.bind(console) : console.log.bind(console);
+        return console.debug ? console.debug.bind(console) : console.warn.bind(console);
     }
   }
 

@@ -176,7 +176,7 @@ export class PluginLogger {
         this.isFlushing = false;
         if (force) {
           // Avoid tight loops when force flushing without storage
-          await new Promise((resolve) => setTimeout(resolve, this.flushIntervalMs));
+          await new Promise((resolve) => window.setTimeout(resolve, this.flushIntervalMs));
         } else {
           this.ensureFlushScheduled();
         }
@@ -313,13 +313,13 @@ function resolveConsoleMethod(level: PluginLogLevel): (...args: unknown[]) => vo
   }
   switch (level) {
     case "error":
-      return console.error ? console.error.bind(console) : console.log.bind(console);
+      return console.error ? console.error.bind(console) : console.warn.bind(console);
     case "warn":
-      return console.warn ? console.warn.bind(console) : console.log.bind(console);
+      return console.warn ? console.warn.bind(console) : console.debug.bind(console);
     case "info":
-      return console.info ? console.info.bind(console) : console.log.bind(console);
+      return console.debug ? console.debug.bind(console) : console.warn.bind(console);
     case "debug":
     default:
-      return console.debug ? console.debug.bind(console) : console.log.bind(console);
+      return console.debug ? console.debug.bind(console) : console.warn.bind(console);
   }
 }

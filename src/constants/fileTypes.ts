@@ -1,75 +1,44 @@
 /**
- * Centralized file type metadata shared across the plugin.
- * Keep this list in sync with supported document and audio flows in
- * DocumentProcessingService and related UI entry points.
+ * File-type contracts shared by active managed conversion and local context UI.
  */
 
-const DOCUMENT_EXTENSIONS = [
-  "pdf",
-  "doc",
-  "docx",
-  "ppt",
-  "pptx",
-  "xls",
-  "xlsx",
-] as const;
-
-const DOCUMENT_MIME_TYPES: Record<DocumentFileExtension, string> = {
-  pdf: "application/pdf",
-  doc: "application/msword",
-  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  ppt: "application/vnd.ms-powerpoint",
-  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-  xls: "application/vnd.ms-excel",
-  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-};
-
+const MANAGED_DOCUMENT_EXTENSIONS = ["pdf", "png", "jpg", "jpeg", "webp"] as const;
+const AUTO_DOCUMENT_EXTENSIONS = ["pdf"] as const;
+const UNSUPPORTED_OFFICE_EXTENSIONS = ["doc", "docx", "ppt", "pptx", "xls", "xlsx"] as const;
 const AUDIO_EXTENSIONS = ["mp3", "wav", "m4a", "ogg", "webm"] as const;
 
-const toReadonlySet = (values: readonly string[]): ReadonlySet<string> =>
-  new Set(values);
+const toReadonlySet = (values: readonly string[]): ReadonlySet<string> => new Set(values);
 
-export const DOCUMENT_FILE_EXTENSIONS: ReadonlySet<string> = toReadonlySet(
-  DOCUMENT_EXTENSIONS
-);
+export const MANAGED_DOCUMENT_CONVERSION_EXTENSIONS = toReadonlySet(MANAGED_DOCUMENT_EXTENSIONS);
+export const AUDIO_FILE_EXTENSIONS = toReadonlySet(AUDIO_EXTENSIONS);
 
-export const AUDIO_FILE_EXTENSIONS: ReadonlySet<string> = toReadonlySet(
-  AUDIO_EXTENSIONS
-);
-
-export const DOCUMENT_MIME_TYPE_MAP: Readonly<Record<DocumentFileExtension, string>> =
-  DOCUMENT_MIME_TYPES;
-
-/**
- * Normalize an extension string for consistent membership checks.
- */
-export const normalizeFileExtension = (
-  extension?: string | null
-): string => (extension ?? "").trim().toLowerCase();
-
-export const isDocumentFileExtension = (
-  extension?: string | null
-): boolean => {
-  const normalized = normalizeFileExtension(extension);
-  return normalized !== "" && DOCUMENT_FILE_EXTENSIONS.has(normalized);
-};
-
-export const isAudioFileExtension = (
-  extension?: string | null
-): boolean => {
-  const normalized = normalizeFileExtension(extension);
-  return normalized !== "" && AUDIO_FILE_EXTENSIONS.has(normalized);
-};
-
-export const getDocumentMimeType = (
-  extension?: string | null
-): string | undefined => {
-  const normalized = normalizeFileExtension(extension);
-  if (normalized === "") {
-    return undefined;
-  }
-  return DOCUMENT_MIME_TYPE_MAP[normalized as DocumentFileExtension];
-};
-
-export type DocumentFileExtension = (typeof DOCUMENT_EXTENSIONS)[number];
+export type ManagedDocumentFileExtension = (typeof MANAGED_DOCUMENT_EXTENSIONS)[number];
 export type AudioFileExtension = (typeof AUDIO_EXTENSIONS)[number];
+
+export const MANAGED_DOCUMENT_MIME_TYPE_MAP: Readonly<Record<ManagedDocumentFileExtension, string>> = Object.freeze({
+  pdf: "application/pdf",
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  webp: "image/webp",
+});
+
+export const normalizeFileExtension = (extension?: string | null): string =>
+  (extension ?? "").trim().toLowerCase();
+
+export const isManagedDocumentConversionFileExtension = (extension?: string | null): boolean =>
+  MANAGED_DOCUMENT_CONVERSION_EXTENSIONS.has(normalizeFileExtension(extension));
+
+export const isAutoDocumentConversionFileExtension = (extension?: string | null): boolean =>
+  AUTO_DOCUMENT_EXTENSIONS.includes(normalizeFileExtension(extension) as (typeof AUTO_DOCUMENT_EXTENSIONS)[number]);
+
+export const isUnsupportedOfficeFileExtension = (extension?: string | null): boolean =>
+  UNSUPPORTED_OFFICE_EXTENSIONS.includes(normalizeFileExtension(extension) as (typeof UNSUPPORTED_OFFICE_EXTENSIONS)[number]);
+
+export const isAudioFileExtension = (extension?: string | null): boolean =>
+  AUDIO_FILE_EXTENSIONS.has(normalizeFileExtension(extension));
+
+export const getManagedDocumentMimeType = (extension?: string | null): string | undefined => {
+  const normalized = normalizeFileExtension(extension) as ManagedDocumentFileExtension;
+  return MANAGED_DOCUMENT_MIME_TYPE_MAP[normalized];
+};

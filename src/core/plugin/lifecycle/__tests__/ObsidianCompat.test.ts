@@ -2,13 +2,13 @@ import { checkObsidianCompatibility, MINIMUM_OBSIDIAN_VERSION } from "../Obsidia
 
 describe("checkObsidianCompatibility (#212 min-version fail-soft)", () => {
   it("supports a current version at or above the minimum", () => {
-    expect(checkObsidianCompatibility("1.4.0").supported).toBe(true);
-    expect(checkObsidianCompatibility("1.5.0").supported).toBe(true);
+    expect(checkObsidianCompatibility("1.7.2").supported).toBe(true);
+    expect(checkObsidianCompatibility("1.8.0").supported).toBe(true);
     expect(checkObsidianCompatibility("2.0.0").supported).toBe(true);
   });
 
   it("rejects a current version below the minimum", () => {
-    expect(checkObsidianCompatibility("1.3.9").supported).toBe(false);
+    expect(checkObsidianCompatibility("1.7.1").supported).toBe(false);
     expect(checkObsidianCompatibility("1.0.0").supported).toBe(false);
     expect(checkObsidianCompatibility("0.15.9").supported).toBe(false);
   });

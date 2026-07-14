@@ -1,0 +1,182 @@
+/* ------------------------------------------------------------------ *
+ * Run status
+ * ------------------------------------------------------------------ */
+.ss-studio-node-run-status-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--ss-space-1);
+  padding: 0 var(--ss-space-2) var(--ss-space-1);
+}
+
+.ss-studio-node-run-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ss-space-1);
+  padding: 0 var(--ss-space-2);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-full);
+  font-size: var(--ss-text-xs);
+  color: var(--ss-ink-muted);
+}
+
+.ss-studio-node-run-status::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: var(--ss-radius-round);
+  background-color: currentColor;
+}
+
+.ss-studio-node-run-status.is-pending {
+  color: var(--ss-ink-faint);
+}
+
+.ss-studio-node-run-status.is-running {
+  color: var(--ss-info);
+  border-color: var(--ss-info-line);
+}
+
+.ss-studio-node-run-status.is-cached {
+  color: var(--ss-studio-accent-mid);
+  border-color: var(--ss-line-accent);
+}
+
+.ss-studio-node-run-status.is-succeeded {
+  color: var(--ss-success);
+  border-color: var(--ss-success-line);
+}
+
+.ss-studio-node-run-status.is-failed {
+  color: var(--ss-danger);
+  border-color: var(--ss-danger-line);
+}
+
+.ss-studio-node-run-message {
+  min-width: 0;
+  padding: 0 var(--ss-space-2);
+  border-radius: var(--ss-radius-full);
+  background-color: var(--ss-surface-1);
+  font-size: var(--ss-text-xs);
+  color: var(--ss-ink-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ss-studio-node-badge {
+  padding: 0 var(--ss-space-2);
+  border-radius: var(--ss-radius-full);
+  background-color: var(--ss-surface-2);
+  font-size: var(--ss-text-xs);
+  color: var(--ss-ink-muted);
+}
+
+.ss-studio-node-badge.is-warning {
+  background-color: var(--ss-warning-tint);
+  color: var(--ss-warning);
+}
+
+/* ------------------------------------------------------------------ *
+ * Ports
+ * ------------------------------------------------------------------ */
+.ss-studio-node-ports {
+  position: relative;
+  /* Above the resize frame's edge strips (z-index 3) so a port pin's hit
+   * area keeps winning connection drags along the card border. */
+  z-index: 4;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--ss-space-1);
+  padding: var(--ss-space-1) var(--ss-space-2) var(--ss-space-2);
+}
+
+.ss-studio-node-ports.is-single-col {
+  grid-template-columns: 1fr;
+}
+
+.ss-studio-node-ports-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ss-space-1);
+  min-width: 0;
+}
+
+.ss-studio-port-row {
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-1);
+  min-width: 0;
+}
+
+.ss-studio-port-row.is-output {
+  justify-content: flex-end;
+}
+
+.ss-studio-port-pin {
+  position: relative;
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  border-radius: var(--ss-radius-round);
+  border: 1.5px solid var(--ss-line-strong);
+  background-color: var(--ss-surface-0);
+  cursor: crosshair;
+  transition: transform var(--ss-dur-fast) var(--ss-ease-spring), border-color var(--ss-dur-fast) var(--ss-ease);
+}
+
+.ss-studio-port-pin::before {
+  content: "";
+  position: absolute;
+  inset: calc((var(--ss-studio-port-hit-size) - 8px) / -2);
+  border-radius: var(--ss-radius-round);
+}
+
+.ss-studio-port-pin.is-input {
+  border-color: var(--ss-accent);
+}
+
+.ss-studio-port-pin.is-output {
+  border-color: var(--ss-success);
+}
+
+.ss-studio-port-pin:hover,
+.ss-studio-port-pin.is-active {
+  transform: scale(1.25);
+  box-shadow: var(--ss-ring);
+}
+
+.ss-studio-port-pin.is-linked {
+  background-color: currentColor;
+}
+
+.ss-studio-port-pin.is-linked.is-input {
+  color: var(--ss-accent);
+}
+
+.ss-studio-port-pin.is-linked.is-output {
+  color: var(--ss-success);
+}
+
+.ss-studio-port-pin.is-drop-target {
+  box-shadow: var(--ss-ring);
+}
+
+.ss-studio-port-pin.is-drop-target.is-input {
+  animation: ss-studio-port-halo 1.1s var(--ss-ease) infinite;
+}
+
+.ss-studio-port-pin.is-drop-incompatible {
+  opacity: 0.25;
+  filter: grayscale(1);
+}
+
+.ss-studio-port-label {
+  min-width: 0;
+  font-family: var(--ss-font-mono);
+  font-size: var(--ss-text-xs);
+  color: var(--ss-ink-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

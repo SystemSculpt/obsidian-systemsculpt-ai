@@ -1,6 +1,6 @@
-import { Notice, normalizePath, setIcon } from "obsidian";
+import { Notice, normalizePath, setIcon, type WorkspaceLeaf } from "obsidian";
 import type SystemSculptPlugin from "../../main";
-import { PlatformContext } from "../../services/PlatformContext";
+import { applyPluginSurface } from "../ui/surface";
 
 export const FILE_EXPLORER_STUDIO_BUTTON_CLASS = "systemsculpt-file-explorer-new-studio-button";
 
@@ -18,72 +18,119 @@ type FileExplorerStudioButtonPlugin = Pick<
 >;
 
 export class FileExplorerStudioButtonManager {
-  private observer: MutationObserver | null = null;
+  private readonly observers = new Map<Document, MutationObserver>();
   private syncTimer: number | null = null;
+  private syncWindow: Window | null = null;
   private createInFlight = false;
+  private started = false;
 
   constructor(private readonly plugin: FileExplorerStudioButtonPlugin) {}
 
   start(): void {
-    if (!PlatformContext.get().supportsDesktopOnlyFeatures()) {
-      return;
-    }
-
+    this.started = true;
     this.syncButtons();
-
-    if (this.observer || typeof MutationObserver === "undefined" || !document.body) {
-      return;
-    }
-
-    this.observer = new MutationObserver(() => this.scheduleSync());
-    this.observer.observe(document.body, {
-      childList: true,
-      subtree: true,
-    });
   }
 
   dispose(): void {
     if (this.syncTimer != null) {
-      window.clearTimeout(this.syncTimer);
+      this.syncWindow?.clearTimeout(this.syncTimer);
       this.syncTimer = null;
+      this.syncWindow = null;
     }
 
-    this.observer?.disconnect();
-    this.observer = null;
+    this.started = false;
+    for (const observer of this.observers.values()) {
+      observer.disconnect();
+    }
+    this.observers.clear();
     this.removeButtons();
   }
 
   syncButtons(): void {
-    if (!PlatformContext.get().supportsDesktopOnlyFeatures()) {
-      this.removeButtons();
-      return;
+    const documents = this.getWorkspaceDocuments();
+    if (this.started) {
+      this.syncObservers(documents);
     }
-
-    const containers = document.querySelectorAll<HTMLElement>(FILE_EXPLORER_BUTTONS_SELECTOR);
-    containers.forEach((container) => this.syncButton(container));
+    for (const ownerDocument of documents) {
+      const containers = ownerDocument.querySelectorAll<HTMLElement>(
+        FILE_EXPLORER_BUTTONS_SELECTOR,
+      );
+      containers.forEach((container) => this.syncButton(container));
+    }
   }
 
-  private scheduleSync(): void {
+  private scheduleSync(hostWindow?: Window | null): void {
     if (this.syncTimer != null) {
       return;
     }
 
-    this.syncTimer = window.setTimeout(() => {
+    this.syncWindow = hostWindow
+      ?? window.activeDocument?.defaultView
+      ?? window;
+    this.syncTimer = this.syncWindow.setTimeout(() => {
       this.syncTimer = null;
+      this.syncWindow = null;
       this.syncButtons();
     }, 50);
   }
 
   private removeButtons(): void {
-    document
-      .querySelectorAll<HTMLElement>(`.${FILE_EXPLORER_STUDIO_BUTTON_CLASS}`)
-      .forEach((button) => button.remove());
+    for (const ownerDocument of this.getWorkspaceDocuments()) {
+      ownerDocument
+        .querySelectorAll<HTMLElement>(`.${FILE_EXPLORER_STUDIO_BUTTON_CLASS}`)
+        .forEach((button) => button.remove());
+    }
+  }
+
+  private getWorkspaceDocuments(): Document[] {
+    const documents = new Set<Document>();
+    if (typeof document !== "undefined") {
+      documents.add(document);
+    }
+    if (typeof window !== "undefined" && window.activeDocument) {
+      documents.add(window.activeDocument);
+    }
+
+    const iterateAllLeaves = this.plugin.app.workspace.iterateAllLeaves;
+    if (typeof iterateAllLeaves === "function") {
+      iterateAllLeaves.call(this.plugin.app.workspace, (leaf: WorkspaceLeaf) => {
+        const containerEl = (leaf.view as { containerEl?: HTMLElement }).containerEl;
+        if (containerEl?.ownerDocument) {
+          documents.add(containerEl.ownerDocument);
+        }
+      });
+    }
+
+    return Array.from(documents);
+  }
+
+  private syncObservers(documents: Document[]): void {
+    const liveDocuments = new Set(documents);
+    for (const [ownerDocument, observer] of this.observers) {
+      if (!liveDocuments.has(ownerDocument)) {
+        observer.disconnect();
+        this.observers.delete(ownerDocument);
+      }
+    }
+
+    for (const ownerDocument of documents) {
+      if (this.observers.has(ownerDocument) || !ownerDocument.body) {
+        continue;
+      }
+      const Observer = ownerDocument.defaultView?.MutationObserver;
+      if (!Observer) {
+        continue;
+      }
+      const observer = new Observer(() => this.scheduleSync(ownerDocument.defaultView));
+      observer.observe(ownerDocument.body, { childList: true, subtree: true });
+      this.observers.set(ownerDocument, observer);
+    }
   }
 
   private syncButton(container: HTMLElement): void {
     let button = container.querySelector<HTMLElement>(`.${FILE_EXPLORER_STUDIO_BUTTON_CLASS}`);
     if (!button) {
-      button = this.createButton();
+      button = this.createButton(container);
     }
 
     const newNoteButton = this.findActionButton(container, ["New note"]);
@@ -108,8 +155,9 @@ export class FileExplorerStudioButtonManager {
     }
   }
 
-  private createButton(): HTMLElement {
-    const button = document.createElement("div");
+  private createButton(container: HTMLElement): HTMLElement {
+    const button = container.createDiv();
+    applyPluginSurface(button, "embedded");
     button.classList.add(
       "clickable-icon",
       "nav-action-button",
@@ -165,8 +213,9 @@ export class FileExplorerStudioButtonManager {
     }
 
     this.createInFlight = true;
-    button.classList.add("is-loading");
+    button.classList.add("is-busy");
     button.setAttribute("aria-disabled", "true");
+    button.setAttribute("aria-busy", "true");
 
     try {
       const studio = this.plugin.getStudioService() as StudioServiceLike;
@@ -189,8 +238,9 @@ export class FileExplorerStudioButtonManager {
       new Notice(`Unable to create Studio project: ${error?.message || error}`);
     } finally {
       this.createInFlight = false;
-      button.classList.remove("is-loading");
+      button.classList.remove("is-busy");
       button.removeAttribute("aria-disabled");
+      button.removeAttribute("aria-busy");
     }
   }
 

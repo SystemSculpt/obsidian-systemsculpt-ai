@@ -11,6 +11,7 @@ import type { StudioNodeDetailMode } from "./StudioGraphNodeDetailMode";
 import { renderInlineConfigPanel } from "./StudioGraphInlineConfigPanel";
 import { renderJsonNodeEditor, type StudioJsonEditorMode } from "./StudioGraphJsonInlineEditor";
 import { isInlineTextNodeKind, renderTextNodeInlineEditor } from "./StudioGraphTextInlineEditor";
+import type { StudioNodeConfigPathBrowseOptions } from "../StudioPathFieldPicker";
 
 type RenderStudioNodeInlineEditorOptions = {
   nodeEl: HTMLElement;
@@ -37,6 +38,7 @@ type RenderStudioNodeInlineEditorOptions = {
     markdown: string,
     containerEl: HTMLElement
   ) => Promise<void> | void;
+  pathBrowseOptions?: StudioNodeConfigPathBrowseOptions;
   resolveDynamicSelectOptions?: (
     source: StudioNodeConfigDynamicOptionsSource,
     node: StudioNodeInstance
@@ -56,7 +58,6 @@ const INLINE_EDITOR_NODE_KINDS = new Set<string>([
   "studio.cli_command",
   "studio.terminal",
   "studio.dataset",
-  "studio.http_request",
   "studio.image_generation",
   "studio.media_ingest",
   "studio.audio_extract",
@@ -78,16 +79,6 @@ const OUTPUT_PREVIEW_SUPPRESSED_NODE_KINDS = new Set<string>([
   "studio.text_generation",
   "studio.transcription",
 ]);
-
-const HTTP_INPUT_BINDING_LABELS: Record<string, string> = {
-  url: "URL",
-  headers: "Headers",
-  query: "Query Params",
-  path_params: "Path Params",
-  bearer_token: "Bearer Token",
-  body_json: "Body JSON",
-  body_text: "Body Text",
-};
 
 function normalizeNodeKind(kind: string): string {
   return String(kind || "").trim();
@@ -159,52 +150,6 @@ function renderValueOutputPreview(options: {
     : "Connect an output and run this node to inspect the value.";
 }
 
-function renderHttpRequestBindingSummary(options: {
-  nodeEl: HTMLElement;
-  inboundEdges?: Array<{
-    fromNodeId: string;
-    fromPortId: string;
-    toPortId: string;
-  }>;
-}): void {
-  const { nodeEl } = options;
-  const inboundEdges = options.inboundEdges || [];
-  const normalized = inboundEdges
-    .filter((edge) => Object.prototype.hasOwnProperty.call(HTTP_INPUT_BINDING_LABELS, edge.toPortId))
-    .map((edge) => ({
-      ...edge,
-      label: HTTP_INPUT_BINDING_LABELS[edge.toPortId] || edge.toPortId,
-    }))
-    .sort((a, b) => a.label.localeCompare(b.label) || a.fromNodeId.localeCompare(b.fromNodeId));
-
-  const wrapEl = nodeEl.createDiv({ cls: "ss-studio-node-http-bindings" });
-  wrapEl.createDiv({
-    cls: "ss-studio-node-http-bindings-label",
-    text: "CONNECTED INPUTS",
-  });
-
-  if (normalized.length === 0) {
-    wrapEl.createDiv({
-      cls: "ss-studio-node-http-bindings-empty",
-      text: "None. Use input ports to bind URL/body/auth/query dynamically.",
-    });
-    return;
-  }
-
-  const listEl = wrapEl.createEl("ul", { cls: "ss-studio-node-http-bindings-list" });
-  for (const edge of normalized) {
-    const itemEl = listEl.createEl("li", { cls: "ss-studio-node-http-bindings-item" });
-    itemEl.createEl("span", {
-      cls: "ss-studio-node-http-bindings-target",
-      text: edge.label,
-    });
-    itemEl.createEl("code", {
-      cls: "ss-studio-node-http-bindings-source",
-      text: `${edge.fromNodeId}.${edge.fromPortId}`,
-    });
-  }
-}
-
 function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOptions): boolean {
   const {
     node,
@@ -218,6 +163,7 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
     showSystemPromptField = true,
     showOutputPreview = true,
     showFieldHelp = true,
+    pathBrowseOptions,
     resolveDynamicSelectOptions,
   } = options;
   const hiddenFieldKeys = new Set<string>();
@@ -231,12 +177,13 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
       nodeEl,
       node,
       definition,
-      orderedFieldKeys: ["prompt", "modelId", "count", "aspectRatio", "imageSize", "seed"],
+      orderedFieldKeys: ["prompt", "count", "aspectRatio", "seed"],
       interactionLocked,
       onNodeConfigMutated,
       onNodeConfigValueChange,
       panelClassName: "ss-studio-node-inline-config--image-generation",
       showFieldHelp,
+      pathBrowseOptions,
       resolveDynamicSelectOptions,
     });
   }
@@ -251,6 +198,7 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
       onNodeConfigMutated,
       onNodeConfigValueChange,
       showFieldHelp,
+      pathBrowseOptions,
       resolveDynamicSelectOptions,
     });
     return true;
@@ -283,6 +231,7 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
       onNodeConfigValueChange,
       compactTextareaFieldKeys,
       showFieldHelp,
+      pathBrowseOptions,
       resolveDynamicSelectOptions,
     });
   }
@@ -292,13 +241,14 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
       nodeEl,
       node,
       definition,
-      orderedFieldKeys: ["modelId", "reasoningEffort", "systemPrompt"],
+      orderedFieldKeys: ["systemPrompt"],
       interactionLocked,
       onNodeConfigMutated,
       onNodeConfigValueChange,
       panelClassName: "ss-studio-node-inline-config--text-generation",
       hiddenFieldKeys,
       showFieldHelp,
+      pathBrowseOptions,
       resolveDynamicSelectOptions,
     });
   }
@@ -321,6 +271,7 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
       onNodeConfigMutated,
       onNodeConfigValueChange,
       showFieldHelp,
+      pathBrowseOptions,
       resolveDynamicSelectOptions,
     });
     if (rendered && showOutputPreview) {
@@ -351,32 +302,6 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
     return true;
   }
 
-  if (kind === "studio.http_request") {
-    const rendered = renderInlineConfigPanel({
-      nodeEl,
-      node,
-      definition,
-      orderedFieldKeys: [
-        "method",
-        "url",
-        "headers",
-        "bearerToken",
-        "body",
-        "maxRetries",
-      ],
-      interactionLocked,
-      onNodeConfigMutated,
-      onNodeConfigValueChange,
-      showFieldHelp,
-      resolveDynamicSelectOptions,
-    });
-    renderHttpRequestBindingSummary({
-      nodeEl,
-      inboundEdges: options.inboundEdges,
-    });
-    return rendered || nodeEl.hasChildNodes();
-  }
-
   if (kind === "studio.cli_command") {
     return renderInlineConfigPanel({
       nodeEl,
@@ -387,6 +312,7 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
       onNodeConfigMutated,
       onNodeConfigValueChange,
       showFieldHelp,
+      pathBrowseOptions,
       resolveDynamicSelectOptions,
     });
   }
@@ -402,6 +328,7 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
       onNodeConfigValueChange,
       panelClassName: "ss-studio-node-inline-config--terminal",
       showFieldHelp,
+      pathBrowseOptions,
       resolveDynamicSelectOptions,
     });
   }
@@ -416,6 +343,7 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
       onNodeConfigMutated,
       onNodeConfigValueChange,
       showFieldHelp,
+      pathBrowseOptions,
       resolveDynamicSelectOptions,
     });
   }
@@ -433,6 +361,7 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
     onNodeConfigMutated,
     onNodeConfigValueChange,
     showFieldHelp,
+    pathBrowseOptions,
     resolveDynamicSelectOptions,
   });
 }

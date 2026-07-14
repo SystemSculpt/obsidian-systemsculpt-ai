@@ -45,22 +45,4 @@ describe("StudioPermissionManager", () => {
     expect(() => manager.assertCliCommand("ffprobe")).toThrow("CLI permission denied");
     expect(() => manager.assertCliCommand("echo")).not.toThrow();
   });
-
-  it("enforces https allowlisted network domains", () => {
-    const policy = createPolicy();
-    policy.grants.push({
-      id: "g3",
-      capability: "network",
-      scope: {
-        allowedDomains: ["api.systemsculpt.com"],
-      },
-      grantedAt: new Date().toISOString(),
-      grantedByUser: true,
-    });
-
-    const manager = new StudioPermissionManager(policy);
-    expect(() => manager.assertNetworkUrl("https://api.systemsculpt.com/api/v1/chat/completions")).not.toThrow();
-    expect(() => manager.assertNetworkUrl("http://api.systemsculpt.com")).toThrow("HTTPS");
-    expect(() => manager.assertNetworkUrl("https://example.com")).toThrow("Network permission denied");
-  });
 });

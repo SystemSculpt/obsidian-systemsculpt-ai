@@ -1,0 +1,64 @@
+/* ------------------------------------------------------------------ *
+ * Remaining node body details
+ * ------------------------------------------------------------------ */
+.ss-studio-node-inline-output-preview-label {
+  font-size: var(--ss-text-xs);
+  color: var(--ss-ink-faint);
+  letter-spacing: var(--ss-tracking-wide);
+  text-transform: uppercase;
+}
+
+.ss-studio-node-inline-output-preview-text {
+  font-family: var(--ss-font-mono);
+  font-size: var(--ss-text-xs);
+  color: var(--ss-ink-muted);
+  overflow-wrap: anywhere;
+}
+
+.ss-studio-node-media-preview-img,
+.ss-studio-node-media-preview-video {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.ss-studio-node-text-editor-surface {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.ss-studio-node-text-rendered-empty {
+  color: var(--ss-ink-faint);
+  font-style: italic;
+}
+
+.ss-studio-node-text-display-mode-label {
+  font-size: var(--ss-text-xs);
+  color: var(--ss-ink-muted);
+}
+
+.ss-studio-inline-error {
+  padding: var(--ss-space-1) var(--ss-space-2);
+  background-color: var(--ss-danger-tint);
+  border: 1px solid var(--ss-danger-line);
+  border-radius: var(--ss-radius-xs);
+  font-size: var(--ss-text-xs);
+  color: var(--ss-danger);
+}
+
+.ss-studio-muted {
+  color: var(--ss-ink-faint);
+}
+
+.ss-studio-text-node-card {
+  display: flex;
+  flex-direction: column;
+}
+
+.ss-studio-media-preview-modal-image {
+  display: block;
+  max-width: 100%;
+  border-radius: var(--ss-radius-sm);
+}

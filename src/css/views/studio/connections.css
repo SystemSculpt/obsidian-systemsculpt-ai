@@ -1,0 +1,63 @@
+/* ------------------------------------------------------------------ *
+ * Edges — static presentation for StudioEdgeRenderer's SVG paths.
+ * Dynamic status stroke/opacity and preview stroke/dash stay inline
+ * (set by StudioEdgeRenderer.ts).
+ * ------------------------------------------------------------------ */
+.ss-studio-edge-line {
+  transition: stroke var(--ss-dur-fast) var(--ss-ease), stroke-width var(--ss-dur-fast) var(--ss-ease);
+}
+
+.ss-studio-edge-line,
+.ss-studio-edge-arrow {
+  fill: none;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+
+/* Hover polish must beat the inline SVG stroke/opacity from StudioEdgeRenderer */
+.ss-studio-edge-group:has(.ss-studio-edge-hit:hover) .ss-studio-edge-line,
+.ss-studio-edge-group:has(.ss-studio-edge-hit:hover) .ss-studio-edge-arrow {
+  stroke: var(--ss-studio-link-stroke-hover) !important;
+  stroke-width: 2.4 !important;
+  opacity: 1 !important;
+}
+
+.ss-studio-edge-group[data-status="flowing"] .ss-studio-edge-line {
+  stroke-dasharray: 10 8;
+  stroke-dashoffset: calc(var(--ss-link-flow-phase, 0) * -18px);
+}
+
+/* Wide, transparent hit target for hover/right-click selection. */
+.ss-studio-edge-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 14;
+  stroke-linecap: round;
+  pointer-events: stroke;
+  cursor: pointer;
+}
+
+/* Drag-to-connect preview line (stroke color/dash set inline per validity). */
+.ss-studio-edge-preview {
+  fill: none;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.95;
+  pointer-events: none;
+}
+
+.ss-studio-connection-autocreate-hint {
+  position: absolute;
+  z-index: 8;
+  padding: var(--ss-space-1) var(--ss-space-2);
+  background-color: var(--ss-surface-2);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-sm);
+  box-shadow: var(--ss-elevation-2);
+  font-size: var(--ss-text-xs);
+  color: var(--ss-ink-muted);
+  pointer-events: none;
+}

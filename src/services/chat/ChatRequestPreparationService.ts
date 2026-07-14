@@ -1,0 +1,88 @@
+import type { ChatMessage } from "../../types";
+import { normalizeManagedTools, type ManagedToolDefinition } from "../../utils/tooling";
+import type { ContextFileService } from "../ContextFileService";
+import type {
+  AcceptedChatOperation,
+  AcceptedManagedChatOperation,
+} from "../managed/ManagedTypes";
+import {
+  createAcceptedManagedChatRequestSnapshot,
+  type AcceptedChatRequestSnapshot,
+} from "./AcceptedChatRequestSnapshot";
+
+export type ManagedChatPreparationInput = Readonly<{
+  contextFiles?: ReadonlySet<string>;
+  webSearch?: boolean;
+  hydrateAttachments?: (
+    messages: readonly Readonly<ChatMessage>[],
+  ) => Promise<readonly Readonly<ChatMessage>[]>;
+}>;
+
+export type ManagedChatPreparationDependencies = Readonly<{
+  contextFileService: ContextFileService;
+  getAvailableTools: () => Promise<Parameters<typeof normalizeManagedTools>[0]>;
+}>;
+
+export async function prepareManagedAcceptedChatRequest(
+  operation: AcceptedManagedChatOperation,
+  input: ManagedChatPreparationInput,
+  dependencies: ManagedChatPreparationDependencies,
+): Promise<Readonly<{ messages: readonly Readonly<ChatMessage>[]; tools: readonly ManagedToolDefinition[] }>> {
+  const contextFiles = new Set(input.contextFiles ?? []);
+  const durableMessages = operation.initialDurableSnapshot.messages
+    .map((message) => ({ ...message })) as ChatMessage[];
+  const hydratedMessages = input.hydrateAttachments
+    ? await input.hydrateAttachments(durableMessages)
+    : durableMessages;
+  if (!Array.isArray(hydratedMessages)
+    || hydratedMessages.length !== durableMessages.length
+    || hydratedMessages.some((message, index) =>
+      message.role !== durableMessages[index].role
+      || message.message_id !== durableMessages[index].message_id)) {
+    throw new Error("Attachment hydration changed durable Chat message identity.");
+  }
+  const requestMessages = hydratedMessages;
+  const messages = await dependencies.contextFileService.prepareMessagesWithContext(
+    requestMessages.map((message) => ({ ...message })) as ChatMessage[],
+    contextFiles,
+    true,
+  );
+  const tools = normalizeManagedTools(await dependencies.getAvailableTools());
+  return { messages, tools };
+}
+
+export class ChatRequestPreparationService {
+  private readonly retained = new WeakMap<AcceptedChatOperation, Promise<AcceptedChatRequestSnapshot>>();
+  private readonly failed = new WeakSet<AcceptedChatOperation>();
+  public prepare(
+    operation: AcceptedChatOperation,
+    input: ManagedChatPreparationInput,
+    managedDependencies: ManagedChatPreparationDependencies,
+  ): Promise<AcceptedChatRequestSnapshot> {
+    const existing = this.retained.get(operation);
+    if (existing) return existing;
+    if (this.failed.has(operation)) return Promise.reject(new Error("Accepted Chat request preparation already failed."));
+    const contextFiles = new Set(input.contextFiles ?? []);
+    const policyBase = {
+      contextCount: contextFiles.size,
+      imageContextIncluded: true,
+      documentContextIncluded: [...contextFiles].some((item) => item.startsWith("doc:")),
+    };
+    const pending = prepareManagedAcceptedChatRequest(operation, input, managedDependencies)
+      .then((managed) => createAcceptedManagedChatRequestSnapshot({
+        operation,
+        policy: {
+          ...policyBase,
+          tools: managed.tools.length ? "normalized" : "omitted",
+        },
+        managedMessages: managed.messages,
+        managedTools: managed.tools,
+        webSearch: input.webSearch === true,
+      }))
+      .catch((error: Error) => { this.failed.add(operation); throw error; });
+    this.retained.set(operation, pending);
+    return pending;
+  }
+  public release(operation: AcceptedChatOperation): void { this.retained.delete(operation); this.failed.delete(operation); }
+  public has(operation: AcceptedChatOperation): boolean { return this.retained.has(operation); }
+}

@@ -43,8 +43,8 @@ class RelativeLineNumberMarker extends GutterMarker {
     return this.text === other.text && this.current === other.current;
   }
 
-  toDOM(): Text {
-    return document.createTextNode(this.text);
+  toDOM(view: EditorView): Text {
+    return view.dom.ownerDocument.createTextNode(this.text);
   }
 }
 

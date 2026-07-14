@@ -1,0 +1,12 @@
+{
+  "mcpServers": [
+    {
+      "id": "legacy-http",
+      "name": "Legacy HTTP MCP",
+      "transport": "http",
+      "endpoint": "https://legacy-mcp.invalid/jsonrpc",
+      "apiKey": "sentinel-retired-http-token",
+      "isEnabled": true
+    }
+  ]
+}

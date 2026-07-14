@@ -2,7 +2,10 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 function readStudioCss(): string {
-  return readFileSync(resolve(process.cwd(), "src/css/views/studio.css"), "utf8");
+  return readFileSync(
+    resolve(process.cwd(), "src/css/views/studio/text-nodes.css"),
+    "utf8"
+  );
 }
 
 function readRuleBody(css: string, selectorPattern: RegExp): string {

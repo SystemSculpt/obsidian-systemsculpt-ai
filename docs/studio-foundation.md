@@ -1,103 +1,78 @@
-# SystemSculpt Studio Foundation
+# Studio architecture
 
-This document describes the new hard-switch Studio architecture in the Obsidian plugin.
+Studio is the portable visual-workflow surface inside the SystemSculpt
+Obsidian plugin. Projects are file-native .systemsculpt documents with sibling
+assets, run history, and policy state.
 
-## Scope
-- Studio is desktop-only.
-- Studio projects are machine-managed `.systemsculpt` files.
-- `studio.text_generation` runs through `SystemSculpt`.
-- `studio.image_generation` and `studio.transcription` remain SystemSculpt-backed.
-- Native Canvas internals are not used for Studio runtime behavior.
+## Host boundary
 
-## Core Paths
-- `src/studio/types.ts`: canonical Studio contracts.
-- `src/studio/schema.ts`: strict project/policy parsing and migration.
-- `src/studio/paths.ts`: `.systemsculpt` + sibling assets path derivation.
-- `src/studio/StudioProjectStore.ts`: project/policy persistence and migration backups.
-- `src/studio/StudioAssetStore.ts`: content-addressed blob storage.
-- `src/studio/StudioPermissionManager.ts`: capability+scope permission enforcement.
-- `src/studio/StudioSandboxRunner.ts`: constrained CLI execution.
-- `src/studio/StudioGraphCompiler.ts`: typed DAG compile/validation.
-- `src/studio/StudioBuiltInNodes.ts`: v1 core node definitions.
-- `src/studio/StudioNodeConfigValidation.ts`: schema-driven node config validation.
-- `src/studio/StudioNodeResultCacheStore.ts`: persistent per-node output cache + input fingerprinting.
-- `src/studio/StudioRunScope.ts`: reusable run-scope projection for graph/node runs.
-- `src/studio/StudioApiExecutionAdapter.ts`: Studio execution adapter for the SystemSculpt path.
-- `src/studio/piAuth/StudioPiAuthStorage.ts`: desktop Pi auth storage bridge for provider discovery, OAuth state, and API-key management.
-- `src/studio/StudioRuntime.ts`: run queue, immutable snapshots, events, retention.
-- `src/studio/StudioService.ts`: plugin-facing Studio orchestration service.
-- `src/views/studio/SystemSculptStudioView.ts`: thin Studio leaf orchestrator.
-- `src/views/studio/StudioGraphInteractionEngine.ts`: graph interactions (drag/select/connect/zoom).
-- `src/views/studio/StudioGraphGroupController.ts`: live group-container overlay + rename interactions.
-- `src/views/studio/graph-v3/StudioGraphWorkspaceRenderer.ts`: full-leaf graph workspace renderer.
-- `src/views/studio/graph-v3/StudioGraphNodeCardRenderer.ts`: node card renderer (ports/status/media preview).
-- `src/views/studio/StudioSearchableDropdown.ts`: reusable fuzzy-searchable dropdown control for large option sets.
-- `src/views/studio/graph-v3/StudioGraphMediaPreview.ts`: media preview inference for node outputs.
-- `src/views/studio/graph-v3/StudioGraphMediaPreviewModal.ts`: vault resource resolution + modal preview rendering.
-- `src/views/studio/graph-v3/StudioGraphGroupModel.ts`: group model helpers (create/rename/sanitize/remove).
-- `src/views/studio/graph-v3/StudioGraphViewStateStore.ts`: graph viewport state normalization/persistence helpers.
-- `src/views/studio/StudioNodeInspectorOverlay.ts`: inspector overlay with visibility-aware field rendering.
-- `src/views/studio/StudioViewHelpers.ts`: shared Studio view helpers.
+Studio opens on desktop and mobile. Node definitions declare a desktop
+hostRequirement only when they need local machine capabilities:
 
-## File System Layout
-Given `My Project.systemsculpt`, Studio stores sibling assets in:
-- `My Project.systemsculpt-assets/project.manifest.json`
-- `My Project.systemsculpt-assets/policy/grants.json`
-- `My Project.systemsculpt-assets/assets/sha256/**`
-- `My Project.systemsculpt-assets/runs/<runId>/snapshot.json`
-- `My Project.systemsculpt-assets/runs/<runId>/events.ndjson`
-- `My Project.systemsculpt-assets/runs/index.json`
-- `My Project.systemsculpt-assets/cache/node-results.json`
+- CLI command
+- Terminal
+- Dataset adapter
+- FFmpeg audio extraction
 
-## Path Contracts
-- Project names are sanitized for path safety while preserving human-readable naming.
-- `.systemsculpt` is always normalized as the canonical extension.
-- Project create operations never overwrite an existing project path or sibling `.systemsculpt-assets` folder.
-- Path collisions auto-suffix with ` (2)`, ` (3)`, etc.
+Portable note, text, JSON, media, transcription, image-generation, and managed
+text-generation nodes remain available on mobile. The insert menu omits
+unavailable nodes, and run preflight names any desktop-only nodes already
+present in an imported project.
 
-## Runtime Contracts
-- One active run per project, queued thereafter.
-- Strict typed edges (no implicit coercion).
-- Fail-fast on fatal node errors unless node has `continueOnError`.
-- Immutable per-run snapshot before execution.
-- Node output cache keyed by node config + resolved input fingerprint.
-- Scoped node run can force selected-node recompute while reusing valid upstream/downstream cache.
-- Retention pruning by per-project max run count.
+StudioHostCapabilities.ts is the single host-policy seam. Do not scatter
+Platform checks through node renderers or runtime implementations.
 
-## Node Editing & Output Contracts
-- Node configuration is edited inline on node cards (no click-to-config inspector workflow).
-- Nodes should expose only immediately reusable output ports to keep graph wiring unambiguous.
-- Metadata/debug details belong in runtime logs or snapshots, not as default output ports.
-- `studio.text_generation` exposes only `text` as its output.
-- `studio.text_generation` runs through `SystemSculpt`; the plugin should not expose alternate text runtimes as part of the shipped UX.
-- `studio.json` is a structured-data node that can pass through upstream `json` input or parse/validate upstream `text` into `json` for typed downstream bindings.
-- `studio.dataset` is config-driven (no input ports), requires a custom query (no presets), always exposes raw `text`, and auto-exposes reusable field outputs from structured adapter results (cached internally with TTL).
-- `studio.dataset` resolves data through a user-configurable adapter command + argument list.
-- `studio.dataset` authentication is adapter-driven: credentials are resolved in the configured working directory/environment (for example from `.env.local`/`DATABASE_URL`), not stored in node output ports.
-- `studio.dataset` inline card includes a read-only latest-result preview so operators can verify fetched data after runs.
-- `studio.http_request` is the canonical outbound API/action node for single or batched requests, including keychain/plaintext auth, retries, throttling, and request-body shaping.
+## Deep modules
 
-## Grouping Contracts
-- Grouping is graph-native metadata (`project.graph.groups`) persisted in `.systemsculpt`.
-- Group creation is driven from Studio context menu actions on multi-selection.
-- Group container bounds are derived live from member node geometry and update during drag.
-- Group name defaults to `Group N` and enters inline rename immediately on creation.
+- types.ts and schema.ts own project contracts and strict parsing.
+- paths.ts, StudioProjectStore.ts, and persistence/ own file-native storage,
+  migrations, generation history, and recovery.
+- StudioAssetStore.ts owns content-addressed project assets.
+- StudioPermissionManager.ts and StudioHostCapabilities.ts own execution gates.
+- StudioGraphCompiler.ts owns typed DAG validation.
+- StudioBuiltInNodes.ts and nodes/ own node definitions and implementations.
+- StudioRuntime.ts owns immutable run snapshots, queueing, events, cache, and
+  retention.
+- StudioService.ts is the plugin-facing orchestration interface.
+- SystemSculptStudioView.ts coordinates the Obsidian leaf and delegates graph,
+  clipboard, session, and presentation ownership to focused modules.
 
-## Interaction Contracts
-- `.systemsculpt` extension is registered to `SYSTEMSCULPT_STUDIO_VIEW_TYPE`.
-- Clicking a `.systemsculpt` file in the file explorer opens that file directly in `SystemSculptStudioView`.
-- Studio view is file-native (one project file per leaf state) and behaves like other Obsidian file views (similar to canvas semantics).
-- Studio does not use modal-driven project create/open flows.
-- Active Studio projects hot-reload on vault file changes only when strict parse+compile validation passes; invalid external writes are rejected while keeping the last good in-memory graph.
-- Output-port drag supports preview-node quick-create: pause ~500ms while dragging to see a release hint; releasing without a compatible target can create a typed preview node (for example JSON/Text) and auto-connect it.
-- Runtime source is guarded against browser dialog APIs (`prompt/confirm/alert`) with an automated test gate.
+## Persistence
 
-## Security Contracts
-- Capability grants are persisted per project policy.
-- Filesystem access is scope-checked.
-- HTTP nodes enforce HTTPS + domain allowlist.
-- CLI nodes enforce command pattern allowlist and path checks.
-- Studio traffic sets `x-systemsculpt-surface: studio` on agent/image requests.
+For My Project.systemsculpt, Studio stores durable state in:
 
-## Known Gaps (Intentionally Deferred)
-- Remote telemetry upload pipeline (local diagnostics/storage is implemented).
+~~~text
+My Project.systemsculpt-assets/
+  project.manifest.json
+  policy/grants.json
+  assets/sha256/
+  runs/
+  cache/node-results.json
+~~~
+
+Project creation never overwrites an existing project or asset directory.
+Names remain human-readable and collisions receive numeric suffixes.
+
+## Runtime contracts
+
+- One active run per project; later runs queue.
+- Graph edges are typed and do not coerce implicitly.
+- Every run receives an immutable project snapshot.
+- Node output caching keys resolved inputs and configuration.
+- Fatal node errors stop the run unless continueOnError is explicit.
+- File, CLI, and host capabilities pass their central policy gates before
+  implementation code runs.
+- Managed generation uses the first-party SystemSculpt API; Studio exposes no
+  alternate provider runtime.
+
+## Interaction contracts
+
+- A .systemsculpt file opens in the Studio view like any other Obsidian file.
+- Node actions and configuration remain visible without hover so touch and
+  screenshots expose the same functionality.
+- Graph grouping, viewport state, selection, clipboard, undo/redo, and live
+  file sync persist through their dedicated modules.
+- Browser dialog APIs are forbidden by repository policy.
+
+See src/views/studio/DESIGN.md for presentation principles and the README files
+beside graph-v3 and systemsculpt-studio-view for current module maps.

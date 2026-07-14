@@ -1,91 +1,36 @@
-import type {
-  SystemSculptModel,
-  CustomProvider,
-  ModelFilterSettings,
-  ActiveProvider,
-} from "./types/llm";
-import { DEFAULT_FILTER_SETTINGS } from "./types/llm";
-import { FavoritesFilterSettings, DEFAULT_FAVORITES_FILTER_SETTINGS } from "./types/favorites";
-import type { FavoriteModel } from "./types/favorites";
-import { MCPServer } from "./types/mcp";
 import { LogLevel } from "./utils/errorHandling";
-import { ToolCall } from "./types/toolCalls";
+import type { ToolCall } from "./types/toolCalls";
 import type { ChatExportPreferences } from "./types/chatExport";
 import { createDefaultChatExportOptions } from "./types/chatExport";
-import type { WorkflowEngineSettings, WorkflowAutomationState, WorkflowAutomationId, WorkflowSkipEntry } from "./types/workflows";
-import { createDefaultWorkflowEngineSettings, createDefaultWorkflowAutomationsState, WORKFLOW_AUTOMATION_IDS } from "./types/workflows";
-import type { ReadwiseImportOptions, ReadwiseOrganization, ReadwiseSyncMode, ReadwiseTweetOrganization } from "./types/readwise";
-import { DEFAULT_READWISE_IMPORT_OPTIONS } from "./types/readwise";
+import type { WorkflowEngineSettings } from "./types/workflows";
+import { createDefaultWorkflowEngineSettings } from "./types/workflows";
 import { CURRENT_SCHEMA_VERSION } from "./core/settings/migrations/schemaVersion";
 
 export { LogLevel };
 export type { ToolCall };
-
-// --- Embedding Feature Types Removed ---
-
-// Re-export for convenience
-export type {
-  SystemSculptModel,
-  CustomProvider,
-  ModelFilterSettings,
-  ActiveProvider,
-} from "./types/llm";
-export type { FavoriteModel } from "./types/favorites";
-
-export type {
-  MCPServer,
-  MCPToolInfo,
-  MCPConnectionStatus,
-  MCPTransport,
-} from "./types/mcp";
 
 export type {
   WorkflowEngineSettings,
   WorkflowAutomationState,
   WorkflowAutomationId,
   WorkflowSkipEntry,
+  WorkflowManagedTextOperation,
+  WorkflowManagedTextPhase,
   WorkflowTrigger,
   WorkflowCondition,
   WorkflowStep,
 } from "./types/workflows";
 
-export { createDefaultWorkflowEngineSettings, createDefaultWorkflowAutomationsState, WORKFLOW_AUTOMATION_IDS } from "./types/workflows";
+export { createDefaultWorkflowEngineSettings } from "./types/workflows";
 
-export const LICENSE_URL = "https://systemsculpt.com/resources?tab=license";
-
-export const DEFAULT_TITLE_GENERATION_PROMPT = `You are a specialized title generation assistant focused on creating precise, meaningful titles.
-
-Your task is to analyze the provided conversation and generate a single, concise title that:
-- Captures the main topic or central theme of the conversation
-- Uses clear, descriptive language
-- Is between 3-8 words long
-- Avoids unnecessary articles (a, an, the) unless essential
-- Maintains professional tone and proper capitalization
-- Includes key technical terms when relevant
-- NEVER includes characters that are invalid in filenames: \\ / : * ? " < > |
-- Uses proper spacing between all words
-
-Output ONLY the title itself - no additional text, no "Title:" prefix, no quotes, no explanation.`;
+export const LICENSE_URL = "https://systemsculpt.com/pricing";
 
 export interface SystemSculptSettings {
-  /**
-   * Settings mode controls how much of the configuration is shown in the UI
-   * - "standard": Show only the essentials for a quick, friendly setup
-   * - "advanced": Reveal all settings and power-user options
-   */
-  settingsMode?: "standard" | "advanced";
-
   /**
    * Stable identifier unique to this vault installation.
    * Used to scope local IndexedDB storage per vault (prevents cross-vault collisions).
    */
   vaultInstanceId?: string;
-
-  /**
-   * When enabled on desktop, expose a token-protected localhost bridge for
-   * no-focus automation against the already-running Obsidian instance.
-   */
-  desktopAutomationBridgeEnabled?: boolean;
 
   /**
    * When enabled, render a vim-style relative line number gutter in the markdown
@@ -108,37 +53,18 @@ export interface SystemSculptSettings {
   licenseKey: string;
   licenseValid: boolean;
   suppressLicenseUpgradePrompt: boolean;
-  selectedModelId: string;
-  /** When enabled, always use the most recently selected AI model across all features */
-  useLatestModelEverywhere?: boolean;
   userName?: string;
   displayName?: string;
   userEmail?: string;
   subscriptionStatus?: string;
-  // Welcome/tour removed: no startup modal
-  /**
-   * The default model ID used for new chats and system operations.
-   * This is now ALIASIASING selectedModelId and should be preferred.
-   */
-  // defaultModelId?: string; // DEPRECATED: Use selectedModelId
-
   chatsDirectory: string;
   /**
    * Directory where notes created via the "Save chat as note" feature are stored
    */
   savedChatsDirectory: string;
-  /**
-   * Directory where web research corpus artifacts are stored.
-   */
-  webResearchDirectory: string;
   lastValidated: number;
   recordingsDirectory: string;
   preferredMicrophoneId: string;
-  /**
-   * When enabled (desktop only), capture system audio alongside microphone input.
-   */
-  // Deprecated: system audio capture removed; kept for backward compatibility in stored settings
-  recordSystemAudio?: boolean;
   autoTranscribeRecordings: boolean;
   autoPasteTranscription: boolean;
   keepRecordingsAfterTranscription: boolean;
@@ -158,10 +84,6 @@ export interface SystemSculptSettings {
    * Path to the selected file (if postProcessingPromptType is "file")
    */
   postProcessingPromptFilePath: string;
-  /** Provider ID used specifically for post-processing (e.g., "systemsculpt", "openai-custom") */
-  postProcessingProviderId: string;
-  /** Canonical model ID used specifically for post-processing (e.g., "systemsculpt@@gpt-4") */
-  postProcessingModelId: string;
   /**
    * When enabled, transcription output will be clean text only without timestamps, titles, or metadata
    */
@@ -182,47 +104,13 @@ export interface SystemSculptSettings {
    */
   showTranscriptionFormatChooserInModal?: boolean;
   /**
-   * Transcription provider settings
-   * - "systemsculpt": Use the SystemSculpt API (requires valid license)
-   * - "custom": Use a custom transcription endpoint
-   */
-  transcriptionProvider: "systemsculpt" | "custom";
-  /**
-   * Custom transcription endpoint URL (used when transcriptionProvider is "custom")
-   * Examples:
-   * - Groq: "https://api.groq.com/openai/v1/audio/transcriptions"
-   * - OpenAI: "https://api.openai.com/v1/audio/transcriptions"
-   * - Local Whisper: "http://localhost:9000/v1/audio/transcriptions"
-   */
-  customTranscriptionEndpoint: string;
-  /**
-   * API key for custom transcription endpoint (if required)
-   */
-  customTranscriptionApiKey: string;
-  /**
-   * Model to use for custom transcription
-   * Examples:
-   * - Groq: "whisper-large-v3", "whisper-large-v3-turbo", "distil-whisper-large-v3-en"
-   * - OpenAI: "whisper-1"
-   * - Custom: Any model name supported by the endpoint
-   */
-  customTranscriptionModel: string;
-  /**
    * Enable automatic audio resampling for incompatible sample rates (desktop only)
    * When enabled, audio files with incompatible sample rates will be automatically
    * converted to the required format before transcription.
    */
   enableAutoAudioResampling: boolean;
-  showModelTooltips: boolean;
-  showVisionModelsOnly: boolean;
-  showTopPicksOnly: boolean;
-  serverUrl: string;
   attachmentsDirectory: string;
   extractionsDirectory: string;
-  // Changed below to "SystemSculpt/System Prompts" with a space
-  systemPromptsDirectory: string;
-  /** Cached list of directories we've already verified to avoid redundant fs checks */
-  verifiedDirectories?: string[];
   workflowEngine: WorkflowEngineSettings;
 
   /**
@@ -230,49 +118,8 @@ export interface SystemSculptSettings {
    */
   skipEmptyNoteWarning: boolean;
 
-  /**
-   * Title generation prompt settings
-   */
-  titleGenerationPrompt: string;
-  titleGenerationPromptType: "precise" | "movie-style" | "custom";
-  titleGenerationPromptPath: string;
-  /** Provider ID used specifically for title generation (e.g., "systemsculpt", "openai-custom") */
-  titleGenerationProviderId: string;
-  /** Canonical model ID used specifically for title generation (e.g., "systemsculpt@@gpt-4") */
-  titleGenerationModelId: string;
-  /**
-   * Custom provider settings
-   */
-  customProviders: CustomProvider[];
-  /**
-   * One-time migration marker for importing known endpoint API keys into Local Pi auth storage.
-   */
-  studioPiAuthMigrationVersion: number;
-
-  modelFilterSettings: ModelFilterSettings;
-
-  favoriteModels: FavoriteModel[];
-
-  favoritesFilterSettings: FavoritesFilterSettings;
-
-  /**
-   * Whether agent mode is enabled in the chat UI.
-   * When false, the AI behaves as a plain chat assistant without tool access.
-   * Defaults to true to preserve existing always-on behavior.
-   */
-  agentModeEnabled: boolean;
-
-  lastUsedPromptPath: string;
-
   favoriteChats: string[];
   favoriteStudioSessions: string[];
-
-  activeProvider: ActiveProvider;
-
-  /**
-   * Last used folder for Save As Note modal
-   */
-  lastSaveAsNoteFolder: string;
 
   /**
    * Remembers export preferences for chat exports (toggle selections, folder, etc.)
@@ -282,58 +129,9 @@ export interface SystemSculptSettings {
 
   showDiagnostics: boolean;
   enableExperimentalFeatures: boolean;
-  lastUsedModel?: SystemSculptModel;
-
-  /**
-   * When enabled, custom provider model lists (like Groq) are filtered
-   * to only show models that are active in the SystemSculpt catalog
-   * managed on the server/website. This keeps the client UI aligned with
-   * the admin’s selections and avoids confusion from unapproved models.
-   */
-  // Deprecated: custom providers are no longer filtered by server allowlists
-  // respectServerAllowlistForCustomProviders?: boolean;
-
-
-  /**
-   * Whether the SystemSculpt provider is enabled
-   * When disabled, the plugin won't use SystemSculpt models even with a valid license
-   */
-  enableSystemSculptProvider: boolean;
-  
-  /**
-   * Whether to use SystemSculpt as the fallback provider when other providers fail
-   * When enabled, calls will fall back to SystemSculpt if the primary provider fails
-   */
-  useSystemSculptAsFallback: boolean;
-
-  /**
-   * Percentage of the model context window to use (0-100)
-   */
-  contextWindowPercentage: number;
-
   logLevel: LogLevel;
   debugMode: boolean;
-  /**
-   * Whether to show the performance indicator in the status bar
-   * When enabled, displays performance metrics (lag and memory usage)
-   */
   
-  /**
-   * Whether to show update notifications
-   * When disabled, the plugin won't check for or show update notifications
-   */
-  showUpdateNotifications: boolean;
-
-  /**
-   * Track the last known version to detect when user has updated
-   */
-  lastKnownVersion?: string;
-
-  /**
-   * Model Context Protocol (MCP) settings
-   */
-  mcpServers: MCPServer[]; // Custom HTTP servers only - internal servers (filesystem, youtube) are always available
-
   /**
    * Optional tag applied to new chat history notes.
    */
@@ -342,45 +140,10 @@ export interface SystemSculptSettings {
   chatFontSize: "small" | "medium" | "large";
 
   /**
-   * When enabled, system-role messages stay in history but are hidden from the chat UI.
-   */
-  hideSystemMessagesInChat: boolean;
-
-  /**
-   * Inline completions (ghost text) shown in the editor.
-   * Hotkey accepts the suggestion (Tab by default), Escape dismisses.
-   */
-
-  /**
    * When enabled, SystemSculpt UI will honor the OS "reduced motion" preference
    * by minimizing animations/transitions inside SystemSculpt views only.
    */
   respectReducedMotion: boolean;
-
-  /**
-   * OpenAI API key - kept for backward compatibility
-   * Users should use custom providers for OpenAI integration
-   */
-  openAiApiKey: string;
-
-  /**
-   * SystemSculpt-hosted image generation (OpenRouter provider).
-   * Used by SystemSculpt Studio.
-   */
-  imageGenerationDefaultModelId: string;
-  /** Last model explicitly chosen in Studio image controls. */
-  imageGenerationLastUsedModelId: string;
-  /** Last image count explicitly chosen in Studio image controls. */
-  imageGenerationLastUsedCount: number;
-  /** Last aspect ratio explicitly chosen in Studio image controls. */
-  imageGenerationLastUsedAspectRatio: string;
-  imageGenerationPollIntervalMs: number;
-  /** Folder path inside the vault where generated images are saved. */
-  imageGenerationOutputDir: string;
-  /** When enabled, write a JSON sidecar next to each generated image. */
-  imageGenerationSaveMetadataSidecar: boolean;
-  /** Cached server model metadata merged into Studio model pickers. */
-  imageGenerationModelCatalogCache: ImageGenerationModelCatalogCache | null;
 
   /**
    * Studio project defaults.
@@ -391,33 +154,15 @@ export interface SystemSculptSettings {
   studioJsonEditorDefaultMode?: "composer" | "raw";
 
   /**
-   * Embeddings settings for the new embeddings system
-   */
+   * Managed semantic-index settings.
+  */
   embeddingsEnabled: boolean;
-  embeddingsModel: string;
-  embeddingsAutoProcess: boolean;
   embeddingsExclusions: {
     folders: string[];
     patterns: string[];
     ignoreChatHistory: boolean;
     respectObsidianExclusions: boolean;
   };
-  
-  /**
-   * Embeddings provider configuration
-   */
-  embeddingsProvider: 'systemsculpt' | 'custom';
-  embeddingsCustomEndpoint?: string;
-  embeddingsCustomApiKey?: string;
-  embeddingsCustomModel?: string;
-  
-  /**
-   * Configurable processing settings
-   */
-  embeddingsBatchSize?: number; // Number of embeddings to process in parallel
-  embeddingsRateLimitPerMinute?: number; // Maximum requests per minute
-  /** Quiet period after edits before re-embedding on modify events (ms) */
-  embeddingsQuietPeriodMs?: number;
   /**
    * When true (default), persist a portable copy of the embedding index into the
    * synced vault (`.systemsculpt/embeddings/`) so Obsidian Sync/backup restores
@@ -425,20 +170,11 @@ export interface SystemSculptSettings {
    */
   embeddingsPortableIndex?: boolean;
   /**
-   * Set true when a bulk rebuild is interrupted by a non-license fatal error
-   * (e.g. a sustained rate limit). Persisted so the rebuild resumes on the next
-   * load even when autoProcess is OFF — the durable per-file completeness markers
-   * make the resumed run skip already-embedded files. Cleared on a clean vault
-   * completion. See #208 / #127.
+   * Set true while a managed bulk rebuild is incomplete. On the next load the
+   * durable per-file completeness markers let the run resume without repeating
+   * completed files. Cleared after a clean vault completion.
    */
   embeddingsRebuildPending?: boolean;
-  /**
-   * Earliest epoch-ms at which an interrupted rebuild should resume, derived from
-   * the server's Retry-After cooldown. Honored on the next load so resume waits
-   * out the cooldown instead of immediately re-hitting the rate limit. 0 = ASAP.
-   */
-  embeddingsRebuildRetryAt?: number;
-  // Embeddings search behavior settings removed; use internal defaults
   
   /**
    * Automatic backup settings
@@ -448,105 +184,18 @@ export interface SystemSculptSettings {
   automaticBackupRetentionDays: number; // How many days to keep automatic backups
   lastAutomaticBackup: number; // Timestamp of last automatic backup
 
-  /**
-   * Preserve reasoning content verbatim without any markdown processing
-   * When enabled, reasoning blocks are rendered exactly as authored without
-   * transformation, preserving bold markers, paragraph spacing, etc.
-   */
-  preserveReasoningVerbatim: boolean;
-
-  /**
-   * Meeting processor default outputs
-   */
-  meetingProcessorOptions?: MeetingProcessorOptions;
-  meetingProcessorOutputDirectory?: string;
-  meetingProcessorOutputNameTemplate?: string;
-
-  /**
-   * YouTube Canvas settings
-   */
-  youtubeNotesFolder?: string;
-  youtubeCanvasToggles?: {
-    summary: boolean;
-    keyPoints: boolean;
-    studyNotes: boolean;
-  };
-
-  /**
-   * Readwise integration settings
-   */
-  readwiseEnabled: boolean;
-  readwiseApiToken: string;
-  readwiseDestinationFolder: string;
-  readwiseOrganization: ReadwiseOrganization;
-  readwiseTweetOrganization: ReadwiseTweetOrganization;
-  readwiseSyncMode: ReadwiseSyncMode;
-  readwiseSyncIntervalMinutes: number;
-  readwiseLastSyncTimestamp: number;
-  readwiseLastSyncCursor: string;
-  readwiseImportOptions: ReadwiseImportOptions;
-
-  /**
-   * Models discovered at runtime to be incompatible with tools.
-   * Maps model ID to timestamp when discovered.
-   */
-  runtimeToolIncompatibleModels?: Record<string, number>;
-
-  /**
-   * Models discovered at runtime to be incompatible with images/vision.
-   * Maps model ID to timestamp when discovered.
-   */
-  runtimeImageIncompatibleModels?: Record<string, number>;
-}
-
-export interface MeetingProcessorOptions {
-  summary: boolean;
-  actionItems: boolean;
-  decisions: boolean;
-  risks: boolean;
-  questions: boolean;
-  transcriptCleanup: boolean;
-}
-
-export interface ImageGenerationModelCatalogCacheModel {
-  id: string;
-  name?: string;
-  provider?: string;
-  supports_generation?: boolean;
-  input_modalities?: string[];
-  output_modalities?: string[];
-  supports_image_input?: boolean;
-  max_images_per_job?: number;
-  default_aspect_ratio?: string;
-  allowed_aspect_ratios?: string[];
-  estimated_cost_per_image_usd?: number;
-  estimated_cost_per_image_low_usd?: number;
-  estimated_cost_per_image_high_usd?: number;
-  pricing_source?: string;
-}
-
-export interface ImageGenerationModelCatalogCache {
-  fetchedAt: string;
-  models: ImageGenerationModelCatalogCacheModel[];
 }
 
 export const DEFAULT_SETTINGS: SystemSculptSettings = {
-  // Default to a simple, friendly experience
-  settingsMode: "standard",
   vaultInstanceId: "",
-  desktopAutomationBridgeEnabled: false,
   relativeLineNumbersEnabled: false,
   schemaVersion: CURRENT_SCHEMA_VERSION,
   embeddingsVectorFormatVersion: 0,
   licenseKey: "",
   licenseValid: false,
   suppressLicenseUpgradePrompt: false,
-  selectedModelId: "systemsculpt@@systemsculpt/ai-agent",
-  useLatestModelEverywhere: true,
-  // defaultModelId: "", // DEPRECATED
   chatsDirectory: "SystemSculpt/Chats",
   savedChatsDirectory: "SystemSculpt/Saved Chats",
-  webResearchDirectory: "SystemSculpt/Web Research",
   lastValidated: 0,
   recordingsDirectory: "SystemSculpt/Recordings",
   preferredMicrophoneId: "",
@@ -567,62 +216,20 @@ Raw transcript:`,
   postProcessingPromptType: "preset",
   postProcessingPromptPresetId: "transcript-cleaner",
   postProcessingPromptFilePath: "",
-  postProcessingProviderId: "systemsculpt", // Default to native provider
-  postProcessingModelId: "", // Default to empty; logic should handle fallback if unset
   cleanTranscriptionOutput: false,
   autoSubmitAfterTranscription: false,
   transcriptionOutputFormat: "markdown",
   showTranscriptionFormatChooserInModal: true,
-  transcriptionProvider: "systemsculpt",
-  customTranscriptionEndpoint: "",
-  customTranscriptionApiKey: "",
-  customTranscriptionModel: "whisper-large-v3",
   enableAutoAudioResampling: true,
-  showModelTooltips: false,
-  showVisionModelsOnly: false,
-  showTopPicksOnly: false,
-  serverUrl: "", // Persisted canonical hosted API origin; sanitized on load
   attachmentsDirectory: "SystemSculpt/Attachments",
   extractionsDirectory: "SystemSculpt/Extractions",
-  systemPromptsDirectory: "SystemSculpt/System Prompts",
-  verifiedDirectories: [],
   workflowEngine: createDefaultWorkflowEngineSettings(),
 
   skipEmptyNoteWarning: false,
 
-  /**
-   * Title generation prompt defaults
-   */
-  titleGenerationPrompt: DEFAULT_TITLE_GENERATION_PROMPT,
-  titleGenerationPromptType: "precise",
-  titleGenerationPromptPath: "",
-  titleGenerationProviderId: "systemsculpt", // Default to native provider
-  titleGenerationModelId: "", // Default to empty; logic should handle fallback if unset
-  /**
-   * Custom provider defaults
-   */
-  customProviders: [],
-  studioPiAuthMigrationVersion: 0,
-
-  modelFilterSettings: DEFAULT_FILTER_SETTINGS,
-
-  favoriteModels: [],
-
-  favoritesFilterSettings: DEFAULT_FAVORITES_FILTER_SETTINGS,
-
-  agentModeEnabled: true,
-  lastUsedPromptPath: "",
-
   favoriteChats: [],
   favoriteStudioSessions: [],
 
-  activeProvider: {
-    id: "systemsculpt",
-    name: "SystemSculpt",
-    type: "native",
-  },
-
-  lastSaveAsNoteFolder: "SystemSculpt/AI Responses",
   chatExportPreferences: {
     options: createDefaultChatExportOptions(),
     lastFolder: "",
@@ -632,41 +239,12 @@ Raw transcript:`,
 
   showDiagnostics: false,
   enableExperimentalFeatures: false,
-  // Deprecated option removed; custom providers are not filtered by server allowlists
-  enableSystemSculptProvider: false,
-  useSystemSculptAsFallback: false,
-
-  /**
-   * Percentage of the model context window to use (0-100)
-   */
-  contextWindowPercentage: 25,
-
   logLevel: LogLevel.WARNING,
   debugMode: false,
-  preserveReasoningVerbatim: true,
-  showUpdateNotifications: true,
-
-  /**
-   * MCP (Model Context Protocol) defaults
-   * Note: Internal servers (filesystem, youtube) are hardcoded in MCPService
-   * and are always available.
-   */
-  mcpServers: [], // Only custom HTTP servers - internal servers are hardcoded
-
   defaultChatTag: "",
   chatFontSize: "medium",
-  hideSystemMessagesInChat: false,
   respectReducedMotion: true,
-  openAiApiKey: "",
 
-  imageGenerationDefaultModelId: "",
-  imageGenerationLastUsedModelId: "",
-  imageGenerationLastUsedCount: 1,
-  imageGenerationLastUsedAspectRatio: "",
-  imageGenerationPollIntervalMs: 1000,
-  imageGenerationOutputDir: "SystemSculpt/Attachments/Generations",
-  imageGenerationSaveMetadataSidecar: true,
-  imageGenerationModelCatalogCache: null,
   studioDefaultProjectsFolder: "SystemSculpt/Studio",
   studioRunRetentionMaxRuns: 100,
   studioRunRetentionMaxArtifactsMb: 1024,
@@ -674,27 +252,16 @@ Raw transcript:`,
 
   /**
    * Embeddings defaults
-   */
+  */
   embeddingsEnabled: false,
-  embeddingsModel: "openrouter/openai/text-embedding-3-small",
-  embeddingsAutoProcess: true,
   embeddingsExclusions: {
     folders: [],
     patterns: [],
     ignoreChatHistory: true,
     respectObsidianExclusions: true
   },
-  embeddingsProvider: 'systemsculpt',
-  embeddingsCustomEndpoint: '',
-  embeddingsCustomApiKey: '',
-  embeddingsCustomModel: '',
-  embeddingsBatchSize: 20, // Optimized batch size for parallel processing
-  embeddingsRateLimitPerMinute: 50, // Default rate limiting
-  embeddingsQuietPeriodMs: 1200,
   embeddingsPortableIndex: true,
   embeddingsRebuildPending: false,
-  embeddingsRebuildRetryAt: 0,
-  // Search behavior defaults removed; handled internally
   
   /**
    * Automatic backup defaults
@@ -704,59 +271,7 @@ Raw transcript:`,
   automaticBackupRetentionDays: 30, // Keep backups for 30 days
   lastAutomaticBackup: 0, // No automatic backup yet
   
-  // preserveReasoningVerbatim default already defined above
-
-  /**
-   * Meeting processor defaults
-   */
-  meetingProcessorOptions: {
-    summary: true,
-    actionItems: true,
-    decisions: true,
-    risks: false,
-    questions: false,
-    transcriptCleanup: true,
-  },
-  meetingProcessorOutputDirectory: "SystemSculpt/Extractions",
-  meetingProcessorOutputNameTemplate: "{{basename}}-processed.md",
-
-  /**
-   * YouTube Canvas defaults
-   */
-  youtubeNotesFolder: "SystemSculpt/YouTube",
-  youtubeCanvasToggles: {
-    summary: true,
-    keyPoints: false,
-    studyNotes: false,
-  },
-
-  /**
-   * Readwise integration defaults
-   */
-  readwiseEnabled: false,
-  readwiseApiToken: "",
-  readwiseDestinationFolder: "SystemSculpt/Readwise",
-  readwiseOrganization: "by-category",
-  readwiseTweetOrganization: "standalone",
-  readwiseSyncMode: "interval",
-  readwiseSyncIntervalMinutes: 60,
-  readwiseLastSyncTimestamp: 0,
-  readwiseLastSyncCursor: "",
-  readwiseImportOptions: DEFAULT_READWISE_IMPORT_OPTIONS,
-
-  /**
-   * Runtime-discovered model incompatibilities
-   */
-  runtimeToolIncompatibleModels: {},
-  runtimeImageIncompatibleModels: {},
 };
-
-export interface ApiStatusResponse {
-  status: "ok" | "error" | "maintenance";
-  message?: string;
-  version?: string;
-}
-
 
 export type ChatRole = "user" | "assistant" | "system" | "tool";
 
@@ -773,6 +288,24 @@ export interface TextContent {
 }
 
 export type MultiPartContent = TextContent | ImageContent;
+
+export interface ChatAttachmentContentRef {
+  schema: "systemsculpt-chat-attachment-v1";
+  payload: "image-bytes" | "utf8-content-part";
+  sha256: string;
+  byteLength: number;
+}
+
+/** Durable identity for a composer attachment represented by one content part. */
+export interface ChatAttachmentMetadata {
+  id: string;
+  name: string;
+  mimeType: string;
+  byteLength: number;
+  kind: "document" | "image" | "text";
+  contentPartIndex: number;
+  contentRef?: ChatAttachmentContentRef;
+}
 
 export interface UrlCitation {
   url: string;
@@ -815,12 +348,14 @@ export interface ChatMessage {
   role: ChatRole;
   content: string | MultiPartContent[] | null;
   message_id: string;
-  pi_entry_id?: string;
+  /**
+   * Presentation/retry metadata only. Model transports intentionally read the
+   * content parts and never send this local descriptor.
+   */
+  attachmentMetadata?: ChatAttachmentMetadata[];
   documentContext?: {
     documentIds: string[];
   };
-  systemPromptType?: string;
-  systemPromptPath?: string;
   annotations?: Annotation[];
   // Additional fields for tool messages
   tool_call_id?: string;
@@ -829,7 +364,7 @@ export interface ChatMessage {
   tool_calls?: ToolCall[];
   // Reasoning trace from assistant messages
   reasoning?: string;
-  // Provider-specific structured reasoning blocks (OpenRouter/OpenAI Responses-style)
+  // Structured reasoning blocks returned by the managed gateway.
   reasoning_details?: unknown[];
   // Sequential message parts for interleaved reasoning and tool calls (2025 AI SDK pattern)
   messageParts?: MessagePart[];
@@ -875,21 +410,6 @@ export interface SystemSculptStreamChunk {
 	    model?: string;
 	  };
 	}
-
-export interface SystemPromptPreset {
-  id: string;
-  label: string;
-  description?: string;
-  isUserConfigurable: boolean;
-  systemPrompt: string;
-}
-
-export interface SystemPromptType {
-  id: string; // e.g., "text_modification"
-  label: string; // e.g., "Text Modification"
-  description?: string; // Optional description of what this prompt type does
-  isUserConfigurable: boolean; // Whether user can customize the prompt
-}
 
 export interface TextModificationState {
   originalText: string;

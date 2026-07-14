@@ -138,7 +138,7 @@ describe("licenseUtils", () => {
       verifyPremiumAccess(settings);
 
       expect(Notice).toHaveBeenCalledWith(
-        expect.stringContaining("Premium Pro license required")
+        expect.stringContaining("Premium pro license required")
       );
     });
 

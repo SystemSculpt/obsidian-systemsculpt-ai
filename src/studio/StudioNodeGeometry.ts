@@ -18,20 +18,20 @@ export const STUDIO_GRAPH_DEFAULT_NODE_HEIGHT = 164;
 export const STUDIO_GRAPH_LARGE_TEXT_NODE_WIDTH = STUDIO_GRAPH_DEFAULT_NODE_WIDTH * 2;
 export const STUDIO_GRAPH_LARGE_TEXT_NODE_MIN_HEIGHT = STUDIO_GRAPH_DEFAULT_NODE_HEIGHT * 2;
 export const STUDIO_GRAPH_NODE_MIN_WIDTH = 220;
-export const STUDIO_GRAPH_NODE_MAX_WIDTH = 2000;
+const STUDIO_GRAPH_NODE_MAX_WIDTH = 2000;
 export const STUDIO_GRAPH_NODE_MIN_HEIGHT = 120;
-export const STUDIO_GRAPH_NODE_MAX_HEIGHT = 2000;
+const STUDIO_GRAPH_NODE_MAX_HEIGHT = 2000;
 export const STUDIO_GRAPH_TERMINAL_DEFAULT_WIDTH = 640;
 export const STUDIO_GRAPH_TERMINAL_DEFAULT_HEIGHT = 420;
 export const STUDIO_GRAPH_TERMINAL_MIN_WIDTH = 360;
-export const STUDIO_GRAPH_TERMINAL_MAX_WIDTH = 2000;
+const STUDIO_GRAPH_TERMINAL_MAX_WIDTH = 2000;
 export const STUDIO_GRAPH_TERMINAL_MIN_HEIGHT = 220;
-export const STUDIO_GRAPH_TERMINAL_MAX_HEIGHT = 1600;
+const STUDIO_GRAPH_TERMINAL_MAX_HEIGHT = 1600;
 
 // Text scales poster-large (tldraw-style): the caps exist only to keep truly
 // absurd values from wrecking canvas math, not to constrain design intent.
 export const STUDIO_GRAPH_TEXT_NODE_MIN_WIDTH = 140;
-export const STUDIO_GRAPH_TEXT_NODE_MAX_WIDTH = 4000;
+const STUDIO_GRAPH_TEXT_NODE_MAX_WIDTH = 4000;
 // One line of default-size text plus the vertical chrome — the card is
 // chromeless (no toolbar), so a single-line text node is genuinely short.
 export const STUDIO_GRAPH_TEXT_NODE_MIN_HEIGHT = 32;
@@ -57,7 +57,8 @@ export const STUDIO_GRAPH_MEASURED_NODE_MIN_HEIGHT = 24;
  * resolveStudioTextNodeHeight. Line height approximates the default 14px font
  * at the base leading; the vertical chrome is the content padding plus the
  * card borders (keep in sync with .ss-studio-text-node-display padding in
- * studio.css). Live DOM measurement (resolveStudioTextNodeHeight with an
+ * views/studio/text-nodes.css). Live DOM measurement
+ * (resolveStudioTextNodeHeight with an
  * element) always wins; this estimate keeps group bounds, canvas bounds, and
  * jsdom tests correct when no element exists.
  */
@@ -160,7 +161,7 @@ export function resolveStudioNodeResizeSemantics(
   return "min-height";
 }
 
-export function countStudioTextNodeLines(text: unknown): number {
+function countStudioTextNodeLines(text: unknown): number {
   const value =
     typeof text === "string"
       ? text
@@ -179,7 +180,7 @@ export function estimateStudioTextNodeHeight(lineCount: number): number {
   );
 }
 
-export function isStudioTextNode(node: Pick<StudioNodeInstance, "kind">): boolean {
+function isStudioTextNode(node: Pick<StudioNodeInstance, "kind">): boolean {
   return isStudioVisualOnlyNodeKind(node.kind) && node.kind === "studio.text";
 }
 
@@ -196,7 +197,7 @@ export function isStudioExpandedTextNodeKind(kind: string): boolean {
   );
 }
 
-export function isStudioTerminalNode(node: Pick<StudioNodeInstance, "kind">): boolean {
+function isStudioTerminalNode(node: Pick<StudioNodeInstance, "kind">): boolean {
   return String(node.kind || "").trim() === "studio.terminal";
 }
 

@@ -11,29 +11,8 @@
 }
 
 .ss-context-filter-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--ss-space-1);
-  min-height: var(--ss-control-height-sm);
-  padding: 0 var(--ss-space-3);
-  background-color: var(--ss-surface-1);
-  border: 1px solid var(--ss-line);
   border-radius: var(--ss-radius-full);
   color: var(--ss-ink-muted);
-  font-size: var(--ss-text-sm);
-  cursor: pointer;
-  transition: var(--ss-transition-colors);
-}
-
-.ss-context-filter-btn:hover {
-  background-color: var(--ss-surface-2);
-  color: var(--ss-ink);
-}
-
-.ss-context-filter-btn.is-active {
-  background-color: var(--ss-accent-tint-strong);
-  border-color: var(--ss-line-accent);
-  color: var(--ss-ink-accent);
 }
 
 .ss-context-file-list {
@@ -45,14 +24,23 @@
 }
 
 .ss-context-file-item {
-  display: flex;
+  border: 1px solid transparent;
+  border-radius: var(--ss-radius-sm);
+  transition: var(--ss-transition-colors);
+}
+
+.ss-context-file-label {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
   align-items: center;
   gap: var(--ss-space-2);
   padding: var(--ss-space-2) var(--ss-space-3);
-  border: 1px solid transparent;
-  border-radius: var(--ss-radius-sm);
   cursor: pointer;
-  transition: var(--ss-transition-colors);
+}
+
+.ss-context-file-label > input {
+  margin: 0;
+  accent-color: var(--ss-accent);
 }
 
 .ss-context-file-item:hover {
@@ -64,13 +52,12 @@
   border-color: var(--ss-line-accent);
 }
 
-.ss-context-file-item.is-disabled {
-  opacity: 0.5;
-  pointer-events: none;
-}
-
 .ss-context-file-item.is-attached {
   border-left: 2px solid var(--ss-success);
+}
+
+.ss-context-file-item.is-attached .ss-context-file-label {
+  cursor: default;
 }
 
 .ss-context-file-icon {
@@ -120,4 +107,9 @@
 .ss-context-load-more {
   align-self: center;
   margin: var(--ss-space-2) 0;
+}
+
+.ss-context-load-more-item {
+  display: flex;
+  justify-content: center;
 }

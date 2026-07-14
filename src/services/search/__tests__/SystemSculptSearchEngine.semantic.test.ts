@@ -96,7 +96,7 @@ describe("SystemSculptSearchEngine semantic mode", () => {
 
       const searchPromise = engine.search("test query", { mode: "semantic", limit: 10 });
 
-      jest.advanceTimersByTime(1600);
+      await jest.advanceTimersByTimeAsync(1600);
 
       const res = await searchPromise;
 

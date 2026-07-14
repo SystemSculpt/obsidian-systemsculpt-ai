@@ -1,5 +1,6 @@
 import type { App } from "obsidian";
 import * as obsidian from "obsidian";
+import { createSurfaceElement, resolveSurfaceDomContext } from "../core/ui/surface";
 
 /**
  * Obsidian's native Canvas text cards do not construct a detached CodeMirror
@@ -127,7 +128,10 @@ function looksLikeMarkdownEmbedConstructor(
   );
 }
 
-function resolveInternalMarkdownEmbedClass(app: App): InternalMarkdownEmbedConstructor | null {
+function resolveInternalMarkdownEmbedClass(
+  app: App,
+  ownerDocument: Document = resolveSurfaceDomContext().document
+): InternalMarkdownEmbedConstructor | null {
   const appKey = app as unknown as object;
   const cached = resolvedMarkdownEmbedByApp.get(appKey);
   if (cached !== undefined) {
@@ -146,7 +150,7 @@ function resolveInternalMarkdownEmbedClass(app: App): InternalMarkdownEmbedConst
       };
     }).embedRegistry?.embedByExtension?.md;
     if (typeof embedCreator === "function") {
-      const probeEl = document.createElement("div");
+      const probeEl = createSurfaceElement(ownerDocument, "div");
       widget = embedCreator({ app, containerEl: probeEl }, null, "") as
         | InternalMarkdownEmbedInstance
         | null;
@@ -275,7 +279,11 @@ function getEmbeddableMarkdownClass(
         "focusout",
         (event) => {
           const relatedTarget = (event as FocusEvent).relatedTarget;
-          if (relatedTarget instanceof Node && focusRootEl.contains(relatedTarget)) {
+          if (
+            relatedTarget
+            && typeof (relatedTarget as Node).nodeType === "number"
+            && focusRootEl.contains(relatedTarget as Node)
+          ) {
             return;
           }
           this.popScope(app);
@@ -444,7 +452,7 @@ export function createEmbeddableMarkdownEditor(
   containerEl: HTMLElement,
   options: EmbeddableMarkdownEditorOptions
 ): EmbeddableMarkdownEditorHandle | null {
-  const Base = resolveInternalMarkdownEmbedClass(app);
+  const Base = resolveInternalMarkdownEmbedClass(app, containerEl.ownerDocument);
   if (!Base) {
     return null;
   }

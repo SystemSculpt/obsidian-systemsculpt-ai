@@ -9,7 +9,6 @@ const STUDIO_GRAPH_EDITABLE_SELECTOR = [
 ].join(", ");
 const STUDIO_GRAPH_MENU_SELECTOR = ".ss-studio-node-context-menu, .ss-studio-simple-context-menu";
 const STUDIO_GRAPH_NATIVE_WHEEL_SCROLL_SELECTOR = [
-  ".ss-studio-node-inspector",
   ".ss-studio-node-context-menu",
   ".ss-studio-simple-context-menu",
   ".ss-studio-group-color-palette",
@@ -19,15 +18,15 @@ const STUDIO_GRAPH_NATIVE_WHEEL_SCROLL_SELECTOR = [
   ".ss-studio-node-text-rendered:focus-within",
 ].join(", ");
 
-export function resolveStudioGraphTargetElement(target: EventTarget | null): Element | null {
+function resolveStudioGraphTargetElement(target: EventTarget | null): Element | null {
   if (!target) {
     return null;
   }
   if (typeof (target as { closest?: unknown }).closest === "function") {
     return target as Element;
   }
-  if (typeof Node !== "undefined" && target instanceof Node) {
-    return target.parentElement;
+  if ("parentElement" in (target as object)) {
+    return (target as Node).parentElement;
   }
   return null;
 }
@@ -50,10 +49,7 @@ export function isStudioGraphEditableFieldActive(target: EventTarget | null): bo
     return false;
   }
 
-  if (typeof document === "undefined") {
-    return false;
-  }
-  const activeElement = (document as { activeElement?: unknown }).activeElement;
+  const activeElement = editableFieldEl.ownerDocument.activeElement;
   if (!activeElement || typeof activeElement !== "object") {
     return false;
   }

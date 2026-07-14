@@ -93,20 +93,11 @@ jest.mock("obsidian", () => {
     ButtonComponent,
     Setting,
     Notice: jest.fn(),
-    Platform: {
-      isDesktopApp: true,
-    },
   };
 });
 
-jest.mock("../core/ui", () => ({
-  showPopup: jest.fn(),
-}));
-
-jest.mock("../modals/UpdateNotificationWarningModal", () => ({
-  UpdateNotificationWarningModal: jest.fn().mockImplementation(() => ({
-    open: jest.fn().mockResolvedValue({ confirmed: true }),
-  })),
+jest.mock("../core/ui/modals/PromptModal", () => ({
+  showPrompt: jest.fn(),
 }));
 
 jest.mock("../utils/clipboard", () => ({
@@ -140,16 +131,10 @@ describe("Advanced settings tab", () => {
       app,
       settings: {
         debugMode: false,
-        showUpdateNotifications: true,
-        desktopAutomationBridgeEnabled: false,
       },
       getSettingsManager: jest.fn(() => ({
         updateSettings: jest.fn().mockResolvedValue(undefined),
       })),
-      versionCheckerService: {
-        onUpdateNotificationsDisabled: jest.fn(),
-        onUpdateNotificationsEnabled: jest.fn(),
-      },
     };
 
     const container = document.createElement("div");
@@ -163,52 +148,7 @@ describe("Advanced settings tab", () => {
 
     expect(renderQuickActionsSection).toHaveBeenCalledWith(container);
     expect(container.textContent).toContain("Quick actions");
-    expect(container.textContent).toContain("Update notifications");
-    expect(container.textContent).toContain("Desktop automation bridge");
+    expect(container.textContent).not.toContain("Update notifications");
     expect(container.textContent).not.toContain("Development mode");
-  });
-
-  it("updates desktop automation bridge settings from the advanced tab toggle", async () => {
-    const app = new App();
-    const updateSettings = jest.fn().mockResolvedValue(undefined);
-    const plugin: any = {
-      app,
-      settings: {
-        debugMode: false,
-        showUpdateNotifications: true,
-        desktopAutomationBridgeEnabled: false,
-      },
-      getSettingsManager: jest.fn(() => ({
-        updateSettings,
-      })),
-      versionCheckerService: {
-        onUpdateNotificationsDisabled: jest.fn(),
-        onUpdateNotificationsEnabled: jest.fn(),
-      },
-    };
-
-    const container = document.createElement("div");
-    const tab: any = {
-      app,
-      plugin,
-      renderQuickActionsSection: jest.fn(),
-    };
-
-    displayAdvancedTabContent(container, tab);
-
-    const toggle = Array.from(container.querySelectorAll("input[type='checkbox']")).find((input) => {
-      const setting = input.closest(".setting-item");
-      return setting?.textContent?.includes("Desktop automation bridge");
-    }) as HTMLInputElement | undefined;
-
-    expect(toggle).toBeDefined();
-    toggle!.checked = true;
-    toggle!.dispatchEvent(new Event("change", { bubbles: true }));
-    await Promise.resolve();
-
-    expect(updateSettings).toHaveBeenCalledWith({
-      desktopAutomationBridgeEnabled: true,
-    });
-    expect(Notice).toHaveBeenCalledWith("Desktop automation bridge enabled.");
   });
 });

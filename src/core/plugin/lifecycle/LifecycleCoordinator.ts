@@ -83,7 +83,6 @@ export class LifecycleCoordinator {
     const tasks = this.phases.get(phase) ?? [];
     for (const task of tasks) {
       const taskId = task.id;
-      const displayName = task.label ?? taskId;
       const optional = task.optional ?? false;
       const phaseDefaults = PHASE_DIAGNOSTIC_DEFAULTS[phase] ?? PHASE_DIAGNOSTIC_DEFAULTS.bootstrap;
       const defaultThresholds = optional ? phaseDefaults.optional : phaseDefaults.required;

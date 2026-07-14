@@ -194,7 +194,7 @@ function parseSvgDimensions(text: string): StudioImageDimensions | null {
   return null;
 }
 
-export function detectStudioImageDimensions(bytes: ArrayBuffer, mimeType: string): StudioImageDimensions | null {
+function detectStudioImageDimensions(bytes: ArrayBuffer, mimeType: string): StudioImageDimensions | null {
   const normalizedMime = String(mimeType || "").trim().toLowerCase();
   const uint8 = new Uint8Array(bytes);
   if (normalizedMime === "image/png") {
@@ -216,11 +216,6 @@ export function detectStudioImageDimensions(bytes: ArrayBuffer, mimeType: string
 }
 
 function base64FromArrayBuffer(bytes: ArrayBuffer): string {
-  const bufferCtor = (globalThis as any)?.Buffer;
-  if (bufferCtor && typeof bufferCtor.from === "function") {
-    return bufferCtor.from(bytes).toString("base64");
-  }
-
   const uint8 = new Uint8Array(bytes);
   let binary = "";
   const chunkSize = 0x8000;
@@ -517,7 +512,7 @@ function supportsCanvasBoardRender(): boolean {
     return false;
   }
   try {
-    const canvas = document.createElement("canvas");
+    const canvas = createEl("canvas");
     return typeof canvas.getContext === "function" && Boolean(canvas.getContext("2d"));
   } catch {
     return false;
@@ -525,7 +520,7 @@ function supportsCanvasBoardRender(): boolean {
 }
 
 function createCanvas(width: number, height: number): HTMLCanvasElement {
-  const canvas = document.createElement("canvas");
+  const canvas = createEl("canvas");
   canvas.width = Math.max(1, Math.floor(width));
   canvas.height = Math.max(1, Math.floor(height));
   return canvas;
@@ -546,11 +541,6 @@ async function canvasToArrayBuffer(canvas: HTMLCanvasElement, mimeType: string):
   }
   const dataUrl = canvas.toDataURL(mimeType);
   const base64 = dataUrl.split(",")[1] || "";
-  const bufferCtor = (globalThis as any)?.Buffer;
-  if (bufferCtor && typeof bufferCtor.from === "function") {
-    const buffer = bufferCtor.from(base64, "base64");
-    return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength) as ArrayBuffer;
-  }
   if (typeof atob !== "function") {
     throw new Error("Canvas encoding is unavailable in this environment.");
   }
@@ -955,7 +945,7 @@ export async function renderStudioCaptionBoardImageFromBytes(options: {
   });
 }
 
-export async function renderStudioCaptionBoardImage(options: {
+async function renderStudioCaptionBoardImage(options: {
   baseImage: StudioAssetRef;
   boardState: StudioCaptionBoardState;
   readAsset: (asset: StudioAssetRef) => Promise<ArrayBuffer>;

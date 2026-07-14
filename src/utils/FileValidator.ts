@@ -1,5 +1,5 @@
 import { App, TFile } from "obsidian";
-import { showPopup } from "../core/ui";
+import { showPrompt } from "../core/ui/modals/PromptModal";
 
 // Maximum file size for uploads (500MB)
 export const MAX_FILE_SIZE = 500 * 1024 * 1024;
@@ -38,7 +38,7 @@ export async function validateFileSize(
     const maxLabel = resolveMaxLabel(maxBytes, options.maxLabel);
 
     // Show popup warning for non-audio files
-    await showPopup(
+    await showPrompt(
       app,
       `The file "${file.name}" is too large (${formatFileSize(fileSize)}). The maximum allowed size is ${maxLabel}.`,
       {
@@ -69,7 +69,7 @@ export async function validateBrowserFileSize(
     const maxLabel = resolveMaxLabel(maxBytes, options.maxLabel);
 
     // Show popup warning for non-audio files
-    await showPopup(
+    await showPrompt(
       app,
       `The file "${file.name}" is too large (${formatFileSize(file.size)}). The maximum allowed size is ${maxLabel}.`,
       {

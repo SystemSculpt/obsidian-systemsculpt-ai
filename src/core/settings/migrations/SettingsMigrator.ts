@@ -37,6 +37,118 @@ export const LEGACY_KEYS_REMOVED_IN_V1: readonly string[] = [
   "showVideoRecordingPermissionPopup",
 ];
 
+export const LEGACY_EMBEDDINGS_KEYS_REMOVED_IN_V3: readonly string[] = [
+  "embeddingsModel",
+  "embeddingsProvider",
+  "embeddingsCustomEndpoint",
+  "embeddingsCustomApiKey",
+  "embeddingsCustomModel",
+  "embeddingsBatchSize",
+  "embeddingsRateLimitPerMinute",
+  "embeddingsQuietPeriodMs",
+  "embeddingsRebuildRetryAt",
+];
+
+/**
+ * Client-owned text-model routing was retired in schema v4. These values can
+ * contain provider credentials, so migration deletes the complete legacy
+ * surface instead of carrying inert secrets into managed-only settings.
+ */
+export const LEGACY_CLIENT_MODEL_KEYS_REMOVED_IN_V4: readonly string[] = [
+  "serverUrl",
+  "settingsMode",
+  "selectedModelId",
+  "useLatestModelEverywhere",
+  "showModelTooltips",
+  "showVisionModelsOnly",
+  "showTopPicksOnly",
+  "customProviders",
+  "studioPiAuthMigrationVersion",
+  "modelFilterSettings",
+  "favoriteModels",
+  "favoritesFilterSettings",
+  "activeProvider",
+  "lastUsedModel",
+  "enableSystemSculptProvider",
+  "useSystemSculptAsFallback",
+  "contextWindowPercentage",
+  "openAiApiKey",
+  "runtimeToolIncompatibleModels",
+  "runtimeImageIncompatibleModels",
+  "piAuth",
+  "piAuthStorage",
+  "piModels",
+  "localPiModelId",
+  "defaultModelId",
+  "transcriptionProvider",
+  "customTranscriptionEndpoint",
+  "customTranscriptionApiKey",
+  "customTranscriptionModel",
+  "imageGenerationDefaultModelId",
+  "imageGenerationLastUsedModelId",
+  "imageGenerationModelCatalogCache",
+  "imageGenerationLastUsedCount",
+  "imageGenerationLastUsedAspectRatio",
+  "imageGenerationPollIntervalMs",
+  "imageGenerationOutputDir",
+  "imageGenerationSaveMetadataSidecar",
+  "readwiseEnabled",
+  "readwiseApiToken",
+  "readwiseDestinationFolder",
+  "readwiseOrganization",
+  "readwiseTweetOrganization",
+  "readwiseSyncMode",
+  "readwiseSyncIntervalMinutes",
+  "readwiseLastSyncTimestamp",
+  "readwiseLastSyncCursor",
+  "readwiseImportOptions",
+  "mcpServers",
+] as const;
+
+export const LEGACY_CHAT_KEYS_REMOVED_IN_V5: readonly string[] = [
+  "systemPromptsDirectory",
+  "lastUsedPromptPath",
+  "agentModeEnabled",
+  "hideSystemMessagesInChat",
+  "preserveReasoningVerbatim",
+] as const;
+
+export const LEGACY_DIRECTORY_KEYS_REMOVED_IN_V5: readonly string[] = [
+  "webResearchDirectory",
+  "verifiedDirectories",
+] as const;
+
+/**
+ * Settings left behind by features removed during the managed-only client
+ * cutover. These fields are no longer read anywhere, but current-schema v5
+ * installs would otherwise preserve them forever when settings are saved.
+ */
+export const LEGACY_FEATURE_KEYS_REMOVED_IN_V6: readonly string[] = [
+  "desktopAutomationBridgeEnabled",
+  "postProcessingProviderId",
+  "postProcessingModelId",
+  "titleGenerationPrompt",
+  "titleGenerationPromptType",
+  "titleGenerationPromptPath",
+  "titleGenerationProviderId",
+  "titleGenerationModelId",
+  "lastSaveAsNoteFolder",
+  "meetingProcessorOptions",
+  "meetingProcessorOutputDirectory",
+  "meetingProcessorOutputNameTemplate",
+  "youtubeNotesFolder",
+  "youtubeCanvasToggles",
+] as const;
+
+export const LEGACY_SEMANTIC_INDEX_KEYS_REMOVED_IN_V7: readonly string[] = [
+  "embeddingsAutoProcess",
+] as const;
+
+export const LEGACY_UPDATE_KEYS_REMOVED_IN_V8: readonly string[] = [
+  "showUpdateNotifications",
+  "lastKnownVersion",
+] as const;
+
 export interface SettingsMigrationStep {
   /** The schema version this step upgrades the settings TO (from `to - 1`). */
   readonly to: number;
@@ -73,11 +185,79 @@ function pruneLegacyKeysV1(settings: Record<string, unknown>): Record<string, un
  * version `to - 1` to `to`. Add new steps here (never ad-hoc field deletes
  * scattered through load/validate) and bump CURRENT_SCHEMA_VERSION to match.
  */
-export const SETTINGS_MIGRATIONS: readonly SettingsMigrationStep[] = [
+const SETTINGS_MIGRATIONS: readonly SettingsMigrationStep[] = [
   {
     to: 1,
     describe: "Prune legacy keys removed before schema versioning was introduced",
     migrate: pruneLegacyKeysV1,
+  },
+  {
+    to: 2,
+    describe: "Remove retired managed disclosure acceptance",
+    migrate: (settings) => {
+      const next = { ...settings };
+      delete next.managedDisclosureAcceptance;
+      return next;
+    },
+  },
+  {
+    to: 3,
+    describe: "Remove legacy configurable embeddings provider and retry controls",
+    migrate: (settings) => {
+      const next = { ...settings };
+      for (const key of LEGACY_EMBEDDINGS_KEYS_REMOVED_IN_V3) {
+        delete next[key];
+      }
+      return next;
+    },
+  },
+  {
+    to: 4,
+    describe: "Remove retired client-side provider, model, Pi auth, and BYOK settings",
+    migrate: (settings) => {
+      const next = { ...settings };
+      for (const key of LEGACY_CLIENT_MODEL_KEYS_REMOVED_IN_V4) {
+        delete next[key];
+      }
+      return next;
+    },
+  },
+  {
+    to: 5,
+    describe: "Remove retired client-owned chat prompt, mode, and directory settings",
+    migrate: (settings) => {
+      const next = { ...settings };
+      for (const key of LEGACY_CHAT_KEYS_REMOVED_IN_V5) delete next[key];
+      for (const key of LEGACY_DIRECTORY_KEYS_REMOVED_IN_V5) delete next[key];
+      return next;
+    },
+  },
+  {
+    to: 6,
+    describe: "Remove orphaned feature, model-routing, and modal-state settings",
+    migrate: (settings) => {
+      const next = { ...settings };
+      for (const key of LEGACY_FEATURE_KEYS_REMOVED_IN_V6) delete next[key];
+      return next;
+    },
+  },
+  {
+    to: 7,
+    describe: "Remove the retired semantic-index auto-process switch",
+    migrate: (settings) => {
+      const next = { ...settings };
+      for (const key of LEGACY_SEMANTIC_INDEX_KEYS_REMOVED_IN_V7) delete next[key];
+      return next;
+    },
+  },
+  {
+    to: 8,
+    describe: "Remove duplicate plugin-update notification state",
+    migrate: (settings) => {
+      const next = { ...settings };
+      for (const key of LEGACY_UPDATE_KEYS_REMOVED_IN_V8) delete next[key];
+      return next;
+    },
   },
 ];
 

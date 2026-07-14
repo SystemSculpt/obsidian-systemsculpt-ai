@@ -26,26 +26,10 @@
 }
 
 .ss-credits-balance__tab {
-  min-height: var(--ss-control-height-sm);
-  padding: 0 var(--ss-space-3);
   border: none;
   border-radius: var(--ss-radius-xs);
   background: transparent;
   color: var(--ss-ink-muted);
-  font-size: var(--ss-text-sm);
-  font-weight: var(--ss-weight-medium);
-  cursor: pointer;
-  transition: var(--ss-transition-colors);
-}
-
-.ss-credits-balance__tab:hover {
-  color: var(--ss-ink);
-}
-
-.ss-credits-balance__tab.is-active {
-  background-color: var(--ss-surface-0);
-  color: var(--ss-ink);
-  box-shadow: var(--ss-elevation-1);
 }
 
 .ss-credits-balance__panel {
@@ -257,12 +241,7 @@
   align-self: center;
 }
 
-.ss-credits-usage__load-more.is-loading {
-  opacity: 0.65;
-  pointer-events: none;
-}
-
-@media (max-width: 720px) {
+@container ss-surface (max-width: 720px) {
   .ss-credits-balance__tabs {
     align-self: stretch;
   }

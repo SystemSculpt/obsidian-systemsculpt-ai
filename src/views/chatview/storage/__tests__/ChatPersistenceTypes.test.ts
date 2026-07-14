@@ -1,31 +1,32 @@
 import {
   buildChatLeafState,
-  normalizePiSessionState,
-  resolveChatBackend,
+  parseManagedChatSessionBinding,
 } from "../ChatPersistenceTypes";
 
 describe("ChatPersistenceTypes SystemSculpt runtime contract", () => {
-  it("normalizes legacy pi backend markers onto the SystemSculpt runtime", () => {
-    expect(
-      resolveChatBackend({
-        explicitBackend: "pi",
-        piSessionFile: "/tmp/session.jsonl",
-      })
-    ).toBe("systemsculpt");
+  const binding = {
+    id: "mchat_0123456789abcdef0123456789abcdef",
+    revision: 3,
+    boundChatId: "chat-1",
+    checkpointMessageId: "assistant-3",
+    toolsetFingerprint: "2:741638a5:5967d5",
+    budget: { messageCount: 4, imageCount: 1, attachmentBytes: 32, storedJsonBytes: 512 },
+  };
+
+  it("strictly accepts a session bound to the expected chat", () => {
+    expect(parseManagedChatSessionBinding(binding, "chat-1")).toEqual(binding);
   });
 
-  it("keeps the managed backend label even when local Pi session state is not preserved", () => {
-    expect(
-      resolveChatBackend({
-        explicitBackend: "pi",
-        piSessionFile: "/tmp/session.jsonl",
-        defaultBackend: "legacy",
-      })
-    ).toBe("systemsculpt");
+  it("rejects session state bound to another chat", () => {
+    expect(parseManagedChatSessionBinding(binding, "chat-2")).toBeUndefined();
   });
 
-  it("defaults clean chats onto the managed backend when no legacy marker is present", () => {
-    expect(resolveChatBackend({})).toBe("systemsculpt");
+  it("rejects unknown session fields and malformed budgets", () => {
+    expect(parseManagedChatSessionBinding({ ...binding, extra: true }, "chat-1")).toBeUndefined();
+    expect(parseManagedChatSessionBinding({
+      ...binding,
+      budget: { ...binding.budget, messageCount: -1 },
+    }, "chat-1")).toBeUndefined();
   });
 
   it("builds minimal resume state without backend or session internals", () => {

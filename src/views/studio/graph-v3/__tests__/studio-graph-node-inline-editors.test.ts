@@ -9,7 +9,7 @@ describe("StudioGraphNodeInlineEditors node-kind policy", () => {
     expect(hasStudioNodeInlineEditor("studio.json")).toBe(true);
     expect(hasStudioNodeInlineEditor("studio.cli_command")).toBe(true);
     expect(hasStudioNodeInlineEditor("studio.terminal")).toBe(true);
-    expect(hasStudioNodeInlineEditor("studio.http_request")).toBe(true);
+    expect(hasStudioNodeInlineEditor("studio.http_request")).toBe(false);
     expect(hasStudioNodeInlineEditor("studio.dataset")).toBe(true);
     expect(hasStudioNodeInlineEditor("studio.media_ingest")).toBe(true);
     expect(hasStudioNodeInlineEditor("studio.audio_extract")).toBe(true);

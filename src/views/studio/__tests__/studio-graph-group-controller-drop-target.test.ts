@@ -1,3 +1,5 @@
+/** @jest-environment jsdom */
+
 import type { StudioProjectV1 } from "../../../studio/types";
 import { StudioGraphGroupController } from "../StudioGraphGroupController";
 import {
@@ -143,7 +145,9 @@ describe("StudioGraphGroupController drop target resolution", () => {
       commitProjectMutation,
       getNodeElement: (nodeId) => (nodeId === "member" ? memberEl : null),
     });
-    const frameEl = createElementStub();
+    // Drag ownership is a DOM-realm contract; use a mounted element rather
+    // than the geometry-only style stub used for node transforms.
+    const frameEl = document.body.createDiv();
     const startEvent = {
       button: 0,
       pointerId: 17,

@@ -3,8 +3,8 @@
 import { App } from "obsidian";
 import { displayBackupTabContent } from "../settings/BackupTabContent";
 
-jest.mock("../core/ui", () => ({
-  showPopup: jest.fn(),
+jest.mock("../core/ui/modals/PromptModal", () => ({
+  showPrompt: jest.fn(),
 }));
 
 jest.mock("../core/settings/BackupRestoreModal", () => ({

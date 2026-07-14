@@ -100,12 +100,3 @@
   25% { transform: translateX(-3px); }
   75% { transform: translateX(3px); }
 }
-
-/* Reduced motion: freeze decorative movement, keep opacity changes instant. */
-@media (prefers-reduced-motion: reduce) {
-  .ss-modal * {
-    animation-duration: 0.01ms;
-    animation-iteration-count: 1;
-    transition-duration: 0.01ms;
-  }
-}

@@ -35,7 +35,7 @@ export function applyStudioNotePrefaceToTextOutputs(
   return outputs;
 }
 
-export function normalizeStudioNotePath(path: string): string {
+function normalizeStudioNotePath(path: string): string {
   return String(path || "").replace(/\\/g, "/").trim();
 }
 
@@ -90,7 +90,7 @@ export function serializeStudioNoteItems(items: StudioNoteConfigItem[]): StudioJ
   } as unknown as StudioJsonValue;
 }
 
-export function readStudioNoteItemsFromConfig(
+function readStudioNoteItemsFromConfig(
   config: Record<string, StudioJsonValue>
 ): StudioNoteConfigItem[] {
   return parseStudioNoteItems(config.notes);
@@ -104,7 +104,7 @@ export function readEnabledStudioNoteItems(
   );
 }
 
-export function readLegacyStudioNotePath(
+function readLegacyStudioNotePath(
   config: Record<string, StudioJsonValue>
 ): string {
   return normalizeStudioNotePath(typeof config.vaultPath === "string" ? config.vaultPath : "");

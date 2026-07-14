@@ -17,22 +17,18 @@ describe("SettingsTabRegistry SystemSculpt-only anchors", () => {
     const configs = buildSettingsTabConfigs(createTabStub());
     expect(configs.map((config) => ({ id: config.id, label: config.label }))).toEqual([
       { id: "account", label: "Account" },
-      { id: "providers", label: "Providers" },
       { id: "chat", label: "Chat" },
       { id: "workflow", label: "Workflow" },
       { id: "knowledge", label: "Knowledge" },
-      { id: "readwise", label: "Readwise" },
       { id: "workspace", label: "Workspace" },
       { id: "studio", label: "Studio" },
       { id: "advanced", label: "Advanced" },
     ]);
 
     const account = configs.find((config) => config.id === "account");
-    const providers = configs.find((config) => config.id === "providers");
     const chat = configs.find((config) => config.id === "chat");
     const workflow = configs.find((config) => config.id === "workflow");
     const knowledge = configs.find((config) => config.id === "knowledge");
-    const readwise = configs.find((config) => config.id === "readwise");
     const workspace = configs.find((config) => config.id === "workspace");
     const studio = configs.find((config) => config.id === "studio");
     const advanced = configs.find((config) => config.id === "advanced");
@@ -42,9 +38,6 @@ describe("SettingsTabRegistry SystemSculpt-only anchors", () => {
     expect(account?.anchor?.title).not.toMatch(/providers|api keys/i);
     expect(account?.anchor?.desc).not.toMatch(/fallback|openai|anthropic|ollama/i);
 
-    expect(providers?.anchor?.title).toContain("Providers");
-    expect(providers?.anchor?.desc).toContain("Connect your own AI provider accounts");
-
     expect(chat?.anchor?.title).toContain("Chat");
     expect(chat?.anchor?.title).not.toMatch(/favorites|prompts|templates/i);
     expect(chat?.anchor?.desc).toContain("chat preferences");
@@ -52,17 +45,15 @@ describe("SettingsTabRegistry SystemSculpt-only anchors", () => {
     expect(chat?.anchor?.desc).not.toMatch(/prompt|model picker|templates/i);
 
     expect(workflow?.anchor?.title).toContain("Audio");
-    expect(workflow?.anchor?.title).not.toContain("Automation");
+    expect(workflow?.anchor?.title).toContain("Automations");
     expect(workflow?.anchor?.desc).toContain("recording");
-    expect(workflow?.anchor?.desc).not.toContain("automation");
+    expect(workflow?.anchor?.desc).toContain("managed workflow automations");
+    expect(workflow?.sections).toHaveLength(2);
 
     expect(knowledge?.anchor?.desc).toContain("semantic search");
     expect(knowledge?.anchor?.desc).toContain("related note discovery");
     expect(knowledge?.anchor?.desc).not.toContain("Readwise");
     expect(knowledge?.anchor?.desc).not.toMatch(/custom provider|your own api/i);
-
-    expect(readwise?.anchor?.title).toContain("Readwise");
-    expect(readwise?.anchor?.desc).toContain("sync");
 
     expect(workspace?.anchor?.title).toContain("Directories");
     expect(workspace?.anchor?.desc).toContain("backup");
@@ -71,7 +62,8 @@ describe("SettingsTabRegistry SystemSculpt-only anchors", () => {
     expect(studio?.anchor?.desc).not.toMatch(/OpenRouter|model selection/i);
     expect(studio?.anchor?.desc).not.toMatch(/telemetry/i);
 
-    expect(advanced?.anchor?.title).toContain("Update Notifications");
+    expect(advanced?.anchor?.title).toContain("Diagnostics");
+    expect(advanced?.anchor?.title).not.toContain("Update Notifications");
     expect(advanced?.anchor?.desc).toContain("diagnostics");
     expect(advanced?.anchor?.desc).not.toMatch(/debug|changelog/i);
   });

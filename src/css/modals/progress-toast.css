@@ -1,15 +1,13 @@
 /**
- * Document-processing progress toast — fixed bottom-right widget
- * (DocumentProcessingModal.ts). Status rows (.systemsculpt-progress-status*)
- * are shared with the transcription/automation modals — see misc-modals.css.
+ * Shared operation progress panel — fixed bottom-right widget for long-running
+ * transcription, document conversion, and workflow automation tasks.
  */
 
-.systemsculpt-progress-modal {
+.systemsculpt-progress-panel {
   position: fixed;
   bottom: var(--ss-space-8);
   right: var(--ss-space-8);
-  width: 350px;
-  max-width: calc(100vw - var(--ss-space-10));
+  width: min(350px, calc(100vw - var(--ss-space-10)));
   padding: var(--ss-space-4);
   background-color: var(--ss-surface-2);
   border: 1px solid var(--ss-line);
@@ -38,6 +36,32 @@
   font-size: var(--ss-text-sm);
 }
 
+.systemsculpt-progress-dismiss {
+  margin-left: auto;
+  background: transparent;
+  border-color: transparent;
+}
+
+.systemsculpt-progress-status {
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-2);
+  padding: var(--ss-space-1) 0;
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-sm);
+}
+
+.systemsculpt-progress-status-icon {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.systemsculpt-progress-status-text {
+  flex: 1;
+  min-width: 0;
+}
+
 .systemsculpt-progress-percent {
   font-variant-numeric: tabular-nums;
   font-size: var(--ss-text-sm);
@@ -60,12 +84,28 @@
   transition: width var(--ss-dur-slow) var(--ss-ease);
 }
 
-.systemsculpt-progress-modal.is-complete .systemsculpt-progress-bar {
+.systemsculpt-progress-panel.is-complete .systemsculpt-progress-bar {
   background-color: var(--ss-success);
 }
 
-.systemsculpt-progress-modal.is-error .systemsculpt-progress-bar {
+.systemsculpt-progress-panel.is-error .systemsculpt-progress-bar {
   background-color: var(--ss-danger);
+}
+
+.systemsculpt-progress-panel.is-warning .systemsculpt-progress-bar {
+  background-color: var(--ss-warning);
+}
+
+.systemsculpt-progress-panel.is-collapsed {
+  width: auto;
+}
+
+.systemsculpt-progress-panel.is-collapsed > :not(.systemsculpt-progress-header) {
+  display: none;
+}
+
+.systemsculpt-progress-panel.is-collapsed .systemsculpt-progress-header {
+  margin-bottom: 0;
 }
 
 /* Steps */
@@ -84,19 +124,19 @@
   color: var(--ss-ink-faint);
 }
 
-.systemsculpt-progress-step.active {
+.systemsculpt-progress-step.is-active {
   color: var(--ss-ink);
 }
 
-.systemsculpt-progress-step.active .systemsculpt-progress-step-icon svg {
+.systemsculpt-progress-step.is-active .systemsculpt-progress-step-icon svg {
   animation: ss-spin 1s linear infinite;
 }
 
-.systemsculpt-progress-step.completed {
+.systemsculpt-progress-step.is-complete {
   color: var(--ss-success);
 }
 
-.systemsculpt-progress-step.error {
+.systemsculpt-progress-step.is-error {
   color: var(--ss-danger);
 }
 
@@ -111,6 +151,59 @@
   min-width: 0;
 }
 
+/* Dynamic items */
+.systemsculpt-progress-items {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ss-space-1);
+  max-height: 160px;
+  margin-top: var(--ss-space-3);
+  overflow-y: auto;
+}
+
+.systemsculpt-progress-items.is-hidden {
+  display: none;
+}
+
+.systemsculpt-progress-item {
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-2);
+  min-width: 0;
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-sm);
+}
+
+.systemsculpt-progress-item-icon,
+.systemsculpt-progress-item-status {
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+.systemsculpt-progress-item-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.systemsculpt-progress-item.is-running .systemsculpt-progress-item-status svg {
+  animation: ss-spin 1s linear infinite;
+}
+
+.systemsculpt-progress-item.is-complete {
+  color: var(--ss-success);
+}
+
+.systemsculpt-progress-item.is-error {
+  color: var(--ss-danger);
+}
+
+.systemsculpt-progress-item.is-skipped {
+  color: var(--ss-ink-faint);
+}
+
 /* Buttons */
 .systemsculpt-progress-buttons {
   display: flex;
@@ -118,40 +211,32 @@
   margin-top: var(--ss-space-3);
 }
 
-.systemsculpt-progress-button {
+.systemsculpt-progress-buttons.is-hidden {
+  display: none;
+}
+
+.systemsculpt-progress-button.ss-button {
   flex: 1;
-  min-height: var(--ss-control-height-sm);
-  padding: 0 var(--ss-space-3);
-  border: 1px solid var(--ss-line);
-  border-radius: var(--ss-radius-xs);
-  background-color: var(--ss-surface-1);
-  color: var(--ss-ink);
-  font-size: var(--ss-text-sm);
-  font-weight: var(--ss-weight-medium);
-  cursor: pointer;
-  transition: var(--ss-transition-colors);
-}
-
-.systemsculpt-progress-button:hover {
-  background-color: var(--ss-surface-3);
-}
-
-.systemsculpt-progress-button.primary {
-  background-color: var(--ss-accent);
-  border-color: var(--ss-accent);
-  color: var(--ss-ink-on-accent);
-}
-
-.systemsculpt-progress-button.primary:hover {
-  background-color: var(--ss-accent-hover);
 }
 
 .systemsculpt-progress-detail {
   margin-top: var(--ss-space-2);
   font-size: var(--ss-text-xs);
   color: var(--ss-ink-muted);
+  white-space: pre-line;
 }
 
 .systemsculpt-progress-detail.is-hidden {
   display: none;
+}
+
+@container ss-surface (max-width: 320px) {
+  .systemsculpt-progress-buttons {
+    flex-wrap: wrap;
+  }
+
+  .systemsculpt-progress-button.ss-button {
+    flex: 1 1 100%;
+    width: 100%;
+  }
 }

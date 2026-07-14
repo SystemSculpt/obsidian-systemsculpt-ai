@@ -1,16 +1,16 @@
 import { TFile } from 'obsidian';
 import type { ChatMessage, MultiPartContent, MessagePart } from '../../../types';
 import { errorLogger } from '../../../utils/errorLogger';
-import type { ChatView } from '../ChatView';
+import type { AgentChatView } from '../AgentChatView';
 import { MessagePartNormalizer } from '../utils/MessagePartNormalizer';
 import { ChatExportBuilder } from './ChatExportBuilder';
 import type { ChatExportContext, ChatExportResult, ChatExportSummary } from './ChatExportTypes';
 import { normalizeChatExportOptions, ChatExportOptions } from '../../../types/chatExport';
 
 export class ChatExportService {
-  private readonly chatView: ChatView;
+  private readonly chatView: AgentChatView;
 
-  constructor(chatView: ChatView) {
+  constructor(chatView: AgentChatView) {
     this.chatView = chatView;
   }
 
@@ -67,12 +67,11 @@ export class ChatExportService {
     };
   }
 
-  private calculateSummary(messages: ChatMessage[]): ChatExportSummary {
+  private calculateSummary(messages: readonly ChatMessage[]): ChatExportSummary {
     const summary: ChatExportSummary = {
       totalMessages: messages.length,
       assistantMessages: 0,
       userMessages: 0,
-      toolMessages: 0,
       toolCallCount: 0,
       reasoningBlockCount: 0,
       imageCount: 0,
@@ -85,9 +84,6 @@ export class ChatExportService {
           break;
         case 'user':
           summary.userMessages += 1;
-          break;
-        case 'tool':
-          summary.toolMessages += 1;
           break;
         default:
           break;
@@ -200,10 +196,4 @@ export class ChatExportService {
     return /^(png|jpe?g|webp|bmp|svg|mp3|wav|flac|ogg|mp4|m4a|mov|pdf|zip|tar|gz)$/i.test(extension);
   }
 
-  private capitalize(value: string): string {
-    if (!value) {
-      return '';
-    }
-    return value.charAt(0).toUpperCase() + value.slice(1);
-  }
 }

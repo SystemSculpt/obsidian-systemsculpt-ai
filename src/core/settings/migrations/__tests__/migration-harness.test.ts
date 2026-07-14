@@ -1,6 +1,6 @@
 /**
  * Migration harness (#212): settings fixtures captured from past releases must
- * load cleanly into HEAD — no throw, no lost custom providers/license, legacy
+ * load cleanly into HEAD — no throw, managed account state preserved, retired
  * keys pruned, new nested defaults back-filled, and the schema version stamped.
  *
  * Add a fixture here whenever the persisted settings shape changes across a
@@ -10,7 +10,13 @@
 import { DEFAULT_SETTINGS } from "../../../../types";
 import {
   CURRENT_SCHEMA_VERSION,
+  LEGACY_CHAT_KEYS_REMOVED_IN_V5,
+  LEGACY_CLIENT_MODEL_KEYS_REMOVED_IN_V4,
+  LEGACY_DIRECTORY_KEYS_REMOVED_IN_V5,
+  LEGACY_FEATURE_KEYS_REMOVED_IN_V6,
   LEGACY_KEYS_REMOVED_IN_V1,
+  LEGACY_SEMANTIC_INDEX_KEYS_REMOVED_IN_V7,
+  LEGACY_UPDATE_KEYS_REMOVED_IN_V8,
   migrateSettingsToCurrentSchema,
 } from "../SettingsMigrator";
 
@@ -18,6 +24,8 @@ import {
 const v4Legacy = require("../../../../../testing/fixtures/settings/v4.x-legacy.json");
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const v5PreVersioning = require("../../../../../testing/fixtures/settings/v5.x-pre-versioning.json");
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const v3ClientAuthority = require("../../../../../testing/fixtures/settings/v3-client-authority.json");
 
 interface SettingsFixture {
   name: string;
@@ -32,6 +40,7 @@ function stripFixtureMeta(fixture: Record<string, unknown>): Record<string, unkn
 const FIXTURES: SettingsFixture[] = [
   { name: "v4.x legacy", raw: stripFixtureMeta(v4Legacy) },
   { name: "v5.x pre-versioning", raw: stripFixtureMeta(v5PreVersioning) },
+  { name: "schema v3 client authority", raw: stripFixtureMeta(v3ClientAuthority) },
 ];
 
 describe("settings migration harness — past releases load cleanly into HEAD (#212)", () => {
@@ -51,11 +60,40 @@ describe("settings migration harness — past releases load cleanly into HEAD (#
         }
       });
 
-      it("preserves the user's custom providers — never wiped by an update (#112)", () => {
-        const original = (fixture.raw.customProviders as Array<{ id: string }>) ?? [];
-        const migrated = (result.settings.customProviders as Array<{ id: string }>) ?? [];
-        expect(migrated).toHaveLength(original.length);
-        expect(migrated.map((p) => p.id).sort()).toEqual(original.map((p) => p.id).sort());
+      it("removes retired client authority and secret fields", () => {
+        for (const key of LEGACY_CLIENT_MODEL_KEYS_REMOVED_IN_V4) {
+          expect(result.settings).not.toHaveProperty(key);
+        }
+      });
+
+      it("removes retired client-owned chat prompt and mode fields", () => {
+        for (const key of LEGACY_CHAT_KEYS_REMOVED_IN_V5) {
+          expect(result.settings).not.toHaveProperty(key);
+        }
+      });
+
+      it("removes retired client-owned directory storage and cache fields", () => {
+        for (const key of LEGACY_DIRECTORY_KEYS_REMOVED_IN_V5) {
+          expect(result.settings).not.toHaveProperty(key);
+        }
+      });
+
+      it("removes orphaned feature and model-routing fields", () => {
+        for (const key of LEGACY_FEATURE_KEYS_REMOVED_IN_V6) {
+          expect(result.settings).not.toHaveProperty(key);
+        }
+      });
+
+      it("removes the retired semantic-index auto-process switch", () => {
+        for (const key of LEGACY_SEMANTIC_INDEX_KEYS_REMOVED_IN_V7) {
+          expect(result.settings).not.toHaveProperty(key);
+        }
+      });
+
+      it("removes duplicate plugin-update notification state", () => {
+        for (const key of LEGACY_UPDATE_KEYS_REMOVED_IN_V8) {
+          expect(result.settings).not.toHaveProperty(key);
+        }
       });
 
       it("preserves the user's license fields", () => {

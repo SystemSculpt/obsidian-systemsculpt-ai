@@ -77,19 +77,21 @@ describe("Studio schema", () => {
     expect(parsed.migrations.applied[0].id).toBe("legacy-auto-migration");
   });
 
-  it("parses and validates policy documents", () => {
+  it("drops retired network grants while preserving retained policy capabilities", () => {
     const policy = createDefaultStudioPolicy();
-    policy.grants.push({
+    const legacyPolicy = {
+      ...policy,
+      grants: [{
       id: "grant_1",
       capability: "network",
-      scope: { allowedDomains: ["api.systemsculpt.com"] },
+      scope: { allowedDomains: ["systemsculpt.com"] },
       grantedAt: new Date().toISOString(),
       grantedByUser: true,
-    });
-    const parsed = parseStudioPolicy(JSON.stringify(policy));
+      }],
+    };
+    const parsed = parseStudioPolicy(JSON.stringify(legacyPolicy));
     expect(parsed.schema).toBe("studio.policy.v1");
-    expect(parsed.grants.length).toBe(1);
-    expect(parsed.grants[0].scope.allowedDomains).toContain("api.systemsculpt.com");
+    expect(parsed.grants).toEqual([]);
   });
 
   it("normalizes valid group colors and rejects invalid group colors", () => {

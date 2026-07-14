@@ -16,7 +16,7 @@ const obsidian = require("obsidian");
 const viewPrototype = (SystemSculptStudioView as any).prototype;
 
 // Real view methods driven against a synthetic context, mirroring the
-// prototype-context pattern in studio-view-cut-honesty.test.ts. Each name
+// prototype-context pattern in studio-view-remove-honesty.test.ts. Each name
 // listed here resolves `this.<name>(...)` calls inside the methods under
 // test to the real implementation.
 const REAL_VIEW_METHODS = [
@@ -120,11 +120,29 @@ function createEditEndHarness(options: {
     getProject: () => sessionRef.project,
   };
 
-  const context: any = {
+  let context: any;
+  const projectSessionController = {
+    commitMutation: (
+      reason: string,
+      mutator: (target: StudioProjectV1) => boolean | void,
+      mutationOptions?: { captureHistory?: boolean; mode?: "continuous" | "discrete" }
+    ): boolean => {
+      if (mutationOptions?.captureHistory !== false) {
+        context.captureProjectHistoryCheckpoint();
+      }
+      return session.mutate(reason, mutator);
+    },
+    syncProjectFromSession: (): void => {
+      context.currentProject = session.getProject();
+    },
+  };
+
+  context = {
     busy: options.busy ?? false,
     currentProject: project,
     currentProjectPath: "SystemSculpt/Studio/Text Cleanup.systemsculpt",
     currentProjectSession: session,
+    projectSessionController,
     historyState: createStudioGraphHistoryState(),
     editingTextNodeIds: new Set<string>(options.editingNodeIds ?? []),
     dirtyTextNodeEditIds: new Set<string>(),

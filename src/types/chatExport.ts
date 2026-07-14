@@ -5,7 +5,6 @@ export interface ChatExportOptions {
   includeConversation: boolean;
   includeUserMessages: boolean;
   includeAssistantMessages: boolean;
-  includeToolMessages: boolean;
   includeReasoning: boolean;
   includeToolCalls: boolean;
   includeToolCallArguments: boolean;
@@ -20,7 +19,6 @@ const DEFAULT_CHAT_EXPORT_OPTIONS: ChatExportOptions = {
   includeConversation: true,
   includeUserMessages: true,
   includeAssistantMessages: true,
-  includeToolMessages: false,
   includeReasoning: true,
   includeToolCalls: true,
   includeToolCallArguments: true,

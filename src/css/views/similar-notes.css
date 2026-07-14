@@ -1,380 +1,481 @@
 /**
- * Embeddings side panel list language.
- * TS: src/views/EmbeddingsView.ts.
+ * Compact Similar Notes workspace.
+ * TS: src/views/SimilarNotesPresentation.ts.
  */
 
-/* ------------------------------------------------------------------ *
- * View shell
- * ------------------------------------------------------------------ */
 .systemsculpt-embeddings-view {
+  height: 100%;
+  overflow: hidden;
+  background: var(--ss-surface-0);
+}
+
+.ss-embeddings-view {
   display: flex;
   flex-direction: column;
   height: 100%;
-  overflow: hidden;
-}
-
-/* Header */
-.ss-embeddings-view__header {
-  position: relative;
-  z-index: 1;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--ss-space-2);
-  flex-shrink: 0;
-  padding: var(--ss-space-3) var(--ss-space-4);
-  border-bottom: 1px solid var(--ss-line);
-}
-
-.ss-embeddings-view__title {
-  display: flex;
-  align-items: center;
-  gap: var(--ss-space-2);
   min-width: 0;
-  font-size: var(--ss-text-base);
-  font-weight: var(--ss-weight-semibold);
 }
 
-.ss-embeddings-view__icon svg {
-  width: var(--ss-icon-size);
-  height: var(--ss-icon-size);
-  color: var(--ss-ink-muted);
+.ss-embeddings-view__header {
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-2);
+  flex: 0 0 auto;
+  min-width: 0;
+  padding: var(--ss-space-2) var(--ss-space-3);
+  border-bottom: 1px solid var(--ss-line);
+  background: var(--ss-surface-0);
 }
 
-.ss-embeddings-view__title.is-refreshing {
-  animation: ss-pulse 1.4s var(--ss-ease) infinite;
+.ss-embeddings-view__identity {
+  min-width: 0;
+  flex: 1 1 auto;
 }
 
 .ss-embeddings-view__title-row {
   display: flex;
   align-items: center;
+  gap: var(--ss-space-1);
+  min-width: 0;
+  line-height: var(--ss-leading-tight);
+}
+
+.ss-embeddings-view__icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: var(--ss-ink-muted);
+}
+
+.ss-embeddings-view__icon svg {
+  width: var(--ss-icon-size-sm);
+  height: var(--ss-icon-size-sm);
+}
+
+.ss-embeddings-view__title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ss-ink);
+  font-size: var(--ss-text-base);
+  font-weight: var(--ss-weight-semibold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ss-embeddings-view__count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--ss-space-5);
+  height: var(--ss-space-5);
+  padding: 0 var(--ss-space-1);
+  border-radius: var(--ss-radius-full);
+  background: var(--ss-surface-2);
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.ss-embeddings-view__context {
+  min-width: 0;
+  margin-top: var(--ss-space-0);
+  overflow: hidden;
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-xs);
+  line-height: var(--ss-leading-tight);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ss-embeddings-view__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-0);
+  flex: 0 0 auto;
+}
+
+.ss-embeddings-view__icon-button {
+  width: var(--ss-control-height-sm);
+  height: var(--ss-control-height-sm);
+  min-width: var(--ss-control-height-sm);
+  min-height: var(--ss-control-height-sm);
+}
+
+.ss-embeddings-view__icon-button svg {
+  width: var(--ss-icon-size-sm);
+  height: var(--ss-icon-size-sm);
+}
+
+.ss-embeddings-view__index-status {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--ss-space-2);
+  padding: var(--ss-space-2) var(--ss-space-3);
+  border-bottom: 1px solid var(--ss-line);
+  background: var(--ss-surface-1);
+}
+
+.ss-embeddings-view__index-status[hidden] {
+  display: none;
+}
+
+.ss-embeddings-view__index-status.is-error {
+  background: var(--ss-danger-tint);
+}
+
+.ss-embeddings-view__index-status.is-paused {
+  background: var(--ss-warning-tint);
+}
+
+.ss-embeddings-view__index-icon {
+  display: inline-flex;
+  color: var(--ss-ink-muted);
+}
+
+.ss-embeddings-view__index-icon svg {
+  width: var(--ss-icon-size-sm);
+  height: var(--ss-icon-size-sm);
+}
+
+.ss-embeddings-view__index-status.is-processing .ss-embeddings-view__index-icon svg,
+.ss-embeddings-view__index-status.is-initializing .ss-embeddings-view__index-icon svg {
+  animation: ss-spin 1s linear infinite;
+}
+
+.ss-embeddings-view__index-status.is-error .ss-embeddings-view__index-icon {
+  color: var(--ss-danger);
+}
+
+.ss-embeddings-view__index-copy {
+  min-width: 0;
+}
+
+.ss-embeddings-view__index-label,
+.ss-embeddings-view__index-detail {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ss-embeddings-view__index-label {
+  color: var(--ss-ink);
+  font-size: var(--ss-text-sm);
+  font-weight: var(--ss-weight-medium);
+}
+
+.ss-embeddings-view__index-detail {
+  margin-top: var(--ss-space-0);
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-xs);
+}
+
+.ss-embeddings-view__index-progress {
+  display: block;
+  width: 100%;
+  height: var(--ss-space-1);
+  margin-top: var(--ss-space-1);
+  overflow: hidden;
+  border: 0;
+  border-radius: var(--ss-radius-full);
+  background: var(--ss-line);
+  color: var(--ss-accent);
+  accent-color: var(--ss-accent);
+}
+
+.ss-embeddings-view__index-progress::-webkit-progress-bar {
+  border-radius: var(--ss-radius-full);
+  background: var(--ss-line);
+}
+
+.ss-embeddings-view__index-progress::-webkit-progress-value {
+  border-radius: var(--ss-radius-full);
+  background: var(--ss-accent);
+}
+
+.ss-embeddings-view__results {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.ss-embeddings-view__results-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ss-similar-note {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  padding: var(--ss-space-2) var(--ss-space-3);
+  border-bottom: 1px solid var(--ss-line);
+  background: transparent;
+  transition: var(--ss-transition-colors), var(--ss-transition-transform);
+}
+
+.ss-similar-note:hover {
+  background: var(--ss-state-hover);
+}
+
+.ss-similar-note:last-child {
+  border-bottom: 0;
+}
+
+.ss-similar-note__content {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: var(--ss-space-0);
+  min-width: 0;
+}
+
+.ss-similar-note__heading {
+  display: flex;
+  align-items: center;
   gap: var(--ss-space-2);
   min-width: 0;
 }
 
-.ss-embeddings-view__file-name {
+.ss-similar-note__title {
   min-width: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-size: var(--ss-text-sm);
-  color: var(--ss-ink-muted);
-}
-
-.ss-embeddings-view__status {
-  display: none;
-}
-
-.systemsculpt-status-text {
-  font-size: var(--ss-text-xs);
-  color: var(--ss-ink-faint);
-}
-
-/* Scroll regions */
-.ss-embeddings-view__results {
   flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
+  overflow: hidden;
+  color: var(--ss-ink);
+  font-size: var(--ss-text-base);
+  font-weight: var(--ss-weight-medium);
+  line-height: var(--ss-leading-tight);
+  text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.ss-embeddings-view__results-container {
-  display: flex;
-  flex-direction: column;
+.ss-similar-note__title:hover,
+.ss-similar-note__title:focus-visible {
+  color: var(--ss-ink-accent);
+  text-decoration: none;
 }
 
-/* ------------------------------------------------------------------ *
- * Result rows
- * ------------------------------------------------------------------ */
-.ss-similar-note {
-  position: relative;
-  display: flex;
-  align-items: flex-start;
-  gap: var(--ss-space-3);
-  padding: var(--ss-space-3) var(--ss-space-4);
-  border-bottom: 1px solid var(--ss-line);
-  cursor: pointer;
-  transition: var(--ss-transition-colors);
-}
-
-.ss-similar-note:last-child {
-  border-bottom: none;
-}
-
-.ss-similar-note:hover {
-  background-color: var(--ss-state-hover);
-}
-
-/* Score chip */
-.ss-similar-note__score {
+.ss-similar-note__accessories {
   display: flex;
   align-items: center;
+  gap: var(--ss-space-1);
+  flex: 0 0 auto;
+}
+
+.ss-similar-note__score {
+  display: inline-flex;
+  align-items: center;
   justify-content: center;
-  flex-shrink: 0;
-  min-width: 36px;
-  height: 20px;
+  min-width: var(--ss-control-height-sm);
+  height: var(--ss-space-5);
   padding: 0 var(--ss-space-1);
   border-radius: var(--ss-radius-full);
-  background-color: var(--ss-surface-2);
+  background: var(--ss-surface-2);
+  color: var(--ss-ink-muted);
   font-size: var(--ss-text-xs);
-  font-weight: var(--ss-weight-semibold);
+  font-weight: var(--ss-weight-medium);
   font-variant-numeric: tabular-nums;
 }
 
-.ss-similar-note__score span {
-  display: contents;
-}
-
 .ss-similar-note__score--high {
-  background-color: var(--ss-success-tint);
+  background: var(--ss-success-tint);
   color: var(--ss-success);
 }
 
 .ss-similar-note__score--medium {
-  background-color: var(--ss-warning-tint);
+  background: var(--ss-warning-tint);
   color: var(--ss-warning);
 }
 
-.ss-similar-note__score--low {
-  color: var(--ss-ink-muted);
-}
-
-/* Content */
-.ss-similar-note__content {
-  display: flex;
-  flex-direction: column;
-  gap: var(--ss-space-0);
+.ss-similar-note__section,
+.ss-similar-note__excerpt,
+.ss-similar-note__metadata {
   min-width: 0;
-  flex: 1 1 auto;
-}
-
-.ss-similar-note__title {
-  font-size: var(--ss-text-base);
-  font-weight: var(--ss-weight-medium);
-}
-
-.ss-similar-note__title.internal-link:hover {
-  color: var(--ss-ink-accent);
-}
-
-.ss-similar-note__section-title {
-  font-size: var(--ss-text-sm);
-  color: var(--ss-ink-muted);
-}
-
-.ss-similar-note__excerpt {
-  font-size: var(--ss-text-sm);
-  color: var(--ss-ink-muted);
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
   overflow: hidden;
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-xs);
+  line-height: var(--ss-leading-base);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.systemsculpt-embeddings-view .ss-similar-note__excerpt {
-  -webkit-line-clamp: 1;
+.ss-similar-note__section {
+  color: var(--ss-ink-faint);
+  font-weight: var(--ss-weight-medium);
 }
 
 .ss-similar-note__metadata {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
   gap: var(--ss-space-2);
-  font-size: var(--ss-text-xs);
   color: var(--ss-ink-faint);
 }
 
 .ss-similar-note__path {
   min-width: 0;
-  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-/* ------------------------------------------------------------------ *
- * Drag to chat context
- * ------------------------------------------------------------------ */
+.ss-similar-note__date {
+  flex: 0 0 auto;
+}
+
+.ss-similar-note__context-action {
+  width: var(--ss-space-5);
+  height: var(--ss-space-5);
+  min-width: var(--ss-space-5);
+  border-radius: var(--ss-radius-xs);
+}
+
+.ss-similar-note__context-action:disabled {
+  background: var(--ss-success-tint);
+  color: var(--ss-success);
+  opacity: 1;
+}
+
 .ss-similar-note--draggable {
   cursor: grab;
 }
 
-.ss-similar-note--draggable::after {
-  content: "";
-  position: absolute;
-  top: var(--ss-space-2);
-  right: var(--ss-space-2);
-  width: var(--ss-icon-size-sm);
-  height: var(--ss-icon-size-sm);
-  background-color: currentColor;
-  opacity: 0;
-  transition: opacity var(--ss-dur-fast) var(--ss-ease);
-  -webkit-mask: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>') center / contain no-repeat;
-  mask: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>') center / contain no-repeat;
-}
-
-.ss-similar-note--draggable:hover::after {
-  opacity: 0.6;
-}
-
 .ss-similar-note.is-dragging {
-  opacity: 0.5;
-  transform: rotate(2deg);
+  opacity: 0.55;
+  transform: scale(0.99);
 }
 
 .ss-similar-note.is-in-context {
-  border-left: 2px solid var(--ss-success);
-  background-color: var(--ss-success-tint);
+  background: var(--ss-success-tint);
+  box-shadow: inset 2px 0 var(--ss-success);
 }
 
-/* Drop zone on the chat view */
-.systemsculpt-chat-view.drag-over-from-similar-notes {
-  background-color: var(--ss-accent-tint);
-}
-
-.systemsculpt-chat-view.drag-over-from-similar-notes::before {
-  content: "Drop to add to context";
-  position: fixed;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  z-index: var(--ss-z-notice);
-  padding: var(--ss-space-2) var(--ss-space-4);
-  background-color: var(--ss-surface-2);
-  border: 1px solid var(--ss-line-accent);
-  border-radius: var(--ss-radius-full);
-  box-shadow: var(--ss-elevation-3);
-  color: var(--ss-ink-accent);
-  font-size: var(--ss-text-sm);
-  font-weight: var(--ss-weight-medium);
-  pointer-events: none;
-}
-
-/* ------------------------------------------------------------------ *
- * State panes (empty / no-results / error / disabled)
- * ------------------------------------------------------------------ */
 .ss-embeddings-view__state {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: var(--ss-space-3);
+  margin: var(--ss-space-4);
+}
+
+.ss-embeddings-view__state > .ss-ui-state__icon {
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: var(--ss-space-2);
-  padding: var(--ss-space-8) var(--ss-space-4);
-  color: var(--ss-ink-muted);
-  text-align: center;
-}
-
-.ss-embeddings-view__state-icon {
-  color: var(--ss-ink-faint);
-}
-
-.ss-embeddings-view__state--error .ss-embeddings-view__state-icon {
-  color: var(--ss-danger);
-}
-
-.ss-embeddings-view__state-title {
-  font-weight: var(--ss-weight-semibold);
-  color: var(--ss-ink);
-}
-
-.ss-embeddings-view__state--error .ss-embeddings-view__state-title {
-  color: var(--ss-danger);
-}
-
-.ss-embeddings-view__state-description {
-  font-size: var(--ss-text-sm);
-}
-
-/* ------------------------------------------------------------------ *
- * Embeddings processing state
- * ------------------------------------------------------------------ */
-.ss-embeddings-view__processing {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--ss-space-2);
-  padding: var(--ss-space-6) var(--ss-space-4);
-  text-align: center;
-}
-
-.ss-embeddings-view__processing-icon {
-  color: var(--ss-ink-faint);
-}
-
-.ss-embeddings-view__processing-title {
-  font-weight: var(--ss-weight-semibold);
-}
-
-.ss-embeddings-view__processing-description {
-  font-size: var(--ss-text-sm);
+  width: var(--ss-control-height);
+  height: var(--ss-control-height);
+  border-radius: var(--ss-radius-md);
+  background: var(--ss-surface-2);
   color: var(--ss-ink-muted);
 }
 
-.ss-embeddings-view__processing-actions,
-.ss-embeddings-view__processing-secondary-actions {
-  display: flex;
-  gap: var(--ss-space-2);
-  margin-top: var(--ss-space-2);
+.ss-embeddings-view__state > .ss-ui-state__icon svg {
+  width: var(--ss-icon-size);
+  height: var(--ss-icon-size);
 }
 
-.ss-embeddings-view__processing-progress {
-  width: 100%;
-  max-width: 280px;
+.ss-embeddings-view__state--error > .ss-ui-state__icon {
+  background: var(--ss-danger-tint);
+  color: var(--ss-danger);
+}
+
+.ss-embeddings-view__state > .ss-ui-state__copy {
+  min-width: 0;
+}
+
+.ss-embeddings-view__state-actions {
+  display: flex;
+  flex-wrap: wrap;
+  grid-column: 2;
+  gap: var(--ss-space-2);
+  margin-top: var(--ss-space-1);
+}
+
+.ss-embeddings-view__progress-wrap {
   display: flex;
   flex-direction: column;
+  grid-column: 2;
   gap: var(--ss-space-1);
+  min-width: 0;
+  margin-top: var(--ss-space-1);
 }
 
-.systemsculpt-progress-text {
-  font-size: var(--ss-text-xs);
+.ss-embeddings-view__progress-label {
+  overflow: hidden;
   color: var(--ss-ink-muted);
+  font-size: var(--ss-text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-/* Track for the embeddings-view build progress (EmbeddingsView). Named
-   distinctly from .systemsculpt-progress-bar (the moving FILL in
-   modals/progress-toast.css) and from .ss-embeddings-progress-track
-   (the EmbeddingsStatusModal track in modals/embeddings-status.css). */
-.ss-embeddings-view-progress-track {
-  height: 4px;
-  background-color: var(--ss-line);
-  border-radius: var(--ss-radius-full);
+.ss-embeddings-view__progress {
+  width: 100%;
+  height: var(--ss-space-1);
   overflow: hidden;
-}
-
-.systemsculpt-progress-fill {
-  width: 0%;
-  height: 100%;
-  background-color: var(--ss-accent);
+  border: 0;
   border-radius: var(--ss-radius-full);
-  transition: width var(--ss-dur-slow) var(--ss-ease);
-  position: relative;
-  overflow: hidden;
+  background: var(--ss-line);
+  color: var(--ss-accent);
+  accent-color: var(--ss-accent);
 }
 
-.systemsculpt-progress-fill.processing::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    color-mix(in srgb, var(--ss-ink-on-accent) 30%, transparent),
-    transparent
-  );
-  background-size: 200% 100%;
-  animation: ss-shimmer 1.5s linear infinite;
+.ss-embeddings-view__progress::-webkit-progress-bar {
+  border-radius: var(--ss-radius-full);
+  background: var(--ss-line);
 }
 
-/* Mobile density */
-@media (max-width: 768px) {
+.ss-embeddings-view__progress::-webkit-progress-value {
+  border-radius: var(--ss-radius-full);
+  background: var(--ss-accent);
+}
+
+@container ss-surface (max-width: 480px) {
   .ss-embeddings-view__header {
-    padding: var(--ss-space-2) var(--ss-space-3);
+    padding-inline: var(--ss-space-2);
+  }
+
+  .ss-embeddings-view__actions {
+    gap: 0;
+  }
+
+  .ss-embeddings-view__index-status {
+    padding-inline: var(--ss-space-2);
   }
 
   .ss-similar-note {
-    padding: var(--ss-space-2) var(--ss-space-3);
-    gap: var(--ss-space-2);
+    padding-inline: var(--ss-space-2);
   }
 
-  .ss-similar-note__excerpt {
-    -webkit-line-clamp: 1;
+  .ss-similar-note__metadata {
+    display: none;
+  }
+
+  .ss-embeddings-view__state {
+    grid-template-columns: 1fr;
+    margin-inline: var(--ss-space-2);
+  }
+
+  .ss-embeddings-view__state-actions,
+  .ss-embeddings-view__progress-wrap {
+    grid-column: 1;
+  }
+}
+
+@container ss-surface (max-width: 300px) {
+  .ss-embeddings-view__header {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .ss-embeddings-view__identity,
+  .ss-embeddings-view__actions {
+    width: 100%;
+  }
+
+  .ss-embeddings-view__actions {
+    justify-content: flex-end;
   }
 }

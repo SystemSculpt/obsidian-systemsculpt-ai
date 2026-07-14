@@ -101,43 +101,6 @@ export function logDebug(context: string, message: string, data?: any): void {
 
 
 /**
- * Mobile-specific error logger that captures additional mobile context
- * @param context The context or component where the error occurred
- * @param message The error message
- * @param error The error object
- * @param additionalInfo Optional additional information specific to mobile
- */
-export async function logMobileError(context: string, message: string, error: any, additionalInfo?: any): Promise<void> {
-    // Always log errors to console first
-    const text = context ? `${context}: ${message}` : message;
-    errorLogger.error(text, error, {
-        source: context,
-        metadata: typeof additionalInfo !== 'undefined' ? { additionalInfo } : undefined
-    });
-}
-
-
-/**
- * Check if running on mobile and log mobile-specific performance issues
- * @param operation Name of the operation being timed
- * @param startTime Performance start time
- * @param threshold Warning threshold in milliseconds
- */
-export async function logMobilePerformance(operation: string, startTime: number, threshold: number = 1000): Promise<void> {
-    const duration = performance.now() - startTime;
-    
-    // Check if we're on mobile
-    const isMobile = typeof window !== 'undefined' && 
-                    ((window as any).app?.isMobile || 
-                     /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent));
-    
-    if (isMobile && duration > threshold) {
-        // Log performance warning to console instead of DebugLogger
-        logWarning('Performance', `${operation} took ${duration}ms on mobile (threshold: ${threshold}ms)`);
-    }
-}
-
-/**
  * Standardized error handling for embedding operations
  * This function logs the error and shows a notice to the user
  *
@@ -220,7 +183,7 @@ export async function safeExecuteWithRetry<T>(
 
             if (attempt < maxRetries) {
                 // Wait before retrying
-                await new Promise(resolve => setTimeout(resolve, delayMs));
+                await new Promise(resolve => window.setTimeout(resolve, delayMs));
             }
         }
     }

@@ -16,6 +16,7 @@ import { StudioLinkFlowBridge } from "./StudioLinkFlowBridge";
 import { StudioEdgeRenderer } from "./StudioEdgeRenderer";
 import { StudioLinkAnimator } from "./StudioLinkAnimator";
 import { StudioPortInteraction } from "./StudioPortInteraction";
+import { getStudioOwnerWindow } from "../StudioDomContext";
 
 type PortDirection = "in" | "out";
 
@@ -122,6 +123,7 @@ export class StudioGraphConnectionEngineV3 {
     this.animator = new StudioLinkAnimator({
       store: this.store,
       getEdgeGroupElement: (edgeId) => this.renderer?.getEdgeGroupElement(edgeId) ?? null,
+      ownerWindow: getStudioOwnerWindow(layer),
     });
     this.animator.attach();
     this.bindEdgeLayerListeners(layer);
@@ -136,10 +138,16 @@ export class StudioGraphConnectionEngineV3 {
   private observeCanvasForEdgeReresolve(): void {
     this.disconnectEdgeLayerResizeObserver();
     const canvas = this.graphCanvasEl;
-    if (!canvas || typeof ResizeObserver === "undefined") {
+    if (!canvas) {
       return;
     }
-    this.edgeLayerResizeObserver = new ResizeObserver(() => {
+    const ResizeObserverCtor = (getStudioOwnerWindow(canvas) as Window & {
+      ResizeObserver?: new (callback: ResizeObserverCallback) => ResizeObserver;
+    }).ResizeObserver;
+    if (typeof ResizeObserverCtor !== "function") {
+      return;
+    }
+    this.edgeLayerResizeObserver = new ResizeObserverCtor(() => {
       this.renderer?.render();
     });
     this.edgeLayerResizeObserver.observe(canvas);
@@ -370,9 +378,9 @@ export class StudioGraphConnectionEngineV3 {
       return;
     }
     if (!this.autoCreateHintEl) {
-      this.autoCreateHintEl = document.createElement("div");
-      this.autoCreateHintEl.className = "ss-studio-connection-autocreate-hint";
-      viewport.appendChild(this.autoCreateHintEl);
+      this.autoCreateHintEl = viewport.createDiv({
+        cls: "ss-studio-connection-autocreate-hint",
+      });
     }
     this.autoCreateHintEl.textContent = `Release to create ${label ?? "node"}`;
     const viewportRect = viewport.getBoundingClientRect();

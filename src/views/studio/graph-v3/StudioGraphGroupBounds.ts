@@ -6,11 +6,11 @@ import {
   STUDIO_GRAPH_MEASURED_NODE_MIN_WIDTH,
 } from "../../../studio/StudioNodeGeometry";
 
-export const STUDIO_GRAPH_GROUP_PADDING_X = 20;
-export const STUDIO_GRAPH_GROUP_PADDING_TOP = 18;
-export const STUDIO_GRAPH_GROUP_PADDING_BOTTOM = 32;
-export const STUDIO_GRAPH_GROUP_MIN_WIDTH = 180;
-export const STUDIO_GRAPH_GROUP_MIN_HEIGHT = 120;
+const STUDIO_GRAPH_GROUP_PADDING_X = 20;
+const STUDIO_GRAPH_GROUP_PADDING_TOP = 18;
+const STUDIO_GRAPH_GROUP_PADDING_BOTTOM = 32;
+const STUDIO_GRAPH_GROUP_MIN_WIDTH = 180;
+const STUDIO_GRAPH_GROUP_MIN_HEIGHT = 120;
 
 export type StudioGraphGroupBounds = {
   left: number;

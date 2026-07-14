@@ -10,8 +10,7 @@ import {
   readStudioCaptionBoardState,
   resolveStudioCaptionBoardRenderedAsset,
 } from "../StudioCaptionBoardState";
-import { getText, inferMimeTypeFromPath, isLikelyAbsolutePath } from "./shared";
-import { extname } from "node:path";
+import { extensionFromPath, getText, inferMimeTypeFromPath, isLikelyAbsolutePath } from "./shared";
 
 const MANAGED_MEDIA_OWNER_KEY = "__studio_managed_by";
 const MANAGED_MEDIA_OWNER = "studio.image_generation_output.v1";
@@ -68,7 +67,7 @@ const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif", ".bm
 const VIDEO_EXTENSIONS = new Set([".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v", ".mpeg", ".mpg"]);
 
 function inferPreviewMimeType(path: string): string {
-  const extension = extname(String(path || "").trim()).toLowerCase();
+  const extension = extensionFromPath(path);
   if (IMAGE_EXTENSIONS.has(extension)) {
     if (extension === ".svg") {
       return "image/svg+xml";

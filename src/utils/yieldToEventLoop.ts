@@ -4,6 +4,6 @@
  */
 export async function yieldToEventLoop(delayMs = 0): Promise<void> {
   await new Promise<void>((resolve) => {
-    setTimeout(resolve, delayMs);
+    window.setTimeout(resolve, delayMs);
   });
 }

@@ -1,0 +1,207 @@
+/**
+ * Agent workspace composer: pending attachments, prompt controls, approval
+ * mode, and container-aware responsive rules.
+ */
+
+.systemsculpt-agent-composer {
+  flex: 0 0 auto;
+  width: min(100%, var(--ss-agent-content-width));
+  margin: 0 auto;
+  padding: var(--ss-space-2) var(--ss-space-5) var(--ss-space-4);
+}
+
+.systemsculpt-agent-composer-attachments {
+  display: flex;
+  gap: var(--ss-space-2);
+  padding-bottom: var(--ss-space-2);
+  overflow-x: auto;
+}
+
+.systemsculpt-agent-composer-attachments.is-empty {
+  display: none;
+}
+
+.systemsculpt-agent-attachment {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ss-space-1);
+  min-width: 0;
+  max-width: var(--ss-agent-attachment-width);
+  padding: var(--ss-space-1) var(--ss-space-2);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-full);
+  background: var(--ss-surface-1);
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-sm);
+}
+
+.systemsculpt-agent-attachment-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.systemsculpt-agent-attachment-remove {
+  flex: 0 0 auto;
+  width: var(--ss-icon-size-lg);
+  height: var(--ss-icon-size-lg);
+  min-width: var(--ss-icon-size-lg);
+  min-height: var(--ss-icon-size-lg);
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+
+.systemsculpt-agent-prompt {
+  overflow: hidden;
+  border: 1px solid var(--ss-line-strong);
+  border-radius: var(--ss-radius-lg);
+  background: var(--ss-surface-1);
+  box-shadow: var(--ss-elevation-1);
+  transition: var(--ss-transition-colors);
+}
+
+.systemsculpt-agent-prompt:focus-within {
+  border-color: var(--ss-line-accent);
+  box-shadow: var(--ss-ring);
+}
+
+.systemsculpt-agent-prompt-input {
+  display: block;
+  width: 100%;
+  min-height: var(--ss-control-height-lg);
+  max-height: var(--ss-agent-composer-max-height);
+  padding: var(--ss-space-3) var(--ss-space-3) var(--ss-space-1);
+  overflow-y: auto;
+  resize: none;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--ss-ink);
+  font: inherit;
+  line-height: var(--ss-leading-base);
+}
+
+.systemsculpt-agent-prompt-toolbar,
+.systemsculpt-agent-prompt-tools,
+.systemsculpt-agent-prompt-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-1);
+}
+
+.systemsculpt-agent-approval-mode {
+  width: auto;
+  max-width: var(--ss-agent-attachment-width);
+  min-height: var(--ss-control-height);
+  padding: 0 var(--ss-space-6) 0 var(--ss-space-2);
+  border-color: var(--ss-line);
+  border-radius: var(--ss-radius-sm);
+  background-color: transparent;
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-xs);
+}
+
+.systemsculpt-agent-approval-mode.is-full-access {
+  border-color: var(--ss-warning-line);
+  background-color: var(--ss-warning-tint);
+  color: var(--ss-warning);
+}
+
+.systemsculpt-agent-prompt-toolbar {
+  flex-wrap: wrap;
+  min-height: var(--ss-control-height-lg);
+  padding: var(--ss-space-1) var(--ss-space-2) var(--ss-space-2);
+}
+
+.systemsculpt-agent-prompt-hint {
+  margin-left: auto;
+  color: var(--ss-ink-faint);
+  font-size: var(--ss-text-xs);
+}
+
+.systemsculpt-agent-prompt-actions {
+  margin-left: var(--ss-space-1);
+}
+
+@container ss-surface (max-width: 500px) {
+  .systemsculpt-agent-conversation {
+    padding-right: var(--ss-space-3);
+    padding-left: var(--ss-space-3);
+  }
+
+  .systemsculpt-agent-composer,
+  .systemsculpt-agent-queue {
+    padding-right: var(--ss-space-3);
+    padding-left: var(--ss-space-3);
+  }
+
+  .systemsculpt-agent-prompt-hint {
+    display: none;
+  }
+
+  .systemsculpt-agent-prompt-tools {
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+  }
+
+  .systemsculpt-agent-prompt-actions {
+    margin-left: auto;
+  }
+
+  .systemsculpt-agent-artifact {
+    flex-wrap: wrap;
+  }
+
+  .systemsculpt-agent-approval {
+    grid-template-columns: 1fr;
+  }
+
+  .systemsculpt-agent-approval-actions,
+  .systemsculpt-agent-approval-preview {
+    grid-column: 1;
+  }
+
+  .systemsculpt-agent-approval-actions {
+    justify-content: flex-start;
+  }
+}
+
+@container ss-surface (max-width: 360px) {
+  .systemsculpt-agent-header-title {
+    max-width: 7rem;
+  }
+
+  .systemsculpt-agent-credits {
+    max-width: 4.5rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .systemsculpt-agent-approval-mode {
+    max-width: 6.5rem;
+  }
+
+  .systemsculpt-agent-tool-header {
+    align-items: center;
+    flex-wrap: nowrap;
+  }
+
+  .systemsculpt-agent-tool-summary {
+    display: none;
+  }
+}
+
+@container ss-surface (max-width: 280px) {
+  .systemsculpt-agent-header-title {
+    display: none;
+  }
+
+  .systemsculpt-agent-header-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+}

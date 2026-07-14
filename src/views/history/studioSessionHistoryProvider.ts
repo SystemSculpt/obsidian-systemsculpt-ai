@@ -1,4 +1,4 @@
-import { Notice, Platform, TFile, normalizePath } from "obsidian";
+import { Notice, TFile, normalizePath } from "obsidian";
 import type SystemSculptPlugin from "../../main";
 import type {
   StudioSessionRecord,
@@ -47,10 +47,6 @@ async function toggleFavoriteStudioSession(plugin: SystemSculptPlugin, projectPa
 }
 
 export async function loadStudioSessionRecords(plugin: SystemSculptPlugin): Promise<StudioSessionRecord[]> {
-  if (!Platform.isDesktopApp) {
-    return [];
-  }
-
   const projectFiles = plugin.app.vault
     .getFiles()
     .filter((file) => file instanceof TFile && file.extension.toLowerCase() === "systemsculpt");

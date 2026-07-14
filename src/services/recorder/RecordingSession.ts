@@ -2,6 +2,7 @@ import type { App } from "obsidian";
 import type { RecorderFormat } from "./RecorderFormats";
 import { MicrophoneRecorder, type RecorderStopReason } from "./MicrophoneRecorder";
 import { logDebug, logError } from "../../utils/errorHandling";
+import type { RecorderHostContext } from "./RecorderHostContext";
 
 export interface RecordingResult {
   filePath: string;
@@ -18,6 +19,7 @@ export interface RecordingSessionOptions {
   format: RecorderFormat;
   audioBitsPerSecond?: number;
   preferredMicrophoneId?: string | null;
+  hostContext: RecorderHostContext;
   onStatus: (status: string) => void;
   onError: (error: Error) => void;
   onStreamChanged?: (stream: MediaStream) => void;
@@ -58,6 +60,7 @@ export class RecordingSession {
       mimeType: this.options.format.mimeType,
       audioBitsPerSecond: this.options.audioBitsPerSecond,
       preferredMicrophoneId: this.options.preferredMicrophoneId,
+      hostContext: this.options.hostContext,
       onError: this.forwardError,
       onStatus: this.options.onStatus,
       onComplete: this.handleRecorderComplete,

@@ -3,14 +3,6 @@
 import { App, TFile } from "obsidian";
 import { CommandManager } from "../commands";
 
-jest.mock("../../../services/PlatformContext", () => ({
-  PlatformContext: {
-    get: () => ({
-      supportsDesktopOnlyFeatures: () => true,
-    }),
-  },
-}));
-
 describe("CommandManager open-systemsculpt-studio command", () => {
   beforeEach(() => {
     jest.clearAllMocks();

@@ -55,7 +55,7 @@ export function trimHistorySnapshots(
   }
 }
 
-export function resolveClipboardAnchor(nodes: StudioNodeInstance[]): { x: number; y: number } {
+function resolveClipboardAnchor(nodes: StudioNodeInstance[]): { x: number; y: number } {
   if (nodes.length === 0) {
     return { x: 0, y: 0 };
   }

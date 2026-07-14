@@ -47,7 +47,7 @@ describe("renderJsonNodeEditor module seam", () => {
 
     expect(rendered).toBe(true);
     const addButton = Array.from(nodeEl.querySelectorAll<HTMLButtonElement>("button")).find(
-      (button) => button.textContent?.trim() === "Add Field"
+      (button) => button.textContent?.trim() === "Add field"
     );
     expect(addButton).toBeDefined();
     click(addButton!);
@@ -90,7 +90,7 @@ describe("renderJsonNodeEditor module seam", () => {
     });
 
     const addButton = Array.from(nodeEl.querySelectorAll<HTMLButtonElement>("button")).find(
-      (button) => button.textContent?.trim() === "Add Field"
+      (button) => button.textContent?.trim() === "Add field"
     );
     click(addButton!);
 

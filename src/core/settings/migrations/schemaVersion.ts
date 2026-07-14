@@ -9,5 +9,12 @@
  * History:
  *  - 0: pre-versioning data (no `schemaVersion` field). Migrated on first load.
  *  - 1: schema versioning introduced; legacy/dead keys pruned (see #212).
+ *  - 2: retired client-side managed disclosure acceptance removed.
+ *  - 3: legacy configurable embeddings provider and retry controls removed.
+ *  - 4: client-side provider, model selection, Pi auth, and BYOK state removed.
+ *  - 5: client-owned chat prompts, modes, hidden-message preferences, and obsolete directory state removed.
+ *  - 6: orphaned feature, model-routing, and modal-state fields removed.
+ *  - 7: retired the semantic-index auto-process switch; enabled now means automatic.
+ *  - 8: retired duplicate plugin-update notification state; Obsidian owns updates.
  */
-export const CURRENT_SCHEMA_VERSION = 1;
+export const CURRENT_SCHEMA_VERSION = 8;

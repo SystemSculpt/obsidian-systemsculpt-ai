@@ -16,7 +16,7 @@ export const MANAGED_MEDIA_SOURCE_NODE_ID_KEY = "__studio_source_node_id";
 export const MANAGED_MEDIA_SLOT_INDEX_KEY = "__studio_source_output_index";
 export const MANAGED_OUTPUT_PENDING_KEY = "__studio_pending";
 export const MANAGED_OUTPUT_PENDING_RUN_ID_KEY = "__studio_pending_run_id";
-export const MANAGED_OUTPUT_PENDING_AT_KEY = "__studio_pending_at";
+const MANAGED_OUTPUT_PENDING_AT_KEY = "__studio_pending_at";
 
 export const MANAGED_TEXT_OWNER_KEY = "__studio_managed_by";
 export const MANAGED_TEXT_OWNER = "studio.text_generation_output.v1";

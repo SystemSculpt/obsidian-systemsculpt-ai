@@ -1,5 +1,6 @@
 import { createEmptyStudioProject, serializeStudioProject } from "../schema";
 import { StudioService } from "../StudioService";
+import { createManagedCapabilityGraphStub, getManagedStudioTestVaultName } from "./managed-capability-graph.stub";
 
 function createPluginStub(): any {
   const adapter = {
@@ -12,6 +13,7 @@ function createPluginStub(): any {
     app: {
       vault: {
         adapter,
+        getName: getManagedStudioTestVaultName,
         configDir: ".obsidian",
       },
     },
@@ -25,12 +27,13 @@ function createPluginStub(): any {
       studioRunRetentionMaxRuns: 100,
       studioRunRetentionMaxArtifactsMb: 1024,
       licenseKey: "test-license-key",
-      serverUrl: "https://api.systemsculpt.com",
+      serverUrl: "https://systemsculpt.com",
     },
     getLogger: () => ({
       warn: jest.fn(),
       error: jest.fn(),
     }),
+    getManagedCapabilityGraph: createManagedCapabilityGraphStub,
   };
 }
 

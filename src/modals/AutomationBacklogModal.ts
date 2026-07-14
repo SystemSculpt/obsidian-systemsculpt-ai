@@ -1,60 +1,96 @@
-import { App, Modal, Notice, Setting, TFile } from "obsidian";
+import { App, Notice, Setting } from "obsidian";
 import type SystemSculptPlugin from "../main";
+import { StandardModal } from "../core/ui/modals/standard/StandardModal";
+import { createUiAction, createUiState, updateUiAction } from "../core/ui/surface";
 import { AutomationRunnerModal } from "./AutomationRunnerModal";
 import type { AutomationBacklogEntry } from "../services/workflow/WorkflowEngineService";
 import { WORKFLOW_AUTOMATIONS } from "../constants/workflowAutomations";
 
-export class AutomationBacklogModal extends Modal {
+export class AutomationBacklogModal extends StandardModal {
   private plugin: SystemSculptPlugin;
   private backlog: AutomationBacklogEntry[] = [];
-  private contentWrapper: HTMLElement | null = null;
 
   constructor(app: App, plugin: SystemSculptPlugin) {
     super(app);
     this.plugin = plugin;
-    this.setTitle("Automation Backlog");
+    this.setSize("large");
+    this.modalEl.addClass("ss-automation-backlog-modal");
   }
 
   async onOpen(): Promise<void> {
-    await this.loadBacklog();
-    this.render();
+    super.onOpen();
+    this.addTitle("Automation backlog");
+    this.addActionButton("Close", () => this.close());
+    await this.refreshBacklog();
   }
 
-  private async loadBacklog(): Promise<void> {
-    this.backlog = await this.plugin.getAutomationBacklog();
+  private async refreshBacklog(): Promise<void> {
+    const task = this.beginAsyncTask("automation-backlog");
+    this.renderLoadState("loading");
+    try {
+      const backlog = await this.plugin.getAutomationBacklog();
+      if (!task.isCurrent()) return;
+      this.backlog = backlog;
+      this.render();
+    } catch (error) {
+      if (!task.isCurrent()) return;
+      this.backlog = [];
+      this.renderLoadState("error", error);
+    }
+  }
+
+  private renderLoadState(kind: "loading" | "error", error?: unknown): void {
+    this.contentEl.empty();
+    this.contentEl.addClass("ss-automation-backlog");
+    this.contentEl.setAttr("aria-busy", kind === "loading" ? "true" : "false");
+    createUiState(this.contentEl, kind === "loading"
+      ? {
+          kind: "loading",
+          title: "Loading backlog",
+        }
+      : {
+          kind: "error",
+          title: "Could not load the backlog",
+          detail: error instanceof Error ? error.message : "Try loading it again.",
+          action: {
+            label: "Retry",
+            onSelect: () => void this.refreshBacklog(),
+          },
+        });
   }
 
   private render(): void {
     const { contentEl } = this;
     contentEl.empty();
-    this.contentWrapper = contentEl.createDiv({ cls: "ss-automation-backlog" });
+    contentEl.addClass("ss-automation-backlog");
+    contentEl.setAttr("aria-busy", "false");
 
-    contentEl.createEl("p", {
-      text: "Backlog items run through SystemSculpt automatically. Instructions and execution are handled for you.",
-      cls: "setting-item-description",
-    });
     this.renderControls();
     this.renderBacklogList();
   }
 
   private renderControls(): void {
     const controls = this.contentEl.createDiv({ cls: "ss-automation-backlog__controls" });
-    const processAllButton = controls.createEl("button", { text: "Process backlog" });
-    processAllButton.addClass("mod-cta");
-    processAllButton.disabled = this.backlog.length === 0;
-    processAllButton.onclick = async () => {
+    const processAllButton = createUiAction(controls, {
+      label: "Process backlog",
+      tone: "primary",
+      disabled: this.backlog.length === 0,
+    });
+    this.registerDomEvent(processAllButton, "click", async () => {
       if (this.backlog.length === 0) {
         new Notice("Nothing to process.");
         return;
       }
+      updateUiAction(processAllButton, { busy: true, disabled: true });
       await this.processEntries(this.backlog);
       new Notice("Backlog processed");
-      await this.loadBacklog();
-      this.render();
-    };
+      await this.refreshBacklog();
+    });
 
-    const runModalButton = controls.createEl("button", { text: "Run single automation" });
-    runModalButton.onclick = () => {
+    const runModalButton = createUiAction(controls, {
+      label: "Run single automation",
+    });
+    this.registerDomEvent(runModalButton, "click", () => {
       const file = this.app.workspace.getActiveFile();
       if (!file) {
         new Notice("Open a note to run an automation manually.");
@@ -67,14 +103,18 @@ export class AutomationBacklogModal extends Modal {
       }));
       const runner = new AutomationRunnerModal(this.app, this.plugin, file, options);
       runner.open();
-    };
+    });
   }
 
   private renderBacklogList(): void {
     const container = this.contentEl.createDiv({ cls: "ss-automation-backlog__list" });
 
     if (this.backlog.length === 0) {
-      container.createEl("p", { text: "Inbox clear! No files are waiting." });
+      createUiState(container, {
+        kind: "success",
+        title: "Inbox clear",
+        detail: "No files are waiting.",
+      });
       return;
     }
 
@@ -96,8 +136,7 @@ export class AutomationBacklogModal extends Modal {
             button.setCta();
             button.onClick(async () => {
               await this.processEntries([entry]);
-              await this.loadBacklog();
-              this.render();
+              await this.refreshBacklog();
             });
           });
         row.settingEl.addClass("ss-automation-backlog__row");

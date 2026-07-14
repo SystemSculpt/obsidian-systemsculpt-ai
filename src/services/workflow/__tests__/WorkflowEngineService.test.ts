@@ -3,6 +3,7 @@
  */
 import { App, TFile, normalizePath } from "obsidian";
 import { WorkflowEngineService } from "../WorkflowEngineService";
+import { ManagedTextGenerationError } from "../../managed/ManagedTextGenerationAdapter";
 
 // Mock the TranscriptionService
 jest.mock("../../TranscriptionService", () => ({
@@ -36,12 +37,25 @@ describe("WorkflowEngineService", () => {
   let mockApp: App;
   let mockPlugin: any;
   let service: WorkflowEngineService;
+  let generateText: jest.Mock;
 
   beforeEach(() => {
     jest.clearAllMocks();
 
     mockApp = new App();
     (mockApp.vault.getMarkdownFiles as jest.Mock).mockReturnValue([]);
+
+    generateText = jest.fn(async (operation) => {
+      const messages = await operation.buildMessages();
+      await operation.onDispatch?.();
+      return {
+        operationId: operation.operationId,
+        requestId: "textreq_workflow",
+        text: `Generated: ${messages[1].content}`,
+        finishReason: "stop",
+        usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+      };
+    });
 
     mockPlugin = {
       app: mockApp,
@@ -61,11 +75,8 @@ describe("WorkflowEngineService", () => {
       }),
       registerEvent: jest.fn(),
       createDirectoryOnce: jest.fn().mockResolvedValue(undefined),
-      aiService: {
-        streamMessage: jest.fn().mockReturnValue((async function* () {
-          yield { type: "content", text: "Generated content" };
-        })()),
-      },
+      saveSettings: jest.fn().mockResolvedValue(undefined),
+      getManagedCapabilityClient: jest.fn(() => ({ generateText })),
     };
 
     service = new WorkflowEngineService(mockPlugin);
@@ -217,6 +228,190 @@ describe("WorkflowEngineService", () => {
         service.runAutomationOnFile("test-automation", mockFile)
       ).rejects.toThrow("markdown");
     });
+
+    it("runs workflow generation only through the managed workflow purpose", async () => {
+      const source = new TFile({ path: "Source/note.md" });
+      const output = new TFile({ path: "Destination/note.md" });
+      mockPlugin.settings.workflowEngine.automations = {
+        "test-automation": {
+          id: "test-automation",
+          enabled: true,
+          sourceFolder: "Source",
+          destinationFolder: "Destination",
+          systemPrompt: "Summarize precisely.",
+        },
+      };
+      (mockApp.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(null);
+      (mockApp.vault.read as jest.Mock).mockResolvedValue("Private source content");
+      (mockApp.vault.create as jest.Mock).mockResolvedValue(output);
+
+      await expect(service.runAutomationOnFile("test-automation", source)).resolves.toBe(output);
+
+      expect(generateText).toHaveBeenCalledTimes(1);
+      const request = generateText.mock.calls[0][0];
+      expect(request).toMatchObject({ purpose: "workflow_automation" });
+      expect(request.operationId).toMatch(/^workflow:[A-Za-z0-9]+$/);
+      expect(request).not.toHaveProperty("provider");
+      expect(request).not.toHaveProperty("model");
+      expect(mockApp.vault.read).toHaveBeenCalledWith(source);
+      expect(mockApp.vault.create).toHaveBeenCalledTimes(1);
+      const tracked = mockPlugin.settings.workflowEngine.managedTextOperations["automation::test-automation::Source/note.md"];
+      expect(tracked).toMatchObject({
+        operationId: request.operationId,
+        phase: "completed",
+        sourcePath: "Source/note.md",
+        targetPath: "Destination/note.md",
+        requestId: "textreq_workflow",
+      });
+    });
+
+    it("keeps blocked work queued and unread, then reuses its durable operation after admission recovers", async () => {
+      const source = new TFile({ path: "Source/blocked.md" });
+      const output = new TFile({ path: "Destination/blocked.md" });
+      mockPlugin.settings.workflowEngine.automations = {
+        "test-automation": { id: "test-automation", enabled: true, sourceFolder: "Source", destinationFolder: "Destination" },
+      };
+      (mockApp.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(null);
+      (mockApp.vault.read as jest.Mock).mockResolvedValue("Unread while blocked");
+      (mockApp.vault.create as jest.Mock).mockResolvedValue(output);
+      generateText.mockRejectedValueOnce(new ManagedTextGenerationError({
+        code: "license_required",
+        message: "License required",
+        operationId: "placeholder",
+      }));
+
+      await expect(service.runAutomationOnFile("test-automation", source)).rejects.toMatchObject({ code: "license_required" });
+      expect(mockApp.vault.read).not.toHaveBeenCalled();
+      expect(mockApp.vault.create).not.toHaveBeenCalled();
+      const key = "automation::test-automation::Source/blocked.md";
+      const queued = mockPlugin.settings.workflowEngine.managedTextOperations[key];
+      expect(queued).toMatchObject({ phase: "queued", admissionReason: "license_required" });
+
+      await expect(service.runAutomationOnFile("test-automation", source)).resolves.toBe(output);
+      expect(generateText).toHaveBeenCalledTimes(2);
+      expect(generateText.mock.calls[1][0].operationId).toBe(queued.operationId);
+      expect(mockApp.vault.read).toHaveBeenCalledWith(source);
+      expect(mockPlugin.settings.workflowEngine.managedTextOperations[key].phase).toBe("completed");
+    });
+
+    it("persists an ambiguous dispatch and refuses automatic replay on the next scheduler pass", async () => {
+      const source = new TFile({ path: "Source/ambiguous.md" });
+      mockPlugin.settings.workflowEngine.automations = {
+        "test-automation": { id: "test-automation", enabled: true, sourceFolder: "Source", destinationFolder: "Destination" },
+      };
+      (mockApp.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(null);
+      (mockApp.vault.read as jest.Mock).mockResolvedValue("Source content");
+      generateText.mockImplementationOnce(async (request) => {
+        await request.buildMessages();
+        await request.onDispatch();
+        throw new ManagedTextGenerationError({
+          code: "ambiguous_outcome",
+          message: "Unknown outcome",
+          operationId: request.operationId,
+          ambiguous: true,
+        });
+      });
+
+      await expect(service.runAutomationOnFile("test-automation", source)).rejects.toMatchObject({ ambiguous: true });
+      const key = "automation::test-automation::Source/ambiguous.md";
+      expect(mockPlugin.settings.workflowEngine.managedTextOperations[key]).toMatchObject({
+        phase: "ambiguous",
+        errorCode: "ambiguous_outcome",
+        retryable: false,
+      });
+
+      await expect(service.runAutomationOnFile("test-automation", source)).rejects.toMatchObject({
+        code: "ambiguous_outcome",
+      });
+      expect(generateText).toHaveBeenCalledTimes(1);
+      expect(mockApp.vault.read).toHaveBeenCalledTimes(1);
+      expect(mockApp.vault.create).not.toHaveBeenCalled();
+    });
+
+    it("records an empty 200 response as a definitive failure instead of an ambiguous dispatch", async () => {
+      const source = new TFile({ path: "Source/empty.md" });
+      mockPlugin.settings.workflowEngine.automations = {
+        "test-automation": { id: "test-automation", enabled: true, sourceFolder: "Source", destinationFolder: "Destination" },
+      };
+      (mockApp.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(null);
+      (mockApp.vault.read as jest.Mock).mockResolvedValue("Source content");
+      generateText.mockImplementationOnce(async (request) => {
+        await request.buildMessages();
+        await request.onDispatch();
+        return {
+          operationId: request.operationId,
+          requestId: "textreq_empty",
+          text: "   ",
+          finishReason: "stop",
+          usage: { promptTokens: 1, completionTokens: 0, totalTokens: 1 },
+        };
+      });
+
+      await expect(service.runAutomationOnFile("test-automation", source)).rejects.toMatchObject({
+        code: "invalid_response",
+        ambiguous: false,
+      });
+      const key = "automation::test-automation::Source/empty.md";
+      expect(mockPlugin.settings.workflowEngine.managedTextOperations[key]).toMatchObject({
+        phase: "failed",
+        errorCode: "invalid_response",
+        requestId: "textreq_empty",
+        retryable: false,
+      });
+      await expect(service.runAutomationOnFile("test-automation", source)).rejects.toThrow("failed definitively");
+      expect(generateText).toHaveBeenCalledTimes(1);
+      expect(mockApp.vault.create).not.toHaveBeenCalled();
+    });
+
+    it("keeps a pre-dispatch local abort queued and suppresses all output writes", async () => {
+      const source = new TFile({ path: "Source/aborted.md" });
+      const controller = new AbortController();
+      mockPlugin.settings.workflowEngine.automations = {
+        "test-automation": { id: "test-automation", enabled: true, sourceFolder: "Source", destinationFolder: "Destination" },
+      };
+      (mockApp.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(null);
+      generateText.mockImplementationOnce(async (request) => {
+        controller.abort();
+        await request.buildMessages();
+        throw new Error("unreachable");
+      });
+
+      await expect((service as any).processAutomation(
+        source,
+        { ...mockPlugin.settings.workflowEngine.automations["test-automation"], id: "test-automation" },
+        { signal: controller.signal }
+      ))
+        .rejects.toMatchObject({ name: "AbortError" });
+      const key = "automation::test-automation::Source/aborted.md";
+      expect(mockPlugin.settings.workflowEngine.managedTextOperations[key].phase).toBe("queued");
+      expect(mockApp.vault.read).not.toHaveBeenCalled();
+      expect(mockApp.vault.create).not.toHaveBeenCalled();
+    });
+
+    it("reconciles an existing operation output exactly once without regenerating", async () => {
+      const source = new TFile({ path: "Source/idempotent.md" });
+      const output = new TFile({ path: "Destination/idempotent.md" });
+      let outputExists = false;
+      mockPlugin.settings.workflowEngine.automations = {
+        "test-automation": { id: "test-automation", enabled: true, sourceFolder: "Source", destinationFolder: "Destination" },
+      };
+      (mockApp.vault.getAbstractFileByPath as jest.Mock).mockImplementation((path: string) =>
+        outputExists && path === output.path ? output : null
+      );
+      (mockApp.vault.read as jest.Mock).mockResolvedValue("Source content");
+      (mockApp.vault.create as jest.Mock).mockImplementation(async () => {
+        outputExists = true;
+        return output;
+      });
+
+      await service.runAutomationOnFile("test-automation", source);
+      await service.runAutomationOnFile("test-automation", source);
+
+      expect(generateText).toHaveBeenCalledTimes(1);
+      expect(mockApp.vault.create).toHaveBeenCalledTimes(1);
+      expect(mockPlugin.settings.workflowEngine.managedTextOperations["automation::test-automation::Source/idempotent.md"].phase)
+        .toBe("completed");
+    });
   });
 
   describe("bulk processing flow", () => {
@@ -350,6 +545,14 @@ describe("WorkflowEngineService", () => {
 
       expect(result).toContain("title: Test");
       expect(result).toContain("workflow_status: processed");
+    });
+
+    it("replaces workflow keys instead of duplicating them on a repeated local commit", () => {
+      const content = "---\nworkflow_status: queued\ntitle: Test\n---\n# Note content";
+      const once = (service as any).mergeFrontmatter(content, { workflow_status: "processed" });
+      const twice = (service as any).mergeFrontmatter(once, { workflow_status: "processed" });
+      expect(twice.match(/^workflow_status:/gm)).toHaveLength(1);
+      expect(twice).toContain("workflow_status: processed");
     });
 
     it("handles empty entries", () => {
@@ -828,31 +1031,34 @@ describe("WorkflowEngineService", () => {
   });
 
   describe("buildAutomationFailureNotice (private)", () => {
-    it("handles MODEL_UNAVAILABLE error", () => {
-      const { SystemSculptError, ERROR_CODES } = require("../../../utils/errors");
-      const error = new SystemSculptError("Model not found", ERROR_CODES.MODEL_UNAVAILABLE);
+    it("handles managed license admission errors", () => {
+      const error = new ManagedTextGenerationError({
+        code: "license_required", message: "License required", operationId: "workflow:1",
+      });
 
       const result = (service as any).buildAutomationFailureNotice(error);
 
-      expect(result).toContain("model is unavailable");
+      expect(result).toContain("valid SystemSculpt license");
     });
 
-    it("handles INVALID_LICENSE error", () => {
-      const { SystemSculptError, ERROR_CODES } = require("../../../utils/errors");
-      const error = new SystemSculptError("Invalid key", ERROR_CODES.INVALID_LICENSE);
+    it("handles ambiguous managed outcomes", () => {
+      const error = new ManagedTextGenerationError({
+        code: "ambiguous_outcome", message: "Unknown", operationId: "workflow:1", ambiguous: true,
+      });
 
       const result = (service as any).buildAutomationFailureNotice(error);
 
-      expect(result).toContain("invalid API key");
+      expect(result).toContain("needs reconciliation");
     });
 
-    it("handles QUOTA_EXCEEDED error", () => {
-      const { SystemSculptError, ERROR_CODES } = require("../../../utils/errors");
-      const error = new SystemSculptError("Rate limited", ERROR_CODES.QUOTA_EXCEEDED);
+    it("handles temporary managed availability errors", () => {
+      const error = new ManagedTextGenerationError({
+        code: "rate_limited", message: "Rate limited", operationId: "workflow:1", retryable: true,
+      });
 
       const result = (service as any).buildAutomationFailureNotice(error);
 
-      expect(result).toContain("rate limit");
+      expect(result).toContain("temporarily unavailable");
     });
 
     it("includes error message for regular Error", () => {
@@ -909,18 +1115,21 @@ describe("WorkflowEngineService", () => {
       expect(result.detailLines).toContain("Skipped 3 remaining files.");
     });
 
-    it("returns valid structure for SystemSculptError", () => {
-      const { SystemSculptError, ERROR_CODES } = require("../../../utils/errors");
-      const error = new SystemSculptError("Failed", ERROR_CODES.HTTP_ERROR, {
-        provider: "openai",
-        model: "gpt-4"
+    it("returns bounded first-party details for a managed generation error", () => {
+      const error = new ManagedTextGenerationError({
+        code: "temporarily_unavailable",
+        message: "Failed",
+        operationId: "workflow:1",
+        requestId: "textreq_1",
+        retryable: true,
       });
 
       const result = (service as any).buildAutomationErrorDetails(error, 0);
 
       expect(result.status).toBe("Stopped after an error");
-      expect(Array.isArray(result.detailLines)).toBe(true);
-      expect(result.detailLines.length).toBeGreaterThan(0);
+      expect(result.detailLines).toContain("Operation: workflow:1");
+      expect(result.detailLines).toContain("Request ID: textreq_1");
+      expect(result.copyText).not.toMatch(/provider|model/i);
     });
 
     it("handles non-Error values", () => {

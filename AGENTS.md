@@ -1,79 +1,104 @@
-# AGENTS.md
+# SystemSculpt AI Obsidian Plugin
 
-Single source of truth for AI agents working in this repo (the SystemSculpt AI
-Obsidian plugin). `CLAUDE.md` is a symlink to this file — **edit `AGENTS.md`**.
+Canonical repository guidance for the SystemSculpt Obsidian client. CLAUDE.md
+is a symlink to this file; edit this file only.
 
-## Merge autonomy, proven by CI
+## Repository boundary
 
-- An agent driving an approved work program may branch, push, open PRs, and
-  merge **without per-step human approval**.
-- A change is "done" only when **CI/CD proves it on the PR**. Local green is
-  necessary, never sufficient — CI is the proof of correctness.
-- Merge **only** when every required CI check is green on the merge commit
-  (plus any automated reviewer that is configured, per the bullet below):
-  - `ci.yml` — tsc/bundle check, full unit suite, embeddings, production build,
-    built-bundle integration suite.
-  - `macos-e2e.yml` — real Obsidian install + release smoke (provider listing,
-    chat round-trip, recorder, embeddings) against local provider fixtures.
-  - `windows-e2e.yml` — Obsidian install, clean-install parity, provider pass,
-    Windows desktop baselines.
-  - Automated PR reviewers are **optional** — when one is configured, read its
-    posted findings, not just the check rollup. CI/CD is the required gate
-    either way.
-- Never merge red, pending, or unverified. Never bypass CI. Treat
-  HIGH/MEDIUM/CRITICAL review findings as blockers: fix them, or justify
-  accepting each one in the PR before merging.
-- **One issue per PR.** Stay with the PR until it is green, then merge.
+The SystemSculpt workspace has three sibling repositories:
 
-## Always strengthen the test net
+- ~/gits/systemsculpt/plugin — this Obsidian client.
+- ~/gits/systemsculpt/website — the customer website and first-party API.
+- ~/gits/systemsculpt/systemsculpt-os — growth and operator automation.
 
-- Every behavioral change lands **failing-test-first**, at the cheapest layer
-  that actually catches the regression (see `CONTRIBUTING.md` for the layer
-  table).
-- A recurring regression earns a **permanent CI guard**, never a one-off manual
-  check. Example: #201 (provider dropdown) → `testing/integration/provider-listing.test.ts`.
-- Leave the suite stronger than you found it: each PR adds or tightens coverage
-  for what it touched. Testing should get better every release, not just stay
-  level.
-- #215 built the foundation — the built-bundle integration harness, reusable
-  provider fixtures (`testing/fixtures/providers/`), and the CI release-smoke
-  lanes. New rework rides on it.
+The plugin is a thin, vault-native client. It owns Obsidian integration,
+presentation, local vault tools, approvals, durable local state, and portable
+Studio behavior. It does not own provider SDKs, provider credentials, model
+catalogs, marketing operations, server sessions, or a local AI runtime.
 
-## Re-architect, don't perpetuate legacy patterns
+All AI traffic uses the first-party SystemSculpt API at
+https://systemsculpt.com/api/plugin. OpenRouter and server agent
+implementation details stay behind that interface.
 
-- When work touches a system that would benefit from better organization or
-  architecture, **re-architect that part** — do not patch around it to keep a
-  legacy pattern or past "slop" alive, even for a small-scale fix. Rebuild the
-  affected system toward a canonical design, supersede the old pattern instead
-  of layering onto it, and prove the result with tests/guards (the test net
-  above). Default to the version a careful engineer would write from scratch
-  today, not the one that minimizes diff against the past.
-- **Why:** the AI landscape changes constantly — each generation of models is
-  more capable than the last, and part of the job is cleaning up the patterns
-  left by earlier, less-capable models rather than carrying them forward. Code
-  shaped to satisfy a weaker model is technical debt; replace it with the
-  canonical version a stronger model would write.
-- Scope re-architecture to the part the work touches — it is justified by the
-  task at hand, not a licence to rewrite unrelated systems. Keep each PR focused
-  (one issue per PR), and let a permanent guard prove the rebuild is correct
-  (e.g. #207 → `testing/integration/bundle-load.no-node.test.ts` proves the
-  startup path requires no Node on mobile).
+## Architecture
 
-## Where things live
+- Prefer one deep module with a narrow interface over adapters that simply
+  rename or forward calls.
+- Keep ownership local to the capability. Views render and coordinate; domain
+  modules own state transitions, persistence, policy, and transport.
+- The compiled plugin is the integration seam. Tests under
+  testing/integration import the production bundle in an Obsidian host mock.
+- Managed-service contracts and fixtures live under
+  testing/fixtures/managed. Tests and CI remain credential-free.
+- Built-in tool names describe user actions, not transport history. Do not add
+  MCP or provider terminology to product code.
+- Obsidian Community Plugins owns plugin updates. Do not restore a custom
+  version checker or update modal.
+- Studio is portable. Nodes with hostRequirement desktop are unavailable on
+  mobile; portable vault, media, and managed-generation nodes remain usable.
 
-- Test layers, provider fixtures, and pre-PR gates: `CONTRIBUTING.md`.
-- Native/runtime harness (desktop, mobile, device lanes): `testing/native/` and
-  `testing/README.md`.
-- Unattended orchestration (Symphony/Codex) keeps its own stricter publish
-  rule — publish only when the issue explicitly asks: see `WORKFLOW.md`.
+## Working loop
 
-## Local gates before pushing
+~~~bash
+npm run check
+npm run test:related -- <changed source files>
+~~~
 
-```bash
-npm run check:plugin:fast   # tsc + bundle + script tests + unit
-npm test                    # full unit suite
-npm run test:integration    # production build + built-bundle suite
-```
+check is the canonical fast gate: Obsidian lint, metadata lint, production
+bundle, CSS contracts, and cheap architecture policy tests.
 
-CI re-runs these plus the macOS and Windows E2E lanes on every PR. A PR is
-ready to merge when all of them — and the automated reviewer — are green.
+Use broader gates only when the affected seam requires them:
+
+~~~bash
+npm run check:ui
+npm run check:mobile
+npm run test:integration
+npm run check:plugin
+npm run check:full
+~~~
+
+- check:plugin adds TypeScript, mobile compatibility, sync, artifact, and
+  release guards.
+- check:full adds unit, embeddings, compiled integration, and release-script
+  suites.
+- CI has one secret-free Ubuntu/Node job and runs npm run check. There is no
+  Windows, Android, iOS, provider, or native-device matrix.
+
+## Local Obsidian loop
+
+systemsculpt-sync.config.json is an ignored machine-local file. List Obsidian
+plugin folders under pluginTargets, then use:
+
+~~~bash
+./run.sh --headless
+npm run sync:local
+~~~
+
+The watcher copies main.js, manifest.json, and styles.css after successful
+builds. Use the official Obsidian CLI or Computer Use for live reload, errors,
+DOM inspection, and visual verification.
+
+## Product contracts
+
+- Approval modes are Ask Approval and Full Access.
+- Read-only vault tools may run immediately; mutating tools follow the selected
+  approval policy.
+- File and folder paths are vault-relative unless a desktop-only Studio node
+  explicitly accepts an external path.
+- The API base is a build-time value. Settings never expose routing,
+  credentials, providers, or model selection.
+- Release artifacts are exactly manifest.json, main.js, and styles.css.
+
+## Repository hygiene
+
+- Never commit, push, open a PR, merge, publish, or release without explicit
+  operator approval.
+- Preserve unrelated dirty work.
+- Do not commit generated main.js or styles.css unless the release workflow
+  explicitly requires them.
+- Do not keep plans, research snapshots, device harnesses, status dumps, or
+  provider experiments in this repository.
+- Keep user docs aligned with current commands and settings whenever those
+  surfaces change.
+
+See docs/development.md for detailed checks and local QA.

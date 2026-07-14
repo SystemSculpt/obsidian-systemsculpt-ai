@@ -29,16 +29,17 @@ export function appendStudioPathBrowseButtonIcon(
 ): void {
   const iconEl = buttonEl.createSpan({ cls: iconClassName });
   iconEl.setAttr("aria-hidden", "true");
-  const namespace = "http://www.w3.org/2000/svg";
-  const svg = document.createElementNS(namespace, "svg");
+  const svg = createStudioSvgElement(buttonEl, "svg");
   svg.setAttribute("viewBox", "0 0 16 16");
-  const folderPath = document.createElementNS(namespace, "path");
+  const folderPath = createStudioSvgElement(buttonEl, "path");
   folderPath.setAttribute(
     "d",
     "M1.75 4.75a1 1 0 0 1 1-1h3l1.1 1.2h6.4a1 1 0 0 1 1 1v5.3a1 1 0 0 1-1 1H2.75a1 1 0 0 1-1-1z"
   );
-  const linePath = document.createElementNS(namespace, "path");
+  const linePath = createStudioSvgElement(buttonEl, "path");
   linePath.setAttribute("d", "M6.25 8.4h4.1m-2.05-2.05V10.5");
   svg.append(folderPath, linePath);
   iconEl.appendChild(svg);
+  buttonEl.prepend(iconEl);
 }
+import { createStudioSvgElement } from "./StudioDomContext";

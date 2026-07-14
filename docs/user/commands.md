@@ -13,7 +13,6 @@ Source of truth:
 | --- | --- | --- | --- |
 | Open SystemSculpt Chat |  | `open-systemsculpt-chat` | Opens a new chat view |
 | Open SystemSculpt History |  | `open-systemsculpt-history` | Opens unified history modal (Chats + Studio sessions) |
-| Open SystemSculpt Chat History (Legacy Alias) |  | `open-chat-history` | Deprecated alias for `open-systemsculpt-history` |
 | Resume Chat from Current History File |  | `resume-chat-from-history` | Only when active file is a chat history file |
 | Open SystemSculpt AI Settings |  | `open-systemsculpt-settings` | Opens plugin settings tab |
 | Open Credits & Usage |  | `open-credits-balance` | Opens the credits/usage modal |
@@ -26,8 +25,7 @@ Chat always runs through SystemSculpt. There are no separate chat-model commands
 
 | Command | Default hotkey | Command ID | Notes |
 | --- | --- | --- | --- |
-| Change/Generate Title | `Mod+Shift+T` | `change-chat-title` | Works in chat and markdown notes |
-| Quick Edit (Active File) |  | `quick-file-edit` | Opens Quick Edit widget |
+| Create Title from Content | `Mod+Shift+T` | `change-chat-title` | Works in chat and markdown notes |
 | Chat with File |  | `chat-with-file` | Opens chat with current file preloaded |
 
 ## Search and embeddings
@@ -37,9 +35,8 @@ Chat always runs through SystemSculpt. There are no separate chat-model commands
 | Open SystemSculpt Search | `Mod+K` | `open-systemsculpt-search` | Opens search modal |
 | Open Similar Notes Panel |  | `open-embeddings-view` | Opens embeddings/similar-notes view |
 | Find Similar Notes (Current Note) |  | `find-similar-current-note` | Added in `src/main.ts`; requires active note |
-| Process Embeddings |  | `process-embeddings` | Starts embeddings processing |
 | Rebuild Embeddings |  | `rebuild-embeddings` | Clears all embeddings data |
-| Rebuild Embeddings (Current Model) |  | `rebuild-embeddings-current-model` | Rebuilds only the current SystemSculpt embeddings namespace |
+| Rebuild SystemSculpt Embeddings |  | `rebuild-embeddings-current-model` | Rebuilds the current SystemSculpt embeddings index |
 | Show Embeddings Database Statistics (Debug) |  | `embeddings-database-stats` | Visible only when embeddings are enabled |
 
 ## Audio and media
@@ -47,8 +44,7 @@ Chat always runs through SystemSculpt. There are no separate chat-model commands
 | Command | Default hotkey | Command ID | Notes |
 | --- | --- | --- | --- |
 | Toggle Audio Recorder | `Mod+R` | `toggle-audio-recorder` | Starts/stops recording |
-| Open Meeting Processor |  | `open-meeting-processor` | Opens meeting processor modal |
-| YouTube Canvas - Extract transcript and create note |  | `open-youtube-canvas` | Opens YouTube Canvas modal |
+| Transcribe an audio file |  | `transcribe-audio-file` | Transcribes a vault audio file through SystemSculpt |
 | Run Audio Chunking Analysis |  | `audio-chunking-analysis` | Developer-facing analysis command |
 
 ## Automations and SystemSculpt Canvas
@@ -65,6 +61,8 @@ Chat always runs through SystemSculpt. There are no separate chat-model commands
 | New SystemSculpt Studio Project |  | `new-systemsculpt-studio-project` | Creates a new `.systemsculpt` project and opens Studio |
 | Open SystemSculpt Studio |  | `open-systemsculpt-studio` | Opens the current/first available `.systemsculpt` project in Studio, or creates one automatically when none exists |
 | Run Current SystemSculpt Studio Project |  | `run-systemsculpt-studio-project` | Runs the active/current Studio project |
+| SystemSculpt Studio: Fit Selection in Viewport |  | `fit-systemsculpt-studio-selection-in-viewport` | Frames selected Studio nodes |
+| SystemSculpt Studio: Overview Graph in Viewport |  | `overview-systemsculpt-studio-graph-in-viewport` | Frames the full Studio graph |
 
 ## Diagnostics
 
@@ -72,4 +70,3 @@ Chat always runs through SystemSculpt. There are no separate chat-model commands
 | --- | --- | --- | --- |
 | Open SystemSculpt Janitor |  | `open-systemsculpt-janitor` | Opens janitor modal |
 | Copy Resource Usage Report |  | `systemsculpt-copy-resource-report` | Copies/saves resource report |
-| Toggle Mobile Emulation Mode |  | `toggle-mobile-emulation` | Developer tool for supported builds |

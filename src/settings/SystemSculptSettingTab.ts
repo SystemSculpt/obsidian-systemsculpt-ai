@@ -7,10 +7,20 @@ import {
   Platform,
   EventRef,
 } from "obsidian";
-import { SYSTEMSCULPT_WEBSITE } from "../constants/externalServices";
-import { showPopup } from "../core/ui";
+import { showPrompt } from "../core/ui/modals/PromptModal";
+import {
+  applyPluginSurface,
+  createUiAction,
+  createUiSearch,
+  createUiState,
+  createUiTabs,
+  getSurfaceOwnerWindow,
+  SurfaceCombobox,
+  type UiSearchHandle,
+  type UiTabBinding,
+  type UiTabsHandle,
+} from "../core/ui/surface";
 import SystemSculptPlugin from "../main";
-import { VersionInfo } from "../services/VersionCheckerService";
 import {
   buildSettingsIndexFromRoot,
   buildSettingsSearchHighlightParts,
@@ -29,7 +39,12 @@ type SettingsSearchViewState = {
   query: string;
   groups: SettingsSearchGroup[];
   results: SettingsSearchMatch[];
-  selectedIndex: number;
+};
+
+type SystemSculptSettingDefinition = {
+  id: string;
+  name: string;
+  description?: string;
 };
 
 export class SystemSculptSettingTab extends PluginSettingTab {
@@ -39,31 +54,51 @@ export class SystemSculptSettingTab extends PluginSettingTab {
     type: string;
     listener: EventListener;
   }[] = [];
-  private versionInfoContainer: HTMLElement | null = null;
+  private renderCleanups = new Set<() => void>();
   private tabContainerEl: HTMLElement | null = null;
   private contentContainerEl: HTMLElement | null = null;
   private searchInputEl: HTMLInputElement | null = null;
   private searchShellEl: HTMLElement | null = null;
   private searchMetaEl: HTMLElement | null = null;
   private clearSearchButtonEl: HTMLButtonElement | null = null;
+  private searchHandle: UiSearchHandle | null = null;
   private searchResultsContainerEl: HTMLElement | null = null;
+  private searchCombobox: SurfaceCombobox<SettingsSearchMatch> | null = null;
+  private searchResultGroupEls = new Map<string, HTMLElement>();
+  private searchResultKeyByElement = new WeakMap<HTMLElement, string>();
+  private nextSearchResultKey = 0;
   private allSettingsIndex: SettingsIndexEntry[] = [];
   private tabsDef: { id: string; label: string }[] = [];
+  private tabsHandle: UiTabsHandle<string> | null = null;
   private contentMutationObserver: MutationObserver | null = null;
   private indexRebuildTimer: number | null = null;
+  private indexRebuildTimerWindow: Window | null = null;
   private activeTabId: string = "account";
   private focusTabEventRef: EventRef | null = null;
   private searchState: SettingsSearchViewState = {
     query: "",
     groups: [],
     results: [],
-    selectedIndex: -1,
   };
   private readonly searchResultsListId = "systemsculpt-settings-search-results";
 
   constructor(app: App, plugin: SystemSculptPlugin) {
     super(app, plugin);
     this.plugin = plugin;
+  }
+
+  /** Registers work that must stop when settings rerender, hide, or unload. */
+  registerRenderCleanup(cleanup: () => void): () => void {
+    this.renderCleanups.add(cleanup);
+    return () => this.renderCleanups.delete(cleanup);
+  }
+
+  getSettingDefinitions(): SystemSculptSettingDefinition[] {
+    return buildSettingsTabConfigs(this).map((config) => ({
+      id: config.id,
+      name: config.anchor?.title || config.label,
+      description: config.anchor?.desc || `${config.label} settings`,
+    }));
   }
 
   registerListener(
@@ -77,6 +112,7 @@ export class SystemSculptSettingTab extends PluginSettingTab {
 
   private generateFeedbackUrl(): string {
     const environmentInfo: string[] = [];
+    const ownerWindow = getSurfaceOwnerWindow(this.containerEl);
 
     // Plugin version - always available
     environmentInfo.push(
@@ -100,10 +136,6 @@ export class SystemSculptSettingTab extends PluginSettingTab {
       os = "macOS";
     } else if (Platform.isLinux) {
       os = "Linux";
-    } else if (Platform.isIosApp) {
-      os = "iOS";
-    } else if (Platform.isAndroidApp) {
-      os = "Android";
     }
     if (os) {
       environmentInfo.push(`- OS: ${os}`);
@@ -113,22 +145,18 @@ export class SystemSculptSettingTab extends PluginSettingTab {
     let deviceType = "";
     if (Platform.isDesktopApp) {
       deviceType = "Desktop";
-    } else if (Platform.isMobileApp) {
-      deviceType = "Mobile";
-    } else if (Platform.isTablet) {
-      deviceType = "Tablet";
     }
     if (deviceType) {
       environmentInfo.push(`- Device type: ${deviceType}`);
     }
 
     // Theme
-    const isDarkTheme = document.body.classList.contains("theme-dark");
+    const isDarkTheme = ownerWindow.document.body.classList.contains("theme-dark");
     environmentInfo.push(`- Theme: ${isDarkTheme ? "Dark" : "Light"}`);
 
     // Language/Locale
-    if (navigator.language) {
-      environmentInfo.push(`- Language: ${navigator.language}`);
+    if (ownerWindow.navigator.language) {
+      environmentInfo.push(`- Language: ${ownerWindow.navigator.language}`);
     }
 
     const hasSystemSculptAccess = !!(
@@ -151,7 +179,7 @@ export class SystemSculptSettingTab extends PluginSettingTab {
     environmentInfo.push(`- Vault size: ${vaultSize}`);
 
     // Enabled Features
-    const enabledFeatures: string[] = ["MCP"]; // MCP is always enabled (internal servers)
+    const enabledFeatures: string[] = ["Vault tools"];
     if (this.plugin.settings.embeddingsEnabled)
       enabledFeatures.push("Embeddings");
 
@@ -183,7 +211,7 @@ export class SystemSculptSettingTab extends PluginSettingTab {
     actionsSetting.addButton((button) => {
       decorateRestoreDefaultsButton(button.buttonEl);
       button.onClick(async () => {
-        const confirm = await showPopup(this.app, RESTORE_DEFAULTS_COPY.label, {
+        const confirm = await showPrompt(this.app, RESTORE_DEFAULTS_COPY.label, {
           description:
             "This will replace your current configuration with the recommended defaults. Any customizations you've applied will be overwritten. Do you want to continue?",
           primaryButton: "Restore Defaults",
@@ -202,7 +230,6 @@ export class SystemSculptSettingTab extends PluginSettingTab {
             savedChatsDirectory: "SystemSculpt/Saved Chats",
             attachmentsDirectory: "SystemSculpt/Attachments",
             extractionsDirectory: "SystemSculpt/Extractions",
-            showUpdateNotifications: true,
             debugMode: false,
           });
           new Notice("Recommended defaults restored.", 2500);
@@ -238,8 +265,46 @@ export class SystemSculptSettingTab extends PluginSettingTab {
     this.listeners = [];
   }
 
+  private invalidateRenderCleanups(): void {
+    const cleanups = [...this.renderCleanups];
+    this.renderCleanups.clear();
+    for (const cleanup of cleanups) {
+      try {
+        cleanup();
+      } catch {
+        // Cleanup must never prevent the settings host from closing.
+      }
+    }
+  }
+
+  private clearSettingsIndexRebuild(): void {
+    if (this.indexRebuildTimer !== null) {
+      this.indexRebuildTimerWindow?.clearTimeout(this.indexRebuildTimer);
+      this.indexRebuildTimer = null;
+      this.indexRebuildTimerWindow = null;
+    }
+  }
+
+  private scheduleSettingsIndexRebuild(ownerWindow: Window, delayMs: number): void {
+    this.clearSettingsIndexRebuild();
+    this.indexRebuildTimerWindow = ownerWindow;
+    this.indexRebuildTimer = ownerWindow.setTimeout(() => {
+      this.indexRebuildTimer = null;
+      this.indexRebuildTimerWindow = null;
+      this.buildSettingsIndex();
+    }, delayMs);
+  }
+
   async display(): Promise<void> {
+    this.invalidateRenderCleanups();
+    this.clearSettingsIndexRebuild();
     this.removeAllListeners();
+    this.tabsHandle?.destroy();
+    this.tabsHandle = null;
+    this.searchCombobox?.destroy();
+    this.searchCombobox = null;
+    this.searchHandle?.destroy();
+    this.searchHandle = null;
     const { containerEl } = this;
     containerEl.empty();
 
@@ -254,115 +319,46 @@ export class SystemSculptSettingTab extends PluginSettingTab {
       query: "",
       groups: [],
       results: [],
-      selectedIndex: -1,
     };
 
-    const titleRow = containerEl.createDiv({ cls: "ss-settings-title-row" });
+    const surfaceRoot = containerEl.createDiv({ cls: "ss-settings-surface" });
+    applyPluginSurface(surfaceRoot, "view");
+    const surfaceWindow = surfaceRoot.ownerDocument.defaultView ?? window;
+
+    const titleRow = surfaceRoot.createDiv({ cls: "ss-settings-title-row" });
     const titleGroup = titleRow.createDiv({ cls: "ss-settings-title-group" });
-    titleGroup.createEl("h2", { text: "SystemSculpt AI" });
     const titleMeta = titleGroup.createDiv({ cls: "ss-settings-title-meta" });
-    this.versionInfoContainer = titleMeta.createDiv({
+    titleMeta.createDiv({
       cls: "ss-settings-title-version",
-    });
-    this.initializeVersionDisplay();
-
-    const refreshVersionButton = titleMeta.createEl("button", {
-      cls: "clickable-icon ss-settings-title-refresh",
-      attr: {
-        type: "button",
-        "aria-label": "Check for updates",
-        title: "Check for updates",
-      },
-    });
-    setIcon(refreshVersionButton, "refresh-cw");
-    this.registerListener(refreshVersionButton, "click", async () => {
-      refreshVersionButton.disabled = true;
-      try {
-        await this.checkForUpdates(true);
-      } finally {
-        refreshVersionButton.disabled = false;
-      }
+      text: `v${this.plugin.manifest.version}`,
     });
 
-    containerEl.createEl("p", {
-      text: "Manage your SystemSculpt account, workspace preferences, and vault integrations.",
+    surfaceRoot.createEl("p", {
+      text: "Account, workspace, and vault preferences.",
       cls: "setting-item-description",
     });
 
-    this.searchShellEl = containerEl.createDiv({
+    this.searchShellEl = surfaceRoot.createDiv({
       cls: "ss-settings-search-shell",
     });
-    const searchHeader = this.searchShellEl.createDiv({
-      cls: "ss-settings-search-shell__header",
+    this.searchHandle = createUiSearch(this.searchShellEl, {
+      label: "Search SystemSculpt settings",
+      placeholder: "Search settings",
+      onQuery: () => this.handleSearchInput(),
     });
-    const searchCopy = searchHeader.createDiv({
-      cls: "ss-settings-search-shell__copy",
-    });
-    searchCopy.createDiv({
-      cls: "ss-settings-search-shell__title",
-      text: "Search settings",
-    });
-    searchCopy.createDiv({
-      cls: "ss-settings-search-shell__description",
-      text: "Jump straight to any setting, section, or integration.",
-    });
-
-    const searchInputRow = this.searchShellEl.createDiv({
-      cls: "ss-settings-search-shell__input-row",
-    });
-    const searchIcon = searchInputRow.createSpan({
-      cls: "ss-settings-search-shell__icon",
-      attr: { "aria-hidden": "true" },
-    });
-    setIcon(searchIcon, "search");
-
-    this.searchInputEl = searchInputRow.createEl("input", {
-      cls: ["search-input", "ss-settings-search-input"],
-      attr: {
-        type: "search",
-        placeholder: "Search settings, providers, studio, vault...",
-        autocomplete: "off",
-        spellcheck: "false",
-        "aria-label": "Search SystemSculpt settings",
-        role: "combobox",
-        "aria-autocomplete": "list",
-        "aria-haspopup": "listbox",
-        "aria-controls": this.searchResultsListId,
-        "aria-expanded": "false",
-      },
-    }) as HTMLInputElement;
-    this.registerListener(this.searchInputEl, "input", () =>
-      this.handleSearchInput(),
-    );
-    this.registerListener(
-      this.searchInputEl,
-      "keydown",
-      (event: KeyboardEvent) => {
-        this.handleSearchKeydown(event);
-      },
-    );
-
-    this.clearSearchButtonEl = searchInputRow.createEl("button", {
-      cls: "clickable-icon ss-settings-search-clear",
-      attr: {
-        type: "button",
-        "aria-label": "Clear settings search",
-        title: "Clear search",
-      },
-    }) as HTMLButtonElement;
-    setIcon(this.clearSearchButtonEl, "x");
-    this.clearSearchButtonEl.hidden = true;
-    this.clearSearchButtonEl.disabled = true;
-    this.registerListener(this.clearSearchButtonEl, "click", () =>
-      this.clearSearch(true),
-    );
+    this.searchInputEl = this.searchHandle.input;
+    this.searchInputEl.autocomplete = "off";
+    this.searchInputEl.spellcheck = false;
+    this.clearSearchButtonEl = this.searchHandle.root.querySelector(
+      ".ss-search-field__clear",
+    ) as HTMLButtonElement | null;
 
     this.searchMetaEl = this.searchShellEl.createDiv({
       cls: "ss-settings-search-meta",
       attr: { "aria-live": "polite" },
     });
 
-    const layout = containerEl.createDiv({ cls: "ss-settings-layout" });
+    const layout = surfaceRoot.createDiv({ cls: "ss-settings-layout" });
     const tabBar = layout.createDiv({ cls: "ss-settings-tab-bar" });
     const contentContainer = layout.createDiv({ cls: "ss-settings-panels" });
 
@@ -411,29 +407,28 @@ export class SystemSculptSettingTab extends PluginSettingTab {
         ? previousActiveTabId
         : (this.tabsDef[0]?.id ?? "account");
 
-    for (const [index, cfg] of visibleTabs.entries()) {
-      const button = tabBar.createEl("button", {
-        cls: "ss-tab-button",
-        text: cfg.label,
+    const tabBindings: UiTabBinding<string>[] = [];
+    for (const cfg of visibleTabs) {
+      const button = createUiAction(tabBar, {
+        label: cfg.label,
+        size: "small",
       });
+      button.addClass("ss-tab-button");
       button.dataset.tab = cfg.id;
-      if (cfg.id === this.activeTabId || (index === 0 && !this.activeTabId)) {
-        button.addClass("mod-active");
-      }
-      this.registerListener(button, "click", () => this.activateTab(cfg.id));
 
       const panel = contentContainer.createDiv({
         cls: ["ss-tab-panel", "systemsculpt-tab-content"],
       });
       panel.dataset.tab = cfg.id;
-      if (cfg.id === this.activeTabId) {
-        panel.addClass("is-active");
-        panel.toggle(true);
-      } else {
-        panel.removeClass("is-active");
-        panel.toggle(false);
-      }
+      tabBindings.push({ id: cfg.id, button, panel });
     }
+
+    this.tabsHandle = createUiTabs(tabBar, tabBindings, {
+      activeId: this.activeTabId,
+      onChange: (tabId, previousTabId) => {
+        this.handleTabChange(tabId, previousTabId);
+      },
+    });
 
     for (const cfg of visibleTabs) {
       const sectionRoot = contentContainer.querySelector(
@@ -452,23 +447,19 @@ export class SystemSculptSettingTab extends PluginSettingTab {
             "data-ss-desc": cfg.anchor.desc,
           },
         });
-        anchor.toggle(false);
+        anchor.toggleAttribute("hidden", true);
       }
     }
 
     this.buildSettingsIndex();
-    window.setTimeout(() => this.buildSettingsIndex(), 300);
+    this.scheduleSettingsIndexRebuild(surfaceWindow, 300);
 
     if (this.contentContainerEl) {
       if (this.contentMutationObserver) {
         this.contentMutationObserver.disconnect();
       }
       this.contentMutationObserver = new MutationObserver(() => {
-        if (this.indexRebuildTimer) window.clearTimeout(this.indexRebuildTimer);
-        this.indexRebuildTimer = window.setTimeout(
-          () => this.buildSettingsIndex(),
-          150,
-        );
+        this.scheduleSettingsIndexRebuild(surfaceWindow, 150);
       });
       this.contentMutationObserver.observe(this.contentContainerEl, {
         childList: true,
@@ -480,118 +471,16 @@ export class SystemSculptSettingTab extends PluginSettingTab {
       cls: "ss-settings-search-results",
       attr: {
         id: this.searchResultsListId,
-        role: "listbox",
-        "aria-label": "Settings search results",
       },
     });
-    this.searchResultsContainerEl.toggle(false);
+    this.searchResultsContainerEl.toggleAttribute("hidden", true);
+    this.initializeSearchCombobox();
     this.syncSearchChrome();
   }
-  /**
-   * Initialize version display and check for updates
-   */
-  private async initializeVersionDisplay() {
-    if (!this.versionInfoContainer) return;
-
-    // Clear previous content
-    this.versionInfoContainer.empty();
-
-    // Display current version while checking
-    const currentVersion = this.plugin.manifest.version;
-    this.versionInfoContainer.createSpan({
-      cls: "ss-version-pill ss-version-pill--checking",
-      text: `v${currentVersion} (checking...)`,
-    });
-
-    // Check for updates
-    await this.checkForUpdates();
-  }
-
-  /**
-   * Check for updates and update the UI
-   */
-  private async checkForUpdates(forceRefresh = false) {
-    if (!this.versionInfoContainer) return;
-
-    try {
-      const versionInfo = await this.plugin
-        .getVersionCheckerService()
-        .checkVersion(forceRefresh);
-      this.updateVersionDisplay(versionInfo);
-    } catch (error) {
-      const versionText = this.versionInfoContainer.querySelector(
-        ".ss-version-pill",
-      ) as HTMLElement | null;
-      if (versionText) {
-        versionText.setText(`v${this.plugin.manifest.version} (check failed)`);
-        versionText.removeClass(
-          "ss-version-pill--latest",
-          "ss-version-pill--outdated",
-          "ss-version-pill--checking",
-        );
-        versionText.addClass("ss-version-pill--error");
-      }
-    }
-  }
-
-  /**
-   * Update the version display with the version info
-   */
-  private updateVersionDisplay(versionInfo: VersionInfo) {
-    if (!this.versionInfoContainer) return;
-
-    let versionText = this.versionInfoContainer.querySelector(
-      ".ss-version-pill",
-    ) as HTMLElement | null;
-    if (!versionText) {
-      versionText = this.versionInfoContainer.createSpan({
-        cls: "ss-version-pill",
-      });
-    }
-
-    versionText.removeClass(
-      "ss-version-pill--latest",
-      "ss-version-pill--outdated",
-      "ss-version-pill--error",
-      "ss-version-pill--checking",
-    );
-
-    if (versionInfo.isLatest) {
-      versionText.setText(`v${versionInfo.currentVersion} (latest)`);
-      versionText.addClass("ss-version-pill--latest");
-      this.versionInfoContainer.querySelector(".ss-version-update")?.remove();
-    } else {
-      versionText.setText(
-        `v${versionInfo.currentVersion} → v${versionInfo.latestVersion}`,
-      );
-      versionText.addClass("ss-version-pill--outdated");
-
-      if (!this.versionInfoContainer.querySelector(".ss-version-update")) {
-        const updateLink = this.versionInfoContainer.createEl("a", {
-          cls: "ss-version-update",
-          text: "Update",
-          attr: {
-            href: versionInfo.updateUrl,
-            target: "_blank",
-            rel: "noopener",
-            "aria-label": "Open in Community Plugins",
-          },
-        });
-
-        this.registerListener(updateLink, "click", (event) => {
-          event.preventDefault();
-          window.open(versionInfo.updateUrl, "_blank");
-          new Notice(
-            "Opening SystemSculpt AI in Community Plugins...\n\nIf nothing happens, please update manually via Settings → Community plugins",
-            10000,
-          );
-        });
-      }
-    }
-  }
-
   // Override hide method to clean up event listeners
   hide() {
+    this.invalidateRenderCleanups();
+    this.clearSettingsIndexRebuild();
     // Clean up resources from the currently active tab before closing
     const activeContent = this.containerEl.querySelector(
       ".systemsculpt-tab-content.is-active",
@@ -602,6 +491,12 @@ export class SystemSculptSettingTab extends PluginSettingTab {
     }
 
     this.removeAllListeners();
+    this.tabsHandle?.destroy();
+    this.tabsHandle = null;
+    this.searchCombobox?.destroy();
+    this.searchCombobox = null;
+    this.searchHandle?.destroy();
+    this.searchHandle = null;
     if (this.contentMutationObserver) {
       this.contentMutationObserver.disconnect();
       this.contentMutationObserver = null;
@@ -617,21 +512,15 @@ export class SystemSculptSettingTab extends PluginSettingTab {
    * Build an index of all `.setting-item` elements across tabs for fast search
    */
   private activateTab(tabId: string) {
-    if (!this.tabContainerEl || !this.contentContainerEl) {
-      return;
-    }
+    this.tabsHandle?.activate(tabId);
+  }
 
-    const targetPanel = this.contentContainerEl.querySelector(
-      `.systemsculpt-tab-content[data-tab="${tabId}"]`,
-    ) as any;
+  private handleTabChange(tabId: string, previousTabId: string): void {
+    if (!this.contentContainerEl) return;
     const activePanel = this.contentContainerEl.querySelector(
-      ".systemsculpt-tab-content.is-active",
+      `.systemsculpt-tab-content[data-tab="${previousTabId}"]`,
     ) as any;
-    if (
-      activePanel &&
-      activePanel !== targetPanel &&
-      typeof activePanel?.cleanup === "function"
-    ) {
+    if (activePanel && typeof activePanel?.cleanup === "function") {
       try {
         activePanel.cleanup();
       } catch (_) {
@@ -640,29 +529,38 @@ export class SystemSculptSettingTab extends PluginSettingTab {
     }
 
     this.activeTabId = tabId;
+  }
 
-    Array.from(
-      this.tabContainerEl.querySelectorAll("button[data-tab]"),
-    ).forEach((button) => {
-      const el = button as HTMLElement;
-      if (el.dataset.tab === tabId) {
-        el.addClass("mod-active", "mod-cta");
-      } else {
-        el.removeClass("mod-active", "mod-cta");
-      }
-    });
-
-    Array.from(
-      this.contentContainerEl.querySelectorAll(".systemsculpt-tab-content"),
-    ).forEach((panel) => {
-      const el = panel as HTMLElement;
-      if (el.dataset.tab === tabId) {
-        el.addClass("is-active");
-        el.toggle(true);
-      } else {
-        el.removeClass("is-active");
-        el.toggle(false);
-      }
+  private initializeSearchCombobox(): void {
+    if (!this.searchInputEl || !this.searchResultsContainerEl) return;
+    this.searchCombobox?.destroy();
+    this.searchCombobox = new SurfaceCombobox<SettingsSearchMatch>({
+      input: this.searchInputEl,
+      listbox: this.searchResultsContainerEl,
+      listboxId: this.searchResultsListId,
+      listboxLabel: "Settings search results",
+      initiallyOpen: false,
+      activeMode: "first",
+      navigation: "clamp",
+      selectionFollowsActive: true,
+      activeClass: "is-selected",
+      optionActivationEvent: "mouseenter",
+      scrollBehavior: "smooth",
+      bindInputEvents: false,
+      getItemKey: (match) => this.getSearchResultKey(match),
+      filterItems: (matches) => matches,
+      renderOption: ({ item }) => this.renderSearchResult(item),
+      renderEmpty: ({ listbox }) => {
+        createUiState(listbox, {
+          kind: "empty",
+          icon: "search",
+          title: "No settings found",
+          detail: "Try another search.",
+        });
+      },
+      onResultsChange: () => this.searchResultGroupEls.clear(),
+      onCommit: ({ item }) => this.navigateToSetting(item.tabId, item.element),
+      onEscape: () => this.clearSearch(true),
     });
   }
 
@@ -703,59 +601,6 @@ export class SystemSculptSettingTab extends PluginSettingTab {
   }
 
   /**
-   * Handle keyboard navigation while the search field is focused.
-   */
-  private handleSearchKeydown(event: KeyboardEvent) {
-    const hasActiveSearch = this.searchState.query.length > 0;
-
-    if (event.key === "Escape") {
-      if (!hasActiveSearch && !this.searchInputEl?.value) {
-        return;
-      }
-      event.preventDefault();
-      this.clearSearch(true);
-      return;
-    }
-
-    if (!hasActiveSearch) {
-      return;
-    }
-
-    if (event.key === "ArrowDown") {
-      event.preventDefault();
-      this.moveSearchSelection(1);
-      return;
-    }
-
-    if (event.key === "ArrowUp") {
-      event.preventDefault();
-      this.moveSearchSelection(-1);
-      return;
-    }
-
-    if (event.key === "Home") {
-      event.preventDefault();
-      this.setSearchSelection(0, true);
-      return;
-    }
-
-    if (event.key === "End") {
-      event.preventDefault();
-      this.setSearchSelection(this.searchState.results.length - 1, true);
-      return;
-    }
-
-    if (event.key === "Enter") {
-      const match = this.searchState.results[this.searchState.selectedIndex];
-      if (!match) {
-        return;
-      }
-      event.preventDefault();
-      this.navigateToSetting(match.tabId, match.element);
-    }
-  }
-
-  /**
    * Recompute and render search results.
    */
   private refreshSearchResults(query: string, resetSelection: boolean) {
@@ -768,30 +613,29 @@ export class SystemSculptSettingTab extends PluginSettingTab {
     }
 
     const resultSet = searchSettingsIndex(this.allSettingsIndex, query);
-    const nextSelectedIndex =
-      resultSet.results.length === 0
-        ? -1
-        : resetSelection
-          ? 0
-          : Math.min(
-              Math.max(this.searchState.selectedIndex, 0),
-              resultSet.results.length - 1,
-            );
+    const orderedResults = resultSet.groups.flatMap((group) => group.results);
 
     this.searchState = {
       query,
       groups: resultSet.groups,
-      results: resultSet.results,
-      selectedIndex: nextSelectedIndex,
+      results: orderedResults,
     };
 
-    this.tabContainerEl.toggle(false);
+    this.tabContainerEl.toggleAttribute("hidden", true);
     Array.from(
       this.contentContainerEl.querySelectorAll(".systemsculpt-tab-content"),
-    ).forEach((panel) => (panel as HTMLElement).toggle(false));
+    ).forEach((panel) => (panel as HTMLElement).toggleAttribute("hidden", true));
 
     this.renderSearchMeta();
-    this.renderSearchResults();
+    this.searchResultsContainerEl.toggleAttribute("hidden", false);
+    this.searchCombobox?.setQuery(query, {
+      writeInput: false,
+      render: false,
+    });
+    this.searchCombobox?.setOpen(true);
+    this.searchCombobox?.setItems(orderedResults, {
+      preserveActive: !resetSelection,
+    });
     this.syncSearchChrome();
   }
 
@@ -807,9 +651,9 @@ export class SystemSculptSettingTab extends PluginSettingTab {
       return;
     }
 
-    this.searchResultsContainerEl.empty();
-    this.searchResultsContainerEl.toggle(false);
-    this.tabContainerEl.toggle(true);
+    this.searchCombobox?.showState(() => {}, { open: false });
+    this.searchResultsContainerEl.toggleAttribute("hidden", true);
+    this.tabContainerEl.toggleAttribute("hidden", false);
     this.activateTab(this.activeTabId);
     this.renderSearchMeta();
     this.syncSearchChrome();
@@ -826,7 +670,6 @@ export class SystemSculptSettingTab extends PluginSettingTab {
       query: "",
       groups: [],
       results: [],
-      selectedIndex: -1,
     };
     this.exitSearchMode();
     if (restoreFocus) {
@@ -887,25 +730,16 @@ export class SystemSculptSettingTab extends PluginSettingTab {
     if (this.allSettingsIndex.length > 0) {
       summary.createSpan({
         cls: "ss-settings-search-meta__count",
-        text: `${this.allSettingsIndex.length} searchable items`,
-      });
-      summary.createSpan({
-        cls: "ss-settings-search-meta__subtle",
-        text: `across ${tabCount || this.tabsDef.length} ${
-          (tabCount || this.tabsDef.length) === 1 ? "tab" : "tabs"
-        }`,
+        text: `${this.allSettingsIndex.length} settings in ${
+          tabCount || this.tabsDef.length
+        } ${(tabCount || this.tabsDef.length) === 1 ? "tab" : "tabs"}`,
       });
     } else {
       summary.createSpan({
         cls: "ss-settings-search-meta__count",
-        text: "Search across every tab",
+        text: "Search all settings",
       });
     }
-
-    actions.createSpan({
-      cls: "ss-settings-search-meta__idle-copy",
-      text: "Search titles, descriptions, and section anchors.",
-    });
   }
 
   private createKeyboardHint(
@@ -929,137 +763,93 @@ export class SystemSculptSettingTab extends PluginSettingTab {
       this.clearSearchButtonEl.disabled = !searchActive;
     }
 
-    if (this.searchInputEl) {
-      this.searchInputEl.setAttribute(
-        "aria-expanded",
-        searchActive ? "true" : "false",
-      );
-      if (searchActive && this.searchState.selectedIndex >= 0) {
-        this.searchInputEl.setAttribute(
-          "aria-activedescendant",
-          this.getSearchResultId(this.searchState.selectedIndex),
-        );
-      } else {
-        this.searchInputEl.removeAttribute("aria-activedescendant");
-      }
-    }
   }
 
-  /**
-   * Render the grouped search results list.
-   */
-  private renderSearchResults() {
-    if (!this.searchResultsContainerEl) {
-      return;
+  private renderSearchResult(match: SettingsSearchMatch): HTMLElement {
+    const group = this.searchState.groups.find(
+      (candidate) => candidate.tabId === match.tabId,
+    );
+    const groupResults = this.getOrCreateSearchResultGroup(
+      match.tabId,
+      group?.tabLabel || match.tabLabel,
+      group?.results.length ?? 1,
+    );
+    const row = groupResults.createEl("button", {
+      cls: "ss-search-result",
+      attr: { type: "button" },
+    });
+
+    const copy = row.createDiv({ cls: "ss-search-result__copy" });
+    const titleRow = copy.createDiv({ cls: "ss-search-result__title-row" });
+    const titleEl = titleRow.createDiv({ cls: "ss-search-result__title" });
+    this.renderHighlightedText(
+      titleEl,
+      match.title || match.description || "(Untitled setting)",
+      this.searchState.query,
+    );
+    if (match.kind === "anchor") {
+      titleRow.createSpan({
+        cls: "ss-search-result__badge",
+        text: "Section",
+      });
     }
 
-    this.searchResultsContainerEl.empty();
-    this.searchResultsContainerEl.toggle(true);
+    const descriptionEl = copy.createDiv({
+      cls: "ss-search-result__description",
+    });
+    const descriptionText = match.description ||
+      (match.kind === "anchor"
+        ? `Jump to this section in ${match.tabLabel}.`
+        : `Open this setting in ${match.tabLabel}.`);
+    this.renderHighlightedText(
+      descriptionEl,
+      descriptionText,
+      this.searchState.query,
+    );
 
-    if (this.searchState.results.length === 0) {
-      const emptyState = this.searchResultsContainerEl.createDiv({
-        cls: "ss-search-empty-state",
-      });
-      const emptyIcon = emptyState.createDiv({
-        cls: "ss-search-empty-state__icon",
-        attr: { "aria-hidden": "true" },
-      });
-      setIcon(emptyIcon, "search");
-      emptyState.createDiv({
-        cls: "ss-search-empty-state__title",
-        text: `No settings found for “${this.searchState.query}”`,
-      });
-      emptyState.createDiv({
-        cls: "ss-search-empty-state__description",
-        text: "Try a broader phrase, a tab name, or a feature like studio, provider, or embeddings.",
-      });
-      return;
-    }
+    const meta = row.createDiv({ cls: "ss-search-result__meta" });
+    const openHint = meta.createDiv({ cls: "ss-search-result__open" });
+    const openIcon = openHint.createSpan({
+      cls: "ss-search-result__open-icon",
+      attr: { "aria-hidden": "true" },
+    });
+    setIcon(openIcon, "arrow-right");
+    openHint.createSpan({ text: "Open" });
+    return row;
+  }
 
-    let flatIndex = 0;
-    for (const group of this.searchState.groups) {
-      const groupEl = this.searchResultsContainerEl.createDiv({
-        cls: "ss-search-group",
-      });
-      const groupHeader = groupEl.createDiv({ cls: "ss-search-group__header" });
-      groupHeader.createSpan({
-        cls: "ss-search-group__title",
-        text: group.tabLabel,
-      });
-      groupHeader.createSpan({
-        cls: "ss-search-group__count",
-        text: `${group.results.length}`,
-      });
+  private getOrCreateSearchResultGroup(
+    tabId: string,
+    tabLabel: string,
+    count: number,
+  ): HTMLElement {
+    const existing = this.searchResultGroupEls.get(tabId);
+    if (existing) return existing;
+    const groupEl = this.searchResultsContainerEl!.createDiv({
+      cls: "ss-search-group",
+    });
+    const groupHeader = groupEl.createDiv({ cls: "ss-search-group__header" });
+    groupHeader.createSpan({
+      cls: "ss-search-group__title",
+      text: tabLabel,
+    });
+    groupHeader.createSpan({
+      cls: "ss-search-group__count",
+      text: `${count}`,
+    });
+    const groupResults = groupEl.createDiv({
+      cls: "ss-search-group__results",
+    });
+    this.searchResultGroupEls.set(tabId, groupResults);
+    return groupResults;
+  }
 
-      const groupResults = groupEl.createDiv({
-        cls: "ss-search-group__results",
-      });
-      for (const match of group.results) {
-        const rowIndex = flatIndex;
-        const row = groupResults.createEl("button", {
-          cls: "ss-search-result",
-          attr: {
-            id: this.getSearchResultId(rowIndex),
-            type: "button",
-            role: "option",
-            "aria-selected":
-              rowIndex === this.searchState.selectedIndex ? "true" : "false",
-          },
-        });
-        row.classList.toggle(
-          "is-selected",
-          rowIndex === this.searchState.selectedIndex,
-        );
-
-        const copy = row.createDiv({ cls: "ss-search-result__copy" });
-        const titleRow = copy.createDiv({ cls: "ss-search-result__title-row" });
-        const titleEl = titleRow.createDiv({ cls: "ss-search-result__title" });
-        this.renderHighlightedText(
-          titleEl,
-          match.title || match.description || "(Untitled setting)",
-          this.searchState.query,
-        );
-        if (match.kind === "anchor") {
-          titleRow.createSpan({
-            cls: "ss-search-result__badge",
-            text: "Section",
-          });
-        }
-
-        const descriptionEl = copy.createDiv({
-          cls: "ss-search-result__description",
-        });
-        const descriptionText =
-          match.description ||
-          (match.kind === "anchor"
-            ? `Jump to this section in ${group.tabLabel}.`
-            : `Open this setting in ${group.tabLabel}.`);
-        this.renderHighlightedText(
-          descriptionEl,
-          descriptionText,
-          this.searchState.query,
-        );
-
-        const meta = row.createDiv({ cls: "ss-search-result__meta" });
-        const openHint = meta.createDiv({ cls: "ss-search-result__open" });
-        const openIcon = openHint.createSpan({
-          cls: "ss-search-result__open-icon",
-          attr: { "aria-hidden": "true" },
-        });
-        setIcon(openIcon, "arrow-right");
-        openHint.createSpan({ text: "Open" });
-
-        row.addEventListener("mouseenter", () =>
-          this.setSearchSelection(rowIndex, false),
-        );
-        row.addEventListener("click", () =>
-          this.navigateToSetting(match.tabId, match.element),
-        );
-        flatIndex += 1;
-      }
-    }
-
-    this.syncRenderedSearchSelection(false);
+  private getSearchResultKey(match: SettingsSearchMatch): string {
+    const existing = this.searchResultKeyByElement.get(match.element);
+    if (existing) return existing;
+    const key = `setting-${++this.nextSearchResultKey}`;
+    this.searchResultKeyByElement.set(match.element, key);
+    return key;
   }
 
   private renderHighlightedText(
@@ -1082,68 +872,6 @@ export class SystemSculptSettingTab extends PluginSettingTab {
     }
   }
 
-  private moveSearchSelection(delta: number) {
-    if (this.searchState.results.length === 0) {
-      return;
-    }
-
-    const currentIndex =
-      this.searchState.selectedIndex < 0 ? 0 : this.searchState.selectedIndex;
-    const nextIndex = Math.max(
-      0,
-      Math.min(currentIndex + delta, this.searchState.results.length - 1),
-    );
-    this.setSearchSelection(nextIndex, true);
-  }
-
-  private setSearchSelection(index: number, scrollIntoView: boolean) {
-    if (this.searchState.results.length === 0) {
-      this.searchState.selectedIndex = -1;
-      this.syncRenderedSearchSelection(false);
-      return;
-    }
-
-    const nextIndex = Math.max(
-      0,
-      Math.min(index, this.searchState.results.length - 1),
-    );
-    if (nextIndex === this.searchState.selectedIndex) {
-      if (scrollIntoView) {
-        this.syncRenderedSearchSelection(true);
-      }
-      return;
-    }
-
-    this.searchState.selectedIndex = nextIndex;
-    this.syncRenderedSearchSelection(scrollIntoView);
-  }
-
-  private syncRenderedSearchSelection(scrollIntoView: boolean) {
-    if (!this.searchResultsContainerEl) {
-      return;
-    }
-
-    const rows = Array.from(
-      this.searchResultsContainerEl.querySelectorAll<HTMLElement>(
-        ".ss-search-result",
-      ),
-    );
-    rows.forEach((row, index) => {
-      const selected = index === this.searchState.selectedIndex;
-      row.classList.toggle("is-selected", selected);
-      row.setAttribute("aria-selected", selected ? "true" : "false");
-      if (selected && scrollIntoView) {
-        row.scrollIntoView({ block: "nearest", behavior: "smooth" });
-      }
-    });
-
-    this.syncSearchChrome();
-  }
-
-  private getSearchResultId(index: number): string {
-    return `${this.searchResultsListId}-${index}`;
-  }
-
   /**
    * Activate the tab and scroll to the target setting element
    */
@@ -1156,11 +884,12 @@ export class SystemSculptSettingTab extends PluginSettingTab {
     this.activateTab(tabId);
 
     // Scroll to element and highlight
-    setTimeout(() => {
+    const ownerWindow = this.containerEl.ownerDocument.defaultView ?? window;
+    ownerWindow.setTimeout(() => {
       try {
         element.scrollIntoView({ behavior: "smooth", block: "center" });
         element.addClass("ss-search-highlight");
-        setTimeout(() => element.removeClass("ss-search-highlight"), 1200);
+        ownerWindow.setTimeout(() => element.removeClass("ss-search-highlight"), 1200);
       } catch (e) {
         // If element no longer exists (mode switch), just ensure tab is visible
       }

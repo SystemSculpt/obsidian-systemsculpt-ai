@@ -1,18 +1,17 @@
-import { App, WorkspaceLeaf, Notice, TFile, ItemView } from "obsidian";
+import { App, WorkspaceLeaf, Notice, ItemView } from "obsidian";
 import SystemSculptPlugin from "../../main";
 import { RibbonManager } from "./ribbons";
 import { ChatState } from "../../types/index";
 import type { EmbeddingsView } from "../../views/EmbeddingsView";
 import type { SystemSculptStudioView } from "../../views/studio/SystemSculptStudioView";
 import { yieldToEventLoop } from "../../utils/yieldToEventLoop";
-import { PlatformContext } from "../../services/PlatformContext";
 import {
   CHAT_VIEW_TYPE,
   EMBEDDINGS_VIEW_TYPE,
   SYSTEMSCULPT_STUDIO_VIEW_TYPE,
 } from "./viewTypes";
 
-type ChatViewModule = typeof import("../../views/chatview/ChatView");
+type AgentChatViewModule = typeof import("../../views/chatview/AgentChatView");
 type EmbeddingsViewModule = typeof import("../../views/EmbeddingsView");
 type StudioViewModule = typeof import("../../views/studio/SystemSculptStudioView");
 type AppWithViewRegistry = App & {
@@ -27,8 +26,8 @@ type ChatViewLike = ItemView & {
   leaf?: WorkspaceLeaf;
 };
 
-function loadChatViewModule(): ChatViewModule {
-  return require("../../views/chatview/ChatView");
+function loadAgentChatViewModule(): AgentChatViewModule {
+  return require("../../views/chatview/AgentChatView");
 }
 
 function loadEmbeddingsViewModule(): EmbeddingsViewModule {
@@ -43,37 +42,6 @@ interface ChatViewState {
   state: ChatState;
 }
 
-class DesktopOnlyPlaceholderView extends ItemView {
-  private readonly viewType: string;
-  private readonly displayText: string;
-  private readonly description: string;
-
-  constructor(
-    leaf: WorkspaceLeaf,
-    options: { viewType: string; displayText: string; description: string }
-  ) {
-    super(leaf);
-    this.viewType = options.viewType;
-    this.displayText = options.displayText;
-    this.description = options.description;
-  }
-
-  getViewType(): string {
-    return this.viewType;
-  }
-
-  getDisplayText(): string {
-    return this.displayText;
-  }
-
-  async onOpen(): Promise<void> {
-    this.containerEl.empty();
-    const container = this.containerEl.createDiv({ cls: "systemsculpt-desktop-only-placeholder" });
-    container.createEl("h3", { text: this.displayText });
-    container.createEl("p", { text: this.description });
-  }
-}
-
 export class ViewManager {
   private plugin: SystemSculptPlugin;
   private app: App;
@@ -81,9 +49,6 @@ export class ViewManager {
   private hasStarted: boolean = false;
   private isInitialized: boolean = false;
   private isInitializing: boolean = false;
-  private initPromise: Promise<void> | null = null;
-  private deferredViews: Map<string, () => void> = new Map();
-  private initializationTimeout: number = 10000; // Increased from 2000ms to 10000ms for network operations
   private restoreQueueHigh: WorkspaceLeaf[] = [];
   private restoreQueueLow: WorkspaceLeaf[] = [];
   private restoreQueuedLeaves: Set<WorkspaceLeaf> = new Set();
@@ -103,13 +68,12 @@ export class ViewManager {
     this.registerView();
 
     // Initialize ribbon manager in the background
-    setTimeout(() => this.ribbonManager.initialize(), 0);
+    window.setTimeout(() => this.ribbonManager.initialize(), 0);
 
     // Wait for layout to be ready before minimal initialization
     this.app.workspace.onLayoutReady(() => {
       try { (window as any).FreezeMonitor?.mark?.('view-manager:onLayoutReady'); } catch {}
-      this.initializeInBackground().catch(error => {
-      });
+      this.initializeInBackground().catch(() => {});
     });
 
     this.hasStarted = true;
@@ -173,7 +137,6 @@ export class ViewManager {
     if (this.isInitializing || this.isInitialized) return;
     this.isInitializing = true;
 
-    const startTime = performance.now();
     try {
       // Only initialize what's needed for visible views
       const leaves = this.app.workspace.getLeavesOfType(CHAT_VIEW_TYPE);
@@ -187,22 +150,10 @@ export class ViewManager {
       // Restore the currently-visible chats first so the UI is ready quickly.
       await this.processRestoreQueue();
 
-      // Lazy-load change: do not fetch models here. We will fetch
-      // on-demand when user opens the model selection or triggers a run.
-
       this.isInitialized = true;
 
-      // Process any deferred views
-      for (const [id, initFn] of this.deferredViews) {
-        try {
-          initFn();
-        } catch (error) {
-        }
-      }
-      this.deferredViews.clear();
-
       if (hiddenLeaves.length > 0) {
-        setTimeout(() => {
+        window.setTimeout(() => {
           for (const leaf of hiddenLeaves) {
             this.scheduleChatRestore(leaf, "low");
           }
@@ -219,7 +170,7 @@ export class ViewManager {
           this.scheduleChatRestore(leaf, "high");
         })
       );
-    } catch (error) {
+    } catch {
     } finally {
       this.isInitializing = false;
     }
@@ -228,34 +179,23 @@ export class ViewManager {
   private async restoreView(view: ChatViewLike, state: ChatState) {
     try {
       await view.setState(state);
-    } catch (error) {
+    } catch {
 
       // Try fallback restoration with minimal state
       try {
         const minimalState = {
           chatId: state.chatId,
-          selectedModelId: state.selectedModelId || this.plugin.settings.selectedModelId,
           chatTitle: state.chatTitle || "Recovered Chat"
         };
         await view.setState(minimalState);
 
         // Notify user of partial recovery
         new Notice("Chat was partially recovered due to an error", 5000);
-      } catch (fallbackError) {
+      } catch {
         // If even fallback fails, detach the leaf
         view.leaf?.detach();
       }
     }
-  }
-
-  private isViewTypeRegistered(viewType: string): boolean {
-    const viewRegistry = (this.app as AppWithViewRegistry).viewRegistry;
-    const viewByType = viewRegistry?.viewByType;
-    if (!viewByType) {
-      return false;
-    }
-
-    return Object.prototype.hasOwnProperty.call(viewByType, viewType);
   }
 
   private registerViewType(viewType: string, viewCreator: (leaf: WorkspaceLeaf) => ItemView): void {
@@ -270,27 +210,6 @@ export class ViewManager {
 
     this.plugin.registerView(viewType, viewCreator);
     this.registeredViewTypes.add(viewType);
-  }
-
-  private async initializeModels() {
-    try {
-      const models = await this.plugin.modelService.getModels();
-      return models;
-    } catch (error) {
-      // Continue with initialization - models can load on demand
-      return [];
-    }
-  }
-
-  // Method to defer a view initialization
-  public deferViewInitialization(id: string, initFn: () => void) {
-    if (this.isInitialized) {
-      // If already initialized, run immediately
-      initFn();
-    } else {
-      // Otherwise store for later
-      this.deferredViews.set(id, initFn);
-    }
   }
 
   async restoreChatViews() {
@@ -324,8 +243,6 @@ export class ViewManager {
       return false;
     }
 
-    const chatId = state.state.chatId;
-
     // Validate data types if they exist, but don't create them yet
     if ("messages" in state.state) {
       if (!Array.isArray(state.state.messages)) {
@@ -347,7 +264,7 @@ export class ViewManager {
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         if (attempt > 1) {
-          await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt - 1) * 1000));
+          await new Promise(resolve => window.setTimeout(resolve, Math.pow(2, attempt - 1) * 1000));
         }
 
         await view.setState(state);
@@ -363,12 +280,11 @@ export class ViewManager {
   }
 
   registerView() {
-    const platform = PlatformContext.get();
     this.registerViewType(
       CHAT_VIEW_TYPE,
       (leaf: WorkspaceLeaf) => {
-        const { ChatView } = loadChatViewModule();
-        return new ChatView(leaf, this.plugin);
+        const { AgentChatView } = loadAgentChatViewModule();
+        return new AgentChatView(leaf, this.plugin);
       }
     );
     
@@ -384,13 +300,6 @@ export class ViewManager {
     this.registerViewType(
       SYSTEMSCULPT_STUDIO_VIEW_TYPE,
       (leaf: WorkspaceLeaf) => {
-        if (!platform.supportsDesktopOnlyFeatures()) {
-          return new DesktopOnlyPlaceholderView(leaf, {
-            viewType: SYSTEMSCULPT_STUDIO_VIEW_TYPE,
-            displayText: "SystemSculpt Studio",
-            description: "SystemSculpt Studio is desktop-only right now.",
-          });
-        }
         const { SystemSculptStudioView } = loadStudioViewModule();
         return new SystemSculptStudioView(leaf, this.plugin);
       }
@@ -425,10 +334,6 @@ export class ViewManager {
   }
 
   async activateSystemSculptStudioView(projectPath?: string): Promise<SystemSculptStudioView> {
-    if (!PlatformContext.get().supportsDesktopOnlyFeatures()) {
-      throw new Error("SystemSculpt Studio is desktop-only.");
-    }
-
     const normalizedTarget = String(projectPath || "").trim();
     if (normalizedTarget) {
       const existingLeaves = this.app.workspace.getLeavesOfType(SYSTEMSCULPT_STUDIO_VIEW_TYPE);

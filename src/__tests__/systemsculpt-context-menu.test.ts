@@ -4,12 +4,12 @@ import { FileContextMenuService } from "../context-menu/FileContextMenuService";
 import { errorLogger } from "../utils/errorLogger";
 import { tryCopyImageFileToClipboard } from "../utils/clipboard";
 import type {
-  DocumentProcessingModalHandle,
-  DocumentProcessingModalLauncher,
-} from "../modals/DocumentProcessingModal";
+  DocumentProcessingPanelHandle,
+  DocumentProcessingPanelLauncher,
+} from "../modals/DocumentProcessingPanel";
 
-jest.mock("../views/chatview/ChatView", () => ({
-  ChatView: jest.fn().mockImplementation(() => ({
+jest.mock("../views/chatview/AgentChatView", () => ({
+  AgentChatView: jest.fn().mockImplementation(() => ({
     addFileToContext: jest.fn(),
   })),
 }));
@@ -159,23 +159,23 @@ const bootstrap = (
     open: jest.fn(async () => undefined),
   };
 
-  const modalHandle: DocumentProcessingModalHandle = {
+  const progressPanel: DocumentProcessingPanelHandle = {
     updateProgress: jest.fn(),
     markSuccess: jest.fn(),
     markFailure: jest.fn(),
     close: jest.fn(),
   };
 
-  const processingModalLauncher: DocumentProcessingModalLauncher = jest
+  const processingPanelLauncher: DocumentProcessingPanelLauncher = jest
     .fn()
-    .mockReturnValue(modalHandle);
+    .mockReturnValue(progressPanel);
 
   const service = new FileContextMenuService({
     app,
     plugin,
     documentProcessor,
     chatLauncher,
-    launchProcessingModal: processingModalLauncher,
+    launchProcessingPanel: processingPanelLauncher,
   } as any);
 
   if (options.autoStart ?? true) {
@@ -192,8 +192,8 @@ const bootstrap = (
     handlers,
     documentProcessor,
     chatLauncher,
-    processingModalLauncher,
-    modalHandle,
+    processingPanelLauncher,
+    progressPanel,
     triggerLayoutReady,
   };
 };
@@ -230,6 +230,20 @@ const bootstrap = (
     expect(titles).toContain("Convert to Markdown");
   });
 
+  it.each(["png", "jpg", "jpeg", "webp"])("offers explicit managed conversion for %s images", (extension) => {
+    const { handlers } = bootstrap();
+    const menu = createMenuStub();
+    emitFileMenu(handlers, menu, createFile(extension), "preview");
+    expect(menu.recordedItems.map((item) => item.title)).toContain("Convert to Markdown");
+  });
+
+  it.each(["doc", "docx", "ppt", "pptx", "xls", "xlsx"])("does not advertise unsupported Office conversion or Chat routing for %s", (extension) => {
+    const { handlers } = bootstrap();
+    const menu = createMenuStub();
+    emitFileMenu(handlers, menu, createFile(extension), "preview");
+    expect(menu.recordedItems).toHaveLength(0);
+  });
+
   it("invokes the document processor when the menu item is clicked", async () => {
     const { handlers, documentProcessor } = bootstrap();
     const menu = createMenuStub();
@@ -249,8 +263,8 @@ const bootstrap = (
     );
   });
 
-  it("opens the processing modal and forwards progress events", async () => {
-    const { handlers, documentProcessor, processingModalLauncher, modalHandle } = bootstrap();
+  it("opens the processing panel and forwards progress events", async () => {
+    const { handlers, documentProcessor, processingPanelLauncher, progressPanel } = bootstrap();
     const menu = createMenuStub();
     const file = createFile("pdf");
 
@@ -261,9 +275,8 @@ const bootstrap = (
 
     await entry!.onClick?.();
 
-    expect(processingModalLauncher).toHaveBeenCalledWith(
+    expect(processingPanelLauncher).toHaveBeenCalledWith(
       expect.objectContaining({
-        app: expect.any(Object),
         file,
       })
     );
@@ -280,16 +293,16 @@ const bootstrap = (
 
     options.onProgress?.(progressEvent);
 
-    expect(modalHandle.updateProgress).toHaveBeenCalledWith(progressEvent);
-    expect(modalHandle.markSuccess).toHaveBeenCalledWith(
+    expect(progressPanel.updateProgress).toHaveBeenCalledWith(progressEvent);
+    expect(progressPanel.markSuccess).toHaveBeenCalledWith(
       expect.objectContaining({
         extractionPath: "site/extracted.md",
       })
     );
   });
 
-  it("marks the modal as failed when conversion errors", async () => {
-    const { handlers, documentProcessor, processingModalLauncher, modalHandle } = bootstrap();
+  it("marks the progress panel as failed when conversion errors", async () => {
+    const { handlers, documentProcessor, processingPanelLauncher, progressPanel } = bootstrap();
     const menu = createMenuStub();
     const file = createFile("pdf");
 
@@ -303,8 +316,8 @@ const bootstrap = (
 
     await entry!.onClick?.();
 
-    expect(processingModalLauncher).toHaveBeenCalled();
-    expect(modalHandle.markFailure).toHaveBeenCalledWith(
+    expect(processingPanelLauncher).toHaveBeenCalled();
+    expect(progressPanel.markFailure).toHaveBeenCalledWith(
       expect.objectContaining({
         error,
       })
@@ -329,7 +342,7 @@ const bootstrap = (
     emitFileMenu(handlers, menu, file, "preview");
 
     const titles = menu.recordedItems.map((item) => item.title);
-    expect(titles).toContain("SystemSculpt - Copy Image to Clipboard");
+    expect(titles).toContain("Copy image to clipboard");
   });
 
   it("copies image to clipboard when copy image menu item is clicked", async () => {
@@ -340,7 +353,7 @@ const bootstrap = (
     emitFileMenu(handlers, menu, file, "file-explorer");
 
     const entry = menu.recordedItems.find(
-      (item) => item.title === "SystemSculpt - Copy Image to Clipboard"
+      (item) => item.title === "Copy image to clipboard"
     );
     expect(entry).toBeDefined();
     await entry!.onClick?.();
@@ -362,7 +375,7 @@ const bootstrap = (
     emitFileMenu(handlers, menu, file, "file-explorer");
 
     const entry = menu.recordedItems.find(
-      (item) => item.title === "SystemSculpt - Copy Image to Clipboard"
+      (item) => item.title === "Copy image to clipboard"
     );
     expect(entry).toBeDefined();
     await entry!.onClick?.();

@@ -4,6 +4,7 @@ import { getText } from "./shared";
 export const cliCommandNode: StudioNodeDefinition = {
   kind: "studio.cli_command",
   version: "1.0.0",
+  hostRequirement: "desktop",
   capabilityClass: "local_io",
   cachePolicy: "never",
   inputPorts: [],

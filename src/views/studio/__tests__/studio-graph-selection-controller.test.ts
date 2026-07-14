@@ -1,3 +1,5 @@
+/** @jest-environment jsdom */
+
 import { StudioGraphSelectionController } from "../StudioGraphSelectionController";
 import {
   createElementStub,
@@ -25,6 +27,7 @@ function createHost(): TestHost {
 
 function createViewport(): HTMLElement {
   return {
+    ownerDocument: document,
     scrollLeft: 120,
     scrollTop: 240,
     clientWidth: 1400,
@@ -53,7 +56,7 @@ describe("StudioGraphSelectionController wheel behavior", () => {
     expect(controller.getSelectedNodeIds()).toEqual(["node-a", "node-b"]);
   });
 
-  it("keeps native scrolling for wheel events inside inspector overlays", () => {
+  it("keeps native scrolling for wheel events inside context menus", () => {
     const controller = new StudioGraphSelectionController(createHost());
     const viewport = createViewport();
     controller.registerViewportElement(viewport);
@@ -62,7 +65,7 @@ describe("StudioGraphSelectionController wheel behavior", () => {
     const event = {
       target: {
         closest: (selector: string) =>
-          selector.includes(".ss-studio-node-inspector") ? ({} as Element) : null,
+          selector.includes(".ss-studio-simple-context-menu") ? ({} as Element) : null,
       },
       ctrlKey: false,
       metaKey: false,
@@ -142,10 +145,13 @@ describe("StudioGraphSelectionController wheel behavior", () => {
     controller.registerViewportElement(viewport);
 
     const preventDefault = jest.fn();
+    const unfocusedTextarea = {
+      ownerDocument: { activeElement: null },
+    } as unknown as Element;
     const event = {
       target: {
         closest: (selector: string) =>
-          selector.includes("textarea") ? ({} as Element) : null,
+          selector.includes("textarea") ? unfocusedTextarea : null,
       },
       ctrlKey: false,
       metaKey: false,
@@ -170,10 +176,13 @@ describe("StudioGraphSelectionController wheel behavior", () => {
     controller.registerViewportElement(viewport);
 
     const preventDefault = jest.fn();
+    const unfocusedPrompt = {
+      ownerDocument: { activeElement: null },
+    } as unknown as Element;
     const event = {
       target: {
         closest: (selector: string) =>
-          selector.includes("textarea") ? ({} as Element) : null,
+          selector.includes("textarea") ? unfocusedPrompt : null,
       },
       ctrlKey: false,
       metaKey: false,
@@ -197,41 +206,29 @@ describe("StudioGraphSelectionController wheel behavior", () => {
     const viewport = createViewport();
     controller.registerViewportElement(viewport);
 
-    const focusedTextarea = {} as Element;
-    const originalDocument = (globalThis as { document?: unknown }).document;
-    (globalThis as { document?: unknown }).document = {
-      activeElement: focusedTextarea,
-    };
+    const focusedTextarea = {} as Element & { ownerDocument: { activeElement: Element | null } };
+    focusedTextarea.ownerDocument = { activeElement: focusedTextarea };
+    const preventDefault = jest.fn();
+    const event = {
+      target: {
+        closest: (selector: string) =>
+          selector.includes("textarea") ? focusedTextarea : null,
+      },
+      ctrlKey: false,
+      metaKey: false,
+      deltaX: 0,
+      deltaY: 84,
+      deltaMode: 0,
+      clientX: 0,
+      clientY: 0,
+      preventDefault,
+    } as unknown as WheelEvent;
 
-    try {
-      const preventDefault = jest.fn();
-      const event = {
-        target: {
-          closest: (selector: string) =>
-            selector.includes("textarea") ? focusedTextarea : null,
-        },
-        ctrlKey: false,
-        metaKey: false,
-        deltaX: 0,
-        deltaY: 84,
-        deltaMode: 0,
-        clientX: 0,
-        clientY: 0,
-        preventDefault,
-      } as unknown as WheelEvent;
+    controller.handleGraphViewportWheel(event);
 
-      controller.handleGraphViewportWheel(event);
-
-      expect(preventDefault).not.toHaveBeenCalled();
-      expect(viewport.scrollLeft).toBe(120);
-      expect(viewport.scrollTop).toBe(240);
-    } finally {
-      if (typeof originalDocument === "undefined") {
-        delete (globalThis as { document?: unknown }).document;
-      } else {
-        (globalThis as { document?: unknown }).document = originalDocument;
-      }
-    }
+    expect(preventDefault).not.toHaveBeenCalled();
+    expect(viewport.scrollLeft).toBe(120);
+    expect(viewport.scrollTop).toBe(240);
   });
 
   it("zooms the canvas for ctrl+wheel events inside editable form controls", () => {
@@ -261,7 +258,7 @@ describe("StudioGraphSelectionController wheel behavior", () => {
     expect(controller.getGraphZoom()).toBeGreaterThan(1);
   });
 
-  it("still zooms graph for ctrl+wheel events inside inspector overlays", () => {
+  it("still zooms graph for ctrl+wheel events inside context menus", () => {
     const controller = new StudioGraphSelectionController(createHost());
     const viewport = createViewport();
     controller.registerViewportElement(viewport);
@@ -271,7 +268,7 @@ describe("StudioGraphSelectionController wheel behavior", () => {
     const event = {
       target: {
         closest: (selector: string) =>
-          selector.includes(".ss-studio-node-inspector") ? ({} as Element) : null,
+          selector.includes(".ss-studio-simple-context-menu") ? ({} as Element) : null,
       },
       ctrlKey: true,
       metaKey: false,
@@ -375,6 +372,7 @@ describe("StudioGraphSelectionController fit selection", () => {
 
     const controller = new StudioGraphSelectionController(host);
     const viewport = {
+      ownerDocument: document,
       scrollLeft: 0,
       scrollTop: 0,
       clientWidth: 1000,
@@ -428,6 +426,7 @@ describe("StudioGraphSelectionController fit selection", () => {
       } as any);
     const controller = new StudioGraphSelectionController(host);
     const viewport = {
+      ownerDocument: document,
       scrollLeft: 88,
       scrollTop: 132,
       clientWidth: 900,
@@ -473,6 +472,7 @@ describe("StudioGraphSelectionController fit selection", () => {
 
     const controller = new StudioGraphSelectionController(host);
     const viewport = {
+      ownerDocument: document,
       scrollLeft: 0,
       scrollTop: 0,
       clientWidth: 1000,
@@ -681,5 +681,51 @@ describe("StudioGraphSelectionController drag behavior", () => {
     }
 
     expect(startEvent.preventDefault).toHaveBeenCalledTimes(1);
+  });
+
+  it("pans the viewport for one-finger canvas touch gestures", () => {
+    const host = createHost();
+    const controller = new StudioGraphSelectionController(host);
+    const viewport = createViewport();
+    controller.registerViewportElement(viewport);
+
+    const startEvent = {
+      button: 0,
+      pointerId: 9,
+      clientX: 240,
+      clientY: 320,
+      preventDefault: jest.fn(),
+    } as unknown as PointerEvent;
+
+    const harness = installWindowPointerListenerHarness();
+    const movePreventDefault = jest.fn();
+    try {
+      controller.startCanvasPan(startEvent);
+      harness.emit(
+        "pointermove",
+        {
+          pointerId: 9,
+          clientX: 180,
+          clientY: 260,
+          preventDefault: movePreventDefault,
+        } as PointerEvent
+      );
+      harness.emit(
+        "pointerup",
+        {
+          pointerId: 9,
+          clientX: 180,
+          clientY: 260,
+        } as PointerEvent
+      );
+    } finally {
+      harness.restore();
+    }
+
+    expect(startEvent.preventDefault).toHaveBeenCalledTimes(1);
+    expect(movePreventDefault).toHaveBeenCalledTimes(1);
+    expect(viewport.scrollLeft).toBe(180);
+    expect(viewport.scrollTop).toBe(300);
+    expect(controller.consumeSuppressedCanvasClick()).toBe(true);
   });
 });

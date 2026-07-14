@@ -28,10 +28,19 @@ describe("historyProviders", () => {
     expect(sorted.map((entry) => entry.id)).toEqual(["studio:1", "chat:1"]);
   });
 
-  it("can disable studio providers for mobile history mode", () => {
+  it("can disable studio providers explicitly", () => {
     const plugin = {} as any;
     const providers = createSystemSculptHistoryProviders(plugin, false);
     expect(providers.map((provider) => provider.id)).toEqual(["chat-history"]);
+  });
+
+  it("includes studio providers by default", () => {
+    const plugin = {} as any;
+    const providers = createSystemSculptHistoryProviders(plugin);
+    expect(providers.map((provider) => provider.id)).toEqual([
+      "chat-history",
+      "studio-session-history",
+    ]);
   });
 
   it("includes studio providers when enabled", () => {

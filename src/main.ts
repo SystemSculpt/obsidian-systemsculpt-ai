@@ -18,16 +18,15 @@ ErrorCollectorService.initializeEarlyLogsCapture();
  * SystemSculpt AI Plugin for Obsidian
  * Version: 1.5.3
  */
-import { Plugin, Notice, MarkdownView, Platform, setIcon, WorkspaceLeaf, debounce, TFile, FileSystemAdapter, normalizePath, apiVersion } from "obsidian";
+import { Plugin, Notice, TFile, FileSystemAdapter, apiVersion } from "obsidian";
+export { StudioProjectGenerationStore } from "./studio/persistence/StudioProjectGenerationStore";
+export { ObsidianStudioGenerationAdapter } from "./studio/persistence/ObsidianStudioGenerationAdapter";
 import { checkObsidianCompatibility, MINIMUM_OBSIDIAN_VERSION } from "./core/plugin/lifecycle/ObsidianCompat";
-import { initializeNotificationQueue } from "./core/ui/notifications";
 import { SystemSculptSettings, DEFAULT_SETTINGS, LogLevel, LICENSE_URL } from "./types";
-import { SystemSculptModel } from "./types/llm";
 import { SystemSculptService, type CreditsBalanceSnapshot } from "./services/SystemSculptService";
 import { SystemSculptSettingTab } from "./settings/SystemSculptSettingTab";
 import type { RecorderService } from "./services/RecorderService";
 import { TranscriptionService } from "./services/TranscriptionService";
-import { YouTubeTranscriptService } from "./services/YouTubeTranscriptService";
 import type { FileContextMenuService } from "./context-menu/FileContextMenuService";
 import { SettingsManager } from "./core/settings/SettingsManager";
 import { LicenseManager } from "./core/license/LicenseManager";
@@ -35,13 +34,7 @@ import type { ViewManager } from "./core/plugin/views";
 import type { CommandManager } from "./core/plugin/commands";
 import { setLogLevel } from "./utils/errorHandling";
 import { errorLogger } from "./utils/errorLogger";
-import { UnifiedModelService } from "./services/providers/UnifiedModelService";
-import { EntitlementService } from "./services/entitlement/EntitlementService";
 import { DirectoryManager } from "./core/DirectoryManager";
-import { VersionCheckerService } from "./services/VersionCheckerService";
-import { FavoritesService } from "./services/FavoritesService";
-import { RuntimeIncompatibilityService } from "./services/RuntimeIncompatibilityService";
-import { PreviewService } from './services/PreviewService';
 import { StorageManager } from "./core/storage";
 import { ResumeChatService } from "./views/chatview/ResumeChatService";
 import { EmbeddingsManager } from "./services/embeddings/EmbeddingsManager";
@@ -54,21 +47,18 @@ import { PluginLogger } from "./utils/PluginLogger";
 import { InitializationTracer } from "./core/diagnostics/InitializationTracer";
 import { yieldToEventLoop } from "./utils/yieldToEventLoop";
 import { PlatformContext } from "./services/PlatformContext";
-import { detectPlatformEnvironment } from "./utils/PlatformEnvironment";
 import { tryCopyToClipboard } from "./utils/clipboard";
 import { EventEmitter } from "./core/EventEmitter";
 import { LifecycleCoordinator, LifecycleFailureEvent } from "./core/plugin/lifecycle/LifecycleCoordinator";
 import { WorkflowEngineService } from "./services/workflow/WorkflowEngineService";
 import type { SystemSculptSearchEngine } from "./services/search/SystemSculptSearchEngine";
-import { ReadwiseService } from "./services/readwise";
-import { WebResearchApiService } from "./services/web/WebResearchApiService";
-import { WebResearchCorpusService } from "./services/web/WebResearchCorpusService";
-import { guardQuickEditEditorDiffLeaks, quickEditEditorDiffExtension } from "./quick-edit/editor-diff";
 import { relativeLineNumbersExtension } from "./editor/relative-line-numbers";
 import { type Extension } from "@codemirror/state";
 import type { StudioService } from "./studio/StudioService";
 import { SYSTEMSCULPT_STUDIO_VIEW_TYPE } from "./core/plugin/viewTypes";
-import type { DesktopAutomationBridge } from "./testing/automation/DesktopAutomationBridge";
+import { API_BASE_URL } from "./constants/api";
+import { ManagedCapabilityClient } from "./services/managed/ManagedCapabilityClient";
+import { ManagedCapabilityClientFactory, type ManagedCapabilityClientGraph } from "./services/managed/ManagedCapabilityClientFactory";
 
 type ViewManagerModule = typeof import("./core/plugin/views");
 type CommandManagerModule = typeof import("./core/plugin/commands");
@@ -76,7 +66,6 @@ type StudioServiceModule = typeof import("./studio/StudioService");
 type SystemSculptSearchEngineModule = typeof import("./services/search/SystemSculptSearchEngine");
 type RecorderServiceModule = typeof import("./services/RecorderService");
 type FileContextMenuServiceModule = typeof import("./context-menu/FileContextMenuService");
-type DesktopAutomationBridgeModule = typeof import("./testing/automation/DesktopAutomationBridge");
 
 function loadViewManagerModule(): ViewManagerModule {
   return require("./core/plugin/views");
@@ -102,10 +91,6 @@ function loadFileContextMenuServiceModule(): FileContextMenuServiceModule {
   return require("./context-menu/FileContextMenuService");
 }
 
-function loadDesktopAutomationBridgeModule(): DesktopAutomationBridgeModule {
-  return require("./testing/automation/DesktopAutomationBridge");
-}
-
 export default class SystemSculptPlugin extends Plugin {
   // Make internalSettings public but indicate it's for manager use only
   public _internal_settings_systemsculpt_plugin: SystemSculptSettings;
@@ -118,14 +103,11 @@ export default class SystemSculptPlugin extends Plugin {
   settingsTab: SystemSculptSettingTab;
   private recorderService: RecorderService | null = null;
   private transcriptionService: TranscriptionService;
-  private youtubeTranscriptService: YouTubeTranscriptService | null = null;
   private settingsManager: SettingsManager;
   private licenseManager: LicenseManager;
   private viewManager: ViewManager;
   private commandManager: CommandManager;
   private fileContextMenuService: FileContextMenuService | null = null;
-  private _modelService: UnifiedModelService | undefined;
-  private _entitlementService: EntitlementService | null = null;
   private isUnloading = false;
   private isPreloadingDone = false;
   private failures: string[] = [];
@@ -133,19 +115,11 @@ export default class SystemSculptPlugin extends Plugin {
   private safeMode = false;
   emitter: EventEmitter;
   directoryManager: DirectoryManager;
-  public versionCheckerService: VersionCheckerService;
   private errorCollectorService: ErrorCollectorService;
-  private favoritesService: FavoritesService;
   public resumeChatService: ResumeChatService;
-  private statusBarEl: HTMLElement | null = null;
-  private statusIconEl: HTMLElement | null = null;
-  private statusTextEl: HTMLElement | null = null;
-  private progressEl: HTMLElement | null = null;
-  private _lastActiveFile: { path: string; content: string; timestamp: number } | null = null;
   public storage: StorageManager;
   private pluginLogger: PluginLogger | null = null;
   private initializationTracer: InitializationTracer | null = null;
-  public hasPromptedForDefaultModel = false;
   public embeddingsManager: EmbeddingsManager | null = null;
   public vaultFileCache: VaultFileCache;
   public embeddingsStatusBar: EmbeddingsStatusBar | null = null;
@@ -156,20 +130,14 @@ export default class SystemSculptPlugin extends Plugin {
   private diagnosticsMetricsFileName = "resource-metrics-latest.ndjson";
   private workflowEngineService: WorkflowEngineService | null = null;
   private searchEngine: SystemSculptSearchEngine | null = null;
-  private webResearchApiService: WebResearchApiService | null = null;
-  private webResearchCorpusService: WebResearchCorpusService | null = null;
   private studioService: StudioService | null = null;
   private fileExplorerStudioButtonManager: FileExplorerStudioButtonManager | null = null;
-  private desktopAutomationBridge: DesktopAutomationBridge | null = null;
+  private managedCapabilityGraph: ManagedCapabilityClientGraph | null = null;
   /** Live-reconfigurable slot for the relative line number gutter editor extension. */
   private readonly relativeLineNumberExtensions: Extension[] = [];
   private relativeLineNumbersApplied = false;
   private pendingSettingsFocusTab: string | null = null;
-  private readonly mobileStartupProbePath = normalizePath("SystemSculpt/Diagnostics/mobile-startup.json");
   // Removed complex settings callback system - embeddings are now completely on-demand
-
-  // Readwise integration
-  private readwiseService: ReadwiseService | null = null;
 
   // Simple initialization tracking
   private embeddingsInitialized = false;
@@ -188,38 +156,23 @@ export default class SystemSculptPlugin extends Plugin {
     return this._aiService;
   }
 
-  public get modelService(): UnifiedModelService {
-    if (!this._modelService) {
-      this._modelService = UnifiedModelService.getInstance(this);
-    }
-    return this._modelService;
+  public getManagedCapabilityClient(): ManagedCapabilityClient {
+    return this.getManagedCapabilityGraph().client;
   }
-  
+
+  public getManagedCapabilityGraph(): ManagedCapabilityClientGraph {
+    if (!this.managedCapabilityGraph) this.managedCapabilityGraph = ManagedCapabilityClientFactory.createGraph({
+      baseUrl: new URL(API_BASE_URL).origin, pluginVersion: this.manifest.version,
+      licenseKey: () => this.settings.licenseKey,
+    });
+    return this.managedCapabilityGraph;
+  }
+
   /**
    * Get or create embeddings manager - simple and reliable
    */
   public getOrCreateEmbeddingsManager(): EmbeddingsManager {
     if (!this.embeddingsManager) {
-      // Validate prerequisites based on provider
-      const provider = (this.settings as any).embeddingsProvider || "systemsculpt";
-      if (provider === 'systemsculpt') {
-        // Route through the single entitlement owner (#209) — no inline license check.
-        if (!this.getEntitlementService().canUseEmbeddings(provider)) {
-          throw new Error('Embeddings require an active SystemSculpt license. Validate your license in settings.');
-        }
-      } else if (provider === 'custom') {
-        // Custom embeddings do not depend on the hosted SystemSculpt API base URL.
-        const endpoint = (this.settings.embeddingsCustomEndpoint || '').trim();
-        const model = (this.settings.embeddingsCustomModel || this.settings.embeddingsModel || '').trim();
-        if (!endpoint || !model) {
-          throw new Error('Custom embeddings provider is not configured. Set API Endpoint and Model in settings.');
-        }
-      } else {
-        throw new Error(
-          `Unknown embeddings provider: ${String(provider)}. Open SystemSculpt → Settings → Embeddings and select "SystemSculpt" or "Custom provider".`
-        );
-      }
-
       this.embeddingsManager = new EmbeddingsManager(this.app, this);
 
       // Initialize in background if not already done
@@ -231,9 +184,6 @@ export default class SystemSculptPlugin extends Plugin {
             const logger = this.getLogger();
             logger.error("Embeddings manager background initialization failed", error, {
               source: "SystemSculptPlugin",
-              metadata: {
-                provider,
-              },
             });
           });
       }
@@ -250,93 +200,8 @@ export default class SystemSculptPlugin extends Plugin {
     return this.searchEngine;
   }
 
-  private async writeMobileStartupProbe(
-    stage: string,
-    extra: Record<string, unknown> = {}
-  ): Promise<void> {
-    const environment = detectPlatformEnvironment();
-    if (environment.runtime !== "mobile" && environment.surface !== "mobile") {
-      return;
-    }
-
-    try {
-      await this.app.vault.adapter.mkdir("SystemSculpt");
-    } catch {}
-
-    try {
-      await this.app.vault.adapter.mkdir(normalizePath("SystemSculpt/Diagnostics"));
-    } catch {}
-
-    try {
-      await this.app.vault.adapter.write(
-        this.mobileStartupProbePath,
-        JSON.stringify(
-          {
-            stage,
-            pluginVersion: this.manifest.version,
-            runtime: environment.runtime,
-            surface: environment.surface,
-            isMobileEmulation: environment.isMobileEmulation,
-            timestamp: new Date().toISOString(),
-            ...extra,
-          },
-          null,
-          2
-        )
-      );
-    } catch {}
-  }
-
-
   public getPluginLogger(): PluginLogger | null {
     return this.pluginLogger;
-  }
-
-  /**
-   * Get or create the Readwise service for importing highlights
-   */
-  public getReadwiseService(): ReadwiseService {
-    if (!this.readwiseService) {
-      this.readwiseService = new ReadwiseService(this);
-      // Initialize the service (loads sync state, starts scheduled sync if configured)
-      this.readwiseService.initialize().catch((error) => {
-        const logger = this.getLogger();
-        logger.warn("Readwise service failed to initialize", {
-          source: "SystemSculptPlugin",
-          metadata: {
-            error: error instanceof Error ? error.message : String(error),
-          },
-        });
-      });
-    }
-    return this.readwiseService;
-  }
-
-  private handleReadwiseSettingsUpdated(oldSettings: SystemSculptSettings, newSettings: SystemSculptSettings): void {
-    const relevantChange =
-      oldSettings.readwiseEnabled !== newSettings.readwiseEnabled ||
-      oldSettings.readwiseSyncMode !== newSettings.readwiseSyncMode ||
-      oldSettings.readwiseSyncIntervalMinutes !== newSettings.readwiseSyncIntervalMinutes ||
-      oldSettings.readwiseApiToken !== newSettings.readwiseApiToken;
-
-    if (!relevantChange) {
-      return;
-    }
-
-    if (!newSettings.readwiseEnabled) {
-      if (this.readwiseService) {
-        this.readwiseService.stopScheduledSync();
-        this.readwiseService.cancelSync();
-      }
-      return;
-    }
-
-    const service = this.getReadwiseService();
-    if (newSettings.readwiseSyncMode === "interval") {
-      service.startScheduledSync();
-    } else {
-      service.stopScheduledSync();
-    }
   }
 
   private getInitializationTracer(): InitializationTracer {
@@ -355,38 +220,8 @@ export default class SystemSculptPlugin extends Plugin {
     await this.criticalInitializationPromise;
   }
 
-  private runAfterIdleAsync<T>(task: () => Promise<T>, timeoutMs: number = 300): Promise<T> {
-    return new Promise<T>((resolve, reject) => {
-      const idle =
-        typeof window !== "undefined" && typeof (window as any).requestIdleCallback === "function"
-          ? (window as any).requestIdleCallback
-          : null;
-
-      const runner = () => {
-        task().then(resolve).catch(reject);
-      };
-
-      if (idle) {
-        idle(() => runner(), { timeout: timeoutMs });
-      } else if (typeof window !== "undefined" && typeof window.setTimeout === "function") {
-        window.setTimeout(runner, timeoutMs);
-      } else {
-        setTimeout(runner, timeoutMs);
-      }
-    });
-  }
-
-
-
-  private lastFileCountUpdate = 0;
-  private fileCountCacheInterval = 60000; // Update cache every 60 seconds
-  
   private async prepareDiagnosticsSession(): Promise<void> {
     if (this.diagnosticsSessionId) {
-      return;
-    }
-
-    if (!PlatformContext.get().supportsEagerVaultWrites()) {
       return;
     }
 
@@ -479,12 +314,6 @@ export default class SystemSculptPlugin extends Plugin {
     return [];
   }
 
-  private wrapCommandCallback<T extends (...args: any[]) => any>(name: string, fn: T): T {
-    return fn;
-  }
-
-
-
   async onload() {
     const loadStart = performance.now();
     // Injected by esbuild `define`; "dev" outside the bundler (tests).
@@ -492,7 +321,7 @@ export default class SystemSculptPlugin extends Plugin {
       typeof __SS_BUILD_STAMP__ !== "undefined" ? __SS_BUILD_STAMP__ : "dev";
     // Plain console line (not just the plugin logger) so any vault can
     // answer "which build am I running?" straight from devtools.
-    console.info(
+    console.debug(
       `[SystemSculpt] v${this.manifest.version} build ${buildStamp}`
     );
     const tracer = this.getInitializationTracer();
@@ -513,11 +342,9 @@ export default class SystemSculptPlugin extends Plugin {
       },
     });
 
-    void this.writeMobileStartupProbe("onload-entered");
-
     try {
       this.warnIfObsidianVersionUnsupported();
-      this.configureLifecycle(loadStart);
+      this.configureLifecycle();
       if (!this.lifecycleCoordinator) {
         throw new Error("Lifecycle coordinator failed to initialize");
       }
@@ -532,25 +359,11 @@ export default class SystemSculptPlugin extends Plugin {
         totalMs: Number((performance.now() - loadStart).toFixed(1)),
         failureCount: this.failures.length,
       });
-      void this.writeMobileStartupProbe("onload-complete", {
-        failureCount: this.failures.length,
-      });
     } catch (error) {
       this.failures.push("core initialization");
       onloadPhase.fail(error, {
         failureCount: this.failures.length,
       });
-      void this.writeMobileStartupProbe("onload-catch", {
-        failureCount: this.failures.length,
-        error:
-          error instanceof Error
-            ? {
-                name: error.name,
-                message: error.message,
-              }
-            : String(error),
-      });
-
       tracer.flushOpenPhases("plugin.onload-error");
 
       if (this.errorCollectorService) {
@@ -561,7 +374,7 @@ export default class SystemSculptPlugin extends Plugin {
         });
       }
 
-      this.enterSafeMode("core initialization failed", error);
+      this.enterSafeMode("core initialization failed");
     }
 
     if (this.failures.length > 0 && !this.safeMode) {
@@ -572,8 +385,7 @@ export default class SystemSculptPlugin extends Plugin {
         },
       });
       this.showErrorNotice(
-        `SystemSculpt had issues with: ${this.failures.join(", ")}. Some features may be unavailable.`,
-        this.collectErrorDetails()
+        `SystemSculpt had issues with: ${this.failures.join(", ")}. Some features may be unavailable.`
       );
     }
   }
@@ -616,7 +428,7 @@ export default class SystemSculptPlugin extends Plugin {
    * diagnostics and tell the user their settings are safe. Idempotent and
    * defensive — it runs on the failure path and must not throw.
    */
-  private enterSafeMode(reason: string, error?: unknown): void {
+  private enterSafeMode(reason: string): void {
     if (this.safeMode) {
       return;
     }
@@ -639,18 +451,16 @@ export default class SystemSculptPlugin extends Plugin {
     try {
       this.showErrorNotice(
         `SystemSculpt AI could not finish loading (${reason}). Your settings are safe — run ` +
-          `"Show load diagnostics (safe mode)" from the command palette for details.`,
-        error ? String(error) : this.collectErrorDetails()
+          `"Show load diagnostics (safe mode)" from the command palette for details.`
       );
     } catch {
       // Notice is best-effort.
     }
   }
 
-  private configureLifecycle(loadStart: number): void {
+  private configureLifecycle(): void {
     const tracer = this.getInitializationTracer();
     const logger = this.getLogger();
-
     this.lifecycleCoordinator = new LifecycleCoordinator({
       tracer,
       logger,
@@ -665,7 +475,6 @@ export default class SystemSculptPlugin extends Plugin {
 
   private registerBootstrapTasks(coordinator: LifecycleCoordinator): void {
     const tracer = this.getInitializationTracer();
-    const logger = this.getLogger();
 
     coordinator.registerTask("bootstrap", {
       id: "storage.prepare",
@@ -674,9 +483,7 @@ export default class SystemSculptPlugin extends Plugin {
         if (!this.storage) {
           this.storage = new StorageManager(this.app, this);
         }
-        if (PlatformContext.get().supportsEagerVaultWrites()) {
-          await this.prepareDiagnosticsSession();
-        }
+        await this.prepareDiagnosticsSession();
       },
     });
 
@@ -690,16 +497,9 @@ export default class SystemSculptPlugin extends Plugin {
         });
 
         PlatformContext.initialize();
-        this.registerEditorExtension(quickEditEditorDiffExtension);
         // Registered empty; filled in / cleared by syncRelativeLineNumbersExtension()
         // once settings load and whenever the toggle changes.
         this.registerEditorExtension(this.relativeLineNumberExtensions);
-        this.registerEvent(
-          this.app.workspace.on("file-open", () => {
-            guardQuickEditEditorDiffLeaks(this.app);
-          })
-        );
-
         this.ensureSettingsManagerInstance();
       },
     });
@@ -729,22 +529,12 @@ export default class SystemSculptPlugin extends Plugin {
       run: () => {
         this.registerEvent(
           this.app.workspace.on("active-leaf-change", (leaf) => {
-            const filePath =
-              leaf && leaf.view instanceof MarkdownView && leaf.view.file ? leaf.view.file.path : null;
-
             FreezeMonitor.mark("workspace:active-leaf-change:start", { hasLeaf: !!leaf });
-            if (filePath) {
-              this._lastActiveFile = {
-                path: filePath,
-                content: "",
-                timestamp: Date.now(),
-              };
-            }
           })
         );
 
         this.registerEvent(
-          this.app.workspace.on("systemsculpt:settings-updated", (oldSettings, newSettings) => {
+          this.app.workspace.on("systemsculpt:settings-updated", () => {
             try {
               this.embeddingsManager?.syncFromSettings();
             } catch (error) {
@@ -753,22 +543,6 @@ export default class SystemSculptPlugin extends Plugin {
                 source: "SystemSculptPlugin",
               });
             }
-
-            try {
-              this.handleReadwiseSettingsUpdated(oldSettings, newSettings);
-            } catch (error) {
-              const logger = this.getLogger();
-              logger.error("Readwise settings sync failed", error, {
-                source: "SystemSculptPlugin",
-              });
-            }
-
-            this.syncDesktopAutomationBridge().catch((error) => {
-              const logger = this.getLogger();
-              logger.error("Desktop automation bridge settings sync failed", error, {
-                source: "SystemSculptPlugin",
-              });
-            });
 
             try {
               this.syncRelativeLineNumbersExtension();
@@ -781,25 +555,6 @@ export default class SystemSculptPlugin extends Plugin {
           })
         );
 
-        this.registerEvent(
-          this.app.workspace.on("systemsculpt:settings-file-touched", () => {
-            this.syncDesktopAutomationBridge({ forceRestart: true }).catch((error) => {
-              const logger = this.getLogger();
-              logger.error("Desktop automation bridge file-touch sync failed", error, {
-                source: "SystemSculptPlugin",
-              });
-            });
-          })
-        );
-      },
-    });
-
-    coordinator.registerTask("bootstrap", {
-      id: "notifications.initialize",
-      label: "notification queue",
-      optional: true,
-      run: () => {
-        initializeNotificationQueue(this.app);
       },
     });
 
@@ -809,15 +564,6 @@ export default class SystemSculptPlugin extends Plugin {
       run: () => {
         this.errorCollectorService = new ErrorCollectorService(500);
         this.errorCollectorService.enableCaptureAllLogs();
-      },
-    });
-
-    coordinator.registerTask("bootstrap", {
-      id: "services.versionChecker",
-      label: "version checker",
-      run: () => {
-        const version = this.manifest.version;
-        this.versionCheckerService = VersionCheckerService.getInstance(version, this.app, this);
       },
     });
 
@@ -840,9 +586,6 @@ export default class SystemSculptPlugin extends Plugin {
       label: "resource monitor",
       optional: true,
       run: () => {
-        if (!PlatformContext.get().supportsEagerVaultWrites()) {
-          return;
-        }
         this.resourceMonitor = new ResourceMonitorService(this, {
           metricsFileName: this.diagnosticsMetricsFileName,
           sessionId: this.diagnosticsSessionId ?? undefined,
@@ -856,9 +599,6 @@ export default class SystemSculptPlugin extends Plugin {
       label: "storage",
       optional: true,
       run: () => {
-        if (!PlatformContext.get().supportsEagerVaultWrites()) {
-          return;
-        }
         this.scheduleStorageInitialization(tracer);
       },
     });
@@ -907,67 +647,6 @@ export default class SystemSculptPlugin extends Plugin {
 
   private registerLayoutTasks(coordinator: LifecycleCoordinator): void {
     coordinator.registerTask("layout", {
-      id: "updates.schedule",
-      label: "version check",
-      optional: true,
-      diagnostics: {
-        slowThresholdMs: 30_000,
-        timeoutMs: 120_000,
-      },
-      run: async () => {
-        if (!this.versionCheckerService) {
-          return;
-        }
-
-        const tracer = this.getInitializationTracer();
-        const scheduleDelayMs = 10000;
-        const schedulePhase = tracer.startPhase("updates.check.schedule", {
-          slowThresholdMs: 0,
-          timeoutMs: 0,
-          successLevel: "debug",
-          metadata: {
-            intent: "version-check",
-          },
-        });
-        schedulePhase.complete({
-          scheduledDelayMs: scheduleDelayMs,
-        });
-
-        await new Promise<void>((resolve) => {
-          const timer = typeof window !== "undefined" && typeof window.setTimeout === "function" ? window.setTimeout : setTimeout;
-          timer(() => {
-            const executePhase = tracer.startPhase("updates.check.execute", {
-              slowThresholdMs: 6000,
-              timeoutMs: 30000,
-              successLevel: "debug",
-            });
-
-            const service = this.versionCheckerService;
-
-            if (!service) {
-              executePhase.complete({
-                skipped: true,
-                reason: "service-unavailable",
-              });
-              resolve();
-              return;
-            }
-
-            this.runAfterIdleAsync(() => service.checkForUpdatesOnStartup(0), 750)
-              .then(() => {
-                executePhase.complete();
-                resolve();
-              })
-              .catch((error) => {
-                executePhase.fail(error);
-                resolve();
-              });
-          }, scheduleDelayMs);
-        });
-      },
-    });
-
-    coordinator.registerTask("layout", {
       id: "embeddings.autostart",
       label: "embeddings auto-start",
       optional: true,
@@ -976,27 +655,23 @@ export default class SystemSculptPlugin extends Plugin {
         timeoutMs: 120_000,
       },
       run: async () => {
-        if (!this.settings.embeddingsEnabled || !this.settings.embeddingsAutoProcess) {
+        if (!this.settings.embeddingsEnabled) {
           return;
         }
 
         const tracer = this.getInitializationTracer();
-        await new Promise<void>((resolve) => {
-          const timer = typeof window !== "undefined" && typeof window.setTimeout === "function" ? window.setTimeout : setTimeout;
-          timer(() => {
-            const embeddingsPhase = tracer.startPhase("embeddings.autostart", {
-              slowThresholdMs: 8000,
-              timeoutMs: 60000,
-            });
-            try {
-              this.getOrCreateEmbeddingsManager();
-              embeddingsPhase.complete();
-            } catch (error) {
-              embeddingsPhase.fail(error);
-            }
-            resolve();
-          }, 10000);
+        const embeddingsPhase = tracer.startPhase("embeddings.autostart", {
+          slowThresholdMs: 8000,
+          timeoutMs: 60000,
         });
+        try {
+          const manager = this.getOrCreateEmbeddingsManager();
+          await manager.awaitReady();
+          this.embeddingsStatusBar?.startMonitoring(manager);
+          embeddingsPhase.complete();
+        } catch (error) {
+          embeddingsPhase.fail(error);
+        }
       },
     });
   }
@@ -1148,13 +823,7 @@ export default class SystemSculptPlugin extends Plugin {
     new Notice(message, 8000); // Show for 8 seconds to ensure visibility
   }
 
-  /**
-   * Show an error notice with copy functionality
-   * @param message The error message to display
-   * @param details Additional error details to include when copied
-   */
-  private showErrorNotice(message: string, details: string) {
-    // Create a notice with text and a button
+  private showErrorNotice(message: string) {
     new Notice(message, 15000);
   }
 
@@ -1339,13 +1008,6 @@ export default class SystemSculptPlugin extends Plugin {
 
     try {
       this.directoryManager = new DirectoryManager(this.app, this);
-      if (!PlatformContext.get().supportsEagerVaultWrites()) {
-        phase.complete({
-          deferred: true,
-        });
-        return;
-      }
-
       await this.directoryManager.initialize();
 
       logger.info("Directory manager initialized", {
@@ -1445,44 +1107,6 @@ export default class SystemSculptPlugin extends Plugin {
     }
   }
 
-  /**
-   * Initialize embeddings for user - fully automatic
-   */
-  public async initializeEmbeddingsForUser(): Promise<void> {
-    try {
-      const manager = this.getOrCreateEmbeddingsManager();
-
-      // Status bar disabled – no monitoring
-
-      // Everything else is automatic - no manual processing needed
-    } catch (error) {
-      throw error;
-    }
-  }
-
-  /**
-   * Initialize embeddings - simple system doesn't need file monitoring
-   */
-  public async initializeEmbeddingsForFileEvents(): Promise<void> {
-    // Embeddings process on demand with automatic file monitoring
-  }
-
-  /**
-   * Set up file watchers for embeddings system
-   */
-  private setupEmbeddingsFileWatchers(): void {
-    // Embeddings system handles reindexing automatically
-    // Embeddings uses on-demand processing silently
-  }
-
-  /**
-   * Auto-start embeddings processing - simplified
-   */
-  private async autoStartEmbeddingsProcessing(): Promise<void> {
-    // Auto-processing handled internally by embeddings manager
-    // Processing happens on-demand when needed
-  }
-
   private ensureSettingsManagerInstance(): SettingsManager {
     if (!this.settingsManager) {
       this.settingsManager = new SettingsManager(this);
@@ -1507,10 +1131,6 @@ export default class SystemSculptPlugin extends Plugin {
       const settingsManager = this.ensureSettingsManagerInstance();
       await settingsManager.loadSettings();
       this._internal_settings_systemsculpt_plugin = settingsManager.getSettings();
-      if (PlatformContext.get().supportsDesktopOnlyFeatures()) {
-        settingsManager.startWatchingPluginDataFile();
-      }
-
       try {
         this.syncRelativeLineNumbersExtension();
       } catch (error) {
@@ -1573,18 +1193,9 @@ export default class SystemSculptPlugin extends Plugin {
 
     try {
       this._aiService = SystemSculptService.getInstance(this);
-      this.favoritesService = FavoritesService.getInstance(this);
-      // Initialize runtime incompatibility tracking (persists model tool/image rejections)
-      RuntimeIncompatibilityService.getInstance(this);
-      this._modelService = UnifiedModelService.getInstance(this);
 
       const metadata = {
-        services: [
-          "SystemSculptService",
-          "FavoritesService",
-          "RuntimeIncompatibilityService",
-          "UnifiedModelService",
-        ],
+        services: ["SystemSculptService"],
       };
 
       logger.info("Core AI services initialized", {
@@ -1596,11 +1207,7 @@ export default class SystemSculptPlugin extends Plugin {
     } catch (error) {
       this.failures.push("basic services");
       phase.fail(error, {
-        services: [
-          "SystemSculptService",
-          "FavoritesService",
-          "UnifiedModelService",
-        ],
+        services: ["SystemSculptService"],
       });
 
       logger.error("Failed to initialize core AI services", error, {
@@ -1629,9 +1236,7 @@ export default class SystemSculptPlugin extends Plugin {
       if (!this.directoryManager) {
         this.directoryManager = new DirectoryManager(this.app, this);
       } else if (!this.directoryManager.isInitialized()) {
-        if (PlatformContext.get().supportsEagerVaultWrites()) {
-          await this.directoryManager.initialize();
-        }
+        await this.directoryManager.initialize();
       }
 
       if (this.isUnloading) {
@@ -1639,7 +1244,7 @@ export default class SystemSculptPlugin extends Plugin {
         return;
       }
 
-      if (PlatformContext.get().supportsStatusBar() && !this.embeddingsStatusBar) {
+      if (!this.embeddingsStatusBar) {
         this.embeddingsStatusBar = new EmbeddingsStatusBar(this);
         this.register(() => {
           this.embeddingsStatusBar?.unload();
@@ -1798,19 +1403,10 @@ export default class SystemSculptPlugin extends Plugin {
         this.transcriptionService = TranscriptionService.getInstance(this);
       }),
       wrap("recorder", "recorder service", () => {
-        if (!PlatformContext.get().isMobileRuntime()) {
-          this.ensureRecorderService();
-        }
-      }),
-      wrap("readwise", "readwise service", () => {
-        if (this.settings.readwiseEnabled) {
-          this.getReadwiseService();
-        }
+        this.ensureRecorderService();
       }),
       wrap("fileContextMenu", "file context menu service", () => {
-        if (!PlatformContext.get().isMobileRuntime()) {
-          this.setupFileContextMenuService();
-        }
+        this.setupFileContextMenuService();
       }),
       wrap("workflowEngine", "workflow engine service", () => {
         this.ensureWorkflowEngineService();
@@ -1844,30 +1440,8 @@ export default class SystemSculptPlugin extends Plugin {
     });
   }
 
-  private async syncDesktopAutomationBridge(options?: { forceRestart?: boolean }): Promise<void> {
-    if (this.isUnloading || !PlatformContext.get().supportsDesktopOnlyFeatures()) {
-      return;
-    }
-
-    if (!this.desktopAutomationBridge) {
-      const { DesktopAutomationBridge } = loadDesktopAutomationBridgeModule();
-      this.desktopAutomationBridge = new DesktopAutomationBridge(this);
-    }
-
-    await this.desktopAutomationBridge.syncFromSettings(options);
-  }
-
   public isPluginUnloading(): boolean {
     return this.isUnloading;
-  }
-
-  private async stopDesktopAutomationBridge(): Promise<void> {
-    if (!this.desktopAutomationBridge) {
-      return;
-    }
-
-    await this.desktopAutomationBridge.stop().catch(() => {});
-    this.desktopAutomationBridge = null;
   }
 
   /**
@@ -1926,10 +1500,7 @@ export default class SystemSculptPlugin extends Plugin {
   }
 
   private registerStudioExtensionsIfNeeded(): void {
-    if (
-      !PlatformContext.get().supportsDesktopOnlyFeatures() ||
-      this.hasRegisteredStudioExtensions
-    ) {
+    if (this.hasRegisteredStudioExtensions) {
       return;
     }
 
@@ -1938,10 +1509,6 @@ export default class SystemSculptPlugin extends Plugin {
   }
 
   private startFileExplorerStudioButtonIfNeeded(): void {
-    if (!PlatformContext.get().supportsDesktopOnlyFeatures()) {
-      return;
-    }
-
     if (!this.fileExplorerStudioButtonManager) {
       this.fileExplorerStudioButtonManager = new FileExplorerStudioButtonManager(this);
     }
@@ -1980,14 +1547,6 @@ export default class SystemSculptPlugin extends Plugin {
       this.registerStudioExtensionsIfNeeded();
       this.startFileExplorerStudioButtonIfNeeded();
       this.ensureCommandManager();
-
-      try {
-        await this.syncDesktopAutomationBridge();
-      } catch (error) {
-        logger.error("Desktop automation bridge failed to initialize", error, {
-          source: "SystemSculptPlugin",
-        });
-      }
 
       const metadata = {
         managers: [
@@ -2074,11 +1633,6 @@ export default class SystemSculptPlugin extends Plugin {
 
     try {
       // Embeddings cleanup
-      // Clean up version checker service
-      if (this.versionCheckerService) {
-        VersionCheckerService.clearInstance();
-      }
-
       // Clean up error collector service
       if (this.errorCollectorService) {
         this.errorCollectorService.unload();
@@ -2088,8 +1642,6 @@ export default class SystemSculptPlugin extends Plugin {
         this.resourceMonitor.stop();
         this.resourceMonitor = null;
       }
-
-      await this.stopDesktopAutomationBridge();
 
       if (this.fileExplorerStudioButtonManager) {
         this.fileExplorerStudioButtonManager.dispose();
@@ -2104,7 +1656,7 @@ export default class SystemSculptPlugin extends Plugin {
 
       // Clean up embeddings manager
       if (this.embeddingsManager) {
-        this.embeddingsManager.cleanup();
+        await this.embeddingsManager.cleanup();
         this.embeddingsManager = null;
       }
 
@@ -2128,12 +1680,6 @@ export default class SystemSculptPlugin extends Plugin {
         this.studioService = null;
       }
 
-      // Cleanup Readwise service
-      if (this.readwiseService) {
-        this.readwiseService.destroy();
-        this.readwiseService = null;
-      }
-
       // Cleanup UI components first
       if (this.settingsTab) {
         // Settings tab is automatically cleaned up by Obsidian
@@ -2145,11 +1691,9 @@ export default class SystemSculptPlugin extends Plugin {
           "toggle-audio-recorder",
           "open-systemsculpt-chat",
           "open-systemsculpt-history",
-          "open-chat-history",
           "open-systemsculpt-janitor",
           "reload-obsidian",
           "open-systemsculpt-settings",
-          "change-chat-model",
           "chat-with-file",
           "suggest-edits",
           "clear-suggested-edits"
@@ -2195,12 +1739,6 @@ export default class SystemSculptPlugin extends Plugin {
 
       // System prompts are now handled locally, no need to clear cache
 
-      // Clean up embeddings manager
-      if (this.embeddingsManager) {
-        // Cleaning up embeddings manager silently
-        this.embeddingsManager = null;
-      }
-      
       // Clean up vault file cache
       if (this.vaultFileCache) {
         // Destroying vault file cache silently
@@ -2208,37 +1746,12 @@ export default class SystemSculptPlugin extends Plugin {
       }
 
       // Clear singleton instances and static caches
-      UnifiedModelService.clearInstance(); // Clear the new unified service
-      FavoritesService.clearInstance();
-      RuntimeIncompatibilityService.clearInstance();
       SystemSculptService.clearInstance(); // Clear SystemSculptService singleton
+      this.managedCapabilityGraph = null;
       
       // Clear service references without reassignment
       // @ts-ignore - Cleanup is handled by garbage collection
-      this._modelService = undefined;
-      // @ts-ignore - Cleanup is handled by garbage collection
       this._aiService = undefined;
-
-      // Clean up the PreviewService
-      try {
-        // Cleaning up PreviewService silently
-        PreviewService.hideAllPreviews();
-        PreviewService.cleanup();
-      } catch (error) {
-      }
-
-      // Clean up status bar elements
-      try {
-        if (this.statusBarEl) {
-          this.statusBarEl.remove();
-          this.statusBarEl = null;
-          this.statusIconEl = null;
-          this.statusTextEl = null;
-          this.progressEl = null;
-        }
-      } catch (error) {
-      }
-
 
       // Plugin unloaded successfully silently
       // The logger's flush timer was already disposed at the top of onunload.
@@ -2361,7 +1874,7 @@ export default class SystemSculptPlugin extends Plugin {
       }
       focusPluginTab();
     } catch {
-      new Notice("Open Settings → SystemSculpt AI to manage your account and plugin preferences.", 6000);
+      new Notice("Open SystemSculpt AI settings to manage your account and plugin preferences.", 6000);
     }
   }
 
@@ -2471,27 +1984,6 @@ export default class SystemSculptPlugin extends Plugin {
     return this.transcriptionService;
   }
 
-  getYouTubeTranscriptService(): YouTubeTranscriptService {
-    if (!this.youtubeTranscriptService) {
-      this.youtubeTranscriptService = YouTubeTranscriptService.getInstance(this);
-    }
-    return this.youtubeTranscriptService;
-  }
-
-  getWebResearchApiService(): WebResearchApiService {
-    if (!this.webResearchApiService) {
-      this.webResearchApiService = new WebResearchApiService(this);
-    }
-    return this.webResearchApiService;
-  }
-
-  getWebResearchCorpusService(): WebResearchCorpusService {
-    if (!this.webResearchCorpusService) {
-      this.webResearchCorpusService = new WebResearchCorpusService(this);
-    }
-    return this.webResearchCorpusService;
-  }
-
   public async runAutomationOnFile(
     automationId: string,
     file: TFile,
@@ -2510,24 +2002,8 @@ export default class SystemSculptPlugin extends Plugin {
     return this.licenseManager;
   }
 
-  /**
-   * The single owner of gating decisions (chat/embeddings/recorder) — #209.
-   * Stateless and memoized: it reads live settings, so callers never hold a
-   * stale license view. UI must ask this instead of inlining license checks.
-   */
-  getEntitlementService(): EntitlementService {
-    return (this._entitlementService ??= new EntitlementService(this));
-  }
-
   getSettingsManager(): SettingsManager {
     return this.settingsManager;
-  }
-
-  /**
-   * Get fresh models from the model service
-   */
-  public getInitialModels(): Promise<SystemSculptModel[]> {
-    return this.modelService.getModels();
   }
 
   private async preloadDataInBackground() {
@@ -2546,33 +2022,11 @@ export default class SystemSculptPlugin extends Plugin {
 
     this.isPreloadingDone = true;
 
-    // Best-effort warmup so changelog works offline and avoids repeated GitHub calls.
-    void import("./services/ChangeLogService")
-      .then(({ ChangeLogService }) => ChangeLogService.warmCache(this))
-      .catch(() => {});
-
-    // Migrate legacy CustomProvider[] API keys into Pi auth storage (one-time, desktop only).
-    if (
-      PlatformContext.get().supportsDesktopOnlyFeatures() &&
-      this.settings.studioPiAuthMigrationVersion < 1
-    ) {
-      void this.migrateCustomProviderKeysToPiAuth().catch(() => {});
-    }
-
     logger.debug("Background preload completed", {
       source: "SystemSculptPlugin",
     });
 
     phase.complete();
-  }
-
-  // Add getter for version checker service
-  public getVersionCheckerService(): VersionCheckerService {
-    return this.versionCheckerService;
-  }
-
-  public async updateLastSaveAsNoteFolder(folder: string) {
-    await this.settingsManager.updateSettings({ lastSaveAsNoteFolder: folder });
   }
 
   // Embeddings methods removed
@@ -2591,10 +2045,6 @@ export default class SystemSculptPlugin extends Plugin {
   }
 
   getStudioService(): StudioService {
-    if (!PlatformContext.get().supportsDesktopOnlyFeatures()) {
-      throw new Error("SystemSculpt Studio is desktop-only.");
-    }
-
     if (!this.studioService) {
       const { StudioService } = loadStudioServiceModule();
       this.studioService = new StudioService(this);
@@ -2607,8 +2057,8 @@ export default class SystemSculptPlugin extends Plugin {
 
     this.addCommand({
       id: "systemsculpt-copy-resource-report",
-      name: "Copy Resource Usage Report",
-      callback: this.wrapCommandCallback("copy-resource-report", async () => {
+      name: "Copy resource usage report",
+      callback: async () => {
         const monitor = this.getResourceMonitor();
         if (!monitor) {
           new Notice("Resource monitor is still starting up.");
@@ -2624,34 +2074,33 @@ export default class SystemSculptPlugin extends Plugin {
         } else {
           new Notice("Unable to copy the report. See .systemsculpt/diagnostics.", 5000);
         }
-      }),
+      },
     });
 
     // Command: Audio Chunking Analysis
     this.addCommand({
       id: 'audio-chunking-analysis',
-      name: 'Run Audio Chunking Analysis',
-      callback: this.wrapCommandCallback('audio-chunking-analysis', () => {
+      name: 'Run audio chunking analysis',
+      callback: () => {
         // Import and run the analysis
         import("./commands/RunAudioAnalysis").then(module => {
           module.runAudioAnalysis(this);
         }).catch(error => {
           new Notice(`Error running analysis: ${error instanceof Error ? error.message : String(error)}`);
         });
-      })
+      }
     });
 
     // Command: Find Similar Notes (Current Note)
     this.addCommand({
       id: 'find-similar-current-note',
-      name: 'Find Similar Notes (Current Note)',
-      editorCallback: this.wrapCommandCallback('find-similar-current-note', async (editor, view) => {
+      name: 'Find similar notes (current note)',
+      editorCallback: async (editor, view) => {
         if (!view.file) {
           new Notice("No active file selected.");
           return;
         }
 
-        const currentFilePath = view.file.path;
         const fileContent = editor.getValue();
 
         if (!fileContent.trim()) {
@@ -2662,7 +2111,7 @@ export default class SystemSculptPlugin extends Plugin {
         try {
           // Check if embeddings are enabled
           if (!this.settings.embeddingsEnabled) {
-            new Notice("Enable embeddings in Settings > SystemSculpt AI > Embeddings to find similar notes.");
+            new Notice("Enable embeddings in SystemSculpt AI settings to find similar notes.");
             return;
           }
 
@@ -2671,143 +2120,8 @@ export default class SystemSculptPlugin extends Plugin {
         } catch (error) {
           new Notice(`Error finding similar notes: ${error.message}`);
         }
-      }),
-    });
-
-
-    
-
-    // Command: Process Embeddings
-    this.addCommand({
-      id: 'process-embeddings',
-      name: 'Process Embeddings',
-      callback: this.wrapCommandCallback('process-embeddings', async () => {
-        try {
-          if (!this.settings.embeddingsEnabled) {
-            new Notice("Embeddings are disabled. Enable them in Settings > SystemSculpt AI > Embeddings.");
-            return;
-          }
-
-          // Embeddings are now fully automatic - no manual processing needed
-          new Notice("Embeddings processing is automatic. Files are processed in the background as needed.");
-        } catch (error) {
-          new Notice(`Failed to process embeddings: ${error.message}`);
-        }
-      }),
-    });
-
-    // Command: Rebuild Embeddings
-    this.addCommand({
-      id: 'rebuild-embeddings',
-      name: 'Rebuild Embeddings',
-      callback: this.wrapCommandCallback('rebuild-embeddings', async () => {
-        try {
-          if (!this.settings.embeddingsEnabled) {
-            new Notice("Embeddings are disabled. Enable them in Settings > SystemSculpt AI > Embeddings.");
-            return;
-          }
-
-          const manager = this.getOrCreateEmbeddingsManager();
-
-          new Notice("Clearing embeddings data...");
-          await manager.clearAll();
-
-          new Notice("Embeddings cleared. Files will be automatically re-processed in the background.");
-        } catch (error) {
-          new Notice(`Failed to rebuild embeddings: ${error.message}`);
-        }
-      }),
-    });
-
-    this.addCommand({
-      id: 'toggle-mobile-emulation',
-      name: 'Toggle Mobile Emulation Mode',
-      callback: this.wrapCommandCallback('toggle-mobile-emulation', () => {
-        const appAny = this.app as any;
-        if (typeof appAny.emulateMobile !== 'function') {
-          new Notice('Mobile emulation is not available in this Obsidian build.', 4000);
-          return;
-        }
-
-        const nextState = !appAny.isMobile;
-        try {
-          appAny.emulateMobile(nextState);
-          PlatformContext.get().resetDetectionCache();
-          const status = nextState ? 'enabled' : 'disabled';
-          new Notice(`Mobile emulation ${status}.`, 2500);
-        } catch (error) {
-          new Notice(`Failed to toggle mobile emulation: ${error instanceof Error ? error.message : String(error)}`);
-        }
-      }),
-    });
-
-  }
-
-  // Removed complex settings callback system - no longer needed for simplified embeddings
-
-  /**
-   * One-time migration: move legacy CustomProvider[] API keys into Pi auth storage.
-   * After migration, preserves provider metadata and only clears keys that were safely moved.
-   */
-  private async migrateCustomProviderKeysToPiAuth(): Promise<void> {
-    const customProviders = this.settings.customProviders;
-    if (!Array.isArray(customProviders) || customProviders.length === 0) {
-      // Nothing to migrate — just bump the version
-      await this.settingsManager.updateSettings({ studioPiAuthMigrationVersion: 1 });
-      return;
-    }
-
-    const { migrateStudioPiProviderApiKeys } = await import("./studio/piAuth/StudioPiAuthStorage");
-    const { resolvePiProviderFromEndpoint } = await import("./studio/piAuth/StudioPiProviderRegistry");
-
-    const candidates = customProviders
-      .filter((cp) => cp.apiKey && cp.endpoint)
-      .map((cp) => {
-        const providerId = resolvePiProviderFromEndpoint(cp.endpoint) || cp.name || cp.id;
-        return {
-          providerId,
-          apiKey: cp.apiKey,
-          origin: `legacy-custom-provider:${cp.id}`,
-        };
-      })
-      .filter((c) => c.providerId);
-
-    const report =
-      candidates.length > 0
-        ? await migrateStudioPiProviderApiKeys(candidates, { plugin: this })
-        : { migrated: [], skipped: [], errors: [] };
-
-    const safeToRedactOrigins = new Set<string>();
-    for (const entry of report.migrated) {
-      const origin = String(entry.origin || "").trim();
-      if (origin) {
-        safeToRedactOrigins.add(origin);
-      }
-    }
-    for (const entry of report.skipped) {
-      const origin = String(entry.origin || "").trim();
-      if (!origin) {
-        continue;
-      }
-      if (
-        entry.reason === "existing_api_key" ||
-        entry.reason === "existing_oauth" ||
-        entry.reason === "existing_stored_credential"
-      ) {
-        safeToRedactOrigins.add(origin);
-      }
-    }
-
-    const redactedCustomProviders = customProviders.map((provider) => ({
-      ...provider,
-      apiKey: safeToRedactOrigins.has(`legacy-custom-provider:${String(provider.id || "").trim()}`)
-        ? ""
-        : provider.apiKey,
-    }));
-
-    await this.settingsManager.updateSettings({
-      customProviders: redactedCustomProviders,
-      studioPiAuthMigrationVersion: 1,
+      },
     });
   }
+
 }

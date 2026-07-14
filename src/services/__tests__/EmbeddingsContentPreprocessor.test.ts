@@ -3,6 +3,17 @@ import { ContentPreprocessor } from "../embeddings/processing/ContentPreprocesso
 describe("ContentPreprocessor", () => {
   const preprocessor = new ContentPreprocessor();
 
+  it("keeps short non-empty notes as semantic content", () => {
+    const processed = preprocessor.process("Tiny idea", {} as any);
+
+    expect(processed).toMatchObject({ content: "Tiny idea", length: 9 });
+    expect(preprocessor.chunkContentWithHashes(processed!.content, processed!.source)).toHaveLength(1);
+  });
+
+  it("rejects only content that is empty after normalization", () => {
+    expect(preprocessor.process("---\ntags: [image]\n---\n![[cover.png]]", {} as any)).toBeNull();
+  });
+
   it("retains large content bodies below the hard truncate limit", () => {
     const longText = "a".repeat(150_000);
     const processed = preprocessor.process(longText, {} as any);

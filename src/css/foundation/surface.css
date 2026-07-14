@@ -1,0 +1,88 @@
+/**
+ * Plugin surface
+ *
+ * Every persistent view, modal, and transient panel mounts this contract.
+ * It deliberately owns presentation adaptation, not feature layout.
+ */
+
+.ss-surface {
+  min-width: 0;
+  color: var(--ss-ink);
+  font-family: var(--ss-font);
+  font-size: var(--ss-text-base);
+  line-height: var(--ss-leading-base);
+  accent-color: var(--ss-accent);
+  container: ss-surface / inline-size;
+}
+
+.ss-surface[data-ss-surface="modal"],
+.ss-surface[data-ss-surface="transient"] {
+  background-color: var(--ss-surface-0);
+  border-color: var(--ss-line);
+}
+
+.ss-surface[data-ss-surface="transient"] {
+  box-shadow: var(--ss-elevation-3);
+}
+
+.ss-surface :where(button, input, textarea, select) {
+  font: inherit;
+}
+
+.ss-surface :where(:focus-visible) {
+  outline: none;
+  box-shadow: var(--ss-ring);
+}
+
+.ss-surface :where([hidden]) {
+  display: none !important;
+}
+
+.ss-surface ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.ss-surface ::-webkit-scrollbar-thumb {
+  background-color: var(--ss-line-strong);
+  border: 2px solid transparent;
+  border-radius: var(--ss-radius-full);
+  background-clip: padding-box;
+}
+
+.ss-surface ::-webkit-scrollbar-thumb:hover {
+  background-color: color-mix(in srgb, var(--ss-ink) 30%, transparent);
+}
+
+.ss-surface ::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@media (prefers-contrast: more) {
+  .ss-surface {
+    --ss-line: color-mix(in srgb, var(--ss-ink) 28%, transparent);
+    --ss-line-strong: color-mix(in srgb, var(--ss-ink) 48%, transparent);
+  }
+}
+
+@media (pointer: coarse) {
+  .ss-surface {
+    --ss-control-height: var(--ss-touch-target);
+    --ss-control-height-sm: var(--ss-touch-target);
+    --ss-control-height-lg: var(--ss-touch-target);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ss-surface,
+  .ss-surface::before,
+  .ss-surface::after,
+  .ss-surface *,
+  .ss-surface *::before,
+  .ss-surface *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}

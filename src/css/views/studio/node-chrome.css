@@ -1,0 +1,175 @@
+/* ------------------------------------------------------------------ *
+ * Node cards
+ * ------------------------------------------------------------------ */
+.ss-studio-node-card {
+  position: absolute;
+  /* keep in sync with STUDIO_GRAPH_DEFAULT_NODE_WIDTH (src/studio/StudioNodeGeometry.ts) */
+  width: 280px;
+  background-color: var(--ss-surface-0);
+  border: 1px solid var(--ss-line);
+  border-left: 3px solid var(--ss-studio-accent-soft);
+  border-radius: var(--ss-radius-lg);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  pointer-events: auto;
+  contain: layout style paint;
+  transition: border-color var(--ss-dur-fast) var(--ss-ease), box-shadow var(--ss-dur-fast) var(--ss-ease);
+}
+
+.ss-studio-node-card:hover,
+.ss-studio-node-card.is-selected {
+  z-index: 5;
+  border-color: var(--ss-accent);
+  box-shadow: var(--ss-elevation-2), var(--ss-ring);
+  /* Allow overlay chrome to overflow */
+  contain: layout style;
+}
+
+.ss-studio-node-card:active {
+  cursor: grabbing;
+}
+
+/* Canvas button reset — Obsidian's native `button` styling (padding,
+ * min-height, background, shadow) must never leak into node-card
+ * controls: it turns 8px port pins into ovals and swallows icon
+ * buttons in padding. `:where()` keeps specificity at one class, so
+ * every component rule below and in the later Studio editor modules
+ * still wins. */
+.ss-studio-node-card :where(button) {
+  appearance: none;
+  margin: 0;
+  padding: 0;
+  height: auto;
+  min-height: 0;
+  background: none;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  font: inherit;
+  color: inherit;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.ss-studio-node-card.is-dragging,
+.ss-studio-node-card.is-selected {
+  will-change: transform;
+}
+
+.ss-studio-node-card.is-detail-collapsed {
+  background-color: var(--ss-surface-1);
+}
+
+.ss-studio-node-card.is-managed-pending {
+  border-color: var(--ss-studio-info-bright);
+}
+
+.ss-studio-node-card.is-managed-pending .ss-studio-node-run-status {
+  animation: ss-studio-pending-pulse 1.4s var(--ss-ease) infinite;
+}
+
+/* Perf gating while interacting / scrolling / zooming */
+.ss-studio-graph-viewport.is-interacting .ss-studio-node-card,
+.ss-studio-graph-viewport.is-scrolling .ss-studio-node-card {
+  transition: none;
+  box-shadow: none;
+  animation-play-state: paused;
+}
+
+.ss-studio-graph-viewport.is-zoom-overview .ss-studio-node-card,
+.ss-studio-graph-viewport.is-zoom-overview .ss-studio-group-frame,
+.ss-studio-graph-viewport.is-zoom-overview .ss-studio-port-pin {
+  pointer-events: none;
+}
+
+.ss-studio-graph-viewport.is-zoomed-micro .ss-studio-node-card {
+  background-color: var(--ss-line);
+  contain: strict;
+  contain-intrinsic-size: 280px 200px;
+}
+
+.ss-studio-graph-viewport.is-zoomed-micro .ss-studio-node-card > * {
+  display: none !important;
+}
+
+.ss-studio-graph-viewport.is-zoomed-extreme .ss-studio-node-card textarea,
+.ss-studio-graph-viewport.is-zoomed-extreme .ss-studio-node-card input,
+.ss-studio-graph-viewport.is-zoomed-extreme .ss-studio-node-text-rendered,
+.ss-studio-graph-viewport.is-zoomed-extreme .ss-studio-node-config-preview {
+  display: none;
+}
+
+/* Header */
+.ss-studio-node-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto auto;
+  align-items: center;
+  gap: var(--ss-space-1);
+  padding: var(--ss-space-2) var(--ss-space-2) var(--ss-space-1);
+}
+
+.ss-studio-node-kind {
+  display: none;
+}
+
+.ss-studio-node-title-input {
+  min-width: 0;
+  padding: var(--ss-space-0) var(--ss-space-1);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--ss-radius-xs);
+  color: var(--ss-ink);
+  font-size: var(--ss-text-base);
+  font-weight: var(--ss-weight-semibold);
+  transition: var(--ss-transition-colors);
+}
+
+.ss-studio-node-title-input:hover {
+  border-color: var(--ss-line);
+}
+
+.ss-studio-node-title-input:focus {
+  border-color: var(--ss-accent);
+  background-color: var(--ss-surface-sunken);
+  outline: none;
+}
+
+/* Header action buttons are always visible; they size to their label
+ * ("Run", "Copy", "Lock", "×") instead of clipping in a fixed square. */
+.ss-studio-node-remove,
+.ss-studio-node-run,
+.ss-studio-node-copy-prompt,
+.ss-studio-node-lock-output {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 var(--ss-space-1);
+  border-radius: var(--ss-radius-xs);
+  color: var(--ss-ink-faint);
+  font-size: var(--ss-text-xs);
+  cursor: pointer;
+  transition: var(--ss-transition-colors);
+}
+
+.ss-studio-node-remove:hover {
+  background-color: var(--ss-danger-tint);
+  color: var(--ss-danger);
+}
+
+.ss-studio-node-run:hover {
+  background-color: var(--ss-success-tint);
+  color: var(--ss-success);
+}
+
+.ss-studio-node-copy-prompt:hover,
+.ss-studio-node-lock-output:hover {
+  background-color: var(--ss-state-hover);
+  color: var(--ss-ink);
+}
+
+.ss-studio-node-lock-output.is-selected {
+  color: var(--ss-ink-accent);
+}

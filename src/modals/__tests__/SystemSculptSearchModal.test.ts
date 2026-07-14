@@ -106,6 +106,8 @@ describe("SystemSculptSearchModal", () => {
       expect(modal.contentEl.querySelector("[data-mode]")).toBeNull();
       expect(modal.contentEl.querySelector("[data-sort]")).toBeNull();
       expect((modal as any).headerEl.textContent).not.toContain("SystemSculpt Search");
+      expect(modal.modalEl.getAttribute("aria-label")).toBe("Search your vault");
+      expect(modal.modalEl.hasAttribute("aria-labelledby")).toBe(false);
     });
 
     it("uses combobox/listbox attributes for the result list", () => {
@@ -139,7 +141,24 @@ describe("SystemSculptSearchModal", () => {
       modal.onOpen();
       await flush();
 
-      expect((modal as any).listEl?.textContent).toContain("Could not load recent notes.");
+      const state = (modal as any).listEl?.querySelector(".ss-ui-state.is-error");
+      expect(state?.getAttribute("role")).toBe("alert");
+      expect(state?.textContent).toContain("Could not load recent notes");
+      expect(state?.querySelector("button")?.textContent).toBe("Retry");
+      expect((modal as any).listEl?.getAttribute("role")).toBeNull();
+    });
+
+    it("keeps the search-open body state local to the modal document", () => {
+      const popupDocument = document.implementation.createHTMLDocument("Search popup");
+      popupDocument.body.appendChild(modal.modalEl);
+
+      modal.onOpen();
+
+      expect(popupDocument.body.classList.contains("ss-search-open")).toBe(true);
+      expect(document.body.classList.contains("ss-search-open")).toBe(false);
+
+      modal.onClose();
+      expect(popupDocument.body.classList.contains("ss-search-open")).toBe(false);
     });
   });
 
@@ -191,6 +210,22 @@ describe("SystemSculptSearchModal", () => {
   });
 
   describe("search execution", () => {
+    it("uses the shared busy state while the first search is pending", () => {
+      plugin = createMockPlugin({
+        search: jest.fn().mockReturnValue(new Promise(() => undefined)),
+        getRecent: jest.fn().mockReturnValue(new Promise(() => undefined)),
+      });
+      modal = new SystemSculptSearchModal(plugin);
+      modal.onOpen();
+
+      void (modal as any).executeSearch("pending");
+
+      const listEl = (modal as any).listEl as HTMLElement;
+      expect(listEl.querySelector(".ss-ui-state.is-loading")).not.toBeNull();
+      expect(listEl.getAttribute("aria-busy")).toBe("true");
+      expect(listEl.getAttribute("role")).toBeNull();
+    });
+
     it("debounces input and uses one smart search path with cancellation support", () => {
       modal.onOpen();
       const searchInput = (modal as any).searchInputEl as HTMLInputElement;
@@ -216,13 +251,14 @@ describe("SystemSculptSearchModal", () => {
 
       input.value = "test";
       input.dispatchEvent(new Event("input"));
-      expect(clear.style.display).toBe("flex");
+      expect(clear.hidden).toBe(false);
+      expect(clear.classList.contains("ss-button")).toBe(true);
 
       clear.click();
       await flush();
 
       expect(input.value).toBe("");
-      expect(clear.style.display).toBe("none");
+      expect(clear.hidden).toBe(true);
       expect(plugin._testEngine.getRecent).toHaveBeenCalledWith(25);
     });
 
@@ -382,7 +418,10 @@ describe("SystemSculptSearchModal", () => {
 
       await (modal as any).executeSearch("nonexistent");
 
-      expect((modal as any).listEl?.querySelector(".ss-search__empty")).not.toBeNull();
+      const listEl = (modal as any).listEl as HTMLElement;
+      expect(listEl.querySelector(".ss-ui-state.is-empty")).not.toBeNull();
+      expect(listEl.getAttribute("aria-busy")).toBe("false");
+      expect(listEl.getAttribute("role")).toBeNull();
     });
   });
 
@@ -451,12 +490,14 @@ describe("SystemSculptSearchModal", () => {
       (modal as any).renderResponse(first);
       const listEl = (modal as any).listEl as HTMLElement;
       const focused = listEl.querySelector('[data-path="notes/b.md"]') as HTMLElement;
+      const focusedId = focused.id;
       focused.focus();
       listEl.scrollTop = 48;
 
       (modal as any).renderResponse(second, { stabilize: true });
 
       expect(document.activeElement?.getAttribute("data-path")).toBe("notes/b.md");
+      expect(document.activeElement?.id).toBe(focusedId);
       expect(listEl.scrollTop).toBe(48);
       expect(Array.from(listEl.querySelectorAll<HTMLElement>(".ss-search__item")).map((item) => item.getAttribute("data-path"))).toEqual([
         "notes/a.md",

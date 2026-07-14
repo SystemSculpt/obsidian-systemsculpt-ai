@@ -2,7 +2,6 @@
 
 import { App } from "obsidian";
 import { displayImageGenerationTabContent } from "../settings/ImageGenerationTabContent";
-import { PlatformContext } from "../services/PlatformContext";
 
 jest.mock("../components/FolderSuggester", () => ({
   attachFolderSuggester: jest.fn(),
@@ -12,13 +11,6 @@ describe("Studio settings tab", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     document.body.innerHTML = "";
-    jest.spyOn(PlatformContext, "get").mockReturnValue({
-      supportsDesktopOnlyFeatures: () => true,
-    } as any);
-  });
-
-  afterEach(() => {
-    jest.restoreAllMocks();
   });
 
   it("renders Studio controls without the retired telemetry setting", async () => {
@@ -55,8 +47,8 @@ describe("Studio settings tab", () => {
       el.textContent?.trim()
     );
 
-    expect(text).toContain("through SystemSculpt");
-    expect(names).toContain("Open SystemSculpt Studio");
+    expect(text).toContain("Projects folder");
+    expect(names).toContain("Open Studio");
     expect(names).not.toContain("Studio telemetry (remote)");
     expect(names).not.toContain("Studio terminal sidecar timeout (minutes)");
     expect(text).not.toContain("redacted Studio run telemetry");

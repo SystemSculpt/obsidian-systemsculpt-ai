@@ -1,47 +1,64 @@
-import { ItemView, WorkspaceLeaf, TFile, setIcon, Notice, Component } from 'obsidian';
+import { ItemView, WorkspaceLeaf, TFile, Notice } from 'obsidian';
 import SystemSculptPlugin from '../main';
 import { EMBEDDINGS_VIEW_TYPE } from "../core/plugin/viewTypes";
 import { CHAT_VIEW_TYPE } from "../core/plugin/viewTypes";
 import { SearchResult } from '../services/embeddings/types';
-import type { ChatView } from './chatview/ChatView';
-import { ChatMessage } from '../types';
+import type { AgentChatView } from './chatview/AgentChatView';
+import { SystemSculptSettings } from '../types';
 import { EmbeddingsPendingFilesModal } from '../modals/EmbeddingsPendingFilesModal';
+import { SimilarNotesPresentation } from './SimilarNotesPresentation';
+import { buildChatSemanticQuery, buildNoteSemanticQuery } from '../services/embeddings/SemanticQuery';
+import {
+  CHAT_TRANSCRIPT_COMMITTED_EVENT,
+  type ChatTranscriptCommittedEvent,
+} from './chatview/ChatTranscriptEvents';
+import {
+  SimilaritySearchRunCoordinator,
+  chatSimilaritySource,
+  fileSimilaritySource,
+  type SimilaritySearchRun,
+} from './SimilaritySearchRunCoordinator';
+import { readEmbeddingErrorMessage } from '../services/embeddings/EmbeddingErrorMessage';
+import type { SemanticIndexSnapshot } from '../services/embeddings/SemanticIndexLifecycle';
+import { getSurfaceOwnerWindow } from '../core/ui/surface/SurfaceDomContext';
+import {
+  FILE_CONTEXT_STATE_CHANGED_EVENT,
+  type FileContextStateChangedEvent,
+} from './chatview/FileContextManager';
 
 export { EMBEDDINGS_VIEW_TYPE };
 
 export class EmbeddingsView extends ItemView {
   private plugin: SystemSculptPlugin;
-  private resultsEl: HTMLElement;
-  private statusEl: HTMLElement;
-  private headerEl: HTMLElement;
-  private titleEl: HTMLElement;
-  private fileNameEl: HTMLElement;
+  private presentation: SimilarNotesPresentation | null = null;
   private currentFile: TFile | null = null;
-  private currentChatView: ChatView | null = null;
+  private currentChatView: AgentChatView | null = null;
   private currentResults: SearchResult[] = [];
-  private isLoading = false;
-  private lastSearchContent = '';
   private lastFileHash = '';
   private forceRefreshNextCheck = false;
   private lastEmbeddingsConfigKey = '';
-  private fileExists = false;
-  private isDragging = false; // Track drag state to prevent clearing results
-  private dragTimeout: number | null = null; // Safety timeout for drag operations
-  private contextChangeHandler: () => void;
-  private pendingSearch: { type: 'file'; file: TFile } | { type: 'chat'; chatView: ChatView } | null = null;
-  
-  // Debouncing for active leaf changes
-  private searchTimeout: number | null = null;
+  private isDragging = false;
+  private unsubscribeIndexLifecycle: (() => void) | null = null;
+  private lastIndexSnapshot: Readonly<SemanticIndexSnapshot> | null = null;
+  private deletedSourcePath: string | null = null;
+  private readonly searchRuns: SimilaritySearchRunCoordinator;
   private readonly SEARCH_DELAY = 300; // 300ms delay
   
   constructor(leaf: WorkspaceLeaf, plugin: SystemSculptPlugin) {
     super(leaf);
     this.plugin = plugin;
+    this.searchRuns = new SimilaritySearchRunCoordinator({
+      isVisible: () => this.isViewVisible(),
+      getOwnerWindow: () => getSurfaceOwnerWindow(this.contentEl),
+      execute: (run) => this.executeSimilaritySearch(run),
+      onError: (error) => this.showError(`Failed to find similar notes: ${this.errorMessage(error)}`),
+      onCancel: () => this.presentation?.setRefreshing(false),
+    });
   }
 
-  private getActiveChatView(): ChatView | null {
+  private getActiveChatView(): AgentChatView | null {
     const activeLeaf = this.app.workspace.activeLeaf;
-    const activeView = activeLeaf?.view as ChatView | undefined;
+    const activeView = activeLeaf?.view as AgentChatView | undefined;
     if (activeView?.getViewType?.() !== CHAT_VIEW_TYPE) {
       return null;
     }
@@ -53,7 +70,7 @@ export class EmbeddingsView extends ItemView {
   }
   
   getDisplayText(): string {
-    return 'Similar Notes';
+    return 'Similar notes';
   }
   
   getIcon(): string {
@@ -61,45 +78,43 @@ export class EmbeddingsView extends ItemView {
   }
   
   async onOpen(): Promise<void> {
+    this.searchRuns.open();
     this.contentEl = this.containerEl.children[1] as HTMLElement;
     this.contentEl.empty();
     this.contentEl.addClass('systemsculpt-embeddings-view');
     
     this.setupUI();
+    this.bindIndexLifecycle();
     this.registerEvents();
-    this.lastEmbeddingsConfigKey = this.getEmbeddingsConfigKey(this.plugin.settings as any);
+    this.lastEmbeddingsConfigKey = this.getEmbeddingsConfigKey(this.plugin.settings);
     
-    // Show empty state initially - no automatic searches
-    this.showEmptyState();
-
     // Immediately evaluate the current active file/chat to populate results on open
     // so users don't need to refocus the editor to see similar notes.
     this.debouncedCheckActiveFile();
   }
   
   private setupUI(): void {
-    // Create compact header
-    this.headerEl = this.contentEl.createDiv({ cls: 'ss-embeddings-view__header' });
-    
-    this.titleEl = this.headerEl.createDiv({ cls: 'ss-embeddings-view__title' });
-    
-    // Title row with icon and text
-    const titleRowEl = this.titleEl.createDiv({ cls: 'ss-embeddings-view__title-row' });
-    const iconEl = titleRowEl.createDiv({ cls: 'ss-embeddings-view__icon' });
-    setIcon(iconEl, 'network');
-    titleRowEl.createSpan({ text: 'Similar Notes' });
-    
-    // File name element (initially hidden)
-    this.fileNameEl = this.titleEl.createDiv({ cls: 'ss-embeddings-view__file-name' });
-    this.fileNameEl.style.display = 'none';
-    
-    // Create hidden status element (kept for compatibility but hidden)
-    this.statusEl = this.contentEl.createDiv({ cls: 'ss-embeddings-view__status', attr: { style: 'display: none;' } });
-    
-    // Create results container
-    this.resultsEl = this.contentEl.createDiv({ cls: 'ss-embeddings-view__results' });
-    
-    // Show initial state
+    if (this.presentation) {
+      this.removeChild(this.presentation);
+      this.presentation.unload();
+    }
+    this.contentEl.empty();
+    this.presentation = new SimilarNotesPresentation(this.contentEl, {
+      onRefresh: () => this.refreshCurrentContext(),
+      onOpenSettings: () => this.plugin.openSettingsTab("knowledge"),
+      onOpenPendingFiles: () => this.openPendingFilesModal(),
+      onStartProcessing: () => this.startProcessing(),
+      onOpenFile: (path) => this.openFile(path),
+      onAddToContext: (path) => this.addResultToCurrentChat(path),
+      onDragStateChange: (dragging) => {
+        this.isDragging = dragging;
+        if (!dragging) {
+          this.debouncedCheckActiveFile();
+        }
+      },
+      isInContext: (path) => this.isNoteInContext(path),
+    });
+    this.addChild(this.presentation);
     this.showEmptyState();
   }
   
@@ -107,44 +122,49 @@ export class EmbeddingsView extends ItemView {
     // Listen for active leaf changes
     this.registerEvent(
       this.app.workspace.on('active-leaf-change', (leaf) => {
-        // Mark for freeze diagnostics
-        try { (window as any).FreezeMonitor?.mark?.('embeddings:active-leaf-change'); } catch {}
         if (leaf?.view?.getViewType?.() === EMBEDDINGS_VIEW_TYPE) {
           this.forceRefreshNextCheck = true;
         }
-        this.debouncedCheckActiveFile();
-        // If the user brought this view to front, run any pending search now
-        this.flushPendingSearchIfVisible();
+        // If the user brought this view to front, resume the exact deferred
+        // source. Other leaf changes invalidate it and re-evaluate context.
+        if (leaf?.view?.getViewType?.() === EMBEDDINGS_VIEW_TYPE && this.searchRuns.hasPending()) {
+          this.searchRuns.reconcileVisibility();
+        } else {
+          this.debouncedCheckActiveFile();
+        }
       })
     );
     
     // Also listen for direct file-open events which can fire without a leaf switch
     this.registerEvent(
       // @ts-ignore - 'file-open' exists on workspace event bus
-      this.app.workspace.on('file-open', () => {
+      this.app.workspace.on('file-open', (file) => {
+        if (file instanceof TFile && file.path === this.deletedSourcePath) {
+          this.deletedSourcePath = null;
+        }
         this.forceRefreshNextCheck = true;
         this.debouncedCheckActiveFile();
       })
     );
 
-    // Refresh results when embeddings settings change (provider/model/exclusions, etc)
+    // Refresh results when managed indexing settings change.
     this.registerEvent(
-      this.app.workspace.on("systemsculpt:settings-updated", (_oldSettings, newSettings: any) => {
+      this.app.workspace.on("systemsculpt:settings-updated", (_oldSettings, newSettings: SystemSculptSettings) => {
         const nextKey = this.getEmbeddingsConfigKey(newSettings);
         if (nextKey === this.lastEmbeddingsConfigKey) {
           return;
         }
         this.lastEmbeddingsConfigKey = nextKey;
+        this.bindIndexLifecycle();
         this.forceRefreshNextCheck = true;
         this.debouncedCheckActiveFile();
-        this.flushPendingSearchIfVisible();
       })
     );
     
     // Listen for layout changes so we can run any pending searches when the view becomes visible
     this.registerEvent(
       this.app.workspace.on('layout-change', () => {
-        this.flushPendingSearchIfVisible();
+        this.searchRuns.reconcileVisibility();
       })
     );
     
@@ -152,7 +172,6 @@ export class EmbeddingsView extends ItemView {
     this.registerEvent(
       this.app.vault.on('modify', (file) => {
         if (file instanceof TFile && file === this.currentFile) {
-          try { (window as any).FreezeMonitor?.mark?.('embeddings:file-modify'); } catch {}
           this.debouncedSearchCurrentFile();
         }
       })
@@ -168,22 +187,7 @@ export class EmbeddingsView extends ItemView {
     );
 
     this.registerEvent(
-      this.app.vault.on("delete", (file) => {
-        if (this.isDragging) return;
-        const deletedPath = typeof (file as any)?.path === "string" ? (file as any).path : "";
-        if (deletedPath && this.currentResults.some((r) => r.path === deletedPath)) {
-          const filtered = this.currentResults.filter((r) => r.path !== deletedPath);
-          this.currentResults = filtered;
-
-          if (this.currentFile) {
-            void this.updateResults(filtered, this.currentFile).catch(() => {});
-          } else if (this.currentChatView) {
-            void this.updateResults(filtered, null, this.currentChatView.getChatTitle() || "Chat").catch(() => {});
-          }
-        }
-        this.forceRefreshNextCheck = true;
-        this.debouncedCheckActiveFile();
-      })
+      this.app.vault.on("delete", (file) => this.handleVaultDelete(file))
     );
     
     // Listen for chat updates
@@ -196,74 +200,133 @@ export class EmbeddingsView extends ItemView {
       })
     );
     
-    // Listen for chat message updates
+    // Durable transcript changes are emitted only after the vault write commits.
     this.registerEvent(
-      (this.app.workspace as any).on('systemsculpt:chat-message-added', (chatId: string) => {
-        // When a message is added to chat, refresh if it's the current chat
-        if (this.currentChatView && this.currentChatView.chatId === chatId) {
+      (this.app.workspace as any).on(CHAT_TRANSCRIPT_COMMITTED_EVENT, (event: ChatTranscriptCommittedEvent) => {
+        if (this.currentChatView && this.currentChatView.chatId === event?.chatId) {
           this.debouncedSearchCurrentChat();
         }
       })
     );
     
-    // Listen for context changes to update visual indicators
-    this.contextChangeHandler = () => {
-      if (this.currentChatView && this.currentResults.length > 0) {
-        this.updateContextIndicators();
+    // File context is plugin state, not document state. The workspace event
+    // bus keeps this synchronized even when either view lives in a popout.
+    this.registerEvent(
+      (this.app.workspace as any).on(
+        FILE_CONTEXT_STATE_CHANGED_EVENT,
+        (event: FileContextStateChangedEvent) => {
+          if (
+            event?.kind === "context" &&
+            event.manager === this.currentChatView?.contextManager &&
+            this.currentResults.length > 0
+          ) {
+            this.updateContextIndicators();
+          }
+        },
+      ),
+    );
+  }
+
+  private bindIndexLifecycle(): void {
+    this.unsubscribeIndexLifecycle?.();
+    this.unsubscribeIndexLifecycle = null;
+    this.lastIndexSnapshot = null;
+    this.presentation?.clearIndexSnapshot();
+
+    if (!this.plugin.settings.embeddingsEnabled) return;
+    const manager = this.plugin.getOrCreateEmbeddingsManager();
+    this.unsubscribeIndexLifecycle = manager.subscribeLifecycle((snapshot) => {
+      this.presentation?.setIndexSnapshot(snapshot);
+
+      const previous = this.lastIndexSnapshot;
+      this.lastIndexSnapshot = snapshot;
+      const generationChanged = Boolean(
+        previous?.generation?.namespace
+        && snapshot.generation?.namespace
+        && previous.generation.namespace !== snapshot.generation.namespace,
+      );
+      const reconciliationSettled = previous?.phase === "reconciling"
+        && snapshot.phase !== "reconciling";
+      if (generationChanged || reconciliationSettled) {
+        this.forceRefreshNextCheck = true;
+        this.debouncedCheckActiveFile();
       }
-    };
-    document.addEventListener('systemsculpt:context-changed', this.contextChangeHandler);
+    });
   }
   
   private debouncedCheckActiveFile(): void {
-    if (this.searchTimeout) {
-      window.clearTimeout(this.searchTimeout);
-    }
-    
-    this.searchTimeout = window.setTimeout(() => {
-      this.checkActiveFile();
-    }, this.SEARCH_DELAY);
+    this.searchRuns.scheduleTask(() => this.checkActiveFile(), this.SEARCH_DELAY);
   }
   
   private debouncedSearchCurrentFile(): void {
-    if (this.searchTimeout) {
-      window.clearTimeout(this.searchTimeout);
+    if (this.currentFile) {
+      this.searchRuns.schedule(fileSimilaritySource(this.currentFile), this.SEARCH_DELAY * 2);
     }
-    
-    this.searchTimeout = window.setTimeout(() => {
-      if (this.currentFile) {
-        this.searchForSimilar(this.currentFile);
-      }
-    }, this.SEARCH_DELAY * 2); // Longer delay for file modifications
   }
 
   private debouncedSearchCurrentChat(): void {
-    if (this.searchTimeout) {
-      window.clearTimeout(this.searchTimeout);
+    if (this.currentChatView) {
+      this.searchRuns.schedule(chatSimilaritySource(this.currentChatView), this.SEARCH_DELAY * 2);
     }
-    
-    this.searchTimeout = window.setTimeout(() => {
-      if (this.currentChatView) {
-        this.searchForSimilarFromChat(this.currentChatView);
+  }
+
+  private handleVaultDelete(file: { path?: string }): void {
+    if (this.isDragging) return;
+    this.searchRuns.cancel();
+    const deletedPath = typeof file?.path === "string" ? file.path : "";
+    if (!deletedPath) return;
+
+    if (deletedPath === this.currentFile?.path) {
+      this.deletedSourcePath = deletedPath;
+      this.lastFileHash = "";
+      this.forceRefreshNextCheck = false;
+      this.showEmptyState();
+      return;
+    }
+
+    if (this.currentResults.some((result) => result.path === deletedPath)) {
+      const filtered = this.currentResults.filter((result) => result.path !== deletedPath);
+      this.currentResults = filtered;
+      if (this.currentFile) {
+        void this.updateResults(filtered, this.currentFile).catch(() => undefined);
+      } else if (this.currentChatView) {
+        void this.updateResults(
+          filtered,
+          null,
+          this.currentChatView.getChatTitle() || "Chat",
+        ).catch(() => undefined);
       }
-    }, this.SEARCH_DELAY * 2); // Longer delay for chat modifications
+    }
+    this.forceRefreshNextCheck = true;
+    this.debouncedCheckActiveFile();
   }
   
   private startRefreshAnimation(): void {
-    this.titleEl.addClass('is-refreshing');
-  }
-  
-  private stopRefreshAnimation(): void {
-    this.titleEl.removeClass('is-refreshing');
+    this.presentation?.setRefreshing(true);
   }
   
   private updateFileName(fileName: string): void {
-    this.fileNameEl.textContent = fileName;
-    this.fileNameEl.style.display = 'block';
+    this.presentation?.setSourceName(fileName);
   }
-  
-  private hideFileName(): void {
-    this.fileNameEl.style.display = 'none';
+
+  private async refreshCurrentContext(): Promise<void> {
+    if (!this.plugin.settings.embeddingsEnabled) {
+      this.searchRuns.cancel();
+      this.showDisabledState();
+      return;
+    }
+
+    if (this.currentFile) {
+      await this.searchForSimilar(this.currentFile);
+      return;
+    }
+    if (this.currentChatView) {
+      await this.searchForSimilarFromChat(this.currentChatView);
+      return;
+    }
+
+    this.forceRefreshNextCheck = true;
+    this.checkActiveFile();
   }
 
   private isViewVisible(): boolean {
@@ -287,14 +350,18 @@ export class EmbeddingsView extends ItemView {
     
     // Check if embeddings are enabled - if not, show disabled state
     if (!this.plugin.settings.embeddingsEnabled) {
+      this.searchRuns.cancel();
       this.showDisabledState();
       return;
     }
     
     let activeChatView = this.getActiveChatView();
     // `workspace.getActiveFile()` can be null while focus is on non-file views (including this Similar Notes view).
-    // Prefer the actual active ChatView when present; otherwise fall back to the workspace active file.
+    // Prefer the active agent workspace when present; otherwise use the workspace file.
     let activeFile = activeChatView ? null : this.app.workspace.getActiveFile();
+    if (activeFile?.path === this.deletedSourcePath) {
+      activeFile = null;
+    }
 
     // If this Similar Notes view is the active leaf, keep the current context even when
     // Obsidian reports no active file/chat (prevents stale results on deletes/renames).
@@ -327,7 +394,7 @@ export class EmbeddingsView extends ItemView {
       this.currentChatView = null; // Clear chat since we're now on a file
       this.updateFileName(activeFile.basename);
       // Defer search slightly to allow editor to finish focusing and avoid jank
-      setTimeout(() => this.searchForSimilar(activeFile), 50);
+      this.searchRuns.schedule(fileSimilaritySource(activeFile), 50);
     } else if (hasNewChat) {
       if (!activeChatView) return;
       // Switch to a different chat
@@ -338,7 +405,7 @@ export class EmbeddingsView extends ItemView {
       this.currentChatView = activeChatView;
       this.currentFile = null; // Clear file since we're now on a chat
       this.updateFileName(chatTitle || 'Chat');
-      setTimeout(() => this.searchForSimilarFromChat(activeChatView), 50);
+      this.searchRuns.schedule(chatSimilaritySource(activeChatView), 50);
     } else if (isRefocusingOnChat) {
       if (!activeChatView) return;
       // Re-focusing on the same chat - check if content changed
@@ -347,7 +414,7 @@ export class EmbeddingsView extends ItemView {
       const contentHash = this.hashContent(chatContent);
       if (forceRefresh || contentHash !== this.lastFileHash) {
         // Content changed, refresh the results
-        setTimeout(() => this.searchForSimilarFromChat(activeChatView), 50);
+        this.searchRuns.schedule(chatSimilaritySource(activeChatView), 50);
       }
     } else if (switchingFromNonContentView) {
       // Switching from settings/file explorer back to content
@@ -356,238 +423,122 @@ export class EmbeddingsView extends ItemView {
         this.currentFile = activeFile;
         this.currentChatView = null;
         this.updateFileName(activeFile.basename);
-        setTimeout(() => this.searchForSimilar(activeFile), 50);
+        this.searchRuns.schedule(fileSimilaritySource(activeFile), 50);
       } else if (activeChatView) {
         // No need to log returning to same chat
         this.currentChatView = activeChatView;
         this.currentFile = null;
         this.updateFileName(activeChatView.getChatTitle() || 'Chat');
-        setTimeout(() => this.searchForSimilarFromChat(activeChatView), 50);
+        this.searchRuns.schedule(chatSimilaritySource(activeChatView), 50);
       }
     } else if (forceRefresh) {
-      // Force refresh current context (e.g. embeddings model/provider switch, vault rename/delete, refocus)
+      // Force refresh current context after an indexing setting or vault change.
       if (activeFile) {
         this.currentFile = activeFile;
         this.currentChatView = null;
         this.updateFileName(activeFile.basename);
-        setTimeout(() => this.searchForSimilar(activeFile), 50);
+        this.searchRuns.schedule(fileSimilaritySource(activeFile), 50);
       } else if (activeChatView) {
         this.currentChatView = activeChatView;
         this.currentFile = null;
         this.updateFileName(activeChatView.getChatTitle() || 'Chat');
-        setTimeout(() => this.searchForSimilarFromChat(activeChatView), 50);
+        this.searchRuns.schedule(chatSimilaritySource(activeChatView), 50);
       }
     }
     // If none of the above, preserve current state
   }
 
-  private getEmbeddingsConfigKey(settings: any): string {
-    const provider = String(settings?.embeddingsProvider || "");
-    const endpoint = String(settings?.embeddingsCustomEndpoint || "");
-    const model = String(settings?.embeddingsCustomModel || "");
+  private getEmbeddingsConfigKey(settings: SystemSculptSettings): string {
     const enabled = settings?.embeddingsEnabled ? "1" : "0";
     const exclusions = settings?.embeddingsExclusions ?? {};
     return JSON.stringify({
       enabled,
-      provider,
-      endpoint,
-      model,
       exclusions,
     });
   }
-  
+
   private async searchForSimilar(file: TFile): Promise<void> {
-    try {
-      // If view isn't visible, schedule a pending search instead of doing work now
-      if (!this.isViewVisible()) {
-        this.pendingSearch = { type: 'file', file };
-        return;
-      }
-
-      const manager = this.plugin.getOrCreateEmbeddingsManager();
-      // Ensure embeddings storage is ready before querying stats/vectors
-      await manager.awaitReady();
-      
-      const hasAnyStoredVectors = manager.hasAnyStoredVectors();
-
-      // Check if the index is empty (any namespace)
-      if (!hasAnyStoredVectors) {
-        this.showProcessingPrompt();
-        return;
-      }
-
-      const stats = manager.getStats();
-      const hasAnyEmbeddings = manager.hasAnyEmbeddings();
-
-      // Check if file exists in embeddings and if content changed
-      // Avoid reading entire file contents on focus; use mtime+size fingerprint instead
-      const fingerprint = `${file.stat.mtime}-${file.stat.size}`;
-      const fileInEmbeddings = manager.hasVector(file.path);
-      
-      // Smart loading: only show "analyzing" if file needs processing
-      if (!fileInEmbeddings || fingerprint !== this.lastFileHash) {
-        this.showSmartLoading(file.basename, !fileInEmbeddings);
-        this.lastFileHash = fingerprint;
-        this.fileExists = fileInEmbeddings;
-      } else {
-        // File exists and hasn't changed, show minimal loading
-        this.showQuickLoading(file.basename);
-      }
-      
-      // Mark that we're searching for this file
-      this.lastSearchContent = file.path;
-      
-      // If there is no existing vector for this file, but the vault has embeddings,
-      // fall back to searching using the file's content instead of prompting to process
-      if (!manager.hasVector(file.path)) {
-        if (hasAnyEmbeddings) {
-          const content = await this.app.vault.read(file);
-          if (!content.trim()) {
-            this.showEmptyContent();
-            return;
-          }
-          this.showQuickLoading(file.basename);
-          const results = await manager.searchSimilar(content, 15);
-          if (this.isViewVisible() && this.lastSearchContent === file.path) {
-            await this.updateResults(results, file);
-          }
-          return;
-        } else {
-          this.showProcessingState(
-            "Embeddings not ready for this model",
-            "Your vault has embeddings, but not for the current embeddings provider/model. Run embeddings processing to refresh.",
-          );
-          return;
-        }
-      }
-      
-      // Search for similar notes using non-blocking vector search under the hood
-      const results = await manager.findSimilar(file.path, 15);
-      
-      // Check if view is still visible and we're still searching for the same file
-      if (this.isViewVisible() && this.lastSearchContent === file.path) {
-        await this.updateResults(results, file);
-      }
-      
-    } catch (error) {
-      this.showError(`Failed to find similar notes: ${error.message}`);
-    }
+    await this.searchRuns.run(fileSimilaritySource(file));
   }
 
-  private async searchForSimilarFromChat(chatView: ChatView): Promise<void> {
-    try {
-      // If view isn't visible, schedule a pending search instead of doing work now
-      if (!this.isViewVisible()) {
-        this.pendingSearch = { type: 'chat', chatView };
-        return;
-      }
+  private async searchForSimilarFromChat(chatView: AgentChatView): Promise<void> {
+    await this.searchRuns.run(chatSimilaritySource(chatView));
+  }
 
-      const manager = this.plugin.getOrCreateEmbeddingsManager();
-      // Ensure embeddings storage is ready before querying
-      await manager.awaitReady();
-      
-      const hasAnyStoredVectors = manager.hasAnyStoredVectors();
+  private async executeSimilaritySearch(run: SimilaritySearchRun): Promise<void> {
+    const manager = this.plugin.getOrCreateEmbeddingsManager();
+    await manager.awaitReady();
+    if (!run.isCurrent()) return;
 
-      // Check if the index is empty (any namespace)
-      if (!hasAnyStoredVectors) {
-        this.showProcessingPrompt();
-        return;
-      }
+    const hasAnyEmbeddings = manager.hasAnyEmbeddings();
+    const lifecycle = manager.getLifecycleSnapshot();
 
-      const stats = manager.getStats();
-      
-      const hasAnyEmbeddings = manager.hasAnyEmbeddings();
-      
-      // Extract content from chat messages (first 3 + latest 2)
-      const chatContent = this.extractChatContent(chatView);
-      if (!chatContent.trim()) {
+    if (run.source.kind === "file") {
+      const file = run.source.file;
+      const fingerprint = `${file.stat.mtime}-${file.stat.size}`;
+      const fileIndex = manager.getFileIndexSnapshot(file.path);
+      if (fileIndex.state === "empty") {
         this.showEmptyContent();
         return;
       }
-      
-      // Create a content hash for comparison
-      const contentHash = this.hashContent(chatContent);
-      
-      // Show loading if content changed
-      if (contentHash !== this.lastFileHash) {
-        this.showSmartLoading(chatView.getChatTitle() || 'Chat', false);
-        this.lastFileHash = contentHash;
-      } else {
-        this.showQuickLoading(chatView.getChatTitle() || 'Chat');
-      }
-      
-      // Mark that we're searching for this chat content
-      this.lastSearchContent = `chat:${chatView.chatId}`;
-      
-      // Search for similar notes using extracted content with non-blocking search underneath
       if (!hasAnyEmbeddings) {
-        this.showProcessingState(
-          "Embeddings not ready for this model",
-          "Your vault has embeddings, but not for the current embeddings provider/model. Run embeddings processing to refresh.",
-        );
+        this.showUnavailableIndex(lifecycle);
         return;
       }
-      const results = await manager.searchSimilar(chatContent, 15);
-      
-      // Check if view is still visible and we're still searching for the same chat
-      const expectedSearchContent = `chat:${chatView.chatId}`;
-      if (this.isViewVisible() && this.lastSearchContent === expectedSearchContent) {
-        await this.updateResults(results, null, chatView.getChatTitle() || 'Chat');
+      const fileInEmbeddings = fileIndex.ready;
+      if (!fileInEmbeddings || fingerprint !== this.lastFileHash) {
+        this.showSmartLoading(file.basename, !fileInEmbeddings);
+        this.lastFileHash = fingerprint;
+      } else {
+        this.showQuickLoading(file.basename);
       }
-      
-    } catch (error) {
-      this.showError(`Failed to find similar notes: ${error.message}`);
+
+      if (!fileInEmbeddings) {
+        const content = await this.app.vault.read(file);
+        if (!run.isCurrent()) return;
+        if (!content.trim()) {
+          this.showEmptyContent();
+          return;
+        }
+        this.showQuickLoading(file.basename);
+        const results = await manager.searchSimilar(
+          buildNoteSemanticQuery(content),
+          15,
+          run.signal,
+        );
+        if (run.isCurrent()) await this.updateResults(results, file);
+        return;
+      }
+
+      const results = await manager.findSimilar(file.path, 15, run.signal);
+      if (run.isCurrent()) await this.updateResults(results, file);
+      return;
     }
+
+    const chatView = run.source.chatView;
+    const chatContent = this.extractChatContent(chatView);
+    if (!chatContent.trim()) {
+      this.showEmptyContent();
+      return;
+    }
+    if (!hasAnyEmbeddings) {
+      this.showUnavailableIndex(lifecycle);
+      return;
+    }
+    const contentHash = this.hashContent(chatContent);
+    const chatTitle = chatView.getChatTitle() || 'Chat';
+    if (contentHash !== this.lastFileHash) {
+      this.showSmartLoading(chatTitle, false);
+      this.lastFileHash = contentHash;
+    } else {
+      this.showQuickLoading(chatTitle);
+    }
+    const results = await manager.searchSimilar(chatContent, 15, run.signal);
+    if (run.isCurrent()) await this.updateResults(results, null, chatTitle);
   }
 
-  private extractChatContent(chatView: ChatView): string {
-    const messages = chatView.getMessages();
-    if (!messages || messages.length === 0) {
-      return '';
-    }
-    
-    // Extract first 3 messages and latest 2 messages
-    const selectedMessages: ChatMessage[] = [];
-    
-    // Add first 3 messages
-    for (let i = 0; i < Math.min(3, messages.length); i++) {
-      selectedMessages.push(messages[i]);
-    }
-    
-    // Add latest 2 messages (if we have more than 3 total)
-    if (messages.length > 3) {
-      const latestStart = Math.max(3, messages.length - 2);
-      for (let i = latestStart; i < messages.length; i++) {
-        // Avoid duplicates if there's overlap
-        if (!selectedMessages.find(m => m.message_id === messages[i].message_id)) {
-          selectedMessages.push(messages[i]);
-        }
-      }
-    }
-    
-    // Extract text content from selected messages
-    const extractedContent = selectedMessages
-      .map(message => {
-        if (typeof message.content === 'string') {
-          return message.content;
-        } else if (Array.isArray(message.content)) {
-          // Handle multipart content
-          return message.content
-            .map((part: any) => {
-              if (part.type === 'text') {
-                return part.text;
-              }
-              return ''; // Skip non-text parts like images
-            })
-            .join(' ');
-        }
-        return '';
-      })
-      .filter(content => content.trim().length > 0)
-      .join('\n\n');
-    
-    
-    return extractedContent;
+  private extractChatContent(chatView: AgentChatView): string {
+    return buildChatSemanticQuery(chatView.getMessages() || []);
   }
 
   /**
@@ -611,318 +562,56 @@ export class EmbeddingsView extends ItemView {
            contextFiles.has(fileNameWikiLink);
   }
 
-  /**
-   * Update context indicators for all currently displayed results
-   */
   private updateContextIndicators(): void {
-    const resultElements = this.resultsEl.querySelectorAll('.ss-similar-note');
-    resultElements.forEach((el, index) => {
-      if (index < this.currentResults.length) {
-        const result = this.currentResults[index];
-        const isInContext = this.isNoteInContext(result.path);
-        el.classList.toggle('is-in-context', isInContext);
-      }
-    });
+    this.presentation?.syncContextIndicators();
   }
-  
-  /**
-   * Smart loading - uses subtle header animation instead of loading screen
-   */
-  private showSmartLoading(fileName: string, needsProcessing: boolean): void {
-    this.isLoading = true;
+
+  private showSmartLoading(fileName: string, _needsProcessing: boolean): void {
+    this.updateFileName(fileName);
     this.startRefreshAnimation();
-    // Don't clear results - keep them visible during update
   }
-  
-  /**
-   * Quick loading - uses subtle header animation instead of loading screen
-   */
+
   private showQuickLoading(fileName: string): void {
-    this.isLoading = true;
+    this.updateFileName(fileName);
     this.startRefreshAnimation();
-    // Don't clear results - keep them visible during update
   }
-  
+
   private showEmptyState(): void {
-    this.isLoading = false;
-    this.stopRefreshAnimation();
-    this.hideFileName();
-    this.statusEl.empty();
-    this.resultsEl.empty();
     this.currentFile = null;
     this.currentChatView = null;
-    this.lastSearchContent = '';
-    
-    const emptyEl = this.resultsEl.createDiv({ cls: 'ss-embeddings-view__state ss-embeddings-view__state--empty' });
-    const iconEl = emptyEl.createDiv({ cls: 'ss-embeddings-view__state-icon' });
-    setIcon(iconEl, 'file-text');
-    
-    emptyEl.createDiv({ 
-      text: 'Open a note or chat to see similar content',
-      cls: 'ss-embeddings-view__state-title' 
-    });
-    
-    emptyEl.createDiv({
-      text: 'Switch to any markdown note or chat view and this panel will show related notes from your vault.',
-      cls: 'ss-embeddings-view__state-description'
-    });
+    this.currentResults = [];
+    this.presentation?.render({ state: 'idle' });
   }
-  
+
   private showEmptyContent(): void {
-    this.isLoading = false;
-    this.stopRefreshAnimation();
-    this.statusEl.empty();
-    this.resultsEl.empty();
-    
-    const emptyEl = this.resultsEl.createDiv({ cls: 'ss-embeddings-view__state ss-embeddings-view__state--empty' });
-    const iconEl = emptyEl.createDiv({ cls: 'ss-embeddings-view__state-icon' });
-    setIcon(iconEl, 'file-x');
-    
-    emptyEl.createDiv({ 
-      text: 'Note is empty',
-      cls: 'ss-embeddings-view__state-title' 
-    });
-    
-    emptyEl.createDiv({ 
-      text: 'Add some content to this note or chat to find similar notes.',
-      cls: 'ss-embeddings-view__state-description' 
-    });
+    this.currentResults = [];
+    this.presentation?.render({ state: 'empty-content' });
   }
-  
-  private showError(message: string): void {
-    this.isLoading = false;
-    this.stopRefreshAnimation();
-    this.statusEl.empty();
-    this.resultsEl.empty();
-    
-    const errorEl = this.resultsEl.createDiv({ cls: 'ss-embeddings-view__state ss-embeddings-view__state--error' });
-    const iconEl = errorEl.createDiv({ cls: 'ss-embeddings-view__state-icon' });
-    setIcon(iconEl, 'alert-circle');
-    
-    errorEl.createDiv({ 
-      text: 'Error finding similar notes',
-      cls: 'ss-embeddings-view__state-title' 
-    });
-    
-    errorEl.createDiv({ 
-      text: message,
-      cls: 'ss-embeddings-view__state-description' 
-    });
-  }
-  
 
-  
+  private showError(message: string): void {
+    this.currentResults = [];
+    this.presentation?.render({
+      state: 'error',
+      message: readEmbeddingErrorMessage(message, 'Similar notes are unavailable. Try again.'),
+    });
+  }
+
   private showDisabledState(): void {
-    this.isLoading = false;
-    this.stopRefreshAnimation();
-    this.hideFileName();
-    this.statusEl.empty();
-    this.resultsEl.empty();
     this.currentFile = null;
     this.currentChatView = null;
-    this.lastSearchContent = '';
-    
-    const disabledEl = this.resultsEl.createDiv({ cls: 'ss-embeddings-view__state ss-embeddings-view__state--disabled' });
-    const iconEl = disabledEl.createDiv({ cls: 'ss-embeddings-view__state-icon' });
-    setIcon(iconEl, 'power');
-    
-    disabledEl.createDiv({ 
-      text: 'Embeddings Disabled',
-      cls: 'ss-embeddings-view__state-title' 
-    });
-    
-    disabledEl.createDiv({ 
-      text: 'Enable embeddings in Settings > SystemSculpt AI > Embeddings to find similar notes.',
-      cls: 'ss-embeddings-view__state-description' 
-    });
+    this.currentResults = [];
+    this.presentation?.render({ state: 'disabled' });
   }
-  
-  private async updateResults(results: SearchResult[], sourceFile: TFile | null, sourceName?: string): Promise<void> {
-    this.isLoading = false;
-    this.stopRefreshAnimation();
-    this.currentResults = results;
-    
-    // Determine the source name for display
-    const displayName = sourceName || sourceFile?.basename || 'Unknown';
-    
-    // Update status
-    this.statusEl.empty();
-    if (results.length > 0) {
-      this.statusEl.createSpan({ 
-        text: `${results.length} similar notes found for "${displayName}"`,
-        cls: 'systemsculpt-status-text'
-      });
-    } else {
-      this.statusEl.createSpan({ 
-        text: `No similar notes found for "${displayName}"`,
-        cls: 'systemsculpt-status-text muted'
-      });
-    }
-    
-    // Clear results
-    this.resultsEl.empty();
-    
-    if (results.length === 0) {
-      const noResultsEl = this.resultsEl.createDiv({ cls: 'ss-embeddings-view__state ss-embeddings-view__state--no-results' });
-      const iconEl = noResultsEl.createDiv({ cls: 'ss-embeddings-view__state-icon' });
-      setIcon(iconEl, 'search-x');
-      
-      noResultsEl.createDiv({ 
-        text: 'No similar notes found',
-        cls: 'ss-embeddings-view__state-title' 
-      });
-      
-      noResultsEl.createDiv({ 
-        text: 'This note doesn\'t have similar content in your vault yet.',
-        cls: 'ss-embeddings-view__state-description' 
-      });
-      return;
-    }
-    
-    // Render results
-    const resultsContainer = this.resultsEl.createDiv({ cls: 'ss-embeddings-view__results-container' });
-    
-    for (const result of results) {
-      await this.renderResult(resultsContainer, result);
-    }
-  }
-  
-  private async renderResult(container: HTMLElement, result: SearchResult): Promise<void> {
-    const resultEl = container.createDiv({ cls: 'ss-similar-note' });
-    
-    // Check if this note is already in context (only for chat views)
-    const isDraggableForChat = this.currentChatView !== null;
-    if (isDraggableForChat) {
-      const isInContext = this.isNoteInContext(result.path);
-      if (isInContext) {
-        resultEl.addClass('is-in-context');
-      }
-    }
-    
-    // Make draggable if viewing results for a chat
-    if (isDraggableForChat) {
-      resultEl.setAttribute('draggable', 'true');
-      resultEl.addClass('ss-similar-note--draggable');
-      
-      // Set up drag handlers
-      resultEl.addEventListener('dragstart', (e) => {
-        if (!e.dataTransfer) return;
-        
-        // Set drag state to prevent clearing results during drag
-        this.isDragging = true;
-        
-        // Set safety timeout to clear drag state (in case dragend doesn't fire)
-        if (this.dragTimeout) {
-          window.clearTimeout(this.dragTimeout);
-        }
-        this.dragTimeout = window.setTimeout(() => {
-          this.isDragging = false;
-          this.dragTimeout = null;
-        }, 5000); // 5 second safety timeout
-        
-        // Set the file path as drag data with similar notes identifier
-        e.dataTransfer.setData('text/plain', result.path);
-        e.dataTransfer.setData('application/x-systemsculpt-similar-note', JSON.stringify({
-          path: result.path,
-          title: result.metadata.title || result.path.split('/').pop() || result.path,
-          score: result.score,
-          source: 'similar-notes'
-        }));
-        e.dataTransfer.effectAllowed = 'copy';
-        
-        // Add visual feedback
-        resultEl.addClass('is-dragging');
-        
-      });
-      
-      resultEl.addEventListener('dragend', (e) => {
-        // Clear drag state
-        this.isDragging = false;
-        
-        // Clear safety timeout
-        if (this.dragTimeout) {
-          window.clearTimeout(this.dragTimeout);
-          this.dragTimeout = null;
-        }
-        
-        // Remove visual feedback
-        resultEl.removeClass('is-dragging');
-        
-        // Small delay before checking active file to allow focus to settle
-        setTimeout(() => {
-          this.debouncedCheckActiveFile();
-        }, 100);
-      });
-    }
-    
-    // Make entire card clickable
-    resultEl.addEventListener('click', async (e) => {
-      // Don't trigger if clicking on the title link (let it handle its own click)
-      if ((e.target as HTMLElement).closest('.internal-link')) {
-        return;
-      }
-      // Don't trigger click if this was part of a drag operation
-      if (isDraggableForChat && e.defaultPrevented) {
-        return;
-      }
-      e.preventDefault();
-      await this.openFile(result.path);
-    });
-    
-    // Score indicator with proper thresholds
-    const scorePercent = Math.round(result.score * 100);
-    const scoreClass = scorePercent >= 75 ? 'ss-similar-note__score--high' : 
-                      scorePercent >= 50 ? 'ss-similar-note__score--medium' : 'ss-similar-note__score--low';
-    const scoreEl = resultEl.createDiv({ cls: `ss-similar-note__score ${scoreClass}` });
-    scoreEl.createSpan({ text: `${scorePercent}%` });
-    
-    // Note content
-    const contentEl = resultEl.createDiv({ cls: 'ss-similar-note__content' });
-    
-    // Title with link (keep for accessibility and right-click context)
-    const titleEl = contentEl.createDiv({ cls: 'ss-similar-note__title' });
-    const linkEl = titleEl.createEl('a', {
-      cls: 'internal-link',
-      text: result.metadata.title || result.path.split('/').pop() || result.path,
-      href: result.path
-    });
-    
-    linkEl.addEventListener('click', async (e) => {
-      e.preventDefault();
-      await this.openFile(result.path);
-    });
-    
-    // Excerpt or content preview
-    const sectionTitle = result.metadata.sectionTitle;
-    if (sectionTitle) {
-      contentEl.createDiv({ cls: 'ss-similar-note__section-title', text: sectionTitle });
-    }
 
-    if (result.metadata.excerpt) {
-      const excerptEl = contentEl.createDiv({ cls: 'ss-similar-note__excerpt' });
-      excerptEl.textContent = result.metadata.excerpt;
-    }
-    
-    // Metadata row
-    const metaEl = contentEl.createDiv({ cls: 'ss-similar-note__metadata' });
-    
-    // Path info
-    const pathParts = result.path.split('/');
-    if (pathParts.length > 1) {
-      const pathEl = metaEl.createSpan({ cls: 'ss-similar-note__path' });
-      pathEl.textContent = pathParts.slice(0, -1).join('/');
-    }
-    
-    // Tags not tracked in current implementation
-    
-    // Last modified
-    if (result.metadata.lastModified) {
-      const date = new Date(result.metadata.lastModified);
-      metaEl.createSpan({ 
-        cls: 'ss-similar-note__date',
-        text: this.formatDate(date)
-      });
-    }
+  private async updateResults(results: SearchResult[], sourceFile: TFile | null, sourceName?: string): Promise<void> {
+    this.currentResults = results;
+    const displayName = sourceName || sourceFile?.basename || 'Unknown';
+    this.presentation?.render({
+      state: 'results',
+      sourceName: displayName,
+      results,
+      chatContext: this.currentChatView !== null,
+    });
   }
   
   private async openFile(path: string): Promise<void> {
@@ -932,14 +621,40 @@ export class EmbeddingsView extends ItemView {
     }
   }
 
+  private async addResultToCurrentChat(path: string): Promise<void> {
+    const chatView = this.currentChatView;
+    const file = this.app.vault.getAbstractFileByPath(path);
+    if (!chatView || !(file instanceof TFile)) {
+      new Notice('This note is no longer available.');
+      return;
+    }
+
+    try {
+      await chatView.addFileToContext(file);
+      this.updateContextIndicators();
+    } catch (error) {
+      new Notice(`Could not add note to chat: ${this.errorMessage(error)}`);
+    }
+  }
+
   /**
    * Show processing prompt - now uses unified state
    */
   private showProcessingPrompt(): void {
-    this.showProcessingState(
-      'No embeddings data found',
-      'Process your vault to enable finding similar notes.'
-    );
+    this.currentResults = [];
+    this.presentation?.render({ state: 'index-required' });
+  }
+
+  private showUnavailableIndex(snapshot: Readonly<SemanticIndexSnapshot>): void {
+    if (snapshot.phase === "reconciling" || snapshot.pending > 0) {
+      this.showProcessingStatus();
+      return;
+    }
+    if (snapshot.phase === "error" || snapshot.failed > 0) {
+      this.showError(snapshot.lastError?.message || "The semantic index needs attention.");
+      return;
+    }
+    this.showProcessingPrompt();
   }
   
   /**
@@ -954,21 +669,12 @@ export class EmbeddingsView extends ItemView {
       manager.resumeProcessing();
 
       if (manager.isCurrentlyProcessing()) {
+        this.showProcessingStatus();
         new Notice('Processing already in progress');
         return;
       }
 
       this.showProcessingStatus();
-
-      // Prevent processing when using an incomplete custom provider configuration
-      if (this.plugin.settings.embeddingsProvider === 'custom') {
-        const endpoint = (this.plugin.settings.embeddingsCustomEndpoint || '').trim();
-        const model = (this.plugin.settings.embeddingsCustomModel || this.plugin.settings.embeddingsModel || '').trim();
-        if (!endpoint || !model) {
-          this.showError('Custom embeddings provider is not configured. Set API Endpoint and Model in settings.');
-          return;
-        }
-      }
 
       const result = await manager.processVault((progress) => {
         this.updateProcessingStatus(progress);
@@ -977,17 +683,20 @@ export class EmbeddingsView extends ItemView {
       if (result.status === 'complete') {
         if (this.currentFile) {
           await this.searchForSimilar(this.currentFile);
+        } else if (this.currentChatView) {
+          await this.searchForSimilarFromChat(this.currentChatView);
+        } else {
+          await this.refreshCurrentContext();
         }
-      } else if (result.status === 'cooldown') {
-        this.showError(result.message || 'Embeddings processing is temporarily paused.');
       } else {
-        const retrySeconds = result.retryAt ? Math.max(1, Math.ceil((result.retryAt - Date.now()) / 1000)) : null;
-        const message = result.message || 'Embeddings processing paused due to provider error.';
-        this.showError(retrySeconds ? `${message} Retry in ~${retrySeconds}s.` : message);
+        this.showError(readEmbeddingErrorMessage(
+          result.message ?? result.failure,
+          'Embeddings processing stopped. Try again.',
+        ));
       }
 
     } catch (error) {
-      this.showError(`Failed to process embeddings: ${error.message}`);
+      this.showError(`Failed to process embeddings: ${this.errorMessage(error)}`);
     }
   }
   
@@ -995,85 +704,15 @@ export class EmbeddingsView extends ItemView {
    * Show processing status - simplified and user-friendly
    */
   private showProcessingStatus(): void {
-    this.showProcessingState(
-      'Building semantic search...',
-      'Preparing your notes for intelligent search. This happens once and runs in the background.',
-      false
-    );
-    
-    // Add progress elements
-    const processingEl = this.resultsEl.querySelector('.ss-embeddings-view__processing') as HTMLElement;
-    if (processingEl) {
-      const progressEl = processingEl.createDiv({ cls: 'ss-embeddings-view__processing-progress' });
-      progressEl.createDiv({ 
-        text: 'Starting...',
-        cls: 'systemsculpt-progress-text' 
-      });
-      
-      const progressBar = progressEl.createDiv({ cls: 'ss-embeddings-view-progress-track' });
-      progressBar.createDiv({ cls: 'systemsculpt-progress-fill' });
-
-      const secondaryActions = processingEl.createDiv({ cls: 'ss-embeddings-view__processing-secondary-actions' });
-      const remainingBtn = secondaryActions.createEl('button', {
-        text: 'View remaining files',
-        cls: 'mod-muted'
-      });
-      remainingBtn.addEventListener('click', () => {
-        this.openPendingFilesModal();
-      });
-    }
+    this.currentResults = [];
+    this.presentation?.render({ state: 'processing' });
   }
   
   /**
    * Update processing progress
    */
   private updateProcessingStatus(progress: { current: number; total: number; currentFile?: string }): void {
-    const progressEl = this.resultsEl.querySelector('.ss-embeddings-view__processing-progress');
-    if (!progressEl) return;
-    
-    const progressText = progressEl.querySelector('.systemsculpt-progress-text') as HTMLElement;
-    const progressFill = progressEl.querySelector('.systemsculpt-progress-fill') as HTMLElement;
-    
-    if (progressText) {
-      const safeCurrent = Math.min(progress.current, progress.total);
-      const percentage = progress.total > 0 ? Math.round((safeCurrent / progress.total) * 100) : 0;
-      progressText.textContent = `Building embeddings... ${percentage}%`;
-    }
-    
-    if (progressFill && progress.total > 0) {
-      const safeCurrent = Math.min(progress.current, progress.total);
-      const percentage = Math.min(100, (safeCurrent / progress.total) * 100);
-      progressFill.style.width = `${percentage}%`;
-      
-      // Add processing animation when actively processing
-      progressFill.classList.add('processing');
-    }
-  }
-  
-  private formatDate(date: Date): string {
-    const now = new Date();
-    const diff = now.getTime() - date.getTime();
-    
-    // Less than 1 hour
-    if (diff < 3600000) {
-      const minutes = Math.floor(diff / 60000);
-      return `${minutes}min ago`;
-    }
-    
-    // Less than 24 hours
-    if (diff < 86400000) {
-      const hours = Math.floor(diff / 3600000);
-      return `${hours}h ago`;
-    }
-    
-    // Less than 7 days
-    if (diff < 604800000) {
-      const days = Math.floor(diff / 86400000);
-      return `${days}d ago`;
-    }
-    
-    // Default to date
-    return date.toLocaleDateString();
+    this.presentation?.updateProgress(progress);
   }
 
   private openPendingFilesModal(): void {
@@ -1089,29 +728,17 @@ export class EmbeddingsView extends ItemView {
   
   
   async onClose(): Promise<void> {
-    if (this.searchTimeout) {
-      window.clearTimeout(this.searchTimeout);
-    }
-    if (this.dragTimeout) {
-      window.clearTimeout(this.dragTimeout);
-    }
-    if (this.contextChangeHandler) {
-      document.removeEventListener('systemsculpt:context-changed', this.contextChangeHandler);
+    this.searchRuns.close();
+    this.unsubscribeIndexLifecycle?.();
+    this.unsubscribeIndexLifecycle = null;
+    this.lastIndexSnapshot = null;
+    if (this.presentation) {
+      this.removeChild(this.presentation);
+      this.presentation.unload();
+      this.presentation = null;
     }
   }
 
-  private flushPendingSearchIfVisible(): void {
-    if (!this.isViewVisible() || !this.pendingSearch) return;
-    const pending = this.pendingSearch;
-    this.pendingSearch = null;
-    if (pending.type === 'file' && pending.file) {
-      // Small defer to allow layout to settle
-      setTimeout(() => this.searchForSimilar(pending.file), 10);
-    } else if (pending.type === 'chat' && pending.chatView) {
-      setTimeout(() => this.searchForSimilarFromChat(pending.chatView), 10);
-    }
-  }
-  
   /**
    * Simple hash function for content comparison
    */
@@ -1125,50 +752,8 @@ export class EmbeddingsView extends ItemView {
     return hash.toString();
   }
 
-  /**
-   * Unified processing state - replaces multiple similar states
-   */
-  private showProcessingState(title: string, description: string, showActions: boolean = true): void {
-    this.statusEl.empty();
-    this.resultsEl.empty();
-
-    const processingEl = this.resultsEl.createDiv({ cls: 'ss-embeddings-view__processing' });
-    
-    // Processing icon
-    const iconEl = processingEl.createDiv({ cls: 'ss-embeddings-view__processing-icon' });
-    setIcon(iconEl, 'database');
-    
-    // Processing message
-    processingEl.createDiv({ 
-      text: title,
-      cls: 'ss-embeddings-view__processing-title' 
-    });
-    
-    processingEl.createDiv({ 
-      text: description,
-      cls: 'ss-embeddings-view__processing-description' 
-    });
-
-    if (showActions) {
-      // Action buttons
-      const actionsEl = processingEl.createDiv({ cls: 'ss-embeddings-view__processing-actions' });
-      
-      const startBtn = actionsEl.createEl('button', {
-        text: 'Start Processing',
-        cls: 'mod-cta'
-      });
-      startBtn.addEventListener('click', async () => {
-        await this.startProcessing();
-      });
-
-      const settingsBtn = actionsEl.createEl('button', {
-        text: 'Settings',
-        cls: 'mod-muted'
-      });
-      settingsBtn.addEventListener('click', () => {
-        this.plugin.openSettingsTab("knowledge");
-      });
-    }
+  private errorMessage(error: unknown): string {
+    return readEmbeddingErrorMessage(error, 'Similar notes are unavailable. Try again.');
   }
 
 } 

@@ -35,16 +35,14 @@ function sampleIndex(): SerializedEmbeddingsIndex {
         id: "ns::A.md#0",
         path: "A.md",
         chunkId: 0,
-        vector: "",
+        vector: "AAAAAA==",
         metadata: {
           title: "A",
           mtime: 1,
           contentHash: "h",
-          provider: "systemsculpt",
-          model: "m",
-          dimension: 0,
+          dimension: 1,
           createdAt: 1,
-          namespace: "ns",
+          namespace: "systemsculpt:local-empty:v1:1",
           isEmpty: true,
         },
       },
@@ -93,5 +91,28 @@ describe("EmbeddingsIndexFile", () => {
 
     await file.write(sampleIndex());
     expect(adapter.mkdir).not.toHaveBeenCalled();
+  });
+
+  it("atomically replaces an existing checkpoint on adapters that cannot rename over a target", async () => {
+    const adapter = makeAdapter() as ReturnType<typeof makeAdapter> & {
+      rename: jest.Mock;
+      remove: jest.Mock;
+    };
+    adapter.files.set(".systemsculpt/embeddings/index.json", JSON.stringify({ old: true }));
+    adapter.rename = jest.fn(async (from: string, to: string) => {
+      if (adapter.files.has(to)) throw new Error("target exists");
+      const value = adapter.files.get(from);
+      if (value === undefined) throw new Error("source missing");
+      adapter.files.delete(from);
+      adapter.files.set(to, value);
+    });
+    adapter.remove = jest.fn(async (path: string) => { adapter.files.delete(path); });
+    const file = new EmbeddingsIndexFile(adapter as never);
+
+    await file.write(sampleIndex());
+
+    expect(await file.read()).toEqual(sampleIndex());
+    expect(adapter.files.has(".systemsculpt/embeddings/index.json.previous")).toBe(false);
+    expect(adapter.files.has(".systemsculpt/embeddings/index.json.next")).toBe(false);
   });
 });

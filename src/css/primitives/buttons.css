@@ -7,7 +7,7 @@
  *   active → gentle press (scale), deeper tint
  *   focus  → token ring
  *   busy   → spinner replaces label
- *   selected (.ss-active) → accent tint, accent hairline
+ *   selected (.is-selected) → accent tint, accent hairline
  */
 
 .ss-button {
@@ -85,10 +85,6 @@
   background-color: var(--ss-accent-hover);
 }
 
-.ss-button--secondary {
-  background-color: var(--ss-surface-1);
-}
-
 .ss-button--danger {
   background-color: var(--ss-danger-tint);
   border-color: var(--ss-danger-line);
@@ -135,19 +131,19 @@
 /* ------------------------------------------------------------------ *
  * States
  * ------------------------------------------------------------------ */
-.ss-button.ss-active {
+.ss-button.is-selected {
   background-color: var(--ss-accent-tint-strong);
   border-color: var(--ss-line-accent);
   color: var(--ss-ink-accent);
 }
 
-.ss-button.ss-loading {
+.ss-button.is-busy {
   position: relative;
   color: transparent;
   pointer-events: none;
 }
 
-.ss-button.ss-loading::after {
+.ss-button.is-busy::after {
   content: "";
   position: absolute;
   inset: 0;
@@ -160,26 +156,8 @@
   animation: ss-spin 0.8s linear infinite;
 }
 
-.ss-button--primary.ss-loading::after,
-.ss-button.mod-cta.ss-loading::after {
+.ss-button--primary.is-busy::after,
+.ss-button.mod-cta.is-busy::after {
   border-color: color-mix(in srgb, var(--ss-ink-on-accent) 30%, transparent);
   border-top-color: var(--ss-ink-on-accent);
-}
-
-/* ------------------------------------------------------------------ *
- * Arrangement
- * ------------------------------------------------------------------ */
-.ss-button-container {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--ss-space-2);
-  justify-content: flex-end;
-  align-items: center;
-}
-
-/* Keyboard shortcut hint inside buttons/menus */
-.systemsculpt-shortcut-hint {
-  margin-left: var(--ss-space-1);
-  font-size: var(--ss-text-xs);
-  color: var(--ss-ink-faint);
 }

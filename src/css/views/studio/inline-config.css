@@ -1,0 +1,154 @@
+/* ------------------------------------------------------------------ *
+ * Generic inline-config fields
+ *
+ * Structure (StudioGraphInlineConfigPanel.ts):
+ *   .ss-studio-node-inline-config        panel wrapper (owns card padding)
+ *     .ss-studio-node-inline-config-grid two-column field grid
+ *       .ss-studio-node-inline-config-field[.is-full][.is-hidden]
+ *         label / help / control
+ * ------------------------------------------------------------------ */
+.ss-studio-node-inline-config {
+  padding: var(--ss-space-2);
+}
+
+.ss-studio-node-inline-config-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--ss-space-2);
+}
+
+.ss-studio-node-inline-config-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ss-space-1);
+  min-width: 0;
+}
+
+/* Textareas, path pickers, string lists, note selectors span both columns. */
+.ss-studio-node-inline-config-field.is-full {
+  grid-column: 1 / -1;
+}
+
+/* Conditional fields toggled off by StudioNodeConfigValidation visibility. */
+.ss-studio-node-inline-config-field.is-hidden {
+  display: none;
+}
+
+.ss-studio-node-inline-config-label {
+  font-size: var(--ss-text-xs);
+  color: var(--ss-ink-faint);
+  letter-spacing: var(--ss-tracking-wide);
+}
+
+.ss-studio-node-inline-config-help {
+  font-size: var(--ss-text-xs);
+  color: var(--ss-ink-faint);
+}
+
+.ss-studio-node-inline-config-input,
+.ss-studio-node-inline-config-select,
+.ss-studio-node-inline-config-path-input {
+  width: 100%;
+  min-height: 26px;
+  padding: 0 var(--ss-space-2);
+  background-color: var(--ss-surface-sunken);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-xs);
+  color: var(--ss-ink);
+  font-size: var(--ss-text-sm);
+  transition: var(--ss-transition-colors);
+}
+
+.ss-studio-node-inline-config-input:focus,
+.ss-studio-node-inline-config-path-input:focus {
+  border-color: var(--ss-accent);
+  outline: none;
+}
+
+.ss-studio-node-inline-config-textarea {
+  width: 100%;
+  min-height: 60px;
+  padding: var(--ss-space-1) var(--ss-space-2);
+  background-color: var(--ss-surface-sunken);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-xs);
+  color: var(--ss-ink);
+  font-size: var(--ss-text-sm);
+  resize: vertical;
+}
+
+.ss-studio-node-inline-config-select-button-group {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--ss-space-0);
+}
+
+.ss-studio-node-inline-config-select-button {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 var(--ss-space-2);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-full);
+  background: transparent;
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-xs);
+  cursor: pointer;
+  transition: var(--ss-transition-colors);
+}
+
+.ss-studio-node-inline-config-select-button.is-selected {
+  background-color: var(--ss-accent-tint-strong);
+  border-color: var(--ss-line-accent);
+  color: var(--ss-ink-accent);
+}
+
+.ss-studio-node-inline-config-checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-2);
+}
+
+.ss-studio-node-inline-config-checkbox {
+  accent-color: var(--ss-accent);
+}
+
+.ss-studio-node-inline-config-path-row {
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-1);
+}
+
+.ss-studio-node-inline-config-path-button,
+.ss-studio-path-browse-button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ss-space-1);
+  flex-shrink: 0;
+  min-height: 26px;
+  padding: 0 var(--ss-space-2);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-xs);
+  background-color: var(--ss-surface-0);
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-xs);
+  cursor: pointer;
+  transition: var(--ss-transition-colors);
+}
+
+.ss-studio-node-inline-config-path-button:hover,
+.ss-studio-path-browse-button:hover {
+  background-color: var(--ss-state-hover);
+  color: var(--ss-ink);
+}
+
+.ss-studio-node-inline-config-path-button-icon,
+.ss-studio-path-browse-button-icon {
+  display: inline-flex;
+  align-items: center;
+}
+
+.ss-studio-node-inline-config-path-button-label,
+.ss-studio-path-browse-button-label {
+  white-space: nowrap;
+}

@@ -70,6 +70,7 @@ describe("StudioGraphNodeCardSections renderNodePorts", () => {
 
   it("renders only the populated port side without empty-state filler copy", () => {
     const graphInteraction = createGraphInteractionStub();
+    graphInteraction.isPendingConnectionSource.mockReturnValue(true);
     const nodeEl = document.createElement("div");
 
     renderNodePorts({
@@ -89,6 +90,10 @@ describe("StudioGraphNodeCardSections renderNodePorts", () => {
     expect(nodeEl.textContent).not.toContain("No inputs");
     expect(nodeEl.textContent).not.toContain("No outputs");
     expect(nodeEl.querySelectorAll(".ss-studio-node-ports-col")).toHaveLength(1);
+    const outputPin = nodeEl.querySelector<HTMLButtonElement>(".ss-studio-port-pin.is-output");
+    expect(outputPin?.type).toBe("button");
+    expect(outputPin?.getAttribute("aria-label")).toBe("text output (text)");
+    expect(outputPin?.getAttribute("aria-pressed")).toBe("true");
     expect(graphInteraction.registerPortElement).toHaveBeenCalledWith(
       "node_terminal",
       "out",

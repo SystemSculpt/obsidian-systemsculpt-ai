@@ -27,15 +27,9 @@ describe("chatHistoryProvider", () => {
       {
         id: "chat-1",
         title: "Chat 1",
-        selectedModelId: "systemsculpt@@systemsculpt/ai-agent",
         lastModified: Date.parse("2026-03-10T10:00:00.000Z"),
         messages: [{ role: "user", content: "Hello" }, { role: "assistant", content: "Hi" }],
         chatPath: "SystemSculpt/Chats/chat-1.md",
-        chatBackend: "systemsculpt",
-        piSessionFile: "/tmp/chat-1.jsonl",
-        piSessionId: "session-1",
-        piLastEntryId: "entry-1",
-        piLastSyncedAt: "2026-03-10T10:00:00.000Z",
       },
     ]);
     (ChatStorageService as jest.Mock).mockImplementation(() => ({ loadChats }));
@@ -48,14 +42,13 @@ describe("chatHistoryProvider", () => {
       app: {},
       settings: {
         chatsDirectory: "SystemSculpt/Chats",
-        selectedModelId: "systemsculpt@@systemsculpt/ai-agent",
       },
     } as any;
 
     const provider = createChatHistoryProvider(plugin);
     const [entry] = await provider.loadEntries();
 
-    expect(entry.badge).toBe("Managed");
+    expect(entry.badge).toBeUndefined();
     expect(entry.subtitle).toBe("2 messages");
 
     await entry.openPrimary();

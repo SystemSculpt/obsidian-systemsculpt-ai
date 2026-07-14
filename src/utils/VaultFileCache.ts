@@ -5,7 +5,7 @@
  * by maintaining a smart cache that updates incrementally via vault events.
  */
 
-import { App, TFile, TFolder, EventRef, Vault } from 'obsidian';
+import { App, TFile, EventRef, Vault } from 'obsidian';
 
 interface FileStats {
   count: number;
@@ -27,10 +27,6 @@ export class VaultFileCache {
   private readonly MAX_CACHE_AGE = 300000; // 5 minutes max cache age
   private readonly STATS_CACHE_AGE = 60000; // 1 minute for stats
   
-  // Performance tracking
-  private cacheHits = 0;
-  private cacheMisses = 0;
-  
   // Cleanup tracking
   private warmCacheTimeout: number | null = null;
   
@@ -48,8 +44,6 @@ export class VaultFileCache {
    * Optimized to defer expensive operations until first use
    */
   async initialize(): Promise<void> {
-    const initStart = performance.now();
-    
     if (this.isInitialized) {
       return;
     }
@@ -66,9 +60,7 @@ export class VaultFileCache {
     
     // Schedule cache warming for after initialization completes
     this.warmCacheTimeout = window.setTimeout(() => {
-      this.warmCache().then(() => {
-      }).catch(error => {
-      });
+      this.warmCache().catch(() => {});
     }, 2000); // Warm cache 2 seconds after initialization
   }
   
@@ -78,12 +70,10 @@ export class VaultFileCache {
   getMarkdownFiles(): TFile[] {
     // Check if cache is valid
     if (this.isCacheValid() && this.markdownFiles) {
-      this.cacheHits++;
       return [...this.markdownFiles]; // Return copy to prevent mutation
     }
     
     // Cache miss - refresh
-    this.cacheMisses++;
     this.refreshMarkdownCache();
     return [...(this.markdownFiles || [])];
   }
@@ -96,11 +86,9 @@ export class VaultFileCache {
    */
   getMarkdownFilesView(): ReadonlyArray<TFile> {
     if (this.isCacheValid() && this.markdownFiles) {
-      this.cacheHits++;
       return this.markdownFiles;
     }
 
-    this.cacheMisses++;
     this.refreshMarkdownCache();
     return this.markdownFiles || [];
   }
@@ -110,11 +98,9 @@ export class VaultFileCache {
    */
   getAllFiles(): TFile[] {
     if (this.isCacheValid() && this.allFiles) {
-      this.cacheHits++;
       return [...this.allFiles];
     }
     
-    this.cacheMisses++;
     this.refreshAllFilesCache();
     return [...(this.allFiles || [])];
   }
@@ -127,11 +113,9 @@ export class VaultFileCache {
    */
   getAllFilesView(): ReadonlyArray<TFile> {
     if (this.isCacheValid() && this.allFiles) {
-      this.cacheHits++;
       return this.allFiles;
     }
 
-    this.cacheMisses++;
     this.refreshAllFilesCache();
     return this.allFiles || [];
   }
@@ -141,11 +125,9 @@ export class VaultFileCache {
    */
   getMarkdownFileCount(): number {
     if (this.isStatsCacheValid() && this.fileStats) {
-      this.cacheHits++;
       return this.fileStats.count;
     }
     
-    this.cacheMisses++;
     this.refreshFileStats();
     return this.fileStats?.count || 0;
   }
@@ -155,11 +137,9 @@ export class VaultFileCache {
    */
   getTotalVaultSize(): number {
     if (this.isStatsCacheValid() && this.fileStats) {
-      this.cacheHits++;
       return this.fileStats.totalSize;
     }
     
-    this.cacheMisses++;
     this.refreshFileStats();
     return this.fileStats?.totalSize || 0;
   }
@@ -173,20 +153,6 @@ export class VaultFileCache {
     this.fileStats = null;
     this.lastCacheUpdate = 0;
     // VaultFileCache cache invalidated silently
-  }
-  
-  /**
-   * Get cache performance statistics
-   */
-  getCacheStats(): { hits: number; misses: number; hitRatio: string } {
-    const total = this.cacheHits + this.cacheMisses;
-    const hitRatio = total > 0 ? ((this.cacheHits / total) * 100).toFixed(1) : '0.0';
-    
-    return {
-      hits: this.cacheHits,
-      misses: this.cacheMisses,
-      hitRatio: `${hitRatio}%`
-    };
   }
   
   /**
@@ -209,8 +175,6 @@ export class VaultFileCache {
     this.invalidateCache();
     this.isInitialized = false;
     
-    const stats = this.getCacheStats();
-    // VaultFileCache destroyed silently
   }
   
   // Private methods
@@ -226,11 +190,10 @@ export class VaultFileCache {
   }
   
   private refreshMarkdownCache(): void {
-    const refreshStart = performance.now();
     try {
       this.markdownFiles = this.vault.getMarkdownFiles();
       this.lastCacheUpdate = Date.now();
-    } catch (error) {
+    } catch {
       this.markdownFiles = [];
     }
   }
@@ -239,7 +202,7 @@ export class VaultFileCache {
     try {
       this.allFiles = this.vault.getFiles();
       this.lastCacheUpdate = Date.now();
-    } catch (error) {
+    } catch {
       this.allFiles = [];
     }
   }
@@ -258,19 +221,18 @@ export class VaultFileCache {
         totalSize,
         lastUpdate: Date.now()
       };
-    } catch (error) {
+    } catch {
       this.fileStats = { count: 0, totalSize: 0, lastUpdate: Date.now() };
     }
   }
   
   private async warmCache(): Promise<void> {
-    const warmStart = performance.now();
     try {
       // Pre-populate the most commonly used caches
       this.refreshMarkdownCache();
       
       this.refreshFileStats();
-    } catch (error) {
+    } catch {
     }
   }
   
@@ -288,7 +250,7 @@ export class VaultFileCache {
         }
         
         if (file instanceof TFile && this.isUserContentFile(file)) {
-          this.handleFileChange('create');
+          this.handleFileChange();
         }
       })
     );
@@ -307,7 +269,7 @@ export class VaultFileCache {
     this.eventRefs.push(
       this.vault.on('delete', (file) => {
         if (file instanceof TFile && this.isUserContentFile(file)) {
-          this.handleFileChange('delete');
+          this.handleFileChange();
         }
       })
     );
@@ -316,7 +278,7 @@ export class VaultFileCache {
     this.eventRefs.push(
       this.vault.on('rename', (file) => {
         if (file instanceof TFile && this.isUserContentFile(file)) {
-          this.handleFileChange('rename');
+          this.handleFileChange();
         }
       })
     );
@@ -327,9 +289,10 @@ export class VaultFileCache {
    */
   private isUserContentFile(file: TFile): boolean {
     const path = file.path;
+    const configDir = this.app.vault.configDir;
     
-    // Exclude .obsidian directory and its subdirectories
-    if (path.startsWith('.obsidian/')) {
+    // Exclude the active Obsidian config directory and its subdirectories
+    if (path.startsWith(`${configDir}/`)) {
       return false;
     }
     
@@ -346,7 +309,7 @@ export class VaultFileCache {
     return true;
   }
   
-  private handleFileChange(type: 'create' | 'delete' | 'rename'): void {
+  private handleFileChange(): void {
     // Invalidate caches that are affected by file structure changes
     this.markdownFiles = null;
     this.allFiles = null;

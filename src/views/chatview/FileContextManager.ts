@@ -9,18 +9,28 @@ type ProcessingEntry = {
   event: DocumentProcessingProgressEvent;
   updatedAt: number;
   removalTimeoutId: number | null;
+  removalTimerWindow: Window | null;
 };
+
+export const FILE_CONTEXT_STATE_CHANGED_EVENT = "systemsculpt:file-context-state-changed";
+
+export interface FileContextStateChangedEvent {
+  manager: FileContextManager;
+  kind: "context" | "processing";
+}
 
 interface FileContextManagerOptions {
   app: App;
   plugin: SystemSculptPlugin;
   onContextChange: () => Promise<void>;
+  getOwnerWindow: () => Window;
 }
 
 export class FileContextManager {
   private readonly app: App;
   private readonly plugin: SystemSculptPlugin;
   private readonly onContextChange: () => Promise<void>;
+  private readonly getOwnerWindow: () => Window;
 
   private contextFiles = new Set<string>();
 
@@ -30,23 +40,35 @@ export class FileContextManager {
     this.app = options.app;
     this.plugin = options.plugin;
     this.onContextChange = options.onContextChange;
+    this.getOwnerWindow = options.getOwnerWindow;
   }
 
   public destroy(): void {
+    this.clearProcessingEntries();
+  }
+
+  private clearProcessingEntries(): void {
     for (const entry of this.processing.values()) {
-      if (entry.removalTimeoutId) {
-        window.clearTimeout(entry.removalTimeoutId);
+      if (entry.removalTimeoutId !== null) {
+        entry.removalTimerWindow?.clearTimeout(entry.removalTimeoutId);
       }
     }
     this.processing.clear();
   }
 
   private emitContextChanged(): void {
-    document.dispatchEvent(new CustomEvent("systemsculpt:context-changed"));
+    this.emitStateChanged("context");
   }
 
   private emitProcessingChanged(): void {
-    document.dispatchEvent(new CustomEvent("systemsculpt:context-processing-changed"));
+    this.emitStateChanged("processing");
+  }
+
+  private emitStateChanged(kind: FileContextStateChangedEvent["kind"]): void {
+    (this.app.workspace as any).trigger(FILE_CONTEXT_STATE_CHANGED_EVENT, {
+      manager: this,
+      kind,
+    } satisfies FileContextStateChangedEvent);
   }
 
   public getContextFiles(): Set<string> {
@@ -117,7 +139,7 @@ export class FileContextManager {
 
   public clearContext(): void {
     this.contextFiles.clear();
-    this.processing.clear();
+    this.clearProcessingEntries();
     this.emitContextChanged();
     this.emitProcessingChanged();
   }
@@ -134,7 +156,7 @@ export class FileContextManager {
     }
 
     this.contextFiles = new Set(existingFiles);
-    this.processing.clear();
+    this.clearProcessingEntries();
     this.emitContextChanged();
     this.emitProcessingChanged();
   }
@@ -142,24 +164,29 @@ export class FileContextManager {
   public updateProcessingStatus(file: TFile, event: DocumentProcessingProgressEvent): void {
     const key = file.path;
     const existing = this.processing.get(key);
-    if (existing?.removalTimeoutId) {
-      window.clearTimeout(existing.removalTimeoutId);
+    if (existing && existing.removalTimeoutId !== null) {
+      existing.removalTimerWindow?.clearTimeout(existing.removalTimeoutId);
     }
+
+    const ownerWindow = this.getOwnerWindow();
 
     const entry: ProcessingEntry = {
       file,
       event,
       updatedAt: Date.now(),
       removalTimeoutId: null,
+      removalTimerWindow: null,
     };
 
     if (event.stage === "ready") {
-      entry.removalTimeoutId = window.setTimeout(() => {
+      entry.removalTimerWindow = ownerWindow;
+      entry.removalTimeoutId = ownerWindow.setTimeout(() => {
         this.processing.delete(key);
         this.emitProcessingChanged();
       }, 1500);
     } else if (event.stage === "error") {
-      entry.removalTimeoutId = window.setTimeout(() => {
+      entry.removalTimerWindow = ownerWindow;
+      entry.removalTimeoutId = ownerWindow.setTimeout(() => {
         this.processing.delete(key);
         this.emitProcessingChanged();
       }, 7000);
@@ -172,8 +199,8 @@ export class FileContextManager {
   public dismissProcessingStatus(filePath: string): void {
     const entry = this.processing.get(filePath);
     if (!entry) return;
-    if (entry.removalTimeoutId) {
-      window.clearTimeout(entry.removalTimeoutId);
+    if (entry.removalTimeoutId !== null) {
+      entry.removalTimerWindow?.clearTimeout(entry.removalTimeoutId);
     }
     this.processing.delete(filePath);
     this.emitProcessingChanged();

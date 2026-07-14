@@ -75,14 +75,14 @@ describe("normalizeVaultRelativePath", () => {
 
 describe("joinFilesystemPath", () => {
   it("joins windows filesystem bases with vault-relative segments", () => {
-    expect(joinFilesystemPath("C:\\vault", ".systemsculpt/pi-agent/auth.json")).toBe(
-      "C:\\vault\\.systemsculpt\\pi-agent\\auth.json",
+    expect(joinFilesystemPath("C:\\vault", ".systemsculpt/runtime/cache.json")).toBe(
+      "C:\\vault\\.systemsculpt\\runtime\\cache.json",
     );
   });
 
   it("joins posix filesystem bases with vault-relative segments", () => {
-    expect(joinFilesystemPath("/srv/obsidian/vault", ".systemsculpt/pi-agent/auth.json")).toBe(
-      "/srv/obsidian/vault/.systemsculpt/pi-agent/auth.json",
+    expect(joinFilesystemPath("/srv/obsidian/vault", ".systemsculpt/runtime/cache.json")).toBe(
+      "/srv/obsidian/vault/.systemsculpt/runtime/cache.json",
     );
   });
 

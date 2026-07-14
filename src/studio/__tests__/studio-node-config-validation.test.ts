@@ -48,21 +48,6 @@ describe("Studio node config validation", () => {
     expect(result.errors).toHaveLength(0);
   });
 
-  it("rejects invalid select options", () => {
-    const registry = registryWithBuiltIns();
-    const definition = registry.get("studio.http_request", "1.0.0");
-    expect(definition).not.toBeNull();
-
-    const result = validateNodeConfig(definition!, {
-      method: "INVALID",
-      url: "https://api.systemsculpt.com",
-      headers: {},
-    });
-
-    expect(result.isValid).toBe(false);
-    expect(result.errors.some((error) => error.fieldKey === "method")).toBe(true);
-  });
-
   it("rejects invalid image-generation aspect-ratio values", () => {
     const registry = registryWithBuiltIns();
     const definition = registry.get("studio.image_generation", "1.0.0");
@@ -131,7 +116,7 @@ describe("Studio node config validation", () => {
       next_unknown: 42,
     });
 
-    expect(rebuilt.modelId).toBe("openai/gpt-5-mini");
+    expect(rebuilt).not.toHaveProperty("modelId");
     expect(rebuilt.custom_internal_key).toBe("still-here");
     expect(rebuilt.next_unknown).toBe(42);
   });
@@ -231,42 +216,14 @@ describe("Studio node config validation", () => {
     expect(result.errors.some((error) => error.fieldKey === "adapterCommand")).toBe(true);
   });
 
-  it("requires a Pi model id for text generation nodes", () => {
+  it("uses managed text generation without a client model id", () => {
     const registry = registryWithBuiltIns();
     const definition = registry.get("studio.text_generation", "1.0.0");
     expect(definition).not.toBeNull();
 
-    const missingModel = validateNodeConfig(definition!, {
-      systemPrompt: "You are local",
-      modelId: "",
-    });
-    expect(missingModel.isValid).toBe(false);
-    expect(missingModel.errors.some((error) => error.fieldKey === "modelId")).toBe(true);
-
-    const validModel = validateNodeConfig(definition!, {
-      modelId: "openai@@gpt-5-mini",
-    });
-    expect(validModel.isValid).toBe(true);
-  });
-
-  it("passes valid HTTP API config", () => {
-    const registry = registryWithBuiltIns();
-    const definition = registry.get("studio.http_request", "1.0.0");
-    expect(definition).not.toBeNull();
-
-    const result = validateNodeConfig(definition!, {
-      method: "POST",
-      url: "https://api.resend.com/contacts",
-      bearerToken: "re_test_123",
-      bodyMode: "auto",
-      body: {
-        email: "first@example.com",
-      },
-      maxRetries: 3,
-    });
-
-    expect(result.isValid).toBe(true);
-    expect(result.errors).toHaveLength(0);
+    const managed = validateNodeConfig(definition!, { systemPrompt: "Be concise" });
+    expect(managed.isValid).toBe(true);
+    expect(managed.errors.some((error) => error.fieldKey === "modelId")).toBe(false);
   });
 
   it("accepts note selector items with path and optional enabled", () => {
@@ -302,34 +259,4 @@ describe("Studio node config validation", () => {
     expect(result.errors.some((error) => error.message.includes("non-empty path"))).toBe(true);
   });
 
-  it("rejects out-of-range HTTP retry values", () => {
-    const registry = registryWithBuiltIns();
-    const definition = registry.get("studio.http_request", "1.0.0");
-    expect(definition).not.toBeNull();
-
-    const result = validateNodeConfig(definition!, {
-      method: "POST",
-      url: "https://api.resend.com/contacts",
-      maxRetries: -1,
-    });
-
-    expect(result.isValid).toBe(false);
-    expect(result.errors.some((error) => error.fieldKey === "maxRetries")).toBe(true);
-  });
-
-  it("rejects invalid HTTP body mode values", () => {
-    const registry = registryWithBuiltIns();
-    const definition = registry.get("studio.http_request", "1.0.0");
-    expect(definition).not.toBeNull();
-
-    const result = validateNodeConfig(definition!, {
-      method: "POST",
-      url: "https://api.resend.com/contacts",
-      bodyMode: "xml",
-      maxRetries: 0,
-    });
-
-    expect(result.isValid).toBe(false);
-    expect(result.errors.some((error) => error.fieldKey === "bodyMode")).toBe(true);
-  });
 });

@@ -1,0 +1,251 @@
+/* ------------------------------------------------------------------ *
+ * Image generation — the prompt IS the card's content; the remaining
+ * settings sit under it in the same always-visible config grid.
+ * ------------------------------------------------------------------ */
+.ss-studio-node-card[data-node-kind="studio.image_generation"]
+  .ss-studio-node-inline-config-field--prompt
+  .ss-studio-node-inline-config-textarea {
+  min-height: 108px;
+}
+
+/* ------------------------------------------------------------------ *
+ * Media layout (data-chrome-layout="media") — media nodes whose card
+ * IS the media. The card carries nothing but the image/video:
+ *   - one flat pill of icon actions floating inside the media's edge
+ *     (bottom for images; top for videos so the native playback
+ *     controls stay free), always visible — no hover reveal anywhere
+ *   - port pins centered on the side edges
+ *   - status badge inside the top-left corner, only while active/failed
+ *
+ * Gesture ownership lives in StudioMediaNodeActionBar.ts.
+ * ------------------------------------------------------------------ */
+.ss-studio-node-card[data-chrome-layout="media"] {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  border-left-width: 1px;
+  /* No `paint` containment: the edge port pins straddle the card box. */
+  contain: layout style;
+}
+
+.ss-studio-node-card[data-chrome-layout="media"] .ss-studio-node-media-preview {
+  border-radius: calc(var(--ss-radius-lg) - 1px);
+}
+
+.ss-studio-media-action-bar {
+  position: absolute;
+  left: 50%;
+  bottom: var(--ss-space-2);
+  transform: translateX(-50%);
+  z-index: 7;
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-0);
+  padding: var(--ss-space-1);
+  background-color: var(--ss-media-scrim);
+  border-radius: var(--ss-radius-full);
+  box-shadow: var(--ss-elevation-2);
+  /* Control surface, not a drag surface — never show the grab hand. */
+  cursor: default;
+}
+
+.ss-studio-media-action-bar.is-top {
+  top: var(--ss-space-2);
+  bottom: auto;
+}
+
+.ss-studio-media-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--ss-radius-full);
+  color: var(--ss-ink-on-media-muted);
+  cursor: pointer;
+  transition: var(--ss-transition-colors);
+  --icon-size: 16px;
+}
+
+.ss-studio-media-action svg {
+  width: 16px;
+  height: 16px;
+}
+
+.ss-studio-media-action:hover {
+  background-color: var(--ss-media-state-hover);
+  color: var(--ss-ink-on-media);
+}
+
+.ss-studio-media-action.is-danger:hover {
+  color: var(--ss-danger);
+}
+
+.ss-studio-media-action-bar.is-locked .ss-studio-media-action {
+  color: var(--ss-line-on-media);
+  cursor: default;
+}
+
+.ss-studio-media-action-bar.is-locked .ss-studio-media-action:hover {
+  background-color: transparent;
+}
+
+/* Ports: pins float centered on the side edges; labels stay in tooltips. */
+.ss-studio-node-card[data-chrome-layout="media"] .ss-studio-node-ports {
+  position: absolute;
+  inset: 0;
+  display: block;
+  padding: 0;
+  pointer-events: none;
+}
+
+.ss-studio-node-card[data-chrome-layout="media"] .ss-studio-node-ports-col {
+  position: absolute;
+  top: 50%;
+  left: -5px;
+  transform: translateY(-50%);
+  gap: var(--ss-space-2);
+}
+
+.ss-studio-node-card[data-chrome-layout="media"]
+  .ss-studio-node-ports-col:has(.ss-studio-port-row.is-output) {
+  left: auto;
+  right: -5px;
+}
+
+.ss-studio-node-card[data-chrome-layout="media"] .ss-studio-port-label {
+  display: none;
+}
+
+.ss-studio-node-card[data-chrome-layout="media"] .ss-studio-port-pin {
+  pointer-events: auto;
+  width: 10px;
+  height: 10px;
+  box-shadow: var(--ss-elevation-1);
+}
+
+/* Status: quiet badge inside the top-left corner; only states that need
+ * attention surface at all. Failure detail rides the pill's tooltip. */
+.ss-studio-node-card[data-chrome-layout="media"] .ss-studio-node-run-status-row {
+  position: absolute;
+  top: var(--ss-space-2);
+  left: var(--ss-space-2);
+  z-index: 5;
+  padding: 0;
+  pointer-events: none;
+}
+
+.ss-studio-node-card[data-chrome-layout="media"] .ss-studio-node-run-status {
+  background-color: color-mix(in srgb, var(--ss-surface-0) 88%, transparent);
+}
+
+.ss-studio-node-card[data-chrome-layout="media"] .ss-studio-node-run-status.is-idle,
+.ss-studio-node-card[data-chrome-layout="media"] .ss-studio-node-run-status.is-succeeded,
+.ss-studio-node-card[data-chrome-layout="media"] .ss-studio-node-run-status.is-cached,
+.ss-studio-node-card[data-chrome-layout="media"] .ss-studio-node-run-message {
+  display: none;
+}
+
+/* Resize frame: four edge strips + four corner zones (tldraw-style).
+ * Hit-zone geometry (sizes, carving around corners) is declared as data in
+ * StudioGraphNodeResizeFrame.ts and applied inline; this block owns cursors,
+ * stacking, and the corner affordance visuals. Zones sit BELOW ports and the
+ * text toolbar (z-index 3 vs 4) so port pins keep winning connection drags
+ * where the strips graze their hit areas. */
+.ss-studio-node-resize-zone {
+  position: absolute;
+  z-index: 3;
+}
+
+.ss-studio-node-resize-zone.is-disabled {
+  display: none;
+}
+
+.ss-studio-node-resize-zone.is-zone-e,
+.ss-studio-node-resize-zone.is-zone-w,
+.ss-studio-selection-resize-zone.is-zone-e,
+.ss-studio-selection-resize-zone.is-zone-w {
+  cursor: ew-resize;
+}
+
+.ss-studio-node-resize-zone.is-zone-n,
+.ss-studio-node-resize-zone.is-zone-s,
+.ss-studio-selection-resize-zone.is-zone-n,
+.ss-studio-selection-resize-zone.is-zone-s {
+  cursor: ns-resize;
+}
+
+.ss-studio-node-resize-zone.is-zone-nw,
+.ss-studio-node-resize-zone.is-zone-se,
+.ss-studio-selection-resize-zone.is-zone-nw,
+.ss-studio-selection-resize-zone.is-zone-se {
+  cursor: nwse-resize;
+}
+
+.ss-studio-node-resize-zone.is-zone-ne,
+.ss-studio-node-resize-zone.is-zone-sw,
+.ss-studio-selection-resize-zone.is-zone-ne,
+.ss-studio-selection-resize-zone.is-zone-sw {
+  cursor: nesw-resize;
+}
+
+/* Corner affordance: a small square reveals on hover/selection while edge
+ * strips remain invisible hit areas. */
+.ss-studio-node-resize-zone.is-corner::after,
+.ss-studio-selection-resize-zone.is-corner::after {
+  content: "";
+  position: absolute;
+  inset: 2px;
+  border: 1px solid var(--ss-line-strong);
+  border-radius: var(--ss-radius-xs);
+  background-color: var(--ss-surface-0);
+  opacity: 0;
+  transition: opacity var(--ss-dur-fast) var(--ss-ease);
+}
+
+.ss-studio-node-card:hover .ss-studio-node-resize-zone.is-corner::after,
+.ss-studio-node-card.is-selected .ss-studio-node-resize-zone.is-corner::after,
+.ss-studio-node-resize-zone.is-active::after {
+  opacity: 1;
+}
+
+/* Multi-select resize frame: ONE bounds box around a 2+ selection with the
+ * same 8-zone affordances; dragging scales the whole selection as a group
+ * (tldraw parity). Lives inside the zoomed canvas, so it is positioned in
+ * canvas-space coordinates by StudioGraphSelectionResizeController. */
+.ss-studio-selection-resize-frame {
+  position: absolute;
+  z-index: 4;
+  display: none;
+  border: 1px solid var(--ss-accent);
+  border-radius: var(--ss-radius-xs);
+  pointer-events: none;
+}
+
+.ss-studio-selection-resize-frame.is-visible {
+  display: block;
+}
+
+.ss-studio-selection-resize-zone {
+  position: absolute;
+  pointer-events: auto;
+}
+
+/* The group frame owns the resize affordance while it is up: per-node
+ * zones hide so the two frames can never fight over the same drag. */
+.ss-studio-graph-canvas.is-multi-select-active .ss-studio-node-resize-zone {
+  display: none;
+}
+
+/* Selection-frame corners are always visible while the frame is shown —
+ * the frame itself only exists for an active multi-selection. */
+.ss-studio-selection-resize-frame.is-visible .ss-studio-selection-resize-zone.is-corner::after {
+  opacity: 1;
+}
+
+/* Node-kind sizing */
+.ss-studio-node-card[data-node-kind="studio.terminal"] {
+  min-height: 320px;
+  display: flex;
+  flex-direction: column;
+}

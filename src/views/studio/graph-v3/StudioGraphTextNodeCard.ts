@@ -4,6 +4,7 @@ import type {
   StudioGraphNodeMutationOptions,
   StudioGraphNodeResizePatch,
 } from "./StudioGraphNodeCardTypes";
+import { getStudioOwnerWindow, requestStudioAnimationFrame } from "../StudioDomContext";
 import {
   resolveStudioTextNodeFontSize,
   resolveStudioTextNodeHeight,
@@ -142,7 +143,13 @@ function isRepeatTextNodeTap(
   return travel <= STUDIO_TEXT_NODE_DOUBLE_TAP_SLOP_PX;
 }
 
-function trackPotentialTextNodeTap(nodeId: string, event: PointerEvent, now: number): void {
+function trackPotentialTextNodeTap(
+  nodeId: string,
+  event: PointerEvent,
+  now: number,
+  host: Node
+): void {
+  const ownerWindow = getStudioOwnerWindow(host);
   lastTextNodeTapByNodeId.set(nodeId, {
     at: now,
     clientX: event.clientX,
@@ -170,14 +177,14 @@ function trackPotentialTextNodeTap(nodeId: string, event: PointerEvent, now: num
     if (finishEvent && finishEvent.pointerId !== pointerId) {
       return;
     }
-    window.removeEventListener("pointermove", clearIfDragged);
-    window.removeEventListener("pointerup", stopTracking);
-    window.removeEventListener("pointercancel", stopTracking);
+    ownerWindow.removeEventListener("pointermove", clearIfDragged);
+    ownerWindow.removeEventListener("pointerup", stopTracking);
+    ownerWindow.removeEventListener("pointercancel", stopTracking);
   };
 
-  window.addEventListener("pointermove", clearIfDragged);
-  window.addEventListener("pointerup", stopTracking);
-  window.addEventListener("pointercancel", stopTracking);
+  ownerWindow.addEventListener("pointermove", clearIfDragged);
+  ownerWindow.addEventListener("pointerup", stopTracking);
+  ownerWindow.addEventListener("pointercancel", stopTracking);
 }
 
 type MountLiveMarkdownEditorOptions = {
@@ -293,7 +300,7 @@ function mountLiveMarkdownEditor(options: MountLiveMarkdownEditorOptions): boole
   });
 
   if (shouldAutoFocus && !initialFocusPoint && !initialEditorSnapshot) {
-    window.requestAnimationFrame(() => {
+    requestStudioAnimationFrame(contentEl, () => {
       // A re-render can tear the editor down before this frame fires.
       if (editorDisposed) {
         return;
@@ -399,7 +406,7 @@ export function renderTextNodeCard(options: RenderTextNodeCardOptions): void {
     // content exactly like the display surface reflows: keep the textarea's
     // height synced to its scrollHeight while typing.
     const syncEditorHeight = (): void => {
-      textAreaEl.style.height = "auto";
+      textAreaEl.setCssStyles({ height: "auto" });
       const scrollHeight = textAreaEl.scrollHeight;
       if (scrollHeight > 0) {
         textAreaEl.style.height = `${scrollHeight}px`;
@@ -431,7 +438,7 @@ export function renderTextNodeCard(options: RenderTextNodeCardOptions): void {
       onStopTextNodeEdit(node.id);
     });
     if (shouldAutoFocus && !busy) {
-      window.requestAnimationFrame(() => {
+      requestStudioAnimationFrame(textAreaEl, () => {
         textAreaEl.focus();
         textAreaEl.select();
       });
@@ -459,8 +466,8 @@ export function renderTextNodeCard(options: RenderTextNodeCardOptions): void {
       // embeds); their pointer gestures belong to the control, not to card
       // dragging. The card-level pointer policy skips these targets too.
       if (
-        event.target instanceof Element &&
-        event.target.closest("a, input, button, audio, video") !== null
+        typeof (event.target as { closest?: unknown } | null)?.closest === "function" &&
+        (event.target as Element).closest("a, input, button, audio, video") !== null
       ) {
         return;
       }
@@ -481,7 +488,7 @@ export function renderTextNodeCard(options: RenderTextNodeCardOptions): void {
         });
         return;
       }
-      trackPotentialTextNodeTap(node.id, pointerEvent, now);
+      trackPotentialTextNodeTap(node.id, pointerEvent, now, displayEl);
       graphInteraction.startNodeDrag(node.id, pointerEvent, nodeEl);
     });
     displayEl.addEventListener("dblclick", (event) => {

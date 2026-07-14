@@ -10,9 +10,9 @@ jest.mock("obsidian", () => ({
   TFile: jest.fn(),
 }));
 
-// Mock showPopup
-jest.mock("../../core/ui", () => ({
-  showPopup: jest.fn().mockResolvedValue({ confirmed: true }),
+// Mock showPrompt
+jest.mock("../../core/ui/modals/PromptModal", () => ({
+  showPrompt: jest.fn().mockResolvedValue({ confirmed: true }),
 }));
 
 import {
@@ -21,7 +21,7 @@ import {
   validateBrowserFileSize,
   formatFileSize,
 } from "../FileValidator";
-import { showPopup } from "../../core/ui";
+import { showPrompt } from "../../core/ui/modals/PromptModal";
 
 describe("FileValidator", () => {
   let mockApp: App;
@@ -72,7 +72,7 @@ describe("FileValidator", () => {
       const result = await validateFileSize(mockFile, mockApp);
 
       expect(result).toBe(true);
-      expect(showPopup).not.toHaveBeenCalled();
+      expect(showPrompt).not.toHaveBeenCalled();
     });
 
     it("returns true for files at exactly max size", async () => {
@@ -95,7 +95,7 @@ describe("FileValidator", () => {
       const result = await validateFileSize(mockFile, mockApp);
 
       expect(result).toBe(false);
-      expect(showPopup).toHaveBeenCalledWith(
+      expect(showPrompt).toHaveBeenCalledWith(
         mockApp,
         expect.stringContaining("large.txt"),
         expect.objectContaining({
@@ -112,7 +112,7 @@ describe("FileValidator", () => {
 
       await validateFileSize(mockFile, mockApp);
 
-      expect(showPopup).toHaveBeenCalledWith(
+      expect(showPrompt).toHaveBeenCalledWith(
         mockApp,
         expect.stringContaining("600.0 MB"),
         expect.any(Object)
@@ -132,7 +132,7 @@ describe("FileValidator", () => {
         description: "Custom description",
       });
 
-      expect(showPopup).toHaveBeenCalledWith(
+      expect(showPrompt).toHaveBeenCalledWith(
         mockApp,
         expect.stringContaining("maximum allowed size is 1 KB"),
         expect.objectContaining({
@@ -153,7 +153,7 @@ describe("FileValidator", () => {
       const result = await validateBrowserFileSize(mockFile, mockApp);
 
       expect(result).toBe(true);
-      expect(showPopup).not.toHaveBeenCalled();
+      expect(showPrompt).not.toHaveBeenCalled();
     });
 
     it("returns false for files exceeding max size", async () => {
@@ -165,7 +165,7 @@ describe("FileValidator", () => {
       const result = await validateBrowserFileSize(mockFile, mockApp);
 
       expect(result).toBe(false);
-      expect(showPopup).toHaveBeenCalledWith(
+      expect(showPrompt).toHaveBeenCalledWith(
         mockApp,
         expect.stringContaining("large.txt"),
         expect.objectContaining({
@@ -193,7 +193,7 @@ describe("FileValidator", () => {
 
       await validateBrowserFileSize(mockFile, mockApp);
 
-      expect(showPopup).toHaveBeenCalledWith(
+      expect(showPrompt).toHaveBeenCalledWith(
         mockApp,
         expect.any(String),
         expect.objectContaining({
@@ -214,7 +214,7 @@ describe("FileValidator", () => {
         maxLabel: "1 KB",
       });
 
-      expect(showPopup).toHaveBeenCalledWith(
+      expect(showPrompt).toHaveBeenCalledWith(
         mockApp,
         expect.stringContaining("maximum allowed size is 1 KB"),
         expect.any(Object)

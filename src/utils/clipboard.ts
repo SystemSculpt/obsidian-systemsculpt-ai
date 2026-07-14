@@ -25,10 +25,16 @@ type ElectronLike = {
   };
 };
 
-function resolveElectron(): ElectronLike | null {
+function resolveClipboardWindow(host?: Node): Window | undefined {
+  return host?.ownerDocument?.defaultView
+    ?? (typeof window !== "undefined" ? window.activeDocument?.defaultView : undefined)
+    ?? (typeof window !== "undefined" ? window : undefined);
+}
+
+function resolveElectron(hostWindow?: Window): ElectronLike | null {
   const candidates = [
-    (globalThis as any)?.require,
-    (globalThis as any)?.window?.require,
+    (hostWindow as any)?.require,
+    (hostWindow as any)?.window?.require,
   ];
 
   for (const candidate of candidates) {
@@ -46,18 +52,11 @@ function resolveElectron(): ElectronLike | null {
   return null;
 }
 
-function toBase64(bytes: ArrayBuffer): string | null {
+function toBase64(bytes: ArrayBuffer, hostWindow?: Window): string | null {
   const uint8 = new Uint8Array(bytes);
-  const BufferCtor = (globalThis as any)?.Buffer;
-  if (BufferCtor && typeof BufferCtor.from === "function") {
-    try {
-      return BufferCtor.from(uint8).toString("base64");
-    } catch {
-      // continue with browser fallback
-    }
-  }
-
-  if (typeof btoa !== "function") {
+  const encodeBase64 = hostWindow?.btoa?.bind(hostWindow)
+    ?? (typeof btoa === "function" ? btoa : undefined);
+  if (!encodeBase64) {
     return null;
   }
 
@@ -68,37 +67,50 @@ function toBase64(bytes: ArrayBuffer): string | null {
     binary += String.fromCharCode(...chunk);
   }
   try {
-    return btoa(binary);
+    return encodeBase64(binary);
   } catch {
     return null;
   }
 }
 
-async function tryWebClipboardImageWrite(bytes: ArrayBuffer, mime: string): Promise<boolean> {
-  if (typeof navigator === "undefined" || !navigator.clipboard?.write) {
+async function tryWebClipboardImageWrite(
+  bytes: ArrayBuffer,
+  mime: string,
+  hostWindow?: Window,
+): Promise<boolean> {
+  const ownerNavigator = hostWindow?.navigator
+    ?? (typeof navigator !== "undefined" ? navigator : undefined);
+  if (!ownerNavigator?.clipboard?.write) {
     return false;
   }
-  if (typeof ClipboardItem === "undefined") {
+  const ClipboardItemCtor = (hostWindow as any)?.ClipboardItem
+    ?? (typeof ClipboardItem !== "undefined" ? ClipboardItem : undefined);
+  if (!ClipboardItemCtor) {
     return false;
   }
 
   try {
-    const blob = new Blob([bytes], { type: mime });
-    const item = new ClipboardItem({ [mime]: blob });
-    await navigator.clipboard.write([item]);
+    const BlobCtor = (hostWindow as any)?.Blob ?? Blob;
+    const blob = new BlobCtor([bytes], { type: mime });
+    const item = new ClipboardItemCtor({ [mime]: blob });
+    await ownerNavigator.clipboard.write([item]);
     return true;
   } catch {
     return false;
   }
 }
 
-function tryElectronClipboardImageWrite(bytes: ArrayBuffer, mime: string): boolean {
-  const electron = resolveElectron();
+function tryElectronClipboardImageWrite(
+  bytes: ArrayBuffer,
+  mime: string,
+  hostWindow?: Window,
+): boolean {
+  const electron = resolveElectron(hostWindow);
   if (!electron) {
     return false;
   }
 
-  const base64 = toBase64(bytes);
+  const base64 = toBase64(bytes, hostWindow);
   if (!base64) {
     return false;
   }
@@ -116,37 +128,46 @@ function tryElectronClipboardImageWrite(bytes: ArrayBuffer, mime: string): boole
   }
 }
 
-export async function tryCopyToClipboard(text: string): Promise<boolean> {
-  if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+export async function tryCopyToClipboard(text: string, host?: Node): Promise<boolean> {
+  const ownerDocument = host?.ownerDocument
+    ?? (typeof window !== "undefined" ? window.activeDocument : undefined)
+    ?? (typeof document !== "undefined" ? document : undefined);
+  const ownerNavigator = ownerDocument?.defaultView?.navigator
+    ?? (typeof navigator !== "undefined" ? navigator : undefined);
+
+  if (ownerNavigator?.clipboard?.writeText) {
     try {
-      await navigator.clipboard.writeText(text);
+      await ownerNavigator.clipboard.writeText(text);
       return true;
     } catch {
       // Fallback to DOM-based copy below
     }
   }
 
-  if (typeof document !== "undefined") {
-    const textarea = document.createElement("textarea");
+  if (ownerDocument?.body) {
+    const textarea = ownerDocument.body.createEl("textarea");
     textarea.value = text;
     textarea.setAttribute("readonly", "");
-    textarea.style.position = "fixed";
-    textarea.style.opacity = "0";
-    document.body.appendChild(textarea);
+    textarea.setCssStyles({ position: "fixed" });
+    textarea.setCssStyles({ opacity: "0" });
     textarea.select();
     try {
-      const result = document.execCommand("copy");
-      document.body.removeChild(textarea);
+      const result = ownerDocument.execCommand("copy");
+      textarea.remove();
       return result;
     } catch {
-      document.body.removeChild(textarea);
+      textarea.remove();
     }
   }
 
   return false;
 }
 
-export async function tryCopyImageFileToClipboard(app: App, file: TFile): Promise<boolean> {
+export async function tryCopyImageFileToClipboard(
+  app: App,
+  file: TFile,
+  host?: Node,
+): Promise<boolean> {
   const mime = imageMimeTypeFromExtension(file.extension);
   if (!mime) {
     return false;
@@ -154,10 +175,11 @@ export async function tryCopyImageFileToClipboard(app: App, file: TFile): Promis
 
   try {
     const bytes = await app.vault.readBinary(file);
-    if (await tryWebClipboardImageWrite(bytes, mime)) {
+    const hostWindow = resolveClipboardWindow(host);
+    if (await tryWebClipboardImageWrite(bytes, mime, hostWindow)) {
       return true;
     }
-    return tryElectronClipboardImageWrite(bytes, mime);
+    return tryElectronClipboardImageWrite(bytes, mime, hostWindow);
   } catch {
     return false;
   }

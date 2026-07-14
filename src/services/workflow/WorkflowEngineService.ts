@@ -4,13 +4,12 @@ import {
   WorkflowEngineSettings,
   WorkflowAutomationState,
   WorkflowSkipEntry,
+  WorkflowManagedTextOperation,
   createDefaultWorkflowEngineSettings,
-  ChatMessage,
 } from "../../types";
 import { TranscriptionService } from "../TranscriptionService";
 import { WORKFLOW_AUTOMATIONS, type WorkflowAutomationDefinition } from "../../constants/workflowAutomations";
-import { ensureCanonicalId } from "../../utils/modelUtils";
-import { SystemSculptError, ERROR_CODES } from "../../utils/errors";
+import { ManagedTextGenerationError } from "../managed/ManagedTextGenerationAdapter";
 import {
   BulkAutomationConfirmModal,
   BulkProgressWidget,
@@ -22,6 +21,12 @@ const DEBOUNCE_MS = 800;
 const BULK_THRESHOLD = 3;
 const BATCH_SIZE = 3;
 const INTER_BATCH_DELAY_MS = 1000;
+
+function createWorkflowOperationId(): string {
+  const random = window.crypto?.randomUUID?.().replace(/-/g, "")
+    ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`;
+  return `workflow:${random}`.slice(0, 128);
+}
 
 export interface AutomationBacklogEntry {
   automationId: string;
@@ -41,7 +46,7 @@ export class WorkflowEngineService {
   private readonly app: App;
   private disposed = false;
   private pendingFiles: PendingFileEvent[] = [];
-  private debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  private debounceTimer: number | null = null;
   private isProcessingBulk = false;
   private progressWidget: BulkProgressWidget | null = null;
   private abortController: AbortController | null = null;
@@ -86,7 +91,7 @@ export class WorkflowEngineService {
 
   private clearDebounceTimer(): void {
     if (this.debounceTimer !== null) {
-      clearTimeout(this.debounceTimer);
+      window.clearTimeout(this.debounceTimer);
       this.debounceTimer = null;
     }
   }
@@ -197,16 +202,15 @@ export class WorkflowEngineService {
   }
 
   private buildAutomationFailureNotice(error: unknown): string {
-    if (error instanceof SystemSculptError) {
-      if (error.code === ERROR_CODES.MODEL_UNAVAILABLE) {
-        return "Automation failed: the selected model is unavailable. Choose another model in settings.";
+    if (error instanceof ManagedTextGenerationError) {
+      if (error.ambiguous) return "Automation paused: the managed generation outcome needs reconciliation.";
+      if (error.code === "license_required" || error.code === "license_rejected") {
+        return "Automation queued: a valid SystemSculpt license is required.";
       }
-      if (error.code === ERROR_CODES.INVALID_LICENSE) {
-        return "Automation failed: invalid API key or authentication error.";
+      if (error.code === "rate_limited" || error.code === "temporarily_unavailable") {
+        return "Automation queued: managed text generation is temporarily unavailable.";
       }
-      if (error.code === ERROR_CODES.QUOTA_EXCEEDED) {
-        return "Automation failed: rate limit or quota exceeded. Try again later.";
-      }
+      return `Automation failed: ${error.message}`;
     }
 
     const message = error instanceof Error ? error.message : String(error ?? "");
@@ -225,44 +229,12 @@ export class WorkflowEngineService {
     const detailLines: string[] = [];
     let message = "Automation failed.";
 
-    if (error instanceof SystemSculptError) {
-      const upstreamMessage = typeof error.metadata?.upstreamMessage === "string"
-        ? error.metadata?.upstreamMessage
-        : "";
-      message = upstreamMessage || error.message || message;
-      const provider = error.metadata?.provider;
-      const model = error.metadata?.model;
-      const endpoint = error.metadata?.endpoint;
-      const statusCode = error.metadata?.statusCode;
-      const requestId = error.metadata?.requestId;
-
-      const identityParts = [provider, model].filter(Boolean);
-      if (identityParts.length > 0) {
-        detailLines.push(identityParts.join(" - "));
-      }
-      if (endpoint) {
-        detailLines.push(`Endpoint: ${endpoint}`);
-      }
-      const metaParts: string[] = [];
-      if (statusCode) metaParts.push(`HTTP ${statusCode}`);
-      if (requestId) metaParts.push(`Request ID: ${requestId}`);
-      if (metaParts.length > 0) {
-        detailLines.push(metaParts.join(" - "));
-      }
-
-      if (error.metadata?.invalidChatSettings) {
-        detailLines.push("Provider rejected the chat settings. Verify the model and request options.");
-      } else if (error.metadata?.shouldResubmitWithoutTools) {
-        detailLines.push("This model doesn't support tools. Disable tools or pick a tool-capable model.");
-      }
-
-      if (error.metadata?.shouldResubmitWithoutImages) {
-        detailLines.push("This model doesn't support images. Remove image attachments or pick a vision model.");
-      }
-
-      if (error.metadata?.statusCode === 400 && error.metadata?.provider) {
-        detailLines.push("Tip: Review your SystemSculpt license and credits in Settings → Overview & Setup.");
-      }
+    if (error instanceof ManagedTextGenerationError) {
+      message = error.message || message;
+      detailLines.push(`Operation: ${error.operationId}`);
+      detailLines.push(`Code: ${error.code}`);
+      if (error.requestId) detailLines.push(`Request ID: ${error.requestId}`);
+      if (error.ambiguous) detailLines.push("The request will not be replayed automatically.");
     } else if (error instanceof Error) {
       message = error.message || message;
     } else if (typeof error !== "undefined") {
@@ -282,12 +254,10 @@ export class WorkflowEngineService {
     if (primary) {
       copyLines.push(primary);
     }
-    if (error instanceof SystemSculptError) {
-      if (error.metadata?.provider) copyLines.push(`Provider: ${error.metadata.provider}`);
-      if (error.metadata?.model) copyLines.push(`Model: ${error.metadata.model}`);
-      if (error.metadata?.endpoint) copyLines.push(`Endpoint: ${error.metadata.endpoint}`);
-      if (error.metadata?.statusCode) copyLines.push(`Status: ${error.metadata.statusCode}`);
-      if (error.metadata?.requestId) copyLines.push(`Request ID: ${error.metadata.requestId}`);
+    if (error instanceof ManagedTextGenerationError) {
+      copyLines.push(`Operation: ${error.operationId}`);
+      copyLines.push(`Code: ${error.code}`);
+      if (error.requestId) copyLines.push(`Request ID: ${error.requestId}`);
     }
     if (skippedCount > 0) {
       copyLines.push(`Skipped: ${skippedCount}`);
@@ -336,7 +306,7 @@ export class WorkflowEngineService {
     this.pendingFiles.push(pending);
     this.clearDebounceTimer();
 
-    this.debounceTimer = setTimeout(() => {
+    this.debounceTimer = window.setTimeout(() => {
       void this.flushPendingFiles();
     }, DEBOUNCE_MS);
   }
@@ -577,7 +547,7 @@ export class WorkflowEngineService {
       throw new DOMException("Aborted", "AbortError");
     }
     if (pending.type === "transcription") {
-      await this.processTranscription(pending.file, settings, options?.signal, options?.showNotices);
+      await this.processTranscription(pending.file, options?.signal, options?.showNotices);
     } else if (pending.automationId) {
       const automation = settings.automations?.[pending.automationId];
       if (automation) {
@@ -591,7 +561,6 @@ export class WorkflowEngineService {
 
   private async processTranscription(
     file: TFile,
-    settings: WorkflowEngineSettings,
     signal?: AbortSignal,
     showNotices: boolean = true
   ): Promise<void> {
@@ -625,11 +594,77 @@ export class WorkflowEngineService {
   }
 
   private delay(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+    return new Promise((resolve) => window.setTimeout(resolve, ms));
   }
 
   private getWorkflowSettings(): WorkflowEngineSettings {
     return this.plugin.settings.workflowEngine ?? createDefaultWorkflowEngineSettings();
+  }
+
+  private managedTextOperationKey(filePath: string, automationId: string): string {
+    return `automation::${automationId}::${filePath}`;
+  }
+
+  private async persistManagedTextOperation(
+    key: string,
+    operation: WorkflowManagedTextOperation
+  ): Promise<WorkflowManagedTextOperation> {
+    const current = this.getWorkflowSettings();
+    const updatedEngine: WorkflowEngineSettings = {
+      ...current,
+      managedTextOperations: {
+        ...(current.managedTextOperations ?? {}),
+        [key]: operation,
+      },
+    };
+    this.plugin.settings.workflowEngine = updatedEngine;
+    const settingsManager = this.plugin.getSettingsManager?.();
+    if (settingsManager?.updateSettings) {
+      await settingsManager.updateSettings({ workflowEngine: updatedEngine });
+    } else {
+      await this.plugin.saveSettings();
+    }
+    return operation;
+  }
+
+  private async updateManagedTextOperation(
+    key: string,
+    operation: WorkflowManagedTextOperation,
+    patch: Partial<Pick<WorkflowManagedTextOperation,
+      "phase" | "admissionReason" | "errorCode" | "requestId" | "retryable"
+    >>
+  ): Promise<WorkflowManagedTextOperation> {
+    const updated: WorkflowManagedTextOperation = {
+      ...operation,
+      ...patch,
+      updatedAt: new Date().toISOString(),
+    };
+    return this.persistManagedTextOperation(key, updated);
+  }
+
+  private async getOrCreateManagedTextOperation(
+    file: TFile,
+    automation: WorkflowAutomationState,
+    destinationFolder: string
+  ): Promise<{ key: string; operation: WorkflowManagedTextOperation }> {
+    const key = this.managedTextOperationKey(file.path, automation.id);
+    const existing = this.getWorkflowSettings().managedTextOperations?.[key];
+    if (existing) return { key, operation: existing };
+    const timestamp = new Date().toISOString();
+    const operation: WorkflowManagedTextOperation = {
+      operationId: createWorkflowOperationId(),
+      automationId: automation.id,
+      sourcePath: file.path,
+      targetPath: await this.getUniqueRoutePath(file, destinationFolder),
+      phase: "queued",
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    return { key, operation: await this.persistManagedTextOperation(key, operation) };
+  }
+
+  private throwIfWorkflowAborted(signal?: AbortSignal): void {
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
   }
 
   private isEngineActive(settings: WorkflowEngineSettings): boolean {
@@ -736,46 +771,171 @@ export class WorkflowEngineService {
     }
 
     const normalizedDestination = normalizePath(destinationFolder);
-    await this.plugin.createDirectoryOnce(normalizedDestination);
     const originalPath = file.path;
-    const targetPath = await this.getUniqueRoutePath(file, normalizedDestination);
-
     const onStatus = options?.onStatus;
     const showNotices = options?.showNotices !== false;
 
     try {
-      onStatus?.(`Reading ${file.basename}…`, 15);
-      const sourceContent = await this.app.vault.read(file);
+      const tracked = await this.getOrCreateManagedTextOperation(file, automation, normalizedDestination);
+      let operation = tracked.operation;
+      const targetPath = operation.targetPath;
+      const existingOutput = this.app.vault.getAbstractFileByPath(targetPath);
 
-      onStatus?.("Generating automation output…", 40);
-      const generatedContent = await this.generateAutomationContent(
-        file,
-        automation,
-        sourceContent,
-        onStatus,
-        options?.signal
-      );
-
-      if (options?.signal?.aborted) {
-        throw new DOMException("Aborted", "AbortError");
-      }
-
-      onStatus?.("Saving generated note…", 85);
-      const finalContent = generatedContent.endsWith("\n") ? generatedContent : `${generatedContent}\n`;
-      const created = await this.app.vault.create(targetPath, finalContent);
-
-      if (created instanceof TFile) {
-        await this.applyProcessedMetadata(
-          created,
-          automation.id,
-          originalPath,
-          targetPath
-        );
+      if (existingOutput instanceof TFile && ["dispatching", "local_commit_pending", "completed"].includes(operation.phase)) {
+        this.throwIfWorkflowAborted(options?.signal);
+        await this.applyProcessedMetadata(existingOutput, automation.id, originalPath, targetPath);
+        this.throwIfWorkflowAborted(options?.signal);
         await this.upsertFrontmatter(file, {
           workflow_status: "processed",
           workflow_processed_note: this.createWikiLink(targetPath) ?? targetPath,
         });
+        this.throwIfWorkflowAborted(options?.signal);
+        if (operation.phase !== "completed") {
+          operation = await this.updateManagedTextOperation(tracked.key, operation, { phase: "completed" });
+        }
+        return existingOutput;
       }
+
+      if (operation.phase === "completed") {
+        throw new Error("Managed workflow output is recorded as complete but the output note is missing.");
+      }
+      if (operation.phase === "dispatching") {
+        operation = await this.updateManagedTextOperation(tracked.key, operation, {
+          phase: "ambiguous",
+          errorCode: "ambiguous_outcome",
+          retryable: false,
+        });
+      }
+      if (operation.phase === "ambiguous") {
+        throw new ManagedTextGenerationError({
+          code: "ambiguous_outcome",
+          message: "This workflow generation has an unknown server outcome and will not be replayed automatically.",
+          operationId: operation.operationId,
+          requestId: operation.requestId,
+          retryable: false,
+          ambiguous: true,
+        });
+      }
+      if (operation.phase === "failed") {
+        throw new Error("This workflow generation failed definitively. An explicit retry must create a new operation.");
+      }
+
+      onStatus?.("Generating automation output…", 40);
+      let result;
+      try {
+        result = await this.plugin.getManagedCapabilityClient().generateText({
+          operationId: operation.operationId,
+          purpose: "workflow_automation",
+          signal: options?.signal,
+          buildMessages: async () => {
+            this.throwIfWorkflowAborted(options?.signal);
+            onStatus?.(`Reading ${file.basename}…`, 55);
+            const sourceContent = await this.app.vault.read(file);
+            this.throwIfWorkflowAborted(options?.signal);
+            const automationPrompt = automation.systemPrompt?.trim()
+              || "You are a note-processing assistant. Given a source note, create a cleaned, well-structured Markdown note that captures the key ideas and action items.";
+            const systemPrompt = `${automationPrompt}
+
+You are operating inside an Obsidian vault. Output a single, self-contained Markdown note suitable for saving as the processed result of this workflow. Do not include YAML frontmatter; the plugin will attach metadata itself.`;
+            return [
+              { role: "system" as const, content: systemPrompt },
+              {
+                role: "user" as const,
+                content: `Workflow ID: ${automation.id}
+Source note path: ${file.path}
+
+--- SOURCE NOTE CONTENT ---
+${sourceContent}
+--- END SOURCE NOTE CONTENT ---`,
+              },
+            ];
+          },
+          onDispatch: async () => {
+            operation = await this.updateManagedTextOperation(tracked.key, operation, {
+              phase: "dispatching",
+              admissionReason: undefined,
+              errorCode: undefined,
+              retryable: undefined,
+            });
+            onStatus?.("Generating draft…", 70);
+          },
+        });
+      } catch (error) {
+        if (error instanceof ManagedTextGenerationError) {
+          if (error.ambiguous) {
+            operation = await this.updateManagedTextOperation(tracked.key, operation, {
+              phase: "ambiguous",
+              errorCode: error.code,
+              requestId: error.requestId ?? undefined,
+              retryable: false,
+            });
+          } else if (error.code === "local_aborted") {
+            operation = await this.updateManagedTextOperation(tracked.key, operation, { phase: "queued" });
+          } else if (["license_required", "license_rejected", "temporarily_unavailable", "rate_limited", "capability_unavailable"].includes(error.code)) {
+            operation = await this.updateManagedTextOperation(tracked.key, operation, {
+              phase: "queued",
+              admissionReason: error.code,
+              requestId: error.requestId ?? undefined,
+              retryable: error.retryable,
+            });
+          } else {
+            operation = await this.updateManagedTextOperation(tracked.key, operation, {
+              phase: "failed",
+              errorCode: error.code,
+              requestId: error.requestId ?? undefined,
+              retryable: error.retryable,
+            });
+          }
+        } else if (this.isAbortError(error)) {
+          operation = await this.updateManagedTextOperation(tracked.key, operation, { phase: "queued" });
+        } else {
+          operation = await this.updateManagedTextOperation(tracked.key, operation, {
+            phase: "failed",
+            errorCode: "local_failure",
+            retryable: false,
+          });
+        }
+        throw error;
+      }
+
+      this.throwIfWorkflowAborted(options?.signal);
+      const generatedContent = result.text.trim();
+      if (!generatedContent) {
+        operation = await this.updateManagedTextOperation(tracked.key, operation, {
+          phase: "failed",
+          errorCode: "invalid_response",
+          requestId: result.requestId,
+          retryable: false,
+        });
+        throw new ManagedTextGenerationError({
+          code: "invalid_response",
+          message: "Managed text generation returned empty workflow content.",
+          operationId: operation.operationId,
+          requestId: result.requestId,
+          retryable: false,
+        });
+      }
+
+      onStatus?.("Saving generated note…", 85);
+      await this.plugin.createDirectoryOnce(normalizedDestination);
+      this.throwIfWorkflowAborted(options?.signal);
+      const finalContent = generatedContent.endsWith("\n") ? generatedContent : `${generatedContent}\n`;
+      const created = await this.app.vault.create(targetPath, finalContent);
+      if (!(created instanceof TFile)) throw new Error("Managed workflow output was not created as a file.");
+      this.throwIfWorkflowAborted(options?.signal);
+      operation = await this.updateManagedTextOperation(tracked.key, operation, {
+        phase: "local_commit_pending",
+        requestId: result.requestId,
+      });
+      this.throwIfWorkflowAborted(options?.signal);
+      await this.applyProcessedMetadata(created, automation.id, originalPath, targetPath);
+      this.throwIfWorkflowAborted(options?.signal);
+      await this.upsertFrontmatter(file, {
+        workflow_status: "processed",
+        workflow_processed_note: this.createWikiLink(targetPath) ?? targetPath,
+      });
+      this.throwIfWorkflowAborted(options?.signal);
+      operation = await this.updateManagedTextOperation(tracked.key, operation, { phase: "completed" });
 
       onStatus?.("Automation complete", 100);
       this.plugin.getLogger().info("Workflow automation created note from source", {
@@ -790,7 +950,7 @@ export class WorkflowEngineService {
       if (showNotices) {
         new Notice(`Automation created note → ${normalizedDestination}`);
       }
-      return created instanceof TFile ? created : null;
+      return created;
     } catch (error) {
       if (this.isAbortError(error)) {
         onStatus?.("Automation stopped", 100);
@@ -819,89 +979,6 @@ export class WorkflowEngineService {
       }
       throw error;
     }
-  }
-
-  private async generateAutomationContent(
-    file: TFile,
-    automation: WorkflowAutomationState,
-    sourceContent: string,
-    onStatus?: (status: string, progress?: number) => void,
-    signal?: AbortSignal
-  ): Promise<string> {
-    const logger = this.plugin.getLogger();
-    const automationPrompt =
-      automation.systemPrompt?.trim() ||
-      "You are a note-processing assistant. Given a source note, create a cleaned, well-structured Markdown note that captures the key ideas and action items.";
-
-    const selectedModelId = this.plugin.settings.selectedModelId;
-    const modelId = ensureCanonicalId(selectedModelId);
-    if (!modelId) {
-      throw new Error("No default model is configured for automations. Choose a model in SystemSculpt settings.");
-    }
-
-    const systemPrompt = `${automationPrompt}
-
-You are operating inside an Obsidian vault. Output a single, self-contained Markdown note suitable for saving as the processed result of this workflow. Do not include YAML frontmatter; the plugin will attach metadata itself.`;
-
-    const userMessage: ChatMessage = {
-      role: "user",
-      content: `Workflow ID: ${automation.id}
-Source note path: ${file.path}
-
---- SOURCE NOTE CONTENT ---
-${sourceContent}
---- END SOURCE NOTE CONTENT ---`,
-      message_id: crypto.randomUUID(),
-    };
-
-    let generated = "";
-
-    try {
-      if (signal?.aborted) {
-        throw new DOMException("Aborted", "AbortError");
-      }
-      onStatus?.("Contacting AI model…", 55);
-      const stream = this.plugin.aiService.streamMessage({
-        messages: [userMessage],
-        model: modelId,
-        systemPromptOverride: systemPrompt,
-        signal,
-      });
-
-      onStatus?.("Generating draft…", 70);
-      for await (const event of stream) {
-        if (signal?.aborted) {
-          throw new DOMException("Aborted", "AbortError");
-        }
-        if (event.type === "content") {
-          generated += event.text;
-        }
-      }
-    } catch (error) {
-      logger.error("Workflow automation generation failed", error, {
-        source: "WorkflowEngineService",
-        metadata: {
-          workflow: automation.id,
-          file: file.path,
-          model: modelId,
-        },
-      });
-      if (error instanceof DOMException && error.name === "AbortError") {
-        throw error;
-      }
-      throw error instanceof Error ? error : new Error(String(error));
-    }
-
-    if (signal?.aborted) {
-      throw new DOMException("Aborted", "AbortError");
-    }
-
-    const final = generated.trim();
-    if (!final) {
-      throw new Error("The automation model returned empty content for this note.");
-    }
-
-    return final;
   }
 
   private async persistTranscription(
@@ -985,7 +1062,13 @@ ${sourceContent}
   }
 
   private async upsertFrontmatter(file: TFile, entries: Record<string, string>): Promise<void> {
-    const fileManager: any = this.app.fileManager as any;
+    type FrontmatterFileManager = {
+      processFrontMatter?: (
+        target: TFile,
+        update: (frontmatter: Record<string, unknown>) => void
+      ) => Promise<void>;
+    };
+    const fileManager = this.app.fileManager as unknown as FrontmatterFileManager;
     const processFrontMatter = fileManager?.processFrontMatter?.bind(fileManager);
 
     if (processFrontMatter) {
@@ -1005,19 +1088,24 @@ ${sourceContent}
   }
 
   private mergeFrontmatter(content: string, entries: Record<string, string>): string {
-    const fmLines = Object.entries(entries)
-      .filter(([, value]) => value)
-      .map(([key, value]) => `${key}: ${value}`)
-      .join("\n");
+    const values = Object.entries(entries).filter(([, value]) => value);
+    const fmLines = values.map(([key, value]) => `${key}: ${value}`).join("\n");
 
     if (content.startsWith("---\n")) {
       const endIndex = content.indexOf("\n---", 4);
       if (endIndex !== -1) {
-        const fmBody = content.slice(4, endIndex);
+        const lines = content.slice(4, endIndex).split("\n");
+        for (const [key, value] of values) {
+          const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+          const index = lines.findIndex((line) => new RegExp(`^${escaped}\\s*:`).test(line));
+          const next = `${key}: ${value}`;
+          if (index >= 0) lines[index] = next;
+          else lines.push(next);
+        }
+        const fmBody = lines.join("\n");
         const body = content.slice(endIndex + 4);
-        const merged = [fmBody.trimEnd(), fmLines].filter((block) => block.length > 0).join("\n");
         const separator = body.startsWith("\n") ? "" : "\n";
-        return `---\n${merged}\n---${separator}${body}`;
+        return `---\n${fmBody.trimEnd()}\n---${separator}${body}`;
       }
     }
 

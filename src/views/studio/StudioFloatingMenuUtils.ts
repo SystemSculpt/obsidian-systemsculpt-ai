@@ -3,8 +3,8 @@ import {
   STUDIO_GRAPH_MIN_ZOOM,
 } from "./StudioGraphInteractionTypes";
 
-export const STUDIO_MENU_EDGE_PADDING_PX = 8;
-export const STUDIO_MENU_ANCHOR_OFFSET_PX = 8;
+const STUDIO_MENU_EDGE_PADDING_PX = 8;
+const STUDIO_MENU_ANCHOR_OFFSET_PX = 8;
 
 type StudioMenuViewportMetrics = Pick<
   HTMLElement,

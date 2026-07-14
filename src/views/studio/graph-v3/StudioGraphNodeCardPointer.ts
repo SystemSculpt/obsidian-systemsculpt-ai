@@ -36,8 +36,8 @@ export function markStudioNodeCardInteractive(el: HTMLElement): void {
 
 export function isStudioNodeCardInteractiveTarget(target: EventTarget | null): boolean {
   return (
-    target instanceof Element &&
-    target.closest(STUDIO_NODE_CARD_INTERACTIVE_SELECTOR) !== null
+    typeof (target as { closest?: unknown } | null)?.closest === "function" &&
+    (target as Element).closest(STUDIO_NODE_CARD_INTERACTIVE_SELECTOR) !== null
   );
 }
 

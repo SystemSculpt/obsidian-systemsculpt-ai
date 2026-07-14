@@ -1,0 +1,53 @@
+/**
+ * Studio node configuration preview and collapsed-card visibility.
+ * TS: src/views/studio/graph-v3/StudioGraphNodeCardSections.ts.
+ */
+
+/* ------------------------------------------------------------------ *
+ * Config preview + collapsed visibility
+ * ------------------------------------------------------------------ */
+.ss-studio-node-config-preview {
+  padding: var(--ss-space-2);
+  margin: 0 var(--ss-space-2) var(--ss-space-2);
+  background-color: var(--ss-surface-1);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-sm);
+  font-size: var(--ss-text-xs);
+  color: var(--ss-ink-muted);
+  overflow: hidden;
+}
+
+.ss-studio-node-collapsed-visibility {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ss-space-2);
+  padding: var(--ss-space-1) var(--ss-space-2);
+}
+
+.ss-studio-node-collapsed-visibility-title {
+  font-size: var(--ss-text-xs);
+  color: var(--ss-ink-muted);
+}
+
+.ss-studio-node-collapsed-visibility-buttons {
+  display: inline-flex;
+  gap: var(--ss-space-0);
+}
+
+.ss-studio-node-collapsed-visibility-button {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--ss-space-0) var(--ss-space-1);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-xs);
+  color: var(--ss-ink-faint);
+  font-size: var(--ss-text-xs);
+  cursor: pointer;
+  transition: var(--ss-transition-colors);
+}
+
+.ss-studio-node-collapsed-visibility-button.is-selected {
+  border-color: var(--ss-line-accent);
+  color: var(--ss-ink-accent);
+}

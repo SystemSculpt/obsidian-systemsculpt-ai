@@ -129,8 +129,8 @@ export class InitializationPhaseHandle {
   private readonly options: InternalPhaseOptions;
   private readonly cleanup: (id: number) => void;
   private readonly startedAt = performance.now();
-  private readonly slowTimer?: ReturnType<typeof setTimeout>;
-  private readonly timeoutTimer?: ReturnType<typeof setTimeout>;
+  private readonly slowTimer?: number;
+  private readonly timeoutTimer?: number;
   private hasCompleted = false;
 
   private timedOut = false;
@@ -151,7 +151,7 @@ export class InitializationPhaseHandle {
     this.logStart();
 
     if (this.options.slowThresholdMs > 0) {
-      this.slowTimer = setTimeout(() => {
+      this.slowTimer = window.setTimeout(() => {
         if (!this.hasCompleted) {
           this.emit("debug", "init:slow", {
             elapsedMs: this.getElapsedMs(),
@@ -162,7 +162,7 @@ export class InitializationPhaseHandle {
     }
 
     if (this.options.timeoutMs > 0) {
-      this.timeoutTimer = setTimeout(() => {
+      this.timeoutTimer = window.setTimeout(() => {
         if (!this.hasCompleted) {
           this.timedOut = true;
           this.emit("error", "init:timeout", {
@@ -241,10 +241,10 @@ export class InitializationPhaseHandle {
 
   private clearTimers(): void {
     if (this.slowTimer) {
-      clearTimeout(this.slowTimer);
+      window.clearTimeout(this.slowTimer);
     }
     if (this.timeoutTimer) {
-      clearTimeout(this.timeoutTimer);
+      window.clearTimeout(this.timeoutTimer);
     }
   }
 

@@ -1,0 +1,18 @@
+[
+  { "id": "success", "operation": "chat_turn", "evidence": { "server": "allowed", "capability": "available" }, "expected": "allowed" },
+  { "id": "authoritative_rejection", "operation": "chat_turn", "evidence": { "server": "license_rejected" }, "expected": "license_rejected" },
+  { "id": "transient_auth_unavailable", "operation": "embeddings", "evidence": { "server": "temporarily_unavailable" }, "expected": "temporarily_unavailable" },
+  { "id": "rate_limited", "operation": "text_generation", "evidence": { "server": "rate_limited", "retryAfterSeconds": 5 }, "expected": "rate_limited" },
+  { "id": "credits_exhausted", "operation": "text_generation", "evidence": { "server": "allowed", "credits": "exhausted" }, "expected": "credits_exhausted" },
+  { "id": "capability_unavailable", "operation": "systemsculpt/images", "evidence": { "server": "allowed", "capability": "unavailable" }, "expected": "capability_unavailable" },
+  { "id": "malformed_contract", "operation": "capability_negotiation", "evidence": { "descriptor": "malformed" }, "expected": "malformed_contract" },
+  { "id": "stream_cancellation", "operation": "chat_turn", "evidence": { "mode": "stream", "cancel": true, "behavior": "client_abort_stops_waiting_server_work_may_continue" }, "expected": "cancelled" },
+  { "id": "malformed_stream_frame", "operation": "chat_turn", "evidence": { "mode": "stream", "frame": "malformed" }, "expected": "malformed_frame", "retrySameIdempotencyKey": false },
+  { "id": "missing_stream_terminal_marker", "operation": "chat_turn", "evidence": { "mode": "stream", "terminalMarkerCount": 0 }, "expected": "missing_terminal_marker", "retrySameIdempotencyKey": false },
+  { "id": "empty_successful_stream", "operation": "chat_turn", "evidence": { "mode": "stream", "deltaFrameCount": 0, "terminalMarkerCount": 1 }, "expected": "empty_successful_stream", "retrySameIdempotencyKey": false },
+  { "id": "in_stream_error", "operation": "chat_turn", "evidence": { "mode": "stream", "frame": "managed_chat_error_v1" }, "expected": "in_stream_error", "retrySameIdempotencyKey": false },
+  { "id": "job_cancellation", "operation": "systemsculpt/transcription", "evidence": { "mode": "job", "cancel": true }, "expected": "cancelled" },
+  { "id": "job_resume", "operation": "systemsculpt/documents", "evidence": { "mode": "job", "resumeToken": "job-sentinel" }, "expected": "resumed" },
+  { "id": "platform_unsupported", "operation": "systemsculpt/images", "evidence": { "platform": "unsupported" }, "expected": "platform_unsupported" },
+  { "id": "contract_version_mismatch", "operation": "capability_negotiation", "evidence": { "received": "managed-capabilities-v1", "required": "managed-capabilities-v2" }, "expected": "contract_version_mismatch" }
+]

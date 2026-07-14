@@ -15,8 +15,6 @@ import { randomId } from "../../studio/utils";
 import type {
   StudioAssetRef,
   StudioJsonValue,
-  StudioNodeConfigDynamicOptionsSource,
-  StudioNodeConfigSelectOption,
   StudioNodeDefinition,
   StudioNodeInstance,
   StudioNodeOutputMap,
@@ -28,11 +26,16 @@ import { scopeProjectForRun } from "../../studio/StudioRunScope";
 import { validateNodeConfig } from "../../studio/StudioNodeConfigValidation";
 import { resolveNodeDefinitionPorts } from "../../studio/StudioNodePortResolution";
 import {
-  StudioProjectSession,
-  type StudioProjectSessionAutosaveMode,
-  type StudioProjectSessionMutationReason,
+  collectStudioHostUnavailableNodes,
+  formatStudioHostUnavailableNodesNotice,
+  resolveStudioNodeHostAvailability,
+} from "../../studio/StudioHostCapabilities";
+import type {
+  StudioProjectSessionAutosaveMode,
+  StudioProjectSessionMutationReason,
 } from "../../studio/StudioProjectSession";
 import { renderStudioGraphWorkspace } from "./graph-v3/StudioGraphWorkspaceRenderer";
+import type { StudioNodeConfigPathBrowseOptions } from "./StudioPathFieldPicker";
 import { createEmbeddableMarkdownEditor } from "../../editor/embeddable-markdown-editor";
 import type {
   StudioTextNodeMarkdownEditorFactory,
@@ -56,23 +59,11 @@ import {
   writeStudioCaptionBoardState,
 } from "../../studio/StudioCaptionBoardState";
 import {
-  getSavedGraphViewState,
-  getSavedNodeDetailMode,
   normalizeGraphCoordinate,
   normalizeGraphZoom,
-  parseNodeDetailModeByProject,
-  parseGraphViewStateByProject,
-  serializeNodeDetailModeByProject,
-  serializeGraphViewStateByProject,
-  type StudioGraphViewState,
-  type StudioGraphViewStateByProject,
-  type StudioNodeDetailModeByProject,
-  type StudioGraphViewportState,
-  upsertGraphViewStateForProject,
 } from "./graph-v3/StudioGraphViewStateStore";
 import {
   STUDIO_NODE_COLLAPSED_VISIBILITY_CONFIG_KEY,
-  STUDIO_NODE_DETAIL_DEFAULT_MODE,
   type StudioNodeDetailMode,
 } from "./graph-v3/StudioGraphNodeDetailMode";
 import type { StudioGraphNodeResizePatch } from "./graph-v3/StudioGraphNodeCardTypes";
@@ -94,17 +85,9 @@ import {
   type StudioGraphZoomChangeContext,
   type StudioGraphZoomMode,
 } from "./StudioGraphInteractionTypes";
-import {
-  type StudioNodeInspectorRuntimeDetails,
-  StudioNodeInspectorLayout,
-  StudioNodeInspectorOverlay,
-} from "./StudioNodeInspectorOverlay";
 import { StudioNodeContextMenuOverlay } from "./StudioNodeContextMenuOverlay";
 import { StudioSimpleContextMenuOverlay } from "./StudioSimpleContextMenuOverlay";
-import {
-  statusLabelForNode,
-  StudioRunPresentationState,
-} from "./StudioRunPresentationState";
+import { StudioRunPresentationState } from "./StudioRunPresentationState";
 import {
   buildNodeInsertMenuItems,
   cloneConfigDefaults,
@@ -114,6 +97,10 @@ import {
 } from "./StudioViewHelpers";
 import { removePendingManagedOutputNodes } from "../../studio/StudioManagedOutputNodes";
 import { isStudioGraphEditableTarget } from "./StudioGraphDomTargeting";
+import {
+  getStudioOwnerDocument,
+  getStudioOwnerWindow,
+} from "./StudioDomContext";
 import { tryCopyImageFileToClipboard, tryCopyToClipboard } from "../../utils/clipboard";
 import { isAbsoluteFilesystemPath, resolveAbsoluteVaultPath } from "../../utils/vaultPathUtils";
 import { resolveStudioViewTitle } from "./studio-view-title";
@@ -128,13 +115,9 @@ import {
   type StudioNoteConfigItem,
 } from "../../studio/StudioNoteConfig";
 import {
-  buildGraphClipboardPayload,
   cloneProjectSnapshot,
   normalizeNodeIdList,
-  parseGraphClipboardPayload,
   serializeProjectSnapshot,
-  STUDIO_GRAPH_CLIPBOARD_SCHEMA,
-  type StudioGraphClipboardPayload,
   type StudioGraphHistorySnapshot,
 } from "./systemsculpt-studio-view/StudioGraphClipboardModel";
 import {
@@ -145,27 +128,16 @@ import {
   setStudioGraphHistoryCurrentSnapshot,
   captureStudioGraphHistoryCheckpoint,
 } from "./systemsculpt-studio-view/StudioGraphHistoryState";
-import { materializeGraphClipboardPaste } from "./systemsculpt-studio-view/StudioGraphClipboardPasteMaterializer";
 import {
-  extractClipboardMediaFiles,
-  extractClipboardText,
-  isMediaIngestableExtension,
-  isMediaMimeType,
-  normalizePastedMediaMimeType,
-} from "./systemsculpt-studio-view/StudioClipboardData";
-import {
-  buildMediaIngestNode,
-  buildPastedTextNode,
-  materializePastedMediaNodes,
-} from "./systemsculpt-studio-view/StudioClipboardPasteNodes";
+  StudioClipboardAndDropController,
+  type StudioCreatedNodesFinalization,
+} from "./systemsculpt-studio-view/StudioClipboardAndDropController";
 import {
   inferAiImageEditAspectRatio,
   insertAiImageEditNode,
 } from "./systemsculpt-studio-view/StudioAiImageEditFlow";
 import {
-  coerceNotePreviewText,
   isTextGenerationOutputLocked,
-  readFirstTextValue,
   resolveTextGenerationOutputSnapshot,
 } from "./systemsculpt-studio-view/StudioPromptBundleUtils";
 import {
@@ -180,69 +152,39 @@ import {
   syncInlineTextOutputToProjectNodeConfig,
 } from "../../studio/StudioRunOutputProjectors";
 import {
-  parsePathReferencesFromText,
-  resolveVaultItemFromReference,
-} from "./systemsculpt-studio-view/StudioVaultReferenceResolver";
-import {
-  isStudioProjectPath,
-  remapPathScopedRecord,
-  resolveProjectPathAfterFolderRename,
-} from "./systemsculpt-studio-view/StudioProjectPathState";
-import { repairStudioProjectForLoad } from "../../studio/StudioProjectRepairs";
+  StudioProjectSessionController,
+  type StudioProjectScopedViewState,
+} from "./systemsculpt-studio-view/StudioProjectSessionController";
 import { SYSTEMSCULPT_STUDIO_VIEW_TYPE } from "../../core/plugin/viewTypes";
+import { applyPluginSurface } from "../../core/ui/surface";
 
-export { SYSTEMSCULPT_STUDIO_VIEW_TYPE };
-
-const DEFAULT_INSPECTOR_LAYOUT: StudioNodeInspectorLayout = {
-  x: 36,
-  y: 88,
-  width: 420,
-  height: 460,
-};
 const GROUP_DISCONNECT_OFFSET_X = 36;
 const STUDIO_GRAPH_HISTORY_MAX_SNAPSHOTS = 120;
 const STUDIO_GRAPH_SELECTION_FIT_PADDING_PX = 25;
 
-type SystemSculptStudioViewState = {
-  inspectorLayout?: unknown;
-  file?: unknown;
-  graphViewByProject?: unknown;
-  nodeDetailModeByProject?: unknown;
-};
+type SystemSculptStudioViewState = StudioProjectScopedViewState;
 
 type StudioRunGraphOptions = {
   fromNodeId?: string;
 };
 
 export class SystemSculptStudioView extends ItemView {
-  private currentProject: StudioProjectV1 | null = null;
-  private currentProjectPath: string | null = null;
-  private currentProjectSession: StudioProjectSession | null = null;
-  /**
-   * The normalized project path this view currently holds a session retain
-   * on. Exactly one retain per view per loaded project; released when the
-   * view loads another project or closes.
-   */
-  private retainedProjectPath: string | null = null;
   private busy = false;
   private lastError: string | null = null;
   private nodeDefinitions: StudioNodeDefinition[] = [];
   private nodeDefinitionsByKey = new Map<string, StudioNodeDefinition>();
   private layoutSaveTimer: number | null = null;
+  private layoutSaveTimerWindow: Window | null = null;
   private viewportScrollCaptureFrame: number | null = null;
+  private viewportScrollCaptureWindow: Window | null = null;
   private viewportScrollingClassTimer: number | null = null;
-  private projectLiveSyncWarning: string | null = null;
+  private viewportScrollingClassTimerWindow: Window | null = null;
+  private listenerWindow: Window | null = null;
+  private detachWindowMigration: (() => void) | null = null;
   private graphViewportEl: HTMLElement | null = null;
-  private graphViewportProjectPath: string | null = null;
-  private inspectorOverlay: StudioNodeInspectorOverlay | null = null;
   private nodeContextMenuOverlay: StudioNodeContextMenuOverlay | null = null;
   private nodeActionContextMenuOverlay: StudioSimpleContextMenuOverlay | null = null;
-  private inspectorLayout: StudioNodeInspectorLayout = { ...DEFAULT_INSPECTOR_LAYOUT };
   private nodeDragInProgress = false;
-  private transientFieldErrorsByNodeId = new Map<string, Map<string, string>>();
-  private graphViewStateByProjectPath: StudioGraphViewStateByProject = {};
-  private nodeDetailModeByProjectPath: StudioNodeDetailModeByProject = {};
-  private pendingViewportState: StudioGraphViewportState | null = null;
   private editingTextNodeIds = new Set<string>();
   /** Text changes stay continuous while typing, then become one undo step on edit end. */
   private dirtyTextNodeEditIds = new Set<string>();
@@ -264,19 +206,31 @@ export class SystemSculptStudioView extends ItemView {
   >();
   private readonly runPresentation = new StudioRunPresentationState();
   private readonly graphInteraction: StudioGraphInteractionEngine;
+  private readonly clipboardAndDropController: StudioClipboardAndDropController;
+  private readonly projectSessionController: StudioProjectSessionController;
   private graphZoomMode: StudioGraphZoomMode = "interactive";
   private graphZoomGestureInFlight = false;
-  private lastGraphPointerPosition: { x: number; y: number } | null = null;
   private vaultEventRefs: EventRef[] = [];
-  private graphClipboardPayload: StudioGraphClipboardPayload | null = null;
-  private graphClipboardPasteCount = 0;
   private readonly historyState = createStudioGraphHistoryState();
   private readonly onWindowKeyDown = (event: KeyboardEvent): void => {
     this.handleWindowKeyDown(event);
   };
-  private readonly onWindowPaste = (event: ClipboardEvent): void => {
-    void this.handleWindowPaste(event);
-  };
+
+  private get currentProject(): StudioProjectV1 | null {
+    return this.projectSessionController.getProject();
+  }
+
+  private get currentProjectPath(): string | null {
+    return this.projectSessionController.getProjectPath();
+  }
+
+  private get currentProjectSession() {
+    return this.projectSessionController.getProjectSession();
+  }
+
+  private get projectLiveSyncWarning(): string | null {
+    return this.projectSessionController.getProjectLiveSyncWarning();
+  }
 
   constructor(
     leaf: WorkspaceLeaf,
@@ -289,7 +243,7 @@ export class SystemSculptStudioView extends ItemView {
       setError: (error) => this.setError(error),
       recomputeEntryNodes: (project) => this.recomputeEntryNodes(project),
       commitProjectMutation: (reason, mutator, options) =>
-        this.commitCurrentProjectMutation(reason, mutator, options),
+        this.projectSessionController.commitMutation(reason, mutator, options),
       requestRender: () => this.render(),
       onNodeDragStateChange: (isDragging) => this.handleNodeDragStateChange(isDragging),
       onSelectionResize: (patches, options) => this.handleSelectionResize(patches, options),
@@ -299,8 +253,70 @@ export class SystemSculptStudioView extends ItemView {
       describeConnectionAutoCreate: (sourceType) => this.describeConnectionAutoCreate(sourceType),
       onConnectionAutoCreateRequested: (request) => this.handleConnectionAutoCreateRequested(request),
     });
-    this.graphInteraction.setSelectionChangeListener(() => {
-      this.syncInspectorSelection();
+    this.projectSessionController = new StudioProjectSessionController({
+      app: this.app,
+      plugin: this.plugin,
+      graphInteraction: this.graphInteraction,
+      getGraphZoomMode: () => this.graphZoomMode,
+      resetGraphZoomInteractionState: () => {
+        this.graphZoomMode = "interactive";
+        this.graphZoomGestureInFlight = false;
+      },
+      scheduleLayoutSave: () => this.scheduleLayoutSave(),
+      requestLayoutSave: () => this.app.workspace.requestSaveLayout(),
+      getGraphViewportElement: () => this.graphViewportEl,
+      captureProjectHistoryCheckpoint: () => this.captureProjectHistoryCheckpoint(),
+      resetProjectHistory: (project) => this.resetProjectHistory(project),
+      setHistoryCurrentSnapshot: (project, selectedNodeIds) =>
+        this.setHistoryCurrentSnapshot(project, selectedNodeIds),
+      clearProjectEditorState: () => this.clearProjectEditorState(),
+      clearRunPresentation: () => this.runPresentation.reset(),
+      disposeTextNodeEditors: () => this.disposeTextNodeEditors(),
+      hydrateProjectCache: async (projectPath, project) => {
+        const cacheSnapshot = await this.plugin.getStudioService().getProjectNodeCache(projectPath);
+        if (cacheSnapshot) {
+          this.runPresentation.hydrateFromCache(cacheSnapshot.entries, {
+            allowedNodeIds: project.graph.nodes.map((node) => node.id),
+          });
+        }
+        return cacheSnapshot;
+      },
+      materializeManagedOutputNodesFromCache: (entries) =>
+        this.materializeManagedOutputNodesFromCache(entries),
+      refreshNoteNodePreviewsFromVault: (project, options) =>
+        this.refreshNoteNodePreviewsFromVault(project, options),
+      setError: (error) => this.setError(error),
+      setLastError: (message) => {
+        this.lastError = message;
+      },
+      render: () => this.render(),
+      refreshLeafDisplay: () => this.refreshLeafDisplay(),
+      isMarkdownVaultFile: (file) => this.isMarkdownVaultFile(file || null),
+      isVaultFolder: (file) => this.isVaultFolder(file || null),
+      readAllNotePathsFromConfig: (node) => this.readAllNotePathsFromConfig(node),
+      normalizeNoteNodeConfig: (node) => this.normalizeNoteNodeConfig(node),
+    });
+    this.clipboardAndDropController = new StudioClipboardAndDropController(this.app, {
+      isActive: () => this.isActiveStudioView(),
+      isBusy: () => this.busy,
+      isEditableTarget: (target) => this.isEditableKeyboardTarget(target),
+      getCurrentProject: () => this.currentProject,
+      getProjectPath: () => this.currentProjectPath,
+      getNodeDefinitions: () => this.nodeDefinitions,
+      getSelectedNodeIds: () => this.graphInteraction.getSelectedNodeIds(),
+      getGraphZoom: () => this.graphInteraction.getGraphZoom(),
+      getDefaultNodePosition: (project) => this.computeDefaultNodePosition(project),
+      normalizeNodePosition: (position) => this.normalizeNodePosition(position),
+      commitNodeCreation: (mutator) =>
+        this.projectSessionController.commitMutation("graph.node.create", mutator),
+      finalizeCreatedNodes: (project, options) =>
+        this.finalizeClipboardCreatedNodes(project, options),
+      removeNodes: (nodeIds) => this.removeNodes(nodeIds),
+      insertVaultNoteNodes: (notePaths, anchor, source) =>
+        this.insertVaultNoteNodes(notePaths, anchor, { source }),
+      storeAsset: (projectPath, bytes, mimeType) =>
+        this.plugin.getStudioService().storeAsset(projectPath, bytes, mimeType),
+      setError: (error) => this.setError(error),
     });
   }
 
@@ -317,92 +333,64 @@ export class SystemSculptStudioView extends ItemView {
   }
 
   getState(): Record<string, unknown> {
-    this.captureGraphViewportState();
-    const state: Record<string, unknown> = {
-      inspectorLayout: { ...this.inspectorLayout },
-    };
-    const graphViewByProject = serializeGraphViewStateByProject(this.graphViewStateByProjectPath);
-    if (Object.keys(graphViewByProject).length > 0) {
-      state.graphViewByProject = graphViewByProject;
-    }
-    const nodeDetailModeByProject = serializeNodeDetailModeByProject(this.nodeDetailModeByProjectPath);
-    if (Object.keys(nodeDetailModeByProject).length > 0) {
-      state.nodeDetailModeByProject = nodeDetailModeByProject;
-    }
-    if (this.currentProjectPath) {
-      state.file = this.currentProjectPath;
-    }
-    return state;
+    this.projectSessionController.captureGraphViewportState();
+    return this.projectSessionController.serializePersistentState();
   }
 
   async setState(state: unknown, result: any): Promise<void> {
     await super.setState(state, result);
     const rawState = (state || {}) as SystemSculptStudioViewState;
-    const rawLayout = rawState.inspectorLayout;
-    this.graphViewStateByProjectPath = parseGraphViewStateByProject(rawState.graphViewByProject);
-    this.nodeDetailModeByProjectPath = parseNodeDetailModeByProject(rawState.nodeDetailModeByProject);
-    if (rawLayout && typeof rawLayout === "object") {
-      const candidate = rawLayout as Partial<StudioNodeInspectorLayout>;
-      this.inspectorLayout = {
-        x: Number.isFinite(candidate.x) ? Number(candidate.x) : DEFAULT_INSPECTOR_LAYOUT.x,
-        y: Number.isFinite(candidate.y) ? Number(candidate.y) : DEFAULT_INSPECTOR_LAYOUT.y,
-        width: Number.isFinite(candidate.width) ? Number(candidate.width) : DEFAULT_INSPECTOR_LAYOUT.width,
-        height: Number.isFinite(candidate.height)
-          ? Number(candidate.height)
-          : DEFAULT_INSPECTOR_LAYOUT.height,
-      };
-    }
-    const filePath = typeof rawState.file === "string"
-      ? (rawState.file || "")
-      : "";
-    await this.loadProjectFromPath(filePath || null, { notifyOnError: false });
+    const filePath = this.projectSessionController.restorePersistentState(rawState);
+    await this.projectSessionController.loadProjectFromPath(filePath || null, {
+      notifyOnError: false,
+    });
     this.render();
   }
 
   async onOpen(): Promise<void> {
-    window.addEventListener("keydown", this.onWindowKeyDown, true);
-    window.addEventListener("paste", this.onWindowPaste, true);
+    this.bindOwnerWindowEvents(getStudioOwnerWindow(this.contentEl));
+    this.detachWindowMigration?.();
+    this.detachWindowMigration = this.contentEl.onWindowMigrated((ownerWindow) => {
+      this.bindOwnerWindowEvents(ownerWindow);
+      this.render();
+    });
     this.bindVaultEvents();
     await this.loadNodeDefinitions();
     this.render();
   }
 
   async onClose(): Promise<void> {
-    window.removeEventListener("keydown", this.onWindowKeyDown, true);
-    window.removeEventListener("paste", this.onWindowPaste, true);
+    this.detachWindowMigration?.();
+    this.detachWindowMigration = null;
+    this.unbindOwnerWindowEvents();
     this.unbindVaultEvents();
-    this.graphClipboardPayload = null;
-    this.graphClipboardPasteCount = 0;
-    this.captureGraphViewportState();
-    this.app.workspace.requestSaveLayout();
-    await this.flushTextNodeEditorsBeforeProjectTransition();
-    this.resetProjectHistory(null);
-    this.clearSaveTimer();
+    this.clipboardAndDropController.dispose();
     this.clearLayoutSaveTimer();
     this.resetViewportScrollingState();
-    this.runPresentation.reset();
-    this.clearProjectLiveSyncState();
-    await this.releaseRetainedProjectSession();
-    this.currentProjectSession = null;
-    this.currentProjectPath = null;
-    this.currentProject = null;
-    this.editingTextNodeIds.clear();
-    this.dirtyTextNodeEditIds.clear();
-    this.pendingTextNodeAutofocusNodeId = null;
-    this.pendingTextNodeFocusPointByNodeId.clear();
-    this.textNodeEditorSnapshots.clear();
-    this.inspectorOverlay?.destroy();
-    this.inspectorOverlay = null;
+    await this.projectSessionController.close();
     this.nodeContextMenuOverlay?.destroy();
     this.nodeContextMenuOverlay = null;
     this.nodeActionContextMenuOverlay?.destroy();
     this.nodeActionContextMenuOverlay = null;
-    this.pendingViewportState = null;
     this.graphViewportEl = null;
-    this.graphViewportProjectPath = null;
-    this.lastGraphPointerPosition = null;
     this.graphInteraction.clearRenderBindings();
     this.contentEl.empty();
+  }
+
+  private unbindOwnerWindowEvents(): void {
+    this.listenerWindow?.removeEventListener("keydown", this.onWindowKeyDown, true);
+    this.clipboardAndDropController.unbindOwnerWindow();
+    this.listenerWindow = null;
+  }
+
+  private bindOwnerWindowEvents(ownerWindow: Window): void {
+    if (this.listenerWindow === ownerWindow) {
+      return;
+    }
+    this.unbindOwnerWindowEvents();
+    ownerWindow.addEventListener("keydown", this.onWindowKeyDown, true);
+    this.clipboardAndDropController.bindOwnerWindow(ownerWindow);
+    this.listenerWindow = ownerWindow;
   }
 
   private bindVaultEvents(): void {
@@ -411,17 +399,17 @@ export class SystemSculptStudioView extends ItemView {
     }
     this.vaultEventRefs.push(
       this.app.vault.on("modify", (file) => {
-        void this.handleVaultItemModified(file);
+        void this.projectSessionController.handleVaultItemModified(file);
       })
     );
     this.vaultEventRefs.push(
       this.app.vault.on("rename", (file, oldPath) => {
-        void this.handleVaultItemRenamed(file, oldPath);
+        void this.projectSessionController.handleVaultItemRenamed(file, oldPath);
       })
     );
     this.vaultEventRefs.push(
       this.app.vault.on("delete", (file) => {
-        void this.handleVaultItemDeleted(file);
+        void this.projectSessionController.handleVaultItemDeleted(file);
       })
     );
   }
@@ -453,6 +441,14 @@ export class SystemSculptStudioView extends ItemView {
     resetStudioGraphHistory(this.historyState, project, options);
   }
 
+  private clearProjectEditorState(): void {
+    this.editingTextNodeIds.clear();
+    this.dirtyTextNodeEditIds.clear();
+    this.pendingTextNodeAutofocusNodeId = null;
+    this.pendingTextNodeFocusPointByNodeId.clear();
+    this.textNodeEditorSnapshots.clear();
+  }
+
   private captureProjectHistoryCheckpoint(): void {
     if (!this.currentProject) {
       return;
@@ -481,8 +477,7 @@ export class SystemSculptStudioView extends ItemView {
       notifyListeners: false,
     });
     this.currentProjectSession.schedulePersist({ mode: "discrete", reason: "history.apply" });
-    this.currentProject = this.currentProjectSession.getProject();
-    this.transientFieldErrorsByNodeId.clear();
+    this.projectSessionController.syncProjectFromSession();
     this.runPresentation.reset();
     this.editingTextNodeIds.clear();
     this.dirtyTextNodeEditIds.clear();
@@ -493,8 +488,12 @@ export class SystemSculptStudioView extends ItemView {
     this.nodeActionContextMenuOverlay?.hide();
     this.graphInteraction.clearPendingConnection({ requestRender: false });
     this.graphInteraction.clearProjectState();
-    this.recomputeEntryNodes(this.currentProject);
-    this.setHistoryCurrentSnapshot(this.currentProject, nextSelection);
+    const currentProject = this.currentProject;
+    if (!currentProject) {
+      return;
+    }
+    this.recomputeEntryNodes(currentProject);
+    this.setHistoryCurrentSnapshot(currentProject, nextSelection);
     this.render();
     this.graphInteraction.setSelectedNodeIds(nextSelection);
     void this.commitCurrentProjectMutationAsync(
@@ -534,15 +533,6 @@ export class SystemSculptStudioView extends ItemView {
     }
     this.applyHistorySnapshot(targetSnapshot);
     return true;
-  }
-
-  private async syncGraphClipboardToSystemClipboard(payload: StudioGraphClipboardPayload): Promise<void> {
-    try {
-      const serialized = JSON.stringify(payload);
-      await tryCopyToClipboard(serialized);
-    } catch {
-      // Best-effort clipboard mirroring only.
-    }
   }
 
   private toggleTextGenerationOutputLock(nodeId: string): void {
@@ -666,116 +656,6 @@ export class SystemSculptStudioView extends ItemView {
     );
   }
 
-  private copySelectedGraphNodesToClipboard(options?: { showNotice?: boolean }): boolean {
-    if (this.busy || !this.currentProject) {
-      return false;
-    }
-    const payload = this.currentProject
-      ? buildGraphClipboardPayload({
-          project: this.currentProject,
-          selectedNodeIds: this.graphInteraction.getSelectedNodeIds(),
-        })
-      : null;
-    if (!payload) {
-      return false;
-    }
-    this.graphClipboardPayload = payload;
-    this.graphClipboardPasteCount = 0;
-    void this.syncGraphClipboardToSystemClipboard(payload);
-    if (options?.showNotice !== false) {
-      new Notice(payload.nodes.length === 1 ? "Copied 1 node." : `Copied ${payload.nodes.length} nodes.`);
-    }
-    return true;
-  }
-
-  private cutSelectedGraphNodesToClipboard(): boolean {
-    if (this.busy || !this.currentProject) {
-      return false;
-    }
-    const selectedNodeIds = this.graphInteraction.getSelectedNodeIds();
-    if (selectedNodeIds.length === 0) {
-      return false;
-    }
-    if (!this.copySelectedGraphNodesToClipboard({ showNotice: false })) {
-      return false;
-    }
-    if (!this.removeNodes(selectedNodeIds)) {
-      new Notice("Unable to cut: the selected nodes no longer exist in this project.");
-      return false;
-    }
-    new Notice(selectedNodeIds.length === 1 ? "Cut 1 node." : `Cut ${selectedNodeIds.length} nodes.`);
-    return true;
-  }
-
-  private pasteGraphClipboardPayload(payloadOverride?: StudioGraphClipboardPayload): boolean {
-    if (this.busy || !this.currentProject || !this.currentProjectPath) {
-      return false;
-    }
-    const payload = payloadOverride || this.graphClipboardPayload;
-    if (!payload) {
-      return false;
-    }
-    if (
-      payload.schema !== STUDIO_GRAPH_CLIPBOARD_SCHEMA ||
-      !Array.isArray(payload.nodes) ||
-      payload.nodes.length === 0
-    ) {
-      return false;
-    }
-
-    const project = this.currentProject;
-    const materializedPaste = materializeGraphClipboardPaste({
-      payload,
-      anchor: this.resolvePasteAnchorPosition(),
-      pasteCount: this.graphClipboardPasteCount,
-      normalizeNodePosition: (position) => this.normalizeNodePosition(position),
-      nextNodeId: () => randomId("node"),
-      nextEdgeId: () => randomId("edge"),
-      nextGroupId: () => randomId("group"),
-    });
-    if (!materializedPaste) {
-      return false;
-    }
-    const { newNodes, newEdges, newGroups, nextSelection } = materializedPaste;
-
-    const changed = this.commitCurrentProjectMutation("graph.node.create", (currentProject) => {
-      currentProject.graph.nodes.push(...newNodes);
-      if (newEdges.length > 0) {
-        currentProject.graph.edges.push(...newEdges);
-      }
-      if (newGroups.length > 0) {
-        if (!Array.isArray(currentProject.graph.groups)) {
-          currentProject.graph.groups = [];
-        }
-        currentProject.graph.groups.push(...newGroups);
-      }
-      return true;
-    });
-    if (!changed) {
-      return false;
-    }
-
-    this.nodeContextMenuOverlay?.hide();
-    this.nodeActionContextMenuOverlay?.hide();
-    this.graphInteraction.clearPendingConnection({ requestRender: false });
-    this.graphInteraction.setSelectedNodeIds(nextSelection);
-    this.recomputeEntryNodes(project);
-    this.render();
-    const pastedNoteNodeIds = newNodes
-      .filter((node) => node.kind === "studio.note")
-      .map((node) => node.id);
-    if (pastedNoteNodeIds.length > 0) {
-      void this.refreshNoteNodePreviewsFromVault(project, {
-        onlyNodeIds: new Set(pastedNoteNodeIds),
-      }).then(() => {
-        this.render();
-      });
-    }
-    this.graphClipboardPasteCount += 1;
-    new Notice(newNodes.length === 1 ? "Pasted 1 node." : `Pasted ${newNodes.length} nodes.`);
-    return true;
-  }
-
   private handleWindowKeyDown(event: KeyboardEvent): void {
     if (event.defaultPrevented) {
       return;
@@ -796,9 +676,9 @@ export class SystemSculptStudioView extends ItemView {
         handled = this.fitSelectedGraphNodesInViewport();
       } else if (!editableTarget) {
         if (normalizedKey === "c" && !event.shiftKey) {
-          handled = this.copySelectedGraphNodesToClipboard();
+          handled = this.clipboardAndDropController.copySelectedGraphNodes();
         } else if (normalizedKey === "x" && !event.shiftKey) {
-          handled = this.cutSelectedGraphNodesToClipboard();
+          handled = this.clipboardAndDropController.cutSelectedGraphNodes();
         } else if (normalizedKey === "z") {
           handled = event.shiftKey ? this.redoGraphHistory() : this.undoGraphHistory();
         } else if (normalizedKey === "y") {
@@ -842,194 +722,6 @@ export class SystemSculptStudioView extends ItemView {
 
   private isVaultFolder(file: TAbstractFile | null): file is TFolder {
     return file instanceof TFolder;
-  }
-
-  private resolveMarkdownVaultPathFromReference(reference: string): string | null {
-    const item = resolveVaultItemFromReference({
-      reference,
-      getAbstractFileByPath: (path) => this.app.vault.getAbstractFileByPath(path),
-      resolveVaultPathFromAbsoluteFilePath: (absolutePath) =>
-        this.resolveVaultPathFromAbsoluteFilePath(absolutePath),
-    });
-    if (!this.isMarkdownVaultFile(item)) {
-      return null;
-    }
-    return item.path;
-  }
-
-  private resolvePasteAnchorPosition(): { x: number; y: number } {
-    const pointer = this.lastGraphPointerPosition;
-    if (pointer && Number.isFinite(pointer.x) && Number.isFinite(pointer.y)) {
-      return {
-        x: pointer.x,
-        y: pointer.y,
-      };
-    }
-
-    const viewport = this.graphViewportEl;
-    if (viewport) {
-      const zoom = this.graphInteraction.getGraphZoom() || 1;
-      return {
-        x: (viewport.scrollLeft + viewport.clientWidth * 0.5) / zoom,
-        y: (viewport.scrollTop + viewport.clientHeight * 0.5) / zoom,
-      };
-    }
-
-    if (this.currentProject) {
-      return this.computeDefaultNodePosition(this.currentProject);
-    }
-
-    return { x: 120, y: 120 };
-  }
-
-  private async handleWindowPaste(event: ClipboardEvent): Promise<void> {
-    if (event.defaultPrevented) {
-      return;
-    }
-    if (!this.isActiveStudioView()) {
-      return;
-    }
-    if (this.busy || !this.currentProject || !this.currentProjectPath) {
-      return;
-    }
-    if (this.isEditableKeyboardTarget(event.target)) {
-      return;
-    }
-
-    const pastedText = extractClipboardText(event);
-    const graphClipboardPayload = parseGraphClipboardPayload(pastedText);
-    if (graphClipboardPayload) {
-      const previousCreatedAt = this.graphClipboardPayload?.createdAt || "";
-      this.graphClipboardPayload = graphClipboardPayload;
-      if (previousCreatedAt !== graphClipboardPayload.createdAt) {
-        this.graphClipboardPasteCount = 0;
-      }
-      event.preventDefault();
-      event.stopPropagation();
-      try {
-        this.pasteGraphClipboardPayload(graphClipboardPayload);
-      } catch (error) {
-        this.setError(error);
-      }
-      return;
-    }
-
-    const mediaFiles = extractClipboardMediaFiles(event);
-    if (mediaFiles.length > 0) {
-      event.preventDefault();
-      event.stopPropagation();
-      try {
-        await this.pasteClipboardMedia(mediaFiles);
-      } catch (error) {
-        this.setError(error);
-      }
-      return;
-    }
-
-    if (!pastedText || pastedText.trim().length === 0) {
-      return;
-    }
-
-    event.preventDefault();
-    event.stopPropagation();
-    try {
-      const notePath =
-        pastedText.includes("\n") || pastedText.includes("\r")
-          ? null
-          : this.resolveMarkdownVaultPathFromReference(pastedText);
-      if (notePath) {
-        await this.insertVaultNoteNodes([notePath], this.resolvePasteAnchorPosition(), {
-          source: "paste",
-        });
-        return;
-      }
-      this.pasteClipboardText(pastedText);
-    } catch (error) {
-      this.setError(error);
-    }
-  }
-
-  private pasteClipboardText(text: string): void {
-    if (!this.currentProject || !this.currentProjectPath) {
-      return;
-    }
-    const textNodeDefinition = this.nodeDefinitions.find((definition) => definition.kind === "studio.text");
-    if (!textNodeDefinition) {
-      throw new Error("Text node definition is unavailable.");
-    }
-
-    const project = this.currentProject;
-    const node = buildPastedTextNode({
-      textNodeDefinition,
-      text,
-      position: this.resolvePasteAnchorPosition(),
-      nextNodeId: () => randomId("node"),
-      prettifyNodeKind,
-      cloneConfigDefaults: (definition) => cloneConfigDefaults(definition),
-      normalizeNodePosition: (position) => this.normalizeNodePosition(position),
-    });
-    const changed = this.commitCurrentProjectMutation("graph.node.create", (currentProject) => {
-      currentProject.graph.nodes.push(node);
-      return true;
-    });
-    if (!changed) {
-      return;
-    }
-    this.graphInteraction.selectOnlyNode(node.id);
-    this.graphInteraction.clearPendingConnection();
-    this.recomputeEntryNodes(project);
-    this.render();
-    new Notice("Pasted as text.");
-  }
-
-  private async pasteClipboardMedia(mediaFiles: File[]): Promise<void> {
-    if (!this.currentProject || !this.currentProjectPath) {
-      return;
-    }
-
-    const mediaDefinition = this.nodeDefinitions.find(
-      (definition) => definition.kind === "studio.media_ingest"
-    );
-    if (!mediaDefinition) {
-      throw new Error("Media node definition is unavailable.");
-    }
-
-    const studio = this.plugin.getStudioService();
-    const project = this.currentProject;
-    const nodes = await materializePastedMediaNodes({
-      mediaFiles,
-      mediaDefinition,
-      anchor: this.resolvePasteAnchorPosition(),
-      projectPath: this.currentProjectPath,
-      nextNodeId: () => randomId("node"),
-      normalizeNodePosition: (position) => this.normalizeNodePosition(position),
-      normalizeMimeType: normalizePastedMediaMimeType,
-      storeAsset: async (projectPath, bytes, mimeType) =>
-        await studio.storeAsset(projectPath, bytes, mimeType),
-      prettifyNodeKind,
-      cloneConfigDefaults: (definition) => cloneConfigDefaults(definition),
-    });
-    if (nodes.length === 0) {
-      return;
-    }
-    const changed = this.commitCurrentProjectMutation("graph.node.create", (currentProject) => {
-      currentProject.graph.nodes.push(...nodes);
-      return true;
-    });
-    if (!changed) {
-      return;
-    }
-    const createdNodeIds = nodes.map((node) => node.id);
-
-    this.graphInteraction.selectOnlyNode(createdNodeIds[createdNodeIds.length - 1]);
-    this.graphInteraction.clearPendingConnection();
-    this.recomputeEntryNodes(project);
-    this.render();
-    new Notice(
-      createdNodeIds.length === 1
-        ? "Pasted 1 media file as a Media node."
-        : `Pasted ${createdNodeIds.length} media files as Media nodes.`
-    );
   }
 
   private readNotePrimaryPathFromConfig(node: Pick<StudioNodeInstance, "config">): string {
@@ -1274,6 +966,42 @@ export class SystemSculptStudioView extends ItemView {
         ? "Pasted 1 note as a Note node."
         : `Pasted ${createdNodeIds.length} notes as Note nodes.`
     );
+  }
+
+  /** Bridges controller-owned creation flows back to private graph UI state. */
+  private finalizeClipboardCreatedNodes(
+    project: StudioProjectV1,
+    options: StudioCreatedNodesFinalization,
+  ): void {
+    if (options.hideNodeMenus) {
+      this.nodeContextMenuOverlay?.hide();
+      this.nodeActionContextMenuOverlay?.hide();
+    }
+    const applySelection = (): void => {
+      if (options.selectionMode === "only" && options.selection.length === 1) {
+        this.graphInteraction.selectOnlyNode(options.selection[0]);
+        return;
+      }
+      this.graphInteraction.setSelectedNodeIds(options.selection);
+    };
+    if (options.pendingConnectionMode === "silent") {
+      this.graphInteraction.clearPendingConnection({ requestRender: false });
+      applySelection();
+    } else {
+      applySelection();
+      this.graphInteraction.clearPendingConnection();
+    }
+    this.recomputeEntryNodes(project);
+    this.render();
+    if (options.refreshNoteNodeIds && options.refreshNoteNodeIds.length > 0) {
+      void this.refreshNoteNodePreviewsFromVault(project, {
+        onlyNodeIds: new Set(options.refreshNoteNodeIds),
+      }).then(() => {
+        if (this.currentProject === project) {
+          this.render();
+        }
+      });
+    }
   }
 
   private async loadNodeDefinitions(): Promise<void> {
@@ -1559,7 +1287,6 @@ export class SystemSculptStudioView extends ItemView {
       return false;
     }
     for (const nodeId of removedNodeIds) {
-      this.clearTransientFieldErrorsForNode(nodeId);
       this.runPresentation.removeNode(nodeId);
       this.graphInteraction.onNodeRemoved(nodeId);
       this.editingTextNodeIds.delete(nodeId);
@@ -1574,127 +1301,37 @@ export class SystemSculptStudioView extends ItemView {
     return true;
   }
 
-  private clearSaveTimer(): void {
-    // Legacy wrapper retained while mutation call sites are still view-routed.
-  }
-
   private clearLayoutSaveTimer(): void {
     if (this.layoutSaveTimer !== null) {
-      window.clearTimeout(this.layoutSaveTimer);
+      this.layoutSaveTimerWindow?.clearTimeout(this.layoutSaveTimer);
       this.layoutSaveTimer = null;
+      this.layoutSaveTimerWindow = null;
     }
   }
 
   private clearViewportScrollCaptureFrame(): void {
     if (this.viewportScrollCaptureFrame !== null) {
-      window.cancelAnimationFrame(this.viewportScrollCaptureFrame);
+      this.viewportScrollCaptureWindow?.cancelAnimationFrame(this.viewportScrollCaptureFrame);
       this.viewportScrollCaptureFrame = null;
+      this.viewportScrollCaptureWindow = null;
     }
   }
 
   private clearViewportScrollingClassTimer(): void {
     if (this.viewportScrollingClassTimer !== null) {
-      window.clearTimeout(this.viewportScrollingClassTimer);
+      this.viewportScrollingClassTimerWindow?.clearTimeout(this.viewportScrollingClassTimer);
       this.viewportScrollingClassTimer = null;
+      this.viewportScrollingClassTimerWindow = null;
     }
-  }
-
-  private hasPendingLocalProjectSaveWork(): boolean {
-    return this.currentProjectSession?.hasPendingLocalSaveWork() === true;
-  }
-
-  private async readStudioProjectRawText(projectPath: string): Promise<string | null> {
-    const normalized = normalizePath(String(projectPath || "").trim());
-    if (!normalized || !isStudioProjectPath(normalized)) {
-      return null;
-    }
-    const adapter = this.app.vault.adapter as { read?: (path: string) => Promise<string> };
-    if (typeof adapter.read !== "function") {
-      return null;
-    }
-    try {
-      return await adapter.read(normalized);
-    } catch {
-      return null;
-    }
-  }
-
-  private markAcceptedProjectSignature(signature: string, options?: { trackExpectedWrite?: boolean }): void {
-    this.currentProjectSession?.markAcceptedProjectSignature(signature, options);
-  }
-
-  private clearProjectLiveSyncState(): void {
-    this.projectLiveSyncWarning = null;
-    this.currentProjectSession?.clearLiveSyncState();
-  }
-
-  private applySelectionToCurrentProject(nodeIds: string[]): void {
-    if (!this.currentProject) {
-      return;
-    }
-    const nodeIdSet = new Set(this.currentProject.graph.nodes.map((node) => node.id));
-    const nextSelection = normalizeNodeIdList(nodeIds).filter((nodeId) => nodeIdSet.has(nodeId));
-    this.graphInteraction.setSelectedNodeIds(nextSelection);
-    this.setHistoryCurrentSnapshot(this.currentProject, nextSelection);
-  }
-
-  private async processCurrentProjectFileMutation(rawText: string): Promise<void> {
-    if (!this.currentProject || !this.currentProjectPath || !this.currentProjectSession) {
-      return;
-    }
-    const update = this.currentProjectSession.resolveExternalProjectTextUpdate(rawText, {
-      isActiveProjectFile: true,
-    });
-    if (update.decision.kind === "ignore") {
-      return;
-    }
-    if (update.decision.kind === "defer") {
-      return;
-    }
-
-    const lintResult = this.plugin.getStudioService().lintProjectText(rawText);
-    if (!lintResult.ok) {
-      this.currentProjectSession.markRejectedProjectSignature(update.signature);
-      this.projectLiveSyncWarning = `External .systemsculpt change rejected: ${lintResult.error}`;
-      this.render();
-      return;
-    }
-
-    const selectedNodeIds = this.graphInteraction.getSelectedNodeIds();
-    await this.loadProjectFromPath(this.currentProjectPath, {
-      notifyOnError: false,
-      forceReload: true,
-    });
-    this.applySelectionToCurrentProject(selectedNodeIds);
-    this.projectLiveSyncWarning = null;
-    this.currentProjectSession?.markAcceptedProjectSignature(update.signature);
-    this.lastError = null;
-    this.render();
-  }
-
-  private async processPendingExternalProjectSync(): Promise<void> {
-    if (!this.currentProjectSession?.hasDeferredExternalSync()) {
-      return;
-    }
-    if (!this.currentProjectPath || !this.currentProject) {
-      this.currentProjectSession?.consumeDeferredExternalSync();
-      return;
-    }
-    if (this.hasPendingLocalProjectSaveWork()) {
-      return;
-    }
-    const rawText = await this.readStudioProjectRawText(this.currentProjectPath);
-    this.currentProjectSession.consumeDeferredExternalSync();
-    if (rawText == null) {
-      return;
-    }
-    await this.processCurrentProjectFileMutation(rawText);
   }
 
   private scheduleLayoutSave(): void {
     this.clearLayoutSaveTimer();
-    this.layoutSaveTimer = window.setTimeout(() => {
+    const ownerWindow = getStudioOwnerWindow(this.contentEl);
+    this.layoutSaveTimerWindow = ownerWindow;
+    this.layoutSaveTimer = ownerWindow.setTimeout(() => {
       this.layoutSaveTimer = null;
+      this.layoutSaveTimerWindow = null;
       this.app.workspace.requestSaveLayout();
     }, 360);
   }
@@ -1707,16 +1344,7 @@ export class SystemSculptStudioView extends ItemView {
       mode?: StudioProjectSessionAutosaveMode;
     }
   ): boolean {
-    const session = this.currentProjectSession;
-    if (!session) {
-      return false;
-    }
-    if (options?.captureHistory !== false) {
-      this.captureProjectHistoryCheckpoint();
-    }
-    return session.mutate(reason, mutator, {
-      mode: options?.mode || "discrete",
-    });
+    return this.projectSessionController.commitMutation(reason, mutator, options);
   }
 
   private async commitCurrentProjectMutationAsync(
@@ -1727,487 +1355,21 @@ export class SystemSculptStudioView extends ItemView {
       mode?: StudioProjectSessionAutosaveMode;
     }
   ): Promise<boolean> {
-    const session = this.currentProjectSession;
-    if (!session) {
-      return false;
-    }
-    if (options?.captureHistory !== false) {
-      this.captureProjectHistoryCheckpoint();
-    }
-    return await session.mutateAsync(reason, mutator, {
-      mode: options?.mode || "discrete",
-    });
+    return await this.projectSessionController.commitMutationAsync(reason, mutator, options);
   }
 
   private scheduleSessionPersistFromLegacyMutation(options?: {
     captureHistory?: boolean;
     mode?: StudioProjectSessionAutosaveMode;
   }): void {
-    if (options?.captureHistory !== false) {
-      this.captureProjectHistoryCheckpoint();
-    }
-    this.currentProjectSession?.schedulePersist({ mode: options?.mode || "discrete" });
+    this.projectSessionController.schedulePersistFromLegacyMutation(options);
   }
 
   private async flushPendingProjectSaveWork(options?: {
     force?: boolean;
     showNotice?: boolean;
   }): Promise<void> {
-    if (!this.currentProjectSession) {
-      return;
-    }
-    try {
-      await this.currentProjectSession.flushPendingSaveWork({ force: options?.force });
-      this.projectLiveSyncWarning = null;
-      if (options?.showNotice) {
-        new Notice("Studio graph saved.");
-      }
-    } catch (error) {
-      this.setError(error);
-    } finally {
-      void this.processPendingExternalProjectSync();
-    }
-  }
-
-  private async flushProjectSave(options?: { showNotice?: boolean }): Promise<void> {
-    await this.flushPendingProjectSaveWork({ force: true, showNotice: options?.showNotice });
-  }
-
-  private async flushTextNodeEditorsBeforeProjectTransition(): Promise<void> {
-    this.disposeTextNodeEditors();
-    await this.flushPendingProjectSaveWork();
-  }
-
-  /**
-   * Release the session retain this view holds. Safe to call when nothing is
-   * retained. Never throws: releasing is cleanup and must not block teardown.
-   */
-  private async releaseRetainedProjectSession(): Promise<void> {
-    const retainedPath = this.retainedProjectPath;
-    this.retainedProjectPath = null;
-    this.currentProjectSession = null;
-    if (!retainedPath) {
-      return;
-    }
-    try {
-      await this.plugin.getStudioService().releaseProjectSession(retainedPath);
-    } catch (error) {
-      console.warn("[SystemSculpt Studio] Failed to release project session", {
-        projectPath: retainedPath,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }
-
-  private async loadProjectFromPath(
-    projectPath: string | null,
-    options?: { notifyOnError?: boolean; forceReload?: boolean }
-  ): Promise<void> {
-    if (!Platform.isDesktopApp) {
-      return;
-    }
-
-    const isProjectTransition =
-      projectPath !== this.currentProjectPath || options?.forceReload === true;
-    if (isProjectTransition && this.currentProjectPath && this.currentProject) {
-      // The live native document can be newer than the last owner callback.
-      // Commit/destroy it while the old session is still active, then flush
-      // that session before switching or force-reloading the project.
-      await this.flushTextNodeEditorsBeforeProjectTransition();
-    }
-
-    if (isProjectTransition) {
-      this.captureGraphViewportState();
-      this.editingTextNodeIds.clear();
-      this.dirtyTextNodeEditIds.clear();
-      this.pendingTextNodeAutofocusNodeId = null;
-      this.pendingTextNodeFocusPointByNodeId.clear();
-      this.textNodeEditorSnapshots.clear();
-    }
-
-    if (!projectPath) {
-      await this.releaseRetainedProjectSession();
-      this.currentProjectPath = null;
-      this.currentProject = null;
-      this.resetProjectHistory(null);
-      this.graphInteraction.clearProjectState();
-      this.graphInteraction.setGraphZoom(STUDIO_GRAPH_DEFAULT_ZOOM);
-      this.transientFieldErrorsByNodeId.clear();
-      this.runPresentation.reset();
-      this.pendingViewportState = null;
-      this.syncInspectorSelection();
-      this.clearProjectLiveSyncState();
-      return;
-    }
-
-    if (!isStudioProjectPath(projectPath)) {
-      await this.releaseRetainedProjectSession();
-      this.currentProjectPath = null;
-      this.currentProject = null;
-      this.resetProjectHistory(null);
-      this.graphInteraction.clearProjectState();
-      this.graphInteraction.setGraphZoom(STUDIO_GRAPH_DEFAULT_ZOOM);
-      this.transientFieldErrorsByNodeId.clear();
-      this.runPresentation.reset();
-      this.pendingViewportState = null;
-      this.syncInspectorSelection();
-      this.clearProjectLiveSyncState();
-      if (options?.notifyOnError !== false) {
-        new Notice("SystemSculpt Studio only opens .systemsculpt files.");
-      }
-      return;
-    }
-
-    if (!options?.forceReload && this.currentProjectPath === projectPath && this.currentProject) {
-      return;
-    }
-
-    try {
-      const studio = this.plugin.getStudioService();
-      const session = await studio.retainProjectSession(projectPath, {
-        forceReload: options?.forceReload,
-      });
-      // One retain per view: swap ownership to the newly retained session and
-      // drop the previous retain. When the manager handed back the session we
-      // already own (same-path reload, or a rename that moved our session),
-      // the extra retain is released at the session's current path.
-      const previousSession = this.currentProjectSession;
-      const previousRetainedPath = this.retainedProjectPath;
-      this.currentProjectSession = session;
-      this.retainedProjectPath = session.getProjectPath();
-      if (previousSession && previousRetainedPath) {
-        if (previousSession === session) {
-          await studio.releaseProjectSession(session.getProjectPath());
-        } else {
-          await studio.releaseProjectSession(previousRetainedPath);
-        }
-      }
-      const project = session.getProject();
-      const savedGraphView = getSavedGraphViewState(this.graphViewStateByProjectPath, projectPath);
-      this.currentProjectPath = projectPath;
-      this.currentProject = project;
-      this.graphInteraction.clearProjectState();
-      this.graphInteraction.setGraphZoom(savedGraphView?.zoom ?? STUDIO_GRAPH_DEFAULT_ZOOM);
-      this.transientFieldErrorsByNodeId.clear();
-      this.runPresentation.reset();
-      this.pendingViewportState = savedGraphView
-        ? { ...savedGraphView, projectPath }
-        : {
-            scrollLeft: 0,
-            scrollTop: 0,
-            zoom: this.graphInteraction.getGraphZoom(),
-            projectPath,
-          };
-      await this.commitCurrentProjectMutationAsync(
-        "project.repair",
-        async (currentProject) => {
-          return repairStudioProjectForLoad(currentProject);
-        },
-        { captureHistory: false }
-      );
-      try {
-        const cacheSnapshot = await studio.getProjectNodeCache(projectPath);
-        if (cacheSnapshot) {
-          this.runPresentation.hydrateFromCache(cacheSnapshot.entries, {
-            allowedNodeIds: project.graph.nodes.map((node) => node.id),
-          });
-          this.materializeManagedOutputNodesFromCache(cacheSnapshot.entries);
-        }
-      } catch (cacheError) {
-        console.warn("[SystemSculpt Studio] Unable to hydrate cache state on project load", {
-          projectPath,
-          error: cacheError instanceof Error ? cacheError.message : String(cacheError),
-        });
-      }
-      await this.commitCurrentProjectMutationAsync(
-        "project.repair",
-        async (currentProject) => await this.refreshNoteNodePreviewsFromVault(currentProject),
-        { captureHistory: false }
-      );
-      this.resetProjectHistory(project);
-      const loadedRawText = await this.readStudioProjectRawText(projectPath);
-      if (loadedRawText != null) {
-        this.currentProjectSession?.markAcceptedProjectText(loadedRawText);
-      } else {
-        this.currentProjectSession?.clearLiveSyncState();
-      }
-      this.projectLiveSyncWarning = null;
-      this.lastError = null;
-      this.syncInspectorSelection();
-    } catch (error) {
-      await this.releaseRetainedProjectSession();
-      this.currentProjectPath = null;
-      this.currentProject = null;
-      this.resetProjectHistory(null);
-      this.graphInteraction.clearProjectState();
-      this.graphInteraction.setGraphZoom(STUDIO_GRAPH_DEFAULT_ZOOM);
-      this.transientFieldErrorsByNodeId.clear();
-      this.runPresentation.reset();
-      this.pendingViewportState = null;
-      this.syncInspectorSelection();
-      this.clearProjectLiveSyncState();
-      this.lastError = error instanceof Error ? error.message : String(error);
-      if (options?.notifyOnError !== false) {
-        this.setError(error);
-      }
-    }
-  }
-
-  private async handleVaultItemModified(file: TAbstractFile): Promise<void> {
-    if (!this.currentProject || !this.currentProjectPath) {
-      return;
-    }
-    const modifiedPath = normalizePath(String(file.path || "").trim());
-    if (!modifiedPath) {
-      return;
-    }
-    if (modifiedPath === this.currentProjectPath) {
-      const rawText = await this.readStudioProjectRawText(modifiedPath);
-      if (rawText != null) {
-        await this.processCurrentProjectFileMutation(rawText);
-      }
-      return;
-    }
-    if (!this.isMarkdownVaultFile(file)) {
-      return;
-    }
-    const matchingNodeIds = this.currentProject.graph.nodes
-      .filter((node) => {
-        if (node.kind !== "studio.note") {
-          return false;
-        }
-        return this.readAllNotePathsFromConfig(node).includes(modifiedPath);
-      })
-      .map((node) => node.id);
-    if (matchingNodeIds.length === 0) {
-      return;
-    }
-
-    await this.commitCurrentProjectMutationAsync(
-      "vault.sync",
-      async (project) =>
-        await this.refreshNoteNodePreviewsFromVault(project, {
-          onlyNodeIds: new Set(matchingNodeIds),
-        }),
-      { captureHistory: false }
-    );
-    this.render();
-  }
-
-  private async handleVaultItemRenamed(file: TAbstractFile, oldPath: string): Promise<void> {
-    if (!this.currentProject || !this.currentProjectPath) {
-      return;
-    }
-    const previousPath = normalizePath(String(oldPath || "").trim());
-    if (!previousPath) {
-      return;
-    }
-    const renamedPath = normalizePath(String(file.path || "").trim());
-    if (previousPath === this.currentProjectPath) {
-      const selectedNodeIds = this.graphInteraction.getSelectedNodeIds();
-      if (!isStudioProjectPath(renamedPath)) {
-        await this.loadProjectFromPath(null, { notifyOnError: false });
-        this.render();
-        return;
-      }
-      this.graphViewStateByProjectPath = remapPathScopedRecord(
-        this.graphViewStateByProjectPath,
-        previousPath,
-        renamedPath
-      );
-      this.nodeDetailModeByProjectPath = remapPathScopedRecord(
-        this.nodeDetailModeByProjectPath,
-        previousPath,
-        renamedPath
-      );
-      await this.loadProjectFromPath(renamedPath, {
-        notifyOnError: false,
-        forceReload: true,
-      });
-      this.applySelectionToCurrentProject(selectedNodeIds);
-      const renamedRawText = await this.readStudioProjectRawText(renamedPath);
-      if (renamedRawText != null) {
-        this.currentProjectSession?.markAcceptedProjectText(renamedRawText);
-      }
-      this.projectLiveSyncWarning = null;
-      this.render();
-      this.refreshLeafDisplay();
-      return;
-    }
-    const remappedProjectPath = this.isVaultFolder(file)
-      ? resolveProjectPathAfterFolderRename({
-          currentProjectPath: this.currentProjectPath,
-          previousFolderPath: previousPath,
-          nextFolderPath: renamedPath,
-        })
-      : null;
-    if (remappedProjectPath) {
-      const selectedNodeIds = this.graphInteraction.getSelectedNodeIds();
-      if (!isStudioProjectPath(remappedProjectPath)) {
-        await this.loadProjectFromPath(null, { notifyOnError: false });
-        this.render();
-        return;
-      }
-      this.graphViewStateByProjectPath = remapPathScopedRecord(
-        this.graphViewStateByProjectPath,
-        this.currentProjectPath,
-        remappedProjectPath
-      );
-      this.nodeDetailModeByProjectPath = remapPathScopedRecord(
-        this.nodeDetailModeByProjectPath,
-        this.currentProjectPath,
-        remappedProjectPath
-      );
-      await this.loadProjectFromPath(remappedProjectPath, {
-        notifyOnError: false,
-        forceReload: true,
-      });
-      this.applySelectionToCurrentProject(selectedNodeIds);
-      const remappedRawText = await this.readStudioProjectRawText(remappedProjectPath);
-      if (remappedRawText != null) {
-        this.currentProjectSession?.markAcceptedProjectText(remappedRawText);
-      }
-      this.projectLiveSyncWarning = null;
-      this.render();
-      this.refreshLeafDisplay();
-      return;
-    }
-
-    const changed = await this.commitCurrentProjectMutationAsync(
-      "vault.sync",
-      async (project) => {
-        let nextChanged = false;
-        const changedNodeIds = new Set<string>();
-        if (this.isMarkdownVaultFile(file)) {
-          for (const node of project.graph.nodes) {
-            if (node.kind !== "studio.note") {
-              continue;
-            }
-            if (this.normalizeNoteNodeConfig(node)) {
-              nextChanged = true;
-            }
-            const existingItems = parseStudioNoteItems(node.config.notes).map((item) => ({
-              path: item.path ? normalizePath(item.path) : "",
-              enabled: item.enabled !== false,
-            }));
-            const remappedItems = existingItems.map((item) => ({
-              path: item.path === previousPath ? normalizePath(file.path) : item.path,
-              enabled: item.enabled,
-            }));
-            if (JSON.stringify(existingItems) === JSON.stringify(remappedItems)) {
-              continue;
-            }
-            node.config.notes = serializeStudioNoteItems(remappedItems);
-            const previousTitle = deriveStudioNoteTitleFromPath(previousPath);
-            if (!node.title || node.title === "Note" || node.title === previousTitle) {
-              node.title = file.basename || node.title;
-            }
-            nextChanged = true;
-            changedNodeIds.add(node.id);
-          }
-        } else if (this.isVaultFolder(file)) {
-          const prefix = `${previousPath}/`;
-          for (const node of project.graph.nodes) {
-            if (node.kind !== "studio.note") {
-              continue;
-            }
-            if (this.normalizeNoteNodeConfig(node)) {
-              nextChanged = true;
-            }
-            const existingItems = parseStudioNoteItems(node.config.notes).map((item) => ({
-              path: item.path ? normalizePath(item.path) : "",
-              enabled: item.enabled !== false,
-            }));
-            const remappedItems = existingItems.map((item) => {
-              if (!item.path.startsWith(prefix)) {
-                return item;
-              }
-              const suffix = item.path.slice(prefix.length);
-              return {
-                path: normalizePath(`${file.path}/${suffix}`),
-                enabled: item.enabled,
-              };
-            });
-            if (JSON.stringify(existingItems) === JSON.stringify(remappedItems)) {
-              continue;
-            }
-            node.config.notes = serializeStudioNoteItems(remappedItems);
-            nextChanged = true;
-            changedNodeIds.add(node.id);
-          }
-        }
-
-        if (changedNodeIds.size > 0) {
-          const hydrated = await this.refreshNoteNodePreviewsFromVault(project, {
-            onlyNodeIds: changedNodeIds,
-          });
-          nextChanged = nextChanged || hydrated;
-        }
-        return nextChanged;
-      },
-      { captureHistory: false }
-    );
-    if (!changed) {
-      return;
-    }
-    this.render();
-  }
-
-  private async handleVaultItemDeleted(file: TAbstractFile): Promise<void> {
-    if (!this.currentProject || !this.currentProjectPath) {
-      return;
-    }
-    const deletedPath = normalizePath(String(file.path || "").trim());
-    if (!deletedPath) {
-      return;
-    }
-    if (deletedPath === this.currentProjectPath || this.currentProjectPath.startsWith(`${deletedPath}/`)) {
-      await this.loadProjectFromPath(null, { notifyOnError: false });
-      this.render();
-      return;
-    }
-
-    const matchingNodeIds = new Set<string>();
-    if (this.isMarkdownVaultFile(file)) {
-      for (const node of this.currentProject.graph.nodes) {
-        if (node.kind !== "studio.note") {
-          continue;
-        }
-        if (!this.readAllNotePathsFromConfig(node).includes(deletedPath)) {
-          continue;
-        }
-        matchingNodeIds.add(node.id);
-      }
-    } else if (this.isVaultFolder(file)) {
-      const prefix = `${deletedPath}/`;
-      for (const node of this.currentProject.graph.nodes) {
-        if (node.kind !== "studio.note") {
-          continue;
-        }
-        const hasMatch = this.readAllNotePathsFromConfig(node).some((path) => path.startsWith(prefix));
-        if (!hasMatch) {
-          continue;
-        }
-        matchingNodeIds.add(node.id);
-      }
-    }
-
-    if (matchingNodeIds.size === 0) {
-      return;
-    }
-    const changed = await this.commitCurrentProjectMutationAsync(
-      "vault.sync",
-      async (project) =>
-        await this.refreshNoteNodePreviewsFromVault(project, {
-          onlyNodeIds: matchingNodeIds,
-        }),
-      { captureHistory: false }
-    );
-    if (!changed) {
-      this.render();
-      return;
-    }
-    this.render();
+    await this.projectSessionController.flushPendingProjectSaveWork(options);
   }
 
   private resolveNodeCardBadge(node: StudioNodeInstance): {
@@ -2215,6 +1377,17 @@ export class SystemSculptStudioView extends ItemView {
     tone: "warning";
     title: string;
   } | null {
+    const definition = this.findNodeDefinition(node);
+    if (definition) {
+      const availability = resolveStudioNodeHostAvailability(definition);
+      if (!availability.available) {
+        return {
+          text: "Desktop only",
+          tone: "warning",
+          title: availability.reason || "This node requires Obsidian Desktop.",
+        };
+      }
+    }
     if (node.kind !== "studio.note") {
       return null;
     }
@@ -2295,40 +1468,6 @@ export class SystemSculptStudioView extends ItemView {
     }
   }
 
-  private setTransientFieldError(nodeId: string, fieldKey: string, message: string | null): void {
-    const normalizedNodeId = String(nodeId || "").trim();
-    const normalizedKey = String(fieldKey || "").trim();
-    if (!normalizedNodeId || !normalizedKey) {
-      return;
-    }
-
-    const normalizedMessage = String(message || "").trim();
-    const perNode = this.transientFieldErrorsByNodeId.get(normalizedNodeId) || new Map<string, string>();
-    if (!normalizedMessage) {
-      perNode.delete(normalizedKey);
-      if (perNode.size === 0) {
-        this.transientFieldErrorsByNodeId.delete(normalizedNodeId);
-      } else {
-        this.transientFieldErrorsByNodeId.set(normalizedNodeId, perNode);
-      }
-      return;
-    }
-
-    perNode.set(normalizedKey, normalizedMessage);
-    this.transientFieldErrorsByNodeId.set(normalizedNodeId, perNode);
-  }
-
-  private clearTransientFieldErrorsForNode(nodeId: string): void {
-    this.transientFieldErrorsByNodeId.delete(String(nodeId || "").trim());
-  }
-
-  private async resolveDynamicSelectOptionsForNode(
-    source: StudioNodeConfigDynamicOptionsSource,
-    node: StudioNodeInstance
-  ): Promise<StudioNodeConfigSelectOption[]> {
-    return this.plugin.getStudioService().resolveDynamicSelectOptions(source, node);
-  }
-
   private readJsonEditorPreferredMode(): "composer" | "raw" {
     const rawMode = String(this.plugin.settings.studioJsonEditorDefaultMode || "")
       .trim()
@@ -2351,26 +1490,13 @@ export class SystemSculptStudioView extends ItemView {
   }
 
   private readCurrentNodeDetailMode(): StudioNodeDetailMode {
-    return getSavedNodeDetailMode(this.nodeDetailModeByProjectPath, this.currentProjectPath);
+    return this.projectSessionController.readCurrentNodeDetailMode();
   }
 
   private updateCurrentNodeDetailMode(mode: StudioNodeDetailMode): void {
-    const projectPath = String(this.currentProjectPath || "").trim();
-    if (!projectPath) {
-      return;
+    if (this.projectSessionController.updateCurrentNodeDetailMode(mode)) {
+      this.render();
     }
-    const nextMode = mode === "collapsed" ? "collapsed" : STUDIO_NODE_DETAIL_DEFAULT_MODE;
-    const previousMode = getSavedNodeDetailMode(this.nodeDetailModeByProjectPath, projectPath);
-    if (previousMode === nextMode) {
-      return;
-    }
-
-    this.nodeDetailModeByProjectPath = {
-      ...this.nodeDetailModeByProjectPath,
-      [projectPath]: nextMode,
-    };
-    this.scheduleLayoutSave();
-    this.render();
   }
 
   private toggleCurrentNodeDetailMode(): void {
@@ -2454,30 +1580,27 @@ export class SystemSculptStudioView extends ItemView {
     });
   }
 
-  private ensureInspectorOverlay(): StudioNodeInspectorOverlay {
-    if (this.inspectorOverlay) {
-      return this.inspectorOverlay;
-    }
+  private pathBrowseOptions(): StudioNodeConfigPathBrowseOptions {
+    return {
+      importFileWithoutOsPath: async (file) => this.importBrowsedFileWithoutOsPath(file),
+    };
+  }
 
-    this.inspectorOverlay = new StudioNodeInspectorOverlay(
-      {
-        isBusy: () => this.busy,
-        onConfigMutated: (node) => {
-          this.handleNodeConfigMutated(node);
-        },
-        onTransientFieldError: (nodeId, fieldKey, message) => {
-          this.setTransientFieldError(nodeId, fieldKey, message);
-        },
-        resolveDynamicSelectOptions: (source, node) =>
-          this.resolveDynamicSelectOptionsForNode(source, node),
-        getRuntimeDetails: (nodeId) => this.buildInspectorRuntimeDetails(nodeId),
-        onLayoutChanged: (layout) => {
-          this.inspectorLayout = { ...layout };
-        },
-      },
-      this.inspectorLayout
-    );
-    return this.inspectorOverlay;
+  private async importBrowsedFileWithoutOsPath(file: File): Promise<string | null> {
+    if (!this.currentProjectPath) {
+      new Notice("Open a .systemsculpt file from the file explorer first.");
+      return null;
+    }
+    try {
+      return await this.plugin.getStudioService().importFileToProject(this.currentProjectPath, {
+        bytes: await file.arrayBuffer(),
+        name: file.name,
+        mimeType: file.type,
+      });
+    } catch (error) {
+      this.setError(error);
+      return null;
+    }
   }
 
   private ensureNodeContextMenuOverlay(): StudioNodeContextMenuOverlay {
@@ -2804,7 +1927,10 @@ export class SystemSculptStudioView extends ItemView {
 
   private measureImageDimensions(src: string): Promise<{ width: number; height: number }> {
     return new Promise((resolve, reject) => {
-      const imageEl = new Image();
+      const ImageCtor = (getStudioOwnerWindow(this.contentEl) as Window & {
+        Image: new () => HTMLImageElement;
+      }).Image;
+      const imageEl = new ImageCtor();
       imageEl.onload = () => {
         resolve({
           width: imageEl.naturalWidth || 1,
@@ -2910,7 +2036,7 @@ export class SystemSculptStudioView extends ItemView {
       new Notice("Unable to copy image to clipboard.");
       return;
     }
-    const copied = await tryCopyImageFileToClipboard(this.app, file);
+    const copied = await tryCopyImageFileToClipboard(this.app, file, this.containerEl);
     if (!copied) {
       new Notice("Unable to copy image to clipboard.");
       return;
@@ -2944,34 +2070,10 @@ export class SystemSculptStudioView extends ItemView {
     previewEl.setText(formatNodeConfigPreview(node));
   }
 
-  private buildInspectorRuntimeDetails(nodeId: string): StudioNodeInspectorRuntimeDetails | null {
-    const state = this.runPresentation.getNodeState(nodeId);
-    const outputs = state.outputs;
-    const hasOutput = Boolean(outputs && Object.keys(outputs).length > 0);
-    const hasStatus = state.status !== "idle" || state.message.trim().length > 0;
-    if (!hasOutput && !hasStatus) {
-      return null;
-    }
-
-    const outputPath =
-      readFirstTextValue(outputs?.path);
-    const outputText = coerceNotePreviewText(outputs?.text, outputs?.path);
-    return {
-      statusLabel: statusLabelForNode(state.status),
-      statusTone: state.status,
-      statusMessage: state.message,
-      outputPath: outputPath || undefined,
-      outputText: outputText || undefined,
-      outputs,
-      updatedAt: state.updatedAt,
-    };
-  }
-
   private handleNodeDragStateChange(isDragging: boolean): void {
     this.nodeDragInProgress = Boolean(isDragging);
     this.syncGraphInteractionVisualState();
     if (this.nodeDragInProgress) {
-      this.inspectorOverlay?.hide();
       this.nodeContextMenuOverlay?.hide();
       this.nodeActionContextMenuOverlay?.hide();
     }
@@ -2997,11 +2099,6 @@ export class SystemSculptStudioView extends ItemView {
     this.graphViewportEl.classList.toggle("is-zoomed-extreme", zoom <= 0.2);
     this.graphViewportEl.classList.toggle("is-zoomed-micro", zoom <= 0.08);
     this.graphViewportEl.classList.toggle("is-zoom-overview", mode === "overview");
-  }
-
-  private syncInspectorSelection(): void {
-    // Studio config editing is now inline-only on node cards.
-    this.inspectorOverlay?.hide();
   }
 
   private collectRunScope(options?: { fromNodeId?: string }): {
@@ -3045,15 +2142,6 @@ export class SystemSculptStudioView extends ItemView {
         errors.push(`Node "${node.title || node.id}" • ${fieldLabel}: ${error.message}`);
       }
 
-      const transientErrors = this.transientFieldErrorsByNodeId.get(node.id);
-      if (transientErrors) {
-        for (const [fieldKey, message] of transientErrors.entries()) {
-          const fieldLabel =
-            definition.configSchema.fields.find((field) => field.key === fieldKey)?.label ||
-            fieldKey;
-          errors.push(`Node "${node.title || node.id}" • ${fieldLabel}: ${message}`);
-        }
-      }
     }
 
     return {
@@ -3080,6 +2168,15 @@ export class SystemSculptStudioView extends ItemView {
     }
     if (!scope.scopedProject) {
       this.setError("Open a .systemsculpt file from the file explorer first.");
+      return;
+    }
+
+    const blockedNodes = collectStudioHostUnavailableNodes(
+      scope.scopedProject,
+      (node) => this.findNodeDefinition(node)
+    );
+    if (blockedNodes.length > 0) {
+      new Notice(formatStudioHostUnavailableNodesNotice(blockedNodes));
       return;
     }
 
@@ -3830,7 +2927,10 @@ export class SystemSculptStudioView extends ItemView {
     const selectedNodeIds = this.graphInteraction.getSelectedNodeIds();
     const selectedNodeIdSet = new Set(selectedNodeIds);
     const canGroupSelection = selectedNodeIds.length > 1;
-    const target = event.target instanceof HTMLElement ? event.target : null;
+    const target =
+      typeof (event.target as { closest?: unknown } | null)?.closest === "function"
+        ? (event.target as HTMLElement)
+        : null;
     const contextNodeCard = target?.closest<HTMLElement>(".ss-studio-node-card");
     const contextNodeId = String(contextNodeCard?.dataset.nodeId || "").trim();
     if (contextNodeId) {
@@ -4046,7 +3146,6 @@ export class SystemSculptStudioView extends ItemView {
     }
 
     for (const nodeId of idsToRemove) {
-      this.clearTransientFieldErrorsForNode(nodeId);
       this.runPresentation.removeNode(nodeId);
       this.graphInteraction.onNodeRemoved(nodeId);
       this.editingTextNodeIds.delete(nodeId);
@@ -4078,10 +3177,8 @@ export class SystemSculptStudioView extends ItemView {
       return;
     }
     if (context.mode === "overview") {
-      this.inspectorOverlay?.hide();
       return;
     }
-    this.inspectorOverlay?.setGraphZoom(zoom);
     this.nodeContextMenuOverlay?.setGraphZoom(zoom);
     this.nodeActionContextMenuOverlay?.setGraphZoom(zoom);
     this.captureGraphViewportState({ zoomOverride: zoom, requestLayoutSave: true });
@@ -4097,8 +3194,15 @@ export class SystemSculptStudioView extends ItemView {
     if (this.viewportScrollCaptureFrame !== null) {
       return;
     }
-    this.viewportScrollCaptureFrame = window.requestAnimationFrame(() => {
+    const viewport = this.graphViewportEl;
+    if (!viewport) {
+      return;
+    }
+    const ownerWindow = getStudioOwnerWindow(viewport);
+    this.viewportScrollCaptureWindow = ownerWindow;
+    this.viewportScrollCaptureFrame = ownerWindow.requestAnimationFrame(() => {
       this.viewportScrollCaptureFrame = null;
+      this.viewportScrollCaptureWindow = null;
       this.captureGraphViewportState({ requestLayoutSave: true });
     });
   }
@@ -4110,8 +3214,11 @@ export class SystemSculptStudioView extends ItemView {
     }
     viewport.classList.add("is-scrolling");
     this.clearViewportScrollingClassTimer();
-    this.viewportScrollingClassTimer = window.setTimeout(() => {
+    const ownerWindow = getStudioOwnerWindow(viewport);
+    this.viewportScrollingClassTimerWindow = ownerWindow;
+    this.viewportScrollingClassTimer = ownerWindow.setTimeout(() => {
       this.viewportScrollingClassTimer = null;
+      this.viewportScrollingClassTimerWindow = null;
       if (this.graphViewportEl) {
         this.graphViewportEl.classList.remove("is-scrolling");
       }
@@ -4125,11 +3232,8 @@ export class SystemSculptStudioView extends ItemView {
   }
 
   private blurActiveStudioEditableTarget(): void {
-    if (typeof document === "undefined") {
-      return;
-    }
-    const activeElement = document.activeElement;
-    if (!(activeElement instanceof HTMLElement)) {
+    const activeElement = getStudioOwnerDocument(this.contentEl).activeElement;
+    if (!activeElement || typeof (activeElement as { blur?: unknown }).blur !== "function") {
       return;
     }
     if (!this.contentEl.contains(activeElement)) {
@@ -4138,7 +3242,7 @@ export class SystemSculptStudioView extends ItemView {
     if (!this.isEditableKeyboardTarget(activeElement)) {
       return;
     }
-    activeElement.blur();
+    (activeElement as HTMLElement).blur();
   }
 
   private handleGraphViewportPointerDown(event: PointerEvent): void {
@@ -4146,350 +3250,6 @@ export class SystemSculptStudioView extends ItemView {
       return;
     }
     this.blurActiveStudioEditableTarget();
-  }
-
-  private handleGraphViewportPointerMove(event: PointerEvent): void {
-    const viewport = this.graphViewportEl;
-    if (!viewport) {
-      return;
-    }
-    const rect = viewport.getBoundingClientRect();
-    const localX = event.clientX - rect.left;
-    const localY = event.clientY - rect.top;
-    if (!Number.isFinite(localX) || !Number.isFinite(localY)) {
-      return;
-    }
-    const zoom = this.graphInteraction.getGraphZoom() || 1;
-    this.lastGraphPointerPosition = {
-      x: (viewport.scrollLeft + localX) / zoom,
-      y: (viewport.scrollTop + localY) / zoom,
-    };
-  }
-
-  private resolveGraphPositionFromClientPoint(clientX: number, clientY: number): { x: number; y: number } | null {
-    const viewport = this.graphViewportEl;
-    if (!viewport) {
-      return null;
-    }
-    const rect = viewport.getBoundingClientRect();
-    const localX = clientX - rect.left;
-    const localY = clientY - rect.top;
-    if (!Number.isFinite(localX) || !Number.isFinite(localY)) {
-      return null;
-    }
-    const zoom = this.graphInteraction.getGraphZoom() || 1;
-    return {
-      x: (viewport.scrollLeft + localX) / zoom,
-      y: (viewport.scrollTop + localY) / zoom,
-    };
-  }
-
-  private resolveVaultPathFromAbsoluteFilePath(absolutePath: string): string | null {
-    const normalizedAbsolute = normalizePath(String(absolutePath || "").trim().replace(/\\/g, "/"));
-    if (!normalizedAbsolute) {
-      return null;
-    }
-    const adapter = this.app.vault.adapter as any;
-    const basePathRaw =
-      typeof adapter?.basePath === "string" ? String(adapter.basePath).trim().replace(/\\/g, "/") : "";
-    if (!basePathRaw) {
-      return null;
-    }
-    const basePath = normalizePath(basePathRaw);
-    if (!normalizedAbsolute.startsWith(`${basePath}/`)) {
-      return null;
-    }
-    const relative = normalizedAbsolute.slice(basePath.length + 1);
-    return relative ? normalizePath(relative) : null;
-  }
-
-  private readDataTransferStringItem(item: DataTransferItem): Promise<string> {
-    return new Promise((resolve) => {
-      try {
-        item.getAsString((value) => {
-          resolve(typeof value === "string" ? value : "");
-        });
-      } catch {
-        resolve("");
-      }
-    });
-  }
-
-  private async collectDroppedVaultItems(dataTransfer: DataTransfer): Promise<{
-    notePaths: string[];
-    folderPaths: string[];
-    unsupportedPaths: string[];
-    vaultMediaPaths: string[];
-    externalMediaFiles: File[];
-  }> {
-    const references = new Set<string>();
-    const pushReference = (value: string): void => {
-      const next = String(value || "").trim();
-      if (!next) {
-        return;
-      }
-      references.add(next);
-    };
-
-    const payloads = new Set<string>();
-    const pushPayload = (value: string): void => {
-      const next = String(value || "").trim();
-      if (!next) {
-        return;
-      }
-      payloads.add(next);
-    };
-
-    const vaultMediaPaths = new Set<string>();
-    const externalMediaFiles: File[] = [];
-    const externalMediaSeenKeys = new Set<string>();
-    const pushExternalMediaFile = (file: File): void => {
-      const key = `${file.name}:${file.type}:${file.size}:${file.lastModified}`;
-      if (externalMediaSeenKeys.has(key)) {
-        return;
-      }
-      externalMediaSeenKeys.add(key);
-      externalMediaFiles.push(file);
-    };
-
-    for (const preferredType of ["text/plain", "text/uri-list", "application/json"]) {
-      try {
-        pushPayload(dataTransfer.getData(preferredType));
-      } catch {
-        // Continue through best-effort fallbacks.
-      }
-    }
-    for (const type of Array.from(dataTransfer.types || [])) {
-      const normalizedType = String(type || "").toLowerCase();
-      if (
-        !normalizedType.startsWith("text/") &&
-        !normalizedType.includes("json") &&
-        !normalizedType.includes("uri")
-      ) {
-        continue;
-      }
-      try {
-        pushPayload(dataTransfer.getData(type));
-      } catch {
-        // Continue through best-effort fallbacks.
-      }
-    }
-    for (const item of Array.from(dataTransfer.items || [])) {
-      if (item.kind !== "string") {
-        continue;
-      }
-      pushPayload(await this.readDataTransferStringItem(item));
-    }
-    for (const payload of payloads) {
-      for (const reference of parsePathReferencesFromText(payload)) {
-        pushReference(reference);
-      }
-    }
-
-    for (const file of Array.from(dataTransfer.files || [])) {
-      const absolutePath =
-        typeof (file as unknown as { path?: unknown }).path === "string"
-          ? String((file as unknown as { path?: string }).path)
-          : "";
-      if (isMediaMimeType(file.type)) {
-        const vaultPath = absolutePath
-          ? this.resolveVaultPathFromAbsoluteFilePath(absolutePath)
-          : "";
-        if (vaultPath) {
-          vaultMediaPaths.add(vaultPath);
-        } else {
-          pushExternalMediaFile(file);
-        }
-        continue;
-      }
-      if (!absolutePath) {
-        continue;
-      }
-      const vaultPath = this.resolveVaultPathFromAbsoluteFilePath(absolutePath);
-      if (vaultPath) {
-        pushReference(vaultPath);
-      }
-    }
-
-    const notePaths = new Set<string>();
-    const folderPaths = new Set<string>();
-    const unsupportedPaths = new Set<string>();
-    for (const reference of references) {
-      const item = resolveVaultItemFromReference({
-        reference,
-        getAbstractFileByPath: (path) => this.app.vault.getAbstractFileByPath(path),
-        resolveVaultPathFromAbsoluteFilePath: (absolutePath) =>
-          this.resolveVaultPathFromAbsoluteFilePath(absolutePath),
-      });
-      if (this.isMarkdownVaultFile(item)) {
-        notePaths.add(item.path);
-        continue;
-      }
-      if (this.isVaultFolder(item)) {
-        folderPaths.add(item.path);
-        continue;
-      }
-      if (item instanceof TFile) {
-        if (isMediaIngestableExtension(item.extension)) {
-          vaultMediaPaths.add(item.path);
-        } else {
-          unsupportedPaths.add(item.path);
-        }
-      }
-    }
-    return {
-      notePaths: Array.from(notePaths),
-      folderPaths: Array.from(folderPaths),
-      unsupportedPaths: Array.from(unsupportedPaths),
-      vaultMediaPaths: Array.from(vaultMediaPaths),
-      externalMediaFiles,
-    };
-  }
-
-  private handleGraphViewportDragOver(event: DragEvent): void {
-    if (!event.dataTransfer) {
-      return;
-    }
-    event.preventDefault();
-    event.stopPropagation();
-    if (this.busy || !this.currentProject || !this.currentProjectPath) {
-      return;
-    }
-    event.dataTransfer.dropEffect = "copy";
-  }
-
-  private async handleGraphViewportDrop(event: DragEvent): Promise<void> {
-    if (!event.dataTransfer) {
-      return;
-    }
-    event.preventDefault();
-    event.stopPropagation();
-    if (this.busy || !this.currentProject || !this.currentProjectPath) {
-      return;
-    }
-
-    const dropped = await this.collectDroppedVaultItems(event.dataTransfer);
-    const totalCollected =
-      dropped.notePaths.length +
-      dropped.folderPaths.length +
-      dropped.unsupportedPaths.length +
-      dropped.vaultMediaPaths.length +
-      dropped.externalMediaFiles.length;
-    if (totalCollected === 0) {
-      const hasPayload =
-        (event.dataTransfer.types?.length || 0) > 0 || (event.dataTransfer.files?.length || 0) > 0;
-      if (hasPayload) {
-        new Notice("Drop a markdown note or media file to create a node.");
-      }
-      return;
-    }
-
-    if (dropped.folderPaths.length > 0) {
-      new Notice("Dropping folders into Studio is not supported yet.");
-    }
-
-    const anchor =
-      this.resolveGraphPositionFromClientPoint(event.clientX, event.clientY) ||
-      this.resolvePasteAnchorPosition();
-
-    let handledSomething = false;
-
-    if (dropped.vaultMediaPaths.length > 0 || dropped.externalMediaFiles.length > 0) {
-      try {
-        await this.dropMediaIntoStudio({
-          vaultMediaPaths: dropped.vaultMediaPaths,
-          externalMediaFiles: dropped.externalMediaFiles,
-          anchor,
-        });
-        handledSomething = true;
-      } catch (error) {
-        this.setError(error);
-      }
-    }
-
-    if (dropped.notePaths.length > 0) {
-      await this.insertVaultNoteNodes(dropped.notePaths, anchor, {
-        source: "drop",
-      });
-      handledSomething = true;
-    }
-
-    if (!handledSomething && dropped.unsupportedPaths.length > 0) {
-      new Notice("Only markdown notes and media files can be dropped into Studio.");
-    }
-  }
-
-  private async dropMediaIntoStudio(options: {
-    vaultMediaPaths: string[];
-    externalMediaFiles: File[];
-    anchor: { x: number; y: number };
-  }): Promise<void> {
-    if (!this.currentProject || !this.currentProjectPath) {
-      return;
-    }
-    const mediaDefinition = this.nodeDefinitions.find(
-      (definition) => definition.kind === "studio.media_ingest"
-    );
-    if (!mediaDefinition) {
-      throw new Error("Media node definition is unavailable.");
-    }
-
-    const { vaultMediaPaths, externalMediaFiles, anchor } = options;
-    const project = this.currentProject;
-    const newNodes: StudioNodeInstance[] = [];
-
-    const pushNodeForPath = (sourcePath: string): void => {
-      newNodes.push(
-        buildMediaIngestNode({
-          mediaDefinition,
-          sourcePath,
-          anchor,
-          index: newNodes.length,
-          nextNodeId: () => randomId("node"),
-          normalizeNodePosition: (position) => this.normalizeNodePosition(position),
-          prettifyNodeKind,
-          cloneConfigDefaults: (definition) => cloneConfigDefaults(definition),
-        })
-      );
-    };
-
-    for (const vaultPath of vaultMediaPaths) {
-      pushNodeForPath(vaultPath);
-    }
-
-    if (externalMediaFiles.length > 0) {
-      const studio = this.plugin.getStudioService();
-      for (const file of externalMediaFiles) {
-        const mimeType = normalizePastedMediaMimeType(file.type);
-        const bytes = await file.arrayBuffer();
-        const asset = await studio.storeAsset(this.currentProjectPath, bytes, mimeType);
-        pushNodeForPath(asset.path);
-      }
-    }
-
-    if (newNodes.length === 0) {
-      return;
-    }
-
-    const changed = this.commitCurrentProjectMutation("graph.node.create", (currentProject) => {
-      currentProject.graph.nodes.push(...newNodes);
-      return true;
-    });
-    if (!changed) {
-      return;
-    }
-
-    const lastNode = newNodes[newNodes.length - 1];
-    this.graphInteraction.selectOnlyNode(lastNode.id);
-    this.graphInteraction.clearPendingConnection();
-    this.recomputeEntryNodes(project);
-    this.render();
-
-    new Notice(
-      newNodes.length === 1
-        ? "Added 1 media file as a Media node."
-        : `Added ${newNodes.length} media files as Media nodes.`
-    );
   }
 
   private async revealPathInFinder(path: string): Promise<void> {
@@ -4526,7 +3286,7 @@ export class SystemSculptStudioView extends ItemView {
       return;
     }
 
-    const runtimeRequire = typeof window !== "undefined" ? (window as any)?.require : null;
+    const runtimeRequire = (getStudioOwnerWindow(this.contentEl) as any)?.require;
     const electron = typeof runtimeRequire === "function" ? runtimeRequire("electron") : null;
     const shell = electron?.shell;
     try {
@@ -4650,8 +3410,6 @@ export class SystemSculptStudioView extends ItemView {
       onNodeGeometryMutated: () => {
         this.graphInteraction.notifyNodePositionsChanged();
       },
-      resolveDynamicSelectOptions: (source, node) =>
-        this.resolveDynamicSelectOptionsForNode(source, node),
       isTextNodeEditing: (nodeId) => this.isTextNodeEditing(nodeId),
       consumeTextNodeAutoFocus: (nodeId) => this.consumeTextNodeAutoFocus(nodeId),
       consumeTextNodeFocusPoint: (nodeId) => this.consumeTextNodeFocusPoint(nodeId),
@@ -4666,15 +3424,13 @@ export class SystemSculptStudioView extends ItemView {
       onRevealPathInFinder: (path) => {
         void this.revealPathInFinder(path);
       },
+      pathBrowseOptions: this.pathBrowseOptions(),
       resolveNodeBadge: (node) => this.resolveNodeCardBadge(node),
     });
 
     this.graphViewportEl = result.viewportEl;
-    this.graphViewportProjectPath = this.currentProjectPath;
     if (!this.graphViewportEl || !this.currentProject) {
-      this.graphViewportProjectPath = null;
       this.nodeDragInProgress = false;
-      this.inspectorOverlay?.hide();
       this.nodeContextMenuOverlay?.hide();
       this.nodeActionContextMenuOverlay?.hide();
       return;
@@ -4687,28 +3443,15 @@ export class SystemSculptStudioView extends ItemView {
     this.graphViewportEl.addEventListener("pointerdown", (event) => {
       this.handleGraphViewportPointerDown(event);
     }, true);
-    this.graphViewportEl.addEventListener("pointermove", (event) => {
-      this.handleGraphViewportPointerMove(event);
-    }, { passive: true });
-    this.graphViewportEl.addEventListener("pointerleave", () => {
-      this.lastGraphPointerPosition = null;
-    }, { passive: true });
-    this.graphViewportEl.addEventListener("dragover", (event) => {
-      this.handleGraphViewportDragOver(event);
-    });
-    this.graphViewportEl.addEventListener("drop", (event) => {
-      void this.handleGraphViewportDrop(event);
-    });
+    this.clipboardAndDropController.bindViewport(this.graphViewportEl);
     this.restoreGraphViewportState(this.graphViewportEl);
     this.syncGraphZoomVisualState();
     const contextMenu = this.ensureNodeContextMenuOverlay();
     const nodeActionMenu = this.ensureNodeActionContextMenuOverlay();
-    this.inspectorOverlay?.hide();
     contextMenu.setGraphZoom(this.graphInteraction.getGraphZoom());
     nodeActionMenu.setGraphZoom(this.graphInteraction.getGraphZoom());
     contextMenu.mount(this.graphViewportEl);
     nodeActionMenu.mount(this.graphViewportEl);
-    this.syncInspectorSelection();
   }
 
   private captureGraphViewportState(options?: {
@@ -4716,68 +3459,11 @@ export class SystemSculptStudioView extends ItemView {
     requestLayoutSave?: boolean;
     allowOverview?: boolean;
   }): void {
-    const viewport = this.graphViewportEl;
-    const projectPath = this.graphViewportProjectPath;
-    if (!viewport || !projectPath) {
-      this.pendingViewportState = null;
-      return;
-    }
-    if (this.graphZoomMode === "overview" && options?.allowOverview !== true) {
-      return;
-    }
-
-    const snapshot: StudioGraphViewState = {
-      scrollLeft: normalizeGraphCoordinate(viewport.scrollLeft),
-      scrollTop: normalizeGraphCoordinate(viewport.scrollTop),
-      zoom: normalizeGraphZoom(
-        options?.zoomOverride ?? this.graphInteraction.getGraphZoom()
-      ),
-    };
-    this.pendingViewportState = { ...snapshot, projectPath };
-    const nextGraphViewState = upsertGraphViewStateForProject(
-      this.graphViewStateByProjectPath,
-      projectPath,
-      snapshot
-    );
-    this.graphViewStateByProjectPath = nextGraphViewState.nextStateByProjectPath;
-    if (nextGraphViewState.changed && options?.requestLayoutSave) {
-      this.scheduleLayoutSave();
-    }
+    this.projectSessionController.captureGraphViewportState(options);
   }
 
   private restoreGraphViewportState(viewport: HTMLElement): void {
-    const pending = this.pendingViewportState;
-    this.pendingViewportState = null;
-    const currentProjectPath = this.currentProjectPath;
-    if (!currentProjectPath) {
-      return;
-    }
-
-    const restoredState = pending && pending.projectPath === currentProjectPath
-      ? pending
-      : getSavedGraphViewState(this.graphViewStateByProjectPath, currentProjectPath);
-    if (!restoredState) {
-      return;
-    }
-
-    const nextZoom = normalizeGraphZoom(restoredState.zoom);
-    this.graphZoomMode = "interactive";
-    this.graphZoomGestureInFlight = false;
-    this.graphInteraction.setGraphZoom(nextZoom, { mode: "interactive" });
-
-    const nextLeft = normalizeGraphCoordinate(restoredState.scrollLeft);
-    const nextTop = normalizeGraphCoordinate(restoredState.scrollTop);
-    viewport.scrollLeft = nextLeft;
-    viewport.scrollTop = nextTop;
-
-    // Ensure position is retained after the browser finishes layout.
-    window.requestAnimationFrame(() => {
-      if (this.graphViewportEl !== viewport) {
-        return;
-      }
-      viewport.scrollLeft = nextLeft;
-      viewport.scrollTop = nextTop;
-    });
+    this.projectSessionController.restoreGraphViewportState(viewport);
   }
 
   /**
@@ -4805,30 +3491,21 @@ export class SystemSculptStudioView extends ItemView {
     this.nodeContextMenuOverlay?.hide();
     this.nodeActionContextMenuOverlay?.hide();
     this.nodeDragInProgress = false;
+    this.clipboardAndDropController.bindViewport(null);
     this.graphViewportEl = null;
-    this.graphViewportProjectPath = null;
-    this.lastGraphPointerPosition = null;
 
     this.contentEl.empty();
     const root = this.contentEl.createDiv({ cls: "ss-studio-view" });
-
-    if (!Platform.isDesktopApp) {
-      this.inspectorOverlay?.hide();
-      root.createEl("p", {
-        text: "SystemSculpt Studio is desktop-only.",
-        cls: "ss-studio-warning",
-      });
-      return;
-    }
+    applyPluginSurface(root, "view");
 
     if (this.lastError) {
-      root.createEl("div", {
+      root.createDiv({
         text: this.lastError,
         cls: "ss-studio-error",
       });
     }
     if (this.projectLiveSyncWarning) {
-      root.createEl("div", {
+      root.createDiv({
         text: this.projectLiveSyncWarning,
         cls: "ss-studio-warning",
       });

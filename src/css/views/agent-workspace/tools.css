@@ -1,0 +1,237 @@
+/**
+ * Agent workspace tools: compact tool-call disclosures, approval cards, and
+ * artifact rows.
+ */
+
+.systemsculpt-agent-part.is-tool {
+  overflow: visible;
+}
+
+.systemsculpt-agent-part.is-error {
+  overflow: hidden;
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-md);
+  background: var(--ss-surface-1);
+}
+
+.systemsculpt-agent-tool-details {
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-sm);
+}
+
+.systemsculpt-agent-tool-details.is-static .systemsculpt-agent-tool-disclosure,
+.systemsculpt-agent-tool-details.is-static .systemsculpt-agent-tool-details-body {
+  display: none;
+}
+
+.systemsculpt-agent-tool-details.is-static > .systemsculpt-agent-tool-header {
+  cursor: default;
+}
+
+.systemsculpt-agent-tool-header {
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-1);
+  min-height: var(--ss-control-height-sm);
+  padding: 0 var(--ss-space-1);
+  border-radius: var(--ss-radius-sm);
+  cursor: pointer;
+  list-style: none;
+  transition: var(--ss-transition-colors);
+}
+
+.systemsculpt-agent-tool-header::-webkit-details-marker {
+  display: none;
+}
+
+.systemsculpt-agent-tool-header:hover,
+.systemsculpt-agent-tool-header:focus-visible,
+.systemsculpt-agent-tool-details[open] > .systemsculpt-agent-tool-header {
+  background: var(--ss-state-hover);
+}
+
+.systemsculpt-agent-tool-header:focus-visible {
+  outline: none;
+  box-shadow: var(--ss-ring);
+}
+
+.systemsculpt-agent-tool-disclosure,
+.systemsculpt-agent-tool-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: var(--ss-ink-faint);
+}
+
+.systemsculpt-agent-tool-disclosure {
+  transition: transform var(--ss-dur-fast) var(--ss-ease);
+}
+
+.systemsculpt-agent-tool-details[open] .systemsculpt-agent-tool-disclosure {
+  transform: rotate(90deg);
+}
+
+.systemsculpt-agent-tool-header svg {
+  width: var(--ss-icon-size-sm);
+  height: var(--ss-icon-size-sm);
+}
+
+.systemsculpt-agent-tool-state {
+  margin-left: auto;
+  flex: 0 0 auto;
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-xs);
+}
+
+.systemsculpt-agent-tool-header strong {
+  flex: 0 0 auto;
+  font-size: var(--ss-text-sm);
+  font-weight: var(--ss-weight-medium);
+}
+
+.systemsculpt-agent-tool-summary {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ss-ink-faint);
+  font-size: var(--ss-text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.systemsculpt-agent-part.is-tool.is-succeeded .systemsculpt-agent-tool-icon {
+  color: var(--ss-success);
+}
+
+.systemsculpt-agent-part.is-tool.is-failed,
+.systemsculpt-agent-part.is-tool.is-cancelled,
+.systemsculpt-agent-part.is-tool.is-outcome-unknown,
+.systemsculpt-agent-part.is-error {
+  color: var(--ss-danger);
+}
+
+.systemsculpt-agent-tool-details-body {
+  margin: var(--ss-space-1) 0 var(--ss-space-1) var(--ss-space-4);
+  overflow: hidden;
+  border-left: 1px solid var(--ss-line);
+  border-radius: 0 var(--ss-radius-sm) var(--ss-radius-sm) 0;
+  background: var(--ss-surface-1);
+}
+
+.systemsculpt-agent-tool-details-body pre {
+  max-height: var(--ss-agent-tool-details-height);
+  margin: 0;
+  padding: var(--ss-space-2) var(--ss-space-3);
+  overflow: auto;
+  background: var(--ss-surface-sunken);
+  font-family: var(--ss-font-mono);
+  font-size: var(--ss-text-xs);
+  white-space: pre-wrap;
+}
+
+.systemsculpt-agent-tool-details-body pre + .systemsculpt-agent-tool-details-label,
+.systemsculpt-agent-tool-details-body pre + .systemsculpt-agent-artifact {
+  border-top: 1px solid var(--ss-line);
+}
+
+.systemsculpt-agent-tool-details-label {
+  padding: var(--ss-space-2) var(--ss-space-3) var(--ss-space-1);
+  color: var(--ss-ink-faint);
+  font-size: var(--ss-text-xs);
+  font-weight: var(--ss-weight-semibold);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.systemsculpt-agent-tool-error {
+  padding: var(--ss-space-2) var(--ss-space-3);
+  font-size: var(--ss-text-sm);
+  color: var(--ss-danger);
+}
+
+.systemsculpt-agent-error-retry {
+  align-self: flex-start;
+  margin-top: var(--ss-space-2);
+}
+
+.systemsculpt-agent-approval {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--ss-space-3);
+  margin-top: var(--ss-space-1);
+  padding: var(--ss-space-3);
+  border: 1px solid var(--ss-warning-line);
+  border-radius: var(--ss-radius-md);
+  background: var(--ss-warning-tint);
+}
+
+.systemsculpt-agent-approval-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--ss-space-2);
+}
+
+.systemsculpt-agent-approval-actions > .ss-button {
+  padding-inline: var(--ss-space-3);
+}
+
+.systemsculpt-agent-approval-preview {
+  grid-column: 1 / -1;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--ss-warning-line);
+  border-radius: var(--ss-radius-sm);
+  background: var(--ss-surface-0);
+}
+
+.systemsculpt-agent-approval-preview .systemsculpt-inline-ops__body {
+  padding: var(--ss-space-2) var(--ss-space-3);
+}
+
+.systemsculpt-agent-approval-preview .systemsculpt-inline-diff__body + .systemsculpt-inline-diff__body {
+  border-top: 1px solid var(--ss-warning-line);
+}
+
+.systemsculpt-agent-approval-preview .systemsculpt-inline-ops ul {
+  margin: 0;
+  padding-left: var(--ss-space-4);
+}
+
+.systemsculpt-agent-approval-preview code {
+  overflow-wrap: anywhere;
+}
+
+.systemsculpt-agent-artifact {
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-2);
+  min-height: var(--ss-control-height);
+  padding: var(--ss-space-1) var(--ss-space-2) var(--ss-space-1) var(--ss-space-3);
+}
+
+.systemsculpt-agent-artifact-copy {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.systemsculpt-agent-artifact-copy > div {
+  overflow: hidden;
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.systemsculpt-agent-artifact-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ss-space-1);
+  margin-left: auto;
+}
+
+.systemsculpt-agent-inline-button {
+  width: var(--ss-control-height-sm);
+  height: var(--ss-control-height-sm);
+  min-width: var(--ss-control-height-sm);
+  min-height: var(--ss-control-height-sm);
+}

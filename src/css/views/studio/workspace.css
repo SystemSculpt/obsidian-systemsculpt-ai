@@ -1,0 +1,240 @@
+/* ------------------------------------------------------------------ *
+ * Workspace, viewport, canvas
+ * ------------------------------------------------------------------ */
+.ss-studio-graph-workspace {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.ss-studio-graph-viewport {
+  position: relative;
+  flex: 1;
+  height: 100%;
+  overflow: auto;
+  touch-action: none;
+  contain: layout style;
+  background-color: var(--ss-surface-sunken);
+  background-image:
+    radial-gradient(color-mix(in srgb, var(--ss-line-strong) 70%, transparent) 1px, transparent 1px),
+    radial-gradient(color-mix(in srgb, var(--ss-line) 60%, transparent) 1px, transparent 1px);
+  background-size: 400px 400px, 40px 40px;
+  background-attachment: local;
+}
+
+.ss-studio-graph-viewport.is-zoom-overview {
+  background-size: 2000px 2000px, 200px 200px;
+}
+
+.ss-studio-graph-surface,
+.ss-studio-graph-canvas {
+  position: relative;
+  contain: layout style;
+}
+
+.ss-studio-graph-canvas {
+  transform-origin: 0 0;
+}
+
+/* Layers */
+.ss-studio-groups-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: auto;
+}
+
+.ss-studio-edges-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  contain: layout paint style;
+}
+
+.ss-studio-nodes-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.ss-studio-group-tags-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+}
+
+/* Marquee select */
+.ss-studio-marquee-select {
+  position: absolute;
+  z-index: 4;
+  display: none;
+  border: 1px dashed var(--ss-accent);
+  background-color: color-mix(in srgb, var(--ss-accent) 10%, transparent);
+  border-radius: var(--ss-radius-xs);
+  pointer-events: none;
+}
+
+.ss-studio-marquee-select.is-active {
+  display: block;
+}
+
+/* Smart alignment guides (drag snapping) */
+.ss-studio-snap-guides-layer {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 5;
+  pointer-events: none;
+}
+
+.ss-studio-snap-guide {
+  position: absolute;
+  background-color: var(--ss-accent);
+}
+
+.ss-studio-snap-guide.is-vertical {
+  width: 1px;
+}
+
+.ss-studio-snap-guide.is-horizontal {
+  height: 1px;
+}
+
+.ss-studio-snap-gap-span {
+  position: absolute;
+  background-color: color-mix(in srgb, var(--ss-accent) 55%, transparent);
+}
+
+.ss-studio-snap-gap-span.is-horizontal {
+  height: 1px;
+}
+
+.ss-studio-snap-gap-span.is-vertical {
+  width: 1px;
+}
+
+.ss-studio-snap-gap-badge {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  padding: 1px var(--ss-space-1);
+  background-color: var(--ss-accent);
+  color: var(--ss-ink-on-accent);
+  font-size: var(--ss-text-xs);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.4;
+  border-radius: var(--ss-radius-xs);
+  white-space: nowrap;
+}
+
+/* Workspace controls (floating toolbar) */
+.ss-studio-graph-workspace-controls {
+  position: absolute;
+  top: var(--ss-space-3);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 8;
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-1);
+  padding: var(--ss-space-1);
+  background-color: var(--ss-surface-0);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-full);
+  box-shadow: var(--ss-elevation-2);
+  pointer-events: auto;
+}
+
+.ss-studio-graph-workspace-control-button {
+  background: transparent;
+  border-color: transparent;
+  border-radius: var(--ss-radius-full);
+  color: var(--ss-ink-muted);
+}
+
+.ss-studio-graph-workspace-control-button:hover {
+  color: var(--ss-ink);
+}
+
+.ss-studio-graph-workspace-control-button.is-run {
+  color: var(--ss-success);
+}
+
+.ss-studio-graph-workspace-control-button.is-run:hover {
+  background-color: var(--ss-success-tint);
+}
+
+.ss-studio-graph-workspace-control-zoom-row {
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-0);
+}
+
+.ss-studio-graph-workspace-control-zoom-label {
+  display: grid;
+  place-items: center;
+  min-width: var(--ss-touch-target);
+  font-size: var(--ss-text-xs);
+  color: var(--ss-ink-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The floating chrome responds to the Studio leaf, not the app window.
+ * Canvas geometry and layer coordinates stay unchanged. */
+@container ss-surface (max-width: 720px) {
+  .ss-studio-graph-workspace-controls {
+    right: var(--ss-space-2);
+    left: var(--ss-space-2);
+    justify-content: center;
+    flex-wrap: wrap;
+    transform: none;
+    border-radius: var(--ss-radius-lg);
+  }
+}
+
+@container ss-surface (max-width: 420px) {
+  .ss-studio-graph-workspace-controls {
+    top: var(--ss-space-2);
+    gap: var(--ss-space-0);
+  }
+
+  .ss-studio-graph-workspace-control-button {
+    padding-inline: var(--ss-space-2);
+  }
+}
+
+@media (pointer: coarse) {
+  .ss-studio-graph-workspace-control-button {
+    min-height: var(--ss-touch-target);
+  }
+}
+
+/* Empty state */
+.ss-studio-empty-state {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  color: var(--ss-ink-muted);
+  text-align: center;
+}
+
+/* Errors / warnings at view level */
+.ss-studio-error {
+  padding: var(--ss-space-3);
+  background-color: var(--ss-danger-tint);
+  border: 1px solid var(--ss-danger-line);
+  border-radius: var(--ss-radius-sm);
+  color: var(--ss-danger);
+  font-size: var(--ss-text-sm);
+}
+
+.ss-studio-warning {
+  padding: var(--ss-space-3);
+  background-color: var(--ss-warning-tint);
+  border: 1px solid var(--ss-warning-line);
+  border-radius: var(--ss-radius-sm);
+  color: var(--ss-warning);
+  font-size: var(--ss-text-sm);
+}

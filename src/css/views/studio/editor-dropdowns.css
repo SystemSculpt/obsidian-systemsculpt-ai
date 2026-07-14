@@ -1,0 +1,131 @@
+/* ------------------------------------------------------------------ *
+ * Searchable dropdown
+ * ------------------------------------------------------------------ */
+.ss-studio-searchable-select {
+  position: relative;
+  min-width: 0;
+}
+
+.ss-studio-searchable-select-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ss-space-2);
+  width: 100%;
+  min-height: var(--ss-control-height-sm);
+  padding: 0 var(--ss-space-2);
+  background-color: var(--ss-surface-sunken);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-xs);
+  color: var(--ss-ink);
+  font-size: var(--ss-text-sm);
+  cursor: pointer;
+  transition: var(--ss-transition-colors);
+}
+
+.ss-studio-searchable-select-trigger:hover {
+  border-color: var(--ss-line-strong);
+}
+
+.ss-studio-searchable-select-trigger-label {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ss-studio-searchable-select-trigger-chevron {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  color: var(--ss-ink-faint);
+  transition: transform var(--ss-dur-fast) var(--ss-ease);
+}
+
+.ss-studio-searchable-select.is-open .ss-studio-searchable-select-trigger-chevron {
+  transform: rotate(180deg);
+}
+
+.ss-studio-searchable-select-panel {
+  position: absolute;
+  top: calc(100% + var(--ss-space-1));
+  left: 0;
+  right: 0;
+  z-index: 12;
+  display: flex;
+  flex-direction: column;
+  max-height: 240px;
+  background-color: var(--ss-surface-2);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-sm);
+  box-shadow: var(--ss-elevation-3);
+  overflow: hidden;
+}
+
+/* Fallback when the viewport width cannot be measured — pin the panel to
+   the trigger's width (computed positioning is inline otherwise). */
+.ss-studio-searchable-select-panel--full-width {
+  left: 0;
+  right: auto;
+  width: 100%;
+}
+
+.ss-studio-searchable-select-search {
+  padding: var(--ss-space-1);
+  border-bottom: 1px solid var(--ss-line);
+}
+
+.ss-studio-searchable-select-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--ss-space-1);
+}
+
+.ss-studio-searchable-select-item {
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-2);
+  padding: var(--ss-space-1) var(--ss-space-2);
+  border-radius: var(--ss-radius-xs);
+  font-size: var(--ss-text-sm);
+  cursor: pointer;
+  transition: var(--ss-transition-colors);
+}
+
+.ss-studio-searchable-select-item:hover {
+  background-color: var(--ss-state-hover);
+}
+
+.ss-studio-searchable-select-item.is-selected {
+  background-color: var(--ss-accent-tint);
+}
+
+.ss-studio-searchable-select-item-label,
+.ss-studio-searchable-select-item-title {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ss-studio-searchable-select-item-description {
+  font-size: var(--ss-text-xs);
+  color: var(--ss-ink-muted);
+}
+
+.ss-studio-searchable-select-item-badge{
+  margin-left: auto;
+  padding: 0 var(--ss-space-1);
+  border-radius: var(--ss-radius-full);
+  background-color: var(--ss-surface-1);
+  font-size: var(--ss-text-xs);
+  color: var(--ss-ink-muted);
+}
+
+.ss-studio-searchable-select-empty {
+  padding: var(--ss-space-2);
+  font-size: var(--ss-text-xs);
+  color: var(--ss-ink-faint);
+  text-align: center;
+}

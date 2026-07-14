@@ -11,9 +11,9 @@ export async function displayEmbeddingsTabContent(containerEl: HTMLElement, tabI
     containerEl.dataset.tab = "knowledge";
   }
 
-  containerEl.createEl("h3", { text: "Embeddings" });
+  containerEl.createEl("h3", { text: "Semantic search" });
   containerEl.createEl("p", {
-    text: "Enable semantic search to find similar notes by meaning instead of keywords.",
+    text: "Find related notes by meaning.",
     cls: "setting-item-description",
   });
 
@@ -30,8 +30,8 @@ export async function displayEmbeddingsTabContent(containerEl: HTMLElement, tabI
 async function renderCoreSettingsSection(containerEl: HTMLElement, tabInstance: SystemSculptSettingTab): Promise<boolean> {
   const { plugin } = tabInstance;
   new Setting(containerEl)
-    .setName("Enable embeddings")
-    .setDesc("Turn on semantic search for your vault.")
+    .setName("Similar notes")
+    .setDesc("Build a semantic index for your vault.")
     .addToggle((toggle) => {
       toggle
         .setValue(plugin.settings.embeddingsEnabled || false)
@@ -39,16 +39,16 @@ async function renderCoreSettingsSection(containerEl: HTMLElement, tabInstance: 
           await plugin.getSettingsManager().updateSettings({ embeddingsEnabled: value });
 
           if (value) {
-            new Notice("Embeddings enabled.");
-            plugin.embeddingsStatusBar?.startMonitoring();
+            new Notice("Similar notes enabled.");
             try {
-              plugin.getOrCreateEmbeddingsManager();
-            } catch (error: any) {
-              const message = error?.message || error || "Failed to initialize embeddings.";
-              new Notice(typeof message === "string" ? message : "Failed to initialize embeddings.");
+              const manager = plugin.getOrCreateEmbeddingsManager();
+              plugin.embeddingsStatusBar?.startMonitoring(manager);
+            } catch (error: unknown) {
+              const message = error instanceof Error ? error.message : "Failed to initialize embeddings.";
+              new Notice(message);
             }
           } else {
-            new Notice("Embeddings disabled.");
+            new Notice("Similar notes disabled.");
             plugin.embeddingsStatusBar?.stopMonitoring();
           }
 
@@ -61,26 +61,13 @@ async function renderCoreSettingsSection(containerEl: HTMLElement, tabInstance: 
     return false;
   }
 
-  if ((plugin.settings.embeddingsProvider || "systemsculpt") !== "systemsculpt") {
-    plugin.settings.embeddingsProvider = "systemsculpt";
-    await plugin.getSettingsManager().updateSettings({ embeddingsProvider: "systemsculpt" });
-  }
-
-  new Setting(containerEl)
-    .setName("Embeddings execution")
-    .setDesc(
-      plugin.settings.licenseKey?.trim()
-        ? "Embeddings always run through SystemSculpt across desktop and mobile."
-        : "Embeddings run through SystemSculpt and require an active SystemSculpt license."
-    );
-
   return true;
 }
 
 async function renderProcessingSection(containerEl: HTMLElement, tabInstance: SystemSculptSettingTab) {
   const { plugin } = tabInstance;
 
-  const statusSetting = new Setting(containerEl).setName("Processing status");
+  const statusSetting = new Setting(containerEl).setName("Index status");
   const statusText = statusSetting.descEl.createSpan();
 
   const refreshStatus = async () => {
@@ -109,11 +96,11 @@ async function renderProcessingSection(containerEl: HTMLElement, tabInstance: Sy
         button.setDisabled(true);
         try {
           const manager = plugin.getOrCreateEmbeddingsManager();
-          await manager.awaitReady?.();
+          await manager.awaitReady();
           new EmbeddingsPendingFilesModal(plugin.app, plugin).open();
-        } catch (error: any) {
-          const message = error?.message || error || "Unable to open remaining files.";
-          new Notice(typeof message === "string" ? message : "Unable to open remaining files.");
+        } catch (error: unknown) {
+          const message = error instanceof Error ? error.message : "Unable to open remaining files.";
+          new Notice(message);
         } finally {
           button.setDisabled(false);
         }
@@ -121,36 +108,35 @@ async function renderProcessingSection(containerEl: HTMLElement, tabInstance: Sy
   });
 
   new Setting(containerEl)
-    .setName("Clear embeddings data")
-    .setDesc("Remove stored embeddings to start over.")
+    .setName("Rebuild index")
+    .setDesc("Replace the local semantic index with a fresh copy.")
     .addButton((button) => {
       button
         .setWarning()
-        .setButtonText("Clear data")
+        .setButtonText("Rebuild")
         .onClick(async () => {
           const { confirmed } = await showConfirm(
             tabInstance.app,
-            "Clear all embeddings data? This cannot be undone.",
+            "Rebuild the Similar notes index? Existing local vectors will be replaced.",
             {
-              title: "Clear Embeddings Data",
-              primaryButton: "Clear Data",
+              title: "Rebuild Semantic Index",
+              primaryButton: "Rebuild",
               secondaryButton: "Cancel",
               icon: "alert-triangle",
             }
           );
           if (!confirmed) return;
 
+          button.setDisabled(true);
           try {
-            const manager = plugin.embeddingsManager;
-            if (manager) {
-              await manager.clearAll();
-              new Notice("Embeddings data cleared.");
-            } else {
-              new Notice("No embeddings data to clear.");
-            }
+            const manager = plugin.getOrCreateEmbeddingsManager();
+            await manager.forceRefreshCurrentNamespace();
+            new Notice("Semantic index rebuilt.");
             await refreshStatus();
-          } catch (error: any) {
-            new Notice(`Failed to clear embeddings data: ${error?.message || error}`);
+          } catch (error: unknown) {
+            new Notice(`Failed to rebuild the semantic index: ${error instanceof Error ? error.message : "Unknown error"}`);
+          } finally {
+            button.setDisabled(false);
           }
         });
     });
@@ -162,9 +148,9 @@ async function renderExclusionsSection(containerEl: HTMLElement, tabInstance: Sy
   const { plugin } = tabInstance;
   const exclusions = getExclusionsWithDefaults(plugin);
 
-  containerEl.createEl("h3", { text: "Exclusions" });
+  containerEl.createEl("h3", { text: "Skip from index" });
   containerEl.createEl("p", {
-    text: "Decide which folders or files should be ignored during embeddings processing.",
+    text: "Choose vault content similar notes should ignore.",
     cls: "setting-item-description",
   });
 
@@ -182,7 +168,7 @@ async function renderExclusionsSection(containerEl: HTMLElement, tabInstance: Sy
 
   new Setting(containerEl)
     .setName("Respect Obsidian exclusions")
-    .setDesc("Reuse the ignored files configured in Settings → Files & Links.")
+    .setDesc("Reuse the ignored files configured in settings → files & links.")
     .addToggle((toggle) => {
       toggle
         .setValue(exclusions.respectObsidianExclusions)
@@ -231,7 +217,7 @@ async function renderExclusionsSection(containerEl: HTMLElement, tabInstance: Sy
 
   const patternSetting = new Setting(containerEl)
     .setName("Excluded patterns")
-    .setDesc("File name patterns (glob) to skip, e.g., *.png.");
+    .setDesc("File name patterns (glob) to skip, e.g., *.PNG.");
 
   patternSetting.addText((text) => {
     text.setPlaceholder("pattern e.g. *.png");
@@ -321,34 +307,32 @@ async function removeExclusion(
 
 async function buildStatusSummary(plugin: SystemSculptPlugin): Promise<string> {
   if (!plugin.settings.embeddingsEnabled) {
-    return "Embeddings disabled";
+    return "Off";
   }
 
   const manager = plugin.embeddingsManager;
   if (!manager) {
-    return "Ready to process files";
+    return "Starting…";
   }
 
   try {
-    const stats = manager.getStats();
-    const sealed = Math.min(stats.processed, stats.total);
-    const present = Math.min(stats.present, stats.total);
-    if (manager.isCurrentlyProcessing()) {
-      if (stats.total > 0 && present === stats.total && sealed < stats.total) {
-        return `Finalizing existing embeddings… ${sealed}/${stats.total} sealed`;
-      }
-      return `Processing… ${present}/${stats.total} embedded`;
+    const snapshot = manager.getLifecycleSnapshot();
+    if (!snapshot.ready || snapshot.phase === "initializing") return "Starting…";
+    if (snapshot.phase === "paused") return snapshot.pending > 0
+      ? `Paused · ${snapshot.pending} remaining`
+      : "Paused";
+    if (snapshot.phase === "error" || snapshot.failed > 0) return snapshot.failed > 0
+      ? `${snapshot.failed} ${snapshot.failed === 1 ? "note needs" : "notes need"} attention`
+      : "Needs attention";
+    if (snapshot.phase === "reconciling" || snapshot.pending > 0) {
+      const total = Math.max(snapshot.total, snapshot.completed + snapshot.pending);
+      return total > 0
+        ? `Indexing ${Math.min(snapshot.completed, total)} of ${total}`
+        : "Updating…";
     }
-    if (stats.total > 0 && sealed === stats.total) {
-      return `Ready for search (${stats.total} file${stats.total === 1 ? "" : "s"} embedded)`;
-    }
-    if (stats.total > 0) {
-      if (present > 0 && present === stats.total && sealed < stats.total) {
-        return `Finalizing existing embeddings… ${sealed}/${stats.total} sealed`;
-      }
-      return `${present}/${stats.total} file${stats.total === 1 ? "" : "s"} embedded`;
-    }
-    return "Ready to process files";
+    return snapshot.total > 0
+      ? `${snapshot.completed} ${snapshot.completed === 1 ? "note" : "notes"} indexed`
+      : "Ready";
   } catch (_error) {
     return "Status unavailable";
   }

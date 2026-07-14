@@ -69,7 +69,7 @@ export function resolveStudioCollapsedSectionLabel(
   return SECTION_LABELS[section];
 }
 
-export function resolveStudioCollapsedSectionDefaultVisibility(
+function resolveStudioCollapsedSectionDefaultVisibility(
   section: StudioCollapsedDetailSection
 ): boolean {
   return DEFAULT_COLLAPSED_SECTION_VISIBILITY[section];
@@ -109,7 +109,7 @@ export function readStudioNodeCollapsedVisibilityOverrides(
   return parsed;
 }
 
-export function readStudioCollapsedSectionVisibilityOverride(
+function readStudioCollapsedSectionVisibilityOverride(
   node: Pick<StudioNodeInstance, "config">,
   section: StudioCollapsedDetailSection
 ): boolean | undefined {

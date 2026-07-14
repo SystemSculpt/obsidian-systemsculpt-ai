@@ -1,6 +1,5 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
 import { normalizePath } from "obsidian";
+import { desktopHost } from "../../platform/desktopOnly";
 import { deriveStudioAssetsDir } from "../paths";
 import type {
   StudioJsonValue,
@@ -23,7 +22,7 @@ const DEFAULT_ADAPTER_ARGS = ["scripts/db-query.js", "{{query}}"];
 const DEFAULT_REFRESH_HOURS = 6;
 const DEFAULT_TIMEOUT_MS = 120_000;
 const DEFAULT_MAX_OUTPUT_BYTES = 1024 * 1024;
-export const DATASET_TEXT_OUTPUT_PORT_ID = "text" as const;
+const DATASET_TEXT_OUTPUT_PORT_ID = "text" as const;
 export const DATASET_OUTPUT_FIELDS_CONFIG_KEY = "outputFields" as const;
 
 const DATASET_BASE_OUTPUT_PORTS: StudioPortDefinition[] = [
@@ -483,6 +482,7 @@ function buildDatasetOutputs(stdout: string): StudioNodeOutputMap {
 export const datasetNode: StudioNodeDefinition = {
   kind: "studio.dataset",
   version: "1.0.0",
+  hostRequirement: "desktop",
   capabilityClass: "local_io",
   cachePolicy: "never",
   inputPorts: [],
@@ -563,6 +563,8 @@ export const datasetNode: StudioNodeDefinition = {
     allowUnknownKeys: true,
   },
   async execute(context) {
+    const fs = desktopHost.fs();
+    const path = desktopHost.path();
     const workingDirectory = getText(context.node.config.workingDirectory as StudioJsonValue).trim();
     if (!workingDirectory) {
       throw new Error(`Dataset node "${context.node.id}" requires a working directory.`);
@@ -610,7 +612,7 @@ export const datasetNode: StudioNodeDefinition = {
     const nowMs = Date.now();
 
     try {
-      const cacheRaw = await readFile(cacheAbsolutePath, "utf8");
+      const cacheRaw = await fs.readFile(cacheAbsolutePath, "utf8");
       const cacheSnapshot = readCacheSnapshot(cacheRaw);
       if (
         cacheSnapshot &&
@@ -690,8 +692,8 @@ export const datasetNode: StudioNodeDefinition = {
       timedOut: result.timedOut,
     };
 
-    await mkdir(dirname(cacheAbsolutePath), { recursive: true });
-    await writeFile(cacheAbsolutePath, `${JSON.stringify(cacheSnapshot, null, 2)}\n`, "utf8");
+    await fs.mkdir(path.dirname(cacheAbsolutePath), { recursive: true });
+    await fs.writeFile(cacheAbsolutePath, `${JSON.stringify(cacheSnapshot, null, 2)}\n`, "utf8");
 
     const outputs = buildDatasetOutputs(result.stdout);
 

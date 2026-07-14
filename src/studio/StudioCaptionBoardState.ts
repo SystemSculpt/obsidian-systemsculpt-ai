@@ -472,24 +472,7 @@ export function writeStudioCaptionBoardState(
   return node;
 }
 
-export function updateStudioCaptionBoardState(
-  node: StudioNodeInstance,
-  updater: (current: StudioCaptionBoardState) => StudioCaptionBoardState
-): StudioNodeInstance {
-  const current = readStudioCaptionBoardState(node.config);
-  const next = updater(current);
-  return writeStudioCaptionBoardState(node, next);
-}
-
-export function clearStudioCaptionBoardRenderedAsset(node: StudioNodeInstance): StudioNodeInstance {
-  return updateStudioCaptionBoardState(node, (current) => ({
-    ...current,
-    lastRenderedAsset: null,
-    updatedAt: new Date().toISOString(),
-  }));
-}
-
-export function boardStateHasRenderableLabels(state: StudioCaptionBoardState): boolean {
+function boardStateHasRenderableLabels(state: StudioCaptionBoardState): boolean {
   return state.labels.some((label) => label.text.trim().length > 0);
 }
 

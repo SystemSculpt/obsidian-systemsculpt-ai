@@ -1,0 +1,85 @@
+/**
+ * SystemSculpt Studio — node-graph canvas workspace.
+ * TS: src/views/studio/** (graph-v3, connections-v3, overlays, menus).
+ *
+ * Runtime contracts (TS setProperty — do not rename):
+ *   --ss-studio-group-accent, --ss-studio-chip-color, --ss-studio-swatch-color,
+ *   --ss-studio-simple-context-menu-scale, --ss-studio-node-context-menu-scale,
+ *   --ss-studio-inspector-scale, --ss-studio-text-node-font-size,
+ *   --ss-studio-annotation-color, --ss-studio-annotation-stroke,
+ *   --ss-link-flow-phase (edge marching ants), --ss-link-flare-t.
+ *
+ * Edge strokes are applied inline by StudioEdgeRenderer.ts reading
+ * --ss-studio-link-* vars — defined below, derived from the theme accent.
+ */
+
+/* ------------------------------------------------------------------ *
+ * Studio palette — derived from the theme, no hardcoded brand colors
+ * ------------------------------------------------------------------ */
+.ss-studio-view {
+  --ss-studio-surface: var(--ss-surface-0);
+  --ss-studio-border: var(--ss-line);
+  --ss-studio-shadow: var(--ss-shadow-color);
+
+  --ss-studio-accent: var(--ss-accent);
+  --ss-studio-accent-bright: color-mix(in srgb, var(--ss-accent) 80%, var(--ss-ink-on-accent));
+  --ss-studio-accent-light: color-mix(in srgb, var(--ss-accent) 65%, var(--ss-ink-on-accent));
+  --ss-studio-accent-soft: color-mix(in srgb, var(--ss-accent) 55%, var(--ss-surface-0));
+  --ss-studio-accent-muted: color-mix(in srgb, var(--ss-accent) 70%, var(--ss-ink-muted));
+  --ss-studio-accent-mid: color-mix(in srgb, var(--ss-accent) 60%, var(--ss-ink));
+  --ss-studio-accent-dim: color-mix(in srgb, var(--ss-accent) 45%, var(--ss-surface-0));
+
+  --ss-studio-success-tint: var(--ss-success);
+  --ss-studio-surface-success: var(--ss-success);
+  --ss-studio-surface-success-light: var(--ss-success-tint);
+
+  --ss-studio-error: var(--ss-danger);
+  --ss-studio-error-muted: color-mix(in srgb, var(--ss-danger) 70%, var(--ss-ink-muted));
+  --ss-studio-warning: var(--ss-warning);
+
+  --ss-studio-info: var(--ss-info);
+  --ss-studio-info-bright: color-mix(in srgb, var(--ss-info) 80%, var(--ss-ink-on-accent));
+
+  --ss-studio-highlight: var(--ss-ink);
+  --ss-studio-bg-dark: color-mix(in srgb, var(--ss-accent) 20%, var(--ss-surface-sunken));
+  --ss-studio-bg-darker: color-mix(in srgb, var(--ss-accent) 10%, var(--ss-surface-sunken));
+  --ss-studio-bg-mid: color-mix(in srgb, var(--ss-accent) 28%, var(--ss-surface-sunken));
+  --ss-studio-bg-deep: color-mix(in srgb, var(--ss-accent) 15%, var(--ss-surface-sunken));
+
+  /* Edge strokes (read inline by StudioEdgeRenderer.ts) */
+  --ss-studio-link-stroke: var(--ss-ink-muted);
+  --ss-studio-link-stroke-hover: var(--ss-accent);
+  --ss-studio-link-flow-a: color-mix(in srgb, var(--ss-accent) 72%, transparent);
+  --ss-studio-link-flow-b: color-mix(in srgb, var(--ss-studio-accent-light) 72%, transparent);
+  --ss-studio-link-failed: color-mix(in srgb, var(--ss-danger) 80%, var(--ss-line));
+
+  /* Port hit target (was undefined — 8px pin, 24px touchable area) */
+  --ss-studio-port-hit-size: var(--ss-space-6);
+
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+/* ------------------------------------------------------------------ *
+ * Studio keyframes (specialized; shared ones live in foundation/motion.css)
+ * ------------------------------------------------------------------ */
+@keyframes ss-studio-pending-pulse {
+  0%,
+  100% { opacity: 0.92; }
+  50% { opacity: 0.55; }
+}
+
+@keyframes ss-studio-port-halo {
+  0%,
+  100% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--ss-accent) 35%, transparent); }
+  50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--ss-accent) 20%, transparent); }
+}
+
+@keyframes ss-studio-pending-shimmer {
+  0%,
+  100% { opacity: 0.5; }
+  50% { opacity: 0.9; }
+}

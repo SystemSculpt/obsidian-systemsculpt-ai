@@ -1,6 +1,0 @@
-export {
-  GENERAL_USE_PRESET,
-  CONCISE_PRESET,
-  AGENT_PRESET,
-  LOCAL_SYSTEM_PROMPTS,
-} from "./prompts/index";

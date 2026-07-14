@@ -1,10 +1,4 @@
-import { JSDOM } from "jsdom";
 import { ChatFavoritesService } from "../ChatFavoritesService";
-
-const dom = new JSDOM("<!doctype html><html><body></body></html>");
-(global as any).window = dom.window;
-(global as any).document = dom.window.document;
-(global as any).CustomEvent = dom.window.CustomEvent;
 
 describe("ChatFavoritesService", () => {
   afterEach(() => {
@@ -37,4 +31,3 @@ describe("ChatFavoritesService", () => {
     expect(service.isFavorite("chat-2")).toBe(false);
   });
 });
-

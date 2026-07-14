@@ -13,7 +13,7 @@ export type StudioPortDataType =
   | "binary_ref"
   | "any";
 
-export type StudioCapability = "cli" | "filesystem" | "network";
+export type StudioCapability = "cli" | "filesystem";
 export type StudioNodeCapabilityClass = "local_cpu" | "local_io" | "api";
 export type StudioRunStatus = "queued" | "running" | "success" | "failed" | "cancelled";
 
@@ -69,18 +69,13 @@ export type StudioNodeConfigSelectOption = {
   description?: string;
   badge?: string;
   keywords?: string[];
-  providerAuthenticated?: boolean;
 };
 
 export type StudioNodeConfigSelectPresentation =
   | "dropdown"
   | "button_group"
   | "searchable_dropdown";
-export type StudioNodeConfigDynamicOptionsSource =
-  | "studio.local_text_models"
-  | "studio.systemsculpt_text_models"
-  | "studio.pi_text_models"
-  | "studio.systemsculpt_image_models";
+export type StudioNodeConfigDynamicOptionsSource = never;
 export type StudioNodeConfigFieldVisibilityRule = {
   key: string;
   equals: StudioPrimitiveValue | StudioPrimitiveValue[];
@@ -167,7 +162,6 @@ export type StudioCapabilityGrant = {
   scope: {
     allowedPaths?: string[];
     allowedCommandPatterns?: string[];
-    allowedDomains?: string[];
   };
   grantedAt: string;
   grantedByUser: boolean;
@@ -239,7 +233,7 @@ export type StudioRunSnapshotV1 = {
 };
 
 export type StudioRunEvent =
-  | { type: "run.started"; runId: string; snapshotHash: string; at: string }
+  | { type: "run.started"; runId: string; at: string }
   | { type: "run.failed"; runId: string; error: string; errorStack?: string; at: string }
   | { type: "run.completed"; runId: string; status: "success" | "failed" | "cancelled"; at: string }
   | { type: "node.started"; runId: string; nodeId: string; at: string }
@@ -251,6 +245,7 @@ export type StudioRunEvent =
       outputRef: string;
       outputSource?: "execution" | "cache";
       outputs?: StudioNodeOutputMap;
+      managedOperations?: StudioManagedOperationRef[];
       at: string;
     }
   | { type: "node.failed"; runId: string; nodeId: string; error: string; errorStack?: string; at: string };
@@ -258,6 +253,7 @@ export type StudioRunEvent =
 export type StudioNodeResult = {
   outputs: StudioNodeOutputMap;
   artifacts?: StudioAssetRef[];
+  managedOperations?: StudioManagedOperationRef[];
 };
 
 export type StudioNodeCachePolicy = "by_inputs" | "never";
@@ -280,48 +276,65 @@ export type StudioNodeCacheSnapshotV1 = {
   entries: Record<string, StudioNodeCacheEntry>;
 };
 
-export type StudioTextReasoningEffort = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+export type StudioManagedOperationRef = {
+  capability: "text_generation" | "image_generation" | "transcription";
+  operationId: string;
+};
 
 export type StudioTextGenerationRequest = {
-  prompt: string;
-  systemPrompt?: string;
-  modelId?: string;
-  reasoningEffort?: StudioTextReasoningEffort;
   runId: string;
   nodeId: string;
   projectPath: string;
+  signal: AbortSignal;
+  buildPayload: () => Promise<{ prompt: string; systemPrompt?: string }> | { prompt: string; systemPrompt?: string };
 };
 
 export type StudioTextGenerationResult = {
   text: string;
-  modelId: string;
+  operation: StudioManagedOperationRef;
+};
+
+export type StudioImageGenerationInput = {
+  asset: StudioAssetRef;
+  load: () => Promise<ArrayBuffer>;
 };
 
 export type StudioImageGenerationRequest = {
-  prompt: string;
-  modelId?: string;
-  count?: number;
-  aspectRatio?: string;
-  imageSize?: string;
-  seed?: number;
-  inputImages?: StudioAssetRef[];
   runId: string;
+  nodeId: string;
   projectPath: string;
+  signal: AbortSignal;
+  buildPayload: () => Promise<{
+    prompt: string;
+    count?: number;
+    aspectRatio?: string;
+    imageSize?: "1K";
+    seed?: number;
+    inputImages?: StudioImageGenerationInput[];
+  }>;
+  storeOutput: (bytes: ArrayBuffer, mimeType: string) => Promise<StudioAssetRef>;
 };
 
 export type StudioImageGenerationResult = {
   images: StudioAssetRef[];
-  modelId: string;
+  operation: StudioManagedOperationRef;
 };
 
 export type StudioTranscriptionRequest = {
-  audio: StudioAssetRef;
   runId: string;
+  nodeId: string;
   projectPath: string;
+  signal: AbortSignal;
+  source: {
+    identity: string;
+    fingerprint: () => string | Promise<string>;
+    load: () => Promise<{ filename: string; contentType: string; bytes: ArrayBuffer }>;
+  };
 };
 
 export type StudioTranscriptionResult = {
   text: string;
+  operation: StudioManagedOperationRef;
 };
 
 export type StudioCliExecutionRequest = {
@@ -341,20 +354,15 @@ export type StudioCliExecutionResult = {
 };
 
 export interface StudioApiAdapter {
-  estimateRunCredits(project: StudioProjectV1): Promise<{ ok: boolean; reason?: string }>;
   generateText(request: StudioTextGenerationRequest): Promise<StudioTextGenerationResult>;
   generateImage(request: StudioImageGenerationRequest): Promise<StudioImageGenerationResult>;
   transcribeAudio(request: StudioTranscriptionRequest): Promise<StudioTranscriptionResult>;
-}
-
-export interface StudioSecretStore {
-  isAvailable(): boolean;
-  getSecret(referenceId: string): Promise<string>;
+  beginLocalCommit(operations: readonly StudioManagedOperationRef[], signal?: AbortSignal): Promise<void>;
+  completeLocalCommit(operations: readonly StudioManagedOperationRef[], signal?: AbortSignal): Promise<void>;
 }
 
 export interface StudioNodeExecutionServices {
   api: StudioApiAdapter;
-  secretStore: StudioSecretStore;
   storeAsset: (bytes: ArrayBuffer, mimeType: string) => Promise<StudioAssetRef>;
   readAsset: (asset: StudioAssetRef) => Promise<ArrayBuffer>;
   resolveAbsolutePath: (path: string) => string;
@@ -371,7 +379,6 @@ export interface StudioNodeExecutionServices {
   deleteLocalFile: (absolutePath: string) => Promise<void>;
   runCli: (request: StudioCliExecutionRequest) => Promise<StudioCliExecutionResult>;
   assertFilesystemPath: (path: string) => void;
-  assertNetworkUrl: (url: string) => void;
 }
 
 export type StudioNodeExecutionContext = {
@@ -388,6 +395,7 @@ export type StudioNodeDefinition<TConfig = Record<string, StudioJsonValue>> = {
   kind: string;
   version: string;
   hiddenFromInsertMenu?: boolean;
+  hostRequirement?: "desktop";
   capabilityClass: StudioNodeCapabilityClass;
   cachePolicy?: StudioNodeCachePolicy;
   inputPorts: StudioPortDefinition[];

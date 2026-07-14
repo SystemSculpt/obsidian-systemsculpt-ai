@@ -1,29 +1,26 @@
-import chalk from 'chalk';
-
 export class BuildLogger {
     constructor(prefix) {
         this.prefix = prefix;
     }
 
     log(level, message, detail = '') {
-        const timestamp = new Date().toLocaleTimeString();
         const prefix = `[${this.prefix}]`;
         
         switch(level) {
             case 'info':
-                console.log(chalk.blue(prefix), message, detail);
+                console.log(prefix, message, detail);
                 break;
             case 'success':
-                console.log(chalk.green(prefix), chalk.green('✓'), message, detail);
+                console.log(prefix, 'PASS', message, detail);
                 break;
             case 'warn':
-                console.log(chalk.yellow(prefix), chalk.yellow('⚠'), message, detail);
+                console.warn(prefix, 'WARN', message, detail);
                 break;
             case 'error':
-                console.log(chalk.red(prefix), chalk.red('✗'), message, detail);
+                console.error(prefix, 'FAIL', message, detail);
                 break;
             case 'debug':
-                console.log(chalk.gray(prefix), message, detail);
+                console.log(prefix, message, detail);
                 break;
             default:
                 console.log(prefix, message, detail);
@@ -51,7 +48,7 @@ export class BuildLogger {
     }
 
     divider() {
-        console.log(chalk.gray('─'.repeat(60)));
+        console.log('─'.repeat(60));
     }
 }
 

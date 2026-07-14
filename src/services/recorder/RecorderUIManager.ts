@@ -1,14 +1,23 @@
 import type { App } from "obsidian";
 import type SystemSculptPlugin from "../../main";
-import { createHoverShell, type HoverShellHandle, type HoverShellLayout } from "../../components/HoverShell";
+import { createHoverShell, type HoverShellHandle } from "../../components/HoverShell";
 import { openRecorderAdvancedModal } from "../../modals/RecorderAdvancedModal";
-import { PlatformContext } from "../PlatformContext";
+import {
+  resolveRecorderHostContext,
+  type RecorderHostContext,
+} from "./RecorderHostContext";
 
 export interface RecorderUIManagerOptions {
   app: App;
   plugin: SystemSculptPlugin;
-  platform?: PlatformContext;
+  host?: HTMLElement;
 }
+
+type RecorderAudioContextConstructor = new () => AudioContext;
+type RecorderHostWindow = Window & {
+  AudioContext?: RecorderAudioContextConstructor;
+  webkitAudioContext?: RecorderAudioContextConstructor;
+};
 
 /**
  * Handles recorder hover UI, timers, and visualization for audio capture.
@@ -16,7 +25,8 @@ export interface RecorderUIManagerOptions {
 export class RecorderUIManager {
   private readonly app: App;
   private readonly plugin: SystemSculptPlugin;
-  private readonly platform: PlatformContext;
+  private readonly configuredHost: HTMLElement | null;
+  private hostContext: RecorderHostContext | null = null;
   private hoverShell: HoverShellHandle | null = null;
   private statusTextEl: HTMLElement | null = null;
   private timerValueEl: HTMLElement | null = null;
@@ -39,18 +49,19 @@ export class RecorderUIManager {
   constructor(options: RecorderUIManagerOptions) {
     this.app = options.app;
     this.plugin = options.plugin;
-    this.platform = options.platform ?? PlatformContext.get();
+    this.configuredHost = options.host ?? null;
   }
 
-  public open(onStop: () => void): void {
+  public open(onStop: () => void): RecorderHostContext {
     this.close();
     this.clearCloseTimer();
     this.stopRequested = false;
     this.stopCallback = onStop;
+    this.selectInitiatingHost();
 
-    const variant = this.platform.uiVariant();
-    this.createHover(variant);
+    this.createHover();
     this.visible = true;
+    return this.ensureHostContext();
   }
 
   public close(): void {
@@ -68,6 +79,7 @@ export class RecorderUIManager {
     this.stopCallback = null;
     this.stopRequested = false;
     this.visible = false;
+    this.hostContext = null;
   }
 
   public isVisible(): boolean {
@@ -99,8 +111,9 @@ export class RecorderUIManager {
   public startTimer(): void {
     this.recordingStartTime = Date.now();
     this.stopTimer();
+    const { hostWindow } = this.ensureHostContext();
 
-    this.timerInterval = window.setInterval(() => {
+    this.timerInterval = hostWindow.setInterval(() => {
       if (!this.timerValueEl) return;
       const elapsed = Math.floor((Date.now() - this.recordingStartTime) / 1000);
       const minutes = Math.floor(elapsed / 60);
@@ -112,15 +125,16 @@ export class RecorderUIManager {
   }
 
   public stopTimer(): void {
-    if (this.timerInterval) {
-      window.clearInterval(this.timerInterval);
+    if (this.timerInterval !== null) {
+      this.hostContext?.hostWindow.clearInterval(this.timerInterval);
       this.timerInterval = null;
     }
   }
 
   public closeAfter(delayMs: number): void {
     this.clearCloseTimer();
-    this.closeTimeout = window.setTimeout(() => this.close(), delayMs);
+    const { hostWindow } = this.ensureHostContext();
+    this.closeTimeout = hostWindow.setTimeout(() => this.close(), delayMs);
   }
 
   public async attachStream(stream: MediaStream | null): Promise<void> {
@@ -140,19 +154,20 @@ export class RecorderUIManager {
     this.stopVisualization();
   }
 
-  private createHover(variant: HoverShellLayout): void {
+  private createHover(): void {
+    const { host } = this.ensureHostContext();
     this.hoverShell = createHoverShell({
       title: "Audio Recorder",
       subtitle: "In progress",
       icon: "mic",
       statusText: "Preparing recorder...",
       className: "ss-recorder-hover",
-      width: variant === "mobile" ? "min(420px, calc(100vw - 24px))" : "300px",
-      layout: variant,
-      draggable: variant === "desktop",
-      defaultPosition: variant === "desktop" ? { top: "72px", right: "24px" } : { bottom: "18px", left: "12px" },
+      width: "300px",
+      draggable: true,
+      defaultPosition: { top: "72px", right: "24px" },
       positionKey: "recorder-hover:audio",
       showStatusRow: true,
+      host,
     });
 
     this.statusTextEl = this.hoverShell.statusEl;
@@ -182,7 +197,10 @@ export class RecorderUIManager {
     this.visualizerCanvas = canvas;
     this.visualizerCtx = canvas.getContext("2d");
     if (this.visualizerCtx) {
-      this.visualizerCtx.fillStyle = getComputedStyle(document.body).getPropertyValue("--background-secondary");
+      const { hostDocument, hostWindow } = this.ensureHostContext();
+      this.visualizerCtx.fillStyle = hostWindow
+        .getComputedStyle(hostDocument.body)
+        .getPropertyValue("--background-secondary");
       this.visualizerCtx.fillRect(0, 0, canvas.width, canvas.height);
     }
   }
@@ -229,13 +247,20 @@ export class RecorderUIManager {
 
     this.stopVisualization();
 
-    this.audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-    this.analyser = this.audioContext.createAnalyser();
-    this.analyser.fftSize = 256;
-    this.analyser.smoothingTimeConstant = 0.8;
+    const { hostWindow } = this.ensureHostContext();
+    const AudioContextConstructor = hostWindow.AudioContext ?? hostWindow.webkitAudioContext;
+    if (!AudioContextConstructor) {
+      return;
+    }
+    const audioContext = new AudioContextConstructor();
+    const analyser = audioContext.createAnalyser();
+    this.audioContext = audioContext;
+    this.analyser = analyser;
+    analyser.fftSize = 256;
+    analyser.smoothingTimeConstant = 0.8;
 
-    const source = this.audioContext.createMediaStreamSource(stream);
-    source.connect(this.analyser);
+    const source = audioContext.createMediaStreamSource(stream);
+    source.connect(analyser);
     this.renderVisualization();
   }
 
@@ -248,7 +273,9 @@ export class RecorderUIManager {
     const dataArray = new Uint8Array(bufferLength);
     this.analyser.getByteFrequencyData(dataArray);
 
-    const background = getComputedStyle(document.body).getPropertyValue("--background-secondary");
+    const { hostDocument, hostWindow } = this.ensureHostContext();
+    const themeStyles = hostWindow.getComputedStyle(hostDocument.body);
+    const background = themeStyles.getPropertyValue("--background-secondary");
     this.visualizerCtx.fillStyle = background;
     this.visualizerCtx.fillRect(0, 0, this.visualizerCanvas.width, this.visualizerCanvas.height);
 
@@ -256,8 +283,8 @@ export class RecorderUIManager {
     const barSpacing = 1;
     let x = 0;
 
-    const accentColor = getComputedStyle(document.body).getPropertyValue("--text-accent");
-    const mutedAccent = getComputedStyle(document.body).getPropertyValue("--text-muted");
+    const accentColor = themeStyles.getPropertyValue("--text-accent");
+    const mutedAccent = themeStyles.getPropertyValue("--text-muted");
 
     for (let i = 0; i < bufferLength; i++) {
       const barHeight = (dataArray[i] / 255) * this.visualizerCanvas.height * 0.8;
@@ -275,12 +302,12 @@ export class RecorderUIManager {
       if (x > this.visualizerCanvas.width) break;
     }
 
-    this.animationId = requestAnimationFrame(() => this.renderVisualization());
+    this.animationId = hostWindow.requestAnimationFrame(() => this.renderVisualization());
   }
 
   private stopVisualization(): void {
-    if (this.animationId) {
-      cancelAnimationFrame(this.animationId);
+    if (this.animationId !== null) {
+      this.hostContext?.hostWindow.cancelAnimationFrame(this.animationId);
       this.animationId = null;
     }
 
@@ -293,9 +320,28 @@ export class RecorderUIManager {
   }
 
   private clearCloseTimer(): void {
-    if (this.closeTimeout) {
-      window.clearTimeout(this.closeTimeout);
+    if (this.closeTimeout !== null) {
+      this.hostContext?.hostWindow.clearTimeout(this.closeTimeout);
       this.closeTimeout = null;
     }
+  }
+
+  private selectInitiatingHost(): void {
+    this.hostContext = resolveRecorderHostContext(this.configuredHost);
+  }
+
+  private ensureHostContext(): {
+    host: HTMLElement;
+    hostDocument: Document;
+    hostWindow: RecorderHostWindow;
+  } {
+    if (!this.hostContext) {
+      this.selectInitiatingHost();
+    }
+    return {
+      host: this.hostContext!.host,
+      hostDocument: this.hostContext!.hostDocument,
+      hostWindow: this.hostContext!.hostWindow as RecorderHostWindow,
+    };
   }
 }

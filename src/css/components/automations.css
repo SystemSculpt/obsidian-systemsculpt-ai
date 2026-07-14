@@ -4,7 +4,7 @@
 
 .ss-automations-gallery {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
   gap: var(--ss-space-3);
 }
 
@@ -82,11 +82,6 @@
   gap: var(--ss-space-2);
 }
 
-.ss-automation-backlog__controls button.mod-cta {
-  background-color: var(--ss-accent);
-  color: var(--ss-ink-on-accent);
-}
-
 .ss-automation-backlog__list h4 {
   margin: var(--ss-space-3) 0 var(--ss-space-1);
   font-size: var(--ss-text-sm);
@@ -96,4 +91,22 @@
 
 .ss-automation-backlog__row .setting-item-control {
   gap: var(--ss-space-2);
+}
+
+/* Native SuggestModal adapter */
+.ss-automation-runner-modal .suggestion-item {
+  border-radius: var(--ss-radius-sm);
+}
+
+.ss-automation-suggestion-title {
+  color: var(--ss-ink);
+  font-weight: var(--ss-weight-medium);
+}
+
+.ss-automation-suggestion-subtitle {
+  display: block;
+  margin-top: var(--ss-space-1);
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-sm);
+  line-height: var(--ss-leading-base);
 }

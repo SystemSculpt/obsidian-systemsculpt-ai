@@ -124,7 +124,6 @@ declare module 'obsidian' {
   /*  Platform helper                                                   */
   /* ------------------------------------------------------------------ */
   export const Platform: {
-    isMobile?: boolean;
     isDesktopApp?: boolean;
     isMacOS?: boolean;
   };

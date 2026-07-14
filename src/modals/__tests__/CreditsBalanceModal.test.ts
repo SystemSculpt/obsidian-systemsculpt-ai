@@ -156,7 +156,11 @@ describe("CreditsBalanceModal", () => {
     expect(meterFill?.style.width).toBe("73.3%");
 
     findButtonByText(modal.modalEl, "Buy Credits").click();
-    expect((window as any).open).toHaveBeenCalledWith("https://systemsculpt.com/buy-credits", "_blank");
+    expect((window as any).open).toHaveBeenCalledWith(
+      "https://systemsculpt.com/buy-credits",
+      "_blank",
+      "noopener,noreferrer",
+    );
 
     findButtonByText(modal.modalEl, "Open Account").click();
     expect(onOpenSetup).toHaveBeenCalledTimes(1);
@@ -194,7 +198,11 @@ describe("CreditsBalanceModal", () => {
     expect(loadBalance).toHaveBeenCalledTimes(2);
 
     findButtonByText(modal.modalEl, "Buy Credits").click();
-    expect((window as any).open).toHaveBeenCalledWith(LICENSE_URL, "_blank");
+    expect((window as any).open).toHaveBeenCalledWith(
+      LICENSE_URL,
+      "_blank",
+      "noopener,noreferrer",
+    );
   });
 
   it("uses conservative totals when reported and derived balances disagree", async () => {
@@ -294,6 +302,12 @@ describe("CreditsBalanceModal", () => {
     findButtonByText(modal.modalEl, "Usage").click();
     await flushPromises();
 
+    const usageTab = findButtonByText(modal.modalEl, "Usage");
+    expect(usageTab.getAttribute("role")).toBe("tab");
+    expect(usageTab.getAttribute("aria-selected")).toBe("true");
+    expect(usageTab.hasAttribute("aria-pressed")).toBe(false);
+    expect(modal.modalEl.querySelector(".ss-credits-balance__panel--usage")?.getAttribute("role"))
+      .toBe("tabpanel");
     expect(loadUsage).toHaveBeenCalledTimes(1);
     expect(modal.modalEl.textContent).toContain("audio/transcriptions/jobs/start");
     expect(modal.modalEl.textContent).toContain("3 credits");
@@ -442,5 +456,57 @@ describe("CreditsBalanceModal", () => {
     await flushPromises();
 
     expect(modal.modalEl.textContent).toContain("Prompt cache: reused 1,200 tokens from earlier context and wrote 450 tokens for future turns.");
+  });
+
+  it("drops a closed balance request and refreshes normally after reopening", async () => {
+    let resolveStale!: (balance: any) => void;
+    const loadBalance = jest
+      .fn()
+      .mockImplementationOnce(() => new Promise((resolve) => {
+        resolveStale = resolve;
+      }))
+      .mockResolvedValueOnce({
+        includedRemaining: 700,
+        addOnRemaining: 100,
+        totalRemaining: 800,
+        includedPerMonth: 3000,
+        cycleEndsAt: "2026-03-01T00:00:00.000Z",
+        cycleStartedAt: "2026-02-01T00:00:00.000Z",
+        cycleAnchorAt: "2026-02-01T00:00:00.000Z",
+        turnInFlightUntil: null,
+        purchaseUrl: null,
+      });
+    const modal = new CreditsBalanceModal({} as any, {
+      initialBalance: null,
+      loadBalance,
+      loadUsage: jest.fn().mockResolvedValue({ items: [], nextBefore: null }),
+      onOpenSetup: jest.fn(),
+    });
+
+    modal.onOpen();
+    expect((modal as any).isRefreshingBalance).toBe(true);
+    modal.onClose();
+    expect((modal as any).isRefreshingBalance).toBe(false);
+
+    modal.onOpen();
+    await flushPromises();
+    expect(loadBalance).toHaveBeenCalledTimes(2);
+    expect(modal.modalEl.textContent).toContain("800 credits");
+
+    resolveStale({
+      includedRemaining: 9000,
+      addOnRemaining: 0,
+      totalRemaining: 9000,
+      includedPerMonth: 9000,
+      cycleEndsAt: "2026-03-01T00:00:00.000Z",
+      cycleStartedAt: "2026-02-01T00:00:00.000Z",
+      cycleAnchorAt: "2026-02-01T00:00:00.000Z",
+      turnInFlightUntil: null,
+      purchaseUrl: null,
+    });
+    await flushPromises();
+
+    expect(modal.modalEl.textContent).toContain("800 credits");
+    expect(modal.modalEl.textContent).not.toContain("9,000 credits");
   });
 });

@@ -1,0 +1,137 @@
+/* ------------------------------------------------------------------ *
+ * Note selector
+ * ------------------------------------------------------------------ */
+.ss-studio-note-selector {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ss-space-2);
+  padding: 0 var(--ss-space-2) var(--ss-space-2);
+}
+
+.ss-studio-note-selector-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ss-space-2);
+}
+
+.ss-studio-note-selector-summary {
+  font-size: var(--ss-text-xs);
+  color: var(--ss-ink-muted);
+}
+
+.ss-studio-note-selector-count {
+  font-variant-numeric: tabular-nums;
+}
+
+.ss-studio-note-selector-control-label {
+  font-size: var(--ss-text-xs);
+  color: var(--ss-ink-muted);
+}
+
+.ss-studio-note-selector-add-button,
+.ss-studio-note-selector-action-button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ss-space-1);
+  min-height: 24px;
+  padding: 0 var(--ss-space-2);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-xs);
+  background-color: var(--ss-surface-0);
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-xs);
+  cursor: pointer;
+  transition: var(--ss-transition-colors);
+}
+
+.ss-studio-note-selector-add-button:hover,
+.ss-studio-note-selector-action-button:hover {
+  background-color: var(--ss-state-hover);
+  color: var(--ss-ink);
+}
+
+.ss-studio-note-selector-items {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ss-space-1);
+}
+
+.ss-studio-note-selector-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ss-space-1);
+  padding: var(--ss-space-2);
+  background-color: var(--ss-surface-1);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-sm);
+}
+
+.ss-studio-note-selector-card.is-disabled {
+  opacity: 0.6;
+}
+
+.ss-studio-note-selector-card-head {
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-2);
+}
+
+.ss-studio-note-selector-card-index {
+  font-size: var(--ss-text-xs);
+  color: var(--ss-ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.ss-studio-note-selector-card-actions {
+  margin-left: auto;
+  display: inline-flex;
+  gap: var(--ss-space-1);
+}
+
+.ss-studio-note-selector-remove-button {
+  align-self: flex-end;
+}
+
+.ss-studio-note-selector-toggle-checkbox {
+  accent-color: var(--ss-accent);
+}
+
+.ss-studio-note-selector-fields,
+.ss-studio-note-selector-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ss-space-1);
+}
+
+.ss-studio-note-selector-path-row {
+  display: flex;
+  gap: var(--ss-space-1);
+  align-items: center;
+}
+
+.ss-studio-note-selector-path-state {
+  font-size: var(--ss-text-xs);
+}
+
+.ss-studio-note-selector-path-state.is-ready {
+  color: var(--ss-success);
+}
+
+.ss-studio-note-selector-path-state.is-invalid {
+  color: var(--ss-danger);
+}
+
+.ss-studio-note-selector-status {
+  font-size: var(--ss-text-xs);
+  color: var(--ss-ink-muted);
+}
+
+.ss-studio-note-selector-empty {
+  padding: var(--ss-space-2);
+  border: 1px dashed var(--ss-line-strong);
+  border-radius: var(--ss-radius-sm);
+  font-size: var(--ss-text-xs);
+  color: var(--ss-ink-faint);
+  text-align: center;
+}

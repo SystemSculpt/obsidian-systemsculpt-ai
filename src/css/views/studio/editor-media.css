@@ -1,0 +1,95 @@
+/* ------------------------------------------------------------------ *
+ * Inline output preview + media
+ * ------------------------------------------------------------------ */
+.ss-studio-node-inline-output-preview {
+  padding: var(--ss-space-2);
+  margin: 0 var(--ss-space-2) var(--ss-space-2);
+  background-color: var(--ss-surface-1);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-sm);
+  font-size: var(--ss-text-xs);
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.ss-studio-node-output-preview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ss-space-1);
+  padding: 0 var(--ss-space-2) var(--ss-space-2);
+}
+
+.ss-studio-node-output-label {
+  font-size: var(--ss-text-xs);
+  color: var(--ss-ink-faint);
+  letter-spacing: var(--ss-tracking-wide);
+  text-transform: uppercase;
+}
+
+.ss-studio-node-output-value {
+  font-family: var(--ss-font-mono);
+  font-size: var(--ss-text-xs);
+  color: var(--ss-ink-muted);
+  overflow-wrap: anywhere;
+}
+
+.ss-studio-node-media-preview {
+  overflow: hidden;
+  border-radius: var(--ss-radius-lg) var(--ss-radius-lg) 0 0;
+}
+
+.ss-studio-node-media-preview.is-contained-image img,
+.ss-studio-node-media-preview.is-video video {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+/* Pending skeleton */
+.ss-studio-node-pending-preview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ss-space-1);
+  padding: var(--ss-space-2);
+}
+
+.ss-studio-node-pending-title {
+  height: 12px;
+  width: 50%;
+  border-radius: var(--ss-radius-xs);
+  background-color: var(--ss-line);
+  animation: ss-studio-pending-shimmer 1.4s var(--ss-ease) infinite;
+}
+
+.ss-studio-node-pending-line {
+  height: 8px;
+  border-radius: var(--ss-radius-xs);
+  background-color: var(--ss-line);
+  animation: ss-studio-pending-shimmer 1.4s var(--ss-ease) infinite;
+}
+
+.ss-studio-node-pending-line.is-short {
+  width: 60%;
+}
+
+.ss-studio-node-pending-frame {
+  min-height: 80px;
+  border: 1px dashed var(--ss-line-strong);
+  border-radius: var(--ss-radius-sm);
+}
+
+/* ------------------------------------------------------------------ *
+ * Studio modals (media preview)
+ * ------------------------------------------------------------------ */
+.ss-studio-media-preview-modal-video {
+  max-width: 100%;
+  border-radius: var(--ss-radius-sm);
+}
+
+.ss-studio-media-preview-modal-path {
+  margin-top: var(--ss-space-2);
+  font-family: var(--ss-font-mono);
+  font-size: var(--ss-text-xs);
+  color: var(--ss-ink-muted);
+  word-break: break-all;
+}

@@ -76,8 +76,8 @@ describe("StudioGraphNodeInlineEditors text display mode", () => {
     const renderedPanel = nodeEl.querySelector<HTMLElement>(".ss-studio-node-text-rendered");
     const textarea = nodeEl.querySelector<HTMLTextAreaElement>(".ss-studio-node-text-editor");
 
-    expect(rawButton?.classList.contains("is-active")).toBe(false);
-    expect(renderedButton?.classList.contains("is-active")).toBe(true);
+    expect(rawButton?.classList.contains("is-selected")).toBe(false);
+    expect(renderedButton?.classList.contains("is-selected")).toBe(true);
     expect(renderedPanel?.classList.contains("is-hidden")).toBe(false);
     expect(textarea?.readOnly).toBe(true);
   });
@@ -257,7 +257,7 @@ describe("StudioGraphNodeInlineEditors text display mode", () => {
 
     expect(textarea?.readOnly).toBe(true);
     expect(renderedPanel?.classList.contains("is-hidden")).toBe(false);
-    expect(rawButton?.classList.contains("is-active")).toBe(false);
+    expect(rawButton?.classList.contains("is-selected")).toBe(false);
     expect(renderMarkdownPreview).toHaveBeenCalledTimes(1);
   });
 
@@ -284,7 +284,7 @@ describe("StudioGraphNodeInlineEditors text display mode", () => {
       nodeEl.querySelectorAll<HTMLButtonElement>(".ss-studio-node-text-display-mode-button")
     ).find((button) => button.textContent?.trim() === "Rendered");
 
-    expect(rawButton?.classList.contains("is-active")).toBe(false);
-    expect(renderedButton?.classList.contains("is-active")).toBe(true);
+    expect(rawButton?.classList.contains("is-selected")).toBe(false);
+    expect(renderedButton?.classList.contains("is-selected")).toBe(true);
   });
 });

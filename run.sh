@@ -156,7 +156,7 @@ if [[ $SYNC_ENABLED -eq 1 ]]; then
       echo "[run.sh] Auto-syncing build outputs via esbuild using: $SYNC_CONFIG"
       print_sync_targets | sed 's/^/[run.sh]  - /'
       if [[ $HOT_RELOAD_ENABLED -eq 1 ]]; then
-        echo "[run.sh] Hot reloading the already-running Obsidian plugin through the desktop automation helper"
+        echo "[run.sh] Hot reloading the already-running Obsidian plugin through the local reload seam"
       fi
     fi
   else

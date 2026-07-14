@@ -9,13 +9,22 @@ import {
   buildProductionPlugin,
   inspectPluginArtifacts,
 } from "./plugin-artifacts.mjs";
+import { CANONICAL_API_BASE_URL } from "./plugin-build-options.mjs";
 
 function createTempPluginDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "systemsculpt-plugin-artifacts-"));
 }
 
-function writeRequiredArtifacts(root, mainJsContents) {
-  fs.writeFileSync(path.join(root, "manifest.json"), '{"id":"systemsculpt-ai"}\n', "utf8");
+function productionBundle(contents = "") {
+  return `const SYSTEMSCULPT_API = ${JSON.stringify(CANONICAL_API_BASE_URL)};\n${contents}`;
+}
+
+function writeRequiredArtifacts(root, mainJsContents = productionBundle()) {
+  fs.writeFileSync(
+    path.join(root, "manifest.json"),
+    '{"id":"systemsculpt-ai","isDesktopOnly":false}\n',
+    "utf8",
+  );
   fs.writeFileSync(path.join(root, "styles.css"), "body {}\n", "utf8");
   fs.writeFileSync(path.join(root, "main.js"), mainJsContents, "utf8");
 }
@@ -32,7 +41,9 @@ test("assertProductionPluginArtifacts rejects inline sourcemap bundles", () => {
   const root = createTempPluginDir();
   writeRequiredArtifacts(
     root,
-    "console.log('dev build');\n//# sourceMappingURL=data:application/json;charset=utf-8;base64,AAAA\n"
+    productionBundle(
+      "console.log('dev build');\n//# sourceMappingURL=data:application/json;charset=utf-8;base64,AAAA\n",
+    ),
   );
 
   assert.throws(
@@ -43,81 +54,86 @@ test("assertProductionPluginArtifacts rejects inline sourcemap bundles", () => {
 
 test("assertProductionPluginArtifacts accepts production-style bundles", () => {
   const root = createTempPluginDir();
-  writeRequiredArtifacts(root, "console.log('production build');\n");
+  writeRequiredArtifacts(root, productionBundle("console.log('production build');\n"));
 
   const inspection = assertProductionPluginArtifacts({ root });
   assert.equal(inspection.ok, true);
   assert.equal(inspection.mainBundle.hasInlineSourceMap, false);
-  assert.deepEqual(inspection.mainBundle.forbiddenFragments, []);
+  assert.equal(inspection.mainBundle.hasCanonicalApiBase, true);
+  assert.equal(inspection.mainBundle.hasRetiredApiHost, false);
+  assert.deepEqual(inspection.mainBundle.loopbackApiBases, []);
+  assert.deepEqual(inspection.mainBundle.forbiddenClientFragments, []);
+  assert.deepEqual(inspection.mainBundle.mobileUnsafeNodeRequires, []);
+  assert.equal(inspection.manifestMobileCompatible, true);
 });
 
-test("assertProductionPluginArtifacts rejects Pi CLI interactive fragments in main.js", () => {
+test("assertProductionPluginArtifacts rejects a desktop-only manifest", () => {
+  const root = createTempPluginDir();
+  writeRequiredArtifacts(root);
+  fs.writeFileSync(path.join(root, "manifest.json"), '{"id":"systemsculpt-ai","isDesktopOnly":true}\n');
+
+  assert.throws(
+    () => assertProductionPluginArtifacts({ root }),
+    /advertise Obsidian Mobile support/i,
+  );
+});
+
+test("assertProductionPluginArtifacts rejects Node builtins outside the desktop host seam", () => {
+  const root = createTempPluginDir();
+  writeRequiredArtifacts(root, productionBundle('const http = require("node:http");\n'));
+
+  assert.throws(
+    () => assertProductionPluginArtifacts({ root }),
+    /loads Node builtins outside the desktop host seam: node:http/i,
+  );
+});
+
+test("assertProductionPluginArtifacts requires the canonical managed API base", () => {
+  const root = createTempPluginDir();
+  writeRequiredArtifacts(root, "console.log('missing managed API base');\n");
+
+  assert.throws(
+    () => assertProductionPluginArtifacts({ root }),
+    /does not contain the canonical SystemSculpt API base/i,
+  );
+});
+
+test("assertProductionPluginArtifacts rejects loopback QA API bases", () => {
   const root = createTempPluginDir();
   writeRequiredArtifacts(
     root,
-    [
-      "console.log('production build');",
-      "// node_modules/@mariozechner/pi-coding-agent/dist/modes/interactive/components/index.js",
-      "",
-    ].join("\n")
+    productionBundle('const QA_API = "http://127.0.0.1:3001/api/plugin";\n'),
   );
 
   assert.throws(
     () => assertProductionPluginArtifacts({ root }),
-    /interactive component index/i
+    /loopback QA API base/i,
   );
 });
 
-test("assertProductionPluginArtifacts rejects the mobile-breaking node:url import-meta banner", () => {
+test("assertProductionPluginArtifacts rejects the retired API subdomain", () => {
   const root = createTempPluginDir();
   writeRequiredArtifacts(
     root,
-    [
-      'const __systemsculpt_import_meta_url__ = require("node:url").pathToFileURL(__filename).href;',
-      "console.log('production build');",
-      "",
-    ].join("\n")
+    productionBundle('const RETIRED_API = "https://api.systemsculpt.com/api/v1";\n'),
   );
 
   assert.throws(
     () => assertProductionPluginArtifacts({ root }),
-    /breaks mobile plugin startup/i
+    /retired SystemSculpt API host/i,
   );
 });
 
-test("assertProductionPluginArtifacts rejects eager Pi extension alias resolution", () => {
+test("assertProductionPluginArtifacts rejects retired client runtimes and provider SDKs", () => {
   const root = createTempPluginDir();
   writeRequiredArtifacts(
     root,
-    [
-      "const aliases = {",
-      '  "@mariozechner/pi-agent-core": resolveWorkspaceOrImport("agent/dist/index.js", "@mariozechner/pi-agent-core"),',
-      '  "@mariozechner/pi-ai": resolveWorkspaceOrImport("ai/dist/index.js", "@mariozechner/pi-ai"),',
-      "};",
-      "",
-    ].join("\n")
+    productionBundle("// node_modules/@anthropic-ai/sdk/index.js\n"),
   );
 
   assert.throws(
     () => assertProductionPluginArtifacts({ root }),
-    /eagerly resolves Pi extension aliases/i
-  );
-});
-
-test("assertProductionPluginArtifacts rejects the unshimmed Pi config module", () => {
-  const root = createTempPluginDir();
-  writeRequiredArtifacts(
-    root,
-    [
-      "// node_modules/@mariozechner/pi-coding-agent/dist/config.js",
-      "__filename = (0, import_url.fileURLToPath)(__systemsculpt_import_meta_url__);",
-      "",
-    ].join("\n")
-  );
-
-  assert.throws(
-    () => assertProductionPluginArtifacts({ root }),
-    /Obsidian-safe config shim/i
+    /still bundles a provider SDK/i,
   );
 });
 
@@ -127,11 +143,15 @@ test("buildProductionPlugin revalidates the post-build artifact set", () => {
   const inspection = buildProductionPlugin({
     root,
     stdio: "pipe",
+    env: {
+      SYSTEMSCULPT_API_BASE_URL: "http://127.0.0.1:3001/api/plugin",
+    },
     spawnSyncImpl(command, args, options) {
       assert.equal(command, "npm");
       assert.deepEqual(args, ["run", "build"]);
       assert.equal(options.cwd, root);
-      writeRequiredArtifacts(root, "console.log('rebuilt bundle');\n");
+      assert.equal(options.env.SYSTEMSCULPT_API_BASE_URL, CANONICAL_API_BASE_URL);
+      writeRequiredArtifacts(root, productionBundle("console.log('rebuilt bundle');\n"));
       return {
         status: 0,
         stdout: "",
@@ -142,4 +162,5 @@ test("buildProductionPlugin revalidates the post-build artifact set", () => {
 
   assert.equal(inspection.ok, true);
   assert.equal(inspection.mainBundle.hasInlineSourceMap, false);
+  assert.equal(inspection.mainBundle.hasCanonicalApiBase, true);
 });

@@ -6,21 +6,13 @@ import {
   FileExplorerStudioButtonManager,
 } from "../FileExplorerStudioButtonManager";
 
-let mockSupportsDesktopOnlyFeatures = true;
-
-jest.mock("../../../services/PlatformContext", () => ({
-  PlatformContext: {
-    get: () => ({
-      supportsDesktopOnlyFeatures: () => mockSupportsDesktopOnlyFeatures,
-    }),
-  },
-}));
-
 function appendExplorer(options?: {
   activeFolderPath?: string;
   activeFilePath?: string;
+  ownerDocument?: Document;
 }): HTMLElement {
-  const leaf = document.body.createDiv({ cls: "workspace-leaf-content" });
+  const ownerDocument = options?.ownerDocument ?? document;
+  const leaf = ownerDocument.body.createDiv({ cls: "workspace-leaf-content" });
   leaf.dataset.type = "file-explorer";
 
   const header = leaf.createDiv({ cls: "nav-header" });
@@ -82,7 +74,6 @@ describe("FileExplorerStudioButtonManager", () => {
   beforeEach(() => {
     document.body.empty();
     jest.clearAllMocks();
-    mockSupportsDesktopOnlyFeatures = true;
   });
 
   it("adds one native New Studio action beside New note in the file explorer header", () => {
@@ -102,9 +93,27 @@ describe("FileExplorerStudioButtonManager", () => {
     expect(studioButton.classList.contains("nav-action-button")).toBe(true);
     expect(studioButton.getAttribute("aria-label")).toBe("New Studio");
     expect(studioButton.getAttribute("data-tooltip-position")).toBe("bottom");
+    expect(studioButton.dataset.ssSurface).toBe("embedded");
     expect(newNoteButton?.nextElementSibling).toBe(studioButton);
     expect(studioButton.nextElementSibling).toBe(newFolderButton);
     expect(setIcon).toHaveBeenCalledWith(studioButton, "workflow");
+  });
+
+  it("injects into a file explorer owned by another Obsidian document", () => {
+    const popoutDocument = document.implementation.createHTMLDocument("Popout");
+    const buttons = appendExplorer({ ownerDocument: popoutDocument });
+    const { app, manager } = createHarness();
+    (app.workspace as any).iterateAllLeaves = jest.fn((visit: (leaf: any) => void) => {
+      visit({ view: { containerEl: popoutDocument.body } });
+    });
+
+    manager.syncButtons();
+
+    const studioButton = buttons.querySelector<HTMLElement>(
+      `.${FILE_EXPLORER_STUDIO_BUTTON_CLASS}`,
+    );
+    expect(studioButton?.ownerDocument).toBe(popoutDocument);
+    expect(studioButton?.dataset.ssSurface).toBe("embedded");
   });
 
   it("creates and opens a Studio project in the active explorer folder", async () => {
@@ -124,6 +133,11 @@ describe("FileExplorerStudioButtonManager", () => {
     expect(activateSystemSculptStudioView).toHaveBeenCalledWith(
       "Projects/New Studio Project.systemsculpt"
     );
+    const studioButton = buttons.querySelector<HTMLElement>(
+      `.${FILE_EXPLORER_STUDIO_BUTTON_CLASS}`,
+    );
+    expect(studioButton?.classList.contains("is-busy")).toBe(false);
+    expect(studioButton?.hasAttribute("aria-busy")).toBe(false);
   });
 
   it("falls back to the active file parent when the explorer has no active folder", async () => {
@@ -160,15 +174,5 @@ describe("FileExplorerStudioButtonManager", () => {
       name: "New Studio Project",
       projectPath: "Selected/New Studio Project.systemsculpt",
     });
-  });
-
-  it("does not add the explorer action on non-desktop surfaces", () => {
-    mockSupportsDesktopOnlyFeatures = false;
-    const buttons = appendExplorer();
-    const { manager } = createHarness();
-
-    manager.syncButtons();
-
-    expect(buttons.querySelector(`.${FILE_EXPLORER_STUDIO_BUTTON_CLASS}`)).toBeNull();
   });
 });

@@ -16,35 +16,9 @@
 }
 
 .systemsculpt-resume-chat-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--ss-space-1);
-  min-height: var(--ss-control-height-sm);
-  padding: 0 var(--ss-space-3);
-  background: var(--ss-accent) !important;
-  color: var(--ss-ink-on-accent) !important;
-  border: none;
   border-radius: var(--ss-radius-full);
   box-shadow: var(--ss-elevation-2);
-  font-size: var(--ss-text-sm);
-  font-weight: var(--ss-weight-medium);
-  cursor: pointer;
   pointer-events: auto;
-  transition: var(--ss-transition-colors), transform var(--ss-dur-fast) var(--ss-ease);
-}
-
-.systemsculpt-resume-chat-btn:hover {
-  background: var(--ss-accent-hover) !important;
-  transform: translateY(-1px);
-}
-
-.systemsculpt-resume-chat-btn::before {
-  content: "";
-  width: var(--ss-icon-size-sm);
-  height: var(--ss-icon-size-sm);
-  background-color: currentColor;
-  -webkit-mask: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>') center / contain no-repeat;
-  mask: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>') center / contain no-repeat;
 }
 
 /* Source (CodeMirror) mode — ResumeChatService adds the modifier when it

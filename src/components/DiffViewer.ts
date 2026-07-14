@@ -41,22 +41,22 @@ export class DiffViewer extends Component {
   }
 
   private createHeader(): void {
-    const header = this.container.createEl('div', {
+    const header = this.container.createDiv({
       cls: 'systemsculpt-diff-header'
     });
 
     // File name and stats in one line
-    const fileInfo = header.createEl('div', {
+    const fileInfo = header.createDiv({
       cls: 'systemsculpt-diff-file-info'
     });
 
-    const fileName = fileInfo.createEl('span', {
+    fileInfo.createSpan({
       cls: 'systemsculpt-diff-filename',
       text: this.fileName
     });
 
     // Stats
-    const stats = fileInfo.createEl('span', {
+    const stats = fileInfo.createSpan({
       cls: 'systemsculpt-diff-stats'
     });
 
@@ -68,7 +68,7 @@ export class DiffViewer extends Component {
     } else {
       // Create separate spans for additions and deletions to style them independently
       if (this.diffResult.stats.additions > 0) {
-        const additionsSpan = stats.createEl('span', {
+        stats.createSpan({
           cls: 'systemsculpt-diff-additions',
           text: `+${this.diffResult.stats.additions}`
         });
@@ -76,9 +76,9 @@ export class DiffViewer extends Component {
       if (this.diffResult.stats.deletions > 0) {
         // Add space between additions and deletions if both exist
         if (this.diffResult.stats.additions > 0) {
-          stats.createEl('span', { text: ' ' });
+          stats.createSpan({ text: ' ' });
         }
-        const deletionsSpan = stats.createEl('span', {
+        stats.createSpan({
           cls: 'systemsculpt-diff-deletions',
           text: `-${this.diffResult.stats.deletions}`
         });
@@ -91,7 +91,7 @@ export class DiffViewer extends Component {
         stats.addClass('systemsculpt-diff-has-deletions');
       }
 
-      const totalSpan = stats.createEl('span', {
+      stats.createSpan({
         cls: 'systemsculpt-diff-total',
         text: ` · ${totalChanges} ${totalChanges === 1 ? 'line' : 'lines'} changed`,
       });
@@ -99,7 +99,7 @@ export class DiffViewer extends Component {
   }
 
   private createChangeHunks(): void {
-    const content = this.container.createEl('div', {
+    const content = this.container.createDiv({
       cls: 'systemsculpt-diff-content'
     });
 
@@ -107,7 +107,7 @@ export class DiffViewer extends Component {
     const hunks = this.groupIntoHunks(this.diffResult.lines);
 
     if (hunks.length === 0) {
-      const noChanges = content.createEl('div', {
+      content.createDiv({
         cls: 'systemsculpt-diff-no-changes-notice',
         text: 'No changes to display'
       });
@@ -119,7 +119,7 @@ export class DiffViewer extends Component {
     });
 
     if (this.diffResult.isTruncated) {
-      content.createEl('div', {
+      content.createDiv({
         cls: 'systemsculpt-diff-truncated',
         text: 'Preview shortened — open the file to review the full change.',
       });
@@ -174,7 +174,7 @@ export class DiffViewer extends Component {
   }
 
   private createHunk(container: HTMLElement, hunk: DiffLine[], index: number): void {
-    const hunkEl = container.createEl('div', {
+    const hunkEl = container.createDiv({
       cls: 'systemsculpt-diff-hunk'
     });
 
@@ -186,14 +186,14 @@ export class DiffViewer extends Component {
     // Hunk header with location summary
     const hunkSummary = this.computeHunkSummary(hunk);
     if (hunkSummary) {
-      hunkEl.createEl('div', {
+      hunkEl.createDiv({
         cls: 'systemsculpt-diff-hunk-header',
         text: `@@ ${hunkSummary} @@`,
       });
     }
 
     // Create lines container
-    const linesContainer = hunkEl.createEl('div', {
+    const linesContainer = hunkEl.createDiv({
       cls: 'systemsculpt-diff-lines'
     });
 
@@ -204,25 +204,25 @@ export class DiffViewer extends Component {
   }
 
   private createCompactLine(container: HTMLElement, line: DiffLine): void {
-    const lineEl = container.createEl('div', {
+    const lineEl = container.createDiv({
       cls: `systemsculpt-diff-line systemsculpt-diff-line-${line.type}`
     });
 
     // Optional line numbers (only if enabled and space allows)
     if (this.showLineNumbers) {
-      const oldNumber = lineEl.createEl('span', {
+      lineEl.createSpan({
         cls: 'systemsculpt-diff-line-number systemsculpt-diff-line-number-old',
         text: line.oldLineNumber ? `${line.oldLineNumber}` : '',
       });
 
-      const newNumber = lineEl.createEl('span', {
+      lineEl.createSpan({
         cls: 'systemsculpt-diff-line-number systemsculpt-diff-line-number-new',
         text: line.newLineNumber ? `${line.newLineNumber}` : '',
       });
     }
 
     // Line prefix (compact)
-    const prefix = lineEl.createEl('span', {
+    const prefix = lineEl.createSpan({
       cls: 'systemsculpt-diff-prefix'
     });
 
@@ -239,7 +239,7 @@ export class DiffViewer extends Component {
     }
 
     // Line content
-    const content = lineEl.createEl('span', {
+    const content = lineEl.createSpan({
       cls: 'systemsculpt-diff-line-content',
       text: line.content || ''
     });

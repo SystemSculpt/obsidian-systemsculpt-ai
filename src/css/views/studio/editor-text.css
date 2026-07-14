@@ -1,0 +1,88 @@
+/* ------------------------------------------------------------------ *
+ * Text editor (markdown surface)
+ * ------------------------------------------------------------------ */
+.ss-studio-node-text-editor-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ss-space-1);
+  padding: 0 var(--ss-space-2) var(--ss-space-2);
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.ss-studio-node-text-editor-label {
+  font-size: var(--ss-text-xs);
+  color: var(--ss-ink-faint);
+  letter-spacing: var(--ss-tracking-wide);
+  text-transform: uppercase;
+}
+
+.ss-studio-node-text-editor-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-1);
+}
+
+.ss-studio-node-text-display-mode {
+  display: inline-flex;
+  gap: var(--ss-space-0);
+}
+
+.ss-studio-node-text-display-mode-button {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--ss-space-0) var(--ss-space-2);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-full);
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-xs);
+  cursor: pointer;
+  transition: var(--ss-transition-colors);
+}
+
+.ss-studio-node-text-display-mode-button.is-selected {
+  background-color: var(--ss-accent-tint-strong);
+  border-color: var(--ss-line-accent);
+  color: var(--ss-ink-accent);
+}
+
+.ss-studio-node-text-editor {
+  flex: 1 1 auto;
+  min-height: 120px;
+  padding: var(--ss-space-2);
+  background-color: var(--ss-surface-sunken);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-sm);
+  color: var(--ss-ink);
+  font-family: var(--ss-font-mono);
+  font-size: var(--ss-text-sm);
+  line-height: var(--ss-leading-base);
+  resize: none;
+  transition: var(--ss-transition-colors);
+}
+
+.ss-studio-node-text-editor:focus {
+  border-color: var(--ss-accent);
+  box-shadow: var(--ss-ring);
+  outline: none;
+}
+
+.ss-studio-node-text-rendered {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--ss-space-2);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-sm);
+  font-size: var(--ss-text-sm);
+  line-height: var(--ss-leading-base);
+}
+
+.ss-studio-node-text-rendered :is(h1, h2, h3, h4, h5, h6) {
+  margin: var(--ss-space-2) 0 var(--ss-space-1);
+  letter-spacing: var(--ss-tracking-tight);
+}
+
+.ss-studio-node-text-rendered :is(p, ul, ol) {
+  margin: var(--ss-space-1) 0;
+}

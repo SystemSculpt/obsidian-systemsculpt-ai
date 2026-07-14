@@ -8,7 +8,7 @@ import type { EmbeddingVector } from "../embeddings/types";
 import { buildVectorId } from "../embeddings/utils/vectorId";
 
 function makeVector(path: string): EmbeddingVector {
-  const namespace = "systemsculpt:openai/text-embedding-3-small:v2:3";
+  const namespace = "systemsculpt:managed:semantic-v1:v2:3";
   return {
     id: buildVectorId(namespace, path, 0),
     path,
@@ -18,8 +18,7 @@ function makeVector(path: string): EmbeddingVector {
       title: path.replace(/\.md$/, ""),
       mtime: 1,
       contentHash: `${path}-hash`,
-      provider: "systemsculpt",
-      model: "openai/text-embedding-3-small",
+      generation: "semantic-v1",
       dimension: 3,
       createdAt: 1,
       namespace,

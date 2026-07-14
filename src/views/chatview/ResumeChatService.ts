@@ -1,8 +1,10 @@
 import { App, MarkdownView, WorkspaceLeaf, TFile, Notice } from "obsidian";
 import SystemSculptPlugin from "../../main";
 import { SystemSculptSettings } from "../../types";
+import { getRuntimeWindow } from "../../utils/runtimeWindow";
 import { ChatStorageService } from "./ChatStorageService";
 import { openChatResumeDescriptor } from "./ChatResumeUtils";
+import { createUiAction } from "../../core/ui/surface";
 
 export class ResumeChatService {
   private app: App;
@@ -56,7 +58,7 @@ export class ResumeChatService {
   }
 
   private scheduleInitialRefresh() {
-    setTimeout(() => {
+    getRuntimeWindow().setTimeout(() => {
       this.app.workspace.iterateAllLeaves((leaf) => {
         void this.handleLeafChange(leaf);
       });
@@ -69,7 +71,7 @@ export class ResumeChatService {
       if (scheduled) return;
       scheduled = true;
       // Defer and coalesce repeated layout-change bursts
-      setTimeout(() => {
+      getRuntimeWindow().setTimeout(() => {
         try {
           this.app.workspace.iterateAllLeaves((leaf) => {
             this.handleLeafChange(leaf);
@@ -82,8 +84,6 @@ export class ResumeChatService {
   }
 
   private async handleLeafChange(leaf: WorkspaceLeaf) {
-    // Freeze diagnostics breadcrumb for when chat leaves are inspected
-    try { (window as any).FreezeMonitor?.mark?.('resume-chat:handleLeafChange:start'); } catch {}
     const view = leaf.view;
     if (!(view instanceof MarkdownView)) return;
 
@@ -100,7 +100,7 @@ export class ResumeChatService {
     if (!file || !this.isChatHistoryFile(file)) return;
 
     // Get the appropriate container based on current view mode
-    const editorContainer = view.contentEl.querySelector('.cm-editor');
+    const editorContainer = view.contentEl.querySelector<HTMLElement>('.cm-editor');
     const isSourceMode = view.getMode() === 'source';
     const contentContainer = isSourceMode ? editorContainer : view.contentEl;
     if (!contentContainer) return;
@@ -112,13 +112,12 @@ export class ResumeChatService {
     // Create and insert the resume chat button. In source mode the button
     // mounts inside .cm-editor and needs the absolute-positioning modifier
     // (resume-chat.css keys off this class, not the Obsidian ancestor).
-    const buttonContainer = this.createResumeChatButton(chatId, file);
+    const buttonContainer = this.createResumeChatButton(chatId, file, contentContainer);
     if (isSourceMode) {
       buttonContainer.classList.add('systemsculpt-resume-chat-button--editor');
     }
     contentContainer.insertBefore(buttonContainer, contentContainer.firstChild);
     this.resumeButtonByLeaf.set(leaf, buttonContainer);
-    try { (window as any).FreezeMonitor?.mark?.('resume-chat:handleLeafChange:end'); } catch {}
   }
 
   public isChatHistoryFile(file: TFile): boolean {
@@ -151,21 +150,26 @@ export class ResumeChatService {
     return filename || null;
   }
 
-  private createResumeChatButton(chatId: string, file: TFile): HTMLElement {
-    const buttonContainer = document.createElement('div');
+  private createResumeChatButton(chatId: string, file: TFile, host: HTMLElement): HTMLElement {
+    // Build directly in the leaf's realm so popout themes, focus, and events
+    // never depend on the primary Obsidian document.
+    // eslint-disable-next-line obsidianmd/prefer-create-el
+    const buttonContainer = host.ownerDocument.createElement("div");
     buttonContainer.className = 'systemsculpt-resume-chat-button';
 
-    const button = document.createElement('button');
-    button.className = 'systemsculpt-resume-chat-btn';
-    button.textContent = 'Resume this chat';
+    const button = createUiAction(buttonContainer, {
+      label: "Resume this chat",
+      icon: "message-circle",
+      size: "small",
+      tone: "primary",
+    });
+    button.addClass("systemsculpt-resume-chat-btn");
 
     const clickHandler = async () => {
       await this.openChat(chatId, file.path);
     };
 
     this.registerListener(button, 'click', clickHandler);
-
-    buttonContainer.appendChild(button);
 
     return buttonContainer;
   }

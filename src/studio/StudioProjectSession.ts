@@ -76,7 +76,7 @@ type StudioProjectSessionAsyncMutator = (project: StudioProjectV1) => Promise<bo
 export class StudioProjectSession {
   private projectPath: string;
   private project: StudioProjectV1;
-  private saveTimer: ReturnType<typeof globalThis.setTimeout> | null = null;
+  private saveTimer: number | null = null;
   private saveTimerMode: StudioProjectSessionAutosaveMode | null = null;
   private saveInFlight = false;
   private saveInFlightPromise: Promise<void> | null = null;
@@ -397,7 +397,7 @@ export class StudioProjectSession {
 
   private clearSaveTimer(): void {
     if (this.saveTimer !== null) {
-      globalThis.clearTimeout(this.saveTimer);
+      window.clearTimeout(this.saveTimer);
       this.saveTimer = null;
       this.saveTimerMode = null;
     }
@@ -406,7 +406,7 @@ export class StudioProjectSession {
   private startSaveTimer(mode: StudioProjectSessionAutosaveMode): void {
     this.saveTimerMode = mode;
     const delayMs = mode === "continuous" ? this.continuousDelayMs : this.discreteDelayMs;
-    this.saveTimer = globalThis.setTimeout(() => {
+    this.saveTimer = window.setTimeout(() => {
       this.saveTimer = null;
       this.saveTimerMode = null;
       void this.flushSave();

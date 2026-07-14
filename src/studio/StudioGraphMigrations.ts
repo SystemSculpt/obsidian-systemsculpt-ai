@@ -7,11 +7,11 @@ const PATH_ONLY_PORTS_MIGRATION_ID = "studio.path-only-ports.v1";
 const PROMPT_TEMPLATE_INLINE_MIGRATION_ID = "studio.inline-prompt-template.v1";
 const RESEND_TO_HTTP_REQUEST_MIGRATION_ID = "studio.resend-http-request.v1";
 const NOTE_NODE_CANONICAL_MIGRATION_ID = "studio.note-canonical-config.v1";
-const PI_TEXT_NODE_MODEL_MIGRATION_ID = "studio.pi-text-model-selector.v1";
+const LEGACY_TEXT_NODE_MODEL_MIGRATION_ID = "studio.pi-text-model-selector.v1";
 const IMAGE_NODE_LEVERS_MIGRATION_ID = "studio.image-node-levers.v1";
+const MANAGED_NODE_CONFIG_MIGRATION_ID = "studio.managed-node-config.v1";
+const RETIRED_HTTP_NODE_MIGRATION_ID = "studio.retire-http-request.v1";
 export const TEXT_NODE_KINDS_MIGRATION_ID = "studio.text-node-kinds.v1";
-const RESEND_DEFAULT_BASE_URL = "https://api.resend.com";
-const RESEND_DEFAULT_MAX_RETRIES = 3;
 
 /**
  * One-shot kind renames applied as a single atomic lookup: every node kind is
@@ -115,24 +115,6 @@ function dedupeEdges(edges: StudioEdge[]): StudioEdge[] {
   return result;
 }
 
-function clampFiniteInt(
-  value: StudioJsonValue | undefined,
-  fallback: number,
-  bounds: { min: number; max: number }
-): number {
-  const parsed =
-    typeof value === "number"
-      ? value
-      : typeof value === "string"
-        ? Number(value.trim())
-        : Number.NaN;
-  if (!Number.isFinite(parsed)) {
-    return fallback;
-  }
-  const rounded = Math.floor(parsed);
-  return Math.max(bounds.min, Math.min(bounds.max, rounded));
-}
-
 function asFiniteGeometryNumber(value: StudioJsonValue | undefined): number | null {
   const parsed =
     typeof value === "number"
@@ -226,17 +208,11 @@ function migrateTextGenerationNodes(
     }
 
     const currentConfig = (node.config || {}) as Record<string, StudioJsonValue>;
-    const sourceMode = asText(currentConfig.sourceMode).trim().toLowerCase();
-    const localModelId = asText(currentConfig.localModelId).trim();
-    const managedModelId = asText(currentConfig.modelId).trim();
-    const nextModelId = sourceMode === "local_pi" ? localModelId || managedModelId : managedModelId;
-
-    const nextConfig: Record<string, StudioJsonValue> = {
-      ...currentConfig,
-      modelId: nextModelId,
-    };
-    delete nextConfig.sourceMode;
-    delete nextConfig.localModelId;
+    const nextConfig: Record<string, StudioJsonValue> = { ...currentConfig };
+    for (const key of [
+      "sourceMode", "localModelId", "modelId", "reasoningEffort", "provider", "providerId",
+      "endpoint", "apiKey", "oauth", "fallback", "price", "pricing",
+    ]) delete nextConfig[key];
 
     if (JSON.stringify(nextConfig) !== JSON.stringify(currentConfig)) {
       changed = true;
@@ -269,15 +245,11 @@ function migrateImageGenerationNodes(
 
     const currentConfig = (node.config || {}) as Record<string, StudioJsonValue>;
     const nextConfig: Record<string, StudioJsonValue> = { ...currentConfig };
-    // Backfill the model + resolution levers as explicit defaults so the new
-    // controls render with a known selection ("" => SystemSculpt managed default).
+    for (const key of [
+      "modelId", "provider", "providerId", "endpoint", "apiKey", "oauth", "fallback", "price", "pricing",
+      "imageSize",
+    ]) delete nextConfig[key];
     // Seed is intentionally left absent, which the node treats as "random".
-    if (typeof nextConfig.modelId !== "string") {
-      nextConfig.modelId = "";
-    }
-    if (typeof nextConfig.imageSize !== "string") {
-      nextConfig.imageSize = "";
-    }
     // Older projects could save count 5-8 under the previous schema (max 8). The
     // new max is 4, and config validation rejects out-of-range values before the
     // node's runtime clamp runs, so normalize legacy counts here or the flow
@@ -315,6 +287,26 @@ function migrateImageGenerationNodes(
   };
 }
 
+function retireHttpRequestNodes(
+  nodes: StudioProjectV1["graph"]["nodes"]
+): { nodes: StudioProjectV1["graph"]["nodes"]; changed: boolean } {
+  let changed = false;
+  const nextNodes = nodes.map(node => {
+    if (node.kind !== "studio.http_request") return node;
+    changed = true;
+    return {
+      ...node,
+      kind: "studio.retired_http_request",
+      version: "1.0.0",
+      title: "Retired HTTP Request",
+      config: {
+        reason: "HTTP Request nodes are retired. Replace this node with a retained managed capability.",
+      },
+    };
+  });
+  return { nodes: nextNodes, changed };
+}
+
 function migrateResendAudienceSyncNodes(
   nodes: StudioProjectV1["graph"]["nodes"],
   edges: StudioEdge[]
@@ -333,40 +325,13 @@ function migrateResendAudienceSyncNodes(
     changed = true;
     convertedNodeIds.add(node.id);
 
-    const config = (node.config || {}) as Record<string, StudioJsonValue>;
-    const apiBaseUrl =
-      asText(config.apiBaseUrl).trim().replace(/\/+$/, "") || RESEND_DEFAULT_BASE_URL;
-    const segmentId = asText(config.segmentId).trim();
-    const authSourceRaw = asText(config.apiKeySource).trim().toLowerCase();
-    const authSource = authSourceRaw === "plaintext" ? "plaintext" : "keychain_ref";
-    const body: Record<string, StudioJsonValue> = {
-      unsubscribed: config.unsubscribed === true,
-    };
-    if (segmentId) {
-      body.segments = [{ id: segmentId }];
-    }
-
-    const maxRetries = clampFiniteInt(config.maxRetries, RESEND_DEFAULT_MAX_RETRIES, {
-      min: 0,
-      max: 8,
-    });
-
-    const headers: Record<string, StudioJsonValue> = {
-      "Content-Type": "application/json",
-    };
-
     return {
       ...node,
-      kind: "studio.http_request",
-      title: asText(node.title).trim() || "HTTP Request",
+      kind: "studio.retired_http_request",
+      version: "1.0.0",
+      title: "Retired HTTP Request",
       config: {
-        method: "POST",
-        url: `${apiBaseUrl}/contacts`,
-        headers,
-        bearerToken: authSource === "plaintext" ? asText(config.apiKey).trim() : "",
-        bodyMode: "auto",
-        body,
-        maxRetries,
+        reason: "HTTP Request nodes are retired. Replace this node with a retained managed capability.",
       },
     };
   });
@@ -384,8 +349,7 @@ function migrateResendAudienceSyncNodes(
       }
       if (edge.toPortId === "emails") {
         changed = true;
-        // Dropped intentionally: mapping to `body` overrides configured payload
-        // on the simplified HTTP node and can produce invalid Resend request bodies.
+        // Dropped intentionally: the retired placeholder does not consume payload data.
         continue;
       }
     }
@@ -401,8 +365,7 @@ function migrateResendAudienceSyncNodes(
       }
       if (edge.fromPortId === "synced") {
         changed = true;
-        // Dropped intentionally: legacy `synced` represented contact count,
-        // while HTTP `status` is a response code and not semantically equivalent.
+        // Dropped intentionally: the retired placeholder has no success result.
         continue;
       }
     }
@@ -673,11 +636,26 @@ export function migrateStudioProjectToPathOnlyPorts(project: StudioProjectV1): {
     changed = true;
   }
 
+  // Geometry must be promoted before any retirement pass replaces config.
+  // Retired nodes keep first-class canvas size, while their legacy request
+  // fields (including width/height-adjacent secrets) are discarded below.
+  const geometryMigration = migrateNodeGeometryToSize(nodes);
+  if (geometryMigration.changed) {
+    changed = true;
+    nodes = geometryMigration.nodes;
+  }
+
   const resendMigration = migrateResendAudienceSyncNodes(nodes, edges);
   if (resendMigration.changed) {
     changed = true;
     nodes = resendMigration.nodes;
     edges = resendMigration.edges;
+  }
+
+  const retiredHttpMigration = retireHttpRequestNodes(nodes);
+  if (retiredHttpMigration.changed) {
+    changed = true;
+    nodes = retiredHttpMigration.nodes;
   }
 
   const textGenerationMigration = migrateTextGenerationNodes(nodes);
@@ -690,12 +668,6 @@ export function migrateStudioProjectToPathOnlyPorts(project: StudioProjectV1): {
   if (imageGenerationMigration.changed) {
     changed = true;
     nodes = imageGenerationMigration.nodes;
-  }
-
-  const geometryMigration = migrateNodeGeometryToSize(nodes);
-  if (geometryMigration.changed) {
-    changed = true;
-    nodes = geometryMigration.nodes;
   }
 
   let entryNodeIds = project.graph.entryNodeIds;
@@ -745,9 +717,9 @@ export function migrateStudioProjectToPathOnlyPorts(project: StudioProjectV1): {
       at: nowIso(),
     });
   }
-  if (textGenerationMigration.changed && !appliedMigrationIds.has(PI_TEXT_NODE_MODEL_MIGRATION_ID)) {
+  if (textGenerationMigration.changed && !appliedMigrationIds.has(LEGACY_TEXT_NODE_MODEL_MIGRATION_ID)) {
     nextApplied.push({
-      id: PI_TEXT_NODE_MODEL_MIGRATION_ID,
+      id: LEGACY_TEXT_NODE_MODEL_MIGRATION_ID,
       at: nowIso(),
     });
   }
@@ -756,6 +728,15 @@ export function migrateStudioProjectToPathOnlyPorts(project: StudioProjectV1): {
       id: IMAGE_NODE_LEVERS_MIGRATION_ID,
       at: nowIso(),
     });
+  }
+  if (
+    (textGenerationMigration.changed || imageGenerationMigration.changed) &&
+    !appliedMigrationIds.has(MANAGED_NODE_CONFIG_MIGRATION_ID)
+  ) {
+    nextApplied.push({ id: MANAGED_NODE_CONFIG_MIGRATION_ID, at: nowIso() });
+  }
+  if (retiredHttpMigration.changed && !appliedMigrationIds.has(RETIRED_HTTP_NODE_MIGRATION_ID)) {
+    nextApplied.push({ id: RETIRED_HTTP_NODE_MIGRATION_ID, at: nowIso() });
   }
   const migrations = {
     ...project.migrations,

@@ -6,8 +6,10 @@ type KeydownContext = {
   isActiveStudioView: jest.Mock<boolean, []>;
   isEditableKeyboardTarget: jest.Mock<boolean, [EventTarget | null]>;
   fitSelectedGraphNodesInViewport: jest.Mock<boolean, []>;
-  copySelectedGraphNodesToClipboard: jest.Mock<boolean, []>;
-  cutSelectedGraphNodesToClipboard: jest.Mock<boolean, []>;
+  clipboardAndDropController: {
+    copySelectedGraphNodes: jest.Mock<boolean, []>;
+    cutSelectedGraphNodes: jest.Mock<boolean, []>;
+  };
   undoGraphHistory: jest.Mock<boolean, []>;
   redoGraphHistory: jest.Mock<boolean, []>;
   busy: boolean;
@@ -41,8 +43,10 @@ function createContext(overrides?: Partial<KeydownContext>): KeydownContext {
     isActiveStudioView: jest.fn(() => true),
     isEditableKeyboardTarget: jest.fn(() => false),
     fitSelectedGraphNodesInViewport: jest.fn(() => true),
-    copySelectedGraphNodesToClipboard: jest.fn(() => false),
-    cutSelectedGraphNodesToClipboard: jest.fn(() => false),
+    clipboardAndDropController: {
+      copySelectedGraphNodes: jest.fn(() => false),
+      cutSelectedGraphNodes: jest.fn(() => false),
+    },
     undoGraphHistory: jest.fn(() => false),
     redoGraphHistory: jest.fn(() => false),
     busy: false,
@@ -103,7 +107,10 @@ describe("SystemSculptStudioView fit-selection keyboard shortcut", () => {
   it("keeps copy shortcut blocked while editing text targets", () => {
     const context = createContext({
       isEditableKeyboardTarget: jest.fn(() => true),
-      copySelectedGraphNodesToClipboard: jest.fn(() => true),
+      clipboardAndDropController: {
+        copySelectedGraphNodes: jest.fn(() => true),
+        cutSelectedGraphNodes: jest.fn(() => false),
+      },
     });
     const event = createKeydownEvent({
       key: "c",
@@ -113,7 +120,7 @@ describe("SystemSculptStudioView fit-selection keyboard shortcut", () => {
 
     handleWindowKeyDown.call(context, event);
 
-    expect(context.copySelectedGraphNodesToClipboard).not.toHaveBeenCalled();
+    expect(context.clipboardAndDropController.copySelectedGraphNodes).not.toHaveBeenCalled();
     expect(event.preventDefault).not.toHaveBeenCalled();
     expect(event.stopPropagation).not.toHaveBeenCalled();
   });

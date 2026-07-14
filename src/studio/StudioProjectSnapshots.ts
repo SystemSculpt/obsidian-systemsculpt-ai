@@ -15,10 +15,6 @@ export function cloneStudioProjectSnapshot(project: StudioProjectV1): StudioProj
   return JSON.parse(JSON.stringify(project)) as StudioProjectV1;
 }
 
-export function cloneStudioProjectSnapshots(projects: StudioProjectV1[]): StudioProjectV1[] {
-  return projects.map((project) => cloneStudioProjectSnapshot(project));
-}
-
 export function readonlyStudioProjectSnapshot(project: StudioProjectV1): ReadonlyStudioProjectSnapshot {
   return cloneStudioProjectSnapshot(project) as ReadonlyStudioProjectSnapshot;
 }

@@ -157,7 +157,7 @@
   font-style: italic;
 }
 
-@media (max-width: 600px) {
+@container ss-surface (max-width: 600px) {
   .systemsculpt-diff-line-number {
     min-width: 2.5ch;
   }

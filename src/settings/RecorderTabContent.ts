@@ -1,23 +1,55 @@
 import { Setting, Notice, DropdownComponent } from "obsidian";
 import { SystemSculptSettingTab } from "./SystemSculptSettingTab";
-import { PlatformContext } from "../services/PlatformContext";
 import { DEFAULT_SETTINGS } from "../types";
-import {
-  CUSTOM_WHISPER_CONTRACT,
-  validateCustomWhisperConfig,
-} from "../services/transcription/providers/customWhisperConfig";
+import { getSurfaceOwnerWindow } from "../core/ui/surface/SurfaceDomContext";
+import { MicrophoneDeviceCatalog } from "../services/recorder/MicrophoneDeviceCatalog";
+
+interface RecorderTabRenderScope {
+  catalog: MicrophoneDeviceCatalog;
+  isCurrent(): boolean;
+  dispose(): void;
+}
+
+const activeRecorderTabRenders = new WeakMap<SystemSculptSettingTab, RecorderTabRenderScope>();
+
+function beginRecorderTabRender(
+  containerEl: HTMLElement,
+  tabInstance: SystemSculptSettingTab,
+): RecorderTabRenderScope {
+  activeRecorderTabRenders.get(tabInstance)?.dispose();
+
+  const catalog = new MicrophoneDeviceCatalog(getSurfaceOwnerWindow(containerEl));
+  let active = true;
+  let unregisterCleanup: () => void = () => undefined;
+  const scope: RecorderTabRenderScope = {
+    catalog,
+    isCurrent: () => active && activeRecorderTabRenders.get(tabInstance) === scope,
+    dispose: () => {
+      if (!active) return;
+      active = false;
+      catalog.dispose();
+      if (activeRecorderTabRenders.get(tabInstance) === scope) {
+        activeRecorderTabRenders.delete(tabInstance);
+      }
+      unregisterCleanup();
+    },
+  };
+  activeRecorderTabRenders.set(tabInstance, scope);
+  unregisterCleanup = tabInstance.registerRenderCleanup(() => scope.dispose());
+  return scope;
+}
 
 export async function displayRecorderTabContent(containerEl: HTMLElement, tabInstance: SystemSculptSettingTab) {
   containerEl.empty();
+  const renderScope = beginRecorderTabRender(containerEl, tabInstance);
   if (containerEl.classList.contains("systemsculpt-tab-content")) {
     containerEl.dataset.tab = "workflow";
   }
   const { plugin } = tabInstance;
-  const isMobile = PlatformContext.get().isMobile();
 
   containerEl.createEl("h3", { text: "Recording" });
 
-  await renderMicrophoneSetting(containerEl, tabInstance);
+  const microphoneDevicesReady = renderMicrophoneSetting(containerEl, tabInstance, renderScope);
 
   new Setting(containerEl)
     .setName("Auto-transcribe recordings")
@@ -85,46 +117,6 @@ export async function displayRecorderTabContent(containerEl: HTMLElement, tabIns
         });
     });
 
-  // #97: a dedicated post-processing model. Clean-up is a cheap, mechanical
-  // task, so users want to run it on a fast/cheap model while keeping a stronger
-  // model for chat. Empty value = "use the chat model" (the PostProcessingService
-  // fallback), which keeps the default behavior and works for BYOK users.
-  new Setting(containerEl)
-    .setName("Post-processing model")
-    .setDesc(
-      "Model used for transcription clean-up. Defaults to your chat model — pick a faster or cheaper model here to keep chat on a stronger one."
-    )
-    .addDropdown((dropdown) => {
-      // Guards the late re-apply below: if the user picks a value while the
-      // model list is still loading, don't clobber their choice.
-      let userSelected = false;
-      dropdown.addOption("", "Use chat model (default)");
-      dropdown.setValue(plugin.settings.postProcessingModelId || "");
-      dropdown.onChange(async (value) => {
-        userSelected = true;
-        await plugin.getSettingsManager().updateSettings({ postProcessingModelId: value });
-      });
-      // Populate the model list asynchronously. The dropdown stays usable with
-      // the default option while models load, and failures degrade gracefully
-      // (clean-up still runs via the chat model).
-      void (async () => {
-        try {
-          const models = await plugin.modelService.getModels();
-          for (const model of models) {
-            const label = String(model.name || model.id || "").trim() || model.id;
-            dropdown.addOption(model.id, label);
-          }
-          // Re-apply the stored selection now that its option exists — unless the
-          // user already chose something while the list was loading.
-          if (!userSelected) {
-            dropdown.setValue(plugin.settings.postProcessingModelId || "");
-          }
-        } catch {
-          // Leave the default-only dropdown in place.
-        }
-      })();
-    });
-
   let postProcessingPromptText: HTMLTextAreaElement | null = null;
   new Setting(containerEl)
     .setName("Transcription clean-up prompt")
@@ -159,25 +151,6 @@ export async function displayRecorderTabContent(containerEl: HTMLElement, tabIns
   containerEl.createEl("h3", { text: "Transcription" });
 
   new Setting(containerEl)
-    .setName("Transcription provider")
-    .setDesc("Transcribe through SystemSculpt (managed) or your own self-hosted / third-party Whisper-compatible endpoint.")
-    .addDropdown((dropdown) => {
-      dropdown
-        .addOption("systemsculpt", "SystemSculpt (managed)")
-        .addOption("custom", "Custom / self-hosted Whisper")
-        .setValue(plugin.settings.transcriptionProvider ?? "systemsculpt")
-        .onChange(async (value: "systemsculpt" | "custom") => {
-          await plugin.getSettingsManager().updateSettings({ transcriptionProvider: value });
-          // Re-render so the custom fields appear/disappear with the choice.
-          await displayRecorderTabContent(containerEl, tabInstance);
-        });
-    });
-
-  if (plugin.settings.transcriptionProvider === "custom") {
-    renderCustomTranscriptionSettings(containerEl, tabInstance);
-  }
-
-  new Setting(containerEl)
     .setName("Default transcription output format")
     .setDesc("Choose whether transcriptions are saved as Markdown (.md) or SRT (.srt) by default.")
     .addDropdown((dropdown) => {
@@ -206,97 +179,26 @@ export async function displayRecorderTabContent(containerEl: HTMLElement, tabIns
     cls: "setting-item-description",
   });
 
-  if (!isMobile) {
-    new Setting(containerEl)
-      .setName("Automatic audio format conversion")
-      .setDesc("Convert incompatible audio files before transcription.")
-      .addToggle((toggle) => {
-        toggle
-          .setValue(plugin.settings.enableAutoAudioResampling ?? true)
-          .onChange(async (value) => {
-            await plugin.getSettingsManager().updateSettings({ enableAutoAudioResampling: value });
-            new Notice(value ? "Audio conversion enabled" : "Audio conversion disabled");
-          });
-      });
-  }
+  new Setting(containerEl)
+    .setName("Automatic audio format conversion")
+    .setDesc("Convert incompatible audio files before transcription.")
+    .addToggle((toggle) => {
+      toggle
+        .setValue(plugin.settings.enableAutoAudioResampling ?? true)
+        .onChange(async (value) => {
+          await plugin.getSettingsManager().updateSettings({ enableAutoAudioResampling: value });
+          new Notice(value ? "Audio conversion enabled" : "Audio conversion disabled");
+        });
+    });
+
+  await microphoneDevicesReady;
 }
 
-function renderCustomTranscriptionSettings(containerEl: HTMLElement, tabInstance: SystemSculptSettingTab) {
-  const { plugin } = tabInstance;
-  let statusEl: HTMLElement | null = null;
-
-  const refreshValidation = () => {
-    if (!statusEl) return;
-    statusEl.empty();
-    const result = validateCustomWhisperConfig({
-      endpoint: plugin.settings.customTranscriptionEndpoint || "",
-      apiKey: plugin.settings.customTranscriptionApiKey || "",
-      model: plugin.settings.customTranscriptionModel || "",
-    });
-    if (result.ok && result.warnings.length === 0) {
-      statusEl.createDiv({ cls: "ss-inline-note ss-inline-note--ok", text: "✓ Endpoint looks compatible." });
-      return;
-    }
-    for (const error of result.errors) {
-      statusEl.createDiv({ cls: "ss-inline-note ss-inline-note--error", text: `⛔ ${error}` });
-    }
-    for (const warning of result.warnings) {
-      statusEl.createDiv({ cls: "ss-inline-note ss-inline-note--warning", text: `⚠️ ${warning}` });
-    }
-  };
-
-  new Setting(containerEl)
-    .setName("Custom endpoint URL")
-    .setDesc(
-      "Full URL of your Whisper-compatible endpoint, e.g. https://api.groq.com/openai/v1/audio/transcriptions, https://api.openai.com/v1/audio/transcriptions, or http://localhost:9000/v1/audio/transcriptions."
-    )
-    .addText((text) => {
-      text
-        .setPlaceholder("https://.../v1/audio/transcriptions")
-        .setValue(plugin.settings.customTranscriptionEndpoint || "")
-        .onChange(async (value) => {
-          await plugin.getSettingsManager().updateSettings({ customTranscriptionEndpoint: value.trim() });
-          refreshValidation();
-        });
-    });
-
-  new Setting(containerEl)
-    .setName("API key")
-    .setDesc("Optional. Sent as 'Authorization: Bearer <key>'. Required by most hosted endpoints; leave blank for a local server that needs none.")
-    .addText((text) => {
-      text.inputEl.type = "password";
-      text
-        .setPlaceholder("sk-... / gsk_...")
-        .setValue(plugin.settings.customTranscriptionApiKey || "")
-        .onChange(async (value) => {
-          await plugin.getSettingsManager().updateSettings({ customTranscriptionApiKey: value.trim() });
-          refreshValidation();
-        });
-    });
-
-  new Setting(containerEl)
-    .setName("Model name")
-    .setDesc("Model identifier sent to the endpoint, e.g. whisper-large-v3 (Groq) or whisper-1 (OpenAI). Leave blank to use the server default.")
-    .addText((text) => {
-      text
-        .setPlaceholder("whisper-large-v3")
-        .setValue(plugin.settings.customTranscriptionModel || "")
-        .onChange(async (value) => {
-          await plugin.getSettingsManager().updateSettings({ customTranscriptionModel: value.trim() });
-          refreshValidation();
-        });
-    });
-
-  containerEl.createEl("p", {
-    text: CUSTOM_WHISPER_CONTRACT,
-    cls: "setting-item-description",
-  });
-
-  statusEl = containerEl.createDiv({ cls: "ss-inline-note" });
-  refreshValidation();
-}
-
-async function renderMicrophoneSetting(containerEl: HTMLElement, tabInstance: SystemSculptSettingTab) {
+function renderMicrophoneSetting(
+  containerEl: HTMLElement,
+  tabInstance: SystemSculptSettingTab,
+  renderScope: RecorderTabRenderScope,
+): Promise<void> {
   const { plugin } = tabInstance;
 
   const setting = new Setting(containerEl)
@@ -318,52 +220,45 @@ async function renderMicrophoneSetting(containerEl: HTMLElement, tabInstance: Sy
     });
   });
 
-  const statusEl = setting.descEl.createDiv({ cls: "ss-inline-note" });
+  const statusEl = setting.descEl.createDiv({
+    cls: "ss-inline-note",
+    attr: { "aria-live": "polite" },
+  });
 
   const loadDevices = async () => {
-    if (!dropdownComponent || !dropdownEl) return;
-    dropdownEl.innerHTML = "";
+    if (!renderScope.isCurrent() || !dropdownComponent || !dropdownEl) return;
+    dropdownEl.empty();
     const dropdown = dropdownComponent;
     const addOption = (value: string, label: string) => {
       dropdown.addOption(value, label);
     };
 
-    if (typeof navigator === "undefined" || !navigator.mediaDevices?.enumerateDevices) {
-      addOption("default", "Default microphone");
+    addOption("default", "Default microphone");
+    statusEl.setText("Loading microphones...");
+    const result = await renderScope.catalog.refresh();
+    if (!renderScope.isCurrent() || result.status === "cancelled") return;
+    if (result.status === "unavailable") {
       dropdown.setValue(plugin.settings.preferredMicrophoneId || "default");
       statusEl.setText("Microphone selection unavailable in this environment.");
       return;
     }
-
-    try {
-      statusEl.setText("Loading microphones...");
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      const labeled = devices.some((device) => device.kind === "audioinput" && device.label);
-      if (!labeled) {
-        try {
-          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-          stream.getTracks().forEach((track) => track.stop());
-        } catch (_error: any) {
-          statusEl.setText("Microphone access denied; using default device list.");
-        }
-      }
-
-      const refreshed = await navigator.mediaDevices.enumerateDevices();
-      const microphones = refreshed.filter((device) => device.kind === "audioinput");
-
-      addOption("default", "Default microphone");
-      microphones.forEach((mic) => {
-        addOption(mic.deviceId, mic.label || `Microphone ${mic.deviceId.slice(0, 8)}`);
-      });
-
-      const current = plugin.settings.preferredMicrophoneId || "default";
-      dropdown.setValue(current);
-      statusEl.setText(microphones.length ? "" : "No microphones detected.");
-    } catch (error: any) {
-      statusEl.setText(`Unable to load microphones: ${error?.message || error}`);
-      addOption("default", "Default microphone");
+    if (result.status === "error") {
+      statusEl.setText(`Unable to load microphones: ${result.message}`);
       dropdown.setValue("default");
+      return;
     }
+
+    for (const microphone of result.devices) {
+      addOption(microphone.id, microphone.label);
+    }
+    dropdown.setValue(plugin.settings.preferredMicrophoneId || "default");
+    statusEl.setText(
+      result.devices.length === 0
+        ? "No microphones detected."
+        : result.labelRefresh === "denied"
+          ? "Microphone access denied; using default device list."
+          : "",
+    );
   };
 
   setting.addExtraButton((button) => {
@@ -371,8 +266,8 @@ async function renderMicrophoneSetting(containerEl: HTMLElement, tabInstance: Sy
       .setIcon("refresh-cw")
       .setTooltip("Refresh microphones")
       .onClick(() => {
-        loadDevices();
+        void loadDevices();
       });
   });
-  await loadDevices();
+  return loadDevices();
 }

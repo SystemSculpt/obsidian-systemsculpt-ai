@@ -1,0 +1,35 @@
+{
+  "_fixtureMeta": {
+    "description": "Synthetic schema-v3 client provider, model, Pi, and integration authority state"
+  },
+  "schemaVersion": 3,
+  "licenseKey": "license-sentinel",
+  "licenseValid": true,
+  "chatsDirectory": "Workspace/Chats",
+  "recordingsDirectory": "Workspace/Recordings",
+  "selectedModelId": "legacy-provider@@legacy-model",
+  "customProviders": [
+    {
+      "id": "legacy-provider",
+      "endpoint": "https://legacy.invalid",
+      "apiKey": "sentinel-provider-key"
+    }
+  ],
+  "openAiApiKey": "sentinel-openai-key",
+  "customTranscriptionApiKey": "sentinel-transcription-key",
+  "mcpServers": [
+    {
+      "id": "legacy-http",
+      "transport": "http",
+      "apiKey": "sentinel-mcp-key"
+    }
+  ],
+  "piAuth": {
+    "provider": "legacy-provider",
+    "token": "sentinel-pi-token"
+  },
+  "readwiseApiToken": "sentinel-readwise-key",
+  "imageGenerationModelCatalogCache": {
+    "models": [{ "id": "legacy-image-model" }]
+  }
+}

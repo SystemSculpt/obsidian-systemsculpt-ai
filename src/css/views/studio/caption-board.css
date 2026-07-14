@@ -1,0 +1,271 @@
+/* ------------------------------------------------------------------ *
+ * Caption / annotation board
+ * ------------------------------------------------------------------ */
+.ss-studio-caption-board-modal-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.ss-studio-caption-board-modal {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 0;
+}
+
+.ss-studio-caption-board {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.ss-studio-caption-board__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--ss-space-3);
+  padding: var(--ss-space-3) var(--ss-space-4);
+  border-bottom: 1px solid var(--ss-line);
+}
+
+.ss-studio-caption-board__toolbar-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--ss-space-2);
+}
+
+/* Toggle state is feature semantics; button structure and interaction come
+ * from the shared action primitive. */
+.ss-studio-caption-board__toggle.is-selected {
+  background-color: var(--ss-accent-tint-strong);
+  border-color: var(--ss-line-accent);
+  color: var(--ss-ink-accent);
+}
+
+.ss-studio-caption-board__body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.ss-studio-caption-board__viewport {
+  position: relative;
+  overflow: auto;
+  background-color: var(--ss-surface-sunken);
+}
+
+.ss-studio-caption-board__surface,
+.ss-studio-caption-board__stage {
+  position: relative;
+}
+
+.ss-studio-caption-board__image {
+  display: block;
+  max-width: 100%;
+}
+
+.ss-studio-caption-board__empty {
+  padding: var(--ss-space-6);
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-sm);
+  text-align: center;
+}
+
+/* Annotations (color/stroke written by TS) */
+.ss-studio-caption-board__annotation {
+  --ss-studio-annotation-color: var(--ss-danger);
+  --ss-studio-annotation-stroke: 4px;
+
+  position: absolute;
+  border: var(--ss-studio-annotation-stroke) solid var(--ss-studio-annotation-color);
+  pointer-events: auto;
+}
+
+.ss-studio-caption-board__annotation.is-hit-area {
+  cursor: pointer;
+}
+
+.ss-studio-caption-board__annotation.is-highlight_circle {
+  border-radius: var(--ss-radius-round);
+}
+
+.ss-studio-caption-board__annotation.is-blur_rect {
+  border-style: dashed;
+  backdrop-filter: blur(8px);
+}
+
+.ss-studio-caption-board__annotation.is-selected {
+  box-shadow: var(--ss-ring);
+}
+
+.ss-studio-caption-board__crop {
+  position: absolute;
+  border: 2px dashed var(--ss-accent);
+  background-color: color-mix(in srgb, var(--ss-accent) 6%, transparent);
+}
+
+/* Small identification chips shown on the selected crop / annotation */
+.ss-studio-caption-board__crop-label,
+.ss-studio-caption-board__annotation-chip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform: translateY(-100%);
+  padding: 0 var(--ss-space-1);
+  background-color: var(--ss-accent);
+  border-radius: var(--ss-radius-xs);
+  color: var(--ss-ink-on-accent);
+  font-size: var(--ss-text-xs);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.ss-studio-caption-board__label {
+  position: absolute;
+  padding: var(--ss-space-0) var(--ss-space-2);
+  border-radius: var(--ss-radius-xs);
+  font-weight: var(--ss-weight-semibold);
+  pointer-events: auto;
+}
+
+.ss-studio-caption-board__label.is-hit-area {
+  cursor: move;
+}
+
+.ss-studio-caption-board__label.is-selected {
+  box-shadow: var(--ss-ring);
+}
+
+.ss-studio-caption-board__label.is-banner {
+  background-color: var(--ss-media-scrim);
+  color: var(--ss-ink-on-media);
+}
+
+.ss-studio-caption-board__label-resize-handle,
+.ss-studio-caption-board__overlay-resize-handle {
+  position: absolute;
+  right: -6px;
+  bottom: -6px;
+  width: 12px;
+  height: 12px;
+  border-radius: var(--ss-radius-round);
+  background-color: var(--ss-accent);
+  cursor: nwse-resize;
+}
+
+/* Sidebar inspector */
+.ss-studio-caption-board__sidebar {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+  border-left: 1px solid var(--ss-line);
+  background-color: var(--ss-surface-0);
+}
+
+.ss-studio-caption-board__sidebar-header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ss-space-1);
+  padding: var(--ss-space-3) var(--ss-space-4);
+  border-bottom: 1px solid var(--ss-line);
+}
+
+.ss-studio-caption-board__sidebar-title {
+  font-weight: var(--ss-weight-semibold);
+}
+
+.ss-studio-caption-board__sidebar-subtitle,
+.ss-studio-caption-board__sidebar-copy {
+  font-size: var(--ss-text-sm);
+  color: var(--ss-ink-muted);
+}
+
+.ss-studio-caption-board__sidebar-empty {
+  padding: var(--ss-space-3) var(--ss-space-4);
+  font-size: var(--ss-text-sm);
+  color: var(--ss-ink-faint);
+}
+
+.ss-studio-caption-board__inspector-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ss-space-2);
+  padding: var(--ss-space-3) var(--ss-space-4);
+  border-bottom: 1px solid var(--ss-line);
+}
+
+.ss-studio-caption-board__inspector-section-title {
+  font-size: var(--ss-text-xs);
+  color: var(--ss-ink-faint);
+  letter-spacing: var(--ss-tracking-wide);
+  text-transform: uppercase;
+}
+
+.ss-studio-caption-board__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ss-space-1);
+}
+
+.ss-studio-caption-board__field-label {
+  font-size: var(--ss-text-sm);
+  font-weight: var(--ss-weight-medium);
+}
+
+.ss-studio-caption-board__textarea,
+.ss-studio-caption-board__input {
+  width: 100%;
+  padding: var(--ss-space-1) var(--ss-space-2);
+  background-color: var(--ss-surface-sunken);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-xs);
+  color: var(--ss-ink);
+  font-size: var(--ss-text-sm);
+}
+
+.ss-studio-caption-board__textarea {
+  min-height: 60px;
+  resize: vertical;
+}
+
+.ss-studio-caption-board__input.is-color {
+  padding: var(--ss-space-0);
+  min-height: var(--ss-control-height-sm);
+}
+
+.ss-studio-caption-board__toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ss-space-2);
+}
+
+.ss-studio-caption-board__button-grid,
+.ss-studio-caption-board__grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--ss-space-1);
+}
+
+.ss-studio-caption-board__button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ss-space-1);
+}
+
+.ss-studio-caption-board__grid.is-2-col {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.ss-studio-caption-board__status {
+  padding: var(--ss-space-2) var(--ss-space-4);
+  font-size: var(--ss-text-xs);
+  color: var(--ss-ink-muted);
+}

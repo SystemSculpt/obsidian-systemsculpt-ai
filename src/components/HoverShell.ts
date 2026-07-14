@@ -1,6 +1,10 @@
 import { setIcon } from "obsidian";
+import {
+  applyPluginSurface,
+  createUiAction,
+  resolveSurfaceDomContext,
+} from "../core/ui/surface";
 
-export type HoverShellLayout = "desktop" | "mobile";
 export type HoverShellActionVariant = "default" | "primary" | "danger";
 
 export interface HoverShellAction {
@@ -27,13 +31,11 @@ export interface HoverShellOptions {
   statusText?: string;
   className?: string;
   width?: string;
-  layout: HoverShellLayout;
   draggable?: boolean;
   defaultPosition?: HoverShellPosition;
   positionKey?: string;
   showStatusRow?: boolean;
   host?: HTMLElement;
-  useFloatingLegacyClass?: boolean;
 }
 
 export interface HoverShellHandle {
@@ -61,6 +63,7 @@ interface StoredHoverPosition {
 }
 
 const HOVER_POSITION_STORAGE_KEY = "systemsculpt:hover-shell:positions:v1";
+let nextHoverShellId = 0;
 
 const parsePx = (value?: string): number | null => {
   if (!value) return null;
@@ -70,10 +73,10 @@ const parsePx = (value?: string): number | null => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
-const readPositionMap = (): Record<string, StoredHoverPosition> => {
-  if (typeof localStorage === "undefined") return {};
+const readPositionMap = (storage?: Storage): Record<string, StoredHoverPosition> => {
+  if (!storage) return {};
   try {
-    const raw = localStorage.getItem(HOVER_POSITION_STORAGE_KEY);
+    const raw = storage.getItem(HOVER_POSITION_STORAGE_KEY);
     if (!raw) return {};
     const parsed = JSON.parse(raw) as Record<string, StoredHoverPosition>;
     return parsed && typeof parsed === "object" ? parsed : {};
@@ -82,139 +85,138 @@ const readPositionMap = (): Record<string, StoredHoverPosition> => {
   }
 };
 
-const writePositionMap = (map: Record<string, StoredHoverPosition>): void => {
-  if (typeof localStorage === "undefined") return;
+const writePositionMap = (map: Record<string, StoredHoverPosition>, storage?: Storage): void => {
+  if (!storage) return;
   try {
-    localStorage.setItem(HOVER_POSITION_STORAGE_KEY, JSON.stringify(map));
+    storage.setItem(HOVER_POSITION_STORAGE_KEY, JSON.stringify(map));
   } catch {
     // Ignore persistence failures in private/sandboxed runtimes.
   }
 };
 
-const makeStorageKey = (positionKey: string, layout: HoverShellLayout): string => `${positionKey}:${layout}`;
-
-const loadStoredPosition = (positionKey: string, layout: HoverShellLayout): StoredHoverPosition | null => {
-  const map = readPositionMap();
-  const key = makeStorageKey(positionKey, layout);
-  const entry = map[key];
+const loadStoredPosition = (positionKey: string, storage?: Storage): StoredHoverPosition | null => {
+  const map = readPositionMap(storage);
+  const entry = map[positionKey];
   if (!entry) return null;
   if (typeof entry.left !== "number" || typeof entry.top !== "number") return null;
   return entry;
 };
 
-const saveStoredPosition = (positionKey: string, layout: HoverShellLayout, value: StoredHoverPosition): void => {
-  const map = readPositionMap();
-  map[makeStorageKey(positionKey, layout)] = value;
-  writePositionMap(map);
+const saveStoredPosition = (
+  positionKey: string,
+  value: StoredHoverPosition,
+  storage?: Storage,
+): void => {
+  const map = readPositionMap(storage);
+  map[positionKey] = value;
+  writePositionMap(map, storage);
 };
 
 export function createHoverShell(options: HoverShellOptions): HoverShellHandle {
-  const host = options.host ?? document.body;
-  const root = document.createElement("div");
+  const {
+    host,
+    window: hostWindow,
+  } = resolveSurfaceDomContext(options.host);
+  const storage = (() => {
+    try {
+      return hostWindow.localStorage;
+    } catch {
+      return undefined;
+    }
+  })();
+  const root = host.createDiv();
   root.className = "ss-hover-shell";
-  root.dataset.layout = options.layout;
+  root.dataset.layout = "desktop";
   root.dataset.state = "idle";
+  applyPluginSurface(root, "transient");
+  root.setAttribute("role", "region");
   if (options.className) {
     root.classList.add(...options.className.split(/\s+/).filter(Boolean));
-  }
-  if (options.useFloatingLegacyClass) {
-    root.classList.add("systemsculpt-floating-widget");
   }
   if (options.width) {
     root.style.width = options.width;
   }
 
-  const header = document.createElement("div");
+  const header = root.createDiv();
   header.className = "ss-hover-shell__header";
-  root.appendChild(header);
 
-  const dragHandleEl = document.createElement("div");
+  const dragHandleEl = header.createDiv();
   dragHandleEl.className = "ss-hover-shell__drag-handle";
-  header.appendChild(dragHandleEl);
 
-  const iconWrap = document.createElement("span");
+  const iconWrap = dragHandleEl.createSpan();
   iconWrap.className = "ss-hover-shell__icon";
   if (options.icon) {
     setIcon(iconWrap, options.icon);
   } else {
     iconWrap.setAttribute("hidden", "true");
   }
-  dragHandleEl.appendChild(iconWrap);
 
-  const titleStack = document.createElement("div");
+  const titleStack = dragHandleEl.createDiv();
   titleStack.className = "ss-hover-shell__title-stack";
-  dragHandleEl.appendChild(titleStack);
 
-  const titleEl = document.createElement("div");
+  const titleEl = titleStack.createDiv();
   titleEl.className = "ss-hover-shell__title";
+  titleEl.id = `ss-hover-shell-title-${++nextHoverShellId}`;
   titleEl.textContent = options.title;
-  titleStack.appendChild(titleEl);
+  root.setAttribute("aria-labelledby", titleEl.id);
 
-  const subtitleEl = document.createElement("div");
+  const subtitleEl = titleStack.createDiv();
   subtitleEl.className = "ss-hover-shell__subtitle";
   subtitleEl.textContent = options.subtitle ?? "";
   if (!options.subtitle) {
     subtitleEl.setAttribute("hidden", "true");
   }
-  titleStack.appendChild(subtitleEl);
 
-  const headerActionsEl = document.createElement("div");
+  const headerActionsEl = header.createDiv();
   headerActionsEl.className = "ss-hover-shell__header-actions";
-  header.appendChild(headerActionsEl);
 
-  const statusEl = document.createElement("div");
+  const statusEl = root.createDiv();
   statusEl.className = "ss-hover-shell__status";
+  statusEl.setAttrs({ role: "status", "aria-live": "polite", "aria-atomic": "true" });
   statusEl.textContent = options.statusText ?? "";
   if (options.showStatusRow === false) {
     statusEl.setAttribute("hidden", "true");
   }
-  root.appendChild(statusEl);
 
-  const contentEl = document.createElement("div");
+  const contentEl = root.createDiv();
   contentEl.className = "ss-hover-shell__content";
-  root.appendChild(contentEl);
 
-  const footerActionsEl = document.createElement("div");
+  const footerActionsEl = root.createDiv();
   footerActionsEl.className = "ss-hover-shell__footer-actions";
-  root.appendChild(footerActionsEl);
-
-  host.appendChild(root);
 
   const unsubscribers: Array<() => void> = [];
 
   const clampToViewport = (): void => {
-    if (options.layout === "mobile") return;
     const rect = root.getBoundingClientRect();
-    const maxLeft = Math.max(0, window.innerWidth - rect.width);
-    const maxTop = Math.max(0, window.innerHeight - rect.height);
+    if (root.dataset.layout === "compact") return;
+    const maxLeft = Math.max(0, hostWindow.innerWidth - rect.width);
+    const maxTop = Math.max(0, hostWindow.innerHeight - rect.height);
     const left = Math.max(0, Math.min(rect.left, maxLeft));
     const top = Math.max(0, Math.min(rect.top, maxTop));
     root.style.left = `${left}px`;
     root.style.top = `${top}px`;
-    root.style.right = "auto";
-    root.style.bottom = "auto";
+    root.setCssStyles({ right: "auto" });
+    root.setCssStyles({ bottom: "auto" });
   };
 
   const persistCurrentPosition = (): void => {
-    if (!options.positionKey || options.layout === "mobile") return;
+    if (!options.positionKey) return;
     const rect = root.getBoundingClientRect();
-    saveStoredPosition(options.positionKey, options.layout, {
+    saveStoredPosition(options.positionKey, {
       left: rect.left,
       top: rect.top,
-    });
+    }, storage);
   };
 
   const applyInitialPosition = (): void => {
-    if (options.layout === "mobile") return;
-
     const fromStorage = options.positionKey
-      ? loadStoredPosition(options.positionKey, options.layout)
+      ? loadStoredPosition(options.positionKey, storage)
       : null;
     if (fromStorage) {
       root.style.left = `${fromStorage.left}px`;
       root.style.top = `${fromStorage.top}px`;
-      root.style.right = "auto";
-      root.style.bottom = "auto";
+      root.setCssStyles({ right: "auto" });
+      root.setCssStyles({ bottom: "auto" });
       clampToViewport();
       return;
     }
@@ -226,13 +228,13 @@ export function createHoverShell(options: HoverShellOptions): HoverShellHandle {
     const bottomPx = parsePx(defaults.bottom);
     const rect = root.getBoundingClientRect();
 
-    const top = topPx ?? (bottomPx !== null ? window.innerHeight - rect.height - bottomPx : 72);
-    const left = leftPx ?? (rightPx !== null ? window.innerWidth - rect.width - rightPx : 24);
+    const top = topPx ?? (bottomPx !== null ? hostWindow.innerHeight - rect.height - bottomPx : 72);
+    const left = leftPx ?? (rightPx !== null ? hostWindow.innerWidth - rect.width - rightPx : 24);
 
     root.style.left = `${Math.max(0, left)}px`;
     root.style.top = `${Math.max(0, top)}px`;
-    root.style.right = "auto";
-    root.style.bottom = "auto";
+    root.setCssStyles({ right: "auto" });
+    root.setCssStyles({ bottom: "auto" });
     clampToViewport();
   };
 
@@ -245,43 +247,35 @@ export function createHoverShell(options: HoverShellOptions): HoverShellHandle {
     container.removeAttribute("hidden");
 
     for (const action of actions) {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "ss-hover-shell__action";
-      button.dataset.actionId = action.id;
-      button.textContent = action.label;
-      if (action.variant === "primary") {
-        button.classList.add("mod-cta");
-      } else if (action.variant === "danger") {
-        button.classList.add("mod-warning");
-      }
-      if (action.icon) {
-        const iconEl = document.createElement("span");
-        iconEl.className = "ss-hover-shell__action-icon";
-        setIcon(iconEl, action.icon);
-        button.prepend(iconEl);
-      }
-      if (action.disabled) {
-        button.disabled = true;
-      }
-      if (action.title) {
-        button.title = action.title;
-      }
-      button.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        action.onClick();
+      const button = createUiAction(container, {
+        label: action.label,
+        icon: action.icon,
+        tone: action.variant === "primary"
+          ? "primary"
+          : action.variant === "danger"
+            ? "danger"
+            : "default",
+        size: "small",
+        disabled: action.disabled,
+        title: action.title,
+        onSelect: (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          action.onClick();
+        },
       });
-      container.appendChild(button);
+      button.classList.add("ss-hover-shell__action");
+      button.dataset.actionId = action.id;
     }
   };
 
-  if (options.draggable !== false && options.layout === "desktop") {
+  if (options.draggable !== false) {
     let dragging = false;
     let offsetX = 0;
     let offsetY = 0;
 
     const onPointerDown = (event: PointerEvent) => {
+      if (root.dataset.layout === "compact") return;
       if (event.button !== 0 && event.pointerType === "mouse") return;
       dragging = true;
       const rect = root.getBoundingClientRect();
@@ -293,14 +287,14 @@ export function createHoverShell(options: HoverShellOptions): HoverShellHandle {
 
     const onPointerMove = (event: PointerEvent) => {
       if (!dragging) return;
-      const maxLeft = Math.max(0, window.innerWidth - root.offsetWidth);
-      const maxTop = Math.max(0, window.innerHeight - root.offsetHeight);
+      const maxLeft = Math.max(0, hostWindow.innerWidth - root.offsetWidth);
+      const maxTop = Math.max(0, hostWindow.innerHeight - root.offsetHeight);
       const left = Math.max(0, Math.min(event.clientX - offsetX, maxLeft));
       const top = Math.max(0, Math.min(event.clientY - offsetY, maxTop));
       root.style.left = `${left}px`;
       root.style.top = `${top}px`;
-      root.style.right = "auto";
-      root.style.bottom = "auto";
+      root.setCssStyles({ right: "auto" });
+      root.setCssStyles({ bottom: "auto" });
     };
 
     const endDrag = (pointerId?: number) => {
@@ -331,15 +325,36 @@ export function createHoverShell(options: HoverShellOptions): HoverShellHandle {
     });
   }
 
-  const onResize = () => {
-    clampToViewport();
-    persistCurrentPosition();
-  };
-  window.addEventListener("resize", onResize);
-  unsubscribers.push(() => window.removeEventListener("resize", onResize));
+  const applyLayout = (): void => {
+    const compact = hostWindow.innerWidth <= 480;
+    root.dataset.layout = compact ? "compact" : "desktop";
+    if (compact) {
+      root.setCssStyles({
+        left: "12px",
+        right: "12px",
+        bottom: "16px",
+        top: "auto",
+        width: "auto",
+      });
+      return;
+    }
 
-  requestAnimationFrame(() => {
+    root.style.width = options.width ?? "";
+    root.setCssStyles({ bottom: "auto" });
     applyInitialPosition();
+  };
+
+  const onResize = () => {
+    applyLayout();
+    if (root.dataset.layout === "desktop") {
+      persistCurrentPosition();
+    }
+  };
+  hostWindow.addEventListener("resize", onResize);
+  unsubscribers.push(() => hostWindow.removeEventListener("resize", onResize));
+
+  hostWindow.requestAnimationFrame(() => {
+    applyLayout();
   });
 
   return {
@@ -375,17 +390,16 @@ export function createHoverShell(options: HoverShellOptions): HoverShellHandle {
       root.dataset.state = state;
     },
     show: () => {
-      requestAnimationFrame(() => root.classList.add("is-visible"));
+      hostWindow.requestAnimationFrame(() => root.classList.add("is-visible"));
     },
     destroy: () => {
       for (const unsubscribe of unsubscribers) {
         unsubscribe();
       }
       root.classList.remove("is-visible");
-      window.setTimeout(() => {
+      hostWindow.setTimeout(() => {
         root.remove();
       }, 140);
     },
   };
 }
-

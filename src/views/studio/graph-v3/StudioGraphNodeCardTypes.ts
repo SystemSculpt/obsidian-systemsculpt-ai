@@ -9,6 +9,7 @@ import type {
 import type { StudioGraphInteractionEngine } from "../StudioGraphInteractionEngine";
 import type { StudioNodeDetailMode } from "./StudioGraphNodeDetailMode";
 import type { StudioNodeRunDisplayState } from "../StudioRunPresentationState";
+import type { StudioNodeConfigPathBrowseOptions } from "../StudioPathFieldPicker";
 import type {
   StudioTextNodeMarkdownEditorFactory,
   StudioTextNodeMarkdownEditorSnapshot,
@@ -98,6 +99,7 @@ export type RenderStudioGraphNodeCardOptions = {
     teardown: () => StudioTextNodeMarkdownEditorSnapshot
   ) => void;
   onRevealPathInFinder: (path: string) => void;
+  pathBrowseOptions?: StudioNodeConfigPathBrowseOptions;
   resolveNodeBadge?: (node: StudioNodeInstance) => {
     text: string;
     tone?: "neutral" | "warning";

@@ -1,6 +1,6 @@
 import type { WorkspaceLeaf } from "obsidian";
 import type SystemSculptPlugin from "../../main";
-import { CHAT_VIEW_TYPE } from "./ChatView";
+import { CHAT_VIEW_TYPE } from "../../core/plugin/viewTypes";
 import { buildChatLeafState, type ChatResumeDescriptor } from "./storage/ChatPersistenceTypes";
 
 export function buildChatResumeState(descriptor: ChatResumeDescriptor): Record<string, unknown> {

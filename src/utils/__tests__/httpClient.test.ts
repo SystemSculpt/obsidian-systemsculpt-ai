@@ -279,7 +279,7 @@ describe("httpClient", () => {
 
   describe("gateway resilience / circuit breaker", () => {
     it("opens a circuit breaker after consecutive 502 responses", async () => {
-      const url = "https://api.systemsculpt.com/api/v1/embeddings";
+      const url = "https://systemsculpt.com/api/plugin/embeddings";
 
       requestUrlMock.mockResolvedValue({ status: 502, text: "<html>Bad Gateway</html>" });
 
@@ -297,7 +297,7 @@ describe("httpClient", () => {
     });
 
     it("allows requests again after the backoff window elapses", async () => {
-      const url = "https://api.systemsculpt.com/api/v1/embeddings";
+      const url = "https://systemsculpt.com/api/plugin/embeddings";
 
       requestUrlMock
         .mockResolvedValueOnce({ status: 502, text: "<html>Bad Gateway</html>" })

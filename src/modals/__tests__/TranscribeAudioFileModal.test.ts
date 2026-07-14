@@ -3,16 +3,16 @@
  */
 import { App } from "obsidian";
 import { TranscribeAudioFileModal } from "../TranscribeAudioFileModal";
-import { showAudioTranscriptionModal } from "../AudioTranscriptionModal";
+import { launchAudioTranscriptionPanel } from "../AudioTranscriptionPanel";
 
-jest.mock("../AudioTranscriptionModal", () => ({
-  showAudioTranscriptionModal: jest.fn(),
+jest.mock("../AudioTranscriptionPanel", () => ({
+  launchAudioTranscriptionPanel: jest.fn(),
 }));
 
 describe("TranscribeAudioFileModal", () => {
-  const mockedShowAudioTranscriptionModal =
-    showAudioTranscriptionModal as jest.MockedFunction<
-      typeof showAudioTranscriptionModal
+  const mockedLaunchAudioTranscriptionPanel =
+    launchAudioTranscriptionPanel as jest.MockedFunction<
+      typeof launchAudioTranscriptionPanel
     >;
 
   const createAudioFile = () =>
@@ -30,6 +30,7 @@ describe("TranscribeAudioFileModal", () => {
 
   const createPlugin = (settingsOverrides: Record<string, unknown> = {}) => {
     const app = new App();
+    (app.vault as any).getResourcePath = jest.fn((file: { path: string }) => `app://${file.path}`);
     const updateSettings = jest.fn().mockResolvedValue(undefined);
     const settings = {
       recordingsDirectory: "SystemSculpt/Recordings",
@@ -52,7 +53,63 @@ describe("TranscribeAudioFileModal", () => {
   };
 
   beforeEach(() => {
-    mockedShowAudioTranscriptionModal.mockReset();
+    mockedLaunchAudioTranscriptionPanel.mockReset();
+  });
+
+  afterEach(() => {
+    document.body.empty();
+  });
+
+  it("uses the shared search and empty-state interfaces for vault audio", () => {
+    const { app, plugin } = createPlugin();
+    (app.vault.getFiles as jest.Mock).mockReturnValue([]);
+
+    const modal = new TranscribeAudioFileModal(plugin);
+    modal.onOpen();
+
+    const search = modal.modalEl.querySelector<HTMLInputElement>(
+      ".ss-search-field__input"
+    );
+    const state = modal.modalEl.querySelector<HTMLElement>(
+      ".ss-transcribe-audio__list > .ss-ui-state.is-empty"
+    );
+    expect(search?.type).toBe("search");
+    expect(search?.getAttribute("aria-label")).toBe("Search vault audio files");
+    expect(state?.textContent).toContain("No audio files");
+    expect(state?.getAttribute("role")).toBe("status");
+    expect(modal.modalEl.querySelector(".ss-transcribe-audio__search-input")).toBeNull();
+  });
+
+  it("filters native file actions and exposes the selected state", () => {
+    const first = createAudioFile();
+    const second = {
+      ...createAudioFile(),
+      path: "Audio/interview.wav",
+      name: "interview.wav",
+      basename: "interview",
+      extension: "wav",
+    };
+    const { app, plugin } = createPlugin();
+    (app.vault.getFiles as jest.Mock).mockReturnValue([first, second]);
+
+    const modal = new TranscribeAudioFileModal(plugin);
+    modal.onOpen();
+
+    const search = modal.modalEl.querySelector<HTMLInputElement>(
+      ".ss-search-field__input"
+    )!;
+    search.value = "interview";
+    search.dispatchEvent(new Event("input", { bubbles: true }));
+
+    const fileActions = modal.modalEl.querySelectorAll<HTMLButtonElement>(
+      ".ss-transcribe-audio__file"
+    );
+    expect(fileActions).toHaveLength(1);
+    expect(fileActions[0].tagName).toBe("BUTTON");
+    expect(fileActions[0].getAttribute("aria-pressed")).toBe("false");
+
+    fileActions[0].click();
+    expect(fileActions[0].getAttribute("aria-pressed")).toBe("true");
   });
 
   it("provides an Open file button that triggers the system file picker input", () => {
@@ -61,6 +118,11 @@ describe("TranscribeAudioFileModal", () => {
 
     const modal = new TranscribeAudioFileModal(plugin);
     modal.onOpen();
+
+    expect(modal.modalEl.textContent).toContain(
+      "click to choose from your computer"
+    );
+    expect(modal.modalEl.textContent).not.toContain("phone");
 
     const openFileButton = modal.modalEl.querySelector(
       ".ss-transcribe-audio__open-file-btn"
@@ -107,7 +169,7 @@ describe("TranscribeAudioFileModal", () => {
         showTranscriptionFormatChooserInModal: false,
       })
     );
-    expect(mockedShowAudioTranscriptionModal).toHaveBeenCalledWith(
+    expect(mockedLaunchAudioTranscriptionPanel).toHaveBeenCalledWith(
       app,
       expect.objectContaining({
         file: audioFile,
@@ -133,6 +195,9 @@ describe("TranscribeAudioFileModal", () => {
     );
     expect(outputRadio).toBeNull();
     expect(modal.modalEl.textContent).toContain(
+      "Settings > Workflow"
+    );
+    expect(modal.modalEl.textContent).not.toContain(
       "Settings > Audio & Transcription"
     );
 
@@ -140,7 +205,7 @@ describe("TranscribeAudioFileModal", () => {
     await (modal as any).handleTranscribe();
 
     expect(updateSettings).not.toHaveBeenCalled();
-    expect(mockedShowAudioTranscriptionModal).toHaveBeenCalledWith(
+    expect(mockedLaunchAudioTranscriptionPanel).toHaveBeenCalledWith(
       app,
       expect.objectContaining({
         file: audioFile,
