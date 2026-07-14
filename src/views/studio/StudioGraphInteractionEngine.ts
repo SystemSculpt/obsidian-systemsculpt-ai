@@ -240,6 +240,10 @@ export class StudioGraphInteractionEngine {
     this.selectionController.startMarqueeSelection(startEvent);
   }
 
+  startCanvasPan(startEvent: PointerEvent): void {
+    this.selectionController.startCanvasPan(startEvent);
+  }
+
   applyGraphZoom(): void {
     this.selectionController.applyGraphZoom();
   }

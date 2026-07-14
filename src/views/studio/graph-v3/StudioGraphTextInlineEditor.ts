@@ -1,4 +1,5 @@
 import type { StudioNodeInstance } from "../../../studio/types";
+import { createStudioAction } from "../StudioAction";
 import type { StudioNodeRunDisplayState } from "../StudioRunPresentationState";
 import type { StudioGraphNodeMutationOptions } from "./StudioGraphNodeCardTypes";
 
@@ -180,30 +181,28 @@ export function renderTextNodeInlineEditor(options: RenderStudioTextNodeInlineEd
 
   const controlsEl = editorWrapEl.createDiv({ cls: "ss-studio-node-text-editor-controls" });
   const modeToggleEl = controlsEl.createDiv({ cls: "ss-studio-node-text-display-mode" });
-  modeToggleEl.createEl("span", {
+  modeToggleEl.createSpan({
     cls: "ss-studio-node-text-display-mode-label",
     text: "Mode",
   });
 
-  const rawModeButtonEl = modeToggleEl.createEl("button", {
-    cls: "ss-studio-node-text-display-mode-button",
-    text: "Raw",
-    attr: {
-      "aria-label": "Show raw markdown source",
-    },
+  const rawModeButtonEl = createStudioAction(modeToggleEl, {
+    className: "ss-studio-node-text-display-mode-button",
+    label: "Raw",
+    ariaLabel: "Show raw Markdown source",
+    size: "small",
+    selected: false,
+    disabled: interactionLocked || isNoteNode,
   });
-  rawModeButtonEl.type = "button";
-  rawModeButtonEl.disabled = interactionLocked || isNoteNode;
 
-  const renderedModeButtonEl = modeToggleEl.createEl("button", {
-    cls: "ss-studio-node-text-display-mode-button",
-    text: "Rendered",
-    attr: {
-      "aria-label": "Show rendered markdown preview",
-    },
+  const renderedModeButtonEl = createStudioAction(modeToggleEl, {
+    className: "ss-studio-node-text-display-mode-button",
+    label: "Rendered",
+    ariaLabel: "Show rendered Markdown preview",
+    size: "small",
+    selected: false,
+    disabled: interactionLocked || isNoteNode,
   });
-  renderedModeButtonEl.type = "button";
-  renderedModeButtonEl.disabled = interactionLocked || isNoteNode;
 
   const rawSurfaceEl = editorWrapEl.createDiv({ cls: "ss-studio-node-text-editor-surface" });
   const textEditorEl = rawSurfaceEl.createEl("textarea", {
@@ -297,8 +296,8 @@ export function renderTextNodeInlineEditor(options: RenderStudioTextNodeInlineEd
     }
     rawSurfaceEl.toggleClass("is-hidden", !showRaw);
     renderedSurfaceEl.toggleClass("is-hidden", showRaw);
-    rawModeButtonEl.classList.toggle("is-active", showRaw);
-    renderedModeButtonEl.classList.toggle("is-active", !showRaw);
+    rawModeButtonEl.classList.toggle("is-selected", showRaw);
+    renderedModeButtonEl.classList.toggle("is-selected", !showRaw);
     rawModeButtonEl.setAttr("aria-pressed", showRaw ? "true" : "false");
     renderedModeButtonEl.setAttr("aria-pressed", showRaw ? "false" : "true");
     textEditorEl.readOnly = editorReadOnly || !showRaw;

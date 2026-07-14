@@ -1,5 +1,4 @@
-import { Notice, Setting, ToggleComponent } from "obsidian";
-import SystemSculptPlugin from "../main";
+import { Notice, Setting } from "obsidian";
 import { SystemSculptSettingTab } from "./SystemSculptSettingTab";
 
 export async function displayChatTabContent(containerEl: HTMLElement, tabInstance: SystemSculptSettingTab) {
@@ -12,7 +11,7 @@ export async function displayChatTabContent(containerEl: HTMLElement, tabInstanc
     containerEl.createEl("h3", { text: "Chat settings" });
 
     containerEl.createEl('p', {
-        text: 'SystemSculpt chat works the same way across desktop and mobile. Use this tab for chat preferences and display choices.',
+        text: 'Use this tab for chat preferences and display choices.',
         cls: 'setting-item-description'
     });
 
@@ -23,7 +22,7 @@ export async function displayChatTabContent(containerEl: HTMLElement, tabInstanc
         .setDesc("Optional. Adds this tag to new chat history notes (frontmatter `tags`).")
         .addText((text) => {
             text
-                .setPlaceholder("ai-chat")
+                .setPlaceholder("Ai-chat")
                 .setValue(plugin.settings.defaultChatTag || "")
                 .onChange(async (value) => {
                     const normalized = normalizeDefaultChatTag(value);
@@ -33,7 +32,7 @@ export async function displayChatTabContent(containerEl: HTMLElement, tabInstanc
 
 // --- Default Chat Font Size ---
 new Setting(containerEl)
-    .setName("Default Chat Font Size")
+    .setName("Default chat font size")
     .setDesc("Select the default text size for new chat messages.")
     .addDropdown(dropdown => {
         dropdown
@@ -47,23 +46,11 @@ new Setting(containerEl)
             });
 	    });
 
-new Setting(containerEl)
-    .setName("Hide SystemSculpt system & tool messages")
-    .setDesc("Default for new chats: keep system and tool messages in the saved history but hide them from the chat view. Each chat has its own toggle in the composer toolbar that overrides this default.")
-    .addToggle((toggle: ToggleComponent) => {
-        toggle
-            .setValue(plugin.settings.hideSystemMessagesInChat ?? false)
-            .onChange(async (value) => {
-                await plugin.getSettingsManager().updateSettings({ hideSystemMessagesInChat: value });
-                new Notice(`System messages ${value ? 'hidden' : 'shown'} in chat.`);
-            });
-    });
-
 // --- Reduced Motion Preference ---
 new Setting(containerEl)
-    .setName("Honor OS Reduced Motion")
-    .setDesc("When enabled, SystemSculpt animations/transitions are minimized if your system prefers reduced motion. Disable if you want full animations.")
-    .addToggle((toggle: ToggleComponent) => {
+    .setName("Honor OS reduced motion")
+    .setDesc("When enabled, SystemSculpt animations/transitions are minimized if your system prefers reduced motion. Disable this if you want full animations.")
+    .addToggle((toggle) => {
         toggle
             .setValue(plugin.settings.respectReducedMotion ?? true)
             .onChange(async (value) => {

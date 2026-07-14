@@ -17,8 +17,6 @@ const createChatView = () => {
     chatTitle: "Test Chat",
     chatId: "chat-1",
     chatVersion: 2,
-    selectedModelId: "systemsculpt@@systemsculpt/ai-agent",
-    currentModelName: "SystemSculpt Agent",
     webSearchEnabled: true,
     contextManager: {
       getContextFiles: jest.fn(() => new Set(["[[Note]]", "[[Image.png]]", "doc:extract.md"])),
@@ -39,8 +37,15 @@ describe("ChatExportService", () => {
 
     const toolCall = {
       id: "call-1",
-      type: "function",
-      function: { name: "mcp-filesystem_search", arguments: "{}" },
+      messageId: "3",
+      request: {
+        id: "call-1",
+        type: "function",
+        function: { name: "search", arguments: "{}" },
+      },
+      state: "completed",
+      timestamp: 2,
+      result: { success: true, data: { matches: [] } },
     };
 
     chatView.messages = [
@@ -53,8 +58,12 @@ describe("ChatExportService", () => {
       {
         role: "assistant",
         content: "Result",
-        reasoning: "thinking",
         tool_calls: [toolCall],
+        messageParts: [
+          { id: "reasoning-1", type: "reasoning", timestamp: 1, data: "thinking" },
+          { id: "tool-1", type: "tool_call", timestamp: 2, data: toolCall },
+          { id: "content-1", type: "content", timestamp: 3, data: "Result" },
+        ],
         message_id: "3",
       },
     ];
@@ -69,11 +78,8 @@ describe("ChatExportService", () => {
     const result = await service.export({
       includeContextFiles: true,
       includeContextFileContents: true,
-      includeSystemPrompt: true,
     });
 
-    expect(result.context.model).toBeUndefined();
-    expect(result.context.systemPrompt).toBeUndefined();
     expect(result.context.summary.totalMessages).toBe(3);
     expect(result.context.summary.userMessages).toBe(1);
     expect(result.context.summary.assistantMessages).toBe(2);

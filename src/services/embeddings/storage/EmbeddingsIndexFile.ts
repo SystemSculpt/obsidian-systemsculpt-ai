@@ -6,9 +6,9 @@
  * `.systemsculpt/diagnostics`) is what lets Obsidian Sync/backup capture and
  * restore the index — unlike the per-device IndexedDB store.
  *
- * Uses only the Obsidian `DataAdapter` (read/write/exists/mkdir), which is the
- * mobile-safe path (CapacitorAdapter on phones); no `node:fs`, so this stays
- * within the no-eager-node-import boundary the embeddings tree relies on.
+ * Uses only the Obsidian `DataAdapter` (read/write/exists/mkdir), including
+ * adapters without a Node base path; no `node:fs`, so this stays within the
+ * no-eager-node-import boundary the embeddings tree relies on.
  */
 
 import type { DataAdapter } from "obsidian";
@@ -68,6 +68,41 @@ export class EmbeddingsIndexFile {
     if (!(await this.adapter.exists(this.dir))) {
       await this.adapter.mkdir(this.dir);
     }
-    await this.adapter.write(this.filePath, JSON.stringify(index));
+    const serialized = JSON.stringify(index);
+    const tempPath = `${this.filePath}.next`;
+    if (typeof this.adapter.rename !== "function") {
+      await this.adapter.write(this.filePath, serialized);
+      return;
+    }
+    const backupPath = `${this.filePath}.previous`;
+    try {
+      await this.adapter.write(tempPath, serialized);
+      await this.adapter.rename(tempPath, this.filePath);
+    } catch (replaceError) {
+      let movedPrevious = false;
+      try {
+        if (await this.adapter.exists(backupPath)) await this.adapter.remove(backupPath);
+        if (await this.adapter.exists(this.filePath)) {
+          await this.adapter.rename(this.filePath, backupPath);
+          movedPrevious = true;
+        }
+        await this.adapter.rename(tempPath, this.filePath);
+        if (movedPrevious && await this.adapter.exists(backupPath)) {
+          await this.adapter.remove(backupPath);
+        }
+      } catch {
+        if (movedPrevious && !(await this.adapter.exists(this.filePath))) {
+          await this.adapter.rename(backupPath, this.filePath);
+        }
+        try {
+          if (await this.adapter.exists(tempPath)) await this.adapter.remove(tempPath);
+        } catch { /* temporary cleanup is best effort */ }
+        throw replaceError;
+      }
+    }
+  }
+
+  public async remove(): Promise<void> {
+    if (await this.adapter.exists(this.filePath)) await this.adapter.remove(this.filePath);
   }
 }

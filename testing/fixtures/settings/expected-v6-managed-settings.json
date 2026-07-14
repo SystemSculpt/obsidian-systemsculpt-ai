@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 6,
+  "licenseKey": "license-sentinel",
+  "disclosure": {
+    "acceptedVersion": null,
+    "acceptedAt": null
+  },
+  "featureFlags": {
+    "embeddingsEnabled": true,
+    "autoTranscribeRecordings": true,
+    "cleanTranscriptionOutput": true,
+    "enableExperimentalFeatures": true
+  },
+  "folders": {
+    "chats": "Workspace/Chats",
+    "savedChats": "Workspace/Saved Chats",
+    "recordings": "Workspace/Recordings",
+    "attachments": "Workspace/Attachments",
+    "extractions": "Workspace/Extractions",
+    "meetingProcessor": "Workspace/Meetings"
+  },
+  "exclusions": {
+    "embeddings": {
+      "folders": ["Archive"],
+      "patterns": ["*.private"],
+      "ignoreChatHistory": false,
+      "respectObsidianExclusions": true
+    }
+  },
+  "prompts": {
+    "postProcessing": "Fix punctuation and preserve voice.",
+    "titleGeneration": "Create a precise title."
+  },
+  "outputs": {
+    "transcriptionFormat": "markdown",
+    "imageDirectory": "Workspace/Images",
+    "imageAspectRatio": "1:1"
+  },
+  "ui": {
+    "settingsMode": "standard",
+    "chatFontSize": "small",
+    "respectReducedMotion": true,
+    "showDiagnostics": false
+  },
+  "workflows": {
+    "enabled": true,
+    "templates": {
+      "publish": { "enabled": true, "sourceFolder": "Drafts" }
+    }
+  },
+  "studioGraph": {
+    "nodes": [{ "id": "prompt-1", "type": "prompt", "prompt": "Summarize the selected note." }],
+    "edges": [{ "from": "prompt-1", "to": "output-1" }]
+  },
+  "managedMigrationState": {
+    "phase": "auth_cleanup_pending",
+    "receipt": {
+      "sourcePluginReleaseFixtureId": "release-5.11-schema-v1",
+      "sourceSchemaVersion": 1,
+      "targetSchemaVersion": 6,
+      "timestamp": "2000-01-01T00:00:00.000Z",
+      "removedFieldCategories": {
+        "cachedAuthority": 2,
+        "credentials": 5,
+        "externalIntegrations": 2,
+        "runtimeConfiguration": 13
+      }
+    }
+  }
+}

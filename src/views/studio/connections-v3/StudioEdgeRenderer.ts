@@ -1,20 +1,18 @@
 import { buildCubicLinkCurve, buildChevronPath, curveTangentAtEnd } from "./LinkGeometry";
 import type { PortAnchor, StudioLinkStore, EdgeState } from "./StudioLinkStore";
-
-const SVG_NS = "http://www.w3.org/2000/svg";
+import { createStudioSvgElement } from "../StudioDomContext";
 
 /**
- * Brand-new Studio edge renderer (replaces the legacy StudioLinkRenderer).
+ * Canonical Studio edge renderer.
  *
- * Design goals after the legacy line system failed to render at all:
+ * Rendering invariants:
  *  1. Dynamic visibility is inline — the status-driven stroke color/opacity
  *     and the drag-preview stroke/dash are set INLINE on the element so a
  *     line is never invisible because of a stylesheet regression. Static
  *     presentation (fill, stroke widths, caps/joins, pointer-events) lives
- *     on the `.ss-studio-edge-*` rules in views/studio.css.
- *  2. Fresh class names (`ss-studio-edge*`) so no legacy `.ss-studio-link-*`
- *     rule can match (e.g. a stuck `is-zoomed-micro` viewport class set
- *     `display:none` on legacy link paths).
+ *     on the `.ss-studio-edge-*` rules in views/studio/connections.css.
+ *  2. Edge classes are exclusively `ss-studio-edge*`, keeping their styling
+ *     contract local to the connection implementation.
  *  3. Geometry comes from the caller's data-driven anchor resolver, so a line
  *     is drawn whenever both endpoint nodes exist — independent of DOM
  *     measurement, paint timing, or visibility.
@@ -128,23 +126,24 @@ export class StudioEdgeRenderer {
   }
 
   private createEdgeGroup(edgeId: string): EdgeGroupElements {
-    const group = document.createElementNS(SVG_NS, "g") as SVGGElement;
+    const group = createStudioSvgElement(this.options.layer, "g");
     group.setAttribute("class", "ss-studio-edge-group");
     group.dataset.edgeId = edgeId;
 
     // Wide, transparent hit target for hover/right-click selection.
-    // Static presentation for all three paths lives in views/studio.css.
-    const hitPath = document.createElementNS(SVG_NS, "path") as SVGPathElement;
+    // Static presentation for all three paths lives in
+    // views/studio/connections.css.
+    const hitPath = createStudioSvgElement(this.options.layer, "path");
     hitPath.setAttribute("class", "ss-studio-edge-hit");
     hitPath.dataset.edgeId = edgeId;
     group.appendChild(hitPath);
 
-    const visiblePath = document.createElementNS(SVG_NS, "path") as SVGPathElement;
+    const visiblePath = createStudioSvgElement(this.options.layer, "path");
     visiblePath.setAttribute("class", "ss-studio-edge-line");
     visiblePath.dataset.edgeId = edgeId;
     group.appendChild(visiblePath);
 
-    const arrowPath = document.createElementNS(SVG_NS, "path") as SVGPathElement;
+    const arrowPath = createStudioSvgElement(this.options.layer, "path");
     arrowPath.setAttribute("class", "ss-studio-edge-arrow");
     group.appendChild(arrowPath);
 
@@ -185,8 +184,9 @@ export class StudioEdgeRenderer {
 
     const curve = buildCubicLinkCurve(source, end);
     if (!this.previewPath) {
-      // Static presentation lives on .ss-studio-edge-preview in views/studio.css.
-      this.previewPath = document.createElementNS(SVG_NS, "path") as SVGPathElement;
+      // Static presentation lives on .ss-studio-edge-preview in
+      // views/studio/connections.css.
+      this.previewPath = createStudioSvgElement(layer, "path");
       this.previewPath.setAttribute("class", "ss-studio-edge-preview");
     }
     this.previewPath.style.stroke = previewStroke(drag.validity);

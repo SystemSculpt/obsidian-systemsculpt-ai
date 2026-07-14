@@ -31,6 +31,12 @@ function isScopedToPlugin(selector) {
          /\[data-type="systemsculpt-/.test(selector);
 }
 
+function stripComments(content) {
+  return content.replace(/\/\*[\s\S]*?\*\//g, (comment) =>
+    comment.replace(/[^\n]/g, " ")
+  );
+}
+
 /**
  * Forbidden patterns that could affect Obsidian's native UI
  */
@@ -98,6 +104,14 @@ const FORBIDDEN_PATTERNS = [
   },
 ];
 
+const LEGACY_STATE_CLASS_PATTERN = /\.(active|completed|error|primary|danger|disabled|loading)(?![a-z0-9_-])/i;
+const RUNTIME_CUSTOM_PROPERTIES = new Set([
+  "--ss-link-flow-phase",
+  "--ss-studio-chip-color",
+  "--ss-studio-swatch-color",
+  "--ss-studio-text-node-font-size",
+]);
+
 /**
  * Allowed patterns (safe selectors)
  */
@@ -116,49 +130,78 @@ const ALLOWED_PATTERNS = [
 function extractSelectors(content, filePath) {
   const selectors = [];
 
-  // Remove comments
-  const noComments = content.replace(/\/\*[\s\S]*?\*\//g, "");
+  const noComments = stripComments(content);
+  let prelude = "";
+  let line = 1;
+  let preludeLine = 1;
+  let quote = null;
+  let escaped = false;
 
-  // Split by lines for better error reporting
-  const lines = noComments.split("\n");
-
-  let lineNum = 0;
-  let inBlock = 0;
-
-  for (const line of lines) {
-    lineNum++;
-    const trimmed = line.trim();
-
-    // Skip empty lines
-    if (!trimmed) continue;
-
-    // Track block depth
-    const openBraces = (trimmed.match(/{/g) || []).length;
-    const closeBraces = (trimmed.match(/}/g) || []).length;
-
-    // Only check selectors at block depth 0 (top-level)
-    if (inBlock === 0 && trimmed && !trimmed.startsWith("@") && !trimmed.startsWith("}") && !trimmed.startsWith("/*")) {
-      // This could be a selector line
-      const selectorPart = trimmed.split("{")[0].trim();
-      if (selectorPart && !selectorPart.includes(":") || selectorPart.includes(".") || selectorPart.includes("[")) {
-        // Split comma-separated selectors
-        const individualSelectors = selectorPart.split(",").map(s => s.trim());
-        for (const sel of individualSelectors) {
-          if (sel) {
-            selectors.push({
-              selector: sel,
-              line: lineNum,
-              file: filePath,
-            });
-          }
+  for (const char of noComments) {
+    if (quote) {
+      prelude += char;
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === quote) {
+        quote = null;
+      }
+    } else if (char === '"' || char === "'") {
+      if (!prelude.trim()) preludeLine = line;
+      quote = char;
+      prelude += char;
+    } else if (char === "{") {
+      const selectorPart = prelude.trim();
+      if (selectorPart && !selectorPart.startsWith("@")) {
+        for (const selector of splitSelectorList(selectorPart)) {
+          selectors.push({ selector, line: preludeLine, file: filePath });
         }
       }
+      prelude = "";
+    } else if (char === ";" || char === "}") {
+      prelude = "";
+    } else {
+      if (!prelude.trim() && !/\s/.test(char)) preludeLine = line;
+      prelude += char;
     }
 
-    inBlock += openBraces - closeBraces;
-    if (inBlock < 0) inBlock = 0;
+    if (char === "\n") line++;
   }
 
+  return selectors;
+}
+
+function splitSelectorList(value) {
+  const selectors = [];
+  let current = "";
+  let depth = 0;
+  let quote = null;
+  let escaped = false;
+
+  for (const char of value) {
+    if (quote) {
+      current += char;
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (char === quote) quote = null;
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+      current += char;
+      continue;
+    }
+    if (char === "(" || char === "[") depth++;
+    if (char === ")" || char === "]") depth = Math.max(0, depth - 1);
+    if (char === "," && depth === 0) {
+      if (current.trim()) selectors.push(current.trim());
+      current = "";
+      continue;
+    }
+    current += char;
+  }
+  if (current.trim()) selectors.push(current.trim());
   return selectors;
 }
 
@@ -168,6 +211,17 @@ function extractSelectors(content, filePath) {
 function checkSelector(selectorInfo) {
   const { selector, line, file } = selectorInfo;
   const issues = [];
+
+  if (LEGACY_STATE_CLASS_PATTERN.test(selector)) {
+    issues.push({
+      severity: "error",
+      message: "Legacy state class — use the canonical is-*/mod-* state grammar",
+      selector,
+      line,
+      file,
+    });
+    return issues;
+  }
 
   // Skip if allowed
   for (const allowed of ALLOWED_PATTERNS) {
@@ -193,6 +247,22 @@ function checkSelector(selectorInfo) {
     }
   }
 
+  if (
+    issues.length === 0 &&
+    !isScopedToPlugin(selector) &&
+    !/^:root\b/.test(selector) &&
+    !/^(from|to|\d+(?:\.\d+)?%)$/.test(selector) &&
+    !(file.endsWith("foundation/tokens.css") && /^body(?:\.[a-z0-9_-]+)?$/i.test(selector))
+  ) {
+    issues.push({
+      severity: "error",
+      message: "Global selector — scope it to an ss-* or systemsculpt-* surface",
+      selector,
+      line,
+      file,
+    });
+  }
+
   return issues;
 }
 
@@ -211,23 +281,16 @@ const TOKEN_SOURCE_FILES = new Set(["foundation/tokens.css"]);
 
 /** Files allowed to use !important, each for a documented reason. */
 const IMPORTANT_ALLOWLIST = new Set([
-  "foundation/base.css", // .systemsculpt-visually-hidden (a11y, beats inline styles)
-  "components/mermaid.css", // fights Mermaid's inline SVG attributes
-  "components/messages.css", // markdown font-size inheritance + hidden copy button
-  "components/chat-blocks.css", // per-chat hide-tool-activity toggle (#213)
+  "foundation/surface.css", // hidden/reduced-motion contracts must beat feature sheets loaded later
   "components/resume-chat.css", // beats reading/source-mode content styles
-  "components/floating-widget.css", // mobile pinning beats inline drag positioning
-  "components/quick-edit.css", // mobile pinning beats inline drag positioning
-  "components/slash-commands.css", // mobile positioning beats inline JS placement
-  "components/youtube-canvas.css", // input icon padding vs generic input rules
   "modals/search.css", // hide Obsidian tooltips while the overlay is open
-  "platform/mobile.css", // force favorites filter visible on mobile
-  "views/studio.css", // edge hover must beat inline SVG strokes; zoom-micro perf
+  "views/studio/connections.css", // edge hover must beat inline SVG strokes
+  "views/studio/node-chrome.css", // zoom-micro mode removes offscreen node chrome
 ]);
 
 /** font-size values allowed besides var(--ss-*)/var(--chat-*)/calc/inherit. */
 const FONT_SIZE_LITERAL_ALLOW = new Set([
-  "16px", // iOS: inputs under 16px trigger focus zoom
+  "16px", // keeps narrow-window text inputs readable
   "inherit",
   "1em",
 ]);
@@ -237,7 +300,8 @@ const DECLARATION_RULES = [
     property: /^(color|background|background-color|border(-\w+)*-color|border|border-top|border-right|border-bottom|border-left|outline|fill|stroke|caret-color|accent-color|text-decoration-color)$/,
     test: (value) =>
       /#[0-9a-fA-F]{3,8}\b/.test(value) ||
-      /\b(rgb|rgba|hsl|hsla)\(/.test(value),
+      /\b(rgb|rgba|hsl|hsla)\(/.test(value) ||
+      /\b(black|white)\b/i.test(value),
     message: "Raw color (hex/rgb/hsl) — use a --ss-* token or color-mix of tokens",
   },
   {
@@ -277,12 +341,17 @@ const DECLARATION_RULES = [
   },
   {
     property: /^z-index$/,
-    test: (value) => {
+    test: (value, cssPath) => {
       const v = value.trim();
       if (/var\(--ss-z|^calc\(/.test(v)) return false;
       const n = Number(v);
       // Studio canvas layer tiers (0-20) are a documented local scale.
-      return !(Number.isInteger(n) && n >= -1 && n <= 20);
+      return !(
+        cssPath.startsWith("views/studio") &&
+        Number.isInteger(n) &&
+        n >= -1 &&
+        n <= 20
+      );
     },
     message: "z-index must use the --ss-z-* layer scale (or studio's 0-20 canvas tiers)",
   },
@@ -323,7 +392,7 @@ function checkDeclarations(content, relPath) {
     const value = rawValue.replace(/!important/g, "").trim();
 
     for (const rule of DECLARATION_RULES) {
-      if (rule.property.test(property) && rule.test(value)) {
+      if (rule.property.test(property) && rule.test(value, cssPath)) {
         issues.push({
           severity: "error",
           message: rule.message,
@@ -354,9 +423,21 @@ export function lintCssDirectory({ cssDir }) {
   let warningCount = 0;
 
   const cssFiles = findCssFiles(cssDir);
+  const contents = new Map(
+    cssFiles.map((file) => [file, fs.readFileSync(file, "utf8")])
+  );
+  const uncommentedContents = new Map(
+    [...contents].map(([file, content]) => [file, stripComments(content)])
+  );
+  const definedCustomProperties = new Set();
+  for (const content of uncommentedContents.values()) {
+    for (const match of content.matchAll(/(--ss-[a-z0-9-]+)\s*:/gi)) {
+      definedCustomProperties.add(match[1]);
+    }
+  }
 
   for (const file of cssFiles) {
-    const content = fs.readFileSync(file, "utf8");
+    const content = contents.get(file);
     const relPath = path.relative(ROOT_DIR, file);
     const selectors = extractSelectors(content, relPath);
 
@@ -373,6 +454,26 @@ export function lintCssDirectory({ cssDir }) {
       if (issue.severity === "warning") warningCount++;
       issues.push(issue);
     }
+
+    const lines = uncommentedContents.get(file).split("\n");
+    lines.forEach((sourceLine, index) => {
+      for (const match of sourceLine.matchAll(/var\((--ss-[a-z0-9-]+)/gi)) {
+        const property = match[1];
+        if (
+          !definedCustomProperties.has(property) &&
+          !RUNTIME_CUSTOM_PROPERTIES.has(property)
+        ) {
+          errorCount++;
+          issues.push({
+            severity: "error",
+            message: "Undefined --ss-* token — define it or register a real runtime contract",
+            selector: property,
+            line: index + 1,
+            file: relPath,
+          });
+        }
+      }
+    });
   }
 
   return { errorCount, warningCount, fileCount: cssFiles.length, issues };

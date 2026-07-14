@@ -186,7 +186,7 @@ describe("ContextFileService", () => {
   });
 
   describe("prepareMessagesWithContext", () => {
-    it("keeps the transcript user-first when no server prompt is supplied", async () => {
+    it("keeps the transcript user-first", async () => {
       const messages: ChatMessage[] = [
         { role: "user", content: "Hello" },
       ];
@@ -200,19 +200,15 @@ describe("ContextFileService", () => {
       expect(result[0].role).toBe("user");
     });
 
-    it("uses provided finalSystemPrompt", async () => {
+    it("drops legacy client-owned system instructions", async () => {
       const messages: ChatMessage[] = [
-        { role: "user", content: "Hello" },
+        { role: "system", content: "Legacy client prompt", message_id: "legacy-system" },
+        { role: "user", content: "Hello", message_id: "user" },
       ];
 
-      const result = await service.prepareMessagesWithContext(
-        messages,
-        new Set(),
-        true,
-        "Custom system prompt"
-      );
+      const result = await service.prepareMessagesWithContext(messages, new Set(), true);
 
-      expect(result[0].content).toBe("Custom system prompt");
+      expect(result).toEqual([{ role: "user", content: "Hello", message_id: "user" }]);
     });
 
     it("adds context files before last user message", async () => {
@@ -261,7 +257,7 @@ describe("ContextFileService", () => {
           content: "Using tool",
           message_id: "a1",
           tool_calls: [
-            { id: "call-1", function: { name: "mcp-filesystem_read", arguments: "{}" } },
+            { id: "call-1", function: { name: "read", arguments: "{}" } },
           ] as any,
         } as any,
         {
@@ -280,7 +276,7 @@ describe("ContextFileService", () => {
 
       const assistantMessage = result.find((m) => m.role === "assistant");
       expect((assistantMessage as any)?.tool_calls).toEqual([
-        { id: "call-1", function: { name: "mcp-filesystem_read", arguments: "{}" } },
+        { id: "call-1", function: { name: "read", arguments: "{}" } },
       ]);
       expect(result.find((m) => m.role === "tool")).toEqual(
         expect.objectContaining({
@@ -301,7 +297,7 @@ describe("ContextFileService", () => {
           tool_calls: [
             {
               id: "call-1",
-              function: { name: "mcp-filesystem_read", arguments: "{}" },
+              function: { name: "read", arguments: "{}" },
               state: "completed",
               result: { success: true, data: { ok: true } },
             },
@@ -335,7 +331,7 @@ describe("ContextFileService", () => {
           role: "assistant",
           content: "",
           message_id: "a1",
-          tool_calls: [{ id: "call-1", function: { name: "mcp-filesystem_read", arguments: "{}" } }] as any,
+          tool_calls: [{ id: "call-1", function: { name: "read", arguments: "{}" } }] as any,
         } as any,
         { role: "user", content: "Continue", message_id: "u2" },
       ];
@@ -359,7 +355,7 @@ describe("ContextFileService", () => {
           id: "call-1",
           type: "function",
           function: {
-            name: "mcp-filesystem_search",
+            name: "search",
             arguments: "{\"patterns\":[\"vault\"]}",
           },
         },
@@ -377,7 +373,7 @@ describe("ContextFileService", () => {
           id: "call-2",
           type: "function",
           function: {
-            name: "mcp-filesystem_read",
+            name: "read",
             arguments: "{\"paths\":[\"alpha.md\"]}",
           },
         },
@@ -447,10 +443,12 @@ describe("ContextFileService", () => {
 
       const assistantMessages = result.filter((message) => message.role === "assistant");
       expect((assistantMessages[0] as any)?.tool_calls?.map((toolCall: any) => toolCall.id)).toEqual(["call-1"]);
+      expect((assistantMessages[0] as any)?.tool_calls?.[0]?.request?.function?.name).toBe("search");
       expect(assistantMessages[0]?.content).toBe("");
       expect((result[2] as any)?.tool_call_id).toBe("call-1");
 
       expect((assistantMessages[1] as any)?.tool_calls?.map((toolCall: any) => toolCall.id)).toEqual(["call-2"]);
+      expect((assistantMessages[1] as any)?.tool_calls?.[0]?.request?.function?.name).toBe("read");
       expect(assistantMessages[1]?.content).toBe("");
       expect((result[4] as any)?.tool_call_id).toBe("call-2");
 
@@ -504,7 +502,7 @@ describe("ContextFileService", () => {
       expect(result[latestUserIndex]?.documentContext?.documentIds).toEqual(["12345"]);
     });
 
-    it("omits a system message when none is provided", async () => {
+    it("does not synthesize a system message", async () => {
       const messages: ChatMessage[] = [
         { role: "user", content: "Hello" },
       ];
@@ -519,21 +517,7 @@ describe("ContextFileService", () => {
       expect(result.find((message) => message.role === "system")).toBeUndefined();
     });
 
-    it("injects Bases syntax guide when the latest user message references a .base file", async () => {
-      const messages: ChatMessage[] = [{ role: "user", content: "Open Projects.base and update filters" }];
-
-      const result = await service.prepareMessagesWithContext(
-        messages,
-        new Set(),
-        true,
-        "Custom system prompt"
-      );
-
-      expect(result[0].role).toBe("system");
-      expect(String(result[0].content)).toContain("<obsidian_bases_syntax_guide>");
-    });
-
-    it("does not inject a Bases guide on its own when no server prompt override is provided", async () => {
+    it("does not inject client-owned instructions for Bases requests", async () => {
       const messages: ChatMessage[] = [{ role: "user", content: "Open Projects.base and update filters" }];
 
       const result = await service.prepareMessagesWithContext(
@@ -544,35 +528,6 @@ describe("ContextFileService", () => {
 
       expect(result).toEqual(messages);
       expect(result.find((message) => message.role === "system")).toBeUndefined();
-    });
-
-    it("injects Bases syntax guide when a tool call targets a .base path", async () => {
-      const messages: ChatMessage[] = [
-        { role: "user", content: "Update the database view" },
-        {
-          role: "assistant",
-          content: "",
-          tool_calls: [
-            {
-              request: {
-                function: {
-                  arguments: JSON.stringify({ path: "Views/Projects.base" }),
-                },
-              },
-            },
-          ] as any,
-        } as any,
-      ];
-
-      const result = await service.prepareMessagesWithContext(
-        messages,
-        new Set(),
-        true,
-        "Custom system prompt"
-      );
-
-      expect(result[0].role).toBe("system");
-      expect(String(result[0].content)).toContain("<obsidian_bases_syntax_guide>");
     });
   });
 

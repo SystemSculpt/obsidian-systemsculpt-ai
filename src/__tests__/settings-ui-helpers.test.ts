@@ -20,7 +20,7 @@ describe("settings UI helpers", () => {
     expect(link.textContent).toContain("Documentation");
     expect(link.getAttribute("href")).toBe("https://example.com/docs");
     expect(link.getAttribute("target")).toBe("_blank");
-    expect(link.getAttribute("rel")).toBe("noopener");
+    expect(link.getAttribute("rel")).toBe("noopener noreferrer");
 
     expect(link.classList.contains("ss-help-link")).toBe(true);
 

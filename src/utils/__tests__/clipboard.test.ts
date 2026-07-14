@@ -95,22 +95,20 @@ describe("clipboard", () => {
       });
 
       const appendChildSpy = jest.spyOn(document.body, "appendChild");
-      const removeChildSpy = jest.spyOn(document.body, "removeChild");
 
       document.execCommand = jest.fn().mockReturnValue(true);
 
       await tryCopyToClipboard("textarea text");
 
       expect(appendChildSpy).toHaveBeenCalled();
-      expect(removeChildSpy).toHaveBeenCalled();
 
       // Check textarea was created with correct value
       const appendedElement = appendChildSpy.mock.calls[0][0] as HTMLTextAreaElement;
       expect(appendedElement.tagName).toBe("TEXTAREA");
       expect(appendedElement.value).toBe("textarea text");
+      expect(appendedElement.isConnected).toBe(false);
 
       appendChildSpy.mockRestore();
-      removeChildSpy.mockRestore();
     });
 
     it("sets textarea style for invisibility", async () => {
@@ -236,6 +234,40 @@ describe("clipboard", () => {
       expect(Object.keys(clipboardItems[0].data)).toEqual(["image/png"]);
       expect(clipboardItems[0].data["image/png"]).toBeInstanceOf(Blob);
       expect(clipboardItems[0].data["image/png"].type).toBe("image/png");
+    });
+
+    it("uses the initiating popout window for image clipboard writes", async () => {
+      const mainWrite = jest.fn().mockResolvedValue(undefined);
+      Object.defineProperty(navigator, "clipboard", {
+        value: { write: mainWrite },
+        writable: true,
+        configurable: true,
+      });
+
+      const iframe = document.createElement("iframe");
+      document.body.appendChild(iframe);
+      const popoutWindow = iframe.contentWindow!;
+      const popoutWrite = jest.fn().mockResolvedValue(undefined);
+      Object.defineProperty(popoutWindow.navigator, "clipboard", {
+        value: { write: popoutWrite },
+        writable: true,
+        configurable: true,
+      });
+      (popoutWindow as any).ClipboardItem = class {
+        constructor(public readonly data: Record<string, Blob>) {}
+      };
+
+      const app = makeApp(new Uint8Array([1, 2, 3]).buffer);
+      const result = await tryCopyImageFileToClipboard(
+        app,
+        makeFile("png"),
+        popoutWindow.document.body,
+      );
+
+      expect(result).toBe(true);
+      expect(popoutWrite).toHaveBeenCalledTimes(1);
+      expect(mainWrite).not.toHaveBeenCalled();
+      iframe.remove();
     });
 
     it("maps JPG to image/jpeg", async () => {

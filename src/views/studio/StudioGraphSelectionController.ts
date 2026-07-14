@@ -34,6 +34,7 @@ import {
   isStudioGraphEditableFieldActive,
   shouldStudioGraphDeferWheelToNativeScroll,
 } from "./StudioGraphDomTargeting";
+import { getStudioOwnerWindow } from "./StudioDomContext";
 
 type GraphPoint = {
   x: number;
@@ -86,11 +87,13 @@ export class StudioGraphSelectionController {
   private graphZoomLabelEl: HTMLElement | null = null;
   private graphCanvasEl: HTMLElement | null = null;
   private graphEdgesLayerEl: SVGSVGElement | null = null;
+  private graphOwnerWindow: Window | null = null;
   private nodeElsById = new Map<string, HTMLElement>();
   private selectedNodeIds = new Set<string>();
   private suppressNextCanvasClick = false;
   private onSelectionChange: (() => void) | null = null;
   private zoomSettleTimer: number | null = null;
+  private zoomSettleWindow: Window | null = null;
 
   constructor(private readonly host: StudioGraphSelectionHost) {}
 
@@ -174,6 +177,7 @@ export class StudioGraphSelectionController {
   }
 
   clearRenderBindings(): void {
+    this.cancelScheduledGraphZoomSettle();
     this.graphViewportEl = null;
     this.graphSurfaceEl = null;
     this.graphMarqueeEl = null;
@@ -181,10 +185,10 @@ export class StudioGraphSelectionController {
     this.graphZoomLabelEl = null;
     this.graphCanvasEl = null;
     this.graphEdgesLayerEl = null;
+    this.graphOwnerWindow = null;
     this.graphCanvasWidth = STUDIO_GRAPH_CANVAS_WIDTH;
     this.graphCanvasHeight = STUDIO_GRAPH_CANVAS_HEIGHT;
     this.suppressNextCanvasClick = false;
-    this.cancelScheduledGraphZoomSettle();
     this.graphZoomMode = "interactive";
     this.nodeElsById.clear();
   }
@@ -197,6 +201,7 @@ export class StudioGraphSelectionController {
 
   registerViewportElement(viewport: HTMLElement): void {
     this.graphViewportEl = viewport;
+    this.graphOwnerWindow = getStudioOwnerWindow(viewport);
   }
 
   registerSurfaceElement(surface: HTMLElement): void {
@@ -217,6 +222,7 @@ export class StudioGraphSelectionController {
 
   registerCanvasElement(canvas: HTMLElement): void {
     this.graphCanvasEl = canvas;
+    this.graphOwnerWindow = getStudioOwnerWindow(canvas);
     this.syncCanvasBounds({ force: true });
   }
 
@@ -417,6 +423,7 @@ export class StudioGraphSelectionController {
     startEvent.preventDefault();
     const viewport = this.graphViewportEl;
     const marquee = this.graphMarqueeEl;
+    const ownerWindow = getStudioOwnerWindow(viewport);
     const pointerId = startEvent.pointerId;
     const additive = startEvent.shiftKey || startEvent.metaKey || startEvent.ctrlKey;
     const baselineSelection = additive ? new Set(this.selectedNodeIds) : new Set<string>();
@@ -498,8 +505,8 @@ export class StudioGraphSelectionController {
         return;
       }
       selectionFrameRequested = true;
-      if (typeof window.requestAnimationFrame === "function") {
-        window.requestAnimationFrame(flushSelectionFrame);
+      if (typeof ownerWindow.requestAnimationFrame === "function") {
+        ownerWindow.requestAnimationFrame(flushSelectionFrame);
         return;
       }
       flushSelectionFrame();
@@ -514,12 +521,12 @@ export class StudioGraphSelectionController {
         flushSelectionFrame();
       }
 
-      window.removeEventListener("pointermove", onPointerMove);
-      window.removeEventListener("pointerup", finishSelection);
-      window.removeEventListener("pointercancel", finishSelection);
+      ownerWindow.removeEventListener("pointermove", onPointerMove);
+      ownerWindow.removeEventListener("pointerup", finishSelection);
+      ownerWindow.removeEventListener("pointercancel", finishSelection);
       marquee.classList.remove("is-active");
-      marquee.style.width = "0px";
-      marquee.style.height = "0px";
+      marquee.setCssStyles({ width: "0px" });
+      marquee.setCssStyles({ height: "0px" });
 
       if (typeof viewport.releasePointerCapture === "function") {
         try {
@@ -550,9 +557,104 @@ export class StudioGraphSelectionController {
     };
 
     updateSelection(startEvent.clientX, startEvent.clientY);
-    window.addEventListener("pointermove", onPointerMove);
-    window.addEventListener("pointerup", finishSelection);
-    window.addEventListener("pointercancel", finishSelection);
+    ownerWindow.addEventListener("pointermove", onPointerMove);
+    ownerWindow.addEventListener("pointerup", finishSelection);
+    ownerWindow.addEventListener("pointercancel", finishSelection);
+  }
+
+  startCanvasPan(startEvent: PointerEvent): void {
+    const viewport = this.graphViewportEl;
+    if (!viewport) {
+      return;
+    }
+
+    if (startEvent.button !== 0) {
+      return;
+    }
+
+    startEvent.preventDefault();
+    const ownerWindow = getStudioOwnerWindow(viewport);
+    const pointerId = startEvent.pointerId;
+    const startX = startEvent.clientX;
+    const startY = startEvent.clientY;
+    const startScrollLeft = viewport.scrollLeft;
+    const startScrollTop = viewport.scrollTop;
+    let pendingClientX = startX;
+    let pendingClientY = startY;
+    let lastClientX = startX;
+    let lastClientY = startY;
+    let panFrameRequested = false;
+
+    if (typeof viewport.setPointerCapture === "function") {
+      try {
+        viewport.setPointerCapture(pointerId);
+      } catch {
+        // Pointer capture can fail in some environments; window listeners are fallback.
+      }
+    }
+
+    const flushPanFrame = (): void => {
+      panFrameRequested = false;
+      lastClientX = pendingClientX;
+      lastClientY = pendingClientY;
+      viewport.scrollLeft = startScrollLeft - (pendingClientX - startX);
+      viewport.scrollTop = startScrollTop - (pendingClientY - startY);
+    };
+
+    const schedulePanFrame = (): void => {
+      if (panFrameRequested) {
+        return;
+      }
+      panFrameRequested = true;
+      if (typeof ownerWindow.requestAnimationFrame === "function") {
+        ownerWindow.requestAnimationFrame(flushPanFrame);
+        return;
+      }
+      flushPanFrame();
+    };
+
+    const finishPan = (event: PointerEvent): void => {
+      if (event.pointerId !== pointerId) {
+        return;
+      }
+
+      if (panFrameRequested) {
+        flushPanFrame();
+      }
+
+      ownerWindow.removeEventListener("pointermove", onPointerMove);
+      ownerWindow.removeEventListener("pointerup", finishPan);
+      ownerWindow.removeEventListener("pointercancel", finishPan);
+
+      if (typeof viewport.releasePointerCapture === "function") {
+        try {
+          viewport.releasePointerCapture(pointerId);
+        } catch {
+          // Ignore release errors; listeners are detached already.
+        }
+      }
+
+      if (Math.hypot(lastClientX - startX, lastClientY - startY) > 3) {
+        this.suppressNextCanvasClick = true;
+      }
+    };
+
+    const onPointerMove = (moveEvent: PointerEvent): void => {
+      if (moveEvent.pointerId !== pointerId) {
+        return;
+      }
+      const latestEvent = this.resolveLatestPointerEvent(moveEvent);
+      pendingClientX = latestEvent.clientX;
+      pendingClientY = latestEvent.clientY;
+      if (typeof moveEvent.preventDefault === "function") {
+        moveEvent.preventDefault();
+      }
+      schedulePanFrame();
+    };
+
+    ownerWindow.addEventListener("pointermove", onPointerMove);
+    ownerWindow.addEventListener("pointerup", finishPan);
+    ownerWindow.addEventListener("pointercancel", finishPan);
   }
 
   private clampGraphZoom(value: number, mode: StudioGraphZoomMode = this.graphZoomMode): number {
@@ -574,7 +676,7 @@ export class StudioGraphSelectionController {
       return;
     }
     this.graphCanvasEl.style.transform = `scale(${zoom})`;
-    this.graphCanvasEl.style.transformOrigin = "0 0";
+    this.graphCanvasEl.setCssStyles({ transformOrigin: "0 0" });
     this.syncGraphSurfaceSize();
     if (this.graphZoomLabelEl) {
       this.graphZoomLabelEl.setText(`${Math.round(zoom * 100)}%`);
@@ -592,16 +694,26 @@ export class StudioGraphSelectionController {
 
   private scheduleSettledGraphZoom(): void {
     this.cancelScheduledGraphZoomSettle();
-    this.zoomSettleTimer = window.setTimeout(() => {
+    const ownerWindow = this.graphCanvasEl
+      ? getStudioOwnerWindow(this.graphCanvasEl)
+      : this.graphOwnerWindow;
+    if (!ownerWindow) {
+      this.applyGraphZoom({ settled: true });
+      return;
+    }
+    this.zoomSettleWindow = ownerWindow;
+    this.zoomSettleTimer = ownerWindow.setTimeout(() => {
       this.zoomSettleTimer = null;
+      this.zoomSettleWindow = null;
       this.applyGraphZoom({ settled: true });
     }, STUDIO_GRAPH_ZOOM_SETTLE_DELAY_MS);
   }
 
   private cancelScheduledGraphZoomSettle(): void {
     if (this.zoomSettleTimer !== null) {
-      window.clearTimeout(this.zoomSettleTimer);
+      this.zoomSettleWindow?.clearTimeout(this.zoomSettleTimer);
       this.zoomSettleTimer = null;
+      this.zoomSettleWindow = null;
     }
   }
 
@@ -724,6 +836,7 @@ export class StudioGraphSelectionController {
     if (this.graphZoomMode === "overview") {
       return;
     }
+    const ownerWindow = getStudioOwnerWindow(dragSurfaceEl);
     const project = this.host.getCurrentProject();
     if (!project) {
       return;
@@ -919,8 +1032,8 @@ export class StudioGraphSelectionController {
         return;
       }
       dragFrameRequested = true;
-      if (typeof window.requestAnimationFrame === "function") {
-        window.requestAnimationFrame(flushDragFrame);
+      if (typeof ownerWindow.requestAnimationFrame === "function") {
+        ownerWindow.requestAnimationFrame(flushDragFrame);
         return;
       }
       flushDragFrame();
@@ -966,11 +1079,11 @@ export class StudioGraphSelectionController {
         flushDragFrame();
       }
 
-      window.removeEventListener("pointermove", onPointerMove);
-      window.removeEventListener("pointerup", finishDrag);
-      window.removeEventListener("pointercancel", finishDrag);
-      window.removeEventListener("keydown", onModifierChange);
-      window.removeEventListener("keyup", onModifierChange);
+      ownerWindow.removeEventListener("pointermove", onPointerMove);
+      ownerWindow.removeEventListener("pointerup", finishDrag);
+      ownerWindow.removeEventListener("pointercancel", finishDrag);
+      ownerWindow.removeEventListener("keydown", onModifierChange);
+      ownerWindow.removeEventListener("keyup", onModifierChange);
       this.renderSnapGuides(null);
       if (typeof dragSurfaceEl.releasePointerCapture === "function") {
         try {
@@ -998,11 +1111,11 @@ export class StudioGraphSelectionController {
       }
     };
 
-    window.addEventListener("pointermove", onPointerMove);
-    window.addEventListener("pointerup", finishDrag);
-    window.addEventListener("pointercancel", finishDrag);
-    window.addEventListener("keydown", onModifierChange);
-    window.addEventListener("keyup", onModifierChange);
+    ownerWindow.addEventListener("pointermove", onPointerMove);
+    ownerWindow.addEventListener("pointerup", finishDrag);
+    ownerWindow.addEventListener("pointercancel", finishDrag);
+    ownerWindow.addEventListener("keydown", onModifierChange);
+    ownerWindow.addEventListener("keyup", onModifierChange);
   }
 
   /**

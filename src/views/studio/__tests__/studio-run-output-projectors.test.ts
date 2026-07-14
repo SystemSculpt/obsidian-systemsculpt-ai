@@ -7,14 +7,14 @@ import {
   MANAGED_TEXT_OWNER,
   MANAGED_TEXT_OWNER_KEY,
   MANAGED_TEXT_SOURCE_NODE_ID_KEY,
-} from "../StudioManagedOutputNodes";
+} from "../../../studio/StudioManagedOutputNodes";
 import {
   materializeManagedOutputNodesForNodeOutput,
   materializeManagedOutputNodesFromCacheEntries,
   materializeManagedOutputPlaceholdersForStartedNode,
   syncDatasetOutputFieldsToProjectNodeConfig,
   syncInlineTextOutputToProjectNodeConfig,
-} from "../systemsculpt-studio-view/StudioRunOutputProjectors";
+} from "../../../studio/StudioRunOutputProjectors";
 
 function nodeFixture(
   kind: string,

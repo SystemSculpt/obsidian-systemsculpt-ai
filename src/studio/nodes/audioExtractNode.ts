@@ -1,4 +1,4 @@
-import { dirname } from "node:path";
+import { desktopHost } from "../../platform/desktopOnly";
 import type {
   StudioJsonValue,
   StudioNodeDefinition,
@@ -116,7 +116,7 @@ async function extractAudioAsset(
     result = await context.services.runCli({
       command: ffmpegCommand,
       args,
-      cwd: dirname(sourcePath),
+      cwd: desktopHost.path().dirname(sourcePath),
       timeoutMs,
       maxOutputBytes,
     });
@@ -147,6 +147,7 @@ async function extractAudioAsset(
 export const audioExtractNode: StudioNodeDefinition = {
   kind: "studio.audio_extract",
   version: "1.0.0",
+  hostRequirement: "desktop",
   capabilityClass: "local_io",
   cachePolicy: "by_inputs",
   inputPorts: [{ id: "path", type: "text", required: true }],

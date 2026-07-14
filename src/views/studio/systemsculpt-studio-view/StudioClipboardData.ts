@@ -1,3 +1,9 @@
+import { TFile, TFolder, type TAbstractFile } from "obsidian";
+import {
+  parsePathReferencesFromText,
+  resolveVaultItemFromReference,
+} from "./StudioVaultReferenceResolver";
+
 const MEDIA_MIME_PREFIXES = ["image/", "video/", "audio/"] as const;
 
 const IMAGE_EXTENSIONS_FOR_INGEST = new Set([
@@ -33,12 +39,12 @@ const AUDIO_EXTENSIONS_FOR_INGEST = new Set([
   "weba",
 ]);
 
-export function isMediaMimeType(rawMimeType: string): boolean {
+function isMediaMimeType(rawMimeType: string): boolean {
   const normalized = String(rawMimeType || "").trim().toLowerCase();
   return MEDIA_MIME_PREFIXES.some((prefix) => normalized.startsWith(prefix));
 }
 
-export function isMediaIngestableExtension(extension: string): boolean {
+function isMediaIngestableExtension(extension: string): boolean {
   const normalized = String(extension || "")
     .trim()
     .toLowerCase()
@@ -112,4 +118,149 @@ export function extractClipboardText(event: ClipboardEvent): string {
   }
   const text = clipboard.getData("text/plain");
   return typeof text === "string" ? text : "";
+}
+
+export type StudioDroppedItems = {
+  notePaths: string[];
+  folderPaths: string[];
+  unsupportedPaths: string[];
+  vaultMediaPaths: string[];
+  externalMediaFiles: File[];
+};
+
+export type StudioDropDataResolver = {
+  getAbstractFileByPath(path: string): TAbstractFile | null;
+  resolveVaultPathFromAbsoluteFilePath(absolutePath: string): string | null;
+};
+
+function readDataTransferStringItem(item: DataTransferItem): Promise<string> {
+  return new Promise((resolve) => {
+    try {
+      item.getAsString((value) => {
+        resolve(typeof value === "string" ? value : "");
+      });
+    } catch {
+      resolve("");
+    }
+  });
+}
+
+/**
+ * Classifies every browser and Obsidian drag payload without mutating Studio.
+ * The controller decides how each bucket should materialize in the graph.
+ */
+export async function collectStudioDroppedItems(
+  dataTransfer: DataTransfer,
+  resolver: StudioDropDataResolver,
+): Promise<StudioDroppedItems> {
+  const references = new Set<string>();
+  const pushReference = (value: string): void => {
+    const next = String(value || "").trim();
+    if (next) references.add(next);
+  };
+
+  const payloads = new Set<string>();
+  const pushPayload = (value: string): void => {
+    const next = String(value || "").trim();
+    if (next) payloads.add(next);
+  };
+
+  const vaultMediaPaths = new Set<string>();
+  const externalMediaFiles: File[] = [];
+  const externalMediaSeenKeys = new Set<string>();
+  const pushExternalMediaFile = (file: File): void => {
+    const key = `${file.name}:${file.type}:${file.size}:${file.lastModified}`;
+    if (externalMediaSeenKeys.has(key)) return;
+    externalMediaSeenKeys.add(key);
+    externalMediaFiles.push(file);
+  };
+
+  for (const preferredType of ["text/plain", "text/uri-list", "application/json"]) {
+    try {
+      pushPayload(dataTransfer.getData(preferredType));
+    } catch {
+      // Continue through best-effort fallbacks.
+    }
+  }
+  for (const type of Array.from(dataTransfer.types || [])) {
+    const normalizedType = String(type || "").toLowerCase();
+    if (
+      !normalizedType.startsWith("text/") &&
+      !normalizedType.includes("json") &&
+      !normalizedType.includes("uri")
+    ) {
+      continue;
+    }
+    try {
+      pushPayload(dataTransfer.getData(type));
+    } catch {
+      // Continue through best-effort fallbacks.
+    }
+  }
+  for (const item of Array.from(dataTransfer.items || [])) {
+    if (item.kind === "string") {
+      pushPayload(await readDataTransferStringItem(item));
+    }
+  }
+  for (const payload of payloads) {
+    for (const reference of parsePathReferencesFromText(payload)) {
+      pushReference(reference);
+    }
+  }
+
+  for (const file of Array.from(dataTransfer.files || [])) {
+    const absolutePath =
+      typeof (file as unknown as { path?: unknown }).path === "string"
+        ? String((file as unknown as { path?: string }).path)
+        : "";
+    if (isMediaMimeType(file.type)) {
+      const vaultPath = absolutePath
+        ? resolver.resolveVaultPathFromAbsoluteFilePath(absolutePath)
+        : "";
+      if (vaultPath) {
+        vaultMediaPaths.add(vaultPath);
+      } else {
+        pushExternalMediaFile(file);
+      }
+      continue;
+    }
+    if (!absolutePath) continue;
+    const vaultPath = resolver.resolveVaultPathFromAbsoluteFilePath(absolutePath);
+    if (vaultPath) pushReference(vaultPath);
+  }
+
+  const notePaths = new Set<string>();
+  const folderPaths = new Set<string>();
+  const unsupportedPaths = new Set<string>();
+  for (const reference of references) {
+    const item = resolveVaultItemFromReference({
+      reference,
+      getAbstractFileByPath: (path) => resolver.getAbstractFileByPath(path),
+      resolveVaultPathFromAbsoluteFilePath: (absolutePath) =>
+        resolver.resolveVaultPathFromAbsoluteFilePath(absolutePath),
+    });
+    if (item instanceof TFile && item.extension.toLowerCase() === "md") {
+      notePaths.add(item.path);
+      continue;
+    }
+    if (item instanceof TFolder) {
+      folderPaths.add(item.path);
+      continue;
+    }
+    if (item instanceof TFile) {
+      if (isMediaIngestableExtension(item.extension)) {
+        vaultMediaPaths.add(item.path);
+      } else {
+        unsupportedPaths.add(item.path);
+      }
+    }
+  }
+
+  return {
+    notePaths: Array.from(notePaths),
+    folderPaths: Array.from(folderPaths),
+    unsupportedPaths: Array.from(unsupportedPaths),
+    vaultMediaPaths: Array.from(vaultMediaPaths),
+    externalMediaFiles,
+  };
 }

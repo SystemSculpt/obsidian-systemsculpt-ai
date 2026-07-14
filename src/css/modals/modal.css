@@ -79,21 +79,10 @@
 }
 
 .ss-modal__close-button {
-  display: flex;
-  align-items: center;
-  justify-content: center;
   width: 28px;
+  min-width: 28px;
   height: 28px;
-  flex-shrink: 0;
-  border-radius: var(--ss-radius-xs);
-  color: var(--ss-ink-muted);
-  cursor: pointer;
-  transition: var(--ss-transition-colors);
-}
-
-.ss-modal__close-button:hover {
-  background-color: var(--ss-state-hover);
-  color: var(--ss-ink);
+  min-height: 28px;
 }
 
 .ss-modal__description {
@@ -128,31 +117,51 @@
  * Search
  * ------------------------------------------------------------------ */
 .ss-modal__search {
-  position: relative;
-  display: flex;
-  align-items: center;
   flex-shrink: 0;
   margin: var(--ss-space-3) var(--ss-space-5);
 }
 
-.ss-modal__search-icon {
-  position: absolute;
-  left: var(--ss-space-3);
+/* ------------------------------------------------------------------ *
+ * Prompt fields
+ * ------------------------------------------------------------------ */
+.ss-prompt-modal__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ss-space-4);
+}
+
+.ss-prompt-modal__title-lead {
   display: flex;
   align-items: center;
-  color: var(--ss-ink-faint);
-  pointer-events: none;
+  gap: var(--ss-space-2);
+  min-width: 0;
 }
 
-.ss-modal__search-icon svg {
-  width: var(--ss-icon-size);
-  height: var(--ss-icon-size);
+.ss-prompt-modal__title-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  color: var(--ss-ink-muted);
 }
 
-.ss-modal__search-input {
+.ss-prompt-modal__message {
+  margin: 0;
+  font-size: var(--ss-text-base);
+  line-height: var(--ss-leading-base);
+  color: var(--ss-ink);
+}
+
+.ss-prompt-modal__inputs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ss-space-2);
+}
+
+.ss-prompt-modal__field {
   width: 100%;
   min-height: var(--ss-control-height);
-  padding: 0 var(--ss-space-8) 0 var(--ss-space-8);
+  padding: var(--ss-space-2) var(--ss-space-3);
   background-color: var(--ss-surface-sunken);
   border: 1px solid var(--ss-line);
   border-radius: var(--ss-radius-sm);
@@ -161,55 +170,33 @@
   transition: var(--ss-transition-colors);
 }
 
-.ss-modal__search-input:focus {
+.ss-prompt-modal__field--textarea {
+  min-height: 140px;
+  resize: vertical;
+}
+
+.ss-prompt-modal__field:focus {
   border-color: var(--ss-accent);
   box-shadow: var(--ss-ring);
   outline: none;
 }
 
-.ss-modal__search-input::placeholder {
-  color: var(--ss-ink-faint);
+.ss-prompt-modal__field.is-invalid,
+.ss-prompt-modal__field[aria-invalid="true"] {
+  border-color: var(--ss-danger);
 }
 
-.ss-modal__search-clear {
-  position: absolute;
-  right: var(--ss-space-2);
-  display: none;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  border-radius: var(--ss-radius-round);
+.ss-prompt-modal__checkbox {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--ss-space-2);
+  font-size: var(--ss-text-sm);
   color: var(--ss-ink-muted);
-  cursor: pointer;
-  transition: var(--ss-transition-colors);
 }
 
-.ss-modal__search-input:not(:placeholder-shown) ~ .ss-modal__search-clear {
-  display: flex;
-}
-
-.ss-modal__search-clear:hover {
-  background-color: var(--ss-state-hover);
-  color: var(--ss-ink);
-}
-
-/* ------------------------------------------------------------------ *
- * Filters
- * ------------------------------------------------------------------ */
-.ss-modal__filter {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--ss-space-2);
-  flex-shrink: 0;
-  padding: 0 var(--ss-space-5) var(--ss-space-3);
-}
-
-.ss-modal__filter-group {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--ss-space-2);
-  align-items: center;
+.ss-prompt-modal__checkbox input[type="checkbox"] {
+  margin-top: 0.15rem;
+  accent-color: var(--ss-accent);
 }
 
 /* ------------------------------------------------------------------ *
@@ -226,28 +213,31 @@
 }
 
 .ss-modal__item {
+  appearance: none;
   display: flex;
   align-items: center;
   gap: var(--ss-space-3);
+  width: 100%;
   padding: var(--ss-space-2) var(--ss-space-3);
+  background-color: transparent;
   border: 1px solid transparent;
   border-radius: var(--ss-radius-sm);
+  box-shadow: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
   cursor: pointer;
   transition: var(--ss-transition-colors);
 }
 
 .ss-modal__item:hover,
-.ss-modal__item:focus {
+.ss-modal__item:focus-visible {
   background-color: var(--ss-state-hover);
 }
 
-.ss-modal__item.ss-active {
-  background-color: var(--ss-accent-tint);
-  border-color: var(--ss-line-accent);
-}
-
-.ss-modal__item.ss-active .ss-modal__item-icon {
-  color: var(--ss-ink-accent);
+.ss-modal__item:focus-visible {
+  outline: none;
+  box-shadow: var(--ss-ring);
 }
 
 .ss-modal__item--failed {
@@ -287,102 +277,6 @@
   text-overflow: ellipsis;
 }
 
-.ss-modal__item-badge {
-  flex-shrink: 0;
-  padding: var(--ss-space-0) var(--ss-space-2);
-  border: 1px solid var(--ss-line);
-  border-radius: var(--ss-radius-full);
-  background-color: var(--ss-surface-1);
-  color: var(--ss-ink-muted);
-  font-size: var(--ss-text-xs);
-  font-weight: var(--ss-weight-medium);
-  letter-spacing: var(--ss-tracking-wide);
-  text-transform: uppercase;
-  white-space: nowrap;
-}
-
-/* Thumbnails + hover preview */
-.ss-modal__item-thumbnail {
-  position: relative;
-  flex-shrink: 0;
-  width: 48px;
-  height: 48px;
-  border-radius: var(--ss-radius-xs);
-  overflow: hidden;
-  border: 1px solid var(--ss-line);
-}
-
-.ss-modal__item-thumbnail img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  transition: var(--ss-transition-transform);
-}
-
-.ss-modal__item-thumbnail:hover img {
-  transform: scale(1.06);
-}
-
-.ss-preview-container {
-  position: fixed;
-  z-index: var(--ss-z-popover);
-  max-width: 360px;
-  padding: var(--ss-space-2);
-  background: var(--ss-surface-2);
-  border: 1px solid var(--ss-line);
-  border-radius: var(--ss-radius-md);
-  box-shadow: var(--ss-elevation-3);
-  pointer-events: none;
-  animation: ss-fade-in var(--ss-dur-fast) var(--ss-ease-out);
-}
-
-.ss-preview-container img {
-  max-width: 100%;
-  border-radius: var(--ss-radius-xs);
-}
-
-/* Aspect-ratio size presets (ListSelectionModal.ts, applied on image load;
-   the cursor-relative left/top stay inline). */
-.ss-preview-container--landscape {
-  width: 350px;
-  height: auto;
-}
-
-.ss-preview-container--portrait {
-  width: auto;
-  height: 350px;
-}
-
-.ss-preview-container--square {
-  width: 300px;
-  height: 300px;
-}
-
-.ss-preview-title {
-  margin-top: var(--ss-space-1);
-  font-size: var(--ss-text-xs);
-  color: var(--ss-ink-muted);
-  text-align: center;
-}
-
-.ss-modal__item-preview {
-  width: 100%;
-  max-height: 200px;
-  overflow: hidden;
-  border-radius: var(--ss-radius-sm);
-  margin-top: var(--ss-space-2);
-}
-
-.ss-modal__item-preview img {
-  width: 100%;
-  object-fit: contain;
-}
-
-.ss-modal__item.expanded {
-  flex-direction: column;
-  align-items: stretch;
-}
-
 /* ------------------------------------------------------------------ *
  * Summary bar (e.g. pending-files)
  * ------------------------------------------------------------------ */
@@ -407,58 +301,7 @@
   gap: var(--ss-space-2);
 }
 
-/* ------------------------------------------------------------------ *
- * Loading / error / empty
- * ------------------------------------------------------------------ */
-.ss-modal__loading {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--ss-space-2);
-  padding: var(--ss-space-8);
-  color: var(--ss-ink-muted);
-}
-
-.ss-modal__loading::before {
-  content: "";
-  width: var(--ss-icon-size);
-  height: var(--ss-icon-size);
-  border: 2px solid var(--ss-line);
-  border-top-color: var(--ss-accent);
-  border-radius: var(--ss-radius-round);
-  animation: ss-spin 0.8s linear infinite;
-}
-
-.ss-modal__error {
-  display: flex;
-  align-items: center;
-  gap: var(--ss-space-2);
-  margin: var(--ss-space-3) var(--ss-space-5);
-  padding: var(--ss-space-3);
-  background-color: var(--ss-danger-tint);
-  border: 1px solid var(--ss-danger-line);
-  border-radius: var(--ss-radius-sm);
-  color: var(--ss-danger);
-  font-size: var(--ss-text-sm);
-}
-
-.ss-modal__empty-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: var(--ss-space-2);
-  min-height: 150px;
-  padding: var(--ss-space-6);
-  color: var(--ss-ink-muted);
-  text-align: center;
-}
-
-.ss-modal__empty-state-icon {
-  color: var(--ss-ink-faint);
-}
-
-/* Plain stacked body copy (PostProcessingModelPromptModal.ts) */
+/* Plain stacked body copy for short modal content blocks. */
 .ss-modal__stack {
   display: flex;
   flex-direction: column;
@@ -469,19 +312,6 @@
 .ss-modal__stack p {
   margin: 0;
   line-height: var(--ss-leading-base);
-}
-
-.ss-modal__callout {
-  padding: var(--ss-space-3);
-  background-color: var(--ss-accent-tint);
-  border: 1px solid var(--ss-line-accent);
-  border-radius: var(--ss-radius-sm);
-  font-size: var(--ss-text-sm);
-}
-
-.ss-modal__muted {
-  font-size: var(--ss-text-sm);
-  color: var(--ss-ink-muted);
 }
 
 .ss-modal__inline-code {
@@ -500,57 +330,13 @@
 }
 
 /* ------------------------------------------------------------------ *
- * Text edit modal bits (TextEditModal.ts)
- * ------------------------------------------------------------------ */
-.ss-modal__textarea-container {
-  display: flex;
-  flex-direction: column;
-  flex: 1 1 auto;
-  min-height: 0;
-  padding: var(--ss-space-4) var(--ss-space-5);
-}
-
-.ss-modal__textarea {
-  width: 100%;
-  min-height: 160px;
-  padding: var(--ss-space-3);
-  background-color: var(--ss-surface-sunken);
-  border: 1px solid var(--ss-line);
-  border-radius: var(--ss-radius-sm);
-  color: var(--ss-ink);
-  font-size: var(--ss-text-base);
-  line-height: var(--ss-leading-base);
-  resize: vertical;
-  transition: var(--ss-transition-colors);
-}
-
-.ss-modal__textarea:focus {
-  border-color: var(--ss-accent);
-  box-shadow: var(--ss-ring);
-  outline: none;
-}
-
-.ss-modal__textarea-reset {
-  display: block;
-  margin-top: var(--ss-space-2);
-  padding: var(--ss-space-1) var(--ss-space-3);
-  font-size: var(--ss-text-sm);
-  cursor: pointer;
-}
-
-.ss-modal__title-generation {
-  padding: 0 var(--ss-space-5) var(--ss-space-3);
-  font-size: var(--ss-text-sm);
-  color: var(--ss-ink-muted);
-}
-
-/* ------------------------------------------------------------------ *
  * Footer
  * ------------------------------------------------------------------ */
 .ss-modal__footer {
   display: flex;
   align-items: center;
   justify-content: flex-end;
+  flex-wrap: wrap;
   gap: var(--ss-space-2);
   flex-shrink: 0;
   padding: var(--ss-space-3) var(--ss-space-5);
@@ -561,15 +347,12 @@
 .ss-modal__footer-group {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: var(--ss-space-2);
 }
 
-.ss-modal__footer .ss-button.is-loading {
-  opacity: 0.65;
-}
-
 /* ------------------------------------------------------------------ *
- * Mobile
+ * Narrow desktop window
  * ------------------------------------------------------------------ */
 @media (max-width: 768px) {
   .ss-modal,
@@ -582,14 +365,43 @@
     height: auto;
   }
 
+}
+
+/* The modal frame follows the app viewport; its interior follows the actual
+ * modal surface, including pop-out windows and constrained side-by-side panes. */
+@container ss-surface (max-width: 480px) {
   .ss-modal__header,
-  .ss-modal__footer {
-    padding-left: var(--ss-space-4);
-    padding-right: var(--ss-space-4);
+  .ss-modal__footer,
+  .ss-modal__custom-content,
+  .ss-modal--scrollable .ss-modal__content,
+  .ss-modal__stack {
+    padding-inline: var(--ss-space-4);
   }
 
   .ss-modal__search {
-    margin-left: var(--ss-space-4);
-    margin-right: var(--ss-space-4);
+    margin-inline: var(--ss-space-4);
+  }
+
+  .ss-modal__summary {
+    padding-inline: var(--ss-space-4);
+  }
+
+  .ss-modal__footer > .ss-button,
+  .ss-modal__footer-group > .ss-button {
+    flex: 1 1 12rem;
+  }
+}
+
+@container ss-surface (max-width: 360px) {
+  .ss-modal__footer,
+  .ss-modal__footer-group {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .ss-modal__footer-group,
+  .ss-modal__footer > .ss-button,
+  .ss-modal__footer-group > .ss-button {
+    width: 100%;
   }
 }

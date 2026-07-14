@@ -1,20 +1,17 @@
 import type { ChatMessage } from "../types";
-import type { ToolCall } from "../types/toolCalls";
 import { deterministicId } from "./id";
+import { normalizeFirstPartyToolName } from "../tools/toolNames";
 
-export const TOOL_LOOP_ERROR_CODE = "TOOL_LOOP_DETECTED";
-
-export type OpenAITool = {
+export type ManagedToolDefinition = {
   type: "function";
   function: {
     name: string;
     description?: string;
     parameters?: Record<string, any>;
-    strict?: boolean;
   };
 };
 
-export function isValidOpenAITool(tool: any): tool is OpenAITool {
+export function isValidManagedTool(tool: any): tool is ManagedToolDefinition {
   return (
     !!tool &&
     tool.type === "function" &&
@@ -24,11 +21,11 @@ export function isValidOpenAITool(tool: any): tool is OpenAITool {
   );
 }
 
-export function normalizeOpenAITools(tools: any[]): OpenAITool[] {
+export function normalizeManagedTools(tools: any[]): ManagedToolDefinition[] {
   const seen = new Set<string>();
-  const result: OpenAITool[] = [];
+  const result: ManagedToolDefinition[] = [];
   for (const tool of tools || []) {
-    if (!isValidOpenAITool(tool)) continue;
+    if (!isValidManagedTool(tool)) continue;
     const name = tool.function.name.trim();
     if (seen.has(name)) continue;
     seen.add(name);
@@ -41,19 +38,17 @@ export function normalizeOpenAITools(tools: any[]): OpenAITool[] {
         name,
         description: tool.function.description || "",
         parameters,
-        strict: tool.function.strict === true ? true : undefined,
       },
     });
   }
   return result;
 }
 
-export function buildOpenAIToolDefinition(input: {
+export function buildManagedToolDefinition(input: {
   name: string;
   description?: string;
   parameters?: Record<string, any>;
-  strict?: boolean;
-}): OpenAITool {
+}): ManagedToolDefinition {
   const name = String(input.name || "").trim();
   if (!name) {
     throw new Error("Tool definition missing name");
@@ -65,49 +60,23 @@ export function buildOpenAIToolDefinition(input: {
       name,
       description: input.description || "",
       parameters,
-      strict: input.strict === true ? true : undefined,
     },
   };
 }
 
-export function transformToolsForModel(modelId: string, providerEndpoint: string | undefined, tools: OpenAITool[]): any[] {
-  if (!Array.isArray(tools) || tools.length === 0) return [];
-  const isOpenRouter = typeof providerEndpoint === 'string' && providerEndpoint.includes('openrouter.ai');
-  const isO4Mini = typeof modelId === 'string' && (modelId.toLowerCase().includes('o4-mini') || modelId.toLowerCase().includes('o4 mini'));
-
-  const normalizedTools = normalizeOpenAITools(tools).map(t => ({
-    type: t.type || 'function',
-    function: {
-      name: t.function.name,
-      description: t.function.description || '',
-      parameters: normalizeJsonSchema(t.function.parameters || {}),
-    },
-  }));
-
-  if (isO4Mini && isOpenRouter) {
-    return normalizedTools.map(t => ({
-      type: t.type || 'function',
-      name: t.function.name,
-      description: t.function.description || '',
-      parameters: t.function.parameters,
-    }));
-  }
-
-  return normalizedTools;
-}
-
-export function mapAssistantToolCallsForApi(rawToolCalls: any[]): any[] {
+export function mapAssistantToolCallsForManagedApi(rawToolCalls: any[]): any[] {
   if (!Array.isArray(rawToolCalls)) return [];
   return rawToolCalls
     .map((toolCall) => {
       const req: any = (toolCall && (toolCall.request || toolCall)) || {};
       const fn: any = req.function || toolCall.function || (req.name ? { name: req.name, arguments: req.arguments } : {});
       if (!fn || !fn.name) return null;
+      const canonicalName = normalizeFirstPartyToolName(fn.name) || String(fn.name);
       const normalizedArgs = typeof fn.arguments === "string" ? fn.arguments : JSON.stringify(fn.arguments ?? {});
       const preferredId = typeof toolCall?.id === "string" && toolCall.id.length > 0 ? toolCall.id : undefined;
       const id = preferredId ?? (typeof req.id === "string" && req.id.length > 0
         ? req.id
-        : deterministicId(String(fn.name) + normalizedArgs, "call"));
+        : deterministicId(canonicalName + normalizedArgs, "call"));
 
       const safeTopLevel = new Set([
         "request",
@@ -144,53 +113,12 @@ export function mapAssistantToolCallsForApi(rawToolCalls: any[]): any[] {
         type: "function",
         function: {
           ...preservedFunction,
-          name: String(fn.name),
+          name: canonicalName,
           arguments: normalizedArgs,
         },
       };
     })
     .filter((tc) => tc !== null);
-}
-
-export function normalizeToolCallArguments(rawArgs: unknown): string {
-  if (typeof rawArgs !== "string") {
-    try {
-      return JSON.stringify(rawArgs ?? "");
-    } catch {
-      return "";
-    }
-  }
-
-  const trimmed = rawArgs.trim();
-  if (!trimmed) return "";
-
-  try {
-    const parsed = JSON.parse(trimmed);
-    return JSON.stringify(sortJsonValue(parsed));
-  } catch {
-    return trimmed;
-  }
-}
-
-export function buildToolCallSignature(toolName: string, rawArgs: unknown): string {
-  const safeName = String(toolName || "").trim();
-  const normalizedArgs = normalizeToolCallArguments(rawArgs);
-  return `${safeName}::${normalizedArgs}`;
-}
-
-function sortJsonValue(value: any): any {
-  if (Array.isArray(value)) {
-    return value.map((entry) => sortJsonValue(entry));
-  }
-  if (value && typeof value === "object") {
-    const sortedKeys = Object.keys(value).sort();
-    const result: Record<string, unknown> = {};
-    for (const key of sortedKeys) {
-      result[key] = sortJsonValue(value[key]);
-    }
-    return result;
-  }
-  return value;
 }
 
 export function pruneToolMessagesNotFollowingToolCalls(messages: ChatMessage[]): { messages: ChatMessage[]; dropped: number } {
@@ -270,11 +198,9 @@ export function buildToolResultMessagesFromToolCalls(toolCalls: any[]): ChatMess
 }
 
 /**
- * Normalize a JSON Schema object for provider compatibility.
- *
- * Anthropic requires input_schema to be an object schema and does not allow
- * oneOf/allOf/anyOf at the top level. This function enforces a safe shape
- * while preserving useful constraints where possible.
+ * Normalize a tool input schema to the managed gateway's canonical object
+ * shape. Top-level unions are flattened conservatively because a callable tool
+ * must have one deterministic object envelope on the wire.
  */
 export function normalizeJsonSchema(schema: any): Record<string, any> {
   // Fallback to permissive empty object schema
@@ -295,15 +221,13 @@ export function normalizeJsonSchema(schema: any): Record<string, any> {
   const properties = (cloned.properties && typeof cloned.properties === 'object')
     ? { ...cloned.properties }
     : {} as Record<string, any>;
-  // If required is not specified, make all properties required for API compatibility
+  // If required is omitted, make declared fields explicit on the wire.
   const propertyKeys = Object.keys(properties);
   const required = Array.isArray(cloned.required)
     ? [...cloned.required]
     : (propertyKeys.length > 0 ? propertyKeys : undefined);
 
-  // Anthropic incompatibility: remove top-level unions (keep nested ones)
-  // Keep a hint by collapsing them into the object form when we can, but
-  // default to permissive object if shapes differ.
+  // Collapse top-level unions while preserving nested schema constraints.
   const hasTopLevelUnion = !!(cloned.oneOf || cloned.anyOf || cloned.allOf);
   let additionalProperties: any = (
     typeof cloned.additionalProperties === 'boolean' || typeof cloned.additionalProperties === 'object'

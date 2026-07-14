@@ -1,10 +1,7 @@
-import { App, Setting, TextComponent } from "obsidian";
-import SystemSculptPlugin from "../main";
+import { Notice, Setting } from "obsidian";
 import { SystemSculptSettingTab } from "./SystemSculptSettingTab";
 import { attachFolderSuggester } from "../components/FolderSuggester";
-import { showPopup } from "../core/ui";
 
-// Moved from main class
 function validateDirectory(path: string): boolean {
     if (!path) return true;
     return (
@@ -12,7 +9,6 @@ function validateDirectory(path: string): boolean {
     );
 }
 
-// Moved from main class
 async function handleDirectoryChange(
     tabInstance: SystemSculptSettingTab,
     value: string,
@@ -21,32 +17,26 @@ async function handleDirectoryChange(
         | "recordingsDirectory"
         | "chatsDirectory"
         | "extractionsDirectory"
-        | "savedChatsDirectory"
-        | "webResearchDirectory",
+        | "savedChatsDirectory",
     createFolder: boolean = false
 ) {
-    const { app, plugin } = tabInstance;
+    const { plugin } = tabInstance;
     if (!validateDirectory(value)) {
-        showPopup(
-            app,
-            "Invalid directory path. Please use relative paths without '..' or leading slashes."
-        );
+        new Notice("Use a vault-relative path without '..' or a leading slash.");
         return;
     }
 
-    // Update settings using SettingsManager
     await plugin.getSettingsManager().updateSettings({ [settingKey]: value });
 
-    // Only create the directory if explicitly requested (on blur or selection)
     if (createFolder && plugin.directoryManager) {
         try {
             await plugin.directoryManager.handleDirectorySettingChange(settingKey, value);
-        } catch (error) {
+        } catch {
+            new Notice("Couldn’t create that directory.");
         }
     }
 }
 
-// Moved from main class
 function createDirectorySetting(
     containerEl: HTMLElement,
     tabInstance: SystemSculptSettingTab,
@@ -57,8 +47,7 @@ function createDirectorySetting(
         | "recordingsDirectory"
         | "chatsDirectory"
         | "extractionsDirectory"
-        | "savedChatsDirectory"
-        | "webResearchDirectory",
+        | "savedChatsDirectory",
     placeholder: string
 ) {
     const { app, plugin } = tabInstance;
@@ -84,10 +73,7 @@ function createDirectorySetting(
                         text.setValue(selectedPath);
                         await handleDirectoryChange(tabInstance, selectedPath, settingKey, true);
                     } else {
-                        showPopup(
-                            app,
-                            "Invalid directory path. Please use relative paths without '..' or leading slashes."
-                        );
+                        new Notice("Use a vault-relative path without '..' or a leading slash.");
                     }
                 },
                 app
@@ -97,30 +83,28 @@ function createDirectorySetting(
 }
 
 export function displayDirectoriesTabContent(containerEl: HTMLElement, tabInstance: SystemSculptSettingTab) {
-    containerEl.empty(); // Ensure clean slate
-    if (containerEl.classList.contains('systemsculpt-tab-content')) {
+    containerEl.empty();
+    if (containerEl.classList.contains("systemsculpt-tab-content")) {
         containerEl.dataset.tab = "workspace";
     }
     const { plugin } = tabInstance;
 
-    containerEl.createEl("h3", { text: "Directory Settings" });
+    containerEl.createEl("h3", { text: "Directories" });
 
-    // Core directories (always available)
     createDirectorySetting(
         containerEl,
         tabInstance,
-        "Chats Directory",
-        "Select the directory for your chat history",
+        "Chats directory",
+        "Where chat history is stored.",
         "chatsDirectory",
         "Path relative to vault root (empty = SystemSculpt/Chats)"
     );
 
-    // New: Saved Chats Directory (for notes saved via "Save chat as note")
     createDirectorySetting(
         containerEl,
         tabInstance,
-        "Saved Chats Directory",
-        "Select the directory where notes created via \"Save chat as note\" are stored",
+        "Saved chats directory",
+        "Where chats saved as notes are stored.",
         "savedChatsDirectory",
         "Path relative to vault root (empty = SystemSculpt/Saved Chats)"
     );
@@ -128,17 +112,8 @@ export function displayDirectoriesTabContent(containerEl: HTMLElement, tabInstan
     createDirectorySetting(
         containerEl,
         tabInstance,
-        "Web Research Directory",
-        "Select the directory where web search and fetch corpus files are stored",
-        "webResearchDirectory",
-        "Path relative to vault root (empty = SystemSculpt/Web Research)"
-    );
-
-    createDirectorySetting(
-        containerEl,
-        tabInstance,
-        "Recordings Directory",
-        "Select the directory for your recordings",
+        "Recordings directory",
+        "Where recordings are stored.",
         "recordingsDirectory",
         "Path relative to vault root (empty = SystemSculpt/Recordings)"
     );
@@ -146,63 +121,61 @@ export function displayDirectoriesTabContent(containerEl: HTMLElement, tabInstan
     createDirectorySetting(
         containerEl,
         tabInstance,
-        "Attachments Directory",
-        "Select the directory for saved images and attachments",
+        "Attachments directory",
+        "Where saved images and attachments are stored.",
         "attachmentsDirectory",
         "Path relative to vault root (empty = Attachments)"
     );
 
-    // Always display these directories
     createDirectorySetting(
         containerEl,
         tabInstance,
-        "Extractions Directory",
-        "Select the directory where extracted PDFs/docs will be placed",
+        "Extractions directory",
+        "Where extracted documents are stored.",
         "extractionsDirectory",
         "Path relative to vault root (empty = file's parent folder)"
     );
 
-    // Add directory diagnostics section
-    containerEl.createEl("h3", { text: "Directory Diagnostics" });
+    containerEl.createEl("h3", { text: "Diagnostics" });
 
     const diagnosticsSetting = new Setting(containerEl)
-      .setName('Directory diagnostics')
-      .setDesc('Check that required directories exist or repair them if something looks off.');
+      .setName("Directory health")
+      .setDesc("Verify or repair SystemSculpt directories.");
 
-    const statusEl = diagnosticsSetting.descEl.createDiv({ cls: 'ss-inline-note' });
+    const statusEl = diagnosticsSetting.descEl.createDiv({ cls: "ss-inline-note" });
 
     diagnosticsSetting.addButton((button) => {
       button
-        .setButtonText('Verify directories')
+        .setButtonText("Verify")
         .onClick(async () => {
-          statusEl.setText('Checking directories...');
+          statusEl.setText("Checking directories…");
           try {
             const result = await plugin.checkDirectoryHealth();
             if (result.valid) {
-              statusEl.setText('All directories are properly configured.');
+              statusEl.setText("All directories are ready.");
             } else {
-              const messages = result.issues?.length ? result.issues.join('\n• ') : 'Issues detected.';
+              const messages = result.issues?.length ? result.issues.join("\n• ") : "Issues detected.";
               statusEl.setText(`Issues found:\n• ${messages}`);
             }
-          } catch (error: any) {
-            statusEl.setText(`Verification failed: ${error?.message || error}`);
+          } catch (error: unknown) {
+            statusEl.setText(`Verification failed: ${error instanceof Error ? error.message : String(error)}`);
           }
         });
     });
 
     diagnosticsSetting.addButton((button) => {
       button
-        .setButtonText('Repair directories')
+        .setButtonText("Repair")
         .setCta()
         .onClick(async () => {
-          statusEl.setText('Repairing directories...');
+          statusEl.setText("Repairing directories…");
           try {
             const success = await plugin.repairDirectoryStructure();
             statusEl.setText(success
-              ? 'Directory structure repaired. Restart Obsidian to ensure changes apply.'
-              : 'Repair did not complete. Check the console for details.');
-          } catch (error: any) {
-            statusEl.setText(`Repair failed: ${error?.message || error}`);
+              ? "Directories repaired. Restart Obsidian to apply the changes."
+              : "Repair didn’t complete. Check the console for details.");
+          } catch (error: unknown) {
+            statusEl.setText(`Repair failed: ${error instanceof Error ? error.message : String(error)}`);
           }
         });
     });

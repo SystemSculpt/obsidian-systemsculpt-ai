@@ -20,6 +20,13 @@ import {
   renameGroup,
   setGroupColor,
 } from "../../studio/StudioGraphGroupModel";
+import { createStudioAction } from "./StudioAction";
+import { getStudioOwnerWindow, requestStudioAnimationFrame } from "./StudioDomContext";
+import {
+  applyPluginSurface,
+  createUiRadioGroup,
+  type UiRadioGroupHandle,
+} from "../../core/ui/surface";
 
 const DEFAULT_GROUP_COLOR = "#8de8bc";
 const GROUP_DROP_TARGET_MIN_OVERLAP_RATIO = 0.08;
@@ -43,6 +50,7 @@ const GROUP_COLOR_PALETTE = [
   "#79a8ff",
   "#b0b6c8",
 ] as const;
+let groupControllerInstanceId = 0;
 
 type NodeGeometry = {
   left: number;
@@ -90,6 +98,7 @@ function resolveGroupColor(group: StudioNodeGroup): string {
 }
 
 export class StudioGraphGroupController {
+  private readonly instanceId = ++groupControllerInstanceId;
   private canvasEl: HTMLElement | null = null;
   private frameLayerEl: HTMLElement | null = null;
   private tagLayerEl: HTMLElement | null = null;
@@ -98,8 +107,9 @@ export class StudioGraphGroupController {
   private pendingNameEditGroupId: string | null = null;
   private editingGroupId: string | null = null;
   private openColorPaletteGroupId: string | null = null;
+  private colorPaletteRadioGroup: UiRadioGroupHandle<string> | null = null;
   private dropTargetGroupId: string | null = null;
-  private windowListenersBound = false;
+  private listenerWindow: Window | null = null;
 
   private readonly onWindowPointerDown = (event: PointerEvent): void => {
     if (!this.openColorPaletteGroupId) {
@@ -135,6 +145,7 @@ export class StudioGraphGroupController {
   }
 
   clearRenderBindings(): void {
+    this.destroyColorPaletteRadioGroup();
     this.groupElsById.clear();
     this.previewColorByGroupId.clear();
     this.editingGroupId = null;
@@ -157,6 +168,7 @@ export class StudioGraphGroupController {
       return;
     }
 
+    this.destroyColorPaletteRadioGroup();
     this.frameLayerEl.empty();
     this.tagLayerEl.empty();
     this.groupElsById.clear();
@@ -194,18 +206,13 @@ export class StudioGraphGroupController {
       const tagRowEl = tagEl.createDiv({ cls: "ss-studio-group-tag-row" });
 
       const nameSlotEl = tagRowEl.createDiv({ cls: "ss-studio-group-tag-name-slot" });
-      const nameButtonEl = nameSlotEl.createEl("button", {
-        cls: "ss-studio-group-tag-button",
-        text: normalizeGroupName(group.name) || nextDefaultGroupName(project),
-      });
-      nameButtonEl.type = "button";
-      nameButtonEl.addEventListener("pointerdown", (event) => {
-        event.stopPropagation();
-      });
-      nameButtonEl.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        this.startGroupNameEdit(group.id, { selectText: true });
+      const nameButtonEl = createStudioAction(nameSlotEl, {
+        className: "ss-studio-group-tag-button",
+        label: normalizeGroupName(group.name) || nextDefaultGroupName(project),
+        stopPointerDown: true,
+        onSelect: () => {
+          this.startGroupNameEdit(group.id, { selectText: true });
+        },
       });
       nameButtonEl.addEventListener("dblclick", (event) => {
         event.preventDefault();
@@ -213,45 +220,34 @@ export class StudioGraphGroupController {
         this.startGroupNameEdit(group.id, { selectText: true });
       });
 
-      const alignButtonEl = tagRowEl.createEl("button", {
-        cls: "ss-studio-group-tag-action ss-studio-group-align-button",
-        text: "Align",
-        attr: {
-          "aria-label": "Auto-align group nodes",
-          title: "Auto-align group nodes",
+      createStudioAction(tagRowEl, {
+        className: "ss-studio-group-tag-action ss-studio-group-align-button",
+        label: "Align",
+        ariaLabel: "Auto-align group nodes",
+        title: "Auto-align group nodes",
+        stopPointerDown: true,
+        onSelect: () => {
+          this.alignGroup(group.id);
         },
       });
-      alignButtonEl.type = "button";
-      alignButtonEl.addEventListener("pointerdown", (event) => {
-        event.stopPropagation();
-      });
-      alignButtonEl.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        this.alignGroup(group.id);
-      });
 
-      const colorButtonEl = tagRowEl.createEl("button", {
-        cls: "ss-studio-group-tag-action ss-studio-group-color-button",
-        attr: {
-          "aria-label": "Choose group color",
-          title: "Choose group color",
+      const colorButtonEl = createStudioAction(tagRowEl, {
+        className: "ss-studio-group-tag-action ss-studio-group-color-button",
+        label: "Choose group color",
+        size: "icon",
+        stopPointerDown: true,
+        onSelect: () => {
+          this.toggleColorPalette(group.id);
         },
       });
-      colorButtonEl.type = "button";
-      const colorChipEl = document.createElement("span");
-      colorChipEl.className = "ss-studio-group-color-chip";
-      colorButtonEl.appendChild(colorChipEl);
-      colorButtonEl.addEventListener("pointerdown", (event) => {
-        event.stopPropagation();
-      });
-      colorButtonEl.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        this.toggleColorPalette(group.id);
-      });
+      const paletteId = this.colorPaletteId(group.id);
+      const paletteOpen = this.openColorPaletteGroupId === group.id;
+      colorButtonEl.setAttribute("aria-haspopup", "true");
+      colorButtonEl.setAttribute("aria-expanded", paletteOpen ? "true" : "false");
+      colorButtonEl.setAttribute("aria-controls", paletteId);
+      const colorChipEl = colorButtonEl.createSpan({ cls: "ss-studio-group-color-chip" });
 
-      if (this.openColorPaletteGroupId === group.id) {
+      if (paletteOpen) {
         this.renderColorPalette(tagEl, group);
       }
 
@@ -286,12 +282,12 @@ export class StudioGraphGroupController {
       }
       const bounds = this.computeGroupBounds(group);
       if (!bounds) {
-        elements.frameEl.style.display = "none";
-        elements.tagEl.style.display = "none";
+        elements.frameEl.setCssStyles({ display: "none" });
+        elements.tagEl.setCssStyles({ display: "none" });
         continue;
       }
-      elements.frameEl.style.display = "";
-      elements.tagEl.style.display = "";
+      elements.frameEl.setCssStyles({ display: "" });
+      elements.tagEl.setCssStyles({ display: "" });
       elements.frameEl.classList.toggle("is-drop-target", group.id === this.dropTargetGroupId);
       elements.frameEl.style.left = `${bounds.left}px`;
       elements.frameEl.style.top = `${bounds.top}px`;
@@ -439,12 +435,17 @@ export class StudioGraphGroupController {
   }
 
   private bindWindowListeners(): void {
-    if (this.windowListenersBound) {
+    if (!this.canvasEl) {
       return;
     }
-    window.addEventListener("pointerdown", this.onWindowPointerDown);
-    window.addEventListener("keydown", this.onWindowKeyDown);
-    this.windowListenersBound = true;
+    const ownerWindow = getStudioOwnerWindow(this.canvasEl);
+    if (this.listenerWindow === ownerWindow) {
+      return;
+    }
+    this.unbindWindowListeners();
+    ownerWindow.addEventListener("pointerdown", this.onWindowPointerDown);
+    ownerWindow.addEventListener("keydown", this.onWindowKeyDown);
+    this.listenerWindow = ownerWindow;
   }
 
   private boundsContainPoint(bounds: StudioGraphGroupBounds, x: number, y: number): boolean {
@@ -530,12 +531,9 @@ export class StudioGraphGroupController {
   }
 
   private unbindWindowListeners(): void {
-    if (!this.windowListenersBound) {
-      return;
-    }
-    window.removeEventListener("pointerdown", this.onWindowPointerDown);
-    window.removeEventListener("keydown", this.onWindowKeyDown);
-    this.windowListenersBound = false;
+    this.listenerWindow?.removeEventListener("pointerdown", this.onWindowPointerDown);
+    this.listenerWindow?.removeEventListener("keydown", this.onWindowKeyDown);
+    this.listenerWindow = null;
   }
 
   private toggleColorPalette(groupId: string): void {
@@ -560,6 +558,8 @@ export class StudioGraphGroupController {
     }
 
     const paletteEl = tagEl.createDiv({ cls: "ss-studio-group-color-palette" });
+    applyPluginSurface(paletteEl, "transient");
+    paletteEl.id = this.colorPaletteId(group.id);
     paletteEl.addEventListener("pointerdown", (event) => {
       event.stopPropagation();
     });
@@ -568,6 +568,27 @@ export class StudioGraphGroupController {
     });
 
     const selectedColor = resolveGroupColor(group);
+    let committedColor = selectedColor;
+    const commitColor = (color: string, closeAfterCommit: boolean): boolean => {
+      const changed = this.host.commitProjectMutation(
+        "graph.group",
+        (currentProject) => setGroupColor(currentProject, group.id, color)
+      );
+      if (!changed && color !== committedColor) {
+        return false;
+      }
+      committedColor = color;
+      this.previewColorByGroupId.delete(group.id);
+      if (closeAfterCommit) {
+        this.openColorPaletteGroupId = null;
+        this.renderGroupLayer();
+      } else {
+        this.refreshRenderedGroupAccent(group.id);
+      }
+      return true;
+    };
+
+    const bindings: Array<{ value: string; button: HTMLButtonElement }> = [];
     for (const swatchColor of GROUP_COLOR_PALETTE) {
       const swatchEl = paletteEl.createEl("button", {
         cls: "ss-studio-group-color-swatch",
@@ -578,7 +599,7 @@ export class StudioGraphGroupController {
         },
       });
       swatchEl.style.setProperty("--ss-studio-swatch-color", swatchColor);
-      swatchEl.classList.toggle("is-active", swatchColor === selectedColor);
+      bindings.push({ value: swatchColor, button: swatchEl });
       swatchEl.addEventListener("pointerdown", (event) => {
         event.stopPropagation();
       });
@@ -594,22 +615,23 @@ export class StudioGraphGroupController {
       swatchEl.addEventListener("blur", () => {
         this.setGroupPreviewColor(group.id, null);
       });
-      swatchEl.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        const changed = this.host.commitProjectMutation(
-          "graph.group",
-          (currentProject) => setGroupColor(currentProject, group.id, swatchColor)
-        );
-        this.openColorPaletteGroupId = null;
-        this.previewColorByGroupId.delete(group.id);
-        if (changed) {
-          this.renderGroupLayer();
-          return;
-        }
-        this.renderGroupLayer();
-      });
     }
+
+    this.colorPaletteRadioGroup = createUiRadioGroup(paletteEl, bindings, {
+      value: selectedColor,
+      label: "Group color",
+      selectedClass: "is-active",
+      onChange: (color, _previousColor, source) => commitColor(color, source === "click"),
+    });
+  }
+
+  private destroyColorPaletteRadioGroup(): void {
+    this.colorPaletteRadioGroup?.destroy();
+    this.colorPaletteRadioGroup = null;
+  }
+
+  private colorPaletteId(groupId: string): string {
+    return `ss-studio-group-color-palette-${this.instanceId}-${encodeURIComponent(groupId)}`;
   }
 
   private closeColorPalette(): void {
@@ -711,6 +733,7 @@ export class StudioGraphGroupController {
     if (startEvent.button !== 0) {
       return;
     }
+    const ownerWindow = getStudioOwnerWindow(dragSurfaceEl);
 
     const project = this.host.getCurrentProject();
     if (!project) {
@@ -834,8 +857,8 @@ export class StudioGraphGroupController {
         return;
       }
       dragFrameRequested = true;
-      if (typeof window.requestAnimationFrame === "function") {
-        window.requestAnimationFrame(flushDragFrame);
+      if (typeof ownerWindow.requestAnimationFrame === "function") {
+        ownerWindow.requestAnimationFrame(flushDragFrame);
         return;
       }
       flushDragFrame();
@@ -860,9 +883,9 @@ export class StudioGraphGroupController {
         flushDragFrame();
       }
 
-      window.removeEventListener("pointermove", onPointerMove);
-      window.removeEventListener("pointerup", finishDrag);
-      window.removeEventListener("pointercancel", finishDrag);
+      ownerWindow.removeEventListener("pointermove", onPointerMove);
+      ownerWindow.removeEventListener("pointerup", finishDrag);
+      ownerWindow.removeEventListener("pointercancel", finishDrag);
 
       if (typeof dragSurfaceEl.releasePointerCapture === "function") {
         try {
@@ -885,9 +908,9 @@ export class StudioGraphGroupController {
       this.host.notifyNodePositionsChanged();
     };
 
-    window.addEventListener("pointermove", onPointerMove);
-    window.addEventListener("pointerup", finishDrag);
-    window.addEventListener("pointercancel", finishDrag);
+    ownerWindow.addEventListener("pointermove", onPointerMove);
+    ownerWindow.addEventListener("pointerup", finishDrag);
+    ownerWindow.addEventListener("pointercancel", finishDrag);
   }
 
   private resolveLatestPointerEvent(event: PointerEvent): PointerEvent {
@@ -1008,7 +1031,7 @@ export class StudioGraphGroupController {
       finalize("commit");
     });
 
-    window.requestAnimationFrame(() => {
+    requestStudioAnimationFrame(inputEl, () => {
       try {
         inputEl.focus({ preventScroll: true });
       } catch {

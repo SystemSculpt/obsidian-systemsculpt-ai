@@ -58,6 +58,11 @@ export function deriveStudioAssetBlobDir(projectPath: string): string {
   return normalizePath(`${assetsDir}/assets/sha256`);
 }
 
+export function deriveStudioImportsDir(projectPath: string): string {
+  const assetsDir = deriveStudioAssetsDir(projectPath);
+  return normalizePath(`${assetsDir}/imports`);
+}
+
 export function deriveStudioNodeCachePath(projectPath: string): string {
   const assetsDir = deriveStudioAssetsDir(projectPath);
   return normalizePath(`${assetsDir}/cache/node-results.json`);

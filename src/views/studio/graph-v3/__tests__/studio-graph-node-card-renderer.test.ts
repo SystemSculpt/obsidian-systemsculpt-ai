@@ -37,10 +37,8 @@ function definitionFields(kind: string): StudioNodeDefinition["configSchema"]["f
   if (kind === "studio.image_generation") {
     return [
       { key: "prompt", label: "Prompt", type: "textarea", required: false },
-      { key: "modelId", label: "Model", type: "select", required: false, options: [] },
       { key: "count", label: "Image Count", type: "number", required: true, min: 1, max: 4, integer: true },
       { key: "aspectRatio", label: "Aspect Ratio", type: "select", required: false, options: [] },
-      { key: "imageSize", label: "Resolution", type: "select", required: false, options: [] },
       { key: "seed", label: "Seed", type: "text", required: false },
     ];
   }
@@ -218,7 +216,7 @@ describe("renderStudioGraphNodeCard", () => {
     expect(statusRow?.parentElement).toBe(nodeEl);
   });
 
-  it("keeps every image-generation config field on the card, prompt first", () => {
+  it("keeps every supported image-generation config field on the card, prompt first", () => {
     const nodeEl = renderNodeCard({
       kind: "studio.image_generation",
       config: { prompt: "", count: 1 },
@@ -233,7 +231,7 @@ describe("renderStudioGraphNodeCard", () => {
         .find((cls) => cls.startsWith("ss-studio-node-inline-config-field--"))
         ?.replace("ss-studio-node-inline-config-field--", "")
     );
-    expect(fieldSuffixes).toEqual(["prompt", "modelid", "count", "aspectratio", "imagesize", "seed"]);
+    expect(fieldSuffixes).toEqual(["prompt", "count", "aspectratio", "seed"]);
     // Nothing gets relocated out of the grid after render.
     for (const fieldEl of Array.from(
       nodeEl.querySelectorAll<HTMLElement>(".ss-studio-node-inline-config-field")

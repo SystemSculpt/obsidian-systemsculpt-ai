@@ -7,7 +7,7 @@ import { redactSettingsForBackup } from "./backupSanitizer";
  */
 export class AutomaticBackupService {
     private plugin: SystemSculptPlugin;
-    private backupTimer: NodeJS.Timeout | null = null;
+    private backupTimer: number | null = null;
     private readonly CHECK_INTERVAL_MS = 60 * 60 * 1000; // Check every hour
 
     constructor(plugin: SystemSculptPlugin) {
@@ -21,7 +21,7 @@ export class AutomaticBackupService {
         this.stop(); // Clean up any existing timer
         
         // Start the periodic check
-        this.backupTimer = setInterval(() => {
+        this.backupTimer = window.setInterval(() => {
             this.checkAndCreateBackup();
         }, this.CHECK_INTERVAL_MS);
 
@@ -34,7 +34,7 @@ export class AutomaticBackupService {
      */
     public stop(): void {
         if (this.backupTimer) {
-            clearInterval(this.backupTimer);
+            window.clearInterval(this.backupTimer);
             this.backupTimer = null;
         }
     }

@@ -1,0 +1,793 @@
+/**
+ * @jest-environment jsdom
+ */
+import { App, TFile, TFolder, normalizePath } from "obsidian";
+import { FileOperations } from "../FileOperations";
+import { FILESYSTEM_LIMITS } from "../../constants";
+
+// Mock utils
+jest.mock("../../utils", () => ({
+  validatePath: jest.fn((path, allowedPaths) => {
+    if (path === "blocked/file.md") return false;
+    return true;
+  }),
+  normalizeVaultPath: jest.fn((value) =>
+    String(value ?? "")
+      .trim()
+      .replace(/\\/g, "/")
+      .replace(/\/{2,}/g, "/")
+      .replace(/^\/+/, "")
+      .replace(/\/+$/, "")
+  ),
+  normalizeLineEndings: jest.fn((text) => text.replace(/\r\n/g, "\n")),
+  createSimpleDiff: jest.fn((original, modified, path) => `diff for ${path}`),
+  isHiddenSystemPath: jest.fn(() => false),
+  ensureAdapterFolder: jest.fn(async () => {}),
+  ensureVaultFolder: jest.fn(async () => {}),
+  adapterPathExists: jest.fn(async () => false),
+  readAdapterText: jest.fn(async () => ""),
+  writeAdapterText: jest.fn(async () => {}),
+  statAdapterPath: jest.fn(async () => null),
+}));
+
+// Mock constants
+jest.mock("../../constants", () => ({
+  FILESYSTEM_LIMITS: {
+    MAX_OPERATIONS: 10,
+    MAX_READ_FILES: 10,
+    MAX_MULTI_EDIT_FILES: 20,
+    MAX_FILE_READ_LENGTH: 100000,
+    MAX_CONTENT_SIZE: 500000,
+    MAX_RESPONSE_CHARS: 25000,
+  },
+}));
+
+describe("FileOperations", () => {
+  let app: App;
+  let fileOps: FileOperations;
+  const allowedPaths = ["/"];
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+
+    app = new App();
+
+    // Setup default mocks
+    (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(null);
+    (app.vault.read as jest.Mock).mockResolvedValue("");
+    (app.vault.modify as jest.Mock).mockResolvedValue(undefined);
+    (app.vault.create as jest.Mock).mockResolvedValue({});
+    (app.vault.createFolder as jest.Mock).mockResolvedValue(undefined);
+
+    fileOps = new FileOperations(app, allowedPaths);
+  });
+
+  describe("readFiles", () => {
+    it("throws error when paths is missing", async () => {
+      await expect(fileOps.readFiles({} as any)).rejects.toThrow(
+        "Missing required 'paths'"
+      );
+    });
+
+    it("throws error when paths is empty array", async () => {
+      await expect(fileOps.readFiles({ paths: [] } as any)).rejects.toThrow(
+        "Missing required 'paths'"
+      );
+    });
+
+    it("throws error when paths array has only whitespace", async () => {
+      await expect(
+        fileOps.readFiles({ paths: ["  ", ""] } as any)
+      ).rejects.toThrow("Missing required 'paths'");
+    });
+
+    it("throws error when too many files requested", async () => {
+      const paths = Array(15).fill("file.md");
+      await expect(fileOps.readFiles({ paths } as any)).rejects.toThrow(
+        "Too many files requested"
+      );
+    });
+
+    it("returns access denied for blocked paths", async () => {
+      const result = await fileOps.readFiles({
+        paths: ["blocked/file.md"],
+      } as any);
+
+      expect(result.files[0].error).toBe("Access denied");
+      expect(result.files[0].content).toBe("");
+    });
+
+    it("returns file not found for non-existent files", async () => {
+      (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(null);
+
+      const result = await fileOps.readFiles({ paths: ["missing.md"] } as any);
+
+      expect(result.files[0].error).toBe("File not found or is a directory");
+    });
+
+    it("reads file successfully with metadata", async () => {
+      const mockFile = new TFile({
+        path: "test.md",
+        stat: { ctime: 1000, mtime: 2000, size: 100 },
+      });
+      (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(mockFile);
+      (app.vault.read as jest.Mock).mockResolvedValue("Hello world");
+
+      const result = await fileOps.readFiles({ paths: ["test.md"] } as any);
+
+      expect(result.files[0].path).toBe("test.md");
+      expect(result.files[0].content).toBe("Hello world");
+      expect(result.files[0].metadata?.fileSize).toBe(11);
+      expect(result.files[0].metadata?.hasMore).toBe(false);
+    });
+
+    it("handles windowed reading with offset", async () => {
+      const mockFile = new TFile({
+        path: "test.md",
+        stat: { ctime: 1000, mtime: 2000, size: 100 },
+      });
+      (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(mockFile);
+      (app.vault.read as jest.Mock).mockResolvedValue("0123456789");
+
+      const result = await fileOps.readFiles({
+        paths: ["test.md"],
+        offset: 5,
+        length: 3,
+      } as any);
+
+      expect(result.files[0].content).toBe("567");
+      expect(result.files[0].metadata?.windowStart).toBe(5);
+      expect(result.files[0].metadata?.windowEnd).toBe(8);
+    });
+
+    it("adds truncation notice when file exceeds default max window", async () => {
+      const mockFile = new TFile({
+        path: "big.md",
+        stat: { ctime: 1000, mtime: 2000, size: 100 },
+      });
+      // Create content larger than MAX_FILE_READ_LENGTH (100000 in mock)
+      const longContent = "a".repeat(150000);
+      (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(mockFile);
+      (app.vault.read as jest.Mock).mockResolvedValue(longContent);
+
+      // Don't provide length - will use default which gets clamped
+      const result = await fileOps.readFiles({
+        paths: ["big.md"],
+      } as any);
+
+      expect(result.files[0].content).toContain("[... truncated:");
+      expect(result.files[0].metadata?.hasMore).toBe(true);
+    });
+
+    it("handles read errors gracefully", async () => {
+      const mockFile = new TFile({
+        path: "error.md",
+        stat: { ctime: 1000, mtime: 2000, size: 100 },
+      });
+      (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(mockFile);
+      (app.vault.read as jest.Mock).mockRejectedValue(new Error("Read failed"));
+
+      const result = await fileOps.readFiles({ paths: ["error.md"] } as any);
+
+      expect(result.files[0].error).toBe("Failed to read file");
+    });
+
+    it("reads multiple files", async () => {
+      const mockFile1 = new TFile({
+        path: "file1.md",
+        stat: { ctime: 1000, mtime: 2000, size: 10 },
+      });
+      const mockFile2 = new TFile({
+        path: "file2.md",
+        stat: { ctime: 1000, mtime: 2000, size: 10 },
+      });
+
+      (app.vault.getAbstractFileByPath as jest.Mock)
+        .mockReturnValueOnce(mockFile1)
+        .mockReturnValueOnce(mockFile2);
+      (app.vault.read as jest.Mock)
+        .mockResolvedValueOnce("content1")
+        .mockResolvedValueOnce("content2");
+
+      const result = await fileOps.readFiles({
+        paths: ["file1.md", "file2.md"],
+      } as any);
+
+      expect(result.files.length).toBe(2);
+      expect(result.files[0].content).toBe("content1");
+      expect(result.files[1].content).toBe("content2");
+    });
+
+    it("keeps the aggregate multi-read result within the response budget", async () => {
+      const files = ["one.md", "two.md"].map((path) => new TFile({
+        path,
+        stat: { ctime: 1000, mtime: 2000, size: 40000 },
+      }));
+      (app.vault.getAbstractFileByPath as jest.Mock).mockImplementation((path: string) =>
+        files.find((file) => file.path === path) ?? null
+      );
+      (app.vault.read as jest.Mock).mockResolvedValue("x".repeat(40000));
+
+      const result = await fileOps.readFiles({ paths: ["one.md", "two.md"] });
+
+      expect(JSON.stringify(result).length).toBeLessThanOrEqual(FILESYSTEM_LIMITS.MAX_RESPONSE_CHARS);
+      expect(result.files).toHaveLength(2);
+    });
+
+    it("trims path strings", async () => {
+      const mockFile = new TFile({
+        path: "test.md",
+        stat: { ctime: 1000, mtime: 2000, size: 10 },
+      });
+      (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(mockFile);
+      (app.vault.read as jest.Mock).mockResolvedValue("content");
+
+      const result = await fileOps.readFiles({
+        paths: ["  test.md  "],
+      } as any);
+
+      expect(result.files[0].content).toBe("content");
+    });
+
+    it("normalizes leading slashes in paths", async () => {
+      const mockFile = new TFile({
+        path: "test.md",
+        stat: { ctime: 1000, mtime: 2000, size: 10 },
+      });
+      (app.vault.getAbstractFileByPath as jest.Mock).mockImplementation((p: string) =>
+        p === "test.md" ? mockFile : null
+      );
+      (app.vault.read as jest.Mock).mockResolvedValue("content");
+
+      const result = await fileOps.readFiles({
+        paths: ["/test.md"],
+      } as any);
+
+      expect(app.vault.getAbstractFileByPath).toHaveBeenCalledWith("test.md");
+      expect(result.files[0].path).toBe("test.md");
+      expect(result.files[0].content).toBe("content");
+    });
+  });
+
+  describe("writeFile", () => {
+    it("throws error for blocked paths", async () => {
+      await expect(
+        fileOps.writeFile({ path: "blocked/file.md", content: "test" })
+      ).rejects.toThrow("Access denied");
+    });
+
+    it("throws error when content too large", async () => {
+      const largeContent = "a".repeat(600000);
+
+      await expect(
+        fileOps.writeFile({ path: "test.md", content: largeContent })
+      ).rejects.toThrow("Content too large");
+    });
+
+    it("creates new file when it does not exist", async () => {
+      (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(null);
+
+      const result = await fileOps.writeFile({
+        path: "new.md",
+        content: "hello",
+      });
+
+      expect(result.success).toBe(true);
+      expect(app.vault.create).toHaveBeenCalledWith("new.md", "hello");
+    });
+
+    it("normalizes leading slashes when creating new file", async () => {
+      (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(null);
+
+      const result = await fileOps.writeFile({
+        path: "/new.md",
+        content: "hello",
+      });
+
+      expect(result.success).toBe(true);
+      expect(app.vault.create).toHaveBeenCalledWith("new.md", "hello");
+      expect(result.path).toBe("new.md");
+    });
+
+    it("creates parent directories via ensureVaultFolder when createDirs is true", async () => {
+      // Robust nested folder creation (#142): writeFile must delegate to
+      // ensureVaultFolder, not the fragile inline createFolder whose errors
+      // were swallowed.
+      (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(null);
+      const { ensureVaultFolder } = require("../../utils");
+
+      await fileOps.writeFile({
+        path: "parent/child/file.md",
+        content: "hello",
+        createDirs: true,
+      } as any);
+
+      expect(ensureVaultFolder).toHaveBeenCalledWith(app, "parent/child");
+      expect(app.vault.create).toHaveBeenCalledWith("parent/child/file.md", "hello");
+    });
+
+    it("overwrites existing file by default", async () => {
+      const mockFile = new TFile({ path: "existing.md" });
+      (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(mockFile);
+
+      const result = await fileOps.writeFile({
+        path: "existing.md",
+        content: "new content",
+      });
+
+      expect(result.success).toBe(true);
+      expect(app.vault.modify).toHaveBeenCalledWith(mockFile, "new content");
+    });
+
+    it("skips when ifExists is skip", async () => {
+      const mockFile = new TFile({ path: "existing.md" });
+      (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(mockFile);
+
+      const result = await fileOps.writeFile({
+        path: "existing.md",
+        content: "ignored",
+        ifExists: "skip",
+      } as any);
+
+      expect(result.success).toBe(true);
+      expect(app.vault.modify).not.toHaveBeenCalled();
+    });
+
+    it("throws error when ifExists is error", async () => {
+      const mockFile = new TFile({ path: "existing.md" });
+      (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(mockFile);
+
+      await expect(
+        fileOps.writeFile({
+          path: "existing.md",
+          content: "content",
+          ifExists: "error",
+        } as any)
+      ).rejects.toThrow("File already exists");
+    });
+
+    it("appends content when ifExists is append", async () => {
+      const mockFile = new TFile({ path: "existing.md" });
+      (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(mockFile);
+      (app.vault.read as jest.Mock).mockResolvedValue("existing");
+
+      await fileOps.writeFile({
+        path: "existing.md",
+        content: " appended",
+        ifExists: "append",
+      } as any);
+
+      expect(app.vault.modify).toHaveBeenCalledWith(mockFile, "existing appended");
+    });
+
+    it("adds newline before append when appendNewline is true", async () => {
+      const mockFile = new TFile({ path: "existing.md" });
+      (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(mockFile);
+      (app.vault.read as jest.Mock).mockResolvedValue("existing");
+
+      await fileOps.writeFile({
+        path: "existing.md",
+        content: "appended",
+        ifExists: "append",
+        appendNewline: true,
+      } as any);
+
+      expect(app.vault.modify).toHaveBeenCalledWith(
+        mockFile,
+        "existing\nappended"
+      );
+    });
+
+    it("does not add extra newline when content already ends with newline", async () => {
+      const mockFile = new TFile({ path: "existing.md" });
+      (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(mockFile);
+      (app.vault.read as jest.Mock).mockResolvedValue("existing\n");
+
+      await fileOps.writeFile({
+        path: "existing.md",
+        content: "appended",
+        ifExists: "append",
+        appendNewline: true,
+      } as any);
+
+      expect(app.vault.modify).toHaveBeenCalledWith(
+        mockFile,
+        "existing\nappended"
+      );
+    });
+  });
+
+  describe("editFile", () => {
+    it("rejects edits outside the allowed paths", async () => {
+      await expect(fileOps.editFile({
+        path: "blocked/file.md",
+        edits: [{ oldText: "old", newText: "new" }],
+      })).rejects.toThrow("Access denied");
+      expect(app.vault.read).not.toHaveBeenCalled();
+    });
+
+    it("throws error when file not found", async () => {
+      (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(null);
+
+      await expect(
+        fileOps.editFile({
+          path: "missing.md",
+          edits: [{ oldText: "a", newText: "b" }],
+        })
+      ).rejects.toThrow("File not found");
+    });
+
+    it("falls back to Folder Notes path when present", async () => {
+      const folder = new TFolder();
+      (folder as any).path = "missing";
+      const fallbackFile = new TFile({ path: "missing/missing.md" });
+
+      (app.vault.getAbstractFileByPath as jest.Mock).mockImplementation((p: string) => {
+        if (p === "missing.md") return null;
+        if (p === "missing") return folder;
+        if (p === "missing/missing.md") return fallbackFile;
+        return null;
+      });
+      (app.vault.read as jest.Mock).mockResolvedValue("hello world");
+
+      const result = await fileOps.editFile({
+        path: "missing.md",
+        edits: [{ oldText: "world", newText: "universe" }],
+      });
+
+      expect(app.vault.modify).toHaveBeenCalledWith(fallbackFile, "hello universe");
+      expect(result.diff).toContain("missing/missing.md");
+    });
+
+    it("reads a Folder Notes file when handed the folder-style path (#154)", async () => {
+      const folder = new TFolder();
+      (folder as any).path = "Projects";
+      const folderNote = new TFile({ path: "Projects/Projects.md" });
+      (app.vault.getAbstractFileByPath as jest.Mock).mockImplementation((p: string) => {
+        if (p === "Projects") return folder;
+        if (p === "Projects/Projects.md") return folderNote;
+        return null;
+      });
+      (app.vault.read as jest.Mock).mockResolvedValue("folder note body");
+
+      const result = await fileOps.readFiles({ paths: ["Projects.md"] });
+
+      expect(result.files[0].error).toBeUndefined();
+      expect(result.files[0].content).toContain("folder note body");
+      expect(result.files[0].path).toBe("Projects/Projects.md");
+    });
+
+    it("applies simple text replacement", async () => {
+      const mockFile = new TFile({ path: "test.md" });
+      (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(mockFile);
+      (app.vault.read as jest.Mock).mockResolvedValue("hello world");
+
+      const result = await fileOps.editFile({
+        path: "test.md",
+        edits: [{ oldText: "world", newText: "universe" }],
+      });
+
+      expect(app.vault.modify).toHaveBeenCalledWith(mockFile, "hello universe");
+      expect(result.diff).toContain("diff");
+      expect(result.appliedCount).toBe(1);
+      expect(result.requestedCount).toBe(1);
+      expect(result.skipped).toEqual([]);
+    });
+
+    it("applies multiple edits in sequence", async () => {
+      const mockFile = new TFile({ path: "test.md" });
+      (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(mockFile);
+      (app.vault.read as jest.Mock).mockResolvedValue("aaa bbb ccc");
+
+      await fileOps.editFile({
+        path: "test.md",
+        edits: [
+          { oldText: "aaa", newText: "AAA" },
+          { oldText: "ccc", newText: "CCC" },
+        ],
+      });
+
+      expect(app.vault.modify).toHaveBeenCalledWith(mockFile, "AAA bbb CCC");
+    });
+
+    it("throws error when edit produces no changes in strict mode", async () => {
+      const mockFile = new TFile({ path: "test.md" });
+      (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(mockFile);
+      (app.vault.read as jest.Mock).mockResolvedValue("hello world");
+
+      await expect(
+        fileOps.editFile({
+          path: "test.md",
+          edits: [{ oldText: "notfound", newText: "replacement" }],
+          strict: true,
+        } as any)
+      ).rejects.toThrow("Edit produced no changes");
+    });
+
+    it("applies matching edits and reports skipped ones when strict is false (BUG-02)", async () => {
+      const mockFile = new TFile({ path: "test.md" });
+      (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(mockFile);
+      (app.vault.read as jest.Mock).mockResolvedValue("hello world");
+
+      const result = await fileOps.editFile({
+        path: "test.md",
+        edits: [
+          { oldText: "notfound", newText: "replacement" },
+          { oldText: "hello", newText: "HELLO" },
+        ],
+        strict: false,
+      } as any);
+
+      // Partial application still writes the file with the edits that landed.
+      expect(app.vault.modify).toHaveBeenCalledWith(mockFile, "HELLO world");
+      // ...but the caller is told only one of two edits applied, so it can retry
+      // the failed one instead of believing a phantom success (BUG-02).
+      expect(result.appliedCount).toBe(1);
+      expect(result.requestedCount).toBe(2);
+      expect(result.skipped).toHaveLength(1);
+      expect(result.skipped[0].index).toBe(0);
+      expect(result.skipped[0].reason).toBeTruthy();
+    });
+
+    it("does not write the file when zero edits match (strict:false) (BUG-02)", async () => {
+      const mockFile = new TFile({ path: "test.md" });
+      (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(mockFile);
+      (app.vault.read as jest.Mock).mockResolvedValue("hello world");
+
+      const result = await fileOps.editFile({
+        path: "test.md",
+        edits: [
+          { oldText: "notfound", newText: "replacement" },
+          { oldText: "alsoMissing", newText: "other" },
+        ],
+        strict: false,
+      } as any);
+
+      // BUG-02: when nothing matches, the redundant no-op write is skipped
+      // entirely so the file's mtime/content is never touched.
+      expect(app.vault.modify).not.toHaveBeenCalled();
+      expect(result.appliedCount).toBe(0);
+      expect(result.requestedCount).toBe(2);
+      expect(result.skipped).toHaveLength(2);
+    });
+
+    it("skips the redundant no-op write when an edit replaces text with itself", async () => {
+      const mockFile = new TFile({ path: "test.md" });
+      (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(mockFile);
+      (app.vault.read as jest.Mock).mockResolvedValue("hello world");
+
+      // "world" -> "world" produces no net change; applySingleEdit treats a
+      // no-op replacement as "no changes", so nothing should be written.
+      const result = await fileOps.editFile({
+        path: "test.md",
+        edits: [{ oldText: "world", newText: "world" }],
+        strict: false,
+      } as any);
+
+      expect(app.vault.modify).not.toHaveBeenCalled();
+      expect(result.appliedCount).toBe(0);
+    });
+
+    it("replaces all occurrences when occurrence is all", async () => {
+      const mockFile = new TFile({ path: "test.md" });
+      (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(mockFile);
+      (app.vault.read as jest.Mock).mockResolvedValue("a a a");
+
+      await fileOps.editFile({
+        path: "test.md",
+        edits: [{ oldText: "a", newText: "b", occurrence: "all" }],
+      });
+
+      expect(app.vault.modify).toHaveBeenCalledWith(mockFile, "b b b");
+    });
+
+    it("replaces last occurrence when occurrence is last", async () => {
+      const mockFile = new TFile({ path: "test.md" });
+      (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(mockFile);
+      (app.vault.read as jest.Mock).mockResolvedValue("a a a");
+
+      await fileOps.editFile({
+        path: "test.md",
+        edits: [{ oldText: "a", newText: "b", occurrence: "last" }],
+      });
+
+      expect(app.vault.modify).toHaveBeenCalledWith(mockFile, "a a b");
+    });
+
+    it("handles regex replacements", async () => {
+      const mockFile = new TFile({ path: "test.md" });
+      (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(mockFile);
+      (app.vault.read as jest.Mock).mockResolvedValue("foo123bar");
+
+      await fileOps.editFile({
+        path: "test.md",
+        edits: [
+          { oldText: "\\d+", newText: "###", isRegex: true, occurrence: "all" },
+        ],
+      });
+
+      expect(app.vault.modify).toHaveBeenCalledWith(mockFile, "foo###bar");
+    });
+
+    it("respects line range constraints", async () => {
+      const mockFile = new TFile({ path: "test.md" });
+      (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(mockFile);
+      (app.vault.read as jest.Mock).mockResolvedValue("line1\nline2\nline3");
+
+      await fileOps.editFile({
+        path: "test.md",
+        edits: [
+          {
+            oldText: "line",
+            newText: "LINE",
+            range: { startLine: 2, endLine: 2 },
+          },
+        ],
+      });
+
+      // Should only modify line 2
+      expect(app.vault.modify).toHaveBeenCalledWith(
+        mockFile,
+        "line1\nLINE2\nline3"
+      );
+    });
+
+    it("respects index range constraints", async () => {
+      const mockFile = new TFile({ path: "test.md" });
+      (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(mockFile);
+      (app.vault.read as jest.Mock).mockResolvedValue("hello world");
+
+      await fileOps.editFile({
+        path: "test.md",
+        edits: [
+          {
+            oldText: "o",
+            newText: "0",
+            range: { startIndex: 5, endIndex: 11 },
+          },
+        ],
+      });
+
+      // Should only modify the "o" in "world", not "hello"
+      expect(app.vault.modify).toHaveBeenCalledWith(mockFile, "hello w0rld");
+    });
+
+    it("ignores a model-filled zero-length index range when a line range is valid", async () => {
+      const mockFile = new TFile({ path: "test.md" });
+      (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(mockFile);
+      (app.vault.read as jest.Mock).mockResolvedValue("# Alpha\n\nfirst version");
+
+      await fileOps.editFile({
+        path: "test.md",
+        edits: [
+          {
+            oldText: "^first version$",
+            newText: "second version",
+            isRegex: true,
+            flags: "m",
+            range: { startLine: 1, endLine: 3, startIndex: 0, endIndex: 0 },
+          },
+        ],
+      });
+
+      expect(app.vault.modify).toHaveBeenCalledWith(mockFile, "# Alpha\n\nsecond version");
+    });
+  });
+
+  describe("multiEditFiles", () => {
+    it("preflights every file before applying all edits", async () => {
+      const files = [new TFile({ path: "one.md" }), new TFile({ path: "two.md" })];
+      const content = new Map([
+        ["one.md", "old one"],
+        ["two.md", "old two"],
+      ]);
+      (app.vault.getAbstractFileByPath as jest.Mock).mockImplementation((path: string) =>
+        files.find((file) => file.path === path) ?? null
+      );
+      (app.vault.read as jest.Mock).mockImplementation(async (file: TFile) => content.get(file.path));
+
+      const result = await fileOps.multiEditFiles({
+        files: [
+          { path: "one.md", edits: [{ oldText: "old", newText: "new" }] },
+          { path: "two.md", edits: [{ oldText: "old", newText: "new" }] },
+        ],
+      });
+
+      expect(result).toMatchObject({ success: true, requestedFiles: 2, appliedFiles: 2 });
+      expect(app.vault.modify).toHaveBeenNthCalledWith(1, files[0], "new one");
+      expect(app.vault.modify).toHaveBeenNthCalledWith(2, files[1], "new two");
+      expect(result.results.every((entry) => entry.success)).toBe(true);
+    });
+
+    it("writes nothing when any file fails preflight", async () => {
+      const file = new TFile({ path: "one.md" });
+      (app.vault.getAbstractFileByPath as jest.Mock).mockImplementation((path: string) =>
+        path === "one.md" ? file : null
+      );
+      (app.vault.read as jest.Mock).mockResolvedValue("old one");
+
+      const result = await fileOps.multiEditFiles({
+        files: [
+          { path: "one.md", edits: [{ oldText: "old", newText: "new" }] },
+          { path: "missing.md", edits: [{ oldText: "old", newText: "new" }] },
+        ],
+      });
+
+      expect(result).toMatchObject({ success: false, appliedFiles: 0, preflightFailed: true });
+      expect(app.vault.modify).not.toHaveBeenCalled();
+      expect(result.results[0]).toMatchObject({ success: false, error: expect.stringContaining("preflight") });
+      expect(result.results[1]).toMatchObject({ success: false, error: expect.stringContaining("File not found") });
+    });
+
+    it("stops at a write-time conflict and reports the partial commit", async () => {
+      const files = [new TFile({ path: "one.md" }), new TFile({ path: "two.md" })];
+      const reads = new Map<string, number>();
+      (app.vault.getAbstractFileByPath as jest.Mock).mockImplementation((path: string) =>
+        files.find((file) => file.path === path) ?? null
+      );
+      (app.vault.read as jest.Mock).mockImplementation(async (file: TFile) => {
+        const count = reads.get(file.path) ?? 0;
+        reads.set(file.path, count + 1);
+        if (file.path === "two.md" && count === 1) return "externally changed";
+        return `old ${file.path === "one.md" ? "one" : "two"}`;
+      });
+
+      const result = await fileOps.multiEditFiles({
+        files: [
+          { path: "one.md", edits: [{ oldText: "old", newText: "new" }] },
+          { path: "two.md", edits: [{ oldText: "old", newText: "new" }] },
+        ],
+      });
+
+      expect(result).toMatchObject({ success: false, appliedFiles: 1, preflightFailed: false });
+      expect(result.results[0].success).toBe(true);
+      expect(result.results[1]).toMatchObject({
+        success: false,
+        error: expect.stringContaining("changed after preflight"),
+      });
+      expect(app.vault.modify).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("private methods via public interface", () => {
+    it("handles loose mode matching with whitespace differences", async () => {
+      const mockFile = new TFile({ path: "test.md" });
+      (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(mockFile);
+      (app.vault.read as jest.Mock).mockResolvedValue("  hello  \n  world  ");
+
+      await fileOps.editFile({
+        path: "test.md",
+        edits: [
+          {
+            oldText: "hello\nworld",
+            newText: "HELLO\nWORLD",
+            mode: "loose",
+          },
+        ],
+      });
+
+      // In loose mode, whitespace differences are ignored when matching
+      expect(app.vault.modify).toHaveBeenCalled();
+    });
+
+    it("preserves indentation when preserveIndent is true", async () => {
+      const mockFile = new TFile({ path: "test.md" });
+      (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(mockFile);
+      (app.vault.read as jest.Mock).mockResolvedValue("    indented line");
+
+      await fileOps.editFile({
+        path: "test.md",
+        edits: [
+          {
+            oldText: "indented line",
+            newText: "new line",
+            mode: "loose",
+            preserveIndent: true,
+          },
+        ],
+      });
+
+      expect(app.vault.modify).toHaveBeenCalledWith(mockFile, "    new line");
+    });
+  });
+});

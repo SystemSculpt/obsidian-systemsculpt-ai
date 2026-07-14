@@ -3,8 +3,6 @@
  * This implements a single source of truth architecture for tool calls
  */
 
-import { TFile } from "obsidian";
-
 /**
  * Represents the state of a tool call throughout its lifecycle
  */
@@ -30,11 +28,15 @@ export interface ToolCallRequest {
 /**
  * Tool execution result
  */
+export type ToolCancellationErrorCode =
+  | 'TOOL_CANCELLED_BEFORE_START'
+  | 'TOOL_CANCEL_REQUESTED_OUTCOME_UNKNOWN';
+
 export interface ToolCallResult {
   success: boolean;
   data?: any;
   error?: {
-    code: string;
+    code: string | ToolCancellationErrorCode;
     message: string;
     details?: any;
   };
@@ -63,101 +65,4 @@ export interface ToolCall {
   // Result data
   result?: ToolCallResult;
   
-  // Metadata
-  serverId?: string; // For MCP tools, the server that provides this tool
-}
-
-/**
- * Events emitted by the tool call system
- */
-export interface ToolCallEvents {
-  'tool-call:created': { toolCall: ToolCall };
-  'tool-call:state-changed': { 
-    toolCallId: string; 
-    previousState: ToolCallState; 
-    newState: ToolCallState;
-    toolCall: ToolCall;
-  };
-  'tool-call:execution-started': { toolCallId: string; toolCall: ToolCall };
-  'tool-call:execution-completed': { 
-    toolCallId: string; 
-    result: ToolCallResult;
-    toolCall: ToolCall;
-  };
-  'tool-call:execution-failed': { 
-    toolCallId: string; 
-    error: ToolCallResult['error'];
-    toolCall: ToolCall;
-  };
-}
-
-/**
- * Tool definition for type-safe tool system
- */
-export interface ToolDefinition {
-  name: string;
-  description: string;
-  parameters: {
-    type: 'object';
-    properties: Record<string, any>;
-    required?: string[];
-  };
-  // Optional metadata
-  serverId?: string; // For MCP tools
-}
-
-/**
- * Serialized format for persistence
- * This is what gets saved to markdown files
- */
-export interface SerializedToolCall {
-  id: string;
-  request: ToolCallRequest;
-  state: ToolCallState;
-  timestamp: number;
-  executionStartedAt?: number;
-  executionCompletedAt?: number;
-  result?: ToolCallResult;
-}
-
-/**
- * Message format for tool results sent to the API
- */
-export interface ToolResultMessage {
-  role: 'tool';
-  tool_call_id: string;
-  content: string; // JSON stringified result
-  message_id: string;
-}
-
-/**
- * Options for tool execution
- */
-export interface ToolExecutionOptions {
-  signal?: AbortSignal; // For cancellation
-  sourceFile?: TFile;
-}
-
-/**
- * Tool executor function signature
- */
-export type ToolExecutor = (
-  args: any,
-  options?: ToolExecutionOptions
-) => Promise<any>;
-
-/**
- * Interface for a local tool that can be registered.
- */
-export interface LocalTool {
-  definition: ToolDefinition;
-  executor: ToolExecutor;
-}
-
-/**
- * Registry entry for available tools
- */
-export interface ToolRegistryEntry {
-  definition: ToolDefinition;
-  executor: ToolExecutor;
 }

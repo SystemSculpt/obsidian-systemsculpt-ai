@@ -1,413 +1,159 @@
-/**
- * @jest-environment jsdom
- */
-import { App, TFolder } from "obsidian";
+/** @jest-environment jsdom */
+
+import { App, TFile, TFolder } from "obsidian";
 import { DirectoryManager } from "../DirectoryManager";
+
+const settings = () => ({
+  chatsDirectory: "SystemSculpt/Chats",
+  savedChatsDirectory: "SystemSculpt/Saved Chats",
+  recordingsDirectory: "SystemSculpt/Recordings",
+  attachmentsDirectory: "SystemSculpt/Attachments",
+  extractionsDirectory: "SystemSculpt/Extractions",
+});
 
 describe("DirectoryManager", () => {
   let app: App;
-  let plugin: any;
+  let plugin: { settings: ReturnType<typeof settings> };
   let manager: DirectoryManager;
 
   beforeEach(() => {
     jest.clearAllMocks();
-
     app = new App();
-    (app.vault.adapter.exists as jest.Mock).mockResolvedValue(true);
+    plugin = { settings: settings() };
+    (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(null);
     (app.vault.createFolder as jest.Mock).mockResolvedValue(undefined);
-    (app.vault.adapter.write as jest.Mock).mockResolvedValue(undefined);
-
-    plugin = {
-      settings: {
-        chatsDirectory: "SystemSculpt/Chats",
-        savedChatsDirectory: "SystemSculpt/SavedChats",
-        recordingsDirectory: "SystemSculpt/Recordings",
-        systemPromptsDirectory: "SystemSculpt/Prompts",
-        attachmentsDirectory: "SystemSculpt/Attachments",
-        extractionsDirectory: "SystemSculpt/Extractions",
-        verifiedDirectories: [],
-      },
-      emitter: {
-        emit: jest.fn(),
-      },
-      getSettingsManager: jest.fn().mockReturnValue({
-        updateSettings: jest.fn().mockResolvedValue(undefined),
-      }),
-    };
-
-    manager = new DirectoryManager(app, plugin);
+    manager = new DirectoryManager(app, plugin as never);
   });
 
-  describe("constructor", () => {
-    it("creates instance with app and plugin", () => {
-      expect(manager).toBeDefined();
-    });
+  it("starts uninitialized and becomes ready only after every configured directory is created", async () => {
+    expect(manager.isInitialized()).toBe(false);
 
-    it("initializes as not initialized", () => {
-      expect(manager.isInitialized()).toBe(false);
-    });
+    await manager.initialize();
 
-    it("loads verified directories from settings", () => {
-      plugin.settings.verifiedDirectories = ["SystemSculpt", "SystemSculpt/Chats"];
-      const mgr = new DirectoryManager(app, plugin);
-      expect(mgr).toBeDefined();
-    });
-
-    it("handles null verifiedDirectories", () => {
-      plugin.settings.verifiedDirectories = null;
-      const mgr = new DirectoryManager(app, plugin);
-      expect(mgr).toBeDefined();
-    });
-
-    it("handles undefined verifiedDirectories", () => {
-      delete plugin.settings.verifiedDirectories;
-      const mgr = new DirectoryManager(app, plugin);
-      expect(mgr).toBeDefined();
-    });
+    expect(manager.isInitialized()).toBe(true);
+    expect(app.vault.createFolder).toHaveBeenCalledTimes(5);
+    expect((app.vault.createFolder as jest.Mock).mock.calls.map(([path]) => path)).toEqual([
+      "SystemSculpt/Chats",
+      "SystemSculpt/Saved Chats",
+      "SystemSculpt/Recordings",
+      "SystemSculpt/Attachments",
+      "SystemSculpt/Extractions",
+    ]);
   });
 
-  describe("isInitialized", () => {
-    it("returns false before initialization", () => {
-      expect(manager.isInitialized()).toBe(false);
-    });
+  it("shares one in-flight initialization and does not repeat successful work", async () => {
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => { release = resolve; });
+    (app.vault.createFolder as jest.Mock).mockImplementation(() => pending);
+
+    const first = manager.initialize();
+    const second = manager.initialize();
+
+    expect(second).toBe(first);
+    expect(app.vault.createFolder).toHaveBeenCalledTimes(5);
+    release();
+    await first;
+    await manager.initialize();
+    expect(app.vault.createFolder).toHaveBeenCalledTimes(5);
   });
 
-  describe("getDirectory", () => {
-    it("throws if not initialized", () => {
-      expect(() => manager.getDirectory("chatsDirectory")).toThrow(
-        "Directory manager not initialized"
-      );
-    });
+  it("propagates initialization failures and never reports fake readiness", async () => {
+    (app.vault.createFolder as jest.Mock).mockRejectedValue(new Error("vault unavailable"));
+
+    await expect(manager.initialize()).rejects.toThrow("vault unavailable");
+
+    expect(manager.isInitialized()).toBe(false);
   });
 
-  describe("normalizePath (private)", () => {
-    const normalize = (path: string) => (manager as any).normalizePath(path);
+  it("normalizes and deduplicates configured paths while skipping existing folders", async () => {
+    plugin.settings.chatsDirectory = "  SystemSculpt//Shared/ ";
+    plugin.settings.savedChatsDirectory = "SystemSculpt/Shared";
+    plugin.settings.recordingsDirectory = "";
+    plugin.settings.attachmentsDirectory = "";
+    plugin.settings.extractionsDirectory = "";
+    (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(
+      new TFolder({ path: "SystemSculpt/Shared" }),
+    );
 
-    it("trims whitespace", () => {
-      expect(normalize("  folder  ")).toBe("folder");
-    });
+    await manager.initialize();
 
-    it("removes leading slashes", () => {
-      expect(normalize("/folder")).toBe("folder");
-      expect(normalize("///folder")).toBe("folder");
-    });
-
-    it("removes trailing slashes", () => {
-      expect(normalize("folder/")).toBe("folder");
-      expect(normalize("folder///")).toBe("folder");
-    });
-
-    it("collapses multiple slashes", () => {
-      expect(normalize("folder//subfolder")).toBe("folder/subfolder");
-      expect(normalize("a///b///c")).toBe("a/b/c");
-    });
-
-    it("handles empty path", () => {
-      expect(normalize("")).toBe("/");
-    });
-
-    it("handles just slashes", () => {
-      expect(normalize("///")).toBe("/");
-    });
-
-    it("preserves single segment paths", () => {
-      expect(normalize("folder")).toBe("folder");
-    });
-
-    it("handles multi-segment paths", () => {
-      expect(normalize("a/b/c")).toBe("a/b/c");
-    });
+    expect(app.vault.getAbstractFileByPath).toHaveBeenCalledWith("SystemSculpt/Shared");
+    expect(app.vault.createFolder).not.toHaveBeenCalled();
   });
 
-  describe("verifyDirectories", () => {
-    it("returns valid when all directories exist", async () => {
-      (app.vault.adapter.exists as jest.Mock).mockResolvedValue(true);
-      const mockFolder = new TFolder({ path: "SystemSculpt" });
-      (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(mockFolder);
+  it("ensures an explicit path directly without initializing unrelated directories", async () => {
+    await manager.ensureDirectoryByPath("  Projects//Alpha/ ");
 
-      const result = await manager.verifyDirectories();
-
-      expect(result.valid).toBe(true);
-      expect(result.issues).toEqual([]);
-    });
-
-    it("returns issues when main directory is missing", async () => {
-      (app.vault.adapter.exists as jest.Mock).mockResolvedValue(false);
-      (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(null);
-
-      const result = await manager.verifyDirectories();
-
-      expect(result.valid).toBe(false);
-      expect(result.issues.length).toBeGreaterThan(0);
-      expect(result.issues[0]).toContain("does not exist");
-    });
-
-    it("handles errors during verification", async () => {
-      (app.vault.adapter.exists as jest.Mock).mockRejectedValue(
-        new Error("Access denied")
-      );
-
-      const result = await manager.verifyDirectories();
-
-      expect(result.valid).toBe(false);
-      expect(result.issues).toContainEqual(
-        expect.stringContaining("Error verifying")
-      );
-    });
-
-    it("checks all configured directories", async () => {
-      (app.vault.adapter.exists as jest.Mock).mockResolvedValue(true);
-      const mockFolder = new TFolder({ path: "folder" });
-      (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(mockFolder);
-
-      await manager.verifyDirectories();
-
-      // Should have checked existence multiple times
-      expect((app.vault.adapter.exists as jest.Mock).mock.calls.length).toBeGreaterThan(1);
-    });
-
-    it("skips empty directory paths", async () => {
-      plugin.settings.chatsDirectory = "";
-      (app.vault.adapter.exists as jest.Mock).mockResolvedValue(true);
-      const mockFolder = new TFolder({ path: "folder" });
-      (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(mockFolder);
-
-      const result = await manager.verifyDirectories();
-
-      // Should still return valid even with empty path
-      expect(result.valid).toBe(true);
-    });
+    expect(manager.isInitialized()).toBe(false);
+    expect(app.vault.createFolder).toHaveBeenCalledWith("Projects/Alpha");
+    expect(app.vault.createFolder).toHaveBeenCalledTimes(1);
   });
 
-  describe("createDirectoryOptimized (private)", () => {
-    it("throws on empty path", async () => {
-      await expect(
-        (manager as any).createDirectoryOptimized("")
-      ).rejects.toThrow("empty or invalid path");
-    });
+  it("accepts an already-created concurrent folder race", async () => {
+    const folder = new TFolder({ path: "Projects/Alpha" });
+    (app.vault.getAbstractFileByPath as jest.Mock)
+      .mockReturnValueOnce(null)
+      .mockReturnValueOnce(folder);
+    (app.vault.createFolder as jest.Mock).mockRejectedValue(new Error("already exists"));
 
-    it("throws on whitespace-only path", async () => {
-      await expect(
-        (manager as any).createDirectoryOptimized("   ")
-      ).rejects.toThrow("empty or invalid path");
-    });
+    await expect(manager.ensureDirectoryByPath("Projects/Alpha")).resolves.toBeUndefined();
   });
 
-  describe("createDirectory (private)", () => {
-    it("calls createDirectoryOptimized", async () => {
-      const spy = jest.spyOn(manager as any, "createDirectoryOptimized");
-      spy.mockResolvedValue(undefined);
+  it("propagates real create failures and file collisions", async () => {
+    (app.vault.createFolder as jest.Mock).mockRejectedValueOnce(new Error("permission denied"));
+    await expect(manager.ensureDirectoryByPath("Projects/Alpha")).rejects.toThrow("permission denied");
 
-      await (manager as any).createDirectory("test", false, 1000, 0);
-
-      expect(spy).toHaveBeenCalledWith("test", false);
-    });
+    (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(
+      new TFile({ path: "Projects/Alpha", extension: "" }),
+    );
+    await expect(manager.ensureDirectoryByPath("Projects/Alpha")).rejects.toThrow("a file already exists");
   });
 
-  describe("repair", () => {
-    it("calls initialize after clearing cache", async () => {
-      // Add something to the cache
-      (manager as any).directories.set("test", true);
-      expect((manager as any).directories.size).toBe(1);
+  it("ensures configured keys and rejects empty paths", async () => {
+    plugin.settings.extractionsDirectory = " Output//Extracted/ ";
+    await expect(manager.ensureDirectoryByKey("extractionsDirectory")).resolves.toBe("Output/Extracted");
+    expect(app.vault.createFolder).toHaveBeenCalledWith("Output/Extracted");
 
-      // Mock successful initialization
-      const initSpy = jest.spyOn(manager, "initialize").mockResolvedValue(undefined);
-
-      const result = await manager.repair();
-
-      // Should have called initialize
-      expect(initSpy).toHaveBeenCalled();
-      expect(result).toBe(true);
-    });
-
-    it("resets initialization state", async () => {
-      (manager as any).initialized = true;
-      (manager as any).initializationPromise = Promise.resolve();
-
-      jest.spyOn(manager, "initialize").mockImplementation(async () => {
-        (manager as any).initialized = true;
-      });
-
-      await manager.repair();
-
-      // Verify initialized is reset to false initially, then back to true after init
-      expect(manager.isInitialized()).toBe(true);
-    });
-
-    it("returns false on failure", async () => {
-      jest.spyOn(manager, "initialize").mockRejectedValue(new Error("Failed"));
-
-      const result = await manager.repair();
-
-      expect(result).toBe(false);
-    });
+    plugin.settings.extractionsDirectory = "";
+    await expect(manager.ensureDirectoryByKey("extractionsDirectory")).rejects.toThrow(
+      "No path configured for: extractionsDirectory",
+    );
+    await expect(manager.ensureDirectoryByPath(" / ")).rejects.toThrow("empty path");
   });
 
-  describe("ensureDirectoryByKey", () => {
-    it("throws for empty path", async () => {
-      plugin.settings.emptyPath = "";
-      jest.spyOn(manager, "initialize").mockResolvedValue(undefined);
-      (manager as any).initialized = true;
+  it("creates non-empty directory-setting changes and ignores cleared values", async () => {
+    await manager.handleDirectorySettingChange("recordingsDirectory", "");
+    expect(app.vault.createFolder).not.toHaveBeenCalled();
 
-      await expect(
-        manager.ensureDirectoryByKey("emptyPath" as any)
-      ).rejects.toThrow("No path configured");
-    });
-
-    it("throws for undefined path", async () => {
-      delete plugin.settings.undefinedPath;
-      jest.spyOn(manager, "initialize").mockResolvedValue(undefined);
-      (manager as any).initialized = true;
-
-      await expect(
-        manager.ensureDirectoryByKey("undefinedPath" as any)
-      ).rejects.toThrow("No path configured");
-    });
+    await manager.handleDirectorySettingChange("recordingsDirectory", "Media/Recordings");
+    expect(app.vault.createFolder).toHaveBeenCalledWith("Media/Recordings");
   });
 
-  describe("ensureDirectoryByPath", () => {
-    it("throws for empty path", async () => {
-      jest.spyOn(manager, "initialize").mockResolvedValue(undefined);
-      (manager as any).initialized = true;
+  it("reports configured folders from Obsidian's vault state", async () => {
+    const missing = "SystemSculpt/Attachments";
+    (app.vault.getAbstractFileByPath as jest.Mock).mockImplementation((path: string) => (
+      path === missing ? null : new TFolder({ path })
+    ));
 
-      await expect(manager.ensureDirectoryByPath("")).rejects.toThrow(
-        "empty path"
-      );
+    await expect(manager.verifyDirectories()).resolves.toEqual({
+      valid: false,
+      issues: [`Directory "${missing}" does not exist or is not accessible`],
     });
 
-    it("throws for whitespace-only path", async () => {
-      jest.spyOn(manager, "initialize").mockResolvedValue(undefined);
-      (manager as any).initialized = true;
-
-      await expect(manager.ensureDirectoryByPath("   ")).rejects.toThrow(
-        "empty path"
-      );
-    });
+    (app.vault.getAbstractFileByPath as jest.Mock).mockImplementation(
+      (path: string) => new TFolder({ path }),
+    );
+    await expect(manager.verifyDirectories()).resolves.toEqual({ valid: true, issues: [] });
   });
 
-  describe("handleDirectorySettingChange", () => {
-    it("does nothing for empty path", async () => {
-      jest.spyOn(manager, "initialize").mockResolvedValue(undefined);
-      (manager as any).initialized = true;
-      const createSpy = jest.spyOn(manager as any, "createDirectory");
+  it("repairs through the same direct initialization path and returns false on failure", async () => {
+    await expect(manager.repair()).resolves.toBe(true);
+    expect(manager.isInitialized()).toBe(true);
 
-      await manager.handleDirectorySettingChange("chatsDirectory", "");
-
-      expect(createSpy).not.toHaveBeenCalled();
-    });
-
-    it("does nothing for whitespace-only path", async () => {
-      jest.spyOn(manager, "initialize").mockResolvedValue(undefined);
-      (manager as any).initialized = true;
-      const createSpy = jest.spyOn(manager as any, "createDirectory");
-
-      await manager.handleDirectorySettingChange("chatsDirectory", "   ");
-
-      expect(createSpy).not.toHaveBeenCalled();
-    });
-
-    it("creates directory for valid path", async () => {
-      jest.spyOn(manager, "initialize").mockResolvedValue(undefined);
-      (manager as any).initialized = true;
-      const createSpy = jest.spyOn(manager as any, "createDirectory").mockResolvedValue(undefined);
-
-      await manager.handleDirectorySettingChange("chatsDirectory", "NewPath");
-
-      expect(createSpy).toHaveBeenCalledWith("NewPath");
-    });
-  });
-
-  describe("initialize", () => {
-    it("sets initialized to true on completion", async () => {
-      // Mock _initialize to succeed immediately
-      jest.spyOn(manager as any, "_initialize").mockResolvedValue(undefined);
-
-      await manager.initialize(1000);
-
-      expect(manager.isInitialized()).toBe(true);
-    });
-
-    it("reuses initialization promise for concurrent calls", async () => {
-      let resolveInit: () => void;
-      const initPromise = new Promise<void>((resolve) => {
-        resolveInit = resolve;
-      });
-      jest.spyOn(manager as any, "_initialize").mockReturnValue(initPromise);
-
-      // Start two initializations
-      const promise1 = manager.initialize(10000);
-      const promise2 = manager.initialize(10000);
-
-      // They should reference the same underlying initialization
-      resolveInit!();
-      await promise1;
-      await promise2;
-
-      // _initialize should only be called once
-      expect((manager as any)._initialize).toHaveBeenCalledTimes(1);
-    });
-
-    it("returns immediately if already initialized", async () => {
-      (manager as any).initialized = true;
-
-      await manager.initialize(1000);
-
-      // Should not have called _initialize
-      const spy = jest.spyOn(manager as any, "_initialize");
-      await manager.initialize(1000);
-      expect(spy).not.toHaveBeenCalled();
-    });
-  });
-
-  describe("notifyDirectoriesReady (private)", () => {
-    it("sets window global flag", () => {
-      (manager as any).notifyDirectoriesReady();
-
-      expect((window as any).__systemsculptDirectoriesReady).toBe(true);
-    });
-
-    it("emits event through plugin emitter", () => {
-      (manager as any).notifyDirectoriesReady();
-
-      expect(plugin.emitter.emit).toHaveBeenCalledWith("directory-structure-ready");
-    });
-
-    it("dispatches window event when emitter unavailable", () => {
-      plugin.emitter = null;
-      manager = new DirectoryManager(app, plugin);
-
-      const dispatchSpy = jest.spyOn(window, "dispatchEvent");
-
-      (manager as any).notifyDirectoriesReady();
-
-      expect(dispatchSpy).toHaveBeenCalled();
-      const event = dispatchSpy.mock.calls[0][0] as CustomEvent;
-      expect(event.type).toBe("systemsculpt:directory-structure-ready");
-      dispatchSpy.mockRestore();
-    });
-
-    it("only notifies once", () => {
-      (manager as any).notifyDirectoriesReady();
-      (manager as any).notifyDirectoriesReady();
-
-      expect(plugin.emitter.emit).toHaveBeenCalledTimes(1);
-    });
-  });
-
-  describe("markDirectoryVerified (private)", () => {
-    it("adds directory to verified set", () => {
-      (manager as any).markDirectoryVerified("test/path");
-
-      expect((manager as any).verifiedDirectories.has("test/path")).toBe(true);
-    });
-
-    it("does nothing if already verified", () => {
-      (manager as any).verifiedDirectories.add("test/path");
-      const scheduleSpy = jest.spyOn(manager as any, "scheduleVerifiedDirectoriesPersist");
-
-      (manager as any).markDirectoryVerified("test/path");
-
-      expect(scheduleSpy).not.toHaveBeenCalled();
-    });
+    const failing = new DirectoryManager(app, plugin as never);
+    (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(null);
+    (app.vault.createFolder as jest.Mock).mockRejectedValue(new Error("read only"));
+    await expect(failing.repair()).resolves.toBe(false);
+    expect(failing.isInitialized()).toBe(false);
   });
 });

@@ -1,6 +1,8 @@
-import { App, Notice, TFile, setIcon } from "obsidian";
+import { App, Notice, TFile } from "obsidian";
 import type SystemSculptPlugin from "../main";
 import { StandardModal } from "../core/ui/modals/standard/StandardModal";
+import { createUiAction, createUiState } from "../core/ui/surface";
+import { tryCopyToClipboard } from "../utils/clipboard";
 import type {
   PendingEmbeddingFile,
   PendingEmbeddingReason
@@ -13,7 +15,6 @@ export class EmbeddingsPendingFilesModal extends StandardModal {
   private summaryContainerEl: HTMLElement | null = null;
   private summaryTextEl: HTMLElement | null = null;
   private listEl: HTMLElement | null = null;
-  private loadingEl: HTMLElement | null = null;
   private searchInput: HTMLInputElement | null = null;
   private copyButtons: HTMLButtonElement[] = [];
 
@@ -25,6 +26,10 @@ export class EmbeddingsPendingFilesModal extends StandardModal {
   async onOpen(): Promise<void> {
     super.onOpen();
 
+    this.allFiles = [];
+    this.filteredFiles = [];
+    this.copyButtons = [];
+
     this.setSize("large");
     this.modalEl.addClass("systemsculpt-pending-files-modal");
     this.addTitle("Remaining Embeddings", "Review the files that still need to finish embedding.");
@@ -35,14 +40,12 @@ export class EmbeddingsPendingFilesModal extends StandardModal {
       text: "Loading pending files…"
     });
     const summaryActionsEl = this.summaryContainerEl.createDiv({ cls: "ss-modal__summary-actions" });
-    const summaryCopyButton = summaryActionsEl.createEl("button", {
-      cls: "ss-button ss-button--secondary",
-      attr: { "aria-label": "Copy pending file paths" }
+    const summaryCopyButton = createUiAction(summaryActionsEl, {
+      label: "Copy file paths",
+      icon: "copy",
+      size: "small",
+      disabled: true,
     });
-    const summaryCopyIcon = summaryCopyButton.createSpan("ss-button__icon");
-    setIcon(summaryCopyIcon, "copy");
-    summaryCopyButton.appendChild(document.createTextNode("Copy file paths"));
-    summaryCopyButton.disabled = true;
     this.registerDomEvent(summaryCopyButton, "click", () => {
       void this.copyPaths();
     });
@@ -54,9 +57,9 @@ export class EmbeddingsPendingFilesModal extends StandardModal {
     this.searchInput.disabled = true;
 
     this.listEl = this.contentEl.createDiv({ cls: "ss-modal__list" });
-    this.loadingEl = this.listEl.createDiv({
-      cls: "ss-modal__loading",
-      text: "Collecting pending files…"
+    createUiState(this.listEl, {
+      kind: "loading",
+      title: "Collecting pending files",
     });
 
     const footerCopyButton = this.addActionButton("Copy file paths", () => {
@@ -71,14 +74,18 @@ export class EmbeddingsPendingFilesModal extends StandardModal {
   }
 
   private async loadPendingFiles(): Promise<void> {
+    const task = this.beginAsyncTask("pending-embedding-files");
     try {
       const manager = this.plugin.getOrCreateEmbeddingsManager();
       await manager.awaitReady();
+      if (!task.isCurrent()) return;
       if (typeof manager.listPendingFiles !== "function") {
         throw new Error("Embeddings manager does not support listing pending files yet.");
       }
 
-      this.allFiles = await manager.listPendingFiles();
+      const files = await manager.listPendingFiles();
+      if (!task.isCurrent()) return;
+      this.allFiles = files;
       this.filteredFiles = [...this.allFiles];
 
       this.renderList();
@@ -89,6 +96,7 @@ export class EmbeddingsPendingFilesModal extends StandardModal {
       }
       this.updateSummary();
     } catch (error) {
+      if (!task.isCurrent()) return;
       this.renderError(error);
     }
   }
@@ -96,29 +104,26 @@ export class EmbeddingsPendingFilesModal extends StandardModal {
   private renderList(): void {
     if (!this.listEl) return;
     this.listEl.empty();
-    this.loadingEl = null;
 
     if (this.filteredFiles.length === 0) {
-      const emptyState = this.listEl.createDiv({ cls: "ss-modal__empty-state" });
-      const iconEl = emptyState.createDiv({ cls: "ss-modal__empty-state-icon" });
-      setIcon(iconEl, this.allFiles.length === 0 ? "check" : "search");
-      emptyState.createSpan({
-        text:
-          this.allFiles.length === 0
-            ? "All eligible markdown files already have embeddings."
-            : "No files match this filter."
+      createUiState(this.listEl, {
+        kind: this.allFiles.length === 0 ? "success" : "empty",
+        icon: this.allFiles.length === 0 ? "check" : "search",
+        title: this.allFiles.length === 0
+          ? "All eligible Markdown files have embeddings"
+          : "No files match this filter",
       });
       return;
     }
 
     for (const entry of this.filteredFiles) {
-      const itemEl = this.listEl.createDiv({ cls: "ss-modal__item" });
+      const itemEl = this.listEl.createEl("button", {
+        cls: "ss-modal__item",
+        attr: { type: "button", "aria-label": `Open ${entry.path}` },
+      });
       if (entry.reason === 'failed') {
         itemEl.addClass("ss-modal__item--failed");
       }
-      itemEl.tabIndex = 0;
-      itemEl.setAttr("role", "button");
-      itemEl.setAttr("aria-label", `Open ${entry.path}`);
 
       const titleEl = itemEl.createDiv({ cls: "ss-modal__item-title" });
       titleEl.setText(this.extractFileName(entry.path));
@@ -129,25 +134,26 @@ export class EmbeddingsPendingFilesModal extends StandardModal {
       this.registerDomEvent(itemEl, "click", () => {
         void this.openFile(entry.path);
       });
-      this.registerDomEvent(itemEl, "keypress", (event: KeyboardEvent) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          void this.openFile(entry.path);
-        }
-      });
     }
   }
 
   private renderError(error: unknown): void {
     if (!this.listEl) return;
     this.listEl.empty();
-    this.loadingEl = null;
 
     const message =
       error instanceof Error && error.message ? error.message : "Unknown error loading pending files.";
 
-    const errorEl = this.listEl.createDiv({ cls: "ss-modal__error" });
-    errorEl.createSpan({ text: message });
+    createUiState(this.listEl, {
+      kind: "error",
+      title: "Couldn’t load pending files",
+      detail: message,
+      action: {
+        label: "Retry",
+        tone: "primary",
+        onSelect: () => void this.loadPendingFiles(),
+      },
+    });
 
     if (this.summaryTextEl) {
       this.summaryTextEl.setText("Unable to load pending files.");
@@ -169,14 +175,14 @@ export class EmbeddingsPendingFilesModal extends StandardModal {
 
     this.renderList();
     this.updateSummary();
-    this.setCopyButtonsEnabled(this.allFiles.length > 0);
+    this.setCopyButtonsEnabled(this.filteredFiles.length > 0);
   }
 
   private updateSummary(): void {
     if (!this.summaryTextEl) return;
 
     if (this.allFiles.length === 0) {
-      this.summaryTextEl.setText("All eligible markdown files already have embeddings.");
+      this.summaryTextEl.setText("All eligible Markdown files already have embeddings.");
       return;
     }
 
@@ -205,7 +211,7 @@ export class EmbeddingsPendingFilesModal extends StandardModal {
   }
 
   private async copyPaths(): Promise<void> {
-    const source = this.filteredFiles.length > 0 ? this.filteredFiles : this.allFiles;
+    const source = this.filteredFiles;
     if (source.length === 0) {
       new Notice("No pending files to copy.");
       return;
@@ -213,29 +219,13 @@ export class EmbeddingsPendingFilesModal extends StandardModal {
 
     const text = source.map((entry) => entry.path).join("\n");
     try {
-      if (navigator?.clipboard?.writeText) {
-        await navigator.clipboard.writeText(text);
-      } else {
-        this.copyViaFallback(text);
-      }
-
+      const copied = await tryCopyToClipboard(text, this.modalEl);
+      if (!copied) throw new Error("Clipboard unavailable");
       new Notice(`Copied ${source.length} file path${source.length === 1 ? "" : "s"} to the clipboard.`);
     } catch (err) {
       console.error("EmbeddingsPendingFilesModal: failed to copy paths", err);
       new Notice("Failed to copy paths. Please try again.");
     }
-  }
-
-  private copyViaFallback(text: string): void {
-    const textarea = document.createElement("textarea");
-    textarea.value = text;
-    textarea.setAttribute("readonly", "true");
-    textarea.style.position = "absolute";
-    textarea.style.left = "-9999px";
-    document.body.appendChild(textarea);
-    textarea.select();
-    document.execCommand("copy");
-    document.body.removeChild(textarea);
   }
 
   private extractFileName(path: string): string {
@@ -278,7 +268,7 @@ export class EmbeddingsPendingFilesModal extends StandardModal {
       case "modified":
         return "Needs refresh after edits";
       case "schema-mismatch":
-        return "Provider/config changed";
+        return "AI configuration changed";
       case "metadata-missing":
         return "File metadata missing";
       case "incomplete":

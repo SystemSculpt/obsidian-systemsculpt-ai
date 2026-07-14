@@ -14,8 +14,8 @@ function writeCss(dir, name, contents) {
   fs.writeFileSync(path.join(dir, name), contents, "utf8");
 }
 
-// Permanent guard for plan 010: the CSS linter is wired into the check:plugin
-// gate (scripts/check-plugin.mjs imports lintCssDirectory). These tests prove
+// The CSS linter is wired into the plugin check
+// (scripts/check-plugin.mjs imports lintCssDirectory). These tests prove
 // the gate actually FAILS on a deliberate violation and PASSES on scoped CSS,
 // so the guard can never silently degrade into a no-op again.
 
@@ -23,7 +23,7 @@ test("lintCssDirectory flags a bare Obsidian-override selector (the gate fails o
   const dir = createTempCssDir();
   // This is the exact class of bug the linter exists to catch: an unscoped
   // .workspace-leaf-content override that would leak into every workspace leaf
-  // (see src/css/README.md "Historical Context").
+  // (see the scoping contract in src/css/README.md).
   writeCss(
     dir,
     "bad-override.css",
@@ -58,6 +58,58 @@ test("lintCssDirectory flags a bare [data-type] selector", () => {
   const report = lintCssDirectory({ cssDir: dir });
 
   assert.ok(report.errorCount > 0, "bare [data-type=] selector must be an error");
+});
+
+test("lintCssDirectory rejects global element selectors", () => {
+  const dir = createTempCssDir();
+  writeCss(dir, "global.css", "button { padding: 0; }\n");
+  const report = lintCssDirectory({ cssDir: dir });
+  assert.ok(
+    report.issues.some((issue) => issue.message.includes("Global selector")),
+    "bare element selectors must fail",
+  );
+});
+
+test("lintCssDirectory checks selectors nested inside media and container rules", () => {
+  const dir = createTempCssDir();
+  writeCss(
+    dir,
+    "nested.css",
+    [
+      "@media (max-width: 600px) {",
+      "  .workspace-leaf-content .native-control { padding: 0; }",
+      "}",
+      "@container panel (max-width: 400px) {",
+      "  .unscoped-card { padding: 0; }",
+      "}",
+    ].join("\n")
+  );
+
+  const report = lintCssDirectory({ cssDir: dir });
+  assert.ok(report.errorCount >= 2, "nested leaking selectors must fail the gate");
+});
+
+test("lintCssDirectory rejects legacy state classes and undefined SystemSculpt tokens", () => {
+  const dir = createTempCssDir();
+  writeCss(
+    dir,
+    "state.css",
+    [
+      ".ss-card.active { z-index: var(--ss-z-missing); }",
+      ".ss-card.is-active { z-index: var(--ss-z-raised); }",
+      ":root { --ss-z-raised: 10; }",
+    ].join("\n")
+  );
+
+  const report = lintCssDirectory({ cssDir: dir });
+  assert.ok(
+    report.issues.some((issue) => issue.message.includes("Legacy state class")),
+    "legacy state grammar must fail",
+  );
+  assert.ok(
+    report.issues.some((issue) => issue.selector === "--ss-z-missing"),
+    "undefined token must fail",
+  );
 });
 
 test("lintCssDirectory passes properly scoped plugin selectors (the gate stays green)", () => {
@@ -124,8 +176,8 @@ test("lintCssDirectory stays silent on prefixed and prefix-scoped classes", () =
       ".systemsculpt-message-content .mermaid {",
       "  position: relative;",
       "}",
-      ".is-mobile .ss-card {",
-      "  padding: 0;",
+      ".is-open .ss-card {",
+        "  padding: 0;",
       "}",
       '.workspace-leaf-content[data-type="systemsculpt-chat-view"] .mermaid {',
       "  position: relative;",

@@ -18,7 +18,7 @@ describe("CommandManager credits command", () => {
 
     expect(addCommand).toHaveBeenCalledWith(expect.objectContaining({
       id: "open-credits-balance",
-      name: "Open Credits & Usage",
+      name: "Open credits & usage",
       callback: expect.any(Function),
     }));
 

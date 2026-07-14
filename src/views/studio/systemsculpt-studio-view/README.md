@@ -23,8 +23,20 @@ into focused submodules.
   - Pure transform used by the view when applying clipboard payloads.
 
 - `StudioClipboardData.ts`
-  - Clipboard payload readers for text/image extraction and mime normalization.
-  - Keeps browser clipboard parsing details out of the view file.
+  - Clipboard readers, DataTransfer classification, and media normalization.
+  - Keeps browser clipboard/drop parsing details out of controller and view code.
+
+- `StudioClipboardAndDropController.ts`
+  - Owns graph clipboard state, system mirroring, paste/drop event lifecycle,
+    pointer-derived anchors, and text/media node ingestion.
+  - Uses a narrow typed host for graph commits and note-runtime coordination;
+    the view only forwards keyboard commands and supplies private state bridges.
+
+- `StudioProjectSessionController.ts`
+  - Owns the active project/session, retain and release lifecycle, save flushing,
+    live vault synchronization, and path-scoped viewport and node-detail state.
+  - Presents one typed project-session boundary to the view; the view does not
+    retain sessions or duplicate project ownership.
 
 - `StudioClipboardPasteNodes.ts`
   - Node construction/materialization for text/image paste actions.
@@ -64,15 +76,9 @@ Helper modules in this directory should own:
 - parsing/normalization
 - deterministic data transforms
 
-## Planned next slices
-
-1. Extract note-preview normalization/refresh orchestration from the view into dedicated note runtime helpers.
-2. Extract drag/drop ingestion pipeline into focused handlers (`drop refs`, `vault folders`, `unsupported files`).
-3. Extract project file live-sync read/mutate orchestration into a dedicated controller.
-4. Extract keyboard shortcut routing into a dedicated command-map controller.
-
 ## Conventions
 
-- Keep files below `450` LOC when possible.
+- Keep pure helpers and presentation modules below `450` LOC when possible.
+- Prefer a cohesive deep controller over splitting one lifecycle across shallow wrappers.
 - Prefer one responsibility per module.
 - Keep naming responsibility-first (`*Model`, `*Resolver`, `*Controller`, `*Handlers`).

@@ -20,8 +20,8 @@ export function joinFilesystemPath(basePath: string, ...segments: string[]): str
 
   // Windows bases join with "\\", POSIX with "/". The segments are already
   // normalized to clean "/"-split parts, so a pure join is exact here — no
-  // node:path needed, which keeps this shared util safe on mobile, where there
-  // is no Node runtime (#207).
+  // node:path dependency needed, which keeps the shared utility deterministic
+  // for any Obsidian vault adapter.
   const separator =
     normalizedBasePath.includes("\\") || /^[a-zA-Z]:/.test(normalizedBasePath) ? "\\" : "/";
   const normalizedSegments = segments

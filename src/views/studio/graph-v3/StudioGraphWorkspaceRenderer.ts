@@ -11,6 +11,7 @@ import {
   STUDIO_GRAPH_CANVAS_WIDTH,
   StudioGraphInteractionEngine,
 } from "../StudioGraphInteractionEngine";
+import type { StudioNodeConfigPathBrowseOptions } from "../StudioPathFieldPicker";
 import type { StudioNodeRunDisplayState } from "../StudioRunPresentationState";
 import type { StudioNodeDetailMode } from "./StudioGraphNodeDetailMode";
 import { renderStudioGraphNodeCard } from "./StudioGraphNodeCardRenderer";
@@ -22,8 +23,37 @@ import type {
   StudioTextNodeMarkdownEditorFactory,
   StudioTextNodeMarkdownEditorSnapshot,
 } from "./StudioGraphTextNodeCard";
+import { createStudioAction } from "../StudioAction";
+import { createStudioSvgElement } from "../StudioDomContext";
 
-const SVG_NS = "http://www.w3.org/2000/svg";
+type StudioWorkspaceControlOptions = Readonly<{
+  label: string;
+  ariaLabel: string;
+  title?: string;
+  disabled?: boolean;
+  selected?: boolean;
+  className?: string;
+  onSelect: () => void;
+}>;
+
+function createStudioWorkspaceControl(
+  parent: HTMLElement,
+  options: StudioWorkspaceControlOptions,
+): HTMLButtonElement {
+  const button = createStudioAction(parent, {
+    label: options.label,
+    ariaLabel: options.ariaLabel,
+    className: `ss-studio-graph-workspace-control-button${options.className ? ` ${options.className}` : ""}`,
+    size: "small",
+    disabled: options.disabled,
+    selected: options.selected,
+    title: options.title ?? options.ariaLabel,
+    onSelect: () => {
+      options.onSelect();
+    },
+  });
+  return button;
+}
 
 export type StudioGraphWorkspaceRendererOptions = {
   root: HTMLElement;
@@ -96,6 +126,7 @@ export type StudioGraphWorkspaceRendererOptions = {
     teardown: () => StudioTextNodeMarkdownEditorSnapshot
   ) => void;
   onRevealPathInFinder: (path: string) => void;
+  pathBrowseOptions?: StudioNodeConfigPathBrowseOptions;
   resolveNodeBadge?: (node: StudioNodeInstance) => {
     text: string;
     tone?: "neutral" | "warning";
@@ -155,6 +186,7 @@ export function renderStudioGraphWorkspace(
     createTextNodeMarkdownEditor,
     registerTextNodeEditorTeardown,
     onRevealPathInFinder,
+    pathBrowseOptions,
     resolveNodeBadge,
   } = options;
 
@@ -186,7 +218,7 @@ export function renderStudioGraphWorkspace(
     }
     if (
       target.closest(
-        ".ss-studio-node-inspector, .ss-studio-node-context-menu, .ss-studio-simple-context-menu, .ss-studio-group-tag, .ss-studio-group-tag-input"
+        ".ss-studio-node-context-menu, .ss-studio-simple-context-menu, .ss-studio-group-tag, .ss-studio-group-tag-input"
       )
     ) {
       return;
@@ -203,9 +235,13 @@ export function renderStudioGraphWorkspace(
     }
     if (
       target.closest(
-        ".ss-studio-node-card, .ss-studio-port-pin, .ss-studio-edge-hit, .ss-studio-edge-line, .ss-studio-edge-preview, .ss-studio-node-inspector, .ss-studio-node-context-menu, .ss-studio-simple-context-menu, .ss-studio-group-frame, .ss-studio-group-tag, .ss-studio-group-tag-input"
+        ".ss-studio-node-card, .ss-studio-port-pin, .ss-studio-edge-hit, .ss-studio-edge-line, .ss-studio-edge-preview, .ss-studio-node-context-menu, .ss-studio-simple-context-menu, .ss-studio-group-frame, .ss-studio-group-tag, .ss-studio-group-tag-input"
       )
     ) {
+      return;
+    }
+    if (pointerEvent.pointerType === "touch") {
+      graphInteraction.startCanvasPan(pointerEvent);
       return;
     }
     graphInteraction.startMarqueeSelection(pointerEvent);
@@ -218,7 +254,7 @@ export function renderStudioGraphWorkspace(
     }
     if (
       target.closest(
-        ".ss-studio-node-card, .ss-studio-port-pin, .ss-studio-edge-hit, .ss-studio-edge-line, .ss-studio-edge-preview, .ss-studio-node-inspector, .ss-studio-node-context-menu, .ss-studio-simple-context-menu, .ss-studio-group-frame, .ss-studio-group-tag, .ss-studio-group-tag-input"
+        ".ss-studio-node-card, .ss-studio-port-pin, .ss-studio-edge-hit, .ss-studio-edge-line, .ss-studio-edge-preview, .ss-studio-node-context-menu, .ss-studio-simple-context-menu, .ss-studio-group-frame, .ss-studio-group-tag, .ss-studio-group-tag-input"
       )
     ) {
       return;
@@ -253,132 +289,76 @@ export function renderStudioGraphWorkspace(
   graphInteraction.registerSnapGuidesElement(snapGuides);
 
   const controls = editor.createDiv({ cls: "ss-studio-graph-workspace-controls" });
-  const runButton = controls.createEl("button", {
-    cls: "ss-studio-graph-workspace-control-button is-run",
-    text: "Run",
-    attr: {
-      "aria-label": "Run Studio graph",
-      title: "Run graph",
+  createStudioWorkspaceControl(controls, {
+    label: "Run",
+    ariaLabel: "Run Studio graph",
+    title: "Run graph",
+    className: "is-run",
+    disabled: busy,
+    onSelect: () => {
+      if (busy) {
+        return;
+      }
+      onRunGraph();
     },
-  });
-  runButton.type = "button";
-  runButton.disabled = busy;
-  runButton.addEventListener("click", (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    if (busy) {
-      return;
-    }
-    onRunGraph();
   });
 
-  const addButton = controls.createEl("button", {
-    cls: "ss-studio-graph-workspace-control-button",
-    text: "Add",
-    attr: {
-      "aria-label": "Add node",
-      title: "Add node",
+  createStudioWorkspaceControl(controls, {
+    label: "Add",
+    ariaLabel: "Add node",
+    disabled: busy,
+    onSelect: () => {
+      if (busy) {
+        return;
+      }
+      onOpenAddNodeMenuAtViewportCenter();
     },
-  });
-  addButton.type = "button";
-  addButton.disabled = busy;
-  addButton.addEventListener("click", (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    if (busy) {
-      return;
-    }
-    onOpenAddNodeMenuAtViewportCenter();
   });
 
   const zoomRow = controls.createDiv({ cls: "ss-studio-graph-workspace-control-zoom-row" });
-  const zoomOutButton = zoomRow.createEl("button", {
-    cls: "ss-studio-graph-workspace-control-button",
-    text: "-",
-    attr: {
-      "aria-label": "Zoom out",
-      title: "Zoom out",
-    },
-  });
-  zoomOutButton.type = "button";
-  zoomOutButton.addEventListener("click", (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    onZoomOut();
+  createStudioWorkspaceControl(zoomRow, {
+    label: "−",
+    ariaLabel: "Zoom out",
+    onSelect: onZoomOut,
   });
 
   const zoomLabel = zoomRow.createDiv({ cls: "ss-studio-graph-workspace-control-zoom-label" });
   graphInteraction.registerZoomLabelElement(zoomLabel);
 
-  const zoomInButton = zoomRow.createEl("button", {
-    cls: "ss-studio-graph-workspace-control-button",
-    text: "+",
-    attr: {
-      "aria-label": "Zoom in",
-      title: "Zoom in",
-    },
-  });
-  zoomInButton.type = "button";
-  zoomInButton.addEventListener("click", (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    onZoomIn();
+  createStudioWorkspaceControl(zoomRow, {
+    label: "+",
+    ariaLabel: "Zoom in",
+    onSelect: onZoomIn,
   });
 
-  const zoomResetButton = controls.createEl("button", {
-    cls: "ss-studio-graph-workspace-control-button",
-    text: "100%",
-    attr: {
-      "aria-label": "Reset zoom",
-      title: "Reset zoom",
-    },
-  });
-  zoomResetButton.type = "button";
-  zoomResetButton.addEventListener("click", (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    onZoomReset();
+  createStudioWorkspaceControl(controls, {
+    label: "100%",
+    ariaLabel: "Reset zoom",
+    onSelect: onZoomReset,
   });
 
-  const zoomOverviewButton = controls.createEl("button", {
-    cls: "ss-studio-graph-workspace-control-button",
-    text: "Fit",
-    attr: {
-      "aria-label": "Overview graph",
-      title: "Overview graph",
-    },
-  });
-  zoomOverviewButton.type = "button";
-  zoomOverviewButton.addEventListener("click", (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    onZoomOverview();
+  createStudioWorkspaceControl(controls, {
+    label: "Fit",
+    ariaLabel: "Overview graph",
+    onSelect: onZoomOverview,
   });
 
-  const detailButton = controls.createEl("button", {
-    cls: "ss-studio-graph-workspace-control-button",
-    text: nodeDetailMode === "collapsed" ? "Expand" : "Collapse",
-    attr: {
-      "aria-label": "Toggle node detail mode",
-      title:
-        nodeDetailMode === "collapsed"
-          ? "Switch to expanded node details"
-          : "Switch to collapsed node details",
-    },
-  });
-  detailButton.type = "button";
-  detailButton.classList.toggle("is-active", nodeDetailMode === "collapsed");
-  detailButton.addEventListener("click", (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    onToggleNodeDetailMode();
+  createStudioWorkspaceControl(controls, {
+    label: nodeDetailMode === "collapsed" ? "Expand" : "Collapse",
+    ariaLabel: "Toggle node detail mode",
+    title:
+      nodeDetailMode === "collapsed"
+        ? "Switch to expanded node details"
+        : "Switch to collapsed node details",
+    selected: nodeDetailMode === "collapsed",
+    onSelect: onToggleNodeDetailMode,
   });
 
   canvas.addEventListener("click", (event) => {
     graphInteraction.handleCanvasBackgroundClick(event.target as HTMLElement);
   });
 
-  const edgesLayer = document.createElementNS(SVG_NS, "svg");
+  const edgesLayer = createStudioSvgElement(canvas, "svg");
   edgesLayer.setAttribute("class", "ss-studio-edges-layer");
   edgesLayer.setAttribute("viewBox", `0 0 ${STUDIO_GRAPH_CANVAS_WIDTH} ${STUDIO_GRAPH_CANVAS_HEIGHT}`);
   edgesLayer.setAttribute("width", String(STUDIO_GRAPH_CANVAS_WIDTH));
@@ -438,6 +418,7 @@ export function renderStudioGraphWorkspace(
       createTextNodeMarkdownEditor,
       registerTextNodeEditorTeardown,
       onRevealPathInFinder,
+      pathBrowseOptions,
       resolveNodeBadge,
     });
   }

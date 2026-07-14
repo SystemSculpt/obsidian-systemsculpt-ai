@@ -1,25 +1,33 @@
 /**
  * @jest-environment jsdom
  */
-import { App, TFile, Notice, TFolder } from "obsidian";
+import { App, TFile, Notice } from "obsidian";
 import { DocumentContextManager, ChatContextManager } from "../DocumentContextManager";
-
-// Mock dependencies
-const mockCheckLicenseForFile = jest.fn();
-jest.mock("../../core/license/LicenseChecker", () => ({
-  LicenseChecker: {
-    checkLicenseForFile: (...args: any[]) => mockCheckLicenseForFile(...args),
-  },
-}));
 
 const mockProcessDocument = jest.fn();
 jest.mock("../DocumentProcessingService", () => ({
   DocumentProcessingService: {
     getInstance: jest.fn(() => ({
-      processDocument: mockProcessDocument,
+      processDocumentWithReceipt: mockProcessDocument,
     })),
   },
 }));
+
+const documentReceipt = (extractionPath: string, imagePaths: string[] = []) => ({
+  extractionPath,
+  imagePaths,
+  operationId: "document-operation-1",
+  outputIdentity: `vault:${extractionPath}`,
+  markdownSha256: "b".repeat(64),
+  contextEffectId: "a".repeat(64),
+});
+
+const resolveDocument = (extractionPath: string, imagePaths: string[] = []) =>
+  mockProcessDocument.mockImplementationOnce(async (_file: TFile, options: any) => {
+    const receipt = documentReceipt(extractionPath, imagePaths);
+    await options.commitContextEffect?.(receipt, new AbortController().signal);
+    return receipt;
+  });
 
 const mockTranscribeFile = jest.fn();
 jest.mock("../TranscriptionService", () => ({
@@ -70,6 +78,8 @@ describe("DocumentContextManager", () => {
 
     mockApp = new App();
     mockPlugin = {
+      loadData: jest.fn().mockResolvedValue({ settingsSentinel: true }),
+      saveData: jest.fn().mockResolvedValue(undefined),
       settings: {
         extractionsDirectory: "Extractions",
         cleanTranscriptionOutput: false,
@@ -83,10 +93,13 @@ describe("DocumentContextManager", () => {
     mockContextManager = createMockContextManager();
 
     // Default mock behaviors
-    mockCheckLicenseForFile.mockResolvedValue(true);
-    mockProcessDocument.mockResolvedValue("Extractions/document/document.md");
+    mockProcessDocument.mockImplementation(async (_file: TFile, options: any) => {
+      const receipt = documentReceipt("Extractions/document/document.md");
+      await options.commitContextEffect?.(receipt, new AbortController().signal);
+      return receipt;
+    });
     mockTranscribeFile.mockResolvedValue("Transcribed text content");
-    (mockApp.vault.create as jest.Mock).mockResolvedValue({});
+    (mockApp.vault.create as jest.Mock).mockImplementation(async (path: string) => new TFile({ path }));
     (mockApp.vault.modify as jest.Mock).mockResolvedValue({});
 
     manager = DocumentContextManager.getInstance(mockApp, mockPlugin);
@@ -98,6 +111,102 @@ describe("DocumentContextManager", () => {
       const instance2 = DocumentContextManager.getInstance(mockApp, mockPlugin);
 
       expect(instance1).toBe(instance2);
+    });
+  });
+
+  describe("document conversion context effects", () => {
+    const effect = {
+      effectId: "a".repeat(64), operationId: "operation-1", outputIdentity: "output-1",
+      outputPath: "Extractions/document.md", markdownSha256: "b".repeat(64),
+    };
+    const record = (projectionMutated: boolean, notificationAcknowledged: boolean) => ({
+      operationId: effect.operationId, outputIdentity: effect.outputIdentity,
+      outputPath: effect.outputPath, markdownSha256: effect.markdownSha256,
+      projectionMutated, notificationAcknowledged,
+    });
+
+    it("persists identity, projection mutation, and notification acknowledgement in order", async () => {
+      const order: string[] = [];
+      mockPlugin.saveData.mockImplementation(async (data: any) => {
+        const saved = data.managedDocumentContextEffectsV1[effect.effectId];
+        order.push(saved.notificationAcknowledged ? "ack" : saved.projectionMutated ? "projection-state" : "identity");
+      });
+      (mockContextManager.addToContextFiles as jest.Mock).mockImplementation(() => { order.push("project"); return true; });
+      (mockContextManager.triggerContextChange as jest.Mock).mockImplementation(async () => { order.push("notify"); });
+
+      await expect(manager.applyDocumentConversionContextEffect(effect, mockContextManager)).resolves.toBe("applied");
+      expect(order).toEqual(["identity", "project", "projection-state", "notify", "ack"]);
+    });
+
+    it("returns already_applied only after both durable phases and the link are present", async () => {
+      mockPlugin.loadData.mockResolvedValue({ managedDocumentContextEffectsV1: { [effect.effectId]: record(true, true) } });
+      (mockContextManager.hasContextFile as jest.Mock).mockReturnValue(true);
+      await expect(manager.applyDocumentConversionContextEffect(effect, mockContextManager)).resolves.toBe("already_applied");
+      expect(mockContextManager.addToContextFiles).not.toHaveBeenCalled();
+      expect(mockContextManager.triggerContextChange).not.toHaveBeenCalled();
+      expect(mockPlugin.saveData).not.toHaveBeenCalled();
+    });
+
+    it("repairs notification after the link exists but triggerContextChange was never acknowledged", async () => {
+      mockPlugin.loadData.mockResolvedValue({ managedDocumentContextEffectsV1: { [effect.effectId]: record(true, false) } });
+      (mockContextManager.hasContextFile as jest.Mock).mockReturnValue(true);
+      await expect(manager.applyDocumentConversionContextEffect(effect, mockContextManager)).resolves.toBe("repaired");
+      expect(mockContextManager.addToContextFiles).not.toHaveBeenCalled();
+      expect(mockContextManager.triggerContextChange).toHaveBeenCalledTimes(1);
+      expect(mockPlugin.saveData).toHaveBeenLastCalledWith(expect.objectContaining({
+        managedDocumentContextEffectsV1: { [effect.effectId]: record(true, true) },
+      }));
+    });
+
+    it("repairs a missing link even when earlier state claimed projection", async () => {
+      mockPlugin.loadData.mockResolvedValue({ managedDocumentContextEffectsV1: { [effect.effectId]: record(true, false) } });
+      await expect(manager.applyDocumentConversionContextEffect(effect, mockContextManager)).resolves.toBe("repaired");
+      expect(mockContextManager.addToContextFiles).toHaveBeenCalledTimes(1);
+      expect(mockContextManager.triggerContextChange).toHaveBeenCalledTimes(1);
+    });
+
+    it("replays safely after cancellation at each mutation/ack boundary", async () => {
+      const boundaries = ["identity", "projection", "projection-state", "notification"] as const;
+      for (const boundary of boundaries) {
+        jest.clearAllMocks();
+        let saved: any = { settingsSentinel: true };
+        let linkPresent = false;
+        const controller = new AbortController();
+        mockPlugin.loadData.mockImplementation(async () => saved);
+        mockPlugin.saveData.mockImplementation(async (data: any) => {
+          saved = JSON.parse(JSON.stringify(data));
+          const state = data.managedDocumentContextEffectsV1[effect.effectId];
+          if (boundary === "identity" && !state.projectionMutated) controller.abort();
+          if (boundary === "projection-state" && state.projectionMutated && !state.notificationAcknowledged) controller.abort();
+        });
+        (mockContextManager.hasContextFile as jest.Mock).mockImplementation(() => linkPresent);
+        (mockContextManager.addToContextFiles as jest.Mock).mockImplementation(() => {
+          linkPresent = true;
+          if (boundary === "projection") controller.abort();
+          return true;
+        });
+        (mockContextManager.triggerContextChange as jest.Mock).mockImplementation(async () => {
+          if (boundary === "notification") controller.abort();
+        });
+        await expect(manager.applyDocumentConversionContextEffect({ ...effect, signal: controller.signal }, mockContextManager))
+          .rejects.toMatchObject({ name: "AbortError" });
+
+        const additionsBeforeReplay = (mockContextManager.addToContextFiles as jest.Mock).mock.calls.length;
+        const notificationsBeforeReplay = (mockContextManager.triggerContextChange as jest.Mock).mock.calls.length;
+        const replayContext = createMockContextManager();
+        (replayContext.hasContextFile as jest.Mock).mockImplementation(() => linkPresent);
+        (replayContext.addToContextFiles as jest.Mock).mockImplementation(() => { linkPresent = true; return true; });
+        await expect(manager.applyDocumentConversionContextEffect(effect, replayContext)).resolves.toBe("repaired");
+        expect((replayContext.addToContextFiles as jest.Mock).mock.calls.length + additionsBeforeReplay).toBe(linkPresent ? 1 : 0);
+        expect(replayContext.triggerContextChange).toHaveBeenCalledTimes(boundary === "notification" ? 1 : 1);
+        expect(notificationsBeforeReplay).toBe(boundary === "notification" ? 1 : 0);
+      }
+    });
+
+    it("rejects effect ID reuse with different data", async () => {
+      mockPlugin.loadData.mockResolvedValue({ managedDocumentContextEffectsV1: { [effect.effectId]: { ...record(true, true), outputPath: "different.md" } } });
+      await expect(manager.applyDocumentConversionContextEffect(effect, mockContextManager)).rejects.toThrow("identity conflict");
+      expect(mockContextManager.addToContextFiles).not.toHaveBeenCalled();
     });
   });
 
@@ -123,16 +232,6 @@ describe("DocumentContextManager", () => {
         expect(mockContextManager.addToContextFiles).not.toHaveBeenCalled();
       });
 
-      it("returns false when license check fails", async () => {
-        const file = createMockFile();
-        mockCheckLicenseForFile.mockResolvedValue(false);
-
-        const result = await manager.addFileToContext(file, mockContextManager);
-
-        expect(result).toBe(false);
-        expect(mockContextManager.addToContextFiles).not.toHaveBeenCalled();
-      });
-
       it("does not save changes when saveChanges is false", async () => {
         const file = createMockFile();
 
@@ -145,7 +244,7 @@ describe("DocumentContextManager", () => {
     describe("document files", () => {
       it("processes PDF and adds extracted content to context", async () => {
         const file = createMockFile({ path: "test/doc.pdf", extension: "pdf", basename: "doc" });
-        mockProcessDocument.mockResolvedValue("Extractions/doc/doc.md");
+        resolveDocument("Extractions/doc/doc.md");
         (mockApp.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(null);
         (mockApp.vault.getAllLoadedFiles as jest.Mock).mockReturnValue([]);
 
@@ -164,21 +263,29 @@ describe("DocumentContextManager", () => {
         );
       });
 
-      it("processes DOCX files", async () => {
+      it("rejects unsupported Office files without managed processing or context routing", async () => {
         const file = createMockFile({ path: "test/doc.docx", extension: "docx", basename: "doc" });
-        mockProcessDocument.mockResolvedValue("Extractions/doc/doc.md");
-        (mockApp.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(null);
-        (mockApp.vault.getAllLoadedFiles as jest.Mock).mockReturnValue([]);
+
+        const result = await manager.addFileToContext(file, mockContextManager);
+
+        expect(result).toBe(false);
+        expect(mockProcessDocument).not.toHaveBeenCalled();
+        expect(mockContextManager.addToContextFiles).not.toHaveBeenCalled();
+      });
+
+      it("keeps images local when adding them to context", async () => {
+        const file = createMockFile({ path: "images/diagram.png", extension: "png", basename: "diagram" });
 
         const result = await manager.addFileToContext(file, mockContextManager);
 
         expect(result).toBe(true);
-        expect(mockProcessDocument).toHaveBeenCalled();
+        expect(mockProcessDocument).not.toHaveBeenCalled();
+        expect(mockContextManager.addToContextFiles).toHaveBeenCalledWith("[[images/diagram.png]]");
       });
 
       it("handles document processing error", async () => {
         const file = createMockFile({ path: "test/doc.pdf", extension: "pdf" });
-        mockProcessDocument.mockRejectedValue(new Error("Processing failed"));
+        mockProcessDocument.mockRejectedValueOnce(new Error("Processing failed"));
 
         const result = await manager.addFileToContext(file, mockContextManager);
 
@@ -194,16 +301,7 @@ describe("DocumentContextManager", () => {
 
       it("adds extracted images to context", async () => {
         const file = createMockFile({ path: "test/doc.pdf", extension: "pdf", basename: "doc" });
-        mockProcessDocument.mockResolvedValue("Extractions/doc/doc.md");
-
-        const mockExtractedFile = new TFile({ path: "Extractions/doc/doc.md" });
-        const mockParentFolder = new TFolder({ path: "Extractions/doc" });
-        (mockExtractedFile as any).parent = mockParentFolder;
-
-        const mockImageFile = new TFile({ path: "Extractions/doc/images-123/image1.png" });
-
-        (mockApp.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(mockExtractedFile);
-        (mockApp.vault.getAllLoadedFiles as jest.Mock).mockReturnValue([mockImageFile]);
+        resolveDocument("Extractions/doc/doc.md", ["Extractions/doc/images-123/image1.png"]);
 
         const result = await manager.addFileToContext(file, mockContextManager);
 

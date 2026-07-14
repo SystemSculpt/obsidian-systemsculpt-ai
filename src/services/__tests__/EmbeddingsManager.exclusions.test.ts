@@ -5,9 +5,10 @@ jest.mock("../embeddings/storage/EmbeddingsStorage", () => {
     clear: jest.fn(),
     getAllVectors: jest.fn(() => []),
     getVectorsByPath: jest.fn(() => []),
+    peekCurrentManagedNamespace: jest.fn(() => null),
     size: jest.fn(() => 0),
     storeVectors: jest.fn(),
-    removeByNamespacePrefix: jest.fn(),
+    removeCurrentManagedGeneration: jest.fn(),
     removeByPath: jest.fn(),
     removeByPathExceptIds: jest.fn(),
     moveVectorId: jest.fn(),
@@ -32,14 +33,11 @@ jest.mock("../embeddings/processing/EmbeddingsProcessor", () => {
     EmbeddingsProcessor: jest.fn().mockImplementation(() => ({
       processFiles: jest.fn(),
       cancel: jest.fn(),
-      setProvider: jest.fn(),
+      setConfig: jest.fn(),
+      cleanup: jest.fn(),
     })),
   };
 });
-
-jest.mock("../../core/ui/notifications", () => ({
-  showNoticeWhenReady: jest.fn(),
-}));
 
 import { EmbeddingsManager } from "../embeddings/EmbeddingsManager";
 
@@ -47,25 +45,16 @@ function createPluginStub(overrides?: Partial<any>) {
   const settings = {
     vaultInstanceId: "test-vault",
     embeddingsVectorFormatVersion: 2,
-    embeddingsProvider: "systemsculpt",
-    embeddingsCustomEndpoint: "",
-    embeddingsCustomApiKey: "",
-    embeddingsCustomModel: "",
-    embeddingsModel: "",
-    embeddingsBatchSize: 8,
-    embeddingsAutoProcess: false,
     embeddingsExclusions: {
       folders: [],
       patterns: [],
       ignoreChatHistory: true,
       respectObsidianExclusions: true,
     },
-    embeddingsRateLimitPerMinute: 30,
     embeddingsEnabled: true,
-    embeddingsQuietPeriodMs: 500,
     licenseKey: "fake-license",
     licenseValid: true,
-    serverUrl: "https://api.systemsculpt.com/api/v1",
+    serverUrl: "https://systemsculpt.com/api/plugin",
     chatsDirectory: "SystemSculpt/Chats",
     savedChatsDirectory: "SystemSculpt/Saved Chats",
     ...(overrides?.settings || {}),
@@ -88,6 +77,7 @@ function createPluginStub(overrides?: Partial<any>) {
       emit: jest.fn(),
       on: jest.fn(() => jest.fn()),
     },
+    getManagedCapabilityClient: jest.fn(() => ({ request: jest.fn() })),
     ...(overrides || {}),
   };
 }

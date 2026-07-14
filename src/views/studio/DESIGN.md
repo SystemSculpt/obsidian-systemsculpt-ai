@@ -73,6 +73,6 @@ Show ALL their config fields on the card — prompt, model, command, URL, timeou
 ## Architecture Notes
 
 - **DOM**: Pure DOM manipulation via Obsidian's `createDiv`/`createEl` API. No React, Svelte, or virtual DOM.
-- **CSS file**: `src/css/views/studio.css` (plus `src/css/views/studio-editors.css`) is the single source of truth for all studio visual styles.
+- **CSS modules**: `src/css/views/studio/` is the single source of truth for Studio visual styles. `src/css/index.css` lists the modules in their required cascade order; ownership is documented in `src/css/README.md`.
 - **Node targeting**: Use `[data-node-kind="studio.*"]` attribute selectors for per-type CSS overrides.
 - **Positioning**: Node cards use `position: absolute` + `transform: translate()` set from TypeScript. This is the one acceptable inline style pattern.

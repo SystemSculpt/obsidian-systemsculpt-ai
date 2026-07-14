@@ -14,8 +14,8 @@ jest.mock("obsidian", () => ({
       const match = line.match(/^(\w+):\s*(.*)$/);
       if (match) {
         const [, key, value] = match;
-        if (value.startsWith("[") && !value.startsWith("[[")) {
-          // Array
+        if ((value.startsWith("[") && !value.startsWith("[[")) || value.startsWith("{")) {
+          // JSON-backed arrays and objects emitted by the focused test helper.
           result[key] = JSON.parse(value.replace(/'/g, '"'));
         } else if (value === "null" || value === "") {
           result[key] = null;
@@ -48,16 +48,6 @@ describe("ChatMarkdownSerializer", () => {
       expect(result).toContain("<!-- SYSTEMSCULPT-MESSAGE-END -->");
     });
 
-    it("persists pi entry ids on serialized messages", () => {
-      const messages: ChatMessage[] = [
-        { role: "user", content: "Hello!", message_id: "user-1", pi_entry_id: "entry-user-1" },
-      ];
-
-      const result = ChatMarkdownSerializer.serializeMessages(messages);
-
-      expect(result).toContain('pi-entry-id="entry-user-1"');
-    });
-
     it("serializes assistant message", () => {
       const messages: ChatMessage[] = [
         { role: "assistant", content: "Hi there!", message_id: "asst-1" },
@@ -69,18 +59,15 @@ describe("ChatMarkdownSerializer", () => {
       expect(result).toContain("Hi there!");
     });
 
-    it("filters out tool role messages", () => {
+    it("rejects standalone tool role messages", () => {
       const messages: ChatMessage[] = [
         { role: "user", content: "Use tool", message_id: "user-1" },
         { role: "tool", content: "Tool result", message_id: "tool-1" } as ChatMessage,
         { role: "assistant", content: "Done", message_id: "asst-1" },
       ];
 
-      const result = ChatMarkdownSerializer.serializeMessages(messages);
-
-      expect(result).toContain("Use tool");
-      expect(result).toContain("Done");
-      expect(result).not.toContain("Tool result");
+      expect(() => ChatMarkdownSerializer.serializeMessages(messages))
+        .toThrow("Managed chat persistence does not support tool messages.");
     });
 
     it("serializes message with messageParts content", () => {
@@ -132,40 +119,6 @@ describe("ChatMarkdownSerializer", () => {
       expect(result).toContain('has-tool-calls="true"');
     });
 
-    it("serializes legacy format with tool_calls array", () => {
-      const messages: ChatMessage[] = [
-        {
-          role: "assistant",
-          content: "Using tools",
-          message_id: "asst-1",
-          tool_calls: [{ id: "call-1", function: { name: "read_file", arguments: "{}" } }],
-        },
-      ];
-
-      const result = ChatMarkdownSerializer.serializeMessages(messages);
-
-      expect(result).toContain("<!-- TOOL-CALLS");
-      expect(result).toContain("read_file");
-      expect(result).toContain('has-tool-calls="true"');
-    });
-
-    it("serializes legacy format with reasoning string", () => {
-      const messages: ChatMessage[] = [
-        {
-          role: "assistant",
-          content: "The answer is 42",
-          message_id: "asst-1",
-          reasoning: "I calculated this carefully",
-        },
-      ];
-
-      const result = ChatMarkdownSerializer.serializeMessages(messages);
-
-      expect(result).toContain("<!-- REASONING");
-      expect(result).toContain("I calculated this carefully");
-      expect(result).toContain('has-reasoning="true"');
-    });
-
     it("serializes array content with text and images", () => {
       const messages: ChatMessage[] = [
         {
@@ -181,7 +134,114 @@ describe("ChatMarkdownSerializer", () => {
       const result = ChatMarkdownSerializer.serializeMessages(messages);
 
       expect(result).toContain("What is this?");
-      expect(result).toContain("![Image Context](data:image/png;base64,abc123)");
+      expect(result).toContain("Attached image 1");
+      expect(result).toContain("SYSTEMSCULPT-CONTENT-PARTS base64");
+      expect(result).not.toContain("data:image/png;base64,abc123");
+    });
+
+    it("round-trips local attachment identity metadata without exposing it to message text", () => {
+      const message: ChatMessage = {
+        role: "user",
+        message_id: "user-attachments",
+        content: [
+          { type: "text", text: "Compare" },
+          { type: "image_url", image_url: { url: "data:image/png;base64,YWJj" } },
+          { type: "text", text: "--- BEGIN ATTACHED FILE: source.pdf (application/pdf) ---\nExtracted\n--- END ATTACHED FILE: source.pdf ---" },
+        ],
+        attachmentMetadata: [
+          { id: "image-hash", name: "diagram.png", mimeType: "image/png", byteLength: 3, kind: "image", contentPartIndex: 1 },
+          { id: "document-hash", name: "source.pdf", mimeType: "application/pdf", byteLength: 4096, kind: "document", contentPartIndex: 2 },
+        ],
+      };
+      const serialized = ChatMarkdownSerializer.serializeMessages([message]);
+      const markdown = [
+        "---",
+        "id: attachment-chat",
+        "created: 2026-01-01T00:00:00.000Z",
+        "lastModified: 2026-01-01T00:00:00.000Z",
+        "title: Attachments",
+        "---",
+        "",
+        serialized,
+      ].join("\n");
+
+      const parsed = ChatMarkdownSerializer.parseMarkdown(markdown);
+
+      expect(parsed?.messages[0].content).toEqual(message.content);
+      expect(parsed?.messages[0].attachmentMetadata).toEqual(message.attachmentMetadata);
+      expect(String(parsed?.messages[0].content)).not.toContain("attachment-metadata");
+    });
+
+    it("stores ref-backed attachments without embedding multipart payloads in the chat note", () => {
+      const message: ChatMessage = {
+        role: "user",
+        message_id: "user-ref-backed",
+        content: [
+          { type: "text", text: "Compare" },
+          { type: "image_url", image_url: { url: "data:image/png;base64,YWJj" } },
+        ],
+        attachmentMetadata: [{
+          id: "image-hash",
+          name: "diagram.png",
+          mimeType: "image/png",
+          byteLength: 3,
+          kind: "image",
+          contentPartIndex: 1,
+          contentRef: {
+            schema: "systemsculpt-chat-attachment-v1",
+            payload: "image-bytes",
+            sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            byteLength: 3,
+          },
+        }],
+      };
+
+      const serialized = ChatMarkdownSerializer.serializeMessages([message]);
+      expect(serialized).toContain("Compare");
+      expect(serialized).toContain("attachment-metadata=");
+      expect(serialized).not.toContain("SYSTEMSCULPT-CONTENT-PARTS");
+      expect(serialized).not.toContain("data:image/png;base64");
+    });
+
+    it("keeps attachment-only ref-backed messages parseable", () => {
+      const message: ChatMessage = {
+        role: "user",
+        message_id: "user-ref-only",
+        content: [{ type: "image_url", image_url: { url: "data:image/png;base64,YWJj" } }],
+        attachmentMetadata: [{
+          id: "image-hash",
+          name: "diagram.png",
+          mimeType: "image/png",
+          byteLength: 3,
+          kind: "image",
+          contentPartIndex: 0,
+          contentRef: {
+            schema: "systemsculpt-chat-attachment-v1",
+            payload: "image-bytes",
+            sha256: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            byteLength: 3,
+          },
+        }],
+      };
+      const markdown = [
+        "---",
+        "id: attachment-only",
+        "created: 2026-01-01T00:00:00.000Z",
+        "lastModified: 2026-01-01T00:00:00.000Z",
+        "title: Attachment only",
+        "---",
+        "",
+        ChatMarkdownSerializer.serializeMessages([message]),
+      ].join("\n");
+
+      const parsed = ChatMarkdownSerializer.parseMarkdown(markdown);
+
+      expect(parsed?.messages).toEqual([{
+        role: "user",
+        message_id: "user-ref-only",
+        content: "",
+        attachmentMetadata: message.attachmentMetadata,
+      }]);
     });
 
     it("adds streaming attribute when message is streaming", () => {
@@ -210,7 +270,7 @@ describe("ChatMarkdownSerializer", () => {
     const createMarkdown = (metadata: Record<string, any>, body: string): string => {
       const yamlLines = Object.entries(metadata)
         .map(([key, value]) => {
-          if (Array.isArray(value)) {
+          if (value !== null && typeof value === "object") {
             return `${key}: ${JSON.stringify(value)}`;
           }
           return `${key}: ${value}`;
@@ -228,39 +288,19 @@ describe("ChatMarkdownSerializer", () => {
     });
 
     it("returns null for front-matter without id", () => {
-      const content = createMarkdown({ model: "gpt-4" }, "");
+      const content = createMarkdown({ title: "No identity" }, "");
 
       const result = ChatMarkdownSerializer.parseMarkdown(content);
 
       expect(result).toBeNull();
     });
 
-    it("parses pi entry ids from message markers", () => {
-      const content = createMarkdown(
-        { id: "chat-1", model: "gpt-4", created: "2026-03-06T00:00:00.000Z", lastModified: "2026-03-06T00:00:00.000Z", title: "Test" },
-        `<!-- SYSTEMSCULPT-MESSAGE-START role="user" message-id="user-1" pi-entry-id="entry-user-1" -->
-Hello!
-<!-- SYSTEMSCULPT-MESSAGE-END -->`,
-      );
-
-      const result = ChatMarkdownSerializer.parseMarkdown(content);
-
-      expect(result?.messages[0]).toEqual(
-        expect.objectContaining({
-          role: "user",
-          message_id: "user-1",
-          pi_entry_id: "entry-user-1",
-        }),
-      );
-      expect(String(result?.messages[0]?.content || "").trim()).toBe("Hello!");
-    });
-
     it("parses basic metadata", () => {
       const content = createMarkdown(
         {
           id: "chat-123",
-          model: "gpt-4",
           title: "Test Chat",
+          approvalMode: "full-access",
           created: "2024-01-01T00:00:00Z",
           lastModified: "2024-01-01T12:00:00Z",
         },
@@ -271,77 +311,32 @@ Hello!
 
       expect(result).not.toBeNull();
       expect(result?.metadata.id).toBe("chat-123");
-      expect(result?.metadata.model).toBe("gpt-4");
       expect(result?.metadata.title).toBe("Test Chat");
-      expect(result?.metadata.chatBackend).toBe("systemsculpt");
-      expect(result?.metadata.systemMessage).toBeUndefined();
+      expect(result?.metadata.approvalMode).toBe("full-access");
     });
 
-    it("round-trips the per-chat hide system/tool preference (#213, #174, #167)", () => {
-      const base = {
-        model: "gpt-4",
-        title: "Test Chat",
-        created: "2024-01-01T00:00:00Z",
-        lastModified: "2024-01-01T12:00:00Z",
+    it("strictly restores a managed session binding from frontmatter", () => {
+      const managedSession = {
+        id: "mchat_0123456789abcdef0123456789abcdef",
+        revision: 4,
+        boundChatId: "chat-session",
+        checkpointMessageId: "assistant-4",
+        toolsetFingerprint: "2:741638a5:5967d5",
+        budget: { messageCount: 4, imageCount: 0, attachmentBytes: 0, storedJsonBytes: 512 },
       };
+      const content = createMarkdown({
+        id: "chat-session",
+        title: "Session",
+        created: "2026-07-13T00:00:00Z",
+        lastModified: "2026-07-13T00:01:00Z",
+        managedSession,
+      }, "");
 
-      const hidden = ChatMarkdownSerializer.parseMarkdown(
-        createMarkdown({ id: "chat-hidden", ...base, hideSystemMessages: true }, "")
-      );
-      expect(hidden?.metadata.hideSystemMessages).toBe(true);
-
-      const shown = ChatMarkdownSerializer.parseMarkdown(
-        createMarkdown({ id: "chat-shown", ...base, hideSystemMessages: false }, "")
-      );
-      expect(shown?.metadata.hideSystemMessages).toBe(false);
-
-      const unset = ChatMarkdownSerializer.parseMarkdown(
-        createMarkdown({ id: "chat-unset", ...base }, "")
-      );
-      expect(unset?.metadata.hideSystemMessages).toBeUndefined();
-    });
-
-    it("round-trips the per-chat agent-mode preference (#210, #149, #185)", () => {
-      const base = {
-        model: "gpt-4",
-        title: "Test Chat",
-        created: "2024-01-01T00:00:00Z",
-        lastModified: "2024-01-01T12:00:00Z",
-      };
-
-      const on = ChatMarkdownSerializer.parseMarkdown(
-        createMarkdown({ id: "chat-agent-on", ...base, agentModeEnabled: true }, "")
-      );
-      expect(on?.metadata.agentModeEnabled).toBe(true);
-
-      const off = ChatMarkdownSerializer.parseMarkdown(
-        createMarkdown({ id: "chat-agent-off", ...base, agentModeEnabled: false }, "")
-      );
-      expect(off?.metadata.agentModeEnabled).toBe(false);
-
-      // Unset means "follow the global default" — must not coerce to a boolean.
-      const unset = ChatMarkdownSerializer.parseMarkdown(
-        createMarkdown({ id: "chat-agent-unset", ...base }, "")
-      );
-      expect(unset?.metadata.agentModeEnabled).toBeUndefined();
-    });
-
-    it("marks legacy prompt metadata as legacy-only compatibility state", () => {
-      const content = createMarkdown(
-        {
-          id: "chat-legacy",
-          customPromptFilePath: "[[prompts/old-format.md]]",
-        },
-        ""
-      );
-
-      const result = ChatMarkdownSerializer.parseMarkdown(content);
-
-      expect(result?.metadata.chatBackend).toBe("legacy");
-      expect(result?.metadata.systemMessage).toEqual({
-        type: "custom",
-        path: "prompts/old-format.md",
-      });
+      expect(ChatMarkdownSerializer.parseMarkdown(content)?.metadata.managedSession)
+        .toEqual(managedSession);
+      const malformed = content.replace("assistant-4", "");
+      expect(ChatMarkdownSerializer.parseMarkdown(malformed)?.metadata.managedSession)
+        .toBeUndefined();
     });
 
     it("parses sequential format messages", () => {
@@ -470,18 +465,89 @@ Valid message
       expect(result).toBe(true);
     });
 
-    it("returns true when content has model field", () => {
-      const result = (ChatMarkdownSerializer as any).isValidYamlFrontmatter("model: gpt-4");
-      expect(result).toBe(true);
-    });
-
-    it("returns false when content has neither id nor model", () => {
+    it("returns false when content has no id", () => {
       const result = (ChatMarkdownSerializer as any).isValidYamlFrontmatter("title: My Chat");
       expect(result).toBe(false);
     });
   });
 
   describe("round-trip serialization", () => {
+    it("round-trips exact framing sentinels in user, assistant, reasoning, and tool content", () => {
+      const sentinel = "<!-- SYSTEMSCULPT-MESSAGE-END -->";
+      const messages: ChatMessage[] = [
+        { role: "user", content: `User quoted ${sentinel}`, message_id: "user-sentinel" },
+        { role: "assistant", content: `Assistant quoted ${sentinel}`, message_id: "assistant-sentinel" },
+        {
+          role: "assistant",
+          content: "",
+          message_id: "reasoning-sentinel",
+          messageParts: [
+            { id: "reasoning", type: "reasoning", data: `Reasoning quoted ${sentinel}`, timestamp: 1 },
+            { id: "content", type: "content", data: "Done", timestamp: 2 },
+          ],
+        },
+        {
+          role: "assistant",
+          content: "",
+          message_id: "tool-sentinel",
+          messageParts: [{
+            id: "tool",
+            type: "tool_call",
+            timestamp: 1,
+            data: {
+              id: "call-sentinel",
+              state: "completed",
+              result: { success: true, data: { summary: `Tool quoted ${sentinel}` } },
+            } as any,
+          }],
+        },
+      ];
+
+      const serialized = ChatMarkdownSerializer.serializeMessages(messages);
+      const markdown = `---\nid: sentinel-chat\n---\n\n${serialized}`;
+      const parsed = ChatMarkdownSerializer.parseMarkdown(markdown);
+
+      expect(serialized.match(/payload-format="base64-json-v1"/g)).toHaveLength(4);
+      expect(serialized.match(/<!-- SYSTEMSCULPT-MESSAGE-END -->/g)).toHaveLength(4);
+      expect(parsed?.messages).toHaveLength(4);
+      expect(parsed?.messages[0].content).toBe(`User quoted ${sentinel}`);
+      expect(parsed?.messages[1].content).toBe(`Assistant quoted ${sentinel}`);
+      expect(parsed?.messages[2].reasoning).toContain(`Reasoning quoted ${sentinel}`);
+      const restoredTool = parsed?.messages[3].messageParts?.find((part) => part.type === "tool_call");
+      expect((restoredTool?.data as any)?.result?.data?.summary).toBe(`Tool quoted ${sentinel}`);
+    });
+
+    it("round-trips old unencoded chat history without changing its meaning", () => {
+      const legacy = `---
+id: old-history
+---
+
+<!-- SYSTEMSCULPT-MESSAGE-START role="user" message-id="old-user" -->
+Legacy question
+<!-- SYSTEMSCULPT-MESSAGE-END -->
+
+<!-- SYSTEMSCULPT-MESSAGE-START role="assistant" message-id="old-assistant" has-reasoning="true" has-tool-calls="true" -->
+<!-- REASONING
+Legacy reasoning
+-->
+<!-- TOOL-CALLS
+[{"id":"old-call","name":"read","arguments":{"paths":["Old.md"]}}]
+-->
+Legacy answer
+<!-- SYSTEMSCULPT-MESSAGE-END -->`;
+
+      const loaded = ChatMarkdownSerializer.parseMarkdown(legacy);
+      const rewritten = ChatMarkdownSerializer.serializeMessages(loaded?.messages ?? []);
+      const reloaded = ChatMarkdownSerializer.parseMarkdown(`---\nid: old-history\n---\n\n${rewritten}`);
+
+      expect(rewritten).not.toContain("payload-format=");
+      expect(reloaded?.messages).toHaveLength(2);
+      expect(String(reloaded?.messages[0].content).trim()).toBe("Legacy question");
+      expect(String(reloaded?.messages[1].content).trim()).toBe("Legacy answer");
+      expect(reloaded?.messages[1].reasoning).toContain("Legacy reasoning");
+      expect(reloaded?.messages[1].tool_calls?.[0].id).toBe("old-call");
+    });
+
     it("preserves message content through serialize and parse", () => {
       const originalMessages: ChatMessage[] = [
         { role: "user", content: "Hello!", message_id: "user-1" },
@@ -491,7 +557,6 @@ Valid message
       const serialized = ChatMarkdownSerializer.serializeMessages(originalMessages);
       const markdown = `---
 id: test-chat
-model: gpt-4
 ---
 
 ${serialized}`;
@@ -501,6 +566,32 @@ ${serialized}`;
       expect(parsed?.messages).toHaveLength(2);
       expect(parsed?.messages[0].content).toContain("Hello!");
       expect(parsed?.messages[1].content).toContain("Hi there!");
+    });
+
+    it("preserves ordered mixed message content, including image bytes, through reload", () => {
+      const content = [
+        { type: "text" as const, text: "Compare these." },
+        { type: "image_url" as const, image_url: { url: "data:image/webp;base64,YWJj" } },
+        {
+          type: "text" as const,
+          text: "--- BEGIN ATTACHED FILE: notes.md (text/markdown) ---\n# Notes\n--- END ATTACHED FILE: notes.md ---",
+        },
+      ];
+      const serialized = ChatMarkdownSerializer.serializeMessages([{
+        role: "user",
+        content,
+        message_id: "user-mixed",
+      }]);
+      const markdown = `---
+id: test-chat
+---
+
+${serialized}`;
+
+      const parsed = ChatMarkdownSerializer.parseMarkdown(markdown);
+
+      expect(parsed?.messages[0].content).toEqual(content);
+      expect(parsed?.messages[0].messageParts).toBeUndefined();
     });
 
     it("preserves reasoning through serialize and parse", () => {

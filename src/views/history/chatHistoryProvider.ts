@@ -58,7 +58,6 @@ export function createChatHistoryProvider(plugin: SystemSculptPlugin): SystemScu
           subtitle,
           timestampMs,
           searchText,
-          badge: "Managed",
           metadataPath: summary.chatPath,
           isFavorite,
           toggleFavorite: async () => {

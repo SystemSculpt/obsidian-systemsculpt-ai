@@ -120,9 +120,7 @@ describe("VaultFileCache", () => {
       cache.getMarkdownFiles();
       cache.getMarkdownFiles();
 
-      // First call refreshes, subsequent calls use cache
-      const stats = cache.getCacheStats();
-      expect(stats.hits).toBeGreaterThan(0);
+      expect(mockVault.getMarkdownFiles).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -183,8 +181,7 @@ describe("VaultFileCache", () => {
       cache.getMarkdownFileCount();
       cache.getMarkdownFileCount();
 
-      const stats = cache.getCacheStats();
-      expect(stats.hits).toBeGreaterThan(0);
+      expect(mockVault.getMarkdownFiles).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -218,31 +215,6 @@ describe("VaultFileCache", () => {
     });
   });
 
-  describe("getCacheStats", () => {
-    it("returns cache hit/miss statistics", async () => {
-      await cache.initialize();
-
-      // Generate some hits and misses
-      cache.getMarkdownFiles(); // Miss
-      cache.getMarkdownFiles(); // Hit
-      cache.getMarkdownFiles(); // Hit
-
-      const stats = cache.getCacheStats();
-
-      expect(typeof stats.hits).toBe("number");
-      expect(typeof stats.misses).toBe("number");
-      expect(stats.hitRatio).toMatch(/\d+\.\d+%/);
-    });
-
-    it("returns 0% hit ratio when no accesses", async () => {
-      const freshCache = new VaultFileCache(mockApp);
-      const stats = freshCache.getCacheStats();
-
-      expect(stats.hitRatio).toBe("0.0%");
-      freshCache.destroy();
-    });
-  });
-
   describe("destroy", () => {
     it("unregisters event listeners", async () => {
       await cache.initialize();
@@ -256,8 +228,9 @@ describe("VaultFileCache", () => {
       cache.getMarkdownFiles();
       cache.destroy();
 
-      // Should not throw
-      expect(() => cache.getCacheStats()).not.toThrow();
+      mockVault.getMarkdownFiles.mockClear();
+      cache.getMarkdownFiles();
+      expect(mockVault.getMarkdownFiles).toHaveBeenCalledTimes(1);
     });
 
     it("clears pending timeouts", async () => {

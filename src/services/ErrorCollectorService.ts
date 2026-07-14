@@ -28,7 +28,7 @@ export class ErrorCollectorService {
 
     this.maxEarlyLogs = maxLogs;
     (["log", "info", "warn", "error", "debug"] as CapturedLevel[]).forEach((level) => {
-      const original = (console as any)[level]?.bind(console) ?? console.log.bind(console);
+      const original = (console as any)[level]?.bind(console) ?? console.warn.bind(console);
       this.originalConsole[level] = original;
       (console as any)[level] = (...args: any[]) => {
         try {

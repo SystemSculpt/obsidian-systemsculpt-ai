@@ -48,7 +48,7 @@ describe("ChatMarkdownSerializer chronology", () => {
       { id: "reasoning-1", type: "reasoning", timestamp: 1, data: "Plan A" },
       { id: "tool-1", type: "tool_call", timestamp: 2, data: createToolCall("call-1", 2, "web_search") },
       { id: "reasoning-2", type: "reasoning", timestamp: 3, data: "Plan B" },
-      { id: "tool-2", type: "tool_call", timestamp: 4, data: createToolCall("call-2", 4, "mcp-filesystem_read") },
+      { id: "tool-2", type: "tool_call", timestamp: 4, data: createToolCall("call-2", 4, "read") },
       { id: "content-1", type: "content", timestamp: 5, data: "Final answer" },
     ];
 

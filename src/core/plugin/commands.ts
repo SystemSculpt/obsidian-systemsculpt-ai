@@ -1,16 +1,19 @@
-import { App, MarkdownView, Notice, Platform, WorkspaceLeaf, TFile, normalizePath } from "obsidian";
+import { App, Notice, WorkspaceLeaf, TFile, normalizePath } from "obsidian";
 import SystemSculptPlugin from "../../main";
 import { RibbonManager } from "./ribbons";
-import { DebugLogger } from "../../utils/debugLogger";
-import { errorLogger } from "../../utils/errorLogger";
 import { tryCopyToClipboard } from "../../utils/clipboard";
 import { resolveAbsoluteVaultPath } from "../../utils/vaultPathUtils";
 import { WORKFLOW_AUTOMATIONS } from "../../constants/workflowAutomations";
 import { showConfirm } from "../ui/notifications";
-import { PlatformContext } from "../../services/PlatformContext";
+import { getSurfaceOwnerWindow, resolveSurfaceDomContext } from "../ui/surface";
 import type { ChatMessage } from "../../types";
 import { CHAT_VIEW_TYPE, SYSTEMSCULPT_STUDIO_VIEW_TYPE } from "./viewTypes";
 import { STUDIO_PROJECT_EXTENSION } from "../../studio/types";
+import {
+  isAudioFileExtension,
+  isAutoDocumentConversionFileExtension,
+  normalizeFileExtension,
+} from "../../constants/fileTypes";
 
 type StudioCommandViewLike = {
   getViewType(): string;
@@ -36,7 +39,7 @@ type AutomationOption = {
   subtitle?: string;
 };
 
-type ChatViewModule = typeof import("../../views/chatview/ChatView");
+type AgentChatViewModule = typeof import("../../views/chatview/AgentChatView");
 
 async function loadTitleGenerationServiceModule(): Promise<
   typeof import("../../services/TitleGenerationService")
@@ -56,8 +59,8 @@ async function loadAutomationBacklogModalModule(): Promise<
   return await import("../../modals/AutomationBacklogModal");
 }
 
-function loadChatViewModule(): ChatViewModule {
-  return require("../../views/chatview/ChatView");
+function loadAgentChatViewModule(): AgentChatViewModule {
+  return require("../../views/chatview/AgentChatView");
 }
 
 export class CommandManager {
@@ -86,7 +89,6 @@ export class CommandManager {
     this.registerOpenChat();
     this.registerOpenSystemSculptHistory();
     this.registerOpenJanitor();
-    this.registerMeetingProcessor();
     this.registerTranscribeAudioFile();
     this.registerOpenSystemSculptSearch();
     this.registerReloadObsidian();
@@ -96,12 +98,9 @@ export class CommandManager {
     this.registerResumeChat();
     this.registerChangeChatTitle();
     this.registerOpenEmbeddingsView();
-    this.registerQuickFileEdit();
-    this.registerDebugCommands();
     this.registerEmbeddingsDatabaseCommands();
     this.registerRunAutomationCommand();
     this.registerAutomationBacklogCommand();
-    this.registerYouTubeCanvas();
     this.registerSystemSculptStudioCommands();
   }
 
@@ -109,7 +108,7 @@ export class CommandManager {
   private registerToggleAudioRecorder() {
     this.plugin.addCommand({
       id: "toggle-audio-recorder",
-      name: "Toggle Audio Recorder",
+      name: "Toggle audio recorder",
       callback: async () => {
         const alreadyInitialized = this.plugin.hasRecorderService();
         const logger = this.plugin.getLogger();
@@ -145,14 +144,13 @@ export class CommandManager {
           new Notice("Unable to toggle the audio recorder.", 8000);
         }
       },
-      hotkeys: [{ modifiers: ["Mod"], key: "r" }],
     });
   }
 
   private registerOpenChat() {
     this.plugin.addCommand({
       id: "open-systemsculpt-chat",
-      name: "Open SystemSculpt Chat",
+      name: "Open chat",
       callback: async () => {
         await this.ribbonManager.openChatView();
       },
@@ -162,15 +160,7 @@ export class CommandManager {
   private registerOpenSystemSculptHistory() {
     this.plugin.addCommand({
       id: "open-systemsculpt-history",
-      name: "Open SystemSculpt History",
-      callback: () => {
-        this.ribbonManager.openSystemSculptHistoryModal();
-      },
-    });
-
-    this.plugin.addCommand({
-      id: "open-chat-history",
-      name: "Open SystemSculpt Chat History (Legacy Alias)",
+      name: "Open history",
       callback: () => {
         this.ribbonManager.openSystemSculptHistoryModal();
       },
@@ -180,21 +170,9 @@ export class CommandManager {
   private registerOpenJanitor() {
     this.plugin.addCommand({
       id: "open-systemsculpt-janitor",
-      name: "Open SystemSculpt Janitor",
+      name: "Open janitor",
       callback: () => {
         this.ribbonManager.openJanitorModal();
-      },
-    });
-  }
-
-  private registerMeetingProcessor() {
-    this.plugin.addCommand({
-      id: "open-meeting-processor",
-      name: "Open Meeting Processor",
-      callback: async () => {
-        const { MeetingProcessorModal } = await import("../../modals/MeetingProcessorModal");
-        const modal = new MeetingProcessorModal(this.plugin);
-        modal.open();
       },
     });
   }
@@ -214,13 +192,12 @@ export class CommandManager {
   private registerOpenSystemSculptSearch() {
     this.plugin.addCommand({
       id: "open-systemsculpt-search",
-      name: "Open SystemSculpt Search",
+      name: "Open search",
       callback: async () => {
         const { SystemSculptSearchModal } = await import("../../modals/SystemSculptSearchModal");
         const modal = new SystemSculptSearchModal(this.plugin);
         modal.open();
       },
-      hotkeys: [{ modifiers: ["Mod"], key: "k" }],
     });
   }
 
@@ -229,7 +206,7 @@ export class CommandManager {
       id: "reload-obsidian",
       name: "Reload Obsidian",
       callback: () => {
-        window.location.reload();
+        resolveSurfaceDomContext().window.location.reload();
       },
     });
   }
@@ -237,7 +214,7 @@ export class CommandManager {
   private registerOpenSettings() {
     this.plugin.addCommand({
       id: "open-systemsculpt-settings",
-      name: "Open SystemSculpt AI Settings",
+      name: "Open AI settings",
       callback: () => {
         this.plugin.openSettingsTab("account");
       },
@@ -247,7 +224,7 @@ export class CommandManager {
   private registerOpenCreditsBalance() {
     this.plugin.addCommand({
       id: "open-credits-balance",
-      name: "Open Credits & Usage",
+      name: "Open credits & usage",
       callback: async () => {
         await this.plugin.openCreditsBalanceModal({
           settingsTab: "account",
@@ -259,40 +236,21 @@ export class CommandManager {
   private registerChatWithFile() {
     this.plugin.addCommand({
       id: "chat-with-file",
-      name: "Chat with File",
+      name: "Chat with file",
       checkCallback: (checking: boolean) => {
         const activeFile = this.app.workspace.getActiveFile();
         if (!activeFile) return false;
-        const extension = activeFile.extension.toLowerCase();
-        const supportedExtensions = [
-          "md",
-          "txt",
-          "markdown",
-          "pdf",
-          "doc",
-          "docx",
-          "ppt",
-          "pptx",
-          "xls",
-          "xlsx",
-          "mp3",
-          "wav",
-          "m4a",
-          "ogg",
-          "webm",
-          "jpg",
-          "jpeg",
-          "png",
-          "webp",
-          "svg",
-        ];
-        if (!supportedExtensions.includes(extension)) return false;
+        const extension = normalizeFileExtension(activeFile.extension);
+        const supported = ["md", "txt", "markdown", "jpg", "jpeg", "png", "webp", "svg"].includes(extension)
+          || isAutoDocumentConversionFileExtension(extension)
+          || isAudioFileExtension(extension);
+        if (!supported) return false;
         if (!checking) {
           const leaf = this.app.workspace.getLeaf("tab");
-          const { ChatView } = loadChatViewModule();
-          const view = new ChatView(leaf, this.plugin);
+          const { AgentChatView } = loadAgentChatViewModule();
+          const view = new AgentChatView(leaf, this.plugin);
           leaf.open(view).then(async () => {
-            await new Promise((resolve) => setTimeout(resolve, 50));
+            await new Promise((resolve) => getSurfaceOwnerWindow(view.containerEl).setTimeout(resolve, 50));
             this.app.workspace.setActiveLeaf(leaf, { focus: true });
             await view.addFileToContext(activeFile);
             view.focusInput();
@@ -306,7 +264,7 @@ export class CommandManager {
   private registerResumeChat() {
     this.plugin.addCommand({
       id: "resume-chat-from-history",
-      name: "Resume Chat from Current History File",
+      name: "Resume chat from current history file",
       checkCallback: (checking: boolean) => {
         const activeFile = this.app.workspace.getActiveFile();
         
@@ -334,12 +292,12 @@ export class CommandManager {
 
 
   /**
-   * Register command to change/generate title for chats and notes
+   * Register deterministic local title creation for chats and notes.
    */
   private registerChangeChatTitle() {
     this.plugin.addCommand({
       id: "change-chat-title",
-      name: "Change/Generate Title",
+      name: "Create title from content",
       checkCallback: (checking: boolean) => {
         // First check if we're in a chat view
         const chatView = this.getActiveChatView();
@@ -348,19 +306,17 @@ export class CommandManager {
           if (!checking) {
             (async () => {
               // Show initial notice
-              const notice = new Notice("Generating title...", 0);
+              const notice = new Notice("Creating title from content...", 0);
 
               try {
                 const { TitleGenerationService } = await loadTitleGenerationServiceModule();
                 const titleService = TitleGenerationService.getInstance(this.plugin);
                 const title = await titleService.generateTitle(
                   chatView.getMessages(),
-                  (title) => {
-                    // No need to update UI during generation
-                  },
-                  (progress: number, status: string) => {
+                  () => {},
+                  (_progress: number, status: string) => {
                     // Update notice text with progress
-                    notice.setMessage(`Generating title... ${status}`);
+                    notice.setMessage(status);
                   }
                 );
 
@@ -373,7 +329,7 @@ export class CommandManager {
                 }
               } catch (error) {
                 const errorMessage = error instanceof Error ? error.message : String(error);
-                notice.setMessage(`Failed to generate title: ${errorMessage}`);
+                notice.setMessage(`Could not create title: ${errorMessage}`);
                 notice.hide();
               }
             })();
@@ -393,7 +349,7 @@ export class CommandManager {
         // Only allow for markdown notes and Studio workflow files
         if (!this.canGenerateTitleForFile(activeFile)) {
           if (!checking) {
-            new Notice("Title generation is only available for markdown and .systemsculpt files.", 5000);
+            new Notice("Titles can be created only for Markdown and .systemsculpt files.", 5000);
           }
           return false;
         }
@@ -401,19 +357,17 @@ export class CommandManager {
         if (!checking) {
           (async () => {
             // Show initial notice
-            const notice = new Notice("Generating title...", 0);
+            const notice = new Notice("Creating title from content...", 0);
 
             try {
               const { TitleGenerationService } = await loadTitleGenerationServiceModule();
               const titleService = TitleGenerationService.getInstance(this.plugin);
               const title = await titleService.generateTitle(
                 activeFile,
-                (title) => {
-                  // No need to update UI during generation
-                },
-                (progress: number, status: string) => {
+                () => {},
+                (_progress: number, status: string) => {
                   // Update notice text with progress
-                  notice.setMessage(`Generating title... ${status}`);
+                  notice.setMessage(status);
                 }
               );
 
@@ -435,21 +389,20 @@ export class CommandManager {
               }
             } catch (error) {
               const errorMessage = error instanceof Error ? error.message : String(error);
-              notice.setMessage(`Failed to generate title: ${errorMessage}`);
+              notice.setMessage(`Could not create title: ${errorMessage}`);
               notice.hide();
             }
           })();
         }
         return true;
       },
-      hotkeys: [{ modifiers: ["Mod", "Shift"], key: "t" }],
     });
   }
 
   private registerOpenEmbeddingsView() {
     this.plugin.addCommand({
       id: "open-embeddings-view",
-      name: "Open Similar Notes Panel",
+      name: "Open similar notes panel",
       callback: async () => {
         try {
           await this.plugin.getViewManager().activateEmbeddingsView();
@@ -460,28 +413,10 @@ export class CommandManager {
     });
   }
 
-  private registerQuickFileEdit() {
-    this.plugin.addCommand({
-      id: "quick-file-edit",
-      name: "Quick Edit (Active File)",
-      checkCallback: (checking: boolean) => {
-        const activeFile = this.app.workspace.getActiveFile();
-        if (!activeFile) return false;
-        if (!checking) {
-          (async () => {
-            const { showQuickEditWidget } = await import("../../components/QuickEditWidget");
-            showQuickEditWidget(this.app, this.plugin);
-          })();
-        }
-        return true;
-      }
-    });
-  }
-
   private registerRunAutomationCommand() {
     this.plugin.addCommand({
       id: "run-workflow-automation",
-      name: "Run Workflow Automation",
+      name: "Run workflow automation",
       callback: async () => {
         const file = this.app.workspace.getActiveFile();
         if (!file) {
@@ -490,13 +425,13 @@ export class CommandManager {
         }
 
         if (file.extension.toLowerCase() !== "md") {
-          new Notice("Automations currently support markdown notes only.", 5000);
+          new Notice("Automations currently support Markdown notes only.", 5000);
           return;
         }
 
         const options = this.buildAutomationOptions();
         if (options.length === 0) {
-          new Notice("No automations available. Enable one under Settings → Workflow.", 5000);
+          new Notice("No automations available. Enable one in workflow settings.", 5000);
           return;
         }
 
@@ -510,7 +445,7 @@ export class CommandManager {
   private registerAutomationBacklogCommand() {
     this.plugin.addCommand({
       id: "open-automation-backlog",
-      name: "Show Automation Backlog",
+      name: "Show automation backlog",
       callback: async () => {
         const { AutomationBacklogModal } = await loadAutomationBacklogModalModule();
         const modal = new AutomationBacklogModal(this.app, this.plugin);
@@ -532,27 +467,11 @@ export class CommandManager {
     });
   }
 
-  private registerYouTubeCanvas() {
-    this.plugin.addCommand({
-      id: "open-youtube-canvas",
-      name: "YouTube Canvas - Extract transcript and create note",
-      callback: async () => {
-        const { YouTubeCanvasModal } = await import("../../modals/YouTubeCanvasModal");
-        new YouTubeCanvasModal(this.app, this.plugin).open();
-      },
-    });
-  }
-
   private registerSystemSculptStudioCommands() {
     this.plugin.addCommand({
       id: "new-systemsculpt-studio-project",
-      name: "New SystemSculpt Studio Project",
+      name: "New Studio project",
       callback: async () => {
-        if (!PlatformContext.get().supportsDesktopOnlyFeatures()) {
-          new Notice("SystemSculpt Studio is desktop-only.");
-          return;
-        }
-
         try {
           const project = await this.createAndOpenStudioProject();
           new Notice(`Created Studio project: ${project.name}`);
@@ -564,13 +483,8 @@ export class CommandManager {
 
     this.plugin.addCommand({
       id: "open-systemsculpt-studio",
-      name: "Open SystemSculpt Studio",
+      name: "Open Studio",
       callback: async () => {
-        if (!PlatformContext.get().supportsDesktopOnlyFeatures()) {
-          new Notice("SystemSculpt Studio is desktop-only.");
-          return;
-        }
-
         try {
           const activeFile = this.app.workspace.getActiveFile();
           const activeStudioFile =
@@ -590,20 +504,15 @@ export class CommandManager {
 
           await this.plugin.getViewManager().activateSystemSculptStudioView(fallbackStudioFile.path);
         } catch (error: any) {
-          new Notice(`Unable to open SystemSculpt Studio: ${error?.message || error}`);
+          new Notice(`Unable to open Studio: ${error?.message || error}`);
         }
       },
     });
 
     this.plugin.addCommand({
       id: "run-systemsculpt-studio-project",
-      name: "Run Current SystemSculpt Studio Project",
+      name: "Run current Studio project",
       callback: async () => {
-        if (!PlatformContext.get().supportsDesktopOnlyFeatures()) {
-          new Notice("SystemSculpt Studio is desktop-only.");
-          return;
-        }
-
         try {
           const studio = this.plugin.getStudioService();
           const projectPath = this.resolveActiveStudioProjectPath();
@@ -625,7 +534,7 @@ export class CommandManager {
 
     this.plugin.addCommand({
       id: "fit-systemsculpt-studio-selection-in-viewport",
-      name: "SystemSculpt Studio: Fit Selection in Viewport",
+      name: "Studio: fit selection in viewport",
       checkCallback: (checking: boolean) => {
         const activeStudioView = this.getActiveStudioView();
         if (!activeStudioView) {
@@ -636,12 +545,11 @@ export class CommandManager {
         }
         return true;
       },
-      hotkeys: [{ modifiers: ["Mod", "Shift"], key: "1" }],
     });
 
     this.plugin.addCommand({
       id: "overview-systemsculpt-studio-graph-in-viewport",
-      name: "SystemSculpt Studio: Overview Graph in Viewport",
+      name: "Studio: overview graph in viewport",
       checkCallback: (checking: boolean) => {
         const activeStudioView = this.getActiveStudioView();
         if (!activeStudioView) {
@@ -656,7 +564,7 @@ export class CommandManager {
 
     this.plugin.addCommand({
       id: "copy-current-file-path",
-      name: "Copy Current File Path",
+      name: "Copy current file path",
       checkCallback: (checking: boolean) => {
         const currentFilePath = this.getCurrentActiveFilePath();
         if (!currentFilePath) {
@@ -668,7 +576,6 @@ export class CommandManager {
         }
         return true;
       },
-      hotkeys: [{ modifiers: ["Mod", "Shift"], key: "c" }],
     });
   }
 
@@ -713,10 +620,6 @@ export class CommandManager {
   }
 
   private getCurrentActiveFilePath(): string | null {
-    if (!PlatformContext.get().supportsDesktopOnlyFeatures()) {
-      return null;
-    }
-
     const activeFile = this.app.workspace.getActiveFile();
     if (activeFile instanceof TFile && activeFile.path) {
       return activeFile.path;
@@ -805,7 +708,7 @@ export class CommandManager {
   private resolveTitleTargetFile(): TFile | null {
     const activeFile = this.app.workspace.getActiveFile();
     if (this.canGenerateTitleForFile(activeFile)) {
-      return activeFile as TFile;
+      return activeFile;
     }
 
     const resolvedPath = this.getCurrentActiveFilePath();
@@ -859,25 +762,11 @@ export class CommandManager {
     new Notice("File path copied to clipboard.");
   }
 
-  private registerDebugCommands() {}
-
-  private getDebuggingGuideContent(): string {
-    return `# SystemSculpt Diagnostics Guide
-
-SystemSculpt no longer records plugin-specific logs. Use these steps when something looks off:
-
-1. Make note of the action you just took and any notices Obsidian displayed.
-2. Capture the workflow or screenshot that best shows the issue.
-3. Share your SystemSculpt version, Obsidian version, and reproduction steps when you contact support.
-
-Without dedicated logs, clear reproduction details are the quickest path to a fix.`;
-  }
-
   private registerEmbeddingsDatabaseCommands() {
     // Diagnostic command for developers/debugging only - not shown in command palette 
     this.plugin.addCommand({
       id: "embeddings-database-stats",
-      name: "Show Embeddings Database Statistics (Debug)",
+      name: "Show embeddings database statistics (debug)",
       checkCallback: (checking: boolean) => {
         // Only show if embeddings are enabled
         const embeddingsEnabled = this.plugin.settings.embeddingsEnabled;
@@ -890,20 +779,20 @@ Without dedicated logs, clear reproduction details are the quickest path to a fi
       }
     });
 
-    // User-visible: force refresh embeddings for current provider/model/schema
+    // User-visible: rebuild the immutable first-party index.
     this.plugin.addCommand({
       id: "rebuild-embeddings-current-model",
-      name: "Rebuild Embeddings (Current Model)",
+      name: "Rebuild SystemSculpt embeddings",
       checkCallback: (checking: boolean) => {
         // Only show if embeddings are enabled
         const enabled = this.plugin.settings.embeddingsEnabled;
         if (!enabled) return false;
         if (!checking) {
-          (async () => {
+          void (async () => {
             try {
               const { confirmed } = await showConfirm(
                 this.app,
-                "This will delete and rebuild embeddings for the current provider/model/schema only.",
+                "This will delete and rebuild the current SystemSculpt embeddings index.",
                 {
                   title: "Rebuild Embeddings",
                   primaryButton: "Rebuild",
@@ -912,12 +801,13 @@ Without dedicated logs, clear reproduction details are the quickest path to a fi
                 }
               );
               if (!confirmed) return;
-              new Notice('Rebuilding embeddings for current model…', 4000);
+              new Notice('Rebuilding SystemSculpt embeddings…', 4000);
               const manager = this.plugin.getOrCreateEmbeddingsManager();
               await manager.forceRefreshCurrentNamespace();
               new Notice('Embeddings rebuild complete.', 4000);
-            } catch (e: any) {
-              new Notice(`Failed to rebuild embeddings: ${e?.message || e}`, 8000);
+            } catch (error: unknown) {
+              const message = error instanceof Error ? error.message : String(error);
+              new Notice(`Failed to rebuild embeddings: ${message}`, 8000);
             }
           })();
         }
@@ -928,14 +818,8 @@ Without dedicated logs, clear reproduction details are the quickest path to a fi
 
   private async showEmbeddingsDatabaseStats(): Promise<void> {
     try {
-      const { Notice } = require("obsidian");
-      
       // Get embeddings manager for stats
       const embeddingsManager = this.plugin.getOrCreateEmbeddingsManager();
-      if (!embeddingsManager) {
-        new Notice("Embeddings manager not available", 5000);
-        return;
-      }
       
       // Get basic stats from embeddings manager
       const isProcessing = embeddingsManager.isCurrentlyProcessing();
@@ -953,9 +837,9 @@ Without dedicated logs, clear reproduction details are the quickest path to a fi
       // Show user-friendly summary
       new Notice(statsText, 8000);
       
-    } catch (error) {
-      const { Notice } = require("obsidian");
-      new Notice(`Error getting database stats: ${error.message}`, 5000);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      new Notice(`Error getting database stats: ${message}`, 5000);
     }
   }
 

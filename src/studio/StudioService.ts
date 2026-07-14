@@ -14,15 +14,11 @@ import {
   type StudioProjectSessionMutationReason,
 } from "./StudioProjectSession";
 import { StudioProjectSessionManager } from "./StudioProjectSessionManager";
-import { resolveStudioDynamicSelectOptions } from "./StudioDynamicSelectOptions";
 import { isBlanketCliCommandPattern, randomId } from "./utils";
 import type {
   StudioAssetRef,
   StudioCapability,
   StudioCapabilityGrant,
-  StudioNodeConfigDynamicOptionsSource,
-  StudioNodeConfigSelectOption,
-  StudioNodeInstance,
   StudioNodeCacheSnapshotV1,
   StudioProjectLintResult,
   StudioProjectV1,
@@ -31,10 +27,68 @@ import type {
 } from "./types";
 import {
   DEFAULT_STUDIO_PROJECTS_DIR,
+  deriveStudioImportsDir,
   normalizeStudioProjectPath,
   sanitizeStudioProjectName,
 } from "./paths";
 import { parseStudioProject } from "./schema";
+import { sha256HexFromArrayBuffer } from "./hash";
+
+const IMPORTED_FILE_SEGMENT_FALLBACK = "import";
+
+function sanitizeImportedFileSegment(value: string): string {
+  const trimmed = String(value || "").trim();
+  const leaf = trimmed.split(/[\\/]/).pop() || "";
+  const sanitized = leaf
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, " ")
+    .replace(/\s+/g, "-")
+    .replace(/[.-]+$/g, "")
+    .trim()
+    .replace(/^-+/g, "");
+  return sanitized || IMPORTED_FILE_SEGMENT_FALLBACK;
+}
+
+function normalizeImportedExtension(extension: string): string {
+  const trimmed = String(extension || "").trim().replace(/^\.+/, "").toLowerCase();
+  if (!trimmed || !/^[a-z0-9]+$/.test(trimmed)) {
+    return "";
+  }
+  return trimmed;
+}
+
+function importedExtensionFromMimeType(mimeType: string): string {
+  const normalized = String(mimeType || "").trim().toLowerCase();
+  if (!normalized) return "";
+  if (normalized === "text/markdown") return "md";
+  if (normalized === "application/json") return "json";
+  if (normalized === "text/plain") return "txt";
+  if (normalized === "image/svg+xml") return "svg";
+  if (normalized.includes("png")) return "png";
+  if (normalized.includes("jpeg") || normalized.includes("jpg")) return "jpg";
+  if (normalized.includes("webp")) return "webp";
+  if (normalized.includes("gif")) return "gif";
+  if (normalized.includes("bmp")) return "bmp";
+  if (normalized.includes("tiff")) return "tiff";
+  if (normalized.includes("mp4")) return "mp4";
+  if (normalized.includes("quicktime")) return "mov";
+  if (normalized.includes("webm")) return "webm";
+  if (normalized.includes("mpeg")) return "mp3";
+  if (normalized.includes("wav")) return "wav";
+  if (normalized.includes("ogg")) return "ogg";
+  if (normalized.includes("pdf")) return "pdf";
+  return "";
+}
+
+function resolveImportedFileName(name: string, mimeType: string, hash: string): string {
+  const rawLeaf = String(name || "").trim().split(/[\\/]/).pop() || "";
+  const dotIndex = rawLeaf.lastIndexOf(".");
+  const hasNameExtension = dotIndex > 0 && dotIndex < rawLeaf.length - 1;
+  const baseName = sanitizeImportedFileSegment(hasNameExtension ? rawLeaf.slice(0, dotIndex) : rawLeaf);
+  const extension = importedExtensionFromMimeType(mimeType)
+    || normalizeImportedExtension(hasNameExtension ? rawLeaf.slice(dotIndex + 1) : "")
+    || "bin";
+  return `${baseName}-${hash.slice(0, 12)}.${extension}`;
+}
 
 export class StudioService {
   private readonly registry = new StudioNodeRegistry();
@@ -47,8 +101,8 @@ export class StudioService {
 
   constructor(private readonly plugin: SystemSculptPlugin) {
     this.projectStore = new StudioProjectStore(plugin.app);
-    this.assetStore = new StudioAssetStore(plugin.app);
-    this.apiAdapter = new StudioApiExecutionAdapter(plugin, this.assetStore);
+    this.assetStore = new StudioAssetStore(this.projectStore);
+    this.apiAdapter = new StudioApiExecutionAdapter(plugin);
     this.runtime = new StudioRuntime(
       plugin.app,
       plugin,
@@ -196,24 +250,6 @@ export class StudioService {
         id: randomId("grant"),
         capability: "filesystem",
         scope: { allowedPaths: ["/"] },
-        grantedAt: new Date().toISOString(),
-        grantedByUser: true,
-      });
-      changed = true;
-    }
-
-    const hasStudioNetwork = policy.grants.some(
-      (grant) =>
-        grant.capability === "network" &&
-        (grant.scope.allowedDomains || []).some((domain) => domain === "api.systemsculpt.com")
-    );
-    if (!hasStudioNetwork) {
-      policy.grants.push({
-        id: randomId("grant"),
-        capability: "network",
-        scope: {
-          allowedDomains: ["api.systemsculpt.com", "systemsculpt.com"],
-        },
         grantedAt: new Date().toISOString(),
         grantedByUser: true,
       });
@@ -437,6 +473,23 @@ export class StudioService {
     return this.assetStore.storeArrayBuffer(targetPath, bytes, mimeType);
   }
 
+  async importFileToProject(
+    projectPath: string,
+    options: { bytes: ArrayBuffer; name?: string; mimeType?: string }
+  ): Promise<string> {
+    const targetPath = this.requireProjectPath(projectPath);
+    const project = await this.projectStore.loadProject(targetPath);
+    const bytes = options.bytes.slice(0);
+    const hash = await sha256HexFromArrayBuffer(bytes);
+    const fileName = resolveImportedFileName(options.name || "", options.mimeType || "", hash);
+    const supportRelativePath = `imports/${fileName}`;
+    await this.projectStore.putSupportFile(targetPath, project.projectId, {
+      supportRelativePath,
+      bytes: new Uint8Array(bytes),
+    });
+    return normalizePath(`${deriveStudioImportsDir(targetPath)}/${fileName}`);
+  }
+
   async readAsset(asset: StudioAssetRef): Promise<ArrayBuffer> {
     return this.assetStore.readArrayBuffer(asset);
   }
@@ -472,13 +525,4 @@ export class StudioService {
     return this.registry.list();
   }
 
-  async resolveDynamicSelectOptions(
-    source: StudioNodeConfigDynamicOptionsSource,
-    _node: StudioNodeInstance
-  ): Promise<StudioNodeConfigSelectOption[]> {
-    return await resolveStudioDynamicSelectOptions({
-      plugin: this.plugin,
-      source,
-    });
-  }
 }

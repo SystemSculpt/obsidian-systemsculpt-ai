@@ -8,6 +8,7 @@ jest.mock("../embeddings/storage/EmbeddingsStorage", () => {
     upgradeVectorsToCanonicalFormat: jest.fn(async () => ({ updated: 0, skipped: 0, removed: 0 })),
     backfillRootCompleteness: jest.fn(async () => ({ updated: 0, skipped: 0 })),
     getAllVectors: jest.fn(() => []),
+    peekCurrentManagedNamespace: jest.fn(() => null),
     size: jest.fn(() => 0),
     storeVectors: jest.fn(),
     purgeCorruptedVectors: jest.fn(() => ({
@@ -37,10 +38,6 @@ jest.mock("../embeddings/storage/EmbeddingsPortableIndex", () => ({
   writeEmbeddingsIndexSnapshot: jest.fn(async () => ({ written: false, count: 0 })),
 }));
 
-jest.mock("../../core/ui/notifications", () => ({
-  showNoticeWhenReady: jest.fn(),
-}));
-
 import { TFile } from "obsidian";
 import { EmbeddingsManager } from "../embeddings/EmbeddingsManager";
 import { EmbeddingsIndexFile } from "../embeddings/storage/EmbeddingsIndexFile";
@@ -49,26 +46,17 @@ import { restoreEmbeddingsIndexIfEmpty } from "../embeddings/storage/EmbeddingsP
 function createPluginStub(settingsOverrides: Record<string, unknown> = {}) {
   const settings = {
     vaultInstanceId: "test-vault",
-    embeddingsVectorFormatVersion: 4,
-    embeddingsProvider: "systemsculpt",
-    embeddingsCustomEndpoint: "",
-    embeddingsCustomApiKey: "",
-    embeddingsCustomModel: "",
-    embeddingsModel: "",
-    embeddingsBatchSize: 8,
-    embeddingsAutoProcess: false,
+    embeddingsVectorFormatVersion: 5,
     embeddingsExclusions: {
       folders: [],
       patterns: [],
       ignoreChatHistory: true,
       respectObsidianExclusions: true,
     },
-    embeddingsRateLimitPerMinute: 30,
     embeddingsEnabled: false,
-    embeddingsQuietPeriodMs: 500,
     licenseKey: "fake-license",
     licenseValid: true,
-    serverUrl: "https://api.systemsculpt.com/api/v1",
+    serverUrl: "https://systemsculpt.com/api/plugin",
     ...settingsOverrides,
   };
 
@@ -90,6 +78,7 @@ function createPluginStub(settingsOverrides: Record<string, unknown> = {}) {
     app: { vault },
     settings,
     emitter: { emit: jest.fn(), on: jest.fn(() => jest.fn()) },
+    getManagedCapabilityClient: jest.fn(() => ({ request: jest.fn() })),
     getSettingsManager: jest.fn(() => ({ updateSettings: jest.fn(async () => {}) })),
   };
 }

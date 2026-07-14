@@ -9,16 +9,22 @@
  *
  * Vectors are encoded as explicit little-endian Float32 bytes (via DataView) and
  * base64'd, so the snapshot round-trips byte-for-byte across platforms. The
- * record `id`/`namespace` already encode `provider:model:vSchema:dimension` with
- * no device identity, so a restored snapshot needs no remapping.
+ * Each record carries a first-party generation namespace with no device
+ * identity, so a restored snapshot needs no remapping.
  *
- * Pure module: no IndexedDB, no Obsidian, no Node — safe to load on mobile.
+ * Pure module: no IndexedDB, no Obsidian, no Node — safe to load in any runtime.
  */
 
 import type { EmbeddingVector } from "../types";
+import { LOCAL_EMPTY_EMBEDDING_NAMESPACE } from "../LocalEmptyEmbeddingMarker";
+import {
+  isManagedNamespace,
+  MANAGED_EMBEDDING_GENERATION,
+  parseNamespaceDimension,
+} from "../utils/namespace";
 
 /** Bump when the envelope shape changes incompatibly. */
-export const EMBEDDINGS_INDEX_FORMAT = 1;
+export const EMBEDDINGS_INDEX_FORMAT = 2;
 
 export interface SerializedEmbeddingVector {
   id: string;
@@ -72,13 +78,20 @@ function float32ToBase64(vector: Float32Array): string {
 
 function base64ToFloat32(base64: string): Float32Array {
   const bytes = base64ToBytes(base64);
-  const usable = bytes.length - (bytes.length % 4);
-  const out = new Float32Array(usable / 4);
-  const view = new DataView(bytes.buffer, bytes.byteOffset, usable);
+  if (bytes.length % 4 !== 0) throw new Error("Invalid Float32 byte length.");
+  const out = new Float32Array(bytes.length / 4);
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.length);
   for (let i = 0; i < out.length; i++) {
     out[i] = view.getFloat32(i * 4, true);
   }
   return out;
+}
+
+function isFiniteVector(vector: Float32Array): boolean {
+  for (let index = 0; index < vector.length; index += 1) {
+    if (!Number.isFinite(vector[index])) return false;
+  }
+  return true;
 }
 
 function parseChunkId(value: unknown, id: string): number {
@@ -152,6 +165,20 @@ export function deserializeEmbeddingsIndex(input: unknown): EmbeddingVector[] {
     } catch {
       continue;
     }
+    if (!isFiniteVector(float)) continue;
+
+    const metadata = record.metadata;
+    const namespace = metadata.namespace;
+    const validLocalEmpty = namespace === LOCAL_EMPTY_EMBEDDING_NAMESPACE
+      && metadata.isEmpty === true
+      && float.length === 1
+      && metadata.dimension === 1;
+    const validManaged = isManagedNamespace(namespace)
+      && metadata.generation === MANAGED_EMBEDDING_GENERATION
+      && float.length > 0
+      && metadata.dimension === float.length
+      && parseNamespaceDimension(namespace) === float.length;
+    if (!validLocalEmpty && !validManaged) continue;
 
     vectors.push({
       id: record.id,

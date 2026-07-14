@@ -26,7 +26,6 @@ describe("chatExport", () => {
       expect(options.includeConversation).toBe(true);
       expect(options.includeUserMessages).toBe(true);
       expect(options.includeAssistantMessages).toBe(true);
-      expect(options.includeToolMessages).toBe(false);
       expect(options.includeReasoning).toBe(true);
       expect(options.includeToolCalls).toBe(true);
       expect(options.includeToolCallArguments).toBe(true);
@@ -103,7 +102,6 @@ describe("chatExport", () => {
         includeConversation: false,
         includeUserMessages: false,
         includeAssistantMessages: false,
-        includeToolMessages: true,
         includeReasoning: false,
         includeToolCalls: false,
         includeToolCallArguments: false,
@@ -157,12 +155,10 @@ describe("chatExport", () => {
 
     it("applies multiple overrides correctly", () => {
       const result = normalizeChatExportOptions({
-        includeToolMessages: true,
         includeImages: false,
         includeReasoning: false,
       });
 
-      expect(result.includeToolMessages).toBe(true);
       expect(result.includeImages).toBe(false);
       expect(result.includeReasoning).toBe(false);
       // Remaining defaults

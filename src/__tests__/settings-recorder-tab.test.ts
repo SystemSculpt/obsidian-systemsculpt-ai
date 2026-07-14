@@ -3,154 +3,222 @@
 import { App } from "obsidian";
 import { displayRecorderTabContent } from "../settings/RecorderTabContent";
 
-jest.mock("../services/PlatformContext", () => ({
-  PlatformContext: {
-    get: jest.fn(() => ({
-      isMobile: jest.fn(() => false),
-    })),
-  },
-}));
+const device = (deviceId: string, label: string): MediaDeviceInfo => ({
+  deviceId,
+  groupId: "group",
+  kind: "audioinput",
+  label,
+  toJSON: () => ({ deviceId, groupId: "group", kind: "audioinput", label }),
+});
 
-function createPlugin(settingsOverrides: Record<string, unknown> = {}) {
-  const app = new App();
-  let plugin: any;
-  // Merge patches into plugin.settings so a re-render reflects the change,
-  // mirroring the real SettingsManager.
-  const updateSettings = jest.fn(async (patch: Record<string, unknown>) => {
-    Object.assign(plugin.settings, patch ?? {});
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((next) => {
+    resolve = next;
   });
-  plugin = {
-    app,
-    settings: {
-      autoTranscribeRecordings: false,
-      autoPasteTranscription: false,
-      keepRecordingsAfterTranscription: true,
-      cleanTranscriptionOutput: true,
-      autoSubmitAfterTranscription: false,
-      postProcessingEnabled: false,
-      postProcessingPrompt: "Custom cleanup instructions",
-      transcriptionProvider: "systemsculpt",
-      customTranscriptionEndpoint: "",
-      customTranscriptionApiKey: "",
-      customTranscriptionModel: "",
-      transcriptionOutputFormat: "markdown",
-      showTranscriptionFormatChooserInModal: true,
-      enableAutoAudioResampling: true,
-      preferredMicrophoneId: "default",
-      ...settingsOverrides,
-    },
-    getSettingsManager: jest.fn(() => ({ updateSettings })),
-  };
-  return { app, plugin, updateSettings };
+  return { promise, resolve };
 }
 
-function render(plugin: any) {
-  const container = document.createElement("div");
-  const tab: any = { app: plugin.app, plugin, display: jest.fn() };
-  return { container, tab };
-}
+const setMediaDevices = (owner: Navigator, mediaDevices: unknown): void => {
+  Object.defineProperty(owner, "mediaDevices", {
+    configurable: true,
+    value: mediaDevices,
+  });
+};
+
+const installObsidianDomHelpers = (ownerWindow: Window): void => {
+  const source = HTMLElement.prototype as unknown as Record<string, unknown>;
+  const target = (ownerWindow as any).HTMLElement.prototype;
+  for (const name of [
+    "setText", "setAttr", "setAttrs", "empty", "createEl", "createDiv",
+    "createSpan", "appendText", "addClass", "removeClass", "toggleClass",
+    "hasClass", "toggle", "setCssStyles", "setCssProps", "hide", "show",
+  ]) {
+    if (name in target || !(name in source)) continue;
+    Object.defineProperty(target, name, Object.getOwnPropertyDescriptor(source, name)!);
+  }
+};
+
+const flush = async (): Promise<void> => {
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
+};
+
+const createPlugin = (app: App) => {
+  const updateSettings = jest.fn().mockResolvedValue(undefined);
+  return {
+    plugin: {
+      app,
+      settings: {
+        autoTranscribeRecordings: false,
+        autoPasteTranscription: false,
+        keepRecordingsAfterTranscription: true,
+        cleanTranscriptionOutput: true,
+        autoSubmitAfterTranscription: false,
+        postProcessingEnabled: false,
+        postProcessingPrompt: "Clean it up",
+        transcriptionOutputFormat: "markdown",
+        showTranscriptionFormatChooserInModal: true,
+        enableAutoAudioResampling: true,
+        preferredMicrophoneId: "default",
+      },
+      getSettingsManager: jest.fn(() => ({ updateSettings })),
+    },
+    updateSettings,
+  };
+};
+
+const createTabHarness = (app: App, plugin: unknown) => {
+  const cleanups = new Set<() => void>();
+  const tab = {
+    app,
+    plugin,
+    registerRenderCleanup: jest.fn((cleanup: () => void) => {
+      cleanups.add(cleanup);
+      return () => {
+        cleanups.delete(cleanup);
+      };
+    }),
+  };
+  return {
+    tab,
+    cleanup: () => {
+      const pending = [...cleanups];
+      cleanups.clear();
+      pending.forEach((cleanup) => cleanup());
+    },
+  };
+};
 
 describe("Recorder settings tab", () => {
-  beforeEach(() => {
-    jest.clearAllMocks();
-    document.body.innerHTML = "";
-    Object.defineProperty(global.navigator, "mediaDevices", {
-      configurable: true,
-      value: {
-        enumerateDevices: jest.fn().mockResolvedValue([]),
-        getUserMedia: jest.fn().mockResolvedValue({ getTracks: () => [{ stop: jest.fn() }] }),
-      },
-    });
+  const originalMediaDevices = Object.getOwnPropertyDescriptor(navigator, "mediaDevices");
+
+  afterEach(() => {
+    document.body.empty();
+    if (originalMediaDevices) {
+      Object.defineProperty(navigator, "mediaDevices", originalMediaDevices);
+    } else {
+      delete (navigator as Navigator & { mediaDevices?: MediaDevices }).mediaDevices;
+    }
   });
 
-  it("offers a transcription provider choice and hides custom controls on SystemSculpt", async () => {
-    const { plugin } = createPlugin({ transcriptionProvider: "systemsculpt" });
-    const { container, tab } = render(plugin);
+  it("offers local recorder/output controls without provider, endpoint, key, or model configuration", async () => {
+    setMediaDevices(navigator, {
+      enumerateDevices: jest.fn().mockResolvedValue([]),
+      getUserMedia: jest.fn().mockResolvedValue({ getTracks: () => [{ stop: jest.fn() }] }),
+    });
+    const app = new App();
+    const { plugin } = createPlugin(app);
+    const { tab } = createTabHarness(app, plugin);
+    const container = document.createElement("div");
 
-    await displayRecorderTabContent(container, tab);
+    await displayRecorderTabContent(container, tab as any);
 
-    const names = Array.from(container.querySelectorAll(".setting-item-name")).map((el) =>
-      el.textContent?.trim()
-    );
-    // The provider is now configurable...
-    expect(names).toContain("Transcription provider");
-    // ...but custom-endpoint controls stay hidden until "custom" is chosen.
+    const names = [...container.querySelectorAll(".setting-item-name")].map((element) => element.textContent?.trim());
+    expect(names).toContain("Auto-transcribe recordings");
+    expect(names).toContain("Default transcription output format");
+    expect(names).toContain("Automatic audio format conversion");
+    expect(names).not.toContain("Transcription provider");
     expect(names).not.toContain("Custom endpoint URL");
     expect(names).not.toContain("API key");
     expect(names).not.toContain("Model name");
-    // Unrelated recorder settings remain.
-    expect(names).toContain("Transcription clean-up prompt");
-    expect(names).toContain("Automatic audio format conversion");
+    expect(names).not.toContain("Post-processing model");
   });
 
-  it("reveals the self-hosted Whisper controls + validation when provider is custom", async () => {
-    const { plugin } = createPlugin({
-      transcriptionProvider: "custom",
-      customTranscriptionEndpoint: "https://api.groq.com/openai/v1/audio/transcriptions",
-      customTranscriptionApiKey: "gsk_test",
-      customTranscriptionModel: "whisper-large-v3",
+  it("uses the settings surface owner realm and preserves microphone persistence", async () => {
+    const frame = document.createElement("iframe");
+    document.body.appendChild(frame);
+    const foreignWindow = frame.contentWindow!;
+    installObsidianDomHelpers(foreignWindow);
+    const foreignEnumerate = jest.fn().mockResolvedValue([
+      device("popout", "Popout microphone"),
+    ]);
+    setMediaDevices(foreignWindow.navigator, {
+      enumerateDevices: foreignEnumerate,
+      getUserMedia: jest.fn(),
     });
-    const { container, tab } = render(plugin);
-
-    await displayRecorderTabContent(container, tab);
-
-    const text = container.textContent || "";
-    const names = Array.from(container.querySelectorAll(".setting-item-name")).map((el) =>
-      el.textContent?.trim()
-    );
-    expect(names).toContain("Transcription provider");
-    expect(names).toContain("Custom endpoint URL");
-    expect(names).toContain("API key");
-    expect(names).toContain("Model name");
-    // The documented contract is surfaced to the user.
-    expect(text).toContain("multipart/form-data");
-    // A fully-configured endpoint validates as compatible.
-    expect(text).toContain("Endpoint looks compatible");
-  });
-
-  it("surfaces a config-time error when the custom endpoint is missing", async () => {
-    const { plugin } = createPlugin({
-      transcriptionProvider: "custom",
-      customTranscriptionEndpoint: "",
+    const mainEnumerate = jest.fn().mockRejectedValue(new Error("main realm used"));
+    setMediaDevices(navigator, {
+      enumerateDevices: mainEnumerate,
+      getUserMedia: jest.fn(),
     });
-    const { container, tab } = render(plugin);
+    const app = new App();
+    const { plugin, updateSettings } = createPlugin(app);
+    const { tab } = createTabHarness(app, plugin);
+    const container = foreignWindow.document.body.createDiv();
 
-    await displayRecorderTabContent(container, tab);
+    await displayRecorderTabContent(container, tab as any);
 
-    const errorNote = container.querySelector(".ss-inline-note--error")?.textContent || "";
-    expect(errorNote).toMatch(/required/i);
+    const select = container.querySelector("select") as HTMLSelectElement;
+    expect(Array.from(select.options).map((option) => option.text)).toContain("Popout microphone");
+    expect(select.ownerDocument).toBe(foreignWindow.document);
+    expect(foreignEnumerate).toHaveBeenCalledTimes(1);
+    expect(mainEnumerate).not.toHaveBeenCalled();
+
+    select.value = "popout";
+    select.dispatchEvent(new foreignWindow.Event("change"));
+    await flush();
+    expect(updateSettings).toHaveBeenCalledWith({ preferredMicrophoneId: "popout" });
   });
 
-  it("switches to custom and reveals the controls when the provider dropdown changes", async () => {
-    const { plugin, updateSettings } = createPlugin({ transcriptionProvider: "systemsculpt" });
-    const { container, tab } = render(plugin);
+  it("renders the existing enumeration rejection copy", async () => {
+    setMediaDevices(navigator, {
+      enumerateDevices: jest.fn().mockRejectedValue(new Error("device query failed")),
+      getUserMedia: jest.fn(),
+    });
+    const app = new App();
+    const { plugin } = createPlugin(app);
+    const { tab } = createTabHarness(app, plugin);
+    const container = document.createElement("div");
 
-    await displayRecorderTabContent(container, tab);
+    await displayRecorderTabContent(container, tab as any);
 
-    const namesBefore = Array.from(container.querySelectorAll(".setting-item-name")).map((el) =>
-      el.textContent?.trim()
+    expect(container.querySelector(".ss-inline-note")?.textContent).toBe(
+      "Unable to load microphones: device query failed",
     );
-    expect(namesBefore).not.toContain("Custom endpoint URL");
+  });
 
-    // The provider <select> is the only one carrying a "systemsculpt" option.
-    const providerSelect = Array.from(container.querySelectorAll("select")).find((select) =>
-      Array.from(select.querySelectorAll("option")).some(
-        (opt) => (opt as HTMLOptionElement).value === "systemsculpt"
-      )
-    ) as HTMLSelectElement | undefined;
-    expect(providerSelect).toBeTruthy();
+  it("invalidates an older render before applying its device result", async () => {
+    const staleDevices = deferred<MediaDeviceInfo[]>();
+    const enumerateDevices = jest
+      .fn()
+      .mockImplementationOnce(() => staleDevices.promise)
+      .mockResolvedValueOnce([device("fresh", "Fresh microphone")]);
+    setMediaDevices(navigator, { enumerateDevices, getUserMedia: jest.fn() });
+    const app = new App();
+    const { plugin } = createPlugin(app);
+    const { tab } = createTabHarness(app, plugin);
+    const staleContainer = document.createElement("div");
+    const freshContainer = document.createElement("div");
 
-    providerSelect!.value = "custom";
-    providerSelect!.dispatchEvent(new Event("change"));
+    const staleRender = displayRecorderTabContent(staleContainer, tab as any);
+    await displayRecorderTabContent(freshContainer, tab as any);
+    expect(freshContainer.textContent).toContain("Fresh microphone");
 
-    // Drain the async onChange (persist + re-render + mic enumerate).
-    for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0));
+    staleDevices.resolve([device("stale", "Stale microphone")]);
+    await staleRender;
 
-    expect(updateSettings).toHaveBeenCalledWith({ transcriptionProvider: "custom" });
-    const namesAfter = Array.from(container.querySelectorAll(".setting-item-name")).map((el) =>
-      el.textContent?.trim()
-    );
-    expect(namesAfter).toContain("Custom endpoint URL");
-    expect(namesAfter).toContain("Model name");
+    expect(staleContainer.textContent).not.toContain("Stale microphone");
+    expect(freshContainer.textContent).toContain("Fresh microphone");
+  });
+
+  it("suppresses a pending result when the settings render unloads", async () => {
+    const lateDevices = deferred<MediaDeviceInfo[]>();
+    setMediaDevices(navigator, {
+      enumerateDevices: jest.fn(() => lateDevices.promise),
+      getUserMedia: jest.fn(),
+    });
+    const app = new App();
+    const { plugin } = createPlugin(app);
+    const harness = createTabHarness(app, plugin);
+    const container = document.createElement("div");
+
+    const render = displayRecorderTabContent(container, harness.tab as any);
+    await Promise.resolve();
+    harness.cleanup();
+    lateDevices.resolve([device("late", "Late microphone")]);
+    await render;
+
+    expect(container.textContent).not.toContain("Late microphone");
+    expect(harness.tab.registerRenderCleanup).toHaveBeenCalledTimes(1);
   });
 });

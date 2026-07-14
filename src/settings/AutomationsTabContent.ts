@@ -66,7 +66,7 @@ export function displayAutomationsTabContent(containerEl: HTMLElement, tabInstan
   });
 
   containerEl.createEl("p", {
-    text: "Tip: Use the command palette → “Run Workflow Automation” to manually process the active note with any enabled automation.",
+    text: "Tip: Use the command palette → “run workflow automation” to manually process the active note with any enabled automation.",
     cls: "setting-item-description",
   });
 

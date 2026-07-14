@@ -42,6 +42,11 @@ describe("RecordingSession", () => {
         extension: "webm",
       },
       preferredMicrophoneId: null,
+      hostContext: {
+        host: {} as HTMLElement,
+        hostDocument: {} as Document,
+        hostWindow: {} as Window,
+      },
       onStatus: jest.fn(),
       onError: jest.fn(),
       onComplete: jest.fn(),
@@ -130,6 +135,23 @@ describe("RecordingSession", () => {
         expect.objectContaining({
           audioBitsPerSecond: 48000,
         })
+      );
+    });
+
+    it("forwards the initiating popout realm to microphone capture", async () => {
+      const hostContext = {
+        host: { id: "popout-body" } as unknown as HTMLElement,
+        hostDocument: { id: "popout-document" } as unknown as Document,
+        hostWindow: { id: "popout-window" } as unknown as Window,
+      };
+      mockOptions.hostContext = hostContext;
+      session = new RecordingSession(mockOptions);
+
+      await session.start();
+
+      expect(MicrophoneRecorder).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ hostContext })
       );
     });
   });

@@ -3,7 +3,7 @@ import {
   consumeExpectedStudioProjectWriteSignature,
   resolveStudioProjectModifyDecision,
   trackExpectedStudioProjectWriteSignature,
-} from "../systemsculpt-studio-view/StudioProjectLiveSync";
+} from "../../../studio/StudioProjectLiveSync";
 
 describe("StudioProjectLiveSync", () => {
   it("computes deterministic signatures", () => {

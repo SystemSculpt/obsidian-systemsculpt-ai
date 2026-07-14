@@ -1,6 +1,5 @@
-import { App, normalizePath, WorkspaceLeaf, TFile, Notice } from 'obsidian';
+import { App, normalizePath, WorkspaceLeaf, TFile } from 'obsidian';
 import { displayNotice } from '../core/ui/notifications';
-import { PlatformContext } from '../services/PlatformContext';
 
 /**
  * Find an existing leaf for a file path across all windows and tabs.
@@ -78,7 +77,7 @@ export async function openFileInMainWorkspace(
   // Case 1: File is open in the same tab group. Switch to it and give it focus.
   if (existingFileLeaf && currentLeaf && existingFileLeaf.parent === currentLeaf.parent) {
     app.workspace.setActiveLeaf(existingFileLeaf, { focus: true });
-    displayNotice(app, {
+    displayNotice({
       title: 'Switched to tab',
       path: normalizedPath
     });
@@ -88,7 +87,7 @@ export async function openFileInMainWorkspace(
   // Case 2: File is open, but in a different pane/window. Focus it without keyboard focus.
   if (existingFileLeaf) {
     app.workspace.setActiveLeaf(existingFileLeaf, { focus: false });
-    displayNotice(app, {
+    displayNotice({
       title: 'Focused existing tab',
       path: normalizedPath,
       message: 'File is in another pane/window.'
@@ -102,38 +101,31 @@ export async function openFileInMainWorkspace(
     let noticeTitle = '';
     let noticeMessage = '';
 
-    if (PlatformContext.get().isMobile()) {
+    let suitablePane: WorkspaceLeaf | null = null;
+    app.workspace.iterateAllLeaves(leaf => {
+      if (leaf.getRoot() === app.workspace.rootSplit && leaf !== currentLeaf) {
+        if (!suitablePane) suitablePane = leaf;
+      }
+    });
+
+    if (suitablePane) {
+      app.workspace.setActiveLeaf(suitablePane, { focus: false });
       targetLeaf = app.workspace.getLeaf('tab');
       noticeTitle = 'Opened in new tab';
+      noticeMessage = 'Added to an existing pane in the main workspace.';
+    } else if (currentLeaf && currentLeaf.getRoot() === app.workspace.rootSplit) {
+      targetLeaf = app.workspace.createLeafBySplit(currentLeaf, 'vertical', true);
+      noticeTitle = 'Opened in new split';
+      noticeMessage = 'Created a side-by-side view with the chat.';
     } else {
-      let suitablePane: WorkspaceLeaf | null = null;
-      app.workspace.iterateAllLeaves(leaf => {
-        if (leaf.getRoot() === app.workspace.rootSplit && leaf !== currentLeaf) {
-          if (!suitablePane) suitablePane = leaf;
-        }
-      });
-
-      if (suitablePane) {
-        app.workspace.setActiveLeaf(suitablePane, { focus: false });
-        targetLeaf = app.workspace.getLeaf('tab');
-        noticeTitle = 'Opened in new tab';
-        noticeMessage = 'Added to an existing pane in the main workspace.';
-      } else {
-        if (currentLeaf && currentLeaf.getRoot() === app.workspace.rootSplit) {
-          targetLeaf = app.workspace.createLeafBySplit(currentLeaf, 'vertical', true);
-          noticeTitle = 'Opened in new split';
-          noticeMessage = 'Created a side-by-side view with the chat.';
-        } else {
-          targetLeaf = app.workspace.getLeaf(true);
-          noticeTitle = 'Opened in new pane';
-          noticeMessage = 'Created a new pane in the main workspace.';
-        }
-      }
+      targetLeaf = app.workspace.getLeaf(true);
+      noticeTitle = 'Opened in new pane';
+      noticeMessage = 'Created a new pane in the main workspace.';
     }
 
     if (targetLeaf) {
       await targetLeaf.openFile(file);
-      displayNotice(app, {
+      displayNotice({
         title: noticeTitle,
         path: normalizedPath,
         message: noticeMessage

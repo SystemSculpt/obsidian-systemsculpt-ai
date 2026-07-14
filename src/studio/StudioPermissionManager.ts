@@ -8,13 +8,6 @@ function wildcardToRegExp(pattern: string): RegExp {
   return new RegExp(`^${replaced}$`);
 }
 
-function hostMatchesDomain(hostname: string, domain: string): boolean {
-  const normalizedHost = String(hostname || "").toLowerCase();
-  const normalizedDomain = String(domain || "").toLowerCase().replace(/^\.+/, "");
-  if (!normalizedHost || !normalizedDomain) return false;
-  return normalizedHost === normalizedDomain || normalizedHost.endsWith(`.${normalizedDomain}`);
-}
-
 export class StudioPermissionManager {
   constructor(private policy: StudioPermissionPolicyV1) {}
 
@@ -89,37 +82,5 @@ export class StudioPermissionManager {
     }
 
     throw new Error(`CLI permission denied for command "${trimmed}".`);
-  }
-
-  public assertNetworkUrl(url: string): void {
-    const raw = String(url || "").trim();
-    if (!raw) {
-      throw new Error("Network permission denied: URL is empty.");
-    }
-
-    let parsed: URL;
-    try {
-      parsed = new URL(raw);
-    } catch {
-      throw new Error(`Network permission denied: invalid URL "${raw}".`);
-    }
-
-    if (parsed.protocol !== "https:") {
-      throw new Error(`Network permission denied: only HTTPS URLs are allowed ("${raw}").`);
-    }
-
-    const hostname = parsed.hostname.toLowerCase();
-    const grants = this.grantsFor("network");
-    for (const grant of grants) {
-      const domains = grant.scope.allowedDomains || [];
-      if (domains.some((domain) => domain.trim() === "*")) {
-        return;
-      }
-      if (domains.some((domain) => hostMatchesDomain(hostname, domain))) {
-        return;
-      }
-    }
-
-    throw new Error(`Network permission denied for domain "${hostname}".`);
   }
 }

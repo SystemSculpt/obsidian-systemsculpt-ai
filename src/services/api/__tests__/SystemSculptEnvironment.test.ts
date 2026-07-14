@@ -1,176 +1,21 @@
-/**
- * @jest-environment node
- */
+/** @jest-environment node */
 import { SystemSculptEnvironment } from "../SystemSculptEnvironment";
-
-// Mock the url helpers
-jest.mock("../../../utils/urlHelpers", () => ({
-  resolveSystemSculptApiBaseUrl: jest.fn(() => "https://api.systemsculpt.com/api/v1"),
-}));
-
-// Mock the API constants
-jest.mock("../../../constants/api", () => ({
-  DEVELOPMENT_MODE: "PRODUCTION",
-  API_BASE_URL: "https://api.systemsculpt.com/api/v1",
-  SYSTEMSCULPT_API_HEADERS: {
-    DEFAULT: {
-      "Content-Type": "application/json",
-      "User-Agent": "SystemSculpt-Obsidian",
-    },
-    WITH_LICENSE: (key: string) => ({
-      "Content-Type": "application/json",
-      "User-Agent": "SystemSculpt-Obsidian",
-      "X-License-Key": key,
-    }),
-  },
-}));
+import { API_BASE_URL } from "../../../constants/api";
 
 describe("SystemSculptEnvironment", () => {
-  describe("resolveBaseUrl", () => {
-    it("uses default API_BASE_URL when no settings provided", () => {
-      const settings = { serverUrl: "" };
-      const url = SystemSculptEnvironment.resolveBaseUrl(settings);
+  it("uses the compiled API base without persisted configuration", () => {
+    expect(SystemSculptEnvironment.resolveBaseUrl()).toBe(API_BASE_URL);
+  });
 
-      expect(url).toBe("https://api.systemsculpt.com/api/v1");
-    });
-
-    it("ignores configured serverUrl in production builds", () => {
-      const settings = { serverUrl: "https://custom.example.com/api/v1" };
-      const url = SystemSculptEnvironment.resolveBaseUrl(settings);
-
-      expect(url).toBe("https://api.systemsculpt.com/api/v1");
-    });
-
-    it("ignores override values in production builds", () => {
-      const settings = { serverUrl: "https://settings.example.com" };
-      const url = SystemSculptEnvironment.resolveBaseUrl(settings, "https://override.example.com");
-
-      expect(url).toBe("https://api.systemsculpt.com/api/v1");
-    });
-
-    it("still resolves to production when both settings and override are provided", () => {
-      const settings = { serverUrl: "https://settings.example.com" };
-      const override = "https://override.example.com/api/v1";
-      const url = SystemSculptEnvironment.resolveBaseUrl(settings, override);
-
-      expect(url).toBe("https://api.systemsculpt.com/api/v1");
-    });
-
-    it("ignores whitespace-padded serverUrl in production builds", () => {
-      const settings = { serverUrl: "  https://custom.example.com  " };
-      const url = SystemSculptEnvironment.resolveBaseUrl(settings);
-
-      expect(url).toBe("https://api.systemsculpt.com/api/v1");
-    });
-
-    it("handles empty override", () => {
-      const settings = { serverUrl: "https://custom.example.com" };
-      const url = SystemSculptEnvironment.resolveBaseUrl(settings, "  ");
-
-      expect(url).toBe("https://api.systemsculpt.com/api/v1");
-    });
-
-    it("handles undefined serverUrl", () => {
-      const settings = { serverUrl: undefined as any };
-      const url = SystemSculptEnvironment.resolveBaseUrl(settings);
-
-      expect(url).toBe("https://api.systemsculpt.com/api/v1");
-    });
-
-    it("forces production API when serverUrl points to localhost", () => {
-      const settings = { serverUrl: "http://localhost:3001/api/v1" };
-      const url = SystemSculptEnvironment.resolveBaseUrl(settings);
-
-      expect(url).toBe("https://api.systemsculpt.com/api/v1");
-    });
-
-    it("forces production API when override points to localhost", () => {
-      const settings = { serverUrl: "https://custom.example.com/api/v1" };
-      const url = SystemSculptEnvironment.resolveBaseUrl(
-        settings,
-        "http://127.0.0.1:3001/api/v1"
-      );
-
-      expect(url).toBe("https://api.systemsculpt.com/api/v1");
+  it("builds anonymous managed headers", () => {
+    expect(SystemSculptEnvironment.buildHeaders()).toMatchObject({
+      "Content-Type": "application/json",
+      Accept: "application/json",
     });
   });
 
-  describe("createConfig", () => {
-    it("returns config with baseUrl and undefined licenseKey", () => {
-      const settings = { serverUrl: "", licenseKey: "" };
-      const config = SystemSculptEnvironment.createConfig(settings);
-
-      expect(config.baseUrl).toBe("https://api.systemsculpt.com/api/v1");
-      expect(config.licenseKey).toBeUndefined();
-    });
-
-    it("includes licenseKey when provided", () => {
-      const settings = { serverUrl: "", licenseKey: "my-license-key" };
-      const config = SystemSculptEnvironment.createConfig(settings);
-
-      expect(config.licenseKey).toBe("my-license-key");
-    });
-
-    it("trims licenseKey whitespace", () => {
-      const settings = { serverUrl: "", licenseKey: "  license-123  " };
-      const config = SystemSculptEnvironment.createConfig(settings);
-
-      expect(config.licenseKey).toBe("license-123");
-    });
-
-    it("keeps production baseUrl even when an override is supplied", () => {
-      const settings = { serverUrl: "", licenseKey: "key" };
-      const config = SystemSculptEnvironment.createConfig(
-        settings,
-        "https://custom.example.com/api/v1"
-      );
-
-      expect(config.baseUrl).toBe("https://api.systemsculpt.com/api/v1");
-    });
-
-    it("returns undefined licenseKey for whitespace-only key", () => {
-      const settings = { serverUrl: "", licenseKey: "   " };
-      const config = SystemSculptEnvironment.createConfig(settings);
-
-      expect(config.licenseKey).toBeUndefined();
-    });
-
-    it("handles null licenseKey", () => {
-      const settings = { serverUrl: "", licenseKey: null as any };
-      const config = SystemSculptEnvironment.createConfig(settings);
-
-      expect(config.licenseKey).toBeUndefined();
-    });
-  });
-
-  describe("buildHeaders", () => {
-    it("returns default headers when no license key", () => {
-      const headers = SystemSculptEnvironment.buildHeaders();
-
-      expect(headers["Content-Type"]).toBe("application/json");
-      expect(headers["User-Agent"]).toBe("SystemSculpt-Obsidian");
-      expect(headers["X-License-Key"]).toBeUndefined();
-    });
-
-    it("returns default headers for empty license key", () => {
-      const headers = SystemSculptEnvironment.buildHeaders("");
-
-      expect(headers["Content-Type"]).toBe("application/json");
-      expect(headers["X-License-Key"]).toBeUndefined();
-    });
-
-    it("includes license key in headers when provided", () => {
-      const headers = SystemSculptEnvironment.buildHeaders("my-license");
-
-      expect(headers["Content-Type"]).toBe("application/json");
-      expect(headers["X-License-Key"]).toBe("my-license");
-    });
-
-    it("returns headers for undefined license key", () => {
-      const headers = SystemSculptEnvironment.buildHeaders(undefined);
-
-      expect(headers["Content-Type"]).toBe("application/json");
-      expect(headers["X-License-Key"]).toBeUndefined();
-    });
+  it("adds the managed license header", () => {
+    expect(SystemSculptEnvironment.buildHeaders("license-key")["x-license-key"])
+      .toBe("license-key");
   });
 });

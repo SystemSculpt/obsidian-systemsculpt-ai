@@ -11,7 +11,6 @@ const OPTION_KEYS: Array<keyof ChatExportOptions> = [
   'includeConversation',
   'includeUserMessages',
   'includeAssistantMessages',
-  'includeToolMessages',
   'includeReasoning',
   'includeToolCalls',
   'includeToolCallArguments',
@@ -101,9 +100,6 @@ export class ChatExportBuilder {
     }
     if (summary.userMessages > 0) {
       bulletLines.push(`- User messages: ${summary.userMessages}`);
-    }
-    if (summary.toolMessages > 0) {
-      bulletLines.push(`- Tool messages: ${summary.toolMessages}`);
     }
     if (summary.toolCallCount > 0) {
       bulletLines.push(`- Tool calls: ${summary.toolCallCount}`);
@@ -206,17 +202,13 @@ export class ChatExportBuilder {
         return options.includeAssistantMessages;
       case 'user':
         return options.includeUserMessages;
-      case 'tool':
-        return options.includeToolMessages;
-      case 'system':
-        return true;
       default:
-        return true;
+        return false;
     }
   }
 
   private renderMessageBody(
-    message: { content: string | MultiPartContent[] | null; role: string; messageParts?: MessagePart[]; reasoning?: string; tool_calls?: ToolCall[] },
+    message: { content: string | MultiPartContent[] | null; role: string; messageParts?: MessagePart[] },
     options: ChatExportOptions
   ): string[] {
     const output: string[] = [];
@@ -269,9 +261,6 @@ export class ChatExportBuilder {
     const name = toolCall.request?.function?.name || toolCall.request?.id || toolCall.id;
     const state = toolCall.state || 'unknown';
     const headerLines = [`**Tool Call • ${name} (${state})**`];
-    if (toolCall.serverId) {
-      headerLines.push(`Server: ${toolCall.serverId}`);
-    }
     this.pushBlock(lines, headerLines);
 
     if (options.includeToolCallArguments) {

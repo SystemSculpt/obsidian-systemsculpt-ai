@@ -10,7 +10,8 @@ import {
 import type SystemSculptPlugin from "../main";
 import {
   isAudioFileExtension,
-  isDocumentFileExtension,
+  isAutoDocumentConversionFileExtension,
+  isManagedDocumentConversionFileExtension,
   normalizeFileExtension,
 } from "../constants/fileTypes";
 import { DocumentProcessingService } from "../services/DocumentProcessingService";
@@ -18,16 +19,17 @@ import {
   DocumentProcessingFlow,
   DocumentProcessingProgressEvent,
 } from "../types/documentProcessing";
-import { showAudioTranscriptionModal } from "../modals/AudioTranscriptionModal";
+import { launchAudioTranscriptionPanel } from "../modals/AudioTranscriptionPanel";
 import { errorLogger } from "../utils/errorLogger";
 import type { PluginLogger } from "../utils/PluginLogger";
 import {
-  launchDocumentProcessingModal,
-  type DocumentProcessingModalHandle,
-  type DocumentProcessingModalLauncher,
-} from "../modals/DocumentProcessingModal";
+  launchDocumentProcessingPanel,
+  type DocumentProcessingPanelHandle,
+  type DocumentProcessingPanelLauncher,
+} from "../modals/DocumentProcessingPanel";
 import { TranscriptionTitleService } from "../services/transcription/TranscriptionTitleService";
 import { tryCopyImageFileToClipboard } from "../utils/clipboard";
+import { getSurfaceOwnerWindow } from "../core/ui/surface";
 
 const CHAT_TEXT_EXTENSIONS = new Set(["md", "txt", "markdown"]);
 const CHAT_IMAGE_EXTENSIONS = new Set([
@@ -48,10 +50,10 @@ const CONVERT_MENU_TITLE = "Convert to Markdown";
 
 type ProcessingFlow = "document" | "audio";
 
-type ChatViewModule = typeof import("../views/chatview/ChatView");
+type AgentChatViewModule = typeof import("../views/chatview/AgentChatView");
 
-function loadChatViewModule(): ChatViewModule {
-  return require("../views/chatview/ChatView");
+function loadAgentChatViewModule(): AgentChatViewModule {
+  return require("../views/chatview/AgentChatView");
 }
 
 export interface DocumentProcessor {
@@ -59,9 +61,9 @@ export interface DocumentProcessor {
     file: TFile,
     options?: {
       onProgress?: (event: DocumentProcessingProgressEvent) => void;
-      addToContext?: boolean;
       showNotices?: boolean;
       flow?: DocumentProcessingFlow;
+      signal?: AbortSignal;
     }
   ): Promise<string>;
 }
@@ -76,7 +78,7 @@ interface FileContextMenuServiceOptions {
   documentProcessor?: DocumentProcessor;
   chatLauncher?: ChatWithFileLauncher;
   pluginLogger?: PluginLogger | null;
-  launchProcessingModal?: DocumentProcessingModalLauncher;
+  launchProcessingPanel?: DocumentProcessingPanelLauncher;
 }
 
 interface MenuContext {
@@ -90,15 +92,15 @@ class DefaultChatWithFileLauncher implements ChatWithFileLauncher {
 
   async open(file: TFile): Promise<void> {
     const leaf = this.app.workspace.getLeaf("tab");
-    const { ChatView } = loadChatViewModule();
-    const view = new ChatView(leaf, this.plugin);
+    const { AgentChatView } = loadAgentChatViewModule();
+    const view = new AgentChatView(leaf, this.plugin);
     await leaf.open(view);
-    await this.focusLeaf(leaf);
+    await this.focusLeaf(leaf, view.containerEl);
     await view.addFileToContext(file);
   }
 
-  private async focusLeaf(leaf: WorkspaceLeaf) {
-    await new Promise((resolve) => setTimeout(resolve, 50));
+  private async focusLeaf(leaf: WorkspaceLeaf, host: HTMLElement) {
+    await new Promise((resolve) => getSurfaceOwnerWindow(host).setTimeout(resolve, 50));
     this.app.workspace.setActiveLeaf(leaf, { focus: true });
   }
 }
@@ -109,11 +111,12 @@ export class FileContextMenuService {
   private readonly documentProcessor: DocumentProcessor;
   private readonly chatLauncher: ChatWithFileLauncher;
   private readonly pluginLogger: PluginLogger | null;
-  private readonly launchProcessingModal: DocumentProcessingModalLauncher;
+  private readonly launchProcessingPanel: DocumentProcessingPanelLauncher;
   private eventRefs: EventRef[] = [];
   private started = false;
   private awaitingLayoutReady = false;
   private cleanupRegistered = false;
+  private activeDocumentConversion: AbortController | null = null;
 
   constructor(options: FileContextMenuServiceOptions) {
     this.app = options.app;
@@ -128,16 +131,7 @@ export class FileContextMenuService {
       (typeof (this.plugin as any).getPluginLogger === "function"
         ? (this.plugin as any).getPluginLogger()
         : null);
-    this.launchProcessingModal =
-      options.launchProcessingModal ??
-      ((modalOptions) =>
-        launchDocumentProcessingModal({
-          app: modalOptions.app ?? this.app,
-          plugin: modalOptions.plugin ?? this.plugin,
-          file: modalOptions.file,
-          onCancel: modalOptions.onCancel,
-          source: modalOptions.source,
-        }));
+    this.launchProcessingPanel = options.launchProcessingPanel ?? launchDocumentProcessingPanel;
 
     this.start();
   }
@@ -208,6 +202,8 @@ export class FileContextMenuService {
   }
 
   stop(): void {
+    this.activeDocumentConversion?.abort();
+    this.activeDocumentConversion = null;
     if (!this.started) {
       return;
     }
@@ -274,7 +270,7 @@ export class FileContextMenuService {
     this.logMenuOpen(file, extension, context);
     const shouldChat = this.shouldOfferChatWithFile(extension);
     const shouldCopyImage = this.shouldOfferCopyImage(extension);
-    const shouldConvertDocument = isDocumentFileExtension(extension);
+    const shouldConvertDocument = isManagedDocumentConversionFileExtension(extension);
     const shouldConvertAudio = isAudioFileExtension(extension);
 
     this.debug("Evaluating menu population", {
@@ -331,7 +327,7 @@ export class FileContextMenuService {
 
     return (
       CHAT_TEXT_EXTENSIONS.has(extension) ||
-      isDocumentFileExtension(extension) ||
+      isAutoDocumentConversionFileExtension(extension) ||
       isAudioFileExtension(extension) ||
       CHAT_IMAGE_EXTENSIONS.has(extension)
     );
@@ -342,7 +338,7 @@ export class FileContextMenuService {
     return (
       this.shouldOfferChatWithFile(ext) ||
       this.shouldOfferCopyImage(ext) ||
-      isDocumentFileExtension(ext) ||
+      isManagedDocumentConversionFileExtension(ext) ||
       isAudioFileExtension(ext)
     );
   }
@@ -355,7 +351,7 @@ export class FileContextMenuService {
   private addChatWithFileMenuItem(menu: Menu, file: TFile, context: MenuContext): void {
     menu.addItem((item) => {
       item
-        .setTitle("SystemSculpt - Chat with File")
+        .setTitle("Chat with file")
         .setIcon("message-square")
         .setSection("systemsculpt")
         .onClick(async () => {
@@ -378,7 +374,7 @@ export class FileContextMenuService {
   private addCopyImageToClipboardMenuItem(menu: Menu, file: TFile, context: MenuContext): void {
     menu.addItem((item) => {
       item
-        .setTitle("SystemSculpt - Copy Image to Clipboard")
+        .setTitle("Copy image to clipboard")
         .setIcon("copy")
         .setSection("systemsculpt")
         .onClick(async () => {
@@ -403,11 +399,7 @@ export class FileContextMenuService {
     flow: ProcessingFlow,
     context: MenuContext
   ): void {
-    const hasValidLicense = this.hasValidProcessingLicense();
-    const title =
-      flow === "document"
-        ? this.buildConvertMenuTitle(hasValidLicense)
-        : this.buildAudioMenuTitle(hasValidLicense);
+    const title = flow === "document" ? CONVERT_MENU_TITLE : "Convert Audio to Markdown";
     const icon = flow === "document" ? "file-text" : "file-audio";
 
     menu.addItem((item) => {
@@ -419,7 +411,6 @@ export class FileContextMenuService {
           this.info("Convert to Markdown triggered", {
             filePath: file.path,
             flow,
-            hasValidLicense,
             source: context.source,
           });
 
@@ -432,76 +423,74 @@ export class FileContextMenuService {
     });
   }
 
-  private hasValidProcessingLicense(): boolean {
-    const { licenseKey, licenseValid } = this.plugin.settings ?? {};
-    return Boolean(licenseKey?.trim() && licenseValid);
-  }
-
-  private buildConvertMenuTitle(hasValidLicense: boolean): string {
-    return hasValidLicense ? CONVERT_MENU_TITLE : `${CONVERT_MENU_TITLE} (Pro)`;
-  }
-
-  private buildAudioMenuTitle(hasValidLicense: boolean): string {
-    const base = "Convert Audio to Markdown";
-    return hasValidLicense ? base : `${base} (Pro)`;
-  }
-
   private async handleDocumentConversion(file: TFile): Promise<void> {
     const startedAt = Date.now();
     this.info("Document conversion started", { filePath: file.path });
-    let modalHandle: DocumentProcessingModalHandle | null = null;
+    let progressPanel: DocumentProcessingPanelHandle | null = null;
+    const controller = new AbortController();
+    this.activeDocumentConversion?.abort();
+    this.activeDocumentConversion = controller;
 
     try {
-      modalHandle = this.launchProcessingModal({
-        app: this.app,
+      progressPanel = this.launchProcessingPanel({
         plugin: this.plugin,
         file,
-        source: "context-menu",
+        onCancel: () => controller.abort(),
       });
 
       const extractionPath = await this.documentProcessor.processDocument(file, {
         onProgress: (event) => {
+          if (controller.signal.aborted) return;
           this.handleProgressEvent(file, event);
-          modalHandle?.updateProgress(event);
+          if (controller.signal.aborted) return;
+          progressPanel?.updateProgress(event);
         },
         showNotices: false,
-        addToContext: false,
         flow: "document",
+        signal: controller.signal,
       });
 
+      if (controller.signal.aborted) return;
       const durationMs = Date.now() - startedAt;
-      await this.handleDocumentSuccess(file, extractionPath, durationMs);
+      await this.handleDocumentSuccess(file, extractionPath, durationMs, controller.signal);
+      if (controller.signal.aborted || this.activeDocumentConversion !== controller) return;
 
       const openOutput = async () => {
         await this.openExtractionFile(extractionPath);
       };
 
-      modalHandle?.markSuccess({
+      if (controller.signal.aborted || this.activeDocumentConversion !== controller) return;
+      progressPanel?.markSuccess({
         extractionPath,
         durationMs,
         file,
         openOutput,
       });
     } catch (error: any) {
+      if (controller.signal.aborted || error?.name === "AbortError") return;
       const message = error instanceof Error ? error.message : String(error);
       this.error("Document conversion failed", error, {
         filePath: file.path,
       });
 
-      modalHandle?.markFailure({
+      progressPanel?.markFailure({
         error,
         file,
       });
 
       if (message?.toLowerCase().includes("license")) {
         new Notice(
-          "Document conversion requires an active SystemSculpt Pro license.",
+          "Document conversion requires an active SystemSculpt license.",
           6000
         );
         return;
       }
 
       new Notice(`Document conversion failed: ${message}`, 6000);
+    } finally {
+      if (this.activeDocumentConversion === controller) {
+        this.activeDocumentConversion = null;
+      }
     }
   }
 
@@ -520,8 +509,10 @@ export class FileContextMenuService {
   private async handleDocumentSuccess(
     file: TFile,
     extractionPath: string,
-    durationMs: number
+    durationMs: number,
+    signal?: AbortSignal
   ): Promise<TFile | null> {
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
     this.info("Document conversion complete", {
       filePath: file.path,
       extractionPath,
@@ -529,8 +520,10 @@ export class FileContextMenuService {
     });
 
     new Notice(`Converted ${file.name} to Markdown`, 4000);
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
 
     const output = await this.openExtractionFile(extractionPath);
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
     return output;
   }
 
@@ -562,7 +555,7 @@ export class FileContextMenuService {
     file: TFile,
     timestamped: boolean
   ): Promise<void> {
-    await showAudioTranscriptionModal(this.app, {
+    launchAudioTranscriptionPanel(this.app, {
       file,
       timestamped,
       plugin: this.plugin,

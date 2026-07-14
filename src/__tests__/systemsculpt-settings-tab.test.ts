@@ -26,23 +26,13 @@ jest.mock("../settings/SettingsTabRegistry", () => ({
   ]),
 }));
 
-jest.mock("../core/ui", () => ({
-  showPopup: jest.fn(),
+jest.mock("../core/ui/modals/PromptModal", () => ({
+  showPrompt: jest.fn(),
 }));
 
 const createPluginStub = () => {
   const settingsManager = {
     updateSettings: jest.fn().mockResolvedValue(undefined),
-  };
-
-  const versionChecker = {
-    checkVersion: jest.fn().mockResolvedValue({
-      currentVersion: "1.2.3",
-      latestVersion: "1.2.3",
-      isLatest: true,
-      releaseUrl: "https://example.com/release",
-      updateUrl: "https://example.com/update",
-    }),
   };
 
   return {
@@ -53,8 +43,6 @@ const createPluginStub = () => {
       customProviders: [],
       activeProvider: null,
       selectedModelId: "",
-      titleGenerationPromptType: "precise",
-      titleGenerationPromptPath: "",
       postProcessingPromptType: "summary",
       postProcessingPromptFilePath: "",
       embeddingsEnabled: false,
@@ -64,17 +52,13 @@ const createPluginStub = () => {
       savedChatsDirectory: "",
       attachmentsDirectory: "",
       extractionsDirectory: "",
-      systemPromptsDirectory: "",
-      showUpdateNotifications: true,
       debugMode: false,
       useLatestModelEverywhere: true,
       licenseKey: "",
       subscriptionStatus: "",
     },
     getSettingsManager: jest.fn(() => settingsManager),
-    getVersionCheckerService: jest.fn(() => versionChecker),
     getSettingsManagerInstance: settingsManager,
-    getVersionCheckerInstance: versionChecker,
     emitter: {
       on: jest.fn(),
       off: jest.fn(),
@@ -86,9 +70,6 @@ const createPluginStub = () => {
     },
     customProviderService: {
       clearCache: jest.fn(),
-    },
-    getVersionChecker() {
-      return versionChecker;
     },
   } as any;
 };
@@ -149,14 +130,15 @@ describe("SystemSculptSettingTab native layout", () => {
     expect(document.getElementById("systemsculpt-settings-styles")).toBeNull();
   });
 
-  it("renders search input with native styling", async () => {
+  it("mounts the canonical view surface and shared search field", async () => {
     const tab = await renderTab();
+    const surface = tab.containerEl.querySelector(".ss-settings-surface");
     const searchInput = tab.containerEl.querySelector("input[type='search']");
+
+    expect(surface?.classList.contains("ss-surface")).toBe(true);
+    expect(surface?.getAttribute("data-ss-surface")).toBe("view");
     expect(searchInput).not.toBeNull();
-    expect(searchInput!.classList.contains("search-input")).toBe(true);
-    expect(searchInput!.classList.contains("ss-settings-search-input")).toBe(
-      true,
-    );
+    expect(searchInput!.classList.contains("ss-search-field__input")).toBe(true);
     expect(
       tab.containerEl.querySelector(".ss-settings-search-shell"),
     ).not.toBeNull();
@@ -172,25 +154,22 @@ describe("SystemSculptSettingTab native layout", () => {
     ).not.toBeNull();
   });
 
-  it("describes the plugin as a SystemSculpt client instead of a provider shell", async () => {
+  it("keeps the settings introduction terse and first-party", async () => {
     const tab = await renderTab();
     const text = tab.containerEl.textContent || "";
-    expect(text).toContain("Manage your SystemSculpt account");
+    expect(text).toContain("Account, workspace, and vault preferences.");
     expect(text).not.toContain("Configure AI models");
   });
 
-  it("shows plugin version inline with the title instead of as its own settings row", async () => {
+  it("shows the plugin version without duplicating Obsidian's settings title", async () => {
     const tab = await renderTab();
     const titleRow = tab.containerEl.querySelector(".ss-settings-title-row");
     const title = titleRow?.querySelector("h2");
-    const versionPill = titleRow?.querySelector(".ss-version-pill");
-    const refreshButton = titleRow?.querySelector(
-      'button[aria-label="Check for updates"]',
-    ) as HTMLButtonElement | null;
+    const version = titleRow?.querySelector(".ss-settings-title-version");
 
-    expect(title?.textContent).toBe("SystemSculpt AI");
-    expect(versionPill?.textContent).toContain("v1.2.3");
-    expect(refreshButton).not.toBeNull();
+    expect(title).toBeNull();
+    expect(version?.textContent).toBe("v1.2.3");
+    expect(titleRow?.querySelector('button[aria-label="Check for updates"]')).toBeNull();
     expect(
       Array.from(tab.containerEl.querySelectorAll(".setting-item-name")).some(
         (el) => el.textContent?.trim() === "Plugin version",
@@ -279,8 +258,42 @@ describe("SystemSculptSettingTab native layout", () => {
       '.systemsculpt-tab-content[data-tab="knowledge"]',
     ) as HTMLElement | null;
 
-    expect(knowledgeButtonAfter?.classList.contains("mod-active")).toBe(true);
+    expect(knowledgeButtonAfter?.classList.contains("is-selected")).toBe(true);
+    expect(knowledgeButtonAfter?.getAttribute("role")).toBe("tab");
+    expect(knowledgeButtonAfter?.getAttribute("aria-selected")).toBe("true");
+    expect(knowledgeButtonAfter?.hasAttribute("aria-pressed")).toBe(false);
     expect(knowledgePanelAfter?.classList.contains("is-active")).toBe(true);
+    expect(knowledgePanelAfter?.getAttribute("role")).toBe("tabpanel");
+  });
+
+  it("invalidates registered render work on rerender and hide", async () => {
+    const plugin = createPluginStub();
+    const tab = new SystemSculptSettingTab(app, plugin);
+    const rerenderCleanup = jest.fn();
+    const hideCleanup = jest.fn();
+
+    tab.registerRenderCleanup(rerenderCleanup);
+    await tab.display();
+    expect(rerenderCleanup).toHaveBeenCalledTimes(1);
+
+    tab.registerRenderCleanup(hideCleanup);
+    tab.hide();
+    expect(hideCleanup).toHaveBeenCalledTimes(1);
+  });
+
+  it("cancels delayed settings indexing when the surface hides", async () => {
+    jest.useFakeTimers();
+    const plugin = createPluginStub();
+    const tab = new SystemSculptSettingTab(app, plugin);
+    const buildSettingsIndex = jest.spyOn(tab as any, "buildSettingsIndex");
+
+    await tab.display();
+    expect(buildSettingsIndex).toHaveBeenCalledTimes(1);
+
+    tab.hide();
+    jest.advanceTimersByTime(500);
+
+    expect(buildSettingsIndex).toHaveBeenCalledTimes(1);
   });
 
   it("honors a queued providers focus request during initial render", async () => {
@@ -323,7 +336,7 @@ describe("SystemSculptSettingTab native layout", () => {
     ) as HTMLElement | null;
 
     expect(plugin.consumePendingSettingsFocusTab).toHaveBeenCalledTimes(1);
-    expect(providersButton?.classList.contains("mod-active")).toBe(true);
+    expect(providersButton?.classList.contains("is-selected")).toBe(true);
     expect(providersPanel?.classList.contains("is-active")).toBe(true);
     expect(accountPanel?.classList.contains("is-active")).toBe(false);
   });
@@ -391,7 +404,7 @@ describe("SystemSculptSettingTab native layout", () => {
       tab.containerEl.querySelectorAll("mark.ss-search-mark").length,
     ).toBeGreaterThan(0);
     expect(
-      tab.containerEl.querySelector(".ss-settings-search-clear"),
+      tab.containerEl.querySelector(".ss-search-field__clear"),
     ).toHaveProperty("hidden", false);
   });
 
@@ -404,17 +417,17 @@ describe("SystemSculptSettingTab native layout", () => {
     searchInput.dispatchEvent(new Event("input"));
 
     expect(
-      tab.containerEl.querySelector(".ss-search-empty-state__title")
+      tab.containerEl.querySelector(".ss-ui-state.is-empty .ss-ui-state__title")
         ?.textContent,
     ).toContain("No settings found");
 
     searchInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
 
     expect(searchInput.value).toBe("");
-    expect(tab.containerEl.querySelector(".ss-search-empty-state")).toBeNull();
+    expect(tab.containerEl.querySelector(".ss-ui-state.is-empty")).toBeNull();
     expect(
       tab.containerEl.querySelector(".ss-settings-search-meta")?.textContent,
-    ).toContain("searchable items");
+    ).toContain("settings in");
   });
 
   it("supports keyboard selection and enter-to-jump for search results", async () => {
@@ -467,6 +480,9 @@ describe("SystemSculptSettingTab native layout", () => {
       tab.containerEl.querySelectorAll(".ss-search-result"),
     );
     expect(searchRows[0].classList.contains("is-selected")).toBe(true);
+    expect(searchInput.getAttribute("role")).toBe("combobox");
+    expect(searchInput.getAttribute("aria-activedescendant")).toBe(searchRows[0].id);
+    expect(searchRows[0].getAttribute("role")).toBe("option");
 
     searchInput.dispatchEvent(
       new KeyboardEvent("keydown", { key: "ArrowDown" }),
@@ -475,6 +491,7 @@ describe("SystemSculptSettingTab native layout", () => {
       tab.containerEl.querySelectorAll(".ss-search-result"),
     );
     expect(searchRows[1].classList.contains("is-selected")).toBe(true);
+    expect(searchInput.getAttribute("aria-activedescendant")).toBe(searchRows[1].id);
     const selectedResultText = searchRows[1].textContent || "";
 
     searchInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }));
@@ -496,7 +513,7 @@ describe("SystemSculptSettingTab native layout", () => {
     ).find((item) => item.textContent?.includes(expectedSettingTitle));
 
     expect(searchInput.value).toBe("");
-    expect(expectedTabButton?.classList.contains("mod-active")).toBe(true);
+    expect(expectedTabButton?.classList.contains("is-selected")).toBe(true);
     expect(highlightedSetting?.classList.contains("ss-search-highlight")).toBe(
       true,
     );

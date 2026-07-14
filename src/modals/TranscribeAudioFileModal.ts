@@ -1,5 +1,12 @@
 import { Notice, TFile, normalizePath, setIcon } from "obsidian";
 import { StandardModal } from "../core/ui/modals/standard/StandardModal";
+import {
+  createUiAction,
+  createUiSearch,
+  createUiState,
+  getSurfaceOwnerWindow,
+  type UiSearchHandle,
+} from "../core/ui/surface";
 import type SystemSculptPlugin from "../main";
 import {
   AUDIO_FILE_EXTENSIONS,
@@ -10,7 +17,7 @@ import {
   formatFileSize,
   validateBrowserFileSize,
 } from "../utils/FileValidator";
-import { showAudioTranscriptionModal } from "./AudioTranscriptionModal";
+import { launchAudioTranscriptionPanel } from "./AudioTranscriptionPanel";
 import type { SystemSculptSettings } from "../types";
 
 type TranscribeAudioSelection =
@@ -37,6 +44,7 @@ export class TranscribeAudioFileModal extends StandardModal {
   private hideFormatChooserNextTime = false;
 
   private listEl: HTMLElement | null = null;
+  private searchHandle: UiSearchHandle | null = null;
   private fileInputEl: HTMLInputElement | null = null;
   private selectionSummaryEl: HTMLElement | null = null;
   private transcribeButton: HTMLButtonElement | null = null;
@@ -79,6 +87,8 @@ export class TranscribeAudioFileModal extends StandardModal {
   }
 
   onClose(): void {
+    this.searchHandle?.destroy();
+    this.searchHandle = null;
     this.clearPreviewUrl();
     this.previewAudioEl = null;
     super.onClose();
@@ -112,28 +122,23 @@ export class TranscribeAudioFileModal extends StandardModal {
       text: "Only audio files are shown.",
     });
 
-    const search = container.createDiv({
-      cls: "ss-transcribe-audio__search",
-    });
-    const icon = search.createDiv({
-      cls: "ss-transcribe-audio__search-icon",
-    });
-    setIcon(icon, "search");
-
-    const searchInputEl = search.createEl("input", {
-      type: "text",
+    this.searchHandle?.destroy();
+    this.searchHandle = createUiSearch(container, {
+      label: "Search vault audio files",
       placeholder: "Search by name or path",
-      cls: "ss-transcribe-audio__search-input",
-    }) as HTMLInputElement;
-    searchInputEl.value = this.searchQuery;
-
-    this.registerDomEvent(searchInputEl, "input", () => {
-      this.searchQuery = searchInputEl.value || "";
-      this.updateFilteredFiles();
+      value: this.searchQuery,
+      onQuery: (query) => {
+        this.searchQuery = query;
+        this.updateFilteredFiles();
+      },
     });
 
     this.listEl = container.createDiv({
       cls: "ss-transcribe-audio__list",
+      attr: {
+        role: "group",
+        "aria-label": "Vault audio files",
+      },
     });
   }
 
@@ -144,7 +149,7 @@ export class TranscribeAudioFileModal extends StandardModal {
     });
     header.createDiv({
       cls: "ss-transcribe-audio__section-hint",
-      text: "Drag in a file or tap to choose from your computer or phone.",
+      text: "Drag in a file or click to choose from your computer.",
     });
 
     const dropzone = container.createDiv({
@@ -224,13 +229,11 @@ export class TranscribeAudioFileModal extends StandardModal {
     const pickerActions = container.createDiv({
       cls: "ss-transcribe-audio__picker-actions",
     });
-    const openFileButton = pickerActions.createEl("button", {
-      cls: "ss-button ss-button--secondary ss-transcribe-audio__open-file-btn",
-    }) as HTMLButtonElement;
-    openFileButton.type = "button";
-    const buttonIcon = openFileButton.createSpan({ cls: "ss-button__icon" });
-    setIcon(buttonIcon, "folder-open");
-    openFileButton.appendChild(document.createTextNode("Open file from Finder"));
+    const openFileButton = createUiAction(pickerActions, {
+      label: "Open file from Finder",
+      icon: "folder-open",
+    });
+    openFileButton.addClass("ss-transcribe-audio__open-file-btn");
 
     this.registerDomEvent(openFileButton, "click", (event: Event) => {
       event.preventDefault();
@@ -279,7 +282,7 @@ export class TranscribeAudioFileModal extends StandardModal {
         attr: { for: hideId },
         cls: "ss-transcribe-audio__output-hide-label",
       });
-      hideLabel.setText("Do not show this again (re-enable in Settings).");
+      hideLabel.setText("Do not show this again (re-enable in settings).");
 
       this.registerDomEvent(hideInput, "change", () => {
         this.hideFormatChooserNextTime = hideInput.checked;
@@ -291,13 +294,13 @@ export class TranscribeAudioFileModal extends StandardModal {
       });
       section.createDiv({
         cls: "ss-transcribe-audio__section-hint",
-        text: "You can re-enable the format chooser anytime in Settings > Audio & Transcription.",
+        text: "You can re-enable the format chooser anytime in Settings > Workflow.",
       });
     }
 
     section.createDiv({
       cls: "ss-transcribe-audio__section-hint",
-      text: "You can always change this in Settings > Audio & Transcription.",
+      text: "You can always change this in Settings > Workflow.",
     });
   }
 
@@ -399,26 +402,28 @@ export class TranscribeAudioFileModal extends StandardModal {
     this.listEl.empty();
 
     if (this.filteredFiles.length === 0) {
-      const empty = this.listEl.createDiv("ss-transcribe-audio__empty");
-      setIcon(
-        empty.createDiv("ss-transcribe-audio__empty-icon"),
-        "headphones"
-      );
-      empty.createDiv({
-        cls: "ss-transcribe-audio__empty-text",
-        text:
+      createUiState(this.listEl, {
+        kind: "empty",
+        icon: "headphones",
+        title: this.audioFiles.length === 0 ? "No audio files" : "No matches",
+        detail:
           this.audioFiles.length === 0
-            ? "No audio found. Drop a file on the right to start."
-            : "No matches. Try a different search.",
+            ? "Drop or upload a file to start."
+            : "Try another name or path.",
       });
       return;
     }
 
     const filesToRender = this.filteredFiles.slice(0, MAX_VISIBLE_FILES);
     filesToRender.forEach((file) => {
-      const item = this.listEl!.createDiv({
+      const isSelected = this.isSelectedVaultFile(file);
+      const item = this.listEl!.createEl("button", {
         cls: "ss-transcribe-audio__file",
-        attr: { "data-path": file.path },
+        attr: {
+          type: "button",
+          "data-path": file.path,
+          "aria-pressed": String(isSelected),
+        },
       });
 
       const meta = item.createDiv({ cls: "ss-transcribe-audio__file-meta" });
@@ -446,7 +451,7 @@ export class TranscribeAudioFileModal extends StandardModal {
         cls: "ss-transcribe-audio__file-badge-text",
       });
 
-      item.classList.toggle("is-selected", this.isSelectedVaultFile(file));
+      item.classList.toggle("is-selected", isSelected);
       this.registerDomEvent(item, "click", () => this.handleVaultSelection(file));
     });
 
@@ -493,6 +498,7 @@ export class TranscribeAudioFileModal extends StandardModal {
         ? el.getAttribute("data-path") === selectedPath
         : false;
       el.classList.toggle("is-selected", isSelected);
+      el.setAttr("aria-pressed", String(isSelected));
     });
   }
 
@@ -561,20 +567,26 @@ export class TranscribeAudioFileModal extends StandardModal {
     }
 
     this.clearPreviewUrl();
-    const url = URL.createObjectURL(selection.file);
+    const url = this.ownerWindow.URL.createObjectURL(selection.file);
     this.previewObjectUrl = url;
     return url;
   }
 
   private clearPreviewUrl(): void {
     if (this.previewObjectUrl) {
-      URL.revokeObjectURL(this.previewObjectUrl);
+      this.ownerWindow.URL.revokeObjectURL(this.previewObjectUrl);
       this.previewObjectUrl = null;
     }
     if (this.previewAudioEl) {
       this.previewAudioEl.pause();
       this.previewAudioEl.src = "";
     }
+  }
+
+  private get ownerWindow(): Window & { URL: typeof URL } {
+    return getSurfaceOwnerWindow(this.modalEl) as Window & {
+      URL: typeof URL;
+    };
   }
 
   private syncTranscribeButton(): void {
@@ -617,7 +629,7 @@ export class TranscribeAudioFileModal extends StandardModal {
         error
       );
       new Notice(
-        "Could not save transcription format preferences. You can still change them in Settings.",
+        "Could not save transcription format preferences. You can still change them in settings.",
         5000
       );
     }
@@ -653,7 +665,7 @@ export class TranscribeAudioFileModal extends StandardModal {
       const file = await this.resolveAudioFile(this.selected);
       await this.persistOutputPreferences();
       this.close();
-      await showAudioTranscriptionModal(this.app, {
+      launchAudioTranscriptionPanel(this.app, {
         file,
         timestamped: this.outputFormat === "srt",
         plugin: this.plugin,

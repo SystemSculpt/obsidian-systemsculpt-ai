@@ -15,6 +15,7 @@ import {
   statusLabelForNode,
   type StudioNodeRunDisplayState,
 } from "../StudioRunPresentationState";
+import { createStudioAction } from "../StudioAction";
 
 export function renderNodeHeader(options: {
   nodeEl: HTMLElement;
@@ -48,64 +49,57 @@ export function renderNodeHeader(options: {
     onNodeTitleInput(node, (event.target as HTMLInputElement).value);
   });
 
-  const runButton = header.createEl("button", {
-    text: "Run",
-    cls: "ss-studio-node-run",
-  });
   const isVisualOnlyNode = isStudioVisualOnlyNodeKind(node.kind);
-  runButton.disabled = interactionLocked || isVisualOnlyNode;
-  if (isVisualOnlyNode) {
-    runButton.setAttribute("title", "Interactive node (not part of graph execution)");
-    runButton.setAttribute("aria-label", "Interactive node (not part of graph execution)");
-  }
-  runButton.addEventListener("click", (event) => {
-    event.stopPropagation();
-    if (isVisualOnlyNode) {
-      return;
-    }
-    onRunNode(node.id);
+  createStudioAction(header, {
+    className: "ss-studio-node-run",
+    label: "Run",
+    ariaLabel: isVisualOnlyNode
+      ? "Interactive node (not part of graph execution)"
+      : "Run node",
+    title: isVisualOnlyNode
+      ? "Interactive node (not part of graph execution)"
+      : "Run node",
+    size: "small",
+    disabled: interactionLocked || isVisualOnlyNode,
+    onSelect: () => {
+      if (!isVisualOnlyNode) {
+        onRunNode(node.id);
+      }
+    },
   });
 
   if (node.kind === "studio.text_generation") {
     const outputLocked = node.config.lockOutput === true;
-    const copyPromptButton = header.createEl("button", {
-      text: "Copy",
-      cls: "ss-studio-node-copy-prompt",
-      attr: {
-        title: "Copy prompt bundle for handoff",
-        "aria-label": "Copy prompt bundle for handoff",
-      },
-    });
-    copyPromptButton.disabled = interactionLocked;
-    copyPromptButton.addEventListener("click", (event) => {
-      event.stopPropagation();
-      onCopyTextGenerationPromptBundle(node.id);
+    createStudioAction(header, {
+      className: "ss-studio-node-copy-prompt",
+      label: "Copy",
+      ariaLabel: "Copy prompt bundle for handoff",
+      title: "Copy prompt bundle for handoff",
+      size: "small",
+      disabled: interactionLocked,
+      onSelect: () => onCopyTextGenerationPromptBundle(node.id),
     });
 
-    const lockOutputButton = header.createEl("button", {
-      text: outputLocked ? "Unlock" : "Lock",
-      cls: "ss-studio-node-lock-output",
-      attr: {
-        title: outputLocked ? "Unlock text output" : "Lock text output",
-        "aria-label": outputLocked ? "Unlock text output" : "Lock text output",
-      },
-    });
-    lockOutputButton.disabled = interactionLocked;
-    lockOutputButton.classList.toggle("is-active", outputLocked);
-    lockOutputButton.addEventListener("click", (event) => {
-      event.stopPropagation();
-      onToggleTextGenerationOutputLock(node.id);
+    createStudioAction(header, {
+      className: "ss-studio-node-lock-output",
+      label: outputLocked ? "Unlock" : "Lock",
+      ariaLabel: outputLocked ? "Unlock text output" : "Lock text output",
+      title: outputLocked ? "Unlock text output" : "Lock text output",
+      size: "small",
+      selected: outputLocked,
+      disabled: interactionLocked,
+      onSelect: () => onToggleTextGenerationOutputLock(node.id),
     });
   }
 
-  const removeButton = header.createEl("button", {
-    text: "×",
-    cls: "ss-studio-node-remove",
-  });
-  removeButton.disabled = interactionLocked;
-  removeButton.addEventListener("click", (event) => {
-    event.stopPropagation();
-    onRemoveNode(node.id);
+  createStudioAction(header, {
+    className: "ss-studio-node-remove",
+    label: "×",
+    ariaLabel: "Remove node",
+    title: "Remove node",
+    size: "small",
+    disabled: interactionLocked,
+    onSelect: () => onRemoveNode(node.id),
   });
 }
 
@@ -177,13 +171,17 @@ export function renderNodePorts(options: {
       const row = inputsCol.createDiv({ cls: "ss-studio-port-row" });
       const pin = row.createEl("button", {
         cls: "ss-studio-port-pin is-input",
-        attr: { title: `${port.id} (${port.type})` },
+        attr: {
+          type: "button",
+          title: `${port.id} (${port.type})`,
+          "aria-label": `${port.id} input (${port.type})`,
+        },
       });
       pin.dataset.nodeId = node.id;
       pin.dataset.portId = port.id;
       pin.dataset.portDirection = "in";
       pin.disabled = interactionLocked;
-      row.createEl("span", {
+      row.createSpan({
         cls: "ss-studio-port-label",
         text: `${port.id}${port.required ? "*" : ""}`,
       });
@@ -202,13 +200,17 @@ export function renderNodePorts(options: {
   if (outputPorts.length > 0) {
     const outputsCol = ports.createDiv({ cls: "ss-studio-node-ports-col" });
     for (const port of outputPorts) {
+      const isPendingSource = graphInteraction.isPendingConnectionSource(node.id, port.id);
       const row = outputsCol.createDiv({ cls: "ss-studio-port-row is-output" });
-      row.createEl("span", { cls: "ss-studio-port-label", text: port.id });
+      row.createSpan({ cls: "ss-studio-port-label", text: port.id });
       const pin = row.createEl("button", {
-        cls: `ss-studio-port-pin is-output ${
-          graphInteraction.isPendingConnectionSource(node.id, port.id) ? "is-active" : ""
-        }`,
-        attr: { title: `${port.id} (${port.type})` },
+        cls: `ss-studio-port-pin is-output ${isPendingSource ? "is-active" : ""}`,
+        attr: {
+          type: "button",
+          title: `${port.id} (${port.type})`,
+          "aria-label": `${port.id} output (${port.type})`,
+          "aria-pressed": isPendingSource ? "true" : "false",
+        },
       });
       pin.dataset.nodeId = node.id;
       pin.dataset.portId = port.id;
@@ -286,56 +288,53 @@ export function renderCollapsedVisibilityControls(options: {
 
   for (const section of sections) {
     const metadata = resolveStudioCollapsedSectionLabel(section);
-    const button = buttonsEl.createEl("button", {
-      cls: "ss-studio-node-collapsed-visibility-button",
-      text: metadata.shortLabel,
-      attr: {
-        "aria-label": `Show ${metadata.summary} in collapsed mode`,
-        title: `Show ${metadata.summary} in collapsed mode`,
-      },
-    });
-    button.type = "button";
-    button.disabled = busy;
-
+    let button: HTMLButtonElement;
     const syncVisualState = (): void => {
       const visibleInCollapsed = resolveStudioNodeDetailSectionVisibility({
         node,
         mode: "collapsed",
         section,
       });
-      button.classList.toggle("is-active", visibleInCollapsed);
+      button.classList.toggle("is-selected", visibleInCollapsed);
       button.setAttr("aria-pressed", visibleInCollapsed ? "true" : "false");
     };
-    syncVisualState();
-    button.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      if (busy) {
-        return;
-      }
-      const currentlyVisible = resolveStudioNodeDetailSectionVisibility({
-        node,
-        mode: "collapsed",
-        section,
-      });
-      const draftNode: StudioNodeInstance = {
-        ...node,
-        config: {
-          ...node.config,
-        },
-      };
-      const changed = writeStudioCollapsedSectionVisibilityOverride({
-        node: draftNode,
-        section,
-        visibleInCollapsed: !currentlyVisible,
-      });
-      if (!changed) {
-        return;
-      }
-      commitPresentationMutation(
-        (draftNode.config[STUDIO_NODE_COLLAPSED_VISIBILITY_CONFIG_KEY] ?? null) as StudioJsonValue | null
-      );
-      syncVisualState();
+    button = createStudioAction(buttonsEl, {
+      className: "ss-studio-node-collapsed-visibility-button",
+      label: metadata.shortLabel,
+      ariaLabel: `Show ${metadata.summary} in collapsed mode`,
+      title: `Show ${metadata.summary} in collapsed mode`,
+      size: "small",
+      selected: false,
+      disabled: busy,
+      onSelect: () => {
+        if (busy) {
+          return;
+        }
+        const currentlyVisible = resolveStudioNodeDetailSectionVisibility({
+          node,
+          mode: "collapsed",
+          section,
+        });
+        const draftNode: StudioNodeInstance = {
+          ...node,
+          config: {
+            ...node.config,
+          },
+        };
+        const changed = writeStudioCollapsedSectionVisibilityOverride({
+          node: draftNode,
+          section,
+          visibleInCollapsed: !currentlyVisible,
+        });
+        if (!changed) {
+          return;
+        }
+        commitPresentationMutation(
+          (draftNode.config[STUDIO_NODE_COLLAPSED_VISIBILITY_CONFIG_KEY] ?? null) as StudioJsonValue | null
+        );
+        syncVisualState();
+      },
     });
+    syncVisualState();
   }
 }

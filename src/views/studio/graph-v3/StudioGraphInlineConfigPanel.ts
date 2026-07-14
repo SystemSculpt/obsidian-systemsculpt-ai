@@ -20,8 +20,12 @@ import {
   resolveStudioNotePathState,
   type StudioNotePathStateTone,
 } from "../StudioPathFieldUi";
-import { browseForNodeConfigPath } from "../StudioPathFieldPicker";
+import {
+  browseForNodeConfigPath,
+  type StudioNodeConfigPathBrowseOptions,
+} from "../StudioPathFieldPicker";
 import { renderStudioSearchableDropdown } from "../StudioSearchableDropdown";
+import { createStudioAction } from "../StudioAction";
 import type { StudioGraphNodeMutationOptions } from "./StudioGraphNodeCardTypes";
 
 function readConfigString(value: unknown): string {
@@ -169,31 +173,33 @@ function renderInlineConfigSelectField(options: {
     const rowEl = fieldEl.createDiv({ cls: "ss-studio-node-inline-config-select-button-group" });
     const refreshActiveState = (value: string): void => {
       for (const buttonEl of Array.from(rowEl.children)) {
-        const element = buttonEl as HTMLElement;
-        element.classList.toggle("is-active", element.dataset.optionValue === value);
+        const element = buttonEl as HTMLButtonElement;
+        const selected = element.dataset.optionValue === value;
+        element.classList.toggle("is-selected", selected);
+        element.setAttribute("aria-pressed", selected ? "true" : "false");
       }
     };
     const currentValue = readConfigString(node.config[field.key]);
     for (const option of field.options) {
-      const buttonEl = rowEl.createEl("button", {
-        cls: "ss-studio-node-inline-config-select-button",
-        text: option.label || option.value,
+      const buttonEl = createStudioAction(rowEl, {
+        className: "ss-studio-node-inline-config-select-button",
+        label: option.label || option.value,
+        size: "small",
+        selected: false,
+        disabled: interactionLocked,
+        onSelect: () => {
+          commitInlineConfigValueChange({
+            node,
+            key: field.key,
+            value: option.value,
+            onNodeConfigMutated,
+            onNodeConfigValueChange,
+            mutationOptions: { mode: "discrete" },
+          });
+          refreshActiveState(option.value);
+        },
       });
-      buttonEl.type = "button";
       buttonEl.dataset.optionValue = option.value;
-      buttonEl.disabled = interactionLocked;
-      buttonEl.addEventListener("click", (event) => {
-        event.preventDefault();
-        commitInlineConfigValueChange({
-          node,
-          key: field.key,
-          value: option.value,
-          onNodeConfigMutated,
-          onNodeConfigValueChange,
-          mutationOptions: { mode: "discrete" },
-        });
-        refreshActiveState(option.value);
-      });
     }
     refreshActiveState(currentValue);
     return;
@@ -585,8 +591,17 @@ function renderInlineConfigNoteSelectorField(options: {
     value: StudioJsonValue,
     options?: StudioGraphNodeMutationOptions
   ) => void;
+  pathBrowseOptions?: StudioNodeConfigPathBrowseOptions;
 }): void {
-  const { node, field, fieldEl, interactionLocked, onNodeConfigMutated, onNodeConfigValueChange } = options;
+  const {
+    node,
+    field,
+    fieldEl,
+    interactionLocked,
+    onNodeConfigMutated,
+    onNodeConfigValueChange,
+    pathBrowseOptions,
+  } = options;
 
   const items = parseStudioNoteItems(node.config[field.key] as StudioJsonValue | undefined);
   const container = fieldEl.createDiv({ cls: "ss-studio-note-selector" });
@@ -594,15 +609,13 @@ function renderInlineConfigNoteSelectorField(options: {
   const summaryEl = toolbarEl.createDiv({ cls: "ss-studio-note-selector-summary" });
   const countBadgeEl = summaryEl.createSpan({ cls: "ss-studio-note-selector-count" });
   const statusEl = summaryEl.createSpan({ cls: "ss-studio-note-selector-status" });
-  const addButton = toolbarEl.createEl("button", {
-    cls: "ss-studio-note-selector-add-button",
-    text: "Add Note",
-    attr: {
-      "aria-label": "Add note entry",
-    },
+  const addButton = createStudioAction(toolbarEl, {
+    className: "ss-studio-note-selector-add-button",
+    label: "Add note",
+    ariaLabel: "Add note entry",
+    size: "small",
+    disabled: interactionLocked,
   });
-  addButton.type = "button";
-  addButton.disabled = interactionLocked;
   const itemsContainer = container.createDiv({ cls: "ss-studio-note-selector-items" });
 
   const updateSummary = (): void => {
@@ -611,7 +624,7 @@ function renderInlineConfigNoteSelectorField(options: {
     const skipped = total - enabled;
     countBadgeEl.setText(`${total} ${total === 1 ? "note" : "notes"}`);
     if (total === 0) {
-      statusEl.setText("Add markdown notes to include in this node.");
+      statusEl.setText("Add Markdown notes to include in this node.");
       return;
     }
     if (enabled === total) {
@@ -700,16 +713,14 @@ function renderInlineConfigNoteSelectorField(options: {
       syncCardIndex();
 
       const actionsEl = cardHeaderEl.createDiv({ cls: "ss-studio-note-selector-card-actions" });
-      const moveUpButton = actionsEl.createEl("button", {
-        cls: "ss-studio-note-selector-action-button",
-        text: "Up",
-        attr: {
-          "aria-label": `Move note ${i + 1} up`,
-          title: "Move note up",
-        },
+      const moveUpButton = createStudioAction(actionsEl, {
+        className: "ss-studio-note-selector-action-button",
+        label: "Up",
+        ariaLabel: `Move note ${i + 1} up`,
+        title: "Move note up",
+        size: "small",
+        disabled: interactionLocked || i === 0,
       });
-      moveUpButton.type = "button";
-      moveUpButton.disabled = interactionLocked || i === 0;
       bindActionButton(moveUpButton, () => {
         if (i === 0) {
           return;
@@ -721,16 +732,14 @@ function renderInlineConfigNoteSelectorField(options: {
         emitChange({ mode: "discrete" });
       });
 
-      const moveDownButton = actionsEl.createEl("button", {
-        cls: "ss-studio-note-selector-action-button",
-        text: "Down",
-        attr: {
-          "aria-label": `Move note ${i + 1} down`,
-          title: "Move note down",
-        },
+      const moveDownButton = createStudioAction(actionsEl, {
+        className: "ss-studio-note-selector-action-button",
+        label: "Down",
+        ariaLabel: `Move note ${i + 1} down`,
+        title: "Move note down",
+        size: "small",
+        disabled: interactionLocked || i === items.length - 1,
       });
-      moveDownButton.type = "button";
-      moveDownButton.disabled = interactionLocked || i === items.length - 1;
       bindActionButton(moveDownButton, () => {
         if (i >= items.length - 1) {
           return;
@@ -742,16 +751,15 @@ function renderInlineConfigNoteSelectorField(options: {
         emitChange({ mode: "discrete" });
       });
 
-      const removeButton = actionsEl.createEl("button", {
-        cls: "ss-studio-note-selector-remove-button",
-        text: "Remove",
-        attr: {
-          "aria-label": `Remove note ${i + 1}`,
-          title: "Remove note",
-        },
+      const removeButton = createStudioAction(actionsEl, {
+        className: "ss-studio-note-selector-remove-button",
+        label: "Remove",
+        ariaLabel: `Remove note ${i + 1}`,
+        title: "Remove note",
+        size: "small",
+        tone: "danger",
+        disabled: interactionLocked,
       });
-      removeButton.type = "button";
-      removeButton.disabled = interactionLocked;
       bindActionButton(removeButton, () => {
         items.splice(i, 1);
         renderItems();
@@ -778,7 +786,7 @@ function renderInlineConfigNoteSelectorField(options: {
         type: "text",
         cls: "ss-studio-node-inline-config-input ss-studio-node-inline-config-path-input",
         attr: {
-          placeholder: "Vault path to markdown note",
+          placeholder: "Vault path to Markdown note",
           "aria-label": `Markdown path for note ${i + 1}`,
         },
       });
@@ -802,23 +810,24 @@ function renderInlineConfigNoteSelectorField(options: {
         emitChange({ mode: "continuous" });
       });
 
-      const browseButtonEl = pathRow.createEl("button", {
-        cls: "ss-studio-node-inline-config-path-button ss-studio-path-browse-button",
-        attr: {
-          "aria-label": "Browse files",
-          title: "Browse files",
-        },
+      const browseButtonEl = createStudioAction(pathRow, {
+        className: "ss-studio-node-inline-config-path-button ss-studio-path-browse-button",
+        label: "Browse",
+        ariaLabel: "Browse files",
+        title: "Browse files",
+        size: "small",
+        disabled: interactionLocked,
       });
-      browseButtonEl.type = "button";
-      browseButtonEl.disabled = interactionLocked;
       appendStudioPathBrowseButtonIcon(
         browseButtonEl,
         "ss-studio-node-inline-config-path-button-icon ss-studio-path-browse-button-icon"
       );
-      browseButtonEl.createSpan({
-        cls: "ss-studio-node-inline-config-path-button-label ss-studio-path-browse-button-label",
-        text: "Browse",
-      });
+      browseButtonEl
+        .querySelector(".ss-button__label")
+        ?.classList.add(
+          "ss-studio-node-inline-config-path-button-label",
+          "ss-studio-path-browse-button-label"
+        );
       bindActionButton(browseButtonEl, async () => {
         const browseField: StudioNodeConfigFieldDefinition = {
           key: field.key,
@@ -826,7 +835,11 @@ function renderInlineConfigNoteSelectorField(options: {
           type: "file_path",
           accept: ".md,text/markdown",
         };
-        const selected = await browseForNodeConfigPath(browseField);
+        const selected = await browseForNodeConfigPath(
+          browseField,
+          browseButtonEl,
+          pathBrowseOptions
+        );
         if (!selected) {
           return;
         }
@@ -862,8 +875,17 @@ function renderInlineConfigPathField(options: {
     value: StudioJsonValue,
     options?: StudioGraphNodeMutationOptions
   ) => void;
+  pathBrowseOptions?: StudioNodeConfigPathBrowseOptions;
 }): void {
-  const { node, field, fieldEl, interactionLocked, onNodeConfigMutated, onNodeConfigValueChange } = options;
+  const {
+    node,
+    field,
+    fieldEl,
+    interactionLocked,
+    onNodeConfigMutated,
+    onNodeConfigValueChange,
+    pathBrowseOptions,
+  } = options;
   const rowEl = fieldEl.createDiv({ cls: "ss-studio-node-inline-config-path-row" });
   const inputEl = rowEl.createEl("input", {
     cls: "ss-studio-node-inline-config-input ss-studio-node-inline-config-path-input",
@@ -886,31 +908,33 @@ function renderInlineConfigPathField(options: {
     });
   });
 
-  const browseButtonEl = rowEl.createEl("button", {
-    cls: "ss-studio-node-inline-config-path-button ss-studio-path-browse-button",
-    attr: {
-      "aria-label":
-        field.type === "directory_path" ? "Browse folders" : "Browse files",
-      title: field.type === "directory_path" ? "Browse folders" : "Browse files",
-    },
+  const browseLabel = field.type === "directory_path" ? "Folder" : "Browse";
+  const browseAriaLabel = field.type === "directory_path" ? "Browse folders" : "Browse files";
+  const browseButtonEl = createStudioAction(rowEl, {
+    className: "ss-studio-node-inline-config-path-button ss-studio-path-browse-button",
+    label: browseLabel,
+    ariaLabel: browseAriaLabel,
+    title: browseAriaLabel,
+    size: "small",
+    disabled: interactionLocked,
   });
-  browseButtonEl.type = "button";
-  browseButtonEl.disabled = interactionLocked;
   appendStudioPathBrowseButtonIcon(
     browseButtonEl,
     "ss-studio-node-inline-config-path-button-icon ss-studio-path-browse-button-icon"
   );
-  browseButtonEl.createSpan({
-    cls: "ss-studio-node-inline-config-path-button-label ss-studio-path-browse-button-label",
-    text: field.type === "directory_path" ? "Folder" : "Browse",
-  });
+  browseButtonEl
+    .querySelector(".ss-button__label")
+    ?.classList.add(
+      "ss-studio-node-inline-config-path-button-label",
+      "ss-studio-path-browse-button-label"
+    );
   browseButtonEl.addEventListener("click", async (event) => {
     event.preventDefault();
     event.stopPropagation();
     if (interactionLocked) {
       return;
     }
-    const selected = await browseForNodeConfigPath(field);
+    const selected = await browseForNodeConfigPath(field, browseButtonEl, pathBrowseOptions);
     if (!selected) {
       return;
     }
@@ -943,6 +967,7 @@ export function renderInlineConfigPanel(options: {
   hiddenFieldKeys?: Set<string>;
   compactTextareaFieldKeys?: Set<string>;
   showFieldHelp?: boolean;
+  pathBrowseOptions?: StudioNodeConfigPathBrowseOptions;
   resolveDynamicSelectOptions?: (
     source: StudioNodeConfigDynamicOptionsSource,
     node: StudioNodeInstance
@@ -960,6 +985,7 @@ export function renderInlineConfigPanel(options: {
     hiddenFieldKeys,
     compactTextareaFieldKeys,
     showFieldHelp = true,
+    pathBrowseOptions,
     resolveDynamicSelectOptions,
   } = options;
 
@@ -1061,6 +1087,7 @@ export function renderInlineConfigPanel(options: {
         interactionLocked,
         onNodeConfigMutated: handleNodeConfigMutated,
         onNodeConfigValueChange: handleNodeConfigValueChange,
+        pathBrowseOptions,
       });
       renderedAnyField = true;
       continue;
@@ -1134,6 +1161,7 @@ export function renderInlineConfigPanel(options: {
         interactionLocked,
         onNodeConfigMutated: handleNodeConfigMutated,
         onNodeConfigValueChange: handleNodeConfigValueChange,
+        pathBrowseOptions,
       });
       renderedAnyField = true;
     }
@@ -1146,4 +1174,3 @@ export function renderInlineConfigPanel(options: {
   refreshVisibilityState();
   return true;
 }
-

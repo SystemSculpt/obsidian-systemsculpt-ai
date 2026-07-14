@@ -9,14 +9,6 @@ const mockViewManagerInitialize = jest.fn();
 const mockCommandManagerCtor = jest.fn();
 const mockRegisterCommands = jest.fn();
 
-jest.mock("../services/PlatformContext", () => ({
-  PlatformContext: {
-    get: () => ({
-      supportsDesktopOnlyFeatures: () => true,
-    }),
-  },
-}));
-
 jest.mock("../core/license/LicenseManager", () => ({
   LicenseManager: jest.fn().mockImplementation(() => {
     mockLicenseManagerCtor();
@@ -85,10 +77,6 @@ describe("SystemSculptPlugin.initializeManagers", () => {
       .spyOn(plugin as any, "getInitializationTracer")
       .mockReturnValue(createTracer() as any);
     jest.spyOn(plugin, "getLogger").mockReturnValue(createLogger() as any);
-    jest
-      .spyOn(plugin as any, "syncDesktopAutomationBridge")
-      .mockResolvedValue(undefined);
-
     const registerExtensionsSpy = jest.spyOn(plugin, "registerExtensions");
 
     mockRegisterCommands

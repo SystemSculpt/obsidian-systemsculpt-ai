@@ -12,7 +12,9 @@ function makeVector(
   values: number[],
   overrides: Partial<EmbeddingVector["metadata"]> = {},
 ): EmbeddingVector {
-  const namespace = `systemsculpt:openai/text-embedding-3-small:v2:${values.length}`;
+  const namespace = values.length > 0
+    ? `systemsculpt:managed:semantic-v1:v2:${values.length}`
+    : "systemsculpt:local-empty:v1:1";
   return {
     id: buildVectorId(namespace, path, 0),
     path,
@@ -22,8 +24,7 @@ function makeVector(
       title: path.replace(/\.md$/, ""),
       mtime: 1700000000000,
       contentHash: `${path}-hash`,
-      provider: "systemsculpt",
-      model: "openai/text-embedding-3-small",
+      ...(values.length > 0 ? { generation: "semantic-v1" } : {}),
       dimension: values.length,
       createdAt: 1700000000000,
       namespace,
@@ -64,9 +65,11 @@ describe("EmbeddingsIndexSerialization", () => {
   });
 
   it("preserves intentionally-empty vectors and metadata flags", () => {
-    const empty = makeVector("empty.md", [], {
+    const empty = makeVector("empty.md", [0], {
       isEmpty: true,
-      dimension: 0,
+      generation: undefined,
+      dimension: 1,
+      namespace: "systemsculpt:local-empty:v1:1",
       complete: true,
       chunkCount: 0,
     });
@@ -74,7 +77,7 @@ describe("EmbeddingsIndexSerialization", () => {
     const restored = deserializeEmbeddingsIndex(serializeEmbeddingsIndex([empty]));
     expect(restored).toHaveLength(1);
     expect(restored[0].vector).toBeInstanceOf(Float32Array);
-    expect(restored[0].vector.length).toBe(0);
+    expect(restored[0].vector.length).toBe(1);
     expect(restored[0].metadata.isEmpty).toBe(true);
     expect(restored[0].metadata.complete).toBe(true);
     expect(restored[0].metadata.chunkCount).toBe(0);
@@ -91,10 +94,20 @@ describe("EmbeddingsIndexSerialization", () => {
     expect(restored.map((v) => v.path)).toEqual(["ok.md"]);
   });
 
+  it("rejects truncated vectors and non-first-party namespaces", () => {
+    const truncated = serializeEmbeddingsIndex([makeVector("truncated.md", [1, 0, 0])]);
+    truncated.vectors[0].vector = btoa("12345");
+    const unrelated = serializeEmbeddingsIndex([makeVector("unrelated.md", [1, 0, 0])]);
+    unrelated.vectors[0].metadata.namespace = "unrelated:semantic:v9:3";
+
+    expect(deserializeEmbeddingsIndex(truncated)).toEqual([]);
+    expect(deserializeEmbeddingsIndex(unrelated)).toEqual([]);
+  });
+
   it("fails safe (empty array) on unknown format or junk envelopes", () => {
     expect(deserializeEmbeddingsIndex({ format: 999, vectors: [] } as never)).toEqual([]);
     expect(deserializeEmbeddingsIndex(null as never)).toEqual([]);
     expect(deserializeEmbeddingsIndex({} as never)).toEqual([]);
-    expect(deserializeEmbeddingsIndex({ format: 1, vectors: "nope" } as never)).toEqual([]);
+    expect(deserializeEmbeddingsIndex({ format: 2, vectors: "nope" } as never)).toEqual([]);
   });
 });

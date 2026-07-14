@@ -23,10 +23,6 @@ build/
 !.env.local.example
 config.json
 systemsculpt-sync.config.json
-systemsculpt-sync.ios.json
-systemsculpt-sync.android.json
-systemsculpt-sync.android.appdata.json
-systemsculpt-sync.windows.generated.json
 /autoresearch*
 
 # OS / editors
@@ -47,12 +43,13 @@ systemsculpt-sync.windows.generated.json
 .serena/
 .conductor/
 .cache/
+.eslintcache
 
 # Obsidian vaults / local state
 .obsidian/
 .obsidian-cache/
 .obsidian-cache.broken*/
-vault/
+/vault/
 
 # Misc local dirs
 plans/

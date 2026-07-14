@@ -64,6 +64,7 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
     createTextNodeMarkdownEditor,
     registerTextNodeEditorTeardown,
     onRevealPathInFinder,
+    pathBrowseOptions,
     resolveNodeBadge,
   } = options;
 
@@ -229,6 +230,7 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
       onOpenImageEditor,
       onEditImageWithAi,
       onCopyNodeImageToClipboard,
+      pathBrowseOptions,
     });
     return;
   }
@@ -244,7 +246,7 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
     onRemoveNode,
   });
 
-  nodeEl.createEl("div", {
+  nodeEl.createDiv({
     cls: "ss-studio-node-kind",
     text: `${node.kind}@${node.version}`,
   });
@@ -319,6 +321,7 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
       onJsonEditorPreferredModeChange,
       renderMarkdownPreview,
       resolveDynamicSelectOptions,
+      pathBrowseOptions,
       nodeDetailMode,
       showTextEditor,
       showSystemPromptField,

@@ -118,26 +118,22 @@ describe("LicenseManager", () => {
   });
 
   describe("validateLicenseKey", () => {
-    it("returns true and updates settings when license is valid", async () => {
+    it("returns the result owned by LicenseService without a redundant settings write", async () => {
       mockPlugin.aiService.validateLicense.mockResolvedValue(true);
 
       const result = await manager.validateLicenseKey();
 
       expect(result).toBe(true);
-      expect(mockSettingsManager.updateSettings).toHaveBeenCalledWith({
-        licenseValid: true,
-      });
+      expect(mockSettingsManager.updateSettings).not.toHaveBeenCalled();
     });
 
-    it("returns false and updates settings when license is invalid", async () => {
+    it("returns a LicenseService rejection without a redundant settings write", async () => {
       mockPlugin.aiService.validateLicense.mockResolvedValue(false);
 
       const result = await manager.validateLicenseKey();
 
       expect(result).toBe(false);
-      expect(mockSettingsManager.updateSettings).toHaveBeenCalledWith({
-        licenseValid: false,
-      });
+      expect(mockSettingsManager.updateSettings).not.toHaveBeenCalled();
     });
 
     it("returns false when no license key exists", async () => {
@@ -149,17 +145,16 @@ describe("LicenseManager", () => {
       expect(mockPlugin.aiService.validateLicense).not.toHaveBeenCalled();
     });
 
-    it("returns false and updates settings on validation error", async () => {
+    it("preserves last-known-good state on an unexpected validation error", async () => {
+      mockPlugin.settings.licenseValid = true;
       mockPlugin.aiService.validateLicense.mockRejectedValue(
         new Error("Network error")
       );
 
       const result = await manager.validateLicenseKey();
 
-      expect(result).toBe(false);
-      expect(mockSettingsManager.updateSettings).toHaveBeenCalledWith({
-        licenseValid: false,
-      });
+      expect(result).toBe(true);
+      expect(mockSettingsManager.updateSettings).not.toHaveBeenCalled();
     });
 
     it("passes force parameter to aiService", async () => {
@@ -203,11 +198,9 @@ describe("LicenseManager", () => {
       await Promise.resolve();
       await Promise.resolve(); // Allow promise chain to complete
 
-      // Verify validation was called and license updated to invalid
+      // LicenseService owns the state transition; the manager only schedules it.
       expect(mockPlugin.aiService.validateLicense).toHaveBeenCalled();
-      expect(mockSettingsManager.updateSettings).toHaveBeenCalledWith({
-        licenseValid: false,
-      });
+      expect(mockSettingsManager.updateSettings).not.toHaveBeenCalled();
     });
   });
 });

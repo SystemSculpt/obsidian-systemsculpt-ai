@@ -1,5 +1,9 @@
 import { App } from "obsidian";
 import { logError } from "../../utils/errorHandling";
+import {
+  resolveRecorderHostContext,
+  type RecorderHostContext,
+} from "./RecorderHostContext";
 
 export type RecorderStopReason =
   | "manual"
@@ -12,6 +16,7 @@ export interface MicrophoneRecorderOptions {
   /** Encoder bitrate hint (bits/second). Omit for the platform default. */
   audioBitsPerSecond?: number;
   preferredMicrophoneId?: string | null;
+  hostContext?: RecorderHostContext;
   onError: (error: Error) => void;
   onStatus: (status: string) => void;
   onComplete: (filePath: string, audioBlob: Blob, stopReason?: RecorderStopReason) => void;
@@ -19,6 +24,22 @@ export interface MicrophoneRecorderOptions {
 }
 
 type RecorderState = "idle" | "starting" | "recording" | "stopping";
+type RecorderCaptureWindow = Window & {
+  MediaRecorder?: typeof MediaRecorder;
+  Blob?: typeof Blob;
+};
+type RecorderWakeLockNavigator = Navigator & {
+  wakeLock?: {
+    request: (type: "screen") => Promise<unknown>;
+  };
+};
+
+function recorderErrorMessage(error: unknown): string {
+  if (error && typeof error === "object" && "message" in error) {
+    return String((error as { message?: unknown }).message ?? "");
+  }
+  return String(error ?? "");
+}
 
 /**
  * Minimal, resilient microphone recorder (no system audio). Handles device
@@ -34,6 +55,10 @@ export class MicrophoneRecorder {
   private readonly onComplete: (filePath: string, audioBlob: Blob, stopReason?: RecorderStopReason) => void;
   private readonly onStreamChanged: ((stream: MediaStream) => void) | null;
   private readonly preferredMicrophoneId: string | null;
+  private readonly hostDocument: Document;
+  private readonly hostWindow: RecorderCaptureWindow;
+  private readonly hostNavigator: RecorderWakeLockNavigator;
+  private readonly mediaDevices: MediaDevices;
 
   private state: RecorderState = "idle";
   private micStream: MediaStream | null = null;
@@ -51,6 +76,7 @@ export class MicrophoneRecorder {
   private wakeLockHintShown = false;
 
   constructor(app: App, options: MicrophoneRecorderOptions) {
+    const hostContext = options.hostContext ?? resolveRecorderHostContext();
     this.app = app;
     this.mimeType = options.mimeType;
     this.audioBitsPerSecond = options.audioBitsPerSecond ?? null;
@@ -59,6 +85,10 @@ export class MicrophoneRecorder {
     this.onComplete = options.onComplete;
     this.onStreamChanged = options.onStreamChanged ?? null;
     this.preferredMicrophoneId = options.preferredMicrophoneId ?? null;
+    this.hostDocument = hostContext.hostDocument;
+    this.hostWindow = hostContext.hostWindow as RecorderCaptureWindow;
+    this.hostNavigator = hostContext.hostWindow.navigator as RecorderWakeLockNavigator;
+    this.mediaDevices = this.hostNavigator.mediaDevices;
   }
 
   public async start(outputPath: string): Promise<void> {
@@ -86,11 +116,10 @@ export class MicrophoneRecorder {
         await this.finalizeRecording(outputPath);
       };
       this.mediaRecorder.onerror = (event: Event) => {
-        // iOS can revoke the mic track when the screen locks and surface it as a
-        // MediaRecorder "error" rather than a clean visibilitychange/onstop.
-        // Without this handler the in-progress recording is dropped silently
-        // (#162). Treat any error while recording as an interruption so the
-        // captured chunks are still flushed to disk.
+        // Browsers can surface a lost mic track or recorder pipeline failure as
+        // a MediaRecorder "error" rather than a clean onstop transition.
+        // Treat any error while recording as an interruption so buffered audio
+        // is still flushed to disk instead of being dropped (#162).
         if (this.state !== "recording") return;
         logError(
           "MicrophoneRecorder",
@@ -131,7 +160,7 @@ export class MicrophoneRecorder {
     } else if (reason === "interrupted") {
       this.onStatus("Recording interrupted. Saving captured audio...");
     } else {
-      this.onStatus("App moved to background. Saving captured audio...");
+      this.onStatus("Window or tab moved to the background. Saving captured audio...");
     }
 
     try {
@@ -146,7 +175,7 @@ export class MicrophoneRecorder {
         void this.finalizeRecording();
       }
     } catch (error) {
-      this.onError(new Error(`Stop failed: ${error instanceof Error ? error.message : String(error)}`));
+      this.onError(new Error(`Stop failed: ${recorderErrorMessage(error)}`));
       this.release();
     }
   }
@@ -176,49 +205,59 @@ export class MicrophoneRecorder {
       ? { ...baseConstraints, deviceId: { exact: this.preferredMicrophoneId } }
       : baseConstraints;
 
-    const streamPromise = navigator.mediaDevices.getUserMedia({ audio: constrained });
-    const timeoutPromise = new Promise<MediaStream>((_, reject) => {
-      setTimeout(
-        () =>
-          reject(
-            new Error(
-              "Browser took too long to grant microphone access. Please check your microphone permissions."
-            )
-          ),
-        10000
-      );
-    });
-
     try {
-      return await Promise.race([streamPromise, timeoutPromise]);
+      return await this.getUserMediaWithTimeout({ audio: constrained });
     } catch (error) {
+      const message = recorderErrorMessage(error);
       if (
         this.preferredMicrophoneId &&
-        error instanceof Error &&
-        (error.message.includes("NotFoundError") ||
-          error.message.includes("not found") ||
-          error.message.includes("OverconstrainedError"))
+        (message.includes("NotFoundError") ||
+          message.includes("not found") ||
+          message.includes("OverconstrainedError"))
       ) {
         this.onStatus("Preferred microphone not available, using default...");
-        const fallback = navigator.mediaDevices.getUserMedia({ audio: baseConstraints });
-        return await Promise.race([fallback, timeoutPromise]);
+        return await this.getUserMediaWithTimeout({ audio: baseConstraints });
       }
 
       this.onStatus("Retrying with basic microphone settings...");
-      const fallback = navigator.mediaDevices.getUserMedia({ audio: true });
-      return await Promise.race([fallback, timeoutPromise]);
+      return await this.getUserMediaWithTimeout({ audio: true });
+    }
+  }
+
+  private async getUserMediaWithTimeout(constraints: MediaStreamConstraints): Promise<MediaStream> {
+    const streamPromise = Promise.resolve().then(() => this.mediaDevices.getUserMedia(constraints));
+    let timeoutId: number | null = null;
+    const timeoutPromise = new Promise<MediaStream>((_, reject) => {
+      timeoutId = this.hostWindow.setTimeout(() => {
+        reject(
+          new Error(
+            "Browser took too long to grant microphone access. Please check your microphone permissions."
+          )
+        );
+      }, 10000);
+    });
+    try {
+      return await Promise.race([streamPromise, timeoutPromise]);
+    } finally {
+      if (timeoutId !== null) {
+        this.hostWindow.clearTimeout(timeoutId);
+      }
     }
   }
 
   private createMediaRecorder(stream: MediaStream): MediaRecorder {
+    const MediaRecorderConstructor = this.hostWindow.MediaRecorder;
+    if (!MediaRecorderConstructor) {
+      throw new Error("MediaRecorder is unavailable in this Obsidian window.");
+    }
     const recorderOptions: MediaRecorderOptions = { mimeType: this.mimeType };
     if (this.audioBitsPerSecond && this.audioBitsPerSecond > 0) {
       recorderOptions.audioBitsPerSecond = this.audioBitsPerSecond;
     }
     try {
-      return new MediaRecorder(stream, recorderOptions);
+      return new MediaRecorderConstructor(stream, recorderOptions);
     } catch (_) {
-      return new MediaRecorder(stream);
+      return new MediaRecorderConstructor(stream);
     }
   }
 
@@ -236,7 +275,7 @@ export class MicrophoneRecorder {
         void this.refreshMicStream("Input device changed");
       };
       try {
-        navigator.mediaDevices.addEventListener("devicechange", this.deviceChangeListener);
+        this.mediaDevices.addEventListener("devicechange", this.deviceChangeListener);
       } catch (_) {}
     }
   }
@@ -252,7 +291,7 @@ export class MicrophoneRecorder {
 
     if (this.deviceChangeListener) {
       try {
-        navigator.mediaDevices.removeEventListener("devicechange", this.deviceChangeListener);
+        this.mediaDevices.removeEventListener("devicechange", this.deviceChangeListener);
       } catch (_) {}
       this.deviceChangeListener = null;
     }
@@ -268,16 +307,16 @@ export class MicrophoneRecorder {
       this.swapMicStream(next);
       this.onStatus("Microphone reconnected");
     } catch (error) {
-      // A lock/background transition can end the mic track and then block
-      // re-acquisition (getUserMedia is unavailable while the page is hidden).
+      // A hidden tab or window can end the mic track and then block
+      // re-acquisition because getUserMedia is unavailable while hidden.
       // Preserve the background classification so the captured audio is saved
-      // and flagged, instead of being treated as a hard failure (#162).
-      const hiddenNow = typeof document !== "undefined" && document.hidden;
+      // and flagged instead of being treated as a hard failure (#162).
+      const hiddenNow = this.hostDocument.hidden;
       if (hiddenNow) {
         this.stop("background-hidden");
       } else {
         this.onError(
-          new Error(`Microphone lost: ${error instanceof Error ? error.message : String(error)}`)
+          new Error(`Microphone lost: ${recorderErrorMessage(error)}`)
         );
         this.stop("manual");
       }
@@ -287,45 +326,45 @@ export class MicrophoneRecorder {
   }
 
   private attachLifecycleListeners(): void {
-    if (typeof document !== "undefined" && !this.visibilityChangeListener) {
+    if (!this.visibilityChangeListener) {
       this.visibilityChangeListener = () => {
         if (this.state !== "recording") return;
-        if (document.hidden) {
+        if (this.hostDocument.hidden) {
           this.stop("background-hidden");
           return;
         }
         void this.ensureWakeLock();
       };
-      document.addEventListener("visibilitychange", this.visibilityChangeListener);
+      this.hostDocument.addEventListener("visibilitychange", this.visibilityChangeListener);
     }
 
-    if (typeof window !== "undefined" && !this.pageHideListener) {
+    if (!this.pageHideListener) {
       this.pageHideListener = () => {
         if (this.state !== "recording") return;
         this.stop("background-pagehide");
       };
-      window.addEventListener("pagehide", this.pageHideListener);
+      this.hostWindow.addEventListener("pagehide", this.pageHideListener);
     }
   }
 
   private detachLifecycleListeners(): void {
-    if (typeof document !== "undefined" && this.visibilityChangeListener) {
-      document.removeEventListener("visibilitychange", this.visibilityChangeListener);
+    if (this.visibilityChangeListener) {
+      this.hostDocument.removeEventListener("visibilitychange", this.visibilityChangeListener);
       this.visibilityChangeListener = null;
     }
 
-    if (typeof window !== "undefined" && this.pageHideListener) {
-      window.removeEventListener("pagehide", this.pageHideListener);
+    if (this.pageHideListener) {
+      this.hostWindow.removeEventListener("pagehide", this.pageHideListener);
       this.pageHideListener = null;
     }
   }
 
   private async ensureWakeLock(): Promise<void> {
     if (this.state !== "recording") return;
-    if (typeof document !== "undefined" && document.hidden) return;
+    if (this.hostDocument.hidden) return;
     if (this.wakeLockSentinel) return;
 
-    const wakeLockApi = (navigator as any)?.wakeLock;
+    const wakeLockApi = this.hostNavigator.wakeLock;
     if (!wakeLockApi || typeof wakeLockApi.request !== "function") {
       this.notifyWakeLockHint();
       return;
@@ -352,7 +391,7 @@ export class MicrophoneRecorder {
   private notifyWakeLockHint(): void {
     if (this.wakeLockHintShown) return;
     this.wakeLockHintShown = true;
-    this.onStatus("Recording started. Keep your screen awake for uninterrupted iOS capture.");
+    this.onStatus("Recording started. Keep this window visible and your screen awake for uninterrupted capture.");
   }
 
   private async releaseWakeLock(): Promise<void> {
@@ -406,12 +445,16 @@ export class MicrophoneRecorder {
     try {
       if (this.chunks.length === 0) {
         if (this.stopReason !== "manual") {
-          throw new Error("No audio data captured before app lock/background transition");
+          throw new Error("No audio data captured before the window or tab left the foreground");
         }
         throw new Error("No audio data recorded");
       }
 
-      const blob = new Blob(this.chunks, { type: this.mimeType });
+      const BlobConstructor = this.hostWindow.Blob;
+      if (!BlobConstructor) {
+        throw new Error("Blob is unavailable in this Obsidian window.");
+      }
+      const blob = new BlobConstructor(this.chunks, { type: this.mimeType });
       if (targetPath) {
         const arrayBuffer = await blob.arrayBuffer();
         await this.app.vault.adapter.writeBinary(targetPath, arrayBuffer);
@@ -420,7 +463,7 @@ export class MicrophoneRecorder {
         } else if (this.stopReason === "interrupted") {
           this.onStatus("Recording saved after interruption");
         } else {
-          this.onStatus("Recording saved after app lock/background");
+          this.onStatus("Recording saved after the window or tab left the foreground");
         }
         this.onComplete(targetPath, blob, this.stopReason);
       } else {
@@ -433,30 +476,31 @@ export class MicrophoneRecorder {
         );
       }
     } catch (error) {
-      this.onError(new Error(`Save failed: ${error instanceof Error ? error.message : String(error)}`));
+      this.onError(new Error(`Save failed: ${recorderErrorMessage(error)}`));
     } finally {
       this.release();
     }
   }
 
   private normalizeStartError(error: unknown): Error {
-    if (!(error instanceof Error)) return new Error("Failed to start recording");
+    const message = recorderErrorMessage(error);
+    if (!message) return new Error("Failed to start recording");
 
     if (
-      error.message.includes("Permission denied") ||
-      error.message.includes("permission") ||
-      error.message.includes("NotAllowedError")
+      message.includes("Permission denied") ||
+      message.includes("permission") ||
+      message.includes("NotAllowedError")
     ) {
       return new Error("Microphone access denied. Please check your system permissions.");
     }
-    if (error.message.includes("not found") || error.message.includes("NotFoundError")) {
+    if (message.includes("not found") || message.includes("NotFoundError")) {
       return new Error("No microphone detected. Please connect a microphone and try again.");
     }
-    if (error.message.includes("timeout")) {
+    if (message.includes("timeout")) {
       return new Error("Browser took too long to respond. Try refreshing or check microphone permissions.");
     }
 
-    return new Error(error.message);
+    return new Error(message);
   }
 
   private releaseStreams(): void {

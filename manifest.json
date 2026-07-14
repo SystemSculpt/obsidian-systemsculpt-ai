@@ -1,11 +1,11 @@
 {
   "author": "SystemSculpt",
   "authorUrl": "https://systemsculpt.com",
-  "description": "AI chat, meeting transcription, semantic search, and agent workflows inside your vault. Bring your own keys or use managed models.",
+  "description": "SystemSculpt AI chat, vault actions, transcription, semantic search, and Studio workflows inside Obsidian.",
   "fundingUrl": "https://www.patreon.com/SystemSculpt",
   "id": "systemsculpt-ai",
   "isDesktopOnly": false,
-  "minAppVersion": "1.4.0",
+  "minAppVersion": "1.7.2",
   "name": "SystemSculpt AI",
-  "version": "5.11.0"
+  "version": "6.0.0"
 }

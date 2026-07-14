@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { App, Modal, Notice, Setting, TFile } from "obsidian";
+import { App, Notice, TFile } from "obsidian";
 import { AutomationBacklogModal } from "../AutomationBacklogModal";
 
 // Mock obsidian
@@ -9,35 +9,6 @@ jest.mock("obsidian", () => {
   const actual = jest.requireActual("obsidian");
   return {
     ...actual,
-    Modal: class MockModal {
-      app: App;
-      contentEl: HTMLElement;
-
-      constructor(app: App) {
-        this.app = app;
-        this.contentEl = document.createElement("div");
-      }
-
-      setTitle() {}
-      open() {}
-      close() {}
-    },
-    Setting: jest.fn().mockImplementation(() => {
-      const settingEl = document.createElement("div");
-      return {
-        setName: jest.fn().mockReturnThis(),
-        setDesc: jest.fn().mockReturnThis(),
-        addButton: jest.fn().mockImplementation(function (this: any, cb: (btn: any) => void) {
-          cb({
-            setButtonText: jest.fn().mockReturnThis(),
-            setCta: jest.fn().mockReturnThis(),
-            onClick: jest.fn().mockReturnThis(),
-          });
-          return this;
-        }),
-        settingEl,
-      };
-    }),
     Notice: jest.fn(),
   };
 });
@@ -106,6 +77,26 @@ describe("AutomationBacklogModal", () => {
   });
 
   describe("onOpen", () => {
+    it("renders the shared loading state while the backlog request is pending", async () => {
+      let resolveBacklog!: (entries: []) => void;
+      mockPlugin.getAutomationBacklog.mockReturnValue(
+        new Promise<[]>((resolve) => {
+          resolveBacklog = resolve;
+        })
+      );
+
+      const opening = modal.onOpen();
+
+      const state = modal.contentEl.querySelector<HTMLElement>(
+        ".ss-ui-state.is-loading"
+      );
+      expect(state?.textContent).toContain("Loading backlog");
+      expect(modal.contentEl.getAttribute("aria-busy")).toBe("true");
+
+      resolveBacklog([]);
+      await opening;
+    });
+
     it("loads backlog entries", async () => {
       await modal.onOpen();
 
@@ -118,10 +109,60 @@ describe("AutomationBacklogModal", () => {
       expect(modal.contentEl.children.length).toBeGreaterThan(0);
     });
 
-    it("creates content wrapper", async () => {
+    it("uses the shared modal shell", async () => {
       await modal.onOpen();
 
-      expect((modal as any).contentWrapper).not.toBeNull();
+      expect(modal.modalEl.classList.contains("ss-modal")).toBe(true);
+      expect(modal.modalEl.getAttribute("role")).toBe("dialog");
+    });
+
+    it("renders a recoverable shared error state", async () => {
+      mockPlugin.getAutomationBacklog
+        .mockRejectedValueOnce(new Error("Vault index unavailable"))
+        .mockResolvedValueOnce([]);
+
+      await modal.onOpen();
+
+      const state = modal.contentEl.querySelector<HTMLElement>(
+        ".ss-ui-state.is-error"
+      );
+      expect(state?.getAttribute("role")).toBe("alert");
+      expect(state?.textContent).toContain("Could not load the backlog");
+      expect(state?.textContent).toContain("Vault index unavailable");
+
+      state?.querySelector<HTMLButtonElement>("button")?.click();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(mockPlugin.getAutomationBacklog).toHaveBeenCalledTimes(2);
+      expect(modal.contentEl.querySelector(".ss-ui-state.is-success")).not.toBeNull();
+    });
+
+    it("ignores a backlog request from a closed generation", async () => {
+      let resolveStale!: (entries: any[]) => void;
+      mockPlugin.getAutomationBacklog
+        .mockImplementationOnce(() => new Promise((resolve) => {
+          resolveStale = resolve;
+        }))
+        .mockResolvedValueOnce([]);
+
+      const firstOpen = modal.onOpen();
+      modal.onClose();
+      await modal.onOpen();
+      expect(modal.contentEl.querySelector(".ss-ui-state.is-success")).not.toBeNull();
+
+      resolveStale([
+        {
+          automationId: "stale",
+          automationTitle: "Stale automation",
+          file: { basename: "stale", path: "stale.md" },
+        },
+      ]);
+      await firstOpen;
+
+      expect(mockPlugin.getAutomationBacklog).toHaveBeenCalledTimes(2);
+      expect(modal.contentEl.textContent).toContain("Inbox clear");
+      expect(modal.contentEl.textContent).not.toContain("Stale automation");
     });
   });
 
@@ -167,7 +208,7 @@ describe("AutomationBacklogModal", () => {
     it("shows empty message", async () => {
       await modal.onOpen();
 
-      // Should render empty state message
+      expect(modal.contentEl.querySelector(".ss-ui-state.is-success")).not.toBeNull();
       expect(modal.contentEl.textContent).toContain("Inbox clear");
     });
   });
@@ -225,15 +266,14 @@ describe("AutomationBacklogModal", () => {
     });
   });
 
-  describe("managed execution copy", () => {
-    it("describes backlog processing as managed by SystemSculpt without a model chooser", async () => {
+  describe("managed execution surface", () => {
+    it("keeps the actions obvious without a model or provider chooser", async () => {
       await modal.onOpen();
 
       const text = modal.contentEl.textContent || "";
-      expect(text).toContain("SystemSculpt");
+      expect(text).toContain("Process backlog");
       expect(text).not.toContain("Change model");
       expect(text).not.toContain("Select a model");
-      expect(text).toContain("run through SystemSculpt automatically");
     });
   });
 });

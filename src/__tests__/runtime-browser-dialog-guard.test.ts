@@ -85,7 +85,7 @@ describe("runtime browser dialog guard", () => {
         [
           "Forbidden browser dialog APIs found in runtime source.",
           ...violations,
-          "Use Studio view-native inputs or showConfirm/showAlert utilities instead.",
+          "Use Studio view-native inputs or the shared prompt surface instead.",
         ].join("\n")
       );
     }

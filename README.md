@@ -1,96 +1,91 @@
-# SystemSculpt AI (Obsidian Plugin)
+# SystemSculpt AI for Obsidian
 
-AI chat, semantic search, meeting transcription, image generation, and agent workflows — inside your Obsidian vault, on your terms.
+SystemSculpt brings an agent workspace, semantic vault search, transcription,
+and visual workflows into Obsidian. Activate a SystemSculpt license once;
+there are no provider keys, model catalogs, or local AI runtimes to configure.
 
-Bring your own API keys (no license wall) or use managed models with SystemSculpt Pro. Every AI file change can be reviewed before it touches your notes.
+## What it does
 
-## Why SystemSculpt AI
+- Chat with notes, documents, images, and built-in vault tools.
+- Stream reasoning, content, citations, tool activity, and approvals.
+- Attach or paste multiple mixed files into a conversation.
+- Find related notes with a portable semantic index.
+- Record or import audio and transcribe it to Markdown or SRT.
+- Build text, image, document, media, and vault workflows in Studio.
+- Run capture-folder automations and review file-changing actions.
 
-- **Chat with your vault.** Conversational AI that reads, searches, and reasons over your notes, with custom system prompts loaded from vault markdown files and favorite-filtered model selection.
-- **Agents you stay in control of.** Toggle agent mode for tool-assisted workflows — read, search, edit, move, and organize notes — with review-before-change so AI never silently rewrites your vault.
-- **Semantic search that survives sync (Pro).** Find notes by meaning with embeddings, backed by a portable index that survives Obsidian Sync and vault restore.
-- **Voice to notes.** Record audio and transcribe meetings or voice memos straight into markdown, including self-hosted Whisper and a separate post-processing model.
-- **Image generation in Studio.** Generate images from a Studio canvas node: pick the model, aspect ratio, image size, seed, and batch count.
-- **Automations.** Capture-folder workflows that process new files automatically.
-- **Your keys, your models.** Native Anthropic (Claude), Google (Gemini), OpenAI, xAI, and OpenRouter support, plus local Pi providers with clear Ollama guidance. BYOK chat never hits a SystemSculpt license wall.
+SystemSculpt runs on desktop and mobile. Studio exposes portable nodes on both;
+local CLI, terminal, dataset-adapter, and FFmpeg nodes require Obsidian Desktop.
 
-Works on desktop and mobile.
+## Install
 
-## Free vs Pro
+1. Install and enable SystemSculpt AI from Obsidian Community Plugins.
+2. Open Settings → SystemSculpt AI → Account.
+3. Activate your SystemSculpt license.
+4. Run Open SystemSculpt Chat or open Studio.
 
-- **Bring your own keys:** BYOK-powered chat and features run entirely on your own provider keys.
-- **SystemSculpt Pro:** managed models with no key setup, semantic search / Similar Notes, hosted transcription and image credits, and priority support — $19/month or $149 lifetime. Details at [systemsculpt.com/pricing](https://systemsculpt.com/pricing).
-
-## Quick start
-
-1. Install **SystemSculpt AI** from Obsidian Community Plugins.
-2. Open `Settings -> SystemSculpt AI`.
-3. Add a provider key under `Providers`, or activate a Pro license under `Account`.
-4. Run the command `Open SystemSculpt Chat`.
-5. Optional (Pro license required): enable embeddings in `Knowledge` for Similar Notes.
+Obsidian Community Plugins owns installation and updates. SystemSculpt does not
+run a separate update checker.
 
 ## Privacy and safety
 
-- BYOK requests go to your chosen provider with your keys.
-- Agent edits support review-before-change, and agent tool policies (including command approval) are enforced and synced.
-- License keys are redacted from logs.
+- The plugin sends AI work only to the first-party SystemSculpt API.
+- Provider credentials and model selection stay on the server.
+- Built-in tools operate against the current vault.
+- Ask Approval pauses before vault mutations. Full Access runs them without
+  pausing.
+- License keys are removed from exported diagnostics and settings backups.
 
-## Docs
+## Documentation
 
-- Docs hub: [docs/README.md](docs/README.md)
-- Getting started: [docs/user/getting-started.md](docs/user/getting-started.md)
-- Settings reference: [docs/user/settings.md](docs/user/settings.md)
-- Commands: [docs/user/commands.md](docs/user/commands.md)
-- Ribbon icons: [docs/user/ribbon-icons.md](docs/user/ribbon-icons.md)
-- Similar Notes: [docs/user/similar-notes.md](docs/user/similar-notes.md)
-- Audio & transcription: [docs/user/audio-transcription.md](docs/user/audio-transcription.md)
-- Automations: [docs/user/automations.md](docs/user/automations.md)
-- Troubleshooting: [docs/user/troubleshooting.md](docs/user/troubleshooting.md)
-
-## Installation
-
-### Community Plugins (recommended)
-
-1. Open Obsidian `Settings -> Community plugins`.
-2. Search for `SystemSculpt AI`.
-3. Click `Install`, then `Enable`.
-
-### Manual install
-
-```bash
-cd /path/to/vault/.obsidian/plugins/
-git clone https://github.com/systemsculpt/obsidian-systemsculpt-ai systemsculpt-ai
-cd systemsculpt-ai
-npm install
-npm run build
-```
-
-## Current release facts
-
-- Plugin version: `5.11.0`
-- Minimum Obsidian version: `1.4.0`
-- Platforms: desktop and mobile (`manifest.json` sets `isDesktopOnly: false`)
-- License: MIT
+- [Getting started](docs/user/getting-started.md)
+- [Agent tools and approvals](docs/user/agent-mode.md)
+- [Settings](docs/user/settings.md)
+- [Commands](docs/user/commands.md)
+- [Similar Notes](docs/user/similar-notes.md)
+- [Audio and transcription](docs/user/audio-transcription.md)
+- [Automations](docs/user/automations.md)
+- [Troubleshooting](docs/user/troubleshooting.md)
 
 ## Development
 
-Build, test, sync, and release documentation lives in [docs/development.md](docs/development.md), with contributor gates in [CONTRIBUTING.md](CONTRIBUTING.md). Common entry points:
+~~~bash
+cd ~/gits/systemsculpt/plugin
+npm install
+npm run check
+~~~
 
-```bash
-npm run dev               # watch build
-npm run build             # production build
-npm run check:plugin      # typecheck + bundle resolution
-npm run check:all         # plugin check + Jest suite
-npm test                  # full unit suite
-```
+Use npm run test:related with the source files being changed. Run
+npm run check:plugin for a larger local checkpoint and npm run check:full for
+the exhaustive local gate.
 
-## Support
+To build against the sibling website API:
 
-- Website: `https://systemsculpt.com`
-- Repo: `https://github.com/SystemSculpt/obsidian-systemsculpt-ai`
-- Issues: `https://github.com/SystemSculpt/obsidian-systemsculpt-ai/issues`
-- Email: `support@systemsculpt.com`
+~~~bash
+SYSTEMSCULPT_API_BASE_URL=http://127.0.0.1:3002/api/plugin npm run build
+~~~
 
-## License
+The override is compiled into the local artifact. Release validation always
+rebuilds against https://systemsculpt.com/api/plugin.
 
-MIT. See `LICENSE`.
+The local SystemSculpt workspace is:
+
+| Directory | Responsibility |
+| --- | --- |
+| ~/gits/systemsculpt/plugin | This Obsidian client |
+| ~/gits/systemsculpt/website | Website and first-party plugin API |
+| ~/gits/systemsculpt/systemsculpt-os | Growth and operator automation |
+
+See [development.md](docs/development.md), [CONTRIBUTING.md](CONTRIBUTING.md),
+and [AGENTS.md](AGENTS.md).
+
+## Release
+
+- Version: 6.0.0
+- Minimum Obsidian version: 1.7.2
+- Platforms: desktop and mobile
+- License: MIT
+
+Support: [systemsculpt.com](https://systemsculpt.com) ·
+[GitHub issues](https://github.com/SystemSculpt/obsidian-systemsculpt-ai/issues) ·
+support@systemsculpt.com

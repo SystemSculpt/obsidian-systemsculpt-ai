@@ -1,40 +1,104 @@
-import { App, Modal, setIcon } from "obsidian";
+import { App, Modal } from "obsidian";
+import {
+  applyPluginSurface,
+  createUiAction,
+  createUiSearch,
+  type UiActionTone,
+  type UiSearchHandle,
+} from "../../surface";
 
-export interface Filter {
-  id: string;
-  label: string;
-  icon?: string;
-  active?: boolean;
+export interface ModalAsyncTaskScope {
+  readonly signal: AbortSignal;
+  isCurrent(): boolean;
 }
 
 /**
  * StandardModal provides a consistent base for all modals in the application.
  * It includes standardized header, content, and footer sections, as well as
- * helper methods for common elements like search bars and filter buttons.
+ * focused helpers for titles, actions, and search fields.
  */
 export class StandardModal extends Modal {
+  private static nextTitleId = 0;
+  private static readonly fallbackAccessibleName = "SystemSculpt";
+
   protected headerEl: HTMLElement;
   public contentEl: HTMLElement;
   protected footerEl: HTMLElement;
   private listeners: { element: HTMLElement; type: string; listener: EventListener }[] = [];
+  private searchHandles: UiSearchHandle[] = [];
+  private asyncTaskEpoch = 0;
+  private asyncTaskControllers = new Map<string, AbortController>();
+  private modalIsOpen = false;
 
   constructor(app: App) {
     super(app);
-    
-    // Add standardized modal classes
+
+    applyPluginSurface(this.modalEl, "modal");
     this.modalEl.addClass("ss-modal");
+    this.applyBaseSemantics();
   }
 
   onOpen() {
+    this.invalidateAsyncTasks();
+    this.modalIsOpen = true;
+    this.applyBaseSemantics();
     // Create the standard modal structure
     this.createModalStructure();
   }
 
   onClose() {
+    this.modalIsOpen = false;
+    this.invalidateAsyncTasks();
     // Clean up event listeners
     this.removeAllListeners();
+    this.searchHandles.forEach((search) => search.destroy());
+    this.searchHandles = [];
     // Clean up
     this.modalEl.empty();
+    this.applyBaseSemantics();
+  }
+
+  /**
+   * Starts the latest async task for a semantic key. Starting the same key,
+   * closing, or reopening the modal aborts the previous scope.
+   */
+  protected beginAsyncTask(key: string): ModalAsyncTaskScope {
+    this.asyncTaskControllers.get(key)?.abort();
+
+    const AbortControllerCtor = (this.modalEl.ownerDocument.defaultView as any)?.AbortController
+      ?? AbortController;
+    const controller = new AbortControllerCtor() as AbortController;
+    const epoch = this.asyncTaskEpoch;
+    this.asyncTaskControllers.set(key, controller);
+
+    return {
+      signal: controller.signal,
+      isCurrent: () =>
+        this.modalIsOpen &&
+        !controller.signal.aborted &&
+        this.asyncTaskEpoch === epoch &&
+        this.asyncTaskControllers.get(key) === controller,
+    };
+  }
+
+  /** Sets a direct accessible name for specialized modals without a visible title. */
+  protected setModalAccessibleName(name: string): void {
+    this.modalEl.removeAttribute("aria-labelledby");
+    this.modalEl.setAttr("aria-label", name.trim() || StandardModal.fallbackAccessibleName);
+  }
+
+  private invalidateAsyncTasks(): void {
+    this.asyncTaskEpoch += 1;
+    this.asyncTaskControllers.forEach((controller) => controller.abort());
+    this.asyncTaskControllers.clear();
+  }
+
+  private applyBaseSemantics(): void {
+    this.modalEl.setAttr("role", "dialog");
+    this.modalEl.setAttr("aria-modal", "true");
+    this.modalEl.removeAttribute("aria-labelledby");
+    this.modalEl.removeAttribute("aria-describedby");
+    this.modalEl.setAttr("aria-label", StandardModal.fallbackAccessibleName);
   }
 
   /**
@@ -115,15 +179,27 @@ export class StandardModal extends Modal {
    */
   addTitle(title: string, description?: string) {
     const titleContainer = this.headerEl.createDiv({ cls: "ss-modal__title-container" });
-    titleContainer.createEl("h2", { text: title, cls: "ss-modal__title" });
+    const titleId = `ss-modal-title-${++StandardModal.nextTitleId}`;
+    titleContainer.createEl("h2", {
+      text: title,
+      cls: "ss-modal__title",
+      attr: { id: titleId },
+    });
+
+    this.modalEl.removeAttribute("aria-label");
+    this.modalEl.setAttr("aria-labelledby", titleId);
     
     // Add close button to the title container
-    const closeButton = titleContainer.createDiv({ cls: "ss-modal__close-button" });
-    setIcon(closeButton, "x");
-    this.registerDomEvent(closeButton, "click", () => this.close());
+    this.addCloseButton(titleContainer);
     
     if (description) {
-      this.headerEl.createDiv({ text: description, cls: "ss-modal__description" });
+      const descriptionId = `${titleId}-description`;
+      this.headerEl.createDiv({
+        text: description,
+        cls: "ss-modal__description",
+        attr: { id: descriptionId },
+      });
+      this.modalEl.setAttr("aria-describedby", descriptionId);
     }
   }
 
@@ -134,20 +210,18 @@ export class StandardModal extends Modal {
    * @param primary Whether this is a primary button
    * @param icon Optional icon name to show before text
    */
-  addActionButton(text: string, callback: () => void, primary: boolean = false, icon?: string) {
-    const button = this.footerEl.createEl("button", {
-      cls: primary ? "ss-button ss-button--primary" : "ss-button ss-button--secondary",
+  addActionButton(
+    text: string,
+    callback: () => void,
+    primary: boolean = false,
+    icon?: string,
+    tone?: UiActionTone,
+  ) {
+    const button = createUiAction(this.footerEl, {
+      label: text,
+      icon,
+      tone: tone ?? (primary ? "primary" : "default"),
     });
-    
-    // Add icon if provided
-    if (icon) {
-      const iconEl = button.createSpan("ss-button__icon");
-      setIcon(iconEl, icon);
-    }
-    
-    // Add text separately to ensure proper spacing
-    button.appendChild(document.createTextNode(text));
-    
     this.registerDomEvent(button, "click", callback);
     return button;
   }
@@ -158,105 +232,31 @@ export class StandardModal extends Modal {
    * @param callback Function called when search input changes
    */
   addSearchBar(placeholder: string, callback: (query: string) => void) {
-    const searchContainer = this.contentEl.createDiv("ss-modal__search");
-    
-    // Add search icon
-    const searchIcon = searchContainer.createDiv("ss-modal__search-icon");
-    setIcon(searchIcon, "search");
-    
-    // Add search input
-    const searchInput = searchContainer.createEl("input", {
-      type: "text",
-      placeholder: placeholder,
-      cls: "ss-modal__search-input",
+    const search = createUiSearch(this.contentEl, {
+      placeholder,
+      onQuery: callback,
     });
-    
-    // Add clear button
-    const clearButton = searchContainer.createDiv("ss-modal__search-clear");
-    setIcon(clearButton, "x");
-    clearButton.style.display = "none";
-    
-    // Event listeners
-    this.registerDomEvent(searchInput, "input", () => {
-      const value = searchInput.value;
-      clearButton.style.display = value ? "flex" : "none";
-      callback(value);
-    });
-    
-    this.registerDomEvent(clearButton, "click", () => {
-      searchInput.value = "";
-      clearButton.style.display = "none";
-      callback("");
-      searchInput.focus();
-    });
-    
-    return searchInput;
+    search.root.addClass("ss-modal__search");
+    search.input.addClass("ss-modal__search-input");
+    const icon = search.root.querySelector(".ss-search-field__icon");
+    icon?.addClass("ss-modal__search-icon");
+    const clear = search.root.querySelector(".ss-search-field__clear");
+    clear?.addClass("ss-modal__search-clear");
+    this.searchHandles.push(search);
+    return search.input;
   }
 
-  /**
-   * Add filter buttons to the modal
-   * @param filters Array of filter objects
-   * @param callback Function called when a filter is toggled
-   */
-  addFilterButtons(filters: Filter[], callback: (filterId: string, active: boolean) => void) {
-    const filterContainer = this.contentEl.createDiv("ss-modal__filter");
-    const filterGroup = filterContainer.createDiv("ss-modal__filter-group");
-    
-    filters.forEach(filter => {
-      const button = filterGroup.createEl("button", {
-        cls: `ss-button ss-button--small ${filter.active ? "ss-active" : ""}`,
-        attr: {
-          "data-filter-id": filter.id,
-        },
-      });
-      
-      if (filter.icon) {
-        const iconContainer = button.createSpan("ss-button__icon");
-        setIcon(iconContainer, filter.icon);
-      }
-      
-      // Add text as a separate node to ensure proper spacing
-      button.appendChild(document.createTextNode(filter.label));
-      
-      this.registerDomEvent(button, "click", () => {
-        const isActive = button.classList.toggle("ss-active");
-        callback(filter.id, isActive);
-      });
+  protected addCloseButton(
+    parent: HTMLElement,
+    onClose: () => void = () => this.close(),
+  ): HTMLButtonElement {
+    const closeButton = createUiAction(parent, {
+      label: "Close",
+      icon: "x",
+      size: "icon",
     });
-    
-    return filterContainer;
+    closeButton.addClass("ss-modal__close-button");
+    this.registerDomEvent(closeButton, "click", onClose);
+    return closeButton;
   }
-
-  /**
-   * Create an item component for displaying model/context/search results
-   * @param title Item title
-   * @param description Optional description
-   * @param icon Optional icon name
-   * @param badge Optional badge text
-   */
-  createItem(title: string, description?: string, icon?: string, badge?: string) {
-    const item = document.createElement("div");
-    item.className = "ss-modal__item";
-    
-    // Add icon if provided
-    if (icon) {
-      const iconEl = item.createDiv("ss-modal__item-icon");
-      setIcon(iconEl, icon);
-    }
-    
-    // Add content (title and description)
-    const content = item.createDiv("ss-modal__item-content");
-    content.createDiv({ text: title, cls: "ss-modal__item-title" });
-    
-    if (description) {
-      content.createDiv({ text: description, cls: "ss-modal__item-description" });
-    }
-    
-    // Add badge if provided
-    if (badge) {
-      const badgeEl = item.createSpan({ text: badge, cls: "ss-modal__item-badge" });
-    }
-    
-    return item;
-  }
-} 
+}

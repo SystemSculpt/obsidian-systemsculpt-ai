@@ -1,13 +1,12 @@
-import { Platform } from "obsidian";
-import { spawn } from "node:child_process";
+import { desktopHost, hasNodeRuntime } from "../platform/desktopOnly";
 import { StudioPermissionManager } from "./StudioPermissionManager";
 import type { StudioCliExecutionRequest, StudioCliExecutionResult } from "./types";
 
 const COMMON_CLI_PATHS = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/opt/local/bin"];
 
-function mergeCliPath(rawPath: string): string {
+function mergeCliPath(rawPath: string, delimiter: string): string {
   const segments = rawPath
-    .split(":")
+    .split(delimiter)
     .map((segment) => segment.trim())
     .filter(Boolean);
   const seen = new Set(segments);
@@ -17,15 +16,15 @@ function mergeCliPath(rawPath: string): string {
       seen.add(segment);
     }
   }
-  return segments.join(":");
+  return segments.join(delimiter);
 }
 
 export class StudioSandboxRunner {
   constructor(private readonly permissions: StudioPermissionManager) {}
 
   async runCli(request: StudioCliExecutionRequest): Promise<StudioCliExecutionResult> {
-    if (!Platform.isDesktopApp) {
-      throw new Error("CLI execution is desktop-only.");
+    if (!hasNodeRuntime()) {
+      throw new Error("CLI execution requires Obsidian Desktop.");
     }
 
     const command = String(request.command || "").trim();
@@ -44,6 +43,8 @@ export class StudioSandboxRunner {
     const args = Array.isArray(request.args) ? request.args.map((value) => String(value)) : [];
     const timeoutMs = Math.max(100, Math.floor(request.timeoutMs ?? 30_000));
     const maxOutputBytes = Math.max(1024, Math.floor(request.maxOutputBytes ?? 256 * 1024));
+    const childProcess = desktopHost.childProcess();
+    const path = desktopHost.path();
 
     return await new Promise<StudioCliExecutionResult>((resolve, reject) => {
       let stdout = "";
@@ -51,12 +52,12 @@ export class StudioSandboxRunner {
       let timedOut = false;
       let settled = false;
       const mergedEnv: Record<string, string> = {
-        ...(process.env as Record<string, string>),
+        ...(desktopHost.environment() as Record<string, string>),
         ...(request.env || {}),
       };
-      mergedEnv.PATH = mergeCliPath(String(mergedEnv.PATH || ""));
+      mergedEnv.PATH = mergeCliPath(String(mergedEnv.PATH || ""), path.delimiter);
 
-      const child = spawn(command, args, {
+      const child = childProcess.spawn(command, args, {
         cwd,
         env: mergedEnv,
         shell: false,
@@ -73,32 +74,32 @@ export class StudioSandboxRunner {
         return value.slice(0, maxOutputBytes);
       };
 
-      const timeout = setTimeout(() => {
+      const timeout = window.setTimeout(() => {
         timedOut = true;
         try {
           child.kill("SIGKILL");
         } catch {}
       }, timeoutMs);
 
-      child.stdout.on("data", (chunk: Buffer | string) => {
+      child.stdout.on("data", (chunk: Uint8Array | string) => {
         stdout = truncate(stdout + chunk.toString());
       });
 
-      child.stderr.on("data", (chunk: Buffer | string) => {
+      child.stderr.on("data", (chunk: Uint8Array | string) => {
         stderr = truncate(stderr + chunk.toString());
       });
 
       child.on("error", (error) => {
         if (settled) return;
         settled = true;
-        clearTimeout(timeout);
+        window.clearTimeout(timeout);
         reject(error);
       });
 
       child.on("close", (code) => {
         if (settled) return;
         settled = true;
-        clearTimeout(timeout);
+        window.clearTimeout(timeout);
         resolve({
           exitCode: typeof code === "number" ? code : 1,
           stdout,

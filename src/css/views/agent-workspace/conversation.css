@@ -1,0 +1,146 @@
+/**
+ * Agent workspace conversation: turn layout, user bubbles, attachments, and
+ * message action affordances.
+ */
+
+.systemsculpt-agent-conversation {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ss-space-6);
+  width: min(100%, var(--ss-agent-content-width));
+  min-height: 100%;
+  margin: 0 auto;
+  padding: var(--ss-space-6) var(--ss-space-5) var(--ss-space-10);
+}
+
+.systemsculpt-agent-history,
+.systemsculpt-agent-active-run {
+  display: flex;
+  flex-direction: column;
+}
+
+.systemsculpt-agent-history {
+  gap: 0;
+}
+
+.systemsculpt-agent-active-run {
+  gap: var(--ss-space-5);
+}
+
+.systemsculpt-agent-history > .systemsculpt-agent-turn + .systemsculpt-agent-turn {
+  margin-top: var(--ss-space-5);
+}
+
+.systemsculpt-agent-history > .systemsculpt-agent-turn.is-tool-only + .systemsculpt-agent-turn.is-tool-only {
+  margin-top: var(--ss-space-1);
+}
+
+.systemsculpt-agent-turn {
+  position: relative;
+  min-width: 0;
+}
+
+.systemsculpt-agent-turn.is-user {
+  align-self: flex-end;
+  max-width: min(86%, var(--ss-agent-user-width));
+}
+
+.systemsculpt-agent-turn.is-user .systemsculpt-agent-turn-body {
+  padding: var(--ss-space-3) var(--ss-space-4);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-lg);
+  background: var(--ss-surface-2);
+}
+
+.systemsculpt-agent-turn.is-assistant {
+  width: 100%;
+}
+
+.systemsculpt-agent-message-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ss-space-2);
+  margin-top: var(--ss-space-2);
+}
+
+.systemsculpt-agent-message-attachment {
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-2);
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-md);
+  background: var(--ss-surface-1);
+}
+
+.systemsculpt-agent-message-attachment.is-file {
+  max-width: 100%;
+  min-height: var(--ss-control-height-lg);
+  padding: var(--ss-space-2) var(--ss-space-3);
+}
+
+.systemsculpt-agent-message-attachment.is-image {
+  width: min(12rem, 100%);
+  aspect-ratio: 4 / 3;
+}
+
+.systemsculpt-agent-message-attachment.is-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.systemsculpt-agent-message-attachment-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: var(--ss-ink-muted);
+}
+
+.systemsculpt-agent-message-attachment-copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.systemsculpt-agent-message-attachment-copy strong,
+.systemsculpt-agent-message-attachment-copy span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.systemsculpt-agent-message-attachment-copy span {
+  color: var(--ss-ink-faint);
+  font-size: var(--ss-text-xs);
+}
+
+.systemsculpt-agent-turn-body > :first-child,
+.systemsculpt-agent-part.is-text > :first-child {
+  margin-top: 0;
+}
+
+.systemsculpt-agent-turn-body > :last-child,
+.systemsculpt-agent-part.is-text > :last-child {
+  margin-bottom: 0;
+}
+
+.systemsculpt-agent-message-actions {
+  display: flex;
+  gap: var(--ss-space-1);
+  min-height: var(--ss-control-height-sm);
+  margin-top: var(--ss-space-1);
+  opacity: 0;
+  transition: opacity var(--ss-dur-fast) var(--ss-ease);
+}
+
+.systemsculpt-agent-turn:hover .systemsculpt-agent-message-actions,
+.systemsculpt-agent-turn:focus-within .systemsculpt-agent-message-actions {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .systemsculpt-agent-message-actions {
+    opacity: 1;
+  }
+}

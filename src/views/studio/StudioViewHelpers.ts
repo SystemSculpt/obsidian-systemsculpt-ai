@@ -1,4 +1,5 @@
 import type { StudioJsonValue, StudioNodeDefinition, StudioNodeInstance } from "../../studio/types";
+import { resolveStudioNodeHostAvailability } from "../../studio/StudioHostCapabilities";
 
 export function definitionKey(definition: StudioNodeDefinition): string {
   return `${definition.kind}@${definition.version}`;
@@ -19,8 +20,7 @@ const NODE_DESCRIPTION_BY_KIND: Record<string, string> = {
   "studio.transcription": "Transcribes audio media into text.",
   "studio.dataset":
     "Runs a custom query through a configurable adapter, caches results, and outputs text plus discovered structured fields.",
-  "studio.http_request":
-    "Makes a straightforward API request with typed URL/header/query/body bindings, then returns status/body/json.",
+  "studio.retired_http_request": "Retired HTTP Request placeholder. This node cannot execute.",
   "studio.cli_command": "Runs a local shell command and captures output.",
   "studio.terminal":
     "Legacy terminal placeholder kept so older Studio workflows still load. Interactive terminal sessions are no longer supported.",
@@ -68,7 +68,10 @@ export function buildNodeInsertMenuItems(
   definitions: StudioNodeDefinition[]
 ): StudioNodeInsertMenuItem[] {
   return definitions
-    .filter((definition) => definition.hiddenFromInsertMenu !== true)
+    .filter((definition) =>
+      definition.hiddenFromInsertMenu !== true &&
+      resolveStudioNodeHostAvailability(definition).available
+    )
     .map((definition) => ({
       definition,
       title: prettifyNodeKind(definition.kind),
@@ -76,7 +79,7 @@ export function buildNodeInsertMenuItems(
     }));
 }
 
-export function describeNodeDefinition(definition: StudioNodeDefinition): string {
+function describeNodeDefinition(definition: StudioNodeDefinition): string {
   const mapped = NODE_DESCRIPTION_BY_KIND[definition.kind];
   if (mapped) {
     return mapped;

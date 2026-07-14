@@ -1,0 +1,30 @@
+/** Narrow-layout contracts shared by Studio editor surfaces. */
+
+@container ss-surface (max-width: 1080px) {
+  .ss-studio-caption-board__body {
+    grid-template-columns: minmax(0, 1fr) 260px;
+  }
+}
+
+@container ss-surface (max-width: 640px) {
+  .ss-studio-caption-board__body {
+    grid-template-columns: 1fr;
+  }
+
+  .ss-studio-caption-board__sidebar {
+    border-left: none;
+    border-top: 1px solid var(--ss-line);
+  }
+
+  .ss-studio-caption-board__toolbar {
+    flex-wrap: wrap;
+  }
+}
+
+/* Note selector stacks on narrow widths */
+@container ss-surface (max-width: 760px) {
+  .ss-studio-note-selector-path-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

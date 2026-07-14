@@ -1,0 +1,89 @@
+/**
+ * Agent workspace state overlays: empty state, jump affordance, follow-up
+ * queue, and run banners.
+ */
+
+.systemsculpt-agent-empty {
+  position: absolute;
+  inset: 0;
+  z-index: var(--ss-z-raised);
+  display: grid;
+  place-content: center;
+  gap: var(--ss-space-2);
+  min-height: var(--ss-agent-empty-height);
+  color: var(--ss-ink-muted);
+  pointer-events: none;
+  text-align: center;
+}
+
+.systemsculpt-agent-empty strong {
+  color: var(--ss-ink);
+  font-size: var(--ss-text-xl);
+}
+
+.systemsculpt-agent-jump {
+  position: absolute;
+  right: var(--ss-space-5);
+  bottom: var(--ss-space-4);
+  z-index: var(--ss-z-sticky);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ss-space-2);
+  min-height: var(--ss-control-height);
+  padding: 0 var(--ss-space-3);
+  border: 1px solid var(--ss-line-strong);
+  border-radius: var(--ss-radius-full);
+  background: var(--ss-surface-2);
+  box-shadow: var(--ss-elevation-2);
+  color: var(--ss-ink);
+}
+
+.systemsculpt-agent-jump[aria-hidden="true"] {
+  display: none;
+}
+
+.systemsculpt-agent-queue {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ss-space-2);
+  width: min(100%, var(--ss-agent-content-width));
+  margin: 0 auto;
+  padding: 0 var(--ss-space-5) var(--ss-space-2);
+}
+
+.systemsculpt-agent-queue-item {
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-2);
+  padding: var(--ss-space-2) var(--ss-space-3);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-sm);
+  background: var(--ss-surface-1);
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-sm);
+}
+
+.systemsculpt-agent-queue-item span:nth-child(2) {
+  min-width: 0;
+  overflow: hidden;
+  flex: 1 1 auto;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.systemsculpt-agent-banner {
+  width: min(100%, var(--ss-agent-content-width));
+  margin: var(--ss-space-2) auto 0;
+  padding: var(--ss-space-2) var(--ss-space-3);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-sm);
+  background: var(--ss-surface-1);
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-sm);
+}
+
+.systemsculpt-agent-banner.is-error {
+  border-color: var(--ss-danger-line);
+  background: var(--ss-danger-tint);
+  color: var(--ss-danger);
+}

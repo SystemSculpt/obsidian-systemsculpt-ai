@@ -1,0 +1,143 @@
+/* ------------------------------------------------------------------ *
+ * Groups + tags
+ * ------------------------------------------------------------------ */
+.ss-studio-group-frame {
+  --ss-studio-group-accent: var(--ss-ink-muted);
+
+  position: absolute;
+  /* The frame always wears the group's accent — a muted dashed line plus a
+   * whisper of fill — so choosing a color visibly changes the group, not
+   * just the picker chip. Drop-target state below goes full strength. */
+  border: 1px dashed color-mix(in srgb, var(--ss-studio-group-accent) 75%, transparent);
+  border-radius: var(--ss-radius-xl);
+  background-color: color-mix(in srgb, var(--ss-studio-group-accent) 5%, transparent);
+  cursor: grab;
+  transition:
+    left var(--ss-dur-fast) var(--ss-ease),
+    top var(--ss-dur-fast) var(--ss-ease),
+    width var(--ss-dur-fast) var(--ss-ease),
+    height var(--ss-dur-fast) var(--ss-ease),
+    border-color var(--ss-dur-fast) var(--ss-ease);
+}
+
+.ss-studio-group-frame.is-dragging {
+  cursor: grabbing;
+}
+
+.ss-studio-group-frame.is-drop-target {
+  border-color: var(--ss-studio-group-accent);
+  background-color: color-mix(in srgb, var(--ss-studio-group-accent) 8%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--ss-studio-group-accent) 30%, transparent);
+}
+
+.ss-studio-group-tag {
+  position: absolute;
+  transform: translate(-50%, 52%);
+  pointer-events: auto;
+}
+
+.ss-studio-group-tag-row {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ss-space-1);
+}
+
+.ss-studio-group-tag-name-slot {
+  display: inline-flex;
+  min-width: 0;
+}
+
+/* All button rules in the tag row are scoped under .ss-studio-group-tag so
+ * they carry (0,2,0) specificity. Obsidian's native
+ * `button:not(.clickable-icon)` rule is (0,1,1) and silently overrides any
+ * single-class background/box-shadow/color — that leak is exactly what made
+ * the color-picker swatches render as gray pills. */
+.ss-studio-group-tag .ss-studio-group-tag-button,
+.ss-studio-group-tag .ss-studio-group-tag-input,
+.ss-studio-group-tag .ss-studio-group-tag-action,
+.ss-studio-group-tag .ss-studio-group-align-button,
+.ss-studio-group-tag .ss-studio-group-color-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 24px;
+  padding: 0 var(--ss-space-2);
+  background-color: var(--ss-surface-1);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-full);
+  box-shadow: var(--ss-elevation-1);
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-xs);
+  cursor: pointer;
+  transition: var(--ss-transition-colors);
+}
+
+.ss-studio-group-tag .ss-studio-group-tag-button:hover,
+.ss-studio-group-tag .ss-studio-group-tag-action:hover,
+.ss-studio-group-tag .ss-studio-group-align-button:hover,
+.ss-studio-group-tag .ss-studio-group-color-button:hover {
+  background-color: var(--ss-surface-2);
+  color: var(--ss-ink);
+}
+
+.ss-studio-group-tag .ss-studio-group-tag-input {
+  cursor: text;
+  color: var(--ss-ink);
+}
+
+.ss-studio-group-tag .ss-studio-group-tag-input:focus-visible {
+  outline: none;
+  border-color: var(--ss-accent);
+  box-shadow: var(--ss-ring);
+}
+
+.ss-studio-group-tag .ss-studio-group-color-button {
+  width: 28px;
+  padding: 0;
+}
+
+.ss-studio-group-color-chip {
+  width: 14px;
+  height: 14px;
+  border-radius: var(--ss-radius-round);
+  border: 1px solid var(--ss-line-strong);
+  background: var(--ss-studio-chip-color, var(--ss-studio-group-accent));
+}
+
+.ss-studio-group-color-palette {
+  position: absolute;
+  bottom: calc(100% + var(--ss-space-2));
+  left: 50%;
+  transform: translateX(-50%);
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: var(--ss-space-1);
+  padding: var(--ss-space-2);
+  background-color: var(--ss-surface-2);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-md);
+  box-shadow: var(--ss-elevation-3);
+  z-index: 8;
+}
+
+/* Scoped under .ss-studio-group-tag — see the specificity note on the tag
+ * button rules above; Obsidian's native button background otherwise paints
+ * every swatch gray. */
+.ss-studio-group-tag .ss-studio-group-color-swatch {
+  aspect-ratio: 1;
+  width: 18px;
+  border-radius: var(--ss-radius-round);
+  border: 1px solid var(--ss-line-strong);
+  background: var(--ss-studio-swatch-color, var(--ss-ink-muted));
+  box-shadow: none;
+  cursor: pointer;
+  transition: transform var(--ss-dur-fast) var(--ss-ease-spring);
+}
+
+.ss-studio-group-tag .ss-studio-group-color-swatch:hover {
+  transform: scale(1.15);
+}
+
+.ss-studio-group-tag .ss-studio-group-color-swatch.is-active {
+  box-shadow: var(--ss-ring);
+}

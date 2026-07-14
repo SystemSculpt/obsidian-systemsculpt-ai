@@ -209,55 +209,6 @@ describe("EventEmitter", () => {
     });
   });
 
-  describe("emitWithProvider", () => {
-    it("emits both the original event and a namespaced version", () => {
-      const originalListener = jest.fn();
-      const namespacedListener = jest.fn();
-
-      emitter.on("modelUpdated", originalListener);
-      emitter.on("systemsculpt:modelUpdated", namespacedListener);
-
-      emitter.emitWithProvider("modelUpdated", "systemsculpt", { model: "gpt-4" });
-
-      expect(originalListener).toHaveBeenCalledWith({ model: "gpt-4" });
-      expect(namespacedListener).toHaveBeenCalledWith({ model: "gpt-4" });
-    });
-
-    it("works with custom provider type", () => {
-      const listener = jest.fn();
-      emitter.on("custom:event", listener);
-
-      emitter.emitWithProvider("event", "custom", "data");
-
-      expect(listener).toHaveBeenCalledWith("data");
-    });
-  });
-
-  describe("onProvider", () => {
-    it("listens only to events from a specific provider", () => {
-      const ssListener = jest.fn();
-      const customListener = jest.fn();
-
-      emitter.onProvider("modelUpdated", "systemsculpt", ssListener);
-      emitter.onProvider("modelUpdated", "custom", customListener);
-
-      emitter.emitWithProvider("modelUpdated", "systemsculpt", "ss-data");
-
-      expect(ssListener).toHaveBeenCalledWith("ss-data");
-      expect(customListener).not.toHaveBeenCalled();
-    });
-
-    it("returns an unsubscribe function", () => {
-      const listener = jest.fn();
-      const unsub = emitter.onProvider("event", "systemsculpt", listener);
-
-      unsub();
-      emitter.emitWithProvider("event", "systemsculpt");
-
-      expect(listener).not.toHaveBeenCalled();
-    });
-  });
-
   describe("namespace cleanup", () => {
     it("cleans up namespace tracking when all events are unsubscribed", () => {
       const unsub1 = emitter.on("test:event1", jest.fn());

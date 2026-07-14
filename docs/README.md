@@ -1,44 +1,28 @@
-# SystemSculpt AI docs
+# SystemSculpt AI documentation
 
-Last verified against code: **2026-03-12**.
+Current user and engineering references for the Obsidian plugin.
 
-This folder includes both user docs and engineering docs for the Obsidian plugin.
-
-## User docs (`docs/user`)
+## User guides
 
 - [Getting started](user/getting-started.md)
+- [Agent tools and approvals](user/agent-mode.md)
 - [Settings](user/settings.md)
-- [Commands](user/commands.md)
+- [Commands and hotkeys](user/commands.md)
 - [Ribbon icons](user/ribbon-icons.md)
-- [Similar Notes (embeddings)](user/similar-notes.md)
-- [Audio & transcription](user/audio-transcription.md)
+- [Similar Notes](user/similar-notes.md)
+- [Audio and transcription](user/audio-transcription.md)
 - [Automations](user/automations.md)
 - [Troubleshooting](user/troubleshooting.md)
 
-## Engineering docs (repo root `docs/`)
+## Engineering references
 
 - [Development, testing, and release](development.md)
-- [Android device testing](android-device-testing.md)
-- [iPad device testing](ipad-device-testing.md)
-- [Windows desktop testing](windows-desktop-testing.md)
-- [Chat request flow](chat-request-flow.md)
-- [Studio foundation](studio-foundation.md)
-- [Testing coverage map](testing-coverage-map.md)
+- [Managed chat request flow](chat-request-flow.md)
+- [Studio architecture](studio-foundation.md)
+- [CSS design-system contract](../src/css/README.md)
+- [Studio design philosophy](../src/views/studio/DESIGN.md)
+- [Testing architecture](../testing/README.md)
 
-## Archive docs
-
-- [Archive index](archive/README.md)
-- [On-device embeddings PRD (archival draft)](prd-on-device-embeddings.md)
-- [Design notes (snapshot docs)](design/)
-- [Research notes (time-bound snapshots)](research/)
-
-Operational guidance should come from the root engineering docs above. Historical plans and audits live under `docs/archive/`.
-
-## Canonical code references
-
-- Settings tabs: `src/settings/SettingsTabRegistry.ts`
-- Commands: `src/core/plugin/commands.ts`, `src/main.ts`
-- Ribbon icons: `src/core/plugin/ribbons.ts`
-- Filesystem MCP tools: `src/mcp-tools/filesystem/toolDefinitions/*.ts`
-- YouTube MCP tool: `src/mcp-tools/youtube/MCPYouTubeServer.ts`
-- Web research tools: `src/services/web/registerWebResearchTools.ts`
+Historical plans, device harness notes, provider experiments, and pre-6 release
+notes are intentionally not retained as operational documentation. Current
+behavior is defined by code, tests, and the references above.

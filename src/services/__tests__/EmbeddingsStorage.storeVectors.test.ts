@@ -3,7 +3,7 @@ import { EmbeddingsStorage } from "../embeddings/storage/EmbeddingsStorage";
 import type { EmbeddingVector } from "../embeddings/types";
 import { buildVectorId } from "../embeddings/utils/vectorId";
 
-function makeVector(path: string, namespace = "systemsculpt:openai/text-embedding-3-small:v2:3"): EmbeddingVector {
+function makeVector(path: string, namespace = "systemsculpt:managed:semantic-v1:v2:3"): EmbeddingVector {
   return {
     id: buildVectorId(namespace, path, 0),
     path,
@@ -13,8 +13,7 @@ function makeVector(path: string, namespace = "systemsculpt:openai/text-embeddin
       title: path.replace(/\.md$/, ""),
       mtime: Date.now(),
       contentHash: `${path}-hash`,
-      provider: "systemsculpt",
-      model: "openai/text-embedding-3-small",
+      generation: "semantic-v1",
       dimension: 3,
       createdAt: Date.now(),
       namespace,
@@ -52,7 +51,7 @@ describe("EmbeddingsStorage.storeVectors", () => {
     expect((storage as any).pathsSet.size).toBe(0);
   });
 
-  it("updates cache and invalidates vector array cache on success", async () => {
+  it("updates the root readiness cache on success", async () => {
     const storage = new EmbeddingsStorage("SystemSculptEmbeddings::test");
 
     const store = { put: jest.fn() };
@@ -65,8 +64,6 @@ describe("EmbeddingsStorage.storeVectors", () => {
     };
 
     (storage as any).db = db;
-    (storage as any).vectorsArrayCache = [makeVector("Existing.md")];
-
     const vectors = [makeVector("C.md")];
     const vectorId = vectors[0].id;
 
@@ -78,6 +75,46 @@ describe("EmbeddingsStorage.storeVectors", () => {
 
     expect((storage as any).cache.has(vectorId)).toBe(true);
     expect((storage as any).pathsSet.has("C.md")).toBe(true);
-    expect((storage as any).vectorsArrayCache).toBeNull();
+  });
+
+  it("keeps the root cache unchanged when a vector move transaction aborts", async () => {
+    const storage = new EmbeddingsStorage("SystemSculptEmbeddings::test");
+    const existing = makeVector("Move.md");
+    (storage as any).cache.set(existing.id, existing);
+    const getRequest: any = {};
+    const store = {
+      get: jest.fn(() => getRequest),
+      put: jest.fn(),
+      delete: jest.fn(),
+    };
+    const transaction: any = { objectStore: jest.fn(() => store) };
+    (storage as any).db = { transaction: jest.fn(() => transaction) };
+    const nextId = buildVectorId(existing.metadata.namespace, existing.path, 1);
+
+    const move = storage.moveVectorId(existing.id, nextId, 1);
+    getRequest.result = existing;
+    getRequest.onsuccess();
+    transaction.error = new Error("aborted");
+    transaction.onabort();
+
+    await expect(move).rejects.toThrow("aborted");
+    expect((storage as any).cache.get(existing.id)).toBe(existing);
+    expect((storage as any).cache.has(nextId)).toBe(false);
+  });
+
+  it("keeps cached roots until a removal transaction commits", async () => {
+    const storage = new EmbeddingsStorage("SystemSculptEmbeddings::test");
+    const existing = makeVector("Remove.md");
+    (storage as any).cache.set(existing.id, existing);
+    const store = { delete: jest.fn() };
+    const transaction: any = { objectStore: jest.fn(() => store) };
+    (storage as any).db = { transaction: jest.fn(() => transaction) };
+
+    const removal = storage.removeIds([existing.id]);
+    expect((storage as any).cache.has(existing.id)).toBe(true);
+    transaction.oncomplete();
+
+    await expect(removal).resolves.toBeUndefined();
+    expect((storage as any).cache.has(existing.id)).toBe(false);
   });
 });

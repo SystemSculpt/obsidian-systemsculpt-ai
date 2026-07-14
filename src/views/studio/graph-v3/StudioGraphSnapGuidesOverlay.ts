@@ -23,7 +23,7 @@ export function renderStudioGraphSnapGuidesLayer(
   const scale = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
 
   for (const guide of result.guides) {
-    const line = doc.createElement("div");
+    const line = doc.createDiv();
     line.className = `ss-studio-snap-guide ${guide.axis === "x" ? "is-vertical" : "is-horizontal"}`;
     const length = Math.max(0, (guide.end - guide.start) * scale);
     if (guide.axis === "x") {
@@ -39,7 +39,7 @@ export function renderStudioGraphSnapGuidesLayer(
   }
 
   for (const gap of result.gaps) {
-    const span = doc.createElement("div");
+    const span = doc.createDiv();
     span.className = `ss-studio-snap-gap-span ${gap.axis === "x" ? "is-horizontal" : "is-vertical"}`;
     const length = Math.max(0, (gap.end - gap.start) * scale);
     if (gap.axis === "x") {
@@ -53,7 +53,7 @@ export function renderStudioGraphSnapGuidesLayer(
     }
     layer.appendChild(span);
 
-    const badge = doc.createElement("div");
+    const badge = doc.createDiv();
     badge.className = "ss-studio-snap-gap-badge";
     badge.textContent = gap.label;
     const mid = ((gap.start + gap.end) / 2) * scale;

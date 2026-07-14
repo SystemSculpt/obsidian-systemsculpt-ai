@@ -1,4 +1,7 @@
 import type { StudioJsonValue, StudioNodeInstance } from "../../../studio/types";
+import { createStudioAction } from "../StudioAction";
+import { createSurfaceElement } from "../../../core/ui/surface";
+import { getStudioOwnerWindow } from "../StudioDomContext";
 import type { StudioNodeRunDisplayState } from "../StudioRunPresentationState";
 import type { StudioGraphNodeMutationOptions } from "./StudioGraphNodeCardTypes";
 
@@ -136,8 +139,8 @@ function isLikelyHtmlFieldKey(key: string): boolean {
   return normalized.length > 0 && normalized.includes("html");
 }
 
-function sanitizeHtmlPreviewSource(rawHtml: string): string {
-  const template = document.createElement("template");
+function sanitizeHtmlPreviewSource(rawHtml: string, ownerDocument: Document): string {
+  const template = createSurfaceElement(ownerDocument, "template");
   template.innerHTML = rawHtml;
 
   for (const selector of ["script", "iframe", "object", "embed", "meta", "base", "link"]) {
@@ -436,12 +439,16 @@ function renderJsonOutputPreview(options: {
     }
     return "empty";
   })();
-  const toggleEl = outputWrapEl.createEl("button", {
-    cls: "ss-studio-node-json-output-toggle",
-    text: `Latest Output (${summary})`,
-  });
-  toggleEl.type = "button";
   let expanded = false;
+  const toggleEl = createStudioAction(outputWrapEl, {
+    className: "ss-studio-node-json-output-toggle",
+    label: `Latest Output (${summary})`,
+    selected: false,
+    onSelect: () => {
+      expanded = !expanded;
+      applyOutputExpandedState();
+    },
+  });
   const outputBodyEl = outputWrapEl.createDiv({ cls: "ss-studio-node-json-output-body is-hidden" });
   const outputEditorEl = outputBodyEl.createEl("textarea", {
     cls: "ss-studio-node-inline-output-preview-text",
@@ -452,15 +459,10 @@ function renderJsonOutputPreview(options: {
   });
   const applyOutputExpandedState = (): void => {
     outputBodyEl.classList.toggle("is-hidden", !expanded);
-    toggleEl.classList.toggle("is-active", expanded);
+    toggleEl.classList.toggle("is-selected", expanded);
+    toggleEl.setAttr("aria-pressed", expanded ? "true" : "false");
     toggleEl.setAttr("aria-expanded", expanded ? "true" : "false");
   };
-  toggleEl.addEventListener("click", (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    expanded = !expanded;
-    applyOutputExpandedState();
-  });
   outputEditorEl.readOnly = true;
   outputEditorEl.value = previewText.trim()
     ? previewText
@@ -499,30 +501,28 @@ export function renderJsonNodeEditor(options: RenderStudioJsonNodeEditorOptions)
   });
 
   const modeToggleEl = controlsEl.createDiv({ cls: "ss-studio-node-text-display-mode" });
-  modeToggleEl.createEl("span", {
+  modeToggleEl.createSpan({
     cls: "ss-studio-node-text-display-mode-label",
     text: "View",
   });
 
-  const composerButtonEl = modeToggleEl.createEl("button", {
-    cls: "ss-studio-node-text-display-mode-button",
-    text: "Composer",
-    attr: {
-      "aria-label": "Show JSON composer rows",
-    },
+  const composerButtonEl = createStudioAction(modeToggleEl, {
+    className: "ss-studio-node-text-display-mode-button",
+    label: "Composer",
+    ariaLabel: "Show JSON composer rows",
+    size: "small",
+    selected: false,
+    disabled: interactionLocked,
   });
-  composerButtonEl.type = "button";
-  composerButtonEl.disabled = interactionLocked;
 
-  const rawButtonEl = modeToggleEl.createEl("button", {
-    cls: "ss-studio-node-text-display-mode-button",
-    text: "Raw",
-    attr: {
-      "aria-label": "Show raw JSON editor",
-    },
+  const rawButtonEl = createStudioAction(modeToggleEl, {
+    className: "ss-studio-node-text-display-mode-button",
+    label: "Raw",
+    ariaLabel: "Show raw JSON editor",
+    size: "small",
+    selected: false,
+    disabled: interactionLocked,
   });
-  rawButtonEl.type = "button";
-  rawButtonEl.disabled = interactionLocked;
 
   const composerSurfaceEl = editorWrapEl.createDiv({ cls: "ss-studio-node-json-composer-surface" });
   const rawSurfaceEl = editorWrapEl.createDiv({ cls: "ss-studio-node-json-raw-surface is-hidden" });
@@ -620,22 +620,20 @@ export function renderJsonNodeEditor(options: RenderStudioJsonNodeEditorOptions)
         cls: "ss-studio-node-json-composer-unsupported-body",
         text: "Switch to Raw for arrays/primitives or reset this node to an empty object.",
       });
-      const resetButtonEl = unsupportedEl.createEl("button", {
-        cls: "ss-studio-node-json-row-button",
-        text: "Reset to {}",
-      });
-      resetButtonEl.type = "button";
-      resetButtonEl.disabled = interactionLocked;
-      resetButtonEl.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        if (interactionLocked) {
-          return;
-        }
-        commitJsonValue({}, { mode: "discrete" });
-        hydrateComposerRowsFromConfig();
-        renderComposerRows();
-        refreshJsonEditorSourceState();
+      createStudioAction(unsupportedEl, {
+        className: "ss-studio-node-json-row-button",
+        label: "Reset to {}",
+        size: "small",
+        disabled: interactionLocked,
+        onSelect: () => {
+          if (interactionLocked) {
+            return;
+          }
+          commitJsonValue({}, { mode: "discrete" });
+          hydrateComposerRowsFromConfig();
+          renderComposerRows();
+          refreshJsonEditorSourceState();
+        },
       });
       return;
     }
@@ -710,7 +708,7 @@ export function renderJsonNodeEditor(options: RenderStudioJsonNodeEditorOptions)
           cls: "ss-studio-node-json-row-key",
           type: "text",
           attr: {
-            placeholder: "key",
+            placeholder: "Key",
             "aria-label": "JSON key",
           },
         });
@@ -757,25 +755,23 @@ export function renderJsonNodeEditor(options: RenderStudioJsonNodeEditorOptions)
           renderComposerRows(row.id);
         });
 
-        const removeRowEl = keyControlsEl.createEl("button", {
-          cls: "ss-studio-node-json-row-button ss-studio-node-json-row-remove",
-          text: "×",
-          attr: {
-            "aria-label": "Remove JSON row",
-            title: "Remove row",
+        createStudioAction(keyControlsEl, {
+          className: "ss-studio-node-json-row-button ss-studio-node-json-row-remove",
+          label: "Remove JSON row",
+          ariaLabel: "Remove JSON row",
+          title: "Remove row",
+          icon: "x",
+          size: "icon",
+          tone: "danger",
+          disabled: interactionLocked,
+          onSelect: () => {
+            if (interactionLocked) {
+              return;
+            }
+            composerRows = composerRows.filter((entry) => entry.id !== row.id);
+            commitComposerRows({ mode: "discrete" });
+            renderComposerRows();
           },
-        });
-        removeRowEl.type = "button";
-        removeRowEl.disabled = interactionLocked;
-        removeRowEl.addEventListener("click", (event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          if (interactionLocked) {
-            return;
-          }
-          composerRows = composerRows.filter((entry) => entry.id !== row.id);
-          commitComposerRows({ mode: "discrete" });
-          renderComposerRows();
         });
 
         const valueWrapEl = rowEl.createDiv({ cls: "ss-studio-node-json-row-value-wrap" });
@@ -785,18 +781,20 @@ export function renderJsonNodeEditor(options: RenderStudioJsonNodeEditorOptions)
         if (row.valueType === "html") {
           const htmlValueWrapEl = valueWrapEl.createDiv({ cls: "ss-studio-node-json-row-html-wrap" });
           const htmlModeEl = htmlValueWrapEl.createDiv({ cls: "ss-studio-node-json-row-html-mode" });
-          const sourceModeEl = htmlModeEl.createEl("button", {
-            cls: "ss-studio-node-json-row-button ss-studio-node-json-row-html-mode-button",
-            text: "Source",
+          const sourceModeEl = createStudioAction(htmlModeEl, {
+            className: "ss-studio-node-json-row-button ss-studio-node-json-row-html-mode-button",
+            label: "Source",
+            size: "small",
+            selected: false,
+            disabled: interactionLocked,
           });
-          sourceModeEl.type = "button";
-          sourceModeEl.disabled = interactionLocked;
-          const previewModeEl = htmlModeEl.createEl("button", {
-            cls: "ss-studio-node-json-row-button ss-studio-node-json-row-html-mode-button",
-            text: "Preview",
+          const previewModeEl = createStudioAction(htmlModeEl, {
+            className: "ss-studio-node-json-row-button ss-studio-node-json-row-html-mode-button",
+            label: "Preview",
+            size: "small",
+            selected: false,
+            disabled: interactionLocked,
           });
-          previewModeEl.type = "button";
-          previewModeEl.disabled = interactionLocked;
 
           const htmlSourceSurfaceEl = htmlValueWrapEl.createDiv({
             cls: "ss-studio-node-json-row-html-source-surface",
@@ -804,7 +802,7 @@ export function renderJsonNodeEditor(options: RenderStudioJsonNodeEditorOptions)
           const valueEl = htmlSourceSurfaceEl.createEl("textarea", {
             cls: `${valueInputClass} ss-studio-node-json-row-html-source`,
             attr: {
-              placeholder: "html source",
+              placeholder: "HTML source",
               "aria-label": `HTML value for ${row.key || "row"}`,
             },
           });
@@ -827,12 +825,15 @@ export function renderJsonNodeEditor(options: RenderStudioJsonNodeEditorOptions)
             const showSource = row.htmlViewMode !== "preview";
             htmlSourceSurfaceEl.classList.toggle("is-hidden", !showSource);
             htmlPreviewSurfaceEl.classList.toggle("is-hidden", showSource);
-            sourceModeEl.classList.toggle("is-active", showSource);
-            previewModeEl.classList.toggle("is-active", !showSource);
+            sourceModeEl.classList.toggle("is-selected", showSource);
+            previewModeEl.classList.toggle("is-selected", !showSource);
             sourceModeEl.setAttr("aria-pressed", showSource ? "true" : "false");
             previewModeEl.setAttr("aria-pressed", showSource ? "false" : "true");
             if (!showSource) {
-              htmlPreviewFrameEl.setAttr("srcdoc", sanitizeHtmlPreviewSource(row.value));
+              htmlPreviewFrameEl.setAttr(
+                "srcdoc",
+                sanitizeHtmlPreviewSource(row.value, htmlPreviewFrameEl.ownerDocument)
+              );
             }
           };
 
@@ -861,7 +862,10 @@ export function renderJsonNodeEditor(options: RenderStudioJsonNodeEditorOptions)
             commitComposerRows({ mode: "continuous" });
             refreshComposerValidation();
             if (row.htmlViewMode === "preview") {
-              htmlPreviewFrameEl.setAttr("srcdoc", sanitizeHtmlPreviewSource(row.value));
+              htmlPreviewFrameEl.setAttr(
+                "srcdoc",
+                sanitizeHtmlPreviewSource(row.value, htmlPreviewFrameEl.ownerDocument)
+              );
             }
           });
 
@@ -900,24 +904,21 @@ export function renderJsonNodeEditor(options: RenderStudioJsonNodeEditorOptions)
         }
 
         if (row.valueType !== "html") {
-          const toggleValueEditorEl = valueWrapEl.createEl("button", {
-            cls: "ss-studio-node-json-row-button ss-studio-node-json-row-mode",
-            text: row.useTextarea ? "Line" : "Area",
-            attr: {
-              "aria-label": row.useTextarea ? "Use single-line input" : "Use multi-line input",
-              title: row.useTextarea ? "Use single-line input" : "Use multi-line input",
+          const toggleLabel = row.useTextarea ? "Use single-line input" : "Use multi-line input";
+          createStudioAction(valueWrapEl, {
+            className: "ss-studio-node-json-row-button ss-studio-node-json-row-mode",
+            label: row.useTextarea ? "Line" : "Area",
+            ariaLabel: toggleLabel,
+            title: toggleLabel,
+            size: "small",
+            disabled: interactionLocked || row.valueType === "null",
+            onSelect: () => {
+              if (interactionLocked || row.valueType === "null") {
+                return;
+              }
+              row.useTextarea = !row.useTextarea;
+              renderComposerRows(row.id);
             },
-          });
-          toggleValueEditorEl.type = "button";
-          toggleValueEditorEl.disabled = interactionLocked || row.valueType === "null";
-          toggleValueEditorEl.addEventListener("click", (event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            if (interactionLocked || row.valueType === "null") {
-              return;
-            }
-            row.useTextarea = !row.useTextarea;
-            renderComposerRows(row.id);
           });
         }
 
@@ -935,7 +936,7 @@ export function renderJsonNodeEditor(options: RenderStudioJsonNodeEditorOptions)
         });
 
         if (focusRowId && focusRowId === row.id) {
-          window.setTimeout(() => {
+          getStudioOwnerWindow(keyEl).setTimeout(() => {
             keyEl.focus();
             keyEl.select();
           }, 0);
@@ -945,69 +946,59 @@ export function renderJsonNodeEditor(options: RenderStudioJsonNodeEditorOptions)
 
     const footerEl = composerSurfaceEl.createDiv({ cls: "ss-studio-node-json-composer-footer" });
     const footerActionsEl = footerEl.createDiv({ cls: "ss-studio-node-json-composer-footer-actions" });
-    const addRowEl = footerEl.createEl("button", {
-      cls: "ss-studio-node-json-row-button",
-      text: "Add Field",
-      attr: {
-        "aria-label": "Add JSON field",
+    createStudioAction(footerActionsEl, {
+      className: "ss-studio-node-json-row-button",
+      label: "Add field",
+      ariaLabel: "Add JSON field",
+      size: "small",
+      disabled: interactionLocked,
+      onSelect: () => {
+        if (interactionLocked) {
+          return;
+        }
+        const newRow = createEmptyComposerRow();
+        composerRows.push(newRow);
+        commitComposerRows({ mode: "discrete" });
+        renderComposerRows(newRow.id);
       },
-    });
-    footerActionsEl.appendChild(addRowEl);
-    addRowEl.type = "button";
-    addRowEl.disabled = interactionLocked;
-    addRowEl.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      if (interactionLocked) {
-        return;
-      }
-      const newRow = createEmptyComposerRow();
-      composerRows.push(newRow);
-      commitComposerRows({ mode: "discrete" });
-      renderComposerRows(newRow.id);
     });
 
-    const quickEmailPresetEl = footerEl.createEl("button", {
-      cls: "ss-studio-node-json-row-button",
-      text: "Email Preset",
-      attr: {
-        "aria-label": "Insert email payload fields",
+    createStudioAction(footerActionsEl, {
+      className: "ss-studio-node-json-row-button",
+      label: "Email preset",
+      ariaLabel: "Insert email payload fields",
+      size: "small",
+      disabled: interactionLocked,
+      onSelect: () => {
+        if (interactionLocked) {
+          return;
+        }
+        const current = readJsonNodeEditorValue(node, nodeRunState);
+        const baseObject: Record<string, StudioJsonValue> = isJsonObjectValue(current)
+          ? { ...(current as Record<string, StudioJsonValue>) }
+          : {};
+        baseObject.from = typeof baseObject.from === "string" ? baseObject.from : "";
+        if (Array.isArray(baseObject.to)) {
+          baseObject.to = baseObject.to.map((entry) => String(entry ?? "")).filter((entry) => entry.trim().length > 0);
+        } else if (typeof baseObject.to === "string" && baseObject.to.trim().length > 0) {
+          baseObject.to = [baseObject.to];
+        } else {
+          baseObject.to = [];
+        }
+        baseObject.reply_to = typeof baseObject.reply_to === "string" ? baseObject.reply_to : "";
+        baseObject.subject = typeof baseObject.subject === "string" ? baseObject.subject : "";
+        baseObject.text = typeof baseObject.text === "string" ? baseObject.text : "";
+        baseObject.html = typeof baseObject.html === "string" ? baseObject.html : "";
+        commitJsonValue(baseObject, { mode: "discrete" });
+        hydrateComposerRowsFromConfig();
+        syncRawEditorFromConfig();
+        renderComposerRows();
+        refreshJsonEditorSourceState();
       },
-    });
-    footerActionsEl.appendChild(quickEmailPresetEl);
-    quickEmailPresetEl.type = "button";
-    quickEmailPresetEl.disabled = interactionLocked;
-    quickEmailPresetEl.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      if (interactionLocked) {
-        return;
-      }
-      const current = readJsonNodeEditorValue(node, nodeRunState);
-      const baseObject: Record<string, StudioJsonValue> = isJsonObjectValue(current)
-        ? { ...(current as Record<string, StudioJsonValue>) }
-        : {};
-      baseObject.from = typeof baseObject.from === "string" ? baseObject.from : "";
-      if (Array.isArray(baseObject.to)) {
-        baseObject.to = baseObject.to.map((entry) => String(entry ?? "")).filter((entry) => entry.trim().length > 0);
-      } else if (typeof baseObject.to === "string" && baseObject.to.trim().length > 0) {
-        baseObject.to = [baseObject.to];
-      } else {
-        baseObject.to = [];
-      }
-      baseObject.reply_to = typeof baseObject.reply_to === "string" ? baseObject.reply_to : "";
-      baseObject.subject = typeof baseObject.subject === "string" ? baseObject.subject : "";
-      baseObject.text = typeof baseObject.text === "string" ? baseObject.text : "";
-      baseObject.html = typeof baseObject.html === "string" ? baseObject.html : "";
-      commitJsonValue(baseObject, { mode: "discrete" });
-      hydrateComposerRowsFromConfig();
-      syncRawEditorFromConfig();
-      renderComposerRows();
-      refreshJsonEditorSourceState();
     });
 
     const hintEl = footerEl.createDiv({ cls: "ss-studio-node-json-composer-hint" });
-    hintEl.setText("Choose value type per row. HTML rows support Source/Preview. Use Raw for advanced nested JSON.");
+    hintEl.setText("Choose value type per row. HTML rows support source/preview. Use raw for advanced nested JSON.");
     refreshComposerValidation();
     refreshJsonEditorSourceState();
   };
@@ -1016,8 +1007,8 @@ export function renderJsonNodeEditor(options: RenderStudioJsonNodeEditorOptions)
     const showComposer = editorMode === "composer";
     composerSurfaceEl.toggleClass("is-hidden", !showComposer);
     rawSurfaceEl.toggleClass("is-hidden", showComposer);
-    composerButtonEl.classList.toggle("is-active", showComposer);
-    rawButtonEl.classList.toggle("is-active", !showComposer);
+    composerButtonEl.classList.toggle("is-selected", showComposer);
+    rawButtonEl.classList.toggle("is-selected", !showComposer);
     composerButtonEl.setAttr("aria-pressed", showComposer ? "true" : "false");
     rawButtonEl.setAttr("aria-pressed", showComposer ? "false" : "true");
   };
@@ -1085,4 +1076,3 @@ export function renderJsonNodeEditor(options: RenderStudioJsonNodeEditorOptions)
 
   return true;
 }
-

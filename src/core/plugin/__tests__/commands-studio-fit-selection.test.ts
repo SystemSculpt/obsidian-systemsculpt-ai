@@ -43,17 +43,17 @@ describe("CommandManager studio fit-selection command", () => {
     return { fitCommand, overviewCommand };
   }
 
-  it("registers fit-selection with Mod+Shift+1", () => {
+  it("registers fit-selection without overriding a user hotkey", () => {
     const { fitCommand } = registerStudioViewportCommands();
 
     expect(fitCommand).toEqual(
       expect.objectContaining({
         id: "fit-systemsculpt-studio-selection-in-viewport",
-        name: "SystemSculpt Studio: Fit Selection in Viewport",
+        name: "Studio: fit selection in viewport",
         checkCallback: expect.any(Function),
-        hotkeys: [{ modifiers: ["Mod", "Shift"], key: "1" }],
       })
     );
+    expect(fitCommand.hotkeys).toBeUndefined();
   });
 
   it("runs fit-selection on the active studio view", () => {

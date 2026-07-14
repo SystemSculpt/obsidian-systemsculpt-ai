@@ -9,6 +9,15 @@
  */
 const base = require("../../../src/tests/mocks/obsidian.js");
 
+class IntegrationApp extends base.App {
+  constructor() {
+    super();
+    this.metadataCache.on = jest.fn(() => ({ unload: jest.fn() }));
+    this.workspace.iterateAllLeaves = jest.fn();
+    this.workspace.requestSaveLayout = jest.fn();
+  }
+}
+
 class IntegrationPlugin extends base.Plugin {
   constructor(app, manifest) {
     super(app, manifest);
@@ -28,5 +37,9 @@ class IntegrationPlugin extends base.Plugin {
 
 module.exports = {
   ...base,
+  // Match manifest.minAppVersion so artifact smoke tests exercise the normal
+  // installed-plugin lifecycle instead of the old-host recovery path.
+  apiVersion: "1.7.2",
+  App: IntegrationApp,
   Plugin: IntegrationPlugin,
 };

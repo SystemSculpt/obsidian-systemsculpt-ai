@@ -7,7 +7,7 @@ import { compareNumericVersions, parseNumericVersion } from "../../../utils/semv
  * still reach onload — this gate lets us fail SOFT with a clear message instead
  * of crashing on a missing newer API (#147/#212).
  */
-export const MINIMUM_OBSIDIAN_VERSION = "1.4.0";
+export const MINIMUM_OBSIDIAN_VERSION = "1.7.2";
 
 export interface ObsidianCompatResult {
   supported: boolean;

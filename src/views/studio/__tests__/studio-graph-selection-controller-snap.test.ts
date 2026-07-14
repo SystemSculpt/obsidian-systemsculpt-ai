@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import { StudioGraphSelectionController } from "../StudioGraphSelectionController";
 import {
   createElementStub,

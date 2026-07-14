@@ -1,11 +1,11 @@
 import { App, TFile, Notice } from "obsidian";
 import { DocumentProcessingService } from "./DocumentProcessingService";
-import { LicenseChecker } from "../core/license/LicenseChecker";
 import type SystemSculptPlugin from "../main";
 import { DocumentProcessingProgressEvent } from "../types/documentProcessing";
 import {
   isAudioFileExtension,
-  isDocumentFileExtension,
+  isAutoDocumentConversionFileExtension,
+  isUnsupportedOfficeFileExtension,
   normalizeFileExtension,
 } from "../constants/fileTypes";
 import { TranscriptionService } from "./TranscriptionService";
@@ -19,6 +19,28 @@ export interface ChatContextManager {
   triggerContextChange: () => Promise<void>;
   updateProcessingStatus: (file: TFile, event: DocumentProcessingProgressEvent) => void;
 }
+
+export interface DocumentConversionContextEffect {
+  effectId: string;
+  operationId: string;
+  outputIdentity: string;
+  outputPath: string;
+  markdownSha256: string;
+  signal?: AbortSignal;
+}
+
+export type DocumentConversionContextEffectResult = "applied" | "already_applied" | "repaired";
+
+interface PersistedDocumentContextEffect {
+  operationId: string;
+  outputIdentity: string;
+  outputPath: string;
+  markdownSha256: string;
+  projectionMutated: boolean;
+  notificationAcknowledged: boolean;
+}
+
+const DOCUMENT_CONTEXT_EFFECTS_KEY = "managedDocumentContextEffectsV1";
 
 /**
  * Centralized service for managing document context
@@ -50,6 +72,74 @@ export class DocumentContextManager {
   }
 
   /**
+   * Durably records and idempotently projects a document-conversion context effect.
+   * Existing context APIs intentionally remain unchanged.
+   */
+  public async applyDocumentConversionContextEffect(
+    effect: DocumentConversionContextEffect,
+    contextManager: ChatContextManager
+  ): Promise<DocumentConversionContextEffectResult> {
+    throwIfAborted(effect.signal);
+    validateContextEffect(effect);
+    const data = ((await this.plugin.loadData?.()) ?? {}) as Record<string, unknown>;
+    throwIfAborted(effect.signal);
+    const ledger = readContextEffectLedger(data[DOCUMENT_CONTEXT_EFFECTS_KEY]);
+    const persisted = ledger[effect.effectId];
+    const identity = {
+      operationId: effect.operationId,
+      outputIdentity: effect.outputIdentity,
+      outputPath: effect.outputPath,
+      markdownSha256: effect.markdownSha256,
+    };
+    if (persisted && (
+      persisted.operationId !== identity.operationId ||
+      persisted.outputIdentity !== identity.outputIdentity ||
+      persisted.outputPath !== identity.outputPath ||
+      persisted.markdownSha256 !== identity.markdownSha256
+    )) {
+      throw new Error("Document context effect identity conflict.");
+    }
+
+    const wasPersisted = Boolean(persisted);
+    const record: PersistedDocumentContextEffect = persisted ?? {
+      ...identity,
+      projectionMutated: false,
+      notificationAcknowledged: false,
+    };
+    const persist = async () => {
+      ledger[effect.effectId] = { ...record };
+      await this.plugin.saveData({ ...data, [DOCUMENT_CONTEXT_EFFECTS_KEY]: ledger });
+      throwIfAborted(effect.signal);
+    };
+    if (!persisted) await persist();
+
+    const wikiLink = `[[${effect.outputPath}]]`;
+    const linkPresent = contextManager.hasContextFile(wikiLink);
+    if (record.projectionMutated && record.notificationAcknowledged && linkPresent) {
+      return "already_applied";
+    }
+
+    if (!linkPresent) {
+      throwIfAborted(effect.signal);
+      contextManager.addToContextFiles(wikiLink);
+      throwIfAborted(effect.signal);
+    }
+    if (!record.projectionMutated || !linkPresent) {
+      record.projectionMutated = true;
+      await persist();
+    }
+
+    if (!record.notificationAcknowledged) {
+      throwIfAborted(effect.signal);
+      await contextManager.triggerContextChange();
+      throwIfAborted(effect.signal);
+      record.notificationAcknowledged = true;
+      await persist();
+    }
+    return wasPersisted ? "repaired" : "applied";
+  }
+
+  /**
    * Add a file to context
    * @param file The file to add to context
    * @param contextManager The FileContextManager to update
@@ -68,17 +158,17 @@ export class DocumentContextManager {
     
     
     try {
-      // Check license before processing
-      if (!(await LicenseChecker.checkLicenseForFile(file, this.app, this.plugin))) {
+      const extension = normalizeFileExtension(file.extension);
+      if (isUnsupportedOfficeFileExtension(extension)) {
+        if (showNotices) new Notice("This office file type is not supported for chat context.", 4000);
         return false;
       }
       
-      const extension = normalizeFileExtension(file.extension);
-      
       // Determine how to process the file based on its extension
       let contextPath: string;
+      let contextEffectCommitted = false;
       
-      if (isDocumentFileExtension(extension)) {
+      if (isAutoDocumentConversionFileExtension(extension)) {
         // Process document file
         try {
           contextManager.updateProcessingStatus(file, {
@@ -89,7 +179,7 @@ export class DocumentContextManager {
             flow: "document",
           });
 
-          const extractionPath = await this.documentProcessingService.processDocument(file, {
+          const receipt = await this.documentProcessingService.processDocumentWithReceipt(file, {
             onProgress: (event: DocumentProcessingProgressEvent) => {
               contextManager.updateProcessingStatus(file, {
                 ...event,
@@ -97,8 +187,24 @@ export class DocumentContextManager {
               });
             },
             showNotices: false,
-            addToContext: false,
+            commitContextEffect: async (effect, signal) => {
+              for (const imagePath of effect.imagePaths) {
+                throwIfAborted(signal);
+                const imageWikiLink = `[[${imagePath}]]`;
+                if (!contextManager.hasContextFile(imageWikiLink)) contextManager.addToContextFiles(imageWikiLink);
+              }
+              await this.applyDocumentConversionContextEffect({
+                effectId: effect.contextEffectId,
+                operationId: effect.operationId,
+                outputIdentity: effect.outputIdentity,
+                outputPath: effect.extractionPath,
+                markdownSha256: effect.markdownSha256,
+                signal,
+              }, contextManager);
+              contextEffectCommitted = true;
+            },
           });
+          const extractionPath = receipt.extractionPath;
 
           contextManager.updateProcessingStatus(file, {
             stage: "contextualizing",
@@ -108,13 +214,6 @@ export class DocumentContextManager {
             flow: "document",
           });
 
-          // Add the markdown file to context
-          const mdWikiLink = `[[${extractionPath}]]`;
-          contextManager.addToContextFiles(mdWikiLink);
-          
-          // Find and add any images that were extracted
-          await this.addExtractedImagesToContext(extractionPath, contextManager);
-          
           contextPath = extractionPath;
 
           contextManager.updateProcessingStatus(file, {
@@ -189,7 +288,7 @@ export class DocumentContextManager {
       }
       
       // Save changes if requested
-      if (saveChanges) {
+      if (saveChanges && !contextEffectCommitted) {
         await contextManager.triggerContextChange();
       }
       
@@ -205,56 +304,6 @@ export class DocumentContextManager {
         new Notice(`Error adding ${file.basename} to context: ${message}`, 5000);
       }
       return false;
-    }
-  }
-  
-  /**
-   * Add extracted images to context
-   * @param extractionPath The path to the extraction file
-   * @param contextManager The chat context manager to update
-   */
-  private async addExtractedImagesToContext(
-    extractionPath: string,
-    contextManager: ChatContextManager
-  ): Promise<void> {
-    try {
-      // Find and add any images that were extracted
-      const extractionFile = this.app.vault.getAbstractFileByPath(extractionPath);
-      if (!extractionFile) {
-        return;
-      }
-      
-      const parentFolder = extractionFile.parent;
-      if (!parentFolder) {
-        return;
-      }
-      
-      // Get all files in the vault and filter for images in the parent folder
-      const allFiles = this.app.vault.getAllLoadedFiles();
-      const imageFiles = allFiles.filter(file => {
-        // Check if it's a file (not a folder)
-        if (!(file instanceof TFile)) return false;
-        
-        // Check if it's in a subfolder of the parent folder
-        const filePath = file.path;
-        if (!filePath.startsWith(parentFolder.path)) return false;
-        
-        // Check if it's in an images folder
-        if (!filePath.includes('images-')) return false;
-        
-        // Check if it's an image file
-        return filePath.endsWith('.png') ||
-               filePath.endsWith('.jpg') ||
-               filePath.endsWith('.jpeg');
-      });
-      
-      // Add all found images to context
-      for (const imageFile of imageFiles) {
-        const imageWikiLink = `[[${imageFile.path}]]`;
-        contextManager.addToContextFiles(imageWikiLink);
-      }
-      
-    } catch (error) {
     }
   }
   
@@ -427,4 +476,25 @@ export class DocumentContextManager {
 
     return finalPath;
   }
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+}
+
+function validateContextEffect(effect: DocumentConversionContextEffect): void {
+  if (
+    !/^[a-f0-9]{64}$/.test(effect.effectId) ||
+    !effect.operationId ||
+    !effect.outputIdentity ||
+    !effect.outputPath ||
+    !/^[a-f0-9]{64}$/.test(effect.markdownSha256)
+  ) {
+    throw new Error("Invalid document context effect.");
+  }
+}
+
+function readContextEffectLedger(value: unknown): Record<string, PersistedDocumentContextEffect> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return { ...(value as Record<string, PersistedDocumentContextEffect>) };
 }

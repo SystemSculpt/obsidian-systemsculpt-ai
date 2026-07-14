@@ -6,11 +6,20 @@ export interface HttpRequestOptions {
   headers?: Record<string, string>;
   body?: string;
   timeoutMs?: number;
+  signal?: AbortSignal;
 }
 
 export interface HttpResponseShim {
   status: number;
   json?: any;
+  text?: string;
+  headers?: Record<string, string>;
+}
+
+export interface HttpRequestError {
+  status: number;
+  message: string;
+  json?: unknown;
   text?: string;
   headers?: Record<string, string>;
 }
@@ -23,19 +32,6 @@ const USER_AGENT = 'SystemSculpt-Obsidian';
 
 function getHost(url: string): string {
   try { return new URL(url).host; } catch { return ''; }
-}
-
-function isLocalHost(url: string): boolean {
-  try {
-    const hostname = new URL(url).hostname.toLowerCase();
-    return hostname === 'localhost'
-      || hostname === '127.0.0.1'
-      || hostname === '0.0.0.0'
-      || hostname === '::1'
-      || hostname === 'host.docker.internal';
-  } catch {
-    return false;
-  }
 }
 
 function normalizeHeaders(method: string, headers?: Record<string,string>, body?: string): Record<string,string> {
@@ -58,89 +54,36 @@ export async function httpRequest(opts: HttpRequestOptions): Promise<HttpRespons
   const method = opts.method || 'GET';
   const headers = normalizeHeaders(method, opts.headers, opts.body);
   const host = getHost(opts.url);
-  const localHost = isLocalHost(opts.url);
   const now = Date.now();
   const state = hostState.get(host);
   const disabled = !!(state?.disabledUntil && state.disabledUntil > now);
   const timeoutMs = Math.max(0, Number(opts.timeoutMs || 0));
 
+  const abortError = () => Object.assign(new Error('Request aborted'), { name: 'AbortError' });
+  if (opts.signal?.aborted) throw abortError();
+
   // Generic timeout wrapper that races the underlying request
   async function withTimeout<T>(promise: Promise<T>): Promise<T> {
-    if (!timeoutMs) return promise;
+    if (!timeoutMs && !opts.signal) return promise;
     return await new Promise<T>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        reject(new Error('Request timed out'));
-      }, timeoutMs);
+      let settled = false;
+      let timer: number | null = null;
+      const finish = (callback: () => void) => {
+        if (settled) return;
+        settled = true;
+        if (timer) window.clearTimeout(timer);
+        opts.signal?.removeEventListener('abort', onAbort);
+        callback();
+      };
+      const onAbort = () => finish(() => reject(abortError()));
+      if (timeoutMs) {
+        timer = window.setTimeout(() => finish(() => reject(new Error('Request timed out'))), timeoutMs);
+      }
+      opts.signal?.addEventListener('abort', onAbort, { once: true });
 
       promise
-        .then((value) => {
-          clearTimeout(timer);
-          resolve(value);
-        })
-        .catch((error) => {
-          clearTimeout(timer);
-          reject(error);
-        });
-    });
-  }
-
-  async function requestLocalViaNode(): Promise<{ status: number; text: string; headers: Record<string, string> }> {
-    const url = new URL(opts.url);
-    const isHttps = url.protocol === "https:";
-    const httpLib = require("http") as typeof import("http");
-    const httpsLib = require("https") as typeof import("https");
-    const lib = isHttps ? httpsLib : httpLib;
-
-    return await new Promise((resolve, reject) => {
-      const req = lib.request(
-        {
-          protocol: url.protocol,
-          hostname: url.hostname,
-          port: url.port ? Number(url.port) : undefined,
-          method,
-          path: `${url.pathname}${url.search}`,
-          headers,
-        },
-        (res) => {
-          const chunks: Array<Buffer> = [];
-          res.on("data", (chunk) => {
-            if (Buffer.isBuffer(chunk)) {
-              chunks.push(chunk);
-            } else {
-              chunks.push(Buffer.from(chunk));
-            }
-          });
-          res.on("end", () => {
-            clearTimer();
-            const text = Buffer.concat(chunks).toString("utf8");
-            const headersOut: Record<string, string> = {};
-            for (const [key, value] of Object.entries(res.headers)) {
-              if (typeof value === "string") {
-                headersOut[key] = value;
-              } else if (Array.isArray(value)) {
-                headersOut[key] = value.join(", ");
-              }
-            }
-            resolve({ status: res.statusCode ?? 0, text, headers: headersOut });
-          });
-        }
-      );
-
-      const timer = timeoutMs ? setTimeout(() => req.destroy(new Error("Request timed out")), timeoutMs) : null;
-      const clearTimer = () => {
-        if (timer) clearTimeout(timer);
-      };
-
-      req.on("error", (error) => {
-        clearTimer();
-        reject(error);
-      });
-      req.on("close", clearTimer);
-
-      if (opts.body) {
-        req.write(opts.body);
-      }
-      req.end();
+        .then((value) => finish(() => resolve(value)))
+        .catch((error) => finish(() => reject(error)));
     });
   }
 
@@ -160,9 +103,9 @@ export async function httpRequest(opts: HttpRequestOptions): Promise<HttpRespons
   }
 
   try {
-    const r = localHost
-      ? await requestLocalViaNode()
-      : await withTimeout(Obsidian.requestUrl({ url: opts.url, method, headers, body: opts.body, throw: false }));
+    const r = await withTimeout(
+      Obsidian.requestUrl({ url: opts.url, method, headers, body: opts.body, throw: false })
+    );
 
     const status = r.status || 0;
     const text = (r as any).text as string | undefined;
@@ -170,7 +113,14 @@ export async function httpRequest(opts: HttpRequestOptions): Promise<HttpRespons
     try { parsed = text ? JSON.parse(text) : undefined; } catch {}
     if (!status || status >= 400) {
       const hdrs = ((r as any).headers || {}) as Record<string, string>;
-      throw { status: status || 500, text, json: parsed, headers: hdrs, message: text || (parsed && (parsed.error?.message || parsed.message)) || `HTTP ${status}` };
+      const requestError: HttpRequestError = {
+        status: status || 500,
+        text,
+        json: parsed,
+        headers: hdrs,
+        message: text || (parsed && (parsed.error?.message || parsed.message)) || `HTTP ${status}`,
+      };
+      throw requestError;
     }
     const hdrs = ((r as any).headers || {}) as Record<string, string>;
     // Success resets circuit breaker for this host

@@ -72,21 +72,10 @@ body.ss-search-open .tooltip {
 }
 
 .ss-search__clear {
-  display: flex;
-  align-items: center;
-  justify-content: center;
   flex-shrink: 0;
   width: 24px;
-  height: 24px;
-  border-radius: var(--ss-radius-round);
-  color: var(--ss-ink-muted);
-  cursor: pointer;
-  transition: var(--ss-transition-colors);
-}
-
-.ss-search__clear:hover {
-  background-color: var(--ss-state-hover);
-  color: var(--ss-ink);
+  min-width: 24px;
+  min-height: 24px;
 }
 
 .ss-search__status {
@@ -163,14 +152,8 @@ body.ss-search-open .tooltip {
   border-radius: 2px;
 }
 
-.ss-search__loading,
-.ss-search__empty {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: var(--ss-space-8);
-  color: var(--ss-ink-muted);
-  font-size: var(--ss-text-sm);
+.ss-search__list > .ss-ui-state {
+  margin: var(--ss-space-4);
 }
 
 /* Footer hints */
@@ -187,17 +170,14 @@ body.ss-search-open .tooltip {
   color: var(--ss-ink-faint);
 }
 
-.is-mobile .ss-search__footer,
-.is-phone .ss-search__footer {
-  display: none;
-}
-
 @media (max-width: 700px) {
   .ss-modal.ss-search-modal {
     width: 96vw;
     height: 88vh;
   }
+}
 
+@container ss-surface (max-width: 700px) {
   .ss-search__excerpt {
     max-height: 18px;
   }

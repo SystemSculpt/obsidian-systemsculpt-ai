@@ -1,20 +1,18 @@
 import { App, normalizePath, Platform, TFile } from "obsidian";
-import { mkdtemp, readFile, rm, unlink, writeFile } from "node:fs/promises";
-import { isAbsolute, join as joinPath } from "node:path";
-import { tmpdir } from "node:os";
 import type SystemSculptPlugin from "../main";
+import { desktopHost } from "../platform/desktopOnly";
 import { StudioAssetStore } from "./StudioAssetStore";
 import { StudioGraphCompiler, type StudioCompiledGraph } from "./StudioGraphCompiler";
 import { StudioNodeRegistry } from "./StudioNodeRegistry";
 import { buildNodeInputFingerprint, StudioNodeResultCacheStore } from "./StudioNodeResultCacheStore";
 import { StudioPermissionManager } from "./StudioPermissionManager";
 import { StudioSandboxRunner } from "./StudioSandboxRunner";
-import { StudioSecretStore } from "./StudioSecretStore";
 import { StudioProjectStore } from "./StudioProjectStore";
 import { scopeProjectForRun } from "./StudioRunScope";
 import type {
   StudioApiAdapter,
   StudioNodeCacheSnapshotV1,
+  StudioManagedOperationRef,
   StudioNodeInputMap,
   StudioNodeOutputMap,
   StudioProjectV1,
@@ -26,7 +24,7 @@ import type {
 import { deriveStudioRunsDir } from "./paths";
 import { cloneStudioProjectSnapshot } from "./StudioProjectSnapshots";
 import { nowIso, randomId } from "./utils";
-import { sha256HexFromArrayBuffer } from "./hash";
+import { assertStudioNodeHostAvailable } from "./StudioHostCapabilities";
 
 type PendingRun = {
   runId: string;
@@ -75,36 +73,7 @@ export class StudioRuntime {
     private readonly assetStore: StudioAssetStore,
     private readonly apiAdapter: StudioApiAdapter
   ) {
-    this.nodeResultCacheStore = new StudioNodeResultCacheStore(app);
-  }
-
-  private get adapter() {
-    return this.app.vault.adapter as any;
-  }
-
-  private async ensureDir(path: string): Promise<void> {
-    const segments = normalizePath(path).split("/").filter(Boolean);
-    let current = "";
-    for (const segment of segments) {
-      current = current ? `${current}/${segment}` : segment;
-      try {
-        const exists = await this.adapter.exists(current);
-        if (!exists) {
-          await this.adapter.mkdir(current);
-        }
-      } catch {}
-    }
-  }
-
-  private async appendLine(path: string, line: string): Promise<void> {
-    if (typeof this.adapter.append === "function") {
-      await this.adapter.append(path, line);
-      return;
-    }
-
-    const exists = await this.adapter.exists(path);
-    const previous = exists ? await this.adapter.read(path) : "";
-    await this.adapter.write(path, `${previous}${line}`);
+    this.nodeResultCacheStore = new StudioNodeResultCacheStore(projectStore);
   }
 
   private runIndexPath(projectPath: string): string {
@@ -113,11 +82,11 @@ export class StudioRuntime {
 
   private async readRunIndex(projectPath: string): Promise<StudioRunSummary[]> {
     const indexPath = this.runIndexPath(projectPath);
-    const exists = await this.adapter.exists(indexPath);
-    if (!exists) return [];
+    const bytes = await this.projectStore.readSupportFile(projectPath, indexPath);
+    if (!bytes) return [];
 
     try {
-      const raw = await this.adapter.read(indexPath);
+      const raw = new TextDecoder().decode(bytes);
       const parsed = JSON.parse(raw);
       if (!Array.isArray(parsed)) return [];
       return parsed
@@ -139,36 +108,6 @@ export class StudioRuntime {
     } catch {
       return [];
     }
-  }
-
-  private async writeRunIndex(projectPath: string, runs: StudioRunSummary[]): Promise<void> {
-    const path = this.runIndexPath(projectPath);
-    await this.ensureDir(path.slice(0, path.lastIndexOf("/")));
-    await this.adapter.write(path, `${JSON.stringify(runs, null, 2)}\n`);
-  }
-
-  private async pruneRunRetention(projectPath: string, maxRuns: number): Promise<void> {
-    const runs = await this.readRunIndex(projectPath);
-    if (runs.length <= maxRuns) return;
-
-    const sorted = [...runs].sort((a, b) => a.startedAt.localeCompare(b.startedAt));
-    const toDrop = sorted.slice(0, sorted.length - maxRuns);
-    const keepSet = new Set(sorted.slice(sorted.length - maxRuns).map((run) => run.runId));
-    const retained = runs.filter((run) => keepSet.has(run.runId));
-
-    const runsDir = deriveStudioRunsDir(projectPath);
-    for (const dropped of toDrop) {
-      const runDir = normalizePath(`${runsDir}/${dropped.runId}`);
-      try {
-        if (typeof this.adapter.rmdir === "function") {
-          await this.adapter.rmdir(runDir, true);
-        } else if (typeof this.adapter.remove === "function") {
-          await this.adapter.remove(runDir);
-        }
-      } catch {}
-    }
-
-    await this.writeRunIndex(projectPath, retained);
   }
 
   async getRecentRuns(projectPath: string): Promise<StudioRunSummary[]> {
@@ -269,11 +208,6 @@ export class StudioRuntime {
     }
   }
 
-  private buildSnapshotHash(snapshot: StudioRunSnapshotV1): Promise<string> {
-    const encoded = new TextEncoder().encode(JSON.stringify(snapshot));
-    return sha256HexFromArrayBuffer(encoded.buffer);
-  }
-
   private mapNodeInputs(compiled: StudioCompiledGraph, nodeId: string, outputsByNode: Map<string, StudioNodeOutputMap>): StudioNodeInputMap {
     const current = compiled.nodesById.get(nodeId);
     if (!current) return {};
@@ -355,16 +289,7 @@ export class StudioRuntime {
     const policy = await this.projectStore.loadPolicy(project.permissionsRef.policyPath);
     const permissions = new StudioPermissionManager(policy);
     const sandbox = new StudioSandboxRunner(permissions);
-    const secretStore = new StudioSecretStore();
-
-    const preflight = await this.apiAdapter.estimateRunCredits(project);
-    if (!preflight.ok) {
-      throw new Error(preflight.reason || "Studio preflight credit check failed.");
-    }
-
     const compiled = this.compiler.compile(project, this.registry);
-    const runDir = normalizePath(`${deriveStudioRunsDir(projectPath)}/${runId}`);
-    await this.ensureDir(runDir);
 
     const snapshot: StudioRunSnapshotV1 = {
       schema: "studio.run.v1",
@@ -376,14 +301,12 @@ export class StudioRuntime {
       policy,
     };
 
-    const snapshotHash = await this.buildSnapshotHash(snapshot);
-    await this.adapter.write(normalizePath(`${runDir}/snapshot.json`), `${JSON.stringify(snapshot, null, 2)}\n`);
-
-    const eventsPath = normalizePath(`${runDir}/events.ndjson`);
-    await this.adapter.write(eventsPath, "");
+    const persistedEvents: string[] = [];
+    const stagedAssetFiles = new Map<string, Uint8Array>();
+    const stagedAssetBytesByProjectionPath = new Map<string, Uint8Array>();
 
     const emit = async (event: StudioRunEvent): Promise<void> => {
-      await this.appendLine(eventsPath, `${JSON.stringify(event)}\n`);
+      persistedEvents.push(`${JSON.stringify(event)}\n`);
       if (typeof options?.onEvent === "function") {
         try {
           await options.onEvent(event);
@@ -402,7 +325,6 @@ export class StudioRuntime {
     await emit({
       type: "run.started",
       runId,
-      snapshotHash,
       at: nowIso(),
     });
 
@@ -414,6 +336,7 @@ export class StudioRuntime {
     );
     const executedNodeIds: string[] = [];
     const cachedNodeIds: string[] = [];
+    const managedOperations = new Map<string, StudioManagedOperationRef>();
 
     const outputsByNode = new Map<string, StudioNodeOutputMap>();
     const dependencyCount = new Map<string, number>();
@@ -426,8 +349,15 @@ export class StudioRuntime {
     };
     const runningPromises = new Map<string, Promise<void>>();
     const abortController = new AbortController();
-    const tempRootDir = Platform.isDesktopApp
-      ? await mkdtemp(joinPath(tmpdir(), "systemsculpt-studio-"))
+    const desktop = Platform.isDesktopApp
+      ? {
+          fs: desktopHost.fs(),
+          path: desktopHost.path(),
+          os: desktopHost.os(),
+        }
+      : null;
+    const tempRootDir = desktop
+      ? await desktop.fs.mkdtemp(desktop.path.join(desktop.os.tmpdir(), "systemsculpt-studio-"))
       : "";
 
     for (const [nodeId, node] of compiled.nodesById.entries()) {
@@ -457,9 +387,12 @@ export class StudioRuntime {
       state.set(nodeId, "running");
 
       const promise = (async () => {
+        assertStudioNodeHostAvailable(compiledNode.definition);
         const inputs = this.mapNodeInputs(compiled, nodeId, outputsByNode);
-        const inputFingerprint = await buildNodeInputFingerprint(compiledNode.node, inputs);
         const cachePolicy = compiledNode.definition.cachePolicy || "by_inputs";
+        const inputFingerprint = cachePolicy === "by_inputs"
+          ? await buildNodeInputFingerprint(compiledNode.node, inputs)
+          : null;
 
         if (cachePolicy === "by_inputs" && !forceNodeIds.has(nodeId)) {
           const cacheEntry = nodeCacheSnapshot.entries[nodeId];
@@ -506,15 +439,25 @@ export class StudioRuntime {
           signal: abortController.signal,
           services: {
             api: this.apiAdapter,
-            secretStore,
-            storeAsset: (bytes, mimeType) => this.assetStore.storeArrayBuffer(projectPath, bytes, mimeType),
-            readAsset: (asset) => this.assetStore.readArrayBuffer(asset),
+            storeAsset: async (bytes, mimeType) => {
+              const staged = await this.assetStore.stageArrayBuffer(projectPath, bytes, mimeType);
+              stagedAssetFiles.set(staged.generationFile.contentAddressedPath, staged.generationFile.bytes);
+              stagedAssetBytesByProjectionPath.set(staged.asset.path, staged.generationFile.bytes);
+              return staged.asset;
+            },
+            readAsset: (asset) => {
+              const staged = stagedAssetBytesByProjectionPath.get(asset.path);
+              return staged ? Promise.resolve(staged.slice().buffer) : this.assetStore.readArrayBuffer(asset);
+            },
             resolveAbsolutePath: (path) => {
+              if (!desktop) {
+                throw new Error("Local filesystem paths require Obsidian Desktop.");
+              }
               const normalized = String(path || "").trim();
               if (!normalized) {
                 throw new Error("Filesystem path cannot be empty.");
               }
-              if (isAbsolute(normalized)) {
+              if (desktop.path.isAbsolute(normalized)) {
                 permissions.assertFilesystemPath(normalized);
                 return normalized;
               }
@@ -529,7 +472,7 @@ export class StudioRuntime {
                 return adapter.getFullPath(vaultPath);
               }
               if (typeof adapter.basePath === "string" && adapter.basePath.trim().length > 0) {
-                return joinPath(adapter.basePath, vaultPath);
+                return desktop.path.join(adapter.basePath, vaultPath);
               }
               throw new Error(
                 `Unable to resolve an absolute path for "${vaultPath}". Desktop FileSystemAdapter is required.`
@@ -552,9 +495,6 @@ export class StudioRuntime {
             },
             readVaultBinary: async (vaultPath: string) => {
               permissions.assertFilesystemPath(vaultPath);
-              if (!Platform.isDesktopApp) {
-                throw new Error("Filesystem reads are desktop-only in Studio.");
-              }
               const file = this.app.vault.getAbstractFileByPath(vaultPath);
               if (!(file instanceof TFile)) {
                 throw new Error(`Vault file not found: ${vaultPath}`);
@@ -563,27 +503,27 @@ export class StudioRuntime {
             },
             readLocalFileBinary: async (absolutePath: string) => {
               const normalized = String(absolutePath || "").trim();
-              if (!Platform.isDesktopApp) {
-                throw new Error("Local filesystem reads are desktop-only in Studio.");
+              if (!desktop) {
+                throw new Error("Local filesystem reads require Obsidian Desktop.");
               }
               if (!normalized) {
                 throw new Error("Local filesystem read path is empty.");
               }
-              if (!isAbsolute(normalized)) {
+              if (!desktop.path.isAbsolute(normalized)) {
                 throw new Error(
                   `Local filesystem read requires an absolute path. Received "${normalized}".`
                 );
               }
               permissions.assertFilesystemPath(normalized);
-              const bytes = await readFile(normalized);
+              const bytes = await desktop.fs.readFile(normalized);
               return bytes.buffer.slice(
                 bytes.byteOffset,
                 bytes.byteOffset + bytes.byteLength
               ) as ArrayBuffer;
             },
             writeTempFile: async (bytes, tempOptions) => {
-              if (!Platform.isDesktopApp || !tempRootDir) {
-                throw new Error("Temp file writes are desktop-only in Studio.");
+              if (!desktop || !tempRootDir) {
+                throw new Error("Temporary local files require Obsidian Desktop.");
               }
               const prefix = String(tempOptions?.prefix || "studio-node")
                 .trim()
@@ -594,11 +534,11 @@ export class StudioRuntime {
                 .replace(/^[.]+/, "")
                 .replace(/[^a-zA-Z0-9]+/g, "");
               const suffix = ext ? `.${ext}` : "";
-              const tempPath = joinPath(
+              const tempPath = desktop.path.join(
                 tempRootDir,
                 `${prefix}-${randomId("tmp")}${suffix}`
               );
-              await writeFile(tempPath, Buffer.from(bytes));
+              await desktop.fs.writeFile(tempPath, new Uint8Array(bytes));
               return tempPath;
             },
             deleteLocalFile: async (absolutePath: string) => {
@@ -606,15 +546,17 @@ export class StudioRuntime {
               if (!normalized) {
                 return;
               }
+              if (!desktop) {
+                return;
+              }
               try {
-                await unlink(normalized);
+                await desktop.fs.unlink(normalized);
               } catch {
                 // Best effort cleanup.
               }
             },
             runCli: (request) => sandbox.runCli(request),
             assertFilesystemPath: (path) => permissions.assertFilesystemPath(path),
-            assertNetworkUrl: (url) => permissions.assertNetworkUrl(url),
           },
           log: (message) => {
             this.plugin.getLogger().debug("Studio node log", {
@@ -629,6 +571,9 @@ export class StudioRuntime {
         });
 
         outputsByNode.set(nodeId, result.outputs);
+        for (const operation of result.managedOperations || []) {
+          managedOperations.set(`${operation.capability}:${operation.operationId}`, operation);
+        }
         state.set(nodeId, "done");
         executedNodeIds.push(nodeId);
         if (cachePolicy === "by_inputs") {
@@ -636,7 +581,7 @@ export class StudioRuntime {
             nodeId,
             nodeKind: compiledNode.node.kind,
             nodeVersion: compiledNode.node.version,
-            inputFingerprint,
+            inputFingerprint: inputFingerprint!,
             outputs: result.outputs,
             artifacts: result.artifacts,
             updatedAt: nowIso(),
@@ -652,6 +597,9 @@ export class StudioRuntime {
           outputRef: `${runId}:${nodeId}`,
           outputSource: "execution",
           outputs: result.outputs,
+          ...(result.managedOperations?.length
+            ? { managedOperations: result.managedOperations }
+            : {}),
           at: nowIso(),
         });
 
@@ -738,21 +686,9 @@ export class StudioRuntime {
 
       await Promise.allSettled(Array.from(runningPromises.values()));
     } finally {
-      try {
-        await this.nodeResultCacheStore.save(projectPath, nodeCacheSnapshot);
-      } catch (error) {
-        this.plugin.getLogger().warn("Failed to persist Studio node cache", {
-          source: "StudioRuntime",
-          metadata: {
-            projectPath,
-            runId,
-            error: error instanceof Error ? error.message : String(error),
-          },
-        });
-      }
       if (tempRootDir) {
         try {
-          await rm(tempRootDir, { recursive: true, force: true });
+          await desktop!.fs.rm(tempRootDir, { recursive: true, force: true });
         } catch {
           // Best effort cleanup.
         }
@@ -795,8 +731,33 @@ export class StudioRuntime {
 
     const currentRuns = await this.readRunIndex(projectPath);
     currentRuns.push(summary);
-    await this.writeRunIndex(projectPath, currentRuns);
-    await this.pruneRunRetention(projectPath, project.settings.retention.maxRuns);
+    const sortedRuns = [...currentRuns].sort((a, b) => a.startedAt.localeCompare(b.startedAt));
+    const retainedRuns = sortedRuns.slice(Math.max(0, sortedRuns.length - project.settings.retention.maxRuns));
+    const retainedIds = new Set(retainedRuns.map((run) => run.runId));
+    nodeCacheSnapshot.updatedAt = nowIso();
+    const managedOperationRefs = [...managedOperations.values()];
+    await this.apiAdapter.beginLocalCommit(managedOperationRefs);
+    await this.projectStore.publishRun(projectPath, {
+      projectId: project.projectId,
+      runId,
+      snapshotDocument: new TextEncoder().encode(`${JSON.stringify(snapshot, null, 2)}\n`),
+      eventsDocument: new TextEncoder().encode(persistedEvents.join("")),
+      runIndexDocument: new TextEncoder().encode(`${JSON.stringify(retainedRuns, null, 2)}\n`),
+      cacheDocument: new TextEncoder().encode(`${JSON.stringify(nodeCacheSnapshot, null, 2)}\n`),
+      assets: [...stagedAssetFiles].map(([contentAddressedPath, bytes]) => ({ contentAddressedPath, bytes })),
+      removeRunIds: currentRuns.filter((run) => !retainedIds.has(run.runId)).map((run) => run.runId),
+    });
+    try {
+      await this.apiAdapter.completeLocalCommit(managedOperationRefs);
+    } catch (error) {
+      this.plugin.getLogger().warn("Studio managed-operation cleanup remains pending after run publication", {
+        source: "StudioRuntime",
+        metadata: {
+          runId,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      });
+    }
 
     if (status === "failed") {
       throw new Error(errorMessage || "Studio run failed.");

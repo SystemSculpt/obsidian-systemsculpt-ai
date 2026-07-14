@@ -39,15 +39,20 @@ function createCacheStore() {
     }),
   };
 
-  const app: InMemoryApp = {
-    vault: {
-      adapter,
-    },
+  const projectStore = {
+    readSupportFile: jest.fn(async (_projectPath: string, path: string) => {
+      const value = files.get(path);
+      return typeof value === "string" ? new TextEncoder().encode(value) : null;
+    }),
+    supportRelativePath: jest.fn((_projectPath: string, path: string) => path),
+    replaceCache: jest.fn(async (_projectPath: string, _projectId: string, bytes: Uint8Array) => {
+      files.set("SystemSculpt/Studio/Cache Test.systemsculpt-assets/cache/node-results.json", new TextDecoder().decode(bytes));
+    }),
   };
 
   return {
     files,
-    store: new StudioNodeResultCacheStore(app as any),
+    store: new StudioNodeResultCacheStore(projectStore as any),
   };
 }
 

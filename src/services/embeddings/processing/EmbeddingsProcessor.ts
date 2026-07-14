@@ -2,10 +2,10 @@
  * EmbeddingsProcessor - High-performance batch processor
  * 
  * Features:
- * - Parallel processing with concurrency control
- * - Smart batching for optimal API usage
+ * - Bounded managed dispatch
+ * - Published-limit managed batching
  * - Progress tracking and cancellation
- * - Error recovery and retry logic
+ * - One managed dispatch per prepared batch
  */
 
 import { App, TFile } from 'obsidian';
@@ -14,36 +14,26 @@ import {
   ProcessingProgress,
   ProcessingResult,
   FailedProcessingDetail,
-  EmbeddingsProvider,
-  EmbeddingBatchMetadata
+  ManagedEmbeddingsGateway
 } from '../types';
 import { EmbeddingsStorage } from '../storage/EmbeddingsStorage';
-import { buildNamespace, namespaceMatchesCurrentVersion, normalizeModelForNamespace, parseNamespace } from '../utils/namespace';
+import {
+  buildManagedNamespace,
+  isManagedNamespace,
+} from '../utils/namespace';
 import { buildVectorId } from "../utils/vectorId";
 import { normalizeInPlace, toFloat32Array } from '../utils/vector';
-import { DEFAULT_EMBEDDING_DIMENSION } from '../../../constants/embeddings';
 import { ContentPreprocessor, PreparedChunk } from "./ContentPreprocessor";
-import {
-  withProviderRetry,
-  type EmbeddingsRetryOptions,
-  type EmbeddingsRetryDeps,
-} from "./embeddingsRetry";
-import { tokenCounter } from '../../../utils/TokenCounter';
 import { errorLogger } from '../../../utils/errorLogger';
-import { EmbeddingsProviderError, isEmbeddingsProviderError } from '../providers/ProviderError';
-
-export interface ProcessorConfig {
-  batchSize: number;
-  maxConcurrency: number;
-  rateLimitPerMinute?: number;
-  /** Backoff policy for retrying transient provider errors (defaults applied if omitted). */
-  retry?: EmbeddingsRetryOptions;
-  /** Injected retry dependencies (sleep/random/onRetry) — primarily for tests. */
-  retryDeps?: EmbeddingsRetryDeps;
-}
+import { ManagedEmbeddingsError } from '../gateway/ManagedEmbeddingsAdapter';
+import {
+  createLocalEmptyEmbeddingMarkerForRevision,
+  isLocalEmptyEmbeddingMarker,
+} from "../LocalEmptyEmbeddingMarker";
+import { MANAGED_EMBEDDING_LIMITS } from "../ManagedEmbeddingsContract";
 
 type PendingChunkWork = {
-  file: TFile;
+  revision: EmbeddingSourceRevision;
   content: string;
   hash: string;
   chunkId: number;
@@ -52,28 +42,29 @@ type PendingChunkWork = {
   length: number;
 };
 
+/** Stable source identity captured before remote inference begins. */
+export interface EmbeddingSourceRevision {
+  path: string;
+  basename: string;
+  mtime: number;
+}
+
+export interface EmbeddingsProcessingOptions {
+  sourceRevisions?: ReadonlyMap<TFile, EmbeddingSourceRevision>;
+}
+
 export class EmbeddingsProcessor {
-  private static readonly DEFAULT_MAX_TEXTS_PER_REQUEST = 25;
-  private static readonly MAX_TRANSIENT_ERRORS = 10;
   private cancelled = false;
-  private maxTextsPerRequest: number;
-  private fatalError: EmbeddingsProviderError | null = null;
-  private rateLimitMutex: Promise<void> = Promise.resolve();
-  private lastRequestAt: number = 0;
   private failedBatchPaths: Set<string> = new Set();
   private failedBatchDetails: Map<string, FailedProcessingDetail> = new Map();
-  private transientErrorCount: number = 0;
-  private htmlForbiddenProbeMode: "unknown" | "content" | "global" = "unknown";
-  private htmlForbiddenProbePromise: Promise<"content" | "global"> | null = null;
+  private operationController = new AbortController();
+  private runId = "";
 
   constructor(
-    private provider: EmbeddingsProvider,
-    private storage: EmbeddingsStorage,
-    private preprocessor: ContentPreprocessor,
-    private config: ProcessorConfig
-  ) {
-    this.maxTextsPerRequest = this.resolveProviderBatchLimit(provider);
-  }
+    private readonly gateway: ManagedEmbeddingsGateway,
+    private readonly storage: EmbeddingsStorage,
+    private readonly preprocessor: ContentPreprocessor,
+  ) {}
 
   /**
    * Process files with progress tracking
@@ -81,25 +72,22 @@ export class EmbeddingsProcessor {
   async processFiles(
     files: TFile[],
     app: App,
-    onProgress?: (progress: ProcessingProgress) => void
+    onProgress?: (progress: ProcessingProgress) => void,
+    options: EmbeddingsProcessingOptions = {},
   ): Promise<ProcessingResult> {
     this.cancelled = false;
-    this.fatalError = null;
+    this.operationController = new AbortController();
+    this.runId = this.createRunId();
     this.failedBatchPaths.clear();
     this.failedBatchDetails.clear();
-    this.transientErrorCount = 0;
-    this.htmlForbiddenProbeMode = "unknown";
-    this.htmlForbiddenProbePromise = null;
     const totalFiles = files.length;
-    const providerLimit = this.maxTextsPerRequest || EmbeddingsProcessor.DEFAULT_MAX_TEXTS_PER_REQUEST;
-    const configuredBatchSize = this.config.batchSize && this.config.batchSize > 0
-      ? this.config.batchSize
-      : providerLimit;
-    const safeBatchSize = Math.max(1, Math.min(configuredBatchSize, providerLimit));
-    const maxConcurrency = Math.max(1, this.config.maxConcurrency || 1);
+    const limits = this.gateway.limits ?? MANAGED_EMBEDDING_LIMITS;
+    const safeBatchSize = Math.max(1, limits.maxTexts);
+    const maxConcurrency = 1;
     const flushThreshold = Math.max(safeBatchSize * maxConcurrency * 6, safeBatchSize * 4);
 
     let completedFiles = 0;
+    const completedPaths = new Set<string>();
 
     const reportProgress = () => {
       if (!onProgress) return;
@@ -114,30 +102,31 @@ export class EmbeddingsProcessor {
     const keepChunkIdsByPath: Map<string, Set<number>> = new Map();
     const namespaceByPath: Map<string, string> = new Map();
     const chunkCountsByPath: Map<string, number> = new Map();
-    const fileByPath: Map<string, TFile> = new Map();
+    const sourceByPath = new Map<string, EmbeddingSourceRevision>();
 
-	    const finalizePath = async (path: string): Promise<void> => {
-	      const keepChunkIds = keepChunkIdsByPath.get(path);
-	      const namespace = namespaceByPath.get(path);
-	      const file = fileByPath.get(path);
-	      const chunkCount = chunkCountsByPath.get(path) ?? 0;
-	      const hadFailures = this.failedBatchPaths.has(path);
+    const finalizePath = async (path: string): Promise<void> => {
+      const keepChunkIds = keepChunkIdsByPath.get(path);
+      const namespace = namespaceByPath.get(path);
+      const source = sourceByPath.get(path);
+      const chunkCount = chunkCountsByPath.get(path) ?? 0;
+      const hadFailures = this.failedBatchPaths.has(path);
 
       // Remove bookkeeping before awaiting to avoid double-finalize.
       pendingChunksByPath.delete(path);
       keepChunkIdsByPath.delete(path);
       namespaceByPath.delete(path);
       chunkCountsByPath.delete(path);
-      fileByPath.delete(path);
+      sourceByPath.delete(path);
 
-      if (!file || !keepChunkIds || !namespace) {
+      if (!source || !keepChunkIds || !namespace) {
         return;
       }
 
-	      await this.finalizeFile(file, chunkCount, namespace, keepChunkIds, hadFailures);
-	      completedFiles += 1;
-	      reportProgress();
-	    };
+      await this.finalizeFile(source, chunkCount, namespace, keepChunkIds, hadFailures);
+      completedPaths.add(path);
+      completedFiles += 1;
+      reportProgress();
+    };
 
     let nextBatchIndex = 0;
 
@@ -145,8 +134,22 @@ export class EmbeddingsProcessor {
       if (pendingWork.length === 0 || this.cancelled) return;
 
       const work = pendingWork.splice(0, pendingWork.length);
-      const rawBatches = tokenCounter.createOptimizedBatches(work);
-      const batches = this.enforceBatchSizeLimit(rawBatches, safeBatchSize);
+      const batches: PendingChunkWork[][] = [];
+      let batch: PendingChunkWork[] = [];
+      let batchChars = 0;
+      for (const item of work) {
+        const exceedsCount = batch.length >= safeBatchSize;
+        const exceedsChars = batch.length > 0
+          && batchChars + item.content.length > limits.maxTotalChars;
+        if (exceedsCount || exceedsChars) {
+          batches.push(batch);
+          batch = [];
+          batchChars = 0;
+        }
+        batch.push(item);
+        batchChars += item.content.length;
+      }
+      if (batch.length > 0) batches.push(batch);
 
       const inFlight = new Set<Promise<void>>();
       let cursor = 0;
@@ -163,7 +166,7 @@ export class EmbeddingsProcessor {
 
             const decrements = new Map<string, number>();
             for (const item of batch) {
-              const path = item.file.path;
+              const path = item.revision.path;
               decrements.set(path, (decrements.get(path) || 0) + 1);
             }
 
@@ -200,47 +203,21 @@ export class EmbeddingsProcessor {
 
     for (const file of files) {
       if (this.cancelled) break;
-      fileByPath.set(file.path, file);
+      const revision = options.sourceRevisions?.get(file) ?? this.captureSourceRevision(file);
+      const path = revision.path;
+      sourceByPath.set(path, revision);
 
       try {
         const content = await app.vault.read(file);
 
         const processed = this.preprocessor.process(content, file);
 
-        // File too small - store empty embedding sentinel to mark as processed
         if (!processed) {
-          const modelId = (this.provider as any).model || 'unknown';
-          const dimension = this.getExpectedDimensionHint() || DEFAULT_EMBEDDING_DIMENSION;
-          const namespace = buildNamespace(this.provider.id, modelId, dimension);
-          const id = buildVectorId(namespace, file.path, 0);
-          const emptyVector: EmbeddingVector = {
-            id,
-            path: file.path,
-            chunkId: 0,
-            vector: new Float32Array(dimension),
-            metadata: {
-              title: file.basename,
-              excerpt: '',
-              mtime: file.stat?.mtime || Date.now(),
-              contentHash: 'empty',
-              isEmpty: true,
-              provider: this.provider.id,
-              model: modelId,
-              dimension,
-              createdAt: Date.now(),
-              namespace,
-              complete: true,
-              partial: false,
-              failedChunkCount: 0,
-              chunkCount: 0
-            }
-          };
-          await this.storage.storeVectors([emptyVector]);
-          keepChunkIdsByPath.set(file.path, new Set<number>([0]));
-          namespaceByPath.set(file.path, namespace);
-          pendingChunksByPath.set(file.path, 0);
-          chunkCountsByPath.set(file.path, 0);
-          await finalizePath(file.path);
+          await this.sealLocallyEmptyFile(revision, content);
+          sourceByPath.delete(path);
+          completedPaths.add(path);
+          completedFiles += 1;
+          reportProgress();
           continue;
         }
 
@@ -251,42 +228,21 @@ export class EmbeddingsProcessor {
         );
 
         if (chunks.length === 0) {
-          const modelId = (this.provider as any).model || 'unknown';
-          const dimension = this.getExpectedDimensionHint() || DEFAULT_EMBEDDING_DIMENSION;
-          const namespace = buildNamespace(this.provider.id, modelId, dimension);
-          const id = buildVectorId(namespace, file.path, 0);
-          const sentinel: EmbeddingVector = {
-            id,
-            path: file.path,
-            chunkId: 0,
-            vector: new Float32Array(dimension),
-            metadata: {
-              title: file.basename,
-              excerpt: '',
-              mtime: file.stat?.mtime || Date.now(),
-              contentHash: 'empty',
-              isEmpty: true,
-              provider: this.provider.id,
-              model: modelId,
-              dimension,
-              createdAt: Date.now(),
-              namespace,
-              complete: true,
-              partial: false,
-              failedChunkCount: 0,
-              chunkCount: 0
-            }
-          };
-          await this.storage.storeVectors([sentinel]);
-          keepChunkIdsByPath.set(file.path, new Set<number>([0]));
-          namespaceByPath.set(file.path, namespace);
-          pendingChunksByPath.set(file.path, 0);
-          chunkCountsByPath.set(file.path, 0);
-          await finalizePath(file.path);
+          await this.sealLocallyEmptyFile(revision, content);
+          sourceByPath.delete(path);
+          completedPaths.add(path);
+          completedFiles += 1;
+          reportProgress();
           continue;
         }
 
-        const existingVectors = await this.storage.getVectorsByPath(file.path);
+        const existingVectors = await this.storage.getVectorsByPath(path);
+        const localEmptyMarkerIds = existingVectors
+          .filter(isLocalEmptyEmbeddingMarker)
+          .map((vector) => vector.id);
+        if (localEmptyMarkerIds.length > 0) {
+          await this.storage.removeIds(localEmptyMarkerIds);
+        }
         const vectorsByHash: Map<string, EmbeddingVector[]> = new Map();
         for (const vector of existingVectors) {
           const hash = vector.metadata?.contentHash || '';
@@ -296,8 +252,6 @@ export class EmbeddingsProcessor {
           vectorsByHash.get(hash)!.push(vector);
         }
 
-        const rawModel = (this.provider as any).model || 'unknown';
-        const currentModel = normalizeModelForNamespace(this.provider.id, rawModel);
         const metadataUpdates: EmbeddingVector[] = [];
         const keepChunkIds = new Set<number>();
         const idsToRemove: string[] = [];
@@ -311,25 +265,9 @@ export class EmbeddingsProcessor {
           let existing: EmbeddingVector | null = null;
           const candidates = vectorsByHash.get(chunk.hash) || [];
           const expectedDimension = this.getExpectedDimensionHint();
-          const findCandidateIndex = (requireCurrentSchema: boolean): number => {
-            return candidates.findIndex((candidate) => {
-              if (!this.isReusableCandidate(candidate, this.provider.id, currentModel, expectedDimension)) {
-                return false;
-              }
-              if (!requireCurrentSchema) return true;
-              return namespaceMatchesCurrentVersion(
-                candidate.metadata?.namespace,
-                this.provider.id,
-                currentModel,
-                expectedDimension || undefined
-              );
-            });
-          };
-
-          let candidateIndex = findCandidateIndex(true);
-          if (candidateIndex < 0) {
-            candidateIndex = findCandidateIndex(false);
-          }
+          const candidateIndex = candidates.findIndex((candidate) =>
+            this.isReusableCandidate(candidate, expectedDimension)
+          );
 
           let targetNamespace: string | null = null;
           let targetId: string | null = null;
@@ -339,23 +277,23 @@ export class EmbeddingsProcessor {
             candidates.splice(candidateIndex, 1);
             vectorsByHash.set(chunk.hash, candidates);
             const dim = existing.vector instanceof Float32Array ? existing.vector.length : 0;
-            targetNamespace = buildNamespace(this.provider.id, currentModel, dim);
-            targetId = buildVectorId(targetNamespace, file.path, chunkId);
+            targetNamespace = buildManagedNamespace(dim);
+            targetId = buildVectorId(targetNamespace, path, chunkId);
 
-            namespaceByPath.set(file.path, targetNamespace);
+            namespaceByPath.set(path, targetNamespace);
 
             const existingNamespace = typeof existing.metadata?.namespace === "string" ? existing.metadata.namespace : "";
             if (existingNamespace === targetNamespace && existing.id !== targetId) {
               await this.storage.moveVectorId(existing.id, targetId, chunkId);
-              existing = { ...existing, id: targetId, path: file.path, chunkId };
+              existing = { ...existing, id: targetId, path, chunkId };
             }
           } else {
             if (expectedDimension && expectedDimension > 0) {
-              targetNamespace = buildNamespace(this.provider.id, currentModel, expectedDimension);
-              targetId = buildVectorId(targetNamespace, file.path, chunkId);
+              targetNamespace = buildManagedNamespace(expectedDimension);
+              targetId = buildVectorId(targetNamespace, path, chunkId);
               existing = this.storage.getVectorSync(targetId);
               if (targetNamespace) {
-                namespaceByPath.set(file.path, targetNamespace);
+                namespaceByPath.set(path, targetNamespace);
               }
             } else {
               existing = null;
@@ -366,10 +304,10 @@ export class EmbeddingsProcessor {
           const reusable =
             !!existing &&
             sameHash &&
-            this.isReusableCandidate(existing, this.provider.id, currentModel, expectedDimension);
+            this.isReusableCandidate(existing, expectedDimension);
 
           if (existing && reusable) {
-            const refresh = this.buildMetadataRefreshVector(existing, file, chunk, sectionTitle, currentModel);
+            const refresh = this.buildMetadataRefreshVector(existing, revision, chunk, sectionTitle);
             if (refresh) {
               metadataUpdates.push(refresh);
               if (existing.id !== refresh.id) {
@@ -380,7 +318,7 @@ export class EmbeddingsProcessor {
           }
 
           pendingWork.push({
-            file,
+            revision,
             content: chunk.text,
             hash: chunk.hash,
             chunkId,
@@ -398,12 +336,27 @@ export class EmbeddingsProcessor {
           }
         }
 
-        keepChunkIdsByPath.set(file.path, keepChunkIds);
-        pendingChunksByPath.set(file.path, pendingCount);
-        chunkCountsByPath.set(file.path, chunks.length);
+        if (pendingCount > 0) {
+          const activeNamespace = this.gateway.activeGeneration?.indexNamespace;
+          const activeRoot = existingVectors.find((vector) => (
+            (vector.chunkId ?? 0) === 0
+            && vector.metadata.namespace === activeNamespace
+            && vector.metadata.isEmpty !== true
+          ));
+          if (activeRoot?.metadata.complete === true) {
+            await this.storage.storeVectors([{
+              ...activeRoot,
+              metadata: { ...activeRoot.metadata, complete: false, partial: true },
+            }]);
+          }
+        }
+
+        keepChunkIdsByPath.set(path, keepChunkIds);
+        pendingChunksByPath.set(path, pendingCount);
+        chunkCountsByPath.set(path, chunks.length);
 
         if (pendingCount === 0) {
-          await finalizePath(file.path);
+          await finalizePath(path);
           continue;
         }
 
@@ -412,15 +365,31 @@ export class EmbeddingsProcessor {
           if (this.cancelled) break;
         }
       } catch (error) {
+        const failure = new ManagedEmbeddingsError(
+          "local_preparation_failed",
+          "A note could not be prepared for managed embeddings.",
+          0,
+        );
+        this.failedBatchPaths.add(path);
+        this.failedBatchDetails.set(path, {
+          code: failure.code,
+          message: failure.message,
+          status: failure.status,
+        });
         errorLogger.warn('Failed to prepare file for embeddings processing', {
           source: 'EmbeddingsProcessor',
           method: 'processFiles',
-          providerId: this.provider.id,
           metadata: {
-            path: file.path,
+            path,
             message: error instanceof Error ? error.message : String(error)
           }
         });
+        pendingChunksByPath.delete(path);
+        keepChunkIdsByPath.delete(path);
+        namespaceByPath.delete(path);
+        chunkCountsByPath.delete(path);
+        sourceByPath.delete(path);
+        continue;
       }
     }
 
@@ -429,15 +398,20 @@ export class EmbeddingsProcessor {
     }
 
     const failedPaths = Array.from(this.failedBatchPaths);
+    for (const path of failedPaths) {
+      // A failed note is removed rather than leaving a stale complete root searchable.
+      await this.storage.removeByPath(path);
+    }
     const result: ProcessingResult = {
       completed: completedFiles,
+      completedPaths: [...completedPaths],
       failed: failedPaths.length,
       failedPaths,
-      fatalError: this.fatalError,
+      cancelled: this.cancelled,
+      fatalError: null,
       failedDetails: this.failedBatchDetails.size > 0 ? Object.fromEntries(this.failedBatchDetails.entries()) : undefined,
     };
 
-    this.fatalError = null;
     return result;
   }
 
@@ -446,21 +420,7 @@ export class EmbeddingsProcessor {
    */
   cancel(): void {
     this.cancelled = true;
-  }
-
-  /**
-   * Set provider dynamically
-   */
-  setProvider(provider: EmbeddingsProvider): void {
-    this.provider = provider;
-    this.maxTextsPerRequest = this.resolveProviderBatchLimit(provider);
-  }
-
-  /**
-   * Update processing configuration (batch size, concurrency, rate limiting).
-   */
-  setConfig(config: ProcessorConfig): void {
-    this.config = config;
+    this.operationController.abort();
   }
 
   /**
@@ -478,89 +438,77 @@ export class EmbeddingsProcessor {
     namespaceByPath: Map<string, string>
   ): Promise<boolean> {
     if (this.cancelled) return false;
+    if (batch.every((item) => this.failedBatchPaths.has(item.revision.path))) return false;
 
-    const texts = batch.map(item => {
-      const truncated = tokenCounter.truncateToTokenLimit(item.content);
-      return truncated;
-    });
-    const metadata = this.buildBatchMetadata(batch, texts, batchIndex);
-    const batchStats = tokenCounter.getBatchStatistics(texts);
+    const texts = batch.map((item) => item.content);
     errorLogger.debug('Embeddings batch prepared', {
       source: 'EmbeddingsProcessor',
       method: 'processBatch',
-      providerId: this.provider.id,
       metadata: {
         batchIndex,
-        batchSize: metadata.batchSize,
-        estimatedTotalTokens: metadata.estimatedTotalTokens,
-        maxEstimatedTokens: metadata.maxEstimatedTokens,
-        truncatedCount: metadata.truncatedCount,
-        stats: batchStats,
-        sampleItems: metadata.items.slice(0, 10)
+        batchSize: batch.length,
+        sampleItems: batch.slice(0, 10).map((item) => ({
+          path: item.revision.path,
+          chunkId: item.chunkId,
+          hash: item.hash,
+          length: item.content.length,
+        })),
       }
     });
 
-	    try {
-	      // Log token statistics for this batch
-	      const embeddings = await this.generateEmbeddingsWithHtmlForbiddenIsolation(batch, texts, metadata);
-	      if (embeddings.length !== texts.length) {
-	        throw new Error(`Embedding count mismatch: expected ${texts.length}, got ${embeddings.length}`);
-	      }
-
-      const rawModel = (this.provider as any).model || "unknown";
-      const modelId = normalizeModelForNamespace(this.provider.id, rawModel);
+    try {
+      const embeddings = await this.gateway.generateEmbeddings(texts, {
+        idempotencyKey: this.batchIdempotencyKey(batchIndex),
+        signal: this.operationController.signal,
+      });
+      if (this.cancelled) return false;
+      if (embeddings.length !== texts.length) {
+        throw new ManagedEmbeddingsError("invalid_response", "Embedding count mismatch.", 200);
+      }
+      const generation = this.gateway.activeGeneration;
+      const namespace = generation?.indexNamespace;
+      if (!namespace || !isManagedNamespace(namespace)) {
+        throw new ManagedEmbeddingsError("invalid_response", "Managed embedding namespace is unavailable.", 200);
+      }
 
       // Create embedding vectors
       const vectors: EmbeddingVector[] = [];
       for (let index = 0; index < batch.length; index++) {
         const item = batch[index];
         const raw = embeddings[index];
-        if (!raw) {
-          this.failedBatchPaths.add(item.file.path);
-          if (!this.failedBatchDetails.has(item.file.path)) {
-            const signals = this.detectWafSignals(item.content);
-            this.failedBatchDetails.set(item.file.path, {
-              code: "HOST_UNAVAILABLE",
-              message: `Embeddings request blocked by gateway/WAF; skipped chunk ${item.chunkId}.`,
-              chunkId: item.chunkId,
-              sectionTitle: item.sectionTitle,
-              headingPath: item.headingPath,
-              signals,
-            });
-          }
-          continue;
-        }
+        if (!raw) throw new ManagedEmbeddingsError("invalid_response", "Managed embedding vector is missing.", 200);
         const vector = toFloat32Array(raw);
         const dimension = vector.length;
         if (!normalizeInPlace(vector)) {
-          throw new Error(`Invalid embedding vector (zero-norm) for ${item.file.path}#${item.chunkId}`);
+          throw new ManagedEmbeddingsError("invalid_response", "Managed embedding vector is invalid.", 200);
         }
-        const namespace = buildNamespace(this.provider.id, modelId, dimension);
-        const id = buildVectorId(namespace, item.file.path, item.chunkId);
+        if (namespace !== buildManagedNamespace(dimension)) {
+          throw new ManagedEmbeddingsError("invalid_response", "Managed embedding dimension changed.", 200);
+        }
+        const id = buildVectorId(namespace, item.revision.path, item.chunkId);
         const excerpt = this.buildExcerpt(item.content, item.sectionTitle);
 
-	        namespaceByPath.set(item.file.path, namespace);
-	        vectors.push({
-	          id,
-	          path: item.file.path,
-	          chunkId: item.chunkId,
+        namespaceByPath.set(item.revision.path, namespace);
+        vectors.push({
+          id,
+          path: item.revision.path,
+          chunkId: item.chunkId,
           vector,
           metadata: {
-            title: item.file.basename,
+            title: item.revision.basename,
             excerpt,
-            mtime: item.file.stat?.mtime || Date.now(),
+            mtime: item.revision.mtime,
             contentHash: item.hash,
-            provider: this.provider.id,
-            model: modelId,
+            generation: generation.id,
             dimension,
             createdAt: Date.now(),
             namespace,
             sectionTitle: item.sectionTitle,
             headingPath: item.headingPath,
-	            chunkLength: item.length
-	          }
-	        } as EmbeddingVector);
-	      }
+            chunkLength: item.length
+          }
+        });
+      }
 
       // Store embeddings
       if (vectors.length > 0) {
@@ -569,470 +517,131 @@ export class EmbeddingsProcessor {
       return true;
 
     } catch (error) {
-      const detailsMetadata = metadata;
-      const providerError = isEmbeddingsProviderError(error)
+      const managedError = error instanceof ManagedEmbeddingsError
         ? error
-        : new EmbeddingsProviderError(
-            error instanceof Error ? error.message : String(error),
-            {
-              code: "UNEXPECTED_RESPONSE",
-              providerId: this.provider.id,
-              transient: false,
-              details: { batchIndex, kind: "unexpected", errorType: (error as any)?.constructor?.name },
-              cause: error
-            }
-          );
-
-      const uniquePaths = [...new Set(batch.map(item => item.file.path))];
-      const action = this.handleBatchError(providerError, uniquePaths, batchIndex, detailsMetadata);
-
-      if (action === 'stop' && !this.shouldSuppressFatalBatchLog(providerError)) {
-        const maxPaths = 40;
-        const fileList = uniquePaths.length > maxPaths
-          ? [...uniquePaths.slice(0, maxPaths), `(+${uniquePaths.length - maxPaths} more)`]
-          : uniquePaths;
-        const summary = fileList.join(', ').slice(0, 1400);
-
-        errorLogger.error(`Embeddings batch failed with fatal error; stopping. Files: ${summary}`, providerError, {
-          source: 'EmbeddingsProcessor',
-          method: 'processBatch',
-          providerId: this.provider.id,
-          metadata: {
-            batchIndex,
-            batchSize: detailsMetadata.batchSize,
-            uniqueFiles: uniquePaths.length,
-            estimatedTotalTokens: detailsMetadata.estimatedTotalTokens,
-            maxEstimatedTokens: detailsMetadata.maxEstimatedTokens,
-            truncatedCount: detailsMetadata.truncatedCount,
-            items: detailsMetadata.items.slice(0, 10),
-            files: fileList,
-            status: providerError.status,
-            code: providerError.code,
-            endpoint: providerError.endpoint,
-            retryInMs: providerError.retryInMs
-          }
+        : new ManagedEmbeddingsError("invalid_response", "Managed embeddings request failed.", 0);
+      if (this.cancelled || managedError.code === "request_cancelled") {
+        return false;
+      }
+      const uniquePaths = [...new Set(batch.map((item) => item.revision.path))];
+      for (const path of uniquePaths) {
+        this.failedBatchPaths.add(path);
+        this.failedBatchDetails.set(path, {
+          code: managedError.code,
+          message: managedError.message,
+          status: managedError.status,
         });
       }
+      errorLogger.warn("Managed embeddings batch stopped", {
+        source: "EmbeddingsProcessor",
+        method: "processBatch",
+        metadata: { batchIndex, batchSize: batch.length, code: managedError.code, status: managedError.status },
+      });
       return false;
     }
   }
 
-  private isHtmlForbiddenError(error: EmbeddingsProviderError): boolean {
-    if (error.status !== 403) return false;
-
-    const details: any = error.details as any;
-    const kind = typeof details?.kind === "string" ? details.kind : "";
-    if (kind === "html-response") return true;
-    const sample = typeof details?.sample === "string" ? details.sample : "";
-    if (sample.trim().startsWith("<")) return true;
-    const text = typeof details?.text === "string" ? details.text : "";
-    if (text.trim().startsWith("<")) return true;
-
-    const msg = (error.message || "").toLowerCase();
-    return msg.includes("received html") && msg.includes("403");
+  private async sealLocallyEmptyFile(revision: EmbeddingSourceRevision, source: string): Promise<void> {
+    await this.storage.removeByPath(revision.path);
+    await this.storage.storeVectors([createLocalEmptyEmbeddingMarkerForRevision(revision, source)]);
   }
 
-  private detectWafSignals(text: string): string[] {
-    const signals: string[] = [];
-    const push = (name: string, condition: boolean) => {
-      if (condition) signals.push(name);
-    };
-
-    push("pem", /-----BEGIN [^-]{0,80}-----/i.test(text));
-    push("ssh-key", /\bssh-(?:rsa|ed25519|dss)\s+[A-Za-z0-9+/=]{80,}/.test(text));
-    push("jwt", /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/.test(text));
-    push("base64", /[A-Za-z0-9+/]{200,}={0,2}/.test(text));
-
-    push("phpunit", /\bphpunit\b/i.test(text));
-    push("sqlmap", /\bsqlmap\b/i.test(text));
-    push("nmap", /\bnmap\b/i.test(text));
-    push("metasploit", /\bmetasploit\b/i.test(text));
-    push("hashcat", /\bhashcat\b/i.test(text));
-    push("hydra", /\bhydra\b/i.test(text));
-
-    push("script-tag", /<\s*\/?\s*script\b/i.test(text));
-    push("php-tag", /<\?\s*php/i.test(text));
-    push("traversal", /\.\.(\/|\\)/.test(text));
-    push("union-select", /\bunion\s+select\b/i.test(text));
-    push("base64_decode", /\bbase64_decode\b/i.test(text));
-
-    push("openai-key", /\bsk-[A-Za-z0-9]{20,}\b/.test(text));
-    push("gh-token", /\b(?:ghp_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{20,})\b/.test(text));
-    push("bearer", /\bBearer\s+[A-Za-z0-9._-]{30,}\b/i.test(text));
-
-    push("cve", /\bCVE-\d{4}-\d{3,7}\b/i.test(text));
-    push("curl", /\bcurl\b/i.test(text));
-    push("wget", /\bwget\b/i.test(text));
-    push("powershell", /\bpowershell\b/i.test(text));
-    push("cmd", /\bcmd\.exe\b/i.test(text));
-    push("rm-rf", /\brm\s+-rf\b/i.test(text));
-    push("chmod", /\bchmod\b/i.test(text));
-    push("chown", /\bchown\b/i.test(text));
-    push("etc-passwd", /\/etc\/passwd\b/i.test(text));
-    push("xss", /\bxss\b/i.test(text));
-    push("csrf", /\bcsrf\b/i.test(text));
-    push("sql-injection", /\bsql\s+injection\b/i.test(text));
-
-    return signals;
-  }
-
-  private formatWafSignalsLabel(signals: string[]): string {
-    if (!Array.isArray(signals) || signals.length === 0) return "";
-    const maxSignals = 6;
-    const clipped = signals.slice(0, maxSignals);
-    const suffix = signals.length > maxSignals ? ` +${signals.length - maxSignals}` : "";
-    return ` (${clipped.join(", ")}${suffix})`;
-  }
-
-  private async classifyHtmlForbiddenMode(): Promise<"content" | "global"> {
-    if (this.htmlForbiddenProbeMode !== "unknown") {
-      return this.htmlForbiddenProbeMode;
-    }
-    if (this.htmlForbiddenProbePromise) {
-      return await this.htmlForbiddenProbePromise;
-    }
-
-    this.htmlForbiddenProbePromise = (async () => {
-      try {
-        await this.enforceRateLimit();
-        const probe = await this.provider.generateEmbeddings(["hello"], { inputType: "document" });
-        if (Array.isArray(probe) && probe.length === 1) {
-          this.htmlForbiddenProbeMode = "content";
-          return "content";
-        }
-      } catch {
-        this.htmlForbiddenProbeMode = "global";
-        return "global";
-      } finally {
-        this.htmlForbiddenProbePromise = null;
-      }
-
-      this.htmlForbiddenProbeMode = "global";
-      return "global";
-    })();
-
-    return await this.htmlForbiddenProbePromise;
-  }
-
-  private async generateEmbeddingsWithHtmlForbiddenIsolation(
-    batch: PendingChunkWork[],
-    texts: string[],
-    metadata: EmbeddingBatchMetadata
-  ): Promise<Array<number[] | null>> {
-    await this.enforceRateLimit();
-    if (this.cancelled) return texts.map(() => null);
-
-    try {
-      // Retry transient provider errors (notably 429 rate limits, which neither
-      // provider retries) with backoff before letting the error reach
-      // handleBatchError — which would otherwise cancel the whole run on the
-      // first 429 (the #127 "bulk rebuild stalls on rate limit" behavior).
-      const embeddings = await withProviderRetry(
-        () => this.provider.generateEmbeddings(texts, { inputType: "document", batchMetadata: metadata }),
-        this.config.retry,
-        {
-          ...this.config.retryDeps,
-          onRetry: this.config.retryDeps?.onRetry ?? ((info) => {
-            errorLogger.warn(
-              `Embeddings request ${info.error.code}; retry ${info.attempt} in ${info.delayMs}ms`,
-              {
-                source: "EmbeddingsProcessor",
-                method: "generateEmbeddingsWithHtmlForbiddenIsolation",
-                providerId: this.provider.id,
-                metadata: {
-                  attempt: info.attempt,
-                  delayMs: info.delayMs,
-                  code: info.error.code,
-                  status: info.error.status,
-                },
-              }
-            );
-          }),
-        }
-      );
-      if (embeddings.length !== texts.length) {
-        throw new Error(`Embedding count mismatch: expected ${texts.length}, got ${embeddings.length}`);
-      }
-      return embeddings;
-    } catch (error) {
-      const providerError = isEmbeddingsProviderError(error)
-        ? error
-        : new EmbeddingsProviderError(
-            error instanceof Error ? error.message : String(error),
-            {
-              code: "UNEXPECTED_RESPONSE",
-              providerId: this.provider.id,
-              transient: false,
-              details: { batchSize: texts.length, kind: "unexpected", errorType: (error as any)?.constructor?.name },
-              cause: error,
-            }
-          );
-
-      if (!this.isHtmlForbiddenError(providerError)) {
-        throw providerError;
-      }
-
-      const mode = await this.classifyHtmlForbiddenMode();
-      if (mode === "global") {
-        throw providerError;
-      }
-
-      if (batch.length <= 1) {
-        const only = batch[0];
-        if (only) {
-          const signals = this.detectWafSignals(only.content);
-          this.failedBatchPaths.add(only.file.path);
-          this.failedBatchDetails.set(only.file.path, {
-            code: providerError.code,
-            message: `Embeddings request blocked by gateway/WAF (HTML 403) for chunk ${only.chunkId}. Consider excluding this note or removing exploit-signature strings and retrying.`,
-            status: providerError.status,
-            retryInMs: providerError.retryInMs,
-            chunkId: only.chunkId,
-            sectionTitle: only.sectionTitle,
-            headingPath: only.headingPath,
-            signals,
-          });
-          errorLogger.warn(
-            `Embeddings chunk blocked by gateway/WAF; skipping ${only.file.path}#${only.chunkId}${this.formatWafSignalsLabel(signals)}`,
-            {
-              source: "EmbeddingsProcessor",
-              method: "processBatch",
-              providerId: this.provider.id,
-              metadata: {
-                path: only.file.path,
-                chunkId: only.chunkId,
-                sectionTitle: only.sectionTitle,
-                headingPath: only.headingPath,
-                signals,
-                status: providerError.status,
-                code: providerError.code,
-              },
-            }
-          );
-        }
-        return [null];
-      }
-
-      const mid = Math.ceil(batch.length / 2);
-      const leftBatch = batch.slice(0, mid);
-      const leftTexts = texts.slice(0, mid);
-      const rightBatch = batch.slice(mid);
-      const rightTexts = texts.slice(mid);
-
-      const leftMeta = this.buildBatchMetadata(leftBatch, leftTexts, metadata.batchIndex ?? 0);
-      const rightMeta = this.buildBatchMetadata(rightBatch, rightTexts, metadata.batchIndex ?? 0);
-
-      const leftEmbeddings = await this.generateEmbeddingsWithHtmlForbiddenIsolation(leftBatch, leftTexts, leftMeta);
-      const rightEmbeddings = await this.generateEmbeddingsWithHtmlForbiddenIsolation(rightBatch, rightTexts, rightMeta);
-      return [...leftEmbeddings, ...rightEmbeddings];
-    }
-  }
-
-  private handleBatchError(
-    error: EmbeddingsProviderError,
-    affectedPaths: string[],
-    batchIndex: number,
-    metadata: EmbeddingBatchMetadata
-  ): 'continue' | 'stop' {
-    const isFatal = !error.transient || error.licenseRelated;
-
-    if (isFatal) {
-      this.fatalError = error;
-      this.cancel();
-      return 'stop';
-    }
-
-    const shouldStopForGlobalBackoff = error.code === "HOST_UNAVAILABLE"
-      || error.code === "RATE_LIMITED"
-      || error.status === 429
-      || (typeof error.retryInMs === "number" && error.retryInMs > 0);
-
-    // Provider-wide cooldown/rate-limit/host disablement errors are not "try next file" errors.
-    // Stop immediately so the manager can schedule a retry instead of spamming warnings.
-    if (shouldStopForGlobalBackoff) {
-      this.fatalError = error;
-      this.cancel();
-      return 'stop';
-    }
-
-    this.transientErrorCount++;
-    for (const path of affectedPaths) {
-      this.failedBatchPaths.add(path);
-      if (!this.failedBatchDetails.has(path)) {
-        this.failedBatchDetails.set(path, {
-          code: error.code,
-          message: error.message,
-          status: error.status,
-          retryInMs: error.retryInMs
-        });
-      }
-    }
-
-    if (this.transientErrorCount >= EmbeddingsProcessor.MAX_TRANSIENT_ERRORS) {
-      const aggregateError = new EmbeddingsProviderError(
-        `Too many transient errors (${this.transientErrorCount}). Stopping to prevent further issues.`,
-        {
-          code: "UNEXPECTED_RESPONSE",
-          providerId: this.provider.id,
-          transient: false,
-          details: { transientErrorCount: this.transientErrorCount, lastErrorCode: error.code }
-        }
-      );
-      this.fatalError = aggregateError;
-      this.cancel();
-
-      errorLogger.error('Embeddings processing stopped due to excessive transient errors', aggregateError, {
-        source: 'EmbeddingsProcessor',
-        method: 'handleBatchError',
-        providerId: this.provider.id,
-        metadata: {
-          transientErrorCount: this.transientErrorCount,
-          totalFailedFiles: this.failedBatchPaths.size,
-          lastBatchIndex: batchIndex
-        }
-      });
-      return 'stop';
-    }
-
-    errorLogger.warn('Transient batch error, continuing with remaining files', {
-      source: 'EmbeddingsProcessor',
-      method: 'handleBatchError',
-      providerId: this.provider.id,
-      metadata: {
-        batchIndex,
-        errorCode: error.code,
-        errorMessage: error.message,
-        transientErrorCount: this.transientErrorCount,
-        affectedFiles: affectedPaths.length,
-        batchSize: metadata.batchSize
-      }
-    });
-
-    return 'continue';
-  }
-
-  private shouldSuppressFatalBatchLog(error: EmbeddingsProviderError): boolean {
-    return Boolean(
-      error.transient &&
-      (
-        error.code === "HOST_UNAVAILABLE" ||
-        error.code === "RATE_LIMITED" ||
-        error.status === 429 ||
-        (typeof error.retryInMs === "number" && error.retryInMs > 0)
-      )
-    );
-  }
-
-  private delay(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
-  }
 
   private async finalizeFile(
-    file: TFile,
+    revision: EmbeddingSourceRevision,
     chunkCount: number,
     namespace: string,
     keepChunkIds: Set<number>,
     hadFailures: boolean
   ): Promise<void> {
-    const rootId = buildVectorId(namespace, file.path, 0);
+    const rootId = buildVectorId(namespace, revision.path, 0);
     const root = this.storage.getVectorSync(rootId);
+    let finalizedRoot: EmbeddingVector | null = root;
     if (root) {
-      const mtime = file.stat?.mtime || Date.now();
       const failedChunkCount = Math.max(0, chunkCount - keepChunkIds.size);
       const needsUpdate =
         (hadFailures ? root.metadata.complete !== false : root.metadata.complete !== true)
         || root.metadata.chunkCount !== chunkCount
-        || root.metadata.title !== file.basename
-        || root.metadata.mtime !== mtime
+        || root.metadata.title !== revision.basename
+        || root.metadata.mtime !== revision.mtime
         || root.metadata.partial !== hadFailures
         || (hadFailures ? (root.metadata.failedChunkCount ?? 0) !== failedChunkCount : (root.metadata.failedChunkCount ?? 0) !== 0);
 
       if (needsUpdate) {
-        await this.storage.storeVectors([{
+        finalizedRoot = {
           ...root,
           id: rootId,
-          path: file.path,
+          path: revision.path,
           chunkId: 0,
           metadata: {
             ...root.metadata,
-            title: file.basename,
-            mtime,
+            title: revision.basename,
+            mtime: revision.mtime,
             complete: hadFailures ? false : true,
             partial: hadFailures,
             failedChunkCount: failedChunkCount,
             chunkCount
           }
-        }]);
+        };
       }
     }
 
     const keepIds = new Set<string>();
     for (const chunkId of keepChunkIds) {
-      keepIds.add(buildVectorId(namespace, file.path, chunkId));
+      keepIds.add(buildVectorId(namespace, revision.path, chunkId));
     }
 
-    await this.storage.removeByPathExceptIds(file.path, namespace, keepIds);
-  }
-
-  private resolveProviderAndModel(vector: EmbeddingVector): { provider: string; model: string } {
-    const metadata: any = vector?.metadata as any;
-    const rawProvider = typeof metadata?.provider === "string" ? metadata.provider.trim() : "";
-    const rawModel = typeof metadata?.model === "string" ? metadata.model.trim() : "";
-
-    if (rawProvider && rawModel) {
-      return {
-        provider: rawProvider,
-        model: normalizeModelForNamespace(rawProvider, rawModel),
-      };
+    if (finalizedRoot) {
+      const finalizer = (this.storage as EmbeddingsStorage & {
+        finalizePath?: EmbeddingsStorage["finalizePath"];
+      }).finalizePath;
+      if (typeof finalizer === "function") {
+        await finalizer.call(this.storage, revision.path, namespace, finalizedRoot, keepIds);
+      } else {
+        await this.storage.storeVectors([finalizedRoot]);
+        await this.storage.removeByPathExceptIds(revision.path, namespace, keepIds);
+      }
+    } else {
+      await this.storage.removeByPathExceptIds(revision.path, namespace, keepIds);
     }
-
-    const parsed = parseNamespace(typeof metadata?.namespace === "string" ? metadata.namespace : "");
-    const provider = rawProvider || parsed?.provider || "unknown";
-    const model = normalizeModelForNamespace(provider, rawModel || parsed?.model || "unknown");
-    return { provider, model };
   }
 
   private isReusableCandidate(
     vector: EmbeddingVector,
-    providerId: string,
-    normalizedModel: string,
     expectedDimension: number | null
   ): boolean {
     if (!vector || !vector.metadata || vector.metadata.isEmpty === true) return false;
-
-    const resolved = this.resolveProviderAndModel(vector);
-    if (resolved.provider !== providerId) return false;
-    if (resolved.model !== normalizedModel) return false;
+    const generationId = this.gateway.activeGeneration?.id;
+    if (!generationId || vector.metadata.generation !== generationId) return false;
+    if (!isManagedNamespace(vector.metadata.namespace)) return false;
 
     const dim = vector.vector instanceof Float32Array ? vector.vector.length : 0;
     if (!Number.isFinite(dim) || dim <= 0) return false;
     if (expectedDimension && expectedDimension > 0 && dim !== expectedDimension) return false;
+    if (vector.metadata.namespace !== buildManagedNamespace(dim)) return false;
 
     return true;
   }
 
   private buildMetadataRefreshVector(
     existing: EmbeddingVector,
-    file: TFile,
+    revision: EmbeddingSourceRevision,
     chunk: PreparedChunk,
-    sectionTitle: string | undefined,
-    currentModel: string
+    sectionTitle: string | undefined
   ): EmbeddingVector | null {
     const headingPath = Array.isArray(chunk.headingPath) ? [...chunk.headingPath] : [];
     const excerpt = this.buildExcerpt(chunk.text, sectionTitle);
-    const mtime = file.stat?.mtime || Date.now();
     const dimension = existing.vector.length;
     const createdAt = typeof existing.metadata?.createdAt === 'number' ? existing.metadata.createdAt : Date.now();
-    const namespace = buildNamespace(this.provider.id, currentModel, dimension);
-    const existingHeading = Array.isArray(existing.metadata?.headingPath) ? existing.metadata.headingPath as string[] : [];
+    const namespace = buildManagedNamespace(dimension);
+    const existingHeading = Array.isArray(existing.metadata?.headingPath) ? existing.metadata.headingPath : [];
     const headingChanged = this.headingPathChanged(existingHeading, headingPath);
     const sectionChanged = (existing.metadata?.sectionTitle || undefined) !== sectionTitle;
     const excerptChanged = (existing.metadata?.excerpt || '') !== excerpt;
-    const titleChanged = (existing.metadata?.title || '') !== file.basename;
+    const titleChanged = (existing.metadata?.title || '') !== revision.basename;
     const chunkLengthChanged = (existing.metadata?.chunkLength ?? null) !== chunk.length;
-    const mtimeChanged = (existing.metadata?.mtime ?? null) !== mtime;
-    const providerChanged = (existing.metadata?.provider || '') !== this.provider.id;
-    const modelChanged = (existing.metadata?.model || '') !== currentModel;
+    const mtimeChanged = (existing.metadata?.mtime ?? null) !== revision.mtime;
+    const generationChanged = existing.metadata?.generation !== this.gateway.activeGeneration?.id;
     const namespaceChanged = (existing.metadata?.namespace || '') !== namespace;
 
     const needsUpdate = headingChanged
@@ -1041,28 +650,26 @@ export class EmbeddingsProcessor {
       || titleChanged
       || chunkLengthChanged
       || mtimeChanged
-      || providerChanged
-      || modelChanged
+      || generationChanged
       || namespaceChanged;
 
     if (!needsUpdate) {
       return null;
     }
 
-    const targetId = buildVectorId(namespace, file.path, chunk.index);
+    const targetId = buildVectorId(namespace, revision.path, chunk.index);
     return {
       ...existing,
       id: targetId,
-      path: file.path,
+      path: revision.path,
       chunkId: chunk.index,
       metadata: {
         ...existing.metadata,
-        title: file.basename,
+        title: revision.basename,
         excerpt,
-        mtime,
+        mtime: revision.mtime,
         contentHash: chunk.hash,
-        provider: this.provider.id,
-        model: currentModel,
+        generation: this.gateway.activeGeneration?.id,
         dimension,
         createdAt,
         namespace,
@@ -1082,54 +689,35 @@ export class EmbeddingsProcessor {
     return false;
   }
 
-  private resolveProviderBatchLimit(provider: EmbeddingsProvider): number {
-    try {
-      const candidate = typeof provider.getMaxBatchSize === 'function'
-        ? provider.getMaxBatchSize()
-        : undefined;
-      if (typeof candidate === 'number' && Number.isFinite(candidate) && candidate > 0) {
-        return Math.max(1, Math.floor(candidate));
-      }
-    } catch {
-      // Ignore provider errors and fall back to default limit.
-    }
-    return EmbeddingsProcessor.DEFAULT_MAX_TEXTS_PER_REQUEST;
+  private captureSourceRevision(file: TFile): EmbeddingSourceRevision {
+    return {
+      path: file.path,
+      basename: file.basename,
+      mtime: typeof file.stat?.mtime === "number" ? file.stat.mtime : Date.now(),
+    };
   }
 
   /**
-   * Best-effort expected embedding dimension for the active provider.
-   * Uses provider hint when available, otherwise the SystemSculpt default.
+   * A dimension only becomes authoritative after a validated managed response.
    */
   private getExpectedDimensionHint(): number | null {
-    const providerAny: any = this.provider as any;
-    if (typeof providerAny.expectedDimension === 'number' && providerAny.expectedDimension > 0) {
-      return providerAny.expectedDimension;
-    }
-    if (providerAny.id === 'systemsculpt') {
-      return DEFAULT_EMBEDDING_DIMENSION;
+    const dimension = this.gateway.expectedDimension;
+    if (typeof dimension === 'number' && Number.isInteger(dimension) && dimension > 0) {
+      return dimension;
     }
     return null;
   }
 
-  private async enforceRateLimit(): Promise<void> {
-    const limit = this.config.rateLimitPerMinute;
-    if (!limit || limit <= 0) return;
+  private batchIdempotencyKey(batchIndex: number): string {
+    return `emb:${this.runId}:${batchIndex}`;
+  }
 
-    const previous = this.rateLimitMutex;
-    let release: () => void;
-    this.rateLimitMutex = new Promise<void>(resolve => { release = resolve; });
-
-    await previous;
-
-    const minIntervalMs = Math.max(1, Math.ceil(60000 / limit));
-    const now = Date.now();
-    const nextAllowedAt = this.lastRequestAt > 0 ? this.lastRequestAt + minIntervalMs : 0;
-    const waitMs = Math.max(0, nextAllowedAt - now);
-    if (waitMs > 0) {
-      await this.delay(waitMs);
+  private createRunId(): string {
+    const randomUUID = window.crypto?.randomUUID;
+    if (typeof randomUUID === "function") {
+      return randomUUID.call(window.crypto).replace(/-/g, "").slice(0, 32);
     }
-    this.lastRequestAt = Date.now();
-    release!();
+    return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 14)}`;
   }
 
   private buildExcerpt(content: string, sectionTitle?: string): string {
@@ -1142,58 +730,4 @@ export class EmbeddingsProcessor {
     return base;
   }
 
-  private buildBatchMetadata(
-    batch: PendingChunkWork[],
-    texts: string[],
-    batchIndex: number
-  ): EmbeddingBatchMetadata {
-    const items = batch.map((item, idx) => {
-      const processed = texts[idx] || '';
-      const originalTokens = tokenCounter.estimateTokens(item.content);
-      const processedTokens = tokenCounter.estimateTokens(processed);
-      return {
-        path: item.file.path,
-        chunkId: item.chunkId,
-        hash: item.hash,
-        originalLength: item.content.length,
-        processedLength: processed.length,
-        originalEstimatedTokens: originalTokens,
-        estimatedTokens: processedTokens,
-        truncated: processed !== item.content
-      };
-    });
-
-    const estimatedTotalTokens = items.reduce((sum, item) => sum + item.estimatedTokens, 0);
-    const maxEstimatedTokens = items.reduce((max, item) => Math.max(max, item.estimatedTokens), 0);
-    const truncatedCount = items.reduce((count, item) => count + (item.truncated ? 1 : 0), 0);
-
-    return {
-      batchIndex,
-      batchSize: batch.length,
-      estimatedTotalTokens,
-      maxEstimatedTokens,
-      truncatedCount,
-      items
-    };
-  }
-
-  private enforceBatchSizeLimit(
-    batches: PendingChunkWork[][],
-    limit: number
-  ): PendingChunkWork[][] {
-    const bounded: PendingChunkWork[][] = [];
-    const providerLimit = this.maxTextsPerRequest || EmbeddingsProcessor.DEFAULT_MAX_TEXTS_PER_REQUEST;
-    const effectiveLimit = Math.max(1, Math.min(limit, providerLimit));
-    for (const batch of batches) {
-      if (batch.length <= effectiveLimit) {
-        bounded.push(batch);
-        continue;
-      }
-
-      for (let idx = 0; idx < batch.length; idx += effectiveLimit) {
-        bounded.push(batch.slice(idx, idx + effectiveLimit));
-      }
-    }
-    return bounded;
-  }
 }

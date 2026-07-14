@@ -1,7 +1,6 @@
-import { App, Setting, Notice } from "obsidian";
-import SystemSculptPlugin from "../main";
+import { Setting, Notice } from "obsidian";
 import { SystemSculptSettingTab } from "./SystemSculptSettingTab";
-import { showPopup } from "../core/ui";
+import { showPrompt } from "../core/ui/modals/PromptModal";
 import { BackupRestoreModal } from "../core/settings/BackupRestoreModal";
 
 
@@ -37,7 +36,7 @@ export function displayBackupTabContent(containerEl: HTMLElement, tabInstance: S
     .setName('Manual backups')
     .setDesc('Create or restore backups on demand. Files live in .systemsculpt/settings-backups inside your vault, with sensitive keys redacted.');
 
-  const restoreSetting = new Setting(containerEl)
+  new Setting(containerEl)
     .setName('Restore from backup')
     .setDesc('Replace your current settings with a saved backup.')
     .addButton((button) => {
@@ -56,7 +55,7 @@ ${details}
 
 Continue?`
               : 'This will replace your current settings with the selected backup. Continue?';
-            const confirmed = await showPopup(app, 'Restore settings from backup', {
+            const confirmed = await showPrompt(app, 'Restore settings from backup', {
               description,
               primaryButton: 'Restore',
               secondaryButton: 'Cancel',
@@ -77,7 +76,7 @@ Continue?`
 • Embeddings, audio, and automation settings
 • License status: ${backupSettings.licenseValid ? 'Active' : 'Inactive'}`;
             await confirmRestore(details);
-          } catch (error) {
+          } catch {
             await confirmRestore(null);
           }
         });

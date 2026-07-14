@@ -15,6 +15,7 @@ import {
   STUDIO_GRAPH_TEXT_NODE_MIN_FONT_SIZE,
   type StudioNodeResizeMode,
 } from "../../../studio/StudioNodeGeometry";
+import { getStudioOwnerWindow } from "../StudioDomContext";
 
 /**
  * tldraw-style 8-zone resize frame: four edge strips plus four corner zones
@@ -209,6 +210,7 @@ export function mountStudioGraphNodeResizeFrame(
   options: MountStudioGraphNodeResizeFrameOptions
 ): () => void {
   const { node, nodeEl } = options;
+  const ownerWindow = getStudioOwnerWindow(nodeEl);
   nodeEl.addClass("has-resize-frame");
 
   const zoneEls = new Map<StudioGraphResizeZone, HTMLElement>();
@@ -529,7 +531,7 @@ export function mountStudioGraphNodeResizeFrame(
       return;
     }
     let frameFiredSynchronously = false;
-    frameId = window.requestAnimationFrame(() => {
+    frameId = ownerWindow.requestAnimationFrame(() => {
       frameFiredSynchronously = true;
       applyPendingFrame();
     });
@@ -543,13 +545,13 @@ export function mountStudioGraphNodeResizeFrame(
       return;
     }
     if (frameId !== null) {
-      window.cancelAnimationFrame(frameId);
+      ownerWindow.cancelAnimationFrame(frameId);
       frameId = null;
       applyPendingFrame();
     }
-    window.removeEventListener("pointermove", onPointerMove);
-    window.removeEventListener("pointerup", onPointerFinish);
-    window.removeEventListener("pointercancel", onPointerFinish);
+    ownerWindow.removeEventListener("pointermove", onPointerMove);
+    ownerWindow.removeEventListener("pointerup", onPointerFinish);
+    ownerWindow.removeEventListener("pointercancel", onPointerFinish);
     const zoneEl = activeZoneEl;
     const pointerId = activePointerId;
     activePointerId = null;
@@ -662,9 +664,9 @@ export function mountStudioGraphNodeResizeFrame(
       }
     }
 
-    window.addEventListener("pointermove", onPointerMove);
-    window.addEventListener("pointerup", onPointerFinish);
-    window.addEventListener("pointercancel", onPointerFinish);
+    ownerWindow.addEventListener("pointermove", onPointerMove);
+    ownerWindow.addEventListener("pointerup", onPointerFinish);
+    ownerWindow.addEventListener("pointercancel", onPointerFinish);
   };
 
   const zoneListeners = new Map<HTMLElement, (event: PointerEvent) => void>();

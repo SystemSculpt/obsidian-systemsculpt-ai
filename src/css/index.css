@@ -1,7 +1,7 @@
 /**
  * SystemSculpt CSS — import manifest.
  *
- * Layered architecture: foundation (tokens → base → motion), primitives,
+ * Layered architecture: foundation (tokens → surfaces → motion), primitives,
  * shared components, modals, views, then platform adjustments last.
  * Every sheet consumes tokens from foundation/tokens.css; no hardcoded
  * colors, radii, font sizes, shadows, or durations outside it.
@@ -9,59 +9,86 @@
 
 /* Foundation */
 @import 'foundation/tokens.css';
-@import 'foundation/base.css';
+@import 'foundation/surface.css';
 @import 'foundation/motion.css';
 
 /* Primitives */
 @import 'primitives/buttons.css';
 @import 'primitives/feedback.css';
+@import 'primitives/surface-primitives.css';
 
 /* Shared components */
-@import 'components/system-feedback.css';
-@import 'components/favorite-toggle.css';
-@import 'components/messages.css';
-@import 'components/chat-blocks.css';
-@import 'components/chat-chips.css';
-@import 'components/chat-status.css';
-@import 'components/streaming-indicator.css';
-@import 'components/slash-commands.css';
+@import 'components/hover-shell.css';
 @import 'components/resume-chat.css';
-@import 'components/large-text.css';
 @import 'components/context-selection.css';
+@import 'components/chat-attachments.css';
 @import 'components/history.css';
-@import 'components/floating-widget.css';
 @import 'components/recorder.css';
-@import 'components/quick-edit.css';
 @import 'components/diff-viewer.css';
-@import 'components/youtube-canvas.css';
 @import 'components/automations.css';
-@import 'components/update-drawer.css';
-@import 'components/mermaid.css';
+@import 'components/embeddings-status-bar.css';
 
 /* Modal system */
 @import 'modals/modal.css';
-@import 'modals/model-selection.css';
-@import 'modals/chat-model-picker.css';
 @import 'modals/chat-settings.css';
 @import 'modals/janitor.css';
-@import 'modals/changelog.css';
-@import 'modals/embeddings-status.css';
 @import 'modals/credits-balance.css';
 @import 'modals/bulk-automation.css';
 @import 'modals/progress-toast.css';
 @import 'modals/file-pickers.css';
 @import 'modals/search.css';
 @import 'modals/misc-modals.css';
-@import 'modals/ai-response.css';
 
 /* Views */
-@import 'views/chat.css';
+/* Agent workspace: ordered from shell through responsive composer states. */
+@import 'views/agent-workspace/shell.css';
+@import 'views/agent-workspace/conversation.css';
+@import 'views/agent-workspace/reasoning.css';
+@import 'views/agent-workspace/tools.css';
+@import 'views/agent-workspace/states.css';
+@import 'views/agent-workspace/composer.css';
 @import 'views/settings.css';
-@import 'views/providers-settings.css';
 @import 'views/similar-notes.css';
-@import 'views/preview.css';
-@import 'views/studio.css';
-@import 'views/studio-editors.css';
+/* Studio canvas: ordered from surface foundations through floating overlays. */
+@import 'views/studio/theme.css';
+@import 'views/studio/workspace.css';
+@import 'views/studio/connections.css';
+@import 'views/studio/node-chrome.css';
+@import 'views/studio/media-nodes.css';
+@import 'views/studio/node-runtime.css';
+@import 'views/studio/groups.css';
+@import 'views/studio/text-nodes.css';
+@import 'views/studio/menus.css';
+/* Studio node editors: component bodies, overlays, responsive rules, details. */
+@import 'views/studio/editor-preview.css';
+@import 'views/studio/editor-text.css';
+@import 'views/studio/editor-json.css';
+@import 'views/studio/editor-notes.css';
+@import 'views/studio/editor-dropdowns.css';
+@import 'views/studio/editor-media.css';
+@import 'views/studio/caption-board.css';
+@import 'views/studio/editor-responsive.css';
+@import 'views/studio/inline-config.css';
+@import 'views/studio/node-details.css';
 
-/* Platform */
-@import 'platform/mobile.css';
+/* Post-cascade invariant: feature sheets may alter action geometry or tone,
+ * but every canonical action retains the same keyboard focus treatment. */
+.ss-surface .ss-button:focus-visible,
+.ss-button:focus-visible {
+  outline: none;
+  box-shadow: var(--ss-ring);
+}
+
+/* Feature sheets may compact desktop chrome, but they must not shrink the
+ * canonical action target back below a finger-sized hit area on touch input. */
+@media (pointer: coarse) {
+  .ss-surface .ss-button,
+  .ss-surface.ss-button {
+    min-height: var(--ss-touch-target);
+  }
+
+  .ss-surface .ss-button--icon,
+  .ss-surface.ss-button--icon {
+    min-width: var(--ss-touch-target);
+  }
+}

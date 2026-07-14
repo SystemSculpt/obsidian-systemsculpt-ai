@@ -1,7 +1,12 @@
-import { App, TFile, TFolder, setIcon } from "obsidian";
+import { App, Notice, TFile, TFolder, setIcon } from "obsidian";
 import SystemSculptPlugin from "../main";
-import { showPopup } from "../core/ui";
 import { StandardModal } from "../core/ui/modals/standard/StandardModal";
+import { createUiAction, createUiState } from "../core/ui/surface";
+import {
+  JanitorConfirmationListModal,
+  formatJanitorFileSize,
+  janitorFileIcon,
+} from "./JanitorConfirmationListModal";
 
 interface JanitorData {
   emptyFiles: TFile[];
@@ -24,10 +29,9 @@ interface JanitorData {
 
 export class JanitorModal extends StandardModal {
   private plugin: SystemSculptPlugin;
-  private cachedData: JanitorData | null = null;
   private isScanning = false;
-  private mainContainer: HTMLElement;
-  private loadingOverlay: HTMLElement;
+  private mainContainer!: HTMLElement;
+  private loadingState!: HTMLElement;
 
   constructor(app: App, plugin: SystemSculptPlugin) {
     super(app);
@@ -37,43 +41,27 @@ export class JanitorModal extends StandardModal {
 
   onOpen() {
     super.onOpen();
-    
-    // Add modal classes for styling
     this.modalEl.addClass("ss-janitor-modal");
-    
-    // Set up the header
+
     this.addTitle(
-      "🧹 SystemSculpt Janitor",
-      "Clean up and optimize your SystemSculpt workspace. Review items before deletion."
+      "Janitor",
+      "Review vault cleanup before moving anything to Trash.",
     );
 
-    // Create the main container and loading overlay
     this.createMainContainer();
-    
-    // Add footer buttons
     this.addActionButton("Refresh", () => this.refreshData(), false, "refresh-cw");
     this.addActionButton("Close", () => this.close(), false);
-    
-    // Load data efficiently
     this.loadJanitorData();
   }
 
   private createMainContainer() {
-    // Create main container
     this.mainContainer = this.contentEl.createDiv({ cls: "ss-janitor-main" });
-    
-    // Create loading overlay
-    this.loadingOverlay = this.contentEl.createDiv({ cls: "ss-janitor-loading-overlay" });
-    const loadingContent = this.loadingOverlay.createDiv({ cls: "ss-janitor-loading-content" });
-    
-    const loadingIcon = loadingContent.createDiv({ cls: "ss-janitor-loading-icon" });
-    setIcon(loadingIcon, "loader-2");
-    
-    const loadingText = loadingContent.createDiv({ cls: "ss-janitor-loading-text" });
-    loadingText.createDiv({ text: "Scanning Vault", cls: "ss-janitor-loading-title" });
-    loadingText.createDiv({ text: "Analyzing files and folders...", cls: "ss-janitor-loading-subtitle" });
-    
-    // Show loading initially
+    this.loadingState = createUiState(this.contentEl, {
+      kind: "loading",
+      title: "Scanning vault",
+      detail: "Checking files and folders.",
+    });
+    this.loadingState.addClass("ss-janitor-loading");
     this.showLoading(true);
   }
 
@@ -117,10 +105,10 @@ export class JanitorModal extends StandardModal {
     
     // Calculate sizes efficiently
     const sizes = {
-      empty: this.calculateSize(emptyFiles),
-      chat: this.calculateSize(chatFiles),
-      extraction: this.calculateSize(extractionFiles),
-      recording: this.calculateSize(recordingFiles)
+      empty: formatJanitorFileSize(emptyFiles),
+      chat: formatJanitorFileSize(chatFiles),
+      extraction: formatJanitorFileSize(extractionFiles),
+      recording: formatJanitorFileSize(recordingFiles)
     };
     
     return {
@@ -143,6 +131,7 @@ export class JanitorModal extends StandardModal {
    */
   private async loadJanitorData() {
     if (this.isScanning) return;
+    const task = this.beginAsyncTask("janitor-scan");
     
     try {
       this.isScanning = true;
@@ -150,16 +139,20 @@ export class JanitorModal extends StandardModal {
       
       // Scan vault once and get all data
       const data = await this.scanVault();
-      this.cachedData = data;
+      if (!task.isCurrent()) return;
       
       // Hide loading and show content
       this.showLoading(false);
       this.populateAllSections(data);
       
     } catch (error) {
-      this.showError("Failed to scan vault. Please try refreshing.");
+      if (task.isCurrent()) {
+        this.showError("Failed to scan vault. Please try refreshing.");
+      }
     } finally {
-      this.isScanning = false;
+      if (task.isCurrent()) {
+        this.isScanning = false;
+      }
     }
   }
 
@@ -186,8 +179,8 @@ export class JanitorModal extends StandardModal {
   private createEmptyContentSection(container: HTMLElement, data: JanitorData) {
     const section = this.createModernSection(
       container,
-      "📄 Empty Content",
-      "Remove empty files and folders that are taking up space"
+      "Empty content",
+      "Empty files and folders.",
     );
 
     const statsContainer = section.content.createDiv({ cls: "ss-janitor-stats" });
@@ -195,34 +188,28 @@ export class JanitorModal extends StandardModal {
 
     const { emptyFiles, emptyFolders, stats } = data;
 
-    // Show stats
     this.createStatCard(statsContainer, "Files", stats.emptyFileCount, "file-text");
     this.createStatCard(statsContainer, "Folders", stats.emptyFolderCount, "folder");
-    this.createStatCard(statsContainer, "Total", stats.totalEmptyCount, "trash-2", stats.totalEmptyCount > 0 ? "warning" : "muted");
 
-    // Create action button
-    const clearButton = actionContainer.createEl("button", {
-      cls: stats.totalEmptyCount > 0 ? "ss-button ss-button--danger" : "ss-button",
-      text: stats.totalEmptyCount > 0 ? `Clear ${stats.totalEmptyCount} Empty Items` : "No Empty Content"
-    }) as HTMLButtonElement;
-    
-    if (stats.totalEmptyCount === 0) {
-      clearButton.disabled = true;
-      clearButton.addClass("ss-disabled");
-    } else {
-      this.registerDomEvent(clearButton, "click", async () => {
+    this.createCleanupAction(
+      actionContainer,
+      stats.totalEmptyCount > 0
+        ? `Move ${stats.totalEmptyCount} items to Trash`
+        : "Nothing to remove",
+      stats.totalEmptyCount > 0,
+      async () => {
         await this.showEmptyContentConfirmation(emptyFiles, emptyFolders, () => {
           this.refreshData();
         });
-      });
-    }
+      },
+    );
   }
 
   private createChatHistorySection(container: HTMLElement, data: JanitorData) {
     const section = this.createModernSection(
       container,
-      "💬 Chat History",
-      "Delete all saved chat conversations and message history"
+      "Chat history",
+      "Saved conversations.",
     );
 
     const statsContainer = section.content.createDiv({ cls: "ss-janitor-stats" });
@@ -233,33 +220,29 @@ export class JanitorModal extends StandardModal {
 
     this.createStatCard(statsContainer, "Chats", chatFiles.length, "message-circle");
     this.createStatCard(statsContainer, "Size", sizes.chat, "hard-drive");
-    this.createStatCard(statsContainer, "Status", hasChatFiles ? "Active" : "Empty", "activity", hasChatFiles ? "success" : "muted");
 
-    const clearButton = actionContainer.createEl("button", {
-      cls: hasChatFiles ? "ss-button ss-button--danger" : "ss-button",
-      text: hasChatFiles ? `Clear All Chat History (${sizes.chat})` : "No Chat History"
-    }) as HTMLButtonElement;
-    
-    if (!hasChatFiles) {
-      clearButton.disabled = true;
-      clearButton.addClass("ss-disabled");
-    } else {
-      this.registerDomEvent(clearButton, "click", async () => {
+    this.createCleanupAction(
+      actionContainer,
+      hasChatFiles
+        ? `Move ${chatFiles.length} chats to Trash`
+        : "No chat history",
+      hasChatFiles,
+      async () => {
         await this.showConfirmationDialog(
           chatFiles,
           "Chat History",
           this.plugin.settings.chatsDirectory,
-          () => this.refreshData()
+          () => this.refreshData(),
         );
-      });
-    }
+      },
+    );
   }
 
   private createExtractionsSection(container: HTMLElement, data: JanitorData) {
     const section = this.createModernSection(
       container,
-      "📄 Document Extractions",
-      "Delete extracted content from PDFs, documents, and other processed files"
+      "Document extractions",
+      "Cached document content.",
     );
 
     const statsContainer = section.content.createDiv({ cls: "ss-janitor-stats" });
@@ -270,33 +253,29 @@ export class JanitorModal extends StandardModal {
 
     this.createStatCard(statsContainer, "Files", extractionFiles.length, "file-text");
     this.createStatCard(statsContainer, "Size", sizes.extraction, "hard-drive");
-    this.createStatCard(statsContainer, "Status", hasExtractionFiles ? "Active" : "Empty", "activity", hasExtractionFiles ? "success" : "muted");
 
-    const clearButton = actionContainer.createEl("button", {
-      cls: hasExtractionFiles ? "ss-button ss-button--danger" : "ss-button",
-      text: hasExtractionFiles ? `Clear All Extractions (${sizes.extraction})` : "No Extractions"
-    }) as HTMLButtonElement;
-    
-    if (!hasExtractionFiles) {
-      clearButton.disabled = true;
-      clearButton.addClass("ss-disabled");
-    } else {
-      this.registerDomEvent(clearButton, "click", async () => {
+    this.createCleanupAction(
+      actionContainer,
+      hasExtractionFiles
+        ? `Move ${extractionFiles.length} files to Trash`
+        : "No extractions",
+      hasExtractionFiles,
+      async () => {
         await this.showConfirmationDialog(
           extractionFiles,
           "Extractions",
           this.plugin.settings.extractionsDirectory,
-          () => this.refreshData()
+          () => this.refreshData(),
         );
-      });
-    }
+      },
+    );
   }
 
   private createRecordingsSection(container: HTMLElement, data: JanitorData) {
     const section = this.createModernSection(
       container,
-      "🎙️ Audio Recordings",
-      "Delete audio recording files (transcribed text files will remain intact)"
+      "Audio recordings",
+      "Audio files; transcripts stay in your vault.",
     );
 
     const statsContainer = section.content.createDiv({ cls: "ss-janitor-stats" });
@@ -307,46 +286,59 @@ export class JanitorModal extends StandardModal {
 
     this.createStatCard(statsContainer, "Files", recordingFiles.length, "audio-lines");
     this.createStatCard(statsContainer, "Size", sizes.recording, "hard-drive");
-    this.createStatCard(statsContainer, "Status", hasRecordingFiles ? "Active" : "Empty", "activity", hasRecordingFiles ? "success" : "muted");
 
-    const clearButton = actionContainer.createEl("button", {
-      cls: hasRecordingFiles ? "ss-button ss-button--danger" : "ss-button",
-      text: hasRecordingFiles ? `Clear All Recordings (${sizes.recording})` : "No Recordings"
-    }) as HTMLButtonElement;
-    
-    if (!hasRecordingFiles) {
-      clearButton.disabled = true;
-      clearButton.addClass("ss-disabled");
-    } else {
-      this.registerDomEvent(clearButton, "click", async () => {
+    this.createCleanupAction(
+      actionContainer,
+      hasRecordingFiles
+        ? `Move ${recordingFiles.length} files to Trash`
+        : "No recordings",
+      hasRecordingFiles,
+      async () => {
         await this.showConfirmationDialog(
           recordingFiles,
           "Recordings",
           this.plugin.settings.recordingsDirectory,
-          () => this.refreshData()
+          () => this.refreshData(),
         );
-      });
+      },
+    );
+  }
+
+  private createCleanupAction(
+    container: HTMLElement,
+    label: string,
+    enabled: boolean,
+    onSelect: () => void | Promise<void>,
+  ): HTMLButtonElement {
+    const button = createUiAction(container, {
+      label,
+      tone: enabled ? "danger" : "default",
+      disabled: !enabled,
+    });
+    button.addClass("ss-janitor-action");
+    if (enabled) {
+      this.registerDomEvent(button, "click", () => void onSelect());
     }
+    return button;
   }
 
   private createModernSection(
     container: HTMLElement,
     title: string,
-    description: string
+    description: string,
   ) {
     const section = container.createDiv({ cls: "ss-janitor-section" });
-    
+
     const header = section.createDiv({ cls: "ss-janitor-section-header" });
-    const titleEl = header.createDiv({ cls: "ss-janitor-section-title", text: title });
-    const descEl = header.createDiv({ cls: "ss-janitor-section-description", text: description });
-    
+    header.createDiv({ cls: "ss-janitor-section-title", text: title });
+    header.createDiv({
+      cls: "ss-janitor-section-description",
+      text: description,
+    });
+
     const content = section.createDiv({ cls: "ss-janitor-section-content" });
 
-    return {
-      section,
-      header,
-      content
-    };
+    return { content };
   }
 
   private createStatCard(
@@ -354,10 +346,9 @@ export class JanitorModal extends StandardModal {
     label: string,
     value: string | number,
     icon: string,
-    variant: "normal" | "warning" | "success" | "muted" = "normal"
   ) {
-    const card = container.createDiv({ cls: `ss-janitor-stat-card ss-janitor-stat-card--${variant}` });
-    
+    const card = container.createDiv({ cls: "ss-janitor-stat-card" });
+
     const iconEl = card.createDiv({ cls: "ss-janitor-stat-icon" });
     setIcon(iconEl, icon);
     
@@ -372,7 +363,6 @@ export class JanitorModal extends StandardModal {
    * Efficient refresh that clears cache and reloads
    */
   private refreshData() {
-    this.cachedData = null;
     this.loadJanitorData();
   }
 
@@ -380,8 +370,8 @@ export class JanitorModal extends StandardModal {
    * Show/hide loading overlay
    */
   private showLoading(show: boolean) {
-    this.loadingOverlay.style.display = show ? "flex" : "none";
-    this.mainContainer.style.display = show ? "none" : "block";
+    this.loadingState.toggleAttribute("hidden", !show);
+    this.mainContainer.toggleAttribute("hidden", show);
   }
 
   /**
@@ -390,32 +380,18 @@ export class JanitorModal extends StandardModal {
   private showError(message: string) {
     this.showLoading(false);
     this.mainContainer.empty();
-    
-    const errorContainer = this.mainContainer.createDiv({ cls: "ss-janitor-error" });
-    const errorIcon = errorContainer.createDiv({ cls: "ss-janitor-error-icon" });
-    setIcon(errorIcon, "alert-circle");
-    
-    const errorText = errorContainer.createDiv({ cls: "ss-janitor-error-text" });
-    errorText.createDiv({ text: "Error", cls: "ss-janitor-error-title" });
-    errorText.createDiv({ text: message, cls: "ss-janitor-error-message" });
-    
-    const retryButton = errorContainer.createEl("button", {
-      cls: "ss-button ss-button--primary",
-      text: "Retry"
-    });
-    
-    this.registerDomEvent(retryButton, "click", () => {
-      this.refreshData();
-    });
-  }
 
-  private calculateSize(files: TFile[]): string {
-    const totalBytes = files.reduce((acc, file) => acc + file.stat.size, 0);
-    if (totalBytes === 0) return "empty";
-    if (totalBytes < 1024) return `${totalBytes} bytes`;
-    if (totalBytes < 1024 * 1024) return `${(totalBytes / 1024).toFixed(1)} KB`;
-    if (totalBytes < 1024 * 1024 * 1024) return `${(totalBytes / (1024 * 1024)).toFixed(1)} MB`;
-    return `${(totalBytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+    const errorState = createUiState(this.mainContainer, {
+      kind: "error",
+      title: "Couldn’t scan vault",
+      detail: message,
+      action: {
+        label: "Retry",
+        tone: "primary",
+        onSelect: () => this.refreshData(),
+      },
+    });
+    errorState.addClass("ss-janitor-error");
   }
 
   private async cleanDirectory(directory: string): Promise<void> {
@@ -429,7 +405,7 @@ export class JanitorModal extends StandardModal {
 
     // Move files to trash
     for (const file of files) {
-      await this.app.vault.trash(file, true);
+      await this.app.fileManager.trashFile(file);
     }
 
     // Clean up empty directories
@@ -441,12 +417,12 @@ export class JanitorModal extends StandardModal {
 
       for (const subdir of subdirs) {
         if (subdir.children.length === 0) {
-          await this.app.vault.trash(subdir, true);
+          await this.app.fileManager.trashFile(subdir);
         }
       }
 
       if (folder.children.length === 0) {
-        await this.app.vault.trash(folder, true);
+        await this.app.fileManager.trashFile(folder);
       }
     }
   }
@@ -457,28 +433,31 @@ export class JanitorModal extends StandardModal {
     directory: string,
     onSuccess: () => void
   ) {
-    const confirmModal = new ConfirmationModal(
-      this.app,
-      `Clear ${type}`,
-      `⚠️ The following ${files.length} ${type.toLowerCase()} files will be moved to the Obsidian trash. You can restore them from the trash if needed.`,
-      files,
-      type
-    );
+    const confirmModal = new JanitorConfirmationListModal(this.app, {
+      title: `Move ${type} to Trash`,
+      description: `${files.length} files from ${directory} will move to Obsidian Trash. You can restore them later.`,
+      summary: `${files.length} files (${formatJanitorFileSize(files)})`,
+      groups: [{
+        items: files.map((file) => ({
+          path: file.path,
+          icon: janitorFileIcon(file.extension),
+          detail: formatJanitorFileSize([file]),
+        })),
+        previewLimit: 10,
+        moreLabel: "files",
+      }],
+    });
 
     const result = await confirmModal.open();
     if (result) {
       try {
         await this.cleanDirectory(directory);
-        showPopup(
-          this.app,
-          `Successfully moved ${files.length} ${type.toLowerCase()} files (${this.calculateSize(files)}) to trash`,
-          { title: "Success" }
+        new Notice(
+          `Moved ${files.length} ${type.toLowerCase()} files (${formatJanitorFileSize(files)}) to trash.`,
         );
         onSuccess();
-      } catch (error) {
-        showPopup(this.app, `Failed to clear ${type.toLowerCase()}`, {
-          title: "Error",
-        });
+      } catch {
+        new Notice(`Couldn’t clear ${type.toLowerCase()}.`);
       }
     }
   }
@@ -488,39 +467,54 @@ export class JanitorModal extends StandardModal {
     emptyFolders: TFolder[],
     onSuccess: () => void
   ) {
-    const confirmModal = new EmptyContentConfirmationModal(
-      this.app,
-      emptyFiles,
-      emptyFolders
-    );
+    const totalEmpty = emptyFiles.length + emptyFolders.length;
+    const confirmModal = new JanitorConfirmationListModal(this.app, {
+      title: "Move Empty Content to Trash",
+      description: `${totalEmpty} empty items will move to Obsidian Trash. You can restore them later.`,
+      groups: [
+        {
+          title: "Empty Files",
+          icon: "file-text",
+          items: emptyFiles.map((file) => ({
+            path: file.path,
+            icon: "file-text",
+          })),
+          previewLimit: 5,
+          moreLabel: "files",
+        },
+        {
+          title: "Empty Folders",
+          icon: "folder",
+          items: emptyFolders.map((folder) => ({
+            path: folder.path,
+            icon: "folder",
+          })),
+          previewLimit: 5,
+          moreLabel: "folders",
+        },
+      ],
+    });
 
     const result = await confirmModal.open();
     if (result) {
       try {
         // Delete empty files first
         for (const file of emptyFiles) {
-          await this.app.vault.trash(file, true);
+          await this.app.fileManager.trashFile(file);
         }
 
         // Then delete empty folders (deepest first)
-        const sortedFolders = emptyFolders.sort(
+        const sortedFolders = [...emptyFolders].sort(
           (a, b) => b.path.length - a.path.length
         );
         for (const folder of sortedFolders) {
-          await this.app.vault.trash(folder, true);
+          await this.app.fileManager.trashFile(folder);
         }
 
-        const totalEmpty = emptyFiles.length + emptyFolders.length;
-        showPopup(
-          this.app,
-          `Successfully moved ${totalEmpty} empty items to trash`,
-          { title: "Success" }
-        );
+        new Notice(`Moved ${totalEmpty} empty items to trash.`);
         onSuccess();
-      } catch (error) {
-        showPopup(this.app, "Failed to clear empty content", {
-          title: "Error",
-        });
+      } catch {
+        new Notice("Couldn’t clear empty content.");
       }
     }
   }
@@ -557,222 +551,7 @@ export class JanitorModal extends StandardModal {
   }
 
   onClose() {
-    this.cachedData = null;
     this.isScanning = false;
-    super.onClose();
-  }
-}
-
-/**
- * Modern confirmation modal for directory clearing operations
- */
-class ConfirmationModal extends StandardModal {
-  private resolvePromise: ((value: boolean) => void) | null = null;
-  private files: TFile[];
-  private type: string;
-  private title: string;
-  private description: string;
-
-  constructor(app: App, title: string, description: string, files: TFile[], type: string) {
-    super(app);
-    this.files = files;
-    this.type = type;
-    this.title = title;
-    this.description = description;
-    this.setSize("medium");
-  }
-
-  onOpen() {
-    super.onOpen();
-    
-    this.addTitle(this.title, this.description);
-    this.createFilePreview();
-    this.createFooterButtons();
-  }
-
-  private createFilePreview() {
-    if (this.files.length === 0) return;
-
-    const previewContainer = this.contentEl.createDiv({ cls: "ss-janitor-preview" });
-    const headerEl = previewContainer.createDiv({ cls: "ss-janitor-preview-header" });
-    headerEl.createSpan({ text: `${this.files.length} files (${this.calculateSize(this.files)})`, cls: "ss-janitor-preview-count" });
-    
-    const listContainer = previewContainer.createDiv({ cls: "ss-janitor-preview-list" });
-    
-    // Show first 10 files
-    const filesToShow = this.files.slice(0, 10);
-    
-    for (const file of filesToShow) {
-      const fileItem = listContainer.createDiv({ cls: "ss-janitor-preview-item" });
-      
-      const iconEl = fileItem.createDiv({ cls: "ss-janitor-preview-icon" });
-      setIcon(iconEl, this.getFileIcon(file));
-      
-      const pathEl = fileItem.createDiv({ cls: "ss-janitor-preview-path", text: file.path });
-      const sizeEl = fileItem.createDiv({ cls: "ss-janitor-preview-size", text: this.calculateSize([file]) });
-    }
-    
-    if (this.files.length > 10) {
-      const moreEl = listContainer.createDiv({ cls: "ss-janitor-preview-more" });
-      moreEl.createSpan({ text: `... and ${this.files.length - 10} more files` });
-    }
-  }
-
-  private getFileIcon(file: TFile): string {
-    const extension = file.extension.toLowerCase();
-    if (["md", "txt", "markdown"].includes(extension)) return "file-text";
-    if (["jpg", "jpeg", "png", "webp", "svg"].includes(extension)) return "image";
-    if (["mp3", "wav", "ogg", "m4a"].includes(extension)) return "audio-lines";
-    if (["pdf"].includes(extension)) return "file-text";
-    return "file";
-  }
-
-  private calculateSize(files: TFile[]): string {
-    const totalBytes = files.reduce((acc, file) => acc + file.stat.size, 0);
-    if (totalBytes === 0) return "empty";
-    if (totalBytes < 1024) return `${totalBytes} bytes`;
-    if (totalBytes < 1024 * 1024) return `${(totalBytes / 1024).toFixed(1)} KB`;
-    if (totalBytes < 1024 * 1024 * 1024) return `${(totalBytes / (1024 * 1024)).toFixed(1)} MB`;
-    return `${(totalBytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
-  }
-
-  private createFooterButtons() {
-    this.addActionButton("Cancel", () => this.resolve(false), false);
-    this.addActionButton("Move to Trash", () => this.resolve(true), true, "trash-2");
-  }
-
-  private resolve(value: boolean) {
-    if (this.resolvePromise) {
-      this.resolvePromise(value);
-      this.resolvePromise = null;
-    }
-    this.close();
-  }
-
-  async open(): Promise<boolean> {
-    return new Promise((resolve) => {
-      this.resolvePromise = resolve;
-      super.open();
-    });
-  }
-
-  onClose() {
-    // Clean up the promise if modal is closed without resolving
-    if (this.resolvePromise) {
-      this.resolvePromise(false);
-      this.resolvePromise = null;
-    }
-    super.onClose();
-  }
-}
-
-/**
- * Specialized confirmation modal for empty content with files and folders
- */
-class EmptyContentConfirmationModal extends StandardModal {
-  private resolvePromise: ((value: boolean) => void) | null = null;
-  private emptyFiles: TFile[];
-  private emptyFolders: TFolder[];
-  private totalEmpty: number;
-
-  constructor(app: App, emptyFiles: TFile[], emptyFolders: TFolder[]) {
-    super(app);
-    this.emptyFiles = emptyFiles;
-    this.emptyFolders = emptyFolders;
-    this.totalEmpty = emptyFiles.length + emptyFolders.length;
-    this.setSize("medium");
-  }
-
-  onOpen() {
-    super.onOpen();
-    
-    this.addTitle(
-      "Clear Empty Content", 
-      `⚠️ The following ${this.totalEmpty} empty items will be moved to the Obsidian trash. You can restore them from the trash if needed.`
-    );
-    
-    this.createEmptyContentPreview();
-    this.createFooterButtons();
-  }
-
-  private createEmptyContentPreview() {
-    const previewContainer = this.contentEl.createDiv({ cls: "ss-janitor-preview" });
-
-    // Show empty files
-    if (this.emptyFiles.length > 0) {
-      const filesSection = previewContainer.createDiv({ cls: "ss-janitor-preview-section" });
-      const filesHeader = filesSection.createDiv({ cls: "ss-janitor-preview-section-header" });
-      
-      const filesHeaderIcon = filesHeader.createDiv({ cls: "ss-janitor-preview-section-icon" });
-      setIcon(filesHeaderIcon, "file-text");
-      filesHeader.createSpan({ text: `Empty Files (${this.emptyFiles.length})`, cls: "ss-janitor-preview-section-title" });
-      
-      const filesList = filesSection.createDiv({ cls: "ss-janitor-preview-list" });
-      const filesToShow = this.emptyFiles.slice(0, 5);
-      
-      for (const file of filesToShow) {
-        const item = filesList.createDiv({ cls: "ss-janitor-preview-item" });
-        const icon = item.createDiv({ cls: "ss-janitor-preview-icon" });
-        setIcon(icon, "file-text");
-        item.createSpan({ text: file.path, cls: "ss-janitor-preview-path" });
-      }
-      
-      if (this.emptyFiles.length > 5) {
-        filesList.createDiv({ cls: "ss-janitor-preview-more", text: `... and ${this.emptyFiles.length - 5} more files` });
-      }
-    }
-
-    // Show empty folders
-    if (this.emptyFolders.length > 0) {
-      const foldersSection = previewContainer.createDiv({ cls: "ss-janitor-preview-section" });
-      const foldersHeader = foldersSection.createDiv({ cls: "ss-janitor-preview-section-header" });
-      
-      const foldersHeaderIcon = foldersHeader.createDiv({ cls: "ss-janitor-preview-section-icon" });
-      setIcon(foldersHeaderIcon, "folder");
-      foldersHeader.createSpan({ text: `Empty Folders (${this.emptyFolders.length})`, cls: "ss-janitor-preview-section-title" });
-      
-      const foldersList = foldersSection.createDiv({ cls: "ss-janitor-preview-list" });
-      const foldersToShow = this.emptyFolders.slice(0, 5);
-      
-      for (const folder of foldersToShow) {
-        const item = foldersList.createDiv({ cls: "ss-janitor-preview-item" });
-        const icon = item.createDiv({ cls: "ss-janitor-preview-icon" });
-        setIcon(icon, "folder");
-        item.createSpan({ text: folder.path, cls: "ss-janitor-preview-path" });
-      }
-      
-      if (this.emptyFolders.length > 5) {
-        foldersList.createDiv({ cls: "ss-janitor-preview-more", text: `... and ${this.emptyFolders.length - 5} more folders` });
-      }
-    }
-  }
-
-  private createFooterButtons() {
-    this.addActionButton("Cancel", () => this.resolve(false), false);
-    this.addActionButton("Move to Trash", () => this.resolve(true), true, "trash-2");
-  }
-
-  private resolve(value: boolean) {
-    if (this.resolvePromise) {
-      this.resolvePromise(value);
-      this.resolvePromise = null;
-    }
-    this.close();
-  }
-
-  async open(): Promise<boolean> {
-    return new Promise((resolve) => {
-      this.resolvePromise = resolve;
-      super.open();
-    });
-  }
-
-  onClose() {
-    // Clean up the promise if modal is closed without resolving
-    if (this.resolvePromise) {
-      this.resolvePromise(false);
-      this.resolvePromise = null;
-    }
     super.onClose();
   }
 }

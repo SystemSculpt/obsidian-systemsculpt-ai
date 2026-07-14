@@ -1,0 +1,101 @@
+{
+  "contract_version": "managed-text-generation-route-v1",
+  "capability": "text_generation",
+  "method": "POST",
+  "path": "/api/plugin/chat/completions",
+  "parent_contract": {
+    "header": "x-systemsculpt-contract",
+    "value": "managed-capabilities-v2"
+  },
+  "required_headers": {
+    "x-license-key": { "type": "non_empty_string" },
+    "x-plugin-version": { "type": "semver", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+    "x-systemsculpt-contract": { "const": "managed-capabilities-v2" },
+    "x-systemsculpt-capability": { "const": "text_generation" },
+    "idempotency-key": { "type": "string", "min_length": 1, "max_length": 128, "pattern": "^[A-Za-z0-9._:-]+$", "generated_fallback": false }
+  },
+  "request": {
+    "content_type": "application/json",
+    "additional_properties": false,
+    "required_fields": ["model", "stream", "purpose", "messages"],
+    "properties": {
+      "model": { "const": "ai-agent" },
+      "stream": { "const": false },
+      "purpose": { "enum": ["transcript_postprocess", "workflow_automation"] },
+      "messages": {
+        "type": "array",
+        "min_items": 1,
+        "max_items": 8,
+        "aggregate_content_max_utf8_bytes": 1048576,
+        "items": {
+          "additional_properties": false,
+          "required_fields": ["role", "content"],
+          "role": { "enum": ["system", "user"] },
+          "content": { "type": "non_empty_string", "max_utf8_bytes": 524288 }
+        }
+      }
+    },
+    "forbidden_fields": ["tools", "tool_choice", "plugins", "temperature", "max_tokens", "max_completion_tokens", "reasoning_effort", "stream_options", "provider", "provider_id", "model_id"]
+  },
+  "response": {
+    "content_type": "application/json",
+    "request_id_header": "x-request-id",
+    "additional_properties": false,
+    "required_fields": ["id", "object", "created", "model", "choices", "usage"],
+    "object": "chat.completion",
+    "model": "ai-agent",
+    "choices": {
+      "min_items": 1,
+      "max_items": 1,
+      "item": {
+        "index": 0,
+        "message": { "role": "assistant", "content": "string", "additional_properties": false },
+        "finish_reason": { "enum": ["stop", "length"] },
+        "additional_properties": false
+      }
+    },
+    "usage": {
+      "prompt_tokens": "non_negative_integer",
+      "completion_tokens": "non_negative_integer",
+      "total_tokens": "non_negative_integer",
+      "additional_properties": false
+    },
+    "forbidden_metadata": ["reasoning", "tool", "provider", "framework", "upstream"]
+  },
+  "errors": {
+    "request_id": { "min_length": 1, "max_length": 128, "pattern": "^[A-Za-z0-9._:-]+$", "matches_header": true },
+    "message_max_length": 2048,
+    "statuses": {
+      "400": { "code": "invalid_request", "retryable": false },
+      "401": { "code": "license_required", "retryable": false },
+      "402": { "code": "insufficient_credits", "retryable": false, "optional_fields": ["credits_remaining", "cycle_ends_at"] },
+      "403": { "code": "license_rejected", "retryable": false },
+      "409": {
+        "retryable": false,
+        "retry_after_ms": null,
+        "codes": {
+          "operation_in_progress": "manual_reconciliation",
+          "operation_already_completed": "completed_result_unavailable",
+          "operation_terminal": "terminal_no_retry",
+          "settlement_pending": "operator_reconciliation"
+        }
+      },
+      "426": { "code": "upgrade_required", "retryable": false, "required_fields": ["minimum_version", "current_version"] },
+      "429": { "code": "rate_limited", "retryable": true, "required_fields": ["retry_after_ms"] },
+      "500": { "code": "internal_error", "retryable": false },
+      "502": { "code": "upstream_failed", "retryable": false },
+      "503": { "code": "temporarily_unavailable", "retryable": true }
+    }
+  },
+  "idempotency": {
+    "policy": "dedupe_without_result_replay",
+    "completed_result_persisted": false,
+    "status_or_result_endpoint": null,
+    "automatic_same_key_poll_or_post_retry": false,
+    "automatic_new_key_retry": false,
+    "explicit_operator_retry": "new_generation_with_new_durable_operation_key",
+    "unknown_outcome": "durable_ambiguous_state"
+  },
+  "background_eligible": true,
+  "cancellation_supported": false
+}

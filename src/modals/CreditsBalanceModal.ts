@@ -1,11 +1,18 @@
 import { App, Notice, setIcon } from "obsidian";
 import { StandardModal } from "../core/ui/modals/standard/StandardModal";
+import {
+  createUiAction,
+  createUiTabs,
+  getSurfaceOwnerWindow,
+  type UiTabsHandle,
+} from "../core/ui/surface";
 import type {
   CreditsBalanceSnapshot,
   CreditsUsageHistoryPage,
   CreditsUsageSnapshot,
 } from "../services/SystemSculptService";
 import { LICENSE_URL } from "../types";
+import { openExternalUrl } from "../utils/externalUrl";
 
 type CreditsTabId = "balance" | "usage";
 
@@ -24,6 +31,7 @@ export class CreditsBalanceModal extends StandardModal {
   private usage: CreditsUsageHistoryPage;
   private activeTab: CreditsTabId = "balance";
   private usageLoaded: boolean = false;
+  private tabsHandle: UiTabsHandle<CreditsTabId> | null = null;
 
   private tabBarEl: HTMLElement | null = null;
   private balanceTabButton: HTMLButtonElement | null = null;
@@ -57,7 +65,13 @@ export class CreditsBalanceModal extends StandardModal {
   }
 
   onOpen(): void {
+    this.tabsHandle?.destroy();
+    this.tabsHandle = null;
     super.onOpen();
+
+    this.isRefreshingBalance = false;
+    this.isRefreshingUsage = false;
+    this.isLoadingMoreUsage = false;
 
     this.addTitle(
       "Credits & Usage",
@@ -66,8 +80,8 @@ export class CreditsBalanceModal extends StandardModal {
 
     const root = this.contentEl.createDiv({ cls: "ss-credits-balance" });
     this.tabBarEl = root.createDiv({ cls: "ss-credits-balance__tabs" });
-    this.balanceTabButton = this.createTabButton("Balance", "balance");
-    this.usageTabButton = this.createTabButton("Usage", "usage");
+    this.balanceTabButton = this.createTabButton("Balance");
+    this.usageTabButton = this.createTabButton("Usage");
 
     this.balancePanelEl = root.createDiv({ cls: "ss-credits-balance__panel ss-credits-balance__panel--balance" });
     this.summaryEl = this.balancePanelEl.createDiv({ cls: "ss-credits-balance__summary" });
@@ -78,13 +92,29 @@ export class CreditsBalanceModal extends StandardModal {
     this.usagePanelEl = root.createDiv({ cls: "ss-credits-balance__panel ss-credits-balance__panel--usage" });
     this.usageListEl = this.usagePanelEl.createDiv({ cls: "ss-credits-usage__list" });
     this.usageHintEl = this.usagePanelEl.createDiv({ cls: "ss-credits-usage__hint" });
-    this.usageLoadMoreButton = this.usagePanelEl.createEl("button", {
-      cls: "ss-credits-usage__load-more",
-      text: "Load More",
-      attr: { type: "button" },
+    this.usageLoadMoreButton = createUiAction(this.usagePanelEl, {
+      label: "Load more",
+      size: "small",
     });
+    this.usageLoadMoreButton.addClass("ss-credits-usage__load-more");
     this.registerDomEvent(this.usageLoadMoreButton, "click", () => {
       void this.loadMoreUsage();
+    });
+
+    this.tabsHandle = createUiTabs(this.tabBarEl, [
+      {
+        id: "balance",
+        button: this.balanceTabButton!,
+        panel: this.balancePanelEl!,
+      },
+      {
+        id: "usage",
+        button: this.usageTabButton!,
+        panel: this.usagePanelEl!,
+      },
+    ], {
+      activeId: this.activeTab,
+      onChange: (tab) => void this.onTabChanged(tab),
     });
 
     this.statusEl = root.createDiv({ cls: "ss-credits-balance__status" });
@@ -120,48 +150,40 @@ export class CreditsBalanceModal extends StandardModal {
 
     this.renderBalance();
     this.renderUsage();
-    this.updateTabUI();
+    this.updateUsageLoadMoreButton();
 
     // Always request a fresh balance snapshot when opening.
     void this.refreshBalance(true);
   }
 
-  private createTabButton(label: string, tab: CreditsTabId): HTMLButtonElement {
+  private createTabButton(label: string): HTMLButtonElement {
     if (!this.tabBarEl) {
       throw new Error("Tab bar is not initialized.");
     }
-    const button = this.tabBarEl.createEl("button", {
-      cls: "ss-credits-balance__tab",
-      text: label,
-      attr: { type: "button" },
-    }) as HTMLButtonElement;
-
-    this.registerDomEvent(button, "click", () => {
-      void this.setActiveTab(tab);
+    const button = createUiAction(this.tabBarEl, {
+      label,
+      size: "small",
     });
+    button.addClass("ss-credits-balance__tab");
     return button;
   }
 
-  private async setActiveTab(tab: CreditsTabId): Promise<void> {
-    if (this.activeTab === tab) {
-      return;
-    }
+  private async onTabChanged(tab: CreditsTabId): Promise<void> {
     this.activeTab = tab;
-    this.updateTabUI();
+    this.updateUsageLoadMoreButton();
 
     if (tab === "usage" && !this.usageLoaded) {
       await this.refreshUsage(true);
     }
   }
 
-  private updateTabUI(): void {
-    this.balanceTabButton?.classList.toggle("is-active", this.activeTab === "balance");
-    this.usageTabButton?.classList.toggle("is-active", this.activeTab === "usage");
-
-    this.balancePanelEl?.classList.toggle("is-active", this.activeTab === "balance");
-    this.usagePanelEl?.classList.toggle("is-active", this.activeTab === "usage");
-
-    this.updateUsageLoadMoreButton();
+  onClose(): void {
+    this.tabsHandle?.destroy();
+    this.tabsHandle = null;
+    this.isRefreshingBalance = false;
+    this.isRefreshingUsage = false;
+    this.isLoadingMoreUsage = false;
+    super.onClose();
   }
 
   private renderBalance(): void {
@@ -265,7 +287,7 @@ export class CreditsBalanceModal extends StandardModal {
     }
 
     if (!this.usageLoaded && this.usage.items.length === 0) {
-      this.usageHintEl.setText("Open the Usage tab and press Refresh to load recent usage.");
+      this.usageHintEl.setText("Open the usage tab and press refresh to load recent usage.");
       this.usageHintEl.removeClass("is-warning");
       this.updateUsageLoadMoreButton();
       return;
@@ -356,7 +378,7 @@ export class CreditsBalanceModal extends StandardModal {
       text: "Refresh to try again",
     });
 
-    this.hintEl.setText("We could not load your latest credits. You can refresh or open Account to verify your license.");
+    this.hintEl.setText("We could not load your latest credits. You can refresh or open account to verify your license.");
     this.hintEl.removeClass("is-warning");
   }
 
@@ -385,6 +407,7 @@ export class CreditsBalanceModal extends StandardModal {
       return;
     }
 
+    const task = this.beginAsyncTask("credits-balance");
     this.isRefreshingBalance = true;
     this.setRefreshBusyState();
     if (!silent) {
@@ -392,7 +415,9 @@ export class CreditsBalanceModal extends StandardModal {
     }
 
     try {
-      this.balance = await this.options.loadBalance();
+      const balance = await this.options.loadBalance();
+      if (!task.isCurrent()) return;
+      this.balance = balance;
       this.renderBalance();
       const updatedAt = this.formatDate(new Date().toISOString(), true);
       if (this.balance) {
@@ -401,12 +426,15 @@ export class CreditsBalanceModal extends StandardModal {
         this.setStatusMessage("Could not fetch current balance. Try again in a moment.", "warning");
       }
     } catch (error) {
+      if (!task.isCurrent()) return;
       const message = error instanceof Error && error.message ? error.message : "Unknown error";
       this.setStatusMessage(`Unable to refresh credits balance (${message}).`, "error");
       new Notice("Unable to refresh credits balance.", 5000);
     } finally {
-      this.isRefreshingBalance = false;
-      this.setRefreshBusyState();
+      if (task.isCurrent()) {
+        this.isRefreshingBalance = false;
+        this.setRefreshBusyState();
+      }
     }
   }
 
@@ -415,6 +443,8 @@ export class CreditsBalanceModal extends StandardModal {
       return;
     }
 
+    const task = this.beginAsyncTask("credits-usage");
+    this.isLoadingMoreUsage = false;
     this.isRefreshingUsage = true;
     this.setRefreshBusyState();
     if (!silent) {
@@ -423,6 +453,7 @@ export class CreditsBalanceModal extends StandardModal {
 
     try {
       const page = await this.options.loadUsage({ limit: 50 });
+      if (!task.isCurrent()) return;
       this.usage = {
         items: Array.isArray(page?.items) ? page.items : [],
         nextBefore: typeof page?.nextBefore === "string" ? page.nextBefore : null,
@@ -432,12 +463,15 @@ export class CreditsBalanceModal extends StandardModal {
       const updatedAt = this.formatDate(new Date().toISOString(), true);
       this.setStatusMessage(`Usage updated ${updatedAt}.`);
     } catch (error) {
+      if (!task.isCurrent()) return;
       const message = error instanceof Error && error.message ? error.message : "Unknown error";
       this.setStatusMessage(`Unable to refresh usage (${message}).`, "error");
       new Notice("Unable to refresh usage history.", 5000);
     } finally {
-      this.isRefreshingUsage = false;
-      this.setRefreshBusyState();
+      if (task.isCurrent()) {
+        this.isRefreshingUsage = false;
+        this.setRefreshBusyState();
+      }
     }
   }
 
@@ -450,6 +484,8 @@ export class CreditsBalanceModal extends StandardModal {
       return;
     }
 
+    const task = this.beginAsyncTask("credits-usage");
+    this.isRefreshingUsage = false;
     this.isLoadingMoreUsage = true;
     this.updateUsageLoadMoreButton();
     this.setRefreshBusyState();
@@ -460,6 +496,7 @@ export class CreditsBalanceModal extends StandardModal {
         limit: 50,
         before: this.usage.nextBefore,
       });
+      if (!task.isCurrent()) return;
 
       const appended = Array.isArray(page?.items) ? page.items : [];
       const seen = new Set(this.usage.items.map((entry) => entry.id));
@@ -480,13 +517,16 @@ export class CreditsBalanceModal extends StandardModal {
       this.renderUsage();
       this.setStatusMessage("Loaded older usage records.");
     } catch (error) {
+      if (!task.isCurrent()) return;
       const message = error instanceof Error && error.message ? error.message : "Unknown error";
       this.setStatusMessage(`Unable to load older usage (${message}).`, "error");
       new Notice("Unable to load older usage records.", 5000);
     } finally {
-      this.isLoadingMoreUsage = false;
-      this.updateUsageLoadMoreButton();
-      this.setRefreshBusyState();
+      if (task.isCurrent()) {
+        this.isLoadingMoreUsage = false;
+        this.updateUsageLoadMoreButton();
+        this.setRefreshBusyState();
+      }
     }
   }
 
@@ -503,7 +543,11 @@ export class CreditsBalanceModal extends StandardModal {
 
     this.usageLoadMoreButton.style.display = shouldShow ? "" : "none";
     this.usageLoadMoreButton.disabled = this.isLoadingMoreUsage;
-    this.usageLoadMoreButton.classList.toggle("is-loading", this.isLoadingMoreUsage);
+    this.usageLoadMoreButton.classList.toggle("is-busy", this.isLoadingMoreUsage);
+    this.usageLoadMoreButton.setAttr(
+      "aria-busy",
+      String(this.isLoadingMoreUsage),
+    );
   }
 
   private setRefreshBusyState(): void {
@@ -513,7 +557,7 @@ export class CreditsBalanceModal extends StandardModal {
 
     const isBusy = this.isRefreshingBalance || this.isRefreshingUsage || this.isLoadingMoreUsage;
     this.refreshButton.disabled = isBusy;
-    this.refreshButton.classList.toggle("is-loading", isBusy);
+    this.refreshButton.classList.toggle("is-busy", isBusy);
     this.refreshButton.setAttr("aria-busy", isBusy ? "true" : "false");
   }
 
@@ -535,7 +579,9 @@ export class CreditsBalanceModal extends StandardModal {
   private openPurchasePage(): void {
     const purchaseUrl = this.balance?.purchaseUrl || this.options.fallbackPurchaseUrl || LICENSE_URL;
     if (purchaseUrl) {
-      window.open(purchaseUrl, "_blank");
+      void openExternalUrl(purchaseUrl, getSurfaceOwnerWindow(this.modalEl)).then((opened) => {
+        if (!opened) this.options.onOpenSetup();
+      });
       return;
     }
 
@@ -548,8 +594,6 @@ export class CreditsBalanceModal extends StandardModal {
         return "Audio transcription";
       case "document_processing":
         return "Document processing";
-      case "youtube_transcript":
-        return "YouTube transcript";
       case "agent_turn":
         return "Agent turn";
       case "embeddings":

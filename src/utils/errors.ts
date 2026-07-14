@@ -37,14 +37,11 @@ export const ERROR_CODES = {
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];
 
-type ErrorMessageFunction = (model?: string) => string;
-type ErrorMessageValue = string | ErrorMessageFunction;
-
 const AUTH_FAILURE_SNIPPETS = [
-  "invalid api key",
-  "api key invalid",
-  "api key missing",
-  "missing api key",
+  "invalid license",
+  "license key invalid",
+  "license key missing",
+  "missing license key",
   "authentication failed",
   "authentication failure",
   "authentication error",
@@ -70,19 +67,13 @@ export function isAuthFailureMessage(message?: string | null): boolean {
 }
 
 /**
- * Detect "prompt too long / context length exceeded" style errors across providers.
- * This is intentionally heuristic: upstreams vary a lot (OpenAI, Anthropic, llama.cpp, etc.).
+ * Detect common "prompt too long / context length exceeded" gateway errors.
  */
 export function isContextOverflowErrorMessage(message?: string | null): boolean {
   if (!message) return false;
   const lc = String(message).toLowerCase();
   if (!lc) return false;
 
-  // llama.cpp / LM Studio style
-  if (lc.includes("tokens to keep") && lc.includes("context length")) return true;
-  if ((lc.includes("n_keep") || lc.includes("n_ctx") || lc.includes("n ctx")) && lc.includes("context")) return true;
-
-  // OpenAI / general
   if (lc.includes("context_length_exceeded")) return true;
   if (lc.includes("maximum context length")) return true;
   if (lc.includes("context length") && (lc.includes("exceed") || lc.includes("greater than") || lc.includes("too long") || lc.includes("limit"))) {
@@ -103,12 +94,7 @@ export class SystemSculptError extends Error {
     message: string,
     public code: ErrorCode = ERROR_CODES.UNKNOWN_ERROR,
     public statusCode: number = 500,
-    public metadata?: {
-      provider?: string;
-      model?: string;
-      shouldResubmit?: boolean;
-      [key: string]: any;
-    }
+    public metadata?: Record<string, any>,
   ) {
     super(message);
     this.name = "SystemSculptError";
@@ -116,29 +102,20 @@ export class SystemSculptError extends Error {
 }
 
 /**
- * Distinguish a genuine managed SystemSculpt license/subscription failure from a
- * BYOK provider key auth failure. Both surface as a 401, and the custom-provider
- * path maps its 401 to INVALID_LICENSE too — but only the managed SystemSculpt
- * API path sets `metadata.licenseFailure`. A BYOK key problem must NOT trigger
- * the renewal flow or flip `licenseValid`: it points the user at their own
- * provider key, not a SystemSculpt subscription (#249). LICENSE_EXPIRED is
- * produced only by the managed path, so it needs no discriminator; only the
- * overloaded INVALID_LICENSE does.
+ * Identify managed SystemSculpt license/subscription failures. The v6 client
+ * has no alternate authentication authority, so both license codes are owned
+ * by the SystemSculpt account flow.
  */
 export function isManagedLicenseFailure(error: unknown): error is SystemSculptError {
   if (!(error instanceof SystemSculptError)) return false;
-  if (error.code === ERROR_CODES.LICENSE_EXPIRED) return true;
-  return (
-    error.code === ERROR_CODES.INVALID_LICENSE &&
-    error.metadata?.licenseFailure === true
-  );
+  return error.code === ERROR_CODES.LICENSE_EXPIRED || error.code === ERROR_CODES.INVALID_LICENSE;
 }
 
 /**
  * Get a user-friendly error message for the given error code
  */
-export function getErrorMessage(code: ErrorCode, model?: string): string {
-  const messages: Record<ErrorCode, ErrorMessageValue> = {
+export function getErrorMessage(code: ErrorCode): string {
+  const messages: Record<ErrorCode, string> = {
     // Authentication Errors
     [ERROR_CODES.INVALID_LICENSE]: "Invalid license key. Please check your license in settings.",
     [ERROR_CODES.LICENSE_EXPIRED]: "Your license has expired. Please renew your subscription.",
@@ -146,10 +123,8 @@ export function getErrorMessage(code: ErrorCode, model?: string): string {
     [ERROR_CODES.PRO_REQUIRED]: "This feature requires a Pro license. Please upgrade your subscription.",
 
     // Model Errors
-    [ERROR_CODES.MODEL_UNAVAILABLE]: (model?: string) => 
-      model ? `Model "${model}" is currently unavailable. Please try another model.` : "The selected model is currently unavailable.",
-    [ERROR_CODES.MODEL_REQUEST_ERROR]: (model?: string) => 
-      model ? `Error processing request with model "${model}". Please try again.` : "Error processing your request. Please try again.",
+    [ERROR_CODES.MODEL_UNAVAILABLE]: "SystemSculpt cannot run this request right now. Please try again.",
+    [ERROR_CODES.MODEL_REQUEST_ERROR]: "SystemSculpt could not process your request. Please try again.",
 
     // Stream Errors
     [ERROR_CODES.STREAM_ERROR]: "Error in streaming response. Please try again.",
@@ -177,9 +152,5 @@ export function getErrorMessage(code: ErrorCode, model?: string): string {
     [ERROR_CODES.TURN_IN_FLIGHT]: "A previous request is still processing. Please wait for it to finish.",
   };
 
-  const message = messages[code];
-  if (typeof message === 'function') {
-    return message(model);
-  }
-  return message;
+  return messages[code];
 }

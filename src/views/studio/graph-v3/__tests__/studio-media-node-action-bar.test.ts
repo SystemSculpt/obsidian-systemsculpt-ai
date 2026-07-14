@@ -194,7 +194,9 @@ describe("renderStudioMediaNodeActionBar", () => {
     await flushMicrotasks();
 
     expect(browseMock).toHaveBeenCalledWith(
-      expect.objectContaining({ key: "sourcePath", type: "media_path" })
+      expect.objectContaining({ key: "sourcePath", type: "media_path" }),
+      expect.any(HTMLElement),
+      undefined
     );
     expect(onNodeConfigValueChange).toHaveBeenCalledWith(
       node.id,

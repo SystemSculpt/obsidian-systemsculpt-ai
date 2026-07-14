@@ -1,11 +1,14 @@
-import { setIcon } from "obsidian";
 import type {
   StudioJsonValue,
   StudioNodeConfigFieldDefinition,
   StudioNodeDefinition,
   StudioNodeInstance,
 } from "../../../studio/types";
-import { browseForNodeConfigPath } from "../StudioPathFieldPicker";
+import {
+  browseForNodeConfigPath,
+  type StudioNodeConfigPathBrowseOptions,
+} from "../StudioPathFieldPicker";
+import { createStudioAction } from "../StudioAction";
 import { markStudioNodeCardInteractive } from "./StudioGraphNodeCardPointer";
 import type { StudioGraphNodeMutationOptions } from "./StudioGraphNodeCardTypes";
 
@@ -28,6 +31,7 @@ export interface RenderStudioMediaNodeActionBarOptions {
   onOpenImageEditor?: (node: StudioNodeInstance) => void;
   onEditImageWithAi?: (node: StudioNodeInstance) => void;
   onCopyNodeImageToClipboard?: (node: StudioNodeInstance) => void;
+  pathBrowseOptions?: StudioNodeConfigPathBrowseOptions;
 }
 
 interface MediaBarAction {
@@ -55,7 +59,10 @@ function resolveMediaSourceField(
   );
 }
 
-function resolveActions(options: RenderStudioMediaNodeActionBarOptions): MediaBarAction[] {
+function resolveActions(
+  options: RenderStudioMediaNodeActionBarOptions,
+  pathPickerHost: HTMLElement
+): MediaBarAction[] {
   const {
     node,
     definition,
@@ -66,6 +73,7 @@ function resolveActions(options: RenderStudioMediaNodeActionBarOptions): MediaBa
     onOpenImageEditor,
     onEditImageWithAi,
     onCopyNodeImageToClipboard,
+    pathBrowseOptions,
   } = options;
 
   const actions: MediaBarAction[] = [
@@ -101,7 +109,11 @@ function resolveActions(options: RenderStudioMediaNodeActionBarOptions): MediaBa
       icon: "folder-open",
       label: "Replace media",
       run: async () => {
-        const selected = await browseForNodeConfigPath(resolveMediaSourceField(definition));
+        const selected = await browseForNodeConfigPath(
+          resolveMediaSourceField(definition),
+          pathPickerHost,
+          pathBrowseOptions
+        );
         if (!selected) {
           return;
         }
@@ -148,19 +160,18 @@ export function renderStudioMediaNodeActionBar(
   barEl.classList.toggle("is-locked", interactionLocked);
 
   const actionsById = new Map<string, MediaBarAction>();
-  for (const action of resolveActions(options)) {
+  for (const action of resolveActions(options, barEl)) {
     actionsById.set(action.id, action);
-    const buttonEl = barEl.createEl("button", {
-      cls: `ss-studio-media-action${action.danger ? " is-danger" : ""}`,
-      attr: {
-        type: "button",
-        "aria-label": action.label,
-        title: action.label,
-        "data-media-action": action.id,
-        ...(interactionLocked ? { "aria-disabled": "true" } : {}),
-      },
+    const buttonEl = createStudioAction(barEl, {
+      className: `ss-studio-media-action${action.danger ? " is-danger" : ""}`,
+      label: action.label,
+      icon: action.icon,
+      size: "icon",
     });
-    setIcon(buttonEl, action.icon);
+    buttonEl.dataset.mediaAction = action.id;
+    if (interactionLocked) {
+      buttonEl.setAttribute("aria-disabled", "true");
+    }
   }
 
   barEl.addEventListener("pointerdown", (event) => {
@@ -176,8 +187,8 @@ export function renderStudioMediaNodeActionBar(
       return;
     }
     const buttonEl =
-      event.target instanceof Element
-        ? event.target.closest<HTMLButtonElement>("button[data-media-action]")
+      typeof (event.target as { closest?: unknown } | null)?.closest === "function"
+        ? (event.target as Element).closest<HTMLButtonElement>("button[data-media-action]")
         : null;
     const action = buttonEl?.dataset.mediaAction
       ? actionsById.get(buttonEl.dataset.mediaAction)

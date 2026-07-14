@@ -1,43 +1,42 @@
-import { App, DropdownComponent, Modal, Notice, Setting } from "obsidian";
+import { App, DropdownComponent, Notice, Setting } from "obsidian";
 import type SystemSculptPlugin from "../main";
+import { StandardModal } from "../core/ui/modals/standard/StandardModal";
+import { getSurfaceOwnerWindow } from "../core/ui/surface/SurfaceDomContext";
+import { MicrophoneDeviceCatalog } from "../services/recorder/MicrophoneDeviceCatalog";
 
-export class RecorderAdvancedModal extends Modal {
+export class RecorderAdvancedModal extends StandardModal {
   private readonly plugin: SystemSculptPlugin;
+  private microphoneCatalog: MicrophoneDeviceCatalog | null = null;
 
   constructor(app: App, plugin: SystemSculptPlugin) {
     super(app);
     this.plugin = plugin;
+    this.setSize("medium");
+    this.modalEl.addClass("ss-recorder-advanced-modal-shell");
   }
 
   onOpen(): void {
+    super.onOpen();
     const { contentEl } = this;
-    contentEl.empty();
     contentEl.addClass("ss-recorder-advanced-modal");
-
-    contentEl.createEl("h2", { text: "Recorder Advanced Controls" });
-    contentEl.createEl("p", {
-      text: "Audio recorder active. Update capture behavior below without leaving your workflow.",
-      cls: "setting-item-description",
-    });
+    this.addTitle("Recorder controls");
 
     this.renderAudioSection(contentEl);
+    this.addActionButton("Done", () => this.close());
+    this.addActionButton("Open Settings", () => {
+      this.close();
+      this.plugin.openSettingsTab("workflow");
+    }, true);
+  }
 
-    new Setting(contentEl)
-      .setName("Open full recording settings")
-      .setDesc("Jump to the Recording tab for the full settings panel.")
-      .addButton((button) => {
-        button
-          .setButtonText("Open settings")
-          .setCta()
-          .onClick(() => {
-            this.close();
-            this.plugin.openSettingsTab("workflow");
-          });
-      });
+  onClose(): void {
+    this.microphoneCatalog?.dispose();
+    this.microphoneCatalog = null;
+    super.onClose();
   }
 
   private renderAudioSection(containerEl: HTMLElement): void {
-    containerEl.createEl("h3", { text: "Audio Recording" });
+    containerEl.createEl("h3", { text: "Audio recording" });
     this.renderMicrophoneSetting(containerEl);
 
     this.addToggleSetting(
@@ -113,6 +112,9 @@ export class RecorderAdvancedModal extends Modal {
   }
 
   private renderMicrophoneSetting(containerEl: HTMLElement): void {
+    this.microphoneCatalog?.dispose();
+    const catalog = new MicrophoneDeviceCatalog(getSurfaceOwnerWindow(containerEl));
+    this.microphoneCatalog = catalog;
     const setting = new Setting(containerEl)
       .setName("Preferred microphone")
       .setDesc("Select which microphone should be used for recordings.");
@@ -129,44 +131,43 @@ export class RecorderAdvancedModal extends Modal {
       });
     });
 
-    const statusEl = setting.descEl.createDiv({ cls: "ss-recorder-advanced-modal__inline-note" });
+    const statusEl = setting.descEl.createDiv({
+      cls: "ss-recorder-advanced-modal__inline-note",
+      attr: { "aria-live": "polite" },
+    });
 
     const loadDevices = async () => {
       if (!dropdownComponent || !dropdownEl) return;
-      dropdownEl.innerHTML = "";
+      const task = this.beginAsyncTask("microphone-devices");
+      dropdownEl.empty();
       dropdownComponent.addOption("default", "Default microphone");
+      statusEl.setText("Loading microphones...");
 
-      if (typeof navigator === "undefined" || !navigator.mediaDevices?.enumerateDevices) {
+      const result = await catalog.refresh(task.signal);
+      if (!task.isCurrent() || this.microphoneCatalog !== catalog) return;
+      if (result.status === "cancelled") return;
+      if (result.status === "unavailable") {
         dropdownComponent.setValue("default");
         statusEl.setText("Microphone selection is unavailable in this runtime.");
         return;
       }
-
-      try {
-        statusEl.setText("Loading microphones...");
-        const devices = await navigator.mediaDevices.enumerateDevices();
-        const hasLabeledMics = devices.some((device) => device.kind === "audioinput" && !!device.label);
-        if (!hasLabeledMics) {
-          try {
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            stream.getTracks().forEach((track) => track.stop());
-          } catch {
-            statusEl.setText("Microphone permission not granted yet; showing generic device labels.");
-          }
-        }
-
-        const refreshed = await navigator.mediaDevices.enumerateDevices();
-        const microphones = refreshed.filter((device) => device.kind === "audioinput");
-        microphones.forEach((mic) => {
-          dropdownComponent?.addOption(mic.deviceId, mic.label || `Microphone ${mic.deviceId.slice(0, 8)}`);
-        });
-
-        const selected = this.plugin.settings.preferredMicrophoneId || "default";
-        dropdownComponent.setValue(selected);
-        statusEl.setText(microphones.length > 0 ? "" : "No microphones detected.");
-      } catch (error: any) {
-        statusEl.setText(`Unable to load microphones: ${error?.message || error}`);
+      if (result.status === "error") {
+        dropdownComponent.setValue("default");
+        statusEl.setText(`Unable to load microphones: ${result.message}`);
+        return;
       }
+
+      for (const microphone of result.devices) {
+        dropdownComponent.addOption(microphone.id, microphone.label);
+      }
+      dropdownComponent.setValue(this.plugin.settings.preferredMicrophoneId || "default");
+      statusEl.setText(
+        result.devices.length === 0
+          ? "No microphones detected."
+          : result.labelRefresh === "denied"
+            ? "Microphone permission not granted yet; showing generic device labels."
+            : "",
+      );
     };
 
     setting.addExtraButton((button) => {

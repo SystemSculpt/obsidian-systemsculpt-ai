@@ -1,5 +1,7 @@
 import type { StudioNodeConfigSelectOption } from "../../studio/types";
+import { applyPluginSurface, SurfaceCombobox } from "../../core/ui/surface";
 import { rankStudioFuzzyItems } from "./StudioFuzzySearch";
+import { getStudioOwnerDocument, getStudioOwnerWindow } from "./StudioDomContext";
 
 type StudioSearchableDropdownOptions = {
   containerEl: HTMLElement;
@@ -11,6 +13,11 @@ type StudioSearchableDropdownOptions = {
   loadOptions: () => Promise<StudioNodeConfigSelectOption[]>;
   onValueChange: (value: string) => void;
 };
+
+export type StudioSearchableDropdownHandle = Readonly<{
+  rootEl: HTMLElement;
+  destroy: () => void;
+}>;
 
 const STUDIO_DROPDOWN_MIN_PANEL_WIDTH_PX = 220;
 const STUDIO_DROPDOWN_MAX_PANEL_WIDTH_PX = 760;
@@ -45,7 +52,9 @@ function estimatePreferredPanelWidth(optionsList: StudioNodeConfigSelectOption[]
   return Math.round(longest * STUDIO_DROPDOWN_ESTIMATED_GLYPH_WIDTH_PX + STUDIO_DROPDOWN_ESTIMATED_PADDING_PX);
 }
 
-export function renderStudioSearchableDropdown(options: StudioSearchableDropdownOptions): void {
+export function renderStudioSearchableDropdown(
+  options: StudioSearchableDropdownOptions
+): StudioSearchableDropdownHandle {
   const {
     containerEl,
     ariaLabel,
@@ -55,14 +64,18 @@ export function renderStudioSearchableDropdown(options: StudioSearchableDropdown
     loadOptions,
     onValueChange,
   } = options;
+  const ownerDocument = getStudioOwnerDocument(containerEl);
+  const ownerWindow = getStudioOwnerWindow(containerEl);
 
   let currentValue = String(options.value || "").trim();
   let loadedOptions: StudioNodeConfigSelectOption[] | null = null;
-  let filteredOptions: StudioNodeConfigSelectOption[] = [];
-  let activeIndex = -1;
-  let open = false;
+  let loadErrorMessage: string | null = null;
+  let openGeneration = 0;
   let loadingPromise: Promise<void> | null = null;
   let teardownViewportListeners: (() => void) | null = null;
+  let lifecycleObserver: MutationObserver | null = null;
+  let destroyed = false;
+  let combobox: SurfaceCombobox<StudioNodeConfigSelectOption> | null = null;
 
   const rootEl = containerEl.createDiv({ cls: "ss-studio-searchable-select" });
   const triggerEl = rootEl.createEl("button", {
@@ -80,7 +93,8 @@ export function renderStudioSearchableDropdown(options: StudioSearchableDropdown
   triggerChevronEl.setText("▾");
 
   const panelEl = rootEl.createDiv({ cls: "ss-studio-searchable-select-panel" });
-  panelEl.style.display = "none";
+  applyPluginSurface(panelEl, "transient");
+  panelEl.setCssStyles({ display: "none" });
   const searchEl = panelEl.createEl("input", {
     cls: "ss-studio-searchable-select-search",
     type: "text",
@@ -93,7 +107,7 @@ export function renderStudioSearchableDropdown(options: StudioSearchableDropdown
   searchEl.autocomplete = "off";
   const listEl = panelEl.createDiv({
     cls: "ss-studio-searchable-select-list",
-    attr: { role: "listbox" },
+    attr: { "aria-label": ariaLabel },
   });
 
   const positionPanel = (): void => {
@@ -102,8 +116,8 @@ export function renderStudioSearchableDropdown(options: StudioSearchableDropdown
     // empty "Loading options..." state) writes a collapsed list max-height,
     // and every later re-measure reads the panel WITH that stale constraint
     // applied — a feedback loop that pins the list at a few pixels tall.
-    panelEl.style.maxHeight = "";
-    listEl.style.maxHeight = "";
+    panelEl.setCssStyles({ maxHeight: "" });
+    listEl.setCssStyles({ maxHeight: "" });
 
     // The panel renders inside the zoomed graph canvas (CSS scale()), so a
     // CSS pixel applied here occupies `scale` visual pixels. Measure the
@@ -114,14 +128,14 @@ export function renderStudioSearchableDropdown(options: StudioSearchableDropdown
     const scale = Number.isFinite(rawScale) && rawScale > 0 ? rawScale : 1;
     const toLocalPx = (visualPx: number): number => visualPx / scale;
 
-    const viewportWidth = window.innerWidth || document.documentElement?.clientWidth || 0;
-    const viewportHeight = window.innerHeight || document.documentElement?.clientHeight || 0;
+    const viewportWidth = ownerWindow.innerWidth || ownerDocument.documentElement?.clientWidth || 0;
+    const viewportHeight = ownerWindow.innerHeight || ownerDocument.documentElement?.clientHeight || 0;
     if (!viewportWidth) {
-      // Static full-width reset lives in views/studio-editors.css.
+      // Static full-width reset lives in views/studio/editor-dropdowns.css.
       panelEl.classList.add("ss-studio-searchable-select-panel--full-width");
-      panelEl.style.left = "";
-      panelEl.style.right = "";
-      panelEl.style.width = "";
+      panelEl.setCssStyles({ left: "" });
+      panelEl.setCssStyles({ right: "" });
+      panelEl.setCssStyles({ width: "" });
     } else {
       panelEl.classList.remove("ss-studio-searchable-select-panel--full-width");
       const viewportMargin = STUDIO_DROPDOWN_VIEWPORT_MARGIN_PX;
@@ -148,14 +162,14 @@ export function renderStudioSearchableDropdown(options: StudioSearchableDropdown
       }
 
       panelEl.style.left = `${Math.round(toLocalPx(leftOffsetVisual))}px`;
-      panelEl.style.right = "auto";
+      panelEl.setCssStyles({ right: "auto" });
       panelEl.style.width = `${Math.round(panelWidth)}px`;
     }
 
     if (!viewportHeight) {
       rootEl.classList.remove("is-open-upward");
       panelEl.style.top = `calc(100% + ${STUDIO_DROPDOWN_PANEL_GAP_PX}px)`;
-      panelEl.style.bottom = "auto";
+      panelEl.setCssStyles({ bottom: "auto" });
       return;
     }
 
@@ -195,7 +209,7 @@ export function renderStudioSearchableDropdown(options: StudioSearchableDropdown
   };
 
   const syncOpenPanelPosition = (): void => {
-    if (!open) return;
+    if (!combobox?.isOpen) return;
     positionPanel();
   };
 
@@ -208,22 +222,39 @@ export function renderStudioSearchableDropdown(options: StudioSearchableDropdown
       syncOpenPanelPosition();
     };
 
-    window.addEventListener("resize", handleViewportChange);
-    window.addEventListener("scroll", handleViewportChange, true);
-    window.visualViewport?.addEventListener("resize", handleViewportChange);
-    window.visualViewport?.addEventListener("scroll", handleViewportChange);
+    ownerWindow.addEventListener("resize", handleViewportChange);
+    ownerWindow.addEventListener("scroll", handleViewportChange, true);
+    ownerWindow.visualViewport?.addEventListener("resize", handleViewportChange);
+    ownerWindow.visualViewport?.addEventListener("scroll", handleViewportChange);
 
     teardownViewportListeners = () => {
-      window.removeEventListener("resize", handleViewportChange);
-      window.removeEventListener("scroll", handleViewportChange, true);
-      window.visualViewport?.removeEventListener("resize", handleViewportChange);
-      window.visualViewport?.removeEventListener("scroll", handleViewportChange);
+      ownerWindow.removeEventListener("resize", handleViewportChange);
+      ownerWindow.removeEventListener("scroll", handleViewportChange, true);
+      ownerWindow.visualViewport?.removeEventListener("resize", handleViewportChange);
+      ownerWindow.visualViewport?.removeEventListener("scroll", handleViewportChange);
       teardownViewportListeners = null;
     };
+
+    const MutationObserverCtor = (ownerWindow as Window & {
+      MutationObserver?: new (callback: MutationCallback) => MutationObserver;
+    }).MutationObserver;
+    if (typeof MutationObserverCtor === "function" && !lifecycleObserver) {
+      lifecycleObserver = new MutationObserverCtor(() => {
+        if (!rootEl.isConnected) {
+          destroy();
+        }
+      });
+      lifecycleObserver.observe(ownerDocument.documentElement, {
+        childList: true,
+        subtree: true,
+      });
+    }
   };
 
   const unbindViewportListeners = (): void => {
     teardownViewportListeners?.();
+    lifecycleObserver?.disconnect();
+    lifecycleObserver = null;
   };
 
   const ensureCurrentValuePresent = (optionsList: StudioNodeConfigSelectOption[]): StudioNodeConfigSelectOption[] => {
@@ -244,108 +275,49 @@ export function renderStudioSearchableDropdown(options: StudioSearchableDropdown
     ];
   };
 
-  const setTriggerAuthState = (authenticated: boolean): void => {
-    rootEl.classList.toggle("is-provider-authenticated", authenticated);
-    triggerEl.classList.toggle("is-provider-authenticated", authenticated);
-  };
-
   const updateTriggerLabel = (): void => {
     const optionsList = loadedOptions ? ensureCurrentValuePresent(loadedOptions) : [];
     const selected = optionsList.find((option) => option.value === currentValue) || null;
     if (selected) {
-      setTriggerAuthState(Boolean(selected.providerAuthenticated));
       const badgePrefix = selected.badge ? `[${selected.badge}] ` : "";
       triggerLabelEl.setText(`${badgePrefix}${selected.label}`);
       triggerEl.title = selected.description || selected.label;
       return;
     }
-    setTriggerAuthState(false);
     const fallback = currentValue || placeholder || "Select option";
     triggerLabelEl.setText(fallback);
     triggerEl.title = fallback;
   };
 
-  const renderEmptyState = (message: string): void => {
-    listEl.empty();
-    listEl.createDiv({
+  const renderEmptyState = (container: HTMLElement, message: string): void => {
+    container.createDiv({
       cls: "ss-studio-searchable-select-empty",
       text: message,
     });
   };
 
-  const renderOptions = (): void => {
-    listEl.empty();
-    if (filteredOptions.length === 0) {
-      renderEmptyState(noResultsText || "No matching options.");
-      syncOpenPanelPosition();
-      return;
-    }
-
-    for (const [index, option] of filteredOptions.entries()) {
-      const itemEl = listEl.createDiv({
-        cls: "ss-studio-searchable-select-item",
-      });
-      const providerAuthenticated = option.providerAuthenticated === true;
-      itemEl.setAttribute("role", "option");
-      itemEl.setAttribute("aria-selected", option.value === currentValue ? "true" : "false");
-      itemEl.classList.toggle("is-active", index === activeIndex);
-      itemEl.classList.toggle("is-selected", option.value === currentValue);
-      itemEl.classList.toggle("is-provider-authenticated", providerAuthenticated);
-
-      const titleEl = itemEl.createDiv({ cls: "ss-studio-searchable-select-item-title" });
-      if (option.badge) {
-        const badgeEl = titleEl.createSpan({
-          cls: "ss-studio-searchable-select-item-badge",
-          text: option.badge,
-        });
-        badgeEl.classList.toggle("is-provider-authenticated", providerAuthenticated);
-      }
-      titleEl.createSpan({
-        cls: "ss-studio-searchable-select-item-label",
-        text: option.label || option.value,
-      });
-      if (option.description) {
-        itemEl.createDiv({
-          cls: "ss-studio-searchable-select-item-description",
-          text: option.description,
-        });
-      }
-
-      itemEl.addEventListener("pointermove", () => {
-        activeIndex = index;
-        for (const child of Array.from(listEl.children)) {
-          child.classList.remove("is-active");
-        }
-        itemEl.addClass("is-active");
-      });
-      itemEl.addEventListener("pointerdown", (event) => {
-        // Prevent node-card drag/select handlers from stealing the interaction.
-        event.preventDefault();
-        event.stopPropagation();
-        currentValue = option.value;
-        onValueChange(option.value);
-        updateTriggerLabel();
-        closePanel();
-      });
-      itemEl.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-      });
-    }
-
-    syncOpenPanelPosition();
-  };
-
-  const applyFilter = (query: string): void => {
-    const optionsList = ensureCurrentValuePresent(loadedOptions || []);
-    filteredOptions = rankStudioFuzzyItems({
-      items: optionsList,
-      query,
-      getSearchText: optionSearchText,
-      compareWhenEqual: (left, right) => left.label.localeCompare(right.label),
+  const renderDropdownOption = (option: StudioNodeConfigSelectOption): HTMLElement => {
+    const itemEl = listEl.createDiv({
+      cls: "ss-studio-searchable-select-item",
     });
-    activeIndex = filteredOptions.length > 0 ? 0 : -1;
-    renderOptions();
+    const titleEl = itemEl.createDiv({ cls: "ss-studio-searchable-select-item-title" });
+    if (option.badge) {
+      titleEl.createSpan({
+        cls: "ss-studio-searchable-select-item-badge",
+        text: option.badge,
+      });
+    }
+    titleEl.createSpan({
+      cls: "ss-studio-searchable-select-item-label",
+      text: option.label || option.value,
+    });
+    if (option.description) {
+      itemEl.createDiv({
+        cls: "ss-studio-searchable-select-item-description",
+        text: option.description,
+      });
+    }
+    return itemEl;
   };
 
   const ensureOptionsLoaded = async (forceReload: boolean = false): Promise<void> => {
@@ -357,10 +329,11 @@ export function renderStudioSearchableDropdown(options: StudioSearchableDropdown
         try {
           const optionsList = await loadOptions();
           loadedOptions = Array.isArray(optionsList) ? optionsList.slice() : [];
+          loadErrorMessage = null;
         } catch (error) {
           loadedOptions = [];
           const message = error instanceof Error ? error.message : String(error);
-          renderEmptyState(`Unable to load options (${message}).`);
+          loadErrorMessage = `Unable to load options (${message}).`;
         } finally {
           loadingPromise = null;
           updateTriggerLabel();
@@ -371,40 +344,101 @@ export function renderStudioSearchableDropdown(options: StudioSearchableDropdown
   };
 
   const openPanel = async (): Promise<void> => {
-    if (open || disabled) {
+    const control = combobox;
+    if (control?.isOpen || disabled || destroyed || !control) {
       return;
     }
-    open = true;
-    // Restore the stylesheet's flex-column layout (an inline display value
-    // would override it and break the list's flex sizing).
-    panelEl.style.display = "";
-    bindViewportListeners();
-    positionPanel();
-    rootEl.addClass("is-open");
-    triggerEl.setAttribute("aria-expanded", "true");
-    renderEmptyState("Loading options...");
+    const generation = ++openGeneration;
+    control.setQuery("");
+    control.setOpen(true);
+    control.setBusy(true);
+    control.showState((container) => renderEmptyState(container, "Loading options..."));
     await ensureOptionsLoaded(true);
-    applyFilter("");
-    searchEl.value = "";
-    searchEl.focus();
+    if (destroyed || !control.isOpen || generation !== openGeneration || !rootEl.isConnected) {
+      return;
+    }
+    control.setBusy(false);
+    if (loadErrorMessage) {
+      control.showState((container) => renderEmptyState(container, loadErrorMessage!));
+    } else {
+      control.setItems(ensureCurrentValuePresent(loadedOptions || []));
+    }
+    control.focusInput();
   };
 
   function closePanel(): void {
-    if (!open) {
+    if (!combobox?.isOpen) {
       return;
     }
-    open = false;
-    panelEl.style.display = "none";
-    rootEl.removeClass("is-open");
-    rootEl.removeClass("is-open-upward");
-    triggerEl.setAttribute("aria-expanded", "false");
-    unbindViewportListeners();
+    openGeneration += 1;
+    combobox.setBusy(false);
+    combobox.setOpen(false);
   }
+
+  function destroy(): void {
+    if (destroyed) {
+      return;
+    }
+    destroyed = true;
+    openGeneration += 1;
+    combobox?.destroy();
+    combobox = null;
+    unbindViewportListeners();
+    rootEl.remove();
+  }
+
+  combobox = new SurfaceCombobox<StudioNodeConfigSelectOption>({
+    input: searchEl,
+    listbox: listEl,
+    listboxLabel: ariaLabel,
+    initiallyOpen: false,
+    activeMode: "first",
+    navigation: "clamp",
+    activeClass: "is-active",
+    selectedClass: "is-selected",
+    getItemKey: (option) => option.value,
+    filterItems: (items, query) => rankStudioFuzzyItems({
+      items,
+      query,
+      getSearchText: optionSearchText,
+      compareWhenEqual: (left, right) => left.label.localeCompare(right.label),
+    }),
+    isSelected: (option) => option.value === currentValue,
+    renderOption: ({ item }) => renderDropdownOption(item),
+    renderEmpty: ({ listbox }) => {
+      renderEmptyState(listbox, noResultsText || "No matching options.");
+    },
+    onCommit: ({ item }) => {
+      currentValue = item.value;
+      onValueChange(item.value);
+      updateTriggerLabel();
+      combobox?.refreshSelection();
+    },
+    optionCommitEvent: "pointerdown",
+    closeOnCommit: true,
+    focusTargetAfterClose: triggerEl,
+    onOpenChange: (nextOpen) => {
+      // Restore the stylesheet's flex-column layout when opening. An inline
+      // display value would override it and break the list's flex sizing.
+      panelEl.setCssStyles({ display: nextOpen ? "" : "none" });
+      rootEl.classList.toggle("is-open", nextOpen);
+      triggerEl.setAttribute("aria-expanded", String(nextOpen));
+      if (nextOpen) {
+        bindViewportListeners();
+        positionPanel();
+      } else {
+        rootEl.removeClass("is-open-upward");
+        unbindViewportListeners();
+      }
+    },
+    onRender: syncOpenPanelPosition,
+  });
+  triggerEl.setAttribute("aria-controls", combobox.listboxId);
 
   triggerEl.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
-    if (open) {
+    if (combobox?.isOpen) {
       closePanel();
       return;
     }
@@ -416,57 +450,15 @@ export function renderStudioSearchableDropdown(options: StudioSearchableDropdown
   });
 
   rootEl.addEventListener("focusout", () => {
-    window.setTimeout(() => {
-      const active = document.activeElement;
+    ownerWindow.setTimeout(() => {
+      const active = ownerDocument.activeElement;
       if (!active || !rootEl.contains(active)) {
         closePanel();
       }
     }, 0);
   });
 
-  searchEl.addEventListener("input", () => {
-    applyFilter(searchEl.value);
-  });
-
-  searchEl.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      closePanel();
-      triggerEl.focus();
-      return;
-    }
-    if (event.key === "ArrowDown") {
-      event.preventDefault();
-      if (filteredOptions.length === 0) {
-        return;
-      }
-      activeIndex = Math.min(filteredOptions.length - 1, activeIndex + 1);
-      renderOptions();
-      return;
-    }
-    if (event.key === "ArrowUp") {
-      event.preventDefault();
-      if (filteredOptions.length === 0) {
-        return;
-      }
-      activeIndex = Math.max(0, activeIndex - 1);
-      renderOptions();
-      return;
-    }
-    if (event.key === "Enter") {
-      event.preventDefault();
-      if (activeIndex < 0 || activeIndex >= filteredOptions.length) {
-        return;
-      }
-      const selected = filteredOptions[activeIndex];
-      currentValue = selected.value;
-      onValueChange(selected.value);
-      updateTriggerLabel();
-      closePanel();
-      triggerEl.focus();
-    }
-  });
-
   updateTriggerLabel();
   void ensureOptionsLoaded();
+  return { rootEl, destroy };
 }

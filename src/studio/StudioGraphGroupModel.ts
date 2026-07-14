@@ -35,7 +35,7 @@ export function normalizeGroupColor(value: string | null | undefined): string | 
   return lower;
 }
 
-export function ensureGraphGroups(project: StudioProjectV1): StudioNodeGroup[] {
+function ensureGraphGroups(project: StudioProjectV1): StudioNodeGroup[] {
   if (!Array.isArray(project.graph.groups)) {
     project.graph.groups = [];
   }

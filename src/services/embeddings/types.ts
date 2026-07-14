@@ -1,16 +1,9 @@
-/**
- * Embeddings System Types and Interfaces
- * 
- * Core types for the embeddings architecture:
- * - Provider abstraction for different embedding sources
- * - Efficient data structures for embeddings storage
- * - Configuration options for optimal performance
- */
+/** First-party semantic-index records and managed execution contracts. */
 
 export interface EmbeddingVector {
   /**
-   * Unique identifier for the vector. Includes namespace so multiple
-   * providers/models/dimensions can coexist for the same file.
+   * Unique identifier for the vector. Includes the managed generation namespace
+   * so incompatible generations can never collide during an upgrade.
    * Format: `${namespace}::${path}#${chunkId}`.
    */
   id: string;
@@ -32,15 +25,13 @@ export interface EmbeddingVector {
     contentHash: string;
     /** Marks intentionally empty vectors for tiny files */
     isEmpty?: boolean;
-    /** Provider id used to generate this vector (e.g. "systemsculpt", "custom") */
-    provider: string;
-    /** Model identifier used at generation time */
-    model: string;
+    /** Opaque first-party generation identity. Required for generation-safe reuse. */
+    generation?: string;
     /** Dimensionality of the vector */
     dimension: number;
     /** Creation timestamp for this vector */
     createdAt: number;
-    /** Convenience namespace key: `${provider}:${model}:v${schema}:${dimension}` */
+    /** Concrete first-party generation namespace, including vector dimensions. */
     namespace: string;
     /** Optional section title derived from the note's heading hierarchy */
     sectionTitle?: string;
@@ -95,74 +86,43 @@ export interface FailedProcessingDetail {
 
 export interface ProcessingResult {
   completed: number;
+  completedPaths: string[];
   failed: number;
   failedPaths: string[];
-  fatalError: import('./providers/ProviderError').EmbeddingsProviderError | null;
+  cancelled: boolean;
+  fatalError: import('./gateway/ManagedEmbeddingsAdapter').ManagedEmbeddingsError | null;
   failedDetails?: Record<string, FailedProcessingDetail>;
 }
 
-export interface EmbeddingBatchItemMetadata {
-  path: string;
-  chunkId: number;
-  hash: string;
-  originalLength: number;
-  processedLength: number;
-  originalEstimatedTokens: number;
-  estimatedTokens: number;
-  truncated: boolean;
-}
-
-export interface EmbeddingBatchMetadata {
-  batchIndex?: number;
-  batchSize: number;
-  estimatedTotalTokens: number;
-  maxEstimatedTokens: number;
-  truncatedCount: number;
-  items: EmbeddingBatchItemMetadata[];
-}
-
 export interface EmbeddingsGenerateOptions {
-  inputType?: 'document' | 'query';
-  batchMetadata?: EmbeddingBatchMetadata;
+  idempotencyKey: string;
+  signal?: AbortSignal;
 }
 
-export interface EmbeddingsProvider {
-  readonly id: string;
-  readonly name: string;
-  readonly supportsModels: boolean;
-  /** Best-effort hint of the embedding vector dimension produced by this provider. */
+export interface ManagedEmbeddingLimits {
+  maxTexts: number;
+  maxCharsPerText: number;
+  maxTotalChars: number;
+}
+
+export interface ManagedEmbeddingGeneration {
+  id: string;
+  indexSchemaVersion: number;
+  indexNamespace: string;
+  dimensions: number;
+  limits: ManagedEmbeddingLimits;
+}
+
+/** The one managed execution seam used by the semantic index. */
+export interface ManagedEmbeddingsGateway {
+  readonly limits: ManagedEmbeddingLimits;
   expectedDimension?: number;
-
-  /**
-   * Returns one slot per input text, in order. A slot is `null` when the
-   * provider produced no vector for that input (e.g. a whitespace-only chunk
-   * that must not be sent to the API). Callers MUST pair `result[i]` with
-   * `texts[i]` and skip `null` slots — never assume a 1:1 dense array.
-   */
-  generateEmbeddings(texts: string[], options?: EmbeddingsGenerateOptions): Promise<(number[] | null)[]>;
-  validateConfiguration(): Promise<boolean>;
-  getModels?(): Promise<string[]>;
-  /**
-   * Maximum number of texts the provider accepts per embeddings request.
-   * Implementations should return a conservative limit; callers will fall back
-   * to sensible defaults when undefined.
-   */
-  getMaxBatchSize?(): number;
-}
-
-export interface EmbeddingsProviderConfig {
-  providerId: 'systemsculpt' | 'custom';
-  customEndpoint?: string;
-  customApiKey?: string;
-  customModel?: string;
-  model: string;
+  activeGeneration?: ManagedEmbeddingGeneration;
+  initializeContract?(): Promise<void>;
+  generateEmbeddings(texts: string[], options: EmbeddingsGenerateOptions): Promise<number[][]>;
 }
 
 export interface EmbeddingsManagerConfig {
-  provider: EmbeddingsProviderConfig;
-  batchSize: number;
-  maxConcurrency: number;
-  autoProcess: boolean;
   exclusions: {
     folders: string[];
     patterns: string[];

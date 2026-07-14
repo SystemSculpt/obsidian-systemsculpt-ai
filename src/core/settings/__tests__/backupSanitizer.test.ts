@@ -1,73 +1,62 @@
 import { applyCurrentSecretsToBackup, redactSettingsForBackup } from "../backupSanitizer";
+import {
+  LEGACY_CLIENT_MODEL_KEYS_REMOVED_IN_V4,
+  LEGACY_FEATURE_KEYS_REMOVED_IN_V6,
+  LEGACY_UPDATE_KEYS_REMOVED_IN_V8,
+} from "../migrations/SettingsMigrator";
 
 describe("backupSanitizer", () => {
-  it("redacts top-level and nested API secrets for backup payloads", () => {
-    const source = {
+  const retiredSecretState = {
+    openAiApiKey: "openai-secret",
+    customTranscriptionApiKey: "transcription-secret",
+    readwiseApiToken: "readwise-secret",
+    customProviders: [{ id: "provider-a", apiKey: "provider-secret" }],
+    mcpServers: [{ id: "mcp-a", apiKey: "mcp-secret" }],
+    piAuth: { token: "pi-secret" },
+    selectedModelId: "legacy-provider@@legacy-model",
+    postProcessingProviderId: "legacy-provider",
+    postProcessingModelId: "legacy-model",
+    titleGenerationProviderId: "legacy-provider",
+    titleGenerationModelId: "legacy-model",
+  };
+
+  it("redacts the current license and drops all retired authority state", () => {
+    const redacted = redactSettingsForBackup({
       licenseKey: "license-secret",
-      openAiApiKey: "openai-secret",
-      customTranscriptionApiKey: "transcription-secret",
-      embeddingsCustomApiKey: "embeddings-secret",
-      readwiseApiToken: "readwise-secret",
-      customProviders: [
-        { id: "provider-a", apiKey: "provider-secret", endpoint: "https://api.example.com" },
-      ],
-      mcpServers: [
-        { id: "mcp-a", transport: "http", endpoint: "https://mcp.example.com", apiKey: "mcp-secret" },
-      ],
-      selectedModelId: "systemsculpt@@systemsculpt/ai-agent",
-    };
+      chatsDirectory: "SystemSculpt/Chats",
+      ...retiredSecretState,
+    });
 
-    const redacted = redactSettingsForBackup(source);
-
-    expect(redacted.licenseKey).toBe("");
-    expect(redacted.openAiApiKey).toBe("");
-    expect(redacted.customTranscriptionApiKey).toBe("");
-    expect(redacted.embeddingsCustomApiKey).toBe("");
-    expect(redacted.readwiseApiToken).toBe("");
-    expect(redacted.customProviders[0].apiKey).toBe("");
-    expect(redacted.mcpServers[0].apiKey).toBe("");
-    expect(redacted.customProviders[0].endpoint).toBe("https://api.example.com");
-    expect(redacted.selectedModelId).toBe("systemsculpt@@systemsculpt/ai-agent");
+    expect(redacted).toMatchObject({
+      licenseKey: "",
+      chatsDirectory: "SystemSculpt/Chats",
+    });
+    for (const key of LEGACY_CLIENT_MODEL_KEYS_REMOVED_IN_V4) {
+      expect(redacted).not.toHaveProperty(key);
+    }
+    for (const key of LEGACY_FEATURE_KEYS_REMOVED_IN_V6) {
+      expect(redacted).not.toHaveProperty(key);
+    }
+    for (const key of LEGACY_UPDATE_KEYS_REMOVED_IN_V8) {
+      expect(redacted).not.toHaveProperty(key);
+    }
   });
 
-  it("restores backups while preserving current secrets instead of trusting backup secrets", () => {
-    const backup = {
-      licenseKey: "malicious-backup-key",
-      openAiApiKey: "malicious-openai-key",
-      customProviders: [
-        { id: "provider-a", apiKey: "malicious-provider-key", endpoint: "https://api.example.com" },
-        { id: "provider-b", apiKey: "malicious-provider-key-b", endpoint: "https://api-2.example.com" },
-      ],
-      mcpServers: [
-        { id: "mcp-a", apiKey: "malicious-mcp-key", transport: "http" },
-      ],
-      selectedModelId: "systemsculpt@@systemsculpt/ai-agent",
-    };
-
-    const currentSettings = {
-      licenseKey: "current-license-key",
-      openAiApiKey: "current-openai-key",
-      customTranscriptionApiKey: "current-transcription-key",
-      embeddingsCustomApiKey: "current-embeddings-key",
-      readwiseApiToken: "current-readwise-key",
-      customProviders: [
-        { id: "provider-a", apiKey: "current-provider-a-key" },
-      ],
-      mcpServers: [
-        { id: "mcp-a", apiKey: "current-mcp-key" },
-      ],
-    };
-
-    const restored = applyCurrentSecretsToBackup(backup, currentSettings);
+  it("restores only the current license and cannot reintroduce retired secrets", () => {
+    const restored = applyCurrentSecretsToBackup(
+      { licenseKey: "malicious-backup-key", ...retiredSecretState },
+      { licenseKey: "current-license-key", ...retiredSecretState },
+    );
 
     expect(restored.licenseKey).toBe("current-license-key");
-    expect(restored.openAiApiKey).toBe("current-openai-key");
-    expect(restored.customTranscriptionApiKey).toBe("current-transcription-key");
-    expect(restored.embeddingsCustomApiKey).toBe("current-embeddings-key");
-    expect(restored.readwiseApiToken).toBe("current-readwise-key");
-    expect(restored.customProviders[0].apiKey).toBe("current-provider-a-key");
-    expect(restored.customProviders[1].apiKey).toBe("");
-    expect(restored.mcpServers[0].apiKey).toBe("current-mcp-key");
-    expect(restored.selectedModelId).toBe("systemsculpt@@systemsculpt/ai-agent");
+    for (const key of LEGACY_CLIENT_MODEL_KEYS_REMOVED_IN_V4) {
+      expect(restored).not.toHaveProperty(key);
+    }
+    for (const key of LEGACY_FEATURE_KEYS_REMOVED_IN_V6) {
+      expect(restored).not.toHaveProperty(key);
+    }
+    for (const key of LEGACY_UPDATE_KEYS_REMOVED_IN_V8) {
+      expect(restored).not.toHaveProperty(key);
+    }
   });
 });

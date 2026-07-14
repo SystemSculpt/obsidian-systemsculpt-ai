@@ -7,7 +7,11 @@ type InMemoryApp = {
       exists: (path: string) => Promise<boolean>;
       mkdir: (path: string) => Promise<void>;
       write: (path: string, data: string) => Promise<void>;
+      writeBinary: (path: string, data: ArrayBuffer) => Promise<void>;
       read: (path: string) => Promise<string>;
+      readBinary: (path: string) => Promise<ArrayBuffer>;
+      list: (path: string) => Promise<{ files: string[]; folders: string[] }>;
+      remove: (path: string) => Promise<void>;
       rename: (source: string, destination: string) => Promise<void>;
     };
     getAbstractFileByPath?: (path: string) => unknown;
@@ -38,6 +42,30 @@ function createStore(options?: { existingFiles?: string[]; existingDirs?: string
         throw new Error(`File not found: ${path}`);
       }
       return value;
+    }),
+    writeBinary: jest.fn(async (path: string, data: ArrayBuffer) => {
+      files.set(path, new TextDecoder().decode(data));
+    }),
+    readBinary: jest.fn(async (path: string) => {
+      const value = files.get(path);
+      if (typeof value === "undefined") throw new Error(`File not found: ${path}`);
+      return new TextEncoder().encode(value).buffer;
+    }),
+    list: jest.fn(async (path: string) => {
+      const prefix = path ? `${path}/` : "";
+      const listedFiles = Array.from(files.keys()).filter((file) => file.startsWith(prefix) && !file.slice(prefix.length).includes("/"));
+      const listedFolders = new Set(Array.from(dirs).filter((dir) => dir.startsWith(prefix) && dir !== path).map((dir) => `${prefix}${dir.slice(prefix.length).split("/")[0]}`));
+      for (const file of files.keys()) {
+        if (!file.startsWith(prefix)) continue;
+        const tail = file.slice(prefix.length);
+        if (tail.includes("/")) listedFolders.add(`${prefix}${tail.split("/")[0]}`);
+      }
+      return { files: listedFiles.sort(), folders: [...listedFolders].sort() };
+    }),
+    remove: jest.fn(async (path: string) => {
+      files.delete(path);
+      for (const file of [...files.keys()]) if (file.startsWith(`${path}/`)) files.delete(file);
+      for (const dir of [...dirs]) if (dir === path || dir.startsWith(`${path}/`)) dirs.delete(dir);
     }),
     rename: jest.fn(async (source: string, destination: string) => {
       if (files.has(source)) {
@@ -143,6 +171,19 @@ describe("StudioProjectStore", () => {
     expect(created.path).toBe("Custom/Flow (2).systemsculpt");
   });
 
+  it("serializes concurrent support publications by reloading ExpectedGeneration", async () => {
+    const { store } = createStore();
+    const created = await store.createProject({ name: "Concurrent", minPluginVersion: "4.13.0", maxRuns: 100, maxArtifactsMb: 512 });
+    await Promise.all([0, 1, 2].map((index) => store.putAsset(created.path, created.project.projectId, {
+      contentAddressedPath: `0${index}/${String(index).repeat(64)}.bin`,
+      bytes: new Uint8Array([index]),
+    })));
+    for (let index = 0; index < 3; index += 1) {
+      const absolute = `${deriveStudioAssetsDir(created.path)}/assets/sha256/0${index}/${String(index).repeat(64)}.bin`;
+      expect(await store.readSupportFile(created.path, absolute)).toEqual(new Uint8Array([index]));
+    }
+  });
+
   it("renames the Studio project file and assets tree together", async () => {
     const { store, files, dirs } = createStore();
 
@@ -153,9 +194,10 @@ describe("StudioProjectStore", () => {
       maxArtifactsMb: 512,
     });
     const oldAssetsDir = deriveStudioAssetsDir(created.path);
-    files.set(`${oldAssetsDir}/assets/sha256/blob.txt`, "blob");
-    dirs.add(`${oldAssetsDir}/assets`);
-    dirs.add(`${oldAssetsDir}/assets/sha256`);
+    await store.putAsset(created.path, created.project.projectId, {
+      contentAddressedPath: `aa/${"a".repeat(64)}.txt`,
+      bytes: new TextEncoder().encode("blob"),
+    });
 
     const renamed = await store.renameProject(created.path, "Renamed", {
       project: created.project,
@@ -169,8 +211,8 @@ describe("StudioProjectStore", () => {
     expect(files.has("SystemSculpt/Studio/Renamed.systemsculpt")).toBe(true);
     expect(files.has(`${oldAssetsDir}/project.manifest.json`)).toBe(false);
     expect(files.has(`${newAssetsDir}/project.manifest.json`)).toBe(true);
-    expect(files.has(`${oldAssetsDir}/assets/sha256/blob.txt`)).toBe(false);
-    expect(files.has(`${newAssetsDir}/assets/sha256/blob.txt`)).toBe(true);
+    expect(files.has(`${oldAssetsDir}/assets/sha256/aa/${"a".repeat(64)}.txt`)).toBe(false);
+    expect(files.has(`${newAssetsDir}/assets/sha256/aa/${"a".repeat(64)}.txt`)).toBe(true);
     expect(renamedProject.name).toBe("Renamed");
     expect(renamedProject.permissionsRef.policyPath).toBe(deriveStudioPolicyPath(renamed.newPath));
   });

@@ -40,6 +40,12 @@ function projectFixture(): StudioProjectV1 {
   };
 }
 
+function createPointerDown(pointerType: string): MouseEvent {
+  const event = new MouseEvent("pointerdown", { bubbles: true, cancelable: true });
+  Object.defineProperty(event, "pointerType", { value: pointerType });
+  return event;
+}
+
 describe("StudioGraphWorkspaceRenderer controls", () => {
   it("wires right-ribbon control callbacks", () => {
     const root = document.createElement("div");
@@ -62,6 +68,7 @@ describe("StudioGraphWorkspaceRenderer controls", () => {
         registerViewportElement: jest.fn(),
         handleGraphViewportWheel: jest.fn(),
         startMarqueeSelection: jest.fn(),
+        startCanvasPan: jest.fn(),
         getGraphZoom: () => 1,
         registerSurfaceElement: jest.fn(),
         registerCanvasElement: jest.fn(),
@@ -132,6 +139,18 @@ describe("StudioGraphWorkspaceRenderer controls", () => {
     expect(zoomOverviewSpy).toHaveBeenCalledTimes(1);
     expect(toggleDetailSpy).toHaveBeenCalledTimes(1);
     expect(zoomLabel.value).toBe("100%");
+
+    const controls = Array.from(
+      root.querySelectorAll<HTMLButtonElement>(
+        ".ss-studio-graph-workspace-control-button",
+      ),
+    );
+    expect(controls).toHaveLength(7);
+    expect(controls.every((button) => button.classList.contains("ss-button"))).toBe(true);
+    expect(controls.every((button) => button.classList.contains("ss-button--small"))).toBe(true);
+    expect(
+      root.querySelector('[aria-label="Toggle node detail mode"]')?.getAttribute("aria-pressed"),
+    ).toBe("false");
   });
 
   it("forwards wheel events from the graph viewport", () => {
@@ -148,6 +167,7 @@ describe("StudioGraphWorkspaceRenderer controls", () => {
         registerViewportElement: jest.fn(),
         handleGraphViewportWheel: wheelSpy,
         startMarqueeSelection: jest.fn(),
+        startCanvasPan: jest.fn(),
         getGraphZoom: () => 1,
         registerSurfaceElement: jest.fn(),
         registerCanvasElement: jest.fn(),
@@ -204,5 +224,144 @@ describe("StudioGraphWorkspaceRenderer controls", () => {
     );
 
     expect(wheelSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("starts marquee selection for mouse and pen pointers on empty canvas", () => {
+    const root = document.createElement("div");
+    const startMarqueeSelection = jest.fn();
+    const startCanvasPan = jest.fn();
+
+    const renderResult = renderStudioGraphWorkspace({
+      root,
+      busy: false,
+      currentProject: projectFixture(),
+      currentProjectPath: "SystemSculpt/Studio/Controls.systemsculpt",
+      nodeDetailMode: "expanded",
+      graphInteraction: {
+        registerViewportElement: jest.fn(),
+        handleGraphViewportWheel: jest.fn(),
+        startMarqueeSelection,
+        startCanvasPan,
+        getGraphZoom: () => 1,
+        registerSurfaceElement: jest.fn(),
+        registerCanvasElement: jest.fn(),
+        registerMarqueeElement: jest.fn(),
+        registerSnapGuidesElement: jest.fn(),
+        clearGraphElementMaps: jest.fn(),
+        registerEdgesLayerElement: jest.fn(),
+        renderGroupLayer: jest.fn(),
+        refreshNodeSelectionClasses: jest.fn(),
+        applyGraphZoom: jest.fn(),
+        refreshSelectionResizeFrame: jest.fn(),
+        registerZoomLabelElement: jest.fn(),
+      } as any,
+      getNodeRunState: () => ({
+        status: "idle",
+        message: "",
+        updatedAt: null,
+        outputs: null,
+      }),
+      findNodeDefinition: () => null,
+      onRunGraph: jest.fn(),
+      onOpenAddNodeMenuAtViewportCenter: jest.fn(),
+      onZoomIn: jest.fn(),
+      onZoomOut: jest.fn(),
+      onZoomReset: jest.fn(),
+      onZoomOverview: jest.fn(),
+      onToggleNodeDetailMode: jest.fn(),
+      onOpenNodeContextMenu: jest.fn(),
+      onCreateTextNodeAtPosition: jest.fn(),
+      onRunNode: jest.fn(),
+      onCopyTextGenerationPromptBundle: jest.fn(),
+      onToggleTextGenerationOutputLock: jest.fn(),
+      onRemoveNode: jest.fn(),
+      onNodeTitleInput: jest.fn(),
+      onNodeConfigMutated: jest.fn(),
+      onNodeGeometryMutated: jest.fn(),
+      isTextNodeEditing: () => false,
+      consumeTextNodeAutoFocus: () => false,
+      consumeTextNodeFocusPoint: () => undefined,
+      consumeTextNodeEditorSnapshot: () => undefined,
+      onRequestTextNodeEdit: jest.fn(),
+      onStopTextNodeEdit: jest.fn(),
+      onRevealPathInFinder: jest.fn(),
+    });
+
+    const viewport = renderResult.viewportEl;
+    expect(viewport).not.toBeNull();
+    viewport?.dispatchEvent(createPointerDown("mouse"));
+    viewport?.dispatchEvent(createPointerDown("pen"));
+
+    expect(startMarqueeSelection).toHaveBeenCalledTimes(2);
+    expect(startCanvasPan).not.toHaveBeenCalled();
+  });
+
+  it("starts touch panning instead of marquee selection for touch pointers on empty canvas", () => {
+    const root = document.createElement("div");
+    const startMarqueeSelection = jest.fn();
+    const startCanvasPan = jest.fn();
+
+    const renderResult = renderStudioGraphWorkspace({
+      root,
+      busy: false,
+      currentProject: projectFixture(),
+      currentProjectPath: "SystemSculpt/Studio/Controls.systemsculpt",
+      nodeDetailMode: "expanded",
+      graphInteraction: {
+        registerViewportElement: jest.fn(),
+        handleGraphViewportWheel: jest.fn(),
+        startMarqueeSelection,
+        startCanvasPan,
+        getGraphZoom: () => 1,
+        registerSurfaceElement: jest.fn(),
+        registerCanvasElement: jest.fn(),
+        registerMarqueeElement: jest.fn(),
+        registerSnapGuidesElement: jest.fn(),
+        clearGraphElementMaps: jest.fn(),
+        registerEdgesLayerElement: jest.fn(),
+        renderGroupLayer: jest.fn(),
+        refreshNodeSelectionClasses: jest.fn(),
+        applyGraphZoom: jest.fn(),
+        refreshSelectionResizeFrame: jest.fn(),
+        registerZoomLabelElement: jest.fn(),
+      } as any,
+      getNodeRunState: () => ({
+        status: "idle",
+        message: "",
+        updatedAt: null,
+        outputs: null,
+      }),
+      findNodeDefinition: () => null,
+      onRunGraph: jest.fn(),
+      onOpenAddNodeMenuAtViewportCenter: jest.fn(),
+      onZoomIn: jest.fn(),
+      onZoomOut: jest.fn(),
+      onZoomReset: jest.fn(),
+      onZoomOverview: jest.fn(),
+      onToggleNodeDetailMode: jest.fn(),
+      onOpenNodeContextMenu: jest.fn(),
+      onCreateTextNodeAtPosition: jest.fn(),
+      onRunNode: jest.fn(),
+      onCopyTextGenerationPromptBundle: jest.fn(),
+      onToggleTextGenerationOutputLock: jest.fn(),
+      onRemoveNode: jest.fn(),
+      onNodeTitleInput: jest.fn(),
+      onNodeConfigMutated: jest.fn(),
+      onNodeGeometryMutated: jest.fn(),
+      isTextNodeEditing: () => false,
+      consumeTextNodeAutoFocus: () => false,
+      consumeTextNodeFocusPoint: () => undefined,
+      consumeTextNodeEditorSnapshot: () => undefined,
+      onRequestTextNodeEdit: jest.fn(),
+      onStopTextNodeEdit: jest.fn(),
+      onRevealPathInFinder: jest.fn(),
+    });
+
+    const viewport = renderResult.viewportEl;
+    expect(viewport).not.toBeNull();
+    viewport?.dispatchEvent(createPointerDown("touch"));
+
+    expect(startCanvasPan).toHaveBeenCalledTimes(1);
+    expect(startMarqueeSelection).not.toHaveBeenCalled();
   });
 });

@@ -1,0 +1,142 @@
+/**
+ * Agent workspace reasoning and streaming: conversational parts, disclosures,
+ * status rows, and reduced-motion behavior.
+ */
+
+.systemsculpt-agent-part {
+  min-width: 0;
+}
+
+.systemsculpt-agent-part.is-reasoning {
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-sm);
+}
+
+.systemsculpt-agent-reasoning-details {
+  min-width: 0;
+}
+
+.systemsculpt-agent-reasoning-header {
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-1);
+  width: fit-content;
+  min-height: var(--ss-control-height-sm);
+  padding: 0 var(--ss-space-1);
+  border-radius: var(--ss-radius-sm);
+  cursor: pointer;
+  list-style: none;
+  transition: var(--ss-transition-colors);
+}
+
+.systemsculpt-agent-reasoning-header::-webkit-details-marker {
+  display: none;
+}
+
+.systemsculpt-agent-reasoning-header:hover,
+.systemsculpt-agent-reasoning-header:focus-visible,
+.systemsculpt-agent-reasoning-details[open] > .systemsculpt-agent-reasoning-header {
+  background: var(--ss-state-hover);
+}
+
+.systemsculpt-agent-reasoning-header:focus-visible {
+  outline: none;
+  box-shadow: var(--ss-ring);
+}
+
+.systemsculpt-agent-reasoning-disclosure,
+.systemsculpt-agent-reasoning-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: var(--ss-ink-faint);
+}
+
+.systemsculpt-agent-reasoning-disclosure {
+  transition: transform var(--ss-dur-fast) var(--ss-ease);
+}
+
+.systemsculpt-agent-reasoning-details[open] .systemsculpt-agent-reasoning-disclosure {
+  transform: rotate(90deg);
+}
+
+.systemsculpt-agent-reasoning-header svg {
+  width: var(--ss-icon-size-sm);
+  height: var(--ss-icon-size-sm);
+}
+
+.systemsculpt-agent-reasoning-header strong {
+  font-size: var(--ss-text-sm);
+  font-weight: var(--ss-weight-medium);
+}
+
+.systemsculpt-agent-reasoning-body {
+  min-width: 0;
+  margin: var(--ss-space-1) 0 var(--ss-space-2) var(--ss-space-4);
+  padding: var(--ss-space-1) var(--ss-space-3);
+  overflow-wrap: anywhere;
+  border-left: 1px solid var(--ss-line);
+  color: var(--ss-ink-muted);
+}
+
+.systemsculpt-agent-reasoning-body > :first-child {
+  margin-top: 0;
+}
+
+.systemsculpt-agent-reasoning-body > :last-child {
+  margin-bottom: 0;
+}
+
+.systemsculpt-agent-part.is-status {
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-2);
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-sm);
+}
+
+.systemsculpt-agent-part.is-status .systemsculpt-agent-status-icon {
+  color: var(--ss-accent);
+}
+
+.systemsculpt-agent-part.is-status:not(.is-complete) .systemsculpt-agent-status-icon svg,
+.systemsculpt-agent-reasoning-icon.is-animated svg,
+.systemsculpt-agent-tool-icon.is-animated svg {
+  animation: ss-spin 0.9s linear infinite;
+}
+
+.systemsculpt-agent-part.is-text.is-streaming::after {
+  content: "";
+  display: inline-block;
+  width: 0.45em;
+  height: 0.9em;
+  margin-left: 0.2em;
+  border-radius: var(--ss-radius-xs);
+  background: var(--ss-accent);
+  vertical-align: -0.1em;
+  animation: ss-pulse 0.9s var(--ss-ease) infinite;
+}
+
+.systemsculpt-agent-workspace.is-reduced-motion *,
+.systemsculpt-agent-workspace.is-reduced-motion *::before,
+.systemsculpt-agent-workspace.is-reduced-motion *::after {
+  animation-duration: 0.01ms;
+  animation-iteration-count: 1;
+  scroll-behavior: auto;
+  transition-duration: 0.01ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .systemsculpt-agent-workspace *,
+  .systemsculpt-agent-workspace *::before,
+  .systemsculpt-agent-workspace *::after {
+    animation-duration: 0.01ms;
+    animation-iteration-count: 1;
+    scroll-behavior: auto;
+    transition-duration: 0.01ms;
+  }
+}
+
+.systemsculpt-agent-part.is-status svg {
+  width: var(--ss-icon-size-sm);
+  height: var(--ss-icon-size-sm);
+}

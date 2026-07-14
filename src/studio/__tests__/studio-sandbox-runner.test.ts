@@ -1,6 +1,5 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { EventEmitter } from "node:events";
+import { desktopHost } from "../../platform/desktopOnly";
 import { StudioPermissionManager } from "../StudioPermissionManager";
 import { StudioSandboxRunner } from "../StudioSandboxRunner";
 import type { StudioPermissionPolicyV1 } from "../types";
@@ -37,37 +36,61 @@ function createPolicy(): StudioPermissionPolicyV1 {
 }
 
 describe("StudioSandboxRunner", () => {
-  it("closes stdin so commands that read stdin do not hang", async () => {
-    const tempDir = await mkdtemp(join(tmpdir(), "studio-sandbox-runner-"));
-    const scriptPath = join(tempDir, "read-stdin.mjs");
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
 
-    try {
-      await writeFile(
-        scriptPath,
-        `let data = "";
-for await (const chunk of process.stdin) {
-  data += chunk;
-}
-process.stdout.write(String(data.length));
-`,
-        "utf8"
-      );
+  it("closes stdin so non-interactive commands can finish immediately", async () => {
+    const stdout = new EventEmitter();
+    const stderr = new EventEmitter();
+    const child = new EventEmitter() as EventEmitter & {
+      stdin: { end: jest.Mock<void, []> };
+      stdout: EventEmitter;
+      stderr: EventEmitter;
+      kill: jest.Mock<boolean, [string]>;
+    };
 
-      const manager = new StudioPermissionManager(createPolicy());
-      const runner = new StudioSandboxRunner(manager);
+    child.stdout = stdout;
+    child.stderr = stderr;
+    child.kill = jest.fn(() => true);
+    child.stdin = {
+      end: jest.fn(() => {
+        queueMicrotask(() => {
+          stdout.emit("data", "0");
+          child.emit("close", 0);
+        });
+      }),
+    };
 
-      const result = await runner.runCli({
-        command: "node",
-        args: [scriptPath],
-        cwd: tempDir,
-        timeoutMs: 2_000,
-      });
+    const spawn = jest.fn(() => child);
+    jest.spyOn(desktopHost, "childProcess").mockReturnValue({ spawn } as never);
+    jest.spyOn(desktopHost, "path").mockReturnValue({ delimiter: ":" } as never);
+    jest.spyOn(desktopHost, "environment").mockReturnValue({ PATH: "/usr/bin" });
 
-      expect(result.timedOut).toBe(false);
-      expect(result.exitCode).toBe(0);
-      expect(result.stdout.trim()).toBe("0");
-    } finally {
-      await rm(tempDir, { recursive: true, force: true });
-    }
+    const manager = new StudioPermissionManager(createPolicy());
+    const runner = new StudioSandboxRunner(manager);
+    const result = await runner.runCli({
+      command: "node",
+      args: ["read-stdin.mjs"],
+      cwd: "/tmp/studio-sandbox-runner",
+      timeoutMs: 100,
+    });
+
+    expect(spawn).toHaveBeenCalledWith(
+      "node",
+      ["read-stdin.mjs"],
+      expect.objectContaining({
+        cwd: "/tmp/studio-sandbox-runner",
+        shell: false,
+      }),
+    );
+    expect(child.stdin.end).toHaveBeenCalledTimes(1);
+    expect(child.kill).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      exitCode: 0,
+      stdout: "0",
+      stderr: "",
+      timedOut: false,
+    });
   });
 });

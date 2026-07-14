@@ -31,7 +31,8 @@ describe("StudioEdgeRenderer", () => {
     expect(line!.getAttribute("d")!.startsWith("M 100 100")).toBe(true);
     // Dynamic status stroke/opacity are inline so no stylesheet regression
     // can blank the line; static presentation (fill, stroke-width, caps)
-    // lives on .ss-studio-edge-* rules in src/css/views/studio.css.
+    // lives on .ss-studio-edge-* rules in
+    // src/css/views/studio/connections.css.
     expect(line!.style.stroke).toBeTruthy();
     expect(line!.style.opacity).toBeTruthy();
     expect(line!.style.display).not.toBe("none");
@@ -41,6 +42,26 @@ describe("StudioEdgeRenderer", () => {
     // hit target + arrow are present too
     expect(layer.querySelector(".ss-studio-edge-hit")).not.toBeNull();
     expect(layer.querySelector(".ss-studio-edge-arrow")).not.toBeNull();
+  });
+
+  it("creates every SVG node in the edge layer owner document", () => {
+    const ownerDocument = document.implementation.createHTMLDocument("Studio popout");
+    const layer = ownerDocument.createElementNS(SVG_NS, "svg") as SVGSVGElement;
+    const store = new StudioLinkStore();
+    const renderer = new StudioEdgeRenderer({
+      store,
+      layer,
+      resolvePortAnchorPoint: (_anchor, direction) =>
+        direction === "out" ? { x: 40, y: 50 } : { x: 200, y: 160 },
+      getCursorAnchorPoint: () => null,
+    });
+
+    store.setEdges([edge("popout-edge")]);
+    renderer.render();
+
+    const group = layer.querySelector(".ss-studio-edge-group");
+    expect(group?.ownerDocument).toBe(ownerDocument);
+    expect(group?.querySelector(".ss-studio-edge-line")?.ownerDocument).toBe(ownerDocument);
   });
 
   it("removes a group when its edge goes away", () => {

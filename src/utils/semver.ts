@@ -1,7 +1,6 @@
 /**
- * Minimal, dependency-free numeric version helpers shared by the plugin-update
- * check (VersionCheckerService) and the Obsidian-version compatibility gate
- * (ObsidianCompat). Deliberately strict: anything that is not a dotted run of
+ * Minimal, dependency-free numeric version helpers for the Obsidian-version
+ * compatibility gate (ObsidianCompat). Deliberately strict: anything that is not a dotted run of
  * integers (optionally "v"-prefixed) parses to null so callers can FAIL SAFE
  * rather than compute a bogus comparison — the root of the #168 false-update
  * loop and a guard for the #212 min-version check.

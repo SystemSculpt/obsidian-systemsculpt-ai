@@ -1,32 +1,80 @@
-import { PlatformContext } from "../services/PlatformContext";
+import { Platform } from "obsidian";
 
 /**
- * Canonical boundary for desktop-only code (#207).
+ * The one host seam for capabilities Obsidian only exposes on desktop.
  *
- * Obsidian's mobile runtime has no Node.js, so any module that imports a Node
- * builtin (`fs`, `path`, `child_process`, …) — directly or transitively — must
- * never load on mobile, and must never be a *static* import on the startup
- * chain: esbuild lowers a top-level `import` to an eager `require`, which throws
- * at bundle-eval on a phone ("Failed to load SystemSculpt AI", the #181 class).
- *
- * Shared/startup modules therefore reach desktop-only subsystems ONLY through
- * these helpers. The loader runs inside a thunk so the `require` is lazy (no
- * eager eval touch), and it is gated by the Node-runtime capability (skipped on
- * mobile). Inside a desktop-only subsystem — which is reached only via these
- * boundaries — importing Node builtins directly is fine; it never loads on a
- * phone.
+ * Node modules must never be imported by a feature module. Keeping every
+ * literal Node `require` here makes the production bundle safe to evaluate in
+ * Obsidian Mobile while preserving the desktop implementation on demand.
  */
 
-/** True iff a Node.js runtime is available (desktop/Electron). */
+export class DesktopHostUnavailableError extends Error {
+  constructor(capability: string) {
+    super(`${capability} is available in Obsidian Desktop only.`);
+    this.name = "DesktopHostUnavailableError";
+  }
+}
+
+/** True only inside Obsidian's desktop Electron host with a Node runtime. */
 export function hasNodeRuntime(): boolean {
-  return PlatformContext.get().supportsNodeApis();
+  return Platform.isDesktopApp &&
+    typeof process !== "undefined" &&
+    typeof process.versions?.node === "string";
 }
 
 /**
- * Lazily load a desktop-only module, returning `null` on mobile (no Node). The
- * loader MUST perform the `require` itself so it stays lazy, e.g.
- * `loadDesktopOnly(() => require("./PiSdkDesktopSupport"))`.
+ * Lazily load a desktop-only module. The loader performs the `require` so
+ * startup-sensitive Node modules remain demand-loaded.
  */
-export function loadDesktopOnly<T>(loader: () => T): T | null {
-  return hasNodeRuntime() ? loader() : null;
+export function loadDesktopOnly<T>(
+  loader: () => T,
+  capability = "This feature",
+): T {
+  if (!hasNodeRuntime()) {
+    throw new DesktopHostUnavailableError(capability);
+  }
+  return loader();
 }
+
+type DesktopFs = typeof import("node:fs/promises");
+type DesktopPath = typeof import("node:path");
+type DesktopOs = typeof import("node:os");
+type DesktopChildProcess = typeof import("node:child_process");
+
+/** Lazily loaded Node modules. Call only after the feature has entered a desktop path. */
+export const desktopHost = {
+  fs(): DesktopFs {
+    return loadDesktopOnly(
+      () => require("node:fs/promises") as DesktopFs,
+      "Local filesystem access",
+    );
+  },
+
+  path(): DesktopPath {
+    return loadDesktopOnly(
+      () => require("node:path") as DesktopPath,
+      "Local filesystem paths",
+    );
+  },
+
+  os(): DesktopOs {
+    return loadDesktopOnly(
+      () => require("node:os") as DesktopOs,
+      "Temporary local storage",
+    );
+  },
+
+  childProcess(): DesktopChildProcess {
+    return loadDesktopOnly(
+      () => require("node:child_process") as DesktopChildProcess,
+      "CLI execution",
+    );
+  },
+
+  environment(): Record<string, string | undefined> {
+    if (!hasNodeRuntime()) {
+      throw new DesktopHostUnavailableError("CLI environment access");
+    }
+    return process.env;
+  },
+} as const;

@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { App, TFile, parseYaml, stringifyYaml } from "obsidian";
+import { App, TFile } from "obsidian";
 import { ChatStorageService } from "../ChatStorageService";
 import { ChatMessage, ChatRole } from "../../../types";
 
@@ -34,10 +34,17 @@ jest.mock("obsidian", () => {
 jest.mock("../storage/ChatMarkdownSerializer", () => ({
   ChatMarkdownSerializer: {
     serializeMessages: jest.fn().mockReturnValue("## Messages\n\nSerialized content here"),
+    parseMetadata: jest.fn().mockReturnValue({
+      id: "test-chat",
+      title: "Test Chat",
+      created: "2024-01-01T00:00:00.000Z",
+      lastModified: "2024-01-01T00:00:00.000Z",
+      version: 1,
+      tags: [],
+    }),
     parseMarkdown: jest.fn().mockReturnValue({
       metadata: {
         id: "test-chat",
-        model: "gpt-4",
         title: "Test Chat",
         created: "2024-01-01T00:00:00.000Z",
         lastModified: "2024-01-01T00:00:00.000Z",
@@ -103,6 +110,25 @@ describe("ChatStorageService", () => {
       expect(result.version).toBe(1);
     });
 
+    it("exclusively creates only one artifact for concurrent writers", async () => {
+      const created = new Set<string>();
+      mockVault.create.mockImplementation(async (path: string) => {
+        if (created.has(path)) throw new Error("File already exists");
+        created.add(path);
+        await Promise.resolve();
+      });
+      mockVault.adapter.exists.mockImplementation(async (path: string) => created.has(path));
+
+      const results = await Promise.all([
+        service.createChatExclusive("same-chat", testMessages),
+        service.createChatExclusive("same-chat", testMessages),
+      ]);
+
+      expect(results.filter(Boolean)).toHaveLength(1);
+      expect(results.filter((result) => result === null)).toHaveLength(1);
+      expect(created).toEqual(new Set(["SystemSculpt/Chats/same-chat.md"]));
+    });
+
     it("creates file when it does not exist", async () => {
       await service.saveChat("new-chat", testMessages);
 
@@ -128,27 +154,41 @@ describe("ChatStorageService", () => {
       expect(mockVault.create).toHaveBeenCalled();
     });
 
-    it("persists the selected model while omitting client-side prompt metadata", async () => {
-      await service.saveChat(
-        "test-chat",
-        testMessages,
-        { selectedModelId: "local-pi-openai@@gpt-4.1" }
-      );
+    it("writes the current managed chat metadata schema", async () => {
+      await service.saveChat("test-chat", testMessages);
 
       const createdContent = mockVault.create.mock.calls[0][1] as string;
-      expect(createdContent).toContain('model: "local-pi-openai@@gpt-4.1"');
-      expect(createdContent).not.toContain("systemMessage");
-      expect(createdContent).not.toContain("prompts/custom.md");
+      expect(createdContent).toContain('id: "test-chat"');
+      expect(createdContent).toContain('title: "Untitled Chat"');
+      expect(createdContent).toContain('approvalMode: "ask"');
     });
 
-    it("persists the per-chat hide system/tool preference to frontmatter (#213, #174, #167)", async () => {
-      await service.saveChat("chat-hidden", testMessages, { hideSystemMessages: true });
-      expect(mockVault.create.mock.calls[0][1] as string).toContain("hideSystemMessages: true");
-    });
+    it("persists only a chat-bound managed session checkpoint", async () => {
+      await service.saveChat("session-chat", testMessages, {
+        managedSession: {
+          id: "mchat_0123456789abcdef0123456789abcdef",
+          revision: 2,
+          boundChatId: "session-chat",
+          checkpointMessageId: "assistant-2",
+          toolsetFingerprint: "2:741638a5:5967d5",
+          budget: { messageCount: 2, imageCount: 0, attachmentBytes: 0, storedJsonBytes: 256 },
+        },
+      });
+      expect(mockVault.create.mock.calls[0][1]).toContain("managedSession:");
 
-    it("persists an explicit show preference so it can override a hidden global default", async () => {
-      await service.saveChat("chat-shown", testMessages, { hideSystemMessages: false });
-      expect(mockVault.create.mock.calls[0][1] as string).toContain("hideSystemMessages: false");
+      jest.clearAllMocks();
+      mockVault.getAbstractFileByPath.mockReturnValue(null);
+      await service.saveChat("other-chat", testMessages, {
+        managedSession: {
+          id: "mchat_0123456789abcdef0123456789abcdef",
+          revision: 2,
+          boundChatId: "session-chat",
+          checkpointMessageId: "assistant-2",
+          toolsetFingerprint: "2:741638a5:5967d5",
+          budget: { messageCount: 2, imageCount: 0, attachmentBytes: 0, storedJsonBytes: 256 },
+        },
+      });
+      expect(mockVault.create.mock.calls[0][1]).not.toContain("managedSession:");
     });
 
     it("adds default chat tag to new history files", async () => {
@@ -167,7 +207,6 @@ describe("ChatStorageService", () => {
       mockVault.getAbstractFileByPath.mockReturnValue(mockFile);
       mockVault.read.mockResolvedValue(`---
 id: test-chat
-model: gpt-4
 title: Test Chat
 created: 2024-01-01T00:00:00.000Z
 lastModified: 2024-01-02T00:00:00.000Z
@@ -180,6 +219,17 @@ Content here`);
       (mockApp as any).plugins.plugins["systemsculpt-ai"] = {
         settings: { defaultChatTag: "new" },
       };
+      const { ChatMarkdownSerializer } = jest.requireMock("../storage/ChatMarkdownSerializer") as {
+        ChatMarkdownSerializer: { parseMetadata: jest.Mock };
+      };
+      ChatMarkdownSerializer.parseMetadata.mockReturnValueOnce({
+        id: "test-chat",
+        title: "Test Chat",
+        created: "2024-01-01T00:00:00.000Z",
+        lastModified: "2024-01-02T00:00:00.000Z",
+        version: 1,
+        tags: ["existing", "keep"],
+      });
 
       await service.saveChat("test-chat", testMessages);
 
@@ -226,91 +276,6 @@ Content here`);
     });
   });
 
-  describe("parseMetadata", () => {
-    it("extracts metadata from frontmatter", () => {
-      const content = `---
-id: test-chat
-model: gpt-4
-title: Test Title
-created: 2024-01-01T00:00:00.000Z
-lastModified: 2024-01-02T00:00:00.000Z
-version: 3
-tags: ["project"]
----
-
-Content here`;
-
-      const metadata = (service as any).parseMetadata(content);
-
-      expect(metadata).not.toBeNull();
-      expect(metadata.id).toBeDefined();
-      expect(metadata.tags).toEqual(["project"]);
-    });
-
-    it("returns null for invalid frontmatter", () => {
-      const content = "No frontmatter here";
-
-      const metadata = (service as any).parseMetadata(content);
-
-      expect(metadata).toBeNull();
-    });
-  });
-});
-
-describe("ChatStorageService tool message persistence", () => {
-  let service: ChatStorageService;
-  let mockApp: App;
-
-  beforeEach(() => {
-    jest.clearAllMocks();
-
-    const mockVault = {
-      getAbstractFileByPath: jest.fn().mockReturnValue(null),
-      read: jest.fn().mockResolvedValue(""),
-      modify: jest.fn().mockResolvedValue(undefined),
-      create: jest.fn().mockResolvedValue(undefined),
-      createFolder: jest.fn().mockResolvedValue(undefined),
-      adapter: {
-        exists: jest.fn().mockResolvedValue(true),
-      },
-    };
-
-    mockApp = {
-      vault: mockVault,
-      plugins: { plugins: {} },
-    } as unknown as App;
-
-    service = new ChatStorageService(mockApp, "Chats");
-  });
-
-  it("passes tool messages through unchanged when saving", async () => {
-    const toolMessage: ChatMessage = {
-      role: "tool" as ChatRole,
-      content: '{"result": "success"}',
-      tool_call_id: "tool-1",
-    };
-
-    await service.saveChat("test", [toolMessage]);
-
-    const { ChatMarkdownSerializer } = jest.requireMock("../storage/ChatMarkdownSerializer") as {
-      ChatMarkdownSerializer: { serializeMessages: jest.Mock };
-    };
-    expect(ChatMarkdownSerializer.serializeMessages).toHaveBeenCalledWith([toolMessage]);
-  });
-
-  it("does not depend on tool manager state for non-tool messages", async () => {
-    const userMessage: ChatMessage = {
-      role: "user" as ChatRole,
-      content: "Hello",
-    };
-
-    await service.saveChat("test", [userMessage]);
-
-    const { ChatMarkdownSerializer } = jest.requireMock("../storage/ChatMarkdownSerializer") as {
-      ChatMarkdownSerializer: { serializeMessages: jest.Mock };
-    };
-    expect(ChatMarkdownSerializer.serializeMessages).toHaveBeenCalledWith([userMessage]);
-  });
 });
 
 describe("ChatStorageService resume descriptor contract", () => {
@@ -318,20 +283,14 @@ describe("ChatStorageService resume descriptor contract", () => {
     jest.restoreAllMocks();
   });
 
-  it("returns a minimal managed resume descriptor without backend session internals", async () => {
+  it("returns a minimal managed resume descriptor", async () => {
     const service = new ChatStorageService({} as App, "SystemSculpt/Chats");
     jest.spyOn(service, "loadChat").mockResolvedValue({
       id: "chat-9",
       messages: [{ role: "user" as ChatRole, content: "Hello" }],
-      selectedModelId: "systemsculpt@@systemsculpt/ai-agent",
       lastModified: 1741600800000,
       title: "Chat 9",
       chatPath: "SystemSculpt/Chats/chat-9.md",
-      chatBackend: "systemsculpt",
-      piSessionFile: "/tmp/chat-9.jsonl",
-      piSessionId: "session-9",
-      piLastEntryId: "entry-9",
-      piLastSyncedAt: "2026-03-10T10:00:00.000Z",
     });
 
     await expect(service.getChatResumeDescriptor("chat-9")).resolves.toEqual({
@@ -395,7 +354,6 @@ describe("ChatStorageService extended", () => {
       mockVault.getAbstractFileByPath.mockReturnValue(mockFile);
       mockVault.read.mockResolvedValue(`---
 id: test-chat
-model: gpt-4
 title: Test Chat
 created: 2024-01-01T00:00:00.000Z
 lastModified: 2024-01-01T00:00:00.000Z
@@ -468,59 +426,12 @@ Hello
     });
   });
 
-  describe("getMetadata", () => {
-    it("returns null when file does not exist", async () => {
-      mockVault.getAbstractFileByPath.mockReturnValue(null);
-
-      const result = await service.getMetadata("nonexistent");
-
-      expect(result).toBeNull();
-    });
-
-    it("returns parsed metadata from file", async () => {
-      const mockFile = new TFile({ path: "SystemSculpt/Chats/meta-test.md" });
-      mockVault.getAbstractFileByPath.mockReturnValue(mockFile);
-      mockVault.read.mockResolvedValue(`---
-id: meta-test
-model: gpt-4
-title: Metadata Test
-created: 2024-01-01T00:00:00.000Z
-lastModified: 2024-01-02T00:00:00.000Z
-version: 5
----
-
-Content here`);
-
-      const result = await service.getMetadata("meta-test");
-
-      expect(result).not.toBeNull();
-      expect(result?.id).toBe("meta-test");
-    });
-
-    it("returns null on error", async () => {
-      const mockFile = new TFile({ path: "SystemSculpt/Chats/error.md" });
-      mockVault.getAbstractFileByPath.mockReturnValue(mockFile);
-      mockVault.read.mockRejectedValue(new Error("Read error"));
-
-      const result = await service.getMetadata("error");
-
-      expect(result).toBeNull();
-    });
-  });
-
-  describe("saveStreamingMessage", () => {
-    it("is a no-op deprecated method", async () => {
-      await expect(service.saveStreamingMessage()).resolves.toBeUndefined();
-    });
-  });
-
   describe("saveChat edge cases", () => {
     it("modifies existing file instead of creating new", async () => {
       const mockFile = new TFile({ path: "SystemSculpt/Chats/existing.md" });
       mockVault.getAbstractFileByPath.mockReturnValue(mockFile);
       mockVault.read.mockResolvedValue(`---
 id: existing
-model: gpt-4
 title: Existing
 created: 2024-01-01T00:00:00.000Z
 lastModified: 2024-01-01T00:00:00.000Z
@@ -541,7 +452,6 @@ version: 1
       mockVault.getAbstractFileByPath.mockReturnValue(mockFile);
       mockVault.read.mockResolvedValue(`---
 id: nonempty
-model: gpt-4
 title: Non Empty
 created: 2024-01-01T00:00:00.000Z
 lastModified: 2024-01-01T00:00:00.000Z
@@ -555,43 +465,6 @@ Hello
       await expect(
         service.saveChat("nonempty", [])
       ).rejects.toThrow();
-    });
-
-    it("allows managed-session chats to save an empty visible transcript after a branch", async () => {
-      const mockFile = new TFile({ path: "SystemSculpt/Chats/pi-fork.md" });
-      mockVault.getAbstractFileByPath.mockReturnValue(mockFile);
-      mockVault.read.mockResolvedValue(`---
-id: pi-fork
-model: anthropic@@claude-haiku-4-5
-title: Pi Fork
-created: 2024-01-01T00:00:00.000Z
-lastModified: 2024-01-01T00:00:00.000Z
-version: 1
-chatBackend: pi
-piSessionFile: /tmp/old.jsonl
-piSessionId: old-session
----
-
-<!-- SYSTEMSCULPT-MESSAGE-START role="user" message-id="1" -->
-Hello
-<!-- SYSTEMSCULPT-MESSAGE-END -->`);
-
-      await expect(
-        service.saveChat(
-          "pi-fork",
-          [],
-          {
-            title: "Pi Fork",
-            chatFontSize: "medium",
-            piSessionFile: "/tmp/new.jsonl",
-            piSessionId: "new-session",
-            piLastSyncedAt: "2026-03-09T02:32:48.935Z",
-            chatBackend: "systemsculpt",
-          }
-        )
-      ).resolves.toEqual({ version: 2 });
-
-      expect(mockVault.modify).toHaveBeenCalled();
     });
 
     it("includes title in save", async () => {
@@ -618,30 +491,6 @@ Hello
       expect(createCall[1]).toContain("large");
     });
 
-    it("writes the selected model while omitting legacy prompt fields from saved frontmatter", async () => {
-      await service.saveChat(
-        "prompt-type-chat",
-        [{ role: "user" as ChatRole, content: "Hello" }],
-        { selectedModelId: "systemsculpt@@systemsculpt/ai-agent" }
-      );
-
-      expect(mockVault.create).toHaveBeenCalled();
-      const createCall = mockVault.create.mock.calls[0];
-      expect(createCall[1]).toContain('model: "systemsculpt@@systemsculpt/ai-agent"');
-      expect(createCall[1]).not.toContain("systemMessage");
-      expect(createCall[1]).not.toContain("prompts/my-prompt.md");
-    });
-
-    it("omits the managed backend marker from new frontmatter", async () => {
-      await service.saveChat(
-        "managed-chat",
-        [{ role: "user" as ChatRole, content: "Hello" }]
-      );
-
-      expect(mockVault.create).toHaveBeenCalled();
-      const createCall = mockVault.create.mock.calls[0];
-      expect(createCall[1]).not.toContain("chatBackend:");
-    });
   });
 
   describe("isValidChatFile", () => {
@@ -660,7 +509,7 @@ Hello
       expect((service as any).isValidChatFile(content)).toBe(true);
     });
 
-    it("rejects legacy five-backtick format files", () => {
+    it("rejects unrelated fenced notes", () => {
       const content = `# AI Chat History
 
 \`\`\`\`\`user
@@ -675,278 +524,4 @@ Hello
     });
   });
 
-  describe("isValidYamlFrontmatter", () => {
-    it("accepts valid YAML with key-value pairs", () => {
-      const yaml = `id: test-chat
-model: gpt-4
-title: Test`;
-      expect((service as any).isValidYamlFrontmatter(yaml)).toBe(true);
-    });
-
-    it("rejects markdown headers", () => {
-      const yaml = `# This is a header
-Some content`;
-      expect((service as any).isValidYamlFrontmatter(yaml)).toBe(false);
-    });
-
-    it("rejects markdown tables", () => {
-      const yaml = `| Column 1 | Column 2 |
-| --- | --- |`;
-      expect((service as any).isValidYamlFrontmatter(yaml)).toBe(false);
-    });
-
-    it("rejects markdown links", () => {
-      const yaml = `[Link text](https://example.com)`;
-      expect((service as any).isValidYamlFrontmatter(yaml)).toBe(false);
-    });
-
-    it("rejects code blocks", () => {
-      const yaml = "```javascript\nconst x = 1;\n```";
-      expect((service as any).isValidYamlFrontmatter(yaml)).toBe(false);
-    });
-  });
-
-  describe("parseMetadata edge cases", () => {
-    it("handles context files as strings", () => {
-      const content = `---
-id: test
-model: gpt-4
-created: 2024-01-01T00:00:00.000Z
-lastModified: 2024-01-01T00:00:00.000Z
-title: Test
-context_files:
-  - path/to/file1.md
-  - path/to/Extractions/file2.md
----`;
-
-      const result = (service as any).parseMetadata(content);
-
-      expect(result).not.toBeNull();
-      // Mock parseYaml doesn't fully parse arrays, just check we got a result
-      expect(result.context_files).toBeDefined();
-    });
-
-    it("handles systemMessage object", () => {
-      (parseYaml as jest.Mock).mockReturnValueOnce({
-        id: "test",
-        model: "gpt-4",
-        created: "2024-01-01T00:00:00.000Z",
-        lastModified: "2024-01-01T00:00:00.000Z",
-        title: "Test",
-        systemMessage: {
-          type: "custom",
-          path: "prompts/custom.md",
-        },
-      });
-
-      const content = `---
-id: test
-model: gpt-4
-created: 2024-01-01T00:00:00.000Z
-lastModified: 2024-01-01T00:00:00.000Z
-title: Test
-systemMessage:
-  type: custom
-  path: prompts/custom.md
----`;
-
-      const result = (service as any).parseMetadata(content);
-
-      expect(result).not.toBeNull();
-      expect(result.systemMessage).toEqual({
-        type: "custom",
-        path: "prompts/custom.md",
-      });
-    });
-
-    it("handles legacy customPromptFilePath", () => {
-      const content = `---
-id: test
-model: gpt-4
-created: 2024-01-01T00:00:00.000Z
-lastModified: 2024-01-01T00:00:00.000Z
-title: Test
-customPromptFilePath: "[[prompts/old-format.md]]"
----`;
-
-      const result = (service as any).parseMetadata(content);
-
-      expect(result).not.toBeNull();
-      // The mock parseYaml doesn't transform wikilinks, just verify we got a result
-      expect(result.systemMessage).toBeDefined();
-    });
-
-    it("returns null for missing id field", () => {
-      const content = `---
-model: gpt-4
-title: No ID
----`;
-
-      const result = (service as any).parseMetadata(content);
-
-      expect(result).toBeNull();
-    });
-  });
-
-  describe("generateMessageId", () => {
-    it("generates UUID format", () => {
-      const id = (service as any).generateMessageId();
-
-      expect(id).toMatch(
-        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
-      );
-    });
-
-    it("generates unique IDs", () => {
-      const id1 = (service as any).generateMessageId();
-      const id2 = (service as any).generateMessageId();
-
-      expect(id1).not.toBe(id2);
-    });
-  });
-
-  describe("standardizeToolCalls", () => {
-    it("returns empty array for null input", () => {
-      const result = (service as any).standardizeToolCalls(null, "msg-1");
-      expect(result).toEqual([]);
-    });
-
-    it("passes through already standardized tool calls", () => {
-      const toolCalls = [
-        {
-          id: "call_123",
-          request: {
-            function: { name: "test", arguments: "{}" },
-          },
-          state: "completed",
-        },
-      ];
-
-      const result = (service as any).standardizeToolCalls(toolCalls, "msg-1");
-
-      expect(result[0].id).toBe("call_123");
-      expect(result[0].request.function.name).toBe("test");
-    });
-
-    it("converts old flat format to new format", () => {
-      const toolCalls = [
-        {
-          id: "call_456",
-          type: "function",
-          function: { name: "old_tool", arguments: "{}" },
-        },
-      ];
-
-      const result = (service as any).standardizeToolCalls(toolCalls, "msg-1");
-
-      expect(result[0].id).toBe("call_456");
-      expect(result[0].request.function.name).toBe("old_tool");
-      expect(result[0].messageId).toBe("msg-1");
-    });
-  });
-
-  describe("normalizeLegacyToolMessages", () => {
-    it("returns empty messages as-is", () => {
-      const result = (service as any).normalizeLegacyToolMessages([]);
-      expect(result).toEqual([]);
-    });
-
-    it("passes through non-tool messages", () => {
-      const messages: ChatMessage[] = [
-        { role: "user" as ChatRole, content: "Hello", message_id: "1" },
-        { role: "assistant" as ChatRole, content: "Hi", message_id: "2" },
-      ];
-
-      const result = (service as any).normalizeLegacyToolMessages(messages);
-
-      expect(result).toHaveLength(2);
-      expect(result[0].role).toBe("user");
-      expect(result[1].role).toBe("assistant");
-    });
-
-    it("attaches tool message to preceding assistant", () => {
-      const messages: ChatMessage[] = [
-        { role: "assistant" as ChatRole, content: "", message_id: "1" },
-        {
-          role: "tool" as ChatRole,
-          content: '{"success": true}',
-          tool_call_id: "call_123",
-          message_id: "2",
-        },
-      ];
-
-      const result = (service as any).normalizeLegacyToolMessages(messages);
-
-      // Tool message should be absorbed into assistant
-      expect(result.length).toBeLessThanOrEqual(2);
-    });
-
-    it("handles tool messages with errors", () => {
-      const messages: ChatMessage[] = [
-        { role: "assistant" as ChatRole, content: "", message_id: "1" },
-        {
-          role: "tool" as ChatRole,
-          content: '{"error": {"code": "EXECUTION_FAILED", "message": "Failed"}}',
-          tool_call_id: "call_123",
-          message_id: "2",
-        },
-      ];
-
-      const result = (service as any).normalizeLegacyToolMessages(messages);
-
-      expect(result.length).toBeLessThanOrEqual(2);
-    });
-
-    it("handles tool messages with USER_DENIED error", () => {
-      const messages: ChatMessage[] = [
-        { role: "assistant" as ChatRole, content: "", message_id: "1" },
-        {
-          role: "tool" as ChatRole,
-          content: '{"error": {"code": "USER_DENIED", "message": "User denied"}}',
-          tool_call_id: "call_123",
-          message_id: "2",
-        },
-      ];
-
-      const result = (service as any).normalizeLegacyToolMessages(messages);
-
-      expect(result.length).toBeLessThanOrEqual(2);
-    });
-
-    it("coalesces consecutive assistant messages into a single assistant turn", () => {
-      const call1: any = {
-        id: "call_1",
-        messageId: "a1",
-        request: { id: "call_1", type: "function", function: { name: "t", arguments: "{}" } },
-        state: "completed",
-        timestamp: 1,
-      };
-
-      const call2: any = {
-        id: "call_2",
-        messageId: "a2",
-        request: { id: "call_2", type: "function", function: { name: "t", arguments: "{}" } },
-        state: "completed",
-        timestamp: 2,
-      };
-
-      const messages: ChatMessage[] = [
-        { role: "assistant" as ChatRole, content: "", message_id: "a1", tool_calls: [call1] } as any,
-        { role: "assistant" as ChatRole, content: "", message_id: "a2", tool_calls: [call2] } as any,
-        { role: "assistant" as ChatRole, content: "Final", message_id: "a3" } as any,
-        { role: "user" as ChatRole, content: "Next", message_id: "u1" } as any,
-      ];
-
-      const result = (service as any).normalizeLegacyToolMessages(messages) as ChatMessage[];
-
-      expect(result).toHaveLength(2);
-      expect(result[0].role).toBe("assistant");
-      expect(result[0].message_id).toBe("a1");
-      expect(result[0].content).toBe("Final");
-      expect(Array.isArray(result[0].tool_calls)).toBe(true);
-      expect(result[0].tool_calls).toHaveLength(2);
-      expect(result[0].tool_calls?.every((tc: any) => tc.messageId === "a1")).toBe(true);
-      expect(result[1].role).toBe("user");
-    });
-  });
 });

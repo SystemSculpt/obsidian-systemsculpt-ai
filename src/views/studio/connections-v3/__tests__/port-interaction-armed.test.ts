@@ -78,11 +78,12 @@ function makeInteraction(store: StudioLinkStore) {
 describe("StudioPortInteraction armed (click-to-connect)", () => {
   it("arming an output sets a pending source and shows a preview", () => {
     const store = new StudioLinkStore();
-    const { interaction } = makeInteraction(store);
+    const { interaction, outPin } = makeInteraction(store);
 
     interaction.arm("src", "out");
 
     expect(interaction.getPendingConnectionSourceKey()).toBe("src:out:out");
+    expect(outPin.getAttribute("aria-pressed")).toBe("true");
     expect(store.getDragState()).not.toBeNull();
     expect(store.getDragState()?.source).toEqual({ nodeId: "src", portId: "out" });
   });
@@ -100,13 +101,14 @@ describe("StudioPortInteraction armed (click-to-connect)", () => {
 
   it("clicking the same output again cancels (toggle off)", () => {
     const store = new StudioLinkStore();
-    const { interaction } = makeInteraction(store);
+    const { interaction, outPin } = makeInteraction(store);
 
     interaction.arm("src", "out");
     interaction.arm("src", "out");
 
     expect(interaction.getPendingConnectionSourceKey()).toBeNull();
     expect(store.getDragState()).toBeNull();
+    expect(outPin.getAttribute("aria-pressed")).toBe("false");
   });
 
   it("Escape cancels the armed connection", () => {

@@ -3,6 +3,7 @@
  */
 
 import { App } from "obsidian";
+import { JSDOM } from "jsdom";
 import { MicrophoneRecorder } from "../MicrophoneRecorder";
 
 type MockTrack = {
@@ -41,7 +42,7 @@ class MockMediaRecorder {
   });
 
   /**
-   * Simulate the device revoking the mic (e.g. iOS lock): a real MediaRecorder
+   * Simulate the browser revoking the mic track mid-recording: a real MediaRecorder
    * fires "error" and transitions to "inactive" without a clean onstop.
    */
   public emitError = (error?: unknown): void => {
@@ -61,7 +62,7 @@ class MockMediaRecorder {
 }
 
 const createTrack = (): MockTrack => ({
-  label: "iPhone Microphone",
+  label: "External Microphone",
   stop: jest.fn(),
   addEventListener: jest.fn(),
   removeEventListener: jest.fn(),
@@ -72,6 +73,69 @@ const createStream = (track: MockTrack): MediaStream => {
     getAudioTracks: () => [track as unknown as MediaStreamTrack],
     getTracks: () => [track as unknown as MediaStreamTrack],
   } as unknown as MediaStream;
+};
+
+const createForeignCaptureHarness = () => {
+  const popout = new JSDOM("<!doctype html><html><body></body></html>", {
+    url: "https://systemsculpt.local/recorder-capture-popout",
+  });
+  const track = createTrack();
+  const stream = createStream(track);
+  const mediaDevices = {
+    getUserMedia: jest.fn().mockResolvedValue(stream),
+    addEventListener: jest.fn(),
+    removeEventListener: jest.fn(),
+  };
+  Object.defineProperty(popout.window.navigator, "mediaDevices", {
+    configurable: true,
+    value: mediaDevices,
+  });
+
+  const releaseWakeLock = jest.fn().mockResolvedValue(undefined);
+  const wakeLockSentinel = {
+    release: releaseWakeLock,
+    addEventListener: jest.fn(),
+    removeEventListener: jest.fn(),
+  };
+  const requestWakeLock = jest.fn().mockResolvedValue(wakeLockSentinel);
+  Object.defineProperty(popout.window.navigator, "wakeLock", {
+    configurable: true,
+    value: { request: requestWakeLock },
+  });
+  Object.defineProperty(popout.window, "MediaRecorder", {
+    configurable: true,
+    value: MockMediaRecorder,
+  });
+  const ForeignBlob = jest.fn().mockImplementation(
+    (parts?: BlobPart[], options?: BlobPropertyBag) => new Blob(parts ?? [], options)
+  );
+  Object.defineProperty(popout.window, "Blob", {
+    configurable: true,
+    value: ForeignBlob,
+  });
+
+  let hidden = false;
+  Object.defineProperty(popout.window.document, "hidden", {
+    configurable: true,
+    get: () => hidden,
+  });
+
+  return {
+    popout,
+    track,
+    mediaDevices,
+    requestWakeLock,
+    releaseWakeLock,
+    ForeignBlob,
+    setHidden: (nextHidden: boolean) => {
+      hidden = nextHidden;
+    },
+    hostContext: {
+      host: popout.window.document.body,
+      hostDocument: popout.window.document,
+      hostWindow: popout.window as unknown as Window,
+    },
+  };
 };
 
 describe("MicrophoneRecorder", () => {
@@ -216,8 +280,8 @@ describe("MicrophoneRecorder", () => {
     const instance = MockMediaRecorder.instances[MockMediaRecorder.instances.length - 1];
     // A timeslice chunk lands before the interruption (start(800) on a device).
     instance.requestData();
-    // iOS lock revokes the track: the recorder errors and goes inactive without
-    // a clean visibilitychange/onstop. The captured audio must still be saved.
+    // The recorder errors and goes inactive without a clean
+    // visibilitychange/onstop. The captured audio must still be saved.
     instance.emitError(new Error("The operation could not be performed"));
     await flushPromises();
 
@@ -402,6 +466,118 @@ describe("MicrophoneRecorder", () => {
 
     await recorder.start("SystemSculpt/Recordings/no-wakelock.webm");
 
-    expect(onStatus).toHaveBeenCalledWith(expect.stringContaining("Keep your screen awake"));
+    expect(onStatus).toHaveBeenCalledWith(expect.stringContaining("screen awake"));
+  });
+
+  it("binds capture, device changes, pagehide, wake lock, and cleanup to the popout realm", async () => {
+    const foreign = createForeignCaptureHarness();
+    const popoutSetTimeout = jest.spyOn(foreign.popout.window, "setTimeout");
+    const popoutClearTimeout = jest.spyOn(foreign.popout.window, "clearTimeout");
+    const mainMediaDevices = {
+      getUserMedia: jest.fn().mockRejectedValue(new Error("main window must not capture")),
+      addEventListener: jest.fn(),
+      removeEventListener: jest.fn(),
+    };
+    Object.defineProperty(globalThis.navigator, "mediaDevices", {
+      configurable: true,
+      value: mainMediaDevices,
+    });
+    const app = new App();
+    (app.vault.adapter as any).writeBinary = jest.fn().mockResolvedValue(undefined);
+    const onComplete = jest.fn();
+    const recorder = new MicrophoneRecorder(app, {
+      mimeType: "audio/webm;codecs=opus",
+      hostContext: foreign.hostContext,
+      onError: jest.fn(),
+      onStatus: jest.fn(),
+      onComplete,
+    });
+
+    try {
+      await recorder.start("SystemSculpt/Recordings/popout-pagehide.webm");
+      await flushPromises();
+
+      expect(foreign.mediaDevices.getUserMedia).toHaveBeenCalledWith({
+        audio: expect.objectContaining({ echoCancellation: true }),
+      });
+      expect(mainMediaDevices.getUserMedia).not.toHaveBeenCalled();
+      expect(foreign.mediaDevices.addEventListener).toHaveBeenCalledWith(
+        "devicechange",
+        expect.any(Function)
+      );
+      expect(mainMediaDevices.addEventListener).not.toHaveBeenCalled();
+      expect(popoutSetTimeout).toHaveBeenCalledWith(expect.any(Function), 10000);
+      expect(popoutClearTimeout).toHaveBeenCalled();
+      expect(foreign.requestWakeLock).toHaveBeenCalledWith("screen");
+
+      const deviceChangeListener = foreign.mediaDevices.addEventListener.mock.calls.find(
+        ([event]) => event === "devicechange"
+      )?.[1] as EventListener;
+      deviceChangeListener(new foreign.popout.window.Event("devicechange"));
+      await flushPromises();
+      expect(foreign.mediaDevices.getUserMedia).toHaveBeenCalledTimes(2);
+
+      document.dispatchEvent(new Event("visibilitychange"));
+      window.dispatchEvent(new Event("pagehide"));
+      await flushPromises();
+      expect(onComplete).not.toHaveBeenCalled();
+
+      foreign.popout.window.dispatchEvent(new foreign.popout.window.Event("pagehide"));
+      await flushPromises();
+      await flushPromises();
+
+      expect(onComplete).toHaveBeenCalledWith(
+        "SystemSculpt/Recordings/popout-pagehide.webm",
+        expect.any(Blob),
+        "background-pagehide"
+      );
+      expect(foreign.ForeignBlob).toHaveBeenCalled();
+      expect(foreign.mediaDevices.removeEventListener).toHaveBeenCalledWith(
+        "devicechange",
+        expect.any(Function)
+      );
+      expect(foreign.releaseWakeLock).toHaveBeenCalled();
+    } finally {
+      recorder.cleanup();
+      foreign.popout.window.close();
+    }
+  });
+
+  it("stops only when its initiating popout document becomes hidden", async () => {
+    const foreign = createForeignCaptureHarness();
+    const app = new App();
+    (app.vault.adapter as any).writeBinary = jest.fn().mockResolvedValue(undefined);
+    const onComplete = jest.fn();
+    const recorder = new MicrophoneRecorder(app, {
+      mimeType: "audio/webm;codecs=opus",
+      hostContext: foreign.hostContext,
+      onError: jest.fn(),
+      onStatus: jest.fn(),
+      onComplete,
+    });
+
+    try {
+      await recorder.start("SystemSculpt/Recordings/popout-hidden.webm");
+
+      document.dispatchEvent(new Event("visibilitychange"));
+      await flushPromises();
+      expect(onComplete).not.toHaveBeenCalled();
+
+      foreign.setHidden(true);
+      foreign.popout.window.document.dispatchEvent(
+        new foreign.popout.window.Event("visibilitychange")
+      );
+      await flushPromises();
+      await flushPromises();
+
+      expect(onComplete).toHaveBeenCalledWith(
+        "SystemSculpt/Recordings/popout-hidden.webm",
+        expect.any(Blob),
+        "background-hidden"
+      );
+    } finally {
+      recorder.cleanup();
+      foreign.popout.window.close();
+    }
   });
 });

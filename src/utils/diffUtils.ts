@@ -33,7 +33,6 @@ export function generateDiff(oldContent: string, newContent: string, contextLine
   const oldLines = splitLines(oldContent);
   const newLines = splitLines(newContent);
   
-  const result: DiffLine[] = [];
   const stats = { additions: 0, deletions: 0 };
   
   // Simple diff algorithm using longest common subsequence approach

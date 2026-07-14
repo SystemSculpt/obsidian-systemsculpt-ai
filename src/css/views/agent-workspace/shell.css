@@ -1,0 +1,89 @@
+/**
+ * Agent workspace shell: mounted view host, root surface, typography, header,
+ * and viewport ownership.
+ */
+
+.workspace-leaf-content[data-type="systemsculpt-chat-view"] > .view-content {
+  padding: 0;
+  width: 100%;
+  max-width: none;
+}
+
+.systemsculpt-agent-workspace {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--ss-surface-0);
+  font-size: var(--ss-text-base);
+}
+
+/* Obsidian's button styles can override the browser's low-specificity hidden
+   rule. Keep every workspace disclosure genuinely absent when hidden. */
+.systemsculpt-agent-workspace [hidden] {
+  display: none;
+}
+
+.systemsculpt-agent-workspace.is-font-small {
+  font-size: var(--ss-text-sm);
+}
+
+.systemsculpt-agent-workspace.is-font-medium {
+  font-size: var(--ss-text-base);
+}
+
+.systemsculpt-agent-workspace.is-font-large {
+  font-size: var(--ss-text-lg);
+}
+
+.systemsculpt-agent-header {
+  z-index: var(--ss-z-raised);
+  display: flex;
+  align-items: center;
+  min-height: var(--ss-control-height-lg);
+  padding: var(--ss-space-2) var(--ss-space-3);
+  border-bottom: 1px solid var(--ss-line);
+  background: var(--ss-surface-0);
+}
+
+.systemsculpt-agent-header-title {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: var(--ss-weight-semibold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.systemsculpt-agent-header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-1);
+  margin-left: auto;
+}
+
+.systemsculpt-agent-credits {
+  min-height: var(--ss-control-height-sm);
+  padding: 0 var(--ss-space-2);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-full);
+  background: transparent;
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-xs);
+}
+
+.systemsculpt-agent-credits.is-low {
+  border-color: var(--ss-warning-line);
+  background: var(--ss-warning-tint);
+  color: var(--ss-warning);
+}
+
+.systemsculpt-agent-viewport {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}

@@ -5,10 +5,10 @@ import { generateDefaultChatTitle } from "../../utils/titleUtils";
 
 type RibbonHandle = HTMLElement;
 
-type ChatViewModule = typeof import("../../views/chatview/ChatView");
+type AgentChatViewModule = typeof import("../../views/chatview/AgentChatView");
 
-function loadChatViewModule(): ChatViewModule {
-  return require("../../views/chatview/ChatView");
+function loadAgentChatViewModule(): AgentChatViewModule {
+  return require("../../views/chatview/AgentChatView");
 }
 
 export class RibbonManager {
@@ -43,25 +43,6 @@ export class RibbonManager {
    */
   private registerRibbonIcons() {
     this.registerRibbonIcon(
-      "youtube",
-      "YouTube Canvas",
-      async () => {
-        const { YouTubeCanvasModal } = await import("../../modals/YouTubeCanvasModal");
-        new YouTubeCanvasModal(this.app, this.plugin).open();
-      }
-    );
-
-    this.registerRibbonIcon(
-      "file-audio",
-      "Process Meeting Audio",
-      async () => {
-        const { MeetingProcessorModal } = await import("../../modals/MeetingProcessorModal");
-        const modal = new MeetingProcessorModal(this.plugin);
-        modal.open();
-      }
-    );
-
-    this.registerRibbonIcon(
       "mic",
       "Audio Recorder",
       async () => {
@@ -71,7 +52,7 @@ export class RibbonManager {
 
     this.registerRibbonIcon(
       "search",
-      "Open SystemSculpt Search",
+      "Open search",
       async () => {
         const { SystemSculptSearchModal } = await import("../../modals/SystemSculptSearchModal");
         const modal = new SystemSculptSearchModal(this.plugin);
@@ -79,13 +60,13 @@ export class RibbonManager {
       }
     );
 
-    this.registerRibbonIcon("trash", "Open SystemSculpt Janitor", () => {
+    this.registerRibbonIcon("trash", "Open janitor", () => {
       this.openJanitorModal();
     });
 
     this.registerRibbonIcon(
       "history",
-      "Open SystemSculpt History",
+      "Open history",
       () => {
         this.openSystemSculptHistoryModal();
       }
@@ -93,7 +74,7 @@ export class RibbonManager {
 
     this.registerRibbonIcon(
       "message-square",
-      "Open SystemSculpt Chat",
+      "Open chat",
       async () => {
         await this.openChatView();
       }
@@ -153,13 +134,12 @@ export class RibbonManager {
       type: CHAT_VIEW_TYPE,
       state: {
         chatId: "",
-        selectedModelId: this.plugin.settings.selectedModelId,
         chatTitle: generateDefaultChatTitle(),
       },
     });
 
-    const { ChatView } = loadChatViewModule();
-    const view = new ChatView(leaf, this.plugin);
+    const { AgentChatView } = loadAgentChatViewModule();
+    const view = new AgentChatView(leaf, this.plugin);
     await leaf.open(view);
     workspace.setActiveLeaf(leaf, { focus: true });
   }
@@ -172,15 +152,8 @@ export class RibbonManager {
       const modal = new SystemSculptHistoryModal(this.plugin);
       modal.open();
     }).catch(() => {
-      new Notice("Unable to open SystemSculpt History right now.", 5000);
+      new Notice("Unable to open history right now.", 5000);
     });
-  }
-
-  /**
-   * Backward-compatible alias for older callers.
-   */
-  public openChatHistoryModal() {
-    this.openSystemSculptHistoryModal();
   }
 
   /**
@@ -190,7 +163,7 @@ export class RibbonManager {
     void import("../../modals/JanitorModal").then(({ JanitorModal }) => {
       new JanitorModal(this.app, this.plugin).open();
     }).catch(() => {
-      new Notice("Unable to open SystemSculpt Janitor right now.", 5000);
+      new Notice("Unable to open janitor right now.", 5000);
     });
   }
 

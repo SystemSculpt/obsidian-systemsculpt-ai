@@ -54,8 +54,8 @@ describe("AutomaticBackupService", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     jest.useFakeTimers();
-    setIntervalSpy = jest.spyOn(global, "setInterval");
-    clearIntervalSpy = jest.spyOn(global, "clearInterval");
+    setIntervalSpy = jest.spyOn(window, "setInterval");
+    clearIntervalSpy = jest.spyOn(window, "clearInterval");
     mockPlugin = createMockPlugin();
     service = new AutomaticBackupService(mockPlugin);
   });
@@ -247,13 +247,12 @@ describe("AutomaticBackupService", () => {
       const backupData = JSON.parse(writeCall[1]);
 
       expect(backupData.licenseKey).toBe("");
-      expect(backupData.openAiApiKey).toBe("");
-      expect(backupData.customTranscriptionApiKey).toBe("");
-      expect(backupData.embeddingsCustomApiKey).toBe("");
-      expect(backupData.readwiseApiToken).toBe("");
-      expect(backupData.customProviders[0].apiKey).toBe("");
-      expect(backupData.customProviders[0].endpoint).toBe("https://api.example.com");
-      expect(backupData.mcpServers[0].apiKey).toBe("");
+      expect(backupData).not.toHaveProperty("openAiApiKey");
+      expect(backupData).not.toHaveProperty("customTranscriptionApiKey");
+      expect(backupData).not.toHaveProperty("embeddingsCustomApiKey");
+      expect(backupData).not.toHaveProperty("readwiseApiToken");
+      expect(backupData).not.toHaveProperty("customProviders");
+      expect(backupData).not.toHaveProperty("mcpServers");
     });
 
     it("generates filename with current date", async () => {

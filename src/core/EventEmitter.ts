@@ -1,7 +1,4 @@
-/**
- * Enhanced EventEmitter with namespace support for provider isolation
- * Supports both legacy events and namespaced events (e.g., "systemsculpt:modelUpdated")
- */
+/** Lightweight namespaced event emitter for plugin lifecycle events. */
 export class EventEmitter {
   private events: Record<string, Array<(...args: any[]) => void>> = {};
   
@@ -134,30 +131,4 @@ export class EventEmitter {
     return this.namespaceListeners[namespace] ? Array.from(this.namespaceListeners[namespace]) : [];
   }
 
-  /**
-   * Emit an event with provider context
-   * @param event Event name
-   * @param providerType Optional provider type context
-   * @param args Arguments to pass to listeners
-   */
-  public emitWithProvider(event: string, providerType: 'systemsculpt' | 'custom' | 'local-pi', ...args: any[]): void {
-    // Emit the original event
-    this.emit(event, ...args);
-    
-    // Also emit a namespaced version for provider-specific listeners
-    const namespacedEvent = `${providerType}:${event}`;
-    this.emit(namespacedEvent, ...args);
-  }
-
-  /**
-   * Listen to events from a specific provider only
-   * @param event Base event name (without namespace)
-   * @param providerType Provider type to listen to
-   * @param listener Function to call when event is emitted
-   * @returns Unsubscribe function
-   */
-  public onProvider(event: string, providerType: 'systemsculpt' | 'custom' | 'local-pi', listener: (...args: any[]) => void): () => void {
-    const namespacedEvent = `${providerType}:${event}`;
-    return this.on(namespacedEvent, listener);
-  }
 }

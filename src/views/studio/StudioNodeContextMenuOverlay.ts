@@ -1,9 +1,16 @@
 import type { StudioNodeDefinition } from "../../studio/types";
+import { applyPluginSurface, SurfaceCombobox } from "../../core/ui/surface";
 import { rankStudioFuzzyItems } from "./StudioFuzzySearch";
 import {
   normalizeStudioMenuScale,
   resolveStudioAnchoredMenuPosition,
 } from "./StudioFloatingMenuUtils";
+import {
+  cancelStudioAnimationFrame,
+  getStudioOwnerDocument,
+  getStudioOwnerWindow,
+  requestStudioAnimationFrame,
+} from "./StudioDomContext";
 
 const CONTEXT_MENU_WIDTH = 360;
 // Menu chrome estimates for anchoring before first layout. These are overlay
@@ -11,6 +18,7 @@ const CONTEXT_MENU_WIDTH = 360;
 // src/studio/StudioNodeGeometry.ts node constants.
 const CONTEXT_MENU_MIN_HEIGHT = 120;
 const CONTEXT_MENU_FALLBACK_HEIGHT = 280;
+let nodeContextMenuInstanceId = 0;
 
 export type StudioNodeContextMenuItem = {
   definition: StudioNodeDefinition;
@@ -26,22 +34,21 @@ export type StudioNodeContextMenuAction = {
 };
 
 export class StudioNodeContextMenuOverlay {
+  private readonly instanceId = `ss-studio-node-context-menu-${++nodeContextMenuInstanceId}`;
   private viewportEl: HTMLElement | null = null;
   private rootEl: HTMLElement | null = null;
   private searchInputEl: HTMLInputElement | null = null;
   private listEl: HTMLElement | null = null;
+  private combobox: SurfaceCombobox<StudioNodeContextMenuItem> | null = null;
   private actionsEl: HTMLElement | null = null;
   private graphZoom = 1;
   private anchorX = 0;
   private anchorY = 0;
   private onSelectDefinition: ((definition: StudioNodeDefinition) => void) | null = null;
   private isVisible = false;
-  private allItems: StudioNodeContextMenuItem[] = [];
-  private filteredItems: StudioNodeContextMenuItem[] = [];
   private actions: StudioNodeContextMenuAction[] = [];
-  private itemEls: HTMLElement[] = [];
-  private activeIndex = -1;
   private focusRafId: number | null = null;
+  private listenerWindow: Window | null = null;
 
   private readonly onWindowPointerDown = (event: PointerEvent): void => {
     if (!this.isVisible || !this.rootEl) {
@@ -90,6 +97,8 @@ export class StudioNodeContextMenuOverlay {
 
   destroy(): void {
     this.hide();
+    this.combobox?.destroy();
+    this.combobox = null;
     if (this.rootEl?.parentElement) {
       this.rootEl.parentElement.removeChild(this.rootEl);
     }
@@ -123,14 +132,15 @@ export class StudioNodeContextMenuOverlay {
     this.anchorX = Number.isFinite(options.anchorX) ? options.anchorX : 0;
     this.anchorY = Number.isFinite(options.anchorY) ? options.anchorY : 0;
     this.onSelectDefinition = options.onSelectDefinition;
-    this.allItems = options.items.slice();
     this.actions = Array.isArray(options.actions) ? options.actions.slice() : [];
     this.searchInputEl.value = "";
     this.renderActions();
-    this.applyFilter("");
+    this.combobox?.setQuery("", { writeInput: false, render: false });
+    this.combobox?.setOpen(true);
+    this.combobox?.setItems(options.items);
 
     this.cancelPendingFocus();
-    this.rootEl.style.display = "flex";
+    this.rootEl.setCssStyles({ display: "flex" });
     this.rootEl.removeAttribute("inert");
     this.rootEl.setAttribute("aria-hidden", "false");
     this.isVisible = true;
@@ -138,7 +148,7 @@ export class StudioNodeContextMenuOverlay {
     this.applyLayout();
 
     // Height can change after DOM paints; clamp once more.
-    this.focusRafId = window.requestAnimationFrame(() => {
+    this.focusRafId = requestStudioAnimationFrame(this.rootEl, () => {
       this.focusRafId = null;
       if (!this.isVisible || !this.searchInputEl) {
         return;
@@ -164,29 +174,25 @@ export class StudioNodeContextMenuOverlay {
     this.onSelectDefinition = null;
     this.unbindGlobalListeners();
     this.isVisible = false;
-    this.allItems = [];
-    this.filteredItems = [];
     this.actions = [];
-    this.itemEls = [];
-    this.activeIndex = -1;
     if (this.rootEl) {
-      const activeElement = document.activeElement as HTMLElement | null;
+      const activeElement = getStudioOwnerDocument(this.rootEl).activeElement as HTMLElement | null;
       if (activeElement && this.rootEl.contains(activeElement) && typeof activeElement.blur === "function") {
         activeElement.blur();
       }
-      this.rootEl.style.display = "none";
+      this.rootEl.setCssStyles({ display: "none" });
       this.rootEl.setAttribute("inert", "");
       this.rootEl.setAttribute("aria-hidden", "true");
     }
     if (this.searchInputEl) {
       this.searchInputEl.value = "";
     }
-    if (this.listEl) {
-      this.listEl.empty();
-    }
+    this.combobox?.setOpen(false);
+    this.combobox?.setQuery("", { writeInput: false, render: false });
+    this.combobox?.showState(() => {});
     if (this.actionsEl) {
       this.actionsEl.empty();
-      this.actionsEl.style.display = "none";
+      this.actionsEl.setCssStyles({ display: "none" });
     }
   }
 
@@ -196,9 +202,11 @@ export class StudioNodeContextMenuOverlay {
     }
 
     const root = this.viewportEl.createDiv({ cls: "ss-studio-node-context-menu" });
-    root.style.display = "none";
+    applyPluginSurface(root, "transient");
+    root.setCssStyles({ display: "none" });
     root.setAttribute("inert", "");
-    root.setAttribute("role", "menu");
+    root.setAttribute("role", "dialog");
+    root.setAttribute("aria-labelledby", `${this.instanceId}-title`);
     root.setAttribute("aria-hidden", "true");
     root.addEventListener("pointerdown", (event) => {
       event.stopPropagation();
@@ -211,6 +219,7 @@ export class StudioNodeContextMenuOverlay {
     header.createDiv({
       cls: "ss-studio-node-context-menu-title",
       text: "Add Node",
+      attr: { id: `${this.instanceId}-title` },
     });
     header.createDiv({
       cls: "ss-studio-node-context-menu-subtitle",
@@ -218,7 +227,7 @@ export class StudioNodeContextMenuOverlay {
     });
 
     const actions = root.createDiv({ cls: "ss-studio-node-context-menu-actions" });
-    actions.style.display = "none";
+    actions.setCssStyles({ display: "none" });
 
     const searchWrap = root.createDiv({ cls: "ss-studio-node-context-menu-search-wrap" });
     const searchInput = searchWrap.createEl("input", {
@@ -231,40 +240,66 @@ export class StudioNodeContextMenuOverlay {
     });
     searchInput.spellcheck = false;
     searchInput.autocomplete = "off";
-    searchInput.addEventListener("input", () => {
-      this.applyFilter(searchInput.value);
-    });
-    searchInput.addEventListener("keydown", (event) => {
-      if (event.key === "ArrowDown") {
-        event.preventDefault();
-        this.moveActiveItem(1);
-        return;
-      }
-      if (event.key === "ArrowUp") {
-        event.preventDefault();
-        this.moveActiveItem(-1);
-        return;
-      }
-      if (event.key === "Enter") {
-        event.preventDefault();
-        this.selectActiveItem();
-      }
-    });
 
-    const list = root.createDiv({ cls: "ss-studio-node-context-menu-list" });
+    const list = root.createDiv({
+      cls: "ss-studio-node-context-menu-list",
+      attr: {
+        id: `${this.instanceId}-listbox`,
+      },
+    });
 
     this.rootEl = root;
     this.searchInputEl = searchInput;
     this.listEl = list;
     this.actionsEl = actions;
+    this.initializeCombobox();
     this.applyLayout();
+  }
+
+  private initializeCombobox(): void {
+    if (!this.searchInputEl || !this.listEl) return;
+    this.combobox?.destroy();
+    this.combobox = new SurfaceCombobox<StudioNodeContextMenuItem>({
+      input: this.searchInputEl,
+      listbox: this.listEl,
+      listboxId: `${this.instanceId}-listbox`,
+      listboxLabel: "Available nodes",
+      initiallyOpen: false,
+      activeMode: "first",
+      navigation: "wrap",
+      selectionFollowsActive: true,
+      activeClass: "is-active",
+      getItemKey: (item) => `${item.definition.kind}@${item.definition.version}`,
+      filterItems: (items, query) => rankStudioFuzzyItems({
+        items,
+        query,
+        getSearchText: (item) => `${item.title} ${item.summary} ${item.definition.kind}`,
+        compareWhenEqual: (left, right) => left.title.localeCompare(right.title),
+      }),
+      renderOption: ({ item }) => this.renderNodeItem(item),
+      renderEmpty: ({ listbox }) => {
+        listbox.createDiv({
+          cls: "ss-studio-node-context-menu-empty",
+          text: "No matching nodes.",
+        });
+      },
+      onCommit: ({ item }) => {
+        const onSelect = this.onSelectDefinition;
+        this.hide();
+        onSelect?.(item.definition);
+      },
+      onEscape: () => this.hide(),
+      onRender: () => this.applyLayout(),
+    });
   }
 
   private cancelPendingFocus(): void {
     if (this.focusRafId === null) {
       return;
     }
-    window.cancelAnimationFrame(this.focusRafId);
+    if (this.rootEl) {
+      cancelStudioAnimationFrame(this.rootEl, this.focusRafId);
+    }
     this.focusRafId = null;
   }
 
@@ -274,11 +309,11 @@ export class StudioNodeContextMenuOverlay {
     }
     this.actionsEl.empty();
     if (this.actions.length === 0) {
-      this.actionsEl.style.display = "none";
+      this.actionsEl.setCssStyles({ display: "none" });
       return;
     }
 
-    this.actionsEl.style.display = "grid";
+    this.actionsEl.setCssStyles({ display: "grid" });
     for (const action of this.actions) {
       const button = this.actionsEl.createEl("button", {
         cls: "ss-studio-node-context-menu-action",
@@ -311,145 +346,23 @@ export class StudioNodeContextMenuOverlay {
     }
   }
 
-  private applyFilter(query: string): void {
-    this.filteredItems = rankStudioFuzzyItems({
-      items: this.allItems,
-      query,
-      getSearchText: (item) => `${item.title} ${item.summary} ${item.definition.kind}`,
-      compareWhenEqual: (left, right) => left.title.localeCompare(right.title),
+  private renderNodeItem(item: StudioNodeContextMenuItem): HTMLElement {
+    const itemEl = this.listEl!.createDiv({
+      cls: "ss-studio-node-context-menu-item",
     });
-
-    this.activeIndex = this.filteredItems.length > 0 ? 0 : -1;
-    this.renderItems();
-    this.applyLayout();
-  }
-
-  private renderItems(): void {
-    if (!this.listEl) {
-      return;
-    }
-
-    this.listEl.empty();
-    this.itemEls = [];
-    if (this.filteredItems.length === 0) {
-      this.listEl.createDiv({
-        cls: "ss-studio-node-context-menu-empty",
-        text: "No matching nodes.",
-      });
-      return;
-    }
-
-    for (const [index, item] of this.filteredItems.entries()) {
-      const itemEl = this.listEl.createDiv({
-        cls: "ss-studio-node-context-menu-item",
-      });
-      itemEl.setAttribute("role", "menuitem");
-      itemEl.tabIndex = 0;
-      this.itemEls.push(itemEl);
-
-      const content = itemEl.createDiv({
-        cls: "ss-studio-node-context-menu-item-content",
-      });
-      content.createDiv({
-        cls: "ss-studio-node-context-menu-item-title",
-        text: item.title,
-      });
-      content.createDiv({
-        cls: "ss-studio-node-context-menu-item-summary",
-        text: item.summary,
-      });
-
-      const commitSelection = (): void => {
-        const onSelect = this.onSelectDefinition;
-        this.hide();
-        onSelect?.(item.definition);
-      };
-
-      itemEl.addEventListener("pointermove", () => {
-        this.setActiveIndex(index, { scrollIntoView: false });
-      });
-      itemEl.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        commitSelection();
-      });
-      itemEl.addEventListener("keydown", (event) => {
-        if (event.key === "ArrowDown") {
-          event.preventDefault();
-          event.stopPropagation();
-          this.moveActiveItem(1);
-          return;
-        }
-        if (event.key === "ArrowUp") {
-          event.preventDefault();
-          event.stopPropagation();
-          this.moveActiveItem(-1);
-          return;
-        }
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          event.stopPropagation();
-          commitSelection();
-        }
-      });
-    }
-
-    this.refreshActiveStyles({ scrollIntoView: false });
-  }
-
-  private setActiveIndex(nextIndex: number, options?: { scrollIntoView?: boolean }): void {
-    if (this.filteredItems.length === 0) {
-      this.activeIndex = -1;
-      this.refreshActiveStyles({ scrollIntoView: false });
-      return;
-    }
-
-    const bounded = Math.max(0, Math.min(this.filteredItems.length - 1, nextIndex));
-    if (bounded === this.activeIndex) {
-      return;
-    }
-
-    this.activeIndex = bounded;
-    this.refreshActiveStyles({ scrollIntoView: options?.scrollIntoView });
-  }
-
-  private moveActiveItem(delta: number): void {
-    if (this.filteredItems.length === 0) {
-      return;
-    }
-
-    const count = this.filteredItems.length;
-    const current = this.activeIndex >= 0 ? this.activeIndex : 0;
-    const next = ((current + delta) % count + count) % count;
-    this.activeIndex = next;
-    this.refreshActiveStyles({ scrollIntoView: true });
-  }
-
-  private refreshActiveStyles(options?: { scrollIntoView?: boolean }): void {
-    for (const [index, itemEl] of this.itemEls.entries()) {
-      const isActive = index === this.activeIndex;
-      itemEl.classList.toggle("is-active", isActive);
-      itemEl.setAttribute("aria-selected", isActive ? "true" : "false");
-      if (isActive && options?.scrollIntoView) {
-        itemEl.scrollIntoView({
-          block: "nearest",
-        });
-      }
-    }
-  }
-
-  private selectActiveItem(): void {
-    if (this.filteredItems.length === 0) {
-      return;
-    }
-    const index = this.activeIndex >= 0 ? this.activeIndex : 0;
-    const item = this.filteredItems[index];
-    if (!item) {
-      return;
-    }
-    const onSelect = this.onSelectDefinition;
-    this.hide();
-    onSelect?.(item.definition);
+    itemEl.tabIndex = -1;
+    const content = itemEl.createDiv({
+      cls: "ss-studio-node-context-menu-item-content",
+    });
+    content.createDiv({
+      cls: "ss-studio-node-context-menu-item-title",
+      text: item.title,
+    });
+    content.createDiv({
+      cls: "ss-studio-node-context-menu-item-summary",
+      text: item.summary,
+    });
+    return itemEl;
   }
 
   private applyLayout(): void {
@@ -480,14 +393,21 @@ export class StudioNodeContextMenuOverlay {
   }
 
   private bindGlobalListeners(): void {
-    window.addEventListener("pointerdown", this.onWindowPointerDown, true);
-    window.addEventListener("keydown", this.onWindowKeyDown, true);
-    window.addEventListener("contextmenu", this.onWindowContextMenu, true);
+    if (!this.rootEl) {
+      return;
+    }
+    this.unbindGlobalListeners();
+    const ownerWindow = getStudioOwnerWindow(this.rootEl);
+    ownerWindow.addEventListener("pointerdown", this.onWindowPointerDown, true);
+    ownerWindow.addEventListener("keydown", this.onWindowKeyDown, true);
+    ownerWindow.addEventListener("contextmenu", this.onWindowContextMenu, true);
+    this.listenerWindow = ownerWindow;
   }
 
   private unbindGlobalListeners(): void {
-    window.removeEventListener("pointerdown", this.onWindowPointerDown, true);
-    window.removeEventListener("keydown", this.onWindowKeyDown, true);
-    window.removeEventListener("contextmenu", this.onWindowContextMenu, true);
+    this.listenerWindow?.removeEventListener("pointerdown", this.onWindowPointerDown, true);
+    this.listenerWindow?.removeEventListener("keydown", this.onWindowKeyDown, true);
+    this.listenerWindow?.removeEventListener("contextmenu", this.onWindowContextMenu, true);
+    this.listenerWindow = null;
   }
 }

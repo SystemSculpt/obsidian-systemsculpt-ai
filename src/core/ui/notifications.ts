@@ -1,82 +1,16 @@
 import { App, Notice } from "obsidian";
-
-let uiReady = false;
-const pendingNotices: { message: string; options: NotificationOptions }[] = [];
-
-/**
- * Call this once during plugin initialization to enable queued notices.
- */
-export function initializeNotificationQueue(app: App) {
-  app.workspace.onLayoutReady(() => {
-    uiReady = true;
-    for (const { message, options } of pendingNotices) {
-      new Notice(message, options.duration ?? 4000);
-    }
-    pendingNotices.length = 0;
-  });
-}
-
-/**
- * Show a notice immediately if UI is ready, else queue it to show after layout.
- */
-export function showNoticeWhenReady(app: App, message: string, options: NotificationOptions = {}) {
-  if (uiReady) {
-    new Notice(message, options.duration ?? 4000);
-  } else {
-    pendingNotices.push({ message, options });
-  }
-}
-import { showPopup } from "./modals/PopupModal";
+import { showPrompt } from "./modals/PromptModal";
+import { createSurfaceFragment, resolveSurfaceDomContext } from "./surface";
 
 interface NotificationOptions {
-  type?: "success" | "error" | "warning" | "info";
   duration?: number;
-  icon?: string;
 }
 
-interface AlertOptions {
+interface ConfirmOptions {
   title?: string;
   primaryButton?: string;
   secondaryButton?: string;
   icon?: string;
-  type?: "error" | "warning" | "info";
-}
-
-/**
- * Show a quick notification for non-critical information
- */
-
-/**
- * Show an alert popup for important messages that need user attention
- */
-export async function showAlert(
-  app: App,
-  message: string,
-  options: AlertOptions = {}
-): Promise<{ confirmed: boolean }> {
-  const {
-    title = options.type === "error"
-      ? "Error"
-      : options.type === "warning"
-      ? "Warning"
-      : "Alert",
-    primaryButton = "OK",
-    secondaryButton,
-    icon = options.type === "error"
-      ? "alert-circle"
-      : options.type === "warning"
-      ? "alert-triangle"
-      : "info",
-  } = options;
-
-  const result = await showPopup(app, message, {
-    title,
-    primaryButton,
-    secondaryButton,
-    icon,
-  });
-
-  return { confirmed: result?.confirmed || false };
 }
 
 /**
@@ -85,7 +19,7 @@ export async function showAlert(
 export async function showConfirm(
   app: App,
   message: string,
-  options: AlertOptions = {}
+  options: ConfirmOptions = {}
 ): Promise<{ confirmed: boolean }> {
   const {
     title = "Confirm Action",
@@ -94,7 +28,7 @@ export async function showConfirm(
     icon = "help-circle",
   } = options;
 
-  const result = await showPopup(app, message, {
+  const result = await showPrompt(app, message, {
     title,
     primaryButton,
     secondaryButton,
@@ -110,8 +44,8 @@ export async function showConfirm(
  * @param parts - An object containing the parts of the message.
  * @param options - Notification options.
  */
-export function displayNotice(app: App, parts: { title: string; path?: string; message?: string }, options: NotificationOptions = {}) {
-  const fragment = document.createDocumentFragment();
+export function displayNotice(parts: { title: string; path?: string; message?: string }, options: NotificationOptions = {}) {
+  const fragment = createSurfaceFragment(resolveSurfaceDomContext().document);
 
   // Title (e.g., "Switched to tab")
   const titleEl = fragment.createDiv({ cls: 'systemsculpt-notice-title' });

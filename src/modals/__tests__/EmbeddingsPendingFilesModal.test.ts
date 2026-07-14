@@ -112,7 +112,7 @@ describe("EmbeddingsPendingFilesModal", () => {
       mockManager.listPendingFiles.mockImplementation(() => new Promise(() => {}));
       modal.onOpen();
 
-      const loadingEl = (modal as any).loadingEl;
+      const loadingEl = (modal as any).listEl?.querySelector(".ss-ui-state");
       expect(loadingEl?.textContent).toContain("Collecting pending files");
     });
 
@@ -121,6 +121,42 @@ describe("EmbeddingsPendingFilesModal", () => {
       modal.onOpen();
 
       expect((modal as any).searchInput?.disabled).toBe(true);
+    });
+
+    it("ignores a pending load after close and renders only the reopened request", async () => {
+      let resolveStale!: (files: PendingEmbeddingFile[]) => void;
+      mockManager.listPendingFiles
+        .mockImplementationOnce(() => new Promise((resolve) => {
+          resolveStale = resolve;
+        }))
+        .mockResolvedValueOnce([
+          {
+            path: "notes/fresh.md",
+            reason: "missing",
+            lastModified: NOW,
+          },
+        ]);
+
+      const firstOpen = modal.onOpen();
+      await Promise.resolve();
+      modal.onClose();
+      const reopened = modal.onOpen();
+      await reopened;
+
+      expect((modal as any).listEl?.textContent).toContain("fresh.md");
+
+      resolveStale([
+        {
+          path: "notes/stale.md",
+          reason: "missing",
+          lastModified: NOW,
+        },
+      ]);
+      await firstOpen;
+
+      expect(mockManager.listPendingFiles).toHaveBeenCalledTimes(2);
+      expect((modal as any).listEl?.textContent).toContain("fresh.md");
+      expect((modal as any).listEl?.textContent).not.toContain("stale.md");
     });
   });
 
@@ -165,8 +201,8 @@ describe("EmbeddingsPendingFilesModal", () => {
       mockManager.listPendingFiles.mockResolvedValue([]);
       await modal.onOpen();
 
-      const emptyState = (modal as any).listEl?.querySelector(".ss-modal__empty-state");
-      expect(emptyState?.textContent).toContain("All eligible markdown files already have embeddings");
+      const emptyState = (modal as any).listEl?.querySelector(".ss-ui-state.is-success");
+      expect(emptyState?.textContent).toContain("All eligible Markdown files have embeddings");
     });
 
     it("shows 'no matches' when filter returns empty", async () => {
@@ -174,7 +210,7 @@ describe("EmbeddingsPendingFilesModal", () => {
 
       (modal as any).applyFilter("nonexistent-xyz");
 
-      const emptyState = (modal as any).listEl?.querySelector(".ss-modal__empty-state");
+      const emptyState = (modal as any).listEl?.querySelector(".ss-ui-state.is-empty");
       expect(emptyState?.textContent).toContain("No files match this filter");
     });
 
@@ -239,24 +275,19 @@ describe("EmbeddingsPendingFilesModal", () => {
       expect(plugin.app.workspace.getLeaf().openFile).toHaveBeenCalled();
     });
 
-    it("opens file on Enter key", async () => {
+    it("uses a native button for keyboard activation", async () => {
       await modal.onOpen();
 
       const item = (modal as any).listEl?.querySelector(".ss-modal__item");
-      const event = new KeyboardEvent("keypress", { key: "Enter" });
-      item?.dispatchEvent(event);
-
-      expect(plugin.app.workspace.getLeaf().openFile).toHaveBeenCalled();
+      expect(item?.tagName).toBe("BUTTON");
+      expect(item?.getAttribute("type")).toBe("button");
     });
 
-    it("opens file on Space key", async () => {
+    it("gives each native file action a descriptive accessible name", async () => {
       await modal.onOpen();
 
       const item = (modal as any).listEl?.querySelector(".ss-modal__item");
-      const event = new KeyboardEvent("keypress", { key: " " });
-      item?.dispatchEvent(event);
-
-      expect(plugin.app.workspace.getLeaf().openFile).toHaveBeenCalled();
+      expect(item?.getAttribute("aria-label")).toBe("Open notes/machine-learning.md");
     });
   });
 
@@ -290,6 +321,15 @@ describe("EmbeddingsPendingFilesModal", () => {
       expect(written).toBe("notes/machine-learning.md");
     });
 
+    it("disables Copy and never copies hidden paths when a filter has no matches", async () => {
+      await modal.onOpen();
+      (modal as any).applyFilter("nonexistent-xyz");
+
+      expect((modal as any).copyButtons.every((button: HTMLButtonElement) => button.disabled)).toBe(true);
+      await (modal as any).copyPaths();
+      expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
+    });
+
     it("enables copy buttons when files exist", async () => {
       await modal.onOpen();
 
@@ -302,7 +342,7 @@ describe("EmbeddingsPendingFilesModal", () => {
       mockManager.listPendingFiles.mockRejectedValue(new Error("Network error"));
       await modal.onOpen();
 
-      const errorEl = (modal as any).listEl?.querySelector(".ss-modal__error");
+      const errorEl = (modal as any).listEl?.querySelector(".ss-ui-state.is-error");
       expect(errorEl?.textContent).toContain("Network error");
     });
 
@@ -337,8 +377,8 @@ describe("EmbeddingsPendingFilesModal", () => {
       expect((modal as any).formatReason("modified")).toBe("Needs refresh after edits");
     });
 
-    it("formats 'schema-mismatch' as 'Provider/config changed'", () => {
-      expect((modal as any).formatReason("schema-mismatch")).toBe("Provider/config changed");
+    it("formats 'schema-mismatch' as a managed configuration change", () => {
+      expect((modal as any).formatReason("schema-mismatch")).toBe("AI configuration changed");
     });
 
     it("formats 'metadata-missing' correctly", () => {
@@ -492,7 +532,7 @@ describe("EmbeddingsPendingFilesModal", () => {
       mockManager.listPendingFiles.mockResolvedValue([]);
       await modal.onOpen();
 
-      expect((modal as any).summaryTextEl?.textContent).toContain("All eligible markdown files");
+      expect((modal as any).summaryTextEl?.textContent).toContain("All eligible Markdown files");
     });
   });
 });

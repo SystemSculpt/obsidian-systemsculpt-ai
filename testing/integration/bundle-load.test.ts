@@ -13,6 +13,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import ts from "typescript";
+import { exerciseBuiltStudioGenerations } from "./studio-generation-bundle-harness";
 
 const BUNDLE_PATH = path.resolve(__dirname, "..", "..", "main.js");
 const MANIFEST_PATH = path.resolve(__dirname, "..", "..", "manifest.json");
@@ -51,9 +52,12 @@ describe("built bundle (main.js)", () => {
     // Settings migration ran: loadData returned null, so defaults applied.
     expect(plugin.settings).toBeDefined();
     expect(typeof plugin.settings).toBe("object");
-    expect(plugin.settings.settingsMode).toBe("standard");
-    expect(Array.isArray(plugin.settings.customProviders)).toBe(true);
-    expect(plugin.settings.selectedModelId).toBe("systemsculpt@@systemsculpt/ai-agent");
+    expect(plugin.settings.schemaVersion).toBe(8);
+    expect(plugin.settings.licenseKey).toBe("");
+    expect(plugin.settings).not.toHaveProperty("settingsMode");
+    expect(plugin.settings).not.toHaveProperty("customProviders");
+    expect(plugin.settings).not.toHaveProperty("selectedModelId");
+    expect(plugin.settings).not.toHaveProperty("serverUrl");
 
     // Core surface registered through the mock host.
     expect(plugin._commands.length).toBeGreaterThan(0);
@@ -62,14 +66,23 @@ describe("built bundle (main.js)", () => {
     const commandIds = plugin._commands.map((command: { id: string }) => command.id);
     expect(new Set(commandIds).size).toBe(commandIds.length);
 
-    // Contrast with the mobile guard (bundle-load.mobile.test.ts): the
-    // desktop-only recorder service that mobile withholds DOES initialize
-    // off-mobile. This is what makes "withheld on mobile" a real gate
-    // (src/main.ts:1689) rather than a vacuous default — a regression in either
-    // direction (recorder on mobile, or recorder missing on desktop) red-builds.
+    // The desktop recorder is part of the normal installed plugin surface.
     expect(plugin.recorderService).not.toBeNull();
 
     plugin.unload();
+  });
+
+  it("executes immutable Studio create/commit/restart/binary recovery through the built production adapter seam", async () => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const bundleModule = require(BUNDLE_PATH);
+    await exerciseBuiltStudioGenerations(bundleModule);
+  });
+
+  it("does not ship the retired Readwise integration", () => {
+    const code = readFileSync(BUNDLE_PATH, "utf8");
+
+    expect(code).not.toContain("ReadwiseService");
+    expect(code).not.toContain("ReadwiseSyncWidget");
   });
 
   it("does not ship browser-native dynamic imports for Node builtins (#235)", () => {
@@ -97,11 +110,17 @@ describe("built bundle (main.js)", () => {
     };
     visit(source);
 
-    // Electron's renderer treats native import() as a URL fetch. A specifier
-    // such as node:fs therefore rejects with "Failed to fetch dynamically
-    // imported module: node:fs" instead of loading the Node builtin. Desktop
-    // code must use the plugin's lazy loadDesktopOnly(() => require(...))
-    // boundary, which also keeps mobile startup safe.
+    // Electron's renderer treats native import() as a URL fetch. Desktop code
+    // must use the plugin's lazy loadDesktopOnly(() => require(...)) seam.
     expect(dynamicNodeImports).toEqual([]);
+  });
+
+  it("does not ship the retired generic HTTP MCP runtime", () => {
+    const code = readFileSync(BUNDLE_PATH, "utf8");
+
+    expect(code).not.toContain("HTTPAdapter");
+    expect(code).not.toContain('"tools/list"');
+    expect(code).not.toContain('"tools/call"');
+    expect(code).not.toContain("Invalid HTTP server configuration");
   });
 });

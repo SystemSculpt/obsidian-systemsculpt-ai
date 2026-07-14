@@ -1,0 +1,884 @@
+{
+  "contract_version": "managed-job-protocol-v1",
+  "negotiation": {
+    "required_headers": {
+      "x-systemsculpt-contract": "managed-capabilities-v2",
+      "x-systemsculpt-job-contract": "managed-job-protocol-v1",
+      "x-systemsculpt-capability": "<descriptor.capability>"
+    },
+    "request_id_header": "x-request-id",
+    "error_content_type": "application/json",
+    "json_content_type": {
+      "media_type": "application/json",
+      "optional_charset": "utf-8"
+    }
+  },
+  "descriptors": [
+    {
+      "capability": "transcription",
+      "auth": {
+        "type": "license",
+        "header": "x-license-key"
+      },
+      "version": {
+        "header": "x-plugin-version",
+        "required_on": [
+          "create",
+          "upload_complete",
+          "start"
+        ]
+      },
+      "idempotency": {
+        "header": "idempotency-key",
+        "required_on": [
+          "create",
+          "upload_complete",
+          "start"
+        ]
+      },
+      "operations": [
+        {
+          "name": "create",
+          "method": "POST",
+          "path": "/api/plugin/audio/transcriptions/jobs",
+          "response_transport": "json"
+        },
+        {
+          "name": "part_url",
+          "method": "GET",
+          "path": "/api/plugin/audio/transcriptions/jobs/{jobId}/upload/part-url",
+          "response_transport": "json"
+        },
+        {
+          "name": "upload_complete",
+          "method": "POST",
+          "path": "/api/plugin/audio/transcriptions/jobs/{jobId}/upload/complete",
+          "response_transport": "json"
+        },
+        {
+          "name": "upload_abort",
+          "method": "POST",
+          "path": "/api/plugin/audio/transcriptions/jobs/{jobId}/upload/abort",
+          "response_transport": "json"
+        },
+        {
+          "name": "start",
+          "method": "POST",
+          "path": "/api/plugin/audio/transcriptions/jobs/{jobId}/start",
+          "response_transport": "json"
+        },
+        {
+          "name": "status",
+          "method": "GET",
+          "path": "/api/plugin/audio/transcriptions/jobs/{jobId}",
+          "response_transport": "json"
+        }
+      ],
+      "request_schema": {
+        "create": {
+          "required": [
+            "filename",
+            "contentType",
+            "contentLengthBytes"
+          ],
+          "optional": [
+            "timestamped",
+            "language"
+          ],
+          "limits": {
+            "contentLengthBytes": {
+              "min": 1,
+              "max": 524288000
+            },
+            "language_max_chars": 64
+          }
+        },
+        "part_url": {
+          "query_required": [
+            "partNumber"
+          ],
+          "partNumber": {
+            "min": 1,
+            "max": 50
+          }
+        },
+        "upload_complete": {
+          "required": [
+            "parts"
+          ],
+          "part": [
+            "partNumber",
+            "etag"
+          ],
+          "parts": {
+            "min_items": 1,
+            "max_items": 50,
+            "unique_partNumber": true
+          }
+        },
+        "upload_abort": {
+          "body": "empty"
+        },
+        "start": {
+          "body": "empty"
+        },
+        "status": {
+          "query": []
+        }
+      },
+      "response_schema": {
+        "create": {
+          "job": [
+            "id",
+            "status",
+            "filename",
+            "content_type",
+            "content_length_bytes",
+            "expires_at"
+          ],
+          "upload": [
+            "part_size_bytes",
+            "total_parts",
+            "part_url_expires_in_seconds"
+          ]
+        },
+        "part_url": {
+          "part": [
+            "part_number",
+            "method",
+            "url",
+            "url_expires_in_seconds",
+            "expected_content_length_bytes"
+          ]
+        },
+        "upload_complete": {
+          "job": [
+            "id",
+            "status"
+          ]
+        },
+        "upload_abort": {
+          "job": [
+            "id",
+            "status"
+          ]
+        },
+        "start": {
+          "job": [
+            "id",
+            "status"
+          ],
+          "optional": [
+            "transcript_urls",
+            "usage_summary"
+          ]
+        },
+        "status": {
+          "job": [
+            "id",
+            "status",
+            "filename",
+            "content_type",
+            "content_length_bytes",
+            "expires_at",
+            "error"
+          ],
+          "fields": [
+            "transcript",
+            "progress"
+          ]
+        }
+      },
+      "upload_part_fields": [
+        "partNumber",
+        "etag"
+      ],
+      "statuses": {
+        "non_terminal": [
+          "uploading",
+          "queued",
+          "processing"
+        ],
+        "terminal": [
+          "succeeded",
+          "failed",
+          "expired"
+        ],
+        "success": "succeeded"
+      },
+      "cancellation": {
+        "supported": false,
+        "operation": null
+      },
+      "upload_abort": {
+        "supported": true,
+        "operation": "upload_abort",
+        "terminal_status": "failed"
+      },
+      "resumability": {
+        "multipart": true,
+        "status_polling": true,
+        "processing_resume": true
+      },
+      "expiry": {
+        "source_fields": [
+          "audioExpiresAt",
+          "expiresInSeconds"
+        ],
+        "upload_part_url_seconds": 900,
+        "result_url_seconds": 1800,
+        "source_retention_hours": 24
+      },
+      "result_operation": "status",
+      "download_operation": null,
+      "limits": {
+        "max_source_bytes": 524288000,
+        "max_multipart_parts": 50
+      },
+      "metering_settlement_point": "start_terminal_processing_outcome",
+      "status_discriminants": {
+        "create": [
+          "uploading"
+        ],
+        "upload_complete": [
+          "queued"
+        ],
+        "upload_abort": [
+          "failed"
+        ],
+        "start": [
+          "queued",
+          "processing",
+          "succeeded",
+          "failed"
+        ],
+        "status": [
+          "uploading",
+          "queued",
+          "processing",
+          "succeeded",
+          "failed",
+          "expired"
+        ]
+      },
+      "public_terminal_errors": {
+        "failed": {
+          "code": "transcription_failed",
+          "message": "Transcription job failed."
+        },
+        "expired": {
+          "code": "job_expired",
+          "message": "The managed job expired."
+        }
+      }
+    },
+    {
+      "capability": "document_processing",
+      "auth": {
+        "type": "license",
+        "header": "x-license-key"
+      },
+      "version": {
+        "header": "x-plugin-version",
+        "required_on": [
+          "create",
+          "upload_complete",
+          "start"
+        ]
+      },
+      "idempotency": {
+        "header": "idempotency-key",
+        "required_on": [
+          "create",
+          "upload_complete",
+          "start"
+        ]
+      },
+      "operations": [
+        {
+          "name": "create",
+          "method": "POST",
+          "path": "/api/plugin/documents/jobs",
+          "response_transport": "json"
+        },
+        {
+          "name": "part_url",
+          "method": "GET",
+          "path": "/api/plugin/documents/jobs/{documentId}/upload/part-url",
+          "response_transport": "json"
+        },
+        {
+          "name": "upload_complete",
+          "method": "POST",
+          "path": "/api/plugin/documents/jobs/{documentId}/upload/complete",
+          "response_transport": "json"
+        },
+        {
+          "name": "upload_abort",
+          "method": "POST",
+          "path": "/api/plugin/documents/jobs/{documentId}/upload/abort",
+          "response_transport": "json"
+        },
+        {
+          "name": "start",
+          "method": "POST",
+          "path": "/api/plugin/documents/jobs/{documentId}/start",
+          "response_transport": "json"
+        },
+        {
+          "name": "status",
+          "method": "GET",
+          "path": "/api/plugin/documents/{documentId}",
+          "response_transport": "json"
+        },
+        {
+          "name": "download",
+          "method": "GET",
+          "path": "/api/plugin/documents/{documentId}/download",
+          "response_transport": "json"
+        }
+      ],
+      "request_schema": {
+        "create": {
+          "required": [
+            "filename",
+            "contentType",
+            "contentLengthBytes"
+          ],
+          "optional": [],
+          "contentType_enum": [
+            "application/pdf",
+            "image/png",
+            "image/jpeg",
+            "image/jpg",
+            "image/webp"
+          ],
+          "limits": {
+            "contentLengthBytes": {
+              "min": 1,
+              "max": 26214400
+            }
+          }
+        },
+        "part_url": {
+          "query_required": [
+            "partNumber"
+          ],
+          "partNumber": {
+            "min": 1,
+            "max": 3
+          }
+        },
+        "upload_complete": {
+          "required": [
+            "parts"
+          ],
+          "part": [
+            "partNumber",
+            "etag"
+          ],
+          "parts": {
+            "min_items": 1,
+            "max_items": 3,
+            "unique_partNumber": true
+          }
+        },
+        "upload_abort": {
+          "body": "empty"
+        },
+        "start": {
+          "body": "empty"
+        },
+        "status": {
+          "query": []
+        },
+        "download": {
+          "query": []
+        }
+      },
+      "response_schema": {
+        "create": {
+          "document": [
+            "id",
+            "status"
+          ],
+          "upload": [
+            "part_size_bytes",
+            "total_parts",
+            "part_url_expires_in_seconds",
+            "expires_at"
+          ]
+        },
+        "part_url": {
+          "part": [
+            "part_number",
+            "method",
+            "url",
+            "url_expires_in_seconds",
+            "expected_content_length_bytes"
+          ]
+        },
+        "upload_complete": {
+          "document": [
+            "id",
+            "status"
+          ]
+        },
+        "upload_abort": {
+          "document": [
+            "id",
+            "status"
+          ]
+        },
+        "start": {
+          "document": [
+            "id",
+            "status"
+          ]
+        },
+        "status": {
+          "document": [
+            "id",
+            "status",
+            "error",
+            "progress"
+          ]
+        },
+        "download": {
+          "result": [
+            "content",
+            "text",
+            "markdown",
+            "images",
+            "metadata"
+          ]
+        }
+      },
+      "upload_part_fields": [
+        "partNumber",
+        "etag"
+      ],
+      "statuses": {
+        "non_terminal": [
+          "uploading",
+          "queued",
+          "processing"
+        ],
+        "terminal": [
+          "completed",
+          "failed"
+        ],
+        "success": "completed"
+      },
+      "cancellation": {
+        "supported": false,
+        "operation": null
+      },
+      "upload_abort": {
+        "supported": true,
+        "operation": "upload_abort",
+        "terminal_status": "failed"
+      },
+      "resumability": {
+        "multipart": true,
+        "status_polling": true,
+        "processing_resume": true
+      },
+      "expiry": {
+        "source_fields": [
+          "expiresAt"
+        ],
+        "upload_part_url_seconds": 900,
+        "result_url_seconds": null,
+        "source_retention_hours": null
+      },
+      "result_operation": "status",
+      "download_operation": "download",
+      "limits": {
+        "max_source_bytes": 26214400,
+        "max_multipart_parts": 3
+      },
+      "metering_settlement_point": "start_terminal_processing_outcome",
+      "status_discriminants": {
+        "create": [
+          "uploading"
+        ],
+        "upload_complete": [
+          "queued"
+        ],
+        "upload_abort": [
+          "failed"
+        ],
+        "start": [
+          "queued",
+          "processing",
+          "completed",
+          "failed"
+        ],
+        "status": [
+          "uploading",
+          "queued",
+          "processing",
+          "completed",
+          "failed"
+        ]
+      },
+      "public_terminal_errors": {
+        "failed": {
+          "code": "document_processing_failed",
+          "message": "Document processing job failed."
+        }
+      }
+    },
+    {
+      "capability": "image_generation",
+      "auth": {
+        "type": "license",
+        "header": "x-license-key"
+      },
+      "version": {
+        "header": "x-plugin-version",
+        "required_on": []
+      },
+      "idempotency": {
+        "header": "idempotency-key",
+        "required_on": [
+          "generation_create"
+        ]
+      },
+      "operations": [
+        {
+          "name": "input_prepare",
+          "method": "POST",
+          "path": "/api/plugin/images/inputs/prepare",
+          "response_transport": "json"
+        },
+        {
+          "name": "generation_create",
+          "method": "POST",
+          "path": "/api/plugin/images/generations/jobs",
+          "response_transport": "json"
+        },
+        {
+          "name": "generation_list",
+          "method": "GET",
+          "path": "/api/plugin/images/generations/jobs",
+          "response_transport": "json"
+        },
+        {
+          "name": "generation_status",
+          "method": "GET",
+          "path": "/api/plugin/images/generations/jobs/{jobId}",
+          "response_transport": "json"
+        }
+      ],
+      "request_schema": {
+        "input_prepare": {
+          "required": [
+            "input_images"
+          ],
+          "input_image": [
+            "mime_type",
+            "size_bytes",
+            "sha256"
+          ],
+          "limits": {
+            "input_images": {
+              "min_items": 1,
+              "max_items": 4
+            },
+            "size_bytes": {
+              "min": 1,
+              "max": 20971520
+            },
+            "mime_type_enum": [
+              "image/png",
+              "image/jpeg",
+              "image/webp"
+            ],
+            "sha256_pattern": "^[a-f0-9]{64}$"
+          }
+        },
+        "generation_create": {
+          "required": [
+            "prompt"
+          ],
+          "optional": [
+            "input_images",
+            "options"
+          ],
+          "input_image_uploaded": [
+            "type",
+            "key",
+            "mime_type",
+            "size_bytes",
+            "sha256"
+          ],
+          "options": [
+            "count",
+            "aspect_ratio",
+            "image_size",
+            "seed"
+          ],
+          "limits": {
+            "prompt_chars": {
+              "min": 1,
+              "max": 8000
+            },
+            "input_images": {
+              "min_items": 0,
+              "max_items": 4
+            },
+            "uploaded_size_bytes": {
+              "min": 1,
+              "max": 20971520
+            },
+            "key_max_chars": 512,
+            "count": {
+              "min": 1,
+              "max": 4
+            },
+            "seed": {
+              "min": 0,
+              "max": 2147483647
+            },
+            "aspect_ratio_enum": [
+              "1:1",
+              "4:3",
+              "3:4",
+              "16:9",
+              "9:16",
+              "3:2",
+              "2:3",
+              "21:9",
+              "match_input_image"
+            ],
+            "image_size_enum": [
+              "1K"
+            ],
+            "mime_type_enum": [
+              "image/png",
+              "image/jpeg",
+              "image/webp"
+            ]
+          }
+        },
+        "generation_list": {
+          "query": [
+            "limit",
+            "before",
+            "status"
+          ],
+          "limits": {
+            "limit": {
+              "min": 1,
+              "max": 100
+            },
+            "before": "date-time",
+            "status_enum": [
+              "queued",
+              "processing",
+              "succeeded",
+              "failed",
+              "expired"
+            ]
+          }
+        },
+        "generation_status": {
+          "query": []
+        }
+      },
+      "response_schema": {
+        "input_prepare": {
+          "fields": [
+            "contract",
+            "upload_id",
+            "expires_at",
+            "input_uploads"
+          ],
+          "input_upload": [
+            "index",
+            "upload",
+            "input_image"
+          ],
+          "upload": [
+            "method",
+            "url",
+            "headers",
+            "expires_in_seconds",
+            "expires_at"
+          ],
+          "input_image": [
+            "type",
+            "key",
+            "mime_type",
+            "size_bytes",
+            "sha256"
+          ]
+        },
+        "generation_create": {
+          "fields": [
+            "job",
+            "poll_url"
+          ],
+          "job": [
+            "id",
+            "status",
+            "created_at",
+            "expires_at",
+            "error"
+          ]
+        },
+        "generation_list": {
+          "fields": [
+            "items",
+            "next_before"
+          ],
+          "item": [
+            "job",
+            "outputs",
+            "usage"
+          ],
+          "job": [
+            "id",
+            "status",
+            "created_at",
+            "processing_started_at",
+            "completed_at",
+            "expires_at",
+            "error",
+            "attempt_count"
+          ],
+          "output": [
+            "index",
+            "mime_type",
+            "size_bytes",
+            "width",
+            "height",
+            "url",
+            "url_expires_in_seconds"
+          ],
+          "usage": [
+            "raw_usd",
+            "cost_source",
+            "estimated"
+          ]
+        },
+        "generation_status": {
+          "fields": [
+            "job",
+            "outputs",
+            "usage"
+          ],
+          "optional": [
+            "poll_after_ms"
+          ],
+          "job": [
+            "id",
+            "status",
+            "created_at",
+            "processing_started_at",
+            "completed_at",
+            "expires_at",
+            "error",
+            "attempt_count"
+          ],
+          "output": [
+            "index",
+            "mime_type",
+            "size_bytes",
+            "width",
+            "height",
+            "url",
+            "url_expires_in_seconds"
+          ],
+          "usage": [
+            "raw_usd",
+            "cost_source",
+            "estimated"
+          ]
+        }
+      },
+      "upload_part_fields": null,
+      "statuses": {
+        "non_terminal": [
+          "queued",
+          "processing"
+        ],
+        "terminal": [
+          "succeeded",
+          "failed",
+          "expired"
+        ],
+        "success": "succeeded"
+      },
+      "cancellation": {
+        "supported": false,
+        "operation": null
+      },
+      "upload_abort": {
+        "supported": false,
+        "operation": null,
+        "terminal_status": null
+      },
+      "resumability": {
+        "multipart": false,
+        "status_polling": true,
+        "processing_resume": false
+      },
+      "expiry": {
+        "source_fields": [
+          "expires_at",
+          "url_expires_in_seconds"
+        ],
+        "input_upload_url_seconds": 900,
+        "result_url_seconds": 1800,
+        "result_retention_days": 90
+      },
+      "result_operation": "generation_status",
+      "download_operation": null,
+      "limits": {
+        "max_images_per_job": 4,
+        "max_input_images": 4,
+        "max_input_image_bytes": 20971520,
+        "max_prompt_chars": 8000,
+        "max_list_limit": 100,
+        "max_url_chars": 2048
+      },
+      "metering_settlement_point": "background_generation_terminal_outcome",
+      "status_discriminants": {
+        "generation_create": [
+          "queued",
+          "processing",
+          "succeeded",
+          "failed",
+          "expired"
+        ],
+        "generation_list": [
+          "queued",
+          "processing",
+          "succeeded",
+          "failed",
+          "expired"
+        ],
+        "generation_status": [
+          "queued",
+          "processing",
+          "succeeded",
+          "failed",
+          "expired"
+        ]
+      },
+      "public_terminal_errors": {
+        "failed": {
+          "code": "image_generation_failed",
+          "message": "Image generation job failed."
+        },
+        "expired": {
+          "code": "job_expired",
+          "message": "The managed job expired."
+        }
+      }
+    }
+  ]
+}

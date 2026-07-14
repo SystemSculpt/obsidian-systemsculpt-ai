@@ -55,6 +55,28 @@ export interface WorkflowSkipEntry {
   reason?: string;
 }
 
+export type WorkflowManagedTextPhase =
+  | "queued"
+  | "dispatching"
+  | "ambiguous"
+  | "failed"
+  | "local_commit_pending"
+  | "completed";
+
+export interface WorkflowManagedTextOperation {
+  operationId: string;
+  automationId: string;
+  sourcePath: string;
+  targetPath: string;
+  phase: WorkflowManagedTextPhase;
+  admissionReason?: string;
+  errorCode?: string;
+  requestId?: string;
+  retryable?: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface WorkflowEngineSettings {
   enabled: boolean;
   inboxRoutingEnabled: boolean;
@@ -63,6 +85,7 @@ export interface WorkflowEngineSettings {
   autoTranscribeInboxNotes: boolean;
   automations: Record<string, WorkflowAutomationState>;
   skippedFiles?: Record<string, WorkflowSkipEntry>;
+  managedTextOperations?: Record<string, WorkflowManagedTextOperation>;
 }
 
 export const WORKFLOW_AUTOMATION_IDS = {
@@ -108,5 +131,6 @@ export function createDefaultWorkflowEngineSettings(): WorkflowEngineSettings {
     autoTranscribeInboxNotes: true,
     automations: createDefaultWorkflowAutomationsState(),
     skippedFiles: {},
+    managedTextOperations: {},
   };
 }

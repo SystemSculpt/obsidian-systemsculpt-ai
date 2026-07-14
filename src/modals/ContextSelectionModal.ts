@@ -1,384 +1,296 @@
-import { App, TFile, Modal, Setting, setIcon, ButtonComponent } from "obsidian";
+import { App, Notice, TFile, setIcon } from "obsidian";
+import { StandardModal } from "../core/ui/modals/standard/StandardModal";
+import { createUiAction, getSurfaceOwnerWindow } from "../core/ui/surface";
 
 const FILE_TYPES = {
   text: { extensions: ["md", "txt"], icon: "file-text", label: "Text" },
-  documents: { extensions: ["pdf", "doc", "docx", "ppt", "pptx", "xls", "xlsx"], icon: "file", label: "Documents" },
+  documents: { extensions: ["pdf"], icon: "file", label: "Documents" },
   images: { extensions: ["png", "jpg", "jpeg", "svg", "webp"], icon: "image", label: "Images" },
-  audio: { extensions: ["mp3", "wav", "m4a", "ogg", "webm"], icon: "headphones", label: "Audio" }
-};
+  audio: { extensions: ["mp3", "wav", "m4a", "ogg", "webm"], icon: "headphones", label: "Audio" },
+} as const;
+
+type ContextFileType = keyof typeof FILE_TYPES;
+type ContextFilter = ContextFileType | "all";
 
 interface FileItem {
   file: TFile;
-  type: keyof typeof FILE_TYPES;
+  type: ContextFileType;
   searchText: string;
 }
 
 export interface ContextSelectionModalOptions {
   isFileAlreadyInContext?: (file: TFile) => boolean;
-  initialFilter?: keyof typeof FILE_TYPES | "all";
+  initialFilter?: ContextFilter;
   initialSearchQuery?: string;
   initialSelectedPaths?: string[];
   autoFocusSearch?: boolean;
 }
 
-export class ContextSelectionModal extends Modal {
-  private files: FileItem[] = [];
+/** Keyboard-native, multi-select vault context picker on the shared modal shell. */
+export class ContextSelectionModal extends StandardModal {
+  private readonly files: FileItem[];
   private filteredFiles: FileItem[] = [];
-  private selectedFiles: Set<TFile> = new Set();
-  private currentFilter: keyof typeof FILE_TYPES | "all" = "all";
-  private searchQuery = "";
-  private onSelect: (files: TFile[]) => void;
-  private addButton: ButtonComponent | null = null;
+  private readonly selectedFiles = new Set<TFile>();
+  private currentFilter: ContextFilter;
+  private searchQuery: string;
+  private readonly onSelect: (files: TFile[]) => void | Promise<void>;
   private readonly isFileAlreadyInContext?: (file: TFile) => boolean;
-  private readonly MAX_RENDERED_FILES = 100;
-  private renderedCount = 0;
-  private listContainer: HTMLElement | null = null;
-  private loadMoreButton: HTMLButtonElement | null = null;
-  private fileItemControlsByPath = new Map<string, { el: HTMLElement; checkbox: HTMLInputElement }>();
   private readonly initialSearchQuery: string;
   private readonly autoFocusSearch: boolean;
+  private readonly maxRenderedFiles = 100;
+  private renderedCount = 0;
+  private listContainer: HTMLUListElement | null = null;
+  private searchInput: HTMLInputElement | null = null;
+  private addButton: HTMLButtonElement | null = null;
+  private cancelButton: HTMLButtonElement | null = null;
+  private loadMoreButton: HTMLButtonElement | null = null;
+  private readonly filterButtons = new Map<ContextFilter, HTMLButtonElement>();
+  private readonly fileItemControlsByPath = new Map<string, { el: HTMLLIElement; checkbox: HTMLInputElement }>();
+  private processing = false;
 
-  constructor(app: App, onSelect: (files: TFile[]) => void, _plugin: unknown, options?: ContextSelectionModalOptions) {
+  constructor(
+    app: App,
+    onSelect: (files: TFile[]) => void | Promise<void>,
+    _plugin: unknown,
+    options: ContextSelectionModalOptions = {},
+  ) {
     super(app);
     this.onSelect = onSelect;
-    this.isFileAlreadyInContext = options?.isFileAlreadyInContext;
-    this.initialSearchQuery = options?.initialSearchQuery?.trim() ?? "";
-    this.autoFocusSearch = options?.autoFocusSearch ?? true;
-    this.currentFilter = options?.initialFilter ?? "all";
+    this.isFileAlreadyInContext = options.isFileAlreadyInContext;
+    this.initialSearchQuery = options.initialSearchQuery?.trim() ?? "";
     this.searchQuery = this.initialSearchQuery.toLowerCase();
-    this.initializeFiles();
-    this.applyInitialSelection(options?.initialSelectedPaths);
-    this.applyFilters();
+    this.autoFocusSearch = options.autoFocusSearch ?? true;
+    this.currentFilter = options.initialFilter ?? "all";
+    this.files = this.readSupportedFiles();
+    this.applyInitialSelection(options.initialSelectedPaths);
+    this.updateFilteredFiles();
+    this.setSize("large");
+    this.modalEl.addClass("ss-context-selection-modal");
   }
 
-  onOpen() {
-    const { contentEl } = this;
-    contentEl.empty();
-    this.renderedCount = 0;
-    
-    // Simple title using Obsidian's titleEl
-    this.titleEl.setText("Add Context Files");
-    
-    // Search using native Setting component
-    new Setting(contentEl)
-      .setName("Search files")
-      .addText(text => {
-        text.inputEl.value = this.initialSearchQuery;
-        text
-          .setPlaceholder("Type to search...")
-          .onChange(value => {
-            this.searchQuery = value.toLowerCase();
-            this.applyFilters();
-          });
-        if (this.autoFocusSearch) {
-          setTimeout(() => text.inputEl.focus(), 100);
-        }
-      });
-
-    // Filter buttons using simple div
-    const filterContainer = contentEl.createDiv("ss-context-filter-container");
-
-    const createFilterButton = (
-      filter: keyof typeof FILE_TYPES | "all",
-      label: string,
-      icon?: string
-    ) => {
-      const isActive = this.currentFilter === filter;
-      const btn = filterContainer.createEl("button", {
-        cls: `ss-context-filter-btn${isActive ? " is-active" : ""}`,
-      });
-      if (icon) {
-        const iconEl = btn.createSpan();
-        setIcon(iconEl, icon);
-      }
-      btn.createSpan({ text: label });
-      btn.onclick = () => this.setFilter(filter, btn);
-      return btn;
-    };
-
-    createFilterButton("all", "All");
-
-    // Type filters
-    Object.entries(FILE_TYPES).forEach(([type, info]) => {
-      createFilterButton(type as keyof typeof FILE_TYPES, info.label, info.icon);
+  onOpen(): void {
+    super.onOpen();
+    this.addTitle("Add context files");
+    this.searchInput = this.addSearchBar("Search files", (query) => {
+      this.searchQuery = query.trim().toLowerCase();
+      this.applyFilters();
     });
+    this.searchInput.value = this.initialSearchQuery;
+    this.searchInput.setAttribute("aria-label", "Search files");
 
-    // File list container
-    const listContainer = contentEl.createDiv("ss-context-file-list");
-    this.listContainer = listContainer;
-    this.renderFileList(listContainer);
+    const filters = this.contentEl.createDiv({
+      cls: "ss-context-filter-container",
+      attr: { role: "toolbar", "aria-label": "File type" },
+    });
+    this.createFilterButton(filters, "all", "All");
+    for (const [type, info] of Object.entries(FILE_TYPES)) {
+      this.createFilterButton(filters, type as ContextFileType, info.label, info.icon);
+    }
 
-    // Simple button container using Setting for consistency
-    new Setting(contentEl)
-      .addButton(btn => btn
-        .setButtonText("Cancel")
-        .onClick(() => this.close()))
-      .addButton(btn => {
-        this.addButton = btn;
-        this.updateAddButton(btn);
-        btn.onClick(async () => {
-          await this.handleSelection();
-        });
-      });
+    this.listContainer = this.contentEl.createEl("ul", {
+      cls: "ss-context-file-list",
+      attr: { "aria-label": "Vault files" },
+    });
+    this.renderFileList();
+
+    this.cancelButton = this.addActionButton("Cancel", () => this.close());
+    this.addButton = this.addActionButton("Add files", () => void this.handleSelection(), true);
+    this.updateAddButton();
+
+    if (this.autoFocusSearch) {
+      getSurfaceOwnerWindow(this.modalEl).setTimeout(() => this.searchInput?.focus(), 0);
+    }
   }
 
-  onClose() {
-    const { contentEl } = this;
-    contentEl.empty();
+  onClose(): void {
     this.selectedFiles.clear();
     this.fileItemControlsByPath.clear();
+    this.filterButtons.clear();
     this.listContainer = null;
+    this.searchInput = null;
+    this.addButton = null;
+    this.cancelButton = null;
     this.loadMoreButton = null;
+    this.contentEl.empty();
+    super.onClose();
   }
 
-  private initializeFiles() {
-    const allFiles = this.app.vault.getFiles();
-    this.files = [];
-    
-    for (const file of allFiles) {
-      const ext = file.extension.toLowerCase();
-      for (const [typeName, typeInfo] of Object.entries(FILE_TYPES)) {
-        if (typeInfo.extensions.includes(ext)) {
-          this.files.push({
-            file,
-            type: typeName as keyof typeof FILE_TYPES,
-            searchText: `${file.basename} ${file.path} ${ext}`.toLowerCase()
-          });
-          break;
-        }
-      }
+  private readSupportedFiles(): FileItem[] {
+    const items: FileItem[] = [];
+    for (const file of this.app.vault.getFiles()) {
+      const extension = file.extension.toLowerCase();
+      const match = Object.entries(FILE_TYPES).find(([, info]) =>
+        (info.extensions as readonly string[]).includes(extension));
+      if (!match) continue;
+      items.push({
+        file,
+        type: match[0] as ContextFileType,
+        searchText: `${file.basename} ${file.path} ${extension}`.toLowerCase(),
+      });
     }
-    
-    this.files.sort((a, b) => a.file.basename.localeCompare(b.file.basename));
-    this.filteredFiles = [...this.files];
+    return items.sort((left, right) => left.file.basename.localeCompare(right.file.basename));
   }
 
-  private applyInitialSelection(paths?: string[]) {
-    if (!paths || paths.length === 0) {
-      return;
-    }
-
+  private applyInitialSelection(paths?: readonly string[]): void {
+    if (!paths?.length) return;
     const selectedPaths = new Set(paths);
     for (const item of this.files) {
-      if (selectedPaths.has(item.file.path)) {
+      if (selectedPaths.has(item.file.path) && !this.isFileAlreadyInContext?.(item.file)) {
         this.selectedFiles.add(item.file);
       }
     }
   }
 
-  private setFilter(filter: keyof typeof FILE_TYPES | "all", buttonEl: HTMLElement) {
-    // Update active state
-    buttonEl.parentElement?.querySelectorAll(".ss-context-filter-btn").forEach(btn => {
-      btn.removeClass("is-active");
+  private updateFilteredFiles(): void {
+    this.filteredFiles = this.files.filter((item) =>
+      (this.currentFilter === "all" || item.type === this.currentFilter)
+      && (!this.searchQuery || item.searchText.includes(this.searchQuery)));
+  }
+
+  private applyFilters(): void {
+    this.updateFilteredFiles();
+    this.renderedCount = 0;
+    this.renderFileList();
+  }
+
+  private createFilterButton(
+    parent: HTMLElement,
+    filter: ContextFilter,
+    label: string,
+    icon?: string,
+  ): void {
+    const selected = filter === this.currentFilter;
+    const button = createUiAction(parent, {
+      label,
+      icon,
+      size: "small",
+      selected,
     });
-    buttonEl.addClass("is-active");
-    
+    button.addClass("ss-context-filter-btn");
+    this.registerDomEvent(button, "click", () => this.setFilter(filter));
+    this.filterButtons.set(filter, button);
+  }
+
+  private setFilter(filter: ContextFilter): void {
     this.currentFilter = filter;
+    for (const [value, button] of this.filterButtons) {
+      const selected = value === filter;
+      button.toggleClass("is-selected", selected);
+      button.setAttribute("aria-pressed", String(selected));
+    }
     this.applyFilters();
   }
 
-  private applyFilters() {
-    let filtered = this.files;
-    
-    if (this.currentFilter !== "all") {
-      filtered = filtered.filter(item => item.type === this.currentFilter);
-    }
-    
-    if (this.searchQuery) {
-      filtered = filtered.filter(item => item.searchText.includes(this.searchQuery));
-    }
-    
-    this.filteredFiles = filtered;
-    this.renderedCount = 0;
-    
-    // Re-render file list
-    const listContainer = this.contentEl.querySelector(".ss-context-file-list") as HTMLElement;
-    if (listContainer) {
-      this.renderFileList(listContainer);
-    }
-  }
-
-  private renderFileList(container: HTMLElement) {
-    container.empty();
+  private renderFileList(): void {
+    if (!this.listContainer) return;
+    this.listContainer.empty();
     this.fileItemControlsByPath.clear();
     this.loadMoreButton = null;
-    
+
     if (this.filteredFiles.length === 0) {
-      const empty = container.createDiv("ss-context-empty");
-      const emptyIcon = empty.createDiv();
-      setIcon(emptyIcon, "file-x");
-      empty.createEl("p", { text: "No files found" });
+      const empty = this.listContainer.createEl("li", { cls: "ss-context-empty" });
+      const icon = empty.createSpan({ attr: { "aria-hidden": "true" } });
+      setIcon(icon, "file-x");
+      empty.createSpan({ text: "No files found" });
       return;
     }
 
-    const end = Math.min(this.MAX_RENDERED_FILES, this.filteredFiles.length);
-    this.appendFileItems(container, 0, end);
+    const end = Math.min(this.maxRenderedFiles, this.filteredFiles.length);
+    this.appendFileItems(0, end);
     this.renderedCount = end;
-
-    this.updateLoadMoreButton(container);
+    this.updateLoadMoreButton();
   }
 
-  private toggleFileSelection(file: TFile) {
-    if (this.isFileAlreadyInContext?.(file)) {
-      return;
-    }
-
-    if (this.selectedFiles.has(file)) {
-      this.selectedFiles.delete(file);
-    } else {
-      this.selectedFiles.add(file);
-    }
-
-    const controls = this.fileItemControlsByPath.get(file.path);
-    if (controls) {
-      controls.el.toggleClass("is-selected", this.selectedFiles.has(file));
-      controls.checkbox.checked = this.selectedFiles.has(file);
-    }
-    
-    // Update button
-    this.updateAddButtonState();
-  }
-
-  private appendFileItems(container: HTMLElement, start: number, end: number): void {
-    for (let index = start; index < end; index++) {
+  private appendFileItems(start: number, end: number): void {
+    if (!this.listContainer) return;
+    for (let index = start; index < end; index += 1) {
       const item = this.filteredFiles[index];
       if (!item) continue;
+      const attached = this.isFileAlreadyInContext?.(item.file) ?? false;
+      const selected = this.selectedFiles.has(item.file);
+      const row = this.listContainer.createEl("li", {
+        cls: `ss-context-file-item${selected ? " is-selected" : ""}${attached ? " is-attached" : ""}`,
+      });
+      const label = row.createEl("label", { cls: "ss-context-file-label" });
+      const checkbox = label.createEl("input", { attr: { type: "checkbox" } });
+      checkbox.checked = attached || selected;
+      checkbox.disabled = attached || this.processing;
+      checkbox.dataset.attached = String(attached);
+      checkbox.setAttribute("aria-label", attached
+        ? `${item.file.basename}, already in context`
+        : `Add ${item.file.basename}`);
+      const icon = label.createSpan({ cls: "ss-context-file-icon", attr: { "aria-hidden": "true" } });
+      setIcon(icon, FILE_TYPES[item.type].icon);
+      const info = label.createSpan({ cls: "ss-context-file-info" });
+      info.createSpan({ text: item.file.basename, cls: "ss-context-file-name" });
+      info.createSpan({ text: item.file.path, cls: "ss-context-file-path" });
+      if (attached) info.createSpan({ text: "Already in context", cls: "ss-context-file-badge" });
 
-      const fileEl = container.createDiv("ss-context-file-item");
-      const isAlreadyInContext = this.isFileAlreadyInContext?.(item.file) ?? false;
-      const isSelected = this.selectedFiles.has(item.file);
-      const isChecked = isAlreadyInContext || isSelected;
-
-      if (isSelected) {
-        fileEl.addClass("is-selected");
-      }
-      if (isAlreadyInContext) {
-        fileEl.addClass("is-attached");
-      }
-
-      // Icon
-      const iconEl = fileEl.createDiv("ss-context-file-icon");
-      setIcon(iconEl, FILE_TYPES[item.type].icon);
-
-      // Info
-      const infoEl = fileEl.createDiv("ss-context-file-info");
-      infoEl.createDiv({ text: item.file.basename, cls: "ss-context-file-name" });
-      infoEl.createDiv({ text: item.file.path, cls: "ss-context-file-path" });
-      if (isAlreadyInContext) {
-        infoEl.createDiv({ text: "Already in context", cls: "ss-context-file-badge" });
-      }
-
-      // Checkbox
-      const checkbox = fileEl.createEl("input", { type: "checkbox" }) as HTMLInputElement;
-      checkbox.checked = isChecked;
-      checkbox.disabled = isAlreadyInContext;
-
-      this.fileItemControlsByPath.set(item.file.path, { el: fileEl, checkbox });
-
-      // Click handler
-      if (!isAlreadyInContext) {
-        fileEl.onclick = () => this.toggleFileSelection(item.file);
-      }
+      this.registerDomEvent(checkbox, "change", () => {
+        if (checkbox.checked) this.selectedFiles.add(item.file);
+        else this.selectedFiles.delete(item.file);
+        row.toggleClass("is-selected", checkbox.checked);
+        this.updateAddButton();
+      });
+      this.fileItemControlsByPath.set(item.file.path, { el: row, checkbox });
     }
   }
 
-  private updateLoadMoreButton(container: HTMLElement): void {
-    if (this.loadMoreButton) {
-      this.loadMoreButton.remove();
-      this.loadMoreButton = null;
-    }
-
+  private updateLoadMoreButton(): void {
+    if (!this.listContainer) return;
     const remaining = this.filteredFiles.length - this.renderedCount;
     if (remaining <= 0) return;
-
-    const button = container.createEl("button", {
-      text: `Show ${remaining} more file${remaining === 1 ? "" : "s"}`,
-      cls: "ss-context-load-more",
-    }) as HTMLButtonElement;
-    button.onclick = () => {
-      if (!this.listContainer) return;
+    const item = this.listContainer.createEl("li", { cls: "ss-context-load-more-item" });
+    this.loadMoreButton = createUiAction(item, {
+      label: `Show ${remaining} more file${remaining === 1 ? "" : "s"}`,
+      size: "small",
+    });
+    this.loadMoreButton.addClass("ss-context-load-more");
+    this.loadMoreButton.disabled = this.processing;
+    this.registerDomEvent(this.loadMoreButton, "click", () => {
+      item.remove();
+      this.loadMoreButton = null;
       const start = this.renderedCount;
-      const end = Math.min(this.renderedCount + this.MAX_RENDERED_FILES, this.filteredFiles.length);
-      // Remove button before appending so it stays at the bottom.
-      if (this.loadMoreButton) {
-        this.loadMoreButton.remove();
-        this.loadMoreButton = null;
-      }
-      this.appendFileItems(this.listContainer, start, end);
+      const end = Math.min(start + this.maxRenderedFiles, this.filteredFiles.length);
+      this.appendFileItems(start, end);
       this.renderedCount = end;
-      this.updateLoadMoreButton(this.listContainer);
-    };
-
-    this.loadMoreButton = button;
+      this.updateLoadMoreButton();
+    });
   }
 
-  private updateAddButton(btn: ButtonComponent) {
+  private updateAddButton(): void {
+    if (!this.addButton) return;
     const count = this.selectedFiles.size;
-    if (count === 0) {
-      btn.setButtonText("Add Files").setDisabled(true);
+    this.addButton.setText(count === 0 ? "Add files" : `Add ${count} file${count === 1 ? "" : "s"}`);
+    this.addButton.disabled = this.processing || count === 0;
+  }
+
+  private setLoadingState(loading: boolean): void {
+    this.processing = loading;
+    if (this.searchInput) this.searchInput.disabled = loading;
+    if (this.cancelButton) this.cancelButton.disabled = loading;
+    for (const button of this.filterButtons.values()) button.disabled = loading;
+    for (const { checkbox } of this.fileItemControlsByPath.values()) {
+      checkbox.disabled = loading || checkbox.dataset.attached === "true";
+    }
+    if (this.loadMoreButton) this.loadMoreButton.disabled = loading;
+    if (this.addButton && loading) {
+      this.addButton.setText("Adding…");
+      this.addButton.disabled = true;
     } else {
-      btn.setButtonText(`Add ${count} File${count === 1 ? '' : 's'}`).setDisabled(false).setCta();
+      this.updateAddButton();
     }
   }
 
-  private updateAddButtonState() {
-    if (this.addButton) {
-      this.updateAddButton(this.addButton);
-    }
-  }
-
-  private setLoadingState(loading: boolean) {
-    const buttons = this.contentEl.querySelectorAll("button");
-    const cancelButton = Array.from(buttons).find(btn => btn.textContent?.includes("Cancel")) as HTMLButtonElement;
-    
-    if (loading) {
-      if (this.addButton) {
-        this.addButton.setButtonText("Processing...").setDisabled(true);
-        this.addButton.buttonEl.removeClass("mod-cta");
-      }
-      if (cancelButton) {
-        cancelButton.disabled = true;
-      }
-      
-      // Disable file selection during processing
-      const fileItems = this.contentEl.querySelectorAll(".ss-context-file-item");
-      fileItems.forEach(item => {
-        (item as HTMLElement).style.pointerEvents = "none";
-        item.addClass("is-disabled");
-      });
-    } else {
-      if (this.addButton) {
-        this.updateAddButton(this.addButton);
-      }
-      if (cancelButton) {
-        cancelButton.disabled = false;
-      }
-      
-      // Re-enable file selection
-      const fileItems = this.contentEl.querySelectorAll(".ss-context-file-item");
-      fileItems.forEach(item => {
-        (item as HTMLElement).style.pointerEvents = "auto";
-        item.removeClass("is-disabled");
-      });
-    }
-  }
-
-  private async handleSelection() {
-    if (this.selectedFiles.size === 0) return;
-    
-    const selectedArray = Array.from(this.selectedFiles);
-    
+  private async handleSelection(): Promise<void> {
+    if (this.processing || this.selectedFiles.size === 0) return;
+    this.setLoadingState(true);
     try {
-      // Show loading state
-      this.setLoadingState(true);
-      
-      // Await the file processing
-      await this.onSelect(selectedArray);
-      
-      // Close modal after successful processing
+      await this.onSelect([...this.selectedFiles]);
       this.close();
     } catch (error) {
-      // Keep modal open on error so user can see what happened
+      const detail = error instanceof Error && error.message.trim() ? ` ${error.message.trim()}` : "";
+      new Notice(`Couldn't add context files.${detail}`, 5000);
       this.setLoadingState(false);
     }
   }

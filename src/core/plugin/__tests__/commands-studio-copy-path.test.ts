@@ -106,17 +106,17 @@ describe("CommandManager copy-current-file-path command", () => {
     return { copyCommand };
   }
 
-  it("registers copy-current-file-path with Mod+Shift+C", () => {
+  it("registers copy-current-file-path without overriding a user hotkey", () => {
     const { copyCommand } = registerCopyPathCommand();
 
     expect(copyCommand).toEqual(
       expect.objectContaining({
         id: "copy-current-file-path",
-        name: "Copy Current File Path",
+        name: "Copy current file path",
         checkCallback: expect.any(Function),
-        hotkeys: [{ modifiers: ["Mod", "Shift"], key: "c" }],
       })
     );
+    expect(copyCommand.hotkeys).toBeUndefined();
   });
 
   it("copies the active file absolute path and shows a success notice", async () => {

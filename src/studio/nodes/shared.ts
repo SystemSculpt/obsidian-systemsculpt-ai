@@ -48,6 +48,13 @@ export function isLikelyAbsolutePath(path: string): boolean {
   return /^[a-zA-Z]:[\\/]/.test(value);
 }
 
+export function extensionFromPath(path: string): string {
+  const value = String(path || "").trim();
+  const fileName = value.slice(Math.max(value.lastIndexOf("/"), value.lastIndexOf("\\")) + 1);
+  const dot = fileName.lastIndexOf(".");
+  return dot > 0 ? fileName.slice(dot).toLowerCase() : "";
+}
+
 export function resolveTemplateVariables(context: StudioNodeExecutionContext): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [key, value] of Object.entries(context.inputs)) {
@@ -146,7 +153,7 @@ function collectPromptTextFragments(value: StudioJsonValue | undefined, out: str
   }
 }
 
-export function readPromptTextFromInput(value: StudioJsonValue | undefined): string {
+function readPromptTextFromInput(value: StudioJsonValue | undefined): string {
   const fragments: string[] = [];
   collectPromptTextFragments(value, fragments);
   return fragments.join("\n\n").trim();

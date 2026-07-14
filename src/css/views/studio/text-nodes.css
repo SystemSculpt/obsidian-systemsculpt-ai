@@ -1,0 +1,155 @@
+/* ------------------------------------------------------------------ *
+ * Text nodes (kind "studio.text") — tldraw-style: no card chrome, just
+ * the text. A hairline outline appears on hover, an accent outline on
+ * selection, and the toolbar/resize handle follow the same progressive
+ * disclosure as the shared node chrome.
+ * ------------------------------------------------------------------ */
+.ss-studio-node-card.ss-studio-text-node-card {
+  background-color: transparent;
+  border-color: transparent;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.ss-studio-node-card.ss-studio-text-node-card:hover {
+  border-color: transparent;
+  box-shadow: none;
+  outline: 1px solid var(--ss-line);
+  outline-offset: 2px;
+}
+
+.ss-studio-node-card.ss-studio-text-node-card.is-selected {
+  border-color: transparent;
+  box-shadow: none;
+  outline: 1px solid var(--ss-line-accent);
+  outline-offset: 2px;
+}
+
+/* Text-node height is intrinsic: the card auto-grows with its reflowed
+ * content, so the display div and editing textarea both size to content —
+ * no fixed heights anywhere in the chain. */
+.ss-studio-text-node-content {
+  position: relative;
+}
+
+.ss-studio-text-node-display,
+.ss-studio-text-node-editor,
+.ss-studio-text-node-live-editor {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  /* tldraw-tight: the text IS the node, so only a hairline of breathing
+   * room. Keep in sync with STUDIO_TEXT_NODE_VERTICAL_CHROME_PX. */
+  padding: var(--ss-space-1);
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  font-size: var(--ss-studio-text-node-font-size, inherit);
+  line-height: var(--ss-leading-base);
+  color: var(--ss-ink);
+}
+
+.ss-studio-text-node-display {
+  white-space: pre-wrap;
+  cursor: grab;
+}
+
+.ss-studio-text-node-display.is-placeholder {
+  color: var(--ss-ink-faint);
+}
+
+/* The editor blends into the canvas: same box and font metrics as the
+ * display surface; the card's selection outline carries the focus state.
+ * overflow: hidden keeps the scrollHeight-driven auto-grow jitter-free. */
+.ss-studio-text-node-editor {
+  overflow: hidden;
+  /* min-height: 0 defeats theme-level textarea floors that would otherwise
+   * pad short text with dead space below the last line. */
+  min-height: 0;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  resize: none;
+}
+
+.ss-studio-text-node-editor::placeholder {
+  color: var(--ss-ink-faint);
+}
+
+.ss-studio-text-node-editor:focus,
+.ss-studio-text-node-editor:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+/* Rendered-markdown display: the resting card shows the value the way a
+ * note preview would — real headings, tables, checklists — so the source
+ * pre-wrap rule gives way to normal block flow. */
+.ss-studio-text-node-display.is-markdown {
+  white-space: normal;
+}
+
+.ss-studio-text-node-display.is-markdown > :first-child {
+  margin-top: 0;
+}
+
+.ss-studio-text-node-display.is-markdown > :last-child {
+  margin-bottom: 0;
+}
+
+/* Obsidian-note editing: the live-preview editor host shares the text-node
+ * box contract above; only the editable-cursor signal is its own. */
+.ss-studio-text-node-live-editor {
+  cursor: text;
+}
+
+/* The native MarkdownEmbed component brings note-embed framing and a 100%
+ * content height. Studio keeps its behavior, but the text itself remains the
+ * chromeless, intrinsic-height canvas node. */
+.ss-studio-text-node-live-editor.markdown-embed {
+  margin: 0;
+  background: transparent;
+  border: 0;
+  font-style: inherit;
+}
+
+.ss-studio-text-node-live-editor > .markdown-embed-content {
+  height: auto;
+}
+
+/* The embedded editor carries Obsidian's own markdown-source-view chrome;
+ * strip the note-page framing so only the text shows on the canvas. */
+.ss-studio-text-node-live-editor .markdown-source-view {
+  padding: 0;
+  background: transparent;
+}
+
+.ss-studio-text-node-live-editor .cm-editor {
+  background: transparent;
+  font-size: inherit;
+}
+
+.ss-studio-text-node-live-editor .cm-editor .cm-scroller {
+  overflow: visible;
+  min-height: 0;
+  padding: 0;
+  font-size: inherit;
+  line-height: var(--ss-leading-base);
+}
+
+/* Kill the readable-line-width sizer margins a full note view would get. */
+.ss-studio-text-node-live-editor .cm-editor .cm-sizer {
+  max-width: none;
+  margin: 0;
+  padding: 0;
+}
+
+.ss-studio-text-node-live-editor .cm-editor .cm-content {
+  padding: 0;
+  caret-color: var(--ss-ink);
+}
+
+.ss-studio-text-node-live-editor .cm-editor.cm-focused {
+  outline: none;
+}

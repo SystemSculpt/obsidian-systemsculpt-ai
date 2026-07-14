@@ -1,30 +1,13 @@
-import { Notice, normalizePath } from "obsidian";
+import { Notice } from "obsidian";
 import { SystemSculptSettings, DEFAULT_SETTINGS, LogLevel, createDefaultWorkflowEngineSettings } from "../../types";
 import SystemSculptPlugin from "../../main";
 import { AutomaticBackupService } from "./AutomaticBackupService";
 import { applyCurrentSecretsToBackup, redactSettingsForBackup } from "./backupSanitizer";
-import { canonicalizeSystemSculptServerUrlSetting } from "../../utils/urlHelpers";
-import { resolveAbsoluteVaultPath } from "../../utils/vaultPathUtils";
 import {
   CURRENT_SCHEMA_VERSION,
   migrateSettingsToCurrentSchema,
   readSchemaVersion,
 } from "./migrations/SettingsMigrator";
-
-type NodeFsModule = typeof import("node:fs");
-type NodePathModule = typeof import("node:path");
-type NodeFsWatcher = import("node:fs").FSWatcher;
-type NodeFsStats = import("node:fs").Stats;
-
-function loadNodeFs(): NodeFsModule {
-  return require("node:fs") as NodeFsModule;
-}
-
-function loadNodePath(): NodePathModule {
-  return require("node:path") as NodePathModule;
-}
-
-const PLUGIN_DATA_POLL_INTERVAL_MS = 1000;
 
 /**
  * SettingsManager handles loading, saving, and updating plugin settings
@@ -34,22 +17,7 @@ export class SettingsManager {
   private plugin: SystemSculptPlugin;
   settings: SystemSculptSettings;
   private isInitialized: boolean = false;
-  private ongoingBackup: Promise<void> | null = null;
-  private backupQueue: (() => Promise<void>)[] = [];
-  private isProcessingBackupQueue: boolean = false;
   private automaticBackupService: AutomaticBackupService;
-  private pluginDataWatcher: NodeFsWatcher | null = null;
-  private pluginDataWatcherTimer: ReturnType<typeof setTimeout> | null = null;
-  private pluginDataPollInterval: ReturnType<typeof setInterval> | null = null;
-  private pluginDataWatcherCleanupRegistered = false;
-  private pluginDataWatcherFilePath: string | null = null;
-  private pluginDataLastObservedMtimeMs: number | null = null;
-  private pluginDataPollInFlight = false;
-  private recentInternalPluginDataWrites: Array<{
-    snapshot: string;
-    ignoreUntil: number;
-    remainingBudget: number;
-  }> = [];
   // De-duplicate the user-facing save-failure Notice so a sync-lock storm (many
   // failing saves in quick succession) shows one Notice, not one per keystroke.
   private lastSaveFailureNoticeAt = 0;
@@ -67,14 +35,9 @@ export class SettingsManager {
     // Settings migration - silent process
     // Deep merge with defaults to ensure nested objects are properly initialized
     const migratedSettings = { ...settingsToMigrate };
-    // Ensure settings mode exists; default to standard for a simpler UX
-    if (!migratedSettings.settingsMode || (migratedSettings.settingsMode !== 'standard' && migratedSettings.settingsMode !== 'advanced')) {
-      migratedSettings.settingsMode = DEFAULT_SETTINGS.settingsMode;
-    }
-
     const generateVaultInstanceId = (): string => {
       try {
-        const globalCrypto: any = (globalThis as any).crypto;
+        const globalCrypto: any = (window as any).crypto;
         if (globalCrypto?.randomUUID) return globalCrypto.randomUUID();
       } catch {}
       return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
@@ -88,46 +51,12 @@ export class SettingsManager {
       migratedSettings.vaultInstanceId = generateVaultInstanceId();
     }
 
-    if (typeof migratedSettings.desktopAutomationBridgeEnabled !== "boolean") {
-      migratedSettings.desktopAutomationBridgeEnabled = DEFAULT_SETTINGS.desktopAutomationBridgeEnabled;
-    }
-
     if (typeof migratedSettings.embeddingsVectorFormatVersion !== "number" || !Number.isFinite(migratedSettings.embeddingsVectorFormatVersion)) {
       migratedSettings.embeddingsVectorFormatVersion = DEFAULT_SETTINGS.embeddingsVectorFormatVersion;
     }
-    
+
     // Legacy/dead keys are pruned by the versioned migrator's v0→v1 step
     // (SettingsMigrator.LEGACY_KEYS_REMOVED_IN_V1) — no ad-hoc deletes here.
-
-    // Ensure other nested objects are properly initialized
-    if (!migratedSettings.favoritesFilterSettings) {
-      migratedSettings.favoritesFilterSettings = DEFAULT_SETTINGS.favoritesFilterSettings;
-    }
-    
-    if (!migratedSettings.modelFilterSettings) {
-      migratedSettings.modelFilterSettings = DEFAULT_SETTINGS.modelFilterSettings;
-    }
-    
-    if (!migratedSettings.activeProvider) {
-      migratedSettings.activeProvider = DEFAULT_SETTINGS.activeProvider;
-    }
-    
-    // Ensure arrays are initialized
-    if (!Array.isArray(migratedSettings.customProviders)) {
-      migratedSettings.customProviders = DEFAULT_SETTINGS.customProviders;
-    }
-
-    if (
-      typeof migratedSettings.studioPiAuthMigrationVersion !== "number" ||
-      !Number.isFinite(migratedSettings.studioPiAuthMigrationVersion) ||
-      migratedSettings.studioPiAuthMigrationVersion < 0
-    ) {
-      migratedSettings.studioPiAuthMigrationVersion = DEFAULT_SETTINGS.studioPiAuthMigrationVersion;
-    }
-    
-    if (!Array.isArray(migratedSettings.favoriteModels)) {
-      migratedSettings.favoriteModels = DEFAULT_SETTINGS.favoriteModels;
-    }
 
     const defaultWorkflowEngine = createDefaultWorkflowEngineSettings();
     if (!migratedSettings.workflowEngine) {
@@ -176,10 +105,6 @@ export class SettingsManager {
       delete (migratedSettings.workflowEngine as any).templates;
     }
     
-    if (!Array.isArray(migratedSettings.mcpServers)) {
-      migratedSettings.mcpServers = DEFAULT_SETTINGS.mcpServers;
-    }
-
     if (typeof migratedSettings.debugMode !== "boolean") {
       migratedSettings.debugMode = DEFAULT_SETTINGS.debugMode;
     }
@@ -212,11 +137,6 @@ export class SettingsManager {
       migratedSettings.lastAutomaticBackup = DEFAULT_SETTINGS.lastAutomaticBackup;
     }
     
-    // Ensure preserveReasoningVerbatim is properly initialized (migration for existing users)
-    if (typeof migratedSettings.preserveReasoningVerbatim !== 'boolean') {
-      migratedSettings.preserveReasoningVerbatim = DEFAULT_SETTINGS.preserveReasoningVerbatim;
-    }
-
     // Ensure respectReducedMotion is properly initialized (migration for existing users)
     if (typeof migratedSettings.respectReducedMotion !== "boolean") {
       migratedSettings.respectReducedMotion = DEFAULT_SETTINGS.respectReducedMotion;
@@ -224,18 +144,6 @@ export class SettingsManager {
 
     if (typeof migratedSettings.defaultChatTag !== "string") {
       migratedSettings.defaultChatTag = DEFAULT_SETTINGS.defaultChatTag;
-    }
-
-    if (typeof migratedSettings.hideSystemMessagesInChat !== "boolean") {
-      migratedSettings.hideSystemMessagesInChat = DEFAULT_SETTINGS.hideSystemMessagesInChat;
-    }
-
-    if (typeof migratedSettings.agentModeEnabled !== "boolean") {
-      migratedSettings.agentModeEnabled = DEFAULT_SETTINGS.agentModeEnabled;
-    }
-
-    if (typeof migratedSettings.lastUsedPromptPath !== "string") {
-      migratedSettings.lastUsedPromptPath = DEFAULT_SETTINGS.lastUsedPromptPath;
     }
 
     if (typeof migratedSettings.studioDefaultProjectsFolder !== "string" || !migratedSettings.studioDefaultProjectsFolder.trim()) {
@@ -463,30 +371,7 @@ export class SettingsManager {
   private validateSettings(settings: SystemSculptSettings): SystemSculptSettings {
     // Create a copy to avoid modifying the original
     const validatedSettings = { ...settings };
-    // Validate settings mode
-    if (validatedSettings.settingsMode !== 'standard' && validatedSettings.settingsMode !== 'advanced') {
-      validatedSettings.settingsMode = DEFAULT_SETTINGS.settingsMode;
-    }
     const defaultSettings = DEFAULT_SETTINGS;
-
-    // Ensure critical arrays exist
-    if (!Array.isArray(validatedSettings.customProviders)) {
-      validatedSettings.customProviders = [];
-    }
-
-    if (
-      typeof validatedSettings.studioPiAuthMigrationVersion !== "number" ||
-      !Number.isFinite(validatedSettings.studioPiAuthMigrationVersion) ||
-      validatedSettings.studioPiAuthMigrationVersion < 0
-    ) {
-      validatedSettings.studioPiAuthMigrationVersion = defaultSettings.studioPiAuthMigrationVersion;
-    } else {
-      validatedSettings.studioPiAuthMigrationVersion = Math.floor(validatedSettings.studioPiAuthMigrationVersion);
-    }
-
-    if (!Array.isArray(validatedSettings.favoriteModels)) {
-      validatedSettings.favoriteModels = [];
-    }
 
     // Validate directories - these are critical for proper functioning
     // Using a simpler approach to avoid TypeScript errors
@@ -506,11 +391,6 @@ export class SettingsManager {
       validatedSettings.extractionsDirectory = defaultSettings.extractionsDirectory;
     }
 
-    if (typeof validatedSettings.systemPromptsDirectory !== 'string') {
-      validatedSettings.systemPromptsDirectory = defaultSettings.systemPromptsDirectory;
-    }
-
-
     // Validate saved chats directory
     if (typeof validatedSettings.savedChatsDirectory !== 'string') {
       validatedSettings.savedChatsDirectory = defaultSettings.savedChatsDirectory;
@@ -519,10 +399,6 @@ export class SettingsManager {
     if (typeof validatedSettings.licenseValid !== 'boolean') {
       validatedSettings.licenseValid = defaultSettings.licenseValid;
     }
-
-    const hasActiveLicense = !!validatedSettings.licenseKey?.trim() && validatedSettings.licenseValid === true;
-    validatedSettings.enableSystemSculptProvider = hasActiveLicense;
-    validatedSettings.useSystemSculptAsFallback = hasActiveLicense;
 
     if (typeof validatedSettings.autoTranscribeRecordings !== 'boolean') {
       validatedSettings.autoTranscribeRecordings = defaultSettings.autoTranscribeRecordings;
@@ -564,83 +440,12 @@ export class SettingsManager {
       validatedSettings.embeddingsEnabled = defaultSettings.embeddingsEnabled;
     }
 
-    // Validate embeddings provider selection (protect against manual edits / stale configs)
-    const rawEmbeddingsProvider = (validatedSettings as any).embeddingsProvider;
-    if (rawEmbeddingsProvider !== "systemsculpt" && rawEmbeddingsProvider !== "custom") {
-      const hasCustomEndpoint =
-        typeof validatedSettings.embeddingsCustomEndpoint === "string" &&
-        validatedSettings.embeddingsCustomEndpoint.trim().length > 0;
-      validatedSettings.embeddingsProvider = hasCustomEndpoint ? "custom" : defaultSettings.embeddingsProvider;
-    }
-
-    if (typeof validatedSettings.embeddingsCustomEndpoint !== "string") {
-      validatedSettings.embeddingsCustomEndpoint = defaultSettings.embeddingsCustomEndpoint;
-    }
-
-    if (typeof validatedSettings.embeddingsCustomApiKey !== "string") {
-      validatedSettings.embeddingsCustomApiKey = defaultSettings.embeddingsCustomApiKey;
-    }
-
-    if (typeof validatedSettings.embeddingsCustomModel !== "string") {
-      validatedSettings.embeddingsCustomModel = defaultSettings.embeddingsCustomModel;
-    }
-
-    // Validate string settings that should never be null - using a simpler approach
-    if (typeof validatedSettings.selectedModelId !== 'string') {
-      validatedSettings.selectedModelId =
-        typeof defaultSettings.selectedModelId === "string" ? defaultSettings.selectedModelId : "";
-    }
-    validatedSettings.selectedModelId = validatedSettings.selectedModelId.trim().length > 0
-      ? validatedSettings.selectedModelId
-      : "";
-
-    if (typeof validatedSettings.titleGenerationModelId !== 'string') {
-      validatedSettings.titleGenerationModelId = defaultSettings.titleGenerationModelId;
-    }
-
     if (typeof validatedSettings.licenseKey !== 'string') {
       validatedSettings.licenseKey = defaultSettings.licenseKey;
     }
 
-    // Keep openAiApiKey validation for backward compatibility
-    // Users can still use OpenAI through custom providers
-    if (!validatedSettings.openAiApiKey) {
-      validatedSettings.openAiApiKey = '';
-    }
-
-    if (typeof validatedSettings.imageGenerationDefaultModelId !== "string") {
-      validatedSettings.imageGenerationDefaultModelId = defaultSettings.imageGenerationDefaultModelId;
-    }
-
-    if (typeof validatedSettings.imageGenerationLastUsedModelId !== "string") {
-      validatedSettings.imageGenerationLastUsedModelId = defaultSettings.imageGenerationLastUsedModelId;
-    }
-
-    if (typeof validatedSettings.imageGenerationLastUsedAspectRatio !== "string") {
-      validatedSettings.imageGenerationLastUsedAspectRatio = defaultSettings.imageGenerationLastUsedAspectRatio;
-    }
-
-    const lastUsedCount = Number(validatedSettings.imageGenerationLastUsedCount);
-    if (!Number.isFinite(lastUsedCount)) {
-      validatedSettings.imageGenerationLastUsedCount = defaultSettings.imageGenerationLastUsedCount;
-    } else {
-      validatedSettings.imageGenerationLastUsedCount = Math.max(1, Math.min(4, Math.floor(lastUsedCount)));
-    }
-
     if (typeof validatedSettings.defaultChatTag !== "string") {
       validatedSettings.defaultChatTag = defaultSettings.defaultChatTag;
-    }
-
-    if (typeof validatedSettings.hideSystemMessagesInChat !== "boolean") {
-      validatedSettings.hideSystemMessagesInChat = defaultSettings.hideSystemMessagesInChat;
-    }
-
-    if (typeof validatedSettings.agentModeEnabled !== "boolean") {
-      validatedSettings.agentModeEnabled = defaultSettings.agentModeEnabled;
-    }
-
-    if (typeof validatedSettings.lastUsedPromptPath !== "string") {
-      validatedSettings.lastUsedPromptPath = defaultSettings.lastUsedPromptPath;
     }
 
     if (
@@ -648,34 +453,6 @@ export class SettingsManager {
       validatedSettings.studioJsonEditorDefaultMode !== "raw"
     ) {
       validatedSettings.studioJsonEditorDefaultMode = defaultSettings.studioJsonEditorDefaultMode;
-    }
-
-    // Validate activeProvider
-    if (!validatedSettings.activeProvider ||
-        typeof validatedSettings.activeProvider !== 'object' ||
-        !validatedSettings.activeProvider.id ||
-        !validatedSettings.activeProvider.name ||
-        !validatedSettings.activeProvider.type) {
-      validatedSettings.activeProvider = { ...defaultSettings.activeProvider };
-    }
-
-    // Validate favoritesFilterSettings
-    if (!validatedSettings.favoritesFilterSettings ||
-        typeof validatedSettings.favoritesFilterSettings !== 'object') {
-      validatedSettings.favoritesFilterSettings = { ...defaultSettings.favoritesFilterSettings };
-    } else {
-      // Validate individual properties of favoritesFilterSettings
-      if (typeof validatedSettings.favoritesFilterSettings.showFavoritesOnly !== 'boolean') {
-        validatedSettings.favoritesFilterSettings.showFavoritesOnly = defaultSettings.favoritesFilterSettings.showFavoritesOnly;
-      }
-
-      if (typeof validatedSettings.favoritesFilterSettings.favoritesFirst !== 'boolean') {
-        validatedSettings.favoritesFilterSettings.favoritesFirst = defaultSettings.favoritesFilterSettings.favoritesFirst;
-      }
-
-      if (typeof validatedSettings.favoritesFilterSettings.modelSortOrder !== 'string') {
-        validatedSettings.favoritesFilterSettings.modelSortOrder = defaultSettings.favoritesFilterSettings.modelSortOrder;
-      }
     }
 
     if (!Array.isArray(validatedSettings.favoriteChats)) {
@@ -689,12 +466,6 @@ export class SettingsManager {
     // Legacy/dead keys (cachedEmbeddingStats, selectedProvider, systemPrompt*, …)
     // are pruned once by the versioned migrator's v0→v1 step, not on every
     // validate pass. See SettingsMigrator.LEGACY_KEYS_REMOVED_IN_V1.
-
-    // Persist the canonical hosted API origin. Production builds always pin this to the
-    // real SystemSculpt API, while development builds still normalize local overrides.
-    validatedSettings.serverUrl = canonicalizeSystemSculptServerUrlSetting(
-      typeof validatedSettings.serverUrl === "string" ? validatedSettings.serverUrl : ""
-    );
 
     const defaultWorkflowEngine = createDefaultWorkflowEngineSettings();
     const providedWorkflowEngine = validatedSettings.workflowEngine;
@@ -806,299 +577,6 @@ export class SettingsManager {
     }
   }
 
-  private getPluginDataFilePath(): string | null {
-    const pluginDataVaultPath = normalizePath(
-      `${this.plugin.app.vault.configDir || ".obsidian"}/plugins/${this.plugin.manifest.id}/data.json`
-    );
-    const absolutePath = resolveAbsoluteVaultPath(this.plugin.app.vault.adapter, pluginDataVaultPath);
-    if (typeof absolutePath === "string" && absolutePath.trim().length > 0) {
-      return absolutePath;
-    }
-
-    const adapter = this.plugin.app.vault.adapter as {
-      getBasePath?: () => string;
-      basePath?: string;
-    };
-    const basePath =
-      typeof adapter?.getBasePath === "function"
-        ? adapter.getBasePath()
-        : typeof adapter?.basePath === "string"
-          ? adapter.basePath
-          : "";
-    if (!basePath || typeof basePath !== "string" || basePath.trim().length === 0) {
-      return null;
-    }
-
-    try {
-      const nodePath = loadNodePath();
-      return nodePath.join(basePath, ".obsidian", "plugins", this.plugin.manifest.id, "data.json");
-    } catch {
-      return null;
-    }
-  }
-
-  private async readPluginDataMtimeMs(pluginDataFilePath: string): Promise<number | null> {
-    try {
-      const stats = (await loadNodeFs().promises.stat(pluginDataFilePath)) as NodeFsStats;
-      return Number.isFinite(stats.mtimeMs) ? Number(stats.mtimeMs) : null;
-    } catch {
-      return null;
-    }
-  }
-
-  private async refreshPluginDataMtimeSnapshot(
-    pluginDataFilePath: string | null = this.pluginDataWatcherFilePath,
-  ): Promise<void> {
-    if (!pluginDataFilePath) {
-      return;
-    }
-
-    const nextMtimeMs = await this.readPluginDataMtimeMs(pluginDataFilePath);
-    if (nextMtimeMs !== null) {
-      this.pluginDataLastObservedMtimeMs = nextMtimeMs;
-    }
-  }
-
-  private startPluginDataPolling(pluginDataFilePath: string): void {
-    if (this.pluginDataPollInterval) {
-      return;
-    }
-
-    void this.refreshPluginDataMtimeSnapshot(pluginDataFilePath);
-
-    this.pluginDataPollInterval = setInterval(() => {
-      void this.pollPluginDataFile(pluginDataFilePath);
-    }, PLUGIN_DATA_POLL_INTERVAL_MS);
-
-    const interval = this.pluginDataPollInterval as { unref?: () => void } | null;
-    if (typeof interval?.unref === "function") {
-      interval.unref();
-    }
-  }
-
-  private async pollPluginDataFile(
-    pluginDataFilePath: string | null = this.pluginDataWatcherFilePath,
-  ): Promise<void> {
-    if (!pluginDataFilePath || this.pluginDataPollInFlight) {
-      return;
-    }
-
-    this.pluginDataPollInFlight = true;
-    try {
-      const nextMtimeMs = await this.readPluginDataMtimeMs(pluginDataFilePath);
-      if (nextMtimeMs === null) {
-        return;
-      }
-
-      const previousMtimeMs = this.pluginDataLastObservedMtimeMs;
-      this.pluginDataLastObservedMtimeMs = nextMtimeMs;
-
-      if (previousMtimeMs === null || nextMtimeMs <= previousMtimeMs) {
-        return;
-      }
-
-      this.schedulePluginDataReload();
-    } finally {
-      this.pluginDataPollInFlight = false;
-    }
-  }
-
-  private schedulePluginDataReload(): void {
-    if (this.pluginDataWatcherTimer) {
-      clearTimeout(this.pluginDataWatcherTimer);
-    }
-
-    void this.refreshPluginDataMtimeSnapshot();
-
-    this.pluginDataWatcherTimer = setTimeout(() => {
-      this.pluginDataWatcherTimer = null;
-      void this.reloadSettingsFromDisk().catch(() => {});
-    }, 150);
-  }
-
-  private serializeSettingsForWatcher(settings: SystemSculptSettings): string {
-    try {
-      return JSON.stringify(settings);
-    } catch {
-      return "";
-    }
-  }
-
-  private pruneRecentInternalPluginDataWrites(): void {
-    const now = Date.now();
-    this.recentInternalPluginDataWrites = this.recentInternalPluginDataWrites.filter(
-      (entry) => entry.remainingBudget > 0 && now <= entry.ignoreUntil && entry.snapshot.length > 0,
-    );
-  }
-
-  private markInternalPluginDataWrite(settings: SystemSculptSettings): void {
-    const snapshot = this.serializeSettingsForWatcher(settings);
-    if (!snapshot) {
-      return;
-    }
-
-    this.pruneRecentInternalPluginDataWrites();
-    const existingEntry = this.recentInternalPluginDataWrites.find((entry) => entry.snapshot === snapshot);
-    if (existingEntry) {
-      existingEntry.ignoreUntil = Date.now() + 5000;
-      // Native saveData writes can surface multiple fs.watch events on macOS.
-      existingEntry.remainingBudget = Math.max(existingEntry.remainingBudget, 10);
-      return;
-    }
-
-    this.recentInternalPluginDataWrites.push({
-      snapshot,
-      ignoreUntil: Date.now() + 5000,
-      remainingBudget: 10,
-    });
-
-    if (this.recentInternalPluginDataWrites.length > 8) {
-      this.recentInternalPluginDataWrites.splice(
-        0,
-        this.recentInternalPluginDataWrites.length - 8,
-      );
-    }
-  }
-
-  private shouldIgnoreInternalPluginDataEcho(nextSettings: SystemSculptSettings): boolean {
-    this.pruneRecentInternalPluginDataWrites();
-    if (this.recentInternalPluginDataWrites.length === 0) {
-      return false;
-    }
-
-    const snapshot = this.serializeSettingsForWatcher(nextSettings);
-    if (!snapshot) {
-      return false;
-    }
-
-    const matchingEntry = this.recentInternalPluginDataWrites.find((entry) => entry.snapshot === snapshot);
-    if (!matchingEntry) {
-      return false;
-    }
-
-    matchingEntry.remainingBudget -= 1;
-    this.pruneRecentInternalPluginDataWrites();
-    return true;
-  }
-
-  private ensurePluginDataWatcherCleanupRegistered(): void {
-    if (this.pluginDataWatcherCleanupRegistered) {
-      return;
-    }
-
-    this.plugin.register(() => {
-      this.stopWatchingPluginDataFile();
-    });
-    this.pluginDataWatcherCleanupRegistered = true;
-  }
-
-  public startWatchingPluginDataFile(): void {
-    const pluginDataFilePath = this.getPluginDataFilePath();
-    if (!pluginDataFilePath) {
-      return;
-    }
-
-    this.ensurePluginDataWatcherCleanupRegistered();
-
-    if (this.pluginDataWatcher || this.pluginDataPollInterval) {
-      return;
-    }
-
-    this.pluginDataWatcherFilePath = pluginDataFilePath;
-    this.startPluginDataPolling(pluginDataFilePath);
-
-    try {
-      const nodeFs = loadNodeFs();
-      const nodePath = loadNodePath();
-      const pluginDir = nodePath.dirname(pluginDataFilePath);
-
-      this.pluginDataWatcher = nodeFs.watch(pluginDir, { persistent: false }, (_eventType, filename) => {
-        const changedFileName =
-          typeof filename === "string"
-            ? filename
-            : filename && typeof (filename as any).toString === "function"
-              ? (filename as any).toString("utf8")
-              : "";
-        if (changedFileName && changedFileName !== "data.json") {
-          return;
-        }
-        this.schedulePluginDataReload();
-      });
-
-      this.pluginDataWatcher.on("error", () => {
-        if (this.pluginDataWatcher) {
-          this.pluginDataWatcher.close();
-          this.pluginDataWatcher = null;
-        }
-      });
-    } catch {
-      if (this.pluginDataWatcher) {
-        this.pluginDataWatcher.close();
-        this.pluginDataWatcher = null;
-      }
-    }
-  }
-
-  public stopWatchingPluginDataFile(): void {
-    if (this.pluginDataWatcherTimer) {
-      clearTimeout(this.pluginDataWatcherTimer);
-      this.pluginDataWatcherTimer = null;
-    }
-
-    if (this.pluginDataWatcher) {
-      this.pluginDataWatcher.close();
-      this.pluginDataWatcher = null;
-    }
-
-    if (this.pluginDataPollInterval) {
-      clearInterval(this.pluginDataPollInterval);
-      this.pluginDataPollInterval = null;
-    }
-
-    this.pluginDataWatcherFilePath = null;
-    this.pluginDataLastObservedMtimeMs = null;
-    this.pluginDataPollInFlight = false;
-  }
-
-  public async reloadSettingsFromDisk(): Promise<boolean> {
-    if (!this.isInitialized) {
-      return false;
-    }
-
-    const loadedData = await this.plugin.loadData();
-    const raw =
-      loadedData && typeof loadedData === "object" && !Array.isArray(loadedData)
-        ? (loadedData as Record<string, unknown>)
-        : {};
-    // Route disk reloads through the SAME versioned migrate+validate+rollback
-    // path as load/restore, so an externally-edited or synced OLD file is
-    // migrated (deep-merge + legacy prune + schema stamp), not applied stale (#212).
-    const nextSettings = await this.migrateValidateWithRollback(raw);
-
-    if (JSON.stringify(this.settings) === JSON.stringify(nextSettings)) {
-      if (this.shouldIgnoreInternalPluginDataEcho(nextSettings)) {
-        return false;
-      }
-
-      this.plugin.app.workspace.trigger(
-        "systemsculpt:settings-file-touched",
-        this.plugin._internal_settings_systemsculpt_plugin
-      );
-      return false;
-    }
-
-    const oldSettings = { ...this.settings };
-    this.settings = nextSettings;
-    this.plugin._internal_settings_systemsculpt_plugin = { ...nextSettings };
-    this.plugin.app.workspace.trigger(
-      "systemsculpt:settings-updated",
-      oldSettings,
-      this.plugin._internal_settings_systemsculpt_plugin
-    );
-    await this.backupSettings();
-    return true;
-  }
-
   /**
    * Surface a settings-persistence failure instead of swallowing it. The failure
    * is always logged via the plugin logger (for diagnostics), and a single
@@ -1152,7 +630,6 @@ export class SettingsManager {
       } as SystemSculptSettings);
       this.settings = persistedSettings;
       this.plugin._internal_settings_systemsculpt_plugin = { ...persistedSettings };
-      this.markInternalPluginDataWrite(persistedSettings);
       await this.plugin.saveData(this.plugin._internal_settings_systemsculpt_plugin);
       this.plugin.app.workspace.trigger("systemsculpt:settings-updated", oldSettings, this.plugin._internal_settings_systemsculpt_plugin);
       await this.backupSettings();
@@ -1180,12 +657,10 @@ export class SettingsManager {
     if (!this.isInitialized) {
       await this.loadSettings(); // Ensure settings are loaded before update
     }
-    const oldSettingsState = { ...this.settings }; 
-
     // Merge new settings into the manager's internal copy
-    let updatedSettings = { ...this.settings, ...newSettings };
+    const updatedSettings = { ...this.settings, ...newSettings };
     
-    // Validate the merged settings including phantom tool cleanup
+    // Validate the merged settings before persistence.
     this.settings = await this.validateSettingsAsync(updatedSettings);
 
     // Synchronize the plugin's internal settings representation BEFORE persisting.
@@ -1210,40 +685,6 @@ export class SettingsManager {
     await this.updateSettings(migrated);
   }
 
-  // ... other methods like getLicenseKey, setLicenseKey, validateLicenseKey, etc.
-  // These should use this.updateSettings if they modify settings.
-
-  public async validateLicenseKey(key: string): Promise<boolean> {
-    const currentSettings = this.getSettings();
-    // Simplified license validation logic for example
-    const isValid = key === "valid-license"; // Replace with actual validation
-
-    if (currentSettings.licenseKey !== key || currentSettings.licenseValid !== isValid) {
-      await this.updateSettings({ licenseKey: key, licenseValid: isValid });
-    }
-    return isValid;
-  }
-
-  public getLicenseKey(): string {
-    return this.getSettings().licenseKey;
-  }
-
-  public isLicenseValid(): boolean {
-    return this.getSettings().licenseValid;
-  }
-
-  public async setLicenseKey(key: string): Promise<void> {
-    await this.updateSettings({ licenseKey: key });
-  }
-
-  public getServerUrl(): string {
-    return this.getSettings().serverUrl;
-  }
-  
-  public async setServerUrl(url: string): Promise<void> {
-    await this.updateSettings({ serverUrl: canonicalizeSystemSculptServerUrlSetting(url) });
-  }
-
   /**
    * Perform async validation.
    */
@@ -1255,7 +696,6 @@ export class SettingsManager {
    * Clean up resources when the plugin is unloaded
    */
   public destroy(): void {
-    this.stopWatchingPluginDataFile();
     if (this.automaticBackupService) {
       this.automaticBackupService.stop();
     }

@@ -25,7 +25,7 @@ export function nowIso(): string {
 
 export function randomId(prefix: string): string {
   try {
-    const globalCrypto: any = (globalThis as any).crypto;
+    const globalCrypto: any = (window as any).crypto;
     if (typeof globalCrypto?.randomUUID === "function") {
       return `${prefix}_${globalCrypto.randomUUID()}`;
     }

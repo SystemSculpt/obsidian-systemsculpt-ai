@@ -2,12 +2,12 @@ import { StudioNodeRegistry } from "./StudioNodeRegistry";
 import { audioExtractNode } from "./nodes/audioExtractNode";
 import { cliCommandNode } from "./nodes/cliCommandNode";
 import { datasetNode } from "./nodes/datasetNode";
-import { httpRequestNode } from "./nodes/httpRequestNode";
 import { imageGenerationNode } from "./nodes/imageGenerationNode";
 import { inputNode } from "./nodes/inputNode";
 import { jsonNode } from "./nodes/jsonNode";
 import { mediaIngestNode } from "./nodes/mediaIngestNode";
 import { noteNode } from "./nodes/noteNode";
+import { retiredHttpRequestNode } from "./nodes/retiredHttpRequestNode";
 import { textNode } from "./nodes/textNode";
 import { textOutputNode } from "./nodes/textOutputNode";
 import { textGenerationNode } from "./nodes/textGenerationNode";
@@ -28,7 +28,7 @@ export function registerBuiltInStudioNodes(registry: StudioNodeRegistry): void {
   registry.register(audioExtractNode);
   registry.register(transcriptionNode);
   registry.register(datasetNode);
-  registry.register(httpRequestNode);
+  registry.register(retiredHttpRequestNode);
   registry.register(cliCommandNode);
   registry.register(terminalNode);
 }

@@ -1,23 +1,17 @@
 import { SystemSculptSettingTab } from "./SystemSculptSettingTab";
-import { PlatformContext } from "../services/PlatformContext";
 
 type SetupTabContentModule = typeof import("./SetupTabContent");
-type ProvidersTabContentModule = typeof import("./ProvidersTabContent");
 type ChatTabContentModule = typeof import("./ChatTabContent");
 type RecorderTabContentModule = typeof import("./RecorderTabContent");
+type AutomationsTabContentModule = typeof import("./AutomationsTabContent");
 type DirectoriesTabContentModule = typeof import("./DirectoriesTabContent");
 type BackupTabContentModule = typeof import("./BackupTabContent");
 type EmbeddingsTabContentModule = typeof import("./EmbeddingsTabContent");
 type ImageGenerationTabContentModule = typeof import("./ImageGenerationTabContent");
-type DataTabContentModule = typeof import("./DataTabContent");
 type AdvancedTabContentModule = typeof import("./AdvancedTabContent");
 
 function loadSetupTabContentModule(): SetupTabContentModule {
   return require("./SetupTabContent") as SetupTabContentModule;
-}
-
-function loadProvidersTabContentModule(): ProvidersTabContentModule {
-  return require("./ProvidersTabContent") as ProvidersTabContentModule;
 }
 
 function loadChatTabContentModule(): ChatTabContentModule {
@@ -26,6 +20,10 @@ function loadChatTabContentModule(): ChatTabContentModule {
 
 function loadRecorderTabContentModule(): RecorderTabContentModule {
   return require("./RecorderTabContent") as RecorderTabContentModule;
+}
+
+function loadAutomationsTabContentModule(): AutomationsTabContentModule {
+  return require("./AutomationsTabContent") as AutomationsTabContentModule;
 }
 
 function loadDirectoriesTabContentModule(): DirectoriesTabContentModule {
@@ -42,10 +40,6 @@ function loadEmbeddingsTabContentModule(): EmbeddingsTabContentModule {
 
 function loadImageGenerationTabContentModule(): ImageGenerationTabContentModule {
   return require("./ImageGenerationTabContent") as ImageGenerationTabContentModule;
-}
-
-function loadDataTabContentModule(): DataTabContentModule {
-  return require("./DataTabContent") as DataTabContentModule;
 }
 
 function loadAdvancedTabContentModule(): AdvancedTabContentModule {
@@ -79,20 +73,6 @@ export function buildSettingsTabConfigs(tab: SystemSculptSettingTab): SettingsTa
     },
   ];
 
-  configs.push({
-    id: "providers",
-    label: "Providers",
-    sections: [
-      (parent) => {
-        void loadProvidersTabContentModule().displayProvidersTabContent(parent, tab);
-      },
-    ],
-    anchor: {
-      title: "AI Providers, API Keys, OAuth, BYOK",
-      desc: "Connect your own AI provider accounts (OpenAI, Anthropic, Google, OpenRouter, etc.) to use their models in Chat and Studio.",
-    },
-  });
-
   configs.push(
     {
       id: "chat",
@@ -113,12 +93,17 @@ export function buildSettingsTabConfigs(tab: SystemSculptSettingTab): SettingsTa
       label: "Workflow",
       sections: [
         (parent) => {
-          void loadRecorderTabContentModule().displayRecorderTabContent(parent, tab);
+          const section = parent.createDiv();
+          void loadRecorderTabContentModule().displayRecorderTabContent(section, tab);
+        },
+        (parent) => {
+          const section = parent.createDiv();
+          loadAutomationsTabContentModule().displayAutomationsTabContent(section, tab);
         },
       ],
       anchor: {
-        title: "Audio Capture, Recording, Transcription",
-        desc: "Configure recording, transcription, and post-processing preferences for SystemSculpt.",
+        title: "Audio Capture, Recording, Transcription, Automations",
+        desc: "Configure recording, transcription, post-processing, and managed workflow automations.",
       },
     },
     {
@@ -132,19 +117,6 @@ export function buildSettingsTabConfigs(tab: SystemSculptSettingTab): SettingsTa
       anchor: {
         title: "Embeddings, Similar Notes",
         desc: "Manage semantic search and related note discovery while SystemSculpt handles the processing.",
-      },
-    },
-    {
-      id: "readwise",
-      label: "Readwise",
-      sections: [
-        (parent) => {
-          loadDataTabContentModule().displayDataTabContent(parent, tab);
-        },
-      ],
-      anchor: {
-        title: "Readwise Imports, Sync, Highlights",
-        desc: "Manage your Readwise connection, import options, sync schedule, and manual sync actions.",
       },
     },
     {
@@ -175,7 +147,7 @@ export function buildSettingsTabConfigs(tab: SystemSculptSettingTab): SettingsTa
       ],
       anchor: {
         title: "SystemSculpt Studio, Image Generation",
-        desc: "Manage the desktop-only Studio workspace and SystemSculpt image generation options.",
+        desc: "Manage Studio workflows and SystemSculpt image generation options.",
       },
     },
     {
@@ -187,8 +159,8 @@ export function buildSettingsTabConfigs(tab: SystemSculptSettingTab): SettingsTa
         },
       ],
       anchor: {
-        title: "Advanced, Update Notifications, Reset, Diagnostics",
-        desc: "Update notifications, reset to factory settings, and diagnostics & troubleshooting tools.",
+        title: "Advanced, Reset, Diagnostics",
+        desc: "Reset to factory settings and open diagnostics or troubleshooting tools.",
       },
     },
   );

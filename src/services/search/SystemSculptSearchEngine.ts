@@ -1,6 +1,6 @@
 import { App, EventRef, TFile } from "obsidian";
 import SystemSculptPlugin from "../../main";
-import { shouldExcludeFromSearch, fuzzyMatchScore } from "../../mcp-tools/filesystem/searchUtils";
+import { shouldExcludeFromSearch, fuzzyMatchScore } from "../../tools/vault/searchUtils";
 import { extractCanvasText } from "./canvasTextExtractor";
 
 export type SearchMode = "smart" | "lexical" | "semantic";
@@ -243,7 +243,7 @@ export class SystemSculptSearchEngine {
       // Explicit semantic request but embeddings not ready; keep usedEmbeddings false and rely on lexical fallback
     }
 
-    const results = this.mergeResults(lexicalHits, semanticHits, limit, mode);
+    const results = this.mergeResults(lexicalHits, semanticHits, limit);
 
     const totalMs = performance.now() - searchStart;
 
@@ -1335,7 +1335,7 @@ export class SystemSculptSearchEngine {
     return processed / total >= 0.75;
   }
 
-  private mergeResults(lexical: SearchHit[], semantic: SearchHit[], limit: number, mode: SearchMode): SearchHit[] {
+  private mergeResults(lexical: SearchHit[], semantic: SearchHit[], limit: number): SearchHit[] {
     const K = 60;
     const entries = new Map<string, { lex?: SearchHit; sem?: SearchHit; rrfLex: number; rrfSem: number }>();
 
@@ -1355,7 +1355,7 @@ export class SystemSculptSearchEngine {
 
     const merged: SearchHit[] = [];
 
-    for (const [path, entry] of entries.entries()) {
+    for (const entry of entries.values()) {
       const lexScore = entry.lex?.lexScore ?? 0;
       const semScore = entry.sem?.semScore ?? 0;
       const rrfBoost = entry.rrfLex + entry.rrfSem;
@@ -1424,7 +1424,7 @@ export class SystemSculptSearchEngine {
   /**
    * Invoke the plugin's lazy embeddings-manager factory if it exists. Used for
    * explicit semantic searches so a missing manager doesn't silently degrade to
-   * lexical-only results. Errors (missing license, misconfigured provider) are
+   * lexical-only results. Errors (missing license or managed-service failure) are
    * swallowed because the subsequent indicator check will report them.
    */
   private ensureEmbeddingsManager(): void {

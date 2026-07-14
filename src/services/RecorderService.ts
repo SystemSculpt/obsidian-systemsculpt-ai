@@ -1,11 +1,11 @@
 import { App } from "obsidian";
 import type SystemSculptPlugin from "../main";
-import { PlatformContext } from "./PlatformContext";
 import { RecorderUIManager } from "./recorder/RecorderUIManager";
-import { pickRecorderFormat, pickRecorderAudioBitsPerSecond } from "./recorder/RecorderFormats";
+import { pickRecorderFormat } from "./recorder/RecorderFormats";
 import { RecordingSession, RecordingResult } from "./recorder/RecordingSession";
+import type { RecorderHostContext } from "./recorder/RecorderHostContext";
 import { TranscriptionCoordinator } from "./transcription/TranscriptionCoordinator";
-import { logDebug, logInfo, logWarning, logError } from "../utils/errorHandling";
+import { logDebug, logInfo, logError } from "../utils/errorHandling";
 
 interface RecorderOptions {
   onTranscriptionComplete?: (text: string) => void;
@@ -21,7 +21,6 @@ export class RecorderService {
 
   private readonly app: App;
   private readonly plugin: SystemSculptPlugin;
-  private readonly platform: PlatformContext;
   private readonly ui: RecorderUIManager;
   private readonly transcriptionCoordinator: TranscriptionCoordinator;
 
@@ -38,14 +37,15 @@ export class RecorderService {
   private sessionCompletionResolver: (() => void) | null = null;
   private toggleQueue: Promise<void> = Promise.resolve();
   private stopRequestedDuringStart = false;
-  private errorCleanupTimer: ReturnType<typeof setTimeout> | null = null;
+  private errorCleanupTimer: number | null = null;
+  private errorCleanupTimerWindow: Window | null = null;
+  private recordingHostContext: RecorderHostContext | null = null;
 
   private constructor(app: App, plugin: SystemSculptPlugin, options: RecorderOptions) {
     this.app = app;
     this.plugin = plugin;
-    this.platform = PlatformContext.get();
-    this.ui = new RecorderUIManager({ app, plugin, platform: this.platform });
-    this.transcriptionCoordinator = new TranscriptionCoordinator(app, plugin, this.platform);
+    this.ui = new RecorderUIManager({ app, plugin });
+    this.transcriptionCoordinator = new TranscriptionCoordinator(app, plugin);
 
     this.onTranscriptionDone = options.onTranscriptionComplete ?? null;
   }
@@ -75,7 +75,7 @@ export class RecorderService {
 
   /**
    * Observe completed transcriptions without replacing the service-level
-   * onTranscriptionComplete callback (used by the desktop automation bridge).
+   * onTranscriptionComplete callback.
    */
   public onTranscription(callback: (text: string) => void): () => void {
     this.transcriptionListeners.add(callback);
@@ -87,6 +87,7 @@ export class RecorderService {
   }
 
   public unload(): void {
+    this.transcriptionCoordinator.abort();
     if (this.isRecording) {
       void this.stopRecording();
     }
@@ -128,24 +129,17 @@ export class RecorderService {
 
     try {
       const directoryPath = this.plugin.settings.recordingsDirectory || "SystemSculpt/Recordings";
-      const format = pickRecorderFormat({
-        preferM4a: this.platform.isMobile(),
-      });
-      // Cap mobile recordings at a speech-optimized bitrate so meeting-length
-      // audio stays under the transcription direct-upload limit and avoids the
-      // mobile chunk/decode path that can't handle webm/opus (#169).
-      const audioBitsPerSecond = pickRecorderAudioBitsPerSecond({
-        isMobile: this.platform.isMobile(),
-      });
+      const format = pickRecorderFormat();
       const directoryManager = this.plugin.directoryManager;
       if (!directoryManager) {
         throw new Error("Recorder directories are not initialized yet. Please wait and try again.");
       }
 
       this.debug("opening recorder UI", { directoryPath, format: format.extension });
-      this.ui.open(() => {
+      const hostContext = this.ui.open(() => {
         this.requestStop();
       });
+      this.recordingHostContext = hostContext;
       this.ui.setStatus("Preparing recorder...");
 
       this.beginSessionLifecycle();
@@ -157,8 +151,8 @@ export class RecorderService {
           await directoryManager.ensureDirectoryByPath(path);
         },
         format,
-        audioBitsPerSecond,
         preferredMicrophoneId: this.plugin.settings.preferredMicrophoneId,
+        hostContext,
         onStatus: (status) => this.updateStatus(status),
         onError: (error) => this.handleError(error),
         onStreamChanged: (stream) => this.handleStreamChanged(stream),
@@ -283,7 +277,7 @@ export class RecorderService {
       const savedMessage = fileName ? `Saved to ${fileName}` : "Recording saved.";
       if (stoppedFromBackground) {
         this.ui.linger(
-          `${savedMessage} iOS stopped recording when the app locked/backgrounded; keep the app unlocked for continuous recording.`,
+          `${savedMessage} Recording stopped when the window or tab left the foreground; saved what was captured.`,
           4200
         );
       } else if (stoppedByInterruption) {
@@ -305,7 +299,6 @@ export class RecorderService {
         onStatus: (status) => this.updateStatus(status),
         onTranscriptionComplete: (text: string) => this.handleTranscriptionComplete(text),
         suppressNotices: true,
-        useModal: false
       });
     } catch (error) {
       const normalized = error instanceof Error ? error : new Error(String(error));
@@ -360,13 +353,13 @@ export class RecorderService {
 
   private handleError(error: Error): void {
     this.error("Recorder failure encountered", error);
-    const isMobile = this.platform.isMobile();
-    const hasBackup = this.lastRecordingPath && this.offlineRecordings.has(this.lastRecordingPath);
+    const hasBackup = !!(this.lastRecordingPath && this.offlineRecordings.has(this.lastRecordingPath));
+    const savedFileName = this.lastRecordingPath?.split("/").pop();
 
     const errorMessage = hasBackup
-      ? isMobile
-        ? "Recording saved, but processing failed. Your audio is safe."
-        : `Recording saved to ${this.lastRecordingPath?.split("/").pop()}, but processing failed`
+      ? savedFileName
+        ? `Recording saved to ${savedFileName}, but processing failed`
+        : "Recording saved, but processing failed."
       : `Recording error: ${error.message}`;
 
     this.updateStatus(errorMessage);
@@ -376,13 +369,16 @@ export class RecorderService {
     this.session = null;
     this.resolveSessionLifecycle();
 
-    if (this.errorCleanupTimer) {
-      clearTimeout(this.errorCleanupTimer);
+    if (this.errorCleanupTimer !== null) {
+      this.errorCleanupTimerWindow?.clearTimeout(this.errorCleanupTimer);
       this.errorCleanupTimer = null;
+      this.errorCleanupTimerWindow = null;
     }
 
-    const timer = setTimeout(() => {
+    const timerWindow = this.recordingHostContext?.hostWindow ?? window;
+    const timer = timerWindow.setTimeout(() => {
       this.errorCleanupTimer = null;
+      this.errorCleanupTimerWindow = null;
       this.cleanup(true);
     }, hasBackup ? 3000 : 2000);
 
@@ -391,6 +387,7 @@ export class RecorderService {
       (timer as any).unref();
     }
     this.errorCleanupTimer = timer;
+    this.errorCleanupTimerWindow = timerWindow;
   }
 
   private notifyListeners(): void {
@@ -406,9 +403,10 @@ export class RecorderService {
 
   private cleanup(hideUI: boolean = false): void {
     this.debug("cleanup invoked", { hideUI });
-    if (this.errorCleanupTimer) {
-      clearTimeout(this.errorCleanupTimer);
+    if (this.errorCleanupTimer !== null) {
+      this.errorCleanupTimerWindow?.clearTimeout(this.errorCleanupTimer);
       this.errorCleanupTimer = null;
+      this.errorCleanupTimerWindow = null;
     }
     if (this.session) {
       this.session.dispose();
@@ -424,6 +422,7 @@ export class RecorderService {
 
     if (hideUI) {
       this.ui.close();
+      this.recordingHostContext = null;
     }
 
     this.notifyListeners();
@@ -447,10 +446,6 @@ export class RecorderService {
 
   private info(message: string, data: Record<string, unknown> = {}): void {
     logInfo("RecorderService", message, { ...this.getStateSnapshot(), ...data });
-  }
-
-  private warn(message: string, data: Record<string, unknown> = {}): void {
-    logWarning("RecorderService", message, { ...this.getStateSnapshot(), ...data });
   }
 
   private error(message: string, error: Error): void {

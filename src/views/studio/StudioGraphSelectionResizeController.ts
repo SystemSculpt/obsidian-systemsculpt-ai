@@ -22,6 +22,7 @@ import {
   type StudioSelectionResizeNodeSnapshot,
   type StudioSelectionResizePatchEntry,
 } from "./graph-v3/StudioGraphSelectionTransform";
+import { getStudioOwnerWindow } from "./StudioDomContext";
 
 export type StudioGraphSelectionResizePatchEntry = StudioSelectionResizePatchEntry;
 
@@ -62,6 +63,7 @@ type StudioGraphSelectionResizeControllerHost = {
 };
 
 type GestureState = {
+  ownerWindow: Window;
   pointerId: number;
   zone: StudioGraphResizeZone;
   zoneEl: HTMLElement;
@@ -227,6 +229,7 @@ export class StudioGraphSelectionResizeController {
     event.stopPropagation();
 
     this.gesture = {
+      ownerWindow: getStudioOwnerWindow(zoneEl),
       pointerId: event.pointerId,
       zone,
       zoneEl,
@@ -261,10 +264,10 @@ export class StudioGraphSelectionResizeController {
         // Ignore capture errors; window listeners are fallback.
       }
     }
-    window.addEventListener("pointermove", this.onPointerMove);
-    window.addEventListener("pointerup", this.onPointerFinish);
-    window.addEventListener("pointercancel", this.onPointerFinish);
-    window.addEventListener("keydown", this.onKeyDown);
+    this.gesture.ownerWindow.addEventListener("pointermove", this.onPointerMove);
+    this.gesture.ownerWindow.addEventListener("pointerup", this.onPointerFinish);
+    this.gesture.ownerWindow.addEventListener("pointercancel", this.onPointerFinish);
+    this.gesture.ownerWindow.addEventListener("keydown", this.onKeyDown);
   }
 
   private readonly onPointerMove = (event: PointerEvent): void => {
@@ -307,7 +310,7 @@ export class StudioGraphSelectionResizeController {
       return;
     }
     let firedSynchronously = false;
-    gesture.frameId = window.requestAnimationFrame(() => {
+    gesture.frameId = gesture.ownerWindow.requestAnimationFrame(() => {
       firedSynchronously = true;
       this.applyPendingFrame();
     });
@@ -448,17 +451,17 @@ export class StudioGraphSelectionResizeController {
       return;
     }
     if (gesture.frameId !== null) {
-      window.cancelAnimationFrame(gesture.frameId);
+      gesture.ownerWindow.cancelAnimationFrame(gesture.frameId);
       gesture.frameId = null;
       if (outcome === "finalize") {
         // Fold the pending pointer travel into the final state.
         this.applyPendingFrame();
       }
     }
-    window.removeEventListener("pointermove", this.onPointerMove);
-    window.removeEventListener("pointerup", this.onPointerFinish);
-    window.removeEventListener("pointercancel", this.onPointerFinish);
-    window.removeEventListener("keydown", this.onKeyDown);
+    gesture.ownerWindow.removeEventListener("pointermove", this.onPointerMove);
+    gesture.ownerWindow.removeEventListener("pointerup", this.onPointerFinish);
+    gesture.ownerWindow.removeEventListener("pointercancel", this.onPointerFinish);
+    gesture.ownerWindow.removeEventListener("keydown", this.onKeyDown);
     gesture.zoneEl.classList.remove("is-active");
     if (typeof gesture.zoneEl.releasePointerCapture === "function") {
       try {

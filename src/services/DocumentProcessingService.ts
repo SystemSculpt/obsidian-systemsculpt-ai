@@ -1,12 +1,26 @@
-import { App, TFile, Notice } from "obsidian";
+import { App, Notice, TFile } from "obsidian";
 import type SystemSculptPlugin from "../main";
-import { SystemSculptService } from "./SystemSculptService";
-import { SYSTEMSCULPT_API_ENDPOINTS } from "../constants/api";
-import { sleep } from "../utils/helpers";
-import type { HttpResponseShim } from "../utils/httpClient";
-import { PlatformContext } from "./PlatformContext";
-import { DOCUMENT_UPLOAD_MAX_BYTES } from "../constants/uploadLimits";
-import { DocumentUploadJobsService } from "./DocumentUploadJobsService";
+import { getManagedDocumentMimeType, normalizeFileExtension } from "../constants/fileTypes";
+import type {
+  DocumentProcessingFlow,
+  DocumentProcessingLogEntry,
+  DocumentProcessingProgressEvent,
+  DocumentProcessingStage,
+} from "../types/documentProcessing";
+import { sha256HexFromBytesPortable } from "../studio/hash";
+import { errorLogger } from "../utils/errorLogger";
+import { ManagedJobClient } from "./managed/ManagedJobClient";
+import { ManagedJobRecoveryStore } from "./managed/ManagedJobRecoveryStore";
+import {
+  ManagedDocumentProcessingAdapter,
+  type ManagedDocumentDownloadResult,
+  type ManagedDocumentProcessingResult,
+} from "./managed/ManagedDocumentProcessingAdapter";
+import {
+  ManagedDocumentLocalStaging,
+  type ManagedDocumentStagedArtifact,
+} from "./managed/ManagedDocumentLocalStaging";
+import { ObsidianManagedRecoveryAdapter } from "./managed/adapters/ObsidianManagedRecoveryAdapter";
 
 const STAGE_ICONS: Record<DocumentProcessingStage, string> = {
   queued: "inbox",
@@ -19,25 +33,10 @@ const STAGE_ICONS: Record<DocumentProcessingStage, string> = {
   error: "x-circle",
 };
 
-const DOCUMENT_PROCESSING_STILL_RUNNING_MESSAGE =
-  "Document is still processing on SystemSculpt. Please retry in about a minute.";
-const DEFAULT_DOCUMENT_POLL_ATTEMPTS = 180;
-
 type ProgressMeta = Partial<
   Pick<DocumentProcessingLogEntry, "filePath" | "fileName" | "durationMs" | "attempt" | "source">
-> & {
-  documentId?: string;
-  metadata?: Record<string, unknown>;
-};
-import {
-  DocumentProcessingProgressEvent,
-  DocumentProcessingStage,
-  DocumentProcessingFlow,
-  DocumentProcessingLogEntry,
-} from "../types/documentProcessing";
-import { errorLogger } from "../utils/errorLogger";
+> & { documentId?: string; metadata?: Record<string, unknown> };
 
-// Interface for image metadata tracking
 interface ImageMetadata {
   originalName: string;
   newName: string;
@@ -47,1295 +46,479 @@ interface ImageMetadata {
   timestamp: number;
 }
 
-/**
- * Centralized service for document processing across the plugin
- * Handles conversion of documents to markdown, image extraction, and context management
- */
-export class DocumentProcessingService {
-  private app: App;
-  private plugin: SystemSculptPlugin;
-  private sculptService: SystemSculptService;
-  private imageMetadataLog: ImageMetadata[] = [];
-  private static instance: DocumentProcessingService;
+export interface DocumentProcessingReceipt {
+  extractionPath: string;
+  imagePaths: string[];
+  operationId: string;
+  outputIdentity: string;
+  markdownSha256: string;
+  contextEffectId: string;
+}
 
-  constructor(app: App, plugin: SystemSculptPlugin) {
-    this.app = app;
-    this.plugin = plugin;
-    // Use singleton instance instead of creating new one
-    this.sculptService = SystemSculptService.getInstance(plugin);
+export interface DocumentProcessingOptions {
+  onProgress?: (event: DocumentProcessingProgressEvent) => void;
+  showNotices?: boolean;
+  flow?: DocumentProcessingFlow;
+  signal?: AbortSignal;
+}
+
+export interface DocumentProcessingReceiptOptions extends DocumentProcessingOptions {
+  commitContextEffect?: (receipt: DocumentProcessingReceipt, signal: AbortSignal) => Promise<void>;
+}
+
+type ManagedDocumentAdapterPort = Pick<ManagedDocumentProcessingAdapter,
+  "process" | "resume" | "beginLocalCommit" | "completeLocalCommit"
+>;
+type ManagedDocumentStagingPort = Pick<ManagedDocumentLocalStaging, "stage" | "readVerified" | "cleanup">;
+
+export interface DocumentProcessingDependencies {
+  managed?: ManagedDocumentAdapterPort;
+  staging?: ManagedDocumentStagingPort;
+}
+
+interface PreparedImageEffect {
+  originalName: string;
+  newName: string;
+  path: string;
+  bytes: ArrayBuffer;
+}
+
+interface PreparedLocalEffects {
+  extractionPath: string;
+  markdownBytes: ArrayBuffer;
+  images: PreparedImageEffect[];
+  artifacts: Array<{ kind: "image" | "markdown"; bytes: ArrayBuffer }>;
+}
+
+interface NormalizedManagedDocumentResult {
+  content: string;
+  text: string;
+  markdown: string;
+  metadata: Readonly<Record<string, unknown>>;
+  images: ManagedDocumentDownloadResult["images"] | Record<string, string>;
+}
+
+export class ManagedDocumentLocalEffectError extends Error {
+  readonly code = "local_output_conflict" as const;
+  constructor(message: string) {
+    super(message);
+    this.name = "ManagedDocumentLocalEffectError";
+  }
+}
+
+export class DocumentProcessingService {
+  private static instance: DocumentProcessingService;
+  private readonly imageMetadataLog: ImageMetadata[] = [];
+  private managedAdapter: ManagedDocumentAdapterPort | null;
+  private localStaging: ManagedDocumentStagingPort | null;
+
+  constructor(
+    private readonly app: App,
+    private readonly plugin: SystemSculptPlugin,
+    dependencies: DocumentProcessingDependencies = {},
+  ) {
+    this.managedAdapter = dependencies.managed ?? null;
+    this.localStaging = dependencies.staging ?? null;
   }
 
-  private clampProgress(value: number | undefined): number {
-    if (typeof value !== "number" || Number.isNaN(value)) {
-      return 0;
+  public static getInstance(app: App, plugin: SystemSculptPlugin): DocumentProcessingService {
+    if (!DocumentProcessingService.instance) DocumentProcessingService.instance = new DocumentProcessingService(app, plugin);
+    return DocumentProcessingService.instance;
+  }
+
+  public async processDocument(file: TFile, options: DocumentProcessingOptions = {}): Promise<string> {
+    return (await this.processDocumentWithReceipt(file, options)).extractionPath;
+  }
+
+  public async processDocumentWithReceipt(
+    file: TFile,
+    options: DocumentProcessingReceiptOptions = {},
+  ): Promise<DocumentProcessingReceipt> {
+    const signal = options.signal ?? new AbortController().signal;
+    const flow = options.flow ?? "document";
+    const showNotices = options.showNotices ?? true;
+    const startedAt = Date.now();
+    const meta: ProgressMeta = { filePath: file.path, fileName: file.name };
+    throwIfAborted(signal);
+    this.emitProgress(options.onProgress, {
+      stage: "validating",
+      progress: 5,
+      label: "Checking document access…",
+      icon: STAGE_ICONS.validating,
+      metadata: { startedAt },
+    }, meta, flow);
+
+    try {
+      const identity = `vault:${file.path}`;
+      const remote = await this.adapter().process({
+        identity,
+        fingerprint: () => `sha256:${sha256HexFromBytesPortable(new TextEncoder().encode(identity))}`,
+        load: async () => {
+          throwIfAborted(signal);
+          const contentType = getManagedDocumentMimeType(normalizeFileExtension(file.extension));
+          if (!contentType) {
+            throw new Error(`Managed document processing does not support .${file.extension || "unknown"} files.`);
+          }
+          const bytes = await this.app.vault.readBinary(file);
+          throwIfAborted(signal);
+          return { filename: file.name, contentType, bytes };
+        },
+      }, {
+        signal,
+        onProgress: (progress, status) => {
+          if (signal.aborted) return;
+          const stage: DocumentProcessingStage = progress < 70 ? "uploading" : "processing";
+          this.emitProgress(options.onProgress, {
+            stage,
+            progress,
+            label: status,
+            icon: STAGE_ICONS[stage],
+          }, meta, flow);
+        },
+      });
+      throwIfAborted(signal);
+      meta.documentId = remote.documentId;
+      this.emitProgress(options.onProgress, {
+        stage: "downloading",
+        progress: 96,
+        label: "Verifying converted document…",
+        icon: STAGE_ICONS.downloading,
+        documentId: remote.documentId,
+      }, meta, flow);
+
+      const receipt = await this.commitLocalEffects(file, remote, options, signal);
+      throwIfAborted(signal);
+      meta.durationMs = Date.now() - startedAt;
+      this.emitProgress(options.onProgress, {
+        stage: "ready",
+        progress: 100,
+        label: "Document ready",
+        icon: STAGE_ICONS.ready,
+        documentId: remote.documentId,
+      }, meta, flow);
+      if (showNotices) new Notice("Document successfully converted to Markdown");
+      return receipt;
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") throw error;
+      const message = error instanceof Error ? error.message : String(error);
+      this.emitProgress(options.onProgress, {
+        stage: "error",
+        progress: 0,
+        label: `Error: ${message}`,
+        icon: STAGE_ICONS.error,
+        error: message,
+      }, meta, flow);
+      if (showNotices) new Notice(`Failed to process document: ${message}`);
+      throw error;
     }
-    if (!Number.isFinite(value)) {
-      return value > 0 ? 100 : 0;
+  }
+
+  private adapter(): ManagedDocumentAdapterPort {
+    if (this.managedAdapter) return this.managedAdapter;
+    const graph = this.plugin.getManagedCapabilityGraph();
+    this.managedAdapter = new ManagedDocumentProcessingAdapter({
+      admission: graph.admission,
+      jobs: new ManagedJobClient(graph.transport).documents,
+      recovery: new ManagedJobRecoveryStore(new ObsidianManagedRecoveryAdapter(this.app)),
+    });
+    return this.managedAdapter;
+  }
+
+  private staging(): ManagedDocumentStagingPort {
+    if (!this.localStaging) this.localStaging = new ManagedDocumentLocalStaging(this.plugin);
+    return this.localStaging;
+  }
+
+  private async commitLocalEffects(
+    file: TFile,
+    remote: ManagedDocumentProcessingResult,
+    options: DocumentProcessingReceiptOptions,
+    signal: AbortSignal,
+  ): Promise<DocumentProcessingReceipt> {
+    await this.adapter().beginLocalCommit(remote.operationId, signal);
+    throwIfAborted(signal);
+    const prepared = this.prepareLocalEffects(file, remote.result);
+    throwIfAborted(signal);
+    const metadata = await this.staging().stage(remote.operationId, prepared.artifacts, signal);
+    throwIfAborted(signal);
+    const verified = await this.staging().readVerified(remote.operationId, metadata, signal);
+    throwIfAborted(signal);
+    if (verified.length !== prepared.artifacts.length || metadata.length !== prepared.artifacts.length) {
+      throw new Error("Managed document staging returned an incomplete artifact set.");
     }
-    return Math.min(100, Math.max(0, value));
+
+    for (let index = 0; index < prepared.images.length; index += 1) {
+      const image = prepared.images[index];
+      const staged = metadata[index];
+      if (staged.kind !== "image") throw new Error("Managed document staging image order changed.");
+      await this.commitBinaryEffect(image.path, verified[index], staged, signal);
+      this.recordImageMetadata({
+        originalName: image.originalName,
+        newName: image.newName,
+        path: image.path,
+        size: staged.byteLength,
+        documentName: file.basename,
+        timestamp: Date.now(),
+      });
+    }
+
+    const markdownIndex = metadata.length - 1;
+    const markdownMetadata = metadata[markdownIndex];
+    if (markdownMetadata.kind !== "markdown") throw new Error("Managed document staging Markdown order changed.");
+    await this.commitMarkdownEffect(prepared.extractionPath, verified[markdownIndex], markdownMetadata, signal);
+    throwIfAborted(signal);
+
+    const outputIdentity = `vault:${prepared.extractionPath}`;
+    const contextEffectId = sha256HexFromBytesPortable(new TextEncoder().encode(
+      `managed-document-context-effect-v1\0${remote.operationId}\0${outputIdentity}\0${markdownMetadata.sha256}`,
+    ));
+    const receipt: DocumentProcessingReceipt = {
+      extractionPath: prepared.extractionPath,
+      imagePaths: prepared.images.map((image) => image.path),
+      operationId: remote.operationId,
+      outputIdentity,
+      markdownSha256: markdownMetadata.sha256,
+      contextEffectId,
+    };
+    await options.commitContextEffect?.(receipt, signal);
+    throwIfAborted(signal);
+    await this.adapter().completeLocalCommit(remote.operationId, signal);
+    throwIfAborted(signal);
+    try {
+      await this.staging().cleanup(remote.operationId, signal);
+    } catch (error) {
+      if (signal.aborted) throw error;
+      errorLogger.error("Managed document staging cleanup is pending", error, {
+        source: "DocumentProcessingService",
+        method: "commitLocalEffects",
+        metadata: { operationId: remote.operationId },
+      });
+    }
+    return receipt;
+  }
+
+  private prepareLocalEffects(file: TFile, result: ManagedDocumentDownloadResult): PreparedLocalEffects {
+    const extractionFolder = this.plugin.settings.extractionsDirectory?.trim() ?? "";
+    const baseName = this.sanitizeFilename(file.basename);
+    const parentPath = extractionFolder ? `${extractionFolder}/${baseName}` : `${file.parent?.path || ""}/${baseName}`;
+    const imagesPath = `${parentPath}/images-${this.sanitizeFilename(baseName).substring(0, 20)}`;
+    const rawImages = this.extractImagesFromData(result);
+    const preparedImages: PreparedImageEffect[] = [];
+    const imagePathMap = new Map<string, string>();
+    const contentPaths = new Map<string, { path: string; relativePath: string }>();
+
+    for (const [imageName, imageBase64] of Object.entries(rawImages)) {
+      const bytes = this.base64ToArrayBuffer(imageBase64);
+      const contentHash = sha256HexFromBytesPortable(new Uint8Array(bytes));
+      const existing = contentPaths.get(contentHash);
+      if (existing) {
+        imagePathMap.set(imageName, existing.relativePath);
+        continue;
+      }
+      const newName = this.generateUniqueImageName(baseName, imageName, imageBase64);
+      const path = this.normalizePath(`${imagesPath}/${newName}`);
+      const relativePath = `${imagesPath.split("/").pop() || "images"}/${newName}`;
+      contentPaths.set(contentHash, { path, relativePath });
+      imagePathMap.set(imageName, relativePath);
+      preparedImages.push({ originalName: imageName, newName, path, bytes });
+    }
+
+    const processed = this.normalizeManagedResult(result);
+    if (imagePathMap.size) {
+      processed.images = rawImages;
+      let content = String(processed.content ?? processed.markdown ?? processed.text ?? "");
+      imagePathMap.forEach((newPath, originalName) => {
+        const escaped = originalName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        content = content
+          .replace(new RegExp(`!\\[([^\\]]*)\\]\\(${escaped}\\)`, "g"), `![$1](${newPath})`)
+          .replace(new RegExp(`<img([^>]*)src=["']${escaped}["']([^>]*)>`, "g"), `<img$1src="${newPath}"$2>`);
+      });
+      processed.content = content;
+    }
+    const markdown = this.formatExtractionContent(processed);
+    const markdownBytes = new TextEncoder().encode(markdown).buffer;
+    const extractionPath = this.normalizePath(`${parentPath}/${baseName}-extraction.md`);
+    return {
+      extractionPath,
+      markdownBytes,
+      images: preparedImages,
+      artifacts: [
+        ...preparedImages.map((image) => ({ kind: "image" as const, bytes: image.bytes })),
+        { kind: "markdown" as const, bytes: markdownBytes },
+      ],
+    };
+  }
+
+  private normalizeManagedResult(result: ManagedDocumentDownloadResult): NormalizedManagedDocumentResult {
+    const content = result.markdown.trim()
+      ? result.markdown
+      : result.text.trim()
+      ? result.text
+      : result.content.length
+      ? JSON.stringify(result.content, null, 2)
+      : "";
+    return { content, text: result.text, markdown: result.markdown, metadata: result.metadata, images: result.images };
+  }
+
+  private async commitBinaryEffect(
+    path: string,
+    bytes: ArrayBuffer,
+    metadata: ManagedDocumentStagedArtifact,
+    signal: AbortSignal,
+  ): Promise<void> {
+    throwIfAborted(signal);
+    await this.ensureDirectory(path.slice(0, path.lastIndexOf("/")), signal);
+    const exists = await this.app.vault.adapter.exists(path);
+    throwIfAborted(signal);
+    if (exists) {
+      const current = await this.app.vault.adapter.readBinary(path);
+      throwIfAborted(signal);
+      const currentHash = sha256HexFromBytesPortable(new Uint8Array(current));
+      if (current.byteLength !== metadata.byteLength || currentHash !== metadata.sha256) {
+        throw new ManagedDocumentLocalEffectError(`Existing image conflicts with managed effect ${path}.`);
+      }
+      return;
+    }
+    await this.app.vault.createBinary(path, bytes);
+    throwIfAborted(signal);
+  }
+
+  private async commitMarkdownEffect(
+    path: string,
+    bytes: ArrayBuffer,
+    metadata: ManagedDocumentStagedArtifact,
+    signal: AbortSignal,
+  ): Promise<void> {
+    throwIfAborted(signal);
+    await this.ensureDirectory(path.slice(0, path.lastIndexOf("/")), signal);
+    const exists = await this.app.vault.adapter.exists(path);
+    throwIfAborted(signal);
+    if (exists) {
+      const current = await this.app.vault.adapter.read(path);
+      throwIfAborted(signal);
+      const currentBytes = new TextEncoder().encode(current);
+      const currentHash = sha256HexFromBytesPortable(currentBytes);
+      if (currentBytes.byteLength !== metadata.byteLength || currentHash !== metadata.sha256) {
+        throw new ManagedDocumentLocalEffectError(`Existing Markdown conflicts with managed effect ${path}.`);
+      }
+      return;
+    }
+    await this.app.vault.create(path, new TextDecoder().decode(bytes));
+    throwIfAborted(signal);
+  }
+
+  private async ensureDirectory(path: string, signal: AbortSignal): Promise<void> {
+    if (!path) return;
+    throwIfAborted(signal);
+    if (this.plugin.directoryManager) await this.plugin.directoryManager.ensureDirectoryByPath(path);
+    else await this.plugin.createDirectory(path);
+    throwIfAborted(signal);
   }
 
   private emitProgress(
     handler: ((event: DocumentProcessingProgressEvent) => void) | undefined,
     event: DocumentProcessingProgressEvent,
     meta: ProgressMeta = {},
-    fallbackFlow: DocumentProcessingFlow = "document"
+    fallbackFlow: DocumentProcessingFlow = "document",
   ): void {
     const normalizedEvent: DocumentProcessingProgressEvent = {
       ...event,
       progress: this.clampProgress(event.progress),
       flow: event.flow ?? fallbackFlow,
     };
-
     try {
       handler?.(normalizedEvent);
     } catch (error) {
       errorLogger.error("Progress handler threw", error, {
         source: "DocumentProcessingService",
         method: "emitProgress",
-        metadata: {
-          stage: normalizedEvent.stage,
-          filePath: meta.filePath,
-        },
+        metadata: { stage: normalizedEvent.stage, filePath: meta.filePath },
       });
     }
   }
 
-  private mapNormalizedStatusToStage(status?: string): DocumentProcessingStage {
-    switch ((status ?? "").toLowerCase()) {
-      case "queued":
-        return "queued";
-      case "validating":
-      case "preparing":
-        return "validating";
-      case "uploading":
-        return "uploading";
-      case "chunking":
-      case "extracting":
-      case "processing":
-      case "analyzing":
-      case "analysis":
-        return "processing";
-      case "downloading":
-        return "downloading";
-      case "contextualizing":
-      case "integrating":
-        return "contextualizing";
-      case "completed":
-      case "ready":
-        return "ready";
-      case "failed":
-      case "error":
-      case "timed_out":
-        return "error";
-      default:
-        return "processing";
-    }
+  private clampProgress(value: number | undefined): number {
+    if (typeof value !== "number" || Number.isNaN(value)) return 0;
+    if (!Number.isFinite(value)) return value > 0 ? 100 : 0;
+    return Math.min(100, Math.max(0, value));
   }
 
-  /**
-   * Get the singleton instance of DocumentProcessingService
-   */
-  public static getInstance(
-    app: App,
-    plugin: SystemSculptPlugin
-  ): DocumentProcessingService {
-    if (!DocumentProcessingService.instance) {
-      DocumentProcessingService.instance = new DocumentProcessingService(app, plugin);
-    }
-    return DocumentProcessingService.instance;
-  }
-
-  /**
-   * Process a document file and convert it to markdown
-   * @param file The file to process
-   * @param options Processing options
-   * @returns Promise with the path to the extracted markdown file
-   */
-  /**
-   * Process a document file and convert it to markdown
-   * @param file The file to process
-   * @param options Processing options
-   * @returns Promise with the path to the extracted markdown file
-   */
-  public async processDocument(
-    file: TFile,
-    options: {
-      onProgress?: (event: DocumentProcessingProgressEvent) => void;
-      addToContext?: boolean;
-      showNotices?: boolean;
-      flow?: DocumentProcessingFlow;
-    } = {}
-  ): Promise<string> {
-    const {
-      onProgress,
-      addToContext = false,
-      showNotices = true,
-      flow = "document",
-    } = options;
-
-    const meta: ProgressMeta = {
-      filePath: file.path,
-      fileName: file.name,
-    };
-    const startedAt = Date.now();
-    let documentId: string | undefined;
-    let lastStage: DocumentProcessingStage = "queued";
-    let emittedError = false;
-
-    const progressHandler = onProgress;
-
-    try {
-      this.emitProgress(
-        progressHandler,
-        {
-          stage: "validating",
-          progress: 5,
-          label: "Validating license…",
-          icon: STAGE_ICONS.validating,
-          metadata: { startedAt },
-        },
-        meta,
-        flow
-      );
-
-      const hasValidLicense = await this.plugin
-        .getLicenseManager()
-        .validateLicenseKey(true, false);
-      if (!hasValidLicense) {
-        throw new Error("Valid license required for document processing");
-      }
-
-      this.emitProgress(
-        progressHandler,
-        {
-          stage: "uploading",
-          progress: 15,
-          label: "Uploading document to DataLab…",
-          icon: STAGE_ICONS.uploading,
-        },
-        meta,
-        flow
-      );
-
-      let uploadResult: any;
-      try {
-        const platform = PlatformContext.get();
-        const fileSize = typeof file.stat?.size === "number" ? file.stat.size : 0;
-        const shouldUseJobsUpload =
-          !platform.isMobile() &&
-          Number.isFinite(fileSize) &&
-          fileSize > DOCUMENT_UPLOAD_MAX_BYTES;
-
-        if (shouldUseJobsUpload) {
-          const jobsUploader = new DocumentUploadJobsService(
-            this.app,
-            this.sculptService.baseUrl,
-            this.plugin.settings.licenseKey || "",
-            this.plugin.manifest?.version ?? "0.0.0"
-          );
-
-          const reservedStart = 15;
-          const reservedEnd = 35;
-          const reservedRange = Math.max(1, reservedEnd - reservedStart);
-
-          uploadResult = await jobsUploader.uploadDocumentViaJobs(file, {
-            onProgress: (evt) => {
-              const mapped =
-                reservedStart +
-                Math.round((Math.max(0, Math.min(100, evt.progress)) / 100) * reservedRange);
-              this.emitProgress(
-                progressHandler,
-                {
-                  stage: "uploading",
-                  progress: mapped,
-                  label: evt.label,
-                  icon: STAGE_ICONS.uploading,
-                  metadata: {
-                    uploadStage: evt.stage,
-                    ...(evt.stage === "uploading"
-                      ? { partNumber: evt.partNumber, totalParts: evt.totalParts }
-                      : {}),
-                  },
-                },
-                meta,
-                flow
-              );
-            },
-          });
-        } else {
-          uploadResult = await this.sculptService.uploadDocument(file);
-        }
-      } catch (uploadError) {
-        const message = uploadError instanceof Error
-          ? uploadError.message
-          : String(uploadError);
-        this.emitProgress(
-          progressHandler,
-          {
-            stage: "error",
-            progress: 0,
-            label: `Upload failed: ${message}`,
-            icon: STAGE_ICONS.error,
-            error: message,
-          },
-          meta,
-          flow
-        );
-        lastStage = "error";
-        emittedError = true;
-        throw uploadError;
-      }
-
-      documentId = uploadResult?.documentId;
-      const cached = Boolean(uploadResult?.cached);
-
-      if (documentId) {
-        meta.documentId = documentId;
-      }
-
-      this.emitProgress(
-        progressHandler,
-        {
-          stage: "uploading",
-          progress: cached ? 45 : 35,
-          label: cached ? "Upload skipped — cached extraction available" : "Upload complete, queued for processing",
-          icon: cached ? "history" : "check",
-          documentId,
-          cached,
-        },
-        meta,
-        flow
-      );
-
-      if (cached && documentId) {
-        lastStage = "processing";
-        this.emitProgress(
-          progressHandler,
-          {
-            stage: "processing",
-            progress: 55,
-            label: "Reusing cached extraction results",
-            icon: "archive",
-            documentId,
-            cached: true,
-          },
-          meta,
-          flow
-        );
-
-        const extractionData = await this.downloadExtraction(documentId);
-        this.emitProgress(
-          progressHandler,
-          {
-            stage: "downloading",
-            progress: 85,
-            label: "Downloading cached results…",
-            icon: STAGE_ICONS.downloading,
-            documentId,
-            cached: true,
-          },
-          meta,
-          flow
-        );
-
-        const extractionPath = await this.saveExtractionResults(file, extractionData, {
-          addToContext,
-        });
-
-        this.emitProgress(
-          progressHandler,
-          {
-            stage: "downloading",
-            progress: 90,
-            label: "Cached results saved to vault",
-            icon: "hard-drive",
-            documentId,
-            cached: true,
-          },
-          meta,
-          flow
-        );
-
-        if (showNotices) {
-          new Notice("Document successfully converted from cache");
-        }
-
-        meta.durationMs = Date.now() - startedAt;
-        lastStage = "downloading";
-        return extractionPath;
-      }
-
-      if (!documentId) {
-        throw new Error("Upload did not return a document ID");
-      }
-
-      lastStage = "processing";
-      const maxPollAttempts = DEFAULT_DOCUMENT_POLL_ATTEMPTS;
-      const pollResult = await this.pollUntilComplete(
-        documentId,
-        progressHandler,
-        meta,
-        flow,
-        maxPollAttempts
-      );
-
-      if (!pollResult.completed) {
-        throw new Error(
-          pollResult.error || DOCUMENT_PROCESSING_STILL_RUNNING_MESSAGE
-        );
-      }
-
-      this.emitProgress(
-        progressHandler,
-        {
-          stage: "downloading",
-          progress: 85,
-          label: "Downloading processed results…",
-          icon: STAGE_ICONS.downloading,
-          documentId,
-        },
-        meta,
-        flow
-      );
-
-      try {
-        const downloadPromise = this.downloadExtraction(documentId);
-        let extractionData = await new Promise<any>((resolve, reject) => {
-          const timer = setTimeout(() => reject(new Error("Download timed out")), 30000);
-          downloadPromise.then(
-            (value) => {
-              clearTimeout(timer);
-              resolve(value);
-            },
-            (error) => {
-              clearTimeout(timer);
-              reject(error);
-            }
-          );
-        });
-
-        if (
-          !extractionData ||
-          (typeof extractionData === "object" &&
-            !extractionData.content &&
-            !extractionData.text &&
-            !extractionData.markdown &&
-            !extractionData.extraction)
-        ) {
-          try {
-            const fallbackUrl = `${this.sculptService.baseUrl}/documents/${documentId}/raw`;
-            const { httpRequest } = await import("../utils/httpClient");
-            const fallbackResponse = await httpRequest({
-              url: fallbackUrl,
-              method: "GET",
-              headers: {
-                "x-license-key": this.plugin.settings.licenseKey || "",
-                "x-plugin-version": this.plugin.manifest?.version ?? "0.0.0",
-              },
-            });
-
-            if (fallbackResponse.status && fallbackResponse.status < 400) {
-              const rawText = fallbackResponse.text || "";
-              if (rawText) {
-                extractionData = { content: rawText };
-              }
-            }
-          } catch (fallbackError) {
-            this.emitProgress(
-              progressHandler,
-              {
-                stage: "processing",
-                progress: 88,
-                label: "Fallback download attempt failed",
-                icon: "alert-triangle",
-                documentId,
-                details:
-                  fallbackError instanceof Error
-                    ? fallbackError.message
-                    : String(fallbackError),
-              },
-              meta,
-              flow
-            );
-          }
-        }
-
-        const extractionPath = await this.saveExtractionResults(file, extractionData, {
-          addToContext,
-        });
-
-        this.emitProgress(
-          progressHandler,
-          {
-            stage: "downloading",
-            progress: 92,
-            label: "Extraction saved",
-            icon: "file-down",
-            documentId,
-          },
-          meta,
-          flow
-        );
-
-        if (showNotices) {
-          new Notice("Document successfully converted to markdown");
-        }
-
-        meta.durationMs = Date.now() - startedAt;
-        lastStage = "downloading";
-        return extractionPath;
-      } catch (downloadError) {
-        const message =
-          downloadError instanceof Error
-            ? downloadError.message
-            : String(downloadError);
-        this.emitProgress(
-          progressHandler,
-          {
-            stage: "error",
-            progress: 0,
-            label: "Error downloading results",
-            icon: STAGE_ICONS.error,
-            documentId,
-            error: message,
-            details:
-              "The server might be experiencing issues. The operation will continue in the background.",
-          },
-          meta,
-          flow
-        );
-        lastStage = "error";
-        emittedError = true;
-        throw downloadError;
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (!emittedError) {
-        this.emitProgress(
-          progressHandler,
-          {
-            stage: "error",
-            progress: 0,
-            label: `Error: ${message}`,
-            icon: STAGE_ICONS.error,
-            documentId,
-            error: message,
-          },
-          meta,
-          flow
-        );
-        lastStage = "error";
-        emittedError = true;
-      }
-
-      if (showNotices) {
-        new Notice(`Failed to process document: ${message}`);
-      }
-      throw error;
-    }
-  }
-
-  /**
-   * Poll for document processing completion
-   * @param documentId The document ID to poll for
-   * @param progressHandler Optional progress handler function
-   * @param maxAttempts Maximum number of polling attempts
-   * @returns Promise<boolean> indicating success or failure
-   */
-  private async pollUntilComplete(
-    documentId: string,
-    handler: ((event: DocumentProcessingProgressEvent) => void) | undefined,
-    meta: ProgressMeta,
-    flow: DocumentProcessingFlow,
-    maxAttempts = 30
-  ): Promise<{ completed: boolean; status: string; error?: string }> {
-    let consecutiveErrors = 0;
-    const maxConsecutiveErrors = 5;
-    let lastStatus = "processing";
-    let lastError: string | undefined;
-    const pollMeta: ProgressMeta = { ...meta, documentId };
-
-    for (let i = 0; i < maxAttempts; i++) {
-      try {
-        const baseUrl = this.sculptService.baseUrl;
-        const endpoint = SYSTEMSCULPT_API_ENDPOINTS.DOCUMENTS.GET(documentId);
-        const url = `${baseUrl}${endpoint}`;
-
-        const { httpRequest } = await import("../utils/httpClient");
-        const response = await httpRequest({
-          url,
-          method: "GET",
-          headers: {
-            "Content-Type": "application/json",
-            "x-license-key": this.plugin.settings.licenseKey || "",
-            "x-plugin-version": this.plugin.manifest?.version ?? "0.0.0",
-          },
-        });
-
-        if (!response.status || response.status >= 400) {
-          consecutiveErrors++;
-          lastError = `HTTP ${response.status}`;
-          const progress = 40 + (i / maxAttempts) * 30;
-          const message =
-            response.status === 500
-              ? "Server error, retrying…"
-              : `Error ${response.status}, retrying…`;
-
-          this.emitProgress(
-            handler,
-            {
-              stage: "processing",
-              progress,
-              label: message,
-              icon: "alert-triangle",
-              documentId,
-              details: lastError,
-              metadata: { attempt: i + 1 },
-            },
-            { ...pollMeta, attempt: i + 1 },
-            flow
-          );
-
-          if (consecutiveErrors >= maxConsecutiveErrors) {
-            this.emitProgress(
-              handler,
-              {
-                stage: "error",
-                progress: 0,
-                label: "Server returned repeated errors",
-                icon: STAGE_ICONS.error,
-                documentId,
-                error: lastError,
-              },
-              pollMeta,
-              flow
-            );
-            await sleep(3000);
-            return {
-              completed: false,
-              status: lastStatus,
-              error: lastError || "Server returned repeated errors",
-            };
-          }
-
-          await sleep(3000);
-          continue;
-        }
-
-        consecutiveErrors = 0;
-
-        const statusInfo = this.parseDocumentStatusResponse(response);
-        lastStatus = statusInfo.normalizedStatus || statusInfo.rawStatus || lastStatus;
-        lastError = statusInfo.error || lastError;
-
-        const stage = this.mapNormalizedStatusToStage(statusInfo.normalizedStatus);
-        const baseProgress = Math.min(45 + (i / maxAttempts) * 45, 90);
-        const progress =
-          typeof statusInfo.progress === "number"
-            ? Math.max(baseProgress, statusInfo.progress)
-            : baseProgress;
-
-        if (stage === "error") {
-          const errorMessage =
-            statusInfo.error ||
-            `Document processing failed (${statusInfo.rawStatus || "unknown"})`;
-          this.emitProgress(
-            handler,
-            {
-              stage: "error",
-              progress,
-              label: errorMessage,
-              icon: STAGE_ICONS.error,
-              documentId,
-              error: errorMessage,
-              details: statusInfo.error,
-            },
-            pollMeta,
-            flow
-          );
-          await sleep(2000);
-          return {
-            completed: false,
-            status: statusInfo.normalizedStatus,
-            error: errorMessage,
-          };
-        }
-
-        if (stage === "ready") {
-          this.emitProgress(
-            handler,
-            {
-              stage: "processing",
-              progress: Math.max(progress, 92),
-              label: "Processing complete, finalizing…",
-              icon: "check",
-              documentId,
-              status: statusInfo.rawStatus,
-            },
-            pollMeta,
-            flow
-          );
-          return { completed: true, status: "completed" };
-        }
-
-        const label =
-          stage === "queued"
-            ? "Queued at document processor…"
-            : "Processing document…";
-        const icon = stage === "queued" ? STAGE_ICONS.queued : STAGE_ICONS.processing;
-
-        this.emitProgress(
-          handler,
-          {
-            stage,
-            progress,
-            label,
-            icon,
-            documentId,
-            status: statusInfo.rawStatus,
-            details: statusInfo.error,
-            metadata: { attempt: i + 1 },
-          },
-          { ...pollMeta, attempt: i + 1 },
-          flow
-        );
-      } catch (error) {
-        consecutiveErrors++;
-        lastError = error instanceof Error ? error.message : String(error);
-        const progress = 45 + (i / maxAttempts) * 35;
-
-        this.emitProgress(
-          handler,
-          {
-            stage: "processing",
-            progress,
-            label: "Connection issue, retrying…",
-            icon: "alert-triangle",
-            documentId,
-            details: lastError,
-            metadata: { attempt: i + 1 },
-          },
-          { ...pollMeta, attempt: i + 1 },
-          flow
-        );
-
-        if (consecutiveErrors >= maxConsecutiveErrors) {
-          this.emitProgress(
-            handler,
-            {
-              stage: "error",
-              progress: 0,
-              label:
-                "Too many connection errors. Please check your internet connection and try again.",
-              icon: STAGE_ICONS.error,
-              documentId,
-              error: lastError,
-            },
-            pollMeta,
-            flow
-          );
-          await sleep(3000);
-          return {
-            completed: false,
-            status: "error",
-            error:
-              lastError ||
-              "Too many connection errors. Please check your internet connection and try again.",
-          };
-        }
-      }
-
-      await sleep(2000);
-    }
-
-    this.emitProgress(
-      handler,
-      {
-        stage: "error",
-        progress: 0,
-        label: DOCUMENT_PROCESSING_STILL_RUNNING_MESSAGE,
-        icon: "clock",
-        documentId,
-        error: lastError || DOCUMENT_PROCESSING_STILL_RUNNING_MESSAGE,
-      },
-      pollMeta,
-      flow
-    );
-    await sleep(3000);
-    return {
-      completed: false,
-      status: lastStatus,
-      error: lastError || DOCUMENT_PROCESSING_STILL_RUNNING_MESSAGE,
-    };
-  }
-
-  private parseDocumentStatusResponse(response: HttpResponseShim): {
-    normalizedStatus: string;
-    rawStatus: string;
-    error?: string;
-    progress?: number;
-  } {
-    let payload: any = response.json;
-    if ((!payload || typeof payload !== 'object') && response.text) {
-      try {
-        payload = JSON.parse(response.text);
-      } catch {
-        payload = {};
-      }
-    }
-
-    if (!payload || typeof payload !== 'object') {
-      payload = {};
-    }
-
-    const data = payload.data && typeof payload.data === 'object' ? payload.data : {};
-    const rawStatusValue =
-      (data && typeof (data as any).status === 'string' ? (data as any).status : undefined) ??
-      (typeof payload.status === 'string' ? payload.status : undefined);
-
-    const normalizedStatusValue =
-      typeof (data as any).normalizedStatus === 'string'
-        ? (data as any).normalizedStatus
-        : rawStatusValue;
-
-    const normalizedStatus = normalizedStatusValue
-      ? normalizedStatusValue.toLowerCase()
-      : 'processing';
-    const rawStatus = rawStatusValue || normalizedStatusValue || 'processing';
-
-    const errorMessage =
-      typeof (data as any).error === 'string'
-        ? (data as any).error
-        : typeof payload.error === 'string'
-        ? payload.error
-        : undefined;
-
-    const progress =
-      typeof (data as any).progress === 'number' ? (data as any).progress : undefined;
-
-    return {
-      normalizedStatus,
-      rawStatus,
-      error: errorMessage,
-      progress,
-    };
-  }
-
-  /**
-   * Download extraction data for a document
-   * @param documentId The document ID to download extraction for
-   * @returns Promise with the extraction data
-   */
-  private async downloadExtraction(documentId: string): Promise<any> {
-    try {
-      // Construct the URL with proper error handling
-      const baseUrl = this.sculptService.baseUrl;
-      const endpoint = SYSTEMSCULPT_API_ENDPOINTS.DOCUMENTS.DOWNLOAD(documentId);
-      const url = `${baseUrl}${endpoint}`;
-
-      const { httpRequest } = await import('../utils/httpClient');
-      const response = await httpRequest({
-        url,
-        method: 'GET',
-        headers: {
-          "Content-Type": "application/json",
-          "x-license-key": this.plugin.settings.licenseKey || "",
-          "x-plugin-version": this.plugin.manifest?.version ?? "0.0.0",
-        },
-      });
-
-      if (!response.status || response.status >= 400) {
-        throw new Error(`Failed to download extraction: ${response.status}`);
-      }
-
-      const data = response.json || (response.text ? JSON.parse(response.text) : {});
-
-      if (data && data.success === false) {
-        const errorMessage =
-          data.error || data.details || 'Document extraction is not ready yet.';
-        throw new Error(errorMessage);
-      }
-
-      const nestedExtraction =
-        (data && typeof data === 'object' && data.extractionResult)
-          ? data.extractionResult
-          : data?.data?.extractionResult;
-
-      if (nestedExtraction && typeof nestedExtraction === 'object') {
-        if (!data.content && nestedExtraction.markdown) {
-          data.content = nestedExtraction.markdown;
-        }
-        if (!data.text && nestedExtraction.text) {
-          data.text = nestedExtraction.text;
-        }
-        if (!data.markdown && nestedExtraction.markdown) {
-          data.markdown = nestedExtraction.markdown;
-        }
-        if (!data.images && nestedExtraction.images) {
-          data.images = nestedExtraction.images;
-        }
-        if (!data.metadata && nestedExtraction.metadata) {
-          data.metadata = nestedExtraction.metadata;
-        }
-      }
-
-      // Validate that we have actual content
-      if (!data || (typeof data === 'object' && !data.content && !data.text)) {
-        throw new Error("Empty extraction data received from server");
-      }
-
-      return data;
-    } catch (error) {
-      throw error;
-    }
-  }
-
-  /**
-   * Save extraction results to disk and optionally add to context
-   * @param file The original file
-   * @param data The extraction data
-   * @param options Options for saving
-   * @returns Promise with the path to the saved extraction file
-   */
-  private async saveExtractionResults(
-    file: TFile,
-    data: any,
-    options: {
-      addToContext?: boolean;
-    } = {}
-  ): Promise<string> {
-    const { addToContext = false } = options;
-
-    try {
-
-      const extractionFolder = this.sculptService.extractionsDirectory;
-      const baseName = this.sanitizeFilename(file.basename);
-      const parentPath = extractionFolder
-        ? `${extractionFolder}/${baseName}`
-        : `${file.parent?.path || ""}/${baseName}`;
-
-      // Create the target folder using the DirectoryManager
-      if (this.plugin.directoryManager) {
-        await this.plugin.directoryManager.ensureDirectoryByPath(parentPath);
-      } else {
-        // Fallback to the legacy method
-        await this.plugin.createDirectory(parentPath);
-      }
-
-      // Process and save images if present
-      let processedContent = data;
-
-      // Extract images from different possible locations in the API response
-      const images = this.extractImagesFromData(data);
-
-      if (images && Object.keys(images).length > 0) {
-        // Add images to processed content for later reference
-        processedContent.images = images;
-
-        // Create a document-specific images subfolder with a deterministic name
-        const documentId = this.sanitizeFilename(baseName).substring(0, 20); // Limit length
-        const imagesPath = `${parentPath}/images-${documentId}`;
-
-        // Check if the directory already exists
-        const directoryExists = await this.app.vault.adapter.exists(imagesPath);
-
-        // If it exists, we'll reuse it and clean it up
-        if (directoryExists) {
-          try {
-            // Get all files in the directory
-            const files = await this.app.vault.adapter.list(imagesPath);
-            if (files && files.files && files.files.length > 0) {
-
-              // Delete all existing files in the directory
-              for (const file of files.files) {
-                await this.app.vault.adapter.remove(file);
-              }
-            }
-          } catch (error) {
-            // Continue anyway - we'll try to overwrite files as needed
-          }
-        }
-
-        // Create the images directory
-        if (this.plugin.directoryManager) {
-          await this.plugin.directoryManager.ensureDirectoryByPath(imagesPath);
-        } else {
-          await this.plugin.createDirectory(imagesPath);
-        }
-
-        // Create maps to track images and prevent duplicates
-        const imagePathMap = new Map<string, string>();
-        const processedImages = new Map<string, string>(); // Maps content hash to relative path
-
-        // Process each image
-        for (const [imageName, imageBase64] of Object.entries<string>(images)) {
-          try {
-            // Generate a content hash for deduplication
-            const imageHash = this.simpleHash(imageBase64.substring(0, 1000));
-            const existingImage = processedImages.get(imageHash);
-
-            if (existingImage) {
-              // Reuse the existing image path for duplicate images
-              imagePathMap.set(imageName, existingImage);
-              continue;
-            }
-
-            // Generate a deterministic name for the image to prevent collisions
-            // This ensures the same image always gets the same filename
-            const uniqueImageName = this.generateUniqueImageName(baseName, imageName, imageBase64);
-            const imagePath = this.normalizePath(`${imagesPath}/${uniqueImageName}`);
-
-
-            // Convert base64 to array buffer
-            const imageArrayBuffer = this.base64ToArrayBuffer(imageBase64);
-
-            // Verify the image data is valid
-            if (imageArrayBuffer.byteLength < 100) {
-            }
-
-            // Note: We don't need to check if the image exists and remove it
-            // because we've already cleaned up the directory if it existed
-
-            // Save the image
-            await this.app.vault.createBinary(imagePath, imageArrayBuffer);
-
-            // Get the folder name from the full path
-            const folderName = imagesPath.split('/').pop() || 'images';
-
-            // Store the mapping from original image name to new path
-            // Use relative path for markdown references
-            const relativeImagePath = `${folderName}/${uniqueImageName}`;
-            imagePathMap.set(imageName, relativeImagePath);
-
-            // Store in processed images map for deduplication
-            processedImages.set(imageHash, relativeImagePath);
-
-            // Add metadata to track image processing
-            this.recordImageMetadata({
-              originalName: imageName,
-              newName: uniqueImageName,
-              path: imagePath,
-              size: imageArrayBuffer.byteLength,
-              documentName: file.basename,
-              timestamp: Date.now()
-            });
-
-            // Add to context if requested
-            if (addToContext) {
-              // TODO: Implement context addition once we integrate with FileContextManager
-            }
-          } catch (imageError) {
-          }
-        }
-
-        // Update image references in the content if needed
-        if (processedContent.content && imagePathMap.size > 0) {
-          let updatedContent = processedContent.content;
-
-          // Replace image references in markdown content
-          imagePathMap.forEach((newPath, originalName) => {
-            try {
-              // Escape special characters in the original name for regex
-              const escapedOriginalName = originalName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
-              // Match various forms of image references
-              const imgRegex = new RegExp(`!\\[([^\\]]*)\\]\\(${escapedOriginalName}\\)`, 'g');
-              updatedContent = updatedContent.replace(imgRegex, `![$1](${newPath})`);
-
-              // Also match image references without alt text
-              const imgRegexNoAlt = new RegExp(`!\\[\\]\\(${escapedOriginalName}\\)`, 'g');
-              updatedContent = updatedContent.replace(imgRegexNoAlt, `![](${newPath})`);
-
-              // Also handle HTML img tags
-              const htmlImgRegex = new RegExp(`<img[^>]*src=["']${escapedOriginalName}["'][^>]*>`, 'g');
-              updatedContent = updatedContent.replace(htmlImgRegex, (match: string) => {
-                return match.replace(escapedOriginalName, newPath);
-              });
-
-              // Also try to match the filename without path
-              const filenameOnly = escapedOriginalName.split('/').pop();
-              if (filenameOnly && filenameOnly !== escapedOriginalName) {
-                const filenameRegex = new RegExp(`!\\[([^\\]]*)\\]\\(${filenameOnly}\\)`, 'g');
-                updatedContent = updatedContent.replace(filenameRegex, `![$1](${newPath})`);
-              }
-
-              // Log successful replacement
-            } catch (regexError) {
-            }
-          });
-
-          processedContent.content = updatedContent;
-        }
-      }
-
-      // Create extraction file path
-      const extractionPath = this.normalizePath(
-        `${parentPath}/${baseName}-extraction.md`
-      );
-
-      // Check if data is valid
-      if (!processedContent) {
-        throw new Error("Invalid extraction data received");
-      }
-
-      // Save the extraction content
-      const content = this.formatExtractionContent(processedContent);
-
-      const existingFile = this.app.vault.getAbstractFileByPath(extractionPath);
-      if (existingFile instanceof TFile) {
-        await this.app.vault.modify(existingFile, content);
-      } else {
-        await this.app.vault.create(extractionPath, content);
-      }
-
-      return extractionPath;
-    } catch (error) {
-      throw error;
-    }
-  }
-
-  /**
-   * Format extraction content for display
-   * @param data The extraction data
-   * @returns Formatted markdown content
-   */
   private formatExtractionContent(data: any): string {
-    // Handle different data formats that might be returned by the API
-    let title = "Document Extraction";
-    let content = "";
-
-    if (data) {
-      // Handle different possible data structures
-      if (data.title) {
-        title = data.title;
-      } else if (data.metadata && data.metadata.title) {
-        title = data.metadata.title;
-      } else if (data.document && data.document.title) {
-        title = data.document.title;
-      }
-
-      if (data.content) {
-        content = data.content;
-      } else if (data.text) {
-        content = data.text;
-      } else if (data.document && data.document.content) {
-        content = data.document.content;
-      } else if (data.document && data.document.text) {
-        content = data.document.text;
-      } else if (typeof data === 'string') {
-        content = data;
-      } else if (data.markdown) {
-        content = data.markdown;
-      } else if (data.extraction) {
-        content = data.extraction;
-      }
-    }
-
-    // If content is still empty, try to use the entire data object as a string
-    if (!content && data) {
-      try {
-        // Try to stringify the entire object if nothing else worked
-        if (typeof data === 'object') {
-          content = JSON.stringify(data, null, 2);
-        }
-      } catch (e) {
-      }
-    }
-
-    // Add a note if content is still empty
-    if (!content) {
-      content = "No content was extracted from this document. The server may be experiencing issues or the document format is not supported.";
-    }
-
-    // Add a note about images if they were processed
+    const title = data?.title ?? data?.metadata?.title ?? data?.document?.title ?? "Document Extraction";
+    let content = data?.content ?? data?.text ?? data?.document?.content ?? data?.document?.text ?? data?.markdown ?? data?.extraction ?? "";
+    if (!content && data && typeof data === "object") content = JSON.stringify(data, null, 2);
+    if (!content) content = "No content was extracted from this document. The server may be experiencing issues or the document format is not supported.";
     let imageNote = "";
-    if (data && data.images && Object.keys(data.images).length > 0) {
+    if (data?.images && Object.keys(data.images).length > 0) {
       const imageCount = Object.keys(data.images).length;
-      // Extract the folder name from the first image path if available
       let folderInfo = "the images folder";
-      if (this.imageMetadataLog && this.imageMetadataLog.length > 0) {
-        const firstImage = this.imageMetadataLog[this.imageMetadataLog.length - imageCount];
-        if (firstImage && firstImage.path) {
-          const pathParts = firstImage.path.split('/');
-          if (pathParts.length >= 2) {
-            folderInfo = `the '${pathParts[pathParts.length - 2]}' folder`;
-          }
-        }
+      if (this.imageMetadataLog.length > 0) {
+        const firstImage = this.imageMetadataLog[Math.max(0, this.imageMetadataLog.length - imageCount)];
+        const parts = firstImage?.path?.split("/") ?? [];
+        if (parts.length >= 2) folderInfo = `the '${parts[parts.length - 2]}' folder`;
       }
-      imageNote = `
-
-> [!note] Images
-> ${imageCount} image${imageCount > 1 ? 's were' : ' was'} extracted from this document and saved in ${folderInfo}.
-`;
+      imageNote = `\n\n> [!note] Images\n> ${imageCount} image${imageCount > 1 ? "s were" : " was"} extracted from this document and saved in ${folderInfo}.\n`;
     }
-
-    return `# ${title}
-
-${content}${imageNote}
-
----
-Extracted with SystemSculpt
-`;
+    return `# ${title}\n\n${String(content)}${imageNote}\n\n---\nExtracted with SystemSculpt\n`;
   }
 
-  /**
-   * Extracts images from different possible locations in the API response
-   * @param data The API response data
-   * @returns Object containing image name to base64 mappings
-   */
   private extractImagesFromData(data: any): Record<string, string> {
     const images: Record<string, string> = {};
-
+    const add = (name: unknown, value: unknown, index: number) => {
+      if (typeof value === "string" && value) images[typeof name === "string" && name ? name : `image-${index}.png`] = value;
+    };
     if (!data) return images;
-
-    // Direct images object
-    if (data.images && typeof data.images === 'object') {
-      Object.entries(data.images).forEach(([key, value]) => {
-        if (typeof value === 'string') {
-          images[key] = value;
-        }
+    if (Array.isArray(data.images)) {
+      data.images.forEach((image: any, index: number) => {
+        if (typeof image === "string") add(undefined, image, index);
+        else add(image?.name ?? image?.filename, image?.data ?? image?.base64 ?? image?.content, index);
       });
+    } else if (data.images && typeof data.images === "object") {
+      Object.entries(data.images).forEach(([name, value], index) => add(name, value, index));
     }
-
-    // Nested in document
-    if (data.document && data.document.images && typeof data.document.images === 'object') {
-      Object.entries(data.document.images).forEach(([key, value]) => {
-        if (typeof value === 'string') {
-          images[key] = value;
-        }
-      });
+    if (data.document?.images && typeof data.document.images === "object") {
+      Object.entries(data.document.images).forEach(([name, value], index) => add(name, value, index));
     }
-
-    // Images in an array format
-    if (data.imageList && Array.isArray(data.imageList)) {
-      data.imageList.forEach((img: any, index: number) => {
-        if (img && typeof img.data === 'string') {
-          const name = img.name || `image-${index}.png`;
-          images[name] = img.data;
-        }
-      });
-    }
-
-    // Images in figures array (common in some API responses)
-    if (data.figures && Array.isArray(data.figures)) {
-      data.figures.forEach((fig: any, index: number) => {
-        if (fig && typeof fig.image === 'string') {
-          const name = fig.name || `figure-${index}.png`;
-          images[name] = fig.image;
-        }
-      });
-    }
-
+    if (Array.isArray(data.imageList)) data.imageList.forEach((image: any, index: number) => add(image?.name, image?.data, index));
+    if (Array.isArray(data.figures)) data.figures.forEach((image: any, index: number) => add(image?.name, image?.image, index));
     return images;
   }
 
-  /**
-   * Generates a deterministic image filename to prevent collisions and ensure consistency
-   * @param baseName Base name for the image
-   * @param imageName Original image name
-   * @param imageData Base64 image data (used for content-based hashing)
-   * @returns A unique image filename
-   */
   private generateUniqueImageName(baseName: string, imageName: string, imageData?: string): string {
-    // Extract extension from original image name
-    const extension = imageName.split('.').pop()?.toLowerCase() || 'png';
-
-    // Sanitize the base name to remove spaces and special characters
+    const extension = imageName.split(".").pop()?.toLowerCase() || "png";
     const sanitizedBaseName = this.sanitizeFilename(baseName);
-
-    // Generate a hash from the image content if available (for deduplication)
-    let contentHash = '';
-    if (imageData) {
-      try {
-        // Use a simple hash function based on the first 1000 chars of the image data
-        // This helps identify duplicate images
-        const sampleData = imageData.substring(0, 1000);
-        contentHash = this.simpleHash(sampleData);
-      } catch (e) {
-        // Create a hash from the image name and base name as a fallback
-        contentHash = this.simpleHash(`${baseName}-${imageName}`);
-      }
-    } else {
-      // Create a hash from the image name and base name as a fallback
-      contentHash = this.simpleHash(`${baseName}-${imageName}`);
-    }
-
-    // Create a deterministic name based on sanitized original name
-    const sanitizedImageName = this.sanitizeFilename(imageName.split('.')[0]);
-
-    // Combine elements for a unique but deterministic filename
+    const contentHash = this.simpleHash(imageData?.substring(0, 1000) || `${baseName}-${imageName}`);
+    const sanitizedImageName = this.sanitizeFilename(imageName.split(".")[0]);
     return `${sanitizedBaseName}-${sanitizedImageName}-${contentHash}.${extension}`;
   }
 
-  /**
-   * Creates a simple hash from a string
-   * @param str String to hash
-   * @returns A simple hash string
-   */
-  private simpleHash(str: string): string {
+  private simpleHash(value: string): string {
     let hash = 0;
-    for (let i = 0; i < str.length; i++) {
-      const char = str.charCodeAt(i);
-      hash = ((hash << 5) - hash) + char;
-      hash = hash & hash; // Convert to 32bit integer
-    }
-    // Convert to a positive hex string and take the first 8 characters
+    for (let index = 0; index < value.length; index += 1) hash = ((hash << 5) - hash + value.charCodeAt(index)) | 0;
     return (hash >>> 0).toString(16).substring(0, 8);
   }
 
-  /**
-   * Converts a base64 string to an ArrayBuffer
-   * @param base64 The base64 string to convert
-   * @returns ArrayBuffer
-   */
-  private base64ToArrayBuffer(base64: string): ArrayBuffer {
-    // Remove data URL prefix if present
-    const base64Data = base64.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, "");
-
-    // Convert base64 to binary string
-    const binaryString = window.atob(base64Data);
-    const bytes = new Uint8Array(binaryString.length);
-
-    // Convert binary string to ArrayBuffer
-    for (let i = 0; i < binaryString.length; i++) {
-      bytes[i] = binaryString.charCodeAt(i);
-    }
-
+  private base64ToArrayBuffer(value: string): ArrayBuffer {
+    const base64 = value.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, "");
+    const binary = window.atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
     return bytes.buffer;
   }
 
-  /**
-   * Records metadata about processed images for tracking and debugging
-   * @param metadata Image metadata to record
-   */
   private recordImageMetadata(metadata: ImageMetadata): void {
-    try {
-      // Store in memory for the current session
-      this.imageMetadataLog.push(metadata);
-
-      // Log the metadata for debugging
-    } catch (e) {
-    }
+    this.imageMetadataLog.push(metadata);
   }
 
-  /**
-   * Sanitizes a filename to remove invalid characters
-   * @param filename The filename to sanitize
-   * @returns Sanitized filename
-   */
   private sanitizeFilename(filename: string): string {
-    // Replace spaces with hyphens and remove other special characters
     return filename.replace(/[^a-zA-Z0-9-_]/g, "-");
   }
 
-  /**
-   * Normalizes a path to ensure it's valid for Obsidian
-   * @param path The path to normalize
-   * @returns Normalized path
-   */
-  private normalizePath(path: string): string {
-    // Normalize path separators and remove any leading/trailing slashes
-    return path.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+  private normalizePath(value: string): string {
+    return value.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
   }
+}
+
+function throwIfAborted(signal: AbortSignal): void {
+  if (signal.aborted) throw new DOMException("Aborted", "AbortError");
 }

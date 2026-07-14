@@ -37,8 +37,6 @@ import {
   logWarning,
   logInfo,
   logDebug,
-  logMobileError,
-  logMobilePerformance,
   handleEmbeddingError,
   safeExecute,
   safeExecuteWithRetry,
@@ -234,64 +232,6 @@ describe("errorHandling", () => {
         "TestContext: Debug message",
         expect.objectContaining({ source: "TestContext", metadata: undefined })
       );
-    });
-  });
-
-  describe("logMobileError", () => {
-    it("logs error with additional info", async () => {
-      await logMobileError("MobileContext", "Mobile error", new Error("test"), {
-        device: "iPhone",
-      });
-
-      expect(mockErrorLogger.error).toHaveBeenCalledWith(
-        "MobileContext: Mobile error",
-        expect.any(Error),
-        expect.objectContaining({
-          source: "MobileContext",
-          metadata: { additionalInfo: { device: "iPhone" } },
-        })
-      );
-    });
-
-    it("logs error without additional info", async () => {
-      await logMobileError("MobileContext", "Mobile error", new Error("test"));
-
-      expect(mockErrorLogger.error).toHaveBeenCalled();
-    });
-  });
-
-  describe("logMobilePerformance", () => {
-    it("logs performance warning when threshold exceeded on mobile", async () => {
-      setLogLevel(LogLevel.WARNING);
-
-      // Mock mobile environment
-      const originalWindow = global.window;
-      (global as any).window = {
-        app: { isMobile: true },
-      };
-      (global as any).navigator = { userAgent: "iPhone" };
-      (global as any).performance = { now: () => 2000 };
-
-      await logMobilePerformance("TestOperation", 0, 1000);
-
-      expect(mockErrorLogger.warn).toHaveBeenCalled();
-
-      (global as any).window = originalWindow;
-    });
-
-    it("does not log when threshold not exceeded", async () => {
-      setLogLevel(LogLevel.WARNING);
-
-      (global as any).window = {
-        app: { isMobile: true },
-      };
-      (global as any).navigator = { userAgent: "iPhone" };
-      (global as any).performance = { now: () => 500 };
-
-      await logMobilePerformance("TestOperation", 0, 1000);
-
-      // Should not have been called because threshold wasn't exceeded
-      expect(mockErrorLogger.warn).not.toHaveBeenCalled();
     });
   });
 

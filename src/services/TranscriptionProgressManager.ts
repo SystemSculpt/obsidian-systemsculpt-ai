@@ -1,10 +1,9 @@
 import { TFile } from "obsidian";
-import { TranscriptionContext } from "./TranscriptionService";
+import type { TranscriptionContext } from "./transcription/TranscriptionCoordinator";
 
 /**
- * Unified manager for transcription progress reporting
- * This class handles progress reporting for both the AudioTranscriptionModal
- * and the FileContextManager interfaces
+ * Unified manager for transcription progress reporting.
+ * This class feeds both the transcription progress panel and file-context flows.
  */
 export class TranscriptionProgressManager {
   private static instance: TranscriptionProgressManager;
@@ -15,7 +14,7 @@ export class TranscriptionProgressManager {
     lastProgress: number;
     lastStatus: string;
     detailedInfo: string | null;
-    cleanupTimeout: NodeJS.Timeout | null;
+    cleanupTimeout: number | null;
   }> = new Map();
 
   // Private constructor for singleton pattern
@@ -63,7 +62,7 @@ export class TranscriptionProgressManager {
 
           // Clear any existing cleanup timeout
           if (transcription.cleanupTimeout) {
-            clearTimeout(transcription.cleanupTimeout);
+            window.clearTimeout(transcription.cleanupTimeout);
             transcription.cleanupTimeout = null;
           }
 
@@ -98,7 +97,7 @@ export class TranscriptionProgressManager {
 
             // For completion, remove the transcription after a short delay
             if (progress === 100) {
-              transcription.cleanupTimeout = setTimeout(() => {
+              transcription.cleanupTimeout = window.setTimeout(() => {
                 this.activeTranscriptions.delete(filePath);
               }, 2000);
             }
@@ -123,11 +122,11 @@ export class TranscriptionProgressManager {
     if (transcription) {
       // Clear any existing cleanup timeout
       if (transcription.cleanupTimeout) {
-        clearTimeout(transcription.cleanupTimeout);
+        window.clearTimeout(transcription.cleanupTimeout);
       }
 
       // Set a shorter timeout to remove the transcription after completion
-      transcription.cleanupTimeout = setTimeout(() => {
+      transcription.cleanupTimeout = window.setTimeout(() => {
         this.activeTranscriptions.delete(filePath);
       }, 2000);
 
@@ -143,7 +142,7 @@ export class TranscriptionProgressManager {
   public clearProgress(filePath: string): void {
     const transcription = this.activeTranscriptions.get(filePath);
     if (transcription && transcription.cleanupTimeout) {
-      clearTimeout(transcription.cleanupTimeout);
+      window.clearTimeout(transcription.cleanupTimeout);
     }
     this.activeTranscriptions.delete(filePath);
   }

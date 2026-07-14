@@ -9,7 +9,7 @@ export type SystemSculptHistoryEntry = {
   subtitle?: string;
   timestampMs: number;
   searchText: string;
-  badge: string;
+  badge?: string;
   metadataPath?: string;
   isFavorite?: boolean;
   toggleFavorite?: () => Promise<boolean>;

@@ -10,7 +10,6 @@ export interface ChatExportSummary {
   totalMessages: number;
   assistantMessages: number;
   userMessages: number;
-  toolMessages: number;
   toolCallCount: number;
   reasoningBlockCount: number;
   imageCount: number;
@@ -22,7 +21,7 @@ export interface ChatExportContext {
   chatVersion?: number;
   exportedAt: Date;
   contextFiles: ChatExportContextFile[];
-  messages: ChatMessage[];
+  messages: readonly ChatMessage[];
   summary: ChatExportSummary;
 }
 

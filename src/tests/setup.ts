@@ -16,6 +16,17 @@ try {
 }
 
 try {
+  const { webcrypto } = require("crypto");
+  if (typeof g.crypto === "undefined") g.crypto = webcrypto;
+  if (typeof g.window !== "undefined" && typeof g.window.crypto === "undefined") {
+    g.window.crypto = webcrypto;
+  }
+} catch (_) {
+  // crypto may be unavailable; ignore in that case
+}
+const sharedWebCrypto = g.crypto;
+
+try {
   if (typeof g.Blob !== "undefined" && typeof g.Blob.prototype.arrayBuffer !== "function") {
     g.Blob.prototype.arrayBuffer = async function () {
       if (typeof this.text === "function") {
@@ -85,20 +96,61 @@ if (typeof g.Response === "undefined") {
 
   g.Response = SimpleResponse;
 }
-const realSetTimeout = globalThis.setTimeout.bind(globalThis) as typeof setTimeout;
-const realClearTimeout = globalThis.clearTimeout.bind(globalThis) as typeof clearTimeout;
-const realSetInterval = globalThis.setInterval.bind(globalThis) as typeof setInterval;
-const realClearInterval = globalThis.clearInterval.bind(globalThis) as typeof clearInterval;
-
 if (typeof g.window === 'undefined') {
   g.window = {} as any;
 }
-g.window.setTimeout = realSetTimeout;
-g.window.clearTimeout = realClearTimeout;
-
 export {};
-g.window.setInterval = realSetInterval;
-g.window.clearInterval = realClearInterval;
+
+function syncWindowTimers(win: any = g.window) {
+  if (!win || win === globalThis) return;
+  win.setTimeout = (...args: Parameters<typeof globalThis.setTimeout>) =>
+    globalThis.setTimeout(...args);
+  win.clearTimeout = (...args: Parameters<typeof globalThis.clearTimeout>) =>
+    globalThis.clearTimeout(...args);
+  win.setInterval = (...args: Parameters<typeof globalThis.setInterval>) =>
+    globalThis.setInterval(...args);
+  win.clearInterval = (...args: Parameters<typeof globalThis.clearInterval>) =>
+    globalThis.clearInterval(...args);
+}
+
+function ensureWindowCrypto(win: any = g.window) {
+  if (!win || !sharedWebCrypto) return;
+  if (typeof g.crypto === "undefined") g.crypto = sharedWebCrypto;
+  if (typeof win.crypto === "undefined" || typeof win.crypto?.subtle === "undefined") {
+    try {
+      Object.defineProperty(win, "crypto", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: sharedWebCrypto,
+      });
+    } catch (_) {
+      // Some JSDOM windows expose crypto through a read-only getter.
+      // Leave the native object in place when it cannot be replaced.
+    }
+  }
+}
+
+function ensureBase64Helpers(win: any = g.window) {
+  const atobImpl = (value: string) => Buffer.from(String(value), "base64").toString("binary");
+  const btoaImpl = (value: string) => Buffer.from(String(value), "binary").toString("base64");
+  if (typeof g.atob !== "function") g.atob = atobImpl;
+  if (typeof g.btoa !== "function") g.btoa = btoaImpl;
+  if (win && typeof win.atob !== "function") win.atob = atobImpl;
+  if (win && typeof win.btoa !== "function") win.btoa = btoaImpl;
+}
+
+function ensureAnimationFrameHelpers(win: any = g.window) {
+  const requestImpl = (callback: FrameRequestCallback) =>
+    globalThis.setTimeout(() => callback(Date.now()), 16) as unknown as number;
+  const cancelImpl = (handle: number) => {
+    globalThis.clearTimeout(handle);
+  };
+  if (typeof g.requestAnimationFrame !== "function") g.requestAnimationFrame = requestImpl;
+  if (typeof g.cancelAnimationFrame !== "function") g.cancelAnimationFrame = cancelImpl;
+  if (win && typeof win.requestAnimationFrame !== "function") win.requestAnimationFrame = requestImpl;
+  if (win && typeof win.cancelAnimationFrame !== "function") win.cancelAnimationFrame = cancelImpl;
+}
 
 // Default to real timers; tests opt-in to fake timers when needed
 jest.useRealTimers();
@@ -221,27 +273,115 @@ const applyConsolePolicy = () => {
 
 applyConsolePolicy();
 
-beforeEach(() => {
-  // Guardrails so the suite can safely run in parallel and keep tests isolated.
-  // Note: this must run in `beforeEach` (not `afterEach`) so it doesn't interfere
-  // with test-file `afterEach` hooks that intentionally run under fake timers.
-  jest.useRealTimers();
-  jest.clearAllMocks();
-  jest.restoreAllMocks();
-  applyConsolePolicy();
-});
-
-
 // Obsidian DOM helper polyfills for JSDOM
-const ensureObsidianDomHelpers = () => {
-  const proto = (g.window as any).HTMLElement?.prototype as any;
-  if (!proto) return;
+const ensureObsidianDomHelpers = (win: any = g.window) => {
+  const nodeProto = win?.Node?.prototype as any;
+  const proto = win?.HTMLElement?.prototype as any;
+  const fragmentProto = win?.DocumentFragment?.prototype as any;
+  if (nodeProto && !nodeProto.instanceOf) {
+    nodeProto.instanceOf = function (ctor: any) {
+      return this instanceof ctor;
+    };
+  }
 
   const applyClasses = (el: HTMLElement, cls: string | string[] | undefined) => {
     if (!cls) return;
     const classes = Array.isArray(cls) ? cls : `${cls}`.split(/\s+/);
     classes.filter(Boolean).forEach((c) => el.classList.add(c));
   };
+
+  const installContainerHelpers = (targetProto: any) => {
+    if (!targetProto) return;
+
+    if (!targetProto.setText) {
+      targetProto.setText = function (text: string) {
+        this.textContent = text ?? "";
+        return this;
+      };
+    }
+
+    if (!targetProto.setAttr) {
+      targetProto.setAttr = function (name: string, value: any) {
+        if (value === null || value === undefined || value === false) {
+          this.removeAttribute(name);
+        } else if (value === true) {
+          this.setAttribute(name, "");
+        } else {
+          this.setAttribute(name, `${value}`);
+        }
+        return this;
+      };
+    }
+
+    if (!targetProto.setAttrs) {
+      targetProto.setAttrs = function (attrs: Record<string, any>) {
+        if (!attrs || typeof attrs !== "object") {
+          return this;
+        }
+        Object.entries(attrs).forEach(([name, value]) => {
+          this.setAttr(name, value);
+        });
+        return this;
+      };
+    }
+
+    if (!targetProto.empty) {
+      targetProto.empty = function () {
+        while (this.firstChild) {
+          this.removeChild(this.firstChild);
+        }
+        return this;
+      };
+    }
+
+    if (!targetProto.createEl) {
+      targetProto.createEl = function (tag: string, options?: any) {
+        const normalized = typeof options === "string" ? { cls: options } : options ?? {};
+        const doc = this.ownerDocument ?? win?.document ?? g.document ?? document;
+        const el = doc.createElement(tag);
+        applyClasses(el, normalized.cls);
+        if (normalized.text !== undefined) {
+          el.textContent = `${normalized.text}`;
+        }
+        if (normalized.attr) {
+          Object.entries(normalized.attr).forEach(([key, value]) => {
+            el.setAttr(key, value as any);
+          });
+        }
+        if (normalized.value !== undefined && "value" in el) {
+          (el as any).value = normalized.value;
+        }
+        this.appendChild(el);
+        return el;
+      };
+    }
+
+    if (!targetProto.createDiv) {
+      targetProto.createDiv = function (options?: any) {
+        return this.createEl("div", options);
+      };
+    }
+
+    if (!targetProto.createSpan) {
+      targetProto.createSpan = function (options?: any) {
+        return this.createEl("span", options);
+      };
+    }
+
+    if (!targetProto.appendText) {
+      targetProto.appendText = function (text: string) {
+        const doc = this.ownerDocument ?? win?.document ?? g.document ?? document;
+        const textNode = doc.createTextNode(text ?? "");
+        this.appendChild(textNode);
+        return this;
+      };
+    }
+  };
+
+  installContainerHelpers(proto);
+  installContainerHelpers(fragmentProto);
+
+  if (!proto) return;
 
   if (!proto.addClass) {
     proto.addClass = function (...classes: any[]) {
@@ -286,47 +426,6 @@ const ensureObsidianDomHelpers = () => {
     };
   }
 
-  if (!proto.setText) {
-    proto.setText = function (text: string) {
-      this.textContent = text ?? "";
-      return this;
-    };
-  }
-
-  if (!proto.setAttr) {
-    proto.setAttr = function (name: string, value: any) {
-      if (value === null || value === undefined || value === false) {
-        this.removeAttribute(name);
-      } else if (value === true) {
-        this.setAttribute(name, "");
-      } else {
-        this.setAttribute(name, `${value}`);
-      }
-      return this;
-    };
-  }
-
-  if (!proto.setAttrs) {
-    proto.setAttrs = function (attrs: Record<string, any>) {
-      if (!attrs || typeof attrs !== "object") {
-        return this;
-      }
-      Object.entries(attrs).forEach(([name, value]) => {
-        this.setAttr(name, value);
-      });
-      return this;
-    };
-  }
-
-  if (!proto.empty) {
-    proto.empty = function () {
-      while (this.firstChild) {
-        this.removeChild(this.firstChild);
-      }
-      return this;
-    };
-  }
-
   if (!proto.toggle) {
     proto.toggle = function (value?: boolean) {
       if (typeof value === "boolean") {
@@ -334,6 +433,28 @@ const ensureObsidianDomHelpers = () => {
       } else {
         this.style.display = this.style.display === "none" ? "" : "none";
       }
+      return this;
+    };
+  }
+
+  if (!proto.setCssStyles) {
+    proto.setCssStyles = function (styles: Record<string, string>) {
+      if (!styles || typeof styles !== "object") {
+        return this;
+      }
+      Object.assign(this.style, styles);
+      return this;
+    };
+  }
+
+  if (!proto.setCssProps) {
+    proto.setCssProps = function (styles: Record<string, string>) {
+      if (!styles || typeof styles !== "object") {
+        return this;
+      }
+      Object.entries(styles).forEach(([name, value]) => {
+        this.style.setProperty(name, value);
+      });
       return this;
     };
   }
@@ -352,54 +473,82 @@ const ensureObsidianDomHelpers = () => {
     };
   }
 
-  if (!proto.createEl) {
-    proto.createEl = function (tag: string, options?: any) {
-      const normalized = typeof options === "string" ? { cls: options } : options ?? {};
-      const el = (this.ownerDocument ?? document).createElement(tag);
-      applyClasses(el, normalized.cls);
-      if (normalized.text !== undefined) {
-        el.textContent = `${normalized.text}`;
-      }
-      if (normalized.attr) {
-        Object.entries(normalized.attr).forEach(([key, value]) => {
-          el.setAttr(key, value as any);
-        });
-      }
-      if (normalized.value !== undefined && "value" in el) {
-        (el as any).value = normalized.value;
-      }
-      this.appendChild(el);
-      return el;
-    };
-  }
-
-  if (!proto.createDiv) {
-    proto.createDiv = function (options?: any) {
-      return this.createEl("div", options);
-    };
-  }
-
-  if (!proto.createSpan) {
-    proto.createSpan = function (options?: any) {
-      return this.createEl("span", options);
-    };
-  }
-
   if (!proto.createFragment) {
     proto.createFragment = function () {
-      const fragment = (this.ownerDocument ?? document).createDocumentFragment();
+      const fragment = (this.ownerDocument ?? win?.document ?? g.document ?? document).createDocumentFragment();
       this.appendChild(fragment);
       return fragment;
     };
   }
-
-  if (!proto.appendText) {
-    proto.appendText = function (text: string) {
-      const textNode = (this.ownerDocument ?? document).createTextNode(text ?? "");
-      this.appendChild(textNode);
-      return this;
-    };
-  }
 };
 
-ensureObsidianDomHelpers();
+const createRootElement = <K extends keyof HTMLElementTagNameMap>(
+  tag: K,
+  options?: { cls?: string | string[]; text?: string; attr?: Record<string, any> }
+): HTMLElementTagNameMap[K] => {
+  const doc = g.document ?? g.window?.document ?? document;
+  const el = doc.createElement(tag);
+  const normalized = typeof options === "string" ? { cls: options } : options ?? {};
+  if (normalized.cls) {
+    const classes = Array.isArray(normalized.cls)
+      ? normalized.cls
+      : `${normalized.cls}`.split(/\s+/);
+    classes.filter(Boolean).forEach((cls) => el.classList.add(cls));
+  }
+  if (normalized.text !== undefined) {
+    el.textContent = `${normalized.text}`;
+  }
+  if (normalized.attr) {
+    Object.entries(normalized.attr).forEach(([name, value]) => {
+      if (value === null || value === undefined || value === false) {
+        el.removeAttribute(name);
+      } else if (value === true) {
+        el.setAttribute(name, "");
+      } else {
+        el.setAttribute(name, `${value}`);
+      }
+    });
+  }
+  return el;
+};
+
+const createRootFragment = () => {
+  const doc = g.document ?? g.window?.document ?? document;
+  return doc.createDocumentFragment();
+};
+
+const syncGlobalDomFactories = () => {
+  (g as any).createEl = <K extends keyof HTMLElementTagNameMap>(
+    tag: K,
+    options?: { cls?: string | string[]; text?: string; attr?: Record<string, any> }
+  ) => createRootElement(tag, options);
+  (g as any).createDiv = (options?: { cls?: string | string[]; text?: string; attr?: Record<string, any> }) =>
+    createRootElement("div", options);
+  (g as any).createSpan = (options?: { cls?: string | string[]; text?: string; attr?: Record<string, any> }) =>
+    createRootElement("span", options);
+  (g as any).createFragment = () => createRootFragment();
+};
+
+const syncRuntimeWindowGlobals = (win: any = g.window) => {
+  if (win?.document) {
+    g.document = win.document;
+  }
+  syncWindowTimers(win);
+  ensureWindowCrypto(win);
+  ensureBase64Helpers(win);
+  ensureAnimationFrameHelpers(win);
+  ensureObsidianDomHelpers(win);
+  syncGlobalDomFactories();
+};
+syncRuntimeWindowGlobals();
+
+beforeEach(() => {
+  // Guardrails so the suite can safely run in parallel and keep tests isolated.
+  // Note: this must run in `beforeEach` (not `afterEach`) so it doesn't interfere
+  // with test-file `afterEach` hooks that intentionally run under fake timers.
+  jest.useRealTimers();
+  jest.clearAllMocks();
+  jest.restoreAllMocks();
+  syncRuntimeWindowGlobals();
+  applyConsolePolicy();
+});

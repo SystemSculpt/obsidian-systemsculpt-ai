@@ -1,11 +1,4 @@
 import { API_BASE_URL, SYSTEMSCULPT_API_HEADERS } from '../../constants/api';
-import { SystemSculptSettings } from '../../types';
-import { resolveSystemSculptApiBaseUrl } from '../../utils/urlHelpers';
-
-export interface ApiEnvironmentConfig {
-  baseUrl: string;
-  licenseKey?: string;
-}
 
 /**
  * Centralized resolver for SystemSculpt API configuration.
@@ -17,28 +10,8 @@ export class SystemSculptEnvironment {
    * Development builds may normalize configured overrides, but production
    * builds always pin hosted traffic to the compiled production API.
    */
-  static resolveBaseUrl(
-    settings: Pick<SystemSculptSettings, 'serverUrl'>,
-    override?: string
-  ): string {
-    const candidate = typeof override === 'string' && override.trim().length > 0
-      ? override.trim()
-      : (settings.serverUrl?.trim() || '');
-
-    return resolveSystemSculptApiBaseUrl(candidate || API_BASE_URL);
-  }
-
-  /**
-   * Build a reusable API environment snapshot (base URL + license key).
-   */
-  static createConfig(
-    settings: Pick<SystemSculptSettings, 'serverUrl' | 'licenseKey'>,
-    override?: string
-  ): ApiEnvironmentConfig {
-    return {
-      baseUrl: this.resolveBaseUrl(settings, override),
-      licenseKey: settings.licenseKey?.trim() || undefined,
-    };
+  static resolveBaseUrl(): string {
+    return API_BASE_URL;
   }
 
   /**

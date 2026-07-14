@@ -1,4 +1,13 @@
+import { Notice } from "obsidian";
 import type { StudioNodeConfigFieldDefinition } from "../../studio/types";
+import { getStudioOwnerWindow } from "./StudioDomContext";
+
+export type StudioNodeConfigPathBrowseOptions = {
+  importFileWithoutOsPath?: (
+    file: File,
+    field: StudioNodeConfigFieldDefinition
+  ) => Promise<string | null>;
+};
 
 function sanitizePath(path: string): string {
   return String(path || "").trim();
@@ -17,19 +26,16 @@ function parentDirectory(path: string): string {
 }
 
 function resolvePickedFilePath(file: File | null, fallbackValue?: string): string {
-  if (!file) {
-    const fallback = String(fallbackValue || "").trim();
-    return fallback.replace(/\\/g, "/").includes("/fakepath/") ? "" : fallback;
-  }
-  const candidate = (file as unknown as { path?: unknown }).path;
-  if (typeof candidate === "string" && candidate.trim().length > 0) {
-    return sanitizePath(candidate);
-  }
-  const fallback = String(fallbackValue || "").trim();
-  if (!fallback || fallback.replace(/\\/g, "/").includes("/fakepath/")) {
+  if (file) {
+    const candidate = (file as unknown as { path?: unknown }).path;
+    if (typeof candidate === "string" && candidate.trim().length > 0) {
+      return sanitizePath(candidate);
+    }
     return "";
   }
-  return fallback;
+
+  const fallback = String(fallbackValue || "").trim();
+  return fallback.replace(/\\/g, "/").includes("/fakepath/") ? "" : fallback;
 }
 
 function resolvePickedDirectoryPath(file: File | null, fallbackValue?: string): string {
@@ -61,7 +67,7 @@ function resolvePickedDirectoryPath(file: File | null, fallbackValue?: string): 
   return result || parentDirectory(filePath);
 }
 
-function resolveElectronDialogRuntime():
+function resolveElectronDialogRuntime(ownerWindow: Window):
   | {
       dialog: {
         showOpenDialog?: (...args: unknown[]) => Promise<{
@@ -76,8 +82,8 @@ function resolveElectronDialogRuntime():
     }
   | null {
   const candidates = [
-    (globalThis as unknown as { require?: unknown })?.require,
-    (globalThis as unknown as { window?: { require?: unknown } })?.window?.require,
+    (ownerWindow as unknown as { require?: unknown })?.require,
+    (ownerWindow as unknown as { window?: { require?: unknown } })?.window?.require,
   ];
 
   for (const runtimeRequire of candidates) {
@@ -152,9 +158,10 @@ function buildMediaDialogExtensions(field: StudioNodeConfigFieldDefinition): str
 }
 
 async function browseForFieldPathViaElectronDialog(
-  field: StudioNodeConfigFieldDefinition
+  field: StudioNodeConfigFieldDefinition,
+  ownerWindow: Window
 ): Promise<string | null> {
-  const runtime = resolveElectronDialogRuntime();
+  const runtime = resolveElectronDialogRuntime(ownerWindow);
   if (!runtime) {
     return null;
   }
@@ -215,19 +222,26 @@ async function browseForFieldPathViaElectronDialog(
 }
 
 export async function browseForNodeConfigPath(
-  field: StudioNodeConfigFieldDefinition
+  field: StudioNodeConfigFieldDefinition,
+  host: Node,
+  options?: StudioNodeConfigPathBrowseOptions
 ): Promise<string | null> {
-  const viaElectronDialog = await browseForFieldPathViaElectronDialog(field);
+  const ownerDocument = host.ownerDocument;
+  if (!ownerDocument) {
+    return null;
+  }
+  const ownerWindow = getStudioOwnerWindow(host);
+  const viaElectronDialog = await browseForFieldPathViaElectronDialog(field, ownerWindow);
   if (viaElectronDialog) {
     return viaElectronDialog;
   }
 
   return await new Promise<string | null>((resolve) => {
-    const input = document.createElement("input");
+    const input = ownerDocument.body.createEl("input");
     input.type = "file";
-    input.style.position = "fixed";
-    input.style.left = "-9999px";
-    input.style.top = "-9999px";
+    input.setCssStyles({ position: "fixed" });
+    input.setCssStyles({ left: "-9999px" });
+    input.setCssStyles({ top: "-9999px" });
 
     if (field.type === "directory_path") {
       (input as unknown as { webkitdirectory?: boolean }).webkitdirectory = true;
@@ -261,8 +275,8 @@ export async function browseForNodeConfigPath(
         return;
       }
       settled = true;
-      window.removeEventListener("blur", onWindowBlur, true);
-      window.removeEventListener("focus", onWindowFocus, true);
+      ownerWindow.removeEventListener("blur", onWindowBlur, true);
+      ownerWindow.removeEventListener("focus", onWindowFocus, true);
       input.removeEventListener("change", onChange);
       if (input.parentElement) {
         input.parentElement.removeChild(input);
@@ -281,18 +295,45 @@ export async function browseForNodeConfigPath(
         return;
       }
       const primary = files[0] || null;
-      const path =
-        field.type === "directory_path"
-          ? resolvePickedDirectoryPath(primary, input.value)
-          : resolvePickedFilePath(primary, input.value);
-      finish(path || null);
+      void (async () => {
+        const path =
+          field.type === "directory_path"
+            ? resolvePickedDirectoryPath(primary, input.value)
+            : resolvePickedFilePath(primary, input.value);
+        if (path) {
+          finish(path);
+          return;
+        }
+        if (primary && field.type === "directory_path") {
+          new Notice("Folder paths require the desktop app.");
+          finish(null);
+          return;
+        }
+        if (
+          primary &&
+          field.type !== "directory_path" &&
+          typeof options?.importFileWithoutOsPath === "function"
+        ) {
+          try {
+            finish(await options.importFileWithoutOsPath(primary, field));
+            return;
+          } catch {
+            finish(null);
+            return;
+          }
+        }
+        if (primary) {
+          new Notice("This file picker requires the desktop app.");
+        }
+        finish(null);
+      })();
     };
 
     const onWindowFocus = (): void => {
       if (!sawWindowBlur) {
         return;
       }
-      window.setTimeout(() => {
+      ownerWindow.setTimeout(() => {
         if (!settled) {
           const files = Array.from(input.files || []);
           if (files.length === 0) {
@@ -303,9 +344,8 @@ export async function browseForNodeConfigPath(
     };
 
     input.addEventListener("change", onChange);
-    window.addEventListener("blur", onWindowBlur, true);
-    window.addEventListener("focus", onWindowFocus, true);
-    document.body.appendChild(input);
+    ownerWindow.addEventListener("blur", onWindowBlur, true);
+    ownerWindow.addEventListener("focus", onWindowFocus, true);
     input.click();
   });
 }

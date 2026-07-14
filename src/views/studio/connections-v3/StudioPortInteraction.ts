@@ -6,6 +6,7 @@ import type {
 } from "../StudioGraphInteractionTypes";
 import { resolveSnapTarget, type SnapCandidate } from "./LinkSnap";
 import type { PortAnchor, StudioLinkStore } from "./StudioLinkStore";
+import { getStudioOwnerWindow } from "../StudioDomContext";
 
 const SNAP_RADIUS_SCREEN_PX = 36;
 const AUTO_CREATE_HINT_DELAY_MS = 500;
@@ -62,6 +63,7 @@ export class StudioPortInteraction {
   private armedTeardown: (() => void) | null = null;
   private canvasEl: HTMLElement | null = null;
   private autoCreateHintTimer: number | null = null;
+  private autoCreateHintTimerWindow: Window | null = null;
   private autoCreateHintVisible = false;
   private suppressedOutputClickKey: string | null = null;
   private pointerListenerTeardown: (() => void) | null = null;
@@ -83,6 +85,12 @@ export class StudioPortInteraction {
     element: HTMLElement
   ): void {
     this.ports.set(portKey(nodeId, direction, portId), { nodeId, portId, direction, element });
+    if (direction === "out") {
+      element.setAttribute(
+        "aria-pressed",
+        this.isPendingConnectionSource(nodeId, portId) ? "true" : "false"
+      );
+    }
   }
 
   getPortElement(
@@ -162,6 +170,7 @@ export class StudioPortInteraction {
     sourcePinEl: HTMLElement
   ): void {
     if (this.host.isBusy() || startEvent.button !== 0) return;
+    const ownerWindow = getStudioOwnerWindow(sourcePinEl);
     startEvent.preventDefault();
 
     const { sourceType, candidates, compatible, incompatible } =
@@ -273,9 +282,9 @@ export class StudioPortInteraction {
     };
 
     this.pointerListenerTeardown = () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onEnd);
-      window.removeEventListener("pointercancel", onEnd);
+      ownerWindow.removeEventListener("pointermove", onMove);
+      ownerWindow.removeEventListener("pointerup", onEnd);
+      ownerWindow.removeEventListener("pointercancel", onEnd);
       if (typeof sourcePinEl.releasePointerCapture === "function") {
         try {
           sourcePinEl.releasePointerCapture(startEvent.pointerId);
@@ -285,9 +294,9 @@ export class StudioPortInteraction {
       }
     };
 
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onEnd);
-    window.addEventListener("pointercancel", onEnd);
+    ownerWindow.addEventListener("pointermove", onMove);
+    ownerWindow.addEventListener("pointerup", onEnd);
+    ownerWindow.addEventListener("pointercancel", onEnd);
   }
 
   private teardownPointerListeners(): void {
@@ -318,8 +327,13 @@ export class StudioPortInteraction {
     if (!this.drag || !this.drag.active) return;
     const descriptor = this.host.describeConnectionAutoCreate?.(this.drag.sourceType) ?? null;
     if (!descriptor) return;
-    this.autoCreateHintTimer = window.setTimeout(() => {
+    const timerHost = this.canvasEl ?? this.ports.get(this.drag.sourceKey)?.element;
+    if (!timerHost) return;
+    const ownerWindow = getStudioOwnerWindow(timerHost);
+    this.autoCreateHintTimerWindow = ownerWindow;
+    this.autoCreateHintTimer = ownerWindow.setTimeout(() => {
       this.autoCreateHintTimer = null;
+      this.autoCreateHintTimerWindow = null;
       if (!this.drag || !this.drag.active) return;
       const snap = this.store.getDragState()?.snapTarget;
       if (snap) {
@@ -333,8 +347,9 @@ export class StudioPortInteraction {
 
   private clearAutoCreateHintTimer(): void {
     if (this.autoCreateHintTimer !== null) {
-      window.clearTimeout(this.autoCreateHintTimer);
+      this.autoCreateHintTimerWindow?.clearTimeout(this.autoCreateHintTimer);
       this.autoCreateHintTimer = null;
+      this.autoCreateHintTimerWindow = null;
     }
   }
 
@@ -356,6 +371,9 @@ export class StudioPortInteraction {
   private resetPortVisualState(): void {
     for (const port of this.ports.values()) {
       port.element.classList.remove("is-drop-target", "is-drop-incompatible", "is-active");
+      if (port.direction === "out") {
+        port.element.setAttribute("aria-pressed", "false");
+      }
     }
   }
 
@@ -438,7 +456,9 @@ export class StudioPortInteraction {
     const activeKey = this.drag?.sourceKey ?? this.armed?.sourceKey ?? null;
     for (const [key, port] of this.ports) {
       if (port.direction !== "out") continue;
-      port.element.classList.toggle("is-active", key === activeKey);
+      const isActive = key === activeKey;
+      port.element.classList.toggle("is-active", isActive);
+      port.element.setAttribute("aria-pressed", isActive ? "true" : "false");
     }
   }
 
@@ -469,6 +489,12 @@ export class StudioPortInteraction {
       lastClientX: start.x,
       lastClientY: start.y,
     };
+    const armedHost = this.ports.get(key)?.element ?? this.canvasEl;
+    if (!armedHost) {
+      this.cancel();
+      return;
+    }
+    const armedWindow = getStudioOwnerWindow(armedHost);
 
     const onArmedMove = (event: PointerEvent) => {
       if (!this.armed) return;
@@ -488,11 +514,11 @@ export class StudioPortInteraction {
         this.cancel();
       }
     };
-    window.addEventListener("pointermove", onArmedMove);
-    window.addEventListener("keydown", onArmedKey);
+    armedWindow.addEventListener("pointermove", onArmedMove);
+    armedWindow.addEventListener("keydown", onArmedKey);
     this.armedTeardown = () => {
-      window.removeEventListener("pointermove", onArmedMove);
-      window.removeEventListener("keydown", onArmedKey);
+      armedWindow.removeEventListener("pointermove", onArmedMove);
+      armedWindow.removeEventListener("keydown", onArmedKey);
     };
 
     this.writeSnapshot({

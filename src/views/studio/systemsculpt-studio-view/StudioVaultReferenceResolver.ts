@@ -7,7 +7,7 @@ export type ResolveVaultItemFromReferenceOptions = {
   resolveVaultPathFromAbsoluteFilePath: (absolutePath: string) => string | null;
 };
 
-export function parseObsidianOpenFilePath(reference: string): string | null {
+function parseObsidianOpenFilePath(reference: string): string | null {
   const raw = String(reference || "").trim();
   if (!raw.startsWith("obsidian://open")) {
     return null;
@@ -25,7 +25,7 @@ export function parseObsidianOpenFilePath(reference: string): string | null {
   }
 }
 
-export function stripEnclosingReferenceWrappers(reference: string): string {
+function stripEnclosingReferenceWrappers(reference: string): string {
   let next = String(reference || "").trim();
   while (next.startsWith("<") && next.endsWith(">") && next.length > 1) {
     next = next.slice(1, -1).trim();
@@ -40,7 +40,7 @@ export function stripEnclosingReferenceWrappers(reference: string): string {
   return next;
 }
 
-export function normalizeObsidianLinkTarget(reference: string): string {
+function normalizeObsidianLinkTarget(reference: string): string {
   let next = stripEnclosingReferenceWrappers(reference);
   if (!next) {
     return "";
@@ -63,7 +63,7 @@ export function normalizeObsidianLinkTarget(reference: string): string {
   return next.trim();
 }
 
-export function parseObsidianWikiLinkTarget(reference: string): string | null {
+function parseObsidianWikiLinkTarget(reference: string): string | null {
   const raw = stripEnclosingReferenceWrappers(reference);
   const match = raw.match(/^!?\[\[([\s\S]+?)\]\]$/);
   if (!match) {
@@ -73,7 +73,7 @@ export function parseObsidianWikiLinkTarget(reference: string): string | null {
   return target || null;
 }
 
-export function parseMarkdownLinkTarget(reference: string): string | null {
+function parseMarkdownLinkTarget(reference: string): string | null {
   const raw = stripEnclosingReferenceWrappers(reference);
   const match = raw.match(/^!?\[[^\]]*]\((.+)\)$/);
   if (!match) {
@@ -98,7 +98,7 @@ export function parseMarkdownLinkTarget(reference: string): string | null {
   return normalized || null;
 }
 
-export function resolveVaultPathFromFileUri(options: {
+function resolveVaultPathFromFileUri(options: {
   reference: string;
   resolveVaultPathFromAbsoluteFilePath: (absolutePath: string) => string | null;
 }): string | null {
@@ -180,7 +180,7 @@ export function resolveVaultItemFromReference(
   return null;
 }
 
-export function collectInlinePathReferencesFromText(raw: string, push: (value: string) => void): void {
+function collectInlinePathReferencesFromText(raw: string, push: (value: string) => void): void {
   const text = String(raw || "");
   if (!text.trim()) {
     return;

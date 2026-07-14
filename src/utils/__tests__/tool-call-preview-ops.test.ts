@@ -15,7 +15,7 @@ const createTC = (id: string, name: string, args: any = {}): ToolCall => ({
 
 describe('Operations preview (grouping + dedup)', () => {
   test('prepareOperationsPreview de-duplicates create_folders paths', () => {
-    const tc = createTC('1', 'mcp-filesystem_create_folders', { paths: ['A', 'B', 'A', 'B', 'C'] });
+    const tc = createTC('1', 'create_folders', { paths: ['A', 'B', 'A', 'B', 'C'] });
     const preview = prepareOperationsPreview(tc);
     expect(preview?.type).toBe('create_folders');
     expect(preview && 'items' in preview ? preview.items.length : 0).toBe(3);
@@ -25,7 +25,7 @@ describe('Operations preview (grouping + dedup)', () => {
 
   test('renderOperationsInlinePreview groups create_folders into one line with comma separation', async () => {
     const host = document.createElement('div');
-    const tc = createTC('2', 'mcp-filesystem_create_folders', { paths: ['projects/personal', 'business', 'notes/knowledge'] });
+    const tc = createTC('2', 'create_folders', { paths: ['projects/personal', 'business', 'notes/knowledge'] });
     await renderOperationsInlinePreview(host, tc);
     const li = host.querySelector<HTMLLIElement>('.systemsculpt-inline-ops li');
     expect(li).toBeTruthy();
@@ -41,7 +41,7 @@ describe('Operations preview (grouping + dedup)', () => {
 
   test('renderOperationsInlinePreview groups trash into one line', async () => {
     const host = document.createElement('div');
-    const tc = createTC('3', 'mcp-filesystem_trash', { paths: ['a.md', 'b.md', 'a.md'] });
+    const tc = createTC('3', 'trash', { paths: ['a.md', 'b.md', 'a.md'] });
     await renderOperationsInlinePreview(host, tc);
     const li = host.querySelector<HTMLLIElement>('.systemsculpt-inline-ops li');
     expect(li).toBeTruthy();
@@ -51,7 +51,7 @@ describe('Operations preview (grouping + dedup)', () => {
 
   test('renderOperationsInlinePreview groups move pairs into one line with arrow and FULL paths', async () => {
     const host = document.createElement('div');
-    const tc = createTC('4', 'mcp-filesystem_move', { items: [
+    const tc = createTC('4', 'move', { items: [
       { source: 'docs/old/a.md', destination: 'docs/new/a.md' },
       { source: 'notes/x.txt', destination: 'archive/x.txt' },
     ]});
@@ -65,5 +65,18 @@ describe('Operations preview (grouping + dedup)', () => {
     expect(codes.map(c => c.getAttribute('title'))).toEqual([
       'docs/old/a.md', 'docs/new/a.md', 'notes/x.txt', 'archive/x.txt'
     ]);
+  });
+
+  test('renders every preview node in the host document for Obsidian popouts', async () => {
+    const popoutDocument = document.implementation.createHTMLDocument('Obsidian popout');
+    const host = popoutDocument.createElement('div');
+    const tc = createTC('5', 'trash', { paths: ['a.md', 'b.md'] });
+
+    await renderOperationsInlinePreview(host, tc);
+
+    const preview = host.querySelector('.systemsculpt-inline-ops');
+    expect(preview?.ownerDocument).toBe(popoutDocument);
+    expect(Array.from(preview?.childNodes ?? []).every((node) => node.ownerDocument === popoutDocument)).toBe(true);
+    expect(Array.from(host.querySelectorAll('*')).every((node) => node.ownerDocument === popoutDocument)).toBe(true);
   });
 });

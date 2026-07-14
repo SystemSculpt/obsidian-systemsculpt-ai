@@ -9,7 +9,7 @@
  *
  * Returns `true` if the URL was safe and an open was attempted, `false` otherwise.
  */
-export async function openExternalUrl(url: string): Promise<boolean> {
+export async function openExternalUrl(url: string, ownerWindow?: Window): Promise<boolean> {
   const trimmed = String(url || "").trim();
   if (!trimmed) return false;
 
@@ -22,7 +22,9 @@ export async function openExternalUrl(url: string): Promise<boolean> {
   if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return false;
   const href = parsed.toString();
 
-  const runtimeRequire = typeof window !== "undefined" ? (window as any)?.require : null;
+  const targetWindow = ownerWindow
+    ?? (typeof window !== "undefined" ? window.activeWindow ?? window : undefined);
+  const runtimeRequire = (targetWindow as any)?.require;
   const electron = typeof runtimeRequire === "function" ? runtimeRequire("electron") : null;
   const shell = electron?.shell;
   try {
@@ -33,8 +35,9 @@ export async function openExternalUrl(url: string): Promise<boolean> {
   } catch {
     // Fall back to window.open below.
   }
-  if (typeof window !== "undefined" && typeof window.open === "function") {
-    window.open(href, "_blank", "noopener,noreferrer");
+  if (typeof targetWindow?.open === "function") {
+    targetWindow.open(href, "_blank", "noopener,noreferrer");
+    return true;
   }
-  return true;
+  return false;
 }
