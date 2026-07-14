@@ -1036,7 +1036,15 @@ describe("AgentWorkspace", () => {
     });
     workspace.load();
     const started = applyManagedAgentEvent(createInitialAgentConversation(), envelope(1, { type: "run.started" }));
-    const failed = applyManagedAgentEvent(started, envelope(2, {
+    const continuing = applyManagedAgentEvent(started, envelope(2, {
+      type: "run.status",
+      phase: "working",
+      label: "Continuing",
+    }));
+    await workspace.setAgentSnapshot(continuing);
+    expect(parent.querySelector(".systemsculpt-agent-part.is-status")?.textContent).toContain("Continuing");
+
+    const failed = applyManagedAgentEvent(continuing, envelope(3, {
       type: "run.failed",
       error: { code: "transport", message: "Connection lost." },
     }));
@@ -1044,6 +1052,7 @@ describe("AgentWorkspace", () => {
     await workspace.setAgentSnapshot(failed);
 
     expect(parent.textContent).toContain("Connection lost.");
+    expect(parent.querySelector(".systemsculpt-agent-part.is-status")).toBeNull();
     parent.querySelector<HTMLButtonElement>(".systemsculpt-agent-error-retry")!.click();
     expect(onRetryMessage).toHaveBeenCalledWith("user-1");
     workspace.unload();
