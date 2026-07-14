@@ -81,12 +81,6 @@ export class StandardModal extends Modal {
     };
   }
 
-  /** Sets a direct accessible name for specialized modals without a visible title. */
-  protected setModalAccessibleName(name: string): void {
-    this.modalEl.removeAttribute("aria-labelledby");
-    this.modalEl.setAttr("aria-label", name.trim() || StandardModal.fallbackAccessibleName);
-  }
-
   private invalidateAsyncTasks(): void {
     this.asyncTaskEpoch += 1;
     this.asyncTaskControllers.forEach((controller) => controller.abort());
@@ -237,11 +231,6 @@ export class StandardModal extends Modal {
       onQuery: callback,
     });
     search.root.addClass("ss-modal__search");
-    search.input.addClass("ss-modal__search-input");
-    const icon = search.root.querySelector(".ss-search-field__icon");
-    icon?.addClass("ss-modal__search-icon");
-    const clear = search.root.querySelector(".ss-search-field__clear");
-    clear?.addClass("ss-modal__search-clear");
     this.searchHandles.push(search);
     return search.input;
   }

@@ -149,8 +149,6 @@ test("every discoverable Obsidian host mounts a direct or named deep surface ada
     ["src/core/ui/progress/OperationProgressPanel.ts", /applyPluginSurface\(this\.root,\s*"transient"\)/],
     ["src/components/HoverShell.ts", /applyPluginSurface\(root,\s*"transient"\)/],
     ["src/modals/BulkAutomationConfirmModal.ts", /new OperationProgressPanel\(\{/],
-    ["src/components/EmbeddingsStatusBar.ts", /applyPluginSurface\(this\.statusBarEl,\s*"embedded"\)/],
-    ["src/core/plugin/FileExplorerStudioButtonManager.ts", /applyPluginSurface\(button,\s*"embedded"\)/],
   ];
   for (const [file, pattern] of composedContracts) {
     assert.match(read(file), pattern, `${file} must mount its named surface adapter`);
@@ -177,6 +175,10 @@ test("the shared surface owns adaptation and obsolete UI seams stay deleted", ()
     "src/views/chatview/ChatView.ts",
     "src/modals/EmbeddingsStatusModal.ts",
     "src/css/modals/embeddings-status.css",
+    "src/css/components/embeddings-status-bar.css",
+    "src/core/plugin/FileExplorerStudioButtonManager.ts",
+    "src/core/plugin/__tests__/file-explorer-studio-button.test.ts",
+    "src/css/components/resume-chat.css",
   ]) {
     assert.equal(fs.existsSync(path.join(root, removed)), false, `${removed} must stay deleted`);
   }
@@ -193,6 +195,36 @@ test("the shared surface owns adaptation and obsolete UI seams stay deleted", ()
     .map((file) => fs.readFileSync(file, "utf8"))
     .join("\n");
   assert.doesNotMatch(productionTypeScript, /showPopup|PopupComponent|chatview\/ChatView/);
+
+  const statusBar = read("src/components/EmbeddingsStatusBar.ts");
+  const plugin = read("src/main.ts");
+  assert.match(statusBar, /plugin\.addStatusBarItem\(\)/);
+  assert.match(statusBar, /this\.statusBarEl\.setText\(value\)/);
+  assert.doesNotMatch(statusBar, /applyPluginSurface|setIcon|ss-embeddings-status-bar/);
+  assert.match(plugin, /Platform\.isDesktop\s*&&\s*!this\.embeddingsStatusBar/);
+  assert.doesNotMatch(read("src/css/index.css"), /embeddings-status-bar\.css/);
+
+  const resumeChat = read("src/views/chatview/ResumeChatService.ts");
+  assert.match(resumeChat, /view\.addAction\("message-circle",\s*"Resume this chat"/);
+  assert.doesNotMatch(resumeChat, /\.cm-editor|insertBefore\(|createUiAction/);
+  assert.doesNotMatch(read("src/css/index.css"), /resume-chat\.css/);
+
+  const contextMenu = read("src/context-menu/FileContextMenuService.ts");
+  assert.match(contextMenu, /file instanceof TFolder/);
+  assert.match(contextMenu, /createStudioProjectInFolder/);
+  assert.doesNotMatch(contextMenu, /setUseNativeMenu\(/);
+  assert.doesNotMatch(contextMenu, /addSeparator\(/);
+  assert.doesNotMatch(contextMenu, /setSection\("(?:systemsculpt|system)"\)/);
+  assert.match(contextMenu, /setSection\("action"\)/);
+  assert.doesNotMatch(productionTypeScript, /workspace-leaf-content\[data-type=["']file-explorer/);
+
+  const searchModal = read("src/modals/SystemSculptSearchModal.ts");
+  const searchCss = read("src/css/modals/search.css");
+  assert.match(searchModal, /this\.addTitle\("Search your vault"\)/);
+  assert.doesNotMatch(searchModal, /ss-search-open|ownerDocument\.body\.classList/);
+  assert.doesNotMatch(searchCss, /body\.ss-search-open|\.tooltip/);
+  assert.match(searchCss, /@media\s*\(max-width:\s*700px\),\s*\(pointer:\s*coarse\)[\s\S]*?\.ss-modal__header\s*\{[\s\S]*?display:\s*block/);
+  assert.match(searchCss, /@media\s*\(max-width:\s*700px\),\s*\(pointer:\s*coarse\)[\s\S]*?\.ss-modal__footer\s*\{[\s\S]*?display:\s*none/);
 });
 
 test("StandardModal owns close and reopen invalidation for async feature adapters", () => {
@@ -506,10 +538,10 @@ test("canonical action and modal CSS stay deep after feature migrations", () => 
   const studioCss = readCssDirectory("src/css/views/studio");
 
   const finalImport = manifest.lastIndexOf("@import");
-  const focusInvariant = manifest.indexOf(".ss-button:focus-visible");
+  const focusInvariant = manifest.indexOf(".ss-surface .ss-button:focus-visible");
   assert.ok(focusInvariant > finalImport, "the action focus invariant must follow every feature sheet");
   assert.match(manifest.slice(focusInvariant), /box-shadow:\s*var\(--ss-ring\)/);
-  assert.match(actionCss, /\.ss-button--icon:not\([^}]+background:\s*transparent/s);
+  assert.match(actionCss, /\.ss-surface \.ss-button--icon:not\([^}]+background:\s*transparent/s);
 
   assert.doesNotMatch(similarNotesCss, /\.ss-embeddings-view__icon-button:(?:hover|focus-visible)/);
   assert.doesNotMatch(agentCss, /\.systemsculpt-agent-(?:send|stop|icon-button)\s*\{/);
@@ -528,6 +560,34 @@ test("canonical action and modal CSS stay deep after feature migrations", () => 
   assert.equal(fs.existsSync(path.join(root, "src/css/components/system-feedback.css")), false);
   assert.doesNotMatch(modalCss, /var\(--text-error\)/);
   assert.match(modalCss, /\.ss-prompt-modal__field\[aria-invalid="true"\][^{]*\{[^}]*border-color:\s*var\(--ss-danger\)/s);
+});
+
+test("custom buttons outrank Obsidian controls without styling native Setting buttons", () => {
+  const buttonCss = read("src/css/primitives/buttons.css");
+  const actionCss = read("src/css/primitives/surface-primitives.css");
+  const settingsCss = read("src/css/views/settings.css");
+
+  assert.match(buttonCss, /^\.ss-surface \.ss-button\s*\{/m);
+  assert.match(actionCss, /^\.ss-surface \.ss-button--icon\s*\{/m);
+  assert.match(settingsCss, /^\.ss-surface \.ss-tab-button\s*\{/m);
+
+  for (const source of [buttonCss, actionCss]) {
+    assert.doesNotMatch(
+      source,
+      /(?:^|,\s*\n)\.ss-button(?:--|__|\b)/m,
+      "canonical button selectors must be qualified by .ss-surface",
+    );
+  }
+  assert.doesNotMatch(
+    settingsCss,
+    /(?:^|,\s*\n)\.ss-tab-button\b/m,
+    "settings tab selectors must be qualified by .ss-surface",
+  );
+  assert.doesNotMatch(
+    `${buttonCss}\n${settingsCss}`,
+    /(?:^|,\s*\n)\s*(?:button|\.setting-item[^,{]*\s+button)\b/m,
+    "SystemSculpt control styles must not select native Obsidian buttons",
+  );
 });
 
 test("operation progress styles stay co-located and adapt inside the named surface container", () => {

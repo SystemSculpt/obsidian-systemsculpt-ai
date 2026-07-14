@@ -19,14 +19,12 @@
 
 /* Shared components */
 @import 'components/hover-shell.css';
-@import 'components/resume-chat.css';
 @import 'components/context-selection.css';
 @import 'components/chat-attachments.css';
 @import 'components/history.css';
 @import 'components/recorder.css';
 @import 'components/diff-viewer.css';
 @import 'components/automations.css';
-@import 'components/embeddings-status-bar.css';
 
 /* Modal system */
 @import 'modals/modal.css';
@@ -73,8 +71,7 @@
 
 /* Post-cascade invariant: feature sheets may alter action geometry or tone,
  * but every canonical action retains the same keyboard focus treatment. */
-.ss-surface .ss-button:focus-visible,
-.ss-button:focus-visible {
+.ss-surface .ss-button:focus-visible {
   outline: none;
   box-shadow: var(--ss-ring);
 }
@@ -82,13 +79,11 @@
 /* Feature sheets may compact desktop chrome, but they must not shrink the
  * canonical action target back below a finger-sized hit area on touch input. */
 @media (pointer: coarse) {
-  .ss-surface .ss-button,
-  .ss-surface.ss-button {
+  .ss-surface .ss-button {
     min-height: var(--ss-touch-target);
   }
 
-  .ss-surface .ss-button--icon,
-  .ss-surface.ss-button--icon {
+  .ss-surface .ss-button--icon {
     min-width: var(--ss-touch-target);
   }
 }

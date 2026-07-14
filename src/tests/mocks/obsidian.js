@@ -25,6 +25,10 @@ class TFolder {
     this.name = path ? path.split("/").pop() ?? "" : "";
     this.children = Array.isArray(children) ? children : [];
   }
+
+  isRoot() {
+    return this.path === "" || this.path === "/";
+  }
 }
 
 class MarkdownView {}
@@ -528,6 +532,31 @@ class TextComponent {
   }
 }
 
+class SearchComponent extends TextComponent {
+  constructor(containerEl) {
+    super(containerEl.createDiv({ cls: "search-input-container" }));
+    this.inputEl.type = "search";
+    this.clearButtonEl = this.containerEl.createDiv({
+      cls: "search-input-clear-button",
+      attr: { "aria-label": "Clear search" },
+    });
+    this.clearButtonEl.addEventListener("click", () => {
+      this.setValue("");
+      this.onChanged();
+      this.inputEl.focus();
+    });
+  }
+
+  onChange(callback) {
+    this.inputEl.addEventListener("input", () => callback(this.inputEl.value));
+    return this;
+  }
+
+  onChanged() {
+    this.inputEl.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+}
+
 class TextAreaComponent {
   constructor(containerEl) {
     this.containerEl = containerEl;
@@ -746,6 +775,7 @@ module.exports = {
   ToggleComponent,
   DropdownComponent,
   TextComponent,
+  SearchComponent,
   TextAreaComponent,
   ButtonComponent,
   ExtraButtonComponent,

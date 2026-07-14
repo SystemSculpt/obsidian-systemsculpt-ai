@@ -1,4 +1,5 @@
-import type { App, Menu, TAbstractFile, TFile, WorkspaceLeaf } from "obsidian";
+import { Notice } from "obsidian";
+import type { App, Menu, TAbstractFile, TFile, TFolder, WorkspaceLeaf } from "obsidian";
 import type SystemSculptPlugin from "../main";
 import { FileContextMenuService } from "../context-menu/FileContextMenuService";
 import { errorLogger } from "../utils/errorLogger";
@@ -7,6 +8,11 @@ import type {
   DocumentProcessingPanelHandle,
   DocumentProcessingPanelLauncher,
 } from "../modals/DocumentProcessingPanel";
+
+jest.mock("obsidian", () => {
+  const actual = jest.requireActual("obsidian");
+  return { ...actual, Notice: jest.fn() };
+});
 
 jest.mock("../views/chatview/AgentChatView", () => ({
   AgentChatView: jest.fn().mockImplementation(() => ({
@@ -19,14 +25,16 @@ jest.mock("../utils/clipboard", () => ({
 }));
 
 const createMenuStub = () => {
-  const trackedItems: Array<{ title: string; onClick?: () => void }> = [];
+  const trackedItems: Array<{ title: string; section?: string; onClick?: () => void }> = [];
 
   const menu: Partial<Menu> & {
     recordedItems: typeof trackedItems;
     separators: number;
+    nativeMenuOverrides: number;
   } = {
     recordedItems: trackedItems,
     separators: 0,
+    nativeMenuOverrides: 0,
     addItem(cb: (item: any) => void) {
       const item = {
         title: "",
@@ -37,7 +45,8 @@ const createMenuStub = () => {
         setIcon() {
           return item;
         },
-        setSection() {
+        setSection(section: string) {
+          item.section = section;
           return item;
         },
         onClick(handler: () => void) {
@@ -47,7 +56,11 @@ const createMenuStub = () => {
       } as any;
 
       cb(item);
-      trackedItems.push({ title: item.title, onClick: item.onClickHandler });
+      trackedItems.push({
+        title: item.title,
+        section: item.section,
+        onClick: item.onClickHandler,
+      });
       return menu as any;
     },
     addSeparator() {
@@ -55,11 +68,16 @@ const createMenuStub = () => {
       return menu as any;
     },
     setUseNativeMenu() {
+      menu.nativeMenuOverrides += 1;
       return menu as any;
     },
   };
 
-  return menu as Menu & { recordedItems: typeof trackedItems; separators: number };
+  return menu as Menu & {
+    recordedItems: typeof trackedItems;
+    separators: number;
+    nativeMenuOverrides: number;
+  };
 };
 
 const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
@@ -77,6 +95,9 @@ const createFile = (extension: string): TFile => {
     stat: { ctime: Date.now(), mtime: Date.now(), size: 2048 },
   }) as TFile;
 };
+
+const createFolder = (path: string): TFolder =>
+  new (require("obsidian").TFolder)({ path }) as TFolder;
 
 const createWorkspaceMock = (options: { layoutReady?: boolean } = {}) => {
   const handlers = new Map<string, Array<(...args: any[]) => void>>();
@@ -118,6 +139,11 @@ const createWorkspaceMock = (options: { layoutReady?: boolean } = {}) => {
 
 const createPluginStub = () => {
   const registrations: Array<() => void> = [];
+  const createProjectFile = jest.fn(async (options?: { projectPath?: string }) => ({
+    path: options?.projectPath ?? "SystemSculpt/Studio/New Studio Project.systemsculpt",
+    project: { name: "New Studio Project" },
+  }));
+  const activateSystemSculptStudioView = jest.fn().mockResolvedValue(undefined);
   const plugin = {
     registerEvent: jest.fn((ref) => ref),
     register: jest.fn((unload: () => void) => {
@@ -133,9 +159,16 @@ const createPluginStub = () => {
       warn: jest.fn(),
       error: jest.fn(),
     },
+    getStudioService: jest.fn(() => ({ createProjectFile })),
+    getViewManager: jest.fn(() => ({ activateSystemSculptStudioView })),
   } as unknown as SystemSculptPlugin & { pluginLogger: any };
 
-  return { plugin, registrations };
+  return {
+    plugin,
+    registrations,
+    createProjectFile,
+    activateSystemSculptStudioView,
+  };
 };
 
 describe("FileContextMenuService", () => {
@@ -151,7 +184,7 @@ const bootstrap = (
     modify: jest.fn(async () => undefined),
   };
   const app = { workspace, vault } as unknown as App;
-  const { plugin } = createPluginStub();
+  const { plugin, createProjectFile, activateSystemSculptStudioView } = createPluginStub();
   const documentProcessor = {
     processDocument: jest.fn(async () => "site/extracted.md"),
   } as any;
@@ -195,13 +228,15 @@ const bootstrap = (
     processingPanelLauncher,
     progressPanel,
     triggerLayoutReady,
+    createProjectFile,
+    activateSystemSculptStudioView,
   };
 };
 
   const emitFileMenu = (
     handlers: Map<string, Array<(...args: any[]) => void>>,
     menu: Menu,
-    file: TFile,
+    file: TAbstractFile,
     source = "file-explorer",
     leaf?: WorkspaceLeaf
   ) => {
@@ -219,6 +254,64 @@ const bootstrap = (
     callbacks.forEach((cb) => cb(menu, files, source));
   };
 
+  it("creates and opens a Studio project from a folder's public context menu", async () => {
+    const { handlers, createProjectFile, activateSystemSculptStudioView } = bootstrap();
+    const menu = createMenuStub();
+    const folder = createFolder("Projects/Client");
+
+    emitFileMenu(handlers, menu, folder, "file-explorer");
+
+    const entry = menu.recordedItems.find((item) => item.title === "New Studio project");
+    expect(entry).toBeDefined();
+    expect(entry?.section).toBe("action");
+    expect(menu.separators).toBe(0);
+    expect(menu.nativeMenuOverrides).toBe(0);
+    await entry!.onClick?.();
+
+    expect(createProjectFile).toHaveBeenCalledWith({
+      name: "New Studio Project",
+      projectPath: "Projects/Client/New Studio Project.systemsculpt",
+    });
+    expect(activateSystemSculptStudioView).toHaveBeenCalledWith(
+      "Projects/Client/New Studio Project.systemsculpt",
+    );
+  });
+
+  it("supports a root-folder Studio action through the single-file menu event", async () => {
+    const { handlers, createProjectFile } = bootstrap();
+    const menu = createMenuStub();
+
+    emitFileMenu(handlers, menu, createFolder("/"), "file-explorer");
+    const entry = menu.recordedItems.find((item) => item.title === "New Studio project");
+    await entry?.onClick?.();
+
+    expect(createProjectFile).toHaveBeenCalledWith({
+      name: "New Studio Project",
+      projectPath: "New Studio Project.systemsculpt",
+    });
+  });
+
+  it("reports a created Studio project truthfully when opening its view fails", async () => {
+    const {
+      handlers,
+      createProjectFile,
+      activateSystemSculptStudioView,
+    } = bootstrap();
+    const menu = createMenuStub();
+    const folder = createFolder("Projects/Client");
+    activateSystemSculptStudioView.mockRejectedValueOnce(new Error("view unavailable"));
+
+    emitFileMenu(handlers, menu, folder, "file-explorer");
+    const entry = menu.recordedItems.find((item) => item.title === "New Studio project");
+    await entry?.onClick?.();
+
+    expect(createProjectFile).toHaveBeenCalledTimes(1);
+    expect(activateSystemSculptStudioView).toHaveBeenCalledTimes(1);
+    expect(Notice).toHaveBeenCalledWith(
+      "Created Studio project, but couldn't open it: Projects/Client/New Studio Project.systemsculpt",
+    );
+  });
+
   it("adds Convert to Markdown for supported documents", () => {
     const { handlers } = bootstrap();
     const menu = createMenuStub();
@@ -228,6 +321,9 @@ const bootstrap = (
 
     const titles = menu.recordedItems.map((item) => item.title);
     expect(titles).toContain("Convert to Markdown");
+    expect(menu.recordedItems.every((item) => item.section === "action")).toBe(true);
+    expect(menu.separators).toBe(0);
+    expect(menu.nativeMenuOverrides).toBe(0);
   });
 
   it.each(["png", "jpg", "jpeg", "webp"])("offers explicit managed conversion for %s images", (extension) => {
@@ -370,8 +466,6 @@ const bootstrap = (
     const menu = createMenuStub();
     const file = createFile("png");
 
-    const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
-
     emitFileMenu(handlers, menu, file, "file-explorer");
 
     const entry = menu.recordedItems.find(
@@ -380,8 +474,7 @@ const bootstrap = (
     expect(entry).toBeDefined();
     await entry!.onClick?.();
 
-    expect(logSpy).toHaveBeenCalledWith("Notice: Unable to copy image to clipboard.");
-    logSpy.mockRestore();
+    expect(Notice).toHaveBeenCalledWith("Unable to copy image to clipboard.");
   });
 
   it("adds a single entry when multiple files are selected but only one is convertible", () => {

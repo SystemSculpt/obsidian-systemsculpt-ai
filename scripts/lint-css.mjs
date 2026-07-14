@@ -282,8 +282,6 @@ const TOKEN_SOURCE_FILES = new Set(["foundation/tokens.css"]);
 /** Files allowed to use !important, each for a documented reason. */
 const IMPORTANT_ALLOWLIST = new Set([
   "foundation/surface.css", // hidden/reduced-motion contracts must beat feature sheets loaded later
-  "components/resume-chat.css", // beats reading/source-mode content styles
-  "modals/search.css", // hide Obsidian tooltips while the overlay is open
   "views/studio/connections.css", // edge hover must beat inline SVG strokes
   "views/studio/node-chrome.css", // zoom-micro mode removes offscreen node chrome
 ]);

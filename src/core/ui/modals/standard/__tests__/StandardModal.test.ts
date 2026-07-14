@@ -15,9 +15,6 @@ class TestStandardModal extends StandardModal {
     this.addTitle(title, description);
   }
 
-  nameDirectly(name: string): void {
-    this.setModalAccessibleName(name);
-  }
 }
 
 describe("StandardModal", () => {
@@ -39,16 +36,6 @@ describe("StandardModal", () => {
 
     modal.onClose();
     expect(modal.modalEl.getAttribute("aria-label")).toBe("SystemSculpt");
-    expect(modal.modalEl.hasAttribute("aria-labelledby")).toBe(false);
-  });
-
-  it("allows a specialized untitled modal to provide one direct name", () => {
-    const modal = new TestStandardModal(new App());
-    modal.onOpen();
-
-    modal.nameDirectly("Search your vault");
-
-    expect(modal.modalEl.getAttribute("aria-label")).toBe("Search your vault");
     expect(modal.modalEl.hasAttribute("aria-labelledby")).toBe(false);
   });
 

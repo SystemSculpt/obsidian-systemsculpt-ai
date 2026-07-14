@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { TFile, Notice } from "obsidian";
+import { MarkdownView, TFile, Notice } from "obsidian";
 import { ResumeChatService } from "../ResumeChatService";
 import * as ChatResumeUtils from "../ChatResumeUtils";
 
@@ -44,6 +44,7 @@ const createPluginStub = () => {
 describe("ResumeChatService", () => {
   afterEach(() => {
     jest.clearAllMocks();
+    document.body.replaceChildren();
   });
 
   describe("constructor", () => {
@@ -287,66 +288,224 @@ describe("ResumeChatService", () => {
     });
   });
 
-  describe("cleanup", () => {
-    it("removes all registered event listeners", () => {
-      const { plugin } = createPluginStub();
+  describe("native Markdown view action", () => {
+    const createHistoryView = (file: TFile) => {
+      const header = document.createElement("div");
+      const action = document.createElement("button");
+      document.body.appendChild(header);
+      const view = new MarkdownView() as MarkdownView & {
+        file: TFile;
+        addAction: jest.Mock;
+      };
+      view.file = file;
+      view.addAction = jest.fn(() => {
+        header.appendChild(action);
+        return action;
+      });
+      return { view, action, leaf: { view } as any };
+    };
+
+    it("registers Resume this chat through MarkdownView.addAction", () => {
+      const { app, plugin } = createPluginStub();
       const service = new ResumeChatService(plugin);
+      const file = new TFile({ path: "SystemSculpt/Chats/chat-native.md" });
+      app.metadataCache.getCache.mockReturnValue({
+        frontmatter: { id: "chat-native", created: "2025-01-01" },
+      });
+      const { view, leaf } = createHistoryView(file);
 
-      // Create mock elements with event listeners
-      const button1 = document.createElement("button");
-      const button2 = document.createElement("button");
-      const listener1 = jest.fn();
-      const listener2 = jest.fn();
+      (service as any).handleLeafChange(leaf);
 
-      // Access private method via any
-      (service as any).registerListener(button1, "click", listener1);
-      (service as any).registerListener(button2, "click", listener2);
+      expect(view.addAction).toHaveBeenCalledWith(
+        "message-circle",
+        "Resume this chat",
+        expect.any(Function),
+      );
+      expect((service as any).resumeActionByView.get(view)).toBeDefined();
+    });
 
-      // Add spy to confirm removal
-      const spy1 = jest.spyOn(button1, "removeEventListener");
-      const spy2 = jest.spyOn(button2, "removeEventListener");
+    it("keeps the same native action when the view descriptor is unchanged", () => {
+      const { app, plugin } = createPluginStub();
+      const service = new ResumeChatService(plugin);
+      const file = new TFile({ path: "SystemSculpt/Chats/chat-native.md" });
+      app.metadataCache.getCache.mockReturnValue({
+        frontmatter: { id: "chat-native", created: "2025-01-01" },
+      });
+      const { view, action, leaf } = createHistoryView(file);
+      const remove = jest.spyOn(action, "remove");
+
+      (service as any).handleLeafChange(leaf);
+      (service as any).handleLeafChange(leaf);
+
+      expect(view.addAction).toHaveBeenCalledTimes(1);
+      expect(remove).not.toHaveBeenCalled();
+    });
+
+    it("restores the native action when Obsidian rebuilds the view header", () => {
+      const { app, plugin } = createPluginStub();
+      const service = new ResumeChatService(plugin);
+      const file = new TFile({ path: "SystemSculpt/Chats/chat-native.md" });
+      app.metadataCache.getCache.mockReturnValue({
+        frontmatter: { id: "chat-native", created: "2025-01-01" },
+      });
+      const { view, action, leaf } = createHistoryView(file);
+
+      (service as any).handleLeafChange(leaf);
+      action.remove();
+      (service as any).handleLeafChange(leaf);
+
+      expect(view.addAction).toHaveBeenCalledTimes(2);
+      expect(action.isConnected).toBe(true);
+    });
+
+    it("routes the native action through the existing chat resume path", () => {
+      const { app, plugin } = createPluginStub();
+      const service = new ResumeChatService(plugin);
+      const file = new TFile({ path: "SystemSculpt/Chats/chat-native.md" });
+      app.metadataCache.getCache.mockReturnValue({
+        frontmatter: { id: "chat-native", created: "2025-01-01" },
+      });
+      const { view, leaf } = createHistoryView(file);
+      const openChat = jest.spyOn(service, "openChat").mockResolvedValue(undefined);
+
+      (service as any).handleLeafChange(leaf);
+      const callback = view.addAction.mock.calls[0][2];
+      callback(new MouseEvent("click"));
+
+      expect(openChat).toHaveBeenCalledWith("chat-native", file.path);
+    });
+
+    it("removes a stale native action when the view leaves chat history", () => {
+      const { app, plugin } = createPluginStub();
+      const service = new ResumeChatService(plugin);
+      const file = new TFile({ path: "SystemSculpt/Chats/chat-native.md" });
+      app.metadataCache.getCache.mockReturnValue({
+        frontmatter: { id: "chat-native", created: "2025-01-01" },
+      });
+      const { view, action, leaf } = createHistoryView(file);
+      const remove = jest.spyOn(action, "remove");
+      (service as any).handleLeafChange(leaf);
+
+      view.file = new TFile({ path: "Notes/Other.md" });
+      (service as any).handleLeafChange(leaf);
+
+      expect(remove).toHaveBeenCalledTimes(1);
+      expect(view.addAction).toHaveBeenCalledTimes(1);
+      expect((service as any).resumeActionByView.has(view)).toBe(false);
+    });
+
+    it("removes every native action during plugin cleanup", () => {
+      const { app, plugin } = createPluginStub();
+      const service = new ResumeChatService(plugin);
+      const file = new TFile({ path: "SystemSculpt/Chats/chat-native.md" });
+      app.metadataCache.getCache.mockReturnValue({
+        frontmatter: { id: "chat-native", created: "2025-01-01" },
+      });
+      const { action, leaf } = createHistoryView(file);
+      const remove = jest.spyOn(action, "remove");
+      (service as any).handleLeafChange(leaf);
 
       service.cleanup();
 
-      expect(spy1).toHaveBeenCalledWith("click", listener1);
-      expect(spy2).toHaveBeenCalledWith("click", listener2);
+      expect(remove).toHaveBeenCalledTimes(1);
+      expect((service as any).resumeActionByView.size).toBe(0);
     });
 
-    it("clears listeners array after cleanup", () => {
-      const { plugin } = createPluginStub();
+    it("does not recreate native actions from a pending startup refresh after cleanup", () => {
+      jest.useFakeTimers();
+      try {
+        const { app, plugin } = createPluginStub();
+        const service = new ResumeChatService(plugin);
+        const file = new TFile({ path: "SystemSculpt/Chats/chat-native.md" });
+        app.metadataCache.getCache.mockReturnValue({
+          frontmatter: { id: "chat-native", created: "2025-01-01" },
+        });
+        const { view, leaf } = createHistoryView(file);
+        app.workspace.iterateAllLeaves.mockImplementation((callback: (leaf: any) => void) => callback(leaf));
+
+        service.cleanup();
+        jest.runOnlyPendingTimers();
+
+        expect(view.addAction).not.toHaveBeenCalled();
+        expect((service as any).resumeActionByView.size).toBe(0);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it("cancels a pending layout refresh during cleanup", () => {
+      jest.useFakeTimers();
+      try {
+        const { app, plugin } = createPluginStub();
+        const service = new ResumeChatService(plugin);
+        jest.runOnlyPendingTimers();
+        app.workspace.iterateAllLeaves.mockClear();
+        const layoutHandler = app.workspace.on.mock.calls.find(
+          (call: any[]) => call[0] === "layout-change",
+        )?.[1];
+
+        layoutHandler?.();
+        service.cleanup();
+        jest.runOnlyPendingTimers();
+
+        expect(app.workspace.iterateAllLeaves).not.toHaveBeenCalled();
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it("keeps workspace timers on the primary plugin window when a popout is active", () => {
+      jest.useFakeTimers();
+      const primaryClearTimeout = jest.spyOn(window, "clearTimeout");
+      const popoutWindow = {
+        setTimeout: jest.fn(() => 4242),
+        clearTimeout: jest.fn(),
+      };
+      const previousActiveWindow = (window as any).activeWindow;
+      try {
+        (window as any).activeWindow = popoutWindow;
+        const { app, plugin } = createPluginStub();
+        const service = new ResumeChatService(plugin);
+        const layoutHandler = app.workspace.on.mock.calls.find(
+          (call: any[]) => call[0] === "layout-change",
+        )?.[1];
+
+        layoutHandler?.();
+        service.cleanup();
+
+        expect(primaryClearTimeout).toHaveBeenCalled();
+        expect(popoutWindow.setTimeout).not.toHaveBeenCalled();
+        expect(popoutWindow.clearTimeout).not.toHaveBeenCalled();
+      } finally {
+        (window as any).activeWindow = previousActiveWindow;
+        primaryClearTimeout.mockRestore();
+        jest.useRealTimers();
+      }
+    });
+
+    it("removes actions for Markdown views that left the workspace layout", () => {
+      const { app, plugin } = createPluginStub();
       const service = new ResumeChatService(plugin);
+      const file = new TFile({ path: "SystemSculpt/Chats/chat-native.md" });
+      app.metadataCache.getCache.mockReturnValue({
+        frontmatter: { id: "chat-native", created: "2025-01-01" },
+      });
+      const { action, leaf } = createHistoryView(file);
+      const remove = jest.spyOn(action, "remove");
+      (service as any).handleLeafChange(leaf);
+      app.workspace.iterateAllLeaves.mockImplementation(() => undefined);
 
-      const button = document.createElement("button");
-      (service as any).registerListener(button, "click", jest.fn());
+      (service as any).refreshAllLeaves();
 
-      expect((service as any).listeners.length).toBe(1);
-
-      service.cleanup();
-
-      expect((service as any).listeners.length).toBe(0);
+      expect(remove).toHaveBeenCalledTimes(1);
+      expect((service as any).resumeActionByView.size).toBe(0);
     });
 
-    it("handles cleanup when no listeners registered", () => {
+    it("handles cleanup when no actions are registered", () => {
       const { plugin } = createPluginStub();
       const service = new ResumeChatService(plugin);
 
       expect(() => service.cleanup()).not.toThrow();
-    });
-
-    it("removes tracked resume buttons from connected leaves", () => {
-      const { app, plugin } = createPluginStub();
-      const service = new ResumeChatService(plugin);
-      const leaf = { view: {} } as any;
-      const button = document.createElement("div");
-      document.body.appendChild(button);
-      (service as any).resumeButtonByLeaf.set(leaf, button);
-      app.workspace.iterateAllLeaves.mockImplementation((callback: (leaf: any) => void) => {
-        callback(leaf);
-      });
-
-      service.cleanup();
-
-      expect(button.isConnected).toBe(false);
     });
   });
 

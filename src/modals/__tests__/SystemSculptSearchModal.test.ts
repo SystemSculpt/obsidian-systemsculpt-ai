@@ -105,9 +105,10 @@ describe("SystemSculptSearchModal", () => {
       expect(modal.contentEl.querySelector(".ss-search__state")).toBeNull();
       expect(modal.contentEl.querySelector("[data-mode]")).toBeNull();
       expect(modal.contentEl.querySelector("[data-sort]")).toBeNull();
-      expect((modal as any).headerEl.textContent).not.toContain("SystemSculpt Search");
-      expect(modal.modalEl.getAttribute("aria-label")).toBe("Search your vault");
-      expect(modal.modalEl.hasAttribute("aria-labelledby")).toBe(false);
+      expect((modal as any).headerEl.textContent).toContain("Search your vault");
+      expect((modal as any).headerEl.querySelector(".ss-modal__close-button")).not.toBeNull();
+      expect(modal.modalEl.hasAttribute("aria-label")).toBe(false);
+      expect(modal.modalEl.hasAttribute("aria-labelledby")).toBe(true);
     });
 
     it("uses combobox/listbox attributes for the result list", () => {
@@ -148,17 +149,17 @@ describe("SystemSculptSearchModal", () => {
       expect((modal as any).listEl?.getAttribute("role")).toBeNull();
     });
 
-    it("keeps the search-open body state local to the modal document", () => {
+    it("does not mutate host body classes or globally suppress host tooltips", () => {
       const popupDocument = document.implementation.createHTMLDocument("Search popup");
+      popupDocument.body.className = "theme-dark native-host-state";
       popupDocument.body.appendChild(modal.modalEl);
 
       modal.onOpen();
 
-      expect(popupDocument.body.classList.contains("ss-search-open")).toBe(true);
-      expect(document.body.classList.contains("ss-search-open")).toBe(false);
+      expect(popupDocument.body.className).toBe("theme-dark native-host-state");
 
       modal.onClose();
-      expect(popupDocument.body.classList.contains("ss-search-open")).toBe(false);
+      expect(popupDocument.body.className).toBe("theme-dark native-host-state");
     });
   });
 

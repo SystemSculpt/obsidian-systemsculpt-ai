@@ -76,6 +76,7 @@ describe("built bundle in Obsidian Mobile", () => {
 
     let host: any;
     let plugin: any;
+    let addStatusBarItemSpy: jest.SpyInstance;
     const layoutReadyCallbacks: Array<() => void | Promise<void>> = [];
     jest.isolateModules(() => {
       // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -96,6 +97,7 @@ describe("built bundle in Obsidian Mobile", () => {
         return { unload: jest.fn() };
       });
       plugin = new PluginClass(app, manifest);
+      addStatusBarItemSpy = jest.spyOn(plugin, "addStatusBarItem");
     });
 
     await plugin.onload();
@@ -110,6 +112,8 @@ describe("built bundle in Obsidian Mobile", () => {
     await flushAsyncWork();
 
     expect(plugin.failures).toEqual([]);
+    expect(addStatusBarItemSpy!).not.toHaveBeenCalled();
+    expect(plugin.embeddingsStatusBar).toBeNull();
 
     expect(plugin._commands.length).toBeGreaterThan(0);
     expect(plugin._settingTabs.length).toBeGreaterThan(0);

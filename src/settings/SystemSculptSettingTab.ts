@@ -60,7 +60,6 @@ export class SystemSculptSettingTab extends PluginSettingTab {
   private searchInputEl: HTMLInputElement | null = null;
   private searchShellEl: HTMLElement | null = null;
   private searchMetaEl: HTMLElement | null = null;
-  private clearSearchButtonEl: HTMLButtonElement | null = null;
   private searchHandle: UiSearchHandle | null = null;
   private searchResultsContainerEl: HTMLElement | null = null;
   private searchCombobox: SurfaceCombobox<SettingsSearchMatch> | null = null;
@@ -313,7 +312,6 @@ export class SystemSculptSettingTab extends PluginSettingTab {
     this.searchInputEl = null;
     this.searchShellEl = null;
     this.searchMetaEl = null;
-    this.clearSearchButtonEl = null;
     this.searchResultsContainerEl = null;
     this.searchState = {
       query: "",
@@ -349,15 +347,11 @@ export class SystemSculptSettingTab extends PluginSettingTab {
     this.searchInputEl = this.searchHandle.input;
     this.searchInputEl.autocomplete = "off";
     this.searchInputEl.spellcheck = false;
-    this.clearSearchButtonEl = this.searchHandle.root.querySelector(
-      ".ss-search-field__clear",
-    ) as HTMLButtonElement | null;
 
     this.searchMetaEl = this.searchShellEl.createDiv({
       cls: "ss-settings-search-meta",
       attr: { "aria-live": "polite" },
     });
-
     const layout = surfaceRoot.createDiv({ cls: "ss-settings-layout" });
     const tabBar = layout.createDiv({ cls: "ss-settings-tab-bar" });
     const contentContainer = layout.createDiv({ cls: "ss-settings-panels" });
@@ -560,7 +554,6 @@ export class SystemSculptSettingTab extends PluginSettingTab {
       },
       onResultsChange: () => this.searchResultGroupEls.clear(),
       onCommit: ({ item }) => this.navigateToSetting(item.tabId, item.element),
-      onEscape: () => this.clearSearch(true),
     });
   }
 
@@ -637,6 +630,16 @@ export class SystemSculptSettingTab extends PluginSettingTab {
       preserveActive: !resetSelection,
     });
     this.syncSearchChrome();
+    if (
+      this.searchInputEl &&
+      this.searchInputEl.ownerDocument.activeElement !== this.searchInputEl
+    ) {
+      try {
+        this.searchInputEl.focus({ preventScroll: true });
+      } catch {
+        this.searchInputEl.focus();
+      }
+    }
   }
 
   /**
@@ -663,9 +666,11 @@ export class SystemSculptSettingTab extends PluginSettingTab {
    * Clear the search shell and restore the normal tab view.
    */
   private clearSearch(restoreFocus: boolean) {
-    if (this.searchInputEl) {
-      this.searchInputEl.value = "";
-    }
+    this.searchHandle?.setValue("", { notify: false });
+    this.searchCombobox?.setQuery("", {
+      writeInput: false,
+      render: false,
+    });
     this.searchState = {
       query: "",
       groups: [],
@@ -720,7 +725,6 @@ export class SystemSculptSettingTab extends PluginSettingTab {
       if (this.searchState.results.length > 0) {
         this.createKeyboardHint(actions, ["Enter"], "open");
       }
-      this.createKeyboardHint(actions, ["Esc"], "clear");
       return;
     }
 
@@ -757,12 +761,6 @@ export class SystemSculptSettingTab extends PluginSettingTab {
   private syncSearchChrome() {
     const searchActive = this.searchState.query.length > 0;
     this.searchShellEl?.classList.toggle("is-search-active", searchActive);
-
-    if (this.clearSearchButtonEl) {
-      this.clearSearchButtonEl.hidden = !searchActive;
-      this.clearSearchButtonEl.disabled = !searchActive;
-    }
-
   }
 
   private renderSearchResult(match: SettingsSearchMatch): HTMLElement {
@@ -774,10 +772,7 @@ export class SystemSculptSettingTab extends PluginSettingTab {
       group?.tabLabel || match.tabLabel,
       group?.results.length ?? 1,
     );
-    const row = groupResults.createEl("button", {
-      cls: "ss-search-result",
-      attr: { type: "button" },
-    });
+    const row = groupResults.createDiv({ cls: "ss-search-result" });
 
     const copy = row.createDiv({ cls: "ss-search-result__copy" });
     const titleRow = copy.createDiv({ cls: "ss-search-result__title-row" });

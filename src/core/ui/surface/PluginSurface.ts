@@ -1,4 +1,4 @@
-export type PluginSurfaceKind = "view" | "modal" | "transient" | "embedded";
+export type PluginSurfaceKind = "view" | "modal" | "transient";
 
 const SURFACE_CLASS = "ss-surface";
 const SURFACE_ATTRIBUTE = "data-ss-surface";

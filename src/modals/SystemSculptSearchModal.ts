@@ -41,8 +41,7 @@ export class SystemSculptSearchModal extends StandardModal {
 
   onOpen() {
     super.onOpen();
-    this.setModalAccessibleName("Search your vault");
-    this.modalEl.ownerDocument.body.classList.add("ss-search-open");
+    this.addTitle("Search your vault");
     this.contentEl.addClass("ss-search__content");
     this.footerEl.addClass("ss-search__footer");
     this.footerEl.createDiv({ text: "↑/↓ Navigate · Enter Open · Esc Close", cls: "ss-search__hint" });
@@ -62,7 +61,6 @@ export class SystemSculptSearchModal extends StandardModal {
   }
 
   onClose() {
-    this.modalEl.ownerDocument.body.classList.remove("ss-search-open");
     this.querySerial += 1;
     this.cancelSearch();
     this.cancelRecentPreviewHydration();

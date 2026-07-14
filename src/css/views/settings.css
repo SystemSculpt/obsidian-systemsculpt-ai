@@ -28,7 +28,7 @@
   gap: var(--ss-space-1);
 }
 
-.ss-tab-button {
+.ss-surface .ss-tab-button {
   background-color: transparent;
   border-radius: var(--ss-radius-full);
   color: var(--ss-ink-muted);

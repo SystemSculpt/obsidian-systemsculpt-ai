@@ -10,7 +10,7 @@
  *   selected (.is-selected) → accent tint, accent hairline
  */
 
-.ss-button {
+.ss-surface .ss-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -35,30 +35,30 @@
   transition: var(--ss-transition-colors), transform var(--ss-dur-fast) var(--ss-ease);
 }
 
-.ss-button:hover {
+.ss-surface .ss-button:hover {
   background-color: var(--ss-surface-2);
   border-color: var(--ss-line-strong);
 }
 
-.ss-button:active {
+.ss-surface .ss-button:active {
   background-color: var(--ss-surface-3);
   transform: scale(0.98);
 }
 
-.ss-button:disabled {
+.ss-surface .ss-button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
   pointer-events: none;
 }
 
 /* Icon inside a button */
-.ss-button__icon {
+.ss-surface .ss-button__icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
 }
 
-.ss-button__icon svg {
+.ss-surface .ss-button__icon svg {
   width: var(--ss-icon-size);
   height: var(--ss-icon-size);
 }
@@ -66,48 +66,48 @@
 /* ------------------------------------------------------------------ *
  * Variants
  * ------------------------------------------------------------------ */
-.ss-button--primary,
-.ss-button.mod-cta {
+.ss-surface .ss-button--primary,
+.ss-surface .ss-button.mod-cta {
   background-color: var(--ss-accent);
   border-color: var(--ss-accent);
   color: var(--ss-ink-on-accent);
   box-shadow: var(--ss-elevation-1);
 }
 
-.ss-button--primary:hover,
-.ss-button.mod-cta:hover {
+.ss-surface .ss-button--primary:hover,
+.ss-surface .ss-button.mod-cta:hover {
   background-color: var(--ss-accent-hover);
   border-color: var(--ss-accent-hover);
 }
 
-.ss-button--primary:active,
-.ss-button.mod-cta:active {
+.ss-surface .ss-button--primary:active,
+.ss-surface .ss-button.mod-cta:active {
   background-color: var(--ss-accent-hover);
 }
 
-.ss-button--danger {
+.ss-surface .ss-button--danger {
   background-color: var(--ss-danger-tint);
   border-color: var(--ss-danger-line);
   color: var(--ss-danger);
 }
 
-.ss-button--danger:hover {
+.ss-surface .ss-button--danger:hover {
   background-color: var(--ss-danger);
   border-color: var(--ss-danger);
   color: var(--ss-ink-on-accent);
 }
 
-.ss-button--danger:active {
+.ss-surface .ss-button--danger:active {
   background-color: var(--ss-danger);
 }
 
-.ss-button.mod-warning {
+.ss-surface .ss-button.mod-warning {
   background-color: var(--ss-warning-tint);
   border-color: var(--ss-warning-line);
   color: var(--ss-warning);
 }
 
-.ss-button.mod-warning:hover {
+.ss-surface .ss-button.mod-warning:hover {
   background-color: var(--ss-warning);
   border-color: var(--ss-warning);
   color: var(--ss-ink-on-accent);
@@ -116,14 +116,14 @@
 /* ------------------------------------------------------------------ *
  * Sizes
  * ------------------------------------------------------------------ */
-.ss-button--small {
+.ss-surface .ss-button--small {
   min-height: var(--ss-control-height-sm);
   padding: 0 var(--ss-space-3);
   font-size: var(--ss-text-sm);
   gap: var(--ss-space-1);
 }
 
-.ss-button--small .ss-button__icon svg {
+.ss-surface .ss-button--small .ss-button__icon svg {
   width: var(--ss-icon-size-sm);
   height: var(--ss-icon-size-sm);
 }
@@ -131,19 +131,19 @@
 /* ------------------------------------------------------------------ *
  * States
  * ------------------------------------------------------------------ */
-.ss-button.is-selected {
+.ss-surface .ss-button.is-selected {
   background-color: var(--ss-accent-tint-strong);
   border-color: var(--ss-line-accent);
   color: var(--ss-ink-accent);
 }
 
-.ss-button.is-busy {
+.ss-surface .ss-button.is-busy {
   position: relative;
   color: transparent;
   pointer-events: none;
 }
 
-.ss-button.is-busy::after {
+.ss-surface .ss-button.is-busy::after {
   content: "";
   position: absolute;
   inset: 0;
@@ -156,8 +156,8 @@
   animation: ss-spin 0.8s linear infinite;
 }
 
-.ss-button--primary.is-busy::after,
-.ss-button.mod-cta.is-busy::after {
+.ss-surface .ss-button--primary.is-busy::after,
+.ss-surface .ss-button.mod-cta.is-busy::after {
   border-color: color-mix(in srgb, var(--ss-ink-on-accent) 30%, transparent);
   border-top-color: var(--ss-ink-on-accent);
 }

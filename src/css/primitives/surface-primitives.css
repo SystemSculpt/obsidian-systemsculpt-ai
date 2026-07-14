@@ -1,82 +1,28 @@
 /** Semantic actions, search, and presentation states shared by every surface. */
 
-.ss-button--icon {
+.ss-surface .ss-button--icon {
   width: var(--ss-control-height);
   min-width: var(--ss-control-height);
   padding: 0;
 }
 
-.ss-button--icon:not(.ss-button--primary):not(.ss-button--danger):not(.mod-warning) {
+.ss-surface .ss-button--icon:not(.ss-button--primary):not(.ss-button--danger):not(.mod-warning) {
   background: transparent;
   border-color: transparent;
   box-shadow: none;
   color: var(--ss-ink-muted);
 }
 
-.ss-button--icon:not(.ss-button--primary):not(.ss-button--danger):not(.mod-warning):hover:not(:disabled),
-.ss-button--icon:not(.ss-button--primary):not(.ss-button--danger):not(.mod-warning):focus-visible {
+.ss-surface .ss-button--icon:not(.ss-button--primary):not(.ss-button--danger):not(.mod-warning):hover:not(:disabled),
+.ss-surface .ss-button--icon:not(.ss-button--primary):not(.ss-button--danger):not(.mod-warning):focus-visible {
   background: var(--ss-state-hover);
   border-color: transparent;
   color: var(--ss-ink);
 }
 
 .ss-search-field {
-  position: relative;
-  display: flex;
-  align-items: center;
   width: 100%;
   min-width: 0;
-}
-
-.ss-search-field__icon {
-  position: absolute;
-  left: var(--ss-space-3);
-  z-index: var(--ss-z-raised);
-  display: inline-flex;
-  color: var(--ss-ink-faint);
-  pointer-events: none;
-}
-
-.ss-search-field__icon svg {
-  width: var(--ss-icon-size);
-  height: var(--ss-icon-size);
-}
-
-.ss-search-field__input {
-  width: 100%;
-  min-width: 0;
-  min-height: var(--ss-control-height);
-  padding: 0 var(--ss-space-10) 0 var(--ss-space-8);
-  color: var(--ss-ink);
-  background-color: var(--ss-surface-sunken);
-  border: 1px solid var(--ss-line);
-  border-radius: var(--ss-radius-sm);
-  transition: var(--ss-transition-colors);
-}
-
-.ss-search-field__input::placeholder {
-  color: var(--ss-ink-faint);
-}
-
-.ss-search-field__input::-webkit-search-cancel-button {
-  appearance: none;
-}
-
-.ss-search-field__input:focus {
-  border-color: var(--ss-accent);
-  outline: none;
-  box-shadow: var(--ss-ring);
-}
-
-.ss-search-field__clear {
-  position: absolute;
-  right: var(--ss-space-1);
-  width: var(--ss-control-height-sm);
-  min-width: var(--ss-control-height-sm);
-  min-height: var(--ss-control-height-sm);
-  padding: 0;
-  background: transparent;
-  border-color: transparent;
 }
 
 .ss-ui-state {

@@ -1,23 +1,28 @@
 import { App, MarkdownView, WorkspaceLeaf, TFile, Notice } from "obsidian";
 import SystemSculptPlugin from "../../main";
 import { SystemSculptSettings } from "../../types";
-import { getRuntimeWindow } from "../../utils/runtimeWindow";
 import { ChatStorageService } from "./ChatStorageService";
 import { openChatResumeDescriptor } from "./ChatResumeUtils";
-import { createUiAction } from "../../core/ui/surface";
 
 export class ResumeChatService {
   private app: App;
   private plugin: SystemSculptPlugin;
   private settings: SystemSculptSettings;
   private chatStorage: ChatStorageService;
-  private listeners: Array<{ element: HTMLElement; type: string; listener: EventListener }> = [];
-  // Track inserted resume buttons per leaf to avoid broad DOM scans
-  private resumeButtonByLeaf: WeakMap<WorkspaceLeaf, HTMLElement> = new WeakMap();
+  private readonly resumeActionByView = new Map<MarkdownView, {
+    element: HTMLElement;
+    filePath: string;
+    chatId: string;
+  }>();
+  private readonly schedulerWindow: Window;
+  private initialRefreshHandle: number | null = null;
+  private layoutRefreshHandle: number | null = null;
+  private disposed = false;
 
   constructor(plugin: SystemSculptPlugin) {
     this.plugin = plugin;
     this.app = plugin.app;
+    this.schedulerWindow = window;
     this.settings = plugin.settings;
     this.chatStorage = new ChatStorageService(this.app, this.settings.chatsDirectory || "SystemSculpt/Chats");
 
@@ -58,66 +63,76 @@ export class ResumeChatService {
   }
 
   private scheduleInitialRefresh() {
-    getRuntimeWindow().setTimeout(() => {
-      this.app.workspace.iterateAllLeaves((leaf) => {
-        void this.handleLeafChange(leaf);
-      });
+    this.initialRefreshHandle = this.schedulerWindow.setTimeout(() => {
+      this.initialRefreshHandle = null;
+      if (this.disposed) return;
+      this.refreshAllLeaves();
     }, 0);
   }
 
   private debouncedRefreshAllLeaves() {
-    let scheduled = false;
     return () => {
-      if (scheduled) return;
-      scheduled = true;
+      if (this.disposed || this.layoutRefreshHandle !== null) return;
       // Defer and coalesce repeated layout-change bursts
-      getRuntimeWindow().setTimeout(() => {
-        try {
-          this.app.workspace.iterateAllLeaves((leaf) => {
-            this.handleLeafChange(leaf);
-          });
-        } finally {
-          scheduled = false;
-        }
+      this.layoutRefreshHandle = this.schedulerWindow.setTimeout(() => {
+        this.layoutRefreshHandle = null;
+        if (this.disposed) return;
+        this.refreshAllLeaves();
       }, 50);
     };
   }
 
-  private async handleLeafChange(leaf: WorkspaceLeaf) {
+  private refreshAllLeaves(): void {
+    if (this.disposed) return;
+    const liveViews = new Set<MarkdownView>();
+    this.app.workspace.iterateAllLeaves((leaf) => {
+      if (leaf.view instanceof MarkdownView) {
+        liveViews.add(leaf.view);
+      }
+      this.handleLeafChange(leaf);
+    });
+
+    for (const view of this.resumeActionByView.keys()) {
+      if (!liveViews.has(view)) {
+        this.removeResumeAction(view);
+      }
+    }
+  }
+
+  private handleLeafChange(leaf: WorkspaceLeaf): void {
+    if (this.disposed) return;
     const view = leaf.view;
     if (!(view instanceof MarkdownView)) return;
 
     const file = view.file;
-
-    // Remove any existing resume chat button for this leaf (targeted)
-    const existingButton = this.resumeButtonByLeaf.get(leaf);
-    if (existingButton && existingButton.isConnected) {
-      existingButton.remove();
+    if (!file || !this.isChatHistoryFile(file)) {
+      this.removeResumeAction(view);
+      return;
     }
-    this.resumeButtonByLeaf.delete(leaf);
-
-    // If not a chat history file, return early after cleanup
-    if (!file || !this.isChatHistoryFile(file)) return;
-
-    // Get the appropriate container based on current view mode
-    const editorContainer = view.contentEl.querySelector<HTMLElement>('.cm-editor');
-    const isSourceMode = view.getMode() === 'source';
-    const contentContainer = isSourceMode ? editorContainer : view.contentEl;
-    if (!contentContainer) return;
 
     // Extract chat ID from the file
     const chatId = this.extractChatId(file);
-    if (!chatId) return;
-
-    // Create and insert the resume chat button. In source mode the button
-    // mounts inside .cm-editor and needs the absolute-positioning modifier
-    // (resume-chat.css keys off this class, not the Obsidian ancestor).
-    const buttonContainer = this.createResumeChatButton(chatId, file, contentContainer);
-    if (isSourceMode) {
-      buttonContainer.classList.add('systemsculpt-resume-chat-button--editor');
+    if (!chatId) {
+      this.removeResumeAction(view);
+      return;
     }
-    contentContainer.insertBefore(buttonContainer, contentContainer.firstChild);
-    this.resumeButtonByLeaf.set(leaf, buttonContainer);
+
+    const current = this.resumeActionByView.get(view);
+    if (
+      current?.element.isConnected &&
+      current.filePath === file.path &&
+      current.chatId === chatId
+    ) return;
+    this.removeResumeAction(view);
+
+    const action = view.addAction("message-circle", "Resume this chat", () => {
+      void this.openChat(chatId, file.path);
+    });
+    this.resumeActionByView.set(view, {
+      element: action,
+      filePath: file.path,
+      chatId,
+    });
   }
 
   public isChatHistoryFile(file: TFile): boolean {
@@ -150,30 +165,6 @@ export class ResumeChatService {
     return filename || null;
   }
 
-  private createResumeChatButton(chatId: string, file: TFile, host: HTMLElement): HTMLElement {
-    // Build directly in the leaf's realm so popout themes, focus, and events
-    // never depend on the primary Obsidian document.
-    // eslint-disable-next-line obsidianmd/prefer-create-el
-    const buttonContainer = host.ownerDocument.createElement("div");
-    buttonContainer.className = 'systemsculpt-resume-chat-button';
-
-    const button = createUiAction(buttonContainer, {
-      label: "Resume this chat",
-      icon: "message-circle",
-      size: "small",
-      tone: "primary",
-    });
-    button.addClass("systemsculpt-resume-chat-btn");
-
-    const clickHandler = async () => {
-      await this.openChat(chatId, file.path);
-    };
-
-    this.registerListener(button, 'click', clickHandler);
-
-    return buttonContainer;
-  }
-
   public async openChat(chatId: string, chatPath?: string): Promise<void> {
     try {
       const descriptor = await this.chatStorage.getChatResumeDescriptor(chatId);
@@ -198,24 +189,24 @@ export class ResumeChatService {
     }
   }
 
-  private registerListener(element: HTMLElement, type: string, listener: EventListener) {
-    element.addEventListener(type, listener);
-    this.listeners.push({ element, type, listener });
+  private removeResumeAction(view: MarkdownView): void {
+    this.resumeActionByView.get(view)?.element.remove();
+    this.resumeActionByView.delete(view);
   }
 
-  cleanup() {
-    // Remove all registered event listeners
-    this.listeners.forEach(({ element, type, listener }) => {
-      element.removeEventListener(type, listener);
-    });
-    this.listeners = [];
-
-    this.app.workspace.iterateAllLeaves((leaf) => {
-      const button = this.resumeButtonByLeaf.get(leaf);
-      if (button?.isConnected) {
-        button.remove();
-      }
-      this.resumeButtonByLeaf.delete(leaf);
-    });
+  cleanup(): void {
+    this.disposed = true;
+    if (this.initialRefreshHandle !== null) {
+      this.schedulerWindow.clearTimeout(this.initialRefreshHandle);
+      this.initialRefreshHandle = null;
+    }
+    if (this.layoutRefreshHandle !== null) {
+      this.schedulerWindow.clearTimeout(this.layoutRefreshHandle);
+      this.layoutRefreshHandle = null;
+    }
+    for (const action of this.resumeActionByView.values()) {
+      action.element.remove();
+    }
+    this.resumeActionByView.clear();
   }
 }

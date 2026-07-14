@@ -68,7 +68,7 @@ describe("TranscribeAudioFileModal", () => {
     modal.onOpen();
 
     const search = modal.modalEl.querySelector<HTMLInputElement>(
-      ".ss-search-field__input"
+      ".ss-search-field input[type='search']"
     );
     const state = modal.modalEl.querySelector<HTMLElement>(
       ".ss-transcribe-audio__list > .ss-ui-state.is-empty"
@@ -96,7 +96,7 @@ describe("TranscribeAudioFileModal", () => {
     modal.onOpen();
 
     const search = modal.modalEl.querySelector<HTMLInputElement>(
-      ".ss-search-field__input"
+      ".ss-search-field input[type='search']"
     )!;
     search.value = "interview";
     search.dispatchEvent(new Event("input", { bubbles: true }));

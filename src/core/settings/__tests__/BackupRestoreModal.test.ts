@@ -45,7 +45,7 @@ describe("BackupSelectionModal", () => {
   it("filters the focused backup list without async-search or multi-select machinery", () => {
     const modal = new BackupSelectionModal(new App(), backups);
     modal.open();
-    const search = modal.modalEl.querySelector<HTMLInputElement>(".ss-modal__search-input")!;
+    const search = modal.modalEl.querySelector<HTMLInputElement>(".ss-modal__search input[type='search']")!;
 
     search.value = "older";
     search.dispatchEvent(new Event("input", { bubbles: true }));
@@ -58,7 +58,7 @@ describe("BackupSelectionModal", () => {
   it("uses the shared empty state when no backup matches", () => {
     const modal = new BackupSelectionModal(new App(), backups);
     modal.open();
-    const search = modal.modalEl.querySelector<HTMLInputElement>(".ss-modal__search-input")!;
+    const search = modal.modalEl.querySelector<HTMLInputElement>(".ss-modal__search input[type='search']")!;
 
     search.value = "does not exist";
     search.dispatchEvent(new Event("input", { bubbles: true }));

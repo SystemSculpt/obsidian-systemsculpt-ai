@@ -1,8 +1,7 @@
-import { Component, setIcon } from "obsidian";
+import { Component } from "obsidian";
 import type SystemSculptPlugin from "../main";
 import type { EmbeddingsManager } from "../services/embeddings/EmbeddingsManager";
 import type { SemanticIndexSnapshot } from "../services/embeddings/SemanticIndexLifecycle";
-import { applyPluginSurface } from "../core/ui/surface";
 
 /**
  * Compact projection of the semantic-index lifecycle.
@@ -12,7 +11,6 @@ import { applyPluginSurface } from "../core/ui/surface";
  */
 export class EmbeddingsStatusBar extends Component {
   private readonly statusBarEl: HTMLElement;
-  private readonly valueEl: HTMLElement;
   private unsubscribeLifecycle: (() => void) | null = null;
   private manager: EmbeddingsManager | null = null;
 
@@ -20,20 +18,10 @@ export class EmbeddingsStatusBar extends Component {
     super();
 
     this.statusBarEl = plugin.addStatusBarItem();
-    applyPluginSurface(this.statusBarEl, "embedded");
-    this.statusBarEl.addClass("mod-clickable", "ss-embeddings-status-bar");
+    this.statusBarEl.addClass("mod-clickable");
     this.statusBarEl.setAttr("role", "button");
     this.statusBarEl.setAttr("tabindex", "0");
-
-    const icon = this.statusBarEl.createSpan({
-      cls: "ss-embeddings-status-bar__icon",
-      attr: { "aria-hidden": "true" },
-    });
-    setIcon(icon, "network");
-    this.valueEl = this.statusBarEl.createSpan({
-      cls: "ss-embeddings-status-bar__value",
-      text: "Starting",
-    });
+    this.statusBarEl.setText("Starting");
 
     this.statusBarEl.addEventListener("click", () => this.openSimilarNotes());
     this.statusBarEl.addEventListener("keydown", (event: KeyboardEvent) => {
@@ -133,7 +121,7 @@ export class EmbeddingsStatusBar extends Component {
   }
 
   private setText(value: string, accessibleName: string): void {
-    this.valueEl.setText(value);
+    this.statusBarEl.setText(value);
     this.statusBarEl.setAttr("aria-label", accessibleName);
   }
 

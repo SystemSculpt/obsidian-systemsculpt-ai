@@ -3,7 +3,7 @@
 import { applyPluginSurface, isPluginSurface } from "../PluginSurface";
 
 describe("PluginSurface", () => {
-  it.each(["view", "modal", "transient", "embedded"] as const)(
+  it.each(["view", "modal", "transient"] as const)(
     "applies the %s host contract without replacing feature state",
     (kind) => {
       const root = document.createElement("div");

@@ -676,8 +676,9 @@ export class AgentChatView extends ItemView {
       }
       this.handleRunResult(result);
       if (result.kind === "completed") {
-        await this.workspace?.setHistory(this.transcript.snapshot().messages as readonly ChatMessage[]);
-        await this.workspace?.setAgentSnapshot(null);
+        await this.workspace?.settleCompletedRun(
+          this.transcript.snapshot().messages as readonly ChatMessage[],
+        );
       }
     } finally {
       if (this.activeRunPromise === run) this.activeRunPromise = null;

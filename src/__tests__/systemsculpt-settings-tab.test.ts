@@ -138,7 +138,11 @@ describe("SystemSculptSettingTab native layout", () => {
     expect(surface?.classList.contains("ss-surface")).toBe(true);
     expect(surface?.getAttribute("data-ss-surface")).toBe("view");
     expect(searchInput).not.toBeNull();
-    expect(searchInput!.classList.contains("ss-search-field__input")).toBe(true);
+    const nativeSearchContainer = searchInput?.closest(".search-input-container");
+    expect(nativeSearchContainer).not.toBeNull();
+    expect(nativeSearchContainer?.parentElement?.classList.contains("ss-search-field")).toBe(true);
+    expect(tab.containerEl.querySelector(".search-input-clear-button")).not.toBeNull();
+    expect(tab.containerEl.querySelector(".ss-search-field__icon")).toBeNull();
     expect(
       tab.containerEl.querySelector(".ss-settings-search-shell"),
     ).not.toBeNull();
@@ -403,12 +407,10 @@ describe("SystemSculptSettingTab native layout", () => {
     expect(
       tab.containerEl.querySelectorAll("mark.ss-search-mark").length,
     ).toBeGreaterThan(0);
-    expect(
-      tab.containerEl.querySelector(".ss-search-field__clear"),
-    ).toHaveProperty("hidden", false);
+    expect(tab.containerEl.querySelector(".search-input-clear-button")).not.toBeNull();
   });
 
-  it("shows a polished empty state and clears search on escape", async () => {
+  it("shows a polished empty state and clears through the native search control", async () => {
     const tab = await renderTab();
     const searchInput = tab.containerEl.querySelector(
       "input[type='search']",
@@ -421,7 +423,8 @@ describe("SystemSculptSettingTab native layout", () => {
         ?.textContent,
     ).toContain("No settings found");
 
-    searchInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    searchInput.value = "";
+    searchInput.dispatchEvent(new Event("input"));
 
     expect(searchInput.value).toBe("");
     expect(tab.containerEl.querySelector(".ss-ui-state.is-empty")).toBeNull();

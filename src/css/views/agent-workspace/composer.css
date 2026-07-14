@@ -67,7 +67,7 @@
   box-shadow: var(--ss-ring);
 }
 
-.systemsculpt-agent-prompt-input {
+.systemsculpt-agent-prompt > .systemsculpt-agent-prompt-input {
   display: block;
   width: 100%;
   min-height: var(--ss-control-height-lg);
@@ -76,6 +76,8 @@
   overflow-y: auto;
   resize: none;
   border: 0;
+  border-bottom: 0;
+  border-radius: 0;
   outline: 0;
   background: transparent;
   box-shadow: none;

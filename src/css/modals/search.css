@@ -1,6 +1,6 @@
 /**
  * SystemSculpt search modal — full-vault search with keyboard navigation.
- * Root: `.ss-modal.ss-search-modal`; TS toggles `body.ss-search-open`.
+ * Root: `.ss-modal.ss-search-modal`.
  */
 
 .ss-modal.ss-search-modal {
@@ -16,11 +16,6 @@
 .ss-search-modal .ss-modal__content {
   min-height: 0;
   overflow: hidden;
-}
-
-/* Obsidian tooltips fight the overlay while the modal is open */
-body.ss-search-open .tooltip {
-  display: none !important;
 }
 
 .ss-search__content {
@@ -174,6 +169,16 @@ body.ss-search-open .tooltip {
   .ss-modal.ss-search-modal {
     width: 96vw;
     height: 88vh;
+  }
+}
+
+@media (max-width: 700px), (pointer: coarse) {
+  .ss-search-modal .ss-modal__header {
+    display: block;
+  }
+
+  .ss-search-modal .ss-modal__footer {
+    display: none;
   }
 }
 
