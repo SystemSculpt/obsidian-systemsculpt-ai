@@ -53,6 +53,7 @@ describe("EmbeddingsStatusBar", () => {
       addStatusBarItem: jest.fn(() => element),
       settings: { embeddingsEnabled: true },
       embeddingsManager: manager,
+      getOrCreateEmbeddingsManager: jest.fn(() => manager),
       getViewManager: jest.fn(() => ({ activateEmbeddingsView })),
     };
     statusBar = new EmbeddingsStatusBar(plugin);

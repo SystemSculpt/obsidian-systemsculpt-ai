@@ -60,4 +60,17 @@ describe("SystemSculptPlugin.initializeBasicUI", () => {
     expect(addStatusBarItemSpy).not.toHaveBeenCalled();
     expect(plugin.embeddingsStatusBar).toBeNull();
   });
+
+  it("rebinds native status chrome whenever an enabled embeddings manager is requested", () => {
+    const app = new App();
+    const plugin = pluginReadyForBasicUi(app);
+    plugin._internal_settings_systemsculpt_plugin.embeddingsEnabled = true;
+    const manager = {} as any;
+    const startMonitoring = jest.fn();
+    plugin.embeddingsManager = manager;
+    plugin.embeddingsStatusBar = { startMonitoring } as any;
+
+    expect(plugin.getOrCreateEmbeddingsManager()).toBe(manager);
+    expect(startMonitoring).toHaveBeenCalledWith(manager);
+  });
 });

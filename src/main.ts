@@ -186,7 +186,11 @@ export default class SystemSculptPlugin extends Plugin {
       }
     }
 
-    return this.embeddingsManager;
+    const manager = this.embeddingsManager;
+    if (this.settings.embeddingsEnabled) {
+      this.embeddingsStatusBar?.startMonitoring(manager);
+    }
+    return manager;
   }
 
   public getSearchEngine(): SystemSculptSearchEngine {

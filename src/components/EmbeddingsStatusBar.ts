@@ -31,7 +31,10 @@ export class EmbeddingsStatusBar extends Component {
     });
 
     if (plugin.settings.embeddingsEnabled) {
-      this.startMonitoring(plugin.embeddingsManager);
+      // Start the configured semantic service without awaiting it so hot
+      // reloads cannot leave native status chrome parked on "Starting" until
+      // the Similar Notes view is opened manually.
+      this.startMonitoring(plugin.getOrCreateEmbeddingsManager());
     } else {
       this.stopMonitoring();
     }
