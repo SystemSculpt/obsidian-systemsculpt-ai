@@ -66,5 +66,5 @@
     "release:plugin": "node scripts/release-plugin.mjs"
   },
   "type": "module",
-  "version": "6.0.0"
+  "version": "6.0.1"
 }

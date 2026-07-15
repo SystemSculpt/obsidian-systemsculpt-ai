@@ -142,6 +142,7 @@ function createEditorFactory(result: "handle" | "null" = "handle"): EditorFactor
 describe("studio.text live-preview card", () => {
   afterEach(() => {
     document.body.innerHTML = "";
+    delete (document as Document & { caretRangeFromPoint?: unknown }).caretRangeFromPoint;
     jest.restoreAllMocks();
   });
 
@@ -237,6 +238,50 @@ describe("studio.text live-preview card", () => {
 
       expect(graphInteraction.ensureSingleSelection).toHaveBeenCalledWith(node.id);
       expect(onRequestTextNodeEdit).toHaveBeenCalledWith(node.id, { x: 48, y: 64 });
+    });
+
+    it("captures a table-cell source offset before replacing the preview", () => {
+      const markdown = [
+        "| Item | State |",
+        "| --- | --- |",
+        "| Alpha | Ready |",
+      ].join("\n");
+      const renderMarkdownPreview = jest.fn(
+        (_node, _markdown, containerEl: HTMLElement) => {
+          containerEl.innerHTML =
+            "<table><thead><tr><th>Item</th><th>State</th></tr></thead>" +
+            "<tbody><tr><td>Alpha</td><td>Ready</td></tr></tbody></table>";
+        }
+      );
+      const { node, nodeEl, onRequestTextNodeEdit } = renderHarness({
+        value: markdown,
+        renderMarkdownPreview,
+      });
+      const alpha = nodeEl.querySelector<HTMLTableCellElement>("tbody td")!;
+      Object.defineProperty(document, "caretRangeFromPoint", {
+        configurable: true,
+        value: () => {
+          const range = document.createRange();
+          range.setStart(alpha.firstChild!, 3);
+          range.collapse(true);
+          return range;
+        },
+      });
+
+      alpha.dispatchEvent(
+        new MouseEvent("dblclick", {
+          bubbles: true,
+          cancelable: true,
+          clientX: 48,
+          clientY: 64,
+        })
+      );
+
+      expect(onRequestTextNodeEdit).toHaveBeenCalledWith(node.id, {
+        x: 48,
+        y: 64,
+        sourceOffset: markdown.indexOf("Alpha") + 3,
+      });
     });
   });
 
@@ -449,8 +494,14 @@ describe("studio.text live-preview card", () => {
       expect(capture.handle.selectAll).not.toHaveBeenCalled();
     });
 
-    it("forwards the pointer focus point and suppresses deferred autofocus", () => {
-      const requestAnimationFrame = jest.spyOn(window, "requestAnimationFrame");
+    it("resolves the pointer focus point after the live editor is mounted", () => {
+      const pendingFrames: FrameRequestCallback[] = [];
+      jest
+        .spyOn(window, "requestAnimationFrame")
+        .mockImplementation((callback: FrameRequestCallback) => {
+          pendingFrames.push(callback);
+          return pendingFrames.length;
+        });
       const capture = createEditorFactory();
       renderHarness({
         value: "x",
@@ -460,9 +511,46 @@ describe("studio.text live-preview card", () => {
         createMarkdownEditor: capture.factory,
       });
 
-      expect(capture.calls[0].options.focusAt).toEqual({ x: 48, y: 64 });
-      expect(requestAnimationFrame).not.toHaveBeenCalled();
+      expect(capture.calls[0].options.focusAt).toBeUndefined();
+      expect(capture.handle.focusAt).not.toHaveBeenCalled();
       expect(capture.handle.focus).not.toHaveBeenCalled();
+
+      pendingFrames.shift()!(0);
+      expect(capture.handle.focusAt).toHaveBeenCalledWith({ x: 48, y: 64 });
+      expect(capture.handle.focus).not.toHaveBeenCalled();
+    });
+
+    it("lets an explicit pointer position win over a remount snapshot", () => {
+      const pendingFrames: FrameRequestCallback[] = [];
+      jest
+        .spyOn(window, "requestAnimationFrame")
+        .mockImplementation((callback: FrameRequestCallback) => {
+          pendingFrames.push(callback);
+          return pendingFrames.length;
+        });
+      const capture = createEditorFactory();
+      const snapshot = {
+        selection: { anchor: 1, head: 1 },
+        scrollTop: 42,
+        focused: true,
+      };
+      renderHarness({
+        value: "x",
+        isEditing: true,
+        shouldAutoFocus: true,
+        initialFocusPoint: { x: 48, y: 64 },
+        initialEditorSnapshot: snapshot,
+        createMarkdownEditor: capture.factory,
+      });
+
+      expect(capture.handle.restoreSnapshot).toHaveBeenCalledWith(snapshot);
+      expect(capture.handle.focusAt).not.toHaveBeenCalled();
+      pendingFrames.shift()!(0);
+
+      expect(capture.handle.restoreSnapshot.mock.invocationCallOrder[0]).toBeLessThan(
+        capture.handle.focusAt.mock.invocationCallOrder[0]
+      );
+      expect(capture.handle.focusAt).toHaveBeenCalledWith({ x: 48, y: 64 });
     });
 
     it("skips the deferred autofocus when the editor is torn down before the frame fires", () => {

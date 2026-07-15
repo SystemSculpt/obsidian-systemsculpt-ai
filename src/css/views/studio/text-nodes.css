@@ -35,6 +35,13 @@
 .ss-studio-text-node-display,
 .ss-studio-text-node-editor,
 .ss-studio-text-node-live-editor {
+  --ss-text-studio-code-size: var(--code-size, 0.875em);
+  --ss-radius-studio-code: var(--code-radius);
+  --ss-text-studio-code-ring: inset 0 0 0 var(--code-border-width)
+    var(--code-border-color);
+  --ss-text-studio-table-cell-block: 1.6667px;
+  --ss-text-studio-table-cell-inline: 1.75px;
+
   display: block;
   box-sizing: border-box;
   width: 100%;
@@ -98,15 +105,131 @@
   margin-bottom: 0;
 }
 
-/* Obsidian-note editing: the live-preview editor host shares the text-node
- * box contract above; only the editable-cursor signal is its own. */
+/* Studio's compact renderer is not wrapped in Obsidian's full
+ * `.markdown-rendered` surface, so its code would otherwise fall back to the
+ * browser's generic monospace face while live preview uses the configured
+ * Obsidian monospace stack. That glyph-width difference can make inline code
+ * wrap only while editing. Keep both fenced and inline code on the same face. */
+.ss-studio-text-node-display.is-markdown code {
+  font-family: var(--font-monospace);
+}
+
+/* MarkdownRenderer expects a full note-preview wrapper to position its code
+ * controls and size code type. A Studio text node is intentionally not a note
+ * page, so establish the same code contract here. The preview gets one code
+ * row of block padding on each side; those two rows correspond exactly to the
+ * opening and closing fence rows retained by live preview. This keeps code
+ * blocks aligned for any number of source lines, not only a fixed sample. */
+.ss-studio-text-node-display.is-markdown pre {
+  --ss-studio-text-node-code-row: max(
+    calc(1.104762em + 2.9167px),
+    calc(0.985714em + 4.375px)
+  );
+
+  position: relative;
+  box-sizing: border-box;
+  margin-block: var(--ss-studio-text-node-font-size, 1em);
+  padding-block: var(--ss-studio-text-node-code-row);
+  padding-inline-start: var(--size-4-4);
+  padding-inline-end: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--code-normal);
+  background-color: var(--code-background);
+  border-radius: var(--ss-radius-studio-code);
+  box-shadow: var(--ss-text-studio-code-ring);
+  font-size: var(--ss-text-studio-code-size);
+  line-height: var(--ss-studio-text-node-code-row);
+}
+.ss-studio-text-node-display.is-markdown > pre:first-child {
+  margin-top: 0;
+}
+
+.ss-studio-text-node-display.is-markdown > pre:last-child {
+  margin-bottom: 0;
+}
+
+.ss-studio-text-node-display.is-markdown pre > code {
+  display: block;
+  overflow-wrap: inherit;
+  white-space: inherit;
+  word-break: inherit;
+  font-size: inherit;
+  line-height: inherit;
+}
+
+/* Pair Obsidian's smaller live-preview inline-code type and box model so glyphs
+ * and wrap boundaries stay stable on edit. */
+.ss-studio-text-node-display.is-markdown :not(pre) > code {
+  padding: 0.15em 0.3em;
+  color: var(--code-normal);
+  background-color: var(--code-background);
+  border: var(--code-border-width) solid var(--code-border-color);
+  border-radius: var(--ss-radius-studio-code);
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+  overflow-wrap: anywhere !important;
+  white-space: break-spaces !important;
+  word-break: break-word !important;
+  font-size: var(--ss-text-studio-code-size);
+  line-height: var(--ss-leading-base);
+}
+
+/* Pair the compact preview and native widget cell grids without importing the
+ * full note page's margins or minimum column widths. */
+.ss-studio-text-node-display.is-markdown table,
+.ss-studio-text-node-live-editor .cm-table-widget table {
+  border-spacing: 0;
+  border-collapse: collapse;
+  line-height: var(--ss-leading-base);
+}
+.ss-studio-text-node-display.is-markdown th,
+.ss-studio-text-node-display.is-markdown td {
+  min-width: 0;
+  padding: var(--ss-text-studio-table-cell-block)
+    var(--ss-text-studio-table-cell-inline);
+  border: var(--table-border-width) solid var(--table-border-color);
+  white-space: var(--table-white-space);
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  font-size: var(--ss-studio-text-node-font-size, inherit);
+  line-height: var(--ss-leading-base);
+}
+
+.ss-studio-text-node-display.is-markdown pre > .copy-code-button {
+  position: absolute;
+  top: var(--ss-space-1);
+  right: var(--ss-space-1);
+  margin: 0;
+  padding: 6px 8px;
+  width: auto;
+  height: auto;
+  background-color: transparent;
+  box-shadow: none;
+  color: var(--text-muted);
+  font-size: var(--ss-text-xs);
+  font-family: var(--font-interface);
+  opacity: 0;
+  pointer-events: none;
+}
+.is-mobile .ss-studio-text-node-display.is-markdown pre > .copy-code-button,
+.ss-studio-text-node-display.is-markdown
+  pre:is(:hover, :focus-within) > .copy-code-button {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.ss-studio-text-node-display.is-markdown pre > .copy-code-button:hover {
+  background-color: var(--background-modifier-hover);
+}
+
+/* Live preview shares the text-node box; only its cursor signal is unique. */
 .ss-studio-text-node-live-editor {
   cursor: text;
 }
 
-/* The native MarkdownEmbed component brings note-embed framing and a 100%
- * content height. Studio keeps its behavior, but the text itself remains the
- * chromeless, intrinsic-height canvas node. */
+/* Keep MarkdownEmbed behavior without its note frame or fixed content height. */
 .ss-studio-text-node-live-editor.markdown-embed {
   margin: 0;
   background: transparent;
@@ -118,24 +241,30 @@
   height: auto;
 }
 
-/* The embedded editor carries Obsidian's own markdown-source-view chrome;
- * strip the note-page framing so only the text shows on the canvas. */
+/* Strip note-page framing while retaining the native markdown editor. */
 .ss-studio-text-node-live-editor .markdown-source-view {
   padding: 0;
   background: transparent;
 }
 
+.ss-studio-text-node-live-editor .markdown-source-view,
+.ss-studio-text-node-live-editor .cm-editor,
+.ss-studio-text-node-live-editor .cm-editor .cm-scroller,
+.ss-studio-text-node-live-editor .cm-editor .cm-sizer,
+.ss-studio-text-node-live-editor .cm-editor .cm-content {
+  /* Keep every native layer on the node's font/leading contract. */
+  font-size: var(--ss-studio-text-node-font-size, inherit) !important;
+  line-height: var(--ss-leading-base) !important;
+}
+
 .ss-studio-text-node-live-editor .cm-editor {
   background: transparent;
-  font-size: inherit;
 }
 
 .ss-studio-text-node-live-editor .cm-editor .cm-scroller {
   overflow: visible;
   min-height: 0;
   padding: 0;
-  font-size: inherit;
-  line-height: var(--ss-leading-base);
 }
 
 /* Kill the readable-line-width sizer margins a full note view would get. */
@@ -148,6 +277,121 @@
 .ss-studio-text-node-live-editor .cm-editor .cm-content {
   padding: 0;
   caret-color: var(--ss-ink);
+}
+
+/* Keep line-number gutters in note editors, never canvas annotations. */
+.ss-studio-text-node-live-editor .cm-gutters {
+  display: none !important;
+}
+
+/* Match native source-row spacing to the rendered block rhythm. */
+.ss-studio-text-node-live-editor .cm-content > .HyperMD-header:first-child {
+  padding-top: 0 !important;
+}
+
+.ss-studio-text-node-live-editor
+  .cm-content
+  > .cm-line:not([class*="HyperMD-"]):has(> br:only-child) {
+  height: 1em !important;
+  min-height: 1em !important;
+  line-height: 1em !important;
+}
+
+.ss-studio-text-node-live-editor
+  .cm-content
+  > .HyperMD-header
+  + .cm-line:has(> br:only-child) {
+  height: max(1em, var(--p-spacing, 1rem)) !important;
+  min-height: max(1em, var(--p-spacing, 1rem)) !important;
+  line-height: max(1em, var(--p-spacing, 1rem)) !important;
+}
+
+/* Obsidian expands editable table widgets past their content column with a
+ * high-specificity negative margin. Canvas text nodes instead use the exact
+ * preview width; the repeated class intentionally wins that native rule. */
+.ss-studio-text-node-live-editor.ss-studio-text-node-live-editor
+  .markdown-source-view.mod-cm6
+  .cm-content .cm-table-widget {
+  box-sizing: border-box !important;
+  contain: layout style !important;
+  position: relative !important;
+  z-index: 2;
+  width: 100% !important;
+  max-width: 100% !important;
+  margin: 0 !important;
+  overflow: visible !important;
+  padding: 0 !important;
+}
+.ss-studio-text-node-live-editor .cm-table-widget,
+.ss-studio-text-node-live-editor .cm-table-widget table,
+.ss-studio-text-node-live-editor .cm-table-widget th,
+.ss-studio-text-node-live-editor .cm-table-widget td,
+.ss-studio-text-node-live-editor .cm-table-widget .table-cell-wrapper {
+  font-size: var(--ss-studio-text-node-font-size, inherit) !important;
+  line-height: var(--ss-leading-base) !important;
+}
+.ss-studio-text-node-live-editor .cm-table-widget th,
+.ss-studio-text-node-live-editor .cm-table-widget td {
+  min-width: 0 !important;
+  padding: 0 !important;
+  border: var(--table-border-width) solid var(--table-border-color) !important;
+}
+
+/* The native widget adds its own table-cell box around the rendered cell.
+ * These compensating insets keep editable tables pixel-aligned with preview
+ * tables across the full supported text-node font-size range. */
+.ss-studio-text-node-live-editor .cm-table-widget .table-cell-wrapper {
+  padding: var(--ss-text-studio-table-cell-block)
+    var(--ss-text-studio-table-cell-inline) !important;
+}
+
+.ss-studio-text-node-live-editor .cm-table-widget .table-cell-wrapper,
+.ss-studio-text-node-live-editor .cm-table-widget .cm-content.cm-lineWrapping {
+  overflow-wrap: anywhere !important;
+  word-break: break-word !important;
+}
+.ss-studio-text-node-live-editor .cm-table-widget .table-row-btn,
+.ss-studio-text-node-live-editor .cm-table-widget .table-col-btn {
+  z-index: 2;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.ss-studio-text-node-live-editor
+  .cm-table-widget:is(:hover, :focus-within, .has-focus)
+  :is(.table-row-btn, .table-col-btn) {
+  opacity: 1 !important;
+  pointer-events: auto !important;
+}
+
+/* Live preview keeps the opening/closing fences as logical CodeMirror rows.
+ * The rendered surface above turns its block padding into the same two rows;
+ * this shared piecewise metric stays aligned at small, default, and large
+ * node fonts while every additional source line advances by one equal row. */
+.ss-studio-text-node-live-editor .HyperMD-codeblock {
+  padding-inline-start: var(--size-4-4) !important;
+  padding-inline-end: 0 !important;
+  line-height: max(
+    calc(1.104762em + 2.9167px),
+    calc(0.985714em + 4.375px)
+  ) !important;
+}
+
+/* Plain list rows use the normal text rhythm. Checkbox controls establish a
+ * slightly taller rendered row, so only task lines receive the compensating
+ * inset; applying it to every list item makes mixed lists drift on each bullet. */
+.ss-studio-text-node-live-editor .HyperMD-list-line {
+  line-height: var(--ss-leading-base) !important;
+}
+
+.ss-studio-text-node-live-editor
+  .HyperMD-list-line:not(.HyperMD-task-line) {
+  padding-block: 0 !important;
+}
+
+.ss-studio-text-node-live-editor .HyperMD-task-line {
+  padding-top: max(0px, calc(4.2555px - 0.26825em)) !important;
+  padding-bottom: max(0px, calc(4.2555px - 0.26825em)) !important;
 }
 
 .ss-studio-text-node-live-editor .cm-editor.cm-focused {

@@ -18,13 +18,20 @@ class FakeNativeMarkdownEditMode {
     contentDOM: HTMLElement;
     scrollDOM: HTMLElement;
     focus: jest.Mock;
+    posAtCoords: jest.Mock;
     hasFocus: boolean;
+    cm?: { state?: { vim?: unknown } };
   };
-  editor: { cm: FakeNativeMarkdownEditMode["cm"] };
+  activeCM: FakeNativeMarkdownEditMode["cm"];
+  editor: {
+    cm: FakeNativeMarkdownEditMode["cm"];
+    activeCM: FakeNativeMarkdownEditMode["cm"];
+  };
 
   constructor(containerEl: HTMLElement) {
     this.editorEl = containerEl.createDiv({ cls: "markdown-source-view" });
     const contentDOM = this.editorEl.createDiv({ cls: "cm-content" });
+    contentDOM.tabIndex = -1;
     const scrollDOM = this.editorEl.createDiv({ cls: "cm-scroller" });
     const selection = { main: { anchor: 0, head: 0 } };
     const doc = {
@@ -36,6 +43,9 @@ class FakeNativeMarkdownEditMode {
     const focus = jest.fn(() => {
       this.cm.hasFocus = true;
     });
+    const posAtCoords = jest.fn((point: { x: number; y: number }) =>
+      Math.max(0, Math.min(this.currentValue.length, Math.round(point.x)))
+    );
     const dispatch = jest.fn((spec: { selection?: { anchor: number; head: number } }) => {
       if (spec.selection) {
         selection.main = { ...spec.selection };
@@ -47,9 +57,17 @@ class FakeNativeMarkdownEditMode {
       contentDOM,
       scrollDOM,
       focus,
+      posAtCoords,
       hasFocus: false,
     };
-    this.editor = { cm: this.cm };
+    this.activeCM = this.cm;
+    const thisMode = this;
+    this.editor = {
+      cm: this.cm,
+      get activeCM() {
+        return thisMode.activeCM;
+      },
+    };
   }
 
   set(value: string): void {
@@ -57,7 +75,7 @@ class FakeNativeMarkdownEditMode {
   }
 
   focus(): void {
-    this.cm.focus();
+    this.activeCM.focus();
   }
 }
 
@@ -105,7 +123,10 @@ class FakeNativeMarkdownEmbedBase {
     }
   }
 
-  showPreview(): void {
+  showPreview(saveCurrent = false): void {
+    if (saveCurrent && this.editMode) {
+      this.save(this.editMode.currentValue, true);
+    }
     (this as unknown as { applyScope: (scope: unknown) => void }).applyScope(null);
     this.editMode = null;
     this.editorEl.empty();
@@ -274,6 +295,193 @@ describe("createEmbeddableMarkdownEditor", () => {
     expect(app.workspace.activeEditor).toBeNull();
   });
 
+  it("enters insert mode when the embedded editor receives focus in Vim normal mode", () => {
+    const { app } = createFakeApp();
+    const handle = createEmbeddableMarkdownEditor(app, document.body.createDiv(), {
+      value: "# Editable",
+    });
+    const surface = handle!.editor as FakeNativeMarkdownEmbedBase;
+    const contentDOM = surface.editMode!.cm.contentDOM;
+    const insertedKeys: string[] = [];
+    contentDOM.classList.add("cm-vimMode", "cm-fat-cursor");
+    contentDOM.addEventListener("keydown", (event) => {
+      insertedKeys.push(event.key);
+      if (event.key === "i") {
+        contentDOM.classList.remove("cm-vimMode", "cm-fat-cursor");
+      }
+    });
+
+    contentDOM.focus();
+    contentDOM.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+    contentDOM.focus();
+    contentDOM.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+
+    expect(insertedKeys).toEqual(["i"]);
+    expect(contentDOM.classList.contains("cm-vimMode")).toBe(false);
+    expect(handle!.value).toBe("# Editable");
+  });
+
+  it("does not synthesize an insert key when Vim normal mode is absent", () => {
+    const { app } = createFakeApp();
+    const handle = createEmbeddableMarkdownEditor(app, document.body.createDiv(), {
+      value: "plain",
+    });
+    const surface = handle!.editor as FakeNativeMarkdownEmbedBase;
+    const contentDOM = surface.editMode!.cm.contentDOM;
+    const keydown = jest.fn();
+    contentDOM.addEventListener("keydown", keydown);
+
+    contentDOM.focus();
+    contentDOM.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+
+    expect(keydown).not.toHaveBeenCalled();
+    expect(handle!.value).toBe("plain");
+  });
+
+  it("ignores a stale Vim marker after a native table-cell adapter is destroyed", () => {
+    const { app } = createFakeApp();
+    const handle = createEmbeddableMarkdownEditor(app, document.body.createDiv(), {
+      value: "| A | B |",
+    });
+    const surface = handle!.editor as FakeNativeMarkdownEmbedBase;
+    const contentDOM = surface.editMode!.cm.contentDOM;
+    const keydown = jest.fn();
+    contentDOM.classList.add("cm-vimMode", "cm-fat-cursor");
+    surface.editMode!.cm.cm = { state: { vim: null } };
+    contentDOM.addEventListener("keydown", keydown);
+
+    contentDOM.focus();
+    contentDOM.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+
+    expect(keydown).not.toHaveBeenCalled();
+    expect(handle!.value).toBe("| A | B |");
+  });
+
+  it("rechecks Vim mode after the native editor finishes mounting", () => {
+    const { app } = createFakeApp();
+    let pendingFrame: FrameRequestCallback | null = null;
+    jest
+      .spyOn(window, "requestAnimationFrame")
+      .mockImplementation((callback: FrameRequestCallback) => {
+        pendingFrame = callback;
+        return 1;
+      });
+    const handle = createEmbeddableMarkdownEditor(app, document.body.createDiv(), {
+      value: "late Vim",
+    });
+    const surface = handle!.editor as FakeNativeMarkdownEmbedBase;
+    const contentDOM = surface.editMode!.cm.contentDOM;
+    const insertedKeys: string[] = [];
+    contentDOM.addEventListener("keydown", (event) => {
+      insertedKeys.push(event.key);
+      contentDOM.classList.remove("cm-vimMode", "cm-fat-cursor");
+    });
+
+    contentDOM.focus();
+    contentDOM.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+    contentDOM.classList.add("cm-vimMode", "cm-fat-cursor");
+    expect(pendingFrame).not.toBeNull();
+    (pendingFrame as unknown as FrameRequestCallback)(0);
+
+    expect(insertedKeys).toEqual(["i"]);
+    expect(contentDOM.classList.contains("cm-vimMode")).toBe(false);
+    expect(handle!.value).toBe("late Vim");
+  });
+
+  it("sends Vim insert to the focused table-cell editor, not the parent editor", () => {
+    const { app } = createFakeApp();
+    const handle = createEmbeddableMarkdownEditor(app, document.body.createDiv(), {
+      value: "| A | B |",
+    });
+    const surface = handle!.editor as FakeNativeMarkdownEmbedBase;
+    const contentDOM = surface.editMode!.cm.contentDOM;
+    const tableCellEditor = contentDOM.createDiv({ cls: "cm-editor" });
+    const tableCellContent = tableCellEditor.createDiv({
+      cls: "cm-content cm-vimMode cm-fat-cursor",
+    });
+    tableCellContent.tabIndex = -1;
+    const parentKeydown = jest.fn();
+    const cellKeys: string[] = [];
+    contentDOM.addEventListener("keydown", parentKeydown);
+    tableCellContent.addEventListener("keydown", (event) => {
+      cellKeys.push(event.key);
+      event.stopPropagation();
+      tableCellContent.classList.remove("cm-vimMode", "cm-fat-cursor");
+    });
+    surface.editMode!.activeCM = {
+      ...surface.editMode!.cm,
+      contentDOM: tableCellContent,
+    };
+
+    tableCellContent.focus();
+    tableCellContent.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+
+    expect(document.activeElement).toBe(tableCellContent);
+    expect(cellKeys).toEqual(["i"]);
+    expect(parentKeydown).not.toHaveBeenCalled();
+    expect(handle!.value).toBe("| A | B |");
+  });
+
+  it("captures Escape before Vim and closes the Studio edit session", () => {
+    const { app } = createFakeApp();
+    const onChange = jest.fn();
+    const onEscape = jest.fn();
+    const handle = createEmbeddableMarkdownEditor(app, document.body.createDiv(), {
+      value: "escape me",
+      onChange,
+      onEscape,
+    });
+    const surface = handle!.editor as FakeNativeMarkdownEmbedBase;
+    surface.editMode!.set("escape me plus final keystroke");
+    const contentDOM = surface.editMode!.cm.contentDOM;
+    contentDOM.classList.add("cm-vimMode", "cm-fat-cursor");
+    const vimHandler = jest.fn();
+    contentDOM.addEventListener("keydown", vimHandler);
+    const event = new KeyboardEvent("keydown", {
+      key: "Escape",
+      bubbles: true,
+      cancelable: true,
+    });
+
+    contentDOM.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(vimHandler).not.toHaveBeenCalled();
+    expect(surface.editMode).toBeNull();
+    expect(surface.text).toBe("escape me plus final keystroke");
+    expect(onChange).toHaveBeenLastCalledWith("escape me plus final keystroke");
+    expect(onEscape).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["composition", { isComposing: true }],
+    ["IME keyCode", { keyCode: 229 }],
+  ])("leaves %s Escape to the native editor", (_label, marker) => {
+    const { app } = createFakeApp();
+    const onEscape = jest.fn();
+    const handle = createEmbeddableMarkdownEditor(app, document.body.createDiv(), {
+      value: "composing",
+      onEscape,
+    });
+    const surface = handle!.editor as FakeNativeMarkdownEmbedBase;
+    const contentDOM = surface.editMode!.cm.contentDOM;
+    const event = new KeyboardEvent("keydown", {
+      key: "Escape",
+      bubbles: true,
+      cancelable: true,
+      isComposing: marker.isComposing ?? false,
+    });
+    if (marker.keyCode) {
+      Object.defineProperty(event, "keyCode", { value: marker.keyCode });
+    }
+
+    contentDOM.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(surface.editMode).not.toBeNull();
+    expect(onEscape).not.toHaveBeenCalled();
+  });
+
   it("never monkey-patches workspace.setActiveLeaf", () => {
     const { app } = createFakeApp();
     const original = app.workspace.setActiveLeaf;
@@ -362,16 +570,165 @@ describe("createEmbeddableMarkdownEditor", () => {
     expect(onPaste).not.toHaveBeenCalled();
   });
 
-  it("enters edit mode at the native Canvas pointer position", () => {
+  it("resolves a pointer position against CodeMirror after its first layout", () => {
     const { app } = createFakeApp();
+    let pendingFrame: FrameRequestCallback | null = null;
+    jest
+      .spyOn(window, "requestAnimationFrame")
+      .mockImplementation((callback: FrameRequestCallback) => {
+        pendingFrame = callback;
+        return 1;
+      });
     const handle = createEmbeddableMarkdownEditor(app, document.body.createDiv(), {
       value: "abcdef",
       focusAt: { x: 4, y: 20 },
     });
     const surface = handle!.editor as FakeNativeMarkdownEmbedBase;
 
-    expect(surface.lastShowEditorPoint).toEqual({ x: 4, y: 20 });
+    expect(surface.lastShowEditorPoint).toBeUndefined();
+    expect(surface.editMode!.cm.posAtCoords).not.toHaveBeenCalled();
+    expect(pendingFrame).not.toBeNull();
+    (pendingFrame as unknown as FrameRequestCallback)(0);
+
+    expect(surface.editMode!.cm.posAtCoords).toHaveBeenCalledWith(
+      { x: 4, y: 20 },
+      false
+    );
     expect(surface.editMode!.cm.state.selection.main).toEqual({ anchor: 4, head: 4 });
+    expect(surface.editMode!.cm.focus).toHaveBeenCalled();
+  });
+
+  it("retries pointer placement once when CodeMirror has not laid out yet", () => {
+    const { app } = createFakeApp();
+    const pendingFrames: FrameRequestCallback[] = [];
+    jest
+      .spyOn(window, "requestAnimationFrame")
+      .mockImplementation((callback: FrameRequestCallback) => {
+        pendingFrames.push(callback);
+        return pendingFrames.length;
+      });
+    const handle = createEmbeddableMarkdownEditor(app, document.body.createDiv(), {
+      value: "abcdef",
+      focusAt: { x: 3, y: 20 },
+    });
+    const surface = handle!.editor as FakeNativeMarkdownEmbedBase;
+    surface.editMode!.cm.posAtCoords
+      .mockReturnValueOnce(null)
+      .mockReturnValueOnce(3);
+
+    pendingFrames.shift()!(0);
+    expect(surface.editMode!.cm.state.selection.main).toEqual({ anchor: 0, head: 0 });
+    expect(pendingFrames).toHaveLength(1);
+
+    pendingFrames.shift()!(16);
+    expect(surface.editMode!.cm.posAtCoords).toHaveBeenCalledTimes(2);
+    expect(surface.editMode!.cm.state.selection.main).toEqual({ anchor: 3, head: 3 });
+  });
+
+  it("uses an exact semantic source offset without guessing from screen coordinates", () => {
+    const { app } = createFakeApp();
+    let pendingFrame: FrameRequestCallback | null = null;
+    jest
+      .spyOn(window, "requestAnimationFrame")
+      .mockImplementation((callback: FrameRequestCallback) => {
+        pendingFrame = callback;
+        return 1;
+      });
+    const handle = createEmbeddableMarkdownEditor(app, document.body.createDiv(), {
+      value: "abcdef",
+      focusAt: { x: 400, y: 500, sourceOffset: 2 },
+    });
+    const surface = handle!.editor as FakeNativeMarkdownEmbedBase;
+
+    (pendingFrame as unknown as FrameRequestCallback)(0);
+
+    expect(surface.editMode!.cm.posAtCoords).not.toHaveBeenCalled();
+    expect(surface.editMode!.cm.state.selection.main).toEqual({ anchor: 2, head: 2 });
+  });
+
+  it("preserves and focuses a native table-cell editor created by caret placement", () => {
+    const { app } = createFakeApp();
+    let pendingFrame: FrameRequestCallback | null = null;
+    jest
+      .spyOn(window, "requestAnimationFrame")
+      .mockImplementation((callback: FrameRequestCallback) => {
+        pendingFrame = callback;
+        return 1;
+      });
+    const handle = createEmbeddableMarkdownEditor(app, document.body.createDiv(), {
+      value: "| Alpha | Ready |",
+      focusAt: { x: 400, y: 500, sourceOffset: 4 },
+    });
+    const surface = handle!.editor as FakeNativeMarkdownEmbedBase;
+    const editMode = surface.editMode!;
+    const mainCM = editMode.cm;
+    const tableCellContent = editMode.editorEl.createDiv({ cls: "cm-content" });
+    tableCellContent.tabIndex = -1;
+    const tableCellCM = {
+      ...mainCM,
+      contentDOM: tableCellContent,
+      hasFocus: false,
+      focus: jest.fn(),
+    };
+    tableCellCM.focus.mockImplementation(() => {
+      tableCellCM.hasFocus = true;
+      tableCellContent.focus();
+    });
+    mainCM.focus.mockImplementation(() => {
+      mainCM.hasFocus = true;
+      if (editMode.activeCM !== mainCM) {
+        editMode.activeCM = mainCM;
+      }
+    });
+    mainCM.dispatch.mockImplementation(
+      (spec: { selection?: { anchor: number; head: number } }) => {
+        if (!spec.selection) {
+          return;
+        }
+        mainCM.state.selection.main = { ...spec.selection };
+        editMode.activeCM = tableCellCM;
+      }
+    );
+
+    (pendingFrame as unknown as FrameRequestCallback)(0);
+
+    expect(editMode.activeCM).toBe(tableCellCM);
+    expect(tableCellCM.focus).toHaveBeenCalledTimes(1);
+    expect(mainCM.focus).toHaveBeenCalledTimes(1);
+    expect(mainCM.focus.mock.invocationCallOrder[0]).toBeLessThan(
+      mainCM.dispatch.mock.invocationCallOrder[0]
+    );
+    expect(mainCM.dispatch.mock.invocationCallOrder[0]).toBeLessThan(
+      tableCellCM.focus.mock.invocationCallOrder[0]
+    );
+    expect(document.activeElement).toBe(tableCellContent);
+    expect(handle!.captureSnapshot().focused).toBe(true);
+  });
+
+  it("retries an exact semantic offset until CodeMirror is mounted", () => {
+    const { app } = createFakeApp();
+    const pendingFrames: FrameRequestCallback[] = [];
+    jest
+      .spyOn(window, "requestAnimationFrame")
+      .mockImplementation((callback: FrameRequestCallback) => {
+        pendingFrames.push(callback);
+        return pendingFrames.length;
+      });
+    const handle = createEmbeddableMarkdownEditor(app, document.body.createDiv(), {
+      value: "abcdef",
+      focusAt: { x: 400, y: 500, sourceOffset: 3 },
+    });
+    const surface = handle!.editor as FakeNativeMarkdownEmbedBase;
+    const mountedEditMode = surface.editMode;
+    surface.editMode = null;
+
+    pendingFrames.shift()!(0);
+    expect(pendingFrames).toHaveLength(1);
+
+    surface.editMode = mountedEditMode;
+    pendingFrames.shift()!(16);
+
+    expect(surface.editMode!.cm.state.selection.main).toEqual({ anchor: 3, head: 3 });
   });
 
   it("focus(), set(), and selectAll() delegate to the native editor", () => {

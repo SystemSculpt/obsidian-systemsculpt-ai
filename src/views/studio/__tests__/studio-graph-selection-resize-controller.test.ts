@@ -320,6 +320,36 @@ describe("StudioGraphSelectionResizeController", () => {
       );
     });
 
+    it("previews text scaling on the live Markdown editor during group resize", () => {
+      const harness = createHarness({
+        nodes: [
+          {
+            node: createNode("text", "studio.text", { x: 100, y: 100 }, { fontSize: 16 }),
+            size: { width: 300, height: 200 },
+          },
+          {
+            node: createNode("generic", "studio.http_request", { x: 500, y: 100 }),
+            size: { width: 300, height: 200 },
+          },
+        ],
+        selection: ["text", "generic"],
+      });
+      const liveEditor = harness.elements
+        .get("text")!
+        .createDiv({ cls: "ss-studio-text-node-live-editor" });
+      harness.controller.refreshSelectionFrame();
+
+      // Group height 200 -> 300, so the text font previews at 16 * 1.5.
+      dragZone(harness.canvas, "s", { to: { x: 0, y: 100 }, release: false });
+
+      expect(liveEditor.style.getPropertyValue("--ss-studio-text-node-font-size")).toBe(
+        "24px"
+      );
+      window.dispatchEvent(
+        createPointerEvent("pointerup", { pointerId: 7, clientX: 0, clientY: 100 })
+      );
+    });
+
     it("captures history on the first mutating frame only and commits discrete on release", () => {
       const harness = createTwoNodeHarness();
       harness.controller.refreshSelectionFrame();

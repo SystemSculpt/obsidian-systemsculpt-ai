@@ -41,6 +41,7 @@ import type {
   StudioTextNodeMarkdownEditorFactory,
   StudioTextNodeMarkdownEditorSnapshot,
 } from "./graph-v3/StudioGraphTextNodeCard";
+import type { StudioTextNodeFocusTarget } from "./graph-v3/StudioGraphTextNodeFocus";
 import {
   createGroupFromSelection as createNodeGroupFromSelection,
   removeNodesFromGroups,
@@ -189,7 +190,7 @@ export class SystemSculptStudioView extends ItemView {
   /** Text changes stay continuous while typing, then become one undo step on edit end. */
   private dirtyTextNodeEditIds = new Set<string>();
   private pendingTextNodeAutofocusNodeId: string | null = null;
-  private pendingTextNodeFocusPointByNodeId = new Map<string, { x: number; y: number }>();
+  private pendingTextNodeFocusPointByNodeId = new Map<string, StudioTextNodeFocusTarget>();
   /**
    * Live embedded markdown editors keyed by text-node id. Each graph render
    * rebuilds card DOM wholesale, so every mounted editor registers a teardown
@@ -2638,7 +2639,7 @@ export class SystemSculptStudioView extends ItemView {
 
   private requestTextNodeEdit(
     nodeId: string,
-    options?: { autoFocus?: boolean; focusAt?: { x: number; y: number } }
+    options?: { autoFocus?: boolean; focusAt?: StudioTextNodeFocusTarget }
   ): void {
     const normalizedNodeId = String(nodeId || "").trim();
     if (!normalizedNodeId) {
@@ -2837,7 +2838,7 @@ export class SystemSculptStudioView extends ItemView {
 
   private consumeTextNodeFocusPoint(
     nodeId: string
-  ): { x: number; y: number } | undefined {
+  ): StudioTextNodeFocusTarget | undefined {
     const normalizedNodeId = String(nodeId || "").trim();
     if (!normalizedNodeId) {
       return undefined;

@@ -23,6 +23,7 @@ import type {
   StudioTextNodeMarkdownEditorFactory,
   StudioTextNodeMarkdownEditorSnapshot,
 } from "./StudioGraphTextNodeCard";
+import type { StudioTextNodeFocusTarget } from "./StudioGraphTextNodeFocus";
 import { createStudioAction } from "../StudioAction";
 import { createStudioSvgElement } from "../StudioDomContext";
 
@@ -114,11 +115,11 @@ export type StudioGraphWorkspaceRendererOptions = {
   ) => Promise<StudioNodeConfigSelectOption[]>;
   isTextNodeEditing: (nodeId: string) => boolean;
   consumeTextNodeAutoFocus: (nodeId: string) => boolean;
-  consumeTextNodeFocusPoint: (nodeId: string) => { x: number; y: number } | undefined;
+  consumeTextNodeFocusPoint: (nodeId: string) => StudioTextNodeFocusTarget | undefined;
   consumeTextNodeEditorSnapshot: (
     nodeId: string
   ) => StudioTextNodeMarkdownEditorSnapshot | undefined;
-  onRequestTextNodeEdit: (nodeId: string, focusAt?: { x: number; y: number }) => void;
+  onRequestTextNodeEdit: (nodeId: string, focusAt?: StudioTextNodeFocusTarget) => void;
   onStopTextNodeEdit: (nodeId: string) => void;
   createTextNodeMarkdownEditor?: StudioTextNodeMarkdownEditorFactory;
   registerTextNodeEditorTeardown?: (
