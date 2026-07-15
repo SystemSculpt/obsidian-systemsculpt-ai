@@ -14,6 +14,10 @@ import {
 import { mountStudioGraphNodeResizeFrame } from "./StudioGraphNodeResizeFrame";
 import { STUDIO_GRAPH_EDITOR_SURFACE_ATTR } from "../StudioGraphDomTargeting";
 import { markStudioNodeCardInteractive } from "./StudioGraphNodeCardPointer";
+import {
+  resolveStudioTextNodeFocusTarget,
+  type StudioTextNodeFocusTarget,
+} from "./StudioGraphTextNodeFocus";
 
 const STUDIO_TEXT_NODE_DOUBLE_TAP_DELAY_MS = 450;
 const STUDIO_TEXT_NODE_DOUBLE_TAP_SLOP_PX = 8;
@@ -44,7 +48,7 @@ export type StudioTextNodeMarkdownEditorHandle = {
   /** Flushes the current native document through onChange before returning it. */
   commit(): string;
   focus(): void;
-  focusAt(point: { x: number; y: number }): void;
+  focusAt(point: StudioTextNodeFocusTarget): void;
   selectAll(): void;
   captureSnapshot(): StudioTextNodeMarkdownEditorSnapshot;
   restoreSnapshot(snapshot: StudioTextNodeMarkdownEditorSnapshot): void;
@@ -63,7 +67,7 @@ export type StudioTextNodeMarkdownEditorFactory = (
   options: {
     value: string;
     placeholder: string;
-    focusAt?: { x: number; y: number };
+    focusAt?: StudioTextNodeFocusTarget;
     nodeId?: string;
     onChange?: (value: string) => void;
     onEscape?: () => void;
@@ -91,8 +95,8 @@ type RenderTextNodeCardOptions = {
   onNodeGeometryMutated: (node: StudioNodeInstance) => void;
   isEditing: boolean;
   shouldAutoFocus: boolean;
-  initialFocusPoint?: { x: number; y: number };
-  onRequestTextNodeEdit: (nodeId: string, focusAt?: { x: number; y: number }) => void;
+  initialFocusPoint?: StudioTextNodeFocusTarget;
+  onRequestTextNodeEdit: (nodeId: string, focusAt?: StudioTextNodeFocusTarget) => void;
   onStopTextNodeEdit: (nodeId: string) => void;
   renderMarkdownPreview?: (
     node: StudioNodeInstance,
@@ -187,6 +191,77 @@ function trackPotentialTextNodeTap(
   ownerWindow.addEventListener("pointercancel", stopTracking);
 }
 
+function requestTextNodeEditAfterPointerRelease(options: {
+  host: Node;
+  nodeId: string;
+  pointerEvent: PointerEvent;
+  focusTarget: StudioTextNodeFocusTarget;
+  graphInteraction: StudioGraphInteractionEngine;
+  onRequestTextNodeEdit: RenderTextNodeCardOptions["onRequestTextNodeEdit"];
+}): void {
+  const {
+    host,
+    nodeId,
+    pointerEvent,
+    focusTarget,
+    graphInteraction,
+    onRequestTextNodeEdit,
+  } = options;
+  const ownerWindow = getStudioOwnerWindow(host);
+  const pointerId = pointerEvent.pointerId;
+  const startClientX = pointerEvent.clientX;
+  const startClientY = pointerEvent.clientY;
+  let settled = false;
+
+  const cleanup = (): void => {
+    ownerWindow.removeEventListener("pointermove", cancelIfDragged, true);
+    ownerWindow.removeEventListener("pointerup", finish, true);
+    ownerWindow.removeEventListener("pointercancel", finish, true);
+    ownerWindow.removeEventListener("blur", cancel);
+  };
+  const cancel = (): void => {
+    if (settled) {
+      return;
+    }
+    settled = true;
+    cleanup();
+  };
+  const finish = (releaseEvent: PointerEvent): void => {
+    if (settled || releaseEvent.pointerId !== pointerId) {
+      return;
+    }
+    settled = true;
+    cleanup();
+    if (releaseEvent.type === "pointercancel") {
+      return;
+    }
+    releaseEvent.preventDefault();
+    graphInteraction.ensureSingleSelection(nodeId);
+    onRequestTextNodeEdit(nodeId, focusTarget);
+  };
+  const cancelIfDragged = (moveEvent: PointerEvent): void => {
+    if (settled || moveEvent.pointerId !== pointerId) {
+      return;
+    }
+    const travel = Math.hypot(
+      moveEvent.clientX - startClientX,
+      moveEvent.clientY - startClientY
+    );
+    if (travel > STUDIO_TEXT_NODE_TAP_DRAG_SLOP_PX) {
+      cancel();
+    }
+  };
+
+  // Do not replace the rendered preview until the pointer sequence that chose
+  // the source offset has completed. Mounting CodeMirror on pointerdown lets
+  // the matching pointerup land on a differently laid-out table widget, where
+  // Obsidian can move the native child editor away from the captured offset.
+  ownerWindow.addEventListener("pointermove", cancelIfDragged, { capture: true });
+  ownerWindow.addEventListener("pointerup", finish, { capture: true });
+  ownerWindow.addEventListener("pointercancel", finish, { capture: true });
+  ownerWindow.addEventListener("blur", cancel);
+}
+
 type MountLiveMarkdownEditorOptions = {
   contentEl: HTMLElement;
   node: StudioNodeInstance;
@@ -201,7 +276,7 @@ type MountLiveMarkdownEditorOptions = {
   onNodeConfigValueChange?: RenderTextNodeCardOptions["onNodeConfigValueChange"];
   onStopTextNodeEdit: (nodeId: string) => void;
   shouldAutoFocus: boolean;
-  initialFocusPoint?: { x: number; y: number };
+  initialFocusPoint?: StudioTextNodeFocusTarget;
   adoptTextSurface: (el: HTMLElement) => void;
 };
 
@@ -267,7 +342,6 @@ function mountLiveMarkdownEditor(options: MountLiveMarkdownEditorOptions): boole
   editorHandle = createMarkdownEditor(hostEl, {
     value: textValue,
     placeholder: "Text",
-    focusAt: initialFocusPoint,
     nodeId: node.id,
     onChange: (nextValue) => {
       commitValue(nextValue);
@@ -299,6 +373,17 @@ function mountLiveMarkdownEditor(options: MountLiveMarkdownEditorOptions): boole
     }
   });
 
+  if (initialFocusPoint) {
+    requestStudioAnimationFrame(contentEl, () => {
+      // Resolve the preview click only after Studio's font-size and the native
+      // live-preview layout are applied. This also gives an explicit click
+      // precedence over a stale remount snapshot.
+      if (!editorDisposed) {
+        editorHandle.focusAt(initialFocusPoint);
+      }
+    });
+  }
+
   if (shouldAutoFocus && !initialFocusPoint && !initialEditorSnapshot) {
     requestStudioAnimationFrame(contentEl, () => {
       // A re-render can tear the editor down before this frame fires.
@@ -306,7 +391,7 @@ function mountLiveMarkdownEditor(options: MountLiveMarkdownEditorOptions): boole
         return;
       }
       // Native note editing focuses the caret; it does not select the whole
-      // document on entry. Pointer-driven entry is handled by focusAt above.
+      // document on entry. Pointer-driven entry is resolved after layout above.
       editorHandle.focus();
     });
   }
@@ -427,7 +512,11 @@ export function renderTextNodeCard(options: RenderTextNodeCardOptions): void {
       onNodeConfigMutated(node);
     });
     textAreaEl.addEventListener("keydown", (event) => {
-      if (event.key !== "Escape") {
+      if (
+        event.key !== "Escape"
+        || event.isComposing
+        || event.keyCode === 229
+      ) {
         return;
       }
       event.preventDefault();
@@ -481,10 +570,17 @@ export function renderTextNodeCard(options: RenderTextNodeCardOptions): void {
       if (isRepeatTextNodeTap(node.id, pointerEvent, now)) {
         event.preventDefault();
         lastTextNodeTapByNodeId.delete(node.id);
-        graphInteraction.ensureSingleSelection(node.id);
-        onRequestTextNodeEdit(node.id, {
-          x: pointerEvent.clientX,
-          y: pointerEvent.clientY,
+        requestTextNodeEditAfterPointerRelease({
+          host: displayEl,
+          nodeId: node.id,
+          pointerEvent,
+          focusTarget: resolveStudioTextNodeFocusTarget(
+            textValue,
+            displayEl,
+            pointerEvent
+          ),
+          graphInteraction,
+          onRequestTextNodeEdit,
         });
         return;
       }
@@ -496,10 +592,10 @@ export function renderTextNodeCard(options: RenderTextNodeCardOptions): void {
       event.stopPropagation();
       lastTextNodeTapByNodeId.delete(node.id);
       graphInteraction.ensureSingleSelection(node.id);
-      onRequestTextNodeEdit(node.id, {
-        x: (event as MouseEvent).clientX,
-        y: (event as MouseEvent).clientY,
-      });
+      onRequestTextNodeEdit(
+        node.id,
+        resolveStudioTextNodeFocusTarget(textValue, displayEl, event as MouseEvent)
+      );
     });
   }
 

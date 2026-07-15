@@ -17,6 +17,8 @@ import { createSurfaceElement, resolveSurfaceDomContext } from "../core/ui/surfa
 export type EmbeddableMarkdownEditorPoint = {
   x: number;
   y: number;
+  /** Exact source offset captured from a rendered Markdown semantic target. */
+  sourceOffset?: number;
 };
 
 export type EmbeddableMarkdownEditorSelection = {
@@ -72,11 +74,15 @@ type InternalCodeMirror = {
   focus?: () => void;
   posAtCoords?: (point: EmbeddableMarkdownEditorPoint, precise?: boolean) => number | null;
   hasFocus?: boolean;
+  /** Obsidian's same-singleton Vim adapter attached to its internal EditorView. */
+  cm?: { state?: { vim?: unknown } };
 };
 
 type InternalMarkdownEditMode = {
   cm?: InternalCodeMirror;
-  editor?: { cm?: InternalCodeMirror };
+  /** Obsidian routes table-cell editing through a temporary child EditorView. */
+  activeCM?: InternalCodeMirror;
+  editor?: { cm?: InternalCodeMirror; activeCM?: InternalCodeMirror };
   editorEl?: HTMLElement;
   focus?: () => void;
   set?: (value: string, clear?: boolean) => void;
@@ -193,6 +199,16 @@ function getCodeMirror(instance: InternalMarkdownEmbedInstance): InternalCodeMir
   return instance.editMode?.cm ?? instance.editMode?.editor?.cm ?? null;
 }
 
+function getActiveCodeMirror(
+  instance: InternalMarkdownEmbedInstance
+): InternalCodeMirror | null {
+  return (
+    instance.editMode?.activeCM
+    ?? instance.editMode?.editor?.activeCM
+    ?? getCodeMirror(instance)
+  );
+}
+
 function getEmbeddableMarkdownClass(
   Base: InternalMarkdownEmbedConstructor
 ): InternalMarkdownEmbedConstructor {
@@ -210,6 +226,8 @@ function getEmbeddableMarkdownClass(
     private embeddableClosingThroughPreview = false;
     private embeddableLastReportedValue = "";
     private embeddableLifecycleAbort: AbortController | null = null;
+    private embeddableVimInsertFrame: number | null = null;
+    private embeddableVimInsertWindow: Window | null = null;
 
     constructor(
       app: App,
@@ -236,7 +254,10 @@ function getEmbeddableMarkdownClass(
       this.bindSurfaceLifecycle(app);
       self.set?.(options.value ?? "", true);
       self.load?.();
-      self.showEditor?.(options.focusAt);
+      // Open the native editor without asking Obsidian to resolve a preview
+      // coordinate against a surface that has not finished mounting yet.
+      // Pointer placement is resolved below against CodeMirror's final layout.
+      self.showEditor?.();
     }
 
     private createScope(app: App): void {
@@ -272,6 +293,7 @@ function getEmbeddableMarkdownClass(
           if (workspace) {
             workspace.activeEditor = self;
           }
+          this.requestVimInsertMode();
         },
         { signal }
       );
@@ -298,6 +320,29 @@ function getEmbeddableMarkdownClass(
         { signal }
       );
       focusRootEl.addEventListener(
+        "keydown",
+        (event) => {
+          if (
+            this.embeddableDestroyed
+            || event.key !== "Escape"
+            || event.isComposing
+            || event.keyCode === 229
+          ) {
+            return;
+          }
+          // Studio text nodes use Escape to finish their bounded edit session.
+          // Capture before CodeMirror's Vim extension can reinterpret it as a
+          // transition to normal mode and leave the node looking stuck.
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          // `true` tells Obsidian's native embed to persist the current CM
+          // document before editMode is destroyed. Without it, a fast Escape
+          // can discard the final keystroke before Studio's commit callback.
+          self.showPreview?.(true);
+        },
+        { capture: true, signal }
+      );
+      focusRootEl.addEventListener(
         "paste",
         (event) => {
           if (this.embeddableDestroyed) {
@@ -306,6 +351,81 @@ function getEmbeddableMarkdownClass(
           this.embeddableOptions.onPaste?.(event as ClipboardEvent);
         },
         { signal }
+      );
+    }
+
+    private requestVimInsertMode(): void {
+      this.enterVimInsertModeIfNecessary();
+      if (this.embeddableVimInsertFrame !== null) {
+        return;
+      }
+      const self = this as unknown as InternalMarkdownEmbedInstance;
+      const focusRootEl = self.containerEl ?? self.editorEl;
+      const ownerWindow = focusRootEl?.ownerDocument.defaultView;
+      if (!ownerWindow) {
+        return;
+      }
+      // The native embed can focus CodeMirror while showEditor is still
+      // installing Vim. Recheck on the next paint so a late `.cm-vimMode`
+      // marker cannot leave a freshly opened Studio node in normal mode.
+      this.embeddableVimInsertWindow = ownerWindow;
+      this.embeddableVimInsertFrame = ownerWindow.requestAnimationFrame(() => {
+        this.embeddableVimInsertFrame = null;
+        this.embeddableVimInsertWindow = null;
+        if (!this.embeddableDestroyed) {
+          this.enterVimInsertModeIfNecessary();
+        }
+      });
+    }
+
+    private enterVimInsertModeIfNecessary(): void {
+      const self = this as unknown as InternalMarkdownEmbedInstance;
+      const activeEditor = getActiveCodeMirror(self);
+      const activeEditorDOM = activeEditor?.contentDOM;
+      const focusRootEl = self.containerEl ?? self.editorEl;
+      const activeElement = activeEditorDOM?.ownerDocument.activeElement;
+      const HTMLElementCtor = activeEditorDOM?.ownerDocument.defaultView?.HTMLElement;
+      const activeHTMLElement =
+        HTMLElementCtor && activeElement instanceof HTMLElementCtor
+          ? (activeElement as HTMLElement)
+          : null;
+      const activeContentDOM =
+        activeHTMLElement?.matches(".cm-content")
+          ? activeHTMLElement
+          : activeHTMLElement
+            ? activeHTMLElement.closest<HTMLElement>(".cm-content")
+            : null;
+      // `.cm-vimMode` is present only while Obsidian's Vim extension is in
+      // normal mode. The marker is a safer guard than the global preference:
+      // without it, dispatching "i" would insert a literal character. Resolve
+      // the focused CodeMirror content so native table-cell editors receive
+      // their own Vim command instead of borrowing the parent editor's state.
+      if (
+        !activeEditorDOM ||
+        activeContentDOM !== activeEditorDOM ||
+        !focusRootEl?.contains(activeContentDOM) ||
+        // A destroyed native table-cell editor can briefly retain its DOM
+        // marker after its adapter state is cleared. Never send it another
+        // Vim command during that teardown window.
+        (activeEditor?.cm && !activeEditor.cm.state?.vim) ||
+        !(
+          activeContentDOM.classList.contains("cm-vimMode") ||
+          activeContentDOM.closest(".cm-vimMode")
+        )
+      ) {
+        return;
+      }
+      const KeyboardEventCtor = activeContentDOM.ownerDocument.defaultView?.KeyboardEvent;
+      if (!KeyboardEventCtor) {
+        return;
+      }
+      activeContentDOM.dispatchEvent(
+        new KeyboardEventCtor("keydown", {
+          key: "i",
+          code: "KeyI",
+          bubbles: true,
+          cancelable: true,
+        })
       );
     }
 
@@ -411,6 +531,16 @@ function getEmbeddableMarkdownClass(
         return;
       }
       this.embeddableDestroyed = true;
+      if (
+        this.embeddableVimInsertFrame !== null
+        && this.embeddableVimInsertWindow
+      ) {
+        this.embeddableVimInsertWindow.cancelAnimationFrame(
+          this.embeddableVimInsertFrame
+        );
+      }
+      this.embeddableVimInsertFrame = null;
+      this.embeddableVimInsertWindow = null;
       this.embeddableLifecycleAbort?.abort();
       this.embeddableLifecycleAbort = null;
       const self = this as unknown as InternalMarkdownEmbedInstance;
@@ -488,11 +618,91 @@ export function createEmbeddableMarkdownEditor(
     return value;
   };
 
-  const focusAt = (point: EmbeddableMarkdownEditorPoint): void => {
-    instance.showEditor?.(point);
+  const ownerWindow = containerEl.ownerDocument.defaultView;
+  let destroyed = false;
+  let pendingFocusPoint: EmbeddableMarkdownEditorPoint | null = null;
+  let focusAtFrame: number | null = null;
+  let focusAtAttempts = 0;
+
+  const focusCurrentEditor = (): void => {
+    if (instance.editMode?.focus) {
+      // The native edit mode owns focus routing. In particular, table cells
+      // use a temporary child EditorView; focusing the parent immediately
+      // afterwards destroys that child and clears its Vim state.
+      instance.editMode.focus();
+      return;
+    }
+    getCodeMirror(instance)?.focus?.();
   };
 
-  return {
+  const resolvePendingFocusPoint = (): void => {
+    focusAtFrame = null;
+    if (destroyed || !pendingFocusPoint) {
+      return;
+    }
+    const cm = getCodeMirror(instance);
+    const explicitOffset = pendingFocusPoint.sourceOffset;
+    const position =
+      typeof explicitOffset === "number" && Number.isFinite(explicitOffset)
+        ? explicitOffset
+        : cm?.posAtCoords?.(pendingFocusPoint, false);
+    if (
+      cm?.dispatch
+      && typeof position === "number"
+      && Number.isFinite(position)
+    ) {
+      const length = cm?.state?.doc?.length ?? readValue().length;
+      const offset = Math.max(0, Math.min(length, Math.round(position)));
+      // Enter insert mode on the parent before a table selection can spawn its
+      // native child editor. Obsidian then safely mirrors that mode into the
+      // child during its own table-cell initialization.
+      focusCurrentEditor();
+      cm.dispatch({
+        selection: { anchor: offset, head: offset },
+        scrollIntoView: true,
+      });
+      pendingFocusPoint = null;
+      focusAtAttempts = 0;
+      focusCurrentEditor();
+      return;
+    }
+
+    // CodeMirror can return null during its first layout pass. Give it one
+    // more paint, then keep the native default selection instead of guessing.
+    if (ownerWindow && focusAtAttempts === 0) {
+      focusAtAttempts = 1;
+      focusAtFrame = ownerWindow.requestAnimationFrame(resolvePendingFocusPoint);
+      return;
+    }
+    pendingFocusPoint = null;
+    focusAtAttempts = 0;
+    focusCurrentEditor();
+  };
+
+  const focusAt = (point: EmbeddableMarkdownEditorPoint): void => {
+    pendingFocusPoint = {
+      x: point.x,
+      y: point.y,
+      ...(typeof point.sourceOffset === "number"
+        ? { sourceOffset: point.sourceOffset }
+        : {}),
+    };
+    focusAtAttempts = 0;
+    if (focusAtFrame !== null && ownerWindow) {
+      ownerWindow.cancelAnimationFrame(focusAtFrame);
+      focusAtFrame = null;
+    }
+    if (ownerWindow) {
+      // Studio applies the node's font-size and geometry immediately after the
+      // handle is returned. Resolve the click on the following paint, once the
+      // live editor occupies the same screen position as the preview did.
+      focusAtFrame = ownerWindow.requestAnimationFrame(resolvePendingFocusPoint);
+      return;
+    }
+    resolvePendingFocusPoint();
+  };
+
+  const handle: EmbeddableMarkdownEditorHandle = {
     get value(): string {
       return readValue();
     },
@@ -501,8 +711,7 @@ export function createEmbeddableMarkdownEditor(
     },
     commit,
     focus(): void {
-      instance.editMode?.focus?.();
-      getCodeMirror(instance)?.focus?.();
+      focusCurrentEditor();
     },
     focusAt,
     selectAll(): void {
@@ -512,6 +721,7 @@ export function createEmbeddableMarkdownEditor(
     },
     captureSnapshot(): EmbeddableMarkdownEditorSnapshot {
       const cm = getCodeMirror(instance);
+      const activeCM = getActiveCodeMirror(instance);
       const main = cm?.state?.selection?.main;
       return {
         selection: {
@@ -519,7 +729,7 @@ export function createEmbeddableMarkdownEditor(
           head: Number(main?.head ?? main?.anchor ?? 0),
         },
         scrollTop: Number(cm?.scrollDOM?.scrollTop ?? 0),
-        focused: cm?.hasFocus === true,
+        focused: activeCM?.hasFocus === true,
       };
     },
     restoreSnapshot(snapshot: EmbeddableMarkdownEditorSnapshot): void {
@@ -532,11 +742,16 @@ export function createEmbeddableMarkdownEditor(
         cm.scrollDOM.scrollTop = Math.max(0, snapshot.scrollTop || 0);
       }
       if (snapshot.focused) {
-        instance.editMode?.focus?.();
-        cm?.focus?.();
+        focusCurrentEditor();
       }
     },
     destroy(): void {
+      destroyed = true;
+      pendingFocusPoint = null;
+      if (focusAtFrame !== null && ownerWindow) {
+        ownerWindow.cancelAnimationFrame(focusAtFrame);
+      }
+      focusAtFrame = null;
       instance.destroyEmbeddable?.();
     },
     get editorEl(): HTMLElement | null {
@@ -546,4 +761,9 @@ export function createEmbeddableMarkdownEditor(
       return instance;
     },
   };
+
+  if (options.focusAt) {
+    focusAt(options.focusAt);
+  }
+  return handle;
 }

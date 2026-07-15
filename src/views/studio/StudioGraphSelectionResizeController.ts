@@ -382,7 +382,8 @@ export class StudioGraphSelectionResizeController {
       }
       if (patch.fontSize !== undefined) {
         const textSurfaceEl = nodeEl.querySelector<HTMLElement>(
-          ".ss-studio-text-node-display, .ss-studio-text-node-editor"
+          ".ss-studio-text-node-display, .ss-studio-text-node-editor, " +
+            ".ss-studio-text-node-live-editor"
         );
         textSurfaceEl?.style.setProperty(
           "--ss-studio-text-node-font-size",

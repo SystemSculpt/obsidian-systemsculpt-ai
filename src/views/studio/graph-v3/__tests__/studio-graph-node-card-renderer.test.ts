@@ -364,6 +364,17 @@ describe("renderStudioGraphNodeCard", () => {
         })
       );
 
+      expect(secondRender.graphInteraction.ensureSingleSelection).not.toHaveBeenCalled();
+      expect(secondRender.onRequestTextNodeEdit).not.toHaveBeenCalled();
+
+      window.dispatchEvent(
+        createPointerEvent("pointerup", {
+          pointerId: 32,
+          clientX: 123,
+          clientY: 142,
+        })
+      );
+
       expect(secondRender.graphInteraction.ensureSingleSelection).toHaveBeenCalledWith(
         secondRender.node.id
       );
@@ -376,6 +387,83 @@ describe("renderStudioGraphNodeCard", () => {
       nowSpy.mockRestore();
     }
   });
+
+  it.each(["pointercancel", "drag", "blur"] as const)(
+    "abandons a pending repeated-tap edit after %s",
+    (cancellation) => {
+      const nowSpy = jest.spyOn(Date, "now");
+      try {
+        nowSpy.mockReturnValueOnce(1000).mockReturnValueOnce(1200);
+        const firstRender = renderNodeCardHarness({
+          kind: "studio.text",
+          config: { value: "Do not open" },
+        });
+        firstRender.nodeEl
+          .querySelector<HTMLElement>(".ss-studio-text-node-display")
+          ?.dispatchEvent(
+            createPointerEvent("pointerdown", {
+              pointerId: 51,
+              clientX: 120,
+              clientY: 140,
+            })
+          );
+        window.dispatchEvent(
+          createPointerEvent("pointerup", {
+            pointerId: 51,
+            clientX: 120,
+            clientY: 140,
+          })
+        );
+
+        document.body.innerHTML = "";
+        const secondRender = renderNodeCardHarness({
+          kind: "studio.text",
+          config: { value: "Do not open" },
+        });
+        secondRender.nodeEl
+          .querySelector<HTMLElement>(".ss-studio-text-node-display")
+          ?.dispatchEvent(
+            createPointerEvent("pointerdown", {
+              pointerId: 52,
+              clientX: 123,
+              clientY: 142,
+            })
+          );
+
+        if (cancellation === "pointercancel") {
+          window.dispatchEvent(
+            createPointerEvent("pointercancel", {
+              pointerId: 52,
+              clientX: 123,
+              clientY: 142,
+            })
+          );
+        } else if (cancellation === "drag") {
+          window.dispatchEvent(
+            createPointerEvent("pointermove", {
+              pointerId: 52,
+              clientX: 132,
+              clientY: 142,
+            })
+          );
+        } else {
+          window.dispatchEvent(new Event("blur"));
+        }
+        window.dispatchEvent(
+          createPointerEvent("pointerup", {
+            pointerId: 52,
+            clientX: 123,
+            clientY: 142,
+          })
+        );
+
+        expect(secondRender.graphInteraction.ensureSingleSelection).not.toHaveBeenCalled();
+        expect(secondRender.onRequestTextNodeEdit).not.toHaveBeenCalled();
+      } finally {
+        nowSpy.mockRestore();
+      }
+    }
+  );
 
   it("renders the text card chromeless — no buttons, text-labeled resize frame", () => {
     const { nodeEl } = renderNodeCardHarness({
@@ -497,6 +585,34 @@ describe("renderStudioGraphNodeCard", () => {
     );
 
     expect(onStopTextNodeEdit).toHaveBeenCalledWith(node.id);
+  });
+
+  it.each([
+    ["composition", { isComposing: true }],
+    ["IME keyCode", { keyCode: 229 }],
+  ])("does not end fallback text editing for %s Escape", (_label, marker) => {
+    const { nodeEl, onStopTextNodeEdit } = renderNodeCardHarness({
+      kind: "studio.text",
+      config: { value: "draft" },
+      isTextNodeEditing: true,
+    });
+    const editorEl = nodeEl.querySelector<HTMLTextAreaElement>(
+      ".ss-studio-text-node-editor"
+    );
+    const event = new KeyboardEvent("keydown", {
+      key: "Escape",
+      bubbles: true,
+      cancelable: true,
+      isComposing: marker.isComposing ?? false,
+    });
+    if (marker.keyCode) {
+      Object.defineProperty(event, "keyCode", { value: marker.keyCode });
+    }
+
+    editorEl?.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(onStopTextNodeEdit).not.toHaveBeenCalled();
   });
 
   it("keeps media-ingest image previews in contained mode", () => {

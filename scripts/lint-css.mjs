@@ -284,6 +284,10 @@ const IMPORTANT_ALLOWLIST = new Set([
   "foundation/surface.css", // hidden/reduced-motion contracts must beat feature sheets loaded later
   "views/studio/connections.css", // edge hover must beat inline SVG strokes
   "views/studio/node-chrome.css", // zoom-micro mode removes offscreen node chrome
+  // Studio embeds Obsidian's native CodeMirror/table widgets. Their host
+  // declarations include !important, so text-node parity cannot be scoped or
+  // specificity-adjusted into effect without an equally strong override.
+  "views/studio/text-nodes.css",
 ]);
 
 /** font-size values allowed besides var(--ss-*)/var(--chat-*)/calc/inherit. */
