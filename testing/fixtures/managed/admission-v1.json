@@ -34,6 +34,12 @@
       "message": "Too many admission requests."
     }
   },
+  "required_response_body_fields": [
+    "contract_version",
+    "code",
+    "message",
+    "request_id"
+  ],
   "required_response_headers": [
     "X-RateLimit-Limit",
     "X-RateLimit-Remaining",

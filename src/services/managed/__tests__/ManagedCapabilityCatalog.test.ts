@@ -9,6 +9,9 @@ const typedAdmission: ManagedAdmissionContract = admissionFixture as ManagedAdmi
 describe("ManagedCapabilityCatalog", () => {
   it("parses the canonical admission and capability files under their exact type and filename contracts", () => {
     expect(typedAdmission.negotiation_header).toEqual({ name: "x-systemsculpt-admission-contract", value: "admission-v1" });
+    expect(typedAdmission.required_response_body_fields).toEqual([
+      "contract_version", "code", "message", "request_id",
+    ]);
     expect(typedAdmission.forbidden_response_fields).toEqual(["license_key", "licenseKey", "credential", "token"]);
     expect(typedCatalog.contract_version).toBe("managed-capabilities-v2");
   });
