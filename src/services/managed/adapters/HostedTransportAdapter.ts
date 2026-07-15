@@ -4,6 +4,7 @@ import {
   ManagedServerOutcome, ManagedTransportOperation, ManagedTransportResult,
 } from "../ManagedTypes";
 import { ManagedCapabilityCatalog } from "../ManagedCapabilityCatalog";
+import { decodeManagedAdmissionResponse } from "../ManagedAdmissionResponse";
 
 export interface HostedTransportOptions { baseUrl: string; pluginVersion: string; licenseKey: () => string; requestClient?: PlatformRequestClient; }
 export type ManagedChatTransportTicket = Readonly<{ kind: "managed_chat_transport_ticket" }>;
@@ -29,17 +30,10 @@ export class HostedTransportAdapter {
 
   async getAdmission(): Promise<{ outcome: ManagedServerOutcome; diagnostics: ManagedTransportResult["diagnostics"] }> {
     const result = await this.send({ path: "/api/plugin/license/validate", method: "GET" }, { "x-systemsculpt-admission-contract": MANAGED_ADMISSION_CONTRACT });
-    let code: unknown;
-    try { code = (await result.response.clone().json())?.code; } catch {}
-    const exactMappings = new Map<string, ManagedServerOutcome>([
-      ["200:allowed", "allowed"],
-      ["401:license_required", "license_required"],
-      ["403:license_rejected", "license_rejected"],
-      ["429:rate_limited", "rate_limited"],
-      ["503:temporarily_unavailable", "temporarily_unavailable"],
-    ]);
+    let body: unknown;
+    try { body = await result.response.clone().json(); } catch {}
     return {
-      outcome: exactMappings.get(`${result.response.status}:${String(code)}`) ?? "temporarily_unavailable",
+      outcome: decodeManagedAdmissionResponse(result.response.status, body).outcome,
       diagnostics: result.diagnostics,
     };
   }

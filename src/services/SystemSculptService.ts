@@ -11,7 +11,7 @@ import { SYSTEMSCULPT_API_ENDPOINTS } from "../constants/api";
 import { SYSTEMSCULPT_WEBSITE } from "../constants/externalServices";
 
 import { StreamingErrorHandler } from "./StreamingErrorHandler";
-import { LicenseService } from "./LicenseService";
+import { LicenseService, type LicenseValidationResult } from "./LicenseService";
 import { ContextFileService } from "./ContextFileService";
 import { ChatRequestPreparationService, type ManagedChatPreparationInput } from "./chat/ChatRequestPreparationService";
 import type { AcceptedChatRequestSnapshot } from "./chat/AcceptedChatRequestSnapshot";
@@ -361,6 +361,11 @@ export class SystemSculptService {
   async validateLicense(forceCheck = false): Promise<boolean> {
     this.refreshSettings(); // Ensure settings are current before validation
     return this.licenseService.validateLicense(forceCheck);
+  }
+
+  async validateLicenseDetailed(forceCheck = false): Promise<LicenseValidationResult> {
+    this.refreshSettings();
+    return this.licenseService.validateLicenseDetailed(forceCheck);
   }
 
   public async getCreditsBalance(): Promise<CreditsBalanceSnapshot> {

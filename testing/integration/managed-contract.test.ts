@@ -15,7 +15,7 @@ function managedFixture(name: string): any {
 }
 
 const canonicalHashes: Record<string, string> = {
-  "admission-v1.json": "fc9938f0c6d6584815b1a59813cad2649554eadda0455fd789f604877fa01fcd",
+  "admission-v1.json": "647cc8d3bdd762fd1ac3f96206692f9e2b3d47cb3cf6b7cf31d36a9f82da5871",
   "managed-capabilities-v2.schema.json": "b26a08c5298ba77d05706b627cd144c6e5feec2680fd86d29521fc0497863271",
   "managed-capabilities-v2.json": "0718fd290caca0c3da309f2c6fe501efc956c674900e533b18a3f907eac5c02c",
   "managed-image-output-v1.schema.json": "373a093908d1c00151e7b1505c7c84befe35d364d164bafa096da8601789581c",
@@ -51,6 +51,9 @@ describe("managed product contract fixtures", () => {
       "rate_limited",
     ]);
     expect(admission.responses.rate_limited.status).toBe(429);
+    expect(admission.required_response_body_fields).toEqual([
+      "contract_version", "code", "message", "request_id",
+    ]);
     expect(admission.conditional_response_headers["Retry-After"]).toEqual([
       "rate_limited",
       "temporarily_unavailable",

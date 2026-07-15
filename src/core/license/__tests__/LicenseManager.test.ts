@@ -25,7 +25,7 @@ describe("LicenseManager", () => {
         lastValidated: 0,
       },
       aiService: {
-        validateLicense: jest.fn().mockResolvedValue(true),
+        validateLicenseDetailed: jest.fn().mockResolvedValue({ outcome: "valid", isValid: true }),
       },
       getSettingsManager: jest.fn(() => mockSettingsManager),
     };
@@ -68,7 +68,7 @@ describe("LicenseManager", () => {
 
       await manager.initializeLicense();
 
-      expect(mockPlugin.aiService.validateLicense).not.toHaveBeenCalled();
+      expect(mockPlugin.aiService.validateLicenseDetailed).not.toHaveBeenCalled();
     });
 
     it("schedules validation when license was not validated recently", async () => {
@@ -81,7 +81,7 @@ describe("LicenseManager", () => {
       jest.runAllTimers();
       await Promise.resolve();
 
-      expect(mockPlugin.aiService.validateLicense).toHaveBeenCalled();
+      expect(mockPlugin.aiService.validateLicenseDetailed).toHaveBeenCalled();
     });
 
     it("schedules validation when license is not valid", async () => {
@@ -93,7 +93,7 @@ describe("LicenseManager", () => {
       jest.runAllTimers();
       await Promise.resolve();
 
-      expect(mockPlugin.aiService.validateLicense).toHaveBeenCalled();
+      expect(mockPlugin.aiService.validateLicenseDetailed).toHaveBeenCalled();
     });
 
     it("handles undefined licenseValid state", async () => {
@@ -119,7 +119,7 @@ describe("LicenseManager", () => {
 
   describe("validateLicenseKey", () => {
     it("returns the result owned by LicenseService without a redundant settings write", async () => {
-      mockPlugin.aiService.validateLicense.mockResolvedValue(true);
+      mockPlugin.aiService.validateLicenseDetailed.mockResolvedValue({ outcome: "valid", isValid: true });
 
       const result = await manager.validateLicenseKey();
 
@@ -128,7 +128,7 @@ describe("LicenseManager", () => {
     });
 
     it("returns a LicenseService rejection without a redundant settings write", async () => {
-      mockPlugin.aiService.validateLicense.mockResolvedValue(false);
+      mockPlugin.aiService.validateLicenseDetailed.mockResolvedValue({ outcome: "rejected", isValid: false, reason: "invalid" });
 
       const result = await manager.validateLicenseKey();
 
@@ -142,12 +142,12 @@ describe("LicenseManager", () => {
       const result = await manager.validateLicenseKey();
 
       expect(result).toBe(false);
-      expect(mockPlugin.aiService.validateLicense).not.toHaveBeenCalled();
+      expect(mockPlugin.aiService.validateLicenseDetailed).not.toHaveBeenCalled();
     });
 
     it("preserves last-known-good state on an unexpected validation error", async () => {
       mockPlugin.settings.licenseValid = true;
-      mockPlugin.aiService.validateLicense.mockRejectedValue(
+      mockPlugin.aiService.validateLicenseDetailed.mockRejectedValue(
         new Error("Network error")
       );
 
@@ -160,13 +160,13 @@ describe("LicenseManager", () => {
     it("passes force parameter to aiService", async () => {
       await manager.validateLicenseKey(true);
 
-      expect(mockPlugin.aiService.validateLicense).toHaveBeenCalledWith(true);
+      expect(mockPlugin.aiService.validateLicenseDetailed).toHaveBeenCalledWith(true);
     });
 
     it("passes default force=false to aiService", async () => {
       await manager.validateLicenseKey();
 
-      expect(mockPlugin.aiService.validateLicense).toHaveBeenCalledWith(false);
+      expect(mockPlugin.aiService.validateLicenseDetailed).toHaveBeenCalledWith(false);
     });
   });
 
@@ -184,13 +184,13 @@ describe("LicenseManager", () => {
       await Promise.resolve();
 
       // Should only validate once
-      expect(mockPlugin.aiService.validateLicense).toHaveBeenCalledTimes(1);
+      expect(mockPlugin.aiService.validateLicenseDetailed).toHaveBeenCalledTimes(1);
     });
 
     it("runs validation when license becomes invalid", async () => {
       mockPlugin.settings.licenseValid = true;
       mockPlugin.settings.lastValidated = 0;
-      mockPlugin.aiService.validateLicense.mockResolvedValue(false);
+      mockPlugin.aiService.validateLicenseDetailed.mockResolvedValue({ outcome: "rejected", isValid: false, reason: "invalid" });
 
       await manager.initializeLicense();
 
@@ -199,7 +199,7 @@ describe("LicenseManager", () => {
       await Promise.resolve(); // Allow promise chain to complete
 
       // LicenseService owns the state transition; the manager only schedules it.
-      expect(mockPlugin.aiService.validateLicense).toHaveBeenCalled();
+      expect(mockPlugin.aiService.validateLicenseDetailed).toHaveBeenCalled();
       expect(mockSettingsManager.updateSettings).not.toHaveBeenCalled();
     });
   });

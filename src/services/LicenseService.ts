@@ -1,8 +1,18 @@
-import { SystemSculptError, ERROR_CODES } from "../utils/errors";
 import { API_BASE_URL, SYSTEMSCULPT_API_HEADERS } from "../constants/api";
 import { CACHE_BUSTER } from "../utils/urlHelpers";
 import type { HttpRequestError } from "../utils/httpClient";
 import SystemSculptPlugin from "../main";
+import { MANAGED_ADMISSION_CONTRACT } from "./managed/ManagedTypes";
+import {
+  decodeManagedAdmissionResponse,
+  type ManagedLicenseRejectReason,
+} from "./managed/ManagedAdmissionResponse";
+
+export type LicenseRejectReason = ManagedLicenseRejectReason | "missing";
+export type LicenseValidationResult =
+  | Readonly<{ outcome: "valid"; isValid: true }>
+  | Readonly<{ outcome: "rejected"; isValid: false; reason: LicenseRejectReason }>
+  | Readonly<{ outcome: "unavailable"; isValid: boolean }>;
 
 /**
  * Service responsible for license validation and entitlement handling
@@ -21,11 +31,15 @@ export class LicenseService {
    * Validate the current license key
    */
   public async validateLicense(_forceCheck = false): Promise<boolean> {
+    return (await this.validateLicenseDetailed(_forceCheck)).isValid;
+  }
+
+  public async validateLicenseDetailed(_forceCheck = false): Promise<LicenseValidationResult> {
     if (!this.licenseKey?.trim()) {
       if (this.plugin.settings.licenseValid) {
         await this.plugin.getSettingsManager().updateSettings({ licenseValid: false });
       }
-      return false;
+      return { outcome: "rejected", isValid: false, reason: "missing" };
     }
 
     // Apply cache busting using centralized utility
@@ -35,6 +49,7 @@ export class LicenseService {
     const headersToSend = {
       ...SYSTEMSCULPT_API_HEADERS.WITH_LICENSE(this.licenseKey),
       "x-plugin-version": this.plugin.manifest.version,
+      "x-systemsculpt-admission-contract": MANAGED_ADMISSION_CONTRACT,
     };
 
     try {
@@ -45,63 +60,66 @@ export class LicenseService {
         headers: headersToSend,
       });
 
-      if (response.status !== 200) {
-        throw new SystemSculptError(
-          `License validation failed with status ${response.status}`,
-          ERROR_CODES.INVALID_LICENSE,
-          response.status
-        );
-      }
-
-      const apiResponse: any = response.json;
-      
-      // Handle both direct response and nested data structure
-      const responseData = apiResponse?.data || apiResponse;
-
-      // Treat any 200 as valid; rely on presence of expected fields
-      if (responseData && typeof responseData === 'object') {
+      const admission = decodeManagedAdmissionResponse(response.status, response.json);
+      if (admission.outcome === "allowed") {
         await this.plugin.getSettingsManager().updateSettings({
           licenseValid: true,
-          userEmail: responseData.email,
-          userName: responseData.user_name || responseData.email,
-          displayName: responseData.display_name || responseData.user_name || responseData.email,
-          subscriptionStatus: responseData.subscription_status,
+          subscriptionStatus: "active",
           lastValidated: Date.now(),
         });
-
-        return true;
+        return { outcome: "valid", isValid: true };
       }
 
-      // Unexpected body shape; keep existing state but report as invalid this round
-      return !!this.plugin.settings.licenseValid;
+      // Compatibility for servers that predate admission-v1 but return the
+      // established successful account envelope. Negotiated responses above
+      // remain the only source of authoritative rejection state.
+      const legacyProfile = this.readLegacySuccessProfile(response.status, response.json);
+      if (legacyProfile) {
+        await this.plugin.getSettingsManager().updateSettings({
+          licenseValid: true,
+          userEmail: legacyProfile.email,
+          userName: legacyProfile.userName,
+          displayName: legacyProfile.displayName,
+          subscriptionStatus: "active",
+          lastValidated: Date.now(),
+        });
+        return { outcome: "valid", isValid: true };
+      }
+
+      return this.unavailableResult();
     } catch (error) {
-      // An authoritative reject (invalid request/key, revoked, expired, refunded)
-      // arrives as a 400/401/403/404 and MUST downgrade
-      // the cached validity, otherwise a revoked license keeps granting
-      // managed-model access indefinitely. Any other failure (offline, DNS
-      // blip, timeout, 5xx) is transient: preserve last-known-good validity so
-      // a flaky connection never logs a paying user out.
-      if (this.isAuthoritativeReject(error)) {
+      const admission = this.isHttpRequestError(error)
+        ? decodeManagedAdmissionResponse(error.status, error.json)
+        : { outcome: "temporarily_unavailable" as const };
+
+      // Only the exact negotiated 403/license_rejected envelope may downgrade
+      // cached validity. Status codes and HTML error pages alone are not proof
+      // that a paid license is invalid.
+      if (admission.outcome === "license_rejected" && admission.reason) {
         await this.plugin.getSettingsManager().updateSettings({ licenseValid: false });
-        return false;
+        return { outcome: "rejected", isValid: false, reason: admission.reason };
       }
-      return !!this.plugin.settings.licenseValid;
+      return this.unavailableResult();
     }
   }
 
-  /**
-   * Whether an error from license validation is the server *authoritatively*
-   * rejecting the key (HTTP 400/401/403/404), as opposed to a transient/offline
-   * failure. Only an authoritative reject should flip `licenseValid` to false.
-   */
-  private isAuthoritativeReject(error: unknown): boolean {
-    const status = error instanceof SystemSculptError
-      ? error.statusCode
-      : this.isHttpRequestError(error)
-        ? error.status
-        : undefined;
+  private unavailableResult(): LicenseValidationResult {
+    return { outcome: "unavailable", isValid: !!this.plugin.settings.licenseValid };
+  }
 
-    return status !== undefined && [400, 401, 403, 404].includes(status);
+  private readLegacySuccessProfile(status: number, value: unknown): {
+    email: string;
+    userName: string;
+    displayName: string;
+  } | null {
+    if (status !== 200 || !value || typeof value !== "object" || Array.isArray(value)) return null;
+    const envelope = value as Record<string, unknown>;
+    if (envelope.status !== "success" || !envelope.data || typeof envelope.data !== "object") return null;
+    const profile = envelope.data as Record<string, unknown>;
+    if (profile.subscription_status !== "active" || typeof profile.email !== "string") return null;
+    const userName = typeof profile.user_name === "string" ? profile.user_name : profile.email;
+    const displayName = typeof profile.display_name === "string" ? profile.display_name : userName;
+    return { email: profile.email, userName, displayName };
   }
 
   private isHttpRequestError(error: unknown): error is HttpRequestError {
