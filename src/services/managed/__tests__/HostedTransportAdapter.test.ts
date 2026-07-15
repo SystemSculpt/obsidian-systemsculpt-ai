@@ -20,6 +20,14 @@ const response = (status = 200, body: unknown = { ok: true }) => new Response(JS
   },
 });
 
+const admission = (code: string, extra: Record<string, unknown> = {}) => ({
+  contract_version: "admission-v1",
+  code,
+  message: "Admission response.",
+  request_id: "request-1",
+  ...extra,
+});
+
 describe("HostedTransportAdapter", () => {
   const request = jest.fn();
   beforeEach(() => {
@@ -30,7 +38,7 @@ describe("HostedTransportAdapter", () => {
 
   it("pins GET discovery routes and exact negotiation/plugin headers while omitting a missing license", async () => {
     const adapter = new HostedTransportAdapter({ baseUrl: "https://api.test/", pluginVersion: "6.0.0", licenseKey: () => "" });
-    request.mockResolvedValueOnce(response(200, fixture)).mockResolvedValueOnce(response(401, { code: "license_required" }));
+    request.mockResolvedValueOnce(response(200, fixture)).mockResolvedValueOnce(response(401, admission("license_required")));
     await adapter.getCatalog();
     await adapter.getAdmission();
     expect(request.mock.calls[0][0]).toEqual(expect.objectContaining({
@@ -49,7 +57,12 @@ describe("HostedTransportAdapter", () => {
     [403, "license_rejected", "license_rejected"], [429, "rate_limited", "rate_limited"],
     [503, "temporarily_unavailable", "temporarily_unavailable"],
   ] as const)("accepts only exact admission-v1 status/code mapping %s/%s", async (status, code, expected) => {
-    request.mockResolvedValue(response(status, { code }));
+    const extra = code === "license_rejected"
+      ? { reason: "invalid" }
+      : code === "temporarily_unavailable"
+        ? { retryable: true, grace_eligible: true }
+        : {};
+    request.mockResolvedValue(response(status, admission(code, extra)));
     const adapter = new HostedTransportAdapter({ baseUrl: "https://api.test", pluginVersion: "6", licenseKey: () => "key" });
     expect((await adapter.getAdmission()).outcome).toBe(expected);
   });
@@ -59,7 +72,18 @@ describe("HostedTransportAdapter", () => {
     [401, "license_rejected"], [429, "temporarily_unavailable"], [503, "rate_limited"],
     [200, "unknown"], [200, undefined], [418, "license_rejected"],
   ])("normalizes contradictory or unknown admission %s/%s to temporarily_unavailable", async (status, code) => {
-    request.mockResolvedValue(response(status as number, typeof code === "undefined" ? {} : { code }));
+    request.mockResolvedValue(response(status as number, typeof code === "undefined" ? {} : admission(code as string)));
+    const adapter = new HostedTransportAdapter({ baseUrl: "https://api.test", pluginVersion: "6", licenseKey: () => "key" });
+    expect((await adapter.getAdmission()).outcome).toBe("temporarily_unavailable");
+  });
+
+  it.each([
+    [403, admission("license_rejected")],
+    [503, admission("temporarily_unavailable", { retryable: false, grace_eligible: true })],
+    [200, admission("allowed", { license_key: "secret" })],
+    [200, admission("allowed", { unexpected: true })],
+  ])("fails closed on malformed admission-v1 envelope %s", async (status, body) => {
+    request.mockResolvedValue(response(status as number, body));
     const adapter = new HostedTransportAdapter({ baseUrl: "https://api.test", pluginVersion: "6", licenseKey: () => "key" });
     expect((await adapter.getAdmission()).outcome).toBe("temporarily_unavailable");
   });

@@ -57,6 +57,7 @@ import { SYSTEMSCULPT_STUDIO_VIEW_TYPE } from "./core/plugin/viewTypes";
 import { API_BASE_URL } from "./constants/api";
 import { ManagedCapabilityClient } from "./services/managed/ManagedCapabilityClient";
 import { ManagedCapabilityClientFactory, type ManagedCapabilityClientGraph } from "./services/managed/ManagedCapabilityClientFactory";
+import { PluginUpdateService } from "./services/PluginUpdateService";
 
 type ViewManagerModule = typeof import("./core/plugin/views");
 type CommandManagerModule = typeof import("./core/plugin/commands");
@@ -130,6 +131,7 @@ export default class SystemSculptPlugin extends Plugin {
   private searchEngine: SystemSculptSearchEngine | null = null;
   private studioService: StudioService | null = null;
   private managedCapabilityGraph: ManagedCapabilityClientGraph | null = null;
+  private pluginUpdateService: PluginUpdateService | null = null;
   /** Live-reconfigurable slot for the relative line number gutter editor extension. */
   private readonly relativeLineNumberExtensions: Extension[] = [];
   private relativeLineNumbersApplied = false;
@@ -569,6 +571,15 @@ export default class SystemSculptPlugin extends Plugin {
     });
 
     coordinator.registerTask("bootstrap", {
+      id: "services.pluginUpdates",
+      label: "plugin updates",
+      optional: true,
+      run: () => {
+        this.pluginUpdateService = new PluginUpdateService(this);
+      },
+    });
+
+    coordinator.registerTask("bootstrap", {
       id: "logging.ready",
       label: "plugin logger",
       optional: true,
@@ -647,6 +658,15 @@ export default class SystemSculptPlugin extends Plugin {
   }
 
   private registerLayoutTasks(coordinator: LifecycleCoordinator): void {
+    coordinator.registerTask("layout", {
+      id: "updates.start",
+      label: "update notifications",
+      optional: true,
+      run: () => {
+        if (this.pluginUpdateService) void this.pluginUpdateService.start();
+      },
+    });
+
     coordinator.registerTask("layout", {
       id: "embeddings.autostart",
       label: "embeddings auto-start",
@@ -1628,6 +1648,11 @@ export default class SystemSculptPlugin extends Plugin {
       if (this.resourceMonitor) {
         this.resourceMonitor.stop();
         this.resourceMonitor = null;
+      }
+
+      if (this.pluginUpdateService) {
+        this.pluginUpdateService.stop();
+        this.pluginUpdateService = null;
       }
 
       // Clean up settings manager (stop automatic backups)

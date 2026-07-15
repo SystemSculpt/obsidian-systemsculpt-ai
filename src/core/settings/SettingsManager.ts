@@ -55,6 +55,13 @@ export class SettingsManager {
       migratedSettings.embeddingsVectorFormatVersion = DEFAULT_SETTINGS.embeddingsVectorFormatVersion;
     }
 
+    if (typeof migratedSettings.lastAnnouncedPluginRelease !== "string") {
+      migratedSettings.lastAnnouncedPluginRelease = DEFAULT_SETTINGS.lastAnnouncedPluginRelease;
+    }
+    if (typeof migratedSettings.lastLoadedPluginVersion !== "string") {
+      migratedSettings.lastLoadedPluginVersion = DEFAULT_SETTINGS.lastLoadedPluginVersion;
+    }
+
     // Legacy/dead keys are pruned by the versioned migrator's v0→v1 step
     // (SettingsMigrator.LEGACY_KEYS_REMOVED_IN_V1) — no ad-hoc deletes here.
 

@@ -5,6 +5,7 @@ import { checkPremiumUserStatus } from "../../utils/licenseUtils";
 import { SystemSculptSettingTab } from "../SystemSculptSettingTab";
 import { getSurfaceOwnerWindow } from "../../core/ui/surface/SurfaceDomContext";
 import { openExternalUrl } from "../../utils/externalUrl";
+import type { LicenseValidationResult } from "../../services/LicenseService";
 
 export function renderAccountSection(
   root: HTMLElement,
@@ -18,23 +19,27 @@ export function renderAccountSection(
   const userStatus = checkPremiumUserStatus(plugin.settings);
   const hasSavedLicense = (plugin.settings.licenseKey || "").trim().length > 0;
 
-  let validateCurrentLicense: () => Promise<boolean>;
-  validateCurrentLicense = async (): Promise<boolean> => {
+  let validateCurrentLicense: () => Promise<LicenseValidationResult>;
+  validateCurrentLicense = async (): Promise<LicenseValidationResult> => {
     const validatingNotice = new Notice("Validating license key...", 0);
     try {
-      const success = await plugin.getLicenseManager().validateLicenseKey(true, false);
+      const result = await plugin.getLicenseManager().validateLicenseKeyDetailed(true, false);
       validatingNotice.hide?.();
-      if (!success) {
+      if (result.outcome === "rejected") {
         new Notice("Invalid license key. Please check and try again.");
-        return false;
+        return result;
+      }
+      if (result.outcome === "unavailable") {
+        new Notice("License validation is temporarily unavailable. Try again.");
+        return result;
       }
       new Notice("License activated successfully.");
       tabInstance.display();
-      return true;
+      return result;
     } catch {
       validatingNotice.hide?.();
       new Notice("Unable to validate license. Try again.");
-      return false;
+      return { outcome: "unavailable", isValid: !!plugin.settings.licenseValid };
     }
   };
 
@@ -140,8 +145,14 @@ export function renderAccountSection(
         }
 
         await plugin.getSettingsManager().updateSettings({ licenseKey: currentValue });
-        if (!(await validateCurrentLicense())) {
+        const result = await validateCurrentLicense();
+        if (result.outcome !== "valid" && (priorLicenseState.licenseKey || result.outcome === "rejected")) {
           await plugin.getSettingsManager().updateSettings(priorLicenseState);
+        } else if (result.outcome === "unavailable") {
+          // Keep a first activation's key so the Retry action remains available
+          // after a temporary outage. Existing active keys are restored above.
+          await plugin.getSettingsManager().updateSettings({ licenseValid: false });
+          tabInstance.display();
         }
       } catch {
         await plugin.getSettingsManager().updateSettings(priorLicenseState).catch(() => {});

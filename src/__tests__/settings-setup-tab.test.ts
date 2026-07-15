@@ -23,6 +23,7 @@ const createPluginStub = () => {
 
   const licenseManager = {
     validateLicenseKey: jest.fn().mockResolvedValue(true),
+    validateLicenseKeyDetailed: jest.fn().mockResolvedValue({ outcome: "valid", isValid: true }),
   };
 
   return {
@@ -171,7 +172,7 @@ describe("Setup tab SystemSculpt-only layout", () => {
     await flushSetupSectionRender();
     expect(plugin.getSettingsManager().updateSettings).toHaveBeenCalledWith({ licenseKey: "skss-replacement" });
     expect(plugin.getSettingsManager().updateSettings).toHaveBeenCalledTimes(1);
-    expect(plugin.getLicenseManager().validateLicenseKey).toHaveBeenCalledWith(true, false);
+    expect(plugin.getLicenseManager().validateLicenseKeyDetailed).toHaveBeenCalledWith(true, false);
   });
 
   it.each(["returns false", "throws"])(
@@ -183,9 +184,9 @@ describe("Setup tab SystemSculpt-only layout", () => {
       plugin.settings.enableSystemSculptProvider = true;
       plugin.settings.useSystemSculptAsFallback = true;
       if (failureMode === "throws") {
-        plugin.getLicenseManager().validateLicenseKey.mockRejectedValue(new Error("upstream failure"));
+        plugin.getLicenseManager().validateLicenseKeyDetailed.mockRejectedValue(new Error("upstream failure"));
       } else {
-        plugin.getLicenseManager().validateLicenseKey.mockResolvedValue(false);
+        plugin.getLicenseManager().validateLicenseKeyDetailed.mockResolvedValue({ outcome: "rejected", isValid: false, reason: "invalid" });
       }
       const tab = new SystemSculptSettingTab(app, plugin);
       tab.display = jest.fn();
@@ -238,7 +239,7 @@ describe("Setup tab SystemSculpt-only layout", () => {
 
   it("uses bounded first-party copy when license validation throws", async () => {
     const plugin = createPluginStub();
-    plugin.getLicenseManager().validateLicenseKey.mockRejectedValue(
+    plugin.getLicenseManager().validateLicenseKeyDetailed.mockRejectedValue(
       new Error("upstream leaked skss-secret and request details")
     );
     const log = jest.spyOn(console, "log").mockImplementation(() => undefined);

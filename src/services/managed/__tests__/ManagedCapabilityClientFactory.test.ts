@@ -4,7 +4,14 @@ import { ManagedCapabilityClientFactory } from "../ManagedCapabilityClientFactor
 
 function responseFor(url: string): Response {
   if (url.endsWith("/api/plugin/config")) return new Response(JSON.stringify(fixture), { status: 200 });
-  if (url.endsWith("/api/plugin/license/validate")) return new Response(JSON.stringify({ code: "allowed" }), { status: 200 });
+  if (url.endsWith("/api/plugin/license/validate")) {
+    return new Response(JSON.stringify({
+      contract_version: "admission-v1",
+      code: "allowed",
+      message: "License admitted.",
+      request_id: "request-1",
+    }), { status: 200 });
+  }
   throw new Error(`Unexpected URL: ${url}`);
 }
 

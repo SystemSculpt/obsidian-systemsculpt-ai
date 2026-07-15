@@ -1,6 +1,7 @@
 import type { App } from "obsidian";
 import { Notice } from "obsidian";
 import SystemSculptPlugin from "../../main";
+import type { LicenseValidationResult } from "../../services/LicenseService";
 
 export class LicenseManager {
   private plugin: SystemSculptPlugin;
@@ -43,17 +44,19 @@ export class LicenseManager {
   }
 
   async validateLicenseKey(force = false, _showReloadPrompt = true): Promise<boolean> {
+    return (await this.validateLicenseKeyDetailed(force, _showReloadPrompt)).isValid;
+  }
+
+  async validateLicenseKeyDetailed(force = false, _showReloadPrompt = true): Promise<LicenseValidationResult> {
     if (!this.plugin.settings.licenseKey) {
       await this.plugin.getSettingsManager().updateSettings({ licenseValid: false });
-      return false;
+      return { outcome: "rejected", isValid: false, reason: "missing" };
     }
 
     try {
-      const isValid = await this.plugin.aiService.validateLicense(force);
-
-      return isValid;
+      return await this.plugin.aiService.validateLicenseDetailed(force);
     } catch (error) {
-      return !!this.plugin.settings.licenseValid;
+      return { outcome: "unavailable", isValid: !!this.plugin.settings.licenseValid };
     }
   }
 

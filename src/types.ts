@@ -63,6 +63,10 @@ export interface SystemSculptSettings {
    */
   savedChatsDirectory: string;
   lastValidated: number;
+  /** Last release for which the plugin showed an update-available notice. */
+  lastAnnouncedPluginRelease: string;
+  /** Last plugin version observed after a successful load. */
+  lastLoadedPluginVersion: string;
   recordingsDirectory: string;
   preferredMicrophoneId: string;
   autoTranscribeRecordings: boolean;
@@ -197,6 +201,8 @@ export const DEFAULT_SETTINGS: SystemSculptSettings = {
   chatsDirectory: "SystemSculpt/Chats",
   savedChatsDirectory: "SystemSculpt/Saved Chats",
   lastValidated: 0,
+  lastAnnouncedPluginRelease: "",
+  lastLoadedPluginVersion: "",
   recordingsDirectory: "SystemSculpt/Recordings",
   preferredMicrophoneId: "",
   autoTranscribeRecordings: true,
