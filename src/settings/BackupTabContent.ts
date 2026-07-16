@@ -1,7 +1,8 @@
-import { Setting, Notice } from "obsidian";
+import { FileSystemAdapter, Setting, Notice } from "obsidian";
 import { SystemSculptSettingTab } from "./SystemSculptSettingTab";
 import { showPrompt } from "../core/ui/modals/PromptModal";
 import { BackupRestoreModal } from "../core/settings/BackupRestoreModal";
+import { hasHostCapability, openLocalFolder } from "../platform/hostCapabilities";
 
 
 export function displayBackupTabContent(containerEl: HTMLElement, tabInstance: SystemSculptSettingTab) {
@@ -82,10 +83,11 @@ Continue?`
         });
     });
 
-  new Setting(containerEl)
+  const backupFolderSetting = new Setting(containerEl)
     .setName('Backup folder')
-    .setDesc('Open the folder where backups are stored.')
-    .addButton((button) => {
+    .setDesc('Stored in .systemsculpt/settings-backups inside your vault.');
+  if (hasHostCapability("file-manager-reveal", containerEl)) {
+    backupFolderSetting.addButton((button) => {
       button
         .setButtonText('Open folder')
         .onClick(async () => {
@@ -96,9 +98,11 @@ Continue?`
             } catch (_) {
               // folder already exists
             }
-            if (typeof (plugin.app.vault.adapter as any).revealInFolder === 'function') {
-              (plugin.app.vault.adapter as any).revealInFolder(backupDir);
-            } else {
+            const adapter = plugin.app.vault.adapter;
+            const opened = adapter instanceof FileSystemAdapter
+              ? await openLocalFolder(adapter.getFullPath(backupDir), containerEl)
+              : false;
+            if (!opened) {
               new Notice(`Backups are stored in: ${backupDir}`);
             }
           } catch (error) {
@@ -106,6 +110,7 @@ Continue?`
           }
         });
     });
+  }
 
   new Setting(containerEl)
     .setName('Tips')

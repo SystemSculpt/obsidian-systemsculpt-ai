@@ -3,7 +3,7 @@ import type { FirstPartyToolDefinition } from "../../types";
 export const fileToolDefinitions: FirstPartyToolDefinition[] = [
   {
     name: "read",
-    description: "Read file contents with automatic pagination for large files. Returns content, file size, and timestamps. For files over 25KB, use offset/length to paginate—metadata.hasMore indicates if more content exists.",
+    description: "Read file contents with automatic pagination for large files, including agent-readable .systemsculpt Studio projects. Returns content, file size, and timestamps. For files over 25KB, use offset/length to paginate—metadata.hasMore indicates if more content exists.",
     inputSchema: {
       type: "object",
       properties: {
@@ -34,7 +34,7 @@ export const fileToolDefinitions: FirstPartyToolDefinition[] = [
   },
   {
     name: "write",
-    description: "Create a new file or overwrite an existing file. Parent directories are created automatically. For partial modifications to existing files, use the edit tool instead.",
+    description: "Create a new file or overwrite an existing file. Parent directories are created automatically. Existing .systemsculpt Studio projects use this same tool and are checked before writing; create a new Studio project in Studio once. For partial modifications to existing files, use the edit tool instead.",
     inputSchema: {
       type: "object",
       properties: {
@@ -69,7 +69,7 @@ export const fileToolDefinitions: FirstPartyToolDefinition[] = [
   },
   {
     name: "edit",
-    description: "Apply find-and-replace edits to an existing file. Supports exact matching, regex patterns, loose whitespace matching, and line range targeting. Returns a diff plus appliedCount/requestedCount and a skipped[] list (each {index, reason}). When strict is false, check appliedCount: if it is less than requestedCount, the skipped edits did NOT apply (e.g. oldText not found) — fix their oldText and retry. success is false when appliedCount is 0, meaning nothing was written.",
+    description: "Apply find-and-replace edits to an existing file, including .systemsculpt Studio projects. Studio edits are parsed and graph-validated before write; edit the project file only, using its embedded agentGuide and nodeKindReference. Supports exact matching, regex patterns, loose whitespace matching, and line range targeting. Returns a diff plus appliedCount/requestedCount and a skipped[] list (each {index, reason}). When strict is false, check appliedCount: if it is less than requestedCount, the skipped edits did NOT apply (e.g. oldText not found) — fix their oldText and retry. success is false when appliedCount is 0, meaning nothing was written.",
     inputSchema: {
       type: "object",
       properties: {
@@ -146,7 +146,7 @@ export const fileToolDefinitions: FirstPartyToolDefinition[] = [
   },
   {
     name: "multi_edit",
-    description: "Edit multiple existing files in one reviewed operation. Every file is preflighted before any write. If preflight fails, nothing is written. Returns explicit per-file results; a write-time conflict can still produce a partial result.",
+    description: "Edit multiple existing files in one reviewed operation, including valid .systemsculpt project documents. Every file is checked before any write. If checking fails, nothing is written. Returns explicit per-file results; a write-time conflict can still produce a partial result.",
     inputSchema: {
       type: "object",
       properties: {

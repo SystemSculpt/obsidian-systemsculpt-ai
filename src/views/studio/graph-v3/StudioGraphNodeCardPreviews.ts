@@ -6,6 +6,7 @@ import {
   formatNodeOutputPreview,
   type StudioNodeRunDisplayState,
 } from "../StudioRunPresentationState";
+import { hasHostCapability } from "../../../platform/hostCapabilities";
 
 export function resolveMediaIngestRevealPath(
   node: StudioNodeInstance,
@@ -111,23 +112,29 @@ export function renderNodeMediaPreview(options: {
   }
 
   const previewEl = nodeEl.createDiv({ cls: "ss-studio-node-media-preview" });
+  const canRevealInFileManager = node.kind === "studio.media_ingest"
+    && hasHostCapability("file-manager-reveal", nodeEl);
   if (node.kind === "studio.media_ingest") {
     previewEl.addClass("is-media-ingest");
     if (mediaPreview.kind === "image") {
       previewEl.addClass("is-contained-image");
     }
-    previewEl.setAttribute("title", "Double-click to reveal in Finder");
+    if (canRevealInFileManager) {
+      previewEl.setAttribute("title", "Double-click to reveal in file manager");
+    }
   }
   previewEl.addEventListener("dblclick", (event) => {
     event.stopPropagation();
-    const revealPath = resolveMediaIngestRevealPath(
-      node,
-      nodeRunState.outputs as Record<string, unknown> | null,
-      mediaPreview.path
-    );
-    if (revealPath) {
-      onRevealPathInFinder(revealPath);
-      return;
+    if (canRevealInFileManager) {
+      const revealPath = resolveMediaIngestRevealPath(
+        node,
+        nodeRunState.outputs as Record<string, unknown> | null,
+        mediaPreview.path
+      );
+      if (revealPath) {
+        onRevealPathInFinder(revealPath);
+        return;
+      }
     }
     onOpenMediaPreview?.({
       kind: mediaPreview.kind,

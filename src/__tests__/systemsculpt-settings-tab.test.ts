@@ -1,7 +1,7 @@
 /** @jest-environment jsdom */
 
 import { SystemSculptSettingTab } from "../settings/SystemSculptSettingTab";
-import { App } from "obsidian";
+import { App, Platform } from "obsidian";
 import { buildSettingsTabConfigs } from "../settings/SettingsTabRegistry";
 
 jest.mock("../settings/SettingsTabRegistry", () => ({
@@ -126,6 +126,10 @@ describe("SystemSculptSettingTab native layout", () => {
     return tab;
   };
 
+  it("does not opt into incomplete declarative settings on Obsidian 1.13+", () => {
+    expect("getSettingDefinitions" in SystemSculptSettingTab.prototype).toBe(false);
+  });
+
   it("does not inject legacy style tag", async () => {
     await renderTab();
     expect(document.getElementById("systemsculpt-settings-styles")).toBeNull();
@@ -220,6 +224,33 @@ describe("SystemSculptSettingTab native layout", () => {
     expect(body).not.toContain("AI Provider:");
     expect(body).not.toContain("AI Model:");
     expect(body).not.toContain("Custom providers enabled:");
+  });
+
+  it("reports the mobile app host in feedback diagnostics", () => {
+    const platform = Platform as typeof Platform & {
+      isDesktopApp?: boolean;
+      isMobile?: boolean;
+      isMobileApp?: boolean;
+    };
+    const previous = {
+      isDesktopApp: platform.isDesktopApp,
+      isMobile: platform.isMobile,
+      isMobileApp: platform.isMobileApp,
+    };
+    platform.isDesktopApp = false;
+    platform.isMobile = true;
+    platform.isMobileApp = true;
+    try {
+      const tab = new SystemSculptSettingTab(app, createPluginStub());
+      const url = (tab as any).generateFeedbackUrl();
+      const body = decodeURIComponent(url.split("&body=")[1] || "");
+
+      expect(body).toContain("Device type: Mobile");
+    } finally {
+      platform.isDesktopApp = previous.isDesktopApp;
+      platform.isMobile = previous.isMobile;
+      platform.isMobileApp = previous.isMobileApp;
+    }
   });
 
   it("preserves active tab across settings rerenders", async () => {

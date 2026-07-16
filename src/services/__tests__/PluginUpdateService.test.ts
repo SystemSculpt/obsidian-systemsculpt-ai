@@ -1,5 +1,6 @@
 /** @jest-environment jsdom */
 
+import { Platform } from "obsidian";
 import { PluginUpdateService, parsePluginReleaseInfo } from "../PluginUpdateService";
 
 const releaseBody = (version = "6.0.2") => ({
@@ -38,6 +39,9 @@ describe("PluginUpdateService", () => {
 
   afterEach(() => {
     jest.useRealTimers();
+    (Platform as any).isDesktopApp = true;
+    (Platform as any).isMobile = false;
+    (Platform as any).isMobileApp = false;
   });
 
   it("accepts only the exact first-party release envelope", () => {
@@ -71,6 +75,22 @@ describe("PluginUpdateService", () => {
     await service.checkForUpdates();
     expect(notify).not.toHaveBeenCalled();
     expect(plugin.statusBarEl.hidden).toBe(false);
+    service.stop();
+  });
+
+  it("does not create a status-bar action in the mobile app host", async () => {
+    (Platform as any).isDesktopApp = false;
+    (Platform as any).isMobile = true;
+    (Platform as any).isMobileApp = true;
+    const plugin = createPlugin();
+    const service = new PluginUpdateService(plugin, {
+      request: jest.fn().mockResolvedValue({ status: 200, json: releaseBody() }),
+      notify: jest.fn(),
+    });
+
+    await service.start();
+
+    expect(plugin.addStatusBarItem).not.toHaveBeenCalled();
     service.stop();
   });
 

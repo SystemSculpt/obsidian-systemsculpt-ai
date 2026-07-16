@@ -4,7 +4,7 @@ export const terminalNode: StudioNodeDefinition = {
   kind: "studio.terminal",
   version: "1.0.0",
   hiddenFromInsertMenu: true,
-  hostRequirement: "desktop",
+  requiredHostCapabilities: ["local-cli"],
   capabilityClass: "local_io",
   cachePolicy: "never",
   inputPorts: [],

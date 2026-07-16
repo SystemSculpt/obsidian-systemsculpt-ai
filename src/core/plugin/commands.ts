@@ -3,6 +3,7 @@ import SystemSculptPlugin from "../../main";
 import { RibbonManager } from "./ribbons";
 import { tryCopyToClipboard } from "../../utils/clipboard";
 import { resolveAbsoluteVaultPath } from "../../utils/vaultPathUtils";
+import { hasHostCapability } from "../../platform/hostCapabilities";
 import { WORKFLOW_AUTOMATIONS } from "../../constants/workflowAutomations";
 import { showConfirm } from "../ui/notifications";
 import { getSurfaceOwnerWindow, resolveSurfaceDomContext } from "../ui/surface";
@@ -498,7 +499,7 @@ export class CommandManager {
 
           if (!fallbackStudioFile) {
             const project = await this.createAndOpenStudioProject();
-            new Notice(`No Studio project found. Created and opened: ${project.name}`);
+            new Notice(`Created Studio project: ${project.name}`);
             return;
           }
 
@@ -565,6 +566,9 @@ export class CommandManager {
     this.plugin.addCommand({
       id: "copy-current-file-path",
       name: "Copy current file path",
+      // This workflow intentionally ships with the documented product shortcut.
+      // eslint-disable-next-line obsidianmd/commands/no-default-hotkeys
+      hotkeys: [{ modifiers: ["Mod", "Shift"], key: "c" }],
       checkCallback: (checking: boolean) => {
         const currentFilePath = this.getCurrentActiveFilePath();
         if (!currentFilePath) {
@@ -620,32 +624,29 @@ export class CommandManager {
   }
 
   private getCurrentActiveFilePath(): string | null {
-    const activeFile = this.app.workspace.getActiveFile();
-    if (activeFile instanceof TFile && activeFile.path) {
-      return activeFile.path;
-    }
-
     const activeLeaf = (this.app.workspace as { activeLeaf?: WorkspaceLeaf | null }).activeLeaf ?? null;
-    const activeLeafPath = this.resolveLeafFilePath(activeLeaf);
-    if (activeLeafPath) {
-      return activeLeafPath;
-    }
 
     const activeChatView = this.getActiveChatView();
     if (activeChatView) {
       const chatFilePath = this.resolveVaultFilePath(activeChatView.getChatHistoryFilePath?.());
-      if (chatFilePath) {
-        return chatFilePath;
-      }
+      return chatFilePath;
     }
 
     const activeStudioView = this.getActiveStudioView();
     if (activeStudioView) {
       const viewState = activeStudioView.getState();
       const stateFilePath = this.resolveVaultFilePath((viewState as { file?: unknown }).file);
-      if (stateFilePath) {
-        return stateFilePath;
-      }
+      return stateFilePath;
+    }
+
+    const activeLeafPath = this.resolveLeafFilePath(activeLeaf);
+    if (activeLeafPath) {
+      return activeLeafPath;
+    }
+
+    const activeFile = this.app.workspace.getActiveFile();
+    if (activeFile instanceof TFile && activeFile.path) {
+      return activeFile.path;
     }
 
     return null;
@@ -747,19 +748,20 @@ export class CommandManager {
   }
 
   private async copyActiveFilePathToClipboard(vaultFilePath: string): Promise<void> {
-    const absolutePath = resolveAbsoluteVaultPath(this.app.vault.adapter, vaultFilePath);
-    if (!absolutePath) {
-      new Notice("Unable to resolve the full file path.");
-      return;
-    }
+    const absolutePath = hasHostCapability("absolute-paths")
+      ? resolveAbsoluteVaultPath(this.app.vault.adapter, vaultFilePath)
+      : null;
+    const clipboardPath = absolutePath ?? vaultFilePath;
 
-    const copied = await tryCopyToClipboard(absolutePath);
+    const copied = await tryCopyToClipboard(clipboardPath);
     if (!copied) {
       new Notice("Unable to copy file path to clipboard.");
       return;
     }
 
-    new Notice("File path copied to clipboard.");
+    new Notice(absolutePath
+      ? "Full file path copied to clipboard."
+      : "Vault-relative file path copied to clipboard.");
   }
 
   private registerEmbeddingsDatabaseCommands() {

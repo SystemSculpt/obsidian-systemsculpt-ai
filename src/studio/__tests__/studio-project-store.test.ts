@@ -10,6 +10,8 @@ type InMemoryApp = {
       writeBinary: (path: string, data: ArrayBuffer) => Promise<void>;
       read: (path: string) => Promise<string>;
       readBinary: (path: string) => Promise<ArrayBuffer>;
+      process: (path: string, update: (data: string) => string) => Promise<string>;
+      copy: (source: string, destination: string) => Promise<void>;
       list: (path: string) => Promise<{ files: string[]; folders: string[] }>;
       remove: (path: string) => Promise<void>;
       rename: (source: string, destination: string) => Promise<void>;
@@ -50,6 +52,21 @@ function createStore(options?: { existingFiles?: string[]; existingDirs?: string
       const value = files.get(path);
       if (typeof value === "undefined") throw new Error(`File not found: ${path}`);
       return new TextEncoder().encode(value).buffer;
+    }),
+    process: jest.fn(async (path: string, update: (data: string) => string) => {
+      const value = files.get(path);
+      if (typeof value === "undefined") throw new Error(`File not found: ${path}`);
+      const nextValue = update(value);
+      files.set(path, nextValue);
+      return nextValue;
+    }),
+    copy: jest.fn(async (source: string, destination: string) => {
+      const value = files.get(source);
+      if (typeof value === "undefined") throw new Error(`File not found: ${source}`);
+      if (files.has(destination) || dirs.has(destination)) {
+        throw new Error(`Path already exists: ${destination}`);
+      }
+      files.set(destination, value);
     }),
     list: jest.fn(async (path: string) => {
       const prefix = path ? `${path}/` : "";
@@ -184,7 +201,51 @@ describe("StudioProjectStore", () => {
     }
   });
 
-  it("renames the Studio project file and assets tree together", async () => {
+  it("force reload invalidates the selected generation and ingests a one-file external edit", async () => {
+    const { store, files } = createStore();
+    const created = await store.createProject({ name: "Direct edit", minPluginVersion: "4.13.0", maxRuns: 100, maxArtifactsMb: 512 });
+    expect((await store.loadProject(created.path)).name).toBe("Direct edit");
+
+    const externallyEdited = JSON.parse(files.get(created.path)!) as Record<string, unknown>;
+    externallyEdited.name = "Edited outside Studio";
+    externallyEdited.updatedAt = "2026-07-15T12:00:00.000Z";
+    files.set(created.path, `${JSON.stringify(externallyEdited, null, 2)}\n`);
+
+    expect((await store.loadProject(created.path)).name).toBe("Direct edit");
+    expect((await store.loadProject(created.path, { forceReload: true })).name).toBe("Edited outside Studio");
+    const recovered = await store.generations.recover(created.project.projectId);
+    expect(recovered.status).toBe("ready");
+    if (recovered.status === "ready") {
+      expect(recovered.expectedGeneration.revision).toBe(1);
+      expect(recovered.generation.metadata.commandKind).toBe("external_sync");
+    }
+  });
+
+  it("keeps persistence bookkeeping out of project-file errors", async () => {
+    const { store, files } = createStore();
+    const created = await store.createProject({
+      name: "Invalid file",
+      minPluginVersion: "4.13.0",
+      maxRuns: 100,
+      maxArtifactsMb: 512,
+    });
+    files.set(created.path, "{");
+
+    let message = "";
+    try {
+      await store.loadProject(created.path, { forceReload: true });
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+
+    expect(message).toContain("Studio couldn't read this project file");
+    expect(message).not.toMatch(
+      /external|sync|projection|authority|generation|candidate|marker|revision|hash/i
+    );
+    expect(files.get(created.path)).toBe("{");
+  });
+
+  it("publishes a renamed projection and retires the old visible paths safely", async () => {
     const { store, files, dirs } = createStore();
 
     const created = await store.createProject({
@@ -213,6 +274,7 @@ describe("StudioProjectStore", () => {
     expect(files.has(`${newAssetsDir}/project.manifest.json`)).toBe(true);
     expect(files.has(`${oldAssetsDir}/assets/sha256/aa/${"a".repeat(64)}.txt`)).toBe(false);
     expect(files.has(`${newAssetsDir}/assets/sha256/aa/${"a".repeat(64)}.txt`)).toBe(true);
+    expect([...files.keys()].some((path) => path.includes("/retired/"))).toBe(true);
     expect(renamedProject.name).toBe("Renamed");
     expect(renamedProject.permissionsRef.policyPath).toBe(deriveStudioPolicyPath(renamed.newPath));
   });

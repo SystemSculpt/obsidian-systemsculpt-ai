@@ -38,6 +38,47 @@ type CreateProjectOptions = {
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
+type StudioPersistenceFailure = {
+  status: string;
+  message?: string;
+};
+
+function studioPersistenceError(
+  action: "open" | "create" | "rename" | "save",
+  failure: StudioPersistenceFailure
+): Error {
+  console.warn("[SystemSculpt Studio] Project persistence operation failed", {
+    action,
+    status: failure.status,
+    detail: failure.message,
+  });
+  if (failure.status === "future_unsupported") {
+    return new Error("This Studio project needs a newer version of SystemSculpt.");
+  }
+  if (failure.status === "storage_unavailable") {
+    return new Error("Studio couldn't access this project right now. The project file was not changed.");
+  }
+  if (failure.status === "invalid_candidate") {
+    const rawDetail = String(failure.message || "");
+    const safeValidationPrefix = /^The Studio project file is invalid:\s*/i;
+    if (safeValidationPrefix.test(rawDetail)) {
+      const detail = rawDetail.replace(safeValidationPrefix, "").trim();
+      return new Error(`Studio couldn't read this project file: ${detail}`);
+    }
+    return new Error("Studio couldn't read this project file. The file was not changed.");
+  }
+  if (action === "save") {
+    return new Error("This project file changed before Studio could save. Studio left the file untouched.");
+  }
+  if (action === "create") {
+    return new Error("Studio couldn't create this project. No project file was changed.");
+  }
+  if (action === "rename") {
+    return new Error("Studio couldn't rename this project. The existing project file was not changed.");
+  }
+  return new Error("Studio couldn't safely open this project. The project file was left untouched.");
+}
+
 export class StudioProjectStore {
   readonly generations: StudioProjectGenerationStore;
   private readonly selectedByPath = new Map<string, { token: ExpectedGeneration; generation: SelectedGeneration }>();
@@ -71,12 +112,19 @@ export class StudioProjectStore {
     this.selectedByPath.set(normalizeStudioProjectPath(path), { token, generation });
   }
 
-  private async openSelected(projectPath: string): Promise<{ token: ExpectedGeneration; generation: SelectedGeneration }> {
+  private async openSelected(projectPath: string, options?: { forceReload?: boolean }): Promise<{ token: ExpectedGeneration; generation: SelectedGeneration }> {
     const path = normalizeStudioProjectPath(projectPath);
     const cached = this.selectedByPath.get(path);
-    if (cached) return cached;
+    if (cached && options?.forceReload !== true) return cached;
+    if (options?.forceReload === true) this.selectedByPath.delete(path);
+    if (cached) {
+      const opened = await this.generations.open(cached.generation.metadata.projectId, { vaultRelativeProjectPath: path });
+      if (opened.status !== "ready") throw studioPersistenceError("open", opened);
+      this.remember(path, opened.expectedGeneration, opened.generation);
+      return { token: opened.expectedGeneration, generation: opened.generation };
+    }
     const adopted = await this.generations.discoverAndAdopt({ vaultRelativeProjectPath: path });
-    if (adopted.status !== "committed") throw new Error(`Studio project is read-only (${adopted.status}): ${"message" in adopted ? adopted.message : "conflict"}`);
+    if (adopted.status !== "committed") throw studioPersistenceError("open", adopted);
     this.remember(path, adopted.expectedGeneration, adopted.generation);
     return { token: adopted.expectedGeneration, generation: adopted.generation };
   }
@@ -100,7 +148,7 @@ export class StudioProjectStore {
       policyDocument: encoder.encode(serializeStudioPolicy(createDefaultStudioPolicy())),
       projectManifest: encoder.encode(`${JSON.stringify({ schema: "studio.manifest.v1", projectId: project.projectId, projectPath, assetsDir: deriveStudioAssetsDir(projectPath), createdAt: nowIso() }, null, 2)}\n`),
     }, { vaultRelativeProjectPath: projectPath });
-    if (result.status !== "committed") throw new Error(`Unable to create Studio project (${result.status}).`);
+    if (result.status !== "committed") throw studioPersistenceError("create", result);
     this.remember(projectPath, result.expectedGeneration, result.generation);
     return { path: projectPath, project };
   }
@@ -121,9 +169,53 @@ export class StudioProjectStore {
       projectDocument: encoder.encode(serializeStudioProject(project)),
       projectManifest: encoder.encode(`${JSON.stringify({ schema: "studio.manifest.v1", projectId: project.projectId, projectPath: newPath, assetsDir: deriveStudioAssetsDir(newPath), createdAt: nowIso() }, null, 2)}\n`),
     }, selected.token);
-    if (result.status !== "committed") throw new Error(`Unable to rename Studio project (${result.status}).`);
+    if (result.status !== "committed") throw studioPersistenceError("rename", result);
     this.selectedByPath.delete(oldPath); this.remember(newPath, result.expectedGeneration, result.generation);
     return { oldPath, newPath, project: parseStudioProject(decoder.decode(result.generation.files.get("project.systemsculpt")!)) };
+  }
+
+  async adoptVisibleProjectRename(options: {
+    oldPath: string;
+    newPath: string;
+    movedRawText: string;
+    project: StudioProjectV1;
+  }): Promise<{ oldPath: string; newPath: string; project: StudioProjectV1 }> {
+    const oldPath = normalizeStudioProjectPath(options.oldPath);
+    const newPath = normalizeStudioProjectPath(options.newPath);
+    const selected = await this.openSelected(oldPath);
+    const movedProject = parseStudioProject(options.movedRawText);
+    if (movedProject.projectId !== selected.generation.metadata.projectId) {
+      throw new Error("The renamed Studio file does not match the open project.");
+    }
+    const project = cloneStudioProjectSnapshot(options.project);
+    if (project.projectId !== selected.generation.metadata.projectId) {
+      throw new Error("The open Studio canvas does not match the renamed project.");
+    }
+    const result = await this.generations.commitWholeGeneration({
+      kind: "logical_rename",
+      projectId: project.projectId,
+      locator: { vaultRelativeProjectPath: newPath },
+      destinationProjectDocumentBeforeRename: encoder.encode(options.movedRawText),
+      projectDocument: encoder.encode(serializeStudioProject({ ...project, updatedAt: nowIso() })),
+      projectManifest: encoder.encode(`${JSON.stringify({
+        schema: "studio.manifest.v1",
+        projectId: project.projectId,
+        projectPath: newPath,
+        assetsDir: deriveStudioAssetsDir(newPath),
+        createdAt: nowIso(),
+      }, null, 2)}\n`),
+    }, selected.token);
+    if (result.status !== "committed") throw studioPersistenceError("rename", result);
+    const renamedProject = parseStudioProject(
+      decoder.decode(result.generation.files.get("project.systemsculpt")!)
+    );
+    this.selectedByPath.delete(oldPath);
+    this.remember(newPath, result.expectedGeneration, result.generation);
+    return { oldPath, newPath, project: renamedProject };
+  }
+
+  async readVisibleProjectRawText(projectPath: string): Promise<string> {
+    return await this.app.vault.adapter.read(normalizeStudioProjectPath(projectPath));
   }
 
   async readProjectRawText(projectPath: string): Promise<string | null> {
@@ -131,19 +223,26 @@ export class StudioProjectStore {
     catch { return null; }
   }
 
-  async loadProject(projectPath: string): Promise<StudioProjectV1> {
-    const raw = await this.readProjectRawText(projectPath);
-    if (raw == null) throw new Error(`Studio project not found: ${normalizeStudioProjectPath(projectPath)}`);
-    return parseStudioProject(raw);
+  async loadProject(projectPath: string, options?: { forceReload?: boolean }): Promise<StudioProjectV1> {
+    const selected = await this.openSelected(projectPath, options);
+    const document = selected.generation.files.get("project.systemsculpt");
+    if (!document) throw new Error(`Studio project not found: ${normalizeStudioProjectPath(projectPath)}`);
+    return parseStudioProject(decoder.decode(document));
   }
 
-  async saveProject(projectPath: string, project: StudioProjectV1): Promise<void> {
+  async saveProject(
+    projectPath: string,
+    project: StudioProjectV1,
+    options?: { onBeforeProjectWrite?: (rawText: string) => void }
+  ): Promise<void> {
     const path = normalizeStudioProjectPath(projectPath);
+    const projectDocument = serializeStudioProject({ ...project, updatedAt: nowIso() });
+    options?.onBeforeProjectWrite?.(projectDocument);
     await this.commitCommand(path, {
       kind: "replace_project",
       projectId: project.projectId,
       reason: "discrete_save",
-      projectDocument: encoder.encode(serializeStudioProject({ ...project, updatedAt: nowIso() })),
+      projectDocument: encoder.encode(projectDocument),
     });
   }
 
@@ -205,7 +304,7 @@ export class StudioProjectStore {
     let selected = await this.openSelected(path);
     if (options?.refresh) {
       const opened = await this.generations.open(command.projectId, { vaultRelativeProjectPath: path });
-      if (opened.status !== "ready") throw new Error(`Studio project is read-only (${opened.status}).`);
+      if (opened.status !== "ready") throw studioPersistenceError("save", opened);
       selected = { token: opened.expectedGeneration, generation: opened.generation };
       this.remember(path, selected.token, selected.generation);
     }
@@ -215,11 +314,11 @@ export class StudioProjectStore {
       // project-document saves intentionally do not enter this retry path.
 
       const reopened = await this.generations.open(command.projectId, { vaultRelativeProjectPath: path });
-      if (reopened.status !== "ready") throw new Error(`Studio project is read-only (${reopened.status}).`);
+      if (reopened.status !== "ready") throw studioPersistenceError("save", reopened);
 
       result = await this.generations.commitWholeGeneration(command, reopened.expectedGeneration);
     }
-    if (result.status !== "committed") throw new Error(`Studio generation commit failed (${result.status}).`);
+    if (result.status !== "committed") throw studioPersistenceError("save", result);
     this.remember(path, result.expectedGeneration, result.generation);
   }
 

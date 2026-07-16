@@ -219,7 +219,7 @@
 /* Respond to the modal, not the app window. */
 @container ss-surface (max-width: 520px) {
   .ss-janitor-stats {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .ss-janitor-actions {
@@ -233,6 +233,38 @@
   .ss-janitor-preview-path {
     white-space: normal;
     word-break: break-all;
+  }
+}
+
+.ss-mobile-layout .ss-janitor-modal .ss-modal__content {
+  padding: var(--ss-space-3);
+}
+
+.ss-mobile-layout .ss-janitor-sections {
+  gap: var(--ss-space-3);
+}
+
+.ss-mobile-layout .ss-janitor-section-header {
+  padding: var(--ss-space-3) var(--ss-space-4);
+}
+
+.ss-mobile-layout .ss-janitor-section-content {
+  padding: var(--ss-space-3);
+}
+
+.ss-mobile-layout .ss-janitor-stat-card {
+  align-items: flex-start;
+  gap: var(--ss-space-2);
+  padding: var(--ss-space-2);
+}
+
+.ss-mobile-layout .ss-janitor-actions {
+  margin-top: var(--ss-space-3);
+}
+
+@container ss-surface (max-width: 300px) {
+  .ss-janitor-stats {
+    grid-template-columns: 1fr;
   }
 }
 

@@ -17,7 +17,7 @@ Source of truth:
 | Open SystemSculpt AI Settings |  | `open-systemsculpt-settings` | Opens plugin settings tab |
 | Open Credits & Usage |  | `open-credits-balance` | Opens the credits/usage modal |
 | Reload Obsidian |  | `reload-obsidian` | Reloads app window |
-| Copy Current File Path | `Mod+Shift+C` | `copy-current-file-path` | Available when the active tab resolves to a vault file (note, PDF, canvas, base, Studio project, etc.); copies the full filesystem path |
+| Copy Current File Path | `Mod+Shift+C` | `copy-current-file-path` | Copies the full filesystem path on desktop and the vault-relative path on mobile for the focused vault-backed tab |
 
 ## Chat and writing
 

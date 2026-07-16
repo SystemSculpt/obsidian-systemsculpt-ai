@@ -4,13 +4,14 @@ import {
   MarkdownRenderer,
   Notice,
   normalizePath,
-  Platform,
   TAbstractFile,
   TFile,
   TFolder,
   WorkspaceLeaf,
 } from "obsidian";
 import type SystemSculptPlugin from "../../main";
+import { hasHostCapability, resolveElectronModule } from "../../platform/hostCapabilities";
+import { isMobileLayout } from "../../platform/mobileLayout";
 import { randomId } from "../../studio/utils";
 import type {
   StudioAssetRef,
@@ -101,6 +102,7 @@ import { isStudioGraphEditableTarget } from "./StudioGraphDomTargeting";
 import {
   getStudioOwnerDocument,
   getStudioOwnerWindow,
+  requestStudioAnimationFrame,
 } from "./StudioDomContext";
 import { tryCopyImageFileToClipboard, tryCopyToClipboard } from "../../utils/clipboard";
 import { isAbsoluteFilesystemPath, resolveAbsoluteVaultPath } from "../../utils/vaultPathUtils";
@@ -126,6 +128,7 @@ import {
   consumeStudioGraphUndoSnapshot,
   createStudioGraphHistoryState,
   resetStudioGraphHistory,
+  preserveStudioGraphHistoryUndoSnapshot,
   setStudioGraphHistoryCurrentSnapshot,
   captureStudioGraphHistoryCheckpoint,
 } from "./systemsculpt-studio-view/StudioGraphHistoryState";
@@ -229,8 +232,8 @@ export class SystemSculptStudioView extends ItemView {
     return this.projectSessionController.getProjectSession();
   }
 
-  private get projectLiveSyncWarning(): string | null {
-    return this.projectSessionController.getProjectLiveSyncWarning();
+  private get projectFileWarning(): string | null {
+    return this.projectSessionController.getProjectFileWarning();
   }
 
   constructor(
@@ -268,11 +271,16 @@ export class SystemSculptStudioView extends ItemView {
       getGraphViewportElement: () => this.graphViewportEl,
       captureProjectHistoryCheckpoint: () => this.captureProjectHistoryCheckpoint(),
       resetProjectHistory: (project) => this.resetProjectHistory(project),
+      preserveProjectAsUndo: (project, selectedNodeIds) =>
+        this.preserveProjectAsUndo(project, selectedNodeIds),
       setHistoryCurrentSnapshot: (project, selectedNodeIds) =>
         this.setHistoryCurrentSnapshot(project, selectedNodeIds),
       clearProjectEditorState: () => this.clearProjectEditorState(),
       clearRunPresentation: () => this.runPresentation.reset(),
       disposeTextNodeEditors: () => this.disposeTextNodeEditors(),
+      scheduleProjectFileRetry: (callback) => {
+        getStudioOwnerWindow(this.contentEl).setTimeout(callback, 120);
+      },
       hydrateProjectCache: async (projectPath, project) => {
         const cacheSnapshot = await this.plugin.getStudioService().getProjectNodeCache(projectPath);
         if (cacheSnapshot) {
@@ -440,6 +448,15 @@ export class SystemSculptStudioView extends ItemView {
 
   private resetProjectHistory(project: StudioProjectV1 | null, options?: { selectedNodeIds?: string[] }): void {
     resetStudioGraphHistory(this.historyState, project, options);
+  }
+
+  private preserveProjectAsUndo(project: StudioProjectV1, selectedNodeIds: string[]): void {
+    preserveStudioGraphHistoryUndoSnapshot(
+      this.historyState,
+      project,
+      selectedNodeIds,
+      STUDIO_GRAPH_HISTORY_MAX_SNAPSHOTS
+    );
   }
 
   private clearProjectEditorState(): void {
@@ -3259,8 +3276,9 @@ export class SystemSculptStudioView extends ItemView {
       new Notice("No media path available to reveal.");
       return;
     }
-    if (!Platform.isDesktopApp) {
-      new Notice("Reveal in Finder is desktop-only.");
+    const ownerWindow = getStudioOwnerWindow(this.contentEl);
+    if (!hasHostCapability("file-manager-reveal", ownerWindow)) {
+      new Notice("Opening files in the system file manager is unavailable on this device.");
       return;
     }
 
@@ -3287,8 +3305,13 @@ export class SystemSculptStudioView extends ItemView {
       return;
     }
 
-    const runtimeRequire = (getStudioOwnerWindow(this.contentEl) as any)?.require;
-    const electron = typeof runtimeRequire === "function" ? runtimeRequire("electron") : null;
+    const electron = resolveElectronModule<{
+      shell?: {
+        showItemInFolder?: (path: string) => void;
+        openPath?: (path: string) => Promise<unknown> | unknown;
+        openExternal?: (url: string) => Promise<unknown> | unknown;
+      };
+    }>(ownerWindow);
     const shell = electron?.shell;
     try {
       if (typeof shell?.showItemInFolder === "function") {
@@ -3315,7 +3338,7 @@ export class SystemSculptStudioView extends ItemView {
       // Fall through to notice.
     }
 
-    new Notice(`Unable to open in Finder: ${rawPath}`);
+    new Notice(`Unable to open in the system file manager: ${rawPath}`);
   }
 
   private renderGraphEditor(root: HTMLElement): void {
@@ -3445,7 +3468,19 @@ export class SystemSculptStudioView extends ItemView {
       this.handleGraphViewportPointerDown(event);
     }, true);
     this.clipboardAndDropController.bindViewport(this.graphViewportEl);
-    this.restoreGraphViewportState(this.graphViewportEl);
+    const restoredViewport = this.restoreGraphViewportState(this.graphViewportEl);
+    if (
+      !restoredViewport
+      && isMobileLayout(this.graphViewportEl)
+      && this.currentProject.graph.nodes.length > 0
+    ) {
+      const viewport = this.graphViewportEl;
+      requestStudioAnimationFrame(viewport, () => {
+        if (this.graphViewportEl === viewport) {
+          this.fitGraphOverviewInViewport();
+        }
+      });
+    }
     this.syncGraphZoomVisualState();
     const contextMenu = this.ensureNodeContextMenuOverlay();
     const nodeActionMenu = this.ensureNodeActionContextMenuOverlay();
@@ -3463,8 +3498,8 @@ export class SystemSculptStudioView extends ItemView {
     this.projectSessionController.captureGraphViewportState(options);
   }
 
-  private restoreGraphViewportState(viewport: HTMLElement): void {
-    this.projectSessionController.restoreGraphViewportState(viewport);
+  private restoreGraphViewportState(viewport: HTMLElement): boolean {
+    return this.projectSessionController.restoreGraphViewportState(viewport);
   }
 
   /**
@@ -3505,9 +3540,9 @@ export class SystemSculptStudioView extends ItemView {
         cls: "ss-studio-error",
       });
     }
-    if (this.projectLiveSyncWarning) {
+    if (this.projectFileWarning) {
       root.createDiv({
-        text: this.projectLiveSyncWarning,
+        text: this.projectFileWarning,
         cls: "ss-studio-warning",
       });
     }

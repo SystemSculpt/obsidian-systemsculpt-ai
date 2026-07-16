@@ -1,4 +1,4 @@
-import { Platform } from "obsidian";
+import { hasHostCapability } from "../platform/hostCapabilities";
 import type { StudioNodeDefinition, StudioNodeInstance, StudioProjectV1 } from "./types";
 
 export type StudioNodeHostAvailability = Readonly<{
@@ -25,16 +25,16 @@ const DESKTOP_ONLY: StudioNodeHostAvailability = Object.freeze({
 
 /** One host policy shared by the Studio registry, presentation, and runtime. */
 export function resolveStudioNodeHostAvailability(
-  definition: Pick<StudioNodeDefinition, "hostRequirement">,
+  definition: Pick<StudioNodeDefinition, "requiredHostCapabilities">,
 ): StudioNodeHostAvailability {
-  if (definition.hostRequirement !== "desktop" || Platform.isDesktopApp) {
+  if (definition.requiredHostCapabilities.every((capability) => hasHostCapability(capability))) {
     return AVAILABLE;
   }
   return DESKTOP_ONLY;
 }
 
 export function assertStudioNodeHostAvailable(
-  definition: Pick<StudioNodeDefinition, "hostRequirement" | "kind">,
+  definition: Pick<StudioNodeDefinition, "requiredHostCapabilities" | "kind">,
 ): void {
   const availability = resolveStudioNodeHostAvailability(definition);
   if (!availability.available) {
@@ -44,7 +44,9 @@ export function assertStudioNodeHostAvailable(
 
 export function collectStudioHostUnavailableNodes(
   project: Pick<StudioProjectV1, "graph">,
-  resolveDefinition: (node: StudioNodeInstance) => Pick<StudioNodeDefinition, "hostRequirement" | "kind"> | null,
+  resolveDefinition: (
+    node: StudioNodeInstance,
+  ) => Pick<StudioNodeDefinition, "requiredHostCapabilities" | "kind"> | null,
 ): StudioHostUnavailableNode[] {
   const blocked: StudioHostUnavailableNode[] = [];
   for (const node of project.graph.nodes) {

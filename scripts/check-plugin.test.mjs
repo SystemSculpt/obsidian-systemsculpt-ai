@@ -8,7 +8,10 @@ const packageJson = JSON.parse(
 );
 
 test("package scripts preserve fast edit and exhaustive verification tiers", () => {
-  assert.equal(packageJson.scripts.check, "npm run check:plugin:fast");
+  assert.equal(
+    packageJson.scripts.check,
+    "npm run check:plugin:fast && npm run test:mobile:bundle",
+  );
   assert.equal(packageJson.scripts["check:all"], "npm run check:full");
   assert.equal(
     packageJson.scripts["check:full"],

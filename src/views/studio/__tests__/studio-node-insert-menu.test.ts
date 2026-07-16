@@ -4,12 +4,14 @@ import { terminalNode } from "../../../studio/nodes/terminalNode";
 import { textNode } from "../../../studio/nodes/textNode";
 import { textOutputNode } from "../../../studio/nodes/textOutputNode";
 import { textGenerationNode } from "../../../studio/nodes/textGenerationNode";
+import { registerBuiltInStudioNodes } from "../../../studio/StudioBuiltInNodes";
 import {
   assertStudioNodeHostAvailable,
   collectStudioHostUnavailableNodes,
   formatStudioHostUnavailableNodesNotice,
   resolveStudioNodeHostAvailability,
 } from "../../../studio/StudioHostCapabilities";
+import { StudioNodeRegistry } from "../../../studio/StudioNodeRegistry";
 import { buildNodeInsertMenuItems, prettifyNodeKind } from "../StudioViewHelpers";
 
 describe("buildNodeInsertMenuItems", () => {
@@ -69,6 +71,35 @@ describe("buildNodeInsertMenuItems", () => {
     expect(() => assertStudioNodeHostAvailable(cliCommandNode)).toThrow(
       "studio.cli_command: This node requires Obsidian Desktop.",
     );
+  });
+
+  it("declares explicit host capabilities for every built-in node", () => {
+    const registry = new StudioNodeRegistry();
+    registerBuiltInStudioNodes(registry);
+
+    const capabilitiesByKind = Object.fromEntries(
+      registry.list()
+        .map((definition) => [definition.kind, definition.requiredHostCapabilities])
+        .sort(([left], [right]) => left.localeCompare(right)),
+    );
+
+    expect(capabilitiesByKind).toEqual({
+      "studio.audio_extract": ["local-filesystem", "absolute-paths", "local-cli"],
+      "studio.cli_command": ["local-cli"],
+      "studio.dataset": ["local-filesystem", "absolute-paths", "local-cli"],
+      "studio.image_generation": [],
+      "studio.input": [],
+      "studio.json": [],
+      "studio.media_ingest": [],
+      "studio.note": [],
+      "studio.retired_http_request": [],
+      "studio.terminal": ["local-cli"],
+      "studio.text": [],
+      "studio.text_generation": [],
+      "studio.text_output": [],
+      "studio.transcription": [],
+      "studio.value": [],
+    });
   });
 
   it("collects and formats desktop-only run blockers in project order", () => {

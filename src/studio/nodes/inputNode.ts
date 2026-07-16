@@ -4,6 +4,7 @@ import { getText } from "./shared";
 export const inputNode: StudioNodeDefinition = {
   kind: "studio.input",
   version: "1.0.0",
+  requiredHostCapabilities: [],
   capabilityClass: "local_cpu",
   cachePolicy: "by_inputs",
   inputPorts: [],

@@ -148,19 +148,207 @@ describe("StudioProjectSession", () => {
     expect(saveProject).toHaveBeenCalledTimes(2);
   });
 
-  it("defers external file updates while local save work is still pending", () => {
+  it("blocks a queued canvas save without pretending the canvas was persisted", () => {
+    const saveProject = jest.fn(async () => {});
     const session = new StudioProjectSession({
       projectPath: "Studio/Test.systemsculpt",
       project: projectFixture(),
-      saveProject: jest.fn(async () => {}),
+      saveProject,
       readProjectRawText: jest.fn(async () => "{}"),
       discreteDelayMs: 40,
     });
 
     session.schedulePersist({ mode: "discrete" });
-    const result = session.resolveExternalProjectTextUpdate('{"schema":"studio.project.v1"}');
+    session.blockProjectFileWrites();
+    jest.advanceTimersByTime(100);
+    expect(saveProject).not.toHaveBeenCalled();
+    expect(session.hasPendingLocalSaveWork()).toBe(true);
+  });
 
-    expect(result.decision).toEqual({ kind: "defer", reason: "local_save_pending" });
-    expect(session.hasDeferredExternalSync()).toBe(true);
+  it("recognizes its own project write before the vault modify event fires", async () => {
+    let session!: StudioProjectSession;
+    const rawText = '{"schema":"studio.project.v1","name":"Saved"}';
+    const decisions: unknown[] = [];
+    const saveProject = jest.fn(async (
+      _path: string,
+      _project: StudioProjectV1,
+      onBeforeProjectWrite?: (raw: string) => void
+    ) => {
+      onBeforeProjectWrite?.(rawText);
+      decisions.push(session.resolveProjectFileTextUpdate(rawText).decision);
+    });
+    session = new StudioProjectSession({
+      projectPath: "Studio/Test.systemsculpt",
+      project: projectFixture(),
+      saveProject,
+      readProjectRawText: jest.fn(async () => rawText),
+      discreteDelayMs: 0,
+    });
+
+    session.schedulePersist({ mode: "discrete" });
+    await session.flushPendingSaveWork({ force: true });
+
+    expect(decisions).toEqual([{ kind: "ignore", reason: "self_write" }]);
+    expect(session.hasPendingLocalSaveWork()).toBe(false);
+  });
+
+  it("does not overwrite an invalid project file while the canvas keeps changing", async () => {
+    const saveProject = jest.fn(async () => {});
+    const saveBlockedProjectRecovery = jest.fn(async () => {});
+    const session = new StudioProjectSession({
+      projectPath: "Studio/Test.systemsculpt",
+      project: projectFixture(),
+      saveProject,
+      readProjectRawText: jest.fn(async () => "{"),
+      saveBlockedProjectRecovery,
+      discreteDelayMs: 0,
+    });
+
+    session.blockProjectFileWrites();
+    session.mutate("node.title", (project) => {
+      project.name = "Still editable in memory";
+    });
+    await session.flushPendingSaveWork({ force: true });
+    await session.close();
+
+    expect(saveProject).not.toHaveBeenCalled();
+    expect(saveBlockedProjectRecovery).toHaveBeenCalledTimes(1);
+    expect(session.hasPendingLocalSaveWork()).toBe(true);
+  });
+
+  it("reevaluates the last valid bytes after a malformed edit is fixed exactly", () => {
+    const session = new StudioProjectSession({
+      projectPath: "Studio/Test.systemsculpt",
+      project: projectFixture(),
+      saveProject: jest.fn(async () => {}),
+    });
+    const validText = '{"schema":"studio.project.v1","name":"Valid"}';
+    const malformedText = "{";
+    session.markAcceptedProjectText(validText);
+    const malformed = session.resolveProjectFileTextUpdate(malformedText);
+    session.markRejectedProjectSignature(malformed.signature);
+
+    expect(session.resolveProjectFileTextUpdate(validText).decision).toEqual({ kind: "evaluate" });
+  });
+
+  it("keeps the file-write block across ordinary Undo snapshot replacement", async () => {
+    const saveProject = jest.fn(async () => {});
+    const session = new StudioProjectSession({
+      projectPath: "Studio/Test.systemsculpt",
+      project: projectFixture(),
+      saveProject,
+      discreteDelayMs: 0,
+    });
+    session.blockProjectFileWrites();
+    session.replaceProjectSnapshot(projectFixture(), { notifyListeners: false });
+    session.schedulePersist({ mode: "discrete", reason: "history.apply" });
+    await session.flushPendingSaveWork({ force: true });
+
+    expect(saveProject).not.toHaveBeenCalled();
+    expect(session.hasPendingLocalSaveWork()).toBe(true);
+  });
+
+  it("preserves blocked canvas work through the plugin-owned recovery callback on close", async () => {
+    const saveBlockedProjectRecovery = jest.fn(async () => {});
+    const session = new StudioProjectSession({
+      projectPath: "Studio/Test.systemsculpt",
+      project: projectFixture(),
+      saveProject: jest.fn(async () => {}),
+      saveBlockedProjectRecovery,
+      discreteDelayMs: 0,
+    });
+    session.blockProjectFileWrites();
+    session.mutate("node.title", (project) => {
+      project.name = "Unsaved canvas survives close";
+    });
+
+    await session.close();
+
+    expect(saveBlockedProjectRecovery).toHaveBeenCalledWith(
+      "Studio/Test.systemsculpt",
+      expect.objectContaining({ name: "Unsaved canvas survives close" })
+    );
+  });
+
+  it("keeps the session alive when blocked canvas recovery cannot be stored", async () => {
+    const session = new StudioProjectSession({
+      projectPath: "Studio/Test.systemsculpt",
+      project: projectFixture(),
+      saveProject: jest.fn(async () => {}),
+      saveBlockedProjectRecovery: jest.fn(async () => {
+        throw new Error("storage unavailable");
+      }),
+      discreteDelayMs: 0,
+    });
+    session.blockProjectFileWrites();
+    session.mutate("node.title", (project) => {
+      project.name = "Only remaining canvas copy";
+    });
+
+    await expect(session.close()).rejects.toThrow("storage unavailable");
+
+    expect(session.isDisposed()).toBe(false);
+    expect(session.hasPendingLocalSaveWork()).toBe(true);
+    expect(session.getProject().name).toBe("Only remaining canvas copy");
+  });
+
+  it("pauses automatic retries after a save failure instead of looping forever", async () => {
+    const saveProject = jest.fn(async () => {
+      throw new Error("storage unavailable");
+    });
+    const session = new StudioProjectSession({
+      projectPath: "Studio/Test.systemsculpt",
+      project: projectFixture(),
+      saveProject,
+      discreteDelayMs: 40,
+    });
+
+    session.mutate("node.title", (project) => {
+      project.name = "Pending after failure";
+    });
+    jest.advanceTimersByTime(40);
+    await Promise.resolve();
+    await Promise.resolve();
+    jest.advanceTimersByTime(10_000);
+    await Promise.resolve();
+
+    expect(saveProject).toHaveBeenCalledTimes(1);
+    expect(session.getDebugState()).toMatchObject({
+      hasPendingLocalSaveWork: true,
+      saveFailurePaused: true,
+    });
+  });
+
+  it("retries a paused save once after a later explicit mutation", async () => {
+    const saveProject = jest
+      .fn<Promise<void>, [string, StudioProjectV1]>()
+      .mockRejectedValueOnce(new Error("temporary failure"))
+      .mockResolvedValueOnce(undefined);
+    const session = new StudioProjectSession({
+      projectPath: "Studio/Test.systemsculpt",
+      project: projectFixture(),
+      saveProject,
+      readProjectRawText: jest.fn(async () => "{}"),
+      discreteDelayMs: 40,
+    });
+
+    session.mutate("node.title", (project) => {
+      project.name = "First edit";
+    });
+    jest.advanceTimersByTime(40);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(session.getDebugState().saveFailurePaused).toBe(true);
+
+    session.mutate("node.title", (project) => {
+      project.name = "Second edit retries";
+    });
+    jest.advanceTimersByTime(40);
+    await session.flushPendingSaveWork({ force: true });
+
+    expect(saveProject).toHaveBeenCalledTimes(2);
+    expect(session.getProject().name).toBe("Second edit retries");
+    expect(session.hasPendingLocalSaveWork()).toBe(false);
+    expect(session.getDebugState().saveFailurePaused).toBe(false);
   });
 });

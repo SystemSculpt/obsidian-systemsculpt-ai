@@ -144,6 +144,14 @@ export class StudioImageEditorModel {
     });
   }
 
+  toggleCropSelection(): void {
+    if (this.selectedItem?.kind === "crop") {
+      this.select(null);
+      return;
+    }
+    this.ensureCrop();
+  }
+
   clearCrop(): void {
     this.selectedItem = null;
     this.commitDraft({ ...this.boardState, crop: null });

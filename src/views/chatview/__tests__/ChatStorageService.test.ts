@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { App, TFile } from "obsidian";
+import { App, Platform, TFile } from "obsidian";
 import { ChatStorageService } from "../ChatStorageService";
 import { ChatMessage, ChatRole } from "../../../types";
 
@@ -69,6 +69,7 @@ describe("ChatStorageService", () => {
       modify: jest.fn().mockResolvedValue(undefined),
       create: jest.fn().mockResolvedValue(undefined),
       createFolder: jest.fn().mockResolvedValue(undefined),
+      cachedRead: jest.fn().mockResolvedValue(""),
       adapter: {
         exists: jest.fn().mockResolvedValue(true),
       },
@@ -317,6 +318,7 @@ describe("ChatStorageService extended", () => {
       modify: jest.fn().mockResolvedValue(undefined),
       create: jest.fn().mockResolvedValue(undefined),
       createFolder: jest.fn().mockResolvedValue(undefined),
+      cachedRead: jest.fn().mockResolvedValue(""),
       adapter: {
         exists: jest.fn().mockResolvedValue(true),
         list: jest.fn().mockResolvedValue({ files: [], folders: [] }),
@@ -403,6 +405,20 @@ Hello
       expect(mockVault.adapter.read).toHaveBeenCalledTimes(1);
     });
 
+    it("uses Obsidian's cached reader for indexed chat files", async () => {
+      const chatFile = new TFile({ path: "SystemSculpt/Chats/indexed.md" });
+      mockVault.adapter.list.mockResolvedValue({
+        files: [chatFile.path],
+        folders: [],
+      });
+      mockVault.getAbstractFileByPath.mockReturnValue(chatFile);
+
+      await service.loadChats();
+
+      expect(mockVault.cachedRead).toHaveBeenCalledWith(chatFile);
+      expect(mockVault.adapter.read).not.toHaveBeenCalled();
+    });
+
     it("handles errors in individual file reads gracefully", async () => {
       mockVault.adapter.list.mockResolvedValue({
         files: ["SystemSculpt/Chats/chat1.md", "SystemSculpt/Chats/chat2.md"],
@@ -415,6 +431,57 @@ Hello
       const result = await service.loadChats();
 
       expect(Array.isArray(result)).toBe(true);
+    });
+
+    it("bounds parallel reads so mobile vault adapters are not saturated", async () => {
+      const files = Array.from(
+        { length: 24 },
+        (_value, index) => `SystemSculpt/Chats/chat-${index}.md`,
+      );
+      let activeReads = 0;
+      let maxActiveReads = 0;
+      mockVault.adapter.list.mockResolvedValue({ files, folders: [] });
+      mockVault.adapter.read.mockImplementation(async () => {
+        activeReads += 1;
+        maxActiveReads = Math.max(maxActiveReads, activeReads);
+        await new Promise((resolve) => setTimeout(resolve, 1));
+        activeReads -= 1;
+        return "";
+      });
+
+      await service.loadChats();
+
+      expect(mockVault.adapter.read).toHaveBeenCalledTimes(files.length);
+      expect(maxActiveReads).toBeLessThanOrEqual(8);
+      expect(maxActiveReads).toBeGreaterThan(1);
+    });
+
+    it("serializes reads when the host has no local filesystem capability", async () => {
+      const originalDesktopApp = Platform.isDesktopApp;
+      const files = Array.from(
+        { length: 6 },
+        (_value, index) => `SystemSculpt/Chats/portable-${index}.md`,
+      );
+      let activeReads = 0;
+      let maxActiveReads = 0;
+      mockVault.adapter.list.mockResolvedValue({ files, folders: [] });
+      mockVault.adapter.read.mockImplementation(async () => {
+        activeReads += 1;
+        maxActiveReads = Math.max(maxActiveReads, activeReads);
+        await new Promise((resolve) => setTimeout(resolve, 1));
+        activeReads -= 1;
+        return "";
+      });
+
+      (Platform as typeof Platform & { isDesktopApp: boolean }).isDesktopApp = false;
+      try {
+        await service.loadChats();
+      } finally {
+        (Platform as typeof Platform & { isDesktopApp: boolean }).isDesktopApp = originalDesktopApp;
+      }
+
+      expect(mockVault.adapter.read).toHaveBeenCalledTimes(files.length);
+      expect(maxActiveReads).toBe(1);
     });
 
     it("returns empty array on list error", async () => {

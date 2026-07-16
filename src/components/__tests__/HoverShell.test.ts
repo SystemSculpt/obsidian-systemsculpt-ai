@@ -3,11 +3,17 @@
  */
 
 import { createHoverShell } from "../HoverShell";
+import { disposeMobileHostLayoutStates } from "../../platform/mobileHostLayout";
 
 describe("HoverShell", () => {
   beforeEach(() => {
     document.body.innerHTML = "";
+    document.body.classList.remove("is-mobile");
     localStorage.clear();
+  });
+
+  afterEach(() => {
+    disposeMobileHostLayoutStates();
   });
 
   it("renders actions and triggers callbacks", () => {
@@ -74,5 +80,19 @@ describe("HoverShell", () => {
     expect(host.contains(shell.root)).toBe(true);
     expect(shell.root.dataset.layout).toBe("compact");
     expect(shell.root.style.left).toBe("12px");
+  });
+
+  it("clears native navigation and horizontal safe areas in mobile compact layout", () => {
+    Object.defineProperty(window, "innerWidth", { value: 420, configurable: true });
+    document.body.classList.add("is-mobile");
+
+    const shell = createHoverShell({ title: "Recorder" });
+    window.dispatchEvent(new Event("resize"));
+
+    expect(shell.root.dataset.layout).toBe("compact");
+    expect(document.body.classList.contains("ss-mobile-layout")).toBe(true);
+    expect(shell.root.style.bottom).toBe("var(--ss-mobile-bottom-clearance)");
+    expect(shell.root.style.left).toContain("safe-area-inset-left");
+    expect(shell.root.style.right).toContain("safe-area-inset-right");
   });
 });

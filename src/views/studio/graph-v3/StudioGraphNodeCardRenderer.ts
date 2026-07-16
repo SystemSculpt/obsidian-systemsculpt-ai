@@ -27,6 +27,7 @@ import {
 } from "../../../studio/StudioNodeGeometry";
 import { resolveNodeMediaPreview } from "./StudioGraphMediaPreview";
 import { mountStudioGraphNodeResizeFrame } from "./StudioGraphNodeResizeFrame";
+import { hasHostCapability } from "../../../platform/hostCapabilities";
 
 export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOptions): void {
   const {
@@ -115,7 +116,10 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
     return;
   }
 
-  if (node.kind === "studio.media_ingest") {
+  if (
+    node.kind === "studio.media_ingest"
+    && hasHostCapability("file-manager-reveal", nodeEl)
+  ) {
     nodeEl.addEventListener("dblclick", (event) => {
       if (isStudioNodeCardInteractiveTarget(event.target)) {
         return;
@@ -142,7 +146,7 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
       ? resolveAssetPreviewSrc(mediaPreviewDescriptor.path)
       : null;
 
-  const mountResizeFrame = (): void => {
+  const mountResizeFrame = (aspectContentEl?: HTMLElement | null): void => {
     mountStudioGraphNodeResizeFrame({
       node,
       nodeEl,
@@ -171,11 +175,14 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
       },
       readInitialSize: () => {
         const measuredHeight = nodeEl.offsetHeight;
+        const measuredAspectContentHeight = aspectContentEl?.offsetHeight ?? 0;
         const resolvedMinHeight = resolveStudioGraphNodeMinHeight(node);
         return {
           width: resolveStudioGraphNodeWidth(node),
           height:
-            measuredHeight > 0
+            measuredAspectContentHeight > 0
+              ? measuredAspectContentHeight
+              : measuredHeight > 0
               ? measuredHeight
               : Math.max(resolvedMinHeight, 1),
         };
@@ -184,9 +191,10 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
   };
 
   // ── Media layout: media nodes whose preview IS the card ──
-  // The card shows only the media plus a floating action bar inside the
-  // media's edge, port pins on the side edges, and a status badge only
-  // while running/failed.
+  // The card keeps the media unobstructed: image actions live in a normal-flow
+  // toolbar below the image. Video actions remain a top overlay so the native
+  // playback controls stay clear. Ports and status stay anchored to the media
+  // content rather than shifting when the image toolbar is present.
   if (
     node.kind === "studio.media_ingest" &&
     !isPlaceholder &&
@@ -195,31 +203,33 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
     mediaPreviewSrc
   ) {
     nodeEl.dataset.chromeLayout = "media";
+    nodeEl.dataset.mediaKind = mediaPreviewDescriptor.kind;
+    const mediaContentEl = nodeEl.createDiv({ cls: "ss-studio-media-content" });
     renderNodeStatusRow({
-      nodeEl,
+      nodeEl: mediaContentEl,
       node,
       isPlaceholder,
       nodeRunState,
       resolveNodeBadge,
     });
     renderNodePorts({
-      nodeEl,
+      nodeEl: mediaContentEl,
       node,
       definition,
       graphInteraction,
       interactionLocked,
     });
     renderNodeMediaPreview({
-      nodeEl,
+      nodeEl: mediaContentEl,
       node,
       nodeRunState,
       resolveAssetPreviewSrc,
       onRevealPathInFinder,
       onOpenMediaPreview,
     });
-    mountResizeFrame();
+    mountResizeFrame(mediaContentEl);
     renderStudioMediaNodeActionBar({
-      nodeEl,
+      nodeEl: mediaPreviewDescriptor.kind === "video" ? mediaContentEl : nodeEl,
       node,
       definition,
       mediaKind: mediaPreviewDescriptor.kind,

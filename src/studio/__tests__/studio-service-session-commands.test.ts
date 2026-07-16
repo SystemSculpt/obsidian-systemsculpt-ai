@@ -1,5 +1,6 @@
 import { StudioProjectSession } from "../StudioProjectSession";
 import { StudioService } from "../StudioService";
+import { serializeStudioProject } from "../schema";
 import type { StudioProjectV1 } from "../types";
 import { createManagedCapabilityGraphStub, getManagedStudioTestVaultName } from "./managed-capability-graph.stub";
 
@@ -153,7 +154,7 @@ describe("StudioService session-backed mutation commands", () => {
     const reopened = await service.retainProjectSession(session.getProjectPath(), { forceReload: true });
 
     expect(reopened).toBe(session);
-    expect(loadProjectForSession).toHaveBeenCalledWith(session.getProjectPath());
+    expect(loadProjectForSession).toHaveBeenCalledWith(session.getProjectPath(), { forceReload: true });
     expect(session.getProject().name).toBe("Reloaded Project");
   });
 
@@ -193,7 +194,7 @@ describe("StudioService session-backed mutation commands", () => {
     const session = await service.retainProjectSession("Studio/Test.systemsculpt", { forceReload: true });
     const mediaNode = session.getProject().graph.nodes.find((node) => node.id === "media_1");
 
-    expect(loadProject).toHaveBeenCalledWith("Studio/Test.systemsculpt");
+    expect(loadProject).toHaveBeenCalledWith("Studio/Test.systemsculpt", { forceReload: true });
     // Resized geometry survives normalization as first-class node.size;
     // caption edits stay in config and the legacy geometry keys are stripped.
     expect(mediaNode?.size).toEqual({ width: 512, height: 356 });
@@ -367,5 +368,125 @@ describe("StudioService session-backed mutation commands", () => {
     expect(session.getProject().name).toBe("Renamed Project");
     expect(service.getProjectSession("Studio/Renamed.systemsculpt")).toBe(session);
     expect(service.getProjectSession("Studio/Test.systemsculpt")).toBeNull();
+  });
+
+  it("adopts a project file already renamed through the ordinary vault", async () => {
+    const service = new StudioService(createPluginStub());
+    const project = projectFixture();
+    const session = createSession("Studio/Test.systemsculpt", project);
+    const movedRawText = serializeStudioProject(project);
+    session.markAcceptedProjectText(movedRawText);
+    await retainExistingSession(service, session);
+    const renamedProject = {
+      ...project,
+      name: "Moved",
+      permissionsRef: {
+        ...project.permissionsRef,
+        policyPath: "Studio/Moved.systemsculpt-assets/policy/grants.json",
+      },
+    };
+    const store = (service as any).projectStore;
+    jest.spyOn(store, "readVisibleProjectRawText").mockResolvedValue(movedRawText);
+    const adopt = jest.spyOn(store, "adoptVisibleProjectRename").mockResolvedValue({
+      oldPath: "Studio/Test.systemsculpt",
+      newPath: "Studio/Moved.systemsculpt",
+      project: renamedProject,
+    });
+    jest.spyOn(store, "readProjectRawText").mockResolvedValue(
+      serializeStudioProject(renamedProject)
+    );
+
+    const renamed = await service.adoptVisibleProjectRename(
+      "Studio/Test.systemsculpt",
+      "Studio/Moved.systemsculpt"
+    );
+
+    expect(adopt).toHaveBeenCalledWith(expect.objectContaining({
+      oldPath: "Studio/Test.systemsculpt",
+      newPath: "Studio/Moved.systemsculpt",
+      movedRawText,
+      project: expect.objectContaining({
+        name: "Moved",
+        permissionsRef: expect.objectContaining({
+          policyPath: "Studio/Moved.systemsculpt-assets/policy/grants.json",
+        }),
+      }),
+    }));
+    expect(renamed.replacedCanvasProject).toBeNull();
+    expect(session.getProjectPath()).toBe("Studio/Moved.systemsculpt");
+    expect(service.getProjectSession("Studio/Moved.systemsculpt")).toBe(session);
+    expect(service.getProjectSession("Studio/Test.systemsculpt")).toBeNull();
+  });
+
+  it("preserves pending canvas work before a renamed file with changed content wins", async () => {
+    const service = new StudioService(createPluginStub());
+    const project = projectFixture();
+    const session = createSession("Studio/Test.systemsculpt", project);
+    const previousRawText = serializeStudioProject(project);
+    session.markAcceptedProjectText(previousRawText);
+    session.mutate("node.title", (current) => {
+      current.name = "Pending canvas";
+    });
+    await retainExistingSession(service, session);
+    const movedProject = projectFixture();
+    movedProject.name = "File changed too";
+    const movedRawText = serializeStudioProject(movedProject);
+    const renamedProject = {
+      ...movedProject,
+      name: "Moved",
+      permissionsRef: {
+        ...movedProject.permissionsRef,
+        policyPath: "Studio/Moved.systemsculpt-assets/policy/grants.json",
+      },
+    };
+    const preserve = jest.spyOn(service, "preserveProjectRecovery").mockResolvedValue();
+    const store = (service as any).projectStore;
+    jest.spyOn(store, "readVisibleProjectRawText").mockResolvedValue(movedRawText);
+    jest.spyOn(store, "adoptVisibleProjectRename").mockResolvedValue({
+      oldPath: "Studio/Test.systemsculpt",
+      newPath: "Studio/Moved.systemsculpt",
+      project: renamedProject,
+    });
+    jest.spyOn(store, "readProjectRawText").mockResolvedValue(
+      serializeStudioProject(renamedProject)
+    );
+
+    const renamed = await service.adoptVisibleProjectRename(
+      "Studio/Test.systemsculpt",
+      "Studio/Moved.systemsculpt"
+    );
+
+    expect(preserve).toHaveBeenCalledWith(expect.objectContaining({ name: "Pending canvas" }));
+    expect(renamed.replacedCanvasProject).toEqual(
+      expect.objectContaining({ name: "Pending canvas" })
+    );
+    expect(session.getProject().name).toBe("Moved");
+  });
+
+  it("rejects Studio-owned field changes in a renamed file before adopting it", async () => {
+    const service = new StudioService(createPluginStub());
+    const project = projectFixture();
+    const session = createSession("Studio/Test.systemsculpt", project);
+    session.markAcceptedProjectText(serializeStudioProject(project));
+    await retainExistingSession(service, session);
+    const movedProject = projectFixture();
+    movedProject.name = "Moved";
+    movedProject.engine.minPluginVersion = "99.0.0";
+    movedProject.permissionsRef.policyPath =
+      "Studio/Moved.systemsculpt-assets/policy/grants.json";
+    const store = (service as any).projectStore;
+    jest.spyOn(store, "readVisibleProjectRawText").mockResolvedValue(
+      serializeStudioProject(movedProject)
+    );
+    const adopt = jest.spyOn(store, "adoptVisibleProjectRename");
+
+    await expect(service.adoptVisibleProjectRename(
+      "Studio/Test.systemsculpt",
+      "Studio/Moved.systemsculpt"
+    )).rejects.toThrow("engine is Studio-owned and must remain unchanged");
+
+    expect(adopt).not.toHaveBeenCalled();
+    expect(session.getProjectPath()).toBe("Studio/Test.systemsculpt");
+    expect(service.getProjectSession("Studio/Moved.systemsculpt")).toBeNull();
   });
 });

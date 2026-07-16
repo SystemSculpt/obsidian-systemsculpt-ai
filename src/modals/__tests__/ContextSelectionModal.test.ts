@@ -8,6 +8,7 @@ function files(): TFile[] {
     new TFile({ path: "notes/meeting.md" }),
     new TFile({ path: "notes/project.md" }),
     new TFile({ path: "docs/readme.txt" }),
+    new TFile({ path: "studio/architecture.systemsculpt" }),
     new TFile({ path: "images/diagram.png" }),
     new TFile({ path: "images/photo.jpg" }),
     new TFile({ path: "documents/report.pdf" }),
@@ -38,7 +39,8 @@ describe("ContextSelectionModal", () => {
     expect(modal.modalEl.getAttribute("role")).toBe("dialog");
     expect(modal.modalEl.textContent).toContain("Add context files");
     expect(modal.modalEl.textContent).not.toContain("legacy");
-    expect(modal.modalEl.querySelectorAll(".ss-context-file-item")).toHaveLength(7);
+    expect(modal.modalEl.querySelectorAll(".ss-context-file-item")).toHaveLength(8);
+    expect(modal.modalEl.textContent).toContain("architecture");
   });
 
   it("applies initial filter, query, and selection", () => {

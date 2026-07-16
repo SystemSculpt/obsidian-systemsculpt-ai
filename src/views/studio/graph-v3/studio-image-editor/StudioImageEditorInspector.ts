@@ -20,7 +20,7 @@ import {
 type StudioImageEditorInspectorActions = {
   addLabel: () => void;
   addAnnotation: (kind: StudioCaptionBoardAnnotationKind) => void;
-  ensureCrop: () => void;
+  toggleCropSelection: () => void;
   select: (selection: StudioImageEditorSelection | null) => void;
   patchLabel: (patch: Partial<StudioCaptionBoardLabel>) => void;
   patchAnnotation: (patch: Partial<StudioCaptionBoardAnnotation>) => void;
@@ -40,19 +40,30 @@ export class StudioImageEditorInspector {
   render(
     state: StudioCaptionBoardState,
     selection: StudioImageEditorSelection | null,
-    hasSource: boolean
+    source: {
+      hasSource: boolean;
+      loading: boolean;
+      statusMessage: string;
+    }
   ): void {
     this.sidebarEl.empty();
     const header = this.sidebarEl.createDiv({ cls: "ss-studio-caption-board__sidebar-header" });
     header.createDiv({ cls: "ss-studio-caption-board__sidebar-title", text: "Inspector" });
     header.createDiv({
       cls: "ss-studio-caption-board__sidebar-subtitle",
-      text: hasSource ? "Select a layer to edit it." : "Load an image to start.",
+      text: source.loading
+        ? "Opening image…"
+        : source.hasSource
+          ? "Select a layer to edit it."
+          : "Image unavailable.",
     });
-    if (!hasSource) {
+    if (source.loading) {
+      return;
+    }
+    if (!source.hasSource) {
       this.sidebarEl.createDiv({
         cls: "ss-studio-caption-board__sidebar-empty",
-        text: "An image source is required.",
+        text: source.statusMessage || "This image could not be opened.",
       });
       return;
     }
@@ -67,8 +78,15 @@ export class StudioImageEditorInspector {
     this.createButton(toolButtons, "Red Box", () => this.actions.addAnnotation("highlight_rect"));
     this.createButton(toolButtons, "Red Circle", () => this.actions.addAnnotation("highlight_circle"));
     this.createButton(toolButtons, "Blur Box", () => this.actions.addAnnotation("blur_rect"));
-    this.createButton(toolButtons, state.crop ? "Select Crop" : "Add Crop", this.actions.ensureCrop);
-    this.createButton(toolButtons, "Deselect", () => this.actions.select(null));
+    const cropSelected = selection?.kind === "crop" && state.crop !== null;
+    this.createButton(
+      toolButtons,
+      cropSelected ? "Deselect Crop" : state.crop ? "Select Crop" : "Add Crop",
+      this.actions.toggleCropSelection
+    );
+    if (selection && selection.kind !== "crop") {
+      this.createButton(toolButtons, "Deselect Layer", () => this.actions.select(null));
+    }
 
     const label = resolveSelectedLabel(state, selection);
     if (label) {
@@ -198,7 +216,7 @@ export class StudioImageEditorInspector {
     const buttons = this.createField(section, "Actions").createDiv({
       cls: "ss-studio-caption-board__button-row",
     });
-    this.createButton(buttons, "Clear Crop", this.actions.clearCrop);
+    this.createButton(buttons, "Remove Crop", this.actions.clearCrop);
   }
 
   private renderLayerActions(section: HTMLElement): void {

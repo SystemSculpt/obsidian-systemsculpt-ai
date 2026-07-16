@@ -325,7 +325,13 @@ export class StudioGraphSelectionController {
     const selectionWidth = Math.max(1, bounds.right - bounds.left);
     const selectionHeight = Math.max(1, bounds.bottom - bounds.top);
     const requestedMode = options?.mode ?? "interactive";
-    const rawTargetZoom = Math.min(availableWidth / selectionWidth, availableHeight / selectionHeight);
+    const fittedZoom = Math.min(availableWidth / selectionWidth, availableHeight / selectionHeight);
+    // Overview is an orientation aid, not a magnifier. A small graph should
+    // be centered at its natural scale instead of ballooning on a wide phone,
+    // tablet, or desktop window. Selection fitting remains free to zoom in.
+    const rawTargetZoom = requestedMode === "overview"
+      ? Math.min(1, fittedZoom)
+      : fittedZoom;
     const appliedMode =
       requestedMode === "overview" && rawTargetZoom < STUDIO_GRAPH_MIN_ZOOM ? "overview" : "interactive";
     const targetZoom = this.clampGraphZoom(rawTargetZoom, appliedMode);
@@ -337,8 +343,8 @@ export class StudioGraphSelectionController {
 
     const centerX = (bounds.left + bounds.right) * 0.5;
     const centerY = (bounds.top + bounds.bottom) * 0.5;
-    viewport.scrollLeft = centerX * targetZoom - viewportWidth * 0.5;
-    viewport.scrollTop = centerY * targetZoom - viewportHeight * 0.5;
+    viewport.scrollLeft = Math.max(0, centerX * targetZoom - viewportWidth * 0.5);
+    viewport.scrollTop = Math.max(0, centerY * targetZoom - viewportHeight * 0.5);
     this.applyGraphZoom({ settled: true });
     return true;
   }

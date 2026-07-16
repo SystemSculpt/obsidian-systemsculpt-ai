@@ -1,6 +1,6 @@
 /** @jest-environment jsdom */
 
-import { App, Plugin } from "obsidian";
+import { App, Platform, Plugin } from "obsidian";
 import { ViewManager } from "../views";
 import {
   CHAT_VIEW_TYPE,
@@ -46,6 +46,9 @@ describe("ViewManager", () => {
   beforeEach(() => {
     jest.useFakeTimers();
     jest.clearAllMocks();
+    (Platform as typeof Platform & { isDesktopApp: boolean; isMobile?: boolean }).isDesktopApp = true;
+    (Platform as typeof Platform & { isMobile?: boolean }).isMobile = false;
+    document.body.classList.remove("is-mobile");
   });
 
   afterEach(() => {
@@ -84,5 +87,50 @@ describe("ViewManager", () => {
     expect(app.viewRegistry?.viewByType[CHAT_VIEW_TYPE]).not.toBe(originalChatCreator);
     expect(app.viewRegistry?.viewByType[SYSTEMSCULPT_STUDIO_VIEW_TYPE]).not.toBe(originalStudioCreator);
     expect(app.viewRegistry?.viewByType[EMBEDDINGS_VIEW_TYPE]).toEqual(expect.any(Function));
+  });
+
+  it("opens Similar Notes in the desktop right sidebar", async () => {
+    const { app, manager } = createFixture();
+    const leaf = {
+      setViewState: jest.fn().mockResolvedValue(undefined),
+      view: { kind: "embeddings" },
+    } as any;
+    const getRightLeaf = jest.fn(() => leaf);
+    const getLeaf = jest.fn();
+    const revealLeaf = jest.fn();
+    Object.assign(app.workspace, { getRightLeaf, getLeaf, revealLeaf });
+
+    await manager.activateEmbeddingsView();
+
+    expect(getRightLeaf).toHaveBeenCalledWith(false);
+    expect(getLeaf).not.toHaveBeenCalled();
+    expect(leaf.setViewState).toHaveBeenCalledWith({
+      type: EMBEDDINGS_VIEW_TYPE,
+      active: true,
+    });
+    expect(revealLeaf).toHaveBeenCalledWith(leaf);
+  });
+
+  it("opens Similar Notes as a full-width tab in mobile layout", async () => {
+    const { app, manager } = createFixture();
+    const leaf = {
+      setViewState: jest.fn().mockResolvedValue(undefined),
+      view: { kind: "embeddings" },
+    } as any;
+    const getRightLeaf = jest.fn();
+    const getLeaf = jest.fn(() => leaf);
+    const revealLeaf = jest.fn();
+    Object.assign(app.workspace, { getRightLeaf, getLeaf, revealLeaf });
+    document.body.classList.add("is-mobile");
+
+    await manager.activateEmbeddingsView();
+
+    expect(getLeaf).toHaveBeenCalledWith("tab");
+    expect(getRightLeaf).not.toHaveBeenCalled();
+    expect(leaf.setViewState).toHaveBeenCalledWith({
+      type: EMBEDDINGS_VIEW_TYPE,
+      active: true,
+    });
+    expect(revealLeaf).toHaveBeenCalledWith(leaf);
   });
 });

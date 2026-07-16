@@ -1,10 +1,11 @@
-import { Notice, Platform } from "obsidian";
+import { Notice } from "obsidian";
 
 import SystemSculptPlugin from "../main";
 import { API_BASE_URL } from "../constants/api";
 import type { HttpResponseShim } from "../utils/httpClient";
 import { httpRequest } from "../utils/httpClient";
 import { compareNumericVersions, parseNumericVersion } from "../utils/semver";
+import { hasHostCapability } from "../platform/hostCapabilities";
 
 const RELEASE_CONTRACT = "plugin-release-v1" as const;
 const PLUGIN_ID = "systemsculpt-ai" as const;
@@ -203,7 +204,7 @@ export class PluginUpdateService {
   }
 
   private prepareStatusBar(): void {
-    if (this.statusBarEl || Platform.isMobile) return;
+    if (this.statusBarEl || !hasHostCapability("status-bar")) return;
     this.statusBarEl = this.plugin.addStatusBarItem();
     this.statusBarEl.setAttribute("role", "button");
     this.statusBarEl.setAttribute("tabindex", "0");

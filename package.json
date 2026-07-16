@@ -34,7 +34,7 @@
   "scripts": {
     "prepare": "node scripts/install-git-hooks.mjs",
     "build": "node esbuild.config.mjs production",
-    "check": "npm run check:plugin:fast",
+    "check": "npm run check:plugin:fast && npm run test:mobile:bundle",
     "lint:obsidian": "eslint --cache --cache-location .cache/eslint/source.cache -c eslint.config.mjs --max-warnings 0 \"src/**/*.{ts,tsx,mts,cts}\"",
     "lint:obsidian:fix": "npm run lint:obsidian -- --fix",
     "lint:obsidian:meta": "eslint --cache --cache-location .cache/eslint/meta.cache -c eslint.meta.config.mjs --max-warnings 0 manifest.json LICENSE",
@@ -45,7 +45,7 @@
     "check:plugin": "node scripts/check-plugin.mjs",
     "check:plugin:fast": "node scripts/check-plugin.mjs --fast",
     "check:types": "tsc --noEmit --skipLibCheck --incremental --tsBuildInfoFile .cache/tsc.check.tsbuildinfo",
-    "check:mobile": "node --test scripts/mobile-compatibility.test.mjs",
+    "check:mobile": "node --test scripts/mobile-compatibility.test.mjs && npm run build && npm run test:mobile:bundle",
     "check:full": "npm run check:plugin && npm test && npm run test:embeddings && npm run test:integration && npm run test:release-script",
     "check:all": "npm run check:full",
     "dev": "node esbuild.config.mjs",
@@ -61,10 +61,11 @@
     "test:embeddings": "node scripts/jest.mjs --config jest.embeddings.config.cjs --passWithNoTests",
     "test:integration": "npm run build && npm run test:integration:ci",
     "test:integration:ci": "node scripts/jest.mjs --config jest.integration.config.cjs --runInBand",
+    "test:mobile:bundle": "node scripts/jest.mjs --config jest.integration.config.cjs --runInBand --runTestsByPath testing/integration/mobile-bundle-load.test.ts",
     "test:embeddings:serial": "node scripts/jest.mjs --config jest.embeddings.config.cjs --runInBand --passWithNoTests",
     "test:release-script": "node --test scripts/plugin-build-options.test.mjs scripts/plugin-artifacts.test.mjs scripts/release-plugin.test.mjs",
     "release:plugin": "node scripts/release-plugin.mjs"
   },
   "type": "module",
-  "version": "6.0.2"
+  "version": "6.1.0"
 }

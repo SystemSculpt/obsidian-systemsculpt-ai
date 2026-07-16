@@ -119,7 +119,7 @@ function dispatchPointer(
 
 async function flushAsync(): Promise<void> {
   await Promise.resolve();
-  await Promise.resolve();
+  await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 function setStageRect(stage: HTMLElement): void {
@@ -240,6 +240,51 @@ describe("StudioGraphImageInlineEditor", () => {
     expect(modalEl?.querySelector(".ss-studio-caption-board__viewport")).not.toBeNull();
     expect(modalEl?.querySelector(".ss-studio-caption-board__sidebar")).not.toBeNull();
     expect(modalEl?.querySelector(".ss-studio-caption-board__viewport textarea")).toBeNull();
+  });
+
+  it("shows one clean loading state instead of legacy missing-image chrome", async () => {
+    const node = mediaNodeFixture({ sourcePath: "Assets/source.png" });
+    let resolveRead!: (bytes: ArrayBuffer) => void;
+    const readAsset = jest.fn(
+      () => new Promise<ArrayBuffer>((resolve) => {
+        resolveRead = resolve;
+      })
+    );
+
+    openStudioImageEditorModal({
+      app: {} as App,
+      node,
+      nodeRunState: imageNodeRunState(),
+      projectPath: "Studio/Test.systemsculpt",
+      resolveAssetPreviewSrc: () => "app://preview",
+      readAsset,
+      storeAsset: jest.fn(async () => RENDERED_ASSET),
+      onNodeConfigMutated: jest.fn(),
+    });
+
+    const modalEl = document.body.querySelector<HTMLElement>(".ss-studio-caption-board-modal-shell");
+    expect(modalEl?.querySelector(".ss-studio-caption-board__empty")?.textContent).toBe(
+      "Opening image…"
+    );
+    expect(modalEl?.querySelector(".ss-studio-caption-board__sidebar-subtitle")?.textContent).toBe(
+      "Opening image…"
+    );
+    expect(modalEl?.querySelector(".ss-studio-caption-board__status")?.hasAttribute("hidden")).toBe(
+      true
+    );
+    expect(modalEl?.textContent).not.toContain("Run this media node once");
+    expect(modalEl?.textContent).not.toContain("Load an image to start");
+    expect(modalEl?.textContent).not.toContain("Load a source image to start editing");
+    expect(modalEl?.textContent).not.toContain("An image source is required");
+
+    resolveRead(tinyPngBytes());
+    await flushAsync();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(modalEl?.querySelector(".ss-studio-caption-board__stage")).not.toBeNull();
+    expect(modalEl?.querySelector(".ss-studio-caption-board__status")?.hasAttribute("hidden")).toBe(
+      false
+    );
   });
 
   it("adds, edits, drags, and resizes labels through the board UI", async () => {
@@ -441,6 +486,55 @@ describe("StudioGraphImageInlineEditor", () => {
     expect(boardState.crop).not.toBeNull();
     expect(boardState.crop?.width).toBeGreaterThan(0.82);
     expect(onNodeConfigMutated).toHaveBeenCalled();
+  });
+
+  it("toggles crop selection from the toolbar and exposes explicit crop removal", async () => {
+    const node = mediaNodeFixture({ sourcePath: "Assets/source.png" });
+
+    openStudioImageEditorModal({
+      app: {} as App,
+      node,
+      nodeRunState: imageNodeRunState(),
+      projectPath: "Studio/Test.systemsculpt",
+      resolveAssetPreviewSrc: () => "app://preview",
+      readAsset: jest.fn(async () => tinyPngBytes()),
+      storeAsset: jest.fn(async () => RENDERED_ASSET),
+      onNodeConfigMutated: jest.fn(),
+    });
+    await flushAsync();
+
+    const cropToolbarButton = Array.from(
+      document.body.querySelectorAll<HTMLButtonElement>(
+        ".ss-studio-caption-board__toolbar-button"
+      )
+    ).find((button) => button.textContent?.trim() === "Crop");
+    expect(cropToolbarButton).toBeDefined();
+
+    cropToolbarButton?.click();
+    expect(document.body.querySelector(".ss-studio-caption-board__crop.is-selected")).not.toBeNull();
+    expect(cropToolbarButton?.textContent).toBe("Deselect Crop");
+    expect(cropToolbarButton?.getAttribute("aria-pressed")).toBe("true");
+
+    cropToolbarButton?.click();
+    expect(document.body.querySelector(".ss-studio-caption-board__crop")).not.toBeNull();
+    expect(document.body.querySelector(".ss-studio-caption-board__crop.is-selected")).toBeNull();
+    expect(cropToolbarButton?.textContent).toBe("Crop");
+    expect(cropToolbarButton?.getAttribute("aria-pressed")).toBe("false");
+    expect(readStudioCaptionBoardState(node.config).crop).not.toBeNull();
+
+    const selectCropButton = Array.from(
+      document.body.querySelectorAll<HTMLButtonElement>("button")
+    ).find((button) => button.textContent?.trim() === "Select Crop");
+    expect(selectCropButton).toBeDefined();
+    selectCropButton?.click();
+    const removeCropButton = Array.from(
+      document.body.querySelectorAll<HTMLButtonElement>("button")
+    ).find((button) => button.textContent?.trim() === "Remove Crop");
+    expect(removeCropButton).toBeDefined();
+    removeCropButton?.click();
+
+    expect(document.body.querySelector(".ss-studio-caption-board__crop")).toBeNull();
+    expect(readStudioCaptionBoardState(node.config).crop).toBeNull();
   });
 
   it("saves a rendered board asset on Done", async () => {

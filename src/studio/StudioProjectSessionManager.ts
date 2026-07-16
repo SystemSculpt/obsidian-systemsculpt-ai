@@ -109,8 +109,8 @@ export class StudioProjectSessionManager {
       return;
     }
 
-    this.entriesByPath.delete(normalized);
     await existing.session.close();
+    this.entriesByPath.delete(normalized);
   }
 
   async closeSession(projectPath: string): Promise<void> {
@@ -122,15 +122,26 @@ export class StudioProjectSessionManager {
     if (!existing) {
       return;
     }
-    this.entriesByPath.delete(normalized);
     await existing.session.close();
+    this.entriesByPath.delete(normalized);
   }
 
   async closeAll(): Promise<void> {
     const entries = Array.from(this.entriesByPath.values());
-    this.entriesByPath.clear();
+    const errors: unknown[] = [];
     for (const entry of entries) {
-      await entry.session.close();
+      try {
+        await entry.session.close();
+        this.entriesByPath.delete(entry.path);
+      } catch (error) {
+        errors.push(error);
+      }
+    }
+    if (errors.length > 0) {
+      const detail = errors
+        .map((error) => error instanceof Error ? error.message : String(error))
+        .join("; ");
+      throw new Error(`Studio could not safely close ${errors.length} project session(s): ${detail}`);
     }
   }
 

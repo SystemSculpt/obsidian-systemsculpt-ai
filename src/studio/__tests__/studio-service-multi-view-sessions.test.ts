@@ -158,4 +158,57 @@ describe("StudioService multi-view session ownership", () => {
     await service.releaseProjectSession("Studio/P1.systemsculpt");
     expect(service.getProjectSession("Studio/P1.systemsculpt")).toBeNull();
   });
+
+  it("coalesces concurrent first retains into one shared session", async () => {
+    const service = createService();
+    const loadProjectForSession = (service as any).loadProjectForSession as jest.Mock;
+
+    const [first, second] = await Promise.all([
+      service.retainProjectSession("Studio/P1.systemsculpt"),
+      service.retainProjectSession("Studio/P1.systemsculpt"),
+    ]);
+
+    expect(second).toBe(first);
+    expect(loadProjectForSession).toHaveBeenCalledTimes(1);
+    await service.releaseProjectSession("Studio/P1.systemsculpt");
+    expect(service.getProjectSession("Studio/P1.systemsculpt")).toBe(first);
+    await service.releaseProjectSession("Studio/P1.systemsculpt");
+    expect(service.getProjectSession("Studio/P1.systemsculpt")).toBeNull();
+  });
+
+  it("reconciles a direct file edit when the project is reopened after the last view closes", async () => {
+    const service = new StudioService(createPluginStub());
+    services.push(service);
+    jest.spyOn((service as any).projectStore, "saveProject").mockResolvedValue(undefined);
+    const projectPath = "Studio/P1.systemsculpt";
+    let visibleProject = projectFixtureForPath(projectPath, "node_p1");
+    let cachedProject: StudioProjectV1 | null = null;
+    jest.spyOn(service as any, "loadProjectForSession").mockImplementation(async (
+      _path: string,
+      options?: { forceReload?: boolean }
+    ) => {
+      if (!cachedProject || options?.forceReload === true) {
+        cachedProject = JSON.parse(JSON.stringify(visibleProject)) as StudioProjectV1;
+      }
+      return {
+        project: JSON.parse(JSON.stringify(cachedProject)) as StudioProjectV1,
+        rawText: JSON.stringify(cachedProject),
+      };
+    });
+
+    const first = await service.retainProjectSession(projectPath);
+    expect(first.getProject().name).toBe("Project node_p1");
+    await service.releaseProjectSession(projectPath);
+    expect(service.getProjectSession(projectPath)).toBeNull();
+
+    visibleProject = {
+      ...visibleProject,
+      name: "Edited while Studio was closed",
+      updatedAt: "2026-07-15T12:00:00.000Z",
+    };
+
+    const reopened = await service.retainProjectSession(projectPath);
+    expect(reopened).not.toBe(first);
+    expect(reopened.getProject().name).toBe("Edited while Studio was closed");
+  });
 });

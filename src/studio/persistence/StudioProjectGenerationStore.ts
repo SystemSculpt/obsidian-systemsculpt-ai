@@ -1,15 +1,24 @@
 import { deriveStudioAssetsDir, deriveStudioPolicyPath, normalizeStudioProjectPath } from "../paths";
-import { parseStudioPolicy, parseStudioProject } from "../schema";
+import { parseStudioPolicy, parseStudioProject, serializeStudioProject } from "../schema";
 import { sha256HexFromArrayBuffer } from "../hash";
+import { validateStudioProjectForAgentEdit } from "../StudioProjectAgentContract";
+import {
+  assertStableStudioProjectAgentDocumentFieldsUnchanged,
+  assertValidStudioProjectAgentDocumentStructure,
+} from "../StudioProjectAgentDocumentValidation";
 
 export type GenerationHash = string;
 export type ExpectedGeneration = { revision: number; generationHash: GenerationHash };
 export type ProjectionLocator = { vaultRelativeProjectPath: string };
 export type StudioGenerationAdapter = {
+  exists(path: string): Promise<boolean>;
   read(path: string): Promise<string>;
   readBinary(path: string): Promise<ArrayBuffer>;
   write(path: string, data: string): Promise<void>;
   writeBinary(path: string, data: ArrayBuffer): Promise<void>;
+  compareAndSwapText(path: string, expectedData: string, nextData: string): Promise<boolean>;
+  copyFileIfAbsent(sourcePath: string, destinationPath: string): Promise<boolean>;
+  movePath(sourcePath: string, destinationPath: string): Promise<void>;
   list(path: string): Promise<{ files: string[]; folders: string[] }>;
   mkdir(path: string): Promise<void>;
   remove(path: string): Promise<void>;
@@ -38,8 +47,7 @@ type CommitDescriptor = {
   logicallyCommittedAt: string;
 };
 type ValidGeneration = { manifest: GenerationManifest; files: Map<string, Uint8Array>; directory: string };
-type ProjectionMarker = { schemaVersion: 1; projectId: string; revision: number; generationHash: string; projectDocumentSha256: string; supportManifestSha256: string };
-type ProjectionSnapshot = { files: Map<string, Uint8Array>; markerRaw: string | null; supportMarkerRaw: string | null };
+type ProjectionSnapshot = { files: Map<string, Uint8Array> };
 
 export type SelectedGeneration = { files: ReadonlyMap<string, Uint8Array>; metadata: GenerationManifest };
 export type ReadyResult = { status: "ready"; expectedGeneration: ExpectedGeneration; generation: SelectedGeneration; projectionStatus: "matching" | "repaired" };
@@ -60,7 +68,6 @@ export type StudioProjectGenerationCreateCommand = {
   policyDocument: Uint8Array;
   projectManifest: Uint8Array;
 };
-export type StudioExternalCandidate = { projectId: string; expectedGeneration: ExpectedGeneration; projectDocument: Uint8Array; supportFiles: readonly { supportRelativePath: string; bytes: Uint8Array }[] };
 export type StudioProjectGenerationCommand =
   | { kind: "replace_project"; projectId: string; projectDocument: Uint8Array; reason: "discrete_save" | "autosave" | "migration" | "repair" }
   | { kind: "replace_policy"; projectId: string; policyDocument: Uint8Array }
@@ -69,7 +76,15 @@ export type StudioProjectGenerationCommand =
   | { kind: "replace_cache"; projectId: string; cacheDocument: Uint8Array }
   | { kind: "replace_manifest"; projectId: string; projectManifest: Uint8Array }
   | { kind: "publish_run"; projectId: string; runId: string; snapshotDocument: Uint8Array; eventsDocument: Uint8Array; runIndexDocument: Uint8Array; cacheDocument: Uint8Array; assets: readonly StudioAssetGenerationFile[]; removeRunIds: readonly string[] }
-  | { kind: "logical_rename"; projectId: string; locator: ProjectionLocator; projectDocument: Uint8Array; projectManifest: Uint8Array };
+  | {
+      kind: "logical_rename";
+      projectId: string;
+      locator: ProjectionLocator;
+      projectDocument: Uint8Array;
+      projectManifest: Uint8Array;
+      /** Exact bytes already moved to locator by an ordinary vault rename. */
+      destinationProjectDocumentBeforeRename?: Uint8Array;
+    };
 type InternalStudioProjectGenerationCommand = StudioProjectGenerationCommand | { kind: "external_sync"; projectId: string; projectDocument: Uint8Array; supportFiles: readonly { relativePath: string; bytes: Uint8Array }[] };
 
 type StudioGenerationCommandKind = "create" | "discrete_save" | "autosave" | "policy" | "manifest" | "asset" | "support" | "run" | "cache" | "migration" | "repair" | "external_sync" | "logical_rename";
@@ -120,8 +135,13 @@ function hasAllowedKeys(value: Record<string, unknown>, required: readonly strin
 
 function validateClosedLegacyProject(raw: Record<string, unknown>, locator: ProjectionLocator): { projectId: string } {
   const top = ["schema", "projectId", "name", "createdAt", "updatedAt", "engine", "graph", "permissionsRef", "settings", "migrations"];
-  if (!hasExactKeys(raw, top)) throw new Error("Legacy Studio project root schema is not closed.");
+  if (!hasAllowedKeys(raw, top, [...top, "agentGuide", "nodeKindReference"])) throw new Error("Legacy Studio project root schema is not closed.");
   const object = (value: unknown, label: string): Record<string, unknown> => { if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${label} must be an object.`); return value as Record<string, unknown>; };
+  if (typeof raw.agentGuide !== "undefined" && object(raw.agentGuide, "agentGuide").schema !== "studio.agent-guide.v1") throw new Error("Legacy agent guide schema is invalid.");
+  if (typeof raw.nodeKindReference !== "undefined") {
+    const reference = object(raw.nodeKindReference, "nodeKindReference");
+    if (reference.schema !== "studio.node-kind-reference.v1" || !Array.isArray(reference.kinds)) throw new Error("Legacy node kind reference schema is invalid.");
+  }
   if (!hasExactKeys(object(raw.engine, "engine"), ["apiMode", "minPluginVersion"])) throw new Error("Legacy engine schema is not closed.");
   const graph = object(raw.graph, "graph");
   if (!hasExactKeys(graph, ["nodes", "edges", "entryNodeIds", "groups"]) || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges) || !Array.isArray(graph.entryNodeIds) || !Array.isArray(graph.groups)) throw new Error("Legacy graph schema is not closed.");
@@ -239,17 +259,25 @@ export class StudioProjectGenerationStore {
       const existing = await this.recover(projectId);
       if (existing.status === "ready") {
         if (existing.generation.metadata.projection.canonicalPath !== locator.vaultRelativeProjectPath) {
+          const previousProjection = await this.readProjection({
+            vaultRelativeProjectPath: existing.generation.metadata.projection.canonicalPath,
+          });
+          if (!previousProjection) {
+            const previousPath = existing.generation.metadata.projection.canonicalPath;
+            try {
+              if (!await this.adapter.exists(previousPath)) {
+                return this.adoptMovedProjectionUnlocked(locator, existing, documentBytes);
+              }
+            } catch (error) {
+              return {
+                status: "storage_unavailable",
+                message: `Studio could not verify the previous project path: ${String(error)}`,
+              };
+            }
+          }
           return { status: "fork_detected", message: "A second projection locator claims an existing project ID." };
         }
-        const existingDocument = existing.generation.files.get("project.systemsculpt");
-        if (existingDocument && bytesEqual(existingDocument, documentBytes)) {
-          const projection = await this.readProjection(locator);
-          if (projection && !this.generationFilesEqual(existing.generation.files, projection.files) && !this.projectionIsAuthoritySubset(existing.generation.files, projection.files)) return { status: "fork_detected", message: "Projection support tree conflicts with existing authority." };
-          try { await this.ensureProjection(existing.generation); }
-          catch (error) { return { status: "storage_unavailable", message: String(error) }; }
-          return { status: "committed", expectedGeneration: existing.expectedGeneration, generation: existing.generation, logicallyCommitted: true };
-        }
-        return { status: "fork_detected", message: "Projection and existing authority disagree." };
+        return this.reconcileProjectionUnlocked(locator, existing);
       }
       if (existing.status === "fork_detected" || existing.status === "future_unsupported") return existing;
       if (await this.authorityHasCandidates(projectId)) return { status: "recovery_required", message: "Existing authority candidates failed validation; legacy bytes were preserved." };
@@ -269,7 +297,7 @@ export class StudioProjectGenerationStore {
           if (!hasExactKeys(manifest, ["schema", "projectId", "projectPath", "assetsDir", "createdAt"]) || manifest.schema !== "studio.manifest.v1" || manifest.projectId !== projectId || manifest.projectPath !== locator.vaultRelativeProjectPath || manifest.assetsDir !== deriveStudioAssetsDir(locator.vaultRelativeProjectPath)) throw new Error("manifest references do not match the projection");
         } catch (error) { return { status: "invalid_candidate", message: `Legacy support manifest is invalid: ${String(error)}` }; }
       }
-      return this.publish(projectId, files, null, "create", locator);
+      return this.publish(projectId, files, null, "create", locator, documentBytes);
     });
   }
 
@@ -289,6 +317,70 @@ export class StudioProjectGenerationStore {
     });
   }
 
+  private async adoptMovedProjectionUnlocked(
+    locator: ProjectionLocator,
+    recovered: Extract<RecoveryResult, { status: "ready" }>,
+    movedDocument: Uint8Array
+  ): Promise<CommitResult> {
+    let rawDocument: unknown;
+    let project: ReturnType<typeof parseStudioProject>;
+    try {
+      const rawText = decoder.decode(movedDocument);
+      rawDocument = JSON.parse(rawText);
+      assertValidStudioProjectAgentDocumentStructure(rawDocument);
+      project = parseStudioProject(rawText);
+      validateStudioProjectForAgentEdit(project);
+      const recoveredDocument = recovered.generation.files.get("project.systemsculpt");
+      if (!recoveredDocument) throw new Error("Project history is missing its document.");
+      assertStableStudioProjectAgentDocumentFieldsUnchanged(
+        rawDocument,
+        JSON.parse(decoder.decode(recoveredDocument))
+      );
+    } catch (error) {
+      return {
+        status: "invalid_candidate",
+        message: `The Studio project file is invalid: ${String(error)}`,
+      };
+    }
+    if (project.projectId !== recovered.generation.metadata.projectId) {
+      return { status: "invalid_candidate", message: "The renamed Studio file does not match its project history." };
+    }
+
+    const fileName = locator.vaultRelativeProjectPath.slice(
+      locator.vaultRelativeProjectPath.lastIndexOf("/") + 1
+    );
+    const projectName = fileName.slice(0, -".systemsculpt".length) || project.name;
+    const renamedProject = {
+      ...project,
+      name: projectName,
+      updatedAt: this.now(),
+      permissionsRef: {
+        ...project.permissionsRef,
+        policyPath: deriveStudioPolicyPath(locator.vaultRelativeProjectPath),
+      },
+    };
+    const files = new Map(
+      [...recovered.generation.files].map(([path, bytes]) => [path, bytes.slice()] as const)
+    );
+    files.set("project.systemsculpt", encoder.encode(serializeStudioProject(renamedProject)));
+    files.set("support/project.manifest.json", encoder.encode(`${JSON.stringify({
+      schema: "studio.manifest.v1",
+      projectId: project.projectId,
+      projectPath: locator.vaultRelativeProjectPath,
+      assetsDir: deriveStudioAssetsDir(locator.vaultRelativeProjectPath),
+      createdAt: this.now(),
+    }, null, 2)}\n`));
+    return this.publish(
+      project.projectId,
+      files,
+      recovered.generation.metadata,
+      "logical_rename",
+      locator,
+      movedDocument,
+      recovered.generation.files.get("project.systemsculpt")
+    );
+  }
+
   async commit(command: StudioProjectGenerationCommand, expected: ExpectedGeneration): Promise<CommitResult> { return this.commitWholeGeneration(command, expected); }
 
   async commitWholeGeneration(command: StudioProjectGenerationCommand, expected: ExpectedGeneration): Promise<CommitResult> {
@@ -301,9 +393,35 @@ export class StudioProjectGenerationStore {
       if (recovered.status !== "ready") return recovered;
       if (recovered.expectedGeneration.revision !== expected.revision || recovered.expectedGeneration.generationHash !== expected.generationHash) return { status: "stale_revision", expectedGeneration: recovered.expectedGeneration };
       try {
+        const adoptsVisibleRename =
+          command.kind === "logical_rename"
+          && command.destinationProjectDocumentBeforeRename !== undefined;
+        if (command.kind !== "external_sync" && !adoptsVisibleRename) {
+          const projection = await this.readProjection({ vaultRelativeProjectPath: recovered.generation.metadata.projection.canonicalPath });
+          if (!projection || !this.generationFilesEqual(recovered.generation.files, projection.files)) {
+            return { status: "read_only", message: "The project file changed before this Studio save could begin; the file was left untouched." };
+          }
+          await this.ensureProjection(recovered.generation);
+        }
         const files = this.applyCommand(command, recovered.generation.files);
         const locator = command.kind === "logical_rename" ? validateProjectionLocator(command.locator) : { vaultRelativeProjectPath: recovered.generation.metadata.projection.canonicalPath };
-        return this.publish(command.projectId, files, recovered.generation.metadata, this.commandKind(command), locator);
+        const expectedVisibleProjectDocument = command.kind === "logical_rename"
+          ? command.destinationProjectDocumentBeforeRename
+            ?? (locator.vaultRelativeProjectPath === recovered.generation.metadata.projection.canonicalPath
+              ? recovered.generation.files.get("project.systemsculpt")
+              : undefined)
+          : recovered.generation.files.get("project.systemsculpt");
+        return this.publish(
+          command.projectId,
+          files,
+          recovered.generation.metadata,
+          this.commandKind(command),
+          locator,
+          expectedVisibleProjectDocument,
+          command.kind === "logical_rename"
+            ? recovered.generation.files.get("project.systemsculpt")
+            : undefined
+        );
       } catch (error) { return { status: "invalid_candidate", message: String(error) }; }
     });
   }
@@ -347,38 +465,30 @@ export class StudioProjectGenerationStore {
   async open(projectId: string, locatorInput: ProjectionLocator): Promise<OpenResult> {
     let locator: ProjectionLocator;
     try { locator = validateProjectionLocator(locatorInput); } catch (error) { return { status: "invalid_candidate", message: String(error) }; }
-    const recovered = await this.recover(projectId);
-    if (recovered.status !== "ready") return recovered;
-    if (recovered.generation.metadata.projection.canonicalPath !== locator.vaultRelativeProjectPath) return { status: "read_only", message: "Projection locator does not match selected generation." };
-    const projection = await this.readProjection(locator);
-    const exact = projection !== null && this.generationFilesEqual(recovered.generation.files, projection.files);
-    if (projection && !exact && this.projectionIsAuthoritySubset(recovered.generation.files, projection.files)) {
-      const authorityMarker = canonicalJson(await this.buildMarker(recovered.generation));
-      if (projection.markerRaw === authorityMarker && projection.supportMarkerRaw === authorityMarker) return { status: "read_only", message: "Selected-token projection is missing support content; bytes were preserved as a partial replacement." };
-      try {
-        await this.writeProjection(recovered.generation);
-        return { ...recovered, projectionStatus: "repaired" };
-      } catch (error) { return { status: "storage_unavailable", message: String(error) }; }
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const recovered = await this.recover(projectId);
+      if (recovered.status !== "ready") return recovered;
+      if (recovered.generation.metadata.projection.canonicalPath !== locator.vaultRelativeProjectPath) return { status: "read_only", message: "Projection locator does not match selected generation." };
+      const projection = await this.readProjection(locator);
+      const exact = projection !== null && this.generationFilesEqual(recovered.generation.files, projection.files);
+      if (projection && !exact && this.projectionIsAuthoritySubset(recovered.generation.files, projection.files)) {
+        try {
+          await this.writeProjection(recovered.generation);
+          return { ...recovered, projectionStatus: "repaired" };
+        } catch (error) { return { status: "storage_unavailable", message: String(error) }; }
+      }
+      if (exact) {
+        try {
+          const status = await this.ensureProjection(recovered.generation);
+          return { ...recovered, projectionStatus: status };
+        } catch (error) { return { status: "storage_unavailable", message: String(error) }; }
+      }
+      const reconciled = await this.reconcileExternalCandidate(locator, recovered.expectedGeneration);
+      if (reconciled.status === "stale_revision") continue;
+      if (reconciled.status !== "committed") return reconciled;
+      return { status: "ready", expectedGeneration: reconciled.expectedGeneration, generation: reconciled.generation, projectionStatus: "matching" };
     }
-    if (exact) {
-      try {
-        const status = await this.ensureProjection(recovered.generation);
-        return { ...recovered, projectionStatus: status };
-      } catch (error) { return { status: "storage_unavailable", message: String(error) }; }
-    }
-    if (!projection || !projection.markerRaw || projection.markerRaw !== projection.supportMarkerRaw) {
-      return { status: "read_only", message: "Changed projection has missing or mismatched identity markers; bytes were preserved." };
-    }
-    const marker = this.parseProjectionMarker(projection.markerRaw);
-    if (!marker || marker.projectId !== projectId || marker.revision !== recovered.expectedGeneration.revision || marker.generationHash !== recovered.expectedGeneration.generationHash) {
-      return { status: "fork_detected", message: "Changed projection is based on an untrusted or stale generation; bytes were preserved." };
-    }
-    const candidateMarker = await this.buildMarker({ files: projection.files, metadata: recovered.generation.metadata });
-    const candidateHashesMatch = marker.projectDocumentSha256 === candidateMarker.projectDocumentSha256 && marker.supportManifestSha256 === candidateMarker.supportManifestSha256;
-    if (!candidateHashesMatch) return { status: "read_only", message: "Changed projection marker hashes do not validate the exact candidate bytes; bytes were preserved." };
-    const reconciled = await this.reconcileExternalCandidate(locator, recovered.expectedGeneration);
-    if (reconciled.status !== "committed") return { status: reconciled.status === "fork_detected" ? "fork_detected" : "read_only", message: `External candidate was preserved (${reconciled.status}).` };
-    return { status: "ready", expectedGeneration: reconciled.expectedGeneration, generation: reconciled.generation, projectionStatus: "matching" };
+    return { status: "read_only", message: "The project file changed again while Studio was reading it; the file was left untouched." };
   }
 
   async recover(projectId: string): Promise<RecoveryResult> {
@@ -425,54 +535,113 @@ export class StudioProjectGenerationStore {
     const projection = await this.readProjection(locator);
     if (projection && !this.generationFilesEqual(recovered.generation.files, projection.files)) {
       if (!this.projectionIsAuthoritySubset(recovered.generation.files, projection.files)) return { status: "read_only", message: "Changed projection bytes were preserved for reconciliation." };
-      const marker = canonicalJson(await this.buildMarker(recovered.generation));
-      if (projection.markerRaw === marker && projection.supportMarkerRaw === marker) return { status: "read_only", message: "Selected-token projection is missing support content; bytes were preserved." };
     }
-    try { await this.writeProjection(recovered.generation); return { ...recovered, projectionStatus: "repaired" }; }
+    try {
+      await this.writeProjection(recovered.generation, {
+        createMissingProjectDocument: projection === null,
+      });
+      return { ...recovered, projectionStatus: "repaired" };
+    }
     catch (error) { return { status: "storage_unavailable", message: String(error) }; }
   }
-  async createExternalCandidateMarker(candidate: StudioExternalCandidate): Promise<string> {
-    const recovered = await this.recover(candidate.projectId);
-    if (recovered.status !== "ready" || recovered.expectedGeneration.revision !== candidate.expectedGeneration.revision || recovered.expectedGeneration.generationHash !== candidate.expectedGeneration.generationHash) throw new Error("External candidate base generation is stale or unavailable.");
-    const files = new Map<string, Uint8Array>([["project.systemsculpt", candidate.projectDocument.slice()]]);
-    for (const file of candidate.supportFiles) files.set(`support/${normalizeRelativePath(file.supportRelativePath)}`, file.bytes.slice());
-    const parsed = JSON.parse(decoder.decode(candidate.projectDocument)) as Record<string, unknown>;
-    if (parsed.schema !== "studio.project.v1" || parsed.projectId !== candidate.projectId) throw new Error("External candidate project identity is invalid.");
-    return canonicalJson(await this.buildMarker({ files, metadata: recovered.generation.metadata }));
-  }
-
   async reconcileExternalCandidate(candidate: ProjectionLocator, expected: ExpectedGeneration): Promise<CommitResult> {
     let locator: ProjectionLocator;
     try { locator = validateProjectionLocator(candidate); } catch (error) { return { status: "invalid_candidate", message: String(error) }; }
     try {
       const projection = await this.readProjection(locator);
-      if (!projection || !projection.markerRaw || projection.markerRaw !== projection.supportMarkerRaw) return { status: "fork_detected", message: "Projection identity markers are missing or disagree." };
-      const marker = this.parseProjectionMarker(projection.markerRaw);
-      if (!marker) return { status: "invalid_candidate", message: "Projection marker schema is invalid." };
-      const projectId = marker.projectId; authority(projectId);
-      if (marker.revision !== expected.revision || marker.generationHash !== expected.generationHash) return { status: "fork_detected", message: "External projection is based on a stale generation." };
-      const document = projection.files.get("project.systemsculpt");
-      if (!document) return { status: "invalid_candidate", message: "External projection lacks a project document." };
-      const parsed = JSON.parse(decoder.decode(document)) as Record<string, unknown>;
-      if (parsed.schema !== "studio.project.v1" || parsed.projectId !== projectId) return { status: "invalid_candidate", message: "External project document identity is invalid." };
-      const recovered = await this.recover(projectId);
-      if (recovered.status !== "ready") return recovered;
-      for (const path of recovered.generation.files.keys()) {
-        if (path.startsWith("support/") && !projection.files.has(path)) return { status: "invalid_candidate", message: "External projection is missing selected-generation support content." };
-      }
-      const computed = await this.buildMarker({ files: projection.files, metadata: recovered.generation.metadata });
-      const candidateHashesMatch = marker.projectDocumentSha256 === computed.projectDocumentSha256 && marker.supportManifestSha256 === computed.supportManifestSha256;
-      if (!candidateHashesMatch) return { status: "invalid_candidate", message: "External projection marker hashes do not validate the exact candidate bytes." };
-      return this.commitInternal({
-        kind: "external_sync",
-        projectId,
-        projectDocument: document,
-        supportFiles: [...projection.files].filter(([path]) => path.startsWith("support/")).map(([relativePath, bytes]) => ({ relativePath, bytes })),
-      }, expected);
+      const document = projection?.files.get("project.systemsculpt");
+      if (!document) return { status: "invalid_candidate", message: "The Studio project file is missing." };
+      const rawText = decoder.decode(document);
+      assertValidStudioProjectAgentDocumentStructure(JSON.parse(rawText));
+      const parsed = parseStudioProject(rawText);
+      const projectId = parsed.projectId;
+      authority(projectId);
+      return this.exclusive(projectId, async () => {
+        const recovered = await this.recover(projectId);
+        if (recovered.status !== "ready") return recovered;
+        if (recovered.expectedGeneration.revision !== expected.revision || recovered.expectedGeneration.generationHash !== expected.generationHash) {
+          return { status: "stale_revision", expectedGeneration: recovered.expectedGeneration };
+        }
+        return this.reconcileProjectionUnlocked(locator, recovered);
+      });
     } catch (error) { return { status: "invalid_candidate", message: String(error) }; }
   }
 
-  private async publish(projectId: string, inputFiles: Map<string, Uint8Array>, parent: GenerationManifest | null, commandKind: StudioGenerationCommandKind, locator: ProjectionLocator): Promise<CommitResult> {
+  private async reconcileProjectionUnlocked(locator: ProjectionLocator, recovered: Extract<RecoveryResult, { status: "ready" }>): Promise<CommitResult> {
+    const projection = await this.readProjection(locator);
+    if (!projection) return { status: "invalid_candidate", message: "The Studio project file is missing." };
+    if (this.generationFilesEqual(recovered.generation.files, projection.files)) {
+      try { await this.ensureProjection(recovered.generation); }
+      catch (error) { return { status: "storage_unavailable", message: String(error) }; }
+      return { status: "committed", expectedGeneration: recovered.expectedGeneration, generation: recovered.generation, logicallyCommitted: true };
+    }
+    const document = projection.files.get("project.systemsculpt");
+    if (!document) return { status: "invalid_candidate", message: "The Studio project file is missing." };
+    let project: ReturnType<typeof parseStudioProject>;
+    let rawProjectDocument: unknown;
+    try {
+      const rawText = decoder.decode(document);
+      rawProjectDocument = JSON.parse(rawText);
+      assertValidStudioProjectAgentDocumentStructure(rawProjectDocument);
+      project = parseStudioProject(rawText);
+      validateStudioProjectForAgentEdit(project);
+    }
+    catch (error) { return { status: "invalid_candidate", message: `The Studio project file is invalid: ${String(error)}` }; }
+    if (project.projectId !== recovered.generation.metadata.projectId) {
+      return { status: "invalid_candidate", message: "The Studio project ID does not match this file's history." };
+    }
+
+    // The .systemsculpt file is the editable project. Plugin-owned support
+    // data never makes an otherwise valid project document stale.
+    const recoveredDocument = recovered.generation.files.get("project.systemsculpt");
+    if (recoveredDocument) {
+      try {
+        assertStableStudioProjectAgentDocumentFieldsUnchanged(
+          rawProjectDocument,
+          JSON.parse(decoder.decode(recoveredDocument))
+        );
+      } catch (error) {
+        return {
+          status: "invalid_candidate",
+          message: `The Studio project file is invalid: ${String(error)}`,
+        };
+      }
+    }
+    if (recoveredDocument && bytesEqual(recoveredDocument, document)) {
+      try {
+        await this.writeProjection(recovered.generation);
+        return { status: "committed", expectedGeneration: recovered.expectedGeneration, generation: recovered.generation, logicallyCommitted: true };
+      } catch (error) {
+        return { status: "storage_unavailable", message: String(error) };
+      }
+    }
+
+    // The project document is the user-editable source of truth. Support files
+    // are private implementation data: recover them from the last valid
+    // generation instead of requiring an agent to coordinate them.
+    const files = new Map(
+      [...recovered.generation.files].map(([path, bytes]) => [path, bytes.slice()] as const)
+    );
+    files.set("project.systemsculpt", document.slice());
+    return this.publish(
+      project.projectId,
+      files,
+      recovered.generation.metadata,
+      "external_sync",
+      locator,
+      document
+    );
+  }
+
+  private async publish(
+    projectId: string,
+    inputFiles: Map<string, Uint8Array>,
+    parent: GenerationManifest | null,
+    commandKind: StudioGenerationCommandKind,
+    locator: ProjectionLocator,
+    expectedVisibleProjectDocument?: Uint8Array,
+    expectedRetiredProjectDocument?: Uint8Array
+  ): Promise<CommitResult> {
     try {
       const createdAt = this.now(); if (!RFC3339_MS.test(createdAt)) throw new Error("Timestamp must be RFC3339 with milliseconds.");
       const files = new Map<string, Uint8Array>(); const folded = new Set<string>();
@@ -493,12 +662,38 @@ export class StudioProjectGenerationStore {
       for (const entry of entries) { const bytes = files.get(entry.relativePath)!; await this.mkdirRecursive(dirname(`${directory}/files/${entry.relativePath}`)); await this.adapter.writeBinary(`${directory}/files/${entry.relativePath}`, arrayBuffer(bytes)); }
       await this.adapter.write(`${directory}/manifest.json`, decoder.decode(manifestBytes));
       await this.validateFiles(directory, manifest, files);
+      const document = files.get("project.systemsculpt")!;
+      await this.mkdirRecursive(dirname(locator.vaultRelativeProjectPath));
+      if (expectedVisibleProjectDocument) {
+        const visibleProjectMatched = await this.adapter.compareAndSwapText(
+          locator.vaultRelativeProjectPath,
+          decoder.decode(expectedVisibleProjectDocument),
+          decoder.decode(document)
+        );
+        if (!visibleProjectMatched) {
+          try { await this.adapter.remove(directory); } catch {}
+          return { status: "read_only", message: "The project file changed before Studio could save; the file was left untouched." };
+        }
+      } else {
+        const destinationCreated = await this.adapter.copyFileIfAbsent(
+          `${directory}/files/project.systemsculpt`,
+          locator.vaultRelativeProjectPath
+        );
+        if (!destinationCreated) {
+          try { await this.adapter.remove(directory); } catch {}
+          return { status: "read_only", message: "A project file already exists at the destination; it was left untouched." };
+        }
+      }
       const descriptor: CommitDescriptor = { schemaVersion: 1, projectId, revision: body.revision, generationHash, manifestSha256: await hash(manifestBytes), entryCount: entries.length, logicallyCommittedAt: createdAt };
       await this.adapter.write(`${directory}/commit.json`, canonicalJson(descriptor));
       const validated = await this.validateGeneration(directory);
-      await this.writeProjection(selected(validated));
+      await this.writeProjection(selected(validated), { projectDocumentAlreadyWritten: true });
       if (parent && parent.projection.canonicalPath !== manifest.projection.canonicalPath) {
-        await this.retirePreviousProjection(parent);
+        await this.retirePreviousProjection(
+          parent,
+          manifest,
+          expectedRetiredProjectDocument
+        );
       }
       const token = generationToken(validated); for (const listener of this.listeners.get(projectId) || []) listener(token);
       return { status: "committed", expectedGeneration: token, generation: selected(validated), logicallyCommitted: true };
@@ -542,24 +737,12 @@ export class StudioProjectGenerationStore {
     const manifestRead = await this.adapter.read(`${directory}/manifest.json`); if (manifestRead !== canonicalJson(manifest)) throw new Error("manifest fresh read validation failed");
   }
 
-  private parseProjectionMarker(raw: string): ProjectionMarker | null {
-    try {
-      const marker = JSON.parse(raw) as Record<string, unknown>;
-      if (!hasExactKeys(marker, ["schemaVersion", "projectId", "revision", "generationHash", "projectDocumentSha256", "supportManifestSha256"])) return null;
-      if (marker.schemaVersion !== 1 || typeof marker.projectId !== "string" || !PROJECT_ID.test(marker.projectId) || !Number.isSafeInteger(marker.revision) || !HASH.test(String(marker.generationHash)) || !HASH.test(String(marker.projectDocumentSha256)) || !HASH.test(String(marker.supportManifestSha256))) return null;
-      return marker as ProjectionMarker;
-    } catch { return null; }
-  }
-
   private async readProjection(locator: ProjectionLocator): Promise<ProjectionSnapshot | null> {
     try {
       const files = new Map<string, Uint8Array>();
       files.set("project.systemsculpt", new Uint8Array(await this.adapter.readBinary(locator.vaultRelativeProjectPath)));
       await this.captureTree(deriveStudioAssetsDir(locator.vaultRelativeProjectPath), "support", files);
-      let markerRaw: string | null = null; let supportMarkerRaw: string | null = null;
-      try { markerRaw = await this.adapter.read(`${locator.vaultRelativeProjectPath}.identity.json`); } catch {}
-      try { supportMarkerRaw = await this.adapter.read(`${deriveStudioAssetsDir(locator.vaultRelativeProjectPath)}/.studio-projection.json`); } catch {}
-      return { files, markerRaw, supportMarkerRaw };
+      return { files };
     } catch { return null; }
   }
 
@@ -573,42 +756,131 @@ export class StudioProjectGenerationStore {
   }
 
   private async ensureProjection(generation: SelectedGeneration): Promise<"matching" | "repaired"> {
-    const marker = canonicalJson(await this.buildMarker(generation));
     const locator = { vaultRelativeProjectPath: generation.metadata.projection.canonicalPath };
     const projection = await this.readProjection(locator);
-    if (projection && this.generationFilesEqual(generation.files, projection.files) && projection.markerRaw === marker && projection.supportMarkerRaw === marker) return "matching";
+    await this.removeLegacyProjectionMarkers(locator);
+    if (projection && this.generationFilesEqual(generation.files, projection.files)) return "matching";
     if (projection && !this.generationFilesEqual(generation.files, projection.files)) throw new Error("Projection bytes differ from authority and require reconciliation.");
     await this.writeProjection(generation);
     return "repaired";
   }
 
-  private async writeProjection(generation: SelectedGeneration): Promise<void> {
+  private async writeProjection(
+    generation: SelectedGeneration,
+    options?: {
+      projectDocumentAlreadyWritten?: boolean;
+      createMissingProjectDocument?: boolean;
+    }
+  ): Promise<void> {
     const document = generation.files.get("project.systemsculpt"); if (!document) throw new Error("Generation lacks project document.");
     const path = generation.metadata.projection.canonicalPath; const supportRoot = generation.metadata.projection.supportRoot;
+    await this.mkdirRecursive(dirname(path));
+    if (options?.createMissingProjectDocument === true) {
+      await this.adapter.writeBinary(path, arrayBuffer(document));
+    } else if (options?.projectDocumentAlreadyWritten !== true) {
+      const matched = await this.adapter.compareAndSwapText(
+        path,
+        decoder.decode(document),
+        decoder.decode(document)
+      );
+      if (!matched) throw new Error("The project file changed before Studio could finish; the file was left untouched.");
+    }
     const expectedSupport = new Set([...generation.files.keys()].filter((entry) => entry.startsWith("support/")).map((entry) => `${supportRoot}/${entry.slice(8)}`));
     const existing = await this.listTreeFiles(supportRoot);
-    for (const stale of existing) if (stale !== `${supportRoot}/.studio-projection.json` && !expectedSupport.has(stale)) await this.adapter.remove(stale);
-    await this.mkdirRecursive(dirname(path)); await this.adapter.writeBinary(path, arrayBuffer(document));
+    for (const stale of existing) if (!expectedSupport.has(stale)) await this.adapter.remove(stale);
     for (const [relativePath, bytes] of generation.files) if (relativePath.startsWith("support/")) { const target = `${supportRoot}/${relativePath.slice(8)}`; await this.mkdirRecursive(dirname(target)); await this.adapter.writeBinary(target, arrayBuffer(bytes)); }
-    const marker = canonicalJson(await this.buildMarker(generation)); await this.adapter.write(`${path}.identity.json`, marker); await this.mkdirRecursive(supportRoot); await this.adapter.write(`${supportRoot}/.studio-projection.json`, marker);
+    await this.removeLegacyProjectionMarkers({ vaultRelativeProjectPath: path });
     const verified = await this.readProjection({ vaultRelativeProjectPath: path });
-    if (!verified || !this.generationFilesEqual(generation.files, verified.files) || verified.markerRaw !== marker || verified.supportMarkerRaw !== marker) throw new Error("Projection fresh-read validation failed.");
+    if (!verified || !this.generationFilesEqual(generation.files, verified.files)) throw new Error("Projection fresh-read validation failed.");
   }
 
-  private async retirePreviousProjection(previous: GenerationManifest): Promise<void> {
-    // The destination is already rebuilt and validated from authority. Cleanup
-    // is an optimization only; an interruption leaves two classifiable
-    // projections and never changes the selected generation.
-    for (const path of [previous.projection.canonicalPath, `${previous.projection.canonicalPath}.identity.json`, previous.projection.supportRoot]) {
+  private async removeLegacyProjectionMarkers(locator: ProjectionLocator): Promise<void> {
+    for (const path of [
+      `${locator.vaultRelativeProjectPath}.identity.json`,
+      `${deriveStudioAssetsDir(locator.vaultRelativeProjectPath)}/.studio-projection.json`,
+    ]) {
       try { await this.adapter.remove(path); } catch {}
     }
   }
 
-  private async buildMarker(generation: SelectedGeneration): Promise<Record<string, unknown>> {
-    const supportEntries: Array<{ relativePath: string; sizeBytes: number; sha256: string }> = [];
-    for (const [path, bytes] of generation.files) if (path.startsWith("support/") && !path.endsWith("/.studio-projection.json")) supportEntries.push({ relativePath: path.slice(8), sizeBytes: bytes.byteLength, sha256: await hash(bytes) });
-    supportEntries.sort((a, b) => compareUtf8(a.relativePath, b.relativePath));
-    return { schemaVersion: 1, projectId: generation.metadata.projectId, revision: generation.metadata.revision, generationHash: generation.metadata.generationHash, projectDocumentSha256: await hash(generation.files.get("project.systemsculpt")!), supportManifestSha256: await hash(encoder.encode(canonicalJson({ entries: supportEntries }))) };
+  private async retirePreviousProjection(
+    previous: GenerationManifest,
+    replacement: GenerationManifest,
+    expectedProjectDocument?: Uint8Array
+  ): Promise<void> {
+    // Move, never delete, the previous visible paths. Rename is atomic at the
+    // adapter boundary, so an edit racing this cleanup is either left at the
+    // original path or captured intact in the private retired tree.
+    const retiredRoot = `${authority(replacement.projectId)}/retired/${replacement.revision}-${replacement.generationHash}`;
+    await this.mkdirRecursive(retiredRoot);
+    const retiredProjectPath = `${retiredRoot}/project.systemsculpt`;
+    let projectMoved = false;
+    try {
+      await this.adapter.movePath(previous.projection.canonicalPath, retiredProjectPath);
+      projectMoved = true;
+    } catch {
+      // A missing or concurrently moved source already satisfies cleanup.
+    }
+
+    // If the bytes moved were not the version Studio intended to rename, put
+    // that agent-authored file back at its original path without overwriting a
+    // newer file that may already have appeared there.
+    if (projectMoved && expectedProjectDocument) {
+      const movedBytes = new Uint8Array(await this.adapter.readBinary(retiredProjectPath));
+      if (!bytesEqual(movedBytes, expectedProjectDocument)) {
+        let restored = false;
+        let lastRestoreError: unknown = null;
+        for (let attempt = 0; attempt < 3 && !restored; attempt += 1) {
+          try {
+            restored = await this.adapter.copyFileIfAbsent(
+              retiredProjectPath,
+              previous.projection.canonicalPath
+            );
+            if (!restored) {
+              // A newer file already occupies the source path, so the raced
+              // edit was not made invisible by this rename.
+              await this.adapter.readBinary(previous.projection.canonicalPath);
+              restored = true;
+            }
+          } catch (error) {
+            lastRestoreError = error;
+          }
+        }
+        if (!restored) {
+          try {
+            // Copy can fail transiently even when an atomic move back works.
+            // Prefer making the agent's bytes visible over retaining a second
+            // private recovery copy.
+            await this.adapter.movePath(
+              retiredProjectPath,
+              previous.projection.canonicalPath
+            );
+            restored = true;
+          } catch (error) {
+            lastRestoreError = error;
+          }
+        }
+        if (!restored) {
+          throw new Error(
+            `Studio preserved an edit made during rename but could not restore it to the visible source path: ${String(lastRestoreError)}`
+          );
+        }
+      }
+    }
+
+    try {
+      await this.adapter.movePath(previous.projection.supportRoot, `${retiredRoot}/support`);
+    } catch {
+      // Support data is private and remains recoverable from generation history.
+    }
+    try {
+      await this.adapter.movePath(
+        `${previous.projection.canonicalPath}.identity.json`,
+        `${retiredRoot}/legacy-identity.json`
+      );
+    } catch {
+      // Legacy markers may not exist.
+    }
   }
 
   private async listTreeFiles(root: string): Promise<string[]> {

@@ -344,6 +344,112 @@
   }
 }
 
+/* Obsidian tablets retain the native settings sidebar, so the plugin pane can
+ * be phone-width even on a wide physical display. Adapt to the pane itself;
+ * this also covers split desktop windows without device-specific selectors. */
+@container ss-surface (max-width: 520px) {
+  .systemsculpt-tab-content .setting-item {
+    align-items: stretch;
+    flex-direction: column;
+    gap: var(--ss-space-2);
+  }
+
+  .systemsculpt-tab-content .setting-item-info,
+  .systemsculpt-tab-content .setting-item-control {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .systemsculpt-tab-content .setting-item-control {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+}
+
+/* Mobile settings keep navigation on one predictable, swipeable row and put
+ * the actual setting controls in the first viewport. */
+.ss-mobile-layout .ss-settings-surface {
+  gap: var(--ss-space-3);
+  padding-bottom: var(--ss-mobile-bottom-clearance);
+}
+
+.ss-mobile-layout .ss-settings-surface > .setting-item-description,
+.ss-mobile-layout .ss-settings-search-meta {
+  display: none;
+}
+
+.ss-mobile-layout .ss-settings-search-shell {
+  gap: 0;
+  padding: var(--ss-space-2);
+}
+
+.ss-mobile-layout .ss-settings-layout {
+  gap: var(--ss-space-3);
+}
+
+.ss-mobile-layout .ss-settings-tab-bar {
+  position: sticky;
+  top: 0;
+  z-index: var(--ss-z-sticky);
+  flex-wrap: nowrap;
+  width: 100%;
+  padding-block: var(--ss-space-1);
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  scrollbar-width: none;
+  background: var(--ss-surface-0);
+}
+
+.ss-mobile-layout .ss-settings-tab-bar::-webkit-scrollbar {
+  display: none;
+}
+
+.ss-mobile-layout .ss-settings-tab-bar > .ss-tab-button {
+  flex: 0 0 auto;
+}
+
+.ss-mobile-layout .ss-settings-surface .ss-help-link,
+.ss-mobile-layout .ss-settings-surface .ss-settings-link {
+  min-height: var(--ss-touch-target);
+}
+
+.ss-mobile-layout .ss-settings-quick-actions {
+  align-items: stretch;
+  flex-direction: column;
+}
+
+.ss-mobile-layout .ss-settings-quick-actions .setting-item-info,
+.ss-mobile-layout .ss-settings-quick-actions .setting-item-control {
+  width: 100%;
+}
+
+.ss-mobile-layout .ss-settings-quick-actions .setting-item-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--ss-space-1);
+}
+
+.ss-mobile-layout .ss-settings-quick-actions .ss-restore-defaults-btn {
+  width: 100%;
+  min-width: 0;
+  min-height: var(--ss-touch-target);
+  white-space: normal;
+}
+
+.ss-mobile-layout .ss-settings-quick-actions .ss-settings-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Preserve Obsidian's visual toggle geometry while extending its touch hit
+ * area to the mobile target size. */
+.ss-mobile-layout .ss-settings-surface .checkbox-container::before {
+  top: calc((var(--ss-touch-target) - 100%) / -2);
+  bottom: calc((var(--ss-touch-target) - 100%) / -2);
+  height: auto;
+}
+
 /* ------------------------------------------------------------------ *
  * Restore defaults + misc buttons
  * ------------------------------------------------------------------ */

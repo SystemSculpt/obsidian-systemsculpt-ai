@@ -59,7 +59,7 @@ type StudioProjectSessionControllerHost = {
   plugin: SystemSculptPlugin;
   graphInteraction: Pick<
     StudioGraphInteractionEngine,
-    "clearProjectState" | "getGraphZoom" | "getSelectedNodeIds" | "setGraphZoom" | "setSelectedNodeIds"
+    "clearProjectState" | "fitSelectedNodesInViewport" | "getGraphZoom" | "getSelectedNodeIds" | "setGraphZoom" | "setSelectedNodeIds"
   >;
   getGraphZoomMode: () => StudioGraphZoomMode;
   resetGraphZoomInteractionState: () => void;
@@ -68,10 +68,12 @@ type StudioProjectSessionControllerHost = {
   getGraphViewportElement: () => HTMLElement | null;
   captureProjectHistoryCheckpoint: () => void;
   resetProjectHistory: (project: StudioProjectV1 | null) => void;
+  preserveProjectAsUndo: (project: StudioProjectV1, selectedNodeIds: string[]) => void;
   setHistoryCurrentSnapshot: (project: StudioProjectV1, selectedNodeIds: string[]) => void;
   clearProjectEditorState: () => void;
   clearRunPresentation: () => void;
   disposeTextNodeEditors: () => void;
+  scheduleProjectFileRetry: (callback: () => void) => void;
   hydrateProjectCache: (
     projectPath: string,
     project: StudioProjectV1
@@ -98,10 +100,15 @@ export class StudioProjectSessionController {
   private currentProjectPath: string | null = null;
   private currentProjectSession: StudioProjectSession | null = null;
   private retainedProjectPath: string | null = null;
-  private projectLiveSyncWarning: string | null = null;
+  private projectFileWarning: string | null = null;
   private graphViewStateByProjectPath: StudioGraphViewStateByProject = {};
   private nodeDetailModeByProjectPath: StudioNodeDetailModeByProject = {};
   private pendingViewportState: StudioGraphViewportState | null = null;
+  private projectFileMutationTail: Promise<void> = Promise.resolve();
+  private projectBindingEpoch = 0;
+  private projectFileRetryScheduled = false;
+  private projectFileRetryCount = 0;
+  private readFailureBlockedSession: StudioProjectSession | null = null;
 
   constructor(private readonly host: StudioProjectSessionControllerHost) {}
 
@@ -117,8 +124,8 @@ export class StudioProjectSessionController {
     return this.currentProjectSession;
   }
 
-  getProjectLiveSyncWarning(): string | null {
-    return this.projectLiveSyncWarning;
+  getProjectFileWarning(): string | null {
+    return this.projectFileWarning;
   }
 
   hasPendingLocalProjectSaveWork(): boolean {
@@ -129,9 +136,9 @@ export class StudioProjectSessionController {
     this.currentProjectSession?.markAcceptedProjectSignature(signature, options);
   }
 
-  clearProjectLiveSyncState(): void {
-    this.projectLiveSyncWarning = null;
-    this.currentProjectSession?.clearLiveSyncState();
+  clearProjectFileState(): void {
+    this.projectFileWarning = null;
+    this.currentProjectSession?.clearProjectFileState();
   }
 
   readCurrentNodeDetailMode(): StudioNodeDetailMode {
@@ -187,19 +194,19 @@ export class StudioProjectSessionController {
     }
   }
 
-  restoreGraphViewportState(viewport: HTMLElement): void {
+  restoreGraphViewportState(viewport: HTMLElement): boolean {
     const pending = this.pendingViewportState;
     this.pendingViewportState = null;
     const currentProjectPath = this.currentProjectPath;
     if (!currentProjectPath) {
-      return;
+      return false;
     }
 
     const restoredState = pending && pending.projectPath === currentProjectPath
       ? pending
       : getSavedGraphViewState(this.graphViewStateByProjectPath, currentProjectPath);
     if (!restoredState) {
-      return;
+      return false;
     }
 
     const nextZoom = normalizeGraphZoom(restoredState.zoom);
@@ -218,6 +225,7 @@ export class StudioProjectSessionController {
       viewport.scrollLeft = nextLeft;
       viewport.scrollTop = nextTop;
     });
+    return true;
   }
 
   serializePersistentState(): StudioProjectScopedViewState {
@@ -301,14 +309,11 @@ export class StudioProjectSessionController {
     }
     try {
       await this.currentProjectSession.flushPendingSaveWork({ force: options?.force });
-      this.projectLiveSyncWarning = null;
       if (options?.showNotice) {
         new Notice("Studio graph saved.");
       }
     } catch (error) {
       this.host.setError(error);
-    } finally {
-      void this.processPendingExternalProjectSync();
     }
   }
 
@@ -322,13 +327,23 @@ export class StudioProjectSessionController {
   }
 
   async close(): Promise<void> {
+    // A vault modify callback captures the changed file bytes before it is
+    // queued. Let every already-observed project-file change finish while the
+    // current session is still bound; otherwise advancing the epoch here would
+    // make the queued handler discard the agent edit before the final canvas
+    // flush/release runs.
+    await this.drainProjectFileMutations();
+    this.projectBindingEpoch += 1;
+    this.projectFileRetryScheduled = false;
+    this.projectFileRetryCount = 0;
+    this.readFailureBlockedSession = null;
     this.captureGraphViewportState();
     this.host.requestLayoutSave();
     await this.flushTextNodeEditorsBeforeProjectTransition();
+    await this.releaseRetainedProjectSession();
     this.host.resetProjectHistory(null);
     this.host.clearRunPresentation();
-    this.clearProjectLiveSyncState();
-    await this.releaseRetainedProjectSession();
+    this.clearProjectFileState();
     this.currentProjectPath = null;
     this.currentProject = null;
     this.pendingViewportState = null;
@@ -343,12 +358,38 @@ export class StudioProjectSessionController {
 
   async loadProjectFromPath(
     projectPath: string | null,
-    options?: { notifyOnError?: boolean; forceReload?: boolean }
-  ): Promise<void> {
-    const isProjectTransition =
-      projectPath !== this.currentProjectPath || options?.forceReload === true;
-    if (isProjectTransition && this.currentProjectPath && this.currentProject) {
+    options?: {
+      notifyOnError?: boolean;
+      forceReload?: boolean;
+      consumeBlockedRecovery?: boolean;
+    }
+  ): Promise<boolean> {
+    // Same-path force reloads run inside the project-file mutation queue, so
+    // waiting there would deadlock. A real path switch must first finish every
+    // modify event already attached to the current binding.
+    if (projectPath !== this.currentProjectPath) {
+      await this.drainProjectFileMutations();
+    }
+    const previousSession = this.currentProjectSession;
+    const previousRetainedPath = this.retainedProjectPath;
+    const previousProjectPath = this.currentProjectPath;
+    const isPathSwitch = projectPath !== this.currentProjectPath;
+    const isSamePathFileReload = !isPathSwitch && options?.forceReload === true;
+    const isProjectTransition = isPathSwitch || isSamePathFileReload;
+    if (isPathSwitch) {
+      this.projectBindingEpoch += 1;
+      this.projectFileRetryScheduled = false;
+      this.projectFileRetryCount = 0;
+      this.readFailureBlockedSession = null;
+    }
+    if (isPathSwitch && this.currentProjectPath && this.currentProject) {
       await this.flushTextNodeEditorsBeforeProjectTransition();
+    } else if (isSamePathFileReload && this.currentProjectPath && this.currentProject) {
+      // A file reload is already authoritative. Commit any final editor text to
+      // the in-memory snapshot only; the caller blocks project-file writes
+      // before entering this path so the old canvas cannot overwrite the file.
+      this.currentProjectSession?.blockProjectFileWrites();
+      this.host.disposeTextNodeEditors();
     }
 
     if (isProjectTransition) {
@@ -359,22 +400,22 @@ export class StudioProjectSessionController {
     if (!projectPath) {
       await this.releaseRetainedProjectSession();
       this.resetLoadedProjectState();
-      this.clearProjectLiveSyncState();
-      return;
+      this.clearProjectFileState();
+      return true;
     }
 
     if (!isStudioProjectPath(projectPath)) {
       await this.releaseRetainedProjectSession();
       this.resetLoadedProjectState();
-      this.clearProjectLiveSyncState();
+      this.clearProjectFileState();
       if (options?.notifyOnError !== false) {
         new Notice("Studio only opens .systemsculpt files.");
       }
-      return;
+      return false;
     }
 
     if (!options?.forceReload && this.currentProjectPath === projectPath && this.currentProject) {
-      return;
+      return true;
     }
 
     try {
@@ -382,8 +423,6 @@ export class StudioProjectSessionController {
       const session = await studio.retainProjectSession(projectPath, {
         forceReload: options?.forceReload,
       });
-      const previousSession = this.currentProjectSession;
-      const previousRetainedPath = this.retainedProjectPath;
       this.currentProjectSession = session;
       this.retainedProjectPath = session.getProjectPath();
       if (previousSession && previousRetainedPath) {
@@ -410,11 +449,18 @@ export class StudioProjectSessionController {
             projectPath,
           };
 
-      await this.commitMutationAsync(
-        "project.repair",
-        async (currentProject) => repairStudioProjectForLoad(currentProject),
-        { captureHistory: false }
-      );
+      try {
+        await this.commitMutationAsync(
+          "project.repair",
+          async (currentProject) => repairStudioProjectForLoad(currentProject),
+          { captureHistory: false }
+        );
+      } catch (repairError) {
+        console.warn("[SystemSculpt Studio] Unable to apply optional project repairs", {
+          projectPath,
+          error: repairError instanceof Error ? repairError.message : String(repairError),
+        });
+      }
 
       try {
         const cacheSnapshot = await this.host.hydrateProjectCache(projectPath, project);
@@ -428,28 +474,61 @@ export class StudioProjectSessionController {
         });
       }
 
-      await this.commitMutationAsync(
-        "project.repair",
-        async (currentProject) => await this.host.refreshNoteNodePreviewsFromVault(currentProject),
-        { captureHistory: false }
-      );
+      try {
+        await this.commitMutationAsync(
+          "project.repair",
+          async (currentProject) => await this.host.refreshNoteNodePreviewsFromVault(currentProject),
+          { captureHistory: false }
+        );
+      } catch (previewError) {
+        console.warn("[SystemSculpt Studio] Unable to refresh note previews on project load", {
+          projectPath,
+          error: previewError instanceof Error ? previewError.message : String(previewError),
+        });
+      }
       this.host.resetProjectHistory(project);
+      if (options?.consumeBlockedRecovery !== false) {
+        const blockedRecovery = await studio.consumeBlockedProjectRecovery(project.projectId, project);
+        if (blockedRecovery) {
+          this.host.preserveProjectAsUndo(blockedRecovery, []);
+        }
+      }
       const loadedRawText = await this.readStudioProjectRawText(projectPath);
       if (loadedRawText != null) {
         this.currentProjectSession?.markAcceptedProjectText(loadedRawText);
       } else {
-        this.currentProjectSession?.clearLiveSyncState();
+        this.currentProjectSession?.clearProjectFileState();
       }
-      this.projectLiveSyncWarning = null;
+      this.projectFileWarning = null;
       this.host.setLastError(null);
+      return true;
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (
+        options?.forceReload === true &&
+        previousSession &&
+        previousRetainedPath &&
+        previousProjectPath
+      ) {
+        this.currentProjectSession = previousSession;
+        this.retainedProjectPath = previousRetainedPath;
+        this.currentProjectPath = previousProjectPath;
+        this.currentProject = previousSession.getProject();
+        this.host.setLastError(message);
+        this.host.render();
+        if (options?.notifyOnError !== false) {
+          this.host.setError(error);
+        }
+        return false;
+      }
       await this.releaseRetainedProjectSession();
       this.resetLoadedProjectState();
-      this.clearProjectLiveSyncState();
-      this.host.setLastError(error instanceof Error ? error.message : String(error));
+      this.clearProjectFileState();
+      this.host.setLastError(message);
       if (options?.notifyOnError !== false) {
         this.host.setError(error);
       }
+      return false;
     }
   }
 
@@ -462,10 +541,50 @@ export class StudioProjectSessionController {
       return;
     }
     if (modifiedPath === this.currentProjectPath) {
-      const rawText = await this.readStudioProjectRawText(modifiedPath);
-      if (rawText != null) {
-        await this.processCurrentProjectFileMutation(rawText);
-      }
+      const bindingEpoch = this.projectBindingEpoch;
+      // Start the read immediately so an observed agent edit is not lost if a
+      // competing in-flight save settles before its queued handler runs.
+      const rawTextPromise = this.readStudioProjectRawText(modifiedPath);
+      const operation = this.projectFileMutationTail.then(async () => {
+        if (bindingEpoch !== this.projectBindingEpoch || modifiedPath !== this.currentProjectPath) {
+          return;
+        }
+        const rawText = await rawTextPromise;
+        if (
+          rawText != null &&
+          bindingEpoch === this.projectBindingEpoch &&
+          modifiedPath === this.currentProjectPath
+        ) {
+          await this.processCurrentProjectFileMutation(rawText);
+        } else if (
+          rawText == null &&
+          bindingEpoch === this.projectBindingEpoch &&
+          modifiedPath === this.currentProjectPath
+        ) {
+          const session = this.currentProjectSession;
+          session?.blockProjectFileWrites();
+          this.readFailureBlockedSession = session;
+          this.projectFileWarning = "Studio couldn't read the changed file yet. Studio will retry automatically; the file has not been overwritten.";
+          this.host.render();
+          this.scheduleProjectFileRetry(modifiedPath, bindingEpoch);
+        }
+      });
+      this.projectFileMutationTail = operation.catch((error) => {
+        console.warn("[SystemSculpt Studio] Unable to reload the changed project file", {
+          projectPath: modifiedPath,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        this.host.setError(error);
+        if (bindingEpoch === this.projectBindingEpoch && modifiedPath === this.currentProjectPath) {
+          const session = this.currentProjectSession;
+          session?.blockProjectFileWrites();
+          this.readFailureBlockedSession = session;
+          this.projectFileWarning = "Studio couldn't reload the changed file yet. Studio will retry automatically; the file has not been overwritten.";
+          this.host.render();
+          this.scheduleProjectFileRetry(modifiedPath, bindingEpoch);
+        }
+      });
+      await this.projectFileMutationTail;
       return;
     }
     if (!this.host.isMarkdownVaultFile(file)) {
@@ -510,19 +629,7 @@ export class StudioProjectSessionController {
         this.host.render();
         return;
       }
-      this.remapProjectScopedState(previousPath, renamedPath);
-      await this.loadProjectFromPath(renamedPath, {
-        notifyOnError: false,
-        forceReload: true,
-      });
-      this.applySelectionToCurrentProject(selectedNodeIds);
-      const renamedRawText = await this.readStudioProjectRawText(renamedPath);
-      if (renamedRawText != null) {
-        this.currentProjectSession?.markAcceptedProjectText(renamedRawText);
-      }
-      this.projectLiveSyncWarning = null;
-      this.host.render();
-      this.host.refreshLeafDisplay();
+      await this.adoptCurrentProjectPathRename(previousPath, renamedPath, selectedNodeIds);
       return;
     }
 
@@ -540,19 +647,11 @@ export class StudioProjectSessionController {
         this.host.render();
         return;
       }
-      this.remapProjectScopedState(this.currentProjectPath, remappedProjectPath);
-      await this.loadProjectFromPath(remappedProjectPath, {
-        notifyOnError: false,
-        forceReload: true,
-      });
-      this.applySelectionToCurrentProject(selectedNodeIds);
-      const remappedRawText = await this.readStudioProjectRawText(remappedProjectPath);
-      if (remappedRawText != null) {
-        this.currentProjectSession?.markAcceptedProjectText(remappedRawText);
-      }
-      this.projectLiveSyncWarning = null;
-      this.host.render();
-      this.host.refreshLeafDisplay();
+      await this.adoptCurrentProjectPathRename(
+        this.currentProjectPath,
+        remappedProjectPath,
+        selectedNodeIds
+      );
       return;
     }
 
@@ -714,61 +813,233 @@ export class StudioProjectSessionController {
     }
   }
 
+  private async replaceStudioProjectRawTextIfUnchanged(
+    projectPath: string,
+    expectedRawText: string,
+    nextRawText: string
+  ): Promise<boolean> {
+    const adapter = this.host.app.vault.adapter as {
+      process?: (path: string, update: (current: string) => string) => Promise<string>;
+    };
+    if (typeof adapter.process !== "function") {
+      return false;
+    }
+    let matched = false;
+    await adapter.process(projectPath, (current) => {
+      if (current !== expectedRawText) return current;
+      matched = true;
+      return nextRawText;
+    });
+    return matched;
+  }
+
+  private async drainProjectFileMutations(): Promise<void> {
+    // A second modify event may append itself while the first one is settling.
+    // Keep draining until the tail we awaited is still the current tail. The
+    // equality check and the caller's subsequent epoch increment execute in
+    // the same JavaScript turn, so no observed event can slip between them.
+    while (true) {
+      const pending = this.projectFileMutationTail;
+      await pending;
+      if (pending === this.projectFileMutationTail) {
+        return;
+      }
+    }
+  }
+
+  private scheduleProjectFileRetry(projectPath: string, bindingEpoch: number): void {
+    if (this.projectFileRetryScheduled) {
+      return;
+    }
+    if (this.projectFileRetryCount >= 8) {
+      this.projectFileWarning = "Studio still can't read this changed file. The file has not been overwritten. Edit the file or reopen Studio to retry.";
+      this.host.render();
+      return;
+    }
+    this.projectFileRetryScheduled = true;
+    this.projectFileRetryCount += 1;
+    this.host.scheduleProjectFileRetry(() => {
+      this.projectFileRetryScheduled = false;
+      if (bindingEpoch !== this.projectBindingEpoch || projectPath !== this.currentProjectPath) {
+        return;
+      }
+      void this.handleVaultItemModified({ path: projectPath } as TAbstractFile);
+    });
+  }
+
   private async processCurrentProjectFileMutation(rawText: string): Promise<void> {
     if (!this.currentProject || !this.currentProjectPath || !this.currentProjectSession) {
       return;
     }
-    const update = this.currentProjectSession.resolveExternalProjectTextUpdate(rawText, {
+    const session = this.currentProjectSession;
+    const projectPath = this.currentProjectPath;
+    const update = session.resolveProjectFileTextUpdate(rawText, {
       isActiveProjectFile: true,
     });
-    if (update.decision.kind === "ignore" || update.decision.kind === "defer") {
+    if (update.decision.kind === "ignore") {
+      if (update.decision.reason === "duplicate_accepted") {
+        const acceptedProject = session.getProject();
+        if (acceptedProject !== this.currentProject) {
+          const previousNodeIds = new Set(this.currentProject.graph.nodes.map((node) => node.id));
+          const selectedNodeIds = this.host.graphInteraction.getSelectedNodeIds();
+          this.currentProject = acceptedProject;
+          const addedNodeIds = acceptedProject.graph.nodes
+            .map((node) => node.id)
+            .filter((nodeId) => !previousNodeIds.has(nodeId));
+          this.applySelectionToCurrentProject(addedNodeIds.length > 0 ? addedNodeIds : selectedNodeIds);
+          this.projectFileWarning = null;
+          this.host.setLastError(null);
+          this.host.render();
+          if (addedNodeIds.length > 0) {
+            const viewport = this.host.getGraphViewportElement();
+            if (viewport) {
+              requestStudioAnimationFrame(viewport, () => {
+                this.host.graphInteraction.fitSelectedNodesInViewport();
+              });
+            }
+          }
+        }
+        if (this.readFailureBlockedSession === session) {
+          session.resumeProjectFileWrites();
+          this.readFailureBlockedSession = null;
+          this.projectFileWarning = null;
+          this.projectFileRetryCount = 0;
+          this.host.render();
+        }
+      } else if (update.decision.reason === "duplicate_rejected") {
+        session.blockProjectFileWrites();
+        const lintResult = this.host.plugin.getStudioService().lintProjectText(rawText);
+        const detail = lintResult.ok ? "The file is not a valid Studio project." : lintResult.error;
+        this.projectFileWarning = `Studio couldn't read this file: ${detail} Fix the file and Studio will update automatically.`;
+        this.projectFileRetryCount = 0;
+        this.host.render();
+      } else if (
+        update.decision.reason === "self_write" &&
+        this.readFailureBlockedSession === session
+      ) {
+        session.resumeProjectFileWrites();
+        this.readFailureBlockedSession = null;
+        this.projectFileWarning = null;
+        this.projectFileRetryCount = 0;
+        this.host.render();
+      }
+      return;
+    }
+    // From this point onward the file is authoritative. Stop every queued or
+    // future canvas write before waiting for a save that may already be in
+    // flight. The persistence layer's final CAS prevents that save from
+    // overwriting these bytes.
+    session.blockProjectFileWrites();
+    try {
+      await session.waitForInFlightSave();
+    } catch {
+      // A normal file-wins race rejects the competing canvas save. Continue by
+      // loading the file instead of surfacing an unhandled save error.
+    }
+    if (this.currentProjectSession !== session || this.currentProjectPath !== projectPath) {
       return;
     }
 
-    const lintResult = this.host.plugin.getStudioService().lintProjectText(rawText);
+    let candidateRawText = rawText;
+    let latestRawText = await this.readStudioProjectRawText(projectPath);
+    if (latestRawText != null && latestRawText !== candidateRawText) {
+      if (session.matchesLastAcceptedProjectText(latestRawText)) {
+        const restored = await this.replaceStudioProjectRawTextIfUnchanged(
+          projectPath,
+          latestRawText,
+          candidateRawText
+        );
+        if (!restored) {
+          latestRawText = await this.readStudioProjectRawText(projectPath);
+          if (latestRawText != null) candidateRawText = latestRawText;
+        }
+      } else {
+        candidateRawText = latestRawText;
+      }
+    }
+    const candidateUpdate = candidateRawText === rawText
+      ? update
+      : session.resolveProjectFileTextUpdate(candidateRawText, { isActiveProjectFile: true });
+    const studio = this.host.plugin.getStudioService();
+    const lintResult = studio.lintProjectText(candidateRawText);
     if (!lintResult.ok) {
-      this.currentProjectSession.markRejectedProjectSignature(update.signature);
-      this.projectLiveSyncWarning = `External .systemsculpt change rejected: ${lintResult.error}`;
+      session.markRejectedProjectSignature(candidateUpdate.signature);
+      this.projectFileWarning = `Studio couldn't read this file: ${lintResult.error} Fix the file and Studio will update automatically.`;
+      this.projectFileRetryCount = 0;
       this.host.render();
       return;
     }
 
+    // Text-editor disposal commits the last keystroke into the blocked session,
+    // so it is preserved in Undo without ever being written over the file.
+    this.host.disposeTextNodeEditors();
+    const previousProject = session.hasPendingLocalSaveWork()
+      ? session.getProjectSnapshot()
+      : null;
+    if (previousProject) {
+      try {
+        // Persist the losing canvas before replacing the shared session. If
+        // this write fails, the transition remains blocked and close cannot
+        // discard the only remaining in-memory copy.
+        await studio.preserveProjectRecovery(previousProject);
+      } catch (recoveryError) {
+        const detail = recoveryError instanceof Error
+          ? recoveryError.message
+          : String(recoveryError);
+        this.projectFileWarning = `Studio couldn't preserve the current canvas before loading this file: ${detail} The file has not been overwritten; Studio will retry automatically.`;
+        this.host.setLastError(detail);
+        this.host.render();
+        this.scheduleProjectFileRetry(projectPath, this.projectBindingEpoch);
+        return;
+      }
+    }
+    const previousNodeIds = new Set(this.currentProject.graph.nodes.map((node) => node.id));
     const selectedNodeIds = this.host.graphInteraction.getSelectedNodeIds();
-    await this.loadProjectFromPath(this.currentProjectPath, {
-      notifyOnError: false,
-      forceReload: true,
-    });
-    this.applySelectionToCurrentProject(selectedNodeIds);
-    this.projectLiveSyncWarning = null;
-    this.currentProjectSession?.markAcceptedProjectSignature(update.signature);
+    let loaded = false;
+    for (let attempt = 0; attempt < 2 && !loaded; attempt += 1) {
+      loaded = await this.loadProjectFromPath(projectPath, {
+        notifyOnError: false,
+        forceReload: true,
+        // The recovery written immediately above must survive this in-place
+        // reload and remain available after the view closes. It is consumed
+        // on the next ordinary open; this view gets the same snapshot in Undo.
+        consumeBlockedRecovery: false,
+      });
+    }
+    if (!loaded || !this.currentProject) {
+      this.projectFileWarning = "Studio couldn't reload this file yet. Studio will retry automatically; the file has not been overwritten.";
+      this.host.render();
+      this.scheduleProjectFileRetry(projectPath, this.projectBindingEpoch);
+      return;
+    }
+    const addedNodeIds = this.currentProject?.graph.nodes
+      .map((node) => node.id)
+      .filter((nodeId) => !previousNodeIds.has(nodeId)) || [];
+    this.applySelectionToCurrentProject(addedNodeIds.length > 0 ? addedNodeIds : selectedNodeIds);
+    if (previousProject) {
+      this.host.preserveProjectAsUndo(previousProject, selectedNodeIds);
+    }
+    this.projectFileWarning = null;
+    this.projectFileRetryCount = 0;
+    this.readFailureBlockedSession = null;
+    this.currentProjectSession?.markAcceptedProjectSignature(candidateUpdate.signature);
     this.host.setLastError(null);
     this.host.render();
-  }
-
-  private async processPendingExternalProjectSync(): Promise<void> {
-    if (!this.currentProjectSession?.hasDeferredExternalSync()) {
-      return;
+    if (addedNodeIds.length > 0) {
+      const viewport = this.host.getGraphViewportElement();
+      if (viewport) {
+        requestStudioAnimationFrame(viewport, () => {
+          this.host.graphInteraction.fitSelectedNodesInViewport();
+        });
+      }
     }
-    if (!this.currentProjectPath || !this.currentProject) {
-      this.currentProjectSession?.consumeDeferredExternalSync();
-      return;
-    }
-    if (this.hasPendingLocalProjectSaveWork()) {
-      return;
-    }
-    const rawText = await this.readStudioProjectRawText(this.currentProjectPath);
-    this.currentProjectSession.consumeDeferredExternalSync();
-    if (rawText == null) {
-      return;
-    }
-    await this.processCurrentProjectFileMutation(rawText);
   }
 
   private async releaseRetainedProjectSession(): Promise<void> {
     const retainedPath = this.retainedProjectPath;
-    this.retainedProjectPath = null;
-    this.currentProjectSession = null;
+    const retainedSession = this.currentProjectSession;
     if (!retainedPath) {
+      this.currentProjectSession = null;
       return;
     }
     try {
@@ -778,7 +1049,12 @@ export class StudioProjectSessionController {
         projectPath: retainedPath,
         error: error instanceof Error ? error.message : String(error),
       });
+      this.retainedProjectPath = retainedPath;
+      this.currentProjectSession = retainedSession;
+      throw error;
     }
+    this.retainedProjectPath = null;
+    this.currentProjectSession = null;
   }
 
   private applySelectionToCurrentProject(nodeIds: string[]): void {
@@ -789,6 +1065,46 @@ export class StudioProjectSessionController {
     const nextSelection = nodeIds.filter((nodeId) => nodeIdSet.has(nodeId));
     this.host.graphInteraction.setSelectedNodeIds(nextSelection);
     this.host.setHistoryCurrentSnapshot(this.currentProject, nextSelection);
+  }
+
+  private async adoptCurrentProjectPathRename(
+    previousPath: string,
+    nextPath: string,
+    selectedNodeIds: string[]
+  ): Promise<boolean> {
+    try {
+      const renamed = await this.host.plugin
+        .getStudioService()
+        .adoptVisibleProjectRename(previousPath, nextPath);
+      this.projectBindingEpoch += 1;
+      this.projectFileRetryScheduled = false;
+      this.projectFileRetryCount = 0;
+      this.readFailureBlockedSession = null;
+      this.remapProjectScopedState(previousPath, nextPath);
+      this.currentProjectPath = renamed.newPath;
+      this.retainedProjectPath = renamed.newPath;
+      this.currentProject = renamed.project;
+      this.host.resetProjectHistory(renamed.project);
+      this.applySelectionToCurrentProject(selectedNodeIds);
+      if (renamed.replacedCanvasProject) {
+        this.host.preserveProjectAsUndo(renamed.replacedCanvasProject, selectedNodeIds);
+      }
+      const renamedRawText = await this.readStudioProjectRawText(renamed.newPath);
+      if (renamedRawText != null) {
+        this.currentProjectSession?.markAcceptedProjectText(renamedRawText);
+      }
+      this.projectFileWarning = null;
+      this.host.setLastError(null);
+      this.host.render();
+      this.host.refreshLeafDisplay();
+      return true;
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      this.projectFileWarning = `Studio couldn't finish loading the renamed project yet: ${detail} The file has not been overwritten.`;
+      this.host.setLastError(detail);
+      this.host.render();
+      return false;
+    }
   }
 
   private remapProjectScopedState(previousPath: string, nextPath: string): void {

@@ -3,6 +3,7 @@ import type { StudioNodeDefinition } from "../types";
 export const retiredHttpRequestNode: StudioNodeDefinition = {
   kind: "studio.retired_http_request",
   version: "1.0.0",
+  requiredHostCapabilities: [],
   hiddenFromInsertMenu: true,
   capabilityClass: "local_cpu",
   cachePolicy: "never",

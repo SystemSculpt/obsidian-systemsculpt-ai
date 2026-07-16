@@ -227,7 +227,7 @@ describe("Studio text-node CSS contract", () => {
       /\.copy-code-button:hover\s*\{[\s\S]*?background-color:\s*var\(--background-modifier-hover\);/
     );
     expect(css).toMatch(
-      /\.is-mobile \.ss-studio-text-node-display\.is-markdown pre > \.copy-code-button/
+      /\.ss-mobile-layout \.ss-studio-text-node-display\.is-markdown pre > \.copy-code-button/
     );
     expect(css).toMatch(
       /--ss-text-studio-code-size:\s*var\(--code-size, 0\.875em\);/

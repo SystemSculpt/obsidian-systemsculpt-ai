@@ -6,6 +6,48 @@ class BundleMemoryAdapter {
   async readBinary(path: string): Promise<ArrayBuffer> { const bytes = this.files.get(path); if (!bytes) throw new Error(`missing ${path}`); return bytes.slice().buffer; }
   async write(path: string, data: string): Promise<void> { this.files.set(path, new TextEncoder().encode(data)); }
   async writeBinary(path: string, data: ArrayBuffer): Promise<void> { this.files.set(path, new Uint8Array(data.slice(0))); }
+  async process(path: string, update: (data: string) => string): Promise<string> {
+    const current = await this.read(path);
+    const next = update(current);
+    await this.write(path, next);
+    return next;
+  }
+  async copy(sourcePath: string, destinationPath: string): Promise<void> {
+    if (this.files.has(destinationPath) || this.dirs.has(destinationPath)) {
+      throw new Error(`destination exists ${destinationPath}`);
+    }
+    const source = this.files.get(sourcePath);
+    if (!source) throw new Error(`missing ${sourcePath}`);
+    this.files.set(destinationPath, source.slice());
+  }
+  async rename(sourcePath: string, destinationPath: string): Promise<void> {
+    if (this.files.has(destinationPath) || this.dirs.has(destinationPath)) {
+      throw new Error(`destination exists ${destinationPath}`);
+    }
+    const sourceFile = this.files.get(sourcePath);
+    if (sourceFile) {
+      this.files.delete(sourcePath);
+      this.files.set(destinationPath, sourceFile);
+      return;
+    }
+    const sourcePrefix = `${sourcePath}/`;
+    const matchingFiles = [...this.files].filter(([path]) => path.startsWith(sourcePrefix));
+    const matchingDirs = [...this.dirs].filter(
+      (path) => path === sourcePath || path.startsWith(sourcePrefix)
+    );
+    if (matchingFiles.length === 0 && matchingDirs.length === 0) {
+      throw new Error(`missing ${sourcePath}`);
+    }
+    for (const [path, bytes] of matchingFiles) {
+      this.files.delete(path);
+      this.files.set(`${destinationPath}/${path.slice(sourcePrefix.length)}`, bytes);
+    }
+    for (const path of matchingDirs.sort((left, right) => left.length - right.length)) {
+      this.dirs.delete(path);
+      const suffix = path === sourcePath ? "" : path.slice(sourcePrefix.length);
+      this.dirs.add(suffix ? `${destinationPath}/${suffix}` : destinationPath);
+    }
+  }
   async mkdir(path: string): Promise<void> { this.dirs.add(path); }
   async remove(path: string): Promise<void> { this.files.delete(path); for (const file of [...this.files.keys()]) if (file.startsWith(`${path}/`)) this.files.delete(file); }
   async list(path: string): Promise<{ files: string[]; folders: string[] }> {

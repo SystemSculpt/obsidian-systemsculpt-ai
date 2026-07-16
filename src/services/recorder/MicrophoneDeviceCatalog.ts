@@ -64,6 +64,18 @@ export class MicrophoneDeviceCatalog {
   }
 
   async refresh(signal?: AbortSignal): Promise<MicrophoneDeviceCatalogResult> {
+    return this.refreshInternal(this.requestLabels, signal);
+  }
+
+  /** Refresh device labels after an explicit user action that may request permission. */
+  async refreshWithLabelPermission(signal?: AbortSignal): Promise<MicrophoneDeviceCatalogResult> {
+    return this.refreshInternal(true, signal);
+  }
+
+  private async refreshInternal(
+    requestLabels: boolean,
+    signal?: AbortSignal,
+  ): Promise<MicrophoneDeviceCatalogResult> {
     if (this.disposed || signal?.aborted) return cancelledResult();
 
     const generation = ++this.generation;
@@ -83,7 +95,7 @@ export class MicrophoneDeviceCatalog {
         ? "not-needed"
         : "skipped";
 
-      if (!hasLabeledMicrophone && this.requestLabels) {
+      if (!hasLabeledMicrophone && requestLabels) {
         labelRefresh = await this.refreshLabelsOnce(mediaDevices);
         if (!this.isCurrent(generation, signal)) return cancelledResult();
         devices = await mediaDevices.enumerateDevices();

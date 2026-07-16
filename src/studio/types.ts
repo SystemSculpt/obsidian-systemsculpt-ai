@@ -1,3 +1,5 @@
+import type { HostCapability } from "../platform/hostCapabilities";
+
 export const STUDIO_PROJECT_EXTENSION = ".systemsculpt" as const;
 export const STUDIO_PROJECT_SCHEMA_V1 = "studio.project.v1" as const;
 export const STUDIO_POLICY_SCHEMA_V1 = "studio.policy.v1" as const;
@@ -395,7 +397,7 @@ export type StudioNodeDefinition<TConfig = Record<string, StudioJsonValue>> = {
   kind: string;
   version: string;
   hiddenFromInsertMenu?: boolean;
-  hostRequirement?: "desktop";
+  requiredHostCapabilities: readonly HostCapability[];
   capabilityClass: StudioNodeCapabilityClass;
   cachePolicy?: StudioNodeCachePolicy;
   inputPorts: StudioPortDefinition[];

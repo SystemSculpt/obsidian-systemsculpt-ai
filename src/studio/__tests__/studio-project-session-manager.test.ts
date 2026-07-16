@@ -79,6 +79,18 @@ describe("StudioProjectSessionManager", () => {
     expect(manager.getSession("Studio/Test.systemsculpt")).toBeNull();
   });
 
+  it("retains the only session copy when close recovery fails", async () => {
+    const manager = new StudioProjectSessionManager();
+    const session = createSession();
+    jest.spyOn(session, "close").mockRejectedValueOnce(new Error("recovery failed"));
+
+    await manager.retainSession("Studio/Test.systemsculpt", async () => session);
+
+    await expect(manager.releaseSession("Studio/Test.systemsculpt")).rejects.toThrow("recovery failed");
+    expect(manager.getSession("Studio/Test.systemsculpt")).toBe(session);
+    expect(manager.getRetainCount("Studio/Test.systemsculpt")).toBe(0);
+  });
+
   it("closes all retained sessions during manager disposal", async () => {
     const manager = new StudioProjectSessionManager();
     const first = createSession("Studio/One.systemsculpt");
@@ -94,6 +106,23 @@ describe("StudioProjectSessionManager", () => {
     expect(firstCloseSpy).toHaveBeenCalledTimes(1);
     expect(secondCloseSpy).toHaveBeenCalledTimes(1);
     expect(manager.listOpenSessions()).toHaveLength(0);
+  });
+
+  it("attempts every session close even when one recovery write fails", async () => {
+    const manager = new StudioProjectSessionManager();
+    const first = createSession("Studio/One.systemsculpt");
+    const second = createSession("Studio/Two.systemsculpt");
+    jest.spyOn(first, "close").mockRejectedValueOnce(new Error("first recovery failed"));
+    const secondCloseSpy = jest.spyOn(second, "close");
+
+    await manager.retainSession("Studio/One.systemsculpt", async () => first);
+    await manager.retainSession("Studio/Two.systemsculpt", async () => second);
+
+    await expect(manager.closeAll()).rejects.toThrow("first recovery failed");
+
+    expect(secondCloseSpy).toHaveBeenCalledTimes(1);
+    expect(manager.getSession("Studio/One.systemsculpt")).toBe(first);
+    expect(manager.getSession("Studio/Two.systemsculpt")).toBeNull();
   });
 
   it("moves retained sessions to a renamed project path", async () => {

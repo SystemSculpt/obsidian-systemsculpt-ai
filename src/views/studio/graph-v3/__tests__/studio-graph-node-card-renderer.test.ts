@@ -651,7 +651,7 @@ describe("renderStudioGraphNodeCard", () => {
     resolveAssetPreviewSrc: () => "app://preview/source.png",
   } as const;
 
-  it("renders image media nodes as media-only cards with floating chrome", () => {
+  it("renders image media nodes with an unobstructed image and bottom toolbar", () => {
     const onOpenImageEditor = jest.fn();
     const onEditImageWithAi = jest.fn();
     const onCopyNodeImageToClipboard = jest.fn();
@@ -667,6 +667,7 @@ describe("renderStudioGraphNodeCard", () => {
     });
 
     expect(nodeEl.dataset.chromeLayout).toBe("media");
+    expect(nodeEl.dataset.mediaKind).toBe("image");
     // Legacy chrome stays off the image entirely — no header, no title bar.
     expect(nodeEl.querySelector(".ss-studio-node-header")).toBeNull();
     expect(nodeEl.querySelector(".ss-studio-media-node-title")).toBeNull();
@@ -677,6 +678,13 @@ describe("renderStudioGraphNodeCard", () => {
 
     const toolbar = nodeEl.querySelector<HTMLElement>(".ss-studio-media-action-bar");
     expect(toolbar).not.toBeNull();
+    expect(toolbar?.parentElement).toBe(nodeEl);
+    expect(toolbar?.classList.contains("is-top")).toBe(false);
+    const mediaContent = nodeEl.querySelector<HTMLElement>(".ss-studio-media-content");
+    expect(mediaContent).not.toBeNull();
+    expect(
+      Boolean(mediaContent?.compareDocumentPosition(toolbar!) & Node.DOCUMENT_POSITION_FOLLOWING)
+    ).toBe(true);
     const buttonFor = (label: string): HTMLButtonElement | null =>
       toolbar?.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`) ?? null;
 
@@ -757,6 +765,9 @@ describe("renderStudioGraphNodeCard", () => {
 
     const toolbar = nodeEl.querySelector<HTMLElement>(".ss-studio-media-action-bar");
     expect(toolbar).not.toBeNull();
+    expect(nodeEl.dataset.mediaKind).toBe("video");
+    expect(toolbar?.classList.contains("is-top")).toBe(true);
+    expect(toolbar?.parentElement?.classList.contains("ss-studio-media-content")).toBe(true);
     const labels = Array.from(
       toolbar?.querySelectorAll<HTMLButtonElement>("button") ?? []
     ).map((button) => button.getAttribute("aria-label"));

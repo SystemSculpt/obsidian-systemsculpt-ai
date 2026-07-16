@@ -53,12 +53,25 @@ describe("Studio Plugin surface CSS contract", () => {
     const editorCss = readStudioEditorsCss();
 
     expect(css).toContain("@container ss-surface (max-width: 720px)");
-    expect(css).toContain("@container ss-surface (max-width: 420px)");
+    expect(css).toContain("@container ss-surface (max-width: 480px)");
     expect(editorCss).toContain("@container ss-surface (max-width: 1080px)");
     expect(editorCss).toContain("@container ss-surface (max-width: 640px)");
     expect(editorCss).not.toMatch(/@media\s*\(max-width:/);
     expect(css).not.toMatch(/color-mix\([^;\n]*(?:,\s*white|,\s*black)\b/);
     expect(css).toContain("var(--ss-ink-on-accent)");
+  });
+
+  it("keeps image actions below the media while video actions remain an overlay", () => {
+    const css = readStudioCss();
+    const imageToolbarRule = readRuleBody(css, ".ss-studio-media-action-bar");
+    const videoToolbarRule = readRuleBody(css, ".ss-studio-media-action-bar.is-top");
+
+    expect(imageToolbarRule).toMatch(/position:\s*relative;/);
+    expect(imageToolbarRule).toMatch(/width:\s*100%;/);
+    expect(imageToolbarRule).toMatch(/border-top:\s*1px solid var\(--ss-line\);/);
+    expect(imageToolbarRule).not.toMatch(/transform:/);
+    expect(videoToolbarRule).toMatch(/position:\s*absolute;/);
+    expect(videoToolbarRule).toMatch(/top:\s*var\(--ss-space-2\);/);
   });
 
   it("keeps the graph coordinate origin and SVG layer tiers stable", () => {

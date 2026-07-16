@@ -1,16 +1,23 @@
+import { App, TFile } from "obsidian";
 import {
   StudioProjectGenerationStore,
   validateProjectionLocator,
   type StudioGenerationAdapter,
 } from "../persistence/StudioProjectGenerationStore";
 import { sha256HexFromBytesPortable } from "../hash";
+import { FileOperations } from "../../tools/vault/tools/FileOperations";
 
 class MemoryAdapter implements StudioGenerationAdapter {
   readonly files = new Map<string, Uint8Array>();
   readonly dirs = new Set<string>();
   failAfterWrites: number | null = null;
+  afterWrite: ((path: string, bytes: Uint8Array) => Promise<void> | void) | null = null;
   private writes = 0;
   readonly corruptReads = new Set<string>();
+
+  async exists(path: string): Promise<boolean> {
+    return this.files.has(path) || this.dirs.has(path);
+  }
 
   armFailure(afterWrites: number | null): void {
     this.failAfterWrites = afterWrites;
@@ -39,11 +46,57 @@ class MemoryAdapter implements StudioGenerationAdapter {
   }
   async write(path: string, data: string): Promise<void> {
     this.cut();
-    this.files.set(path, new TextEncoder().encode(data));
+    const bytes = new TextEncoder().encode(data);
+    this.files.set(path, bytes);
+    await this.afterWrite?.(path, bytes.slice());
   }
   async writeBinary(path: string, data: ArrayBuffer): Promise<void> {
     this.cut();
-    this.files.set(path, new Uint8Array(data.slice(0)));
+    const bytes = new Uint8Array(data.slice(0));
+    this.files.set(path, bytes);
+    await this.afterWrite?.(path, bytes.slice());
+  }
+  async compareAndSwapText(path: string, expectedData: string, nextData: string): Promise<boolean> {
+    const currentData = await this.read(path);
+    if (currentData !== expectedData) return false;
+    await this.write(path, nextData);
+    return true;
+  }
+  async copyFileIfAbsent(sourcePath: string, destinationPath: string): Promise<boolean> {
+    const source = this.files.get(sourcePath);
+    if (!source) throw new Error(`missing ${sourcePath}`);
+    if (this.files.has(destinationPath)) return false;
+    this.cut();
+    const bytes = source.slice();
+    this.files.set(destinationPath, bytes);
+    await this.afterWrite?.(destinationPath, bytes.slice());
+    return true;
+  }
+  async movePath(sourcePath: string, destinationPath: string): Promise<void> {
+    if (this.files.has(destinationPath) || this.dirs.has(destinationPath)) {
+      throw new Error(`destination exists ${destinationPath}`);
+    }
+    const sourceFile = this.files.get(sourcePath);
+    if (sourceFile) {
+      this.files.delete(sourcePath);
+      this.files.set(destinationPath, sourceFile);
+      return;
+    }
+    const sourcePrefix = `${sourcePath}/`;
+    const matchingFiles = [...this.files].filter(([path]) => path.startsWith(sourcePrefix));
+    const matchingDirs = [...this.dirs].filter((path) => path === sourcePath || path.startsWith(sourcePrefix));
+    if (matchingFiles.length === 0 && matchingDirs.length === 0) {
+      throw new Error(`missing ${sourcePath}`);
+    }
+    for (const [path, bytes] of matchingFiles) {
+      this.files.delete(path);
+      this.files.set(`${destinationPath}/${path.slice(sourcePrefix.length)}`, bytes);
+    }
+    for (const path of matchingDirs.sort((left, right) => left.length - right.length)) {
+      this.dirs.delete(path);
+      const suffix = path === sourcePath ? "" : path.slice(sourcePrefix.length);
+      this.dirs.add(suffix ? `${destinationPath}/${suffix}` : destinationPath);
+    }
   }
   async list(path: string): Promise<{ files: string[]; folders: string[] }> {
     const prefix = path ? `${path}/` : "";
@@ -101,6 +154,28 @@ describe("StudioProjectGenerationStore", () => {
     expect(validateProjectionLocator(locator)).toEqual(locator);
   });
 
+  it("does not overwrite a create destination that appears after availability was checked", async () => {
+    const adapter = new MemoryAdapter();
+    const store = new StudioProjectGenerationStore(adapter, {
+      now: () => "2026-07-11T01:02:03.004Z",
+    });
+    expect(await store.isProjectionLocatorAvailable(locator)).toBe(true);
+
+    const agentDestination = "agent-created destination\n";
+    adapter.files.set(locator.vaultRelativeProjectPath, new TextEncoder().encode(agentDestination));
+
+    const created = await store.create({
+      kind: "create",
+      projectId: "project_alpha",
+      projectDocument: new TextEncoder().encode(legacyProject),
+      policyDocument: new TextEncoder().encode('{"schema":"studio.policy.v1"}\n'),
+      projectManifest: new TextEncoder().encode("{}\n"),
+    }, locator);
+
+    expect(created.status).toBe("read_only");
+    expect(await adapter.read(locator.vaultRelativeProjectPath)).toBe(agentDestination);
+  });
+
   it("adopts a legacy project into a validated immutable root generation", async () => {
     const adapter = new MemoryAdapter();
     await seedLegacy(adapter);
@@ -148,64 +223,293 @@ describe("StudioProjectGenerationStore", () => {
     }
   });
 
-  it("preserves changed document bytes when the selected-token sidecar hashes are stale", async () => {
+  it("commits a valid direct document edit exactly once", async () => {
     const adapter = new MemoryAdapter(); await seedLegacy(adapter);
     const root = await new StudioProjectGenerationStore(adapter, { now: () => "2026-07-11T01:02:03.004Z" }).discoverAndAdopt(locator);
     if (root.status !== "committed") throw new Error("adoption failed");
     const changed = legacyProject.replace('"Alpha"', '"Externally edited"');
     adapter.files.set(locator.vaultRelativeProjectPath, new TextEncoder().encode(changed));
-    const opened = await new StudioProjectGenerationStore(adapter).open("project_alpha", locator);
-    expect(opened.status).toBe("read_only");
+    const opened = await new StudioProjectGenerationStore(adapter, { now: () => "2026-07-11T02:02:03.004Z" }).open("project_alpha", locator);
+    expect(opened.status).toBe("ready");
+    if (opened.status !== "ready") throw new Error("external sync failed");
+    expect(opened.expectedGeneration.revision).toBe(1);
+    expect(opened.generation.metadata.commandKind).toBe("external_sync");
     expect(new TextDecoder().decode(adapter.files.get(locator.vaultRelativeProjectPath)!)).toBe(changed);
+
+    const reopened = await new StudioProjectGenerationStore(adapter).open("project_alpha", locator);
+    expect(reopened.status).toBe("ready");
+    if (reopened.status === "ready") expect(reopened.expectedGeneration).toEqual(opened.expectedGeneration);
+    const generations = await adapter.list(".systemsculpt/studio/projects/project_alpha/generations");
+    expect(generations.folders).toHaveLength(2);
   });
 
-  it("ingests an external document edit only with a closed-API marker hashing exact candidate bytes", async () => {
+  it("coalesces concurrent opens for one direct edit into exactly one generation", async () => {
+    const adapter = new MemoryAdapter(); await seedLegacy(adapter);
+    const root = await new StudioProjectGenerationStore(adapter, {
+      now: () => "2026-07-11T01:02:03.004Z",
+    }).discoverAndAdopt(locator);
+    if (root.status !== "committed") throw new Error("adoption failed");
+    const changed = legacyProject.replace('"Alpha"', '"One concurrent agent edit"');
+    adapter.files.set(locator.vaultRelativeProjectPath, new TextEncoder().encode(changed));
+
+    const [first, second] = await Promise.all([
+      new StudioProjectGenerationStore(adapter, {
+        now: () => "2026-07-11T02:02:03.004Z",
+      }).open("project_alpha", locator),
+      new StudioProjectGenerationStore(adapter, {
+        now: () => "2026-07-11T02:02:03.004Z",
+      }).open("project_alpha", locator),
+    ]);
+
+    expect(first.status).toBe("ready");
+    expect(second.status).toBe("ready");
+    if (first.status !== "ready" || second.status !== "ready") return;
+    expect(first.expectedGeneration).toEqual(second.expectedGeneration);
+    expect(first.expectedGeneration.revision).toBe(1);
+    expect(first.generation.metadata.commandKind).toBe("external_sync");
+    expect(second.generation.metadata.commandKind).toBe("external_sync");
+    expect(new TextDecoder().decode(first.generation.files.get("project.systemsculpt"))).toBe(changed);
+    expect(new TextDecoder().decode(second.generation.files.get("project.systemsculpt"))).toBe(changed);
+    expect(await adapter.read(locator.vaultRelativeProjectPath)).toBe(changed);
+
+    const generations = await adapter.list(".systemsculpt/studio/projects/project_alpha/generations");
+    expect(generations.folders).toHaveLength(2);
+  });
+
+  it("round-trips an ordinary ChatView file-tool edit into one external_sync generation", async () => {
     const adapter = new MemoryAdapter(); await seedLegacy(adapter);
     const store = new StudioProjectGenerationStore(adapter, { now: () => "2026-07-11T01:02:03.004Z" });
     const root = await store.discoverAndAdopt(locator);
     if (root.status !== "committed") throw new Error("adoption failed");
-    const changed = new TextEncoder().encode(legacyProject.replace('"Alpha"', '"Trusted external edit"'));
-    const policy = adapter.files.get("SystemSculpt/Studio/Alpha.systemsculpt-assets/policy/grants.json")!;
-    const marker = await store.createExternalCandidateMarker({ projectId: "project_alpha", expectedGeneration: root.expectedGeneration, projectDocument: changed, supportFiles: [{ supportRelativePath: "policy/grants.json", bytes: policy }] });
-    adapter.files.set(locator.vaultRelativeProjectPath, changed);
-    adapter.files.set(`${locator.vaultRelativeProjectPath}.identity.json`, new TextEncoder().encode(marker));
-    adapter.files.set("SystemSculpt/Studio/Alpha.systemsculpt-assets/.studio-projection.json", new TextEncoder().encode(marker));
-    const opened = await new StudioProjectGenerationStore(adapter, { now: () => "2026-07-11T02:02:03.004Z" }).open("project_alpha", locator);
+
+    const app = new App();
+    const file = new TFile({ path: locator.vaultRelativeProjectPath });
+    (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(file);
+    (app.vault.read as jest.Mock).mockImplementation(async () => adapter.read(locator.vaultRelativeProjectPath));
+    (app.vault as any).process = jest.fn(async (_file: TFile, update: (content: string) => string) => {
+      const updated = update(await adapter.read(locator.vaultRelativeProjectPath));
+      await adapter.write(locator.vaultRelativeProjectPath, updated);
+      return updated;
+    });
+    (app.vault.modify as jest.Mock).mockImplementation(async (_file: TFile, content: string) => {
+      await adapter.write(locator.vaultRelativeProjectPath, content);
+    });
+
+    const toolResult = await new FileOperations(app, ["/"]).editFile({
+      path: locator.vaultRelativeProjectPath,
+      edits: [{ oldText: '"name": "Alpha"', newText: '"name": "Agent-authored canvas"' }],
+    } as any);
+    expect(toolResult.appliedCount).toBe(1);
+
+    const opened = await new StudioProjectGenerationStore(adapter, {
+      now: () => "2026-07-11T02:02:03.004Z",
+    }).open("project_alpha", locator);
     expect(opened.status).toBe("ready");
-    if (opened.status === "ready") expect(opened.expectedGeneration.revision).toBe(1);
+    if (opened.status !== "ready") throw new Error("external sync failed");
+    expect(opened.expectedGeneration.revision).toBe(1);
+    expect(opened.generation.metadata.commandKind).toBe("external_sync");
+    expect(await adapter.read(locator.vaultRelativeProjectPath)).toContain("Agent-authored canvas");
+
+    const generations = await adapter.list(".systemsculpt/studio/projects/project_alpha/generations");
+    expect(generations.folders).toHaveLength(2);
   });
 
-  it("preserves support edits whose unchanged sidecar hashes are stale", async () => {
+  it("leaves malformed direct edits untouched and authority unchanged", async () => {
+    const adapter = new MemoryAdapter(); await seedLegacy(adapter);
+    const root = await new StudioProjectGenerationStore(adapter, { now: () => "2026-07-11T01:02:03.004Z" }).discoverAndAdopt(locator);
+    if (root.status !== "committed") throw new Error("adoption failed");
+    const malformed = "{ not valid json\n";
+    adapter.files.set(locator.vaultRelativeProjectPath, new TextEncoder().encode(malformed));
+
+    const opened = await new StudioProjectGenerationStore(adapter).open("project_alpha", locator);
+    expect(opened.status).toBe("invalid_candidate");
+    expect(new TextDecoder().decode(adapter.files.get(locator.vaultRelativeProjectPath)!)).toBe(malformed);
+    const recovered = await new StudioProjectGenerationStore(adapter).recover("project_alpha");
+    expect(recovered.status).toBe("ready");
+    if (recovered.status === "ready") expect(recovered.expectedGeneration).toEqual(root.expectedGeneration);
+  });
+
+  it("rejects parser-normalizable direct edits without changing bytes or history", async () => {
+    const adapter = new MemoryAdapter(); await seedLegacy(adapter);
+    const root = await new StudioProjectGenerationStore(adapter, { now: () => "2026-07-11T01:02:03.004Z" }).discoverAndAdopt(locator);
+    if (root.status !== "committed") throw new Error("adoption failed");
+    const rawDocument = JSON.parse(legacyProject);
+    rawDocument.graph.nodes.push({
+      id: "node_input",
+      kind: "studio.input",
+      version: "1.0.0",
+      title: "Input",
+      position: { x: "80", y: 120 },
+      config: { value: "hello" },
+      continueOnError: false,
+      disabled: false,
+    });
+    const malformedButNormalizable = `${JSON.stringify(rawDocument, null, 2)}\n`;
+    adapter.files.set(
+      locator.vaultRelativeProjectPath,
+      new TextEncoder().encode(malformedButNormalizable)
+    );
+
+    const opened = await new StudioProjectGenerationStore(adapter).open("project_alpha", locator);
+
+    expect(opened.status).toBe("invalid_candidate");
+    expect(await adapter.read(locator.vaultRelativeProjectPath)).toBe(malformedButNormalizable);
+    const recovered = await new StudioProjectGenerationStore(adapter).recover("project_alpha");
+    expect(recovered.status).toBe("ready");
+    if (recovered.status === "ready") {
+      expect(recovered.expectedGeneration).toEqual(root.expectedGeneration);
+    }
+    const generations = await adapter.list(".systemsculpt/studio/projects/project_alpha/generations");
+    expect(generations.folders).toHaveLength(1);
+  });
+
+  it("rejects direct edits to Studio-owned project fields without changing bytes or history", async () => {
+    const adapter = new MemoryAdapter(); await seedLegacy(adapter);
+    const root = await new StudioProjectGenerationStore(adapter, {
+      now: () => "2026-07-11T01:02:03.004Z",
+    }).discoverAndAdopt(locator);
+    if (root.status !== "committed") throw new Error("adoption failed");
+    const rawDocument = JSON.parse(legacyProject);
+    rawDocument.settings.retention.maxRuns = 7;
+    const changedStableField = `${JSON.stringify(rawDocument, null, 2)}\n`;
+    adapter.files.set(
+      locator.vaultRelativeProjectPath,
+      new TextEncoder().encode(changedStableField)
+    );
+
+    const opened = await new StudioProjectGenerationStore(adapter).open("project_alpha", locator);
+
+    expect(opened.status).toBe("invalid_candidate");
+    expect(await adapter.read(locator.vaultRelativeProjectPath)).toBe(changedStableField);
+    const recovered = await new StudioProjectGenerationStore(adapter).recover("project_alpha");
+    expect(recovered.status).toBe("ready");
+    if (recovered.status === "ready") {
+      expect(recovered.expectedGeneration).toEqual(root.expectedGeneration);
+    }
+    const generations = await adapter.list(".systemsculpt/studio/projects/project_alpha/generations");
+    expect(generations.folders).toHaveLength(1);
+  });
+
+  it("reconciles a valid direct edit on first open after restart", async () => {
+    const adapter = new MemoryAdapter(); await seedLegacy(adapter);
+    const root = await new StudioProjectGenerationStore(adapter, { now: () => "2026-07-11T01:02:03.004Z" }).discoverAndAdopt(locator);
+    if (root.status !== "committed") throw new Error("adoption failed");
+    const changed = legacyProject.replace('"Alpha"', '"Restart edit"');
+    adapter.files.set(locator.vaultRelativeProjectPath, new TextEncoder().encode(changed));
+
+    const adopted = await new StudioProjectGenerationStore(adapter, { now: () => "2026-07-11T02:02:03.004Z" }).discoverAndAdopt(locator);
+    expect(adopted.status).toBe("committed");
+    if (adopted.status === "committed") {
+      expect(adopted.expectedGeneration.revision).toBe(1);
+      expect(new TextDecoder().decode(adopted.generation.files.get("project.systemsculpt"))).toBe(changed);
+    }
+  });
+
+  it("does not overwrite an external edit with a local generation commit", async () => {
+    const adapter = new MemoryAdapter(); await seedLegacy(adapter);
+    const store = new StudioProjectGenerationStore(adapter, { now: () => "2026-07-11T01:02:03.004Z" });
+    const root = await store.discoverAndAdopt(locator);
+    if (root.status !== "committed") throw new Error("adoption failed");
+    const external = legacyProject.replace('"Alpha"', '"External wins the file"');
+    adapter.files.set(locator.vaultRelativeProjectPath, new TextEncoder().encode(external));
+
+    const localCommit = await store.commitWholeGeneration({
+      kind: "replace_project",
+      projectId: "project_alpha",
+      reason: "autosave",
+      projectDocument: new TextEncoder().encode(legacyProject.replace('"Alpha"', '"Unsaved local edit"')),
+    }, root.expectedGeneration);
+
+    expect(localCommit.status).toBe("read_only");
+    expect(new TextDecoder().decode(adapter.files.get(locator.vaultRelativeProjectPath)!)).toBe(external);
+  });
+
+  it("does not overwrite an agent edit that lands after a Studio save has begun", async () => {
+    const adapter = new MemoryAdapter(); await seedLegacy(adapter);
+    const store = new StudioProjectGenerationStore(adapter, {
+      now: () => "2026-07-11T01:02:03.004Z",
+    });
+    const root = await store.discoverAndAdopt(locator);
+    if (root.status !== "committed") throw new Error("adoption failed");
+
+    let descriptorReached!: () => void;
+    let allowDescriptorWriteToFinish!: () => void;
+    const descriptorWasWritten = new Promise<void>((resolve) => { descriptorReached = resolve; });
+    const descriptorWriteMayFinish = new Promise<void>((resolve) => { allowDescriptorWriteToFinish = resolve; });
+    adapter.afterWrite = async (path) => {
+      if (!/\/generations\/1-[0-9a-f]{64}\/commit\.json$/.test(path)) return;
+      adapter.afterWrite = null;
+      descriptorReached();
+      await descriptorWriteMayFinish;
+    };
+
+    const studioSave = store.commitWholeGeneration({
+      kind: "replace_project",
+      projectId: "project_alpha",
+      reason: "autosave",
+      projectDocument: new TextEncoder().encode(
+        legacyProject.replace('"Alpha"', '"Studio save already in flight"')
+      ),
+    }, root.expectedGeneration);
+
+    await descriptorWasWritten;
+    const agentEdit = legacyProject.replace('"Alpha"', '"Agent edit wins the visible file"');
+    adapter.files.set(locator.vaultRelativeProjectPath, new TextEncoder().encode(agentEdit));
+    allowDescriptorWriteToFinish();
+
+    const saveResult = await studioSave;
+    expect(saveResult.status).not.toBe("committed");
+    expect(await adapter.read(locator.vaultRelativeProjectPath)).toBe(agentEdit);
+  });
+
+  it("repairs private support edits without making the project file stale", async () => {
     const adapter = new MemoryAdapter(); await seedLegacy(adapter);
     const root = await new StudioProjectGenerationStore(adapter, { now: () => "2026-07-11T01:02:03.004Z" }).discoverAndAdopt(locator);
     if (root.status !== "committed") throw new Error("adoption failed");
     const policyPath = "SystemSculpt/Studio/Alpha.systemsculpt-assets/policy/grants.json";
     adapter.files.set(policyPath, new TextEncoder().encode("{\"schema\":\"studio.policy.v1\",\"external\":true}\n"));
     const opened = await new StudioProjectGenerationStore(adapter).open("project_alpha", locator);
-    expect(opened.status).toBe("read_only");
-    expect(new TextDecoder().decode(adapter.files.get(policyPath)!)).toContain("external");
+    expect(opened.status).toBe("ready");
+    expect(new TextDecoder().decode(adapter.files.get(policyPath)!)).not.toContain("external");
   });
 
-  it("preserves partial support replacement as read-only", async () => {
+  it("repairs missing private support files automatically", async () => {
     const adapter = new MemoryAdapter(); await seedLegacy(adapter);
     const root = await new StudioProjectGenerationStore(adapter, { now: () => "2026-07-11T01:02:03.004Z" }).discoverAndAdopt(locator);
     if (root.status !== "committed") throw new Error("adoption failed");
     adapter.files.delete("SystemSculpt/Studio/Alpha.systemsculpt-assets/policy/grants.json");
     const opened = await new StudioProjectGenerationStore(adapter).open("project_alpha", locator);
-    expect(opened.status).toBe("read_only");
+    expect(opened.status).toBe("ready");
   });
 
-  it("preserves changed bytes with missing or stale markers instead of repairing over them", async () => {
+  it("accepts a valid one-file edit without requiring legacy metadata files", async () => {
     const adapter = new MemoryAdapter(); await seedLegacy(adapter);
     const root = await new StudioProjectGenerationStore(adapter, { now: () => "2026-07-11T01:02:03.004Z" }).discoverAndAdopt(locator);
     if (root.status !== "committed") throw new Error("adoption failed");
     const changed = legacyProject.replace('"Alpha"', '"Untrusted edit"');
     adapter.files.set(locator.vaultRelativeProjectPath, new TextEncoder().encode(changed));
-    adapter.files.delete(`${locator.vaultRelativeProjectPath}.identity.json`);
+    adapter.files.set(`${locator.vaultRelativeProjectPath}.identity.json`, new TextEncoder().encode("legacy"));
+    adapter.files.set("SystemSculpt/Studio/Alpha.systemsculpt-assets/.studio-projection.json", new TextEncoder().encode("legacy"));
 
-    const opened = await new StudioProjectGenerationStore(adapter).open("project_alpha", locator);
-    expect(opened.status).toBe("read_only");
+    const opened = await new StudioProjectGenerationStore(adapter, {
+      now: () => "2026-07-11T02:02:03.004Z",
+    }).open("project_alpha", locator);
+    expect(opened.status).toBe("ready");
+    if (opened.status !== "ready") throw new Error("metadata repair failed");
+    expect(opened.expectedGeneration.revision).toBe(1);
+    expect(new TextDecoder().decode(opened.generation.files.get("project.systemsculpt"))).toBe(changed);
     expect(new TextDecoder().decode(adapter.files.get(locator.vaultRelativeProjectPath)!)).toBe(changed);
+    expect(adapter.files.has(`${locator.vaultRelativeProjectPath}.identity.json`)).toBe(false);
+    expect(adapter.files.has("SystemSculpt/Studio/Alpha.systemsculpt-assets/.studio-projection.json")).toBe(false);
+
+    const reopened = await new StudioProjectGenerationStore(adapter).open("project_alpha", locator);
+    expect(reopened.status).toBe("ready");
+    if (reopened.status === "ready") {
+      expect(reopened.expectedGeneration).toEqual(opened.expectedGeneration);
+      expect(reopened.projectionStatus).toBe("matching");
+    }
+    const generations = await adapter.list(".systemsculpt/studio/projects/project_alpha/generations");
+    expect(generations.folders).toHaveLength(2);
   });
 
   it("forks when a second locator claims the same project ID even with identical bytes", async () => {
@@ -216,6 +520,63 @@ describe("StudioProjectGenerationStore", () => {
     adapter.files.set(other.vaultRelativeProjectPath, new TextEncoder().encode(legacyProject));
     const adopted = await new StudioProjectGenerationStore(adapter).discoverAndAdopt(other);
     expect(adopted.status).toBe("fork_detected");
+  });
+
+  it("adopts an ordinary file rename on first open after restart", async () => {
+    const adapter = new MemoryAdapter(); await seedLegacy(adapter);
+    const root = await new StudioProjectGenerationStore(adapter, {
+      now: () => "2026-07-11T01:02:03.004Z",
+    }).discoverAndAdopt(locator);
+    if (root.status !== "committed") throw new Error("adoption failed");
+    const destination = { vaultRelativeProjectPath: "SystemSculpt/Studio/Moved.systemsculpt" };
+    await adapter.movePath(locator.vaultRelativeProjectPath, destination.vaultRelativeProjectPath);
+
+    const adopted = await new StudioProjectGenerationStore(adapter, {
+      now: () => "2026-07-11T02:02:03.004Z",
+    }).discoverAndAdopt(destination);
+
+    expect(adopted.status).toBe("committed");
+    if (adopted.status !== "committed") return;
+    expect(adopted.expectedGeneration.revision).toBe(1);
+    expect(adopted.generation.metadata.projection.canonicalPath).toBe(
+      destination.vaultRelativeProjectPath
+    );
+    const document = JSON.parse(await adapter.read(destination.vaultRelativeProjectPath));
+    expect(document.name).toBe("Moved");
+    expect(document.permissionsRef.policyPath).toBe(
+      "SystemSculpt/Studio/Moved.systemsculpt-assets/policy/grants.json"
+    );
+  });
+
+  it("adopts a folder move when the previous parent no longer exists", async () => {
+    const adapter = new MemoryAdapter(); await seedLegacy(adapter);
+    const root = await new StudioProjectGenerationStore(adapter, {
+      now: () => "2026-07-11T01:02:03.004Z",
+    }).discoverAndAdopt(locator);
+    if (root.status !== "committed") throw new Error("adoption failed");
+    const previousParent = "SystemSculpt/Studio";
+    const movedParent = "SystemSculpt/Moved Studio";
+    const destination = {
+      vaultRelativeProjectPath: `${movedParent}/Alpha.systemsculpt`,
+    };
+    await adapter.movePath(previousParent, movedParent);
+    const originalList = adapter.list.bind(adapter);
+    adapter.list = jest.fn(async (path) => {
+      if (path === previousParent) throw new Error(`missing ${path}`);
+      return originalList(path);
+    });
+
+    const adopted = await new StudioProjectGenerationStore(adapter, {
+      now: () => "2026-07-11T02:02:03.004Z",
+    }).discoverAndAdopt(destination);
+
+    expect(adopted.status).toBe("committed");
+    if (adopted.status !== "committed") return;
+    expect(adopted.expectedGeneration.revision).toBe(1);
+    expect(adopted.generation.metadata.projection.canonicalPath).toBe(
+      destination.vaultRelativeProjectPath
+    );
+    expect(adapter.list).not.toHaveBeenCalledWith(previousParent);
   });
 
   it("does not retire the old rename projection until destination fresh-read validation passes", async () => {
@@ -232,6 +593,227 @@ describe("StudioProjectGenerationStore", () => {
     }, root.expectedGeneration);
     expect(renamed.status).toBe("storage_unavailable");
     expect(adapter.files.has(locator.vaultRelativeProjectPath)).toBe(true);
+  });
+
+  it("does not overwrite a rename destination that appears after availability was checked", async () => {
+    const adapter = new MemoryAdapter(); await seedLegacy(adapter);
+    const store = new StudioProjectGenerationStore(adapter, {
+      now: () => "2026-07-11T01:02:03.004Z",
+    });
+    const root = await store.discoverAndAdopt(locator);
+    if (root.status !== "committed") throw new Error("adoption failed");
+    const destination = { vaultRelativeProjectPath: "SystemSculpt/Studio/Renamed.systemsculpt" };
+    expect(await store.isProjectionLocatorAvailable(destination)).toBe(true);
+
+    const agentDestination = legacyProject.replace('"Alpha"', '"Agent owns destination"');
+    adapter.files.set(destination.vaultRelativeProjectPath, new TextEncoder().encode(agentDestination));
+
+    const renamed = await store.commitWholeGeneration({
+      kind: "logical_rename",
+      projectId: "project_alpha",
+      locator: destination,
+      projectDocument: new TextEncoder().encode(legacyProject.replace('"Alpha"', '"Renamed"')),
+      projectManifest: new TextEncoder().encode("{}"),
+    }, root.expectedGeneration);
+
+    expect(renamed.status).toBe("read_only");
+    expect(await adapter.read(destination.vaultRelativeProjectPath)).toBe(agentDestination);
+    expect(await adapter.read(locator.vaultRelativeProjectPath)).toBe(legacyProject);
+  });
+
+  it("publishes an in-place logical rename through visible-file CAS", async () => {
+    const adapter = new MemoryAdapter(); await seedLegacy(adapter);
+    const store = new StudioProjectGenerationStore(adapter, {
+      now: () => "2026-07-11T01:02:03.004Z",
+    });
+    const root = await store.discoverAndAdopt(locator);
+    if (root.status !== "committed") throw new Error("adoption failed");
+    const copyFileIfAbsent = jest.spyOn(adapter, "copyFileIfAbsent");
+    const compareAndSwapText = jest.spyOn(adapter, "compareAndSwapText");
+
+    const renamed = await store.commitWholeGeneration({
+      kind: "logical_rename",
+      projectId: "project_alpha",
+      locator,
+      projectDocument: new TextEncoder().encode(legacyProject),
+      projectManifest: new TextEncoder().encode("{}"),
+    }, root.expectedGeneration);
+
+    expect(renamed.status).toBe("committed");
+    if (renamed.status !== "committed") return;
+    expect(renamed.expectedGeneration.revision).toBe(1);
+    expect(await adapter.read(locator.vaultRelativeProjectPath)).toBe(legacyProject);
+    expect(compareAndSwapText).toHaveBeenCalledWith(
+      locator.vaultRelativeProjectPath,
+      legacyProject,
+      legacyProject
+    );
+    expect(copyFileIfAbsent).not.toHaveBeenCalled();
+  });
+
+  it("adopts a project file already moved by an ordinary vault rename", async () => {
+    const adapter = new MemoryAdapter(); await seedLegacy(adapter);
+    const store = new StudioProjectGenerationStore(adapter, {
+      now: () => "2026-07-11T01:02:03.004Z",
+    });
+    const root = await store.discoverAndAdopt(locator);
+    if (root.status !== "committed") throw new Error("adoption failed");
+    const destination = { vaultRelativeProjectPath: "SystemSculpt/Studio/Renamed.systemsculpt" };
+    await adapter.movePath(locator.vaultRelativeProjectPath, destination.vaultRelativeProjectPath);
+    const renamedDocument = legacyProject.replace('"Alpha"', '"Renamed"');
+
+    const renamed = await store.commitWholeGeneration({
+      kind: "logical_rename",
+      projectId: "project_alpha",
+      locator: destination,
+      destinationProjectDocumentBeforeRename: new TextEncoder().encode(legacyProject),
+      projectDocument: new TextEncoder().encode(renamedDocument),
+      projectManifest: new TextEncoder().encode("{}"),
+    }, root.expectedGeneration);
+
+    expect(renamed.status).toBe("committed");
+    expect(await adapter.read(destination.vaultRelativeProjectPath)).toBe(renamedDocument);
+    expect(adapter.files.has(locator.vaultRelativeProjectPath)).toBe(false);
+  });
+
+  it("does not overwrite a moved project that changes again before rename adoption", async () => {
+    const adapter = new MemoryAdapter(); await seedLegacy(adapter);
+    const store = new StudioProjectGenerationStore(adapter, {
+      now: () => "2026-07-11T01:02:03.004Z",
+    });
+    const root = await store.discoverAndAdopt(locator);
+    if (root.status !== "committed") throw new Error("adoption failed");
+    const destination = { vaultRelativeProjectPath: "SystemSculpt/Studio/Renamed.systemsculpt" };
+    await adapter.movePath(locator.vaultRelativeProjectPath, destination.vaultRelativeProjectPath);
+    const agentEdit = legacyProject.replace('"Alpha"', '"Agent edited moved file"');
+    adapter.files.set(destination.vaultRelativeProjectPath, new TextEncoder().encode(agentEdit));
+
+    const renamed = await store.commitWholeGeneration({
+      kind: "logical_rename",
+      projectId: "project_alpha",
+      locator: destination,
+      destinationProjectDocumentBeforeRename: new TextEncoder().encode(legacyProject),
+      projectDocument: new TextEncoder().encode(legacyProject.replace('"Alpha"', '"Renamed"')),
+      projectManifest: new TextEncoder().encode("{}"),
+    }, root.expectedGeneration);
+
+    expect(renamed.status).toBe("read_only");
+    expect(await adapter.read(destination.vaultRelativeProjectPath)).toBe(agentEdit);
+  });
+
+  it("moves the old visible project into private recovery after a successful logical rename", async () => {
+    const adapter = new MemoryAdapter(); await seedLegacy(adapter);
+    const store = new StudioProjectGenerationStore(adapter, {
+      now: () => "2026-07-11T01:02:03.004Z",
+    });
+    const root = await store.discoverAndAdopt(locator);
+    if (root.status !== "committed") throw new Error("adoption failed");
+    const destination = { vaultRelativeProjectPath: "SystemSculpt/Studio/Renamed.systemsculpt" };
+
+    const renamed = await store.commitWholeGeneration({
+      kind: "logical_rename",
+      projectId: "project_alpha",
+      locator: destination,
+      projectDocument: new TextEncoder().encode(legacyProject.replace('"Alpha"', '"Renamed"')),
+      projectManifest: new TextEncoder().encode("{}"),
+    }, root.expectedGeneration);
+
+    expect(renamed.status).toBe("committed");
+    expect(adapter.files.has(locator.vaultRelativeProjectPath)).toBe(false);
+    expect(await adapter.read(destination.vaultRelativeProjectPath)).toContain('"Renamed"');
+    expect(
+      [...adapter.files.keys()].some((path) =>
+        path.startsWith(".systemsculpt/studio/projects/project_alpha/retired/")
+      )
+    ).toBe(true);
+  });
+
+  it("does not delete an agent edit that lands on the source path during rename", async () => {
+    const adapter = new MemoryAdapter(); await seedLegacy(adapter);
+    const store = new StudioProjectGenerationStore(adapter, {
+      now: () => "2026-07-11T01:02:03.004Z",
+    });
+    const root = await store.discoverAndAdopt(locator);
+    if (root.status !== "committed") throw new Error("adoption failed");
+    const destination = { vaultRelativeProjectPath: "SystemSculpt/Studio/Renamed.systemsculpt" };
+
+    let descriptorReached!: () => void;
+    let allowRenameToFinish!: () => void;
+    const descriptorWasWritten = new Promise<void>((resolve) => { descriptorReached = resolve; });
+    const renameMayFinish = new Promise<void>((resolve) => { allowRenameToFinish = resolve; });
+    adapter.afterWrite = async (path) => {
+      if (!/\/generations\/1-[0-9a-f]{64}\/commit\.json$/.test(path)) return;
+      adapter.afterWrite = null;
+      descriptorReached();
+      await renameMayFinish;
+    };
+
+    const rename = store.commitWholeGeneration({
+      kind: "logical_rename",
+      projectId: "project_alpha",
+      locator: destination,
+      projectDocument: new TextEncoder().encode(legacyProject.replace('"Alpha"', '"Renamed"')),
+      projectManifest: new TextEncoder().encode("{}"),
+    }, root.expectedGeneration);
+
+    await descriptorWasWritten;
+    const agentEdit = legacyProject.replace('"Alpha"', '"Agent kept editing the original path"');
+    adapter.files.set(locator.vaultRelativeProjectPath, new TextEncoder().encode(agentEdit));
+    allowRenameToFinish();
+    await rename;
+
+    expect(await adapter.read(locator.vaultRelativeProjectPath)).toBe(agentEdit);
+  });
+
+  it("surfaces a rename when raced agent bytes cannot be restored visibly", async () => {
+    const adapter = new MemoryAdapter(); await seedLegacy(adapter);
+    const store = new StudioProjectGenerationStore(adapter, {
+      now: () => "2026-07-11T01:02:03.004Z",
+    });
+    const root = await store.discoverAndAdopt(locator);
+    if (root.status !== "committed") throw new Error("adoption failed");
+    const destination = { vaultRelativeProjectPath: "SystemSculpt/Studio/Renamed.systemsculpt" };
+    const agentEdit = legacyProject.replace('"Alpha"', '"Agent edit during rename"');
+    adapter.afterWrite = async (path) => {
+      if (!/\/generations\/1-[0-9a-f]{64}\/commit\.json$/.test(path)) return;
+      adapter.afterWrite = null;
+      adapter.files.set(locator.vaultRelativeProjectPath, new TextEncoder().encode(agentEdit));
+    };
+
+    const originalCopy = adapter.copyFileIfAbsent.bind(adapter);
+    adapter.copyFileIfAbsent = jest.fn(async (sourcePath, destinationPath) => {
+      if (sourcePath.includes("/retired/") && destinationPath === locator.vaultRelativeProjectPath) {
+        throw new Error("restore copy unavailable");
+      }
+      return originalCopy(sourcePath, destinationPath);
+    });
+    const originalMove = adapter.movePath.bind(adapter);
+    let movedIntoRetired = false;
+    adapter.movePath = jest.fn(async (sourcePath, destinationPath) => {
+      if (destinationPath.includes("/retired/") && sourcePath === locator.vaultRelativeProjectPath) {
+        movedIntoRetired = true;
+        return originalMove(sourcePath, destinationPath);
+      }
+      if (movedIntoRetired && destinationPath === locator.vaultRelativeProjectPath) {
+        throw new Error("restore move unavailable");
+      }
+      return originalMove(sourcePath, destinationPath);
+    });
+
+    const renamed = await store.commitWholeGeneration({
+      kind: "logical_rename",
+      projectId: "project_alpha",
+      locator: destination,
+      projectDocument: new TextEncoder().encode(legacyProject.replace('"Alpha"', '"Renamed"')),
+      projectManifest: new TextEncoder().encode("{}"),
+    }, root.expectedGeneration);
+
+    expect(renamed.status).toBe("storage_unavailable");
+    expect(
+      [...adapter.files].some(([path, bytes]) =>
+        path.includes("/retired/") && new TextDecoder().decode(bytes) === agentEdit
+      )
+    ).toBe(true);
   });
 
   it("projection repair removes stale support files and validates exact output", async () => {
@@ -354,12 +936,19 @@ describe("StudioProjectGenerationStore", () => {
     const store = new StudioProjectGenerationStore(adapter, { now: () => "2026-07-11T01:02:03.004Z" });
     const root = await store.discoverAndAdopt(locator);
     if (root.status !== "committed") throw new Error("adoption failed");
+    const rootProjection = new Map(
+      [...adapter.files]
+        .filter(([path]) => !path.startsWith(".systemsculpt/studio/projects/"))
+        .map(([path, bytes]) => [path, bytes.slice()])
+    );
     const first = await store.commitWholeGeneration({ kind: "put_asset", projectId: "project_alpha", asset: { contentAddressedPath: `aa/${TEST_HASH_A}.bin`, bytes: new Uint8Array([1]) } }, root.expectedGeneration);
     if (first.status !== "committed") throw new Error("first commit failed");
     const firstDir = [...adapter.dirs].find((path) => path.includes(`/1-${first.expectedGeneration.generationHash}`));
     if (!firstDir) throw new Error("missing first generation");
     const copied = new Map([...adapter.files].filter(([path]) => path.startsWith(firstDir)).map(([path, bytes]) => [path, bytes.slice()]));
     await adapter.remove(firstDir);
+    for (const path of [...adapter.files.keys()]) if (!path.startsWith(".systemsculpt/studio/projects/")) adapter.files.delete(path);
+    for (const [path, bytes] of rootProjection) adapter.files.set(path, bytes);
     const second = await new StudioProjectGenerationStore(adapter, { now: () => "2026-07-11T02:02:03.004Z" }).commitWholeGeneration({ kind: "put_asset", projectId: "project_alpha", asset: { contentAddressedPath: `bb/${TEST_HASH_B}.bin`, bytes: new Uint8Array([2]) } }, root.expectedGeneration);
     if (second.status !== "committed") throw new Error("second commit failed");
     for (const [path, bytes] of copied) adapter.files.set(path, bytes);

@@ -15,6 +15,27 @@ function createPluginStub(): any {
       if (value == null) throw new Error(`missing file: ${path}`);
       return value;
     }),
+    process: jest.fn(async (path: string, update: (data: string) => string) => {
+      const value = files.get(path);
+      if (value == null) throw new Error(`missing file: ${path}`);
+      const nextValue = update(value);
+      files.set(path, nextValue);
+      return nextValue;
+    }),
+    copy: jest.fn(async (source: string, destination: string) => {
+      const value = files.get(source);
+      if (value == null) throw new Error(`missing file: ${source}`);
+      if (files.has(destination) || dirs.has(destination)) {
+        throw new Error(`path already exists: ${destination}`);
+      }
+      files.set(destination, value);
+    }),
+    rename: jest.fn(async (source: string, destination: string) => {
+      const value = files.get(source);
+      if (value == null) throw new Error(`missing file: ${source}`);
+      files.delete(source);
+      files.set(destination, value);
+    }),
     writeBinary: jest.fn(async (path: string, data: ArrayBuffer) => { files.set(path, new TextDecoder().decode(data)); }),
     readBinary: jest.fn(async (path: string) => {
       const value = files.get(path);

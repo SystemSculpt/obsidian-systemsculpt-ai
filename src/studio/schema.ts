@@ -17,6 +17,7 @@ import {
   randomId,
 } from "./utils";
 import { TEXT_NODE_KINDS_MIGRATION_ID } from "./StudioGraphMigrations";
+import { createAgentFacingStudioProjectDocument } from "./StudioProjectAgentContract";
 
 const DEFAULT_MAX_RUNS = 100;
 const DEFAULT_MAX_ARTIFACTS_MB = 1024;
@@ -367,7 +368,25 @@ export function parseStudioProject(rawText: string): StudioProjectV1 {
 }
 
 export function serializeStudioProject(project: StudioProjectV1): string {
-  return `${JSON.stringify(project, null, 2)}\n`;
+  const document = createAgentFacingStudioProjectDocument(project);
+  const {
+    schema,
+    agentGuide,
+    nodeKindReference,
+    ...editableProject
+  } = document;
+  const editableBody = JSON.stringify(editableProject, null, 2).slice(2, -2);
+  return [
+    "{",
+    `  "schema": ${JSON.stringify(schema)},`,
+    // Generated reference data is compact; authored fields remain pretty and
+    // easy to patch. This keeps a blank project inside one ordinary agent read.
+    `  "agentGuide": ${JSON.stringify(agentGuide)},`,
+    `${editableBody},`,
+    `  "nodeKindReference": ${JSON.stringify(nodeKindReference)}`,
+    "}",
+    "",
+  ].join("\n");
 }
 
 export function createEmptyStudioProject(options: {

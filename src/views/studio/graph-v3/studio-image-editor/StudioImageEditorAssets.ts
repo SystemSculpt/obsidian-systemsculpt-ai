@@ -23,8 +23,7 @@ export async function loadStudioImageEditorSource(
     StudioImageEditorModalOptions,
     "app" | "node" | "nodeRunState" | "resolveAssetPreviewSrc" | "readAsset" | "storeAsset"
   >,
-  ownerWindow: Window,
-  onLoaded?: (source: StudioImageEditorSource) => void
+  ownerWindow: Window
 ): Promise<StudioImageEditorSource> {
   const outputs = asRecord(options.nodeRunState.outputs);
   const sourceAsset = normalizeAssetRef(outputs?.source_preview_asset);
@@ -59,17 +58,13 @@ export async function loadStudioImageEditorSource(
   }
 
   if (!src) {
-    const source = { asset, bytes, path, src, width: 0, height: 0, statusMessage };
-    onLoaded?.(source);
-    return source;
+    return { asset, bytes, path, src, width: 0, height: 0, statusMessage };
   }
   try {
     const dimensions = await measureImage(ownerWindow, src);
-    const source = { asset, bytes, path, src, ...dimensions, statusMessage: "" };
-    onLoaded?.(source);
-    return source;
+    return { asset, bytes, path, src, ...dimensions, statusMessage: "" };
   } catch (error) {
-    const source = {
+    return {
       asset,
       bytes,
       path,
@@ -78,8 +73,6 @@ export async function loadStudioImageEditorSource(
       height: 0,
       statusMessage: `Unable to render image preview: ${errorMessage(error)}`,
     };
-    onLoaded?.(source);
-    return source;
   }
 }
 

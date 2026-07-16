@@ -4,6 +4,7 @@ import {
   createUiAction,
   resolveSurfaceDomContext,
 } from "../core/ui/surface";
+import { isMobileLayout } from "../platform/mobileLayout";
 
 export type HoverShellActionVariant = "default" | "primary" | "danger";
 
@@ -329,10 +330,15 @@ export function createHoverShell(options: HoverShellOptions): HoverShellHandle {
     const compact = hostWindow.innerWidth <= 480;
     root.dataset.layout = compact ? "compact" : "desktop";
     if (compact) {
+      const mobileLayout = isMobileLayout(root);
       root.setCssStyles({
-        left: "12px",
-        right: "12px",
-        bottom: "16px",
+        left: mobileLayout
+          ? "max(var(--ss-space-3), env(safe-area-inset-left, 0px))"
+          : "12px",
+        right: mobileLayout
+          ? "max(var(--ss-space-3), env(safe-area-inset-right, 0px))"
+          : "12px",
+        bottom: mobileLayout ? "var(--ss-mobile-bottom-clearance)" : "16px",
         top: "auto",
         width: "auto",
       });

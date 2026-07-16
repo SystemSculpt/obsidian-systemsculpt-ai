@@ -4,16 +4,11 @@ export type StudioProjectModifyDecision =
       reason: "inactive_project" | "self_write" | "duplicate_accepted" | "duplicate_rejected";
     }
   | {
-      kind: "defer";
-      reason: "local_save_pending";
-    }
-  | {
       kind: "evaluate";
     };
 
 type ResolveStudioProjectModifyDecisionOptions = {
   isActiveProjectFile: boolean;
-  hasPendingLocalSaveWork: boolean;
   isExpectedSelfWrite: boolean;
   signature: string;
   lastAcceptedSignature: string | null;
@@ -81,12 +76,6 @@ export function resolveStudioProjectModifyDecision(
     return {
       kind: "ignore",
       reason: "self_write",
-    };
-  }
-  if (options.hasPendingLocalSaveWork) {
-    return {
-      kind: "defer",
-      reason: "local_save_pending",
     };
   }
   if (options.lastAcceptedSignature && options.lastAcceptedSignature === options.signature) {

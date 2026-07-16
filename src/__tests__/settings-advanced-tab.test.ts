@@ -104,12 +104,18 @@ jest.mock("../utils/clipboard", () => ({
   tryCopyToClipboard: jest.fn().mockResolvedValue(true),
 }));
 
+jest.mock("../platform/hostCapabilities", () => ({
+  hasHostCapability: jest.fn(() => true),
+}));
+
 import { App, Notice } from "obsidian";
 import { displayAdvancedTabContent } from "../settings/AdvancedTabContent";
+import { hasHostCapability } from "../platform/hostCapabilities";
 
 describe("Advanced settings tab", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    (hasHostCapability as jest.Mock).mockReturnValue(true);
     document.body.innerHTML = "";
   });
 
@@ -150,5 +156,30 @@ describe("Advanced settings tab", () => {
     expect(container.textContent).toContain("Quick actions");
     expect(container.textContent).not.toContain("Update notifications");
     expect(container.textContent).not.toContain("Development mode");
+  });
+
+  it("does not render a dead file-manager action when the host cannot reveal folders", () => {
+    (hasHostCapability as jest.Mock).mockReturnValue(false);
+    const app = new App();
+    const container = document.createElement("div");
+    const tab: any = {
+      app,
+      plugin: {
+        settings: {},
+        getSettingsManager: jest.fn(() => ({
+          updateSettings: jest.fn().mockResolvedValue(undefined),
+        })),
+      },
+      renderQuickActionsSection: jest.fn(),
+    };
+
+    displayAdvancedTabContent(container, tab);
+
+    expect(container.textContent).toContain("Diagnostics folder");
+    expect(container.textContent).toContain(".systemsculpt/diagnostics");
+    expect(Array.from(container.querySelectorAll("button")))
+      .not.toEqual(expect.arrayContaining([
+        expect.objectContaining({ textContent: "Open folder" }),
+      ]));
   });
 });

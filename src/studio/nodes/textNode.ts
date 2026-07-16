@@ -16,6 +16,7 @@ const DEFAULT_FONT_SIZE = 14;
 export const textNode: StudioNodeDefinition = {
   kind: "studio.text",
   version: "1.0.0",
+  requiredHostCapabilities: [],
   capabilityClass: "local_cpu",
   cachePolicy: "by_inputs",
   inputPorts: [],

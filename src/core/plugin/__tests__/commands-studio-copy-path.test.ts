@@ -1,6 +1,6 @@
 /** @jest-environment jsdom */
 
-import { App, TFile, WorkspaceLeaf } from "obsidian";
+import { App, Platform, TFile, WorkspaceLeaf } from "obsidian";
 import { CommandManager } from "../commands";
 import { tryCopyToClipboard } from "../../../utils/clipboard";
 
@@ -13,6 +13,11 @@ describe("CommandManager copy-current-file-path command", () => {
 
   beforeEach(() => {
     mockedTryCopyToClipboard.mockReset();
+    (Platform as typeof Platform & { isDesktopApp: boolean }).isDesktopApp = true;
+  });
+
+  afterAll(() => {
+    (Platform as typeof Platform & { isDesktopApp: boolean }).isDesktopApp = true;
   });
 
   function registerCopyPathCommand(options?: {
@@ -106,17 +111,17 @@ describe("CommandManager copy-current-file-path command", () => {
     return { copyCommand };
   }
 
-  it("registers copy-current-file-path without overriding a user hotkey", () => {
+  it("registers copy-current-file-path with Mod+Shift+C", () => {
     const { copyCommand } = registerCopyPathCommand();
 
     expect(copyCommand).toEqual(
       expect.objectContaining({
         id: "copy-current-file-path",
         name: "Copy current file path",
+        hotkeys: [{ modifiers: ["Mod", "Shift"], key: "c" }],
         checkCallback: expect.any(Function),
       })
     );
-    expect(copyCommand.hotkeys).toBeUndefined();
   });
 
   it("copies the active file absolute path and shows a success notice", async () => {
@@ -136,7 +141,7 @@ describe("CommandManager copy-current-file-path command", () => {
     await Promise.resolve();
 
     expect(mockedTryCopyToClipboard).toHaveBeenCalledWith("/vault/Notes/Inbox.md");
-    expect(consoleLogSpy).toHaveBeenCalledWith("Notice: File path copied to clipboard.");
+    expect(consoleLogSpy).toHaveBeenCalledWith("Notice: Full file path copied to clipboard.");
     consoleLogSpy.mockRestore();
   });
 
@@ -156,7 +161,7 @@ describe("CommandManager copy-current-file-path command", () => {
     await Promise.resolve();
 
     expect(mockedTryCopyToClipboard).toHaveBeenCalledWith("/vault/SystemSculpt/Canvas/Map.canvas");
-    expect(consoleLogSpy).toHaveBeenCalledWith("Notice: File path copied to clipboard.");
+    expect(consoleLogSpy).toHaveBeenCalledWith("Notice: Full file path copied to clipboard.");
     consoleLogSpy.mockRestore();
   });
 
@@ -176,7 +181,7 @@ describe("CommandManager copy-current-file-path command", () => {
     await Promise.resolve();
 
     expect(mockedTryCopyToClipboard).toHaveBeenCalledWith("/vault/Research/Papers/SystemSculpt.pdf");
-    expect(consoleLogSpy).toHaveBeenCalledWith("Notice: File path copied to clipboard.");
+    expect(consoleLogSpy).toHaveBeenCalledWith("Notice: Full file path copied to clipboard.");
     consoleLogSpy.mockRestore();
   });
 
@@ -196,7 +201,64 @@ describe("CommandManager copy-current-file-path command", () => {
     await Promise.resolve();
 
     expect(mockedTryCopyToClipboard).toHaveBeenCalledWith("/vault/SystemSculpt/Chats/2026-03-06 12-42-10.md");
-    expect(consoleLogSpy).toHaveBeenCalledWith("Notice: File path copied to clipboard.");
+    expect(consoleLogSpy).toHaveBeenCalledWith("Notice: Full file path copied to clipboard.");
+    consoleLogSpy.mockRestore();
+  });
+
+  it("copies the focused ChatView path instead of Obsidian's stale active file", async () => {
+    mockedTryCopyToClipboard.mockResolvedValue(true);
+
+    const { copyCommand } = registerCopyPathCommand({
+      activeFile: new TFile({ path: "Notes/Previously Focused.md", extension: "md" }),
+      activeChatViewFile: "SystemSculpt/Chats/current-chat.md",
+      getFullPath: (vaultPath) => `/vault/${vaultPath}`,
+    });
+
+    expect(copyCommand.checkCallback(false)).toBe(true);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(mockedTryCopyToClipboard).toHaveBeenCalledWith(
+      "/vault/SystemSculpt/Chats/current-chat.md"
+    );
+  });
+
+  it("copies the focused Studio path instead of Obsidian's stale active file", async () => {
+    mockedTryCopyToClipboard.mockResolvedValue(true);
+
+    const { copyCommand } = registerCopyPathCommand({
+      activeFile: new TFile({ path: "Notes/Previously Focused.md", extension: "md" }),
+      activeLeafStateFile: "SystemSculpt/Studio/Current.systemsculpt",
+      getFullPath: (vaultPath) => `/vault/${vaultPath}`,
+    });
+
+    expect(copyCommand.checkCallback(false)).toBe(true);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(mockedTryCopyToClipboard).toHaveBeenCalledWith(
+      "/vault/SystemSculpt/Studio/Current.systemsculpt"
+    );
+  });
+
+  it("copies a portable vault-relative path on Obsidian Mobile", async () => {
+    const consoleLogSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+    (Platform as typeof Platform & { isDesktopApp: boolean }).isDesktopApp = false;
+    mockedTryCopyToClipboard.mockResolvedValue(true);
+
+    const { copyCommand } = registerCopyPathCommand({
+      activeFile: new TFile({ path: "Notes/Inbox.md", extension: "md" }),
+      getFullPath: (vaultPath) => `/desktop-only/${vaultPath}`,
+    });
+
+    expect(copyCommand.checkCallback(false)).toBe(true);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(mockedTryCopyToClipboard).toHaveBeenCalledWith("Notes/Inbox.md");
+    expect(consoleLogSpy).toHaveBeenCalledWith(
+      "Notice: Vault-relative file path copied to clipboard."
+    );
     consoleLogSpy.mockRestore();
   });
 

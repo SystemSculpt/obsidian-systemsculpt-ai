@@ -1,5 +1,6 @@
 import { Notice } from "obsidian";
 import type { StudioNodeConfigFieldDefinition } from "../../studio/types";
+import { resolveElectronModule } from "../../platform/hostCapabilities";
 import { getStudioOwnerWindow } from "./StudioDomContext";
 
 export type StudioNodeConfigPathBrowseOptions = {
@@ -81,48 +82,34 @@ function resolveElectronDialogRuntime(ownerWindow: Window):
       };
     }
   | null {
-  const candidates = [
-    (ownerWindow as unknown as { require?: unknown })?.require,
-    (ownerWindow as unknown as { window?: { require?: unknown } })?.window?.require,
-  ];
-
-  for (const runtimeRequire of candidates) {
-    if (typeof runtimeRequire !== "function") {
-      continue;
-    }
-    try {
-      const electron = runtimeRequire("electron") as {
-        dialog?: unknown;
-        BrowserWindow?: unknown;
-        remote?: { dialog?: unknown; BrowserWindow?: unknown };
-      };
-      const dialog =
-        (electron?.dialog as {
-          showOpenDialog?: (...args: unknown[]) => Promise<{
-            canceled?: unknown;
-            filePaths?: unknown;
-          }>;
-          showOpenDialogSync?: (...args: unknown[]) => unknown;
-        }) ||
-        (electron?.remote?.dialog as {
-          showOpenDialog?: (...args: unknown[]) => Promise<{
-            canceled?: unknown;
-            filePaths?: unknown;
-          }>;
-          showOpenDialogSync?: (...args: unknown[]) => unknown;
-        });
-      const BrowserWindow =
-        (electron?.BrowserWindow as { getFocusedWindow?: () => unknown }) ||
-        (electron?.remote?.BrowserWindow as { getFocusedWindow?: () => unknown });
-      if (dialog && (typeof dialog.showOpenDialog === "function" || typeof dialog.showOpenDialogSync === "function")) {
-        return {
-          dialog,
-          BrowserWindow,
-        };
-      }
-    } catch {
-      // Continue through fallbacks.
-    }
+  const electron = resolveElectronModule<{
+    dialog?: unknown;
+    BrowserWindow?: unknown;
+    remote?: { dialog?: unknown; BrowserWindow?: unknown };
+  }>(ownerWindow);
+  const dialog =
+    (electron?.dialog as {
+      showOpenDialog?: (...args: unknown[]) => Promise<{
+        canceled?: unknown;
+        filePaths?: unknown;
+      }>;
+      showOpenDialogSync?: (...args: unknown[]) => unknown;
+    }) ||
+    (electron?.remote?.dialog as {
+      showOpenDialog?: (...args: unknown[]) => Promise<{
+        canceled?: unknown;
+        filePaths?: unknown;
+      }>;
+      showOpenDialogSync?: (...args: unknown[]) => unknown;
+    });
+  const BrowserWindow =
+    (electron?.BrowserWindow as { getFocusedWindow?: () => unknown }) ||
+    (electron?.remote?.BrowserWindow as { getFocusedWindow?: () => unknown });
+  if (dialog && (typeof dialog.showOpenDialog === "function" || typeof dialog.showOpenDialogSync === "function")) {
+    return {
+      dialog,
+      BrowserWindow,
+    };
   }
 
   return null;

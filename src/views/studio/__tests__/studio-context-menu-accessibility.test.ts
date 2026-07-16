@@ -2,6 +2,7 @@
  * @jest-environment jsdom
  */
 import type { StudioNodeDefinition } from "../../../studio/types";
+import { disposeMobileHostLayoutStates } from "../../../platform/mobileHostLayout";
 import { StudioNodeContextMenuOverlay } from "../StudioNodeContextMenuOverlay";
 import { StudioSimpleContextMenuOverlay } from "../StudioSimpleContextMenuOverlay";
 
@@ -13,6 +14,7 @@ function definition(kind: string): StudioNodeDefinition {
     cachePolicy: "never",
     inputPorts: [],
     outputPorts: [],
+    requiredHostCapabilities: [],
     configDefaults: {},
     configSchema: { fields: [], allowUnknownKeys: true },
     async execute() {
@@ -24,7 +26,12 @@ function definition(kind: string): StudioNodeDefinition {
 describe("Studio context menu accessibility", () => {
   beforeEach(() => {
     document.body.empty();
+    document.body.removeClass("is-mobile");
     HTMLElement.prototype.scrollIntoView = jest.fn();
+  });
+
+  afterEach(() => {
+    disposeMobileHostLayoutStates();
   });
 
   it("exposes add-node search as a dialog with a combobox-owned listbox", () => {
@@ -79,6 +86,64 @@ describe("Studio context menu accessibility", () => {
     expect(onSelectDefinition).toHaveBeenCalledWith(second);
     expect(root?.getAttribute("aria-hidden")).toBe("true");
     expect(search?.getAttribute("aria-expanded")).toBe("false");
+
+    overlay.destroy();
+  });
+
+  it("keeps the mobile node menu visible in a scrolled viewport without opening the keyboard", async () => {
+    document.body.addClass("is-mobile");
+    const workspace = document.body.createDiv();
+    const controls = workspace.createDiv({ cls: "ss-studio-graph-workspace-controls" });
+    const viewport = workspace.createDiv();
+    const mobileNav = document.body.createDiv({ cls: "mobile-navbar-action" });
+    Object.defineProperties(viewport, {
+      clientWidth: { configurable: true, value: 400 },
+      clientHeight: { configurable: true, value: 700 },
+      scrollTop: { configurable: true, value: 500, writable: true },
+    });
+    Object.defineProperty(viewport, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({
+        x: 0, y: 100, width: 400, height: 700,
+        top: 100, right: 400, bottom: 800, left: 0,
+        toJSON: () => ({}),
+      }),
+    });
+    Object.defineProperty(controls, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({
+        x: 8, y: 108, width: 384, height: 96,
+        top: 108, right: 392, bottom: 204, left: 8,
+        toJSON: () => ({}),
+      }),
+    });
+    Object.defineProperty(mobileNav, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({
+        x: 40, y: 720, width: 320, height: 52,
+        top: 720, right: 360, bottom: 772, left: 40,
+        toJSON: () => ({}),
+      }),
+    });
+    const focus = jest.spyOn(HTMLInputElement.prototype, "focus");
+    const overlay = new StudioNodeContextMenuOverlay();
+
+    overlay.mount(viewport);
+    overlay.open({
+      anchorX: 200,
+      anchorY: 900,
+      items: [
+        { definition: definition("studio.alpha"), title: "Alpha", summary: "First node" },
+        { definition: definition("studio.beta"), title: "Beta", summary: "Second node" },
+      ],
+      onSelectDefinition: jest.fn(),
+    });
+    await new Promise<void>((resolve) => setTimeout(resolve, 25));
+
+    const root = viewport.querySelector<HTMLElement>(".ss-studio-node-context-menu");
+    expect(focus).not.toHaveBeenCalled();
+    expect(root?.style.top).toBe("612px");
+    expect(root?.style.maxHeight).toBe("500px");
 
     overlay.destroy();
   });

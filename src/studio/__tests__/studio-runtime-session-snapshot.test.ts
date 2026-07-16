@@ -169,12 +169,12 @@ describe("StudioRuntime session snapshot runs", () => {
     } as any;
     const producer = {
       node: { id: "producer", kind: "test.producer", version: "1", title: "Producer", position: { x: 0, y: 0 }, config: {} },
-      definition: { capabilityClass: "local_io", cachePolicy: "none", execute: async ({ services }: any) => ({ outputs: { asset: await services.storeAsset(bytes.buffer, "application/octet-stream") } }) },
+      definition: { requiredHostCapabilities: [], capabilityClass: "local_io", cachePolicy: "none", execute: async ({ services }: any) => ({ outputs: { asset: await services.storeAsset(bytes.buffer, "application/octet-stream") } }) },
       inboundEdges: [], dependencyNodeIds: [],
     };
     const consumer = {
       node: { id: "consumer", kind: "test.consumer", version: "1", title: "Consumer", position: { x: 1, y: 1 }, config: {} },
-      definition: { capabilityClass: "local_io", cachePolicy: "none", execute: async ({ services, inputs }: any) => {
+      definition: { requiredHostCapabilities: [], capabilityClass: "local_io", cachePolicy: "none", execute: async ({ services, inputs }: any) => {
         const consumed = new Uint8Array(await services.readAsset(inputs.asset));
         expect(consumed).toEqual(bytes);
         return { outputs: { size: consumed.byteLength } };

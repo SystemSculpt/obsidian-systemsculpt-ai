@@ -59,6 +59,22 @@ describe("ContextFileService", () => {
       expect(result).toBe("Test content");
     });
 
+    it("reads a Studio project by its exact vault path without Markdown link metadata", async () => {
+      const mockFile = new TFile({
+        path: "studio/architecture.systemsculpt",
+        extension: "systemsculpt",
+      });
+      (mockApp.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(mockFile);
+      (mockApp.vault.read as jest.Mock).mockResolvedValue('{"schema":"studio.project.v1"}');
+
+      const result = await service.getContextFileContents("[[studio/architecture.systemsculpt]]");
+
+      expect(result).toBe('{"schema":"studio.project.v1"}');
+      expect(mockApp.vault.getAbstractFileByPath).toHaveBeenCalledWith(
+        "studio/architecture.systemsculpt"
+      );
+    });
+
     it("returns image data for image files", async () => {
       const mockFile = new TFile({ path: "images/photo.png", extension: "png" });
       (mockApp.metadataCache.getFirstLinkpathDest as jest.Mock).mockReturnValue(mockFile);
@@ -146,6 +162,37 @@ describe("ContextFileService", () => {
       expect(result?.role).toBe("user");
       expect(result?.content).toContain("Context from [[notes/test.md]]");
       expect(result?.content).toContain("Document content");
+    });
+
+    it("adds the installed authoring reference to legacy Studio context without changing its exact bytes", async () => {
+      const mockFile = new TFile({
+        path: "studio/architecture.systemsculpt",
+        extension: "systemsculpt",
+      });
+      const legacyProject = JSON.stringify({
+        schema: "studio.project.v1",
+        projectId: "architecture",
+        name: "Architecture",
+        createdAt: "2026-07-15T00:00:00.000Z",
+        updatedAt: "2026-07-15T00:00:00.000Z",
+        engine: { apiMode: "systemsculpt_only", minPluginVersion: "6.0.2" },
+        graph: { nodes: [], edges: [], entryNodeIds: [], groups: [] },
+        permissionsRef: { policyVersion: 1, policyPath: "studio/architecture.systemsculpt-assets/policy/grants.json" },
+        settings: { runConcurrency: "adaptive", defaultFsScope: "vault", retention: { maxRuns: 100, maxArtifactsMb: 1024 } },
+        migrations: { projectSchemaVersion: "1.0.0", applied: [] },
+      }, null, 2);
+      (mockApp.metadataCache.getFirstLinkpathDest as jest.Mock).mockReturnValue(mockFile);
+      (mockApp.vault.read as jest.Mock).mockResolvedValue(legacyProject);
+
+      const result = await service.buildContextMessageFromFile(
+        "[[studio/architecture.systemsculpt]]",
+        true
+      );
+
+      expect(result?.content).toContain("Generated Studio authoring reference");
+      expect(result?.content).toContain('"schema": "studio.agent-guide.v1"');
+      expect(result?.content).toContain("Exact .systemsculpt file bytes:");
+      expect(result?.content).toContain(legacyProject);
     });
 
     it("builds image context message when includeImages is true", async () => {

@@ -333,7 +333,7 @@ export function renderStudioGraphWorkspace(
   });
 
   createStudioWorkspaceControl(controls, {
-    label: "100%",
+    label: "Reset",
     ariaLabel: "Reset zoom",
     onSelect: onZoomReset,
   });

@@ -51,6 +51,23 @@ export function resetStudioGraphHistory(
   setStudioGraphHistoryCurrentSnapshot(state, project, options?.selectedNodeIds || []);
 }
 
+export function preserveStudioGraphHistoryUndoSnapshot(
+  state: StudioGraphHistoryState,
+  project: StudioProjectV1,
+  selectedNodeIds: string[],
+  maxSnapshots: number
+): void {
+  if (!state.currentSnapshot || serializeProjectSnapshot(project) === state.currentSerialized) {
+    return;
+  }
+  state.undoSnapshots.push({
+    project: cloneProjectSnapshot(project),
+    selectedNodeIds: normalizeNodeIdList(selectedNodeIds),
+  });
+  trimHistorySnapshots(state.undoSnapshots, maxSnapshots);
+  state.redoSnapshots = [];
+}
+
 export function captureStudioGraphHistoryCheckpoint(
   state: StudioGraphHistoryState,
   project: StudioProjectV1,

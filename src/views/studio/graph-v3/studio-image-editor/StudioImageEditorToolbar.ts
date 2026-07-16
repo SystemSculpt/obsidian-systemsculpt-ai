@@ -14,7 +14,7 @@ import {
 type StudioImageEditorToolbarActions = {
   addLabel: () => void;
   addAnnotation: (kind: StudioCaptionBoardAnnotationKind) => void;
-  ensureCrop: () => void;
+  toggleCropSelection: () => void;
   fit: () => void;
   done: () => Promise<void>;
 };
@@ -44,7 +44,7 @@ export class StudioImageEditorToolbar {
     this.blurButton = createToolbarButton(buttons, "Blur", () => {
       actions.addAnnotation("blur_rect");
     });
-    this.cropButton = createToolbarButton(buttons, "Crop", actions.ensureCrop);
+    this.cropButton = createToolbarButton(buttons, "Crop", actions.toggleCropSelection);
     this.fitButton = createToolbarButton(buttons, "Fit", actions.fit);
     this.doneButton = createToolbarButton(buttons, "Done", () => {
       void actions.done();
@@ -55,6 +55,7 @@ export class StudioImageEditorToolbar {
     state: StudioCaptionBoardState;
     selection: StudioImageEditorSelection | null;
     hasSource: boolean;
+    sourceLoading: boolean;
     saving: boolean;
     statusOverride: string;
   }): void {
@@ -64,9 +65,15 @@ export class StudioImageEditorToolbar {
     this.highlightCircleButton.disabled = disabled;
     this.blurButton.disabled = disabled;
     this.cropButton.disabled = disabled;
+    const cropSelected = options.selection?.kind === "crop" && options.state.crop !== null;
+    this.cropButton.classList.toggle("is-selected", cropSelected);
+    this.cropButton.setAttribute("aria-pressed", String(cropSelected));
+    this.cropButton.setAttribute("aria-label", cropSelected ? "Deselect Crop" : "Crop");
+    this.cropButton.textContent = cropSelected ? "Deselect Crop" : "Crop";
     this.fitButton.disabled = disabled;
     this.doneButton.disabled = disabled;
     this.doneButton.textContent = options.saving ? "Saving..." : "Done";
+    this.statusEl.toggleAttribute("hidden", options.sourceLoading);
     this.statusEl.setText(describeStatus(options));
   }
 }
@@ -88,13 +95,17 @@ function describeStatus(options: {
   state: StudioCaptionBoardState;
   selection: StudioImageEditorSelection | null;
   hasSource: boolean;
+  sourceLoading: boolean;
   statusOverride: string;
 }): string {
+  if (options.sourceLoading) {
+    return "";
+  }
   if (options.statusOverride) {
     return options.statusOverride;
   }
   if (!options.hasSource) {
-    return "Load a source image to start editing.";
+    return "Image unavailable.";
   }
   const editCount = countStudioCaptionBoardEdits(options.state);
   if (editCount === 0) {

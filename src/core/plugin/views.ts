@@ -5,6 +5,7 @@ import { ChatState } from "../../types/index";
 import type { EmbeddingsView } from "../../views/EmbeddingsView";
 import type { SystemSculptStudioView } from "../../views/studio/SystemSculptStudioView";
 import { yieldToEventLoop } from "../../utils/yieldToEventLoop";
+import { isMobileLayout } from "../../platform/mobileLayout";
 import {
   CHAT_VIEW_TYPE,
   EMBEDDINGS_VIEW_TYPE,
@@ -318,19 +319,22 @@ export class ViewManager {
       return existingLeaves[0].view as EmbeddingsView;
     }
     
-    // Create new view in right sidebar
-    const rightLeaf = this.app.workspace.getRightLeaf(false);
-    if (!rightLeaf) {
-      throw new Error("Failed to create right sidebar leaf");
+    // Similar Notes is a primary, full-width workflow on mobile. Sidebars are
+    // retained on desktop, where they can remain visible beside the note.
+    const targetLeaf = isMobileLayout()
+      ? this.app.workspace.getLeaf("tab")
+      : this.app.workspace.getRightLeaf(false);
+    if (!targetLeaf) {
+      throw new Error("Failed to create Similar Notes leaf");
     }
     
-    await rightLeaf.setViewState({
+    await targetLeaf.setViewState({
       type: EMBEDDINGS_VIEW_TYPE,
       active: true
     });
     
-    this.app.workspace.revealLeaf(rightLeaf);
-    return rightLeaf.view as EmbeddingsView;
+    this.app.workspace.revealLeaf(targetLeaf);
+    return targetLeaf.view as EmbeddingsView;
   }
 
   async activateSystemSculptStudioView(projectPath?: string): Promise<SystemSculptStudioView> {

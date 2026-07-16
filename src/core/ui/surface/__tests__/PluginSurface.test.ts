@@ -1,8 +1,13 @@
 /** @jest-environment jsdom */
 
 import { applyPluginSurface, isPluginSurface } from "../PluginSurface";
+import { disposeMobileHostLayoutStates } from "../../../../platform/mobileHostLayout";
 
 describe("PluginSurface", () => {
+  afterEach(() => {
+    disposeMobileHostLayoutStates();
+  });
+
   it.each(["view", "modal", "transient"] as const)(
     "applies the %s host contract without replacing feature state",
     (kind) => {

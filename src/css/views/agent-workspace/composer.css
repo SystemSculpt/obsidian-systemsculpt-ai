@@ -145,8 +145,9 @@
   }
 
   .systemsculpt-agent-prompt-tools {
-    flex: 1 1 100%;
-    flex-wrap: wrap;
+    flex: 1 1 auto;
+    flex-wrap: nowrap;
+    min-width: 0;
   }
 
   .systemsculpt-agent-prompt-actions {
@@ -169,6 +170,24 @@
   .systemsculpt-agent-approval-actions {
     justify-content: flex-start;
   }
+}
+
+.ss-mobile-layout .systemsculpt-agent-composer {
+  padding-top: var(--ss-space-1);
+  padding-bottom: var(--ss-space-2);
+}
+
+.ss-mobile-layout .systemsculpt-agent-prompt-toolbar {
+  flex-wrap: nowrap;
+}
+
+.ss-mobile-layout .systemsculpt-agent-approval-mode {
+  min-width: 0;
+  max-width: 8rem;
+}
+
+.ss-mobile-layout .systemsculpt-agent-prompt-actions {
+  flex: 0 0 auto;
 }
 
 @container ss-surface (max-width: 360px) {
@@ -205,5 +224,45 @@
   .systemsculpt-agent-header-actions {
     width: 100%;
     justify-content: flex-end;
+  }
+}
+
+@media (orientation: landscape) {
+  .ss-mobile-layout.ss-mobile-navbar-hidden .systemsculpt-agent-composer {
+    width: 100%;
+    padding: var(--ss-space-1) var(--ss-space-2);
+  }
+
+  .ss-mobile-layout.ss-mobile-navbar-hidden .systemsculpt-agent-composer-attachments,
+  .ss-mobile-layout.ss-mobile-navbar-hidden .systemsculpt-agent-prompt-tools,
+  .ss-mobile-layout.ss-mobile-navbar-hidden .systemsculpt-agent-prompt-hint {
+    display: none;
+  }
+
+  .ss-mobile-layout.ss-mobile-navbar-hidden .systemsculpt-agent-prompt {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    border-radius: var(--ss-radius-md);
+  }
+
+  .ss-mobile-layout.ss-mobile-navbar-hidden
+    .systemsculpt-agent-prompt
+    > .systemsculpt-agent-prompt-input {
+    grid-column: 1;
+    min-height: var(--ss-touch-target);
+    height: var(--ss-touch-target);
+    max-height: var(--ss-touch-target);
+    padding: var(--ss-space-2) var(--ss-space-3);
+  }
+
+  .ss-mobile-layout.ss-mobile-navbar-hidden .systemsculpt-agent-prompt-toolbar {
+    grid-column: 2;
+    min-height: var(--ss-touch-target);
+    padding: 0 var(--ss-space-1);
+  }
+
+  .ss-mobile-layout.ss-mobile-navbar-hidden .systemsculpt-agent-prompt-actions {
+    margin-left: 0;
   }
 }

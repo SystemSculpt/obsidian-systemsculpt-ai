@@ -41,7 +41,8 @@
 
 /* Toggle state is feature semantics; button structure and interaction come
  * from the shared action primitive. */
-.ss-studio-caption-board__toggle.is-selected {
+.ss-studio-caption-board__toggle.is-selected,
+.ss-studio-caption-board__toolbar-button.is-selected {
   background-color: var(--ss-accent-tint-strong);
   border-color: var(--ss-line-accent);
   color: var(--ss-ink-accent);

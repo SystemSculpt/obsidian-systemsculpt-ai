@@ -205,3 +205,27 @@
   color: var(--ss-ink-muted);
   text-align: center;
 }
+
+@container ss-surface (max-width: 480px) {
+  .ss-studio-node-context-menu {
+    max-width: calc(100% - var(--ss-space-4));
+    max-height: calc(100% - var(--ss-mobile-bottom-clearance) - var(--ss-space-4));
+  }
+
+  .ss-studio-simple-context-menu {
+    max-width: calc(100% - var(--ss-space-4));
+  }
+}
+
+.ss-mobile-layout .ss-studio-node-context-menu-item,
+.ss-mobile-layout .ss-studio-node-context-menu-action,
+.ss-mobile-layout .ss-studio-simple-context-menu-item {
+  min-height: var(--ss-touch-target);
+  padding-block: var(--ss-space-2);
+}
+
+/* Portable node types remain easy to scan without a keyboard taking over the
+ * graph viewport. Desktop keeps the fuzzy-search field and keyboard focus. */
+.ss-mobile-layout .ss-studio-node-context-menu-search-wrap {
+  display: none;
+}

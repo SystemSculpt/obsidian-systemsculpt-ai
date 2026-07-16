@@ -149,7 +149,7 @@ export class TranscribeAudioFileModal extends StandardModal {
     });
     header.createDiv({
       cls: "ss-transcribe-audio__section-hint",
-      text: "Drag in a file or click to choose from your computer.",
+      text: "Drop a file here or choose one from this device.",
     });
 
     const dropzone = container.createDiv({
@@ -230,7 +230,7 @@ export class TranscribeAudioFileModal extends StandardModal {
       cls: "ss-transcribe-audio__picker-actions",
     });
     const openFileButton = createUiAction(pickerActions, {
-      label: "Open file from Finder",
+      label: "Choose audio file",
       icon: "folder-open",
     });
     openFileButton.addClass("ss-transcribe-audio__open-file-btn");
@@ -238,11 +238,6 @@ export class TranscribeAudioFileModal extends StandardModal {
     this.registerDomEvent(openFileButton, "click", (event: Event) => {
       event.preventDefault();
       this.fileInputEl?.click();
-    });
-
-    pickerActions.createDiv({
-      cls: "ss-transcribe-audio__section-hint",
-      text: "Opens your system file picker (Finder on macOS).",
     });
   }
 
