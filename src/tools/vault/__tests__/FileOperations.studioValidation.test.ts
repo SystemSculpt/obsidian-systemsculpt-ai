@@ -98,6 +98,22 @@ describe("FileOperations Studio agent edits", () => {
     expect(app.vault.modify).not.toHaveBeenCalled();
   });
 
+  it("applies a valid batch edit to a CRLF Studio project", async () => {
+    persisted = original.replace(/\n/g, "\r\n");
+
+    const result = await operations.multiEditFiles({
+      files: [{
+        path: file.path,
+        edits: [{ oldText: "Current architecture", newText: "Batch architecture" }],
+      }],
+    } as any);
+
+    expect(result).toMatchObject({ success: true, appliedFiles: 1 });
+    expect(persisted).toContain("Batch architecture");
+    expect((app.vault as any).process).toHaveBeenCalledWith(file, expect.any(Function));
+    expect(app.vault.modify).not.toHaveBeenCalled();
+  });
+
   it("does not overwrite a newer project when an ordinary overwrite races it", async () => {
     const replacement = original.replace("Current architecture", "Agent overwrite");
     const canvasAutosave = original.replace("Current architecture", "Newer canvas state");

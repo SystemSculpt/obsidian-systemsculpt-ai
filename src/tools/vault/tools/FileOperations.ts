@@ -517,10 +517,11 @@ export class FileOperations {
           const file = resolveExistingVaultFile(this.app, normalizedPath);
           if (!file) throw new Error(`File not found: ${path}`);
           resolvedPath = file.path;
-          original = normalizeLineEndings(await this.app.vault.read(file));
+          const rawOriginal = await this.app.vault.read(file);
+          original = normalizeLineEndings(rawOriginal);
           readCurrent = async () => normalizeLineEndings(await this.app.vault.read(file));
           write = isStudioProjectDocumentPath(resolvedPath)
-            ? async (content) => this.writeStudioProjectIfUnchanged(file, original, content)
+            ? async (content) => this.writeStudioProjectIfUnchanged(file, rawOriginal, content)
             : async (content) => this.app.vault.modify(file, content);
         }
 
