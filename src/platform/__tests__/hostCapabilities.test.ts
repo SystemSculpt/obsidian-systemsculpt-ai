@@ -85,6 +85,26 @@ describe("host capabilities", () => {
     expect(getHostDeviceType()).toBe("Mobile");
   });
 
+  it("keeps desktop host capabilities when the desktop app uses mobile UI mode", () => {
+    platform.isDesktopApp = true;
+    platform.isMobile = true;
+    platform.isMobileApp = false;
+    const electron = {
+      dialog: { showOpenDialog: jest.fn() },
+      shell: { showItemInFolder: jest.fn() },
+    };
+    const runtimeRequire = jest.fn(() => electron);
+    (window as Window & { require?: unknown }).require = runtimeRequire;
+
+    expect(resolveElectronModule()).toBe(electron);
+    expect(hasHostCapability("local-cli")).toBe(true);
+    expect(hasHostCapability("native-file-picker")).toBe(true);
+    expect(hasHostCapability("file-manager-reveal")).toBe(true);
+    expect(hasHostCapability("status-bar")).toBe(true);
+    expect(getHostDeviceType()).toBe("Desktop");
+    expect(runtimeRequire).toHaveBeenCalledWith("electron");
+  });
+
   it("owns operating-system labels for feature diagnostics", () => {
     platform.isMacOS = true;
     expect(getHostOperatingSystem()).toBe("macOS");

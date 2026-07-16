@@ -110,14 +110,12 @@ function resolveOwnerWindow(owner?: HostCapabilityOwner): Window | undefined {
 
 function isMobileAppHost(): boolean {
   const platform = Platform as HostPlatform;
-  return platform.isMobile === true ||
-    platform.isMobileApp === true ||
-    platform.isDesktopApp === false;
+  return platform.isMobileApp === true;
 }
 
 function isDesktopAppHost(): boolean {
   const platform = Platform as HostPlatform;
-  return platform.isDesktopApp === true && !isMobileAppHost();
+  return platform.isDesktopApp === true;
 }
 
 /**
