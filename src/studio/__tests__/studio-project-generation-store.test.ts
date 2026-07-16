@@ -621,6 +621,36 @@ describe("StudioProjectGenerationStore", () => {
     expect(await adapter.read(locator.vaultRelativeProjectPath)).toBe(legacyProject);
   });
 
+  it("publishes an in-place logical rename through visible-file CAS", async () => {
+    const adapter = new MemoryAdapter(); await seedLegacy(adapter);
+    const store = new StudioProjectGenerationStore(adapter, {
+      now: () => "2026-07-11T01:02:03.004Z",
+    });
+    const root = await store.discoverAndAdopt(locator);
+    if (root.status !== "committed") throw new Error("adoption failed");
+    const copyFileIfAbsent = jest.spyOn(adapter, "copyFileIfAbsent");
+    const compareAndSwapText = jest.spyOn(adapter, "compareAndSwapText");
+
+    const renamed = await store.commitWholeGeneration({
+      kind: "logical_rename",
+      projectId: "project_alpha",
+      locator,
+      projectDocument: new TextEncoder().encode(legacyProject),
+      projectManifest: new TextEncoder().encode("{}"),
+    }, root.expectedGeneration);
+
+    expect(renamed.status).toBe("committed");
+    if (renamed.status !== "committed") return;
+    expect(renamed.expectedGeneration.revision).toBe(1);
+    expect(await adapter.read(locator.vaultRelativeProjectPath)).toBe(legacyProject);
+    expect(compareAndSwapText).toHaveBeenCalledWith(
+      locator.vaultRelativeProjectPath,
+      legacyProject,
+      legacyProject
+    );
+    expect(copyFileIfAbsent).not.toHaveBeenCalled();
+  });
+
   it("adopts a project file already moved by an ordinary vault rename", async () => {
     const adapter = new MemoryAdapter(); await seedLegacy(adapter);
     const store = new StudioProjectGenerationStore(adapter, {

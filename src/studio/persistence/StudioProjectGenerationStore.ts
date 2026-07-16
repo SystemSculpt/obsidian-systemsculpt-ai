@@ -407,6 +407,9 @@ export class StudioProjectGenerationStore {
         const locator = command.kind === "logical_rename" ? validateProjectionLocator(command.locator) : { vaultRelativeProjectPath: recovered.generation.metadata.projection.canonicalPath };
         const expectedVisibleProjectDocument = command.kind === "logical_rename"
           ? command.destinationProjectDocumentBeforeRename
+            ?? (locator.vaultRelativeProjectPath === recovered.generation.metadata.projection.canonicalPath
+              ? recovered.generation.files.get("project.systemsculpt")
+              : undefined)
           : recovered.generation.files.get("project.systemsculpt");
         return this.publish(
           command.projectId,
