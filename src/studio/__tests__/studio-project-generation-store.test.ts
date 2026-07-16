@@ -15,6 +15,10 @@ class MemoryAdapter implements StudioGenerationAdapter {
   private writes = 0;
   readonly corruptReads = new Set<string>();
 
+  async exists(path: string): Promise<boolean> {
+    return this.files.has(path) || this.dirs.has(path);
+  }
+
   armFailure(afterWrites: number | null): void {
     this.failAfterWrites = afterWrites;
     this.writes = 0;
@@ -542,6 +546,37 @@ describe("StudioProjectGenerationStore", () => {
     expect(document.permissionsRef.policyPath).toBe(
       "SystemSculpt/Studio/Moved.systemsculpt-assets/policy/grants.json"
     );
+  });
+
+  it("adopts a folder move when the previous parent no longer exists", async () => {
+    const adapter = new MemoryAdapter(); await seedLegacy(adapter);
+    const root = await new StudioProjectGenerationStore(adapter, {
+      now: () => "2026-07-11T01:02:03.004Z",
+    }).discoverAndAdopt(locator);
+    if (root.status !== "committed") throw new Error("adoption failed");
+    const previousParent = "SystemSculpt/Studio";
+    const movedParent = "SystemSculpt/Moved Studio";
+    const destination = {
+      vaultRelativeProjectPath: `${movedParent}/Alpha.systemsculpt`,
+    };
+    await adapter.movePath(previousParent, movedParent);
+    const originalList = adapter.list.bind(adapter);
+    adapter.list = jest.fn(async (path) => {
+      if (path === previousParent) throw new Error(`missing ${path}`);
+      return originalList(path);
+    });
+
+    const adopted = await new StudioProjectGenerationStore(adapter, {
+      now: () => "2026-07-11T02:02:03.004Z",
+    }).discoverAndAdopt(destination);
+
+    expect(adopted.status).toBe("committed");
+    if (adopted.status !== "committed") return;
+    expect(adopted.expectedGeneration.revision).toBe(1);
+    expect(adopted.generation.metadata.projection.canonicalPath).toBe(
+      destination.vaultRelativeProjectPath
+    );
+    expect(adapter.list).not.toHaveBeenCalledWith(previousParent);
   });
 
   it("does not retire the old rename projection until destination fresh-read validation passes", async () => {

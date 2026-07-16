@@ -11,6 +11,7 @@ export type GenerationHash = string;
 export type ExpectedGeneration = { revision: number; generationHash: GenerationHash };
 export type ProjectionLocator = { vaultRelativeProjectPath: string };
 export type StudioGenerationAdapter = {
+  exists(path: string): Promise<boolean>;
   read(path: string): Promise<string>;
   readBinary(path: string): Promise<ArrayBuffer>;
   write(path: string, data: string): Promise<void>;
@@ -262,10 +263,9 @@ export class StudioProjectGenerationStore {
             vaultRelativeProjectPath: existing.generation.metadata.projection.canonicalPath,
           });
           if (!previousProjection) {
+            const previousPath = existing.generation.metadata.projection.canonicalPath;
             try {
-              const previousPath = existing.generation.metadata.projection.canonicalPath;
-              const listed = await this.adapter.list(dirname(previousPath));
-              if (!listed.files.includes(previousPath)) {
+              if (!await this.adapter.exists(previousPath)) {
                 return this.adoptMovedProjectionUnlocked(locator, existing, documentBytes);
               }
             } catch (error) {

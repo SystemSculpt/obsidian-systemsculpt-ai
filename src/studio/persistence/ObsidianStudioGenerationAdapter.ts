@@ -4,6 +4,7 @@ import type { StudioGenerationAdapter } from "./StudioProjectGenerationStore";
 /** Common vault DataAdapter wrapper. No Node APIs or rename-based authority. */
 export class ObsidianStudioGenerationAdapter implements StudioGenerationAdapter {
   constructor(private readonly adapter: DataAdapter) {}
+  exists(path: string): Promise<boolean> { return this.adapter.exists(path); }
   read(path: string): Promise<string> { return this.adapter.read(path); }
   readBinary(path: string): Promise<ArrayBuffer> { return this.adapter.readBinary(path); }
   write(path: string, data: string): Promise<void> { return this.adapter.write(path, data); }
