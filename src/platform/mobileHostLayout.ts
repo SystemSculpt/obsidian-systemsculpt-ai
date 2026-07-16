@@ -29,12 +29,21 @@ const controllers = new Map<Document, MobileHostLayoutController>();
 
 function readVisibleNavbar(document: Document): HTMLElement | null {
   const navbar = document.querySelector<HTMLElement>(HOST_MOBILE_NAV_SELECTOR);
-  if (!navbar || !navbar.isConnected || navbar.hidden || navbar.getAttribute("aria-hidden") === "true") {
+  if (!navbar || !navbar.isConnected) {
     return null;
   }
-  const computedStyle = document.defaultView?.getComputedStyle(navbar);
-  if (computedStyle?.display === "none" || computedStyle?.visibility === "hidden") {
-    return null;
+
+  for (let element: HTMLElement | null = navbar; element; element = element.parentElement) {
+    if (element.hidden || element.getAttribute("aria-hidden") === "true") {
+      return null;
+    }
+    const computedStyle = document.defaultView?.getComputedStyle(element);
+    if (computedStyle?.display === "none" || computedStyle?.visibility === "hidden") {
+      return null;
+    }
+    if (element === document.body) {
+      break;
+    }
   }
   return navbar;
 }
@@ -99,7 +108,8 @@ function createController(document: Document): MobileHostLayoutController {
           return target === document.body
             || (ElementCtor !== null
               && target.instanceOf(ElementCtor)
-              && target.matches(HOST_MOBILE_NAV_SELECTOR));
+              && (target.matches(HOST_MOBILE_NAV_SELECTOR)
+                || target.querySelector(HOST_MOBILE_NAV_SELECTOR) !== null));
         }
         return [...record.addedNodes, ...record.removedNodes].some((node) =>
           ElementCtor !== null

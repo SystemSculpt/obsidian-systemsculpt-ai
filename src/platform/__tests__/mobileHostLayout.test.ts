@@ -67,6 +67,29 @@ describe("mobile host layout adapter", () => {
     expect(document.body.classList.contains(MOBILE_HOST_LAYOUT_CLASSES.navbarHidden)).toBe(true);
   });
 
+  it("tracks navbar visibility changes made on a host wrapper", async () => {
+    const wrapper = document.createElement("footer");
+    const navbar = document.createElement("button");
+    navbar.className = "mobile-navbar-action";
+    wrapper.appendChild(navbar);
+    document.body.appendChild(wrapper);
+    ensureMobileHostLayoutState(document);
+
+    expect(document.body.classList.contains(MOBILE_HOST_LAYOUT_CLASSES.navbarVisible)).toBe(true);
+
+    wrapper.hidden = true;
+    await new Promise((resolve) => window.setTimeout(resolve, 20));
+
+    expect(document.body.classList.contains(MOBILE_HOST_LAYOUT_CLASSES.navbarVisible)).toBe(false);
+    expect(document.body.classList.contains(MOBILE_HOST_LAYOUT_CLASSES.navbarHidden)).toBe(true);
+
+    wrapper.hidden = false;
+    await new Promise((resolve) => window.setTimeout(resolve, 20));
+
+    expect(document.body.classList.contains(MOBILE_HOST_LAYOUT_CLASSES.navbarVisible)).toBe(true);
+    expect(document.body.classList.contains(MOBILE_HOST_LAYOUT_CLASSES.navbarHidden)).toBe(false);
+  });
+
   it("reports the navbar boundary as the usable viewport bottom", () => {
     const navbar = document.createElement("nav");
     navbar.className = "mobile-navbar-action";
