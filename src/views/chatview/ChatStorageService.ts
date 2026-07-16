@@ -1,4 +1,4 @@
-import { App, TFile, normalizePath, stringifyYaml } from "obsidian";
+import { App, TFile, stringifyYaml } from "obsidian";
 import { ChatMessage } from "../../types";
 import { hasHostCapability } from "../../platform/hostCapabilities";
 import {
@@ -26,7 +26,6 @@ type LoadedChatRecord = {
   approvalMode?: ChatApprovalMode;
   managedSession?: ManagedChatSessionBinding;
   chatPath: string;
-  messagesLoaded?: boolean;
 };
 
 type SaveChatOptions = {
@@ -314,13 +313,6 @@ export class ChatStorageService {
 
   async loadChats(): Promise<LoadedChatRecord[]> {
     try {
-      if (!hasHostCapability("local-filesystem")) {
-        const indexedChats = this.loadPortableChatIndex();
-        if (indexedChats) {
-          return indexedChats;
-        }
-      }
-
       const files = await this.app.vault.adapter.list(this.chatDirectory);
       const chatFiles = files.files.filter((f) => f.endsWith(".md"));
 
@@ -383,55 +375,6 @@ export class ChatStorageService {
     } catch (error) {
       return [];
     }
-  }
-
-  /**
-   * Mobile already has a complete Obsidian file/frontmatter index in memory.
-   * Use it for an immediate, truthful history list instead of bridging every
-   * saved transcript across the native filesystem before the modal can open.
-   */
-  private loadPortableChatIndex(): LoadedChatRecord[] | null {
-    const vault = this.app.vault;
-    if (typeof vault.getMarkdownFiles !== "function") {
-      return null;
-    }
-
-    const directory = normalizePath(String(this.chatDirectory || "").trim()).replace(/\/+$/, "");
-    if (!directory) {
-      return [];
-    }
-    const directoryPrefix = `${directory}/`;
-
-    return vault.getMarkdownFiles()
-      .filter((file) => {
-        if (!file.path.startsWith(directoryPrefix)) {
-          return false;
-        }
-        const relativePath = file.path.slice(directoryPrefix.length);
-        return relativePath.length > 0 && !relativePath.includes("/");
-      })
-      .map((file) => {
-        const frontmatter = this.app.metadataCache?.getFileCache(file)?.frontmatter;
-        const rawId = frontmatter?.id;
-        const id = (typeof rawId === "string" || typeof rawId === "number")
-          ? String(rawId).trim()
-          : "";
-        const rawTitle = frontmatter?.title;
-        const title = typeof rawTitle === "string" && rawTitle.trim()
-          ? rawTitle.trim()
-          : file.basename;
-        const rawVersion = Number(frontmatter?.version);
-
-        return {
-          id: id || file.basename,
-          messages: [],
-          messagesLoaded: false,
-          lastModified: Number(file.stat.mtime) || 0,
-          title,
-          version: Number.isFinite(rawVersion) ? rawVersion : undefined,
-          chatPath: file.path,
-        };
-      });
   }
 
   /**

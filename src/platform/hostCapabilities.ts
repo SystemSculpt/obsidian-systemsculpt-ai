@@ -44,6 +44,37 @@ type ElectronCapabilityModule = {
   };
 };
 
+async function tryOpenLocalFolder(
+  shell: ElectronCapabilityModule["shell"],
+  absolutePath: string,
+): Promise<boolean> {
+  try {
+    if (typeof shell?.openPath === "function") {
+      await shell.openPath(absolutePath);
+      return true;
+    }
+  } catch {
+    // Continue through the remaining shell fallbacks.
+  }
+  try {
+    if (typeof shell?.showItemInFolder === "function") {
+      shell.showItemInFolder(absolutePath);
+      return true;
+    }
+  } catch {
+    // Continue through the remaining shell fallbacks.
+  }
+  try {
+    if (typeof shell?.openExternal === "function") {
+      await shell.openExternal(`file://${encodeURI(absolutePath)}`);
+      return true;
+    }
+  } catch {
+    // The caller owns user-facing failure handling.
+  }
+  return false;
+}
+
 const CAPABILITIES: readonly HostCapability[] = [
   "node-runtime",
   "local-filesystem",
@@ -150,6 +181,21 @@ export function hasHostCapability(
 
 export function getHostCapabilities(owner?: HostCapabilityOwner): ReadonlySet<HostCapability> {
   return new Set(CAPABILITIES.filter((capability) => hasHostCapability(capability, owner)));
+}
+
+/** Open a desktop folder through the same shell methods that advertise support. */
+export async function openLocalFolder(
+  absolutePath: string,
+  owner?: HostCapabilityOwner,
+): Promise<boolean> {
+  const normalizedPath = String(absolutePath || "").trim();
+  if (!normalizedPath) {
+    return false;
+  }
+  return tryOpenLocalFolder(
+    resolveElectronModule<ElectronCapabilityModule>(owner)?.shell,
+    normalizedPath,
+  );
 }
 
 export function getHostDeviceType(): HostDeviceType {

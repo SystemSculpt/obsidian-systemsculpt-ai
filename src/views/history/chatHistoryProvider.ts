@@ -40,15 +40,12 @@ export function createChatHistoryProvider(plugin: SystemSculptPlugin): SystemScu
         const timestampMs = asTimestamp(summary.lastModified);
         const title = String(summary.title || "Untitled Chat").trim() || "Untitled Chat";
         const isFavorite = chatFavorites.isFavorite(summary.id);
-        const messagesLoaded = summary.messagesLoaded !== false;
-        const messageCount = messagesLoaded && Array.isArray(summary.messages)
-          ? summary.messages.length
-          : 0;
-        const subtitle = messagesLoaded ? `${messageCount} messages` : "Saved chat";
+        const messageCount = Array.isArray(summary.messages) ? summary.messages.length : 0;
+        const subtitle = `${messageCount} messages`;
         const searchText = [
           title,
           summary.id,
-          messagesLoaded ? joinMessageContent(summary.messages || []) : "",
+          joinMessageContent(summary.messages || []),
         ]
           .filter((segment) => segment.length > 0)
           .join("\n")

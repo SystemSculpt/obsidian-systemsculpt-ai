@@ -6,6 +6,7 @@ import { hasHostCapability } from "../platform/hostCapabilities";
 
 jest.mock("../platform/hostCapabilities", () => ({
   hasHostCapability: jest.fn(() => false),
+  openLocalFolder: jest.fn(async () => false),
 }));
 
 jest.mock("../core/ui/modals/PromptModal", () => ({

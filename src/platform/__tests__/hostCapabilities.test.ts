@@ -6,6 +6,7 @@ import {
   getHostDeviceType,
   getHostOperatingSystem,
   hasHostCapability,
+  openLocalFolder,
   resolveElectronModule,
 } from "../hostCapabilities";
 
@@ -121,6 +122,16 @@ describe("host capabilities", () => {
     ]));
     expect(runtimeRequire).toHaveBeenCalledWith("electron");
     iframe.remove();
+  });
+
+  it("opens a folder through the same shell fallback that advertises reveal support", async () => {
+    const showItemInFolder = jest.fn();
+    (window as Window & { require?: unknown }).require = jest.fn(() => ({
+      shell: { showItemInFolder },
+    }));
+
+    await expect(openLocalFolder("/tmp/SystemSculpt")).resolves.toBe(true);
+    expect(showItemInFolder).toHaveBeenCalledWith("/tmp/SystemSculpt");
   });
 
   it("treats an unavailable or throwing Electron loader as no native capability", () => {

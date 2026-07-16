@@ -43,7 +43,7 @@ import { FreezeMonitor } from "./services/FreezeMonitor";
 import { ResourceMonitorService } from "./services/ResourceMonitorService";
 import { PluginLogger } from "./utils/PluginLogger";
 import { InitializationTracer } from "./core/diagnostics/InitializationTracer";
-import { hasHostCapability, resolveElectronModule } from "./platform/hostCapabilities";
+import { hasHostCapability, openLocalFolder } from "./platform/hostCapabilities";
 import { disposeMobileHostLayoutStates } from "./platform/mobileHostLayout";
 import { yieldToEventLoop } from "./utils/yieldToEventLoop";
 import { PlatformContext } from "./services/PlatformContext";
@@ -1832,21 +1832,7 @@ export default class SystemSculptPlugin extends Plugin {
     const adapter = this.app.vault.adapter;
     if (adapter instanceof FileSystemAdapter && hasHostCapability("file-manager-reveal")) {
       const fullPath = adapter.getFullPath(relativePath);
-      const electron = resolveElectronModule<{
-        shell?: {
-          openPath?: (path: string) => Promise<unknown> | unknown;
-          openExternal?: (url: string) => Promise<unknown> | unknown;
-        };
-      }>();
-      const shell = electron?.shell;
-      if (shell?.openPath) {
-        await shell.openPath(fullPath);
-        return true;
-      }
-      if (shell?.openExternal) {
-        await shell.openExternal(`file://${fullPath}`);
-        return true;
-      }
+      return openLocalFolder(fullPath);
     }
     return false;
   }

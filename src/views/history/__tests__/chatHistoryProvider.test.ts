@@ -62,31 +62,4 @@ describe("chatHistoryProvider", () => {
     });
   });
 
-  it("labels portable metadata-only entries without inventing a message count", async () => {
-    const loadChats = jest.fn(async () => [
-      {
-        id: "mobile-chat",
-        title: "Mobile Chat",
-        lastModified: Date.parse("2026-07-15T10:00:00.000Z"),
-        messages: [],
-        messagesLoaded: false,
-        chatPath: "SystemSculpt/Chats/mobile-chat.md",
-      },
-    ]);
-    (ChatStorageService as jest.Mock).mockImplementation(() => ({ loadChats }));
-    (ChatFavoritesService.getInstance as jest.Mock).mockReturnValue({
-      isFavorite: jest.fn(() => false),
-      toggleFavorite: jest.fn(async () => false),
-    });
-
-    const plugin = {
-      app: {},
-      settings: { chatsDirectory: "SystemSculpt/Chats" },
-    } as any;
-
-    const [entry] = await createChatHistoryProvider(plugin).loadEntries();
-
-    expect(entry.subtitle).toBe("Saved chat");
-    expect(entry.searchText).toContain("mobile chat");
-  });
 });

@@ -1,8 +1,8 @@
-import { Setting, Notice } from "obsidian";
+import { FileSystemAdapter, Setting, Notice } from "obsidian";
 import { SystemSculptSettingTab } from "./SystemSculptSettingTab";
 import { showPrompt } from "../core/ui/modals/PromptModal";
 import { BackupRestoreModal } from "../core/settings/BackupRestoreModal";
-import { hasHostCapability } from "../platform/hostCapabilities";
+import { hasHostCapability, openLocalFolder } from "../platform/hostCapabilities";
 
 
 export function displayBackupTabContent(containerEl: HTMLElement, tabInstance: SystemSculptSettingTab) {
@@ -98,9 +98,11 @@ Continue?`
             } catch (_) {
               // folder already exists
             }
-            if (typeof (plugin.app.vault.adapter as any).revealInFolder === 'function') {
-              (plugin.app.vault.adapter as any).revealInFolder(backupDir);
-            } else {
+            const adapter = plugin.app.vault.adapter;
+            const opened = adapter instanceof FileSystemAdapter
+              ? await openLocalFolder(adapter.getFullPath(backupDir), containerEl)
+              : false;
+            if (!opened) {
               new Notice(`Backups are stored in: ${backupDir}`);
             }
           } catch (error) {

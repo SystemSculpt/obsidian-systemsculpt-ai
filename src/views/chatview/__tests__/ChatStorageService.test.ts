@@ -484,43 +484,6 @@ Hello
       expect(maxActiveReads).toBe(1);
     });
 
-    it("uses the Obsidian metadata index immediately on portable hosts", async () => {
-      const originalDesktopApp = Platform.isDesktopApp;
-      const indexedFile = new TFile({ path: "SystemSculpt/Chats/indexed-mobile.md" });
-      indexedFile.stat.mtime = 1_750_000_000_000;
-      mockVault.getMarkdownFiles = jest.fn(() => [indexedFile]);
-      (mockApp as any).metadataCache = {
-        getFileCache: jest.fn(() => ({
-          frontmatter: {
-            id: "indexed-mobile",
-            title: "Indexed Mobile Chat",
-            version: 4,
-          },
-        })),
-      };
-
-      (Platform as typeof Platform & { isDesktopApp: boolean }).isDesktopApp = false;
-      let result;
-      try {
-        result = await service.loadChats();
-      } finally {
-        (Platform as typeof Platform & { isDesktopApp: boolean }).isDesktopApp = originalDesktopApp;
-      }
-
-      expect(result).toEqual([
-        expect.objectContaining({
-          id: "indexed-mobile",
-          title: "Indexed Mobile Chat",
-          chatPath: indexedFile.path,
-          messages: [],
-          messagesLoaded: false,
-          lastModified: indexedFile.stat.mtime,
-        }),
-      ]);
-      expect(mockVault.adapter.list).not.toHaveBeenCalled();
-      expect(mockVault.adapter.read).not.toHaveBeenCalled();
-    });
-
     it("returns empty array on list error", async () => {
       mockVault.adapter.list.mockRejectedValue(new Error("List error"));
 
