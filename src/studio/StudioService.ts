@@ -35,7 +35,10 @@ import {
 } from "./paths";
 import { parseStudioProject } from "./schema";
 import { sha256HexFromArrayBuffer } from "./hash";
-import { assertValidStudioProjectAgentDocumentStructure } from "./StudioProjectAgentDocumentValidation";
+import {
+  assertStableStudioProjectAgentDocumentFieldsUnchanged,
+  assertValidStudioProjectAgentDocumentStructure,
+} from "./StudioProjectAgentDocumentValidation";
 import { validateStudioProjectForAgentEdit } from "./StudioProjectAgentContract";
 
 const IMPORTED_FILE_SEGMENT_FALLBACK = "import";
@@ -444,6 +447,31 @@ export class StudioService {
 
     const currentCanvas = session.getProjectSnapshot();
     const fileContainsLastSavedCanvas = session.matchesLastAcceptedProjectText(movedRawText);
+    const nextPolicyPath = deriveStudioPolicyPath(newPath);
+    if (!fileContainsLastSavedCanvas) {
+      const movedPolicyPath = lintResult.project.permissionsRef.policyPath;
+      const pathChangeMatchesRename = movedPolicyPath === currentCanvas.permissionsRef.policyPath
+        || movedPolicyPath === nextPolicyPath;
+      if (!pathChangeMatchesRename) {
+        throw new Error("permissionsRef.policyPath may only change to match the renamed Studio file.");
+      }
+      assertStableStudioProjectAgentDocumentFieldsUnchanged(
+        {
+          ...lintResult.project,
+          permissionsRef: {
+            ...lintResult.project.permissionsRef,
+            policyPath: nextPolicyPath,
+          },
+        },
+        {
+          ...currentCanvas,
+          permissionsRef: {
+            ...currentCanvas.permissionsRef,
+            policyPath: nextPolicyPath,
+          },
+        }
+      );
+    }
     const replacedCanvasProject =
       !fileContainsLastSavedCanvas && session.hasPendingLocalSaveWork()
         ? currentCanvas
@@ -465,7 +493,7 @@ export class StudioService {
         name: projectName,
         permissionsRef: {
           ...sourceProject.permissionsRef,
-          policyPath: deriveStudioPolicyPath(newPath),
+          policyPath: nextPolicyPath,
         },
       },
     });

@@ -90,6 +90,27 @@ describe("mobile host layout adapter", () => {
     expect(document.body.classList.contains(MOBILE_HOST_LAYOUT_CLASSES.navbarHidden)).toBe(false);
   });
 
+  it("tracks aria-hidden changes made on mobile chrome", async () => {
+    const navbar = document.createElement("nav");
+    navbar.className = "mobile-navbar-action";
+    document.body.appendChild(navbar);
+    ensureMobileHostLayoutState(document);
+
+    expect(document.body.classList.contains(MOBILE_HOST_LAYOUT_CLASSES.navbarVisible)).toBe(true);
+
+    navbar.setAttribute("aria-hidden", "true");
+    await new Promise((resolve) => window.setTimeout(resolve, 20));
+
+    expect(document.body.classList.contains(MOBILE_HOST_LAYOUT_CLASSES.navbarVisible)).toBe(false);
+    expect(document.body.classList.contains(MOBILE_HOST_LAYOUT_CLASSES.navbarHidden)).toBe(true);
+
+    navbar.setAttribute("aria-hidden", "false");
+    await new Promise((resolve) => window.setTimeout(resolve, 20));
+
+    expect(document.body.classList.contains(MOBILE_HOST_LAYOUT_CLASSES.navbarVisible)).toBe(true);
+    expect(document.body.classList.contains(MOBILE_HOST_LAYOUT_CLASSES.navbarHidden)).toBe(false);
+  });
+
   it("reports the navbar boundary as the usable viewport bottom", () => {
     const navbar = document.createElement("nav");
     navbar.className = "mobile-navbar-action";

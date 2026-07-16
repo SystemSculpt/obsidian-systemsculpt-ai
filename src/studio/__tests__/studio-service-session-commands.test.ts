@@ -462,4 +462,31 @@ describe("StudioService session-backed mutation commands", () => {
     );
     expect(session.getProject().name).toBe("Moved");
   });
+
+  it("rejects Studio-owned field changes in a renamed file before adopting it", async () => {
+    const service = new StudioService(createPluginStub());
+    const project = projectFixture();
+    const session = createSession("Studio/Test.systemsculpt", project);
+    session.markAcceptedProjectText(serializeStudioProject(project));
+    await retainExistingSession(service, session);
+    const movedProject = projectFixture();
+    movedProject.name = "Moved";
+    movedProject.engine.minPluginVersion = "99.0.0";
+    movedProject.permissionsRef.policyPath =
+      "Studio/Moved.systemsculpt-assets/policy/grants.json";
+    const store = (service as any).projectStore;
+    jest.spyOn(store, "readVisibleProjectRawText").mockResolvedValue(
+      serializeStudioProject(movedProject)
+    );
+    const adopt = jest.spyOn(store, "adoptVisibleProjectRename");
+
+    await expect(service.adoptVisibleProjectRename(
+      "Studio/Test.systemsculpt",
+      "Studio/Moved.systemsculpt"
+    )).rejects.toThrow("engine is Studio-owned and must remain unchanged");
+
+    expect(adopt).not.toHaveBeenCalled();
+    expect(session.getProjectPath()).toBe("Studio/Test.systemsculpt");
+    expect(service.getProjectSession("Studio/Moved.systemsculpt")).toBeNull();
+  });
 });

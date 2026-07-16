@@ -124,7 +124,7 @@ function createController(document: Document): MobileHostLayoutController {
     });
     controller.observer.observe(document.body, {
       attributes: true,
-      attributeFilter: ["class", "hidden", "style"],
+      attributeFilter: ["aria-hidden", "class", "hidden", "style"],
       childList: true,
       subtree: true,
     });
