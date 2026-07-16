@@ -90,12 +90,17 @@ describe("Studio context menu accessibility", () => {
     overlay.destroy();
   });
 
-  it("keeps the mobile node menu visible without auto-opening the keyboard", async () => {
+  it("keeps the mobile node menu visible in a scrolled viewport without opening the keyboard", async () => {
     document.body.addClass("is-mobile");
     const workspace = document.body.createDiv();
     const controls = workspace.createDiv({ cls: "ss-studio-graph-workspace-controls" });
     const viewport = workspace.createDiv();
     const mobileNav = document.body.createDiv({ cls: "mobile-navbar-action" });
+    Object.defineProperties(viewport, {
+      clientWidth: { configurable: true, value: 400 },
+      clientHeight: { configurable: true, value: 700 },
+      scrollTop: { configurable: true, value: 500, writable: true },
+    });
     Object.defineProperty(viewport, "getBoundingClientRect", {
       configurable: true,
       value: () => ({
@@ -126,7 +131,7 @@ describe("Studio context menu accessibility", () => {
     overlay.mount(viewport);
     overlay.open({
       anchorX: 200,
-      anchorY: 500,
+      anchorY: 900,
       items: [
         { definition: definition("studio.alpha"), title: "Alpha", summary: "First node" },
         { definition: definition("studio.beta"), title: "Beta", summary: "Second node" },
@@ -137,8 +142,8 @@ describe("Studio context menu accessibility", () => {
 
     const root = viewport.querySelector<HTMLElement>(".ss-studio-node-context-menu");
     expect(focus).not.toHaveBeenCalled();
-    expect(Number.parseFloat(root?.style.maxHeight || "0")).toBeGreaterThan(0);
-    expect(Number.parseFloat(root?.style.top || "999")).toBeLessThan(200);
+    expect(root?.style.top).toBe("612px");
+    expect(root?.style.maxHeight).toBe("500px");
 
     overlay.destroy();
   });

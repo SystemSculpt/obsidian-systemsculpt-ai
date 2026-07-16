@@ -397,12 +397,14 @@ export class StudioNodeContextMenuOverlay {
 
     if (isMobileLayout(this.rootEl)) {
       const viewportRect = this.viewportEl.getBoundingClientRect();
+      const viewportScrollTop = this.viewportEl.scrollTop;
       const controls = this.viewportEl.parentElement?.querySelector<HTMLElement>(
         ".ss-studio-graph-workspace-controls",
       );
       if (controls) {
         const preferredTop = controls.getBoundingClientRect().bottom
           - viewportRect.top
+          + viewportScrollTop
           + CONTEXT_MENU_MOBILE_EDGE_GAP;
         resolvedY = Math.min(resolvedY, preferredTop);
       }
@@ -411,9 +413,10 @@ export class StudioNodeContextMenuOverlay {
         viewportRect.bottom,
         mobileHost.viewportBottom,
       );
+      const contentBottom = visualBottom - viewportRect.top + viewportScrollTop;
       const availableVisualHeight = Math.max(
         CONTEXT_MENU_MIN_HEIGHT,
-        visualBottom - viewportRect.top - resolvedY - CONTEXT_MENU_MOBILE_EDGE_GAP,
+        contentBottom - resolvedY - CONTEXT_MENU_MOBILE_EDGE_GAP,
       );
       this.rootEl.style.maxHeight = `${availableVisualHeight / scale}px`;
     } else {
