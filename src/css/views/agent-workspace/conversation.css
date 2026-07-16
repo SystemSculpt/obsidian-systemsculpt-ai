@@ -209,3 +209,12 @@
     opacity: 1;
   }
 }
+
+.ss-mobile-layout .systemsculpt-agent-conversation {
+  padding-top: var(--ss-space-4);
+  padding-bottom: var(--ss-space-6);
+}
+
+.ss-mobile-layout .systemsculpt-agent-turn.is-user {
+  max-width: 92%;
+}

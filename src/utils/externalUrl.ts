@@ -1,3 +1,5 @@
+import { resolveElectronModule } from "../platform/hostCapabilities";
+
 /**
  * Open an external URL safely.
  *
@@ -24,8 +26,9 @@ export async function openExternalUrl(url: string, ownerWindow?: Window): Promis
 
   const targetWindow = ownerWindow
     ?? (typeof window !== "undefined" ? window.activeWindow ?? window : undefined);
-  const runtimeRequire = (targetWindow as any)?.require;
-  const electron = typeof runtimeRequire === "function" ? runtimeRequire("electron") : null;
+  const electron = resolveElectronModule<{
+    shell?: { openExternal?: (url: string) => Promise<unknown> | unknown };
+  }>(targetWindow);
   const shell = electron?.shell;
   try {
     if (typeof shell?.openExternal === "function") {

@@ -3,7 +3,7 @@ import { StandardModal } from "../core/ui/modals/standard/StandardModal";
 import { createUiAction, getSurfaceOwnerWindow } from "../core/ui/surface";
 
 const FILE_TYPES = {
-  text: { extensions: ["md", "txt"], icon: "file-text", label: "Text" },
+  text: { extensions: ["md", "txt", "systemsculpt"], icon: "file-text", label: "Text & Studio" },
   documents: { extensions: ["pdf"], icon: "file", label: "Documents" },
   images: { extensions: ["png", "jpg", "jpeg", "svg", "webp"], icon: "image", label: "Images" },
   audio: { extensions: ["mp3", "wav", "m4a", "ogg", "webm"], icon: "headphones", label: "Audio" },

@@ -5,6 +5,7 @@ import { sha256HexFromArrayBuffer } from "../hash";
 export const transcriptionNode: StudioNodeDefinition = {
   kind: "studio.transcription",
   version: "1.0.0",
+  requiredHostCapabilities: [],
   capabilityClass: "api",
   cachePolicy: "never",
   inputPorts: [{ id: "path", type: "text", required: true }],

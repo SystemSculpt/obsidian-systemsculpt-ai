@@ -51,9 +51,9 @@ describe("SystemSculptStudioView runGraph host preflight", () => {
       })),
       findNodeDefinition: jest.fn((node) => {
         if (node.kind === "studio.dataset" || node.kind === "studio.cli_command") {
-          return { kind: node.kind, hostRequirement: "desktop" };
+          return { kind: node.kind, requiredHostCapabilities: ["local-cli"] };
         }
-        return { kind: node.kind };
+        return { kind: node.kind, requiredHostCapabilities: [] };
       }),
       setError: jest.fn(),
       runPresentation: {

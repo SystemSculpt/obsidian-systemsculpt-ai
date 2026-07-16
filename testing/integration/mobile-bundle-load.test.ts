@@ -92,6 +92,7 @@ describe("built bundle in Obsidian Mobile", () => {
       const bundleModule = require(BUNDLE_PATH);
       const PluginClass = bundleModule?.default ?? bundleModule;
       const app = new host.App();
+      app.workspace.offref = jest.fn();
       app.workspace.onLayoutReady = jest.fn((callback: () => void | Promise<void>) => {
         layoutReadyCallbacks.push(callback);
         return { unload: jest.fn() };
@@ -120,6 +121,22 @@ describe("built bundle in Obsidian Mobile", () => {
     expect(plugin._views.has(STUDIO_VIEW_TYPE)).toBe(true);
     expect(plugin._views.has(EMBEDDINGS_VIEW_TYPE)).toBe(true);
     expect(plugin._views.has(CHAT_VIEW_TYPE)).toBe(true);
+
+    const settingsTab = plugin._settingTabs[0];
+    expect(settingsTab).toBeDefined();
+    expect("getSettingDefinitions" in settingsTab).toBe(false);
+    await settingsTab.display();
+    await flushAsyncWork();
+    expect(settingsTab.containerEl.querySelector(".ss-settings-surface")).not.toBeNull();
+    expect(settingsTab.containerEl.querySelectorAll(".ss-settings-tab-bar button").length)
+      .toBeGreaterThanOrEqual(7);
+    expect(
+      settingsTab.containerEl.querySelectorAll(
+        ".setting-item-control button, .setting-item-control input, .setting-item-control select, .setting-item-control textarea",
+      ).length,
+    ).toBeGreaterThan(0);
+    expect(document.body.classList.contains("ss-mobile-layout")).toBe(true);
+    settingsTab.hide();
 
     const studioView = await openView({
       creator: plugin._views.get(STUDIO_VIEW_TYPE),

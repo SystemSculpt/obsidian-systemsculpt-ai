@@ -19,6 +19,16 @@
   padding: 0 var(--ss-space-3) var(--ss-space-3);
 }
 
+/* A full-screen mobile modal must let its content and list shrink to the
+ * remaining space after the native header, search, keyboard, and footer. */
+.ss-mobile-layout .systemsculpt-history-modal .ss-modal__content {
+  min-height: 0;
+}
+
+.ss-mobile-layout .systemsculpt-history-list {
+  max-height: none;
+}
+
 .systemsculpt-history-item {
   padding: var(--ss-space-2) var(--ss-space-3);
   background-color: var(--ss-surface-0);

@@ -198,6 +198,23 @@ body {
   --ss-icon-size-lg: 20px;
   --ss-touch-target: 44px;
 
+  /* Obsidian Mobile overlays its fixed navigation above view content. */
+  --ss-safe-top: clamp(
+    0px,
+    var(--safe-area-inset-top, env(safe-area-inset-top, 0px)),
+    64px
+  );
+  /* Obsidian reuses its bottom inset for the full software-keyboard height.
+   * Cap it at the largest platform safe area so a focused field cannot consume
+   * the entire plugin surface a second time after the host already resized it. */
+  --ss-safe-bottom: clamp(
+    0px,
+    var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)),
+    34px
+  );
+  --ss-mobile-nav-clearance: calc(var(--ss-touch-target) + var(--ss-space-2));
+  --ss-mobile-bottom-clearance: calc(var(--ss-mobile-nav-clearance) + var(--ss-safe-bottom));
+
   /* Agent workspace layout bounds. */
   --ss-agent-content-width: 780px;
   --ss-agent-user-width: 620px;
@@ -205,6 +222,12 @@ body {
   --ss-agent-tool-details-height: 240px;
   --ss-agent-composer-max-height: 180px;
   --ss-agent-attachment-width: 240px;
+}
+
+/* The host adapter owns navbar discovery. Feature sheets consume only this
+ * token and the SystemSculpt-owned body state, never Obsidian's private DOM. */
+body.ss-mobile-layout.ss-mobile-navbar-hidden {
+  --ss-mobile-nav-clearance: 0px;
 }
 
 /* Light themes need gentler shadows and a slightly stronger hairline. */

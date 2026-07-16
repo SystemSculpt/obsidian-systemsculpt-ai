@@ -506,6 +506,47 @@ describe("StudioGraphSelectionController fit selection", () => {
     expect(controller.getGraphZoomMode()).toBe("overview");
     expect(controller.getGraphZoom()).toBeLessThan(0.02);
   });
+
+  it("centers a small graph without enlarging it above natural scale", () => {
+    const host = createHost();
+    host.getCurrentProject = () =>
+      ({
+        graph: {
+          nodes: [
+            {
+              id: "node_a",
+              position: { x: 100, y: 120 },
+              kind: "studio.value",
+              config: {},
+            },
+          ],
+        },
+      } as any);
+
+    const controller = new StudioGraphSelectionController(host);
+    const viewport = {
+      ownerDocument: document,
+      scrollLeft: 0,
+      scrollTop: 0,
+      clientWidth: 1000,
+      clientHeight: 600,
+      getBoundingClientRect: () => ({ left: 0, top: 0 }) as DOMRect,
+    } as unknown as HTMLElement;
+    controller.registerViewportElement(viewport);
+
+    const nodeEl = createElementStub() as unknown as HTMLElement & {
+      offsetWidth: number;
+      offsetHeight: number;
+    };
+    (nodeEl as any).offsetWidth = 240;
+    (nodeEl as any).offsetHeight = 160;
+    controller.registerNodeElement("node_a", nodeEl);
+
+    expect(controller.fitGraphInViewport({ paddingPx: 25 })).toBe(true);
+    expect(controller.getGraphZoom()).toBe(1);
+    expect(viewport.scrollLeft).toBe(0);
+    expect(viewport.scrollTop).toBe(0);
+  });
 });
 
 describe("StudioGraphSelectionController drag behavior", () => {

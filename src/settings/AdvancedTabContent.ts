@@ -4,6 +4,7 @@ import { showPrompt } from "../core/ui/modals/PromptModal";
 import { DEFAULT_SETTINGS } from "../types";
 import { tryCopyToClipboard } from "../utils/clipboard";
 import { getSurfaceOwnerWindow } from "../core/ui/surface/SurfaceDomContext";
+import { hasHostCapability } from "../platform/hostCapabilities";
 
 export function displayAdvancedTabContent(containerEl: HTMLElement, tabInstance: SystemSculptSettingTab) {
     containerEl.empty(); // Ensure clean slate
@@ -100,10 +101,11 @@ export function displayAdvancedTabContent(containerEl: HTMLElement, tabInstance:
             });
         });
 
-    new Setting(containerEl)
-        .setName("Open diagnostics folder")
-        .setDesc("Opens the .systemsculpt/diagnostics folder inside your vault.")
-        .addButton((button) => {
+    const diagnosticsFolderSetting = new Setting(containerEl)
+        .setName("Diagnostics folder")
+        .setDesc("Saved in .systemsculpt/diagnostics inside your vault.");
+    if (hasHostCapability("file-manager-reveal", containerEl)) {
+        diagnosticsFolderSetting.addButton((button) => {
             button.setButtonText("Open folder").onClick(async () => {
                 const opened = await plugin.openDiagnosticsFolder();
                 if (opened) {
@@ -113,4 +115,5 @@ export function displayAdvancedTabContent(containerEl: HTMLElement, tabInstance:
                 }
             });
         });
+    }
 }

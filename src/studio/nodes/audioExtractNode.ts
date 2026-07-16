@@ -147,7 +147,7 @@ async function extractAudioAsset(
 export const audioExtractNode: StudioNodeDefinition = {
   kind: "studio.audio_extract",
   version: "1.0.0",
-  hostRequirement: "desktop",
+  requiredHostCapabilities: ["local-filesystem", "absolute-paths", "local-cli"],
   capabilityClass: "local_io",
   cachePolicy: "by_inputs",
   inputPorts: [{ id: "path", type: "text", required: true }],

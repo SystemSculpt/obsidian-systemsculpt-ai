@@ -11,6 +11,8 @@ import {
   getStudioOwnerWindow,
   requestStudioAnimationFrame,
 } from "./StudioDomContext";
+import { isMobileLayout } from "../../platform/mobileLayout";
+import { readMobileHostLayout } from "../../platform/mobileHostLayout";
 
 const CONTEXT_MENU_WIDTH = 360;
 // Menu chrome estimates for anchoring before first layout. These are overlay
@@ -18,6 +20,7 @@ const CONTEXT_MENU_WIDTH = 360;
 // src/studio/StudioNodeGeometry.ts node constants.
 const CONTEXT_MENU_MIN_HEIGHT = 120;
 const CONTEXT_MENU_FALLBACK_HEIGHT = 280;
+const CONTEXT_MENU_MOBILE_EDGE_GAP = 8;
 let nodeContextMenuInstanceId = 0;
 
 export type StudioNodeContextMenuItem = {
@@ -156,13 +159,15 @@ export class StudioNodeContextMenuOverlay {
       if (this.rootEl?.getAttribute("aria-hidden") === "true") {
         return;
       }
-      try {
-        this.searchInputEl.focus({ preventScroll: true });
-      } catch {
+      if (!isMobileLayout(this.rootEl)) {
         try {
-          this.searchInputEl.focus();
+          this.searchInputEl.focus({ preventScroll: true });
         } catch {
-          // Ignore focus failures.
+          try {
+            this.searchInputEl.focus();
+          } catch {
+            // Ignore focus failures.
+          }
         }
       }
       this.applyLayout();
@@ -388,8 +393,34 @@ export class StudioNodeContextMenuOverlay {
       visualWidth,
       visualHeight,
     });
+    let resolvedY = position.y;
+
+    if (isMobileLayout(this.rootEl)) {
+      const viewportRect = this.viewportEl.getBoundingClientRect();
+      const controls = this.viewportEl.parentElement?.querySelector<HTMLElement>(
+        ".ss-studio-graph-workspace-controls",
+      );
+      if (controls) {
+        const preferredTop = controls.getBoundingClientRect().bottom
+          - viewportRect.top
+          + CONTEXT_MENU_MOBILE_EDGE_GAP;
+        resolvedY = Math.min(resolvedY, preferredTop);
+      }
+      const mobileHost = readMobileHostLayout(this.rootEl);
+      const visualBottom = Math.min(
+        viewportRect.bottom,
+        mobileHost.viewportBottom,
+      );
+      const availableVisualHeight = Math.max(
+        CONTEXT_MENU_MIN_HEIGHT,
+        visualBottom - viewportRect.top - resolvedY - CONTEXT_MENU_MOBILE_EDGE_GAP,
+      );
+      this.rootEl.style.maxHeight = `${availableVisualHeight / scale}px`;
+    } else {
+      this.rootEl.style.removeProperty("max-height");
+    }
     this.rootEl.style.left = `${position.x}px`;
-    this.rootEl.style.top = `${position.y}px`;
+    this.rootEl.style.top = `${resolvedY}px`;
   }
 
   private bindGlobalListeners(): void {

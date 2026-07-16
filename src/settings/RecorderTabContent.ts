@@ -18,7 +18,9 @@ function beginRecorderTabRender(
 ): RecorderTabRenderScope {
   activeRecorderTabRenders.get(tabInstance)?.dispose();
 
-  const catalog = new MicrophoneDeviceCatalog(getSurfaceOwnerWindow(containerEl));
+  const catalog = new MicrophoneDeviceCatalog(getSurfaceOwnerWindow(containerEl), {
+    requestLabels: false,
+  });
   let active = true;
   let unregisterCleanup: () => void = () => undefined;
   const scope: RecorderTabRenderScope = {
@@ -225,7 +227,7 @@ function renderMicrophoneSetting(
     attr: { "aria-live": "polite" },
   });
 
-  const loadDevices = async () => {
+  const loadDevices = async (requestLabelPermission = false) => {
     if (!renderScope.isCurrent() || !dropdownComponent || !dropdownEl) return;
     dropdownEl.empty();
     const dropdown = dropdownComponent;
@@ -235,7 +237,9 @@ function renderMicrophoneSetting(
 
     addOption("default", "Default microphone");
     statusEl.setText("Loading microphones...");
-    const result = await renderScope.catalog.refresh();
+    const result = requestLabelPermission
+      ? await renderScope.catalog.refreshWithLabelPermission()
+      : await renderScope.catalog.refresh();
     if (!renderScope.isCurrent() || result.status === "cancelled") return;
     if (result.status === "unavailable") {
       dropdown.setValue(plugin.settings.preferredMicrophoneId || "default");
@@ -266,7 +270,7 @@ function renderMicrophoneSetting(
       .setIcon("refresh-cw")
       .setTooltip("Refresh microphones")
       .onClick(() => {
-        void loadDevices();
+        void loadDevices(true);
       });
   });
   return loadDevices();

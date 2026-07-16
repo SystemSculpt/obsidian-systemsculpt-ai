@@ -17,6 +17,18 @@
   animation: ss-slide-up var(--ss-dur-base) var(--ss-ease-out);
 }
 
+/* Fixed progress surfaces live outside a view's normal flow. On mobile they
+ * must clear Obsidian's navigation and the device's horizontal safe areas
+ * themselves instead of inheriting padding from the active view. */
+.ss-mobile-layout .systemsculpt-progress-panel {
+  right: max(var(--ss-space-2), env(safe-area-inset-right, 0px));
+  bottom: var(--ss-mobile-bottom-clearance);
+  left: max(var(--ss-space-2), env(safe-area-inset-left, 0px));
+  width: auto;
+  max-height: calc(100dvh - var(--ss-mobile-bottom-clearance) - var(--ss-space-4));
+  overflow-y: auto;
+}
+
 .systemsculpt-progress-header {
   display: flex;
   align-items: center;

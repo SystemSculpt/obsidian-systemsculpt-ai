@@ -112,7 +112,7 @@ describe("TranscribeAudioFileModal", () => {
     expect(fileActions[0].getAttribute("aria-pressed")).toBe("true");
   });
 
-  it("provides an Open file button that triggers the system file picker input", () => {
+  it("provides a device-neutral file button that triggers the system picker", () => {
     const { app, plugin } = createPlugin();
     (app.vault.getFiles as jest.Mock).mockReturnValue([]);
 
@@ -120,14 +120,15 @@ describe("TranscribeAudioFileModal", () => {
     modal.onOpen();
 
     expect(modal.modalEl.textContent).toContain(
-      "click to choose from your computer"
+      "choose one from this device"
     );
-    expect(modal.modalEl.textContent).not.toContain("phone");
+    expect(modal.modalEl.textContent).not.toContain("Finder");
 
     const openFileButton = modal.modalEl.querySelector(
       ".ss-transcribe-audio__open-file-btn"
     ) as HTMLButtonElement | null;
     expect(openFileButton).toBeTruthy();
+    expect(openFileButton?.textContent).toContain("Choose audio file");
 
     const fileInputEl = (modal as any).fileInputEl as HTMLInputElement;
     expect(fileInputEl).toBeTruthy();

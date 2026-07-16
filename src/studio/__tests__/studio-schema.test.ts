@@ -25,6 +25,55 @@ describe("Studio schema", () => {
     expect(parsed.graph.groups || []).toEqual([]);
   });
 
+  it("serializes a self-contained agent authoring guide and built-in node reference", () => {
+    const project = createEmptyStudioProject({
+      name: "Agent-readable",
+      policyPath: "SystemSculpt/Studio/Agent-readable.systemsculpt-assets/policy/grants.json",
+      minPluginVersion: "6.0.2",
+      maxRuns: 100,
+      maxArtifactsMb: 1024,
+    });
+
+    const serialized = serializeStudioProject(project);
+    const document = JSON.parse(serialized);
+    expect(document.agentGuide).toMatchObject({
+      schema: "studio.agent-guide.v1",
+      guideIsGenerated: true,
+      editingContract: {
+        editOnlyThisFile: true,
+        generatedFields: ["agentGuide", "nodeKindReference"],
+      },
+      canvas: {
+        coordinateSystem: expect.stringContaining("top-left"),
+      },
+      graph: {
+        groups: expect.stringContaining("Membership"),
+      },
+    });
+    expect(document.nodeKindReference.schema).toBe("studio.node-kind-reference.v1");
+    const textKind = document.nodeKindReference.kinds.find((entry: any) => entry.kind === "studio.text");
+    expect(textKind).toMatchObject({
+      execution: { mode: "visual_only" },
+      canvas: {
+        defaultSize: expect.objectContaining({ width: expect.any(Number) }),
+      },
+      config: {
+        fields: expect.arrayContaining([
+          expect.objectContaining({ key: "value", type: "textarea" }),
+          expect.objectContaining({ key: "fontSize", type: "number" }),
+        ]),
+      },
+    });
+    expect(serialized.length).toBeLessThan(20_000);
+    expect(serialized.indexOf('"graph"')).toBeLessThan(
+      serialized.lastIndexOf('\n  "nodeKindReference"')
+    );
+    expect(JSON.stringify(document.agentGuide)).not.toMatch(
+      /external[_ -]?sync|projection|authority|generation|candidate|marker|revision|hash|cas|sidecar|reconciliation/i
+    );
+    expect(serializeStudioProject(parseStudioProject(serialized))).toBe(serialized);
+  });
+
   it("round-trips first-class node size, keeping width-only sizes", () => {
     const project = createEmptyStudioProject({
       name: "Sized",

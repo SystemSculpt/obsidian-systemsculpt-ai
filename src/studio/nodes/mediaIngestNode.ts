@@ -123,6 +123,7 @@ async function buildPreviewAssetPath(
 export const mediaIngestNode: StudioNodeDefinition = {
   kind: "studio.media_ingest",
   version: "1.0.0",
+  requiredHostCapabilities: [],
   capabilityClass: "local_io",
   cachePolicy: "by_inputs",
   inputPorts: [{ id: "media", type: "any", required: false }],

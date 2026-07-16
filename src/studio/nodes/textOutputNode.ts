@@ -4,6 +4,7 @@ import { getText } from "./shared";
 export const textOutputNode: StudioNodeDefinition = {
   kind: "studio.text_output",
   version: "1.0.0",
+  requiredHostCapabilities: [],
   // Load-bearing dataflow node (managed outputs, edge-drop auto-create) that
   // is no longer offered on the user-facing insert surface; canvas text is
   // covered by studio.text ("Text").

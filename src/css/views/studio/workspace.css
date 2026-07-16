@@ -194,14 +194,34 @@
   }
 }
 
-@container ss-surface (max-width: 420px) {
+@container ss-surface (max-width: 480px) {
   .ss-studio-graph-workspace-controls {
     top: var(--ss-space-2);
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: var(--ss-space-0);
   }
 
   .ss-studio-graph-workspace-control-button {
+    width: 100%;
     padding-inline: var(--ss-space-2);
+  }
+
+  .ss-studio-graph-workspace-control-zoom-row {
+    grid-column: span 2;
+    justify-content: center;
+  }
+
+  .ss-studio-graph-workspace-control-zoom-row > .ss-studio-graph-workspace-control-button,
+  .ss-studio-graph-workspace-control-zoom-label {
+    flex: 1 1 0;
+    width: auto;
+    min-width: 0;
+    padding-inline: 0;
+  }
+
+  .ss-studio-graph-workspace-controls > :last-child {
+    grid-column: span 2;
   }
 }
 

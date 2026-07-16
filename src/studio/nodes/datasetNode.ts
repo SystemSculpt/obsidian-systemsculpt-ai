@@ -482,7 +482,7 @@ function buildDatasetOutputs(stdout: string): StudioNodeOutputMap {
 export const datasetNode: StudioNodeDefinition = {
   kind: "studio.dataset",
   version: "1.0.0",
-  hostRequirement: "desktop",
+  requiredHostCapabilities: ["local-filesystem", "absolute-paths", "local-cli"],
   capabilityClass: "local_io",
   cachePolicy: "never",
   inputPorts: [],

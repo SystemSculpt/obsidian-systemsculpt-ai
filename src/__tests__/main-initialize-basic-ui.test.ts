@@ -17,6 +17,9 @@ function pluginReadyForBasicUi(app: App): SystemSculptPlugin {
 describe("SystemSculptPlugin.initializeBasicUI", () => {
   afterEach(() => {
     (Platform as any).isDesktop = true;
+    (Platform as any).isDesktopApp = true;
+    (Platform as any).isMobile = false;
+    (Platform as any).isMobileApp = false;
   });
 
   it("skips UI initialization after unload has started", async () => {
@@ -40,6 +43,9 @@ describe("SystemSculptPlugin.initializeBasicUI", () => {
     const plugin = pluginReadyForBasicUi(app);
     const addStatusBarItemSpy = jest.spyOn(plugin, "addStatusBarItem");
     (Platform as any).isDesktop = true;
+    (Platform as any).isDesktopApp = true;
+    (Platform as any).isMobile = false;
+    (Platform as any).isMobileApp = false;
 
     await (plugin as any).initializeBasicUI();
 
@@ -54,6 +60,9 @@ describe("SystemSculptPlugin.initializeBasicUI", () => {
     const plugin = pluginReadyForBasicUi(app);
     const addStatusBarItemSpy = jest.spyOn(plugin, "addStatusBarItem");
     (Platform as any).isDesktop = false;
+    (Platform as any).isDesktopApp = false;
+    (Platform as any).isMobile = true;
+    (Platform as any).isMobileApp = true;
 
     await (plugin as any).initializeBasicUI();
 

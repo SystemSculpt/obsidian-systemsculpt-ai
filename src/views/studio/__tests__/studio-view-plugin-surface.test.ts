@@ -28,7 +28,7 @@ describe("SystemSculptStudioView Plugin surface", () => {
       graphViewportEl: document.createElement("div"),
       contentEl,
       lastError: null,
-      projectLiveSyncWarning: null,
+      projectFileWarning: null,
       renderGraphEditor: jest.fn((root: HTMLElement) => root.appendChild(geometry)),
     };
 

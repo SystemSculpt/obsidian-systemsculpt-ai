@@ -69,6 +69,29 @@ describe("ChatMessageAttachmentCollection", () => {
     expect(collection.snapshot()).toEqual([]);
   });
 
+  it("accepts a Studio project as ordinary text context", async () => {
+    const project = '{"schema":"studio.project.v1","graph":{"nodes":[]}}';
+    const collection = new ChatMessageAttachmentCollection(reader({
+      "architecture.systemsculpt": project,
+    }));
+
+    const result = await collection.addFiles([
+      file("architecture.systemsculpt", "", project),
+    ]);
+
+    expect(result.issues).toEqual([]);
+    expect(result.accepted).toEqual([
+      expect.objectContaining({
+        name: "architecture.systemsculpt",
+        kind: "text",
+        contentPart: expect.objectContaining({
+          type: "text",
+          text: expect.stringContaining("studio.project.v1"),
+        }),
+      }),
+    ]);
+  });
+
   it("deduplicates by content and reports unsupported, empty, and unreadable files truthfully", async () => {
     const collection = new ChatMessageAttachmentCollection(async (input) => {
       if (input.name === "broken.txt") throw new Error("read failed");

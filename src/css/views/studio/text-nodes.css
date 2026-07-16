@@ -213,7 +213,7 @@
   opacity: 0;
   pointer-events: none;
 }
-.is-mobile .ss-studio-text-node-display.is-markdown pre > .copy-code-button,
+.ss-mobile-layout .ss-studio-text-node-display.is-markdown pre > .copy-code-button,
 .ss-studio-text-node-display.is-markdown
   pre:is(:hover, :focus-within) > .copy-code-button {
   opacity: 1;

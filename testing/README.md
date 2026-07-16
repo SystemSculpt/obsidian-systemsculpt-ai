@@ -32,9 +32,10 @@ npm run check:plugin
 npm run check:full
 ~~~
 
-- check verifies Obsidian lint, metadata, the production bundle, CSS, and cheap
-  architecture policy.
-- check:mobile imports the production artifact without desktop-only globals.
+- check verifies Obsidian lint, metadata, the production bundle, CSS, cheap
+  architecture policy, and the built bundle in a mobile host.
+- check:mobile runs static mobile policy, rebuilds the artifact, and opens
+  settings, Chat, Similar Notes, and Studio without desktop-only globals.
 - test:integration imports the production artifact in the Obsidian host mock.
 - check:plugin adds types, mobile, sync, artifact, and release guards.
 - check:full adds the complete unit, embeddings, integration, and release

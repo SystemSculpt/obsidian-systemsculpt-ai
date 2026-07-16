@@ -30,6 +30,7 @@ class StudioCaptionBoardModal extends StandardModal {
   private inspector: StudioImageEditorInspector | null = null;
   private toolbar: StudioImageEditorToolbar | null = null;
   private source = EMPTY_SOURCE;
+  private sourceLoading = true;
   private previewRenderVersion = 0;
   private saving = false;
   private disposed = false;
@@ -49,6 +50,7 @@ class StudioCaptionBoardModal extends StandardModal {
   onOpen(): void {
     super.onOpen();
     this.disposed = false;
+    this.sourceLoading = true;
     this.addTitle(this.options.node.title || "Image Editor");
     this.footerEl.toggleAttribute("hidden", true);
     this.contentEl.addClass("ss-studio-caption-board-modal");
@@ -79,7 +81,7 @@ class StudioCaptionBoardModal extends StandardModal {
     this.inspector = new StudioImageEditorInspector(sidebarEl, {
       addLabel: () => this.model.addLabel(),
       addAnnotation: (kind) => this.model.addAnnotation(kind),
-      ensureCrop: () => this.model.ensureCrop(),
+      toggleCropSelection: () => this.model.toggleCropSelection(),
       select: (selection) => this.model.select(selection),
       patchLabel: (patch) => this.model.patchSelectedLabel(patch),
       patchAnnotation: (patch) => this.model.patchSelectedAnnotation(patch),
@@ -92,7 +94,7 @@ class StudioCaptionBoardModal extends StandardModal {
     this.toolbar = new StudioImageEditorToolbar(toolbarEl, statusEl, {
       addLabel: () => this.model.addLabel(),
       addAnnotation: (kind) => this.model.addAnnotation(kind),
-      ensureCrop: () => this.model.ensureCrop(),
+      toggleCropSelection: () => this.model.toggleCropSelection(),
       fit: () => this.canvas?.fitToViewport(),
       done: () => this.handleDone(),
     });
@@ -112,39 +114,61 @@ class StudioCaptionBoardModal extends StandardModal {
   }
 
   private renderBoard(): void {
-    this.canvas?.render(this.model.state, this.model.selection);
-    this.inspector?.render(
-      this.model.state,
-      this.model.selection,
-      Boolean(this.source.src)
-    );
+    this.canvas?.render(this.model.state, this.model.selection, this.sourceLoading);
+    this.inspector?.render(this.model.state, this.model.selection, {
+      hasSource: Boolean(this.source.src),
+      loading: this.sourceLoading,
+      statusMessage: this.source.statusMessage,
+    });
     this.toolbar?.render({
       state: this.model.state,
       selection: this.model.selection,
       hasSource: Boolean(this.source.src),
+      sourceLoading: this.sourceLoading,
       saving: this.saving,
       statusOverride: this.source.statusMessage,
     });
   }
 
   private async hydrateSource(ownerWindow: Window): Promise<void> {
-    await loadStudioImageEditorSource(this.options, ownerWindow, (source) => {
+    try {
+      const source = await loadStudioImageEditorSource(this.options, ownerWindow);
       if (this.disposed) {
         return;
       }
+      this.sourceLoading = false;
       this.source = source;
       this.canvas?.setSource({
         path: source.path,
         src: source.src,
         width: source.width,
         height: source.height,
+        statusMessage: source.statusMessage,
       });
       this.renderBoard();
       if (source.width > 0 && source.height > 0) {
         this.canvas?.fitToViewport();
         void this.refreshRenderedPreview();
       }
-    });
+    } catch (error) {
+      if (this.disposed) {
+        return;
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      this.sourceLoading = false;
+      this.source = {
+        ...EMPTY_SOURCE,
+        statusMessage: `Unable to open image: ${message}`,
+      };
+      this.canvas?.setSource({
+        path: "",
+        src: "",
+        width: 0,
+        height: 0,
+        statusMessage: this.source.statusMessage,
+      });
+      this.renderBoard();
+    }
   }
 
   private async refreshRenderedPreview(): Promise<void> {

@@ -46,7 +46,7 @@ Every node except the visual-only Text node renders as a single in-flow stack, t
 
 ### Content-prominent nodes (media_ingest with loaded media)
 
-The media branch (`data-chrome-layout="media"`): the image/video is the only in-flow child and the card sizes to it. Actions live in the always-visible pill action bar floating inside the media's edge (bottom for images, top for videos so native playback controls stay free). Port pins sit centered on the side edges. When no primary content exists (empty source, failed load), the node renders as a normal card with the sourcePath picker on it.
+The media branch (`data-chrome-layout="media"`): the card sizes to its image/video content. Image actions live in an always-visible, normal-flow toolbar directly below the image so the controls never obscure the content. Video actions remain a compact top overlay so native playback controls stay free. Port pins stay centered on the media itself rather than shifting with the image toolbar. When no primary content exists (empty source, failed load), the node renders as a normal card with the sourcePath picker on it.
 
 ### Functional nodes (text_generation, cli_command, http_request, etc.)
 

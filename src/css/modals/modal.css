@@ -405,3 +405,35 @@
     width: 100%;
   }
 }
+
+/* StandardModal becomes a true app sheet on mobile. This prevents nested
+ * modal chrome and actions from leaking beneath Obsidian's fixed navigation. */
+.ss-mobile-layout .ss-modal,
+.ss-mobile-layout .ss-modal--small,
+.ss-mobile-layout .ss-modal--medium,
+.ss-mobile-layout .ss-modal--large,
+.ss-mobile-layout .ss-modal--fullwidth {
+  width: 100vw;
+  max-width: 100vw;
+  height: 100dvh;
+  max-height: 100dvh;
+  border-radius: 0;
+}
+
+.ss-mobile-layout .ss-modal__header {
+  padding:
+    calc(var(--ss-safe-top) + var(--ss-space-3))
+    var(--ss-space-4)
+    var(--ss-space-3);
+}
+
+.ss-mobile-layout .ss-modal__footer {
+  padding-bottom: calc(var(--ss-safe-bottom) + var(--ss-space-2));
+}
+
+.ss-mobile-layout .ss-modal__close-button {
+  width: var(--ss-touch-target);
+  min-width: var(--ss-touch-target);
+  height: var(--ss-touch-target);
+  min-height: var(--ss-touch-target);
+}

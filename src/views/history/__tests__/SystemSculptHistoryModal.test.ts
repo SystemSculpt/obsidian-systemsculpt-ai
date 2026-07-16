@@ -1,5 +1,6 @@
 /** @jest-environment jsdom */
 
+import { readFileSync } from "node:fs";
 import { App } from "obsidian";
 import { SystemSculptHistoryModal } from "../SystemSculptHistoryModal";
 import type { SystemSculptHistoryEntry } from "../types";
@@ -115,5 +116,16 @@ describe("SystemSculptHistoryModal lifecycle", () => {
 
     expect(second.openPrimary).toHaveBeenCalledTimes(1);
     expect(first.openPrimary).not.toHaveBeenCalled();
+  });
+
+  it("allows the mobile history body to shrink in short landscape viewports", () => {
+    const css = readFileSync("src/css/components/history.css", "utf8");
+
+    expect(css).toMatch(
+      /\.ss-mobile-layout \.systemsculpt-history-modal \.ss-modal__content\s*\{[^}]*min-height:\s*0;/s,
+    );
+    expect(css).toMatch(
+      /\.ss-mobile-layout \.systemsculpt-history-list\s*\{[^}]*max-height:\s*none;/s,
+    );
   });
 });

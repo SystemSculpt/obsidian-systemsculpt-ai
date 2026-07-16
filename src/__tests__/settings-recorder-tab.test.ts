@@ -124,6 +124,32 @@ describe("Recorder settings tab", () => {
     expect(names).not.toContain("Post-processing model");
   });
 
+  it("does not request microphone permission until the user refreshes devices", async () => {
+    const getUserMedia = jest.fn().mockResolvedValue({
+      getTracks: () => [{ stop: jest.fn() }],
+    });
+    setMediaDevices(navigator, {
+      enumerateDevices: jest.fn().mockResolvedValue([device("hidden", "")]),
+      getUserMedia,
+    });
+    const app = new App();
+    const { plugin } = createPlugin(app);
+    const { tab } = createTabHarness(app, plugin);
+    const container = document.createElement("div");
+
+    await displayRecorderTabContent(container, tab as any);
+    expect(getUserMedia).not.toHaveBeenCalled();
+
+    const refreshButton = container.querySelector(
+      '.extra-button[aria-label="Refresh microphones"]',
+    ) as HTMLButtonElement | null;
+    expect(refreshButton).not.toBeNull();
+    refreshButton?.click();
+    await flush();
+
+    expect(getUserMedia).toHaveBeenCalledTimes(1);
+  });
+
   it("uses the settings surface owner realm and preserves microphone persistence", async () => {
     const frame = document.createElement("iframe");
     document.body.appendChild(frame);

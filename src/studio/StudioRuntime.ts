@@ -1,6 +1,7 @@
-import { App, normalizePath, Platform, TFile } from "obsidian";
+import { App, normalizePath, TFile } from "obsidian";
 import type SystemSculptPlugin from "../main";
 import { desktopHost } from "../platform/desktopOnly";
+import { hasHostCapability } from "../platform/hostCapabilities";
 import { StudioAssetStore } from "./StudioAssetStore";
 import { StudioGraphCompiler, type StudioCompiledGraph } from "./StudioGraphCompiler";
 import { StudioNodeRegistry } from "./StudioNodeRegistry";
@@ -349,7 +350,7 @@ export class StudioRuntime {
     };
     const runningPromises = new Map<string, Promise<void>>();
     const abortController = new AbortController();
-    const desktop = Platform.isDesktopApp
+    const desktop = hasHostCapability("local-filesystem")
       ? {
           fs: desktopHost.fs(),
           path: desktopHost.path(),

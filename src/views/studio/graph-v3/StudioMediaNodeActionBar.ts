@@ -134,10 +134,11 @@ function resolveActions(
 }
 
 /**
- * Action bar for media nodes whose card IS the media: one flat pill of
- * icon buttons floating inside the media's edge — bottom for images,
- * top for videos so the native playback controls stay free — always
- * visible (the studio has no hover-revealed chrome).
+ * Action bar for media nodes whose card IS the media. Image actions render as
+ * a normal-flow toolbar below the image so they never obscure it. Video
+ * actions remain a compact top overlay so the native playback controls stay
+ * free. Both variants are always visible (the studio has no hover-revealed
+ * chrome).
  *
  * The bar owns every pointer gesture that starts on it: pointerdown
  * stops here, before any card-drag, marquee, selection, or
@@ -155,6 +156,10 @@ export function renderStudioMediaNodeActionBar(
 
   const barEl = nodeEl.createDiv({
     cls: `ss-studio-media-action-bar${mediaKind === "video" ? " is-top" : ""}`,
+    attr: {
+      role: "toolbar",
+      "aria-label": mediaKind === "image" ? "Image actions" : "Video actions",
+    },
   });
   markStudioNodeCardInteractive(barEl);
   barEl.classList.toggle("is-locked", interactionLocked);

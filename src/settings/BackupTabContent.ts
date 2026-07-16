@@ -2,6 +2,7 @@ import { Setting, Notice } from "obsidian";
 import { SystemSculptSettingTab } from "./SystemSculptSettingTab";
 import { showPrompt } from "../core/ui/modals/PromptModal";
 import { BackupRestoreModal } from "../core/settings/BackupRestoreModal";
+import { hasHostCapability } from "../platform/hostCapabilities";
 
 
 export function displayBackupTabContent(containerEl: HTMLElement, tabInstance: SystemSculptSettingTab) {
@@ -82,10 +83,11 @@ Continue?`
         });
     });
 
-  new Setting(containerEl)
+  const backupFolderSetting = new Setting(containerEl)
     .setName('Backup folder')
-    .setDesc('Open the folder where backups are stored.')
-    .addButton((button) => {
+    .setDesc('Stored in .systemsculpt/settings-backups inside your vault.');
+  if (hasHostCapability("file-manager-reveal", containerEl)) {
+    backupFolderSetting.addButton((button) => {
       button
         .setButtonText('Open folder')
         .onClick(async () => {
@@ -106,6 +108,7 @@ Continue?`
           }
         });
     });
+  }
 
   new Setting(containerEl)
     .setName('Tips')

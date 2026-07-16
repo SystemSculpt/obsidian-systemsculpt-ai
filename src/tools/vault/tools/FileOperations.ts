@@ -27,6 +27,10 @@ import {
 } from "../utils";
 import { assertValidObsidianBasesYaml } from "../../../utils/obsidianBasesYaml";
 import { resolveExistingVaultFile } from "../folderNotes";
+import {
+  assertValidStudioProjectAgentFileMutation,
+  isStudioProjectDocumentPath,
+} from "../../../studio/StudioProjectAgentFileGuard";
 
 /**
  * File operations for first-party vault tools (read, write, edit).
@@ -39,6 +43,32 @@ export class FileOperations {
 
   private shouldUseAdapter(path: string): boolean {
     return isHiddenSystemPath(path);
+  }
+
+  /**
+   * Atomically replace a Studio project only when it still contains the bytes
+   * that were parsed and validated by the file tool. Studio can autosave while
+   * an agent edit is being prepared, so a plain `modify` here could otherwise
+   * overwrite that newer canvas state after validation has already finished.
+   */
+  private async writeStudioProjectIfUnchanged(
+    file: TFile,
+    expectedContent: string,
+    nextContent: string
+  ): Promise<void> {
+    let changedBeforeWrite = false;
+    await this.app.vault.process(file, (currentContent) => {
+      if (currentContent !== expectedContent) {
+        changedBeforeWrite = true;
+        return currentContent;
+      }
+      return nextContent;
+    });
+    if (changedBeforeWrite) {
+      throw new Error(
+        "Studio project changed while this edit was being prepared; nothing was overwritten. Read the file again and retry."
+      );
+    }
   }
 
   /**
@@ -228,15 +258,39 @@ export class FileOperations {
       if (ifExists === 'append') {
         const current = await this.app.vault.read(file);
         const newContent = current + (appendNewline && !current.endsWith('\n') ? '\n' : '') + content;
+        assertValidStudioProjectAgentFileMutation({
+          path: normalizedPath || path,
+          content: newContent,
+          exists: true,
+          mode: "append",
+        });
         if (isBaseFile) {
           assertValidObsidianBasesYaml(normalizedPath || path, newContent);
         }
-        await this.app.vault.modify(file, newContent);
+        if (isStudioProjectDocumentPath(normalizedPath || path)) {
+          await this.writeStudioProjectIfUnchanged(file, current, newContent);
+        } else {
+          await this.app.vault.modify(file, newContent);
+        }
       } else {
+        const previousContent = isStudioProjectDocumentPath(normalizedPath || path)
+          ? await this.app.vault.read(file)
+          : undefined;
+        assertValidStudioProjectAgentFileMutation({
+          path: normalizedPath || path,
+          content,
+          previousContent,
+          exists: true,
+          mode: "overwrite",
+        });
         if (isBaseFile) {
           assertValidObsidianBasesYaml(normalizedPath || path, content);
         }
-        await this.app.vault.modify(file, content);
+        if (typeof previousContent === "string") {
+          await this.writeStudioProjectIfUnchanged(file, previousContent, content);
+        } else {
+          await this.app.vault.modify(file, content);
+        }
       }
     } else if (this.shouldUseAdapter(normalizedPath)) {
       const adapter: any = this.app.vault.adapter as any;
@@ -248,10 +302,21 @@ export class FileOperations {
         throw new Error(`File already exists: ${path}`);
       }
       let nextContent = content;
+      let previousContent: string | undefined;
       if (exists && ifExists === "append") {
         const current = await readAdapterText(adapter, normalizedPath);
         nextContent = current + (appendNewline && !current.endsWith("\n") ? "\n" : "") + content;
+        previousContent = current;
+      } else if (exists && isStudioProjectDocumentPath(normalizedPath || path)) {
+        previousContent = await readAdapterText(adapter, normalizedPath);
       }
+      assertValidStudioProjectAgentFileMutation({
+        path: normalizedPath || path,
+        content: nextContent,
+        previousContent,
+        exists,
+        mode: ifExists === "append" ? "append" : "overwrite",
+      });
       if (isBaseFile) {
         assertValidObsidianBasesYaml(normalizedPath || path, nextContent);
       }
@@ -264,6 +329,12 @@ export class FileOperations {
       }
       await writeAdapterText(adapter, normalizedPath, nextContent);
     } else {
+      assertValidStudioProjectAgentFileMutation({
+        path: normalizedPath || path,
+        content,
+        exists: false,
+        mode: "overwrite",
+      });
       if (isBaseFile) {
         assertValidObsidianBasesYaml(normalizedPath || path, content);
       }
@@ -306,6 +377,11 @@ export class FileOperations {
     // Read file content and normalize line endings
     const normalizedPath = normalizePath(normalizeVaultPath(filePath));
     const isBaseFile = normalizedPath.toLowerCase().endsWith(".base");
+    assertValidStudioProjectAgentFileMutation({
+      path: normalizedPath || filePath,
+      exists: true,
+      mode: "edit",
+    });
     if (this.shouldUseAdapter(normalizedPath)) {
       const adapter: any = this.app.vault.adapter as any;
       const content = normalizeLineEndings(await readAdapterText(adapter, normalizedPath));
@@ -316,6 +392,13 @@ export class FileOperations {
       // Only write when content actually changed — skip the redundant no-op write
       // so a zero-match (strict:false) edit never touches the file's mtime.
       if (modifiedContent !== content) {
+        assertValidStudioProjectAgentFileMutation({
+          path: normalizedPath || filePath,
+          content: modifiedContent,
+          previousContent: content,
+          exists: true,
+          mode: "edit",
+        });
         if (isBaseFile) {
           assertValidObsidianBasesYaml(normalizedPath || filePath, modifiedContent);
         }
@@ -330,7 +413,8 @@ export class FileOperations {
     }
     const resolvedPath = abstractFile.path;
 
-    const content = normalizeLineEndings(await this.app.vault.read(abstractFile));
+    const originalContent = await this.app.vault.read(abstractFile);
+    const content = normalizeLineEndings(originalContent);
 
     const { modifiedContent, appliedCount, skipped } = this.applyEdits(content, edits, strict);
 
@@ -339,10 +423,25 @@ export class FileOperations {
 
     // Apply the changes to the file only when something actually changed.
     if (modifiedContent !== content) {
+      assertValidStudioProjectAgentFileMutation({
+        path: resolvedPath,
+        content: modifiedContent,
+        previousContent: content,
+        exists: true,
+        mode: "edit",
+      });
       if (isBaseFile) {
         assertValidObsidianBasesYaml(resolvedPath, modifiedContent);
       }
-      await this.app.vault.modify(abstractFile, modifiedContent);
+      if (isStudioProjectDocumentPath(resolvedPath)) {
+        await this.writeStudioProjectIfUnchanged(
+          abstractFile,
+          originalContent,
+          modifiedContent
+        );
+      } else {
+        await this.app.vault.modify(abstractFile, modifiedContent);
+      }
     }
 
     return { diff, appliedCount, requestedCount: edits.length, skipped };
@@ -395,6 +494,11 @@ export class FileOperations {
           throw new Error(`Access denied: ${path}`);
         }
         const normalizedPath = normalizePath(normalizeVaultPath(path));
+        assertValidStudioProjectAgentFileMutation({
+          path: normalizedPath || path,
+          exists: true,
+          mode: "multi_edit",
+        });
         if (seen.has(normalizedPath)) {
           throw new Error(`Duplicate file in multi_edit: ${path}`);
         }
@@ -415,7 +519,9 @@ export class FileOperations {
           resolvedPath = file.path;
           original = normalizeLineEndings(await this.app.vault.read(file));
           readCurrent = async () => normalizeLineEndings(await this.app.vault.read(file));
-          write = async (content) => this.app.vault.modify(file, content);
+          write = isStudioProjectDocumentPath(resolvedPath)
+            ? async (content) => this.writeStudioProjectIfUnchanged(file, original, content)
+            : async (content) => this.app.vault.modify(file, content);
         }
 
         const strict = entry.strict ?? true;
@@ -426,6 +532,13 @@ export class FileOperations {
         if (resolvedPath.toLowerCase().endsWith(".base")) {
           assertValidObsidianBasesYaml(resolvedPath, applied.modifiedContent);
         }
+        assertValidStudioProjectAgentFileMutation({
+          path: resolvedPath,
+          content: applied.modifiedContent,
+          previousContent: original,
+          exists: true,
+          mode: "multi_edit",
+        });
         const result: MultiEditFileResult = {
           path: resolvedPath,
           success: true,

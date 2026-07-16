@@ -79,7 +79,13 @@ describe("StudioImageEditorCanvas", () => {
         resolveSelectionFrame: () => label,
       }
     );
-    canvas.setSource({ path: "image.png", src: "data:image/png;base64,AA==", width: 400, height: 200 });
+    canvas.setSource({
+      path: "image.png",
+      src: "data:image/png;base64,AA==",
+      width: 400,
+      height: 200,
+      statusMessage: "",
+    });
     canvas.render(state, { kind: "label", id: label.id });
 
     expect(popoutAddListener).toHaveBeenCalledWith("pointermove", expect.any(Function));

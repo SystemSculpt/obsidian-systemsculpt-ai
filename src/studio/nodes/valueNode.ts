@@ -9,6 +9,7 @@ function hasKey(record: Record<string, StudioJsonValue>, key: string): boolean {
 export const valueNode: StudioNodeDefinition = {
   kind: "studio.value",
   version: "1.0.0",
+  requiredHostCapabilities: [],
   capabilityClass: "local_cpu",
   cachePolicy: "by_inputs",
   inputPorts: [{ id: "value", type: "any", required: false }],

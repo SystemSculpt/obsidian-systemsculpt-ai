@@ -4,7 +4,6 @@ import {
   Setting,
   Notice,
   setIcon,
-  Platform,
   EventRef,
 } from "obsidian";
 import { showPrompt } from "../core/ui/modals/PromptModal";
@@ -21,6 +20,7 @@ import {
   type UiTabsHandle,
 } from "../core/ui/surface";
 import SystemSculptPlugin from "../main";
+import { getHostDeviceType, getHostOperatingSystem } from "../platform/hostCapabilities";
 import {
   buildSettingsIndexFromRoot,
   buildSettingsSearchHighlightParts,
@@ -41,12 +41,10 @@ type SettingsSearchViewState = {
   results: SettingsSearchMatch[];
 };
 
-type SystemSculptSettingDefinition = {
-  id: string;
-  name: string;
-  description?: string;
-};
-
+// Keep the imperative renderer until every dynamic control can be represented
+// declaratively. Obsidian 1.13 skips display() as soon as definitions exist, so
+// partial definitions would regress mobile settings to heading-only rows.
+// eslint-disable-next-line obsidianmd/settings-tab/prefer-setting-definitions
 export class SystemSculptSettingTab extends PluginSettingTab {
   plugin: SystemSculptPlugin;
   private listeners: {
@@ -92,14 +90,6 @@ export class SystemSculptSettingTab extends PluginSettingTab {
     return () => this.renderCleanups.delete(cleanup);
   }
 
-  getSettingDefinitions(): SystemSculptSettingDefinition[] {
-    return buildSettingsTabConfigs(this).map((config) => ({
-      id: config.id,
-      name: config.anchor?.title || config.label,
-      description: config.anchor?.desc || `${config.label} settings`,
-    }));
-  }
-
   registerListener(
     element: HTMLElement,
     type: string,
@@ -128,24 +118,14 @@ export class SystemSculptSettingTab extends PluginSettingTab {
     }
 
     // OS
-    let os = "";
-    if (Platform.isWin) {
-      os = "Windows";
-    } else if (Platform.isMacOS) {
-      os = "macOS";
-    } else if (Platform.isLinux) {
-      os = "Linux";
-    }
-    if (os) {
+    const os = getHostOperatingSystem();
+    if (os !== "Unknown") {
       environmentInfo.push(`- OS: ${os}`);
     }
 
     // Device type
-    let deviceType = "";
-    if (Platform.isDesktopApp) {
-      deviceType = "Desktop";
-    }
-    if (deviceType) {
+    const deviceType = getHostDeviceType();
+    if (deviceType !== "Unknown") {
       environmentInfo.push(`- Device type: ${deviceType}`);
     }
 
@@ -206,6 +186,7 @@ export class SystemSculptSettingTab extends PluginSettingTab {
     const actionsSetting = new Setting(containerEl)
       .setName("Quick actions")
       .setDesc("");
+    actionsSetting.settingEl.addClass("ss-settings-quick-actions");
 
     actionsSetting.addButton((button) => {
       decorateRestoreDefaultsButton(button.buttonEl);

@@ -111,6 +111,30 @@ describe("MicrophoneDeviceCatalog", () => {
     });
   });
 
+  it("keeps passive refresh permission-free while allowing an explicit label refresh", async () => {
+    const getUserMedia = jest.fn().mockResolvedValue({
+      getTracks: () => [{ stop: jest.fn() }],
+    });
+    const catalog = new MicrophoneDeviceCatalog({
+      mediaDevices: {
+        enumerateDevices: jest.fn().mockResolvedValue([device("hidden", "")]),
+        getUserMedia,
+      },
+    } as unknown as Navigator, { requestLabels: false });
+
+    await expect(catalog.refresh()).resolves.toMatchObject({
+      status: "ready",
+      labelRefresh: "skipped",
+    });
+    expect(getUserMedia).not.toHaveBeenCalled();
+
+    await expect(catalog.refreshWithLabelPermission()).resolves.toMatchObject({
+      status: "ready",
+      labelRefresh: "granted",
+    });
+    expect(getUserMedia).toHaveBeenCalledTimes(1);
+  });
+
   it("makes overlapping refreshes latest-wins", async () => {
     const staleDevices = deferred<MediaDeviceInfo[]>();
     const enumerateDevices = jest

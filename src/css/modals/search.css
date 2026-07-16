@@ -172,6 +172,15 @@
   }
 }
 
+/* The narrow-desktop dimensions above are intentionally window-relative.
+ * Mobile follows StandardModal's full-screen app-sheet contract instead. */
+.ss-mobile-layout .ss-modal.ss-search-modal {
+  width: 100vw;
+  max-width: 100vw;
+  height: 100dvh;
+  max-height: 100dvh;
+}
+
 @media (max-width: 700px), (pointer: coarse) {
   .ss-search-modal .ss-modal__header {
     display: block;

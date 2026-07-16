@@ -50,6 +50,7 @@ type StudioImageEditorCanvasSource = {
   src: string;
   width: number;
   height: number;
+  statusMessage: string;
 };
 
 const ZOOM_MIN = 0.18;
@@ -59,7 +60,14 @@ const SURFACE_PADDING = 140;
 export class StudioImageEditorCanvas {
   private state: StudioCaptionBoardState | null = null;
   private selection: StudioImageEditorSelection | null = null;
-  private source: StudioImageEditorCanvasSource = { path: "", src: "", width: 0, height: 0 };
+  private source: StudioImageEditorCanvasSource = {
+    path: "",
+    src: "",
+    width: 0,
+    height: 0,
+    statusMessage: "",
+  };
+  private sourceLoading = true;
   private renderedPreviewSrc = "";
   private zoom = 1;
   private stageEl: HTMLElement | null = null;
@@ -108,6 +116,7 @@ export class StudioImageEditorCanvas {
 
   setSource(source: StudioImageEditorCanvasSource): void {
     this.source = source;
+    this.sourceLoading = false;
     this.renderedPreviewSrc = "";
   }
 
@@ -118,10 +127,12 @@ export class StudioImageEditorCanvas {
 
   render(
     state: StudioCaptionBoardState,
-    selection: StudioImageEditorSelection | null
+    selection: StudioImageEditorSelection | null,
+    sourceLoading: boolean = false
   ): void {
     this.state = state;
     this.selection = selection;
+    this.sourceLoading = sourceLoading;
     this.renderCurrent();
   }
 
@@ -168,12 +179,17 @@ export class StudioImageEditorCanvas {
   private renderCurrent(): void {
     this.surfaceEl.empty();
     this.stageEl = null;
+    if (this.sourceLoading) {
+      this.surfaceEl.createDiv({
+        cls: "ss-studio-caption-board__empty",
+        text: "Opening image…",
+      });
+      return;
+    }
     if (!this.source.src || !this.source.width || !this.source.height || !this.state) {
       this.surfaceEl.createDiv({
         cls: "ss-studio-caption-board__empty",
-        text: this.source.path
-          ? "Loading source image..."
-          : "Run this media node once or use a stored Studio asset so the editor can load the source image.",
+        text: this.source.statusMessage || "This image is unavailable.",
       });
       return;
     }

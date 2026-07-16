@@ -34,7 +34,6 @@ describe("StudioProjectLiveSync", () => {
     expect(
       resolveStudioProjectModifyDecision({
         isActiveProjectFile: false,
-        hasPendingLocalSaveWork: false,
         isExpectedSelfWrite: false,
         signature: "sig",
         lastAcceptedSignature: null,
@@ -45,7 +44,6 @@ describe("StudioProjectLiveSync", () => {
     expect(
       resolveStudioProjectModifyDecision({
         isActiveProjectFile: true,
-        hasPendingLocalSaveWork: false,
         isExpectedSelfWrite: true,
         signature: "sig",
         lastAcceptedSignature: null,
@@ -56,18 +54,6 @@ describe("StudioProjectLiveSync", () => {
     expect(
       resolveStudioProjectModifyDecision({
         isActiveProjectFile: true,
-        hasPendingLocalSaveWork: true,
-        isExpectedSelfWrite: false,
-        signature: "sig",
-        lastAcceptedSignature: null,
-        lastRejectedSignature: null,
-      })
-    ).toEqual({ kind: "defer", reason: "local_save_pending" });
-
-    expect(
-      resolveStudioProjectModifyDecision({
-        isActiveProjectFile: true,
-        hasPendingLocalSaveWork: false,
         isExpectedSelfWrite: false,
         signature: "accepted",
         lastAcceptedSignature: "accepted",
@@ -78,7 +64,6 @@ describe("StudioProjectLiveSync", () => {
     expect(
       resolveStudioProjectModifyDecision({
         isActiveProjectFile: true,
-        hasPendingLocalSaveWork: false,
         isExpectedSelfWrite: false,
         signature: "rejected",
         lastAcceptedSignature: null,
@@ -89,7 +74,6 @@ describe("StudioProjectLiveSync", () => {
     expect(
       resolveStudioProjectModifyDecision({
         isActiveProjectFile: true,
-        hasPendingLocalSaveWork: false,
         isExpectedSelfWrite: false,
         signature: "fresh",
         lastAcceptedSignature: "accepted",

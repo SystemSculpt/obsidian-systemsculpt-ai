@@ -88,6 +88,36 @@ test("Studio CSS stays feature-owned, bounded, and explicitly ordered", () => {
   }
 });
 
+test("Studio built-ins declare host capabilities explicitly", () => {
+  const types = read("src/studio/types.ts");
+  const hostPolicy = read("src/studio/StudioHostCapabilities.ts");
+  const builtIns = read("src/studio/StudioBuiltInNodes.ts");
+  const nodeModules = [...builtIns.matchAll(/from "\.\/nodes\/([^"]+)"/g)]
+    .map((match) => match[1]);
+
+  assert.ok(nodeModules.length >= 15, "Studio built-in discovery unexpectedly found too few nodes");
+  assert.match(
+    types,
+    /requiredHostCapabilities:\s*readonly HostCapability\[\]/,
+    "every Studio node definition must make its host requirements explicit",
+  );
+  assert.doesNotMatch(types, /hostRequirement/);
+  assert.match(
+    hostPolicy,
+    /requiredHostCapabilities\.every\(\(capability\)\s*=>\s*hasHostCapability\(capability\)\)/,
+  );
+
+  for (const module of nodeModules) {
+    const source = read(`src/studio/nodes/${module}.ts`);
+    assert.match(
+      source,
+      /requiredHostCapabilities:\s*\[[^\]]*\]/,
+      `src/studio/nodes/${module}.ts must declare requiredHostCapabilities, including [] for portable nodes`,
+    );
+    assert.doesNotMatch(source, /hostRequirement/);
+  }
+});
+
 test("Agent workspace CSS stays feature-owned, bounded, and explicitly ordered", () => {
   const workspaceRoot = path.join(root, "src", "css", "views", "agent-workspace");
   const manifest = read("src/css/index.css");
@@ -201,7 +231,10 @@ test("the shared surface owns adaptation and obsolete UI seams stay deleted", ()
   assert.match(statusBar, /plugin\.addStatusBarItem\(\)/);
   assert.match(statusBar, /this\.statusBarEl\.setText\(value\)/);
   assert.doesNotMatch(statusBar, /applyPluginSurface|setIcon|ss-embeddings-status-bar/);
-  assert.match(plugin, /Platform\.isDesktop\s*&&\s*!this\.embeddingsStatusBar/);
+  assert.match(
+    plugin,
+    /hasHostCapability\("status-bar"\)\s*&&\s*!this\.embeddingsStatusBar/,
+  );
   assert.doesNotMatch(read("src/css/index.css"), /embeddings-status-bar\.css/);
 
   const resumeChat = read("src/views/chatview/ResumeChatService.ts");
@@ -225,6 +258,60 @@ test("the shared surface owns adaptation and obsolete UI seams stay deleted", ()
   assert.doesNotMatch(searchCss, /body\.ss-search-open|\.tooltip/);
   assert.match(searchCss, /@media\s*\(max-width:\s*700px\),\s*\(pointer:\s*coarse\)[\s\S]*?\.ss-modal__header\s*\{[\s\S]*?display:\s*block/);
   assert.match(searchCss, /@media\s*\(max-width:\s*700px\),\s*\(pointer:\s*coarse\)[\s\S]*?\.ss-modal__footer\s*\{[\s\S]*?display:\s*none/);
+});
+
+test("desktop capabilities and mobile host chrome stay behind canonical adapters", () => {
+  const hostCapabilities = read("src/platform/hostCapabilities.ts");
+  const mobileLayout = read("src/platform/mobileLayout.ts");
+  const mobileHostLayout = read("src/platform/mobileHostLayout.ts");
+  const pluginSurface = read("src/core/ui/surface/PluginSurface.ts");
+  const tokens = read("src/css/foundation/tokens.css");
+  const modalCss = read("src/css/modals/modal.css");
+  const allCss = readCssDirectory("src/css");
+
+  assert.match(hostCapabilities, /export type HostCapability\s*=/);
+  assert.match(hostCapabilities, /export function hasHostCapability\(/);
+  assert.match(hostCapabilities, /export function resolveElectronModule<T = unknown>\(/);
+  assert.match(mobileLayout, /export function isMobileLayout\(owner\?: MobileLayoutOwner\)/);
+  assert.match(mobileHostLayout, /const HOST_MOBILE_NAV_SELECTOR = "\.mobile-navbar-action"/);
+  assert.match(mobileHostLayout, /const MOBILE_LAYOUT_CLASS = "ss-mobile-layout"/);
+  assert.match(mobileHostLayout, /const MOBILE_NAV_VISIBLE_CLASS = "ss-mobile-navbar-visible"/);
+  assert.match(mobileHostLayout, /const MOBILE_NAV_HIDDEN_CLASS = "ss-mobile-navbar-hidden"/);
+  assert.match(pluginSurface, /ensureMobileHostLayoutState\(root\)/);
+  assert.match(tokens, /--ss-safe-top:\s*clamp\(/);
+  assert.match(
+    modalCss,
+    /\.ss-mobile-layout \.ss-modal__header\s*\{[\s\S]*?calc\(var\(--ss-safe-top\) \+ var\(--ss-space-3\)\)/,
+  );
+  assert.match(allCss, /\.ss-mobile-layout/);
+  assert.doesNotMatch(allCss, /\.is-mobile|\.mobile-navbar-action/);
+
+  const productionFiles = listProductionTypeScript(path.join(root, "src"));
+  for (const file of productionFiles) {
+    const relative = path.relative(root, file).split(path.sep).join("/");
+    const source = fs.readFileSync(file, "utf8");
+    if (!relative.startsWith("src/platform/")) {
+      assert.doesNotMatch(
+        source,
+        /\bPlatform\s*\./,
+        `${relative} must use the platform capability/layout seams`,
+      );
+    }
+    if (relative !== "src/platform/mobileHostLayout.ts") {
+      assert.doesNotMatch(
+        source,
+        /\.mobile-navbar-action/,
+        `${relative} must not depend on Obsidian's private mobile navbar DOM`,
+      );
+    }
+    if (relative !== "src/platform/mobileLayout.ts") {
+      assert.doesNotMatch(
+        source,
+        /["']is-mobile["']/,
+        `${relative} must consume SystemSculpt-owned mobile state`,
+      );
+    }
+  }
 });
 
 test("StandardModal owns close and reopen invalidation for async feature adapters", () => {
@@ -570,6 +657,10 @@ test("custom buttons outrank Obsidian controls without styling native Setting bu
   assert.match(buttonCss, /^\.ss-surface \.ss-button\s*\{/m);
   assert.match(actionCss, /^\.ss-surface \.ss-button--icon\s*\{/m);
   assert.match(settingsCss, /^\.ss-surface \.ss-tab-button\s*\{/m);
+  assert.match(
+    settingsCss,
+    /@container\s+ss-surface\s*\(max-width:\s*520px\)[\s\S]*?\.systemsculpt-tab-content \.setting-item\s*\{[\s\S]*?flex-direction:\s*column[\s\S]*?\.setting-item-info,[\s\S]*?\.setting-item-control\s*\{[\s\S]*?width:\s*100%/,
+  );
 
   for (const source of [buttonCss, actionCss]) {
     assert.doesNotMatch(

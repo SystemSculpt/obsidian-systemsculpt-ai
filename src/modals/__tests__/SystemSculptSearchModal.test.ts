@@ -1,6 +1,7 @@
 /**
  * @jest-environment jsdom
  */
+import { readFileSync } from "node:fs";
 import { App } from "obsidian";
 import { SystemSculptSearchModal } from "../SystemSculptSearchModal";
 import { SearchResponse } from "../../services/search/SystemSculptSearchEngine";
@@ -160,6 +161,14 @@ describe("SystemSculptSearchModal", () => {
 
       modal.onClose();
       expect(popupDocument.body.className).toBe("theme-dark native-host-state");
+    });
+
+    it("preserves the StandardModal full-screen geometry on mobile", () => {
+      const css = readFileSync("src/css/modals/search.css", "utf8");
+
+      expect(css).toMatch(
+        /\.ss-mobile-layout \.ss-modal\.ss-search-modal\s*\{[^}]*width:\s*100vw;[^}]*max-width:\s*100vw;[^}]*height:\s*100dvh;[^}]*max-height:\s*100dvh;/s,
+      );
     });
   });
 

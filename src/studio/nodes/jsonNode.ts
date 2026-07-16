@@ -223,6 +223,7 @@ function parseJsonTextOrThrow(text: string): StudioJsonValue {
 export const jsonNode: StudioNodeDefinition = {
   kind: "studio.json",
   version: "1.0.0",
+  requiredHostCapabilities: [],
   capabilityClass: "local_cpu",
   cachePolicy: "by_inputs",
   inputPorts: [

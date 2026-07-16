@@ -1,6 +1,11 @@
 import { App, TFile } from "obsidian";
 import { ChatMessage, MessagePart, MultiPartContent } from "../types";
 import { ImageProcessor } from "../utils/ImageProcessor";
+import {
+  STUDIO_PROJECT_AGENT_GUIDE,
+  STUDIO_PROJECT_NODE_KIND_REFERENCE,
+} from "../studio/StudioProjectAgentContract";
+import { parseStudioProject } from "../studio/schema";
 import { simpleHash } from "../utils/cryptoUtils";
 import {
   buildToolResultMessagesFromToolCalls,
@@ -333,7 +338,7 @@ export class ContextFileService {
       const resolvedFile = this.app.metadataCache.getFirstLinkpathDest(
         cleanPath,
         ""
-      );
+      ) ?? this.app.vault.getAbstractFileByPath(cleanPath);
 
       if (resolvedFile instanceof TFile) {
         if (resolvedFile.extension.match(/^(jpg|jpeg|png|webp)$/i)) {
@@ -405,9 +410,10 @@ export class ContextFileService {
 
     if (content) {
       if (typeof content === "string") {
+        const contextContent = this.withStudioAgentReference(filePath, content);
         return {
           role: "user",
-          content: `Context from ${displayName}:\n\n${content}`,
+          content: `Context from ${displayName}:\n\n${contextContent}`,
           message_id: this.deterministicId(filePath, "ctx"),
         };
       } else if (content.type === "image") {
@@ -443,6 +449,33 @@ export class ContextFileService {
       }
     }
     return null;
+  }
+
+  private withStudioAgentReference(filePath: string, content: string): string {
+    const normalizedPath = filePath.replace(/^\[\[(.*?)\]\]$/, "$1").toLowerCase();
+    if (!normalizedPath.endsWith(".systemsculpt")) return content;
+
+    try {
+      const raw = JSON.parse(content) as Record<string, unknown>;
+      const guide = raw.agentGuide as Record<string, unknown> | undefined;
+      const reference = raw.nodeKindReference as Record<string, unknown> | undefined;
+      if (guide?.schema === "studio.agent-guide.v1"
+        && reference?.schema === "studio.node-kind-reference.v1") {
+        return content;
+      }
+      parseStudioProject(content);
+      return [
+        "Generated Studio authoring reference (context only; the exact file bytes follow):",
+        JSON.stringify({
+          agentGuide: STUDIO_PROJECT_AGENT_GUIDE,
+          nodeKindReference: STUDIO_PROJECT_NODE_KIND_REFERENCE,
+        }, null, 2),
+        "Exact .systemsculpt file bytes:",
+        content,
+      ].join("\n\n");
+    } catch {
+      return content;
+    }
   }
 
   /**

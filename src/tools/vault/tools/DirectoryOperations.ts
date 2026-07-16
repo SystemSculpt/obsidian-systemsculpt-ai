@@ -336,7 +336,7 @@ export class DirectoryOperations {
                 };
                 
                 // Add preview for small text files, capped to a few items
-                if (previewsGenerated < PREVIEW_MAX_FILES && (child.extension === 'md' || child.extension === 'txt' || child.extension === 'base') && (child.stat.size || 0) <= PREVIEW_MAX_BYTES) {
+                if (previewsGenerated < PREVIEW_MAX_FILES && (child.extension === 'md' || child.extension === 'txt' || child.extension === 'base' || child.extension === 'systemsculpt') && (child.stat.size || 0) <= PREVIEW_MAX_BYTES) {
                   try {
                     const content = await this.app.vault.cachedRead(child);
                     // Get first non-empty line or first 150 chars

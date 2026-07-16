@@ -1,3 +1,5 @@
+import { ensureMobileHostLayoutState } from "../../../platform/mobileHostLayout";
+
 export type PluginSurfaceKind = "view" | "modal" | "transient";
 
 const SURFACE_CLASS = "ss-surface";
@@ -26,6 +28,7 @@ export function applyPluginSurface(
 
   root.classList.add(SURFACE_CLASS);
   root.setAttribute(SURFACE_ATTRIBUTE, kind);
+  ensureMobileHostLayoutState(root);
 }
 
 export function isPluginSurface(

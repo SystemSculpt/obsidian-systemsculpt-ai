@@ -8,6 +8,9 @@ import ts from "typescript";
 const root = process.cwd();
 const sourceRoot = path.join(root, "src");
 const desktopHostSeam = "src/platform/desktopOnly.ts";
+const hostCapabilitySeam = "src/platform/hostCapabilities.ts";
+const mobileLayoutSeam = "src/platform/mobileLayout.ts";
+const mobileHostLayoutSeam = "src/platform/mobileHostLayout.ts";
 const ignoredDirectories = new Set(["__tests__", "__mocks__", "tests", "mocks"]);
 const sourceExtensions = new Set([".ts", ".tsx", ".mts", ".cts"]);
 const nodeBuiltins = new Set(
@@ -120,4 +123,42 @@ test("manifest advertises desktop and mobile support", () => {
     false,
     "manifest.json isDesktopOnly must stay false once runtime source is mobile-safe",
   );
+});
+
+test("features consume owned host capabilities and mobile layout state", () => {
+  const hazards = [];
+  for (const filePath of runtimeSourceFiles(sourceRoot)) {
+    const repoPath = toRepoPath(filePath);
+    const source = fs.readFileSync(filePath, "utf8");
+    if (
+      ![desktopHostSeam, hostCapabilitySeam, mobileLayoutSeam].includes(repoPath)
+      && /\bPlatform\b/.test(source)
+    ) {
+      hazards.push(`${repoPath} reads Obsidian Platform outside the platform seams`);
+    }
+    if (repoPath !== hostCapabilitySeam && /["']electron["']/.test(source)) {
+      hazards.push(`${repoPath} resolves Electron outside ${hostCapabilitySeam}`);
+    }
+    if (repoPath !== mobileHostLayoutSeam && /\.mobile-navbar-action/.test(source)) {
+      hazards.push(`${repoPath} depends on Obsidian's private mobile navbar DOM`);
+    }
+    if (repoPath !== mobileLayoutSeam && /["']is-mobile["']/.test(source)) {
+      hazards.push(`${repoPath} consumes Obsidian's host class instead of owned mobile state`);
+    }
+  }
+
+  const cssFiles = (directory) => fs.readdirSync(directory, { withFileTypes: true })
+    .flatMap((entry) => {
+      const entryPath = path.join(directory, entry.name);
+      return entry.isDirectory() ? cssFiles(entryPath) : [entryPath];
+    })
+    .filter((filePath) => filePath.endsWith(".css"));
+  for (const filePath of cssFiles(path.join(sourceRoot, "css"))) {
+    const source = fs.readFileSync(filePath, "utf8");
+    if (/\.is-mobile|\.mobile-navbar-action/.test(source)) {
+      hazards.push(`${toRepoPath(filePath)} targets private Obsidian mobile selectors`);
+    }
+  }
+
+  assert.deepEqual(hazards, [], hazards.join("\n"));
 });

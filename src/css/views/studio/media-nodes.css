@@ -10,11 +10,10 @@
 
 /* ------------------------------------------------------------------ *
  * Media layout (data-chrome-layout="media") — media nodes whose card
- * IS the media. The card carries nothing but the image/video:
- *   - one flat pill of icon actions floating inside the media's edge
- *     (bottom for images; top for videos so the native playback
- *     controls stay free), always visible — no hover reveal anywhere
- *   - port pins centered on the side edges
+ * IS the media. The card carries the image/video plus its actions:
+ *   - image actions live in an in-flow toolbar below the image, never over it
+ *   - video actions stay in a top overlay so native playback controls remain free
+ *   - port pins stay centered on the media content, not the image toolbar
  *   - status badge inside the top-left corner, only while active/failed
  *
  * Gesture ownership lives in StudioMediaNodeActionBar.ts.
@@ -28,30 +27,45 @@
   contain: layout style;
 }
 
+.ss-studio-media-content {
+  position: relative;
+  width: 100%;
+}
+
 .ss-studio-node-card[data-chrome-layout="media"] .ss-studio-node-media-preview {
+  border-radius: calc(var(--ss-radius-lg) - 1px) calc(var(--ss-radius-lg) - 1px) 0 0;
+}
+
+.ss-studio-node-card[data-media-kind="video"] .ss-studio-node-media-preview {
   border-radius: calc(var(--ss-radius-lg) - 1px);
 }
 
 .ss-studio-media-action-bar {
-  position: absolute;
-  left: 50%;
-  bottom: var(--ss-space-2);
-  transform: translateX(-50%);
+  position: relative;
   z-index: 7;
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: var(--ss-space-0);
+  width: 100%;
   padding: var(--ss-space-1);
-  background-color: var(--ss-media-scrim);
-  border-radius: var(--ss-radius-full);
-  box-shadow: var(--ss-elevation-2);
+  background-color: var(--ss-surface-1);
+  border-top: 1px solid var(--ss-line);
+  border-radius: 0 0 calc(var(--ss-radius-lg) - 1px) calc(var(--ss-radius-lg) - 1px);
   /* Control surface, not a drag surface — never show the grab hand. */
   cursor: default;
 }
 
 .ss-studio-media-action-bar.is-top {
+  position: absolute;
+  left: 50%;
   top: var(--ss-space-2);
-  bottom: auto;
+  width: auto;
+  transform: translateX(-50%);
+  background-color: var(--ss-media-scrim);
+  border-top: 0;
+  border-radius: var(--ss-radius-full);
+  box-shadow: var(--ss-elevation-2);
 }
 
 .ss-studio-media-action {
@@ -61,7 +75,7 @@
   width: 30px;
   height: 30px;
   border-radius: var(--ss-radius-full);
-  color: var(--ss-ink-on-media-muted);
+  color: var(--ss-ink-muted);
   cursor: pointer;
   transition: var(--ss-transition-colors);
   --icon-size: 16px;
@@ -73,21 +87,34 @@
 }
 
 .ss-studio-media-action:hover {
-  background-color: var(--ss-media-state-hover);
-  color: var(--ss-ink-on-media);
+  background-color: var(--ss-state-hover);
+  color: var(--ss-ink);
 }
 
 .ss-studio-media-action.is-danger:hover {
   color: var(--ss-danger);
 }
 
+.ss-studio-media-action-bar.is-top .ss-studio-media-action {
+  color: var(--ss-ink-on-media-muted);
+}
+
+.ss-studio-media-action-bar.is-top .ss-studio-media-action:hover {
+  background-color: var(--ss-media-state-hover);
+  color: var(--ss-ink-on-media);
+}
+
 .ss-studio-media-action-bar.is-locked .ss-studio-media-action {
-  color: var(--ss-line-on-media);
+  color: var(--ss-ink-faint);
   cursor: default;
 }
 
 .ss-studio-media-action-bar.is-locked .ss-studio-media-action:hover {
   background-color: transparent;
+}
+
+.ss-studio-media-action-bar.is-top.is-locked .ss-studio-media-action {
+  color: var(--ss-line-on-media);
 }
 
 /* Ports: pins float centered on the side edges; labels stay in tooltips. */

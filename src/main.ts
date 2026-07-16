@@ -17,7 +17,7 @@ ErrorCollectorService.initializeEarlyLogsCapture();
 /**
  * SystemSculpt AI Plugin for Obsidian
  */
-import { Plugin, Notice, TFile, FileSystemAdapter, Platform, apiVersion } from "obsidian";
+import { Plugin, Notice, TFile, FileSystemAdapter, apiVersion } from "obsidian";
 export { StudioProjectGenerationStore } from "./studio/persistence/StudioProjectGenerationStore";
 export { ObsidianStudioGenerationAdapter } from "./studio/persistence/ObsidianStudioGenerationAdapter";
 import { checkObsidianCompatibility, MINIMUM_OBSIDIAN_VERSION } from "./core/plugin/lifecycle/ObsidianCompat";
@@ -43,6 +43,8 @@ import { FreezeMonitor } from "./services/FreezeMonitor";
 import { ResourceMonitorService } from "./services/ResourceMonitorService";
 import { PluginLogger } from "./utils/PluginLogger";
 import { InitializationTracer } from "./core/diagnostics/InitializationTracer";
+import { hasHostCapability, resolveElectronModule } from "./platform/hostCapabilities";
+import { disposeMobileHostLayoutStates } from "./platform/mobileHostLayout";
 import { yieldToEventLoop } from "./utils/yieldToEventLoop";
 import { PlatformContext } from "./services/PlatformContext";
 import { tryCopyToClipboard } from "./utils/clipboard";
@@ -1265,7 +1267,7 @@ export default class SystemSculptPlugin extends Plugin {
         return;
       }
 
-      if (Platform.isDesktop && !this.embeddingsStatusBar) {
+      if (hasHostCapability("status-bar") && !this.embeddingsStatusBar) {
         this.embeddingsStatusBar = this.addChild(new EmbeddingsStatusBar(this));
       }
 
@@ -1619,6 +1621,12 @@ export default class SystemSculptPlugin extends Plugin {
   async onunload() {
     this.isUnloading = true;
 
+    try {
+      disposeMobileHostLayoutStates();
+    } catch {
+      // Host-layout observers are best-effort and must never block teardown.
+    }
+
     // Halt self-rescheduling timers first and unconditionally (#214/#158): the
     // FreezeMonitor interval and PluginLogger flush timer never auto-clean, so
     // they must stop even if a later teardown step throws.
@@ -1822,9 +1830,14 @@ export default class SystemSculptPlugin extends Plugin {
     }
     const relativePath = this.storage.getPath("diagnostics");
     const adapter = this.app.vault.adapter;
-    if (adapter instanceof FileSystemAdapter) {
+    if (adapter instanceof FileSystemAdapter && hasHostCapability("file-manager-reveal")) {
       const fullPath = adapter.getFullPath(relativePath);
-      const electron = typeof window !== "undefined" ? (window as any)?.require?.("electron") : null;
+      const electron = resolveElectronModule<{
+        shell?: {
+          openPath?: (path: string) => Promise<unknown> | unknown;
+          openExternal?: (url: string) => Promise<unknown> | unknown;
+        };
+      }>();
       const shell = electron?.shell;
       if (shell?.openPath) {
         await shell.openPath(fullPath);

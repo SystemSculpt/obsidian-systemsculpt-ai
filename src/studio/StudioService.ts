@@ -14,6 +14,7 @@ import {
   type StudioProjectSessionMutationReason,
 } from "./StudioProjectSession";
 import { StudioProjectSessionManager } from "./StudioProjectSessionManager";
+import { StudioProjectRecoveryStore } from "./persistence/StudioProjectRecoveryStore";
 import { isBlanketCliCommandPattern, randomId } from "./utils";
 import type {
   StudioAssetRef,
@@ -28,11 +29,14 @@ import type {
 import {
   DEFAULT_STUDIO_PROJECTS_DIR,
   deriveStudioImportsDir,
+  deriveStudioPolicyPath,
   normalizeStudioProjectPath,
   sanitizeStudioProjectName,
 } from "./paths";
 import { parseStudioProject } from "./schema";
 import { sha256HexFromArrayBuffer } from "./hash";
+import { assertValidStudioProjectAgentDocumentStructure } from "./StudioProjectAgentDocumentValidation";
+import { validateStudioProjectForAgentEdit } from "./StudioProjectAgentContract";
 
 const IMPORTED_FILE_SEGMENT_FALLBACK = "import";
 
@@ -98,9 +102,12 @@ export class StudioService {
   private readonly apiAdapter: StudioApiExecutionAdapter;
   private readonly runtime: StudioRuntime;
   private readonly projectSessionManager = new StudioProjectSessionManager();
+  private readonly projectRecoveryStore: StudioProjectRecoveryStore;
+  private readonly projectSessionOperations = new Map<string, Promise<void>>();
 
   constructor(private readonly plugin: SystemSculptPlugin) {
     this.projectStore = new StudioProjectStore(plugin.app);
+    this.projectRecoveryStore = new StudioProjectRecoveryStore(plugin.app.vault.adapter);
     this.assetStore = new StudioAssetStore(this.projectStore);
     this.apiAdapter = new StudioApiExecutionAdapter(plugin);
     this.runtime = new StudioRuntime(
@@ -158,11 +165,16 @@ export class StudioService {
     const session = new StudioProjectSession({
       projectPath,
       project,
-      saveProject: async (nextProjectPath, nextProject) => {
-        await this.projectStore.saveProject(nextProjectPath, nextProject);
+      saveProject: async (nextProjectPath, nextProject, onBeforeProjectWrite) => {
+        await this.projectStore.saveProject(nextProjectPath, nextProject, {
+          onBeforeProjectWrite,
+        });
       },
       readProjectRawText: async (nextProjectPath) => {
         return this.projectStore.readProjectRawText(nextProjectPath);
+      },
+      saveBlockedProjectRecovery: async (_nextProjectPath, recoveryProject) => {
+        await this.preserveProjectRecovery(recoveryProject);
       },
     });
     const rawText =
@@ -175,11 +187,13 @@ export class StudioService {
     return session;
   }
 
-  private async loadProjectForSession(projectPath: string): Promise<{
+  private async loadProjectForSession(projectPath: string, options?: { forceReload?: boolean }): Promise<{
     project: StudioProjectV1;
     rawText: string | null;
   }> {
-    let project = await this.projectStore.loadProject(projectPath);
+    let project = options
+      ? await this.projectStore.loadProject(projectPath, options)
+      : await this.projectStore.loadProject(projectPath);
     const migration = migrateStudioProjectToPathOnlyPorts(project);
     if (migration.changed) {
       project = migration.project;
@@ -193,6 +207,17 @@ export class StudioService {
     };
   }
 
+  async preserveProjectRecovery(project: StudioProjectV1): Promise<void> {
+    await this.projectRecoveryStore.save(project);
+  }
+
+  async consumeBlockedProjectRecovery(
+    projectId: string,
+    currentProject?: StudioProjectV1
+  ): Promise<StudioProjectV1 | null> {
+    return await this.projectRecoveryStore.consume(projectId, currentProject);
+  }
+
   /**
    * Retain a project session for a specific owner (usually a Studio view).
    * Every retain must be paired with exactly one releaseProjectSession call;
@@ -203,20 +228,27 @@ export class StudioService {
     options?: { forceReload?: boolean }
   ): Promise<StudioProjectSession> {
     const normalized = normalizeStudioProjectPath(path);
+    return await this.withProjectSessionOperation(normalized, async () => {
+      const existingSession = this.projectSessionManager.getSession(normalized);
+      if (existingSession && options?.forceReload === true) {
+        // Load and validate completely before replacing the shared in-memory
+        // snapshot. A failed file reload therefore leaves the current canvas
+        // and its editor state untouched.
+        const loaded = await this.loadProjectForSession(normalized, { forceReload: true });
+        existingSession.replaceProjectSnapshot(loaded.project, {
+          projectPath: normalized,
+          acceptedRawText: loaded.rawText,
+        });
+      }
 
-    const existingSession = this.projectSessionManager.getSession(normalized);
-    if (existingSession && options?.forceReload === true) {
-      const loaded = await this.loadProjectForSession(normalized);
-      existingSession.replaceProjectSnapshot(loaded.project, {
-        projectPath: normalized,
-        acceptedRawText: loaded.rawText,
-      });
-    }
-
-    return await this.projectSessionManager.retainSession(normalized, async (sessionPath) => {
-      const loaded = await this.loadProjectForSession(sessionPath);
-      return await this.buildProjectSession(sessionPath, loaded.project, {
-        acceptedRawText: loaded.rawText,
+      return await this.projectSessionManager.retainSession(normalized, async (sessionPath) => {
+        // With no retained session there is no Studio view watching file
+        // modifications. Reconcile the visible project file before creating a
+        // new session instead of reusing a selection cached by an earlier view.
+        const loaded = await this.loadProjectForSession(sessionPath, { forceReload: true });
+        return await this.buildProjectSession(sessionPath, loaded.project, {
+          acceptedRawText: loaded.rawText,
+        });
       });
     });
   }
@@ -226,7 +258,30 @@ export class StudioService {
     if (!rawPath) {
       return;
     }
-    await this.projectSessionManager.releaseSession(normalizeStudioProjectPath(rawPath));
+    const normalized = normalizeStudioProjectPath(rawPath);
+    await this.withProjectSessionOperation(normalized, async () => {
+      await this.projectSessionManager.releaseSession(normalized);
+    });
+  }
+
+  private async withProjectSessionOperation<T>(
+    projectPath: string,
+    operation: () => Promise<T>
+  ): Promise<T> {
+    const prior = this.projectSessionOperations.get(projectPath) || Promise.resolve();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const queued = prior.catch(() => {}).then(() => gate);
+    this.projectSessionOperations.set(projectPath, queued);
+    await prior.catch(() => {});
+    try {
+      return await operation();
+    } finally {
+      release();
+      if (this.projectSessionOperations.get(projectPath) === queued) {
+        this.projectSessionOperations.delete(projectPath);
+      }
+    }
   }
 
   private getProjectsFolder(): string {
@@ -366,6 +421,63 @@ export class StudioService {
     return renamed;
   }
 
+  async adoptVisibleProjectRename(oldProjectPath: string, newProjectPath: string): Promise<{
+    oldPath: string;
+    newPath: string;
+    project: StudioProjectV1;
+    replacedCanvasProject: StudioProjectV1 | null;
+  }> {
+    const oldPath = normalizeStudioProjectPath(oldProjectPath);
+    const newPath = normalizeStudioProjectPath(newProjectPath);
+    const session = this.projectSessionManager.getSession(oldPath);
+    if (!session) {
+      throw new Error("Studio no longer has the renamed project open.");
+    }
+    const movedRawText = await this.projectStore.readVisibleProjectRawText(newPath);
+    const lintResult = this.lintProjectText(movedRawText);
+    if (!lintResult.ok) {
+      throw new Error(`Studio couldn't read the renamed project file: ${lintResult.error}`);
+    }
+    if (lintResult.project.projectId !== session.getProject().projectId) {
+      throw new Error("The renamed Studio file does not match the open project.");
+    }
+
+    const currentCanvas = session.getProjectSnapshot();
+    const fileContainsLastSavedCanvas = session.matchesLastAcceptedProjectText(movedRawText);
+    const replacedCanvasProject =
+      !fileContainsLastSavedCanvas && session.hasPendingLocalSaveWork()
+        ? currentCanvas
+        : null;
+    if (replacedCanvasProject) {
+      // Content changed as well as the path. Preserve the canvas before the
+      // file wins so a failed recovery write blocks the transition.
+      await this.preserveProjectRecovery(replacedCanvasProject);
+    }
+    const fileName = newPath.slice(newPath.lastIndexOf("/") + 1);
+    const projectName = fileName.slice(0, -".systemsculpt".length) || lintResult.project.name;
+    const sourceProject = fileContainsLastSavedCanvas ? currentCanvas : lintResult.project;
+    const renamed = await this.projectStore.adoptVisibleProjectRename({
+      oldPath,
+      newPath,
+      movedRawText,
+      project: {
+        ...sourceProject,
+        name: projectName,
+        permissionsRef: {
+          ...sourceProject.permissionsRef,
+          policyPath: deriveStudioPolicyPath(newPath),
+        },
+      },
+    });
+    const nextRawText = await this.projectStore.readProjectRawText(renamed.newPath);
+    session.replaceProjectSnapshot(renamed.project, {
+      projectPath: renamed.newPath,
+      acceptedRawText: nextRawText,
+    });
+    this.projectSessionManager.moveSession(renamed.oldPath, renamed.newPath);
+    return { ...renamed, replacedCanvasProject };
+  }
+
   async saveProject(projectPath: string, project: StudioProjectV1): Promise<void> {
     const normalizedProjectPath = normalizeStudioProjectPath(projectPath);
     await this.projectStore.saveProject(normalizedProjectPath, project);
@@ -382,8 +494,11 @@ export class StudioService {
 
   lintProjectText(rawText: string): StudioProjectLintResult {
     try {
-      const project = parseStudioProject(String(rawText || ""));
+      const projectText = String(rawText || "");
+      assertValidStudioProjectAgentDocumentStructure(JSON.parse(projectText));
+      const project = parseStudioProject(projectText);
       this.compiler.compile(project, this.registry);
+      validateStudioProjectForAgentEdit(project);
       return {
         ok: true,
         project,

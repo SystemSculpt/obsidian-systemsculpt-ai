@@ -1,4 +1,5 @@
 import type { App, TFile } from "obsidian";
+import { resolveElectronModule } from "../platform/hostCapabilities";
 
 function imageMimeTypeFromExtension(extension: string): string | null {
   const ext = String(extension || "").trim().toLowerCase();
@@ -32,24 +33,10 @@ function resolveClipboardWindow(host?: Node): Window | undefined {
 }
 
 function resolveElectron(hostWindow?: Window): ElectronLike | null {
-  const candidates = [
-    (hostWindow as any)?.require,
-    (hostWindow as any)?.window?.require,
-  ];
-
-  for (const candidate of candidates) {
-    if (typeof candidate !== "function") continue;
-    try {
-      const electron = candidate("electron") as ElectronLike;
-      if (electron?.clipboard?.writeImage && electron?.nativeImage?.createFromDataURL) {
-        return electron;
-      }
-    } catch {
-      // ignore and continue
-    }
-  }
-
-  return null;
+  const electron = resolveElectronModule<ElectronLike>(hostWindow);
+  return electron?.clipboard?.writeImage && electron?.nativeImage?.createFromDataURL
+    ? electron
+    : null;
 }
 
 function toBase64(bytes: ArrayBuffer, hostWindow?: Window): string | null {

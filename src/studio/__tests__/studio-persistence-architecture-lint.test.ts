@@ -67,6 +67,7 @@ describe("Studio persistence architecture lint", () => {
     const persistenceFiles = new Set([
       "src/studio/persistence/ObsidianStudioGenerationAdapter.ts",
       "src/studio/persistence/StudioProjectGenerationStore.ts",
+      "src/studio/persistence/StudioProjectRecoveryStore.ts",
     ]);
     const allowedNonProjectContexts = new Set([
       "src/main.ts#rotateDiagnosticsFile",

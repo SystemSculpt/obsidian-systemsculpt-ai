@@ -109,11 +109,13 @@ describe("renderStudioMediaNodeActionBar", () => {
     browseMock.mockResolvedValue(null);
   });
 
-  it("renders one flat pill of actions for images — no dividers, no scrim layers", () => {
+  it("renders a labeled in-flow toolbar for images", () => {
     const { nodeEl, barEl } = renderBarHarness();
 
     expect(barEl).not.toBeNull();
     expect(barEl?.classList.contains("is-top")).toBe(false);
+    expect(barEl?.getAttribute("role")).toBe("toolbar");
+    expect(barEl?.getAttribute("aria-label")).toBe("Image actions");
     expect(nodeEl.querySelector(".ss-studio-media-node-actions-divider")).toBeNull();
     const labels = Array.from(barEl?.querySelectorAll("button") ?? []).map((button) =>
       button.getAttribute("aria-label")
@@ -132,6 +134,8 @@ describe("renderStudioMediaNodeActionBar", () => {
     const { barEl } = renderBarHarness({ mediaKind: "video" });
 
     expect(barEl?.classList.contains("is-top")).toBe(true);
+    expect(barEl?.getAttribute("role")).toBe("toolbar");
+    expect(barEl?.getAttribute("aria-label")).toBe("Video actions");
     const labels = Array.from(barEl?.querySelectorAll("button") ?? []).map((button) =>
       button.getAttribute("aria-label")
     );

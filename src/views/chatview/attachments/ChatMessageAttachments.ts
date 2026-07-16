@@ -26,7 +26,7 @@ const IMAGE_MIME_BY_EXTENSION: Readonly<Record<string, "image/png" | "image/jpeg
 const TEXT_EXTENSIONS = new Set([
   "c", "cc", "cpp", "css", "csv", "go", "h", "hpp", "htm", "html", "ini", "java",
   "js", "json", "jsonl", "jsx", "log", "md", "markdown", "mjs", "py", "rb", "rs", "sh",
-  "sql", "toml", "ts", "tsx", "txt", "xml", "yaml", "yml", "zsh",
+  "sql", "systemsculpt", "toml", "ts", "tsx", "txt", "xml", "yaml", "yml", "zsh",
 ]);
 
 const TEXT_MIME_TYPES = new Set([

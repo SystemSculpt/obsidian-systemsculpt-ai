@@ -101,4 +101,67 @@ describe("StudioService lintProjectText", () => {
       expect(result.error).toContain("missing node definition");
     }
   });
+
+  it("rejects raw node geometry that the compatibility parser would normalize", () => {
+    const service = new StudioService(createPluginStub());
+    const project = createEmptyStudioProject({
+      name: "Raw geometry",
+      policyPath: "SystemSculpt/Studio/Raw geometry.systemsculpt-assets/policy/grants.json",
+      minPluginVersion: "9.9.9",
+      maxRuns: 100,
+      maxArtifactsMb: 1024,
+    });
+    project.graph.nodes.push({
+      id: "node_input",
+      kind: "studio.input",
+      version: "1.0.0",
+      title: "Input",
+      position: { x: 80, y: 120 },
+      config: { value: "hello" },
+      continueOnError: false,
+      disabled: false,
+    });
+    const rawDocument = JSON.parse(serializeStudioProject(project));
+    rawDocument.graph.nodes[0].position.x = "80";
+
+    const result = service.lintProjectText(JSON.stringify(rawDocument));
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toContain("position.x must be a finite number");
+    }
+  });
+
+  it("rejects raw group membership that the compatibility parser would discard", () => {
+    const service = new StudioService(createPluginStub());
+    const project = createEmptyStudioProject({
+      name: "Raw groups",
+      policyPath: "SystemSculpt/Studio/Raw groups.systemsculpt-assets/policy/grants.json",
+      minPluginVersion: "9.9.9",
+      maxRuns: 100,
+      maxArtifactsMb: 1024,
+    });
+    project.graph.nodes.push({
+      id: "node_input",
+      kind: "studio.input",
+      version: "1.0.0",
+      title: "Input",
+      position: { x: 80, y: 120 },
+      config: { value: "hello" },
+      continueOnError: false,
+      disabled: false,
+    });
+    project.graph.groups.push({
+      id: "group_missing_member",
+      name: "Missing member",
+      nodeIds: ["node_missing"],
+    });
+
+    const result = service.lintProjectText(serializeStudioProject(project));
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toContain('references missing node "node_missing"');
+    }
+  });
 });

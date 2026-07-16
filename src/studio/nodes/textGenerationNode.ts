@@ -9,6 +9,7 @@ import {
 export const textGenerationNode: StudioNodeDefinition = {
   kind: "studio.text_generation",
   version: "1.0.0",
+  requiredHostCapabilities: [],
   capabilityClass: "api",
   cachePolicy: "never",
   inputPorts: [{ id: "prompt", type: "text", required: true }],

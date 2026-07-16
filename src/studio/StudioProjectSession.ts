@@ -53,16 +53,24 @@ export type StudioProjectSessionDebugState = {
   dirtyRevision: number;
   persistedRevision: number;
   hasPendingLocalSaveWork: boolean;
-  hasDeferredExternalSync: boolean;
   saveTimerMode: StudioProjectSessionAutosaveMode | null;
   saveInFlight: boolean;
+  saveFailurePaused: boolean;
 };
 
 type StudioProjectSessionOptions = {
   projectPath: string;
   project: StudioProjectV1;
-  saveProject: (projectPath: string, project: StudioProjectV1) => Promise<void>;
+  saveProject: (
+    projectPath: string,
+    project: StudioProjectV1,
+    onBeforeProjectWrite?: (rawText: string) => void
+  ) => Promise<void>;
   readProjectRawText?: (projectPath: string) => Promise<string | null>;
+  saveBlockedProjectRecovery?: (
+    projectPath: string,
+    project: StudioProjectV1
+  ) => Promise<void>;
   discreteDelayMs?: number;
   continuousDelayMs?: number;
 };
@@ -82,9 +90,10 @@ export class StudioProjectSession {
   private saveInFlightPromise: Promise<void> | null = null;
   private saveQueued = false;
   private saveQueuedMode: StudioProjectSessionAutosaveMode | null = null;
+  private saveFailurePaused = false;
   private dirtyRevision = 0;
   private persistedRevision = 0;
-  private pendingExternalSync = false;
+  private projectFileWriteBlocked = false;
   private disposed = false;
   private lastAcceptedSignature: string | null = null;
   private lastRejectedSignature: string | null = null;
@@ -136,9 +145,9 @@ export class StudioProjectSession {
       dirtyRevision: this.dirtyRevision,
       persistedRevision: this.persistedRevision,
       hasPendingLocalSaveWork: this.hasPendingLocalSaveWork(),
-      hasDeferredExternalSync: this.hasDeferredExternalSync(),
       saveTimerMode: this.saveTimerMode,
       saveInFlight: this.saveInFlight,
+      saveFailurePaused: this.saveFailurePaused,
     };
   }
 
@@ -214,7 +223,11 @@ export class StudioProjectSession {
     this.saveQueuedMode = null;
     this.dirtyRevision = 0;
     this.persistedRevision = 0;
-    this.clearLiveSyncState();
+    this.saveFailurePaused = false;
+    if (typeof options?.acceptedRawText === "string") {
+      this.projectFileWriteBlocked = false;
+    }
+    this.clearProjectFileState();
     if (typeof options?.acceptedRawText === "string" && options.acceptedRawText.length > 0) {
       this.markAcceptedProjectText(options.acceptedRawText);
     }
@@ -236,21 +249,40 @@ export class StudioProjectSession {
     );
   }
 
-  hasDeferredExternalSync(): boolean {
-    return this.pendingExternalSync;
-  }
-
-  consumeDeferredExternalSync(): boolean {
-    const pending = this.pendingExternalSync;
-    this.pendingExternalSync = false;
-    return pending;
-  }
-
-  clearLiveSyncState(): void {
-    this.pendingExternalSync = false;
+  clearProjectFileState(): void {
     this.lastAcceptedSignature = null;
     this.lastRejectedSignature = null;
     this.expectedProjectWriteSignatures.clear();
+  }
+
+  blockProjectFileWrites(): void {
+    this.projectFileWriteBlocked = true;
+    this.clearSaveTimer();
+    this.saveQueued = false;
+    this.saveQueuedMode = null;
+  }
+
+  resumeProjectFileWrites(): void {
+    if (!this.projectFileWriteBlocked || this.disposed) {
+      return;
+    }
+    this.projectFileWriteBlocked = false;
+    this.saveFailurePaused = false;
+    if (
+      !this.saveInFlight &&
+      this.saveTimer === null &&
+      this.dirtyRevision !== this.persistedRevision
+    ) {
+      this.startSaveTimer("discrete");
+    }
+  }
+
+  async waitForInFlightSave(): Promise<void> {
+    await (this.saveInFlightPromise || Promise.resolve());
+  }
+
+  matchesLastAcceptedProjectText(rawText: string): boolean {
+    return computeStudioProjectTextSignature(rawText) === this.lastAcceptedSignature;
   }
 
   markAcceptedProjectSignature(signature: string, options?: { trackExpectedWrite?: boolean }): void {
@@ -274,6 +306,7 @@ export class StudioProjectSession {
     if (!normalized) {
       return;
     }
+    this.lastAcceptedSignature = null;
     this.lastRejectedSignature = normalized;
   }
 
@@ -281,7 +314,7 @@ export class StudioProjectSession {
     this.markRejectedProjectSignature(computeStudioProjectTextSignature(rawText));
   }
 
-  resolveExternalProjectTextUpdate(
+  resolveProjectFileTextUpdate(
     rawText: string,
     options?: {
       isActiveProjectFile?: boolean;
@@ -294,7 +327,6 @@ export class StudioProjectSession {
     );
     const decision = resolveStudioProjectModifyDecision({
       isActiveProjectFile: options?.isActiveProjectFile !== false,
-      hasPendingLocalSaveWork: this.hasPendingLocalSaveWork(),
       isExpectedSelfWrite,
       signature,
       lastAcceptedSignature: this.lastAcceptedSignature,
@@ -309,10 +341,6 @@ export class StudioProjectSession {
       return { signature, decision };
     }
 
-    if (decision.kind === "defer") {
-      this.pendingExternalSync = true;
-    }
-
     return { signature, decision };
   }
 
@@ -325,7 +353,14 @@ export class StudioProjectSession {
       return;
     }
     const mode = options?.mode || "discrete";
+    // A new edit is an explicit retry signal. A failed save pauses automatic
+    // retry churn, but it must never make later user work permanently inert.
+    this.saveFailurePaused = false;
     this.dirtyRevision += 1;
+
+    if (this.projectFileWriteBlocked) {
+      return;
+    }
 
     if (this.saveInFlight) {
       this.saveQueued = true;
@@ -348,6 +383,15 @@ export class StudioProjectSession {
     if (this.disposed) {
       return;
     }
+    if (this.projectFileWriteBlocked) {
+      return;
+    }
+    if (this.saveFailurePaused && options?.force !== true) {
+      return;
+    }
+    if (options?.force === true) {
+      this.saveFailurePaused = false;
+    }
     if (options?.force !== true && !this.hasPendingLocalSaveWork()) {
       return;
     }
@@ -369,7 +413,33 @@ export class StudioProjectSession {
     if (this.disposed) {
       return;
     }
-    await this.flushPendingSaveWork({ force: true });
+    let flushError: unknown = null;
+    try {
+      await this.flushPendingSaveWork({ force: true });
+    } catch (error) {
+      // A competing file edit can make the final canvas CAS fail. Stop further
+      // writes and preserve that canvas snapshot as Undo instead of dropping it
+      // during teardown.
+      flushError = error;
+      this.blockProjectFileWrites();
+    }
+    const needsRecovery = this.projectFileWriteBlocked && this.hasPendingLocalSaveWork();
+    if (needsRecovery) {
+      if (!this.options.saveBlockedProjectRecovery) {
+        throw flushError instanceof Error
+          ? flushError
+          : new Error("Studio could not preserve unsaved canvas work.");
+      }
+      // Recovery persistence is a close gate. If it fails, this session stays
+      // alive so the only remaining copy of the canvas is never discarded.
+      await this.options.saveBlockedProjectRecovery(this.projectPath, this.getProjectSnapshot());
+    }
+    if (flushError) {
+      console.warn("[SystemSculpt Studio] Preserved a canvas version that lost a file-edit race", {
+        projectPath: this.projectPath,
+        error: flushError instanceof Error ? flushError.message : String(flushError),
+      });
+    }
     this.disposed = true;
     this.clearSaveTimer();
     this.listeners.clear();
@@ -409,12 +479,17 @@ export class StudioProjectSession {
     this.saveTimer = window.setTimeout(() => {
       this.saveTimer = null;
       this.saveTimerMode = null;
-      void this.flushSave();
+      void this.flushSave().catch((error) => {
+        console.warn("[SystemSculpt Studio] Unable to persist project session", {
+          projectPath: this.projectPath,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
     }, delayMs);
   }
 
   private async flushSave(): Promise<void> {
-    if (this.disposed || !this.projectPath) {
+    if (this.disposed || this.projectFileWriteBlocked || !this.projectPath) {
       return;
     }
 
@@ -431,19 +506,46 @@ export class StudioProjectSession {
 
     this.saveInFlight = true;
     const revisionToPersist = this.dirtyRevision;
+    let expectedWriteSignature: string | null = null;
     const savePromise = (async () => {
       try {
-        await this.options.saveProject(this.projectPath, this.project);
-        const rawText = this.options.readProjectRawText
-          ? await this.options.readProjectRawText(this.projectPath)
-          : null;
-        if (rawText != null) {
-          this.markAcceptedProjectText(rawText, { trackExpectedWrite: true });
+        await this.options.saveProject(this.projectPath, this.project, (rawText) => {
+          expectedWriteSignature = computeStudioProjectTextSignature(rawText);
+          trackExpectedStudioProjectWriteSignature(
+            this.expectedProjectWriteSignatures,
+            expectedWriteSignature
+          );
+        });
+        this.saveFailurePaused = false;
+        if (expectedWriteSignature) {
+          this.markAcceptedProjectSignature(expectedWriteSignature);
+        } else {
+          const rawText = this.options.readProjectRawText
+            ? await this.options.readProjectRawText(this.projectPath)
+            : null;
+          if (rawText != null) {
+            this.markAcceptedProjectText(rawText);
+          }
         }
         this.persistedRevision = Math.max(this.persistedRevision, revisionToPersist);
+      } catch (error) {
+        if (expectedWriteSignature) {
+          this.expectedProjectWriteSignatures.delete(expectedWriteSignature);
+        }
+        const newerEditArrived = this.dirtyRevision > revisionToPersist;
+        this.saveFailurePaused = !newerEditArrived;
+        if (!newerEditArrived) {
+          this.saveQueued = false;
+          this.saveQueuedMode = null;
+        }
+        throw error;
       } finally {
         this.saveInFlight = false;
-        if (this.saveQueued || this.dirtyRevision !== this.persistedRevision) {
+        if (
+          !this.projectFileWriteBlocked
+          && !this.saveFailurePaused
+          && (this.saveQueued || this.dirtyRevision !== this.persistedRevision)
+        ) {
           const queuedMode = this.saveQueuedMode || "discrete";
           this.saveQueued = false;
           this.saveQueuedMode = null;

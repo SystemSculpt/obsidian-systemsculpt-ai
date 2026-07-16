@@ -87,3 +87,49 @@
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
 }
+
+/* The native mobile view header already owns the current chat title. Keep the
+ * plugin row focused on session actions and clear Obsidian's fixed nav. */
+.ss-mobile-layout .systemsculpt-agent-workspace {
+  padding-bottom: var(--ss-mobile-bottom-clearance);
+}
+
+/* Obsidian removes the floating navbar while the software keyboard is open
+ * and already shrinks the app container. Do not reserve the hidden navbar a
+ * second time in that state. */
+.ss-mobile-layout.ss-mobile-navbar-hidden .systemsculpt-agent-workspace {
+  padding-bottom: var(--ss-space-2);
+}
+
+.ss-mobile-layout .systemsculpt-agent-header {
+  padding: var(--ss-space-1) var(--ss-space-3);
+}
+
+.ss-mobile-layout .systemsculpt-agent-header-title {
+  display: none;
+}
+
+.ss-mobile-layout .systemsculpt-agent-header-actions {
+  width: 100%;
+  margin-left: 0;
+}
+
+.ss-mobile-layout .systemsculpt-agent-credits {
+  margin-right: auto;
+}
+
+/* Android landscape leaves only a single control row beneath Obsidian's
+ * native header while the software keyboard is visible. The composer owns
+ * that scarce row; secondary workspace chrome returns with the navbar. */
+@media (orientation: landscape) {
+  .ss-mobile-layout.ss-mobile-navbar-hidden .systemsculpt-agent-workspace {
+    padding-bottom: 0;
+  }
+
+  .ss-mobile-layout.ss-mobile-navbar-hidden .systemsculpt-agent-header,
+  .ss-mobile-layout.ss-mobile-navbar-hidden .systemsculpt-agent-banner,
+  .ss-mobile-layout.ss-mobile-navbar-hidden .systemsculpt-agent-viewport,
+  .ss-mobile-layout.ss-mobile-navbar-hidden .systemsculpt-agent-queue {
+    display: none;
+  }
+}
