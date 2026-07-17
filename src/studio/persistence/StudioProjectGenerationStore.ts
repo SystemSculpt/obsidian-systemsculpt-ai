@@ -5,6 +5,7 @@ import { validateStudioProjectForAgentEdit } from "../StudioProjectAgentContract
 import {
   assertStableStudioProjectAgentDocumentFieldsUnchanged,
   assertValidStudioProjectAgentDocumentStructure,
+  studioProjectGeneratedFieldsMatch,
 } from "../StudioProjectAgentDocumentValidation";
 
 export type GenerationHash = string;
@@ -334,7 +335,8 @@ export class StudioProjectGenerationStore {
       if (!recoveredDocument) throw new Error("Project history is missing its document.");
       assertStableStudioProjectAgentDocumentFieldsUnchanged(
         rawDocument,
-        JSON.parse(decoder.decode(recoveredDocument))
+        JSON.parse(decoder.decode(recoveredDocument)),
+        { ignoreGeneratedFields: true }
       );
     } catch (error) {
       return {
@@ -594,11 +596,18 @@ export class StudioProjectGenerationStore {
     // The .systemsculpt file is the editable project. Plugin-owned support
     // data never makes an otherwise valid project document stale.
     const recoveredDocument = recovered.generation.files.get("project.systemsculpt");
+    let generatedFieldsMatch = true;
     if (recoveredDocument) {
       try {
+        const recoveredProjectDocument = JSON.parse(decoder.decode(recoveredDocument));
+        generatedFieldsMatch = studioProjectGeneratedFieldsMatch(
+          rawProjectDocument,
+          recoveredProjectDocument
+        );
         assertStableStudioProjectAgentDocumentFieldsUnchanged(
           rawProjectDocument,
-          JSON.parse(decoder.decode(recoveredDocument))
+          recoveredProjectDocument,
+          { ignoreGeneratedFields: true }
         );
       } catch (error) {
         return {
@@ -622,7 +631,16 @@ export class StudioProjectGenerationStore {
     const files = new Map(
       [...recovered.generation.files].map(([path, bytes]) => [path, bytes.slice()] as const)
     );
-    files.set("project.systemsculpt", document.slice());
+    // agentGuide and nodeKindReference are generated descriptions of the
+    // current plugin, not user-authored project identity. Older backups can
+    // legitimately omit or contain stale copies. Preserve the validated
+    // canvas edit while restoring only those generated blocks.
+    files.set(
+      "project.systemsculpt",
+      generatedFieldsMatch
+        ? document.slice()
+        : encoder.encode(serializeStudioProject(project))
+    );
     return this.publish(
       project.projectId,
       files,

@@ -5,6 +5,7 @@ import {
   type StudioGenerationAdapter,
 } from "../persistence/StudioProjectGenerationStore";
 import { sha256HexFromBytesPortable } from "../hash";
+import { parseStudioProject, serializeStudioProject } from "../schema";
 import { FileOperations } from "../../tools/vault/tools/FileOperations";
 
 class MemoryAdapter implements StudioGenerationAdapter {
@@ -388,6 +389,46 @@ describe("StudioProjectGenerationStore", () => {
     }
     const generations = await adapter.list(".systemsculpt/studio/projects/project_alpha/generations");
     expect(generations.folders).toHaveLength(1);
+  });
+
+  it("loads an older valid project file and regenerates missing authoring references", async () => {
+    const adapter = new MemoryAdapter(); await seedLegacy(adapter);
+    const store = new StudioProjectGenerationStore(adapter, {
+      now: () => "2026-07-11T01:02:03.004Z",
+    });
+    const root = await store.discoverAndAdopt(locator);
+    if (root.status !== "committed") throw new Error("adoption failed");
+
+    const canonicalDocument = serializeStudioProject(parseStudioProject(legacyProject));
+    const canonical = await store.commitWholeGeneration({
+      kind: "replace_project",
+      projectId: "project_alpha",
+      reason: "discrete_save",
+      projectDocument: new TextEncoder().encode(canonicalDocument),
+    }, root.expectedGeneration);
+    if (canonical.status !== "committed") throw new Error("canonical save failed");
+
+    const restoredDocument = JSON.parse(canonicalDocument);
+    restoredDocument.name = "Restored older backup";
+    delete restoredDocument.agentGuide;
+    delete restoredDocument.nodeKindReference;
+    adapter.files.set(
+      locator.vaultRelativeProjectPath,
+      new TextEncoder().encode(`${JSON.stringify(restoredDocument, null, 2)}\n`)
+    );
+
+    const opened = await new StudioProjectGenerationStore(adapter, {
+      now: () => "2026-07-11T02:02:03.004Z",
+    }).open("project_alpha", locator);
+
+    expect(opened.status).toBe("ready");
+    if (opened.status !== "ready") return;
+    expect(opened.expectedGeneration.revision).toBe(2);
+    expect(opened.generation.metadata.commandKind).toBe("external_sync");
+    const repaired = JSON.parse(await adapter.read(locator.vaultRelativeProjectPath));
+    expect(repaired.name).toBe("Restored older backup");
+    expect(repaired.agentGuide?.schema).toBe("studio.agent-guide.v1");
+    expect(repaired.nodeKindReference?.schema).toBe("studio.node-kind-reference.v1");
   });
 
   it("reconciles a valid direct edit on first open after restart", async () => {
