@@ -228,9 +228,25 @@ export class StudioProjectGenerationStore {
     }
   }
 
-  private async authorityHasCandidates(projectId: string): Promise<boolean> {
-    try { const listed = await this.adapter.list(generationRoot(projectId)); return listed.files.length > 0 || listed.folders.length > 0; }
-    catch { return false; }
+  private async inspectAuthorityCandidates(projectId: string): Promise<{ any: boolean; committed: boolean } | null> {
+    try {
+      const listed = await this.adapter.list(generationRoot(projectId));
+      if (listed.files.length > 0) return { any: true, committed: true };
+      for (const folder of listed.folders) {
+        try {
+          if (await this.adapter.exists(`${folder}/commit.json`)) {
+            return { any: true, committed: true };
+          }
+        } catch {
+          // An unreadable candidate may contain committed authority. Require
+          // explicit recovery instead of treating it as disposable debris.
+          return { any: true, committed: true };
+        }
+      }
+      return { any: listed.folders.length > 0, committed: false };
+    } catch {
+      return null;
+    }
   }
 
   private async exclusive<T>(projectId: string, action: () => Promise<T>): Promise<T> {
@@ -281,7 +297,17 @@ export class StudioProjectGenerationStore {
         return this.reconcileProjectionUnlocked(locator, existing);
       }
       if (existing.status === "fork_detected" || existing.status === "future_unsupported") return existing;
-      if (await this.authorityHasCandidates(projectId)) return { status: "recovery_required", message: "Existing authority candidates failed validation; legacy bytes were preserved." };
+      const candidates = await this.inspectAuthorityCandidates(projectId);
+      const mayRetryInterruptedRoot =
+        existing.message === "No validated generation exists."
+        && candidates?.any === true
+        && candidates.committed === false;
+      if (candidates?.any && !mayRetryInterruptedRoot) {
+        return {
+          status: "recovery_required",
+          message: `Existing authority candidates failed validation (${existing.message}); legacy bytes were preserved.`,
+        };
+      }
       try { validateClosedLegacyProject(JSON.parse(decoder.decode(documentBytes)) as Record<string, unknown>, locator); }
       catch (error) { return { status: "invalid_candidate", message: String(error) }; }
       const files = new Map<string, Uint8Array>(); files.set("project.systemsculpt", documentBytes);
@@ -306,7 +332,18 @@ export class StudioProjectGenerationStore {
     return this.exclusive(command.projectId, async () => {
       const recovered = await this.recover(command.projectId);
       if (recovered.status === "ready") return { status: "stale_revision", expectedGeneration: recovered.expectedGeneration };
-      if (await this.authorityHasCandidates(command.projectId)) return { status: "recovery_required", message: "Existing authority candidates failed validation." };
+      const candidates = await this.inspectAuthorityCandidates(command.projectId);
+      const mayRetryInterruptedRoot =
+        recovered.status === "recovery_required"
+        && recovered.message === "No validated generation exists."
+        && candidates?.any === true
+        && candidates.committed === false;
+      if (candidates?.any && !mayRetryInterruptedRoot) {
+        return {
+          status: "recovery_required",
+          message: `Existing authority candidates failed validation (${recovered.message}).`,
+        };
+      }
       try {
         const files = new Map<string, Uint8Array>([
           ["project.systemsculpt", command.projectDocument.slice()],
@@ -723,7 +760,7 @@ export class StudioProjectGenerationStore {
     if (manifest.schemaVersion !== 1) throw new Error("future schema");
     if (!hasExactKeys(manifest as unknown as Record<string, unknown>, ["schemaVersion", "projectId", "revision", "parentRevision", "parentGenerationHash", "generationHash", "createdAt", "commandKind", "entries", "projection"])) throw new Error("manifest schema is not closed");
     authority(manifest.projectId);
-    if (!HASH.test(manifest.generationHash) || !Number.isSafeInteger(manifest.revision) || manifest.revision < 0 || !RFC3339_MS.test(manifest.createdAt) || !["create", "discrete_save", "autosave", "policy", "manifest", "asset", "run", "cache", "migration", "repair", "external_sync", "logical_rename"].includes(manifest.commandKind)) throw new Error("invalid manifest identity");
+    if (!HASH.test(manifest.generationHash) || !Number.isSafeInteger(manifest.revision) || manifest.revision < 0 || !RFC3339_MS.test(manifest.createdAt) || !["create", "discrete_save", "autosave", "policy", "manifest", "asset", "support", "run", "cache", "migration", "repair", "external_sync", "logical_rename"].includes(manifest.commandKind)) throw new Error("invalid manifest identity");
     if (!hasExactKeys(manifest.projection as unknown as Record<string, unknown>, ["canonicalPath", "supportRoot"]) || validateProjectionLocator({ vaultRelativeProjectPath: manifest.projection.canonicalPath }).vaultRelativeProjectPath !== manifest.projection.canonicalPath || deriveStudioAssetsDir(manifest.projection.canonicalPath) !== manifest.projection.supportRoot) throw new Error("invalid manifest projection");
     if ((manifest.revision === 0) !== (manifest.parentRevision === null && manifest.parentGenerationHash === null)) throw new Error("invalid root lineage");
     if (manifest.revision > 0 && (!Number.isSafeInteger(manifest.parentRevision) || manifest.parentRevision !== manifest.revision - 1 || !HASH.test(String(manifest.parentGenerationHash)))) throw new Error("invalid descendant lineage");
