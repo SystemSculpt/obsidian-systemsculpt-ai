@@ -54,9 +54,12 @@ describe("shared extension helpers", () => {
     expect(normalizeFileExtension(undefined)).toBe("");
   });
 
-  it("keeps the managed transcription extension set unchanged", () => {
-    expect([...AUDIO_FILE_EXTENSIONS]).toEqual(["mp3", "wav", "m4a", "ogg", "webm"]);
+  it("keeps the managed transcription extension set centralized", () => {
+    expect([...AUDIO_FILE_EXTENSIONS]).toEqual(["mp3", "wav", "m4a", "mp4", "ogg", "webm", "flac"]);
     expect(isAudioFileExtension(" WAV ")).toBe(true);
+    expect(isAudioFileExtension("FLAC")).toBe(true);
+    expect(isAudioFileExtension("aac")).toBe(false);
+    expect(isAudioFileExtension("opus")).toBe(false);
     expect(isAudioFileExtension("pdf")).toBe(false);
   });
 });

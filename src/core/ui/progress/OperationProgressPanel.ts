@@ -59,6 +59,26 @@ interface OperationProgressItemElements {
   statusIcon: HTMLElement;
 }
 
+interface OperationProgressStack {
+  element: HTMLElement;
+  panels: Set<HTMLElement>;
+}
+
+const progressStacks = new WeakMap<HTMLElement, OperationProgressStack>();
+
+function acquireProgressStack(host: HTMLElement): OperationProgressStack {
+  const current = progressStacks.get(host);
+  if (current?.element.isConnected || current?.element.parentElement === host) {
+    return current;
+  }
+  const stack: OperationProgressStack = {
+    element: host.createDiv({ cls: "systemsculpt-progress-stack" }),
+    panels: new Set(),
+  };
+  progressStacks.set(host, stack);
+  return stack;
+}
+
 export class OperationProgressPanel {
   private readonly root: HTMLElement;
   private readonly statusIcon: HTMLElement;
@@ -75,6 +95,8 @@ export class OperationProgressPanel {
   private readonly stepsListEl: HTMLElement | null;
   private readonly itemElements = new Map<string, OperationProgressItemElements>();
   private readonly hostWindow: Window;
+  private readonly stackHost: HTMLElement;
+  private readonly stack: OperationProgressStack;
   private autoCloseTimer: number | null = null;
   private closed = false;
 
@@ -82,13 +104,16 @@ export class OperationProgressPanel {
     const context = resolveSurfaceDomContext(options.host);
     const { host } = context;
     this.hostWindow = context.window;
-    this.root = host.createDiv({
+    this.stackHost = host;
+    this.stack = acquireProgressStack(host);
+    this.root = this.stack.element.createDiv({
       cls: "systemsculpt-progress-panel",
       attr: {
         role: "region",
         "aria-label": options.title,
       },
     });
+    this.stack.panels.add(this.root);
     applyPluginSurface(this.root, "transient");
     if (options.className) {
       options.className
@@ -362,6 +387,13 @@ export class OperationProgressPanel {
       this.root.parentElement.removeChild(this.root);
     } else if (this.root.isConnected) {
       this.root.remove();
+    }
+    this.stack.panels.delete(this.root);
+    if (this.stack.panels.size === 0) {
+      this.stack.element.remove();
+      if (progressStacks.get(this.stackHost) === this.stack) {
+        progressStacks.delete(this.stackHost);
+      }
     }
   }
 

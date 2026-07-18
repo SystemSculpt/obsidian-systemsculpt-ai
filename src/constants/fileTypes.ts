@@ -5,7 +5,7 @@
 const MANAGED_DOCUMENT_EXTENSIONS = ["pdf", "png", "jpg", "jpeg", "webp"] as const;
 const AUTO_DOCUMENT_EXTENSIONS = ["pdf"] as const;
 const UNSUPPORTED_OFFICE_EXTENSIONS = ["doc", "docx", "ppt", "pptx", "xls", "xlsx"] as const;
-const AUDIO_EXTENSIONS = ["mp3", "wav", "m4a", "ogg", "webm"] as const;
+const AUDIO_EXTENSIONS = ["mp3", "wav", "m4a", "mp4", "ogg", "webm", "flac"] as const;
 
 const toReadonlySet = (values: readonly string[]): ReadonlySet<string> => new Set(values);
 

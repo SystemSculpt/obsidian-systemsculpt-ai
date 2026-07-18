@@ -16,5 +16,9 @@
  *  - 6: orphaned feature, model-routing, and modal-state fields removed.
  *  - 7: retired the semantic-index auto-process switch; enabled now means automatic.
  *  - 8: retired duplicate plugin-update notification state; Obsidian owns updates.
+ *  - 9: retired recorder prompt-source, format-chooser, and resampling state.
+ *  - 10: moved microphone preference to vault-scoped device-local storage.
+ *  - 11: removed obsolete top-level transcription language overrides; transcription now auto-detects source language.
+ *  - 12: removed retired user-configured workflow automations, backlog state, and automation skip records.
  */
-export const CURRENT_SCHEMA_VERSION = 8;
+export const CURRENT_SCHEMA_VERSION = 12;

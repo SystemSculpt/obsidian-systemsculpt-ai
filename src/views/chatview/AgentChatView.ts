@@ -2,7 +2,7 @@ import { ItemView, Notice, TFile, WorkspaceLeaf } from "obsidian";
 import type SystemSculptPlugin from "../../main";
 import { CHAT_VIEW_TYPE } from "../../core/plugin/viewTypes";
 import { SystemSculptService, type CreditsBalanceSnapshot } from "../../services/SystemSculptService";
-import { RecorderService } from "../../services/RecorderService";
+import type { RecorderService } from "../../services/RecorderService";
 import type { ChatMessage } from "../../types";
 import type { ChatExportOptions } from "../../types/chatExport";
 import type { ToolApprovalPolicy } from "../../utils/toolPolicy";
@@ -126,6 +126,7 @@ export class AgentChatView extends ItemView {
   private activeRunPromise: Promise<ManagedAgentRunResult> | null = null;
   private queuedFollowUps: AgentQueuedFollowUp[] = [];
   private draftKey: string;
+  private conversationOriginToken = messageId("conversation-origin");
   private queueHydrated = false;
   private queuePersistence: Promise<void> = Promise.resolve();
   private pendingRetry: Extract<AgentUserCommitInput, { kind: "resend" }> | null = null;
@@ -337,6 +338,7 @@ export class AgentChatView extends ItemView {
   }
 
   public async loadChatById(chatId: string): Promise<void> {
+    this.conversationOriginToken = messageId("conversation-origin");
     if (this.queueHydrated) await this.persistQueueState();
     await this.controller.cancel();
     this.sessionTrustedToolNames.clear();
@@ -376,6 +378,7 @@ export class AgentChatView extends ItemView {
 
   public getMessages(): ChatMessage[] { return this.messages; }
   public getChatTitle(): string { return this.chatTitle; }
+  public getConversationOriginToken(): string { return this.conversationOriginToken; }
 
   public async setTitle(title: string, shouldSave = true): Promise<void> {
     const normalized = sanitizeChatTitle(title.trim()) || generateDefaultChatTitle();
@@ -575,8 +578,24 @@ export class AgentChatView extends ItemView {
     this.workspace = null;
   }
 
-  private acceptComposerSubmission(submission: AgentComposerSubmit): void {
+  private acceptComposerSubmission(
+    submission: AgentComposerSubmit,
+    expectedConversationOriginToken?: string,
+    clearComposerAfterAdmission = false,
+  ): void {
     void this.prepareSubmission(submission).then((prepared) => {
+      if (
+        expectedConversationOriginToken
+        && expectedConversationOriginToken !== this.conversationOriginToken
+      ) {
+        return;
+      }
+      // Recorder dictation remains visible and recoverable until asynchronous
+      // attachment preparation/admission has revalidated the exact chat. Do
+      // not erase text the user added while that work was pending.
+      if (clearComposerAfterAdmission && this.getInputText() === submission.text) {
+        this.setInputText("");
+      }
       if (prepared.mode === "queue" || this.activeRunPromise) {
         this.queuedFollowUps.push({
           id: messageId("queued"),
@@ -594,7 +613,9 @@ export class AgentChatView extends ItemView {
         await this.handleError(error);
       });
     }).catch(async (error) => {
-      this.workspace?.restoreRejectedSubmission(submission);
+      if (!clearComposerAfterAdmission) {
+        this.workspace?.restoreRejectedSubmission(submission);
+      }
       await this.handleError(error);
     });
   }
@@ -825,6 +846,7 @@ export class AgentChatView extends ItemView {
     title?: string,
     restoredDraftKey?: string,
   ): Promise<void> {
+    this.conversationOriginToken = messageId("conversation-origin");
     this.suppressQueueDrain = true;
     try { await this.controller.cancel(); }
     finally { this.suppressQueueDrain = false; }
@@ -976,24 +998,45 @@ export class AgentChatView extends ItemView {
 
   private installRecorderBindings(): void {
     let recorder: RecorderService;
-    try { recorder = RecorderService.getInstance(this.app, this.plugin); }
+    try { recorder = this.plugin.getRecorderService(); }
     catch { return; }
     this.recorderToggleUnsubscribe = recorder.onToggle((recording) => this.workspace?.setRecording(recording));
-    this.recorderTranscriptUnsubscribe = recorder.onTranscription((text) => {
-      if (this.app.workspace.activeLeaf !== this.leaf) return;
-      const current = this.getInputText();
-      const combined = [current.trim(), text.trim()].filter(Boolean).join(current.trim() ? "\n\n" : "");
-      this.setInputText(combined, { focus: true });
-      if (this.plugin.settings.autoSubmitAfterTranscription && combined.trim()) {
-        this.setInputText("");
-        this.acceptComposerSubmission({ text: combined, webSearch: this.isWebSearchEnabled(), mode: "send" });
-      }
-    });
+    this.recorderTranscriptUnsubscribe = recorder.onTranscription((
+      text,
+      originLeaf,
+      conversationOriginToken,
+    ) => this.handleRecorderTranscription(text, originLeaf, conversationOriginToken));
     this.workspace?.setRecording(recorder.isCurrentlyRecording());
   }
 
+  private handleRecorderTranscription(
+    text: string,
+    originLeaf: WorkspaceLeaf | null,
+    conversationOriginToken: string | null,
+  ): boolean {
+    if (
+      originLeaf !== this.leaf
+      || !conversationOriginToken
+      || conversationOriginToken !== this.conversationOriginToken
+    ) {
+      return false;
+    }
+
+    const current = this.getInputText();
+    const combined = [current.trim(), text.trim()].filter(Boolean).join(current.trim() ? "\n\n" : "");
+    this.setInputText(combined, { focus: this.app.workspace.activeLeaf === this.leaf });
+    if (this.plugin.settings.autoSubmitAfterTranscription && combined.trim()) {
+      this.acceptComposerSubmission(
+        { text: combined, webSearch: this.isWebSearchEnabled(), mode: "send" },
+        conversationOriginToken,
+        true,
+      );
+    }
+    return true;
+  }
+
   private async toggleRecording(): Promise<void> {
-    try { await RecorderService.getInstance(this.app, this.plugin).toggleRecording(); }
+    try { await this.plugin.getRecorderService().toggleRecording(); }
     catch (error) { await this.handleError(error); }
   }
 

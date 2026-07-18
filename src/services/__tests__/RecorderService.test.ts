@@ -1,30 +1,53 @@
-/**
- * @jest-environment node
- */
+/** @jest-environment jsdom */
 
-import { App } from "obsidian";
+import { App, Platform, TFile } from "obsidian";
+import { CHAT_VIEW_TYPE } from "../../core/plugin/viewTypes";
 import { RecorderService } from "../RecorderService";
-import { pickRecorderFormat } from "../recorder/RecorderFormats";
+import { setCurrentHostPreferredMicrophoneId } from "../recorder/RecorderPreferenceStore";
+import {
+  ManagedTranscriptionInterruptedError,
+  TranscriptionResumeRequiredError,
+} from "../transcription/ManagedTranscriptionAdapter";
 
-// Mock dependencies
+type Deferred<T> = {
+  promise: Promise<T>;
+  resolve(value: T): void;
+  reject(error: unknown): void;
+};
+
+const deferred = <T,>(): Deferred<T> => {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+};
+
+const mockUiInstances: any[] = [];
+const mockSessionInstances: any[] = [];
+let mockSessionFactory: (options: any) => any;
+const mockTranscriptionStart = jest.fn();
+const mockTranscriptionUnload = jest.fn();
+const mockTranscriptionAcknowledgeCompleted = jest.fn();
+
 jest.mock("../recorder/RecorderUIManager", () => ({
-  RecorderUIManager: jest.fn().mockImplementation(() => ({
-    open: jest.fn(() => ({
-      host: {},
-      hostDocument: {},
-      hostWindow: globalThis.window,
-    })),
-    close: jest.fn(),
-    setStatus: jest.fn(),
-    setRecordingState: jest.fn(),
-    startTimer: jest.fn(),
-    stopTimer: jest.fn(),
-    attachStream: jest.fn(),
-    detachStream: jest.fn(),
-    linger: jest.fn(),
-    closeAfter: jest.fn(),
-    isVisible: jest.fn().mockReturnValue(false),
-  })),
+  RecorderUIManager: jest.fn().mockImplementation(() => {
+    const ui = {
+      open: jest.fn((_actions, _initial) => ({
+        host: document.body,
+        hostDocument: document,
+        hostWindow: window,
+      })),
+      render: jest.fn(),
+      close: jest.fn(),
+      closeAfter: jest.fn(),
+      isVisible: jest.fn().mockReturnValue(true),
+    };
+    mockUiInstances.push(ui);
+    return ui;
+  }),
 }));
 
 jest.mock("../recorder/RecorderFormats", () => ({
@@ -35,603 +58,1507 @@ jest.mock("../recorder/RecorderFormats", () => ({
 }));
 
 jest.mock("../recorder/RecordingSession", () => ({
-  RecordingSession: jest.fn().mockImplementation(() => ({
-    start: jest.fn().mockResolvedValue(undefined),
-    stop: jest.fn(),
-    dispose: jest.fn(),
-    isActive: jest.fn().mockReturnValue(false),
-    getMediaStream: jest.fn().mockReturnValue(null),
-    getOutputPath: jest.fn().mockReturnValue("test/path.webm"),
-  })),
+  MAX_ENCODED_CAPTURE_BYTES: 64 * 1024 * 1024,
+  MOBILE_MAX_ENCODED_CAPTURE_BYTES: 24 * 1024 * 1024,
+  RecordingSession: jest.fn().mockImplementation((options) => {
+    const session = mockSessionFactory(options);
+    mockSessionInstances.push({ options, session });
+    return session;
+  }),
 }));
 
-jest.mock("../transcription/TranscriptionCoordinator", () => ({
-  TranscriptionCoordinator: jest.fn().mockImplementation(() => ({
-    start: jest.fn().mockResolvedValue("Transcribed text"),
-    abort: jest.fn(),
-  })),
+jest.mock("../TranscriptionService", () => ({
+  TranscriptionService: {
+    getInstance: jest.fn(() => ({
+      start: mockTranscriptionStart,
+      acknowledgeCompleted: mockTranscriptionAcknowledgeCompleted,
+      unload: mockTranscriptionUnload,
+    })),
+  },
 }));
 
 jest.mock("../../utils/errorHandling", () => ({
   logDebug: jest.fn(),
   logInfo: jest.fn(),
-  logWarning: jest.fn(),
   logError: jest.fn(),
 }));
 
+interface SessionHarness {
+  session: any;
+  start: Deferred<{ filePath: string; startedAt: number; microphoneLabel: string }>;
+  completion: Deferred<any>;
+  setRecording(value: boolean): void;
+  setPendingSave(value: any | null): void;
+}
+
+function createSessionHarness(): SessionHarness {
+  const start = deferred<{ filePath: string; startedAt: number; microphoneLabel: string }>();
+  const completion = deferred<any>();
+  let recording = false;
+  let pendingSave: any | null = null;
+  const session = {
+    completion: completion.promise,
+    start: jest.fn(() => start.promise),
+    stop: jest.fn((reason = "manual") => {
+      recording = false;
+      completion.resolve({
+        filePath: "SystemSculpt/Recordings/session.webm",
+        startedAt: 1_000,
+        durationMs: 2_000,
+        sizeBytes: 24_000,
+        stopReason: reason,
+      });
+      return completion.promise;
+    }),
+    hasPendingSave: jest.fn(() => pendingSave !== null),
+    getPendingSaveResult: jest.fn(() => pendingSave),
+    retrySave: jest.fn(async () => {
+      if (!pendingSave) throw new Error("There is no captured audio waiting to be saved.");
+      const result = pendingSave;
+      pendingSave = null;
+      return result;
+    }),
+    dispose: jest.fn(() => {
+      recording = false;
+      const error = new Error("Recording was cancelled.");
+      error.name = "AbortError";
+      start.reject(error);
+      completion.reject(error);
+    }),
+    isRecording: jest.fn(() => recording),
+  };
+  return {
+    session,
+    start,
+    completion,
+    setRecording: (value) => { recording = value; },
+    setPendingSave: (value) => { pendingSave = value; },
+  };
+}
+
+const flush = async (): Promise<void> => {
+  for (let turn = 0; turn < 10; turn += 1) {
+    await Promise.resolve();
+  }
+};
+
 describe("RecorderService", () => {
-  let mockApp: App;
-  let mockPlugin: any;
+  let app: App;
+  let plugin: any;
+  let harness: SessionHarness;
 
   beforeEach(() => {
     jest.clearAllMocks();
-
-    // Reset singleton
+    mockTranscriptionStart.mockReset();
+    mockTranscriptionAcknowledgeCompleted.mockReset().mockResolvedValue(undefined);
+    mockUiInstances.length = 0;
+    mockSessionInstances.length = 0;
     (RecorderService as any).instance = null;
 
-    mockApp = new App();
-
-    mockPlugin = {
+    app = new App();
+    window.localStorage.clear();
+    Object.assign(Platform, {
+      isDesktopApp: true,
+      isMobile: false,
+      isMobileApp: false,
+    });
+    setCurrentHostPreferredMicrophoneId(window, app.vault.getName(), "desk-mic");
+    plugin = {
       settings: {
         recordingsDirectory: "SystemSculpt/Recordings",
-        preferredMicrophoneId: null,
         autoTranscribeRecordings: false,
-        postProcessingEnabled: false,
+        autoPasteTranscription: true,
+        autoSubmitAfterTranscription: false,
+        pendingRecorderCaptures: [],
       },
       directoryManager: {
         ensureDirectoryByPath: jest.fn().mockResolvedValue(undefined),
       },
+      openSettingsTab: jest.fn(),
     };
+    plugin.getSettingsManager = jest.fn(() => ({
+      updateSettings: jest.fn(async (update: Record<string, unknown>) => {
+        Object.assign(plugin.settings, update);
+      }),
+    }));
+    harness = createSessionHarness();
+    mockSessionFactory = () => harness.session;
   });
 
-  describe("getInstance", () => {
-    it("creates singleton instance", () => {
-      const instance1 = RecorderService.getInstance(mockApp, mockPlugin);
-      const instance2 = RecorderService.getInstance();
+  afterEach(() => {
+    (RecorderService as any).instance?.unload();
+    (RecorderService as any).instance = null;
+  });
 
-      expect(instance1).toBe(instance2);
+  it("creates one plugin-scoped service and supports listener disposal", () => {
+    const service = RecorderService.getInstance(app, plugin);
+    expect(RecorderService.getInstance()).toBe(service);
+
+    const listener = jest.fn();
+    const dispose = service.onToggle(listener);
+    dispose();
+    (service as any).notifyRecordingListeners();
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  it("treats two synchronous toggles as start then cancel without requesting the microphone", async () => {
+    const service = RecorderService.getInstance(app, plugin);
+
+    await Promise.all([service.toggleRecording(), service.toggleRecording()]);
+
+    expect(mockSessionInstances).toHaveLength(0);
+    expect((service as any).state).toBe("idle");
+    expect(service.isCurrentlyRecording()).toBe(false);
+  });
+
+  it("uses the initiating window realm and reports recording only after capture starts", async () => {
+    const service = RecorderService.getInstance(app, plugin);
+    const listener = jest.fn();
+    service.onToggle(listener);
+
+    const running = service.toggleRecording();
+    await flush();
+    expect(listener).toHaveBeenLastCalledWith(true);
+    expect(mockSessionInstances[0].options.hostContext).toEqual({
+      host: document.body,
+      hostDocument: document,
+      hostWindow: window,
     });
+    expect(mockSessionInstances[0].options.preferredMicrophoneId).toBe("desk-mic");
 
-    it("throws when not initialized and no args provided", () => {
-      expect(() => RecorderService.getInstance()).toThrow(
-        "RecorderService has not been initialized"
-      );
+    harness.setRecording(true);
+    harness.start.resolve({
+      filePath: "SystemSculpt/Recordings/session.webm",
+      startedAt: 5_000,
+      microphoneLabel: "Phone microphone",
     });
+    await running;
 
-    it("updates onTranscriptionComplete callback", () => {
-      const callback1 = jest.fn();
-      const callback2 = jest.fn();
+    expect((service as any).state).toBe("recording");
+    expect(mockUiInstances[0].render).toHaveBeenLastCalledWith(expect.objectContaining({
+      phase: "recording",
+      startedAt: 5_000,
+      microphoneLabel: "Phone microphone",
+    }));
+  });
 
-      const instance1 = RecorderService.getInstance(mockApp, mockPlugin, {
-        onTranscriptionComplete: callback1,
-      });
-      const instance2 = RecorderService.getInstance(mockApp, mockPlugin, {
-        onTranscriptionComplete: callback2,
-      });
+  it("uses the mobile host microphone preference without reading the desktop one", async () => {
+    Object.assign(Platform, {
+      isDesktopApp: false,
+      isMobile: true,
+      isMobileApp: true,
+    });
+    setCurrentHostPreferredMicrophoneId(window, app.vault.getName(), "phone-mic");
+    const service = RecorderService.getInstance(app, plugin);
 
-      expect(instance1).toBe(instance2);
-      // Callback should be updated
-      expect((instance2 as any).onTranscriptionDone).toBe(callback2);
+    const running = service.toggleRecording();
+    await flush();
+
+    expect(mockSessionInstances[0].options.preferredMicrophoneId).toBe("phone-mic");
+    expect(mockSessionInstances[0].options.maxEncodedBytes).toBe(24 * 1024 * 1024);
+
+    harness.setRecording(true);
+    harness.start.resolve({
+      filePath: "SystemSculpt/Recordings/session.m4a",
+      startedAt: 5_000,
+      microphoneLabel: "Phone microphone",
+    });
+    await running;
+  });
+
+  it("normalizes the configured recordings directory before every host operation", async () => {
+    plugin.settings.recordingsDirectory = "Voice Notes///";
+    const service = RecorderService.getInstance(app, plugin);
+
+    const running = service.toggleRecording();
+    await flush();
+
+    expect(mockSessionInstances[0].options.directoryPath).toBe("Voice Notes");
+    harness.setRecording(true);
+    harness.start.resolve({
+      filePath: "Voice Notes/session.webm",
+      startedAt: 5_000,
+      microphoneLabel: "Default microphone",
+    });
+    await running;
+  });
+
+  it("does not leave a phantom recording when microphone startup fails", async () => {
+    const service = RecorderService.getInstance(app, plugin);
+    const failure = new Error("Microphone access is blocked.");
+    const running = service.toggleRecording();
+    await flush();
+
+    harness.start.reject(failure);
+    harness.completion.reject(failure);
+    await running;
+
+    expect(service.isCurrentlyRecording()).toBe(false);
+    expect((service as any).state).toBe("error");
+    expect(mockUiInstances[0].render).toHaveBeenLastCalledWith({
+      phase: "error",
+      status: "Microphone access is blocked.",
     });
   });
 
-  describe("onToggle", () => {
-    it("registers toggle listener", () => {
-      const service = RecorderService.getInstance(mockApp, mockPlugin);
-      const listener = jest.fn();
+  it("cancels immediately when tapped again while permission is pending", async () => {
+    const service = RecorderService.getInstance(app, plugin);
+    const starting = service.toggleRecording();
+    await flush();
+    const cancel = service.toggleRecording();
 
-      service.onToggle(listener);
+    expect(harness.session.stop).not.toHaveBeenCalled();
+    await Promise.all([starting, cancel]);
 
-      expect((service as any).listeners.has(listener)).toBe(true);
-    });
-
-    it("returns unsubscribe function", () => {
-      const service = RecorderService.getInstance(mockApp, mockPlugin);
-      const listener = jest.fn();
-
-      const unsubscribe = service.onToggle(listener);
-      unsubscribe();
-
-      expect((service as any).listeners.has(listener)).toBe(false);
-    });
+    expect(harness.session.dispose).toHaveBeenCalledTimes(1);
+    expect(harness.session.stop).not.toHaveBeenCalled();
+    expect((service as any).state).toBe("idle");
+    expect(mockUiInstances[0].close).toHaveBeenCalled();
   });
 
-  it("passes the recorder UI initiating realm into the recording session", async () => {
-    const { RecordingSession } = require("../recorder/RecordingSession");
-    const service = RecorderService.getInstance(mockApp, mockPlugin);
-    const hostContext = {
-      host: { id: "popout-body" },
-      hostDocument: { id: "popout-document" },
-      hostWindow: { id: "popout-window" },
+  it("keeps interrupted audio durable and explains why capture ended", async () => {
+    const service = RecorderService.getInstance(app, plugin);
+    const running = service.toggleRecording();
+    await flush();
+    harness.setRecording(true);
+    harness.start.resolve({
+      filePath: "SystemSculpt/Recordings/session.webm",
+      startedAt: 1_000,
+      microphoneLabel: "Default microphone",
+    });
+    await running;
+
+    harness.setRecording(false);
+    harness.completion.resolve({
+      filePath: "SystemSculpt/Recordings/session.webm",
+      startedAt: 1_000,
+      durationMs: 3_000,
+      sizeBytes: 32_000,
+      stopReason: "background-hidden",
+    });
+    await flush();
+
+    expect((service as any).completedCapture.result).not.toHaveProperty("blob");
+    expect(mockUiInstances[0].render).toHaveBeenLastCalledWith(expect.objectContaining({
+      phase: "saved",
+      status: "Obsidian moved to the background, so recording stopped and the captured audio was saved.",
+      sourcePath: "SystemSculpt/Recordings/session.webm",
+    }));
+  });
+
+  it("explains when the encoded safety limit stops and saves a recording", async () => {
+    const service = RecorderService.getInstance(app, plugin);
+    const running = service.toggleRecording();
+    await flush();
+    harness.setRecording(true);
+    harness.start.resolve({
+      filePath: "SystemSculpt/Recordings/session.webm",
+      startedAt: 1_000,
+      microphoneLabel: "Default microphone",
+    });
+    await running;
+
+    harness.setRecording(false);
+    harness.completion.resolve({
+      filePath: "SystemSculpt/Recordings/session.webm",
+      startedAt: 1_000,
+      durationMs: 5_583_000,
+      sizeBytes: 64 * 1024 * 1024,
+      stopReason: "size-limit",
+    });
+    await flush();
+
+    expect(mockUiInstances[0].render).toHaveBeenLastCalledWith(expect.objectContaining({
+      phase: "saved",
+      status: "Recording reached the 64 MiB safety limit. The captured audio is saved.",
+    }));
+  });
+
+  it("retains failed-save audio, blocks a new recording, and retries the save", async () => {
+    const service = RecorderService.getInstance(app, plugin);
+    const running = service.toggleRecording();
+    await flush();
+    harness.setRecording(true);
+    harness.start.resolve({
+      filePath: "SystemSculpt/Recordings/session.webm",
+      startedAt: 1_000,
+      microphoneLabel: "Default microphone",
+    });
+    await running;
+
+    const pending = {
+      filePath: "SystemSculpt/Recordings/session.webm",
+      startedAt: 1_000,
+      durationMs: 3_000,
+      sizeBytes: 32_000,
+      stopReason: "manual",
     };
-    ((service as any).ui.open as jest.Mock).mockReturnValueOnce(hostContext);
+    harness.setRecording(false);
+    harness.setPendingSave(pending);
+    harness.completion.reject(new Error(
+      "Audio is still in memory, but it could not be saved: Storage is full",
+    ));
+    await flush();
+
+    expect((service as any).session).toBe(harness.session);
+    expect((service as any).state).toBe("warning");
+    expect(mockUiInstances[0].render).toHaveBeenLastCalledWith(expect.objectContaining({
+      phase: "warning",
+      status: "Audio is still in memory because it could not be saved: Storage is full Retry save before closing Obsidian.",
+      sourcePath: pending.filePath,
+      canRetrySave: true,
+    }));
 
     await service.toggleRecording();
+    expect(mockSessionInstances).toHaveLength(1);
 
-    expect(RecordingSession).toHaveBeenCalledWith(
-      expect.objectContaining({ hostContext })
+    const actions = mockUiInstances[0].open.mock.calls[0][0];
+    actions.onRetrySave();
+    await flush();
+
+    expect(harness.session.retrySave).toHaveBeenCalledTimes(1);
+    expect((service as any).session).toBeNull();
+    expect((service as any).completedCapture.result).toEqual(pending);
+    expect((service as any).state).toBe("saved");
+    expect(mockUiInstances[0].render).toHaveBeenLastCalledWith(expect.objectContaining({
+      phase: "saved",
+      status: "Recording saved.",
+    }));
+  });
+
+  it("pins transcription to the view and editor where recording began", async () => {
+    const originEditor = {
+      replaceSelection: jest.fn(),
+      getCursor: jest.fn((which?: "from" | "to") => (which === "to"
+        ? { line: 0, ch: 4 }
+        : { line: 0, ch: 0 })),
+      getSelection: jest.fn(() => "seed"),
+    };
+    const originFile = new TFile({ path: "Notes/origin.md" });
+    const originView = {
+      getViewType: () => "markdown",
+      editor: originEditor,
+      file: originFile,
+    };
+    const originLeaf = { view: originView } as any;
+    const otherLeaf = { view: { getViewType: () => CHAT_VIEW_TYPE } } as any;
+    (app.workspace as any).activeLeaf = originLeaf;
+    (app.workspace.getActiveViewOfType as jest.Mock).mockReturnValue(originView);
+    plugin.settings.autoTranscribeRecordings = true;
+
+    const transcription = deferred<any>();
+    mockTranscriptionStart.mockImplementation((request) => {
+      request.onProgress?.({ phase: "preparing", progress: 1, message: "Preparing audio…" });
+      return { promise: transcription.promise, cancel: jest.fn() };
+    });
+
+    const service = RecorderService.getInstance(app, plugin);
+    const running = service.toggleRecording();
+    await flush();
+    harness.setRecording(true);
+    harness.start.resolve({
+      filePath: "SystemSculpt/Recordings/session.webm",
+      startedAt: 1_000,
+      microphoneLabel: "Default microphone",
+    });
+    await running;
+
+    (app.workspace as any).activeLeaf = otherLeaf;
+    harness.setRecording(false);
+    harness.completion.resolve({
+      filePath: "SystemSculpt/Recordings/session.webm",
+      startedAt: 1_000,
+      durationMs: 3_000,
+      sizeBytes: 32_000,
+      stopReason: "manual",
+    });
+    await flush();
+
+    expect(mockTranscriptionStart).toHaveBeenCalledWith(expect.objectContaining({
+      destination: "note",
+      targetEditor: originEditor,
+      validateInsertionTarget: expect.any(Function),
+      filePath: "SystemSculpt/Recordings/session.webm",
+    }));
+    const request = mockTranscriptionStart.mock.calls[0][0];
+    expect(request.validateInsertionTarget()).toBe(true);
+
+    transcription.resolve({
+      text: "Transcript",
+      outputPath: "SystemSculpt/Recordings/session - transcript.md",
+      sourceDisposition: "kept",
+      insertedIntoOrigin: true,
+    });
+    await flush();
+    expect((service as any).state).toBe("complete");
+  });
+
+  it("delivers chat dictation only to the chat leaf that started recording", async () => {
+    const originLeaf = {
+      view: {
+        getViewType: () => CHAT_VIEW_TYPE,
+        getConversationOriginToken: () => "conversation-origin-1",
+      },
+    } as any;
+    (app.workspace as any).activeLeaf = originLeaf;
+    plugin.settings.autoTranscribeRecordings = true;
+    const transcription = deferred<any>();
+    mockTranscriptionStart.mockReturnValue({ promise: transcription.promise, cancel: jest.fn() });
+
+    const service = RecorderService.getInstance(app, plugin);
+    const listener = jest.fn(() => true);
+    service.onTranscription(listener);
+    const running = service.toggleRecording();
+    await flush();
+    harness.setRecording(true);
+    harness.start.resolve({
+      filePath: "SystemSculpt/Recordings/session.webm",
+      startedAt: 1_000,
+      microphoneLabel: "Default microphone",
+    });
+    await running;
+    harness.setRecording(false);
+    harness.completion.resolve({
+      filePath: "SystemSculpt/Recordings/session.webm",
+      startedAt: 1_000,
+      durationMs: 3_000,
+      sizeBytes: 32_000,
+      stopReason: "manual",
+    });
+    await flush();
+    transcription.resolve({
+      text: "Dictated message",
+      outputPath: "SystemSculpt/Recordings/session - transcript.md",
+      sourceDisposition: "kept",
+      insertedIntoOrigin: false,
+    });
+    await flush();
+
+    expect(listener).toHaveBeenCalledWith(
+      "Dictated message",
+      originLeaf,
+      "conversation-origin-1",
+      "SystemSculpt/Recordings/session - transcript.md",
     );
   });
 
-  describe("unload", () => {
-    it("clears listeners", () => {
-      const service = RecorderService.getInstance(mockApp, mockPlugin);
-      service.onToggle(jest.fn());
-
-      service.unload();
-
-      expect((service as any).listeners.size).toBe(0);
+  it("starts another recording while the previous saved audio keeps transcribing", async () => {
+    plugin.settings.autoTranscribeRecordings = true;
+    const firstTranscription = deferred<any>();
+    const cancelFirst = jest.fn();
+    mockTranscriptionStart.mockReturnValue({
+      operationId: "first-transcription",
+      promise: firstTranscription.promise,
+      cancel: cancelFirst,
     });
 
-    it("stops recording if active", () => {
-      const service = RecorderService.getInstance(mockApp, mockPlugin);
-      (service as any).isRecording = true;
-
-      const stopSpy = jest.spyOn(service as any, "stopRecording");
-      service.unload();
-
-      expect(stopSpy).toHaveBeenCalled();
+    const service = RecorderService.getInstance(app, plugin);
+    const firstStart = service.toggleRecording();
+    await flush();
+    harness.setRecording(true);
+    harness.start.resolve({
+      filePath: "SystemSculpt/Recordings/first.webm",
+      startedAt: 1_000,
+      microphoneLabel: "Default microphone",
     });
-
-    it("aborts managed transcription even after recording capture has already stopped", () => {
-      const service = RecorderService.getInstance(mockApp, mockPlugin);
-      const coordinator = (service as any).transcriptionCoordinator;
-      (service as any).isRecording = false;
-
-      service.unload();
-
-      expect(coordinator.abort).toHaveBeenCalledTimes(1);
+    await firstStart;
+    harness.setRecording(false);
+    harness.completion.resolve({
+      filePath: "SystemSculpt/Recordings/first.webm",
+      startedAt: 1_000,
+      durationMs: 2_000,
+      sizeBytes: 24_000,
+      stopReason: "manual",
     });
+    await flush();
+    expect((service as any).state).toBe("transcribing");
+
+    const second = createSessionHarness();
+    mockSessionFactory = () => second.session;
+    const secondStart = service.toggleRecording();
+    await flush();
+    second.setRecording(true);
+    second.start.resolve({
+      filePath: "SystemSculpt/Recordings/second.webm",
+      startedAt: 4_000,
+      microphoneLabel: "Default microphone",
+    });
+    await secondStart;
+
+    expect(cancelFirst).not.toHaveBeenCalled();
+    expect(mockSessionInstances).toHaveLength(2);
+    expect((service as any).state).toBe("recording");
+
+    firstTranscription.resolve({
+      text: "First transcript",
+      outputPath: "SystemSculpt/Recordings/first - transcript.md",
+      sourceDisposition: "kept",
+      insertedIntoOrigin: false,
+    });
+    await flush();
+
+    expect((service as any).state).toBe("recording");
+    expect((service as any).transcriptionTasks.size).toBe(0);
   });
 
-  describe("toggleRecording", () => {
-    it("selects a recorder format before starting", async () => {
-      const { pickRecorderFormat } = require("../recorder/RecorderFormats");
-      const service = RecorderService.getInstance(mockApp, mockPlugin);
-      await (service as any).startRecording();
-
-      expect(pickRecorderFormat).toHaveBeenCalledTimes(1);
-    });
-
-    it("queues toggle operations", async () => {
-      const service = RecorderService.getInstance(mockApp, mockPlugin);
-
-      // Mock the internal methods
-      const performToggleSpy = jest
-        .spyOn(service as any, "performToggle")
-        .mockResolvedValue(undefined);
-
-      await service.toggleRecording();
-
-      expect(performToggleSpy).toHaveBeenCalled();
-    });
-
-    it("serializes concurrent toggle calls", async () => {
-      const service = RecorderService.getInstance(mockApp, mockPlugin);
-      let callCount = 0;
-
-      jest
-        .spyOn(service as any, "performToggle")
-        .mockImplementation(async () => {
-          callCount++;
-          await new Promise((resolve) => setTimeout(resolve, 10));
-        });
-
-      // Make concurrent calls
-      const promise1 = service.toggleRecording();
-      const promise2 = service.toggleRecording();
-
-      await Promise.all([promise1, promise2]);
-
-      expect(callCount).toBe(2);
-    });
-
-    it("honors stop pressed while starting (single tap)", async () => {
-      const { RecordingSession } = require("../recorder/RecordingSession");
-
-      const startDeferred = (() => {
-        let resolve!: () => void;
-        const promise = new Promise<void>((res) => {
-          resolve = res;
-        });
-        return { promise, resolve };
-      })();
-
-      let onComplete: ((result: any) => void) | null = null;
-      const stopMock = jest.fn(() => {
-        onComplete?.({
-          filePath: "SystemSculpt/Recordings/test.webm",
-          blob: new Blob(["test"], { type: "audio/webm" }),
-          startedAt: Date.now(),
-          durationMs: 50,
-        });
+  it("serializes recorder transcriptions while leaving capture free to continue", async () => {
+    plugin.settings.autoTranscribeRecordings = true;
+    const first = deferred<any>();
+    const second = deferred<any>();
+    mockTranscriptionStart
+      .mockReturnValueOnce({
+        operationId: "first-operation",
+        promise: first.promise,
+        cancel: jest.fn(),
+      })
+      .mockReturnValueOnce({
+        operationId: "second-operation",
+        promise: second.promise,
+        cancel: jest.fn(),
       });
 
-      (RecordingSession as jest.Mock).mockImplementationOnce((options: any) => {
-        onComplete = options.onComplete;
-        return {
-          start: jest.fn().mockReturnValue(startDeferred.promise),
-          stop: stopMock,
-          dispose: jest.fn(),
-          isActive: jest.fn().mockReturnValue(true),
-          getMediaStream: jest.fn().mockReturnValue(null),
-          getOutputPath: jest.fn().mockReturnValue("SystemSculpt/Recordings/test.webm"),
-        };
-      });
-
-      const service = RecorderService.getInstance(mockApp, mockPlugin);
-      const togglePromise = service.toggleRecording();
-
-      for (let i = 0; i < 4; i++) {
-        const openMock = (service as any).ui.open as jest.Mock;
-        if (openMock.mock.calls.length > 0) break;
-        await Promise.resolve();
-      }
-
-      const openMock = (service as any).ui.open as jest.Mock;
-      expect(openMock).toHaveBeenCalledTimes(1);
-      const stopCallback = openMock.mock.calls[0][0] as () => void;
-
-      stopCallback();
-      expect(stopMock).not.toHaveBeenCalled();
-
-      startDeferred.resolve();
-      await togglePromise;
-
-      expect(stopMock).toHaveBeenCalledTimes(1);
-      expect((service as any).isRecording).toBe(false);
-    });
-  });
-
-  describe("notifyListeners (private)", () => {
-    it("notifies all listeners with recording state", () => {
-      const service = RecorderService.getInstance(mockApp, mockPlugin);
-      const listener1 = jest.fn();
-      const listener2 = jest.fn();
-
-      service.onToggle(listener1);
-      service.onToggle(listener2);
-
-      (service as any).isRecording = true;
-      (service as any).notifyListeners();
-
-      expect(listener1).toHaveBeenCalledWith(true);
-      expect(listener2).toHaveBeenCalledWith(true);
-    });
-
-    it("handles listener errors gracefully", () => {
-      const service = RecorderService.getInstance(mockApp, mockPlugin);
-      const throwingListener = jest.fn().mockImplementation(() => {
-        throw new Error("Listener error");
-      });
-      const goodListener = jest.fn();
-
-      service.onToggle(throwingListener);
-      service.onToggle(goodListener);
-
-      expect(() => (service as any).notifyListeners()).not.toThrow();
-      expect(goodListener).toHaveBeenCalled();
-    });
-  });
-
-  describe("cleanup (private)", () => {
-    it("disposes session if exists", () => {
-      const service = RecorderService.getInstance(mockApp, mockPlugin);
-      const mockSession = {
-        dispose: jest.fn(),
-        isActive: jest.fn().mockReturnValue(false),
-      };
-      (service as any).session = mockSession;
-
-      (service as any).cleanup(true);
-
-      expect(mockSession.dispose).toHaveBeenCalled();
-      expect((service as any).session).toBeNull();
-    });
-
-    it("resets recording state", () => {
-      const service = RecorderService.getInstance(mockApp, mockPlugin);
-      (service as any).isRecording = true;
-      (service as any).lifecycleState = "recording";
-
-      (service as any).cleanup(false);
-
-      expect((service as any).isRecording).toBe(false);
-      expect((service as any).lifecycleState).toBe("idle");
-    });
-
-    it("closes UI when hideUI is true", () => {
-      const service = RecorderService.getInstance(mockApp, mockPlugin);
-      const mockClose = (service as any).ui.close;
-
-      (service as any).cleanup(true);
-
-      expect(mockClose).toHaveBeenCalled();
-    });
-
-    it("does not close UI when hideUI is false", () => {
-      const service = RecorderService.getInstance(mockApp, mockPlugin);
-      const mockClose = (service as any).ui.close;
-
-      (service as any).cleanup(false);
-
-      expect(mockClose).not.toHaveBeenCalled();
-    });
-  });
-
-  describe("getStateSnapshot (private)", () => {
-    it("returns current state", () => {
-      const service = RecorderService.getInstance(mockApp, mockPlugin);
-      (service as any).isRecording = true;
-      (service as any).lifecycleState = "recording";
-
-      const snapshot = (service as any).getStateSnapshot();
-
-      expect(snapshot).toEqual(
-        expect.objectContaining({
-          isRecording: true,
-          lifecycleState: "recording",
-          hasSession: false,
-        })
-      );
-    });
-  });
-
-  describe("storeRecordingInMemory (private)", () => {
-    it("stores blob in offline recordings map", () => {
-      const service = RecorderService.getInstance(mockApp, mockPlugin);
-      const mockBlob = new Blob(["test"], { type: "audio/webm" });
-      const result = {
-        filePath: "test/recording.webm",
-        blob: mockBlob,
-        startedAt: Date.now(),
-        durationMs: 1000,
-      };
-
-      (service as any).storeRecordingInMemory(result);
-
-      expect((service as any).offlineRecordings.has("test/recording.webm")).toBe(
-        true
-      );
-    });
-  });
-
-  describe("handleError (private)", () => {
-    it("logs error", () => {
-      const service = RecorderService.getInstance(mockApp, mockPlugin);
-      const mockError = new Error("Test error");
-
-      (service as any).handleError(mockError);
-
-      const { logError } = require("../../utils/errorHandling");
-      expect(logError).toHaveBeenCalled();
-    });
-
-    it("shows error message with backup if available", () => {
-      const service = RecorderService.getInstance(mockApp, mockPlugin);
-      (service as any).lastRecordingPath = "test/file.webm";
-      (service as any).offlineRecordings.set(
-        "test/file.webm",
-        new Blob(["test"])
-      );
-
-      (service as any).handleError(new Error("Processing failed"));
-
-      expect((service as any).ui.setStatus).toHaveBeenCalledWith(
-        expect.stringContaining("processing failed")
-      );
-    });
-
-    it("resets lifecycle state", () => {
-      const service = RecorderService.getInstance(mockApp, mockPlugin);
-      (service as any).lifecycleState = "recording";
-
-      (service as any).handleError(new Error("Error"));
-
-      expect((service as any).lifecycleState).toBe("idle");
-    });
-  });
-
-  describe("updateStatus (private)", () => {
-    it("calls ui setStatus", () => {
-      const service = RecorderService.getInstance(mockApp, mockPlugin);
-
-      (service as any).updateStatus("Test status");
-
-      expect((service as any).ui.setStatus).toHaveBeenCalledWith("Test status");
-    });
-  });
-
-  describe("handleTranscriptionComplete (private)", () => {
-    it("calls onTranscriptionDone callback", () => {
-      const callback = jest.fn();
-      const service = RecorderService.getInstance(mockApp, mockPlugin, {
-        onTranscriptionComplete: callback,
-      });
-
-      (service as any).handleTranscriptionComplete("Test transcription");
-
-      expect(callback).toHaveBeenCalledWith("Test transcription");
-    });
-
-    it("shows linger message when no callback", () => {
-      const service = RecorderService.getInstance(mockApp, mockPlugin);
-
-      (service as any).handleTranscriptionComplete("Test transcription");
-
-      expect((service as any).ui.linger).toHaveBeenCalledWith(
-        "Transcription ready.",
-        2600
-      );
-    });
-
-    it("shows post-processing message when enabled", () => {
-      mockPlugin.settings.postProcessingEnabled = true;
-      const service = RecorderService.getInstance(mockApp, mockPlugin);
-
-      (service as any).handleTranscriptionComplete("Test transcription");
-
-      expect((service as any).ui.linger).toHaveBeenCalledWith(
-        "Transcription ready. Post-processing complete.",
-        2600
-      );
-    });
-
-    it("handles errors gracefully", () => {
-      const throwingCallback = jest.fn().mockImplementation(() => {
-        throw new Error("Callback error");
-      });
-      const service = RecorderService.getInstance(mockApp, mockPlugin, {
-        onTranscriptionComplete: throwingCallback,
-      });
-
-      expect(() =>
-        (service as any).handleTranscriptionComplete("Test")
-      ).not.toThrow();
-
-      expect((service as any).ui.setStatus).toHaveBeenCalledWith(
-        expect.stringContaining("Failed to process transcription")
-      );
-    });
-  });
-
-  describe("handleRecordingComplete (private)", () => {
-    it("shows explicit lock/background guidance when stop reason is background", async () => {
-      const service = RecorderService.getInstance(mockApp, mockPlugin);
-      mockPlugin.settings.autoTranscribeRecordings = false;
-      (service as any).isRecording = true;
-
-      await (service as any).handleRecordingComplete({
-        filePath: "SystemSculpt/Recordings/test-audio.webm",
-        blob: new Blob(["audio"], { type: "audio/webm" }),
-        startedAt: Date.now() - 1500,
-        durationMs: 1500,
-        stopReason: "background-hidden",
-      });
-
-      expect((service as any).isRecording).toBe(false);
-      expect((service as any).ui.setRecordingState).toHaveBeenCalledWith(false);
-      expect((service as any).ui.stopTimer).toHaveBeenCalled();
-      expect((service as any).ui.linger).toHaveBeenCalledWith(
-        expect.stringContaining("window or tab left the foreground"),
-        4200
-      );
-    });
-
-    it("uses normal saved message for manual stop reason", async () => {
-      const service = RecorderService.getInstance(mockApp, mockPlugin);
-      mockPlugin.settings.autoTranscribeRecordings = false;
-      (service as any).isRecording = true;
-
-      await (service as any).handleRecordingComplete({
-        filePath: "SystemSculpt/Recordings/test-audio.webm",
-        blob: new Blob(["audio"], { type: "audio/webm" }),
-        startedAt: Date.now() - 900,
-        durationMs: 900,
+    const service = RecorderService.getInstance(app, plugin);
+    const firstCapture = {
+      result: {
+        filePath: "SystemSculpt/Recordings/first.webm",
+        startedAt: 1_000,
+        durationMs: 2_000,
+        sizeBytes: 24_000,
         stopReason: "manual",
+      },
+      origin: { leaf: null, destination: "note", editor: null, conversationOriginToken: null, hostDocument: document },
+      microphoneLabel: "Default microphone",
+    };
+    const secondCapture = {
+      ...firstCapture,
+      result: {
+        ...firstCapture.result,
+        filePath: "SystemSculpt/Recordings/second.webm",
+        startedAt: 4_000,
+      },
+    };
+
+    (service as any).completedCapture = firstCapture;
+    void (service as any).transcribeSavedRecording();
+    await flush();
+    expect(mockTranscriptionStart).toHaveBeenCalledTimes(1);
+
+    (service as any).detachDisplayedTranscription();
+    (service as any).completedCapture = secondCapture;
+    (service as any).state = "saved";
+    void (service as any).transcribeSavedRecording();
+    await flush();
+
+    expect(mockTranscriptionStart).toHaveBeenCalledTimes(1);
+    expect((service as any).queuedTranscriptions).toHaveLength(1);
+    expect(mockUiInstances[0].render).toHaveBeenLastCalledWith(expect.objectContaining({
+      phase: "saved",
+      status: expect.stringContaining("Waiting for the previous transcription"),
+    }));
+
+    first.resolve({
+      text: "First transcript",
+      outputPath: "SystemSculpt/Recordings/first - transcript.md",
+      sourceDisposition: "kept",
+      insertedIntoOrigin: false,
+    });
+    await flush();
+    await flush();
+
+    expect(mockTranscriptionStart).toHaveBeenCalledTimes(2);
+    expect(mockTranscriptionStart.mock.calls[1][0]).toEqual(expect.objectContaining({
+      filePath: secondCapture.result.filePath,
+    }));
+    expect((service as any).queuedTranscriptions).toHaveLength(0);
+
+    second.resolve({
+      text: "Second transcript",
+      outputPath: "SystemSculpt/Recordings/second - transcript.md",
+      sourceDisposition: "kept",
+      insertedIntoOrigin: false,
+    });
+    await flush();
+  });
+
+  it("restarts a queued automatic transcription when the setting is turned back on", async () => {
+    plugin.settings.autoTranscribeRecordings = true;
+    const first = deferred<any>();
+    const second = deferred<any>();
+    mockTranscriptionStart
+      .mockReturnValueOnce({ operationId: "first-operation", promise: first.promise, cancel: jest.fn() })
+      .mockReturnValueOnce({ operationId: "second-operation", promise: second.promise, cancel: jest.fn() });
+
+    const service = RecorderService.getInstance(app, plugin);
+    const capture = (filePath: string, startedAt: number) => ({
+      result: {
+        filePath,
+        startedAt,
+        durationMs: 2_000,
+        sizeBytes: 24_000,
+        stopReason: "manual",
+      },
+      origin: {
+        leaf: null,
+        destination: "note",
+        editor: null,
+        conversationOriginToken: null,
+        hostDocument: document,
+      },
+      microphoneLabel: "Default microphone",
+    });
+
+    (service as any).completedCapture = capture("SystemSculpt/Recordings/first.webm", 1_000);
+    void (service as any).transcribeSavedRecording();
+    await flush();
+    (service as any).detachDisplayedTranscription();
+    (service as any).completedCapture = capture("SystemSculpt/Recordings/second.webm", 4_000);
+    (service as any).state = "saved";
+    void (service as any).transcribeSavedRecording();
+    await flush();
+    expect((service as any).queuedTranscriptions).toHaveLength(1);
+
+    plugin.settings.autoTranscribeRecordings = false;
+    first.resolve({
+      text: "First transcript",
+      outputPath: "SystemSculpt/Recordings/first - transcript.md",
+      sourceDisposition: "kept",
+      insertedIntoOrigin: false,
+    });
+    await flush();
+    await flush();
+    expect(mockTranscriptionStart).toHaveBeenCalledTimes(1);
+    expect((service as any).queuedTranscriptions).toHaveLength(1);
+
+    plugin.settings.autoTranscribeRecordings = true;
+    service.recoverPendingCaptures();
+    await flush();
+    expect(mockTranscriptionStart).toHaveBeenCalledTimes(2);
+    expect((service as any).queuedTranscriptions).toHaveLength(0);
+
+    second.resolve({
+      text: "Second transcript",
+      outputPath: "SystemSculpt/Recordings/second - transcript.md",
+      sourceDisposition: "kept",
+      insertedIntoOrigin: false,
+    });
+    await flush();
+  });
+
+  it("persists manual transcription intent before dispatch when automatic transcription is off", async () => {
+    const events: string[] = [];
+    const work = deferred<any>();
+    plugin.getSettingsManager = jest.fn(() => ({
+      updateSettings: jest.fn(async (update: Record<string, unknown>) => {
+        events.push("persist");
+        Object.assign(plugin.settings, update);
+      }),
+    }));
+    mockTranscriptionStart.mockImplementation((request) => {
+      events.push("dispatch");
+      return {
+        operationId: "manual-operation",
+        promise: Promise.resolve(
+          request.onOperationIdChange?.("manual-operation"),
+        ).then(() => work.promise),
+        cancel: jest.fn(),
+      };
+    });
+    const service = RecorderService.getInstance(app, plugin);
+    (service as any).completedCapture = {
+      result: {
+        filePath: "SystemSculpt/Recordings/manual.webm",
+        startedAt: 1_000,
+        durationMs: 2_000,
+        sizeBytes: 24_000,
+        stopReason: "manual",
+      },
+      origin: {
+        leaf: null,
+        destination: "note",
+        editor: null,
+        conversationOriginToken: null,
+        hostDocument: document,
+      },
+      microphoneLabel: "Default microphone",
+    };
+
+    const running = (service as any).transcribeSavedRecording("manual");
+    await flush();
+
+    expect(events.slice(0, 2)).toEqual(["persist", "dispatch"]);
+    expect(plugin.settings.pendingRecorderCaptures).toEqual([
+      expect.objectContaining({
+        filePath: "SystemSculpt/Recordings/manual.webm",
+        transcriptionIntent: "manual",
+        operationId: "manual-operation",
+      }),
+    ]);
+
+    work.resolve({
+      text: "Manual transcript",
+      outputPath: "SystemSculpt/Recordings/manual - transcript.md",
+      sourceDisposition: "kept",
+      insertedIntoOrigin: false,
+    });
+    await running;
+  });
+
+  it("does not dispatch manual transcription when restart-safe intent cannot be saved", async () => {
+    plugin.getSettingsManager = jest.fn(() => ({
+      updateSettings: jest.fn().mockRejectedValue(new Error("settings unavailable")),
+    }));
+    const service = RecorderService.getInstance(app, plugin);
+    (service as any).completedCapture = {
+      result: {
+        filePath: "SystemSculpt/Recordings/manual.webm",
+        startedAt: 1_000,
+        durationMs: 2_000,
+        sizeBytes: 24_000,
+        stopReason: "manual",
+      },
+      origin: {
+        leaf: null,
+        destination: "note",
+        editor: null,
+        conversationOriginToken: null,
+        hostDocument: document,
+      },
+      microphoneLabel: "Default microphone",
+    };
+
+    await (service as any).transcribeSavedRecording("manual");
+
+    expect(mockTranscriptionStart).not.toHaveBeenCalled();
+    expect(mockUiInstances[0].render).toHaveBeenLastCalledWith(expect.objectContaining({
+      phase: "warning",
+      status: expect.stringContaining("restart-safe"),
+      canRetry: true,
+    }));
+  });
+
+  it("recovers a manually requested transcription while automatic transcription stays off", async () => {
+    const source = new TFile({
+      path: "SystemSculpt/Recordings/manual-recovery.webm",
+      stat: { size: 24_000 },
+    });
+    (app.vault.getAbstractFileByPath as jest.Mock).mockImplementation(
+      (path: string) => path === source.path ? source : null,
+    );
+    plugin.settings.pendingRecorderCaptures = [{
+      filePath: source.path,
+      startedAt: 1_000,
+      durationMs: 3_000,
+      sizeBytes: 24_000,
+      stopReason: "manual",
+      destination: "note",
+      transcriptionIntent: "manual",
+      operationId: "manual-recovery-operation",
+    }];
+    mockTranscriptionStart.mockReturnValue({
+      operationId: "manual-recovery-operation",
+      promise: Promise.resolve({
+        text: "Recovered manual transcript",
+        outputPath: "SystemSculpt/Recordings/manual-recovery - transcript.md",
+        sourceDisposition: "kept",
+        insertedIntoOrigin: false,
+      }),
+      cancel: jest.fn(),
+    });
+
+    const service = RecorderService.getInstance(app, plugin);
+    service.recoverPendingCaptures();
+    await flush();
+    await flush();
+
+    expect(mockTranscriptionStart).toHaveBeenCalledWith(expect.objectContaining({
+      filePath: source.path,
+      resumeOperationId: "manual-recovery-operation",
+    }));
+    expect(plugin.settings.pendingRecorderCaptures).toEqual([]);
+  });
+
+  it("drains a queued manual transcription even when automatic transcription is turned off", async () => {
+    plugin.settings.autoTranscribeRecordings = true;
+    const first = deferred<any>();
+    const second = deferred<any>();
+    mockTranscriptionStart
+      .mockReturnValueOnce({ operationId: "first-operation", promise: first.promise, cancel: jest.fn() })
+      .mockReturnValueOnce({ operationId: "manual-operation", promise: second.promise, cancel: jest.fn() });
+    const service = RecorderService.getInstance(app, plugin);
+    const capture = (filePath: string, startedAt: number) => ({
+      result: {
+        filePath,
+        startedAt,
+        durationMs: 2_000,
+        sizeBytes: 24_000,
+        stopReason: "manual",
+      },
+      origin: {
+        leaf: null,
+        destination: "note",
+        editor: null,
+        conversationOriginToken: null,
+        hostDocument: document,
+      },
+      microphoneLabel: "Default microphone",
+    });
+
+    (service as any).completedCapture = capture("SystemSculpt/Recordings/first.webm", 1_000);
+    void (service as any).transcribeSavedRecording("automatic");
+    await flush();
+    (service as any).detachDisplayedTranscription();
+    plugin.settings.autoTranscribeRecordings = false;
+    (service as any).completedCapture = capture("SystemSculpt/Recordings/manual.webm", 4_000);
+    void (service as any).transcribeSavedRecording("manual");
+    await flush();
+    expect((service as any).queuedTranscriptions).toHaveLength(1);
+
+    first.resolve({
+      text: "First transcript",
+      outputPath: "SystemSculpt/Recordings/first - transcript.md",
+      sourceDisposition: "kept",
+      insertedIntoOrigin: false,
+    });
+    await flush();
+    await flush();
+
+    expect(mockTranscriptionStart).toHaveBeenCalledTimes(2);
+    expect(mockTranscriptionStart.mock.calls[1][0]).toEqual(expect.objectContaining({
+      filePath: "SystemSculpt/Recordings/manual.webm",
+    }));
+    second.resolve({
+      text: "Manual transcript",
+      outputPath: "SystemSculpt/Recordings/manual - transcript.md",
+      sourceDisposition: "kept",
+      insertedIntoOrigin: false,
+    });
+    await flush();
+  });
+
+  it("reports saved-with-warning when the initiating chat no longer accepts dictation", async () => {
+    const service = RecorderService.getInstance(app, plugin);
+    service.onTranscription(() => false);
+    (service as any).completedCapture = {
+      result: {
+        filePath: "SystemSculpt/Recordings/session.webm",
+        startedAt: 1_000,
+        durationMs: 3_000,
+        sizeBytes: 32_000,
+        stopReason: "manual",
+      },
+      origin: {
+        leaf: { view: { getViewType: () => CHAT_VIEW_TYPE } },
+        destination: "chat",
+        editor: null,
+        conversationOriginToken: "conversation-origin-1",
+      },
+      microphoneLabel: "Default microphone",
+    };
+    mockTranscriptionStart.mockReturnValue({
+      promise: Promise.resolve({
+        text: "Dictated message",
+        outputPath: "SystemSculpt/Recordings/session - transcript.md",
+        sourceDisposition: "kept",
+        insertedIntoOrigin: false,
+      }),
+      cancel: jest.fn(),
+    });
+
+    await (service as any).transcribeSavedRecording();
+
+    expect((service as any).state).toBe("warning");
+    expect(mockUiInstances[0].render).toHaveBeenLastCalledWith(expect.objectContaining({
+      phase: "warning",
+      status: expect.stringContaining("chat where recording started changed or closed"),
+    }));
+  });
+
+  it("opens the completed transcript in a focused tab", async () => {
+    const output = new TFile({ path: "SystemSculpt/Recordings/session - transcript.md" });
+    const leaf = { openFile: jest.fn().mockResolvedValue(undefined) };
+    (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(output);
+    (app.workspace as any).getLeaf = jest.fn().mockReturnValue(leaf);
+    (app.workspace as any).setActiveLeaf = jest.fn();
+
+    const service = RecorderService.getInstance(app, plugin);
+    const running = service.toggleRecording();
+    await flush();
+    harness.setRecording(true);
+    harness.start.resolve({
+      filePath: "SystemSculpt/Recordings/session.webm",
+      startedAt: 1_000,
+      microphoneLabel: "Default microphone",
+    });
+    await running;
+    harness.setRecording(false);
+    harness.completion.resolve({
+      filePath: "SystemSculpt/Recordings/session.webm",
+      startedAt: 1_000,
+      durationMs: 3_000,
+      sizeBytes: 32_000,
+      stopReason: "manual",
+    });
+    await flush();
+    (service as any).outputPath = output.path;
+
+    const actions = mockUiInstances[0].open.mock.calls[0][0];
+    actions.onOpenOutput();
+    await flush();
+
+    expect(leaf.openFile).toHaveBeenCalledWith(output);
+    expect((app.workspace as any).setActiveLeaf).toHaveBeenCalledWith(leaf, { focus: true });
+  });
+
+  it("shows Stop waiting immediately and retries preserved processing with the same operation", async () => {
+    const service = RecorderService.getInstance(app, plugin);
+    (service as any).completedCapture = {
+      result: {
+        filePath: "SystemSculpt/Recordings/session.webm",
+        startedAt: 1_000,
+        durationMs: 3_000,
+        sizeBytes: 32_000,
+        stopReason: "manual",
+      },
+      origin: {
+        leaf: null,
+        destination: "note",
+        editor: null,
+        conversationOriginToken: null,
+        hostDocument: document,
+      },
+      microphoneLabel: "Default microphone",
+    };
+    const first = deferred<any>();
+    const cancel = jest.fn();
+    mockTranscriptionStart.mockReturnValueOnce({
+      operationId: "preserved-op",
+      promise: first.promise,
+      cancel,
+    });
+    const running = (service as any).transcribeSavedRecording();
+    await flush();
+
+    (service as any).stopWaitingForTranscription();
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(mockUiInstances[0].render).toHaveBeenLastCalledWith(expect.objectContaining({
+      phase: "warning",
+      canRetry: false,
+      status: expect.stringContaining("Finishing safe cancellation"),
+    }));
+    await service.toggleRecording();
+    expect(mockSessionInstances).toHaveLength(0);
+    expect(mockUiInstances[0].render).toHaveBeenLastCalledWith(expect.objectContaining({
+      canRetry: false,
+      status: expect.stringContaining("Still finishing safe cancellation"),
+    }));
+    first.reject(new ManagedTranscriptionInterruptedError(
+      "preserved-op",
+      true,
+      "processing",
+      "resume",
+    ));
+    await running;
+
+    expect(mockUiInstances[0].render).toHaveBeenLastCalledWith(expect.objectContaining({
+      canRetry: true,
+      status: expect.stringContaining("Retry resumes the same operation"),
+    }));
+    mockTranscriptionStart.mockReturnValueOnce({
+      operationId: "preserved-op",
+      promise: Promise.resolve({
+        text: "Transcript",
+        outputPath: "SystemSculpt/Recordings/session - transcript.md",
+        sourceDisposition: "kept",
+        insertedIntoOrigin: false,
+      }),
+      cancel: jest.fn(),
+    });
+    await (service as any).transcribeSavedRecording();
+    expect(mockTranscriptionStart.mock.calls[1][0]).toEqual(expect.objectContaining({
+      resumeOperationId: "preserved-op",
+    }));
+  });
+
+  it("disables retry for an ambiguous preserved dispatch instead of launching a duplicate", async () => {
+    const service = RecorderService.getInstance(app, plugin);
+    (service as any).completedCapture = {
+      result: {
+        filePath: "SystemSculpt/Recordings/session.webm",
+        startedAt: 1_000,
+        durationMs: 3_000,
+        sizeBytes: 32_000,
+        stopReason: "manual",
+      },
+      origin: { leaf: null, destination: "note", editor: null, conversationOriginToken: null, hostDocument: document },
+      microphoneLabel: "Default microphone",
+    };
+    mockTranscriptionStart.mockReturnValueOnce({
+      operationId: "ambiguous-op",
+      promise: Promise.reject(new ManagedTranscriptionInterruptedError(
+        "ambiguous-op",
+        false,
+        "create_dispatching",
+        "blocked",
+      )),
+      cancel: jest.fn(),
+    });
+
+    await (service as any).transcribeSavedRecording();
+
+    expect((service as any).transcriptionResumeOperationId).toBeNull();
+    expect(mockUiInstances[0].render).toHaveBeenLastCalledWith(expect.objectContaining({
+      canRetry: false,
+      status: expect.stringContaining("automatic retry is disabled"),
+    }));
+    expect(mockTranscriptionStart).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["hidden", "background-hidden", "visibilitychange"],
+    ["visible", "background-pagehide", "pageshow"],
+  ] as const)("handles %s background auto-transcription without losing the foreground race", async (visibility, stopReason, resumeEvent) => {
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: visibility });
+    plugin.settings.autoTranscribeRecordings = true;
+    mockTranscriptionStart.mockReturnValue({
+      operationId: "visible-op",
+      promise: Promise.resolve({
+        text: "Transcript",
+        outputPath: "SystemSculpt/Recordings/session - transcript.md",
+        sourceDisposition: "kept",
+        insertedIntoOrigin: false,
+      }),
+      cancel: jest.fn(),
+    });
+    const service = RecorderService.getInstance(app, plugin);
+    const running = service.toggleRecording();
+    await flush();
+    harness.setRecording(true);
+    harness.start.resolve({
+      filePath: "SystemSculpt/Recordings/session.webm",
+      startedAt: 1_000,
+      microphoneLabel: "Default microphone",
+    });
+    await running;
+    harness.setRecording(false);
+    harness.completion.resolve({
+      filePath: "SystemSculpt/Recordings/session.webm",
+      startedAt: 1_000,
+      durationMs: 3_000,
+      sizeBytes: 32_000,
+      stopReason,
+    });
+    await flush();
+
+    expect(mockTranscriptionStart).not.toHaveBeenCalled();
+    expect(mockUiInstances[0].render).toHaveBeenLastCalledWith(expect.objectContaining({
+      phase: "saved",
+      status: "Recording saved. Transcription will start when Obsidian returns.",
+    }));
+
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+    if (resumeEvent === "pageshow") window.dispatchEvent(new Event("pageshow"));
+    else document.dispatchEvent(new Event("visibilitychange"));
+    await flush();
+    expect(mockTranscriptionStart).toHaveBeenCalledTimes(1);
+  });
+
+  it("reoffers a durably saved automatic recording after a plugin/process restart", async () => {
+    const source = new TFile({
+      path: "SystemSculpt/Recordings/recovered.webm",
+      stat: { size: 24_000 },
+    });
+    (app.vault.getAbstractFileByPath as jest.Mock).mockImplementation(
+      (path: string) => path === source.path ? source : null,
+    );
+    plugin.settings.autoTranscribeRecordings = true;
+    plugin.settings.pendingRecorderCaptures = [{
+      filePath: source.path,
+      startedAt: 1_000,
+      durationMs: 3_000,
+      sizeBytes: 24_000,
+      stopReason: "background-hidden",
+      destination: "note",
+      operationId: "persisted-recorder-op",
+    }];
+    const acknowledgeCompletion = jest.fn().mockResolvedValue(undefined);
+    mockTranscriptionStart.mockReturnValue({
+      operationId: "persisted-recorder-op",
+      promise: Promise.resolve({
+        text: "Recovered transcript",
+        outputPath: "SystemSculpt/Recordings/recovered - transcript.md",
+        sourceDisposition: "kept",
+        insertedIntoOrigin: false,
+        acknowledgeCompletion,
+      }),
+      cancel: jest.fn(),
+    });
+
+    const service = RecorderService.getInstance(app, plugin);
+    service.recoverPendingCaptures();
+    await flush();
+    await flush();
+
+    expect(mockTranscriptionStart).toHaveBeenCalledWith(expect.objectContaining({
+      filePath: source.path,
+      destination: "note",
+      callerScope: "recorder/note-dictation",
+      sourceOwnership: "recorder-capture",
+      resumeOperationId: "persisted-recorder-op",
+    }));
+    expect(plugin.settings.pendingRecorderCaptures).toEqual([]);
+    expect(acknowledgeCompletion).toHaveBeenCalledTimes(1);
+  });
+
+  it("acknowledges a completed recorder operation only after pending capture state is durably cleared", async () => {
+    const events: string[] = [];
+    plugin.settings.autoTranscribeRecordings = true;
+    plugin.settings.pendingRecorderCaptures = [{
+      filePath: "SystemSculpt/Recordings/session.webm",
+      startedAt: 1_000,
+      durationMs: 3_000,
+      sizeBytes: 24_000,
+      stopReason: "manual",
+      destination: "note",
+    }];
+    plugin.getSettingsManager = jest.fn(() => ({
+      updateSettings: jest.fn(async (update: Record<string, unknown>) => {
+        const pending = update.pendingRecorderCaptures as unknown[] | undefined;
+        if (pending?.length === 0) events.push("pending-cleared");
+        Object.assign(plugin.settings, update);
+      }),
+    }));
+    const acknowledgeCompletion = jest.fn(async () => { events.push("acknowledged"); });
+    mockTranscriptionStart.mockReturnValue({
+      operationId: "fresh-recorder-op",
+      promise: Promise.resolve({
+        operationId: "fresh-recorder-op",
+        text: "Transcript",
+        outputPath: "SystemSculpt/Recordings/session - transcript.md",
+        sourceDisposition: "kept",
+        insertedIntoOrigin: false,
+        acknowledgeCompletion,
+      }),
+      cancel: jest.fn(),
+    });
+    const service = RecorderService.getInstance(app, plugin);
+    (service as any).completedCapture = {
+      result: {
+        filePath: "SystemSculpt/Recordings/session.webm",
+        startedAt: 1_000,
+        durationMs: 3_000,
+        sizeBytes: 24_000,
+        stopReason: "manual",
+      },
+      origin: { leaf: null, destination: "note", editor: null, conversationOriginToken: null, hostDocument: document },
+      microphoneLabel: "Default microphone",
+    };
+
+    await (service as any).transcribeSavedRecording();
+
+    expect(events).toEqual(["pending-cleared", "acknowledged"]);
+  });
+
+  it("keeps the completed recovery receipt when pending capture state cannot be cleared", async () => {
+    plugin.settings.autoTranscribeRecordings = true;
+    plugin.settings.pendingRecorderCaptures = [{
+      filePath: "SystemSculpt/Recordings/session.webm",
+      startedAt: 1_000,
+      durationMs: 3_000,
+      sizeBytes: 24_000,
+      stopReason: "manual",
+      destination: "note",
+    }];
+    plugin.getSettingsManager = jest.fn(() => ({
+      updateSettings: jest.fn(async () => { throw new Error("settings unavailable"); }),
+    }));
+    const acknowledgeCompletion = jest.fn().mockResolvedValue(undefined);
+    mockTranscriptionStart.mockReturnValue({
+      operationId: "uncleared-recorder-op",
+      promise: Promise.resolve({
+        operationId: "uncleared-recorder-op",
+        text: "Transcript",
+        outputPath: "SystemSculpt/Recordings/session - transcript.md",
+        sourceDisposition: "kept",
+        insertedIntoOrigin: false,
+        acknowledgeCompletion,
+      }),
+      cancel: jest.fn(),
+    });
+    const service = RecorderService.getInstance(app, plugin);
+    (service as any).completedCapture = {
+      result: {
+        filePath: "SystemSculpt/Recordings/session.webm",
+        startedAt: 1_000,
+        durationMs: 3_000,
+        sizeBytes: 24_000,
+        stopReason: "manual",
+      },
+      origin: { leaf: null, destination: "note", editor: null, conversationOriginToken: null, hostDocument: document },
+      microphoneLabel: "Default microphone",
+    };
+
+    await (service as any).transcribeSavedRecording();
+
+    expect(acknowledgeCompletion).not.toHaveBeenCalled();
+  });
+
+  it("uses a missing recorder source's operation ID to prune a completed receipt before forgetting it", async () => {
+    const events: string[] = [];
+    plugin.settings.autoTranscribeRecordings = true;
+    plugin.settings.pendingRecorderCaptures = [{
+      filePath: "SystemSculpt/Recordings/trashed.webm",
+      startedAt: 1_000,
+      durationMs: 3_000,
+      sizeBytes: 24_000,
+      stopReason: "manual",
+      destination: "note",
+      operationId: "completed-before-crash",
+    }];
+    (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(null);
+    mockTranscriptionAcknowledgeCompleted.mockImplementation(async () => {
+      events.push("acknowledged");
+    });
+    plugin.getSettingsManager = jest.fn(() => ({
+      updateSettings: jest.fn(async (update: Record<string, unknown>) => {
+        const pending = update.pendingRecorderCaptures as unknown[] | undefined;
+        if (pending?.length === 0) events.push("pending-forgotten");
+        Object.assign(plugin.settings, update);
+      }),
+    }));
+
+    RecorderService.getInstance(app, plugin).recoverPendingCaptures();
+    await flush();
+
+    expect(mockTranscriptionAcknowledgeCompleted).toHaveBeenCalledWith("completed-before-crash");
+    expect(events).toEqual(["acknowledged", "pending-forgotten"]);
+    expect(mockTranscriptionStart).not.toHaveBeenCalled();
+  });
+
+  it("keeps missing-source pending state when its completion acknowledgment fails", async () => {
+    plugin.settings.autoTranscribeRecordings = true;
+    plugin.settings.pendingRecorderCaptures = [{
+      filePath: "SystemSculpt/Recordings/trashed.webm",
+      startedAt: 1_000,
+      durationMs: 3_000,
+      sizeBytes: 24_000,
+      stopReason: "manual",
+      destination: "note",
+      operationId: "not-completed-yet",
+    }];
+    (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(null);
+    mockTranscriptionAcknowledgeCompleted.mockRejectedValue(
+      new Error("completion is not durable"),
+    );
+    const updateSettings = jest.fn(async (update: Record<string, unknown>) => {
+      Object.assign(plugin.settings, update);
+    });
+    plugin.getSettingsManager = jest.fn(() => ({ updateSettings }));
+
+    RecorderService.getInstance(app, plugin).recoverPendingCaptures();
+    await flush();
+
+    expect(mockTranscriptionAcknowledgeCompleted).toHaveBeenCalledWith("not-completed-yet");
+    expect(updateSettings).not.toHaveBeenCalled();
+    expect(plugin.settings.pendingRecorderCaptures).toHaveLength(1);
+    expect(mockTranscriptionStart).not.toHaveBeenCalled();
+  });
+
+  it("drains a newly saved capture after startup recovery without overlapping uploads", async () => {
+    const recoveredSource = new TFile({
+      path: "SystemSculpt/Recordings/recovered.webm",
+      stat: { size: 24_000 },
+    });
+    (app.vault.getAbstractFileByPath as jest.Mock).mockImplementation(
+      (path: string) => path === recoveredSource.path ? recoveredSource : null,
+    );
+    plugin.settings.autoTranscribeRecordings = true;
+    plugin.settings.pendingRecorderCaptures = [{
+      filePath: recoveredSource.path,
+      startedAt: 1_000,
+      durationMs: 3_000,
+      sizeBytes: 24_000,
+      stopReason: "background-hidden",
+      destination: "note",
+    }];
+    const recovery = deferred<any>();
+    const live = deferred<any>();
+    mockTranscriptionStart
+      .mockReturnValueOnce({
+        operationId: "recovery-op",
+        promise: recovery.promise,
+        cancel: jest.fn(),
+      })
+      .mockReturnValueOnce({
+        operationId: "live-op",
+        promise: live.promise,
+        cancel: jest.fn(),
       });
 
-      expect((service as any).isRecording).toBe(false);
-      expect((service as any).ui.setRecordingState).toHaveBeenCalledWith(false);
-      expect((service as any).ui.stopTimer).toHaveBeenCalled();
-      expect((service as any).ui.linger).toHaveBeenCalledWith(
-        expect.stringContaining("Saved to test-audio.webm"),
-        2400
-      );
+    const service = RecorderService.getInstance(app, plugin);
+    service.recoverPendingCaptures();
+    await flush();
+    expect(mockTranscriptionStart).toHaveBeenCalledTimes(1);
+
+    (service as any).completedCapture = {
+      result: {
+        filePath: "SystemSculpt/Recordings/live.webm",
+        startedAt: 4_000,
+        durationMs: 2_000,
+        sizeBytes: 20_000,
+        stopReason: "manual",
+      },
+      origin: { leaf: null, destination: "note", editor: null, conversationOriginToken: null, hostDocument: document },
+      microphoneLabel: "Default microphone",
+    };
+    (service as any).state = "saved";
+    void (service as any).transcribeSavedRecording();
+    await flush();
+    expect(mockTranscriptionStart).toHaveBeenCalledTimes(1);
+    expect((service as any).queuedTranscriptions).toHaveLength(1);
+
+    recovery.resolve({
+      text: "Recovered transcript",
+      outputPath: "SystemSculpt/Recordings/recovered - transcript.md",
+      sourceDisposition: "kept",
+      insertedIntoOrigin: false,
     });
+    await flush();
+    await flush();
+
+    expect(mockTranscriptionStart).toHaveBeenCalledTimes(2);
+    expect(mockTranscriptionStart.mock.calls[1][0]).toEqual(expect.objectContaining({
+      filePath: "SystemSculpt/Recordings/live.webm",
+    }));
+
+    live.resolve({
+      text: "Live transcript",
+      outputPath: "SystemSculpt/Recordings/live - transcript.md",
+      sourceDisposition: "kept",
+      insertedIntoOrigin: false,
+    });
+    await flush();
   });
 
-  describe("handleStreamChanged (private)", () => {
-    it("attaches stream to UI", () => {
-      const service = RecorderService.getInstance(mockApp, mockPlugin);
-      const mockStream = {} as MediaStream;
-
-      (service as any).handleStreamChanged(mockStream);
-
-      expect((service as any).ui.attachStream).toHaveBeenCalledWith(mockStream);
+  it("keeps scanning pending recordings when starting one recovery throws synchronously", async () => {
+    const first = new TFile({
+      path: "SystemSculpt/Recordings/first.webm",
+      stat: { size: 24_000 },
     });
-  });
-
-  describe("beginSessionLifecycle (private)", () => {
-    it("creates session completion promise", () => {
-      const service = RecorderService.getInstance(mockApp, mockPlugin);
-
-      (service as any).beginSessionLifecycle();
-
-      expect((service as any).sessionCompletionPromise).not.toBeNull();
-      expect((service as any).sessionCompletionResolver).not.toBeNull();
+    const second = new TFile({
+      path: "SystemSculpt/Recordings/second.webm",
+      stat: { size: 25_000 },
     });
-
-    it("skips if promise already active", () => {
-      const service = RecorderService.getInstance(mockApp, mockPlugin);
-      (service as any).beginSessionLifecycle();
-      const firstPromise = (service as any).sessionCompletionPromise;
-
-      (service as any).beginSessionLifecycle();
-
-      expect((service as any).sessionCompletionPromise).toBe(firstPromise);
-    });
-  });
-
-  describe("resolveSessionLifecycle (private)", () => {
-    it("resolves pending promise", () => {
-      const service = RecorderService.getInstance(mockApp, mockPlugin);
-      (service as any).beginSessionLifecycle();
-
-      (service as any).resolveSessionLifecycle();
-
-      expect((service as any).sessionCompletionPromise).toBeNull();
-      expect((service as any).sessionCompletionResolver).toBeNull();
-    });
-
-    it("does nothing if no pending promise", () => {
-      const service = RecorderService.getInstance(mockApp, mockPlugin);
-
-      expect(() => (service as any).resolveSessionLifecycle()).not.toThrow();
-    });
-  });
-
-  describe("waitForSessionLifecycle (private)", () => {
-    it("waits for pending promise", async () => {
-      const service = RecorderService.getInstance(mockApp, mockPlugin);
-      (service as any).beginSessionLifecycle();
-
-      let resolved = false;
-      const waitPromise = (service as any).waitForSessionLifecycle().then(() => {
-        resolved = true;
+    (app.vault.getAbstractFileByPath as jest.Mock).mockImplementation(
+      (path: string) => path === first.path ? first : path === second.path ? second : null,
+    );
+    plugin.settings.autoTranscribeRecordings = true;
+    plugin.settings.pendingRecorderCaptures = [first, second].map((source) => ({
+      filePath: source.path,
+      startedAt: 1_000,
+      durationMs: 3_000,
+      sizeBytes: source.stat.size,
+      stopReason: "background-hidden",
+      destination: "note",
+    }));
+    mockTranscriptionStart
+      .mockImplementationOnce(() => { throw new Error("service still loading"); })
+      .mockReturnValueOnce({
+        operationId: "second-op",
+        promise: Promise.resolve({
+          text: "Recovered transcript",
+          outputPath: "SystemSculpt/Recordings/second - transcript.md",
+          sourceDisposition: "kept",
+          insertedIntoOrigin: false,
+        }),
+        cancel: jest.fn(),
       });
 
-      expect(resolved).toBe(false);
+    RecorderService.getInstance(app, plugin).recoverPendingCaptures();
+    await flush();
+    await flush();
 
-      (service as any).resolveSessionLifecycle();
-      await waitPromise;
-
-      expect(resolved).toBe(true);
-    });
-
-    it("handles errors gracefully", async () => {
-      const service = RecorderService.getInstance(mockApp, mockPlugin);
-      (service as any).sessionCompletionPromise = Promise.reject(
-        new Error("Test error")
-      );
-
-      await expect(
-        (service as any).waitForSessionLifecycle()
-      ).resolves.not.toThrow();
-    });
+    expect(mockTranscriptionStart).toHaveBeenCalledTimes(2);
+    expect(plugin.settings.pendingRecorderCaptures).toEqual([
+      expect.objectContaining({ filePath: first.path }),
+    ]);
   });
 
-  describe("lifecycle state management", () => {
-    it("starts in idle state", () => {
-      const service = RecorderService.getInstance(mockApp, mockPlugin);
+  it("fails closed instead of retranscribing conflicting synced recovery entries", async () => {
+    plugin.settings.autoTranscribeRecordings = true;
+    plugin.settings.pendingRecorderCaptures = [{
+      filePath: "SystemSculpt/Recordings/conflict.webm",
+      startedAt: 1_000,
+      durationMs: 3_000,
+      sizeBytes: 24_000,
+      stopReason: "background-hidden",
+      destination: "note",
+      recoveryBlocked: "conflicting-operation-ids",
+    }];
 
-      expect((service as any).lifecycleState).toBe("idle");
+    RecorderService.getInstance(app, plugin).recoverPendingCaptures();
+    await flush();
+
+    expect(mockTranscriptionStart).not.toHaveBeenCalled();
+    expect(plugin.settings.pendingRecorderCaptures).toHaveLength(1);
+  });
+
+  it("retries local transcript-finishing failures with the existing remote operation", async () => {
+    const service = RecorderService.getInstance(app, plugin);
+    mockUiInstances[0].isVisible.mockReturnValue(false);
+    (service as any).completedCapture = {
+      result: {
+        filePath: "SystemSculpt/Recordings/session.webm",
+        startedAt: 1_000,
+        durationMs: 3_000,
+        sizeBytes: 32_000,
+        stopReason: "manual",
+      },
+      origin: { leaf: null, destination: "note", editor: null, conversationOriginToken: null, hostDocument: document },
+      microphoneLabel: "Default microphone",
+    };
+    mockTranscriptionStart.mockReturnValueOnce({
+      operationId: "local-failure-op",
+      promise: Promise.reject(new TranscriptionResumeRequiredError(
+        "local-failure-op",
+        new Error("disk full"),
+      )),
+      cancel: jest.fn(),
     });
 
-    it("isRecording starts as false", () => {
-      const service = RecorderService.getInstance(mockApp, mockPlugin);
+    await (service as any).transcribeSavedRecording();
+    expect((service as any).transcriptionResumeOperationId).toBe("local-failure-op");
+    expect(mockUiInstances[0].open).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({
+        canRetry: true,
+        status: expect.stringContaining("Retry resumes the same server operation"),
+      }),
+    );
+    await service.toggleRecording();
+    expect(mockSessionInstances).toHaveLength(0);
+    expect((service as any).transcriptionResumeOperationId).toBe("local-failure-op");
+  });
 
-      expect((service as any).isRecording).toBe(false);
+  it("stops active capture and scoped transcription during unload", async () => {
+    const service = RecorderService.getInstance(app, plugin);
+    const running = service.toggleRecording();
+    await flush();
+    harness.setRecording(true);
+    harness.start.resolve({
+      filePath: "SystemSculpt/Recordings/session.webm",
+      startedAt: 1_000,
+      microphoneLabel: "Default microphone",
     });
+    await running;
+
+    const cancel = jest.fn();
+    const activeTask = { promise: new Promise(() => undefined), cancel };
+    (service as any).transcriptionTask = activeTask;
+    (service as any).transcriptionTasks.add(activeTask);
+    service.unload();
+
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(harness.session.stop).toHaveBeenCalledWith("interrupted");
+    expect(mockUiInstances[0].close).toHaveBeenCalled();
   });
 });

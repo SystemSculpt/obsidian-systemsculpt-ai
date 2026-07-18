@@ -41,6 +41,8 @@ const CONCURRENCY_LIMITS = {
   local_cpu: 1,
 } as const;
 
+const MAX_RECOVERY_EVENT_LOG_BYTES = 8 * 1024 * 1024;
+
 const PREVIEWABLE_MEDIA_EXTENSIONS = new Set([
   ".png",
   ".jpg",
@@ -113,7 +115,62 @@ export class StudioRuntime {
 
   async getRecentRuns(projectPath: string): Promise<StudioRunSummary[]> {
     const index = await this.readRunIndex(projectPath);
+    await this.retryPublishedTranscriptionCleanup(projectPath, index);
     return index.sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+  }
+
+  private async retryPublishedTranscriptionCleanup(
+    projectPath: string,
+    index: readonly StudioRunSummary[] = [],
+  ): Promise<void> {
+    const runs = index.length > 0 ? index : await this.readRunIndex(projectPath);
+    const operations = new Map<string, StudioManagedOperationRef>();
+    for (const run of runs) {
+      const eventsPath = normalizePath(
+        `${deriveStudioRunsDir(projectPath)}/${run.runId}/events.ndjson`,
+      );
+      const bytes = await this.projectStore.readSupportFile(projectPath, eventsPath);
+      if (!bytes || bytes.byteLength > MAX_RECOVERY_EVENT_LOG_BYTES) continue;
+      for (const line of new TextDecoder().decode(bytes).split("\n")) {
+        if (!line.trim()) continue;
+        let event: unknown;
+        try {
+          event = JSON.parse(line);
+        } catch {
+          continue;
+        }
+        if (
+          !event
+          || typeof event !== "object"
+          || (event as { type?: unknown }).type !== "node.output"
+          || !Array.isArray((event as { managedOperations?: unknown }).managedOperations)
+        ) continue;
+        for (const operation of (event as { managedOperations: unknown[] }).managedOperations) {
+          if (
+            !operation
+            || typeof operation !== "object"
+            || (operation as { capability?: unknown }).capability !== "transcription"
+          ) continue;
+          const operationId = (operation as { operationId?: unknown }).operationId;
+          if (
+            typeof operationId !== "string"
+            || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(operationId)
+          ) continue;
+          operations.set(operationId, { capability: "transcription", operationId });
+        }
+      }
+    }
+    if (operations.size === 0) return;
+    try {
+      await this.apiAdapter.completeLocalCommit([...operations.values()]);
+    } catch (error) {
+      this.plugin.getLogger().warn("Studio published transcription cleanup remains pending", {
+        source: "StudioRuntime",
+        metadata: {
+          error: error instanceof Error ? error.message : String(error),
+        },
+      });
+    }
   }
 
   async getNodeCacheSnapshot(projectPath: string): Promise<StudioNodeCacheSnapshotV1> {
@@ -286,6 +343,7 @@ export class StudioRuntime {
     startedAt: string,
     options?: StudioRunOptions
   ): Promise<StudioRunSummary> {
+    await this.retryPublishedTranscriptionCleanup(projectPath);
     const project = scopeProjectForRun(cloneStudioProjectSnapshot(fullProject), options?.entryNodeIds);
     const policy = await this.projectStore.loadPolicy(project.permissionsRef.policyPath);
     const permissions = new StudioPermissionManager(policy);
@@ -494,6 +552,18 @@ export class StudioRuntime {
               }
               return this.app.vault.read(file);
             },
+            statVaultFileSize: async (vaultPath: string) => {
+              permissions.assertFilesystemPath(vaultPath);
+              const file = this.app.vault.getAbstractFileByPath(vaultPath);
+              if (!(file instanceof TFile)) {
+                throw new Error(`Vault file not found: ${vaultPath}`);
+              }
+              const size = Number(file.stat?.size);
+              if (!Number.isFinite(size)) {
+                throw new Error(`Unable to determine vault file size: ${vaultPath}`);
+              }
+              return size;
+            },
             readVaultBinary: async (vaultPath: string) => {
               permissions.assertFilesystemPath(vaultPath);
               const file = this.app.vault.getAbstractFileByPath(vaultPath);
@@ -501,6 +571,27 @@ export class StudioRuntime {
                 throw new Error(`Vault file not found: ${vaultPath}`);
               }
               return this.app.vault.readBinary(file);
+            },
+            statLocalFileSize: async (absolutePath: string) => {
+              const normalized = String(absolutePath || "").trim();
+              if (!desktop) {
+                throw new Error("Local filesystem reads require Obsidian Desktop.");
+              }
+              if (!normalized) {
+                throw new Error("Local filesystem read path is empty.");
+              }
+              if (!desktop.path.isAbsolute(normalized)) {
+                throw new Error(
+                  `Local filesystem read requires an absolute path. Received "${normalized}".`
+                );
+              }
+              permissions.assertFilesystemPath(normalized);
+              const stat = await desktop.fs.stat(normalized);
+              const size = Number(stat.size);
+              if (!Number.isFinite(size)) {
+                throw new Error(`Unable to determine local file size: ${normalized}`);
+              }
+              return size;
             },
             readLocalFileBinary: async (absolutePath: string) => {
               const normalized = String(absolutePath || "").trim();

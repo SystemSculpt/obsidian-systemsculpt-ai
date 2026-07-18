@@ -516,6 +516,7 @@ describe("AgentChatView coordinator", () => {
       setAgentSnapshot: jest.fn(async () => undefined),
     };
     const view = {
+      conversationOriginToken: "conversation-origin-before-load",
       controller: { cancel: jest.fn(async () => undefined) },
       sessionTrustedToolNames,
       workspace,
@@ -534,6 +535,7 @@ describe("AgentChatView coordinator", () => {
     await AgentChatView.prototype.loadChatById.call(view as any, "chat-2");
 
     expect(sessionTrustedToolNames).toEqual(new Set());
+    expect(view.conversationOriginToken).not.toBe("conversation-origin-before-load");
     expect(view.approvalMode).toBe("full-access");
     expect(workspace.setApprovalMode).toHaveBeenCalledWith("full-access");
     expect(view.hydrateQueue).toHaveBeenCalledWith("chat-2");
@@ -580,6 +582,7 @@ describe("AgentChatView coordinator", () => {
     const persistQueueState = jest.fn(async () => undefined);
     const transcriptCommitUnsubscribe = jest.fn();
     const view = {
+      conversationOriginToken: "conversation-origin-before-new-chat",
       suppressQueueDrain: false,
       controller: { cancel: jest.fn(async () => undefined) },
       queueHydrated: true,
@@ -650,11 +653,159 @@ describe("AgentChatView coordinator", () => {
     await (AgentChatView.prototype as any).startNewChat.call(view, false);
 
     expect(view.queuedFollowUps).toEqual(queued);
+    expect(view.conversationOriginToken).not.toBe("conversation-origin-before-new-chat");
     expect(queueRepository.move).toHaveBeenCalledWith(
       "draft-old",
       expect.stringMatching(/^draft-/),
       queued,
     );
     expect(queueRepository.save).not.toHaveBeenCalled();
+  });
+
+  it("does not change the conversation token when a draft receives its durable chat ID", () => {
+    const workspace = { setTitle: jest.fn() };
+    const view = {
+      conversationOriginToken: "conversation-origin-draft",
+      workspace,
+      chatId: "",
+      chatTitle: "New chat",
+      chatVersion: 0,
+    };
+
+    (AgentChatView.prototype as any).applyTranscriptIdentity.call(view, {
+      chatId: "chat-durable-1",
+      title: "Durable chat",
+      version: 1,
+    });
+
+    expect(view.chatId).toBe("chat-durable-1");
+    expect(view.conversationOriginToken).toBe("conversation-origin-draft");
+  });
+
+  it("binds chat recording through the plugin-owned recorder lifecycle", () => {
+    const unsubscribeToggle = jest.fn();
+    const unsubscribeTranscript = jest.fn();
+    const recorder = {
+      onToggle: jest.fn(() => unsubscribeToggle),
+      onTranscription: jest.fn(() => unsubscribeTranscript),
+      isCurrentlyRecording: jest.fn(() => true),
+    };
+    const getRecorderService = jest.fn(() => recorder);
+    const workspace = { setRecording: jest.fn() };
+    const view = {
+      plugin: { getRecorderService },
+      workspace,
+      handleRecorderTranscription: jest.fn(),
+    };
+
+    (AgentChatView.prototype as any).installRecorderBindings.call(view);
+
+    expect(getRecorderService).toHaveBeenCalledTimes(1);
+    expect(view).toMatchObject({
+      recorderToggleUnsubscribe: unsubscribeToggle,
+      recorderTranscriptUnsubscribe: unsubscribeTranscript,
+    });
+    expect(workspace.setRecording).toHaveBeenCalledWith(true);
+  });
+
+  it("refuses same-leaf dictation after that leaf switches conversations", () => {
+    const leaf = {};
+    const setInputText = jest.fn();
+    const acceptComposerSubmission = jest.fn();
+    const view = {
+      leaf,
+      conversationOriginToken: "conversation-origin-new",
+      app: { workspace: { activeLeaf: leaf } },
+      plugin: { settings: { autoSubmitAfterTranscription: true } },
+      getInputText: jest.fn(() => "Existing draft"),
+      setInputText,
+      isWebSearchEnabled: jest.fn(() => false),
+      acceptComposerSubmission,
+    };
+
+    const delivered = (AgentChatView.prototype as any).handleRecorderTranscription.call(
+      view,
+      "Dictated message",
+      leaf,
+      "conversation-origin-old",
+    );
+
+    expect(delivered).toBe(false);
+    expect(setInputText).not.toHaveBeenCalled();
+    expect(acceptComposerSubmission).not.toHaveBeenCalled();
+  });
+
+  it("inserts and may submit dictation only when both leaf and conversation token match", () => {
+    const leaf = {};
+    const setInputText = jest.fn();
+    const acceptComposerSubmission = jest.fn();
+    const view = {
+      leaf,
+      conversationOriginToken: "conversation-origin-current",
+      app: { workspace: { activeLeaf: leaf } },
+      plugin: { settings: { autoSubmitAfterTranscription: true } },
+      getInputText: jest.fn(() => "Existing draft"),
+      setInputText,
+      isWebSearchEnabled: jest.fn(() => true),
+      acceptComposerSubmission,
+    };
+
+    const delivered = (AgentChatView.prototype as any).handleRecorderTranscription.call(
+      view,
+      "Dictated message",
+      leaf,
+      "conversation-origin-current",
+    );
+
+    expect(delivered).toBe(true);
+    expect(setInputText).toHaveBeenNthCalledWith(
+      1,
+      "Existing draft\n\nDictated message",
+      { focus: true },
+    );
+    expect(setInputText).toHaveBeenCalledTimes(1);
+    expect(acceptComposerSubmission).toHaveBeenCalledWith({
+      text: "Existing draft\n\nDictated message",
+      webSearch: true,
+      mode: "send",
+    }, "conversation-origin-current", true);
+  });
+
+  it("does not auto-submit dictation if the conversation changes during async preparation", async () => {
+    let finishPreparation!: (submission: typeof submit) => void;
+    const preparing = new Promise<typeof submit>((resolve) => {
+      finishPreparation = resolve;
+    });
+    const executeSubmission = jest.fn(async () => undefined);
+    const setInputText = jest.fn();
+    const view = {
+      conversationOriginToken: "conversation-origin-current",
+      prepareSubmission: jest.fn(() => preparing),
+      activeRunPromise: null,
+      queuedFollowUps: [],
+      executeSubmission,
+      syncQueue: jest.fn(),
+      scheduleQueuePersistence: jest.fn(),
+      workspace: { restoreRejectedSubmission: jest.fn() },
+      handleError: jest.fn(async () => undefined),
+      getInputText: jest.fn(() => submit.text),
+      setInputText,
+    };
+
+    (AgentChatView.prototype as any).acceptComposerSubmission.call(
+      view,
+      submit,
+      "conversation-origin-current",
+      true,
+    );
+    view.conversationOriginToken = "conversation-origin-later";
+    finishPreparation(submit);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(executeSubmission).not.toHaveBeenCalled();
+    expect(view.queuedFollowUps).toEqual([]);
+    expect(setInputText).not.toHaveBeenCalled();
+    expect(view.getInputText()).toBe(submit.text);
   });
 });

@@ -38,16 +38,22 @@ jest.mock("../TranscriptionService", () => ({
   },
 }));
 
-jest.mock("../TranscriptionProgressManager", () => ({
-  TranscriptionProgressManager: {
-    getInstance: jest.fn(() => ({
-      createProgressHandler: jest.fn(() => ({
-        onProgress: jest.fn(),
-      })),
-      handleCompletion: jest.fn((filePath, outputPath, callback) => callback()),
-    })),
-  },
-}));
+const unwrapTranscriptionCommit = <T>(result: T | { value: T }): T => (
+  typeof result === "object" && result !== null && "value" in result
+    ? result.value
+    : result
+);
+
+const resolveTranscription = (text: string) => {
+  mockTranscribeFile.mockImplementationOnce(async (
+    _file: TFile,
+    context: { onProgress?: (progress: number, status: string) => void },
+    commit: (transcript: string, operationId: string) => Promise<string>,
+  ) => {
+    context.onProgress?.(75, "Transcribing audio…");
+    return unwrapTranscriptionCommit(await commit(text, "document-context-op-1"));
+  });
+};
 
 describe("DocumentContextManager", () => {
   let mockApp: App;
@@ -98,7 +104,11 @@ describe("DocumentContextManager", () => {
       await options.commitContextEffect?.(receipt, new AbortController().signal);
       return receipt;
     });
-    mockTranscribeFile.mockResolvedValue("Transcribed text content");
+    mockTranscribeFile.mockReset().mockImplementation(async (
+      _file: TFile,
+      _context: unknown,
+      commit: (transcript: string) => Promise<string>,
+    ) => unwrapTranscriptionCommit(await commit("Transcribed text content")));
     (mockApp.vault.create as jest.Mock).mockImplementation(async (path: string) => new TFile({ path }));
     (mockApp.vault.modify as jest.Mock).mockResolvedValue({});
 
@@ -313,20 +323,28 @@ describe("DocumentContextManager", () => {
     describe("audio files", () => {
       it("transcribes audio file and adds to context", async () => {
         const file = createMockFile({ path: "test/audio.mp3", extension: "mp3", basename: "audio" });
-        mockTranscribeFile.mockResolvedValue("Transcribed text");
+        resolveTranscription("Transcribed text");
         (mockApp.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(null);
 
         const result = await manager.addFileToContext(file, mockContextManager);
 
         expect(result).toBe(true);
-        expect(mockTranscribeFile).toHaveBeenCalled();
+        expect(mockTranscribeFile).toHaveBeenCalledWith(
+          file,
+          expect.objectContaining({ type: "note", timestamped: false }),
+          expect.any(Function),
+        );
         expect(mockPlugin.directoryManager.ensureDirectoryByKey).toHaveBeenCalledWith("extractionsDirectory");
-        expect(mockApp.vault.create).toHaveBeenCalled();
+        expect(mockApp.vault.create).toHaveBeenCalledTimes(1);
+        expect(mockApp.vault.create).toHaveBeenCalledWith(
+          "Extractions/audio/audio - transcript.md",
+          expect.stringContaining("Transcribed text"),
+        );
       });
 
       it("processes WAV files", async () => {
         const file = createMockFile({ path: "test/audio.wav", extension: "wav", basename: "audio" });
-        mockTranscribeFile.mockResolvedValue("Transcribed text");
+        resolveTranscription("Transcribed text");
         (mockApp.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(null);
 
         const result = await manager.addFileToContext(file, mockContextManager);
@@ -335,21 +353,27 @@ describe("DocumentContextManager", () => {
         expect(mockTranscribeFile).toHaveBeenCalled();
       });
 
-      it("modifies existing transcription file", async () => {
+      it("preserves an existing transcription path and creates a unique sibling", async () => {
         const file = createMockFile({ path: "test/audio.mp3", extension: "mp3", basename: "audio" });
-        const existingFile = createMockFile({ path: "Extractions/audio/audio.md" });
-        mockTranscribeFile.mockResolvedValue("Transcribed text");
-        (mockApp.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(existingFile);
+        const existingPath = "Extractions/audio/audio - transcript.md";
+        const existingFile = createMockFile({ path: existingPath });
+        resolveTranscription("Transcribed text");
+        (mockApp.vault.getAbstractFileByPath as jest.Mock).mockImplementation(
+          (path: string) => path === existingPath ? existingFile : null,
+        );
 
         await manager.addFileToContext(file, mockContextManager);
 
-        expect(mockApp.vault.modify).toHaveBeenCalled();
-        expect(mockApp.vault.create).not.toHaveBeenCalled();
+        expect(mockApp.vault.modify).not.toHaveBeenCalled();
+        expect(mockApp.vault.create).toHaveBeenCalledWith(
+          "Extractions/audio/audio - transcript (2).md",
+          expect.stringContaining("Transcribed text"),
+        );
       });
 
       it("handles transcription error", async () => {
         const file = createMockFile({ path: "test/audio.mp3", extension: "mp3" });
-        mockTranscribeFile.mockRejectedValue(new Error("Transcription failed"));
+        mockTranscribeFile.mockRejectedValueOnce(new Error("Transcription failed"));
 
         const result = await manager.addFileToContext(file, mockContextManager);
 
@@ -366,7 +390,7 @@ describe("DocumentContextManager", () => {
       it("uses clean output when setting enabled", async () => {
         mockPlugin.settings.cleanTranscriptionOutput = true;
         const file = createMockFile({ path: "test/audio.mp3", extension: "mp3", basename: "audio" });
-        mockTranscribeFile.mockResolvedValue("Just the text");
+        resolveTranscription("Just the text");
         (mockApp.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(null);
 
         await manager.addFileToContext(file, mockContextManager);
@@ -374,6 +398,33 @@ describe("DocumentContextManager", () => {
         expect(mockApp.vault.create).toHaveBeenCalledWith(
           expect.any(String),
           "Just the text"
+        );
+      });
+
+      it("reuses an existing committed transcription during local-commit retry", async () => {
+        const file = createMockFile({ path: "test/audio.mp3", extension: "mp3", basename: "audio" });
+        const existing = createMockFile({
+          path: "Extractions/audio/audio - transcript - Existing.md",
+          basename: "audio - transcript - Existing",
+          extension: "md",
+        });
+        (existing as any).parent = { path: "Extractions/audio" };
+        resolveTranscription("Transcribed text");
+        (mockApp.vault.getFiles as jest.Mock).mockReturnValue([existing]);
+        (mockApp.vault.read as jest.Mock).mockResolvedValue(
+          "Transcribed text\n\n<!-- systemsculpt-context-transcription:document-context-op-1 -->\n",
+        );
+        (mockApp.vault.getAbstractFileByPath as jest.Mock).mockImplementation(
+          (path: string) => path === existing.path ? existing : null,
+        );
+
+        const result = await manager.addFileToContext(file, mockContextManager);
+
+        expect(result).toBe(true);
+        expect(mockApp.vault.create).not.toHaveBeenCalled();
+        expect(mockContextManager.updateProcessingStatus).toHaveBeenCalledWith(
+          file,
+          expect.objectContaining({ details: `[[${existing.path}]]` }),
         );
       });
     });

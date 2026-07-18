@@ -43,8 +43,6 @@ const createPluginStub = () => {
       customProviders: [],
       activeProvider: null,
       selectedModelId: "",
-      postProcessingPromptType: "summary",
-      postProcessingPromptFilePath: "",
       embeddingsEnabled: false,
       enableSystemSculptProvider: false,
       useSystemSculptAsFallback: false,

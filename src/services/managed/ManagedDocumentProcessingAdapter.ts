@@ -1,7 +1,12 @@
 import type { ManagedAdmission } from "./ManagedAdmission";
 import { ManagedJobClient, ManagedJobError } from "./ManagedJobClient";
 import { ManagedJobRecoveryStore } from "./ManagedJobRecoveryStore";
-import type { ManagedJobRecoveryRecord, ManagedJobStatus, ManagedPendingDispatch } from "./ManagedTypes";
+import type {
+  ManagedJobRecoveryRecord,
+  ManagedJobStatus,
+  ManagedMultipartCreateRequest,
+  ManagedPendingDispatch,
+} from "./ManagedTypes";
 
 const CAPABILITY = "document_processing" as const;
 const MAX_DOCUMENT_BYTES = 25 * 1024 * 1024;
@@ -151,20 +156,31 @@ export class ManagedDocumentProcessingAdapter {
     throwIfAborted(signal);
 
     context.onProgress?.(5, "Preparing document upload…");
-    record = await this.beginDispatch(record, "create");
-    throwIfAborted(signal);
-    const created = await this.dependencies.jobs.create({
+    const createRequest: ManagedMultipartCreateRequest = {
       filename: loaded.filename,
       contentType: loaded.contentType,
       contentLengthBytes: loaded.bytes.byteLength,
-    }, operationId, signal);
+    };
+    record = await this.beginDispatch(record, "create", undefined, createRequest);
+    throwIfAborted(signal);
+    const created = await this.dependencies.jobs.create(createRequest, operationId, signal);
     throwIfAborted(signal);
     const documentId = readDocumentId(created);
     const upload = readUpload(created);
     if (upload.totalParts !== Math.ceil(loaded.bytes.byteLength / upload.partSize)) {
       throw new Error("Managed document multipart layout does not match the document size.");
     }
-    record = await this.dependencies.recovery.acknowledgeCreated(CAPABILITY, operationId, record.revision, documentId);
+    record = await this.dependencies.recovery.acknowledgeCreated(
+      CAPABILITY,
+      operationId,
+      record.revision,
+      documentId,
+      {
+        createRequest,
+        partSizeBytes: upload.partSize,
+        totalParts: upload.totalParts,
+      },
+    );
     throwIfAborted(signal);
 
     const completedParts: Array<{ partNumber: number; etag: string }> = [];
@@ -252,11 +268,17 @@ export class ManagedDocumentProcessingAdapter {
     return this.dependencies.recovery.completeLocalCommit(CAPABILITY, operationId, record.revision);
   }
 
-  private beginDispatch(record: ManagedJobRecoveryRecord, operation: ManagedPendingDispatch["operation"], partNumber?: number): Promise<ManagedJobRecoveryRecord> {
+  private beginDispatch(
+    record: ManagedJobRecoveryRecord,
+    operation: ManagedPendingDispatch["operation"],
+    partNumber?: number,
+    createRequest?: ManagedMultipartCreateRequest,
+  ): Promise<ManagedJobRecoveryRecord> {
     return this.dependencies.recovery.beginDispatch(CAPABILITY, record.operationId, record.revision, {
       operation,
       requestId: this.createRequestId(),
       ...(partNumber === undefined ? {} : { partNumber }),
+      ...(createRequest === undefined ? {} : { createRequest }),
       ...(["create", "complete", "start"].includes(operation) ? { idempotencyKey: `${record.operationId}:${operation}` } : {}),
       dispatchedAt: this.now(),
     });

@@ -331,6 +331,7 @@ export type StudioTranscriptionRequest = {
     identity: string;
     fingerprint: () => string | Promise<string>;
     load: () => Promise<{ filename: string; contentType: string; bytes: ArrayBuffer }>;
+    release?: () => void;
   };
 };
 
@@ -369,7 +370,9 @@ export interface StudioNodeExecutionServices {
   readAsset: (asset: StudioAssetRef) => Promise<ArrayBuffer>;
   resolveAbsolutePath: (path: string) => string;
   readVaultText: (vaultPath: string) => Promise<string>;
+  statVaultFileSize: (vaultPath: string) => Promise<number>;
   readVaultBinary: (vaultPath: string) => Promise<ArrayBuffer>;
+  statLocalFileSize: (absolutePath: string) => Promise<number>;
   readLocalFileBinary: (absolutePath: string) => Promise<ArrayBuffer>;
   writeTempFile: (
     bytes: ArrayBuffer,

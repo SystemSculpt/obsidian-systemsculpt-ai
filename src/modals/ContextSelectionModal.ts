@@ -1,12 +1,13 @@
 import { App, Notice, TFile, setIcon } from "obsidian";
 import { StandardModal } from "../core/ui/modals/standard/StandardModal";
 import { createUiAction, getSurfaceOwnerWindow } from "../core/ui/surface";
+import { AUDIO_FILE_EXTENSIONS } from "../constants/fileTypes";
 
 const FILE_TYPES = {
   text: { extensions: ["md", "txt", "systemsculpt"], icon: "file-text", label: "Text & Studio" },
   documents: { extensions: ["pdf"], icon: "file", label: "Documents" },
   images: { extensions: ["png", "jpg", "jpeg", "svg", "webp"], icon: "image", label: "Images" },
-  audio: { extensions: ["mp3", "wav", "m4a", "ogg", "webm"], icon: "headphones", label: "Audio" },
+  audio: { extensions: Array.from(AUDIO_FILE_EXTENSIONS), icon: "headphones", label: "Audio" },
 } as const;
 
 type ContextFileType = keyof typeof FILE_TYPES;

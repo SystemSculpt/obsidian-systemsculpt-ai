@@ -1,7 +1,7 @@
 import { App, TFile } from "obsidian";
 import { showPrompt } from "../core/ui/modals/PromptModal";
 
-// Maximum file size for uploads (500MB)
+// Maximum file size for uploads (500 MiB)
 export const MAX_FILE_SIZE = 500 * 1024 * 1024;
 
 export interface FileSizeValidationOptions {
@@ -93,8 +93,8 @@ export function formatFileSize(bytes: number): string {
   if (bytes < 1024) {
     return bytes + " bytes";
   } else if (bytes < 1024 * 1024) {
-    return (bytes / 1024).toFixed(1) + " KB";
+    return (bytes / 1024).toFixed(1) + " KiB";
   } else {
-    return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+    return (bytes / (1024 * 1024)).toFixed(1) + " MiB";
   }
 }

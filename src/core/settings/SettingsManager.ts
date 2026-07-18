@@ -1,5 +1,14 @@
 import { Notice } from "obsidian";
-import { SystemSculptSettings, DEFAULT_SETTINGS, LogLevel, createDefaultWorkflowEngineSettings } from "../../types";
+import {
+  SystemSculptSettings,
+  DEFAULT_SETTINGS,
+  LogLevel,
+  createDefaultWorkflowEngineSettings,
+  type PendingAudioProcessorUpload,
+  type PendingRecorderCapture,
+  type WorkflowEngineSettings,
+  type WorkflowSkipEntry,
+} from "../../types";
 import SystemSculptPlugin from "../../main";
 import { AutomaticBackupService } from "./AutomaticBackupService";
 import { applyCurrentSecretsToBackup, redactSettingsForBackup } from "./backupSanitizer";
@@ -8,6 +17,155 @@ import {
   migrateSettingsToCurrentSchema,
   readSchemaVersion,
 } from "./migrations/SettingsMigrator";
+import {
+  getCurrentRecorderPreferenceHost,
+  normalizePreferredMicrophoneId,
+  seedCurrentHostPreferredMicrophoneId,
+} from "../../services/recorder/RecorderPreferenceStore";
+
+const DEVICE_LOCAL_RECORDER_PREFERENCE_SCHEMA_VERSION = 10;
+const AUDIO_JOB_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,255}$/;
+const SHA256_PATTERN = /^[a-f0-9]{64}$/;
+
+function normalizeWorkflowEngineSettings(value: unknown): WorkflowEngineSettings {
+  const defaults = createDefaultWorkflowEngineSettings();
+  if (!value || typeof value !== "object" || Array.isArray(value)) return defaults;
+
+  const candidate = value as Record<string, unknown>;
+  const skippedFiles: Record<string, WorkflowSkipEntry> = {};
+  if (candidate.skippedFiles && typeof candidate.skippedFiles === "object" && !Array.isArray(candidate.skippedFiles)) {
+    for (const [key, rawEntry] of Object.entries(candidate.skippedFiles)) {
+      if (!rawEntry || typeof rawEntry !== "object" || Array.isArray(rawEntry)) continue;
+      const entry = rawEntry as Record<string, unknown>;
+      if (
+        entry.type !== "transcription"
+        || typeof entry.path !== "string"
+        || typeof entry.skippedAt !== "string"
+      ) continue;
+      skippedFiles[key] = {
+        path: entry.path,
+        type: "transcription",
+        skippedAt: entry.skippedAt,
+        ...(typeof entry.reason === "string" ? { reason: entry.reason } : {}),
+      };
+    }
+  }
+
+  const normalized = {
+    ...candidate,
+    enabled: typeof candidate.enabled === "boolean" ? candidate.enabled : defaults.enabled,
+    inboxRoutingEnabled: typeof candidate.inboxRoutingEnabled === "boolean"
+      ? candidate.inboxRoutingEnabled
+      : defaults.inboxRoutingEnabled,
+    inboxFolder: typeof candidate.inboxFolder === "string" && candidate.inboxFolder.trim()
+      ? candidate.inboxFolder
+      : defaults.inboxFolder,
+    processedNotesFolder: typeof candidate.processedNotesFolder === "string"
+      ? candidate.processedNotesFolder
+      : defaults.processedNotesFolder,
+    autoTranscribeInboxNotes: typeof candidate.autoTranscribeInboxNotes === "boolean"
+      ? candidate.autoTranscribeInboxNotes
+      : defaults.autoTranscribeInboxNotes,
+    skippedFiles,
+  } as Record<string, unknown>;
+  delete normalized.automations;
+  delete normalized.templates;
+  delete normalized.managedTextOperations;
+  return normalized as unknown as WorkflowEngineSettings;
+}
+
+function normalizePendingAudioProcessorUpload(value: unknown): PendingAudioProcessorUpload | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const entry = value as Record<string, unknown>;
+  if (
+    typeof entry.jobId !== "string"
+    || !AUDIO_JOB_ID_PATTERN.test(entry.jobId)
+    || typeof entry.filename !== "string"
+    || entry.filename.length === 0
+    || entry.filename.length > 512
+    || typeof entry.contentType !== "string"
+    || entry.contentType.length === 0
+    || entry.contentType.length > 128
+    || !Number.isInteger(entry.sizeBytes)
+    || (entry.sizeBytes as number) <= 0
+    || !Number.isInteger(entry.partSizeBytes)
+    || (entry.partSizeBytes as number) <= 0
+    || !Number.isInteger(entry.totalParts)
+    || (entry.totalParts as number) <= 0
+    || !Number.isFinite(entry.updatedAt)
+    || (entry.updatedAt as number) <= 0
+    || !Array.isArray(entry.uploadedParts)
+  ) return null;
+
+  const rawSource = entry.source && typeof entry.source === "object" && !Array.isArray(entry.source)
+    ? entry.source as Record<string, unknown>
+    : null;
+  const source = rawSource?.kind === "staged"
+    && typeof rawSource.stagingId === "string"
+    && SHA256_PATTERN.test(rawSource.stagingId)
+    && typeof rawSource.manifestSha256 === "string"
+    && SHA256_PATTERN.test(rawSource.manifestSha256)
+    ? {
+      kind: "staged" as const,
+      stagingId: rawSource.stagingId,
+      manifestSha256: rawSource.manifestSha256,
+    }
+    : rawSource?.kind === "vault"
+      && typeof rawSource.filePath === "string"
+      && rawSource.filePath.length > 0
+      && rawSource.filePath.length <= 1024
+      && Number.isFinite(rawSource.modifiedAt)
+      && (rawSource.modifiedAt as number) > 0
+      ? {
+        kind: "vault" as const,
+        filePath: rawSource.filePath,
+        modifiedAt: rawSource.modifiedAt as number,
+      }
+      : typeof entry.filePath === "string"
+        && entry.filePath.length > 0
+        && entry.filePath.length <= 1024
+        && Number.isFinite(entry.modifiedAt)
+        && (entry.modifiedAt as number) > 0
+        ? {
+          kind: "vault" as const,
+          filePath: entry.filePath,
+          modifiedAt: entry.modifiedAt as number,
+        }
+        : null;
+  if (!source) return null;
+
+  const uploadedPartMap = new Map<number, { partNumber: number; etag: string }>();
+  for (const valuePart of entry.uploadedParts) {
+    if (!valuePart || typeof valuePart !== "object" || Array.isArray(valuePart)) return null;
+    const part = valuePart as Record<string, unknown>;
+    if (
+      !Number.isInteger(part.partNumber)
+      || (part.partNumber as number) <= 0
+      || (part.partNumber as number) > (entry.totalParts as number)
+      || typeof part.etag !== "string"
+      || part.etag.trim().length === 0
+      || part.etag.length > 512
+    ) return null;
+    uploadedPartMap.set(part.partNumber as number, {
+      partNumber: part.partNumber as number,
+      etag: part.etag.trim(),
+    });
+  }
+
+  return {
+    jobId: entry.jobId,
+    filename: entry.filename,
+    contentType: entry.contentType,
+    sizeBytes: entry.sizeBytes as number,
+    source,
+    partSizeBytes: entry.partSizeBytes as number,
+    totalParts: entry.totalParts as number,
+    uploadedParts: [...uploadedPartMap.values()].sort(
+      (left, right) => left.partNumber - right.partNumber,
+    ),
+    updatedAt: entry.updatedAt as number,
+  };
+}
 
 /**
  * SettingsManager handles loading, saving, and updating plugin settings
@@ -65,52 +223,7 @@ export class SettingsManager {
     // Legacy/dead keys are pruned by the versioned migrator's v0→v1 step
     // (SettingsMigrator.LEGACY_KEYS_REMOVED_IN_V1) — no ad-hoc deletes here.
 
-    const defaultWorkflowEngine = createDefaultWorkflowEngineSettings();
-    if (!migratedSettings.workflowEngine) {
-      migratedSettings.workflowEngine = defaultWorkflowEngine;
-    } else {
-      const providedEngine = migratedSettings.workflowEngine;
-      const providedAutomations =
-        (providedEngine.automations && typeof providedEngine.automations === "object" && !Array.isArray(providedEngine.automations)
-          ? providedEngine.automations
-          : null) ||
-        (providedEngine.templates && typeof providedEngine.templates === "object" && !Array.isArray(providedEngine.templates)
-          ? providedEngine.templates
-          : {}) ||
-        {};
-      const mergedAutomations: Record<string, any> = {};
-      const automationKeys = new Set([
-        ...Object.keys(defaultWorkflowEngine.automations || {}),
-        ...Object.keys(providedAutomations),
-      ]);
-
-      automationKeys.forEach((automationId) => {
-        const baseAutomation = defaultWorkflowEngine.automations?.[automationId] || {
-          id: automationId,
-          enabled: false,
-        };
-        const overrideAutomation = providedAutomations[automationId] || {};
-        mergedAutomations[automationId] = {
-          ...baseAutomation,
-          ...overrideAutomation,
-          id: automationId,
-          enabled: !!overrideAutomation.enabled,
-        };
-      });
-
-      migratedSettings.workflowEngine = {
-        ...defaultWorkflowEngine,
-        ...providedEngine,
-        skippedFiles:
-          providedEngine.skippedFiles &&
-          typeof providedEngine.skippedFiles === "object" &&
-          !Array.isArray(providedEngine.skippedFiles)
-            ? providedEngine.skippedFiles
-            : defaultWorkflowEngine.skippedFiles,
-        automations: mergedAutomations,
-      };
-      delete (migratedSettings.workflowEngine as any).templates;
-    }
+    migratedSettings.workflowEngine = normalizeWorkflowEngineSettings(migratedSettings.workflowEngine);
     
     if (typeof migratedSettings.debugMode !== "boolean") {
       migratedSettings.debugMode = DEFAULT_SETTINGS.debugMode;
@@ -306,13 +419,20 @@ export class SettingsManager {
   ): Promise<SystemSculptSettings> {
     const fromVersion = readSchemaVersion(raw);
     try {
+      // Capture the retired synced value before schema v10 prunes it. The
+      // device-local write happens only after the remaining migration validates.
+      const legacyRecorderPreference = this.readLegacyRecorderPreference(raw, fromVersion);
       const result = migrateSettingsToCurrentSchema(raw, DEFAULT_SETTINGS);
       // Back up BEFORE applying a real schema upgrade so a migration bug found
       // later is always recoverable from the pre-migration snapshot.
       if (!result.future && result.fromVersion < CURRENT_SCHEMA_VERSION && this.hasMeaningfulData(raw)) {
         await this.writePreMigrationBackup(raw, fromVersion);
       }
-      return await this.validateSettingsAsync(this.migrateSettings(result.settings));
+      const migrated = await this.validateSettingsAsync(this.migrateSettings(result.settings));
+      if (!result.future) {
+        this.seedLegacyRecorderPreference(legacyRecorderPreference, migrated);
+      }
+      return migrated;
     } catch (migrationError) {
       await this.writePreMigrationBackup(raw, fromVersion).catch(() => {});
       try {
@@ -325,6 +445,47 @@ export class SettingsManager {
         return { ...DEFAULT_SETTINGS };
       }
     }
+  }
+
+  private readLegacyRecorderPreference(
+    raw: Record<string, unknown>,
+    fromVersion: number,
+  ): string {
+    if (fromVersion >= DEVICE_LOCAL_RECORDER_PREFERENCE_SCHEMA_VERSION) return "";
+
+    const host = getCurrentRecorderPreferenceHost();
+    const byHost = raw.preferredMicrophoneIdsByHost;
+    let hostPreference: unknown;
+    if (byHost && typeof byHost === "object" && !Array.isArray(byHost)) {
+      const values = byHost as Record<string, unknown>;
+      if (host === "desktop") {
+        hostPreference = values.desktop ?? values.Desktop;
+      } else if (host === "mobile") {
+        hostPreference = values.mobile ?? values.Mobile;
+      }
+    }
+
+    return normalizePreferredMicrophoneId(hostPreference)
+      || normalizePreferredMicrophoneId(raw.preferredMicrophoneId);
+  }
+
+  private seedLegacyRecorderPreference(
+    preferredMicrophoneId: string,
+    migrated: SystemSculptSettings,
+  ): void {
+    if (!preferredMicrophoneId || typeof window === "undefined") return;
+
+    const globalWindow = window as Window & { activeWindow?: Window };
+    const ownerWindow = globalWindow.activeWindow ?? globalWindow;
+    const vaultName = typeof this.plugin.app.vault.getName === "function"
+      ? this.plugin.app.vault.getName()
+      : "";
+    const vaultIdentity = migrated.vaultInstanceId?.trim() || vaultName;
+    seedCurrentHostPreferredMicrophoneId(
+      ownerWindow,
+      vaultIdentity,
+      preferredMicrophoneId,
+    );
   }
 
   private hasMeaningfulData(raw: Record<string, unknown>): boolean {
@@ -419,20 +580,115 @@ export class SettingsManager {
       validatedSettings.keepRecordingsAfterTranscription = defaultSettings.keepRecordingsAfterTranscription;
     }
 
+    if (!Array.isArray(validatedSettings.pendingRecorderCaptures)) {
+      validatedSettings.pendingRecorderCaptures = [];
+    } else {
+      const validPendingCaptures: PendingRecorderCapture[] = validatedSettings.pendingRecorderCaptures
+        .filter((entry) => {
+          if (!entry || typeof entry !== "object") return false;
+          return typeof entry.filePath === "string"
+            && entry.filePath.length > 0
+            && entry.filePath.length <= 1024
+            && Number.isFinite(entry.startedAt)
+            && entry.startedAt >= 0
+            && Number.isFinite(entry.durationMs)
+            && entry.durationMs >= 0
+            && Number.isFinite(entry.sizeBytes)
+            && entry.sizeBytes > 0
+            && ["manual", "background-hidden", "background-pagehide", "interrupted", "size-limit"].includes(entry.stopReason)
+            && ["note", "chat"].includes(entry.destination)
+            && (entry.transcriptionIntent === undefined
+              || ["automatic", "manual"].includes(entry.transcriptionIntent))
+            && (entry.operationId === undefined
+              || /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(entry.operationId))
+            && (entry.recoveryBlocked === undefined
+              || entry.recoveryBlocked === "conflicting-operation-ids");
+        })
+        .slice(-20)
+        .map((entry): PendingRecorderCapture => ({
+          filePath: entry.filePath,
+          startedAt: entry.startedAt,
+          durationMs: entry.durationMs,
+          sizeBytes: entry.sizeBytes,
+          stopReason: entry.stopReason,
+          destination: entry.destination,
+          ...(entry.transcriptionIntent
+            ? { transcriptionIntent: entry.transcriptionIntent }
+            : {}),
+          ...(entry.operationId ? { operationId: entry.operationId } : {}),
+          ...(entry.recoveryBlocked === "conflicting-operation-ids"
+            ? { recoveryBlocked: entry.recoveryBlocked }
+            : {}),
+        }));
+      const pendingByPath = new Map<string, PendingRecorderCapture>();
+      for (const entry of validPendingCaptures) {
+        const current = pendingByPath.get(entry.filePath);
+        if (!current) {
+          pendingByPath.set(entry.filePath, entry);
+          continue;
+        }
+        const currentOperationId = current.operationId;
+        const nextOperationId = entry.operationId;
+        if (
+          current.recoveryBlocked === "conflicting-operation-ids"
+          || (currentOperationId && nextOperationId && currentOperationId !== nextOperationId)
+        ) {
+          const { operationId: _discarded, ...newest } = entry;
+          pendingByPath.set(entry.filePath, {
+            ...newest,
+            ...(current.transcriptionIntent === "manual"
+              ? { transcriptionIntent: "manual" }
+              : {}),
+            recoveryBlocked: "conflicting-operation-ids",
+          });
+          continue;
+        }
+        pendingByPath.set(entry.filePath, {
+          ...entry,
+          ...(current.transcriptionIntent === "manual"
+            || entry.transcriptionIntent === "manual"
+            ? { transcriptionIntent: "manual" }
+            : entry.transcriptionIntent || current.transcriptionIntent
+              ? { transcriptionIntent: entry.transcriptionIntent ?? current.transcriptionIntent }
+              : {}),
+          ...(nextOperationId || currentOperationId
+            ? { operationId: nextOperationId ?? currentOperationId }
+            : {}),
+        });
+      }
+      validatedSettings.pendingRecorderCaptures = [...pendingByPath.values()];
+    }
+
+    if (!Array.isArray(validatedSettings.pendingAudioProcessorUploads)) {
+      validatedSettings.pendingAudioProcessorUploads = [];
+    } else {
+      const validUploads: PendingAudioProcessorUpload[] = validatedSettings.pendingAudioProcessorUploads
+        .map((entry) => normalizePendingAudioProcessorUpload(entry))
+        .filter((entry): entry is PendingAudioProcessorUpload => entry !== null)
+        .slice(-10);
+      const newestByJobId = new Map<string, PendingAudioProcessorUpload>();
+      for (const entry of validUploads) newestByJobId.set(entry.jobId, entry);
+      validatedSettings.pendingAudioProcessorUploads = [...newestByJobId.values()];
+    }
+
     if (typeof validatedSettings.postProcessingEnabled !== 'boolean') {
       validatedSettings.postProcessingEnabled = defaultSettings.postProcessingEnabled;
+    }
+
+    if (typeof validatedSettings.postProcessingPrompt !== "string") {
+      validatedSettings.postProcessingPrompt = defaultSettings.postProcessingPrompt;
     }
 
     if (typeof validatedSettings.cleanTranscriptionOutput !== 'boolean') {
       validatedSettings.cleanTranscriptionOutput = defaultSettings.cleanTranscriptionOutput;
     }
 
-    if (validatedSettings.transcriptionOutputFormat !== "markdown" && validatedSettings.transcriptionOutputFormat !== "srt") {
-      validatedSettings.transcriptionOutputFormat = defaultSettings.transcriptionOutputFormat;
+    if (typeof validatedSettings.autoSubmitAfterTranscription !== "boolean") {
+      validatedSettings.autoSubmitAfterTranscription = defaultSettings.autoSubmitAfterTranscription;
     }
 
-    if (typeof validatedSettings.showTranscriptionFormatChooserInModal !== "boolean") {
-      validatedSettings.showTranscriptionFormatChooserInModal = defaultSettings.showTranscriptionFormatChooserInModal;
+    if (validatedSettings.transcriptionOutputFormat !== "markdown" && validatedSettings.transcriptionOutputFormat !== "srt") {
+      validatedSettings.transcriptionOutputFormat = defaultSettings.transcriptionOutputFormat;
     }
 
     if (typeof validatedSettings.skipEmptyNoteWarning !== 'boolean') {
@@ -474,75 +730,7 @@ export class SettingsManager {
     // are pruned once by the versioned migrator's v0→v1 step, not on every
     // validate pass. See SettingsMigrator.LEGACY_KEYS_REMOVED_IN_V1.
 
-    const defaultWorkflowEngine = createDefaultWorkflowEngineSettings();
-    const providedWorkflowEngine = validatedSettings.workflowEngine;
-    if (!providedWorkflowEngine) {
-      validatedSettings.workflowEngine = defaultWorkflowEngine;
-    } else {
-      const legacyWorkflowEngine = providedWorkflowEngine as typeof providedWorkflowEngine & {
-        templates?: Record<string, unknown>;
-      };
-      const mergedAutomations: Record<string, any> = {};
-      const providedAutomations: Record<string, any> =
-        (providedWorkflowEngine.automations &&
-          typeof providedWorkflowEngine.automations === "object" &&
-          !Array.isArray(providedWorkflowEngine.automations)
-          ? providedWorkflowEngine.automations
-          : null) ||
-        (legacyWorkflowEngine.templates &&
-          typeof legacyWorkflowEngine.templates === "object" &&
-          !Array.isArray(legacyWorkflowEngine.templates)
-          ? legacyWorkflowEngine.templates
-          : {}) ||
-        {};
-      const automationIds = new Set([
-        ...Object.keys(defaultWorkflowEngine.automations || {}),
-        ...Object.keys(providedAutomations),
-      ]);
-
-      automationIds.forEach((automationId) => {
-        const baseAutomation = defaultWorkflowEngine.automations?.[automationId] || {
-          id: automationId,
-          enabled: false,
-        };
-        const overrideAutomation = providedAutomations[automationId] || {};
-        mergedAutomations[automationId] = {
-          ...baseAutomation,
-          ...overrideAutomation,
-          id: automationId,
-          enabled: !!overrideAutomation.enabled,
-        };
-      });
-
-      validatedSettings.workflowEngine = {
-        ...defaultWorkflowEngine,
-        ...providedWorkflowEngine,
-        skippedFiles:
-          providedWorkflowEngine.skippedFiles &&
-          typeof providedWorkflowEngine.skippedFiles === "object" &&
-          !Array.isArray(providedWorkflowEngine.skippedFiles)
-            ? providedWorkflowEngine.skippedFiles
-            : defaultWorkflowEngine.skippedFiles,
-        inboxFolder:
-          typeof providedWorkflowEngine.inboxFolder === "string" && providedWorkflowEngine.inboxFolder.trim()
-            ? providedWorkflowEngine.inboxFolder
-            : defaultWorkflowEngine.inboxFolder,
-        processedNotesFolder:
-          typeof providedWorkflowEngine.processedNotesFolder === "string"
-            ? providedWorkflowEngine.processedNotesFolder
-            : "",
-        autoTranscribeInboxNotes:
-          typeof providedWorkflowEngine.autoTranscribeInboxNotes === "boolean"
-            ? providedWorkflowEngine.autoTranscribeInboxNotes
-            : defaultWorkflowEngine.autoTranscribeInboxNotes,
-        inboxRoutingEnabled:
-          typeof providedWorkflowEngine.inboxRoutingEnabled === "boolean"
-            ? providedWorkflowEngine.inboxRoutingEnabled
-            : defaultWorkflowEngine.inboxRoutingEnabled,
-        automations: mergedAutomations,
-      };
-      delete (validatedSettings.workflowEngine as any).templates;
-    }
+    validatedSettings.workflowEngine = normalizeWorkflowEngineSettings(validatedSettings.workflowEngine);
 
     return validatedSettings;
   }

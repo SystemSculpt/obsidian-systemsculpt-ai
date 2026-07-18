@@ -129,14 +129,38 @@ export type ManagedRecoveryPhase =
   | "part_dispatching" | "uploading" | "abort_dispatching" | "upload_aborted" | "complete_dispatching"
   | "upload_completed" | "start_dispatching" | "processing" | "result_ready" | "local_commit_pending"
   | "completed" | "blocked_ambiguous" | "abandoned";
+export interface ManagedMultipartCreateRequest {
+  filename: string;
+  contentType: string;
+  contentLengthBytes: number;
+  timestamped?: boolean;
+  language?: string;
+}
+export interface ManagedMultipartUploadDescriptor {
+  createRequest: ManagedMultipartCreateRequest;
+  partSizeBytes: number;
+  totalParts: number;
+}
 export interface ManagedPendingDispatch {
   operation: "prepare" | "create" | "part" | "abort" | "complete" | "start";
-  requestId: string; idempotencyKey?: string; partNumber?: number; dispatchedAt: string;
+  requestId: string;
+  idempotencyKey?: string;
+  partNumber?: number;
+  dispatchedAt: string;
+  createRequest?: ManagedMultipartCreateRequest;
+}
+export interface ManagedLocalCommitReceipt {
+  kind: "marker" | "exact";
+  outputPath: string;
+  contentSha256: string;
+  marker?: string;
 }
 export interface ManagedJobRecoveryRecord {
   schemaVersion: 1; revision: number; capability: ManagedJobCapability; operationId: string;
   source: { identity: string; fingerprint: string }; jobId?: string;
+  multipartUpload?: ManagedMultipartUploadDescriptor;
   completedParts?: Array<{ partNumber: number; etag: string }>;
   phase: ManagedRecoveryPhase; pendingDispatch?: ManagedPendingDispatch;
+  localCommitReceipt?: ManagedLocalCommitReceipt;
   createdAt: string; updatedAt: string;
 }

@@ -52,7 +52,7 @@ describe("built bundle (main.js)", () => {
     // Settings migration ran: loadData returned null, so defaults applied.
     expect(plugin.settings).toBeDefined();
     expect(typeof plugin.settings).toBe("object");
-    expect(plugin.settings.schemaVersion).toBe(8);
+    expect(plugin.settings.schemaVersion).toBe(12);
     expect(plugin.settings.licenseKey).toBe("");
     expect(plugin.settings).not.toHaveProperty("settingsMode");
     expect(plugin.settings).not.toHaveProperty("customProviders");
@@ -66,8 +66,13 @@ describe("built bundle (main.js)", () => {
     const commandIds = plugin._commands.map((command: { id: string }) => command.id);
     expect(new Set(commandIds).size).toBe(commandIds.length);
 
-    // The desktop recorder is part of the normal installed plugin surface.
-    expect(plugin.recorderService).not.toBeNull();
+    // Recovery coordination initializes at startup so saved mobile captures
+    // can be reoffered, while microphone capture itself remains dormant.
+    expect(plugin.recorderService).toMatchObject({
+      state: "idle",
+      session: null,
+      captureTask: null,
+    });
 
     plugin.unload();
   });

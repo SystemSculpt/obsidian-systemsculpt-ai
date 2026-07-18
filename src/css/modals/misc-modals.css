@@ -1,28 +1,5 @@
 /** Native settings modals and lightweight progress surfaces. */
 
-/* Recorder advanced-controls modal (native Obsidian modal, class on contentEl) */
-.ss-recorder-advanced-modal {
-  display: flex;
-  flex-direction: column;
-  gap: var(--ss-space-3);
-}
-
-.ss-recorder-advanced-modal h2,
-.ss-recorder-advanced-modal h3 {
-  margin: 0 0 var(--ss-space-2);
-  letter-spacing: var(--ss-tracking-tight);
-}
-
-.ss-recorder-advanced-modal .setting-item {
-  margin: 0;
-  padding: var(--ss-space-2) 0;
-}
-
-.ss-recorder-advanced-modal__inline-note {
-  font-size: var(--ss-text-sm);
-  color: var(--ss-ink-muted);
-}
-
 /* ------------------------------------------------------------------ *
  * Settings backup restore. Manual-backup form + focused backup choices.
  * ------------------------------------------------------------------ */

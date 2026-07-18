@@ -45,15 +45,15 @@ describe("FileValidator", () => {
     });
 
     it("formats kilobytes correctly", () => {
-      expect(formatFileSize(1024)).toBe("1.0 KB");
-      expect(formatFileSize(1536)).toBe("1.5 KB");
-      expect(formatFileSize(10 * 1024)).toBe("10.0 KB");
+      expect(formatFileSize(1024)).toBe("1.0 KiB");
+      expect(formatFileSize(1536)).toBe("1.5 KiB");
+      expect(formatFileSize(10 * 1024)).toBe("10.0 KiB");
     });
 
     it("formats megabytes correctly", () => {
-      expect(formatFileSize(1024 * 1024)).toBe("1.0 MB");
-      expect(formatFileSize(10 * 1024 * 1024)).toBe("10.0 MB");
-      expect(formatFileSize(500 * 1024 * 1024)).toBe("500.0 MB");
+      expect(formatFileSize(1024 * 1024)).toBe("1.0 MiB");
+      expect(formatFileSize(10 * 1024 * 1024)).toBe("10.0 MiB");
+      expect(formatFileSize(500 * 1024 * 1024)).toBe("500.0 MiB");
     });
 
     it("handles edge cases", () => {
@@ -114,7 +114,7 @@ describe("FileValidator", () => {
 
       expect(showPrompt).toHaveBeenCalledWith(
         mockApp,
-        expect.stringContaining("600.0 MB"),
+        expect.stringContaining("600.0 MiB"),
         expect.any(Object)
       );
     });

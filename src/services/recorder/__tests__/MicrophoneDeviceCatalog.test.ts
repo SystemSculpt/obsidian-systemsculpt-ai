@@ -135,6 +135,55 @@ describe("MicrophoneDeviceCatalog", () => {
     expect(getUserMedia).toHaveBeenCalledTimes(1);
   });
 
+  it("omits and deduplicates pseudo device ids so they do not duplicate Default microphone", async () => {
+    const catalog = new MicrophoneDeviceCatalog({
+      mediaDevices: {
+        enumerateDevices: jest.fn().mockResolvedValue([
+          device("", ""),
+          device("default", "System default"),
+          device("named-id", "USB microphone"),
+          device("named-id", "USB microphone duplicate"),
+        ]),
+      },
+    } as unknown as Navigator, { requestLabels: false });
+
+    await expect(catalog.refresh()).resolves.toEqual({
+      status: "ready",
+      labelRefresh: "not-needed",
+      devices: [{ id: "named-id", label: "USB microphone" }],
+    });
+  });
+
+  it("allows an explicit retry after microphone permission was denied", async () => {
+    const stop = jest.fn();
+    const getUserMedia = jest
+      .fn()
+      .mockRejectedValueOnce(new Error("permission denied"))
+      .mockResolvedValueOnce({ getTracks: () => [{ stop }] });
+    const enumerateDevices = jest
+      .fn()
+      .mockResolvedValueOnce([device("hidden", "")])
+      .mockResolvedValueOnce([device("hidden", "")])
+      .mockResolvedValueOnce([device("hidden", "")])
+      .mockResolvedValueOnce([device("hidden", "Phone microphone")]);
+    const catalog = new MicrophoneDeviceCatalog({
+      mediaDevices: { enumerateDevices, getUserMedia },
+    } as unknown as Navigator, { requestLabels: false });
+
+    await expect(catalog.refreshWithLabelPermission()).resolves.toMatchObject({
+      status: "ready",
+      labelRefresh: "denied",
+    });
+    await expect(catalog.refreshWithLabelPermission()).resolves.toEqual({
+      status: "ready",
+      labelRefresh: "granted",
+      devices: [{ id: "hidden", label: "Phone microphone" }],
+    });
+
+    expect(getUserMedia).toHaveBeenCalledTimes(2);
+    expect(stop).toHaveBeenCalledTimes(1);
+  });
+
   it("makes overlapping refreshes latest-wins", async () => {
     const staleDevices = deferred<MediaDeviceInfo[]>();
     const enumerateDevices = jest

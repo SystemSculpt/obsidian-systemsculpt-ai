@@ -11,8 +11,8 @@ there are no provider keys, model catalogs, or local AI runtimes to configure.
 - Attach or paste multiple mixed files into a conversation.
 - Find related notes with a portable semantic index.
 - Record or import audio and transcribe it to Markdown or SRT.
+- Process long audio and YouTube videos into transcripts and structured summaries.
 - Build text, image, document, media, and vault workflows in Studio.
-- Run capture-folder automations and review file-changing actions.
 
 SystemSculpt runs on desktop and mobile. Studio exposes portable nodes on both;
 local CLI, terminal, dataset-adapter, and FFmpeg nodes require Obsidian Desktop.
@@ -44,7 +44,7 @@ run a separate update checker.
 - [Commands](docs/user/commands.md)
 - [Similar Notes](docs/user/similar-notes.md)
 - [Audio and transcription](docs/user/audio-transcription.md)
-- [Automations](docs/user/automations.md)
+- [Audio Processor](docs/user/audio-processor.md)
 - [Troubleshooting](docs/user/troubleshooting.md)
 
 ## Development

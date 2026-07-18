@@ -232,6 +232,10 @@ export class CreditsBalanceModal extends StandardModal {
     const meterTrack = includedMeter.createDiv({ cls: "ss-credits-balance__meter-track" });
     const meterFill = meterTrack.createDiv({ cls: "ss-credits-balance__meter-fill" });
     meterFill.style.width = `${metrics.remainingPercentForMeter}%`;
+    this.summaryEl.createDiv({
+      cls: "ss-credits-balance__hint",
+      text: "Included credits reset each month. Purchased add-on credits never reset or expire.",
+    });
 
     this.createStatCard(
       "Included left",

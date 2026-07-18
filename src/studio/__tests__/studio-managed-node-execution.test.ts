@@ -6,6 +6,7 @@ import { StudioNodeRegistry } from "../StudioNodeRegistry";
 import { imageGenerationNode } from "../nodes/imageGenerationNode";
 import { textGenerationNode } from "../nodes/textGenerationNode";
 import { transcriptionNode } from "../nodes/transcriptionNode";
+import { DESKTOP_TRANSCRIPTION_MAX_FILE_SIZE } from "../../services/transcription/TranscriptionCoordinator";
 import type { StudioProjectV1 } from "../types";
 
 function projectWithHttpSecret(): StudioProjectV1 {
@@ -42,7 +43,9 @@ function services(api: Record<string, unknown>) {
     readAsset: jest.fn(),
     resolveAbsolutePath: (path: string) => `/vault/${path}`,
     readVaultText: jest.fn(),
+    statVaultFileSize: jest.fn(async () => 1),
     readVaultBinary: jest.fn(async () => new Uint8Array([1]).buffer),
+    statLocalFileSize: jest.fn(async () => 1),
     readLocalFileBinary: jest.fn(async () => new Uint8Array([1]).buffer),
     writeTempFile: jest.fn(),
     deleteLocalFile: jest.fn(),
@@ -133,6 +136,10 @@ describe("managed-only Studio remote nodes", () => {
     const events: string[] = [];
     const fingerprints: string[] = [];
     let runIndex = 0;
+    const statVaultFileSize = jest.fn(async () => {
+      events.push(`size:${runIndex}`);
+      return bytesByRun[runIndex].byteLength;
+    });
     const readVaultBinary = jest.fn(async () => {
       events.push(`read:${runIndex}`);
       return bytesByRun[runIndex];
@@ -154,6 +161,7 @@ describe("managed-only Studio remote nodes", () => {
 
     const execute = async () => {
       const nodeServices = services({ transcribeAudio });
+      nodeServices.statVaultFileSize = statVaultFileSize;
       nodeServices.readVaultBinary = readVaultBinary;
       await transcriptionNode.execute({
         runId: `run-${runIndex}`,
@@ -169,10 +177,65 @@ describe("managed-only Studio remote nodes", () => {
     await execute();
     await execute();
 
-    expect(events).toEqual(["admission:0", "read:0", "admission:1", "read:1"]);
+    expect(events).toEqual(["admission:0", "size:0", "read:0", "admission:1", "size:1", "read:1"]);
     expect(fingerprints[0]).toMatch(/^sha256:[a-f0-9]{64}$/);
     expect(fingerprints[1]).not.toBe(fingerprints[0]);
+    expect(statVaultFileSize).toHaveBeenCalledTimes(2);
     expect(readVaultBinary).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects oversized vault audio before allocating bytes", async () => {
+    const readVaultBinary = jest.fn(async () => new Uint8Array([1, 2, 3]).buffer);
+    const transcribeAudio = jest.fn(async request => {
+      await request.source.fingerprint();
+      return {
+        text: "done",
+        operation: { capability: "transcription", operationId: "transcription-op" },
+      };
+    });
+    const nodeServices = services({ transcribeAudio });
+    nodeServices.statVaultFileSize = jest.fn(async () => DESKTOP_TRANSCRIPTION_MAX_FILE_SIZE + 1);
+    nodeServices.readVaultBinary = readVaultBinary;
+
+    await expect(transcriptionNode.execute({
+      runId: "run-oversize-vault",
+      projectPath: "Studio/Test.systemsculpt",
+      signal: new AbortController().signal,
+      node: { id: "transcription", kind: transcriptionNode.kind, version: transcriptionNode.version, title: "Transcription", position: { x: 0, y: 0 }, config: {} },
+      inputs: { path: "audio.wav" },
+      services: nodeServices as never,
+      log: jest.fn(),
+    })).rejects.toThrow("Audio file is too large");
+
+    expect(nodeServices.statVaultFileSize).toHaveBeenCalledWith("audio.wav");
+    expect(readVaultBinary).not.toHaveBeenCalled();
+  });
+
+  it("rejects oversized absolute local audio before allocating bytes", async () => {
+    const readLocalFileBinary = jest.fn(async () => new Uint8Array([1, 2, 3]).buffer);
+    const transcribeAudio = jest.fn(async request => {
+      await request.source.load();
+      return {
+        text: "done",
+        operation: { capability: "transcription", operationId: "transcription-op" },
+      };
+    });
+    const nodeServices = services({ transcribeAudio });
+    nodeServices.statLocalFileSize = jest.fn(async () => DESKTOP_TRANSCRIPTION_MAX_FILE_SIZE + 1);
+    nodeServices.readLocalFileBinary = readLocalFileBinary;
+
+    await expect(transcriptionNode.execute({
+      runId: "run-oversize-local",
+      projectPath: "Studio/Test.systemsculpt",
+      signal: new AbortController().signal,
+      node: { id: "transcription", kind: transcriptionNode.kind, version: transcriptionNode.version, title: "Transcription", position: { x: 0, y: 0 }, config: {} },
+      inputs: { path: "/mock/audio.wav" },
+      services: nodeServices as never,
+      log: jest.fn(),
+    })).rejects.toThrow("Audio file is too large");
+
+    expect(nodeServices.statLocalFileSize).toHaveBeenCalledWith("/mock/audio.wav");
+    expect(readLocalFileBinary).not.toHaveBeenCalled();
   });
 
   it("contains no Studio generic stream, provider, model, credit, or arbitrary network path", () => {

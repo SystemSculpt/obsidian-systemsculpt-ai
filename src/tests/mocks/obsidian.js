@@ -646,6 +646,7 @@ class ButtonComponent {
 class ExtraButtonComponent extends ButtonComponent {
   constructor(containerEl) {
     super(containerEl);
+    this.extraSettingsEl = this.buttonEl;
     this.buttonEl.addClass("extra-button");
   }
 }

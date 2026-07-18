@@ -11,7 +11,7 @@ Current user and engineering references for the Obsidian plugin.
 - [Ribbon icons](user/ribbon-icons.md)
 - [Similar Notes](user/similar-notes.md)
 - [Audio and transcription](user/audio-transcription.md)
-- [Automations](user/automations.md)
+- [Audio Processor](user/audio-processor.md)
 - [Troubleshooting](user/troubleshooting.md)
 
 ## Engineering references

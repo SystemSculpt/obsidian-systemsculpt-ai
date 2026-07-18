@@ -1,14 +1,18 @@
 import { DEFAULT_SETTINGS } from "../../../../types";
 import {
   CURRENT_SCHEMA_VERSION,
+  LEGACY_AUDIO_KEYS_REMOVED_IN_V9,
   LEGACY_CHAT_KEYS_REMOVED_IN_V5,
   LEGACY_CLIENT_MODEL_KEYS_REMOVED_IN_V4,
   LEGACY_DIRECTORY_KEYS_REMOVED_IN_V5,
   LEGACY_EMBEDDINGS_KEYS_REMOVED_IN_V3,
   LEGACY_FEATURE_KEYS_REMOVED_IN_V6,
-  LEGACY_UPDATE_KEYS_REMOVED_IN_V8,
   LEGACY_KEYS_REMOVED_IN_V1,
+  LEGACY_RECORDER_KEYS_REMOVED_IN_V10,
   LEGACY_SEMANTIC_INDEX_KEYS_REMOVED_IN_V7,
+  LEGACY_TRANSCRIPTION_LANGUAGE_KEYS_REMOVED_IN_V11,
+  LEGACY_UPDATE_KEYS_REMOVED_IN_V8,
+  LEGACY_WORKFLOW_AUTOMATION_KEYS_REMOVED_IN_V12,
   deepMergeDefaults,
   findMissingMigrationVersions,
   migrateSettingsToCurrentSchema,
@@ -222,6 +226,116 @@ describe("migrateSettingsToCurrentSchema", () => {
       expect(result.settings).not.toHaveProperty(key);
     }
     expect(result.settings.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
+  });
+
+  it("removes retired audio settings and synced microphone preferences", () => {
+    const raw: Record<string, unknown> = {
+      schemaVersion: 8,
+      preferredMicrophoneId: "default",
+      postProcessingPrompt: "Keep the speaker's meaning.",
+      postProcessingEnabled: true,
+      transcriptionOutputFormat: "srt",
+    };
+    for (const key of LEGACY_AUDIO_KEYS_REMOVED_IN_V9) raw[key] = "retired";
+
+    const result = migrateSettingsToCurrentSchema(raw, DEFAULT_SETTINGS);
+
+    expect(result.appliedSteps).toContain("Remove retired recorder and transcription settings");
+    expect(result.appliedSteps).toContain("Move microphone preference out of synced settings");
+    for (const key of LEGACY_AUDIO_KEYS_REMOVED_IN_V9) {
+      expect(result.settings).not.toHaveProperty(key);
+    }
+    for (const key of LEGACY_RECORDER_KEYS_REMOVED_IN_V10) {
+      expect(result.settings).not.toHaveProperty(key);
+    }
+    expect(result.settings).toMatchObject({
+      schemaVersion: CURRENT_SCHEMA_VERSION,
+      postProcessingPrompt: "Keep the speaker's meaning.",
+      postProcessingEnabled: true,
+      transcriptionOutputFormat: "srt",
+    });
+    expect(result.settings).not.toHaveProperty("preferredMicrophoneId");
+    expect(result.settings).not.toHaveProperty("preferredMicrophoneIdsByHost");
+  });
+
+  it("removes only obsolete top-level language overrides when upgrading schema v10", () => {
+    const managedJobState = {
+      createRequest: { language: "ru" },
+      source: { langs: ["ru", "en"] },
+    };
+    const raw: Record<string, unknown> = {
+      schemaVersion: 10,
+      licenseKey: "managed-license",
+      language: "en",
+      langs: "en",
+      managedJobState,
+    };
+
+    const result = migrateSettingsToCurrentSchema(raw, DEFAULT_SETTINGS);
+
+    expect(result.appliedSteps).toContain(
+      "Remove obsolete top-level transcription language overrides",
+    );
+    for (const key of LEGACY_TRANSCRIPTION_LANGUAGE_KEYS_REMOVED_IN_V11) {
+      expect(result.settings).not.toHaveProperty(key);
+    }
+    expect(result.settings.managedJobState).toEqual(managedJobState);
+    expect(result.settings.licenseKey).toBe("managed-license");
+    expect(result.settings.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
+  });
+
+  it("removes only the retired automation layer from workflow settings in v12", () => {
+    const raw = {
+      schemaVersion: 11,
+      workflowEngine: {
+        enabled: false,
+        inboxRoutingEnabled: true,
+        inboxFolder: "Capture/Inbox",
+        processedNotesFolder: "Processed",
+        autoTranscribeInboxNotes: true,
+        automations: { meeting: { enabled: true } },
+        templates: { legacy: { enabled: true } },
+        managedTextOperations: { "automation::meeting::note.md": { phase: "queued" } },
+        skippedFiles: {
+          "automation::meeting::note.md": {
+            path: "note.md",
+            type: "automation",
+            automationId: "meeting",
+            skippedAt: "2026-07-18T00:00:00.000Z",
+          },
+          "transcription::default::Capture/Inbox/audio.mp3": {
+            path: "Capture/Inbox/audio.mp3",
+            type: "transcription",
+            automationId: "retired-field",
+            skippedAt: "2026-07-18T00:00:00.000Z",
+          },
+        },
+      },
+    };
+
+    const result = migrateSettingsToCurrentSchema(raw, DEFAULT_SETTINGS);
+    const workflowEngine = result.settings.workflowEngine as Record<string, unknown>;
+
+    expect(result.appliedSteps).toEqual([
+      "Remove retired workflow automation configuration and backlog state",
+    ]);
+    for (const key of LEGACY_WORKFLOW_AUTOMATION_KEYS_REMOVED_IN_V12) {
+      expect(workflowEngine).not.toHaveProperty(key);
+    }
+    expect(workflowEngine).toMatchObject({
+      enabled: false,
+      inboxRoutingEnabled: true,
+      inboxFolder: "Capture/Inbox",
+      processedNotesFolder: "Processed",
+      autoTranscribeInboxNotes: true,
+      skippedFiles: {
+        "transcription::default::Capture/Inbox/audio.mp3": {
+          path: "Capture/Inbox/audio.mp3",
+          type: "transcription",
+          skippedAt: "2026-07-18T00:00:00.000Z",
+        },
+      },
+    });
   });
 
   it("back-fills brand-new install defaults for empty persisted data", () => {

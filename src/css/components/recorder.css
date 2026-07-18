@@ -1,87 +1,117 @@
-/**
- * Recorder hover popover — live badge, timer, waveform canvas.
- * Lives inside the floating widget shell (.ss-hover-shell).
- */
+/** Recorder task card. Capture has no decorative audio graph or animation loop. */
 
 .ss-recorder-hover {
   display: flex;
   flex-direction: column;
   gap: var(--ss-space-2);
-  width: min(300px, calc(100vw - var(--ss-space-6)));
+  z-index: var(--ss-z-floating-workflow);
+  width: min(320px, calc(100vw - var(--ss-space-6)));
 }
 
-.ss-recorder-hover__badge-row {
-  display: flex;
-  align-items: center;
-  gap: var(--ss-space-2);
-}
-
-.ss-recorder-hover__live {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--ss-space-1);
-  padding: 0 var(--ss-space-2);
-  border: 1px solid var(--ss-line);
-  border-radius: var(--ss-radius-full);
-  font-size: var(--ss-text-xs);
-  font-weight: var(--ss-weight-semibold);
-  letter-spacing: var(--ss-tracking-wide);
-  text-transform: uppercase;
-  color: var(--ss-ink-muted);
-}
-
-.ss-recorder-hover[data-state="recording"] {
-  border-color: var(--ss-danger-line);
-}
-
-.ss-recorder-hover[data-state="recording"] .ss-recorder-hover__live {
-  border-color: var(--ss-danger-line);
-  color: var(--ss-danger);
-}
-
-.ss-recorder-hover[data-state="recording"] .ss-recorder-hover__live::before {
-  content: "";
-  width: 6px;
-  height: 6px;
-  border-radius: var(--ss-radius-round);
-  background-color: var(--ss-danger);
-  animation: ss-pulse 1.5s var(--ss-ease) infinite;
-}
-
-.ss-recorder-hover__timer {
+.ss-recorder-hover__summary {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--ss-space-2);
+  gap: var(--ss-space-3);
   padding: var(--ss-space-2) var(--ss-space-3);
   background-color: var(--ss-surface-1);
   border: 1px solid var(--ss-line);
   border-radius: var(--ss-radius-sm);
 }
 
-.ss-recorder-hover__timer-label {
-  font-size: var(--ss-text-xs);
+.ss-recorder-hover__phase {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ss-space-1);
   color: var(--ss-ink-muted);
+  font-size: var(--ss-text-xs);
+  font-weight: var(--ss-weight-semibold);
   letter-spacing: var(--ss-tracking-wide);
   text-transform: uppercase;
 }
 
-.ss-recorder-hover__timer-value {
+.ss-recorder-hover[data-state="recording"] {
+  border-color: var(--ss-danger-line);
+}
+
+.ss-recorder-hover[data-state="recording"] .ss-recorder-hover__phase {
+  color: var(--ss-danger);
+}
+
+.ss-recorder-hover[data-state="recording"] .ss-recorder-hover__phase::before {
+  width: 7px;
+  height: 7px;
+  background-color: var(--ss-danger);
+  border-radius: var(--ss-radius-round);
+  content: "";
+}
+
+.ss-recorder-hover__timer {
+  color: var(--ss-ink);
   font-family: var(--ss-font-mono);
   font-size: var(--ss-text-2xl);
   font-weight: var(--ss-weight-semibold);
   font-variant-numeric: tabular-nums;
+  line-height: 1;
 }
 
-.ss-recorder-hover__visualizer-wrap {
-  padding: var(--ss-space-2);
+.ss-recorder-hover__details {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ss-space-1);
+}
+
+.ss-recorder-hover__detail {
+  overflow: hidden;
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ss-recorder-hover__detail.is-hidden,
+.ss-recorder-hover__progress.is-hidden {
+  display: none;
+}
+
+.ss-recorder-hover__progress {
+  height: 4px;
+  overflow: hidden;
   background-color: var(--ss-surface-sunken);
-  border: 1px solid var(--ss-line);
-  border-radius: var(--ss-radius-sm);
+  border-radius: var(--ss-radius-full);
 }
 
-.ss-recorder-hover__visualizer {
-  display: block;
-  width: 100%;
-  height: 52px;
+.ss-recorder-hover__progress-fill {
+  width: 0;
+  height: 100%;
+  background-color: var(--ss-accent);
+  border-radius: inherit;
+  transition: width var(--ss-dur-base) var(--ss-ease);
+}
+
+.ss-mobile-layout .ss-recorder-hover {
+  position: fixed;
+  right: max(var(--ss-space-3), env(safe-area-inset-right, 0px));
+  bottom: var(--ss-mobile-bottom-clearance);
+  left: max(var(--ss-space-3), env(safe-area-inset-left, 0px));
+  width: auto;
+  max-width: none;
+}
+
+@container ss-surface (max-width: 420px) {
+  .ss-recorder-hover__summary {
+    min-height: 44px;
+  }
+}
+
+@media (pointer: coarse) {
+  .ss-recorder-hover .ss-hover-shell__action {
+    min-height: 44px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ss-recorder-hover__progress-fill {
+    transition: none;
+  }
 }

@@ -2,6 +2,7 @@
 
 import { App } from "obsidian";
 import SystemSculptPlugin from "../main";
+import { AudioTranscriptionPanel } from "../modals/AudioTranscriptionPanel";
 
 const createTracer = () => ({
   startPhase: jest.fn(() => ({ complete: jest.fn(), fail: jest.fn() })),
@@ -80,5 +81,43 @@ describe("SystemSculptPlugin safe mode + version gate (#212)", () => {
     expect(plugin._commands.map((c: { id: string }) => c.id)).toContain(
       "systemsculpt-show-load-diagnostics"
     );
+  });
+
+  it("stops recorder capture before any fallible service teardown", async () => {
+    const plugin = makePlugin();
+    const order: string[] = [];
+    (plugin as any).recorderService = {
+      unload: jest.fn(() => { order.push("recorder"); }),
+    };
+    (plugin as any).settingsManager = {
+      destroy: jest.fn(() => {
+        order.push("settings");
+        throw new Error("simulated settings teardown failure");
+      }),
+    };
+
+    await expect(plugin.onunload()).resolves.toBeUndefined();
+
+    expect(order).toEqual(["recorder", "settings"]);
+    expect((plugin as any).recorderService).toBeNull();
+  });
+
+  it("disposes owned transcription panels before transcription service unload", async () => {
+    const plugin = makePlugin();
+    const order: string[] = [];
+    const disposePanels = jest
+      .spyOn(AudioTranscriptionPanel, "disposeOwnedBy")
+      .mockImplementation((owner) => {
+        expect(owner).toBe(plugin);
+        order.push("panels");
+      });
+    (plugin as any).transcriptionService = {
+      unload: jest.fn(() => { order.push("transcription"); }),
+    };
+
+    await expect(plugin.onunload()).resolves.toBeUndefined();
+
+    expect(disposePanels).toHaveBeenCalledTimes(1);
+    expect(order).toEqual(["panels", "transcription"]);
   });
 });

@@ -45,6 +45,61 @@ describe("StudioRuntime session snapshot runs", () => {
     platform.isDesktopApp = true;
   });
 
+  it("retries published transcription cleanup from retained run events", async () => {
+    const runIndex = [{
+      runId: "run-published",
+      status: "success",
+      startedAt: "2026-03-22T00:00:00.000Z",
+      finishedAt: "2026-03-22T00:01:00.000Z",
+      error: null,
+      executedNodeIds: ["transcribe"],
+      cachedNodeIds: [],
+    }];
+    const events = [
+      JSON.stringify({
+        type: "node.output",
+        managedOperations: [
+          { capability: "transcription", operationId: "studio-transcription-published" },
+          { capability: "image_generation", operationId: "ignored-image" },
+          { capability: "transcription", operationId: "bad/id" },
+        ],
+      }),
+      "not-json",
+    ].join("\n");
+    const projectStore = {
+      readSupportFile: jest.fn(async (_projectPath: string, path: string) => {
+        if (path.endsWith("/runs/index.json")) {
+          return new TextEncoder().encode(JSON.stringify(runIndex));
+        }
+        if (path.endsWith("/runs/run-published/events.ndjson")) {
+          return new TextEncoder().encode(events);
+        }
+        return null;
+      }),
+    } as any;
+    const completeLocalCommit = jest.fn(async () => undefined);
+    const plugin = {
+      getLogger: () => ({ warn: jest.fn(), error: jest.fn(), debug: jest.fn() }),
+    } as any;
+    const runtime = new StudioRuntime(
+      {} as any,
+      plugin,
+      projectStore,
+      {} as any,
+      {} as any,
+      {} as any,
+      { completeLocalCommit } as any,
+    );
+
+    await expect(runtime.getRecentRuns("Studio/Test.systemsculpt"))
+      .resolves.toMatchObject([{ runId: "run-published" }]);
+
+    expect(completeLocalCommit).toHaveBeenCalledWith([{
+      capability: "transcription",
+      operationId: "studio-transcription-published",
+    }]);
+  });
+
   it("runs directly from the provided project snapshot without reloading the project file", async () => {
     const adapter = {
       exists: jest.fn(async (path: string) => path.endsWith("index.json") ? false : true),

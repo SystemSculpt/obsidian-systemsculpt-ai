@@ -73,7 +73,7 @@ describe("StudioApiExecutionAdapter managed cutover", () => {
         bytes: new Uint8Array([1, 2]).buffer,
       }],
     }));
-    const transcribe = jest.fn(async (_source, context) => ({ operationId: context.operationId, text: "transcript" }));
+    const transcribe = jest.fn(async (_source, context) => ({ kind: "transcript", operationId: context.operationId, text: "transcript" }));
     Object.assign(adapter as object, {
       images: { generate: imageGenerate, beginLocalCommit: jest.fn(), completeLocalCommit: jest.fn() },
       transcription: { transcribe, beginLocalCommit: jest.fn(), completeLocalCommit: jest.fn() },
@@ -111,5 +111,24 @@ describe("StudioApiExecutionAdapter managed cutover", () => {
       text: "transcript",
       operation: { capability: "transcription", operationId: "studio-transcription-run-1-transcription-a" },
     });
+  });
+
+  it("finalizes published transcription records while preserving image cleanup", async () => {
+    const { plugin } = createPlugin();
+    const adapter = new StudioApiExecutionAdapter(plugin as never);
+    const imageComplete = jest.fn(async () => undefined);
+    const transcriptionFinalize = jest.fn(async () => undefined);
+    Object.assign(adapter as object, {
+      images: { completeLocalCommit: imageComplete },
+      transcription: { finalizePublishedLocalCommit: transcriptionFinalize },
+    });
+
+    await adapter.completeLocalCommit([
+      { capability: "image_generation", operationId: "image-op" },
+      { capability: "transcription", operationId: "transcription-op" },
+    ]);
+
+    expect(imageComplete).toHaveBeenCalledWith("image-op", undefined);
+    expect(transcriptionFinalize).toHaveBeenCalledWith("transcription-op", undefined);
   });
 });
