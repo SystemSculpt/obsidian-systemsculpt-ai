@@ -162,7 +162,7 @@ describe("PlatformRequestClient", () => {
     expect(requestUrl).not.toHaveBeenCalled();
   });
 
-  it("forces requestUrl for a raw ArrayBuffer without adding or changing signed headers", async () => {
+  it("lets the host derive a validated Content-Length for raw requestUrl uploads", async () => {
     const client = new PlatformRequestClient();
     const fetchMock = jest.fn();
     global.fetch = fetchMock as any;
@@ -177,7 +177,11 @@ describe("PlatformRequestClient", () => {
     const response = await client.request({
       url: "https://signed.example.com/upload?signature=exact",
       method: "PUT",
-      headers: { "content-type": "audio/wav", "x-amz-meta-part": "1" },
+      headers: {
+        "content-type": "audio/wav",
+        "Content-Length": "4",
+        "x-amz-meta-part": "1",
+      },
       body,
       bodyEncoding: "raw",
       transport: "requestUrl",
@@ -197,6 +201,22 @@ describe("PlatformRequestClient", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("etag")).toBe('"0123456789abcdef"');
     expect(response.headers.get("x-amz-request-id")).toBe("r2-1");
+  });
+
+  it("rejects a signed Content-Length that does not match the raw body", async () => {
+    const client = new PlatformRequestClient();
+    const body = new Uint8Array([0, 1, 2, 3]).buffer;
+
+    await expect(client.request({
+      url: "https://signed.example.com/upload?signature=exact",
+      method: "PUT",
+      headers: { "Content-Length": "5" },
+      body,
+      bodyEncoding: "raw",
+      transport: "requestUrl",
+    })).rejects.toThrow("Content-Length must match the ArrayBuffer size");
+
+    expect(requestUrl).not.toHaveBeenCalled();
   });
 
   it("rejects a non-ArrayBuffer raw body before selecting a transport", async () => {
