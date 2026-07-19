@@ -5,6 +5,7 @@ import {
   type StudioGenerationAdapter,
 } from "../persistence/StudioProjectGenerationStore";
 import { sha256HexFromBytesPortable } from "../hash";
+import { parseStudioProject, serializeStudioProject } from "../schema";
 import { FileOperations } from "../../tools/vault/tools/FileOperations";
 
 class MemoryAdapter implements StudioGenerationAdapter {
@@ -206,7 +207,7 @@ describe("StudioProjectGenerationStore", () => {
     expect([...missingPolicy.files.keys()].some((path) => path.startsWith(".systemsculpt/studio/projects/"))).toBe(false);
   });
 
-  it("preserves the legacy projection across every root-publication write cut", async () => {
+  it("retries every interrupted uncommitted root publication without deleting legacy bytes", async () => {
     for (let cut = 0; cut < 10; cut += 1) {
       const adapter = new MemoryAdapter();
       await seedLegacy(adapter);
@@ -220,7 +221,37 @@ describe("StudioProjectGenerationStore", () => {
       } else {
         expect(recovered.status).toBe("recovery_required");
       }
+
+      const partialCandidates = [...adapter.dirs].filter((path) =>
+        path.startsWith(".systemsculpt/studio/projects/project_alpha/generations/")
+      );
+      const retried = await new StudioProjectGenerationStore(adapter, {
+        now: () => "2026-07-11T02:02:03.004Z",
+      }).discoverAndAdopt(locator);
+      expect(retried.status).toBe("committed");
+      expect((await new StudioProjectGenerationStore(adapter).recover("project_alpha")).status).toBe("ready");
+      expect(new TextDecoder().decode(adapter.files.get(locator.vaultRelativeProjectPath)!)).toBe(legacyProject);
+      for (const path of partialCandidates) expect(adapter.dirs.has(path)).toBe(true);
     }
+  });
+
+  it("does not retry root adoption over an invalid committed authority candidate", async () => {
+    const adapter = new MemoryAdapter();
+    await seedLegacy(adapter);
+    const candidate = `.systemsculpt/studio/projects/project_alpha/generations/0-${TEST_HASH_A}`;
+    adapter.dirs.add(candidate);
+    adapter.files.set(`${candidate}/commit.json`, new TextEncoder().encode("{}"));
+
+    const retried = await new StudioProjectGenerationStore(adapter, {
+      now: () => "2026-07-11T02:02:03.004Z",
+    }).discoverAndAdopt(locator);
+
+    expect(retried).toMatchObject({
+      status: "recovery_required",
+      message: expect.stringContaining("No validated generation exists"),
+    });
+    expect([...adapter.files.keys()].filter((path) => path.endsWith("/manifest.json"))).toHaveLength(0);
+    expect(new TextDecoder().decode(adapter.files.get(locator.vaultRelativeProjectPath)!)).toBe(legacyProject);
   });
 
   it("commits a valid direct document edit exactly once", async () => {
@@ -388,6 +419,46 @@ describe("StudioProjectGenerationStore", () => {
     }
     const generations = await adapter.list(".systemsculpt/studio/projects/project_alpha/generations");
     expect(generations.folders).toHaveLength(1);
+  });
+
+  it("loads an older valid project file and regenerates missing authoring references", async () => {
+    const adapter = new MemoryAdapter(); await seedLegacy(adapter);
+    const store = new StudioProjectGenerationStore(adapter, {
+      now: () => "2026-07-11T01:02:03.004Z",
+    });
+    const root = await store.discoverAndAdopt(locator);
+    if (root.status !== "committed") throw new Error("adoption failed");
+
+    const canonicalDocument = serializeStudioProject(parseStudioProject(legacyProject));
+    const canonical = await store.commitWholeGeneration({
+      kind: "replace_project",
+      projectId: "project_alpha",
+      reason: "discrete_save",
+      projectDocument: new TextEncoder().encode(canonicalDocument),
+    }, root.expectedGeneration);
+    if (canonical.status !== "committed") throw new Error("canonical save failed");
+
+    const restoredDocument = JSON.parse(canonicalDocument);
+    restoredDocument.name = "Restored older backup";
+    delete restoredDocument.agentGuide;
+    delete restoredDocument.nodeKindReference;
+    adapter.files.set(
+      locator.vaultRelativeProjectPath,
+      new TextEncoder().encode(`${JSON.stringify(restoredDocument, null, 2)}\n`)
+    );
+
+    const opened = await new StudioProjectGenerationStore(adapter, {
+      now: () => "2026-07-11T02:02:03.004Z",
+    }).open("project_alpha", locator);
+
+    expect(opened.status).toBe("ready");
+    if (opened.status !== "ready") return;
+    expect(opened.expectedGeneration.revision).toBe(2);
+    expect(opened.generation.metadata.commandKind).toBe("external_sync");
+    const repaired = JSON.parse(await adapter.read(locator.vaultRelativeProjectPath));
+    expect(repaired.name).toBe("Restored older backup");
+    expect(repaired.agentGuide?.schema).toBe("studio.agent-guide.v1");
+    expect(repaired.nodeKindReference?.schema).toBe("studio.node-kind-reference.v1");
   });
 
   it("reconciles a valid direct edit on first open after restart", async () => {
@@ -875,6 +946,32 @@ describe("StudioProjectGenerationStore", () => {
       projectDocument: new TextEncoder().encode(legacyProject),
     }, adopted.expectedGeneration);
     expect(stale.status).toBe("stale_revision");
+  });
+
+  it("commits and reopens imported support files written by Studio", async () => {
+    const adapter = new MemoryAdapter();
+    await seedLegacy(adapter);
+    const store = new StudioProjectGenerationStore(adapter, { now: () => "2026-07-11T01:02:03.004Z" });
+    const root = await store.discoverAndAdopt(locator);
+    if (root.status !== "committed") throw new Error("adoption failed");
+
+    const imported = await new StudioProjectGenerationStore(adapter, {
+      now: () => "2026-07-11T02:02:03.004Z",
+    }).commitWholeGeneration({
+      kind: "put_support_file",
+      projectId: "project_alpha",
+      file: {
+        supportRelativePath: "imports/context.txt",
+        bytes: new TextEncoder().encode("source context\n"),
+      },
+    }, root.expectedGeneration);
+
+    expect(imported.status).toBe("committed");
+    const recovered = await new StudioProjectGenerationStore(adapter).recover("project_alpha");
+    expect(recovered.status).toBe("ready");
+    if (recovered.status !== "ready") throw new Error("support generation did not reopen");
+    expect(recovered.generation.metadata.commandKind).toBe("support");
+    expect(new TextDecoder().decode(recovered.generation.files.get("support/imports/context.txt"))).toBe("source context\n");
   });
 
   it("recovers deterministically after every descendant publication write cut", async () => {

@@ -1,32 +1,52 @@
 /**
- * Shared operation progress panel — fixed bottom-right widget for long-running
- * transcription, document conversion, and workflow automation tasks.
+ * Shared operation progress stack for long-running transcription, document
+ * conversion, inbox transcription, and other long-running tasks.
  */
 
-.systemsculpt-progress-panel {
+.systemsculpt-progress-stack {
   position: fixed;
   bottom: var(--ss-space-8);
   right: var(--ss-space-8);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ss-space-2);
   width: min(350px, calc(100vw - var(--ss-space-10)));
+  max-height: calc(100dvh - var(--ss-space-8) - var(--ss-space-8));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  z-index: var(--ss-z-notice);
+}
+
+.systemsculpt-progress-panel {
+  position: relative;
+  flex: 0 0 auto;
+  width: 100%;
   padding: var(--ss-space-4);
   background-color: var(--ss-surface-2);
   border: 1px solid var(--ss-line);
   border-radius: var(--ss-radius-md);
   box-shadow: var(--ss-elevation-3);
-  z-index: var(--ss-z-notice);
   animation: ss-slide-up var(--ss-dur-base) var(--ss-ease-out);
 }
 
 /* Fixed progress surfaces live outside a view's normal flow. On mobile they
  * must clear Obsidian's navigation and the device's horizontal safe areas
  * themselves instead of inheriting padding from the active view. */
-.ss-mobile-layout .systemsculpt-progress-panel {
+.ss-mobile-layout .systemsculpt-progress-stack {
   right: max(var(--ss-space-2), env(safe-area-inset-right, 0px));
-  bottom: var(--ss-mobile-bottom-clearance);
+  bottom: calc(
+    var(--ss-mobile-bottom-clearance)
+    + var(--ss-recorder-mobile-stack-offset, 0px)
+  );
   left: max(var(--ss-space-2), env(safe-area-inset-left, 0px));
   width: auto;
-  max-height: calc(100dvh - var(--ss-mobile-bottom-clearance) - var(--ss-space-4));
-  overflow-y: auto;
+  max-height: calc(
+    100dvh
+    - var(--ss-mobile-bottom-clearance)
+    - var(--ss-recorder-mobile-stack-offset, 0px)
+    - max(var(--ss-space-2), env(safe-area-inset-top, 0px))
+    - var(--ss-space-2)
+  );
 }
 
 .systemsculpt-progress-header {

@@ -38,43 +38,11 @@ export interface WorkflowDefinition {
   description?: string;
 }
 
-export interface WorkflowAutomationState {
-  id: string;
-  enabled: boolean;
-  sourceFolder?: string;
-  destinationFolder?: string;
-  metadata?: Record<string, string>;
-  systemPrompt?: string;
-}
-
 export interface WorkflowSkipEntry {
   path: string;
-  type: "transcription" | "automation";
-  automationId?: string;
+  type: "transcription";
   skippedAt: string;
   reason?: string;
-}
-
-export type WorkflowManagedTextPhase =
-  | "queued"
-  | "dispatching"
-  | "ambiguous"
-  | "failed"
-  | "local_commit_pending"
-  | "completed";
-
-export interface WorkflowManagedTextOperation {
-  operationId: string;
-  automationId: string;
-  sourcePath: string;
-  targetPath: string;
-  phase: WorkflowManagedTextPhase;
-  admissionReason?: string;
-  errorCode?: string;
-  requestId?: string;
-  retryable?: boolean;
-  createdAt: string;
-  updatedAt: string;
 }
 
 export interface WorkflowEngineSettings {
@@ -83,43 +51,7 @@ export interface WorkflowEngineSettings {
   inboxFolder: string;
   processedNotesFolder: string;
   autoTranscribeInboxNotes: boolean;
-  automations: Record<string, WorkflowAutomationState>;
   skippedFiles?: Record<string, WorkflowSkipEntry>;
-  managedTextOperations?: Record<string, WorkflowManagedTextOperation>;
-}
-
-export const WORKFLOW_AUTOMATION_IDS = {
-  MEETING_TRANSCRIPT: "meeting-transcript",
-  WEB_CLIPPING: "web-clipping",
-  IDEA_DUMP: "idea-dump",
-} as const;
-
-export type WorkflowAutomationId = typeof WORKFLOW_AUTOMATION_IDS[keyof typeof WORKFLOW_AUTOMATION_IDS];
-
-export function createDefaultWorkflowAutomationsState(): Record<string, WorkflowAutomationState> {
-  return {
-    [WORKFLOW_AUTOMATION_IDS.MEETING_TRANSCRIPT]: {
-      id: WORKFLOW_AUTOMATION_IDS.MEETING_TRANSCRIPT,
-      enabled: false,
-      sourceFolder: "10 - capture-intake/Transcripts",
-      destinationFolder: "40 - areas/Meetings",
-      systemPrompt: "You are a meeting operations assistant. Turn messy transcripts into crisp notes highlighting agenda, key decisions, blockers, owners, and next steps. Write in bullet lists and keep timestamps out of the final summary.",
-    },
-    [WORKFLOW_AUTOMATION_IDS.WEB_CLIPPING]: {
-      id: WORKFLOW_AUTOMATION_IDS.WEB_CLIPPING,
-      enabled: false,
-      sourceFolder: "10 - capture-intake/Clippings",
-      destinationFolder: "20 - resources/Web",
-      systemPrompt: "You are a research clipping analyst. Normalize web clippings, capture source context, summarize the core insight, and list 2-3 follow-up actions if relevant.",
-    },
-    [WORKFLOW_AUTOMATION_IDS.IDEA_DUMP]: {
-      id: WORKFLOW_AUTOMATION_IDS.IDEA_DUMP,
-      enabled: false,
-      sourceFolder: "10 - capture-intake/Inbox",
-      destinationFolder: "30 - projects/Incubator",
-      systemPrompt: "You are a creative project triage assistant. Take short idea dumps, clarify the problem, opportunity, and next experiments. Keep tone energetic but concise.",
-    },
-  };
 }
 
 export function createDefaultWorkflowEngineSettings(): WorkflowEngineSettings {
@@ -129,8 +61,6 @@ export function createDefaultWorkflowEngineSettings(): WorkflowEngineSettings {
     inboxFolder: "10 - capture-intake/Inbox",
     processedNotesFolder: "",
     autoTranscribeInboxNotes: true,
-    automations: createDefaultWorkflowAutomationsState(),
     skippedFiles: {},
-    managedTextOperations: {},
   };
 }

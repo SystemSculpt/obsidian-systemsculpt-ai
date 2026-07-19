@@ -115,8 +115,13 @@ describe("FileContextMenuService", () => {
       expect.objectContaining({
         file: audioFile,
         timestamped: false,
+        targetEditor: null,
         plugin,
+        openOnComplete: true,
       })
     );
+    const options = (launchAudioTranscriptionPanel as jest.Mock).mock.calls[0][1];
+    expect(options).not.toHaveProperty("onTranscriptionComplete");
+    expect(app.vault.create).not.toHaveBeenCalled();
   });
 });

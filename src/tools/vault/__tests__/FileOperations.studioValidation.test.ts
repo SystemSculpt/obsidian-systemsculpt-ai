@@ -348,6 +348,16 @@ describe("FileOperations Studio agent edits", () => {
       edits: [{ oldText: projectId, newText: `${projectId}-changed` }],
     } as any)).rejects.toThrow("projectId is Studio-owned");
 
+    const changedGuide = JSON.parse(original);
+    changedGuide.agentGuide.purpose = "Replace the generated editing contract.";
+    expect(() => assertValidStudioProjectAgentFileMutation({
+      path: file.path,
+      exists: true,
+      mode: "overwrite",
+      previousContent: original,
+      content: JSON.stringify(changedGuide),
+    })).toThrow("agentGuide is Studio-owned");
+
     expect(app.vault.modify).not.toHaveBeenCalled();
   });
 

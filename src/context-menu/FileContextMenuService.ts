@@ -29,7 +29,6 @@ import {
   type DocumentProcessingPanelHandle,
   type DocumentProcessingPanelLauncher,
 } from "../modals/DocumentProcessingPanel";
-import { TranscriptionTitleService } from "../services/transcription/TranscriptionTitleService";
 import { tryCopyImageFileToClipboard } from "../utils/clipboard";
 import { getSurfaceOwnerWindow } from "../core/ui/surface";
 
@@ -606,14 +605,14 @@ export class FileContextMenuService {
   }
 
   private async handleAudioConversion(file: TFile): Promise<void> {
-    this.info("Audio conversion started", { filePath: file.path });
+    this.info("Audio transcription launch requested", { filePath: file.path });
 
     try {
       await this.handleAudioTranscription(file, false);
-      this.info("Audio conversion completed", { filePath: file.path });
+      this.info("Audio transcription panel launched", { filePath: file.path });
     } catch (error) {
-      this.error("Audio conversion failed", error, { filePath: file.path });
-      new Notice("Audio conversion failed.", 6000);
+      this.error("Audio transcription launch failed", error, { filePath: file.path });
+      new Notice("Audio transcription could not start.", 6000);
     }
   }
 
@@ -624,32 +623,11 @@ export class FileContextMenuService {
     launchAudioTranscriptionPanel(this.app, {
       file,
       timestamped,
+      // A file-menu action belongs to the selected audio file, not whichever
+      // note happened to be active when the menu opened.
+      targetEditor: null,
       plugin: this.plugin,
-      onTranscriptionComplete: async (text: string) => {
-        const baseName = file.basename;
-        const fileExtension = timestamped ? "srt" : "md";
-        const folderPath = file.parent?.path ?? "";
-        const outputBasename = timestamped
-          ? baseName
-          : TranscriptionTitleService.getInstance(this.plugin).buildFallbackBasename(baseName);
-        const outputPath = folderPath ? `${folderPath}/${outputBasename}.${fileExtension}` : `${outputBasename}.${fileExtension}`;
-
-        const content = text;
-
-        const existingFile = this.app.vault.getAbstractFileByPath(outputPath);
-        let transcriptionFile: TFile;
-
-        if (existingFile instanceof TFile) {
-          await this.app.vault.modify(existingFile, content);
-          transcriptionFile = existingFile;
-        } else {
-          transcriptionFile = await this.app.vault.create(outputPath, content);
-        }
-
-        const leaf = this.app.workspace.getLeaf("tab");
-        await leaf.openFile(transcriptionFile);
-        this.app.workspace.setActiveLeaf(leaf, { focus: true });
-      },
+      openOnComplete: true,
     });
   }
 

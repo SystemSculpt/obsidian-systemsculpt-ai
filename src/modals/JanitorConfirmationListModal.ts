@@ -1,5 +1,6 @@
 import { App, setIcon } from "obsidian";
 import { StandardModal } from "../core/ui/modals/standard/StandardModal";
+import { isAudioFileExtension } from "../constants/fileTypes";
 
 export interface ConfirmationListItem {
   path: string;
@@ -45,7 +46,7 @@ export function janitorFileIcon(extension: string): string {
   const normalized = extension.toLowerCase();
   if (["md", "txt", "markdown", "pdf"].includes(normalized)) return "file-text";
   if (["jpg", "jpeg", "png", "webp", "svg"].includes(normalized)) return "image";
-  if (["mp3", "wav", "ogg", "m4a"].includes(normalized)) return "audio-lines";
+  if (isAudioFileExtension(normalized)) return "audio-lines";
   return "file";
 }
 

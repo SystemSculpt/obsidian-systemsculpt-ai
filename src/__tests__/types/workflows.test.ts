@@ -2,82 +2,13 @@
  * @jest-environment node
  */
 import {
-  WORKFLOW_AUTOMATION_IDS,
-  createDefaultWorkflowAutomationsState,
   createDefaultWorkflowEngineSettings,
   type WorkflowTrigger,
   type WorkflowCondition,
   type WorkflowStep,
   type WorkflowDefinition,
-  type WorkflowAutomationState,
   type WorkflowEngineSettings,
-  type WorkflowTriggerType,
-  type WorkflowConditionType,
-  type WorkflowStepType,
 } from "../../types/workflows";
-
-describe("WORKFLOW_AUTOMATION_IDS", () => {
-  it("has MEETING_TRANSCRIPT id", () => {
-    expect(WORKFLOW_AUTOMATION_IDS.MEETING_TRANSCRIPT).toBe("meeting-transcript");
-  });
-
-  it("has WEB_CLIPPING id", () => {
-    expect(WORKFLOW_AUTOMATION_IDS.WEB_CLIPPING).toBe("web-clipping");
-  });
-
-  it("has IDEA_DUMP id", () => {
-    expect(WORKFLOW_AUTOMATION_IDS.IDEA_DUMP).toBe("idea-dump");
-  });
-});
-
-describe("createDefaultWorkflowAutomationsState", () => {
-  it("returns an object with all automation IDs", () => {
-    const state = createDefaultWorkflowAutomationsState();
-    expect(state[WORKFLOW_AUTOMATION_IDS.MEETING_TRANSCRIPT]).toBeDefined();
-    expect(state[WORKFLOW_AUTOMATION_IDS.WEB_CLIPPING]).toBeDefined();
-    expect(state[WORKFLOW_AUTOMATION_IDS.IDEA_DUMP]).toBeDefined();
-  });
-
-  it("meeting transcript has correct defaults", () => {
-    const state = createDefaultWorkflowAutomationsState();
-    const transcript = state[WORKFLOW_AUTOMATION_IDS.MEETING_TRANSCRIPT];
-
-    expect(transcript.id).toBe(WORKFLOW_AUTOMATION_IDS.MEETING_TRANSCRIPT);
-    expect(transcript.enabled).toBe(false);
-    expect(transcript.sourceFolder).toContain("Transcripts");
-    expect(transcript.destinationFolder).toContain("Meetings");
-    expect(transcript.systemPrompt).toContain("meeting");
-  });
-
-  it("web clipping has correct defaults", () => {
-    const state = createDefaultWorkflowAutomationsState();
-    const clipping = state[WORKFLOW_AUTOMATION_IDS.WEB_CLIPPING];
-
-    expect(clipping.id).toBe(WORKFLOW_AUTOMATION_IDS.WEB_CLIPPING);
-    expect(clipping.enabled).toBe(false);
-    expect(clipping.sourceFolder).toContain("Clippings");
-    expect(clipping.destinationFolder).toContain("Web");
-    expect(clipping.systemPrompt).toContain("clipping");
-  });
-
-  it("idea dump has correct defaults", () => {
-    const state = createDefaultWorkflowAutomationsState();
-    const idea = state[WORKFLOW_AUTOMATION_IDS.IDEA_DUMP];
-
-    expect(idea.id).toBe(WORKFLOW_AUTOMATION_IDS.IDEA_DUMP);
-    expect(idea.enabled).toBe(false);
-    expect(idea.sourceFolder).toContain("Inbox");
-    expect(idea.destinationFolder).toContain("Incubator");
-    expect(idea.systemPrompt).toContain("idea");
-  });
-
-  it("returns a new object each time", () => {
-    const state1 = createDefaultWorkflowAutomationsState();
-    const state2 = createDefaultWorkflowAutomationsState();
-    expect(state1).not.toBe(state2);
-    expect(state1).toEqual(state2);
-  });
-});
 
 describe("createDefaultWorkflowEngineSettings", () => {
   it("has enabled set to true", () => {
@@ -105,11 +36,9 @@ describe("createDefaultWorkflowEngineSettings", () => {
     expect(settings.autoTranscribeInboxNotes).toBe(true);
   });
 
-  it("includes all default automations", () => {
+  it("starts with an empty transcription skip map", () => {
     const settings = createDefaultWorkflowEngineSettings();
-    expect(settings.automations[WORKFLOW_AUTOMATION_IDS.MEETING_TRANSCRIPT]).toBeDefined();
-    expect(settings.automations[WORKFLOW_AUTOMATION_IDS.WEB_CLIPPING]).toBeDefined();
-    expect(settings.automations[WORKFLOW_AUTOMATION_IDS.IDEA_DUMP]).toBeDefined();
+    expect(settings.skippedFiles).toEqual({});
   });
 
   it("returns a new object each time", () => {
@@ -191,7 +120,7 @@ describe("WorkflowStep type", () => {
     const step: WorkflowStep = {
       id: "step-2",
       type: "write-note",
-      label: "Write meeting note",
+      label: "Write audio note",
       config: {
         targetPath: "/processed/meeting.md",
       },
@@ -228,7 +157,7 @@ describe("WorkflowDefinition type", () => {
   it("can create a complete workflow", () => {
     const workflow: WorkflowDefinition = {
       id: "workflow-1",
-      name: "Meeting Processor",
+      name: "Audio Processor",
       trigger: {
         type: "folder",
         value: "/inbox/meetings",
@@ -241,15 +170,15 @@ describe("WorkflowDefinition type", () => {
         { id: "s2", type: "extract-tasks", label: "Extract tasks" },
         { id: "s3", type: "route-note", label: "Move to archive" },
       ],
-      description: "Process meeting transcripts automatically",
+      description: "Process audio transcripts automatically",
     };
 
     expect(workflow.id).toBe("workflow-1");
-    expect(workflow.name).toBe("Meeting Processor");
+    expect(workflow.name).toBe("Audio Processor");
     expect(workflow.trigger.type).toBe("folder");
     expect(workflow.conditions).toHaveLength(1);
     expect(workflow.steps).toHaveLength(3);
-    expect(workflow.description).toContain("meeting");
+    expect(workflow.description).toContain("audio");
   });
 
   it("can create workflow without conditions", () => {
@@ -265,34 +194,6 @@ describe("WorkflowDefinition type", () => {
   });
 });
 
-describe("WorkflowAutomationState type", () => {
-  it("can create minimal state", () => {
-    const state: WorkflowAutomationState = {
-      id: "auto-1",
-      enabled: true,
-    };
-
-    expect(state.id).toBe("auto-1");
-    expect(state.enabled).toBe(true);
-    expect(state.sourceFolder).toBeUndefined();
-  });
-
-  it("can create full state", () => {
-    const state: WorkflowAutomationState = {
-      id: "auto-2",
-      enabled: false,
-      sourceFolder: "/source",
-      destinationFolder: "/dest",
-      metadata: { key: "value" },
-      systemPrompt: "Process this note",
-    };
-
-    expect(state.sourceFolder).toBe("/source");
-    expect(state.metadata?.key).toBe("value");
-    expect(state.systemPrompt).toBe("Process this note");
-  });
-});
-
 describe("WorkflowEngineSettings type", () => {
   it("can create custom settings", () => {
     const settings: WorkflowEngineSettings = {
@@ -301,10 +202,10 @@ describe("WorkflowEngineSettings type", () => {
       inboxFolder: "/custom/inbox",
       processedNotesFolder: "/processed",
       autoTranscribeInboxNotes: false,
-      automations: {},
+      skippedFiles: {},
     };
 
     expect(settings.enabled).toBe(false);
-    expect(settings.automations).toEqual({});
+    expect(settings.skippedFiles).toEqual({});
   });
 });

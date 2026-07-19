@@ -17,7 +17,9 @@ function createContext(options: {
   readAssetMock?: jest.Mock;
   writeTempFileMock?: jest.Mock;
   readVaultTextMock?: jest.Mock;
+  statVaultFileSizeMock?: jest.Mock;
   readVaultBinaryMock?: jest.Mock;
+  statLocalFileSizeMock?: jest.Mock;
   readLocalFileBinaryMock?: jest.Mock;
   deleteLocalFileMock?: jest.Mock;
 }): StudioNodeExecutionContext {
@@ -43,7 +45,9 @@ function createContext(options: {
   const readAssetMock = options.readAssetMock || jest.fn(async () => new ArrayBuffer(0));
   const writeTempFileMock = options.writeTempFileMock || jest.fn(async () => "/tmp/file.bin");
   const readVaultTextMock = options.readVaultTextMock || jest.fn(async () => "");
+  const statVaultFileSizeMock = options.statVaultFileSizeMock || jest.fn(async () => 1);
   const readVaultBinaryMock = options.readVaultBinaryMock || jest.fn(async () => new ArrayBuffer(0));
+  const statLocalFileSizeMock = options.statLocalFileSizeMock || jest.fn(async () => 1);
   const readLocalFileBinaryMock =
     options.readLocalFileBinaryMock || jest.fn(async () => new ArrayBuffer(0));
   const deleteLocalFileMock = options.deleteLocalFileMock || jest.fn(async () => {});
@@ -76,7 +80,9 @@ function createContext(options: {
       readAsset: readAssetMock,
       resolveAbsolutePath: (path) => path,
       readVaultText: readVaultTextMock,
+      statVaultFileSize: statVaultFileSizeMock,
       readVaultBinary: readVaultBinaryMock,
+      statLocalFileSize: statLocalFileSizeMock,
       readLocalFileBinary: readLocalFileBinaryMock,
       writeTempFile: writeTempFileMock,
       deleteLocalFile: deleteLocalFileMock,

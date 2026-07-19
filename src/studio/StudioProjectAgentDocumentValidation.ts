@@ -47,6 +47,8 @@ const STABLE_PROJECT_FIELDS = [
   "permissionsRef",
   "settings",
   "migrations",
+] as const;
+const GENERATED_PROJECT_FIELDS = [
   "agentGuide",
   "nodeKindReference",
 ] as const;
@@ -408,14 +410,35 @@ export function assertValidStudioProjectAgentDocumentStructure(document: unknown
  */
 export function assertStableStudioProjectAgentDocumentFieldsUnchanged(
   document: unknown,
-  previousDocument: unknown
+  previousDocument: unknown,
+  options?: { ignoreGeneratedFields?: boolean }
 ): void {
   if (!isRecord(document) || !isRecord(previousDocument)) {
     throw new Error("Studio project field comparison requires two JSON objects.");
   }
-  for (const field of STABLE_PROJECT_FIELDS) {
+  const fields = options?.ignoreGeneratedFields === true
+    ? STABLE_PROJECT_FIELDS
+    : [...STABLE_PROJECT_FIELDS, ...GENERATED_PROJECT_FIELDS];
+  for (const field of fields) {
     if (stableJson(document[field]) !== stableJson(previousDocument[field])) {
       throw new Error(`${field} is Studio-owned and must remain unchanged.`);
     }
   }
+}
+
+/**
+ * Generated authoring references describe the current plugin rather than the
+ * user's canvas. Persistence uses this signal to refresh only those blocks
+ * when an older valid project file is restored over a newer generation.
+ */
+export function studioProjectGeneratedFieldsMatch(
+  document: unknown,
+  previousDocument: unknown
+): boolean {
+  if (!isRecord(document) || !isRecord(previousDocument)) {
+    return false;
+  }
+  return GENERATED_PROJECT_FIELDS.every(
+    (field) => stableJson(document[field]) === stableJson(previousDocument[field])
+  );
 }

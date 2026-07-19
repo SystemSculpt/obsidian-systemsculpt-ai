@@ -95,7 +95,7 @@ export class HostedTransportAdapter {
     const response = await this.client.request({
       url: this.url(operation.path), method: operation.method ?? "POST", headers,
       body: operation.body, stream, preserveResponseHeaders: true,
-      streamingProbeUrl: stream ? this.url("/api/plugin/config") : undefined,
+      streamingProbeUrl: stream ? this.url("/api/plugin/connectivity") : undefined,
       allowTransportFallback: isReplaySafeManagedRead(operation),
       signal: operation.signal, licenseKey,
       ...requestOverrides,

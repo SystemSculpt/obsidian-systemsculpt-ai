@@ -133,6 +133,8 @@ export const LEGACY_FEATURE_KEYS_REMOVED_IN_V6: readonly string[] = [
   "titleGenerationProviderId",
   "titleGenerationModelId",
   "lastSaveAsNoteFolder",
+  // Historical v5 field names. They are intentionally retained only so the
+  // migrator deletes them; the new Audio Processor does not read aliases.
   "meetingProcessorOptions",
   "meetingProcessorOutputDirectory",
   "meetingProcessorOutputNameTemplate",
@@ -147,6 +149,36 @@ export const LEGACY_SEMANTIC_INDEX_KEYS_REMOVED_IN_V7: readonly string[] = [
 export const LEGACY_UPDATE_KEYS_REMOVED_IN_V8: readonly string[] = [
   "showUpdateNotifications",
   "lastKnownVersion",
+] as const;
+
+export const LEGACY_AUDIO_KEYS_REMOVED_IN_V9: readonly string[] = [
+  "postProcessingPromptType",
+  "postProcessingPromptPresetId",
+  "postProcessingPromptFilePath",
+  "showTranscriptionFormatChooserInModal",
+  "enableAutoAudioResampling",
+] as const;
+
+export const LEGACY_RECORDER_KEYS_REMOVED_IN_V10: readonly string[] = [
+  "preferredMicrophoneId",
+  "preferredMicrophoneIdsByHost",
+] as const;
+
+/**
+ * Old releases persisted these unused top-level language controls even though
+ * no current settings surface populated them. Only the top-level data.json
+ * keys are removed: language metadata inside managed-job records remains part
+ * of the internal recovery/transport contract.
+ */
+export const LEGACY_TRANSCRIPTION_LANGUAGE_KEYS_REMOVED_IN_V11: readonly string[] = [
+  "language",
+  "langs",
+] as const;
+
+export const LEGACY_WORKFLOW_AUTOMATION_KEYS_REMOVED_IN_V12: readonly string[] = [
+  "automations",
+  "templates",
+  "managedTextOperations",
 ] as const;
 
 export interface SettingsMigrationStep {
@@ -256,6 +288,65 @@ const SETTINGS_MIGRATIONS: readonly SettingsMigrationStep[] = [
     migrate: (settings) => {
       const next = { ...settings };
       for (const key of LEGACY_UPDATE_KEYS_REMOVED_IN_V8) delete next[key];
+      return next;
+    },
+  },
+  {
+    to: 9,
+    describe: "Remove retired recorder and transcription settings",
+    migrate: (settings) => {
+      const next = { ...settings };
+      for (const key of LEGACY_AUDIO_KEYS_REMOVED_IN_V9) delete next[key];
+      return next;
+    },
+  },
+  {
+    to: 10,
+    describe: "Move microphone preference out of synced settings",
+    migrate: (settings) => {
+      const next = { ...settings };
+      for (const key of LEGACY_RECORDER_KEYS_REMOVED_IN_V10) delete next[key];
+      return next;
+    },
+  },
+  {
+    to: 11,
+    describe: "Remove obsolete top-level transcription language overrides",
+    migrate: (settings) => {
+      const next = { ...settings };
+      for (const key of LEGACY_TRANSCRIPTION_LANGUAGE_KEYS_REMOVED_IN_V11) delete next[key];
+      return next;
+    },
+  },
+  {
+    to: 12,
+    describe: "Remove retired workflow automation configuration and backlog state",
+    migrate: (settings) => {
+      const next = { ...settings };
+      if (!isPlainObject(next.workflowEngine)) return next;
+
+      const workflowEngine = { ...next.workflowEngine };
+      for (const key of LEGACY_WORKFLOW_AUTOMATION_KEYS_REMOVED_IN_V12) {
+        delete workflowEngine[key];
+      }
+
+      if (isPlainObject(workflowEngine.skippedFiles)) {
+        const skippedFiles: Record<string, unknown> = {};
+        for (const [key, rawEntry] of Object.entries(workflowEngine.skippedFiles)) {
+          if (key.startsWith("automation::")) continue;
+          if (isPlainObject(rawEntry) && rawEntry.type === "automation") continue;
+          if (isPlainObject(rawEntry)) {
+            const entry = { ...rawEntry };
+            delete entry.automationId;
+            skippedFiles[key] = entry;
+          } else {
+            skippedFiles[key] = rawEntry;
+          }
+        }
+        workflowEngine.skippedFiles = skippedFiles;
+      }
+
+      next.workflowEngine = workflowEngine;
       return next;
     },
   },

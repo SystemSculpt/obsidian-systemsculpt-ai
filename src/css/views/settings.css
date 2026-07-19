@@ -413,6 +413,17 @@
   min-height: var(--ss-touch-target);
 }
 
+.ss-mobile-layout .ss-recorder-microphone-refresh {
+  display: inline-flex;
+  flex: 0 0 var(--ss-touch-target);
+  align-items: center;
+  justify-content: center;
+  width: var(--ss-touch-target);
+  min-width: var(--ss-touch-target);
+  height: var(--ss-touch-target);
+  min-height: var(--ss-touch-target);
+}
+
 .ss-mobile-layout .ss-settings-quick-actions {
   align-items: stretch;
   flex-direction: column;

@@ -17,7 +17,7 @@ ErrorCollectorService.initializeEarlyLogsCapture();
 /**
  * SystemSculpt AI Plugin for Obsidian
  */
-import { Plugin, Notice, TFile, FileSystemAdapter, apiVersion } from "obsidian";
+import { Plugin, Notice, FileSystemAdapter, apiVersion } from "obsidian";
 export { StudioProjectGenerationStore } from "./studio/persistence/StudioProjectGenerationStore";
 export { ObsidianStudioGenerationAdapter } from "./studio/persistence/ObsidianStudioGenerationAdapter";
 import { checkObsidianCompatibility, MINIMUM_OBSIDIAN_VERSION } from "./core/plugin/lifecycle/ObsidianCompat";
@@ -60,6 +60,8 @@ import { API_BASE_URL } from "./constants/api";
 import { ManagedCapabilityClient } from "./services/managed/ManagedCapabilityClient";
 import { ManagedCapabilityClientFactory, type ManagedCapabilityClientGraph } from "./services/managed/ManagedCapabilityClientFactory";
 import { PluginUpdateService } from "./services/PluginUpdateService";
+import { PostProcessingService } from "./services/PostProcessingService";
+import { AudioTranscriptionPanel } from "./modals/AudioTranscriptionPanel";
 
 type ViewManagerModule = typeof import("./core/plugin/views");
 type CommandManagerModule = typeof import("./core/plugin/commands");
@@ -1094,7 +1096,19 @@ export default class SystemSculptPlugin extends Plugin {
       await this.initializeRemainingServices();
       await this.initializeManagers();
 
-      void this.initializeLicense();
+      void this.initializeLicense().finally(() => {
+        if (this.isUnloading) return;
+        try {
+          this.ensureRecorderService().recoverPendingCaptures();
+        } catch (error) {
+          logger.warn("Recorder recovery initialization failed", {
+            source: "SystemSculptPlugin",
+            metadata: {
+              error: error instanceof Error ? error.message : String(error),
+            },
+          });
+        }
+      });
 
       await this.preloadDataInBackground();
 
@@ -1421,9 +1435,6 @@ export default class SystemSculptPlugin extends Plugin {
       wrap("transcription", "transcription service", () => {
         this.transcriptionService = TranscriptionService.getInstance(this);
       }),
-      wrap("recorder", "recorder service", () => {
-        this.ensureRecorderService();
-      }),
       wrap("fileContextMenu", "file context menu service", () => {
         this.setupFileContextMenuService();
       }),
@@ -1622,6 +1633,12 @@ export default class SystemSculptPlugin extends Plugin {
     this.isUnloading = true;
 
     try {
+      AudioTranscriptionPanel.disposeOwnedBy(this);
+    } catch {
+      // Stale transcription presentation must never block plugin teardown.
+    }
+
+    try {
       disposeMobileHostLayoutStates();
     } catch {
       // Host-layout observers are best-effort and must never block teardown.
@@ -1635,6 +1652,23 @@ export default class SystemSculptPlugin extends Plugin {
       this.pluginLogger?.dispose();
     } catch (error) {
       // Best-effort; teardown continues regardless.
+    }
+
+    // Microphone privacy is a first teardown priority. Keep this isolated from
+    // the broader cleanup block so an unrelated service failure can never
+    // leave capture running after the plugin is disabled.
+    const recorder = this.recorderService;
+    this.recorderService = null;
+    try {
+      recorder?.unload();
+    } catch {
+      // Recorder teardown is internally best-effort; continue plugin unload.
+    }
+
+    try {
+      PostProcessingService.clearInstance(this);
+    } catch {
+      // Singleton teardown must never block the rest of plugin unload.
     }
 
     const tracer = this.getInitializationTracer();
@@ -1735,13 +1769,8 @@ export default class SystemSculptPlugin extends Plugin {
 
       // Embeddings manager already cleaned up above
 
-      // Cleanup services in reverse order of initialization
-      if (this.recorderService) {
-        // Unloading recorder service silently
-        this.recorderService.unload();
-        this.recorderService = null;
-      }
-
+      // Cleanup services in reverse order of initialization. Recorder cleanup
+      // ran before every fallible teardown step above.
       if (this.transcriptionService) {
         this.transcriptionService.unload();
       }
@@ -1990,20 +2019,6 @@ export default class SystemSculptPlugin extends Plugin {
     return this.transcriptionService;
   }
 
-  public async runAutomationOnFile(
-    automationId: string,
-    file: TFile,
-    options?: { onStatus?: (status: string, progress?: number) => void }
-  ): Promise<TFile | null> {
-    const engine = this.ensureWorkflowEngineService();
-    return await engine.runAutomationOnFile(automationId, file, options);
-  }
-
-  public async getAutomationBacklog() {
-    const engine = this.ensureWorkflowEngineService();
-    return await engine.getAutomationBacklog();
-  }
-
   getLicenseManager(): LicenseManager {
     return this.licenseManager;
   }
@@ -2079,20 +2094,6 @@ export default class SystemSculptPlugin extends Plugin {
           new Notice("Unable to copy the report. See .systemsculpt/diagnostics.", 5000);
         }
       },
-    });
-
-    // Command: Audio Chunking Analysis
-    this.addCommand({
-      id: 'audio-chunking-analysis',
-      name: 'Run audio chunking analysis',
-      callback: () => {
-        // Import and run the analysis
-        import("./commands/RunAudioAnalysis").then(module => {
-          module.runAudioAnalysis(this);
-        }).catch(error => {
-          new Notice(`Error running analysis: ${error instanceof Error ? error.message : String(error)}`);
-        });
-      }
     });
 
     // Command: Find Similar Notes (Current Note)

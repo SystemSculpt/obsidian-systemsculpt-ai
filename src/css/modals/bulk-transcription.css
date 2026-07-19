@@ -1,19 +1,19 @@
-/** Bulk workflow confirmation. Progress delegates to progress-toast.css. */
+/** Bulk inbox transcription confirmation. Progress delegates to progress-toast.css. */
 
-.ss-bulk-automation-modal__body {
+.ss-bulk-transcription-modal__body {
   display: flex;
   flex-direction: column;
   gap: var(--ss-space-3);
 }
 
-.ss-bulk-automation-modal__summary {
+.ss-bulk-transcription-modal__summary {
   margin: 0;
   color: var(--ss-ink);
   font-size: var(--ss-text-sm);
   font-weight: var(--ss-weight-medium);
 }
 
-.ss-bulk-automation-modal__notes {
+.ss-bulk-transcription-modal__notes {
   margin: 0;
   padding-left: var(--ss-space-4);
   color: var(--ss-ink-muted);
@@ -21,6 +21,6 @@
   line-height: var(--ss-leading-base);
 }
 
-.ss-bulk-automation-modal__notes li + li {
+.ss-bulk-transcription-modal__notes li + li {
   margin-top: var(--ss-space-1);
 }

@@ -9,8 +9,11 @@ import {
   normalizeFileExtension,
 } from "../constants/fileTypes";
 import { TranscriptionService } from "./TranscriptionService";
-import { TranscriptionProgressManager } from "./TranscriptionProgressManager";
 import { TranscriptionTitleService } from "./transcription/TranscriptionTitleService";
+import {
+  createLocalCommitReceipt,
+  verifyLocalCommitReceipt,
+} from "./transcription/LocalCommitReceipt";
 
 export interface ChatContextManager {
   getContextFiles: () => Set<string>;
@@ -399,82 +402,136 @@ export class DocumentContextManager {
       flow: "audio",
     });
 
-    // Progress manager provides a consistent update shape + lifecycle
-    const progressManager = TranscriptionProgressManager.getInstance();
-    const progressHandler = progressManager.createProgressHandler(
+    const transcriptionService = TranscriptionService.getInstance(this.plugin);
+    const finalPath = await transcriptionService.transcribeFile<string>(
       file,
-      (progress, status, icon, details) => {
+      {
+        type: "note",
+        callerScope: "document-context/audio-extraction",
+        timestamped: false,
+        recoveryVariant: JSON.stringify({
+          schema: "document-context-audio-v2",
+          cleanOutput: this.plugin.settings.cleanTranscriptionOutput,
+        }),
+        recoverLocalCommit: async (receipt) => (
+          await verifyLocalCommitReceipt(this.app, receipt)
+        ).file.path,
+        onProgress: (progress, status) => {
         const stage = this.mapAudioStatusToStage(status, progress);
         contextManager.updateProcessingStatus(file, {
           stage,
           progress,
           label: status,
-          icon: this.resolveAudioIcon(status, icon || "file-audio"),
+          icon: this.resolveAudioIcon(status),
           flow: "audio",
-          details: details || undefined,
         });
-      }
+        },
+      },
+      async (text, operationId) => {
+        contextManager.updateProcessingStatus(file, {
+          stage: "contextualizing",
+          progress: 92,
+          label: "Saving transcription…",
+          icon: "hard-drive",
+          flow: "audio",
+        });
+
+        const extractionFolder = this.plugin.settings.extractionsDirectory?.trim() || "";
+        const baseName = file.basename.replace(/[\\/:*?"<>|]/g, "-").trim();
+        const baseParent = extractionFolder || (file.parent?.path ?? "");
+        const parentPath = baseParent ? `${baseParent}/${baseName}` : baseName;
+
+        if (extractionFolder) {
+          await this.plugin.directoryManager.ensureDirectoryByKey("extractionsDirectory");
+        }
+        await this.plugin.directoryManager.ensureDirectoryByPath(parentPath);
+
+        const titleService = TranscriptionTitleService.getInstance(this.plugin);
+        const fallbackBasename = titleService.buildFallbackBasename(baseName);
+        const finalContent = this.plugin.settings.cleanTranscriptionOutput
+          ? text
+          : `# Audio transcription\nSource: ${file.basename}\nTranscribed: ${new Date().toISOString()}\n\n${text}`;
+        const marker = this.plugin.settings.cleanTranscriptionOutput
+          ? null
+          : `<!-- systemsculpt-context-transcription:${operationId} -->`;
+        const storedContent = marker ? `${finalContent.trimEnd()}\n\n${marker}\n` : finalContent;
+        const existing = await this.findCommittedTranscriptionFile(
+          parentPath,
+          storedContent,
+          marker,
+        );
+        if (existing) {
+          return {
+            value: existing.path,
+            receipt: createLocalCommitReceipt(existing.path, storedContent, marker),
+          };
+        }
+        const transcriptionFile = await this.createUniqueTranscriptionFile(
+          parentPath,
+          fallbackBasename,
+          storedContent,
+        );
+
+        const finalPath = await titleService.tryRenameTranscriptionFile(this.app, transcriptionFile, {
+          prefix: baseName,
+          transcriptText: text,
+          extension: "md",
+        });
+        return {
+          value: finalPath,
+          receipt: createLocalCommitReceipt(finalPath, storedContent, marker),
+        };
+      },
     );
 
-    const transcriptionService = TranscriptionService.getInstance(this.plugin);
-    const text = await transcriptionService.transcribeFile(file, {
-      ...progressHandler,
-      timestamped: false,
-    });
-
-    const extractionFolder = this.plugin.settings.extractionsDirectory?.trim() || "";
-    const baseName = file.basename.replace(/[\\/:*?"<>|]/g, "-").trim();
-    const baseParent = extractionFolder || (file.parent?.path ?? "");
-    const parentPath = baseParent ? `${baseParent}/${baseName}` : baseName;
-
-    if (extractionFolder) {
-      await this.plugin.directoryManager.ensureDirectoryByKey("extractionsDirectory");
-    }
-    await this.plugin.directoryManager.ensureDirectoryByPath(parentPath);
-
-    const titleService = TranscriptionTitleService.getInstance(this.plugin);
-    const fallbackBasename = titleService.buildFallbackBasename(baseName);
-    const outputPath = `${parentPath}/${fallbackBasename}.md`;
-
-    const finalContent = this.plugin.settings.cleanTranscriptionOutput
-      ? text
-      : `# Audio Transcription\nSource: ${file.basename}\nTranscribed: ${new Date().toISOString()}\n\n${text}`;
-
-    const existingFile = this.app.vault.getAbstractFileByPath(outputPath);
-    let transcriptionFile: TFile;
-    if (existingFile instanceof TFile) {
-      await this.app.vault.modify(existingFile, finalContent);
-      transcriptionFile = existingFile;
-    } else {
-      transcriptionFile = await this.app.vault.create(outputPath, finalContent);
-    }
-
-    const finalPath = await titleService.tryRenameTranscriptionFile(this.app, transcriptionFile, {
-      prefix: baseName,
-      transcriptText: text,
-      extension: "md",
-    });
-
     contextManager.updateProcessingStatus(file, {
-      stage: "contextualizing",
-      progress: 92,
-      label: "Saving transcription…",
-      icon: "hard-drive",
+      stage: "ready",
+      progress: 100,
+      label: "Transcription added to context",
+      icon: "check-circle",
       flow: "audio",
-    });
-
-    progressManager.handleCompletion(file.path, finalPath, () => {
-      contextManager.updateProcessingStatus(file, {
-        stage: "ready",
-        progress: 100,
-        label: "Transcription added to context",
-        icon: "check-circle",
-        flow: "audio",
-        details: `[[${finalPath}]]`,
-      });
+      details: `[[${finalPath}]]`,
     });
 
     return finalPath;
+  }
+
+  private async createUniqueTranscriptionFile(
+    parentPath: string,
+    fallbackBasename: string,
+    content: string,
+  ): Promise<TFile> {
+    for (let attempt = 1; attempt <= 100; attempt += 1) {
+      const basename = attempt === 1
+        ? fallbackBasename
+        : `${fallbackBasename} (${attempt})`;
+      const candidate = `${parentPath}/${basename}.md`;
+      if (this.app.vault.getAbstractFileByPath(candidate)) continue;
+      try {
+        return await this.app.vault.create(candidate, content);
+      } catch (error) {
+        if (!this.app.vault.getAbstractFileByPath(candidate)) throw error;
+      }
+    }
+    throw new Error("Could not allocate a unique transcription output path.");
+  }
+
+  private async findCommittedTranscriptionFile(
+    parentPath: string,
+    content: string,
+    marker: string | null,
+  ): Promise<TFile | null> {
+    const candidates = this.app.vault.getFiles().filter((candidate) => (
+      candidate.extension === "md"
+      && (candidate.parent?.path ?? "") === parentPath
+    ));
+    for (const candidate of candidates) {
+      const existing = await this.app.vault.read(candidate);
+      if (marker ? existing.includes(marker) : existing === content) {
+        return candidate;
+      }
+    }
+    return null;
   }
 }
 

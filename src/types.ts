@@ -11,17 +11,60 @@ export type { ToolCall };
 
 export type {
   WorkflowEngineSettings,
-  WorkflowAutomationState,
-  WorkflowAutomationId,
   WorkflowSkipEntry,
-  WorkflowManagedTextOperation,
-  WorkflowManagedTextPhase,
   WorkflowTrigger,
   WorkflowCondition,
   WorkflowStep,
 } from "./types/workflows";
 
 export { createDefaultWorkflowEngineSettings } from "./types/workflows";
+
+export interface PendingRecorderCapture {
+  filePath: string;
+  startedAt: number;
+  durationMs: number;
+  sizeBytes: number;
+  stopReason: "manual" | "background-hidden" | "background-pagehide" | "interrupted" | "size-limit";
+  destination: "note" | "chat";
+  /**
+   * Why transcription was admitted. Manual intent remains recoverable even
+   * when automatic transcription is disabled after an app restart.
+   * Missing values are legacy automatic entries.
+   */
+  transcriptionIntent?: "automatic" | "manual";
+  operationId?: string;
+  /** Automatic recovery is disabled when synced state names incompatible jobs. */
+  recoveryBlocked?: "conflicting-operation-ids";
+}
+
+export interface PendingAudioProcessorUploadPart {
+  partNumber: number;
+  etag: string;
+}
+
+export type PendingAudioProcessorUploadSource =
+  | Readonly<{
+    kind: "vault";
+    filePath: string;
+    modifiedAt: number;
+  }>
+  | Readonly<{
+    kind: "staged";
+    stagingId: string;
+    manifestSha256: string;
+  }>;
+
+export interface PendingAudioProcessorUpload {
+  jobId: string;
+  filename: string;
+  contentType: string;
+  sizeBytes: number;
+  source: PendingAudioProcessorUploadSource;
+  partSizeBytes: number;
+  totalParts: number;
+  uploadedParts: PendingAudioProcessorUploadPart[];
+  updatedAt: number;
+}
 
 export const LICENSE_URL = "https://systemsculpt.com/pricing";
 
@@ -68,26 +111,15 @@ export interface SystemSculptSettings {
   /** Last plugin version observed after a successful load. */
   lastLoadedPluginVersion: string;
   recordingsDirectory: string;
-  preferredMicrophoneId: string;
+  /** Recorder audio saved before recorder-owned transcription fully committed. */
+  pendingRecorderCaptures: PendingRecorderCapture[];
+  /** Vault-backed multipart uploads that can resume after a restart. */
+  pendingAudioProcessorUploads?: PendingAudioProcessorUpload[];
   autoTranscribeRecordings: boolean;
   autoPasteTranscription: boolean;
   keepRecordingsAfterTranscription: boolean;
   postProcessingPrompt: string;
   postProcessingEnabled: boolean;
-  /**
-   * Tracks the source of the post-processing prompt
-   * - "preset": Using a preset from the SystemSculpt API
-   * - "file": Using a custom file from the vault
-   */
-  postProcessingPromptType: "preset" | "file";
-  /**
-   * ID of the selected preset (if postProcessingPromptType is "preset")
-   */
-  postProcessingPromptPresetId: string;
-  /**
-   * Path to the selected file (if postProcessingPromptType is "file")
-   */
-  postProcessingPromptFilePath: string;
   /**
    * When enabled, transcription output will be clean text only without timestamps, titles, or metadata
    */
@@ -102,17 +134,6 @@ export interface SystemSculptSettings {
    * - "srt": Save as an SRT subtitle file
    */
   transcriptionOutputFormat?: "markdown" | "srt";
-  /**
-   * When enabled, the "Transcribe an audio file" modal shows an output format selector.
-   * Users can hide this chooser from the modal and re-enable it in Settings.
-   */
-  showTranscriptionFormatChooserInModal?: boolean;
-  /**
-   * Enable automatic audio resampling for incompatible sample rates (desktop only)
-   * When enabled, audio files with incompatible sample rates will be automatically
-   * converted to the required format before transcription.
-   */
-  enableAutoAudioResampling: boolean;
   attachmentsDirectory: string;
   extractionsDirectory: string;
   workflowEngine: WorkflowEngineSettings;
@@ -204,29 +225,26 @@ export const DEFAULT_SETTINGS: SystemSculptSettings = {
   lastAnnouncedPluginRelease: "",
   lastLoadedPluginVersion: "",
   recordingsDirectory: "SystemSculpt/Recordings",
-  preferredMicrophoneId: "",
+  pendingRecorderCaptures: [],
+  pendingAudioProcessorUploads: [],
   autoTranscribeRecordings: true,
   autoPasteTranscription: true,
   keepRecordingsAfterTranscription: true,
   postProcessingPrompt:
-    `You are a transcription post-processor. Your task is to fix any transcription errors, correct grammar and punctuation, and ensure the text is properly formatted. Keep the original meaning intact while making the text more readable.
+    `Clean up the transcript without changing what language anyone used.
 
-Please process the following raw transcript to:
-- Fix grammar, punctuation, and capitalization
+Please:
+- Fix obvious transcription errors, grammar, punctuation, and capitalization
 - Remove filler words (um, uh, like, you know)
 - Format into clear paragraphs
-- Maintain the original meaning and speaker's voice
-
-Raw transcript:`,
+- Maintain the original meaning, terminology, and speaker's voice
+- Preserve every original language and writing system, including code-switches
+- Keep personal, company, product, and place names as transcribed
+- Never translate, transliterate, anglicize, or normalize the transcript into another language`,
   postProcessingEnabled: false,
-  postProcessingPromptType: "preset",
-  postProcessingPromptPresetId: "transcript-cleaner",
-  postProcessingPromptFilePath: "",
   cleanTranscriptionOutput: false,
   autoSubmitAfterTranscription: false,
   transcriptionOutputFormat: "markdown",
-  showTranscriptionFormatChooserInModal: true,
-  enableAutoAudioResampling: true,
   attachmentsDirectory: "SystemSculpt/Attachments",
   extractionsDirectory: "SystemSculpt/Extractions",
   workflowEngine: createDefaultWorkflowEngineSettings(),

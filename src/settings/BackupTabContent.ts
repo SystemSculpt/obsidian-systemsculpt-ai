@@ -74,7 +74,7 @@ Continue?`
             const backupSettings = JSON.parse(backupData);
             const details = `This backup contains:
 • Chat display defaults and client-side workspace preferences
-• Embeddings, audio, and automation settings
+• Embeddings and audio settings
 • License status: ${backupSettings.licenseValid ? 'Active' : 'Inactive'}`;
             await confirmRestore(details);
           } catch {

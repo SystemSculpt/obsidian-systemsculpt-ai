@@ -4,7 +4,6 @@ import { RibbonManager } from "./ribbons";
 import { tryCopyToClipboard } from "../../utils/clipboard";
 import { resolveAbsoluteVaultPath } from "../../utils/vaultPathUtils";
 import { hasHostCapability } from "../../platform/hostCapabilities";
-import { WORKFLOW_AUTOMATIONS } from "../../constants/workflowAutomations";
 import { showConfirm } from "../ui/notifications";
 import { getSurfaceOwnerWindow, resolveSurfaceDomContext } from "../ui/surface";
 import type { ChatMessage } from "../../types";
@@ -15,6 +14,7 @@ import {
   isAutoDocumentConversionFileExtension,
   normalizeFileExtension,
 } from "../../constants/fileTypes";
+import type { AudioProcessorArtifactKind } from "../../features/audio-processor/types";
 
 type StudioCommandViewLike = {
   getViewType(): string;
@@ -34,30 +34,13 @@ type ChatCommandViewLike = {
   setTitle(title: string): Promise<void>;
 };
 
-type AutomationOption = {
-  id: string;
-  title: string;
-  subtitle?: string;
-};
-
 type AgentChatViewModule = typeof import("../../views/chatview/AgentChatView");
+const AUDIO_PROCESSOR_UNAVAILABLE_NOTICE = "Audio Processor is temporarily unavailable.";
 
 async function loadTitleGenerationServiceModule(): Promise<
   typeof import("../../services/TitleGenerationService")
 > {
   return await import("../../services/TitleGenerationService");
-}
-
-async function loadAutomationRunnerModalModule(): Promise<
-  typeof import("../../modals/AutomationRunnerModal")
-> {
-  return await import("../../modals/AutomationRunnerModal");
-}
-
-async function loadAutomationBacklogModalModule(): Promise<
-  typeof import("../../modals/AutomationBacklogModal")
-> {
-  return await import("../../modals/AutomationBacklogModal");
 }
 
 function loadAgentChatViewModule(): AgentChatViewModule {
@@ -91,6 +74,7 @@ export class CommandManager {
     this.registerOpenSystemSculptHistory();
     this.registerOpenJanitor();
     this.registerTranscribeAudioFile();
+    this.registerAudioProcessorCommands();
     this.registerOpenSystemSculptSearch();
     this.registerReloadObsidian();
     this.registerOpenSettings();
@@ -100,8 +84,6 @@ export class CommandManager {
     this.registerChangeChatTitle();
     this.registerOpenEmbeddingsView();
     this.registerEmbeddingsDatabaseCommands();
-    this.registerRunAutomationCommand();
-    this.registerAutomationBacklogCommand();
     this.registerSystemSculptStudioCommands();
   }
 
@@ -188,6 +170,105 @@ export class CommandManager {
         modal.open();
       },
     });
+  }
+
+  private registerAudioProcessorCommands() {
+    void import("../../features/audio-processor")
+      .then(({ resumeAudioProcessorJobs }) => resumeAudioProcessorJobs(this.plugin))
+      .catch(() => undefined);
+
+    this.plugin.addCommand({
+      id: "open-audio-processor",
+      name: "Open audio processor",
+      callback: async () => {
+        await this.openAudioProcessor("audio");
+      },
+    });
+
+    this.plugin.addCommand({
+      id: "process-youtube-video",
+      name: "Process YouTube video",
+      callback: async () => {
+        await this.openAudioProcessor("youtube");
+      },
+    });
+
+    this.registerAudioArtifactCommand("summary");
+    this.registerAudioArtifactCommand("transcript");
+  }
+
+  private async openAudioProcessor(initialTab: "audio" | "youtube"): Promise<void> {
+    const {
+      AudioProcessorModal,
+      canOpenAudioProcessor,
+      resumeAudioProcessorJobs,
+    } = await import("../../features/audio-processor");
+    if (!await canOpenAudioProcessor(this.plugin)) {
+      new Notice(AUDIO_PROCESSOR_UNAVAILABLE_NOTICE, 6000);
+      return;
+    }
+    void resumeAudioProcessorJobs(this.plugin, { notifyOnDiscoveryFailure: true });
+    new AudioProcessorModal(this.plugin, { initialTab }).open();
+  }
+
+  private registerAudioArtifactCommand(kind: AudioProcessorArtifactKind): void {
+    const label = kind === "summary" ? "summary" : "transcript";
+    this.plugin.addCommand({
+      id: `save-audio-${kind}`,
+      name: `Save audio ${label}`,
+      checkCallback: (checking: boolean) => {
+        const jobReference = this.getActiveAudioArtifactReference();
+        if (!jobReference) return false;
+        if (!checking) void this.saveAudioArtifact(jobReference, kind);
+        return true;
+      },
+    });
+  }
+
+  private getActiveAudioArtifactReference(): {
+    artifactJobId: string;
+    deliveryJobId: string;
+  } | null {
+    const activeFile = this.app.workspace.getActiveFile();
+    if (!activeFile || normalizeFileExtension(activeFile.extension) !== "md") return null;
+    const frontmatter = this.app.metadataCache.getFileCache(activeFile)?.frontmatter;
+    const jobId = frontmatter?.["systemsculpt-audio-job-id"];
+    const deliveryJobId = frontmatter?.["systemsculpt-audio-delivery-job-id"];
+    const artifact = frontmatter?.["systemsculpt-audio-artifact"];
+    if (
+      typeof jobId !== "string"
+      || !jobId.trim()
+      || !["full", "summary", "transcript"].includes(artifact)
+    ) return null;
+    return {
+      artifactJobId: jobId.trim(),
+      deliveryJobId: typeof deliveryJobId === "string" && deliveryJobId.trim()
+        ? deliveryJobId.trim()
+        : jobId.trim(),
+    };
+  }
+
+  private async saveAudioArtifact(
+    jobReference: Readonly<{ artifactJobId: string; deliveryJobId: string }>,
+    kind: AudioProcessorArtifactKind,
+  ): Promise<void> {
+    try {
+      const { AudioProcessorService } = await import("../../features/audio-processor");
+      const artifact = await new AudioProcessorService(this.plugin)
+        .saveArtifactForJob(
+          jobReference.deliveryJobId,
+          jobReference.artifactJobId,
+          kind,
+        );
+      await artifact.open();
+      const label = kind === "summary" ? "Summary" : "Transcript";
+      new Notice(`${label} saved to ${artifact.notePath}.`, 6000);
+    } catch (error) {
+      const fallback = kind === "summary"
+        ? "Unable to save the audio summary."
+        : "Unable to save the audio transcript.";
+      new Notice(error instanceof Error ? error.message : fallback, 7000);
+    }
   }
 
   private registerOpenSystemSculptSearch() {
@@ -411,60 +492,6 @@ export class CommandManager {
           new Notice(`Error opening similar notes panel: ${error.message}`);
         }
       },
-    });
-  }
-
-  private registerRunAutomationCommand() {
-    this.plugin.addCommand({
-      id: "run-workflow-automation",
-      name: "Run workflow automation",
-      callback: async () => {
-        const file = this.app.workspace.getActiveFile();
-        if (!file) {
-          new Notice("Open a note before running an automation.", 4000);
-          return;
-        }
-
-        if (file.extension.toLowerCase() !== "md") {
-          new Notice("Automations currently support Markdown notes only.", 5000);
-          return;
-        }
-
-        const options = this.buildAutomationOptions();
-        if (options.length === 0) {
-          new Notice("No automations available. Enable one in workflow settings.", 5000);
-          return;
-        }
-
-        const { AutomationRunnerModal } = await loadAutomationRunnerModalModule();
-        const modal = new AutomationRunnerModal(this.app, this.plugin, file, options);
-        modal.open();
-      },
-    });
-  }
-
-  private registerAutomationBacklogCommand() {
-    this.plugin.addCommand({
-      id: "open-automation-backlog",
-      name: "Show automation backlog",
-      callback: async () => {
-        const { AutomationBacklogModal } = await loadAutomationBacklogModalModule();
-        const modal = new AutomationBacklogModal(this.app, this.plugin);
-        modal.open();
-      },
-    });
-  }
-
-  private buildAutomationOptions(): AutomationOption[] {
-    const automationSettings = this.plugin.settings.workflowEngine?.automations || {};
-
-    return WORKFLOW_AUTOMATIONS.map((definition) => {
-      const state = automationSettings[definition.id];
-      return {
-        id: definition.id,
-        title: definition.title,
-        subtitle: state?.destinationFolder || definition.destinationPlaceholder,
-      };
     });
   }
 

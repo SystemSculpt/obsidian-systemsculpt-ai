@@ -95,4 +95,45 @@ describe("HoverShell", () => {
     expect(shell.root.style.left).toContain("safe-area-inset-left");
     expect(shell.root.style.right).toContain("safe-area-inset-right");
   });
+
+  it("keeps the recorder docked on tablet-width mobile hosts", () => {
+    Object.defineProperty(window, "innerWidth", { value: 768, configurable: true });
+    document.body.classList.add("is-mobile");
+
+    const shell = createHoverShell({ title: "Recorder" });
+    window.dispatchEvent(new Event("resize"));
+
+    expect(shell.root.dataset.layout).toBe("compact");
+    expect(shell.root.style.bottom).toBe("var(--ss-mobile-bottom-clearance)");
+    expect(shell.root.style.left).toContain("safe-area-inset-left");
+    expect(shell.root.style.right).toContain("safe-area-inset-right");
+  });
+
+  it("reserves mobile stack space so progress panels cannot cover recorder controls", () => {
+    Object.defineProperty(window, "innerWidth", { value: 420, configurable: true });
+    document.body.classList.add("is-mobile");
+
+    const shell = createHoverShell({
+      title: "Recorder",
+      className: "ss-recorder-hover",
+    });
+    jest.spyOn(shell.root, "getBoundingClientRect").mockReturnValue({
+      x: 0,
+      y: 0,
+      top: 0,
+      right: 400,
+      bottom: 132,
+      left: 0,
+      width: 400,
+      height: 132,
+      toJSON: () => ({}),
+    });
+
+    window.dispatchEvent(new Event("resize"));
+    expect(document.body.style.getPropertyValue("--ss-recorder-mobile-stack-offset"))
+      .toBe("calc(132px + var(--ss-space-2))");
+
+    shell.destroy();
+    expect(document.body.style.getPropertyValue("--ss-recorder-mobile-stack-offset")).toBe("");
+  });
 });

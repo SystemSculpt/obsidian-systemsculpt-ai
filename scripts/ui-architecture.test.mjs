@@ -164,7 +164,7 @@ test("every discoverable Obsidian host mounts a direct or named deep surface ada
     }],
   ]);
 
-  assert.ok(candidates.length >= 5, "host discovery unexpectedly found too few Obsidian hosts");
+  assert.ok(candidates.length >= 4, "host discovery unexpectedly found too few Obsidian hosts");
   for (const { file, source } of candidates) {
     const relative = path.relative(root, file);
     if (/applyPluginSurface\(/.test(source)) continue;
@@ -178,7 +178,7 @@ test("every discoverable Obsidian host mounts a direct or named deep surface ada
     ["src/core/ui/modals/standard/StandardModal.ts", /applyPluginSurface\(this\.modalEl,\s*"modal"\)/],
     ["src/core/ui/progress/OperationProgressPanel.ts", /applyPluginSurface\(this\.root,\s*"transient"\)/],
     ["src/components/HoverShell.ts", /applyPluginSurface\(root,\s*"transient"\)/],
-    ["src/modals/BulkAutomationConfirmModal.ts", /new OperationProgressPanel\(\{/],
+    ["src/modals/BulkTranscriptionConfirmModal.ts", /new OperationProgressPanel\(\{/],
   ];
   for (const [file, pattern] of composedContracts) {
     assert.match(read(file), pattern, `${file} must mount its named surface adapter`);
@@ -323,22 +323,18 @@ test("StandardModal owns close and reopen invalidation for async feature adapter
   for (const file of [
     "src/views/history/SystemSculptHistoryModal.ts",
     "src/modals/EmbeddingsPendingFilesModal.ts",
-    "src/modals/AutomationBacklogModal.ts",
     "src/modals/CreditsBalanceModal.ts",
     "src/modals/JanitorModal.ts",
-    "src/modals/RecorderAdvancedModal.ts",
   ]) {
     assert.match(read(file), /this\.beginAsyncTask\(/, `${file} must use the shared modal task scope`);
   }
 
   assert.doesNotMatch(read("src/modals/JanitorModal.ts"), /scanGeneration/);
-  assert.doesNotMatch(read("src/modals/AutomationBacklogModal.ts"), /loadGeneration/);
 });
 
 test("feature modals stay behind the shared modal interface", () => {
   const modalFiles = listProductionTypeScript(path.join(root, "src"))
     .filter((file) => file.endsWith("Modal.ts"));
-  const expectedNativeSuggestModal = path.join(root, "src", "modals", "AutomationRunnerModal.ts");
   const sharedBase = path.join(root, "src", "core", "ui", "modals", "standard", "StandardModal.ts");
 
   assert.ok(modalFiles.length >= 15, "modal discovery unexpectedly found too few feature modules");
@@ -346,12 +342,6 @@ test("feature modals stay behind the shared modal interface", () => {
     if (file === sharedBase) continue;
     const source = fs.readFileSync(file, "utf8");
     const relative = path.relative(root, file);
-
-    if (file === expectedNativeSuggestModal) {
-      assert.match(source, /class\s+AutomationRunnerModal\s+extends\s+SuggestModal\b/);
-      assert.doesNotMatch(source, /extends\s+(?:Modal|StandardModal)\b/);
-      continue;
-    }
 
     assert.match(
       source,
@@ -364,7 +354,6 @@ test("feature modals stay behind the shared modal interface", () => {
 
 test("microphone discovery has one owner-realm and lifecycle seam", () => {
   const catalog = read("src/services/recorder/MicrophoneDeviceCatalog.ts");
-  const modal = read("src/modals/RecorderAdvancedModal.ts");
   const settings = read("src/settings/RecorderTabContent.ts");
   const settingsHost = read("src/settings/SystemSculptSettingTab.ts");
 
@@ -374,17 +363,10 @@ test("microphone discovery has one owner-realm and lifecycle seam", () => {
   assert.match(catalog, /this\.stopStream\(stream\)/);
   assert.match(catalog, /generation === this\.generation/);
 
-  for (const [file, source] of [
-    ["RecorderAdvancedModal.ts", modal],
-    ["RecorderTabContent.ts", settings],
-  ]) {
-    assert.match(source, /getSurfaceOwnerWindow\(/, `${file} must resolve its mounted owner realm`);
-    assert.match(source, /new MicrophoneDeviceCatalog\(/, `${file} must use the shared catalog`);
-    assert.doesNotMatch(source, /enumerateDevices|getUserMedia/, `${file} must not duplicate device discovery`);
-    assert.doesNotMatch(source, /\bnavigator\.mediaDevices|\bwindow\.navigator/, `${file} must not use a global realm`);
-  }
-
-  assert.match(modal, /this\.beginAsyncTask\("microphone-devices"\)/);
+  assert.match(settings, /getSurfaceOwnerWindow\(/, "RecorderTabContent.ts must resolve its mounted owner realm");
+  assert.match(settings, /new MicrophoneDeviceCatalog\(/, "RecorderTabContent.ts must use the shared catalog");
+  assert.doesNotMatch(settings, /enumerateDevices|getUserMedia/, "RecorderTabContent.ts must not duplicate device discovery");
+  assert.doesNotMatch(settings, /\bnavigator\.mediaDevices|\bwindow\.navigator/, "RecorderTabContent.ts must not use a global realm");
   assert.match(settings, /tabInstance\.registerRenderCleanup\(/);
   assert.match(settings, /activeRecorderTabRenders\.get\(tabInstance\)\?\.dispose\(\)/);
   assert.match(settingsHost, /registerRenderCleanup\(cleanup: \(\) => void\)/);
@@ -661,6 +643,11 @@ test("custom buttons outrank Obsidian controls without styling native Setting bu
     settingsCss,
     /@container\s+ss-surface\s*\(max-width:\s*520px\)[\s\S]*?\.systemsculpt-tab-content \.setting-item\s*\{[\s\S]*?flex-direction:\s*column[\s\S]*?\.setting-item-info,[\s\S]*?\.setting-item-control\s*\{[\s\S]*?width:\s*100%/,
   );
+  assert.match(
+    settingsCss,
+    /\.ss-mobile-layout \.ss-recorder-microphone-refresh\s*\{[^}]*flex:\s*0 0 var\(--ss-touch-target\);[^}]*min-width:\s*var\(--ss-touch-target\);[^}]*min-height:\s*var\(--ss-touch-target\);/s,
+    "the mobile microphone refresh target must not shrink below 44px in landscape",
+  );
 
   for (const source of [buttonCss, actionCss]) {
     assert.doesNotMatch(
@@ -687,7 +674,7 @@ test("operation progress styles stay co-located and adapt inside the named surfa
 
   assert.match(
     progressCss,
-    /\.systemsculpt-progress-panel\s*\{[^}]*width:\s*min\(350px,\s*calc\(100vw\s*-\s*var\(--ss-space-10\)\)\)/s,
+    /\.systemsculpt-progress-stack\s*\{[^}]*width:\s*min\(350px,\s*calc\(100vw\s*-\s*var\(--ss-space-10\)\)\)/s,
   );
   assert.match(progressCss, /\.systemsculpt-progress-status\s*\{/);
   assert.match(progressCss, /\.systemsculpt-progress-status-icon\s*\{/);

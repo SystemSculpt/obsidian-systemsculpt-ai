@@ -28,6 +28,11 @@ const downloaded = {
   images: [],
   metadata: { title: "Managed" },
 };
+const createRequest = {
+  filename: "report.pdf",
+  contentType: "application/pdf",
+  contentLengthBytes: 6,
+} as const;
 
 function managedHarness() {
   const events: string[] = [];
@@ -126,7 +131,7 @@ describe("managed document processing adapter contract", () => {
     });
     record = await recovery.markContentReady("document_processing", "resume-op", record.revision);
     record = await recovery.beginDispatch("document_processing", "resume-op", record.revision, {
-      operation: "create", requestId: "create-1", idempotencyKey: "resume-op:create", dispatchedAt: "2026-07-12T12:00:00.000Z",
+      operation: "create", requestId: "create-1", idempotencyKey: "resume-op:create", dispatchedAt: "2026-07-12T12:00:00.000Z", createRequest,
     });
     record = await recovery.acknowledgeCreated("document_processing", "resume-op", record.revision, documentId);
     record = await recovery.beginDispatch("document_processing", "resume-op", record.revision, {
@@ -157,7 +162,7 @@ describe("managed document processing adapter contract", () => {
     record = await recovery.markContentReady("document_processing", record.operationId, record.revision);
     if (operation !== "create") {
       record = await recovery.beginDispatch("document_processing", record.operationId, record.revision, {
-        operation: "create", requestId: "create-1", idempotencyKey: `${record.operationId}:create`, dispatchedAt: "2026-07-12T12:00:00.000Z",
+        operation: "create", requestId: "create-1", idempotencyKey: `${record.operationId}:create`, dispatchedAt: "2026-07-12T12:00:00.000Z", createRequest,
       });
       record = await recovery.acknowledgeCreated("document_processing", record.operationId, record.revision, documentId);
     }
@@ -165,6 +170,7 @@ describe("managed document processing adapter contract", () => {
       operation,
       requestId: `${operation}-ambiguous`,
       ...(operation === "create" ? { idempotencyKey: `${record.operationId}:${operation}` } : { partNumber: 1 }),
+      ...(operation === "create" ? { createRequest } : {}),
       dispatchedAt: "2026-07-12T12:00:00.000Z",
     });
 
@@ -191,7 +197,7 @@ describe("managed document processing adapter contract", () => {
     });
     record = await recovery.markContentReady("document_processing", operationId, record.revision);
     record = await recovery.beginDispatch("document_processing", operationId, record.revision, {
-      operation: "create", requestId: "create-1", idempotencyKey: `${operationId}:create`, dispatchedAt: "2026-07-12T12:00:00.000Z",
+      operation: "create", requestId: "create-1", idempotencyKey: `${operationId}:create`, dispatchedAt: "2026-07-12T12:00:00.000Z", createRequest,
     });
     record = await recovery.acknowledgeCreated("document_processing", operationId, record.revision, documentId);
     for (const part of completedParts) {
@@ -226,7 +232,7 @@ describe("managed document processing adapter contract", () => {
     });
     record = await recovery.markContentReady("document_processing", operationId, record.revision);
     record = await recovery.beginDispatch("document_processing", operationId, record.revision, {
-      operation: "create", requestId: "create-1", idempotencyKey: `${operationId}:create`, dispatchedAt: "2026-07-12T12:00:00.000Z",
+      operation: "create", requestId: "create-1", idempotencyKey: `${operationId}:create`, dispatchedAt: "2026-07-12T12:00:00.000Z", createRequest,
     });
     record = await recovery.acknowledgeCreated("document_processing", operationId, record.revision, documentId);
     await recovery.beginDispatch("document_processing", operationId, record.revision, {
@@ -250,7 +256,7 @@ describe("managed document processing adapter contract", () => {
     });
     record = await recovery.markContentReady("document_processing", operationId, record.revision);
     record = await recovery.beginDispatch("document_processing", operationId, record.revision, {
-      operation: "create", requestId: "create-1", idempotencyKey: `${operationId}:create`, dispatchedAt: "2026-07-12T12:00:00.000Z",
+      operation: "create", requestId: "create-1", idempotencyKey: `${operationId}:create`, dispatchedAt: "2026-07-12T12:00:00.000Z", createRequest,
     });
     record = await recovery.acknowledgeCreated("document_processing", operationId, record.revision, documentId);
     record = await recovery.beginDispatch("document_processing", operationId, record.revision, {
@@ -276,7 +282,7 @@ describe("managed document processing adapter contract", () => {
     });
     record = await recovery.markContentReady("document_processing", operationId, record.revision);
     record = await recovery.beginDispatch("document_processing", operationId, record.revision, {
-      operation: "create", requestId: "create-1", idempotencyKey: `${operationId}:create`, dispatchedAt: "2026-07-12T12:00:00.000Z",
+      operation: "create", requestId: "create-1", idempotencyKey: `${operationId}:create`, dispatchedAt: "2026-07-12T12:00:00.000Z", createRequest,
     });
     record = await recovery.acknowledgeCreated("document_processing", operationId, record.revision, documentId);
     record = await recovery.beginDispatch("document_processing", operationId, record.revision, {

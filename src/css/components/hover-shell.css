@@ -107,6 +107,32 @@
   border-radius: var(--ss-radius-full);
 }
 
+/* Compact shells must fit the visible mobile viewport after Obsidian's bottom
+ * navigation, keyboard resize, and device safe areas are accounted for. The
+ * middle scrolls while Stop/Retry actions remain reachable. */
+.ss-mobile-layout .ss-hover-shell {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(
+    100dvh
+    - var(--ss-mobile-bottom-clearance)
+    - max(var(--ss-space-2), env(safe-area-inset-top, 0px))
+    - var(--ss-space-2)
+  );
+}
+
+.ss-mobile-layout .ss-hover-shell__header,
+.ss-mobile-layout .ss-hover-shell__status,
+.ss-mobile-layout .ss-hover-shell__footer-actions {
+  flex: 0 0 auto;
+}
+
+.ss-mobile-layout .ss-hover-shell__content {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+}
+
 @container ss-surface (max-width: 280px) {
   .ss-hover-shell__footer-actions {
     flex-direction: column-reverse;

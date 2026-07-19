@@ -186,6 +186,36 @@ export function createHoverShell(options: HoverShellOptions): HoverShellHandle {
   footerActionsEl.className = "ss-hover-shell__footer-actions";
 
   const unsubscribers: Array<() => void> = [];
+  const recorderStackOffsetProperty = "--ss-recorder-mobile-stack-offset";
+  const ownsRecorderStackOffset = root.classList.contains("ss-recorder-hover");
+  let recorderStackFrame: number | null = null;
+  let destroyed = false;
+  const updateRecorderStackOffset = (): void => {
+    recorderStackFrame = null;
+    if (!ownsRecorderStackOffset) return;
+    if (destroyed || !isMobileLayout(root) || !root.isConnected) {
+      host.style.removeProperty(recorderStackOffsetProperty);
+      return;
+    }
+    const height = Math.max(0, Math.ceil(root.getBoundingClientRect().height));
+    host.style.setProperty(
+      recorderStackOffsetProperty,
+      `calc(${height}px + var(--ss-space-2))`,
+    );
+  };
+  const scheduleRecorderStackOffset = (): void => {
+    if (!ownsRecorderStackOffset || destroyed || recorderStackFrame !== null) return;
+    recorderStackFrame = hostWindow.requestAnimationFrame(updateRecorderStackOffset);
+  };
+
+  const ResizeObserverConstructor = (hostWindow as Window & {
+    ResizeObserver?: typeof ResizeObserver;
+  }).ResizeObserver;
+  if (ownsRecorderStackOffset && ResizeObserverConstructor) {
+    const resizeObserver = new ResizeObserverConstructor(updateRecorderStackOffset);
+    resizeObserver.observe(root);
+    unsubscribers.push(() => resizeObserver.disconnect());
+  }
 
   const clampToViewport = (): void => {
     const rect = root.getBoundingClientRect();
@@ -327,10 +357,10 @@ export function createHoverShell(options: HoverShellOptions): HoverShellHandle {
   }
 
   const applyLayout = (): void => {
-    const compact = hostWindow.innerWidth <= 480;
+    const mobileLayout = isMobileLayout(root);
+    const compact = mobileLayout || hostWindow.innerWidth <= 480;
     root.dataset.layout = compact ? "compact" : "desktop";
     if (compact) {
-      const mobileLayout = isMobileLayout(root);
       root.setCssStyles({
         left: mobileLayout
           ? "max(var(--ss-space-3), env(safe-area-inset-left, 0px))"
@@ -342,9 +372,11 @@ export function createHoverShell(options: HoverShellOptions): HoverShellHandle {
         top: "auto",
         width: "auto",
       });
+      updateRecorderStackOffset();
       return;
     }
 
+    if (ownsRecorderStackOffset) host.style.removeProperty(recorderStackOffsetProperty);
     root.style.width = options.width ?? "";
     root.setCssStyles({ bottom: "auto" });
     applyInitialPosition();
@@ -374,6 +406,7 @@ export function createHoverShell(options: HoverShellOptions): HoverShellHandle {
     footerActionsEl,
     setTitle: (title: string) => {
       titleEl.textContent = title;
+      scheduleRecorderStackOffset();
     },
     setSubtitle: (subtitle: string) => {
       subtitleEl.textContent = subtitle;
@@ -382,26 +415,39 @@ export function createHoverShell(options: HoverShellOptions): HoverShellHandle {
       } else {
         subtitleEl.setAttribute("hidden", "true");
       }
+      scheduleRecorderStackOffset();
     },
     setStatus: (status: string) => {
       statusEl.textContent = status;
+      scheduleRecorderStackOffset();
     },
     setHeaderActions: (actions: HoverShellAction[]) => {
       renderActions(headerActionsEl, actions);
+      scheduleRecorderStackOffset();
     },
     setFooterActions: (actions: HoverShellAction[]) => {
       renderActions(footerActionsEl, actions);
+      scheduleRecorderStackOffset();
     },
     setState: (state: string) => {
       root.dataset.state = state;
     },
     show: () => {
-      hostWindow.requestAnimationFrame(() => root.classList.add("is-visible"));
+      hostWindow.requestAnimationFrame(() => {
+        root.classList.add("is-visible");
+        updateRecorderStackOffset();
+      });
     },
     destroy: () => {
+      destroyed = true;
+      if (recorderStackFrame !== null) {
+        hostWindow.cancelAnimationFrame(recorderStackFrame);
+        recorderStackFrame = null;
+      }
       for (const unsubscribe of unsubscribers) {
         unsubscribe();
       }
+      if (ownsRecorderStackOffset) host.style.removeProperty(recorderStackOffsetProperty);
       root.classList.remove("is-visible");
       hostWindow.setTimeout(() => {
         root.remove();

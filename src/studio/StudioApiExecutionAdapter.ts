@@ -4,6 +4,7 @@ import { ManagedJobClient } from "../services/managed/ManagedJobClient";
 import { ManagedJobRecoveryStore } from "../services/managed/ManagedJobRecoveryStore";
 import { ObsidianManagedRecoveryAdapter } from "../services/managed/adapters/ObsidianManagedRecoveryAdapter";
 import { ManagedTranscriptionAdapter } from "../services/transcription/ManagedTranscriptionAdapter";
+import { getTranscriptionMaxFileSize } from "../services/transcription/TranscriptionCoordinator";
 import type {
   StudioApiAdapter,
   StudioImageGenerationRequest,
@@ -104,7 +105,11 @@ export class StudioApiExecutionAdapter implements StudioApiAdapter {
     const result = await this.transcription.transcribe(request.source, {
       operationId: id,
       signal: request.signal,
+      maxAudioBytes: getTranscriptionMaxFileSize(),
     });
+    if (result.kind !== "transcript") {
+      throw new Error("Studio transcription cannot recover a local commit receipt.");
+    }
     return {
       text: result.text,
       operation: { capability: "transcription", operationId: result.operationId },
@@ -126,7 +131,7 @@ export class StudioApiExecutionAdapter implements StudioApiAdapter {
       if (operation.capability === "image_generation") {
         await this.images.completeLocalCommit(operation.operationId, signal);
       } else if (operation.capability === "transcription") {
-        await this.transcription.completeLocalCommit(operation.operationId, signal);
+        await this.transcription.finalizePublishedLocalCommit(operation.operationId, signal);
       }
     }
   }

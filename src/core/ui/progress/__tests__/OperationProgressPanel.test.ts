@@ -76,6 +76,22 @@ describe("OperationProgressPanel", () => {
     expect(root?.getAttribute("data-ss-surface")).toBe("transient");
   });
 
+  it("stacks concurrent panels without overlapping and removes an empty stack", () => {
+    const first = new OperationProgressPanel({ title: "First", icon: "loader" });
+    const second = new OperationProgressPanel({ title: "Second", icon: "loader" });
+
+    const stack = document.querySelector(".systemsculpt-progress-stack");
+    expect(stack).toBeTruthy();
+    expect(stack?.querySelectorAll(":scope > .systemsculpt-progress-panel")).toHaveLength(2);
+
+    first.close();
+    expect(document.querySelector(".systemsculpt-progress-stack")).toBe(stack);
+    expect(stack?.querySelectorAll(":scope > .systemsculpt-progress-panel")).toHaveLength(1);
+
+    second.close();
+    expect(document.querySelector(".systemsculpt-progress-stack")).toBeNull();
+  });
+
   it("owns collapsible chrome and dynamic item state for feature adapters", () => {
     const panel = new OperationProgressPanel({
       title: "Batch",
@@ -106,7 +122,10 @@ describe("OperationProgressPanel", () => {
     const css = readFileSync("src/css/modals/progress-toast.css", "utf8");
 
     expect(css).toMatch(
-      /\.ss-mobile-layout \.systemsculpt-progress-panel\s*\{[^}]*bottom:\s*var\(--ss-mobile-bottom-clearance\);/s,
+      /\.ss-mobile-layout \.systemsculpt-progress-stack\s*\{[^}]*bottom:\s*calc\([^}]*--ss-mobile-bottom-clearance[^}]*--ss-recorder-mobile-stack-offset/s,
+    );
+    expect(css).toMatch(
+      /\.ss-mobile-layout \.systemsculpt-progress-stack\s*\{[^}]*max-height:\s*calc\([^}]*safe-area-inset-top/s,
     );
     expect(css).toMatch(/env\(safe-area-inset-left,\s*0px\)/);
     expect(css).toMatch(/env\(safe-area-inset-right,\s*0px\)/);

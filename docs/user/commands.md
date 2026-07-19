@@ -43,16 +43,12 @@ Chat always runs through SystemSculpt. There are no separate chat-model commands
 
 | Command | Default hotkey | Command ID | Notes |
 | --- | --- | --- | --- |
-| Toggle Audio Recorder | `Mod+R` | `toggle-audio-recorder` | Starts/stops recording |
+| Toggle Audio Recorder |  | `toggle-audio-recorder` | Starts/stops recording |
 | Transcribe an audio file |  | `transcribe-audio-file` | Transcribes a vault audio file through SystemSculpt |
-| Run Audio Chunking Analysis |  | `audio-chunking-analysis` | Developer-facing analysis command |
-
-## Automations and SystemSculpt Canvas
-
-| Command | Default hotkey | Command ID | Notes |
-| --- | --- | --- | --- |
-| Run Workflow Automation |  | `run-workflow-automation` | Runs automation for active markdown note |
-| Show Automation Backlog |  | `open-automation-backlog` | Opens automation backlog modal |
+| Open audio processor |  | `open-audio-processor` | Creates a structured audio note and linked timestamped transcript |
+| Process YouTube video |  | `process-youtube-video` | Opens Audio Processor on the YouTube input |
+| Save audio summary |  | `save-audio-summary` | Creates or opens an optional summary-only note for the active Audio Processor note |
+| Save audio transcript |  | `save-audio-transcript` | Opens or restores the linked transcript for the active Audio Processor note |
 
 ## Studio
 

@@ -7,69 +7,50 @@ import {
 } from "../core/ui/progress/OperationProgressPanel";
 import { tryCopyToClipboard } from "../utils/clipboard";
 
-export interface PendingAutomationFile {
+export interface PendingTranscriptionFile {
   file: TFile;
-  automationType: "transcription" | "automation";
-  automationId?: string;
-  automationTitle?: string;
 }
 
-export interface BulkAutomationConfirmModalOptions {
+export interface BulkTranscriptionConfirmModalOptions {
   app: App;
-  plugin: SystemSculptPlugin;
-  pendingFiles: PendingAutomationFile[];
-  onConfirm: (files: PendingAutomationFile[]) => void;
+  pendingFiles: PendingTranscriptionFile[];
+  onConfirm: (files: PendingTranscriptionFile[]) => void;
   onCancel: () => void;
 }
 
-export class BulkAutomationConfirmModal extends StandardModal {
-  private readonly pendingFiles: PendingAutomationFile[];
-  private readonly onConfirm: (files: PendingAutomationFile[]) => void;
+export class BulkTranscriptionConfirmModal extends StandardModal {
+  private readonly pendingFiles: PendingTranscriptionFile[];
+  private readonly onConfirm: (files: PendingTranscriptionFile[]) => void;
   private readonly onCancel: () => void;
   private settled = false;
 
-  constructor(options: BulkAutomationConfirmModalOptions) {
+  constructor(options: BulkTranscriptionConfirmModalOptions) {
     super(options.app);
     this.pendingFiles = options.pendingFiles;
     this.onConfirm = options.onConfirm;
     this.onCancel = options.onCancel;
     this.setSize("small");
-    this.modalEl.addClass("ss-bulk-automation-modal");
+    this.modalEl.addClass("ss-bulk-transcription-modal");
   }
 
   onOpen(): void {
     super.onOpen();
     const count = this.pendingFiles.length;
-    const transcriptionCount = this.pendingFiles.filter(
-      (file) => file.automationType === "transcription",
-    ).length;
-    const automationCount = this.pendingFiles.filter(
-      (file) => file.automationType === "automation",
-    ).length;
 
-    const summaryParts: string[] = [];
-    if (transcriptionCount > 0) {
-      summaryParts.push(
-        `${transcriptionCount} transcription${transcriptionCount === 1 ? "" : "s"}`,
-      );
-    }
-    if (automationCount > 0) {
-      summaryParts.push(
-        `${automationCount} automation${automationCount === 1 ? "" : "s"}`,
-      );
-    }
-
-    this.addTitle("Bulk workflow detected", `${count} files are ready for automatic work.`);
+    this.addTitle(
+      "Bulk transcription detected",
+      `${count} audio file${count === 1 ? " is" : "s are"} ready for transcription.`,
+    );
 
     const body = this.contentEl.createDiv({
-      cls: "ss-modal__custom-content ss-bulk-automation-modal__body",
+      cls: "ss-modal__custom-content ss-bulk-transcription-modal__body",
     });
     body.createEl("p", {
-      cls: "ss-bulk-automation-modal__summary",
-      text: summaryParts.length > 0 ? summaryParts.join(" • ") : `${count} files`,
+      cls: "ss-bulk-transcription-modal__summary",
+      text: `${count} transcription${count === 1 ? "" : "s"}`,
     });
 
-    const notes = body.createEl("ul", { cls: "ss-bulk-automation-modal__notes" });
+    const notes = body.createEl("ul", { cls: "ss-bulk-transcription-modal__notes" });
     notes.createEl("li", { text: "Runs in batches of 3 and stops on the first error." });
     notes.createEl("li", {
       text: "Skip all marks these files as skipped until you clear them in settings > workflow.",
@@ -77,7 +58,7 @@ export class BulkAutomationConfirmModal extends StandardModal {
 
     this.addActionButton("Skip all", () => this.handleCancel(), false);
     this.addActionButton(
-      `Process ${count} file${count === 1 ? "" : "s"}`,
+      `Transcribe ${count} file${count === 1 ? "" : "s"}`,
       () => this.handleConfirm(),
       true,
     );
@@ -107,7 +88,7 @@ export class BulkAutomationConfirmModal extends StandardModal {
   }
 }
 
-export interface BulkProgressWidgetOptions {
+export interface BulkTranscriptionProgressWidgetOptions {
   plugin: SystemSculptPlugin;
   totalFiles: number;
   onStop?: () => void;
@@ -122,7 +103,7 @@ type BulkProgressAction = {
 };
 
 /** Feature adapter over the one canonical long-running operation panel. */
-export class BulkProgressWidget {
+export class BulkTranscriptionProgressWidget {
   private readonly plugin: SystemSculptPlugin;
   private readonly totalFiles: number;
   private readonly onStop?: () => void;
@@ -134,12 +115,12 @@ export class BulkProgressWidget {
   private status = "Starting…";
   private state: "running" | "complete" | "error" | "stopped" = "running";
 
-  constructor(options: BulkProgressWidgetOptions) {
+  constructor(options: BulkTranscriptionProgressWidgetOptions) {
     this.plugin = options.plugin;
     this.totalFiles = options.totalFiles;
     this.onStop = options.onStop;
     this.panel = new OperationProgressPanel({
-      title: "Processing workflows",
+      title: "Transcribing inbox audio",
       icon: "loader",
       className: "systemsculpt-bulk-progress-widget",
       collapsible: true,
@@ -164,12 +145,12 @@ export class BulkProgressWidget {
     this.syncStatus();
   }
 
-  showCurrentBatch(files: PendingAutomationFile[]): void {
+  showCurrentBatch(files: PendingTranscriptionFile[]): void {
     if (this.destroyed || this.state !== "running") return;
     this.panel.setItems(files.map((file) => ({
       id: file.file.path,
       label: file.file.basename,
-      icon: file.automationType === "transcription" ? "mic" : "sparkles",
+      icon: "mic",
     })));
   }
 
@@ -188,7 +169,7 @@ export class BulkProgressWidget {
   markComplete(): void {
     if (this.destroyed || this.state !== "running") return;
     this.state = "complete";
-    this.status = "All workflows complete";
+    this.status = "All transcriptions complete";
     this.syncStatus();
     this.setActions([{
       label: "Close",

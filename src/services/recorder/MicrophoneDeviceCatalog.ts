@@ -21,7 +21,7 @@ export type MicrophoneDeviceCatalogResult =
   | { status: "cancelled"; devices: readonly [] };
 
 export interface MicrophoneDeviceCatalogOptions {
-  /** Ask for audio permission once when the browser initially hides labels. */
+  /** Ask for audio permission when the browser initially hides labels. */
   requestLabels?: boolean;
 }
 
@@ -102,11 +102,24 @@ export class MicrophoneDeviceCatalog {
         if (!this.isCurrent(generation, signal)) return cancelledResult();
       }
 
+      const seenDeviceIds = new Set<string>();
       return {
         status: "ready",
         labelRefresh,
         devices: devices
-          .filter((device) => device.kind === "audioinput")
+          // An empty id is the browser's permission-gated default device. The
+          // settings UI already owns one explicit Default microphone option.
+          .filter((device) => {
+            const id = device.deviceId;
+            if (
+              device.kind !== "audioinput"
+              || !id
+              || id === "default"
+              || seenDeviceIds.has(id)
+            ) return false;
+            seenDeviceIds.add(id);
+            return true;
+          })
           .map((device) => ({
             id: device.deviceId,
             label: device.label || `Microphone ${device.deviceId.slice(0, 8)}`,
@@ -136,7 +149,7 @@ export class MicrophoneDeviceCatalog {
     mediaDevices: CatalogMediaDevices,
   ): Promise<MicrophoneLabelRefreshState> {
     if (!this.labelRefreshPromise) {
-      this.labelRefreshPromise = (async () => {
+      const request = (async () => {
         if (typeof mediaDevices.getUserMedia !== "function") return "unavailable";
         try {
           const stream = await mediaDevices.getUserMedia({ audio: true });
@@ -146,6 +159,10 @@ export class MicrophoneDeviceCatalog {
           return "denied";
         }
       })();
+      this.labelRefreshPromise = request;
+      void request.finally(() => {
+        if (this.labelRefreshPromise === request) this.labelRefreshPromise = null;
+      });
     }
     return this.labelRefreshPromise;
   }

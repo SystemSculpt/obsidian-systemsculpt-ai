@@ -18,8 +18,28 @@ class MemoryAdapter implements ManagedRecoveryAdapter {
 }
 const initial = { capability: "transcription", operationId: "op-1", source: { identity: "vault:a.wav", fingerprint: `sha256:${"a".repeat(64)}` } } as const;
 const create = async (store: ManagedJobRecoveryStore, value = initial) => store.createAdmitted(value);
+const createRequest = {
+  filename: "a".repeat(64) + ".webm",
+  contentType: "audio/webm",
+  contentLengthBytes: 6,
+} as const;
 
 describe("ManagedJobRecoveryStore hardening", () => {
+  it("distinguishes a genuinely absent recovery record from a corrupt one", async () => {
+    const adapter = new MemoryAdapter();
+    const store = new ManagedJobRecoveryStore(adapter);
+    await expect(store.readOptional("transcription", "missing-op")).resolves.toBeNull();
+    await create(store);
+    await expect(store.readOptional("transcription", "op-1"))
+      .resolves.toMatchObject({ operationId: "op-1", phase: "admitted" });
+    adapter.files.set(
+      ".systemsculpt/managed-jobs/transcription/corrupt-op.json",
+      "not-json",
+    );
+    await expect(store.readOptional("transcription", "corrupt-op"))
+      .rejects.toMatchObject({ code: "recovery_corrupt" });
+  });
+
   it("fails closed without atomic rename and serializes same-operation create/CAS mutations", async () => {
     const bad = new MemoryAdapter(); bad.capabilities.atomicRename = false;
     expect(() => new ManagedJobRecoveryStore(bad)).toThrow(expect.objectContaining({ code: "recovery_unavailable" }));
@@ -39,7 +59,7 @@ describe("ManagedJobRecoveryStore hardening", () => {
   it("exposes only legal typed mutations and preserves immutable identity and creation time", async () => {
     const store = new ManagedJobRecoveryStore(new MemoryAdapter(), () => "2026-01-01T00:00:00.000Z");
     const admitted = await create(store); const ready = await store.markContentReady("transcription", "op-1", admitted.revision);
-    const dispatch = await store.beginDispatch("transcription", "op-1", ready.revision, { operation: "create", requestId: "req-1", idempotencyKey: "op-1:create", dispatchedAt: "2026-01-01T00:00:00.000Z" });
+    const dispatch = await store.beginDispatch("transcription", "op-1", ready.revision, { operation: "create", requestId: "req-1", idempotencyKey: "op-1:create", dispatchedAt: "2026-01-01T00:00:00.000Z", createRequest });
     const ack = await store.acknowledgeCreated("transcription", "op-1", dispatch.revision, "job-1");
     expect(ack).toMatchObject({ capability: "transcription", operationId: "op-1", createdAt: admitted.createdAt, phase: "created", jobId: "job-1" });
     expect((store as any).update).toBeUndefined(); expect((store as any).transition).toBeUndefined();
@@ -106,11 +126,62 @@ describe("ManagedJobRecoveryStore hardening", () => {
     }
   });
 
+  it("atomically prunes completed records during initialization across every delete boundary", async () => {
+    const path = ".systemsculpt/managed-jobs/transcription/completed-op.json";
+    const completed = {
+      schemaVersion: 1,
+      revision: 9,
+      capability: "transcription",
+      operationId: "completed-op",
+      source: {
+        identity: `audio:sha256:${"c".repeat(64)}`,
+        fingerprint: `sha256:${"c".repeat(64)}`,
+      },
+      jobId: "job-completed",
+      phase: "completed",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:01:00.000Z",
+    };
+
+    for (let failAt = 0; failAt < 12; failAt += 1) {
+      const adapter = new MemoryAdapter(new Map([[path, JSON.stringify(completed)]]));
+      adapter.failAt = failAt;
+      await new ManagedJobRecoveryStore(adapter).initialize().catch(() => undefined);
+      adapter.failAt = -1;
+      await expect(new ManagedJobRecoveryStore(adapter).initialize()).resolves.toBeUndefined();
+      expect([...adapter.files.keys()].filter((candidate) => candidate.startsWith(path))).toEqual([]);
+    }
+  });
+
+  it.each(["abandoned", "upload_aborted", "completed"] as const)(
+    "prunes terminal %s records during initialization",
+    async (phase) => {
+      const path = `.systemsculpt/managed-jobs/transcription/terminal-${phase}.json`;
+      const adapter = new MemoryAdapter(new Map([[path, JSON.stringify({
+        schemaVersion: 1,
+        revision: 3,
+        capability: "transcription",
+        operationId: `terminal-${phase}`,
+        source: {
+          identity: `audio:sha256:${"d".repeat(64)}`,
+          fingerprint: `sha256:${"d".repeat(64)}`,
+        },
+        ...(phase === "upload_aborted" ? { jobId: "job-aborted" } : {}),
+        phase,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:01:00.000Z",
+      })]]));
+
+      await expect(new ManagedJobRecoveryStore(adapter).initialize()).resolves.toBeUndefined();
+      expect([...adapter.files.keys()].filter((candidate) => candidate.startsWith(path))).toEqual([]);
+    },
+  );
+
   it("rejects impossible capability dispatches, missing part numbers, and bad idempotency", async () => {
     const adapter = new MemoryAdapter(); const store = new ManagedJobRecoveryStore(adapter); let record = await create(store); record = await store.markContentReady("transcription", "op-1", record.revision);
     await expect(store.beginDispatch("transcription", "op-1", record.revision, { operation: "prepare", requestId: "r", dispatchedAt: "2026-01-01T00:00:00Z" })).rejects.toMatchObject({ code: "illegal_transition" });
-    await expect(store.beginDispatch("transcription", "op-1", record.revision, { operation: "create", requestId: "r", idempotencyKey: "wrong", dispatchedAt: "2026-01-01T00:00:00Z" })).rejects.toMatchObject({ code: "invalid_record" });
-    await expect(store.beginDispatch("transcription", "op-1", record.revision, { operation: "create", requestId: "https://credential.example", idempotencyKey: "op-1:create", dispatchedAt: "2026-01-01T00:00:00Z" })).rejects.toMatchObject({ code: "invalid_record" });
+    await expect(store.beginDispatch("transcription", "op-1", record.revision, { operation: "create", requestId: "r", idempotencyKey: "wrong", dispatchedAt: "2026-01-01T00:00:00Z", createRequest })).rejects.toMatchObject({ code: "invalid_record" });
+    await expect(store.beginDispatch("transcription", "op-1", record.revision, { operation: "create", requestId: "https://credential.example", idempotencyKey: "op-1:create", dispatchedAt: "2026-01-01T00:00:00Z", createRequest })).rejects.toMatchObject({ code: "invalid_record" });
     const image = await create(store, { capability: "image_generation", operationId: "img-1", source: { identity: "vault:image.png", fingerprint: `sha256:${"b".repeat(64)}` } }); const ready = await store.markContentReady("image_generation", "img-1", image.revision);
     await expect(store.beginDispatch("image_generation", "img-1", ready.revision, { operation: "part", requestId: "r", dispatchedAt: "2026-01-01T00:00:00Z" })).rejects.toMatchObject({ code: "illegal_transition" });
     await expect(store.beginDispatch("image_generation", "img-1", ready.revision, { operation: "create", requestId: "r", dispatchedAt: "2026-01-01T00:00:00Z" })).rejects.toMatchObject({ code: "invalid_record" });
@@ -122,8 +193,8 @@ describe("ManagedJobRecoveryStore hardening", () => {
     const baseAdapter = new MemoryAdapter(); const baseStore = new ManagedJobRecoveryStore(baseAdapter); const valid = await create(baseStore);
     const badRecords = [
       { ...valid, phase: "create_dispatching", pendingDispatch: undefined },
-      { ...valid, phase: "admitted", pendingDispatch: { operation: "create", requestId: "req-1", idempotencyKey: "op-1:create", dispatchedAt: "2026-01-01T00:00:00Z" } },
-      { ...valid, phase: "part_dispatching", pendingDispatch: { operation: "create", requestId: "req-1", idempotencyKey: "op-1:create", partNumber: 1, dispatchedAt: "2026-01-01T00:00:00Z" } },
+      { ...valid, phase: "admitted", pendingDispatch: { operation: "create", requestId: "req-1", idempotencyKey: "op-1:create", dispatchedAt: "2026-01-01T00:00:00Z", createRequest } },
+      { ...valid, phase: "part_dispatching", pendingDispatch: { operation: "create", requestId: "req-1", idempotencyKey: "op-1:create", partNumber: 1, dispatchedAt: "2026-01-01T00:00:00Z", createRequest } },
       { ...valid, phase: "part_dispatching", pendingDispatch: { operation: "part", requestId: "req-1", dispatchedAt: "2026-01-01T00:00:00Z" } },
       { ...valid, capability: "image_generation", phase: "complete_dispatching", pendingDispatch: { operation: "complete", requestId: "req-1", dispatchedAt: "2026-01-01T00:00:00Z" } },
       { ...valid, completedParts: [{ partNumber: 1, etag: "x-amz-signature=abc" }] },
@@ -145,7 +216,7 @@ describe("ManagedJobRecoveryStore hardening", () => {
     for (const [index, [capability, completedParts]] of cases.entries()) { const adapter = new MemoryAdapter(); adapter.files.set(`.systemsculpt/managed-jobs/${capability}/bad-part-${index}.json`, JSON.stringify({ ...valid, capability, operationId: `bad-part-${index}`, completedParts })); await expect(new ManagedJobRecoveryStore(adapter).initialize()).rejects.toMatchObject({ code: "recovery_corrupt" }); }
     for (const [capability, partNumber] of [["transcription", 1], ["transcription", 50], ["document_processing", 1], ["document_processing", 3]] as const) { const adapter = new MemoryAdapter(); adapter.files.set(`.systemsculpt/managed-jobs/${capability}/good-${partNumber}.json`, JSON.stringify({ ...valid, capability, operationId: `good-${partNumber}`, completedParts: [{ partNumber, etag }] })); await expect(new ManagedJobRecoveryStore(adapter).initialize()).resolves.toBeUndefined(); }
 
-    const adapter = new MemoryAdapter(); const store = new ManagedJobRecoveryStore(adapter); let record = await create(store); record = await store.markContentReady("transcription", "op-1", record.revision); record = await store.beginDispatch("transcription", "op-1", record.revision, { operation: "create", requestId: "r", idempotencyKey: "op-1:create", dispatchedAt: "2026-01-01T00:00:00Z" }); record = await store.acknowledgeCreated("transcription", "op-1", record.revision, "job");
+    const adapter = new MemoryAdapter(); const store = new ManagedJobRecoveryStore(adapter); let record = await create(store); record = await store.markContentReady("transcription", "op-1", record.revision); record = await store.beginDispatch("transcription", "op-1", record.revision, { operation: "create", requestId: "r", idempotencyKey: "op-1:create", dispatchedAt: "2026-01-01T00:00:00Z", createRequest }); record = await store.acknowledgeCreated("transcription", "op-1", record.revision, "job");
     await expect(store.beginDispatch("transcription", "op-1", record.revision, { operation: "part", requestId: "r", partNumber: 51, dispatchedAt: "2026-01-01T00:00:00Z" })).rejects.toMatchObject({ code: "invalid_record" });
     record = await store.beginDispatch("transcription", "op-1", record.revision, { operation: "part", requestId: "r", partNumber: 50, dispatchedAt: "2026-01-01T00:00:00Z" });
     await expect(store.acknowledgePart("transcription", "op-1", record.revision, { partNumber: 49, etag })).rejects.toMatchObject({ code: "illegal_transition" });
@@ -154,7 +225,7 @@ describe("ManagedJobRecoveryStore hardening", () => {
 
   it.each([
     ["transcription", "complete_dispatching", "queued", "upload_completed"], ["transcription", "complete_dispatching", "processing", "processing"], ["transcription", "complete_dispatching", "failed", "result_ready"],
-    ["document_processing", "start_dispatching", "queued", "blocked_ambiguous"], ["document_processing", "start_dispatching", "processing", "processing"], ["document_processing", "start_dispatching", "completed", "result_ready"],
+    ["document_processing", "start_dispatching", "queued", "processing"], ["document_processing", "start_dispatching", "processing", "processing"], ["document_processing", "start_dispatching", "completed", "result_ready"],
     ["transcription", "abort_dispatching", "failed", "upload_aborted"], ["image_generation", "create_dispatching", "queued", "blocked_ambiguous"],
   ] as const)("atomically applies reconciliation %s %s %s → %s", async (capability, phase, status, expected) => {
     const adapter = new MemoryAdapter(); const operation = phase.replace("_dispatching", "") as any; const id = `reconcile-${capability}`; const pending: any = { operation, requestId: "req-1", dispatchedAt: "2026-01-01T00:00:00Z" }; if (["create", "complete", "start"].includes(operation)) pending.idempotencyKey = `${id}:${operation}`;

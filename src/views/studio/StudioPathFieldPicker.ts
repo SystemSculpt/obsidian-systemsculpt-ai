@@ -125,7 +125,7 @@ function buildMediaDialogExtensions(field: StudioNodeConfigFieldDefinition): str
     } else if (kind === "video") {
       ["mp4", "mov", "mkv", "webm", "avi", "m4v"].forEach((value) => extensions.add(value));
     } else if (kind === "audio") {
-      ["wav", "mp3", "m4a", "ogg", "flac", "aac"].forEach((value) => extensions.add(value));
+      ["wav", "mp3", "m4a", "mp4", "ogg", "webm", "flac", "aac"].forEach((value) => extensions.add(value));
     }
   }
 

@@ -24,16 +24,16 @@
 @import 'components/history.css';
 @import 'components/recorder.css';
 @import 'components/diff-viewer.css';
-@import 'components/automations.css';
 
 /* Modal system */
 @import 'modals/modal.css';
 @import 'modals/chat-settings.css';
 @import 'modals/janitor.css';
 @import 'modals/credits-balance.css';
-@import 'modals/bulk-automation.css';
+@import 'modals/bulk-transcription.css';
 @import 'modals/progress-toast.css';
 @import 'modals/file-pickers.css';
+@import 'modals/audio-processor.css';
 @import 'modals/search.css';
 @import 'modals/misc-modals.css';
 

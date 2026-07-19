@@ -10,6 +10,7 @@
 import { DEFAULT_SETTINGS } from "../../../../types";
 import {
   CURRENT_SCHEMA_VERSION,
+  LEGACY_AUDIO_KEYS_REMOVED_IN_V9,
   LEGACY_CHAT_KEYS_REMOVED_IN_V5,
   LEGACY_CLIENT_MODEL_KEYS_REMOVED_IN_V4,
   LEGACY_DIRECTORY_KEYS_REMOVED_IN_V5,
@@ -17,6 +18,7 @@ import {
   LEGACY_KEYS_REMOVED_IN_V1,
   LEGACY_SEMANTIC_INDEX_KEYS_REMOVED_IN_V7,
   LEGACY_UPDATE_KEYS_REMOVED_IN_V8,
+  LEGACY_WORKFLOW_AUTOMATION_KEYS_REMOVED_IN_V12,
   migrateSettingsToCurrentSchema,
 } from "../SettingsMigrator";
 
@@ -93,6 +95,19 @@ describe("settings migration harness — past releases load cleanly into HEAD (#
       it("removes duplicate plugin-update notification state", () => {
         for (const key of LEGACY_UPDATE_KEYS_REMOVED_IN_V8) {
           expect(result.settings).not.toHaveProperty(key);
+        }
+      });
+
+      it("removes retired recorder and transcription state", () => {
+        for (const key of LEGACY_AUDIO_KEYS_REMOVED_IN_V9) {
+          expect(result.settings).not.toHaveProperty(key);
+        }
+      });
+
+      it("removes retired nested workflow automation state", () => {
+        const workflowEngine = result.settings.workflowEngine as Record<string, unknown>;
+        for (const key of LEGACY_WORKFLOW_AUTOMATION_KEYS_REMOVED_IN_V12) {
+          expect(workflowEngine).not.toHaveProperty(key);
         }
       });
 

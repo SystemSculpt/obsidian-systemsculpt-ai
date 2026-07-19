@@ -107,7 +107,7 @@ describe("HostedTransportAdapter", () => {
       licenseKey: "first-key",
       stream: true,
       allowTransportFallback: false,
-      streamingProbeUrl: "https://api.test/api/plugin/config",
+      streamingProbeUrl: "https://api.test/api/plugin/connectivity",
       headers: { "x-license-key": "first-key", "x-plugin-version": "6.0.0" },
     });
   });

@@ -67,7 +67,7 @@ describe("ChatMarkdownSerializer chronology", () => {
     const file = [
       "---",
       "id: chronology-test",
-      "model: gpt-5.4",
+      "model: gpt-5.6-terra",
       "title: Chronology Test",
       "created: 2026-03-31T00:00:00.000Z",
       "lastModified: 2026-03-31T00:00:00.000Z",

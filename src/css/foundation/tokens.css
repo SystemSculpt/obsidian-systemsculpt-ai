@@ -180,6 +180,9 @@ body {
    * Z-layers
    * ------------------------------------------------------------------ */
   --ss-z-raised: 10;
+  /* Floating workflow cards must remain above workspace chrome while
+   * yielding to Obsidian's host-owned modal layer (50 on mobile). */
+  --ss-z-floating-workflow: 40;
   --ss-z-sticky: 100;
   --ss-z-drawer: 500;
   --ss-z-modal: 1000;

@@ -80,7 +80,7 @@ describe("PlatformRequestClient", () => {
       body: { ok: true },
       stream: true,
       licenseKey: "license",
-      streamingProbeUrl: "https://systemsculpt.com/api/plugin/config",
+      streamingProbeUrl: "https://systemsculpt.com/api/plugin/connectivity",
     });
 
     expect(requestUrl).toHaveBeenCalledWith(
@@ -101,7 +101,7 @@ describe("PlatformRequestClient", () => {
     });
     expect(global.fetch).toHaveBeenCalledTimes(1);
     expect(global.fetch).toHaveBeenCalledWith(
-      "https://systemsculpt.com/api/plugin/config",
+      "https://systemsculpt.com/api/plugin/connectivity",
       expect.objectContaining({ method: "GET" }),
     );
     expect(response.status).toBe(200);
@@ -127,13 +127,13 @@ describe("PlatformRequestClient", () => {
       licenseKey: "license",
       preserveResponseHeaders: true,
       allowTransportFallback: false,
-      streamingProbeUrl: "https://systemsculpt.com/api/plugin/config",
+      streamingProbeUrl: "https://systemsculpt.com/api/plugin/connectivity",
     });
 
     expect(response).toBe(streamed);
     expect(global.fetch).toHaveBeenNthCalledWith(
       1,
-      "https://systemsculpt.com/api/plugin/config",
+      "https://systemsculpt.com/api/plugin/connectivity",
       expect.objectContaining({ method: "GET" }),
     );
     expect(global.fetch).toHaveBeenNthCalledWith(

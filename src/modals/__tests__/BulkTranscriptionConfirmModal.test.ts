@@ -2,36 +2,30 @@
  * @jest-environment jsdom
  */
 import { App, TFile } from "obsidian";
-import { BulkAutomationConfirmModal, BulkProgressWidget } from "../BulkAutomationConfirmModal";
+import {
+  BulkTranscriptionConfirmModal,
+  BulkTranscriptionProgressWidget,
+} from "../BulkTranscriptionConfirmModal";
 
 function createPendingFiles() {
   return [
-    {
-      file: new TFile({ path: "Inbox/audio.wav", name: "audio.wav" }),
-      automationType: "transcription" as const,
-    },
-    {
-      file: new TFile({ path: "Inbox/note.md", name: "note.md" }),
-      automationType: "automation" as const,
-      automationId: "meeting",
-      automationTitle: "Meeting summary",
-    },
+    { file: new TFile({ path: "Inbox/first.wav", name: "first.wav" }) },
+    { file: new TFile({ path: "Inbox/second.mp3", name: "second.mp3" }) },
   ];
 }
 
-describe("BulkAutomationConfirmModal", () => {
+describe("BulkTranscriptionConfirmModal", () => {
   beforeEach(() => {
     document.body.innerHTML = "";
   });
 
-  it("confirms the full file set without firing cancel", () => {
+  it("confirms the full audio file set without firing cancel", () => {
     const onConfirm = jest.fn();
     const onCancel = jest.fn();
     const pendingFiles = createPendingFiles();
 
-    const modal = new BulkAutomationConfirmModal({
+    const modal = new BulkTranscriptionConfirmModal({
       app: new App(),
-      plugin: { register: jest.fn() } as any,
       pendingFiles,
       onConfirm,
       onCancel,
@@ -39,12 +33,12 @@ describe("BulkAutomationConfirmModal", () => {
 
     modal.open();
 
-    expect(document.body.textContent).toContain("Bulk workflow detected");
-    expect(document.body.textContent).toContain("1 transcription");
-    expect(document.body.textContent).toContain("1 automation");
+    expect(document.body.textContent).toContain("Bulk transcription detected");
+    expect(document.body.textContent).toContain("2 transcriptions");
+    expect(document.body.textContent).not.toContain("automation");
 
     const processButton = [...document.querySelectorAll("button")].find((button) =>
-      button.textContent?.includes("Process 2 files")
+      button.textContent?.includes("Transcribe 2 files")
     ) as HTMLButtonElement;
     processButton.click();
 
@@ -57,9 +51,8 @@ describe("BulkAutomationConfirmModal", () => {
     const onCancel = jest.fn();
 
     const pendingFiles = createPendingFiles();
-    const modal = new BulkAutomationConfirmModal({
+    const modal = new BulkTranscriptionConfirmModal({
       app: new App(),
-      plugin: { register: jest.fn() } as any,
       pendingFiles,
       onConfirm,
       onCancel,
@@ -75,7 +68,7 @@ describe("BulkAutomationConfirmModal", () => {
 
   it("uses a semantic minimize button and live progress status", () => {
     const plugin = { register: jest.fn() } as any;
-    const widget = new BulkProgressWidget({
+    const widget = new BulkTranscriptionProgressWidget({
       plugin,
       totalFiles: 4,
     });
