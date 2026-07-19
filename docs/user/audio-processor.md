@@ -33,4 +33,4 @@ YouTube citations link to the matching source timestamp. Empty decision or actio
 
 The audio note and transcript are saved together by default and linked to each other. The audio note opens automatically when delivery finishes.
 
-If either local note is moved or missing, open the surviving SystemSculpt audio note and run **Save audio summary** or **Save audio transcript** from the command palette to open or restore that artifact while the completed server result is still available.
+From any saved Audio Processor note, run **Save audio transcript** to open or restore the linked transcript while the completed server result is still available. Run **Save audio summary** to create or open an optional summary-only third note.
