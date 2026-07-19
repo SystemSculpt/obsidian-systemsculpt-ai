@@ -320,7 +320,7 @@ function fundingDetails(event: AudioProcessorProgressEvent): string {
   const quoted = event.quotedCredits;
   const charged = event.chargedCredits ?? 0;
   const quote = typeof quoted === "number"
-    ? `This audio is quoted at ${quoted.toLocaleString()} credits; ${charged.toLocaleString()} charged so far. `
+    ? `Up to ${quoted.toLocaleString()} credits may be temporarily reserved; ${charged.toLocaleString()} charged so far. Unused reserved credits are returned. `
     : "";
   return `${quote}It will resume automatically after credits are added.`;
 }

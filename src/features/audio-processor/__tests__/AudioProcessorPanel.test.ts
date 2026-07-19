@@ -91,7 +91,10 @@ describe("AudioProcessorPanel", () => {
       resumeRequired: true,
     });
 
-    expect(document.body.textContent).toContain("3,850 credits; 1,100 charged so far");
+    expect(document.body.textContent).toContain(
+      "Up to 3,850 credits may be temporarily reserved; 1,100 charged so far",
+    );
+    expect(document.body.textContent).toContain("Unused reserved credits are returned");
     expect(document.body.textContent).toContain("resume automatically");
     actionButton("Credits & usage").click();
     expect(openCreditsBalanceModal).toHaveBeenCalledTimes(1);
