@@ -50,7 +50,7 @@ export class PlatformRequestClient {
       if (!directFetch) transport = "requestUrl";
     }
     const headers: Record<string, string> = rawBody
-      ? { ...(input.headers || {}) }
+      ? this.rawRequestHeaders(input.headers, input.body as ArrayBuffer | undefined)
       : {
           "Content-Type": "application/json",
           Accept: input.stream ? "text/event-stream" : "application/json",
@@ -127,6 +127,36 @@ export class PlatformRequestClient {
     }
 
     return new Response(responseBody, { status, headers: responseHeaders });
+  }
+
+  private rawRequestHeaders(
+    inputHeaders: Record<string, string> | undefined,
+    body: ArrayBuffer | undefined,
+  ): Record<string, string> {
+    const headers = { ...(inputHeaders || {}) };
+    const contentLengthNames = Object.keys(headers).filter(
+      (name) => name.toLowerCase() === "content-length",
+    );
+    if (contentLengthNames.length > 1) {
+      throw new TypeError("Raw platform requests cannot contain duplicate Content-Length headers.");
+    }
+    const contentLengthName = contentLengthNames[0];
+    if (!contentLengthName) return headers;
+
+    const declaredLength = headers[contentLengthName];
+    if (
+      !body
+      || !/^(0|[1-9]\d*)$/.test(declaredLength)
+      || Number(declaredLength) !== body.byteLength
+    ) {
+      throw new TypeError("Raw platform request Content-Length must match the ArrayBuffer size.");
+    }
+
+    // Chromium and Electron own this restricted header. Supplying it through
+    // Obsidian requestUrl fails before the request reaches the signed object
+    // store; omitting it still sends the exact byte length from the body.
+    delete headers[contentLengthName];
+    return headers;
   }
 
   private async probeStreamingFetch(url: string, signal?: AbortSignal): Promise<boolean> {
