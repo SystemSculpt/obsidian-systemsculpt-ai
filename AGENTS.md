@@ -101,7 +101,7 @@ npm run check:full
   release guards.
 - check:full adds unit, embeddings, compiled integration, and release-script
   suites.
-- CI has one secret-free Ubuntu/Node job and runs npm run check. There is no
+- CI has one secret-free Ubuntu/Node job and runs npm run check:full. There is no
   Windows, Android, iOS, provider, or native-device matrix.
 
 ## Local Obsidian loop
