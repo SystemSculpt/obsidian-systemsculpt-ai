@@ -9,8 +9,12 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 
-const BUNDLE_PATH = path.resolve(__dirname, "..", "..", "main.js");
-const MANIFEST_PATH = path.resolve(__dirname, "..", "..", "manifest.json");
+const DEFAULT_ARTIFACT_ROOT = path.resolve(__dirname, "..", "..");
+const ARTIFACT_ROOT = process.env.SYSTEMSCULPT_PLUGIN_ARTIFACT_ROOT?.trim()
+  ? path.resolve(process.env.SYSTEMSCULPT_PLUGIN_ARTIFACT_ROOT)
+  : DEFAULT_ARTIFACT_ROOT;
+const BUNDLE_PATH = path.join(ARTIFACT_ROOT, "main.js");
+const MANIFEST_PATH = path.join(ARTIFACT_ROOT, "manifest.json");
 const DESKTOP_NODE_MODULES = [
   "node:fs/promises",
   "node:path",
