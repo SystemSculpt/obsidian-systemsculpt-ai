@@ -3,15 +3,23 @@ import { SystemSculptEnvironment } from "../../services/api/SystemSculptEnvironm
 import type {
   AudioProcessorArtifactDescriptor,
   AudioProcessorArtifactManifest,
+  AudioProcessorCleanTranscriptArtifactManifest,
   AudioProcessorCreatedJob,
+  AudioProcessorDetailedArtifactManifest,
   AudioProcessorJob,
+  AudioProcessorMeetingBriefArtifactManifest,
+  AudioProcessorOutputPreset,
   AudioProcessorResult,
   AudioProcessorStage,
   AudioProcessorStatus,
   AudioProcessorTranscriptArtifact,
   AudioProcessorUpload,
 } from "./types";
-import { AUDIO_PROCESSOR_ARTIFACT_MANIFEST_VERSION } from "./types";
+import {
+  AUDIO_PROCESSOR_ARTIFACT_MANIFEST_VERSION,
+  AUDIO_PROCESSOR_OUTPUT_PRESETS,
+  AUDIO_PROCESSOR_PRESET_ARTIFACT_MANIFEST_VERSION,
+} from "./types";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -20,6 +28,12 @@ export interface AudioProcessorApiClientOptions {
   licenseKey: () => string;
   baseUrl?: string;
   requestClient?: PlatformRequestClient;
+}
+
+export interface AudioProcessorCreateOptions {
+  operationId: string;
+  outputPreset: AudioProcessorOutputPreset;
+  signal?: AbortSignal;
 }
 
 export interface AudioProcessorSignedPart {
@@ -82,8 +96,7 @@ export class AudioProcessorApiClient {
       contentType: string;
       sizeBytes: number;
     }>,
-    operationId: string,
-    signal?: AbortSignal,
+    options: AudioProcessorCreateOptions,
   ): Promise<AudioProcessorCreatedJob> {
     const payload = await this.apiJson("/audio-processor/jobs", "POST", {
       source: {
@@ -92,19 +105,28 @@ export class AudioProcessorApiClient {
         content_type: source.contentType,
         size_bytes: source.sizeBytes,
       },
-    }, operationId, signal);
-    return this.parseCreatedJob(payload, true);
+      output_preset: options.outputPreset,
+    }, options.operationId, options.signal);
+    const created = this.parseCreatedJob(payload, true);
+    if (created.job.outputPreset !== options.outputPreset) {
+      malformed("The created audio job did not retain its requested output preset.");
+    }
+    return created;
   }
 
   async createYouTubeJob(
     url: string,
-    operationId: string,
-    signal?: AbortSignal,
+    options: AudioProcessorCreateOptions,
   ): Promise<AudioProcessorCreatedJob> {
     const payload = await this.apiJson("/audio-processor/jobs", "POST", {
       source: { type: "youtube", url },
-    }, operationId, signal);
-    return this.parseCreatedJob(payload, false);
+      output_preset: options.outputPreset,
+    }, options.operationId, options.signal);
+    const created = this.parseCreatedJob(payload, false);
+    if (created.job.outputPreset !== options.outputPreset) {
+      malformed("The created YouTube job did not retain its requested output preset.");
+    }
+    return created;
   }
 
   async getPartUrl(
@@ -469,6 +491,9 @@ function parseJob(
   const job = record(value, "Audio job");
   const id = string(job.id, "job.id", 256);
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,255}$/.test(id)) malformed("job.id was invalid.");
+  const outputPreset = Object.prototype.hasOwnProperty.call(job, "output_preset")
+    ? parseOutputPreset(job.output_preset, "job.output_preset")
+    : "detailed";
   if (!STATUSES.includes(job.status as AudioProcessorStatus)) malformed("job.status was invalid.");
   if (!STAGES.includes(job.stage as AudioProcessorStage)) malformed("job.stage was invalid.");
   if (typeof job.progress !== "number" || !Number.isFinite(job.progress) || job.progress < 0 || job.progress > 1) {
@@ -495,9 +520,15 @@ function parseJob(
   const result = resultValue == null ? null : parseResult(resultValue);
   if (status === "succeeded" && !result) malformed("A succeeded audio job requires a result.");
   if (status !== "succeeded" && result) malformed("Only a succeeded audio job may include a result.");
+  if (result && result.outputPreset !== outputPreset) {
+    malformed("The audio result output preset did not match its job.");
+  }
   const transcriptArtifact = transcriptArtifactValue == null
     ? null
     : parseTranscriptArtifact(transcriptArtifactValue);
+  if (transcriptArtifact && transcriptArtifact.outputPreset !== outputPreset) {
+    malformed("The transcript artifact output preset did not match its job.");
+  }
   if (
     transcriptArtifact
     && (
@@ -510,6 +541,7 @@ function parseJob(
 
   return {
     id,
+    outputPreset,
     status,
     stage,
     progress: job.progress,
@@ -532,24 +564,38 @@ function parseJobError(value: unknown): string | null {
 
 function parseResult(value: unknown): AudioProcessorResult {
   const result = record(value, "Audio job result");
-  const parsed: AudioProcessorResult = {
+  const hasOutputPreset = Object.prototype.hasOwnProperty.call(result, "output_preset");
+  const outputPreset = hasOutputPreset
+    ? parseOutputPreset(result.output_preset, "output_preset")
+    : "detailed";
+  const summaryUrl = outputPreset === "clean_transcript"
+    ? result.summary_url === null
+      ? null
+      : malformed("Clean transcript results require summary_url to be null.")
+    : publicHttpsUrl(result.summary_url, "summary_url");
+  const parsed = {
     artifactJobId: string(result.artifact_job_id, "artifact_job_id", 255),
     noteUrl: publicHttpsUrl(result.note_url, "note_url"),
-    summaryUrl: publicHttpsUrl(result.summary_url, "summary_url"),
+    summaryUrl,
     transcriptUrl: publicHttpsUrl(result.transcript_url, "transcript_url"),
     urlExpiresInSeconds: positiveInteger(result.url_expires_in_seconds, "url_expires_in_seconds"),
     filename: string(result.filename, "filename", 255),
-    artifactManifest: null,
+    outputPreset,
   };
+  let artifactManifest: AudioProcessorArtifactManifest | null = null;
   const hasArtifactManifest = Object.prototype.hasOwnProperty.call(result, "artifact_manifest");
   if (hasArtifactManifest && result.artifact_manifest == null) {
     malformed("The audio result did not include a complete artifact manifest.");
   }
   if (result.artifact_manifest != null) {
     const manifest = parseArtifactManifest(result.artifact_manifest);
+    if (manifest.outputPreset !== outputPreset) {
+      malformed("The artifact manifest output preset did not match the audio result.");
+    }
+    const manifestSummaryUrl = manifest.summary?.url ?? null;
     if (
       manifest.note.url !== parsed.noteUrl
-      || manifest.summary.url !== parsed.summaryUrl
+      || manifestSummaryUrl !== parsed.summaryUrl
       || manifest.transcript.url !== parsed.transcriptUrl
       || manifest.note.filename !== parsed.filename
     ) {
@@ -561,22 +607,107 @@ function parseResult(value: unknown): AudioProcessorResult {
     if (resultSha256 && resultSha256 !== manifest.note.sha256) {
       malformed("The artifact manifest note digest did not match the audio result.");
     }
-    parsed.artifactManifest = manifest;
+    artifactManifest = manifest;
   }
-  return parsed;
+
+  if (outputPreset === "clean_transcript") {
+    if (
+      artifactManifest
+      && artifactManifest.outputPreset !== "clean_transcript"
+    ) {
+      malformed("The clean transcript manifest was inconsistent.");
+    }
+    return {
+      ...parsed,
+      outputPreset,
+      summaryUrl: null,
+      artifactManifest,
+    };
+  }
+  if (summaryUrl === null) {
+    malformed("Detailed and meeting brief results require a summary URL.");
+  }
+
+  if (outputPreset === "meeting_brief") {
+    if (
+      artifactManifest
+      && artifactManifest.outputPreset !== "meeting_brief"
+    ) {
+      malformed("The meeting brief manifest was inconsistent.");
+    }
+    return {
+      ...parsed,
+      outputPreset,
+      summaryUrl,
+      artifactManifest,
+    };
+  }
+
+  if (
+    artifactManifest
+    && artifactManifest.outputPreset !== "detailed"
+  ) {
+    malformed("The detailed note manifest was inconsistent.");
+  }
+  return {
+    ...parsed,
+    outputPreset,
+    summaryUrl,
+    artifactManifest,
+  };
 }
 
 function parseArtifactManifest(value: unknown): AudioProcessorArtifactManifest {
   const manifest = record(value, "Audio artifact manifest");
-  if (manifest.version !== AUDIO_PROCESSOR_ARTIFACT_MANIFEST_VERSION) {
+  if (manifest.version === AUDIO_PROCESSOR_ARTIFACT_MANIFEST_VERSION) {
+    if (
+      Object.prototype.hasOwnProperty.call(manifest, "output_preset")
+      && manifest.output_preset !== "detailed"
+    ) {
+      malformed("Version 1 audio artifact manifests are detailed notes.");
+    }
+    const detailed: AudioProcessorDetailedArtifactManifest = {
+      version: AUDIO_PROCESSOR_ARTIFACT_MANIFEST_VERSION,
+      outputPreset: "detailed",
+      note: parseArtifactDescriptor(manifest.note, "note"),
+      summary: parseArtifactDescriptor(manifest.summary, "summary"),
+      transcript: parseArtifactDescriptor(manifest.transcript, "transcript"),
+    };
+    return detailed;
+  }
+
+  if (manifest.version !== AUDIO_PROCESSOR_PRESET_ARTIFACT_MANIFEST_VERSION) {
     malformed("The audio artifact manifest version was unsupported.");
   }
-  return {
-    version: AUDIO_PROCESSOR_ARTIFACT_MANIFEST_VERSION,
+  const outputPreset = parseOutputPreset(
+    manifest.output_preset,
+    "artifact_manifest.output_preset",
+  );
+  const common = {
+    version: AUDIO_PROCESSOR_PRESET_ARTIFACT_MANIFEST_VERSION,
     note: parseArtifactDescriptor(manifest.note, "note"),
-    summary: parseArtifactDescriptor(manifest.summary, "summary"),
     transcript: parseArtifactDescriptor(manifest.transcript, "transcript"),
   };
+  if (outputPreset === "meeting_brief") {
+    const meetingBrief: AudioProcessorMeetingBriefArtifactManifest = {
+      ...common,
+      outputPreset,
+      summary: parseArtifactDescriptor(manifest.summary, "summary"),
+    };
+    return meetingBrief;
+  }
+  if (outputPreset === "clean_transcript") {
+    if (manifest.summary !== null) {
+      malformed("Clean transcript artifact manifests require summary to be null.");
+    }
+    const cleanTranscript: AudioProcessorCleanTranscriptArtifactManifest = {
+      ...common,
+      outputPreset,
+      summary: null,
+    };
+    return cleanTranscript;
+  }
+  malformed("Version 2 audio artifact manifests require a preset output.");
 }
 
 function parseArtifactDescriptor(
@@ -595,6 +726,9 @@ function parseTranscriptArtifact(value: unknown): AudioProcessorTranscriptArtifa
   const artifact = record(value, "Audio transcript artifact");
   return {
     artifactJobId: string(artifact.artifact_job_id, "transcript_artifact.artifact_job_id", 255),
+    outputPreset: Object.prototype.hasOwnProperty.call(artifact, "output_preset")
+      ? parseOutputPreset(artifact.output_preset, "transcript_artifact.output_preset")
+      : "detailed",
     transcriptUrl: publicHttpsUrl(artifact.transcript_url, "transcript_artifact.transcript_url"),
     urlExpiresInSeconds: positiveInteger(
       artifact.url_expires_in_seconds,
@@ -611,6 +745,13 @@ function sha256(value: unknown, label: string): string {
     malformed(`${label} must be a SHA-256 digest.`);
   }
   return digest;
+}
+
+function parseOutputPreset(value: unknown, label: string): AudioProcessorOutputPreset {
+  if (!AUDIO_PROCESSOR_OUTPUT_PRESETS.includes(value as AudioProcessorOutputPreset)) {
+    malformed(`${label} was invalid.`);
+  }
+  return value as AudioProcessorOutputPreset;
 }
 
 function nonNegativeInteger(value: unknown, label: string): number {

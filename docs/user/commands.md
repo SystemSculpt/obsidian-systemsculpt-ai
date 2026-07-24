@@ -45,9 +45,9 @@ Chat always runs through SystemSculpt. There are no separate chat-model commands
 | --- | --- | --- | --- |
 | Toggle Audio Recorder |  | `toggle-audio-recorder` | Starts/stops recording |
 | Transcribe an audio file |  | `transcribe-audio-file` | Transcribes a vault audio file through SystemSculpt |
-| Open audio processor |  | `open-audio-processor` | Creates a structured audio note and linked timestamped transcript |
+| Open audio processor |  | `open-audio-processor` | Processes audio or YouTube into a detailed note, meeting brief, or clean transcript |
 | Process YouTube video |  | `process-youtube-video` | Opens Audio Processor on the YouTube input |
-| Save audio summary |  | `save-audio-summary` | Creates or opens an optional summary-only note for the active Audio Processor note |
+| Save audio summary |  | `save-audio-summary` | Creates or opens a summary-only note for detailed and meeting brief outputs |
 | Save audio transcript |  | `save-audio-transcript` | Opens or restores the linked transcript for the active Audio Processor note |
 
 ## Studio

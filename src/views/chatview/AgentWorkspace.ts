@@ -320,10 +320,6 @@ export class AgentWorkspace extends Component {
     this.composer.setValue(value, options);
   }
 
-  public setWebSearchEnabled(enabled: boolean): void {
-    this.composer.setWebSearchEnabled(enabled);
-  }
-
   public setApprovalMode(mode: "ask" | "full-access"): void {
     this.composer.setApprovalMode(mode);
   }

@@ -3,12 +3,14 @@ import type SystemSculptPlugin from "../../main";
 import { StandardModal } from "../../core/ui/modals/standard/StandardModal";
 import {
   createUiAction,
+  createUiRadioGroup,
   createUiSearch,
   createUiState,
   createUiTabs,
   getSurfaceOwnerWindow,
   updateUiAction,
   type UiSearchHandle,
+  type UiRadioGroupHandle,
   type UiTabsHandle,
 } from "../../core/ui/surface";
 import {
@@ -25,6 +27,8 @@ import { AudioProcessorPanel } from "./AudioProcessorPanel";
 import { AudioProcessorService } from "./AudioProcessorService";
 import {
   AUDIO_PROCESSOR_MAX_AUDIO_BYTES,
+  normalizeAudioProcessorOutputPreset,
+  type AudioProcessorOutputPreset,
   type AudioProcessorSource,
 } from "./types";
 import { parseYouTubeVideoUrl, requireYouTubeVideoUrl } from "./youtube";
@@ -49,12 +53,14 @@ export class AudioProcessorModal extends StandardModal {
   private audioTab: AudioPickerTab = "vault";
   private selectedAudio: AudioProcessorSelection | null = null;
   private youtubeUrl = "";
+  private outputPreset: AudioProcessorOutputPreset;
   private audioFiles: TFile[] = [];
   private filteredAudioFiles: TFile[] = [];
   private searchQuery = "";
   private launching = false;
 
   private sourceTabs: UiTabsHandle<AudioProcessorTab> | null = null;
+  private outputPresetGroup: UiRadioGroupHandle<AudioProcessorOutputPreset> | null = null;
   private audioTabs: UiTabsHandle<AudioPickerTab> | null = null;
   private search: UiSearchHandle | null = null;
   private audioListEl: HTMLElement | null = null;
@@ -71,6 +77,9 @@ export class AudioProcessorModal extends StandardModal {
   ) {
     super(plugin.app);
     this.activeTab = options.initialTab ?? "audio";
+    this.outputPreset = normalizeAudioProcessorOutputPreset(
+      plugin.settings.audioProcessorOutputPreset,
+    );
     this.setSize("medium");
     this.modalEl.addClass("ss-modal--scrollable", "ss-audio-processor-modal");
   }
@@ -79,7 +88,7 @@ export class AudioProcessorModal extends StandardModal {
     super.onOpen();
     this.addTitle(
       "Audio Processor",
-      "Turn audio or a YouTube video into a polished note with a linked full transcript.",
+      "Turn audio or a YouTube video into a detailed note, meeting brief, or clean transcript.",
     );
     this.processButton = this.addActionButton(
       this.activeTab === "youtube" ? "Process video" : "Process audio",
@@ -101,6 +110,8 @@ export class AudioProcessorModal extends StandardModal {
   onClose(): void {
     this.sourceTabs?.destroy();
     this.sourceTabs = null;
+    this.outputPresetGroup?.destroy();
+    this.outputPresetGroup = null;
     this.audioTabs?.destroy();
     this.audioTabs = null;
     this.search?.destroy();
@@ -130,6 +141,7 @@ export class AudioProcessorModal extends StandardModal {
     const youtubePanel = shell.createDiv({ cls: "ss-audio-processor__panel" });
     this.renderAudioPanel(audioPanel);
     this.renderYouTubePanel(youtubePanel);
+    this.renderOutputPreset(shell);
 
     this.sourceTabs = createUiTabs(tablist, [
       { id: "audio", button: audioButton, panel: audioPanel },
@@ -321,7 +333,7 @@ export class AudioProcessorModal extends StandardModal {
   private renderYouTubePanel(container: HTMLElement): void {
     container.createDiv({
       cls: "ss-audio-processor__intro",
-      text: "Paste a YouTube video link. SystemSculpt handles retrieval, transcription, and summarization on the server.",
+      text: "Paste a YouTube video link. SystemSculpt handles retrieval, transcription, and note creation on the server.",
     });
     const field = container.createDiv({ cls: "ss-audio-processor__youtube-field" });
     const inputId = `ss-audio-youtube-${this.instanceId}`;
@@ -353,15 +365,69 @@ export class AudioProcessorModal extends StandardModal {
       this.syncProcessButton();
     });
     this.renderYouTubeStatus();
+  }
 
-    const defaults = container.createDiv({ cls: "ss-audio-processor__defaults" });
-    setIcon(defaults.createSpan({ attr: { "aria-hidden": "true" } }), "sparkles");
-    const copy = defaults.createDiv();
-    copy.createDiv({ cls: "ss-audio-processor__defaults-title", text: "Polished note + full transcript" });
-    copy.createDiv({
-      cls: "ss-audio-processor__defaults-copy",
-      text: "You’ll get a concise note with key points, decisions, action items, and open questions, plus a linked timestamped transcript—no setup required.",
+  private renderOutputPreset(container: HTMLElement): void {
+    const section = container.createEl("section", {
+      cls: "ss-audio-processor__output",
     });
+    const titleId = `ss-audio-processor-output-${this.instanceId}`;
+    section.createEl("h3", {
+      cls: "ss-audio-processor__section-title",
+      text: "Output",
+      attr: { id: titleId },
+    });
+    const choices = section.createDiv({
+      cls: "ss-audio-processor__output-options",
+    });
+    const detailedButton = this.createOutputPresetOption(
+      choices,
+      "Detailed note",
+      "Summary, decisions, action items, and a linked timestamped transcript.",
+      "file-text",
+    );
+    const meetingBriefButton = this.createOutputPresetOption(
+      choices,
+      "Meeting brief",
+      "Outcome, decisions, action items, and open questions, plus a linked transcript.",
+      "list-checks",
+    );
+    const cleanTranscriptButton = this.createOutputPresetOption(
+      choices,
+      "Clean transcript",
+      "Readable paragraphs without timestamps in the main note, plus a linked transcript.",
+      "align-left",
+    );
+    this.outputPresetGroup = createUiRadioGroup(
+      choices,
+      [
+        { value: "detailed", button: detailedButton },
+        { value: "meeting_brief", button: meetingBriefButton },
+        { value: "clean_transcript", button: cleanTranscriptButton },
+      ],
+      {
+        value: this.outputPreset,
+        labelledBy: titleId,
+        onChange: (preset) => {
+          this.outputPreset = preset;
+        },
+      },
+    );
+  }
+
+  private createOutputPresetOption(
+    container: HTMLElement,
+    label: string,
+    detail: string,
+    icon: string,
+  ): HTMLButtonElement {
+    const button = createUiAction(container, { label, icon });
+    button.addClass("ss-audio-processor__output-option");
+    button.createSpan({
+      cls: "ss-audio-processor__output-detail",
+      text: detail,
+    });
+    return button;
   }
 
   private refreshAudioFiles(): void {
@@ -568,6 +634,7 @@ export class AudioProcessorModal extends StandardModal {
     try {
       const note = await service.process(source, {
         signal: controller.signal,
+        outputPreset: this.outputPreset,
         onProgress: (event) => panel.update(event),
       });
       panel.succeed(note);

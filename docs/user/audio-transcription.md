@@ -2,7 +2,7 @@
 
 SystemSculpt handles in-app recording and transcription workflows inside Obsidian.
 
-To turn existing audio or a YouTube video into a structured note with a summary and full transcript, use the [Audio Processor](audio-processor.md).
+To turn existing audio or a YouTube video into the detailed note, meeting brief, or clean transcript you select, plus a full timestamped companion transcript, use the [Audio Processor](audio-processor.md).
 
 ## Configure
 
@@ -48,7 +48,7 @@ Audio and transcription settings now live inside the `Workflow` tab.
 - `Transcribe an audio file`
 - `Open audio processor`
 - `Process YouTube video`
-- `Save audio summary` (with a saved SystemSculpt audio note active)
+- `Save audio summary` (with a saved detailed or meeting brief SystemSculpt audio note active)
 - `Save audio transcript` (with a saved SystemSculpt audio note active)
 
 ## Supported recording/transcription extensions

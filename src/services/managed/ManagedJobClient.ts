@@ -16,6 +16,11 @@ export const MANAGED_IMAGE_OUTPUT_DESCRIPTOR = Object.freeze({
 } as const);
 type Operation = "create" | "part_url" | "upload_complete" | "upload_abort" | "start" | "status" | "download" | "input_prepare" | "generation_create" | "generation_list" | "generation_status";
 type ErrorCode = "invalid_request" | "unsupported_image_output_contract" | "license_required" | "payment_required" | "license_rejected" | "not_found" | "output_not_ready" | "operation_conflict" | "upgrade_required" | "rate_limited" | "internal_error" | "temporarily_unavailable" | "managed_job_error" | "malformed_response" | "unsupported_operation" | "transcription_failed" | "document_processing_failed" | "image_generation_failed" | "job_expired";
+const MANAGED_JOB_HTTP_ERROR_MESSAGES: Readonly<Record<number, string>> = Object.freeze({
+  429: "SystemSculpt is receiving too many processing requests right now.",
+  502: "SystemSculpt processing is temporarily unavailable.",
+  503: "SystemSculpt processing is temporarily unavailable.",
+});
 export class ManagedJobError extends Error { constructor(public readonly code: ErrorCode, message: string, public readonly status?: number, public readonly requestId: string | null = null, public readonly retryable = false) { super(message); this.name = "ManagedJobError"; } }
 
 export const MANAGED_JOB_OPERATION_STATUSES = {
@@ -135,7 +140,7 @@ export class ManagedJobClient {
   }
 
   private async parse(capability: ManagedJobCapability, operation: Operation, result: ManagedTransportResult, imageOutputRequestId?: string): Promise<unknown> {
-    if (!result.response.ok) { if (imageOutputRequestId) return this.imageOutputError(result, imageOutputRequestId); const map: Record<number, [ErrorCode, boolean]> = { 400: ["invalid_request", false], 401: ["license_required", false], 402: ["payment_required", false], 403: ["license_rejected", false], 409: ["operation_conflict", false], 426: ["upgrade_required", false], 429: ["rate_limited", true], 502: ["temporarily_unavailable", true], 503: ["temporarily_unavailable", true] }; const [code, retryable] = map[result.response.status] ?? ["managed_job_error", false]; throw new ManagedJobError(code, `Managed job request failed (${result.response.status}).`, result.response.status, result.diagnostics.requestId, retryable); }
+    if (!result.response.ok) { if (imageOutputRequestId) return this.imageOutputError(result, imageOutputRequestId); const map: Record<number, [ErrorCode, boolean]> = { 400: ["invalid_request", false], 401: ["license_required", false], 402: ["payment_required", false], 403: ["license_rejected", false], 409: ["operation_conflict", false], 426: ["upgrade_required", false], 429: ["rate_limited", true], 502: ["temporarily_unavailable", true], 503: ["temporarily_unavailable", true] }; const [code, retryable] = map[result.response.status] ?? ["managed_job_error", false]; const message = MANAGED_JOB_HTTP_ERROR_MESSAGES[result.response.status] ?? `Managed job request failed (${result.response.status}).`; throw new ManagedJobError(code, message, result.response.status, result.diagnostics.requestId, retryable); }
     if (imageOutputRequestId && result.response.headers.get("x-request-id") !== imageOutputRequestId) malformed("Invalid managed image output response request ID.");
     let value: unknown; try { value = await result.response.json(); } catch { malformed("Expected a JSON response."); }
     const parsed = this.validateResponse(capability, operation, value); const terminal = operation === "upload_abort" ? null : this.terminalError(capability, parsed); if (terminal) throw new ManagedJobError(terminal, terminal === "job_expired" ? "The managed job expired." : "Managed job failed.", result.response.status, result.diagnostics.requestId, false); return parsed;

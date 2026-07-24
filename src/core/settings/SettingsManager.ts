@@ -683,6 +683,14 @@ export class SettingsManager {
       validatedSettings.cleanTranscriptionOutput = defaultSettings.cleanTranscriptionOutput;
     }
 
+    if (
+      validatedSettings.audioProcessorOutputPreset !== "detailed"
+      && validatedSettings.audioProcessorOutputPreset !== "meeting_brief"
+      && validatedSettings.audioProcessorOutputPreset !== "clean_transcript"
+    ) {
+      validatedSettings.audioProcessorOutputPreset = defaultSettings.audioProcessorOutputPreset;
+    }
+
     if (typeof validatedSettings.autoSubmitAfterTranscription !== "boolean") {
       validatedSettings.autoSubmitAfterTranscription = defaultSettings.autoSubmitAfterTranscription;
     }

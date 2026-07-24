@@ -1,11 +1,18 @@
 /**
  * @jest-environment jsdom
  */
-import { App, TFile } from "obsidian";
+import { App, Notice, TFile } from "obsidian";
 import { ContextFileService } from "../ContextFileService";
 import { ChatMessage } from "../../types";
+import { ImageProcessor } from "../../utils/ImageProcessor";
+import { ERROR_CODES, SystemSculptError } from "../../utils/errors";
 
 // Mock dependencies
+jest.mock("obsidian", () => {
+  const actual = jest.requireActual("obsidian");
+  return { ...actual, Notice: jest.fn() };
+});
+
 jest.mock("../../utils/ImageProcessor", () => ({
   ImageProcessor: {
     processImage: jest.fn().mockResolvedValue("base64encodedimage"),
@@ -147,6 +154,38 @@ describe("ContextFileService", () => {
       const result = await service.getContextFileContents("[[images/photo.webp]]");
 
       expect(result).toEqual({ type: "image", base64: "base64encodedimage" });
+    });
+
+    it.each([
+      {
+        path: "images/large.png",
+        error: new SystemSculptError("Image too large", ERROR_CODES.FILE_TOO_LARGE, 413),
+        notice: "large.png is over the 10 MB image context limit.",
+      },
+      {
+        path: "images/vector.svg",
+        error: new SystemSculptError("Unsupported image format", ERROR_CODES.UNSUPPORTED_FORMAT, 415),
+        notice: "vector.svg can't be used as image context. Use PNG, JPG, or WebP.",
+      },
+      {
+        path: "images/broken.png",
+        error: new SystemSculptError("Failed to process image", ERROR_CODES.PROCESSING_ERROR, 500),
+        notice: "broken.png couldn't be read as image context. Try another copy of the image.",
+      },
+    ])("shows a per-file notice when $path cannot be used as image context", async ({
+      path,
+      error,
+      notice,
+    }) => {
+      const mockFile = new TFile({ path });
+      (mockApp.metadataCache.getFirstLinkpathDest as jest.Mock).mockReturnValue(mockFile);
+      (ImageProcessor.processImage as jest.Mock).mockRejectedValueOnce(error);
+
+      const result = await service.getContextFileContents(`[[${path}]]`);
+
+      expect(result).toBeNull();
+      expect(Notice).toHaveBeenCalledWith(notice, 6000);
+      expect(mockApp.vault.read).not.toHaveBeenCalled();
     });
   });
 

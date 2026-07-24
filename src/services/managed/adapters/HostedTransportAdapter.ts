@@ -9,6 +9,7 @@ import { decodeManagedAdmissionResponse } from "../ManagedAdmissionResponse";
 export interface HostedTransportOptions { baseUrl: string; pluginVersion: string; licenseKey: () => string; requestClient?: PlatformRequestClient; }
 export type ManagedChatTransportTicket = Readonly<{ kind: "managed_chat_transport_ticket" }>;
 type ManagedChatConfiguration = Readonly<{ licenseKey: string; pluginVersion: string }>;
+const MANAGED_CHAT_ACTIVITY_CONTRACT = "web-search-v1";
 
 function isReplaySafeManagedRead(operation: ManagedTransportOperation): boolean {
   return (operation.method ?? "POST").toUpperCase() === "GET";
@@ -52,7 +53,13 @@ export class HostedTransportAdapter {
   streamAcceptedChat(ticket: ManagedChatTransportTicket, operation: ManagedTransportOperation) {
     const configuration = this.managedChatConfigurations.get(ticket);
     if (!configuration) return Promise.reject(new Error("Managed Chat transport configuration is unavailable."));
-    return this.send({ ...operation, method: "POST" }, {}, true, false, configuration);
+    return this.send(
+      { ...operation, method: "POST" },
+      { "x-systemsculpt-chat-activity": MANAGED_CHAT_ACTIVITY_CONTRACT },
+      true,
+      false,
+      configuration,
+    );
   }
   job(operation: ManagedTransportOperation, readErrorBody = true) { return this.send(operation, operation.headers ?? {}, false, true, undefined, readErrorBody); }
 

@@ -26,10 +26,20 @@ client-side model runtime is required.
 
 ## Server-owned web search
 
-The Web control asks SystemSculpt to use web search
-for that turn. Search and page retrieval happen on the server; the plugin
-receives the resulting agent events and citations. There are no client-side
-web-search tools, direct web endpoints, or web-research corpus directory.
+SystemSculpt can use web search when current or external information would
+materially improve its answer. Search happens on the server; the plugin
+receives brief activity updates and cited answers. There are no
+client-side web-search tools, direct web endpoints, provider credentials, or
+web-research corpus directory.
+
+## Vault and image context
+
+Use the files control in the composer to add vault context, including supported
+images. SystemSculpt sends image context as image input, so you can ask about
+what is visible in a diagram, screenshot, or other supported vault image. The
+supported formats are PNG, JPG, and WebP, with a 10 MB limit per image. The
+semantic vault index remains text-based; adding an image to the current chat is
+different from searching every image in the vault.
 
 ## Approval behavior
 

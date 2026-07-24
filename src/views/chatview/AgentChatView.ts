@@ -50,6 +50,7 @@ import {
   DEFAULT_MANAGED_CHAT_INPUT_LIMITS,
   type ManagedChatInputLimits,
 } from "../../services/managed/ManagedChatInputLimits";
+import { isVaultImageContextFileExtension } from "../../constants/fileTypes";
 
 export type AutomationApprovalMode = "interactive" | "auto-approve" | "deny";
 export type { ChatApprovalMode } from "./storage/ChatPersistenceTypes";
@@ -443,8 +444,10 @@ export class AgentChatView extends ItemView {
   public setInputText(value: string | object, options?: { focus?: boolean }): void {
     this.workspace?.setInputText(typeof value === "string" ? value : JSON.stringify(value, null, 2), options);
   }
-  public isWebSearchEnabled(): boolean { return this.workspace?.composer.isWebSearchEnabled() ?? false; }
-  public setWebSearchEnabled(enabled: boolean): void { this.workspace?.setWebSearchEnabled(enabled); }
+  /** @deprecated Managed web search is server-owned and selected autonomously. */
+  public isWebSearchEnabled(): boolean { return false; }
+  /** @deprecated Managed web search is server-owned and selected autonomously. */
+  public setWebSearchEnabled(_enabled: boolean): void {}
   public getAutomationApprovalMode(): AutomationApprovalMode { return this.automationApprovalMode; }
   public setAutomationApprovalMode(mode: AutomationApprovalMode): void { this.automationApprovalMode = mode; }
   public async sendAutomationMessage(options: {
@@ -897,8 +900,26 @@ export class AgentChatView extends ItemView {
   private syncAttachments(): void {
     this.workspace?.setAttachments([...this.contextManager.getContextFiles()].map((entry) => {
       const path = entry.replace(/^\[\[(.*?)\]\]$/, "$1");
-      return { id: entry, label: path.split("/").pop() || path, path: entry, kind: "vault" as const };
+      const file = this.app.vault.getAbstractFileByPath(path);
+      const isImage = file instanceof TFile
+        && isVaultImageContextFileExtension(file.extension);
+      const previewUrl = isImage ? this.resolveVaultImagePreview(file) : undefined;
+      return {
+        id: entry,
+        label: path.split("/").pop() || path,
+        path: entry,
+        kind: isImage ? "image" as const : "vault" as const,
+        ...(previewUrl ? { previewUrl } : {}),
+      };
     }));
+  }
+
+  private resolveVaultImagePreview(file: TFile): string | undefined {
+    try {
+      return this.app.vault.getResourcePath(file) || undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   private async addDroppedVaultContext(path: string): Promise<void> {

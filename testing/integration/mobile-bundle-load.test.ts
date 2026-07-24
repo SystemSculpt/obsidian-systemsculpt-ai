@@ -125,6 +125,11 @@ describe("built bundle in Obsidian Mobile", () => {
     expect(plugin._views.has(STUDIO_VIEW_TYPE)).toBe(true);
     expect(plugin._views.has(EMBEDDINGS_VIEW_TYPE)).toBe(true);
     expect(plugin._views.has(CHAT_VIEW_TYPE)).toBe(true);
+    const audioProcessorRibbon = plugin._ribbons.find(
+      (ribbon: HTMLElement) => ribbon.getAttribute("aria-label") === "Open Audio Processor",
+    );
+    expect(audioProcessorRibbon).toBeDefined();
+    expect(audioProcessorRibbon.icon).toBe("audio-lines");
 
     const settingsTab = plugin._settingTabs[0];
     expect(settingsTab).toBeDefined();

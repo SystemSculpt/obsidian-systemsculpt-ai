@@ -5,10 +5,12 @@ import {
   AUDIO_FILE_EXTENSIONS,
   MANAGED_DOCUMENT_CONVERSION_EXTENSIONS,
   MANAGED_DOCUMENT_MIME_TYPE_MAP,
+  VAULT_IMAGE_CONTEXT_EXTENSIONS,
   normalizeFileExtension,
   isAudioFileExtension,
   isAutoDocumentConversionFileExtension,
   isManagedDocumentConversionFileExtension,
+  isVaultImageContextFileExtension,
   getManagedDocumentMimeType,
 } from "../fileTypes";
 
@@ -61,5 +63,13 @@ describe("shared extension helpers", () => {
     expect(isAudioFileExtension("aac")).toBe(false);
     expect(isAudioFileExtension("opus")).toBe(false);
     expect(isAudioFileExtension("pdf")).toBe(false);
+  });
+
+  it("keeps the vault image context contract centralized", () => {
+    expect([...VAULT_IMAGE_CONTEXT_EXTENSIONS]).toEqual(["jpg", "jpeg", "png", "webp"]);
+    expect(isVaultImageContextFileExtension(" PNG ")).toBe(true);
+    expect(isVaultImageContextFileExtension("WEBP")).toBe(true);
+    expect(isVaultImageContextFileExtension("svg")).toBe(false);
+    expect(isVaultImageContextFileExtension("gif")).toBe(false);
   });
 });

@@ -12,9 +12,19 @@ import { STUDIO_PROJECT_EXTENSION } from "../../studio/types";
 import {
   isAudioFileExtension,
   isAutoDocumentConversionFileExtension,
+  isVaultImageContextFileExtension,
   normalizeFileExtension,
 } from "../../constants/fileTypes";
-import type { AudioProcessorArtifactKind } from "../../features/audio-processor/types";
+import type {
+  AudioProcessorArtifactKind,
+  AudioProcessorOutputPreset,
+} from "../../features/audio-processor/types";
+
+type ActiveAudioArtifactReference = {
+  artifactJobId: string;
+  deliveryJobId: string;
+  outputPreset: AudioProcessorOutputPreset;
+};
 
 type StudioCommandViewLike = {
   getViewType(): string;
@@ -35,7 +45,6 @@ type ChatCommandViewLike = {
 };
 
 type AgentChatViewModule = typeof import("../../views/chatview/AgentChatView");
-const AUDIO_PROCESSOR_UNAVAILABLE_NOTICE = "Audio Processor is temporarily unavailable.";
 
 async function loadTitleGenerationServiceModule(): Promise<
   typeof import("../../services/TitleGenerationService")
@@ -198,17 +207,7 @@ export class CommandManager {
   }
 
   private async openAudioProcessor(initialTab: "audio" | "youtube"): Promise<void> {
-    const {
-      AudioProcessorModal,
-      canOpenAudioProcessor,
-      resumeAudioProcessorJobs,
-    } = await import("../../features/audio-processor");
-    if (!await canOpenAudioProcessor(this.plugin)) {
-      new Notice(AUDIO_PROCESSOR_UNAVAILABLE_NOTICE, 6000);
-      return;
-    }
-    void resumeAudioProcessorJobs(this.plugin, { notifyOnDiscoveryFailure: true });
-    new AudioProcessorModal(this.plugin, { initialTab }).open();
+    await this.ribbonManager.openAudioProcessor(initialTab);
   }
 
   private registerAudioArtifactCommand(kind: AudioProcessorArtifactKind): void {
@@ -219,37 +218,43 @@ export class CommandManager {
       checkCallback: (checking: boolean) => {
         const jobReference = this.getActiveAudioArtifactReference();
         if (!jobReference) return false;
+        if (kind === "summary" && jobReference.outputPreset === "clean_transcript") {
+          return false;
+        }
         if (!checking) void this.saveAudioArtifact(jobReference, kind);
         return true;
       },
     });
   }
 
-  private getActiveAudioArtifactReference(): {
-    artifactJobId: string;
-    deliveryJobId: string;
-  } | null {
+  private getActiveAudioArtifactReference(): ActiveAudioArtifactReference | null {
     const activeFile = this.app.workspace.getActiveFile();
     if (!activeFile || normalizeFileExtension(activeFile.extension) !== "md") return null;
     const frontmatter = this.app.metadataCache.getFileCache(activeFile)?.frontmatter;
     const jobId = frontmatter?.["systemsculpt-audio-job-id"];
     const deliveryJobId = frontmatter?.["systemsculpt-audio-delivery-job-id"];
     const artifact = frontmatter?.["systemsculpt-audio-artifact"];
+    const outputPreset = frontmatter?.["output-preset"];
     if (
       typeof jobId !== "string"
       || !jobId.trim()
       || !["full", "summary", "transcript"].includes(artifact)
+      || (
+        outputPreset !== undefined
+        && !["detailed", "meeting_brief", "clean_transcript"].includes(outputPreset)
+      )
     ) return null;
     return {
       artifactJobId: jobId.trim(),
       deliveryJobId: typeof deliveryJobId === "string" && deliveryJobId.trim()
         ? deliveryJobId.trim()
         : jobId.trim(),
+      outputPreset: outputPreset ?? "detailed",
     };
   }
 
   private async saveAudioArtifact(
-    jobReference: Readonly<{ artifactJobId: string; deliveryJobId: string }>,
+    jobReference: Readonly<ActiveAudioArtifactReference>,
     kind: AudioProcessorArtifactKind,
   ): Promise<void> {
     try {
@@ -323,7 +328,8 @@ export class CommandManager {
         const activeFile = this.app.workspace.getActiveFile();
         if (!activeFile) return false;
         const extension = normalizeFileExtension(activeFile.extension);
-        const supported = ["md", "txt", "markdown", "jpg", "jpeg", "png", "webp", "svg"].includes(extension)
+        const supported = ["md", "txt", "markdown"].includes(extension)
+          || isVaultImageContextFileExtension(extension)
           || isAutoDocumentConversionFileExtension(extension)
           || isAudioFileExtension(extension);
         if (!supported) return false;

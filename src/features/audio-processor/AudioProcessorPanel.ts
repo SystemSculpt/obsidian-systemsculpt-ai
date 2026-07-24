@@ -44,7 +44,7 @@ export class AudioProcessorPanel {
       steps: [
         { id: "source", label: "Source" },
         { id: "transcribing", label: "Transcript" },
-        { id: "summarizing", label: "Summary" },
+        { id: "summarizing", label: "Note" },
         { id: "saving", label: "Save" },
       ],
     });
@@ -94,9 +94,9 @@ export class AudioProcessorPanel {
     this.finished = true;
     if (!this.panel || this.hidden) {
       new Notice(
-        note.summaryAvailable
+        note.primaryNoteAvailable
           ? `Audio note and transcript saved to ${note.notePath}.`
-          : `Transcript saved to ${note.transcriptPath}; summary unavailable.`,
+          : `Transcript recovered to ${note.transcriptPath}; primary note unavailable.`,
         6000,
       );
       return;
@@ -106,9 +106,9 @@ export class AudioProcessorPanel {
 
   private renderCompleted(note: AudioProcessorCompletedNote): void {
     if (!this.panel) return;
-    if (!note.summaryAvailable) {
+    if (!note.primaryNoteAvailable) {
       this.panel.setStatus({
-        label: "Transcript saved; summary unavailable",
+        label: "Transcript recovered; primary note unavailable",
         icon: "file-warning",
         progress: 100,
         details: note.transcriptPath,

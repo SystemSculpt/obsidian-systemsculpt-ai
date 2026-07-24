@@ -66,6 +66,11 @@ export interface PendingAudioProcessorUpload {
   updatedAt: number;
 }
 
+export type AudioProcessorOutputPreset =
+  | "detailed"
+  | "meeting_brief"
+  | "clean_transcript";
+
 export const LICENSE_URL = "https://systemsculpt.com/pricing";
 
 export interface SystemSculptSettings {
@@ -124,6 +129,11 @@ export interface SystemSculptSettings {
    * When enabled, transcription output will be clean text only without timestamps, titles, or metadata
    */
   cleanTranscriptionOutput: boolean;
+  /**
+   * Output selected when Audio Processor opens. A modal selection applies to
+   * one new server job and becomes immutable once that job is created.
+   */
+  audioProcessorOutputPreset: AudioProcessorOutputPreset;
   /**
    * When enabled, automatically submits the message (hits enter) after transcription/post-processing completes in chat views
    */
@@ -243,6 +253,7 @@ Please:
 - Never translate, transliterate, anglicize, or normalize the transcript into another language`,
   postProcessingEnabled: false,
   cleanTranscriptionOutput: false,
+  audioProcessorOutputPreset: "detailed",
   autoSubmitAfterTranscription: false,
   transcriptionOutputFormat: "markdown",
   attachmentsDirectory: "SystemSculpt/Attachments",

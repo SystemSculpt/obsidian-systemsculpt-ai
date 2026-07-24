@@ -66,6 +66,47 @@
   min-width: 0;
 }
 
+.ss-audio-processor__output {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ss-space-2);
+  min-width: 0;
+}
+
+.ss-audio-processor__output-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--ss-space-2);
+}
+
+.ss-audio-processor__output-option.ss-button {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  align-items: center;
+  justify-content: start;
+  min-height: 72px;
+  padding: var(--ss-space-2) var(--ss-space-3);
+  text-align: left;
+}
+
+.ss-audio-processor__output-option.ss-button.is-selected {
+  border-color: var(--ss-line-accent);
+  background: var(--ss-accent-tint);
+  color: var(--ss-ink);
+}
+
+.ss-audio-processor__output-option .ss-button__icon {
+  grid-row: 1 / 3;
+}
+
+.ss-audio-processor__output-detail {
+  grid-column: 2;
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-xs);
+  line-height: var(--ss-leading-base);
+}
+
 .ss-audio-processor__section-title,
 .ss-audio-processor__field-label {
   margin: 0;
@@ -293,35 +334,17 @@
   font-size: var(--ss-text-xs);
 }
 
-.ss-audio-processor__defaults {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: start;
-  gap: var(--ss-space-3);
-  padding: var(--ss-space-4);
-  border: 1px solid var(--ss-line-accent);
-  border-radius: var(--ss-radius-md);
-  background: var(--ss-accent-tint);
-  color: var(--ss-ink-accent);
-}
-
-.ss-audio-processor__defaults-title {
-  color: var(--ss-ink);
-  font-size: var(--ss-text-sm);
-  font-weight: var(--ss-weight-semibold);
-}
-
-.ss-audio-processor__defaults-copy {
-  margin-top: var(--ss-space-1);
-  color: var(--ss-ink-muted);
-  font-size: var(--ss-text-xs);
-  line-height: var(--ss-leading-base);
+@container ss-surface (max-width: 560px) {
+  .ss-audio-processor__output-options {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (pointer: coarse) {
   .ss-audio-processor__audio-file,
   .ss-audio-processor__tab.ss-button,
   .ss-audio-processor__subtab.ss-button,
+  .ss-audio-processor__output-option.ss-button,
   .ss-audio-processor__choose-file.ss-button,
   .ss-audio-processor__youtube-input {
     min-height: var(--ss-touch-target);

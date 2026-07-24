@@ -108,7 +108,11 @@ describe("HostedTransportAdapter", () => {
       stream: true,
       allowTransportFallback: false,
       streamingProbeUrl: "https://api.test/api/plugin/connectivity",
-      headers: { "x-license-key": "first-key", "x-plugin-version": "6.0.0" },
+      headers: {
+        "x-license-key": "first-key",
+        "x-plugin-version": "6.0.0",
+        "x-systemsculpt-chat-activity": "web-search-v1",
+      },
     });
   });
 

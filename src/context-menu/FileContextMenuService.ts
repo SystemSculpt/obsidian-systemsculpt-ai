@@ -14,7 +14,9 @@ import {
   isAudioFileExtension,
   isAutoDocumentConversionFileExtension,
   isManagedDocumentConversionFileExtension,
+  isVaultImageContextFileExtension,
   normalizeFileExtension,
+  VAULT_IMAGE_CONTEXT_EXTENSIONS,
 } from "../constants/fileTypes";
 import { DocumentProcessingService } from "../services/DocumentProcessingService";
 import {
@@ -33,15 +35,9 @@ import { tryCopyImageFileToClipboard } from "../utils/clipboard";
 import { getSurfaceOwnerWindow } from "../core/ui/surface";
 
 const CHAT_TEXT_EXTENSIONS = new Set(["md", "txt", "markdown"]);
-const CHAT_IMAGE_EXTENSIONS = new Set([
-  "jpg",
-  "jpeg",
-  "png",
-  "webp",
-  "svg",
-]);
 const COPYABLE_IMAGE_EXTENSIONS = new Set([
-  ...CHAT_IMAGE_EXTENSIONS,
+  ...VAULT_IMAGE_CONTEXT_EXTENSIONS,
+  "svg",
   "bmp",
   "tiff",
   "tif",
@@ -394,7 +390,7 @@ export class FileContextMenuService {
       CHAT_TEXT_EXTENSIONS.has(extension) ||
       isAutoDocumentConversionFileExtension(extension) ||
       isAudioFileExtension(extension) ||
-      CHAT_IMAGE_EXTENSIONS.has(extension)
+      isVaultImageContextFileExtension(extension)
     );
   }
 

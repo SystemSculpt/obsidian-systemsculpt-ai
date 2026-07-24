@@ -27,6 +27,7 @@ export type ManagedChatSessionCheckpoint = Readonly<{
 
 export type ManagedChatRuntimeEvent =
   | Readonly<{ kind: "phase_restarted"; attempt: number }>
+  | Readonly<{ kind: "chat_activity"; activity: "web_search"; state: "started" | "completed" }>
   | Readonly<{ kind: "reasoning_summary_delta"; text: string }>
   | Readonly<{ kind: "content_delta"; text: string }>
   | Readonly<{ kind: "tool_call_delta"; index: number; id?: string; name?: string; arguments?: string }>
@@ -172,6 +173,18 @@ function normalizeErrorFrame(value: JsonContractValue): ManagedChatErrorFrame | 
 function normalizeFrame(value: JsonContractValue): readonly ManagedChatRuntimeEvent[] | null {
   const object = asObject(value);
   if (!object || typeof object.error !== "undefined") return null;
+  if (object.object === "systemsculpt.chat.activity") {
+    if (!ownKeysExactly(object, ["object", "activity", "state"])) return null;
+    if (
+      object.activity !== "web_search"
+      || (object.state !== "started" && object.state !== "completed")
+    ) return null;
+    return [{
+      kind: "chat_activity",
+      activity: "web_search",
+      state: object.state,
+    }];
+  }
   if (object.object === "systemsculpt.chat.session") {
     if (!ownKeysExactly(object, ["object", "session_id", "revision", "state"])) return null;
     const sessionId = stringField(object, "session_id");
@@ -651,7 +664,6 @@ export class ManagedChatRuntimeAdapter {
       messages,
     };
     if (!binding && accepted.tools?.length) body.tools = accepted.tools;
-    if (input.phase === "initial" && accepted.webSearch) body.plugins = [{ id: "web" }];
     return body;
   }
 
