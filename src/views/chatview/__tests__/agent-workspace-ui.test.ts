@@ -38,6 +38,8 @@ describe("AgentComposer", () => {
     composer.load();
     const input = parent.querySelector("textarea")!;
 
+    expect(parent.querySelector('[aria-label="Add vault context, including images"]')).not.toBeNull();
+
     composer.setValue("First request");
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     await Promise.resolve();
@@ -45,13 +47,12 @@ describe("AgentComposer", () => {
     expect(submissions).toEqual([{ text: "First request", webSearch: false, mode: "send" }]);
 
     composer.setRunning(true);
-    composer.setWebSearchEnabled(true);
-    expect(parent.querySelector('[aria-label="Search the web"]')?.classList.contains("is-selected")).toBe(true);
+    expect(parent.querySelector('[aria-label="Search the web"]')).toBeNull();
     composer.setValue("Follow up");
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     await Promise.resolve();
     await Promise.resolve();
-    expect(submissions.at(-1)).toEqual({ text: "Follow up", webSearch: true, mode: "queue" });
+    expect(submissions.at(-1)).toEqual({ text: "Follow up", webSearch: false, mode: "queue" });
 
     composer.setValue("Keep me");
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", shiftKey: true, bubbles: true }));
@@ -79,6 +80,43 @@ describe("AgentComposer", () => {
     expect(onRemoveAttachment).toHaveBeenCalledWith(expect.objectContaining({ id: "a" }));
 
     expect(parent.textContent).toContain("Project.md");
+    composer.unload();
+  });
+
+  it("keeps a vault image thumbnail visible after selection", () => {
+    const parent = document.body.createDiv();
+    const composer = new AgentComposer(parent, {
+      onSubmit: jest.fn(),
+      onStop: jest.fn(),
+      onAttach: jest.fn(),
+      onRemoveAttachment: jest.fn(),
+    });
+    composer.load();
+    composer.setAttachments([{
+      id: "image",
+      label: "Diagram.png",
+      path: "[[Images/Diagram.png]]",
+      kind: "image",
+      previewUrl: "app://local/Images/Diagram.png",
+    }]);
+
+    const preview = parent.querySelector<HTMLImageElement>(
+      ".systemsculpt-agent-attachment.is-context .systemsculpt-agent-attachment-preview",
+    )!;
+    expect(preview.src).toContain("Images/Diagram.png");
+    expect(preview.alt).toBe("");
+    expect(preview.loading).toBe("lazy");
+    expect(preview.decoding).toBe("async");
+    expect(preview.draggable).toBe(false);
+
+    preview.dispatchEvent(new Event("error"));
+    expect(parent.querySelector(".systemsculpt-agent-attachment.is-context img")).toBeNull();
+    const fallback = parent.querySelector(
+      ".systemsculpt-agent-attachment.is-context .systemsculpt-agent-attachment-icon",
+    );
+    expect(fallback).not.toBeNull();
+    expect(fallback?.nextElementSibling?.classList.contains("systemsculpt-agent-attachment-label"))
+      .toBe(true);
     composer.unload();
   });
 

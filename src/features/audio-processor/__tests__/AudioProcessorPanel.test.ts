@@ -18,6 +18,15 @@ describe("AudioProcessorPanel", () => {
     jest.restoreAllMocks();
   });
 
+  it("uses a preset-neutral note step in the shared progress timeline", () => {
+    const plugin = { register: jest.fn() } as unknown as SystemSculptPlugin;
+
+    new AudioProcessorPanel(plugin, "audio.m4a", jest.fn());
+
+    expect(document.body.textContent).toContain("Note");
+    expect(document.body.textContent).not.toContain("Summary");
+  });
+
   it("distinguishes cancelling an upload from stopping local observation of server work", () => {
     const onCancel = jest.fn();
     const plugin = { register: jest.fn() } as unknown as SystemSculptPlugin;
@@ -55,7 +64,7 @@ describe("AudioProcessorPanel", () => {
       jobId: "audio_job_123",
       notePath: "SystemSculpt/Audio Notes/Product sync.md",
       transcriptPath: "SystemSculpt/Audio Notes/Product sync — Transcript.md",
-      summaryAvailable: true,
+      primaryNoteAvailable: true,
       open: jest.fn().mockResolvedValue(undefined),
       saveArtifact,
     };
@@ -175,13 +184,33 @@ describe("AudioProcessorPanel", () => {
     expect(openCreditsBalanceModal).toHaveBeenCalledTimes(1);
   });
 
+  it("presents a clean transcript as a completed primary note without implying a summary exists", () => {
+    const plugin = { register: jest.fn() } as unknown as SystemSculptPlugin;
+    const note: AudioProcessorCompletedNote = {
+      jobId: "audio_job_123",
+      notePath: "SystemSculpt/Audio Notes/Product sync.md",
+      transcriptPath: "SystemSculpt/Audio Notes/Product sync — Transcript.md",
+      primaryNoteAvailable: true,
+      open: jest.fn().mockResolvedValue(undefined),
+      saveArtifact: jest.fn(),
+    };
+    const panel = new AudioProcessorPanel(plugin, "Product sync", jest.fn());
+
+    panel.succeed(note);
+
+    expect(document.body.textContent).toContain("Audio note ready");
+    expect(actionButton("Open note")).toBeTruthy();
+    expect(actionButton("Open transcript")).toBeTruthy();
+    expect(document.body.textContent).not.toContain("summary unavailable");
+  });
+
   it("presents a transcript-only recovery without offering a missing summary note", () => {
     const plugin = { register: jest.fn() } as unknown as SystemSculptPlugin;
     const note: AudioProcessorCompletedNote = {
       jobId: "audio_job_123",
       notePath: "SystemSculpt/Audio Notes/Product sync — Transcript.md",
       transcriptPath: "SystemSculpt/Audio Notes/Product sync — Transcript.md",
-      summaryAvailable: false,
+      primaryNoteAvailable: false,
       open: jest.fn().mockResolvedValue(undefined),
       saveArtifact: jest.fn().mockResolvedValue({
         notePath: "SystemSculpt/Audio Notes/Product sync — Transcript.md",
@@ -192,7 +221,9 @@ describe("AudioProcessorPanel", () => {
 
     panel.succeed(note);
 
-    expect(document.body.textContent).toContain("Transcript saved; summary unavailable");
+    expect(document.body.textContent).toContain(
+      "Transcript recovered; primary note unavailable",
+    );
     expect(actionButton("Open transcript")).toBeTruthy();
     expect(Array.from(document.querySelectorAll("button"))
       .some((button) => button.textContent?.includes("Open note"))).toBe(false);

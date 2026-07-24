@@ -7,6 +7,7 @@ SystemSculpt adds the following ribbon actions in this order:
 | Icon name | Ribbon action label | Behavior |
 | --- | --- | --- |
 | `mic` | Audio Recorder | Toggles the recorder |
+| `audio-lines` | Open Audio Processor | Opens Audio Processor for vault audio, a device file, or YouTube |
 | `search` | Open search | Opens vault search |
 | `trash` | Open janitor | Opens vault cleanup |
 | `history` | Open history | Opens chat and Studio history |

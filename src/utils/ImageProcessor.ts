@@ -1,4 +1,5 @@
 import { App, TFile } from "obsidian";
+import { isVaultImageContextFileExtension } from "../constants/fileTypes";
 import { SystemSculptError } from "./errors";
 
 /**
@@ -12,12 +13,6 @@ const VISION_JPEG_QUALITY = 0.85;
 
 export class ImageProcessor {
   private static MAX_FILE_SIZE = 10 * 1024 * 1024;
-  private static SUPPORTED_FORMATS = new Set([
-    "jpg",
-    "jpeg",
-    "png",
-    "webp",
-  ]);
 
   /**
    * Load a Blob into a drawable image source with dimensions, using
@@ -131,7 +126,7 @@ export class ImageProcessor {
     }
 
     const extension = file.extension.toLowerCase();
-    if (!ImageProcessor.SUPPORTED_FORMATS.has(extension)) {
+    if (!isVaultImageContextFileExtension(extension)) {
       throw new SystemSculptError(
         "Unsupported image format",
         "UNSUPPORTED_FORMAT",

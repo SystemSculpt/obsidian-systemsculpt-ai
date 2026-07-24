@@ -270,6 +270,54 @@ describe("ManagedAgentController", () => {
     expect(harness.host.clearSessionCheckpoint).not.toHaveBeenCalled();
   });
 
+  it("shows server search activity without creating a local tool or approval", async () => {
+    const harness = createHarness([[
+      { kind: "chat_activity", activity: "web_search", state: "started" },
+      { kind: "chat_activity", activity: "web_search", state: "completed" },
+      ...textEvents("Current answer with [a source](https://example.com)."),
+    ]]);
+    const statusLabels: string[] = [];
+    harness.controller.subscribe((_snapshot, envelope) => {
+      if (envelope.event.type === "run.status") statusLabels.push(envelope.event.label);
+    });
+
+    const result = await harness.controller.start({ commit: { kind: "append", message: user() } });
+
+    expect(result.kind).toBe("completed");
+    expect(statusLabels).toEqual(expect.arrayContaining([
+      "Thinking",
+      "Searching the web",
+      "Reviewing sources",
+    ]));
+    expect(harness.host.executeLocalTool).not.toHaveBeenCalled();
+    expect(selectPendingApprovals(harness.controller.getSnapshot())).toEqual([]);
+    expect(harness.persisted[0].message.content).toContain("https://example.com");
+  });
+
+  it("does not announce search from the legacy accepted-request flag", async () => {
+    const harness = createHarness([textEvents("No search was needed.")]);
+    const prepareAcceptedRequest = harness.host.prepareAcceptedRequest as jest.Mock;
+    const originalPrepare = prepareAcceptedRequest.getMockImplementation() as (
+      operation: AcceptedManagedChatOperation,
+    ) => Promise<AcceptedManagedChatRequestSnapshot>;
+    prepareAcceptedRequest.mockImplementation(async (operation: AcceptedManagedChatOperation) =>
+      Object.freeze({
+        ...await originalPrepare(operation),
+        webSearch: true,
+      }));
+    const statusLabels: string[] = [];
+    harness.controller.subscribe((_snapshot, envelope) => {
+      if (envelope.event.type === "run.status") statusLabels.push(envelope.event.label);
+    });
+
+    const result = await harness.controller.start({ commit: { kind: "append", message: user() } });
+
+    expect(result.kind).toBe("completed");
+    expect(statusLabels).toContain("Thinking");
+    expect(statusLabels).not.toContain("Searching the web");
+    expect(harness.host.executeLocalTool).not.toHaveBeenCalled();
+  });
+
   it("keeps streamed reasoning summaries distinct, ordered, and durable", async () => {
     const harness = createHarness([[
       { kind: "reasoning_summary_delta", text: "Checked the current note. " },

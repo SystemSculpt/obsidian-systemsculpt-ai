@@ -91,7 +91,7 @@ describe("AudioProcessorApiClient", () => {
   it("creates an audio job with the exact source contract and upload plan", async () => {
     const { client, requestClient } = setup();
     requestClient.responses.push(json({
-      job: pendingJob,
+      job: { ...pendingJob, output_preset: "meeting_brief" },
       upload: { part_size_bytes: 8_388_608, total_parts: 3 },
     }));
 
@@ -99,7 +99,10 @@ describe("AudioProcessorApiClient", () => {
       filename: "all-hands.m4a",
       contentType: "audio/mp4",
       sizeBytes: 20_000_000,
-    }, "audio-op:create")).resolves.toEqual({
+    }, {
+      operationId: "audio-op:create",
+      outputPreset: "meeting_brief",
+    })).resolves.toEqual({
       job: expect.objectContaining({ id: "audio_job_123", status: "uploading" }),
       upload: { partSizeBytes: 8_388_608, totalParts: 3 },
     });
@@ -121,7 +124,66 @@ describe("AudioProcessorApiClient", () => {
           content_type: "audio/mp4",
           size_bytes: 20_000_000,
         },
+        output_preset: "meeting_brief",
       },
+    }));
+  });
+
+  it("creates a YouTube job with the same immutable output preset seam", async () => {
+    const { client, requestClient } = setup();
+    requestClient.responses.push(json({
+      job: {
+        ...pendingJob,
+        output_preset: "clean_transcript",
+        status: "queued",
+        stage: "queued",
+        progress: 0.05,
+      },
+      upload: null,
+    }));
+
+    await expect(client.createYouTubeJob(
+      "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+      {
+        operationId: "youtube-op:create",
+        outputPreset: "clean_transcript",
+      },
+    )).resolves.toEqual({
+      job: expect.objectContaining({ id: "audio_job_123", status: "queued" }),
+      upload: null,
+    });
+
+    expect(requestClient.inputs[0]).toEqual(expect.objectContaining({
+      url: "https://systemsculpt.test/api/plugin/audio-processor/jobs",
+      method: "POST",
+      body: {
+        source: {
+          type: "youtube",
+          url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        },
+        output_preset: "clean_transcript",
+      },
+      headers: expect.objectContaining({
+        "Idempotency-Key": "youtube-op:create",
+      }),
+    }));
+  });
+
+  it("rejects a created job that did not retain the requested preset", async () => {
+    const { client, requestClient } = setup();
+    requestClient.responses.push(json({
+      job: { ...pendingJob, status: "queued", stage: "queued", progress: 0.05 },
+      upload: null,
+    }));
+
+    await expect(client.createYouTubeJob(
+      "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+      {
+        operationId: "youtube-op:create",
+        outputPreset: "meeting_brief",
+      },
+    )).rejects.toEqual(expect.objectContaining({
+      code: "malformed_response",
     }));
   });
 
@@ -160,6 +222,7 @@ describe("AudioProcessorApiClient", () => {
     const job = await client.getJob("audio_job_123");
     expect(job.result).toEqual({
       artifactJobId: "audio_job_123",
+      outputPreset: "detailed",
       noteUrl: "https://objects.example.com/note?signature=one",
       summaryUrl: "https://objects.example.com/summary?signature=two",
       transcriptUrl: "https://objects.example.com/transcript?signature=three",
@@ -201,7 +264,10 @@ describe("AudioProcessorApiClient", () => {
 
     await expect(client.createYouTubeJob(
       "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-      "audio-op:create",
+      {
+        operationId: "audio-op:create",
+        outputPreset: "detailed",
+      },
     )).rejects.toEqual(expect.objectContaining({
       status: 402,
       code: "insufficient_credits",
@@ -218,7 +284,10 @@ describe("AudioProcessorApiClient", () => {
 
     await expect(client.createYouTubeJob(
       "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-      "audio-op:create",
+      {
+        operationId: "audio-op:create",
+        outputPreset: "clean_transcript",
+      },
     )).rejects.toEqual(expect.objectContaining({
       status: 400,
       code: "invalid_source",
@@ -350,6 +419,7 @@ describe("AudioProcessorApiClient", () => {
         result: null,
         transcriptArtifact: {
           artifactJobId: "audio_job_owner",
+          outputPreset: "detailed",
           transcriptUrl: "https://objects.example.com/transcript?signature=recovery",
           urlExpiresInSeconds: 900,
           filename: "Product sync — Transcript.md",
@@ -364,6 +434,7 @@ describe("AudioProcessorApiClient", () => {
     const transcriptArtifact = {
       delivery_job_id: "audio_job_123",
       artifact_job_id: "audio_job_owner",
+      output_preset: "meeting_brief",
       transcript_url: "https://objects.example.com/transcript?signature=active",
       url_expires_in_seconds: 900,
       filename: "Product sync — Transcript.md",
@@ -372,6 +443,7 @@ describe("AudioProcessorApiClient", () => {
     requestClient.responses.push(json({
       job: {
         ...pendingJob,
+        output_preset: "meeting_brief",
         status: "processing",
         stage: "summarizing",
         progress: 0.82,
@@ -384,6 +456,7 @@ describe("AudioProcessorApiClient", () => {
     requestClient.responses.push(json({
       job: {
         ...pendingJob,
+        output_preset: "meeting_brief",
         status: "queued",
         stage: "queued",
         progress: 0.82,
@@ -398,8 +471,10 @@ describe("AudioProcessorApiClient", () => {
       expect.objectContaining({
         status: "processing",
         stage: "summarizing",
+        outputPreset: "meeting_brief",
         transcriptArtifact: expect.objectContaining({
           artifactJobId: "audio_job_owner",
+          outputPreset: "meeting_brief",
           sha256: "a".repeat(64),
         }),
       }),
@@ -410,6 +485,51 @@ describe("AudioProcessorApiClient", () => {
         stage: "queued",
         transcriptArtifact: expect.objectContaining({ artifactJobId: "audio_job_owner" }),
       }),
+    );
+  });
+
+  it("rejects result and transcript artifact presets that drift from their job", async () => {
+    const { client, requestClient } = setup();
+    requestClient.responses.push(json({
+      job: { ...succeededJob, output_preset: "detailed" },
+      result: {
+        ...succeededResult,
+        output_preset: "meeting_brief",
+        artifact_manifest: {
+          version: "audio_processor_artifacts.v2",
+          output_preset: "meeting_brief",
+          note: artifactManifest.note,
+          summary: artifactManifest.summary,
+          transcript: artifactManifest.transcript,
+        },
+      },
+    }));
+    requestClient.responses.push(json({
+      job: {
+        ...pendingJob,
+        output_preset: "meeting_brief",
+        status: "processing",
+        stage: "summarizing",
+        progress: 0.82,
+        quoted_credits: 2_500,
+        charged_credits: 1_100,
+      },
+      result: null,
+      transcript_artifact: {
+        artifact_job_id: "audio_job_owner",
+        output_preset: "clean_transcript",
+        transcript_url: "https://objects.example.com/transcript?signature=drift",
+        url_expires_in_seconds: 900,
+        filename: "Product sync — Transcript.md",
+        sha256: "a".repeat(64),
+      },
+    }));
+
+    await expect(client.getJob("audio_job_123")).rejects.toEqual(
+      expect.objectContaining({ code: "malformed_response" }),
+    );
+    await expect(client.getJob("audio_job_123")).rejects.toEqual(
+      expect.objectContaining({ code: "malformed_response" }),
     );
   });
 
@@ -445,6 +565,7 @@ describe("AudioProcessorApiClient", () => {
       job: succeededJob,
       result: {
         ...succeededResult,
+        output_preset: "detailed",
         sha256: artifactManifest.note.sha256,
         artifact_manifest: artifactManifest,
       },
@@ -472,6 +593,7 @@ describe("AudioProcessorApiClient", () => {
         result: expect.objectContaining({
           artifactManifest: {
             version: "audio_processor_artifacts.v1",
+            outputPreset: "detailed",
             note: expect.objectContaining({ sha256: "1".repeat(64) }),
             summary: expect.objectContaining({ sha256: "2".repeat(64) }),
             transcript: expect.objectContaining({ sha256: "3".repeat(64) }),
@@ -482,6 +604,160 @@ describe("AudioProcessorApiClient", () => {
     await expect(client.getJob("audio_job_123")).rejects.toEqual(
       expect.objectContaining({ code: "malformed_response" }),
     );
+    await expect(client.getJob("audio_job_123")).rejects.toEqual(
+      expect.objectContaining({ code: "malformed_response" }),
+    );
+  });
+
+  it("parses strict version 2 meeting-brief and clean-transcript manifests", async () => {
+    const { client, requestClient } = setup();
+    const meetingManifest = {
+      version: "audio_processor_artifacts.v2",
+      output_preset: "meeting_brief",
+      note: artifactManifest.note,
+      summary: artifactManifest.summary,
+      transcript: artifactManifest.transcript,
+    };
+    const cleanManifest = {
+      version: "audio_processor_artifacts.v2",
+      output_preset: "clean_transcript",
+      note: artifactManifest.note,
+      summary: null,
+      transcript: artifactManifest.transcript,
+    };
+    requestClient.responses.push(json({
+      job: { ...succeededJob, output_preset: "meeting_brief" },
+      result: {
+        ...succeededResult,
+        output_preset: "meeting_brief",
+        artifact_manifest: meetingManifest,
+      },
+    }));
+    requestClient.responses.push(json({
+      job: { ...succeededJob, output_preset: "clean_transcript" },
+      result: {
+        ...succeededResult,
+        output_preset: "clean_transcript",
+        summary_url: null,
+        artifact_manifest: cleanManifest,
+      },
+    }));
+
+    await expect(client.getJob("audio_job_123")).resolves.toEqual(
+      expect.objectContaining({
+        result: expect.objectContaining({
+          outputPreset: "meeting_brief",
+          summaryUrl: succeededResult.summary_url,
+          artifactManifest: expect.objectContaining({
+            version: "audio_processor_artifacts.v2",
+            outputPreset: "meeting_brief",
+            summary: expect.objectContaining({ sha256: "2".repeat(64) }),
+          }),
+        }),
+      }),
+    );
+    await expect(client.getJob("audio_job_123")).resolves.toEqual(
+      expect.objectContaining({
+        result: expect.objectContaining({
+          outputPreset: "clean_transcript",
+          summaryUrl: null,
+          artifactManifest: {
+            version: "audio_processor_artifacts.v2",
+            outputPreset: "clean_transcript",
+            note: expect.objectContaining({ sha256: "1".repeat(64) }),
+            summary: null,
+            transcript: expect.objectContaining({ sha256: "3".repeat(64) }),
+          },
+        }),
+      }),
+    );
+  });
+
+  it.each([
+    {
+      label: "version 2 detailed preset",
+      result: {
+        ...succeededResult,
+        output_preset: "detailed",
+        artifact_manifest: {
+          ...artifactManifest,
+          version: "audio_processor_artifacts.v2",
+          output_preset: "detailed",
+        },
+      },
+    },
+    {
+      label: "meeting brief without a summary descriptor",
+      result: {
+        ...succeededResult,
+        output_preset: "meeting_brief",
+        artifact_manifest: {
+          ...artifactManifest,
+          version: "audio_processor_artifacts.v2",
+          output_preset: "meeting_brief",
+          summary: null,
+        },
+      },
+    },
+    {
+      label: "clean transcript with a summary descriptor",
+      result: {
+        ...succeededResult,
+        output_preset: "clean_transcript",
+        summary_url: null,
+        artifact_manifest: {
+          ...artifactManifest,
+          version: "audio_processor_artifacts.v2",
+          output_preset: "clean_transcript",
+        },
+      },
+    },
+    {
+      label: "result and manifest preset mismatch",
+      result: {
+        ...succeededResult,
+        output_preset: "meeting_brief",
+        artifact_manifest: {
+          ...artifactManifest,
+          version: "audio_processor_artifacts.v2",
+          output_preset: "clean_transcript",
+          summary: null,
+        },
+      },
+    },
+    {
+      label: "clean transcript with a summary URL",
+      result: {
+        ...succeededResult,
+        output_preset: "clean_transcript",
+        artifact_manifest: {
+          ...artifactManifest,
+          version: "audio_processor_artifacts.v2",
+          output_preset: "clean_transcript",
+          summary: null,
+        },
+      },
+    },
+    {
+      label: "version 1 manifest claimed by a meeting brief",
+      result: {
+        ...succeededResult,
+        output_preset: "meeting_brief",
+        artifact_manifest: artifactManifest,
+      },
+    },
+  ])("rejects $label", async ({ result: malformedResult }) => {
+    const { client, requestClient } = setup();
+    requestClient.responses.push(json({
+      job: {
+        ...succeededJob,
+        ...(typeof malformedResult.output_preset === "string"
+          ? { output_preset: malformedResult.output_preset }
+          : {}),
+      },
+      result: malformedResult,
+    }));
+
     await expect(client.getJob("audio_job_123")).rejects.toEqual(
       expect.objectContaining({ code: "malformed_response" }),
     );
@@ -514,7 +790,10 @@ describe("AudioProcessorApiClient", () => {
       filename: "cached.mp3",
       contentType: "audio/mpeg",
       sizeBytes: 100,
-    }, "audio-cache:create")).resolves.toEqual(expect.objectContaining({
+    }, {
+      operationId: "audio-cache:create",
+      outputPreset: "detailed",
+    })).resolves.toEqual(expect.objectContaining({
       job: expect.objectContaining({ status: "succeeded" }),
       upload: null,
     }));

@@ -16,9 +16,11 @@ import {
   type AudioProcessorArtifactKind,
   type AudioProcessorCompletedNote,
   type AudioProcessorJob,
+  type AudioProcessorOutputPreset,
   type AudioProcessorProgressEvent,
   type AudioProcessorSavedArtifact,
   type AudioProcessorSource,
+  normalizeAudioProcessorOutputPreset,
 } from "./types";
 import { requireYouTubeVideoUrl } from "./youtube";
 
@@ -50,6 +52,11 @@ export interface AudioProcessorServiceOptions {
 export interface ProcessAudioOptions {
   signal: AbortSignal;
   onProgress?: (event: AudioProcessorProgressEvent) => void;
+  /**
+   * Set only when creating a new job. The server persists this value with the
+   * idempotent create operation, so resume paths continue by job ID.
+   */
+  outputPreset?: AudioProcessorOutputPreset;
 }
 
 export class AudioProcessorService {
@@ -82,6 +89,7 @@ export class AudioProcessorService {
     options: ProcessAudioOptions,
   ): Promise<AudioProcessorCompletedNote> {
     const operationId = createOperationId();
+    const outputPreset = normalizeAudioProcessorOutputPreset(options.outputPreset);
     let uploadJobId: string | null = null;
     let abortIncompleteUpload = false;
     let deviceStagingStarted = false;
@@ -107,8 +115,11 @@ export class AudioProcessorService {
         });
         const created = await this.api.createYouTubeJob(
           youtube.url,
-          `${operationId}:create`,
-          options.signal,
+          {
+            operationId: `${operationId}:create`,
+            outputPreset,
+            signal: options.signal,
+          },
         );
         job = created.job;
       } else {
@@ -121,7 +132,11 @@ export class AudioProcessorService {
           filename: source.audio.filename,
           contentType: source.audio.contentType,
           sizeBytes: source.audio.sizeBytes,
-        }, `${operationId}:create`, options.signal);
+        }, {
+          operationId: `${operationId}:create`,
+          outputPreset,
+          signal: options.signal,
+        });
         uploadJobId = created.job.id;
         if (created.upload) {
           abortIncompleteUpload = true;
@@ -646,7 +661,7 @@ export class AudioProcessorService {
       stage: job.stage,
       progress: Math.max(0.36, Math.min(0.98, job.progress)),
       message: job.status === "failed" && job.transcriptArtifact
-        ? "Transcript ready; summary unavailable"
+        ? "Transcript ready; primary note unavailable"
         : messages[job.stage],
       serverOwned: true,
       quotedCredits: job.quotedCredits,
@@ -749,7 +764,7 @@ export class AudioProcessorService {
       jobId: job.id,
       notePath: files.note.path,
       transcriptPath: files.transcript.path,
-      summaryAvailable: true,
+      primaryNoteAvailable: true,
       open,
       saveArtifact,
     };
@@ -798,7 +813,7 @@ export class AudioProcessorService {
     ): Promise<AudioProcessorSavedArtifact> => {
       if (kind === "summary") {
         throw new AudioProcessorApiError(
-          "The transcript was saved, but a audio summary could not be produced.",
+          "The transcript was recovered, but the primary audio note is unavailable.",
           0,
           "summary_unavailable",
         );
@@ -809,13 +824,13 @@ export class AudioProcessorService {
     options.onProgress?.({
       stage: "saving",
       progress: 1,
-      message: "Transcript saved; summary unavailable",
+      message: "Transcript recovered; primary note unavailable",
     });
     return {
       jobId: job.id,
       notePath: transcript.path,
       transcriptPath: transcript.path,
-      summaryAvailable: false,
+      primaryNoteAvailable: false,
       open,
       saveArtifact,
     };
@@ -913,6 +928,19 @@ export class AudioProcessorService {
         "artifact_provenance_changed",
       );
     }
+    let artifactUrl: string;
+    if (kind === "summary") {
+      if (refreshed.result.summaryUrl === null) {
+        throw new AudioProcessorApiError(
+          "Clean transcript output does not include a separate summary.",
+          0,
+          "summary_unavailable",
+        );
+      }
+      artifactUrl = refreshed.result.summaryUrl;
+    } else {
+      artifactUrl = refreshed.result.transcriptUrl;
+    }
     const plan = await delivery.resolvePlan(
       artifactJobId,
       refreshed.result.filename,
@@ -926,8 +954,7 @@ export class AudioProcessorService {
         open: async (): Promise<void> => await this.openNote(slot.file!),
       };
     }
-    const url = kind === "summary" ? refreshed.result.summaryUrl : refreshed.result.transcriptUrl;
-    const markdown = await this.api.downloadNote(url, signal);
+    const markdown = await this.api.downloadNote(artifactUrl, signal);
     const manifestArtifact = refreshed.result.artifactManifest?.[kind];
     if (manifestArtifact) {
       await verifyArtifactDigest(markdown, manifestArtifact.sha256, `audio ${kind}`);

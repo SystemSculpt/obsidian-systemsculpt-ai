@@ -28,6 +28,28 @@ jest.mock("../../../features/audio-processor", () => ({
   resumeAudioProcessorJobs: resumeMock,
 }));
 
+function setActiveAudioNote(
+  app: App,
+  artifact: "full" | "summary" | "transcript",
+  outputPreset?: "detailed" | "meeting_brief" | "clean_transcript",
+): void {
+  const audioNote = new (TFile as any)({
+    path: `SystemSculpt/Audio Notes/Product sync ${artifact}.md`,
+    name: `Product sync ${artifact}.md`,
+    extension: "md",
+    stat: { size: 200, ctime: 1, mtime: 1 },
+  }) as TFile;
+  (app.workspace.getActiveFile as jest.Mock).mockReturnValue(audioNote);
+  (app.metadataCache.getFileCache as jest.Mock).mockReturnValue({
+    frontmatter: {
+      "systemsculpt-audio-job-id": "audio_job_original",
+      "systemsculpt-audio-delivery-job-id": "audio_job_authenticated_alias",
+      "systemsculpt-audio-artifact": artifact,
+      ...(outputPreset ? { "output-preset": outputPreset } : {}),
+    },
+  });
+}
+
 describe("CommandManager Audio Processor commands", () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -62,22 +84,20 @@ describe("CommandManager Audio Processor commands", () => {
     expect(availabilityMock).toHaveBeenNthCalledWith(2, plugin);
     expect(modalCtorMock).toHaveBeenLastCalledWith(plugin, { initialTab: "youtube" });
     expect(openMock).toHaveBeenCalledTimes(2);
+  });
 
-    const audioNote = new (TFile as any)({
-      path: "SystemSculpt/Audio Notes/Product sync.md",
-      name: "Product sync.md",
-      extension: "md",
-      stat: { size: 200, ctime: 1, mtime: 1 },
-    }) as TFile;
-    (app.workspace.getActiveFile as jest.Mock).mockReturnValue(audioNote);
-    (app.metadataCache.getFileCache as jest.Mock).mockReturnValue({
-      frontmatter: {
-        "systemsculpt-audio-job-id": "audio_job_original",
-        "systemsculpt-audio-delivery-job-id": "audio_job_authenticated_alias",
-        "systemsculpt-audio-artifact": "full",
-      },
-    });
+  it("keeps both artifact commands available for legacy detailed notes", async () => {
+    const addCommand = jest.fn();
+    const plugin = { addCommand } as any;
+    const app = new App();
+    const manager = new CommandManager(plugin, app);
 
+    (manager as any).registerAudioProcessorCommands();
+    const commands = addCommand.mock.calls.map(([command]) => command);
+    setActiveAudioNote(app, "full");
+
+    expect(commands[2].checkCallback(true)).toBe(true);
+    expect(commands[3].checkCallback(true)).toBe(true);
     expect(commands[2].checkCallback(false)).toBe(true);
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
 
@@ -99,6 +119,39 @@ describe("CommandManager Audio Processor commands", () => {
     );
     expect(artifactOpenMock).toHaveBeenCalledTimes(2);
   });
+
+  it.each([
+    ["primary", "full"],
+    ["companion", "transcript"],
+  ] as const)(
+    "hides the summary command but keeps the transcript command for a clean-transcript %s note",
+    async (_noteKind, artifact) => {
+      const addCommand = jest.fn();
+      const plugin = { addCommand } as any;
+      const app = new App();
+      const manager = new CommandManager(plugin, app);
+
+      (manager as any).registerAudioProcessorCommands();
+      const commands = addCommand.mock.calls.map(([command]) => command);
+      setActiveAudioNote(app, artifact, "clean_transcript");
+
+      expect(commands[2].checkCallback(true)).toBe(false);
+      expect(commands[2].checkCallback(false)).toBe(false);
+      expect(serviceCtorMock).not.toHaveBeenCalled();
+
+      expect(commands[3].checkCallback(true)).toBe(true);
+      expect(commands[3].checkCallback(false)).toBe(true);
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+      expect(saveArtifactForJobMock).toHaveBeenCalledTimes(1);
+      expect(saveArtifactForJobMock).toHaveBeenCalledWith(
+        "audio_job_authenticated_alias",
+        "audio_job_original",
+        "transcript",
+      );
+      expect(artifactOpenMock).toHaveBeenCalledTimes(1);
+    },
+  );
 
   it("hides durable artifact commands outside a saved Audio Processor note", () => {
     const addCommand = jest.fn();

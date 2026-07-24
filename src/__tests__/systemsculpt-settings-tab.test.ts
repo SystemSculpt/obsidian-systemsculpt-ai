@@ -3,6 +3,7 @@
 import { SystemSculptSettingTab } from "../settings/SystemSculptSettingTab";
 import { App, Platform } from "obsidian";
 import { buildSettingsTabConfigs } from "../settings/SettingsTabRegistry";
+import { showPrompt } from "../core/ui/modals/PromptModal";
 
 jest.mock("../settings/SettingsTabRegistry", () => ({
   buildSettingsTabConfigs: jest.fn(() => [
@@ -203,6 +204,27 @@ describe("SystemSculptSettingTab native layout", () => {
         (el) => el.textContent?.trim() === "Quick actions",
       ),
     ).toBe(false);
+  });
+
+  it("restores the customer-facing Audio Processor default", async () => {
+    const plugin = createPluginStub();
+    (showPrompt as jest.Mock).mockResolvedValue({ confirmed: true });
+    const tab = new SystemSculptSettingTab(app, plugin);
+    const container = document.body.createDiv();
+
+    tab.renderQuickActionsSection(container);
+    const restoreButton = container.querySelector<HTMLButtonElement>(
+      '[data-test-id="restore-defaults-btn"]',
+    );
+    expect(restoreButton).not.toBeNull();
+    restoreButton?.click();
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+    expect(plugin.getSettingsManagerInstance.updateSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        audioProcessorOutputPreset: "detailed",
+      }),
+    );
   });
 
   it("builds feedback payloads around SystemSculpt access instead of provider choices", () => {

@@ -34,6 +34,8 @@ describe("CommandManager SystemSculpt-only chat contract", () => {
   it.each([
     ["pdf", true],
     ["png", true],
+    ["webp", true],
+    ["svg", false],
     ["mp3", true],
     ["doc", false],
     ["docx", false],

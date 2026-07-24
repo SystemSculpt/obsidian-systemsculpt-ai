@@ -619,7 +619,7 @@ export class ManagedAgentController {
           type: "run.status",
           phase: phase === "initial" ? "thinking" : "working",
           label: phase === "initial"
-            ? acceptedRequest.webSearch ? "Searching web" : "Thinking"
+            ? "Thinking"
             : "Continuing",
         });
         const messageId = `${durableTurnId}:assistant:${streamOrdinal}`;
@@ -851,6 +851,15 @@ export class ManagedAgentController {
           phaseUsage = {};
           this.emit(active, { type: "message.restarted", messageId });
           this.emit(active, { type: "run.status", phase: "retrying", label: "Recovering" });
+          break;
+        case "chat_activity":
+          this.emit(active, {
+            type: "run.status",
+            phase: "working",
+            label: event.state === "started"
+              ? "Searching the web"
+              : "Reviewing sources",
+          });
           break;
         case "reasoning_summary_delta": {
           if (!event.text) break;

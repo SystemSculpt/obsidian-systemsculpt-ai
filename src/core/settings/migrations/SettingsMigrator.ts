@@ -350,6 +350,19 @@ const SETTINGS_MIGRATIONS: readonly SettingsMigrationStep[] = [
       return next;
     },
   },
+  {
+    to: 13,
+    describe: "Add the persisted default output preset for Audio Processor",
+    migrate: (settings) => ({
+      ...settings,
+      audioProcessorOutputPreset:
+        settings.audioProcessorOutputPreset === "detailed"
+        || settings.audioProcessorOutputPreset === "meeting_brief"
+        || settings.audioProcessorOutputPreset === "clean_transcript"
+          ? settings.audioProcessorOutputPreset
+          : "detailed",
+    }),
+  },
 ];
 
 /** Read a non-negative integer schema version from raw data; 0 if absent/garbage. */

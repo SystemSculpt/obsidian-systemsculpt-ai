@@ -44,6 +44,78 @@ function executionHarness(result: Record<string, unknown>) {
 }
 
 describe("AgentChatView coordinator", () => {
+  it("publishes supported vault images with local thumbnail URLs", () => {
+    const image = new TFile({ path: "Images/Diagram.png" });
+    const note = new TFile({ path: "Notes/Project.md" });
+    const files = new Map([
+      [image.path, image],
+      [note.path, note],
+    ]);
+    const workspace = { setAttachments: jest.fn() };
+    const view = {
+      workspace,
+      contextManager: {
+        getContextFiles: jest.fn(() => new Set([
+          "[[Images/Diagram.png]]",
+          "[[Notes/Project.md]]",
+        ])),
+      },
+      app: {
+        vault: {
+          getAbstractFileByPath: jest.fn((path: string) => files.get(path) ?? null),
+          getResourcePath: jest.fn((file: TFile) => `app://local/${file.path}`),
+        },
+      },
+      resolveVaultImagePreview: (AgentChatView.prototype as any).resolveVaultImagePreview,
+    };
+
+    (AgentChatView.prototype as any).syncAttachments.call(view);
+
+    expect(workspace.setAttachments).toHaveBeenCalledWith([
+      {
+        id: "[[Images/Diagram.png]]",
+        label: "Diagram.png",
+        path: "[[Images/Diagram.png]]",
+        kind: "image",
+        previewUrl: "app://local/Images/Diagram.png",
+      },
+      {
+        id: "[[Notes/Project.md]]",
+        label: "Project.md",
+        path: "[[Notes/Project.md]]",
+        kind: "vault",
+      },
+    ]);
+  });
+
+  it("keeps vault image context usable when its thumbnail URL cannot be resolved", () => {
+    const image = new TFile({ path: "Images/Diagram.png" });
+    const workspace = { setAttachments: jest.fn() };
+    const view = {
+      workspace,
+      contextManager: {
+        getContextFiles: jest.fn(() => new Set(["[[Images/Diagram.png]]"])),
+      },
+      app: {
+        vault: {
+          getAbstractFileByPath: jest.fn(() => image),
+          getResourcePath: jest.fn(() => {
+            throw new Error("resource unavailable");
+          }),
+        },
+      },
+      resolveVaultImagePreview: (AgentChatView.prototype as any).resolveVaultImagePreview,
+    };
+
+    expect(() => (AgentChatView.prototype as any).syncAttachments.call(view)).not.toThrow();
+    expect(workspace.setAttachments).toHaveBeenCalledWith([{
+      id: "[[Images/Diagram.png]]",
+      label: "Diagram.png",
+      path: "[[Images/Diagram.png]]",
+      kind: "image",
+    }]);
+  });
+
   it("shows pending run state and restores the prompt when admission is denied", async () => {
     const result = {
       kind: "admission_denied",
@@ -645,6 +717,7 @@ describe("AgentChatView coordinator", () => {
       syncAttachments: jest.fn(),
       syncQueue: jest.fn(),
       queueRepository,
+      plugin: { settings: {} },
       updateViewState: jest.fn(),
       app: { workspace: { trigger: jest.fn() } },
       isFullyLoaded: false,

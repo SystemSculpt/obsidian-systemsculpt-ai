@@ -256,9 +256,19 @@ describe("ManagedChatRuntimeAdapter live events", () => {
       .toBe(state.requestClient.inputs[0].headers?.["Idempotency-Key"]);
   });
 
-  it("dispatches managed web search through the accepted request snapshot", async () => {
+  it("opts into server-owned search activity without forwarding the legacy web plugin", async () => {
     const state = setup(true);
-    state.requestClient.responses.push(response('data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n'));
+    state.requestClient.responses.push(response([
+      'data: {"object":"systemsculpt.chat.activity","activity":"web_search","state":"started"}',
+      "",
+      'data: {"object":"systemsculpt.chat.activity","activity":"web_search","state":"completed"}',
+      "",
+      'data: {"choices":[{"delta":{"content":"ok"}}]}',
+      "",
+      "data: [DONE]",
+      "",
+      "",
+    ].join("\n")));
     const result = await state.adapter.dispatch({ operation: state.operation, acceptedRequestSnapshot: state.acceptedRequestSnapshot, phase: "initial", continuationIndex: 0 });
     expect(result.kind).toBe("success");
     expect(state.requestClient.inputs[0].body).toEqual({
@@ -266,13 +276,37 @@ describe("ManagedChatRuntimeAdapter live events", () => {
       stream: true,
       session: { mode: "create" },
       messages: [{ role: "user", content: "hello" }],
-      plugins: [{ id: "web" }],
+    });
+    expect(state.requestClient.inputs[0].headers).toMatchObject({
+      "x-systemsculpt-chat-activity": "web-search-v1",
     });
     if (result.kind === "success") await expect(collect(result.events)).resolves.toEqual([
+      { kind: "chat_activity", activity: "web_search", state: "started" },
+      { kind: "chat_activity", activity: "web_search", state: "completed" },
       { kind: "content_delta", text: "ok" },
       sessionCheckpoint(),
       { kind: "done" },
     ]);
+  });
+
+  it.each([
+    ['{"object":"systemsculpt.chat.activity","activity":"web_search","state":"started","provider":"brave"}'],
+    ['{"object":"systemsculpt.chat.activity","activity":"web_search","state":"working"}'],
+    ['{"object":"systemsculpt.chat.activity","activity":"page_fetch","state":"started"}'],
+    ['{"object":"systemsculpt.chat.activity","state":"started"}'],
+  ])("fails closed on malformed managed activity frame %s", async (activityFrame) => {
+    const state = setup();
+    state.requestClient.responses.push(response(
+      `data: ${activityFrame}\n\ndata: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n`,
+    ));
+    const result = await state.adapter.dispatch({
+      operation: state.operation,
+      acceptedRequestSnapshot: state.acceptedRequestSnapshot,
+      phase: "initial",
+      continuationIndex: 0,
+    });
+    if (result.kind !== "success") throw new Error(result.kind);
+    await expect(collect(result.events)).rejects.toMatchObject({ kind: "transport_failure" });
   });
 
   it("resumes a bound server session with only the accepted turn delta", async () => {

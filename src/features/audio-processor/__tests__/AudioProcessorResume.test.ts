@@ -52,6 +52,7 @@ const activeJob = (
   updatedAt: string,
 ): AudioProcessorJob => ({
   id,
+  outputPreset: "detailed",
   status,
   stage,
   progress: status === "succeeded" ? 1 : 0.5,
@@ -62,6 +63,7 @@ const activeJob = (
   resumeRequired: status === "awaiting_funds",
   result: status === "succeeded" ? {
     artifactJobId: "audio_job_resume",
+    outputPreset: "detailed",
     noteUrl: "https://objects.example.com/note",
     summaryUrl: "https://objects.example.com/summary",
     transcriptUrl: "https://objects.example.com/transcript",
@@ -85,7 +87,7 @@ describe("resumeAudioProcessorJobs", () => {
       jobId: "uploading",
       notePath: "SystemSculpt/Audio Notes/uploading.md",
       transcriptPath: "SystemSculpt/Audio Notes/uploading — Transcript.md",
-      summaryAvailable: true,
+      primaryNoteAvailable: true,
       open: jest.fn(),
       saveArtifact: jest.fn(),
     });
@@ -187,6 +189,7 @@ describe("resumeAudioProcessorJobs", () => {
         ...activeJob("audio_partial", "failed", "complete", "2026-07-18T11:57:00.000Z"),
         transcriptArtifact: {
           artifactJobId: "audio_partial",
+          outputPreset: "detailed",
           transcriptUrl: "https://objects.example.com/partial-transcript",
           urlExpiresInSeconds: 900,
           filename: "Partial — Transcript.md",

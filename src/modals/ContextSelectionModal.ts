@@ -1,12 +1,15 @@
 import { App, Notice, TFile, setIcon } from "obsidian";
 import { StandardModal } from "../core/ui/modals/standard/StandardModal";
 import { createUiAction, getSurfaceOwnerWindow } from "../core/ui/surface";
-import { AUDIO_FILE_EXTENSIONS } from "../constants/fileTypes";
+import {
+  AUDIO_FILE_EXTENSIONS,
+  VAULT_IMAGE_CONTEXT_EXTENSIONS,
+} from "../constants/fileTypes";
 
 const FILE_TYPES = {
   text: { extensions: ["md", "txt", "systemsculpt"], icon: "file-text", label: "Text & Studio" },
   documents: { extensions: ["pdf"], icon: "file", label: "Documents" },
-  images: { extensions: ["png", "jpg", "jpeg", "svg", "webp"], icon: "image", label: "Images" },
+  images: { extensions: Array.from(VAULT_IMAGE_CONTEXT_EXTENSIONS), icon: "image", label: "Images" },
   audio: { extensions: Array.from(AUDIO_FILE_EXTENSIONS), icon: "headphones", label: "Audio" },
 } as const;
 
@@ -218,10 +221,9 @@ export class ContextSelectionModal extends StandardModal {
       checkbox.disabled = attached || this.processing;
       checkbox.dataset.attached = String(attached);
       checkbox.setAttribute("aria-label", attached
-        ? `${item.file.basename}, already in context`
-        : `Add ${item.file.basename}`);
-      const icon = label.createSpan({ cls: "ss-context-file-icon", attr: { "aria-hidden": "true" } });
-      setIcon(icon, FILE_TYPES[item.type].icon);
+        ? `${item.file.path}, already in context`
+        : `Add ${item.file.path}`);
+      this.renderFileVisual(label, item);
       const info = label.createSpan({ cls: "ss-context-file-info" });
       info.createSpan({ text: item.file.basename, cls: "ss-context-file-name" });
       info.createSpan({ text: item.file.path, cls: "ss-context-file-path" });
@@ -235,6 +237,49 @@ export class ContextSelectionModal extends StandardModal {
       });
       this.fileItemControlsByPath.set(item.file.path, { el: row, checkbox });
     }
+  }
+
+  private renderFileVisual(parent: HTMLElement, item: FileItem): void {
+    if (item.type !== "images") {
+      const icon = parent.createSpan({
+        cls: "ss-context-file-icon",
+        attr: { "aria-hidden": "true" },
+      });
+      setIcon(icon, FILE_TYPES[item.type].icon);
+      return;
+    }
+
+    const thumbnail = parent.createSpan({
+      cls: "ss-context-file-thumbnail",
+      attr: { "aria-hidden": "true" },
+    });
+    const showFallback = (): void => {
+      thumbnail.empty();
+      thumbnail.addClass("is-unavailable");
+      setIcon(thumbnail, "image-off");
+    };
+
+    let resourcePath = "";
+    try {
+      resourcePath = this.app.vault.getResourcePath(item.file);
+    } catch {
+      showFallback();
+      return;
+    }
+    if (!resourcePath) {
+      showFallback();
+      return;
+    }
+
+    const image = thumbnail.createEl("img", { attr: { alt: "" } });
+    image.loading = "lazy";
+    image.decoding = "async";
+    image.draggable = false;
+    image.onerror = () => {
+      image.onerror = null;
+      showFallback();
+    };
+    image.src = resourcePath;
   }
 
   private updateLoadMoreButton(): void {

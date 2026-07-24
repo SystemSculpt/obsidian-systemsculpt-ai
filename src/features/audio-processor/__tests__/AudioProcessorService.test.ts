@@ -17,6 +17,7 @@ import type {
 
 const result: AudioProcessorResult = {
   artifactJobId: "audio_job_123",
+  outputPreset: "detailed",
   noteUrl: "https://objects.example.com/note",
   summaryUrl: "https://objects.example.com/summary",
   transcriptUrl: "https://objects.example.com/transcript",
@@ -42,6 +43,7 @@ const job = (
   progress: number,
 ): AudioProcessorJob => ({
   id: "audio_job_123",
+  outputPreset: "detailed",
   status,
   stage,
   progress,
@@ -206,6 +208,7 @@ describe("AudioProcessorService", () => {
       chargedCredits: 1_100,
       transcriptArtifact: {
         artifactJobId,
+        outputPreset: "detailed",
         transcriptUrl: "https://objects.example.com/active-transcript",
         urlExpiresInSeconds: 900,
         filename: "Product sync — Transcript.md",
@@ -274,6 +277,7 @@ describe("AudioProcessorService", () => {
           ...result,
           artifactManifest: {
             version: "audio_processor_artifacts.v1",
+            outputPreset: "detailed",
             note: {
               url: result.noteUrl,
               filename: result.filename,
@@ -323,6 +327,7 @@ describe("AudioProcessorService", () => {
 
     const completed = await service.process({ type: "audio", audio }, {
       signal: new AbortController().signal,
+      outputPreset: "meeting_brief",
       onProgress: (event) => progress.push(event.stage),
     });
 
@@ -330,7 +335,11 @@ describe("AudioProcessorService", () => {
       filename: "product-sync.m4a",
       contentType: "audio/mp4",
       sizeBytes: 10,
-    }), expect.stringMatching(/^audio-.+:create$/), expect.any(AbortSignal));
+    }), {
+      operationId: expect.stringMatching(/^audio-.+:create$/),
+      outputPreset: "meeting_brief",
+      signal: expect.any(AbortSignal),
+    });
     expect(audio.readSlice).toHaveBeenCalledWith(0, 4);
     expect(audio.readSlice).toHaveBeenCalledWith(4, 8);
     expect(audio.readSlice).toHaveBeenCalledWith(8, 10);
@@ -808,8 +817,11 @@ describe("AudioProcessorService", () => {
 
     expect(api.createYouTubeJob).toHaveBeenCalledWith(
       "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-      expect.stringMatching(/^audio-.+:create$/),
-      expect.any(AbortSignal),
+      {
+        operationId: expect.stringMatching(/^audio-.+:create$/),
+        outputPreset: "detailed",
+        signal: expect.any(AbortSignal),
+      },
     );
     expect(api.getPartUrl).not.toHaveBeenCalled();
   });
@@ -1155,6 +1167,59 @@ describe("AudioProcessorService", () => {
     expect(app.vault.create).toHaveBeenCalledTimes(3);
   });
 
+  it("treats clean transcript delivery as complete and reports a separate summary as unavailable", async () => {
+    const { app, plugin, created, transcriptCreated } = createPlugin();
+    const api = createApi();
+    const cleanResult: AudioProcessorResult = {
+      ...result,
+      outputPreset: "clean_transcript",
+      summaryUrl: null,
+      artifactManifest: null,
+    };
+    const cleanJob: AudioProcessorJob = {
+      ...job("succeeded", "complete", 1),
+      outputPreset: "clean_transcript",
+      result: cleanResult,
+    };
+    api.createYouTubeJob.mockResolvedValue({
+      job: cleanJob,
+      upload: null,
+    });
+    api.getJob.mockReset().mockResolvedValue(cleanJob);
+    const service = new AudioProcessorService(plugin, {
+      apiClient: api as unknown as AudioProcessorApiClient,
+    });
+
+    const completed = await service.process({
+      type: "youtube",
+      url: "https://youtu.be/dQw4w9WgXcQ",
+    }, {
+      signal: new AbortController().signal,
+      outputPreset: "clean_transcript",
+    });
+
+    expect(completed).toEqual(expect.objectContaining({
+      notePath: created.path,
+      transcriptPath: transcriptCreated.path,
+      primaryNoteAvailable: true,
+    }));
+    expect(app.vault.create).toHaveBeenCalledTimes(2);
+    expect(api.downloadNote).toHaveBeenCalledWith(cleanResult.noteUrl, expect.any(AbortSignal));
+    expect(api.downloadNote).toHaveBeenCalledWith(
+      cleanResult.transcriptUrl,
+      expect.any(AbortSignal),
+    );
+
+    await expect(completed.saveArtifact("summary")).rejects.toEqual(
+      expect.objectContaining({
+        code: "summary_unavailable",
+        message: "Clean transcript output does not include a separate summary.",
+      }),
+    );
+    expect(api.downloadNote).toHaveBeenCalledTimes(2);
+    expect(app.vault.create).toHaveBeenCalledTimes(2);
+  });
+
   it("polls an awaiting-funds job read-only with exponential backoff until the server requeues it", async () => {
     const { plugin } = createPlugin();
     const api = createApi();
@@ -1192,7 +1257,9 @@ describe("AudioProcessorService", () => {
       onProgress: (event) => {
         if (event.stage !== "preparing" && event.stage !== "saving") progress.push(event.stage);
       },
-    })).resolves.toEqual(expect.objectContaining({ summaryAvailable: true }));
+    })).resolves.toEqual(expect.objectContaining({
+      primaryNoteAvailable: true,
+    }));
 
     expect(sleep.mock.calls.map(([milliseconds]) => milliseconds)).toEqual([
       5_000, 10_000, 20_000, 2_000,
@@ -1213,6 +1280,7 @@ describe("AudioProcessorService", () => {
       error: "The summary could not be produced.",
       transcriptArtifact: {
         artifactJobId: "audio_job_owner",
+        outputPreset: "detailed",
         transcriptUrl: "https://objects.example.com/recovery-transcript",
         urlExpiresInSeconds: 900,
         filename: "Product sync — Transcript.md",
@@ -1230,7 +1298,7 @@ describe("AudioProcessorService", () => {
       url: "https://youtu.be/dQw4w9WgXcQ",
     }, { signal: new AbortController().signal });
 
-    expect(completed.summaryAvailable).toBe(false);
+    expect(completed.primaryNoteAvailable).toBe(false);
     expect(completed.notePath).toBe(
       "SystemSculpt/Audio Notes/Product sync — Transcript.md",
     );
