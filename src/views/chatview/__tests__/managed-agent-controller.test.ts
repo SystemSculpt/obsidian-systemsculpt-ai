@@ -270,28 +270,69 @@ describe("ManagedAgentController", () => {
     expect(harness.host.clearSessionCheckpoint).not.toHaveBeenCalled();
   });
 
-  it("shows server search activity without creating a local tool or approval", async () => {
+  it("settles a server-executed search from its result without running a local tool", async () => {
     const harness = createHarness([[
-      { kind: "chat_activity", activity: "web_search", state: "started" },
-      { kind: "chat_activity", activity: "web_search", state: "completed" },
+      {
+        kind: "server_tool_result",
+        toolCallId: "call_web_1",
+        status: "succeeded",
+        details: { tool: "web_search", query: "current answer", result_count: 3 },
+      },
       ...textEvents("Current answer with [a source](https://example.com)."),
     ]]);
-    const statusLabels: string[] = [];
-    harness.controller.subscribe((_snapshot, envelope) => {
-      if (envelope.event.type === "run.status") statusLabels.push(envelope.event.label);
-    });
 
     const result = await harness.controller.start({ commit: { kind: "append", message: user() } });
 
     expect(result.kind).toBe("completed");
-    expect(statusLabels).toEqual(expect.arrayContaining([
-      "Thinking",
-      "Searching the web",
-      "Reviewing sources",
-    ]));
+    // The server ran it, so nothing executes locally and nothing is approved.
     expect(harness.host.executeLocalTool).not.toHaveBeenCalled();
     expect(selectPendingApprovals(harness.controller.getSnapshot())).toEqual([]);
     expect(harness.persisted[0].message.content).toContain("https://example.com");
+  });
+
+  it("continues a mixed server and vault batch with only the vault result", async () => {
+    const vaultArgs = JSON.stringify({ paths: ["Notes/release.md"] });
+    const harness = createHarness([
+      [
+        {
+          kind: "server_tool_result",
+          toolCallId: "call_web_1",
+          status: "succeeded",
+          details: { tool: "web_search", query: "release notes", result_count: 3 },
+        },
+        { kind: "tool_call_delta", index: 0, id: "call_web_1", name: "web_search", arguments: "{}" },
+        { kind: "tool_call_delta", index: 1, id: "call_vault_1", name: "read", arguments: vaultArgs },
+        { kind: "finish_reason", reason: "tool_calls" },
+        checkpointEvent(1),
+        { kind: "tool_call_completed", index: 0, id: "call_web_1", name: "web_search", arguments: "{}" },
+        { kind: "tool_call_completed", index: 1, id: "call_vault_1", name: "read", arguments: vaultArgs },
+        { kind: "done" },
+      ],
+      textEvents("Both checked.", 2),
+    ]);
+
+    const result = await harness.controller.start({ commit: { kind: "append", message: user() } });
+
+    expect(result.kind).toBe("completed");
+    // Only the vault half runs here. The search already ran upstream.
+    expect(harness.host.executeLocalTool).toHaveBeenCalledTimes(1);
+    expect((harness.host.executeLocalTool as jest.Mock).mock.calls[0][0].id).toBe("call_vault_1");
+    // Both calls render, and the search reads as completed rather than pending.
+    const snapshot = harness.controller.getSnapshot();
+    expect(selectToolCall(snapshot, "user-1:assistant:0:tool:0")).toMatchObject({ state: "succeeded" });
+    expect(selectToolCall(snapshot, "user-1:assistant:0:tool:1")).toMatchObject({ state: "succeeded" });
+
+    // The continuation carries one tool result: the vault one. The server wrote
+    // its own result into the durable transcript on its side, so sending a second
+    // result for the same call would be rejected as a duplicate — and it would
+    // push evidence back over the wire that never needed to leave the server.
+    const continuationCall = (harness.runtime.dispatch as jest.Mock).mock.calls[1][0];
+    const delta = composeAcceptedChatContinuationDelta(
+      continuationCall.acceptedRequestSnapshot,
+      continuationCall.postCheckpointDurableSnapshot,
+    );
+    expect(delta).toHaveLength(1);
+    expect(delta[0]).toMatchObject({ role: "tool", tool_call_id: "call_vault_1" });
   });
 
   it("does not announce search from the legacy accepted-request flag", async () => {
