@@ -259,9 +259,7 @@ describe("ManagedChatRuntimeAdapter live events", () => {
   it("opts into server-owned search activity without forwarding the legacy web plugin", async () => {
     const state = setup(true);
     state.requestClient.responses.push(response([
-      'data: {"object":"systemsculpt.chat.activity","activity":"web_search","state":"started"}',
-      "",
-      'data: {"object":"systemsculpt.chat.activity","activity":"web_search","state":"completed"}',
+      'data: {"object":"systemsculpt.chat.tool_result","tool_call_id":"call_web_1","status":"succeeded","details":{"tool":"web_search","result_count":3}}',
       "",
       'data: {"choices":[{"delta":{"content":"ok"}}]}',
       "",
@@ -281,8 +279,12 @@ describe("ManagedChatRuntimeAdapter live events", () => {
       "x-systemsculpt-chat-activity": "web-search-v1",
     });
     if (result.kind === "success") await expect(collect(result.events)).resolves.toEqual([
-      { kind: "chat_activity", activity: "web_search", state: "started" },
-      { kind: "chat_activity", activity: "web_search", state: "completed" },
+      {
+        kind: "server_tool_result",
+        toolCallId: "call_web_1",
+        status: "succeeded",
+        details: { tool: "web_search", result_count: 3 },
+      },
       { kind: "content_delta", text: "ok" },
       sessionCheckpoint(),
       { kind: "done" },
