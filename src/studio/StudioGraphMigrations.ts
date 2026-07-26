@@ -247,9 +247,8 @@ function migrateImageGenerationNodes(
     const nextConfig: Record<string, StudioJsonValue> = { ...currentConfig };
     for (const key of [
       "modelId", "provider", "providerId", "endpoint", "apiKey", "oauth", "fallback", "price", "pricing",
-      "imageSize",
+      "imageSize", "seed",
     ]) delete nextConfig[key];
-    // Seed is intentionally left absent, which the node treats as "random".
     // Older projects could save count 5-8 under the previous schema (max 8). The
     // new max is 4, and config validation rejects out-of-range values before the
     // node's runtime clamp runs, so normalize legacy counts here or the flow

@@ -615,6 +615,7 @@ describe("migrateStudioProjectToPathOnlyPorts", () => {
         count: 1,
         aspectRatio: "1:1",
         imageSize: "2K",
+        seed: 42,
       },
     });
 

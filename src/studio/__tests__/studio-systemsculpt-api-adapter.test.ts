@@ -69,14 +69,22 @@ describe("StudioApiExecutionAdapter managed cutover", () => {
   it("stages verified managed image bytes and routes transcription directly", async () => {
     const { plugin } = createPlugin();
     const adapter = new StudioApiExecutionAdapter(plugin as never);
-    const imageGenerate = jest.fn(async operation => ({
-      operationId: operation.operationId,
-      jobId: "job-1",
-      outputs: [{
-        metadata: { index: 0, mime_type: "image/png", size_bytes: 2, sha256: "a".repeat(64), width: 2, height: 1 },
-        bytes: new Uint8Array([1, 2]).buffer,
-      }],
-    }));
+    const imageGenerate = jest.fn(async operation => {
+      expect(await operation.buildPayload()).toEqual({
+        prompt: "Draw",
+        count: 1,
+        aspectRatio: "16:9",
+        inputImages: [],
+      });
+      return {
+        operationId: operation.operationId,
+        jobId: "job-1",
+        outputs: [{
+          metadata: { index: 0, mime_type: "image/png", size_bytes: 2, sha256: "a".repeat(64), width: 2, height: 1 },
+          bytes: new Uint8Array([1, 2]).buffer,
+        }],
+      };
+    });
     const transcribe = jest.fn(async (_source, context) => ({ kind: "transcript", operationId: context.operationId, text: "transcript" }));
     Object.assign(adapter as object, {
       images: { generate: imageGenerate, beginLocalCommit: jest.fn(), completeLocalCommit: jest.fn() },
@@ -89,7 +97,7 @@ describe("StudioApiExecutionAdapter managed cutover", () => {
       nodeId: "image-a",
       projectPath: "Studio/Test.systemsculpt",
       signal: new AbortController().signal,
-      buildPayload: async () => ({ prompt: "Draw" }),
+      buildPayload: async () => ({ prompt: "Draw", count: 1, aspectRatio: "16:9" }),
       storeOutput,
     });
     const source = {

@@ -177,7 +177,7 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
       nodeEl,
       node,
       definition,
-      orderedFieldKeys: ["prompt", "count", "aspectRatio", "seed"],
+      orderedFieldKeys: ["prompt", "count", "aspectRatio"],
       interactionLocked,
       onNodeConfigMutated,
       onNodeConfigValueChange,
