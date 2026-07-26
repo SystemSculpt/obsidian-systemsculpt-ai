@@ -6,6 +6,7 @@ export type AgentRunPhase =
   | "working"
   | "waiting"
   | "retrying"
+  | "settling"
   | "complete";
 
 export type AgentRunStatus =
@@ -223,6 +224,7 @@ const RUN_PHASES = new Set<AgentRunPhase>([
   "working",
   "waiting",
   "retrying",
+  "settling",
   "complete",
 ]);
 const TOOL_LOCATIONS = new Set<ManagedToolCall["location"]>(["server", "vault"]);

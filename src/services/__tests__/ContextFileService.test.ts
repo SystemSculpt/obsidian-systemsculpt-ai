@@ -410,6 +410,51 @@ describe("ContextFileService", () => {
       );
     });
 
+    it("keeps mixed server and vault calls but synthesizes only the client-owned result", async () => {
+      const messages: ChatMessage[] = [
+        { role: "user", content: "Search both places", message_id: "u1" },
+        {
+          role: "assistant",
+          content: "",
+          message_id: "a1",
+          tool_calls: [
+            {
+              id: "call-vault",
+              messageId: "a1",
+              request: {
+                id: "call-vault",
+                type: "function",
+                function: { name: "read", arguments: "{\"paths\":[\"Welcome.md\"]}" },
+              },
+              state: "completed",
+              result: { success: true, data: { path: "Welcome.md" } },
+            },
+            {
+              id: "call-server",
+              messageId: "a1",
+              request: {
+                id: "call-server",
+                type: "function",
+                function: { name: "web_search", arguments: "{\"query\":\"Obsidian\"}" },
+              },
+              state: "completed",
+              executedOn: "server",
+              result: { success: true, data: { result_count: 3 } },
+            },
+          ] as any,
+        },
+      ];
+
+      const result = await service.prepareMessagesWithContext(messages, new Set(), true);
+      const assistantMessage = result.find((message) => message.role === "assistant");
+
+      expect((assistantMessage as any)?.tool_calls?.map((toolCall: any) => toolCall.id))
+        .toEqual(["call-vault", "call-server"]);
+      expect(result.filter((message) => message.role === "tool")).toEqual([
+        expect.objectContaining({ tool_call_id: "call-vault" }),
+      ]);
+    });
+
     it("drops unresolved tool_calls when no matching tool results exist", async () => {
       const messages: ChatMessage[] = [
         { role: "user", content: "Use a tool", message_id: "u1" },

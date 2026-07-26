@@ -1,6 +1,6 @@
 /**
- * Agent workspace tools: compact tool-call disclosures, approval cards, and
- * artifact rows.
+ * Agent workspace tools: compact status rows, approval cards, and artifact
+ * rows. Raw transport payloads are deliberately not part of the product UI.
  */
 
 .systemsculpt-agent-part.is-tool {
@@ -14,18 +14,9 @@
   background: var(--ss-surface-1);
 }
 
-.systemsculpt-agent-tool-details {
+.systemsculpt-agent-tool {
   color: var(--ss-ink-muted);
   font-size: var(--ss-text-sm);
-}
-
-.systemsculpt-agent-tool-details.is-static .systemsculpt-agent-tool-disclosure,
-.systemsculpt-agent-tool-details.is-static .systemsculpt-agent-tool-details-body {
-  display: none;
-}
-
-.systemsculpt-agent-tool-details.is-static > .systemsculpt-agent-tool-header {
-  cursor: default;
 }
 
 .systemsculpt-agent-tool-header {
@@ -33,41 +24,15 @@
   align-items: center;
   gap: var(--ss-space-1);
   min-height: var(--ss-control-height-sm);
-  padding: 0 var(--ss-space-1);
+  padding: 0 var(--ss-space-2);
   border-radius: var(--ss-radius-sm);
-  cursor: pointer;
-  list-style: none;
-  transition: var(--ss-transition-colors);
+  cursor: default;
 }
 
-.systemsculpt-agent-tool-header::-webkit-details-marker {
-  display: none;
-}
-
-.systemsculpt-agent-tool-header:hover,
-.systemsculpt-agent-tool-header:focus-visible,
-.systemsculpt-agent-tool-details[open] > .systemsculpt-agent-tool-header {
-  background: var(--ss-state-hover);
-}
-
-.systemsculpt-agent-tool-header:focus-visible {
-  outline: none;
-  box-shadow: var(--ss-ring);
-}
-
-.systemsculpt-agent-tool-disclosure,
 .systemsculpt-agent-tool-icon {
   display: inline-flex;
   flex: 0 0 auto;
   color: var(--ss-ink-faint);
-}
-
-.systemsculpt-agent-tool-disclosure {
-  transition: transform var(--ss-dur-fast) var(--ss-ease);
-}
-
-.systemsculpt-agent-tool-details[open] .systemsculpt-agent-tool-disclosure {
-  transform: rotate(90deg);
 }
 
 .systemsculpt-agent-tool-header svg {
@@ -108,7 +73,7 @@
   color: var(--ss-danger);
 }
 
-.systemsculpt-agent-tool-details-body {
+.systemsculpt-agent-tool-support {
   margin: var(--ss-space-1) 0 var(--ss-space-1) var(--ss-space-4);
   overflow: hidden;
   border-left: 1px solid var(--ss-line);
@@ -116,29 +81,8 @@
   background: var(--ss-surface-1);
 }
 
-.systemsculpt-agent-tool-details-body pre {
-  max-height: var(--ss-agent-tool-details-height);
-  margin: 0;
-  padding: var(--ss-space-2) var(--ss-space-3);
-  overflow: auto;
-  background: var(--ss-surface-sunken);
-  font-family: var(--ss-font-mono);
-  font-size: var(--ss-text-xs);
-  white-space: pre-wrap;
-}
-
-.systemsculpt-agent-tool-details-body pre + .systemsculpt-agent-tool-details-label,
-.systemsculpt-agent-tool-details-body pre + .systemsculpt-agent-artifact {
-  border-top: 1px solid var(--ss-line);
-}
-
-.systemsculpt-agent-tool-details-label {
-  padding: var(--ss-space-2) var(--ss-space-3) var(--ss-space-1);
-  color: var(--ss-ink-faint);
-  font-size: var(--ss-text-xs);
-  font-weight: var(--ss-weight-semibold);
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+.systemsculpt-agent-tool-support[hidden] {
+  display: none;
 }
 
 .systemsculpt-agent-tool-error {
@@ -207,6 +151,10 @@
   gap: var(--ss-space-2);
   min-height: var(--ss-control-height);
   padding: var(--ss-space-1) var(--ss-space-2) var(--ss-space-1) var(--ss-space-3);
+}
+
+.systemsculpt-agent-artifact + .systemsculpt-agent-artifact {
+  border-top: 1px solid var(--ss-line);
 }
 
 .systemsculpt-agent-artifact-copy {

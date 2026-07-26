@@ -211,7 +211,12 @@ describe("AnchoredScroller", () => {
     expect(harness.scroller.getMode()).toBe("manual");
 
     const anchor = harness.scroller.capturePrependAnchor();
-    expect(anchor).toEqual({ rowId: "first", offsetFromViewportTop: -50 });
+    expect(anchor).toEqual({
+      rowId: "first",
+      offsetFromViewportTop: -50,
+      mode: "manual",
+      turnAnchorRowId: null,
+    });
 
     harness.state.scrollHeight = 1_300;
     harness.setRowLayout(first, { top: 500 });
@@ -321,12 +326,49 @@ describe("AnchoredScroller", () => {
     const anchor: AnchoredScrollerPrependAnchor = {
       rowId: "turn",
       offsetFromViewportTop: turn.offsetTop - harness.state.scrollTop,
+      mode: "turn",
+      turnAnchorRowId: "turn",
     };
     harness.state.scrollHeight = 1_700;
     harness.setRowLayout(turn, { top: 700 });
     harness.scroller.restorePrependAnchor(anchor);
     expect(harness.scroller.getMode()).toBe("turn");
     expect(harness.state.scrollTop).toBe(636);
+    harness.cleanup();
+  });
+
+  it("keeps programmatic ownership through intermediate smooth-scroll frames", () => {
+    const harness = createHarness({ scrollTop: 0, scrollHeight: 1_600 });
+    harness.addRow("turn", 700, 80, { turnAnchor: true });
+    harness.viewport.scrollTo = ((options: ScrollToOptions) => {
+      harness.calls.push({
+        top: Number(options.top ?? harness.state.scrollTop),
+        behavior: options.behavior ?? "auto",
+      });
+    }) as typeof harness.viewport.scrollTo;
+
+    harness.scroller.notifyTurnStarted("turn");
+    harness.state.scrollTop = 300;
+    harness.viewport.dispatchEvent(new Event("scroll"));
+
+    expect(harness.scroller.getMode()).toBe("turn");
+    harness.state.scrollHeight = 1_900;
+    harness.scroller.notifyContentChanged({ streaming: true });
+    expect(harness.calls.at(-1)).toEqual({ top: 636, behavior: "auto" });
+    harness.cleanup();
+  });
+
+  it.each([
+    ["wheel", () => new WheelEvent("wheel", { bubbles: true })],
+    ["touch", () => new Event("touchstart", { bubbles: true })],
+    ["keyboard", () => new KeyboardEvent("keydown", { key: "PageUp", bubbles: true })],
+  ])("releases programmatic ownership on %s input", (_name, createEvent) => {
+    const harness = createHarness({ scrollTop: 0, scrollHeight: 1_600 });
+    harness.addRow("turn", 700, 80, { turnAnchor: true });
+    harness.scroller.notifyTurnStarted("turn");
+
+    harness.viewport.dispatchEvent(createEvent());
+    expect(harness.scroller.getMode()).toBe("manual");
     harness.cleanup();
   });
 });

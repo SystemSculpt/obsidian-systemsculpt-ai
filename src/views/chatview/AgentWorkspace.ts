@@ -16,7 +16,11 @@ import type { ChatMessageAttachment } from "./attachments/ChatMessageAttachments
 import type { ChatDocumentAttachmentProcessor } from "./attachments/ChatMessageAttachments";
 import type { ManagedChatInputLimits } from "../../services/managed/ManagedChatInputLimits";
 import type { AgentArtifact, AgentConversationSnapshot } from "./AgentConversation";
-import { AgentConversationRenderer } from "./AgentConversationRenderer";
+import { presentAgentConversation } from "./AgentConversationPresentation";
+import {
+  AgentConversationRenderer,
+  type AgentInlineMessageEdit,
+} from "./AgentConversationRenderer";
 
 export type AgentQueuedFollowUp = Readonly<{
   id: string;
@@ -42,7 +46,9 @@ export type AgentWorkspaceOptions = Readonly<{
   onOpenArtifact: (artifact: AgentArtifact) => void | Promise<void>;
   onCopyArtifactPath: (artifact: AgentArtifact) => void | Promise<void>;
   onRetryMessage?: (messageId: string) => void | Promise<void>;
-  onCopyText?: (text: string) => void | Promise<void>;
+  onResubmitMessage?: (messageId: string, text: string) => boolean | Promise<boolean>;
+  onCancelMessageEdit?: (messageId: string) => void | Promise<void>;
+  onCopyText?: (text: string) => boolean | Promise<boolean>;
   onNewChat: () => void | Promise<void>;
   onOpenHistory: () => void | Promise<void>;
   onOpenSettings: () => void | Promise<void>;
@@ -143,6 +149,8 @@ export class AgentWorkspace extends Component {
       onOpenArtifact: options.onOpenArtifact,
       onCopyArtifactPath: options.onCopyArtifactPath,
       onRetryMessage: options.onRetryMessage,
+      onResubmitMessage: options.onResubmitMessage,
+      onCancelMessageEdit: options.onCancelMessageEdit,
       onCopyText: options.onCopyText,
     });
     this.addChild(this.renderer);
@@ -263,14 +271,43 @@ export class AgentWorkspace extends Component {
 
   public setHistory(messages: readonly ChatMessage[]): Promise<void> {
     this.history = messages;
+    return this.renderHistoryPreservingAnchor();
+  }
+
+  public showMessageEditor(edit: AgentInlineMessageEdit): Promise<void> {
+    this.renderer.setInlineMessageEdit(edit);
+    this.composer.setHistoryEditing(true);
+    return this.renderHistoryPreservingAnchor(true);
+  }
+
+  public hideMessageEditor(messageId: string, restoreFocus = true): Promise<void> {
+    this.renderer.setInlineMessageEdit(null);
+    this.composer.setHistoryEditing(false);
+    return this.renderHistoryPreservingAnchor(false, restoreFocus ? messageId : undefined);
+  }
+
+  public resetMessageEditor(): void {
+    this.renderer.setInlineMessageEdit(null);
+    this.composer.setHistoryEditing(false);
+  }
+
+  private renderHistoryPreservingAnchor(
+    focusEditor = false,
+    focusEditActionForMessageId?: string,
+  ): Promise<void> {
     return this.scheduleRender(async () => {
       const anchor = this.scroller.capturePrependAnchor();
       for (const id of this.registeredRows) this.scroller.unregisterRow(id);
       this.registeredRows.clear();
-      await this.renderer.renderHistory(messages);
+      await this.renderer.renderHistory(this.history);
       this.syncRows();
       this.scroller.restorePrependAnchor(anchor && this.registeredRows.has(anchor.rowId) ? anchor : null);
+      this.anchorActiveTurn();
       this.syncEmpty();
+      if (focusEditor) this.renderer.focusInlineMessageEdit();
+      if (focusEditActionForMessageId) {
+        this.renderer.focusMessageEditAction(focusEditActionForMessageId);
+      }
     });
   }
 
@@ -304,8 +341,7 @@ export class AgentWorkspace extends Component {
 
   public setRunPending(pending: boolean): void {
     this.runPending = pending;
-    const running = pending || this.snapshot?.status === "running" || this.snapshot?.status === "waiting";
-    this.composer.setRunning(running);
+    this.composer.setRunning(presentAgentConversation(this.snapshot, pending).composerRunning);
   }
 
   public focus(): void {
@@ -363,17 +399,13 @@ export class AgentWorkspace extends Component {
       renderWaiters = this.snapshotRenderWaiters.splice(0);
       const snapshot = this.pendingSnapshotRender;
       this.pendingSnapshotRender = undefined;
-      if (snapshot) await this.renderer.renderActive(snapshot);
+      const presentation = presentAgentConversation(snapshot ?? null, this.runPending);
+      if (snapshot) await this.renderer.renderActive(snapshot, presentation);
       else this.renderer.clearActive();
-      const running = this.runPending || snapshot?.status === "running" || snapshot?.status === "waiting";
-      this.composer.setRunning(running);
-      this.scroller.notifyContentChanged({ streaming: running });
+      this.composer.setRunning(presentation.composerRunning);
+      this.anchorActiveTurn();
+      this.scroller.notifyContentChanged({ streaming: presentation.busy });
       this.syncEmpty();
-      if (snapshot?.turnId && this.renderedTurnId !== snapshot.turnId) {
-        const rowId = `message:${snapshot.turnId}`;
-        if (this.registeredRows.has(rowId)) this.scroller.notifyTurnStarted(rowId);
-      }
-      this.renderedTurnId = snapshot?.turnId ?? null;
     });
     void this.snapshotRenderPromise.then(
       () => {
@@ -386,5 +418,18 @@ export class AgentWorkspace extends Component {
       this.snapshotRenderPromise = null;
       if (typeof this.pendingSnapshotRender !== "undefined") this.ensureSnapshotRender();
     });
+  }
+
+  private anchorActiveTurn(): void {
+    const turnId = this.snapshot?.turnId;
+    if (!turnId) {
+      this.renderedTurnId = null;
+      return;
+    }
+    if (this.renderedTurnId === turnId) return;
+    const rowId = `message:${turnId}`;
+    if (!this.registeredRows.has(rowId)) return;
+    this.scroller.notifyTurnStarted(rowId);
+    this.renderedTurnId = turnId;
   }
 }

@@ -577,11 +577,19 @@ export class ContextFileService {
       };
 
       if (msg.role === "assistant" && Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0) {
-        const synthesizedToolMessages = buildToolResultMessagesFromToolCalls(msg.tool_calls);
+        const clientToolCalls = msg.tool_calls.filter((toolCall) => toolCall.executedOn !== "server");
+        const synthesizedToolMessages = buildToolResultMessagesFromToolCalls(clientToolCalls);
         const satisfiedToolCallIds = new Set<string>();
         for (const toolCall of msg.tool_calls) {
           const toolCallId = typeof toolCall?.id === "string" ? toolCall.id : "";
           if (!toolCallId) continue;
+          if (toolCall.executedOn === "server") {
+            // Server tools are already settled inside the managed session.
+            // Keep their assistant-call chronology, but never synthesize a
+            // second client-owned tool result for them.
+            satisfiedToolCallIds.add(toolCallId);
+            continue;
+          }
           if (explicitToolResultIds.has(toolCallId)) {
             satisfiedToolCallIds.add(toolCallId);
             continue;
@@ -611,7 +619,9 @@ export class ContextFileService {
       preparedMessages.push(messageToPush as ChatMessage);
 
       if (msg.role === "assistant" && Array.isArray((messageToPush as any).tool_calls)) {
-        const syntheticToolMessages = buildToolResultMessagesFromToolCalls((messageToPush as any).tool_calls).filter(
+        const clientToolCalls = ((messageToPush as any).tool_calls as ToolCall[])
+          .filter((toolCall) => toolCall.executedOn !== "server");
+        const syntheticToolMessages = buildToolResultMessagesFromToolCalls(clientToolCalls).filter(
           (toolMessage) =>
             typeof toolMessage.tool_call_id === "string"
             && !explicitToolResultIds.has(toolMessage.tool_call_id)

@@ -3,8 +3,15 @@
  */
 
 import { TFile } from "obsidian";
+import { showConfirm } from "../../../core/ui/notifications";
 import { createInitialAgentConversation } from "../AgentConversation";
 import { AgentChatView } from "../AgentChatView";
+
+jest.mock("../../../core/ui/notifications", () => ({
+  showConfirm: jest.fn(),
+}));
+
+const showConfirmMock = showConfirm as jest.MockedFunction<typeof showConfirm>;
 
 const submit = {
   text: "Summarize Project.md",
@@ -22,12 +29,14 @@ function executionHarness(result: Record<string, unknown>) {
     setInputText: jest.fn(),
     restoreRejectedSubmission: jest.fn(),
     hasDraft: jest.fn(() => false),
+    resetMessageEditor: jest.fn(),
     focus: jest.fn(),
   };
   const view = {
     activeRunPromise: null,
     queuedFollowUps: [],
     pendingRetry: null,
+    messageEditGeneration: 0,
     activeWebSearch: false,
     activeIncludeContextFiles: true,
     automationApprovalMode: "interactive",
@@ -44,6 +53,10 @@ function executionHarness(result: Record<string, unknown>) {
 }
 
 describe("AgentChatView coordinator", () => {
+  beforeEach(() => {
+    showConfirmMock.mockReset();
+  });
+
   it("publishes supported vault images with local thumbnail URLs", () => {
     const image = new TFile({ path: "Images/Diagram.png" });
     const note = new TFile({ path: "Notes/Project.md" });
@@ -242,6 +255,52 @@ describe("AgentChatView coordinator", () => {
     });
   });
 
+  it("forces fresh vault approval for a confirmed replay-risk resubmission", async () => {
+    const result = {
+      kind: "admission_denied",
+      outcome: "license_required",
+      snapshot: createInitialAgentConversation(),
+    };
+    const { view, workspace } = executionHarness(result);
+    const pendingRetry = {
+      kind: "resend" as const,
+      message: { role: "user" as const, content: "old", message_id: "old" },
+      targetMessageId: "old",
+      expectedIndex: 0,
+      expectedVersion: 1,
+      attachments: [],
+      laterMessageCount: 1,
+      unavailableAttachmentCount: 0,
+      requiresReplayConfirmation: true,
+    };
+    Object.assign(view, {
+      approvalMode: "full-access",
+      automationApprovalMode: "auto-approve",
+      sessionTrustedToolNames: new Set(["write"]),
+      pendingRetry,
+    });
+
+    await (AgentChatView.prototype as any).executeSubmission.call(
+      view,
+      submit,
+      {
+        historicalResubmit: pendingRetry,
+        forceDestructiveApproval: true,
+        restoreRejectedSubmission: false,
+      },
+    );
+
+    const startInput = view.controller.start.mock.calls[0][0];
+    expect(startInput.commit).toMatchObject({
+      kind: "resend",
+      targetMessageId: "old",
+      expectedIndex: 0,
+      expectedVersion: 1,
+    });
+    expect(startInput.approvalPolicy).toEqual({ trustedToolNames: new Set() });
+    expect(workspace.restoreRejectedSubmission).not.toHaveBeenCalled();
+  });
+
   it("shares chat-scoped trust with the active run so remembered approvals affect continuations", async () => {
     const result = {
       kind: "admission_denied",
@@ -288,9 +347,7 @@ describe("AgentChatView coordinator", () => {
       }],
     };
     const workspace = {
-      hasDraft: jest.fn(() => false),
-      setInputText: jest.fn(),
-      restoreMessageAttachments: jest.fn(),
+      showMessageEditor: jest.fn(async () => undefined),
     };
     const view = {
       transcript: { snapshot: jest.fn(() => ({ version: 7, messages: [message] })) },
@@ -298,6 +355,7 @@ describe("AgentChatView coordinator", () => {
       workspace,
       activeRunPromise: null,
       pendingRetry: null,
+      messageEditGeneration: 0,
     };
 
     await (AgentChatView.prototype as any).prepareRetry.call(view, message.message_id);
@@ -307,16 +365,24 @@ describe("AgentChatView coordinator", () => {
       targetMessageId: message.message_id,
       expectedIndex: 0,
       expectedVersion: 7,
+      attachments: [attachment],
     });
-    expect(workspace.setInputText).toHaveBeenCalledWith("Compare this", { focus: true });
-    expect(workspace.restoreMessageAttachments).toHaveBeenCalledWith([attachment]);
+    expect(workspace.showMessageEditor).toHaveBeenCalledWith({
+      messageId: message.message_id,
+      text: "Compare this",
+      laterMessageCount: 0,
+      hasAttachments: true,
+      unavailableAttachmentCount: 0,
+      requiresReplayConfirmation: false,
+    });
   });
 
-  it("leaves a nonempty current draft untouched when retry-from-here is requested", async () => {
+  it("opens the historical editor without reading or changing the bottom draft", async () => {
     const workspace = {
       hasDraft: jest.fn(() => true),
       setInputText: jest.fn(),
       restoreMessageAttachments: jest.fn(),
+      showMessageEditor: jest.fn(async () => undefined),
       focus: jest.fn(),
     };
     const view = {
@@ -324,20 +390,27 @@ describe("AgentChatView coordinator", () => {
         version: 2,
         messages: [{ role: "user", message_id: "user-1", content: "Old prompt" }],
       })) },
+      attachmentStore: { hydrateMessage: jest.fn(async (message) => message) },
       workspace,
       activeRunPromise: null,
       pendingRetry: null,
+      messageEditGeneration: 0,
     };
 
     await (AgentChatView.prototype as any).prepareRetry.call(view, "user-1");
 
-    expect(view.pendingRetry).toBeNull();
+    expect(view.pendingRetry).toMatchObject({ targetMessageId: "user-1" });
+    expect(workspace.hasDraft).not.toHaveBeenCalled();
     expect(workspace.setInputText).not.toHaveBeenCalled();
     expect(workspace.restoreMessageAttachments).not.toHaveBeenCalled();
-    expect(workspace.focus).toHaveBeenCalledTimes(1);
+    expect(workspace.focus).not.toHaveBeenCalled();
+    expect(workspace.showMessageEditor).toHaveBeenCalledWith(expect.objectContaining({
+      messageId: "user-1",
+      text: "Old prompt",
+    }));
   });
 
-  it("makes a missing attachment explicit when retry hydration degrades", async () => {
+  it("makes a missing attachment explicit inside the historical editor", async () => {
     const message = {
       role: "user" as const,
       message_id: "user-1",
@@ -358,10 +431,7 @@ describe("AgentChatView coordinator", () => {
       }],
     };
     const workspace = {
-      hasDraft: jest.fn(() => false),
-      setInputText: jest.fn(),
-      restoreMessageAttachments: jest.fn(),
-      setBanner: jest.fn(),
+      showMessageEditor: jest.fn(async () => undefined),
     };
     const view = {
       transcript: { snapshot: jest.fn(() => ({ version: 2, messages: [message] })) },
@@ -369,15 +439,170 @@ describe("AgentChatView coordinator", () => {
       workspace,
       activeRunPromise: null,
       pendingRetry: null,
+      messageEditGeneration: 0,
     };
 
     await (AgentChatView.prototype as any).prepareRetry.call(view, "user-1");
 
-    expect(workspace.setBanner).toHaveBeenCalledWith(
-      "One or more attachments are unavailable. They were left out of this retry.",
-      "error",
+    expect(workspace.showMessageEditor).toHaveBeenCalledWith(expect.objectContaining({
+      messageId: "user-1",
+      hasAttachments: false,
+      unavailableAttachmentCount: 1,
+    }));
+  });
+
+  it("marks later vault mutations for confirmation but ignores changes denied before start", async () => {
+    const write = (id: string, errorCode?: string) => ({
+      id,
+      messageId: `assistant-${id}`,
+      request: {
+        id,
+        type: "function" as const,
+        function: { name: "write", arguments: '{"path":"Project.md","content":"Updated"}' },
+      },
+      state: errorCode ? "failed" as const : "completed" as const,
+      timestamp: 2,
+      result: errorCode
+        ? { success: false, error: { code: errorCode, message: "Not run" } }
+        : { success: true, data: { path: "Project.md" } },
+    });
+    const target = { role: "user" as const, message_id: "user-1", content: "Update it" };
+    const workspace = { showMessageEditor: jest.fn(async () => undefined) };
+    const mutationMessages = [
+      target,
+      {
+        role: "assistant" as const,
+        message_id: "assistant-1",
+        content: "Updated",
+        tool_calls: [write("write-1")],
+      },
+    ];
+    const view = {
+      transcript: { snapshot: jest.fn(() => ({ version: 3, messages: mutationMessages })) },
+      attachmentStore: { hydrateMessage: jest.fn(async (message) => message) },
+      workspace,
+      activeRunPromise: null,
+      pendingRetry: null,
+      messageEditGeneration: 0,
+    };
+
+    await (AgentChatView.prototype as any).prepareRetry.call(view, "user-1");
+    expect(workspace.showMessageEditor).toHaveBeenLastCalledWith(expect.objectContaining({
+      laterMessageCount: 1,
+      requiresReplayConfirmation: true,
+    }));
+
+    const deniedMessages = [
+      target,
+      {
+        role: "assistant" as const,
+        message_id: "assistant-2",
+        content: "Cancelled",
+        tool_calls: [write("write-2", "USER_DENIED")],
+      },
+    ];
+    view.transcript.snapshot.mockImplementation(() => ({ version: 4, messages: deniedMessages }));
+    await (AgentChatView.prototype as any).prepareRetry.call(view, "user-1");
+    expect(workspace.showMessageEditor).toHaveBeenLastCalledWith(expect.objectContaining({
+      laterMessageCount: 1,
+      requiresReplayConfirmation: false,
+    }));
+  });
+
+  it("keeps a risky inline resubmission editable when confirmation is cancelled", async () => {
+    showConfirmMock.mockResolvedValue({ confirmed: false });
+    const pending = {
+      kind: "resend" as const,
+      message: { role: "user" as const, message_id: "user-1", content: "Old" },
+      targetMessageId: "user-1",
+      expectedIndex: 0,
+      expectedVersion: 3,
+      attachments: [],
+      laterMessageCount: 2,
+      unavailableAttachmentCount: 0,
+      requiresReplayConfirmation: true,
+    };
+    const executeSubmission = jest.fn();
+    const view = {
+      app: {},
+      activeRunPromise: null,
+      pendingRetry: pending,
+      messageEditGeneration: 1,
+      transcript: {
+        snapshot: jest.fn(() => ({ version: 3, messages: [pending.message] })),
+      },
+      prepareSubmission: jest.fn(),
+      executeSubmission,
+      workspace: { hideMessageEditor: jest.fn() },
+    };
+
+    await expect(
+      (AgentChatView.prototype as any).resubmitMessage.call(view, "user-1", "Edited"),
+    ).resolves.toBe(false);
+    expect(showConfirmMock).toHaveBeenCalledWith(
+      view.app,
+      expect.stringContaining("Vault changes already made"),
+      expect.objectContaining({ primaryButton: "Resubmit" }),
     );
-    expect(workspace.restoreMessageAttachments).not.toHaveBeenCalled();
+    expect(executeSubmission).not.toHaveBeenCalled();
+    expect(view.pendingRetry).toBe(pending);
+  });
+
+  it("resubmits from the exact historical point and forces fresh vault approvals", async () => {
+    showConfirmMock.mockResolvedValue({ confirmed: true });
+    const attachment = {
+      status: "ready" as const,
+      id: "text-1",
+      name: "Brief.txt",
+      mimeType: "text/plain",
+      byteLength: 5,
+      kind: "text" as const,
+      contentPart: { type: "text" as const, text: "Brief" },
+    };
+    const pending = {
+      kind: "resend" as const,
+      message: { role: "user" as const, message_id: "user-1", content: "Old" },
+      targetMessageId: "user-1",
+      expectedIndex: 0,
+      expectedVersion: 3,
+      attachments: [attachment],
+      laterMessageCount: 2,
+      unavailableAttachmentCount: 0,
+      requiresReplayConfirmation: true,
+    };
+    const before = { version: 3, messages: [pending.message] };
+    const after = {
+      version: 4,
+      messages: [{ role: "user" as const, message_id: "user-new", content: "Edited" }],
+    };
+    const prepared = {
+      text: "Edited",
+      webSearch: false,
+      mode: "send" as const,
+      attachments: [attachment],
+    };
+    const executeSubmission = jest.fn(async () => undefined);
+    const view = {
+      app: {},
+      activeRunPromise: null,
+      pendingRetry: pending,
+      messageEditGeneration: 1,
+      transcript: { snapshot: jest.fn().mockReturnValueOnce(before).mockReturnValue(after) },
+      prepareSubmission: jest.fn(async () => prepared),
+      executeSubmission,
+      handleError: jest.fn(),
+      workspace: { hideMessageEditor: jest.fn() },
+    };
+
+    await expect(
+      (AgentChatView.prototype as any).resubmitMessage.call(view, "user-1", " Edited "),
+    ).resolves.toBe(true);
+    expect(view.prepareSubmission).toHaveBeenCalledWith(prepared);
+    expect(executeSubmission).toHaveBeenCalledWith(prepared, {
+      restoreRejectedSubmission: false,
+      forceDestructiveApproval: true,
+      historicalResubmit: pending,
+    });
   });
 
   it("adds a Similar Notes drag as vault context without copying the file", async () => {
@@ -427,17 +652,9 @@ describe("AgentChatView coordinator", () => {
       operation: {},
     };
     const { view, workspace } = executionHarness(result);
-    view.pendingRetry = {
-      kind: "resend",
-      message: { role: "user", content: "old", message_id: "old" },
-      targetMessageId: "old",
-      expectedIndex: 0,
-      expectedVersion: 1,
-    };
 
     await (AgentChatView.prototype as any).executeSubmission.call(view, submit);
 
-    expect(view.pendingRetry).toBeNull();
     expect(workspace.setHistory).toHaveBeenCalledTimes(1);
     expect(workspace.setAgentSnapshot).toHaveBeenCalledTimes(1);
     expect(workspace.setAgentSnapshot).toHaveBeenCalledWith(null);
@@ -586,6 +803,7 @@ describe("AgentChatView coordinator", () => {
       setTitle: jest.fn(),
       setHistory: jest.fn(async () => undefined),
       setAgentSnapshot: jest.fn(async () => undefined),
+      resetMessageEditor: jest.fn(),
     };
     const view = {
       conversationOriginToken: "conversation-origin-before-load",
@@ -704,6 +922,7 @@ describe("AgentChatView coordinator", () => {
         setBanner: jest.fn(),
         setHistory: jest.fn(async () => undefined),
         setAgentSnapshot: jest.fn(async () => undefined),
+        resetMessageEditor: jest.fn(),
       },
       contextLoading: false,
       contextManager: { clearContext: jest.fn() },

@@ -7,6 +7,58 @@
   min-width: 0;
 }
 
+.systemsculpt-agent-activity {
+  min-width: 0;
+}
+
+.systemsculpt-agent-activity-header {
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-2);
+  min-height: var(--ss-control-height-sm);
+  padding: 0 var(--ss-space-1);
+  color: var(--ss-ink-faint);
+}
+
+.systemsculpt-agent-activity-header strong {
+  overflow: hidden;
+  font-size: var(--ss-text-xs);
+  font-weight: var(--ss-weight-semibold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.systemsculpt-agent-activity-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: var(--ss-ink-faint);
+}
+
+.systemsculpt-agent-activity-icon svg {
+  width: var(--ss-icon-size-sm);
+  height: var(--ss-icon-size-sm);
+}
+
+.systemsculpt-agent-activity-state {
+  flex: 0 0 7rem;
+  margin-left: auto;
+  overflow: hidden;
+  font-size: var(--ss-text-xs);
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.systemsculpt-agent-activity-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 0;
+  margin-left: var(--ss-space-2);
+  padding-left: var(--ss-space-2);
+  border-left: 1px solid var(--ss-line);
+}
+
 .systemsculpt-agent-part.is-reasoning {
   color: var(--ss-ink-muted);
   font-size: var(--ss-text-sm);
@@ -20,9 +72,9 @@
   display: flex;
   align-items: center;
   gap: var(--ss-space-1);
-  width: fit-content;
+  width: 100%;
   min-height: var(--ss-control-height-sm);
-  padding: 0 var(--ss-space-1);
+  padding: 0 var(--ss-space-2);
   border-radius: var(--ss-radius-sm);
   cursor: pointer;
   list-style: none;
@@ -71,7 +123,7 @@
 
 .systemsculpt-agent-reasoning-body {
   min-width: 0;
-  margin: var(--ss-space-1) 0 var(--ss-space-2) var(--ss-space-4);
+  margin: var(--ss-space-1) 0 var(--ss-space-2) var(--ss-space-5);
   padding: var(--ss-space-1) var(--ss-space-3);
   overflow-wrap: anywhere;
   border-left: 1px solid var(--ss-line);
