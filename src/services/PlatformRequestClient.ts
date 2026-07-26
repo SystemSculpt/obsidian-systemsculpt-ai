@@ -16,6 +16,7 @@ export type PlatformRequestInput = {
   transport?: PlatformTransport;
   bodyEncoding?: "json" | "raw";
   responseEncoding?: "text" | "arrayBuffer";
+  maxResponseBytes?: number;
   /**
    * Replay-safe endpoint used to prove that direct browser fetch can read the
    * first-party origin before a state-changing streaming request is sent.
@@ -39,6 +40,12 @@ export class PlatformRequestClient {
     const rawBody = input.bodyEncoding === "raw";
     if (rawBody && input.body !== undefined && !(input.body instanceof ArrayBuffer)) {
       throw new TypeError("Raw platform request bodies must be an ArrayBuffer.");
+    }
+    if (
+      input.maxResponseBytes !== undefined
+      && (!Number.isInteger(input.maxResponseBytes) || input.maxResponseBytes < 1)
+    ) {
+      throw new TypeError("Maximum platform response size must be a positive integer.");
     }
     let transport = input.transport
       ?? PlatformContext.get().preferredTransport({
@@ -115,6 +122,13 @@ export class PlatformRequestClient {
       : typeof result.text === "string"
         ? result.text
         : JSON.stringify(result.json || {});
+    if (
+      input.maxResponseBytes !== undefined
+      && input.responseEncoding === "arrayBuffer"
+      && result.arrayBuffer.byteLength > input.maxResponseBytes
+    ) {
+      throw new TypeError("Native response exceeded the configured maximum size.");
+    }
     const responseHeaders = new Headers();
     const nativeHeaders = (result as typeof result & { headers?: Record<string, string> }).headers;
     if (nativeHeaders) {

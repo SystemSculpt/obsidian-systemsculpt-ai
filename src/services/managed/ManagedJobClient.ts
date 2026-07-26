@@ -1,5 +1,5 @@
 import { HostedTransportAdapter } from "./adapters/HostedTransportAdapter";
-import { MANAGED_CAPABILITY_CONTRACT, ManagedImageOutputBytes, ManagedImageOutputMetadata, ManagedJobCapability, ManagedJobStatus, ManagedTransportResult } from "./ManagedTypes";
+import { MANAGED_CAPABILITY_CONTRACT, MANAGED_IMAGE_OUTPUT_MAX_BYTES, ManagedImageOutputBytes, ManagedImageOutputMetadata, ManagedJobCapability, ManagedJobStatus, ManagedTransportResult } from "./ManagedTypes";
 
 export const MANAGED_JOB_PROTOCOL = "managed-job-protocol-v1" as const;
 const MANAGED_IMAGE_OUTPUT_PROTOCOL = "managed-image-output-v1" as const;
@@ -84,21 +84,68 @@ export class ManagedJobClient {
     const result = await this.transport.managedImageOutput(path, headers, signal);
     if (!result.response.ok) await this.imageOutputError(result, requestId);
     const response = result.response, responseRequestId = response.headers.get("x-request-id");
-    const required: Record<string, string> = { "x-systemsculpt-contract": MANAGED_CAPABILITY_CONTRACT, "x-systemsculpt-job-contract": MANAGED_JOB_PROTOCOL, "x-systemsculpt-image-output-contract": MANAGED_IMAGE_OUTPUT_PROTOCOL, "x-systemsculpt-capability": "image_generation", "x-systemsculpt-output-index": String(outputIndex), "x-systemsculpt-content-sha256": expected.sha256, "content-type": expected.mime_type, "content-length": String(expected.size_bytes), "cache-control": "no-store, max-age=0", "x-content-type-options": "nosniff" };
+    const required: Record<string, string> = { "x-systemsculpt-contract": MANAGED_CAPABILITY_CONTRACT, "x-systemsculpt-job-contract": MANAGED_JOB_PROTOCOL, "x-systemsculpt-image-output-contract": MANAGED_IMAGE_OUTPUT_PROTOCOL, "x-systemsculpt-capability": "image_generation", "x-systemsculpt-output-index": String(outputIndex), "x-systemsculpt-content-sha256": expected.sha256, "content-type": expected.mime_type, "cache-control": "no-store, max-age=0", "x-content-type-options": "nosniff" };
+    const declaredLength = response.headers.get("content-length");
+    // A proxy may legitimately frame the fixed server body as chunked. When
+    // length is present it must agree with metadata; either way the reader
+    // below enforces the exact metadata size before hashing.
+    const validDeclaredLength = declaredLength === null
+      || (/^(0|[1-9]\d*)$/.test(declaredLength) && Number(declaredLength) === expected.size_bytes);
     const mismatchedHeaders = [
       ...(responseRequestId === requestId ? [] : ["x-request-id"]),
       ...Object.entries(required).filter(([name, value]) => response.headers.get(name) !== value).map(([name]) => name),
+      ...(validDeclaredLength ? [] : ["content-length"]),
     ];
     if (mismatchedHeaders.length > 0) malformed(`Invalid managed image output headers: ${mismatchedHeaders.join(", ")}.`);
     const extension = expected.mime_type === "image/png" ? "png" : expected.mime_type === "image/jpeg" ? "jpg" : "webp";
     if (response.headers.get("content-disposition") !== `attachment; filename="systemsculpt-image-${outputIndex}.${extension}"`) malformed("Invalid managed image output disposition.");
-    let bytes: ArrayBuffer; try { bytes = await response.arrayBuffer(); } catch (error) { if (signal?.aborted) { try { await response.body?.cancel(); } catch {} throw new DOMException("Aborted", "AbortError"); } throw error; }
-    if (signal?.aborted) { try { await response.body?.cancel(); } catch {} throw new DOMException("Aborted", "AbortError"); }
-    if (bytes.byteLength !== expected.size_bytes || await this.sha256(bytes) !== expected.sha256) malformed("Managed image output integrity mismatch.");
+    const bytes = await this.readImageOutputBytes(response, expected.size_bytes, signal);
+    if (await this.sha256(bytes) !== expected.sha256) malformed("Managed image output integrity mismatch.");
     return { metadata: expected, bytes };
   }
 
-  private validateImageOutputMetadata(value: ManagedImageOutputMetadata, response = false): void { if (!value || Object.keys(value).sort().join() !== "height,index,mime_type,sha256,size_bytes,width" || !Number.isInteger(value.index) || value.index < 0 || value.index > 3 || !["image/png", "image/jpeg", "image/webp"].includes(value.mime_type) || !Number.isInteger(value.size_bytes) || value.size_bytes < 1 || value.size_bytes > 31457280 || !/^[a-f0-9]{64}$/.test(value.sha256) || [value.width, value.height].some(v => v !== null && (!Number.isInteger(v) || v < 0))) { if (response) malformed("Malformed image output metadata."); this.invalid("Invalid expected image output metadata."); } }
+  private async readImageOutputBytes(response: Response, expectedBytes: number, signal?: AbortSignal): Promise<ArrayBuffer> {
+    const body = response.body;
+    if (!body) malformed("Managed image output integrity mismatch.");
+    const reader = body.getReader();
+    const bytes = new Uint8Array(expectedBytes);
+    let offset = 0;
+    let completed = false;
+    const abortError = () => new DOMException("Aborted", "AbortError");
+    const abortReader = () => { void reader.cancel(abortError()).catch(() => undefined); };
+    signal?.addEventListener("abort", abortReader, { once: true });
+    try {
+      while (true) {
+        if (signal?.aborted) throw abortError();
+        let chunk: ReadableStreamReadResult<Uint8Array>;
+        try {
+          chunk = await reader.read();
+        } catch (error) {
+          if (signal?.aborted) throw abortError();
+          throw error;
+        }
+        if (signal?.aborted) throw abortError();
+        if (chunk.done) {
+          completed = true;
+          break;
+        }
+        if (!(chunk.value instanceof Uint8Array)) malformed("Managed image output body was malformed.");
+        if (chunk.value.byteLength > expectedBytes - offset) malformed("Managed image output exceeded expected size.");
+        bytes.set(chunk.value, offset);
+        offset += chunk.value.byteLength;
+      }
+    } finally {
+      signal?.removeEventListener("abort", abortReader);
+      if (!completed) {
+        try { await reader.cancel(); } catch {}
+      }
+      reader.releaseLock();
+    }
+    if (offset !== expectedBytes) malformed("Managed image output integrity mismatch.");
+    return bytes.buffer;
+  }
+
+  private validateImageOutputMetadata(value: ManagedImageOutputMetadata, response = false): void { if (!value || Object.keys(value).sort().join() !== "height,index,mime_type,sha256,size_bytes,width" || !Number.isInteger(value.index) || value.index < 0 || value.index > 3 || !["image/png", "image/jpeg", "image/webp"].includes(value.mime_type) || !Number.isInteger(value.size_bytes) || value.size_bytes < 1 || value.size_bytes > MANAGED_IMAGE_OUTPUT_MAX_BYTES || !/^[a-f0-9]{64}$/.test(value.sha256) || [value.width, value.height].some(v => v !== null && (!Number.isInteger(v) || v < 0))) { if (response) malformed("Malformed image output metadata."); this.invalid("Invalid expected image output metadata."); } }
   private imageOutputHeaders(requestId: string): Record<string, string> { return { "x-systemsculpt-contract": MANAGED_CAPABILITY_CONTRACT, "x-systemsculpt-job-contract": MANAGED_JOB_PROTOCOL, "x-systemsculpt-capability": "image_generation", "x-systemsculpt-image-output-contract": MANAGED_IMAGE_OUTPUT_PROTOCOL, "x-request-id": requestId }; }
   private requestId(): string { const requestId = this.createRequestId(); if (!/^[A-Za-z0-9._:-]{1,128}$/.test(requestId)) throw new Error("Invalid generated request ID."); return requestId; }
   private async sha256(bytes: ArrayBuffer): Promise<string> { const digest = await window.crypto.subtle.digest("SHA-256", bytes); return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join(""); }

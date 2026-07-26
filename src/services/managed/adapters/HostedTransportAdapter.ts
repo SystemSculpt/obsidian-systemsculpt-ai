@@ -1,6 +1,6 @@
 import { PlatformRequestClient, type PlatformRequestInput } from "../../PlatformRequestClient";
 import {
-  MANAGED_ADMISSION_CONTRACT, MANAGED_CAPABILITY_CONTRACT,
+  MANAGED_ADMISSION_CONTRACT, MANAGED_CAPABILITY_CONTRACT, MANAGED_IMAGE_OUTPUT_MAX_BYTES,
   ManagedServerOutcome, ManagedTransportOperation, ManagedTransportResult,
 } from "../ManagedTypes";
 import { ManagedCapabilityCatalog } from "../ManagedCapabilityCatalog";
@@ -80,11 +80,11 @@ export class HostedTransportAdapter {
     return this.send(
       { path, method: "GET", headers, signal },
       headers, false, true, undefined, false,
-      { transport: "requestUrl", responseEncoding: "arrayBuffer" },
+      { transport: "requestUrl", responseEncoding: "arrayBuffer", maxResponseBytes: MANAGED_IMAGE_OUTPUT_MAX_BYTES },
     );
   }
 
-  private async send(operation: ManagedTransportOperation, extra: Record<string, string> = {}, stream = false, scopedHeaders = false, managedChatConfiguration?: ManagedChatConfiguration, readErrorBody = true, requestOverrides: Pick<PlatformRequestInput, "transport" | "responseEncoding"> = {}): Promise<ManagedTransportResult> {
+  private async send(operation: ManagedTransportOperation, extra: Record<string, string> = {}, stream = false, scopedHeaders = false, managedChatConfiguration?: ManagedChatConfiguration, readErrorBody = true, requestOverrides: Pick<PlatformRequestInput, "transport" | "responseEncoding" | "maxResponseBytes"> = {}): Promise<ManagedTransportResult> {
     const pluginVersion = managedChatConfiguration?.pluginVersion ?? this.options.pluginVersion;
     const headers: Record<string, string> = scopedHeaders ? { ...extra } : { "x-plugin-version": pluginVersion, ...extra };
     if (!extra["x-systemsculpt-admission-contract"]) headers["x-systemsculpt-contract"] = MANAGED_CAPABILITY_CONTRACT;
