@@ -120,14 +120,14 @@ The watcher copies main.js, manifest.json, and styles.css after successful
 builds. Use the official Obsidian CLI or Computer Use for live reload, errors,
 DOM inspection, and visual verification.
 
-For a mobile-sensitive change, automated checks are necessary but not final
-proof. Sync the exact built main.js, manifest.json, and styles.css into a real
-Obsidian Mobile vault, verify their hashes, then exercise settings, Chat,
-Similar Notes, Studio portable and blocked nodes, commands, modals, and fixed
-transients. Cover portrait and landscape, keyboard open and closed, light and
-dark themes, enlarged interface text, and phone plus tablet or equivalent
-widths. Record which Android/iOS hosts were physically tested; desktop mobile
-emulation does not count as native-host proof.
+For mobile-sensitive changes, npm run check:mobile and npm run check:full are
+the release gates. They validate the exact built main.js, manifest.json, and
+styles.css across narrow-pane, touch, keyboard, accessibility, and Studio
+capability scenarios with desktop adapters unavailable. Simulator, emulator,
+browser-emulation, or physical-device runs may provide supplemental evidence
+when explicitly requested, but they are not release gates and must not replace
+or weaken the deterministic checks. Record the host and artifact hashes when
+manual mobile exploration is performed.
 
 ## Product contracts
 
