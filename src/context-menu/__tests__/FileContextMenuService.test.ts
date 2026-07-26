@@ -15,6 +15,52 @@ jest.mock("../../utils/errorLogger", () => ({
 }));
 
 describe("FileContextMenuService", () => {
+  it.each([
+    ["png", true],
+    ["webp", true],
+    ["svg", false],
+  ] as const)("offers Chat with file for %s only when visual context supports it", (extension, expected) => {
+    const app = new App() as any;
+    app.workspace.layoutReady = true;
+    app.workspace.on = jest.fn(() => ({ id: "evt-ref" }));
+    const plugin = {
+      settings: {},
+      register: jest.fn(),
+      registerEvent: jest.fn(),
+      getPluginLogger: jest.fn(() => null),
+    } as any;
+    const service = new FileContextMenuService({
+      app,
+      plugin,
+      documentProcessor: { processDocument: jest.fn() },
+      chatLauncher: { open: jest.fn() },
+      launchProcessingPanel: jest.fn() as any,
+    });
+
+    expect((service as any).shouldOfferChatWithFile(extension)).toBe(expected);
+  });
+
+  it("keeps SVG available for the independent copy-image action", () => {
+    const app = new App() as any;
+    app.workspace.layoutReady = true;
+    app.workspace.on = jest.fn(() => ({ id: "evt-ref" }));
+    const plugin = {
+      settings: {},
+      register: jest.fn(),
+      registerEvent: jest.fn(),
+      getPluginLogger: jest.fn(() => null),
+    } as any;
+    const service = new FileContextMenuService({
+      app,
+      plugin,
+      documentProcessor: { processDocument: jest.fn() },
+      chatLauncher: { open: jest.fn() },
+      launchProcessingPanel: jest.fn() as any,
+    });
+
+    expect((service as any).shouldOfferCopyImage("svg")).toBe(true);
+  });
+
   it("owns one conversion-scoped AbortController and suppresses late success after cancel", async () => {
     const app = new App() as any;
     app.workspace.layoutReady = true;

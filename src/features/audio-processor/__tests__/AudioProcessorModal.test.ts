@@ -14,7 +14,10 @@ const audioFile = (
   stat: { size, mtime, ctime: mtime },
 }) as TFile;
 
-function createPlugin(files: TFile[] = []) {
+function createPlugin(
+  files: TFile[] = [],
+  settings: Record<string, unknown> = {},
+) {
   const app = new App();
   (app.vault.getFiles as jest.Mock).mockReturnValue(files);
   (app.vault as any).getResourcePath = jest.fn((file: TFile) => `app://${file.path}`);
@@ -24,7 +27,11 @@ function createPlugin(files: TFile[] = []) {
   return {
     app,
     manifest: { version: "6.1.0" },
-    settings: { licenseKey: "license" },
+    settings: {
+      licenseKey: "license",
+      audioProcessorOutputPreset: "detailed",
+      ...settings,
+    },
     vaultFileCache: null,
     directoryManager: { ensureDirectoryByPath: jest.fn() },
     register: jest.fn(),
@@ -54,7 +61,7 @@ describe("AudioProcessorModal", () => {
     jest.restoreAllMocks();
   });
 
-  it("opens directly to the YouTube source with strict URL validation and fixed defaults", () => {
+  it("opens directly to the YouTube source with strict URL validation and output presets", () => {
     const modal = new AudioProcessorModal(createPlugin(), { initialTab: "youtube" });
     document.body.appendChild(modal.modalEl);
     modal.onOpen();
@@ -65,8 +72,19 @@ describe("AudioProcessorModal", () => {
     );
     expect(sourceTabs).toHaveLength(2);
     expect(sourceTabs[1].getAttribute("aria-selected")).toBe("true");
-    expect(modal.modalEl.textContent).toContain("Polished note + full transcript");
-    expect(modal.modalEl.textContent).toContain("no setup required");
+    expect(modal.modalEl.textContent).toContain("Detailed note");
+    expect(modal.modalEl.textContent).toContain("Meeting brief");
+    expect(modal.modalEl.textContent).toContain("Clean transcript");
+    expect(buttonWithText(modal.modalEl, "Meeting brief").textContent)
+      .toContain("plus a linked transcript");
+    expect(buttonWithText(modal.modalEl, "Clean transcript").textContent)
+      .toContain("without timestamps in the main note");
+    expect(modal.modalEl.querySelectorAll(
+      ".ss-audio-processor__output-option[role='radio']",
+    )).toHaveLength(3);
+    expect(modal.modalEl.querySelector(
+      ".ss-audio-processor__output-option[aria-checked='true']",
+    )?.textContent).toContain("Detailed note");
     expect(modal.modalEl.textContent).not.toMatch(/model|template/i);
 
     const input = modal.modalEl.querySelector<HTMLInputElement>(
@@ -84,6 +102,50 @@ describe("AudioProcessorModal", () => {
     input.dispatchEvent(new Event("input", { bubbles: true }));
     expect(process.disabled).toBe(false);
     expect(modal.modalEl.textContent).toContain("YouTube video ready");
+  });
+
+  it("shares one preset selector across Audio and YouTube and passes the one-job choice", async () => {
+    const process = jest.fn(() => new Promise(() => undefined));
+    const modal = new AudioProcessorModal(
+      createPlugin([], { audioProcessorOutputPreset: "meeting_brief" }),
+      {
+        initialTab: "youtube",
+        createService: () => ({ process }) as any,
+      },
+    );
+    document.body.appendChild(modal.modalEl);
+    modal.onOpen();
+
+    const selected = () => modal.modalEl.querySelector<HTMLButtonElement>(
+      ".ss-audio-processor__output-option[aria-checked='true']",
+    );
+    expect(selected()?.textContent).toContain("Meeting brief");
+
+    buttonWithText(modal.modalEl, "Audio").click();
+    expect(selected()?.textContent).toContain("Meeting brief");
+    buttonWithText(modal.modalEl, "YouTube").click();
+
+    buttonWithText(modal.modalEl, "Clean transcript").click();
+    expect(selected()?.textContent).toContain("Clean transcript");
+
+    const input = modal.modalEl.querySelector<HTMLInputElement>(
+      ".ss-audio-processor__youtube-input",
+    )!;
+    input.value = "https://youtu.be/dQw4w9WgXcQ?si=share";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    buttonWithText(modal.modalEl, "Process video").click();
+
+    expect(process).toHaveBeenCalledWith(
+      {
+        type: "youtube",
+        url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+      },
+      expect.objectContaining({
+        outputPreset: "clean_transcript",
+        signal: expect.any(AbortSignal),
+        onProgress: expect.any(Function),
+      }),
+    );
   });
 
   it("uses bounded, searchable, keyboard-selectable vault audio and a native device picker", () => {

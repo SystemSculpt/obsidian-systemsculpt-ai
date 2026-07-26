@@ -27,6 +27,12 @@ export type ManagedChatSessionCheckpoint = Readonly<{
 
 export type ManagedChatRuntimeEvent =
   | Readonly<{ kind: "phase_restarted"; attempt: number }>
+  | Readonly<{
+    kind: "server_tool_result";
+    toolCallId: string;
+    status: "succeeded" | "failed";
+    details: Readonly<Record<string, unknown>>;
+  }>
   | Readonly<{ kind: "reasoning_summary_delta"; text: string }>
   | Readonly<{ kind: "content_delta"; text: string }>
   | Readonly<{ kind: "tool_call_delta"; index: number; id?: string; name?: string; arguments?: string }>
@@ -172,6 +178,23 @@ function normalizeErrorFrame(value: JsonContractValue): ManagedChatErrorFrame | 
 function normalizeFrame(value: JsonContractValue): readonly ManagedChatRuntimeEvent[] | null {
   const object = asObject(value);
   if (!object || typeof object.error !== "undefined") return null;
+  if (object.object === "systemsculpt.chat.tool_result") {
+    if (!ownKeysExactly(object, ["object", "tool_call_id", "status", "details"])) return null;
+    const toolCallId = stringField(object, "tool_call_id");
+    if (
+      !toolCallId
+      || (object.status !== "succeeded" && object.status !== "failed")
+      || !object.details
+      || typeof object.details !== "object"
+      || Array.isArray(object.details)
+    ) return null;
+    return [{
+      kind: "server_tool_result",
+      toolCallId,
+      status: object.status,
+      details: object.details as Readonly<Record<string, unknown>>,
+    }];
+  }
   if (object.object === "systemsculpt.chat.session") {
     if (!ownKeysExactly(object, ["object", "session_id", "revision", "state"])) return null;
     const sessionId = stringField(object, "session_id");
@@ -651,7 +674,6 @@ export class ManagedChatRuntimeAdapter {
       messages,
     };
     if (!binding && accepted.tools?.length) body.tools = accepted.tools;
-    if (input.phase === "initial" && accepted.webSearch) body.plugins = [{ id: "web" }];
     return body;
   }
 

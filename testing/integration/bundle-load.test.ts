@@ -52,7 +52,9 @@ describe("built bundle (main.js)", () => {
     // Settings migration ran: loadData returned null, so defaults applied.
     expect(plugin.settings).toBeDefined();
     expect(typeof plugin.settings).toBe("object");
-    expect(plugin.settings.schemaVersion).toBe(12);
+    expect(plugin.settings.schemaVersion).toBe(13);
+    expect(plugin.settings).not.toHaveProperty("webSearchEnabledByDefault");
+    expect(plugin.settings.audioProcessorOutputPreset).toBe("detailed");
     expect(plugin.settings.licenseKey).toBe("");
     expect(plugin.settings).not.toHaveProperty("settingsMode");
     expect(plugin.settings).not.toHaveProperty("customProviders");
@@ -88,6 +90,18 @@ describe("built bundle (main.js)", () => {
 
     expect(code).not.toContain("ReadwiseService");
     expect(code).not.toContain("ReadwiseSyncWidget");
+  });
+
+  it("ships the exact Audio Processor output presets in the built artifact", () => {
+    const code = readFileSync(BUNDLE_PATH, "utf8");
+
+    expect(code).toContain("Detailed note");
+    expect(code).toContain("Meeting brief");
+    expect(code).toContain("Clean transcript");
+    expect(code).toContain("output_preset");
+    expect(code).toContain("meeting_brief");
+    expect(code).toContain("clean_transcript");
+    expect(code).toContain("audio_processor_artifacts.v2");
   });
 
   it("does not ship browser-native dynamic imports for Node builtins (#235)", () => {

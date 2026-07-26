@@ -17,6 +17,7 @@ export type AgentComposerAttachment = Readonly<{
   label: string;
   path?: string;
   kind: "vault" | "file" | "image";
+  previewUrl?: string;
 }>;
 
 export type AgentComposerSubmit = Readonly<{
@@ -35,7 +36,6 @@ export type AgentComposerOptions = Readonly<{
   attachmentLimits?: ManagedChatInputLimits;
   onMic?: () => void | Promise<void>;
   onRemoveAttachment: (attachment: AgentComposerAttachment) => void | Promise<void>;
-  onWebSearchChange?: (enabled: boolean) => void;
   onApprovalModeChange?: (mode: "ask" | "full-access") => void;
 }>;
 
@@ -68,14 +68,13 @@ export class AgentComposer extends Component {
   private readonly attachButton: HTMLButtonElement;
   private readonly vaultContextButton: HTMLButtonElement;
   private readonly filePicker: HTMLInputElement;
-  private readonly webButton: HTMLButtonElement;
   private readonly approvalMode: HTMLSelectElement;
   private readonly micButton: HTMLButtonElement | null;
   private readonly sendButton: HTMLButtonElement;
   private readonly stopButton: HTMLButtonElement;
   private readonly hint: HTMLElement;
   private running = false;
-  private webSearch = false;
+  private historyEditing = false;
   private submitting = false;
   private attachmentBusy = false;
   private contextAttachments: readonly AgentComposerAttachment[] = [];
@@ -107,7 +106,12 @@ export class AgentComposer extends Component {
     const toolbar = prompt.createDiv({ cls: "systemsculpt-agent-prompt-toolbar" });
     const tools = toolbar.createDiv({ cls: "systemsculpt-agent-prompt-tools" });
     this.attachButton = createButton(tools, "systemsculpt-agent-icon-button", "Attach files", "paperclip");
-    this.vaultContextButton = createButton(tools, "systemsculpt-agent-icon-button", "Add vault context", "files");
+    this.vaultContextButton = createButton(
+      tools,
+      "systemsculpt-agent-icon-button",
+      "Add vault context, including images",
+      "files",
+    );
     this.filePicker = tools.createEl("input", {
       cls: "systemsculpt-agent-file-picker",
       attr: {
@@ -118,8 +122,6 @@ export class AgentComposer extends Component {
         "aria-hidden": "true",
       },
     });
-    this.webButton = createButton(tools, "systemsculpt-agent-icon-button", "Search the web", "globe-2");
-    this.webButton.setAttribute("aria-pressed", "false");
     this.approvalMode = tools.createEl("select", {
       cls: "dropdown systemsculpt-agent-approval-mode",
       attr: { "aria-label": "Vault changes" },
@@ -183,11 +185,6 @@ export class AgentComposer extends Component {
       else if (vaultPath) void this.options.onVaultContextDrop?.(vaultPath);
     });
     if (this.micButton) this.registerDomEvent(this.micButton, "click", () => void this.options.onMic?.());
-    this.registerDomEvent(this.webButton, "click", () => {
-      this.webSearch = !this.webSearch;
-      updateUiAction(this.webButton, { selected: this.webSearch });
-      this.options.onWebSearchChange?.(this.webSearch);
-    });
     this.registerDomEvent(this.approvalMode, "change", () => {
       const mode = this.approvalMode.value === "full-access" ? "full-access" : "ask";
       this.approvalMode.classList.toggle("is-full-access", mode === "full-access");
@@ -217,16 +214,6 @@ export class AgentComposer extends Component {
     if (options.focus) this.focus();
   }
 
-  public isWebSearchEnabled(): boolean {
-    return this.webSearch;
-  }
-
-  public setWebSearchEnabled(enabled: boolean): void {
-    this.webSearch = enabled;
-    updateUiAction(this.webButton, { selected: enabled });
-    this.options.onWebSearchChange?.(enabled);
-  }
-
   public setApprovalMode(mode: "ask" | "full-access"): void {
     this.approvalMode.value = mode;
     this.approvalMode.classList.toggle("is-full-access", mode === "full-access");
@@ -235,11 +222,16 @@ export class AgentComposer extends Component {
   public setRunning(running: boolean): void {
     this.running = running;
     this.element.classList.toggle("is-running", running);
-    this.hint.setText(running ? "Enter to queue" : "Enter to send");
     updateUiAction(this.sendButton, {
       label: running ? "Queue follow-up" : "Send message",
       icon: running ? "list-plus" : "arrow-up",
     });
+    this.syncControls();
+  }
+
+  public setHistoryEditing(editing: boolean): void {
+    this.historyEditing = editing;
+    this.element.classList.toggle("is-history-editing", editing);
     this.syncControls();
   }
 
@@ -299,10 +291,16 @@ export class AgentComposer extends Component {
     for (const attachment of this.contextAttachments) {
       const chip = this.attachmentList.createDiv({
         cls: "systemsculpt-agent-attachment is-context",
-        attr: { role: "listitem" },
+        attr: {
+          role: "listitem",
+          title: attachment.path || attachment.label,
+        },
       });
-      const icon = chip.createSpan({ cls: "systemsculpt-agent-attachment-icon" });
-      setIcon(icon, attachment.kind === "image" ? "image" : "file-text");
+      if (attachment.kind === "image" && attachment.previewUrl) {
+        this.renderAttachmentPreview(chip, attachment.previewUrl);
+      } else {
+        this.renderAttachmentIcon(chip, attachment.kind === "image" ? "image" : "file-text");
+      }
       chip.createSpan({ cls: "systemsculpt-agent-attachment-label", text: attachment.label });
       const remove = createButton(chip, "systemsculpt-agent-attachment-remove", `Remove ${attachment.label}`, "x");
       // Attachment chips are replaced wholesale. Keeping their listeners on
@@ -321,13 +319,9 @@ export class AgentComposer extends Component {
         },
       });
       if (attachment.status === "ready" && attachment.kind === "image" && attachment.contentPart.type === "image_url") {
-        chip.createEl("img", {
-          cls: "systemsculpt-agent-attachment-preview",
-          attr: { src: attachment.contentPart.image_url.url, alt: "" },
-        });
+        this.renderAttachmentPreview(chip, attachment.contentPart.image_url.url);
       } else {
-        const icon = chip.createSpan({ cls: "systemsculpt-agent-attachment-icon" });
-        setIcon(icon, attachment.status === "failed" ? "circle-alert" : "file-text");
+        this.renderAttachmentIcon(chip, attachment.status === "failed" ? "circle-alert" : "file-text");
       }
       chip.createSpan({ cls: "systemsculpt-agent-attachment-label", text: attachment.name });
       if (attachment.status === "failed") {
@@ -339,10 +333,39 @@ export class AgentComposer extends Component {
     }
   }
 
+  private renderAttachmentPreview(parent: HTMLElement, src: string): void {
+    const image = parent.createEl("img", {
+      cls: "systemsculpt-agent-attachment-preview",
+      attr: { alt: "" },
+    });
+    image.loading = "lazy";
+    image.decoding = "async";
+    image.draggable = false;
+    image.onerror = () => {
+      image.onerror = null;
+      const fallback = parent.createSpan({
+        cls: "systemsculpt-agent-attachment-icon",
+      });
+      image.replaceWith(fallback);
+      setIcon(fallback, "image");
+    };
+    image.src = src;
+  }
+
+  private renderAttachmentIcon(parent: HTMLElement, iconName: string): void {
+    const icon = parent.createSpan({ cls: "systemsculpt-agent-attachment-icon" });
+    setIcon(icon, iconName);
+  }
+
   private async submit(): Promise<void> {
     const text = this.input.value.trim();
     const attachments = this.messageAttachments.snapshot();
-    if ((!text && attachments.length === 0) || this.submitting || this.attachmentBusy) return;
+    if (
+      (!text && attachments.length === 0)
+      || this.historyEditing
+      || this.submitting
+      || this.attachmentBusy
+    ) return;
     const validation = this.messageAttachments.validateSubmission(text, attachments);
     if (validation.length > 0) {
       for (const problem of validation) new Notice(problem.message, 6000);
@@ -353,7 +376,9 @@ export class AgentComposer extends Component {
     try {
       await this.options.onSubmit({
         text,
-        webSearch: this.webSearch,
+        // Retained in the submission shape for legacy queued-state
+        // compatibility. Managed search is server-owned and autonomous.
+        webSearch: false,
         mode: this.running ? "queue" : "send",
         ...(attachments.length > 0 ? { attachments } : {}),
       });
@@ -376,13 +401,20 @@ export class AgentComposer extends Component {
   private syncControls(): void {
     const hasText = this.input.value.trim().length > 0;
     const hasMessage = hasText || this.messageAttachments.hasAny();
-    this.sendButton.disabled = this.submitting || this.attachmentBusy
+    this.hint.setText(
+      this.historyEditing
+        ? "Finish editing the earlier message"
+        : this.running ? "Enter to queue" : "Enter to send",
+    );
+    this.input.disabled = this.historyEditing;
+    this.sendButton.disabled = this.historyEditing || this.submitting || this.attachmentBusy
       || this.messageAttachments.hasBlockingFailures() || !hasMessage;
     this.stopButton.toggleAttribute("hidden", !this.running);
-    this.attachButton.disabled = this.attachmentBusy;
-    this.vaultContextButton.disabled = this.attachmentBusy;
-    this.filePicker.disabled = this.attachmentBusy;
-    this.approvalMode.disabled = this.running;
+    this.attachButton.disabled = this.historyEditing || this.attachmentBusy;
+    this.vaultContextButton.disabled = this.historyEditing || this.attachmentBusy;
+    this.filePicker.disabled = this.historyEditing || this.attachmentBusy;
+    this.approvalMode.disabled = this.historyEditing || this.running;
+    if (this.micButton) this.micButton.disabled = this.historyEditing || this.attachmentBusy;
     this.element.classList.toggle("is-submitting", this.submitting);
     this.element.classList.toggle("is-processing-attachments", this.attachmentBusy);
   }

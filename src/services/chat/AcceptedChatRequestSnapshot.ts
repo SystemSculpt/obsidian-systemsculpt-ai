@@ -1,4 +1,5 @@
 import type { ChatMessage, MultiPartContent } from "../../types";
+import type { ToolCall } from "../../types/toolCalls";
 import type { AgentTranscriptSnapshot as ChatTranscriptSnapshot } from "../../views/chatview/AgentTranscriptRepository";
 import type { ManagedToolDefinition } from "../../utils/tooling";
 import type {
@@ -132,6 +133,21 @@ export function prepareManagedMessage(
   return deepFreezeAccepted(deepCopy(wire));
 }
 
+/**
+ * Tool calls this client is responsible for answering.
+ *
+ * A batch may mix vault tools with tools the server ran itself. The server has
+ * already written its own results into the durable transcript, so sending one
+ * from here would be a second result for the same call — rejected as a duplicate,
+ * and it would also push evidence back over the wire that never needed to leave
+ * the server.
+ */
+function clientSettledToolCalls(
+  assistant: Readonly<ChatMessage>,
+): readonly ToolCall[] {
+  return (assistant.tool_calls ?? []).filter((call) => call.executedOn !== "server");
+}
+
 function settledToolResultMessages(
   assistant: Readonly<ChatMessage>,
 ): readonly ManagedPreparedMessage[] {
@@ -139,7 +155,7 @@ function settledToolResultMessages(
   if (assistant.tool_calls.some((call) => call.state !== "completed" && call.state !== "failed")) {
     throw new Error("Managed history contains an unsettled tool call.");
   }
-  return assistant.tool_calls.map((call) =>
+  return clientSettledToolCalls(assistant).map((call) =>
     prepareManagedMessage(managedToolResultMessage(call, assistant.message_id)),
   );
 }
@@ -154,7 +170,8 @@ export function projectManagedMessages(
     if (message.role === "system") continue;
     projected.push(prepareManagedMessage(message));
     if (message.role !== "assistant" || !message.tool_calls?.length) continue;
-    const expectedIds = new Set(message.tool_calls.map((call) => call.id));
+    const expectedIds = new Set(clientSettledToolCalls(message).map((call) => call.id));
+    if (expectedIds.size === 0) continue;
     const explicitResults: Readonly<ChatMessage>[] = [];
     for (let cursor = index + 1; cursor < messages.length && messages[cursor].role === "tool"; cursor += 1) {
       explicitResults.push(messages[cursor]);

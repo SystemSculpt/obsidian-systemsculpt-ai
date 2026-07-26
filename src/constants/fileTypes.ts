@@ -6,11 +6,15 @@ const MANAGED_DOCUMENT_EXTENSIONS = ["pdf", "png", "jpg", "jpeg", "webp"] as con
 const AUTO_DOCUMENT_EXTENSIONS = ["pdf"] as const;
 const UNSUPPORTED_OFFICE_EXTENSIONS = ["doc", "docx", "ppt", "pptx", "xls", "xlsx"] as const;
 const AUDIO_EXTENSIONS = ["mp3", "wav", "m4a", "mp4", "ogg", "webm", "flac"] as const;
+const VAULT_IMAGE_CONTEXT_FILE_EXTENSIONS = ["jpg", "jpeg", "png", "webp"] as const;
 
 const toReadonlySet = (values: readonly string[]): ReadonlySet<string> => new Set(values);
 
 export const MANAGED_DOCUMENT_CONVERSION_EXTENSIONS = toReadonlySet(MANAGED_DOCUMENT_EXTENSIONS);
 export const AUDIO_FILE_EXTENSIONS = toReadonlySet(AUDIO_EXTENSIONS);
+export const VAULT_IMAGE_CONTEXT_EXTENSIONS = toReadonlySet(
+  VAULT_IMAGE_CONTEXT_FILE_EXTENSIONS,
+);
 
 export type ManagedDocumentFileExtension = (typeof MANAGED_DOCUMENT_EXTENSIONS)[number];
 export type AudioFileExtension = (typeof AUDIO_EXTENSIONS)[number];
@@ -37,6 +41,9 @@ export const isUnsupportedOfficeFileExtension = (extension?: string | null): boo
 
 export const isAudioFileExtension = (extension?: string | null): boolean =>
   AUDIO_FILE_EXTENSIONS.has(normalizeFileExtension(extension));
+
+export const isVaultImageContextFileExtension = (extension?: string | null): boolean =>
+  VAULT_IMAGE_CONTEXT_EXTENSIONS.has(normalizeFileExtension(extension));
 
 export const getManagedDocumentMimeType = (extension?: string | null): string | undefined => {
   const normalized = normalizeFileExtension(extension) as ManagedDocumentFileExtension;

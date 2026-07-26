@@ -20,5 +20,6 @@
  *  - 10: moved microphone preference to vault-scoped device-local storage.
  *  - 11: removed obsolete top-level transcription language overrides; transcription now auto-detects source language.
  *  - 12: removed retired user-configured workflow automations, backlog state, and automation skip records.
+ *  - 13: added the persisted default output preset for Audio Processor.
  */
-export const CURRENT_SCHEMA_VERSION = 12;
+export const CURRENT_SCHEMA_VERSION = 13;

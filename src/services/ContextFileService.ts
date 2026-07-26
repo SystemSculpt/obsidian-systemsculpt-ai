@@ -1,6 +1,8 @@
-import { App, TFile } from "obsidian";
+import { App, Notice, TFile } from "obsidian";
 import { ChatMessage, MessagePart, MultiPartContent } from "../types";
+import { isVaultImageContextFileExtension } from "../constants/fileTypes";
 import { ImageProcessor } from "../utils/ImageProcessor";
+import { ERROR_CODES, SystemSculptError } from "../utils/errors";
 import {
   STUDIO_PROJECT_AGENT_GUIDE,
   STUDIO_PROJECT_NODE_KIND_REFERENCE,
@@ -19,6 +21,7 @@ import { normalizeFirstPartyToolName } from "../tools/toolNames";
  */
 export class ContextFileService {
   private app: App;
+  private static readonly LEGACY_UNSUPPORTED_IMAGE_EXTENSIONS = new Set(["svg"]);
 
   constructor(app: App) {
     this.app = app;
@@ -318,6 +321,32 @@ export class ContextFileService {
     return Array.isArray(content) && content.length > 0;
   }
 
+  private isImageExtension(extension: string): boolean {
+    const normalized = extension.toLowerCase();
+    return isVaultImageContextFileExtension(normalized)
+      || ContextFileService.LEGACY_UNSUPPORTED_IMAGE_EXTENSIONS.has(normalized);
+  }
+
+  private async readContextImage(
+    file: TFile,
+  ): Promise<{ type: "image"; base64: string } | null> {
+    try {
+      const base64 = await ImageProcessor.processImage(file, this.app);
+      return { type: "image", base64 };
+    } catch (error) {
+      let detail = "couldn't be read as image context. Try another copy of the image.";
+      if (error instanceof SystemSculptError) {
+        if (error.code === ERROR_CODES.FILE_TOO_LARGE) {
+          detail = "is over the 10 MB image context limit.";
+        } else if (error.code === ERROR_CODES.UNSUPPORTED_FORMAT) {
+          detail = "can't be used as image context. Use PNG, JPG, or WebP.";
+        }
+      }
+      new Notice(`${file.name} ${detail}`, 6000);
+      return null;
+    }
+  }
+
   /**
    * Get contents of a context file
    */
@@ -341,12 +370,8 @@ export class ContextFileService {
       ) ?? this.app.vault.getAbstractFileByPath(cleanPath);
 
       if (resolvedFile instanceof TFile) {
-        if (resolvedFile.extension.match(/^(jpg|jpeg|png|webp)$/i)) {
-          const base64 = await ImageProcessor.processImage(
-            resolvedFile,
-            this.app
-          );
-          return { type: "image", base64 };
+        if (this.isImageExtension(resolvedFile.extension)) {
+          return await this.readContextImage(resolvedFile);
         }
         const content = await this.app.vault.read(resolvedFile);
         return content;
@@ -358,12 +383,8 @@ export class ContextFileService {
         const allFiles = this.app.vault.getFiles();
         const matchingFile = allFiles.find((f) => f.name === fileName);
         if (matchingFile) {
-          if (matchingFile.extension.match(/^(jpg|jpeg|png|webp)$/i)) {
-            const base64 = await ImageProcessor.processImage(
-              matchingFile,
-              this.app
-            );
-            return { type: "image", base64 };
+          if (this.isImageExtension(matchingFile.extension)) {
+            return await this.readContextImage(matchingFile);
           }
           const content = await this.app.vault.read(matchingFile);
           return content;
@@ -387,7 +408,7 @@ export class ContextFileService {
       const linkText = filePath.replace(/^\[\[(.*?)\]\]$/, "$1");
       const cleanPath = linkText.replace(/\$begin:math:display\$\[(.*?)\$end:math:display\$]/g, "$1");
       const ext = (cleanPath.split(".").pop() || "").toLowerCase();
-      if (ext && ["jpg", "jpeg", "png", "webp"].includes(ext)) {
+      if (ext && this.isImageExtension(ext)) {
         return null;
       }
 
@@ -396,7 +417,7 @@ export class ContextFileService {
         this.app.vault.getAbstractFileByPath(cleanPath);
       if (
         resolved instanceof TFile &&
-        ["jpg", "jpeg", "png", "webp"].includes((resolved.extension || "").toLowerCase())
+        this.isImageExtension(resolved.extension || "")
       ) {
         return null;
       }
@@ -556,11 +577,19 @@ export class ContextFileService {
       };
 
       if (msg.role === "assistant" && Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0) {
-        const synthesizedToolMessages = buildToolResultMessagesFromToolCalls(msg.tool_calls);
+        const clientToolCalls = msg.tool_calls.filter((toolCall) => toolCall.executedOn !== "server");
+        const synthesizedToolMessages = buildToolResultMessagesFromToolCalls(clientToolCalls);
         const satisfiedToolCallIds = new Set<string>();
         for (const toolCall of msg.tool_calls) {
           const toolCallId = typeof toolCall?.id === "string" ? toolCall.id : "";
           if (!toolCallId) continue;
+          if (toolCall.executedOn === "server") {
+            // Server tools are already settled inside the managed session.
+            // Keep their assistant-call chronology, but never synthesize a
+            // second client-owned tool result for them.
+            satisfiedToolCallIds.add(toolCallId);
+            continue;
+          }
           if (explicitToolResultIds.has(toolCallId)) {
             satisfiedToolCallIds.add(toolCallId);
             continue;
@@ -590,7 +619,9 @@ export class ContextFileService {
       preparedMessages.push(messageToPush as ChatMessage);
 
       if (msg.role === "assistant" && Array.isArray((messageToPush as any).tool_calls)) {
-        const syntheticToolMessages = buildToolResultMessagesFromToolCalls((messageToPush as any).tool_calls).filter(
+        const clientToolCalls = ((messageToPush as any).tool_calls as ToolCall[])
+          .filter((toolCall) => toolCall.executedOn !== "server");
+        const syntheticToolMessages = buildToolResultMessagesFromToolCalls(clientToolCalls).filter(
           (toolMessage) =>
             typeof toolMessage.tool_call_id === "string"
             && !explicitToolResultIds.has(toolMessage.tool_call_id)

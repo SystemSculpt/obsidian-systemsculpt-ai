@@ -195,6 +195,16 @@ describe("ManagedJobClient exact wire contract", () => {
     await expect(client.transcription.status("job")).rejects.toMatchObject({ code, status, requestId: "req-1", retryable });
   });
 
+  it("turns a retryable 503 into a customer-facing availability message", async () => {
+    request.mockResolvedValue(json({ code: "temporarily_unavailable" }, 503));
+
+    await expect(client.transcription.status("job")).rejects.toMatchObject({
+      code: "temporarily_unavailable",
+      message: "SystemSculpt processing is temporarily unavailable.",
+      retryable: true,
+    });
+  });
+
   it.each([
     ["transcription.upload_complete", () => client.transcription.complete("job", [{ partNumber: 1, etag: "a".repeat(32) }], "op"), (status: string) => ({ job: { id: "job", status } }), "queued", "uploading"],
     ["transcription.start", () => client.transcription.start("job", "op"), (status: string) => ({ job: { id: "job", status } }), "queued", "uploading"],

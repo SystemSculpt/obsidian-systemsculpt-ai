@@ -64,5 +64,12 @@ export interface ToolCall {
   
   // Result data
   result?: ToolCallResult;
-  
+
+  /**
+   * Where this call ran. Absent means the vault, which is every tool the plugin
+   * implements. `"server"` marks a tool the SystemSculpt server executed and
+   * already settled into the durable transcript on its side — the continuation
+   * must not send a result for it, because one exists there already.
+   */
+  executedOn?: 'server';
 }

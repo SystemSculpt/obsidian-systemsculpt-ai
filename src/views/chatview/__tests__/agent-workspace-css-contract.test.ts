@@ -24,15 +24,32 @@ describe("agent workspace CSS contract", () => {
     expect(css).toMatch(/\.systemsculpt-agent-workspace\s+\[hidden\]\s*\{[^}]*display:\s*none;/s);
   });
 
-  it("keeps completed tool calls to a compact disclosure row", () => {
+  it("keeps tool activity compact and removes raw transport disclosures", () => {
     const css = readAgentWorkspaceCss();
 
     expect(css).toMatch(/\.systemsculpt-agent-tool-header\s*\{[^}]*min-height:\s*var\(--ss-control-height-sm\)/s);
-    expect(css).toMatch(/\.systemsculpt-agent-tool-details-body\s*\{[^}]*margin:/s);
+    expect(css).toMatch(/\.systemsculpt-agent-tool-support\s*\{[^}]*margin:/s);
     expect(css).not.toMatch(/\.systemsculpt-agent-tool-header\s*\{[^}]*min-height:\s*var\(--ss-control-height-lg\)/s);
+    expect(css).not.toContain(".systemsculpt-agent-tool-details-body");
+    expect(css).not.toContain(".systemsculpt-agent-tool-details-label");
   });
 
-  it("compacts only adjacent tool-only history turns", () => {
+  it("keeps activity geometry stable from the first row through completion", () => {
+    const css = readAgentWorkspaceCss();
+
+    expect(css).toMatch(
+      /\.systemsculpt-agent-activity-header\s*\{[^}]*min-height:\s*var\(--ss-control-height-sm\)/s,
+    );
+    expect(css).toMatch(
+      /\.systemsculpt-agent-activity-state\s*\{[^}]*flex:\s*0 0 7rem;[^}]*text-align:\s*right;/s,
+    );
+    expect(css).not.toContain('.systemsculpt-agent-activity[data-count="1"]');
+    expect(css).toMatch(
+      /\.systemsculpt-agent-reasoning-header\s*\{[^}]*width:\s*100%;[^}]*min-height:\s*var\(--ss-control-height-sm\)/s,
+    );
+  });
+
+  it("compacts adjacent tool-only history while keeping one stable live turn", () => {
     const css = readAgentWorkspaceCss();
 
     expect(css).toMatch(/\.systemsculpt-agent-history\s*\{[^}]*gap:\s*0;/s);
@@ -42,7 +59,10 @@ describe("agent workspace CSS contract", () => {
     expect(css).toMatch(
       /\.systemsculpt-agent-history\s*>\s*\.systemsculpt-agent-turn\.is-tool-only\s*\+\s*\.systemsculpt-agent-turn\.is-tool-only\s*\{[^}]*margin-top:\s*var\(--ss-space-1\)/s,
     );
-    expect(css).toMatch(/\.systemsculpt-agent-active-run\s*\{[^}]*gap:\s*var\(--ss-space-5\)/s);
+    expect(css).toMatch(/\.systemsculpt-agent-active-run\s*\{[^}]*gap:\s*0;/s);
+    expect(css).toMatch(
+      /\.systemsculpt-agent-turn\.is-assistant\s+\.systemsculpt-agent-turn-body\s*\{[^}]*gap:\s*var\(--ss-space-3\)/s,
+    );
   });
 
   it("keeps the live-to-durable turn boundary visually stable", () => {
@@ -65,6 +85,37 @@ describe("agent workspace CSS contract", () => {
     );
     expect(css).toMatch(
       /\.systemsculpt-agent-conversation\s+\.systemsculpt-agent-code-copy\.is-copied\s*\{[^}]*color:\s*var\(--ss-success\);/s,
+    );
+  });
+
+  it("keeps response-copy feedback compact and motion-safe without layout shift", () => {
+    const css = readAgentWorkspaceCss();
+
+    expect(css).toMatch(
+      /\.systemsculpt-agent-message-copy\s*\{[^}]*width:\s*var\(--ss-control-height\);[^}]*min-width:\s*var\(--ss-control-height\);/s,
+    );
+    expect(css).toMatch(
+      /\.systemsculpt-agent-message-copy\.is-copied\s*\{[^}]*color:\s*var\(--ss-success\);/s,
+    );
+    expect(css).toMatch(
+      /\.systemsculpt-agent-message-copy\.is-copy-failed\s*\{[^}]*color:\s*var\(--ss-danger\);/s,
+    );
+    expect(css).toMatch(
+      /@media\s*\(prefers-reduced-motion:\s*reduce\)[\s\S]*\.systemsculpt-agent-message-copy\.is-copied/,
+    );
+  });
+
+  it("keeps historical message editing stable and usable in narrow plugin panes", () => {
+    const css = readAgentWorkspaceCss();
+
+    expect(css).toMatch(
+      /\.systemsculpt-agent-turn\.is-user\.is-editing\s*\{[^}]*width:\s*min\(100%, var\(--ss-agent-user-width\)\);[^}]*max-width:\s*100%;/s,
+    );
+    expect(css).toMatch(
+      /\.systemsculpt-agent-message-editor-input\s*\{[^}]*width:\s*100%;[^}]*resize:\s*vertical;/s,
+    );
+    expect(css).toMatch(
+      /@container\s+ss-surface\s*\(max-width:\s*500px\)[\s\S]*\.systemsculpt-agent-message-editor-actions\s*\{[^}]*grid-template-columns:/s,
     );
   });
 

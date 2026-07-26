@@ -316,9 +316,9 @@ describe("migrateSettingsToCurrentSchema", () => {
     const result = migrateSettingsToCurrentSchema(raw, DEFAULT_SETTINGS);
     const workflowEngine = result.settings.workflowEngine as Record<string, unknown>;
 
-    expect(result.appliedSteps).toEqual([
+    expect(result.appliedSteps).toContain(
       "Remove retired workflow automation configuration and backlog state",
-    ]);
+    );
     for (const key of LEGACY_WORKFLOW_AUTOMATION_KEYS_REMOVED_IN_V12) {
       expect(workflowEngine).not.toHaveProperty(key);
     }
@@ -336,6 +336,40 @@ describe("migrateSettingsToCurrentSchema", () => {
         },
       },
     });
+  });
+
+  it("adds the Audio Processor default when upgrading schema v12", () => {
+    const result = migrateSettingsToCurrentSchema({
+      schemaVersion: 12,
+    }, DEFAULT_SETTINGS);
+
+    expect(result.appliedSteps).toEqual([
+      "Add the persisted default output preset for Audio Processor",
+    ]);
+    expect(result.settings.audioProcessorOutputPreset).toBe("detailed");
+    expect(result.settings.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
+  });
+
+  it("preserves a valid Audio Processor default when upgrading schema v12", () => {
+    const result = migrateSettingsToCurrentSchema({
+      schemaVersion: 12,
+      audioProcessorOutputPreset: "clean_transcript",
+    }, DEFAULT_SETTINGS);
+
+    expect(result.appliedSteps).toEqual([
+      "Add the persisted default output preset for Audio Processor",
+    ]);
+    expect(result.settings.audioProcessorOutputPreset).toBe("clean_transcript");
+    expect(result.settings.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
+  });
+
+  it("replaces an unknown Audio Processor default when upgrading schema v12", () => {
+    const result = migrateSettingsToCurrentSchema({
+      schemaVersion: 12,
+      audioProcessorOutputPreset: "future_preset",
+    }, DEFAULT_SETTINGS);
+
+    expect(result.settings.audioProcessorOutputPreset).toBe("detailed");
   });
 
   it("back-fills brand-new install defaults for empty persisted data", () => {

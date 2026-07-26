@@ -3,8 +3,22 @@
 import { App, Plugin } from "obsidian";
 import { RibbonManager } from "../ribbons";
 
+const audioProcessorOpenMock = jest.fn();
+const audioProcessorModalMock = jest.fn().mockImplementation(() => ({
+  open: audioProcessorOpenMock,
+}));
+const audioProcessorResumeMock = jest.fn().mockResolvedValue(undefined);
+const audioProcessorAvailabilityMock = jest.fn().mockResolvedValue(true);
+
+jest.mock("../../../features/audio-processor", () => ({
+  AudioProcessorModal: audioProcessorModalMock,
+  canOpenAudioProcessor: audioProcessorAvailabilityMock,
+  resumeAudioProcessorJobs: audioProcessorResumeMock,
+}));
+
 const SYSTEMSCULPT_TOP_TITLES = [
   "Audio Recorder",
+  "Open Audio Processor",
   "Open search",
   "Open janitor",
   "Open history",
@@ -47,6 +61,7 @@ const flushAsyncWork = async () => {
 describe("RibbonManager", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    audioProcessorAvailabilityMock.mockResolvedValue(true);
   });
 
   it("registers and cleans up ribbons", async () => {
@@ -57,7 +72,7 @@ describe("RibbonManager", () => {
     await flushAsyncWork();
 
     const ribbons = getRibbonElements(plugin);
-    expect(ribbons).toHaveLength(6);
+    expect(ribbons).toHaveLength(7);
 
     const handles = [...ribbons];
     manager.cleanup();
@@ -76,7 +91,32 @@ describe("RibbonManager", () => {
     manager.initialize();
     await flushAsyncWork();
 
-    expect(getRibbonElements(plugin)).toHaveLength(6);
+    expect(getRibbonElements(plugin)).toHaveLength(7);
+  });
+
+  it("opens Audio Processor through the native ribbon action", async () => {
+    const { app, plugin } = createPlugin();
+    const manager = new RibbonManager(plugin, app);
+
+    manager.initialize();
+    await flushAsyncWork();
+
+    const audioProcessorRibbon = getRibbonElements(plugin).find(
+      (ribbon) => ribbon.getAttribute("aria-label") === "Open Audio Processor",
+    );
+    expect(audioProcessorRibbon).toBeDefined();
+
+    await (audioProcessorRibbon as HTMLElement & { callback: () => Promise<void> }).callback();
+    await flushAsyncWork();
+
+    expect(audioProcessorAvailabilityMock).toHaveBeenCalledWith(plugin);
+    expect(audioProcessorResumeMock).toHaveBeenCalledWith(plugin, {
+      notifyOnDiscoveryFailure: true,
+    });
+    expect(audioProcessorModalMock).toHaveBeenCalledWith(plugin, {
+      initialTab: "audio",
+    });
+    expect(audioProcessorOpenMock).toHaveBeenCalledTimes(1);
   });
 
   it("registers the expected SystemSculpt ribbon actions without removing native ribbons", async () => {

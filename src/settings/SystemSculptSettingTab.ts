@@ -205,6 +205,7 @@ export class SystemSculptSettingTab extends PluginSettingTab {
           button.setDisabled(true);
           await this.plugin.getSettingsManager().updateSettings({
             chatFontSize: "medium",
+            audioProcessorOutputPreset: "detailed",
             embeddingsEnabled: false,
             chatsDirectory: "SystemSculpt/Chats",
             savedChatsDirectory: "SystemSculpt/Saved Chats",

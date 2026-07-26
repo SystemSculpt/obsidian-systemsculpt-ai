@@ -36,6 +36,7 @@ npm run build
 
 - Drag files into chat.
 - Attach files with the paperclip in chat.
+- Use the files control to add vault notes or supported vault images as context.
 - Type `@` to mention files.
 - Use `Chat with File` from the command palette.
 

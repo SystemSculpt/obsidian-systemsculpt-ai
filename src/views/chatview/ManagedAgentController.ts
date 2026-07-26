@@ -160,6 +160,8 @@ type StreamedTool = {
   location?: ManagedAgentToolLocation;
   input?: Record<string, unknown>;
   toolCall?: ToolCall;
+  /** Present only for server-executed tools, which arrive already settled. */
+  serverResult?: { status: "succeeded" | "failed"; details: Readonly<Record<string, unknown>> };
 };
 
 type StreamedTextPart = {
@@ -360,10 +362,14 @@ function isManagedDispatchFailure(
   ].includes(String((error as { kind: unknown }).kind));
 }
 
-function defaultToolLocation(_toolName: string): ManagedAgentToolLocation {
-  // Every model-emitted tool in the current contract executes through the
-  // first-party tool service. Server-owned web search never surfaces as a tool call.
-  return "vault";
+const SERVER_EXECUTED_TOOLS: ReadonlySet<string> = new Set(["web_search"]);
+
+function defaultToolLocation(toolName: string): ManagedAgentToolLocation {
+  // One tool model, two settlement paths. A vault tool runs here and is handed
+  // back to continue the turn; a server tool has already run by the time we see
+  // it and arrives with its result attached. Both render as the same kind of
+  // tool part, which is the whole point: a tool is a tool.
+  return SERVER_EXECUTED_TOOLS.has(toolName) ? "server" : "vault";
 }
 
 function parseToolInput(argumentsJson: string, toolName: string): Record<string, unknown> {
@@ -619,7 +625,7 @@ export class ManagedAgentController {
           type: "run.status",
           phase: phase === "initial" ? "thinking" : "working",
           label: phase === "initial"
-            ? acceptedRequest.webSearch ? "Searching web" : "Thinking"
+            ? "Thinking"
             : "Continuing",
         });
         const messageId = `${durableTurnId}:assistant:${streamOrdinal}`;
@@ -833,6 +839,13 @@ export class ManagedAgentController {
     this.emit(active, { type: "message.started", messageId, role: "assistant" });
     const orderedStream = new OrderedMessageStream(messageId);
     const tools = new Map<number, StreamedTool>();
+    // Results for tools the server already executed, keyed by the tool-call id
+    // they settle. Populated as the stream arrives, applied once the call itself
+    // is complete.
+    const serverToolResults = new Map<
+      string,
+      { status: "succeeded" | "failed"; details: Readonly<Record<string, unknown>> }
+    >();
     let finishReason: string | undefined;
     let requestId = dispatched.diagnostic.requestId;
     let done = false;
@@ -851,6 +864,16 @@ export class ManagedAgentController {
           phaseUsage = {};
           this.emit(active, { type: "message.restarted", messageId });
           this.emit(active, { type: "run.status", phase: "retrying", label: "Recovering" });
+          break;
+        case "server_tool_result":
+          // The server ran this one. It is already a streamed tool call, so it
+          // settles here rather than being handed to the tool service, and a
+          // failed search now reads as Failed instead of a status label that
+          // said "Reviewing sources" whether or not anything came back.
+          serverToolResults.set(event.toolCallId, {
+            status: event.status,
+            details: event.details,
+          });
           break;
         case "reasoning_summary_delta": {
           if (!event.text) break;
@@ -918,6 +941,8 @@ export class ManagedAgentController {
             );
           }
           finishReason = event.reason;
+          this.completeNarrativePart(active, messageId, orderedStream.completeActiveNarrative());
+          this.emit(active, { type: "run.status", phase: "settling", label: "Finishing" });
           break;
         case "request_id":
           requestId = event.requestId;
@@ -961,6 +986,12 @@ export class ManagedAgentController {
     }
     this.completeNarrativePart(active, messageId, orderedStream.completeActiveNarrative());
     const finalizedTools = [...tools.values()].sort((left, right) => left.index - right.index);
+    // Server-executed tools arrive already settled. Their result frame is keyed
+    // by the transport id the server assigned to the call, so match on that.
+    for (const tool of finalizedTools) {
+      const settled = tool.transportId ? serverToolResults.get(tool.transportId) : undefined;
+      if (settled) tool.serverResult = settled;
+    }
     if (finalizedTools.some((tool) => !tool.completed || !tool.toolCall)) {
       throw new ManagedAgentControllerError(
         "managed_tool_incomplete",
@@ -1166,25 +1197,55 @@ export class ManagedAgentController {
       );
     }
     if (streamed.location === "server") {
+      // Already executed upstream: settle from the result the server sent rather
+      // than running anything, and never enter the continuation loop, which the
+      // server neither needs nor expects for its own tools.
       this.emit(active, { type: "tool.started", callId: streamed.uiCallId });
-      toolCall.state = "failed";
+      toolCall.executedOn = "server";
       toolCall.executionStartedAt = this.now();
       toolCall.executionCompletedAt = this.now();
+      const serverResult = streamed.serverResult;
+      if (!serverResult) {
+        toolCall.state = "failed";
+        toolCall.result = {
+          success: false,
+          error: {
+            code: "SERVER_TOOL_RESULT_UNAVAILABLE",
+            message: "The server did not include a completed result for this server-side tool.",
+          },
+        };
+        this.emit(active, {
+          type: "tool.failed",
+          callId: streamed.uiCallId,
+          result: toolResultSummary(toolCall),
+          error: toolCall.result.error!,
+        });
+        return;
+      }
+      if (serverResult.status === "succeeded") {
+        toolCall.state = "completed";
+        toolCall.result = { success: true, data: serverResult.details };
+        this.emit(active, {
+          type: "tool.succeeded",
+          callId: streamed.uiCallId,
+          result: toolResultSummary(toolCall),
+        });
+        return;
+      }
+      toolCall.state = "failed";
       toolCall.result = {
         success: false,
+        data: serverResult.details,
         error: {
-          code: "SERVER_TOOL_RESULT_UNAVAILABLE",
-          message: "The server did not include a completed result for this server-side tool.",
+          code: "SERVER_TOOL_FAILED",
+          message: "This ran on the SystemSculpt server and did not succeed.",
         },
       };
       this.emit(active, {
         type: "tool.failed",
         callId: streamed.uiCallId,
         result: toolResultSummary(toolCall),
-        error: {
-          code: "SERVER_TOOL_RESULT_UNAVAILABLE",
-          message: "The server did not include a completed result for this server-side tool.",
-        },
+        error: toolCall.result.error!,
       });
       return;
     }

@@ -6,6 +6,7 @@ import { generateDefaultChatTitle } from "../../utils/titleUtils";
 type RibbonHandle = HTMLElement;
 
 type AgentChatViewModule = typeof import("../../views/chatview/AgentChatView");
+const AUDIO_PROCESSOR_UNAVAILABLE_NOTICE = "Audio Processor is temporarily unavailable.";
 
 function loadAgentChatViewModule(): AgentChatViewModule {
   return require("../../views/chatview/AgentChatView");
@@ -47,6 +48,14 @@ export class RibbonManager {
       "Audio Recorder",
       async () => {
         await this.toggleAudioRecorder();
+      }
+    );
+
+    this.registerRibbonIcon(
+      "audio-lines",
+      "Open Audio Processor",
+      async () => {
+        await this.openAudioProcessor();
       }
     );
 
@@ -174,6 +183,24 @@ export class RibbonManager {
     } catch {
       new Notice("Unable to toggle the audio recorder.", 8000);
     }
+  }
+
+  /**
+   * Open Audio Processor through the same availability and recovery path used
+   * by the command palette entry.
+   */
+  public async openAudioProcessor(initialTab: "audio" | "youtube" = "audio"): Promise<void> {
+    const {
+      AudioProcessorModal,
+      canOpenAudioProcessor,
+      resumeAudioProcessorJobs,
+    } = await import("../../features/audio-processor");
+    if (!await canOpenAudioProcessor(this.plugin)) {
+      new Notice(AUDIO_PROCESSOR_UNAVAILABLE_NOTICE, 6000);
+      return;
+    }
+    void resumeAudioProcessorJobs(this.plugin, { notifyOnDiscoveryFailure: true });
+    new AudioProcessorModal(this.plugin, { initialTab }).open();
   }
 
   /**

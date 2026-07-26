@@ -90,6 +90,24 @@ export async function displayRecorderTabContent(
         });
     });
 
+  containerEl.createEl("h3", { text: "Audio output" });
+
+  new Setting(containerEl)
+    .setName("Default output")
+    .setDesc("Choose the output selected when the processor opens.")
+    .addDropdown((dropdown) => {
+      dropdown
+        .addOption("detailed", "Detailed note + transcript")
+        .addOption("meeting_brief", "Meeting brief")
+        .addOption("clean_transcript", "Clean transcript")
+        .setValue(plugin.settings.audioProcessorOutputPreset)
+        .onChange(async (value: "detailed" | "meeting_brief" | "clean_transcript") => {
+          await plugin.getSettingsManager().updateSettings({
+            audioProcessorOutputPreset: value,
+          });
+        });
+    });
+
   containerEl.createEl("h3", { text: "Transcript output" });
 
   let submitAfterDictationToggle: ToggleComponent | null = null;

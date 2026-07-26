@@ -58,6 +58,7 @@ const createPlugin = (app: App, settings: Record<string, unknown> = {}) => {
         autoPasteTranscription: false,
         keepRecordingsAfterTranscription: true,
         cleanTranscriptionOutput: true,
+        audioProcessorOutputPreset: "detailed",
         autoSubmitAfterTranscription: false,
         postProcessingEnabled: false,
         postProcessingPrompt: "Clean it up",
@@ -140,13 +141,20 @@ describe("Recorder settings tab", () => {
     await displayRecorderTabContent(container, tab as any);
 
     const headings = [...container.querySelectorAll("h3")].map((element) => element.textContent?.trim());
-    expect(headings).toEqual(["Capture", "After recording", "Transcript output", "Chat dictation"]);
+    expect(headings).toEqual([
+      "Capture",
+      "After recording",
+      "Audio output",
+      "Transcript output",
+      "Chat dictation",
+    ]);
 
     const names = [...container.querySelectorAll(".setting-item-name")].map((element) => element.textContent?.trim());
     expect(names).toEqual(expect.arrayContaining([
       "Microphone",
       "Transcribe automatically",
       "Keep source audio",
+      "Default output",
       "Default file format",
       "Clean transcript output",
       "Clean up transcript",
@@ -164,6 +172,38 @@ describe("Recorder settings tab", () => {
     expect(container.textContent).toContain(
       "exact note insertion target remains unchanged",
     );
+  });
+
+  it("persists the default Audio Processor output preset", async () => {
+    setMediaDevices(navigator, {
+      enumerateDevices: jest.fn().mockResolvedValue([]),
+      getUserMedia: jest.fn(),
+    });
+    const app = new App();
+    const { plugin, updateSettings } = createPlugin(app, {
+      audioProcessorOutputPreset: "meeting_brief",
+    });
+    const { tab } = createTabHarness(app, plugin);
+    const container = document.createElement("div");
+
+    await displayRecorderTabContent(container, tab as any);
+
+    const select = Array.from(container.querySelectorAll("select"))
+      .find((candidate) => candidate.value === "meeting_brief") as HTMLSelectElement;
+    expect(select).toBeTruthy();
+    expect(Array.from(select.options).map((option) => option.value)).toEqual([
+      "detailed",
+      "meeting_brief",
+      "clean_transcript",
+    ]);
+
+    select.value = "clean_transcript";
+    select.dispatchEvent(new Event("change"));
+    await flush();
+
+    expect(updateSettings).toHaveBeenCalledWith({
+      audioProcessorOutputPreset: "clean_transcript",
+    });
   });
 
   it("does not request microphone permission until the user refreshes devices", async () => {
