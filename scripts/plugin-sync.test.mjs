@@ -5,7 +5,9 @@ import os from "node:os";
 import path from "node:path";
 import {
   countConfiguredTargets,
+  createDevelopmentBuildIdentity,
   createBuildSyncController,
+  DEVELOPMENT_BUILD_MANIFEST_KEY,
   formatSyncTarget,
   loadConfiguredTargets,
   reloadConfiguredTargets,
@@ -31,6 +33,21 @@ function writeSyncConfig(root, value) {
 }
 
 const silentLogger = { info() {}, warn() {} };
+const digest = "a".repeat(64);
+const buildIdentity = Object.freeze({
+  schemaVersion: 1,
+  id: "12345678-dirty-20260726T205500000Z",
+  revision: "1234567890abcdef1234567890abcdef12345678",
+  branch: "test/dev-sync",
+  dirty: true,
+  syncedAt: "2026-07-26T20:55:00.000Z",
+  sourcePath: "/test/plugin",
+  artifacts: Object.freeze({
+    "main.js": digest,
+    "manifest.json": digest,
+    "styles.css": digest,
+  }),
+});
 
 test("loadConfiguredTargets exposes only configured local plugin folders", (t) => {
   const root = createTempRoot(t);
@@ -55,11 +72,46 @@ test("syncConfiguredTargets copies local artifacts and removes obsolete extras",
   fs.writeFileSync(path.join(pluginDir, "README.md"), "obsolete\n");
   const configPath = writeSyncConfig(root, { pluginTargets: [{ path: pluginDir }] });
 
-  const result = syncConfiguredTargets({ root, configPath, logger: silentLogger });
+  const sourceManifest = fs.readFileSync(path.join(root, "manifest.json"), "utf8");
+  const result = syncConfiguredTargets({
+    root,
+    configPath,
+    logger: silentLogger,
+    buildIdentity,
+  });
   assert.equal(result.succeeded.length, 1);
   assert.equal(fs.readFileSync(path.join(pluginDir, "main.js"), "utf8"), "module.exports = { version: 'test' };\n");
+  assert.equal(fs.readFileSync(path.join(root, "manifest.json"), "utf8"), sourceManifest);
+  const syncedManifest = JSON.parse(fs.readFileSync(path.join(pluginDir, "manifest.json"), "utf8"));
+  assert.deepEqual(syncedManifest[DEVELOPMENT_BUILD_MANIFEST_KEY], buildIdentity);
+  assert.equal(syncedManifest.version, "5.3.0");
   assert.equal(fs.existsSync(path.join(pluginDir, "README.md")), false);
   assert.equal(fs.existsSync(path.join(pluginDir, "node_modules")), false);
+  assert.equal(
+    fs.readdirSync(pluginDir).some((name) => name.includes(".systemsculpt-sync-")),
+    false,
+  );
+});
+
+test("createDevelopmentBuildIdentity fingerprints every source artifact", (t) => {
+  const root = createTempRoot(t);
+  writePluginArtifacts(root);
+  const identity = createDevelopmentBuildIdentity({
+    root,
+    revision: "1234567890abcdef1234567890abcdef12345678",
+    branch: "test/build",
+    dirty: false,
+    syncedAt: "2026-07-26T20:55:00.000Z",
+  });
+
+  assert.equal(identity.id, "12345678-20260726T205500000Z");
+  assert.deepEqual(Object.keys(identity.artifacts).sort(), [
+    "main.js",
+    "manifest.json",
+    "styles.css",
+  ]);
+  assert.match(identity.artifacts["main.js"], /^[a-f0-9]{64}$/);
+  assert.equal(identity.sourcePath, root);
 });
 
 test("reloadConfiguredTargets uses Obsidian CLI with the configured vault", (t) => {

@@ -4,9 +4,11 @@ import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { spawnSync } from "node:child_process";
+import { createHash, randomBytes } from "node:crypto";
 import { inspectPluginArtifacts, REQUIRED_PLUGIN_ARTIFACTS } from "./plugin-artifacts.mjs";
 
 export const DEFAULT_SYNC_CONFIG_PATH = path.resolve(process.cwd(), "systemsculpt-sync.config.json");
+export const DEVELOPMENT_BUILD_MANIFEST_KEY = "systemsculptDevBuild";
 export const OBSOLETE_PLUGIN_FILES = [
   "README.md",
   "LICENSE",
@@ -55,12 +57,87 @@ export function formatSyncTarget(target) {
   return `plugin: ${target.label || target.path}`;
 }
 
-function copyPluginArtifacts(root, target) {
+function sha256(bytes) {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+function gitValue(root, args, fallback) {
+  const result = spawnSync("git", ["-C", root, ...args], {
+    encoding: "utf8",
+    stdio: "pipe",
+  });
+  return result.status === 0 ? String(result.stdout || "").trim() || fallback : fallback;
+}
+
+export function createDevelopmentBuildIdentity(options = {}) {
+  const root = path.resolve(String(options.root || process.cwd()));
+  const syncedAt = options.syncedAt || new Date().toISOString();
+  const revision = options.revision
+    || gitValue(root, ["rev-parse", "HEAD"], "0000000");
+  const branch = options.branch
+    || gitValue(root, ["branch", "--show-current"], "detached");
+  const dirty = options.dirty ?? Boolean(
+    gitValue(root, ["status", "--porcelain", "--untracked-files=no"], ""),
+  );
+  const compactTime = syncedAt.replace(/[-:.]/g, "");
+  const artifacts = Object.fromEntries(
+    REQUIRED_PLUGIN_ARTIFACTS.map((fileName) => [
+      fileName,
+      sha256(fs.readFileSync(path.join(root, fileName))),
+    ]),
+  );
+  return Object.freeze({
+    schemaVersion: 1,
+    id: `${revision.slice(0, 8)}${dirty ? "-dirty" : ""}-${compactTime}`,
+    revision,
+    branch,
+    dirty,
+    syncedAt,
+    sourcePath: root,
+    artifacts: Object.freeze(artifacts),
+  });
+}
+
+function atomicReplace(filePath, bytes) {
+  const tempPath = path.join(
+    path.dirname(filePath),
+    `.${path.basename(filePath)}.systemsculpt-sync-${process.pid}-${randomBytes(6).toString("hex")}.tmp`,
+  );
+  try {
+    fs.writeFileSync(tempPath, bytes);
+    fs.renameSync(tempPath, filePath);
+  } finally {
+    fs.rmSync(tempPath, { force: true });
+  }
+}
+
+function developmentManifest(root, buildIdentity) {
+  const source = JSON.parse(fs.readFileSync(path.join(root, "manifest.json"), "utf8"));
+  if (!source || typeof source !== "object" || Array.isArray(source)) {
+    throw new Error("manifest.json must contain an object");
+  }
+  return Buffer.from(`${JSON.stringify({
+    ...source,
+    [DEVELOPMENT_BUILD_MANIFEST_KEY]: buildIdentity,
+  }, null, 2)}\n`);
+}
+
+function copyPluginArtifacts(root, target, buildIdentity) {
   fs.mkdirSync(target.path, { recursive: true });
-  for (const fileName of REQUIRED_PLUGIN_ARTIFACTS) {
+  const artifactBytes = new Map(
+    REQUIRED_PLUGIN_ARTIFACTS.map((fileName) => [
+      fileName,
+      fileName === "manifest.json"
+        ? developmentManifest(root, buildIdentity)
+        : fs.readFileSync(path.join(root, fileName)),
+    ]),
+  );
+  // Replace executable and style bytes first. The manifest is the final
+  // transaction marker and identifies the exact source artifact hashes.
+  for (const fileName of ["main.js", "styles.css", "manifest.json"]) {
     const sourcePath = path.join(root, fileName);
     if (!fs.existsSync(sourcePath)) throw new Error(`Required file missing: ${sourcePath}`);
-    fs.copyFileSync(sourcePath, path.join(target.path, fileName));
+    atomicReplace(path.join(target.path, fileName), artifactBytes.get(fileName));
   }
   for (const relativePath of OBSOLETE_PLUGIN_FILES) {
     fs.rmSync(path.join(target.path, relativePath), {
@@ -84,11 +161,13 @@ export function syncConfiguredTargets(options = {}) {
     throw new Error(`[sync] Config file not found at ${loaded.configPath}.`);
   }
 
+  const buildIdentity = options.buildIdentity
+    || createDevelopmentBuildIdentity({ root });
   for (const target of loaded.targets) {
-    copyPluginArtifacts(root, target);
-    logger.info?.(`[sync] Updated ${formatSyncTarget(target)}`);
+    copyPluginArtifacts(root, target, buildIdentity);
+    logger.info?.(`[sync] Updated ${formatSyncTarget(target)} (${buildIdentity.id})`);
   }
-  return { ...loaded, succeeded: loaded.targets };
+  return { ...loaded, succeeded: loaded.targets, buildIdentity };
 }
 
 function inferVaultName(pluginPath) {

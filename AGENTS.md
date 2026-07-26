@@ -114,11 +114,18 @@ plugin folders under pluginTargets, then use:
 ~~~bash
 ./run.sh --headless
 npm run sync:local
+npm run dev:watch:install
 ~~~
 
-The watcher copies main.js, manifest.json, and styles.css after successful
-builds. Use the official Obsidian CLI or Computer Use for live reload, errors,
-DOM inspection, and visual verification.
+On the normal macOS development machine, install the persistent watcher once.
+It stays running across logins, rebuilds on source changes, atomically replaces
+each artifact before reload, and hot reloads configured vaults.
+Re-running the install from another
+worktree intentionally transfers watcher ownership to that worktree. Synced
+development manifests include a visible local-only build identity without
+changing the release version used by server contracts. Use the official
+Obsidian CLI or Computer Use for live reload, errors, DOM inspection, and
+visual verification.
 
 For mobile-sensitive changes, npm run check:mobile and npm run check:full are
 the release gates. They validate the exact built main.js, manifest.json, and

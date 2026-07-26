@@ -8,6 +8,10 @@ import {
 } from "obsidian";
 import { showPrompt } from "../core/ui/modals/PromptModal";
 import {
+  formatDevelopmentBuildLabel,
+  getDevelopmentBuildIdentity,
+} from "../core/plugin/DevelopmentBuildIdentity";
+import {
   applyPluginSurface,
   createUiAction,
   createUiSearch,
@@ -308,9 +312,18 @@ export class SystemSculptSettingTab extends PluginSettingTab {
     const titleRow = surfaceRoot.createDiv({ cls: "ss-settings-title-row" });
     const titleGroup = titleRow.createDiv({ cls: "ss-settings-title-group" });
     const titleMeta = titleGroup.createDiv({ cls: "ss-settings-title-meta" });
+    const developmentBuild = getDevelopmentBuildIdentity(this.plugin.manifest);
     titleMeta.createDiv({
       cls: "ss-settings-title-version",
-      text: `v${this.plugin.manifest.version}`,
+      text: [
+        `v${this.plugin.manifest.version}`,
+        formatDevelopmentBuildLabel(this.plugin.manifest),
+      ].filter(Boolean).join(" · "),
+      ...(developmentBuild ? {
+        attr: {
+          title: `Synced ${developmentBuild.syncedAt} from ${developmentBuild.sourcePath} (${developmentBuild.branch})`,
+        },
+      } : {}),
     });
 
     surfaceRoot.createEl("p", {
