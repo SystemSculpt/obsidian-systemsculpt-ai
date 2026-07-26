@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { builtinModules } from "node:module";
 import ts from "typescript";
@@ -111,6 +112,35 @@ function findMobileHazards(filePath) {
   return hazards;
 }
 
+function findHostBoundaryHazards(filePath) {
+  const repoPath = toRepoPath(filePath);
+  const source = fs.readFileSync(filePath, "utf8");
+  const hazards = [];
+  if (
+    ![desktopHostSeam, hostCapabilitySeam, mobileLayoutSeam].includes(repoPath)
+    && /\bPlatform\b/.test(source)
+  ) {
+    hazards.push(`${repoPath} reads Obsidian Platform outside the platform seams`);
+  }
+  if (repoPath !== hostCapabilitySeam && /["']electron["']/.test(source)) {
+    hazards.push(`${repoPath} resolves Electron outside ${hostCapabilitySeam}`);
+  }
+  if (repoPath !== mobileHostLayoutSeam && /\.mobile-navbar-action/.test(source)) {
+    hazards.push(`${repoPath} depends on Obsidian's private mobile navbar DOM`);
+  }
+  if (repoPath !== mobileLayoutSeam && /["']is-mobile["']/.test(source)) {
+    hazards.push(`${repoPath} consumes Obsidian's host class instead of owned mobile state`);
+  }
+  return hazards;
+}
+
+function findCssMobileHazards(filePath) {
+  const source = fs.readFileSync(filePath, "utf8");
+  return /\.is-mobile|\.mobile-navbar-action/.test(source)
+    ? [`${toRepoPath(filePath)} targets private Obsidian mobile selectors`]
+    : [];
+}
+
 test("runtime source is safe to load in Obsidian Mobile", () => {
   const hazards = runtimeSourceFiles(sourceRoot).flatMap(findMobileHazards);
   assert.deepEqual(hazards, [], hazards.join("\n"));
@@ -126,26 +156,7 @@ test("manifest advertises desktop and mobile support", () => {
 });
 
 test("features consume owned host capabilities and mobile layout state", () => {
-  const hazards = [];
-  for (const filePath of runtimeSourceFiles(sourceRoot)) {
-    const repoPath = toRepoPath(filePath);
-    const source = fs.readFileSync(filePath, "utf8");
-    if (
-      ![desktopHostSeam, hostCapabilitySeam, mobileLayoutSeam].includes(repoPath)
-      && /\bPlatform\b/.test(source)
-    ) {
-      hazards.push(`${repoPath} reads Obsidian Platform outside the platform seams`);
-    }
-    if (repoPath !== hostCapabilitySeam && /["']electron["']/.test(source)) {
-      hazards.push(`${repoPath} resolves Electron outside ${hostCapabilitySeam}`);
-    }
-    if (repoPath !== mobileHostLayoutSeam && /\.mobile-navbar-action/.test(source)) {
-      hazards.push(`${repoPath} depends on Obsidian's private mobile navbar DOM`);
-    }
-    if (repoPath !== mobileLayoutSeam && /["']is-mobile["']/.test(source)) {
-      hazards.push(`${repoPath} consumes Obsidian's host class instead of owned mobile state`);
-    }
-  }
+  const hazards = runtimeSourceFiles(sourceRoot).flatMap(findHostBoundaryHazards);
 
   const cssFiles = (directory) => fs.readdirSync(directory, { withFileTypes: true })
     .flatMap((entry) => {
@@ -153,12 +164,43 @@ test("features consume owned host capabilities and mobile layout state", () => {
       return entry.isDirectory() ? cssFiles(entryPath) : [entryPath];
     })
     .filter((filePath) => filePath.endsWith(".css"));
-  for (const filePath of cssFiles(path.join(sourceRoot, "css"))) {
-    const source = fs.readFileSync(filePath, "utf8");
-    if (/\.is-mobile|\.mobile-navbar-action/.test(source)) {
-      hazards.push(`${toRepoPath(filePath)} targets private Obsidian mobile selectors`);
-    }
-  }
+  hazards.push(...cssFiles(path.join(sourceRoot, "css")).flatMap(findCssMobileHazards));
 
   assert.deepEqual(hazards, [], hazards.join("\n"));
+});
+
+test("the policy rejects representative mobile regressions", () => {
+  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "systemsculpt-mobile-policy-"));
+  try {
+    const sourceFixture = path.join(fixtureRoot, "unsafe.ts");
+    fs.writeFileSync(
+      sourceFixture,
+      [
+        'import fs from "node:fs";',
+        'import electron from "electron";',
+        'import { Platform } from "obsidian";',
+        'const payload = Buffer.from(process.platform);',
+        'const hostNav = ".mobile-navbar-action";',
+        'const hostClass = "is-mobile";',
+        "void fs; void electron; void Platform; void payload; void hostNav; void hostClass;",
+      ].join("\n"),
+    );
+    const sourceHazards = [
+      ...findMobileHazards(sourceFixture),
+      ...findHostBoundaryHazards(sourceFixture),
+    ].join("\n");
+    assert.match(sourceHazards, /imports Node builtin "node:fs"/);
+    assert.match(sourceHazards, /assumes the Node Buffer global/);
+    assert.match(sourceHazards, /uses process\.platform/);
+    assert.match(sourceHazards, /reads Obsidian Platform outside the platform seams/);
+    assert.match(sourceHazards, /resolves Electron outside/);
+    assert.match(sourceHazards, /private mobile navbar DOM/);
+    assert.match(sourceHazards, /owned mobile state/);
+
+    const cssFixture = path.join(fixtureRoot, "unsafe.css");
+    fs.writeFileSync(cssFixture, ".is-mobile .fixture, .mobile-navbar-action { display: none; }\n");
+    assert.match(findCssMobileHazards(cssFixture).join("\n"), /private Obsidian mobile selectors/);
+  } finally {
+    fs.rmSync(fixtureRoot, { force: true, recursive: true });
+  }
 });

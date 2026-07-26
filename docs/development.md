@@ -1,6 +1,7 @@
 # Plugin development
 
-Work from ~/gits/systemsculpt/plugin with Node 20.10 or newer.
+Work from ~/gits/systemsculpt/plugin with Node 20.10 or newer. Node 22 is the
+local and CI baseline; version managers can select it from .nvmrc.
 
 ## Setup
 
@@ -31,22 +32,50 @@ npm run test:release-script
 ~~~
 
 check:mobile runs static mobile safety, rebuilds the production artifact, and
-opens settings, Chat, Similar Notes, and portable Studio with desktop-only
+runs the focused mobile interaction suite before opening settings, Chat,
+Similar Notes, and portable Studio from the artifact with desktop-only
 adapters unavailable. It does not launch Android or iOS.
 
 ## Checkpoints
 
 ~~~bash
 npm run check:plugin
+npm run check:ci
 npm run check:full
 ~~~
 
 check:plugin adds TypeScript, mobile compatibility, sync, artifact, and release
-guards. check:full adds full unit, embeddings, compiled integration, and
-release-script suites.
+guards. check:ci is the exact PR contract and adds full unit, embeddings,
+already-built integration, and release-script suites. check:full is its local
+alias.
 
-CI is one secret-free Ubuntu/Node job running npm run check. Local focused tests
-and full checkpoints provide the additional depth when a change needs it.
+CI is one secret-free Ubuntu/Node 22 job running npm run check:ci.
+
+## Mobile QA pyramid
+
+1. Every PR statically rejects desktop-only imports and private Obsidian mobile
+   DOM coupling outside the owned host seams.
+2. Focused source tests cover mobile host state, PluginSurface container
+   behavior, narrow chat and settings contracts, touch gestures, keyboard and
+   accessibility behavior, and portable versus blocked Studio nodes.
+3. The production main.js is loaded with Node desktop adapters unavailable.
+   Its manifest, compiled styles.css, settings, Chat, Similar Notes, and Studio
+   surfaces are checked as the exact three-file plugin artifact.
+4. Full unit, managed API fixture, embeddings, integration, artifact, and
+   release tests run through npm run check:ci on every PR.
+5. A mobile-sensitive release uses that exact artifact on real Obsidian Mobile
+   hardware. Record hashes, host OS and Obsidian versions, phone and tablet
+   coverage, orientation, software keyboard, themes, enlarged interface text,
+   and the exercised surfaces.
+
+The first four layers are deterministic compatibility and interaction
+evidence. They deliberately avoid Android emulators, iOS Simulator,
+self-hosted device runners, and browser mobile emulation. This repository does
+not own an iOS app target for Simulator or an APK or IPA for a device farm.
+Android emulation adds a nonphysical host, boot, storage-sync, and WebView
+debugging lane that has not been reproducible in hosted CI. Browser emulation
+reproduces viewport and touch inputs, not the installed Obsidian host. None of
+these alternatives substitutes for the physical-device release gate.
 
 ## Local API
 

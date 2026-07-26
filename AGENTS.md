@@ -91,18 +91,20 @@ npm run check:ui
 npm run check:mobile
 npm run test:integration
 npm run check:plugin
+npm run check:ci
 npm run check:full
 ~~~
 
 - check:mobile runs the static mobile-safety policy, rebuilds the artifact, and
-  opens settings, Chat, Similar Notes, and Studio from that artifact with
-  desktop adapters unavailable.
+  runs focused narrow-pane, touch, accessibility, and Studio capability tests
+  before opening settings, Chat, Similar Notes, and Studio from that artifact
+  with desktop adapters unavailable.
 - check:plugin adds TypeScript, mobile compatibility, sync, artifact, and
   release guards.
-- check:full adds unit, embeddings, compiled integration, and release-script
-  suites.
-- CI has one secret-free Ubuntu/Node job and runs npm run check:full. There is no
-  Windows, Android, iOS, provider, or native-device matrix.
+- check:ci is the exact PR gate and adds unit, embeddings, already-built
+  integration, and release-script suites. check:full is its local alias.
+- CI has one secret-free Ubuntu/Node 22 job and runs npm run check:ci. There is
+  no Windows, Android, iOS, provider, or native-device matrix.
 
 ## Local Obsidian loop
 
