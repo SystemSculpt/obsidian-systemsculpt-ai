@@ -29,20 +29,40 @@ npm run check:mobile
 npm run test:embeddings
 npm run test:integration
 npm run check:plugin
+npm run check:ci
 npm run check:full
 ~~~
 
 - check verifies Obsidian lint, metadata, the production bundle, CSS, cheap
   architecture policy, and the built bundle in a mobile host.
-- check:mobile runs static mobile policy, rebuilds the artifact, and opens
-  settings, Chat, Similar Notes, and Studio without desktop-only globals.
+- check:mobile runs static mobile policy; focused host, narrow-pane, touch,
+  accessibility, and Studio capability tests; then rebuilds the artifact and
+  opens settings, Chat, Similar Notes, and Studio without desktop-only globals.
 - test:integration imports the production artifact in the Obsidian host mock.
 - check:plugin adds types, mobile, sync, artifact, and release guards.
-- check:full adds the complete unit, embeddings, integration, and release
-  suites.
+- check:ci is the exact PR gate: check:plugin plus the complete unit,
+  embeddings, already-built integration, and release suites.
+- check:full is the local alias for check:ci.
 
-CI contains one secret-free Ubuntu/Node job and runs npm run check. There is no
-native-device, operating-system, or provider matrix.
+CI contains one secret-free Ubuntu/Node 22 job and runs npm run check:ci. There
+is no native-device, operating-system, or provider matrix.
+
+## Mobile QA contract
+
+Mobile confidence is layered. Static policy rejects Node, Electron, raw
+Platform, and private host-selector leakage. Focused source tests exercise
+owned mobile state, container-query contracts, touch paths, keyboard and
+accessibility behavior, and Studio capability fallback. The integration suite
+then loads main.js from the exact production artifact with desktop adapters
+unavailable and checks that its compiled styles.css still contains the shared
+touch, safe-area, and narrow-surface rules.
+
+These deterministic layers are PR gates, but they are not a mobile device.
+Android emulators, iOS Simulator, browser viewport emulation, and synthetic DOM
+events do not count as proof of the installed Obsidian Mobile host. A
+mobile-sensitive release still requires the exact three built artifacts on
+physical Obsidian Mobile, with the hashes and scenarios recorded as described
+in AGENTS.md.
 
 ## Real-app verification
 
