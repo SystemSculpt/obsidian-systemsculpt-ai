@@ -310,8 +310,6 @@ export type StudioImageGenerationRequest = {
     prompt: string;
     count?: number;
     aspectRatio?: string;
-    imageSize?: "1K";
-    seed?: number;
     inputImages?: StudioImageGenerationInput[];
   }>;
   storeOutput: (bytes: ArrayBuffer, mimeType: string) => Promise<StudioAssetRef>;

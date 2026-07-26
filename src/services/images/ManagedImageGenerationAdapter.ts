@@ -28,8 +28,6 @@ export type ManagedImageGenerationPayload = Readonly<{
   inputImages?: readonly ManagedImageGenerationInput[];
   count?: number;
   aspectRatio?: string;
-  imageSize?: "1K";
-  seed?: number;
 }>;
 
 export type ManagedImageGenerationOperation = Readonly<{
@@ -136,7 +134,7 @@ function defaultRequestId(): string {
 function normalizePayload(payload: ManagedImageGenerationPayload): {
   prompt: string;
   inputs: ManagedImageGenerationInput[];
-  options: { count?: number; aspect_ratio?: string; image_size?: "1K"; seed?: number };
+  options: { count?: number; aspect_ratio?: string };
 } {
   const prompt = String(payload.prompt || "").trim();
   if (!prompt || prompt.length > 8_000) throw new Error("Managed image generation requires a prompt of at most 8,000 characters.");
@@ -158,8 +156,6 @@ function normalizePayload(payload: ManagedImageGenerationPayload): {
     options: {
       ...(payload.count === undefined ? {} : { count: payload.count }),
       ...(payload.aspectRatio ? { aspect_ratio: payload.aspectRatio } : {}),
-      ...(payload.imageSize ? { image_size: payload.imageSize } : {}),
-      ...(payload.seed === undefined ? {} : { seed: payload.seed }),
     },
   };
 }

@@ -201,18 +201,6 @@ export const imageGenerationNode: StudioNodeDefinition = {
           { value: "2:3", label: "2:3" },
         ],
       },
-      {
-        // Text (not number) so an empty value stays empty: the inline number
-        // editor coerces blanks to its min (0), which would silently pin a fixed
-        // seed of 0. execute() parses this string and treats blank/non-numeric as
-        // "random".
-        key: "seed",
-        label: "Seed",
-        type: "text",
-        required: false,
-        placeholder: "Random",
-        description: "Whole number for reproducible results. Leave blank for random.",
-      },
     ],
     allowUnknownKeys: true,
   },
@@ -238,17 +226,10 @@ export const imageGenerationNode: StudioNodeDefinition = {
             : 1;
         const configuredAspectRatio = getText(context.node.config.aspectRatio as StudioJsonValue).trim();
         const aspectRatio = configuredAspectRatio || DEFAULT_IMAGE_ASPECT_RATIO;
-        const seedConfig = context.node.config.seed;
-        const seedText =
-          typeof seedConfig === "number" ? String(seedConfig) : getText(seedConfig as StudioJsonValue).trim();
-        const seedNum = seedText.length > 0 ? Number(seedText) : Number.NaN;
-        const seed = Number.isFinite(seedNum) && seedNum >= 0 ? Math.floor(seedNum) : undefined;
         return {
           prompt,
           count,
           aspectRatio,
-          imageSize: "1K",
-          seed,
           inputImages,
         };
       },
