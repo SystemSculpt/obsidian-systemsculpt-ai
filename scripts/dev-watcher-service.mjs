@@ -116,6 +116,30 @@ function requireMac(platform) {
   }
 }
 
+function sleepSync(milliseconds) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
+}
+
+function waitForServiceToUnload(options) {
+  const {
+    serviceTarget,
+    runCommand,
+    sleep = sleepSync,
+    timeoutMs = 5_000,
+    pollIntervalMs = 50,
+  } = options;
+  const attempts = Math.max(1, Math.ceil(timeoutMs / pollIntervalMs));
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const result = runCommand("launchctl", ["print", serviceTarget], {
+      encoding: "utf8",
+      stdio: "pipe",
+    });
+    if (result?.error || result?.status !== 0) return;
+    sleep(pollIntervalMs);
+  }
+  throw new Error(`launchctl did not unload ${serviceTarget} within ${timeoutMs}ms.`);
+}
+
 export function installDevWatcherService(options = {}) {
   const root = path.resolve(String(options.root || process.cwd()));
   const configPath = resolveSyncConfigPath(options.configPath);
@@ -123,6 +147,7 @@ export function installDevWatcherService(options = {}) {
   const platform = options.platform || process.platform;
   const uid = options.uid ?? process.getuid?.();
   const runCommand = options.runCommand || spawnSync;
+  const sleep = options.sleep || sleepSync;
   requireMac(platform);
   if (!Number.isInteger(uid) || uid < 0) throw new Error("Unable to resolve the current macOS user.");
   if (!fs.existsSync(path.join(root, "run.sh"))) throw new Error(`run.sh is missing from ${root}.`);
@@ -140,12 +165,20 @@ export function installDevWatcherService(options = {}) {
   }));
 
   const domain = `gui/${uid}`;
-  runCommand("launchctl", ["bootout", `${domain}/${DEV_WATCHER_SERVICE_LABEL}`], {
+  const serviceTarget = `${domain}/${DEV_WATCHER_SERVICE_LABEL}`;
+  runCommand("launchctl", ["bootout", serviceTarget], {
     encoding: "utf8",
     stdio: "pipe",
   });
+  waitForServiceToUnload({
+    serviceTarget,
+    runCommand,
+    sleep,
+    timeoutMs: options.unloadTimeoutMs,
+    pollIntervalMs: options.unloadPollIntervalMs,
+  });
   checked("launchctl", ["bootstrap", domain, paths.plistPath], runCommand);
-  checked("launchctl", ["kickstart", "-k", `${domain}/${DEV_WATCHER_SERVICE_LABEL}`], runCommand);
+  checked("launchctl", ["kickstart", "-k", serviceTarget], runCommand);
   return { ...paths, root, configPath, domain };
 }
 

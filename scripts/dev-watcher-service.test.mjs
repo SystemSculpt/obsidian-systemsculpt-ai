@@ -44,6 +44,7 @@ test("install writes and bootstraps a per-user persistent watcher", (t) => {
   const calls = [];
   const runCommand = (command, args) => {
     calls.push([command, args]);
+    if (args[0] === "print") return { status: 113, stdout: "", stderr: "not found" };
     return { status: 0, stdout: "ok", stderr: "" };
   };
 
@@ -59,11 +60,86 @@ test("install writes and bootstraps a per-user persistent watcher", (t) => {
   assert.equal(fs.existsSync(result.plistPath), true);
   assert.deepEqual(calls.map(([, args]) => args[0]), [
     "bootout",
+    "print",
     "bootstrap",
     "kickstart",
   ]);
   assert.match(fs.readFileSync(result.plistPath, "utf8"), /--headless/);
   assert.match(fs.readFileSync(result.plistPath, "utf8"), /--sync-config/);
+});
+
+test("install waits for an asynchronous launchd bootout before bootstrapping", (t) => {
+  const root = tempRoot(t);
+  const home = path.join(root, "home");
+  const configPath = path.join(root, "systemsculpt-sync.config.json");
+  fs.writeFileSync(path.join(root, "run.sh"), "#!/usr/bin/env bash\n");
+  fs.writeFileSync(configPath, JSON.stringify({
+    pluginTargets: [{ path: path.join(root, "vault", ".obsidian", "plugins", "systemsculpt-ai") }],
+  }));
+  const calls = [];
+  let printCount = 0;
+  let sleepCount = 0;
+  const runCommand = (command, args) => {
+    calls.push([command, args]);
+    if (args[0] === "print") {
+      printCount += 1;
+      return printCount < 3
+        ? { status: 0, stdout: "still unloading", stderr: "" }
+        : { status: 113, stdout: "", stderr: "not found" };
+    }
+    return { status: 0, stdout: "ok", stderr: "" };
+  };
+
+  installDevWatcherService({
+    root,
+    home,
+    configPath,
+    platform: "darwin",
+    uid: 501,
+    runCommand,
+    sleep: () => {
+      sleepCount += 1;
+    },
+  });
+
+  assert.equal(printCount, 3);
+  assert.equal(sleepCount, 2);
+  assert.deepEqual(calls.map(([, args]) => args[0]), [
+    "bootout",
+    "print",
+    "print",
+    "print",
+    "bootstrap",
+    "kickstart",
+  ]);
+});
+
+test("install fails safely when launchd never completes the bootout", (t) => {
+  const root = tempRoot(t);
+  const home = path.join(root, "home");
+  const configPath = path.join(root, "systemsculpt-sync.config.json");
+  fs.writeFileSync(path.join(root, "run.sh"), "#!/usr/bin/env bash\n");
+  fs.writeFileSync(configPath, JSON.stringify({
+    pluginTargets: [{ path: path.join(root, "vault", ".obsidian", "plugins", "systemsculpt-ai") }],
+  }));
+  const calls = [];
+  const runCommand = (command, args) => {
+    calls.push([command, args]);
+    return { status: 0, stdout: "still unloading", stderr: "" };
+  };
+
+  assert.throws(() => installDevWatcherService({
+    root,
+    home,
+    configPath,
+    platform: "darwin",
+    uid: 501,
+    runCommand,
+    sleep: () => {},
+    unloadTimeoutMs: 3,
+    unloadPollIntervalMs: 1,
+  }), /did not unload.*within 3ms/);
+  assert.equal(calls.some(([, args]) => args[0] === "bootstrap"), false);
 });
 
 test("install refuses to run without an explicit local vault target", (t) => {
