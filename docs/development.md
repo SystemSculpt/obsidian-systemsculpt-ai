@@ -63,19 +63,19 @@ CI is one secret-free Ubuntu/Node 22 job running npm run check:ci.
    surfaces are checked as the exact three-file plugin artifact.
 4. Full unit, managed API fixture, embeddings, integration, artifact, and
    release tests run through npm run check:ci on every PR.
-5. A mobile-sensitive release uses that exact artifact on real Obsidian Mobile
-   hardware. Record hashes, host OS and Obsidian versions, phone and tablet
-   coverage, orientation, software keyboard, themes, enlarged interface text,
-   and the exercised surfaces.
+5. When explicitly requested, the exact artifact may also be explored on real
+   Obsidian Mobile hardware. Record hashes, host OS and Obsidian versions, phone
+   and tablet coverage, orientation, software keyboard, themes, enlarged
+   interface text, and the exercised surfaces.
 
-The first four layers are deterministic compatibility and interaction
-evidence. They deliberately avoid Android emulators, iOS Simulator,
+The first four layers are the deterministic compatibility and interaction
+release gate. They deliberately avoid Android emulators, iOS Simulator,
 self-hosted device runners, and browser mobile emulation. This repository does
 not own an iOS app target for Simulator or an APK or IPA for a device farm.
 Android emulation adds a nonphysical host, boot, storage-sync, and WebView
 debugging lane that has not been reproducible in hosted CI. Browser emulation
-reproduces viewport and touch inputs, not the installed Obsidian host. None of
-these alternatives substitutes for the physical-device release gate.
+reproduces viewport and touch inputs, not the installed Obsidian host. These
+manual alternatives are supplemental evidence, not release requirements.
 
 ## Local API
 
@@ -103,12 +103,13 @@ npm run sync:local
 
 Successful builds copy main.js, manifest.json, and styles.css. Use the official
 Obsidian CLI or Computer Use to reload the plugin and verify real desktop UI.
-Mobile confidence comes from portable architecture, the exact built-bundle
-smoke, and real Obsidian Mobile verification. For mobile-sensitive changes,
-test the synced artifact in portrait and landscape, with the keyboard open and
-closed, light and dark themes, enlarged interface text, and phone plus tablet
-or equivalent widths. Verify the synced artifact hashes. No native-device CI
-harness is part of this repository.
+Mobile release confidence comes from portable architecture, focused
+interaction tests, and the exact built-bundle smoke. If manual mobile
+exploration is explicitly requested, test the synced artifact in portrait and
+landscape, with the keyboard open and closed, light and dark themes, enlarged
+interface text, and phone plus tablet or equivalent widths. Verify the synced
+artifact hashes. No native-device CI or mandatory manual-device gate is part of
+this repository.
 
 ## Release validation
 

@@ -57,12 +57,11 @@ then loads main.js from the exact production artifact with desktop adapters
 unavailable and checks that its compiled styles.css still contains the shared
 touch, safe-area, and narrow-surface rules.
 
-These deterministic layers are PR gates, but they are not a mobile device.
-Android emulators, iOS Simulator, browser viewport emulation, and synthetic DOM
-events do not count as proof of the installed Obsidian Mobile host. A
-mobile-sensitive release still requires the exact three built artifacts on
-physical Obsidian Mobile, with the hashes and scenarios recorded as described
-in AGENTS.md.
+These deterministic layers are the PR and release gates. They do not claim to
+be an installed Obsidian Mobile host. Android emulators, iOS Simulator, browser
+viewport emulation, synthetic DOM events, and physical-device exploration may
+provide supplemental evidence when explicitly requested, but they are not
+release requirements and must not replace or weaken the deterministic checks.
 
 ## Real-app verification
 
