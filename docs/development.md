@@ -101,8 +101,27 @@ pluginTargets.
 npm run sync:local
 ~~~
 
-Successful builds copy main.js, manifest.json, and styles.css. Use the official
-Obsidian CLI or Computer Use to reload the plugin and verify real desktop UI.
+For the normal macOS development machine, install the watcher once:
+
+~~~bash
+npm run dev:watch:install
+npm run dev:watch:status
+~~~
+
+The per-user launch agent starts at login, stays running, rebuilds after source
+changes, atomically replaces each local artifact, and reloads the plugin through
+the official Obsidian CLI. Re-running the install command deliberately moves
+the persistent watcher to the current worktree. Use `npm run
+dev:watch:uninstall` to remove it.
+
+Successful development syncs copy main.js, manifest.json, and styles.css. The
+synced manifest retains the release version used by server wire contracts and
+adds a local-only build identity. Settings renders that identity beside the
+version, so a development artifact cannot silently impersonate a release
+artifact. Production and release manifests never contain the development
+identity.
+
+Use the official Obsidian CLI or Computer Use to verify real desktop UI.
 Mobile release confidence comes from portable architecture, focused
 interaction tests, and the exact built-bundle smoke. If manual mobile
 exploration is explicitly requested, test the synced artifact in portrait and

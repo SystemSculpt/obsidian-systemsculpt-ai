@@ -62,6 +62,7 @@ import { ManagedCapabilityClientFactory, type ManagedCapabilityClientGraph } fro
 import { PluginUpdateService } from "./services/PluginUpdateService";
 import { PostProcessingService } from "./services/PostProcessingService";
 import { AudioTranscriptionPanel } from "./modals/AudioTranscriptionPanel";
+import { getDevelopmentBuildIdentity } from "./core/plugin/DevelopmentBuildIdentity";
 
 type ViewManagerModule = typeof import("./core/plugin/views");
 type CommandManagerModule = typeof import("./core/plugin/commands");
@@ -328,8 +329,11 @@ export default class SystemSculptPlugin extends Plugin {
       typeof __SS_BUILD_STAMP__ !== "undefined" ? __SS_BUILD_STAMP__ : "dev";
     // Plain console line (not just the plugin logger) so any vault can
     // answer "which build am I running?" straight from devtools.
+    const developmentBuild = getDevelopmentBuildIdentity(this.manifest);
     console.debug(
-      `[SystemSculpt] v${this.manifest.version} build ${buildStamp}`
+      developmentBuild
+        ? `[SystemSculpt] v${this.manifest.version} ${developmentBuild.id} from ${developmentBuild.branch} (${developmentBuild.syncedAt})`
+        : `[SystemSculpt] v${this.manifest.version} build ${buildStamp}`
     );
     const tracer = this.getInitializationTracer();
     const onloadPhase = tracer.startPhase("plugin.onload", {
@@ -346,6 +350,7 @@ export default class SystemSculptPlugin extends Plugin {
       metadata: {
         version: this.manifest.version,
         build: buildStamp,
+        ...(developmentBuild ? { developmentBuild: developmentBuild.id } : {}),
       },
     });
 
