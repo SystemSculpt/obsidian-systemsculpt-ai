@@ -278,4 +278,37 @@ describe("PlatformRequestClient", () => {
     expect(response.headers.get("x-systemsculpt-contract")).toBe("managed-capabilities-v2");
     expect(response.headers.get("x-systemsculpt-image-output-contract")).toBe("managed-image-output-v1");
   });
+
+  it("rejects an oversized native binary response before reconstructing another body", async () => {
+    const client = new PlatformRequestClient();
+    (requestUrl as jest.Mock).mockResolvedValue({
+      status: 200,
+      headers: { "Content-Type": "image/png" },
+      arrayBuffer: new Uint8Array([1, 2, 3]).buffer,
+      text: "\u0001\u0002\u0003",
+      json: null,
+    });
+
+    await expect(client.request({
+      url: "https://systemsculpt.com/api/plugin/images/generations/jobs/job/outputs/0",
+      method: "GET",
+      transport: "requestUrl",
+      responseEncoding: "arrayBuffer",
+      maxResponseBytes: 2,
+    })).rejects.toThrow("Native response exceeded the configured maximum size");
+  });
+
+  it.each([0, -1, 1.5, Number.NaN])("rejects invalid maximum native response size %p before transport", async (maxResponseBytes) => {
+    const client = new PlatformRequestClient();
+
+    await expect(client.request({
+      url: "https://systemsculpt.com/api/plugin/images/generations/jobs/job/outputs/0",
+      method: "GET",
+      transport: "requestUrl",
+      responseEncoding: "arrayBuffer",
+      maxResponseBytes,
+    })).rejects.toThrow("Maximum platform response size must be a positive integer");
+
+    expect(requestUrl).not.toHaveBeenCalled();
+  });
 });

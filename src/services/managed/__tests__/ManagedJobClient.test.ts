@@ -245,6 +245,79 @@ describe("ManagedJobClient exact wire contract", () => {
     expect(JSON.stringify(request.mock.calls[0][0])).not.toContain("signed");
   });
 
+  it("downloads a valid chunked image output when content-length is absent", async () => {
+    const bytes = new Uint8Array([1, 2]);
+    const metadata = { index: 0, mime_type: "image/png" as const, size_bytes: 2, sha256: "a12871fee210fb8619291eaea194581cbd2531e4b23759d225f6806923f63222", width: 10, height: 20 };
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(bytes.subarray(0, 1));
+        controller.enqueue(bytes.subarray(1));
+        controller.close();
+      },
+    });
+    request.mockResolvedValue(new Response(body, { status: 200, headers: { "x-request-id": "req-1", "x-systemsculpt-contract": "managed-capabilities-v2", "x-systemsculpt-job-contract": MANAGED_JOB_PROTOCOL, "x-systemsculpt-image-output-contract": "managed-image-output-v1", "x-systemsculpt-capability": "image_generation", "x-systemsculpt-output-index": "0", "x-systemsculpt-content-sha256": metadata.sha256, "content-type": "image/png", "cache-control": "no-store, max-age=0", "x-content-type-options": "nosniff", "content-disposition": "attachment; filename=\"systemsculpt-image-0.png\"" } }));
+
+    const result = await client.images.downloadOutput("123e4567-e89b-42d3-a456-426614174000", 0, metadata);
+
+    expect([...new Uint8Array(result.bytes)]).toEqual([1, 2]);
+  });
+
+  it.each([
+    ["malformed", "invalid"],
+    ["conflicting", "2, 3"],
+    ["leading zero", "02"],
+    ["negative", "-1"],
+    ["declared oversize", "31457281"],
+  ])("rejects a %s managed image content-length before reading bytes", async (_label, contentLength) => {
+    const metadata = { index: 0, mime_type: "image/png" as const, size_bytes: 2, sha256: "a12871fee210fb8619291eaea194581cbd2531e4b23759d225f6806923f63222", width: 1, height: 1 };
+    request.mockResolvedValue(new Response(new Uint8Array([1, 2]), { status: 200, headers: { ...imageContractHeaders(), "x-systemsculpt-output-index": "0", "x-systemsculpt-content-sha256": metadata.sha256, "content-type": "image/png", "content-length": contentLength, "cache-control": "no-store, max-age=0", "x-content-type-options": "nosniff", "content-disposition": "attachment; filename=\"systemsculpt-image-0.png\"" } }));
+
+    await expect(client.images.downloadOutput("123e4567-e89b-42d3-a456-426614174000", 0, metadata)).rejects.toMatchObject({
+      code: "malformed_response",
+      message: "Invalid managed image output headers: content-length.",
+    });
+  });
+
+  it("rejects and cancels an actual oversized chunked managed image body", async () => {
+    const cancel = jest.fn();
+    const metadata = { index: 0, mime_type: "image/png" as const, size_bytes: 2, sha256: "a12871fee210fb8619291eaea194581cbd2531e4b23759d225f6806923f63222", width: 1, height: 1 };
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array([1, 2, 3]));
+      },
+      cancel,
+    });
+    request.mockResolvedValue(new Response(body, { status: 200, headers: { ...imageContractHeaders(), "x-systemsculpt-output-index": "0", "x-systemsculpt-content-sha256": metadata.sha256, "content-type": "image/png", "cache-control": "no-store, max-age=0", "x-content-type-options": "nosniff", "content-disposition": "attachment; filename=\"systemsculpt-image-0.png\"" } }));
+
+    await expect(client.images.downloadOutput("123e4567-e89b-42d3-a456-426614174000", 0, metadata)).rejects.toMatchObject({
+      code: "malformed_response",
+      message: "Managed image output exceeded expected size.",
+    });
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["truncated", new Uint8Array([1])],
+    ["empty", null],
+  ])("rejects a %s managed image body after bounded reading", async (_label, body) => {
+    const metadata = { index: 0, mime_type: "image/png" as const, size_bytes: 2, sha256: "a12871fee210fb8619291eaea194581cbd2531e4b23759d225f6806923f63222", width: 1, height: 1 };
+    request.mockResolvedValue(new Response(body, { status: 200, headers: { ...imageContractHeaders(), "x-systemsculpt-output-index": "0", "x-systemsculpt-content-sha256": metadata.sha256, "content-type": "image/png", "cache-control": "no-store, max-age=0", "x-content-type-options": "nosniff", "content-disposition": "attachment; filename=\"systemsculpt-image-0.png\"" } }));
+
+    await expect(client.images.downloadOutput("123e4567-e89b-42d3-a456-426614174000", 0, metadata)).rejects.toMatchObject({
+      code: "malformed_response",
+      message: "Managed image output integrity mismatch.",
+    });
+  });
+
+  it("rejects a redirect response instead of interpreting it as image bytes", async () => {
+    const metadata = { index: 0, mime_type: "image/png" as const, size_bytes: 2, sha256: "a".repeat(64), width: 1, height: 1 };
+    request.mockResolvedValue(new Response(null, { status: 302, headers: { ...imageContractHeaders() } }));
+
+    await expect(client.images.downloadOutput("123e4567-e89b-42d3-a456-426614174000", 0, metadata)).rejects.toMatchObject({
+      code: "malformed_response",
+    });
+  });
+
   it.each([
     ["content length", { "content-length": "1" }, "content-length"], ["content type", { "content-type": "image/jpeg" }, "content-type"],
     ["index", { "x-systemsculpt-output-index": "1" }, "x-systemsculpt-output-index"], ["hash header", { "x-systemsculpt-content-sha256": "b".repeat(64) }, "x-systemsculpt-content-sha256"],

@@ -2,6 +2,7 @@ import type { ChatMessage } from "../../types";
 import type { AgentTranscriptSnapshot as ChatTranscriptSnapshot } from "../../views/chatview/AgentTranscriptRepository";
 
 export const MANAGED_CAPABILITY_CONTRACT = "managed-capabilities-v2" as const;
+export const MANAGED_IMAGE_OUTPUT_MAX_BYTES = 30 * 1024 * 1024;
 export const MANAGED_ADMISSION_CONTRACT = "admission-v1" as const;
 
 export type ManagedCapabilityAlias =
