@@ -1,4 +1,3 @@
-import { isStudioVisualOnlyNodeKind } from "./StudioNodeKinds";
 import type { StudioNodeInstance, StudioNodeSize } from "./types";
 
 /**
@@ -181,7 +180,7 @@ export function estimateStudioTextNodeHeight(lineCount: number): number {
 }
 
 function isStudioTextNode(node: Pick<StudioNodeInstance, "kind">): boolean {
-  return isStudioVisualOnlyNodeKind(node.kind) && node.kind === "studio.text";
+  return String(node.kind || "").trim() === "studio.text";
 }
 
 export function isStudioExpandedTextNodeKind(kind: string): boolean {

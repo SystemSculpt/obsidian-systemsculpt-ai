@@ -135,7 +135,7 @@ describe("StudioRuntime scoped run projection", () => {
     expect(scopeProjectForRun(project, [])).toBe(project);
   });
 
-  it("filters visual-only nodes out of full-graph runs", () => {
+  it("keeps executable text sources while filtering visual-only terminals", () => {
     const project = projectWithBranchMerge();
     project.graph.nodes.push({
       id: "text_1",
@@ -174,15 +174,15 @@ describe("StudioRuntime scoped run projection", () => {
     project.graph.entryNodeIds = [...project.graph.entryNodeIds, "text_1", "terminal_1"];
 
     const scoped = scopeProjectForRun(project, undefined);
-    expect(scoped.graph.nodes.map((node) => node.id)).not.toContain("text_1");
+    expect(scoped.graph.nodes.map((node) => node.id)).toContain("text_1");
     expect(scoped.graph.nodes.map((node) => node.id)).not.toContain("terminal_1");
-    expect(scoped.graph.edges.map((edge) => edge.id)).not.toContain("text_edge");
+    expect(scoped.graph.edges.map((edge) => edge.id)).toContain("text_edge");
     expect(scoped.graph.edges.map((edge) => edge.id)).not.toContain("terminal_edge");
-    expect(scoped.graph.entryNodeIds).not.toContain("text_1");
+    expect(scoped.graph.entryNodeIds).toContain("text_1");
     expect(scoped.graph.entryNodeIds).not.toContain("terminal_1");
   });
 
-  it("throws when running from a visual-only text node", () => {
+  it("allows a scoped run to start from a text node", () => {
     const project = projectWithBranchMerge();
     project.graph.nodes.push({
       id: "text_1",
@@ -194,9 +194,9 @@ describe("StudioRuntime scoped run projection", () => {
         value: "Section marker",
       },
     });
-    expect(() => scopeProjectForRun(project, ["text_1"])).toThrow(
-      'Cannot run from node "text_1" because "studio.text" is visual-only.'
-    );
+    const scoped = scopeProjectForRun(project, ["text_1"]);
+    expect(scoped.graph.nodes.map((node) => node.id)).toEqual(["text_1"]);
+    expect(scoped.graph.entryNodeIds).toEqual(["text_1"]);
   });
 
   it("throws when running from a visual-only terminal node", () => {

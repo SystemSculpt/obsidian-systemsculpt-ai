@@ -10,7 +10,7 @@ const NODE_DESCRIPTION_BY_KIND: Record<string, string> = {
   "studio.json":
     "Build JSON payloads in Composer or Raw mode, pass through upstream JSON, or validate/parse text input into JSON.",
   "studio.value": "Generic value preview node for scalar or unknown output types.",
-  "studio.text": "Adds freeform text for annotating your canvas.",
+  "studio.text": "Adds minimal freeform text that can feed downstream text inputs.",
   "studio.note": "Reads selected markdown vault notes and keeps a live read-only preview.",
   "studio.text_output": "Stores editable text and outputs it for downstream nodes.",
   "studio.text_generation": "Calls a text model and returns generated text output.",

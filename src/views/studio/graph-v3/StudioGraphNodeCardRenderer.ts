@@ -113,6 +113,13 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
       createMarkdownEditor: createTextNodeMarkdownEditor,
       registerEditorTeardown: registerTextNodeEditorTeardown,
     });
+    renderNodePorts({
+      nodeEl,
+      node,
+      definition,
+      graphInteraction,
+      interactionLocked,
+    });
     return;
   }
 

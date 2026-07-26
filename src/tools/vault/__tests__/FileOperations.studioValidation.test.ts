@@ -328,9 +328,19 @@ describe("FileOperations Studio agent edits", () => {
     expect(() => assertValidStudioProjectAgentDocumentStructure(document)).toThrow(error);
   });
 
-  it("rejects a visual-only text node as an entry point through the ordinary file guard", () => {
+  it("rejects a visual-only terminal node as an entry point through the ordinary file guard", () => {
     const document = JSON.parse(original);
-    document.graph.entryNodeIds = ["overview"];
+    document.graph.nodes.push({
+      id: "terminal",
+      kind: "studio.terminal",
+      version: "1.0.0",
+      title: "Terminal",
+      position: { x: 640, y: 20 },
+      config: {},
+      continueOnError: false,
+      disabled: false,
+    });
+    document.graph.entryNodeIds = ["terminal"];
 
     expect(() => assertValidStudioProjectAgentFileMutation({
       path: file.path,
@@ -338,7 +348,7 @@ describe("FileOperations Studio agent edits", () => {
       mode: "overwrite",
       previousContent: original,
       content: JSON.stringify(document),
-    })).toThrow('Entry node "overview" must be executable, not visual-only.');
+    })).toThrow('Entry node "terminal" must be executable, not visual-only.');
   });
 
   it("keeps Studio-owned identity and authoring reference fields stable", async () => {

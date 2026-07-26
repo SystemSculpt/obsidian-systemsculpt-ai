@@ -38,6 +38,72 @@ describe("StudioGraphCompiler managed node graph", () => {
     expect(compiler.compile(project, registry).executionOrder).toEqual(["input", "text"]);
   });
 
+  it("compiles a minimal text node into an image-generation prompt", () => {
+    const project = baseProject();
+    project.graph.nodes.push(
+      {
+        id: "prompt",
+        kind: "studio.text",
+        version: "1.0.0",
+        title: "Prompt",
+        position: { x: 0, y: 0 },
+        config: { value: "Portrait of a fox in amber light", fontSize: 14 },
+      },
+      {
+        id: "image",
+        kind: "studio.image_generation",
+        version: "1.0.0",
+        title: "Image Generation",
+        position: { x: 320, y: 0 },
+        config: { count: 1, aspectRatio: "1:1" },
+      },
+    );
+    project.graph.edges.push({
+      id: "prompt-edge",
+      fromNodeId: "prompt",
+      fromPortId: "text",
+      toNodeId: "image",
+      toPortId: "prompt",
+    });
+
+    const compiled = compiler.compile(project, registry);
+    expect(compiled.executionOrder).toEqual(["prompt", "image"]);
+    expect(compiled.nodesById.get("image")?.dependencyNodeIds).toEqual(["prompt"]);
+  });
+
+  it("rejects a minimal text output connected to an incompatible JSON input", () => {
+    const project = baseProject();
+    project.graph.nodes.push(
+      {
+        id: "prompt",
+        kind: "studio.text",
+        version: "1.0.0",
+        title: "Prompt",
+        position: { x: 0, y: 0 },
+        config: { value: "Not image data", fontSize: 14 },
+      },
+      {
+        id: "json",
+        kind: "studio.json",
+        version: "1.0.0",
+        title: "JSON",
+        position: { x: 320, y: 0 },
+        config: {},
+      },
+    );
+    project.graph.edges.push({
+      id: "invalid-edge",
+      fromNodeId: "prompt",
+      fromPortId: "text",
+      toNodeId: "json",
+      toPortId: "json",
+    });
+
+    expect(() => compiler.compile(project, registry)).toThrow(
+      "type mismatch on edge"
+    );
+  });
+
   it("rejects cyclic graphs", () => {
     const project = baseProject();
     project.graph.nodes.push(

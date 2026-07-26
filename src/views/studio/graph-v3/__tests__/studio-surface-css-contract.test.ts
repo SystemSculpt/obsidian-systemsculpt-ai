@@ -86,6 +86,31 @@ describe("Studio Plugin surface CSS contract", () => {
     expect(readRuleBody(css, ".ss-studio-group-tags-layer")).toMatch(/z-index:\s*3;/);
   });
 
+  it("keeps the minimal text output visible, focusable, and touchable", () => {
+    const css = readStudioCss();
+    const textPortsRule = readRuleBody(
+      css,
+      ".ss-studio-text-node-card .ss-studio-node-ports"
+    );
+    const sharedPinRule =
+      /(?:^|\n)\.ss-studio-port-pin\s*\{(?<body>[^}]*)\}/s.exec(css)?.groups?.body ?? "";
+    const sharedHitRule =
+      /(?:^|\n)\.ss-studio-port-pin::before\s*\{(?<body>[^}]*)\}/s.exec(css)?.groups?.body ?? "";
+
+    expect(textPortsRule).toMatch(/position:\s*absolute;/);
+    expect(textPortsRule).toMatch(/right:\s*var\(--ss-space-1\);/);
+    expect(textPortsRule).toMatch(/transform:\s*translateY\(-50%\);/);
+    expect(sharedPinRule).toMatch(/width:\s*8px;/);
+    expect(sharedPinRule).toMatch(/height:\s*8px;/);
+    expect(sharedHitRule).toMatch(/--ss-studio-port-hit-size/);
+    expect(css).toMatch(
+      /\.ss-studio-port-pin:hover,\s*\.ss-studio-port-pin:focus-visible,\s*\.ss-studio-port-pin\.is-active\s*\{/
+    );
+    expect(css).toMatch(
+      /@media\s*\(pointer:\s*coarse\)[\s\S]*?\.ss-studio-text-node-card \.ss-studio-port-pin\s*\{[\s\S]*?--ss-studio-port-hit-size:\s*var\(--ss-touch-target\);/
+    );
+  });
+
   it("uses the canonical selected-state grammar for ordinary Studio actions", () => {
     const css = `${readStudioCss()}\n${readStudioEditorsCss()}`;
     const actionSelectors = [

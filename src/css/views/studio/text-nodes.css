@@ -47,9 +47,9 @@
   width: 100%;
   max-width: 100%;
   min-width: 0;
-  /* tldraw-tight: the text IS the node, so only a hairline of breathing
-   * room. Keep in sync with STUDIO_TEXT_NODE_VERTICAL_CHROME_PX. */
+  /* Keep block padding in sync with STUDIO_TEXT_NODE_VERTICAL_CHROME_PX. */
   padding: var(--ss-space-1);
+  padding-inline-end: calc(var(--ss-space-1) + var(--ss-space-3));
   overflow-wrap: anywhere;
   word-break: break-word;
   font-size: var(--ss-studio-text-node-font-size, inherit);

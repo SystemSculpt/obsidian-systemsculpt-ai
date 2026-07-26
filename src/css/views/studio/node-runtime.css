@@ -141,9 +141,14 @@
 }
 
 .ss-studio-port-pin:hover,
+.ss-studio-port-pin:focus-visible,
 .ss-studio-port-pin.is-active {
   transform: scale(1.25);
   box-shadow: var(--ss-ring);
+}
+
+.ss-studio-port-pin:focus-visible {
+  outline: none;
 }
 
 .ss-studio-port-pin.is-linked {
@@ -179,4 +184,42 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Text stays chromeless while using the shared typed port interaction.
+ * Unlike ordinary cards, it must not paint-contain the compact port: doing so
+ * clips both the visible dot and its invisible hit target until card hover. */
+.ss-studio-node-card.ss-studio-text-node-card {
+  contain: layout style;
+  overflow: visible;
+}
+
+.ss-studio-text-node-card .ss-studio-node-ports {
+  position: absolute;
+  top: 50%;
+  right: var(--ss-space-1);
+  transform: translateY(-50%);
+  display: block;
+  width: max-content;
+  padding: 0;
+  overflow: visible;
+}
+
+.ss-studio-text-node-card .ss-studio-node-ports-col,
+.ss-studio-text-node-card .ss-studio-port-row {
+  gap: 0;
+}
+
+.ss-studio-text-node-card .ss-studio-port-label {
+  display: none;
+}
+
+.ss-studio-text-node-card .ss-studio-port-pin {
+  opacity: 1;
+}
+
+@media (pointer: coarse) {
+  .ss-studio-text-node-card .ss-studio-port-pin {
+    --ss-studio-port-hit-size: var(--ss-touch-target);
+  }
 }
