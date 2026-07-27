@@ -103,9 +103,15 @@ export class ManagedJobClient {
     const result = await this.transport.managedImageOutput(path, headers, signal);
     if (!result.response.ok) await this.imageOutputError(result, requestId);
     const response = result.response, responseRequestId = response.headers.get("x-request-id");
-    const required: Record<string, string> = { "x-systemsculpt-contract": MANAGED_CAPABILITY_CONTRACT, "x-systemsculpt-job-contract": MANAGED_JOB_PROTOCOL, "x-systemsculpt-image-output-contract": MANAGED_IMAGE_OUTPUT_PROTOCOL, "x-systemsculpt-capability": "image_generation", "x-systemsculpt-output-index": String(outputIndex), "x-systemsculpt-content-sha256": expected.sha256, "content-type": expected.mime_type, "content-length": String(expected.size_bytes), "cache-control": "no-store, max-age=0", "x-content-type-options": "nosniff" };
+    const required: Record<string, string> = { "x-systemsculpt-contract": MANAGED_CAPABILITY_CONTRACT, "x-systemsculpt-job-contract": MANAGED_JOB_PROTOCOL, "x-systemsculpt-image-output-contract": MANAGED_IMAGE_OUTPUT_PROTOCOL, "x-systemsculpt-capability": "image_generation", "x-systemsculpt-output-index": String(outputIndex), "x-systemsculpt-content-sha256": expected.sha256, "content-type": expected.mime_type, "cache-control": "no-store, max-age=0", "x-content-type-options": "nosniff" };
+    // content-length is framing, not integrity: intermediaries legally drop it
+    // when they stream a large body chunked, which bricked downloads of ~2MB+
+    // images. Enforce it only when present; the byte length and SHA-256 of the
+    // actual body are always verified below and are strictly stronger.
+    const contentLength = response.headers.get("content-length");
     const mismatchedHeaders = [
       ...(responseRequestId === requestId ? [] : ["x-request-id"]),
+      ...(contentLength !== null && contentLength !== String(expected.size_bytes) ? ["content-length"] : []),
       ...Object.entries(required).filter(([name, value]) => response.headers.get(name) !== value).map(([name]) => name),
     ];
     if (mismatchedHeaders.length > 0) malformed(`Invalid managed image output headers: ${mismatchedHeaders.join(", ")}.`);

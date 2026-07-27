@@ -255,6 +255,18 @@ describe("ManagedJobClient exact wire contract", () => {
     expect(JSON.stringify(request.mock.calls[0][0])).not.toContain("signed");
   });
 
+  it("accepts a chunked image output without content-length and still verifies bytes", async () => {
+    // Transfer framing may drop content-length when intermediaries stream a
+    // large body chunked; byte length and SHA-256 verification below make it
+    // redundant for integrity.
+    const bytes = new Uint8Array([1, 2]);
+    const metadata = { index: 0, mime_type: "image/png" as const, size_bytes: 2, sha256: "a12871fee210fb8619291eaea194581cbd2531e4b23759d225f6806923f63222", width: 10, height: 20 };
+    request.mockResolvedValue(new Response(bytes, { status: 200, headers: { "x-request-id": "req-1", "x-systemsculpt-contract": "managed-capabilities-v2", "x-systemsculpt-job-contract": MANAGED_JOB_PROTOCOL, "x-systemsculpt-image-output-contract": "managed-image-output-v1", "x-systemsculpt-capability": "image_generation", "x-systemsculpt-output-index": "0", "x-systemsculpt-content-sha256": metadata.sha256, "content-type": "image/png", "cache-control": "no-store, max-age=0", "x-content-type-options": "nosniff", "content-disposition": "attachment; filename=\"systemsculpt-image-0.png\"" } }));
+    const result = await client.images.downloadOutput("123e4567-e89b-42d3-a456-426614174000", 0, metadata);
+    expect([...new Uint8Array(result.bytes)]).toEqual([1, 2]);
+    expect(result.metadata).toEqual(metadata);
+  });
+
   it.each([
     ["content length", { "content-length": "1" }, "content-length"], ["content type", { "content-type": "image/jpeg" }, "content-type"],
     ["index", { "x-systemsculpt-output-index": "1" }, "x-systemsculpt-output-index"], ["hash header", { "x-systemsculpt-content-sha256": "b".repeat(64) }, "x-systemsculpt-content-sha256"],
