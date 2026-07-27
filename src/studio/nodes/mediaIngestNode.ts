@@ -134,10 +134,13 @@ export const mediaIngestNode: StudioNodeDefinition = {
   configSchema: {
     fields: [
       {
+        // Not required: media can arrive through the "media" input port
+        // instead (including managed image-generation placeholders that are
+        // persisted with an empty sourcePath while a run is in flight).
+        // execute() enforces the real contract: media input OR sourcePath.
         key: "sourcePath",
         label: "Source Path",
         type: "media_path",
-        required: true,
         allowOutsideVault: true,
         mediaKinds: ["image", "video", "audio"],
       },

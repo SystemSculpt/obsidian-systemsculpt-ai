@@ -183,7 +183,12 @@ export function createAgentFacingStudioProjectDocument(project: StudioProjectV1)
 }
 
 export function validateStudioProjectForAgentEdit(project: StudioProjectV1): void {
-  new StudioGraphCompiler().compile(project, builtInRegistry);
+  // Document-mode compile: this gate decides whether Studio will adopt and
+  // open a project file at all, so it must accept every state Studio itself
+  // can persist (placeholder nodes, unfinished configs, unwired required
+  // inputs). Run readiness is enforced separately by the runtime's strict
+  // compile when the user actually runs the graph.
+  new StudioGraphCompiler().compile(project, builtInRegistry, { validation: "document" });
   const nodesById = new Map(project.graph.nodes.map((node) => [node.id, node] as const));
   for (const entryNodeId of project.graph.entryNodeIds) {
     const entryNode = nodesById.get(entryNodeId);

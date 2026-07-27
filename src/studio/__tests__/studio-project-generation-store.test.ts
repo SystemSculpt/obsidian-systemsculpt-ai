@@ -1054,4 +1054,103 @@ describe("StudioProjectGenerationStore", () => {
     const recovered = await new StudioProjectGenerationStore(adapter).recover("project_alpha");
     expect(recovered.status).toBe("fork_detected");
   });
+
+  it("ignores OS metadata files in projections and generation authority", async () => {
+    const adapter = new MemoryAdapter(); await seedLegacy(adapter);
+    const root = await new StudioProjectGenerationStore(adapter, { now: () => "2026-07-11T01:02:03.004Z" }).discoverAndAdopt(locator);
+    if (root.status !== "committed") throw new Error("adoption failed");
+
+    // Finder browsing drops .DS_Store into the visible assets tree and even
+    // into private authority folders. None of that is project content.
+    const junk = new TextEncoder().encode("junk");
+    adapter.files.set("SystemSculpt/Studio/Alpha.systemsculpt-assets/.DS_Store", junk);
+    adapter.files.set("SystemSculpt/Studio/Alpha.systemsculpt-assets/policy/.DS_Store", junk);
+    adapter.files.set("SystemSculpt/Studio/Alpha.systemsculpt-assets/policy/._grants.json", junk);
+    adapter.files.set(".systemsculpt/studio/projects/project_alpha/generations/.DS_Store", junk);
+    const rootDir = [...adapter.dirs].find((path) => path.includes("/generations/0-"));
+    if (!rootDir) throw new Error("missing root generation dir");
+    adapter.files.set(`${rootDir}/.DS_Store`, junk);
+    adapter.files.set(`${rootDir}/files/support/.DS_Store`, junk);
+
+    // Open must stay ready on the same revision: junk alone must never look
+    // like an external edit and must never invalidate committed authority.
+    const opened = await new StudioProjectGenerationStore(adapter, { now: () => "2026-07-11T02:02:03.004Z" }).open("project_alpha", locator);
+    expect(opened.status).toBe("ready");
+    if (opened.status !== "ready") return;
+    expect(opened.expectedGeneration).toEqual(root.expectedGeneration);
+    expect([...opened.generation.files.keys()].some((path) => path.includes(".DS_Store"))).toBe(false);
+
+    // A real external edit made while junk is present syncs cleanly and the
+    // new generation captures no junk.
+    const changed = legacyProject.replace('"Alpha"', '"Edited beside junk"');
+    adapter.files.set(locator.vaultRelativeProjectPath, new TextEncoder().encode(changed));
+    const synced = await new StudioProjectGenerationStore(adapter, { now: () => "2026-07-11T03:02:03.004Z" }).open("project_alpha", locator);
+    expect(synced.status).toBe("ready");
+    if (synced.status !== "ready") return;
+    expect(synced.expectedGeneration.revision).toBe(1);
+    expect(synced.generation.metadata.commandKind).toBe("external_sync");
+    expect([...synced.generation.files.keys()].some((path) => path.includes(".DS_Store") || path.includes("._grants"))).toBe(false);
+    expect(synced.generation.metadata.entries.some((entry) => entry.relativePath.includes(".DS_Store") || entry.relativePath.includes("._grants"))).toBe(false);
+  });
+
+  it("reopens a project whose saved document holds a pending managed media placeholder", async () => {
+    // Regression for the incident where Studio saved an image-generation
+    // placeholder (media node with an empty sourcePath, fed by an edge) and
+    // then refused to reopen its own file once the projection drifted.
+    const parsed = JSON.parse(legacyProject);
+    parsed.graph.nodes = [
+      {
+        id: "node_image",
+        kind: "studio.image_generation",
+        version: "1.0.0",
+        title: "Image Generation",
+        position: { x: 0, y: 0 },
+        config: { prompt: "a fox", count: 1, aspectRatio: "1:1" },
+      },
+      {
+        id: "node_media",
+        kind: "studio.media_ingest",
+        version: "1.0.0",
+        title: "Image Generation Image 1",
+        position: { x: 320, y: 0 },
+        config: {
+          sourcePath: "",
+          __studio_managed_by: "studio.image_generation_output.v1",
+          __studio_source_node_id: "node_image",
+          __studio_source_output_index: 0,
+          __studio_pending: true,
+          __studio_pending_run_id: "run_pending",
+          __studio_pending_at: "2026-07-11T01:00:00.000Z",
+        },
+      },
+    ];
+    parsed.graph.edges = [
+      { id: "edge_images", fromNodeId: "node_image", fromPortId: "images", toNodeId: "node_media", toPortId: "media" },
+    ];
+    const placeholderProject = `${JSON.stringify(parsed, null, 2)}\n`;
+
+    const adapter = new MemoryAdapter();
+    await adapter.write(locator.vaultRelativeProjectPath, placeholderProject);
+    await adapter.write("SystemSculpt/Studio/Alpha.systemsculpt-assets/policy/grants.json", "{\"schema\":\"studio.policy.v1\"}\n");
+    const root = await new StudioProjectGenerationStore(adapter, { now: () => "2026-07-11T01:02:03.004Z" }).discoverAndAdopt(locator);
+    expect(root.status).toBe("committed");
+    if (root.status !== "committed") return;
+
+    // Junk-only drift (the incident trigger) must not force reconcile.
+    adapter.files.set("SystemSculpt/Studio/Alpha.systemsculpt-assets/.DS_Store", new TextEncoder().encode("junk"));
+    const reopened = await new StudioProjectGenerationStore(adapter, { now: () => "2026-07-11T02:02:03.004Z" }).open("project_alpha", locator);
+    expect(reopened.status).toBe("ready");
+    if (reopened.status === "ready") expect(reopened.expectedGeneration).toEqual(root.expectedGeneration);
+
+    // A real external edit against the placeholder-bearing document must be
+    // adopted: placeholder states are Studio-persisted, not invalid files.
+    const edited = placeholderProject.replace('"Alpha"', '"Renamed around a placeholder"');
+    adapter.files.set(locator.vaultRelativeProjectPath, new TextEncoder().encode(edited));
+    const synced = await new StudioProjectGenerationStore(adapter, { now: () => "2026-07-11T03:02:03.004Z" }).open("project_alpha", locator);
+    expect(synced.status).toBe("ready");
+    if (synced.status !== "ready") return;
+    expect(synced.expectedGeneration.revision).toBe(1);
+    expect(synced.generation.metadata.commandKind).toBe("external_sync");
+    expect(new TextDecoder().decode(synced.generation.files.get("project.systemsculpt"))).toBe(edited);
+  });
 });

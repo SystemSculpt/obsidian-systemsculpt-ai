@@ -525,7 +525,10 @@ export class StudioService {
       const projectText = String(rawText || "");
       assertValidStudioProjectAgentDocumentStructure(JSON.parse(projectText));
       const project = parseStudioProject(projectText);
-      this.compiler.compile(project, this.registry);
+      // Lint gates whether Studio adopts an edited document, so it compiles
+      // in document mode like the persistence gate. Run readiness (required
+      // configs and inputs) is enforced by the runtime when a run starts.
+      this.compiler.compile(project, this.registry, { validation: "document" });
       validateStudioProjectForAgentEdit(project);
       return {
         ok: true,

@@ -160,6 +160,18 @@ function validateClosedLegacyProject(raw: Record<string, unknown>, locator: Proj
   return { projectId: String(raw.projectId || "") };
 }
 
+// Operating systems drop metadata files into folders the user merely browses
+// (Finder writes .DS_Store, Windows Explorer writes Thumbs.db/desktop.ini,
+// macOS writes ._* AppleDouble files on non-native volumes). They are not
+// project content: they must never make a projection look externally edited,
+// never invalidate a committed generation, and never be captured into new
+// generations.
+const IGNORED_TREE_FILE_NAMES = new Set([".ds_store", "thumbs.db", "desktop.ini"]);
+function isIgnoredTreeFile(path: string): boolean {
+  const name = path.slice(path.lastIndexOf("/") + 1);
+  return IGNORED_TREE_FILE_NAMES.has(name.toLocaleLowerCase("en-US")) || name.startsWith("._");
+}
+
 function hasExactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
   const actual = Object.keys(value).sort();
   const expected = [...keys].sort();
@@ -231,7 +243,7 @@ export class StudioProjectGenerationStore {
   private async inspectAuthorityCandidates(projectId: string): Promise<{ any: boolean; committed: boolean } | null> {
     try {
       const listed = await this.adapter.list(generationRoot(projectId));
-      if (listed.files.length > 0) return { any: true, committed: true };
+      if (listed.files.some((file) => !isIgnoredTreeFile(file))) return { any: true, committed: true };
       for (const folder of listed.folders) {
         try {
           if (await this.adapter.exists(`${folder}/commit.json`)) {
@@ -701,7 +713,7 @@ export class StudioProjectGenerationStore {
       const createdAt = this.now(); if (!RFC3339_MS.test(createdAt)) throw new Error("Timestamp must be RFC3339 with milliseconds.");
       const files = new Map<string, Uint8Array>(); const folded = new Set<string>();
       for (const [rawPath, rawBytes] of inputFiles) {
-        const path = normalizeRelativePath(rawPath); const fold = path.toLocaleLowerCase("en-US");
+        const path = normalizeRelativePath(rawPath); if (isIgnoredTreeFile(path)) continue; const fold = path.toLocaleLowerCase("en-US");
         if (folded.has(fold)) throw new Error("Case-folding generation path collision."); folded.add(fold); files.set(path, rawBytes.slice());
       }
       if (!files.has("project.systemsculpt")) throw new Error("Generation is missing the project document.");
@@ -778,12 +790,14 @@ export class StudioProjectGenerationStore {
     const descriptorRaw = await this.adapter.read(`${directory}/commit.json`); const descriptor = JSON.parse(descriptorRaw) as CommitDescriptor;
     if (!hasExactKeys(descriptor as unknown as Record<string, unknown>, ["schemaVersion", "projectId", "revision", "generationHash", "manifestSha256", "entryCount", "logicallyCommittedAt"]) || descriptor.schemaVersion !== 1 || descriptor.projectId !== manifest.projectId || descriptor.revision !== manifest.revision || descriptor.generationHash !== generationHash || descriptor.entryCount !== manifest.entries.length || descriptor.manifestSha256 !== await hash(manifestBytes) || !RFC3339_MS.test(descriptor.logicallyCommittedAt) || descriptorRaw !== canonicalJson(descriptor)) throw new Error("invalid commit descriptor");
     const rootListing = await this.adapter.list(directory);
-    if (rootListing.files.slice().sort(compareUtf8).join("\n") !== [`${directory}/commit.json`, `${directory}/manifest.json`].sort(compareUtf8).join("\n") || rootListing.folders.slice().sort(compareUtf8).join("\n") !== [`${directory}/files`].join("\n")) throw new Error("unmanifested generation metadata entry");
-    const manifestedPaths = manifest.entries.map((entry) => `${directory}/files/${entry.relativePath}`).sort(compareUtf8);
+    if (rootListing.files.filter((file) => !isIgnoredTreeFile(file)).sort(compareUtf8).join("\n") !== [`${directory}/commit.json`, `${directory}/manifest.json`].sort(compareUtf8).join("\n") || rootListing.folders.slice().sort(compareUtf8).join("\n") !== [`${directory}/files`].join("\n")) throw new Error("unmanifested generation metadata entry");
+    // Filter both sides: listTreeFiles already ignores OS junk on disk, and
+    // generations committed before junk filtering may have manifested it.
+    const manifestedPaths = manifest.entries.map((entry) => `${directory}/files/${entry.relativePath}`).filter((path) => !isIgnoredTreeFile(path)).sort(compareUtf8);
     const actualPaths = await this.listTreeFiles(`${directory}/files`);
     if (actualPaths.join("\n") !== manifestedPaths.join("\n")) throw new Error("unmanifested generation content entry");
     const files = new Map<string, Uint8Array>();
-    for (const entry of manifest.entries) { const path = normalizeRelativePath(entry.relativePath); const bytes = new Uint8Array(await this.adapter.readBinary(`${directory}/files/${path}`)); if (bytes.byteLength !== entry.sizeBytes || await hash(bytes) !== entry.sha256) throw new Error("entry validation failed"); files.set(path, bytes); }
+    for (const entry of manifest.entries) { const path = normalizeRelativePath(entry.relativePath); if (isIgnoredTreeFile(path)) continue; const bytes = new Uint8Array(await this.adapter.readBinary(`${directory}/files/${path}`)); if (bytes.byteLength !== entry.sizeBytes || await hash(bytes) !== entry.sha256) throw new Error("entry validation failed"); files.set(path, bytes); }
     return { manifest, files, directory };
   }
 
@@ -941,14 +955,14 @@ export class StudioProjectGenerationStore {
   private async listTreeFiles(root: string): Promise<string[]> {
     let listed: { files: string[]; folders: string[] };
     try { listed = await this.adapter.list(root); } catch { return []; }
-    const files = [...listed.files];
+    const files = listed.files.filter((file) => !isIgnoredTreeFile(file));
     for (const folder of listed.folders) files.push(...await this.listTreeFiles(folder));
     return files.sort(compareUtf8);
   }
 
   private async captureTree(root: string, prefix: string, output: Map<string, Uint8Array>): Promise<void> {
     let listed: { files: string[]; folders: string[] }; try { listed = await this.adapter.list(root); } catch { return; }
-    for (const file of listed.files) { const name = file.slice(root.length + 1); if (name === ".studio-projection.json") continue; output.set(`${prefix}/${name}`, new Uint8Array(await this.adapter.readBinary(file))); }
+    for (const file of listed.files) { const name = file.slice(root.length + 1); if (name === ".studio-projection.json" || isIgnoredTreeFile(file)) continue; output.set(`${prefix}/${name}`, new Uint8Array(await this.adapter.readBinary(file))); }
     for (const folder of listed.folders) { const name = folder.slice(root.length + 1); await this.captureTree(folder, `${prefix}/${name}`, output); }
   }
   private async mkdirRecursive(path: string): Promise<void> { if (!path) return; let current = ""; for (const segment of path.split("/").filter(Boolean)) { current = current ? `${current}/${segment}` : segment; try { await this.adapter.mkdir(current); } catch {} } }
