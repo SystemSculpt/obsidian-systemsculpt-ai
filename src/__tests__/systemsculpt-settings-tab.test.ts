@@ -185,6 +185,34 @@ describe("SystemSculptSettingTab native layout", () => {
     ).toBe(false);
   });
 
+  it("makes a synced development build unmistakable without changing the wire version", async () => {
+    const plugin = createPluginStub();
+    plugin.manifest.systemsculptDevBuild = {
+      schemaVersion: 1,
+      id: "310f308f-dirty-20260726T205500Z",
+      revision: "310f308f062877899ca0f3247b9d5531f3413a3c",
+      branch: "codex/systemsculpt-dev-auto-build",
+      dirty: true,
+      syncedAt: "2026-07-26T20:55:00.000Z",
+      sourcePath: "/workspace/plugin",
+      artifacts: {
+        "main.js": "a".repeat(64),
+        "manifest.json": "b".repeat(64),
+        "styles.css": "c".repeat(64),
+      },
+    };
+    const tab = new SystemSculptSettingTab(app, plugin);
+    tab.display();
+    await Promise.resolve();
+
+    const version = tab.containerEl.querySelector(".ss-settings-title-version");
+    expect(version?.textContent)
+      .toBe("v1.2.3 · DEV 310f308f-dirty-20260726T205500Z");
+    expect(version?.getAttribute("title"))
+      .toContain("codex/systemsculpt-dev-auto-build");
+    expect(plugin.manifest.version).toBe("1.2.3");
+  });
+
   it("does not render the legacy settings mode control", async () => {
     const tab = await renderTab();
     const text = tab.containerEl.textContent || "";

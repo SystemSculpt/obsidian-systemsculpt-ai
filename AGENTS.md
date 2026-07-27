@@ -91,18 +91,20 @@ npm run check:ui
 npm run check:mobile
 npm run test:integration
 npm run check:plugin
+npm run check:ci
 npm run check:full
 ~~~
 
 - check:mobile runs the static mobile-safety policy, rebuilds the artifact, and
-  opens settings, Chat, Similar Notes, and Studio from that artifact with
-  desktop adapters unavailable.
+  runs focused narrow-pane, touch, accessibility, and Studio capability tests
+  before opening settings, Chat, Similar Notes, and Studio from that artifact
+  with desktop adapters unavailable.
 - check:plugin adds TypeScript, mobile compatibility, sync, artifact, and
   release guards.
-- check:full adds unit, embeddings, compiled integration, and release-script
-  suites.
-- CI has one secret-free Ubuntu/Node job and runs npm run check:full. There is no
-  Windows, Android, iOS, provider, or native-device matrix.
+- check:ci is the exact PR gate and adds unit, embeddings, already-built
+  integration, and release-script suites. check:full is its local alias.
+- CI has one secret-free Ubuntu/Node 22 job and runs npm run check:ci. There is
+  no Windows, Android, iOS, provider, or native-device matrix.
 
 ## Local Obsidian loop
 
@@ -112,20 +114,27 @@ plugin folders under pluginTargets, then use:
 ~~~bash
 ./run.sh --headless
 npm run sync:local
+npm run dev:watch:install
 ~~~
 
-The watcher copies main.js, manifest.json, and styles.css after successful
-builds. Use the official Obsidian CLI or Computer Use for live reload, errors,
-DOM inspection, and visual verification.
+On the normal macOS development machine, install the persistent watcher once.
+It stays running across logins, rebuilds on source changes, atomically replaces
+each artifact before reload, and hot reloads configured vaults.
+Re-running the install from another
+worktree intentionally transfers watcher ownership to that worktree. Synced
+development manifests include a visible local-only build identity without
+changing the release version used by server contracts. Use the official
+Obsidian CLI or Computer Use for live reload, errors, DOM inspection, and
+visual verification.
 
-For a mobile-sensitive change, automated checks are necessary but not final
-proof. Sync the exact built main.js, manifest.json, and styles.css into a real
-Obsidian Mobile vault, verify their hashes, then exercise settings, Chat,
-Similar Notes, Studio portable and blocked nodes, commands, modals, and fixed
-transients. Cover portrait and landscape, keyboard open and closed, light and
-dark themes, enlarged interface text, and phone plus tablet or equivalent
-widths. Record which Android/iOS hosts were physically tested; desktop mobile
-emulation does not count as native-host proof.
+For mobile-sensitive changes, npm run check:mobile and npm run check:full are
+the release gates. They validate the exact built main.js, manifest.json, and
+styles.css across narrow-pane, touch, keyboard, accessibility, and Studio
+capability scenarios with desktop adapters unavailable. Simulator, emulator,
+browser-emulation, or physical-device runs may provide supplemental evidence
+when explicitly requested, but they are not release gates and must not replace
+or weaken the deterministic checks. Record the host and artifact hashes when
+manual mobile exploration is performed.
 
 ## Product contracts
 

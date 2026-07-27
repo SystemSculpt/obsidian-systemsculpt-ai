@@ -24,7 +24,7 @@
 }
 
 .systemsculpt-agent-active-run {
-  gap: var(--ss-space-5);
+  gap: 0;
 }
 
 .systemsculpt-agent-active-run:not(:empty) {
@@ -49,6 +49,11 @@
   max-width: min(86%, var(--ss-agent-user-width));
 }
 
+.systemsculpt-agent-turn.is-user.is-editing {
+  width: min(100%, var(--ss-agent-user-width));
+  max-width: 100%;
+}
+
 .systemsculpt-agent-turn.is-user .systemsculpt-agent-turn-body {
   padding: var(--ss-space-3) var(--ss-space-4);
   border: 1px solid var(--ss-line);
@@ -56,8 +61,65 @@
   background: var(--ss-surface-2);
 }
 
+.systemsculpt-agent-message-editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ss-space-3);
+  min-width: 0;
+}
+
+.systemsculpt-agent-message-editor-input {
+  width: 100%;
+  min-height: 6rem;
+  max-height: min(17.5rem, 42vh);
+  padding: var(--ss-space-3);
+  overflow-y: auto;
+  resize: vertical;
+  border: 1px solid var(--ss-line-strong);
+  border-radius: var(--ss-radius-md);
+  background: var(--ss-surface-1);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--ss-ink) 3%, transparent);
+  color: var(--ss-ink);
+  font: inherit;
+  line-height: var(--ss-leading-base);
+}
+
+.systemsculpt-agent-message-editor-input:focus-visible {
+  border-color: var(--interactive-accent);
+  box-shadow: var(--ss-ring);
+  outline: none;
+}
+
+.systemsculpt-agent-message-editor-hint {
+  color: var(--ss-ink-faint);
+  font-size: var(--ss-text-xs);
+  line-height: var(--ss-leading-base);
+}
+
+.systemsculpt-agent-message-editor-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--ss-space-2);
+}
+
+.systemsculpt-agent-message-editor-actions .ss-button {
+  min-height: var(--ss-control-height);
+}
+
+.systemsculpt-agent-composer.is-history-editing {
+  opacity: 0.72;
+}
+
 .systemsculpt-agent-turn.is-assistant {
   width: 100%;
+}
+
+.systemsculpt-agent-turn.is-assistant .systemsculpt-agent-turn-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ss-space-3);
+  min-width: 0;
 }
 
 .systemsculpt-agent-message-attachments {
@@ -199,6 +261,47 @@
   transition: opacity var(--ss-dur-fast) var(--ss-ease);
 }
 
+.systemsculpt-agent-message-copy {
+  width: var(--ss-control-height);
+  min-width: var(--ss-control-height);
+  border-color: transparent;
+}
+
+.systemsculpt-agent-message-copy.is-copied {
+  color: var(--ss-success);
+}
+
+.systemsculpt-agent-message-copy.is-copy-failed {
+  color: var(--ss-danger);
+}
+
+.systemsculpt-agent-message-copy.is-copied .ss-button__icon {
+  animation: ss-agent-copy-confirm var(--ss-dur-slow) var(--ss-ease);
+}
+
+.systemsculpt-agent-message-copy.is-copy-failed .ss-button__icon {
+  animation: ss-agent-copy-failed var(--ss-dur-slow) var(--ss-ease);
+}
+
+@keyframes ss-agent-copy-confirm {
+  0% { transform: scale(0.78); opacity: 0.45; }
+  58% { transform: scale(1.16); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+@keyframes ss-agent-copy-failed {
+  0%, 100% { transform: translateX(0); }
+  35% { transform: translateX(-1px); }
+  70% { transform: translateX(1px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .systemsculpt-agent-message-copy.is-copied .ss-button__icon,
+  .systemsculpt-agent-message-copy.is-copy-failed .ss-button__icon {
+    animation: none;
+  }
+}
+
 .systemsculpt-agent-turn:hover .systemsculpt-agent-message-actions,
 .systemsculpt-agent-turn:focus-within .systemsculpt-agent-message-actions {
   opacity: 1;
@@ -210,6 +313,22 @@
   }
 }
 
+@container ss-surface (max-width: 500px) {
+  .systemsculpt-agent-turn.is-user.is-editing {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .systemsculpt-agent-message-editor-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr);
+  }
+
+  .systemsculpt-agent-message-editor-actions .ss-button {
+    width: 100%;
+  }
+}
+
 .ss-mobile-layout .systemsculpt-agent-conversation {
   padding-top: var(--ss-space-4);
   padding-bottom: var(--ss-space-6);
@@ -217,4 +336,9 @@
 
 .ss-mobile-layout .systemsculpt-agent-turn.is-user {
   max-width: 92%;
+}
+
+.ss-mobile-layout .systemsculpt-agent-turn.is-user.is-editing {
+  width: 100%;
+  max-width: 100%;
 }

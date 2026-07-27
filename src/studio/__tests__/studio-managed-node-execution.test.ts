@@ -101,7 +101,12 @@ describe("managed-only Studio remote nodes", () => {
     const generateImage = jest.fn(async request => {
       expect(imageReads).toBe(0);
       const payload = await request.buildPayload();
-      expect(payload.imageSize).toBe("1K");
+      expect(payload).toEqual({
+        prompt: "Draw",
+        count: 1,
+        aspectRatio: "1:1",
+        inputImages: [],
+      });
       return { images: [], operation: { capability: "image_generation", operationId: "image-op" }, payload };
     });
     await imageGenerationNode.execute({

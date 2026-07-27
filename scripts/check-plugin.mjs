@@ -33,6 +33,7 @@ const FAST_SCRIPT_TESTS = [
 
 const NORMAL_SCRIPT_TESTS = [
   "scripts/mobile-compatibility.test.mjs",
+  "scripts/dev-watcher-service.test.mjs",
   "scripts/plugin-artifacts.test.mjs",
   "scripts/plugin-sync.test.mjs",
   "scripts/release-plugin.test.mjs",

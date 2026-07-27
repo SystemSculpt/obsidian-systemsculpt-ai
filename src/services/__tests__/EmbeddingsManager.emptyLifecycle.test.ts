@@ -144,6 +144,15 @@ function harness(initialContent: string) {
   };
 }
 
+async function waitFor(predicate: () => boolean, timeoutMs = 2_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`Timed out after ${timeoutMs}ms waiting for embeddings lifecycle state.`);
+}
+
 describe("EmbeddingsManager local empty-note lifecycle", () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -180,10 +189,7 @@ describe("EmbeddingsManager local empty-note lifecycle", () => {
     expect(state.manager.getStats()).toMatchObject({ processed: 0, needsProcessing: 1 });
     releaseLock();
     await heldLock;
-    await new Promise((resolve) => setTimeout(resolve, 450));
-    for (let attempt = 0; attempt < 20 && (state.request.mock.calls.length === 0 || state.manager.isCurrentlyProcessing()); attempt += 1) {
-      await Promise.resolve();
-    }
+    await waitFor(() => state.request.mock.calls.length > 0 && !state.manager.isCurrentlyProcessing());
 
     expect(state.request).toHaveBeenCalledTimes(1);
     expect(state.manager.getStats()).toMatchObject({ processed: 1, present: 1, needsProcessing: 0 });

@@ -200,7 +200,7 @@ describe("HostedTransportAdapter", () => {
     expect(request).toHaveBeenCalledWith(expect.objectContaining({
       url: "https://api.test/api/plugin/images/generations/jobs/123e4567-e89b-42d3-a456-426614174000/outputs/0",
       method: "GET", headers: expect.objectContaining(headers), preserveResponseHeaders: true, licenseKey: "secret",
-      transport: "requestUrl", responseEncoding: "arrayBuffer",
+      transport: "requestUrl", responseEncoding: "arrayBuffer", maxResponseBytes: 30 * 1024 * 1024,
     }));
     await expect(adapter.managedImageOutput("https://signed.test/output", headers)).rejects.toThrow("Invalid managed image output path");
     await expect(adapter.managedImageOutput("/api/plugin/documents/id/download", headers)).rejects.toThrow("Invalid managed image output path");

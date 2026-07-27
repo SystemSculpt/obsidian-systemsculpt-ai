@@ -70,6 +70,7 @@ describe("ManagedImageGenerationAdapter", () => {
     const create = jest.fn(async body => {
       events.push("jobs:create");
       expect(body.input_images?.map(input => input.key)).toEqual(["key-a", "key-b"]);
+      expect(body.options).toEqual({ count: 2, aspect_ratio: "16:9" });
       return { job: { id: "123e4567-e89b-42d3-a456-426614174000", status: "queued" as const } };
     });
     const metadata = {
@@ -108,6 +109,8 @@ describe("ManagedImageGenerationAdapter", () => {
         events.push("payload");
         return {
           prompt: "Draw a vault graph",
+          count: 2,
+          aspectRatio: "16:9",
           inputImages: [
             { mimeType: "image/png", sizeBytes: 1, sha256: HASH_A, load: async () => new Uint8Array([1]).buffer },
             { mimeType: "image/webp", sizeBytes: 1, sha256: HASH_B, load: async () => new Uint8Array([2]).buffer },

@@ -39,7 +39,6 @@ function definitionFields(kind: string): StudioNodeDefinition["configSchema"]["f
       { key: "prompt", label: "Prompt", type: "textarea", required: false },
       { key: "count", label: "Image Count", type: "number", required: true, min: 1, max: 4, integer: true },
       { key: "aspectRatio", label: "Aspect Ratio", type: "select", required: false, options: [] },
-      { key: "seed", label: "Seed", type: "text", required: false },
     ];
   }
   return [];
@@ -231,7 +230,7 @@ describe("renderStudioGraphNodeCard", () => {
         .find((cls) => cls.startsWith("ss-studio-node-inline-config-field--"))
         ?.replace("ss-studio-node-inline-config-field--", "")
     );
-    expect(fieldSuffixes).toEqual(["prompt", "count", "aspectratio", "seed"]);
+    expect(fieldSuffixes).toEqual(["prompt", "count", "aspectratio"]);
     // Nothing gets relocated out of the grid after render.
     for (const fieldEl of Array.from(
       nodeEl.querySelectorAll<HTMLElement>(".ss-studio-node-inline-config-field")

@@ -358,7 +358,7 @@ describe("AgentWorkspace", () => {
     delete (window.navigator as Navigator & { clipboard?: Clipboard }).clipboard;
   });
 
-  it("renders detail-free tool status as static non-focusable content", async () => {
+  it("renders tool status as static non-focusable content without raw payload disclosure", async () => {
     const host = document.body.createDiv();
     const renderer = new AgentConversationRenderer(host, {
       app: new App(),
@@ -375,12 +375,13 @@ describe("AgentWorkspace", () => {
       state: "running",
     });
 
-    const shell = node.querySelector(".systemsculpt-agent-tool-details") as HTMLElement;
+    const shell = node.querySelector(".systemsculpt-agent-tool") as HTMLElement;
     const header = node.querySelector(".systemsculpt-agent-tool-header") as HTMLElement;
     expect(shell.tagName).toBe("DIV");
     expect(header.tagName).toBe("DIV");
     expect(header.hasAttribute("tabindex")).toBe(false);
     expect(node.querySelector("summary")).toBeNull();
+    expect(node.querySelector("pre")).toBeNull();
   });
 
   it("mounts the canonical view surface and shared action grammar", () => {
@@ -508,6 +509,65 @@ describe("AgentWorkspace", () => {
     render.mockRestore();
   });
 
+  it("confirms response copying in place, preserves focus, and recovers from failure", async () => {
+    const host = document.body.createDiv();
+    const onCopyText = jest.fn<Promise<boolean>, [string]>()
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(true)
+      .mockRejectedValueOnce(new Error("clipboard unavailable"));
+    const renderer = new AgentConversationRenderer(host, {
+      app: new App(),
+      sourcePath: () => "",
+      onApprove: jest.fn(),
+      onOpenArtifact: jest.fn(),
+      onCopyArtifactPath: jest.fn(),
+      onCopyText,
+    });
+    renderer.load();
+
+    await renderer.renderHistory([{
+      role: "assistant",
+      message_id: "assistant-copy",
+      content: "A response worth copying.",
+    }]);
+    const copy = host.querySelector<HTMLButtonElement>(".systemsculpt-agent-message-copy")!;
+    expect(copy.classList.contains("ss-button--icon")).toBe(true);
+    expect(copy.textContent).not.toContain("Copy");
+    expect(copy.title).toBe("Copy response");
+    copy.focus();
+    copy.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(onCopyText).toHaveBeenCalledWith("A response worth copying.");
+    expect(copy.textContent).not.toContain("Copied");
+    expect(copy.classList.contains("is-copied")).toBe(true);
+    expect(copy.getAttribute("aria-label")).toBe("Response copied");
+    expect(copy.title).toBe("Response copied");
+    expect(document.activeElement).toBe(copy);
+    expect((renderer as any).copyFeedbackTimers.size).toBe(1);
+
+    copy.click();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(onCopyText).toHaveBeenCalledTimes(2);
+    expect(copy.textContent).not.toContain("Copied");
+    expect((renderer as any).copyFeedbackTimers.size).toBe(1);
+
+    copy.click();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(copy.textContent).not.toContain("Copy failed");
+    expect(copy.classList.contains("is-copy-failed")).toBe(true);
+    expect(copy.getAttribute("aria-label")).toBe("Could not copy response. Try again");
+    expect(copy.title).toBe("Could not copy response. Try again");
+    expect(document.activeElement).toBe(copy);
+    expect((renderer as any).copyFeedbackTimers.size).toBe(1);
+
+    renderer.unload();
+    expect((renderer as any).copyFeedbackTimers.size).toBe(0);
+  });
+
   it("classifies tool-only history turns without action chrome", async () => {
     const parent = document.body.createDiv();
     const workspace = new AgentWorkspace(parent, {
@@ -553,6 +613,7 @@ describe("AgentWorkspace", () => {
           { id: "part-ordered", type: "tool_call", timestamp: 2, data: orderedTool },
         ],
       },
+      { role: "user", message_id: "user-boundary", content: "Continue." },
       {
         role: "assistant",
         message_id: "assistant-mixed",
@@ -569,9 +630,177 @@ describe("AgentWorkspace", () => {
     expect(row("assistant-tool-ordered").classList.contains("is-tool-only")).toBe(true);
     expect(row("assistant-tool-ordered").querySelector(".systemsculpt-agent-message-actions")).toBeNull();
     expect(row("user-text").classList.contains("is-tool-only")).toBe(false);
-    expect(row("user-text").querySelector('[aria-label="Retry from here"]')).not.toBeNull();
+    expect(row("user-text").querySelector('[aria-label="Edit and resubmit"]')).not.toBeNull();
     expect(row("assistant-mixed").classList.contains("is-tool-only")).toBe(false);
-    expect(row("assistant-mixed").querySelector('[aria-label="Copy"]')).not.toBeNull();
+    expect(row("assistant-mixed").querySelector('[aria-label="Copy response"]')).not.toBeNull();
+    workspace.unload();
+  });
+
+  it("edits a historical user message inline while preserving the global draft", async () => {
+    const parent = document.body.createDiv();
+    let workspace: AgentWorkspace;
+    const onCancelMessageEdit = jest.fn(async (messageId: string) => {
+      await workspace.hideMessageEditor(messageId);
+    });
+    workspace = new AgentWorkspace(parent, {
+      app: new App(),
+      sourcePath: () => "SystemSculpt/Chats/chat.md",
+      onSubmit: jest.fn(),
+      onStop: jest.fn(),
+      onAttach: jest.fn(),
+      onRemoveAttachment: jest.fn(),
+      onApprove: jest.fn(),
+      onOpenArtifact: jest.fn(),
+      onCopyArtifactPath: jest.fn(),
+      onRetryMessage: jest.fn(),
+      onResubmitMessage: jest.fn(async () => false),
+      onCancelMessageEdit,
+      onNewChat: jest.fn(),
+      onOpenHistory: jest.fn(),
+      onOpenSettings: jest.fn(),
+    });
+    workspace.load();
+    await workspace.setHistory([
+      { role: "user", message_id: "user-edit", content: "Original request" },
+      { role: "assistant", message_id: "assistant-edit", content: "Original response" },
+      { role: "user", message_id: "user-later", content: "Later follow-up" },
+    ]);
+    workspace.setInputText("Keep this bottom draft");
+    const capturedAnchor = {
+      rowId: "message:user-edit",
+      offsetFromViewportTop: 12,
+      mode: "manual" as const,
+      turnAnchorRowId: null,
+    };
+    const captureAnchor = jest.spyOn((workspace as any).scroller, "capturePrependAnchor")
+      .mockReturnValue(capturedAnchor);
+    const restoreAnchor = jest.spyOn((workspace as any).scroller, "restorePrependAnchor");
+
+    await workspace.showMessageEditor({
+      messageId: "user-edit",
+      text: "Original request",
+      laterMessageCount: 2,
+      hasAttachments: false,
+      unavailableAttachmentCount: 0,
+      requiresReplayConfirmation: false,
+    });
+
+    const row = parent.querySelector<HTMLElement>('[data-message-id="user-edit"]')!;
+    const input = row.querySelector<HTMLTextAreaElement>(".systemsculpt-agent-message-editor-input")!;
+    const globalInput = parent.querySelector<HTMLTextAreaElement>('[aria-label="Message SystemSculpt"]')!;
+    expect(row.classList.contains("is-editing")).toBe(true);
+    expect(input.value).toBe("Original request");
+    expect(document.activeElement).toBe(input);
+    expect(row.textContent).toContain("Saving will replace 2 later messages in this chat.");
+    expect(row.textContent).toContain("Ctrl or Command Enter to save. Escape to cancel.");
+    expect(globalInput.value).toBe("Keep this bottom draft");
+    expect(globalInput.disabled).toBe(true);
+    expect(parent.textContent).toContain("Finish editing the earlier message");
+    expect(captureAnchor).toHaveBeenCalledTimes(1);
+    expect(restoreAnchor).toHaveBeenCalledWith(capturedAnchor);
+
+    const escapedToHost = jest.fn();
+    parent.addEventListener("keydown", escapedToHost);
+    input.value = "Changed but cancelled";
+    const escape = new KeyboardEvent("keydown", {
+      key: "Escape",
+      bubbles: true,
+      cancelable: true,
+    });
+    input.dispatchEvent(escape);
+    expect(escape.defaultPrevented).toBe(true);
+    expect(escapedToHost).not.toHaveBeenCalled();
+    expect(row.classList.contains("is-editing")).toBe(true);
+    const escapeKeyup = new KeyboardEvent("keyup", {
+      key: "Escape",
+      bubbles: true,
+      cancelable: true,
+    });
+    input.dispatchEvent(escapeKeyup);
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    await (workspace as any).rendering;
+
+    expect(escapeKeyup.defaultPrevented).toBe(true);
+    expect(escapedToHost).not.toHaveBeenCalled();
+    expect(onCancelMessageEdit).toHaveBeenCalledWith("user-edit");
+    expect(row.isConnected).toBe(false);
+    const restored = parent.querySelector<HTMLElement>('[data-message-id="user-edit"]')!;
+    expect(restored.classList.contains("is-editing")).toBe(false);
+    expect(restored.textContent).toContain("Original request");
+    expect(globalInput.value).toBe("Keep this bottom draft");
+    expect(globalInput.disabled).toBe(false);
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("Edit and resubmit");
+    workspace.unload();
+  });
+
+  it("resubmits an inline edit with keyboard semantics and keeps failures editable", async () => {
+    const parent = document.body.createDiv();
+    const onResubmitMessage = jest.fn(async () => false);
+    const workspace = new AgentWorkspace(parent, {
+      app: new App(),
+      sourcePath: () => "SystemSculpt/Chats/chat.md",
+      onSubmit: jest.fn(),
+      onStop: jest.fn(),
+      onAttach: jest.fn(),
+      onRemoveAttachment: jest.fn(),
+      onApprove: jest.fn(),
+      onOpenArtifact: jest.fn(),
+      onCopyArtifactPath: jest.fn(),
+      onRetryMessage: jest.fn(),
+      onResubmitMessage,
+      onCancelMessageEdit: jest.fn(),
+      onNewChat: jest.fn(),
+      onOpenHistory: jest.fn(),
+      onOpenSettings: jest.fn(),
+    });
+    workspace.load();
+    await workspace.setHistory([
+      { role: "user", message_id: "user-edit", content: "Original request" },
+    ]);
+    await workspace.showMessageEditor({
+      messageId: "user-edit",
+      text: "Original request",
+      laterMessageCount: 0,
+      hasAttachments: false,
+      unavailableAttachmentCount: 1,
+      requiresReplayConfirmation: true,
+    });
+    const input = parent.querySelector<HTMLTextAreaElement>(".systemsculpt-agent-message-editor-input")!;
+    const shortcutToHost = jest.fn();
+    parent.addEventListener("keydown", shortcutToHost);
+    input.value = "  Updated request  ";
+    const saveShortcut = new KeyboardEvent("keydown", {
+      key: "Enter",
+      metaKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    input.dispatchEvent(saveShortcut);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(saveShortcut.defaultPrevented).toBe(true);
+    expect(shortcutToHost).not.toHaveBeenCalled();
+    expect(onResubmitMessage).toHaveBeenCalledWith("user-edit", "Updated request");
+    expect(input.disabled).toBe(false);
+    expect(document.activeElement).toBe(input);
+    const saveKeyup = new KeyboardEvent("keyup", {
+      key: "Enter",
+      bubbles: true,
+      cancelable: true,
+    });
+    input.dispatchEvent(saveKeyup);
+    expect(saveKeyup.defaultPrevented).toBe(true);
+    expect(shortcutToHost).not.toHaveBeenCalled();
+    expect(parent.textContent).toContain("1 unavailable attachment will be left out.");
+    expect(parent.textContent).toContain("Existing vault changes will not be undone.");
+
+    input.value = "";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    const save = Array.from(
+      parent.querySelectorAll<HTMLButtonElement>(".systemsculpt-agent-message-editor-actions button"),
+    ).find((button) => button.textContent?.includes("Save and resubmit"));
+    expect(save?.disabled).toBe(true);
     workspace.unload();
   });
 
@@ -624,11 +853,197 @@ describe("AgentWorkspace", () => {
     const body = parent.querySelector(".systemsculpt-agent-turn-body")!;
     expect(Array.from(body.children).map((node) => node.textContent)).toEqual([
       "Before",
-      expect.stringContaining("One.md"),
-      expect.stringContaining("Two.md"),
+      expect.stringMatching(/One\.md[\s\S]*Two\.md/),
       "After",
     ]);
+    const groupedTools = body.querySelectorAll(
+      ".systemsculpt-agent-activity .systemsculpt-agent-part.is-tool",
+    );
+    expect(groupedTools).toHaveLength(1);
+    expect(groupedTools[0].querySelector("strong")?.textContent).toBe("Read 2 files");
     expect(body.textContent).not.toContain("BeforeAfter");
+    workspace.unload();
+  });
+
+  it("keeps one assistant-owned activity section after a subsequent user turn", async () => {
+    const parent = document.body.createDiv();
+    const workspace = new AgentWorkspace(parent, {
+      app: new App(),
+      sourcePath: () => "SystemSculpt/Chats/chat.md",
+      onSubmit: jest.fn(),
+      onStop: jest.fn(),
+      onAttach: jest.fn(),
+      onRemoveAttachment: jest.fn(),
+      onApprove: jest.fn(),
+      onOpenArtifact: jest.fn(),
+      onCopyArtifactPath: jest.fn(),
+      onCopyText: jest.fn(async () => true),
+      onNewChat: jest.fn(),
+      onOpenHistory: jest.fn(),
+      onOpenSettings: jest.fn(),
+    });
+    workspace.load();
+    const tool = (id: string, timestamp: number) => ({
+      id,
+      messageId: "assistant-multiround",
+      request: {
+        id,
+        type: "function" as const,
+        function: { name: "read", arguments: JSON.stringify({ path: `${id}.md` }) },
+      },
+      state: "completed" as const,
+      result: { success: true, data: { summary: `Read ${id}.md`, raw: "not product UI" } },
+      timestamp,
+    });
+    const firstTool = tool("first", 2);
+    const secondTool = tool("second", 5);
+    const thirdTool = tool("third", 7);
+    const firstUser = {
+      role: "user" as const,
+      message_id: "user-first",
+      content: "Inspect several notes.",
+    };
+    const assistantRounds = [{
+      role: "assistant" as const,
+      message_id: "assistant-multiround-1",
+      content: "",
+      tool_calls: [firstTool],
+      messageParts: [
+        { id: "reasoning-1", type: "reasoning" as const, timestamp: 1, data: "Plan the first read." },
+        { id: "tool-1", type: "tool_call" as const, timestamp: 2, data: firstTool },
+        { id: "empty-round-1", type: "content" as const, timestamp: 3, data: "" },
+      ],
+    }, {
+      role: "assistant" as const,
+      message_id: "assistant-multiround-2",
+      content: "",
+      tool_calls: [secondTool],
+      messageParts: [
+        { id: "reasoning-2", type: "reasoning" as const, timestamp: 4, data: "Continue with the next reads." },
+        { id: "tool-2", type: "tool_call" as const, timestamp: 5, data: secondTool },
+        { id: "empty-round-2", type: "content" as const, timestamp: 6, data: " " },
+      ],
+    }, {
+      role: "assistant" as const,
+      message_id: "assistant-multiround-3",
+      content: "Finished.",
+      tool_calls: [thirdTool],
+      messageParts: [
+        { id: "tool-3", type: "tool_call" as const, timestamp: 7, data: thirdTool },
+        { id: "answer", type: "content" as const, timestamp: 8, data: "Finished." },
+      ],
+    }];
+
+    const assertCoherentTurn = () => {
+      const row = parent.querySelector<HTMLElement>('[data-message-id="assistant-multiround-1"]')!;
+      expect(row.dataset.messageIds).toBe(
+        "assistant-multiround-1 assistant-multiround-2 assistant-multiround-3",
+      );
+      expect(row.querySelectorAll(":scope .systemsculpt-agent-activity")).toHaveLength(1);
+      expect(row.querySelector(".systemsculpt-agent-activity-label")?.textContent).toBe("Activity");
+      expect(row.querySelector(".systemsculpt-agent-activity-state")?.textContent).toBe("Done");
+      expect(row.querySelectorAll(".systemsculpt-agent-activity .systemsculpt-agent-part.is-reasoning"))
+        .toHaveLength(2);
+      expect(row.querySelectorAll(".systemsculpt-agent-activity .systemsculpt-agent-part.is-tool"))
+        .toHaveLength(3);
+      expect(row.querySelector(".systemsculpt-agent-activity pre")).toBeNull();
+      expect(row.querySelector(".systemsculpt-agent-artifact")).toBeNull();
+      expect(row.textContent).not.toContain("not product UI");
+      expect(row.querySelector('[aria-label="Copy response"]')).not.toBeNull();
+    };
+
+    await workspace.setHistory([firstUser, ...assistantRounds]);
+    assertCoherentTurn();
+    await workspace.setHistory([
+      firstUser,
+      ...assistantRounds,
+      { role: "user", message_id: "user-follow-up", content: "?" },
+    ]);
+    assertCoherentTurn();
+    expect(parent.querySelectorAll(".systemsculpt-agent-activity")).toHaveLength(1);
+    expect(parent.querySelectorAll(".systemsculpt-agent-turn.is-assistant")).toHaveLength(1);
+    workspace.unload();
+  });
+
+  it("keeps consecutive reads grouped across assistant continuation messages and later history rerenders", async () => {
+    const parent = document.body.createDiv();
+    const workspace = new AgentWorkspace(parent, {
+      app: new App(),
+      sourcePath: () => "SystemSculpt/Chats/chat.md",
+      onSubmit: jest.fn(),
+      onStop: jest.fn(),
+      onAttach: jest.fn(),
+      onRemoveAttachment: jest.fn(),
+      onApprove: jest.fn(),
+      onOpenArtifact: jest.fn(),
+      onCopyArtifactPath: jest.fn(),
+      onCopyText: jest.fn(async () => true),
+      onNewChat: jest.fn(),
+      onOpenHistory: jest.fn(),
+      onOpenSettings: jest.fn(),
+    });
+    workspace.load();
+    const tool = (id: string, messageId: string, timestamp: number, path: string) => ({
+      id,
+      messageId,
+      request: {
+        id,
+        type: "function" as const,
+        function: { name: "read", arguments: JSON.stringify({ paths: [path] }) },
+      },
+      state: "completed" as const,
+      result: { success: true, data: { files: [{ path, content: "ok" }] } },
+      timestamp,
+    });
+    const reads = [
+      tool("read-1", "assistant-read-1", 1, "Research/One.md"),
+      tool("read-2", "assistant-read-2", 2, "Research/Two.md"),
+      tool("read-3", "assistant-read-3", 3, "Research/Three.md"),
+    ];
+    const firstUser = {
+      role: "user" as const,
+      message_id: "user-read",
+      content: "Read these notes.",
+    };
+    const assistantRounds = reads.map((read, index) => ({
+      role: "assistant" as const,
+      message_id: `assistant-read-${index + 1}`,
+      content: index === reads.length - 1 ? "Finished." : "",
+      tool_calls: [read],
+      messageParts: [
+        { id: `read-part-${index + 1}`, type: "tool_call" as const, timestamp: read.timestamp, data: read },
+        ...(index === reads.length - 1
+          ? [{ id: "read-answer", type: "content" as const, timestamp: 4, data: "Finished." }]
+          : []),
+      ],
+    }));
+
+    const assertGrouped = () => {
+      const row = parent.querySelector<HTMLElement>('[data-message-id="assistant-read-1"]')!;
+      expect(row.dataset.messageIds).toBe(
+        "assistant-read-1 assistant-read-2 assistant-read-3",
+      );
+      const toolRows = row.querySelectorAll(".systemsculpt-agent-activity .systemsculpt-agent-part.is-tool");
+      expect(toolRows).toHaveLength(1);
+      expect(toolRows[0].classList.contains("is-grouped")).toBe(true);
+      expect(toolRows[0].getAttribute("data-tool-count")).toBe("3");
+      expect(toolRows[0].querySelector("strong")?.textContent).toBe("Read 3 files");
+      expect(toolRows[0].querySelector(".systemsculpt-agent-tool-summary")?.textContent)
+        .toBe("Research/One.md, Research/Two.md, +1 more");
+      expect(toolRows[0].querySelector(".systemsculpt-agent-tool-state")?.textContent).toBe("Done");
+      expect(toolRows[0].querySelector(".systemsculpt-agent-tool-header")?.getAttribute("aria-label"))
+        .toBe("Read 3 files, Research/One.md, Research/Two.md, +1 more, Done");
+    };
+
+    await workspace.setHistory([firstUser, ...assistantRounds]);
+    assertGrouped();
+    await workspace.setHistory([
+      firstUser,
+      ...assistantRounds,
+      { role: "user", message_id: "user-after-read", content: "Now summarize them." },
+    ]);
+    assertGrouped();
+    expect(parent.querySelectorAll(".systemsculpt-agent-turn.is-assistant")).toHaveLength(1);
     workspace.unload();
   });
 
@@ -738,15 +1153,14 @@ describe("AgentWorkspace", () => {
       .click();
     expect(onApprove).toHaveBeenCalledWith("approval-1", true, true);
 
-    const pendingDetails = parent.querySelector<HTMLDetailsElement>(".systemsculpt-agent-tool-details")!;
-    pendingDetails.open = true;
-    const pendingSummary = pendingDetails.querySelector<HTMLElement>(".systemsculpt-agent-tool-header")!;
-    pendingSummary.focus();
-    expect(document.activeElement).toBe(pendingSummary);
+    const pendingPart = parent.querySelector<HTMLElement>(".systemsculpt-agent-part.is-tool")!;
+    const pendingHeader = pendingPart.querySelector<HTMLElement>(".systemsculpt-agent-tool-header")!;
+    expect(pendingHeader.hasAttribute("tabindex")).toBe(false);
+    expect(pendingPart.querySelector("summary")).toBeNull();
     snapshot = applyManagedAgentEvent(snapshot, envelope(6, { type: "approval.resolved", approvalId: "approval-1", approved: true }));
     await workspace.setAgentSnapshot(snapshot);
-    expect(parent.querySelector<HTMLDetailsElement>(".systemsculpt-agent-tool-details")?.open).toBe(true);
-    expect((document.activeElement as HTMLElement | null)?.dataset.focusKey).toBe("tool-summary");
+    expect(parent.querySelector(".systemsculpt-agent-part.is-tool")).toBe(pendingPart);
+    expect(pendingPart.querySelector("summary")).toBeNull();
 
     snapshot = applyManagedAgentEvent(snapshot, envelope(7, { type: "tool.started", callId: "call-1" }));
     snapshot = applyManagedAgentEvent(snapshot, envelope(8, {
@@ -766,7 +1180,7 @@ describe("AgentWorkspace", () => {
     workspace.unload();
   });
 
-  it("keeps continuation progress after the streamed content instead of above it", async () => {
+  it("hides redundant continuation progress once streamed content is visible", async () => {
     const parent = document.body.createDiv();
     const workspace = new AgentWorkspace(parent, {
       app: new App(),
@@ -804,11 +1218,145 @@ describe("AgentWorkspace", () => {
     }));
     await workspace.setAgentSnapshot(snapshot);
 
-    const parts = Array.from(parent.querySelectorAll<HTMLElement>(
-      ".systemsculpt-agent-active-run > .systemsculpt-agent-part",
-    ));
-    expect(parts.map((part) => part.classList.contains("is-status"))).toEqual([false, true]);
-    expect(parts.at(-1)?.textContent).toContain("Continuing");
+    const turn = parent.querySelector(".systemsculpt-agent-active-run .systemsculpt-agent-turn.is-active");
+    expect(turn).not.toBeNull();
+    expect(turn?.querySelector(".systemsculpt-agent-part.is-text")?.textContent)
+      .toContain("Working through the result");
+    expect(turn?.querySelector(".systemsculpt-agent-part.is-status")).toBeNull();
+    expect(turn?.textContent).not.toContain("Continuing");
+    workspace.unload();
+  });
+
+  it("keeps the assistant shell and prior text node stable when a tool arrives", async () => {
+    const parent = document.body.createDiv();
+    const workspace = new AgentWorkspace(parent, {
+      app: new App(),
+      sourcePath: () => "SystemSculpt/Chats/chat.md",
+      onSubmit: jest.fn(),
+      onStop: jest.fn(),
+      onAttach: jest.fn(),
+      onRemoveAttachment: jest.fn(),
+      onApprove: jest.fn(),
+      onOpenArtifact: jest.fn(),
+      onCopyArtifactPath: jest.fn(),
+      onNewChat: jest.fn(),
+      onOpenHistory: jest.fn(),
+      onOpenSettings: jest.fn(),
+    });
+    workspace.load();
+
+    let snapshot = createInitialAgentConversation();
+    snapshot = applyManagedAgentEvent(snapshot, envelope(1, { type: "run.started" }));
+    snapshot = applyManagedAgentEvent(snapshot, envelope(2, {
+      type: "message.started",
+      messageId: "assistant-stable",
+      role: "assistant",
+    }));
+    snapshot = applyManagedAgentEvent(snapshot, envelope(3, {
+      type: "text.delta",
+      messageId: "assistant-stable",
+      partId: "text-stable",
+      delta: "I will check that.",
+    }));
+    await workspace.setAgentSnapshot(snapshot);
+    const turn = parent.querySelector(".systemsculpt-agent-turn.is-active");
+    const text = turn?.querySelector(".systemsculpt-agent-part.is-text");
+
+    snapshot = applyManagedAgentEvent(snapshot, envelope(4, {
+      type: "text.completed",
+      messageId: "assistant-stable",
+      partId: "text-stable",
+    }));
+    snapshot = applyManagedAgentEvent(snapshot, envelope(5, {
+      type: "tool.input.started",
+      callId: "call-stable",
+      partId: "tool-stable",
+      messageId: "assistant-stable",
+      name: "read",
+      location: "vault",
+    }));
+    await workspace.setAgentSnapshot(snapshot);
+
+    expect(parent.querySelector(".systemsculpt-agent-turn.is-active")).toBe(turn);
+    expect(parent.querySelector(".systemsculpt-agent-part.is-text")).toBe(text);
+    expect(turn?.querySelector(".systemsculpt-agent-activity .systemsculpt-agent-part.is-tool"))
+      .not.toBeNull();
+    workspace.unload();
+  });
+
+  it("waits for terminal settlement before grouping a completed live tool sequence", async () => {
+    const parent = document.body.createDiv();
+    const workspace = new AgentWorkspace(parent, {
+      app: new App(),
+      sourcePath: () => "SystemSculpt/Chats/chat.md",
+      onSubmit: jest.fn(),
+      onStop: jest.fn(),
+      onAttach: jest.fn(),
+      onRemoveAttachment: jest.fn(),
+      onApprove: jest.fn(),
+      onOpenArtifact: jest.fn(),
+      onCopyArtifactPath: jest.fn(),
+      onNewChat: jest.fn(),
+      onOpenHistory: jest.fn(),
+      onOpenSettings: jest.fn(),
+    });
+    workspace.load();
+
+    let snapshot = createInitialAgentConversation();
+    snapshot = applyManagedAgentEvent(snapshot, envelope(1, { type: "run.started" }));
+    snapshot = applyManagedAgentEvent(snapshot, envelope(2, {
+      type: "message.started",
+      messageId: "assistant-group-live",
+      role: "assistant",
+    }));
+    snapshot = applyManagedAgentEvent(snapshot, envelope(3, {
+      type: "tool.requested",
+      call: {
+        callId: "read-live-1",
+        partId: "read-live-part-1",
+        messageId: "assistant-group-live",
+        name: "read",
+        location: "vault",
+        input: { paths: ["One.md"] },
+      },
+    }));
+    snapshot = applyManagedAgentEvent(snapshot, envelope(4, { type: "tool.started", callId: "read-live-1" }));
+    snapshot = applyManagedAgentEvent(snapshot, envelope(5, {
+      type: "tool.succeeded",
+      callId: "read-live-1",
+      result: { data: { files: [{ path: "One.md", content: "one" }] } },
+    }));
+    snapshot = applyManagedAgentEvent(snapshot, envelope(6, {
+      type: "tool.requested",
+      call: {
+        callId: "read-live-2",
+        partId: "read-live-part-2",
+        messageId: "assistant-group-live",
+        name: "read",
+        location: "vault",
+        input: { paths: ["Two.md"] },
+      },
+    }));
+    snapshot = applyManagedAgentEvent(snapshot, envelope(7, { type: "tool.started", callId: "read-live-2" }));
+    snapshot = applyManagedAgentEvent(snapshot, envelope(8, {
+      type: "tool.succeeded",
+      callId: "read-live-2",
+      result: { data: { files: [{ path: "Two.md", content: "two" }] } },
+    }));
+    await workspace.setAgentSnapshot(snapshot);
+
+    expect(parent.querySelectorAll(
+      ".systemsculpt-agent-active-run .systemsculpt-agent-part.is-tool",
+    )).toHaveLength(2);
+
+    snapshot = applyManagedAgentEvent(snapshot, envelope(9, { type: "run.completed" }));
+    await workspace.setAgentSnapshot(snapshot);
+    const grouped = parent.querySelectorAll(
+      ".systemsculpt-agent-active-run .systemsculpt-agent-part.is-tool",
+    );
+    expect(grouped).toHaveLength(1);
+    expect(grouped[0].querySelector("strong")?.textContent).toBe("Read 2 files");
+    expect(grouped[0].querySelector(".systemsculpt-agent-tool-state")?.textContent).toBe("Done");
     workspace.unload();
   });
 
@@ -865,7 +1413,38 @@ describe("AgentWorkspace", () => {
     workspace.unload();
   });
 
-  it("shows the proposed change before approval and exposes bounded result details", async () => {
+  it("stops the composer at the terminal protocol boundary even while settlement is pending", async () => {
+    const parent = document.body.createDiv();
+    const workspace = new AgentWorkspace(parent, {
+      app: new App(),
+      sourcePath: () => "SystemSculpt/Chats/chat.md",
+      onSubmit: jest.fn(),
+      onStop: jest.fn(),
+      onAttach: jest.fn(),
+      onRemoveAttachment: jest.fn(),
+      onApprove: jest.fn(),
+      onOpenArtifact: jest.fn(),
+      onCopyArtifactPath: jest.fn(),
+      onNewChat: jest.fn(),
+      onOpenHistory: jest.fn(),
+      onOpenSettings: jest.fn(),
+    });
+    workspace.load();
+    workspace.setRunPending(true);
+
+    let snapshot = createInitialAgentConversation();
+    snapshot = applyManagedAgentEvent(snapshot, envelope(1, { type: "run.started" }));
+    snapshot = applyManagedAgentEvent(snapshot, envelope(2, { type: "run.completed" }));
+    await workspace.setAgentSnapshot(snapshot);
+
+    expect(parent.querySelector(".systemsculpt-agent-composer")?.classList.contains("is-running"))
+      .toBe(false);
+    expect(parent.querySelector(".systemsculpt-agent-prompt-hint")?.textContent).toBe("Enter to send");
+    expect(parent.querySelector('[aria-label="Send message"]')).not.toBeNull();
+    workspace.unload();
+  });
+
+  it("shows the proposed change before approval without exposing raw result data", async () => {
     const parent = document.body.createDiv();
     const workspace = new AgentWorkspace(parent, {
       app: new App(),
@@ -917,15 +1496,16 @@ describe("AgentWorkspace", () => {
     }));
     await workspace.setAgentSnapshot(snapshot);
 
-    const details = parent.querySelector(".systemsculpt-agent-tool-details")!;
-    expect(details.tagName).toBe("DETAILS");
-    expect((details as HTMLDetailsElement).open).toBe(false);
-    expect(details.querySelector(":scope > .systemsculpt-agent-tool-header")?.textContent)
+    const tool = parent.querySelector(".systemsculpt-agent-tool")!;
+    expect(tool.tagName).toBe("DIV");
+    expect(tool.querySelector(":scope > .systemsculpt-agent-tool-header")?.textContent)
       .toContain("Created Plan.md");
-    expect(details.querySelector(":scope > .systemsculpt-agent-tool-header")?.textContent)
+    expect(tool.querySelector(":scope > .systemsculpt-agent-tool-header")?.textContent)
       .toContain("Done");
-    expect(details.textContent).toContain("Result");
-    expect(details.textContent).toContain('"bytes": 13');
+    expect(tool.querySelector("summary")).toBeNull();
+    expect(tool.querySelector("pre")).toBeNull();
+    expect(tool.textContent).not.toContain("Result");
+    expect(tool.textContent).not.toContain('"bytes": 13');
     workspace.unload();
   });
 
@@ -958,8 +1538,46 @@ describe("AgentWorkspace", () => {
     ]);
 
     expect(render).toHaveBeenCalledTimes(1);
-    expect(render).toHaveBeenCalledWith(working);
+    expect(render).toHaveBeenCalledWith(
+      working,
+      expect.objectContaining({ busy: true, composerRunning: true }),
+    );
     expect(parent.textContent).toContain("Working");
+    workspace.unload();
+  });
+
+  it("retries turn anchoring when the lifecycle snapshot arrives before its durable user row", async () => {
+    const parent = document.body.createDiv();
+    const workspace = new AgentWorkspace(parent, {
+      app: new App(),
+      sourcePath: () => "SystemSculpt/Chats/chat.md",
+      onSubmit: jest.fn(),
+      onStop: jest.fn(),
+      onAttach: jest.fn(),
+      onRemoveAttachment: jest.fn(),
+      onApprove: jest.fn(),
+      onOpenArtifact: jest.fn(),
+      onCopyArtifactPath: jest.fn(),
+      onNewChat: jest.fn(),
+      onOpenHistory: jest.fn(),
+      onOpenSettings: jest.fn(),
+    });
+    workspace.load();
+    const notifyTurnStarted = jest.spyOn((workspace as any).scroller, "notifyTurnStarted");
+    const started = applyManagedAgentEvent(
+      createInitialAgentConversation(),
+      envelope(1, { type: "run.started" }),
+    );
+
+    await workspace.setAgentSnapshot(started);
+    expect(notifyTurnStarted).not.toHaveBeenCalled();
+
+    await workspace.setHistory([{
+      role: "user",
+      message_id: "user-1",
+      content: "Start",
+    }]);
+    expect(notifyTurnStarted).toHaveBeenCalledWith("message:user-1");
     workspace.unload();
   });
 
@@ -1149,13 +1767,14 @@ describe("AgentWorkspace", () => {
     expect(parent.textContent).toContain("Project.md");
     expect(parent.textContent).toContain("Write file");
     expect(parent.textContent).not.toContain("Mcp Filesystem");
-    expect(parent.querySelector(".systemsculpt-agent-tool-details")?.textContent).toContain("Result");
+    expect(parent.querySelector(".systemsculpt-agent-tool")?.textContent).not.toContain("Result");
+    expect(parent.querySelector(".systemsculpt-agent-tool")?.querySelector("pre")).toBeNull();
     parent.querySelector<HTMLButtonElement>('.systemsculpt-agent-artifact [aria-label="Open"]')!.click();
     expect(onOpenArtifact).toHaveBeenCalledWith(expect.objectContaining({ path: "Projects/Project.md" }));
     workspace.unload();
   });
 
-  it("restores truthful partial-result details and only successful artifacts", async () => {
+  it("restores a concise partial-result error and only successful artifacts", async () => {
     const parent = document.body.createDiv();
     const onOpenArtifact = jest.fn();
     const workspace = new AgentWorkspace(parent, {
@@ -1208,7 +1827,10 @@ describe("AgentWorkspace", () => {
       ],
     }]);
 
-    expect(parent.querySelector(".systemsculpt-agent-tool-details")?.textContent).toContain("Result");
+    expect(parent.querySelector(".systemsculpt-agent-tool")?.textContent)
+      .toContain("One file changed; one conflicted.");
+    expect(parent.querySelector(".systemsculpt-agent-tool")?.textContent).not.toContain("results");
+    expect(parent.querySelector(".systemsculpt-agent-tool")?.querySelector("pre")).toBeNull();
     const artifacts = [...parent.querySelectorAll<HTMLElement>(".systemsculpt-agent-artifact")];
     expect(artifacts).toHaveLength(1);
     expect(artifacts[0].textContent).toContain("Changed.md");

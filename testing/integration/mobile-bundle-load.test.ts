@@ -15,6 +15,7 @@ const ARTIFACT_ROOT = process.env.SYSTEMSCULPT_PLUGIN_ARTIFACT_ROOT?.trim()
   : DEFAULT_ARTIFACT_ROOT;
 const BUNDLE_PATH = path.join(ARTIFACT_ROOT, "main.js");
 const MANIFEST_PATH = path.join(ARTIFACT_ROOT, "manifest.json");
+const STYLES_PATH = path.join(ARTIFACT_ROOT, "styles.css");
 const DESKTOP_NODE_MODULES = [
   "node:fs/promises",
   "node:path",
@@ -54,9 +55,12 @@ async function openView(options: {
 
 describe("built bundle in Obsidian Mobile", () => {
   beforeAll(() => {
-    if (!existsSync(BUNDLE_PATH)) {
+    const missingArtifacts = [BUNDLE_PATH, MANIFEST_PATH, STYLES_PATH]
+      .filter((artifactPath) => !existsSync(artifactPath));
+    if (missingArtifacts.length > 0) {
       throw new Error(
-        `Built bundle not found at ${BUNDLE_PATH} — run \`npm run build\` first `
+        `Built plugin artifacts not found: ${missingArtifacts.join(", ")}. `
+          + "Run `npm run build` first "
           + "(or use `npm run test:integration`, which builds before testing).",
       );
     }
@@ -66,6 +70,18 @@ describe("built bundle in Obsidian Mobile", () => {
     for (const specifier of DESKTOP_NODE_MODULES) {
       jest.dontMock(specifier);
     }
+  });
+
+  it("ships the adaptive layout, touch target, and safe-area contracts in the exact CSS artifact", () => {
+    const styles = readFileSync(STYLES_PATH, "utf8");
+    expect(styles).toMatch(/--ss-touch-target:\s*44px/);
+    expect(styles).toMatch(/--ss-safe-bottom:[^;]*safe-area-inset-bottom/s);
+    expect(styles).toContain("@media (pointer: coarse)");
+    expect(styles).toContain("@container ss-surface (max-width: 500px)");
+    expect(styles).toMatch(/\.ss-mobile-layout \.systemsculpt-agent-workspace\s*\{/);
+    expect(styles).toMatch(/\.ss-mobile-layout \.ss-settings-surface\s*\{/);
+    expect(styles).toMatch(/\.ss-mobile-layout \.ss-embeddings-view__results-list\s*\{/);
+    expect(styles).not.toMatch(/\.is-mobile|\.mobile-navbar-action/);
   });
 
   it("onloads cleanly and opens Studio, Similar Notes, and Chat from the production mobile bundle", async () => {
@@ -86,10 +102,14 @@ describe("built bundle in Obsidian Mobile", () => {
       // eslint-disable-next-line @typescript-eslint/no-var-requires
       host = require("obsidian");
       Object.assign(host.Platform, {
+        isAndroidApp: true,
         isDesktop: false,
         isDesktopApp: false,
+        isIosApp: false,
         isMobile: true,
         isMobileApp: true,
+        isPhone: true,
+        isTablet: false,
       });
 
       // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -177,6 +197,26 @@ describe("built bundle in Obsidian Mobile", () => {
     });
     expect(chatView.getViewType()).toBe(CHAT_VIEW_TYPE);
     expect(chatView.contentEl.querySelector(".systemsculpt-agent-workspace")).not.toBeNull();
+    expect(
+      chatView.contentEl.querySelector('.ss-surface[data-ss-surface="view"]'),
+    ).not.toBeNull();
+    expect(
+      chatView.contentEl.querySelector('textarea[aria-label="Message SystemSculpt"]'),
+    ).not.toBeNull();
+    expect(
+      chatView.contentEl.querySelector('button[aria-label="Send message"]'),
+    ).not.toBeNull();
+    expect(
+      chatView.contentEl.querySelector('button[aria-label="Attach files"]'),
+    ).not.toBeNull();
+    expect(
+      chatView.contentEl.querySelector(
+        'button[aria-label^="Add vault context"]',
+      ),
+    ).not.toBeNull();
+    expect(
+      chatView.contentEl.querySelector(".systemsculpt-agent-viewport")?.getAttribute("tabindex"),
+    ).toBe("0");
 
     plugin.unload();
   });

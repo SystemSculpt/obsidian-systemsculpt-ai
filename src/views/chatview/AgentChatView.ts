@@ -5,7 +5,7 @@ import { SystemSculptService, type CreditsBalanceSnapshot } from "../../services
 import type { RecorderService } from "../../services/RecorderService";
 import type { ChatMessage } from "../../types";
 import type { ChatExportOptions } from "../../types/chatExport";
-import type { ToolApprovalPolicy } from "../../utils/toolPolicy";
+import { isMutatingTool, type ToolApprovalPolicy } from "../../utils/toolPolicy";
 import { tryCopyToClipboard } from "../../utils/clipboard";
 import { getRuntimeCrypto } from "../../utils/runtimeWindow";
 import { resolveAbsoluteVaultPath } from "../../utils/vaultPathUtils";
@@ -51,6 +51,7 @@ import {
   type ManagedChatInputLimits,
 } from "../../services/managed/ManagedChatInputLimits";
 import { isVaultImageContextFileExtension } from "../../constants/fileTypes";
+import { showConfirm } from "../../core/ui/notifications";
 
 export type AutomationApprovalMode = "interactive" | "auto-approve" | "deny";
 export type { ChatApprovalMode } from "./storage/ChatPersistenceTypes";
@@ -62,6 +63,13 @@ type ChatLeafState = Readonly<{
   chatFontSize?: "small" | "medium" | "large";
   approvalMode?: ChatApprovalMode;
   draftKey?: string;
+}>;
+
+type PendingHistoricalResubmit = Extract<AgentUserCommitInput, { kind: "resend" }> & Readonly<{
+  attachments: readonly ChatMessageAttachment[];
+  laterMessageCount: number;
+  unavailableAttachmentCount: number;
+  requiresReplayConfirmation: boolean;
 }>;
 
 function messageId(prefix: string): string {
@@ -85,6 +93,34 @@ function plainContent(message: ChatMessage): string {
     .map((part) => part.type === "text" ? part.text : "")
     .filter(Boolean)
     .join("\n");
+}
+
+function historicalResubmitConsequences(
+  messages: readonly Readonly<ChatMessage>[],
+  targetIndex: number,
+): Readonly<{ laterMessageCount: number; requiresReplayConfirmation: boolean }> {
+  const laterMessages = messages.slice(targetIndex + 1)
+    .filter((message) => message.role === "user" || message.role === "assistant");
+  const tools = new Map<string, NonNullable<ChatMessage["tool_calls"]>[number]>();
+  for (const message of laterMessages) {
+    for (const tool of message.tool_calls ?? []) tools.set(tool.id, tool);
+    for (const part of message.messageParts ?? []) {
+      if (part.type === "tool_call") tools.set(part.data.id, part.data);
+    }
+  }
+  const explicitlyDidNotStart = new Set([
+    "USER_DENIED",
+    "TOOL_CANCELLED_BEFORE_START",
+  ]);
+  const requiresReplayConfirmation = [...tools.values()].some((tool) => {
+    if (!isMutatingTool(tool.request.function.name)) return false;
+    const code = tool.result?.error?.code;
+    return !code || !explicitlyDidNotStart.has(String(code));
+  });
+  return {
+    laterMessageCount: laterMessages.length,
+    requiresReplayConfirmation,
+  };
 }
 
 function formatCredits(value: number): string {
@@ -130,7 +166,8 @@ export class AgentChatView extends ItemView {
   private conversationOriginToken = messageId("conversation-origin");
   private queueHydrated = false;
   private queuePersistence: Promise<void> = Promise.resolve();
-  private pendingRetry: Extract<AgentUserCommitInput, { kind: "resend" }> | null = null;
+  private pendingRetry: PendingHistoricalResubmit | null = null;
+  private messageEditGeneration = 0;
   private automationApprovalMode: AutomationApprovalMode = "interactive";
   private readonly sessionTrustedToolNames = new Set<string>();
   private suppressQueueDrain = false;
@@ -198,6 +235,14 @@ export class AgentChatView extends ItemView {
           }
           const snapshot = await this.transcript.commitUser(input);
           this.applyTranscriptIdentity(snapshot);
+          if (
+            input.kind === "resend"
+            && this.pendingRetry?.targetMessageId === input.targetMessageId
+          ) {
+            this.messageEditGeneration += 1;
+            this.pendingRetry = null;
+            this.workspace?.resetMessageEditor();
+          }
           await this.bindQueueToChat(snapshot.chatId)
             .catch((error) => this.reportQueuePersistenceError(error));
           await this.workspace?.setHistory(snapshot.messages as readonly ChatMessage[]);
@@ -274,7 +319,9 @@ export class AgentChatView extends ItemView {
       onOpenArtifact: (artifact) => this.openArtifact(artifact),
       onCopyArtifactPath: (artifact) => this.copyArtifactPath(artifact),
       onRetryMessage: (id) => this.prepareRetry(id),
-      onCopyText: async (text) => { await tryCopyToClipboard(text); },
+      onResubmitMessage: (id, text) => this.resubmitMessage(id, text),
+      onCancelMessageEdit: (id) => this.cancelMessageEdit(id),
+      onCopyText: (text) => tryCopyToClipboard(text, this.containerEl),
       onNewChat: () => this.startNewChat(),
       onOpenHistory: () => this.openHistory(),
       onOpenSettings: () => this.openChatSettings(),
@@ -340,6 +387,9 @@ export class AgentChatView extends ItemView {
 
   public async loadChatById(chatId: string): Promise<void> {
     this.conversationOriginToken = messageId("conversation-origin");
+    this.messageEditGeneration += 1;
+    this.pendingRetry = null;
+    this.workspace?.resetMessageEditor();
     if (this.queueHydrated) await this.persistQueueState();
     await this.controller.cancel();
     this.sessionTrustedToolNames.clear();
@@ -639,7 +689,12 @@ export class AgentChatView extends ItemView {
 
   private async executeSubmission(
     submission: AgentComposerSubmit,
-    options: Readonly<{ includeContextFiles?: boolean }> = {},
+    options: Readonly<{
+      includeContextFiles?: boolean;
+      restoreRejectedSubmission?: boolean;
+      forceDestructiveApproval?: boolean;
+      historicalResubmit?: PendingHistoricalResubmit;
+    }> = {},
   ): Promise<void> {
     // Composer submissions are externalized at admission; queued attachments
     // are restored from durable refs. Do not rewrite the same CAS payload here.
@@ -672,30 +727,43 @@ export class AgentChatView extends ItemView {
       message_id: messageId("user"),
       ...(attachmentMetadata ? { attachmentMetadata } : {}),
     };
-    const commit: AgentUserCommitInput = this.pendingRetry
-      ? { ...this.pendingRetry, message: userMessage }
+    const historicalResubmit = options.historicalResubmit;
+    const commit: AgentUserCommitInput = historicalResubmit
+      ? {
+          kind: "resend",
+          message: userMessage,
+          targetMessageId: historicalResubmit.targetMessageId,
+          expectedIndex: historicalResubmit.expectedIndex,
+          expectedVersion: historicalResubmit.expectedVersion,
+        }
       : { kind: "append", message: userMessage };
-    const policy: ToolApprovalPolicy = this.automationApprovalMode === "auto-approve"
-      || this.approvalMode === "full-access"
+    const forceDestructiveApproval = options.forceDestructiveApproval === true;
+    const policy: ToolApprovalPolicy = !forceDestructiveApproval
+      && (this.automationApprovalMode === "auto-approve" || this.approvalMode === "full-access")
       ? { requireDestructiveApproval: false }
       : {
           // The active run reads this same set between continuations so an
           // "Allow for chat" choice takes effect before the next tool call.
-          trustedToolNames: this.sessionTrustedToolNames,
+          trustedToolNames: forceDestructiveApproval
+            ? new Set<string>()
+            : this.sessionTrustedToolNames,
         };
     const run = this.controller.start({ commit, turnBoundaryId: userMessage.message_id, approvalPolicy: policy });
     this.activeRunPromise = run;
     let result: ManagedAgentRunResult;
     try {
       result = await run;
-      if ("operation" in result && result.operation) this.pendingRetry = null;
       const userWasCommitted = this.transcript.snapshot().messages
         .some((message) => message.message_id === userMessage.message_id);
       const rejectedBeforeCommit = result.kind === "admission_denied"
         || result.kind === "busy"
         || (result.kind === "cancelled" && !result.operation)
         || (result.kind === "failed" && !result.operation);
-      if (rejectedBeforeCommit && !userWasCommitted) {
+      if (
+        rejectedBeforeCommit
+        && !userWasCommitted
+        && options.restoreRejectedSubmission !== false
+      ) {
         this.workspace?.restoreRejectedSubmission(prepared);
       }
       this.handleRunResult(result);
@@ -804,28 +872,108 @@ export class AgentChatView extends ItemView {
       new Notice("Wait for the current response to finish before retrying from here.", 5000);
       return;
     }
-    if (this.workspace?.hasDraft()) {
-      new Notice("Send or clear the current draft before retrying from here.", 5000);
-      this.workspace.focus();
+    const generation = ++this.messageEditGeneration;
+    const hydratedMessage = await this.attachmentStore.hydrateMessage(message as ChatMessage);
+    if (generation !== this.messageEditGeneration) return;
+    const current = this.transcript.snapshot();
+    if (
+      current.version !== snapshot.version
+      || current.messages[index]?.message_id !== messageIdToRetry
+    ) {
+      new Notice("This chat changed before the message could be edited.", 5000);
       return;
     }
-    const hydratedMessage = await this.attachmentStore.hydrateMessage(message as ChatMessage);
     const draft = restoreChatMessageDraft(hydratedMessage);
     const expectedAttachments = message.attachmentMetadata?.length ?? 0;
-    if (draft.attachments.length < expectedAttachments) {
-      const warning = "One or more attachments are unavailable. They were left out of this retry.";
-      this.workspace?.setBanner(warning, "error");
-      new Notice(warning, 8000);
-    }
+    const unavailableAttachmentCount = Math.max(0, expectedAttachments - draft.attachments.length);
+    const consequences = historicalResubmitConsequences(snapshot.messages, index);
     this.pendingRetry = {
       kind: "resend",
       message: { ...message } as ChatMessage,
       targetMessageId: messageIdToRetry,
       expectedIndex: index,
       expectedVersion: snapshot.version,
+      attachments: draft.attachments,
+      unavailableAttachmentCount,
+      ...consequences,
     };
-    this.workspace?.setInputText(draft.text, { focus: true });
-    if (draft.attachments.length) this.workspace?.restoreMessageAttachments(draft.attachments);
+    await this.workspace?.showMessageEditor({
+      messageId: messageIdToRetry,
+      text: draft.text,
+      hasAttachments: draft.attachments.length > 0,
+      unavailableAttachmentCount,
+      ...consequences,
+    });
+  }
+
+  private async cancelMessageEdit(messageIdToCancel: string): Promise<void> {
+    if (this.pendingRetry?.targetMessageId !== messageIdToCancel) return;
+    this.messageEditGeneration += 1;
+    this.pendingRetry = null;
+    await this.workspace?.hideMessageEditor(messageIdToCancel);
+  }
+
+  private async resubmitMessage(messageIdToResubmit: string, text: string): Promise<boolean> {
+    const pending = this.pendingRetry;
+    if (!pending || pending.targetMessageId !== messageIdToResubmit) return false;
+    if (this.activeRunPromise) {
+      new Notice("Wait for the current response to finish before resubmitting this message.", 5000);
+      return false;
+    }
+    if (!text.trim() && pending.attachments.length === 0) return false;
+
+    const snapshot = this.transcript.snapshot();
+    if (
+      snapshot.version !== pending.expectedVersion
+      || snapshot.messages[pending.expectedIndex]?.message_id !== pending.targetMessageId
+    ) {
+      this.messageEditGeneration += 1;
+      this.pendingRetry = null;
+      await this.workspace?.hideMessageEditor(messageIdToResubmit, false);
+      new Notice("This chat changed before the edited message could be resubmitted.", 6000);
+      return false;
+    }
+
+    if (pending.requiresReplayConfirmation) {
+      const { confirmed } = await showConfirm(
+        this.app,
+        [
+          `Resubmitting will replace ${pending.laterMessageCount} later ${
+            pending.laterMessageCount === 1 ? "message" : "messages"
+          } in this chat.`,
+          "Vault changes already made after this message will not be undone.",
+          "Any new vault changes will require approval.",
+        ].join(" "),
+        {
+          title: "Resubmit this message?",
+          primaryButton: "Resubmit",
+          secondaryButton: "Cancel",
+          icon: "triangle-alert",
+        },
+      );
+      if (!confirmed) return false;
+    }
+
+    let prepared: AgentComposerSubmit;
+    try {
+      prepared = await this.prepareSubmission({
+        text: text.trim(),
+        webSearch: false,
+        mode: "send",
+        ...(pending.attachments.length > 0 ? { attachments: pending.attachments } : {}),
+      });
+      await this.executeSubmission(prepared, {
+        restoreRejectedSubmission: false,
+        forceDestructiveApproval: pending.requiresReplayConfirmation,
+        historicalResubmit: pending,
+      });
+    } catch (error) {
+      await this.handleError(error);
+      return false;
+    }
+
+    return !this.transcript.snapshot().messages
+      .some((message) => message.message_id === messageIdToResubmit);
   }
 
   private respondToToolApproval(approvalId: string, approved: boolean, rememberForChat = false): void {
@@ -859,7 +1007,9 @@ export class AgentChatView extends ItemView {
     const preservedKey = restoredDraftKey?.trim();
     this.draftKey = preservedKey || messageId("draft");
     this.queuedFollowUps = preservedKey ? [] : carryUndurableQueue;
+    this.messageEditGeneration += 1;
     this.pendingRetry = null;
+    this.workspace?.resetMessageEditor();
     this.sessionTrustedToolNames.clear();
     this.approvalMode = "ask";
     this.workspace?.setApprovalMode(this.approvalMode);

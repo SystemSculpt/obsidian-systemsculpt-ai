@@ -45,10 +45,14 @@
     "check:plugin": "node scripts/check-plugin.mjs",
     "check:plugin:fast": "node scripts/check-plugin.mjs --fast",
     "check:types": "tsc --noEmit --skipLibCheck --incremental --tsBuildInfoFile .cache/tsc.check.tsbuildinfo",
-    "check:mobile": "node --test scripts/mobile-compatibility.test.mjs && npm run build && npm run test:mobile:bundle",
-    "check:full": "npm run check:plugin && npm test && npm run test:embeddings && npm run test:integration && npm run test:release-script",
+    "check:mobile": "node --test scripts/mobile-compatibility.test.mjs && npm run test:mobile:interactions && npm run build && npm run test:mobile:bundle",
+    "check:ci": "npm run check:plugin && npm test && npm run test:embeddings && npm run test:integration:ci && npm run test:release-script",
+    "check:full": "npm run check:ci",
     "check:all": "npm run check:full",
     "dev": "node esbuild.config.mjs",
+    "dev:watch:install": "node scripts/dev-watcher-service.mjs install",
+    "dev:watch:status": "node scripts/dev-watcher-service.mjs status",
+    "dev:watch:uninstall": "node scripts/dev-watcher-service.mjs uninstall",
     "sync:local": "node scripts/sync-local-vaults.mjs",
     "test": "node scripts/jest.mjs --config jest.config.cjs --passWithNoTests",
     "test:strict": "node scripts/jest.mjs --strict-console --config jest.config.cjs --passWithNoTests",
@@ -62,10 +66,11 @@
     "test:integration": "npm run build && npm run test:integration:ci",
     "test:integration:ci": "node scripts/jest.mjs --config jest.integration.config.cjs --runInBand",
     "test:mobile:bundle": "node scripts/jest.mjs --config jest.integration.config.cjs --runInBand --runTestsByPath testing/integration/mobile-bundle-load.test.ts",
+    "test:mobile:interactions": "node scripts/jest.mjs --config jest.config.cjs --runInBand --runTestsByPath src/platform/__tests__/hostCapabilities.test.ts src/platform/__tests__/mobileLayout.test.ts src/platform/__tests__/mobileHostLayout.test.ts src/core/ui/surface/__tests__/PluginSurface.test.ts src/views/chatview/__tests__/agent-workspace-ui.test.ts src/views/chatview/__tests__/agent-workspace-css-contract.test.ts src/views/chatview/__tests__/anchored-scroller.test.ts src/views/__tests__/similar-notes-css-contract.test.ts src/views/studio/__tests__/studio-node-insert-menu.test.ts src/views/studio/__tests__/studio-run-host-preflight.test.ts src/views/studio/__tests__/studio-context-menu-accessibility.test.ts src/views/studio/graph-v3/__tests__/studio-surface-css-contract.test.ts src/views/studio/graph-v3/__tests__/studio-graph-workspace-renderer-controls.test.ts src/__tests__/systemsculpt-settings-tab.test.ts",
     "test:embeddings:serial": "node scripts/jest.mjs --config jest.embeddings.config.cjs --runInBand --passWithNoTests",
     "test:release-script": "node --test scripts/plugin-build-options.test.mjs scripts/plugin-artifacts.test.mjs scripts/release-plugin.test.mjs",
     "release:plugin": "node scripts/release-plugin.mjs"
   },
   "type": "module",
-  "version": "6.2.2"
+  "version": "6.2.3"
 }

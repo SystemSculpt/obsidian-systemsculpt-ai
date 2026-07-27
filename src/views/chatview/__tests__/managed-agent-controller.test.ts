@@ -231,9 +231,13 @@ describe("ManagedAgentController", () => {
     const harness = createHarness([textEvents("Hello from the agent")]);
     const envelopes: string[] = [];
     const statusLabels: string[] = [];
+    const eventOrder: string[] = [];
     harness.controller.subscribe((_snapshot, envelope) => {
       envelopes.push(envelope.event.type);
       if (envelope.event.type === "run.status") statusLabels.push(envelope.event.label);
+      eventOrder.push(envelope.event.type === "run.status"
+        ? `run.status:${envelope.event.phase}`
+        : envelope.event.type);
     });
 
     const result = await harness.controller.start({ commit: { kind: "append", message: user() } });
@@ -253,6 +257,9 @@ describe("ManagedAgentController", () => {
       "run.completed",
     ]));
     expect(statusLabels).not.toContain("Done");
+    expect(statusLabels).toContain("Finishing");
+    expect(eventOrder.indexOf("text.completed"))
+      .toBeLessThan(eventOrder.indexOf("run.status:settling"));
     expect(harness.persisted).toHaveLength(1);
     expect(harness.persisted[0].message).toMatchObject({
       role: "assistant",

@@ -14,10 +14,13 @@ test("package scripts preserve fast edit and exhaustive verification tiers", () 
   );
   assert.equal(packageJson.scripts["check:all"], "npm run check:full");
   assert.equal(
-    packageJson.scripts["check:full"],
+    packageJson.scripts["check:ci"],
     "npm run check:plugin && npm test "
-      + "&& npm run test:embeddings && npm run test:integration && npm run test:release-script",
+      + "&& npm run test:embeddings && npm run test:integration:ci && npm run test:release-script",
   );
+  assert.equal(packageJson.scripts["check:full"], "npm run check:ci");
+  assert.match(packageJson.scripts["check:mobile"], /npm run test:mobile:interactions/);
+  assert.match(packageJson.scripts["check:mobile"], /npm run test:mobile:bundle/);
 });
 
 test("fast plugin checks stay on the measured Obsidian-native tier", () => {

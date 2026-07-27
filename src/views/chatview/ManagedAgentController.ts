@@ -941,6 +941,8 @@ export class ManagedAgentController {
             );
           }
           finishReason = event.reason;
+          this.completeNarrativePart(active, messageId, orderedStream.completeActiveNarrative());
+          this.emit(active, { type: "run.status", phase: "settling", label: "Finishing" });
           break;
         case "request_id":
           requestId = event.requestId;

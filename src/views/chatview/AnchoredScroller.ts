@@ -9,6 +9,8 @@ export type AnchoredScrollerRowOptions = Readonly<{
 export type AnchoredScrollerPrependAnchor = Readonly<{
   rowId: string;
   offsetFromViewportTop: number;
+  mode: AnchoredScrollMode;
+  turnAnchorRowId: string | null;
 }>;
 
 export type AnchoredScrollerOptions = Readonly<{
@@ -54,6 +56,7 @@ export class AnchoredScroller {
   private mode: AnchoredScrollMode = "end";
   private turnAnchorRowId: string | null = null;
   private programmaticTarget: number | null = null;
+  private manualIntentPending = false;
   private destroyed = false;
 
   constructor(options: AnchoredScrollerOptions) {
@@ -83,6 +86,9 @@ export class AnchoredScroller {
     this.content.setAttribute("aria-relevant", this.content.getAttribute("aria-relevant") || "additions");
 
     this.viewport.addEventListener("scroll", this.handleScroll, { passive: true });
+    this.viewport.addEventListener("wheel", this.handleManualScrollIntent, { passive: true });
+    this.viewport.addEventListener("touchstart", this.handleManualScrollIntent, { passive: true });
+    this.viewport.addEventListener("keydown", this.handleKeyScrollIntent);
     this.scrollButton?.addEventListener("click", this.handleScrollButtonClick);
     this.updateScrollButton();
   }
@@ -159,6 +165,8 @@ export class AnchoredScroller {
     return Object.freeze({
       rowId: firstVisible.id,
       offsetFromViewportTop: this.rowTop(firstVisible) - viewportTop,
+      mode: this.mode,
+      turnAnchorRowId: this.turnAnchorRowId,
     });
   }
 
@@ -169,11 +177,9 @@ export class AnchoredScroller {
       return;
     }
     const row = this.requireRow(anchor.rowId);
-    const preservedMode = this.mode;
-    const preservedTurnAnchor = this.turnAnchorRowId;
     this.setScrollTop(this.rowTop(row) - finite(anchor.offsetFromViewportTop), "auto");
-    this.mode = preservedMode;
-    this.turnAnchorRowId = preservedTurnAnchor;
+    this.mode = anchor.mode;
+    this.turnAnchorRowId = anchor.turnAnchorRowId;
     this.updateScrollButton();
   }
 
@@ -216,6 +222,9 @@ export class AnchoredScroller {
     if (this.destroyed) return;
     this.destroyed = true;
     this.viewport.removeEventListener("scroll", this.handleScroll);
+    this.viewport.removeEventListener("wheel", this.handleManualScrollIntent);
+    this.viewport.removeEventListener("touchstart", this.handleManualScrollIntent);
+    this.viewport.removeEventListener("keydown", this.handleKeyScrollIntent);
     this.scrollButton?.removeEventListener("click", this.handleScrollButtonClick);
     this.rows.clear();
     this.programmaticTarget = null;
@@ -224,12 +233,19 @@ export class AnchoredScroller {
   private readonly handleScroll = (): void => {
     if (this.destroyed) return;
     const current = finite(this.viewport.scrollTop);
-    if (this.programmaticTarget !== null && Math.abs(current - this.programmaticTarget) <= 1) {
+    if (this.manualIntentPending) {
+      this.manualIntentPending = false;
       this.programmaticTarget = null;
+      this.mode = "manual";
+      this.turnAnchorRowId = null;
       this.updateScrollButton();
       return;
     }
-    this.programmaticTarget = null;
+    if (this.programmaticTarget !== null) {
+      if (Math.abs(current - this.programmaticTarget) <= 1) this.programmaticTarget = null;
+      this.updateScrollButton();
+      return;
+    }
     if (this.isNearEnd()) {
       this.mode = "end";
       this.turnAnchorRowId = null;
@@ -238,6 +254,28 @@ export class AnchoredScroller {
       this.turnAnchorRowId = null;
     }
     this.updateScrollButton();
+  };
+
+  private readonly handleManualScrollIntent = (): void => {
+    if (this.destroyed) return;
+    this.manualIntentPending = true;
+    this.programmaticTarget = null;
+    this.mode = "manual";
+    this.turnAnchorRowId = null;
+    this.updateScrollButton();
+  };
+
+  private readonly handleKeyScrollIntent = (event: KeyboardEvent): void => {
+    if (![
+      "ArrowUp",
+      "ArrowDown",
+      "PageUp",
+      "PageDown",
+      "Home",
+      "End",
+      " ",
+    ].includes(event.key)) return;
+    this.handleManualScrollIntent();
   };
 
   private readonly handleScrollButtonClick = (event: MouseEvent): void => {

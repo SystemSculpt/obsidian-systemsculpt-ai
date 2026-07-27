@@ -74,6 +74,7 @@ export class AgentComposer extends Component {
   private readonly stopButton: HTMLButtonElement;
   private readonly hint: HTMLElement;
   private running = false;
+  private historyEditing = false;
   private submitting = false;
   private attachmentBusy = false;
   private contextAttachments: readonly AgentComposerAttachment[] = [];
@@ -221,11 +222,16 @@ export class AgentComposer extends Component {
   public setRunning(running: boolean): void {
     this.running = running;
     this.element.classList.toggle("is-running", running);
-    this.hint.setText(running ? "Enter to queue" : "Enter to send");
     updateUiAction(this.sendButton, {
       label: running ? "Queue follow-up" : "Send message",
       icon: running ? "list-plus" : "arrow-up",
     });
+    this.syncControls();
+  }
+
+  public setHistoryEditing(editing: boolean): void {
+    this.historyEditing = editing;
+    this.element.classList.toggle("is-history-editing", editing);
     this.syncControls();
   }
 
@@ -354,7 +360,12 @@ export class AgentComposer extends Component {
   private async submit(): Promise<void> {
     const text = this.input.value.trim();
     const attachments = this.messageAttachments.snapshot();
-    if ((!text && attachments.length === 0) || this.submitting || this.attachmentBusy) return;
+    if (
+      (!text && attachments.length === 0)
+      || this.historyEditing
+      || this.submitting
+      || this.attachmentBusy
+    ) return;
     const validation = this.messageAttachments.validateSubmission(text, attachments);
     if (validation.length > 0) {
       for (const problem of validation) new Notice(problem.message, 6000);
@@ -390,13 +401,20 @@ export class AgentComposer extends Component {
   private syncControls(): void {
     const hasText = this.input.value.trim().length > 0;
     const hasMessage = hasText || this.messageAttachments.hasAny();
-    this.sendButton.disabled = this.submitting || this.attachmentBusy
+    this.hint.setText(
+      this.historyEditing
+        ? "Finish editing the earlier message"
+        : this.running ? "Enter to queue" : "Enter to send",
+    );
+    this.input.disabled = this.historyEditing;
+    this.sendButton.disabled = this.historyEditing || this.submitting || this.attachmentBusy
       || this.messageAttachments.hasBlockingFailures() || !hasMessage;
     this.stopButton.toggleAttribute("hidden", !this.running);
-    this.attachButton.disabled = this.attachmentBusy;
-    this.vaultContextButton.disabled = this.attachmentBusy;
-    this.filePicker.disabled = this.attachmentBusy;
-    this.approvalMode.disabled = this.running;
+    this.attachButton.disabled = this.historyEditing || this.attachmentBusy;
+    this.vaultContextButton.disabled = this.historyEditing || this.attachmentBusy;
+    this.filePicker.disabled = this.historyEditing || this.attachmentBusy;
+    this.approvalMode.disabled = this.historyEditing || this.running;
+    if (this.micButton) this.micButton.disabled = this.historyEditing || this.attachmentBusy;
     this.element.classList.toggle("is-submitting", this.submitting);
     this.element.classList.toggle("is-processing-attachments", this.attachmentBusy);
   }

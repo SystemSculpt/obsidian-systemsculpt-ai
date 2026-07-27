@@ -1,3 +1,7 @@
+import { createHash } from "node:crypto";
+import { ManagedJobClient, MANAGED_JOB_PROTOCOL } from "../../services/managed/ManagedJobClient";
+import { HostedTransportAdapter } from "../../services/managed/adapters/HostedTransportAdapter";
+import { StudioAssetStore } from "../StudioAssetStore";
 import { StudioApiExecutionAdapter } from "../StudioApiExecutionAdapter";
 
 function createPlugin() {
@@ -65,14 +69,22 @@ describe("StudioApiExecutionAdapter managed cutover", () => {
   it("stages verified managed image bytes and routes transcription directly", async () => {
     const { plugin } = createPlugin();
     const adapter = new StudioApiExecutionAdapter(plugin as never);
-    const imageGenerate = jest.fn(async operation => ({
-      operationId: operation.operationId,
-      jobId: "job-1",
-      outputs: [{
-        metadata: { index: 0, mime_type: "image/png", size_bytes: 2, sha256: "a".repeat(64), width: 2, height: 1 },
-        bytes: new Uint8Array([1, 2]).buffer,
-      }],
-    }));
+    const imageGenerate = jest.fn(async operation => {
+      expect(await operation.buildPayload()).toEqual({
+        prompt: "Draw",
+        count: 1,
+        aspectRatio: "16:9",
+        inputImages: [],
+      });
+      return {
+        operationId: operation.operationId,
+        jobId: "job-1",
+        outputs: [{
+          metadata: { index: 0, mime_type: "image/png", size_bytes: 2, sha256: "a".repeat(64), width: 2, height: 1 },
+          bytes: new Uint8Array([1, 2]).buffer,
+        }],
+      };
+    });
     const transcribe = jest.fn(async (_source, context) => ({ kind: "transcript", operationId: context.operationId, text: "transcript" }));
     Object.assign(adapter as object, {
       images: { generate: imageGenerate, beginLocalCommit: jest.fn(), completeLocalCommit: jest.fn() },
@@ -85,7 +97,7 @@ describe("StudioApiExecutionAdapter managed cutover", () => {
       nodeId: "image-a",
       projectPath: "Studio/Test.systemsculpt",
       signal: new AbortController().signal,
-      buildPayload: async () => ({ prompt: "Draw" }),
+      buildPayload: async () => ({ prompt: "Draw", count: 1, aspectRatio: "16:9" }),
       storeOutput,
     });
     const source = {
@@ -111,6 +123,82 @@ describe("StudioApiExecutionAdapter managed cutover", () => {
       text: "transcript",
       operation: { capability: "transcription", operationId: "studio-transcription-run-1-transcription-a" },
     });
+  });
+
+  it("downloads a chunked managed image and saves the verified bytes through Studio output storage", async () => {
+    const png = Uint8Array.from(Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9slt4d8AAAAASUVORK5CYII=", "base64"));
+    const sha256 = createHash("sha256").update(png).digest("hex");
+    const metadata = { index: 0, mime_type: "image/png" as const, size_bytes: png.byteLength, sha256, width: 1, height: 1 };
+    const request = jest.fn(async () => new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(png.subarray(0, 17));
+        controller.enqueue(png.subarray(17));
+        controller.close();
+      },
+    }), { headers: {
+      "x-request-id": "req-studio-image",
+      "x-systemsculpt-contract": "managed-capabilities-v2",
+      "x-systemsculpt-job-contract": MANAGED_JOB_PROTOCOL,
+      "x-systemsculpt-image-output-contract": "managed-image-output-v1",
+      "x-systemsculpt-capability": "image_generation",
+      "x-systemsculpt-output-index": "0",
+      "x-systemsculpt-content-sha256": sha256,
+      "content-type": "image/png",
+      "cache-control": "no-store, max-age=0",
+      "x-content-type-options": "nosniff",
+      "content-disposition": "attachment; filename=\"systemsculpt-image-0.png\"",
+    } }));
+    const jobs = new ManagedJobClient(
+      new HostedTransportAdapter({
+        baseUrl: "https://systemsculpt.test",
+        pluginVersion: "6.2.2",
+        licenseKey: () => "license",
+        requestClient: { request } as never,
+      }),
+      undefined,
+      () => "req-studio-image",
+    );
+    const downloaded = await jobs.images.downloadOutput("123e4567-e89b-42d3-a456-426614174000", 0, metadata);
+    const putAsset = jest.fn(async () => undefined);
+    const assetStore = new StudioAssetStore({
+      loadProject: jest.fn(async () => ({ projectId: "studio-project" })),
+      putAsset,
+    } as never);
+    const { plugin } = createPlugin();
+    const adapter = new StudioApiExecutionAdapter(plugin as never);
+    Object.assign(adapter as object, {
+      images: {
+        generate: jest.fn(async () => ({
+          operationId: "studio-image-run-1-image-a",
+          jobId: "123e4567-e89b-42d3-a456-426614174000",
+          outputs: [downloaded],
+        })),
+      },
+    });
+
+    const result = await adapter.generateImage({
+      runId: "run-1",
+      nodeId: "image-a",
+      projectPath: "SystemSculpt/Studio/New Studio Project.systemsculpt",
+      signal: new AbortController().signal,
+      buildPayload: async () => ({ prompt: "Draw" }),
+      storeOutput: (bytes, mimeType) => assetStore.storeArrayBuffer(
+        "SystemSculpt/Studio/New Studio Project.systemsculpt",
+        bytes,
+        mimeType,
+      ),
+    });
+
+    expect(result.images).toHaveLength(1);
+    expect(result.images[0]).toMatchObject({ hash: sha256, mimeType: "image/png", sizeBytes: png.byteLength });
+    expect(putAsset).toHaveBeenCalledWith(
+      "SystemSculpt/Studio/New Studio Project.systemsculpt",
+      "studio-project",
+      expect.objectContaining({
+        contentAddressedPath: `${sha256.slice(0, 2)}/${sha256}.png`,
+        bytes: png,
+      }),
+    );
   });
 
   it("finalizes published transcription records while preserving image cleanup", async () => {

@@ -79,8 +79,6 @@ export class StudioApiExecutionAdapter implements StudioApiAdapter {
           prompt: payload.prompt,
           count: payload.count,
           aspectRatio: payload.aspectRatio,
-          imageSize: payload.imageSize,
-          seed: payload.seed,
           inputImages: (payload.inputImages || []).map(input => ({
             mimeType: input.asset.mimeType as "image/png" | "image/jpeg" | "image/webp",
             sizeBytes: input.asset.sizeBytes,

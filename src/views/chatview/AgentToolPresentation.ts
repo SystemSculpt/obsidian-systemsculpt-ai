@@ -8,9 +8,12 @@ export type AgentToolPresentation = Readonly<{
   icon: string;
   animated: boolean;
   summary: string | null;
-  hasDetails: boolean;
-  openByDefault: boolean;
+  itemCount: number | null;
 }>;
+
+export type AgentToolActivityEntry<T> =
+  | Readonly<{ kind: "item"; item: T }>
+  | Readonly<{ kind: "tools"; items: readonly T[]; tools: readonly AgentToolPart[] }>;
 
 const TOOL_LABELS: Readonly<Record<string, string>> = {
   read: "Read files",
@@ -60,6 +63,21 @@ const ANIMATED_STATES = new Set<AgentToolPart["state"]>([
   "running",
 ]);
 
+type CountedTool = Readonly<{
+  verb: string;
+  singular: string;
+  plural: string;
+  items: readonly string[];
+}>;
+
+const COUNTED_TOOL_COPY: Readonly<Record<string, Omit<CountedTool, "items">>> = {
+  read: { verb: "Read", singular: "file", plural: "files" },
+  open: { verb: "Open", singular: "file", plural: "files" },
+  list_items: { verb: "List", singular: "folder", plural: "folders" },
+  find: { verb: "Search", singular: "file pattern", plural: "file patterns" },
+  search: { verb: "Search", singular: "text pattern", plural: "text patterns" },
+};
+
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -89,6 +107,106 @@ function compact(value: string | null | undefined, max = 96): string | null {
   return normalized.length <= max ? normalized : `${normalized.slice(0, max - 1).trimEnd()}…`;
 }
 
+function strings(value: unknown): string[] {
+  if (typeof value === "string") {
+    const normalized = value.trim();
+    return normalized ? [normalized] : [];
+  }
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((entry): entry is string => typeof entry === "string")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+function objectStrings(value: unknown, key: string): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
+    return strings((entry as Record<string, unknown>)[key]);
+  });
+}
+
+function countedTool(canonicalName: string, input: Record<string, unknown>): CountedTool | null {
+  const copy = COUNTED_TOOL_COPY[canonicalName];
+  if (!copy) return null;
+  const items = canonicalName === "open"
+    ? objectStrings(input.files, "path")
+    : canonicalName === "list_items"
+      ? [...strings(input.paths), ...strings(input.path)]
+      : canonicalName === "read"
+        ? [...strings(input.paths), ...strings(input.path)]
+        : strings(input.patterns);
+  return items.length > 0 ? { ...copy, items } : null;
+}
+
+function countedLabel(counted: CountedTool): string {
+  const noun = counted.items.length === 1 ? counted.singular : counted.plural;
+  return `${counted.verb} ${counted.items.length} ${noun}`;
+}
+
+function resultEntries(part: AgentToolPart, canonicalName: string): readonly Record<string, unknown>[] {
+  if (!["read", "open", "list_items"].includes(canonicalName)) return [];
+  const data = record(part.output?.data);
+  const value = canonicalName === "read" ? data.files : data.results;
+  if (!Array.isArray(value)) return [];
+  return value.filter((entry): entry is Record<string, unknown> =>
+    Boolean(entry) && typeof entry === "object" && !Array.isArray(entry));
+}
+
+function failedResultEntry(entry: Record<string, unknown>): boolean {
+  return entry.success === false
+    || (typeof entry.error === "string" && entry.error.trim().length > 0)
+    || (Boolean(entry.error) && typeof entry.error === "object");
+}
+
+function partialOutcomeSummary(part: AgentToolPart, canonicalName: string): string | null {
+  const entries = resultEntries(part, canonicalName);
+  if (entries.length === 0) return null;
+  const failed = entries.filter(failedResultEntry).length;
+  if (failed === 0) return null;
+  const completed = entries.length - failed;
+  return `${completed} completed, ${failed} failed`;
+}
+
+function toolScope(part: AgentToolPart): CountedTool | null {
+  const { canonicalName } = splitToolName(part.name);
+  return countedTool(canonicalName, record(part.input));
+}
+
+function normalizedScopeItem(value: string): string {
+  return value.replace(/\\/g, "/").replace(/\/+/g, "/").trim().toLocaleLowerCase();
+}
+
+function canAppendTool(
+  group: readonly AgentToolPart[],
+  candidate: AgentToolPart,
+): boolean {
+  const previous = group[group.length - 1];
+  if (!previous || previous.state !== "succeeded" || candidate.state !== "succeeded") return false;
+  if (previous.location !== candidate.location) return false;
+  const previousName = splitToolName(previous.name).canonicalName;
+  const candidateName = splitToolName(candidate.name).canonicalName;
+  if (previousName !== candidateName) return false;
+
+  const existingScopes = group.map(toolScope);
+  const candidateScope = toolScope(candidate);
+  if (existingScopes.some((scope) => !scope) || !candidateScope) return false;
+  if (group.some((part) => resultEntries(part, previousName).some(failedResultEntry))) return false;
+  if (resultEntries(candidate, candidateName).some(failedResultEntry)) return false;
+
+  const seen = new Set(existingScopes.flatMap((scope) =>
+    scope!.items.map(normalizedScopeItem)));
+  return candidateScope.items.every((item) => !seen.has(normalizedScopeItem(item)));
+}
+
+function compactScope(items: readonly string[]): string | null {
+  if (items.length === 0) return null;
+  const visible = items.slice(0, 2);
+  const remaining = items.length - visible.length;
+  return compact(`${visible.join(", ")}${remaining > 0 ? `, +${remaining} more` : ""}`);
+}
+
 function inputSummary(canonicalName: string, input: Record<string, unknown>): string | null {
   const primaryPath = extractPrimaryPathArg(canonicalName, input);
   if (primaryPath) return compact(primaryPath);
@@ -111,24 +229,72 @@ function inputSummary(canonicalName: string, input: Record<string, unknown>): st
 export function presentAgentTool(part: AgentToolPart): AgentToolPresentation {
   const { canonicalName } = splitToolName(part.name);
   const input = record(part.input);
+  const counted = countedTool(canonicalName, input);
+  const partialSummary = partialOutcomeSummary(part, canonicalName);
   const outputSummary = compact(part.output?.summary ?? part.output?.title);
-  const summary = outputSummary ?? inputSummary(canonicalName, input);
-  const hasDetails = typeof part.input !== "undefined"
-    || Boolean(part.inputText)
-    || typeof part.output?.data !== "undefined"
-    || Boolean(part.error)
-    || (part.output?.artifacts?.length ?? 0) > 0;
-
+  const summary = partialSummary ?? outputSummary ?? inputSummary(canonicalName, input);
   return {
     canonicalName,
-    label: TOOL_LABELS[canonicalName] || canonicalName
-      .replace(/[_-]+/g, " ")
-      .replace(/\b\w/g, (letter) => letter.toUpperCase()) || "Tool",
+    label: counted
+      ? countedLabel(counted)
+      : TOOL_LABELS[canonicalName] || canonicalName
+        .replace(/[_-]+/g, " ")
+        .replace(/\b\w/g, (letter) => letter.toUpperCase()) || "Tool",
     stateLabel: STATE_LABELS[part.state],
     icon: STATE_ICONS[part.state],
     animated: ANIMATED_STATES.has(part.state),
     summary,
-    hasDetails,
-    openByDefault: part.state === "failed" || part.state === "outcome-unknown",
+    itemCount: counted?.items.length ?? null,
   };
+}
+
+export function presentAgentToolGroup(
+  parts: readonly AgentToolPart[],
+): AgentToolPresentation {
+  const first = parts[0];
+  if (!first) {
+    throw new Error("A tool presentation group must contain at least one tool.");
+  }
+  const base = presentAgentTool(first);
+  if (parts.length === 1) return base;
+  const scopes = parts.map(toolScope);
+  if (scopes.some((scope) => !scope)) return base;
+  const items = scopes.flatMap((scope) => scope!.items);
+  const counted = { ...scopes[0]!, items };
+  return {
+    ...base,
+    label: countedLabel(counted),
+    summary: compactScope(items),
+    itemCount: items.length,
+  };
+}
+
+/**
+ * Groups only adjacent, terminal, read-only activity with explicit and
+ * non-overlapping scope. Any non-tool item remains a chronology boundary.
+ */
+export function groupConsecutiveToolActivity<T>(
+  items: readonly T[],
+  toolFor: (item: T) => AgentToolPart | null,
+  enabled = true,
+): readonly AgentToolActivityEntry<T>[] {
+  const result: AgentToolActivityEntry<T>[] = [];
+  for (const item of items) {
+    const tool = toolFor(item);
+    if (!tool) {
+      result.push({ kind: "item", item });
+      continue;
+    }
+    const previous = result[result.length - 1];
+    if (enabled && previous?.kind === "tools" && canAppendTool(previous.tools, tool)) {
+      result[result.length - 1] = {
+        kind: "tools",
+        items: [...previous.items, item],
+        tools: [...previous.tools, tool],
+      };
+      continue;
+    }
+    result.push({ kind: "tools", items: [item], tools: [tool] });
+  }
+  return result;
 }
