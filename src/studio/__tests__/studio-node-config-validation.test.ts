@@ -126,11 +126,20 @@ describe("Studio node config validation", () => {
     const definition = registry.get("studio.media_ingest", "1.0.0");
     expect(definition).not.toBeNull();
 
-    const invalid = validateNodeConfig(definition!, {
+    // Empty sourcePath is a valid persisted state: media can arrive through
+    // the "media" input port, and managed image-generation placeholders are
+    // saved with an empty sourcePath while a run is in flight. execute()
+    // enforces the real "media input OR sourcePath" contract at run time.
+    const emptyPath = validateNodeConfig(definition!, {
       sourcePath: "",
     });
-    expect(invalid.isValid).toBe(false);
-    expect(invalid.errors.some((error) => error.fieldKey === "sourcePath")).toBe(true);
+    expect(emptyPath.isValid).toBe(true);
+
+    const wrongType = validateNodeConfig(definition!, {
+      sourcePath: 42,
+    });
+    expect(wrongType.isValid).toBe(false);
+    expect(wrongType.errors.some((error) => error.fieldKey === "sourcePath")).toBe(true);
 
     const valid = validateNodeConfig(definition!, {
       sourcePath: "/media/video.mp4",

@@ -1,4 +1,7 @@
 import { Platform } from "obsidian";
+import { registerBuiltInStudioNodes } from "../StudioBuiltInNodes";
+import { StudioGraphCompiler } from "../StudioGraphCompiler";
+import { StudioNodeRegistry } from "../StudioNodeRegistry";
 import { StudioRuntime } from "../StudioRuntime";
 import type { StudioProjectV1 } from "../types";
 
@@ -252,5 +255,121 @@ describe("StudioRuntime session snapshot runs", () => {
     expect(assetStore.readArrayBuffer).not.toHaveBeenCalled();
     expect(projectStore.publishRun).toHaveBeenCalledTimes(1);
     expect(published[0].assets).toEqual([{ contentAddressedPath: `aa/${"a".repeat(64)}.bin`, bytes }]);
+  });
+
+  it("propagates authored and edited minimal text through the real runtime into an image prompt", async () => {
+    platform.isDesktopApp = false;
+    const app = {
+      vault: {
+        adapter: {},
+        getAbstractFileByPath: jest.fn(),
+        read: jest.fn(),
+        readBinary: jest.fn(),
+      },
+    } as any;
+    const plugin = {
+      app,
+      getLogger: () => ({ warn: jest.fn(), error: jest.fn(), debug: jest.fn() }),
+    } as any;
+    const projectStore = {
+      readSupportFile: jest.fn(async () => null),
+      loadPolicy: jest.fn(async () => ({
+        schema: "studio.policy.v1",
+        version: 1,
+        updatedAt: "2026-03-22T00:00:00.000Z",
+        grants: [],
+      })),
+      publishRun: jest.fn(async () => undefined),
+    } as any;
+    const registry = new StudioNodeRegistry();
+    registerBuiltInStudioNodes(registry);
+    const receivedPrompts: string[] = [];
+    const apiAdapter = {
+      generateImage: jest.fn(async (request: { buildPayload: () => Promise<{ prompt: string }> }) => {
+        const payload = await request.buildPayload();
+        receivedPrompts.push(payload.prompt);
+        return {
+          images: [],
+          operation: {
+            capability: "image_generation",
+            operationId: `image-${receivedPrompts.length}`,
+          },
+        };
+      }),
+      beginLocalCommit: jest.fn(async () => undefined),
+      completeLocalCommit: jest.fn(async () => undefined),
+    } as any;
+    const runtime = new StudioRuntime(
+      app,
+      plugin,
+      projectStore,
+      registry,
+      new StudioGraphCompiler(),
+      {
+        stageArrayBuffer: jest.fn(),
+        readArrayBuffer: jest.fn(),
+      } as any,
+      apiAdapter
+    );
+    (runtime as any).nodeResultCacheStore = {
+      load: jest.fn(async () => ({
+        projectId: "proj_live_runtime",
+        updatedAt: "2026-03-22T00:00:00.000Z",
+        entries: {},
+      })),
+    };
+    const project = projectFixture();
+    project.graph.nodes = [
+      {
+        id: "prompt",
+        kind: "studio.text",
+        version: "1.0.0",
+        title: "Prompt",
+        position: { x: 0, y: 0 },
+        config: {
+          value: "Portrait of a fox in amber light",
+          fontSize: 14,
+        },
+      },
+      {
+        id: "image",
+        kind: "studio.image_generation",
+        version: "1.0.0",
+        title: "Image Generation",
+        position: { x: 320, y: 0 },
+        config: {
+          count: 1,
+          aspectRatio: "1:1",
+        },
+      },
+    ];
+    project.graph.edges = [{
+      id: "prompt-edge",
+      fromNodeId: "prompt",
+      fromPortId: "text",
+      toNodeId: "image",
+      toPortId: "prompt",
+    }];
+    project.graph.entryNodeIds = ["prompt"];
+
+    await expect(
+      runtime.runProjectSnapshot("Studio/Test.systemsculpt", project, {
+        entryNodeIds: ["image"],
+      })
+    ).resolves.toMatchObject({ status: "success" });
+
+    project.graph.nodes[0].config.value = "Edited prompt reaches the image node";
+    await expect(
+      runtime.runProjectSnapshot("Studio/Test.systemsculpt", project, {
+        entryNodeIds: ["image"],
+      })
+    ).resolves.toMatchObject({ status: "success" });
+
+    expect(receivedPrompts).toEqual([
+      "Portrait of a fox in amber light",
+      "Edited prompt reaches the image node",
+    ]);
+    expect(apiAdapter.generateImage).toHaveBeenCalledTimes(2);
+    expect(projectStore.publishRun).toHaveBeenCalledTimes(2);
   });
 });

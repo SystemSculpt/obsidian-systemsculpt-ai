@@ -1,8 +1,5 @@
-import type { StudioNodeDefinition } from "../types";
+import type { StudioJsonValue, StudioNodeDefinition } from "../types";
 import {
-  resolveStudioTextNodeFontSize,
-  resolveStudioTextNodeHeight,
-  resolveStudioTextNodeWidth,
   STUDIO_GRAPH_TEXT_NODE_MAX_FONT_SIZE,
   STUDIO_GRAPH_TEXT_NODE_MIN_FONT_SIZE,
 } from "../StudioNodeGeometry";
@@ -20,7 +17,7 @@ export const textNode: StudioNodeDefinition = {
   capabilityClass: "local_cpu",
   cachePolicy: "by_inputs",
   inputPorts: [],
-  outputPorts: [],
+  outputPorts: [{ id: "text", type: "text" }],
   configDefaults: {
     value: DEFAULT_TEXT_VALUE,
     fontSize: DEFAULT_FONT_SIZE,
@@ -47,15 +44,10 @@ export const textNode: StudioNodeDefinition = {
     allowUnknownKeys: true,
   },
   async execute(context) {
-    const value = getText(context.node.config.value as never);
-    // Width/height are canvas geometry (node.size), not config; the resolvers
-    // read size first with the migration-era legacy fallback and defaults.
+    const text = getText(context.node.config.value as StudioJsonValue);
     return {
       outputs: {
-        value,
-        fontSize: resolveStudioTextNodeFontSize(context.node),
-        width: resolveStudioTextNodeWidth(context.node),
-        height: resolveStudioTextNodeHeight(context.node),
+        text,
       },
     };
   },

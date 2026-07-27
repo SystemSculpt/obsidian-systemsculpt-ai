@@ -347,9 +347,10 @@ export function assertValidStudioProjectAgentDocumentStructure(document: unknown
     if (entryNodeIds.has(rawNodeId)) {
       throw new Error(`graph.entryNodeIds contains duplicate node ID "${rawNodeId}".`);
     }
-    if (!nodeIds.has(rawNodeId)) {
-      throw new Error(`${entryLabel} references missing node "${rawNodeId}".`);
-    }
+    // Entry IDs referencing missing nodes are tolerated: entryNodeIds is
+    // derived data that Studio recomputes and parse drops stale references,
+    // so an edit that deletes a node without touching this list must not
+    // make the document unopenable.
     entryNodeIds.add(rawNodeId);
   });
 

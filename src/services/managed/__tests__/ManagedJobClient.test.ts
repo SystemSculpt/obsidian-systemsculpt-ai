@@ -396,4 +396,39 @@ describe("ManagedJobClient exact wire contract", () => {
     await expect(client.transcription.status("job")).rejects.toMatchObject({ code: "transcription_failed", requestId: "req-1", retryable: false });
     expect(request.mock.calls[0][0].headers).toEqual({ "x-systemsculpt-contract": "managed-capabilities-v2", "x-systemsculpt-job-contract": MANAGED_JOB_PROTOCOL, "x-systemsculpt-capability": "transcription" });
   });
+
+  it("surfaces the server's curated failure detail on terminal image jobs", async () => {
+    request.mockResolvedValue(json({
+      job: {
+        ...imageJob("failed"),
+        processing_started_at: "2026-01-01T00:00:01Z",
+        completed_at: "2026-01-01T00:00:02Z",
+        error: { code: "provider_timeout", message: "The image provider timed out before finishing this job. Retry the run; smaller image counts finish faster." },
+      },
+      outputs: [],
+      usage: { raw_usd: 0, cost_source: "not_billed", estimated: false },
+    }));
+    await expect(client.images.status("img-1")).rejects.toMatchObject({
+      code: "image_generation_failed",
+      message: "The image provider timed out before finishing this job. Retry the run; smaller image counts finish faster.",
+      jobFailure: { jobId: "img-1", code: "provider_timeout" },
+      retryable: false,
+    });
+  });
+
+  it("falls back to the generic terminal message when failure detail is unsafe or missing", async () => {
+    const failedJob = (error: unknown) => json({
+      job: { ...imageJob("failed"), processing_started_at: "2026-01-01T00:00:01Z", completed_at: "2026-01-01T00:00:02Z", error },
+      outputs: [],
+      usage: { raw_usd: 0, cost_source: "not_billed", estimated: false },
+    });
+    request.mockResolvedValueOnce(failedJob(null));
+    await expect(client.images.status("img-1")).rejects.toMatchObject({ code: "image_generation_failed", message: "Managed job failed." });
+    request.mockResolvedValueOnce(failedJob({ code: "Bad Code!", message: "multi\nline provider stack" }));
+    await expect(client.images.status("img-1")).rejects.toMatchObject({
+      code: "image_generation_failed",
+      message: "Managed job failed.",
+      jobFailure: { jobId: "img-1", code: null },
+    });
+  });
 });

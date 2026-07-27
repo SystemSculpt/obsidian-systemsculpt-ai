@@ -184,10 +184,17 @@ function readProjectV1(raw: Record<string, unknown>): StudioProjectV1 {
     }
   }
 
+  // Entry IDs are derived data (the canvas recomputes them and runs
+  // re-derive real entry points), so heal rather than reject: drop
+  // references to nodes that no longer exist. Kind-based filtering is
+  // deliberately absent — the executable/visual-only split changes across
+  // plugin versions, and pruning by kind here would fight files persisted
+  // by a newer build.
   const entryNodeIds = entryNodeIdsRaw
     .map((value) => asString(value).trim())
     .filter((value) => value.length > 0)
-    .filter((value, index, arr) => arr.indexOf(value) === index);
+    .filter((value, index, arr) => arr.indexOf(value) === index)
+    .filter((value) => nodeIdSet.has(value));
 
   const groups = groupsRaw
     .map(readGroup)

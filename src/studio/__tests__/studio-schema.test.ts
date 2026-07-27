@@ -53,9 +53,13 @@ describe("Studio schema", () => {
     expect(document.nodeKindReference.schema).toBe("studio.node-kind-reference.v1");
     const textKind = document.nodeKindReference.kinds.find((entry: any) => entry.kind === "studio.text");
     expect(textKind).toMatchObject({
-      execution: { mode: "visual_only" },
+      execution: { mode: "executable" },
       canvas: {
         defaultSize: expect.objectContaining({ width: expect.any(Number) }),
+      },
+      ports: {
+        inputs: [],
+        outputs: [{ id: "text", type: "text" }],
       },
       config: {
         fields: expect.arrayContaining([
@@ -112,6 +116,78 @@ describe("Studio schema", () => {
 
     delete corrupted.graph.nodes[0].size;
     expect(parseStudioProject(JSON.stringify(corrupted)).graph.nodes[0].size).toBeUndefined();
+  });
+
+  it("round-trips a minimal text-to-image prompt edge without migration", () => {
+    const project = createEmptyStudioProject({
+      name: "Text prompt",
+      policyPath: "SystemSculpt/Studio/Text prompt.systemsculpt-assets/policy/grants.json",
+      minPluginVersion: "6.2.2",
+      maxRuns: 100,
+      maxArtifactsMb: 1024,
+    });
+    project.graph.nodes.push(
+      {
+        id: "prompt",
+        kind: "studio.text",
+        version: "1.0.0",
+        title: "Prompt",
+        position: { x: 20, y: 20 },
+        size: { width: 280 },
+        config: { value: "Portrait of a fox in amber light", fontSize: 14 },
+        continueOnError: false,
+        disabled: false,
+      },
+      {
+        id: "image",
+        kind: "studio.image_generation",
+        version: "1.0.0",
+        title: "Image Generation",
+        position: { x: 400, y: 20 },
+        config: { count: 1, aspectRatio: "1:1" },
+        continueOnError: false,
+        disabled: false,
+      },
+    );
+    project.graph.edges.push({
+      id: "prompt-edge",
+      fromNodeId: "prompt",
+      fromPortId: "text",
+      toNodeId: "image",
+      toPortId: "prompt",
+    });
+    project.graph.entryNodeIds = ["prompt"];
+
+    const parsed = parseStudioProject(serializeStudioProject(project));
+    expect(parsed.graph.edges).toEqual(project.graph.edges);
+    expect(parsed.graph.nodes.find((node) => node.id === "prompt")?.config.value).toBe(
+      "Portrait of a fox in amber light"
+    );
+    expect(parsed.graph.entryNodeIds).toEqual(["prompt"]);
+  });
+
+  it("heals entry IDs that reference missing nodes instead of failing to parse", () => {
+    const project = createEmptyStudioProject({
+      name: "Stale entries",
+      policyPath: "SystemSculpt/Studio/Stale entries.systemsculpt-assets/policy/grants.json",
+      minPluginVersion: "6.2.2",
+      maxRuns: 100,
+      maxArtifactsMb: 1024,
+    });
+    project.graph.nodes.push({
+      id: "prompt",
+      kind: "studio.text",
+      version: "1.0.0",
+      title: "Prompt",
+      position: { x: 20, y: 20 },
+      config: { value: "hello", fontSize: 14 },
+      continueOnError: false,
+      disabled: false,
+    });
+    project.graph.entryNodeIds = ["deleted-node", "prompt"];
+
+    const parsed = parseStudioProject(serializeStudioProject(project));
+    expect(parsed.graph.entryNodeIds).toEqual(["prompt"]);
   });
 
   it("migrates legacy canvas-like payloads into v1", () => {

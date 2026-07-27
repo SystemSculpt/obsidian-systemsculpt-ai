@@ -22,13 +22,30 @@ export type StudioCompiledGraph = {
   executionOrder: string[];
 };
 
+export type StudioGraphCompileOptions = {
+  /**
+   * "run" (default) enforces run readiness: node configs must satisfy their
+   * schemas and required input ports must be connected.
+   * "document" checks only structural integrity (IDs, kinds, edges, ports,
+   * cycles). It must accept every state Studio itself can persist — nodes
+   * with unfinished configs and unwired required inputs are normal canvas
+   * states, so persistence and agent-edit gates use this mode.
+   */
+  validation?: "run" | "document";
+};
+
 function typeCompatible(source: string, target: string): boolean {
   if (source === "any" || target === "any") return true;
   return source === target;
 }
 
 export class StudioGraphCompiler {
-  compile(project: StudioProjectV1, registry: StudioNodeRegistry): StudioCompiledGraph {
+  compile(
+    project: StudioProjectV1,
+    registry: StudioNodeRegistry,
+    options?: StudioGraphCompileOptions
+  ): StudioCompiledGraph {
+    const enforceRunReadiness = options?.validation !== "document";
     const nodesById = new Map<string, StudioCompiledNode>();
     const edgeIds = new Set<string>();
 
@@ -44,12 +61,14 @@ export class StudioGraphCompiler {
         );
       }
 
-      const configValidation = validateNodeConfig(baseDefinition, node.config);
-      if (!configValidation.isValid) {
-        const firstError = configValidation.errors[0];
-        throw new Error(
-          `Graph compile failed: invalid config on node "${node.id}" field "${firstError.fieldKey}" (${firstError.message}).`
-        );
+      if (enforceRunReadiness) {
+        const configValidation = validateNodeConfig(baseDefinition, node.config);
+        if (!configValidation.isValid) {
+          const firstError = configValidation.errors[0];
+          throw new Error(
+            `Graph compile failed: invalid config on node "${node.id}" field "${firstError.fieldKey}" (${firstError.message}).`
+          );
+        }
       }
 
       const definition = resolveNodeDefinitionPorts(node, baseDefinition);
@@ -104,14 +123,16 @@ export class StudioGraphCompiler {
       }
     }
 
-    for (const compiled of nodesById.values()) {
-      for (const port of compiled.definition.inputPorts) {
-        if (port.required !== true) continue;
-        const hasIncoming = compiled.inboundEdges.some((edge) => edge.toPortId === port.id);
-        if (!hasIncoming) {
-          throw new Error(
-            `Graph compile failed: required input "${port.id}" missing on node "${compiled.node.id}".`
-          );
+    if (enforceRunReadiness) {
+      for (const compiled of nodesById.values()) {
+        for (const port of compiled.definition.inputPorts) {
+          if (port.required !== true) continue;
+          const hasIncoming = compiled.inboundEdges.some((edge) => edge.toPortId === port.id);
+          if (!hasIncoming) {
+            throw new Error(
+              `Graph compile failed: required input "${port.id}" missing on node "${compiled.node.id}".`
+            );
+          }
         }
       }
     }

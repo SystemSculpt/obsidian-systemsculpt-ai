@@ -51,7 +51,7 @@ function createDefinition(kind: string): StudioNodeDefinition {
     capabilityClass: "local_cpu",
     cachePolicy: "never",
     inputPorts: [],
-    outputPorts: [],
+    outputPorts: kind === "studio.text" ? [{ id: "text", type: "text" }] : [],
     configDefaults: {},
     configSchema: {
       fields: definitionFields(kind),
@@ -464,17 +464,28 @@ describe("renderStudioGraphNodeCard", () => {
     }
   );
 
-  it("renders the text card chromeless — no buttons, text-labeled resize frame", () => {
-    const { nodeEl } = renderNodeCardHarness({
+  it("keeps the text card chromeless with one accessible output dot", () => {
+    const { graphInteraction, node, nodeEl } = renderNodeCardHarness({
       kind: "studio.text",
       config: { value: "Annotated" },
     });
 
-    // tldraw parity: the text IS the node. No toolbar, no delete button
-    // (select + Delete/Backspace/cut is the removal path), no font buttons
-    // (font size is drag-scaled via edges/corners).
-    expect(nodeEl.querySelectorAll("button")).toHaveLength(0);
+    // The text IS the node. There is still no toolbar, delete button, header,
+    // or font button. The one button is the typed graph output.
+    const buttons = nodeEl.querySelectorAll<HTMLButtonElement>("button");
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0].classList.contains("ss-studio-port-pin")).toBe(true);
+    expect(buttons[0].getAttribute("aria-label")).toBe("text output (text)");
+    expect(buttons[0].getAttribute("aria-pressed")).toBe("false");
     expect(nodeEl.querySelector(".ss-studio-text-node-toolbar")).toBeNull();
+    expect(nodeEl.querySelector(".ss-studio-node-header")).toBeNull();
+    expect(nodeEl.querySelector(".ss-studio-port-label")).not.toBeNull();
+    expect(graphInteraction.registerPortElement).toHaveBeenCalledWith(
+      node.id,
+      "out",
+      "text",
+      buttons[0]
+    );
 
     const zoneEls = Array.from(
       nodeEl.querySelectorAll<HTMLElement>(".ss-studio-node-resize-zone")
@@ -483,6 +494,33 @@ describe("renderStudioGraphNodeCard", () => {
     for (const zoneEl of zoneEls) {
       expect(zoneEl.getAttribute("aria-label")).toBe("Resize text");
     }
+  });
+
+  it("keeps the text output dot on the existing keyboard and pointer connection paths", () => {
+    const { graphInteraction, node, nodeEl } = renderNodeCardHarness({
+      kind: "studio.text",
+      config: { value: "Connect me" },
+    });
+    const outputPin = nodeEl.querySelector<HTMLButtonElement>(".ss-studio-port-pin.is-output");
+    expect(outputPin).not.toBeNull();
+
+    outputPin?.dispatchEvent(
+      createPointerEvent("pointerdown", {
+        pointerId: 71,
+        clientX: 300,
+        clientY: 72,
+      })
+    );
+    expect(graphInteraction.startConnectionDrag).toHaveBeenCalledWith(
+      node.id,
+      "text",
+      expect.any(MouseEvent),
+      outputPin
+    );
+    expect(graphInteraction.startNodeDrag).not.toHaveBeenCalled();
+
+    outputPin?.click();
+    expect(graphInteraction.beginConnection).toHaveBeenCalledWith(node.id, "text");
   });
 
   it("renders text cards with intrinsic height — no explicit height style", () => {

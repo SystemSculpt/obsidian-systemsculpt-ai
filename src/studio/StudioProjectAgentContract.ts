@@ -28,7 +28,7 @@ const NODE_PURPOSES: Readonly<Record<string, string>> = {
   "studio.note": "Read one or more vault Markdown notes and emit their content and paths.",
   "studio.retired_http_request": "Retained only for compatibility with older projects; do not add new instances.",
   "studio.terminal": "Visual terminal surface; it is canvas content, not an executable graph step.",
-  "studio.text": "Visual-only freeform canvas text for labels, explanations, and architecture annotations.",
+  "studio.text": "Provide minimal freeform canvas text that can also feed downstream text inputs.",
   "studio.text_generation": "Generate text from a required prompt input through the managed SystemSculpt API.",
   "studio.text_output": "Display or preserve text produced by another node.",
   "studio.transcription": "Transcribe an audio or video asset through the managed SystemSculpt API.",
@@ -152,8 +152,8 @@ export const STUDIO_PROJECT_AGENT_GUIDE = {
   graph: {
     ids: "All node, edge, and group IDs must be non-empty and unique. Keep existing IDs stable; use descriptive deterministic IDs for additions.",
     edges: "Edges are executable data flow only: fromNodeId/fromPortId must name an output port and toNodeId/toPortId an input port from nodeKindReference. Port types must match unless either type is any.",
-    entryNodeIds: "Entry IDs must reference existing executable nodes and identify intended run starting points.",
-    visualOnlyNodes: "Visual-only nodes have no executable ports. Use text nodes and groups for architecture annotations; do not invent port IDs.",
+    entryNodeIds: "Entry IDs must reference existing nodes and identify intended run starting points. Studio recomputes this list from graph structure, so prefer leaving it untouched.",
+    visualOnlyNodes: "Visual-only nodes have no executable ports. Text nodes stay visually minimal but expose their declared text output for data flow; do not invent port IDs.",
     groups: "A group is {id,name,color?,nodeIds}. Membership, not geometry, defines its bounds. Every nodeId must exist, a node should belong to at most one group, and color must be #rgb or #rrggbb.",
   },
   referenceField: "nodeKindReference",
@@ -183,15 +183,18 @@ export function createAgentFacingStudioProjectDocument(project: StudioProjectV1)
 }
 
 export function validateStudioProjectForAgentEdit(project: StudioProjectV1): void {
-  new StudioGraphCompiler().compile(project, builtInRegistry);
-  const nodesById = new Map(project.graph.nodes.map((node) => [node.id, node] as const));
-  for (const entryNodeId of project.graph.entryNodeIds) {
-    const entryNode = nodesById.get(entryNodeId);
-    if (!entryNode) {
-      throw new Error(`Entry node "${entryNodeId}" does not exist.`);
-    }
-    if (isStudioVisualOnlyNodeKind(entryNode.kind)) {
-      throw new Error(`Entry node "${entryNodeId}" must be executable, not visual-only.`);
-    }
-  }
+  // Document-mode compile: this gate decides whether Studio will adopt and
+  // open a project file at all, so it must accept every state Studio itself
+  // can persist (placeholder nodes, unfinished configs, unwired required
+  // inputs). Run readiness is enforced separately by the runtime's strict
+  // compile when the user actually runs the graph.
+  //
+  // graph.entryNodeIds is deliberately not validated here. It is derived
+  // data: the canvas recomputes it on every mutation and scopeProjectForRun
+  // re-derives real entry points from executable-graph structure, ignoring
+  // the persisted list. The visual-only classification also changes across
+  // plugin versions (studio.text became executable in 6.2.x), so rejecting
+  // an entry by kind bricks files persisted by a sibling build. parse
+  // drops entry IDs that reference missing nodes.
+  new StudioGraphCompiler().compile(project, builtInRegistry, { validation: "document" });
 }

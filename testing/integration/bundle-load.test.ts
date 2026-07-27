@@ -17,6 +17,7 @@ import { exerciseBuiltStudioGenerations } from "./studio-generation-bundle-harne
 
 const BUNDLE_PATH = path.resolve(__dirname, "..", "..", "main.js");
 const MANIFEST_PATH = path.resolve(__dirname, "..", "..", "manifest.json");
+const STYLES_PATH = path.resolve(__dirname, "..", "..", "styles.css");
 
 describe("built bundle (main.js)", () => {
   beforeAll(() => {
@@ -83,6 +84,55 @@ describe("built bundle (main.js)", () => {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const bundleModule = require(BUNDLE_PATH);
     await exerciseBuiltStudioGenerations(bundleModule);
+  });
+
+  it("ships the executable minimal text-node output contract", async () => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const bundleModule = require(BUNDLE_PATH);
+    const PluginClass = bundleModule?.default ?? bundleModule;
+    const { App } = require("obsidian");
+    const manifest = JSON.parse(readFileSync(MANIFEST_PATH, "utf8"));
+    const plugin = new PluginClass(new App(), manifest);
+    const definition = plugin
+      .getStudioService()
+      .listNodeDefinitions()
+      .find((entry: { kind: string }) => entry.kind === "studio.text");
+
+    expect(definition?.inputPorts).toEqual([]);
+    expect(definition?.outputPorts).toEqual([{ id: "text", type: "text" }]);
+    const result = await definition.execute({
+      node: {
+        id: "compiled-text",
+        kind: "studio.text",
+        version: "1.0.0",
+        title: "Prompt",
+        position: { x: 0, y: 0 },
+        config: {
+          value: "Portrait of a fox in amber light",
+          fontSize: 14,
+        },
+      },
+    });
+    expect(result.outputs).toEqual({
+      text: "Portrait of a fox in amber light",
+    });
+  });
+
+  it("ships the unclipped text output geometry in the exact CSS artifact", () => {
+    const styles = readFileSync(STYLES_PATH, "utf8");
+
+    expect(styles).toMatch(
+      /\.ss-studio-node-card\.ss-studio-text-node-card\s*\{[^}]*contain:\s*layout style;[^}]*overflow:\s*visible;/s
+    );
+    expect(styles).toMatch(
+      /\.ss-studio-text-node-card \.ss-studio-node-ports\s*\{[^}]*right:\s*var\(--ss-space-1\);[^}]*transform:\s*translateY\(-50%\);[^}]*overflow:\s*visible;/s
+    );
+    expect(styles).toMatch(
+      /\.ss-studio-text-node-card \.ss-studio-port-pin\s*\{[^}]*opacity:\s*1;/s
+    );
+    expect(styles).toMatch(
+      /@media\s*\(pointer:\s*coarse\)[\s\S]*?\.ss-studio-text-node-card \.ss-studio-port-pin\s*\{[^}]*--ss-studio-port-hit-size:\s*var\(--ss-touch-target\);/
+    );
   });
 
   it("does not ship the retired Readwise integration", () => {

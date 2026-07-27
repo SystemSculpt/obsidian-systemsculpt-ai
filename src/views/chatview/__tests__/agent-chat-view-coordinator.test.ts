@@ -57,6 +57,7 @@ describe("AgentChatView coordinator", () => {
     showConfirmMock.mockReset();
   });
 
+
   it("publishes supported vault images with local thumbnail URLs", () => {
     const image = new TFile({ path: "Images/Diagram.png" });
     const note = new TFile({ path: "Notes/Project.md" });

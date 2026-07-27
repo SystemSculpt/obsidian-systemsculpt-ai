@@ -8,12 +8,59 @@ function readStudioCss(): string {
   );
 }
 
+function readStudioPortCss(): string {
+  return readFileSync(
+    resolve(process.cwd(), "src/css/views/studio/node-runtime.css"),
+    "utf8"
+  );
+}
+
 function readRuleBody(css: string, selectorPattern: RegExp): string {
   const match = selectorPattern.exec(css);
   return match?.groups?.body ?? "";
 }
 
 describe("Studio text-node CSS contract", () => {
+  it("keeps the complete output dot visible at rest without adding block height", () => {
+    const css = readStudioCss();
+    const portCss = readStudioPortCss();
+    const cardRule = readRuleBody(
+      portCss,
+      /\.ss-studio-node-card\.ss-studio-text-node-card\s*\{(?<body>[^}]*)\}/s
+    );
+    const portRule = readRuleBody(
+      portCss,
+      /\.ss-studio-text-node-card\s+\.ss-studio-node-ports\s*\{(?<body>[^}]*)\}/s
+    );
+    const labelRule = readRuleBody(
+      portCss,
+      /\.ss-studio-text-node-card\s+\.ss-studio-port-label\s*\{(?<body>[^}]*)\}/s
+    );
+    const pinRule = readRuleBody(
+      portCss,
+      /\.ss-studio-text-node-card\s+\.ss-studio-port-pin\s*\{(?<body>[^}]*)\}/s
+    );
+    const surfaceRule = readRuleBody(
+      css,
+      /\.ss-studio-text-node-display,\s*\.ss-studio-text-node-editor,\s*\.ss-studio-text-node-live-editor\s*\{(?<body>[^}]*)\}/s
+    );
+
+    expect(cardRule).toMatch(/contain:\s*layout style;/);
+    expect(cardRule).toMatch(/overflow:\s*visible;/);
+    expect(portRule).toMatch(/position:\s*absolute;/);
+    expect(portRule).toMatch(/top:\s*50%;/);
+    expect(portRule).toMatch(/right:\s*var\(--ss-space-1\);/);
+    expect(portRule).toMatch(/transform:\s*translateY\(-50%\);/);
+    expect(portRule).toMatch(/padding:\s*0;/);
+    expect(portRule).toMatch(/overflow:\s*visible;/);
+    expect(labelRule).toMatch(/display:\s*none;/);
+    expect(pinRule).toMatch(/opacity:\s*1;/);
+    expect(surfaceRule).toMatch(/padding:\s*var\(--ss-space-1\);/);
+    expect(surfaceRule).toMatch(
+      /padding-inline-end:\s*calc\(var\(--ss-space-1\) \+ var\(--ss-space-3\)\);/
+    );
+  });
+
   it("keeps every text surface constrained by ONE shared box rule — display, textarea, and live editor", () => {
     const css = readStudioCss();
     const sharedTextSurfaceRule = readRuleBody(

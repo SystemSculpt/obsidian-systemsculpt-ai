@@ -282,11 +282,6 @@ describe("FileOperations Studio agent edits", () => {
       error: 'graph.entryNodeIds contains duplicate node ID "overview"',
     },
     {
-      contract: "entry IDs that reference existing nodes",
-      mutate: (document: any) => { document.graph.entryNodeIds = ["missing"]; },
-      error: 'graph.entryNodeIds[0] references missing node "missing"',
-    },
-    {
       contract: "entry IDs with a strict string type",
       mutate: (document: any) => { document.graph.entryNodeIds = [7]; },
       error: "graph.entryNodeIds[0] must be a non-empty string",
@@ -328,9 +323,25 @@ describe("FileOperations Studio agent edits", () => {
     expect(() => assertValidStudioProjectAgentDocumentStructure(document)).toThrow(error);
   });
 
-  it("rejects a visual-only text node as an entry point through the ordinary file guard", () => {
+  it("accepts visual-only and stale entry points because entry IDs are derived data recomputed by Studio", () => {
+    // The visual-only classification changes across plugin versions
+    // (studio.text became executable in 6.2.x), so a sibling build can
+    // legitimately persist entry IDs this build considers visual-only, and
+    // an edit can delete a node without touching the list. Runs re-derive
+    // entry points from graph structure and parse drops stale references,
+    // so accepting is harmless; rejecting bricks cross-version files.
     const document = JSON.parse(original);
-    document.graph.entryNodeIds = ["overview"];
+    document.graph.nodes.push({
+      id: "terminal",
+      kind: "studio.terminal",
+      version: "1.0.0",
+      title: "Terminal",
+      position: { x: 640, y: 20 },
+      config: {},
+      continueOnError: false,
+      disabled: false,
+    });
+    document.graph.entryNodeIds = ["terminal", "no-longer-exists"];
 
     expect(() => assertValidStudioProjectAgentFileMutation({
       path: file.path,
@@ -338,7 +349,7 @@ describe("FileOperations Studio agent edits", () => {
       mode: "overwrite",
       previousContent: original,
       content: JSON.stringify(document),
-    })).toThrow('Entry node "overview" must be executable, not visual-only.');
+    })).not.toThrow();
   });
 
   it("keeps Studio-owned identity and authoring reference fields stable", async () => {

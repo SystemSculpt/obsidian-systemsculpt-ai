@@ -118,7 +118,29 @@ describe("Studio built-in text/image node execution", () => {
   const registry = new StudioNodeRegistry();
   registerBuiltInStudioNodes(registry);
 
-  it("text node emits configured text for downstream nodes", async () => {
+  it("minimal text node exposes and emits its exact configured text", async () => {
+    const definition = registry.get("studio.text", "1.0.0");
+    expect(definition).toBeDefined();
+    expect(definition?.inputPorts).toEqual([]);
+    expect(definition?.outputPorts).toEqual([{ id: "text", type: "text" }]);
+
+    const result = await definition!.execute(
+      createContext({
+        nodeId: "prompt-source",
+        kind: "studio.text",
+        config: {
+          value: "Portrait of a fox in amber light",
+          fontSize: 14,
+        },
+      })
+    );
+
+    expect(result.outputs).toEqual({
+      text: "Portrait of a fox in amber light",
+    });
+  });
+
+  it("text output node emits configured text for downstream nodes", async () => {
     const definition = registry.get("studio.text_output", "1.0.0");
     expect(definition).toBeDefined();
 
@@ -138,7 +160,7 @@ describe("Studio built-in text/image node execution", () => {
     expect(result.outputs.text).toBe("Edited note text");
   });
 
-  it("text node falls back to upstream text when config is empty", async () => {
+  it("text output node falls back to upstream text when config is empty", async () => {
     const definition = registry.get("studio.text_output", "1.0.0");
     expect(definition).toBeDefined();
 

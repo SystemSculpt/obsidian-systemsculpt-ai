@@ -221,4 +221,81 @@ describe("ManagedImageGenerationAdapter", () => {
       timer.mockRestore();
     }
   });
+
+  function pollHarness(status: jest.Mock) {
+    const jobId = "123e4567-e89b-42d3-a456-426614174000";
+    let current = record("admitted", 1);
+    const recovery = {
+      createAdmitted: jest.fn(async () => current),
+      read: jest.fn(async () => current),
+      markContentReady: jest.fn(async () => (current = record("content_ready", 2))),
+      beginDispatch: jest.fn(async (_capability, _id, _revision, pending) => (current = record(`${pending.operation}_dispatching`, current.revision + 1))),
+      acknowledgePrepared: jest.fn(),
+      acknowledgeImageCreated: jest.fn(async () => (current = record("processing", current.revision + 1, jobId))),
+      applyReconciliation: jest.fn(async () => (current = record("result_ready", current.revision + 1, jobId))),
+      markLocalCommitPending: jest.fn(),
+      completeLocalCommit: jest.fn(),
+    };
+    const metadata = { index: 0, mime_type: "image/png" as const, size_bytes: 1, sha256: HASH_A, width: 1, height: 1 };
+    const waits: number[] = [];
+    const adapter = new ManagedImageGenerationAdapter({
+      admission: { acquireLease: jest.fn(async () => ({ outcome: "allowed" })) } as never,
+      recovery,
+      jobs: {
+        prepareInputs: jest.fn(),
+        create: jest.fn(async () => ({ job: { id: jobId, status: "queued" } })),
+        status,
+        downloadOutput: jest.fn(async () => ({ metadata, bytes: new Uint8Array([1]).buffer })),
+      } as never,
+      createRequestId: () => "request-1",
+      wait: async (milliseconds: number) => { waits.push(milliseconds); },
+    });
+    const generate = () => adapter.generate({
+      operationId: "studio-image-run-node",
+      sourceIdentity: "studio:project:run:node",
+      buildPayload: () => ({ prompt: "Draw" }),
+    });
+    return { generate, waits, metadata, jobId };
+  }
+
+  it("retries transient status failures with backoff instead of failing the run", async () => {
+    const jobId = "123e4567-e89b-42d3-a456-426614174000";
+    const retryable503 = Object.assign(new Error("SystemSculpt processing is temporarily unavailable."), {
+      name: "ManagedJobError", code: "temporarily_unavailable", retryable: true,
+    });
+    const transportBlip = new TypeError("connection reset");
+    const status = jest.fn()
+      .mockRejectedValueOnce(retryable503)
+      .mockRejectedValueOnce(transportBlip)
+      .mockResolvedValueOnce({ job: { id: jobId, status: "processing" }, outputs: [], poll_after_ms: 0 })
+      .mockRejectedValueOnce(retryable503)
+      .mockImplementation(async () => ({
+        job: { id: jobId, status: "succeeded" },
+        outputs: [{ index: 0, mime_type: "image/png", size_bytes: 1, sha256: HASH_A, width: 1, height: 1 }],
+      }));
+    const harness = pollHarness(status);
+
+    await expect(harness.generate()).resolves.toMatchObject({ jobId });
+    expect(status).toHaveBeenCalledTimes(5);
+    // Backoff doubles per consecutive failure and resets after a good poll.
+    expect(harness.waits).toEqual([2_000, 4_000, 0, 2_000]);
+  });
+
+  it("does not retry protocol violations and gives up after consecutive transient failures", async () => {
+    const malformed = Object.assign(new Error("Malformed managed job response."), {
+      name: "ManagedJobError", code: "malformed_response", retryable: false,
+    });
+    const malformedHarness = pollHarness(jest.fn().mockRejectedValue(malformed));
+    await expect(malformedHarness.generate()).rejects.toMatchObject({ code: "malformed_response" });
+    expect(malformedHarness.waits).toEqual([]);
+
+    const retryable503 = Object.assign(new Error("SystemSculpt processing is temporarily unavailable."), {
+      name: "ManagedJobError", code: "temporarily_unavailable", retryable: true,
+    });
+    const exhausted = jest.fn().mockRejectedValue(retryable503);
+    const exhaustedHarness = pollHarness(exhausted);
+    await expect(exhaustedHarness.generate()).rejects.toMatchObject({ code: "temporarily_unavailable" });
+    expect(exhausted).toHaveBeenCalledTimes(6);
+    expect(exhaustedHarness.waits).toEqual([2_000, 4_000, 8_000, 16_000, 30_000]);
+  });
 });

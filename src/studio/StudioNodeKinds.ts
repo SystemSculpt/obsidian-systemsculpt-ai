@@ -1,4 +1,4 @@
-const VISUAL_ONLY_NODE_KINDS = new Set<string>(["studio.text", "studio.terminal"]);
+const VISUAL_ONLY_NODE_KINDS = new Set<string>(["studio.terminal"]);
 const MANAGED_OUTPUT_PRODUCER_NODE_KINDS = new Set<string>([
   "studio.image_generation",
 ]);
