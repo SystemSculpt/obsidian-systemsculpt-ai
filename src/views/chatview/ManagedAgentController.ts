@@ -664,17 +664,27 @@ export class ManagedAgentController {
           return { kind: "completed", operation, snapshot: active.snapshot };
         }
 
-        const rotateSession = this.assertToolContinuationBudget(
-          operation,
-          acceptedRequest,
-          phase,
-          checkpointSnapshot,
-          message,
-          sessionBudget,
+        // Only client-run tools produce results the server is waiting on. A
+        // batch the server executed entirely itself (e.g. web_search) already
+        // continued upstream inside this same stream, so a continuation round
+        // would have nothing to send — the delta composes to zero messages
+        // and the dispatch fails as an unpreparable transcript.
+        const clientTools = streamed.result.tools.filter(
+          (streamedTool) => streamedTool.location !== "server",
         );
-        if (rotateSession) {
-          await this.host.clearSessionCheckpoint();
-          this.assertOpen(active);
+        if (clientTools.length > 0) {
+          const rotateSession = this.assertToolContinuationBudget(
+            operation,
+            acceptedRequest,
+            phase,
+            checkpointSnapshot,
+            message,
+            sessionBudget,
+          );
+          if (rotateSession) {
+            await this.host.clearSessionCheckpoint();
+            this.assertOpen(active);
+          }
         }
         for (const streamedTool of streamed.result.tools) {
           await this.settleTool(active, streamedTool, input.approvalPolicy);
@@ -683,6 +693,11 @@ export class ManagedAgentController {
         const persistedCheckpoint = await this.host.persistAssistant(message, "tool_checkpoint");
         this.assertOpen(active);
         active.checkpointMessage = undefined;
+        if (clientTools.length === 0) {
+          this.emit(active, { type: "run.completed" }, true);
+          this.notifyTerminal(active);
+          return { kind: "completed", operation, snapshot: active.snapshot };
+        }
         const durable = persistedCheckpoint ?? this.host.snapshot();
         checkpointSnapshot = durable;
         phase = "continuation";

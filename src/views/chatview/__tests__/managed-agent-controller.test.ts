@@ -297,6 +297,48 @@ describe("ManagedAgentController", () => {
     expect(harness.persisted[0].message.content).toContain("https://example.com");
   });
 
+  it("completes a pure server-executed tool batch without dispatching a continuation", async () => {
+    // Regression: the real server streams web_search as a full tool call
+    // (tool_call_delta/completed + finish_reason "tool_calls"), settled by a
+    // server_tool_result event. A batch with no client-run tools has no
+    // results to send back — its continuation delta composes to zero
+    // messages, which the runtime adapter rejects as an unpreparable
+    // transcript ("This chat history could not be prepared safely."). The
+    // run must complete after settling instead of dispatching again; the
+    // single mocked response makes any second dispatch fail this test.
+    const harness = createHarness([[
+      {
+        kind: "server_tool_result",
+        toolCallId: "call_web_1",
+        status: "succeeded",
+        details: { tool: "web_search", query: "current answer", result_count: 3 },
+      },
+      { kind: "tool_call_delta", index: 0, id: "call_web_1", name: "web_search", arguments: "{}" },
+      { kind: "content_delta", text: "Answer grounded in search results." },
+      { kind: "finish_reason", reason: "tool_calls" },
+      { kind: "usage", promptTokens: 2, completionTokens: 3, totalTokens: 5 },
+      checkpointEvent(1),
+      { kind: "tool_call_completed", index: 0, id: "call_web_1", name: "web_search", arguments: "{}" },
+      { kind: "done" },
+    ]]);
+
+    const result = await harness.controller.start({ commit: { kind: "append", message: user() } });
+
+    expect(result.kind).toBe("completed");
+    expect(harness.runtime.dispatch).toHaveBeenCalledTimes(1);
+    expect(harness.host.executeLocalTool).not.toHaveBeenCalled();
+    const snapshot = harness.controller.getSnapshot();
+    expect(snapshot.status).toBe("completed");
+    expect(selectToolCall(snapshot, "user-1:assistant:0:tool:0")).toMatchObject({ state: "succeeded" });
+    const settled = harness.persisted[harness.persisted.length - 1].message;
+    expect(settled.content).toContain("Answer grounded in search results.");
+    expect(settled.tool_calls?.[0]).toMatchObject({
+      id: "call_web_1",
+      state: "completed",
+      executedOn: "server",
+    });
+  });
+
   it("continues a mixed server and vault batch with only the vault result", async () => {
     const vaultArgs = JSON.stringify({ paths: ["Notes/release.md"] });
     const harness = createHarness([
