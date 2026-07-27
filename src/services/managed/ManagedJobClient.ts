@@ -21,7 +21,21 @@ const MANAGED_JOB_HTTP_ERROR_MESSAGES: Readonly<Record<number, string>> = Object
   502: "SystemSculpt processing is temporarily unavailable.",
   503: "SystemSculpt processing is temporarily unavailable.",
 });
-export class ManagedJobError extends Error { constructor(public readonly code: ErrorCode, message: string, public readonly status?: number, public readonly requestId: string | null = null, public readonly retryable = false) { super(message); this.name = "ManagedJobError"; } }
+export class ManagedJobError extends Error { constructor(public readonly code: ErrorCode, message: string, public readonly status?: number, public readonly requestId: string | null = null, public readonly retryable = false, public readonly jobFailure: { jobId: string | null; code: string | null } | null = null) { super(message); this.name = "ManagedJobError"; } }
+
+// Server-authored job failure detail. Codes and messages come from the
+// managed API's fixed public taxonomy, but treat them as untrusted input:
+// only a small character set and bounded length may reach users or logs.
+const JOB_ERROR_CODE_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
+const JOB_ERROR_MESSAGE_PATTERN = /^[\x20-\x7E]{1,240}$/;
+function jobFailureDetail(holder: unknown): { jobId: string | null; code: string | null; message: string | null } {
+  const record = holder && typeof holder === "object" && !Array.isArray(holder) ? holder as JsonObject : null;
+  const jobId = record && typeof record.id === "string" && record.id.length <= 256 ? record.id : null;
+  const error = record && record.error && typeof record.error === "object" && !Array.isArray(record.error) ? record.error as JsonObject : null;
+  const code = error && typeof error.code === "string" && JOB_ERROR_CODE_PATTERN.test(error.code) ? error.code : null;
+  const message = error && typeof error.message === "string" && JOB_ERROR_MESSAGE_PATTERN.test(error.message) ? error.message : null;
+  return { jobId, code, message };
+}
 
 export const MANAGED_JOB_OPERATION_STATUSES = {
   transcription: { create: ["uploading"], upload_complete: ["queued"], upload_abort: ["failed"], start: ["queued", "processing", "succeeded", "failed"], status: ["uploading", "queued", "processing", "succeeded", "failed", "expired"] },
@@ -143,7 +157,15 @@ export class ManagedJobClient {
     if (!result.response.ok) { if (imageOutputRequestId) return this.imageOutputError(result, imageOutputRequestId); const map: Record<number, [ErrorCode, boolean]> = { 400: ["invalid_request", false], 401: ["license_required", false], 402: ["payment_required", false], 403: ["license_rejected", false], 409: ["operation_conflict", false], 426: ["upgrade_required", false], 429: ["rate_limited", true], 502: ["temporarily_unavailable", true], 503: ["temporarily_unavailable", true] }; const [code, retryable] = map[result.response.status] ?? ["managed_job_error", false]; const message = MANAGED_JOB_HTTP_ERROR_MESSAGES[result.response.status] ?? `Managed job request failed (${result.response.status}).`; throw new ManagedJobError(code, message, result.response.status, result.diagnostics.requestId, retryable); }
     if (imageOutputRequestId && result.response.headers.get("x-request-id") !== imageOutputRequestId) malformed("Invalid managed image output response request ID.");
     let value: unknown; try { value = await result.response.json(); } catch { malformed("Expected a JSON response."); }
-    const parsed = this.validateResponse(capability, operation, value); const terminal = operation === "upload_abort" ? null : this.terminalError(capability, parsed); if (terminal) throw new ManagedJobError(terminal, terminal === "job_expired" ? "The managed job expired." : "Managed job failed.", result.response.status, result.diagnostics.requestId, false); return parsed;
+    const parsed = this.validateResponse(capability, operation, value); const terminal = operation === "upload_abort" ? null : this.terminalError(capability, parsed);
+    if (terminal) {
+      const holder = (parsed as { job?: unknown; document?: unknown } | null)?.job ?? (parsed as { document?: unknown } | null)?.document;
+      const detail = jobFailureDetail(holder);
+      const fallback = terminal === "job_expired" ? "The managed job expired." : "Managed job failed.";
+      const message = terminal === "job_expired" ? fallback : detail.message ?? fallback;
+      throw new ManagedJobError(terminal, message, result.response.status, result.diagnostics.requestId, false, { jobId: detail.jobId, code: detail.code });
+    }
+    return parsed;
   }
 
   private terminalError(c: ManagedJobCapability, value: any): ErrorCode | null { const holder = value?.job ?? value?.document; const status = holder?.status; if (status === "expired") return "job_expired"; if (status === "failed") return c === "transcription" ? "transcription_failed" : c === "document_processing" ? "document_processing_failed" : "image_generation_failed"; return null; }

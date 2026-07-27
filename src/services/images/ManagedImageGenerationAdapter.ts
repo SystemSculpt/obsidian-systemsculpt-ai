@@ -15,6 +15,12 @@ import { sha256HexFromBytesPortable } from "../../studio/hash";
 const CAPABILITY = "image_generation" as const;
 const DEFAULT_POLL_INTERVAL_MS = 2_000;
 const DEFAULT_MAX_POLLS = 900;
+// A generation can run for minutes; one dropped poll must not kill the whole
+// run. Consecutive transient status failures (rate limits, 5xx, transport
+// loss) retry with exponential backoff up to this bound before surfacing.
+const MAX_CONSECUTIVE_TRANSIENT_STATUS_FAILURES = 5;
+const TRANSIENT_STATUS_BACKOFF_BASE_MS = 2_000;
+const TRANSIENT_STATUS_BACKOFF_MAX_MS = 30_000;
 
 export type ManagedImageGenerationInput = Readonly<{
   mimeType: "image/png" | "image/jpeg" | "image/webp";
@@ -184,6 +190,16 @@ function terminalStatusFromError(error: unknown): "failed" | "expired" | null {
   return null;
 }
 
+function isTransientStatusError(error: unknown): boolean {
+  if (error instanceof DOMException && error.name === "AbortError") return false;
+  const candidate = error as Partial<ManagedJobError> | null;
+  if (candidate?.name === "ManagedJobError") return candidate.retryable === true;
+  // Anything else thrown by the status call is transport-level (connection
+  // reset, DNS blip); protocol violations arrive as non-retryable
+  // ManagedJobErrors and are excluded above.
+  return true;
+}
+
 export class ManagedImageGenerationAdapter {
   private readonly createRequestId: () => string;
   private readonly now: () => string;
@@ -289,15 +305,30 @@ export class ManagedImageGenerationAdapter {
     const jobId = record.jobId;
     if (!jobId) throw new Error("Managed image generation recovery record is missing its job ID.");
 
+    let consecutiveTransientFailures = 0;
     for (let poll = 0; poll < this.maxPolls; poll += 1) {
       throwIfAborted(signal);
       let status: ImageStatusResponse;
       try {
         status = await this.dependencies.jobs.status(jobId, signal);
+        consecutiveTransientFailures = 0;
       } catch (error) {
         const terminal = terminalStatusFromError(error);
         if (terminal) {
           await this.dependencies.recovery.applyReconciliation(CAPABILITY, record.operationId, record.revision, terminal);
+          throw error;
+        }
+        if (
+          isTransientStatusError(error) &&
+          consecutiveTransientFailures < MAX_CONSECUTIVE_TRANSIENT_STATUS_FAILURES
+        ) {
+          consecutiveTransientFailures += 1;
+          const backoff = Math.min(
+            TRANSIENT_STATUS_BACKOFF_MAX_MS,
+            TRANSIENT_STATUS_BACKOFF_BASE_MS * 2 ** (consecutiveTransientFailures - 1),
+          );
+          await this.wait(backoff, signal);
+          continue;
         }
         throw error;
       }
