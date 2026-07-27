@@ -1153,4 +1153,48 @@ describe("StudioProjectGenerationStore", () => {
     expect(synced.generation.metadata.commandKind).toBe("external_sync");
     expect(new TextDecoder().decode(synced.generation.files.get("project.systemsculpt"))).toBe(edited);
   });
+
+  it("opens a project whose entry IDs another build persisted as visual-only or stale", async () => {
+    // Regression for the incident where a sibling plugin build (with
+    // studio.text classified as executable) recomputed entryNodeIds to
+    // include text nodes, and an older build then refused to open the file
+    // with 'Entry node ... must be executable, not visual-only.' Entry IDs
+    // are derived data: openability must never depend on them.
+    const parsed = JSON.parse(legacyProject);
+    parsed.graph.nodes = [
+      {
+        id: "node_text",
+        kind: "studio.terminal",
+        version: "1.0.0",
+        title: "Visual only in this build",
+        position: { x: 0, y: 0 },
+        config: {},
+      },
+      {
+        id: "node_image",
+        kind: "studio.image_generation",
+        version: "1.0.0",
+        title: "Image Generation",
+        position: { x: 320, y: 0 },
+        config: { prompt: "a fox", count: 1, aspectRatio: "1:1" },
+      },
+    ];
+    parsed.graph.edges = [];
+    parsed.graph.entryNodeIds = ["node_text", "node_image", "node_deleted_elsewhere"];
+    const crossBuildProject = `${JSON.stringify(parsed, null, 2)}\n`;
+
+    const adapter = new MemoryAdapter();
+    await adapter.write(locator.vaultRelativeProjectPath, crossBuildProject);
+    await adapter.write("SystemSculpt/Studio/Alpha.systemsculpt-assets/policy/grants.json", "{\"schema\":\"studio.policy.v1\"}\n");
+    const root = await new StudioProjectGenerationStore(adapter, { now: () => "2026-07-11T01:02:03.004Z" }).discoverAndAdopt(locator);
+    expect(root.status).toBe("committed");
+    if (root.status !== "committed") return;
+
+    // Reopen must stay ready and preserve the document bytes exactly —
+    // healing happens in the parsed view, never by rewriting the file.
+    const reopened = await new StudioProjectGenerationStore(adapter, { now: () => "2026-07-11T02:02:03.004Z" }).open("project_alpha", locator);
+    expect(reopened.status).toBe("ready");
+    if (reopened.status !== "ready") return;
+    expect(new TextDecoder().decode(reopened.generation.files.get("project.systemsculpt"))).toBe(crossBuildProject);
+  });
 });

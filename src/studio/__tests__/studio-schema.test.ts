@@ -166,6 +166,30 @@ describe("Studio schema", () => {
     expect(parsed.graph.entryNodeIds).toEqual(["prompt"]);
   });
 
+  it("heals entry IDs that reference missing nodes instead of failing to parse", () => {
+    const project = createEmptyStudioProject({
+      name: "Stale entries",
+      policyPath: "SystemSculpt/Studio/Stale entries.systemsculpt-assets/policy/grants.json",
+      minPluginVersion: "6.2.2",
+      maxRuns: 100,
+      maxArtifactsMb: 1024,
+    });
+    project.graph.nodes.push({
+      id: "prompt",
+      kind: "studio.text",
+      version: "1.0.0",
+      title: "Prompt",
+      position: { x: 20, y: 20 },
+      config: { value: "hello", fontSize: 14 },
+      continueOnError: false,
+      disabled: false,
+    });
+    project.graph.entryNodeIds = ["deleted-node", "prompt"];
+
+    const parsed = parseStudioProject(serializeStudioProject(project));
+    expect(parsed.graph.entryNodeIds).toEqual(["prompt"]);
+  });
+
   it("migrates legacy canvas-like payloads into v1", () => {
     const legacy = {
       name: "Legacy",

@@ -152,7 +152,7 @@ export const STUDIO_PROJECT_AGENT_GUIDE = {
   graph: {
     ids: "All node, edge, and group IDs must be non-empty and unique. Keep existing IDs stable; use descriptive deterministic IDs for additions.",
     edges: "Edges are executable data flow only: fromNodeId/fromPortId must name an output port and toNodeId/toPortId an input port from nodeKindReference. Port types must match unless either type is any.",
-    entryNodeIds: "Entry IDs must reference existing executable nodes and identify intended run starting points.",
+    entryNodeIds: "Entry IDs must reference existing nodes and identify intended run starting points. Studio recomputes this list from graph structure, so prefer leaving it untouched.",
     visualOnlyNodes: "Visual-only nodes have no executable ports. Text nodes stay visually minimal but expose their declared text output for data flow; do not invent port IDs.",
     groups: "A group is {id,name,color?,nodeIds}. Membership, not geometry, defines its bounds. Every nodeId must exist, a node should belong to at most one group, and color must be #rgb or #rrggbb.",
   },
@@ -188,15 +188,13 @@ export function validateStudioProjectForAgentEdit(project: StudioProjectV1): voi
   // can persist (placeholder nodes, unfinished configs, unwired required
   // inputs). Run readiness is enforced separately by the runtime's strict
   // compile when the user actually runs the graph.
+  //
+  // graph.entryNodeIds is deliberately not validated here. It is derived
+  // data: the canvas recomputes it on every mutation and scopeProjectForRun
+  // re-derives real entry points from executable-graph structure, ignoring
+  // the persisted list. The visual-only classification also changes across
+  // plugin versions (studio.text became executable in 6.2.x), so rejecting
+  // an entry by kind bricks files persisted by a sibling build. parse
+  // drops entry IDs that reference missing nodes.
   new StudioGraphCompiler().compile(project, builtInRegistry, { validation: "document" });
-  const nodesById = new Map(project.graph.nodes.map((node) => [node.id, node] as const));
-  for (const entryNodeId of project.graph.entryNodeIds) {
-    const entryNode = nodesById.get(entryNodeId);
-    if (!entryNode) {
-      throw new Error(`Entry node "${entryNodeId}" does not exist.`);
-    }
-    if (isStudioVisualOnlyNodeKind(entryNode.kind)) {
-      throw new Error(`Entry node "${entryNodeId}" must be executable, not visual-only.`);
-    }
-  }
 }
