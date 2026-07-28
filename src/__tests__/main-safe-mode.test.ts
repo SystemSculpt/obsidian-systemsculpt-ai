@@ -69,6 +69,7 @@ describe("SystemSculptPlugin safe mode + version gate (#212)", () => {
 
   it("onload enters safe mode (and never rethrows) when core initialization throws (#183)", async () => {
     const plugin = makePlugin();
+    const debug = jest.spyOn(console, "debug").mockImplementation(() => undefined);
     jest.spyOn(plugin as any, "configureLifecycle").mockImplementation(() => {
       throw new Error("simulated fatal init failure");
     });
@@ -81,6 +82,7 @@ describe("SystemSculptPlugin safe mode + version gate (#212)", () => {
     expect(plugin._commands.map((c: { id: string }) => c.id)).toContain(
       "systemsculpt-show-load-diagnostics"
     );
+    expect(debug).toHaveBeenCalledWith("[SystemSculpt] v1.0.0 build dev");
   });
 
   it("stops recorder capture before any fallible service teardown", async () => {

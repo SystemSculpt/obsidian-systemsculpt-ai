@@ -10,6 +10,7 @@ import {
   DEVELOPMENT_BUILD_MANIFEST_KEY,
   formatSyncTarget,
   loadConfiguredTargets,
+  replaceFileAtomically,
   reloadConfiguredTargets,
   syncConfiguredTargets,
 } from "./plugin-sync.mjs";
@@ -88,7 +89,97 @@ test("syncConfiguredTargets copies local artifacts and removes obsolete extras",
   assert.equal(fs.existsSync(path.join(pluginDir, "README.md")), false);
   assert.equal(fs.existsSync(path.join(pluginDir, "node_modules")), false);
   assert.equal(
-    fs.readdirSync(pluginDir).some((name) => name.includes(".systemsculpt-sync-")),
+    fs.readdirSync(pluginDir).some((name) => name.includes(".systemsculpt-replace-")),
+    false,
+  );
+});
+
+test("repeat sync safely replaces existing target artifacts with Windows rename semantics", (t) => {
+  const root = createTempRoot(t);
+  writePluginArtifacts(root);
+  const pluginDir = path.join(root, "vault", ".obsidian", "plugins", "systemsculpt-ai");
+  const configPath = writeSyncConfig(root, { pluginTargets: [{ path: pluginDir }] });
+  const replacement = (filePath, bytes) => replaceFileAtomically(filePath, bytes, {
+    platform: "win32",
+    maxRetries: 2,
+    retryDelayMs: 0,
+    sleep() {},
+    fsImpl: {
+      ...fs,
+      renameSync(source, destination) {
+        if (
+          source.includes(".systemsculpt-replace-")
+          && source.endsWith(".tmp")
+          && destination === filePath
+          && fs.existsSync(destination)
+        ) {
+          const error = new Error("Windows refuses to rename over an existing file");
+          error.code = "EEXIST";
+          throw error;
+        }
+        fs.renameSync(source, destination);
+      },
+    },
+  });
+
+  syncConfiguredTargets({
+    root,
+    configPath,
+    logger: silentLogger,
+    buildIdentity,
+    replaceFile: replacement,
+  });
+  fs.writeFileSync(path.join(root, "main.js"), "module.exports = { version: 'updated' };\n");
+  syncConfiguredTargets({
+    root,
+    configPath,
+    logger: silentLogger,
+    buildIdentity,
+    replaceFile: replacement,
+  });
+
+  assert.equal(
+    fs.readFileSync(path.join(pluginDir, "main.js"), "utf8"),
+    "module.exports = { version: 'updated' };\n",
+  );
+  assert.equal(
+    fs.readdirSync(pluginDir).some((name) => name.includes(".systemsculpt-replace-")),
+    false,
+  );
+});
+
+test("failed Windows replacement restores the previous artifact", (t) => {
+  const root = createTempRoot(t);
+  const target = path.join(root, "main.js");
+  fs.writeFileSync(target, "previous bytes\n", "utf8");
+  let targetWasBackedUp = false;
+
+  assert.throws(
+    () => replaceFileAtomically(target, Buffer.from("new bytes\n"), {
+      platform: "win32",
+      maxRetries: 0,
+      sleep() {},
+      fsImpl: {
+        ...fs,
+        renameSync(source, destination) {
+          if (source.endsWith(".tmp") && destination === target) {
+            const error = new Error("replacement remained locked");
+            error.code = "EPERM";
+            throw error;
+          }
+          if (source === target && destination.endsWith(".bak")) {
+            targetWasBackedUp = true;
+          }
+          fs.renameSync(source, destination);
+        },
+      },
+    }),
+    /replacement remained locked/,
+  );
+  assert.equal(targetWasBackedUp, true);
+  assert.equal(fs.readFileSync(target, "utf8"), "previous bytes\n");
+  assert.equal(
+    fs.readdirSync(root).some((name) => name.includes(".systemsculpt-replace-")),
     false,
   );
 });

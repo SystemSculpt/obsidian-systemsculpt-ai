@@ -172,6 +172,39 @@ describe("AgentTranscriptRepository", () => {
     expect(records.get(accepted.chatId).managedSession).toBeUndefined();
   });
 
+  it.each([
+    ["repeated revision", sessionId, 1],
+    ["skipped revision", sessionId, 3],
+    ["changed session", "mchat_fedcba9876543210fedcba9876543210", 2],
+  ])("rejects a %s checkpoint without mutating or saving durable state", async (
+    _label,
+    candidateSessionId,
+    candidateRevision,
+  ) => {
+    const { repository, records, storage } = createHarness();
+    const accepted = await repository.commitUser({ kind: "append", message: user("u1") });
+    await repository.persistAssistantWithSession(
+      assistant("a1", "First checkpoint"),
+      { id: sessionId, revision: 1 },
+      toolsetFingerprint,
+      budget,
+    );
+    const beforeSnapshot = repository.snapshot();
+    const beforeRecord = structuredClone(records.get(accepted.chatId));
+    storage.saveChat.mockClear();
+
+    await expect(repository.persistAssistantWithSession(
+      assistant("a2", "Must not persist"),
+      { id: candidateSessionId, revision: candidateRevision },
+      toolsetFingerprint,
+      budget,
+    )).rejects.toThrow("non-sequential managed session checkpoint");
+
+    expect(storage.saveChat).not.toHaveBeenCalled();
+    expect(repository.snapshot()).toEqual(beforeSnapshot);
+    expect(records.get(accepted.chatId)).toEqual(beforeRecord);
+  });
+
   it("restores only a final clean assistant anchor and durably removes stale bindings", async () => {
     const valid = createHarness();
     valid.records.set("valid", {

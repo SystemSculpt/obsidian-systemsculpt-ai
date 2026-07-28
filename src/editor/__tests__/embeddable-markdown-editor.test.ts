@@ -203,6 +203,7 @@ describe("createEmbeddableMarkdownEditor", () => {
   });
 
   it("returns null when native markdown surface resolution throws", () => {
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined);
     const app: any = {
       embedRegistry: {
         embedByExtension: {
@@ -215,6 +216,10 @@ describe("createEmbeddableMarkdownEditor", () => {
     expect(
       createEmbeddableMarkdownEditor(app, document.body.createDiv(), {})
     ).toBeNull();
+    expect(warn).toHaveBeenCalledWith(
+      "[SystemSculpt] Native markdown surface resolution failed; falling back to plain editing",
+      "internal shape changed",
+    );
   });
 
   it("constructs the surface from Obsidian's native markdown embed component", () => {

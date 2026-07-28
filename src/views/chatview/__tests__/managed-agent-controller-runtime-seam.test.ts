@@ -11,6 +11,7 @@ import {
   ManagedAgentController,
   type ManagedAgentControllerHost,
 } from "../ManagedAgentController";
+import { ChatMarkdownSerializer } from "../storage/ChatMarkdownSerializer";
 import { ManagedChatRuntimeAdapter } from "../turn/ManagedChatRuntimeAdapter";
 
 // Seam tests: the controller drives the REAL ManagedChatRuntimeAdapter,
@@ -20,7 +21,18 @@ import { ManagedChatRuntimeAdapter } from "../turn/ManagedChatRuntimeAdapter";
 // the server receives (which the server's transcript validation judges), and
 // both have shipped production incidents that mocked suites green-lit.
 
-jest.mock("obsidian", () => jest.requireActual("obsidian"));
+jest.mock("obsidian", () => ({
+  parseYaml: jest.fn((content: string) => {
+    const result: Record<string, unknown> = {};
+    for (const line of content.split("\n")) {
+      const match = line.match(/^(\w+):\s*(.*)$/);
+      if (!match) continue;
+      const [, key, value] = match;
+      result[key] = value === "" ? null : value.replace(/^["']|["']$/g, "");
+    }
+    return result;
+  }),
+}));
 
 class QueueClient extends PlatformRequestClient {
   inputs: PlatformRequestInput[] = [];
@@ -97,6 +109,36 @@ function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
 
+function saveAndReloadMessages(messages: readonly ChatMessage[], chatId = "chat-1"): ChatMessage[] {
+  const serialized = ChatMarkdownSerializer.serializeMessages(clone([...messages]) as ChatMessage[]);
+  const parsed = ChatMarkdownSerializer.parseMarkdown(`---
+id: ${chatId}
+---
+
+${serialized}`);
+  if (!parsed) throw new Error(`Failed to reload persisted chat transcript for ${chatId}.`);
+  return clone(parsed.messages);
+}
+
+function expectSchemaValidAssistantProjection(
+  wire: ReadonlyArray<Record<string, unknown>>,
+): Record<string, unknown> | undefined {
+  const assistants = wire.filter((message) => message.role === "assistant");
+  expect(assistants.length).toBeLessThanOrEqual(1);
+  const assistant = assistants[0];
+  if (!assistant) return undefined;
+
+  const content = assistant.content;
+  const toolCalls = assistant.tool_calls;
+  const hasNonEmptyContent = typeof content === "string"
+    ? content.length > 0
+    : Array.isArray(content) && content.length > 0;
+  const hasToolCalls = Array.isArray(toolCalls) && toolCalls.length > 0;
+
+  expect(hasNonEmptyContent || hasToolCalls).toBe(true);
+  return assistant;
+}
+
 function createSeamHarness(
   executeLocalTool: (toolCall: ToolCall, signal: AbortSignal) => Promise<unknown> = async () => ({
     success: true,
@@ -112,7 +154,7 @@ function createSeamHarness(
   const requestClient = new QueueClient();
   const transport = new HostedTransportAdapter({
     baseUrl: "https://api.test",
-    pluginVersion: "6.2.5",
+    pluginVersion: "6.2.6",
     licenseKey: () => "key",
     requestClient,
   });
@@ -131,6 +173,11 @@ function createSeamHarness(
     backend: "systemsculpt",
     messages: Object.freeze(clone(messages)),
   });
+  const replaceTranscript = (nextMessages: readonly ChatMessage[]) => {
+    messages = clone([...nextMessages]) as ChatMessage[];
+    version += 1;
+    return snapshot();
+  };
 
   const host: ManagedAgentControllerHost = {
     acquireChatTurnLease: jest.fn(async () => ({ outcome: "allowed" as const, lease })),
@@ -183,7 +230,7 @@ function createSeamHarness(
     })(),
   }).start({ commit: { kind: "append", message: { role: "user", content, message_id: id } } });
 
-  return { requestClient, host, startTurn, transcript: snapshot };
+  return { requestClient, host, startTurn, transcript: snapshot, replaceTranscript };
 }
 
 function requestMessages(input: PlatformRequestInput): ReadonlyArray<Record<string, unknown>> {
@@ -212,7 +259,7 @@ describe("ManagedAgentController through the real runtime adapter", () => {
     });
   });
 
-  it("sends a follow-up after a search turn without the unanswerable server call", async () => {
+  it("sends a follow-up after a search turn through a real save and reload without the unanswerable server call", async () => {
     // Incident guard: the durable transcript keeps the server-executed call
     // but never a result row for it, and the server's transcript validation
     // requires exactly one result per call on session create/rebase. Keeping
@@ -224,14 +271,130 @@ describe("ManagedAgentController through the real runtime adapter", () => {
     harness.requestClient.responses.push(response(TEXT_TURN_WIRE("Cloudflare and Modal, briefly.")));
 
     await harness.startTurn("user-1", "tldr about blaxel please");
+    harness.replaceTranscript(saveAndReloadMessages(harness.transcript().messages, "search-follow-up"));
     const followUp = await harness.startTurn("user-2", "who are its competitors?");
 
     expect(followUp.kind).toBe("completed");
     expect(harness.requestClient.inputs).toHaveLength(2);
     const wire = requestMessages(harness.requestClient.inputs[1]);
+    const assistant = expectSchemaValidAssistantProjection(wire);
     expect(wire.map((message) => message.role)).toEqual(["user", "assistant", "user"]);
     expect(JSON.stringify(wire)).not.toContain("call_web_1");
-    expect(wire[1]).not.toHaveProperty("tool_calls");
+    expect(assistant).toMatchObject({
+      role: "assistant",
+      content: "Blaxel is cloud infrastructure for AI agents.",
+    });
+    expect(assistant).not.toHaveProperty("tool_calls");
+  });
+
+  it("projects a reloaded legacy web search follow-up without relying on executedOn metadata", async () => {
+    const harness = createSeamHarness();
+    const legacyWebSearchToolCall = {
+      id: "call_web_legacy",
+      messageId: "assistant-search",
+      request: {
+        id: "call_web_legacy",
+        type: "function" as const,
+        function: {
+          name: "web_search",
+          arguments: JSON.stringify({ query: "release notes" }),
+        },
+      },
+      state: "completed" as const,
+      timestamp: 1,
+      result: {
+        success: true as const,
+        data: { tool: "web_search", result_count: 1 },
+      },
+    };
+    harness.replaceTranscript(saveAndReloadMessages([
+      { role: "user", content: "Search release notes", message_id: "user-search" },
+      {
+        role: "assistant",
+        content: "Search-backed answer",
+        message_id: "assistant-search",
+        messageParts: [
+          {
+            id: "tool_call_part-call_web_legacy",
+            type: "tool_call",
+            data: legacyWebSearchToolCall,
+            timestamp: 1,
+          },
+          {
+            id: "content-search-answer",
+            type: "content",
+            data: "Search-backed answer",
+            timestamp: 2,
+          },
+        ],
+      },
+    ], "legacy-web-search"));
+    harness.requestClient.responses.push(response(TEXT_TURN_WIRE("It changed recently.")));
+
+    expect(harness.transcript().messages[1]?.tool_calls?.[0]).not.toHaveProperty("executedOn");
+
+    const followUp = await harness.startTurn("user-follow-up", "Follow up");
+
+    expect(followUp.kind).toBe("completed");
+    expect(harness.requestClient.inputs).toHaveLength(1);
+    const wire = requestMessages(harness.requestClient.inputs[0]);
+    const assistant = expectSchemaValidAssistantProjection(wire);
+    expect(wire.map((message) => message.role)).toEqual(["user", "assistant", "user"]);
+    expect(JSON.stringify(wire)).not.toContain("call_web_legacy");
+    expect(assistant).toMatchObject({
+      role: "assistant",
+      content: "Search-backed answer",
+    });
+    expect(assistant).not.toHaveProperty("tool_calls");
+  });
+
+  it("omits a reloaded empty server-only checkpoint instead of sending an empty assistant row", async () => {
+    const harness = createSeamHarness();
+    const legacyEmptyWebSearchToolCall = {
+      id: "call_web_empty",
+      messageId: "assistant-empty-search",
+      request: {
+        id: "call_web_empty",
+        type: "function" as const,
+        function: {
+          name: "web_search",
+          arguments: "{}",
+        },
+      },
+      state: "completed" as const,
+      timestamp: 1,
+      result: {
+        success: true as const,
+        data: { tool: "web_search", result_count: 0 },
+      },
+    };
+    harness.replaceTranscript(saveAndReloadMessages([
+      { role: "user", content: "Search", message_id: "user-search" },
+      {
+        role: "assistant",
+        content: "",
+        message_id: "assistant-empty-search",
+        messageParts: [{
+          id: "tool_call_part-call_web_empty",
+          type: "tool_call",
+          data: legacyEmptyWebSearchToolCall,
+          timestamp: 1,
+        }],
+      },
+    ], "legacy-empty-search"));
+    harness.requestClient.responses.push(response(TEXT_TURN_WIRE("Try a more specific query.")));
+
+    expect(harness.transcript().messages[1]?.tool_calls?.[0]).not.toHaveProperty("executedOn");
+
+    const followUp = await harness.startTurn("user-retry", "Try again");
+
+    expect(followUp.kind).toBe("completed");
+    expect(harness.requestClient.inputs).toHaveLength(1);
+    const wire = requestMessages(harness.requestClient.inputs[0]);
+    expectSchemaValidAssistantProjection(wire);
+    expect(wire.map((message) => message.role)).toEqual(["user", "user"]);
+    expect(JSON.stringify(wire)).not.toContain("call_web_empty");
+    expect(wire.find((message) => message.role === "assistant")).toBeUndefined();
   });
 
   it("continues a mixed batch sending only the vault result and no server call", async () => {

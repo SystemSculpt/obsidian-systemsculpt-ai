@@ -1,6 +1,6 @@
 "use strict";
 
-// Preloaded in Jest processes (via NODE_OPTIONS) to avoid Node's experimental
+// Preloaded in Jest processes through an explicit Node argv entry to avoid Node's experimental
 // webstorage warning in Node 25+ when `localStorage` is accessed without a
 // configured `--localstorage-file` path.
 //
@@ -47,4 +47,3 @@ function defineStorage(name) {
 
 defineStorage("localStorage");
 defineStorage("sessionStorage");
-

@@ -293,6 +293,7 @@ describe("StudioProjectSession", () => {
   });
 
   it("pauses automatic retries after a save failure instead of looping forever", async () => {
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined);
     const saveProject = jest.fn(async () => {
       throw new Error("storage unavailable");
     });
@@ -317,9 +318,17 @@ describe("StudioProjectSession", () => {
       hasPendingLocalSaveWork: true,
       saveFailurePaused: true,
     });
+    expect(warn).toHaveBeenCalledWith(
+      "[SystemSculpt Studio] Unable to persist project session",
+      {
+        projectPath: "Studio/Test.systemsculpt",
+        error: "storage unavailable",
+      },
+    );
   });
 
   it("retries a paused save once after a later explicit mutation", async () => {
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined);
     const saveProject = jest
       .fn<Promise<void>, [string, StudioProjectV1]>()
       .mockRejectedValueOnce(new Error("temporary failure"))
@@ -350,5 +359,12 @@ describe("StudioProjectSession", () => {
     expect(session.getProject().name).toBe("Second edit retries");
     expect(session.hasPendingLocalSaveWork()).toBe(false);
     expect(session.getDebugState().saveFailurePaused).toBe(false);
+    expect(warn).toHaveBeenCalledWith(
+      "[SystemSculpt Studio] Unable to persist project session",
+      {
+        projectPath: "Studio/Test.systemsculpt",
+        error: "temporary failure",
+      },
+    );
   });
 });

@@ -80,12 +80,6 @@ const createMenuStub = () => {
   };
 };
 
-const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
-
-afterAll(() => {
-  consoleErrorSpy.mockRestore();
-});
-
 const createFile = (extension: string): TFile => {
   const name = `Example.${extension}`;
   return new (require("obsidian").TFile)({
@@ -292,6 +286,7 @@ const bootstrap = (
   });
 
   it("reports a created Studio project truthfully when opening its view fails", async () => {
+    const errorSpy = jest.spyOn(console, "error").mockImplementation(() => undefined);
     const {
       handlers,
       createProjectFile,
@@ -310,9 +305,22 @@ const bootstrap = (
     expect(Notice).toHaveBeenCalledWith(
       "Created Studio project, but couldn't open it: Projects/Client/New Studio Project.systemsculpt",
     );
+    expect(errorSpy).toHaveBeenCalledWith(
+      "[SystemSculpt][ERROR] Opening new Studio project failed",
+      {
+        source: "FileContextMenuService",
+        metadata: {
+          folderPath: "Projects/Client",
+          projectPath: "Projects/Client/New Studio Project.systemsculpt",
+          source: "file-explorer",
+        },
+      },
+      expect.any(Error),
+    );
   });
 
   it("reports Studio project creation failures without opening a view", async () => {
+    const errorSpy = jest.spyOn(console, "error").mockImplementation(() => undefined);
     const {
       handlers,
       createProjectFile,
@@ -328,6 +336,18 @@ const bootstrap = (
     expect(activateSystemSculptStudioView).not.toHaveBeenCalled();
     expect(Notice).toHaveBeenCalledWith(
       "Unable to create Studio project: vault write failed",
+    );
+    expect(errorSpy).toHaveBeenCalledWith(
+      "[SystemSculpt][ERROR] New Studio project failed",
+      {
+        source: "FileContextMenuService",
+        metadata: {
+          folderPath: "Projects/Client",
+          projectPath: "Projects/Client/New Studio Project.systemsculpt",
+          source: "file-explorer",
+        },
+      },
+      expect.any(Error),
     );
   });
 
@@ -417,6 +437,7 @@ const bootstrap = (
   });
 
   it("marks the progress panel as failed when conversion errors", async () => {
+    const errorSpy = jest.spyOn(console, "error").mockImplementation(() => undefined);
     const { handlers, documentProcessor, processingPanelLauncher, progressPanel } = bootstrap();
     const menu = createMenuStub();
     const file = createFile("pdf");
@@ -436,6 +457,14 @@ const bootstrap = (
       expect.objectContaining({
         error,
       })
+    );
+    expect(errorSpy).toHaveBeenCalledWith(
+      "[SystemSculpt][ERROR] Document conversion failed",
+      {
+        source: "FileContextMenuService",
+        metadata: { filePath: file.path },
+      },
+      error,
     );
   });
 

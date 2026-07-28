@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 import { App, Platform, TFile } from "obsidian";
-import { ChatStorageService } from "../ChatStorageService";
+import { ChatStorageService, SavedChatCorruptedError } from "../ChatStorageService";
 import { ChatMessage, ChatRole } from "../../../types";
 
 // Mock parseYaml and stringifyYaml
@@ -302,6 +302,23 @@ describe("ChatStorageService resume descriptor contract", () => {
       messageCount: 1,
     });
   });
+
+  it("falls back to null when the saved chat note is corrupted", async () => {
+    const service = new ChatStorageService({} as App, "SystemSculpt/Chats");
+    jest.spyOn(service, "loadChat").mockRejectedValue(
+      new SavedChatCorruptedError("SystemSculpt/Chats/corrupt.md"),
+    );
+
+    await expect(service.getChatResumeDescriptor("corrupt")).resolves.toBeNull();
+  });
+
+  it("does not hide an unexpected resume read failure as a missing chat", async () => {
+    const service = new ChatStorageService({} as App, "SystemSculpt/Chats");
+    jest.spyOn(service, "loadChat").mockRejectedValue(new Error("vault unavailable"));
+
+    await expect(service.getChatResumeDescriptor("unavailable"))
+      .rejects.toThrow("vault unavailable");
+  });
 });
 
 describe("ChatStorageService extended", () => {
@@ -372,6 +389,38 @@ Hello
       expect(result?.id).toBe("test-chat");
     });
 
+    it.each([
+      ["LF", "\n", false],
+      ["CRLF", "\r\n", false],
+      ["BOM plus LF", "\n", true],
+      ["BOM plus CRLF", "\r\n", true],
+    ])("loads a valid chat with %s framing", async (_label, newline, bom) => {
+      const mockedSerializer = jest.requireMock("../storage/ChatMarkdownSerializer").ChatMarkdownSerializer;
+      const actualSerializer = jest.requireActual("../storage/ChatMarkdownSerializer").ChatMarkdownSerializer;
+      mockedSerializer.parseMarkdown.mockImplementationOnce((content: string) => (
+        actualSerializer.parseMarkdown(content)
+      ));
+      const mockFile = new TFile({ path: "SystemSculpt/Chats/portable.md" });
+      mockVault.getAbstractFileByPath.mockReturnValue(mockFile);
+      const portable = [
+        "---",
+        "id: portable",
+        "title: Portable",
+        "---",
+        "",
+        '<!-- SYSTEMSCULPT-MESSAGE-START role="user" message-id="user-1" -->',
+        "Hello",
+        "<!-- SYSTEMSCULPT-MESSAGE-END -->",
+      ].join("\n").replace(/\n/g, newline);
+      mockVault.read.mockResolvedValue(`${bom ? "\uFEFF" : ""}${portable}`);
+
+      await expect(service.loadChat("portable")).resolves.toMatchObject({
+        id: "portable",
+        title: "Portable",
+        messages: [expect.objectContaining({ message_id: "user-1" })],
+      });
+    });
+
     it("returns null on read error", async () => {
       const mockFile = new TFile({ path: "SystemSculpt/Chats/error-chat.md" });
       mockVault.getAbstractFileByPath.mockReturnValue(mockFile);
@@ -380,6 +429,148 @@ Hello
       const result = await service.loadChat("error-chat");
 
       expect(result).toBeNull();
+    });
+
+    it("does not misclassify an unrelated markdown note as a corrupted chat", async () => {
+      const serializer = jest.requireMock("../storage/ChatMarkdownSerializer").ChatMarkdownSerializer;
+      serializer.parseMarkdown.mockReturnValueOnce(null);
+      const mockFile = new TFile({ path: "SystemSculpt/Chats/plain-note.md" });
+      mockVault.getAbstractFileByPath.mockReturnValue(mockFile);
+      mockVault.read.mockResolvedValue("# Plain note\n\nNo chat framing.");
+
+      await expect(service.loadChat("plain-note")).resolves.toBeNull();
+    });
+
+    it("does not load an id-only blank note as an empty chat", async () => {
+      const mockedSerializer = jest.requireMock("../storage/ChatMarkdownSerializer").ChatMarkdownSerializer;
+      const actualSerializer = jest.requireActual("../storage/ChatMarkdownSerializer").ChatMarkdownSerializer;
+      mockedSerializer.parseMarkdown.mockImplementationOnce((content: string) => (
+        actualSerializer.parseMarkdown(content)
+      ));
+      const mockFile = new TFile({ path: "SystemSculpt/Chats/stray-frontmatter.md" });
+      mockVault.getAbstractFileByPath.mockReturnValue(mockFile);
+      mockVault.read.mockResolvedValue(`---
+id: stray-frontmatter
+---`);
+
+      await expect(service.loadChat("stray-frontmatter")).resolves.toBeNull();
+    });
+
+    it.each([
+      [
+        "truncated message",
+        `<!-- SYSTEMSCULPT-MESSAGE-START role="user" message-id="msg-1" -->
+Hello`,
+      ],
+      [
+        "invalid framed payload",
+        `<!-- SYSTEMSCULPT-MESSAGE-START role="user" message-id="msg-1" payload-format="base64-json-v1" -->
+not-valid-base64-json
+<!-- SYSTEMSCULPT-MESSAGE-END -->`,
+      ],
+    ])("throws for a %s instead of loading a shortened transcript", async (_label, body) => {
+      const mockedSerializer = jest.requireMock("../storage/ChatMarkdownSerializer").ChatMarkdownSerializer;
+      const actualSerializer = jest.requireActual("../storage/ChatMarkdownSerializer").ChatMarkdownSerializer;
+      mockedSerializer.parseMarkdown.mockImplementationOnce((content: string) => (
+        actualSerializer.parseMarkdown(content)
+      ));
+      const mockFile = new TFile({ path: "SystemSculpt/Chats/corrupt-chat.md" });
+      mockVault.getAbstractFileByPath.mockReturnValue(mockFile);
+      mockVault.read.mockResolvedValue(`---
+id: corrupt-chat
+title: Corrupt Chat
+---
+
+${body}`);
+
+      await expect(service.loadChat("corrupt-chat")).rejects.toBeInstanceOf(SavedChatCorruptedError);
+    });
+
+    it("throws for a start-truncated chat even without frontmatter", async () => {
+      const mockedSerializer = jest.requireMock("../storage/ChatMarkdownSerializer").ChatMarkdownSerializer;
+      const actualSerializer = jest.requireActual("../storage/ChatMarkdownSerializer").ChatMarkdownSerializer;
+      mockedSerializer.parseMarkdown.mockImplementationOnce((content: string) => (
+        actualSerializer.parseMarkdown(content)
+      ));
+      const mockFile = new TFile({ path: "SystemSculpt/Chats/no-frontmatter-corrupt.md" });
+      mockVault.getAbstractFileByPath.mockReturnValue(mockFile);
+      mockVault.read.mockResolvedValue(`<!-- SYSTEMSCULPT-MESSAGE-START role="user" message-id="msg-1" -->
+Hello`);
+
+      await expect(service.loadChat("no-frontmatter-corrupt")).rejects.toBeInstanceOf(SavedChatCorruptedError);
+    });
+
+    it.each([
+      [
+        "legacy stored multipart payload",
+        (serializer: typeof import("../storage/ChatMarkdownSerializer").ChatMarkdownSerializer) => (
+          serializer.serializeMessages([{
+            role: "user",
+            message_id: "user-multipart",
+            content: [
+              { type: "text", text: "Compare these." },
+              { type: "image_url", image_url: { url: "data:image/png;base64,YWJj" } },
+            ],
+          }]).replace(
+            /(<!-- SYSTEMSCULPT-CONTENT-PARTS base64\n)([A-Za-z0-9+/=]+)(\n-->)/,
+            "$1W10=$3",
+          )
+        ),
+      ],
+      [
+        "framed attachment metadata",
+        (serializer: typeof import("../storage/ChatMarkdownSerializer").ChatMarkdownSerializer) => (
+          serializer.serializeMessages([{
+            role: "user",
+            message_id: "user-framed-attachments",
+            content: [
+              { type: "text", text: "Quoted <!-- SYSTEMSCULPT-MESSAGE-END --> marker" },
+              { type: "image_url", image_url: { url: "data:image/png;base64,YWJj" } },
+            ],
+            attachmentMetadata: [{
+              id: "image-hash",
+              name: "diagram.png",
+              mimeType: "image/png",
+              byteLength: 3,
+              kind: "image",
+              contentPartIndex: 1,
+            }],
+          }]).replace(
+            /attachment-metadata="([A-Za-z0-9+/=]+)"/,
+            'attachment-metadata="bm90LWpzb24="',
+          )
+        ),
+      ],
+    ])("throws for corrupt %s instead of mutating the saved note", async (_label, buildBody) => {
+      const mockedSerializer = jest.requireMock("../storage/ChatMarkdownSerializer").ChatMarkdownSerializer;
+      const actualSerializer = jest.requireActual("../storage/ChatMarkdownSerializer").ChatMarkdownSerializer;
+      const normalizeMarkdown = (value: string, newline: string, bom: boolean): string => (
+        `${bom ? "\uFEFF" : ""}${value.replace(/\n/g, newline)}`
+      );
+
+      for (const [_variantLabel, newline, bom] of [
+        ["LF", "\n", false],
+        ["CRLF", "\r\n", false],
+        ["BOM plus LF", "\n", true],
+        ["BOM plus CRLF", "\r\n", true],
+      ] as const) {
+        mockedSerializer.parseMarkdown.mockImplementationOnce((content: string) => (
+          actualSerializer.parseMarkdown(content)
+        ));
+        const mockFile = new TFile({ path: "SystemSculpt/Chats/corrupt-chat.md" });
+        mockVault.getAbstractFileByPath.mockReturnValue(mockFile);
+        mockVault.read.mockResolvedValue(normalizeMarkdown(`---
+id: corrupt-chat
+title: Corrupt Chat
+---
+
+${buildBody(actualSerializer)}`, newline, bom));
+
+        await expect(service.loadChat("corrupt-chat")).rejects.toBeInstanceOf(SavedChatCorruptedError);
+      }
+
+      expect(mockVault.modify).not.toHaveBeenCalled();
+      expect(mockVault.create).not.toHaveBeenCalled();
     });
   });
 
@@ -491,6 +682,31 @@ Hello
 
       expect(result).toEqual([]);
     });
+
+    it("excludes a corrupt chat instead of indexing its surviving prefix", async () => {
+      const mockedSerializer = jest.requireMock("../storage/ChatMarkdownSerializer").ChatMarkdownSerializer;
+      const actualSerializer = jest.requireActual("../storage/ChatMarkdownSerializer").ChatMarkdownSerializer;
+      mockedSerializer.parseMarkdown.mockImplementationOnce((content: string) => (
+        actualSerializer.parseMarkdown(content)
+      ));
+      mockVault.adapter.list.mockResolvedValue({
+        files: ["SystemSculpt/Chats/corrupt.md"],
+        folders: [],
+      });
+      mockVault.adapter.read.mockResolvedValue(`---
+id: corrupt
+title: Corrupt
+---
+
+<!-- SYSTEMSCULPT-MESSAGE-START role="user" message-id="user-1" -->
+Valid prefix
+<!-- SYSTEMSCULPT-MESSAGE-END -->
+
+<!-- SYSTEMSCULPT-MESSAGE-START role="assistant" message-id="assistant-1" -->
+Truncated`);
+
+      await expect(service.loadChats()).resolves.toEqual([]);
+    });
   });
 
   describe("saveChat edge cases", () => {
@@ -561,19 +777,36 @@ Hello
   });
 
   describe("isValidChatFile", () => {
-    it("accepts files with frontmatter", () => {
+    it("accepts files with chat frontmatter", () => {
       const content = `---
 id: test
+created: 2026-07-28T00:00:00.000Z
 ---
 Some content`;
       expect((service as any).isValidChatFile(content)).toBe(true);
     });
 
-    it("accepts files with message markers", () => {
+    it("accepts files with a start marker even if the closing marker is missing", () => {
       const content = `<!-- SYSTEMSCULPT-MESSAGE-START role="user" message-id="1" -->
-Hello
-<!-- SYSTEMSCULPT-MESSAGE-END -->`;
+Hello`;
       expect((service as any).isValidChatFile(content)).toBe(true);
+    });
+
+    it.each([
+      ["CRLF", "---\r\nid: portable\r\nlastModified: 2026-07-28T00:00:00.000Z\r\n---\r\n"],
+      ["BOM plus LF", "\uFEFF---\nid: portable\ncreated: 2026-07-28T00:00:00.000Z\n---\n"],
+      ["BOM plus CRLF", "\uFEFF---\r\nid: portable\r\nlastModified: 2026-07-28T00:00:00.000Z\r\n---\r\n"],
+    ])("accepts %s frontmatter", (_label, content) => {
+      expect((service as any).isValidChatFile(content)).toBe(true);
+    });
+
+    it("rejects frontmatter that lacks chat history timestamps", () => {
+      const content = `---
+id: stray-note
+title: Not a chat
+---
+Body`;
+      expect((service as any).isValidChatFile(content)).toBe(false);
     });
 
     it("rejects unrelated fenced notes", () => {

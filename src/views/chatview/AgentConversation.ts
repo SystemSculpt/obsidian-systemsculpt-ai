@@ -49,6 +49,7 @@ export type AgentUsage = Readonly<{
 export type ManagedAgentError = Readonly<{
   code: string;
   message: string;
+  status?: number;
   requestId?: string;
 }>;
 
@@ -406,6 +407,11 @@ function validateError(error: ManagedAgentError): void {
   }
   assertNonEmptyString(error.code, "error.code");
   assertNonEmptyString(error.message, "error.message");
+  if (typeof error.status !== "undefined") {
+    if (!Number.isSafeInteger(error.status) || error.status < 100 || error.status > 599) {
+      protocolError("illegal_transition", "error.status must be a valid HTTP status code.");
+    }
+  }
   if (typeof error.requestId !== "undefined") {
     assertNonEmptyString(error.requestId, "error.requestId");
   }

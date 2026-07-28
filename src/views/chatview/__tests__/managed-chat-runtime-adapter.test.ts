@@ -35,6 +35,33 @@ const rawResponse = (wire: string, revision = 1) => new Response(
   new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(bytes(wire)); controller.close(); } }),
   { status: 200, headers: sessionHeaders(revision) },
 );
+const fragmentedRawResponse = (wire: string, seed: number, revision = 1) => {
+  const encoded = bytes(wire);
+  let state = seed >>> 0;
+  return new Response(
+    new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (let offset = 0; offset < encoded.byteLength;) {
+          state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+          const width = 1 + (state % 17);
+          controller.enqueue(encoded.slice(offset, Math.min(offset + width, encoded.byteLength)));
+          offset += width;
+        }
+        controller.close();
+      },
+    }),
+    { status: 200, headers: sessionHeaders(revision) },
+  );
+};
+const byteResponse = (chunks: readonly Uint8Array[], revision = 1) => new Response(
+  new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const chunk of chunks) controller.enqueue(chunk);
+      controller.close();
+    },
+  }),
+  { status: 200, headers: sessionHeaders(revision) },
+);
 const response = (wire: string, revision = 1) => rawResponse(
   wire.includes('"object":"systemsculpt.chat.session"')
     ? wire
@@ -158,6 +185,146 @@ describe("ManagedChatRuntimeAdapter live events", () => {
       sessionCheckpoint(),
       { kind: "done" },
     ]);
+  });
+
+  it("parses 128 deterministic proxy fragmentations across UTF-8, CRLF, JSON, and DONE boundaries", async () => {
+    const wire = [
+      ": proxy heartbeat",
+      `data: ${JSON.stringify({ choices: [{ delta: { content: "é中🙂" } }] })}`,
+      "",
+      sessionFrame().trim(),
+      "",
+      "data: [DONE]",
+      "",
+      "",
+    ].join("\r\n");
+
+    for (let seed = 1; seed <= 128; seed += 1) {
+      const state = setup();
+      state.requestClient.responses.push(fragmentedRawResponse(wire, seed));
+      const result = await state.adapter.dispatch({
+        operation: state.operation,
+        acceptedRequestSnapshot: state.acceptedRequestSnapshot,
+        phase: "initial",
+        continuationIndex: 0,
+      });
+
+      expect(result.kind).toBe("success");
+      if (result.kind === "success") {
+        await expect(collect(result.events)).resolves.toEqual([
+          { kind: "content_delta", text: "é中🙂" },
+          sessionCheckpoint(),
+          { kind: "done" },
+        ]);
+      }
+    }
+  });
+
+  it("never exposes a durable terminal event from any strict byte prefix", async () => {
+    const wire = [
+      `data: ${JSON.stringify({ choices: [{ delta: { content: "prefix-é中🙂" } }] })}`,
+      "",
+      sessionFrame().trim(),
+      "",
+      "data: [DONE]",
+      "",
+      "",
+    ].join("\r\n");
+    const encoded = bytes(wire);
+    const terminalKinds = new Set(["session_committed", "tool_call_completed", "done"]);
+
+    for (let cut = 0; cut < encoded.byteLength; cut += 1) {
+      const state = setup();
+      const events: ManagedChatRuntimeEvent[] = [];
+      let failure: unknown;
+      try {
+        for await (const event of (state.adapter as any).parseStream(
+          byteResponse([encoded.slice(0, cut)]),
+          { id: SESSION_ID, revision: 1 },
+          {},
+        )) {
+          events.push(event);
+        }
+      } catch (error) {
+        failure = error;
+      }
+
+      expect(failure).toBeDefined();
+      expect(events.filter((event) => terminalKinds.has(event.kind))).toEqual([]);
+    }
+  });
+
+  it.each([
+    [
+      "duplicate session commit",
+      [
+        'data: {"choices":[{"delta":{"content":"ok"}}]}',
+        "",
+        sessionFrame().trim(),
+        "",
+        sessionFrame().trim(),
+        "",
+        "data: [DONE]",
+        "",
+        "",
+      ].join("\n"),
+    ],
+    [
+      "duplicate DONE",
+      [
+        'data: {"choices":[{"delta":{"content":"ok"}}]}',
+        "",
+        sessionFrame().trim(),
+        "",
+        "data: [DONE]",
+        "",
+        "data: [DONE]",
+        "",
+        "",
+      ].join("\n"),
+    ],
+  ])("rejects a %s frame instead of accepting an ambiguous terminal", async (_label, wire) => {
+    const state = setup();
+    state.requestClient.responses.push(rawResponse(wire));
+    const result = await state.adapter.dispatch({
+      operation: state.operation,
+      acceptedRequestSnapshot: state.acceptedRequestSnapshot,
+      phase: "initial",
+      continuationIndex: 0,
+    });
+    if (result.kind !== "success") throw new Error(result.kind);
+
+    await expect(collect(result.events)).rejects.toMatchObject({ kind: "transport_failure" });
+  });
+
+  it("recovers an invalid UTF-8 stream with the same accepted operation", async () => {
+    const state = setup();
+    state.requestClient.responses.push(
+      byteResponse([
+        bytes('data: {"choices":[{"delta":{"content":"'),
+        Uint8Array.from([0xc3, 0x28]),
+      ]),
+      response('data: {"choices":[{"delta":{"content":"recovered"}}]}\n\ndata: [DONE]\n\n'),
+    );
+
+    const result = await state.adapter.dispatch({
+      operation: state.operation,
+      acceptedRequestSnapshot: state.acceptedRequestSnapshot,
+      phase: "initial",
+      continuationIndex: 0,
+    });
+
+    expect(result.kind).toBe("success");
+    if (result.kind === "success") {
+      await expect(collect(result.events)).resolves.toEqual([
+        { kind: "phase_restarted", attempt: 1 },
+        { kind: "content_delta", text: "recovered" },
+        sessionCheckpoint(),
+        { kind: "done" },
+      ]);
+    }
+    expect(state.requestClient.inputs).toHaveLength(2);
+    expect(state.requestClient.inputs[1].body).toEqual(state.requestClient.inputs[0].body);
   });
 
   it("replays a retryable in-stream finalization failure with the same operation key", async () => {
@@ -634,6 +801,29 @@ describe("ManagedChatRuntimeAdapter live events", () => {
       kind: "capability_request", diagnostic: { status: 400, code: "request_too_large" },
     });
     expect(JSON.stringify(state.requestClient.inputs[0].body)).toContain(large);
+  });
+
+  it("does not replay a non-retryable schema 400 even when the response requests the same key", async () => {
+    const state = setup();
+    state.requestClient.responses.push(new Response(JSON.stringify({ error: {
+      code: "invalid_request",
+      message: "The request body did not match the schema.",
+      retry_same_idempotency_key: true,
+    } }), {
+      status: 400,
+      headers: { "content-type": "application/json", "x-request-id": "req-chat-400" },
+    }));
+
+    await expect(state.adapter.dispatch({
+      operation: state.operation,
+      acceptedRequestSnapshot: state.acceptedRequestSnapshot,
+      phase: "initial",
+      continuationIndex: 0,
+    })).resolves.toEqual({
+      kind: "capability_request",
+      diagnostic: { status: 400, code: "invalid_request", requestId: "req-chat-400" },
+    });
+    expect(state.requestClient.inputs).toHaveLength(1);
   });
 
   it("rejects an oversized exact request locally from the negotiated envelope", async () => {

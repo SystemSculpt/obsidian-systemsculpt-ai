@@ -3,11 +3,40 @@
  */
 import { ErrorCollectorService } from "../ErrorCollectorService";
 
+const strictConsoleMethods = {
+  log: console.log,
+  info: console.info,
+  warn: console.warn,
+  error: console.error,
+  debug: console.debug,
+};
+
+function resetEarlyCaptureState(): void {
+  const internals = ErrorCollectorService as unknown as {
+    activeInstances: Set<ErrorCollectorService>;
+    consolePatched: boolean;
+    earlyBuffer: unknown[];
+    maxEarlyLogs: number;
+    originalConsole: Partial<Record<"log" | "info" | "warn" | "error" | "debug", (...args: any[]) => void>>;
+  };
+  (console as any).log = strictConsoleMethods.log;
+  (console as any).info = strictConsoleMethods.info;
+  (console as any).warn = strictConsoleMethods.warn;
+  (console as any).error = strictConsoleMethods.error;
+  (console as any).debug = strictConsoleMethods.debug;
+  internals.activeInstances.clear();
+  internals.consolePatched = false;
+  internals.earlyBuffer = [];
+  internals.maxEarlyLogs = 250;
+  internals.originalConsole = {};
+}
+
 describe("ErrorCollectorService", () => {
   let service: ErrorCollectorService;
 
   beforeEach(() => {
     jest.clearAllMocks();
+    resetEarlyCaptureState();
     // Create a fresh instance for each test
     service = new ErrorCollectorService(100);
   });
@@ -15,6 +44,8 @@ describe("ErrorCollectorService", () => {
   afterEach(() => {
     // Clean up the service
     service.unload();
+    jest.restoreAllMocks();
+    resetEarlyCaptureState();
   });
 
   describe("constructor", () => {
@@ -253,6 +284,7 @@ describe("ErrorCollectorService", () => {
 
   describe("console patching behavior", () => {
     it("captures logs when initializeEarlyLogsCapture is called", () => {
+      const errorSpy = jest.spyOn(console, "error").mockImplementation(() => undefined);
       // Initialize early capture
       ErrorCollectorService.initializeEarlyLogsCapture(50);
 
@@ -265,6 +297,7 @@ describe("ErrorCollectorService", () => {
       // Logs should be captured (exact context depends on implementation state)
       const logs = testService.getAllLogs();
       expect(logs.length).toBeGreaterThan(0);
+      expect(errorSpy).toHaveBeenCalledWith("Test error during patching");
 
       testService.unload();
     });
@@ -356,6 +389,7 @@ describe("ErrorCollectorService", () => {
     });
 
     it("removes instance from active set on unload", () => {
+      const errorSpy = jest.spyOn(console, "error").mockImplementation(() => undefined);
       const testService = new ErrorCollectorService(100);
 
       // After unload, the instance should be removed from activeInstances
@@ -368,12 +402,14 @@ describe("ErrorCollectorService", () => {
       console.error("New error after unload");
 
       // The new service should have logs, but old one shouldn't affect it
+      expect(errorSpy).toHaveBeenCalledWith("New error after unload");
       newService.unload();
     });
   });
 
   describe("early buffer behavior", () => {
     it("copies early buffer to new instance", () => {
+      const errorSpy = jest.spyOn(console, "error").mockImplementation(() => undefined);
       // Initialize and trigger early capture
       ErrorCollectorService.initializeEarlyLogsCapture(50);
 
@@ -385,11 +421,13 @@ describe("ErrorCollectorService", () => {
 
       const logs = testService.getAllLogs();
       expect(logs.length).toBeGreaterThan(0);
+      expect(errorSpy).toHaveBeenCalledWith("[SystemSculpt] Early error");
 
       testService.unload();
     });
 
     it("respects max early logs limit", () => {
+      const errorSpy = jest.spyOn(console, "error").mockImplementation(() => undefined);
       ErrorCollectorService.initializeEarlyLogsCapture(3);
 
       // Log more than the limit
@@ -401,10 +439,12 @@ describe("ErrorCollectorService", () => {
 
       // Should have at most 3 + any logs generated during test
       // The key is that it doesn't have all 10
+      expect(errorSpy).toHaveBeenCalledWith("Error 0");
       testService.unload();
     });
 
     it("stringifies Error objects in console args", () => {
+      const errorSpy = jest.spyOn(console, "error").mockImplementation(() => undefined);
       ErrorCollectorService.initializeEarlyLogsCapture(50);
 
       const testError = new Error("Test error message");
@@ -414,11 +454,13 @@ describe("ErrorCollectorService", () => {
       const logs = testService.getAllLogs();
 
       expect(logs.some((log) => log.includes("Test error message"))).toBe(true);
+      expect(errorSpy).toHaveBeenCalledWith("[SystemSculpt] Error occurred:", testError);
 
       testService.unload();
     });
 
     it("stringifies objects in console args", () => {
+      const errorSpy = jest.spyOn(console, "error").mockImplementation(() => undefined);
       ErrorCollectorService.initializeEarlyLogsCapture(50);
 
       const testObject = { key: "value", nested: { count: 42 } };
@@ -428,11 +470,13 @@ describe("ErrorCollectorService", () => {
       const logs = testService.getAllLogs();
 
       expect(logs.some((log) => log.includes("key") && log.includes("value"))).toBe(true);
+      expect(errorSpy).toHaveBeenCalledWith("[SystemSculpt] Data:", testObject);
 
       testService.unload();
     });
 
     it("handles circular objects gracefully", () => {
+      const errorSpy = jest.spyOn(console, "error").mockImplementation(() => undefined);
       ErrorCollectorService.initializeEarlyLogsCapture(50);
 
       const circular: any = { name: "test" };
@@ -442,6 +486,7 @@ describe("ErrorCollectorService", () => {
       expect(() => {
         console.error("[SystemSculpt] Circular:", circular);
       }).not.toThrow();
+      expect(errorSpy).toHaveBeenCalledWith("[SystemSculpt] Circular:", circular);
 
       const testService = new ErrorCollectorService(100);
       testService.unload();

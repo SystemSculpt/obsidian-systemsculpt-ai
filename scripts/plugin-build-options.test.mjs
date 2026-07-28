@@ -4,6 +4,7 @@ import {
   CANONICAL_API_BASE_URL,
   createPluginBuildOptions,
   normalizeApiBaseUrl,
+  resolvePluginBuildStamp,
 } from "./plugin-build-options.mjs";
 
 test("production API base is the build default", () => {
@@ -41,5 +42,34 @@ test("API base rejects relative and stateful URLs", () => {
   assert.throws(
     () => normalizeApiBaseUrl("https://systemsculpt.com/api/v1"),
     /must end with \/api\/plugin/,
+  );
+});
+
+test("release metadata produces one deterministic build define", () => {
+  const buildStamp = resolvePluginBuildStamp({ version: "6.2.7" });
+  const first = createPluginBuildOptions({ buildStamp });
+  const second = createPluginBuildOptions({ buildStamp });
+
+  assert.equal(buildStamp, "release-6.2.7");
+  assert.equal(first.define.__SS_BUILD_STAMP__, JSON.stringify(buildStamp));
+  assert.equal(second.define.__SS_BUILD_STAMP__, first.define.__SS_BUILD_STAMP__);
+});
+
+test("build stamp overrides are explicit and development remains stable", () => {
+  assert.equal(
+    resolvePluginBuildStamp({
+      version: "6.2.7",
+      override: "qa-candidate-42",
+    }),
+    "qa-candidate-42",
+  );
+  assert.equal(resolvePluginBuildStamp({ production: false }), "dev");
+  assert.throws(
+    () => resolvePluginBuildStamp({ version: "not-semver" }),
+    /semantic manifest version/,
+  );
+  assert.equal(
+    createPluginBuildOptions().define.__SS_BUILD_STAMP__,
+    JSON.stringify("dev"),
   );
 });

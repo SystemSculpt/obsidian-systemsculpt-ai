@@ -27,6 +27,15 @@ export type MobileHostLayoutSnapshot = Readonly<{
 
 const controllers = new Map<Document, MobileHostLayoutController>();
 
+function isOwnerElement(node: Node, ElementCtor: typeof Element): node is Element {
+  const obsidianNode = node as Node & {
+    instanceOf?: (constructor: typeof Element) => boolean;
+  };
+  return typeof obsidianNode.instanceOf === "function"
+    ? obsidianNode.instanceOf(ElementCtor)
+    : ElementCtor.prototype.isPrototypeOf(node);
+}
+
 function readVisibleNavbar(document: Document): HTMLElement | null {
   const navbar = document.querySelector<HTMLElement>(HOST_MOBILE_NAV_SELECTOR);
   if (!navbar || !navbar.isConnected) {
@@ -107,13 +116,13 @@ function createController(document: Document): MobileHostLayoutController {
           const target = record.target;
           return target === document.body
             || (ElementCtor !== null
-              && target.instanceOf(ElementCtor)
+              && isOwnerElement(target, ElementCtor)
               && (target.matches(HOST_MOBILE_NAV_SELECTOR)
                 || target.querySelector(HOST_MOBILE_NAV_SELECTOR) !== null));
         }
         return [...record.addedNodes, ...record.removedNodes].some((node) =>
           ElementCtor !== null
-          && node.instanceOf(ElementCtor)
+          && isOwnerElement(node, ElementCtor)
           && (node.matches(HOST_MOBILE_NAV_SELECTOR)
             || node.querySelector(HOST_MOBILE_NAV_SELECTOR) !== null),
         );

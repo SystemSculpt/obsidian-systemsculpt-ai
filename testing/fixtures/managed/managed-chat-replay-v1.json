@@ -1,0 +1,209 @@
+{
+  "contract_version": "managed-chat-replay-v1",
+  "scenarios": [
+    {
+      "name": "legacy_server_search_follow_up",
+      "durable_messages": [
+        {
+          "role": "user",
+          "content": "Search release notes",
+          "message_id": "user-search"
+        },
+        {
+          "role": "assistant",
+          "content": "Search-backed answer",
+          "message_id": "assistant-search",
+          "tool_calls": [
+            {
+              "id": "call-web-legacy",
+              "messageId": "assistant-search",
+              "request": {
+                "id": "call-web-legacy",
+                "type": "function",
+                "function": {
+                  "name": "web_search",
+                  "arguments": "{\"query\":\"release notes\"}"
+                }
+              },
+              "state": "completed",
+              "timestamp": 1,
+              "result": {
+                "success": true,
+                "data": {
+                  "tool": "web_search",
+                  "result_count": 1
+                }
+              }
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": "Follow up",
+          "message_id": "user-follow-up"
+        }
+      ],
+      "expected_wire": [
+        {
+          "role": "user",
+          "content": "Search release notes"
+        },
+        {
+          "role": "assistant",
+          "content": "Search-backed answer"
+        },
+        {
+          "role": "user",
+          "content": "Follow up"
+        }
+      ]
+    },
+    {
+      "name": "empty_server_search_checkpoint",
+      "durable_messages": [
+        {
+          "role": "user",
+          "content": "Search",
+          "message_id": "user-search"
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "message_id": "assistant-search",
+          "tool_calls": [
+            {
+              "id": "call-web-empty",
+              "messageId": "assistant-search",
+              "request": {
+                "id": "call-web-empty",
+                "type": "function",
+                "function": {
+                  "name": "web_search",
+                  "arguments": "{}"
+                }
+              },
+              "state": "completed",
+              "timestamp": 1,
+              "executedOn": "server",
+              "result": {
+                "success": true,
+                "data": {
+                  "tool": "web_search",
+                  "result_count": 0
+                }
+              }
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": "Try again",
+          "message_id": "user-follow-up"
+        }
+      ],
+      "expected_wire": [
+        {
+          "role": "user",
+          "content": "Search"
+        },
+        {
+          "role": "user",
+          "content": "Try again"
+        }
+      ]
+    },
+    {
+      "name": "mixed_server_and_vault_follow_up",
+      "durable_messages": [
+        {
+          "role": "user",
+          "content": "Check the web and my note",
+          "message_id": "user-mixed"
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "message_id": "assistant-mixed",
+          "tool_calls": [
+            {
+              "id": "call-web-mixed",
+              "messageId": "assistant-mixed",
+              "request": {
+                "id": "call-web-mixed",
+                "type": "function",
+                "function": {
+                  "name": "web_search",
+                  "arguments": "{\"query\":\"release\"}"
+                }
+              },
+              "state": "completed",
+              "timestamp": 1,
+              "result": {
+                "success": true,
+                "data": {
+                  "tool": "web_search",
+                  "result_count": 1
+                }
+              }
+            },
+            {
+              "id": "call-vault-mixed",
+              "messageId": "assistant-mixed",
+              "request": {
+                "id": "call-vault-mixed",
+                "type": "function",
+                "function": {
+                  "name": "read",
+                  "arguments": "{\"paths\":[\"Notes/release.md\"]}"
+                }
+              },
+              "state": "completed",
+              "timestamp": 2,
+              "result": {
+                "success": true,
+                "data": {
+                  "path": "Notes/release.md"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": "Summarize both",
+          "message_id": "user-follow-up"
+        }
+      ],
+      "expected_wire": [
+        {
+          "role": "user",
+          "content": "Check the web and my note"
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "call-vault-mixed",
+              "type": "function",
+              "function": {
+                "name": "read",
+                "arguments": "{\"paths\":[\"Notes/release.md\"]}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "{\"path\":\"Notes/release.md\"}",
+          "tool_call_id": "call-vault-mixed",
+          "name": "read"
+        },
+        {
+          "role": "user",
+          "content": "Summarize both"
+        }
+      ]
+    }
+  ]
+}

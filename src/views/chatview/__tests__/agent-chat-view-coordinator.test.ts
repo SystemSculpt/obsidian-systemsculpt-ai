@@ -6,6 +6,7 @@ import { TFile } from "obsidian";
 import { showConfirm } from "../../../core/ui/notifications";
 import { createInitialAgentConversation } from "../AgentConversation";
 import { AgentChatView } from "../AgentChatView";
+import { SavedChatCorruptedError } from "../ChatStorageService";
 
 jest.mock("../../../core/ui/notifications", () => ({
   showConfirm: jest.fn(),
@@ -52,9 +53,45 @@ function executionHarness(result: Record<string, unknown>) {
   return { view, workspace };
 }
 
+function retryHarness(
+  snapshot: () => Readonly<{ version: number; messages: readonly unknown[] }>,
+) {
+  const workspace = { showMessageEditor: jest.fn(async () => undefined) };
+  const view = {
+    transcript: { snapshot: jest.fn(snapshot) },
+    attachmentStore: { hydrateMessage: jest.fn(async (message) => message) },
+    workspace,
+    activeRunPromise: null,
+    pendingRetry: null,
+    messageEditGeneration: 0,
+  };
+  return { view, workspace };
+}
+
 describe("AgentChatView coordinator", () => {
   beforeEach(() => {
     showConfirmMock.mockReset();
+  });
+
+  it("formats a successful credits refresh for the ChatView surface", async () => {
+    const workspace = { setCredits: jest.fn() };
+    const balance = { totalRemaining: 1234 };
+    const view = {
+      plugin: { settings: { licenseKey: "configured" } },
+      creditsBalance: null,
+      creditsPromise: null,
+      aiService: { getCreditsBalance: jest.fn(async () => balance) },
+      workspace,
+    };
+
+    await (AgentChatView.prototype as any).refreshCreditsBalance.call(view);
+
+    expect(view.creditsBalance).toBe(balance);
+    expect(workspace.setCredits).toHaveBeenCalledWith(
+      expect.stringMatching(/1.*234/),
+      false,
+    );
+    expect(view.creditsPromise).toBeNull();
   });
 
 
@@ -510,6 +547,319 @@ describe("AgentChatView coordinator", () => {
     }));
   });
 
+  it("replays an oldest-shape web search safely and fails closed for an unknowable tool", async () => {
+    const target = { role: "user" as const, message_id: "user-1", content: "Search" };
+    const flatWebSearch = {
+      id: "flat-web",
+      messageId: "assistant-flat",
+      name: "web_search",
+      arguments: { query: "legacy" },
+      state: "completed",
+      timestamp: 1,
+      result: { success: true, data: { result_count: 1 } },
+    };
+    const { view, workspace } = retryHarness(() => ({
+      version: 1,
+      messages: [
+        target,
+        {
+          role: "assistant",
+          message_id: "assistant-flat",
+          content: "Found it",
+          tool_calls: [flatWebSearch],
+          messageParts: [{
+            id: "tool_call_part-flat-web",
+            type: "tool_call",
+            data: flatWebSearch,
+            timestamp: 1,
+          }],
+        },
+      ],
+    }));
+
+    await (AgentChatView.prototype as any).prepareRetry.call(view, "user-1");
+    expect(workspace.showMessageEditor).toHaveBeenLastCalledWith(expect.objectContaining({
+      requiresReplayConfirmation: false,
+    }));
+
+    const malformedTool = {
+      id: "unknown-flat",
+      messageId: "assistant-flat",
+      state: "completed",
+      timestamp: 2,
+      result: { success: true, data: {} },
+    };
+    view.transcript.snapshot.mockImplementation(() => ({
+      version: 2,
+      messages: [
+        target,
+        {
+          role: "assistant",
+          message_id: "assistant-flat",
+          content: "Unknown activity",
+          tool_calls: [malformedTool],
+        },
+      ],
+    }));
+    await (AgentChatView.prototype as any).prepareRetry.call(view, "user-1");
+    expect(workspace.showMessageEditor).toHaveBeenLastCalledWith(expect.objectContaining({
+      requiresReplayConfirmation: true,
+    }));
+  });
+
+  it("classifies content-only, optional-field, blank-id, and conflicting-id replay history", async () => {
+    const target = { role: "user" as const, message_id: "user-1", content: "Search" };
+    const contentPart = {
+      id: "content-1",
+      type: "content" as const,
+      data: "Narrative only",
+      timestamp: 1,
+    };
+    const optionalFieldSearch = {
+      id: "optional-web",
+      messageId: "assistant-optional",
+      name: "web_search",
+      arguments: { query: "legacy" },
+      timestamp: 2,
+      executedOn: undefined,
+    };
+    const safeDuplicate = {
+      id: "same-message-id",
+      messageId: "assistant-conflict",
+      name: "web_search",
+      arguments: { query: "status" },
+      state: "completed" as const,
+      timestamp: 3,
+      result: { success: true, data: { result_count: 1 } },
+    };
+    const conflictingDuplicate = {
+      id: "same-message-id",
+      messageId: "assistant-conflict",
+      request: {
+        id: "same-message-id",
+        type: "function" as const,
+        function: { name: "write", arguments: '{"path":"Project.md","content":"Updated"}' },
+      },
+      state: "completed" as const,
+      timestamp: 4,
+      result: { success: true, data: { path: "Project.md" } },
+    };
+    const cases = [
+      {
+        label: "content-only",
+        expected: false,
+        message: {
+          role: "assistant" as const,
+          message_id: "assistant-content",
+          content: "Narrative only",
+          messageParts: [contentPart],
+        },
+      },
+      {
+        label: "optional-field mirror",
+        expected: false,
+        message: {
+          role: "assistant" as const,
+          message_id: "assistant-optional",
+          content: "Found it",
+          tool_calls: [optionalFieldSearch],
+          messageParts: [
+            contentPart,
+            {
+              id: "tool_call_part-optional-web",
+              type: "tool_call" as const,
+              data: optionalFieldSearch,
+              timestamp: 2,
+            },
+          ],
+        },
+      },
+      {
+        label: "blank id",
+        expected: true,
+        message: {
+          role: "assistant" as const,
+          message_id: "assistant-blank",
+          content: "Untrusted",
+          tool_calls: [{ ...optionalFieldSearch, id: "   " }],
+        },
+      },
+      {
+        label: "same-message conflict",
+        expected: true,
+        message: {
+          role: "assistant" as const,
+          message_id: "assistant-conflict",
+          content: "Conflicting",
+          tool_calls: [safeDuplicate],
+          messageParts: [
+            contentPart,
+            {
+              id: "tool_call_part-same-message-id",
+              type: "tool_call" as const,
+              data: conflictingDuplicate,
+              timestamp: 4,
+            },
+          ],
+        },
+      },
+    ];
+
+    for (const replayCase of cases) {
+      const { view, workspace } = retryHarness(() => ({
+        version: 5,
+        messages: [target, replayCase.message],
+      }));
+
+      await (AgentChatView.prototype as any).prepareRetry.call(view, "user-1");
+
+      expect(workspace.showMessageEditor).toHaveBeenLastCalledWith(expect.objectContaining({
+        laterMessageCount: 1,
+        requiresReplayConfirmation: replayCase.expected,
+      }));
+    }
+  });
+
+  it("fails closed when mixed-shape replay history adds a mutating messageParts tool", async () => {
+    const target = { role: "user" as const, message_id: "user-1", content: "Search" };
+    const flatWebSearch = {
+      id: "flat-web",
+      messageId: "assistant-flat",
+      name: "web_search",
+      arguments: { query: "legacy" },
+      state: "completed" as const,
+      timestamp: 1,
+      result: { success: true, data: { result_count: 1 } },
+    };
+    const writeTool = {
+      id: "write-1",
+      messageId: "assistant-flat",
+      request: {
+        id: "write-1",
+        type: "function" as const,
+        function: { name: "write", arguments: '{"path":"Project.md","content":"Updated"}' },
+      },
+      state: "completed" as const,
+      timestamp: 2,
+      result: { success: true, data: { path: "Project.md" } },
+    };
+    const { view, workspace } = retryHarness(() => ({
+      version: 3,
+      messages: [
+        target,
+        {
+          role: "assistant" as const,
+          message_id: "assistant-flat",
+          content: "Found it",
+          tool_calls: [flatWebSearch],
+          messageParts: [{
+            id: "tool_call_part-write-1",
+            type: "tool_call" as const,
+            data: writeTool,
+            timestamp: 2,
+          }],
+        },
+      ],
+    }));
+
+    await (AgentChatView.prototype as any).prepareRetry.call(view, "user-1");
+
+    expect(workspace.showMessageEditor).toHaveBeenLastCalledWith(expect.objectContaining({
+      laterMessageCount: 1,
+      requiresReplayConfirmation: true,
+    }));
+  });
+
+  it("fails closed when replay signature serialization cannot inspect a later tool", async () => {
+    const target = { role: "user" as const, message_id: "user-1", content: "Search" };
+    const cyclic: Record<string, unknown> = {};
+    cyclic.self = cyclic;
+    const { view, workspace } = retryHarness(() => ({
+      version: 4,
+      messages: [
+        target,
+        {
+          role: "assistant" as const,
+          message_id: "assistant-cyclic",
+          content: "Found it",
+          tool_calls: [{
+            id: "flat-web",
+            messageId: "assistant-cyclic",
+            name: "web_search",
+            arguments: { query: "legacy" },
+            state: "completed" as const,
+            timestamp: 1,
+            result: { success: true, data: cyclic },
+          }],
+        },
+      ],
+    }));
+
+    await expect(
+      (AgentChatView.prototype as any).prepareRetry.call(view, "user-1"),
+    ).resolves.toBeUndefined();
+
+    expect(workspace.showMessageEditor).toHaveBeenLastCalledWith(expect.objectContaining({
+      laterMessageCount: 1,
+      requiresReplayConfirmation: true,
+    }));
+  });
+
+  it("fails closed when later durable tool calls reuse a client id", async () => {
+    const target = { role: "user" as const, message_id: "user-1", content: "Update it" };
+    const duplicateId = "tool-dup";
+    const writeTool = {
+      id: duplicateId,
+      messageId: "assistant-write",
+      request: {
+        id: duplicateId,
+        type: "function" as const,
+        function: { name: "write", arguments: '{"path":"Project.md","content":"Updated"}' },
+      },
+      state: "completed" as const,
+      timestamp: 1,
+      result: { success: true, data: { path: "Project.md" } },
+    };
+    const flatWebSearch = {
+      id: duplicateId,
+      messageId: "assistant-search",
+      name: "web_search",
+      arguments: { query: "status" },
+      state: "completed" as const,
+      timestamp: 2,
+      result: { success: true, data: { result_count: 1 } },
+    };
+    const { view, workspace } = retryHarness(() => ({
+      version: 3,
+      messages: [
+        target,
+        {
+          role: "assistant" as const,
+          message_id: "assistant-write",
+          content: "Updated",
+          tool_calls: [writeTool],
+        },
+        {
+          role: "assistant" as const,
+          message_id: "assistant-search",
+          content: "Checked",
+          tool_calls: [flatWebSearch],
+        },
+      ],
+    }));
+
+    await (AgentChatView.prototype as any).prepareRetry.call(view, "user-1");
+
+    expect(workspace.showMessageEditor).toHaveBeenLastCalledWith(expect.objectContaining({
+      laterMessageCount: 2,
+      requiresReplayConfirmation: true,
+    }));
+    expect(view.pendingRetry).toMatchObject({
+      targetMessageId: "user-1",
+      requiresReplayConfirmation: true,
+    });
+  });
+
   it("keeps a risky inline resubmission editable when confirmation is cancelled", async () => {
     showConfirmMock.mockResolvedValue({ confirmed: false });
     const pending = {
@@ -547,6 +897,102 @@ describe("AgentChatView coordinator", () => {
     );
     expect(executeSubmission).not.toHaveBeenCalled();
     expect(view.pendingRetry).toBe(pending);
+  });
+
+  it("forces fresh destructive approval when duplicate later tool ids are replayed", async () => {
+    showConfirmMock.mockResolvedValue({ confirmed: true });
+    const target = { role: "user" as const, message_id: "user-1", content: "Old" };
+    const duplicateId = "tool-dup";
+    const before = {
+      version: 3,
+      messages: [
+        target,
+        {
+          role: "assistant" as const,
+          message_id: "assistant-write",
+          content: "Updated",
+          tool_calls: [{
+            id: duplicateId,
+            messageId: "assistant-write",
+            request: {
+              id: duplicateId,
+              type: "function" as const,
+              function: { name: "write", arguments: '{"path":"Project.md","content":"Updated"}' },
+            },
+            state: "completed" as const,
+            timestamp: 1,
+            result: { success: true, data: { path: "Project.md" } },
+          }],
+        },
+        {
+          role: "assistant" as const,
+          message_id: "assistant-search",
+          content: "Checked",
+          tool_calls: [{
+            id: duplicateId,
+            messageId: "assistant-search",
+            name: "web_search",
+            arguments: { query: "status" },
+            state: "completed" as const,
+            timestamp: 2,
+            result: { success: true, data: { result_count: 1 } },
+          }],
+        },
+      ],
+    };
+    const after = {
+      version: 4,
+      messages: [{ role: "user" as const, message_id: "user-new", content: "Edited" }],
+    };
+    const prepared = {
+      text: "Edited",
+      webSearch: false,
+      mode: "send" as const,
+      attachments: [],
+    };
+    const executeSubmission = jest.fn(async () => undefined);
+    const workspace = {
+      showMessageEditor: jest.fn(async () => undefined),
+      hideMessageEditor: jest.fn(async () => undefined),
+    };
+    const view = {
+      app: {},
+      activeRunPromise: null,
+      pendingRetry: null,
+      messageEditGeneration: 1,
+      transcript: {
+        snapshot: jest.fn()
+          .mockReturnValueOnce(before)
+          .mockReturnValueOnce(before)
+          .mockReturnValueOnce(before)
+          .mockReturnValue(after),
+      },
+      attachmentStore: { hydrateMessage: jest.fn(async (message) => message) },
+      prepareSubmission: jest.fn(async () => prepared),
+      executeSubmission,
+      handleError: jest.fn(),
+      workspace,
+    };
+
+    await (AgentChatView.prototype as any).prepareRetry.call(view, "user-1");
+    await expect(
+      (AgentChatView.prototype as any).resubmitMessage.call(view, "user-1", " Edited "),
+    ).resolves.toBe(true);
+
+    expect(showConfirmMock).toHaveBeenCalledWith(
+      view.app,
+      expect.stringContaining("Vault changes already made"),
+      expect.objectContaining({ primaryButton: "Resubmit" }),
+    );
+    expect(executeSubmission).toHaveBeenCalledWith(prepared, {
+      restoreRejectedSubmission: false,
+      forceDestructiveApproval: true,
+      historicalResubmit: expect.objectContaining({
+        targetMessageId: "user-1",
+        laterMessageCount: 2,
+        requiresReplayConfirmation: true,
+      }),
+    });
   });
 
   it("resubmits from the exact historical point and forces fresh vault approvals", async () => {
@@ -830,6 +1276,74 @@ describe("AgentChatView coordinator", () => {
     expect(view.approvalMode).toBe("full-access");
     expect(workspace.setApprovalMode).toHaveBeenCalledWith("full-access");
     expect(view.hydrateQueue).toHaveBeenCalledWith("chat-2");
+  });
+
+  it("resets to a new chat and keeps a corruption banner after a corrupt saved history is rejected", async () => {
+    const workspace = {
+      setBanner: jest.fn(),
+      resetMessageEditor: jest.fn(),
+    };
+    const view = {
+      conversationOriginToken: "conversation-origin-before-load",
+      messageEditGeneration: 0,
+      pendingRetry: null,
+      queueHydrated: false,
+      controller: { cancel: jest.fn(async () => undefined) },
+      sessionTrustedToolNames: new Set(["write"]),
+      workspace,
+      transcript: {
+        load: jest.fn(async () => {
+          throw new SavedChatCorruptedError("SystemSculpt/Chats/corrupt.md");
+        }),
+      },
+      resetAfterFailedChatLoad: (AgentChatView.prototype as any).resetAfterFailedChatLoad,
+      startNewChat: jest.fn(async () => {
+        workspace.setBanner(null);
+      }),
+    };
+
+    await expect(AgentChatView.prototype.loadChatById.call(view as any, "corrupt"))
+      .resolves.toBeUndefined();
+
+    expect(view.startNewChat).toHaveBeenCalledWith(false);
+    expect(workspace.setBanner).toHaveBeenLastCalledWith(
+      "This saved chat is corrupted and was left unchanged. Start a new chat to continue.",
+      "error",
+    );
+  });
+
+  it("falls back to a fresh chat instead of crashing when transcript load throws unexpectedly", async () => {
+    const workspace = {
+      setBanner: jest.fn(),
+      resetMessageEditor: jest.fn(),
+    };
+    const view = {
+      conversationOriginToken: "conversation-origin-before-load",
+      messageEditGeneration: 0,
+      pendingRetry: null,
+      queueHydrated: false,
+      controller: { cancel: jest.fn(async () => undefined) },
+      sessionTrustedToolNames: new Set(),
+      workspace,
+      transcript: {
+        load: jest.fn(async () => {
+          throw new Error("vault read failed");
+        }),
+      },
+      resetAfterFailedChatLoad: (AgentChatView.prototype as any).resetAfterFailedChatLoad,
+      startNewChat: jest.fn(async () => {
+        workspace.setBanner(null);
+      }),
+    };
+
+    await expect(AgentChatView.prototype.loadChatById.call(view as any, "chat-2"))
+      .resolves.toBeUndefined();
+
+    expect(view.startNewChat).toHaveBeenCalledWith(false);
+    expect(workspace.setBanner).toHaveBeenLastCalledWith(
+      "This chat could not be loaded.",
+      "error",
+    );
   });
 
   it("rolls current approval state back and rejects when durable persistence fails", async () => {

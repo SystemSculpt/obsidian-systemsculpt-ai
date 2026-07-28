@@ -222,6 +222,7 @@ describe("StudioProjectStore", () => {
   });
 
   it("keeps persistence bookkeeping out of project-file errors", async () => {
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined);
     const { store, files } = createStore();
     const created = await store.createProject({
       name: "Invalid file",
@@ -243,6 +244,14 @@ describe("StudioProjectStore", () => {
       /external|sync|projection|authority|generation|candidate|marker|revision|hash/i
     );
     expect(files.get(created.path)).toBe("{");
+    expect(warn).toHaveBeenCalledWith(
+      "[SystemSculpt Studio] Project persistence operation failed",
+      {
+        action: "open",
+        status: "invalid_candidate",
+        detail: expect.stringMatching(/^SyntaxError:/),
+      },
+    );
   });
 
   it("publishes a renamed projection and retires the old visible paths safely", async () => {

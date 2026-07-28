@@ -3,6 +3,7 @@ import type SystemSculptPlugin from "../../main";
 import { CHAT_VIEW_TYPE } from "../../core/plugin/viewTypes";
 import { SystemSculptService, type CreditsBalanceSnapshot } from "../../services/SystemSculptService";
 import type { RecorderService } from "../../services/RecorderService";
+import { readManagedToolCallFunction } from "../../services/chat/ManagedToolExecution";
 import type { ChatMessage } from "../../types";
 import type { ChatExportOptions } from "../../types/chatExport";
 import { isMutatingTool, type ToolApprovalPolicy } from "../../utils/toolPolicy";
@@ -10,7 +11,7 @@ import { tryCopyToClipboard } from "../../utils/clipboard";
 import { getRuntimeCrypto } from "../../utils/runtimeWindow";
 import { resolveAbsoluteVaultPath } from "../../utils/vaultPathUtils";
 import { generateDefaultChatTitle, sanitizeChatTitle } from "../../utils/titleUtils";
-import { ChatStorageService } from "./ChatStorageService";
+import { ChatStorageService, SavedChatCorruptedError } from "./ChatStorageService";
 import {
   FILE_CONTEXT_STATE_CHANGED_EVENT,
   FileContextManager,
@@ -95,25 +96,82 @@ function plainContent(message: ChatMessage): string {
     .join("\n");
 }
 
+function historicalReplayToolOccurrences(
+  message: Readonly<ChatMessage>,
+): readonly NonNullable<ChatMessage["tool_calls"]>[number][] {
+  const tools = [...(message.tool_calls ?? [])];
+  for (const part of message.messageParts ?? []) {
+    if (part.type === "tool_call") tools.push(part.data);
+  }
+  return tools;
+}
+
+function historicalReplayToolSignature(
+  tool: NonNullable<ChatMessage["tool_calls"]>[number],
+): string | null {
+  const fn = readManagedToolCallFunction(tool);
+  try {
+    return JSON.stringify({
+      functionName: fn?.name ?? null,
+      functionArguments: fn?.arguments ?? null,
+      state: typeof tool.state === "string" ? tool.state : null,
+      result: tool.result ?? null,
+      executedOn: "executedOn" in tool ? tool.executedOn ?? null : null,
+    });
+  } catch {
+    return null;
+  }
+}
+
 function historicalResubmitConsequences(
   messages: readonly Readonly<ChatMessage>[],
   targetIndex: number,
 ): Readonly<{ laterMessageCount: number; requiresReplayConfirmation: boolean }> {
   const laterMessages = messages.slice(targetIndex + 1)
     .filter((message) => message.role === "user" || message.role === "assistant");
-  const tools = new Map<string, NonNullable<ChatMessage["tool_calls"]>[number]>();
+  const tools: NonNullable<ChatMessage["tool_calls"]>[number][] = [];
+  const seenToolIds = new Set<string>();
+  let hasAmbiguousReplayHistory = false;
   for (const message of laterMessages) {
-    for (const tool of message.tool_calls ?? []) tools.set(tool.id, tool);
-    for (const part of message.messageParts ?? []) {
-      if (part.type === "tool_call") tools.set(part.data.id, part.data);
+    const messageTools = new Map<string, {
+      tool: NonNullable<ChatMessage["tool_calls"]>[number];
+      signature: string;
+    }>();
+    for (const tool of historicalReplayToolOccurrences(message)) {
+      const toolId = typeof tool.id === "string" ? tool.id.trim() : "";
+      if (!toolId || seenToolIds.has(toolId)) {
+        hasAmbiguousReplayHistory = true;
+        continue;
+      }
+      const signature = historicalReplayToolSignature(tool);
+      if (signature === null) {
+        hasAmbiguousReplayHistory = true;
+        continue;
+      }
+      const existing = messageTools.get(toolId);
+      if (existing) {
+        if (existing.signature !== signature) hasAmbiguousReplayHistory = true;
+        continue;
+      }
+      messageTools.set(toolId, { tool, signature });
+    }
+    for (const [toolId, entry] of messageTools) {
+      if (!toolId || seenToolIds.has(toolId)) {
+        hasAmbiguousReplayHistory = true;
+        continue;
+      }
+      seenToolIds.add(toolId);
+      tools.push(entry.tool);
     }
   }
   const explicitlyDidNotStart = new Set([
     "USER_DENIED",
     "TOOL_CANCELLED_BEFORE_START",
   ]);
-  const requiresReplayConfirmation = [...tools.values()].some((tool) => {
-    if (!isMutatingTool(tool.request.function.name)) return false;
+  const requiresReplayConfirmation = hasAmbiguousReplayHistory || tools.some((tool) => {
+    const name = readManagedToolCallFunction(tool)?.name;
+    if (!name) return true;
+    if (!isMutatingTool(name)) return false;
     const code = tool.result?.error?.code;
     return !code || !explicitlyDidNotStart.has(String(code));
   });
@@ -395,10 +453,18 @@ export class AgentChatView extends ItemView {
     this.sessionTrustedToolNames.clear();
     this.isFullyLoaded = false;
     this.workspace?.setBanner("Loading chat…");
-    const loaded = await this.transcript.load(chatId);
+    let loaded;
+    try {
+      loaded = await this.transcript.load(chatId);
+    } catch (error) {
+      const message = error instanceof SavedChatCorruptedError
+        ? "This saved chat is corrupted and was left unchanged. Start a new chat to continue."
+        : "This chat could not be loaded.";
+      await this.resetAfterFailedChatLoad(message);
+      return;
+    }
     if (!loaded) {
-      this.workspace?.setBanner("This chat could not be loaded.", "error");
-      await this.startNewChat(false);
+      await this.resetAfterFailedChatLoad("This chat could not be loaded.");
       return;
     }
     this.contextLoading = true;
@@ -419,6 +485,11 @@ export class AgentChatView extends ItemView {
     this.isFullyLoaded = true;
     this.updateViewState();
     this.app.workspace.trigger("systemsculpt:chat-loaded", this.chatId);
+  }
+
+  private async resetAfterFailedChatLoad(message: string): Promise<void> {
+    await this.startNewChat(false);
+    this.workspace?.setBanner(message, "error");
   }
 
   public async saveChat(): Promise<void> {

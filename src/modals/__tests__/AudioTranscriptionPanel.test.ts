@@ -1,9 +1,14 @@
 /**
  * @jest-environment jsdom
  */
-import { App, MarkdownView, TFile } from "obsidian";
+import { App, MarkdownView, Notice, TFile } from "obsidian";
 import { ManagedTranscriptionInterruptedError } from "../../services/transcription/ManagedTranscriptionAdapter";
 import { AudioTranscriptionPanel } from "../AudioTranscriptionPanel";
+
+jest.mock("obsidian", () => {
+  const actual = jest.requireActual("obsidian");
+  return { ...actual, Notice: jest.fn() };
+});
 
 const mockStart = jest.fn();
 jest.mock("../../services/TranscriptionService", () => ({
@@ -11,6 +16,8 @@ jest.mock("../../services/TranscriptionService", () => ({
     getInstance: jest.fn(() => ({ start: mockStart })),
   },
 }));
+
+const mockedNotice = Notice as unknown as jest.Mock;
 
 jest.mock("../../utils/clipboard", () => ({
   tryCopyToClipboard: jest.fn(async () => true),
@@ -171,6 +178,10 @@ describe("AudioTranscriptionPanel", () => {
 
     expect(cancel).not.toHaveBeenCalled();
     expect(document.querySelector(".systemsculpt-progress-panel")).toBeNull();
+    expect(mockedNotice).toHaveBeenCalledWith(
+      "Transcription is continuing. You can keep using Obsidian.",
+      3500,
+    );
   });
 
   it("Stop waiting cancels locally and reports safe cancellation immediately", () => {
@@ -205,6 +216,10 @@ describe("AudioTranscriptionPanel", () => {
     ([...document.querySelectorAll("button")]
       .find((button) => button.textContent === "Hide") as HTMLButtonElement).click();
     expect(document.querySelector(".systemsculpt-progress-panel")).toBeNull();
+    expect(mockedNotice).toHaveBeenCalledWith(
+      "Transcription is continuing. You can keep using Obsidian.",
+      3500,
+    );
     first.reject(new ManagedTranscriptionInterruptedError(
       "preserved-panel-op",
       true,
@@ -250,6 +265,10 @@ describe("AudioTranscriptionPanel", () => {
     expect(document.body.textContent).toContain("Transcript saved");
     expect([...document.querySelectorAll("button")]
       .some((button) => button.textContent === "Open transcript")).toBe(true);
+    expect(mockedNotice).toHaveBeenCalledWith(
+      "Transcript saved to Recordings/test.srt, but Obsidian could not open it automatically.",
+      6000,
+    );
   });
 
   it("keeps a completed output actionable when cleanup returns a warning", async () => {
@@ -268,6 +287,10 @@ describe("AudioTranscriptionPanel", () => {
 
     expect(document.body.textContent).toContain("Transcript saved with a warning");
     expect(document.body.textContent).toContain(completedResult.outputPath);
+    expect(mockedNotice).toHaveBeenCalledWith(
+      "The source audio could not be moved to trash.",
+      6000,
+    );
   });
 
   it("shows a task failure without deleting or rewriting the source", async () => {

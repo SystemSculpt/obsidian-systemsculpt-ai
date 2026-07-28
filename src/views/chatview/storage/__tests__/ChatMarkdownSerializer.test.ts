@@ -2,7 +2,13 @@
  * @jest-environment jsdom
  */
 import { ChatMarkdownSerializer } from "../ChatMarkdownSerializer";
+import {
+  hasChatIdentityFrontmatter,
+  hasChatIdentityMetadata,
+} from "../ChatFrontmatterIdentity";
 import { ChatMessage, MessagePart } from "../../../../types";
+import { projectManagedMessages } from "../../../../services/chat/AcceptedChatRequestSnapshot";
+import { parseYaml } from "obsidian";
 
 // Mock obsidian's parseYaml
 jest.mock("obsidian", () => ({
@@ -278,6 +284,9 @@ describe("ChatMarkdownSerializer", () => {
         .join("\n");
       return `---\n${yamlLines}\n---\n\n${body}`;
     };
+    const normalizeMarkdown = (value: string, newline: string, bom: boolean): string => (
+      `${bom ? "\uFEFF" : ""}${value.replace(/\n/g, newline)}`
+    );
 
     it("returns null for content without front-matter", () => {
       const content = "Just some text without YAML";
@@ -313,6 +322,29 @@ describe("ChatMarkdownSerializer", () => {
       expect(result?.metadata.id).toBe("chat-123");
       expect(result?.metadata.title).toBe("Test Chat");
       expect(result?.metadata.approvalMode).toBe("full-access");
+    });
+
+    it("parses metadata independently and rejects content without frontmatter", () => {
+      const content = normalizeMarkdown(createMarkdown(
+        {
+          id: "chat-metadata-only",
+          title: "Metadata only",
+          created: "2024-01-01T00:00:00Z",
+          lastModified: "2024-01-01T12:00:00Z",
+        },
+        "Body is intentionally ignored by metadata parsing.",
+      ), "\r\n", true);
+
+      expect(ChatMarkdownSerializer.parseMetadata(content)).toMatchObject({
+        id: "chat-metadata-only",
+        title: "Metadata only",
+      });
+      expect(ChatMarkdownSerializer.parseMetadata("No frontmatter")).toBeNull();
+    });
+
+    it("rejects an id-only blank note instead of synthesizing an empty chat", () => {
+      expect(ChatMarkdownSerializer.parseMarkdown(createMarkdown({ id: "blank-id-only" }, "")))
+        .toBeNull();
     });
 
     it("strictly restores a managed session binding from frontmatter", () => {
@@ -358,6 +390,23 @@ I'm doing well, thank you!
       expect(result?.messages[0].message_id).toBe("user-1");
       expect(result?.messages[0].content).toContain("Hello");
       expect(result?.messages[1].role).toBe("assistant");
+    });
+
+    it("keeps id-only legacy transcripts when real message frames exist", () => {
+      const content = createMarkdown(
+        { id: "legacy-id-only" },
+        `<!-- SYSTEMSCULPT-MESSAGE-START role="user" message-id="legacy-user" -->
+Legacy question
+<!-- SYSTEMSCULPT-MESSAGE-END -->`,
+      );
+
+      const restored = ChatMarkdownSerializer.parseMarkdown(content)?.messages[0];
+
+      expect(restored).toMatchObject({
+        role: "user",
+        message_id: "legacy-user",
+      });
+      expect(String(restored?.content).trim()).toBe("Legacy question");
     });
 
     it("parses message with reasoning block", () => {
@@ -421,6 +470,8 @@ Using tools...
       const content = createMarkdown(
         {
           id: "chat-123",
+          created: "2026-07-28T00:00:00.000Z",
+          lastModified: "2026-07-28T00:00:00.000Z",
           context_files: ["file1.md", "path/Extractions/doc.md"],
         },
         ""
@@ -435,7 +486,92 @@ Using tools...
       expect(result?.metadata.context_files?.[1].type).toBe("extraction");
     });
 
-    it("skips messages without required attributes", () => {
+    it.each([
+      ["LF", "\n", false],
+      ["CRLF", "\r\n", false],
+      ["BOM plus LF", "\n", true],
+      ["BOM plus CRLF", "\r\n", true],
+    ])("parses legacy and framed histories identically with %s", (_label, newline, bom) => {
+      const normalize = (value: string) => (
+        `${bom ? "\uFEFF" : ""}${value.replace(/\n/g, newline)}`
+      );
+      const legacy = createMarkdown(
+        { id: "portable-legacy", title: "Portable Legacy" },
+        [
+          '<!-- SYSTEMSCULPT-MESSAGE-START role="assistant" message-id="assistant-1" -->',
+          "<!-- REASONING",
+          "Portable reasoning",
+          "-->",
+          "<!-- TOOL-CALLS",
+          '[{"id":"portable-call","name":"read","arguments":{"paths":["Portable.md"]}}]',
+          "-->",
+          "Portable answer",
+          "<!-- SYSTEMSCULPT-MESSAGE-END -->",
+        ].join("\n"),
+      );
+      const framed = createMarkdown(
+        { id: "portable-framed", title: "Portable Framed" },
+        ChatMarkdownSerializer.serializeMessages([{
+          role: "user",
+          content: "Quoted <!-- SYSTEMSCULPT-MESSAGE-END --> marker",
+          message_id: "user-framed",
+        }]),
+      );
+
+      const parsedLegacy = ChatMarkdownSerializer.parseMarkdown(normalize(legacy));
+      const parsedFramed = ChatMarkdownSerializer.parseMarkdown(normalize(framed));
+
+      expect(parsedLegacy?.metadata.id).toBe("portable-legacy");
+      expect(String(parsedLegacy?.messages[0].content).trim()).toBe("Portable answer");
+      expect(parsedLegacy?.messages[0].reasoning).toContain("Portable reasoning");
+      expect(parsedLegacy?.messages[0].tool_calls?.[0]).toMatchObject({
+        id: "portable-call",
+        name: "read",
+      });
+      expect(parsedFramed?.metadata.id).toBe("portable-framed");
+      expect(parsedFramed?.messages).toEqual([
+        expect.objectContaining({
+          role: "user",
+          message_id: "user-framed",
+          content: "Quoted <!-- SYSTEMSCULPT-MESSAGE-END --> marker",
+        }),
+      ]);
+    });
+
+    it.each([
+      ["LF", "\n", false],
+      ["CRLF", "\r\n", false],
+      ["BOM plus LF", "\n", true],
+      ["BOM plus CRLF", "\r\n", true],
+    ])("restores stored multipart content with %s framing", (_label, newline, bom) => {
+      const serialized = ChatMarkdownSerializer.serializeMessages([{
+        role: "user",
+        message_id: "user-multipart",
+        content: [
+          { type: "text", text: "Compare these." },
+          { type: "image_url", image_url: { url: "data:image/png;base64,YWJj" } },
+        ],
+      }]);
+
+      const parsed = ChatMarkdownSerializer.parseMarkdown(normalizeMarkdown(
+        createMarkdown({ id: "chat-multipart" }, serialized),
+        newline,
+        bom,
+      ));
+
+      expect(parsed?.messages).toEqual([
+        expect.objectContaining({
+          role: "user",
+          message_id: "user-multipart",
+          content: [
+            { type: "text", text: "Compare these." },
+            { type: "image_url", image_url: { url: "data:image/png;base64,YWJj" } },
+          ],
+        }),
+      ]);
+    });
+
+    it("fails closed when any declared message is missing required attributes", () => {
       const messageBlock = `
 <!-- SYSTEMSCULPT-MESSAGE-START role="user" -->
 Missing message-id
@@ -453,21 +589,222 @@ Valid message
 
       const result = ChatMarkdownSerializer.parseMarkdown(content);
 
-      expect(result?.messages).toHaveLength(1);
-      expect(result?.messages[0].message_id).toBe("asst-2");
+      expect(result).toBeNull();
+    });
+
+    it("fails closed instead of returning a valid prefix from a truncated chat", () => {
+      const valid = ChatMarkdownSerializer.serializeMessages([
+        { role: "user", content: "Keep all of this or none of it", message_id: "user-1" },
+      ]);
+      const content = createMarkdown(
+        { id: "chat-truncated" },
+        `${valid}\n\n<!-- SYSTEMSCULPT-MESSAGE-START role="assistant" message-id="assistant-1" -->\nPartial`,
+      );
+
+      expect(ChatMarkdownSerializer.parseMarkdown(content)).toBeNull();
+    });
+
+    it("fails closed when the body contains non-chat text but no message frames", () => {
+      const content = createMarkdown(
+        {
+          id: "chat-stray-body",
+          created: "2026-07-28T00:00:00.000Z",
+          lastModified: "2026-07-28T00:00:00.000Z",
+        },
+        "Plain markdown body that is not a saved chat transcript.",
+      );
+
+      expect(ChatMarkdownSerializer.parseMarkdown(content)).toBeNull();
+    });
+
+    it("fails closed instead of dropping an invalid framed payload", () => {
+      const valid = ChatMarkdownSerializer.serializeMessages([
+        { role: "user", content: "Question", message_id: "user-1" },
+      ]);
+      const invalid = [
+        '<!-- SYSTEMSCULPT-MESSAGE-START role="assistant" message-id="assistant-1" payload-format="base64-json-v1" -->',
+        "not-valid-base64-json",
+        "<!-- SYSTEMSCULPT-MESSAGE-END -->",
+      ].join("\n");
+      const content = createMarkdown({ id: "chat-corrupt" }, `${valid}\n\n${invalid}`);
+
+      expect(ChatMarkdownSerializer.parseMarkdown(content)).toBeNull();
+    });
+
+    it.each([
+      ["LF", "\n", false],
+      ["CRLF", "\r\n", false],
+      ["BOM plus LF", "\n", true],
+      ["BOM plus CRLF", "\r\n", true],
+    ])("fails closed on corrupt stored multipart content with %s framing", (_label, newline, bom) => {
+      const serialized = ChatMarkdownSerializer.serializeMessages([{
+        role: "user",
+        message_id: "user-multipart",
+        content: [
+          { type: "text", text: "Compare these." },
+          { type: "image_url", image_url: { url: "data:image/png;base64,YWJj" } },
+        ],
+      }]).replace(
+        /(<!-- SYSTEMSCULPT-CONTENT-PARTS base64\n)([A-Za-z0-9+/=]+)(\n-->)/,
+        "$1W10=$3",
+      );
+
+      expect(ChatMarkdownSerializer.parseMarkdown(normalizeMarkdown(
+        createMarkdown({ id: "chat-corrupt-multipart" }, serialized),
+        newline,
+        bom,
+      ))).toBeNull();
+    });
+
+    it.each([
+      ["LF", "\n", false],
+      ["CRLF", "\r\n", false],
+      ["BOM plus LF", "\n", true],
+      ["BOM plus CRLF", "\r\n", true],
+    ])("fails closed on corrupt sequential attachment metadata with %s framing", (_label, newline, bom) => {
+      const serialized = ChatMarkdownSerializer.serializeMessages([{
+        role: "user",
+        message_id: "user-sequential-attachments",
+        content: [
+          { type: "text", text: "Compare" },
+          { type: "image_url", image_url: { url: "data:image/png;base64,YWJj" } },
+        ],
+        attachmentMetadata: [{
+          id: "image-hash",
+          name: "diagram.png",
+          mimeType: "image/png",
+          byteLength: 3,
+          kind: "image",
+          contentPartIndex: 1,
+        }],
+      }]).replace(
+        /attachment-metadata="([A-Za-z0-9+/=]+)"/,
+        'attachment-metadata="bm90LWpzb24="',
+      );
+
+      expect(ChatMarkdownSerializer.parseMarkdown(normalizeMarkdown(
+        createMarkdown({ id: "chat-corrupt-sequential-attachments" }, serialized),
+        newline,
+        bom,
+      ))).toBeNull();
+    });
+
+    it.each([
+      ["LF", "\n", false],
+      ["CRLF", "\r\n", false],
+      ["BOM plus LF", "\n", true],
+      ["BOM plus CRLF", "\r\n", true],
+    ])("fails closed on corrupt framed attachment metadata with %s framing", (_label, newline, bom) => {
+      const serialized = ChatMarkdownSerializer.serializeMessages([{
+        role: "user",
+        message_id: "user-framed-attachments",
+        content: [
+          { type: "text", text: "Quoted <!-- SYSTEMSCULPT-MESSAGE-END --> marker" },
+          { type: "image_url", image_url: { url: "data:image/png;base64,YWJj" } },
+        ],
+        attachmentMetadata: [{
+          id: "image-hash",
+          name: "diagram.png",
+          mimeType: "image/png",
+          byteLength: 3,
+          kind: "image",
+          contentPartIndex: 1,
+        }],
+      }]).replace(
+        /attachment-metadata="([A-Za-z0-9+/=]+)"/,
+        'attachment-metadata="W10="',
+      );
+
+      expect(serialized).toContain(`payload-format="base64-json-v1"`);
+      expect(ChatMarkdownSerializer.parseMarkdown(normalizeMarkdown(
+        createMarkdown({ id: "chat-corrupt-framed-attachments" }, serialized),
+        newline,
+        bom,
+      ))).toBeNull();
+    });
+
+    it.each([
+      [
+        "unsupported role",
+        '<!-- SYSTEMSCULPT-MESSAGE-START role="system" message-id="system-1" -->\nNope\n<!-- SYSTEMSCULPT-MESSAGE-END -->',
+      ],
+      [
+        "empty message id",
+        '<!-- SYSTEMSCULPT-MESSAGE-START role="user" message-id="" -->\nNope\n<!-- SYSTEMSCULPT-MESSAGE-END -->',
+      ],
+      [
+        "empty tool-call payload",
+        '<!-- SYSTEMSCULPT-MESSAGE-START role="assistant" message-id="assistant-1" -->\n<!-- TOOL-CALLS\n\n-->\n<!-- SYSTEMSCULPT-MESSAGE-END -->',
+      ],
+      [
+        "non-array tool-call payload",
+        '<!-- SYSTEMSCULPT-MESSAGE-START role="assistant" message-id="assistant-1" -->\n<!-- TOOL-CALLS\n{}\n-->\n<!-- SYSTEMSCULPT-MESSAGE-END -->',
+      ],
+      [
+        "invalid tool-call JSON",
+        '<!-- SYSTEMSCULPT-MESSAGE-START role="assistant" message-id="assistant-1" -->\n<!-- TOOL-CALLS\n{not-json\n-->\n<!-- SYSTEMSCULPT-MESSAGE-END -->',
+      ],
+      [
+        "nested message frame",
+        [
+          '<!-- SYSTEMSCULPT-MESSAGE-START role="user" message-id="user-1" -->',
+          '<!-- SYSTEMSCULPT-MESSAGE-START role="assistant" message-id="assistant-1" -->',
+          "Nested",
+          "<!-- SYSTEMSCULPT-MESSAGE-END -->",
+          "<!-- SYSTEMSCULPT-MESSAGE-END -->",
+        ].join("\n"),
+      ],
+    ])("fails closed on a %s", (_label, body) => {
+      expect(ChatMarkdownSerializer.parseMarkdown(createMarkdown({ id: "chat-malformed" }, body)))
+        .toBeNull();
+    });
+
+    it("preserves a declared empty legacy message instead of silently dropping it", () => {
+      const content = createMarkdown(
+        { id: "chat-empty" },
+        [
+          '<!-- SYSTEMSCULPT-MESSAGE-START role="assistant" message-id="assistant-empty" -->',
+          "",
+          "<!-- SYSTEMSCULPT-MESSAGE-END -->",
+        ].join("\n"),
+      );
+
+      expect(ChatMarkdownSerializer.parseMarkdown(content)?.messages).toEqual([
+        expect.objectContaining({
+          role: "assistant",
+          message_id: "assistant-empty",
+          content: "",
+        }),
+      ]);
     });
   });
 
-  describe("isValidYamlFrontmatter", () => {
-    // Access private method via bracket notation
-    it("returns true when content has id field", () => {
-      const result = (ChatMarkdownSerializer as any).isValidYamlFrontmatter("id: chat-123");
-      expect(result).toBe(true);
+  describe("chat identity frontmatter", () => {
+    it("recognizes the shared id and timestamp identity contract", () => {
+      const content = "\uFEFF---\r\nid: chat-123\r\nlastModified: 2026-07-28T00:00:00.000Z\r\n---\r\n";
+
+      expect(hasChatIdentityFrontmatter(content)).toBe(true);
+      expect(hasChatIdentityMetadata({
+        id: "chat-123",
+        created: "2026-07-28T00:00:00.000Z",
+      })).toBe(true);
     });
 
-    it("returns false when content has no id", () => {
-      const result = (ChatMarkdownSerializer as any).isValidYamlFrontmatter("title: My Chat");
-      expect(result).toBe(false);
+    it("rejects frontmatter without a chat history timestamp", () => {
+      expect(hasChatIdentityFrontmatter("---\nid: stray-note\n---\n")).toBe(false);
+      expect(hasChatIdentityMetadata({ id: "stray-note" })).toBe(false);
+      expect(hasChatIdentityMetadata(null)).toBe(false);
+      expect(hasChatIdentityMetadata([])).toBe(false);
+    });
+
+    it("fails closed when YAML parsing throws or returns a non-object", () => {
+      (parseYaml as jest.Mock).mockImplementationOnce(() => {
+        throw new Error("malformed YAML");
+      });
+      expect(hasChatIdentityFrontmatter("---\nid: malformed\ncreated: [\n---\n")).toBe(false);
+
+      (parseYaml as jest.Mock).mockReturnValueOnce([]);
+      expect(hasChatIdentityFrontmatter("---\nid: array\ncreated: today\n---\n")).toBe(false);
     });
   });
 
@@ -651,6 +988,7 @@ ${serialized}`;
         },
         state: "completed",
         timestamp: 1,
+        executedOn: "server" as const,
         result: {
           success: true,
           data: {
@@ -686,8 +1024,111 @@ ${serialized}`;
       const parsed = ChatMarkdownSerializer.parseMarkdown(markdown);
       const restoredToolCall = parsed?.messages[0].tool_calls?.[0] as any;
       expect(restoredToolCall?.request?.function?.name).toBe("web_search");
+      expect(restoredToolCall?.executedOn).toBe("server");
       expect(JSON.parse(restoredToolCall?.request?.function?.arguments ?? "{}")).toEqual({
         query: "systemsculpt pricing",
+      });
+    });
+
+    it("reloads legacy web search history into a valid managed follow-up request", () => {
+      const legacyWebSearchToolCall = {
+        id: "call-web-legacy",
+        messageId: "assistant-search",
+        request: {
+          id: "call-web-legacy",
+          type: "function" as const,
+          function: {
+            name: "web_search",
+            arguments: JSON.stringify({ query: "release notes" }),
+          },
+        },
+        state: "completed" as const,
+        timestamp: 1,
+        result: {
+          success: true,
+          data: { tool: "web_search", result_count: 1 },
+        },
+      };
+      const savedMessages: ChatMessage[] = [
+        { role: "user", content: "Search release notes", message_id: "user-search" },
+        {
+          role: "assistant",
+          content: "Search-backed answer",
+          message_id: "assistant-search",
+          messageParts: [
+            {
+              id: "tool_call_part-call-web-legacy",
+              type: "tool_call",
+              data: legacyWebSearchToolCall,
+              timestamp: 1,
+            },
+            {
+              id: "content-search-answer",
+              type: "content",
+              data: "Search-backed answer",
+              timestamp: 2,
+            },
+          ],
+        },
+        { role: "user", content: "Follow up", message_id: "user-follow-up" },
+      ];
+      const markdown = `---
+id: legacy-web-search
+---
+
+${ChatMarkdownSerializer.serializeMessages(savedMessages)}`;
+
+      const reloaded = ChatMarkdownSerializer.parseMarkdown(markdown);
+      const wire = projectManagedMessages(reloaded?.messages ?? []);
+
+      expect(reloaded?.messages[1].tool_calls?.[0]).not.toHaveProperty("executedOn");
+      expect(wire.map((message) => message.role)).toEqual(["user", "assistant", "user"]);
+      expect(JSON.stringify(wire)).not.toContain("call-web-legacy");
+      expect(wire[1]).not.toHaveProperty("tool_calls");
+    });
+
+    it("reloads the oldest flat web search shape without dereferencing a missing request", () => {
+      const savedMessages: ChatMessage[] = [
+        { role: "user", content: "Search", message_id: "user-search" },
+        {
+          role: "assistant",
+          content: "Legacy search answer",
+          message_id: "assistant-search",
+          messageParts: [
+            {
+              id: "tool_call_part-flat-web",
+              type: "tool_call",
+              data: {
+                id: "flat-web",
+                name: "web_search",
+                arguments: { query: "legacy" },
+              } as any,
+              timestamp: 1,
+            },
+            {
+              id: "content-flat-web",
+              type: "content",
+              data: "Legacy search answer",
+              timestamp: 2,
+            },
+          ],
+        },
+        { role: "user", content: "Continue", message_id: "user-follow-up" },
+      ];
+      const markdown = `---
+id: flat-web-search
+---
+
+${ChatMarkdownSerializer.serializeMessages(savedMessages)}`;
+
+      const reloaded = ChatMarkdownSerializer.parseMarkdown(markdown);
+      const wire = projectManagedMessages(reloaded?.messages ?? []);
+
+      expect(wire.map((message) => message.role)).toEqual(["user", "assistant", "user"]);
+      expect(JSON.stringify(wire)).not.toContain("flat-web");
+      expect(wire[1]).toEqual({
+        role: "assistant",
+        content: "Legacy search answer",
       });
     });
   });

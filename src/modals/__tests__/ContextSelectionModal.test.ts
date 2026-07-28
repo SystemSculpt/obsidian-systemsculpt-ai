@@ -1,7 +1,14 @@
 /** @jest-environment jsdom */
 
-import { App, TFile } from "obsidian";
+import { App, Notice, TFile } from "obsidian";
 import { ContextSelectionModal } from "../ContextSelectionModal";
+
+jest.mock("obsidian", () => {
+  const actual = jest.requireActual("obsidian");
+  return { ...actual, Notice: jest.fn() };
+});
+
+const mockedNotice = Notice as unknown as jest.Mock;
 
 function files(): TFile[] {
   return [
@@ -202,6 +209,10 @@ describe("ContextSelectionModal", () => {
 
     expect(document.body.contains(modal.modalEl)).toBe(true);
     expect(modal.modalEl.textContent).toContain("Add 1 file");
+    expect(mockedNotice).toHaveBeenCalledWith(
+      "Couldn't add context files. Processing failed",
+      5000,
+    );
   });
 
   it("renders an honest empty state", () => {

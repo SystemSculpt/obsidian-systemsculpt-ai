@@ -7,6 +7,10 @@ import {
 } from "../../core/ui/surface";
 import type { ChatMessage, MessagePart } from "../../types";
 import type { ToolCall } from "../../types/toolCalls";
+import {
+  isServerExecutedManagedToolCall,
+  readManagedToolCallFunction,
+} from "../../services/chat/ManagedToolExecution";
 import { tryCopyToClipboard } from "../../utils/clipboard";
 import { collectSuccessfulToolArtifactPaths, collectToolArtifactPaths } from "../../utils/toolArtifacts";
 import {
@@ -112,18 +116,6 @@ function toolCallForPart(part: AgentToolPart): ToolCall {
     state: "executing",
     timestamp: Date.now(),
   };
-}
-
-function artifactPaths(tool: ToolCall, success: boolean): string[] {
-  try {
-    const input = JSON.parse(tool.request.function.arguments || "{}") as Record<string, unknown>;
-    return success
-      ? collectToolArtifactPaths(tool.request.function.name, input, tool.result?.data)
-      : collectSuccessfulToolArtifactPaths(tool.request.function.name, tool.result?.data);
-  } catch {
-    // Malformed input is already represented by the durable failed tool state.
-    return [];
-  }
 }
 
 function historicalToolState(tool: ToolCall, success: boolean): AgentToolPart["state"] {
@@ -768,10 +760,21 @@ export class AgentConversationRenderer extends Component {
   }
 
   private historicalToolPart(tool: ToolCall): AgentToolPart {
-    let input: unknown = {};
-    try { input = JSON.parse(tool.request.function.arguments || "{}"); } catch { input = tool.request.function.arguments; }
+    const fn = readManagedToolCallFunction(tool);
     const success = tool.state === "completed" && tool.result?.success === true;
-    const paths = artifactPaths(tool, success);
+    let input: unknown = {};
+    let paths: string[] = [];
+    try {
+      input = JSON.parse(fn?.arguments || "{}");
+      if (fn) {
+        paths = success
+          ? collectToolArtifactPaths(fn.name, input as Record<string, unknown>, tool.result?.data)
+          : collectSuccessfulToolArtifactPaths(fn.name, tool.result?.data);
+      }
+    } catch {
+      // Malformed input is already represented by the durable failed tool state.
+      input = fn?.arguments ?? {};
+    }
     const state = historicalToolState(tool, success);
     const summary = tool.result?.data && typeof tool.result.data === "object"
       && typeof (tool.result.data as { summary?: unknown }).summary === "string"
@@ -783,8 +786,8 @@ export class AgentConversationRenderer extends Component {
       kind: "tool",
       messageId: tool.messageId,
       callId: tool.id,
-      name: tool.request.function.name,
-      location: tool.executedOn === "server" ? "server" : "vault",
+      name: fn?.name ?? "unknown_tool",
+      location: isServerExecutedManagedToolCall(tool) ? "server" : "vault",
       input,
       state,
       ...(typeof tool.result?.data !== "undefined" || paths.length ? {

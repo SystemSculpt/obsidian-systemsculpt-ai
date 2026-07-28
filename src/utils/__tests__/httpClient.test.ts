@@ -210,6 +210,36 @@ describe("httpClient", () => {
       await expect(httpRequest({ url })).rejects.toMatchObject({ status: 400 });
     });
 
+    it("never opens the host circuit for repeated managed chat schema 400s", async () => {
+      const url = "https://systemsculpt.com/api/plugin/chat/completions";
+      requestUrlMock.mockResolvedValue({
+        status: 400,
+        text: JSON.stringify({
+          error: {
+            code: "invalid_managed_chat_request",
+            message: "messages does not match managed_chat_messages_v1.",
+          },
+        }),
+        headers: { "x-request-id": "chatreq_schema_400" },
+      });
+
+      for (let attempt = 0; attempt < 8; attempt += 1) {
+        await expect(httpRequest({ url })).rejects.toMatchObject({
+          status: 400,
+          json: {
+            error: {
+              code: "invalid_managed_chat_request",
+            },
+          },
+        });
+        expect(isHostTemporarilyDisabled(url)).toEqual({
+          disabled: false,
+          retryInMs: 0,
+        });
+      }
+      expect(requestUrlMock).toHaveBeenCalledTimes(8);
+    });
+
     it("throws on 401 error", async () => {
       const url = "https://api.example.com/data";
       requestUrlMock.mockResolvedValue({

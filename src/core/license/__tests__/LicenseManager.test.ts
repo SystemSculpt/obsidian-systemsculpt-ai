@@ -4,6 +4,13 @@
 import { App, Notice } from "obsidian";
 import { LicenseManager } from "../LicenseManager";
 
+jest.mock("obsidian", () => {
+  const actual = jest.requireActual("obsidian");
+  return { ...actual, Notice: jest.fn() };
+});
+
+const mockedNotice = Notice as unknown as jest.Mock;
+
 describe("LicenseManager", () => {
   let manager: LicenseManager;
   let mockPlugin: any;
@@ -49,6 +56,7 @@ describe("LicenseManager", () => {
       expect(mockSettingsManager.updateSettings).toHaveBeenCalledWith({
         licenseValid: false,
       });
+      expect(mockedNotice).toHaveBeenCalledWith("License key is empty. Premium features disabled.", 5000);
     });
 
     it("sets licenseValid to false when license key is only whitespace", async () => {
@@ -60,6 +68,7 @@ describe("LicenseManager", () => {
       expect(mockSettingsManager.updateSettings).toHaveBeenCalledWith({
         licenseValid: false,
       });
+      expect(mockedNotice).toHaveBeenCalledWith("License key is empty. Premium features disabled.", 5000);
     });
 
     it("skips validation when license was recently validated", async () => {
@@ -195,12 +204,15 @@ describe("LicenseManager", () => {
       await manager.initializeLicense();
 
       jest.runAllTimers();
-      await Promise.resolve();
-      await Promise.resolve(); // Allow promise chain to complete
+      await (manager as any).pendingValidation;
 
       // LicenseService owns the state transition; the manager only schedules it.
       expect(mockPlugin.aiService.validateLicenseDetailed).toHaveBeenCalled();
       expect(mockSettingsManager.updateSettings).not.toHaveBeenCalled();
+      expect(mockedNotice).toHaveBeenCalledWith(
+        "Your SystemSculpt license is no longer valid or failed to validate. Premium features may be unavailable.",
+        7000,
+      );
     });
   });
 });

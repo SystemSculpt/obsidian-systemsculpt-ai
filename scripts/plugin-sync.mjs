@@ -4,8 +4,11 @@ import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { spawnSync } from "node:child_process";
-import { createHash, randomBytes } from "node:crypto";
+import { createHash } from "node:crypto";
 import { inspectPluginArtifacts, REQUIRED_PLUGIN_ARTIFACTS } from "./plugin-artifacts.mjs";
+import { replaceFileAtomically } from "./platform-portability.mjs";
+
+export { replaceFileAtomically } from "./platform-portability.mjs";
 
 export const DEFAULT_SYNC_CONFIG_PATH = path.resolve(process.cwd(), "systemsculpt-sync.config.json");
 export const DEVELOPMENT_BUILD_MANIFEST_KEY = "systemsculptDevBuild";
@@ -98,19 +101,6 @@ export function createDevelopmentBuildIdentity(options = {}) {
   });
 }
 
-function atomicReplace(filePath, bytes) {
-  const tempPath = path.join(
-    path.dirname(filePath),
-    `.${path.basename(filePath)}.systemsculpt-sync-${process.pid}-${randomBytes(6).toString("hex")}.tmp`,
-  );
-  try {
-    fs.writeFileSync(tempPath, bytes);
-    fs.renameSync(tempPath, filePath);
-  } finally {
-    fs.rmSync(tempPath, { force: true });
-  }
-}
-
 function developmentManifest(root, buildIdentity) {
   const source = JSON.parse(fs.readFileSync(path.join(root, "manifest.json"), "utf8"));
   if (!source || typeof source !== "object" || Array.isArray(source)) {
@@ -122,7 +112,7 @@ function developmentManifest(root, buildIdentity) {
   }, null, 2)}\n`);
 }
 
-function copyPluginArtifacts(root, target, buildIdentity) {
+function copyPluginArtifacts(root, target, buildIdentity, replaceFile) {
   fs.mkdirSync(target.path, { recursive: true });
   const artifactBytes = new Map(
     REQUIRED_PLUGIN_ARTIFACTS.map((fileName) => [
@@ -137,7 +127,7 @@ function copyPluginArtifacts(root, target, buildIdentity) {
   for (const fileName of ["main.js", "styles.css", "manifest.json"]) {
     const sourcePath = path.join(root, fileName);
     if (!fs.existsSync(sourcePath)) throw new Error(`Required file missing: ${sourcePath}`);
-    atomicReplace(path.join(target.path, fileName), artifactBytes.get(fileName));
+    replaceFile(path.join(target.path, fileName), artifactBytes.get(fileName));
   }
   for (const relativePath of OBSOLETE_PLUGIN_FILES) {
     fs.rmSync(path.join(target.path, relativePath), {
@@ -163,8 +153,9 @@ export function syncConfiguredTargets(options = {}) {
 
   const buildIdentity = options.buildIdentity
     || createDevelopmentBuildIdentity({ root });
+  const replaceFile = options.replaceFile || replaceFileAtomically;
   for (const target of loaded.targets) {
-    copyPluginArtifacts(root, target, buildIdentity);
+    copyPluginArtifacts(root, target, buildIdentity, replaceFile);
     logger.info?.(`[sync] Updated ${formatSyncTarget(target)} (${buildIdentity.id})`);
   }
   return { ...loaded, succeeded: loaded.targets, buildIdentity };

@@ -1,11 +1,18 @@
 /** @jest-environment jsdom */
 
-import { App, Platform } from "obsidian";
+import { App, Notice, Platform } from "obsidian";
 import { displayRecorderTabContent } from "../settings/RecorderTabContent";
 import {
   getCurrentHostPreferredMicrophoneId,
   setCurrentHostPreferredMicrophoneId,
 } from "../services/recorder/RecorderPreferenceStore";
+
+jest.mock("obsidian", () => {
+  const actual = jest.requireActual("obsidian");
+  return { ...actual, Notice: jest.fn() };
+});
+
+const mockedNotice = Notice as unknown as jest.Mock;
 
 const device = (deviceId: string, label: string): MediaDeviceInfo => ({
   deviceId,
@@ -126,6 +133,7 @@ describe("Recorder settings tab", () => {
     } else {
       delete (navigator as Navigator & { mediaDevices?: MediaDevices }).mediaDevices;
     }
+    jest.clearAllMocks();
   });
 
   it("groups the canonical recorder controls and removes retired options", async () => {
@@ -349,6 +357,7 @@ describe("Recorder settings tab", () => {
       app.vault.getName(),
     )).toBe("popout");
     expect(updateSettings).not.toHaveBeenCalled();
+    expect(mockedNotice).toHaveBeenCalledWith("Microphone set to Popout microphone.");
   });
 
   it("keeps device-local mobile and desktop microphone preferences isolated", async () => {
@@ -382,6 +391,7 @@ describe("Recorder settings tab", () => {
 
     expect(getCurrentHostPreferredMicrophoneId(window, app.vault.getName())).toBe("headset");
     expect(updateSettings).not.toHaveBeenCalled();
+    expect(mockedNotice).toHaveBeenCalledWith("Microphone set to USB headset.");
 
     Object.assign(Platform, {
       isDesktopApp: true,
@@ -462,6 +472,7 @@ describe("Recorder settings tab", () => {
 
     expect(select.value).toBe("");
     expect(select.selectedOptions[0]?.text).toBe("Default microphone");
+    expect(mockedNotice).toHaveBeenCalledWith("Microphone set to Default microphone.");
   });
 
   it("invalidates an older render before applying its device result", async () => {

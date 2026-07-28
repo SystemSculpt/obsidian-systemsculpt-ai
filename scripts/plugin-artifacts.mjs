@@ -4,11 +4,13 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { builtinModules } from "node:module";
+import process from "node:process";
 import { CANONICAL_API_BASE_URL } from "./plugin-build-options.mjs";
 
 export const REQUIRED_PLUGIN_ARTIFACTS = ["manifest.json", "main.js", "styles.css"];
 
 const INLINE_SOURCE_MAP_PATTERN = /[#@]\s*sourceMappingURL=data:/;
+const CSS_BUILD_FAILURE_PATTERN = /\/\*\s*CSS build failed\s*\*\//i;
 const RETIRED_SYSTEMSCULPT_API_HOST = "https://api.systemsculpt.com";
 const DEFAULT_TAIL_BYTES = 2 * 1024 * 1024;
 const FORBIDDEN_CLIENT_BUNDLE_FRAGMENTS = [
@@ -85,26 +87,68 @@ function formatBytes(sizeBytes) {
   return `${(sizeBytes / (1024 * 1024)).toFixed(2)} MB`;
 }
 
+function inspectArtifactPath(filePath) {
+  try {
+    const stats = fs.lstatSync(filePath);
+    return {
+      path: filePath,
+      exists: true,
+      sizeBytes: stats.isFile() ? stats.size : null,
+      isRegularFile: stats.isFile(),
+      isSymbolicLink: stats.isSymbolicLink(),
+    };
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+    return {
+      path: filePath,
+      exists: false,
+      sizeBytes: null,
+      isRegularFile: false,
+      isSymbolicLink: false,
+    };
+  }
+}
+
+function artifactPathProblem(fileName, file) {
+  if (!file.exists || file.isRegularFile) return null;
+  return `${fileName} must be a regular file and must not be a symbolic link.`;
+}
+
+export function assertSafePluginArtifactPathsForBuild({
+  root = process.cwd(),
+} = {}) {
+  const resolvedRoot = path.resolve(root);
+  const files = Object.fromEntries(
+    REQUIRED_PLUGIN_ARTIFACTS.map((fileName) => [
+      fileName,
+      inspectArtifactPath(path.join(resolvedRoot, fileName)),
+    ]),
+  );
+  if (!files["manifest.json"].exists) {
+    throw new Error("manifest.json must exist before building plugin artifacts.");
+  }
+  const problems = REQUIRED_PLUGIN_ARTIFACTS
+    .map((fileName) => artifactPathProblem(fileName, files[fileName]))
+    .filter(Boolean);
+  if (problems.length > 0) {
+    throw new Error(problems.join(" "));
+  }
+  return files;
+}
+
 export function inspectPluginArtifacts({ root = process.cwd() } = {}) {
   const resolvedRoot = path.resolve(root);
   const files = Object.fromEntries(
-    REQUIRED_PLUGIN_ARTIFACTS.map((fileName) => {
-      const filePath = path.join(resolvedRoot, fileName);
-      const exists = fs.existsSync(filePath);
-      const sizeBytes = exists ? fs.statSync(filePath).size : null;
-      return [
-        fileName,
-        {
-          path: filePath,
-          exists,
-          sizeBytes,
-        },
-      ];
-    })
+    REQUIRED_PLUGIN_ARTIFACTS.map((fileName) => [
+      fileName,
+      inspectArtifactPath(path.join(resolvedRoot, fileName)),
+    ]),
   );
 
   const missingFiles = REQUIRED_PLUGIN_ARTIFACTS.filter((fileName) => !files[fileName].exists);
-  const problems = [];
+  const problems = REQUIRED_PLUGIN_ARTIFACTS
+    .map((fileName) => artifactPathProblem(fileName, files[fileName]))
+    .filter(Boolean);
 
   if (missingFiles.length > 0) {
     problems.push(`Missing plugin artifacts: ${missingFiles.join(", ")}`);
@@ -112,7 +156,7 @@ export function inspectPluginArtifacts({ root = process.cwd() } = {}) {
 
   const manifestFile = files["manifest.json"];
   let manifestMobileCompatible = false;
-  if (manifestFile.exists) {
+  if (manifestFile.isRegularFile) {
     try {
       const manifest = JSON.parse(fs.readFileSync(manifestFile.path, "utf8"));
       manifestMobileCompatible = manifest.isDesktopOnly === false;
@@ -139,7 +183,7 @@ export function inspectPluginArtifacts({ root = process.cwd() } = {}) {
     mobileUnsafeNodeRequires: [],
   };
 
-  if (mainFile.exists) {
+  if (mainFile.isRegularFile) {
     const tail = readFileTail(mainFile.path);
     mainBundle.hasInlineSourceMap = INLINE_SOURCE_MAP_PATTERN.test(tail);
     if (mainBundle.hasInlineSourceMap) {
@@ -198,12 +242,35 @@ export function inspectPluginArtifacts({ root = process.cwd() } = {}) {
     }
   }
 
+  const stylesFile = files["styles.css"];
+  const stylesBundle = {
+    path: stylesFile.path,
+    exists: stylesFile.exists,
+    sizeBytes: stylesFile.sizeBytes,
+    formattedSize: stylesFile.exists ? formatBytes(stylesFile.sizeBytes) : "missing",
+    hasBuildFailureSentinel: false,
+    isEffectivelyEmpty: false,
+  };
+  if (stylesFile.isRegularFile) {
+    const stylesText = fs.readFileSync(stylesFile.path, "utf8");
+    stylesBundle.hasBuildFailureSentinel = CSS_BUILD_FAILURE_PATTERN.test(stylesText);
+    stylesBundle.isEffectivelyEmpty =
+      stylesText.replace(/\/\*[\s\S]*?\*\//g, "").trim().length === 0;
+    if (stylesBundle.hasBuildFailureSentinel) {
+      problems.push("styles.css contains the CSS build failure sentinel.");
+    }
+    if (stylesBundle.isEffectivelyEmpty) {
+      problems.push("styles.css contains no effective CSS.");
+    }
+  }
+
   return {
     root: resolvedRoot,
     files,
     missingFiles,
     manifestMobileCompatible,
     mainBundle,
+    stylesBundle,
     problems,
     ok: problems.length === 0,
   };
@@ -232,16 +299,21 @@ export function buildProductionPlugin({
   spawnSyncImpl = spawnSync,
 } = {}) {
   const resolvedRoot = path.resolve(root);
+  assertSafePluginArtifactPathsForBuild({ root: resolvedRoot });
   const releaseEnv = {
     ...env,
     SYSTEMSCULPT_API_BASE_URL: CANONICAL_API_BASE_URL,
   };
-  const result = spawnSyncImpl("npm", ["run", "build"], {
-    cwd: resolvedRoot,
-    env: releaseEnv,
-    stdio,
-    encoding: "utf8",
-  });
+  const result = spawnSyncImpl(
+    process.execPath,
+    [path.join(resolvedRoot, "esbuild.config.mjs"), "production"],
+    {
+      cwd: resolvedRoot,
+      env: releaseEnv,
+      stdio,
+      encoding: "utf8",
+    },
+  );
 
   if (result?.error) {
     throw result.error;
@@ -249,7 +321,7 @@ export function buildProductionPlugin({
 
   if ((result?.status ?? 1) !== 0) {
     const output = [result?.stderr, result?.stdout].filter(Boolean).join("\n").trim();
-    throw new Error(`npm run build failed.${output ? `\n${output}` : ""}`);
+    throw new Error(`Production plugin build failed.${output ? `\n${output}` : ""}`);
   }
 
   return assertProductionPluginArtifacts({ root: resolvedRoot });

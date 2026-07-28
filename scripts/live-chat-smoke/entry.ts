@@ -1,5 +1,7 @@
 import "./globals";
 import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import manifest from "../../manifest.json";
 import fixture from "../../testing/fixtures/managed/managed-capabilities-v2.json";
 import type { ChatMessage } from "../../src/types";
@@ -13,6 +15,7 @@ import {
   ManagedAgentController,
   type ManagedAgentControllerHost,
 } from "../../src/views/chatview/ManagedAgentController";
+import { ChatMarkdownSerializer } from "../../src/views/chatview/storage/ChatMarkdownSerializer";
 import { ManagedChatRuntimeAdapter } from "../../src/views/chatview/turn/ManagedChatRuntimeAdapter";
 
 // Live release smoke: drives the REAL controller, runtime adapter, capability
@@ -24,7 +27,16 @@ import { ManagedChatRuntimeAdapter } from "../../src/views/chatview/turn/Managed
 
 const BASE_URL = "https://systemsculpt.com";
 const BROWSER_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) obsidian/1.9.1 Chrome/132.0.6834.196 Electron/34.3.0 Safari/537.36";
-const DEFAULT_KEY_SOURCE = `${process.env.HOME}/.codex/qa-vaults/systemsculpt-v6/.obsidian/plugins/systemsculpt-ai/data.json`;
+const DEFAULT_KEY_SOURCE = join(
+  homedir(),
+  ".codex",
+  "qa-vaults",
+  "systemsculpt-v6",
+  ".obsidian",
+  "plugins",
+  "systemsculpt-ai",
+  "data.json",
+);
 
 function licenseKey(): string {
   const fromEnvironment = process.env.SYSTEMSCULPT_LICENSE_KEY?.trim();
@@ -57,7 +69,7 @@ class NodeRequestClient extends PlatformRequestClient {
   }
 }
 
-function createLiveHarness(key: string) {
+function createLiveHarness(key: string, initialMessages: readonly ChatMessage[] = []) {
   const descriptor = fixture.capabilities.find((entry) => entry.alias === "systemsculpt/chat")!;
   const requestContract = descriptor.request_contracts.find(
     (entry) => entry.capability === "chat_turn",
@@ -76,8 +88,8 @@ function createLiveHarness(key: string) {
     invalidate: async () => undefined,
   });
 
-  let version = 0;
-  let messages: ChatMessage[] = [];
+  let version = initialMessages.length;
+  let messages = JSON.parse(JSON.stringify(initialMessages)) as ChatMessage[];
   const snapshot = (): AgentTranscriptSnapshot => Object.freeze({
     chatId: "live-smoke",
     title: "Live smoke",
@@ -141,7 +153,8 @@ function createLiveHarness(key: string) {
 }
 
 async function main(): Promise<void> {
-  const harness = createLiveHarness(licenseKey());
+  const key = licenseKey();
+  const harness = createLiveHarness(key);
 
   console.log("[smoke] turn 1: forcing a server-side web search…");
   const first = await harness.startTurn(
@@ -163,8 +176,38 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  console.log("[smoke] turn 2: follow-up over the settled search transcript (session create/rebase path)…");
-  const second = await harness.startTurn("Thanks — now answer in one short sentence: why does that headline matter?");
+  const firstSnapshot = harness.transcript();
+  const serialized = ChatMarkdownSerializer.serializeMessages([...firstSnapshot.messages]);
+  const now = new Date().toISOString();
+  const reloaded = ChatMarkdownSerializer.parseMarkdown([
+    "---",
+    "id: live-smoke",
+    `created: ${now}`,
+    `lastModified: ${now}`,
+    "title: Live smoke",
+    "version: 1",
+    "---",
+    "",
+    serialized,
+  ].join("\n"));
+  if (!reloaded || reloaded.messages.length !== firstSnapshot.messages.length) {
+    console.error("[smoke] FAIL: the settled search transcript did not survive save/reload.");
+    process.exit(1);
+  }
+
+  const legacyReload = JSON.parse(JSON.stringify(reloaded.messages)) as ChatMessage[];
+  for (const message of legacyReload) {
+    for (const call of message.tool_calls ?? []) {
+      if (call.executedOn === "server") {
+        delete (call as { executedOn?: string }).executedOn;
+      }
+    }
+  }
+  const reloadedHarness = createLiveHarness(key, legacyReload);
+  console.log("[smoke] turn 2: follow-up after save/reload over legacy server-tool history…");
+  const second = await reloadedHarness.startTurn(
+    "Thanks — now answer in one short sentence: why does that headline matter?",
+  );
   if (second.kind !== "completed") {
     console.error(`[smoke] FAIL: follow-up after search ended ${second.kind}`, JSON.stringify((second as { error?: unknown }).error ?? null));
     process.exit(1);

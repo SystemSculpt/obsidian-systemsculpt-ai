@@ -4,6 +4,11 @@
 import { App, TFile, Notice } from "obsidian";
 import { DocumentContextManager, ChatContextManager } from "../DocumentContextManager";
 
+jest.mock("obsidian", () => {
+  const actual = jest.requireActual("obsidian");
+  return { ...actual, Notice: jest.fn() };
+});
+
 const mockProcessDocument = jest.fn();
 jest.mock("../DocumentProcessingService", () => ({
   DocumentProcessingService: {
@@ -43,6 +48,8 @@ const unwrapTranscriptionCommit = <T>(result: T | { value: T }): T => (
     ? result.value
     : result
 );
+
+const mockedNotice = Notice as unknown as jest.Mock;
 
 const resolveTranscription = (text: string) => {
   mockTranscribeFile.mockImplementationOnce(async (
@@ -230,6 +237,7 @@ describe("DocumentContextManager", () => {
         expect(result).toBe(true);
         expect(mockContextManager.addToContextFiles).toHaveBeenCalledWith("[[test/document.md]]");
         expect(mockContextManager.triggerContextChange).toHaveBeenCalled();
+        expect(mockedNotice).toHaveBeenCalledWith("Added document to context", 3000);
       });
 
       it("returns false when file already in context", async () => {
@@ -240,6 +248,7 @@ describe("DocumentContextManager", () => {
 
         expect(result).toBe(false);
         expect(mockContextManager.addToContextFiles).not.toHaveBeenCalled();
+        expect(mockedNotice).toHaveBeenCalledWith("document is already added to context", 3000);
       });
 
       it("does not save changes when saveChanges is false", async () => {
@@ -248,6 +257,7 @@ describe("DocumentContextManager", () => {
         await manager.addFileToContext(file, mockContextManager, { saveChanges: false });
 
         expect(mockContextManager.triggerContextChange).not.toHaveBeenCalled();
+        expect(mockedNotice).toHaveBeenCalledWith("Added document to context", 3000);
       });
     });
 
@@ -271,6 +281,7 @@ describe("DocumentContextManager", () => {
           file,
           expect.objectContaining({ stage: "ready" })
         );
+        expect(mockedNotice).toHaveBeenCalledWith("Added doc to context", 3000);
       });
 
       it("rejects unsupported Office files without managed processing or context routing", async () => {
@@ -281,6 +292,10 @@ describe("DocumentContextManager", () => {
         expect(result).toBe(false);
         expect(mockProcessDocument).not.toHaveBeenCalled();
         expect(mockContextManager.addToContextFiles).not.toHaveBeenCalled();
+        expect(mockedNotice).toHaveBeenCalledWith(
+          "This office file type is not supported for chat context.",
+          4000,
+        );
       });
 
       it("keeps images local when adding them to context", async () => {
@@ -291,6 +306,7 @@ describe("DocumentContextManager", () => {
         expect(result).toBe(true);
         expect(mockProcessDocument).not.toHaveBeenCalled();
         expect(mockContextManager.addToContextFiles).toHaveBeenCalledWith("[[images/diagram.png]]");
+        expect(mockedNotice).toHaveBeenCalledWith("Added diagram to context", 3000);
       });
 
       it("handles document processing error", async () => {
@@ -307,6 +323,7 @@ describe("DocumentContextManager", () => {
             error: "Processing failed",
           })
         );
+        expect(mockedNotice).toHaveBeenCalledWith("Error processing doc: Processing failed", 5000);
       });
 
       it("adds extracted images to context", async () => {
@@ -317,6 +334,7 @@ describe("DocumentContextManager", () => {
 
         expect(result).toBe(true);
         expect(mockContextManager.addToContextFiles).toHaveBeenCalledWith("[[Extractions/doc/images-123/image1.png]]");
+        expect(mockedNotice).toHaveBeenCalledWith("Added doc to context", 3000);
       });
     });
 
@@ -340,6 +358,7 @@ describe("DocumentContextManager", () => {
           "Extractions/audio/audio - transcript.md",
           expect.stringContaining("Transcribed text"),
         );
+        expect(mockedNotice).toHaveBeenCalledWith("Added audio to context", 3000);
       });
 
       it("processes WAV files", async () => {
@@ -351,6 +370,7 @@ describe("DocumentContextManager", () => {
 
         expect(result).toBe(true);
         expect(mockTranscribeFile).toHaveBeenCalled();
+        expect(mockedNotice).toHaveBeenCalledWith("Added audio to context", 3000);
       });
 
       it("preserves an existing transcription path and creates a unique sibling", async () => {
@@ -369,6 +389,7 @@ describe("DocumentContextManager", () => {
           "Extractions/audio/audio - transcript (2).md",
           expect.stringContaining("Transcribed text"),
         );
+        expect(mockedNotice).toHaveBeenCalledWith("Added audio to context", 3000);
       });
 
       it("handles transcription error", async () => {
@@ -385,6 +406,7 @@ describe("DocumentContextManager", () => {
             error: "Transcription failed",
           })
         );
+        expect(mockedNotice).toHaveBeenCalledWith("Error processing audio: Transcription failed", 5000);
       });
 
       it("uses clean output when setting enabled", async () => {
@@ -399,6 +421,7 @@ describe("DocumentContextManager", () => {
           expect.any(String),
           "Just the text"
         );
+        expect(mockedNotice).toHaveBeenCalledWith("Added audio to context", 3000);
       });
 
       it("reuses an existing committed transcription during local-commit retry", async () => {
@@ -426,6 +449,7 @@ describe("DocumentContextManager", () => {
           file,
           expect.objectContaining({ details: `[[${existing.path}]]` }),
         );
+        expect(mockedNotice).toHaveBeenCalledWith("Added audio to context", 3000);
       });
     });
   });

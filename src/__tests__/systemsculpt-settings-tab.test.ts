@@ -1,9 +1,16 @@
 /** @jest-environment jsdom */
 
 import { SystemSculptSettingTab } from "../settings/SystemSculptSettingTab";
-import { App, Platform } from "obsidian";
+import { App, Notice, Platform } from "obsidian";
 import { buildSettingsTabConfigs } from "../settings/SettingsTabRegistry";
 import { showPrompt } from "../core/ui/modals/PromptModal";
+
+jest.mock("obsidian", () => {
+  const actual = jest.requireActual("obsidian");
+  return { ...actual, Notice: jest.fn() };
+});
+
+const mockedNotice = Notice as unknown as jest.Mock;
 
 jest.mock("../settings/SettingsTabRegistry", () => ({
   buildSettingsTabConfigs: jest.fn(() => [
@@ -253,6 +260,7 @@ describe("SystemSculptSettingTab native layout", () => {
         audioProcessorOutputPreset: "detailed",
       }),
     );
+    expect(mockedNotice).toHaveBeenCalledWith("Recommended defaults restored.", 2500);
   });
 
   it("builds feedback payloads around SystemSculpt access instead of provider choices", () => {

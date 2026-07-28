@@ -18,6 +18,7 @@ const canonicalHashes: Record<string, string> = {
   "admission-v1.json": "647cc8d3bdd762fd1ac3f96206692f9e2b3d47cb3cf6b7cf31d36a9f82da5871",
   "managed-capabilities-v2.schema.json": "b26a08c5298ba77d05706b627cd144c6e5feec2680fd86d29521fc0497863271",
   "managed-capabilities-v2.json": "0718fd290caca0c3da309f2c6fe501efc956c674900e533b18a3f907eac5c02c",
+  "managed-chat-replay-v1.json": "8c4618dc65cfaa1646a3c4d99daa746bc531918e96f137a5deaf7a0185d8dd3a",
   "managed-image-output-v1.schema.json": "373a093908d1c00151e7b1505c7c84befe35d364d164bafa096da8601789581c",
   "managed-image-output-v1.json": "fda81d995879f64896eaaafafe98b6f1fb0d9334bbc889e3db80ed1cc50069af",
   "managed-job-protocol-v1.json": "91ec1771c44d5bb02cf6dd750f1bad4ea1d5fce29a1534c8a74d2370b7deb904",

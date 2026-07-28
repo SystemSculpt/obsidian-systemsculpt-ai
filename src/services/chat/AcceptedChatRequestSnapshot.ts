@@ -7,6 +7,10 @@ import type {
   AcceptedManagedChatOperation,
   JsonContractValue,
 } from "../managed/ManagedTypes";
+import {
+  isServerExecutedManagedToolCall,
+  readManagedToolCallFunction,
+} from "./ManagedToolExecution";
 import { managedToolResultMessage } from "./ManagedToolResult";
 
 export type ManagedPreparedMessage = Readonly<{
@@ -128,17 +132,18 @@ export function prepareManagedMessage(
   // exactly one matching tool result"). The assistant text already carries
   // the search-derived knowledge, so the wire omits the call records.
   const clientCalls = (message.tool_calls ?? []).filter(
-    (call) => call.executedOn !== "server",
+    (call) => !isServerExecutedManagedToolCall(call),
   );
   if (clientCalls.length) {
-    wire.tool_calls = clientCalls.map((call) => ({
-      id: call.id,
-      type: "function",
-      function: {
-        name: call.request.function.name,
-        arguments: call.request.function.arguments,
-      },
-    }));
+    wire.tool_calls = clientCalls.map((call) => {
+      const fn = readManagedToolCallFunction(call);
+      if (!fn) throw new Error("Managed history contains a malformed tool call.");
+      return {
+        id: call.id,
+        type: "function",
+        function: fn,
+      };
+    });
   }
   return deepFreezeAccepted(deepCopy(wire));
 }
@@ -155,7 +160,9 @@ export function prepareManagedMessage(
 function clientSettledToolCalls(
   assistant: Readonly<ChatMessage>,
 ): readonly ToolCall[] {
-  return (assistant.tool_calls ?? []).filter((call) => call.executedOn !== "server");
+  return (assistant.tool_calls ?? []).filter(
+    (call) => !isServerExecutedManagedToolCall(call),
+  );
 }
 
 function settledToolResultMessages(
@@ -175,12 +182,27 @@ export function projectManagedMessages(
   messages: readonly Readonly<ChatMessage>[],
 ): readonly ManagedPreparedMessage[] {
   const projected: ManagedPreparedMessage[] = [];
+  const declaredClientToolCallIds = new Set<string>();
   for (let index = 0; index < messages.length; index += 1) {
     const message = messages[index];
     if (message.role === "system") continue;
-    projected.push(prepareManagedMessage(message));
+    const clientCalls = message.role === "assistant"
+      ? clientSettledToolCalls(message)
+      : [];
+    for (const call of clientCalls) {
+      if (!call.id || declaredClientToolCallIds.has(call.id)) {
+        throw new Error("Managed history contains a duplicate client tool-call id.");
+      }
+      declaredClientToolCallIds.add(call.id);
+    }
+    const prepared = prepareManagedMessage(message);
+    const emptyServerOnlyCheckpoint = message.role === "assistant"
+      && (message.tool_calls?.length ?? 0) > 0
+      && clientCalls.length === 0
+      && prepared.content === "";
+    if (!emptyServerOnlyCheckpoint) projected.push(prepared);
     if (message.role !== "assistant" || !message.tool_calls?.length) continue;
-    const expectedIds = new Set(clientSettledToolCalls(message).map((call) => call.id));
+    const expectedIds = new Set(clientCalls.map((call) => call.id));
     if (expectedIds.size === 0) continue;
     const explicitResults: Readonly<ChatMessage>[] = [];
     for (let cursor = index + 1; cursor < messages.length && messages[cursor].role === "tool"; cursor += 1) {

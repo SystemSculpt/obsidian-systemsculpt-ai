@@ -147,17 +147,35 @@ const creditsTimestamp = (value: unknown): string => {
   return normalized;
 };
 
-const creditsCheckoutUrl = (value: unknown): string | null => {
+const SYSTEMSCULPT_WEBSITE_HOST = new URL(SYSTEMSCULPT_WEBSITE.BASE_URL).hostname.toLowerCase();
+const SYSTEMSCULPT_WEBSITE_ALLOWED_HOSTS = new Set(
+  [SYSTEMSCULPT_WEBSITE_HOST, `www.${SYSTEMSCULPT_WEBSITE_HOST}`]
+);
+
+export const normalizeCreditsCheckoutUrl = (value: unknown): string | null => {
   if (typeof value !== "string") return null;
   const normalized = value.trim();
   if (!normalized) return null;
-  if (/^https?:\/\//i.test(normalized)) return normalized;
-  if (!normalized.startsWith("/")) return null;
+
+  if (normalized.startsWith("//")) return null;
+
+  let parsed: URL;
   try {
-    return new URL(normalized, SYSTEMSCULPT_WEBSITE.BASE_URL).toString();
+    parsed = normalized.startsWith("/")
+      ? new URL(normalized, SYSTEMSCULPT_WEBSITE.BASE_URL)
+      : new URL(normalized);
   } catch {
     return null;
   }
+
+  if (parsed.protocol !== "https:") return null;
+  if (parsed.username || parsed.password) return null;
+  if (parsed.port) return null;
+  if (!SYSTEMSCULPT_WEBSITE_ALLOWED_HOSTS.has(parsed.hostname.toLowerCase())) {
+    return null;
+  }
+
+  return parsed.toString();
 };
 
 function decodeCreditsBalance(payload: unknown): CreditsBalanceSnapshot {
@@ -196,7 +214,7 @@ function decodeCreditsBalance(payload: unknown): CreditsBalanceSnapshot {
     const percentSaved = candidate.percent_saved;
     const annualPriceCents = candidate.annual_price_cents;
     const monthlyEquivalentAnnualCents = candidate.monthly_equivalent_annual_cents;
-    const checkoutUrl = creditsCheckoutUrl(candidate.checkout_path);
+    const checkoutUrl = normalizeCreditsCheckoutUrl(candidate.checkout_path);
     if (
       typeof amountSavedCents === "number" && Number.isSafeInteger(amountSavedCents) && amountSavedCents > 0 &&
       typeof percentSaved === "number" && Number.isSafeInteger(percentSaved) && percentSaved > 0 &&
@@ -223,7 +241,7 @@ function decodeCreditsBalance(payload: unknown): CreditsBalanceSnapshot {
     cycleStartedAt,
     cycleAnchorAt,
     turnInFlightUntil,
-    purchaseUrl: creditsCheckoutUrl(value.purchase_url),
+    purchaseUrl: normalizeCreditsCheckoutUrl(value.purchase_url),
     billingCycle,
     annualUpgradeOffer,
   };

@@ -1,15 +1,23 @@
 /** @jest-environment jsdom */
 
-import { App } from "obsidian";
+import { App, Notice } from "obsidian";
 import {
   StandardChatSettingsModal,
   showStandardChatSettingsModal,
   type ChatSettingsChange,
 } from "../StandardChatSettingsModal";
 
+jest.mock("obsidian", () => {
+  const actual = jest.requireActual("obsidian");
+  return { ...actual, Notice: jest.fn() };
+});
+
+const mockedNotice = Notice as unknown as jest.Mock;
+
 describe("StandardChatSettingsModal", () => {
   afterEach(() => {
     document.body.empty();
+    jest.clearAllMocks();
   });
 
   const openModal = (
@@ -127,6 +135,7 @@ describe("StandardChatSettingsModal", () => {
 
   it("rolls a rejected approval change back to its committed radio value", async () => {
     let reject!: (error: Error) => void;
+    const errorSpy = jest.spyOn(console, "error").mockImplementation(() => undefined);
     const onChange = jest.fn(() => new Promise<void>((_resolve, nextReject) => { reject = nextReject; }));
     const { modal } = openModal(onChange);
     const ask = modal.modalEl.querySelector<HTMLButtonElement>('[data-value="ask"]')!;
@@ -145,6 +154,11 @@ describe("StandardChatSettingsModal", () => {
     expect(fullAccess.getAttribute("aria-checked")).toBe("false");
     expect(group.hasAttribute("aria-busy")).toBe(false);
     expect(ask.disabled).toBe(false);
+    expect(errorSpy).toHaveBeenCalledWith(
+      "Unable to apply chat setting",
+      expect.objectContaining({ message: "vault write failed" }),
+    );
+    expect(mockedNotice).toHaveBeenCalledWith("Couldn't update chat settings.", 4000);
   });
 
   it("closes from the explicit Done action without promise-result bookkeeping", () => {

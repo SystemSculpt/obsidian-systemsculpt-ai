@@ -14,6 +14,28 @@ type MutablePlatform = typeof Platform & {
   isMobileApp?: boolean;
 };
 
+async function waitForOwnedClass(className: string, present: boolean): Promise<void> {
+  if (document.body.classList.contains(className) === present) return;
+  await new Promise<void>((resolve, reject) => {
+    const observer = new MutationObserver(() => {
+      if (document.body.classList.contains(className) !== present) return;
+      window.clearTimeout(timeout);
+      observer.disconnect();
+      resolve();
+    });
+    const timeout = window.setTimeout(() => {
+      observer.disconnect();
+      reject(new Error(
+        `Timed out waiting for ${className} to become ${present ? "present" : "absent"}.`,
+      ));
+    }, 1_000);
+    observer.observe(document.body, {
+      attributes: true,
+      attributeFilter: ["class"],
+    });
+  });
+}
+
 describe("mobile host layout adapter", () => {
   const platform = Platform as MutablePlatform;
 
@@ -56,15 +78,34 @@ describe("mobile host layout adapter", () => {
     const navbar = document.createElement("nav");
     navbar.className = "mobile-navbar-action";
     document.body.appendChild(navbar);
-    await new Promise((resolve) => window.setTimeout(resolve, 20));
+    await waitForOwnedClass(MOBILE_HOST_LAYOUT_CLASSES.navbarVisible, true);
 
     expect(document.body.classList.contains(MOBILE_HOST_LAYOUT_CLASSES.navbarVisible)).toBe(true);
 
     navbar.hidden = true;
-    await new Promise((resolve) => window.setTimeout(resolve, 20));
+    await waitForOwnedClass(MOBILE_HOST_LAYOUT_CLASSES.navbarVisible, false);
 
     expect(document.body.classList.contains(MOBILE_HOST_LAYOUT_CLASSES.navbarVisible)).toBe(false);
     expect(document.body.classList.contains(MOBILE_HOST_LAYOUT_CLASSES.navbarHidden)).toBe(true);
+  });
+
+  it("falls back to the platform instanceof check when the Obsidian helper is unavailable", async () => {
+    const nodePrototype = window.Node.prototype as Node & {
+      instanceOf?: (constructor: typeof Element) => boolean;
+    };
+    const instanceOf = nodePrototype.instanceOf;
+    delete nodePrototype.instanceOf;
+    try {
+      ensureMobileHostLayoutState(document);
+      const navbar = document.createElement("nav");
+      navbar.className = "mobile-navbar-action";
+      document.body.appendChild(navbar);
+      await waitForOwnedClass(MOBILE_HOST_LAYOUT_CLASSES.navbarVisible, true);
+
+      expect(document.body.classList.contains(MOBILE_HOST_LAYOUT_CLASSES.navbarVisible)).toBe(true);
+    } finally {
+      if (instanceOf) nodePrototype.instanceOf = instanceOf;
+    }
   });
 
   it("tracks navbar visibility changes made on a host wrapper", async () => {
@@ -78,13 +119,13 @@ describe("mobile host layout adapter", () => {
     expect(document.body.classList.contains(MOBILE_HOST_LAYOUT_CLASSES.navbarVisible)).toBe(true);
 
     wrapper.hidden = true;
-    await new Promise((resolve) => window.setTimeout(resolve, 20));
+    await waitForOwnedClass(MOBILE_HOST_LAYOUT_CLASSES.navbarVisible, false);
 
     expect(document.body.classList.contains(MOBILE_HOST_LAYOUT_CLASSES.navbarVisible)).toBe(false);
     expect(document.body.classList.contains(MOBILE_HOST_LAYOUT_CLASSES.navbarHidden)).toBe(true);
 
     wrapper.hidden = false;
-    await new Promise((resolve) => window.setTimeout(resolve, 20));
+    await waitForOwnedClass(MOBILE_HOST_LAYOUT_CLASSES.navbarVisible, true);
 
     expect(document.body.classList.contains(MOBILE_HOST_LAYOUT_CLASSES.navbarVisible)).toBe(true);
     expect(document.body.classList.contains(MOBILE_HOST_LAYOUT_CLASSES.navbarHidden)).toBe(false);
@@ -99,13 +140,13 @@ describe("mobile host layout adapter", () => {
     expect(document.body.classList.contains(MOBILE_HOST_LAYOUT_CLASSES.navbarVisible)).toBe(true);
 
     navbar.setAttribute("aria-hidden", "true");
-    await new Promise((resolve) => window.setTimeout(resolve, 20));
+    await waitForOwnedClass(MOBILE_HOST_LAYOUT_CLASSES.navbarVisible, false);
 
     expect(document.body.classList.contains(MOBILE_HOST_LAYOUT_CLASSES.navbarVisible)).toBe(false);
     expect(document.body.classList.contains(MOBILE_HOST_LAYOUT_CLASSES.navbarHidden)).toBe(true);
 
     navbar.setAttribute("aria-hidden", "false");
-    await new Promise((resolve) => window.setTimeout(resolve, 20));
+    await waitForOwnedClass(MOBILE_HOST_LAYOUT_CLASSES.navbarVisible, true);
 
     expect(document.body.classList.contains(MOBILE_HOST_LAYOUT_CLASSES.navbarVisible)).toBe(true);
     expect(document.body.classList.contains(MOBILE_HOST_LAYOUT_CLASSES.navbarHidden)).toBe(false);

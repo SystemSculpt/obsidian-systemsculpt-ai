@@ -2,7 +2,15 @@
 
 import { displaySetupTabContent } from "../settings/SetupTabContent";
 import { SystemSculptSettingTab } from "../settings/SystemSculptSettingTab";
-import { App } from "obsidian";
+import { App, Notice } from "obsidian";
+
+jest.mock("obsidian", () => {
+  const actual = jest.requireActual("obsidian");
+  return {
+    ...actual,
+    Notice: jest.fn(() => ({ hide: jest.fn() })),
+  };
+});
 
 var getCreditsBalanceMock: jest.Mock;
 jest.mock("../services/SystemSculptService", () => {
@@ -15,6 +23,8 @@ jest.mock("../services/SystemSculptService", () => {
     },
   };
 });
+
+const mockedNotice = Notice as unknown as jest.Mock;
 
 const createPluginStub = () => {
   const settingsManager = {
@@ -173,6 +183,8 @@ describe("Setup tab SystemSculpt-only layout", () => {
     expect(plugin.getSettingsManager().updateSettings).toHaveBeenCalledWith({ licenseKey: "skss-replacement" });
     expect(plugin.getSettingsManager().updateSettings).toHaveBeenCalledTimes(1);
     expect(plugin.getLicenseManager().validateLicenseKeyDetailed).toHaveBeenCalledWith(true, false);
+    expect(mockedNotice).toHaveBeenCalledWith("Validating license key...", 0);
+    expect(mockedNotice).toHaveBeenCalledWith("License activated successfully.");
   });
 
   it.each(["returns false", "throws"])(
@@ -242,7 +254,6 @@ describe("Setup tab SystemSculpt-only layout", () => {
     plugin.getLicenseManager().validateLicenseKeyDetailed.mockRejectedValue(
       new Error("upstream leaked skss-secret and request details")
     );
-    const log = jest.spyOn(console, "log").mockImplementation(() => undefined);
     const tab = new SystemSculptSettingTab(app, plugin);
     tab.display = jest.fn();
     const container = document.createElement("div");
@@ -253,11 +264,10 @@ describe("Setup tab SystemSculpt-only layout", () => {
     licenseInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     await flushSetupSectionRender();
 
-    const notices = log.mock.calls.map((args) => args.join(" ")).join("\n");
+    const notices = mockedNotice.mock.calls.map((args) => String(args[0])).join("\n");
     expect(notices).toContain("Unable to validate license. Try again.");
     expect(notices).not.toContain("upstream leaked");
     expect(notices).not.toContain("skss-secret");
-    log.mockRestore();
   });
 
   it("opens annual checkout upsell when monthly savings is available", async () => {
@@ -280,6 +290,53 @@ describe("Setup tab SystemSculpt-only layout", () => {
 
     expect(window.open).toHaveBeenCalledWith(
       "https://systemsculpt.com/checkout?resourceId=2b96b063-3ed9-4e5a-972c-6910fb611ab8",
+      "_blank",
+      "noopener,noreferrer",
+    );
+  });
+
+  it("keeps rejected billing URLs from surfacing as settings actions", async () => {
+    getCreditsBalanceMock.mockResolvedValueOnce({
+      totalRemaining: 2500,
+      includedRemaining: 1200,
+      includedPerMonth: 2000,
+      addOnRemaining: 1300,
+      cycleStartedAt: "2026-02-01T00:00:00.000Z",
+      cycleEndsAt: "2026-03-01T00:00:00.000Z",
+      purchaseUrl: null,
+      billingCycle: "monthly",
+      annualUpgradeOffer: null,
+    });
+    const plugin = createPluginStub();
+    plugin.settings.licenseValid = true;
+    plugin.settings.licenseKey = "skss-test";
+
+    const tab = new SystemSculptSettingTab(app, plugin);
+    const container = document.createElement("div");
+
+    displaySetupTabContent(container, tab, true);
+    await flushSetupSectionRender();
+
+    const annualSwitchButton = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent?.trim() === "Switch to annual"
+    ) as HTMLButtonElement | undefined;
+    expect(annualSwitchButton).toBeTruthy();
+    expect(annualSwitchButton?.disabled).toBe(true);
+    expect(annualSwitchButton?.style.display).toBe("none");
+
+    const buyCreditsButton = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent?.trim() === "Buy credits"
+    );
+    expect(buyCreditsButton).toBeTruthy();
+    (buyCreditsButton as HTMLButtonElement).click();
+
+    expect(window.open).toHaveBeenCalledWith(
+      "https://systemsculpt.com/pricing",
+      "_blank",
+      "noopener,noreferrer",
+    );
+    expect(window.open).not.toHaveBeenCalledWith(
+      "https://evil.example/checkout",
       "_blank",
       "noopener,noreferrer",
     );

@@ -13,6 +13,10 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import ts from "typescript";
+import {
+  captureStartupIdentity,
+  expectProductionStartupIdentity,
+} from "./startup-identity-assertions";
 import { exerciseBuiltStudioGenerations } from "./studio-generation-bundle-harness";
 
 const BUNDLE_PATH = path.resolve(__dirname, "..", "..", "main.js");
@@ -41,6 +45,7 @@ describe("built bundle (main.js)", () => {
 
     const manifest = JSON.parse(readFileSync(MANIFEST_PATH, "utf8"));
     const plugin = new PluginClass(new App(), manifest);
+    const startupIdentity = captureStartupIdentity();
 
     await plugin.onload();
 
@@ -76,6 +81,7 @@ describe("built bundle (main.js)", () => {
       session: null,
       captureTask: null,
     });
+    expectProductionStartupIdentity(startupIdentity, manifest.version);
 
     plugin.unload();
   });

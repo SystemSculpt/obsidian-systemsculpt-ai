@@ -3,6 +3,7 @@ import SystemSculptPlugin from "../../main";
 import { SystemSculptSettings } from "../../types";
 import { ChatStorageService } from "./ChatStorageService";
 import { openChatResumeDescriptor } from "./ChatResumeUtils";
+import { hasChatIdentityMetadata } from "./storage/ChatFrontmatterIdentity";
 
 export class ResumeChatService {
   private app: App;
@@ -166,8 +167,7 @@ export class ResumeChatService {
 
     // Check for expected chat metadata fields. Old chat files may not carry a
     // persisted model anymore, so identity + timestamps are the stable contract.
-    const metadata = cache.frontmatter;
-    return !!(metadata.id && (metadata.created || metadata.lastModified));
+    return hasChatIdentityMetadata(cache.frontmatter);
   }
 
   public extractChatId(file: TFile): string | null {

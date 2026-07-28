@@ -206,6 +206,7 @@ describe("CommandManager copy-current-file-path command", () => {
   });
 
   it("copies the focused ChatView path instead of Obsidian's stale active file", async () => {
+    const consoleLogSpy = jest.spyOn(console, "log").mockImplementation(() => {});
     mockedTryCopyToClipboard.mockResolvedValue(true);
 
     const { copyCommand } = registerCopyPathCommand({
@@ -221,9 +222,12 @@ describe("CommandManager copy-current-file-path command", () => {
     expect(mockedTryCopyToClipboard).toHaveBeenCalledWith(
       "/vault/SystemSculpt/Chats/current-chat.md"
     );
+    expect(consoleLogSpy).toHaveBeenCalledWith("Notice: Full file path copied to clipboard.");
+    consoleLogSpy.mockRestore();
   });
 
   it("copies the focused Studio path instead of Obsidian's stale active file", async () => {
+    const consoleLogSpy = jest.spyOn(console, "log").mockImplementation(() => {});
     mockedTryCopyToClipboard.mockResolvedValue(true);
 
     const { copyCommand } = registerCopyPathCommand({
@@ -239,6 +243,8 @@ describe("CommandManager copy-current-file-path command", () => {
     expect(mockedTryCopyToClipboard).toHaveBeenCalledWith(
       "/vault/SystemSculpt/Studio/Current.systemsculpt"
     );
+    expect(consoleLogSpy).toHaveBeenCalledWith("Notice: Full file path copied to clipboard.");
+    consoleLogSpy.mockRestore();
   });
 
   it("copies a portable vault-relative path on Obsidian Mobile", async () => {
