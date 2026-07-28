@@ -10,6 +10,7 @@ import {
 } from "./plugin-artifacts.mjs";
 import {
   createRepositoryScopedGitEnvironment,
+  DEFAULT_CI_EVIDENCE_DIRECTORY,
   writeBuildProvenance,
 } from "./build-provenance.mjs";
 
@@ -87,6 +88,11 @@ export function validateReleasePackage({
     root: resolvedRoot,
     version,
     kind: "release",
+    outputPath: path.join(
+      resolvedRoot,
+      DEFAULT_CI_EVIDENCE_DIRECTORY,
+      `release-provenance-${version}.json`,
+    ),
   });
   const releaseRevision = provenance?.record?.git?.revision;
   const releaseDirty = provenance?.record?.git?.dirty;

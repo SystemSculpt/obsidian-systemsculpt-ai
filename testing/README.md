@@ -81,7 +81,9 @@ Before a failed hosted gate uploads artifacts, CI validates that build
 provenance and artifact-inspection sidecars exist and are valid JSON.
 Release validation records SHA-256 and size for every shipped byte plus source
 revision and build-environment identity without changing the three-file plugin
-artifact contract.
+artifact contract. It writes a version-qualified release record alongside the
+rolling CI provenance so the tag-push gate cannot overwrite the release
+evidence.
 
 The installed pre-push hook runs check:ci. The workflow and package-script
 policy tests prevent local and hosted gate definitions from silently drifting.

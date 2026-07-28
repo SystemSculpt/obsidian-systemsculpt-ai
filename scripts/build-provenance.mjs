@@ -144,16 +144,60 @@ export function writeJsonEvidence(filePath, value) {
   return resolvedPath;
 }
 
+function assertSafeRepositoryEvidencePath(root, outputPath) {
+  const resolvedRoot = path.resolve(root);
+  const resolvedPath = path.resolve(outputPath);
+  const relativePath = path.relative(resolvedRoot, resolvedPath);
+  if (
+    relativePath === ""
+    || relativePath === ".."
+    || relativePath.startsWith(`..${path.sep}`)
+    || path.isAbsolute(relativePath)
+  ) {
+    throw new Error(`Evidence output must stay inside the repository: ${resolvedPath}`);
+  }
+
+  const segments = relativePath.split(path.sep);
+  let currentPath = resolvedRoot;
+  for (let index = 0; index < segments.length; index += 1) {
+    currentPath = path.join(currentPath, segments[index]);
+    let stats;
+    try {
+      stats = fs.lstatSync(currentPath);
+    } catch (error) {
+      if (error?.code === "ENOENT") return;
+      throw error;
+    }
+    if (stats.isSymbolicLink()) {
+      throw new Error(`Evidence output path must not contain a symbolic link: ${currentPath}`);
+    }
+    const isDestination = index === segments.length - 1;
+    if (isDestination ? !stats.isFile() : !stats.isDirectory()) {
+      throw new Error(
+        `Evidence output path must contain only directories and a regular-file destination: ${currentPath}`,
+      );
+    }
+  }
+}
+
+function writeRepositoryJsonEvidence({ root, outputPath, value }) {
+  assertSafeRepositoryEvidencePath(root, outputPath);
+  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+  assertSafeRepositoryEvidencePath(root, outputPath);
+  replaceFileAtomically(outputPath, `${JSON.stringify(value, null, 2)}\n`);
+  return outputPath;
+}
+
 export function writeBuildProvenance(options = {}) {
   const root = path.resolve(options.root || process.cwd());
   const record = createBuildProvenance({ ...options, root });
-  const outputPath = options.outputPath || path.join(
+  const outputPath = path.resolve(options.outputPath || path.join(
     root,
     DEFAULT_CI_EVIDENCE_DIRECTORY,
     "release-provenance.json",
-  );
+  ));
   return Object.freeze({
-    path: writeJsonEvidence(outputPath, record),
+    path: writeRepositoryJsonEvidence({ root, outputPath, value: record }),
     record,
   });
 }
@@ -200,13 +244,17 @@ export function writeArtifactInspectionEvidence({
     inspection,
     recordedAt,
   });
-  const destination = outputPath || path.join(
+  const destination = path.resolve(outputPath || path.join(
     resolvedRoot,
     DEFAULT_CI_EVIDENCE_DIRECTORY,
     "plugin-artifact-inspection.json",
-  );
+  ));
   return Object.freeze({
-    path: writeJsonEvidence(destination, record),
+    path: writeRepositoryJsonEvidence({
+      root: resolvedRoot,
+      outputPath: destination,
+      value: record,
+    }),
     record,
   });
 }
