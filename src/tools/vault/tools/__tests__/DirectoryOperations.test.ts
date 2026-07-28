@@ -4,6 +4,13 @@
 import { App, TFile, TFolder, Notice, normalizePath } from "obsidian";
 import { DirectoryOperations } from "../DirectoryOperations";
 
+jest.mock("obsidian", () => {
+  const actual = jest.requireActual("obsidian");
+  return { ...actual, Notice: jest.fn() };
+});
+
+const mockedNotice = Notice as unknown as jest.Mock;
+
 // Mock utils
 jest.mock("../../utils", () => ({
   validatePath: jest.fn((path, allowedPaths) => {
@@ -532,6 +539,7 @@ describe("DirectoryOperations", () => {
 
       expect(result.results[0].success).toBe(true);
       expect(app.vault.adapter.trashLocal).toHaveBeenCalledWith("delete-me.md");
+      expect(mockedNotice).toHaveBeenCalledWith("Moved 1 item(s) to trash.");
     });
 
     it("refuses irreversible deletion of internal SystemSculpt paths", async () => {
@@ -556,6 +564,7 @@ describe("DirectoryOperations", () => {
       expect(result.results.length).toBe(3);
       expect(result.results.every((r) => r.success)).toBe(true);
       expect(app.vault.adapter.trashLocal).toHaveBeenCalledTimes(3);
+      expect(mockedNotice).toHaveBeenCalledWith("Moved 3 item(s) to trash.");
     });
 
     it("resolves a Folder Notes path when trashing (#154)", async () => {
@@ -571,6 +580,7 @@ describe("DirectoryOperations", () => {
 
       expect(result.results[0].success).toBe(true);
       expect(app.vault.adapter.trashLocal).toHaveBeenCalledWith("Projects/Projects.md");
+      expect(mockedNotice).toHaveBeenCalledWith("Moved 1 item(s) to trash.");
     });
   });
 });

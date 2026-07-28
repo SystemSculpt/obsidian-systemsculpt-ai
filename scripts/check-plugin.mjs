@@ -13,10 +13,14 @@ import { exec, execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { buildProductionPlugin } from "./plugin-artifacts.mjs";
+import { inspectPluginArtifacts } from "./plugin-artifacts.mjs";
 import { lintCssDirectory } from "./lint-css.mjs";
+import {
+  writeArtifactInspectionEvidence,
+  writeBuildProvenance,
+} from "./build-provenance.mjs";
 
 const args = process.argv.slice(2);
-const verbose = args.includes("--verbose");
 const fast = args.includes("--fast");
 const skipTests = args.includes("--skip-tests");
 const root = process.cwd();
@@ -24,6 +28,12 @@ const defaultTimeoutMs = Number(process.env.SYSTEMSCULPT_CHECK_TIMEOUT_MS || "")
 
 const FAST_SCRIPT_TESTS = [
   "scripts/check-plugin.test.mjs",
+  "scripts/verify-ci-failure-evidence.test.mjs",
+  "scripts/chatview-critical-mutants.test.mjs",
+  "scripts/check/chatview-critical-risk-policy.test.mjs",
+  "scripts/check/chatview-critical-mutants-policy.test.mjs",
+  "scripts/check/test-gate-partition-policy.test.mjs",
+  "scripts/git-hooks.test.mjs",
   "scripts/github-workflows.test.mjs",
   "scripts/lint-css.test.mjs",
   "scripts/ui-architecture.test.mjs",
@@ -104,12 +114,26 @@ function checkBundle() {
   const startedAt = Date.now();
   try {
     const inspection = buildProductionPlugin({ root, stdio: "pipe" });
+    writeArtifactInspectionEvidence({ root, inspection });
+    const version = JSON.parse(fs.readFileSync(path.join(root, "manifest.json"), "utf8")).version;
+    writeBuildProvenance({ root, version, kind: "ci-build" });
     return {
       ok: true,
       ms: Date.now() - startedAt,
       stdout: inspection.mainBundle.formattedSize,
     };
   } catch (error) {
+    try {
+      const inspection = inspectPluginArtifacts({ root });
+      writeArtifactInspectionEvidence({ root, inspection });
+      const manifestPath = path.join(root, "manifest.json");
+      const version = fs.existsSync(manifestPath)
+        ? JSON.parse(fs.readFileSync(manifestPath, "utf8")).version
+        : "unknown";
+      writeBuildProvenance({ root, version, kind: "ci-build-failure" });
+    } catch {
+      // The original build failure remains authoritative.
+    }
     return {
       ok: false,
       ms: Date.now() - startedAt,
@@ -157,9 +181,7 @@ async function main() {
   if (failures.length > 0) {
     for (const failure of failures) {
       console.error(`[plugin] FAIL: ${failure.name}`);
-      if (verbose || failure.name === "css") {
-        console.error(failure.stderr || failure.stdout || "No diagnostic output.");
-      }
+      console.error(failure.stderr || failure.stdout || "No diagnostic output.");
     }
     process.exit(1);
   }

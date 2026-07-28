@@ -81,7 +81,8 @@ npm run test:related -- <changed source files>
 ~~~
 
 check is the canonical fast gate: Obsidian lint, metadata lint, production
-bundle, CSS contracts, cheap architecture policy tests, and an exact built
+bundle, CSS contracts, cheap architecture policy tests, focused mobile
+interactions, the ChatView critical-risk coverage gate, and an exact built
 bundle smoke in a mobile Obsidian host.
 
 Use broader gates only when the affected seam requires them:
@@ -90,8 +91,11 @@ Use broader gates only when the affected seam requires them:
 npm run check:ui
 npm run check:mobile
 npm run test:integration
+npm run test:chatview:critical
+npm run test:chatview:mutants
 npm run check:plugin
 npm run check:ci
+npm run check:compat
 npm run check:full
 ~~~
 
@@ -101,10 +105,36 @@ npm run check:full
   with desktop adapters unavailable.
 - check:plugin adds TypeScript, mobile compatibility, sync, artifact, and
   release guards.
-- check:ci is the exact PR gate and adds unit, embeddings, already-built
-  integration, and release-script suites. check:full is its local alias.
-- CI has one secret-free Ubuntu/Node 22 job and runs npm run check:ci. There is
-  no Windows, Android, iOS, provider, or native-device matrix.
+- test:chatview:critical runs the persistence, managed-request projection,
+  controller/runtime/transport, storage, and restored-history UI suites with
+  strict console, randomized order, open-handle detection, seeded generative
+  histories, and per-file uncovered-code budgets.
+- test:chatview:mutants creates an isolated source mirror, applies 13 curated
+  compatibility, projection, session, durability, controller, replay, and
+  restored-history regressions, and requires focused tests to kill every one.
+- check:ci is the exact exhaustive PR gate. It adds strict-console randomized
+  mobile interactions, critical ChatView coverage, curated mutation testing,
+  the partitioned unit remainder, embeddings, already-built integration,
+  open-handle detection, and release-script contracts. Focused mobile and
+  ChatView paths are excluded from the unit remainder so they are not run a
+  third time. check:full is its local alias.
+- check:compat is the smaller compatibility contract used on Node 20.10,
+  Node 24, macOS, and Windows after the exhaustive Ubuntu/Node 22 job. It runs
+  the same critical ChatView suites without repeating coverage instrumentation.
+- CI is credential-free. It runs check:ci on Ubuntu/Node 22 and check:compat
+  across the compatibility matrix. It has no provider or native-device lane.
+- The installed pre-push hook runs check:ci before a push. Hosted CI remains
+  authoritative and branch protection must require the stable `required` job,
+  which fails unless every exhaustive and compatibility lane succeeds.
+- Top-level hosted Jest gates record replay-oriented child argv and seed.
+  Failed jobs retain those records, ChatView coverage, artifact inspection,
+  build provenance, and exact plugin artifact bytes for 14 days. The exhaustive
+  plugin lane also records mutation results when that gate is reached.
+- Release validation records the SHA-256 and size of manifest.json, main.js,
+  and styles.css plus the source revision and build environment identity.
+- Saved chat parsing fails closed. A malformed or truncated history must never
+  become a shortened request. Leave the source note unchanged, open a fresh
+  unsaved chat, and keep a visible corruption banner.
 
 ## Local Obsidian loop
 

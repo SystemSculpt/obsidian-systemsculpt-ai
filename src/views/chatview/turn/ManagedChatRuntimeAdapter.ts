@@ -363,6 +363,10 @@ function responseRetrySameIdempotencyKey(errorText: string): boolean {
   }
 }
 
+function shouldReplaySameIdempotencyKey(status: number, errorText: string): boolean {
+  return status !== 400 && responseRetrySameIdempotencyKey(errorText);
+}
+
 function transportDiagnostic(transport: ManagedTransportResult): ManagedChatDiagnostic {
   const status = statusValue(transport.response.status);
   const requestId = bounded(transport.diagnostics.requestId, 128);
@@ -566,7 +570,7 @@ export class ManagedChatRuntimeAdapter {
       const diagnostic = transportDiagnostic(transport);
       if (
         !transport.response.ok
-        && !responseRetrySameIdempotencyKey(transport.diagnostics.errorText)
+        && !shouldReplaySameIdempotencyKey(transport.response.status, transport.diagnostics.errorText)
       ) return this.statusResult(transport.response.status, transport.diagnostics.errorText, diagnostic);
       const expectedCheckpoint = responseSessionCheckpoint(transport.response);
       const expectedRevision = binding ? binding.revision + 1 : 1;
@@ -784,7 +788,7 @@ export class ManagedChatRuntimeAdapter {
           continue;
         }
         if (
-          !responseRetrySameIdempotencyKey(transport.diagnostics.errorText)
+          !shouldReplaySameIdempotencyKey(transport.response.status, transport.diagnostics.errorText)
           || finalizationRetries >= MAX_SAME_KEY_RETRIES
         ) {
           throw this.statusResult(
@@ -892,6 +896,7 @@ export class ManagedChatRuntimeAdapter {
               || event.checkpoint.revision !== expectedCheckpoint.revision
             ) return false;
             committedCheckpoint = event.checkpoint;
+            continue;
           }
           if (event.kind === "tool_call_delta") {
             const previous = toolState.get(event.index) ?? { arguments: "" };
@@ -963,6 +968,7 @@ export class ManagedChatRuntimeAdapter {
         throw new ManagedChatStreamDisconnectError(diagnostic);
       }
       if (!committedCheckpoint) throw new ManagedChatStreamProtocolError();
+      yield { kind: "session_committed", checkpoint: committedCheckpoint };
       for (const [index, state] of toolState) yield { kind: "tool_call_completed", index, ...state };
       yield { kind: "done" };
       iterationCompleted = true;

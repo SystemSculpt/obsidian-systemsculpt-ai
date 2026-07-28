@@ -8,6 +8,10 @@
  */
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
+import {
+  captureStartupIdentity,
+  expectProductionStartupIdentity,
+} from "./startup-identity-assertions";
 
 const DEFAULT_ARTIFACT_ROOT = path.resolve(__dirname, "..", "..");
 const ARTIFACT_ROOT = process.env.SYSTEMSCULPT_PLUGIN_ARTIFACT_ROOT?.trim()
@@ -125,6 +129,7 @@ describe("built bundle in Obsidian Mobile", () => {
       addStatusBarItemSpy = jest.spyOn(plugin, "addStatusBarItem");
     });
 
+    const startupIdentity = captureStartupIdentity();
     await plugin.onload();
     await plugin.criticalInitializationPromise;
     await plugin.deferredInitializationPromise;
@@ -137,6 +142,7 @@ describe("built bundle in Obsidian Mobile", () => {
     await flushAsyncWork();
 
     expect(plugin.failures).toEqual([]);
+    expectProductionStartupIdentity(startupIdentity, manifest.version);
     expect(addStatusBarItemSpy!).not.toHaveBeenCalled();
     expect(plugin.embeddingsStatusBar).toBeNull();
 

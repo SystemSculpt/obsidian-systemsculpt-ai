@@ -15,6 +15,7 @@ import {
 } from "../utils/tooling";
 import type { ToolCall } from "../types/toolCalls";
 import { normalizeFirstPartyToolName } from "../tools/toolNames";
+import { isServerExecutedManagedToolCall } from "./chat/ManagedToolExecution";
 
 /**
  * Service responsible for handling context files and message preparation
@@ -577,13 +578,15 @@ export class ContextFileService {
       };
 
       if (msg.role === "assistant" && Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0) {
-        const clientToolCalls = msg.tool_calls.filter((toolCall) => toolCall.executedOn !== "server");
+        const clientToolCalls = msg.tool_calls.filter(
+          (toolCall) => !isServerExecutedManagedToolCall(toolCall),
+        );
         const synthesizedToolMessages = buildToolResultMessagesFromToolCalls(clientToolCalls);
         const satisfiedToolCallIds = new Set<string>();
         for (const toolCall of msg.tool_calls) {
           const toolCallId = typeof toolCall?.id === "string" ? toolCall.id : "";
           if (!toolCallId) continue;
-          if (toolCall.executedOn === "server") {
+          if (isServerExecutedManagedToolCall(toolCall)) {
             // Server tools are already settled inside the managed session.
             // Keep their assistant-call chronology, but never synthesize a
             // second client-owned tool result for them.
@@ -620,7 +623,7 @@ export class ContextFileService {
 
       if (msg.role === "assistant" && Array.isArray((messageToPush as any).tool_calls)) {
         const clientToolCalls = ((messageToPush as any).tool_calls as ToolCall[])
-          .filter((toolCall) => toolCall.executedOn !== "server");
+          .filter((toolCall) => !isServerExecutedManagedToolCall(toolCall));
         const syntheticToolMessages = buildToolResultMessagesFromToolCalls(clientToolCalls).filter(
           (toolMessage) =>
             typeof toolMessage.tool_call_id === "string"

@@ -279,6 +279,134 @@ describe("AcceptedChatRequestSnapshot", () => {
     expect(wire[1]).not.toHaveProperty("tool_calls");
   });
 
+  it("projects a reloaded legacy web search without relying on executedOn metadata", () => {
+    const reloadedSearchAssistant = {
+      role: "assistant" as const,
+      content: "Search-backed answer",
+      message_id: "search-assistant",
+      tool_calls: [{
+        id: "call_web_legacy",
+        messageId: "search-assistant",
+        request: {
+          id: "call_web_legacy",
+          type: "function" as const,
+          function: { name: "web_search", arguments: "{\"query\":\"release\"}" },
+        },
+        state: "completed" as const,
+        timestamp: 1,
+        result: { success: true as const, data: { tool: "web_search", result_count: 1 } },
+      }],
+    };
+
+    const wire = projectManagedMessages([
+      { role: "user", content: "search for release", message_id: "u1" },
+      reloadedSearchAssistant,
+      { role: "user", content: "follow up", message_id: "u2" },
+    ]);
+
+    expect(wire.map((message) => message.role)).toEqual(["user", "assistant", "user"]);
+    expect(JSON.stringify(wire)).not.toContain("call_web_legacy");
+    expect(wire[1]).not.toHaveProperty("tool_calls");
+  });
+
+  it("omits an empty server-only checkpoint that would violate the wire schema", () => {
+    const emptySearchCheckpoint = {
+      role: "assistant" as const,
+      content: "",
+      message_id: "empty-search-assistant",
+      tool_calls: [{
+        id: "call_web_empty",
+        messageId: "empty-search-assistant",
+        request: {
+          id: "call_web_empty",
+          type: "function" as const,
+          function: { name: "web_search", arguments: "{}" },
+        },
+        state: "completed" as const,
+        timestamp: 1,
+        executedOn: "server" as const,
+        result: { success: true as const, data: { tool: "web_search", result_count: 0 } },
+      }],
+    };
+
+    const wire = projectManagedMessages([
+      { role: "user", content: "search", message_id: "u1" },
+      emptySearchCheckpoint,
+      { role: "user", content: "try again", message_id: "u2" },
+    ]);
+
+    expect(wire).toEqual([
+      expect.objectContaining({ role: "user", content: "search" }),
+      expect.objectContaining({ role: "user", content: "try again" }),
+    ]);
+  });
+
+  it("normalizes an oldest-shape settled vault call and its synthesized result", () => {
+    const wire = projectManagedMessages([
+      { role: "user", content: "Read it", message_id: "u1" },
+      {
+        role: "assistant",
+        content: "",
+        message_id: "a1",
+        tool_calls: [{
+          id: "call_flat_read",
+          messageId: "a1",
+          name: "read",
+          arguments: { paths: ["Notes/Legacy.md"] },
+          state: "completed",
+          timestamp: 1,
+          result: { success: true, data: { path: "Notes/Legacy.md" } },
+        } as any],
+      },
+      { role: "user", content: "Continue", message_id: "u2" },
+    ]);
+
+    expect(wire).toEqual([
+      { role: "user", content: "Read it" },
+      {
+        role: "assistant",
+        content: "",
+        tool_calls: [{
+          id: "call_flat_read",
+          type: "function",
+          function: {
+            name: "read",
+            arguments: "{\"paths\":[\"Notes/Legacy.md\"]}",
+          },
+        }],
+      },
+      {
+        role: "tool",
+        content: "{\"path\":\"Notes/Legacy.md\"}",
+        tool_call_id: "call_flat_read",
+        name: "read",
+      },
+      { role: "user", content: "Continue" },
+    ]);
+  });
+
+  it("rejects a malformed legacy client call with an explicit local-history error", () => {
+    const malformedAssistant = {
+      role: "assistant" as const,
+      content: "",
+      message_id: "a1",
+      tool_calls: [{
+        id: "call_malformed",
+        messageId: "a1",
+        state: "completed" as const,
+        timestamp: 1,
+        result: { success: true as const, data: {} },
+      } as any],
+    };
+
+    expect(() => prepareManagedMessage(malformedAssistant))
+      .toThrow("Managed history contains a malformed tool call.");
+    expect(() => projectManagedMessages([
+      { role: "user", content: "Run it", message_id: "u1" },
+      malformedAssistant,
+    ])).toThrow("Managed history contains a malformed tool call.");
+  });
+
   it("projects a mixed settled batch keeping only the client call and its result", () => {
     const mixedAssistant = {
       role: "assistant" as const,
@@ -368,5 +496,52 @@ describe("AcceptedChatRequestSnapshot", () => {
     expect(() => projectManagedMessages([assistant, partial])).toThrow(
       "partial or mismatched explicit tool-result batch",
     );
+  });
+
+  it("fails closed when one assistant repeats a surviving client tool-call id", () => {
+    const duplicate = (timestamp: number) => ({
+      id: "duplicate-call",
+      messageId: "assistant-duplicate",
+      request: {
+        id: "duplicate-call",
+        type: "function" as const,
+        function: { name: "read", arguments: JSON.stringify({ timestamp }) },
+      },
+      state: "completed" as const,
+      timestamp,
+      result: { success: true as const, data: { timestamp } },
+    });
+
+    expect(() => projectManagedMessages([{
+      role: "assistant",
+      content: "",
+      message_id: "assistant-duplicate",
+      tool_calls: [duplicate(1), duplicate(2)],
+    }])).toThrow("duplicate client tool-call id");
+  });
+
+  it("fails closed when separate assistant batches reuse a client tool-call id", () => {
+    const assistant = (messageId: string, timestamp: number) => ({
+      role: "assistant" as const,
+      content: "",
+      message_id: messageId,
+      tool_calls: [{
+        id: "reused-call",
+        messageId,
+        request: {
+          id: "reused-call",
+          type: "function" as const,
+          function: { name: "read", arguments: "{}" },
+        },
+        state: "completed" as const,
+        timestamp,
+        result: { success: true as const, data: { messageId } },
+      }],
+    });
+
+    expect(() => projectManagedMessages([
+      assistant("assistant-1", 1),
+      assistant("assistant-2", 2),
+    ])).toThrow("duplicate client tool-call id");
   });
 });

@@ -6,6 +6,7 @@ import { TFile } from "obsidian";
 import { showConfirm } from "../../../core/ui/notifications";
 import { createInitialAgentConversation } from "../AgentConversation";
 import { AgentChatView } from "../AgentChatView";
+import { SavedChatCorruptedError } from "../ChatStorageService";
 
 jest.mock("../../../core/ui/notifications", () => ({
   showConfirm: jest.fn(),
@@ -510,6 +511,76 @@ describe("AgentChatView coordinator", () => {
     }));
   });
 
+  it("replays an oldest-shape web search safely and fails closed for an unknowable tool", async () => {
+    const target = { role: "user" as const, message_id: "user-1", content: "Search" };
+    const workspace = { showMessageEditor: jest.fn(async () => undefined) };
+    const flatWebSearch = {
+      id: "flat-web",
+      messageId: "assistant-flat",
+      name: "web_search",
+      arguments: { query: "legacy" },
+      state: "completed",
+      timestamp: 1,
+      result: { success: true, data: { result_count: 1 } },
+    };
+    const view = {
+      transcript: {
+        snapshot: jest.fn(() => ({
+          version: 1,
+          messages: [
+            target,
+            {
+              role: "assistant",
+              message_id: "assistant-flat",
+              content: "Found it",
+              tool_calls: [flatWebSearch],
+              messageParts: [{
+                id: "tool_call_part-flat-web",
+                type: "tool_call",
+                data: flatWebSearch,
+                timestamp: 1,
+              }],
+            },
+          ],
+        })),
+      },
+      attachmentStore: { hydrateMessage: jest.fn(async (message) => message) },
+      workspace,
+      activeRunPromise: null,
+      pendingRetry: null,
+      messageEditGeneration: 0,
+    };
+
+    await (AgentChatView.prototype as any).prepareRetry.call(view, "user-1");
+    expect(workspace.showMessageEditor).toHaveBeenLastCalledWith(expect.objectContaining({
+      requiresReplayConfirmation: false,
+    }));
+
+    const malformedTool = {
+      id: "unknown-flat",
+      messageId: "assistant-flat",
+      state: "completed",
+      timestamp: 2,
+      result: { success: true, data: {} },
+    };
+    view.transcript.snapshot.mockImplementation(() => ({
+      version: 2,
+      messages: [
+        target,
+        {
+          role: "assistant",
+          message_id: "assistant-flat",
+          content: "Unknown activity",
+          tool_calls: [malformedTool],
+        },
+      ],
+    }));
+    await (AgentChatView.prototype as any).prepareRetry.call(view, "user-1");
+    expect(workspace.showMessageEditor).toHaveBeenLastCalledWith(expect.objectContaining({
+      requiresReplayConfirmation: true,
+    }));
+  });
+
   it("keeps a risky inline resubmission editable when confirmation is cancelled", async () => {
     showConfirmMock.mockResolvedValue({ confirmed: false });
     const pending = {
@@ -830,6 +901,74 @@ describe("AgentChatView coordinator", () => {
     expect(view.approvalMode).toBe("full-access");
     expect(workspace.setApprovalMode).toHaveBeenCalledWith("full-access");
     expect(view.hydrateQueue).toHaveBeenCalledWith("chat-2");
+  });
+
+  it("resets to a new chat and keeps a corruption banner after a corrupt saved history is rejected", async () => {
+    const workspace = {
+      setBanner: jest.fn(),
+      resetMessageEditor: jest.fn(),
+    };
+    const view = {
+      conversationOriginToken: "conversation-origin-before-load",
+      messageEditGeneration: 0,
+      pendingRetry: null,
+      queueHydrated: false,
+      controller: { cancel: jest.fn(async () => undefined) },
+      sessionTrustedToolNames: new Set(["write"]),
+      workspace,
+      transcript: {
+        load: jest.fn(async () => {
+          throw new SavedChatCorruptedError("SystemSculpt/Chats/corrupt.md");
+        }),
+      },
+      resetAfterFailedChatLoad: (AgentChatView.prototype as any).resetAfterFailedChatLoad,
+      startNewChat: jest.fn(async () => {
+        workspace.setBanner(null);
+      }),
+    };
+
+    await expect(AgentChatView.prototype.loadChatById.call(view as any, "corrupt"))
+      .resolves.toBeUndefined();
+
+    expect(view.startNewChat).toHaveBeenCalledWith(false);
+    expect(workspace.setBanner).toHaveBeenLastCalledWith(
+      "This saved chat is corrupted and was left unchanged. Start a new chat to continue.",
+      "error",
+    );
+  });
+
+  it("falls back to a fresh chat instead of crashing when transcript load throws unexpectedly", async () => {
+    const workspace = {
+      setBanner: jest.fn(),
+      resetMessageEditor: jest.fn(),
+    };
+    const view = {
+      conversationOriginToken: "conversation-origin-before-load",
+      messageEditGeneration: 0,
+      pendingRetry: null,
+      queueHydrated: false,
+      controller: { cancel: jest.fn(async () => undefined) },
+      sessionTrustedToolNames: new Set(),
+      workspace,
+      transcript: {
+        load: jest.fn(async () => {
+          throw new Error("vault read failed");
+        }),
+      },
+      resetAfterFailedChatLoad: (AgentChatView.prototype as any).resetAfterFailedChatLoad,
+      startNewChat: jest.fn(async () => {
+        workspace.setBanner(null);
+      }),
+    };
+
+    await expect(AgentChatView.prototype.loadChatById.call(view as any, "chat-2"))
+      .resolves.toBeUndefined();
+
+    expect(view.startNewChat).toHaveBeenCalledWith(false);
+    expect(workspace.setBanner).toHaveBeenLastCalledWith(
+      "This chat could not be loaded.",
+      "error",
+    );
   });
 
   it("rolls current approval state back and rejects when durable persistence fails", async () => {

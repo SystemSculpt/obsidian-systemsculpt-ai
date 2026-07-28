@@ -6,6 +6,7 @@ import {
   collectChatAttachmentRefKeys,
   isChatAttachmentContentRef,
 } from "./attachments/ChatAttachmentVaultStore";
+import { hasChatIdentityFrontmatter } from "./storage/ChatFrontmatterIdentity";
 import { ChatMarkdownSerializer } from "./storage/ChatMarkdownSerializer";
 import type {
   ChatApprovalMode,
@@ -35,6 +36,13 @@ type SaveChatOptions = {
   approvalMode?: ChatApprovalMode;
   managedSession?: ManagedChatSessionBinding;
 };
+
+export class SavedChatCorruptedError extends Error {
+  constructor(public readonly filePath: string) {
+    super(`Saved chat history is corrupted: ${filePath}`);
+    this.name = "SavedChatCorruptedError";
+  }
+}
 
 const DESKTOP_CHAT_HISTORY_READ_CONCURRENCY = 8;
 const PORTABLE_CHAT_HISTORY_READ_CONCURRENCY = 1;
@@ -423,7 +431,7 @@ export class ChatStorageService {
       }
 
       const content = await this.app.vault.read(file);
-      const parsed = this.parseMarkdownContent(content, filePath);
+      const parsed = this.parseDirectChatLoad(content, filePath);
       if (!parsed) return null;
       this.attachmentStore?.claimMessageReferences(parsed.messages);
       return {
@@ -434,8 +442,16 @@ export class ChatStorageService {
         messages: parsed.messages,
       };
     } catch (error) {
+      if (error instanceof SavedChatCorruptedError) throw error;
       return null;
     }
+  }
+
+  private parseDirectChatLoad(content: string, filePath: string): LoadedChatRecord | null {
+    const parsed = this.parseMarkdownContent(content, filePath);
+    if (parsed) return parsed;
+    if (this.isValidChatFile(content)) throw new SavedChatCorruptedError(filePath);
+    return null;
   }
 
   private parseMarkdownContent(content: string, filePath?: string): LoadedChatRecord | null {
@@ -465,7 +481,13 @@ export class ChatStorageService {
   }
 
   public async getChatResumeDescriptor(chatId: string): Promise<ChatResumeDescriptor | null> {
-    const record = await this.loadChat(chatId);
+    let record: LoadedChatRecord | null;
+    try {
+      record = await this.loadChat(chatId);
+    } catch (error) {
+      if (error instanceof SavedChatCorruptedError) return null;
+      throw error;
+    }
     if (!record) {
       return null;
     }
@@ -483,14 +505,11 @@ export class ChatStorageService {
    * Validates that a file has the expected chat file structure
    */
   private isValidChatFile(content: string): boolean {
-    // Check for modern format with frontmatter
-    const hasFrontmatter = /^---\n[\s\S]*?\n---/.test(content);
-    
-    // Check for SystemSculpt message markers (current format)
-    const hasMessageMarkers = content.includes('SYSTEMSCULPT-MESSAGE-START') && 
-                              content.includes('SYSTEMSCULPT-MESSAGE-END');
+    // A lone opening marker still signals an attempted chat transcript and
+    // should fail closed if parsing cannot recover it.
+    const hasMessageMarkers = content.includes("SYSTEMSCULPT-MESSAGE-START");
 
-    return hasFrontmatter || hasMessageMarkers;
+    return hasChatIdentityFrontmatter(content) || hasMessageMarkers;
   }
 
 }

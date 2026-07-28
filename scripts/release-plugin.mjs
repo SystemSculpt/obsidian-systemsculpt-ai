@@ -8,6 +8,7 @@ import {
   buildProductionPlugin,
   REQUIRED_PLUGIN_ARTIFACTS,
 } from "./plugin-artifacts.mjs";
+import { writeBuildProvenance } from "./build-provenance.mjs";
 
 const SEMVER = /^\d+\.\d+\.\d+$/;
 
@@ -19,6 +20,7 @@ export function validateReleasePackage({
   root = process.cwd(),
   build = true,
   buildImpl = buildProductionPlugin,
+  provenanceImpl = writeBuildProvenance,
 } = {}) {
   const resolvedRoot = path.resolve(root);
   const manifest = readJson(resolvedRoot, "manifest.json");
@@ -42,8 +44,19 @@ export function validateReleasePackage({
   const artifacts = build
     ? buildImpl({ root: resolvedRoot, stdio: "inherit" })
     : assertProductionPluginArtifacts({ root: resolvedRoot });
+  const provenance = provenanceImpl({
+    root: resolvedRoot,
+    version,
+    kind: "release",
+  });
 
-  return { root: resolvedRoot, version, files: [...REQUIRED_PLUGIN_ARTIFACTS], artifacts };
+  return {
+    root: resolvedRoot,
+    version,
+    files: [...REQUIRED_PLUGIN_ARTIFACTS],
+    artifacts,
+    provenance,
+  };
 }
 
 const direct = process.argv[1]
@@ -56,6 +69,7 @@ if (direct) {
     if (unknown.length > 0) throw new Error(`Unknown argument: ${unknown[0]}`);
     const result = validateReleasePackage({ build: !process.argv.includes("--no-build") });
     console.log(`[release] OK ${result.version}: ${result.files.join(", ")}`);
+    console.log(`[release] Provenance: ${result.provenance.path}`);
   } catch (error) {
     console.error(`[release] FAIL: ${error instanceof Error ? error.message : String(error)}`);
     process.exitCode = 1;

@@ -18,15 +18,17 @@ npm run test:related -- <changed source files>
 ~~~
 
 check runs the canonical Obsidian source and metadata lint, production bundle,
-CSS contracts, cheap architecture policy tests, and an exact built-bundle
-mobile-host smoke. It is the normal edit loop, not a native-device or provider
-test.
+CSS contracts, cheap architecture policy tests, focused mobile interactions,
+the ChatView critical-risk coverage gate, and an exact built-bundle mobile-host
+smoke. It is the normal edit loop, not a native-device or provider test.
 
 Useful focused gates:
 
 ~~~bash
 npm run check:ui
 npm run check:mobile
+npm run test:chatview:critical
+npm run test:chatview:mutants
 npm run test:integration
 npm run test:release-script
 ~~~
@@ -41,15 +43,50 @@ adapters unavailable. It does not launch Android or iOS.
 ~~~bash
 npm run check:plugin
 npm run check:ci
+npm run check:compat
 npm run check:full
 ~~~
 
 check:plugin adds TypeScript, mobile compatibility, sync, artifact, and release
-guards. check:ci is the exact PR contract and adds full unit, embeddings,
-already-built integration, and release-script suites. check:full is its local
-alias.
+guards. test:chatview:critical runs persistence, request projection,
+controller/runtime/transport, storage, and restored-history UI with strict console,
+randomized order, open-handle detection, generative histories, and per-file
+coverage budgets. check:ci is the exact exhaustive PR contract and adds strict
+mobile interaction, curated mutation, unit, embeddings, already-built
+integration, and release-script suites. The mutation gate creates an isolated
+temporary source mirror and requires every high-risk compatibility, projection,
+session, durability, controller, replay, and history UI mutant to be killed.
+The unit CI remainder excludes focused mobile and ChatView paths already proven
+by earlier gates, keeping the exhaustive workflow broad without rerunning the
+same suites a third time.
+check:compat is the smaller Node and operating-system compatibility contract.
+It runs the same critical ChatView suites without repeating coverage collection
+already enforced by check:ci.
+check:full is the local alias for check:ci.
 
-CI is one secret-free Ubuntu/Node 22 job running npm run check:ci.
+CI runs check:ci on Ubuntu/Node 22, then runs check:compat on Node 20.10,
+Node 24, macOS/Node 22, and Windows/Node 22. The merge queue runs the same
+workflow. A final `required` job fails unless every exhaustive and compatibility
+lane succeeds. All jobs are credential-free. The installed pre-push hook runs
+check:ci locally, while hosted CI and the repository rule requiring `required`
+remain authoritative.
+
+Each top-level hosted Jest gate records its replay seed and normalized child
+Jest argv in `.cache/ci-evidence/jest-seeds`. A failed lane uploads those
+records, the ChatView coverage summary, artifact inspection, build provenance,
+and the exact plugin artifact bytes for 14 days. The mutation gate records its
+baseline, every killed, surviving, or infrastructure-failed mutant, and its
+exact child Jest commands in
+`.cache/ci-evidence/chatview-critical-mutants.json`. CI validates the
+structured provenance and artifact-inspection sidecars before uploading a
+failed gate. Successful release validation writes SHA-256, size, Git revision,
+dirty state, Node, platform, and architecture to
+`.cache/ci-evidence/release-provenance.json`.
+
+Saved chat parsing fails closed. A malformed or truncated history is never
+reduced to a surviving prefix and sent as a new request. Direct loads show a
+corruption banner, reset to a fresh unsaved chat, and leave the original note
+bytes unchanged.
 
 ## Mobile QA pyramid
 
@@ -136,10 +173,11 @@ this repository.
 npm run release:plugin
 ~~~
 
-The release command verifies version consistency, rebuilds the production
-artifact, and validates exactly manifest.json, main.js, and styles.css. It
-rejects local API bases, retired client AI runtimes, provider SDKs, and inline
-source maps. Publishing still requires explicit operator approval.
+The release command first requires the complete check:ci contract. It then
+verifies version consistency, rebuilds the production artifact, and validates
+exactly manifest.json, main.js, and styles.css. It rejects local API bases,
+retired client AI runtimes, provider SDKs, and inline source maps. Publishing
+still requires explicit operator approval.
 
 ~~~bash
 npm run smoke:chat:live
@@ -148,10 +186,16 @@ npm run smoke:chat:live
 Before releasing a change that touches managed chat, run the live smoke. It
 drives the real controller, runtime adapter, capability client, and transport
 against production with server-side web search enabled, then sends a
-follow-up turn over the settled transcript — the two flows unit fixtures have
-historically mismodeled (6.2.4's empty continuation, 6.2.5's rejected
+follow-up turn over the settled transcript. Unit fixtures have historically
+mismodeled those two flows (6.2.4's empty continuation and 6.2.5's rejected
 follow-up). It needs a license key (`SYSTEMSCULPT_LICENSE_KEY` or a local QA
 vault), spends a few real chat turns, and is deliberately not part of CI.
+
+The live smoke serializes and reloads the settled search turn, removes the
+newer server-execution marker to emulate legacy saved history, and then sends
+the follow-up over a new controller/runtime instance. It complements the
+deterministic critical-risk replay contract, including the byte-pinned fixture
+validated by the website API repository.
 
 ## Canonical source references
 

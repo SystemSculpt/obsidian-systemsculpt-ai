@@ -9,6 +9,7 @@ import {
   type ManagedPreparedMessage,
 } from "../../services/chat/AcceptedChatRequestSnapshot";
 import { safeManagedResultData as safeResultData } from "../../services/chat/ManagedToolResult";
+import { isServerExecutedManagedToolName } from "../../services/chat/ManagedToolExecution";
 import {
   advanceManagedChatSessionBudget,
   inspectManagedToolContinuationBudget,
@@ -204,6 +205,7 @@ class ManagedAgentControllerError extends Error {
     public readonly code: string,
     message: string,
     public readonly requestId?: string,
+    public readonly status?: number,
   ) {
     super(message);
     this.name = "ManagedAgentControllerError";
@@ -343,6 +345,7 @@ function asManagedError(error: unknown): ManagedAgentError {
       code: error.code,
       message: error.message,
       ...(error.requestId ? { requestId: error.requestId } : {}),
+      ...(typeof error.status === "number" ? { status: error.status } : {}),
     };
   }
   if (error instanceof Error) {
@@ -362,14 +365,12 @@ function isManagedDispatchFailure(
   ].includes(String((error as { kind: unknown }).kind));
 }
 
-const SERVER_EXECUTED_TOOLS: ReadonlySet<string> = new Set(["web_search"]);
-
 function defaultToolLocation(toolName: string): ManagedAgentToolLocation {
   // One tool model, two settlement paths. A vault tool runs here and is handed
   // back to continue the turn; a server tool has already run by the time we see
   // it and arrives with its result attached. Both render as the same kind of
   // tool part, which is the whole point: a tool is a tool.
-  return SERVER_EXECUTED_TOOLS.has(toolName) ? "server" : "vault";
+  return isServerExecutedManagedToolName(toolName) ? "server" : "vault";
 }
 
 function parseToolInput(argumentsJson: string, toolName: string): Record<string, unknown> {
@@ -466,10 +467,21 @@ function dispatchError(result: Exclude<ManagedChatDispatchResult, { kind: "succe
     local_session_attachment_limit: "This chat has reached its managed attachment limit. Start a new chat to continue.",
     local_session_stored_json_limit: "This chat has reached its managed storage limit. Start a new chat to continue.",
   };
+  const remoteCapabilityMessages: Readonly<Record<string, string>> = {
+    request_too_large: localMessages.local_request_too_large,
+    invalid_request: "This chat request was rejected before it started. Start a new chat, and update the plugin if it keeps happening.",
+  };
+  const remoteCapabilityMessage = result.kind === "capability_request" && result.diagnostic.status === 400
+    ? remoteCapabilityMessages[result.diagnostic.code ?? ""]
+      ?? "This chat request was rejected before it started. Start a new chat, and update the plugin if it keeps happening."
+    : undefined;
   return new ManagedAgentControllerError(
     result.diagnostic.code || `managed_${result.kind}`,
-    (result.diagnostic.code && localMessages[result.diagnostic.code]) || messages[result.kind],
+    (result.diagnostic.code && localMessages[result.diagnostic.code])
+      || remoteCapabilityMessage
+      || messages[result.kind],
     result.diagnostic.requestId,
+    result.diagnostic.status,
   );
 }
 

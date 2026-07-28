@@ -339,6 +339,52 @@ describe("ManagedAgentController", () => {
     });
   });
 
+  it("completes with fallback text when a pure server-executed search fails", async () => {
+    const harness = createHarness([[
+      {
+        kind: "server_tool_result",
+        toolCallId: "call_web_failed",
+        status: "failed",
+        details: { tool: "web_search", query: "release notes" },
+      },
+      {
+        kind: "tool_call_delta",
+        index: 0,
+        id: "call_web_failed",
+        name: "web_search",
+        arguments: '{"query":"release notes"}',
+      },
+      { kind: "content_delta", text: "I can still answer from the settled conversation." },
+      { kind: "finish_reason", reason: "tool_calls" },
+      checkpointEvent(1),
+      {
+        kind: "tool_call_completed",
+        index: 0,
+        id: "call_web_failed",
+        name: "web_search",
+        arguments: '{"query":"release notes"}',
+      },
+      { kind: "done" },
+    ]]);
+
+    const result = await harness.controller.start({ commit: { kind: "append", message: user() } });
+
+    expect(result.kind).toBe("completed");
+    expect(harness.runtime.dispatch).toHaveBeenCalledTimes(1);
+    expect(harness.host.executeLocalTool).not.toHaveBeenCalled();
+    const settled = harness.persisted[harness.persisted.length - 1].message;
+    expect(settled.content).toContain("I can still answer");
+    expect(settled.tool_calls?.[0]).toMatchObject({
+      id: "call_web_failed",
+      state: "failed",
+      executedOn: "server",
+      result: {
+        success: false,
+        error: { code: "SERVER_TOOL_FAILED" },
+      },
+    });
+  });
+
   it("continues a mixed server and vault batch with only the vault result", async () => {
     const vaultArgs = JSON.stringify({ paths: ["Notes/release.md"] });
     const harness = createHarness([
@@ -542,6 +588,84 @@ describe("ManagedAgentController", () => {
     expect(harness.host.executeLocalTool).not.toHaveBeenCalled();
     expect(harness.runtime.dispatch).toHaveBeenCalledTimes(1);
     expect(harness.persisted.at(-1)?.phase).toBe("tool_checkpoint");
+  });
+
+  it("preserves structured server 400 diagnostics while keeping the customer message safe", async () => {
+    const harness = createHarness([]);
+    (harness.runtime.dispatch as jest.Mock).mockResolvedValueOnce({
+      kind: "capability_request",
+      diagnostic: {
+        status: 400,
+        code: "invalid_request",
+        requestId: "req-chat-400",
+      },
+    });
+
+    const result = await harness.controller.start({
+      commit: { kind: "append", message: user("user-1", "secret-token=abc123") },
+    });
+
+    expect(result).toMatchObject({
+      kind: "failed",
+      error: {
+        code: "invalid_request",
+        status: 400,
+        requestId: "req-chat-400",
+        message: "This chat request was rejected before it started. Start a new chat, and update the plugin if it keeps happening.",
+      },
+    });
+    if (result.kind !== "failed") throw new Error(`Expected failed result, received ${result.kind}.`);
+    expect(result.error.message).not.toContain("secret-token");
+    expect(result.error.message).not.toContain("abc123");
+    expect(harness.controller.getSnapshot()).toMatchObject({
+      status: "failed",
+      terminalError: {
+        code: "invalid_request",
+        status: 400,
+        requestId: "req-chat-400",
+      },
+    });
+    expect(harness.host.persistAssistant).not.toHaveBeenCalled();
+    expect(harness.host.persistAssistantWithSession).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      label: "request size rejection",
+      diagnostic: { status: 400, code: "request_too_large" },
+      message: "This chat request is too large to send. Remove attachments or start a new chat.",
+    },
+    {
+      label: "unknown schema rejection",
+      diagnostic: { status: 400, code: "future_schema_error" },
+      message: "This chat request was rejected before it started. Start a new chat, and update the plugin if it keeps happening.",
+    },
+    {
+      label: "non-400 capability rejection",
+      diagnostic: { status: 409, code: "invalid_request" },
+      message: "SystemSculpt rejected this request.",
+    },
+  ])("maps $label without echoing server response content", async ({ diagnostic, message }) => {
+    const harness = createHarness([]);
+    (harness.runtime.dispatch as jest.Mock).mockResolvedValueOnce({
+      kind: "capability_request",
+      diagnostic,
+    });
+
+    const result = await harness.controller.start({
+      commit: { kind: "append", message: user("user-1", "private prompt") },
+    });
+
+    expect(result).toMatchObject({
+      kind: "failed",
+      error: {
+        code: diagnostic.code,
+        status: diagnostic.status,
+        message,
+      },
+    });
+    if (result.kind !== "failed") throw new Error(`Expected failed result, received ${result.kind}.`);
+    expect(result.error.message).not.toContain("private prompt");
   });
 
   it("preserves text, tool, text chronology in live projection, durable parts, and reload", async () => {

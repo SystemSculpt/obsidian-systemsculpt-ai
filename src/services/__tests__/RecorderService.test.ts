@@ -142,6 +142,11 @@ const flush = async (): Promise<void> => {
   }
 };
 
+const noticeMessages = (noticeLog: jest.SpyInstance): string[] =>
+  noticeLog.mock.calls
+    .map(([message]) => String(message))
+    .filter((message) => message.startsWith("Notice:"));
+
 describe("RecorderService", () => {
   let app: App;
   let plugin: any;
@@ -544,6 +549,7 @@ describe("RecorderService", () => {
 
   it("starts another recording while the previous saved audio keeps transcribing", async () => {
     plugin.settings.autoTranscribeRecordings = true;
+    const noticeLog = jest.spyOn(console, "log").mockImplementation(() => undefined);
     const firstTranscription = deferred<any>();
     const cancelFirst = jest.fn();
     mockTranscriptionStart.mockReturnValue({
@@ -599,10 +605,15 @@ describe("RecorderService", () => {
 
     expect((service as any).state).toBe("recording");
     expect((service as any).transcriptionTasks.size).toBe(0);
+    expect(noticeMessages(noticeLog)).toEqual([
+      "Notice: The previous recording is still transcribing. Starting a new recording…",
+      "Notice: Transcript saved to SystemSculpt/Recordings/first - transcript.md.",
+    ]);
   });
 
   it("serializes recorder transcriptions while leaving capture free to continue", async () => {
     plugin.settings.autoTranscribeRecordings = true;
+    const noticeLog = jest.spyOn(console, "log").mockImplementation(() => undefined);
     const first = deferred<any>();
     const second = deferred<any>();
     mockTranscriptionStart
@@ -670,6 +681,9 @@ describe("RecorderService", () => {
       filePath: secondCapture.result.filePath,
     }));
     expect((service as any).queuedTranscriptions).toHaveLength(0);
+    expect(noticeMessages(noticeLog)).toEqual([
+      "Notice: Transcript saved to SystemSculpt/Recordings/first - transcript.md.",
+    ]);
 
     second.resolve({
       text: "Second transcript",
@@ -682,6 +696,7 @@ describe("RecorderService", () => {
 
   it("restarts a queued automatic transcription when the setting is turned back on", async () => {
     plugin.settings.autoTranscribeRecordings = true;
+    const noticeLog = jest.spyOn(console, "log").mockImplementation(() => undefined);
     const first = deferred<any>();
     const second = deferred<any>();
     mockTranscriptionStart
@@ -742,6 +757,9 @@ describe("RecorderService", () => {
       insertedIntoOrigin: false,
     });
     await flush();
+    expect(noticeMessages(noticeLog)).toEqual([
+      "Notice: Transcript saved to SystemSculpt/Recordings/first - transcript.md.",
+    ]);
   });
 
   it("persists manual transcription intent before dispatch when automatic transcription is off", async () => {
@@ -837,6 +855,7 @@ describe("RecorderService", () => {
   });
 
   it("recovers a manually requested transcription while automatic transcription stays off", async () => {
+    const noticeLog = jest.spyOn(console, "log").mockImplementation(() => undefined);
     const source = new TFile({
       path: "SystemSculpt/Recordings/manual-recovery.webm",
       stat: { size: 24_000 },
@@ -875,10 +894,14 @@ describe("RecorderService", () => {
       resumeOperationId: "manual-recovery-operation",
     }));
     expect(plugin.settings.pendingRecorderCaptures).toEqual([]);
+    expect(noticeMessages(noticeLog)).toEqual([
+      "Notice: Recovered transcript saved to SystemSculpt/Recordings/manual-recovery - transcript.md.",
+    ]);
   });
 
   it("drains a queued manual transcription even when automatic transcription is turned off", async () => {
     plugin.settings.autoTranscribeRecordings = true;
+    const noticeLog = jest.spyOn(console, "log").mockImplementation(() => undefined);
     const first = deferred<any>();
     const second = deferred<any>();
     mockTranscriptionStart
@@ -933,6 +956,9 @@ describe("RecorderService", () => {
       insertedIntoOrigin: false,
     });
     await flush();
+    expect(noticeMessages(noticeLog)).toEqual([
+      "Notice: Transcript saved to SystemSculpt/Recordings/first - transcript.md.",
+    ]);
   });
 
   it("reports saved-with-warning when the initiating chat no longer accepts dictation", async () => {
@@ -1163,6 +1189,7 @@ describe("RecorderService", () => {
   });
 
   it("reoffers a durably saved automatic recording after a plugin/process restart", async () => {
+    const noticeLog = jest.spyOn(console, "log").mockImplementation(() => undefined);
     const source = new TFile({
       path: "SystemSculpt/Recordings/recovered.webm",
       stat: { size: 24_000 },
@@ -1207,6 +1234,9 @@ describe("RecorderService", () => {
     }));
     expect(plugin.settings.pendingRecorderCaptures).toEqual([]);
     expect(acknowledgeCompletion).toHaveBeenCalledTimes(1);
+    expect(noticeMessages(noticeLog)).toEqual([
+      "Notice: Recovered transcript saved to SystemSculpt/Recordings/recovered - transcript.md.",
+    ]);
   });
 
   it("acknowledges a completed recorder operation only after pending capture state is durably cleared", async () => {
@@ -1335,6 +1365,7 @@ describe("RecorderService", () => {
   });
 
   it("keeps missing-source pending state when its completion acknowledgment fails", async () => {
+    const noticeLog = jest.spyOn(console, "log").mockImplementation(() => undefined);
     plugin.settings.autoTranscribeRecordings = true;
     plugin.settings.pendingRecorderCaptures = [{
       filePath: "SystemSculpt/Recordings/trashed.webm",
@@ -1361,9 +1392,13 @@ describe("RecorderService", () => {
     expect(updateSettings).not.toHaveBeenCalled();
     expect(plugin.settings.pendingRecorderCaptures).toHaveLength(1);
     expect(mockTranscriptionStart).not.toHaveBeenCalled();
+    expect(noticeMessages(noticeLog)).toEqual([
+      "Notice: The saved audio SystemSculpt/Recordings/trashed.webm is missing, but its recovery record could not be cleared. SystemSculpt will retry cleanup later.",
+    ]);
   });
 
   it("drains a newly saved capture after startup recovery without overlapping uploads", async () => {
+    const noticeLog = jest.spyOn(console, "log").mockImplementation(() => undefined);
     const recoveredSource = new TFile({
       path: "SystemSculpt/Recordings/recovered.webm",
       stat: { size: 24_000 },
@@ -1437,9 +1472,13 @@ describe("RecorderService", () => {
       insertedIntoOrigin: false,
     });
     await flush();
+    expect(noticeMessages(noticeLog)).toEqual([
+      "Notice: Recovered transcript saved to SystemSculpt/Recordings/recovered - transcript.md.",
+    ]);
   });
 
   it("keeps scanning pending recordings when starting one recovery throws synchronously", async () => {
+    const noticeLog = jest.spyOn(console, "log").mockImplementation(() => undefined);
     const first = new TFile({
       path: "SystemSculpt/Recordings/first.webm",
       stat: { size: 24_000 },
@@ -1481,9 +1520,14 @@ describe("RecorderService", () => {
     expect(plugin.settings.pendingRecorderCaptures).toEqual([
       expect.objectContaining({ filePath: first.path }),
     ]);
+    expect(noticeMessages(noticeLog)).toEqual([
+      "Notice: Saved recording still needs transcription: service still loading",
+      "Notice: Recovered transcript saved to SystemSculpt/Recordings/second - transcript.md.",
+    ]);
   });
 
   it("fails closed instead of retranscribing conflicting synced recovery entries", async () => {
+    const noticeLog = jest.spyOn(console, "log").mockImplementation(() => undefined);
     plugin.settings.autoTranscribeRecordings = true;
     plugin.settings.pendingRecorderCaptures = [{
       filePath: "SystemSculpt/Recordings/conflict.webm",
@@ -1500,10 +1544,14 @@ describe("RecorderService", () => {
 
     expect(mockTranscriptionStart).not.toHaveBeenCalled();
     expect(plugin.settings.pendingRecorderCaptures).toHaveLength(1);
+    expect(noticeMessages(noticeLog)).toEqual([
+      "Notice: Saved recording SystemSculpt/Recordings/conflict.webm has conflicting recovery state. The audio was left unchanged; transcribe it manually after checking existing transcript files.",
+    ]);
   });
 
   it("retries local transcript-finishing failures with the existing remote operation", async () => {
     const service = RecorderService.getInstance(app, plugin);
+    const noticeLog = jest.spyOn(console, "log").mockImplementation(() => undefined);
     mockUiInstances[0].isVisible.mockReturnValue(false);
     (service as any).completedCapture = {
       result: {
@@ -1537,6 +1585,9 @@ describe("RecorderService", () => {
     await service.toggleRecording();
     expect(mockSessionInstances).toHaveLength(0);
     expect((service as any).transcriptionResumeOperationId).toBe("local-failure-op");
+    expect(noticeMessages(noticeLog)).toEqual([
+      "Notice: Transcription failed: disk full",
+    ]);
   });
 
   it("stops active capture and scoped transcription during unload", async () => {

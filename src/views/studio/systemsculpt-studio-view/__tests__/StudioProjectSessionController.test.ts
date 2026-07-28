@@ -399,6 +399,7 @@ describe("StudioProjectSessionController", () => {
   });
 
   it("keeps a successfully loaded file current when optional preview hydration fails", async () => {
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined);
     const originalProject = projectFixture(noteNodeFixture("Notes/Before.md"));
     const fileProject = projectFixture(noteNodeFixture("Notes/From file.md"));
     fileProject.name = "Loaded from file";
@@ -418,6 +419,13 @@ describe("StudioProjectSessionController", () => {
     expect(controller.getProject()?.name).toBe("Loaded from file");
     expect(host.resetProjectHistory).toHaveBeenCalledWith(fileProject);
     expect(host.setError).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(
+      "[SystemSculpt Studio] Unable to refresh note previews on project load",
+      {
+        projectPath: "Studio/Test.systemsculpt",
+        error: "preview unavailable",
+      },
+    );
   });
 
   it("serializes overlapping project-file modify events in observed order", async () => {

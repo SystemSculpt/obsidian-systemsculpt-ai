@@ -13,6 +13,8 @@ import {
 } from "../AgentConversation";
 import { AgentWorkspace } from "../AgentWorkspace";
 import { AgentConversationRenderer } from "../AgentConversationRenderer";
+import { ChatMarkdownSerializer } from "../storage/ChatMarkdownSerializer";
+import type { ChatMessage } from "../../../types";
 
 function envelope(seq: number, event: ManagedAgentEvent): ManagedAgentEventEnvelope {
   return {
@@ -23,6 +25,14 @@ function envelope(seq: number, event: ManagedAgentEvent): ManagedAgentEventEnvel
     emittedAt: seq,
     event,
   };
+}
+
+function reloadSavedMessages(messages: ChatMessage[]): ChatMessage[] {
+  const parsed = (ChatMarkdownSerializer as unknown as {
+    parseSequentialFormat(content: string): { success: boolean; messages: ChatMessage[] };
+  }).parseSequentialFormat(ChatMarkdownSerializer.serializeMessages(messages));
+  expect(parsed.success).toBe(true);
+  return parsed.messages;
 }
 
 describe("AgentComposer", () => {
@@ -226,6 +236,7 @@ describe("AgentComposer", () => {
   it("blocks a mixed batch when PDF processing fails, then submits the whole batch after retry", async () => {
     const parent = document.body.createDiv();
     const submissions: any[] = [];
+    const noticeLog = jest.spyOn(console, "log").mockImplementation(() => undefined);
     let attempt = 0;
     const composer = new AgentComposer(parent, {
       onSubmit: async (submission) => { submissions.push(submission); },
@@ -252,6 +263,9 @@ describe("AgentComposer", () => {
 
     await (composer as any).ingestFiles([text, pdf, image]);
 
+    expect(noticeLog).toHaveBeenCalledWith(
+      "Notice: broken.pdf could not be processed: conversion failed",
+    );
     const send = parent.querySelector<HTMLButtonElement>('[aria-label="Send message"]')!;
     expect(parent.querySelectorAll(".systemsculpt-agent-attachment.is-message")).toHaveLength(3);
     expect(parent.querySelector(".systemsculpt-agent-attachment.is-failed")?.textContent).toContain("broken.pdf");
@@ -382,6 +396,62 @@ describe("AgentWorkspace", () => {
     expect(header.hasAttribute("tabindex")).toBe(false);
     expect(node.querySelector("summary")).toBeNull();
     expect(node.querySelector("pre")).toBeNull();
+  });
+
+  it("opens an oldest-shape persisted web search without crashing the history renderer", async () => {
+    const host = document.body.createDiv();
+    const renderer = new AgentConversationRenderer(host, {
+      app: new App(),
+      sourcePath: () => "",
+      onApprove: jest.fn(),
+      onOpenArtifact: jest.fn(),
+      onCopyArtifactPath: jest.fn(),
+    });
+    const flatWebSearch = {
+      id: "flat-web-search",
+      messageId: "assistant-legacy",
+      name: "web_search",
+      arguments: { query: "legacy release" },
+      state: "completed",
+      timestamp: 1,
+      result: {
+        success: true,
+        data: { tool: "web_search", result_count: 1 },
+      },
+    };
+
+    await expect(renderer.renderHistory([{
+      role: "assistant",
+      message_id: "assistant-legacy",
+      content: "Legacy search answer",
+      tool_calls: [flatWebSearch as any],
+      messageParts: [
+        {
+          id: "tool_call_part-flat-web-search",
+          type: "tool_call",
+          data: flatWebSearch as any,
+          timestamp: 1,
+        },
+        {
+          id: "content-legacy",
+          type: "content",
+          data: "Legacy search answer",
+          timestamp: 2,
+        },
+      ],
+    }])).resolves.toBeUndefined();
+
+    expect((renderer as any).historicalToolPart(flatWebSearch)).toMatchObject({
+      name: "web_search",
+      location: "server",
+      state: "succeeded",
+      output: {
+        data: { tool: "web_search", result_count: 1 },
+      },
+    });
+    expect(host.querySelector(".systemsculpt-agent-tool")).not.toBeNull();
+    expect(host.textContent).toContain("Legacy search answer");
+    expect(host.textContent).not.toContain("legacy release");
   });
 
   it("mounts the canonical view surface and shared action grammar", () => {
@@ -1753,7 +1823,7 @@ describe("AgentWorkspace", () => {
       timestamp: 1,
       result: { success: true, data: { path: "Projects/Project.md" } },
     };
-    await workspace.setHistory([{
+    const savedHistory: ChatMessage[] = [{
       role: "assistant",
       content: "Updated the project note.",
       message_id: "assistant-1",
@@ -1762,7 +1832,8 @@ describe("AgentWorkspace", () => {
         { id: "write-part", type: "tool_call", timestamp: 1, data: writeCall },
         { id: "content-part", type: "content", timestamp: 2, data: "Updated the project note." },
       ],
-    }]);
+    }];
+    await workspace.setHistory(reloadSavedMessages(savedHistory));
 
     expect(parent.textContent).toContain("Project.md");
     expect(parent.textContent).toContain("Write file");
@@ -1816,7 +1887,7 @@ describe("AgentWorkspace", () => {
         error: { code: "TOOL_PARTIAL_FAILURE", message: "One file changed; one conflicted." },
       },
     };
-    await workspace.setHistory([{
+    const savedHistory: ChatMessage[] = [{
       role: "assistant",
       content: "One file changed; one conflicted.",
       message_id: "assistant-partial",
@@ -1825,7 +1896,8 @@ describe("AgentWorkspace", () => {
         { id: "partial-part", type: "tool_call", timestamp: 1, data: partialCall },
         { id: "content-part", type: "content", timestamp: 2, data: "One file changed; one conflicted." },
       ],
-    }]);
+    }];
+    await workspace.setHistory(reloadSavedMessages(savedHistory));
 
     expect(parent.querySelector(".systemsculpt-agent-tool")?.textContent)
       .toContain("One file changed; one conflicted.");

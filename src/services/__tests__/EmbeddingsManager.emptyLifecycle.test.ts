@@ -196,6 +196,7 @@ describe("EmbeddingsManager local empty-note lifecycle", () => {
   });
 
   it("keeps rebuild intent pending and isolates a note that cannot be read", async () => {
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined);
     const state = harness("This note has enough content to require preparation and embedding. ".repeat(3));
     state.vault.read.mockRejectedValueOnce(new Error("disk read failed"));
     await state.manager.initialize();
@@ -206,6 +207,17 @@ describe("EmbeddingsManager local empty-note lifecycle", () => {
     expect(state.plugin.settings.embeddingsRebuildPending).toBe(true);
     expect(state.manager.getStats()).toMatchObject({ failed: 1, needsProcessing: 1 });
     expect(state.request).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(
+      "[SystemSculpt][WARN] Failed to prepare file for embeddings processing",
+      {
+        source: "EmbeddingsProcessor",
+        method: "processFiles",
+        metadata: {
+          path: "Note.md",
+          message: "disk read failed",
+        },
+      },
+    );
   });
 
   it("keeps edits durable while processing is paused", async () => {

@@ -1,11 +1,18 @@
 /**
  * @jest-environment jsdom
  */
-import { App, TFile } from "obsidian";
+import { App, Notice, TFile } from "obsidian";
 import { EmbeddingsPendingFilesModal } from "../EmbeddingsPendingFilesModal";
 import { PendingEmbeddingFile } from "../../services/embeddings/EmbeddingsManager";
 
+jest.mock("obsidian", () => {
+  const actual = jest.requireActual("obsidian");
+  return { ...actual, Notice: jest.fn() };
+});
+
 const NOW = Date.now();
+
+const mockedNotice = Notice as unknown as jest.Mock;
 
 const createMockPendingFiles = (): PendingEmbeddingFile[] => [
   {
@@ -310,6 +317,7 @@ describe("EmbeddingsPendingFilesModal", () => {
       expect(written).toContain("notes/deep-learning.md");
       expect(written).toContain("folder/nested/file.md");
       expect(written).toContain("failed-file.md");
+      expect(mockedNotice).toHaveBeenCalledWith("Copied 4 file paths to the clipboard.");
     });
 
     it("copies filtered paths when filter active", async () => {
@@ -319,6 +327,7 @@ describe("EmbeddingsPendingFilesModal", () => {
 
       const written = (navigator.clipboard.writeText as jest.Mock).mock.calls[0][0];
       expect(written).toBe("notes/machine-learning.md");
+      expect(mockedNotice).toHaveBeenCalledWith("Copied 1 file path to the clipboard.");
     });
 
     it("disables Copy and never copies hidden paths when a filter has no matches", async () => {
@@ -328,6 +337,7 @@ describe("EmbeddingsPendingFilesModal", () => {
       expect((modal as any).copyButtons.every((button: HTMLButtonElement) => button.disabled)).toBe(true);
       await (modal as any).copyPaths();
       expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
+      expect(mockedNotice).toHaveBeenCalledWith("No pending files to copy.");
     });
 
     it("enables copy buttons when files exist", async () => {

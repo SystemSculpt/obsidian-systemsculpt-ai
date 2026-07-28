@@ -38,6 +38,9 @@ test("validates one semantic version and exactly the three plugin artifacts", (t
   const result = validateReleasePackage({ root, build: false });
   assert.equal(result.version, "5.11.0");
   assert.deepEqual(result.files, ["manifest.json", "main.js", "styles.css"]);
+  assert.equal(result.provenance.record.version, "5.11.0");
+  assert.equal(result.provenance.record.artifacts["main.js"].sha256.length, 64);
+  assert.equal(fs.existsSync(result.provenance.path), true);
 });
 
 test("rejects inconsistent package versions", (t) => {
@@ -56,4 +59,19 @@ test("runs the production builder before validating artifacts", (t) => {
     },
   });
   assert.equal(called, true);
+});
+
+test("records provenance only after artifact validation succeeds", (t) => {
+  const root = fixture(t);
+  const calls = [];
+  validateReleasePackage({
+    root,
+    build: false,
+    provenanceImpl(options) {
+      calls.push(options);
+      return { path: "evidence.json", record: { version: options.version } };
+    },
+  });
+
+  assert.deepEqual(calls, [{ root, version: "5.11.0", kind: "release" }]);
 });

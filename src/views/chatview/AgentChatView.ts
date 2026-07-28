@@ -3,6 +3,7 @@ import type SystemSculptPlugin from "../../main";
 import { CHAT_VIEW_TYPE } from "../../core/plugin/viewTypes";
 import { SystemSculptService, type CreditsBalanceSnapshot } from "../../services/SystemSculptService";
 import type { RecorderService } from "../../services/RecorderService";
+import { readManagedToolCallFunction } from "../../services/chat/ManagedToolExecution";
 import type { ChatMessage } from "../../types";
 import type { ChatExportOptions } from "../../types/chatExport";
 import { isMutatingTool, type ToolApprovalPolicy } from "../../utils/toolPolicy";
@@ -10,7 +11,7 @@ import { tryCopyToClipboard } from "../../utils/clipboard";
 import { getRuntimeCrypto } from "../../utils/runtimeWindow";
 import { resolveAbsoluteVaultPath } from "../../utils/vaultPathUtils";
 import { generateDefaultChatTitle, sanitizeChatTitle } from "../../utils/titleUtils";
-import { ChatStorageService } from "./ChatStorageService";
+import { ChatStorageService, SavedChatCorruptedError } from "./ChatStorageService";
 import {
   FILE_CONTEXT_STATE_CHANGED_EVENT,
   FileContextManager,
@@ -113,7 +114,9 @@ function historicalResubmitConsequences(
     "TOOL_CANCELLED_BEFORE_START",
   ]);
   const requiresReplayConfirmation = [...tools.values()].some((tool) => {
-    if (!isMutatingTool(tool.request.function.name)) return false;
+    const name = readManagedToolCallFunction(tool)?.name;
+    if (!name) return true;
+    if (!isMutatingTool(name)) return false;
     const code = tool.result?.error?.code;
     return !code || !explicitlyDidNotStart.has(String(code));
   });
@@ -395,10 +398,18 @@ export class AgentChatView extends ItemView {
     this.sessionTrustedToolNames.clear();
     this.isFullyLoaded = false;
     this.workspace?.setBanner("Loading chat…");
-    const loaded = await this.transcript.load(chatId);
+    let loaded;
+    try {
+      loaded = await this.transcript.load(chatId);
+    } catch (error) {
+      const message = error instanceof SavedChatCorruptedError
+        ? "This saved chat is corrupted and was left unchanged. Start a new chat to continue."
+        : "This chat could not be loaded.";
+      await this.resetAfterFailedChatLoad(message);
+      return;
+    }
     if (!loaded) {
-      this.workspace?.setBanner("This chat could not be loaded.", "error");
-      await this.startNewChat(false);
+      await this.resetAfterFailedChatLoad("This chat could not be loaded.");
       return;
     }
     this.contextLoading = true;
@@ -419,6 +430,11 @@ export class AgentChatView extends ItemView {
     this.isFullyLoaded = true;
     this.updateViewState();
     this.app.workspace.trigger("systemsculpt:chat-loaded", this.chatId);
+  }
+
+  private async resetAfterFailedChatLoad(message: string): Promise<void> {
+    await this.startNewChat(false);
+    this.workspace?.setBanner(message, "error");
   }
 
   public async saveChat(): Promise<void> {

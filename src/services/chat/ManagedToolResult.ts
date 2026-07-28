@@ -1,6 +1,7 @@
 import type { ChatMessage } from "../../types";
 import type { ToolCall } from "../../types/toolCalls";
 import { collectSuccessfulToolArtifactPaths, collectToolArtifactPaths } from "../../utils/toolArtifacts";
+import { readManagedToolCallFunction } from "./ManagedToolExecution";
 
 export const MAX_MANAGED_TOOL_RESULT_BYTES = 96 * 1024;
 
@@ -45,8 +46,10 @@ function serializeManagedToolResult(toolCall: ToolCall): string {
   const originalBytes = utf8Length(serialized);
   if (originalBytes <= MAX_MANAGED_TOOL_RESULT_BYTES) return serialized;
 
-  const name = toolCall.request.function.name;
-  const input = parseToolInput(toolCall.request.function.arguments);
+  const fn = readManagedToolCallFunction(toolCall);
+  if (!fn) throw new Error("Managed history contains a malformed tool call.");
+  const name = fn.name;
+  const input = parseToolInput(fn.arguments);
   const artifactPaths = (toolCall.result?.success
     ? collectToolArtifactPaths(name, input, toolCall.result.data)
     : collectSuccessfulToolArtifactPaths(name, toolCall.result?.data))
@@ -81,11 +84,13 @@ export function managedToolResultMessage(
   toolCall: ToolCall,
   assistantMessageId: string,
 ): ChatMessage {
+  const fn = readManagedToolCallFunction(toolCall);
+  if (!fn) throw new Error("Managed history contains a malformed tool call.");
   return {
     role: "tool",
     content: serializeManagedToolResult(toolCall),
     tool_call_id: toolCall.id,
-    name: toolCall.request.function.name,
+    name: fn.name,
     message_id: `${assistantMessageId}:tool-result:${toolCall.id}`,
   };
 }

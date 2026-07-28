@@ -7,11 +7,12 @@ import {
 } from "../../../types";
 import { parseAttachedTextContent } from "../attachments/ChatAttachmentContent";
 import { isChatAttachmentContentRef } from "../attachments/ChatAttachmentVaultStore";
-import * as obsidianApi from "obsidian";
-// Dynamically extract to support stub in tests
-
-const { parseYaml } = obsidianApi as any;
 import { MessagePartList } from "../utils/MessagePartList";
+import {
+  hasChatIdentityMetadata,
+  parseChatFrontmatterYaml,
+  splitChatFrontmatter,
+} from "./ChatFrontmatterIdentity";
 import {
   parseManagedChatSessionBinding,
   type ChatMetadata,
@@ -31,6 +32,28 @@ type FramedMessagePayload =
       kind: "parts";
       parts: ReadonlyArray<Readonly<{ type: MessagePart["type"]; data: unknown }>>;
     }>;
+
+type StoredMultipartParseResult =
+  | Readonly<{
+      state: "absent";
+      body: string;
+      content: null;
+    }>
+  | Readonly<{
+      state: "valid";
+      body: string;
+      content: MultiPartContent[];
+    }>
+  | Readonly<{
+      state: "invalid";
+      body: string;
+      content: null;
+    }>;
+
+type AttachmentMetadataParseResult =
+  | Readonly<{ state: "absent" }>
+  | Readonly<{ state: "valid"; metadata: ChatAttachmentMetadata[] }>
+  | Readonly<{ state: "invalid" }>;
 
 /**
  * ChatMarkdownSerializer – central place for converting between in-memory
@@ -60,14 +83,21 @@ export class ChatMarkdownSerializer {
 
   /** Parse markdown of a chat file and return metadata + messages. */
   public static parseMarkdown(content: string): ParsedChatMarkdown | null {
-    const metadata = this.parseMetadata(content);
+    const envelope = splitChatFrontmatter(content);
+    if (!envelope) return null;
+    const parsedFrontmatter = parseChatFrontmatterYaml(envelope.yamlContent);
+    if (!parsedFrontmatter) return null;
+    const metadata = this.parseMetadataRecord(parsedFrontmatter);
     if (!metadata) return null;
 
     // Prefer modern sequential format
-    const sequential = this.parseSequentialFormat(content);
-    if (sequential.success) return { metadata, messages: sequential.messages };
+    const sequential = this.parseSequentialFormat(envelope.body);
+    if (!sequential.success) return null;
+    if (sequential.messages.length === 0 && !hasChatIdentityMetadata(parsedFrontmatter)) {
+      return null;
+    }
 
-    return null;
+    return { metadata, messages: sequential.messages };
   }
 
   // ───────────────────────── Internal parsing helpers ─────────────────────────
@@ -75,25 +105,34 @@ export class ChatMarkdownSerializer {
   private static parseSequentialFormat(content: string): { success: boolean; messages: ChatMessage[] } {
     const messages: ChatMessage[] = [];
     const messageRegex = /<!-- SYSTEMSCULPT-MESSAGE-START (.*?) -->([\s\S]*?)<!-- SYSTEMSCULPT-MESSAGE-END -->/g;
+    const declaredStarts = content.match(/<!-- SYSTEMSCULPT-MESSAGE-START /g)?.length ?? 0;
+    const declaredEnds = content.match(/<!-- SYSTEMSCULPT-MESSAGE-END -->/g)?.length ?? 0;
+    if (declaredStarts !== declaredEnds) return { success: false, messages: [] };
+    if (declaredStarts === 0 && content.trim().length > 0) return { success: false, messages: [] };
+
+    let parsedBlocks = 0;
     let match: RegExpExecArray | null;
 
     while ((match = messageRegex.exec(content)) !== null) {
+      parsedBlocks += 1;
       const attrs = match[1];
       const roleMatch = attrs.match(/role="(.*?)"/);
       const idMatch = attrs.match(/message-id="(.*?)"/);
-      if (!roleMatch || !idMatch) continue;
+      if (!roleMatch || !idMatch || !idMatch[1]) return { success: false, messages: [] };
 
       const role = roleMatch[1];
-      if (role !== "user" && role !== "assistant") continue;
+      if (role !== "user" && role !== "assistant") return { success: false, messages: [] };
       const message_id = idMatch[1];
 
       if (attrs.includes(`payload-format="${FRAMED_PAYLOAD_FORMAT}"`)) {
         const framedMessage = this.parseFramedMessagePayload(match[2], role, message_id, attrs);
-        if (framedMessage) messages.push(framedMessage);
+        if (!framedMessage) return { success: false, messages: [] };
+        messages.push(framedMessage);
         continue;
       }
 
       const storedMultipart = this.extractStoredMultipart(match[2]);
+      if (storedMultipart.state === "invalid") return { success: false, messages: [] };
       const body = storedMultipart.body;
 
       const parts: MessagePart[] = [];
@@ -106,7 +145,7 @@ export class ChatMarkdownSerializer {
         end: number;
       }> = [];
 
-      const reasoningRegex = /<!-- REASONING\n([\s\S]*?)\n-->/g;
+      const reasoningRegex = /<!-- REASONING\r?\n([\s\S]*?)\r?\n-->/g;
       let reasoningMatch: RegExpExecArray | null;
       while ((reasoningMatch = reasoningRegex.exec(body)) !== null) {
         const reasoningText = reasoningMatch[1];
@@ -120,22 +159,22 @@ export class ChatMarkdownSerializer {
         }
       }
 
-      const toolCallRegex = /<!-- TOOL-CALLS\n([\s\S]*?)\n-->/g;
+      const toolCallRegex = /<!-- TOOL-CALLS\r?\n([\s\S]*?)\r?\n-->/g;
       let toolCallMatch: RegExpExecArray | null;
       while ((toolCallMatch = toolCallRegex.exec(body)) !== null) {
         const toolCallJson = toolCallMatch[1]?.trim();
-        if (toolCallJson) {
-          try {
-            const toolCallsArray = JSON.parse(toolCallJson);
-            if (Array.isArray(toolCallsArray)) {
-              extractedBlocks.push({
-                type: "tool_calls",
-                data: toolCallsArray,
-                start: toolCallMatch.index,
-                end: toolCallMatch.index + toolCallMatch[0].length,
-              });
-            }
-          } catch { /* ignore JSON errors */ }
+        if (!toolCallJson) return { success: false, messages: [] };
+        try {
+          const toolCallsArray = JSON.parse(toolCallJson);
+          if (!Array.isArray(toolCallsArray)) return { success: false, messages: [] };
+          extractedBlocks.push({
+            type: "tool_calls",
+            data: toolCallsArray,
+            start: toolCallMatch.index,
+            end: toolCallMatch.index + toolCallMatch[0].length,
+          });
+        } catch {
+          return { success: false, messages: [] };
         }
       }
 
@@ -192,17 +231,19 @@ export class ChatMarkdownSerializer {
       }
 
       const attachmentMetadata = this.extractAttachmentMetadata(attrs, storedMultipart.content);
-      if (parts.length > 0 || attachmentMetadata) {
-        const reconstructed: ChatMessage = parts.length > 0
-          ? this.reconstructMessageFromParts(role, message_id, parts)
-          : { role, message_id, content: "" as const };
-        const restored = storedMultipart.content
-          ? { ...reconstructed, content: storedMultipart.content, messageParts: undefined }
-          : reconstructed;
-        messages.push(attachmentMetadata ? { ...restored, attachmentMetadata } : restored);
-      }
+      if (attachmentMetadata.state === "invalid") return { success: false, messages: [] };
+      const reconstructed: ChatMessage = parts.length > 0
+        ? this.reconstructMessageFromParts(role, message_id, parts)
+        : { role, message_id, content: "" as const };
+      const restored = storedMultipart.state === "valid"
+        ? { ...reconstructed, content: storedMultipart.content, messageParts: undefined }
+        : reconstructed;
+      messages.push(attachmentMetadata.state === "valid" ? { ...restored, attachmentMetadata: attachmentMetadata.metadata } : restored);
     }
 
+    if (parsedBlocks !== declaredStarts || messages.length !== declaredStarts) {
+      return { success: false, messages: [] };
+    }
     return { success: true, messages };
   }
 
@@ -231,6 +272,7 @@ export class ChatMarkdownSerializer {
       if (decoded.kind === "content") {
         const multipart = Array.isArray(decoded.content) ? decoded.content : null;
         const attachmentMetadata = this.extractAttachmentMetadata(attributes, multipart);
+        if (attachmentMetadata.state === "invalid") return null;
         const timestamp = Date.now();
         const restored: ChatMessage = multipart
           ? { role, message_id, content: multipart }
@@ -242,7 +284,9 @@ export class ChatMarkdownSerializer {
                 timestamp,
               }])
             : { role, message_id, content: "" };
-        return attachmentMetadata ? { ...restored, attachmentMetadata } : restored;
+        return attachmentMetadata.state === "valid"
+          ? { ...restored, attachmentMetadata: attachmentMetadata.metadata }
+          : restored;
       }
 
       let timestamp = Date.now();
@@ -279,7 +323,10 @@ export class ChatMarkdownSerializer {
       });
       const restored = this.reconstructMessageFromParts(role, message_id, parts);
       const attachmentMetadata = this.extractAttachmentMetadata(attributes, null);
-      return attachmentMetadata ? { ...restored, attachmentMetadata } : restored;
+      if (attachmentMetadata.state === "invalid") return null;
+      return attachmentMetadata.state === "valid"
+        ? { ...restored, attachmentMetadata: attachmentMetadata.metadata }
+        : restored;
     } catch {
       return null;
     }
@@ -321,20 +368,20 @@ export class ChatMarkdownSerializer {
     });
   }
 
-  private static extractStoredMultipart(body: string): { body: string; content: MultiPartContent[] | null } {
-    const marker = /\n?<!-- SYSTEMSCULPT-CONTENT-PARTS base64\n([A-Za-z0-9+/=]+)\n-->/;
+  private static extractStoredMultipart(body: string): StoredMultipartParseResult {
+    const marker = /(?:\r?\n)?<!-- SYSTEMSCULPT-CONTENT-PARTS base64\r?\n([A-Za-z0-9+/=]+)\r?\n-->/;
     const match = body.match(marker);
-    if (!match) return { body, content: null };
+    if (!match) return { state: "absent", body, content: null };
     try {
       const binary = atob(match[1]);
       const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
       const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
       if (!Array.isArray(parsed) || parsed.length === 0 || !parsed.every((part) => this.isStoredContentPart(part))) {
-        return { body, content: null };
+        return { state: "invalid", body, content: null };
       }
-      return { body: body.replace(match[0], ""), content: parsed as MultiPartContent[] };
+      return { state: "valid", body: body.replace(match[0], ""), content: parsed as MultiPartContent[] };
     } catch {
-      return { body, content: null };
+      return { state: "invalid", body, content: null };
     }
   }
 
@@ -373,12 +420,12 @@ export class ChatMarkdownSerializer {
   private static extractAttachmentMetadata(
     attributes: string,
     content: MultiPartContent[] | null,
-  ): ChatAttachmentMetadata[] | null {
+  ): AttachmentMetadataParseResult {
     const match = attributes.match(/(?:^|\s)attachment-metadata="([A-Za-z0-9+/=]+)"(?:\s|$)/);
-    if (!match) return null;
+    if (!match) return { state: "absent" };
     try {
       const parsed = this.decodeBase64Json(match[1]);
-      if (!Array.isArray(parsed) || parsed.length === 0) return null;
+      if (!Array.isArray(parsed) || parsed.length === 0) return { state: "invalid" };
       const indices = new Set<number>();
       const valid = parsed.every((value) => {
         if (!value || typeof value !== "object" || Array.isArray(value)) return false;
@@ -400,9 +447,11 @@ export class ChatMarkdownSerializer {
         indices.add(partIndex);
         return true;
       });
-      return valid ? parsed as ChatAttachmentMetadata[] : null;
+      return valid
+        ? { state: "valid", metadata: parsed as ChatAttachmentMetadata[] }
+        : { state: "invalid" };
     } catch {
-      return null;
+      return { state: "invalid" };
     }
   }
 
@@ -438,25 +487,24 @@ export class ChatMarkdownSerializer {
   // ───────────────────────── Front-matter helpers ─────────────────────────
 
   public static parseMetadata(content: string): ChatMetadata | null {
-    const frontMatterMatch = content.match(/^---\n([\s\S]*?)\n---/);
-    if (!frontMatterMatch) return null;
+    const envelope = splitChatFrontmatter(content);
+    return envelope ? this.parseMetadataYaml(envelope.yamlContent) : null;
+  }
 
-    const yamlContent = frontMatterMatch[1];
-    if (!this.isValidYamlFrontmatter(yamlContent)) return null;
+  private static parseMetadataYaml(yamlContent: string): ChatMetadata | null {
+    const parsed = parseChatFrontmatterYaml(yamlContent);
+    return parsed ? this.parseMetadataRecord(parsed) : null;
+  }
 
-    const parsed: any = parseYaml(yamlContent);
-    if (!parsed || typeof parsed !== "object") return null;
-
-    const {
-      id = "",
-      created = new Date().toISOString(),
-      lastModified = new Date().toISOString(),
-      title = "Untitled Chat",
-      context_files = [],
-      version: versionRaw = 0,
-    } = parsed;
-
+  private static parseMetadataRecord(parsed: Record<string, unknown>): ChatMetadata | null {
+    const id = typeof parsed.id === "string" ? parsed.id : "";
     if (!id) return null;
+    const now = new Date().toISOString();
+    const created = typeof parsed.created === "string" ? parsed.created : now;
+    const lastModified = typeof parsed.lastModified === "string" ? parsed.lastModified : now;
+    const title = typeof parsed.title === "string" ? parsed.title : "Untitled Chat";
+    const context_files = parsed.context_files;
+    const versionRaw = parsed.version ?? 0;
 
     const processedContextFiles = Array.isArray(context_files)
       ? context_files.map((file: any): NonNullable<ChatMetadata["context_files"]>[number] => {
@@ -487,10 +535,6 @@ export class ChatMarkdownSerializer {
       approvalMode: parsed.approvalMode === "full-access" ? "full-access" : "ask",
       managedSession: parseManagedChatSessionBinding(parsed.managedSession, id),
     };
-  }
-
-  private static isValidYamlFrontmatter(content: string): boolean {
-    return /\bid\s*:/i.test(content);
   }
 
   private static normalizeTags(value: unknown): string[] {

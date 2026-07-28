@@ -1,3 +1,5 @@
+import { parse } from "yaml";
+
 // Minimal Obsidian surface for running the managed chat client stack under
 // Node in the live smoke. Only what the imported module graph touches.
 export function normalizePath(path: string): string {
@@ -18,8 +20,8 @@ export class Notice {
 export function requestUrl(): never {
   throw new Error("The live smoke must not fall back to Obsidian requestUrl.");
 }
-export function parseYaml(): never {
-  throw new Error("parseYaml is not available in the live smoke.");
+export function parseYaml(source: string): unknown {
+  return parse(source);
 }
 export function setIcon(): void {}
 export class TFile {}

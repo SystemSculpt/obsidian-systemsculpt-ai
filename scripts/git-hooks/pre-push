@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Run the exact hosted PR gate before bytes leave the machine.
+# Set SYSTEMSCULPT_SKIP_PRE_PUSH_CHECKS=1 only for an explicitly justified
+# emergency push. Hosted CI remains authoritative.
+
+set -euo pipefail
+
+if [ "${SYSTEMSCULPT_SKIP_PRE_PUSH_CHECKS:-}" = "1" ]; then
+  echo "[pre-push] Skipping local verification by explicit request."
+  exit 0
+fi
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+echo "[pre-push] Running the exact local and hosted CI contract..."
+npm run check:ci

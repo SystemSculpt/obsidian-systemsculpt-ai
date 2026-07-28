@@ -12,15 +12,26 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..");
 const sourceDir = path.join(__dirname, "git-hooks");
-const targetDir = path.join(repoRoot, ".git", "hooks");
+let targetDir = null;
+try {
+  const resolved = execFileSync("git", ["rev-parse", "--git-path", "hooks"], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+  }).trim();
+  targetDir = path.isAbsolute(resolved) ? resolved : path.resolve(repoRoot, resolved);
+} catch {
+  // Package archives and CI source snapshots may not have Git metadata.
+}
 
-// Guard: only run inside a git repo (CI `--ignore-scripts` skips this anyway)
-if (!fs.existsSync(targetDir)) {
+// Guard: only run inside a Git checkout with an existing hooks directory.
+if (!targetDir || !fs.existsSync(targetDir)) {
   process.exit(0);
 }
 
