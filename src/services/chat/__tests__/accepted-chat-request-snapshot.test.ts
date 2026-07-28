@@ -245,6 +245,79 @@ describe("AcceptedChatRequestSnapshot", () => {
     ]);
   });
 
+  it("projects a follow-up after a server-executed search without the unanswerable call", () => {
+    // Regression: the server executes web_search itself and writes its own
+    // result into its transcript, so this client never has a result row for
+    // it. The managed transcript contract requires exactly one result per
+    // projected call, so keeping the call on the wire made every session
+    // create/rebase after a web-search turn fail server-side with
+    // 'Every assistant tool call must receive exactly one matching tool
+    // result' — surfaced as "SystemSculpt rejected this request."
+    const searchAssistant = {
+      role: "assistant" as const,
+      content: "Blaxel is cloud infrastructure for AI agents.",
+      message_id: "search-assistant",
+      tool_calls: [{
+        id: "call_web_1",
+        messageId: "search-assistant",
+        request: { id: "call_web_1", type: "function" as const, function: { name: "web_search", arguments: "{}" } },
+        state: "completed" as const,
+        timestamp: 1,
+        executedOn: "server" as const,
+        result: { success: true as const, data: { tool: "web_search", result_count: 3 } },
+      }],
+    };
+
+    const wire = projectManagedMessages([
+      { role: "user", content: "tldr about blaxel please", message_id: "u1" },
+      searchAssistant,
+      { role: "user", content: "who are its competitors?", message_id: "u2" },
+    ]);
+
+    expect(wire.map((message) => message.role)).toEqual(["user", "assistant", "user"]);
+    expect(JSON.stringify(wire)).not.toContain("call_web_1");
+    expect(wire[1]).not.toHaveProperty("tool_calls");
+  });
+
+  it("projects a mixed settled batch keeping only the client call and its result", () => {
+    const mixedAssistant = {
+      role: "assistant" as const,
+      content: "",
+      message_id: "mixed-assistant",
+      tool_calls: [
+        {
+          id: "call_web_1",
+          messageId: "mixed-assistant",
+          request: { id: "call_web_1", type: "function" as const, function: { name: "web_search", arguments: "{}" } },
+          state: "completed" as const,
+          timestamp: 1,
+          executedOn: "server" as const,
+          result: { success: true as const, data: { tool: "web_search", result_count: 3 } },
+        },
+        {
+          id: "call_vault_1",
+          messageId: "mixed-assistant",
+          request: { id: "call_vault_1", type: "function" as const, function: { name: "read", arguments: "{}" } },
+          state: "completed" as const,
+          timestamp: 2,
+          result: { success: true as const, data: { path: "Notes/release.md" } },
+        },
+      ],
+    };
+
+    const wire = projectManagedMessages([
+      { role: "user", content: "check both", message_id: "u1" },
+      mixedAssistant,
+      { role: "tool", content: "{\"path\":\"Notes/release.md\"}", message_id: "t1", tool_call_id: "call_vault_1" },
+      { role: "user", content: "thanks, next", message_id: "u2" },
+    ]);
+
+    const assistant = wire[1] as { tool_calls?: ReadonlyArray<{ id: string }> };
+    expect(assistant.tool_calls?.map((call) => call.id)).toEqual(["call_vault_1"]);
+    expect(wire[2]).toMatchObject({ role: "tool", tool_call_id: "call_vault_1" });
+    expect(JSON.stringify(wire)).not.toContain("call_web_1");
+  });
+
   it("fails closed when a continuation loses or duplicates its accepted boundary", () => {
     const operation = managedOperation("accepted-user");
     const accepted = createAcceptedManagedChatRequestSnapshot({
