@@ -10,6 +10,7 @@ import {
 } from "./release-plugin.mjs";
 import { CANONICAL_API_BASE_URL } from "./plugin-build-options.mjs";
 import { assertProductionPluginArtifacts } from "./plugin-artifacts.mjs";
+import { writeBuildProvenance } from "./build-provenance.mjs";
 
 function fixture(t, overrides = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "systemsculpt-release-"));
@@ -97,7 +98,44 @@ test("records provenance only after artifact validation succeeds", (t) => {
     },
   });
 
-  assert.deepEqual(calls, [{ root, version: "5.11.0", kind: "release" }]);
+  assert.deepEqual(calls, [{
+    root,
+    version: "5.11.0",
+    kind: "release",
+    outputPath: path.join(
+      root,
+      ".cache",
+      "ci-evidence",
+      "release-provenance-5.11.0.json",
+    ),
+  }]);
+});
+
+test("later CI evidence cannot overwrite versioned release provenance", (t) => {
+  const root = fixture(t);
+  const release = validateFixtureRelease({ root });
+  const before = fs.readFileSync(release.provenance.path, "utf8");
+
+  const ci = writeBuildProvenance({
+    root,
+    version: "5.11.0",
+    kind: "ci-build",
+    spawnSyncImpl: () => ({ status: 1, stdout: "" }),
+  });
+
+  assert.equal(
+    release.provenance.path,
+    path.join(
+      root,
+      ".cache",
+      "ci-evidence",
+      "release-provenance-5.11.0.json",
+    ),
+  );
+  assert.notEqual(ci.path, release.provenance.path);
+  assert.equal(JSON.parse(fs.readFileSync(ci.path, "utf8")).kind, "ci-build");
+  assert.equal(fs.readFileSync(release.provenance.path, "utf8"), before);
+  assert.equal(JSON.parse(before).kind, "release");
 });
 
 test("release identity can require one clean full revision and matching tag", (t) => {

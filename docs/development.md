@@ -81,7 +81,9 @@ exact child Jest commands in
 structured provenance and artifact-inspection sidecars before uploading a
 failed gate. Successful release validation writes SHA-256, size, Git revision,
 dirty state, Node, platform, and architecture to
-`.cache/ci-evidence/release-provenance.json`.
+`.cache/ci-evidence/release-provenance-<version>.json`. The version-qualified
+release record is separate from the rolling CI build provenance, so the
+required pre-push gate cannot overwrite it while publishing the tag.
 
 Saved chat parsing fails closed. A malformed or truncated history is never
 reduced to a surviving prefix and sent as a new request. Direct loads show a

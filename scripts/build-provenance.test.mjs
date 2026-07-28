@@ -129,6 +129,76 @@ test("writes provenance and sanitized artifact inspection as atomic JSON sidecar
   });
 });
 
+test("repository evidence rejects traversal, symlinked parents, and nonregular destinations", (t) => {
+  const root = fixture(t);
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), "systemsculpt-evidence-outside-"));
+  t.after(() => fs.rmSync(outside, { recursive: true, force: true }));
+  const outsideSentinel = path.join(outside, "sentinel.txt");
+  fs.writeFileSync(outsideSentinel, "unchanged\n");
+
+  assert.throws(
+    () => writeBuildProvenance({
+      root,
+      outputPath: path.join(root, "..", "escaped.json"),
+      spawnSyncImpl: gitFixture,
+    }),
+    /must stay inside the repository/,
+  );
+
+  fs.symlinkSync(outside, path.join(root, ".cache"), "dir");
+  assert.throws(
+    () => writeBuildProvenance({
+      root,
+      version: "6.2.7",
+      outputPath: path.join(
+        root,
+        ".cache",
+        "ci-evidence",
+        "release-provenance-6.2.7.json",
+      ),
+      spawnSyncImpl: gitFixture,
+    }),
+    /must not contain a symbolic link/,
+  );
+  assert.equal(
+    fs.existsSync(path.join(outside, "ci-evidence", "release-provenance-6.2.7.json")),
+    false,
+  );
+  assert.equal(fs.readFileSync(outsideSentinel, "utf8"), "unchanged\n");
+
+  fs.rmSync(path.join(root, ".cache"));
+  fs.mkdirSync(path.join(root, ".cache", "ci-evidence"), { recursive: true });
+  const destination = path.join(
+    root,
+    ".cache",
+    "ci-evidence",
+    "release-provenance-6.2.7.json",
+  );
+  fs.symlinkSync(outsideSentinel, destination);
+  assert.throws(
+    () => writeBuildProvenance({
+      root,
+      version: "6.2.7",
+      outputPath: destination,
+      spawnSyncImpl: gitFixture,
+    }),
+    /must not contain a symbolic link/,
+  );
+  assert.equal(fs.readFileSync(outsideSentinel, "utf8"), "unchanged\n");
+
+  fs.rmSync(destination);
+  fs.mkdirSync(destination);
+  assert.throws(
+    () => writeBuildProvenance({
+      root,
+      version: "6.2.7",
+      outputPath: destination,
+      spawnSyncImpl: gitFixture,
+    }),
+    /regular-file destination/,
+  );
+});
+
 test("missing artifacts stay explicit in provenance instead of disappearing", (t) => {
   const root = fixture(t);
   fs.rmSync(path.join(root, "styles.css"));
