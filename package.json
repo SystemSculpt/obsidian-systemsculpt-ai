@@ -69,8 +69,9 @@
     "test:mobile:interactions": "node scripts/jest.mjs --config jest.config.cjs --runInBand --runTestsByPath src/platform/__tests__/hostCapabilities.test.ts src/platform/__tests__/mobileLayout.test.ts src/platform/__tests__/mobileHostLayout.test.ts src/core/ui/surface/__tests__/PluginSurface.test.ts src/views/chatview/__tests__/agent-workspace-ui.test.ts src/views/chatview/__tests__/agent-workspace-css-contract.test.ts src/views/chatview/__tests__/anchored-scroller.test.ts src/views/__tests__/similar-notes-css-contract.test.ts src/views/studio/__tests__/studio-node-insert-menu.test.ts src/views/studio/__tests__/studio-run-host-preflight.test.ts src/views/studio/__tests__/studio-context-menu-accessibility.test.ts src/views/studio/graph-v3/__tests__/studio-surface-css-contract.test.ts src/views/studio/graph-v3/__tests__/studio-graph-workspace-renderer-controls.test.ts src/__tests__/systemsculpt-settings-tab.test.ts",
     "test:embeddings:serial": "node scripts/jest.mjs --config jest.embeddings.config.cjs --runInBand --passWithNoTests",
     "test:release-script": "node --test scripts/plugin-build-options.test.mjs scripts/plugin-artifacts.test.mjs scripts/release-plugin.test.mjs",
-    "release:plugin": "node scripts/release-plugin.mjs"
+    "release:plugin": "node scripts/release-plugin.mjs",
+    "smoke:chat:live": "node scripts/live-chat-smoke.mjs"
   },
   "type": "module",
-  "version": "6.2.5"
+  "version": "6.2.6"
 }

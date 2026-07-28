@@ -141,6 +141,18 @@ artifact, and validates exactly manifest.json, main.js, and styles.css. It
 rejects local API bases, retired client AI runtimes, provider SDKs, and inline
 source maps. Publishing still requires explicit operator approval.
 
+~~~bash
+npm run smoke:chat:live
+~~~
+
+Before releasing a change that touches managed chat, run the live smoke. It
+drives the real controller, runtime adapter, capability client, and transport
+against production with server-side web search enabled, then sends a
+follow-up turn over the settled transcript — the two flows unit fixtures have
+historically mismodeled (6.2.4's empty continuation, 6.2.5's rejected
+follow-up). It needs a license key (`SYSTEMSCULPT_LICENSE_KEY` or a local QA
+vault), spends a few real chat turns, and is deliberately not part of CI.
+
 ## Canonical source references
 
 - API ownership: src/constants/api.ts

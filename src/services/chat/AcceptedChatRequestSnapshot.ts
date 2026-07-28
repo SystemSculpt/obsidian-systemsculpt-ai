@@ -120,8 +120,18 @@ export function prepareManagedMessage(
     if (message.tool_call_id) wire.tool_call_id = message.tool_call_id;
     if (message.name) wire.name = message.name;
   }
-  if (message.tool_calls?.length) {
-    wire.tool_calls = message.tool_calls.map((call) => ({
+  // Server-executed calls (web_search) never leave a result row in this
+  // client's transcript — the server writes its own results into its side.
+  // The managed transcript contract requires exactly one result per call, so
+  // projecting such a call onto the wire makes every session create/rebase
+  // of the chat unpreparable ("Every assistant tool call must receive
+  // exactly one matching tool result"). The assistant text already carries
+  // the search-derived knowledge, so the wire omits the call records.
+  const clientCalls = (message.tool_calls ?? []).filter(
+    (call) => call.executedOn !== "server",
+  );
+  if (clientCalls.length) {
+    wire.tool_calls = clientCalls.map((call) => ({
       id: call.id,
       type: "function",
       function: {
