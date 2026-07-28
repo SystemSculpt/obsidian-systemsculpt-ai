@@ -5,6 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import {
   parseReleaseArguments,
+  resolveReleaseTagRevision,
   validateReleasePackage,
 } from "./release-plugin.mjs";
 import { CANONICAL_API_BASE_URL } from "./plugin-build-options.mjs";
@@ -144,6 +145,41 @@ test("release validation is strict by default and requires a real version tag", 
     }),
     /release tag 5\.11\.0 must resolve to one full Git revision/,
   );
+});
+
+test("release tag resolution cannot be redirected by an inherited Git hook environment", () => {
+  let invocation;
+  const result = resolveReleaseTagRevision({
+    root: "/intended/repository",
+    tag: "6.2.7",
+    environment: {
+      PATH: "/bin",
+      GIT_DIR: "/different/repository",
+      GIT_WORK_TREE: "/different/tree",
+      GIT_CONFIG_COUNT: "1",
+      GIT_CONFIG_KEY_0: "safe.directory",
+      GIT_CONFIG_VALUE_0: "*",
+      GIT_SSH_COMMAND: "preserve transport configuration",
+    },
+    spawnSyncImpl(command, args, options) {
+      invocation = { command, args, options };
+      return { status: 1, stdout: "" };
+    },
+  });
+
+  assert.equal(result, null);
+  assert.equal(invocation.command, "git");
+  assert.deepEqual(invocation.args, [
+    "-C",
+    "/intended/repository",
+    "rev-parse",
+    "--verify",
+    "refs/tags/6.2.7^{commit}",
+  ]);
+  assert.deepEqual(invocation.options.env, {
+    PATH: "/bin",
+    GIT_SSH_COMMAND: "preserve transport configuration",
+  });
 });
 
 test("release identity rejects dirty, unresolved, or unexpected revisions", (t) => {

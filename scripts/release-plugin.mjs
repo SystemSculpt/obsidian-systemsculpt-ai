@@ -8,7 +8,10 @@ import {
   buildProductionPlugin,
   REQUIRED_PLUGIN_ARTIFACTS,
 } from "./plugin-artifacts.mjs";
-import { writeBuildProvenance } from "./build-provenance.mjs";
+import {
+  createRepositoryScopedGitEnvironment,
+  writeBuildProvenance,
+} from "./build-provenance.mjs";
 
 const SEMVER = /^\d+\.\d+\.\d+$/;
 const FULL_GIT_REVISION = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
@@ -21,12 +24,14 @@ export function resolveReleaseTagRevision({
   root,
   tag,
   spawnSyncImpl = spawnSync,
+  environment = process.env,
 }) {
   const result = spawnSyncImpl(
     "git",
     ["-C", path.resolve(root), "rev-parse", "--verify", `refs/tags/${tag}^{commit}`],
     {
       encoding: "utf8",
+      env: createRepositoryScopedGitEnvironment(environment),
       stdio: "pipe",
     },
   );

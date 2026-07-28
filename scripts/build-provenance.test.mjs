@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import {
+  createRepositoryScopedGitEnvironment,
   createBuildProvenance,
   writeArtifactInspectionEvidence,
   writeBuildProvenance,
@@ -29,6 +30,26 @@ function gitFixture(command, args) {
   }
   return { status: 1, stdout: "" };
 }
+
+test("Git inspection preserves ordinary environment while removing repository routing", () => {
+  assert.deepEqual(
+    createRepositoryScopedGitEnvironment({
+      PATH: "/bin",
+      GIT_DIR: "/wrong/repository",
+      GIT_WORK_TREE: "/wrong/tree",
+      GIT_COMMON_DIR: "/wrong/common",
+      git_index_file: "/wrong/index",
+      Git_Config_Count: "1",
+      git_config_key_0: "safe.directory",
+      GIT_CONFIG_value_0: "*",
+      GIT_SSH_COMMAND: "preserve transport configuration",
+    }),
+    {
+      PATH: "/bin",
+      GIT_SSH_COMMAND: "preserve transport configuration",
+    },
+  );
+});
 
 test("records exact artifact bytes and source identity without secrets", (t) => {
   const root = fixture(t);
