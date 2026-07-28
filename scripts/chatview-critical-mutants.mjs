@@ -132,13 +132,93 @@ export function assertMutationParses(source, fileName, mutantId) {
   throw new Error(`${mutantId} produced invalid TypeScript: ${message}`);
 }
 
-function copyMirror() {
-  fs.mkdirSync(mirrorRoot, { recursive: true });
-  for (const entry of ["src", "testing"]) {
-    fs.cpSync(path.join(root, entry), path.join(mirrorRoot, entry), {
+function uniqueMutationFiles(mutants = CHATVIEW_CRITICAL_MUTANTS) {
+  return [...new Set(mutants.map((mutant) => mutant.file))].sort();
+}
+
+export function assertCuratedMutationTarget(
+  rootDir,
+  relativeFilePath,
+  { label = relativeFilePath } = {},
+) {
+  if (typeof relativeFilePath !== "string" || relativeFilePath.length === 0) {
+    throw new Error(`${label} must be a non-empty relative path.`);
+  }
+  if (path.isAbsolute(relativeFilePath)) {
+    throw new Error(`${label} must stay within ${path.resolve(rootDir)}.`);
+  }
+  const resolvedRoot = path.resolve(rootDir);
+  const normalizedRelativePath = path.normalize(relativeFilePath);
+  if (
+    normalizedRelativePath === "."
+    || normalizedRelativePath === ".."
+    || normalizedRelativePath.startsWith(`..${path.sep}`)
+  ) {
+    throw new Error(`${label} must stay within ${resolvedRoot}.`);
+  }
+  const resolvedPath = path.join(resolvedRoot, normalizedRelativePath);
+  const lexicalRelativePath = path.relative(resolvedRoot, resolvedPath);
+  if (
+    lexicalRelativePath.length === 0
+    || lexicalRelativePath === ".."
+    || lexicalRelativePath.startsWith(`..${path.sep}`)
+    || path.isAbsolute(lexicalRelativePath)
+  ) {
+    throw new Error(`${label} must stay within ${resolvedRoot}.`);
+  }
+  const rootStats = fs.lstatSync(resolvedRoot);
+  if (rootStats.isSymbolicLink()) {
+    throw new Error(`${label} root must not be a symlink: ${resolvedRoot}`);
+  }
+  if (!rootStats.isDirectory()) {
+    throw new Error(`${label} root must be a directory: ${resolvedRoot}`);
+  }
+  let currentPath = resolvedRoot;
+  for (const segment of lexicalRelativePath.split(path.sep)) {
+    currentPath = path.join(currentPath, segment);
+    const stats = fs.lstatSync(currentPath);
+    if (stats.isSymbolicLink()) {
+      throw new Error(`${label} must not include symlinks: ${currentPath}`);
+    }
+  }
+  if (!fs.statSync(resolvedPath).isFile()) {
+    throw new Error(`${label} must be a regular file: ${resolvedPath}`);
+  }
+  return Object.freeze({
+    root: resolvedRoot,
+    path: resolvedPath,
+    relativePath: lexicalRelativePath,
+  });
+}
+
+export function copyMutationMirror({
+  sourceRoot = root,
+  targetRoot = mirrorRoot,
+  entries = ["src", "testing"],
+  mutants = CHATVIEW_CRITICAL_MUTANTS,
+} = {}) {
+  const resolvedSourceRoot = path.resolve(sourceRoot);
+  const resolvedTargetRoot = path.resolve(targetRoot);
+  for (const file of uniqueMutationFiles(mutants)) {
+    assertCuratedMutationTarget(
+      resolvedSourceRoot,
+      file,
+      { label: `Curated mutation source target ${file}` },
+    );
+  }
+  fs.mkdirSync(resolvedTargetRoot, { recursive: true });
+  for (const entry of entries) {
+    fs.cpSync(path.join(resolvedSourceRoot, entry), path.join(resolvedTargetRoot, entry), {
       recursive: true,
       force: true,
     });
+  }
+  for (const file of uniqueMutationFiles(mutants)) {
+    assertCuratedMutationTarget(
+      resolvedTargetRoot,
+      file,
+      { label: `Curated mutation mirror target ${file}` },
+    );
   }
 }
 
@@ -181,8 +261,12 @@ function uniqueTestPaths() {
   return [...new Set(CHATVIEW_CRITICAL_MUTANTS.flatMap((mutant) => mutant.testPaths))].sort();
 }
 
-function applyMutant(mutant) {
-  const filePath = path.join(mirrorRoot, mutant.file);
+export function applyMutant(mutant, { targetRoot = mirrorRoot } = {}) {
+  const filePath = assertCuratedMutationTarget(
+    targetRoot,
+    mutant.file,
+    { label: `Curated mutation mirror target ${mutant.file}` },
+  ).path;
   const source = fs.readFileSync(filePath, "utf8");
   const span = locateMutationSpan(source, mutant.file, mutant);
   if (Math.abs(span.line - mutant.anchorLine) > 8) {
@@ -196,14 +280,21 @@ function applyMutant(mutant) {
   const mutated = `${source.slice(0, span.start)}${replacement}${source.slice(span.end)}`;
   assertMutationParses(mutated, mutant.file, mutant.id);
   fs.writeFileSync(filePath, mutated);
-  return () => fs.writeFileSync(filePath, source);
+  return () => {
+    const restorePath = assertCuratedMutationTarget(
+      targetRoot,
+      mutant.file,
+      { label: `Curated mutation mirror target ${mutant.file}` },
+    ).path;
+    fs.writeFileSync(restorePath, source);
+  };
 }
 
 async function main() {
   const evidence = createMutationEvidence();
   fs.mkdirSync(cacheParent, { recursive: true });
   try {
-    copyMirror();
+    copyMutationMirror();
     const targetedSuites = uniqueTestPaths();
     const baselineInvocation = buildJestInvocation(targetedSuites);
     const baseline = runJest(targetedSuites);

@@ -10,6 +10,7 @@ import {
   inspectPluginArtifacts,
 } from "./plugin-artifacts.mjs";
 import { CANONICAL_API_BASE_URL } from "./plugin-build-options.mjs";
+import { npmExecutable } from "./platform-portability.mjs";
 
 function createTempPluginDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "systemsculpt-plugin-artifacts-"));
@@ -147,7 +148,7 @@ test("buildProductionPlugin revalidates the post-build artifact set", () => {
       SYSTEMSCULPT_API_BASE_URL: "http://127.0.0.1:3001/api/plugin",
     },
     spawnSyncImpl(command, args, options) {
-      assert.equal(command, "npm");
+      assert.equal(command, npmExecutable());
       assert.deepEqual(args, ["run", "build"]);
       assert.equal(options.cwd, root);
       assert.equal(options.env.SYSTEMSCULPT_API_BASE_URL, CANONICAL_API_BASE_URL);

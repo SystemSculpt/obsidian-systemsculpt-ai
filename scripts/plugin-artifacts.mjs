@@ -5,6 +5,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { builtinModules } from "node:module";
 import { CANONICAL_API_BASE_URL } from "./plugin-build-options.mjs";
+import { npmExecutable } from "./platform-portability.mjs";
 
 export const REQUIRED_PLUGIN_ARTIFACTS = ["manifest.json", "main.js", "styles.css"];
 
@@ -236,7 +237,7 @@ export function buildProductionPlugin({
     ...env,
     SYSTEMSCULPT_API_BASE_URL: CANONICAL_API_BASE_URL,
   };
-  const result = spawnSyncImpl("npm", ["run", "build"], {
+  const result = spawnSyncImpl(npmExecutable(), ["run", "build"], {
     cwd: resolvedRoot,
     env: releaseEnv,
     stdio,

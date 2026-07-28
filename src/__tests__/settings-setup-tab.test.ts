@@ -294,4 +294,51 @@ describe("Setup tab SystemSculpt-only layout", () => {
       "noopener,noreferrer",
     );
   });
+
+  it("keeps rejected billing URLs from surfacing as settings actions", async () => {
+    getCreditsBalanceMock.mockResolvedValueOnce({
+      totalRemaining: 2500,
+      includedRemaining: 1200,
+      includedPerMonth: 2000,
+      addOnRemaining: 1300,
+      cycleStartedAt: "2026-02-01T00:00:00.000Z",
+      cycleEndsAt: "2026-03-01T00:00:00.000Z",
+      purchaseUrl: null,
+      billingCycle: "monthly",
+      annualUpgradeOffer: null,
+    });
+    const plugin = createPluginStub();
+    plugin.settings.licenseValid = true;
+    plugin.settings.licenseKey = "skss-test";
+
+    const tab = new SystemSculptSettingTab(app, plugin);
+    const container = document.createElement("div");
+
+    displaySetupTabContent(container, tab, true);
+    await flushSetupSectionRender();
+
+    const annualSwitchButton = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent?.trim() === "Switch to annual"
+    ) as HTMLButtonElement | undefined;
+    expect(annualSwitchButton).toBeTruthy();
+    expect(annualSwitchButton?.disabled).toBe(true);
+    expect(annualSwitchButton?.style.display).toBe("none");
+
+    const buyCreditsButton = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent?.trim() === "Buy credits"
+    );
+    expect(buyCreditsButton).toBeTruthy();
+    (buyCreditsButton as HTMLButtonElement).click();
+
+    expect(window.open).toHaveBeenCalledWith(
+      "https://systemsculpt.com/pricing",
+      "_blank",
+      "noopener,noreferrer",
+    );
+    expect(window.open).not.toHaveBeenCalledWith(
+      "https://evil.example/checkout",
+      "_blank",
+      "noopener,noreferrer",
+    );
+  });
 });

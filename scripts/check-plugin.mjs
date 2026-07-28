@@ -39,6 +39,7 @@ const FAST_SCRIPT_TESTS = [
   "scripts/ui-architecture.test.mjs",
   "scripts/plugin-build-options.test.mjs",
   "scripts/check/managed-only-policy.test.mjs",
+  "scripts/platform-portability.test.mjs",
 ];
 
 const NORMAL_SCRIPT_TESTS = [

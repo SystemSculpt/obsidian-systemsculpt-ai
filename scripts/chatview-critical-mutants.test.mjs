@@ -4,7 +4,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
+  applyMutant,
+  assertCuratedMutationTarget,
   buildJestInvocation,
+  copyMutationMirror,
   createMutationEvidence,
   writeMutationEvidence,
 } from "./chatview-critical-mutants.mjs";
@@ -64,7 +67,126 @@ test("mutation invocations record the exact child Jest command", () => {
       "--runInBand",
       "--no-cache",
       "--runTestsByPath",
-      "/tmp/mirror/src/example.test.ts",
+      path.join("/tmp/mirror", "src/example.test.ts"),
     ],
   });
+});
+
+test("curated mutation targets must stay lexically within their root", () => {
+  assert.throws(
+    () => assertCuratedMutationTarget("/repo", "../outside.ts"),
+    /must stay within/,
+  );
+});
+
+test("applyMutant rejects a symlinked mirror root and leaves the external file untouched", (t) => {
+  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "systemsculpt-mutant-root-link-"));
+  t.after(() => fs.rmSync(fixtureRoot, { recursive: true, force: true }));
+
+  const externalRoot = path.join(fixtureRoot, "outside");
+  const targetRoot = path.join(fixtureRoot, "mirror");
+  const curatedRelativePath = "src/services/chat/ManagedToolExecution.ts";
+  const externalFile = path.join(externalRoot, curatedRelativePath);
+  const original = "return recordValue(request?.function) ?? recordValue(record.function) ?? record;\n";
+  fs.mkdirSync(path.dirname(externalFile), { recursive: true });
+  fs.writeFileSync(externalFile, original, "utf8");
+  fs.symlinkSync(externalRoot, targetRoot, "dir");
+
+  assert.throws(
+    () => applyMutant(
+      {
+        id: "reader_flat_shape_fallback_removed",
+        file: curatedRelativePath,
+        anchorLine: 1,
+        anchorText: "return recordValue(request?.function) ?? recordValue(record.function) ?? record;",
+        replacement: "return recordValue(request?.function) ?? recordValue(record.function);",
+        testPaths: [],
+      },
+      { targetRoot },
+    ),
+    /root must not be a symlink/,
+  );
+  assert.equal(fs.readFileSync(externalFile, "utf8"), original);
+});
+
+test("copyMutationMirror accepts a regular curated target", (t) => {
+  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "systemsculpt-mutant-copy-"));
+  t.after(() => fs.rmSync(fixtureRoot, { recursive: true, force: true }));
+
+  const sourceRoot = path.join(fixtureRoot, "repo");
+  const targetRoot = path.join(fixtureRoot, "mirror");
+  const curatedRelativePath = "src/services/chat/ManagedToolExecution.ts";
+  const sourceFile = path.join(sourceRoot, curatedRelativePath);
+  fs.mkdirSync(path.dirname(sourceFile), { recursive: true });
+  fs.mkdirSync(path.join(sourceRoot, "testing"), { recursive: true });
+  fs.writeFileSync(sourceFile, "export const curated = true;\n", "utf8");
+
+  copyMutationMirror({
+    sourceRoot,
+    targetRoot,
+    entries: ["src", "testing"],
+    mutants: [{ file: curatedRelativePath }],
+  });
+
+  const mirroredFile = path.join(targetRoot, curatedRelativePath);
+  assert.equal(fs.readFileSync(mirroredFile, "utf8"), "export const curated = true;\n");
+  assert.equal(fs.lstatSync(mirroredFile).isSymbolicLink(), false);
+});
+
+test("copyMutationMirror rejects a symlinked curated source target and leaves the external file untouched", (t) => {
+  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "systemsculpt-mutant-source-link-"));
+  t.after(() => fs.rmSync(fixtureRoot, { recursive: true, force: true }));
+
+  const sourceRoot = path.join(fixtureRoot, "repo");
+  const targetRoot = path.join(fixtureRoot, "mirror");
+  const externalFile = path.join(fixtureRoot, "outside.ts");
+  const curatedRelativePath = "src/services/chat/ManagedToolExecution.ts";
+  const sourceFile = path.join(sourceRoot, curatedRelativePath);
+  const original = "export const outside = 'safe';\n";
+  fs.mkdirSync(path.dirname(sourceFile), { recursive: true });
+  fs.mkdirSync(path.join(sourceRoot, "testing"), { recursive: true });
+  fs.writeFileSync(externalFile, original, "utf8");
+  fs.symlinkSync(externalFile, sourceFile);
+
+  assert.throws(
+    () => copyMutationMirror({
+      sourceRoot,
+      targetRoot,
+      entries: ["src", "testing"],
+      mutants: [{ file: curatedRelativePath }],
+    }),
+    /must not include symlinks/,
+  );
+  assert.equal(fs.readFileSync(externalFile, "utf8"), original);
+  assert.equal(fs.existsSync(path.join(targetRoot, curatedRelativePath)), false);
+});
+
+test("applyMutant rejects a symlinked mirrored curated target and leaves the external file untouched", (t) => {
+  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "systemsculpt-mutant-mirror-link-"));
+  t.after(() => fs.rmSync(fixtureRoot, { recursive: true, force: true }));
+
+  const targetRoot = path.join(fixtureRoot, "mirror");
+  const externalFile = path.join(fixtureRoot, "outside.ts");
+  const curatedRelativePath = "src/services/chat/ManagedToolExecution.ts";
+  const mirroredFile = path.join(targetRoot, curatedRelativePath);
+  const original = "return recordValue(request?.function) ?? recordValue(record.function) ?? record;\n";
+  fs.mkdirSync(path.dirname(mirroredFile), { recursive: true });
+  fs.writeFileSync(externalFile, original, "utf8");
+  fs.symlinkSync(externalFile, mirroredFile);
+
+  assert.throws(
+    () => applyMutant(
+      {
+        id: "reader_flat_shape_fallback_removed",
+        file: curatedRelativePath,
+        anchorLine: 1,
+        anchorText: "return recordValue(request?.function) ?? recordValue(record.function) ?? record;",
+        replacement: "return recordValue(request?.function) ?? recordValue(record.function);",
+        testPaths: [],
+      },
+      { targetRoot },
+    ),
+    /must not include symlinks/,
+  );
+  assert.equal(fs.readFileSync(externalFile, "utf8"), original);
 });

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
+import { toRepositoryPath } from "../platform-portability.mjs";
 
 const PRODUCTION_ROOTS = ["src"];
 const NETWORK_OWNERSHIP_ROOTS = [
@@ -54,7 +55,7 @@ function sourceFiles(entry) {
 
 function authorityViolations(file) {
   const source = fs.readFileSync(file, "utf8");
-  const relative = path.relative(process.cwd(), file);
+  const relative = toRepositoryPath(path.relative(process.cwd(), file));
   const findings = [];
   const imports = source.matchAll(/(?:from\s*|import\s*\(|require\s*\()\s*["']([^"']+)["']/g);
   for (const [, specifier] of imports) {
@@ -74,7 +75,7 @@ function authorityViolations(file) {
 
 function networkViolations(file) {
   const source = fs.readFileSync(file, "utf8");
-  const relative = path.relative(process.cwd(), file);
+  const relative = toRepositoryPath(path.relative(process.cwd(), file));
   const findings = [];
   for (const [raw] of source.matchAll(/https?:\/\/[^\s"'\`<>)}\]]+/g)) {
     try {
@@ -125,7 +126,8 @@ test("current chat code and fixtures use only canonical first-party tool names",
   const findings = sourceFiles("src/views/chatview").flatMap((file) => {
     const source = fs.readFileSync(file, "utf8");
     const match = source.match(RETIRED_CHAT_TOOL_PREFIX);
-    return match ? [`${path.relative(process.cwd(), file)}: ${match[0]}`] : [];
+    const relative = toRepositoryPath(path.relative(process.cwd(), file));
+    return match ? [`${relative}: ${match[0]}`] : [];
   });
   assert.deepEqual(findings, []);
 });

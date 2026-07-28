@@ -4,12 +4,17 @@ import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { pathToFileURL } from "node:url";
+import { spawnSync } from "node:child_process";
 import {
+  createArtifactInspectionEvidenceRecord,
+  createBuildProvenance,
   DEFAULT_CI_EVIDENCE_DIRECTORY,
   HOSTED_JEST_PHASE_MARKER_FILE,
 } from "./build-provenance.mjs";
-
-const REQUIRED_ARTIFACTS = ["manifest.json", "main.js", "styles.css"];
+import {
+  inspectPluginArtifacts,
+  REQUIRED_PLUGIN_ARTIFACTS,
+} from "./plugin-artifacts.mjs";
 
 function parseJsonFile(filePath, label) {
   if (!fs.existsSync(filePath)) {
@@ -40,6 +45,24 @@ function assertArtifactRecord(fileName, record, label) {
   }
   if (record.sizeBytes !== null || record.sha256 !== null) {
     throw new Error(`${label} ${fileName} must use null size and hash when absent.`);
+  }
+}
+
+function assertInspectionFileRecord(fileName, record, label) {
+  if (!record || typeof record !== "object") {
+    throw new Error(`${label} ${fileName} record is missing.`);
+  }
+  if (typeof record.exists !== "boolean") {
+    throw new Error(`${label} ${fileName} must record exists as a boolean.`);
+  }
+  if (record.exists) {
+    if (!Number.isInteger(record.sizeBytes) || record.sizeBytes < 0) {
+      throw new Error(`${label} ${fileName} must record a non-negative sizeBytes.`);
+    }
+    return;
+  }
+  if (record.sizeBytes !== null) {
+    throw new Error(`${label} ${fileName} must use null sizeBytes when absent.`);
   }
 }
 
@@ -99,6 +122,89 @@ function isFile(filePath) {
   return fs.existsSync(filePath) && fs.statSync(filePath).isFile();
 }
 
+function sameJson(actual, expected) {
+  return JSON.stringify(actual) === JSON.stringify(expected);
+}
+
+function assertCurrentArtifactBinding(
+  resolvedRoot,
+  provenance,
+  inspection,
+  spawnSyncImpl,
+) {
+  const manifestPath = path.join(resolvedRoot, "manifest.json");
+  const currentManifest = parseJsonFile(manifestPath, "Current manifest.json");
+  if (typeof currentManifest.version !== "string" || currentManifest.version.length === 0) {
+    throw new Error("Current manifest.json must record a non-empty version.");
+  }
+  if (typeof provenance.version !== "string" || provenance.version.length === 0) {
+    throw new Error("Build provenance must record a non-empty version.");
+  }
+  if (currentManifest.version !== provenance.version) {
+    throw new Error(
+      `Current manifest.json version ${currentManifest.version} does not match recorded provenance version ${provenance.version}.`,
+    );
+  }
+
+  const currentProvenance = createBuildProvenance({
+    root: resolvedRoot,
+    version: currentManifest.version,
+    spawnSyncImpl,
+  });
+  if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(currentProvenance.git.revision)) {
+    throw new Error("Current git revision could not be resolved.");
+  }
+  if (currentProvenance.git.revision !== provenance.git.revision) {
+    throw new Error(
+      `Current git revision ${currentProvenance.git.revision} does not match recorded provenance revision ${provenance.git.revision}.`,
+    );
+  }
+  for (const fileName of REQUIRED_PLUGIN_ARTIFACTS) {
+    const currentRecord = currentProvenance.artifacts?.[fileName];
+    const recordedRecord = provenance.artifacts?.[fileName];
+    if (!sameJson(currentRecord, recordedRecord)) {
+      throw new Error(
+        `Current ${fileName} no longer matches recorded build provenance.`,
+      );
+    }
+  }
+
+  const currentInspection = createArtifactInspectionEvidenceRecord({
+    inspection: inspectPluginArtifacts({ root: resolvedRoot }),
+    recordedAt: inspection.recordedAt,
+  });
+  if (!sameJson(currentInspection.missingFiles, inspection.missingFiles)) {
+    throw new Error("Current missing artifact set does not match recorded artifact inspection.");
+  }
+  if (currentInspection.ok !== inspection.ok) {
+    throw new Error("Current artifact inspection ok flag does not match recorded artifact inspection.");
+  }
+  if (currentInspection.manifestMobileCompatible !== inspection.manifestMobileCompatible) {
+    throw new Error(
+      "Current artifact inspection mobile-compatibility flag does not match recorded artifact inspection.",
+    );
+  }
+  if (!inspection.mainBundle || typeof inspection.mainBundle !== "object") {
+    throw new Error("Artifact inspection must record a mainBundle object.");
+  }
+  for (const fileName of REQUIRED_PLUGIN_ARTIFACTS) {
+    const currentRecord = currentInspection.files?.[fileName];
+    const recordedRecord = inspection.files?.[fileName];
+    if (!sameJson(currentRecord, recordedRecord)) {
+      throw new Error(
+        `Current ${fileName} no longer matches recorded artifact inspection.`,
+      );
+    }
+  }
+  for (const [fieldName, recordedValue] of Object.entries(inspection.mainBundle)) {
+    if (!sameJson(currentInspection.mainBundle?.[fieldName], recordedValue)) {
+      throw new Error(
+        `Current artifact inspection mainBundle.${fieldName} does not match recorded artifact inspection.`,
+      );
+    }
+  }
+}
+
 function collectJestEvidenceState(root, evidenceRoot) {
   const configuredDirectory = process.env.SYSTEMSCULPT_TEST_EVIDENCE_DIR?.trim();
   const candidateDirectories = uniquePaths([
@@ -124,6 +230,7 @@ function collectJestEvidenceState(root, evidenceRoot) {
 export function verifyCiFailureEvidence({
   root = process.cwd(),
   job = "plugin",
+  spawnSyncImpl = spawnSync,
 } = {}) {
   if (job !== "plugin" && job !== "compatibility") {
     throw new Error(`Unknown CI job ${job}. Expected plugin or compatibility.`);
@@ -138,13 +245,19 @@ export function verifyCiFailureEvidence({
   if (provenance.schemaVersion !== 1) {
     throw new Error("Build provenance must use schemaVersion 1.");
   }
+  if (typeof provenance.version !== "string" || provenance.version.length === 0) {
+    throw new Error("Build provenance must record a non-empty version.");
+  }
   if (!["ci-build", "ci-build-failure"].includes(provenance.kind)) {
     throw new Error(`Build provenance kind must stay on a CI build variant, found ${provenance.kind}.`);
   }
   if (!provenance.git || typeof provenance.git !== "object") {
     throw new Error("Build provenance must record git identity.");
   }
-  for (const fileName of REQUIRED_ARTIFACTS) {
+  if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(provenance.git.revision)) {
+    throw new Error("Build provenance must record a full git revision.");
+  }
+  for (const fileName of REQUIRED_PLUGIN_ARTIFACTS) {
     assertArtifactRecord(fileName, provenance.artifacts?.[fileName], "Build provenance");
   }
 
@@ -152,9 +265,23 @@ export function verifyCiFailureEvidence({
   if (inspection.schemaVersion !== 1) {
     throw new Error("Artifact inspection must use schemaVersion 1.");
   }
+  if (typeof inspection.ok !== "boolean") {
+    throw new Error("Artifact inspection must record ok as a boolean.");
+  }
+  if (typeof inspection.manifestMobileCompatible !== "boolean") {
+    throw new Error("Artifact inspection must record manifestMobileCompatible as a boolean.");
+  }
   if (!Array.isArray(inspection.missingFiles) || !Array.isArray(inspection.problems)) {
     throw new Error("Artifact inspection must record missingFiles and problems arrays.");
   }
+  if (!inspection.files || typeof inspection.files !== "object") {
+    throw new Error("Artifact inspection must record file entries.");
+  }
+  for (const fileName of REQUIRED_PLUGIN_ARTIFACTS) {
+    assertInspectionFileRecord(fileName, inspection.files[fileName], "Artifact inspection");
+  }
+
+  assertCurrentArtifactBinding(resolvedRoot, provenance, inspection, spawnSyncImpl);
 
   const { markerFiles, jestEvidenceFiles } = collectJestEvidenceState(
     resolvedRoot,

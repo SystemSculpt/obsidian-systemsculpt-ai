@@ -145,9 +145,32 @@ export const CHATVIEW_CRITICAL_MUTANTS = Object.freeze([
     id: "replay_unknowable_tool_fails_open",
     category: "replay-safety",
     file: "src/views/chatview/AgentChatView.ts",
-    anchorLine: 118,
+    anchorLine: 173,
     anchorText: "if (!name) return true;",
     replacement: "if (!name) return false;",
+    testPaths: Object.freeze([
+      "src/views/chatview/__tests__/agent-chat-view-coordinator.test.ts",
+    ]),
+  }),
+  Object.freeze({
+    id: "replay_ambiguous_history_fails_open",
+    category: "replay-safety",
+    file: "src/views/chatview/AgentChatView.ts",
+    anchorLine: 171,
+    anchorText: `hasAmbiguousReplayHistory || tools.some((tool) => {
+    const name = readManagedToolCallFunction(tool)?.name;
+    if (!name) return true;
+    if (!isMutatingTool(name)) return false;
+    const code = tool.result?.error?.code;
+    return !code || !explicitlyDidNotStart.has(String(code));
+  })`,
+    replacement: `tools.some((tool) => {
+    const name = readManagedToolCallFunction(tool)?.name;
+    if (!name) return true;
+    if (!isMutatingTool(name)) return false;
+    const code = tool.result?.error?.code;
+    return !code || !explicitlyDidNotStart.has(String(code));
+  })`,
     testPaths: Object.freeze([
       "src/views/chatview/__tests__/agent-chat-view-coordinator.test.ts",
     ]),

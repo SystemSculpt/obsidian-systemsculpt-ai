@@ -9,14 +9,22 @@ import {
   writeBuildProvenance,
   writeJsonEvidence,
 } from "./build-provenance.mjs";
-import { verifyCiFailureEvidence } from "./verify-ci-failure-evidence.mjs";
+import { CANONICAL_API_BASE_URL } from "./plugin-build-options.mjs";
+import { inspectPluginArtifacts } from "./plugin-artifacts.mjs";
+import { verifyCiFailureEvidence as verifyCiFailureEvidenceImpl } from "./verify-ci-failure-evidence.mjs";
 
 function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "systemsculpt-ci-evidence-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  fs.writeFileSync(path.join(root, "manifest.json"), '{"version":"6.2.6"}\n');
-  fs.writeFileSync(path.join(root, "main.js"), "main bytes\n");
-  fs.writeFileSync(path.join(root, "styles.css"), "style bytes\n");
+  fs.writeFileSync(
+    path.join(root, "manifest.json"),
+    '{"id":"systemsculpt-ai","version":"6.2.6","isDesktopOnly":false}\n',
+  );
+  fs.writeFileSync(
+    path.join(root, "main.js"),
+    `const SYSTEMSCULPT_API = ${JSON.stringify(CANONICAL_API_BASE_URL)};\nconsole.log("main bytes");\n`,
+  );
+  fs.writeFileSync(path.join(root, "styles.css"), "body {}\n");
   return root;
 }
 
@@ -27,6 +35,10 @@ function gitFixture(command, args) {
   if (operation === "branch --show-current") return { status: 0, stdout: "main\n" };
   if (operation === "status --porcelain --untracked-files=normal") return { status: 0, stdout: "" };
   return { status: 1, stdout: "" };
+}
+
+function verifyCiFailureEvidence(options) {
+  return verifyCiFailureEvidenceImpl({ ...options, spawnSyncImpl: gitFixture });
 }
 
 function withJestEvidenceDir(t, value) {
@@ -65,30 +77,23 @@ function writeHostedJestEvidence(root, fileName = "jest-proof.json") {
   );
 }
 
-test("verifies structured CI evidence sidecars for a failed gate", (t) => {
-  const root = fixture(t);
-  withJestEvidenceDir(t, ".cache/ci-evidence/jest-seeds");
+function writeRecordedEvidence(root, kind = "ci-build-failure") {
   writeBuildProvenance({
     root,
     version: "6.2.6",
-    kind: "ci-build-failure",
+    kind,
     spawnSyncImpl: gitFixture,
   });
   writeArtifactInspectionEvidence({
     root,
-    inspection: {
-      ok: false,
-      missingFiles: [],
-      problems: ["simulated failure"],
-      manifestMobileCompatible: true,
-      files: {
-        "manifest.json": { exists: true, sizeBytes: 20 },
-        "main.js": { exists: true, sizeBytes: 11 },
-        "styles.css": { exists: true, sizeBytes: 12 },
-      },
-      mainBundle: { hasInlineSourceMap: false, hasCanonicalApiBase: true },
-    },
+    inspection: inspectPluginArtifacts({ root }),
   });
+}
+
+test("verifies structured CI evidence sidecars for a failed gate", (t) => {
+  const root = fixture(t);
+  withJestEvidenceDir(t, ".cache/ci-evidence/jest-seeds");
+  writeRecordedEvidence(root);
   writeHostedJestPhaseMarker(root);
   writeHostedJestEvidence(root);
 
@@ -101,27 +106,7 @@ test("verifies structured CI evidence sidecars for a failed gate", (t) => {
 test("accepts pre-Jest CI failures when no hosted Jest phase marker exists", (t) => {
   const root = fixture(t);
   withJestEvidenceDir(t, ".cache/ci-evidence/jest-seeds");
-  writeBuildProvenance({
-    root,
-    version: "6.2.6",
-    kind: "ci-build-failure",
-    spawnSyncImpl: gitFixture,
-  });
-  writeArtifactInspectionEvidence({
-    root,
-    inspection: {
-      ok: false,
-      missingFiles: [],
-      problems: ["pre-jest failure"],
-      manifestMobileCompatible: true,
-      files: {
-        "manifest.json": { exists: true, sizeBytes: 20 },
-        "main.js": { exists: true, sizeBytes: 11 },
-        "styles.css": { exists: true, sizeBytes: 12 },
-      },
-      mainBundle: { hasInlineSourceMap: false, hasCanonicalApiBase: true },
-    },
-  });
+  writeRecordedEvidence(root);
 
   const summary = verifyCiFailureEvidence({ root, job: "compatibility" });
   assert.equal(summary.jestPhaseStarted, false);
@@ -131,27 +116,7 @@ test("accepts pre-Jest CI failures when no hosted Jest phase marker exists", (t)
 test("rejects a started hosted Jest phase that failed to record evidence", (t) => {
   const root = fixture(t);
   withJestEvidenceDir(t, ".cache/ci-evidence/jest-seeds");
-  writeBuildProvenance({
-    root,
-    version: "6.2.6",
-    kind: "ci-build-failure",
-    spawnSyncImpl: gitFixture,
-  });
-  writeArtifactInspectionEvidence({
-    root,
-    inspection: {
-      ok: false,
-      missingFiles: [],
-      problems: ["simulated jest wrapper failure"],
-      manifestMobileCompatible: true,
-      files: {
-        "manifest.json": { exists: true, sizeBytes: 20 },
-        "main.js": { exists: true, sizeBytes: 11 },
-        "styles.css": { exists: true, sizeBytes: 12 },
-      },
-      mainBundle: { hasInlineSourceMap: false, hasCanonicalApiBase: true },
-    },
-  });
+  writeRecordedEvidence(root);
   writeHostedJestPhaseMarker(root);
 
   assert.throws(
@@ -164,14 +129,7 @@ test("rejects missing provenance sidecars", (t) => {
   const root = fixture(t);
   writeArtifactInspectionEvidence({
     root,
-    inspection: {
-      ok: true,
-      missingFiles: [],
-      problems: [],
-      manifestMobileCompatible: true,
-      files: {},
-      mainBundle: {},
-    },
+    inspection: inspectPluginArtifacts({ root }),
   });
 
   assert.throws(
@@ -180,26 +138,52 @@ test("rejects missing provenance sidecars", (t) => {
   );
 });
 
+test("rejects provenance with an unresolved git revision", (t) => {
+  const root = fixture(t);
+  writeRecordedEvidence(root);
+  const provenancePath = path.join(root, ".cache", "ci-evidence", "release-provenance.json");
+  const provenance = JSON.parse(fs.readFileSync(provenancePath, "utf8"));
+  provenance.git.revision = "unknown";
+  writeJsonEvidence(provenancePath, provenance);
+
+  assert.throws(
+    () => verifyCiFailureEvidence({ root, job: "compatibility" }),
+    /must record a full git revision/,
+  );
+});
+
+test("rejects provenance from a different git revision", (t) => {
+  const root = fixture(t);
+  writeRecordedEvidence(root);
+  const provenancePath = path.join(root, ".cache", "ci-evidence", "release-provenance.json");
+  const provenance = JSON.parse(fs.readFileSync(provenancePath, "utf8"));
+  provenance.git.revision = "a".repeat(40);
+  writeJsonEvidence(provenancePath, provenance);
+
+  assert.throws(
+    () => verifyCiFailureEvidence({ root, job: "compatibility" }),
+    /does not match recorded provenance revision/,
+  );
+});
+
+test("rejects evidence when the current git revision cannot be resolved", (t) => {
+  const root = fixture(t);
+  writeRecordedEvidence(root);
+
+  assert.throws(
+    () => verifyCiFailureEvidenceImpl({
+      root,
+      job: "compatibility",
+      spawnSyncImpl: () => ({ status: 1, stdout: "" }),
+    }),
+    /Current git revision could not be resolved/,
+  );
+});
+
 test("rejects malformed nested hosted Jest evidence", (t) => {
   const root = fixture(t);
   withJestEvidenceDir(t, ".cache/ci-evidence/jest-seeds");
-  writeBuildProvenance({
-    root,
-    version: "6.2.6",
-    kind: "ci-build-failure",
-    spawnSyncImpl: gitFixture,
-  });
-  writeArtifactInspectionEvidence({
-    root,
-    inspection: {
-      ok: false,
-      missingFiles: [],
-      problems: [],
-      manifestMobileCompatible: true,
-      files: {},
-      mainBundle: {},
-    },
-  });
+  writeRecordedEvidence(root);
   writeHostedJestPhaseMarker(root);
   const jestEvidenceDir = path.join(root, ".cache", "ci-evidence", "jest-seeds");
   fs.mkdirSync(jestEvidenceDir, { recursive: true });
@@ -210,3 +194,44 @@ test("rejects malformed nested hosted Jest evidence", (t) => {
     /Jest evidence is not valid JSON/,
   );
 });
+
+test("rejects a malformed current manifest after provenance capture", (t) => {
+  const root = fixture(t);
+  writeRecordedEvidence(root);
+  fs.writeFileSync(path.join(root, "manifest.json"), "{not json}\n");
+
+  assert.throws(
+    () => verifyCiFailureEvidence({ root, job: "compatibility" }),
+    /Current manifest\.json is not valid JSON/,
+  );
+});
+
+test("rejects a missing current artifact after provenance capture", (t) => {
+  const root = fixture(t);
+  writeRecordedEvidence(root);
+  fs.rmSync(path.join(root, "main.js"));
+
+  assert.throws(
+    () => verifyCiFailureEvidence({ root, job: "compatibility" }),
+    /Current main\.js no longer matches recorded build provenance/,
+  );
+});
+
+for (const [fileName, replacement] of [
+  ["manifest.json", '{"id":"systemsculpt-ai","version":"9.9.9","isDesktopOnly":false}\n'],
+  ["main.js", `const SYSTEMSCULPT_API = ${JSON.stringify(CANONICAL_API_BASE_URL)};\nconsole.log("evil bytes");\n`],
+  ["styles.css", "html {}\n"],
+]) {
+  test(`rejects a swapped ${fileName} after provenance capture`, (t) => {
+    const root = fixture(t);
+    writeRecordedEvidence(root);
+    fs.writeFileSync(path.join(root, fileName), replacement);
+
+    assert.throws(
+      () => verifyCiFailureEvidence({ root, job: "compatibility" }),
+      fileName === "manifest.json"
+        ? /does not match recorded provenance version/
+        : new RegExp(`Current ${fileName.replace(".", "\\.")} no longer matches recorded build provenance`),
+    );
+  });
+}

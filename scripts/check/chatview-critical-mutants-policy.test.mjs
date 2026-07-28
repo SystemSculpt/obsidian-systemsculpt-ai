@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import {
+  assertCuratedMutationTarget,
   assertMutationParses,
   locateMutationSpan,
 } from "../chatview-critical-mutants.mjs";
@@ -21,6 +22,7 @@ const expectedIds = [
   "runtime_session_checkpoint_exposed_before_done",
   "controller_server_tools_reenter_local_continuation",
   "replay_unknowable_tool_fails_open",
+  "replay_ambiguous_history_fails_open",
   "renderer_historical_name_fallback_lost",
   "renderer_server_location_forced_vault",
 ];
@@ -52,6 +54,10 @@ test("the curated ChatView mutation manifest cannot silently shrink or widen", (
     assert.ok(allowedSourceFiles.has(mutant.file), mutant.file);
     assert.ok(typeof mutant.category === "string" && mutant.category.length > 0);
     assert.ok(mutant.testPaths.length >= 1 && mutant.testPaths.length <= 4);
+    assert.equal(
+      assertCuratedMutationTarget(root, mutant.file, { label: mutant.file }).relativePath,
+      mutant.file,
+    );
     for (const testPath of mutant.testPaths) {
       assert.ok(allowedTestPaths.has(testPath), testPath);
       assert.ok(fs.existsSync(path.join(root, testPath)), testPath);

@@ -105,19 +105,16 @@ export function writeBuildProvenance(options = {}) {
   });
 }
 
-export function writeArtifactInspectionEvidence({
-  root = process.cwd(),
+export function createArtifactInspectionEvidenceRecord({
   inspection,
   recordedAt = new Date().toISOString(),
-  outputPath,
 } = {}) {
   if (!inspection || typeof inspection !== "object") {
     throw new Error("Artifact inspection evidence requires an inspection object.");
   }
-  const resolvedRoot = path.resolve(root);
   const mainBundle = { ...(inspection.mainBundle || {}) };
   delete mainBundle.path;
-  const record = Object.freeze({
+  return Object.freeze({
     schemaVersion: 1,
     recordedAt,
     ok: inspection.ok === true,
@@ -134,6 +131,19 @@ export function writeArtifactInspectionEvidence({
       ]),
     )),
     mainBundle: Object.freeze(mainBundle),
+  });
+}
+
+export function writeArtifactInspectionEvidence({
+  root = process.cwd(),
+  inspection,
+  recordedAt = new Date().toISOString(),
+  outputPath,
+} = {}) {
+  const resolvedRoot = path.resolve(root);
+  const record = createArtifactInspectionEvidenceRecord({
+    inspection,
+    recordedAt,
   });
   const destination = outputPath || path.join(
     resolvedRoot,

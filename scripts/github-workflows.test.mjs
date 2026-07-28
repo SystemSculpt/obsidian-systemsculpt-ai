@@ -3,10 +3,13 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { parse } from "yaml";
+import { normalizeLineEndings } from "./platform-portability.mjs";
 
 const workflowsDir = path.join(process.cwd(), ".github", "workflows");
 const workflowNames = fs.readdirSync(workflowsDir).filter((name) => /\.ya?ml$/.test(name)).sort();
-const ci = fs.readFileSync(path.join(workflowsDir, "ci.yml"), "utf8");
+const ci = normalizeLineEndings(
+  fs.readFileSync(path.join(workflowsDir, "ci.yml"), "utf8"),
+);
 const packageJson = JSON.parse(
   fs.readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
 );

@@ -9,6 +9,7 @@
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import { toRepositoryPath } from "./platform-portability.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -441,7 +442,7 @@ export function lintCssDirectory({ cssDir }) {
 
   for (const file of cssFiles) {
     const content = contents.get(file);
-    const relPath = path.relative(ROOT_DIR, file);
+    const relPath = toRepositoryPath(path.relative(ROOT_DIR, file));
     const selectors = extractSelectors(content, relPath);
 
     for (const sel of selectors) {

@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import { toRepositoryPath } from "./platform-portability.mjs";
 
 const root = process.cwd();
 const read = (relativePath) => fs.readFileSync(path.join(root, relativePath), "utf8");
@@ -166,7 +167,7 @@ test("every discoverable Obsidian host mounts a direct or named deep surface ada
 
   assert.ok(candidates.length >= 4, "host discovery unexpectedly found too few Obsidian hosts");
   for (const { file, source } of candidates) {
-    const relative = path.relative(root, file);
+    const relative = toRepositoryPath(path.relative(root, file));
     if (/applyPluginSurface\(/.test(source)) continue;
     const adapter = deepAdapters.get(relative);
     assert.ok(adapter, `${relative} needs a direct surface mount or named deep adapter`);
