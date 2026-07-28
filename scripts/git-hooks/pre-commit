@@ -22,16 +22,11 @@ PATTERNS=(
 # Files that legitimately discuss secret patterns (docs, examples, this hook)
 SKIP_RE='\.(example|sample|template)$|/pre-commit$'
 
-STAGED=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null || true)
-if [ -z "$STAGED" ]; then
-  exit 0
-fi
-
 FOUND=0
 
-for file in $STAGED; do
+while IFS= read -r -d '' file; do
   # Skip exempted files
-  if echo "$file" | grep -qE "$SKIP_RE"; then
+  if printf '%s\n' "$file" | grep -qE "$SKIP_RE"; then
     continue
   fi
 
@@ -41,13 +36,13 @@ for file in $STAGED; do
   fi
 
   for pattern in "${PATTERNS[@]}"; do
-    if echo "$content" | grep -qE -- "$pattern"; then
+    if printf '%s\n' "$content" | grep -qE -- "$pattern"; then
       echo "BLOCKED: Potential secret in $file (pattern: $pattern)"
       FOUND=1
       break  # one match per file is enough
     fi
   done
-done
+done < <(git diff --cached --name-only -z --diff-filter=ACM 2>/dev/null || true)
 
 if [ "$FOUND" -ne 0 ]; then
   echo ""

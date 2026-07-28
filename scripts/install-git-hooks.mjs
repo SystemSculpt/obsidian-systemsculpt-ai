@@ -14,6 +14,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { normalizeLineEndings } from "./platform-portability.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..");
@@ -52,7 +53,7 @@ for (const entry of fs.readdirSync(sourceDir)) {
     }
   }
 
-  const raw = fs.readFileSync(src, "utf8");
+  const raw = normalizeLineEndings(fs.readFileSync(src, "utf8"));
   // Preserve the shebang on line 1 so the kernel can exec the hook on Linux.
   const shebangMatch = raw.match(/^(#!.*\n)/);
   const content = shebangMatch

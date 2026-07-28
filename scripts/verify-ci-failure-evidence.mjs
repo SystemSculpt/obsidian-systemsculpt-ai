@@ -15,6 +15,20 @@ import {
   inspectPluginArtifacts,
   REQUIRED_PLUGIN_ARTIFACTS,
 } from "./plugin-artifacts.mjs";
+import { CHATVIEW_CRITICAL_MUTANTS } from "./check/chatview-critical-mutants.manifest.mjs";
+
+const FULL_GIT_REVISION = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
+const RUNNER_OS_TO_NODE_PLATFORM = Object.freeze({
+  Linux: "linux",
+  macOS: "darwin",
+  Windows: "win32",
+});
+const RUNNER_ARCH_TO_NODE_ARCH = Object.freeze({
+  ARM: "arm",
+  ARM64: "arm64",
+  X64: "x64",
+  X86: "ia32",
+});
 
 function parseJsonFile(filePath, label) {
   if (!fs.existsSync(filePath)) {
@@ -33,6 +47,14 @@ function assertArtifactRecord(fileName, record, label) {
   }
   if (typeof record.exists !== "boolean") {
     throw new Error(`${label} ${fileName} must record exists as a boolean.`);
+  }
+  if (record.exists && record.isRegularFile === false) {
+    if (record.sizeBytes !== null || record.sha256 !== null) {
+      throw new Error(
+        `${label} ${fileName} must not hash a non-regular artifact path.`,
+      );
+    }
+    return;
   }
   if (record.exists) {
     if (!Number.isInteger(record.sizeBytes) || record.sizeBytes < 0) {
@@ -54,6 +76,14 @@ function assertInspectionFileRecord(fileName, record, label) {
   }
   if (typeof record.exists !== "boolean") {
     throw new Error(`${label} ${fileName} must record exists as a boolean.`);
+  }
+  if (record.exists && record.isRegularFile === false) {
+    if (record.sizeBytes !== null) {
+      throw new Error(
+        `${label} ${fileName} must not size a non-regular artifact path.`,
+      );
+    }
+    return;
   }
   if (record.exists) {
     if (!Number.isInteger(record.sizeBytes) || record.sizeBytes < 0) {
@@ -90,13 +120,43 @@ function assertMutationEvidence(record, filePath) {
   if (typeof record.runId !== "string" || record.runId.length === 0) {
     throw new Error(`Mutation evidence ${filePath} must record runId.`);
   }
+  if (
+    typeof record.recordedAt !== "string"
+    || !Number.isFinite(Date.parse(record.recordedAt))
+  ) {
+    throw new Error(`Mutation evidence ${filePath} must record a valid recordedAt timestamp.`);
+  }
+  if (!["passed", "failed", "survivor_failure"].includes(record.status)) {
+    throw new Error(`Mutation evidence ${filePath} must record a terminal status.`);
+  }
+  if (record.mutantsTotal !== CHATVIEW_CRITICAL_MUTANTS.length) {
+    throw new Error(
+      `Mutation evidence ${filePath} must record all ${CHATVIEW_CRITICAL_MUTANTS.length} curated mutants.`,
+    );
+  }
   if (!Array.isArray(record.results)) {
     throw new Error(`Mutation evidence ${filePath} must record results.`);
   }
   if (!record.baseline || typeof record.baseline !== "object") {
     throw new Error(`Mutation evidence ${filePath} must record baseline state.`);
   }
-  if (record.baseline.status !== "not_run") {
+  if (!["not_run", "passed", "failed", "infrastructure_failure"].includes(record.baseline.status)) {
+    throw new Error(`Mutation evidence ${filePath} has an invalid baseline status.`);
+  }
+  if (!Number.isInteger(record.baseline.suiteCount) || record.baseline.suiteCount < 0) {
+    throw new Error(`Mutation evidence ${filePath} must record a non-negative baseline suiteCount.`);
+  }
+  if (record.baseline.status === "not_run") {
+    if (
+      record.baseline.suiteCount !== 0
+      || record.baseline.argv !== null
+      || record.baseline.cwd !== null
+    ) {
+      throw new Error(
+        `Mutation evidence ${filePath} must keep a not-run baseline empty.`,
+      );
+    }
+  } else {
     if (!Array.isArray(record.baseline.argv) || record.baseline.argv.length === 0) {
       throw new Error(`Mutation evidence ${filePath} must record baseline argv once it runs.`);
     }
@@ -104,13 +164,80 @@ function assertMutationEvidence(record, filePath) {
       throw new Error(`Mutation evidence ${filePath} must record baseline cwd once it runs.`);
     }
   }
-  for (const result of record.results) {
+  if (
+    record.results.length > 0
+    && record.baseline.status !== "passed"
+  ) {
+    throw new Error(
+      `Mutation evidence ${filePath} cannot record mutant results before its baseline passes.`,
+    );
+  }
+  if (record.results.length > CHATVIEW_CRITICAL_MUTANTS.length) {
+    throw new Error(`Mutation evidence ${filePath} records more results than curated mutants.`);
+  }
+  for (const [index, result] of record.results.entries()) {
+    const expectedMutant = CHATVIEW_CRITICAL_MUTANTS[index];
+    if (result?.id !== expectedMutant.id) {
+      throw new Error(
+        `Mutation evidence ${filePath} result ${index + 1} must be ${expectedMutant.id}.`,
+      );
+    }
+    if (result.category !== expectedMutant.category) {
+      throw new Error(
+        `Mutation evidence ${filePath} result ${result.id} has the wrong category.`,
+      );
+    }
+    if (JSON.stringify(result.testPaths) !== JSON.stringify(expectedMutant.testPaths)) {
+      throw new Error(
+        `Mutation evidence ${filePath} result ${result.id} has the wrong targeted tests.`,
+      );
+    }
+    if (!["killed", "survived", "infrastructure_failure"].includes(result.status)) {
+      throw new Error(
+        `Mutation evidence ${filePath} result ${result.id} has an invalid status.`,
+      );
+    }
+    if (!Number.isInteger(result.durationMs) || result.durationMs < 0) {
+      throw new Error(
+        `Mutation evidence ${filePath} result ${result.id} must record a non-negative durationMs.`,
+      );
+    }
     if (!Array.isArray(result?.argv) || result.argv.length === 0) {
       throw new Error(`Mutation evidence ${filePath} must record argv for every mutant run.`);
     }
     if (typeof result?.cwd !== "string" || result.cwd.length === 0) {
       throw new Error(`Mutation evidence ${filePath} must record cwd for every mutant run.`);
     }
+  }
+  const hasFailure = typeof record.failure === "string" && record.failure.length > 0;
+  if (record.status === "passed") {
+    if (
+      record.baseline.status !== "passed"
+      || record.results.length !== CHATVIEW_CRITICAL_MUTANTS.length
+      || record.results.some((result) => result.status !== "killed")
+      || record.failure !== null
+    ) {
+      throw new Error(
+        `Mutation evidence ${filePath} passed without a complete killed-mutant record.`,
+      );
+    }
+    return;
+  }
+  if (!hasFailure) {
+    throw new Error(`Mutation evidence ${filePath} must explain its terminal failure.`);
+  }
+  if (
+    record.status === "survivor_failure"
+    && (
+      record.baseline.status !== "passed"
+      || record.results.length !== CHATVIEW_CRITICAL_MUTANTS.length
+      || !record.results.some((result) => result.status === "survived")
+      || record.results.some((result) => result.status === "infrastructure_failure")
+    )
+  ) {
+    throw new Error(
+      `Mutation evidence ${filePath} must completely record every survivor.`,
+    );
   }
 }
 
@@ -126,11 +253,100 @@ function sameJson(actual, expected) {
   return JSON.stringify(actual) === JSON.stringify(expected);
 }
 
+function configuredEnvironmentValue(environment, ...names) {
+  for (const name of names) {
+    const value = environment?.[name];
+    if (typeof value === "string" && value.trim().length > 0) return value.trim();
+  }
+  return null;
+}
+
+function assertRuntimeBinding({
+  provenance,
+  currentProvenance,
+  environment,
+  runtime,
+}) {
+  if (provenance.git.dirty !== false) {
+    throw new Error("Build provenance must come from a clean git worktree.");
+  }
+  if (currentProvenance.git.dirty !== false) {
+    throw new Error("Current git worktree must stay clean while verifying CI evidence.");
+  }
+
+  const expectedGitRevision = configuredEnvironmentValue(
+    environment,
+    "SYSTEMSCULPT_EXPECTED_GIT_SHA",
+    "GITHUB_SHA",
+  )?.toLowerCase();
+  if (environment?.GITHUB_ACTIONS === "true" && !expectedGitRevision) {
+    throw new Error("Hosted CI evidence requires the workflow Git revision.");
+  }
+  if (expectedGitRevision) {
+    if (!FULL_GIT_REVISION.test(expectedGitRevision)) {
+      throw new Error("Expected workflow Git revision must be a full Git hash.");
+    }
+    if (provenance.git.revision !== expectedGitRevision) {
+      throw new Error(
+        `Recorded provenance revision ${provenance.git.revision} does not match workflow revision ${expectedGitRevision}.`,
+      );
+    }
+  }
+
+  for (const [fieldName, currentValue] of [
+    ["nodeVersion", runtime.nodeVersion],
+    ["platform", runtime.platform],
+    ["arch", runtime.arch],
+  ]) {
+    if (provenance[fieldName] !== currentValue) {
+      throw new Error(
+        `Build provenance ${fieldName} ${provenance[fieldName]} does not match current runtime ${currentValue}.`,
+      );
+    }
+  }
+
+  const declaredRunnerOs = configuredEnvironmentValue(
+    environment,
+    "SYSTEMSCULPT_EXPECTED_RUNNER_OS",
+    "RUNNER_OS",
+  );
+  if (declaredRunnerOs) {
+    const expectedPlatform = RUNNER_OS_TO_NODE_PLATFORM[declaredRunnerOs];
+    if (!expectedPlatform) {
+      throw new Error(`Unsupported declared runner OS ${declaredRunnerOs}.`);
+    }
+    if (runtime.platform !== expectedPlatform) {
+      throw new Error(
+        `Declared runner OS ${declaredRunnerOs} does not match Node platform ${runtime.platform}.`,
+      );
+    }
+  }
+
+  const declaredRunnerArch = configuredEnvironmentValue(
+    environment,
+    "SYSTEMSCULPT_EXPECTED_RUNNER_ARCH",
+    "RUNNER_ARCH",
+  );
+  if (declaredRunnerArch) {
+    const expectedArch = RUNNER_ARCH_TO_NODE_ARCH[declaredRunnerArch];
+    if (!expectedArch) {
+      throw new Error(`Unsupported declared runner architecture ${declaredRunnerArch}.`);
+    }
+    if (runtime.arch !== expectedArch) {
+      throw new Error(
+        `Declared runner architecture ${declaredRunnerArch} does not match Node architecture ${runtime.arch}.`,
+      );
+    }
+  }
+}
+
 function assertCurrentArtifactBinding(
   resolvedRoot,
   provenance,
   inspection,
   spawnSyncImpl,
+  environment,
+  runtime,
 ) {
   const manifestPath = path.join(resolvedRoot, "manifest.json");
   const currentManifest = parseJsonFile(manifestPath, "Current manifest.json");
@@ -159,6 +375,12 @@ function assertCurrentArtifactBinding(
       `Current git revision ${currentProvenance.git.revision} does not match recorded provenance revision ${provenance.git.revision}.`,
     );
   }
+  assertRuntimeBinding({
+    provenance,
+    currentProvenance,
+    environment,
+    runtime,
+  });
   for (const fileName of REQUIRED_PLUGIN_ARTIFACTS) {
     const currentRecord = currentProvenance.artifacts?.[fileName];
     const recordedRecord = provenance.artifacts?.[fileName];
@@ -231,6 +453,12 @@ export function verifyCiFailureEvidence({
   root = process.cwd(),
   job = "plugin",
   spawnSyncImpl = spawnSync,
+  environment = process.env,
+  runtime = Object.freeze({
+    nodeVersion: process.version,
+    platform: process.platform,
+    arch: process.arch,
+  }),
 } = {}) {
   if (job !== "plugin" && job !== "compatibility") {
     throw new Error(`Unknown CI job ${job}. Expected plugin or compatibility.`);
@@ -254,7 +482,7 @@ export function verifyCiFailureEvidence({
   if (!provenance.git || typeof provenance.git !== "object") {
     throw new Error("Build provenance must record git identity.");
   }
-  if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(provenance.git.revision)) {
+  if (!FULL_GIT_REVISION.test(provenance.git.revision)) {
     throw new Error("Build provenance must record a full git revision.");
   }
   for (const fileName of REQUIRED_PLUGIN_ARTIFACTS) {
@@ -281,7 +509,14 @@ export function verifyCiFailureEvidence({
     assertInspectionFileRecord(fileName, inspection.files[fileName], "Artifact inspection");
   }
 
-  assertCurrentArtifactBinding(resolvedRoot, provenance, inspection, spawnSyncImpl);
+  assertCurrentArtifactBinding(
+    resolvedRoot,
+    provenance,
+    inspection,
+    spawnSyncImpl,
+    environment,
+    runtime,
+  );
 
   const { markerFiles, jestEvidenceFiles } = collectJestEvidenceState(
     resolvedRoot,

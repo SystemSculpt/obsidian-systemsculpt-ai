@@ -1,5 +1,7 @@
 import "./globals";
 import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import manifest from "../../manifest.json";
 import fixture from "../../testing/fixtures/managed/managed-capabilities-v2.json";
 import type { ChatMessage } from "../../src/types";
@@ -25,7 +27,16 @@ import { ManagedChatRuntimeAdapter } from "../../src/views/chatview/turn/Managed
 
 const BASE_URL = "https://systemsculpt.com";
 const BROWSER_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) obsidian/1.9.1 Chrome/132.0.6834.196 Electron/34.3.0 Safari/537.36";
-const DEFAULT_KEY_SOURCE = `${process.env.HOME}/.codex/qa-vaults/systemsculpt-v6/.obsidian/plugins/systemsculpt-ai/data.json`;
+const DEFAULT_KEY_SOURCE = join(
+  homedir(),
+  ".codex",
+  "qa-vaults",
+  "systemsculpt-v6",
+  ".obsidian",
+  "plugins",
+  "systemsculpt-ai",
+  "data.json",
+);
 
 function licenseKey(): string {
   const fromEnvironment = process.env.SYSTEMSCULPT_LICENSE_KEY?.trim();

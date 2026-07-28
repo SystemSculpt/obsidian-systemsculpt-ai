@@ -12,6 +12,7 @@ import {
   DEFAULT_CI_EVIDENCE_DIRECTORY,
   writeJsonEvidence,
 } from "./build-provenance.mjs";
+import { toRepositoryPath } from "./platform-portability.mjs";
 
 const root = process.cwd();
 const cacheParent = path.join(root, ".cache", "chatview-mut");
@@ -136,6 +137,10 @@ function uniqueMutationFiles(mutants = CHATVIEW_CRITICAL_MUTANTS) {
   return [...new Set(mutants.map((mutant) => mutant.file))].sort();
 }
 
+export function repositoryRelativePath(rootDir, targetPath, pathImplementation = path) {
+  return toRepositoryPath(pathImplementation.relative(rootDir, targetPath));
+}
+
 export function assertCuratedMutationTarget(
   rootDir,
   relativeFilePath,
@@ -187,7 +192,7 @@ export function assertCuratedMutationTarget(
   return Object.freeze({
     root: resolvedRoot,
     path: resolvedPath,
-    relativePath: lexicalRelativePath,
+    relativePath: repositoryRelativePath(resolvedRoot, resolvedPath),
   });
 }
 

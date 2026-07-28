@@ -51,7 +51,7 @@ npm run check:full
   printed replay seed, open-handle detection, provider-wire generative cases,
   and per-file uncovered-code budgets on the high-risk ChatView seams.
 - test:chatview:mutants copies only the required source and fixture trees into
-  an isolated temporary mirror, applies 13 curated AST-anchored regressions one
+  an isolated temporary mirror, applies 14 curated AST-anchored regressions one
   at a time, and requires focused tests to kill every one. It runs without
   coverage or randomized order so a survivor is deterministic and actionable.
 - check:ci is the exact exhaustive PR gate: check:plugin plus the critical-risk
@@ -90,7 +90,9 @@ must require the stable `required` job before merge.
 
 The release:plugin command also requires check:ci before it rebuilds and
 validates release artifacts, so the local release path cannot bypass the
-exhaustive gate.
+exhaustive gate. It only succeeds from a clean worktree when the version tag
+resolves to the same full revision recorded in provenance, and the CLI cannot
+reuse pre-existing artifacts without rebuilding them.
 
 Saved chat parsing is intentionally fail-closed. Malformed or truncated
 histories are excluded from indexes and never returned as a shortened prefix.

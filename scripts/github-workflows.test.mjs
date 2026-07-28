@@ -74,6 +74,18 @@ test("CI preserves a secret-free exhaustive Linux gate and compatibility matrix"
   assert.ok(compatibilityCheckStep["timeout-minutes"] < workflow.jobs.compatibility["timeout-minutes"]);
   assert.equal(pluginVerifyStep?.if, "${{ failure() && steps.run_check_ci.conclusion == 'failure' }}");
   assert.equal(compatibilityVerifyStep?.if, "${{ failure() && steps.run_check_compat.conclusion == 'failure' }}");
+  assert.equal(pluginVerifyStep?.id, "verify_plugin_failure_evidence");
+  assert.equal(
+    compatibilityVerifyStep?.id,
+    "verify_compatibility_failure_evidence",
+  );
+  for (const verifyStep of [pluginVerifyStep, compatibilityVerifyStep]) {
+    assert.deepEqual(verifyStep?.env, {
+      SYSTEMSCULPT_EXPECTED_GIT_SHA: "${{ github.sha }}",
+      SYSTEMSCULPT_EXPECTED_RUNNER_ARCH: "${{ runner.arch }}",
+      SYSTEMSCULPT_EXPECTED_RUNNER_OS: "${{ runner.os }}",
+    });
+  }
   assert.match(pluginVerifyStep?.run || "", /verify-ci-failure-evidence\.mjs --job plugin/);
   assert.match(compatibilityVerifyStep?.run || "", /verify-ci-failure-evidence\.mjs --job compatibility/);
   assert.ok(
@@ -92,10 +104,13 @@ test("CI preserves a secret-free exhaustive Linux gate and compatibility matrix"
     workflow.jobs.compatibility.steps.findIndex((step) => step.name === "Verify structured failure evidence")
       < workflow.jobs.compatibility.steps.findIndex((step) => step.name === "Upload failure evidence"),
   );
-  const uploadSteps = [
-    ...workflow.jobs.plugin.steps,
-    ...workflow.jobs.compatibility.steps,
-  ].filter((step) => step.name === "Upload failure evidence");
+  const pluginUploadStep = workflow.jobs.plugin.steps.find(
+    (step) => step.name === "Upload failure evidence",
+  );
+  const compatibilityUploadStep = workflow.jobs.compatibility.steps.find(
+    (step) => step.name === "Upload failure evidence",
+  );
+  const uploadSteps = [pluginUploadStep, compatibilityUploadStep];
   assert.equal(uploadSteps.length, 2);
   const uses = [
     ...workflow.jobs.plugin.steps,
@@ -112,17 +127,26 @@ test("CI preserves a secret-free exhaustive Linux gate and compatibility matrix"
     "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
   ]);
   for (const step of uploadSteps) {
+    assert.ok(step);
     assert.equal(
       step.uses,
       "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
     );
-    assert.equal(step.if, "failure()");
-    assert.equal(step.with["if-no-files-found"], "warn");
+    assert.equal(step.with["if-no-files-found"], "error");
+    assert.equal(step.with["include-hidden-files"], true);
     assert.equal(step.with["retention-days"], 14);
     assert.match(step.with.path, /\.cache\/ci-evidence/);
     assert.match(step.with.path, /coverage-summary\.json/);
     assert.match(step.with.path, /main\.js/);
   }
+  assert.equal(
+    pluginUploadStep.if,
+    "${{ always() && steps.verify_plugin_failure_evidence.conclusion == 'success' }}",
+  );
+  assert.equal(
+    compatibilityUploadStep.if,
+    "${{ always() && steps.verify_compatibility_failure_evidence.conclusion == 'success' }}",
+  );
 });
 
 test("the hosted gate is the exact exhaustive local CI contract", () => {

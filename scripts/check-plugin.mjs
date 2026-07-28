@@ -40,6 +40,7 @@ const FAST_SCRIPT_TESTS = [
   "scripts/plugin-build-options.test.mjs",
   "scripts/check/managed-only-policy.test.mjs",
   "scripts/platform-portability.test.mjs",
+  "scripts/live-chat-smoke.test.mjs",
 ];
 
 const NORMAL_SCRIPT_TESTS = [
@@ -127,9 +128,9 @@ function checkBundle() {
     try {
       const inspection = inspectPluginArtifacts({ root });
       writeArtifactInspectionEvidence({ root, inspection });
-      const manifestPath = path.join(root, "manifest.json");
-      const version = fs.existsSync(manifestPath)
-        ? JSON.parse(fs.readFileSync(manifestPath, "utf8")).version
+      const manifestFile = inspection.files["manifest.json"];
+      const version = manifestFile?.isRegularFile
+        ? JSON.parse(fs.readFileSync(manifestFile.path, "utf8")).version
         : "unknown";
       writeBuildProvenance({ root, version, kind: "ci-build-failure" });
     } catch {

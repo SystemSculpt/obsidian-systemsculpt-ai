@@ -49,6 +49,8 @@ test("records exact artifact bytes and source identity without secrets", (t) => 
     dirty: true,
   });
   assert.equal(record.recordedAt, "2026-07-28T12:00:00.000Z");
+  assert.equal(record.artifacts["main.js"].isRegularFile, true);
+  assert.equal(record.artifacts["main.js"].isSymbolicLink, false);
   assert.equal(record.artifacts["main.js"].sizeBytes, Buffer.byteLength("main bytes\n"));
   assert.equal(
     record.artifacts["main.js"].sha256,
@@ -80,7 +82,13 @@ test("writes provenance and sanitized artifact inspection as atomic JSON sidecar
       problems: [],
       manifestMobileCompatible: true,
       files: {
-        "main.js": { path: path.join(root, "main.js"), exists: true, sizeBytes: 11 },
+        "main.js": {
+          path: path.join(root, "main.js"),
+          exists: true,
+          isRegularFile: true,
+          isSymbolicLink: false,
+          sizeBytes: 11,
+        },
       },
       mainBundle: {
         path: path.join(root, "main.js"),
@@ -92,7 +100,12 @@ test("writes provenance and sanitized artifact inspection as atomic JSON sidecar
   const parsed = JSON.parse(fs.readFileSync(evidence.path, "utf8"));
   assert.equal(parsed.mainBundle.path, undefined);
   assert.equal(parsed.mainBundle.hasCanonicalApiBase, true);
-  assert.deepEqual(parsed.files["main.js"], { exists: true, sizeBytes: 11 });
+  assert.deepEqual(parsed.files["main.js"], {
+    exists: true,
+    isRegularFile: true,
+    isSymbolicLink: false,
+    sizeBytes: 11,
+  });
 });
 
 test("missing artifacts stay explicit in provenance instead of disappearing", (t) => {
@@ -105,7 +118,33 @@ test("missing artifacts stay explicit in provenance instead of disappearing", (t
   });
   assert.deepEqual(record.artifacts["styles.css"], {
     exists: false,
+    isRegularFile: false,
+    isSymbolicLink: false,
     sizeBytes: null,
     sha256: null,
   });
+});
+
+test("provenance refuses to read or hash a symlinked artifact", (t) => {
+  const root = fixture(t);
+  const mainPath = path.join(root, "main.js");
+  const outsidePath = path.join(root, "outside-secret.txt");
+  fs.writeFileSync(outsidePath, "must not enter provenance\n");
+  fs.rmSync(mainPath);
+  fs.symlinkSync(outsidePath, mainPath);
+
+  const record = createBuildProvenance({
+    root,
+    version: "6.2.6",
+    spawnSyncImpl: gitFixture,
+  });
+
+  assert.deepEqual(record.artifacts["main.js"], {
+    exists: true,
+    isRegularFile: false,
+    isSymbolicLink: true,
+    sizeBytes: null,
+    sha256: null,
+  });
+  assert.equal(fs.readFileSync(outsidePath, "utf8"), "must not enter provenance\n");
 });

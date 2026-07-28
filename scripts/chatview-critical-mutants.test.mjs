@@ -9,6 +9,7 @@ import {
   buildJestInvocation,
   copyMutationMirror,
   createMutationEvidence,
+  repositoryRelativePath,
   writeMutationEvidence,
 } from "./chatview-critical-mutants.mjs";
 
@@ -76,6 +77,17 @@ test("curated mutation targets must stay lexically within their root", () => {
   assert.throws(
     () => assertCuratedMutationTarget("/repo", "../outside.ts"),
     /must stay within/,
+  );
+});
+
+test("mutation targets expose canonical repository paths on Windows", () => {
+  assert.equal(
+    repositoryRelativePath(
+      "C:\\repo",
+      "C:\\repo\\src\\services\\chat\\ManagedToolExecution.ts",
+      path.win32,
+    ),
+    "src/services/chat/ManagedToolExecution.ts",
   );
 });
 

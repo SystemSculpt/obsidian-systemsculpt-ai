@@ -177,7 +177,11 @@ The release command first requires the complete check:ci contract. It then
 verifies version consistency, rebuilds the production artifact, and validates
 exactly manifest.json, main.js, and styles.css. It rejects local API bases,
 retired client AI runtimes, provider SDKs, and inline source maps. Publishing
-still requires explicit operator approval.
+still requires explicit operator approval. The command only succeeds from a
+clean Git worktree when the exact version tag exists and points to the same full
+revision recorded in release provenance. It always rebuilds the artifacts;
+there is no release CLI path that can bind stale pre-existing bytes to a newer
+source revision.
 
 ~~~bash
 npm run smoke:chat:live

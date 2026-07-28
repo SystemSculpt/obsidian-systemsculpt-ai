@@ -109,7 +109,7 @@ npm run check:full
   controller/runtime/transport, storage, and restored-history UI suites with
   strict console, randomized order, open-handle detection, seeded generative
   histories, and per-file uncovered-code budgets.
-- test:chatview:mutants creates an isolated source mirror, applies 13 curated
+- test:chatview:mutants creates an isolated source mirror, applies 14 curated
   compatibility, projection, session, durability, controller, replay, and
   restored-history regressions, and requires focused tests to kill every one.
 - check:ci is the exact exhaustive PR gate. It adds strict-console randomized

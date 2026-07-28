@@ -1,9 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
-import { createHash, randomBytes } from "node:crypto";
+import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { REQUIRED_PLUGIN_ARTIFACTS } from "./plugin-artifacts.mjs";
+import { replaceFileAtomically } from "./platform-portability.mjs";
 
 export const DEFAULT_CI_EVIDENCE_DIRECTORY = ".cache/ci-evidence";
 export const HOSTED_JEST_PHASE_MARKER_FILE = "hosted-jest-phase-started.json";
@@ -23,12 +24,33 @@ function gitOutput(root, args, spawnSyncImpl) {
 
 function artifactRecord(root, fileName) {
   const filePath = path.join(root, fileName);
-  if (!fs.existsSync(filePath)) {
-    return Object.freeze({ exists: false, sizeBytes: null, sha256: null });
+  let stats;
+  try {
+    stats = fs.lstatSync(filePath);
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+    return Object.freeze({
+      exists: false,
+      isRegularFile: false,
+      isSymbolicLink: false,
+      sizeBytes: null,
+      sha256: null,
+    });
+  }
+  if (!stats.isFile() || stats.isSymbolicLink()) {
+    return Object.freeze({
+      exists: true,
+      isRegularFile: false,
+      isSymbolicLink: stats.isSymbolicLink(),
+      sizeBytes: null,
+      sha256: null,
+    });
   }
   const bytes = fs.readFileSync(filePath);
   return Object.freeze({
     exists: true,
+    isRegularFile: true,
+    isSymbolicLink: false,
     sizeBytes: bytes.byteLength,
     sha256: sha256(bytes),
   });
@@ -77,17 +99,7 @@ export function createBuildProvenance({
 export function writeJsonEvidence(filePath, value) {
   const resolvedPath = path.resolve(filePath);
   fs.mkdirSync(path.dirname(resolvedPath), { recursive: true });
-  const temporaryPath = path.join(
-    path.dirname(resolvedPath),
-    `.${path.basename(resolvedPath)}-${process.pid}-${randomBytes(4).toString("hex")}.tmp`,
-  );
-  try {
-    fs.writeFileSync(temporaryPath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
-    fs.rmSync(resolvedPath, { force: true });
-    fs.renameSync(temporaryPath, resolvedPath);
-  } finally {
-    fs.rmSync(temporaryPath, { force: true });
-  }
+  replaceFileAtomically(resolvedPath, `${JSON.stringify(value, null, 2)}\n`);
   return resolvedPath;
 }
 
@@ -126,6 +138,8 @@ export function createArtifactInspectionEvidenceRecord({
         fileName,
         {
           exists: file?.exists === true,
+          isRegularFile: file?.isRegularFile === true,
+          isSymbolicLink: file?.isSymbolicLink === true,
           sizeBytes: typeof file?.sizeBytes === "number" ? file.sizeBytes : null,
         },
       ]),

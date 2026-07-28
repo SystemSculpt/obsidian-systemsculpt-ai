@@ -53,6 +53,21 @@ function executionHarness(result: Record<string, unknown>) {
   return { view, workspace };
 }
 
+function retryHarness(
+  snapshot: () => Readonly<{ version: number; messages: readonly unknown[] }>,
+) {
+  const workspace = { showMessageEditor: jest.fn(async () => undefined) };
+  const view = {
+    transcript: { snapshot: jest.fn(snapshot) },
+    attachmentStore: { hydrateMessage: jest.fn(async (message) => message) },
+    workspace,
+    activeRunPromise: null,
+    pendingRetry: null,
+    messageEditGeneration: 0,
+  };
+  return { view, workspace };
+}
+
 describe("AgentChatView coordinator", () => {
   beforeEach(() => {
     showConfirmMock.mockReset();
@@ -534,7 +549,6 @@ describe("AgentChatView coordinator", () => {
 
   it("replays an oldest-shape web search safely and fails closed for an unknowable tool", async () => {
     const target = { role: "user" as const, message_id: "user-1", content: "Search" };
-    const workspace = { showMessageEditor: jest.fn(async () => undefined) };
     const flatWebSearch = {
       id: "flat-web",
       messageId: "assistant-flat",
@@ -544,33 +558,24 @@ describe("AgentChatView coordinator", () => {
       timestamp: 1,
       result: { success: true, data: { result_count: 1 } },
     };
-    const view = {
-      transcript: {
-        snapshot: jest.fn(() => ({
-          version: 1,
-          messages: [
-            target,
-            {
-              role: "assistant",
-              message_id: "assistant-flat",
-              content: "Found it",
-              tool_calls: [flatWebSearch],
-              messageParts: [{
-                id: "tool_call_part-flat-web",
-                type: "tool_call",
-                data: flatWebSearch,
-                timestamp: 1,
-              }],
-            },
-          ],
-        })),
-      },
-      attachmentStore: { hydrateMessage: jest.fn(async (message) => message) },
-      workspace,
-      activeRunPromise: null,
-      pendingRetry: null,
-      messageEditGeneration: 0,
-    };
+    const { view, workspace } = retryHarness(() => ({
+      version: 1,
+      messages: [
+        target,
+        {
+          role: "assistant",
+          message_id: "assistant-flat",
+          content: "Found it",
+          tool_calls: [flatWebSearch],
+          messageParts: [{
+            id: "tool_call_part-flat-web",
+            type: "tool_call",
+            data: flatWebSearch,
+            timestamp: 1,
+          }],
+        },
+      ],
+    }));
 
     await (AgentChatView.prototype as any).prepareRetry.call(view, "user-1");
     expect(workspace.showMessageEditor).toHaveBeenLastCalledWith(expect.objectContaining({
@@ -701,20 +706,10 @@ describe("AgentChatView coordinator", () => {
     ];
 
     for (const replayCase of cases) {
-      const workspace = { showMessageEditor: jest.fn(async () => undefined) };
-      const view = {
-        transcript: {
-          snapshot: jest.fn(() => ({
-            version: 5,
-            messages: [target, replayCase.message],
-          })),
-        },
-        attachmentStore: { hydrateMessage: jest.fn(async (message) => message) },
-        workspace,
-        activeRunPromise: null,
-        pendingRetry: null,
-        messageEditGeneration: 0,
-      };
+      const { view, workspace } = retryHarness(() => ({
+        version: 5,
+        messages: [target, replayCase.message],
+      }));
 
       await (AgentChatView.prototype as any).prepareRetry.call(view, "user-1");
 
@@ -727,7 +722,6 @@ describe("AgentChatView coordinator", () => {
 
   it("fails closed when mixed-shape replay history adds a mutating messageParts tool", async () => {
     const target = { role: "user" as const, message_id: "user-1", content: "Search" };
-    const workspace = { showMessageEditor: jest.fn(async () => undefined) };
     const flatWebSearch = {
       id: "flat-web",
       messageId: "assistant-flat",
@@ -749,33 +743,24 @@ describe("AgentChatView coordinator", () => {
       timestamp: 2,
       result: { success: true, data: { path: "Project.md" } },
     };
-    const view = {
-      transcript: {
-        snapshot: jest.fn(() => ({
-          version: 3,
-          messages: [
-            target,
-            {
-              role: "assistant" as const,
-              message_id: "assistant-flat",
-              content: "Found it",
-              tool_calls: [flatWebSearch],
-              messageParts: [{
-                id: "tool_call_part-write-1",
-                type: "tool_call" as const,
-                data: writeTool,
-                timestamp: 2,
-              }],
-            },
-          ],
-        })),
-      },
-      attachmentStore: { hydrateMessage: jest.fn(async (message) => message) },
-      workspace,
-      activeRunPromise: null,
-      pendingRetry: null,
-      messageEditGeneration: 0,
-    };
+    const { view, workspace } = retryHarness(() => ({
+      version: 3,
+      messages: [
+        target,
+        {
+          role: "assistant" as const,
+          message_id: "assistant-flat",
+          content: "Found it",
+          tool_calls: [flatWebSearch],
+          messageParts: [{
+            id: "tool_call_part-write-1",
+            type: "tool_call" as const,
+            data: writeTool,
+            timestamp: 2,
+          }],
+        },
+      ],
+    }));
 
     await (AgentChatView.prototype as any).prepareRetry.call(view, "user-1");
 
@@ -787,38 +772,28 @@ describe("AgentChatView coordinator", () => {
 
   it("fails closed when replay signature serialization cannot inspect a later tool", async () => {
     const target = { role: "user" as const, message_id: "user-1", content: "Search" };
-    const workspace = { showMessageEditor: jest.fn(async () => undefined) };
     const cyclic: Record<string, unknown> = {};
     cyclic.self = cyclic;
-    const view = {
-      transcript: {
-        snapshot: jest.fn(() => ({
-          version: 4,
-          messages: [
-            target,
-            {
-              role: "assistant" as const,
-              message_id: "assistant-cyclic",
-              content: "Found it",
-              tool_calls: [{
-                id: "flat-web",
-                messageId: "assistant-cyclic",
-                name: "web_search",
-                arguments: { query: "legacy" },
-                state: "completed" as const,
-                timestamp: 1,
-                result: { success: true, data: cyclic },
-              }],
-            },
-          ],
-        })),
-      },
-      attachmentStore: { hydrateMessage: jest.fn(async (message) => message) },
-      workspace,
-      activeRunPromise: null,
-      pendingRetry: null,
-      messageEditGeneration: 0,
-    };
+    const { view, workspace } = retryHarness(() => ({
+      version: 4,
+      messages: [
+        target,
+        {
+          role: "assistant" as const,
+          message_id: "assistant-cyclic",
+          content: "Found it",
+          tool_calls: [{
+            id: "flat-web",
+            messageId: "assistant-cyclic",
+            name: "web_search",
+            arguments: { query: "legacy" },
+            state: "completed" as const,
+            timestamp: 1,
+            result: { success: true, data: cyclic },
+          }],
+        },
+      ],
+    }));
 
     await expect(
       (AgentChatView.prototype as any).prepareRetry.call(view, "user-1"),
@@ -832,7 +807,6 @@ describe("AgentChatView coordinator", () => {
 
   it("fails closed when later durable tool calls reuse a client id", async () => {
     const target = { role: "user" as const, message_id: "user-1", content: "Update it" };
-    const workspace = { showMessageEditor: jest.fn(async () => undefined) };
     const duplicateId = "tool-dup";
     const writeTool = {
       id: duplicateId,
@@ -855,33 +829,24 @@ describe("AgentChatView coordinator", () => {
       timestamp: 2,
       result: { success: true, data: { result_count: 1 } },
     };
-    const view = {
-      transcript: {
-        snapshot: jest.fn(() => ({
-          version: 3,
-          messages: [
-            target,
-            {
-              role: "assistant" as const,
-              message_id: "assistant-write",
-              content: "Updated",
-              tool_calls: [writeTool],
-            },
-            {
-              role: "assistant" as const,
-              message_id: "assistant-search",
-              content: "Checked",
-              tool_calls: [flatWebSearch],
-            },
-          ],
-        })),
-      },
-      attachmentStore: { hydrateMessage: jest.fn(async (message) => message) },
-      workspace,
-      activeRunPromise: null,
-      pendingRetry: null,
-      messageEditGeneration: 0,
-    };
+    const { view, workspace } = retryHarness(() => ({
+      version: 3,
+      messages: [
+        target,
+        {
+          role: "assistant" as const,
+          message_id: "assistant-write",
+          content: "Updated",
+          tool_calls: [writeTool],
+        },
+        {
+          role: "assistant" as const,
+          message_id: "assistant-search",
+          content: "Checked",
+          tool_calls: [flatWebSearch],
+        },
+      ],
+    }));
 
     await (AgentChatView.prototype as any).prepareRetry.call(view, "user-1");
 

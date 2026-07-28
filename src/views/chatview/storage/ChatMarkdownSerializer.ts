@@ -105,8 +105,14 @@ export class ChatMarkdownSerializer {
   private static parseSequentialFormat(content: string): { success: boolean; messages: ChatMessage[] } {
     const messages: ChatMessage[] = [];
     const messageRegex = /<!-- SYSTEMSCULPT-MESSAGE-START (.*?) -->([\s\S]*?)<!-- SYSTEMSCULPT-MESSAGE-END -->/g;
-    const declaredStarts = content.match(/<!-- SYSTEMSCULPT-MESSAGE-START /g)?.length ?? 0;
-    const declaredEnds = content.match(/<!-- SYSTEMSCULPT-MESSAGE-END -->/g)?.length ?? 0;
+    const markerRegex = /<!-- SYSTEMSCULPT-MESSAGE-(START |END -->)/g;
+    let declaredStarts = 0;
+    let declaredEnds = 0;
+    let markerMatch: RegExpExecArray | null;
+    while ((markerMatch = markerRegex.exec(content)) !== null) {
+      if (markerMatch[1] === "START ") declaredStarts += 1;
+      else declaredEnds += 1;
+    }
     if (declaredStarts !== declaredEnds) return { success: false, messages: [] };
     if (declaredStarts === 0 && content.trim().length > 0) return { success: false, messages: [] };
 

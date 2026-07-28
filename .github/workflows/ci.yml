@@ -35,10 +35,15 @@ jobs:
         timeout-minutes: 13
         run: npm run check:ci
       - name: Verify structured failure evidence
+        id: verify_plugin_failure_evidence
         if: ${{ failure() && steps.run_check_ci.conclusion == 'failure' }}
+        env:
+          SYSTEMSCULPT_EXPECTED_GIT_SHA: ${{ github.sha }}
+          SYSTEMSCULPT_EXPECTED_RUNNER_ARCH: ${{ runner.arch }}
+          SYSTEMSCULPT_EXPECTED_RUNNER_OS: ${{ runner.os }}
         run: node scripts/verify-ci-failure-evidence.mjs --job plugin
       - name: Upload failure evidence
-        if: failure()
+        if: ${{ always() && steps.verify_plugin_failure_evidence.conclusion == 'success' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: plugin-ci-failure-evidence-ubuntu-node-22
@@ -48,7 +53,8 @@ jobs:
             manifest.json
             main.js
             styles.css
-          if-no-files-found: warn
+          if-no-files-found: error
+          include-hidden-files: true
           retention-days: 14
 
   compatibility:
@@ -77,10 +83,15 @@ jobs:
         timeout-minutes: 18
         run: npm run check:compat
       - name: Verify structured failure evidence
+        id: verify_compatibility_failure_evidence
         if: ${{ failure() && steps.run_check_compat.conclusion == 'failure' }}
+        env:
+          SYSTEMSCULPT_EXPECTED_GIT_SHA: ${{ github.sha }}
+          SYSTEMSCULPT_EXPECTED_RUNNER_ARCH: ${{ runner.arch }}
+          SYSTEMSCULPT_EXPECTED_RUNNER_OS: ${{ runner.os }}
         run: node scripts/verify-ci-failure-evidence.mjs --job compatibility
       - name: Upload failure evidence
-        if: failure()
+        if: ${{ always() && steps.verify_compatibility_failure_evidence.conclusion == 'success' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: plugin-compat-failure-evidence-${{ matrix.os }}-node-${{ matrix.node }}
@@ -90,7 +101,8 @@ jobs:
             manifest.json
             main.js
             styles.css
-          if-no-files-found: warn
+          if-no-files-found: error
+          include-hidden-files: true
           retention-days: 14
 
   required:

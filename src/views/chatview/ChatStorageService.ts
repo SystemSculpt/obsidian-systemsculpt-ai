@@ -352,13 +352,6 @@ export class ChatStorageService {
               CHAT_HISTORY_READ_TIMEOUT_MS,
             );
             
-            // Validate file structure before attempting to parse
-            if (!this.isValidChatFile(content)) {
-              // Silently skip files that are not valid chat files (e.g., empty files, other markdown notes).
-              // A warning will be logged by the parser later if a file appears to be a chat file but is corrupted.
-              return null;
-            }
-            
             const parsed = this.parseMarkdownContent(content, filePath);
 
             if (!parsed) return null;

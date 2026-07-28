@@ -37,6 +37,22 @@ export function normalizeApiBaseUrl(value = CANONICAL_API_BASE_URL) {
   return raw;
 }
 
+export function resolvePluginBuildStamp({
+  version,
+  override,
+  production = true,
+} = {}) {
+  const explicit = String(override || '').trim();
+  if (explicit) return explicit;
+  if (!production) return 'dev';
+
+  const releaseVersion = String(version || '').trim();
+  if (!/^\d+\.\d+\.\d+$/.test(releaseVersion)) {
+    throw new Error('Production plugin builds require a semantic manifest version');
+  }
+  return `release-${releaseVersion}`;
+}
+
 export function createPluginBuildOptions({
   entryPoint = 'src/main.ts',
   outfile = 'main.js',
@@ -44,7 +60,7 @@ export function createPluginBuildOptions({
   production = true,
   overrides = {},
   plugins = [],
-  buildStamp = new Date().toISOString(),
+  buildStamp = 'dev',
   apiBaseUrl = CANONICAL_API_BASE_URL,
 } = {}) {
   const normalizedApiBaseUrl = normalizeApiBaseUrl(apiBaseUrl);

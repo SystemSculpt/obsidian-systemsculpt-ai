@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  nodeRequireInvocation,
   normalizeLineEndings,
-  npmExecutable,
   toRepositoryPath,
 } from "./platform-portability.mjs";
 
@@ -22,8 +22,17 @@ test("policy text normalizes Windows and legacy Mac line endings", () => {
   assert.equal(normalizeLineEndings("permissions:\r\n  contents: read\r"), "permissions:\n  contents: read\n");
 });
 
-test("npm uses the executable form required by the host", () => {
-  assert.equal(npmExecutable("win32"), "npm.cmd");
-  assert.equal(npmExecutable("darwin"), "npm");
-  assert.equal(npmExecutable("linux"), "npm");
+test("Node preload paths remain one argv value when repository paths contain spaces", () => {
+  assert.deepEqual(
+    nodeRequireInvocation(
+      "C:\\Users\\QA Engineer\\System Sculpt\\scripts\\jest-preload.cjs",
+      ["C:\\Users\\QA Engineer\\System Sculpt\\node_modules\\jest\\bin\\jest.js", "--runInBand"],
+    ),
+    [
+      "--require",
+      "C:\\Users\\QA Engineer\\System Sculpt\\scripts\\jest-preload.cjs",
+      "C:\\Users\\QA Engineer\\System Sculpt\\node_modules\\jest\\bin\\jest.js",
+      "--runInBand",
+    ],
+  );
 });

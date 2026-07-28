@@ -75,7 +75,7 @@
     "test:mobile:interactions": "node scripts/jest.mjs --strict-console --config jest.mobile-interactions.config.cjs --runInBand --detectOpenHandles --openHandlesTimeout=1000 --randomize --showSeed",
     "test:embeddings:serial": "node scripts/jest.mjs --config jest.embeddings.config.cjs --runInBand --passWithNoTests",
     "test:release-script": "node --test scripts/build-provenance.test.mjs scripts/plugin-build-options.test.mjs scripts/plugin-artifacts.test.mjs scripts/release-plugin.test.mjs",
-    "release:plugin": "npm run check:ci && node scripts/release-plugin.mjs",
+    "release:plugin": "npm run check:ci && node scripts/release-plugin.mjs --require-clean --require-tag",
     "smoke:chat:live": "node scripts/live-chat-smoke.mjs"
   },
   "type": "module",

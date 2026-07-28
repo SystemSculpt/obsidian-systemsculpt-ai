@@ -28,7 +28,7 @@ test("package scripts preserve fast edit and exhaustive verification tiers", () 
   );
   assert.equal(
     packageJson.scripts["release:plugin"],
-    "npm run check:ci && node scripts/release-plugin.mjs",
+    "npm run check:ci && node scripts/release-plugin.mjs --require-clean --require-tag",
   );
   assert.equal(packageJson.scripts["check:full"], "npm run check:ci");
   assert.match(packageJson.scripts["check:mobile"], /npm run test:mobile:interactions/);
@@ -111,6 +111,8 @@ test("randomized Jest gates print a replayable seed before the child starts", ()
   assert.match(jestRunner, /HOSTED_JEST_PHASE_MARKER_FILE/);
   assert.match(jestRunner, /schemaVersion: 1/);
   assert.match(jestRunner, /seed: replaySeed/);
+  assert.match(jestRunner, /nodeRequireInvocation\(preload, \[jestBin, \.\.\.jestArgs\]\)/);
+  assert.doesNotMatch(jestRunner, /requireFlag|nextNodeOptions/);
 });
 
 test("failing plugin subgates always emit their captured diagnostic output", () => {
