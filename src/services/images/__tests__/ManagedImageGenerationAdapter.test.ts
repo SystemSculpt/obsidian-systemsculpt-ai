@@ -201,7 +201,6 @@ describe("ManagedImageGenerationAdapter", () => {
           downloadOutput: jest.fn(async () => ({ metadata, bytes: new Uint8Array([1]).buffer })),
         } as never,
         createRequestId: () => "request-1",
-        maxPolls: 2,
       });
       const controller = new AbortController();
       const add = jest.spyOn(controller.signal, "addEventListener");
@@ -261,7 +260,7 @@ describe("ManagedImageGenerationAdapter", () => {
   it("retries transient status failures with backoff instead of failing the run", async () => {
     const jobId = "123e4567-e89b-42d3-a456-426614174000";
     const retryable503 = Object.assign(new Error("SystemSculpt processing is temporarily unavailable."), {
-      name: "ManagedJobError", code: "temporarily_unavailable", retryable: true,
+      name: "ManagedJobError", code: "temporarily_unavailable", retryable: true, retryAfterMs: 2_500,
     });
     const transportBlip = new TypeError("connection reset");
     const status = jest.fn()
@@ -277,25 +276,36 @@ describe("ManagedImageGenerationAdapter", () => {
 
     await expect(harness.generate()).resolves.toMatchObject({ jobId });
     expect(status).toHaveBeenCalledTimes(5);
-    // Backoff doubles per consecutive failure and resets after a good poll.
-    expect(harness.waits).toEqual([2_000, 4_000, 0, 2_000]);
+    expect(harness.waits).toEqual([2_500, 2_000, 0, 2_500]);
   });
 
-  it("does not retry protocol violations and gives up after consecutive transient failures", async () => {
+  it("does not retry protocol violations", async () => {
     const malformed = Object.assign(new Error("Malformed managed job response."), {
       name: "ManagedJobError", code: "malformed_response", retryable: false,
     });
     const malformedHarness = pollHarness(jest.fn().mockRejectedValue(malformed));
     await expect(malformedHarness.generate()).rejects.toMatchObject({ code: "malformed_response" });
     expect(malformedHarness.waits).toEqual([]);
+  });
 
-    const retryable503 = Object.assign(new Error("SystemSculpt processing is temporarily unavailable."), {
-      name: "ManagedJobError", code: "temporarily_unavailable", retryable: true,
-    });
-    const exhausted = jest.fn().mockRejectedValue(retryable503);
-    const exhaustedHarness = pollHarness(exhausted);
-    await expect(exhaustedHarness.generate()).rejects.toMatchObject({ code: "temporarily_unavailable" });
-    expect(exhausted).toHaveBeenCalledTimes(6);
-    expect(exhaustedHarness.waits).toEqual([2_000, 4_000, 8_000, 16_000, 30_000]);
+  it("does not stop a valid image job at the historical 900-poll boundary", async () => {
+    let polls = 0;
+    const harness = pollHarness(jest.fn(async () => {
+      polls += 1;
+      if (polls <= 900) {
+        return {
+          job: { id: harness.jobId, status: "processing" },
+          outputs: [],
+          poll_after_ms: 0,
+        };
+      }
+      return {
+        job: { id: harness.jobId, status: "succeeded" },
+        outputs: [harness.metadata],
+      };
+    }));
+
+    await expect(harness.generate()).resolves.toMatchObject({ jobId: harness.jobId });
+    expect(polls).toBe(901);
   });
 });

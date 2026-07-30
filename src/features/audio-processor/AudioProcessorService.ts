@@ -23,10 +23,12 @@ import {
   normalizeAudioProcessorOutputPreset,
 } from "./types";
 import { requireYouTubeVideoUrl } from "./youtube";
+import {
+  isRetryableManagedJobObservationError,
+  observeManagedJob,
+} from "../../services/managed/ManagedJobObservation";
 
 const POLL_INTERVAL_MS = 2_000;
-const RESUME_ATTEMPT_INTERVAL_MS = 15_000;
-const MAX_POLL_DURATION_MS = 12 * 60 * 60 * 1_000;
 const MAX_UPLOAD_ATTEMPTS = 3;
 const UPLOAD_RETRY_DELAY_MS = 750;
 const MAX_UPLOAD_COMPLETION_ATTEMPTS = 3;
@@ -44,8 +46,6 @@ export interface AudioProcessorServiceOptions {
     | "cleanupStale"
   >;
   pollIntervalMs?: number;
-  resumeAttemptIntervalMs?: number;
-  maxPollDurationMs?: number;
   sleep?: (milliseconds: number, signal: AbortSignal) => Promise<void>;
 }
 
@@ -62,8 +62,6 @@ export interface ProcessAudioOptions {
 export class AudioProcessorService {
   private readonly api: AudioProcessorApiClient;
   private readonly pollIntervalMs: number;
-  private readonly maxPollDurationMs: number;
-  private readonly resumeAttemptIntervalMs: number;
   private readonly sleep: (milliseconds: number, signal: AbortSignal) => Promise<void>;
   private readonly uploadRecovery: AudioProcessorUploadRecovery;
   private deviceStaging: AudioProcessorServiceOptions["deviceStaging"] | null;
@@ -77,8 +75,6 @@ export class AudioProcessorService {
       licenseKey: () => plugin.settings.licenseKey,
     });
     this.pollIntervalMs = options.pollIntervalMs ?? POLL_INTERVAL_MS;
-    this.resumeAttemptIntervalMs = options.resumeAttemptIntervalMs ?? RESUME_ATTEMPT_INTERVAL_MS;
-    this.maxPollDurationMs = options.maxPollDurationMs ?? MAX_POLL_DURATION_MS;
     this.sleep = options.sleep ?? abortableSleep;
     this.uploadRecovery = new AudioProcessorUploadRecovery(plugin);
     this.deviceStaging = options.deviceStaging ?? null;
@@ -559,12 +555,29 @@ export class AudioProcessorService {
     options: ProcessAudioOptions,
     recovery: Readonly<{ resumeAwaitingFundsOnce?: boolean }> = {},
   ): Promise<AudioProcessorJob> {
-    const startedAt = Date.now();
     let job = initial;
-    let previousStateKey: string | null = null;
-    let stablePolls = 0;
-    let attemptedAwaitingFundsResume = false;
-    while (true) {
+    if (
+      job.status === "awaiting_funds"
+      && recovery.resumeAwaitingFundsOnce
+      && job.resumeRequired
+    ) {
+      job = await this.api.resumeJob(
+        job.id,
+        `${operationId}:resume`,
+        options.signal,
+      );
+    }
+
+    for await (const observed of observeManagedJob<AudioProcessorJob>({
+      initial: job,
+      read: () => this.api.getJob(job.id, options.signal),
+      signal: options.signal,
+      pollAfterMs: value => value.pollAfterMs ?? this.pollIntervalMs,
+      isRetryableError: isRetryableManagedJobObservationError,
+      retryAfterMs: error => (error as Partial<AudioProcessorApiError> | null)?.retryAfterMs,
+      wait: this.sleep,
+    })) {
+      job = observed;
       if (job.status === "succeeded") {
         this.reportServerProgress(job, options);
         return job;
@@ -588,50 +601,12 @@ export class AudioProcessorService {
         );
       }
       this.reportServerProgress(job, options);
-      if (Date.now() - startedAt >= this.maxPollDurationMs) {
-        throw new AudioProcessorApiError(
-          "The audio is still processing. Reopen Audio Processor to resume the active job.",
-          0,
-          "poll_timeout",
-        );
-      }
-      if (
-        job.status === "awaiting_funds"
-        && recovery.resumeAwaitingFundsOnce
-        && job.resumeRequired
-        && !attemptedAwaitingFundsResume
-      ) {
-        attemptedAwaitingFundsResume = true;
-        job = await this.api.resumeJob(
-          job.id,
-          `${operationId}:resume`,
-          options.signal,
-        );
-        previousStateKey = null;
-        stablePolls = 0;
-        continue;
-      }
-      const stateKey = `${job.status}:${job.stage}`;
-      stablePolls = stateKey === previousStateKey ? stablePolls + 1 : 0;
-      previousStateKey = stateKey;
-      const delay = this.nextPollDelay(job, stablePolls);
-      await this.sleep(delay, options.signal);
-      job = await this.api.getJob(job.id, options.signal);
     }
-  }
-
-  private nextPollDelay(job: AudioProcessorJob, stablePolls: number): number {
-    const base = job.status === "awaiting_funds"
-      ? this.resumeAttemptIntervalMs
-      : this.pollIntervalMs;
-    const multiplier = job.status === "awaiting_funds" ? 2 : 1.75;
-    const maxDelay = job.status === "awaiting_funds"
-      ? Math.max(base, 120_000)
-      : job.stage === "queued"
-        ? Math.max(base, 15_000)
-        : Math.max(base, 30_000);
-    const growth = base * Math.pow(multiplier, stablePolls);
-    return Math.max(0, Math.min(maxDelay, Math.round(growth)));
+    throw new AudioProcessorApiError(
+      "Audio processing observation ended without a terminal status.",
+      0,
+      "processing_failed",
+    );
   }
 
   private reportServerProgress(

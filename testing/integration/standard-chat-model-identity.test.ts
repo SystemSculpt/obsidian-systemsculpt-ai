@@ -12,7 +12,7 @@ const BUNDLE_PATH = path.resolve(__dirname, "..", "..", "main.js");
 const MANIFEST_PATH = path.resolve(__dirname, "..", "..", "manifest.json");
 
 describe("built standard Chat identity", () => {
-  it("opens and prepares a managed send without client-side model/provider authority", async () => {
+  it("opens and submits a thin agent turn without client-side model/provider authority", async () => {
     if (!existsSync(BUNDLE_PATH)) {
       throw new Error(`Built bundle not found at ${BUNDLE_PATH} — run npm run build first.`);
     }

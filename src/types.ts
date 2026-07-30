@@ -81,6 +81,12 @@ export interface SystemSculptSettings {
   vaultInstanceId?: string;
 
   /**
+   * Stable opaque installation identity bound into thin-agent tickets.
+   * It is not authentication or execution authority.
+   */
+  thinAgentClientId?: string;
+
+  /**
    * When enabled, render a vim-style relative line number gutter in the markdown
    * editor: the current line shows its absolute number, every other line shows
    * its distance from the cursor.

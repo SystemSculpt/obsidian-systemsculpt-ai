@@ -3,13 +3,15 @@
 The plugin has four local test layers:
 
 1. src/**/__tests__ proves module behavior with Jest, including seeded
-   generative managed-chat histories.
+   lifecycle, persistence, rendering, approval, queue, and recovery races.
 2. testing/integration imports the production bundle and proves managed
    contracts plus Obsidian host composition.
 3. scripts/*.test.mjs proves build, release, workflow, mobile-import, sync, and
    repository policy.
-4. The byte-identical managed-chat replay fixture is consumed by both this
-   repository and the website API's real request validator.
+4. The retired managed-chat replay fixture remains hash-pinned as a released
+   compatibility artifact. Behavioral validation of that legacy server route
+   belongs to the website API; the plugin does not replay it through a second
+   client-owned projector.
 
 Managed fixtures live in testing/fixtures/managed; versioned settings inputs
 live in testing/fixtures/settings. Default tests need no provider key, hosted
@@ -33,6 +35,7 @@ npm run test:embeddings
 npm run test:integration
 npm run test:chatview:critical
 npm run test:chatview:mutants
+npm run test:thin-agent:endurance
 npm run check:plugin
 npm run check:ci
 npm run check:compat
@@ -48,12 +51,16 @@ npm run check:full
 - test:integration imports the production artifact in the Obsidian host mock.
 - check:plugin adds types, mobile, sync, artifact, and release guards.
 - test:chatview:critical uses strict console, randomized test order with a
-  printed replay seed, open-handle detection, provider-wire generative cases,
-  and per-file uncovered-code budgets on the high-risk ChatView seams.
+  printed replay seed, open-handle detection, adversarial thin-session and
+  local-persistence cases, and per-file uncovered-code budgets on the
+  high-risk ChatView seams.
 - test:chatview:mutants copies only the required source and fixture trees into
-  an isolated temporary mirror, applies 14 curated AST-anchored regressions one
+  an isolated temporary mirror, applies 5 curated AST-anchored regressions one
   at a time, and requires focused tests to kill every one. It runs without
   coverage or randomized order so a survivor is deterministic and actionable.
+- test:thin-agent:endurance drives the real headless Chat, Bridge, native
+  transport, approval, mutation-journal, reconnect, and terminal seams through
+  the credential-free long-run fixture.
 - check:ci is the exact exhaustive PR gate: check:plugin plus the critical-risk
   and mutation gates, focused mobile interactions, strict randomized unit and
   embeddings tests, already-built integration, and release suites.
@@ -65,7 +72,7 @@ npm run check:full
   repeating the coverage instrumentation already enforced by check:ci.
 - check:full is the local alias for check:ci.
 
-CI runs check:ci on Ubuntu/Node 22. It also runs check:compat on Node 20.10,
+CI runs check:ci on Ubuntu/Node 22. It also runs check:compat on Node 22.18,
 Node 24, macOS/Node 22, and Windows/Node 22 with fail-fast disabled. All jobs
 are credential-free. A stable `required` job fails unless every lane succeeds.
 There is no native-device or provider matrix.

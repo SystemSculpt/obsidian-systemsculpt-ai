@@ -12,6 +12,9 @@ module.exports = {
 	],
 	moduleNameMapper: {
 		'^obsidian$': '<rootDir>/src/tests/mocks/obsidian.js',
+		'^agents/chat$': '<rootDir>/src/tests/mocks/agents-chat.js',
+		'^agents/chat/react$': '<rootDir>/src/tests/mocks/agents-chat-react.js',
+		'^agents/client$': '<rootDir>/src/tests/mocks/agents-client.js',
 		'^@/(.*)$': '<rootDir>/src/$1',
 		'^src/(.*)$': '<rootDir>/src/$1'
 	},
@@ -30,6 +33,9 @@ module.exports = {
 			}
 		]
 	},
+	transformIgnorePatterns: [
+		'/node_modules/(?!(?:@ai-sdk|@standard-schema/spec|@workflow/serde|eventsource-parser|ai)/)'
+	],
 	collectCoverageFrom: [
 		'src/**/*.ts',
 		'!src/main.ts',

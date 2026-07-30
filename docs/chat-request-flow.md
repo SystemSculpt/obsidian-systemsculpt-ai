@@ -1,69 +1,189 @@
-# Managed Chat request flow
+# ChatView thin-agent flow
 
-Last verified against code: **2026-07-12**.
+Architecture requirement adopted: **2026-07-29**.
 
-Chat has one execution path: an accepted SystemSculpt request followed by a
-managed stream. The plugin does not select a provider or model.
+ChatView is a thin UI and Obsidian capability adapter for one authoritative
+server-side agent. A harness, model, provider, prompt, caching, compaction,
+retry, or server-tool change must not require another plugin release.
 
-## Main flow
+## Reused native harness
 
-1. `InputHandler` commits the user message and captures a durable transcript
-   snapshot.
-2. Managed admission returns a lease for the accepted chat turn.
-3. `ChatRequestPreparationService` prepares context and normalized built-in
-   tools once for that accepted operation. The server owns the chat system
-   prompt.
-4. `AcceptedChatRequestSnapshot` freezes the managed request (`ai-agent`) and
-   its policy audit before dispatch.
-5. `ManagedChatRuntimeAdapter` creates a transport ticket, derives an
-   idempotency key, and streams the accepted request through
-   `ManagedCapabilityClient`.
-6. `StreamingController` renders stream events and persists the assistant
-   result.
-7. When the managed response requests tool use, `InputHandler` applies the
-   local approval policy, executes the built-in vault tool, persists the tool
-   checkpoint, and sends a continuation from the new durable snapshot.
+The plugin subclasses the official `AbstractChat` class from `ai` with a tiny
+observable non-React state, and uses Cloudflare `AgentClient` and
+`WebSocketChatTransport`.
 
-## Key modules
+Cloudflare currently ships `WebSocketChatTransport` from
+`agents/chat/react`, whose module imports React and `@ai-sdk/react` at runtime.
+Those peer dependencies remain explicit for clean mobile installs even though
+ChatView itself does not use React or its hook state.
 
-- UI and turn orchestration: `src/views/chatview/InputHandler.ts`
-- Accepted request preparation: `src/services/chat/ChatRequestPreparationService.ts`
-- Immutable wire snapshot: `src/services/chat/AcceptedChatRequestSnapshot.ts`
-- Managed dispatch: `src/views/chatview/turn/ManagedChatRuntimeAdapter.ts`
-- Managed capability contract: `src/services/managed/ManagedCapabilityClient.ts`
-- Hosted transport: `src/services/managed/adapters/HostedTransportAdapter.ts`
-- Stream rendering and persistence: `src/views/chatview/controllers/StreamingController.ts`
-- Tool execution and policy: `src/views/chatview/ToolCallManager.ts`, `src/utils/toolPolicy.ts`
+Those dependencies own:
 
-## Request ownership
+- native UI message assembly and streaming;
+- tool input, output, and approval parts;
+- cancellation;
+- stream continuation after a client-tool result;
+- reconnect probes, pending streams, replay, and resume acknowledgement;
+- authoritative message snapshots and message updates.
 
-The frozen request contains:
+The plugin does not parse an AI SDK byte stream, reduce a private event
+protocol, count continuation rounds, impose a turn limit, select a provider,
+or decide when the model should stop. There is no client-side harness.
 
-- the fixed managed model identity `ai-agent`;
-- normalized conversation history;
-- selected vault context and document references;
-- normalized built-in tool declarations.
+The small headless state exists because Obsidian does not use React. It
+only:
 
-The API base is compiled into the plugin. Settings never own network routing,
-provider credentials, or model selection.
+- subscribes to the official headless `Chat` state;
+- maps native UI parts into the existing Obsidian renderer model;
+- applies local approval policy;
+- executes requested Obsidian vault capabilities;
+- returns native tool results and approval responses;
+- resumes the native stream after those client interactions;
+- reconciles native full-message and message-update broadcasts;
+- records local mutation receipts; and
+- persists the final assistant turn in the user’s chat note.
 
-## Built-in tool surfaces
+## Authority boundary
 
-- Local filesystem tools
+The server owns:
 
-Web search is negotiated as a managed chat capability and executes on the
-server. The plugin has no direct `web_search`/`web_fetch` tool or corpus writer.
+- the agent harness and every model continuation;
+- authoritative conversation history;
+- model and provider selection;
+- provider retry and rate-limit handling;
+- server tools such as web search;
+- memory, context construction, compaction, and prompt caching;
+- usage, cost, credit reservation, and settlement;
+- incident diagnostics and terminal run outcome.
 
-Read-only tools can run automatically under the local policy. Destructive vault
-tools require approval unless the user has explicitly trusted them.
+The plugin owns:
 
-## Continuations and failure behavior
+- ChatView input and rendering;
+- native message file parts;
+- reading user-selected vault context into source records;
+- the implementation of `obsidian.vault@1`;
+- local approval UI and policy;
+- crash-safe local mutation receipts;
+- a non-authoritative conversation routing pointer in the chat note.
 
-Tool continuations reuse the accepted request and append only messages that
-were durably committed after its original snapshot. Each phase gets a stable
-idempotency key. The turn fails with a typed managed error when admission,
-transport, continuation identity, or the maximum continuation depth fails; it
-does not fall back to a local runtime or external provider.
+The plugin announces only the aggregate `obsidian.vault@1` capability. It does
+not send model-facing tool schemas, prompt text, provider identities, or local
+history as bootstrap authority.
 
-`StreamingController` handles content, reasoning, tool-call, annotation, meta,
-and footnote events and persists the final stop reason with the assistant turn.
+## Turn flow
+
+1. The plugin bootstraps a conversation with a client ID, conversation ID,
+   exact loaded `main.js` SHA-256, and `obsidian.vault@1`.
+2. It constructs the official Cloudflare client and transport.
+3. It installs native message, open, and close listeners before awaiting the
+   socket’s ready state, so the initial authoritative history cannot race past
+   the headless `Chat`.
+4. After bootstrap, it stages selected vault sources once through the
+   short-lived-access context endpoint and receives one opaque `context_ref`.
+5. It submits the native UI user message. User attachments are native file
+   parts. The Think body contains only `context_ref`.
+6. The server runs for however long and through however many server-tool or
+   model steps are needed.
+7. A vault tool arrives as a native client-tool part.
+8. The plugin obtains local approval when required, executes the one requested
+   operation, and returns its native result.
+9. The official transport resumes the server stream. There is no continuation
+   counter or locally chosen finish condition.
+10. Native message updates reconcile durable server state. Exactly one
+   `data-systemsculpt-run-terminal` part identifies success, cancellation, or
+   correlated failure.
+11. On success, the plugin persists the assistant presentation and refreshes
+    credits from the existing authoritative balance endpoint.
+
+## Context and files
+
+After bootstrap, the plugin stages selected context once:
+
+```ts
+{
+  contract_version: "thin-agent-v1";
+  root_message_id: string;
+  context_sources: Array<
+    | { kind: "text"; path: string; content: string }
+    | { kind: "image"; path: string; data_url: string }
+    | { kind: "document_ref"; path: string; document_id: string }
+  >;
+}
+```
+
+The server returns one opaque, expiring `context_ref`. The lazy native turn
+body is then exactly:
+
+```ts
+{
+  context_ref: string;
+}
+```
+
+Raw context is not sent through Think, recorded in client diagnostics, or
+retried by a client staging loop. These are source records, not prompt
+instructions. The server decides how they enter model context. Text and image
+message attachments remain native UI file parts so future supported media
+types do not require a second chat protocol.
+
+Web search is server policy and a server-side tool. It is not a client request
+preference, queued-item field, or plugin-owned capability.
+
+## Historical edit
+
+Editing an earlier user turn creates a new conversation ID and bootstraps:
+
+```json
+{
+  "fork": {
+    "source_conversation_id": "conversation_<32 lowercase hex>",
+    "before_message_id": "<native message ID>"
+  }
+}
+```
+
+The server copies authoritative history before that boundary. The plugin does
+not reconstruct or replay a local transcript as execution authority.
+
+## Mutation replay safety
+
+Vault mutations are the only operations that require local delivery
+deduplication. Before execution, the plugin durably records the tuple:
+
+`conversation_id`, native tool-call ID, tool name, and input fingerprint.
+
+A completed receipt returns the recorded result. A started receipt has an
+unknown outcome and is never repeated automatically. A reused call ID with
+different input fails closed. Receipts have no rolling cap and live until that
+server conversation is deliberately deleted.
+
+If the vault operation returns but its completed receipt cannot be written,
+the plugin reports `TOOL_MUTATION_OUTCOME_UNKNOWN` as a resolved tool result
+and leaves the journal unavailable. It does not retry the mutation.
+
+## Diagnostics
+
+Server-side runs already carry a correlated terminal incident. For client-only
+failures, the plugin sends one best-effort extension frame:
+
+`systemsculpt.client_diagnostic.v1`
+
+It contains only a safe code, phase, severity, run ID, optional tool identity,
+HTTP status, and retryability. It never contains prompts, paths, file content,
+arguments, results, credentials, tickets, or stack traces. Diagnostic delivery
+cannot change the user-visible turn and never retries recursively.
+
+## Compatibility proof
+
+The local gate exercises the official packages through a deterministic
+40-continuation scenario with more than 40 vault calls, parallel tool batches,
+approval, mutation replay, and reconnect. It asserts that the client has no
+hard continuation limit. Focused bridge tests additionally cover:
+
+- more than 30 parallel client-tool calls;
+- initial-history listener ordering;
+- post-stream native message-update terminalization;
+- approval acknowledgement before mutation;
+- corrupt, started, completed, conflicting, and write-failed receipts;
+- receipt retention beyond the removed 256-entry cap; and
+- bounded rate-limit and client-diagnostic behavior.

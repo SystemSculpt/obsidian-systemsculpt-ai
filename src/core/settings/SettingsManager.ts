@@ -208,6 +208,20 @@ export class SettingsManager {
     if (typeof migratedSettings.vaultInstanceId !== "string" || migratedSettings.vaultInstanceId.trim().length === 0) {
       migratedSettings.vaultInstanceId = generateVaultInstanceId();
     }
+    if (typeof migratedSettings.thinAgentClientId !== "string"
+      || !/^client_[a-f0-9]{32}$/.test(migratedSettings.thinAgentClientId)) {
+      const vaultHex = String(migratedSettings.vaultInstanceId)
+        .toLowerCase()
+        .replace(/[^a-f0-9]/g, "");
+      const randomHex = generateVaultInstanceId()
+        .toLowerCase()
+        .replace(/[^a-f0-9]/g, "")
+        .padEnd(32, "0")
+        .slice(0, 32);
+      migratedSettings.thinAgentClientId = `client_${
+        /^[a-f0-9]{32}$/.test(vaultHex) ? vaultHex : randomHex
+      }`;
+    }
 
     if (typeof migratedSettings.embeddingsVectorFormatVersion !== "number" || !Number.isFinite(migratedSettings.embeddingsVectorFormatVersion)) {
       migratedSettings.embeddingsVectorFormatVersion = DEFAULT_SETTINGS.embeddingsVectorFormatVersion;

@@ -2,30 +2,22 @@
  * @jest-environment jsdom
  */
 
-import { App, MarkdownRenderer } from "obsidian";
+import { App, MarkdownRenderer, setIcon } from "obsidian";
 import { AgentComposer } from "../AgentComposer";
 import {
-  applyManagedAgentEvent,
-  createInitialAgentConversation,
-  MANAGED_AGENT_EVENT_VERSION,
-  type ManagedAgentEvent,
-  type ManagedAgentEventEnvelope,
+  type AgentArtifact,
+  type AgentConversationSnapshot,
+  type AgentPart,
 } from "../AgentConversation";
 import { AgentWorkspace } from "../AgentWorkspace";
 import { AgentConversationRenderer } from "../AgentConversationRenderer";
 import { ChatMarkdownSerializer } from "../storage/ChatMarkdownSerializer";
 import type { ChatMessage } from "../../../types";
-
-function envelope(seq: number, event: ManagedAgentEvent): ManagedAgentEventEnvelope {
-  return {
-    version: MANAGED_AGENT_EVENT_VERSION,
-    seq,
-    runId: "run-1",
-    turnId: "user-1",
-    emittedAt: seq,
-    event,
-  };
-}
+import type { UIMessage } from "ai";
+import {
+  durableAssistant,
+  projectThinAgentChat,
+} from "../thin/ThinAgentProjection";
 
 function reloadSavedMessages(messages: ChatMessage[]): ChatMessage[] {
   const parsed = (ChatMarkdownSerializer as unknown as {
@@ -38,10 +30,11 @@ function reloadSavedMessages(messages: ChatMessage[]): ChatMessage[] {
 describe("AgentComposer", () => {
   it("sends while idle, queues while running, and preserves line breaks", async () => {
     const parent = document.body.createDiv();
-    const submissions: Array<{ text: string; webSearch: boolean; mode: "send" | "queue" }> = [];
+    const submissions: Array<{ text: string; mode: "send" | "queue" }> = [];
+    const onStop = jest.fn();
     const composer = new AgentComposer(parent, {
       onSubmit: async (submission) => { submissions.push(submission); },
-      onStop: jest.fn(),
+      onStop,
       onAttach: jest.fn(),
       onRemoveAttachment: jest.fn(),
     });
@@ -54,19 +47,79 @@ describe("AgentComposer", () => {
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     await Promise.resolve();
     await Promise.resolve();
-    expect(submissions).toEqual([{ text: "First request", webSearch: false, mode: "send" }]);
+    expect(submissions).toEqual([{ text: "First request", mode: "send" }]);
 
     composer.setRunning(true);
     expect(parent.querySelector('[aria-label="Search the web"]')).toBeNull();
+    parent.querySelector<HTMLButtonElement>('[aria-label="Stop response"]')!.click();
+    expect(onStop).toHaveBeenCalledTimes(1);
     composer.setValue("Follow up");
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     await Promise.resolve();
     await Promise.resolve();
-    expect(submissions.at(-1)).toEqual({ text: "Follow up", webSearch: false, mode: "queue" });
+    expect(submissions.at(-1)).toEqual({ text: "Follow up", mode: "queue" });
 
     composer.setValue("Keep me");
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", shiftKey: true, bubbles: true }));
     expect(composer.getValue()).toBe("Keep me");
+    composer.unload();
+  });
+
+  it("makes a saved-history composer visibly read-only until a new chat enables it", async () => {
+    const parent = document.body.createDiv();
+    const onSubmit = jest.fn(async () => undefined);
+    const onAttach = jest.fn();
+    const onRemoveAttachment = jest.fn();
+    const composer = new AgentComposer(parent, {
+      onSubmit,
+      onStop: jest.fn(),
+      onAttach,
+      onRemoveAttachment,
+    });
+    composer.load();
+    composer.setValue("Draft that must not be sent");
+    composer.setAttachments([{
+      id: "legacy-context",
+      label: "Legacy.md",
+      path: "Legacy.md",
+      kind: "vault",
+    }]);
+
+    composer.setReadOnly("View-only saved chat. Start a new chat to continue.");
+
+    const input = parent.querySelector<HTMLTextAreaElement>("textarea")!;
+    expect(input.disabled).toBe(true);
+    expect(input.placeholder).toBe("Start a new chat to continue.");
+    expect(parent.querySelector(".systemsculpt-agent-prompt-hint")?.textContent)
+      .toBe("View-only saved chat. Start a new chat to continue.");
+    expect(parent.querySelector<HTMLButtonElement>('[aria-label="Send message"]')!.disabled).toBe(true);
+    expect(parent.querySelector<HTMLButtonElement>('[aria-label="Attach files"]')!.disabled).toBe(true);
+    expect(parent.querySelector<HTMLButtonElement>(
+      '[aria-label="Add vault context, including images"]',
+    )!.disabled).toBe(true);
+    expect(parent.querySelector<HTMLSelectElement>('[aria-label="Vault changes"]')!.disabled).toBe(true);
+    expect(parent.querySelector<HTMLButtonElement>('[aria-label="Remove Legacy.md"]')!.disabled).toBe(true);
+
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    parent.querySelector<HTMLButtonElement>('[aria-label="Remove Legacy.md"]')!.click();
+    await Promise.resolve();
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(onAttach).not.toHaveBeenCalled();
+    expect(onRemoveAttachment).not.toHaveBeenCalled();
+    expect(composer.getValue()).toBe("Draft that must not be sent");
+
+    composer.setReadOnly(null);
+
+    expect(input.disabled).toBe(false);
+    expect(input.placeholder).toBe("Ask SystemSculpt to work in your vault…");
+    expect(parent.querySelector<HTMLButtonElement>('[aria-label="Send message"]')!.disabled).toBe(false);
+    parent.querySelector<HTMLButtonElement>('[aria-label="Send message"]')!.click();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(onSubmit).toHaveBeenCalledWith({
+      text: "Draft that must not be sent",
+      mode: "send",
+    });
     composer.unload();
   });
 
@@ -365,6 +418,7 @@ describe("AgentWorkspace", () => {
 
   afterEach(() => {
     jest.restoreAllMocks();
+    jest.useRealTimers();
     if (originalClipboardDescriptor) {
       Object.defineProperty(window.navigator, "clipboard", originalClipboardDescriptor);
       return;
@@ -396,6 +450,152 @@ describe("AgentWorkspace", () => {
     expect(header.hasAttribute("tabindex")).toBe(false);
     expect(node.querySelector("summary")).toBeNull();
     expect(node.querySelector("pre")).toBeNull();
+  });
+
+  it("renders fixed and generic server activity without exposing protocol tool names", async () => {
+    const host = document.body.createDiv();
+    const onApprove = jest.fn();
+    const renderer = new AgentConversationRenderer(host, {
+      app: new App(),
+      sourcePath: () => "",
+      onApprove,
+      onOpenArtifact: jest.fn(),
+      onCopyArtifactPath: jest.fn(),
+    });
+    const node = host.createDiv();
+
+    await (renderer as any).renderTool(node, {
+      id: "server-search",
+      order: 0,
+      kind: "tool",
+      messageId: "assistant-search",
+      callId: "call-search",
+      name: "web_search",
+      location: "server",
+      input: { query: "Obsidian agents" },
+      state: "running",
+    });
+    expect(node.textContent).toContain("Search web");
+    expect(node.textContent).not.toContain("web_search");
+
+    node.empty();
+    await (renderer as any).renderTool(node, {
+      id: "server-additive",
+      order: 0,
+      kind: "tool",
+      messageId: "assistant-additive",
+      callId: "call-additive",
+      name: "cf_agent_provider_retry",
+      location: "server",
+      input: { query: "provider-internal" },
+      state: "running",
+      output: { summary: "Cloudflare provider retry" },
+    });
+    expect(node.textContent).toContain("SystemSculpt action");
+    expect(node.textContent).not.toMatch(/cf_agent|provider|cloudflare|retry/i);
+    expect(node.querySelector(".systemsculpt-agent-tool-header")?.getAttribute("aria-label"))
+      .toBe("SystemSculpt action, Working");
+
+    node.empty();
+    await (renderer as any).renderTool(node, {
+      id: "server-write-collision",
+      order: 0,
+      kind: "tool",
+      messageId: "assistant-write-collision",
+      callId: "call-write-collision",
+      name: "write",
+      location: "server",
+      input: { path: "server-private-path" },
+      state: "approval-required",
+      approvalId: "approval-server-write",
+    });
+    expect(node.textContent).toContain("SystemSculpt action");
+    expect(node.textContent).toContain("Working");
+    expect(node.textContent).not.toMatch(/needs approval|allow once|allow for chat/i);
+    expect(node.querySelector(".systemsculpt-agent-approval")).toBeNull();
+    expect(onApprove).not.toHaveBeenCalled();
+  });
+
+  it("omits inert path actions and reports artifact copy success or failure in place", async () => {
+    const host = document.body.createDiv();
+    const onOpenArtifact = jest.fn();
+    const onCopyArtifactPath = jest.fn<Promise<boolean>, [AgentArtifact]>()
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(false);
+    const renderer = new AgentConversationRenderer(host, {
+      app: new App(),
+      sourcePath: () => "",
+      onApprove: jest.fn(),
+      onOpenArtifact,
+      onCopyArtifactPath,
+    });
+    renderer.load();
+
+    const pathless = host.createDiv();
+    await (renderer as any).renderTool(pathless, {
+      id: "pathless-tool",
+      order: 0,
+      kind: "tool",
+      messageId: "assistant-pathless",
+      callId: "call-pathless",
+      name: "write",
+      location: "vault",
+      input: {},
+      state: "succeeded",
+      output: {
+        artifacts: [{
+          id: "pathless-artifact",
+          kind: "generated_file",
+          title: "Generated result",
+        }],
+      },
+    });
+    expect(pathless.textContent).toContain("Generated result");
+    expect(pathless.querySelector(".systemsculpt-agent-artifact-actions")).toBeNull();
+    expect(pathless.querySelector('[aria-label="Open"]')).toBeNull();
+    expect(pathless.querySelector('[aria-label="Copy path"]')).toBeNull();
+
+    const actionable = host.createDiv();
+    const artifact: AgentArtifact = {
+      id: "artifact-with-path",
+      kind: "vault_file",
+      title: "Project.md",
+      path: "Projects/Project.md",
+    };
+    await (renderer as any).renderTool(actionable, {
+      id: "path-tool",
+      order: 0,
+      kind: "tool",
+      messageId: "assistant-path",
+      callId: "call-path",
+      name: "write",
+      location: "vault",
+      input: { path: artifact.path },
+      state: "succeeded",
+      output: { artifacts: [artifact] },
+    });
+
+    actionable.querySelector<HTMLButtonElement>('[aria-label="Open"]')!.click();
+    expect(onOpenArtifact).toHaveBeenCalledWith(artifact);
+    const copy = actionable.querySelector<HTMLButtonElement>('[aria-label="Copy path"]')!;
+    copy.focus();
+    copy.click();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(onCopyArtifactPath).toHaveBeenLastCalledWith(artifact);
+    expect(copy.classList.contains("is-copied")).toBe(true);
+    expect(copy.getAttribute("aria-label")).toBe("Path copied");
+    expect(document.activeElement).toBe(copy);
+
+    copy.click();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(copy.classList.contains("is-copy-failed")).toBe(true);
+    expect(copy.getAttribute("aria-label")).toBe("Could not copy path. Try again");
+    expect(document.activeElement).toBe(copy);
+    expect((renderer as any).copyFeedbackTimers.size).toBe(1);
+    renderer.unload();
+    expect((renderer as any).copyFeedbackTimers.size).toBe(0);
   });
 
   it("opens an oldest-shape persisted web search without crashing the history renderer", async () => {
@@ -450,6 +650,7 @@ describe("AgentWorkspace", () => {
       },
     });
     expect(host.querySelector(".systemsculpt-agent-tool")).not.toBeNull();
+    expect(host.textContent).toContain("Search web");
     expect(host.textContent).toContain("Legacy search answer");
     expect(host.textContent).not.toContain("legacy release");
   });
@@ -469,6 +670,9 @@ describe("AgentWorkspace", () => {
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
       onOpenSettings: jest.fn(),
+      onOpenCredits: jest.fn(),
+      onCancelQueued: jest.fn(),
+      onRunQueuedNow: jest.fn(),
     });
     workspace.load();
 
@@ -476,6 +680,7 @@ describe("AgentWorkspace", () => {
     expect(parent.querySelector('[aria-label="Chat history"]')?.classList.contains("ss-button--icon")).toBe(true);
     expect(parent.querySelector('[aria-label="Attach files"]')?.classList.contains("ss-button--icon")).toBe(true);
     expect(parent.querySelector('[aria-label="Jump to latest"]')?.classList.contains("ss-button")).toBe(true);
+    expect(parent.querySelector(".systemsculpt-agent-credits")?.textContent).toBe("Credits");
     for (const label of ["Chat history", "New chat", "Chat settings", "Attach files", "Jump to latest"]) {
       expect(parent.querySelector(`[aria-label="${label}"]`)?.hasAttribute("title")).toBe(false);
     }
@@ -492,11 +697,33 @@ describe("AgentWorkspace", () => {
     workspace.setBanner("Connection failed", "error");
     expect(parent.querySelector(".systemsculpt-agent-banner")?.getAttribute("role"))
       .toBe("alert");
-    workspace.setQueue([{ id: "queued-1", text: "Follow up" }]);
+    workspace.setQueue([
+      {
+        id: "queued-1",
+        text: "Follow up with private message content",
+        includeContextFiles: true,
+      },
+      {
+        id: "queued-2",
+        text: "Second private follow-up",
+        includeContextFiles: false,
+      },
+    ]);
     expect(parent.querySelector(".systemsculpt-agent-queue")?.getAttribute("role"))
       .toBe("list");
-    expect(parent.querySelector(".systemsculpt-agent-queue-item")?.getAttribute("role"))
-      .toBe("listitem");
+    expect(parent.querySelectorAll('.systemsculpt-agent-queue-item[role="listitem"]'))
+      .toHaveLength(2);
+    const actionLabels = Array.from(
+      parent.querySelectorAll<HTMLButtonElement>(".systemsculpt-agent-queue-item button"),
+      (button) => button.getAttribute("aria-label"),
+    );
+    expect(actionLabels).toEqual([
+      "Stop and send queued follow-up 1 of 2 now",
+      "Remove queued follow-up 1 of 2",
+      "Stop and send queued follow-up 2 of 2 now",
+      "Remove queued follow-up 2 of 2",
+    ]);
+    expect(actionLabels.join(" ")).not.toContain("private");
 
     workspace.unload();
   });
@@ -536,7 +763,71 @@ describe("AgentWorkspace", () => {
     render.mockRestore();
   });
 
+  it("appends history without rebuilding earlier turns, controls, focus, or selection", async () => {
+    const host = document.body.createDiv();
+    const renderer = new AgentConversationRenderer(host, {
+      app: new App(),
+      sourcePath: () => "",
+      onApprove: jest.fn(),
+      onOpenArtifact: jest.fn(),
+      onCopyArtifactPath: jest.fn(),
+      onCopyText: jest.fn(async () => true),
+    });
+    renderer.load();
+    const render = jest.spyOn(MarkdownRenderer, "render").mockImplementation(
+      async (_app, markdown, parent) => {
+        if (String(markdown).includes("const stable")) {
+          parent.innerHTML = "<pre><code>const stable = true;</code></pre>";
+        } else {
+          parent.setText(String(markdown));
+        }
+      },
+    );
+    const firstHistory: ChatMessage[] = [{
+      role: "user",
+      message_id: "history-user-1",
+      content: "First request",
+    }, {
+      role: "assistant",
+      message_id: "history-assistant-1",
+      content: "```ts\nconst stable = true;\n```",
+    }];
+    await renderer.renderHistory(firstHistory);
+    const assistantRow = host.querySelector<HTMLElement>(
+      '[data-message-id="history-assistant-1"]',
+    )!;
+    const code = assistantRow.querySelector<HTMLElement>("code")!;
+    const copy = assistantRow.querySelector<HTMLButtonElement>(
+      ".systemsculpt-agent-code-copy",
+    )!;
+    copy.focus();
+    const selection = document.getSelection()!;
+    const range = document.createRange();
+    range.selectNodeContents(code);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    const initialRenderCalls = render.mock.calls.length;
+
+    await renderer.renderHistory([
+      ...JSON.parse(JSON.stringify(firstHistory)) as ChatMessage[],
+      {
+        role: "user",
+        message_id: "history-user-2",
+        content: "Second request",
+      },
+    ]);
+
+    expect(host.querySelector('[data-message-id="history-assistant-1"]')).toBe(assistantRow);
+    expect(assistantRow.querySelector(".systemsculpt-agent-code-copy")).toBe(copy);
+    expect(document.activeElement).toBe(copy);
+    expect(selection.toString()).toBe("const stable = true;");
+    expect(render).toHaveBeenCalledTimes(initialRenderCalls + 1);
+    renderer.unload();
+    render.mockRestore();
+  });
+
   it("containerizes rendered code and shows compact copy success feedback", async () => {
+    jest.useFakeTimers();
     const host = document.body.createDiv();
     const renderer = new AgentConversationRenderer(host, {
       app: new App(),
@@ -574,6 +865,29 @@ describe("AgentWorkspace", () => {
     expect(copy.classList.contains("is-copied")).toBe(true);
     expect(copy.getAttribute("aria-label")).toBe("Code copied");
     expect((renderer as any).copyFeedbackTimers.size).toBe(1);
+
+    copy.click();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(writeText).toHaveBeenCalledTimes(2);
+    expect((renderer as any).copyFeedbackTimers.size).toBe(1);
+
+    jest.advanceTimersByTime(1_600);
+    expect(copy.classList.contains("is-copied")).toBe(false);
+    expect(copy.textContent).toContain("Copy");
+    expect(copy.getAttribute("aria-label")).toBe("Copy code");
+    expect((renderer as any).copyFeedbackTimers.size).toBe(0);
+
+    writeText.mockRejectedValueOnce(new Error("clipboard unavailable"));
+    copy.click();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(copy.classList.contains("is-copy-failed")).toBe(true);
+    expect(copy.getAttribute("aria-label")).toBe("Could not copy code");
+    copy.remove();
+    jest.advanceTimersByTime(1_600);
+    expect((renderer as any).copyFeedbackTimers.size).toBe(0);
+
     renderer.unload();
     expect((renderer as any).copyFeedbackTimers.size).toBe(0);
     render.mockRestore();
@@ -598,7 +912,18 @@ describe("AgentWorkspace", () => {
     await renderer.renderHistory([{
       role: "assistant",
       message_id: "assistant-copy",
-      content: "A response worth copying.",
+      content: "A response worth copying.\n\n### Sources\n\n- [Reference](<https://example.com/reference>)",
+      messageParts: [{
+        id: "answer",
+        type: "content",
+        timestamp: 1,
+        data: "A response worth copying.",
+      }, {
+        id: "sources",
+        type: "content",
+        timestamp: 2,
+        data: "### Sources\n\n- [Reference](<https://example.com/reference>)",
+      }],
     }]);
     const copy = host.querySelector<HTMLButtonElement>(".systemsculpt-agent-message-copy")!;
     expect(copy.classList.contains("ss-button--icon")).toBe(true);
@@ -609,7 +934,9 @@ describe("AgentWorkspace", () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(onCopyText).toHaveBeenCalledWith("A response worth copying.");
+    expect(onCopyText).toHaveBeenCalledWith(
+      "A response worth copying.\n\n### Sources\n\n- [Reference](<https://example.com/reference>)",
+    );
     expect(copy.textContent).not.toContain("Copied");
     expect(copy.classList.contains("is-copied")).toBe(true);
     expect(copy.getAttribute("aria-label")).toBe("Response copied");
@@ -1185,35 +1512,38 @@ describe("AgentWorkspace", () => {
     workspace.setQueue([{
       id: "queued-1",
       text: "Then summarize it",
-      webSearch: false,
       includeContextFiles: true,
     }]);
 
-    let snapshot = createInitialAgentConversation();
-    snapshot = applyManagedAgentEvent(snapshot, envelope(1, { type: "run.started" }));
-    snapshot = applyManagedAgentEvent(snapshot, envelope(2, { type: "message.started", messageId: "assistant-1", role: "assistant" }));
-    snapshot = applyManagedAgentEvent(snapshot, envelope(3, {
-      type: "tool.requested",
-      call: {
-        callId: "call-1",
-        partId: "tool-1",
-        messageId: "assistant-1",
-        name: "edit",
-        location: "vault",
-        input: { path: "Project.md" },
-      },
-    }));
-    snapshot = applyManagedAgentEvent(snapshot, envelope(4, {
-      type: "approval.requested",
+    const approvalTool: Extract<AgentPart, { kind: "tool" }> = {
+      id: "tool-1",
+      kind: "tool",
+      messageId: "assistant-1",
       callId: "call-1",
+      name: "edit",
+      location: "vault",
+      input: { path: "Project.md" },
+      state: "approval-required",
       approvalId: "approval-1",
-    }));
-    snapshot = applyManagedAgentEvent(snapshot, envelope(5, { type: "run.waiting", reason: "approval" }));
+      order: 0,
+    };
+    let snapshot: AgentConversationSnapshot = {
+      runId: "run-1",
+      turnId: "user-1",
+      status: "waiting",
+      phase: "waiting",
+      statusLabel: "Starting",
+      waitingReason: "approval",
+      messages: [{ id: "assistant-1", role: "assistant", partIds: ["tool-1"] }],
+      parts: [approvalTool],
+    };
     await workspace.setAgentSnapshot(snapshot);
 
     expect(parent.textContent).toContain("Update Project.md");
     expect(parent.textContent).toContain("Then summarize it");
     expect(parent.textContent).toContain("Needs approval");
+    parent.querySelector<HTMLButtonElement>('[data-focus-key="tool-deny"]')!.click();
+    expect(onApprove).toHaveBeenCalledWith("approval-1", false);
     const allowOnce = parent.querySelector<HTMLButtonElement>('[data-focus-key="tool-allow-once"]')!;
     expect(allowOnce.classList.contains("ss-button--primary")).toBe(true);
     allowOnce.click();
@@ -1227,21 +1557,34 @@ describe("AgentWorkspace", () => {
     const pendingHeader = pendingPart.querySelector<HTMLElement>(".systemsculpt-agent-tool-header")!;
     expect(pendingHeader.hasAttribute("tabindex")).toBe(false);
     expect(pendingPart.querySelector("summary")).toBeNull();
-    snapshot = applyManagedAgentEvent(snapshot, envelope(6, { type: "approval.resolved", approvalId: "approval-1", approved: true }));
+    snapshot = {
+      ...snapshot,
+      parts: [{ ...approvalTool, state: "approved" }],
+    };
     await workspace.setAgentSnapshot(snapshot);
     expect(parent.querySelector(".systemsculpt-agent-part.is-tool")).toBe(pendingPart);
     expect(pendingPart.querySelector("summary")).toBeNull();
 
-    snapshot = applyManagedAgentEvent(snapshot, envelope(7, { type: "tool.started", callId: "call-1" }));
-    snapshot = applyManagedAgentEvent(snapshot, envelope(8, {
-      type: "tool.succeeded",
-      callId: "call-1",
-      result: {
-        summary: "Updated Project.md",
-        artifacts: [{ id: "artifact-1", kind: "vault_file", title: "Project.md", path: "Project.md" }],
-      },
-    }));
-    snapshot = applyManagedAgentEvent(snapshot, envelope(9, { type: "run.completed" }));
+    snapshot = {
+      runId: "run-1",
+      turnId: "user-1",
+      status: "completed",
+      phase: "complete",
+      messages: [{ id: "assistant-1", role: "assistant", partIds: ["tool-1"] }],
+      parts: [{
+        ...approvalTool,
+        state: "succeeded",
+        output: {
+          summary: "Updated Project.md",
+          artifacts: [{
+            id: "artifact-1",
+            kind: "vault_file",
+            title: "Project.md",
+            path: "Project.md",
+          }],
+        },
+      }],
+    };
     await workspace.setAgentSnapshot(snapshot);
 
     expect(parent.textContent).toContain("Updated Project.md");
@@ -1250,7 +1593,7 @@ describe("AgentWorkspace", () => {
     workspace.unload();
   });
 
-  it("hides redundant continuation progress once streamed content is visible", async () => {
+  it("keeps one continuation header beside visible streamed content", async () => {
     const parent = document.body.createDiv();
     const workspace = new AgentWorkspace(parent, {
       app: new App(),
@@ -1268,24 +1611,26 @@ describe("AgentWorkspace", () => {
     });
     workspace.load();
 
-    let snapshot = createInitialAgentConversation();
-    snapshot = applyManagedAgentEvent(snapshot, envelope(1, { type: "run.started" }));
-    snapshot = applyManagedAgentEvent(snapshot, envelope(2, {
-      type: "run.status",
+    const snapshot: AgentConversationSnapshot = {
+      runId: "run-1",
+      turnId: "user-1",
+      status: "running",
       phase: "working",
-      label: "Continuing",
-    }));
-    snapshot = applyManagedAgentEvent(snapshot, envelope(3, {
-      type: "message.started",
-      messageId: "assistant-continuing",
-      role: "assistant",
-    }));
-    snapshot = applyManagedAgentEvent(snapshot, envelope(4, {
-      type: "text.delta",
-      messageId: "assistant-continuing",
-      partId: "text-continuing",
-      delta: "Working through the result",
-    }));
+      statusLabel: "Continuing",
+      messages: [{
+        id: "assistant-continuing",
+        role: "assistant",
+        partIds: ["text-continuing"],
+      }],
+      parts: [{
+        id: "text-continuing",
+        kind: "text",
+        messageId: "assistant-continuing",
+        state: "streaming",
+        markdown: "Working through the result",
+        order: 0,
+      }],
+    };
     await workspace.setAgentSnapshot(snapshot);
 
     const turn = parent.querySelector(".systemsculpt-agent-active-run .systemsculpt-agent-turn.is-active");
@@ -1293,7 +1638,893 @@ describe("AgentWorkspace", () => {
     expect(turn?.querySelector(".systemsculpt-agent-part.is-text")?.textContent)
       .toContain("Working through the result");
     expect(turn?.querySelector(".systemsculpt-agent-part.is-status")).toBeNull();
-    expect(turn?.textContent).not.toContain("Continuing");
+    expect(turn?.querySelectorAll(".systemsculpt-agent-activity")).toHaveLength(1);
+    expect(turn?.querySelector(".systemsculpt-agent-activity-state")?.textContent)
+      .toBe("Continuing");
+    workspace.unload();
+  });
+
+  it("keeps one stable animated activity header through every live run phase", async () => {
+    const parent = document.body.createDiv();
+    const workspace = new AgentWorkspace(parent, {
+      app: new App(),
+      sourcePath: () => "SystemSculpt/Chats/chat.md",
+      onSubmit: jest.fn(),
+      onStop: jest.fn(),
+      onAttach: jest.fn(),
+      onRemoveAttachment: jest.fn(),
+      onApprove: jest.fn(),
+      onOpenArtifact: jest.fn(),
+      onCopyArtifactPath: jest.fn(),
+      onNewChat: jest.fn(),
+      onOpenHistory: jest.fn(),
+      onOpenSettings: jest.fn(),
+    });
+    workspace.load();
+    const textPart = {
+      id: "text-phase",
+      kind: "text" as const,
+      messageId: "assistant-phase",
+      state: "streaming" as const,
+      markdown: "Streaming answer",
+      order: 1,
+    };
+    const snapshot = (
+      phase: NonNullable<AgentConversationSnapshot["phase"]>,
+      statusLabel: string,
+      tool?: Extract<AgentPart, { kind: "tool" }>,
+    ): AgentConversationSnapshot => ({
+      runId: "run-phase",
+      turnId: "user-phase",
+      status: tool?.state === "approval-required" ? "waiting" : "running",
+      phase,
+      statusLabel,
+      ...(tool?.state === "approval-required"
+        ? { waitingReason: "approval" as const }
+        : {}),
+      messages: [{
+        id: "assistant-phase",
+        role: "assistant",
+        partIds: [...(tool ? [tool.id] : []), textPart.id],
+      }],
+      parts: [...(tool ? [tool] : []), textPart],
+    });
+    const assertPhase = async (
+      value: AgentConversationSnapshot,
+      label: string,
+      expectedActivity?: HTMLElement,
+    ): Promise<HTMLElement> => {
+      await workspace.setAgentSnapshot(value);
+      const activity = parent.querySelector<HTMLElement>(".systemsculpt-agent-activity")!;
+      expect(activity).toBe(expectedActivity ?? activity);
+      expect(activity.querySelector(".systemsculpt-agent-activity-state")?.textContent).toBe(label);
+      expect(activity.querySelector(".systemsculpt-agent-activity-icon")?.classList)
+        .toContain("is-animated");
+      expect(parent.querySelectorAll(".systemsculpt-agent-activity")).toHaveLength(1);
+      expect(parent.querySelector(".systemsculpt-agent-part.is-status")).toBeNull();
+      expect(parent.querySelector(".systemsculpt-agent-part.is-text")?.textContent)
+        .toContain("Streaming answer");
+      return activity;
+    };
+
+    const activity = await assertPhase(snapshot("thinking", "Working"), "Thinking");
+    await assertPhase(snapshot("working", "Working", {
+      id: "tool-search",
+      kind: "tool",
+      messageId: "assistant-phase",
+      callId: "call-search",
+      name: "web_search",
+      location: "server",
+      input: { query: "Obsidian" },
+      state: "running",
+      order: 0,
+    }), "Searching", activity);
+    await assertPhase(snapshot("waiting", "Working", {
+      id: "tool-write",
+      kind: "tool",
+      messageId: "assistant-phase",
+      callId: "call-write",
+      name: "write",
+      location: "vault",
+      input: { path: "Plan.md" },
+      state: "running",
+      order: 0,
+    }), "Working in vault", activity);
+    await assertPhase(snapshot("waiting", "Working", {
+      id: "tool-approval",
+      kind: "tool",
+      messageId: "assistant-phase",
+      callId: "call-approval",
+      name: "write",
+      location: "vault",
+      input: { path: "Plan.md" },
+      state: "approval-required",
+      approvalId: "approval-write",
+      order: 0,
+    }), "Needs approval", activity);
+    await assertPhase(snapshot("retrying", "Continuing"), "Continuing", activity);
+    await assertPhase(snapshot("retrying", "Reconnecting"), "Continuing", activity);
+    await assertPhase(snapshot("settling", "Finishing"), "Finishing", activity);
+    workspace.unload();
+  });
+
+  it("preserves activity icon and spinner identity across streamed token snapshots", async () => {
+    const setIconMock = setIcon as jest.Mock;
+    const previousImplementation = setIconMock.getMockImplementation();
+    const markdownRender = jest.spyOn(MarkdownRenderer, "render");
+    setIconMock.mockImplementation((element: HTMLElement, name: string) => {
+      const svg = element.ownerDocument.createElementNS("http://www.w3.org/2000/svg", "svg");
+      svg.setAttribute("data-icon", name);
+      element.replaceChildren(svg);
+    });
+    const parent = document.body.createDiv();
+    const workspace = new AgentWorkspace(parent, {
+      app: new App(),
+      sourcePath: () => "SystemSculpt/Chats/chat.md",
+      onSubmit: jest.fn(),
+      onStop: jest.fn(),
+      onAttach: jest.fn(),
+      onRemoveAttachment: jest.fn(),
+      onApprove: jest.fn(),
+      onOpenArtifact: jest.fn(),
+      onCopyArtifactPath: jest.fn(),
+      onNewChat: jest.fn(),
+      onOpenHistory: jest.fn(),
+      onOpenSettings: jest.fn(),
+    });
+    workspace.load();
+
+    try {
+      const snapshot = (
+        markdown: string,
+        completed = false,
+      ): AgentConversationSnapshot => ({
+        runId: "run-1",
+        turnId: "user-1",
+        status: completed ? "completed" : "running",
+        phase: completed ? "complete" : "submitted",
+        ...(!completed ? { statusLabel: "Starting" } : {}),
+        messages: [{
+          id: "assistant-token-stream",
+          role: "assistant",
+          partIds: ["reasoning-token-stream", "tool-token-stream", "text-token-stream"],
+        }],
+        parts: [{
+          id: "reasoning-token-stream",
+          kind: "reasoning",
+          messageId: "assistant-token-stream",
+          state: "complete",
+          summary: "Planning the vault change",
+          order: 0,
+        }, {
+          id: "tool-token-stream",
+          kind: "tool",
+          messageId: "assistant-token-stream",
+          callId: "call-token-stream",
+          name: "write",
+          location: "vault",
+          input: undefined,
+          state: completed ? "succeeded" : "approval-required",
+          approvalId: "approval-token-stream",
+          ...(completed ? { output: { summary: "Search complete" } } : {}),
+          order: 1,
+        }, {
+          id: "text-token-stream",
+          kind: "text",
+          messageId: "assistant-token-stream",
+          state: completed ? "complete" : "streaming",
+          markdown,
+          order: 2,
+        }],
+      });
+      let currentSnapshot = snapshot("First token");
+      await workspace.setAgentSnapshot(currentSnapshot);
+
+      const activity = parent.querySelector<HTMLElement>(".systemsculpt-agent-activity")!;
+      const icon = activity.querySelector<HTMLElement>(".systemsculpt-agent-activity-icon")!;
+      const spinner = icon.querySelector<SVGElement>("svg")!;
+      const activityIconCalls = () =>
+        setIconMock.mock.calls.filter(([element]) => element === icon).length;
+      const busyCallCount = activityIconCalls();
+      expect(busyCallCount).toBe(1);
+      const reasoningDetails = activity.querySelector<HTMLDetailsElement>(
+        ".systemsculpt-agent-reasoning-details",
+      )!;
+      const reasoningIcon = activity.querySelector<HTMLElement>(
+        ".systemsculpt-agent-reasoning-icon",
+      )!;
+      const reasoningSvg = reasoningIcon.querySelector("svg");
+      const toolNode = activity.querySelector<HTMLElement>(".systemsculpt-agent-part.is-tool")!;
+      const toolIcon = toolNode.querySelector<HTMLElement>(".systemsculpt-agent-tool-icon")!;
+      const toolSvg = toolIcon.querySelector("svg");
+      const approvalButton = toolNode.querySelector<HTMLButtonElement>(
+        '[data-focus-key="tool-allow-once"]',
+      )!;
+      const textPart = parent.querySelector<HTMLElement>(".systemsculpt-agent-part.is-text")!;
+      const streamedTextNode = textPart.firstChild;
+      expect(streamedTextNode?.nodeType).toBe(Node.TEXT_NODE);
+      const markdownCallsBeforeSuffix = markdownRender.mock.calls.length;
+      approvalButton.focus();
+
+      currentSnapshot = snapshot("First token and second token");
+      await workspace.setAgentSnapshot(currentSnapshot);
+
+      expect(parent.querySelector(".systemsculpt-agent-activity")).toBe(activity);
+      expect(parent.querySelector(".systemsculpt-agent-activity-icon")).toBe(icon);
+      expect(icon.querySelector("svg")).toBe(spinner);
+      expect(activityIconCalls()).toBe(busyCallCount);
+      expect(activity.querySelector(".systemsculpt-agent-reasoning-details")).toBe(reasoningDetails);
+      expect(activity.querySelector(".systemsculpt-agent-reasoning-icon")).toBe(reasoningIcon);
+      expect(reasoningIcon.querySelector("svg")).toBe(reasoningSvg);
+      expect(activity.querySelector(".systemsculpt-agent-part.is-tool")).toBe(toolNode);
+      expect(toolNode.querySelector(".systemsculpt-agent-tool-icon")).toBe(toolIcon);
+      expect(toolIcon.querySelector("svg")).toBe(toolSvg);
+      expect(toolNode.querySelector('[data-focus-key="tool-allow-once"]')).toBe(approvalButton);
+      expect(document.activeElement).toBe(approvalButton);
+      expect(textPart.firstChild).toBe(streamedTextNode);
+      expect(textPart.textContent).toBe("First token and second token");
+      expect(markdownRender).toHaveBeenCalledTimes(markdownCallsBeforeSuffix);
+
+      const selection = document.getSelection()!;
+      const selectedToken = document.createRange();
+      selectedToken.setStart(streamedTextNode!, 0);
+      selectedToken.setEnd(streamedTextNode!, 5);
+      selection.removeAllRanges();
+      selection.addRange(selectedToken);
+      reasoningDetails.open = true;
+      approvalButton.focus();
+      const burstRender = jest.spyOn(workspace.renderer, "renderActive");
+      const burstPrefix = "First token and second token ";
+      const burstSuffix = Array.from(
+        { length: 64 },
+        (_, index) => String.fromCharCode(97 + (index % 26)),
+      ).join("");
+      const burstSnapshots = Array.from(burstSuffix, (_, index) =>
+        snapshot(`${burstPrefix}${burstSuffix.slice(0, index + 1)}`));
+      await Promise.all(
+        burstSnapshots.map((burstSnapshot) =>
+          workspace.setAgentSnapshot(burstSnapshot)),
+      );
+      currentSnapshot = burstSnapshots.at(-1)!;
+
+      expect(burstRender).toHaveBeenCalledTimes(1);
+      expect(burstRender.mock.calls[0][0]).toBe(currentSnapshot);
+      expect(parent.querySelector(".systemsculpt-agent-activity")).toBe(activity);
+      expect(parent.querySelector(".systemsculpt-agent-activity-icon")).toBe(icon);
+      expect(icon.querySelector("svg")).toBe(spinner);
+      expect(activityIconCalls()).toBe(busyCallCount);
+      expect(activity.querySelector(".systemsculpt-agent-reasoning-details")).toBe(reasoningDetails);
+      expect(activity.querySelector(".systemsculpt-agent-reasoning-icon")).toBe(reasoningIcon);
+      expect(reasoningIcon.querySelector("svg")).toBe(reasoningSvg);
+      expect(reasoningDetails.open).toBe(true);
+      expect(activity.querySelector(".systemsculpt-agent-part.is-tool")).toBe(toolNode);
+      expect(toolNode.querySelector(".systemsculpt-agent-tool-icon")).toBe(toolIcon);
+      expect(toolIcon.querySelector("svg")).toBe(toolSvg);
+      expect(toolNode.querySelector('[data-focus-key="tool-allow-once"]')).toBe(approvalButton);
+      expect(document.activeElement).toBe(approvalButton);
+      expect(textPart.firstChild).toBe(streamedTextNode);
+      expect(textPart.textContent).toBe(`${burstPrefix}${burstSuffix}`);
+      expect(selection.toString()).toBe("First");
+      expect(selection.anchorNode).toBe(streamedTextNode);
+      expect(selection.anchorOffset).toBe(0);
+      expect(selection.focusNode).toBe(streamedTextNode);
+      expect(selection.focusOffset).toBe(5);
+      expect(markdownRender).toHaveBeenCalledTimes(markdownCallsBeforeSuffix);
+      burstRender.mockRestore();
+
+      const formattedStream = [
+        `${burstPrefix}${burstSuffix}`,
+        "",
+        "# Heading",
+        "",
+        "- list item with *emphasis*",
+        "",
+        "[official source](https://help.obsidian.md)",
+        "",
+        "```ts",
+        "const streamed = true;",
+        "```",
+      ].join("\n");
+      currentSnapshot = snapshot(formattedStream);
+      await workspace.setAgentSnapshot(currentSnapshot);
+      expect(textPart.firstChild).toBe(streamedTextNode);
+      expect(textPart.textContent).toBe(formattedStream);
+      expect(selection.toString()).toBe("First");
+      expect(selection.anchorNode).toBe(streamedTextNode);
+      expect(selection.focusNode).toBe(streamedTextNode);
+      expect(markdownRender).toHaveBeenCalledTimes(markdownCallsBeforeSuffix);
+      expect(parent.querySelector(".systemsculpt-agent-activity")).toBe(activity);
+      expect(icon.querySelector("svg")).toBe(spinner);
+      expect(activityIconCalls()).toBe(busyCallCount);
+
+      const correctedFormattedStream = formattedStream.replace(
+        "const streamed = true;",
+        "const corrected = true;",
+      );
+      currentSnapshot = snapshot(correctedFormattedStream);
+      await workspace.setAgentSnapshot(currentSnapshot);
+      const correctedTextNode = textPart.firstChild;
+      expect(correctedTextNode).not.toBe(streamedTextNode);
+      expect(correctedTextNode?.nodeType).toBe(Node.TEXT_NODE);
+      expect(textPart.textContent).toBe(correctedFormattedStream);
+      expect(markdownRender).toHaveBeenCalledTimes(markdownCallsBeforeSuffix);
+      expect(parent.querySelector(".systemsculpt-agent-activity")).toBe(activity);
+      expect(icon.querySelector("svg")).toBe(spinner);
+      expect(activityIconCalls()).toBe(busyCallCount);
+
+      currentSnapshot = snapshot(
+        correctedFormattedStream,
+        true,
+      );
+      await workspace.setAgentSnapshot(currentSnapshot);
+
+      expect(textPart.firstChild).not.toBe(correctedTextNode);
+      expect(markdownRender).toHaveBeenCalledTimes(markdownCallsBeforeSuffix + 1);
+      expect(parent.querySelector(".systemsculpt-agent-activity")).toBe(activity);
+      expect(parent.querySelector(".systemsculpt-agent-activity-icon")).toBe(icon);
+      expect(icon.querySelector("svg")).not.toBe(spinner);
+      expect(activityIconCalls()).toBe(busyCallCount + 1);
+      expect(icon.classList).not.toContain("is-animated");
+    } finally {
+      workspace.unload();
+      markdownRender.mockRestore();
+      setIconMock.mockImplementation(previousImplementation ?? (() => undefined));
+    }
+  });
+
+  it("leaves a large settled tool subtree untouched across unrelated text deltas", async () => {
+    const parent = document.body.createDiv();
+    const workspace = new AgentWorkspace(parent, {
+      app: new App(),
+      sourcePath: () => "SystemSculpt/Chats/chat.md",
+      onSubmit: jest.fn(),
+      onStop: jest.fn(),
+      onAttach: jest.fn(),
+      onRemoveAttachment: jest.fn(),
+      onApprove: jest.fn(),
+      onOpenArtifact: jest.fn(),
+      onCopyArtifactPath: jest.fn(),
+      onNewChat: jest.fn(),
+      onOpenHistory: jest.fn(),
+      onOpenSettings: jest.fn(),
+    });
+    workspace.load();
+    const snapshot = (markdown: string): AgentConversationSnapshot => ({
+      runId: "run-large-tool",
+      turnId: "user-large-tool",
+      status: "running",
+      phase: "working",
+      statusLabel: "Working",
+      messages: [{
+        id: "assistant-large-tool",
+        role: "assistant",
+        partIds: ["tool-large", "text-large"],
+      }],
+      parts: [{
+        id: "tool-large",
+        kind: "tool",
+        messageId: "assistant-large-tool",
+        callId: "call-large",
+        name: "read",
+        location: "vault",
+        input: { paths: ["Large.md"] },
+        state: "succeeded",
+        output: {
+          summary: "Loaded the note",
+          data: { content: "x".repeat(250_000) },
+        },
+        order: 0,
+      }, {
+        id: "text-large",
+        kind: "text",
+        messageId: "assistant-large-tool",
+        state: "streaming",
+        markdown,
+        order: 1,
+      }],
+    });
+
+    await workspace.setAgentSnapshot(snapshot("Token"));
+    const toolNode = parent.querySelector<HTMLElement>(".systemsculpt-agent-part.is-tool")!;
+    const toolShell = toolNode.firstElementChild;
+    const toolIcon = toolNode.querySelector<HTMLElement>(".systemsculpt-agent-tool-icon")!;
+    const iconCallCount = (setIcon as jest.Mock).mock.calls
+      .filter(([element]) => element === toolIcon).length;
+
+    let markdown = "Token";
+    for (let index = 0; index < 12; index += 1) {
+      markdown += ` ${index}`;
+      await workspace.setAgentSnapshot(snapshot(markdown));
+      expect(parent.querySelector(".systemsculpt-agent-part.is-tool")).toBe(toolNode);
+      expect(toolNode.firstElementChild).toBe(toolShell);
+    }
+    expect((setIcon as jest.Mock).mock.calls
+      .filter(([element]) => element === toolIcon)).toHaveLength(iconCallCount);
+    workspace.unload();
+  });
+
+  it("does not remount a server tool when only hidden streamed payloads change", async () => {
+    const parent = document.body.createDiv();
+    const workspace = new AgentWorkspace(parent, {
+      app: new App(),
+      sourcePath: () => "SystemSculpt/Chats/chat.md",
+      onSubmit: jest.fn(),
+      onStop: jest.fn(),
+      onAttach: jest.fn(),
+      onRemoveAttachment: jest.fn(),
+      onApprove: jest.fn(),
+      onOpenArtifact: jest.fn(),
+      onCopyArtifactPath: jest.fn(),
+      onNewChat: jest.fn(),
+      onOpenHistory: jest.fn(),
+      onOpenSettings: jest.fn(),
+    });
+    workspace.load();
+    const snapshot = (input: unknown, output?: unknown): AgentConversationSnapshot => ({
+      runId: "run-server-payload",
+      turnId: "user-server-payload",
+      status: "running",
+      phase: "working",
+      messages: [{
+        id: "assistant-server-payload",
+        role: "assistant",
+        partIds: ["tool-server-payload"],
+      }],
+      parts: [{
+        id: "tool-server-payload",
+        kind: "tool",
+        messageId: "assistant-server-payload",
+        callId: "call-server-payload",
+        name: "web_search",
+        location: "server",
+        input,
+        state: "running",
+        ...(output === undefined ? {} : { output: { data: output } }),
+        order: 0,
+      }],
+    });
+
+    await workspace.setAgentSnapshot(snapshot({ query: "clo" }));
+    const toolNode = parent.querySelector<HTMLElement>(".systemsculpt-agent-part.is-tool")!;
+    const shell = toolNode.firstElementChild;
+    const icon = toolNode.querySelector<HTMLElement>(".systemsculpt-agent-tool-icon")!;
+    const svg = icon.firstElementChild;
+
+    await workspace.setAgentSnapshot(snapshot(
+      { query: "cloudflare official documentation", hidden: "x".repeat(250_000) },
+      { raw: "y".repeat(250_000) },
+    ));
+
+    expect(parent.querySelector(".systemsculpt-agent-part.is-tool")).toBe(toolNode);
+    expect(toolNode.firstElementChild).toBe(shell);
+    expect(toolNode.querySelector(".systemsculpt-agent-tool-icon")).toBe(icon);
+    expect(icon.firstElementChild).toBe(svg);
+    expect(toolNode.textContent).toContain("Search web");
+    expect(toolNode.textContent).not.toContain("cloudflare official documentation");
+    workspace.unload();
+  });
+
+  it("keeps a text-only terminal activity row until the completed run settles", async () => {
+    const parent = document.body.createDiv();
+    const workspace = new AgentWorkspace(parent, {
+      app: new App(),
+      sourcePath: () => "SystemSculpt/Chats/chat.md",
+      onSubmit: jest.fn(),
+      onStop: jest.fn(),
+      onAttach: jest.fn(),
+      onRemoveAttachment: jest.fn(),
+      onApprove: jest.fn(),
+      onOpenArtifact: jest.fn(),
+      onCopyArtifactPath: jest.fn(),
+      onNewChat: jest.fn(),
+      onOpenHistory: jest.fn(),
+      onOpenSettings: jest.fn(),
+    });
+    workspace.load();
+    const running: AgentConversationSnapshot = {
+      runId: "run-text-terminal",
+      turnId: "user-text-terminal",
+      status: "running",
+      phase: "working",
+      messages: [{
+        id: "assistant-text-terminal",
+        role: "assistant",
+        partIds: ["text-terminal"],
+      }],
+      parts: [{
+        id: "text-terminal",
+        kind: "text",
+        messageId: "assistant-text-terminal",
+        state: "streaming",
+        markdown: "Final",
+        order: 0,
+      }],
+    };
+    await workspace.setAgentSnapshot(running);
+    const activity = parent.querySelector<HTMLElement>(".systemsculpt-agent-activity")!;
+
+    await workspace.setAgentSnapshot({
+      ...running,
+      status: "completed",
+      phase: "complete",
+      parts: [{
+        ...running.parts[0] as Extract<AgentPart, { kind: "text" }>,
+        state: "complete",
+        markdown: "Final answer",
+      }],
+    });
+
+    expect(parent.querySelector(".systemsculpt-agent-activity")).toBe(activity);
+    expect(activity.getAttribute("aria-label")).toBe("Agent activity: Done");
+    expect(activity.querySelector(".systemsculpt-agent-activity-state")?.textContent).toBe("Done");
+    workspace.unload();
+  });
+
+  it.each([
+    {
+      status: "failed" as const,
+      expectedLabel: "Failed",
+      parts: [{
+        id: "error-empty-terminal",
+        kind: "error" as const,
+        error: { code: "response_failed", message: "Could not finish." },
+        retryable: false,
+        order: 0,
+      }],
+    },
+    {
+      status: "cancelled" as const,
+      expectedLabel: "Stopped",
+      parts: [],
+    },
+  ])("retains the same activity row for an otherwise empty $status terminal", async ({
+    status,
+    expectedLabel,
+    parts,
+  }) => {
+    const parent = document.body.createDiv();
+    const workspace = new AgentWorkspace(parent, {
+      app: new App(),
+      sourcePath: () => "SystemSculpt/Chats/chat.md",
+      onSubmit: jest.fn(),
+      onStop: jest.fn(),
+      onAttach: jest.fn(),
+      onRemoveAttachment: jest.fn(),
+      onApprove: jest.fn(),
+      onOpenArtifact: jest.fn(),
+      onCopyArtifactPath: jest.fn(),
+      onNewChat: jest.fn(),
+      onOpenHistory: jest.fn(),
+      onOpenSettings: jest.fn(),
+    });
+    workspace.load();
+    const running: AgentConversationSnapshot = {
+      runId: `run-empty-${status}`,
+      turnId: `user-empty-${status}`,
+      status: "running",
+      phase: "working",
+      messages: [],
+      parts: [],
+    };
+    await workspace.setAgentSnapshot(running);
+    const activity = parent.querySelector<HTMLElement>(".systemsculpt-agent-activity")!;
+
+    await workspace.setAgentSnapshot({
+      ...running,
+      status,
+      phase: "complete",
+      parts,
+    });
+
+    expect(parent.querySelector(".systemsculpt-agent-activity")).toBe(activity);
+    expect(activity.getAttribute("aria-label")).toBe(`Agent activity: ${expectedLabel}`);
+    expect(activity.querySelector(".systemsculpt-agent-activity-state")?.textContent)
+      .toBe(expectedLabel);
+    workspace.unload();
+  });
+
+  it("keeps streamed text visible until completed Markdown is ready", async () => {
+    const parent = document.body.createDiv();
+    const markdownRender = jest.spyOn(MarkdownRenderer, "render");
+    let releaseRender!: () => void;
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => { markStarted = resolve; });
+    const released = new Promise<void>((resolve) => { releaseRender = resolve; });
+    markdownRender.mockImplementation(async (
+      _app: App,
+      markdown: string,
+      target: HTMLElement,
+    ) => {
+      markStarted();
+      await released;
+      target.createEl("p", { text: markdown });
+    });
+    const workspace = new AgentWorkspace(parent, {
+      app: new App(),
+      sourcePath: () => "SystemSculpt/Chats/chat.md",
+      onSubmit: jest.fn(),
+      onStop: jest.fn(),
+      onAttach: jest.fn(),
+      onRemoveAttachment: jest.fn(),
+      onApprove: jest.fn(),
+      onOpenArtifact: jest.fn(),
+      onCopyArtifactPath: jest.fn(),
+      onNewChat: jest.fn(),
+      onOpenHistory: jest.fn(),
+      onOpenSettings: jest.fn(),
+    });
+    workspace.load();
+    const snapshot = (complete: boolean): AgentConversationSnapshot => ({
+      runId: "run-markdown-handoff",
+      turnId: "user-markdown-handoff",
+      status: complete ? "completed" : "running",
+      phase: complete ? "complete" : "working",
+      messages: [{
+        id: "assistant-markdown-handoff",
+        role: "assistant",
+        partIds: ["text-markdown-handoff"],
+      }],
+      parts: [{
+        id: "text-markdown-handoff",
+        kind: "text",
+        messageId: "assistant-markdown-handoff",
+        state: complete ? "complete" : "streaming",
+        markdown: "**Still visible**",
+        order: 0,
+      }],
+    });
+
+    try {
+      await workspace.setAgentSnapshot(snapshot(false));
+      const textPart = parent.querySelector<HTMLElement>(".systemsculpt-agent-part.is-text")!;
+      const rawText = textPart.firstChild;
+      const completion = workspace.setAgentSnapshot(snapshot(true));
+      await started;
+
+      expect(textPart.firstChild).toBe(rawText);
+      expect(textPart.textContent).toBe("**Still visible**");
+
+      releaseRender();
+      await completion;
+      expect(textPart.firstChild).not.toBe(rawText);
+      expect(textPart.textContent).toBe("**Still visible**");
+    } finally {
+      releaseRender();
+      await workspace.setAgentSnapshot(null);
+      workspace.unload();
+      markdownRender.mockRestore();
+    }
+  });
+
+  it("retains streamed text when completed Markdown rendering rejects", async () => {
+    const parent = document.body.createDiv();
+    const markdownRender = jest.spyOn(MarkdownRenderer, "render");
+    const workspace = new AgentWorkspace(parent, {
+      app: new App(),
+      sourcePath: () => "SystemSculpt/Chats/chat.md",
+      onSubmit: jest.fn(),
+      onStop: jest.fn(),
+      onAttach: jest.fn(),
+      onRemoveAttachment: jest.fn(),
+      onApprove: jest.fn(),
+      onOpenArtifact: jest.fn(),
+      onCopyArtifactPath: jest.fn(),
+      onNewChat: jest.fn(),
+      onOpenHistory: jest.fn(),
+      onOpenSettings: jest.fn(),
+    });
+    workspace.load();
+    const running: AgentConversationSnapshot = {
+      runId: "run-markdown-reject",
+      turnId: "user-markdown-reject",
+      status: "running",
+      phase: "working",
+      messages: [{
+        id: "assistant-markdown-reject",
+        role: "assistant",
+        partIds: ["text-markdown-reject"],
+      }],
+      parts: [{
+        id: "text-markdown-reject",
+        kind: "text",
+        messageId: "assistant-markdown-reject",
+        state: "streaming",
+        markdown: "Visible response",
+        order: 0,
+      }],
+    };
+
+    try {
+      await workspace.setAgentSnapshot(running);
+      const textPart = parent.querySelector<HTMLElement>(".systemsculpt-agent-part.is-text")!;
+      const rawText = textPart.firstChild;
+      markdownRender.mockRejectedValueOnce(new Error("postprocessor failed"));
+
+      await expect(workspace.setAgentSnapshot({
+        ...running,
+        status: "completed",
+        phase: "complete",
+        parts: [{
+          ...running.parts[0] as Extract<AgentPart, { kind: "text" }>,
+          state: "complete",
+        }],
+      })).rejects.toThrow("postprocessor failed");
+
+      expect(textPart.firstChild).toBe(rawText);
+      expect(textPart.textContent).toBe("Visible response");
+    } finally {
+      workspace.unload();
+      markdownRender.mockRestore();
+    }
+  });
+
+  it("streams a reasoning suffix without remounting its disclosure, icon, focus, or selection", async () => {
+    const markdownRender = jest.spyOn(MarkdownRenderer, "render");
+    const parent = document.body.createDiv();
+    const workspace = new AgentWorkspace(parent, {
+      app: new App(),
+      sourcePath: () => "SystemSculpt/Chats/chat.md",
+      onSubmit: jest.fn(),
+      onStop: jest.fn(),
+      onAttach: jest.fn(),
+      onRemoveAttachment: jest.fn(),
+      onApprove: jest.fn(),
+      onOpenArtifact: jest.fn(),
+      onCopyArtifactPath: jest.fn(),
+      onNewChat: jest.fn(),
+      onOpenHistory: jest.fn(),
+      onOpenSettings: jest.fn(),
+    });
+    workspace.load();
+
+    const snapshot = (
+      summary: string,
+      state: "streaming" | "complete" = "streaming",
+    ): AgentConversationSnapshot => ({
+      runId: "run-1",
+      turnId: "user-1",
+      status: "running",
+      phase: "submitted",
+      statusLabel: "Starting",
+      messages: [{
+        id: "assistant-reasoning-identity",
+        role: "assistant",
+        partIds: ["reasoning-identity"],
+      }],
+      parts: [{
+        id: "reasoning-identity",
+        kind: "reasoning",
+        messageId: "assistant-reasoning-identity",
+        state,
+        summary,
+        order: 0,
+      }],
+    });
+    await workspace.setAgentSnapshot(snapshot("Reading the note"));
+    expect(markdownRender).not.toHaveBeenCalled();
+
+    const details = parent.querySelector<HTMLDetailsElement>(
+      ".systemsculpt-agent-reasoning-details",
+    )!;
+    const header = details.querySelector<HTMLElement>(
+      ".systemsculpt-agent-reasoning-header",
+    )!;
+    const icon = details.querySelector<HTMLElement>(
+      ".systemsculpt-agent-reasoning-icon",
+    )!;
+    const body = details.querySelector<HTMLElement>(
+      ".systemsculpt-agent-reasoning-body",
+    )!;
+    const bodyText = body.firstChild!;
+    expect(bodyText.nodeType).toBe(Node.TEXT_NODE);
+    const iconCalls = () => (setIcon as jest.Mock).mock.calls
+      .filter(([element]) => element === icon).length;
+    const initialIconCalls = iconCalls();
+    const selection = document.getSelection()!;
+    const range = document.createRange();
+    range.setStart(bodyText, 0);
+    range.setEnd(bodyText, 7);
+    selection.removeAllRanges();
+    selection.addRange(range);
+
+    const formattedSummary = [
+      "Reading the note and checking links",
+      "",
+      "## Checks",
+      "",
+      "- preserve *selection*",
+      "",
+      "```text",
+      "stream safely",
+      "```",
+    ].join("\n");
+    await workspace.setAgentSnapshot(snapshot(formattedSummary));
+
+    expect(parent.querySelector(".systemsculpt-agent-reasoning-details")).toBe(details);
+    expect(parent.querySelector(".systemsculpt-agent-reasoning-header")).toBe(header);
+    expect(parent.querySelector(".systemsculpt-agent-reasoning-icon")).toBe(icon);
+    expect(body.firstChild).toBe(bodyText);
+    expect(body.textContent).toBe(formattedSummary);
+    expect(iconCalls()).toBe(initialIconCalls);
+    expect(selection.toString()).toBe("Reading");
+    expect(selection.anchorNode).toBe(bodyText);
+    expect(selection.focusNode).toBe(bodyText);
+    expect(markdownRender).not.toHaveBeenCalled();
+
+    header.focus();
+    const finalSummary = `${formattedSummary}\n\n[Source](https://help.obsidian.md)`;
+    await workspace.setAgentSnapshot(snapshot(finalSummary));
+    expect(parent.querySelector(".systemsculpt-agent-reasoning-details")).toBe(details);
+    expect(parent.querySelector(".systemsculpt-agent-reasoning-header")).toBe(header);
+    expect(parent.querySelector(".systemsculpt-agent-reasoning-icon")).toBe(icon);
+    expect(body.firstChild).toBe(bodyText);
+    expect(document.activeElement).toBe(header);
+    expect(iconCalls()).toBe(initialIconCalls);
+    expect(markdownRender).not.toHaveBeenCalled();
+
+    await workspace.setAgentSnapshot(
+      snapshot(finalSummary, "complete"),
+    );
+    expect(parent.querySelector(".systemsculpt-agent-reasoning-details")).toBe(details);
+    expect(parent.querySelector(".systemsculpt-agent-reasoning-header")).toBe(header);
+    expect(parent.querySelector(".systemsculpt-agent-reasoning-icon")).toBe(icon);
+    expect(details.open).toBe(false);
+    expect(iconCalls()).toBe(initialIconCalls + 1);
+    expect(markdownRender).toHaveBeenCalledTimes(1);
+    markdownRender.mockRestore();
+    workspace.unload();
+  });
+
+  it("shows Thinking before the first snapshot and clears it on admission failure", async () => {
+    const parent = document.body.createDiv();
+    const workspace = new AgentWorkspace(parent, {
+      app: new App(),
+      sourcePath: () => "SystemSculpt/Chats/chat.md",
+      onSubmit: jest.fn(),
+      onStop: jest.fn(),
+      onAttach: jest.fn(),
+      onRemoveAttachment: jest.fn(),
+      onApprove: jest.fn(),
+      onOpenArtifact: jest.fn(),
+      onCopyArtifactPath: jest.fn(),
+      onNewChat: jest.fn(),
+      onOpenHistory: jest.fn(),
+      onOpenSettings: jest.fn(),
+    });
+    workspace.load();
+
+    workspace.setRunPending(true, "user-1");
+    await workspace.setAgentSnapshot(null);
+
+    expect(parent.querySelectorAll(".systemsculpt-agent-activity")).toHaveLength(1);
+    expect(parent.querySelector(".systemsculpt-agent-activity-state")?.textContent)
+      .toBe("Thinking");
+    expect(parent.querySelector(".systemsculpt-agent-empty")?.hasAttribute("hidden")).toBe(true);
+    expect(parent.querySelector(".systemsculpt-agent-composer")?.classList.contains("is-running"))
+      .toBe(true);
+    const pendingTurn = parent.querySelector(".systemsculpt-agent-turn.is-active");
+
+    const active: AgentConversationSnapshot = {
+      runId: "run-1",
+      turnId: "user-1",
+      status: "running",
+      phase: "submitted",
+      statusLabel: "Starting",
+      messages: [],
+      parts: [],
+    };
+    await workspace.setAgentSnapshot(active);
+    expect(parent.querySelectorAll(".systemsculpt-agent-activity")).toHaveLength(1);
+    expect(parent.querySelector(".systemsculpt-agent-turn.is-active")).toBe(pendingTurn);
+    expect(parent.querySelector(".systemsculpt-agent-turn")?.getAttribute("data-turn-id"))
+      .toBe("user-1");
+
+    await workspace.setAgentSnapshot(null);
+    workspace.setRunPending(false);
+    await workspace.setAgentSnapshot(null);
+    expect(parent.querySelector(".systemsculpt-agent-active-run")?.childElementCount).toBe(0);
+    expect(parent.querySelector(".systemsculpt-agent-composer")?.classList.contains("is-running"))
+      .toBe(false);
     workspace.unload();
   });
 
@@ -1315,36 +2546,52 @@ describe("AgentWorkspace", () => {
     });
     workspace.load();
 
-    let snapshot = createInitialAgentConversation();
-    snapshot = applyManagedAgentEvent(snapshot, envelope(1, { type: "run.started" }));
-    snapshot = applyManagedAgentEvent(snapshot, envelope(2, {
-      type: "message.started",
-      messageId: "assistant-stable",
-      role: "assistant",
-    }));
-    snapshot = applyManagedAgentEvent(snapshot, envelope(3, {
-      type: "text.delta",
-      messageId: "assistant-stable",
-      partId: "text-stable",
-      delta: "I will check that.",
-    }));
+    let snapshot: AgentConversationSnapshot = {
+      runId: "run-1",
+      turnId: "user-1",
+      status: "running",
+      phase: "submitted",
+      statusLabel: "Starting",
+      messages: [{
+        id: "assistant-stable",
+        role: "assistant",
+        partIds: ["text-stable"],
+      }],
+      parts: [{
+        id: "text-stable",
+        kind: "text",
+        messageId: "assistant-stable",
+        state: "streaming",
+        markdown: "I will check that.",
+        order: 0,
+      }],
+    };
     await workspace.setAgentSnapshot(snapshot);
     const turn = parent.querySelector(".systemsculpt-agent-turn.is-active");
     const text = turn?.querySelector(".systemsculpt-agent-part.is-text");
 
-    snapshot = applyManagedAgentEvent(snapshot, envelope(4, {
-      type: "text.completed",
-      messageId: "assistant-stable",
-      partId: "text-stable",
-    }));
-    snapshot = applyManagedAgentEvent(snapshot, envelope(5, {
-      type: "tool.input.started",
-      callId: "call-stable",
-      partId: "tool-stable",
-      messageId: "assistant-stable",
-      name: "read",
-      location: "vault",
-    }));
+    snapshot = {
+      ...snapshot,
+      messages: [{
+        id: "assistant-stable",
+        role: "assistant",
+        partIds: ["text-stable", "tool-stable"],
+      }],
+      parts: [{
+        ...snapshot.parts[0],
+        state: "complete",
+      } as AgentPart, {
+        id: "tool-stable",
+        kind: "tool",
+        messageId: "assistant-stable",
+        callId: "call-stable",
+        name: "read",
+        location: "vault",
+        input: undefined,
+        state: "input-streaming",
+        order: 1,
+      }],
+    };
     await workspace.setAgentSnapshot(snapshot);
 
     expect(parent.querySelector(".systemsculpt-agent-turn.is-active")).toBe(turn);
@@ -1372,55 +2619,54 @@ describe("AgentWorkspace", () => {
     });
     workspace.load();
 
-    let snapshot = createInitialAgentConversation();
-    snapshot = applyManagedAgentEvent(snapshot, envelope(1, { type: "run.started" }));
-    snapshot = applyManagedAgentEvent(snapshot, envelope(2, {
-      type: "message.started",
+    const toolParts: readonly AgentPart[] = [{
+      id: "read-live-part-1",
+      kind: "tool",
       messageId: "assistant-group-live",
-      role: "assistant",
-    }));
-    snapshot = applyManagedAgentEvent(snapshot, envelope(3, {
-      type: "tool.requested",
-      call: {
-        callId: "read-live-1",
-        partId: "read-live-part-1",
-        messageId: "assistant-group-live",
-        name: "read",
-        location: "vault",
-        input: { paths: ["One.md"] },
-      },
-    }));
-    snapshot = applyManagedAgentEvent(snapshot, envelope(4, { type: "tool.started", callId: "read-live-1" }));
-    snapshot = applyManagedAgentEvent(snapshot, envelope(5, {
-      type: "tool.succeeded",
       callId: "read-live-1",
-      result: { data: { files: [{ path: "One.md", content: "one" }] } },
-    }));
-    snapshot = applyManagedAgentEvent(snapshot, envelope(6, {
-      type: "tool.requested",
-      call: {
-        callId: "read-live-2",
-        partId: "read-live-part-2",
-        messageId: "assistant-group-live",
-        name: "read",
-        location: "vault",
-        input: { paths: ["Two.md"] },
-      },
-    }));
-    snapshot = applyManagedAgentEvent(snapshot, envelope(7, { type: "tool.started", callId: "read-live-2" }));
-    snapshot = applyManagedAgentEvent(snapshot, envelope(8, {
-      type: "tool.succeeded",
+      name: "read",
+      location: "vault",
+      input: { paths: ["One.md"] },
+      state: "succeeded",
+      output: { data: { files: [{ path: "One.md", content: "one" }] } },
+      order: 0,
+    }, {
+      id: "read-live-part-2",
+      kind: "tool",
+      messageId: "assistant-group-live",
       callId: "read-live-2",
-      result: { data: { files: [{ path: "Two.md", content: "two" }] } },
-    }));
-    await workspace.setAgentSnapshot(snapshot);
+      name: "read",
+      location: "vault",
+      input: { paths: ["Two.md"] },
+      state: "succeeded",
+      output: { data: { files: [{ path: "Two.md", content: "two" }] } },
+      order: 1,
+    }];
+    const running: AgentConversationSnapshot = {
+      runId: "run-1",
+      turnId: "user-1",
+      status: "running",
+      phase: "submitted",
+      statusLabel: "Starting",
+      messages: [{
+        id: "assistant-group-live",
+        role: "assistant",
+        partIds: ["read-live-part-1", "read-live-part-2"],
+      }],
+      parts: toolParts,
+    };
+    await workspace.setAgentSnapshot(running);
 
     expect(parent.querySelectorAll(
       ".systemsculpt-agent-active-run .systemsculpt-agent-part.is-tool",
     )).toHaveLength(2);
 
-    snapshot = applyManagedAgentEvent(snapshot, envelope(9, { type: "run.completed" }));
-    await workspace.setAgentSnapshot(snapshot);
+    await workspace.setAgentSnapshot({
+      ...running,
+      status: "completed",
+      phase: "complete",
+      statusLabel: undefined,
+    });
     const grouped = parent.querySelectorAll(
       ".systemsculpt-agent-active-run .systemsculpt-agent-part.is-tool",
     );
@@ -1450,25 +2696,25 @@ describe("AgentWorkspace", () => {
     const user = { role: "user" as const, message_id: "user-settle", content: "Finish this" };
     await workspace.setHistory([user]);
 
-    let snapshot = createInitialAgentConversation();
-    snapshot = applyManagedAgentEvent(snapshot, envelope(1, { type: "run.started" }));
-    snapshot = applyManagedAgentEvent(snapshot, envelope(2, {
-      type: "message.started",
-      messageId: "assistant-settle",
-      role: "assistant",
-    }));
-    snapshot = applyManagedAgentEvent(snapshot, envelope(3, {
-      type: "text.delta",
-      messageId: "assistant-settle",
-      partId: "text-settle",
-      delta: "Final answer",
-    }));
-    snapshot = applyManagedAgentEvent(snapshot, envelope(4, {
-      type: "text.completed",
-      messageId: "assistant-settle",
-      partId: "text-settle",
-    }));
-    snapshot = applyManagedAgentEvent(snapshot, envelope(5, { type: "run.completed" }));
+    const snapshot: AgentConversationSnapshot = {
+      runId: "run-1",
+      turnId: "user-1",
+      status: "completed",
+      phase: "complete",
+      messages: [{
+        id: "assistant-settle",
+        role: "assistant",
+        partIds: ["text-settle"],
+      }],
+      parts: [{
+        id: "text-settle",
+        kind: "text",
+        messageId: "assistant-settle",
+        state: "complete",
+        markdown: "Final answer",
+        order: 0,
+      }],
+    };
     await workspace.setAgentSnapshot(snapshot);
     expect(parent.querySelector(".systemsculpt-agent-active-run")?.textContent).toContain("Final answer");
 
@@ -1480,6 +2726,160 @@ describe("AgentWorkspace", () => {
     expect(parent.querySelector(".systemsculpt-agent-active-run")?.childElementCount).toBe(0);
     expect(parent.querySelectorAll(".systemsculpt-agent-history .systemsculpt-agent-turn")).toHaveLength(2);
     expect(parent.textContent?.match(/Final answer/g)).toHaveLength(1);
+    workspace.unload();
+  });
+
+  it("keeps the completed response and a safe fallback when durable history rendering rejects", async () => {
+    const parent = document.body.createDiv();
+    const workspace = new AgentWorkspace(parent, {
+      app: new App(),
+      sourcePath: () => "SystemSculpt/Chats/chat.md",
+      onSubmit: jest.fn(),
+      onStop: jest.fn(),
+      onAttach: jest.fn(),
+      onRemoveAttachment: jest.fn(),
+      onApprove: jest.fn(),
+      onOpenArtifact: jest.fn(),
+      onCopyArtifactPath: jest.fn(),
+      onNewChat: jest.fn(),
+      onOpenHistory: jest.fn(),
+      onOpenSettings: jest.fn(),
+    });
+    workspace.load();
+    const user = {
+      role: "user" as const,
+      message_id: "user-settlement-rejection",
+      content: "Finish this",
+    };
+    await workspace.setHistory([user]);
+    await workspace.setAgentSnapshot({
+      runId: "run-settlement-rejection",
+      turnId: user.message_id,
+      status: "completed",
+      phase: "complete",
+      messages: [{
+        id: "assistant-settlement-rejection",
+        role: "assistant",
+        partIds: ["text-settlement-rejection"],
+      }],
+      parts: [{
+        id: "text-settlement-rejection",
+        kind: "text",
+        messageId: "assistant-settlement-rejection",
+        state: "complete",
+        markdown: "Final answer",
+        order: 0,
+      }],
+    });
+    expect(parent.querySelector(".systemsculpt-agent-active-run")?.textContent)
+      .toContain("Final answer");
+
+    const renderError = new Error("Durable history rendering failed.");
+    jest.spyOn(workspace.renderer, "renderHistory").mockRejectedValueOnce(renderError);
+
+    await expect(workspace.settleCompletedRun([
+      user,
+      {
+        role: "assistant",
+        message_id: "assistant-settlement-rejection",
+        content: "Final answer",
+      },
+    ])).rejects.toBe(renderError);
+
+    const active = parent.querySelector(".systemsculpt-agent-active-run")!;
+    expect(active.textContent).toContain("Final answer");
+    expect(active.textContent).toContain(
+      "The response completed, but part of this chat could not be displayed. Reopen the chat to try again.",
+    );
+    expect(active.textContent).not.toContain(renderError.message);
+    expect(active.querySelector(".systemsculpt-agent-render-fallback")?.getAttribute("role"))
+      .toBe("alert");
+    expect((workspace as any).snapshot).toBeNull();
+    expect((workspace as any).pendingSnapshotRender).toBeUndefined();
+
+    await expect(workspace.settleCompletedRun([
+      user,
+      {
+        role: "assistant",
+        message_id: "assistant-settlement-rejection",
+        content: "Final answer",
+      },
+    ])).resolves.toBeUndefined();
+    expect(active.childElementCount).toBe(0);
+    expect(parent.querySelector(".systemsculpt-agent-render-fallback")).toBeNull();
+    expect(parent.textContent?.match(/Final answer/g)).toHaveLength(1);
+    workspace.unload();
+  });
+
+  it("discards a pending stale snapshot when terminal history settles", async () => {
+    const parent = document.body.createDiv();
+    const workspace = new AgentWorkspace(parent, {
+      app: new App(),
+      sourcePath: () => "SystemSculpt/Chats/chat.md",
+      onSubmit: jest.fn(),
+      onStop: jest.fn(),
+      onAttach: jest.fn(),
+      onRemoveAttachment: jest.fn(),
+      onApprove: jest.fn(),
+      onOpenArtifact: jest.fn(),
+      onCopyArtifactPath: jest.fn(),
+      onNewChat: jest.fn(),
+      onOpenHistory: jest.fn(),
+      onOpenSettings: jest.fn(),
+    });
+    workspace.load();
+    const user = { role: "user" as const, message_id: "user-stale", content: "Finish this" };
+    await workspace.setHistory([user]);
+
+    let releaseRender: () => void = () => {};
+    const renderBlocked = new Promise<void>((resolve) => {
+      releaseRender = resolve;
+    });
+    let enteredRender: () => void = () => {};
+    const renderEntered = new Promise<void>((resolve) => {
+      enteredRender = resolve;
+    });
+    const originalRenderActive = workspace.renderer.renderActive.bind(workspace.renderer);
+    jest.spyOn(workspace.renderer, "renderActive").mockImplementation(async (...args) => {
+      enteredRender();
+      await renderBlocked;
+      return originalRenderActive(...args);
+    });
+
+    const snapshot: AgentConversationSnapshot = {
+      runId: "run-1",
+      turnId: "user-1",
+      status: "running",
+      phase: "submitted",
+      statusLabel: "Starting",
+      messages: [{
+        id: "assistant-stale",
+        role: "assistant",
+        partIds: ["text-stale"],
+      }],
+      parts: [{
+        id: "text-stale",
+        kind: "text",
+        messageId: "assistant-stale",
+        state: "streaming",
+        markdown: "Stale live answer",
+        order: 0,
+      }],
+    };
+    const firstRender = workspace.setAgentSnapshot(snapshot);
+    await renderEntered;
+
+    const stalePendingRender = workspace.setAgentSnapshot(snapshot);
+    const settlement = workspace.settleCompletedRun([
+      user,
+      { role: "assistant", message_id: "assistant-stale", content: "Final durable answer" },
+    ]);
+    releaseRender();
+    await Promise.all([firstRender, stalePendingRender, settlement]);
+
+    expect(parent.querySelector(".systemsculpt-agent-active-run")?.childElementCount).toBe(0);
+    expect(parent.textContent).not.toContain("Stale live answer");
+    expect(parent.textContent?.match(/Final durable answer/g)).toHaveLength(1);
     workspace.unload();
   });
 
@@ -1502,9 +2902,14 @@ describe("AgentWorkspace", () => {
     workspace.load();
     workspace.setRunPending(true);
 
-    let snapshot = createInitialAgentConversation();
-    snapshot = applyManagedAgentEvent(snapshot, envelope(1, { type: "run.started" }));
-    snapshot = applyManagedAgentEvent(snapshot, envelope(2, { type: "run.completed" }));
+    const snapshot: AgentConversationSnapshot = {
+      runId: "run-1",
+      turnId: "user-1",
+      status: "completed",
+      phase: "complete",
+      messages: [],
+      parts: [],
+    };
     await workspace.setAgentSnapshot(snapshot);
 
     expect(parent.querySelector(".systemsculpt-agent-composer")?.classList.contains("is-running"))
@@ -1532,38 +2937,52 @@ describe("AgentWorkspace", () => {
     });
     workspace.load();
 
-    let snapshot = createInitialAgentConversation();
-    snapshot = applyManagedAgentEvent(snapshot, envelope(1, { type: "run.started" }));
-    snapshot = applyManagedAgentEvent(snapshot, envelope(2, { type: "message.started", messageId: "assistant-1", role: "assistant" }));
-    snapshot = applyManagedAgentEvent(snapshot, envelope(3, {
-      type: "tool.requested",
-      call: {
-        callId: "call-write",
-        partId: "tool-write",
-        messageId: "assistant-1",
-        name: "write",
-        location: "vault",
-        input: { path: "Projects/Plan.md", content: "# Plan\n\nReady" },
-      },
-    }));
-    snapshot = applyManagedAgentEvent(snapshot, envelope(4, {
-      type: "approval.requested",
+    const approvalTool: Extract<AgentPart, { kind: "tool" }> = {
+      id: "tool-write",
+      kind: "tool",
+      messageId: "assistant-1",
       callId: "call-write",
+      name: "write",
+      location: "vault",
+      input: { path: "Projects/Plan.md", content: "# Plan\n\nReady" },
+      state: "approval-required",
       approvalId: "approval-write",
-    }));
+      order: 0,
+    };
+    let snapshot: AgentConversationSnapshot = {
+      runId: "run-1",
+      turnId: "user-1",
+      status: "waiting",
+      phase: "waiting",
+      statusLabel: "Starting",
+      waitingReason: "approval",
+      messages: [{
+        id: "assistant-1",
+        role: "assistant",
+        partIds: ["tool-write"],
+      }],
+      parts: [approvalTool],
+    };
     await workspace.setAgentSnapshot(snapshot);
 
     expect(parent.querySelector(".systemsculpt-agent-approval-preview .systemsculpt-diff-viewer")).not.toBeNull();
     expect(parent.textContent).toContain("Projects/Plan.md");
     expect(parent.textContent).toContain("Ready");
 
-    snapshot = applyManagedAgentEvent(snapshot, envelope(5, { type: "approval.resolved", approvalId: "approval-write", approved: true }));
-    snapshot = applyManagedAgentEvent(snapshot, envelope(6, { type: "tool.started", callId: "call-write" }));
-    snapshot = applyManagedAgentEvent(snapshot, envelope(7, {
-      type: "tool.succeeded",
-      callId: "call-write",
-      result: { summary: "Created Plan.md", data: { path: "Projects/Plan.md", bytes: 13 } },
-    }));
+    snapshot = {
+      ...snapshot,
+      status: "running",
+      phase: "working",
+      waitingReason: undefined,
+      parts: [{
+        ...approvalTool,
+        state: "succeeded",
+        output: {
+          summary: "Created Plan.md",
+          data: { path: "Projects/Plan.md", bytes: 13 },
+        },
+      }],
+    };
     await workspace.setAgentSnapshot(snapshot);
 
     const tool = parent.querySelector(".systemsculpt-agent-tool")!;
@@ -1597,9 +3016,25 @@ describe("AgentWorkspace", () => {
     });
     workspace.load();
     const render = jest.spyOn(workspace.renderer, "renderActive");
-    const started = applyManagedAgentEvent(createInitialAgentConversation(), envelope(1, { type: "run.started" }));
-    const thinking = applyManagedAgentEvent(started, envelope(2, { type: "run.status", phase: "thinking", label: "Thinking" }));
-    const working = applyManagedAgentEvent(thinking, envelope(3, { type: "run.status", phase: "working", label: "Working" }));
+    const started: AgentConversationSnapshot = {
+      runId: "run-1",
+      turnId: "user-1",
+      status: "running",
+      phase: "submitted",
+      statusLabel: "Starting",
+      messages: [],
+      parts: [],
+    };
+    const thinking: AgentConversationSnapshot = {
+      ...started,
+      phase: "thinking",
+      statusLabel: "Thinking",
+    };
+    const working: AgentConversationSnapshot = {
+      ...thinking,
+      phase: "working",
+      statusLabel: "Working",
+    };
 
     await Promise.all([
       workspace.setAgentSnapshot(started),
@@ -1612,7 +3047,7 @@ describe("AgentWorkspace", () => {
       working,
       expect.objectContaining({ busy: true, composerRunning: true }),
     );
-    expect(parent.textContent).toContain("Working");
+    expect(parent.textContent).toContain("Thinking");
     workspace.unload();
   });
 
@@ -1634,10 +3069,15 @@ describe("AgentWorkspace", () => {
     });
     workspace.load();
     const notifyTurnStarted = jest.spyOn((workspace as any).scroller, "notifyTurnStarted");
-    const started = applyManagedAgentEvent(
-      createInitialAgentConversation(),
-      envelope(1, { type: "run.started" }),
-    );
+    const started: AgentConversationSnapshot = {
+      runId: "run-1",
+      turnId: "user-1",
+      status: "running",
+      phase: "submitted",
+      statusLabel: "Starting",
+      messages: [],
+      parts: [],
+    };
 
     await workspace.setAgentSnapshot(started);
     expect(notifyTurnStarted).not.toHaveBeenCalled();
@@ -1669,24 +3109,27 @@ describe("AgentWorkspace", () => {
     });
     workspace.load();
 
-    let snapshot = createInitialAgentConversation();
-    snapshot = applyManagedAgentEvent(snapshot, envelope(1, { type: "run.started" }));
-    snapshot = applyManagedAgentEvent(snapshot, envelope(2, {
-      type: "run.status",
+    const reasoningPart: Extract<AgentPart, { kind: "reasoning" }> = {
+      id: "reasoning-1",
+      kind: "reasoning",
+      messageId: "assistant-reasoning",
+      state: "streaming",
+      summary: "Checking the active note. ",
+      order: 0,
+    };
+    let snapshot: AgentConversationSnapshot = {
+      runId: "run-1",
+      turnId: "user-1",
+      status: "running",
       phase: "thinking",
-      label: "Thinking",
-    }));
-    snapshot = applyManagedAgentEvent(snapshot, envelope(3, {
-      type: "message.started",
-      messageId: "assistant-reasoning",
-      role: "assistant",
-    }));
-    snapshot = applyManagedAgentEvent(snapshot, envelope(4, {
-      type: "reasoning.delta",
-      messageId: "assistant-reasoning",
-      partId: "reasoning-1",
-      delta: "Checking the active note. ",
-    }));
+      statusLabel: "Thinking",
+      messages: [{
+        id: "assistant-reasoning",
+        role: "assistant",
+        partIds: ["reasoning-1"],
+      }],
+      parts: [reasoningPart],
+    };
     await workspace.setAgentSnapshot(snapshot);
 
     const active = parent.querySelector<HTMLElement>(".systemsculpt-agent-active-run")!;
@@ -1697,34 +3140,41 @@ describe("AgentWorkspace", () => {
     expect(active.querySelector(".systemsculpt-agent-part.is-status.is-thinking")).toBeNull();
 
     details.open = false;
-    snapshot = applyManagedAgentEvent(snapshot, envelope(5, {
-      type: "reasoning.delta",
-      messageId: "assistant-reasoning",
-      partId: "reasoning-1",
-      delta: "Planning one safe edit.",
-    }));
+    snapshot = {
+      ...snapshot,
+      parts: [{
+        ...reasoningPart,
+        summary: "Checking the active note. Planning one safe edit.",
+      }],
+    };
     await workspace.setAgentSnapshot(snapshot);
     details = active.querySelector<HTMLDetailsElement>(".systemsculpt-agent-reasoning-details")!;
     expect(details.open).toBe(false);
 
     details.open = true;
-    snapshot = applyManagedAgentEvent(snapshot, envelope(6, {
-      type: "reasoning.completed",
-      messageId: "assistant-reasoning",
-      partId: "reasoning-1",
-    }));
-    snapshot = applyManagedAgentEvent(snapshot, envelope(7, {
-      type: "text.delta",
-      messageId: "assistant-reasoning",
-      partId: "text-1",
-      delta: "Done.",
-    }));
-    snapshot = applyManagedAgentEvent(snapshot, envelope(8, {
-      type: "text.completed",
-      messageId: "assistant-reasoning",
-      partId: "text-1",
-    }));
-    snapshot = applyManagedAgentEvent(snapshot, envelope(9, { type: "run.completed" }));
+    snapshot = {
+      runId: "run-1",
+      turnId: "user-1",
+      status: "completed",
+      phase: "complete",
+      messages: [{
+        id: "assistant-reasoning",
+        role: "assistant",
+        partIds: ["reasoning-1", "text-1"],
+      }],
+      parts: [{
+        ...reasoningPart,
+        state: "complete",
+        summary: "Checking the active note. Planning one safe edit.",
+      }, {
+        id: "text-1",
+        kind: "text",
+        messageId: "assistant-reasoning",
+        state: "complete",
+        markdown: "Done.",
+        order: 1,
+      }],
+    };
     await workspace.setAgentSnapshot(snapshot);
     details = active.querySelector<HTMLDetailsElement>(".systemsculpt-agent-reasoning-details")!;
     expect(details.open).toBe(false);
@@ -1767,26 +3217,136 @@ describe("AgentWorkspace", () => {
       onOpenSettings: jest.fn(),
     });
     workspace.load();
-    const started = applyManagedAgentEvent(createInitialAgentConversation(), envelope(1, { type: "run.started" }));
-    const continuing = applyManagedAgentEvent(started, envelope(2, {
-      type: "run.status",
+    const continuing: AgentConversationSnapshot = {
+      runId: "run-1",
+      turnId: "user-1",
+      status: "running",
       phase: "working",
-      label: "Continuing",
-    }));
+      statusLabel: "Continuing",
+      messages: [],
+      parts: [],
+    };
     await workspace.setAgentSnapshot(continuing);
-    expect(parent.querySelector(".systemsculpt-agent-part.is-status")?.textContent).toContain("Continuing");
+    expect(parent.querySelector(".systemsculpt-agent-activity-state")?.textContent)
+      .toContain("Continuing");
 
-    const failed = applyManagedAgentEvent(continuing, envelope(3, {
-      type: "run.failed",
-      error: { code: "transport", message: "Connection lost." },
-    }));
+    const interruptedError = {
+      code: "transport",
+      message: "Connection lost.",
+      retryable: true,
+    };
+    const failed: AgentConversationSnapshot = {
+      ...continuing,
+      status: "failed",
+      phase: "complete",
+      statusLabel: undefined,
+      terminalError: interruptedError,
+      parts: [{
+        id: "error:user-1",
+        kind: "error",
+        error: interruptedError,
+        retryable: true,
+        retryMessageId: "user-1",
+        order: 0,
+      }],
+    };
 
     await workspace.setAgentSnapshot(failed);
 
-    expect(parent.textContent).toContain("Connection lost.");
+    expect(parent.textContent).toContain("Retry this message to continue.");
+    expect(parent.textContent).not.toMatch(/connection/i);
     expect(parent.querySelector(".systemsculpt-agent-part.is-status")).toBeNull();
     parent.querySelector<HTMLButtonElement>(".systemsculpt-agent-error-retry")!.click();
     expect(onRetryMessage).toHaveBeenCalledWith("user-1");
+    workspace.unload();
+  });
+
+  it("shows an exact tool and terminal failure only once while retaining the failed activity row", async () => {
+    const parent = document.body.createDiv();
+    const workspace = new AgentWorkspace(parent, {
+      app: new App(),
+      sourcePath: () => "SystemSculpt/Chats/chat.md",
+      onSubmit: jest.fn(),
+      onStop: jest.fn(),
+      onAttach: jest.fn(),
+      onRemoveAttachment: jest.fn(),
+      onApprove: jest.fn(),
+      onOpenArtifact: jest.fn(),
+      onCopyArtifactPath: jest.fn(),
+      onRetryMessage: jest.fn(),
+      onNewChat: jest.fn(),
+      onOpenHistory: jest.fn(),
+      onOpenSettings: jest.fn(),
+    });
+    workspace.load();
+
+    const repeatedError = {
+      code: "TOOL_EXECUTION_FAILED",
+      message: "Could not update Plan.md.",
+    };
+    const failedTool: Extract<AgentPart, { kind: "tool" }> = {
+      id: "tool-failed-once",
+      kind: "tool",
+      messageId: "assistant-failed-once",
+      callId: "call-failed-once",
+      name: "write",
+      location: "vault",
+      input: { path: "Plan.md" },
+      state: "failed",
+      error: repeatedError,
+      order: 0,
+    };
+    const running: AgentConversationSnapshot = {
+      runId: "run-failed-once",
+      turnId: "user-failed-once",
+      status: "running",
+      phase: "working",
+      messages: [{
+        id: "assistant-failed-once",
+        role: "assistant",
+        partIds: [failedTool.id],
+      }],
+      parts: [failedTool],
+    };
+    await workspace.setAgentSnapshot(running);
+
+    const toolNode = parent.querySelector<HTMLElement>(".systemsculpt-agent-part.is-tool")!;
+    expect(toolNode.querySelector(".systemsculpt-agent-tool-error")?.textContent)
+      .toBe(repeatedError.message);
+
+    await workspace.setAgentSnapshot({
+      ...running,
+      status: "failed",
+      phase: "complete",
+      terminalError: {
+        ...repeatedError,
+        status: 503,
+        requestId: "req-terminal-only",
+        retryable: true,
+      },
+      parts: [
+        failedTool,
+        {
+          id: "error:user-failed-once",
+          kind: "error",
+          error: {
+            ...repeatedError,
+            status: 503,
+            requestId: "req-terminal-only",
+            retryable: true,
+          },
+          retryable: true,
+          retryMessageId: "user-failed-once",
+          order: 1,
+        },
+      ],
+    });
+
+    expect(parent.querySelector(".systemsculpt-agent-part.is-tool")).toBe(toolNode);
+    expect(toolNode.querySelector(".systemsculpt-agent-tool-state")?.textContent).toBe("Failed");
+    expect(toolNode.querySelector(".systemsculpt-agent-tool-error")).toBeNull();
+    expect(parent.querySelectorAll(".systemsculpt-agent-part.is-error")).toHaveLength(1);
+    expect(parent.textContent?.match(/Could not update Plan\.md\./g)).toHaveLength(1);
     workspace.unload();
   });
 
@@ -1863,40 +3423,50 @@ describe("AgentWorkspace", () => {
       onOpenSettings: jest.fn(),
     });
     workspace.load();
-    const partialCall = {
-      id: "call-partial",
-      messageId: "assistant-partial",
-      request: {
-        id: "call-partial",
-        type: "function" as const,
-        function: {
-          name: "multi_edit",
-          arguments: JSON.stringify({ files: [{ path: "Changed.md" }, { path: "Failed.md" }] }),
-        },
-      },
-      state: "failed" as const,
-      timestamp: 1,
-      result: {
-        success: false,
-        data: {
-          results: [
-            { path: "Changed.md", success: true },
-            { path: "Failed.md", success: false, error: "Conflict" },
-          ],
-        },
-        error: { code: "TOOL_PARTIAL_FAILURE", message: "One file changed; one conflicted." },
-      },
-    };
-    const savedHistory: ChatMessage[] = [{
+    const nativeMessages: UIMessage[] = [{
+      id: "user-partial",
+      role: "user",
+      parts: [{ type: "text", text: "Edit both notes." }],
+    }, {
+      id: "assistant-partial",
       role: "assistant",
-      content: "One file changed; one conflicted.",
-      message_id: "assistant-partial",
-      tool_calls: [partialCall],
-      messageParts: [
-        { id: "partial-part", type: "tool_call", timestamp: 1, data: partialCall },
-        { id: "content-part", type: "content", timestamp: 2, data: "One file changed; one conflicted." },
-      ],
+      parts: [{
+        type: "tool-multi_edit",
+        toolCallId: "call-partial",
+        state: "output-available",
+        input: { files: [{ path: "Changed.md" }, { path: "Failed.md" }] },
+        output: {
+          success: false,
+          data: {
+            results: [
+              { path: "Changed.md", success: true },
+              { path: "Failed.md", success: false, error: "Conflict" },
+            ],
+          },
+          error: { code: "TOOL_PARTIAL_FAILURE", message: "One file changed; one conflicted." },
+        },
+      }, {
+        type: "text",
+        text: "One file changed; one conflicted.",
+        state: "done",
+      }],
     }];
+    const projected = projectThinAgentChat({
+      runId: "run-partial",
+      turnId: "user-partial",
+      statusPhase: "working",
+      statusLabel: "Working",
+      terminalOutcome: { kind: "completed" },
+      chat: { messages: nativeMessages },
+      executingToolIds: new Set(),
+    });
+    await workspace.setAgentSnapshot(projected);
+    expect(parent.querySelectorAll(".systemsculpt-agent-artifact")).toHaveLength(1);
+    expect(parent.textContent).toContain("Changed.md");
+    expect(parent.textContent).not.toContain("Failed.md");
+
+    const savedHistory = [durableAssistant(projected, nativeMessages, 100)];
+    await workspace.setAgentSnapshot(null);
     await workspace.setHistory(reloadSavedMessages(savedHistory));
 
     expect(parent.querySelector(".systemsculpt-agent-tool")?.textContent)

@@ -108,6 +108,23 @@ describe("SettingsManager managed settings contract", () => {
     expect(manager.settings.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
     expect(typeof manager.settings.chatsDirectory).toBe("string");
     expect(typeof manager.settings.vaultInstanceId).toBe("string");
+    expect(manager.settings.thinAgentClientId).toMatch(/^client_[a-f0-9]{32}$/);
+  });
+
+  it("persists one stable thin-agent installation client id across reloads", async () => {
+    const plugin = createPlugin({
+      schemaVersion: CURRENT_SCHEMA_VERSION,
+      vaultInstanceId: "12345678-1234-4abc-8def-1234567890ab",
+    });
+    const first = new SettingsManager(plugin);
+    await first.loadSettings();
+    expect(first.settings.thinAgentClientId)
+      .toBe("client_1234567812344abc8def1234567890ab");
+
+    const reloadedPlugin = createPlugin(first.settings);
+    const second = new SettingsManager(reloadedPlugin);
+    await second.loadSettings();
+    expect(second.settings.thinAgentClientId).toBe(first.settings.thinAgentClientId);
   });
 
   it("persists updates and emits the settings-updated event", async () => {

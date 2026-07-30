@@ -45,7 +45,21 @@ describe("agent workspace CSS contract", () => {
     );
     expect(css).not.toContain('.systemsculpt-agent-activity[data-count="1"]');
     expect(css).toMatch(
+      /\.systemsculpt-agent-activity-icon\.is-animated svg[\s\S]*animation:\s*ss-spin 0\.9s linear infinite;/,
+    );
+    expect(css).toMatch(
+      /\.systemsculpt-agent-workspace\.is-reduced-motion \*[\s\S]*animation-duration:\s*0\.01ms;/,
+    );
+    expect(css).toMatch(
       /\.systemsculpt-agent-reasoning-header\s*\{[^}]*width:\s*100%;[^}]*min-height:\s*var\(--ss-control-height-sm\)/s,
+    );
+  });
+
+  it("preserves whitespace while answer and reasoning text are streaming", () => {
+    const css = readAgentWorkspaceCss();
+
+    expect(css).toMatch(
+      /\.systemsculpt-agent-part\.is-text\.is-streaming,\s*\.systemsculpt-agent-part\.is-reasoning\.is-streaming \.systemsculpt-agent-reasoning-body\s*\{[^}]*overflow-wrap:\s*anywhere;[^}]*white-space:\s*pre-wrap;/s,
     );
   });
 

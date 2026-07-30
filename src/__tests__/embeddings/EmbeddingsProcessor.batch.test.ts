@@ -2,237 +2,293 @@ jest.mock("../../utils/errorLogger", () => ({
   errorLogger: { debug: jest.fn(), warn: jest.fn(), error: jest.fn() },
 }));
 
+import {
+  ManagedEmbeddingsError,
+  type ManagedEmbeddingsIndexResult,
+} from "../../services/embeddings/gateway/ManagedEmbeddingsIndexAdapter";
 import { EmbeddingsProcessor } from "../../services/embeddings/processing/EmbeddingsProcessor";
-import { ManagedEmbeddingsError } from "../../services/embeddings/gateway/ManagedEmbeddingsAdapter";
-import type { ManagedEmbeddingsGateway } from "../../services/embeddings/types";
-import { buildManagedNamespace } from "../../services/embeddings/utils/namespace";
 import { buildVectorId } from "../../services/embeddings/utils/vectorId";
 
-function fixture(options: { chunks?: number; batchSize?: number; chunkText?: string } = {}) {
-  const chunkCount = options.chunks ?? 60;
-  const namespace = buildManagedNamespace(3);
-  const gateway: ManagedEmbeddingsGateway = {
-    limits: {
-      maxTexts: options.batchSize ?? 20,
-      maxCharsPerText: 100_000,
-      maxTotalChars: 200_000,
-    },
-    activeGeneration: {
-      id: "semantic-v1",
-      indexSchemaVersion: 2,
+const SOURCE_HASH = "a".repeat(64);
+const TEXT_HASH = "b".repeat(64);
+
+function indexedResult(options: {
+  generationId?: string;
+  schema?: number;
+  dimensions?: number;
+  chunks?: number;
+  empty?: boolean;
+} = {}): ManagedEmbeddingsIndexResult {
+  if (options.empty) {
+    return {
+      contract: "managed-embeddings-index-v1",
+      source: { contentSha256: SOURCE_HASH },
+      empty: true,
+      vectorEncoding: "float32-le-base64",
+      generation: null,
+      chunks: [],
+    };
+  }
+  const generationId = options.generationId ?? "semantic-v1";
+  const schema = options.schema ?? 3;
+  const dimensions = options.dimensions ?? 3;
+  const namespace = `systemsculpt:managed:${generationId}:v${schema}:${dimensions}`;
+  return {
+    contract: "managed-embeddings-index-v1",
+    source: { contentSha256: SOURCE_HASH },
+    empty: false,
+    vectorEncoding: "float32-le-base64",
+    generation: {
+      id: generationId,
+      indexSchemaVersion: schema,
       indexNamespace: namespace,
-      dimensions: 3,
-      limits: { maxTexts: options.batchSize ?? 20, maxCharsPerText: 100_000, maxTotalChars: 200_000 },
+      dimensions,
     },
-    expectedDimension: 3,
-    generateEmbeddings: jest.fn(async (texts: string[]) => texts.map(() => [0.1, 0.2, 0.3])),
+    chunks: Array.from({ length: options.chunks ?? 2 }, (_, ordinal) => ({
+      ordinal,
+      textHash: ordinal === 0 ? TEXT_HASH : "c".repeat(64),
+      headingPath: ordinal === 0 ? ["Heading"] : [],
+      excerpt: `Chunk ${ordinal}`,
+      length: 20 + ordinal,
+      vector: dimensions === 3
+        ? new Float32Array(ordinal === 0 ? [1, 0, 0] : [0, 1, 0])
+        : new Float32Array(Array.from({ length: dimensions }, (_, index) => index === ordinal ? 1 : 0)),
+    })),
   };
-  const storage = {
-    storeVectors: jest.fn(async () => undefined),
-    removeByPathExceptIds: jest.fn(async () => undefined),
-    getVectorSync: jest.fn(() => null),
-    getVectorsByPath: jest.fn(async () => []),
-    moveVectorId: jest.fn(async () => undefined),
-    removeIds: jest.fn(async () => undefined),
-    removeByPath: jest.fn(async () => undefined),
-  };
-  const preprocessor = {
-    process: jest.fn(() => ({ content: "processed", source: "processed", hash: "doc", length: 1000 })),
-    chunkContentWithHashes: jest.fn(() => Array.from({ length: chunkCount }, (_, index) => ({
-      index,
-      text: options.chunkText ?? `Chunk ${index} content`,
-      hash: `hash-${index}`,
-      headingPath: [],
-      length: 200,
-    }))),
-  };
-  const processor = new EmbeddingsProcessor(gateway, storage as never, preprocessor as never);
-  const file = { path: "Note.md", basename: "Note", stat: { mtime: 123 } };
-  const app = { vault: { read: jest.fn(async () => "dummy") } };
-  return { gateway, storage, processor, file, app };
 }
 
-describe("EmbeddingsProcessor managed batching", () => {
-  it("uses the managed operational batch size, stable order, deterministic ids, and unique dispatch keys", async () => {
-    const { gateway, storage, processor, file, app } = fixture();
+function fixture(result = indexedResult()) {
+  const index = jest.fn(async (operation: { prepare: () => { markdown: string } }) => {
+    operation.prepare();
+    return result;
+  });
+  const storage = {
+    publishPath: jest.fn(async () => undefined),
+    replacePath: jest.fn(async () => undefined),
+  };
+  const processor = new EmbeddingsProcessor({ index } as never, storage as never);
+  const file = {
+    path: "Note.md",
+    basename: "Note",
+    stat: { mtime: 123, size: 20 },
+  };
+  let content = "# Heading\n\nPrivate note";
+  const app = { vault: { read: jest.fn(async () => content) } };
+  return {
+    app,
+    file,
+    index,
+    processor,
+    storage,
+    setContent(value: string) {
+      content = value;
+    },
+  };
+}
 
-    const result = await processor.processFiles([file] as never, app as never);
+describe("EmbeddingsProcessor server indexing", () => {
+  it("sends one raw note request and atomically publishes all returned chunks", async () => {
+    const state = fixture(indexedResult({ chunks: 2 }));
 
-    expect(result).toMatchObject({ completed: 1, failed: 0, cancelled: false, fatalError: null });
-    expect(gateway.generateEmbeddings).toHaveBeenCalledTimes(3);
-    const calls = (gateway.generateEmbeddings as jest.Mock).mock.calls;
-    expect(calls.map((call) => call[0].length)).toEqual([20, 20, 20]);
-    expect(calls.flatMap((call) => call[0])).toEqual(
-      Array.from({ length: 60 }, (_, index) => `Chunk ${index} content`),
+    const processed = await state.processor.processFiles(
+      [state.file] as never,
+      state.app as never,
     );
-    const keys = calls.map((call) => call[1].idempotencyKey);
-    expect(new Set(keys).size).toBe(3);
 
-    const namespace = buildManagedNamespace(3);
-    expect(storage.removeByPathExceptIds).toHaveBeenCalledWith("Note.md", namespace, expect.any(Set));
-    const keepIds = storage.removeByPathExceptIds.mock.calls[0][2] as Set<string>;
-    expect(keepIds).toContain(buildVectorId(namespace, "Note.md", 0));
-    expect(keepIds).toContain(buildVectorId(namespace, "Note.md", 59));
+    expect(processed).toMatchObject({
+      completed: 1,
+      completedPaths: ["Note.md"],
+      failed: 0,
+      cancelled: false,
+      generation: {
+        id: "semantic-v1",
+        indexSchemaVersion: 3,
+        indexNamespace: "systemsculpt:managed:semantic-v1:v3:3",
+      },
+    });
+    expect(state.index).toHaveBeenCalledTimes(1);
+    expect(state.index.mock.calls[0][0].prepare()).toEqual({
+      markdown: "# Heading\n\nPrivate note",
+    });
+    expect(state.storage.publishPath).toHaveBeenCalledTimes(1);
+    const [path, namespace, vectors] = state.storage.publishPath.mock.calls[0];
+    expect(path).toBe("Note.md");
+    expect(namespace).toBe("systemsculpt:managed:semantic-v1:v3:3");
+    expect(vectors).toHaveLength(2);
+    expect(vectors[0]).toMatchObject({
+      id: buildVectorId(namespace, "Note.md", 0),
+      path: "Note.md",
+      chunkId: 0,
+      metadata: {
+        title: "Note",
+        contentHash: TEXT_HASH,
+        generation: "semantic-v1",
+        namespace,
+        complete: true,
+        partial: false,
+        chunkCount: 2,
+      },
+    });
+    expect(vectors[1].metadata.complete).toBeUndefined();
   });
 
-  it("batches by the managed capability limit rather than local tuning", async () => {
-    const { gateway, processor, file, app } = fixture({ chunks: 15, batchSize: 7 });
+  it("dispatches exactly once per note and continues after an isolated failure", async () => {
+    const state = fixture();
+    const failed = { path: "Failed.md", basename: "Failed", stat: { mtime: 1 } };
+    const healthy = { path: "Healthy.md", basename: "Healthy", stat: { mtime: 2 } };
+    state.app.vault.read.mockImplementation(async (file: { path: string }) => (
+      file.path === "Failed.md" ? "failed" : "healthy"
+    ));
+    state.index
+      .mockRejectedValueOnce(new ManagedEmbeddingsError("rate_limited", "Try later.", 429))
+      .mockResolvedValueOnce(indexedResult({ chunks: 1 }));
 
-    await processor.processFiles([file] as never, app as never);
+    const processed = await state.processor.processFiles(
+      [failed, healthy] as never,
+      state.app as never,
+    );
 
-    const calls = (gateway.generateEmbeddings as jest.Mock).mock.calls;
-    expect(calls.map((call) => call[0].length)).toEqual([7, 7, 1]);
-  });
-
-  it("sends prepared chunks verbatim without client token-limit truncation", async () => {
-    const preparedChunk = "vault-content:" + "x".repeat(40_000) + ":complete";
-    const { gateway, processor, file, app } = fixture({ chunks: 1, chunkText: preparedChunk });
-
-    await processor.processFiles([file] as never, app as never);
-
-    expect(gateway.generateEmbeddings).toHaveBeenCalledWith(
-      [preparedChunk],
-      expect.objectContaining({ idempotencyKey: expect.any(String) }),
+    expect(state.index).toHaveBeenCalledTimes(2);
+    expect(processed).toMatchObject({
+      completed: 1,
+      completedPaths: ["Healthy.md"],
+      failed: 1,
+      failedPaths: ["Failed.md"],
+      failedDetails: {
+        "Failed.md": { code: "rate_limited", status: 429 },
+      },
+    });
+    expect(state.storage.publishPath).toHaveBeenCalledTimes(1);
+    expect(state.storage.publishPath).toHaveBeenCalledWith(
+      "Healthy.md",
+      "systemsculpt:managed:semantic-v1:v3:3",
+      expect.any(Array),
     );
   });
 
-  it("stops after one failed managed dispatch and records the file failure", async () => {
-    const { gateway, processor, file, app } = fixture({ chunks: 10, batchSize: 5 });
-    const failure = new ManagedEmbeddingsError("rate_limited", "Managed embeddings request failed.", 429);
-    (gateway.generateEmbeddings as jest.Mock).mockRejectedValue(failure);
+  it("atomically replaces every prior generation with a local empty marker", async () => {
+    const state = fixture(indexedResult({ empty: true }));
 
-    const result = await processor.processFiles([file] as never, app as never);
+    const processed = await state.processor.processFiles(
+      [state.file] as never,
+      state.app as never,
+    );
 
-    expect(gateway.generateEmbeddings).toHaveBeenCalledTimes(1);
-    expect(result).toMatchObject({ fatalError: null, cancelled: false });
-    expect(result.failedPaths).toEqual(["Note.md"]);
-    expect(result.failedDetails?.["Note.md"]).toMatchObject({ code: "rate_limited", status: 429 });
-  });
-
-  it("seals normalized-empty content locally without a remote dispatch", async () => {
-    const { storage, processor, file, app } = fixture({ chunks: 0 });
-
-    const result = await processor.processFiles([file] as never, app as never);
-
-    expect(result).toMatchObject({ completed: 1, failed: 0 });
-    expect(storage.removeByPath).toHaveBeenCalledWith("Note.md");
-    expect(storage.storeVectors).toHaveBeenCalledWith([
+    expect(processed).toMatchObject({ completed: 1, failed: 0 });
+    expect(state.storage.publishPath).not.toHaveBeenCalled();
+    expect(state.storage.replacePath).toHaveBeenCalledWith("Note.md", [
       expect.objectContaining({
         path: "Note.md",
-        vector: expect.any(Float32Array),
-        metadata: expect.objectContaining({ isEmpty: true, complete: true, chunkCount: 0 }),
+        metadata: expect.objectContaining({
+          isEmpty: true,
+          complete: true,
+          chunkCount: 0,
+        }),
       }),
     ]);
-    expect(storage.storeVectors.mock.calls[0][0][0].vector).toHaveLength(1);
-    expect(storage.removeByPathExceptIds).not.toHaveBeenCalled();
   });
 
-  it("records a file preparation failure without cancelling unrelated work", async () => {
-    const { processor, file, app } = fixture({ chunks: 1 });
-    app.vault.read.mockRejectedValueOnce(new Error("disk read failed"));
+  it("accepts a validated dynamic generation without rewriting its namespace", async () => {
+    const state = fixture(indexedResult({
+      generationId: "semantic-v2.1",
+      schema: 17,
+      dimensions: 2,
+      chunks: 1,
+    }));
 
-    const result = await processor.processFiles([file] as never, app as never);
+    const processed = await state.processor.processFiles(
+      [state.file] as never,
+      state.app as never,
+    );
 
-    expect(result).toMatchObject({
+    expect(processed.generation).toEqual({
+      id: "semantic-v2.1",
+      indexSchemaVersion: 17,
+      indexNamespace: "systemsculpt:managed:semantic-v2.1:v17:2",
+      dimensions: 2,
+    });
+    expect(state.storage.publishPath).toHaveBeenCalledWith(
+      "Note.md",
+      "systemsculpt:managed:semantic-v2.1:v17:2",
+      expect.any(Array),
+    );
+  });
+
+  it("suppresses an already-dispatched result after local cancellation", async () => {
+    const state = fixture();
+    let release!: (result: ManagedEmbeddingsIndexResult) => void;
+    state.index.mockImplementationOnce(() => new Promise((resolve) => { release = resolve; }));
+
+    const processing = state.processor.processFiles(
+      [state.file] as never,
+      state.app as never,
+    );
+    for (let attempt = 0; attempt < 20 && !release; attempt += 1) await Promise.resolve();
+    state.processor.cancel();
+    release(indexedResult());
+    const processed = await processing;
+
+    expect(processed).toMatchObject({
+      completed: 0,
+      failed: 0,
+      cancelled: true,
+      failedPaths: [],
+    });
+    expect(state.storage.publishPath).not.toHaveBeenCalled();
+  });
+
+  it("rejects a stale source revision without publishing old vectors", async () => {
+    const state = fixture();
+    let release!: (result: ManagedEmbeddingsIndexResult) => void;
+    state.index.mockImplementationOnce(() => new Promise((resolve) => { release = resolve; }));
+
+    const processing = state.processor.processFiles(
+      [state.file] as never,
+      state.app as never,
+      undefined,
+      {
+        sourceRevisions: new Map([[
+          state.file as never,
+          { path: "Note.md", basename: "Note", mtime: 123 },
+        ]]),
+      },
+    );
+    for (let attempt = 0; attempt < 20 && !release; attempt += 1) await Promise.resolve();
+    state.file.stat.mtime = 124;
+    state.setContent("New content");
+    release(indexedResult());
+    const processed = await processing;
+
+    expect(processed).toMatchObject({
       completed: 0,
       failed: 1,
-      cancelled: false,
       failedPaths: ["Note.md"],
-      fatalError: null,
+      failedDetails: {
+        "Note.md": { code: "source_changed", status: 0 },
+      },
     });
+    expect(state.storage.publishPath).not.toHaveBeenCalled();
+    expect(state.storage.replacePath).not.toHaveBeenCalled();
   });
 
-  it("continues indexing the next note when one note fails local preparation", async () => {
-    const { gateway, storage, processor, app } = fixture({ chunks: 1 });
-    const failedFile = { path: "Failed.md", basename: "Failed", stat: { mtime: 1 } };
-    const healthyFile = { path: "Healthy.md", basename: "Healthy", stat: { mtime: 2 } };
-    app.vault.read
-      .mockRejectedValueOnce(new Error("unreadable"))
-      .mockResolvedValueOnce("healthy note");
+  it("records invalid server output without deleting a previously committed path", async () => {
+    const state = fixture();
+    state.index.mockRejectedValueOnce(new ManagedEmbeddingsError(
+      "invalid_response",
+      "Managed embedding index returned an invalid response.",
+      200,
+    ));
 
-    const result = await processor.processFiles([failedFile, healthyFile] as never, app as never);
+    const processed = await state.processor.processFiles(
+      [state.file] as never,
+      state.app as never,
+    );
 
-    expect(result).toMatchObject({
-      completed: 1,
-      failed: 1,
-      cancelled: false,
-      fatalError: null,
-      failedPaths: ["Failed.md"],
+    expect(processed.failedDetails?.["Note.md"]).toMatchObject({
+      code: "invalid_response",
+      status: 200,
     });
-    expect(gateway.generateEmbeddings).toHaveBeenCalledTimes(1);
-    expect(storage.removeByPath).toHaveBeenCalledWith("Failed.md");
-  });
-
-  it("packs one-chunk notes across managed requests while isolating an unreadable note", async () => {
-    const { gateway, processor, app } = fixture({ chunks: 1, batchSize: 7 });
-    const unreadable = { path: "Unreadable.md", basename: "Unreadable", stat: { mtime: 1 } };
-    const healthy = Array.from({ length: 15 }, (_, index) => ({
-      path: `Healthy-${index}.md`,
-      basename: `Healthy-${index}`,
-      stat: { mtime: index + 2 },
-    }));
-    app.vault.read.mockRejectedValueOnce(new Error("unreadable"));
-
-    const result = await processor.processFiles([unreadable, ...healthy] as never, app as never);
-
-    const calls = (gateway.generateEmbeddings as jest.Mock).mock.calls;
-    expect(calls.map((call) => call[0].length)).toEqual([7, 7, 1]);
-    expect(result.completedPaths).toEqual(healthy.map((file) => file.path));
-    expect(result.failedPaths).toEqual(["Unreadable.md"]);
-  });
-
-  it("suppresses an already-dispatched result after local cancellation without claiming a transport cancellation", async () => {
-    const { gateway, processor, file, app } = fixture({ chunks: 1 });
-    let release: ((vectors: number[][]) => void) | undefined;
-    (gateway.generateEmbeddings as jest.Mock).mockImplementation(() => new Promise<number[][]>((resolve) => {
-      release = resolve;
-    }));
-
-    const processing = processor.processFiles([file] as never, app as never);
-    await Promise.resolve();
-    await Promise.resolve();
-    processor.cancel();
-    release?.([[0.1, 0.2, 0.3]]);
-    const result = await processing;
-
-    expect(gateway.generateEmbeddings).toHaveBeenCalledTimes(1);
-    expect(result).toMatchObject({ cancelled: true, fatalError: null, failedPaths: [] });
-  });
-
-  it("stores the captured source revision when the live TFile changes during remote inference", async () => {
-    const { gateway, storage, processor, file, app } = fixture({ chunks: 1 });
-    let release: ((vectors: number[][]) => void) | undefined;
-    (gateway.generateEmbeddings as jest.Mock).mockImplementation(() => new Promise<number[][]>((resolve) => {
-      release = resolve;
-    }));
-    const sourceRevision = { path: "Note.md", basename: "Note", mtime: 123 };
-
-    const processing = processor.processFiles(
-      [file] as never,
-      app as never,
-      undefined,
-      { sourceRevisions: new Map([[file as never, sourceRevision]]) },
-    );
-    for (let attempt = 0; attempt < 10 && !release; attempt += 1) await Promise.resolve();
-    expect(release).toBeDefined();
-
-    file.path = "Renamed.md";
-    file.basename = "Renamed";
-    file.stat.mtime = 456;
-    release?.([[0.1, 0.2, 0.3]]);
-    await processing;
-
-    const stored = storage.storeVectors.mock.calls
-      .flatMap((call) => call[0])
-      .filter((vector) => vector.metadata.namespace === buildManagedNamespace(3));
-    expect(stored).toContainEqual(expect.objectContaining({
-      path: "Note.md",
-      metadata: expect.objectContaining({ title: "Note", mtime: 123 }),
-    }));
-    expect(storage.removeByPathExceptIds).toHaveBeenCalledWith(
-      "Note.md",
-      buildManagedNamespace(3),
-      expect.any(Set),
-    );
+    expect(state.storage.publishPath).not.toHaveBeenCalled();
+    expect(state.storage.replacePath).not.toHaveBeenCalled();
   });
 });

@@ -90,36 +90,9 @@ export interface ProcessingResult {
   failed: number;
   failedPaths: string[];
   cancelled: boolean;
-  fatalError: import('./gateway/ManagedEmbeddingsAdapter').ManagedEmbeddingsError | null;
+  fatalError: import('./gateway/ManagedEmbeddingsIndexAdapter').ManagedEmbeddingsError | null;
+  generation?: import('./gateway/ManagedEmbeddingsIndexAdapter').ManagedEmbeddingsIndexGeneration;
   failedDetails?: Record<string, FailedProcessingDetail>;
-}
-
-export interface EmbeddingsGenerateOptions {
-  idempotencyKey: string;
-  signal?: AbortSignal;
-}
-
-export interface ManagedEmbeddingLimits {
-  maxTexts: number;
-  maxCharsPerText: number;
-  maxTotalChars: number;
-}
-
-export interface ManagedEmbeddingGeneration {
-  id: string;
-  indexSchemaVersion: number;
-  indexNamespace: string;
-  dimensions: number;
-  limits: ManagedEmbeddingLimits;
-}
-
-/** The one managed execution seam used by the semantic index. */
-export interface ManagedEmbeddingsGateway {
-  readonly limits: ManagedEmbeddingLimits;
-  expectedDimension?: number;
-  activeGeneration?: ManagedEmbeddingGeneration;
-  initializeContract?(): Promise<void>;
-  generateEmbeddings(texts: string[], options: EmbeddingsGenerateOptions): Promise<number[][]>;
 }
 
 export interface EmbeddingsManagerConfig {

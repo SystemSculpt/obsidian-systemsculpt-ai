@@ -13,6 +13,64 @@ const INLINE_SOURCE_MAP_PATTERN = /[#@]\s*sourceMappingURL=data:/;
 const CSS_BUILD_FAILURE_PATTERN = /\/\*\s*CSS build failed\s*\*\//i;
 const RETIRED_SYSTEMSCULPT_API_HOST = "https://api.systemsculpt.com";
 const DEFAULT_TAIL_BYTES = 2 * 1024 * 1024;
+function bundleFragmentRules(message, fragments) {
+  return fragments.map((fragment) => ({ fragment, message }));
+}
+
+export const THIN_CLIENT_FORBIDDEN_BUNDLE_FRAGMENTS = [
+  ...bundleFragmentRules(
+    "main.js still bundles retired client chat authority.",
+    [
+      "ManagedAgentController",
+      "ManagedChatRuntimeAdapter",
+      "ManagedChatSessionBudget",
+      "ManagedChatInputLimits",
+      "AcceptedChatRequestSnapshot",
+      "ChatRequestPreparationService",
+      "OrderedMessageStream",
+      "ManagedToolContinuationBudget",
+      "inspectManagedToolContinuationBudget",
+      "DEFAULT_MAX_CONTINUATION_ROUNDS",
+      "maxContinuationRounds",
+      "max_tool_continuation_depth",
+      "MAX_SAME_KEY_RETRIES",
+      "MAX_DISCONNECT_RECOVERY_REQUESTS",
+      "DISCONNECT_RETRY_BASE_DELAY_MS",
+    ],
+  ),
+  ...bundleFragmentRules(
+    "main.js still bundles retired client model or provider authority.",
+    [
+      "ModelManagementService",
+      "UnifiedModelService",
+      "PiTextCatalog",
+      "RemoteProviderCatalog",
+      "createPiModelRegistry",
+      "ChatModelSelectionController",
+      "LocalPiStreamExecutor",
+      "PiLocalAgentExecutor",
+      "PiTextRuntime",
+      "PiSdkSessionCore",
+    ],
+  ),
+  ...bundleFragmentRules(
+    "main.js still bundles a React UI runtime.",
+    [
+      "node_modules/react/",
+      "node_modules/@ai-sdk/react/",
+      "Invalid hook call",
+    ],
+  ),
+  {
+    fragment: "Agent stopped",
+    message: "main.js still contains the retired stop-response copy.",
+  },
+  {
+    fragment: "connection.ticket",
+    message: "main.js still exposes an internal connection ticket field.",
+  },
+];
+
 const FORBIDDEN_CLIENT_BUNDLE_FRAGMENTS = [
   {
     fragment: "node_modules/@mariozechner/",
@@ -34,6 +92,7 @@ const FORBIDDEN_CLIENT_BUNDLE_FRAGMENTS = [
     fragment: "node_modules/@openai/codex",
     message: "main.js still bundles a retired local AI runtime.",
   },
+  ...THIN_CLIENT_FORBIDDEN_BUNDLE_FRAGMENTS,
 ];
 
 const LOOPBACK_API_BASE_PATTERN =

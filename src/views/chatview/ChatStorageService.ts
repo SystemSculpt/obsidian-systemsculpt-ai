@@ -12,9 +12,8 @@ import type {
   ChatApprovalMode,
   ChatMetadata,
   ChatResumeDescriptor,
-  ManagedChatSessionBinding,
 } from "./storage/ChatPersistenceTypes";
-import { parseManagedChatSessionBinding } from "./storage/ChatPersistenceTypes";
+import { parseAgentConversationId } from "./storage/ChatPersistenceTypes";
 
 type LoadedChatRecord = {
   id: string;
@@ -25,7 +24,7 @@ type LoadedChatRecord = {
   context_files?: string[];
   chatFontSize?: "small" | "medium" | "large";
   approvalMode?: ChatApprovalMode;
-  managedSession?: ManagedChatSessionBinding;
+  agentConversationId?: string;
   chatPath: string;
 };
 
@@ -34,7 +33,12 @@ type SaveChatOptions = {
   title?: string;
   chatFontSize?: "small" | "medium" | "large";
   approvalMode?: ChatApprovalMode;
-  managedSession?: ManagedChatSessionBinding;
+  agentConversationId?: string;
+  /**
+   * Reserved for a validated, server-authoritative history reconciliation.
+   * Ordinary local saves must keep the empty-over-nonempty race guard.
+   */
+  authoritativeServerHistoryReconciliation?: boolean;
 };
 
 export class SavedChatCorruptedError extends Error {
@@ -250,9 +254,19 @@ export class ChatStorageService {
       // If messages are empty and file exists with content, preserve the version
       const currentVersion = Number(existingMetadata?.version) || 0;
       let newVersion = currentVersion + 1;
+      const agentConversationId = parseAgentConversationId(options.agentConversationId);
       
       // Safety check: Don't overwrite an existing local chat with an empty transcript.
-      if (messages.length === 0 && fileExists && existingMetadata && file instanceof TFile) {
+      if (
+        messages.length === 0
+        && fileExists
+        && existingMetadata
+        && file instanceof TFile
+        && (
+          options.authoritativeServerHistoryReconciliation !== true
+          || !agentConversationId
+        )
+      ) {
         // Check if the existing file has messages (simple heuristic: check for message markers)
         const existingContent = await vault.read(file);
         if (existingContent.includes('SYSTEMSCULPT-MESSAGE-START')) {
@@ -269,9 +283,7 @@ export class ChatStorageService {
         chatFontSize: options.chatFontSize || "medium",
         approvalMode: options.approvalMode === "full-access" ? "full-access" : "ask",
       };
-      if (options.managedSession?.boundChatId === chatId) {
-        metadata.managedSession = options.managedSession;
-      }
+      if (agentConversationId) metadata.agentConversationId = agentConversationId;
 
       if (mergedTags.length > 0) {
         metadata.tags = mergedTags;
@@ -468,7 +480,7 @@ export class ChatStorageService {
       context_files: metadata.context_files?.map((f) => f.path) || [],
       chatFontSize: metadata.chatFontSize,
       approvalMode: metadata.approvalMode === "full-access" ? "full-access" : "ask",
-      managedSession: parseManagedChatSessionBinding(metadata.managedSession, metadata.id),
+      agentConversationId: parseAgentConversationId(metadata.agentConversationId),
       chatPath: filePath || `${this.chatDirectory}/${metadata.id}.md`,
     };
   }

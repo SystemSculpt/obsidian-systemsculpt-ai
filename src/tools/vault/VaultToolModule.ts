@@ -1,7 +1,6 @@
 import { App } from "obsidian";
-import type { FirstPartyToolChatTarget, FirstPartyToolDefinition } from "../types";
+import type { FirstPartyToolChatTarget } from "../types";
 import SystemSculptPlugin from "../../main";
-import { toolDefinitions } from "./toolDefinitions";
 import { FileOperations } from "./tools/FileOperations";
 import { DirectoryOperations } from "./tools/DirectoryOperations";
 import { SearchOperations } from "./tools/SearchOperations";
@@ -54,14 +53,6 @@ export class VaultToolModule {
     this.directoryOps = new DirectoryOperations(this.app, this.allowedPaths, this.plugin);
     this.searchOps = new SearchOperations(this.app, this.allowedPaths, this.plugin);
     this.managementOps = new ManagementOperations(this.app, this.plugin);
-  }
-  
-  /**
-   * Get available tools
-   */
-  getTools(): FirstPartyToolDefinition[] {
-    // Return all tool definitions
-    return toolDefinitions;
   }
   
   /**

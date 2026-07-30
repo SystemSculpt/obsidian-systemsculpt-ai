@@ -12,7 +12,7 @@ import { buildVectorId } from "../utils/vectorId";
 import { normalizeInPlace } from '../utils/vector';
 import {
   isManagedNamespace,
-  MANAGED_EMBEDDING_NAMESPACE_PREFIX,
+  MANAGED_EMBEDDING_FAMILY_PREFIX,
 } from "../utils/namespace";
 import {
   deserializeEmbeddingsIndex,
@@ -192,6 +192,104 @@ export class EmbeddingsStorage {
       transaction.onerror = () => reject(transaction.error);
       transaction.onabort = () =>
         reject(transaction.error || new Error('IndexedDB transaction aborted while storing vectors.'));
+    });
+  }
+
+  /**
+   * Atomically replace every chunk for one path in one managed namespace.
+   * Readers observe either the previous complete set or the next complete set,
+   * never a mixture of separately committed chunks.
+   */
+  async publishPath(
+    path: string,
+    namespace: string,
+    vectors: EmbeddingVector[],
+  ): Promise<void> {
+    if (!this.db) return;
+    const root = vectors.find((vector) => vector.chunkId === 0);
+    const ids = new Set(vectors.map((vector) => vector.id));
+    if (
+      !path
+      || !isManagedNamespace(namespace)
+      || vectors.length < 1
+      || ids.size !== vectors.length
+      || !root
+      || root.metadata.complete !== true
+      || vectors.some((vector) => (
+        vector.path !== path
+        || vector.metadata.namespace !== namespace
+        || vector.id !== buildVectorId(namespace, path, vector.chunkId ?? this.parseChunkIdFromId(vector.id))
+      ))
+    ) {
+      throw new Error("Managed embedding path publication is invalid.");
+    }
+
+    await new Promise<void>((resolve, reject) => {
+      const tx = this.db!.transaction([STORE_NAME], "readwrite");
+      const store = tx.objectStore(STORE_NAME);
+      const namespacePrefix = `${namespace}::${path}#`;
+      const request = store.index("by_path").getAllKeys(IDBKeyRange.only(path));
+      request.onsuccess = () => {
+        for (const id of (request.result || []) as string[]) {
+          if (id.startsWith(namespacePrefix) || id.startsWith("systemsculpt:local-empty:")) {
+            store.delete(id);
+          }
+        }
+        for (const vector of vectors) store.put(vector);
+      };
+      request.onerror = () => reject(request.error);
+      tx.oncomplete = () => {
+        for (const [id, vector] of this.cache) {
+          if (
+            vector.path === path
+            && (id.startsWith(namespacePrefix) || id.startsWith("systemsculpt:local-empty:"))
+          ) {
+            this.cache.delete(id);
+          }
+        }
+        this.cache.set(root.id, root);
+        this.pathsSet.add(path);
+        resolve();
+      };
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error || new Error("IndexedDB path publication aborted."));
+    });
+  }
+
+  /** Atomically replace all generations for one path, used for empty markers. */
+  async replacePath(path: string, vectors: EmbeddingVector[]): Promise<void> {
+    if (!this.db) return;
+    if (
+      !path
+      || vectors.some((vector) => vector.path !== path)
+      || new Set(vectors.map((vector) => vector.id)).size !== vectors.length
+    ) {
+      throw new Error("Embedding path replacement is invalid.");
+    }
+    await new Promise<void>((resolve, reject) => {
+      const tx = this.db!.transaction([STORE_NAME], "readwrite");
+      const store = tx.objectStore(STORE_NAME);
+      const request = store.index("by_path").getAllKeys(IDBKeyRange.only(path));
+      request.onsuccess = () => {
+        for (const id of (request.result || []) as string[]) store.delete(id);
+        for (const vector of vectors) store.put(vector);
+      };
+      request.onerror = () => reject(request.error);
+      tx.oncomplete = () => {
+        for (const [id, vector] of this.cache) {
+          if (vector.path === path) this.cache.delete(id);
+        }
+        for (const vector of vectors) {
+          if ((vector.chunkId ?? this.parseChunkIdFromId(vector.id)) === 0) {
+            this.cache.set(vector.id, vector);
+          }
+        }
+        if (vectors.length > 0) this.pathsSet.add(path);
+        else this.pathsSet.delete(path);
+        resolve();
+      };
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error || new Error("IndexedDB path replacement aborted."));
     });
   }
 
@@ -811,8 +909,8 @@ export class EmbeddingsStorage {
       const store = tx.objectStore(STORE_NAME);
       const index = store.index("by_namespace");
       const range = IDBKeyRange.bound(
-        MANAGED_EMBEDDING_NAMESPACE_PREFIX,
-        `${MANAGED_EMBEDDING_NAMESPACE_PREFIX}\uffff`,
+        MANAGED_EMBEDDING_FAMILY_PREFIX,
+        `${MANAGED_EMBEDDING_FAMILY_PREFIX}\uffff`,
       );
       const deletedIds: string[] = [];
 

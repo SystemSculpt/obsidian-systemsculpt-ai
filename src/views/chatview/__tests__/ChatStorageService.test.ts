@@ -164,32 +164,19 @@ describe("ChatStorageService", () => {
       expect(createdContent).toContain('approvalMode: "ask"');
     });
 
-    it("persists only a chat-bound managed session checkpoint", async () => {
+    it("persists only the server conversation routing pointer", async () => {
       await service.saveChat("session-chat", testMessages, {
-        managedSession: {
-          id: "mchat_0123456789abcdef0123456789abcdef",
-          revision: 2,
-          boundChatId: "session-chat",
-          checkpointMessageId: "assistant-2",
-          toolsetFingerprint: "2:741638a5:5967d5",
-          budget: { messageCount: 2, imageCount: 0, attachmentBytes: 0, storedJsonBytes: 256 },
-        },
+        agentConversationId: "conversation_0123456789abcdef0123456789abcdef",
       });
-      expect(mockVault.create.mock.calls[0][1]).toContain("managedSession:");
+      expect(mockVault.create.mock.calls[0][1])
+        .toContain('agentConversationId: "conversation_0123456789abcdef0123456789abcdef"');
 
       jest.clearAllMocks();
       mockVault.getAbstractFileByPath.mockReturnValue(null);
       await service.saveChat("other-chat", testMessages, {
-        managedSession: {
-          id: "mchat_0123456789abcdef0123456789abcdef",
-          revision: 2,
-          boundChatId: "session-chat",
-          checkpointMessageId: "assistant-2",
-          toolsetFingerprint: "2:741638a5:5967d5",
-          budget: { messageCount: 2, imageCount: 0, attachmentBytes: 0, storedJsonBytes: 256 },
-        },
+        agentConversationId: "invalid",
       });
-      expect(mockVault.create.mock.calls[0][1]).not.toContain("managedSession:");
+      expect(mockVault.create.mock.calls[0][1]).not.toContain("agentConversationId:");
     });
 
     it("adds default chat tag to new history files", async () => {
@@ -730,7 +717,7 @@ version: 1
       expect(mockVault.create).not.toHaveBeenCalled();
     });
 
-    it("throws error when trying to save empty messages over existing content", async () => {
+    it("rejects ordinary empty saves over existing content", async () => {
       const mockFile = new TFile({ path: "SystemSculpt/Chats/nonempty.md" });
       mockVault.getAbstractFileByPath.mockReturnValue(mockFile);
       mockVault.read.mockResolvedValue(`---
@@ -747,7 +734,41 @@ Hello
 
       await expect(
         service.saveChat("nonempty", [])
-      ).rejects.toThrow();
+      ).rejects.toThrow("Cannot save empty messages over existing chat content");
+      await expect(
+        service.saveChat("nonempty", [], {
+          authoritativeServerHistoryReconciliation: true,
+        })
+      ).rejects.toThrow("Cannot save empty messages over existing chat content");
+      expect(mockVault.modify).not.toHaveBeenCalled();
+    });
+
+    it("allows only identified authoritative server history to clear existing content", async () => {
+      const mockFile = new TFile({ path: "SystemSculpt/Chats/nonempty.md" });
+      mockVault.getAbstractFileByPath.mockReturnValue(mockFile);
+      mockVault.read.mockResolvedValue(`---
+id: nonempty
+title: Non Empty
+created: 2024-01-01T00:00:00.000Z
+lastModified: 2024-01-01T00:00:00.000Z
+version: 1
+---
+
+<!-- SYSTEMSCULPT-MESSAGE-START role="user" message-id="1" -->
+Hello
+<!-- SYSTEMSCULPT-MESSAGE-END -->`);
+
+      await service.saveChat("nonempty", [], {
+        agentConversationId: "conversation_0123456789abcdef0123456789abcdef",
+        authoritativeServerHistoryReconciliation: true,
+      });
+
+      expect(mockVault.modify).toHaveBeenCalledTimes(1);
+      expect(mockVault.modify.mock.calls[0]?.[1]).toContain(
+        'agentConversationId: "conversation_0123456789abcdef0123456789abcdef"',
+      );
+      expect(mockVault.modify.mock.calls[0]?.[1])
+        .not.toContain("SYSTEMSCULPT-MESSAGE-START");
     });
 
     it("includes title in save", async () => {

@@ -1,40 +1,5 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { ReadableStream } from "node:stream/web";
-import fixture from "../fixtures/managed/managed-capabilities-v2.json";
-
-function managedStream(text: string): Response {
-  const sessionId = "mchat_0123456789abcdef0123456789abcdef";
-  const body = [
-    `data: ${JSON.stringify({ choices: [{ delta: { content: text } }] })}`,
-    "",
-    `data: ${JSON.stringify({
-      object: "systemsculpt.chat.session",
-      session_id: sessionId,
-      revision: 1,
-      state: "committed",
-    })}`,
-    "",
-    "data: [DONE]",
-    "",
-    "",
-  ].join("\n");
-  const encoded = new TextEncoder().encode(body);
-  const stream = new ReadableStream<Uint8Array>({
-    start(controller) {
-      controller.enqueue(encoded);
-      controller.close();
-    },
-  });
-  return new Response(stream, {
-    status: 200,
-    headers: {
-      "content-type": "text/event-stream",
-      "x-systemsculpt-session-id": sessionId,
-      "x-systemsculpt-session-revision": "1",
-    },
-  });
-}
 
 export async function exerciseBuiltStandardChatIdentity(
   bundleModule: { default?: new (...args: never[]) => object } | (new (...args: never[]) => object),
@@ -44,6 +9,12 @@ export async function exerciseBuiltStandardChatIdentity(
   const { webcrypto } = require("node:crypto");
   if (!window.crypto?.subtle) {
     Object.defineProperty(window, "crypto", { configurable: true, value: webcrypto });
+  }
+  if (typeof globalThis.structuredClone !== "function") {
+    Object.defineProperty(globalThis, "structuredClone", {
+      configurable: true,
+      value: <T>(value: T): T => JSON.parse(JSON.stringify(value)),
+    });
   }
   const app = new App();
   const manifest = JSON.parse(
@@ -55,32 +26,7 @@ export async function exerciseBuiltStandardChatIdentity(
   await plugin.deferredInitializationPromise;
   await plugin.initializeManagers();
   plugin.ensureViewManager().initialize();
-
-  const descriptor = fixture.capabilities.find((item) => item.alias === "systemsculpt/chat")!;
-  const requestContract = descriptor.request_contracts.find((item) => item.capability === "chat_turn")!;
-  const lease = Object.freeze({ outcome: "allowed", descriptor, requestContract });
-  const acquireChatTurnLease = jest.fn(async () => ({ outcome: "allowed", lease }));
-  const beginAcceptedChatDispatch = jest.fn(() => ({ id: "bundle-ticket" }));
-  const transportEnvelope = {
-    response: managedStream("Managed agent bundle proof"),
-    diagnostics: {
-      status: 200,
-      requestId: "bundle-request",
-      contentType: "text/event-stream",
-      rateLimitLimit: null,
-      rateLimitRemaining: null,
-      rateLimitReset: null,
-      retryAfter: null,
-      errorText: "",
-    },
-  };
-  const streamAcceptedChat = jest.fn(async () => transportEnvelope);
-  const managedClient = {
-    acquireChatTurnLease,
-    beginAcceptedChatDispatch,
-    streamAcceptedChat,
-  };
-  plugin.getManagedCapabilityClient = () => managedClient;
+  plugin.settings.licenseKey = "bundle-integration-license";
 
   for (const key of ["modelService", "getEntitlementService", "providerRegistry", "piAuth", "favorites"]) {
     Object.defineProperty(plugin, key, {
@@ -116,14 +62,180 @@ export async function exerciseBuiltStandardChatIdentity(
     return { version };
   });
 
-  let acceptedSnapshot: Record<string, any> | null = null;
-  const originalPrepare = view.aiService.prepareAcceptedChatRequest.bind(view.aiService);
-  view.aiService.prepareAcceptedChatRequest = async (...args: unknown[]) => {
-    acceptedSnapshot = await originalPrepare(...args);
-    return acceptedSnapshot;
+  const originalAgentStart = view.agent.start;
+  const originalAgentHydrate = view.agent.hydrate;
+  const connectionRequests: Array<Record<string, any>> = [];
+  let submittedTransportBody: Record<string, any> | null = null;
+  const sentAgentFrames: Array<Record<string, any>> = [];
+  let createdSocket: Record<string, any> | null = null;
+  const createdSockets: Array<Record<string, any>> = [];
+  class FakeWebSocket extends EventTarget {
+    public static readonly CONNECTING = 0;
+    public static readonly OPEN = 1;
+    public static readonly CLOSING = 2;
+    public static readonly CLOSED = 3;
+    public readonly url: string;
+    public readyState = FakeWebSocket.CONNECTING;
+    public binaryType: BinaryType = "blob";
+    public readonly bufferedAmount = 0;
+    public readonly extensions = "";
+    public readonly protocol = "";
+    public readonly closeCalls: Array<Readonly<{ code: number; reason: string }>> = [];
+
+    constructor(url: string | URL) {
+      super();
+      this.url = String(url);
+      createdSocket = this;
+      createdSockets.push(this);
+      queueMicrotask(() => {
+        if (this.readyState !== FakeWebSocket.CONNECTING) return;
+        this.readyState = FakeWebSocket.OPEN;
+        this.dispatchEvent(new Event("open"));
+        this.dispatchFrame({
+          type: "cf_agent_identity",
+          name: "default",
+          agent: "system-sculpt-agent",
+        });
+      });
+    }
+
+    public send(serialized: string): void {
+      const frame = JSON.parse(serialized) as Record<string, any>;
+      sentAgentFrames.push(frame);
+      if (frame.type === "cf_agent_stream_resume_request") {
+        queueMicrotask(() => this.dispatchFrame({
+          type: "cf_agent_stream_resume_none",
+          probeId: frame.probeId,
+        }));
+        return;
+      }
+      if (frame.type !== "cf_agent_use_chat_request") return;
+      submittedTransportBody = JSON.parse(frame.init.body) as Record<string, any>;
+      const userMessage = submittedTransportBody.messages.find(
+        (message: Record<string, unknown>) => message.role === "user",
+      ) as Record<string, any>;
+      const chunks: Array<Record<string, unknown>> = [
+        { type: "start", messageId: "assistant-bundle-proof" },
+        { type: "text-start", id: "text-bundle-proof" },
+        {
+          type: "text-delta",
+          id: "text-bundle-proof",
+          delta: "Managed agent bundle proof",
+        },
+        { type: "text-end", id: "text-bundle-proof" },
+        {
+          type: "data-systemsculpt-run-terminal",
+          data: {
+            version: 1,
+            run_id: "run_0123456789abcdef0123456789abcdef",
+            root_message_id: userMessage.id,
+            outcome: "succeeded",
+            code: "completed",
+          },
+        },
+        { type: "finish", finishReason: "stop" },
+      ];
+      queueMicrotask(() => {
+        chunks.forEach((chunk, index) => this.dispatchFrame({
+          id: frame.id,
+          type: "cf_agent_use_chat_response",
+          body: JSON.stringify(chunk),
+          done: index === chunks.length - 1,
+        }));
+      });
+    }
+
+    public close(code = 1_000, reason = ""): void {
+      if (this.readyState >= FakeWebSocket.CLOSING) return;
+      this.readyState = FakeWebSocket.CLOSING;
+      this.closeCalls.push({ code, reason });
+      this.readyState = FakeWebSocket.CLOSED;
+      this.dispatchEvent(new CloseEvent("close", {
+        code,
+        reason,
+        wasClean: true,
+      }));
+    }
+
+    private dispatchFrame(frame: Record<string, unknown>): void {
+      this.dispatchEvent(new MessageEvent("message", {
+        data: JSON.stringify(frame),
+      }));
+    }
+  }
+  const originalWebSocketDescriptor = Object.getOwnPropertyDescriptor(
+    globalThis,
+    "WebSocket",
+  );
+  Object.defineProperty(globalThis, "WebSocket", {
+    configurable: true,
+    writable: true,
+    value: FakeWebSocket,
+  });
+  let viewOpened = false;
+  let viewClosed = false;
+  let pluginUnloaded = false;
+  try {
+  const response = (body: unknown, status: number): Record<string, unknown> => {
+    const serialized = typeof body === "string" ? body : JSON.stringify(body);
+    const bytes = new TextEncoder().encode(serialized);
+    return {
+      status,
+      ok: status >= 200 && status < 300,
+      headers: new Headers(),
+      json: async () => JSON.parse(serialized),
+      text: async () => serialized,
+      arrayBuffer: async () => bytes.buffer.slice(
+        bytes.byteOffset,
+        bytes.byteOffset + bytes.byteLength,
+      ),
+    };
   };
+  view.agentConnection.requestClient.request = jest.fn(
+    async (request: Record<string, any>) => {
+      connectionRequests.push(request);
+      const url = new URL(request.url);
+      if (url.pathname === "/api/plugin/agent/bootstrap") {
+        return response({
+          contract_version: "thin-agent-v1",
+          conversation_id: request.body.conversation_id,
+          session: { id: "session_0123456789abcdef0123456789abcdef" },
+          access: {
+            token: "fixture.access.signature",
+            expires_at: "2030-01-01T00:01:00.000Z",
+          },
+          client_input_limits: {
+            image_mime_types: ["image/png", "image/jpeg", "image/webp"],
+            max_content_blocks_per_message: 16,
+            max_images_per_turn: 6,
+            max_image_bytes: 6 * 1024 * 1024,
+            max_total_image_bytes: 16 * 1024 * 1024,
+            max_text_bytes_per_block: 1024 * 1024,
+            max_total_text_bytes: 2 * 1024 * 1024,
+            max_document_bytes: 25 * 1024 * 1024,
+          },
+          accepted_capabilities: [{ id: "obsidian.vault", version: 1 }],
+        }, 200);
+      }
+      if (url.pathname === "/api/plugin/agent/connect/get-messages") {
+        return response("[]", 200);
+      }
+      if (url.pathname === "/api/plugin/agent/context") {
+        return response({
+          contract_version: "thin-agent-v1",
+          context_ref: "ctx1_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          expires_at: "2030-01-01T00:02:00.000Z",
+          bytes: 2,
+          sha256: `sha256:${"b".repeat(64)}`,
+        }, 201);
+      }
+      throw new Error(`Unexpected compiled integration request: ${request.method} ${url.pathname}`);
+    },
+  );
+  view.getLoadedPluginBuildId = jest.fn(async () => `sha256:${"a".repeat(64)}`);
 
   await view.onOpen();
+  viewOpened = true;
   const content = view.containerEl.children[1] as HTMLElement;
   expect(content.querySelector(".systemsculpt-agent-workspace")).not.toBeNull();
   expect(content.querySelector(".systemsculpt-agent-prompt-input")).not.toBeNull();
@@ -139,13 +251,83 @@ export async function exerciseBuiltStandardChatIdentity(
   });
   await Promise.resolve();
 
-  expect(acquireChatTurnLease).toHaveBeenCalledTimes(1);
-  expect(beginAcceptedChatDispatch).toHaveBeenCalledTimes(1);
-  expect(streamAcceptedChat).toHaveBeenCalledTimes(1);
-  expect(acceptedSnapshot).toEqual(expect.objectContaining({ runtime: "managed", model: "ai-agent" }));
-  expect(acceptedSnapshot).not.toHaveProperty("legacyPreparation");
-  expect(acceptedSnapshot?.operation.runtime).toBe("managed");
-  expect(acceptedSnapshot?.operation.lease).toBe(lease);
+  expect(view.agent.start).toBe(originalAgentStart);
+  expect(view.agent.hydrate).toBe(originalAgentHydrate);
+  expect(jest.isMockFunction(view.agent.start)).toBe(false);
+  expect(jest.isMockFunction(view.agent.hydrate)).toBe(false);
+  expect(view.agent.constructor.name).toBe("ThinAgentBridge");
+  expect(view.agentConnection.constructor.name).toBe("ThinAgentConnection");
+  expect(view.agent.getSnapshot()).toEqual(expect.objectContaining({
+    status: "completed",
+  }));
+  expect(view.agent.getSnapshot()).not.toHaveProperty("terminalError");
+  const transport = view.agentConnection.chatTransport();
+  expect(transport.constructor.name).toBe("WebSocketChatTransport");
+  expect(jest.isMockFunction(transport.sendMessages)).toBe(false);
+  expect(view.agentConnection.options.createAgentClient).toBeUndefined();
+  const agentClient = view.agentConnection.agentClient();
+  expect(agentClient.constructor.name).toBe("AgentClient");
+  expect(jest.isMockFunction(agentClient.send)).toBe(false);
+  expect(createdSocket).not.toBeNull();
+  expect(createdSockets).toHaveLength(1);
+
+  const bootstrapRequest = connectionRequests.find(({ url }) =>
+    new URL(url).pathname === "/api/plugin/agent/bootstrap");
+  const historyRequest = connectionRequests.find(({ url }) =>
+    new URL(url).pathname === "/api/plugin/agent/connect/get-messages");
+  const contextRequest = connectionRequests.find(({ url }) =>
+    new URL(url).pathname === "/api/plugin/agent/context");
+  expect(bootstrapRequest?.body).toEqual(expect.objectContaining({
+    conversation_id: expect.stringMatching(/^conversation_[a-f0-9]{32}$/),
+    plugin_build_id: `sha256:${"a".repeat(64)}`,
+  }));
+  const bootstrapUrl = new URL(bootstrapRequest!.url);
+  const socketUrl = new URL(createdSocket!.url);
+  expect(socketUrl.protocol).toBe(bootstrapUrl.protocol === "http:" ? "ws:" : "wss:");
+  expect(socketUrl.host).toBe(bootstrapUrl.host);
+  expect(socketUrl.pathname).toBe("/api/plugin/agent/connect");
+  expect([...socketUrl.searchParams.keys()].sort()).toEqual([
+    "_pk",
+    "access_token",
+  ]);
+  expect(socketUrl.searchParams.get("_pk")).toMatch(
+    /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/,
+  );
+  expect(socketUrl.searchParams.get("access_token")).toBe(
+    "fixture.access.signature",
+  );
+  expect(historyRequest).toEqual(expect.objectContaining({
+    method: "GET",
+    responseEncoding: "arrayBuffer",
+  }));
+  expect(contextRequest?.body).toEqual(expect.objectContaining({
+    root_message_id: expect.stringMatching(/^user-[a-f0-9-]{36}$/),
+    context_sources: [],
+  }));
+  expect(submittedTransportBody).toEqual(expect.objectContaining({
+    messages: expect.arrayContaining([
+      expect.objectContaining({
+        id: contextRequest?.body.root_message_id,
+        role: "user",
+      }),
+    ]),
+    trigger: "submit-message",
+    context_ref: "ctx1_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  }));
+  expect(submittedTransportBody).not.toHaveProperty("preferences");
+  expect(submittedTransportBody).not.toHaveProperty("runtime");
+  expect(submittedTransportBody).not.toHaveProperty("model");
+  expect(submittedTransportBody).not.toHaveProperty("provider");
+  expect(submittedTransportBody).not.toHaveProperty("legacyPreparation");
+  expect(JSON.stringify(submittedTransportBody)).not.toContain("web_search");
+  expect(JSON.stringify(submittedTransportBody)).not.toContain("context_sources");
+  expect(sentAgentFrames).toEqual(expect.arrayContaining([
+    expect.objectContaining({ type: "cf_agent_stream_resume_request" }),
+    expect.objectContaining({
+      type: "cf_agent_use_chat_request",
+      init: expect.objectContaining({ method: "POST" }),
+    }),
+  ]));
   expect(durableMessages).toEqual(expect.arrayContaining([
     expect.objectContaining({ role: "user", content: "built identity proof" }),
     expect.objectContaining({ role: "assistant", content: "Managed agent bundle proof" }),
@@ -155,5 +337,33 @@ export async function exerciseBuiltStandardChatIdentity(
   ]));
 
   await view.onClose();
+  viewClosed = true;
+  expect(createdSocket!.closeCalls).toContainEqual({
+    code: 1_000,
+    reason: "Chat changed.",
+  });
+  expect(createdSocket!.readyState).toBe(FakeWebSocket.CLOSED);
   plugin.unload();
+  pluginUnloaded = true;
+  } finally {
+    if (viewOpened && !viewClosed) {
+      try {
+        await view.onClose();
+      } catch {
+        // Preserve the original integration failure while still restoring globals.
+      }
+    }
+    if (!pluginUnloaded) {
+      try {
+        plugin.unload();
+      } catch {
+        // Preserve the original integration failure while still restoring globals.
+      }
+    }
+    if (originalWebSocketDescriptor) {
+      Object.defineProperty(globalThis, "WebSocket", originalWebSocketDescriptor);
+    } else {
+      Reflect.deleteProperty(globalThis, "WebSocket");
+    }
+  }
 }

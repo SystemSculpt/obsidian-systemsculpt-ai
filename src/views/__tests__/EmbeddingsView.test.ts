@@ -4,7 +4,7 @@
 
 import { EmbeddingsView, EMBEDDINGS_VIEW_TYPE } from "../EmbeddingsView";
 import { WorkspaceLeaf, TFile } from "obsidian";
-import { MANAGED_EMBEDDING_LIMITS } from "../../services/embeddings/ManagedEmbeddingsContract";
+import { MANAGED_EMBEDDINGS_INDEX_MAX_QUERY_CHARS } from "../../services/embeddings/gateway/ManagedEmbeddingsIndexAdapter";
 import { CHAT_TRANSCRIPT_COMMITTED_EVENT } from "../chatview/ChatTranscriptEvents";
 
 function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void; reject: (error: unknown) => void } {
@@ -171,7 +171,7 @@ describe("EmbeddingsView", () => {
       await (view as any).searchForSimilar(mockFile);
 
       const query = mockManager.searchSimilar.mock.calls[0][0] as string;
-      expect(query.length).toBeLessThanOrEqual(MANAGED_EMBEDDING_LIMITS.maxCharsPerText);
+      expect(query.length).toBeLessThanOrEqual(MANAGED_EMBEDDINGS_INDEX_MAX_QUERY_CHARS);
       expect(query).toContain("HEAD");
       expect(query).toContain("TAIL");
     });

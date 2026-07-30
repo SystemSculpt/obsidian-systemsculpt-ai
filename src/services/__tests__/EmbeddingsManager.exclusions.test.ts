@@ -77,7 +77,12 @@ function createPluginStub(overrides?: Partial<any>) {
       emit: jest.fn(),
       on: jest.fn(() => jest.fn()),
     },
-    getManagedCapabilityClient: jest.fn(() => ({ request: jest.fn() })),
+    getManagedCapabilityClient: jest.fn(() => ({
+      getEmbeddingsIndex: jest.fn(() => ({
+        activeGeneration: undefined,
+        metadata: undefined,
+      })),
+    })),
     ...(overrides || {}),
   };
 }

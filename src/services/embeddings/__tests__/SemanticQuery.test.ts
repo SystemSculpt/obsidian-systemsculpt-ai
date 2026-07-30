@@ -1,5 +1,5 @@
 import type { ChatMessage } from "../../../types";
-import { MANAGED_EMBEDDING_LIMITS } from "../ManagedEmbeddingsContract";
+import { MANAGED_EMBEDDINGS_INDEX_MAX_QUERY_CHARS } from "../gateway/ManagedEmbeddingsIndexAdapter";
 import {
   buildChatSemanticQuery,
   buildNoteSemanticQuery,
@@ -17,7 +17,7 @@ describe("SemanticQuery", () => {
     const second = buildNoteSemanticQuery(content);
 
     expect(first).toBe(second);
-    expect(first.length).toBeLessThanOrEqual(MANAGED_EMBEDDING_LIMITS.maxCharsPerText);
+    expect(first.length).toBeLessThanOrEqual(MANAGED_EMBEDDINGS_INDEX_MAX_QUERY_CHARS);
     expect(first).toContain("NOTE-HEAD");
     expect(first).toContain("NOTE-TAIL");
     expect(first).toContain("…");
@@ -32,7 +32,7 @@ describe("SemanticQuery", () => {
 
     const query = buildChatSemanticQuery(messages);
 
-    expect(query.length).toBeLessThanOrEqual(MANAGED_EMBEDDING_LIMITS.maxCharsPerText);
+    expect(query.length).toBeLessThanOrEqual(MANAGED_EMBEDDINGS_INDEX_MAX_QUERY_CHARS);
     expect(query).toContain("TURN-1");
     expect(query).toContain("TURN-2");
     expect(query).toContain("TURN-3");
@@ -57,7 +57,7 @@ describe("SemanticQuery", () => {
       ]),
     ]);
 
-    expect(query.length).toBeLessThanOrEqual(MANAGED_EMBEDDING_LIMITS.maxCharsPerText);
+    expect(query.length).toBeLessThanOrEqual(MANAGED_EMBEDDINGS_INDEX_MAX_QUERY_CHARS);
     expect(query).toContain("PROMPT: compare these sources");
     expect(query).toContain("notes.txt");
     expect(query).toContain("TEXT-FILE");

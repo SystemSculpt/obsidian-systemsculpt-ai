@@ -88,34 +88,6 @@ describe("HostedTransportAdapter", () => {
     expect((await adapter.getAdmission()).outcome).toBe("temporarily_unavailable");
   });
 
-  it.each([
-    ["key", "6", true], ["", "6", false], ["key", "", false], ["   ", "6", false], ["key", "   ", false],
-  ])("atomically snapshots non-empty managed Chat configuration without returning credentials", (license, version, expected) => {
-    const supplier = jest.fn(() => license);
-    const adapter = new HostedTransportAdapter({ baseUrl: "https://api.test", pluginVersion: version, licenseKey: supplier });
-    expect(adapter.beginManagedChatDispatch() !== null).toBe(expected);
-    expect(supplier).toHaveBeenCalledTimes(1);
-  });
-
-  it("uses one immutable managed Chat configuration snapshot without re-reading its supplier", async () => {
-    const supplier = jest.fn().mockReturnValueOnce("first-key").mockReturnValue("changed-key");
-    const adapter = new HostedTransportAdapter({ baseUrl: "https://api.test", pluginVersion: " 6.0.0 ", licenseKey: supplier });
-    const ticket = adapter.beginManagedChatDispatch()!;
-    await adapter.streamAcceptedChat(ticket, { path: "/api/plugin/chat/completions", capability: "chat_turn", idempotencyKey: "idem", body: {} });
-    expect(supplier).toHaveBeenCalledTimes(1);
-    expect(request.mock.calls[0][0]).toMatchObject({
-      licenseKey: "first-key",
-      stream: true,
-      allowTransportFallback: false,
-      streamingProbeUrl: "https://api.test/api/plugin/connectivity",
-      headers: {
-        "x-license-key": "first-key",
-        "x-plugin-version": "6.0.0",
-        "x-systemsculpt-chat-activity": "web-search-v1",
-      },
-    });
-  });
-
   it("adds operation contract headers and only explicit idempotency keys", async () => {
     const adapter = new HostedTransportAdapter({ baseUrl: "https://api.test", pluginVersion: "6", licenseKey: () => " key " });
     await adapter.request({ path: "/op", method: "POST", body: { a: 1 }, capability: "embeddings", idempotencyKey: "idem" });
@@ -204,6 +176,127 @@ describe("HostedTransportAdapter", () => {
     }));
     await expect(adapter.managedImageOutput("https://signed.test/output", headers)).rejects.toThrow("Invalid managed image output path");
     await expect(adapter.managedImageOutput("/api/plugin/documents/id/download", headers)).rejects.toThrow("Invalid managed image output path");
+  });
+
+  it("posts managed embedding index bytes once through bounded native transport with only the dedicated contract", async () => {
+    const adapter = new HostedTransportAdapter({
+      baseUrl: "https://api.test/",
+      pluginVersion: " 6.0.0 ",
+      licenseKey: () => " secret ",
+    });
+    const body = new TextEncoder().encode("# Private\n\nVault text").buffer;
+    const contentSha256 = "a".repeat(64);
+
+    await adapter.managedEmbeddingsIndex(body, contentSha256);
+
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(request).toHaveBeenCalledWith({
+      url: "https://api.test/api/plugin/embeddings/index",
+      method: "POST",
+      headers: {
+        "content-type": "text/markdown; charset=utf-8",
+        Accept: "application/json",
+        "x-plugin-version": "6.0.0",
+        "x-license-key": "secret",
+        "x-systemsculpt-capability": "embeddings",
+        "x-systemsculpt-embeddings-index-contract": "managed-embeddings-index-v1",
+        "x-systemsculpt-content-sha256": contentSha256,
+        "x-systemsculpt-content-size": String(body.byteLength),
+        "Idempotency-Key": `idx:${contentSha256}`,
+      },
+      body,
+      stream: false,
+      preserveResponseHeaders: true,
+      allowTransportFallback: false,
+      transport: "requestUrl",
+      bodyEncoding: "raw",
+      responseEncoding: "arrayBuffer",
+      maxResponseBytes: 16 * 1024 * 1024,
+      signal: undefined,
+    });
+    expect(request.mock.calls[0][0].headers).not.toHaveProperty("x-systemsculpt-contract");
+  });
+
+  it("rejects invalid managed embedding index source metadata before transport", async () => {
+    const adapter = new HostedTransportAdapter({
+      baseUrl: "https://api.test",
+      pluginVersion: "6",
+      licenseKey: () => "secret",
+    });
+
+    await expect(adapter.managedEmbeddingsIndex(new ArrayBuffer(0), "a".repeat(64)))
+      .rejects.toThrow("Invalid managed embeddings index source");
+    await expect(adapter.managedEmbeddingsIndex(
+      new ArrayBuffer(8 * 1024 * 1024 + 1),
+      "a".repeat(64),
+    )).rejects.toThrow("Invalid managed embeddings index source");
+    await expect(adapter.managedEmbeddingsIndex(new Uint8Array([1]).buffer, "not-a-hash"))
+      .rejects.toThrow("Invalid managed embeddings index source");
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it("uses dedicated bounded native requests for embedding index metadata and queries", async () => {
+    const adapter = new HostedTransportAdapter({
+      baseUrl: "https://api.test",
+      pluginVersion: "6.2.7",
+      licenseKey: () => "secret",
+    });
+    const querySha256 = "b".repeat(64);
+
+    await adapter.getManagedEmbeddingsIndexMetadata();
+    await adapter.managedEmbeddingsIndexQuery("semantic query", querySha256);
+
+    const commonHeaders = {
+      Accept: "application/json",
+      "x-plugin-version": "6.2.7",
+      "x-license-key": "secret",
+      "x-systemsculpt-capability": "embeddings",
+      "x-systemsculpt-embeddings-index-contract": "managed-embeddings-index-v1",
+    };
+    expect(request.mock.calls[0][0]).toEqual({
+      url: "https://api.test/api/plugin/embeddings/index",
+      method: "GET",
+      headers: commonHeaders,
+      body: undefined,
+      stream: false,
+      preserveResponseHeaders: true,
+      allowTransportFallback: false,
+      transport: "requestUrl",
+      responseEncoding: "arrayBuffer",
+      maxResponseBytes: 64 * 1024,
+      signal: undefined,
+    });
+    expect(request.mock.calls[1][0]).toEqual({
+      url: "https://api.test/api/plugin/embeddings/index/query",
+      method: "POST",
+      headers: {
+        ...commonHeaders,
+        "Idempotency-Key": `idxq:${querySha256}`,
+      },
+      body: { query: "semantic query" },
+      stream: false,
+      preserveResponseHeaders: true,
+      allowTransportFallback: false,
+      transport: "requestUrl",
+      responseEncoding: "arrayBuffer",
+      maxResponseBytes: 64 * 1024,
+      signal: undefined,
+    });
+    expect(request).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects invalid embedding index query metadata before transport", async () => {
+    const adapter = new HostedTransportAdapter({
+      baseUrl: "https://api.test",
+      pluginVersion: "6.2.7",
+      licenseKey: () => "secret",
+    });
+
+    await expect(adapter.managedEmbeddingsIndexQuery("", "b".repeat(64)))
+      .rejects.toThrow("Invalid managed embeddings index query");
+    await expect(adapter.managedEmbeddingsIndexQuery("query", "not-a-hash"))
+      .rejects.toThrow("Invalid managed embeddings index query");
+    expect(request).not.toHaveBeenCalled();
   });
 
   it("forces native raw transport for signed image input uploads without adding managed headers", async () => {

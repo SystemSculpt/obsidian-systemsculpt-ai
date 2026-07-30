@@ -63,7 +63,7 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            node: "20.10.0"
+            node: "22.18.0"
           - os: ubuntu-latest
             node: "24.x"
           - os: macos-latest

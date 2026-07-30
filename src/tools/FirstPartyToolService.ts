@@ -1,10 +1,8 @@
 import { normalizePath, type App } from "obsidian";
 import type SystemSculptPlugin from "../main";
-import { buildManagedToolDefinition, type ManagedToolDefinition } from "../utils/tooling";
 import { VaultToolModule } from "./vault/VaultToolModule";
 import {
   FirstPartyToolExecutionError,
-  type FirstPartyToolDefinition,
   type FirstPartyToolExecutionOptions,
 } from "./types";
 import {
@@ -19,10 +17,6 @@ export class FirstPartyToolService {
 
   constructor(plugin: SystemSculptPlugin, app: App) {
     this.vaultTools = new VaultToolModule(plugin, app);
-  }
-
-  async getAvailableTools(): Promise<ManagedToolDefinition[]> {
-    return this.vaultTools.getTools().map((tool) => this.toManagedDefinition(tool));
   }
 
   async executeTool(
@@ -58,14 +52,6 @@ export class FirstPartyToolService {
     this.vaultRootAliases = (Array.isArray(aliases) ? aliases : [])
       .map((alias) => normalizePath(String(alias ?? "")).replace(/^\/+/, ""))
       .filter((alias) => alias.length > 0);
-  }
-
-  private toManagedDefinition(tool: FirstPartyToolDefinition): ManagedToolDefinition {
-    return buildManagedToolDefinition({
-      name: tool.name,
-      description: tool.description,
-      parameters: tool.inputSchema,
-    });
   }
 
   private async awaitStartedExecution<T>(

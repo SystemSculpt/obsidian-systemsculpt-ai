@@ -14,7 +14,7 @@ import {
 } from "./AgentComposer";
 import type { ChatMessageAttachment } from "./attachments/ChatMessageAttachments";
 import type { ChatDocumentAttachmentProcessor } from "./attachments/ChatMessageAttachments";
-import type { ManagedChatInputLimits } from "../../services/managed/ManagedChatInputLimits";
+import type { ThinAgentInputLimits } from "../../services/managed/ThinAgentInputLimits";
 import type { AgentArtifact, AgentConversationSnapshot } from "./AgentConversation";
 import { presentAgentConversation } from "./AgentConversationPresentation";
 import {
@@ -25,7 +25,6 @@ import {
 export type AgentQueuedFollowUp = Readonly<{
   id: string;
   text: string;
-  webSearch: boolean;
   includeContextFiles: boolean;
   attachments?: readonly ChatMessageAttachment[];
 }>;
@@ -39,12 +38,12 @@ export type AgentWorkspaceOptions = Readonly<{
   onAttach: () => void | Promise<void>;
   onVaultContextDrop?: (path: string) => void | Promise<void>;
   documentAttachmentProcessor?: ChatDocumentAttachmentProcessor;
-  attachmentLimits?: ManagedChatInputLimits;
+  attachmentLimits?: ThinAgentInputLimits;
   onMic?: () => void | Promise<void>;
   onRemoveAttachment: (attachment: AgentComposerAttachment) => void | Promise<void>;
   onApprove: (approvalId: string, approved: boolean, rememberForChat?: boolean) => void | Promise<void>;
   onOpenArtifact: (artifact: AgentArtifact) => void | Promise<void>;
-  onCopyArtifactPath: (artifact: AgentArtifact) => void | Promise<void>;
+  onCopyArtifactPath: (artifact: AgentArtifact) => boolean | Promise<boolean>;
   onRetryMessage?: (messageId: string) => void | Promise<void>;
   onResubmitMessage?: (messageId: string, text: string) => boolean | Promise<boolean>;
   onCancelMessageEdit?: (messageId: string) => void | Promise<void>;
@@ -71,6 +70,15 @@ function iconButton(parent: HTMLElement, label: string, icon: string): HTMLButto
 
 let workspaceLabelSequence = 0;
 
+const PENDING_AGENT_SNAPSHOT: AgentConversationSnapshot = Object.freeze({
+  runId: null,
+  turnId: null,
+  status: "running",
+  phase: "submitted",
+  messages: Object.freeze([]),
+  parts: Object.freeze([]),
+});
+
 /** Complete native shell for the managed agent experience inside Obsidian. */
 export class AgentWorkspace extends Component {
   public readonly element: HTMLElement;
@@ -84,10 +92,12 @@ export class AgentWorkspace extends Component {
   private readonly queueElement: HTMLElement;
   private readonly jumpButton: HTMLButtonElement;
   private readonly scroller: AnchoredScroller;
-  private readonly registeredRows = new Set<string>();
+  private readonly registeredRows = new Map<string, HTMLElement>();
   private history: readonly ChatMessage[] = [];
+  private historyFingerprint = "[]";
   private snapshot: AgentConversationSnapshot | null = null;
   private runPending = false;
+  private pendingTurnId: string | null = null;
   private rendering: Promise<void> = Promise.resolve();
   private pendingSnapshotRender: AgentConversationSnapshot | null | undefined;
   private snapshotRenderPromise: Promise<void> | null = null;
@@ -110,7 +120,7 @@ export class AgentWorkspace extends Component {
     const headerActions = header.createDiv({ cls: "systemsculpt-agent-header-actions" });
     this.creditsButton = options.onOpenCredits
       ? createUiAction(headerActions, {
-          label: "—",
+          label: "Credits",
           size: "small",
           tooltip: false,
         })
@@ -226,7 +236,7 @@ export class AgentWorkspace extends Component {
     this.composer.setAttachments(attachments);
   }
 
-  public setMessageAttachmentLimits(limits: ManagedChatInputLimits): void {
+  public setMessageAttachmentLimits(limits: ThinAgentInputLimits): void {
     this.composer.setMessageAttachmentLimits(limits);
   }
 
@@ -234,8 +244,24 @@ export class AgentWorkspace extends Component {
     this.composer.restoreMessageAttachments(attachments);
   }
 
+  public getMessageAttachments(): readonly ChatMessageAttachment[] {
+    return this.composer.getMessageAttachments();
+  }
+
+  public setMessageAttachments(attachments: readonly ChatMessageAttachment[]): void {
+    this.composer.setMessageAttachments(attachments);
+  }
+
   public restoreRejectedSubmission(submission: Pick<AgentComposerSubmit, "text" | "attachments">): void {
     this.composer.restoreRejectedSubmission(submission);
+  }
+
+  public resetComposerDraft(): void {
+    this.composer.resetDraft();
+  }
+
+  public setComposerReadOnly(message: string | null): void {
+    this.composer.setReadOnly(message);
   }
 
   public hasDraft(): boolean {
@@ -249,7 +275,7 @@ export class AgentWorkspace extends Component {
   public setQueue(queue: readonly AgentQueuedFollowUp[]): void {
     this.queueElement.empty();
     this.queueElement.toggleAttribute("hidden", queue.length === 0);
-    for (const item of queue) {
+    for (const [index, item] of queue.entries()) {
       const row = this.queueElement.createDiv({
         cls: "systemsculpt-agent-queue-item",
         attr: { role: "listitem" },
@@ -258,20 +284,25 @@ export class AgentWorkspace extends Component {
       setIcon(icon, "list-end");
       const attachmentLabel = item.attachments?.map((attachment) => attachment.name).join(", ") || "";
       row.createSpan({ text: item.text || attachmentLabel || "Queued attachment" });
+      const target = `queued follow-up ${index + 1} of ${queue.length}`;
       if (this.options.onRunQueuedNow) {
-        const runNow = iconButton(row, "Stop and send now", "arrow-up");
+        const runNow = iconButton(row, `Stop and send ${target} now`, "arrow-up");
         runNow.onclick = () => void this.options.onRunQueuedNow?.(item.id);
       }
       if (this.options.onCancelQueued) {
-        const remove = iconButton(row, "Remove queued follow-up", "x");
+        const remove = iconButton(row, `Remove ${target}`, "x");
         remove.onclick = () => void this.options.onCancelQueued?.(item.id);
       }
     }
   }
 
   public setHistory(messages: readonly ChatMessage[]): Promise<void> {
+    const fingerprint = JSON.stringify(messages);
     this.history = messages;
-    return this.renderHistoryPreservingAnchor();
+    if (fingerprint === this.historyFingerprint) return Promise.resolve();
+    return this.renderHistoryPreservingAnchor().then(() => {
+      this.historyFingerprint = fingerprint;
+    });
   }
 
   public showMessageEditor(edit: AgentInlineMessageEdit): Promise<void> {
@@ -297,8 +328,6 @@ export class AgentWorkspace extends Component {
   ): Promise<void> {
     return this.scheduleRender(async () => {
       const anchor = this.scroller.capturePrependAnchor();
-      for (const id of this.registeredRows) this.scroller.unregisterRow(id);
-      this.registeredRows.clear();
       await this.renderer.renderHistory(this.history);
       this.syncRows();
       this.scroller.restorePrependAnchor(anchor && this.registeredRows.has(anchor.rowId) ? anchor : null);
@@ -315,17 +344,26 @@ export class AgentWorkspace extends Component {
   public settleCompletedRun(messages: readonly ChatMessage[]): Promise<void> {
     this.history = messages;
     this.snapshot = null;
+    this.pendingSnapshotRender = undefined;
     return this.scheduleRender(async () => {
       const anchor = this.scroller.capturePrependAnchor();
-      for (const id of this.registeredRows) this.scroller.unregisterRow(id);
-      this.registeredRows.clear();
-      await this.renderer.renderHistory(messages);
-      this.renderer.clearActive();
-      this.syncRows();
-      this.scroller.restorePrependAnchor(anchor && this.registeredRows.has(anchor.rowId) ? anchor : null);
-      this.scroller.notifyContentChanged({ streaming: false });
-      this.syncEmpty();
-      this.renderedTurnId = null;
+      let renderedHistory = false;
+      try {
+        await this.renderer.renderHistory(messages);
+        renderedHistory = true;
+        this.historyFingerprint = JSON.stringify(messages);
+      } catch (error) {
+        this.renderer.showCompletedRenderFallback();
+        throw error;
+      } finally {
+        if (renderedHistory) this.renderer.clearActive();
+        this.syncRows();
+        this.scroller.restorePrependAnchor(anchor && this.registeredRows.has(anchor.rowId) ? anchor : null);
+        this.scroller.notifyContentChanged({ streaming: false });
+        this.syncEmpty();
+        this.renderedTurnId = null;
+        for (const waiter of this.snapshotRenderWaiters.splice(0)) waiter.resolve();
+      }
     });
   }
 
@@ -339,9 +377,14 @@ export class AgentWorkspace extends Component {
     return completion;
   }
 
-  public setRunPending(pending: boolean): void {
+  public setRunPending(pending: boolean, turnId?: string): void {
     this.runPending = pending;
+    this.pendingTurnId = pending ? turnId ?? this.pendingTurnId : null;
     this.composer.setRunning(presentAgentConversation(this.snapshot, pending).composerRunning);
+    if (!this.snapshot) {
+      this.pendingSnapshotRender = null;
+      this.ensureSnapshotRender();
+    }
   }
 
   public focus(): void {
@@ -368,12 +411,14 @@ export class AgentWorkspace extends Component {
       if (!messageId) continue;
       const id = `message:${messageId}`;
       discovered.add(id);
-      if (!this.registeredRows.has(id)) {
+      const registered = this.registeredRows.get(id);
+      if (registered !== row) {
+        if (registered) this.scroller.unregisterRow(id);
         this.scroller.registerRow(id, row, { turnAnchor: row.classList.contains("is-user") });
-        this.registeredRows.add(id);
+        this.registeredRows.set(id, row);
       }
     }
-    for (const id of this.registeredRows) {
+    for (const id of this.registeredRows.keys()) {
       if (!discovered.has(id)) {
         this.scroller.unregisterRow(id);
         this.registeredRows.delete(id);
@@ -382,7 +427,7 @@ export class AgentWorkspace extends Component {
   }
 
   private syncEmpty(): void {
-    const hasActiveParts = (this.snapshot?.parts.length ?? 0) > 0;
+    const hasActiveParts = this.runPending || (this.snapshot?.parts.length ?? 0) > 0;
     this.emptyState.toggleAttribute("hidden", this.history.length > 0 || hasActiveParts);
   }
 
@@ -401,6 +446,12 @@ export class AgentWorkspace extends Component {
       this.pendingSnapshotRender = undefined;
       const presentation = presentAgentConversation(snapshot ?? null, this.runPending);
       if (snapshot) await this.renderer.renderActive(snapshot, presentation);
+      else if (presentation.busy) {
+        await this.renderer.renderActive({
+          ...PENDING_AGENT_SNAPSHOT,
+          turnId: this.pendingTurnId,
+        }, presentation);
+      }
       else this.renderer.clearActive();
       this.composer.setRunning(presentation.composerRunning);
       this.anchorActiveTurn();

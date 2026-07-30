@@ -22,10 +22,17 @@ import type {
   AgentConversationSnapshot,
   AgentPart,
   AgentToolPart,
+  ManagedAgentError,
 } from "./AgentConversation";
-import type { AgentConversationPresentation } from "./AgentConversationPresentation";
+import {
+  presentAgentError,
+  presentAgentErrorMessage,
+  type AgentConversationPresentation,
+  type AgentPresentationPhase,
+} from "./AgentConversationPresentation";
 import {
   groupConsecutiveToolActivity,
+  presentAgentTool,
   presentAgentToolGroup,
 } from "./AgentToolPresentation";
 import {
@@ -41,7 +48,7 @@ export type AgentConversationRendererOptions = Readonly<{
   labelledBy?: string;
   onApprove: (approvalId: string, approved: boolean, rememberForChat?: boolean) => void | Promise<void>;
   onOpenArtifact: (artifact: AgentArtifact) => void | Promise<void>;
-  onCopyArtifactPath: (artifact: AgentArtifact) => void | Promise<void>;
+  onCopyArtifactPath: (artifact: AgentArtifact) => boolean | Promise<boolean>;
   onRetryMessage?: (messageId: string) => void | Promise<void>;
   onResubmitMessage?: (messageId: string, text: string) => boolean | Promise<boolean>;
   onCancelMessageEdit?: (messageId: string) => void | Promise<void>;
@@ -135,6 +142,132 @@ function historicalToolState(tool: ToolCall, success: boolean): AgentToolPart["s
   }
 }
 
+function visibleToolError(error: ManagedAgentError | undefined): string | null {
+  return error
+    ? presentAgentErrorMessage(error.message, error.retryable === true)
+    : null;
+}
+
+function toolDisplayFingerprint(part: AgentToolPart): string {
+  const presentation = presentAgentTool(part);
+  const approvalInput = part.location === "vault"
+    && part.state === "approval-required"
+    && part.approvalId
+    ? part.input
+    : undefined;
+  const artifacts = ACTIONABLE_ARTIFACT_TOOLS.has(presentation.canonicalName)
+    ? part.output?.artifacts
+    : undefined;
+  return JSON.stringify({
+    location: part.location,
+    state: part.state,
+    presentation,
+    error: visibleToolError(part.error),
+    approvalId: approvalInput === undefined ? undefined : part.approvalId,
+    approvalInput,
+    artifacts,
+  });
+}
+
+function agentPartsEqual(left: AgentPart | undefined, right: AgentPart): boolean {
+  if (left === right) return true;
+  if (!left || left.kind !== right.kind || left.id !== right.id || left.order !== right.order) {
+    return false;
+  }
+  switch (right.kind) {
+    case "text":
+      return left.kind === "text"
+        && left.messageId === right.messageId
+        && left.state === right.state
+        && left.markdown === right.markdown;
+    case "reasoning":
+      return left.kind === "reasoning"
+        && left.messageId === right.messageId
+        && left.state === right.state
+        && left.summary === right.summary;
+    case "error":
+      return left.kind === "error"
+        && left.retryable === right.retryable
+        && left.retryMessageId === right.retryMessageId
+        && JSON.stringify(presentAgentError(left.error, left.retryable))
+          === JSON.stringify(presentAgentError(right.error, right.retryable));
+    case "tool":
+      return left.kind === "tool"
+        && left.messageId === right.messageId
+        && left.callId === right.callId
+        && toolDisplayFingerprint(left) === toolDisplayFingerprint(right);
+  }
+}
+
+function updateStreamingText(
+  node: HTMLElement,
+  previous: string,
+  current: string,
+): void {
+  if (!current.startsWith(previous)) {
+    node.replaceChildren(node.ownerDocument.createTextNode(current));
+    return;
+  }
+  // Streaming nodes are created as one raw Text node and remain in that form
+  // until their single completion render.
+  const finalTextNode = node.firstChild as Text;
+  const selection = node.ownerDocument.getSelection();
+  const preservedSelection = selection
+    && selection.anchorNode
+    && selection.focusNode
+    && node.contains(selection.anchorNode)
+    && node.contains(selection.focusNode)
+    ? {
+        anchorNode: selection.anchorNode,
+        anchorOffset: selection.anchorOffset,
+        focusNode: selection.focusNode,
+        focusOffset: selection.focusOffset,
+      }
+    : null;
+  (finalTextNode as Text).appendData(current.slice(previous.length));
+  if (selection && preservedSelection) {
+    selection.removeAllRanges();
+    if (typeof selection.setBaseAndExtent === "function") {
+      selection.setBaseAndExtent(
+        preservedSelection.anchorNode,
+        preservedSelection.anchorOffset,
+        preservedSelection.focusNode,
+        preservedSelection.focusOffset,
+      );
+    } else {
+      const range = node.ownerDocument.createRange();
+      range.setStart(preservedSelection.anchorNode, preservedSelection.anchorOffset);
+      range.setEnd(preservedSelection.focusNode, preservedSelection.focusOffset);
+      selection.addRange(range);
+    }
+  }
+}
+
+type TerminalActivityIconName = "check" | "circle-alert" | "circle-stop";
+
+const SETTLED_ACTIVITY_ICONS: Readonly<
+  Record<AgentPresentationPhase, TerminalActivityIconName>
+> = {
+  idle: "check",
+  submitting: "check",
+  reasoning: "check",
+  acting: "check",
+  "awaiting-approval": "check",
+  responding: "check",
+  settling: "check",
+  recovering: "check",
+  completed: "check",
+  failed: "circle-alert",
+  cancelled: "circle-stop",
+};
+
+function activityIconName(
+  presentation: AgentConversationPresentation,
+): "loader-circle" | "check" | "circle-alert" | "circle-stop" {
+  if (presentation.busy) return "loader-circle";
+  return SETTLED_ACTIVITY_ICONS[presentation.phase];
+}
+
 /** Projects durable messages plus the active normalized agent run into native DOM. */
 export class AgentConversationRenderer extends Component {
   public readonly element: HTMLElement;
@@ -143,7 +276,12 @@ export class AgentConversationRenderer extends Component {
   private readonly activeNodes = new Map<string, HTMLElement>();
   private readonly activePartRefs = new Map<string, AgentPart>();
   private readonly activeToolGroupRefs = new Map<string, readonly AgentToolPart[]>();
+  private readonly activeToolErrorSuppression = new Map<string, boolean>();
   private readonly activeActivityNodes = new Map<string, HTMLElement>();
+  private historyRows = new Map<string, Readonly<{
+    fingerprint: string;
+    node: HTMLElement;
+  }>>();
   private inlineMessageEdit: AgentInlineMessageEdit | null = null;
   private activeTurn: HTMLElement | null = null;
   private activeBody: HTMLElement | null = null;
@@ -180,7 +318,6 @@ export class AgentConversationRenderer extends Component {
 
   public async renderHistory(messages: readonly ChatMessage[]): Promise<void> {
     const generation = ++this.renderGeneration;
-    this.clearInlineEditorShortcutGuard();
     if (
       this.inlineMessageEdit
       && !messages.some((message) =>
@@ -189,6 +326,12 @@ export class AgentConversationRenderer extends Component {
       this.inlineMessageEdit = null;
     }
     const nextHistory = createSurfaceElement(this.historyRoot.ownerDocument, "div");
+    const nextRows = new Map<string, Readonly<{
+      fingerprint: string;
+      node: HTMLElement;
+    }>>();
+    const desiredRows: HTMLElement[] = [];
+    let hasInlineEdit = false;
     for (let index = 0; index < messages.length;) {
       if (generation !== this.renderGeneration) return;
       const message = messages[index];
@@ -230,6 +373,21 @@ export class AgentConversationRenderer extends Component {
         && this.inlineMessageEdit?.messageId === anchorMessage.message_id
         ? this.inlineMessageEdit
         : null;
+      hasInlineEdit ||= inlineEdit !== null;
+      const rowKey = JSON.stringify({
+        role: message.role,
+        messageIds: turnMessages.map((entry) => entry.message_id),
+      });
+      const fingerprint = JSON.stringify({
+        messages: turnMessages,
+        inlineEdit,
+      });
+      const existing = this.historyRows.get(rowKey);
+      if (existing?.fingerprint === fingerprint) {
+        nextRows.set(rowKey, existing);
+        desiredRows.push(existing.node);
+        continue;
+      }
       const row = nextHistory.createDiv({
         cls: [
           "systemsculpt-agent-turn",
@@ -273,9 +431,14 @@ export class AgentConversationRenderer extends Component {
           semantics.copyText,
         );
       }
+      const rendered = { fingerprint, node: row };
+      nextRows.set(rowKey, rendered);
+      desiredRows.push(row);
     }
     if (generation !== this.renderGeneration) return;
-    this.historyRoot.replaceChildren(...Array.from(nextHistory.childNodes));
+    this.reconcileChildren(this.historyRoot, desiredRows);
+    this.historyRows = nextRows;
+    if (!hasInlineEdit) this.clearInlineEditorShortcutGuard();
   }
 
   public setInlineMessageEdit(edit: AgentInlineMessageEdit | null): void {
@@ -366,6 +529,15 @@ export class AgentConversationRenderer extends Component {
     const wantedParts = new Set<string>();
     const wantedActivities = new Set<string>();
     const orderedParts = [...presentation.visibleParts];
+    const terminalErrors = orderedParts.filter(
+      (part): part is Extract<AgentPart, { kind: "error" }> => part.kind === "error",
+    );
+    const duplicatesTerminalError = (part: AgentToolPart): boolean =>
+      Boolean(part.error && terminalErrors.some((terminal) =>
+        visibleToolError(part.error) === presentAgentError(
+          terminal.error,
+          terminal.retryable,
+        ).message));
     const lanes: Array<Readonly<{ key: string; node: HTMLElement }>> = [];
 
     const timelineEntries = groupConsecutiveToolActivity(
@@ -375,18 +547,7 @@ export class AgentConversationRenderer extends Component {
     );
     const activityEntries = timelineEntries.filter((entry) =>
       entry.kind === "tools" || entry.item.kind === "reasoning");
-    let renderedActivity = false;
-
-    for (const part of orderedParts) {
-      if (part.kind !== "reasoning" && part.kind !== "tool") {
-        const key = `${part.kind}:${part.id}`;
-        const node = await this.renderActivePart(part, key);
-        wantedParts.add(key);
-        lanes.push({ key, node });
-        continue;
-      }
-
-      if (renderedActivity) continue;
+    if (presentation.phase !== "idle" || activityEntries.length > 0) {
       const activityKey = `activity:${snapshot.turnId ?? "active"}`;
       wantedActivities.add(activityKey);
       const activity = this.ensureActivity(activityKey, presentation);
@@ -402,11 +563,22 @@ export class AgentConversationRenderer extends Component {
         const first = entry.tools[0];
         const key = `tool:${first.id}`;
         wantedParts.add(key);
-        activityNodes.push(await this.renderActiveToolGroup(entry.tools, key));
+        activityNodes.push(await this.renderActiveToolGroup(
+          entry.tools,
+          key,
+          entry.tools.some(duplicatesTerminalError),
+        ));
       }
       this.reconcileChildren(activityBody, activityNodes);
       lanes.push({ key: activityKey, node: activity });
-      renderedActivity = true;
+    }
+
+    for (const part of orderedParts) {
+      if (part.kind === "reasoning" || part.kind === "tool") continue;
+      const key = `${part.kind}:${part.id}`;
+      const node = await this.renderActivePart(part, key);
+      wantedParts.add(key);
+      lanes.push({ key, node });
     }
 
     this.reconcileChildren(body, lanes.map((lane) => lane.node));
@@ -422,11 +594,16 @@ export class AgentConversationRenderer extends Component {
         this.activeNodes.delete(key);
         this.activePartRefs.delete(key);
         this.activeToolGroupRefs.delete(key);
+        this.activeToolErrorSuppression.delete(key);
       }
     }
   }
 
-  private async renderActivePart(part: AgentPart, key: string): Promise<HTMLElement> {
+  private async renderActivePart(
+    part: AgentPart,
+    key: string,
+    suppressToolError = false,
+  ): Promise<HTMLElement> {
     let node = this.activeNodes.get(key);
     if (!node) {
       node = createSurfaceElement(this.activeRoot.ownerDocument, "div");
@@ -439,10 +616,26 @@ export class AgentConversationRenderer extends Component {
     const preservedFocusKey = activeElement && node.contains(activeElement)
       ? activeElement.dataset.focusKey
       : undefined;
-    if (this.activePartRefs.get(key) !== part || this.activeToolGroupRefs.has(key)) {
-      await this.renderPart(node, part, this.activePartRefs.get(key));
+    const suppressionChanged = part.kind === "tool"
+      && this.activeToolErrorSuppression.get(key) !== suppressToolError;
+    if (
+      !agentPartsEqual(this.activePartRefs.get(key), part)
+      || this.activeToolGroupRefs.has(key)
+      || suppressionChanged
+    ) {
+      await this.renderPart(
+        node,
+        part,
+        this.activePartRefs.get(key),
+        suppressToolError,
+      );
       this.activePartRefs.set(key, part);
       this.activeToolGroupRefs.delete(key);
+      if (part.kind === "tool") {
+        this.activeToolErrorSuppression.set(key, suppressToolError);
+      } else {
+        this.activeToolErrorSuppression.delete(key);
+      }
     }
     if (preservedFocusKey) {
       node.querySelector<HTMLElement>(`[data-focus-key="${preservedFocusKey}"]`)?.focus();
@@ -453,8 +646,11 @@ export class AgentConversationRenderer extends Component {
   private async renderActiveToolGroup(
     parts: readonly AgentToolPart[],
     key: string,
+    suppressToolError: boolean,
   ): Promise<HTMLElement> {
-    if (parts.length === 1) return this.renderActivePart(parts[0], key);
+    if (parts.length === 1) {
+      return this.renderActivePart(parts[0], key, suppressToolError);
+    }
     let node = this.activeNodes.get(key);
     if (!node) {
       node = createSurfaceElement(this.activeRoot.ownerDocument, "div");
@@ -463,13 +659,16 @@ export class AgentConversationRenderer extends Component {
     }
     const previous = this.activeToolGroupRefs.get(key);
     const unchanged = previous?.length === parts.length
-      && previous.every((part, index) => part === parts[index]);
-    if (!unchanged) {
+      && previous.every((part, index) => agentPartsEqual(part, parts[index]));
+    const suppressionChanged =
+      this.activeToolErrorSuppression.get(key) !== suppressToolError;
+    if (!unchanged || suppressionChanged) {
       node.empty();
       node.className = "systemsculpt-agent-part is-tool";
-      await this.renderTool(node, parts);
+      await this.renderTool(node, parts, suppressToolError);
       this.activePartRefs.delete(key);
       this.activeToolGroupRefs.set(key, parts);
+      this.activeToolErrorSuppression.set(key, suppressToolError);
     }
     return node;
   }
@@ -495,7 +694,12 @@ export class AgentConversationRenderer extends Component {
   ): HTMLElement {
     let activity = this.activeActivityNodes.get(key);
     if (!activity) {
-      activity = this.createActivity(this.activeRoot, presentation.activityStatus).element;
+      activity = this.createActivity(
+        this.activeRoot,
+        presentation.activityStatus,
+        presentation.busy,
+        activityIconName(presentation),
+      ).element;
       activity.dataset.activityKey = key;
       this.activeActivityNodes.set(key, activity);
     }
@@ -503,6 +707,13 @@ export class AgentConversationRenderer extends Component {
     activity.setAttribute("aria-label", `Agent activity: ${presentation.activityStatus}`);
     const state = activity.querySelector<HTMLElement>(".systemsculpt-agent-activity-state");
     state?.setText(presentation.activityStatus);
+    const icon = activity.querySelector<HTMLElement>(".systemsculpt-agent-activity-icon");
+    const iconState = activityIconName(presentation);
+    if (icon && activity.dataset.iconState !== iconState) {
+      setIcon(icon, iconState);
+      icon.classList.toggle("is-animated", presentation.busy);
+      activity.dataset.iconState = iconState;
+    }
     activity.querySelector<HTMLElement>(".systemsculpt-agent-activity-header")?.setAttrs({
       role: "status",
       "aria-live": "polite",
@@ -514,6 +725,8 @@ export class AgentConversationRenderer extends Component {
   private createActivity(
     parent: HTMLElement,
     state: string,
+    busy?: boolean,
+    iconName?: "loader-circle" | "check" | "circle-alert" | "circle-stop",
   ): Readonly<{ element: HTMLElement; body: HTMLElement }> {
     const element = parent.createDiv({
       cls: "systemsculpt-agent-activity",
@@ -521,7 +734,11 @@ export class AgentConversationRenderer extends Component {
     });
     const header = element.createDiv({ cls: "systemsculpt-agent-activity-header" });
     const icon = header.createSpan({ cls: "systemsculpt-agent-activity-icon" });
-    setIcon(icon, "sparkles");
+    setIcon(icon, iconName ?? "sparkles");
+    if (busy !== undefined) {
+      icon.classList.toggle("is-animated", busy);
+      element.dataset.iconState = iconName ?? (busy ? "loader-circle" : "check");
+    }
     header.createEl("strong", { cls: "systemsculpt-agent-activity-label", text: "Activity" });
     header.createSpan({ cls: "systemsculpt-agent-activity-state", text: state });
     const body = element.createDiv({ cls: "systemsculpt-agent-activity-body" });
@@ -550,56 +767,76 @@ export class AgentConversationRenderer extends Component {
     this.activeNodes.clear();
     this.activePartRefs.clear();
     this.activeToolGroupRefs.clear();
+    this.activeToolErrorSuppression.clear();
     this.element.setAttribute("aria-busy", "false");
+  }
+
+  public showCompletedRenderFallback(): void {
+    this.element.setAttribute("aria-busy", "false");
+    if (this.activeRoot.querySelector(".systemsculpt-agent-render-fallback")) return;
+    this.activeRoot.createDiv({
+      cls: "systemsculpt-agent-render-fallback systemsculpt-agent-banner is-error",
+      text: "The response completed, but part of this chat could not be displayed. Reopen the chat to try again.",
+      attr: {
+        role: "alert",
+        "aria-live": "assertive",
+      },
+    });
   }
 
   /*
    * Stable part nodes are reconciled above. Only the changed part subtree is
    * refreshed, so adding a tool does not remount earlier text or disclosures.
    */
-  private async renderPart(node: HTMLElement, part: AgentPart, previousPart?: AgentPart): Promise<void> {
-    const previousDetails = part.kind === "reasoning"
-      ? node.querySelector<HTMLDetailsElement>(".systemsculpt-agent-reasoning-details")
-      : null;
-    const previousOpen = previousDetails?.open;
+  private async renderPart(
+    node: HTMLElement,
+    part: AgentPart,
+    previousPart?: AgentPart,
+    suppressToolError = false,
+  ): Promise<void> {
+    if (part.kind === "text") {
+      node.className = "systemsculpt-agent-part is-text";
+      node.classList.toggle("is-streaming", part.state === "streaming");
+      if (part.state === "streaming") {
+        if (previousPart?.kind === "text" && previousPart.state === "streaming") {
+          updateStreamingText(node, previousPart.markdown, part.markdown);
+          return;
+        }
+        node.replaceChildren(node.ownerDocument.createTextNode(part.markdown));
+        return;
+      }
+      await this.renderMarkdown(part.markdown, node);
+      return;
+    }
+    if (
+      part.kind === "reasoning"
+      && previousPart?.kind === "reasoning"
+      && await this.updateReasoning(node, previousPart, part)
+    ) {
+      return;
+    }
     node.empty();
     node.className = `systemsculpt-agent-part is-${part.kind}`;
     switch (part.kind) {
       case "reasoning": {
-        const justCompleted = previousPart?.kind === "reasoning"
-          && previousPart.state === "streaming"
-          && part.state === "complete";
         await this.renderReasoning(
           node,
           part.summary,
           part.state === "streaming",
-          justCompleted ? false : previousOpen,
         );
         return;
       }
-      case "text":
-        node.classList.toggle("is-streaming", part.state === "streaming");
-        await this.renderMarkdown(part.markdown, node);
-        return;
-      case "status": {
-        node.classList.add(`is-${part.phase}`);
-        node.setAttribute("role", "status");
-        node.setAttribute("aria-live", "polite");
-        const icon = node.createSpan({ cls: "systemsculpt-agent-status-icon" });
-        setIcon(icon, part.phase === "complete" ? "check" : "loader-circle");
-        node.createSpan({ text: part.label || "Working…" });
-        return;
-      }
       case "tool":
-        await this.renderTool(node, part);
+        await this.renderTool(node, part, suppressToolError);
         return;
       case "error": {
         node.setAttrs({ role: "alert", "aria-live": "assertive" });
         const errorIcon = node.createSpan();
         setIcon(errorIcon, "circle-alert");
         const copy = node.createDiv();
-        copy.createEl("strong", { text: "Agent stopped" });
-        copy.createDiv({ text: part.error.message });
+        const presented = presentAgentError(part.error, part.retryable);
+        copy.createEl("strong", { text: presented.heading });
+        copy.createDiv({ text: presented.message });
         if (part.retryable && part.retryMessageId && this.options.onRetryMessage) {
           const retry = createUiAction(copy, {
             label: "Retry",
@@ -620,6 +857,7 @@ export class AgentConversationRenderer extends Component {
     const ownerWindow = getSurfaceOwnerWindow(this.element);
     for (const timer of this.copyFeedbackTimers.values()) ownerWindow.clearTimeout(timer);
     this.copyFeedbackTimers.clear();
+    this.historyRows.clear();
     this.clearInlineEditorShortcutGuard();
     this.clearSuppressedEditorKeyup();
   }
@@ -646,15 +884,59 @@ export class AgentConversationRenderer extends Component {
     setIcon(disclosure, "chevron-right");
     const icon = header.createSpan({ cls: "systemsculpt-agent-reasoning-icon" });
     setIcon(icon, streaming ? "loader-circle" : "sparkles");
+    icon.dataset.iconState = streaming ? "streaming" : "complete";
     icon.classList.toggle("is-animated", streaming);
     header.createEl("strong", { text: streaming ? "Thinking" : "Reasoning" });
     const body = details.createDiv({ cls: "systemsculpt-agent-reasoning-body" });
+    if (streaming) {
+      body.replaceChildren(body.ownerDocument.createTextNode(summary));
+      return;
+    }
     if (summary.trim()) await this.renderMarkdown(summary, body);
+  }
+
+  private async updateReasoning(
+    node: HTMLElement,
+    previous: Extract<AgentPart, { kind: "reasoning" }>,
+    current: Extract<AgentPart, { kind: "reasoning" }>,
+  ): Promise<boolean> {
+    const details = node.querySelector<HTMLDetailsElement>(".systemsculpt-agent-reasoning-details");
+    const header = details?.querySelector<HTMLElement>(".systemsculpt-agent-reasoning-header");
+    const icon = header?.querySelector<HTMLElement>(".systemsculpt-agent-reasoning-icon");
+    const label = header?.querySelector<HTMLElement>("strong");
+    const body = details?.querySelector<HTMLElement>(".systemsculpt-agent-reasoning-body");
+    if (!details || !header || !icon || !label || !body) return false;
+
+    const streaming = current.state === "streaming";
+    node.className = "systemsculpt-agent-part is-reasoning";
+    node.classList.toggle("is-streaming", streaming);
+    header.setAttribute("aria-label", streaming ? "Thinking summary" : "Reasoning summary");
+    label.setText(streaming ? "Thinking" : "Reasoning");
+    const iconState = streaming ? "streaming" : "complete";
+    if (icon.dataset.iconState !== iconState) {
+      setIcon(icon, streaming ? "loader-circle" : "sparkles");
+      icon.dataset.iconState = iconState;
+    }
+    icon.classList.toggle("is-animated", streaming);
+    if (previous.state === "streaming" && current.state === "complete") {
+      details.open = false;
+    }
+    if (current.state === "streaming") {
+      if (previous.state === "streaming") {
+        updateStreamingText(body, previous.summary, current.summary);
+        return true;
+      }
+      body.replaceChildren(body.ownerDocument.createTextNode(current.summary));
+      return true;
+    }
+    await this.renderMarkdown(current.summary, body);
+    return true;
   }
 
   private async renderTool(
     node: HTMLElement,
     partOrParts: AgentToolPart | readonly AgentToolPart[],
+    suppressToolError = false,
   ): Promise<void> {
     const parts = Array.isArray(partOrParts) ? partOrParts : [partOrParts];
     const part = parts[0];
@@ -684,14 +966,22 @@ export class AgentConversationRenderer extends Component {
     header.createSpan({ cls: "systemsculpt-agent-tool-state", text: presentation.stateLabel });
 
     const support = shell.createDiv({ cls: "systemsculpt-agent-tool-support" });
-    if (parts.length === 1 && part.error) {
+    if (parts.length === 1 && part.error && !suppressToolError) {
       support.createDiv({
         cls: "systemsculpt-agent-tool-error",
-        text: part.error.message,
+        text: presentAgentErrorMessage(
+          part.error.message,
+          part.error.retryable === true,
+        ),
         attr: { role: "alert" },
       });
     }
-    if (parts.length === 1 && part.state === "approval-required" && part.approvalId) {
+    if (
+      parts.length === 1
+      && part.location === "vault"
+      && part.state === "approval-required"
+      && part.approvalId
+    ) {
       const approval = node.createDiv({
         cls: "systemsculpt-agent-approval",
         attr: {
@@ -750,13 +1040,13 @@ export class AgentConversationRenderer extends Component {
     const copy = card.createDiv({ cls: "systemsculpt-agent-artifact-copy" });
     copy.createEl("strong", { text: artifact.title });
     if (artifact.description) copy.createDiv({ text: artifact.description });
+    if (!artifact.path?.trim()) return;
     const actions = card.createDiv({ cls: "systemsculpt-agent-artifact-actions" });
     const open = button(actions, "Open", "arrow-up-right");
     open.onclick = () => void this.options.onOpenArtifact(artifact);
-    if (artifact.path) {
-      const copyPath = button(actions, "Copy path", "copy");
-      copyPath.onclick = () => void this.options.onCopyArtifactPath(artifact);
-    }
+    const copyPath = button(actions, "Copy path", "copy");
+    copyPath.setAttrs({ "aria-label": "Copy path", "aria-live": "polite" });
+    copyPath.onclick = () => void this.copyArtifactPath(copyPath, artifact);
   }
 
   private historicalToolPart(tool: ToolCall): AgentToolPart {
@@ -1051,9 +1341,10 @@ export class AgentConversationRenderer extends Component {
   }
 
   private async renderMarkdown(markdown: string, parent: HTMLElement): Promise<void> {
-    parent.empty();
-    await MarkdownRenderer.render(this.options.app, markdown, parent, this.options.sourcePath(), this);
-    this.enhanceCodeBlocks(parent);
+    const staging = createSurfaceElement(parent.ownerDocument, "div");
+    await MarkdownRenderer.render(this.options.app, markdown, staging, this.options.sourcePath(), this);
+    this.enhanceCodeBlocks(staging);
+    parent.replaceChildren(...Array.from(staging.childNodes));
   }
 
   private enhanceCodeBlocks(parent: HTMLElement): void {
@@ -1138,6 +1429,45 @@ export class AgentConversationRenderer extends Component {
       if (!button.isConnected) return;
       button.removeClass("is-copied", "is-copy-failed");
       updateUiAction(button, { label: `Copy ${subject}`, icon: "copy" });
+    }, copied ? 1_800 : 3_000);
+    this.copyFeedbackTimers.set(button, timer);
+  }
+
+  private async copyArtifactPath(
+    button: HTMLButtonElement,
+    artifact: AgentArtifact,
+  ): Promise<void> {
+    const attempt = String(Number(button.dataset.copyAttempt ?? "0") + 1);
+    button.dataset.copyAttempt = attempt;
+    let copied = false;
+    try {
+      copied = await this.options.onCopyArtifactPath(artifact) === true;
+    } catch {
+      copied = false;
+    }
+    if (!button.isConnected || button.dataset.copyAttempt !== attempt) return;
+
+    const ownerWindow = getSurfaceOwnerWindow(button);
+    const previousTimer = this.copyFeedbackTimers.get(button);
+    if (typeof previousTimer === "number") ownerWindow.clearTimeout(previousTimer);
+
+    button.classList.toggle("is-copied", copied);
+    button.classList.toggle("is-copy-failed", !copied);
+    updateUiAction(button, {
+      label: copied ? "Path copied" : "Could not copy path. Try again",
+      icon: copied ? "check" : "circle-alert",
+    });
+    button.setAttribute(
+      "aria-label",
+      copied ? "Path copied" : "Could not copy path. Try again",
+    );
+
+    const timer = ownerWindow.setTimeout(() => {
+      this.copyFeedbackTimers.delete(button);
+      if (!button.isConnected) return;
+      button.removeClass("is-copied", "is-copy-failed");
+      updateUiAction(button, { label: "Copy path", icon: "copy" });
+      button.setAttribute("aria-label", "Copy path");
     }, copied ? 1_800 : 3_000);
     this.copyFeedbackTimers.set(button, timer);
   }

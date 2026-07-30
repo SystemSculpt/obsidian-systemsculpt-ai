@@ -1,5 +1,7 @@
 import type { ChatMessage } from "../../../types";
+import type { ToolCall } from "../../../types/toolCalls";
 import { AgentTranscriptConflictError, AgentTranscriptRepository } from "../AgentTranscriptRepository";
+import { createTextAttachmentPart } from "../attachments/ChatAttachmentContent";
 
 function user(id: string, content = id): ChatMessage {
   return { role: "user", content, message_id: id };
@@ -7,6 +9,57 @@ function user(id: string, content = id): ChatMessage {
 
 function assistant(id: string, content = id): ChatMessage {
   return { role: "assistant", content, message_id: id };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+function projectedServerHistory(
+  timestamp: number,
+  content = "The plan is ready.",
+  path = "Plan.md",
+): ChatMessage[] {
+  const tool: ToolCall = {
+    id: "call-read",
+    messageId: "assistant-1",
+    request: {
+      id: "call-read",
+      type: "function",
+      function: { name: "read", arguments: JSON.stringify({ paths: ["Plan.md"] }) },
+    },
+    state: "completed",
+    timestamp: timestamp + 1,
+    result: { success: true, data: { path } },
+  };
+  const response = assistant("assistant-1", content);
+  response.tool_calls = [tool];
+  response.messageParts = [{
+    id: "reasoning:assistant-1:0",
+    type: "reasoning",
+    timestamp,
+    data: "Checking the vault.",
+  }, {
+    id: "tool:call-read",
+    type: "tool_call",
+    timestamp: timestamp + 1,
+    data: { ...tool },
+  }, {
+    id: "text:assistant-1:2",
+    type: "content",
+    timestamp: timestamp + 2,
+    data: content,
+  }];
+  return [
+    user("user-1", "Check the plan."),
+    response,
+  ];
 }
 
 function createHarness() {
@@ -21,7 +74,7 @@ function createHarness() {
         version: 1,
         messages,
         context_files: [],
-        managedSession: options.managedSession,
+        agentConversationId: options.agentConversationId,
       });
       return { version: 1 };
     }),
@@ -34,7 +87,7 @@ function createHarness() {
         title: options.title,
         version,
         messages,
-        managedSession: options.managedSession,
+        agentConversationId: options.agentConversationId,
       });
       return { version };
     }),
@@ -48,48 +101,44 @@ function createHarness() {
 }
 
 describe("AgentTranscriptRepository", () => {
-  const sessionId = "mchat_0123456789abcdef0123456789abcdef";
-  const toolsetFingerprint = "2:741638a5:5967d5";
-  const budget = Object.freeze({
-    messageCount: 2,
-    imageCount: 0,
-    attachmentBytes: 0,
-    storedJsonBytes: 256,
-  });
+  const conversationId = "conversation_0123456789abcdef0123456789abcdef";
 
-  it("allocates the chat on the first durable user turn and serializes assistant checkpoints", async () => {
+  it("allocates on the first user turn and durably upserts assistant output", async () => {
     const { repository, storage } = createHarness();
     const commits: Array<{ role: string; messageId: string; version: number }> = [];
     repository.subscribeToCommits(({ role, messageId, snapshot }) => {
       commits.push({ role, messageId, version: snapshot.version });
     });
     repository.setTitle("Project work");
-    const accepted = await repository.commitUser({ kind: "append", message: user("u1", "Update Project.md") });
+    const accepted = await repository.commitUser({
+      kind: "append",
+      message: user("u1", "Update Project.md"),
+    });
     expect(accepted.chatId).toMatch(/^\d{4}-\d{2}-\d{2} /);
-    expect(accepted.version).toBe(1);
     expect(storage.createChatExclusive).toHaveBeenCalledTimes(1);
 
-    const firstAssistant = assistant("a1", "Working");
-    firstAssistant.tool_calls = [{
+    const working = assistant("a1", "Working");
+    working.tool_calls = [{
       id: "call-1",
       messageId: "a1",
       request: { id: "call-1", type: "function", function: { name: "edit", arguments: "{}" } },
       state: "executing",
       timestamp: 1,
     }];
-    await repository.persistAssistant(firstAssistant);
+    await repository.persistAssistant(working);
     const completed = assistant("a1", "Done");
     completed.tool_calls = [{
-      ...firstAssistant.tool_calls[0],
+      ...working.tool_calls[0],
       state: "completed",
       result: { success: true, data: { path: "Project.md" } },
     }];
     const final = await repository.persistAssistant(completed);
 
     expect(final.messages).toHaveLength(2);
-    expect(final.messages[1]).toMatchObject({ content: "Done" });
-    expect(final.messages[1].tool_calls?.[0]).toMatchObject({ state: "completed", result: { success: true } });
-    expect(storage.saveChat).toHaveBeenCalledTimes(2);
+    expect(final.messages[1]).toMatchObject({
+      content: "Done",
+      tool_calls: [expect.objectContaining({ state: "completed" })],
+    });
     expect(commits).toEqual([
       { role: "user", messageId: "u1", version: 1 },
       { role: "assistant", messageId: "a1", version: 2 },
@@ -97,18 +146,422 @@ describe("AgentTranscriptRepository", () => {
     ]);
   });
 
-  it("does not let a transcript observer invalidate a completed durable commit", async () => {
-    const { repository } = createHarness();
-    const healthy = jest.fn();
-    repository.subscribeToCommits(() => { throw new Error("renderer failed"); });
-    repository.subscribeToCommits(healthy);
+  it("preserves same-generation serialization for operations invoked together", async () => {
+    const { repository, storage } = createHarness();
 
-    await expect(repository.commitUser({ kind: "append", message: user("u1") }))
-      .resolves.toMatchObject({ messages: [expect.objectContaining({ message_id: "u1" })] });
-    expect(healthy).toHaveBeenCalledTimes(1);
+    const userCommit = repository.commitUser({
+      kind: "append",
+      message: user("u1", "Question"),
+    }, conversationId);
+    const assistantCommit = repository.persistAssistant(
+      assistant("a1", "Answer"),
+    );
+
+    await expect(userCommit).resolves.toMatchObject({
+      messages: [expect.objectContaining({ message_id: "u1" })],
+    });
+    await expect(assistantCommit).resolves.toMatchObject({
+      messages: [
+        expect.objectContaining({ message_id: "u1" }),
+        expect.objectContaining({ message_id: "a1" }),
+      ],
+    });
+    expect(storage.createChatExclusive).toHaveBeenCalledTimes(1);
+    expect(storage.saveChat).toHaveBeenCalledTimes(1);
   });
 
-  it("branches a retry only from the exact durable user/version pair", async () => {
+  it("rejects queued old-chat operations after reset without allocating or writing old history", async () => {
+    const { repository, records, storage } = createHarness();
+    const oldMessages = [
+      user("user-old", "Old question"),
+      assistant("assistant-old", "Old answer"),
+    ];
+    records.set("old-chat", {
+      id: "old-chat",
+      title: "Old chat",
+      version: 5,
+      messages: oldMessages,
+      context_files: [],
+      agentConversationId: conversationId,
+    });
+    await repository.load("old-chat");
+
+    const writeStarted = deferred<void>();
+    const writeResult = deferred<{ version: number }>();
+    storage.saveChat.mockImplementationOnce(async () => {
+      writeStarted.resolve(undefined);
+      return writeResult.promise;
+    });
+    const inFlightMetadata = repository.saveMetadata();
+    await writeStarted.promise;
+
+    const staleHistory = repository.reconcileServerHistory([
+      user("user-server-old", "Server old question"),
+      assistant("assistant-server-old", "Server old answer"),
+    ]);
+    const staleUser = repository.commitUser({
+      kind: "append",
+      message: user("user-late-old", "Late old question"),
+    }, conversationId);
+    const staleAssistant = repository.persistAssistant(
+      assistant("assistant-late-old", "Late old answer"),
+    );
+    const staleMetadata = repository.saveMetadata();
+
+    const reset = repository.reset({ title: "Fresh chat" });
+    const expectedConflicts = [
+      expect(inFlightMetadata).rejects.toBeInstanceOf(AgentTranscriptConflictError),
+      expect(staleHistory).rejects.toBeInstanceOf(AgentTranscriptConflictError),
+      expect(staleUser).rejects.toBeInstanceOf(AgentTranscriptConflictError),
+      expect(staleAssistant).rejects.toBeInstanceOf(AgentTranscriptConflictError),
+      expect(staleMetadata).rejects.toBeInstanceOf(AgentTranscriptConflictError),
+    ];
+    writeResult.resolve({ version: 6 });
+    await Promise.all(expectedConflicts);
+
+    expect(reset).toMatchObject({
+      chatId: "",
+      title: "Fresh chat",
+      version: 0,
+      messages: [],
+    });
+    expect(repository.snapshot()).toEqual(reset);
+    expect(storage.createChatExclusive).not.toHaveBeenCalled();
+    expect(storage.saveChat).toHaveBeenCalledTimes(1);
+    expect(storage.saveChat.mock.calls[0]?.[1]).toEqual(oldMessages);
+    expect(records).toEqual(new Map([[
+      "old-chat",
+      expect.objectContaining({
+        version: 5,
+        messages: oldMessages,
+      }),
+    ]]));
+  });
+
+  it("rejects an operation queued before a load changes the active chat", async () => {
+    const { repository, records, storage } = createHarness();
+    const loadedRecord = {
+      id: "loaded-chat",
+      title: "Loaded chat",
+      version: 8,
+      messages: [
+        user("user-loaded", "Loaded question"),
+        assistant("assistant-loaded", "Loaded answer"),
+      ],
+      context_files: [],
+      agentConversationId: conversationId,
+    };
+    records.set("loaded-chat", loadedRecord);
+    const loadStarted = deferred<void>();
+    const loadResult = deferred<typeof loadedRecord>();
+    storage.loadChat.mockImplementationOnce(async () => {
+      loadStarted.resolve(undefined);
+      return loadResult.promise;
+    });
+
+    const loading = repository.load("loaded-chat");
+    await loadStarted.promise;
+    const staleHistory = repository.reconcileServerHistory([
+      user("user-stale", "Stale question"),
+      assistant("assistant-stale", "Stale answer"),
+    ]);
+    const staleExpectation = expect(staleHistory).rejects
+      .toBeInstanceOf(AgentTranscriptConflictError);
+    loadResult.resolve(loadedRecord);
+
+    await expect(loading).resolves.toMatchObject({
+      chatId: "loaded-chat",
+      version: 8,
+      messages: loadedRecord.messages,
+    });
+    await staleExpectation;
+    expect(repository.snapshot()).toMatchObject({
+      chatId: "loaded-chat",
+      version: 8,
+      messages: loadedRecord.messages,
+    });
+    expect(storage.createChatExclusive).not.toHaveBeenCalled();
+    expect(storage.saveChat).not.toHaveBeenCalled();
+  });
+
+  it("does not apply a deferred load after reset changes the active chat", async () => {
+    const { repository, storage } = createHarness();
+    const loadedRecord = {
+      id: "stale-loaded-chat",
+      title: "Stale loaded chat",
+      version: 11,
+      messages: [
+        user("user-stale-loaded", "Stale loaded question"),
+        assistant("assistant-stale-loaded", "Stale loaded answer"),
+      ],
+      context_files: [],
+      agentConversationId: conversationId,
+    };
+    const loadStarted = deferred<void>();
+    const loadResult = deferred<typeof loadedRecord>();
+    storage.loadChat.mockImplementationOnce(async () => {
+      loadStarted.resolve(undefined);
+      return loadResult.promise;
+    });
+
+    const loading = repository.load("stale-loaded-chat");
+    await loadStarted.promise;
+    const reset = repository.reset({ title: "Fresh after load" });
+    const staleLoadExpectation = expect(loading).rejects
+      .toBeInstanceOf(AgentTranscriptConflictError);
+    loadResult.resolve(loadedRecord);
+    await staleLoadExpectation;
+
+    expect(repository.snapshot()).toEqual(reset);
+    expect(repository.snapshot()).toMatchObject({
+      chatId: "",
+      title: "Fresh after load",
+      version: 0,
+      messages: [],
+    });
+    expect(storage.createChatExclusive).not.toHaveBeenCalled();
+    expect(storage.saveChat).not.toHaveBeenCalled();
+  });
+
+  it("atomically rejects the local user row and conversation pointer when persistence fails", async () => {
+    const { repository, storage } = createHarness();
+    storage.createChatExclusive.mockRejectedValueOnce(new Error("disk full"));
+
+    await expect(repository.commitUser(
+      { kind: "append", message: user("u1") },
+      conversationId,
+    )).rejects.toThrow("Failed to exclusively create chat");
+    expect(repository.snapshot()).toMatchObject({
+      chatId: "",
+      version: 0,
+      messages: [],
+    });
+    expect(repository.snapshot().agentConversationId).toBeUndefined();
+  });
+
+  it("atomically repairs local divergence from server order and content", async () => {
+    const { repository, records } = createHarness();
+    const accepted = await repository.commitUser(
+      { kind: "append", message: user("u-local", "stale") },
+      conversationId,
+    );
+    await repository.persistAssistant(assistant("a-local", "stale answer"));
+
+    const reconciled = await repository.reconcileServerHistory([
+      user("u-server", "authoritative question"),
+      assistant("a-server", "authoritative answer"),
+    ]);
+
+    expect(reconciled.messages).toEqual([
+      user("u-server", "authoritative question"),
+      assistant("a-server", "authoritative answer"),
+    ]);
+    expect(records.get(accepted.chatId).messages).toEqual(reconciled.messages);
+  });
+
+  it("does not rewrite identical projected server history when only synthesized timestamps change", async () => {
+    const { repository, records, storage } = createHarness();
+    const accepted = await repository.commitUser({
+      kind: "append",
+      message: user("user-1", "Check the plan."),
+    }, conversationId);
+
+    const first = await repository.reconcileServerHistory(projectedServerHistory(100));
+    const replayed = await repository.reconcileServerHistory(projectedServerHistory(10_000));
+
+    expect(first.version).toBe(2);
+    expect(replayed.version).toBe(2);
+    expect(storage.saveChat).toHaveBeenCalledTimes(1);
+    expect(replayed.messages[1].messageParts?.map((part) => part.timestamp))
+      .toEqual([100, 101, 102]);
+    expect(replayed.messages[1].tool_calls?.[0].timestamp).toBe(101);
+    expect(records.get(accepted.chatId).version).toBe(2);
+  });
+
+  it("persists real content and tool-result updates despite synthesized timestamp changes", async () => {
+    const { repository, storage } = createHarness();
+    await repository.commitUser({
+      kind: "append",
+      message: user("user-1", "Check the plan."),
+    }, conversationId);
+    await repository.reconcileServerHistory(projectedServerHistory(100));
+
+    const updated = await repository.reconcileServerHistory(
+      projectedServerHistory(10_000, "The revised plan is ready.", "Revised Plan.md"),
+    );
+
+    expect(updated.version).toBe(3);
+    expect(storage.saveChat).toHaveBeenCalledTimes(2);
+    expect(updated.messages[1]).toMatchObject({
+      content: "The revised plan is ready.",
+      tool_calls: [{
+        result: { success: true, data: { path: "Revised Plan.md" } },
+      }],
+    });
+    expect(updated.messages[1].messageParts?.map((part) => part.id)).toEqual([
+      "reasoning:assistant-1:0",
+      "tool:call-read",
+      "text:assistant-1:2",
+    ]);
+  });
+
+  it("persists a real projected part-order change when timestamps are regenerated", async () => {
+    const { repository, storage } = createHarness();
+    await repository.commitUser({
+      kind: "append",
+      message: user("user-1", "Check the plan."),
+    }, conversationId);
+    await repository.reconcileServerHistory(projectedServerHistory(100));
+
+    const reordered = projectedServerHistory(10_000);
+    const response = reordered[1];
+    const [reasoningPart, toolPart, contentPart] = response.messageParts ?? [];
+    response.messageParts = [toolPart, reasoningPart, contentPart];
+
+    const updated = await repository.reconcileServerHistory(reordered);
+
+    expect(updated.version).toBe(3);
+    expect(storage.saveChat).toHaveBeenCalledTimes(2);
+    expect(updated.messages[1].messageParts?.map((part) => part.id)).toEqual([
+      "tool:call-read",
+      "reasoning:assistant-1:0",
+      "text:assistant-1:2",
+    ]);
+  });
+
+  it("clears a stale saved cache when confirmed authoritative history is empty", async () => {
+    const { repository, records, storage } = createHarness();
+    const savedMessages = [
+      user("user-saved", "Please update the note"),
+      assistant("assistant-saved", "The note is updated."),
+    ];
+    records.set("2026-07-30 08-02-11", {
+      id: "2026-07-30 08-02-11",
+      title: "Saved tool run",
+      version: 9,
+      messages: savedMessages,
+      context_files: [],
+      agentConversationId: conversationId,
+    });
+
+    const loaded = await repository.load("2026-07-30 08-02-11");
+    expect(loaded?.messages).toEqual(savedMessages);
+
+    const reconciled = await repository.reconcileServerHistory([]);
+
+    expect(reconciled).toMatchObject({
+      chatId: "2026-07-30 08-02-11",
+      version: 10,
+      messages: [],
+    });
+    expect(repository.snapshot().messages).toEqual([]);
+    expect(storage.saveChat).toHaveBeenCalledTimes(1);
+    expect(storage.saveChat).toHaveBeenCalledWith(
+      "2026-07-30 08-02-11",
+      [],
+      expect.objectContaining({
+        agentConversationId: conversationId,
+        authoritativeServerHistoryReconciliation: true,
+      }),
+    );
+    expect(records.get("2026-07-30 08-02-11")).toMatchObject({
+      version: 10,
+      messages: [],
+    });
+  });
+
+  it("does not reuse cleared local history when the next user turn is committed", async () => {
+    const { repository, records, storage } = createHarness();
+    const savedMessages = [
+      user("user-stale", "Stale local question"),
+      assistant("assistant-stale", "Stale local answer"),
+    ];
+    records.set("chat-stale", {
+      id: "chat-stale",
+      title: "Stale chat",
+      version: 3,
+      messages: savedMessages,
+      context_files: [],
+      agentConversationId: conversationId,
+    });
+    await repository.load("chat-stale");
+    await repository.reconcileServerHistory([]);
+
+    const next = await repository.commitUser({
+      kind: "append",
+      message: user("user-next", "Start from the server state"),
+    }, conversationId);
+
+    expect(next.messages).toEqual([
+      user("user-next", "Start from the server state"),
+    ]);
+    expect(records.get("chat-stale")).toMatchObject({
+      version: 5,
+      messages: [user("user-next", "Start from the server state")],
+    });
+    expect(storage.saveChat).toHaveBeenCalledTimes(2);
+    expect(storage.saveChat.mock.calls[0]?.[1]).toEqual([]);
+    expect(storage.saveChat.mock.calls[0]?.[2]).toEqual(expect.objectContaining({
+      authoritativeServerHistoryReconciliation: true,
+    }));
+    expect(storage.saveChat.mock.calls[1]?.[1]).toEqual([
+      user("user-next", "Start from the server state"),
+    ]);
+    expect(storage.saveChat.mock.calls[1]?.[2])
+      .not.toHaveProperty("authoritativeServerHistoryReconciliation");
+  });
+
+  it("preserves local attachment presentation metadata by authoritative message id", async () => {
+    const { repository } = createHarness();
+    const local = user("u1");
+    local.content = [
+      { type: "text", text: "Review" },
+      createTextAttachmentPart(
+        "report.pdf",
+        "text/markdown",
+        new TextEncoder().encode("PDF canary 42"),
+      ),
+    ];
+    local.attachmentMetadata = [{
+      id: "attachment-1",
+      name: "report.pdf",
+      mimeType: "application/pdf",
+      byteLength: 42,
+      kind: "document",
+      contentPartIndex: 1,
+      contentRef: {
+        schema: "systemsculpt-chat-attachment-v1",
+        payload: "utf8-content-part",
+        sha256: "a".repeat(64),
+        byteLength: 42,
+      },
+    }];
+    await repository.commitUser({ kind: "append", message: local }, conversationId);
+
+    const reconciled = await repository.reconcileServerHistory([{
+      ...user("u1"),
+      content: [
+        { type: "text", text: "Review this" },
+        createTextAttachmentPart(
+          "report.pdf",
+          "text/markdown",
+          new TextEncoder().encode("PDF canary 42"),
+        ),
+      ],
+    }]);
+
+    expect(reconciled.messages[0].content).toEqual([
+      { type: "text", text: "Review this" },
+      createTextAttachmentPart(
+        "report.pdf",
+        "text/markdown",
+        new TextEncoder().encode("PDF canary 42"),
+      ),
+    ]);
+    expect(reconciled.messages[0].attachmentMetadata).toEqual(local.attachmentMetadata);
+  });
+
+  it("branches a retry from the exact durable user/version pair without replaying history", async () => {
     const { repository, records } = createHarness();
     records.set("chat-1", {
       id: "chat-1",
@@ -116,6 +569,7 @@ describe("AgentTranscriptRepository", () => {
       version: 4,
       messages: [user("u1"), assistant("a1"), user("u2"), assistant("a2")],
       context_files: [],
+      agentConversationId: conversationId,
     });
     await repository.load("chat-1");
 
@@ -127,6 +581,7 @@ describe("AgentTranscriptRepository", () => {
       expectedVersion: 4,
     });
     expect(retried.messages.map((message) => message.message_id)).toEqual(["u1", "a1", "u3"]);
+    expect(retried.agentConversationId).toBe(conversationId);
 
     await expect(repository.commitUser({
       kind: "resend",
@@ -137,135 +592,102 @@ describe("AgentTranscriptRepository", () => {
     })).rejects.toBeInstanceOf(AgentTranscriptConflictError);
   });
 
-  it("atomically persists assistant content with its server checkpoint and clears it on resend", async () => {
-    const { repository, records, storage } = createHarness();
-    const accepted = await repository.commitUser({ kind: "append", message: user("u1") });
-    const committed = await repository.persistAssistantWithSession(
-      assistant("a1", "Done"),
-      { id: sessionId, revision: 1 },
-      toolsetFingerprint,
-      budget,
-    );
-
-    expect(committed.managedSession).toEqual({
-      id: sessionId,
-      revision: 1,
-      boundChatId: accepted.chatId,
-      checkpointMessageId: "a1",
-      toolsetFingerprint,
-      budget,
-    });
-    expect(records.get(accepted.chatId)).toMatchObject({
-      messages: [expect.objectContaining({ message_id: "u1" }), expect.objectContaining({ message_id: "a1" })],
-      managedSession: { id: sessionId, revision: 1, checkpointMessageId: "a1" },
-    });
-    expect(storage.saveChat).toHaveBeenCalledTimes(1);
-
-    const resent = await repository.commitUser({
-      kind: "resend",
-      message: user("u2", "Again"),
+  it.each([
+    {
+      label: "first user turn",
       targetMessageId: "u1",
       expectedIndex: 0,
-      expectedVersion: committed.version,
-    });
-    expect(resent.managedSession).toBeUndefined();
-    expect(records.get(accepted.chatId).managedSession).toBeUndefined();
-  });
-
-  it.each([
-    ["repeated revision", sessionId, 1],
-    ["skipped revision", sessionId, 3],
-    ["changed session", "mchat_fedcba9876543210fedcba9876543210", 2],
-  ])("rejects a %s checkpoint without mutating or saving durable state", async (
-    _label,
-    candidateSessionId,
-    candidateRevision,
-  ) => {
+      expectedIds: ["u-edited"],
+    },
+    {
+      label: "later user turn",
+      targetMessageId: "u2",
+      expectedIndex: 2,
+      expectedIds: ["u1", "a1", "u-edited"],
+    },
+  ])("persists an edited $label branch before a later authoritative empty reconciliation", async ({
+    targetMessageId,
+    expectedIndex,
+    expectedIds,
+  }) => {
     const { repository, records, storage } = createHarness();
-    const accepted = await repository.commitUser({ kind: "append", message: user("u1") });
-    await repository.persistAssistantWithSession(
-      assistant("a1", "First checkpoint"),
-      { id: sessionId, revision: 1 },
-      toolsetFingerprint,
-      budget,
-    );
-    const beforeSnapshot = repository.snapshot();
-    const beforeRecord = structuredClone(records.get(accepted.chatId));
-    storage.saveChat.mockClear();
-
-    await expect(repository.persistAssistantWithSession(
-      assistant("a2", "Must not persist"),
-      { id: candidateSessionId, revision: candidateRevision },
-      toolsetFingerprint,
-      budget,
-    )).rejects.toThrow("non-sequential managed session checkpoint");
-
-    expect(storage.saveChat).not.toHaveBeenCalled();
-    expect(repository.snapshot()).toEqual(beforeSnapshot);
-    expect(records.get(accepted.chatId)).toEqual(beforeRecord);
-  });
-
-  it("restores only a final clean assistant anchor and durably removes stale bindings", async () => {
-    const valid = createHarness();
-    valid.records.set("valid", {
-      id: "valid",
-      title: "Valid",
-      version: 2,
-      messages: [user("u1"), assistant("a1")],
+    records.set("chat-1", {
+      id: "chat-1",
+      title: "Chat",
+      version: 4,
+      messages: [user("u1"), assistant("a1"), user("u2"), assistant("a2")],
       context_files: [],
-      managedSession: {
-        id: sessionId,
-        revision: 1,
-        boundChatId: "valid",
-        checkpointMessageId: "a1",
-        toolsetFingerprint,
-        budget,
-      },
+      agentConversationId: conversationId,
     });
-    await expect(valid.repository.load("valid")).resolves.toMatchObject({
-      managedSession: { id: sessionId, checkpointMessageId: "a1" },
+    await repository.load("chat-1");
+    const forkConversationId = "conversation_fedcba9876543210fedcba9876543210";
+    const branchWriteStarted = deferred<void>();
+    const releaseBranchWrite = deferred<void>();
+    storage.saveChat.mockImplementationOnce(async (
+      id: string,
+      messages: ChatMessage[],
+      options: any,
+    ) => {
+      branchWriteStarted.resolve(undefined);
+      await releaseBranchWrite.promise;
+      const previous = records.get(id);
+      records.set(id, {
+        ...previous,
+        id,
+        title: options.title,
+        version: 5,
+        messages,
+        agentConversationId: options.agentConversationId,
+      });
+      return { version: 5 };
     });
-    expect(valid.storage.saveChat).not.toHaveBeenCalled();
 
-    const budgetless = createHarness();
-    budgetless.records.set("budgetless", {
-      id: "budgetless",
-      title: "Budgetless",
-      version: 2,
-      messages: [user("u1"), assistant("a1")],
-      context_files: [],
-      managedSession: {
-        id: sessionId,
-        revision: 1,
-        boundChatId: "budgetless",
-        checkpointMessageId: "a1",
-        toolsetFingerprint,
-      },
-    });
-    const budgetlessLoaded = await budgetless.repository.load("budgetless");
-    expect(budgetlessLoaded?.managedSession).toBeUndefined();
-    expect(budgetless.storage.saveChat).toHaveBeenCalledTimes(1);
+    const editedPromise = repository.commitUser({
+      kind: "resend",
+      message: user("u-edited", "Edited request"),
+      targetMessageId,
+      expectedIndex,
+      expectedVersion: 4,
+    }, forkConversationId);
+    const emptyReconciliation = repository.reconcileServerHistory([]);
+    await branchWriteStarted.promise;
 
-    const stale = createHarness();
-    stale.records.set("stale", {
-      id: "stale",
-      title: "Stale",
-      version: 3,
-      messages: [user("u1"), assistant("a1"), user("u2")],
-      context_files: [],
-      managedSession: {
-        id: sessionId,
-        revision: 1,
-        boundChatId: "stale",
-        checkpointMessageId: "a1",
-        toolsetFingerprint,
-        budget,
-      },
+    expect(storage.saveChat).toHaveBeenCalledTimes(1);
+    expect(storage.saveChat.mock.calls[0]?.[1]
+      .map((message: ChatMessage) => message.message_id)).toEqual(expectedIds);
+    expect(storage.saveChat.mock.calls[0]?.[2])
+      .not.toHaveProperty("authoritativeServerHistoryReconciliation");
+    expect(records.get("chat-1").messages.map((message: ChatMessage) => message.message_id))
+      .toEqual(["u1", "a1", "u2", "a2"]);
+
+    releaseBranchWrite.resolve(undefined);
+    const [edited, reconciled] = await Promise.all([
+      editedPromise,
+      emptyReconciliation,
+    ]);
+
+    expect(edited).toMatchObject({
+      version: 5,
+      agentConversationId: forkConversationId,
     });
-    const loaded = await stale.repository.load("stale");
-    expect(loaded?.managedSession).toBeUndefined();
-    expect(stale.storage.saveChat).toHaveBeenCalledTimes(1);
-    expect(stale.records.get("stale").managedSession).toBeUndefined();
+    expect(edited.messages.map((message) => message.message_id)).toEqual(expectedIds);
+    expect(reconciled).toMatchObject({
+      chatId: "chat-1",
+      version: 6,
+      agentConversationId: forkConversationId,
+      messages: [],
+    });
+    expect(storage.saveChat).toHaveBeenCalledTimes(2);
+    expect(storage.saveChat.mock.calls[1]?.[1]).toEqual([]);
+    expect(storage.saveChat.mock.calls[1]?.[2]).toEqual(expect.objectContaining({
+      agentConversationId: forkConversationId,
+      authoritativeServerHistoryReconciliation: true,
+    }));
+    expect(records.get("chat-1")).toMatchObject({
+      version: 6,
+      agentConversationId: forkConversationId,
+      messages: [],
+    });
   });
 
   it("reconciles a crash-interrupted active tool to an honest unknown outcome", async () => {
@@ -294,18 +716,13 @@ describe("AgentTranscriptRepository", () => {
     });
 
     const loaded = await repository.load("current");
-
     expect(loaded?.messages[1].tool_calls?.[0]).toMatchObject({
-      state: "failed",
-      result: { success: false, error: { code: "TOOL_OUTCOME_UNKNOWN_AFTER_RESTART" } },
-    });
-    expect(loaded?.messages[1].messageParts?.[0].data).toMatchObject({
       state: "failed",
       result: { error: { code: "TOOL_OUTCOME_UNKNOWN_AFTER_RESTART" } },
     });
   });
 
-  it("returns immutable copies so renderers cannot mutate durable state", async () => {
+  it("returns copies so UI code cannot mutate durable state", async () => {
     const { repository } = createHarness();
     const accepted = await repository.commitUser({ kind: "append", message: user("u1") });
     (accepted.messages[0] as ChatMessage).content = "tampered";

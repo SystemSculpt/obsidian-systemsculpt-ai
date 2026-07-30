@@ -54,7 +54,6 @@ describe("AgentQueueStateRepository", () => {
     const items = [{
       id: "queued-1",
       text: "Compare this",
-      webSearch: true,
       includeContextFiles: false,
       attachments: [attachment],
     }];
@@ -65,6 +64,7 @@ describe("AgentQueueStateRepository", () => {
     const persisted = textFiles.get(queuePath)!;
     expect(persisted).toContain("\"contentRef\"");
     expect(persisted).not.toContain("data:image/png;base64");
+    expect(persisted).not.toContain("\"webSearch\"");
     expect(binaryFiles.size).toBe(1);
     const persistedRecord = JSON.parse(persisted);
     const persistedRef = persistedRecord.items[0].attachments[0].contentRef;
@@ -103,7 +103,6 @@ describe("AgentQueueStateRepository", () => {
     const items = [{
       id: "queued-1",
       text: "Follow up",
-      webSearch: false,
       includeContextFiles: true,
     }];
     await repository.save("draft-1", items);
@@ -114,13 +113,36 @@ describe("AgentQueueStateRepository", () => {
     expect(await repository.load("chat-1")).toEqual(items);
   });
 
+  it("rejects an obsolete webSearch field instead of migrating it into current queue state", async () => {
+    const { queueAdapter, attachmentAdapter, textFiles } = adapterHarness();
+    const repository = new AgentQueueStateRepository(
+      queueAdapter,
+      new ChatAttachmentVaultStore(attachmentAdapter),
+    );
+    const items = [{
+      id: "queued-legacy",
+      text: "Legacy follow-up",
+      includeContextFiles: true,
+    }];
+    await repository.save("chat-legacy", items);
+    const [path] = textFiles.keys();
+    const legacy = JSON.parse(textFiles.get(path)!);
+    legacy.items[0].webSearch = true;
+    textFiles.set(path, JSON.stringify(legacy));
+
+    await expect(repository.load("chat-legacy")).rejects.toThrow(
+      "Saved queued follow-ups are invalid.",
+    );
+    await expect(repository.collectAttachmentRefKeys()).resolves.toBeNull();
+    expect(textFiles.get(path)).toContain("\"webSearch\":true");
+  });
+
   it("fails loudly instead of silently dropping a corrupt queue", async () => {
     const { queueAdapter, attachmentAdapter, textFiles } = adapterHarness();
     const repository = new AgentQueueStateRepository(queueAdapter, new ChatAttachmentVaultStore(attachmentAdapter));
     await repository.save("chat-1", [{
       id: "queued-1",
       text: "Follow up",
-      webSearch: false,
       includeContextFiles: true,
     }]);
     const [path] = textFiles.keys();
@@ -136,7 +158,6 @@ describe("AgentQueueStateRepository", () => {
     await repository.save("chat-1", [{
       id: "queued-1",
       text: "Follow up",
-      webSearch: false,
       includeContextFiles: true,
     }]);
     const [path] = textFiles.keys();
@@ -154,7 +175,6 @@ describe("AgentQueueStateRepository", () => {
     await repository.save("chat-1", [{
       id: "queued-1",
       text: "",
-      webSearch: false,
       includeContextFiles: true,
       attachments: [attachment],
     }]);

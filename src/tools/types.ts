@@ -1,11 +1,5 @@
 import type { ChatContextManager } from "../services/DocumentContextManager";
 
-export interface FirstPartyToolDefinition {
-  name: string;
-  description: string;
-  inputSchema: Record<string, any>;
-}
-
 export interface FirstPartyToolChatTarget {
   contextManager: ChatContextManager & {
     removeFromContextFiles: (filePath: string) => Promise<boolean>;

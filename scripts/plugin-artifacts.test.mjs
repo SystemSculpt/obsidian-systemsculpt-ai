@@ -9,6 +9,7 @@ import {
   assertProductionPluginArtifacts,
   buildProductionPlugin,
   inspectPluginArtifacts,
+  THIN_CLIENT_FORBIDDEN_BUNDLE_FRAGMENTS,
 } from "./plugin-artifacts.mjs";
 import { buildCssArtifact } from "./build-css.mjs";
 import { CANONICAL_API_BASE_URL } from "./plugin-build-options.mjs";
@@ -389,6 +390,30 @@ test("assertProductionPluginArtifacts rejects retired client runtimes and provid
     () => assertProductionPluginArtifacts({ root }),
     /still bundles a provider SDK/i,
   );
+});
+
+test("artifact inspection rejects every thin-client authority mutation", async (t) => {
+  for (const { fragment, message } of THIN_CLIENT_FORBIDDEN_BUNDLE_FRAGMENTS) {
+    await t.test(fragment, () => {
+      const root = createTempPluginDir();
+      t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+      writeRequiredArtifacts(root, productionBundle(JSON.stringify(fragment)));
+
+      const inspection = inspectPluginArtifacts({ root });
+      assert.equal(inspection.ok, false);
+      assert.ok(
+        inspection.mainBundle.forbiddenClientFragments.some(
+          (finding) => finding.fragment === fragment && finding.message === message,
+        ),
+        `${fragment} was not reported`,
+      );
+      assert.throws(
+        () => assertProductionPluginArtifacts({ root }),
+        (error) => error instanceof Error
+          && error.message.includes(message),
+      );
+    });
+  }
 });
 
 test("buildProductionPlugin revalidates the post-build artifact set", () => {

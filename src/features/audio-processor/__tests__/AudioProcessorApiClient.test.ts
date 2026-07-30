@@ -71,9 +71,9 @@ const artifactManifest = {
   },
 };
 
-const json = (value: unknown, status = 200): Response => new Response(JSON.stringify(value), {
+const json = (value: unknown, status = 200, headers: Record<string, string> = {}): Response => new Response(JSON.stringify(value), {
   status,
-  headers: { "Content-Type": "application/json" },
+  headers: { "Content-Type": "application/json", ...headers },
 });
 
 describe("AudioProcessorApiClient", () => {
@@ -392,6 +392,19 @@ describe("AudioProcessorApiClient", () => {
       body: {},
       headers: expect.objectContaining({ "Idempotency-Key": "audio-op:resume" }),
     }));
+  });
+
+  it("keeps server Retry-After as status observation metadata", async () => {
+    const { client, requestClient } = setup();
+    requestClient.responses.push(json(
+      { job: pendingJob, result: null },
+      200,
+      { "Retry-After": "15" },
+    ));
+
+    await expect(client.getJob("audio_job_123")).resolves.toEqual(
+      expect.objectContaining({ pollAfterMs: 15_000 }),
+    );
   });
 
   it("accepts a durable recovery transcript on a charged failed summary job", async () => {

@@ -138,19 +138,13 @@
   margin-bottom: 0;
 }
 
-.systemsculpt-agent-part.is-status {
-  display: flex;
-  align-items: center;
-  gap: var(--ss-space-2);
-  color: var(--ss-ink-muted);
-  font-size: var(--ss-text-sm);
+.systemsculpt-agent-part.is-text.is-streaming,
+.systemsculpt-agent-part.is-reasoning.is-streaming .systemsculpt-agent-reasoning-body {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
-.systemsculpt-agent-part.is-status .systemsculpt-agent-status-icon {
-  color: var(--ss-accent);
-}
-
-.systemsculpt-agent-part.is-status:not(.is-complete) .systemsculpt-agent-status-icon svg,
+.systemsculpt-agent-activity-icon.is-animated svg,
 .systemsculpt-agent-reasoning-icon.is-animated svg,
 .systemsculpt-agent-tool-icon.is-animated svg {
   animation: ss-spin 0.9s linear infinite;
@@ -186,9 +180,4 @@
     scroll-behavior: auto;
     transition-duration: 0.01ms;
   }
-}
-
-.systemsculpt-agent-part.is-status svg {
-  width: var(--ss-icon-size-sm);
-  height: var(--ss-icon-size-sm);
 }

@@ -78,7 +78,12 @@ function createPluginStub(settingsOverrides: Record<string, unknown> = {}) {
     app: { vault },
     settings,
     emitter: { emit: jest.fn(), on: jest.fn(() => jest.fn()) },
-    getManagedCapabilityClient: jest.fn(() => ({ request: jest.fn() })),
+    getManagedCapabilityClient: jest.fn(() => ({
+      getEmbeddingsIndex: jest.fn(() => ({
+        activeGeneration: undefined,
+        metadata: undefined,
+      })),
+    })),
     getSettingsManager: jest.fn(() => ({ updateSettings: jest.fn(async () => {}) })),
   };
 }

@@ -7,11 +7,14 @@ import type {
   ManagedMultipartCreateRequest,
   ManagedPendingDispatch,
 } from "./ManagedTypes";
+import {
+  isRetryableManagedJobObservationError,
+  observeManagedJob,
+  waitForManagedJob,
+} from "./ManagedJobObservation";
 
 const CAPABILITY = "document_processing" as const;
 const MAX_DOCUMENT_BYTES = 25 * 1024 * 1024;
-const DEFAULT_POLL_INTERVAL_MS = 2_000;
-const DEFAULT_MAX_POLLS = 180;
 
 export type ManagedDocumentProcessingContext = Readonly<{
   operationId?: string;
@@ -58,7 +61,6 @@ export type ManagedDocumentProcessingDependencies = Readonly<{
   createRequestId?: () => string;
   now?: () => string;
   wait?: (milliseconds: number, signal: AbortSignal) => Promise<void>;
-  maxPolls?: number;
 }>;
 
 function defaultOperationId(): string {
@@ -77,20 +79,6 @@ function abortError(): DOMException {
 
 function throwIfAborted(signal: AbortSignal): void {
   if (signal.aborted) throw abortError();
-}
-
-async function defaultWait(milliseconds: number, signal: AbortSignal): Promise<void> {
-  throwIfAborted(signal);
-  await new Promise<void>((resolve, reject) => {
-    const timeout = window.setTimeout(resolve, milliseconds);
-    const onAbort = () => {
-      window.clearTimeout(timeout);
-      reject(abortError());
-    };
-    signal.addEventListener("abort", onAbort, { once: true });
-    if (signal.aborted) onAbort();
-  });
-  throwIfAborted(signal);
 }
 
 function readDocumentId(value: unknown): string {
@@ -114,14 +102,12 @@ export class ManagedDocumentProcessingAdapter {
   private readonly createRequestId: () => string;
   private readonly now: () => string;
   private readonly wait: (milliseconds: number, signal: AbortSignal) => Promise<void>;
-  private readonly maxPolls: number;
 
   constructor(private readonly dependencies: ManagedDocumentProcessingDependencies) {
     this.createOperationId = dependencies.createOperationId ?? defaultOperationId;
     this.createRequestId = dependencies.createRequestId ?? defaultRequestId;
     this.now = dependencies.now ?? (() => new Date().toISOString());
-    this.wait = dependencies.wait ?? defaultWait;
-    this.maxPolls = dependencies.maxPolls ?? DEFAULT_MAX_POLLS;
+    this.wait = dependencies.wait ?? waitForManagedJob;
   }
 
   async process(source: ManagedDocumentSource, context: ManagedDocumentProcessingContext = {}): Promise<ManagedDocumentProcessingResult> {
@@ -288,35 +274,40 @@ export class ManagedDocumentProcessingAdapter {
     const documentId = record.jobId;
     if (!documentId) throw new Error("Managed document recovery record has no acknowledged document ID.");
 
-    for (let poll = 0; poll < this.maxPolls; poll += 1) {
-      throwIfAborted(signal);
-      let status: { document: { id: string; status: ManagedJobStatus; progress: number } };
-      try {
-        status = await this.dependencies.jobs.status(documentId, signal) as typeof status;
-        throwIfAborted(signal);
-      } catch (error) {
-        if (error instanceof ManagedJobError && error.code === "document_processing_failed" && record.phase === "processing") {
-          await this.dependencies.recovery.applyReconciliation(CAPABILITY, record.operationId, record.revision, "failed");
+    type DocumentStatus = {
+      document: { id: string; status: ManagedJobStatus; progress: number };
+      poll_after_ms?: number;
+    };
+    try {
+      for await (const status of observeManagedJob<DocumentStatus>({
+        read: async () => await this.dependencies.jobs.status(documentId, signal) as DocumentStatus,
+        signal,
+        pollAfterMs: value => value.poll_after_ms,
+        isRetryableError: isRetryableManagedJobObservationError,
+        retryAfterMs: error => (error as Partial<ManagedJobError> | null)?.retryAfterMs,
+        wait: this.wait,
+      })) {
+        if (status.document.id !== documentId) throw new Error("Managed document status returned a different document ID.");
+        if (record.phase === "processing") {
+          record = await this.dependencies.recovery.applyReconciliation(CAPABILITY, record.operationId, record.revision, status.document.status);
           throwIfAborted(signal);
         }
-        throw error;
+        context.onProgress?.(75 + Math.floor(Math.min(1, status.document.progress) * 20), "Processing document…");
+        if (status.document.status === "completed") {
+          if (!["result_ready", "local_commit_pending"].includes(record.phase)) throw new Error("Managed document completion could not be reconciled.");
+          const downloaded = await this.dependencies.jobs.download(documentId, signal) as { result: ManagedDocumentDownloadResult };
+          throwIfAborted(signal);
+          return { operationId: record.operationId, documentId, result: downloaded.result };
+        }
+        if (record.phase !== "processing") throw new Error("Managed document resume cannot dispatch missing upload or start work.");
       }
-      if (status.document.id !== documentId) throw new Error("Managed document status returned a different document ID.");
-      if (record.phase === "processing") {
-        record = await this.dependencies.recovery.applyReconciliation(CAPABILITY, record.operationId, record.revision, status.document.status);
-        throwIfAborted(signal);
+    } catch (error) {
+      if (error instanceof ManagedJobError && error.code === "document_processing_failed" && record.phase === "processing") {
+        await this.dependencies.recovery.applyReconciliation(CAPABILITY, record.operationId, record.revision, "failed");
       }
-      context.onProgress?.(75 + Math.floor(Math.min(1, status.document.progress) * 20), "Processing document…");
-      if (status.document.status === "completed") {
-        if (!["result_ready", "local_commit_pending"].includes(record.phase)) throw new Error("Managed document completion could not be reconciled.");
-        const downloaded = await this.dependencies.jobs.download(documentId, signal) as { result: ManagedDocumentDownloadResult };
-        throwIfAborted(signal);
-        return { operationId: record.operationId, documentId, result: downloaded.result };
-      }
-      if (record.phase !== "processing") throw new Error("Managed document resume cannot dispatch missing upload or start work.");
-      await this.wait(DEFAULT_POLL_INTERVAL_MS, signal);
       throwIfAborted(signal);
+      throw error;
     }
-    throw new Error("Managed document processing did not complete before the polling limit.");
+    throw new Error("Managed document processing observation ended without a terminal status.");
   }
 }

@@ -6,12 +6,13 @@ import {
   type ChatDocumentAttachmentProcessor,
 } from "../ChatMessageAttachments";
 import {
-  DEFAULT_MANAGED_CHAT_INPUT_LIMITS,
-  type ManagedChatInputLimits,
-} from "../../../../services/managed/ManagedChatInputLimits";
+  DEFAULT_THIN_AGENT_INPUT_LIMITS,
+  type ThinAgentInputLimits,
+} from "../../../../services/managed/ThinAgentInputLimits";
+import { parseAttachedTextContent } from "../ChatAttachmentContent";
 
-function limits(overrides: Partial<ManagedChatInputLimits>): ManagedChatInputLimits {
-  return Object.freeze({ ...DEFAULT_MANAGED_CHAT_INPUT_LIMITS, ...overrides });
+function limits(overrides: Partial<ThinAgentInputLimits>): ThinAgentInputLimits {
+  return Object.freeze({ ...DEFAULT_THIN_AGENT_INPUT_LIMITS, ...overrides });
 }
 
 function file(name: string, type: string, content: string): File {
@@ -119,20 +120,20 @@ describe("ChatMessageAttachmentCollection", () => {
     const tooLarge = {
       name: "huge.md",
       type: "text/markdown",
-      size: DEFAULT_MANAGED_CHAT_INPUT_LIMITS.maxTextBytesPerBlock + 1,
+      size: DEFAULT_THIN_AGENT_INPUT_LIMITS.maxTextBytesPerBlock + 1,
     } as File;
     const oversized = await collection.addFiles([tooLarge]);
     expect(oversized.issues[0].code).toBe("too_large");
     expect(read).not.toHaveBeenCalled();
 
-    const files = Array.from({ length: DEFAULT_MANAGED_CHAT_INPUT_LIMITS.maxContentBlocksPerMessage + 1 }, (_, index) =>
+    const files = Array.from({ length: DEFAULT_THIN_AGENT_INPUT_LIMITS.maxContentBlocksPerMessage + 1 }, (_, index) =>
       file(`file-${index}.txt`, "text/plain", String(index)),
     );
     const countCollection = new ChatMessageAttachmentCollection(async (input) =>
       new TextEncoder().encode(input.name).buffer
     );
     const counted = await countCollection.addFiles(files);
-    expect(counted.accepted).toHaveLength(DEFAULT_MANAGED_CHAT_INPUT_LIMITS.maxContentBlocksPerMessage);
+    expect(counted.accepted).toHaveLength(DEFAULT_THIN_AGENT_INPUT_LIMITS.maxContentBlocksPerMessage);
     expect(counted.issues.at(-1)?.code).toBe("file_limit");
   });
 
@@ -172,6 +173,10 @@ describe("ChatMessageAttachmentCollection", () => {
       type: "text",
       text: expect.stringContaining("# Extracted"),
     }));
+    expect(result.accepted[0].mimeType).toBe("application/pdf");
+    expect(result.accepted[0].contentPart.type === "text"
+      ? parseAttachedTextContent(result.accepted[0].contentPart.text)?.mimeType
+      : null).toBe("text/markdown");
   });
 
   it("restores exact image, text, and PDF identities from a durable multipart message", async () => {
@@ -254,7 +259,7 @@ describe("ChatMessageAttachmentCollection", () => {
     const processor: ChatDocumentAttachmentProcessor = {
       prepare: jest.fn(async () => ({
         operationId: "document-op-too-large",
-        markdown: "x".repeat(DEFAULT_MANAGED_CHAT_INPUT_LIMITS.maxTextBytesPerBlock + 1),
+        markdown: "x".repeat(DEFAULT_THIN_AGENT_INPUT_LIMITS.maxTextBytesPerBlock + 1),
       })),
       complete: jest.fn(async () => undefined),
       discard: jest.fn(async () => undefined),
@@ -270,7 +275,7 @@ describe("ChatMessageAttachmentCollection", () => {
     expect(processor.discard).toHaveBeenCalledWith("document-op-too-large");
   });
 
-  it("enforces negotiated image, block, text, and exact mixed-wire limits", async () => {
+  it("enforces server-delivered image, block, and text picker limits", async () => {
     const tiny = limits({
       maxContentBlocksPerMessage: 3,
       maxImagesPerTurn: 1,
@@ -278,7 +283,6 @@ describe("ChatMessageAttachmentCollection", () => {
       maxTotalImageBytes: 8,
       maxTextBytesPerBlock: 256,
       maxTotalTextBytes: 320,
-      maxDeltaRequestBytes: 66_000,
     });
     const collection = new ChatMessageAttachmentCollection(reader({
       "one.png": "1234",
@@ -300,10 +304,6 @@ describe("ChatMessageAttachmentCollection", () => {
 
     expect(collection.validateSubmission("x".repeat(257)).map((entry) => entry.code)).toEqual(
       expect.arrayContaining(["text_limit"]),
-    );
-    collection.setLimits(limits({ ...tiny, maxDeltaRequestBytes: 65_600 }));
-    expect(collection.validateSubmission("hello").map((entry) => entry.code)).toEqual(
-      expect.arrayContaining(["request_limit"]),
     );
   });
 });

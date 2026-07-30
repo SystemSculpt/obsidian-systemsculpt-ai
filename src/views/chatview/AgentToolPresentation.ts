@@ -30,6 +30,12 @@ const TOOL_LABELS: Readonly<Record<string, string>> = {
   context: "Update context",
 };
 
+const SERVER_TOOL_LABELS: Readonly<Record<string, string>> = {
+  web_search: "Search web",
+};
+
+const UNKNOWN_SERVER_TOOL_LABEL = "SystemSculpt action";
+
 const STATE_LABELS: Readonly<Record<AgentToolPart["state"], string>> = {
   "input-streaming": "Preparing",
   "input-ready": "Ready",
@@ -229,20 +235,42 @@ function inputSummary(canonicalName: string, input: Record<string, unknown>): st
 export function presentAgentTool(part: AgentToolPart): AgentToolPresentation {
   const { canonicalName } = splitToolName(part.name);
   const input = record(part.input);
-  const counted = countedTool(canonicalName, input);
-  const partialSummary = partialOutcomeSummary(part, canonicalName);
-  const outputSummary = compact(part.output?.summary ?? part.output?.title);
-  const summary = partialSummary ?? outputSummary ?? inputSummary(canonicalName, input);
+  const serverLabel = part.location === "server"
+    ? SERVER_TOOL_LABELS[canonicalName]
+    : undefined;
+  const unknownServerTool = part.location === "server" && !serverLabel;
+  const serverTool = part.location === "server";
+  const displayState = serverTool && (
+    part.state === "input-ready"
+    || part.state === "approval-required"
+    || part.state === "approved"
+  )
+    ? "running"
+    : part.state;
+  const counted = part.location === "vault"
+    ? countedTool(canonicalName, input)
+    : null;
+  const partialSummary = serverTool
+    ? null
+    : partialOutcomeSummary(part, canonicalName);
+  const outputSummary = serverTool
+    ? null
+    : compact(part.output?.summary ?? part.output?.title);
+  const summary = serverTool
+    ? null
+    : partialSummary ?? outputSummary ?? inputSummary(canonicalName, input);
   return {
-    canonicalName,
-    label: counted
-      ? countedLabel(counted)
-      : TOOL_LABELS[canonicalName] || canonicalName
-        .replace(/[_-]+/g, " ")
-        .replace(/\b\w/g, (letter) => letter.toUpperCase()) || "Tool",
-    stateLabel: STATE_LABELS[part.state],
-    icon: STATE_ICONS[part.state],
-    animated: ANIMATED_STATES.has(part.state),
+    canonicalName: unknownServerTool ? "server_action" : canonicalName,
+    label: part.location === "server"
+      ? serverLabel ?? UNKNOWN_SERVER_TOOL_LABEL
+      : counted
+        ? countedLabel(counted)
+        : TOOL_LABELS[canonicalName] || canonicalName
+          .replace(/[_-]+/g, " ")
+          .replace(/\b\w/g, (letter) => letter.toUpperCase()) || "Tool",
+    stateLabel: STATE_LABELS[displayState],
+    icon: STATE_ICONS[displayState],
+    animated: ANIMATED_STATES.has(displayState),
     summary,
     itemCount: counted?.items.length ?? null,
   };
@@ -256,7 +284,7 @@ export function presentAgentToolGroup(
     throw new Error("A tool presentation group must contain at least one tool.");
   }
   const base = presentAgentTool(first);
-  if (parts.length === 1) return base;
+  if (parts.length === 1 || first.location === "server") return base;
   const scopes = parts.map(toolScope);
   if (scopes.some((scope) => !scope)) return base;
   const items = scopes.flatMap((scope) => scope!.items);

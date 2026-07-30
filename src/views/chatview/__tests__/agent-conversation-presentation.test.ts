@@ -1,140 +1,197 @@
 import {
-  applyManagedAgentEvent,
-  createInitialAgentConversation,
-  MANAGED_AGENT_EVENT_VERSION,
-  type ManagedAgentEvent,
-  type ManagedAgentEventEnvelope,
-} from "../AgentConversation";
-import { presentAgentConversation } from "../AgentConversationPresentation";
+  presentAgentConversation,
+  presentAgentError,
+  presentAgentErrorMessage,
+} from "../AgentConversationPresentation";
 
-function envelope(seq: number, event: ManagedAgentEvent): ManagedAgentEventEnvelope {
-  return {
-    version: MANAGED_AGENT_EVENT_VERSION,
-    seq,
-    runId: "run-1",
-    turnId: "user-1",
-    emittedAt: seq,
-    event,
-  };
-}
+describe("AgentConversationPresentation product-copy boundary", () => {
+  it.each([
+    {
+      code: "agent_connection_closed",
+      message: "The agent connection ticket is invalid.",
+      heading: "Response interrupted",
+      visibleMessage: "Retry this message to continue.",
+    },
+    {
+      code: "agent_stream_error",
+      message: "The WebSocket closed unexpectedly.",
+      heading: "Response interrupted",
+      visibleMessage: "Retry this message to continue.",
+    },
+    {
+      code: "agent_bootstrap_failed",
+      message: "The transport failed during bootstrap.",
+      heading: "Could not finish",
+      visibleMessage: "SystemSculpt could not complete the response.",
+    },
+    {
+      code: "agent_bootstrap_failed",
+      message: "Bootstrap could not obtain a ticket.",
+      heading: "Could not finish",
+      visibleMessage: "SystemSculpt could not complete the response.",
+    },
+    {
+      code: "agent_provider_failed",
+      message: "The Cloudflare AI SDK provider failed.",
+      heading: "Could not finish",
+      visibleMessage: "SystemSculpt could not complete the response.",
+    },
+    {
+      code: "server_failed",
+      message: "OpenRouter rejected the response.",
+      heading: "Could not finish",
+      visibleMessage: "SystemSculpt could not complete the response.",
+    },
+    {
+      code: "server_failed",
+      message: "Think could not continue this run.",
+      heading: "Could not finish",
+      visibleMessage: "SystemSculpt could not complete the response.",
+    },
+    {
+      code: "server_failed",
+      message: "Pi returned an invalid event.",
+      heading: "Could not finish",
+      visibleMessage: "SystemSculpt could not complete the response.",
+    },
+  ])("never exposes internal connection wording: $message", ({
+    code,
+    message,
+    heading,
+    visibleMessage,
+  }) => {
+    const presented = presentAgentError({
+      code,
+      message,
+      retryable: true,
+    }, true);
+    const visible = `${presented.heading} ${presented.message}`;
 
-describe("presentAgentConversation", () => {
-  it("uses request pending only until protocol state becomes terminal", () => {
-    expect(presentAgentConversation(null, true)).toMatchObject({
-      phase: "submitting",
-      busy: true,
-      composerRunning: true,
+    expect(presented).toEqual({ heading, message: visibleMessage });
+    expect(visible).not.toMatch(
+      /connection|websocket|socket|ticket|bootstrap|transport|protocol|provider|cloudflare|openrouter|think|\bpi\b|ai sdk|cf_agent/i,
+    );
+  });
+
+  it("uses natural terminal headings while preserving safe actionable copy", () => {
+    expect(presentAgentError({
+      code: "vault_failed",
+      message: "The selected vault file is no longer available.",
+    }, false)).toEqual({
+      heading: "Could not finish",
+      message: "The selected vault file is no longer available.",
     });
+  });
 
-    const started = applyManagedAgentEvent(
-      createInitialAgentConversation(),
-      envelope(1, { type: "run.started" }),
-    );
-    const completed = applyManagedAgentEvent(
-      started,
-      envelope(2, { type: "run.completed" }),
-    );
+  it("uses the same final copy filter for global banners and tool failures", () => {
+    expect(presentAgentErrorMessage(
+      "Agent connection closed: WebSocket closed with code 4001",
+      true,
+    )).toBe("Retry this message to continue.");
+    expect(presentAgentErrorMessage(
+      "Connection lost.",
+      true,
+    )).toBe("Retry this message to continue.");
+    expect(presentAgentErrorMessage(
+      "The cf_agent protocol frame was invalid.",
+      false,
+    )).toBe("SystemSculpt could not complete the response.");
+    expect(presentAgentErrorMessage(
+      "The selected vault file is no longer available.",
+      false,
+    )).toBe("The selected vault file is no longer available.");
+  });
 
-    expect(presentAgentConversation(completed, true)).toMatchObject({
-      phase: "completed",
+  it("projects no duplicate status part beside the single activity header", () => {
+    const visibleText = {
+      id: "text-1",
+      kind: "text" as const,
+      messageId: "assistant-1",
+      state: "streaming" as const,
+      markdown: "Working",
+      order: 0,
+    };
+    const presentation = presentAgentConversation({
+      runId: "run-1",
+      turnId: "user-1",
+      status: "running",
+      phase: "thinking",
+      statusLabel: "Starting",
+      messages: [{
+        id: "assistant-1",
+        role: "assistant",
+        partIds: ["text-1"],
+      }],
+      parts: [visibleText],
+    }, true);
+
+    expect(presentation.activityStatus).toBe("Thinking");
+    expect(presentation.visibleParts).toEqual([visibleText]);
+  });
+
+  it("lets terminal truth override a stale in-flight tool presenter", () => {
+    const staleSearch = {
+      id: "tool-1",
+      kind: "tool" as const,
+      messageId: "assistant-1",
+      callId: "call-1",
+      name: "web_search",
+      location: "server" as const,
+      input: { query: "latest" },
+      state: "running" as const,
+      order: 0,
+    };
+    const presentation = presentAgentConversation({
+      runId: "run-1",
+      turnId: "user-1",
+      status: "failed",
+      phase: "working",
+      statusLabel: "Reconnecting",
+      messages: [{
+        id: "assistant-1",
+        role: "assistant",
+        partIds: ["tool-1"],
+      }],
+      parts: [staleSearch],
+    }, true);
+
+    expect(presentation).toMatchObject({
+      phase: "failed",
       busy: false,
       composerRunning: false,
-      activityStatus: "Done",
+      activityStatus: "Failed",
     });
   });
 
-  it("lets reasoning, tools, and text replace generic status copy", () => {
-    let snapshot = createInitialAgentConversation();
-    snapshot = applyManagedAgentEvent(snapshot, envelope(1, { type: "run.started" }));
-    snapshot = applyManagedAgentEvent(snapshot, envelope(2, {
-      type: "run.status",
+  it("never turns a server-owned approval-shaped part into vault approval UX", () => {
+    const presentation = presentAgentConversation({
+      runId: "run-server-approval",
+      turnId: "user-server-approval",
+      status: "running",
       phase: "working",
-      label: "Continuing",
-    }));
-    snapshot = applyManagedAgentEvent(snapshot, envelope(3, {
-      type: "message.started",
-      messageId: "assistant-1",
-      role: "assistant",
-    }));
-    snapshot = applyManagedAgentEvent(snapshot, envelope(4, {
-      type: "text.delta",
-      messageId: "assistant-1",
-      partId: "text-1",
-      delta: "Answer",
-    }));
-
-    const presentation = presentAgentConversation(snapshot, true);
-    expect(presentation.phase).toBe("responding");
-    expect(presentation.visibleParts).toHaveLength(1);
-    expect(presentation.visibleParts[0]).toMatchObject({ kind: "text", markdown: "Answer" });
-  });
-
-  it("maps approval and settlement to distinct user-facing phases", () => {
-    let snapshot = createInitialAgentConversation();
-    snapshot = applyManagedAgentEvent(snapshot, envelope(1, { type: "run.started" }));
-    snapshot = applyManagedAgentEvent(snapshot, envelope(2, {
-      type: "message.started",
-      messageId: "assistant-1",
-      role: "assistant",
-    }));
-    snapshot = applyManagedAgentEvent(snapshot, envelope(3, {
-      type: "tool.input.started",
-      callId: "call-1",
-      partId: "tool-1",
-      messageId: "assistant-1",
-      name: "write",
-      location: "vault",
-    }));
-    snapshot = applyManagedAgentEvent(snapshot, envelope(4, {
-      type: "tool.requested",
-      call: {
-        callId: "call-1",
-        partId: "tool-1",
-        messageId: "assistant-1",
+      messages: [{
+        id: "assistant-server-approval",
+        role: "assistant",
+        partIds: ["tool-server-approval"],
+      }],
+      parts: [{
+        id: "tool-server-approval",
+        kind: "tool",
+        messageId: "assistant-server-approval",
+        callId: "call-server-approval",
         name: "write",
-        location: "vault",
-        input: { path: "Plan.md" },
-      },
-    }));
-    snapshot = applyManagedAgentEvent(snapshot, envelope(5, {
-      type: "approval.requested",
-      callId: "call-1",
-      approvalId: "approval-1",
-    }));
-    expect(presentAgentConversation(snapshot, true).phase).toBe("awaiting-approval");
-    expect(presentAgentConversation(snapshot, true).activityStatus).toBe("Needs approval");
+        location: "server",
+        input: {},
+        state: "approval-required",
+        approvalId: "approval-server",
+        order: 0,
+      }],
+    }, true);
 
-    let textSnapshot = createInitialAgentConversation();
-    textSnapshot = applyManagedAgentEvent(textSnapshot, envelope(1, { type: "run.started" }));
-    textSnapshot = applyManagedAgentEvent(textSnapshot, envelope(2, {
-      type: "run.status",
-      phase: "settling",
-      label: "Finishing",
-    }));
-    expect(presentAgentConversation(textSnapshot, true).phase).toBe("settling");
-    expect(presentAgentConversation(textSnapshot, true).activityStatus).toBe("Finishing");
-  });
-
-  it("keeps a stopped marker after partial output when the run is cancelled", () => {
-    let snapshot = createInitialAgentConversation();
-    snapshot = applyManagedAgentEvent(snapshot, envelope(1, { type: "run.started" }));
-    snapshot = applyManagedAgentEvent(snapshot, envelope(2, {
-      type: "message.started",
-      messageId: "assistant-1",
-      role: "assistant",
-    }));
-    snapshot = applyManagedAgentEvent(snapshot, envelope(3, {
-      type: "text.delta",
-      messageId: "assistant-1",
-      partId: "text-1",
-      delta: "Partial answer",
-    }));
-    snapshot = applyManagedAgentEvent(snapshot, envelope(4, { type: "run.cancelled" }));
-
-    const presentation = presentAgentConversation(snapshot, true);
-    expect(presentation.phase).toBe("cancelled");
-    expect(presentation.busy).toBe(false);
-    expect(presentation.visibleParts.map((part) => part.kind)).toEqual(["text", "status"]);
-    expect(presentation.visibleParts.at(-1)).toMatchObject({ kind: "status", label: "Stopped" });
+    expect(presentation).toMatchObject({
+      phase: "acting",
+      busy: true,
+      activityStatus: "Thinking",
+    });
   });
 });

@@ -7,7 +7,6 @@ import {
   hasChatIdentityMetadata,
 } from "../ChatFrontmatterIdentity";
 import { ChatMessage, MessagePart } from "../../../../types";
-import { projectManagedMessages } from "../../../../services/chat/AcceptedChatRequestSnapshot";
 import { parseYaml } from "obsidian";
 
 // Mock obsidian's parseYaml
@@ -347,27 +346,20 @@ describe("ChatMarkdownSerializer", () => {
         .toBeNull();
     });
 
-    it("strictly restores a managed session binding from frontmatter", () => {
-      const managedSession = {
-        id: "mchat_0123456789abcdef0123456789abcdef",
-        revision: 4,
-        boundChatId: "chat-session",
-        checkpointMessageId: "assistant-4",
-        toolsetFingerprint: "2:741638a5:5967d5",
-        budget: { messageCount: 4, imageCount: 0, attachmentBytes: 0, storedJsonBytes: 512 },
-      };
+    it("strictly restores a server conversation routing pointer from frontmatter", () => {
+      const agentConversationId = "conversation_0123456789abcdef0123456789abcdef";
       const content = createMarkdown({
         id: "chat-session",
         title: "Session",
         created: "2026-07-13T00:00:00Z",
         lastModified: "2026-07-13T00:01:00Z",
-        managedSession,
+        agentConversationId,
       }, "");
 
-      expect(ChatMarkdownSerializer.parseMarkdown(content)?.metadata.managedSession)
-        .toEqual(managedSession);
-      const malformed = content.replace("assistant-4", "");
-      expect(ChatMarkdownSerializer.parseMarkdown(malformed)?.metadata.managedSession)
+      expect(ChatMarkdownSerializer.parseMarkdown(content)?.metadata.agentConversationId)
+        .toEqual(agentConversationId);
+      const malformed = content.replace(agentConversationId, "conversation-invalid");
+      expect(ChatMarkdownSerializer.parseMarkdown(malformed)?.metadata.agentConversationId)
         .toBeUndefined();
     });
 
@@ -1079,12 +1071,11 @@ id: legacy-web-search
 ${ChatMarkdownSerializer.serializeMessages(savedMessages)}`;
 
       const reloaded = ChatMarkdownSerializer.parseMarkdown(markdown);
-      const wire = projectManagedMessages(reloaded?.messages ?? []);
 
       expect(reloaded?.messages[1].tool_calls?.[0]).not.toHaveProperty("executedOn");
-      expect(wire.map((message) => message.role)).toEqual(["user", "assistant", "user"]);
-      expect(JSON.stringify(wire)).not.toContain("call-web-legacy");
-      expect(wire[1]).not.toHaveProperty("tool_calls");
+      expect(reloaded?.messages.map((message) => message.role))
+        .toEqual(["user", "assistant", "user"]);
+      expect(reloaded?.messages[1].content).toBe("Search-backed answer");
     });
 
     it("reloads the oldest flat web search shape without dereferencing a missing request", () => {
@@ -1122,14 +1113,10 @@ id: flat-web-search
 ${ChatMarkdownSerializer.serializeMessages(savedMessages)}`;
 
       const reloaded = ChatMarkdownSerializer.parseMarkdown(markdown);
-      const wire = projectManagedMessages(reloaded?.messages ?? []);
 
-      expect(wire.map((message) => message.role)).toEqual(["user", "assistant", "user"]);
-      expect(JSON.stringify(wire)).not.toContain("flat-web");
-      expect(wire[1]).toEqual({
-        role: "assistant",
-        content: "Legacy search answer",
-      });
+      expect(reloaded?.messages.map((message) => message.role))
+        .toEqual(["user", "assistant", "user"]);
+      expect(reloaded?.messages[1].content).toBe("Legacy search answer");
     });
   });
 });

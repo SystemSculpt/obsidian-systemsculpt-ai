@@ -165,7 +165,6 @@ describe("ManagedTranscriptionAdapter", () => {
         jobs,
         recovery,
         createOperationId: () => "listener-cleanup-op",
-        maxPolls: 2,
       });
       const controller = new AbortController();
       const add = jest.spyOn(controller.signal, "addEventListener");
@@ -851,31 +850,38 @@ describe("ManagedTranscriptionAdapter", () => {
     await expect(recovery.read("transcription", "transcription-op-1")).resolves.toMatchObject({ phase: "processing", jobId });
   });
 
-  it("preserves acknowledged processing when the polling limit expires", async () => {
-    const { admission, jobs, recovery } = harness([
-      { job: { id: jobId, status: "processing" }, transcript: null, progress: 0.5 },
-    ]);
+  it("does not stop acknowledged processing at the historical 900-poll boundary", async () => {
+    const statuses = Array.from({ length: 900 }, () => ({
+      job: { id: jobId, status: "processing" },
+      transcript: null,
+      progress: 0.5,
+    }));
+    statuses.push({
+      job: { id: jobId, status: "succeeded" },
+      transcript: "long-running transcript",
+      progress: 1,
+    });
+    const { admission, jobs, recovery } = harness(statuses);
     const adapter = new ManagedTranscriptionAdapter({
       admission,
       jobs,
       recovery,
-      createOperationId: () => "poll-timeout-op",
+      createOperationId: () => "long-running-op",
       wait: async () => undefined,
-      maxPolls: 1,
     });
 
-    const failure = await adapter.transcribe({
+    const result = await adapter.transcribe({
       identity: opaqueIdentity("7"),
       fingerprint: () => `sha256:${"7".repeat(64)}`,
-      load: async () => ({ filename: "timeout.webm", contentType: "audio/webm", bytes: audioBytes() }),
-    }).catch((error: unknown) => error);
-
-    expect(failure).toBeInstanceOf(ManagedTranscriptionRetryError);
-    expect(failure).toMatchObject({
-      operationId: "poll-timeout-op",
-      retryDisposition: "resume",
-      recoveryPhase: "processing",
+      load: async () => ({ filename: "long.webm", contentType: "audio/webm", bytes: audioBytes() }),
     });
+
+    expect(result).toMatchObject({
+      kind: "transcript",
+      operationId: "long-running-op",
+      text: "long-running transcript",
+    });
+    expect(jobs.status).toHaveBeenCalledTimes(901);
   });
 
   it("replays a preserved start dispatch idempotently instead of guessing from queued status", async () => {

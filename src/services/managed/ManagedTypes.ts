@@ -1,6 +1,3 @@
-import type { ChatMessage } from "../../types";
-import type { AgentTranscriptSnapshot as ChatTranscriptSnapshot } from "../../views/chatview/AgentTranscriptRepository";
-
 export const MANAGED_CAPABILITY_CONTRACT = "managed-capabilities-v2" as const;
 export const MANAGED_IMAGE_OUTPUT_MAX_BYTES = 30 * 1024 * 1024;
 export const MANAGED_ADMISSION_CONTRACT = "admission-v1" as const;
@@ -66,12 +63,6 @@ export interface ManagedCapabilityCatalogContract {
   cache_ttl_seconds: number;
   capabilities: ManagedCapabilityDescriptor[];
 }
-export type ManagedChatSessionBudgetState = Readonly<{
-  messageCount: number;
-  imageCount: number;
-  attachmentBytes: number;
-  storedJsonBytes: number;
-}>;
 export interface ManagedAdmissionContractResponse {
   status: number; code: ManagedServerOutcome; message: string;
   reasons?: string[]; retryable?: boolean; grace_eligible?: boolean;
@@ -87,22 +78,6 @@ export interface ManagedAdmissionContract {
 }
 export interface ManagedOperation { alias: ManagedCapabilityAlias; requestContract?: ManagedRequestContractId; }
 export interface ManagedLease { outcome: ManagedAdmissionOutcome; descriptor?: ManagedCapabilityDescriptor; requestContract?: ManagedNestedRequestContract; diagnostics?: ManagedResponseDiagnostics; }
-export interface ManagedAllowedLease extends ManagedLease { readonly outcome: "allowed"; readonly descriptor: ManagedCapabilityDescriptor; readonly requestContract: ManagedNestedRequestContract; }
-export type ManagedChatLeaseResult =
-  | Readonly<{ outcome: "allowed"; lease: ManagedAllowedLease }>
-  | Readonly<{ outcome: Exclude<ManagedAdmissionOutcome, "allowed">; lease: ManagedLease }>;
-export interface ManagedChatAdmissionPort { acquireChatTurnLease(): Promise<ManagedChatLeaseResult>; }
-export type AcceptedChatOperationBase = Readonly<{
-  durableTurnId: string;
-  acceptedUserMessage: Readonly<ChatMessage>;
-  initialDurableSnapshot: ChatTranscriptSnapshot;
-  turnBoundaryId: string;
-}>;
-export type AcceptedManagedChatOperation = AcceptedChatOperationBase & Readonly<{
-  runtime: "managed";
-  lease: ManagedAllowedLease;
-}>;
-export type AcceptedChatOperation = AcceptedManagedChatOperation;
 export interface ManagedResponseDiagnostics {
   status: number; requestId: string | null; contentType: string | null;
   rateLimitLimit: string | null; rateLimitRemaining: string | null; rateLimitReset: string | null;

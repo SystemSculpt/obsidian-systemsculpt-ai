@@ -35,10 +35,9 @@ function harness() {
   manager.gateway = {
     activeGeneration: {
       id: "semantic-v1",
-      indexSchemaVersion: 2,
+      indexSchemaVersion: 3,
       indexNamespace: namespace,
       dimensions: 2,
-      limits: { maxTexts: 128, maxCharsPerText: 8000, maxTotalChars: 200000 },
     },
   };
   manager.workQueue = {
@@ -73,15 +72,16 @@ describe("EmbeddingsManager file freshness", () => {
     expect(manager.storage.getVectorsByPath).not.toHaveBeenCalled();
   });
 
-  it("keeps search on the committed namespace while a replacement is incomplete", async () => {
+  it("keeps search on the committed namespace while a replacement schema is incomplete", async () => {
     const { file, manager } = harness();
-    const committedNamespace = buildManagedNamespace(2);
-    const replacementNamespace = buildManagedNamespace(3);
+    const committedNamespace = buildManagedNamespace(2, "semantic-v1", 3);
+    const replacementNamespace = buildManagedNamespace(2, "semantic-v1", 4);
     manager.searchNamespace = committedNamespace;
     manager.gateway.activeGeneration = {
       ...manager.gateway.activeGeneration,
+      indexSchemaVersion: 4,
       indexNamespace: replacementNamespace,
-      dimensions: 3,
+      dimensions: 2,
     };
     manager.searchIndexedNamespace = jest.fn(async () => [[]]);
 

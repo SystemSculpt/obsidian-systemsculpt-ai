@@ -5,7 +5,11 @@ import path from "node:path";
 import process from "node:process";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { inspectPluginArtifacts, REQUIRED_PLUGIN_ARTIFACTS } from "./plugin-artifacts.mjs";
+import {
+  formatArtifactProblems,
+  inspectPluginArtifacts,
+  REQUIRED_PLUGIN_ARTIFACTS,
+} from "./plugin-artifacts.mjs";
 import { replaceFileAtomically } from "./platform-portability.mjs";
 
 export { replaceFileAtomically } from "./platform-portability.mjs";
@@ -80,7 +84,7 @@ export function createDevelopmentBuildIdentity(options = {}) {
   const branch = options.branch
     || gitValue(root, ["branch", "--show-current"], "detached");
   const dirty = options.dirty ?? Boolean(
-    gitValue(root, ["status", "--porcelain", "--untracked-files=no"], ""),
+    gitValue(root, ["status", "--porcelain", "--untracked-files=normal"], ""),
   );
   const compactTime = syncedAt.replace(/[-:.]/g, "");
   const artifacts = Object.fromEntries(
@@ -101,8 +105,28 @@ export function createDevelopmentBuildIdentity(options = {}) {
   });
 }
 
-function developmentManifest(root, buildIdentity) {
-  const source = JSON.parse(fs.readFileSync(path.join(root, "manifest.json"), "utf8"));
+function readSourceArtifactBytes(root) {
+  return new Map(
+    REQUIRED_PLUGIN_ARTIFACTS.map((fileName) => [
+      fileName,
+      fs.readFileSync(path.join(root, fileName)),
+    ]),
+  );
+}
+
+function assertBuildIdentityMatchesSource(buildIdentity, sourceArtifactBytes) {
+  for (const fileName of REQUIRED_PLUGIN_ARTIFACTS) {
+    const expected = sha256(sourceArtifactBytes.get(fileName));
+    if (buildIdentity?.artifacts?.[fileName] !== expected) {
+      throw new Error(
+        `[sync] Development build identity does not match source ${fileName}.`,
+      );
+    }
+  }
+}
+
+function developmentManifest(sourceBytes, buildIdentity) {
+  const source = JSON.parse(sourceBytes.toString("utf8"));
   if (!source || typeof source !== "object" || Array.isArray(source)) {
     throw new Error("manifest.json must contain an object");
   }
@@ -112,21 +136,36 @@ function developmentManifest(root, buildIdentity) {
   }, null, 2)}\n`);
 }
 
-function copyPluginArtifacts(root, target, buildIdentity, replaceFile) {
-  fs.mkdirSync(target.path, { recursive: true });
-  const artifactBytes = new Map(
+function createTargetArtifactBytes(sourceArtifactBytes, buildIdentity) {
+  return new Map(
     REQUIRED_PLUGIN_ARTIFACTS.map((fileName) => [
       fileName,
       fileName === "manifest.json"
-        ? developmentManifest(root, buildIdentity)
-        : fs.readFileSync(path.join(root, fileName)),
+        ? developmentManifest(sourceArtifactBytes.get(fileName), buildIdentity)
+        : sourceArtifactBytes.get(fileName),
     ]),
   );
+}
+
+function assertTargetArtifactBytes(target, expectedArtifactBytes) {
+  for (const fileName of REQUIRED_PLUGIN_ARTIFACTS) {
+    const targetPath = path.join(target.path, fileName);
+    const stats = fs.lstatSync(targetPath);
+    if (!stats.isFile() || stats.isSymbolicLink()) {
+      throw new Error(`[sync] Target ${fileName} is not a regular file: ${targetPath}`);
+    }
+    const actual = fs.readFileSync(targetPath);
+    if (!actual.equals(expectedArtifactBytes.get(fileName))) {
+      throw new Error(`[sync] Target ${fileName} failed byte-for-byte read-back: ${targetPath}`);
+    }
+  }
+}
+
+function copyPluginArtifacts(target, artifactBytes, replaceFile) {
+  fs.mkdirSync(target.path, { recursive: true });
   // Replace executable and style bytes first. The manifest is the final
   // transaction marker and identifies the exact source artifact hashes.
   for (const fileName of ["main.js", "styles.css", "manifest.json"]) {
-    const sourcePath = path.join(root, fileName);
-    if (!fs.existsSync(sourcePath)) throw new Error(`Required file missing: ${sourcePath}`);
     replaceFile(path.join(target.path, fileName), artifactBytes.get(fileName));
   }
   for (const relativePath of OBSOLETE_PLUGIN_FILES) {
@@ -137,6 +176,7 @@ function copyPluginArtifacts(root, target, buildIdentity, replaceFile) {
       retryDelay: 150,
     });
   }
+  assertTargetArtifactBytes(target, artifactBytes);
 }
 
 export function syncConfiguredTargets(options = {}) {
@@ -144,18 +184,24 @@ export function syncConfiguredTargets(options = {}) {
   const logger = options.logger || console;
   const loaded = loadConfiguredTargets({ root, configPath: options.configPath });
   const inspection = inspectPluginArtifacts({ root });
-  if (inspection.missingFiles.length > 0) {
-    throw new Error(`Missing plugin artifacts: ${inspection.missingFiles.join(", ")}`);
+  if (!inspection.ok) {
+    throw new Error(`[sync] ${formatArtifactProblems(inspection)}`);
   }
   if (!loaded.configExists && options.failWhenNoTargets !== false) {
     throw new Error(`[sync] Config file not found at ${loaded.configPath}.`);
   }
 
+  const sourceArtifactBytes = readSourceArtifactBytes(root);
   const buildIdentity = options.buildIdentity
     || createDevelopmentBuildIdentity({ root });
+  assertBuildIdentityMatchesSource(buildIdentity, sourceArtifactBytes);
+  const targetArtifactBytes = createTargetArtifactBytes(
+    sourceArtifactBytes,
+    buildIdentity,
+  );
   const replaceFile = options.replaceFile || replaceFileAtomically;
   for (const target of loaded.targets) {
-    copyPluginArtifacts(root, target, buildIdentity, replaceFile);
+    copyPluginArtifacts(target, targetArtifactBytes, replaceFile);
     logger.info?.(`[sync] Updated ${formatSyncTarget(target)} (${buildIdentity.id})`);
   }
   return { ...loaded, succeeded: loaded.targets, buildIdentity };
@@ -183,6 +229,7 @@ export function reloadConfiguredTargets(options = {}) {
   if (!pluginId) throw new Error("manifest.json is missing the plugin id");
 
   const reloaded = [];
+  const failures = [];
   for (const target of options.targets || []) {
     const vault = target.vault || inferVaultName(target.path);
     const result = runCommand(
@@ -193,10 +240,16 @@ export function reloadConfiguredTargets(options = {}) {
     if (result?.error || result?.status !== 0) {
       const reason = result?.error?.message || result?.stderr || `exit ${result?.status}`;
       logger.warn?.(`[sync] Obsidian reload skipped for ${vault}: ${String(reason).trim()}`);
+      failures.push({ vault, reason: String(reason).trim() });
       continue;
     }
     reloaded.push({ target, vault });
     logger.info?.(`[sync] Reloaded ${pluginId} in ${vault}`);
+  }
+  if (failures.length > 0) {
+    throw new Error(
+      `[sync] Failed to reload ${failures.map(({ vault }) => vault).join(", ")}.`,
+    );
   }
   return { reloaded };
 }

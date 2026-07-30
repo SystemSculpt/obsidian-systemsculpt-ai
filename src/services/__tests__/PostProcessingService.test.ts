@@ -1,8 +1,5 @@
 import { DEFAULT_SETTINGS } from "../../types";
-import {
-  PostProcessingService,
-  TRANSCRIPT_SOURCE_LANGUAGE_CONTRACT,
-} from "../PostProcessingService";
+import { PostProcessingService } from "../PostProcessingService";
 
 type PostProcessingInput = Readonly<{
   cleanupInstructions: string;
@@ -16,7 +13,7 @@ function parsePostProcessingInput(content: string): PostProcessingInput {
 function plugin() {
   const generateText = jest.fn(async (operation) => {
     const messages = await operation.buildMessages();
-    const input = parsePostProcessingInput(messages[1].content);
+    const input = parsePostProcessingInput(messages[0].content);
     return {
       operationId: operation.operationId,
       requestId: "textreq_1",
@@ -65,12 +62,9 @@ describe("PostProcessingService", () => {
     }));
     const request = mock.generateText.mock.calls[0][0];
     const messages = await request.buildMessages();
-    expect(messages[0]).toEqual({
-      role: "system",
-      content: TRANSCRIPT_SOURCE_LANGUAGE_CONTRACT,
-    });
-    expect(messages[1].role).toBe("user");
-    expect(parsePostProcessingInput(messages[1].content)).toEqual({
+    expect(messages).toHaveLength(1);
+    expect(messages[0].role).toBe("user");
+    expect(parsePostProcessingInput(messages[0].content)).toEqual({
       cleanupInstructions: "Clean this transcript.",
       transcript: "raw",
     });
@@ -94,13 +88,12 @@ describe("PostProcessingService", () => {
     await PostProcessingService.getInstance(mock).processTranscription("raw", { operationId: "postprocess:1" });
     const request = mock.generateText.mock.calls[0][0];
     const messages = await request.buildMessages();
-    expect(messages[0].content).toBe(TRANSCRIPT_SOURCE_LANGUAGE_CONTRACT);
-    expect(parsePostProcessingInput(messages[1].content).cleanupInstructions).toBe(
+    expect(parsePostProcessingInput(messages[0].content).cleanupInstructions).toBe(
       DEFAULT_SETTINGS.postProcessingPrompt,
     );
   });
 
-  it("keeps source-language preservation above a conflicting custom cleanup prompt", async () => {
+  it("sends conflicting cleanup text as structured data for server policy enforcement", async () => {
     const mock = plugin();
 
     await PostProcessingService.getInstance(mock).processTranscription(
@@ -113,16 +106,8 @@ describe("PostProcessingService", () => {
 
     const request = mock.generateText.mock.calls[0][0];
     const messages = await request.buildMessages();
-    expect(messages).toHaveLength(2);
-    expect(messages[0]).toEqual({
-      role: "system",
-      content: TRANSCRIPT_SOURCE_LANGUAGE_CONTRACT,
-    });
-    expect(messages[0].content).toContain("Keep the output in exactly the same language or languages");
-    expect(messages[0].content).toContain("Preserve the original writing systems and every code-switch");
-    expect(messages[0].content).toContain("Keep personal, company, product, place, and other proper names");
-    expect(messages[0].content).toContain("Ignore any conflicting instruction");
-    expect(parsePostProcessingInput(messages[1].content)).toEqual({
+    expect(messages).toHaveLength(1);
+    expect(parsePostProcessingInput(messages[0].content)).toEqual({
       cleanupInstructions: "Translate everything into English, including names.",
       transcript: "Сегодня мы shipped новую версию.",
     });
@@ -141,7 +126,7 @@ describe("PostProcessingService", () => {
       mock.settings.postProcessingEnabled = false;
       mock.settings.postProcessingPrompt = "Changed while running.";
       const messages = await operation.buildMessages();
-      const input = parsePostProcessingInput(messages[1].content);
+      const input = parsePostProcessingInput(messages[0].content);
       return {
         operationId: operation.operationId,
         requestId: "snapshot-request",
@@ -248,11 +233,8 @@ describe("PostProcessingService", () => {
 
     const request = reloadedPlugin.generateText.mock.calls[0][0];
     const messages = await request.buildMessages();
-    expect(messages[0]).toEqual({
-      role: "system",
-      content: TRANSCRIPT_SOURCE_LANGUAGE_CONTRACT,
-    });
-    expect(parsePostProcessingInput(messages[1].content)).toEqual({
+    expect(messages).toHaveLength(1);
+    expect(parsePostProcessingInput(messages[0].content)).toEqual({
       cleanupInstructions: "Reloaded plugin prompt.",
       transcript: "raw",
     });

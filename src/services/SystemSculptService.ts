@@ -12,10 +12,6 @@ import { SYSTEMSCULPT_WEBSITE } from "../constants/externalServices";
 
 import { StreamingErrorHandler } from "./StreamingErrorHandler";
 import { LicenseService, type LicenseValidationResult } from "./LicenseService";
-import { ContextFileService } from "./ContextFileService";
-import { ChatRequestPreparationService, type ManagedChatPreparationInput } from "./chat/ChatRequestPreparationService";
-import type { AcceptedChatRequestSnapshot } from "./chat/AcceptedChatRequestSnapshot";
-import type { AcceptedChatOperation } from "./managed/ManagedTypes";
 import { FirstPartyToolService } from "../tools/FirstPartyToolService";
 import type { ToolCall, ToolCallRequest, ToolCallResult } from "../types/toolCalls";
 import type { FirstPartyToolChatTarget } from "../tools/types";
@@ -298,33 +294,8 @@ export class SystemSculptService {
   public baseUrl: string;
   private plugin: SystemSculptPlugin;
   private licenseService: LicenseService;
-  private contextFileService: ContextFileService;
   private toolService: FirstPartyToolService;
-  private acceptedChatPreparation = new ChatRequestPreparationService();
   private readonly requestClient = new PlatformRequestClient();
-
-  private managedPreparationDependencies() {
-    return {
-      contextFileService: this.contextFileService,
-      getAvailableTools: () => this.toolService.getAvailableTools(),
-    };
-  }
-
-  public prepareAcceptedChatRequest(
-    operation: AcceptedChatOperation,
-    options: ManagedChatPreparationInput,
-  ): Promise<AcceptedChatRequestSnapshot> {
-    this.refreshSettings();
-    return this.acceptedChatPreparation.prepare(
-      operation,
-      options,
-      this.managedPreparationDependencies(),
-    );
-  }
-
-  public releaseAcceptedChatRequest(operation: AcceptedChatOperation): void {
-    this.acceptedChatPreparation.release(operation);
-  }
 
   private constructor(plugin: SystemSculptPlugin) {
     this.plugin = plugin;
@@ -334,7 +305,6 @@ export class SystemSculptService {
     this.baseUrl = this.getValidServerUrl();
 
     this.licenseService = new LicenseService(plugin);
-    this.contextFileService = new ContextFileService(plugin.app);
     this.toolService = new FirstPartyToolService(plugin, plugin.app);
   }
 
@@ -555,7 +525,7 @@ export class SystemSculptService {
       nextBefore: asNullableString(payload?.next_before),
     };
   }
-  public async executeHostedToolCall(options: {
+  public async executeLocalVaultToolCall(options: {
     toolCall: ToolCall | ToolCallRequest;
     chatView?: FirstPartyToolChatTarget;
     timeoutMs?: number;

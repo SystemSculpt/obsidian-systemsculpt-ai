@@ -124,6 +124,8 @@ export interface AudioProcessorJob {
   quotedCredits: number | null;
   chargedCredits: number;
   resumeRequired: boolean;
+  /** Server-authored cadence for the next read-only status observation. */
+  pollAfterMs?: number;
   result: AudioProcessorResult | null;
   transcriptArtifact: AudioProcessorTranscriptArtifact | null;
 }

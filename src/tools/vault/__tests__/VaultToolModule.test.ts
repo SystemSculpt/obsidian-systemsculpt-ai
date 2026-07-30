@@ -13,24 +13,6 @@ jest.mock("obsidian", () => ({
 // Mock the plugin
 jest.mock("../../../main", () => ({}));
 
-// Mock toolDefinitions
-jest.mock("../toolDefinitions", () => ({
-  toolDefinitions: [
-    { name: "read", description: "Read files" },
-    { name: "write", description: "Write file" },
-    { name: "edit", description: "Edit file" },
-    { name: "multi_edit", description: "Edit multiple files" },
-    { name: "create_folders", description: "Create folders" },
-    { name: "list_items", description: "List items" },
-    { name: "move", description: "Move items" },
-    { name: "trash", description: "Trash files" },
-    { name: "find", description: "Find files" },
-    { name: "search", description: "Search files" },
-    { name: "open", description: "Open files" },
-    { name: "context", description: "Manage context" },
-  ],
-}));
-
 // Mock operation classes
 const mockReadFiles = jest.fn();
 const mockWriteFile = jest.fn();
@@ -119,28 +101,6 @@ describe("VaultToolModule", () => {
     it("sets default allowed paths to root", () => {
       // Verify by checking the constructor calls
       expect(FileOperations).toHaveBeenCalledWith(mockApp, ["/"]);
-    });
-  });
-
-  describe("getTools", () => {
-    it("returns all tool definitions", async () => {
-      const tools = await server.getTools();
-
-      expect(tools).toHaveLength(12);
-      expect(tools.map((t) => t.name)).toEqual([
-        "read",
-        "write",
-        "edit",
-        "multi_edit",
-        "create_folders",
-        "list_items",
-        "move",
-        "trash",
-        "find",
-        "search",
-        "open",
-        "context",
-      ]);
     });
   });
 

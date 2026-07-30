@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import process from "node:process";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   countConfiguredTargets,
   formatSyncTarget,
@@ -9,8 +11,13 @@ import {
   syncConfiguredTargets,
 } from "./plugin-sync.mjs";
 
-function parseArgs(argv) {
-  const options = { configPath: null, countTargets: false, listTargets: false, help: false };
+export function parseArgs(argv) {
+  const options = {
+    configPath: undefined,
+    countTargets: false,
+    listTargets: false,
+    help: false,
+  };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if ((arg === "--config" || arg === "-c") && argv[index + 1]) {
@@ -42,8 +49,8 @@ Options:
   --help, -h           Show this help.`);
 }
 
-async function main() {
-  const options = parseArgs(process.argv.slice(2));
+export async function main(argv = process.argv.slice(2)) {
+  const options = parseArgs(argv);
   if (options.help) return printHelp();
   const configPath = resolveSyncConfigPath(options.configPath);
   if (options.countTargets) {
@@ -61,7 +68,13 @@ async function main() {
   console.log("[sync] Completed successfully.");
 }
 
-main().catch((error) => {
-  console.error(error instanceof Error ? error.message : String(error));
-  process.exit(1);
-});
+const direct = process.argv[1]
+  ? path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))
+  : false;
+
+if (direct) {
+  main().catch((error) => {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  });
+}

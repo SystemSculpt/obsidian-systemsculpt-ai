@@ -55,6 +55,90 @@ describe("presentAgentTool", () => {
       .toMatchObject({ canonicalName: "write", label: "Write file", summary: "Note.md" });
   });
 
+  it("uses a fixed product label for visible web search activity", () => {
+    expect(presentAgentTool(part({
+      name: "web_search",
+      location: "server",
+      input: { query: "Obsidian agent plugins" },
+      output: {
+        title: "Cloudflare search",
+        summary: "OpenRouter web search completed",
+      },
+    }))).toMatchObject({
+      canonicalName: "web_search",
+      label: "Search web",
+      summary: null,
+      itemCount: null,
+    });
+  });
+
+  it("never derives visible copy from an additive server tool name or payload", () => {
+    const presentation = presentAgentTool(part({
+      name: "cf_agent_provider_retry",
+      location: "server",
+      input: { patterns: ["provider-internal"] },
+      output: {
+        title: "Cloudflare provider action",
+        summary: "cf_agent_provider_retry completed",
+      },
+    }));
+
+    expect(presentation).toMatchObject({
+      canonicalName: "server_action",
+      label: "SystemSculpt action",
+      summary: null,
+      itemCount: null,
+    });
+    expect(JSON.stringify(presentation)).not.toMatch(
+      /cf_agent|provider|cloudflare|retry/i,
+    );
+    expect(presentAgentTool(part({
+      name: "read",
+      location: "server",
+      input: { paths: ["Private provider path"] },
+    }))).toMatchObject({
+      label: "SystemSculpt action",
+      summary: null,
+      itemCount: null,
+    });
+    expect(presentAgentToolGroup([
+      part({
+        id: "server-read-1",
+        callId: "server-read-1",
+        name: "read",
+        location: "server",
+        input: { paths: ["Private provider path 1"] },
+        state: "succeeded",
+      }),
+      part({
+        id: "server-read-2",
+        callId: "server-read-2",
+        name: "read",
+        location: "server",
+        input: { paths: ["Private provider path 2"] },
+        state: "succeeded",
+      }),
+    ])).toMatchObject({
+      label: "SystemSculpt action",
+      summary: null,
+      itemCount: null,
+    });
+  });
+
+  it("never presents a server-owned tool as requiring vault approval", () => {
+    expect(presentAgentTool(part({
+      name: "write",
+      location: "server",
+      state: "approval-required",
+      approvalId: "server-approval",
+    }))).toMatchObject({
+      canonicalName: "server_action",
+      label: "SystemSculpt action",
+      stateLabel: "Working",
+      animated: true,
+    });
+  });
+
   it("summarizes canonical find, search, and open inputs", () => {
     expect(presentAgentTool(part({ name: "find", input: { patterns: ["meeting", "notes"] } })).summary)
       .toBe("meeting");

@@ -7,12 +7,14 @@ import type {
   ProcessingProgress,
   SearchResult,
 } from "./types";
-import { ManagedEmbeddingsAdapter, ManagedEmbeddingsError } from "./gateway/ManagedEmbeddingsAdapter";
+import {
+  ManagedEmbeddingsError,
+  type ManagedEmbeddingsIndexAdapter,
+} from "./gateway/ManagedEmbeddingsIndexAdapter";
 import {
   EmbeddingsProcessor,
   type EmbeddingSourceRevision,
 } from "./processing/EmbeddingsProcessor";
-import { ContentPreprocessor } from "./processing/ContentPreprocessor";
 import { VectorSearch } from "./search/VectorSearch";
 import { EmbeddingsStorage } from "./storage/EmbeddingsStorage";
 import { EmbeddingsIndexFile } from "./storage/EmbeddingsIndexFile";
@@ -21,14 +23,12 @@ import {
   PortableCheckpointCoordinator,
 } from "./storage/EmbeddingsPortableIndex";
 import {
-  buildManagedNamespace,
   isManagedNamespace,
+  parseManagedNamespace,
   parseNamespaceDimension,
-  MANAGED_EMBEDDING_GENERATION,
   MANAGED_EMBEDDING_FAMILY_PREFIX,
 } from "./utils/namespace";
 import { buildVectorId } from "./utils/vectorId";
-import { normalizeInPlace, toFloat32Array } from "./utils/vector";
 import {
   isCurrentLocalEmptyEmbeddingMarker,
   isLocalEmptyEmbeddingMarker,
@@ -44,10 +44,6 @@ import {
   type SemanticWorkItem,
   type SemanticWorkReason,
 } from "./SemanticWorkQueue";
-import {
-  MANAGED_EMBEDDING_INDEX_SCHEMA_VERSION,
-  MANAGED_EMBEDDING_LIMITS,
-} from "./ManagedEmbeddingsContract";
 
 export type EmbeddingsRunStatus = "complete" | "aborted";
 
@@ -112,9 +108,8 @@ type FileState = {
  */
 export class EmbeddingsManager {
   private readonly storage: EmbeddingsStorage;
-  private readonly gateway: ManagedEmbeddingsAdapter;
+  private readonly gateway: ManagedEmbeddingsIndexAdapter;
   private readonly processor: EmbeddingsProcessor;
-  private readonly preprocessor = new ContentPreprocessor();
   private readonly search = new VectorSearch();
   private readonly processingMutex = new Mutex();
   private readonly failedFiles = new Map<string, FailedEmbeddingFile>();
@@ -126,7 +121,6 @@ export class EmbeddingsManager {
   private initialized = false;
   private processingSuspended = false;
   private automaticRunQueued = false;
-  private operationSequence = 0;
   /** Namespace that is complete enough to query while another is written. */
   private searchNamespace: string | null = null;
   private fileWatchers: EventRef[] = [];
@@ -144,7 +138,7 @@ export class EmbeddingsManager {
     this.storage = new EmbeddingsStorage(
       EmbeddingsStorage.buildDbName(this.plugin.settings.vaultInstanceId || ""),
     );
-    this.gateway = new ManagedEmbeddingsAdapter(this.plugin.getManagedCapabilityClient());
+    this.gateway = this.plugin.getManagedCapabilityClient().getEmbeddingsIndex();
     const stateStorage = this.storage as EmbeddingsStorage & Partial<Pick<
       EmbeddingsStorage,
       "readState" | "writeState" | "deleteState"
@@ -163,7 +157,6 @@ export class EmbeddingsManager {
     this.processor = new EmbeddingsProcessor(
       this.gateway,
       this.storage,
-      this.preprocessor,
     );
   }
 
@@ -212,7 +205,7 @@ export class EmbeddingsManager {
       return { status: "aborted", processed: 0, message: "Embeddings processing is paused." };
     }
     try {
-      await this.gateway.initializeContract();
+      await this.gateway.getMetadata();
     } catch (error) {
       this.reportLifecycleFailure(error);
       throw error;
@@ -357,7 +350,6 @@ export class EmbeddingsManager {
 
   async searchSimilar(query: string, limit = 20, signal?: AbortSignal): Promise<SearchResult[]> {
     await this.awaitReady();
-    await this.gateway.initializeContract();
     const prepared = String(query || "").trim();
     if (!prepared || signal?.aborted) return [];
 
@@ -365,33 +357,29 @@ export class EmbeddingsManager {
     let cacheKey = `${namespace ?? "unnegotiated"}:${this.hashQuery(prepared)}`;
     const cached = this.queryCache.get(cacheKey);
     let queryVector: Float32Array;
-    if (cached && namespace && cached.namespace === namespace && cached.expiresAt > Date.now()) {
+    if (
+      cached
+      && namespace
+      && cached.namespace === namespace
+      && cached.expiresAt > Date.now()
+      && this.cachedQueryCompatibleWithNamespace(cached.vector, namespace)
+    ) {
       queryVector = cached.vector;
     } else {
-      const vectors = await this.gateway.generateEmbeddings([prepared], {
-        idempotencyKey: this.nextIdempotencyKey("query"),
-        signal,
-      });
+      if (cached) this.queryCache.delete(cacheKey);
+      const indexedQuery = await this.gateway.query(prepared, signal);
       if (signal?.aborted) return [];
-      const raw = vectors[0];
-      if (!raw) throw new ManagedEmbeddingsError("invalid_response", "Managed query embedding is missing.", 200);
-      queryVector = toFloat32Array(raw);
-      if (!normalizeInPlace(queryVector)) {
-        throw new ManagedEmbeddingsError("invalid_response", "Managed query embedding is invalid.", 200);
-      }
-      const negotiatedNamespace = this.gateway.activeGeneration?.indexNamespace;
-      if (!negotiatedNamespace || !isManagedNamespace(negotiatedNamespace)) {
-        throw new ManagedEmbeddingsError("invalid_response", "Managed embedding generation is missing.", 200);
-      }
+      queryVector = indexedQuery.vector;
       // A newly-written namespace is not searchable until the full eligible
-      // corpus has committed. Never expose a partial replacement here.
-      if (!namespace || namespace !== negotiatedNamespace) return [];
+      // corpus has committed. An older schema remains queryable only when it
+      // shares the exact generation id and vector dimensions.
+      if (!namespace || !this.queryCompatibleWithNamespace(indexedQuery.generation, namespace)) return [];
       cacheKey = `${namespace}:${this.hashQuery(prepared)}`;
       this.rememberQuery(cacheKey, queryVector, namespace);
       this.refreshLifecycle({ generation: this.currentGenerationSnapshot() });
     }
 
-    if (!namespace || namespace !== buildManagedNamespace(queryVector.length)) return [];
+    if (!namespace || parseNamespaceDimension(namespace) !== queryVector.length) return [];
     const [rawResults] = await this.searchIndexedNamespace(
       namespace,
       [queryVector],
@@ -607,7 +595,6 @@ export class EmbeddingsManager {
       this.failedFiles.clear();
       this.queryCache.clear();
       this.gateway.activeGeneration = undefined;
-      this.gateway.expectedDimension = undefined;
       this.searchNamespace = null;
       await this.setRebuildPending(false);
       await this.deleteCommittedNamespace();
@@ -634,7 +621,7 @@ export class EmbeddingsManager {
       this.failedFiles.clear();
       this.queryCache.clear();
       this.gateway.activeGeneration = undefined;
-      this.gateway.expectedDimension = undefined;
+      this.gateway.metadata = undefined;
       this.searchNamespace = null;
       this.portableCheckpoint?.cancel();
       this.portableCheckpoint = null;
@@ -971,18 +958,73 @@ export class EmbeddingsManager {
   }
 
   private getIndexingNamespace(): string | null {
-    if (this.gateway.activeGeneration?.indexNamespace) return this.gateway.activeGeneration.indexNamespace;
-    if (this.searchNamespace && isManagedNamespace(this.searchNamespace)) return this.searchNamespace;
+    const active = this.gateway.activeGeneration?.indexNamespace;
+    if (active && isManagedNamespace(active) && this.namespaceMatchesPublishedGeneration(active)) {
+      return active;
+    }
     const inferred = typeof this.storage.peekCurrentManagedNamespace === "function"
       ? this.storage.peekCurrentManagedNamespace()
       : null;
-    return inferred && isManagedNamespace(inferred) ? inferred : null;
+    if (
+      inferred
+      && isManagedNamespace(inferred)
+      && this.namespaceMatchesPublishedGeneration(inferred)
+    ) {
+      return inferred;
+    }
+    if (
+      !this.gateway.metadata
+      && this.searchNamespace
+      && isManagedNamespace(this.searchNamespace)
+    ) {
+      return this.searchNamespace;
+    }
+    return null;
   }
 
   private getSearchNamespace(): string | null {
     return this.searchNamespace && isManagedNamespace(this.searchNamespace)
       ? this.searchNamespace
       : null;
+  }
+
+  private namespaceMatchesPublishedGeneration(namespace: string): boolean {
+    const identity = parseManagedNamespace(namespace);
+    const published = this.gateway.metadata?.generation;
+    return Boolean(
+      identity
+      && (
+        !published
+        || (
+          identity.generationId === published.id
+          && identity.indexSchemaVersion === published.indexSchemaVersion
+        )
+      ),
+    );
+  }
+
+  private queryCompatibleWithNamespace(
+    generation: { id: string; dimensions: number },
+    namespace: string,
+  ): boolean {
+    const identity = parseManagedNamespace(namespace);
+    return Boolean(
+      identity
+      && identity.generationId === generation.id
+      && identity.dimensions === generation.dimensions
+    );
+  }
+
+  private cachedQueryCompatibleWithNamespace(
+    vector: Float32Array,
+    namespace: string,
+  ): boolean {
+    const identity = parseManagedNamespace(namespace);
+    if (!identity || identity.dimensions !== vector.length) return false;
+    const published = this.gateway.metadata?.generation;
+    if (published && published.id !== identity.generationId) return false;
+    const active = this.gateway.activeGeneration;
+    return !active || this.queryCompatibleWithNamespace(active, namespace);
   }
 
   private async hydrateManagedIdentityFromStorage(): Promise<void> {
@@ -1015,15 +1057,13 @@ export class EmbeddingsManager {
       ? inferred
       : searchNamespace ?? candidates[0] ?? null;
     if (!namespace) return;
-    const dimension = parseNamespaceDimension(namespace);
-    if (!dimension) return;
-    this.gateway.expectedDimension = dimension;
+    const identity = parseManagedNamespace(namespace);
+    if (!identity) return;
     this.gateway.activeGeneration = {
-      id: MANAGED_EMBEDDING_GENERATION,
-      indexSchemaVersion: MANAGED_EMBEDDING_INDEX_SCHEMA_VERSION,
+      id: identity.generationId,
+      indexSchemaVersion: identity.indexSchemaVersion,
       indexNamespace: namespace,
-      dimensions: dimension,
-      limits: MANAGED_EMBEDDING_LIMITS,
+      dimensions: identity.dimensions,
     };
   }
 
@@ -1088,10 +1128,15 @@ export class EmbeddingsManager {
     }
     const namespace = this.getIndexingNamespace();
     if (!namespace) {
+      const priorNamespace = this.getSearchNamespace();
+      const prior = priorNamespace
+        ? this.storage.getVectorSync(buildVectorId(priorNamespace, file.path, 0))
+        : null;
       return {
         needsProcessing: true,
-        reason: "missing",
-        lastEmbedded: null,
+        reason: prior ? "schema-mismatch" : "missing",
+        lastEmbedded: prior?.metadata.mtime ?? null,
+        ...(prior ? { existingNamespace: prior.metadata.namespace } : {}),
       };
     }
     const existing = this.storage.getVectorSync(buildVectorId(namespace, file.path, 0));
@@ -1104,7 +1149,8 @@ export class EmbeddingsManager {
     }
     if (
       !isManagedNamespace(existing.metadata.namespace)
-      || existing.metadata.generation !== MANAGED_EMBEDDING_GENERATION
+      || existing.metadata.generation !== parseManagedNamespace(existing.metadata.namespace)?.generationId
+      || !this.namespaceMatchesPublishedGeneration(existing.metadata.namespace)
     ) {
       return {
         needsProcessing: true,
@@ -1222,7 +1268,13 @@ export class EmbeddingsManager {
     const paths = new Set<string>();
     for (const vector of vectors) {
       if (vector.chunkId !== 0 || vector.metadata.isEmpty === true || vector.metadata.complete === false) continue;
-      if (this.getFileIndexSnapshot(vector.path).ready) paths.add(vector.path);
+      const file = this.app.vault.getAbstractFileByPath(vector.path);
+      if (
+        file instanceof TFile
+        && this.isFileReadyInNamespace(file, vector.metadata.namespace)
+      ) {
+        paths.add(vector.path);
+      }
     }
     return paths;
   }
@@ -1258,7 +1310,11 @@ export class EmbeddingsManager {
 
     const eligiblePaths = new Set(
       this.storage.getDistinctPaths().filter((path) => (
-        path !== excludedPath && this.getFileIndexSnapshot(path).ready
+        path !== excludedPath
+        && (() => {
+          const file = this.app.vault.getAbstractFileByPath(path);
+          return file instanceof TFile && this.isFileReadyInNamespace(file, namespace);
+        })()
       )),
     );
     const sets = queries.map(() => [] as SearchResult[]);
@@ -1352,11 +1408,6 @@ export class EmbeddingsManager {
     this.queryCache.set(key, { vector, namespace, expiresAt: Date.now() + 60_000 });
   }
 
-  private nextIdempotencyKey(scope: string): string {
-    this.operationSequence = (this.operationSequence + 1) % Number.MAX_SAFE_INTEGER;
-    return `emb:${scope}:${Date.now().toString(36)}:${this.operationSequence.toString(36)}`;
-  }
-
   private buildConfig(overrides?: Partial<EmbeddingsManagerConfig>): EmbeddingsManagerConfig {
     const exclusions = this.plugin.settings.embeddingsExclusions;
     return {
@@ -1371,22 +1422,30 @@ export class EmbeddingsManager {
   }
 
   private async migrateToManagedNamespaceContract(): Promise<void> {
-    const version = 7;
+    const version = 8;
     if ((this.plugin.settings.embeddingsVectorFormatVersion || 0) >= version) return;
 
     const vectors = await this.storage.getAllVectors();
     const legacyIds = vectors
       .filter((vector) => (
         !isLocalEmptyEmbeddingMarker(vector)
-        && (
-          !isManagedNamespace(vector.metadata.namespace)
-          || vector.metadata.generation !== MANAGED_EMBEDDING_GENERATION
-        )
+        && (() => {
+          const identity = parseManagedNamespace(vector.metadata.namespace);
+          return !identity
+            || identity.indexSchemaVersion === 2
+            || vector.metadata.generation !== identity.generationId
+            || vector.metadata.dimension !== identity.dimensions;
+        })()
       ))
       .map((vector) => vector.id);
     if (legacyIds.length > 0) {
       await this.storage.removeIds(legacyIds);
       await this.commitPortableDestructiveMutation();
+    }
+    const committed = await this.readCommittedNamespace();
+    if (committed && parseManagedNamespace(committed)?.indexSchemaVersion === 2) {
+      await this.deleteCommittedNamespace();
+      this.searchNamespace = null;
     }
 
     await this.plugin.getSettingsManager().updateSettings({ embeddingsVectorFormatVersion: version });
@@ -1451,26 +1510,36 @@ export class EmbeddingsManager {
   }
 
   private generationSnapshotForNamespace(namespace: string): SemanticIndexSnapshot["generation"] {
-    const dimensions = parseNamespaceDimension(namespace);
-    if (!dimensions) return null;
+    const identity = parseManagedNamespace(namespace);
+    if (!identity) return null;
     return {
-      id: MANAGED_EMBEDDING_GENERATION,
+      id: identity.generationId,
       namespace,
-      dimensions,
+      dimensions: identity.dimensions,
     };
   }
 
   private isFileReadyInNamespace(file: TFile, namespace: string): boolean {
-    if (this.workQueue.get(file.path)) return false;
+    const identity = parseManagedNamespace(namespace);
+    if (!identity) return false;
+    const queued = this.workQueue.get(file.path);
     const root = this.storage.getVectorSync(buildVectorId(namespace, file.path, 0));
     return Boolean(
       root
       && root.metadata.namespace === namespace
-      && root.metadata.generation === MANAGED_EMBEDDING_GENERATION
+      && root.metadata.generation === identity.generationId
       && root.metadata.complete === true
       && root.metadata.partial !== true
       && typeof root.metadata.mtime === "number"
       && root.metadata.mtime >= file.stat.mtime
+      && (
+        !queued
+        || (
+          namespace === this.searchNamespace
+          && (queued.reason === "reconcile" || queued.reason === "retry")
+          && queued.sourceMtime === root.metadata.mtime
+        )
+      )
     );
   }
 

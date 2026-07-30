@@ -112,6 +112,19 @@ describe("ManagedJobClient exact wire contract", () => {
     await expect(client.documents.download("doc-1")).rejects.toMatchObject({ code: "malformed_response" });
   });
 
+  it("keeps Retry-After outside strict response bodies while exposing the server poll hint", async () => {
+    request.mockResolvedValueOnce(json(
+      { document: { id: "doc-1", status: "processing", error: null, progress: 0.5 } },
+      200,
+      { "retry-after": "2" },
+    ));
+
+    await expect(client.documents.status("doc-1")).resolves.toEqual({
+      document: { id: "doc-1", status: "processing", error: null, progress: 0.5 },
+      poll_after_ms: 2_000,
+    });
+  });
+
   it("keeps signed upload material internal and returns uploaded keys in declared index order", async () => {
     const signed = jest.spyOn(transport as any, "uploadSignedInput").mockResolvedValue(undefined);
     request.mockResolvedValue(json({ contract: MANAGED_JOB_PROTOCOL, upload_id: "up-1", expires_at: futureUploadExpiry(), input_uploads: [
@@ -192,7 +205,13 @@ describe("ManagedJobClient exact wire contract", () => {
     [400, "invalid_request", false], [401, "license_required", false], [402, "payment_required", false], [403, "license_rejected", false], [409, "operation_conflict", false], [426, "upgrade_required", false], [429, "rate_limited", true], [502, "temporarily_unavailable", true], [503, "temporarily_unavailable", true],
   ])("maps HTTP %s exactly with request ID/retryability", async (status, code, retryable) => {
     request.mockResolvedValue(json({ code }, status, { "retry-after": "5" }));
-    await expect(client.transcription.status("job")).rejects.toMatchObject({ code, status, requestId: "req-1", retryable });
+    await expect(client.transcription.status("job")).rejects.toMatchObject({
+      code,
+      status,
+      requestId: "req-1",
+      retryable,
+      retryAfterMs: 5_000,
+    });
   });
 
   it("turns a retryable 503 into a customer-facing availability message", async () => {

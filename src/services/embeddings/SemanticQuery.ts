@@ -1,5 +1,5 @@
 import type { ChatMessage } from "../../types";
-import { MANAGED_EMBEDDING_LIMITS } from "./ManagedEmbeddingsContract";
+import { MANAGED_EMBEDDINGS_INDEX_MAX_QUERY_CHARS } from "./gateway/ManagedEmbeddingsIndexAdapter";
 
 const FRAGMENT_SEPARATOR = "\n\n";
 const EXCERPT_SEPARATOR = "\n…\n";
@@ -25,7 +25,7 @@ function excerptFragment(text: string, maxChars: number): string {
  */
 function buildBoundedSemanticQuery(
   fragments: readonly unknown[],
-  maxChars = MANAGED_EMBEDDING_LIMITS.maxCharsPerText,
+  maxChars = MANAGED_EMBEDDINGS_INDEX_MAX_QUERY_CHARS,
 ): string {
   const normalized = fragments.map(normalizeFragment).filter(Boolean);
   if (normalized.length === 0 || !Number.isFinite(maxChars) || maxChars <= 0) return "";

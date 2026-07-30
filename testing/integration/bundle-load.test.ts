@@ -86,6 +86,18 @@ describe("built bundle (main.js)", () => {
     plugin.unload();
   });
 
+  it("keeps the maintained headless chat transport without shipping the React UI runtime", () => {
+    const code = readFileSync(BUNDLE_PATH, "utf8");
+
+    expect(code).toContain("node_modules/agents/dist/chat/react.js");
+    expect(code).toContain("WebSocketChatTransport");
+    expect(code).not.toContain("node_modules/react/cjs/react.development.js");
+    expect(code).not.toContain("Invalid hook call");
+
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    expect(() => require(BUNDLE_PATH)).not.toThrow();
+  });
+
   it("executes immutable Studio create/commit/restart/binary recovery through the built production adapter seam", async () => {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const bundleModule = require(BUNDLE_PATH);
