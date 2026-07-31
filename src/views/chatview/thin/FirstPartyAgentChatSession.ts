@@ -431,6 +431,13 @@ function toolApproval(part: WirePart): Readonly<{ id: string; approved?: boolean
 }
 
 function collectClientToolTargets(messages: readonly WireMessage[]): ToolTargetMap {
+  // The provider stream assembles a tool part when its input STARTS streaming,
+  // while the explicit client-tool request part is appended once the input is
+  // complete — so within one authoritative message the tool part usually
+  // precedes its request part. Authorization therefore runs in two passes:
+  // every request part is gathered first, then tool parts are matched against
+  // them, so intra-message part order can never demote a requested vault tool
+  // to server-owned.
   const requested = new Map<string, ToolTarget>();
   const authorized = new Map<string, ToolTarget>();
   const serverOwned = new Set<string>();
@@ -439,28 +446,31 @@ function collectClientToolTargets(messages: readonly WireMessage[]): ToolTargetM
     for (const part of message.parts) {
       const parsed = parseThinAgentDataPart(part);
       if (
-        parsed?.kind === "known"
-        && parsed.type === "data-systemsculpt-client-tool-request"
+        parsed?.kind !== "known"
+        || parsed.type !== "data-systemsculpt-client-tool-request"
+      ) continue;
+      const callId = parsed.data.tool_call_id;
+      const name = parsed.data.tool_name;
+      const existing = requested.get(callId);
+      if (
+        serverOwned.has(callId)
+        || !isFirstPartyToolName(name)
+        || (existing && (
+          existing.name !== name
+          || JSON.stringify(existing.input) !== JSON.stringify(parsed.data.input)
+        ))
       ) {
-        const callId = parsed.data.tool_call_id;
-        const name = parsed.data.tool_name;
-        const existing = requested.get(callId);
-        if (
-          serverOwned.has(callId)
-          || !isFirstPartyToolName(name)
-          || (existing && (
-            existing.name !== name
-            || JSON.stringify(existing.input) !== JSON.stringify(parsed.data.input)
-          ))
-        ) {
-          requested.delete(callId);
-          authorized.delete(callId);
-          serverOwned.add(callId);
-        } else {
-          requested.set(callId, Object.freeze({ name, input: parsed.data.input }));
-        }
-        continue;
+        requested.delete(callId);
+        serverOwned.add(callId);
+      } else {
+        requested.set(callId, Object.freeze({ name, input: parsed.data.input }));
       }
+    }
+  }
+  for (const message of messages) {
+    if (message.role !== "assistant") continue;
+    for (const part of message.parts) {
+      if (parseThinAgentDataPart(part)?.kind === "known") continue;
       const callId = toolCallId(part);
       const name = toolName(part);
       if (!callId || !name) continue;

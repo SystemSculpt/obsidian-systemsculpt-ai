@@ -574,6 +574,79 @@ describe("FirstPartyAgentChatSession", () => {
     expect(harness.reportError).toHaveBeenCalledTimes(1);
   });
 
+  it("authorizes a vault tool whose request part arrives after the tool part", async () => {
+    // The provider assembly creates the tool part when input starts streaming
+    // and appends the explicit client-tool request once input completes, so
+    // the authoritative message orders the tool part FIRST. That order must
+    // still authorize the vault tool instead of demoting it to server-owned.
+    const harness = trackedHarness();
+    const socket = await harness.open([]);
+
+    const turnId = "user_late_request_part";
+    const run = harness.agent.start({
+      conversationId: CONVERSATION_ID,
+      turnId,
+      message: userMessage(turnId, "Write the note"),
+    });
+    await waitFor(() => harness.commands(socket).some((command) =>
+      command.kind === "submit"));
+    socket.serverMessage(runState(active(1, turnId, turnId)));
+
+    const input = { path: "Ordered.md", content: "ordered request" };
+    socket.serverMessage(assistantSnapshot(turnId, {
+      id: "assistant_late_request",
+      role: "assistant",
+      parts: [
+        { type: "text", text: "Creating the note.", state: "done" },
+        {
+          type: "tool-write",
+          toolCallId: "call_late_request",
+          state: "input-available",
+          input,
+        },
+        clientToolRequest("call_late_request", "write", input),
+      ],
+    }));
+    socket.serverMessage(runState(active(2, turnId, turnId, "waiting_for_client")));
+
+    await waitFor(() => harness.agent.getSnapshot().parts.some((part) =>
+      part.kind === "tool" && part.state === "approval-required"));
+    const tool = harness.agent.getSnapshot().parts.find((part) =>
+      part.kind === "tool");
+    expect(tool).toMatchObject({
+      kind: "tool",
+      name: "write",
+      location: "vault",
+      state: "approval-required",
+    });
+    expect(harness.executeLocalTool).not.toHaveBeenCalled();
+
+    const approvalId = (tool as { approvalId?: string }).approvalId;
+    expect(typeof approvalId).toBe("string");
+    expect(harness.agent.respondToApproval(approvalId!, true)).toBe(true);
+    await waitFor(() => harness.executeLocalTool.mock.calls.length === 1);
+    await waitFor(() => harness.commands(socket).some((command) =>
+      command.kind === "client_tool_result"));
+
+    socket.serverMessage(assistantSnapshot(turnId, {
+      id: "assistant_late_request",
+      role: "assistant",
+      parts: [
+        { type: "text", text: "Creating the note.", state: "done" },
+        {
+          type: "tool-write",
+          toolCallId: "call_late_request",
+          state: "output-available",
+          input,
+          output: { success: true, data: { path: input.path } },
+        },
+        clientToolRequest("call_late_request", "write", input),
+      ],
+    }));
+    socket.serverMessage(succeededTerminal(turnId, turnId));
+    await expect(run).resolves.toMatchObject({ kind: "completed" });
+  });
+
   it("escalates to an honest connection-interrupted status when reconnection stalls mid-run", async () => {
     let releaseReconnectBootstrap!: (value: Response) => void;
     const request = jest.fn<Promise<Response>, [PlatformRequestInput]>()
