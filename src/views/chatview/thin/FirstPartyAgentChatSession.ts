@@ -1814,6 +1814,11 @@ export class FirstPartyAgentChatSession {
     generation: number,
   ): void {
     if (generation !== this.generation) return;
+    if (issue.code === "invalid_server_event") {
+      this.reportLocalIssue(new Error(
+        `Ignored an invalid server event: ${issue.detail ?? issue.message}`,
+      ));
+    }
     this.recordLifecycle({
       code: issue.recoverable ? "session_interrupted" : "session_failed",
       phase: "session",

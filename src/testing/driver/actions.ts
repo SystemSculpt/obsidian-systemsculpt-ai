@@ -1,6 +1,7 @@
 import type { App } from "obsidian";
 
 import { CHAT_VIEW_TYPE } from "../../core/plugin/viewTypes";
+import type { DriverDiagnostics } from "./diagnostics";
 import {
   chatContainer,
   describeElement,
@@ -23,6 +24,7 @@ export interface ActionContext {
   pluginId: string;
   pluginVersion: string;
   buildStamp: string;
+  diagnostics: DriverDiagnostics;
 }
 
 interface AppWithCommands extends App {
@@ -156,11 +158,17 @@ function chatSnapshot(ctx: ActionContext): Record<string, unknown> {
     const label = (item.textContent ?? "").trim();
     if (label) attachments.push(label.slice(0, 200));
   }
+  const banners: string[] = [];
+  for (const banner of container.querySelectorAll(".systemsculpt-agent-banner")) {
+    const label = (banner.textContent ?? "").trim();
+    if (label) banners.push(label.slice(0, 500));
+  }
   return {
     open: true,
     title: text(".systemsculpt-agent-header-title"),
     turnCount: turns.length,
     turns,
+    banners,
     composer: {
       value: input?.instanceOf(HTMLTextAreaElement) ? input.value : "",
       sendDisabled: send?.instanceOf(HTMLButtonElement) ? send.disabled : null,
@@ -257,6 +265,7 @@ export async function runDriverAction(
         vault: ctx.app.vault.getName(),
         chatOpen: chatContainer(ctx.app) !== null,
         settingsOpen: settingsSnapshot().open === true,
+        consoleErrorCount: ctx.diagnostics.recentErrorCount(),
       };
     }
     case "chat.open": {
@@ -349,6 +358,20 @@ export async function runDriverAction(
       element.dispatchEvent(new Event("change", { bubbles: true }));
       return describeElement(element);
     }
+    case "logs": {
+      return ctx.diagnostics.readLogs({
+        level: typeof params.level === "string" ? params.level : undefined,
+        pattern: typeof params.pattern === "string" ? params.pattern : undefined,
+        sinceSeq: typeof params.sinceSeq === "number" ? params.sinceSeq : undefined,
+        limit: typeof params.limit === "number" ? params.limit : undefined,
+      });
+    }
+    case "notices": {
+      return ctx.diagnostics.readNotices({
+        sinceSeq: typeof params.sinceSeq === "number" ? params.sinceSeq : undefined,
+        limit: typeof params.limit === "number" ? params.limit : undefined,
+      });
+    }
     case "catalog": {
       return { testIds: liveTestIdCatalog() };
     }
@@ -399,8 +422,8 @@ export async function runDriverAction(
     default:
       throw new DriverActionError(
         `Unknown driver action "${action}". Available: status, chat.open, click, type, press, ` +
-          "attach, scroll, select, read, query, catalog, snapshot, waitFor, command, " +
-          "settings.open, settings.close.",
+          "attach, scroll, select, read, query, catalog, logs, notices, snapshot, waitFor, " +
+          "command, settings.open, settings.close.",
       );
   }
 }

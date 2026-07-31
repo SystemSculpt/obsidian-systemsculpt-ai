@@ -150,11 +150,15 @@ export class DriverSession {
     if (!this.socket) return Promise.reject(new Error("The driver session is not connected."));
     const id = this.nextId;
     this.nextId += 1;
+    // A step may declare its own wait budget (waitFor timeoutMs); the session
+    // timeout must always outlast it or long waits die at the transport.
+    const declaredMs = typeof params.timeoutMs === "number" ? params.timeoutMs : 0;
+    const timeoutMs = Math.max(this.actionTimeoutMs, declaredMs + 5000);
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        reject(new Error(`Driver action "${action}" timed out after ${this.actionTimeoutMs}ms.`));
-      }, this.actionTimeoutMs);
+        reject(new Error(`Driver action "${action}" timed out after ${timeoutMs}ms.`));
+      }, timeoutMs);
       this.pending.set(id, { resolve, reject, timer });
       this.socket.send(JSON.stringify({ type: "action", id, action, params }));
     });

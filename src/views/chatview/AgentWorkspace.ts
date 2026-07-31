@@ -488,6 +488,13 @@ export class AgentWorkspace extends Component {
   public setAgentSnapshot(snapshot: AgentConversationSnapshot | null): Promise<void> {
     this.snapshot = snapshot;
     if (this.unloaded) return Promise.resolve();
+    if (!snapshot && !this.runPending) {
+      // Clearing to "no run" is authoritative and idempotent, so retire the
+      // active turn immediately. The scheduled render can coalesce, delay, or
+      // bail on a superseded generation, which would otherwise strand the
+      // previous conversation's pending turn in an empty chat.
+      this.renderer.clearActive();
+    }
     this.pendingSnapshotRender = snapshot;
     const completion = new Promise<void>((resolve, reject) => {
       this.snapshotRenderWaiters.push({ resolve, reject });

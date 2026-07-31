@@ -839,12 +839,18 @@ export class AgentConversationRenderer extends Component {
       }
       case "error": {
         node.setAttrs({ role: "alert", "aria-live": "assertive" });
-        const errorIcon = node.createSpan();
+        const errorIcon = node.createSpan({ cls: "systemsculpt-agent-error-icon" });
         setIcon(errorIcon, "circle-alert");
-        const copy = node.createDiv();
+        const copy = node.createDiv({ cls: "systemsculpt-agent-error-copy" });
         const presented = presentAgentError(part.error, part.retryable);
-        copy.createEl("strong", { text: presented.heading });
-        copy.createDiv({ text: presented.message });
+        copy.createEl("strong", {
+          cls: "systemsculpt-agent-error-heading",
+          text: presented.heading,
+        });
+        copy.createDiv({
+          cls: "systemsculpt-agent-error-message",
+          text: presented.message,
+        });
         if (part.retryable && part.retryMessageId && this.options.onRetryFailedTurn) {
           const retry = createUiAction(copy, {
             label: "Retry",

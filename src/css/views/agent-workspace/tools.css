@@ -8,10 +8,44 @@
 }
 
 .systemsculpt-agent-part.is-error {
+  display: flex;
+  gap: var(--ss-space-2);
+  align-items: flex-start;
   overflow: hidden;
-  border: 1px solid var(--ss-line);
+  padding: var(--ss-space-3);
+  border: 1px solid var(--ss-danger-line);
   border-radius: var(--ss-radius-md);
-  background: var(--ss-surface-1);
+  background: var(--ss-danger-tint);
+}
+
+.systemsculpt-agent-error-icon {
+  display: flex;
+  flex: none;
+  align-items: center;
+  /* Optically centers the icon against the heading's cap height. */
+  height: calc(var(--ss-text-sm) * 1.5);
+  color: var(--ss-danger);
+}
+
+.systemsculpt-agent-error-copy {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ss-space-1);
+  min-width: 0;
+}
+
+.systemsculpt-agent-error-heading {
+  color: var(--ss-danger);
+  font-size: var(--ss-text-sm);
+  font-weight: var(--ss-weight-semibold);
+  line-height: 1.5;
+}
+
+.systemsculpt-agent-error-message {
+  overflow-wrap: anywhere;
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-sm);
+  line-height: 1.5;
 }
 
 .systemsculpt-agent-tool {

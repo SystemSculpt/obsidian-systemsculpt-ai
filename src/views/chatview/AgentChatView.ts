@@ -907,9 +907,20 @@ export class AgentChatView extends ItemView {
   }
 
   public async handleError(error: unknown): Promise<void> {
+    // Session failures reject with structured payloads ({code, message,
+    // retryable}), not Error instances — read message the same way as
+    // retryable so an object never renders as "[object Object]".
+    const structuredMessage = error
+      && typeof error === "object"
+      && typeof (error as { message?: unknown }).message === "string"
+      ? ((error as { message: string }).message).trim()
+      : "";
     const rawMessage = error instanceof Error
       ? error.message
-      : String(error || "SystemSculpt could not complete the response.");
+      : structuredMessage
+        || (typeof error === "string" && error.trim()
+          ? error
+          : "SystemSculpt could not complete the response.");
     const retryable = Boolean(
       error
       && typeof error === "object"
@@ -1087,7 +1098,11 @@ export class AgentChatView extends ItemView {
     if (operation.settled) return;
     const wasActive = this.activeSubmissionOperation === operation;
     if (wasActive) this.activeSubmissionOperation = null;
-    if (wasActive && operation.kind === "submission") {
+    if (wasActive) {
+      // A settled active operation leaves nothing pending. Transitions must
+      // clear this too: otherwise a conversation switch that retires a
+      // streaming submission leaves runPending set, and the next empty
+      // conversation renders a phantom pending turn.
       this.workspace?.setRunPending(false);
     }
     operation.settled = true;
@@ -2214,6 +2229,10 @@ export class AgentChatView extends ItemView {
       this.applyTranscriptIdentity(snapshot);
       this.workspace?.setTitle(this.chatTitle);
       this.workspace?.setBanner(null);
+      // Invariant: a new conversation owns no run. Clear pending state before
+      // rendering so an empty transcript cannot inherit the previous chat's
+      // pending indicator.
+      this.workspace?.setRunPending(false);
       await this.workspace?.setHistory([]);
       await this.workspace?.setAgentSnapshot(null);
       this.syncAttachments();

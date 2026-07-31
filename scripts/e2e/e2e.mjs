@@ -60,6 +60,7 @@ function parseArgs(argv) {
     const valueFlags = new Set([
       "plugin-dir", "vault", "target", "text", "mime", "name", "via",
       "timeout", "connect-timeout", "tab", "evidence", "mode", "limit",
+      "pattern", "level", "since",
     ]);
     if (valueFlags.has(key)) {
       flags[key] = argv[index + 1];
@@ -166,6 +167,18 @@ function stepsForVerb(positional, flags) {
       return [{ action: "settings.close" }];
     case "targets":
       return [{ action: "catalog" }];
+    case "logs":
+      return [{ action: "logs", params: {
+        level: flags.level,
+        pattern: flags.pattern,
+        sinceSeq: flags.since ? Number(flags.since) : undefined,
+        limit: flags.limit ? Number(flags.limit) : undefined,
+      } }];
+    case "notices":
+      return [{ action: "notices", params: {
+        sinceSeq: flags.since ? Number(flags.since) : undefined,
+        limit: flags.limit ? Number(flags.limit) : undefined,
+      } }];
     case "select": {
       if (!rest[0] || rest[1] === undefined) {
         throw new Error('select requires a target and value, e.g. select chat.composer.approval-mode full-access');
@@ -175,8 +188,8 @@ function stepsForVerb(positional, flags) {
     default:
       throw new Error(
         `Unknown verb "${verb ?? ""}". Verbs: status, open-chat, click, type, press, attach, ` +
-          "scroll, select, read, query, snapshot, wait, command, settings, settings-close, " +
-          "targets, script.",
+          "scroll, select, read, query, logs, notices, snapshot, wait, command, settings, " +
+          "settings-close, targets, script.",
       );
   }
 }
@@ -205,8 +218,8 @@ async function main() {
   if (positional.length === 0 || flags.help) {
     console.log("Usage: npm run e2e -- <verb> [args] [--vault name] [--plugin-dir path] [--json]");
     console.log("Verbs: status, open-chat, click, type, press, attach, scroll, select, read,");
-    console.log("       query, snapshot, wait, command, settings, settings-close,");
-    console.log("       targets [--live], script <file>");
+    console.log("       query, logs, notices, snapshot, wait, command, settings,");
+    console.log("       settings-close, targets [--live], script <file>");
     console.log("Targets are data-testid values (npm run e2e -- targets), plus css:, chat:,");
     console.log("label:, setting:, and settings.tab: prefixes.");
     process.exit(positional.length === 0 ? 1 : 0);

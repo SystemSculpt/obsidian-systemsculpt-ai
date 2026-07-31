@@ -47,6 +47,8 @@ export type FirstPartyThinAgentTransportIssue = Readonly<{
   code: string;
   message: string;
   recoverable: boolean;
+  /** Bounded diagnostic context (parse failure + event prefix), dev-facing. */
+  detail?: string;
 }>;
 
 type RequestClient = Pick<PlatformRequestClient, "request">;
@@ -336,6 +338,7 @@ export class FirstPartyThinAgentSessionTransport {
     }
     this.socket = socket;
     let synchronized = false;
+    let selfClosed = false;
     socket.addEventListener("open", () => {
       if (!this.currentAttemptSocket(attempt, socket)) return;
       this.setConnectionState("synchronizing");
@@ -350,7 +353,10 @@ export class FirstPartyThinAgentSessionTransport {
           true,
         );
         this.rejectAttempt(attempt, error);
-        socket.close(1002, "Authoritative snapshot required.");
+        // Browsers only allow script-initiated close codes of 1000 or
+        // 3000-4999; 4002 is our application "protocol violation" code.
+        selfClosed = true;
+        socket.close(4002, "Authoritative snapshot required.");
       }, timeout);
     });
     socket.addEventListener("message", (rawEvent) => {
@@ -373,14 +379,24 @@ export class FirstPartyThinAgentSessionTransport {
         if (!this.currentAttemptSocket(attempt, socket)) return;
         this.resolveAttempt(attempt);
       } catch (error) {
+        // Authoritative events are ordered, so an unreadable one cannot be
+        // skipped without risking silent divergence. Close and resynchronize
+        // from a fresh snapshot instead; the reconnect path keeps the run
+        // recoverable, and the detail makes the offending frame diagnosable.
         if (synchronized) {
-          this.reportIssue(error, "invalid_server_event", true);
+          this.reportIssue(
+            error,
+            "invalid_server_event",
+            true,
+            invalidServerEventDetail(error, messageData(rawEvent)),
+          );
         }
         this.rejectAttempt(
           attempt,
           error instanceof Error ? error : new Error(String(error)),
         );
-        socket.close(1002, "Invalid authoritative event.");
+        selfClosed = true;
+        socket.close(4002, "Invalid authoritative event.");
       }
     });
     socket.addEventListener("error", () => {
@@ -396,8 +412,8 @@ export class FirstPartyThinAgentSessionTransport {
       this.clearSnapshotTimer();
       this.socket = null;
       const closed = closeData(rawEvent);
-      const policyClose = closed.code === 1008
-        || (closed.code >= 4_000 && closed.code <= 4_999);
+      const policyClose = !selfClosed && (closed.code === 1008
+        || (closed.code >= 4_000 && closed.code <= 4_999));
       if (policyClose) {
         const error = new FirstPartyThinAgentSessionTransportError(
           "socket_policy_closed",
@@ -692,6 +708,7 @@ export class FirstPartyThinAgentSessionTransport {
     error: unknown,
     fallbackCode: string,
     recoverable: boolean,
+    detail?: string,
   ): void {
     const typed = error instanceof FirstPartyThinAgentSessionTransportError
       ? error
@@ -701,9 +718,18 @@ export class FirstPartyThinAgentSessionTransport {
         code: typed?.code ?? fallbackCode,
         message: error instanceof Error ? error.message : String(error),
         recoverable: typed?.recoverable ?? recoverable,
+        ...(detail ? { detail } : {}),
       });
     } catch {
       // Diagnostics observers cannot alter transport authority.
     }
   }
+}
+
+function invalidServerEventDetail(error: unknown, rawData: unknown): string {
+  const reason = error instanceof Error ? error.message : String(error);
+  const prefix = typeof rawData === "string"
+    ? rawData.slice(0, 200)
+    : `[non-string frame: ${typeof rawData}]`;
+  return `${reason} | event: ${prefix}`;
 }

@@ -1,6 +1,7 @@
 import type { App, PluginManifest } from "obsidian";
 
 import { runDriverAction, type ActionContext } from "./actions";
+import { DriverDiagnostics } from "./diagnostics";
 import {
   parseHandshake,
   TEST_DRIVER_HANDSHAKE_FILE,
@@ -22,6 +23,7 @@ import {
  * action is a synthesized user interaction on the real DOM.
  */
 export class TestDriverClient {
+  private readonly diagnostics = new DriverDiagnostics();
   private pollTimer: number | null = null;
   private socket: WebSocket | null = null;
   private connectedServerId: string | null = null;
@@ -37,6 +39,7 @@ export class TestDriverClient {
 
   public start(): void {
     if (this.pollTimer !== null || this.stopped) return;
+    this.diagnostics.start();
     this.pollTimer = window.setInterval(() => {
       void this.poll();
     }, TEST_DRIVER_POLL_INTERVAL_MS);
@@ -45,6 +48,7 @@ export class TestDriverClient {
 
   public stop(): void {
     this.stopped = true;
+    this.diagnostics.stop();
     if (this.pollTimer !== null) {
       window.clearInterval(this.pollTimer);
       this.pollTimer = null;
@@ -155,6 +159,7 @@ export class TestDriverClient {
       pluginId: this.manifest.id,
       pluginVersion: this.manifest.version,
       buildStamp: this.buildStamp,
+      diagnostics: this.diagnostics,
     };
     let response: TestDriverActionResult;
     try {
