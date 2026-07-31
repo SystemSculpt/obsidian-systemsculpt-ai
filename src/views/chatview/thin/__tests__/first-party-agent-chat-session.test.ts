@@ -218,6 +218,10 @@ class FakeWebSocket implements FirstPartyThinAgentWebSocket {
     this.emit("error", {});
   }
 
+  public serverClose(code = 1006, reason = "interrupted"): void {
+    this.close(code, reason);
+  }
+
   private emit(type: string, eventValue: unknown): void {
     for (const listener of this.listeners.get(type) ?? []) listener(eventValue);
   }
@@ -251,9 +255,11 @@ type ExecuteLocalTool = (
 
 function createHarness(input: Readonly<{
   executeLocalTool?: ExecuteLocalTool;
+  request?: jest.Mock<Promise<Response>, [PlatformRequestInput]>;
+  connectionDegradedGraceMs?: number;
 }> = {}) {
   const sockets: FakeWebSocket[] = [];
-  const request = jest.fn(async (_input: PlatformRequestInput): Promise<Response> =>
+  const request = input.request ?? jest.fn(async (_input: PlatformRequestInput): Promise<Response> =>
     jsonResponse(bootstrapResponse()));
   const mutation = journalHarness();
   const executeLocalTool = jest.fn(input.executeLocalTool ?? (async () => ({
@@ -278,6 +284,9 @@ function createHarness(input: Readonly<{
     requestClient: { request },
     reconnectDelayMs: () => 0,
     snapshotTimeoutMs: 5_000,
+    ...(input.connectionDegradedGraceMs
+      ? { connectionDegradedGraceMs: input.connectionDegradedGraceMs }
+      : {}),
     now: () => 10_000,
     createWebSocket: () => {
       const socket = new FakeWebSocket();
@@ -563,6 +572,55 @@ describe("FirstPartyAgentChatSession", () => {
       message: { message_id: "assistant_after_fault" },
     });
     expect(harness.reportError).toHaveBeenCalledTimes(1);
+  });
+
+  it("escalates to an honest connection-interrupted status when reconnection stalls mid-run", async () => {
+    let releaseReconnectBootstrap!: (value: Response) => void;
+    const request = jest.fn<Promise<Response>, [PlatformRequestInput]>()
+      .mockImplementationOnce(async () => jsonResponse(bootstrapResponse()))
+      .mockImplementation(() => new Promise<Response>((resolve) => {
+        releaseReconnectBootstrap = resolve;
+      }));
+    const harness = trackedHarness({ request, connectionDegradedGraceMs: 25 });
+    const socket = await harness.open([]);
+    const labels: (string | undefined)[] = [];
+    harness.agent.subscribe((snapshot) => labels.push(snapshot.statusLabel));
+
+    const turnId = "user_degraded_run";
+    const run = harness.agent.start({
+      conversationId: CONVERSATION_ID,
+      turnId,
+      message: userMessage(turnId, "Survive a connection outage"),
+    });
+    await waitFor(() => harness.commands(socket).some((command) =>
+      command.kind === "submit"));
+    socket.serverMessage(runState(active(1, turnId, turnId)));
+
+    socket.serverClose();
+    await waitFor(() =>
+      harness.agent.getSnapshot().statusLabel === "Connection interrupted");
+    expect(harness.agent.getSnapshot()).toMatchObject({
+      status: "running",
+      phase: "retrying",
+      statusLabel: "Connection interrupted",
+    });
+    const softIndex = labels.indexOf("Reconnecting");
+    expect(softIndex).toBeGreaterThanOrEqual(0);
+    expect(softIndex).toBeLessThan(labels.indexOf("Connection interrupted"));
+
+    releaseReconnectBootstrap(jsonResponse(bootstrapResponse()));
+    await waitFor(() => harness.sockets.length === 2);
+    const recovered = harness.sockets[1]!;
+    recovered.open();
+    recovered.serverMessage(sessionSnapshot(
+      [wireUser(turnId, "Survive a connection outage")],
+      active(1, turnId, turnId),
+    ));
+    await waitFor(() => harness.agent.getSnapshot().statusLabel === "Thinking");
+
+    recovered.serverMessage(succeededTerminal(turnId, turnId));
+    await expect(run).resolves.toMatchObject({ kind: "completed" });
+    expect(harness.agent.getSnapshot().statusLabel).toBeUndefined();
   });
 
   it("regenerates an exact authoritative root without sending client history", async () => {

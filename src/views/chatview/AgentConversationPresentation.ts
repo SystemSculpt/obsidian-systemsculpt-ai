@@ -120,6 +120,10 @@ function activityStatus(
   if (phase === "completed") return "Done";
   if (phase === "cancelled") return "Stopped";
   if (phase === "failed") return "Failed";
+  // A sustained outage outranks stale tool activity: the frozen tool states
+  // below describe the last frames before the connection dropped, not what is
+  // happening now.
+  if (snapshot?.statusLabel === "Connection interrupted") return "Reconnecting";
   const activeTools = snapshot?.parts.filter((part): part is AgentToolPart =>
     part.kind === "tool" && ACTIVE_TOOL_STATES.has(part.state)) ?? [];
   if (phase === "awaiting-approval") return "Needs approval";

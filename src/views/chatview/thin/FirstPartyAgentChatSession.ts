@@ -235,8 +235,17 @@ export type FirstPartyAgentChatSessionOptions = Readonly<{
   createWebSocket?: (url: string) => FirstPartyThinAgentWebSocket;
   reconnectDelayMs?: (attempt: number) => number;
   snapshotTimeoutMs?: number;
+  connectionDegradedGraceMs?: number;
   now?: () => number;
 }>;
+
+/**
+ * How long a live run may sit on a non-open connection before the soft
+ * "Reconnecting" presentation escalates to an honest "Connection interrupted"
+ * status. Short blips recover silently; a sustained outage must not keep
+ * presenting as routine progress.
+ */
+const CONNECTION_DEGRADED_GRACE_MS = 10_000;
 
 type ActiveRun = {
   readonly token: object;
@@ -683,6 +692,7 @@ function projectRun(
   active: ActiveRun,
   messages: readonly WireMessage[],
   connectionState: FirstPartyThinAgentConnectionState,
+  connectionDegraded: boolean,
 ): AgentConversationSnapshot {
   const turnMessages = currentTurnMessages(messages, active.turnId);
   const targets = collectClientToolTargets(turnMessages);
@@ -792,9 +802,11 @@ function projectRun(
     label = "Stopping";
   } else if (connectionState !== "open") {
     phase = "retrying";
-    label = connectionState === "connecting" || connectionState === "synchronizing"
-      ? "Starting"
-      : "Reconnecting";
+    label = connectionDegraded
+      ? "Connection interrupted"
+      : connectionState === "connecting" || connectionState === "synchronizing"
+        ? "Starting"
+        : "Reconnecting";
   } else if (parts.some((part) =>
     part.kind === "tool" && part.state === "approval-required")) {
     status = "waiting";
@@ -1139,6 +1151,8 @@ export class FirstPartyAgentChatSession {
   private authoritativeMessages: readonly WireMessage[] = Object.freeze([]);
   private presentationMessages: readonly WireMessage[] = Object.freeze([]);
   private connectionState: FirstPartyThinAgentConnectionState = "idle";
+  private connectionDegraded = false;
+  private connectionDegradedTimer: number | null = null;
   private currentSnapshot: AgentConversationSnapshot = initialSnapshot();
   private active: ActiveRun | null = null;
   private pendingCancelRequestId: string | null = null;
@@ -1553,6 +1567,7 @@ export class FirstPartyAgentChatSession {
       active,
       this.authoritativeMessages,
       this.connectionState,
+      this.connectionDegraded,
     ) });
   }
 
@@ -1567,7 +1582,12 @@ export class FirstPartyAgentChatSession {
         outcome: "cancelled",
         code: "cancelled",
       };
-      const snapshot = projectRun(active, this.authoritativeMessages, this.connectionState);
+      const snapshot = projectRun(
+        active,
+        this.authoritativeMessages,
+        this.connectionState,
+        this.connectionDegraded,
+      );
       active.resolve({ kind: "cancelled", snapshot });
       this.active = null;
     }
@@ -1578,6 +1598,7 @@ export class FirstPartyAgentChatSession {
 
   public disconnect(): void {
     this.generation += 1;
+    this.clearConnectionDegradation();
     this.detachSession?.();
     this.detachConnectionState?.();
     this.detachSession = null;
@@ -1778,6 +1799,7 @@ export class FirstPartyAgentChatSession {
   private handleConnectionState(state: FirstPartyThinAgentConnectionState): void {
     const active = this.active;
     if (state === "open") {
+      this.clearConnectionDegradation();
       this.openEpoch += 1;
       this.recordLifecycle({
         code: "session_opened",
@@ -1799,7 +1821,9 @@ export class FirstPartyAgentChatSession {
         phase: "session",
         ...(this.conversationId ? { conversationId: this.conversationId } : {}),
       });
+      this.scheduleConnectionDegradation();
     } else if (state === "closed") {
+      this.clearConnectionDegradation();
       this.recordLifecycle({
         code: "session_closed",
         phase: "session",
@@ -1807,6 +1831,29 @@ export class FirstPartyAgentChatSession {
       });
     }
     if (active && !active.terminal) this.publishActive(active, true);
+  }
+
+  private scheduleConnectionDegradation(): void {
+    const active = this.active;
+    if (!active || active.terminal) return;
+    if (this.connectionDegraded || this.connectionDegradedTimer !== null) return;
+    const generation = this.generation;
+    this.connectionDegradedTimer = window.setTimeout(() => {
+      this.connectionDegradedTimer = null;
+      if (this.generation !== generation || this.connectionState === "open") return;
+      const current = this.active;
+      if (!current || current.terminal) return;
+      this.connectionDegraded = true;
+      this.publishActive(current, true);
+    }, this.options.connectionDegradedGraceMs ?? CONNECTION_DEGRADED_GRACE_MS);
+  }
+
+  private clearConnectionDegradation(): void {
+    if (this.connectionDegradedTimer !== null) {
+      window.clearTimeout(this.connectionDegradedTimer);
+      this.connectionDegradedTimer = null;
+    }
+    this.connectionDegraded = false;
   }
 
   private handleTransportIssue(
@@ -2356,7 +2403,12 @@ export class FirstPartyAgentChatSession {
       }
     }
     await this.reconcileMessages(this.presentationMessages).catch(() => undefined);
-    const snapshot = projectRun(active, this.presentationMessages, this.connectionState);
+    const snapshot = projectRun(
+      active,
+      this.presentationMessages,
+      this.connectionState,
+      this.connectionDegraded,
+    );
     this.commitSnapshot(snapshot);
     const result: FirstPartyAgentRunResult = terminal.outcome === "succeeded"
       ? {
@@ -2408,7 +2460,12 @@ export class FirstPartyAgentChatSession {
         : `incident_${"0".repeat(32)}`,
       retryable: error.retryable === true,
     };
-    const snapshot = projectRun(active, this.presentationMessages, this.connectionState);
+    const snapshot = projectRun(
+      active,
+      this.presentationMessages,
+      this.connectionState,
+      this.connectionDegraded,
+    );
     this.commitSnapshot(snapshot);
     this.reportLocalIssue(error);
     this.completeActive(active, { kind: "failed", snapshot, error });
@@ -2437,7 +2494,12 @@ export class FirstPartyAgentChatSession {
 
   private publishActive(active: ActiveRun, immediate = false): void {
     if (this.active?.token !== active.token) return;
-    const snapshot = projectRun(active, this.presentationMessages, this.connectionState);
+    const snapshot = projectRun(
+      active,
+      this.presentationMessages,
+      this.connectionState,
+      this.connectionDegraded,
+    );
     if (immediate) this.commitSnapshot(snapshot);
     else this.scheduleSnapshot(snapshot);
   }
@@ -2459,7 +2521,7 @@ export class FirstPartyAgentChatSession {
     });
     active.serverRunId = terminal.run_id;
     active.terminal = terminal;
-    this.commitSnapshot(projectRun(active, messages, this.connectionState));
+    this.commitSnapshot(projectRun(active, messages, this.connectionState, false));
   }
 
   private scheduleSnapshot(snapshot: AgentConversationSnapshot): void {

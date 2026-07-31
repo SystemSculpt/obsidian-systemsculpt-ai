@@ -169,6 +169,40 @@ describe("AgentConversationPresentation product-copy boundary", () => {
     });
   });
 
+  it("presents a sustained connection interruption above stale tool activity", () => {
+    const staleSearch = {
+      id: "tool-1",
+      kind: "tool" as const,
+      messageId: "assistant-1",
+      callId: "call-1",
+      name: "web_search",
+      location: "server" as const,
+      input: { query: "latest" },
+      state: "running" as const,
+      order: 0,
+    };
+    const presentation = presentAgentConversation({
+      runId: "run-1",
+      turnId: "user-1",
+      status: "running",
+      phase: "retrying",
+      statusLabel: "Connection interrupted",
+      messages: [{
+        id: "assistant-1",
+        role: "assistant",
+        partIds: ["tool-1"],
+      }],
+      parts: [staleSearch],
+    }, true);
+
+    expect(presentation).toMatchObject({
+      phase: "recovering",
+      busy: true,
+      composerRunning: true,
+      activityStatus: "Reconnecting",
+    });
+  });
+
   it("never turns a server-owned approval-shaped part into vault approval UX", () => {
     const presentation = presentAgentConversation({
       runId: "run-server-approval",
