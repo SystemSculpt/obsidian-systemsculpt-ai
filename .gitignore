@@ -37,7 +37,9 @@ systemsculpt-sync.config.json
 .pytest_cache/
 
 # Local tool configs (should not be tracked)
-.claude/
+# Local agent state stays ignored; shared skills are part of the repository.
+.claude/*
+!.claude/skills/
 .codex/
 .pi/
 .serena/
