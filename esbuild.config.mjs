@@ -5,6 +5,7 @@ import {
 	createPluginBuildOptions,
 	normalizeApiBaseUrl,
 	resolvePluginBuildStamp,
+	resolveTestDriverFlag,
 } from "./scripts/plugin-build-options.mjs";
 import fs from "fs";
 import path from "path";
@@ -68,6 +69,10 @@ const buildOptions = createPluginBuildOptions({
 	production: prod,
 	apiBaseUrl,
 	buildStamp,
+	testDriver: resolveTestDriverFlag({
+		production: prod,
+		override: process.env.SYSTEMSCULPT_TEST_DRIVER,
+	}),
 	plugins: [
 		{
 			name: "build-reporter",

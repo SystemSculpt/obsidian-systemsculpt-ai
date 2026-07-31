@@ -280,6 +280,7 @@ export function createHoverShell(options: HoverShellOptions): HoverShellHandle {
     for (const action of actions) {
       const button = createUiAction(container, {
         label: action.label,
+        testId: `hover.${action.id}`,
         icon: action.icon,
         tone: action.variant === "primary"
           ? "primary"

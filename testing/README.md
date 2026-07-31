@@ -17,6 +17,11 @@ Managed fixtures live in testing/fixtures/managed; versioned settings inputs
 live in testing/fixtures/settings. Default tests need no provider key, hosted
 service, installed app, physical device, or remote host.
 
+testing/e2e is the live-app lane, not a CI gate: testid-catalog.json is the
+generated catalog of every `data-testid` the product renders, and scenarios/
+holds deterministic GUI journeys for `npm run e2e -- script <file>` against a
+running development build. See "CLI E2E driving" in docs/development.md.
+
 ## Normal loop
 
 ~~~bash

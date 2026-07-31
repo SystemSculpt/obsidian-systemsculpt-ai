@@ -34,19 +34,19 @@ export class StudioImageEditorToolbar {
     actions: StudioImageEditorToolbarActions
   ) {
     const buttons = toolbarEl.createDiv({ cls: "ss-studio-caption-board__toolbar-actions" });
-    this.addTextButton = createToolbarButton(buttons, "Text", actions.addLabel);
-    this.highlightRectButton = createToolbarButton(buttons, "Box", () => {
+    this.addTextButton = createToolbarButton(buttons, "studio.image.toolbar.text", "Text", actions.addLabel);
+    this.highlightRectButton = createToolbarButton(buttons, "studio.image.toolbar.box", "Box", () => {
       actions.addAnnotation("highlight_rect");
     });
-    this.highlightCircleButton = createToolbarButton(buttons, "Circle", () => {
+    this.highlightCircleButton = createToolbarButton(buttons, "studio.image.toolbar.circle", "Circle", () => {
       actions.addAnnotation("highlight_circle");
     });
-    this.blurButton = createToolbarButton(buttons, "Blur", () => {
+    this.blurButton = createToolbarButton(buttons, "studio.image.toolbar.blur", "Blur", () => {
       actions.addAnnotation("blur_rect");
     });
-    this.cropButton = createToolbarButton(buttons, "Crop", actions.toggleCropSelection);
-    this.fitButton = createToolbarButton(buttons, "Fit", actions.fit);
-    this.doneButton = createToolbarButton(buttons, "Done", () => {
+    this.cropButton = createToolbarButton(buttons, "studio.image.toolbar.crop", "Crop", actions.toggleCropSelection);
+    this.fitButton = createToolbarButton(buttons, "studio.image.toolbar.fit", "Fit", actions.fit);
+    this.doneButton = createToolbarButton(buttons, "studio.image.toolbar.done", "Done", () => {
       void actions.done();
     });
   }
@@ -80,12 +80,14 @@ export class StudioImageEditorToolbar {
 
 function createToolbarButton(
   parent: HTMLElement,
+  testId: string,
   label: string,
   onSelect: () => void
 ): HTMLButtonElement {
   return createStudioAction(parent, {
     className: "ss-studio-caption-board__toolbar-button",
     label,
+    testId,
     size: "small",
     onSelect,
   });

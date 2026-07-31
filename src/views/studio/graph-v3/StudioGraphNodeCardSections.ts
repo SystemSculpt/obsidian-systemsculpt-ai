@@ -53,6 +53,7 @@ export function renderNodeHeader(options: {
   createStudioAction(header, {
     className: "ss-studio-node-run",
     label: "Run",
+    testId: "studio.node.run",
     ariaLabel: isVisualOnlyNode
       ? "Interactive node (not part of graph execution)"
       : "Run node",
@@ -73,6 +74,7 @@ export function renderNodeHeader(options: {
     createStudioAction(header, {
       className: "ss-studio-node-copy-prompt",
       label: "Copy",
+      testId: "studio.node.copy-prompt",
       ariaLabel: "Copy prompt bundle for handoff",
       title: "Copy prompt bundle for handoff",
       size: "small",
@@ -83,6 +85,7 @@ export function renderNodeHeader(options: {
     createStudioAction(header, {
       className: "ss-studio-node-lock-output",
       label: outputLocked ? "Unlock" : "Lock",
+      testId: "studio.node.lock-output",
       ariaLabel: outputLocked ? "Unlock text output" : "Lock text output",
       title: outputLocked ? "Unlock text output" : "Lock text output",
       size: "small",
@@ -95,6 +98,7 @@ export function renderNodeHeader(options: {
   createStudioAction(header, {
     className: "ss-studio-node-remove",
     label: "×",
+    testId: "studio.node.remove",
     ariaLabel: "Remove node",
     title: "Remove node",
     size: "small",
@@ -301,6 +305,7 @@ export function renderCollapsedVisibilityControls(options: {
     button = createStudioAction(buttonsEl, {
       className: "ss-studio-node-collapsed-visibility-button",
       label: metadata.shortLabel,
+      testId: `studio.node.collapsed-visibility.${section}`,
       ariaLabel: `Show ${metadata.summary} in collapsed mode`,
       title: `Show ${metadata.summary} in collapsed mode`,
       size: "small",

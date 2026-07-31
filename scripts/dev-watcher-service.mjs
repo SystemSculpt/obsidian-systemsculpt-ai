@@ -85,6 +85,8 @@ export function createDevWatcherLaunchAgentPlist(options) {
   <dict>
     <key>PATH</key>
     <string>${xml(executablePath)}</string>
+    <key>SYSTEMSCULPT_TEST_DRIVER</key>
+    <string>1</string>
     ${apiBaseEnvironment}
   </dict>
   <key>RunAtLoad</key>

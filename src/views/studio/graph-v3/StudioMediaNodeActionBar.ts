@@ -170,6 +170,7 @@ export function renderStudioMediaNodeActionBar(
     const buttonEl = createStudioAction(barEl, {
       className: `ss-studio-media-action${action.danger ? " is-danger" : ""}`,
       label: action.label,
+      testId: `studio.media.${action.id}`,
       icon: action.icon,
       size: "icon",
     });

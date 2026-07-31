@@ -22,7 +22,8 @@
     "obsidian": "latest",
     "tslib": "2.8.1",
     "typescript": "^5.9.2",
-    "typescript-eslint": "^8.44.1"
+    "typescript-eslint": "^8.44.1",
+    "ws": "^8.21.1"
   },
   "engines": {
     "node": ">=22.18.0"
@@ -58,6 +59,7 @@
     "dev:watch:install:staging": "node scripts/dev-watcher-service.mjs install --target staging",
     "dev:watch:status": "node scripts/dev-watcher-service.mjs status",
     "dev:watch:uninstall": "node scripts/dev-watcher-service.mjs uninstall",
+    "e2e": "node scripts/e2e/e2e.mjs",
     "sync:local": "node scripts/sync-local-vaults.mjs",
     "sync:local:agent": "node scripts/sync-local-vaults.mjs --target local-agent",
     "sync:local:staging": "node scripts/sync-local-vaults.mjs --target staging",

@@ -190,6 +190,44 @@ interface text, and phone plus tablet or equivalent widths. Verify the synced
 artifact hashes. No native-device CI or mandatory manual-device gate is part of
 this repository.
 
+## CLI E2E driving
+
+Development, staging, and local-agent builds embed SystemSculptTestDriver/v1
+(src/testing/driver). Release builds exclude it via the __SS_TEST_DRIVER__
+define, and artifact inspection enforces both directions. The driver dials out
+to a CLI-hosted localhost WebSocket server; the plugin never listens.
+
+With Obsidian running a development build, drive the real GUI from the
+terminal — every action is a synthesized user event (pointer, keyboard, input,
+file-picker change, drop) on the live DOM, never a service shortcut:
+
+~~~bash
+npm run e2e -- status
+npm run e2e -- open-chat
+npm run e2e -- click chat.header.new
+npm run e2e -- type "Draft a note about spaced repetition"
+npm run e2e -- attach ./diagram.png
+npm run e2e -- snapshot chat
+npm run e2e -- wait chat.composer.send enabled
+npm run e2e -- settings --tab Chat
+npm run e2e -- script testing/e2e/scenarios/chat-composer-journey.mjs --evidence .cache/e2e/run.json
+~~~
+
+Targets are canonical `data-testid` identities. Every interactive element the
+product renders declares one (UiActionOptions.testId is required, so the
+compiler enforces the sweep), dot-namespaced and product-shaped:
+`chat.composer.send`, `chat.turn.edit-resubmit`, `settings.tab.chat`,
+`studio.node.run`. List the full catalog with `npm run e2e -- targets`
+(generated into testing/e2e/testid-catalog.json and freshness-gated), or ask
+the live app with `npm run e2e -- targets --live`. Escape hatches: `css:`,
+`chat:`, `label:`, `setting:<row name>` (drives any Obsidian settings row by
+its visible name), and `settings.tab:<label>`. A coverage ratchet
+(scripts/check/testid-coverage-policy.test.mjs) freezes the remaining
+untagged raw elements and only shrinks. Script mode runs a whole journey —
+clicks, typing, waits, assertions — in one invocation and reports per-step
+results. The CLI resolves the vault from systemsculpt-sync.config.json; use
+--vault or --plugin-dir to override.
+
 ## Release validation
 
 ~~~bash

@@ -59,9 +59,10 @@ export type AgentWorkspaceOptions = Readonly<{
   onApprovalModeChange?: (mode: "ask" | "full-access") => void;
 }>;
 
-function iconButton(parent: HTMLElement, label: string, icon: string): HTMLButtonElement {
+function iconButton(parent: HTMLElement, testId: string, label: string, icon: string): HTMLButtonElement {
   const element = createUiAction(parent, {
     label,
+    testId,
     icon,
     size: "icon",
     tooltip: false,
@@ -137,6 +138,7 @@ export class AgentWorkspace extends Component {
     this.creditsButton = options.onOpenCredits
       ? createUiAction(headerActions, {
           label: "Credits",
+          testId: "chat.header.credits",
           size: "small",
         })
       : null;
@@ -145,9 +147,9 @@ export class AgentWorkspace extends Component {
       this.creditsButton.setAttribute("aria-label", "Credits");
       this.registerDomEvent(this.creditsButton, "click", () => void this.options.onOpenCredits?.());
     }
-    const history = iconButton(headerActions, "Chat history", "history");
-    const create = iconButton(headerActions, "New chat", "square-pen");
-    const settings = iconButton(headerActions, "Chat settings", "settings-2");
+    const history = iconButton(headerActions, "chat.header.history", "Chat history", "history");
+    const create = iconButton(headerActions, "chat.header.new", "New chat", "square-pen");
+    const settings = iconButton(headerActions, "chat.header.settings", "Chat settings", "settings-2");
     this.registerDomEvent(history, "click", () => void this.options.onOpenHistory());
     this.registerDomEvent(create, "click", () => void this.options.onNewChat());
     this.registerDomEvent(settings, "click", () => void this.options.onOpenSettings());
@@ -183,6 +185,7 @@ export class AgentWorkspace extends Component {
 
     this.jumpButton = createUiAction(this.element, {
       label: "Latest",
+      testId: "chat.jump-to-latest",
       icon: "arrow-down",
       tooltip: false,
     });
@@ -337,7 +340,7 @@ export class AgentWorkspace extends Component {
         setIcon(icon, "list-end");
         row.createSpan({ cls: "systemsculpt-agent-queue-copy" });
         if (this.options.onRunQueuedNow) {
-          const runNow = iconButton(row, "Stop and send queued follow-up now", "arrow-up");
+          const runNow = iconButton(row, "chat.queue.run-now", "Stop and send queued follow-up now", "arrow-up");
           runNow.dataset.queueAction = "run-now";
           runNow.onclick = () => {
             const currentId = row?.dataset.queueItemId;
@@ -345,7 +348,7 @@ export class AgentWorkspace extends Component {
           };
         }
         if (this.options.onCancelQueued) {
-          const remove = iconButton(row, "Remove queued follow-up", "x");
+          const remove = iconButton(row, "chat.queue.remove", "Remove queued follow-up", "x");
           remove.dataset.queueAction = "remove";
           remove.onclick = () => {
             const currentId = row?.dataset.queueItemId;

@@ -39,6 +39,8 @@ const FAST_SCRIPT_TESTS = [
   "scripts/ui-architecture.test.mjs",
   "scripts/plugin-build-options.test.mjs",
   "scripts/check/managed-only-policy.test.mjs",
+  "scripts/check/testid-coverage-policy.test.mjs",
+  "scripts/e2e/generate-testid-catalog.test.mjs",
   "scripts/platform-portability.test.mjs",
 ];
 
@@ -48,6 +50,7 @@ const NORMAL_SCRIPT_TESTS = [
   "scripts/plugin-artifacts.test.mjs",
   "scripts/plugin-sync.test.mjs",
   "scripts/release-plugin.test.mjs",
+  "scripts/e2e/driver-session.test.mjs",
 ];
 
 function run(command, options = {}) {

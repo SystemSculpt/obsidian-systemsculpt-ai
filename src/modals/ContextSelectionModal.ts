@@ -79,7 +79,7 @@ export class ContextSelectionModal extends StandardModal {
       cls: "ss-context-description",
       text: "Pinned files are reread for every message. Files SystemSculpt reads while working remain part of this chat, but are not pinned automatically.",
     });
-    this.searchInput = this.addSearchBar("Search files", (query) => {
+    this.searchInput = this.addSearchBar("modal.context.search", "Search files", (query) => {
       this.searchQuery = query.trim().toLowerCase();
       this.applyFilters();
     });
@@ -101,8 +101,8 @@ export class ContextSelectionModal extends StandardModal {
     });
     this.renderFileList();
 
-    this.cancelButton = this.addActionButton("Cancel", () => this.close());
-    this.addButton = this.addActionButton("Pin files", () => void this.handleSelection(), true);
+    this.cancelButton = this.addActionButton("modal.context.cancel", "Cancel", () => this.close());
+    this.addButton = this.addActionButton("modal.context.pin", "Pin files", () => void this.handleSelection(), true);
     this.updateAddButton();
 
     if (this.autoFocusSearch) {
@@ -170,6 +170,7 @@ export class ContextSelectionModal extends StandardModal {
     const selected = filter === this.currentFilter;
     const button = createUiAction(parent, {
       label,
+      testId: `modal.context.filter.${filter}`,
       icon,
       size: "small",
       selected,
@@ -293,6 +294,7 @@ export class ContextSelectionModal extends StandardModal {
     const item = this.listContainer.createEl("li", { cls: "ss-context-load-more-item" });
     this.loadMoreButton = createUiAction(item, {
       label: `Show ${remaining} more file${remaining === 1 ? "" : "s"}`,
+      testId: "modal.context.load-more",
       size: "small",
     });
     this.loadMoreButton.addClass("ss-context-load-more");

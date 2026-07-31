@@ -6,6 +6,7 @@ import {
   createPluginBuildOptions,
   normalizeApiBaseUrl,
   resolvePluginBuildStamp,
+  resolveTestDriverFlag,
 } from "./plugin-build-options.mjs";
 
 test("production API base is the build default", () => {
@@ -88,4 +89,25 @@ test("caller-provided plugins are preserved without hidden runtime shims", () =>
   const options = createPluginBuildOptions({ plugins: [plugin] });
 
   assert.deepEqual(options.plugins, [plugin]);
+});
+
+test("the E2E test driver define follows production unless explicitly overridden", () => {
+  assert.equal(resolveTestDriverFlag({ production: true }), false);
+  assert.equal(resolveTestDriverFlag({ production: false }), true);
+  assert.equal(resolveTestDriverFlag({ production: true, override: "1" }), true);
+  assert.equal(resolveTestDriverFlag({ production: false, override: "0" }), false);
+  assert.equal(resolveTestDriverFlag({ production: true, override: "" }), false);
+
+  assert.equal(
+    createPluginBuildOptions({ production: true }).define.__SS_TEST_DRIVER__,
+    "false",
+  );
+  assert.equal(
+    createPluginBuildOptions({ production: false }).define.__SS_TEST_DRIVER__,
+    "true",
+  );
+  assert.equal(
+    createPluginBuildOptions({ production: true, testDriver: true }).define.__SS_TEST_DRIVER__,
+    "true",
+  );
 });

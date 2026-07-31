@@ -310,7 +310,9 @@ export async function exerciseBuiltStandardChatIdentity(
     type: "systemsculpt.agent.command.v1",
     version: 1,
     kind: "submit",
-    request_id: expect.stringMatching(/^request_[A-Za-z0-9._:-]+$/),
+    // The request identity is the root user message identity, which keeps
+    // resubmits of the same turn idempotent on the server.
+    request_id: contextRequest?.body.root_message_id,
     user_message: expect.objectContaining({
       id: contextRequest?.body.root_message_id,
       role: "user",
@@ -344,7 +346,7 @@ export async function exerciseBuiltStandardChatIdentity(
   viewClosed = true;
   expect(createdSocket!.closeCalls).toContainEqual({
     code: 1_000,
-    reason: "Chat changed.",
+    reason: "Client closed.",
   });
   expect(createdSocket!.readyState).toBe(FakeWebSocket.CLOSED);
   plugin.unload();

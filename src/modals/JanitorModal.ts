@@ -49,8 +49,8 @@ export class JanitorModal extends StandardModal {
     );
 
     this.createMainContainer();
-    this.addActionButton("Refresh", () => this.refreshData(), false, "refresh-cw");
-    this.addActionButton("Close", () => this.close(), false);
+    this.addActionButton("janitor.refresh", "Refresh", () => this.refreshData(), false, "refresh-cw");
+    this.addActionButton("janitor.close", "Close", () => this.close(), false);
     this.loadJanitorData();
   }
 
@@ -312,6 +312,7 @@ export class JanitorModal extends StandardModal {
   ): HTMLButtonElement {
     const button = createUiAction(container, {
       label,
+      testId: "janitor.move-to-trash",
       tone: enabled ? "danger" : "default",
       disabled: !enabled,
     });
@@ -387,6 +388,7 @@ export class JanitorModal extends StandardModal {
       detail: message,
       action: {
         label: "Retry",
+        testId: "janitor.retry",
         tone: "primary",
         onSelect: () => this.refreshData(),
       },

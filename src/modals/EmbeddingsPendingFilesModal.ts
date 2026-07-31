@@ -42,6 +42,7 @@ export class EmbeddingsPendingFilesModal extends StandardModal {
     const summaryActionsEl = this.summaryContainerEl.createDiv({ cls: "ss-modal__summary-actions" });
     const summaryCopyButton = createUiAction(summaryActionsEl, {
       label: "Copy file paths",
+      testId: "embeddings.pending.copy-paths",
       icon: "copy",
       size: "small",
       disabled: true,
@@ -51,7 +52,7 @@ export class EmbeddingsPendingFilesModal extends StandardModal {
     });
     this.copyButtons.push(summaryCopyButton);
 
-    this.searchInput = this.addSearchBar("Filter by file or folder…", (query) => {
+    this.searchInput = this.addSearchBar("embeddings.pending.search", "Filter by file or folder…", (query) => {
       this.applyFilter(query);
     });
     this.searchInput.disabled = true;
@@ -62,13 +63,13 @@ export class EmbeddingsPendingFilesModal extends StandardModal {
       title: "Collecting pending files",
     });
 
-    const footerCopyButton = this.addActionButton("Copy file paths", () => {
+    const footerCopyButton = this.addActionButton("embeddings.pending.copy-paths", "Copy file paths", () => {
       void this.copyPaths();
     }, false, "copy");
     footerCopyButton.disabled = true;
     this.copyButtons.push(footerCopyButton);
 
-    this.addActionButton("Close", () => this.close(), true);
+    this.addActionButton("embeddings.pending.close", "Close", () => this.close(), true);
 
     await this.loadPendingFiles();
   }
@@ -150,6 +151,7 @@ export class EmbeddingsPendingFilesModal extends StandardModal {
       detail: message,
       action: {
         label: "Retry",
+        testId: "embeddings.pending.retry",
         tone: "primary",
         onSelect: () => void this.loadPendingFiles(),
       },

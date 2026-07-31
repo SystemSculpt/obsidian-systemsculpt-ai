@@ -11,6 +11,7 @@ import {
   buildProductionPlugin,
   buildStagingPlugin,
   inspectPluginArtifacts,
+  TEST_DRIVER_BUNDLE_MARKER,
   THIN_CLIENT_FORBIDDEN_BUNDLE_FRAGMENTS,
 } from "./plugin-artifacts.mjs";
 import { buildCssArtifact } from "./build-css.mjs";
@@ -105,7 +106,10 @@ test("assertProductionPluginArtifacts accepts production-style bundles", () => {
 
 test("staging artifacts require only the staging API and remain invalid release artifacts", () => {
   const root = createTempPluginDir();
-  writeRequiredArtifacts(root, stagingBundle("console.log('staging build');\n"));
+  writeRequiredArtifacts(
+    root,
+    stagingBundle(`console.log('staging build');\nconst driver = ${JSON.stringify(TEST_DRIVER_BUNDLE_MARKER)};\n`),
+  );
 
   const inspection = assertStagingPluginArtifacts({ root });
   assert.equal(inspection.ok, true);
@@ -520,7 +524,11 @@ test("buildStagingPlugin forces the staging URL and revalidates the target artif
       assert.equal(options.env.SYSTEMSCULPT_API_BASE_URL, STAGING_API_BASE_URL);
       assert.equal(options.env.SYSTEMSCULPT_BUILD_STAMP, "staging");
       assert.equal(options.shell, undefined);
-      writeRequiredArtifacts(root, stagingBundle("console.log('staging bundle');\n"));
+      assert.equal(options.env.SYSTEMSCULPT_TEST_DRIVER, "1");
+      writeRequiredArtifacts(
+        root,
+        stagingBundle(`console.log('staging bundle');\nconst driver = ${JSON.stringify(TEST_DRIVER_BUNDLE_MARKER)};\n`),
+      );
       return {
         status: 0,
         stdout: "",
@@ -569,4 +577,28 @@ test("buildProductionPlugin preserves failed build diagnostics", () => {
     }),
     /Production plugin build failed\.\nbuild stderr\nbuild stdout/,
   );
+});
+
+test("release artifacts must exclude the E2E test driver; development artifacts must include it", () => {
+  const root = createTempPluginDir();
+  writeRequiredArtifacts(root, productionBundle(`const marker = ${JSON.stringify(TEST_DRIVER_BUNDLE_MARKER)};\n`));
+  assert.throws(
+    () => assertProductionPluginArtifacts({ root }),
+    /contains the E2E test driver/,
+  );
+
+  writeRequiredArtifacts(root, productionBundle());
+  assert.equal(assertProductionPluginArtifacts({ root }).mainBundle.hasTestDriver, false);
+
+  const stagingRoot = createTempPluginDir();
+  writeRequiredArtifacts(stagingRoot, stagingBundle());
+  assert.throws(
+    () => assertStagingPluginArtifacts({ root: stagingRoot }),
+    /missing the E2E test driver/,
+  );
+  writeRequiredArtifacts(
+    stagingRoot,
+    stagingBundle(`const marker = ${JSON.stringify(TEST_DRIVER_BUNDLE_MARKER)};\n`),
+  );
+  assert.equal(assertStagingPluginArtifacts({ root: stagingRoot }).mainBundle.hasTestDriver, true);
 });

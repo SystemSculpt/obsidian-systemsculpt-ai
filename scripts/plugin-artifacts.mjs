@@ -186,11 +186,18 @@ export function assertSafePluginArtifactPathsForBuild({
   return files;
 }
 
+/**
+ * Marker embedded by src/testing/driver/protocol.ts. Kept as a literal here
+ * because build scripts cannot import TypeScript sources.
+ */
+export const TEST_DRIVER_BUNDLE_MARKER = "SystemSculptTestDriver/v1";
+
 export function inspectPluginArtifacts({
   root = process.cwd(),
   expectedApiBaseUrl = CANONICAL_API_BASE_URL,
   forbiddenApiBaseUrls = [],
   allowedLoopbackApiBaseUrls = [],
+  expectTestDriver = null,
 } = {}) {
   const resolvedRoot = path.resolve(root);
   const normalizedExpectedApiBaseUrl = normalizeApiBaseUrl(expectedApiBaseUrl);
@@ -246,6 +253,7 @@ export function inspectPluginArtifacts({
     forbiddenClientFragments: [],
     nodeBuiltinRequires: [],
     mobileUnsafeNodeRequires: [],
+    hasTestDriver: false,
   };
 
   if (mainFile.isRegularFile) {
@@ -319,6 +327,18 @@ export function inspectPluginArtifacts({
         `main.js loads Node builtins outside the desktop host seam: ${mainBundle.mobileUnsafeNodeRequires.join(", ")}.`,
       );
     }
+
+    mainBundle.hasTestDriver = bundleText.includes(TEST_DRIVER_BUNDLE_MARKER);
+    if (expectTestDriver === false && mainBundle.hasTestDriver) {
+      problems.push(
+        "main.js contains the E2E test driver; release artifacts must exclude it.",
+      );
+    }
+    if (expectTestDriver === true && !mainBundle.hasTestDriver) {
+      problems.push(
+        "main.js is missing the E2E test driver expected in this development artifact.",
+      );
+    }
   }
 
   const stylesFile = files["styles.css"];
@@ -368,6 +388,7 @@ export function assertProductionPluginArtifacts(options = {}) {
     ...options,
     expectedApiBaseUrl: CANONICAL_API_BASE_URL,
     forbiddenApiBaseUrls: [STAGING_API_BASE_URL],
+    expectTestDriver: false,
   });
   if (!inspection.ok) {
     throw new Error(formatArtifactProblems(inspection));
@@ -380,6 +401,7 @@ export function assertStagingPluginArtifacts(options = {}) {
     ...options,
     expectedApiBaseUrl: STAGING_API_BASE_URL,
     forbiddenApiBaseUrls: [CANONICAL_API_BASE_URL],
+    expectTestDriver: true,
   });
   if (!inspection.ok) {
     throw new Error(formatArtifactProblems(inspection));
@@ -393,6 +415,7 @@ export function assertLocalAgentPluginArtifacts(options = {}) {
     expectedApiBaseUrl: LOCAL_AGENT_API_BASE_URL,
     forbiddenApiBaseUrls: [CANONICAL_API_BASE_URL, STAGING_API_BASE_URL],
     allowedLoopbackApiBaseUrls: [LOCAL_AGENT_API_BASE_URL],
+    expectTestDriver: true,
   });
   if (!inspection.ok) {
     throw new Error(formatArtifactProblems(inspection));
@@ -411,6 +434,7 @@ export function buildProductionPlugin({
   const releaseEnv = {
     ...env,
     SYSTEMSCULPT_API_BASE_URL: CANONICAL_API_BASE_URL,
+    SYSTEMSCULPT_TEST_DRIVER: "0",
   };
   const result = spawnSyncImpl(
     process.execPath,
@@ -447,6 +471,7 @@ export function buildStagingPlugin({
     ...env,
     SYSTEMSCULPT_API_BASE_URL: STAGING_API_BASE_URL,
     SYSTEMSCULPT_BUILD_STAMP: "staging",
+    SYSTEMSCULPT_TEST_DRIVER: "1",
   };
   const result = spawnSyncImpl(
     process.execPath,
@@ -483,6 +508,7 @@ export function buildLocalAgentPlugin({
     ...env,
     SYSTEMSCULPT_API_BASE_URL: LOCAL_AGENT_API_BASE_URL,
     SYSTEMSCULPT_BUILD_STAMP: "local-agent",
+    SYSTEMSCULPT_TEST_DRIVER: "1",
   };
   const result = spawnSyncImpl(
     process.execPath,

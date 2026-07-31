@@ -36,7 +36,7 @@ export class SystemSculptHistoryModal extends StandardModal {
     this.renderSearchBar();
     this.renderContainers();
     this.initializeCombobox();
-    this.addActionButton("Close", () => this.close(), false);
+    this.addActionButton("history.close", "Close", () => this.close(), false);
 
     this.registerDomEvent(this.modalEl, "keydown", (event: Event) => {
       this.handleModalKeydown(event as KeyboardEvent);
@@ -47,6 +47,7 @@ export class SystemSculptHistoryModal extends StandardModal {
 
   private renderSearchBar(): void {
     this.searchInput = this.addSearchBar(
+      "history.search",
       "Search chats and Studio sessions…",
       (query) => this.combobox?.setQuery(query, { writeInput: false }),
     );
@@ -158,6 +159,7 @@ export class SystemSculptHistoryModal extends StandardModal {
     if (typeof entry.toggleFavorite === "function") {
       const favoriteButton = createUiAction(header, {
         label: entry.isFavorite ? "Remove favorite" : "Add favorite",
+        testId: "history.item.favorite",
         icon: entry.isFavorite ? "star" : "star-off",
         size: "icon",
         selected: entry.isFavorite,
@@ -204,7 +206,7 @@ export class SystemSculptHistoryModal extends StandardModal {
       title,
       detail,
       action: kind === "error"
-        ? { label: "Retry", tone: "primary", onSelect: () => void this.reloadEntries() }
+        ? { label: "Retry", testId: "history.retry", tone: "primary", onSelect: () => void this.reloadEntries() }
         : undefined,
     });
     this.stateEl.addClass("systemsculpt-history-state");

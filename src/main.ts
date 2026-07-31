@@ -426,6 +426,8 @@ export default class SystemSculptPlugin extends Plugin {
 
       this.registerLayoutReadyHandler(loadStart);
 
+      this.startTestDriverIfEnabled(buildStamp);
+
       onloadPhase.complete({
         totalMs: Number((performance.now() - loadStart).toFixed(1)),
         failureCount: this.failures.length,
@@ -458,6 +460,29 @@ export default class SystemSculptPlugin extends Plugin {
       this.showErrorNotice(
         `SystemSculpt had issues with: ${this.failures.join(", ")}. Some features may be unavailable.`
       );
+    }
+  }
+
+  /**
+   * The E2E test driver exists only in non-release builds: release builds
+   * define __SS_TEST_DRIVER__ false, so esbuild eliminates this branch and
+   * the driver module never enters the production bundle. The driver dials
+   * out to a CLI-hosted localhost WebSocket server; it never listens.
+   */
+  private startTestDriverIfEnabled(buildStamp: string): void {
+    // The positive constant guard is load-bearing: esbuild eliminates this
+    // branch (and the imported driver module) when the define is false.
+    if (typeof __SS_TEST_DRIVER__ !== "undefined" && __SS_TEST_DRIVER__) {
+      void import("./testing/driver/TestDriverClient").then(({ TestDriverClient }) => {
+        const driver = new TestDriverClient(this.app, this.manifest, buildStamp);
+        driver.start();
+        this.register(() => driver.stop());
+      }).catch((error) => {
+        this.getLogger().warn("E2E test driver failed to start", {
+          source: "SystemSculptPlugin",
+          metadata: { message: error instanceof Error ? error.message : String(error) },
+        });
+      });
     }
   }
 

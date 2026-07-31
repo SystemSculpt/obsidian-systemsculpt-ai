@@ -29,6 +29,7 @@ import { createStudioSvgElement } from "../StudioDomContext";
 
 type StudioWorkspaceControlOptions = Readonly<{
   label: string;
+  testId: string;
   ariaLabel: string;
   title?: string;
   disabled?: boolean;
@@ -43,6 +44,7 @@ function createStudioWorkspaceControl(
 ): HTMLButtonElement {
   const button = createStudioAction(parent, {
     label: options.label,
+    testId: options.testId,
     ariaLabel: options.ariaLabel,
     className: `ss-studio-graph-workspace-control-button${options.className ? ` ${options.className}` : ""}`,
     size: "small",
@@ -292,6 +294,7 @@ export function renderStudioGraphWorkspace(
   const controls = editor.createDiv({ cls: "ss-studio-graph-workspace-controls" });
   createStudioWorkspaceControl(controls, {
     label: "Run",
+    testId: "studio.workspace.run",
     ariaLabel: "Run Studio graph",
     title: "Run graph",
     className: "is-run",
@@ -306,6 +309,7 @@ export function renderStudioGraphWorkspace(
 
   createStudioWorkspaceControl(controls, {
     label: "Add",
+    testId: "studio.workspace.add-node",
     ariaLabel: "Add node",
     disabled: busy,
     onSelect: () => {
@@ -319,6 +323,7 @@ export function renderStudioGraphWorkspace(
   const zoomRow = controls.createDiv({ cls: "ss-studio-graph-workspace-control-zoom-row" });
   createStudioWorkspaceControl(zoomRow, {
     label: "−",
+    testId: "studio.workspace.zoom-out",
     ariaLabel: "Zoom out",
     onSelect: onZoomOut,
   });
@@ -328,24 +333,28 @@ export function renderStudioGraphWorkspace(
 
   createStudioWorkspaceControl(zoomRow, {
     label: "+",
+    testId: "studio.workspace.zoom-in",
     ariaLabel: "Zoom in",
     onSelect: onZoomIn,
   });
 
   createStudioWorkspaceControl(controls, {
     label: "Reset",
+    testId: "studio.workspace.zoom-reset",
     ariaLabel: "Reset zoom",
     onSelect: onZoomReset,
   });
 
   createStudioWorkspaceControl(controls, {
     label: "Fit",
+    testId: "studio.workspace.zoom-overview",
     ariaLabel: "Overview graph",
     onSelect: onZoomOverview,
   });
 
   createStudioWorkspaceControl(controls, {
     label: nodeDetailMode === "collapsed" ? "Expand" : "Collapse",
+    testId: "studio.workspace.detail-mode",
     ariaLabel: "Toggle node detail mode",
     title:
       nodeDetailMode === "collapsed"

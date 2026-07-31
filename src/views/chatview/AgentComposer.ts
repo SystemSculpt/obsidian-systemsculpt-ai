@@ -46,12 +46,14 @@ const PINNED_FILES_DESCRIPTION =
 function createButton(
   parent: HTMLElement,
   className: string,
+  testId: string,
   label: string,
   icon: string,
   tone: UiActionTone = "default",
 ): HTMLButtonElement {
   const button = createUiAction(parent, {
     label,
+    testId,
     icon,
     size: "icon",
     tone,
@@ -91,7 +93,10 @@ export class AgentComposer extends Component {
     super();
     this.attachmentLimits = options.attachmentLimits;
     this.messageAttachments = this.createMessageAttachmentCollection();
-    this.element = parent.createDiv({ cls: "systemsculpt-agent-composer" });
+    this.element = parent.createDiv({
+      cls: "systemsculpt-agent-composer",
+      attr: { "data-testid": "chat.composer" },
+    });
     this.attachmentList = this.element.createDiv({
       cls: "systemsculpt-agent-composer-attachments",
       attr: {
@@ -105,6 +110,7 @@ export class AgentComposer extends Component {
     this.input = prompt.createEl("textarea", {
       cls: "systemsculpt-agent-prompt-input",
       attr: {
+        "data-testid": "chat.composer.input",
         rows: "1",
         placeholder: DEFAULT_COMPOSER_PLACEHOLDER,
         "aria-label": "Message SystemSculpt",
@@ -113,10 +119,11 @@ export class AgentComposer extends Component {
 
     const toolbar = prompt.createDiv({ cls: "systemsculpt-agent-prompt-toolbar" });
     const tools = toolbar.createDiv({ cls: "systemsculpt-agent-prompt-tools" });
-    this.attachButton = createButton(tools, "systemsculpt-agent-icon-button", "Attach files", "paperclip");
+    this.attachButton = createButton(tools, "systemsculpt-agent-icon-button", "chat.composer.attach", "Attach files", "paperclip");
     this.vaultContextButton = createButton(
       tools,
       "systemsculpt-agent-icon-button",
+      "chat.composer.pin",
       "Pin files for every message",
       "files",
     );
@@ -125,6 +132,7 @@ export class AgentComposer extends Component {
     this.filePicker = tools.createEl("input", {
       cls: "systemsculpt-agent-file-picker",
       attr: {
+        "data-testid": "chat.composer.file-picker",
         type: "file",
         multiple: "true",
         accept: CHAT_ATTACHMENT_PICKER_ACCEPT,
@@ -134,21 +142,21 @@ export class AgentComposer extends Component {
     });
     this.approvalMode = tools.createEl("select", {
       cls: "dropdown systemsculpt-agent-approval-mode",
-      attr: { "aria-label": "Vault changes" },
+      attr: { "data-testid": "chat.composer.approval-mode", "aria-label": "Vault changes" },
     });
     // eslint-disable-next-line obsidianmd/ui/sentence-case -- Familiar product mode name.
     this.approvalMode.createEl("option", { value: "ask", text: "Ask Approval" });
     // eslint-disable-next-line obsidianmd/ui/sentence-case -- Familiar product mode name.
     this.approvalMode.createEl("option", { value: "full-access", text: "Full Access" });
     this.micButton = options.onMic
-      ? createButton(tools, "systemsculpt-agent-icon-button", "Record message", "mic")
+      ? createButton(tools, "systemsculpt-agent-icon-button", "chat.composer.mic", "Record message", "mic")
       : null;
 
     this.hint = toolbar.createSpan({ cls: "systemsculpt-agent-prompt-hint", text: "Enter to send" });
 
     const actions = toolbar.createDiv({ cls: "systemsculpt-agent-prompt-actions" });
-    this.stopButton = createButton(actions, "systemsculpt-agent-stop", "Stop response", "square", "danger");
-    this.sendButton = createButton(actions, "systemsculpt-agent-send", "Send message", "arrow-up", "primary");
+    this.stopButton = createButton(actions, "systemsculpt-agent-stop", "chat.composer.stop", "Stop response", "square", "danger");
+    this.sendButton = createButton(actions, "systemsculpt-agent-send", "chat.composer.send", "Send message", "arrow-up", "primary");
 
     this.registerDomEvent(this.input, "input", () => {
       this.resize();
@@ -350,7 +358,7 @@ export class AgentComposer extends Component {
       }
       chip.createSpan({ cls: "systemsculpt-agent-attachment-label", text: attachment.label });
       chip.createSpan({ cls: "systemsculpt-agent-attachment-badge", text: "Pinned" });
-      const remove = createButton(chip, "systemsculpt-agent-attachment-remove", `Unpin ${attachment.label}`, "x");
+      const remove = createButton(chip, "systemsculpt-agent-attachment-remove", "chat.composer.attachment.unpin", `Unpin ${attachment.label}`, "x");
       remove.disabled = Boolean(this.readOnlyMessage);
       // Attachment chips are replaced wholesale. Keeping their listeners on
       // the component cleanup stack would retain every removed chip until the
@@ -374,11 +382,11 @@ export class AgentComposer extends Component {
       }
       chip.createSpan({ cls: "systemsculpt-agent-attachment-label", text: attachment.name });
       if (attachment.status === "failed") {
-        const retry = createButton(chip, "systemsculpt-agent-attachment-retry", `Retry ${attachment.name}`, "rotate-cw");
+        const retry = createButton(chip, "systemsculpt-agent-attachment-retry", "chat.composer.attachment.retry", `Retry ${attachment.name}`, "rotate-cw");
         retry.disabled = Boolean(this.readOnlyMessage);
         retry.onclick = () => void this.retryMessageAttachment(attachment.id);
       }
-      const remove = createButton(chip, "systemsculpt-agent-attachment-remove", `Remove ${attachment.name}`, "x");
+      const remove = createButton(chip, "systemsculpt-agent-attachment-remove", "chat.composer.attachment.remove", `Remove ${attachment.name}`, "x");
       remove.disabled = Boolean(this.readOnlyMessage);
       remove.onclick = () => void this.removeMessageAttachment(attachment.id);
     }

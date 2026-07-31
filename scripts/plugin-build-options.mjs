@@ -55,6 +55,18 @@ export function resolvePluginBuildStamp({
   return `release-${releaseVersion}`;
 }
 
+/**
+ * The E2E test driver ships only in development, staging, and local-agent
+ * artifacts. Release builds define the flag false so esbuild eliminates the
+ * driver module entirely; the artifact gate verifies both directions.
+ */
+export function resolveTestDriverFlag({ production = true, override } = {}) {
+  const raw = String(override ?? '').trim();
+  if (/^(?:1|true|yes|on)$/i.test(raw)) return true;
+  if (/^(?:0|false|no|off)$/i.test(raw)) return false;
+  return !production;
+}
+
 export function createPluginBuildOptions({
   entryPoint = 'src/main.ts',
   outfile = 'main.js',
@@ -64,6 +76,7 @@ export function createPluginBuildOptions({
   plugins = [],
   buildStamp = 'dev',
   apiBaseUrl = CANONICAL_API_BASE_URL,
+  testDriver = !production,
 } = {}) {
   const normalizedApiBaseUrl = normalizeApiBaseUrl(apiBaseUrl);
   return {
@@ -76,6 +89,7 @@ export function createPluginBuildOptions({
     define: {
       '__SS_BUILD_STAMP__': JSON.stringify(buildStamp),
       '__SYSTEMSCULPT_API_BASE_URL__': JSON.stringify(normalizedApiBaseUrl),
+      '__SS_TEST_DRIVER__': testDriver === true ? 'true' : 'false',
     },
     external: [
       'obsidian', 'electron', 'proper-lockfile', 'graceful-fs',

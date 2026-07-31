@@ -56,8 +56,9 @@ export class BulkTranscriptionConfirmModal extends StandardModal {
       text: "Skip all marks these files as skipped until you clear them in settings > workflow.",
     });
 
-    this.addActionButton("Skip all", () => this.handleCancel(), false);
+    this.addActionButton("bulk-transcribe.skip-all", "Skip all", () => this.handleCancel(), false);
     this.addActionButton(
+      "bulk-transcribe.confirm",
       `Transcribe ${count} file${count === 1 ? "" : "s"}`,
       () => this.handleConfirm(),
       true,
@@ -97,6 +98,7 @@ export interface BulkTranscriptionProgressWidgetOptions {
 
 type BulkProgressAction = {
   label: string;
+  testId: string;
   onClick: () => void;
   variant?: "primary" | "danger" | "default";
   disabled?: boolean;
@@ -173,6 +175,7 @@ export class BulkTranscriptionProgressWidget {
     this.syncStatus();
     this.setActions([{
       label: "Close",
+      testId: "bulk-transcribe.progress.close",
       variant: "primary",
       onClick: () => this.close(),
     }]);
@@ -243,6 +246,7 @@ export class BulkTranscriptionProgressWidget {
       ...(copyText ? [this.buildCopyAction(copyText)] : []),
       {
         label: "Close",
+        testId: "bulk-transcribe.progress.close",
         variant: "primary" as const,
         onClick: () => this.close(),
       },
@@ -253,6 +257,7 @@ export class BulkTranscriptionProgressWidget {
     if (!this.onStop) return [];
     return [{
       label: "Stop",
+      testId: "bulk-transcribe.progress.stop",
       variant: "danger",
       onClick: () => this.handleStopClick(),
     }];
@@ -264,6 +269,7 @@ export class BulkTranscriptionProgressWidget {
     this.syncStatus();
     this.setActions([{
       label: "Stopping…",
+      testId: "bulk-transcribe.progress.stop",
       variant: "danger",
       disabled: true,
       onClick: () => {},
@@ -274,6 +280,7 @@ export class BulkTranscriptionProgressWidget {
   private setActions(actions: BulkProgressAction[]): void {
     this.panel.setActions(actions.map((action) => ({
       label: action.label,
+      testId: action.testId,
       onClick: action.onClick,
       variant: action.variant,
       disabled: action.disabled,
@@ -283,6 +290,7 @@ export class BulkTranscriptionProgressWidget {
   private buildCopyAction(copyText: string): BulkProgressAction {
     return {
       label: "Copy error",
+      testId: "bulk-transcribe.progress.copy-error",
       onClick: async () => {
         const copied = await tryCopyToClipboard(copyText);
         new Notice(copied ? "Error copied to clipboard" : "Unable to copy error", 2500);

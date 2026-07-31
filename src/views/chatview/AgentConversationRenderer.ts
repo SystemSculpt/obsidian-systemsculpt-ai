@@ -65,9 +65,10 @@ export type AgentInlineMessageEdit = Readonly<{
   requiresReplayConfirmation: boolean;
 }>;
 
-function button(parent: HTMLElement, label: string, icon?: string): HTMLButtonElement {
+function button(parent: HTMLElement, testId: string, label: string, icon?: string): HTMLButtonElement {
   const element = createUiAction(parent, {
     label,
+    testId,
     icon,
     size: icon ? "icon" : "small",
     tooltip: false,
@@ -260,6 +261,7 @@ export class AgentConversationRenderer extends Component {
     this.element = parent.createDiv({
       cls: "systemsculpt-agent-conversation",
       attr: {
+        "data-testid": "chat.scroller",
         role: "log",
         ...(options.labelledBy
           ? { "aria-labelledby": options.labelledBy }
@@ -846,6 +848,7 @@ export class AgentConversationRenderer extends Component {
         if (part.retryable && part.retryMessageId && this.options.onRetryFailedTurn) {
           const retry = createUiAction(copy, {
             label: "Retry",
+            testId: "chat.turn.retry-failed",
             tone: "primary",
             size: "small",
           });
@@ -1045,11 +1048,13 @@ export class AgentConversationRenderer extends Component {
       const actions = approval.createDiv({ cls: "systemsculpt-agent-approval-actions" });
       const deny = createUiAction(actions, {
         label: "Deny",
+        testId: "chat.approval.deny",
         size: "small",
       });
       deny.setAttr("data-focus-key", "tool-deny");
       const approve = createUiAction(actions, {
         label: "Allow once",
+        testId: "chat.approval.allow-once",
         tone: "primary",
         size: "small",
       });
@@ -1059,6 +1064,7 @@ export class AgentConversationRenderer extends Component {
       if (presentation.canonicalName !== "trash") {
         const allowForChat = createUiAction(actions, {
           label: "Allow for chat",
+          testId: "chat.approval.allow-for-chat",
           size: "small",
         });
         allowForChat.setAttr("data-focus-key", "tool-allow-chat");
@@ -1092,9 +1098,9 @@ export class AgentConversationRenderer extends Component {
     if (artifact.description) copy.createDiv({ text: artifact.description });
     if (!artifact.path?.trim()) return;
     const actions = card.createDiv({ cls: "systemsculpt-agent-artifact-actions" });
-    const open = button(actions, "Open", "arrow-up-right");
+    const open = button(actions, "chat.tool.file.open", "Open", "arrow-up-right");
     open.onclick = () => void this.options.onOpenArtifact(artifact);
-    const copyPath = button(actions, "Copy path", "copy");
+    const copyPath = button(actions, "chat.tool.file.copy-path", "Copy path", "copy");
     copyPath.setAttrs({ "aria-label": "Copy path", "aria-live": "polite" });
     copyPath.onclick = () => void this.copyArtifactPath(copyPath, artifact);
   }
@@ -1168,6 +1174,7 @@ export class AgentConversationRenderer extends Component {
       const subject = message.role === "assistant" ? "response" : "message";
       const copy = createUiAction(actions, {
         label: `Copy ${subject}`,
+        testId: "chat.turn.copy",
         icon: "copy",
         size: "icon",
       });
@@ -1178,6 +1185,7 @@ export class AgentConversationRenderer extends Component {
     if (canRetry) {
       const retry = createUiAction(actions, {
         label: "Edit and resubmit",
+        testId: "chat.turn.edit-resubmit",
         icon: "pencil",
         size: "icon",
       });
@@ -1236,10 +1244,12 @@ export class AgentConversationRenderer extends Component {
     const actions = editor.createDiv({ cls: "systemsculpt-agent-message-editor-actions" });
     const cancel = createUiAction(actions, {
       label: "Cancel",
+      testId: "chat.editor.cancel",
       size: "small",
     });
     const save = createUiAction(actions, {
       label: "Save and resubmit",
+      testId: "chat.editor.save-resubmit",
       tone: "primary",
       size: "small",
     });
@@ -1415,6 +1425,7 @@ export class AgentConversationRenderer extends Component {
 
       const copyButton = createUiAction(pre, {
         label: "Copy",
+        testId: "chat.code.copy",
         icon: "copy",
         size: "small",
       });

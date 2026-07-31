@@ -81,8 +81,8 @@ export class CreditsBalanceModal extends StandardModal {
 
     const root = this.contentEl.createDiv({ cls: "ss-credits-balance" });
     this.tabBarEl = root.createDiv({ cls: "ss-credits-balance__tabs" });
-    this.balanceTabButton = this.createTabButton("Balance");
-    this.usageTabButton = this.createTabButton("Usage");
+    this.balanceTabButton = this.createTabButton("credits.tab.balance", "Balance");
+    this.usageTabButton = this.createTabButton("credits.tab.usage", "Usage");
 
     this.balancePanelEl = root.createDiv({ cls: "ss-credits-balance__panel ss-credits-balance__panel--balance" });
     this.summaryEl = this.balancePanelEl.createDiv({ cls: "ss-credits-balance__summary" });
@@ -95,6 +95,7 @@ export class CreditsBalanceModal extends StandardModal {
     this.usageHintEl = this.usagePanelEl.createDiv({ cls: "ss-credits-usage__hint" });
     this.usageLoadMoreButton = createUiAction(this.usagePanelEl, {
       label: "Load more",
+      testId: "credits.usage.load-more",
       size: "small",
     });
     this.usageLoadMoreButton.addClass("ss-credits-usage__load-more");
@@ -121,6 +122,7 @@ export class CreditsBalanceModal extends StandardModal {
     this.statusEl = root.createDiv({ cls: "ss-credits-balance__status" });
 
     this.refreshButton = this.addActionButton(
+      "credits.refresh",
       "Refresh",
       () => {
         if (this.activeTab === "usage") {
@@ -134,6 +136,7 @@ export class CreditsBalanceModal extends StandardModal {
     ) as HTMLButtonElement;
 
     this.purchaseButton = this.addActionButton(
+      "credits.buy",
       "Buy Credits",
       () => this.openPurchasePage(),
       true,
@@ -141,13 +144,14 @@ export class CreditsBalanceModal extends StandardModal {
     ) as HTMLButtonElement;
 
     this.addActionButton(
+      "credits.open-account",
       "Open Account",
       () => this.options.onOpenSetup(),
       false,
       "settings"
     );
 
-    this.addActionButton("Close", () => this.close(), false);
+    this.addActionButton("credits.close", "Close", () => this.close(), false);
 
     this.renderBalance();
     this.renderUsage();
@@ -157,12 +161,13 @@ export class CreditsBalanceModal extends StandardModal {
     void this.refreshBalance(true);
   }
 
-  private createTabButton(label: string): HTMLButtonElement {
+  private createTabButton(testId: string, label: string): HTMLButtonElement {
     if (!this.tabBarEl) {
       throw new Error("Tab bar is not initialized.");
     }
     const button = createUiAction(this.tabBarEl, {
       label,
+      testId,
       size: "small",
     });
     button.addClass("ss-credits-balance__tab");
