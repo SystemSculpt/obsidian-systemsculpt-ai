@@ -1818,6 +1818,16 @@ export class FirstPartyAgentChatSession {
       this.reportLocalIssue(new Error(
         `Ignored an invalid server event: ${issue.detail ?? issue.message}`,
       ));
+    } else if (issue.recoverable && this.active && !this.active.terminal) {
+      // A recoverable fault during a live run is otherwise invisible: the
+      // transport reconnects on its own, the run keeps rendering as active,
+      // and nothing reaches the log. If the server never resumes the run, the
+      // user is left with a spinner and no explanation. Report it so a stalled
+      // run is diagnosable without changing who owns run termination.
+      this.reportLocalIssue(new Error(
+        `Agent session interrupted during an active run (${issue.code}): `
+          + `${issue.message}`,
+      ));
     }
     this.recordLifecycle({
       code: issue.recoverable ? "session_interrupted" : "session_failed",

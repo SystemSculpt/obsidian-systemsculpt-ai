@@ -61,6 +61,7 @@ function response(value: unknown): Response {
 class FakeWebSocket implements FirstPartyThinAgentWebSocket {
   public readyState = 0;
   public readonly sent: string[] = [];
+  public readonly closes: Readonly<{ code: number; reason: string }>[] = [];
   private readonly listeners = new Map<string, Set<(event: unknown) => void>>();
 
   public addEventListener(type: string, listener: (event: unknown) => void): void {
@@ -77,6 +78,7 @@ class FakeWebSocket implements FirstPartyThinAgentWebSocket {
   public close(code = 1000, reason = ""): void {
     if (this.readyState === 3) return;
     this.readyState = 3;
+    this.closes.push({ code, reason });
     this.emit("close", { code, reason });
   }
 
@@ -87,6 +89,10 @@ class FakeWebSocket implements FirstPartyThinAgentWebSocket {
 
   public serverMessage(value: unknown): void {
     this.emit("message", { data: JSON.stringify(value) });
+  }
+
+  public serverRawMessage(data: unknown): void {
+    this.emit("message", { data });
   }
 
   public serverClose(code = 1006, reason = "interrupted"): void {
@@ -141,6 +147,7 @@ function harness(
   options: Readonly<{
     request?: jest.Mock<Promise<Response>, []>;
     reconnectDelayMs?: number;
+    snapshotTimeoutMs?: number;
     onIssue?: (issue: FirstPartyThinAgentTransportIssue) => void;
   }> = {},
 ) {
@@ -158,7 +165,7 @@ function harness(
     bootstrapRequest: () => bootstrapRequest,
     requestClient: { request },
     reconnectDelayMs: () => options.reconnectDelayMs ?? 0,
-    snapshotTimeoutMs: 5_000,
+    snapshotTimeoutMs: options.snapshotTimeoutMs ?? 5_000,
     createWebSocket: (url) => {
       urls.push(url);
       const socket = new FakeWebSocket();
@@ -623,6 +630,76 @@ describe("FirstPartyThinAgentSessionTransport", () => {
       .not.toContain("private policy reason");
     },
   );
+
+  it("self-closes with the app protocol code and reconnects when the snapshot never arrives", async () => {
+    const h = harness([
+      "access_token_first_1234567890",
+      "access_token_second_1234567890",
+    ], { snapshotTimeoutMs: 10 });
+    const pending = h.transport.connect();
+    await waitFor(() => h.sockets.length === 1);
+    h.sockets[0].open();
+
+    await expect(pending).rejects.toMatchObject({ code: "snapshot_timeout" });
+    expect(h.sockets[0].closes).toEqual([
+      { code: 4002, reason: "Authoritative snapshot required." },
+    ]);
+
+    await waitFor(() => h.sockets.length === 2);
+    h.sockets[1].open();
+    h.sockets[1].serverMessage(sessionSnapshot(1));
+    await waitFor(() => h.transport.state === "open");
+    expect(h.transport.isReady).toBe(true);
+    expect(h.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "snapshot_timeout", recoverable: true }),
+    ]));
+    expect(h.issues.map((issue) => issue.code)).not.toContain("socket_policy_closed");
+    h.transport.close();
+  });
+
+  it("reports a bounded invalid-event detail, self-closes with 4002, and resynchronizes", async () => {
+    const h = harness([
+      "access_token_first_1234567890",
+      "access_token_second_1234567890",
+      "access_token_third_1234567890",
+    ]);
+    await connect(h);
+
+    const corruptFrame = `{"broken": ${"x".repeat(300)}`;
+    h.sockets[0].serverRawMessage(corruptFrame);
+
+    expect(h.sockets[0].closes).toEqual([
+      { code: 4002, reason: "Invalid authoritative event." },
+    ]);
+    expect(h.issues).toEqual([{
+      code: "malformed_server_event",
+      message: "The authoritative server event is not valid JSON.",
+      recoverable: true,
+      detail: "The authoritative server event is not valid JSON."
+        + ` | event: ${corruptFrame.slice(0, 200)}`,
+    }]);
+
+    await waitFor(() => h.sockets.length === 2);
+    h.sockets[1].open();
+    h.sockets[1].serverMessage(sessionSnapshot(2));
+    await waitFor(() => h.transport.state === "open");
+
+    h.sockets[1].serverRawMessage(12_345);
+    expect(h.sockets[1].closes).toEqual([
+      { code: 4002, reason: "Invalid authoritative event." },
+    ]);
+    expect(h.issues[1]).toEqual({
+      code: "binary_server_event_forbidden",
+      message: "The authoritative server event must be a text frame.",
+      recoverable: true,
+      detail: "The authoritative server event must be a text frame."
+        + " | event: [non-string frame: number]",
+    });
+
+    await waitFor(() => h.sockets.length === 3);
+    expect(h.issues.map((issue) => issue.code)).not.toContain("socket_policy_closed");
+    h.transport.close();
+  });
 
   it("publishes recursively immutable sanitized snapshots without encrypted reasoning material", async () => {
     const h = harness();

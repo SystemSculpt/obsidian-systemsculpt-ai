@@ -214,6 +214,10 @@ class FakeWebSocket implements FirstPartyThinAgentWebSocket {
     this.emit("message", { data: JSON.stringify(value) });
   }
 
+  public serverError(): void {
+    this.emit("error", {});
+  }
+
   private emit(type: string, eventValue: unknown): void {
     for (const listener of this.listeners.get(type) ?? []) listener(eventValue);
   }
@@ -522,6 +526,43 @@ describe("FirstPartyAgentChatSession", () => {
         content: "The response still ran.",
       },
     });
+  });
+
+  it("reports a recoverable transport fault only while a run is active", async () => {
+    const harness = trackedHarness();
+    const socket = await harness.open([]);
+
+    socket.serverError();
+    expect(harness.reportError).not.toHaveBeenCalled();
+
+    const turnId = "user_interrupted_run";
+    const run = harness.agent.start({
+      conversationId: CONVERSATION_ID,
+      turnId,
+      message: userMessage(turnId, "Keep working through the fault"),
+    });
+    await waitFor(() => harness.commands(socket).some((command) =>
+      command.kind === "submit"));
+    socket.serverMessage(runState(active(1, turnId, turnId)));
+
+    socket.serverError();
+    expect(harness.reportError).toHaveBeenCalledTimes(1);
+    const reported = harness.reportError.mock.calls[0]?.[0] as Error;
+    expect(reported.message).toBe(
+      "Agent session interrupted during an active run (socket_error): "
+        + "The first-party agent socket reported an error.",
+    );
+
+    socket.serverMessage(assistantSnapshot(
+      turnId,
+      wireAssistant("assistant_after_fault", "Recovered and finished."),
+    ));
+    socket.serverMessage(succeededTerminal(turnId, turnId));
+    await expect(run).resolves.toMatchObject({
+      kind: "completed",
+      message: { message_id: "assistant_after_fault" },
+    });
+    expect(harness.reportError).toHaveBeenCalledTimes(1);
   });
 
   it("regenerates an exact authoritative root without sending client history", async () => {
