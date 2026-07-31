@@ -612,8 +612,8 @@ export class AgentChatView extends ItemView {
     const transition = this.beginConversationTransition(loadOriginToken);
     let thinConversationHydrated = false;
     try {
-      // Retire a no-spend draft warm-up before cancelling it. Its expected
-      // preparation rejection belongs to the replaced draft, not this chat.
+      // Retire the outgoing draft identity before cancelling it. Any stale
+      // preparation belongs to the replaced draft, not this chat.
       this.pendingThinConversationId = null;
       this.thinBootstrapRequest = null;
       this.messageEditGeneration += 1;
@@ -655,11 +655,10 @@ export class AgentChatView extends ItemView {
       this.workspace?.setApprovalMode(this.approvalMode);
       this.workspace?.setTitle(this.chatTitle);
       await this.workspace?.setHistory(loaded.messages as readonly ChatMessage[]);
-      await this.workspace?.setAgentSnapshot(
-        loaded.agentConversationId
-          ? cachedTranscriptRecoverySnapshot(loaded.messages)
-          : null,
-      );
+      const recoverySnapshot = loaded.agentConversationId
+        ? cachedTranscriptRecoverySnapshot(loaded.messages)
+        : null;
+      await this.workspace?.setAgentSnapshot(recoverySnapshot);
       const legacyHistoryViewOnly = loaded.messages.length > 0 && !loaded.agentConversationId;
       this.setLegacyHistoryViewOnly(legacyHistoryViewOnly);
       let hydrationFailed = false;
@@ -682,7 +681,14 @@ export class AgentChatView extends ItemView {
               capabilities: THIN_AGENT_CAPABILITIES,
             },
           };
-          await this.agent.hydrate(conversationId);
+          // Opening a chat is a local act: the cache renders and the composer
+          // is ready without any server round trip. The session connects when
+          // the user actually sends a message. The one exception is a cached
+          // unfinished run — its owner already sent a message, so the session
+          // reconnects now to resume or settle that run.
+          if (recoverySnapshot) {
+            await this.agent.hydrate(conversationId);
+          }
           if (
             this.conversationOriginToken !== loadOriginToken
             || this.pendingThinConversationId !== conversationId
@@ -704,8 +710,8 @@ export class AgentChatView extends ItemView {
         }
       } else if (loaded.messages.length === 0) {
         this.pendingThinConversationId = protocolId("conversation");
-        void this.warmThinConversation(this.pendingThinConversationId)
-          .catch((error) => this.reportAgentError(error, "warmThinConversation"));
+        void this.prepareThinConversation(this.pendingThinConversationId)
+          .catch((error) => this.reportAgentError(error, "prepareThinConversation"));
       }
       this.syncAttachments();
       if (!legacyHistoryViewOnly && !hydrationFailed) {
@@ -1326,7 +1332,13 @@ export class AgentChatView extends ItemView {
       ??= getLoadedPluginBuildId(this.app, this.plugin.manifest);
   }
 
-  private async warmThinConversation(conversationId: string): Promise<void> {
+  /**
+   * Prepares a draft conversation entirely locally: identity and bootstrap
+   * payload only. A new chat never opens a server connection — the session
+   * connects when the user sends their first message, so an offline or slow
+   * server can never paint a fresh chat with reconnect or phantom-run state.
+   */
+  private async prepareThinConversation(conversationId: string): Promise<void> {
     if (!this.plugin.settings.licenseKey?.trim()) return;
     const pluginBuildId = await this.getLoadedPluginBuildId();
     if (this.pendingThinConversationId !== conversationId) return;
@@ -1340,15 +1352,6 @@ export class AgentChatView extends ItemView {
         capabilities: THIN_AGENT_CAPABILITIES,
       },
     };
-    try {
-      await this.agent.hydrate(conversationId);
-    } catch (error) {
-      // A second Obsidian view-state application can supersede this draft
-      // while bootstrap is in flight. The replacement conversation owns any
-      // actionable error; this stale warm-up is expected cancellation.
-      if (this.pendingThinConversationId !== conversationId) return;
-      throw error;
-    }
   }
 
   private async executeSubmission(
@@ -1489,6 +1492,22 @@ export class AgentChatView extends ItemView {
         };
       }
 
+      // The typed message must be on screen before any network work begins.
+      // The durable commit still happens in beforeSend once the session is
+      // ready; this is presentation only, and a rejected run rolls it back.
+      const optimisticHistory: readonly ChatMessage[] = historicalResubmit
+        ? [
+            ...this.transcript.snapshot().messages
+              .slice(0, historicalResubmit.expectedIndex) as readonly ChatMessage[],
+            admittedUserMessage,
+          ]
+        : [
+            ...this.transcript.snapshot().messages as readonly ChatMessage[],
+            admittedUserMessage,
+          ];
+      await this.workspace?.setHistory(optimisticHistory);
+      if (!this.isCurrentSubmissionOperation(operation)) return;
+
       const [hydratedUserMessage, contextSources, pluginBuildId] = await Promise.all([
         this.attachmentStore.hydrateMessage(admittedUserMessage),
         this.readThinAgentContextSources(
@@ -1569,6 +1588,11 @@ export class AgentChatView extends ItemView {
         && !userWasCommitted
       ) {
         this.restoreSubmissionDraft(operation);
+        // The optimistic bubble is withdrawn with the restored draft so the
+        // same words never sit in the transcript and the composer at once.
+        await this.workspace?.setHistory(
+          this.transcript.snapshot().messages as readonly ChatMessage[],
+        );
         if (result.kind === "failed") {
           this.pendingRejectedRetry = {
             turnId: admittedUserMessage.message_id,
@@ -2247,8 +2271,8 @@ export class AgentChatView extends ItemView {
       this.recordUiLifecycle("conversation_reset", "session", newConversationId);
       this.updateViewState();
       this.app.workspace.trigger("systemsculpt:chat-loaded", "");
-      void this.warmThinConversation(newConversationId)
-        .catch((error) => this.reportAgentError(error, "warmThinConversation"));
+      void this.prepareThinConversation(newConversationId)
+        .catch((error) => this.reportAgentError(error, "prepareThinConversation"));
       if (focus) this.workspace?.focus();
     } finally {
       this.finishSubmissionOperation(transition);
@@ -2641,7 +2665,9 @@ export class AgentChatView extends ItemView {
   }
 
   private logAgentError(error: unknown, method: string): void {
-    this.plugin.getLogger().error("ChatView agent session failed", error, {
+    // Diagnostics are observational: a torn-down view (or a partial test
+    // harness) must never turn an error report into a second failure.
+    this.plugin?.getLogger?.().error("ChatView agent session failed", error, {
       source: "AgentChatView",
       method,
       metadata: {

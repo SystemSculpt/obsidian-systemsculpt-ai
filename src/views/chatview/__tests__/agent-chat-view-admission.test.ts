@@ -141,7 +141,9 @@ function createHarness(failure: "before-start" | "before-commit" | "after-commit
   const workspace = {
     setHistory: jest.fn(async () => {
       setHistoryCalls += 1;
-      if (failure === "after-commit" && setHistoryCalls === 2) {
+      // Call order: (1) baseline history, (2) optimistic user bubble at
+      // admission, (3) durable render after commitUserTurn.
+      if (failure === "after-commit" && setHistoryCalls === 3) {
         throw new Error("render failed after durable commit");
       }
     }),
@@ -581,7 +583,7 @@ function createSavedChatLoadHarness(
     snapshot: jest.fn(() => loaded),
   };
   const logger = { error: jest.fn() };
-  const warmThinConversation = jest.fn(async () => undefined);
+  const prepareThinConversation = jest.fn(async () => undefined);
   const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
   Object.assign(view, {
     app,
@@ -622,9 +624,9 @@ function createSavedChatLoadHarness(
     syncAttachments: jest.fn(),
     updateViewState: jest.fn(),
     getLoadedPluginBuildId: jest.fn(async () => `sha256:${"d".repeat(64)}`),
-    warmThinConversation,
+    prepareThinConversation,
   });
-  return { agent, loaded, logger, transcript, view, warmThinConversation, workspace };
+  return { agent, loaded, logger, transcript, view, prepareThinConversation, workspace };
 }
 
 function cachedExecutingToolHistory(): ChatMessage[] {
@@ -1816,7 +1818,7 @@ describe("AgentChatView controls", () => {
       },
       syncAttachments: jest.fn(() => workspace.setAttachments([])),
       updateViewState: jest.fn(),
-      warmThinConversation: jest.fn(async () => undefined),
+      prepareThinConversation: jest.fn(async () => undefined),
       isFullyLoaded: true,
     });
 
@@ -1967,7 +1969,7 @@ describe("AgentChatView controls", () => {
       },
       syncAttachments: jest.fn(() => workspace.setAttachments([])),
       updateViewState: jest.fn(),
-      warmThinConversation: jest.fn(async () => undefined),
+      prepareThinConversation: jest.fn(async () => undefined),
       isFullyLoaded: true,
     });
     workspace.setQueue(oldQueue);
@@ -3000,7 +3002,7 @@ describe("AgentChatView thin conversation lifecycle", () => {
       "This older saved chat is view-only. You can read or export it. Start a new chat to continue.",
     );
     expect(harness.agent.hydrate).not.toHaveBeenCalled();
-    expect(harness.warmThinConversation).not.toHaveBeenCalled();
+    expect(harness.prepareThinConversation).not.toHaveBeenCalled();
     expect(harness.transcript.saveMetadata).not.toHaveBeenCalled();
     expect(harness.loaded.messages).toEqual(messages);
   });
@@ -3025,7 +3027,7 @@ describe("AgentChatView thin conversation lifecycle", () => {
 
     expect(harness.agent.cancel).toHaveBeenCalledTimes(1);
     expect(harness.agent.disconnect).toHaveBeenCalledTimes(1);
-    expect(harness.warmThinConversation).not.toHaveBeenCalled();
+    expect(harness.prepareThinConversation).not.toHaveBeenCalled();
   });
 
   it("keeps an empty saved chat without a server conversation writable", async () => {
@@ -3037,7 +3039,7 @@ describe("AgentChatView thin conversation lifecycle", () => {
     expect((harness.view as any).legacyHistoryViewOnly).toBe(false);
     expect(harness.workspace.setComposerReadOnly).toHaveBeenLastCalledWith(null);
     expect(harness.workspace.setBanner).toHaveBeenLastCalledWith(null);
-    expect(harness.warmThinConversation).toHaveBeenCalledWith(
+    expect(harness.prepareThinConversation).toHaveBeenCalledWith(
       expect.stringMatching(/^conversation_[a-f0-9]{32}$/),
     );
   });
@@ -3209,7 +3211,7 @@ describe("AgentChatView thin conversation lifecycle", () => {
     });
   });
 
-  it("drains a persisted FIFO once when terminal server history wins during saved-chat hydration", async () => {
+  it("drains a persisted FIFO once when a saved chat loads without reconnecting", async () => {
     const conversationId = "conversation_22222222222222222222222222222222";
     const messages: ChatMessage[] = [
       {
@@ -3265,12 +3267,9 @@ describe("AgentChatView thin conversation lifecycle", () => {
       getSnapshot: jest.fn(() => terminalSnapshot),
       cancel: jest.fn(async () => undefined),
       disconnect: jest.fn(),
-      hydrate: jest.fn(async () => {
-        // Reproduce a terminal event racing the successful hydrate. The
-        // deferred-completion path and post-hydrate path must converge on the
-        // same queue owner instead of promoting the first item twice.
-        (view as any).renderAgentSnapshot(terminalSnapshot);
-      }),
+      // A settled saved chat loads entirely from cache: the session must not
+      // reconnect, and the persisted FIFO still promotes exactly once.
+      hydrate: jest.fn(async () => undefined),
     };
     Object.assign(view, {
       app,
@@ -3324,7 +3323,7 @@ describe("AgentChatView thin conversation lifecycle", () => {
     await view.loadChatById(loaded.chatId);
     await Promise.resolve();
 
-    expect(agent.hydrate).toHaveBeenCalledTimes(1);
+    expect(agent.hydrate).not.toHaveBeenCalled();
     expect(runPromotedQueuedSubmission).toHaveBeenCalledTimes(1);
     expect(runPromotedQueuedSubmission).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -3564,17 +3563,9 @@ describe("AgentChatView thin conversation lifecycle", () => {
     expect(setTitle).toHaveBeenCalledWith("Restored draft");
   });
 
-  it("silently retires a warm bootstrap after another draft supersedes it", async () => {
+  it("prepares a draft locally without ever opening a server connection", async () => {
     const conversationId = "conversation_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-    const replacementId = "conversation_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
-    const hydrateStarted = deferred();
-    let rejectHydrate!: (reason?: unknown) => void;
-    const hydrate = jest.fn(() => {
-      hydrateStarted.resolve();
-      return new Promise<void>((_resolve, reject) => {
-        rejectHydrate = reject;
-      });
-    });
+    const hydrate = jest.fn(async () => undefined);
     const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
     Object.assign(view, {
       plugin: { settings: { licenseKey: "test-license" } },
@@ -3585,33 +3576,62 @@ describe("AgentChatView thin conversation lifecycle", () => {
       agent: { hydrate },
     });
 
-    const warming = (view as any).warmThinConversation(conversationId);
-    await hydrateStarted.promise;
-    (view as any).pendingThinConversationId = replacementId;
-    rejectHydrate(new Error("The agent conversation changed during bootstrap."));
+    await expect((view as any).prepareThinConversation(conversationId))
+      .resolves.toBeUndefined();
 
-    await expect(warming).resolves.toBeUndefined();
-    expect(hydrate).toHaveBeenCalledWith(conversationId);
+    expect(hydrate).not.toHaveBeenCalled();
+    expect((view as any).thinBootstrapRequest).toMatchObject({
+      conversation_id: conversationId,
+    });
   });
 
-  it("still surfaces a warm bootstrap failure for the current draft", async () => {
+  it("silently retires a superseded draft preparation without claiming the bootstrap", async () => {
+    const conversationId = "conversation_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const replacementId = "conversation_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    const buildIdStarted = deferred();
+    let releaseBuildId!: (value: `sha256:${string}`) => void;
+    const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
+    Object.assign(view, {
+      plugin: { settings: { licenseKey: "test-license" } },
+      getLoadedPluginBuildId: jest.fn(() => {
+        buildIdStarted.resolve();
+        return new Promise<`sha256:${string}`>((resolve) => {
+          releaseBuildId = resolve;
+        });
+      }),
+      pendingThinConversationId: conversationId,
+      thinBootstrapRequest: null,
+      thinClientId: `client_${"c".repeat(32)}`,
+      agent: { hydrate: jest.fn(async () => undefined) },
+    });
+
+    const preparing = (view as any).prepareThinConversation(conversationId);
+    await buildIdStarted.promise;
+    (view as any).pendingThinConversationId = replacementId;
+    releaseBuildId(`sha256:${"d".repeat(64)}`);
+
+    await expect(preparing).resolves.toBeUndefined();
+    expect((view as any).thinBootstrapRequest).toBeNull();
+    expect((view as any).agent.hydrate).not.toHaveBeenCalled();
+  });
+
+  it("still surfaces a draft preparation failure for the current draft", async () => {
     const conversationId = "conversation_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
     Object.assign(view, {
       plugin: { settings: { licenseKey: "test-license" } },
-      getLoadedPluginBuildId: jest.fn(async () => `sha256:${"d".repeat(64)}`),
+      getLoadedPluginBuildId: jest.fn(async () => {
+        throw new Error("Current build identity is unavailable.");
+      }),
       pendingThinConversationId: conversationId,
       thinBootstrapRequest: null,
       thinClientId: `client_${"c".repeat(32)}`,
-      agent: {
-        hydrate: jest.fn(async () => {
-          throw new Error("Current bootstrap failed.");
-        }),
-      },
+      agent: { hydrate: jest.fn(async () => undefined) },
     });
 
-    await expect((view as any).warmThinConversation(conversationId))
-      .rejects.toThrow("Current bootstrap failed.");
+    await expect((view as any).prepareThinConversation(conversationId))
+      .rejects.toThrow("Current build identity is unavailable.");
+    expect((view as any).agent.hydrate).not.toHaveBeenCalled();
   });
 
   it("detaches a transient Obsidian view without invoking explicit Stop", async () => {
