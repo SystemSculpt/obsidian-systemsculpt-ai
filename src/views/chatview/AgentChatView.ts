@@ -18,7 +18,6 @@ import {
   FileContextManager,
   type FileContextStateChangedEvent,
 } from "./FileContextManager";
-import { getSurfaceOwnerWindow } from "../../core/ui/surface/SurfaceDomContext";
 import { ChatExportService } from "./export/ChatExportService";
 import type { ChatExportResult } from "./export/ChatExportTypes";
 import type { ChatApprovalMode } from "./storage/ChatPersistenceTypes";
@@ -43,13 +42,12 @@ import {
   type AgentTranscriptSnapshot,
   type AgentUserCommitInput,
 } from "./AgentTranscriptRepository";
-import { ThinAgentBridge, type ThinAgentRunResult } from "./thin/ThinAgentBridge";
-import { ThinAgentConnection } from "./thin/ThinAgentConnection";
 import {
-  ThinAgentLifecycle,
-  type ThinAgentLifecycleCode,
-  type ThinAgentLifecyclePhase,
-} from "./thin/ThinAgentLifecycle";
+  FirstPartyAgentChatSession,
+  type FirstPartyAgentLifecycleCode,
+  type FirstPartyAgentLifecyclePhase,
+  type FirstPartyAgentRunResult,
+} from "./thin/FirstPartyAgentChatSession";
 import { ThinAgentMutationJournal } from "./thin/ThinAgentMutationJournal";
 import {
   thinAgentDataUrl,
@@ -89,6 +87,12 @@ type PendingHistoricalResubmit = Extract<AgentUserCommitInput, { kind: "resend" 
   requiresReplayConfirmation: boolean;
 }>;
 
+type PreparedHistoricalResubmit = Readonly<{
+  pending: PendingHistoricalResubmit;
+  text: string;
+  hasLaterUserMessage: boolean;
+}>;
+
 type PendingRejectedSubmissionRetry = Readonly<{
   turnId: string;
   submission: AgentComposerSubmit;
@@ -110,6 +114,8 @@ const LEGACY_HISTORY_VIEW_ONLY_BANNER =
   "This older saved chat is view-only. You can read or export it. Start a new chat to continue.";
 const LEGACY_HISTORY_VIEW_ONLY_COMPOSER =
   "View-only saved chat. Start a new chat to continue.";
+const AGENT_SESSION_RESTORE_ERROR =
+  "The agent session could not be restored. This cached transcript is shown for reference. Reload the chat to try again.";
 
 type ActiveSubmissionOperation = {
   readonly kind: "submission" | "transition";
@@ -122,7 +128,7 @@ type ActiveSubmissionOperation = {
   readonly finished: Promise<void>;
   readonly resolveFinished: () => void;
   preparedSubmission: AgentComposerSubmit | null;
-  runPromise: Promise<ThinAgentRunResult> | null;
+  runPromise: Promise<FirstPartyAgentRunResult> | null;
   includeContextFiles: boolean;
   draftRestored: boolean;
   draftRestorable: boolean;
@@ -183,6 +189,23 @@ function historicalReplayToolOccurrences(
     if (part.type === "tool_call") tools.push(part.data);
   }
   return tools;
+}
+
+function cachedTranscriptRecoverySnapshot(
+  messages: readonly Readonly<ChatMessage>[],
+): AgentConversationSnapshot | null {
+  const hasCachedExecutingTool = messages.some((message) =>
+    historicalReplayToolOccurrences(message).some((tool) => tool.state === "executing"));
+  if (!hasCachedExecutingTool) return null;
+  return Object.freeze({
+    runId: null,
+    turnId: null,
+    status: "running",
+    phase: "retrying",
+    statusLabel: "Recovering",
+    messages: Object.freeze([]),
+    parts: Object.freeze([]),
+  });
 }
 
 function historicalReplayToolSignature(
@@ -324,11 +347,6 @@ function terminalLiveResubmitConsequences(
   };
 }
 
-function formatCredits(value: number): string {
-  try { return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(value); }
-  catch { return String(Math.round(value)); }
-}
-
 /**
  * Lean Chat view coordinator. Durable transcript, active run, native DOM
  * projection, and local vault tools each have one owner.
@@ -347,8 +365,7 @@ export class AgentChatView extends ItemView {
   public creditsBalance: CreditsBalanceSnapshot | null = null;
 
   private readonly transcript: AgentTranscriptRepository;
-  private readonly agent: ThinAgentBridge;
-  private readonly agentConnection: ThinAgentConnection;
+  private readonly agent: FirstPartyAgentChatSession;
   private readonly documentAttachmentProcessor: ManagedChatDocumentAttachmentProcessor;
   private readonly attachmentStore: ChatAttachmentVaultStore;
   private readonly queueRepository: AgentQueueStateRepository;
@@ -412,10 +429,11 @@ export class AgentChatView extends ItemView {
           this.applyTranscriptIdentity(snapshot);
         }
       },
-      getOwnerWindow: () => getSurfaceOwnerWindow(this.contentEl),
     });
     this.transcript = new AgentTranscriptRepository(this.chatStorage, () => ({
-      contextFiles: new Set(this.contextManager.getContextFiles()),
+      // `context_files` is the persisted compatibility key. Its values are
+      // precisely the files the user pinned for rereading on every message.
+      contextFiles: new Set(this.contextManager.getPinnedFiles()),
       title: this.chatTitle,
       chatFontSize: this.chatFontSize,
       approvalMode: this.approvalMode,
@@ -431,32 +449,25 @@ export class AgentChatView extends ItemView {
     });
     this.documentAttachmentProcessor = new ManagedChatDocumentAttachmentProcessor(plugin.app, plugin);
 
-    const thinAgentLifecycle = new ThinAgentLifecycle((record) => {
-      plugin.getLogger().lifecycle({ ...record });
-    });
-    this.agentConnection = new ThinAgentConnection({
+    this.agent = new FirstPartyAgentChatSession({
       baseUrl: new URL(this.aiService.baseUrl).origin,
       pluginVersion: plugin.manifest.version,
       licenseKey: () => plugin.settings.licenseKey,
-      lifecycle: thinAgentLifecycle,
       bootstrapRequest: () => {
         if (!this.thinBootstrapRequest) {
           throw new Error("SystemSculpt started before this message was ready.");
         }
         return this.thinBootstrapRequest;
       },
-      onTerminalConnectionError: (error) =>
-        this.logAgentError(error, "onTerminalConnectionError"),
-    });
-    const journalPath = normalizePath([
-      plugin.app.vault.configDir,
-      "plugins",
-      plugin.manifest.id,
-      "thin-agent-mutations.json",
-    ].join("/"));
-    this.agent = new ThinAgentBridge({
-      connection: this.agentConnection,
-      mutationJournal: new ThinAgentMutationJournal(plugin.app.vault.adapter, journalPath),
+      mutationJournal: new ThinAgentMutationJournal(
+        plugin.app.vault.adapter,
+        normalizePath([
+          plugin.app.vault.configDir,
+          "plugins",
+          plugin.manifest.id,
+          "thin-agent-mutations.json",
+        ].join("/")),
+      ),
       executeLocalTool: (call, signal) => this.aiService.executeLocalVaultToolCall({
           toolCall: {
             id: call.callId,
@@ -479,7 +490,8 @@ export class AgentChatView extends ItemView {
         this.workspace?.setMessageAttachmentLimits(limits);
       },
       refreshCredits: () => this.refreshCreditsBalance(),
-      reportError: (error) => this.logAgentError(error, "agentBridge"),
+      reportError: (error) => this.logAgentError(error, "agentSession"),
+      onLifecycle: (record) => plugin.getLogger().lifecycle({ ...record }),
     });
   }
 
@@ -502,15 +514,18 @@ export class AgentChatView extends ItemView {
         this.conversationOriginToken,
       ),
       onStop: () => this.stopActiveRun(),
-      onAttach: () => this.contextManager.addContextFile(),
-      onVaultContextDrop: (path) => this.addDroppedVaultContext(path),
+      onAttach: () => this.contextManager.openPinFiles(),
+      onVaultContextDrop: (path) => this.pinDroppedVaultFile(path),
       documentAttachmentProcessor: this.documentAttachmentProcessor,
       attachmentLimits: this.chatInputLimits,
       onMic: () => this.toggleRecording(),
-      onRemoveAttachment: async (attachment) => { await this.contextManager.removeFromContextFiles(attachment.path || attachment.label); },
+      onRemoveAttachment: async (attachment) => {
+        await this.contextManager.unpinFile(attachment.path || attachment.label);
+      },
       onApprove: (approvalId, approved, rememberForChat) => this.respondToToolApproval(approvalId, approved, rememberForChat),
       onOpenArtifact: (artifact) => this.openArtifact(artifact),
       onCopyArtifactPath: (artifact) => this.copyArtifactPath(artifact),
+      onRetryFailedTurn: (id) => this.retryFailedTurn(id),
       onRetryMessage: (id) => this.prepareRetry(id),
       onResubmitMessage: (id, text) => this.resubmitMessage(id, text),
       onCancelMessageEdit: (id) => this.cancelMessageEdit(id),
@@ -522,7 +537,8 @@ export class AgentChatView extends ItemView {
       onCancelQueued: async (id) => { await this.cancelQueuedFollowUp(id); },
       onRunQueuedNow: (id) => this.runQueuedFollowUpNow(id),
       onApprovalModeChange: (mode) => {
-        void this.setApprovalMode(mode).catch((error) => this.reportAgentError(error));
+        void this.setApprovalMode(mode)
+          .catch((error) => this.reportAgentError(error, "approvalModeChange"));
       },
     });
     this.addChild(this.workspace);
@@ -594,7 +610,12 @@ export class AgentChatView extends ItemView {
     this.conversationOriginToken = messageId("conversation-origin");
     const loadOriginToken = this.conversationOriginToken;
     const transition = this.beginConversationTransition(loadOriginToken);
+    let thinConversationHydrated = false;
     try {
+      // Retire a no-spend draft warm-up before cancelling it. Its expected
+      // preparation rejection belongs to the replaced draft, not this chat.
+      this.pendingThinConversationId = null;
+      this.thinBootstrapRequest = null;
       this.messageEditGeneration += 1;
       this.pendingRetry = null;
       this.pendingRejectedRetry = null;
@@ -602,8 +623,6 @@ export class AgentChatView extends ItemView {
       if (this.queueHydrated) await this.persistQueueState();
       await this.agent.cancel();
       this.agent.disconnect();
-      this.thinBootstrapRequest = null;
-      this.pendingThinConversationId = null;
       this.sessionTrustedToolNames.clear();
       this.isFullyLoaded = false;
       this.pendingForkHistory = null;
@@ -625,7 +644,7 @@ export class AgentChatView extends ItemView {
         return;
       }
       this.contextLoading = true;
-      try { await this.contextManager.setContextFiles([...loaded.contextFiles]); }
+      try { await this.contextManager.setPinnedFiles([...loaded.contextFiles]); }
       finally { this.contextLoading = false; }
       this.applyTranscriptIdentity(loaded);
       this.draftKey = loaded.chatId;
@@ -636,7 +655,11 @@ export class AgentChatView extends ItemView {
       this.workspace?.setApprovalMode(this.approvalMode);
       this.workspace?.setTitle(this.chatTitle);
       await this.workspace?.setHistory(loaded.messages as readonly ChatMessage[]);
-      await this.workspace?.setAgentSnapshot(null);
+      await this.workspace?.setAgentSnapshot(
+        loaded.agentConversationId
+          ? cachedTranscriptRecoverySnapshot(loaded.messages)
+          : null,
+      );
       const legacyHistoryViewOnly = loaded.messages.length > 0 && !loaded.agentConversationId;
       this.setLegacyHistoryViewOnly(legacyHistoryViewOnly);
       let hydrationFailed = false;
@@ -664,6 +687,7 @@ export class AgentChatView extends ItemView {
             this.conversationOriginToken !== loadOriginToken
             || this.pendingThinConversationId !== conversationId
           ) return;
+          thinConversationHydrated = true;
         } catch (error) {
           if (
             this.conversationOriginToken !== loadOriginToken
@@ -671,12 +695,17 @@ export class AgentChatView extends ItemView {
           ) return;
           hydrationFailed = true;
           this.logAgentError(error, "loadChatHydration");
-          await this.handleError(error);
+          try {
+            await this.workspace?.setAgentSnapshot(null);
+          } catch (renderError) {
+            this.logAgentError(renderError, "loadChatHydrationReset");
+          }
+          this.workspace?.setBanner(AGENT_SESSION_RESTORE_ERROR, "error");
         }
       } else if (loaded.messages.length === 0) {
         this.pendingThinConversationId = protocolId("conversation");
         void this.warmThinConversation(this.pendingThinConversationId)
-          .catch((error) => this.reportAgentError(error));
+          .catch((error) => this.reportAgentError(error, "warmThinConversation"));
       }
       this.syncAttachments();
       if (!legacyHistoryViewOnly && !hydrationFailed) {
@@ -688,6 +717,9 @@ export class AgentChatView extends ItemView {
     } finally {
       this.finishSubmissionOperation(transition);
       this.promoteDeferredRecoveredCompletion(loadOriginToken);
+      if (thinConversationHydrated) {
+        this.promoteHydratedQueuedSubmission(loadOriginToken);
+      }
     }
   }
 
@@ -756,13 +788,13 @@ export class AgentChatView extends ItemView {
     this.app.workspace.requestSaveLayout();
   }
 
-  public async addFileToContext(file: TFile): Promise<void> {
+  public async pinFile(file: TFile): Promise<void> {
     if (this.blockLegacyHistoryAction()) return;
-    await this.contextManager.addFileToContext(file);
+    await this.contextManager.pinVaultFile(file);
   }
 
-  public async addContextFile(file: TFile): Promise<void> {
-    await this.addFileToContext(file);
+  public async addFileToContext(file: TFile): Promise<void> {
+    await this.pinFile(file);
   }
 
   public focusInput(): void { this.workspace?.focus(); }
@@ -848,16 +880,16 @@ export class AgentChatView extends ItemView {
   public async refreshCreditsBalance(): Promise<void> {
     if (!this.plugin.settings.licenseKey?.trim()) {
       this.creditsBalance = null;
-      this.workspace?.setCredits(null);
+      this.workspace?.setCreditsBalance(null);
       return;
     }
     if (this.creditsPromise) return this.creditsPromise;
     this.creditsPromise = (async () => {
       try {
         this.creditsBalance = await this.aiService.getCreditsBalance();
-        this.workspace?.setCredits(formatCredits(this.creditsBalance.totalRemaining), this.creditsBalance.totalRemaining <= 1000);
+        this.workspace?.setCreditsBalance(this.creditsBalance);
       } catch {
-        this.workspace?.setCredits(null);
+        this.workspace?.setCreditsBalance(null);
       }
     })().finally(() => { this.creditsPromise = null; });
     return this.creditsPromise;
@@ -868,10 +900,7 @@ export class AgentChatView extends ItemView {
       initialBalance: this.creditsBalance,
       onBalanceUpdated: async (balance) => {
         this.creditsBalance = balance;
-        this.workspace?.setCredits(
-          balance ? formatCredits(balance.totalRemaining) : null,
-          !!balance && balance.totalRemaining <= 1000,
-        );
+        this.workspace?.setCreditsBalance(balance);
       },
       settingsTab: "account",
     });
@@ -907,7 +936,7 @@ export class AgentChatView extends ItemView {
     this.pendingThinConversationId = null;
     this.thinBootstrapRequest = null;
     try {
-      await this.agent.close();
+      await this.agent.detach();
       await this.transcript.idle();
       if (closingSubmission && !closingSubmission.userCommitted) {
         const submission = closingSubmission.preparedSubmission
@@ -936,7 +965,6 @@ export class AgentChatView extends ItemView {
       this.transcriptCommitUnsubscribe?.();
       this.recorderToggleUnsubscribe?.();
       this.recorderTranscriptUnsubscribe?.();
-      this.contextManager.destroy();
       this.workspace = null;
     } finally {
       // A submit that began while Obsidian was closing must not resume against
@@ -947,19 +975,22 @@ export class AgentChatView extends ItemView {
   }
 
   private isSubmissionActive(): boolean {
-    const bridgeStatus = (
-      this.agent as Partial<ThinAgentBridge> | undefined
-    )?.getSnapshot?.()?.status;
+    const sessionStatus = this.agent?.getSnapshot?.()?.status;
     return this.activeSubmissionOperation != null
-      || bridgeStatus === "running"
-      || bridgeStatus === "waiting";
+      || sessionStatus === "running"
+      || sessionStatus === "waiting";
   }
 
   private recordUiLifecycle(
-    code: ThinAgentLifecycleCode,
-    phase: ThinAgentLifecyclePhase = "response",
+    code: FirstPartyAgentLifecycleCode,
+    phase: FirstPartyAgentLifecyclePhase = "response",
+    conversationId?: string,
   ): void {
-    this.agentConnection?.recordLifecycle?.({ code, phase });
+    this.agent?.recordLifecycle?.({
+      code,
+      phase,
+      ...(conversationId ? { conversationId } : {}),
+    });
   }
 
   private beginQueueDrainSuppression(): () => void {
@@ -1203,24 +1234,24 @@ export class AgentChatView extends ItemView {
   }
 
   private async readThinAgentContextSources(
-    entries: ReadonlySet<string>,
+    pinnedEntries: ReadonlySet<string>,
   ): Promise<ThinAgentContextSource[]> {
     const sources: ThinAgentContextSource[] = [];
     let textBytes = 0;
     let imageBytes = 0;
     let imageCount = 0;
-    for (const entry of entries) {
+    for (const entry of pinnedEntries) {
       if (sources.length >= this.chatInputLimits.maxContentBlocksPerMessage) {
-        throw new Error("Selected context exceeds the context source limit.");
+        throw new Error("Pinned files exceed the per-message source limit.");
       }
       if (entry.startsWith("doc:")) {
         const documentId = entry.slice(4).trim();
         if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
           .test(documentId)) {
-          throw new Error("A selected document reference is invalid.");
+          throw new Error("A pinned document reference is invalid.");
         }
         if (entry.length > 1_024 || entry.includes("\0")) {
-          throw new Error("A selected document path is invalid.");
+          throw new Error("A pinned document path is invalid.");
         }
         sources.push({
           kind: "document_ref",
@@ -1236,7 +1267,7 @@ export class AgentChatView extends ItemView {
           ? this.app.vault.getAbstractFileByPath(`${linkPath}.md`)
           : null);
       if (!(resolved instanceof TFile)) {
-        throw new Error(`Selected context file not found: ${linkPath}`);
+        throw new Error(`Pinned file not found: ${linkPath}`);
       }
       if (resolved.path.length > 1_024 || resolved.path.includes("\0")) {
         throw new Error(`${resolved.name} has an invalid context path.`);
@@ -1244,15 +1275,15 @@ export class AgentChatView extends ItemView {
       if (isVaultImageContextFileExtension(resolved.extension)) {
         imageCount += 1;
         if (imageCount > this.chatInputLimits.maxImagesPerTurn) {
-          throw new Error("Selected context exceeds the image count limit.");
+          throw new Error("Pinned files exceed the per-message image count limit.");
         }
         if (resolved.stat.size > this.chatInputLimits.maxImageBytes) {
-          throw new Error(`${resolved.name} exceeds the image context limit.`);
+          throw new Error(`${resolved.name} exceeds the pinned image limit.`);
         }
         const bytes = new Uint8Array(await this.app.vault.readBinary(resolved));
         imageBytes += bytes.byteLength;
         if (imageBytes > this.chatInputLimits.maxTotalImageBytes) {
-          throw new Error("Selected context images exceed the total image limit.");
+          throw new Error("Pinned images exceed the total per-message image limit.");
         }
         sources.push({
           kind: "image",
@@ -1263,11 +1294,11 @@ export class AgentChatView extends ItemView {
         const content = await this.app.vault.read(resolved);
         const byteLength = new TextEncoder().encode(content).byteLength;
         if (byteLength > this.chatInputLimits.maxTextBytesPerBlock) {
-          throw new Error(`${resolved.name} exceeds the text context limit.`);
+          throw new Error(`${resolved.name} exceeds the pinned text file limit.`);
         }
         textBytes += new TextEncoder().encode(resolved.path).byteLength + byteLength;
         if (textBytes > this.chatInputLimits.maxTotalTextBytes) {
-          throw new Error("Selected context files exceed the total text limit.");
+          throw new Error("Pinned files exceed the total per-message text limit.");
         }
         sources.push({ kind: "text", path: resolved.path, content });
       }
@@ -1353,8 +1384,8 @@ export class AgentChatView extends ItemView {
     operation.includeContextFiles = options.includeContextFiles !== false;
 
     let userMessage: ChatMessage | null = null;
-    let run: Promise<ThinAgentRunResult> | null = null;
-    let result: ThinAgentRunResult | undefined;
+    let run: Promise<FirstPartyAgentRunResult> | null = null;
+    let result: FirstPartyAgentRunResult | undefined;
     let queuedPromotion: Readonly<{
       operation: ActiveSubmissionOperation;
       item: AgentQueuedFollowUp;
@@ -1362,6 +1393,14 @@ export class AgentChatView extends ItemView {
     }> | null = null;
 
     try {
+      if (
+        options.historicalResubmit
+        && !this.transcript.snapshot().agentConversationId
+      ) {
+        this.setLegacyHistoryViewOnly(true);
+        this.blockLegacyHistoryAction();
+        return;
+      }
       if (!this.isCurrentSubmissionOperation(operation)) return;
       await this.workspace?.setHistory(
         this.transcript.snapshot().messages as readonly ChatMessage[],
@@ -1440,7 +1479,7 @@ export class AgentChatView extends ItemView {
         this.readThinAgentContextSources(
           options.includeContextFiles === false
             ? new Set()
-            : new Set(this.contextManager.getContextFiles()),
+            : new Set(this.contextManager.getPinnedFiles()),
         ),
         this.getLoadedPluginBuildId(),
       ]);
@@ -1472,7 +1511,7 @@ export class AgentChatView extends ItemView {
           if (!this.isCurrentSubmissionOperation(operation)) {
             throw new Error("This chat changed before the request was admitted.");
           }
-          const staged = await this.agentConnection.stageContext(
+          const staged = await this.agent.stageContext(
             admittedUserMessage.message_id,
             contextSources,
             signal,
@@ -1528,9 +1567,18 @@ export class AgentChatView extends ItemView {
       this.handleRunResult();
       if (result.kind === "completed") {
         try {
-          await this.workspace?.settleCompletedRun(
-            this.transcript.snapshot().messages as readonly ChatMessage[],
-          );
+          const cachedMessages = this.transcript.snapshot().messages as readonly ChatMessage[];
+          const completedMessage = result.message;
+          if (completedMessage) {
+            const settlementMessages = cachedMessages.some((message) =>
+              message.message_id === completedMessage.message_id)
+              ? cachedMessages
+              : [...cachedMessages, completedMessage];
+            await this.workspace?.settleCompletedRun(settlementMessages);
+          }
+          // If no cacheable assistant could be derived, keep the bridge's
+          // completed live snapshot visible instead of replacing it with a
+          // transcript that only contains the user turn.
         } catch (error) {
           this.logAgentError(error, "completedRunSettlement");
         }
@@ -1803,17 +1851,51 @@ export class AgentChatView extends ItemView {
 
   private async prepareRetry(messageIdToRetry: string): Promise<void> {
     if (this.blockLegacyHistoryAction()) return;
+    const target = this.transcript.snapshot().messages.find((message) =>
+      message.message_id === messageIdToRetry && message.role === "user");
+    if (!target) {
+      await this.retryRejectedSubmission(messageIdToRetry);
+      return;
+    }
+    const prepared = await this.prepareHistoricalResubmit(messageIdToRetry);
+    if (!prepared) return;
+    await this.showHistoricalResubmitEditor(prepared);
+  }
+
+  private async retryFailedTurn(messageIdToRetry: string): Promise<void> {
+    if (this.blockLegacyHistoryAction()) return;
+    const target = this.transcript.snapshot().messages.find((message) =>
+      message.message_id === messageIdToRetry && message.role === "user");
+    if (!target) {
+      await this.retryRejectedSubmission(messageIdToRetry);
+      return;
+    }
+    const prepared = await this.prepareHistoricalResubmit(messageIdToRetry);
+    if (!prepared) return;
+    const active = this.agent.getSnapshot();
+    const canRetryDirectly = active?.status === "failed"
+      && active.turnId === messageIdToRetry
+      && !prepared.hasLaterUserMessage
+      && prepared.pending.unavailableAttachmentCount === 0
+      && !prepared.pending.requiresReplayConfirmation;
+    if (!canRetryDirectly) {
+      await this.showHistoricalResubmitEditor(prepared);
+      return;
+    }
+    await this.resubmitMessage(messageIdToRetry, prepared.text);
+  }
+
+  private async prepareHistoricalResubmit(
+    messageIdToRetry: string,
+  ): Promise<PreparedHistoricalResubmit | null> {
     const expectedConversationOriginToken = this.conversationOriginToken;
     const snapshot = this.transcript.snapshot();
     const index = snapshot.messages.findIndex((message) => message.message_id === messageIdToRetry);
     const message = snapshot.messages[index];
-    if (index < 0 || message?.role !== "user") {
-      await this.retryRejectedSubmission(messageIdToRetry);
-      return;
-    }
+    if (index < 0 || message?.role !== "user") return null;
     if (this.isSubmissionActive()) {
       new Notice("Wait for the current response to finish before retrying from here.", 5000);
-      return;
+      return null;
     }
     const generation = ++this.messageEditGeneration;
     const hydratedMessage = await this.attachmentStore.hydrateMessage(message as ChatMessage);
@@ -1821,14 +1903,14 @@ export class AgentChatView extends ItemView {
       generation !== this.messageEditGeneration
       || !this.isCurrentConversationOrigin(expectedConversationOriginToken)
       || this.isSubmissionActive()
-    ) return;
+    ) return null;
     const current = this.transcript.snapshot();
     if (
       current.version !== snapshot.version
       || current.messages[index]?.message_id !== messageIdToRetry
     ) {
       new Notice("This chat changed before the message could be edited.", 5000);
-      return;
+      return null;
     }
     const draft = restoreChatMessageDraft(hydratedMessage);
     const expectedAttachments = message.attachmentMetadata?.length ?? 0;
@@ -1849,7 +1931,7 @@ export class AgentChatView extends ItemView {
         durableConsequences.requiresReplayConfirmation
         || liveConsequences.requiresReplayConfirmation,
     };
-    this.pendingRetry = {
+    const pending: PendingHistoricalResubmit = {
       kind: "resend",
       message: { ...message } as ChatMessage,
       targetMessageId: messageIdToRetry,
@@ -1859,12 +1941,27 @@ export class AgentChatView extends ItemView {
       unavailableAttachmentCount,
       ...consequences,
     };
-    await this.workspace?.showMessageEditor({
-      messageId: messageIdToRetry,
+    this.pendingRetry = pending;
+    return {
+      pending,
       text: draft.text,
-      hasAttachments: draft.attachments.length > 0,
-      unavailableAttachmentCount,
-      ...consequences,
+      hasLaterUserMessage: current.messages
+        .slice(index + 1)
+        .some((entry) => entry.role === "user"),
+    };
+  }
+
+  private async showHistoricalResubmitEditor(
+    prepared: PreparedHistoricalResubmit,
+  ): Promise<void> {
+    const { pending, text } = prepared;
+    await this.workspace?.showMessageEditor({
+      messageId: pending.targetMessageId,
+      text,
+      hasAttachments: pending.attachments.length > 0,
+      unavailableAttachmentCount: pending.unavailableAttachmentCount,
+      laterMessageCount: pending.laterMessageCount,
+      requiresReplayConfirmation: pending.requiresReplayConfirmation,
     });
   }
 
@@ -2057,16 +2154,23 @@ export class AgentChatView extends ItemView {
   private respondToToolApproval(approvalId: string, approved: boolean, rememberForChat = false): void {
     const tool = this.agent.getSnapshot().parts.find((part) =>
       part.kind === "tool" && part.approvalId === approvalId);
-    const trustedToolName = approved && rememberForChat && tool?.kind === "tool"
-      ? tool.name
-      : null;
-    const wasAlreadyTrusted = trustedToolName
-      ? this.sessionTrustedToolNames.has(trustedToolName)
-      : false;
-    if (trustedToolName) this.sessionTrustedToolNames.add(trustedToolName);
-    const settled = this.agent.respondToApproval(approvalId, approved);
-    if (!settled && trustedToolName && !wasAlreadyTrusted) {
-      this.sessionTrustedToolNames.delete(trustedToolName);
+    const rememberAllMutations = approved
+      && rememberForChat
+      && tool?.kind === "tool"
+      && tool.location === "vault"
+      && isMutatingTool(tool.name)
+      && tool.name !== "trash";
+    const introducedChatTrust = rememberAllMutations
+      && !this.sessionTrustedToolNames.has("*");
+    if (rememberAllMutations) this.sessionTrustedToolNames.add("*");
+    try {
+      const settled = this.agent.respondToApproval(approvalId, approved);
+      if (!settled && introducedChatTrust) {
+        this.sessionTrustedToolNames.delete("*");
+      }
+    } catch (error) {
+      if (introducedChatTrust) this.sessionTrustedToolNames.delete("*");
+      throw error;
     }
   }
 
@@ -2082,12 +2186,14 @@ export class AgentChatView extends ItemView {
       this.setLegacyHistoryViewOnly(false);
       this.pendingForkHistory = null;
       this.deferredRecoveredCompletion = null;
+      // The old draft no longer owns preparation errors once New chat wins.
+      this.pendingThinConversationId = null;
+      this.thinBootstrapRequest = null;
       const releaseQueueDrainSuppression = this.beginQueueDrainSuppression();
       try { await this.agent.cancel(); }
       finally { releaseQueueDrainSuppression(); }
       this.agent.disconnect();
       this.workspace?.resetComposerDraft();
-      this.thinBootstrapRequest = null;
       const newConversationId = protocolId("conversation");
       this.pendingThinConversationId = newConversationId;
       if (this.queueHydrated) await this.persistQueueState();
@@ -2102,7 +2208,7 @@ export class AgentChatView extends ItemView {
       this.approvalMode = "ask";
       this.workspace?.setApprovalMode(this.approvalMode);
       this.contextLoading = true;
-      try { this.contextManager.clearContext(); }
+      try { this.contextManager.clearPinnedFiles(); }
       finally { this.contextLoading = false; }
       const snapshot = this.transcript.reset({ title: title?.trim() || generateDefaultChatTitle() });
       this.applyTranscriptIdentity(snapshot);
@@ -2119,11 +2225,11 @@ export class AgentChatView extends ItemView {
         await this.queueRepository.save(this.draftKey, []);
       }
       this.isFullyLoaded = true;
-      this.recordUiLifecycle("conversation_reset", "session");
+      this.recordUiLifecycle("conversation_reset", "session", newConversationId);
       this.updateViewState();
       this.app.workspace.trigger("systemsculpt:chat-loaded", "");
       void this.warmThinConversation(newConversationId)
-        .catch((error) => this.reportAgentError(error));
+        .catch((error) => this.reportAgentError(error, "warmThinConversation"));
       if (focus) this.workspace?.focus();
     } finally {
       this.finishSubmissionOperation(transition);
@@ -2138,7 +2244,7 @@ export class AgentChatView extends ItemView {
   }
 
   private syncAttachments(): void {
-    this.workspace?.setAttachments([...this.contextManager.getContextFiles()].map((entry) => {
+    this.workspace?.setAttachments([...this.contextManager.getPinnedFiles()].map((entry) => {
       const path = entry.replace(/^\[\[(.*?)\]\]$/, "$1");
       const file = this.app.vault.getAbstractFileByPath(path);
       const isImage = file instanceof TFile
@@ -2162,13 +2268,13 @@ export class AgentChatView extends ItemView {
     }
   }
 
-  private async addDroppedVaultContext(path: string): Promise<void> {
+  private async pinDroppedVaultFile(path: string): Promise<void> {
     const file = this.app.vault.getAbstractFileByPath(path);
     if (!(file instanceof TFile)) {
       new Notice(`Vault file not found: ${path}`, 5000);
       return;
     }
-    await this.contextManager.addFileToContext(file);
+    await this.contextManager.pinVaultFile(file);
   }
 
   private syncQueue(): void {
@@ -2413,8 +2519,11 @@ export class AgentChatView extends ItemView {
     return true;
   }
 
-  private reportAgentError(error: unknown): void {
-    this.logAgentError(error, "reportAgentError");
+  private reportAgentError(
+    error: unknown,
+    method = "reportAgentError",
+  ): void {
+    this.logAgentError(error, method);
     void this.handleError(error);
   }
 
@@ -2486,8 +2595,34 @@ export class AgentChatView extends ItemView {
     );
   }
 
+  /**
+   * A detached server run can finish before the replacement view hydrates it.
+   * In that case there is no recovered active run to publish a fresh completed
+   * snapshot, so resume the durable local FIFO only after authoritative
+   * hydration has succeeded and the load transition has released ownership.
+   */
+  private promoteHydratedQueuedSubmission(
+    expectedConversationOriginToken: string,
+  ): void {
+    if (
+      !this.isCurrentConversationOrigin(expectedConversationOriginToken)
+      || this.activeSubmissionOperation
+      || this.queuedFollowUps.length === 0
+    ) return;
+    const status = this.agent.getSnapshot().status;
+    if (status !== "idle" && status !== "completed") return;
+    const promotion = this.promoteRecoveredQueuedSubmission(
+      expectedConversationOriginToken,
+    );
+    if (!promotion) return;
+    void this.runPromotedQueuedSubmission(
+      promotion,
+      expectedConversationOriginToken,
+    );
+  }
+
   private logAgentError(error: unknown, method: string): void {
-    this.plugin.getLogger().error("ChatView agent bridge failed", error, {
+    this.plugin.getLogger().error("ChatView agent session failed", error, {
       source: "AgentChatView",
       method,
       metadata: {

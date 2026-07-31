@@ -86,12 +86,22 @@ describe("built bundle (main.js)", () => {
     plugin.unload();
   });
 
-  it("keeps the maintained headless chat transport without shipping the React UI runtime", () => {
+  it("ships only the first-party agent protocol without legacy SDK runtimes", () => {
     const code = readFileSync(BUNDLE_PATH, "utf8");
 
-    expect(code).toContain("node_modules/agents/dist/chat/react.js");
-    expect(code).toContain("WebSocketChatTransport");
-    expect(code).not.toContain("node_modules/react/cjs/react.development.js");
+    expect(code).toContain("systemsculpt.agent.command.v1");
+    expect(code).toContain("systemsculpt.agent.event.v1");
+    for (const forbidden of [
+      "node_modules/agents/",
+      "node_modules/ai/",
+      "node_modules/@ai-sdk/",
+      "node_modules/react/",
+      "node_modules/react-dom/",
+      "WebSocketChatTransport",
+      "cf_agent_",
+    ]) {
+      expect(code).not.toContain(forbidden);
+    }
     expect(code).not.toContain("Invalid hook call");
 
     // eslint-disable-next-line @typescript-eslint/no-var-requires

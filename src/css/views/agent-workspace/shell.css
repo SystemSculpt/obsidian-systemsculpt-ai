@@ -79,6 +79,11 @@
   color: var(--ss-warning);
 }
 
+.systemsculpt-agent-credits.is-internal-qa {
+  border-color: var(--interactive-accent);
+  color: var(--text-accent);
+}
+
 .systemsculpt-agent-viewport {
   position: relative;
   flex: 1 1 auto;

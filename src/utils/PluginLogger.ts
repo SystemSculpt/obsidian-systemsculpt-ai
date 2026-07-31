@@ -19,7 +19,17 @@ export type SupportDiagnosticEvent = Readonly<{
   severity: "info" | "error";
   code: string;
   phase: string;
+  origin?: string;
+  cause?: string;
   sequence?: number;
+  conversation_id?: string;
+  request_id?: string;
+  client_instance_id?: string;
+  plugin_build_id?: string;
+  run_id?: string;
+  server_run_id?: string;
+  tool_name?: string;
+  tool_call_id?: string;
   status?: number;
   retryable?: boolean;
   incident_id?: string;
@@ -45,7 +55,7 @@ const LEVEL_TO_THRESHOLD: Record<PluginLogLevel, LogLevel> = {
   debug: LogLevel.DEBUG,
 };
 
-const THIN_AGENT_FAILURE_INPUT_MESSAGE = "ChatView agent bridge failed";
+const THIN_AGENT_FAILURE_INPUT_MESSAGE = "ChatView agent session failed";
 const THIN_AGENT_FAILURE_LOG_MESSAGE = "thin-agent:failure";
 const THIN_AGENT_FAILURE_DEDUPE_MS = 1_000;
 const MAX_RECENT_THIN_AGENT_FAILURES = 128;
@@ -66,7 +76,6 @@ const SAFE_THIN_AGENT_FAILURE_CODES = new Set([
   "response_finished_with_pending_vault_action",
   "response_in_progress",
   "response_interrupted",
-  "response_resume_failed",
   "response_save_failed",
   "response_start_failed",
   "response_start_rate_limited",
@@ -87,7 +96,50 @@ const SAFE_THIN_AGENT_FAILURE_CODES = new Set([
   "web_search_unavailable",
 ]);
 const SAFE_THIN_AGENT_INCIDENT_ID = /^incident_[a-f0-9]{32}$/u;
-const SAFE_THIN_AGENT_IDENTIFIER = /^[A-Za-z0-9_.:-]+$/;
+const SAFE_THIN_AGENT_IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9_.:-]*$/;
+const SAFE_THIN_AGENT_CLIENT_INSTANCE_ID = /^client_[a-f0-9]{32}$/u;
+const SAFE_THIN_AGENT_CONVERSATION_ID = /^conversation_[a-f0-9]{32}$/u;
+const SAFE_THIN_AGENT_SERVER_RUN_ID = /^run_[a-f0-9]{32}$/u;
+const SAFE_THIN_AGENT_TOOL_NAMES = new Set([
+  "read",
+  "write",
+  "edit",
+  "multi_edit",
+  "create_folders",
+  "list_items",
+  "move",
+  "trash",
+  "find",
+  "search",
+  "open",
+  "context",
+]);
+const THIN_AGENT_FAILURE_ORIGINS = new Set([
+  "approval_mode_change",
+  "chat_hydration",
+  "historical_resubmit",
+  "run_settlement",
+  "session_callback",
+  "snapshot_render",
+  "unknown",
+  "warm_bootstrap",
+]);
+const THIN_AGENT_FAILURE_CAUSES = new Set([
+  "aborted",
+  "generic_error",
+  "history_generation_changed",
+  "invalid_data",
+  "message_not_found",
+  "network",
+  "non_error",
+  "object_error",
+  "preparation_superseded",
+  "session_generation_changed",
+  "session_not_ready",
+  "timed_out",
+  "type_error",
+  "view_detached",
+]);
 // Keep this synchronized with the strict ThinAgentLifecycle contract. The
 // logger cannot import from the ChatView layer without inverting dependencies.
 const THIN_AGENT_LIFECYCLE_CODES = new Set([
@@ -113,6 +165,9 @@ const THIN_AGENT_LIFECYCLE_CODES = new Set([
   "historical_resubmit_failed",
   "conversation_reset",
   "run_started",
+  "request_dispatch_started",
+  "request_dispatch_returned",
+  "request_dispatch_failed",
   "phase_submitted",
   "phase_thinking",
   "phase_working",
@@ -121,19 +176,20 @@ const THIN_AGENT_LIFECYCLE_CODES = new Set([
   "phase_settling",
   "phase_complete",
   "approval_presented",
-  "approval_submitted_approved",
+  "approval_submitted_approved_manual",
+  "approval_submitted_approved_policy",
   "approval_submitted_denied",
   "approval_acknowledged_approved",
   "approval_acknowledged_denied",
+  "mutation_execute_claimed",
+  "mutation_replay_served",
+  "mutation_outcome_unknown",
+  "mutation_call_conflict",
   "local_tool_started",
   "local_tool_completed_succeeded",
   "local_tool_completed_failed",
   "tool_result_sent_succeeded",
   "tool_result_sent_failed",
-  "response_resume_scheduled",
-  "response_resume_started",
-  "response_resume_completed",
-  "response_resume_failed",
   "response_result_received_succeeded",
   "response_result_received_cancelled",
   "response_result_received_failed",
@@ -146,6 +202,7 @@ const THIN_AGENT_LIFECYCLE_CODES = new Set([
   "run_finished_completed",
   "run_finished_cancelled",
   "run_finished_failed",
+  "diagnostics_truncated",
 ]);
 const THIN_AGENT_PHASES = new Set([
   "start",
@@ -525,10 +582,32 @@ function sanitizeLifecycleMetadata(
   if (Number.isSafeInteger(metadata.timestamp) && (metadata.timestamp as number) >= 0) {
     sanitized.timestamp = metadata.timestamp;
   }
+  const conversationId = typeof metadata.conversationId === "string"
+    && SAFE_THIN_AGENT_CONVERSATION_ID.test(metadata.conversationId)
+    ? metadata.conversationId
+    : undefined;
+  const requestId = boundedIdentifier(metadata.requestId, 160);
+  const clientInstanceId = typeof metadata.clientInstanceId === "string"
+    && SAFE_THIN_AGENT_CLIENT_INSTANCE_ID.test(metadata.clientInstanceId)
+    ? metadata.clientInstanceId
+    : undefined;
+  const pluginBuildId = boundedIdentifier(metadata.pluginBuildId, 160);
   const runId = boundedIdentifier(metadata.runId, 160);
-  const toolName = boundedIdentifier(metadata.toolName, 64);
+  const serverRunId = typeof metadata.serverRunId === "string"
+    && SAFE_THIN_AGENT_SERVER_RUN_ID.test(metadata.serverRunId)
+    ? metadata.serverRunId
+    : undefined;
+  const toolName = typeof metadata.toolName === "string"
+    && SAFE_THIN_AGENT_TOOL_NAMES.has(metadata.toolName)
+    ? metadata.toolName
+    : undefined;
   const toolCallId = boundedIdentifier(metadata.toolCallId, 160);
+  if (conversationId) sanitized.conversationId = conversationId;
+  if (requestId) sanitized.requestId = requestId;
+  if (clientInstanceId) sanitized.clientInstanceId = clientInstanceId;
+  if (pluginBuildId) sanitized.pluginBuildId = pluginBuildId;
   if (runId) sanitized.runId = runId;
+  if (serverRunId) sanitized.serverRunId = serverRunId;
   if (toolName) sanitized.toolName = toolName;
   if (toolCallId) sanitized.toolCallId = toolCallId;
   if (
@@ -584,7 +663,17 @@ function projectSupportDiagnosticEvent(entry: PluginLogEntry): SupportDiagnostic
     severity: "info" | "error";
     code: string;
     phase: string;
+    origin?: string;
+    cause?: string;
     sequence?: number;
+    conversation_id?: string;
+    request_id?: string;
+    client_instance_id?: string;
+    plugin_build_id?: string;
+    run_id?: string;
+    server_run_id?: string;
+    tool_name?: string;
+    tool_call_id?: string;
     status?: number;
     retryable?: boolean;
     incident_id?: string;
@@ -594,8 +683,60 @@ function projectSupportDiagnosticEvent(entry: PluginLogEntry): SupportDiagnostic
     code,
     phase,
   };
+  if (
+    isFailure
+    && typeof metadata.origin === "string"
+    && THIN_AGENT_FAILURE_ORIGINS.has(metadata.origin)
+  ) {
+    projected.origin = metadata.origin;
+  }
+  if (
+    isFailure
+    && typeof metadata.cause === "string"
+    && THIN_AGENT_FAILURE_CAUSES.has(metadata.cause)
+  ) {
+    projected.cause = metadata.cause;
+  }
   if (Number.isSafeInteger(metadata.sequence) && (metadata.sequence as number) > 0) {
     projected.sequence = metadata.sequence as number;
+  }
+  if (
+    isLifecycle
+    && typeof metadata.conversationId === "string"
+    && SAFE_THIN_AGENT_CONVERSATION_ID.test(metadata.conversationId)
+  ) {
+    projected.conversation_id = metadata.conversationId;
+  }
+  if (isLifecycle) {
+    const requestId = boundedIdentifier(metadata.requestId, 160);
+    const pluginBuildId = boundedIdentifier(metadata.pluginBuildId, 160);
+    const runId = boundedIdentifier(metadata.runId, 160);
+    const toolCallId = boundedIdentifier(metadata.toolCallId, 160);
+    if (requestId) projected.request_id = requestId;
+    if (pluginBuildId) projected.plugin_build_id = pluginBuildId;
+    if (runId) projected.run_id = runId;
+    if (toolCallId) projected.tool_call_id = toolCallId;
+  }
+  if (
+    isLifecycle
+    && typeof metadata.clientInstanceId === "string"
+    && SAFE_THIN_AGENT_CLIENT_INSTANCE_ID.test(metadata.clientInstanceId)
+  ) {
+    projected.client_instance_id = metadata.clientInstanceId;
+  }
+  if (
+    isLifecycle
+    && typeof metadata.serverRunId === "string"
+    && SAFE_THIN_AGENT_SERVER_RUN_ID.test(metadata.serverRunId)
+  ) {
+    projected.server_run_id = metadata.serverRunId;
+  }
+  if (
+    isLifecycle
+    && typeof metadata.toolName === "string"
+    && SAFE_THIN_AGENT_TOOL_NAMES.has(metadata.toolName)
+  ) {
+    projected.tool_name = metadata.toolName;
   }
   if (
     Number.isInteger(metadata.status)
@@ -659,9 +800,14 @@ function normalizeThinAgentFailure(
     ? incidentCandidate
     : undefined;
   const phase = thinAgentPhaseForMethod(context.method);
+  const origin = thinAgentOriginForMethod(context.method);
+  const cause = code === "client_failure"
+    ? thinAgentFailureCause(error)
+    : undefined;
   const metadata: Record<string, unknown> = {
     code,
     phase,
+    ...(cause ? { origin, cause } : {}),
     ...(status === undefined ? {} : { status }),
     ...(typeof candidate.retryable === "boolean"
       ? { retryable: candidate.retryable }
@@ -678,13 +824,90 @@ function normalizeThinAgentFailure(
   };
 }
 
+function thinAgentOriginForMethod(method: string | undefined): string {
+  switch (method) {
+    case "approvalModeChange":
+      return "approval_mode_change";
+    case "loadChatHydration":
+      return "chat_hydration";
+    case "agentSession":
+    case "reportAgentError":
+      return "session_callback";
+    case "completedRunSettlement":
+      return "run_settlement";
+    case "agentSnapshotRender":
+      return "snapshot_render";
+    case "historicalResubmit":
+      return "historical_resubmit";
+    case "warmThinConversation":
+      return "warm_bootstrap";
+    default:
+      return "unknown";
+  }
+}
+
+function thinAgentFailureCause(error: unknown): string {
+  if (!error || typeof error !== "object" || Array.isArray(error)) {
+    return "non_error";
+  }
+  const candidate = error as Record<string, unknown>;
+  const name = typeof candidate.name === "string" ? candidate.name : "";
+  const code = typeof candidate.code === "string" ? candidate.code : "";
+  const message = typeof candidate.message === "string" ? candidate.message : "";
+  if (
+    name === "ConversationPreparationCancelled"
+    || message === "Conversation preparation was superseded."
+  ) {
+    return "preparation_superseded";
+  }
+  if (
+    name === "AbortError"
+    || ["ABORT_ERR", "ERR_ABORTED", "ERR_CANCELED"].includes(code)
+  ) {
+    return "aborted";
+  }
+  if (
+    name === "TimeoutError"
+    || ["ETIMEDOUT", "ERR_TIMEOUT"].includes(code)
+  ) {
+    return "timed_out";
+  }
+  if (
+    name === "NetworkError"
+    || ["ECONNABORTED", "ECONNRESET", "ENETDOWN", "ENETUNREACH"].includes(code)
+  ) {
+    return "network";
+  }
+  if (message === "This chat changed while the response was starting.") {
+    return "session_generation_changed";
+  }
+  if (message === "This chat changed while its history was loading.") {
+    return "history_generation_changed";
+  }
+  if (message === "SystemSculpt is no longer available in this chat.") {
+    return "view_detached";
+  }
+  if (
+    message === "SystemSculpt is not ready. Retry this message."
+    || message === "This chat session is no longer ready. Retry this message."
+  ) {
+    return "session_not_ready";
+  }
+  if (/^message .+ not found$/u.test(message)) return "message_not_found";
+  if (name === "TypeError") return "type_error";
+  if (name === "SyntaxError") return "invalid_data";
+  if (error instanceof Error) return "generic_error";
+  return "object_error";
+}
+
 function thinAgentPhaseForMethod(method: string | undefined): string {
   switch (method) {
-    case "onTerminalConnectionError":
+    case "approvalModeChange":
       return "session";
     case "loadChatHydration":
+    case "warmThinConversation":
       return "start";
-    case "agentBridge":
+    case "agentSession":
     case "reportAgentError":
       return "response";
     case "completedRunSettlement":
@@ -697,7 +920,13 @@ function thinAgentPhaseForMethod(method: string | undefined): string {
 }
 
 function boundedIdentifier(value: unknown, maximum: number): string | undefined {
-  if (typeof value !== "string" || value.length === 0 || value.length > maximum) {
+  if (
+    typeof value !== "string"
+    || value.length === 0
+    || value.length > maximum
+    || /^(?:data|file|https?|obsidian|wss?):/iu.test(value)
+    || /^www\./iu.test(value)
+  ) {
     return undefined;
   }
   return SAFE_THIN_AGENT_IDENTIFIER.test(value) ? value : undefined;

@@ -15,6 +15,7 @@ import {
 import type { ChatMessageAttachment } from "./attachments/ChatMessageAttachments";
 import type { ChatDocumentAttachmentProcessor } from "./attachments/ChatMessageAttachments";
 import type { ThinAgentInputLimits } from "../../services/managed/ThinAgentInputLimits";
+import type { CreditsBalanceSnapshot } from "../../services/SystemSculptService";
 import type { AgentArtifact, AgentConversationSnapshot } from "./AgentConversation";
 import { presentAgentConversation } from "./AgentConversationPresentation";
 import {
@@ -44,6 +45,7 @@ export type AgentWorkspaceOptions = Readonly<{
   onApprove: (approvalId: string, approved: boolean, rememberForChat?: boolean) => void | Promise<void>;
   onOpenArtifact: (artifact: AgentArtifact) => void | Promise<void>;
   onCopyArtifactPath: (artifact: AgentArtifact) => boolean | Promise<boolean>;
+  onRetryFailedTurn?: (messageId: string) => void | Promise<void>;
   onRetryMessage?: (messageId: string) => void | Promise<void>;
   onResubmitMessage?: (messageId: string, text: string) => boolean | Promise<boolean>;
   onCancelMessageEdit?: (messageId: string) => void | Promise<void>;
@@ -70,6 +72,14 @@ function iconButton(parent: HTMLElement, label: string, icon: string): HTMLButto
 
 let workspaceLabelSequence = 0;
 
+function formatCredits(value: number): string {
+  try {
+    return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(value);
+  } catch {
+    return String(Math.round(value));
+  }
+}
+
 const PENDING_AGENT_SNAPSHOT: AgentConversationSnapshot = Object.freeze({
   runId: null,
   turnId: null,
@@ -93,6 +103,7 @@ export class AgentWorkspace extends Component {
   private readonly jumpButton: HTMLButtonElement;
   private readonly scroller: AnchoredScroller;
   private readonly registeredRows = new Map<string, HTMLElement>();
+  private readonly queuedRows = new Map<string, HTMLElement>();
   private history: readonly ChatMessage[] = [];
   private historyFingerprint = "[]";
   private snapshot: AgentConversationSnapshot | null = null;
@@ -102,7 +113,12 @@ export class AgentWorkspace extends Component {
   private pendingSnapshotRender: AgentConversationSnapshot | null | undefined;
   private snapshotRenderPromise: Promise<void> | null = null;
   private snapshotRenderWaiters: Array<Readonly<{ resolve: () => void; reject: (error: unknown) => void }>> = [];
-  private renderedTurnId: string | null = null;
+  private activeSnapshotRenderWaiters: Array<Readonly<{ resolve: () => void; reject: (error: unknown) => void }>> = [];
+  private snapshotRenderTimer: number | null = null;
+  private resolveSnapshotRenderDelay: (() => void) | null = null;
+  private followedTurnId: string | null = null;
+  private unloaded = false;
+  private lifecycleGeneration = 0;
 
   constructor(parent: HTMLElement, private readonly options: AgentWorkspaceOptions) {
     super();
@@ -122,7 +138,6 @@ export class AgentWorkspace extends Component {
       ? createUiAction(headerActions, {
           label: "Credits",
           size: "small",
-          tooltip: false,
         })
       : null;
     if (this.creditsButton) {
@@ -158,6 +173,7 @@ export class AgentWorkspace extends Component {
       onApprove: options.onApprove,
       onOpenArtifact: options.onOpenArtifact,
       onCopyArtifactPath: options.onCopyArtifactPath,
+      onRetryFailedTurn: options.onRetryFailedTurn,
       onRetryMessage: options.onRetryMessage,
       onResubmitMessage: options.onResubmitMessage,
       onCancelMessageEdit: options.onCancelMessageEdit,
@@ -202,6 +218,9 @@ export class AgentWorkspace extends Component {
       onMic: options.onMic,
       onRemoveAttachment: options.onRemoveAttachment,
       onApprovalModeChange: options.onApprovalModeChange,
+      onHeightChange: () => {
+        if (!this.unloaded) this.scroller.notifyViewportGeometryChanged();
+      },
     });
     this.addChild(this.composer);
   }
@@ -211,17 +230,33 @@ export class AgentWorkspace extends Component {
     this.titleElement.setText(normalized);
   }
 
-  public setCredits(label: string | null, low = false): void {
+  public setCreditsBalance(balance: CreditsBalanceSnapshot | null): void {
     if (!this.creditsButton) return;
-    this.creditsButton.toggleAttribute("hidden", label === null);
-    this.creditsButton.classList.toggle("is-low", low);
-    if (label !== null) {
-      updateUiAction(this.creditsButton, {
-        label,
-        title: `Credits: ${label}`,
-      });
-      this.creditsButton.setAttribute("aria-label", `Credits: ${label}`);
+    this.creditsButton.toggleAttribute("hidden", balance === null);
+    this.creditsButton.classList.toggle(
+      "is-internal-qa",
+      balance?.usageClass === "master_auth",
+    );
+    if (balance === null) {
+      this.creditsButton.classList.remove("is-low");
+      return;
     }
+    if (balance.usageClass === "master_auth") {
+      this.creditsButton.classList.remove("is-low");
+      updateUiAction(this.creditsButton, {
+        label: "Internal QA",
+        title: "Internal testing mode",
+      });
+      this.creditsButton.setAttribute("aria-label", "Internal testing mode");
+      return;
+    }
+    const label = formatCredits(balance.totalRemaining);
+    this.creditsButton.classList.toggle("is-low", balance.totalRemaining <= 1000);
+    updateUiAction(this.creditsButton, {
+      label,
+      title: `Credits: ${label}`,
+    });
+    this.creditsButton.setAttribute("aria-label", `Credits: ${label}`);
   }
 
   public setBanner(message: string | null, kind: "info" | "error" = "info"): void {
@@ -273,26 +308,97 @@ export class AgentWorkspace extends Component {
   }
 
   public setQueue(queue: readonly AgentQueuedFollowUp[]): void {
-    this.queueElement.empty();
+    const focusedElement = this.queueElement.contains(
+      this.queueElement.ownerDocument.activeElement,
+    )
+      ? this.queueElement.ownerDocument.activeElement as HTMLElement
+      : null;
     this.queueElement.toggleAttribute("hidden", queue.length === 0);
+    const desiredRows: HTMLElement[] = [];
+    const wantedKeys = new Set<string>();
+    const occurrences = new Map<string, number>();
     for (const [index, item] of queue.entries()) {
-      const row = this.queueElement.createDiv({
-        cls: "systemsculpt-agent-queue-item",
-        attr: { role: "listitem" },
-      });
-      const icon = row.createSpan();
-      setIcon(icon, "list-end");
+      const occurrence = occurrences.get(item.id) ?? 0;
+      occurrences.set(item.id, occurrence + 1);
+      const key = occurrence === 0 ? item.id : `${item.id}:${occurrence}`;
+      wantedKeys.add(key);
+      let row = this.queuedRows.get(key);
+      if (!row) {
+        row = this.queueElement.createDiv({
+          cls: "systemsculpt-agent-queue-item",
+          attr: {
+            role: "listitem",
+            "data-queue-key": key,
+          },
+        });
+        const icon = row.createSpan({
+          cls: "systemsculpt-agent-queue-icon",
+        });
+        setIcon(icon, "list-end");
+        row.createSpan({ cls: "systemsculpt-agent-queue-copy" });
+        if (this.options.onRunQueuedNow) {
+          const runNow = iconButton(row, "Stop and send queued follow-up now", "arrow-up");
+          runNow.dataset.queueAction = "run-now";
+          runNow.onclick = () => {
+            const currentId = row?.dataset.queueItemId;
+            if (currentId) void this.options.onRunQueuedNow?.(currentId);
+          };
+        }
+        if (this.options.onCancelQueued) {
+          const remove = iconButton(row, "Remove queued follow-up", "x");
+          remove.dataset.queueAction = "remove";
+          remove.onclick = () => {
+            const currentId = row?.dataset.queueItemId;
+            if (currentId) void this.options.onCancelQueued?.(currentId);
+          };
+        }
+        this.queuedRows.set(key, row);
+      }
+      row.dataset.queueItemId = item.id;
       const attachmentLabel = item.attachments?.map((attachment) => attachment.name).join(", ") || "";
-      row.createSpan({ text: item.text || attachmentLabel || "Queued attachment" });
+      const copy = row.querySelector<HTMLElement>(":scope > .systemsculpt-agent-queue-copy");
+      const text = item.text || attachmentLabel || "Queued attachment";
+      if (copy?.textContent !== text) copy?.setText(text);
       const target = `queued follow-up ${index + 1} of ${queue.length}`;
-      if (this.options.onRunQueuedNow) {
-        const runNow = iconButton(row, `Stop and send ${target} now`, "arrow-up");
-        runNow.onclick = () => void this.options.onRunQueuedNow?.(item.id);
+      const runNow = row.querySelector<HTMLButtonElement>(
+        ':scope > [data-queue-action="run-now"]',
+      );
+      if (runNow) {
+        updateUiAction(runNow, { label: `Stop and send ${target} now` });
       }
-      if (this.options.onCancelQueued) {
-        const remove = iconButton(row, `Remove ${target}`, "x");
-        remove.onclick = () => void this.options.onCancelQueued?.(item.id);
+      const remove = row.querySelector<HTMLButtonElement>(
+        ':scope > [data-queue-action="remove"]',
+      );
+      if (remove) {
+        updateUiAction(remove, { label: `Remove ${target}` });
       }
+      desiredRows.push(row);
+    }
+    for (const [key, row] of this.queuedRows) {
+      if (wantedKeys.has(key)) continue;
+      row.remove();
+      this.queuedRows.delete(key);
+    }
+    this.reconcileQueueRows(desiredRows);
+    if (
+      focusedElement?.isConnected
+      && this.queueElement.contains(focusedElement)
+      && this.queueElement.ownerDocument.activeElement !== focusedElement
+    ) {
+      focusedElement.focus();
+    }
+  }
+
+  private reconcileQueueRows(desired: readonly HTMLElement[]): void {
+    let cursor = this.queueElement.firstElementChild;
+    for (const row of desired) {
+      if (cursor !== row) this.queueElement.insertBefore(row, cursor);
+      cursor = row.nextElementSibling;
+    }
+    while (cursor) {
+      const next = cursor.nextElementSibling;
+      cursor.remove();
+      cursor = next;
     }
   }
 
@@ -326,12 +432,15 @@ export class AgentWorkspace extends Component {
     focusEditor = false,
     focusEditActionForMessageId?: string,
   ): Promise<void> {
+    const generation = this.lifecycleGeneration;
     return this.scheduleRender(async () => {
+      if (!this.isLifecycleCurrent(generation)) return;
       const anchor = this.scroller.capturePrependAnchor();
       await this.renderer.renderHistory(this.history);
+      if (!this.isLifecycleCurrent(generation)) return;
       this.syncRows();
       this.scroller.restorePrependAnchor(anchor && this.registeredRows.has(anchor.rowId) ? anchor : null);
-      this.anchorActiveTurn();
+      this.followActiveTurn();
       this.syncEmpty();
       if (focusEditor) this.renderer.focusInlineMessageEdit();
       if (focusEditActionForMessageId) {
@@ -345,30 +454,37 @@ export class AgentWorkspace extends Component {
     this.history = messages;
     this.snapshot = null;
     this.pendingSnapshotRender = undefined;
+    const generation = this.lifecycleGeneration;
     return this.scheduleRender(async () => {
+      if (!this.isLifecycleCurrent(generation)) return;
       const anchor = this.scroller.capturePrependAnchor();
       let renderedHistory = false;
       try {
         await this.renderer.renderHistory(messages);
+        if (!this.isLifecycleCurrent(generation)) return;
         renderedHistory = true;
         this.historyFingerprint = JSON.stringify(messages);
       } catch (error) {
+        if (!this.isLifecycleCurrent(generation)) return;
         this.renderer.showCompletedRenderFallback();
         throw error;
       } finally {
-        if (renderedHistory) this.renderer.clearActive();
-        this.syncRows();
-        this.scroller.restorePrependAnchor(anchor && this.registeredRows.has(anchor.rowId) ? anchor : null);
-        this.scroller.notifyContentChanged({ streaming: false });
-        this.syncEmpty();
-        this.renderedTurnId = null;
-        for (const waiter of this.snapshotRenderWaiters.splice(0)) waiter.resolve();
+        if (this.isLifecycleCurrent(generation)) {
+          if (renderedHistory) this.renderer.clearActive();
+          this.syncRows();
+          this.scroller.restorePrependAnchor(anchor && this.registeredRows.has(anchor.rowId) ? anchor : null);
+          this.scroller.notifyContentChanged({ streaming: false });
+          this.syncEmpty();
+          this.followedTurnId = null;
+          for (const waiter of this.snapshotRenderWaiters.splice(0)) waiter.resolve();
+        }
       }
     });
   }
 
   public setAgentSnapshot(snapshot: AgentConversationSnapshot | null): Promise<void> {
     this.snapshot = snapshot;
+    if (this.unloaded) return Promise.resolve();
     this.pendingSnapshotRender = snapshot;
     const completion = new Promise<void>((resolve, reject) => {
       this.snapshotRenderWaiters.push({ resolve, reject });
@@ -414,7 +530,7 @@ export class AgentWorkspace extends Component {
       const registered = this.registeredRows.get(id);
       if (registered !== row) {
         if (registered) this.scroller.unregisterRow(id);
-        this.scroller.registerRow(id, row, { turnAnchor: row.classList.contains("is-user") });
+        this.scroller.registerRow(id, row);
         this.registeredRows.set(id, row);
       }
     }
@@ -427,8 +543,12 @@ export class AgentWorkspace extends Component {
   }
 
   private syncEmpty(): void {
-    const hasActiveParts = this.runPending || (this.snapshot?.parts.length ?? 0) > 0;
-    this.emptyState.toggleAttribute("hidden", this.history.length > 0 || hasActiveParts);
+    const presentation = presentAgentConversation(this.snapshot, this.runPending);
+    const hasActivePresentation = presentation.phase !== "idle";
+    this.emptyState.toggleAttribute(
+      "hidden",
+      this.history.length > 0 || hasActivePresentation,
+    );
   }
 
   private scheduleRender(task: () => Promise<void>): Promise<void> {
@@ -437,26 +557,46 @@ export class AgentWorkspace extends Component {
   }
 
   private ensureSnapshotRender(): void {
-    if (this.snapshotRenderPromise) return;
+    if (this.unloaded || this.snapshotRenderPromise) return;
+    const generation = this.lifecycleGeneration;
     let renderWaiters: Array<Readonly<{ resolve: () => void; reject: (error: unknown) => void }>> = [];
     this.snapshotRenderPromise = this.scheduleRender(async () => {
-      await new Promise<void>((resolve) => getSurfaceOwnerWindow(this.element).setTimeout(resolve, 32));
+      if (!this.isLifecycleCurrent(generation)) return;
+      await new Promise<void>((resolve) => {
+        const finishDelay = (): void => {
+          this.snapshotRenderTimer = null;
+          this.resolveSnapshotRenderDelay = null;
+          resolve();
+        };
+        this.resolveSnapshotRenderDelay = finishDelay;
+        this.snapshotRenderTimer = getSurfaceOwnerWindow(this.element)
+          .setTimeout(finishDelay, 32);
+      });
+      if (!this.isLifecycleCurrent(generation)) return;
       renderWaiters = this.snapshotRenderWaiters.splice(0);
+      this.activeSnapshotRenderWaiters = renderWaiters;
       const snapshot = this.pendingSnapshotRender;
       this.pendingSnapshotRender = undefined;
       const presentation = presentAgentConversation(snapshot ?? null, this.runPending);
-      if (snapshot) await this.renderer.renderActive(snapshot, presentation);
-      else if (presentation.busy) {
+      // Terminal protocol truth must update controls even if rendering the
+      // final Markdown frame or a postprocessor later fails.
+      this.composer.setRunning(presentation.composerRunning);
+      this.syncEmpty();
+      if (snapshot) {
+        await this.renderer.renderActive(snapshot, presentation);
+        if (!this.isLifecycleCurrent(generation)) return;
+      } else if (presentation.busy) {
         await this.renderer.renderActive({
           ...PENDING_AGENT_SNAPSHOT,
           turnId: this.pendingTurnId,
         }, presentation);
+        if (!this.isLifecycleCurrent(generation)) return;
+      } else {
+        this.renderer.clearActive();
       }
-      else this.renderer.clearActive();
-      this.composer.setRunning(presentation.composerRunning);
-      this.anchorActiveTurn();
+      if (!this.isLifecycleCurrent(generation)) return;
+      this.followActiveTurn(snapshot ?? null);
       this.scroller.notifyContentChanged({ streaming: presentation.busy });
-      this.syncEmpty();
     });
     void this.snapshotRenderPromise.then(
       () => {
@@ -466,21 +606,50 @@ export class AgentWorkspace extends Component {
         for (const waiter of renderWaiters) waiter.reject(error);
       },
     ).finally(() => {
+      if (this.activeSnapshotRenderWaiters === renderWaiters) {
+        this.activeSnapshotRenderWaiters = [];
+      }
       this.snapshotRenderPromise = null;
-      if (typeof this.pendingSnapshotRender !== "undefined") this.ensureSnapshotRender();
+      if (!this.unloaded && typeof this.pendingSnapshotRender !== "undefined") {
+        this.ensureSnapshotRender();
+      }
     });
   }
 
-  private anchorActiveTurn(): void {
-    const turnId = this.snapshot?.turnId;
+  private followActiveTurn(snapshot: AgentConversationSnapshot | null = this.snapshot): void {
+    const turnId = snapshot?.turnId ?? (this.runPending ? this.pendingTurnId : null);
     if (!turnId) {
-      this.renderedTurnId = null;
+      this.followedTurnId = null;
       return;
     }
-    if (this.renderedTurnId === turnId) return;
+    if (this.followedTurnId === turnId) return;
     const rowId = `message:${turnId}`;
     if (!this.registeredRows.has(rowId)) return;
-    this.scroller.notifyTurnStarted(rowId);
-    this.renderedTurnId = turnId;
+    this.scroller.notifyTurnStarted();
+    this.followedTurnId = turnId;
+  }
+
+  public override onload(): void {
+    this.unloaded = false;
+    this.lifecycleGeneration += 1;
+  }
+
+  public override onunload(): void {
+    this.unloaded = true;
+    this.lifecycleGeneration += 1;
+    if (this.snapshotRenderTimer !== null) {
+      getSurfaceOwnerWindow(this.element).clearTimeout(this.snapshotRenderTimer);
+      this.snapshotRenderTimer = null;
+    }
+    const resolveDelay = this.resolveSnapshotRenderDelay;
+    this.resolveSnapshotRenderDelay = null;
+    resolveDelay?.();
+    this.pendingSnapshotRender = undefined;
+    for (const waiter of this.snapshotRenderWaiters.splice(0)) waiter.resolve();
+    for (const waiter of this.activeSnapshotRenderWaiters.splice(0)) waiter.resolve();
+  }
+
+  private isLifecycleCurrent(generation: number): boolean {
+    return !this.unloaded && generation === this.lifecycleGeneration;
   }
 }

@@ -2,7 +2,7 @@ import type { ChatContextManager } from "../services/DocumentContextManager";
 
 export interface FirstPartyToolChatTarget {
   contextManager: ChatContextManager & {
-    removeFromContextFiles: (filePath: string) => Promise<boolean>;
+    unpinFile: (filePath: string) => Promise<boolean>;
   };
 }
 

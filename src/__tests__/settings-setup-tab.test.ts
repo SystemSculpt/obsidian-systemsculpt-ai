@@ -132,6 +132,46 @@ describe("Setup tab SystemSculpt-only layout", () => {
     expect(plugin.openCreditsBalanceModal).toHaveBeenCalledTimes(1);
   });
 
+  it("presents master auth as Internal QA without customer billing actions", async () => {
+    getCreditsBalanceMock.mockResolvedValueOnce({
+      totalRemaining: 0,
+      includedRemaining: 0,
+      includedPerMonth: 0,
+      addOnRemaining: 0,
+      usageClass: "master_auth",
+      cycleStartedAt: "2026-07-01T00:00:00.000Z",
+      cycleEndsAt: "2026-08-01T00:00:00.000Z",
+      purchaseUrl: null,
+      billingCycle: "unknown",
+      annualUpgradeOffer: null,
+    });
+    const plugin = createPluginStub();
+    plugin.settings.licenseValid = true;
+    plugin.settings.licenseKey = "skss-master-auth";
+    const tab = new SystemSculptSettingTab(app, plugin);
+    const container = document.createElement("div");
+
+    displaySetupTabContent(container, tab, true);
+    await flushSetupSectionRender();
+
+    expect(container.textContent).toContain("Usage mode");
+    expect(container.textContent).toContain("Internal testing");
+    expect(container.textContent).toContain("Provider usage is tracked internally");
+    expect(container.textContent).not.toContain("Remaining: 0 credits");
+    const buyCreditsButton = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent?.trim() === "Buy credits",
+    ) as HTMLButtonElement | undefined;
+    const annualSwitchButton = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent?.trim() === "Switch to annual",
+    ) as HTMLButtonElement | undefined;
+    expect(buyCreditsButton).toBeTruthy();
+    expect(buyCreditsButton?.hidden || buyCreditsButton?.style.display === "none").toBe(true);
+    expect(buyCreditsButton?.disabled).toBe(true);
+    expect(annualSwitchButton).toBeTruthy();
+    expect(annualSwitchButton?.hidden || annualSwitchButton?.style.display === "none").toBe(true);
+    expect(annualSwitchButton?.disabled).toBe(true);
+  });
+
   it("never renders or copies the saved license and exposes canonical legal links", async () => {
     const plugin = createPluginStub();
     plugin.settings.licenseValid = true;

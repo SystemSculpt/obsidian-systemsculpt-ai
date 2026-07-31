@@ -27,7 +27,7 @@ const TOOL_LABELS: Readonly<Record<string, string>> = {
   find: "Find files",
   search: "Search vault",
   open: "Open files",
-  context: "Update context",
+  context: "Manage pinned files",
 };
 
 const SERVER_TOOL_LABELS: Readonly<Record<string, string>> = {
@@ -232,6 +232,13 @@ function inputSummary(canonicalName: string, input: Record<string, unknown>): st
   return null;
 }
 
+function contextToolLabel(input: Record<string, unknown>): string {
+  const action = firstString(input.action)?.toLowerCase();
+  if (action === "add") return "Pin files";
+  if (action === "remove") return "Unpin files";
+  return TOOL_LABELS.context;
+}
+
 export function presentAgentTool(part: AgentToolPart): AgentToolPresentation {
   const { canonicalName } = splitToolName(part.name);
   const input = record(part.input);
@@ -265,7 +272,9 @@ export function presentAgentTool(part: AgentToolPart): AgentToolPresentation {
       ? serverLabel ?? UNKNOWN_SERVER_TOOL_LABEL
       : counted
         ? countedLabel(counted)
-        : TOOL_LABELS[canonicalName] || canonicalName
+        : canonicalName === "context"
+          ? contextToolLabel(input)
+          : TOOL_LABELS[canonicalName] || canonicalName
           .replace(/[_-]+/g, " ")
           .replace(/\b\w/g, (letter) => letter.toUpperCase()) || "Tool",
     stateLabel: STATE_LABELS[displayState],

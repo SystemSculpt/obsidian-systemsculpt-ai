@@ -152,7 +152,10 @@ npm run dev:watch:status
 The per-user launch agent starts at login, stays running, rebuilds after source
 changes, atomically replaces each local artifact, and reloads the plugin through
 the official Obsidian CLI. Re-running the install command deliberately moves
-the persistent watcher to the current worktree. Use `npm run
+the persistent watcher to the current canonical checkout. The watcher uses
+production-shaped artifacts without inline source maps, including for local
+and staging API targets, so the artifact safety gate and automatic sync use
+the same bytes. Use `npm run
 dev:watch:uninstall` to remove it.
 
 Successful development syncs copy main.js, manifest.json, and styles.css. The

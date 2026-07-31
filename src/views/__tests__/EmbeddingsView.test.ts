@@ -77,9 +77,9 @@ const createMockChatView = (options: { chatId?: string; title?: string; messages
   getChatTitle: jest.fn().mockReturnValue(options.title ?? "Test Chat"),
   getMessages: jest.fn().mockReturnValue(options.messages ?? []),
   contextManager: {
-    getContextFiles: jest.fn().mockReturnValue(new Set()),
+    getPinnedFiles: jest.fn().mockReturnValue(new Set()),
   },
-  addFileToContext: jest.fn().mockResolvedValue(undefined),
+  pinFile: jest.fn().mockResolvedValue(undefined),
 });
 
 describe("EmbeddingsView", () => {
@@ -616,7 +616,7 @@ describe("EmbeddingsView", () => {
 
       await (view as any).addResultToCurrentChat("notes/similar.md");
 
-      expect(chatView.addFileToContext).toHaveBeenCalledWith(resultFile);
+      expect(chatView.pinFile).toHaveBeenCalledWith(resultFile);
     });
   });
 

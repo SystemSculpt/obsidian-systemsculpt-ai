@@ -4,8 +4,8 @@ export const PRODUCTION_API_BASE_URL = "https://systemsculpt.com/api/plugin";
 
 /** Build-time API ownership. Local QA overrides this through esbuild only. */
 export const API_BASE_URL =
-  typeof __SYSTEMSCULPT_API_BASE_URL__ === "string" && __SYSTEMSCULPT_API_BASE_URL__.trim()
-    ? __SYSTEMSCULPT_API_BASE_URL__.replace(/\/+$/, "")
+  typeof __SYSTEMSCULPT_API_BASE_URL__ === "string"
+    ? __SYSTEMSCULPT_API_BASE_URL__
     : PRODUCTION_API_BASE_URL;
 export const IS_DEVELOPMENT_BUILD = API_BASE_URL !== PRODUCTION_API_BASE_URL;
 

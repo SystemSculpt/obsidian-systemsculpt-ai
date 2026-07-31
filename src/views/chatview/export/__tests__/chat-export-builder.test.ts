@@ -77,7 +77,7 @@ describe('ChatExportBuilder', () => {
     expect(markdown).toContain('title: "Exported Chat"');
 
     expect(markdown).toContain('## Summary');
-    expect(markdown).toContain('## Context Files');
+    expect(markdown).toContain('## Pinned Files');
     expect(markdown).toContain('- [[Docs/guide.md]]');
     expect(markdown).toContain('```text\n# Guide');
 
@@ -125,7 +125,7 @@ describe('ChatExportBuilder', () => {
     const markdown = builder.build(options);
 
     expect(markdown).toContain('[[Docs/guide.md]]');
-    const contextSection = markdown.split('## Context Files')[1]?.split('## Conversation')[0] ?? '';
+    const contextSection = markdown.split('## Pinned Files')[1]?.split('## Conversation')[0] ?? '';
     expect(contextSection).not.toContain('```text');
     expect(contextSection).not.toContain('Content line one.');
   });

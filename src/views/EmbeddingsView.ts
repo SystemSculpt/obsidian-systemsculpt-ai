@@ -541,25 +541,23 @@ export class EmbeddingsView extends ItemView {
     return buildChatSemanticQuery(chatView.getMessages() || []);
   }
 
-  /**
-   * Check if a note is already in the current chat's context
-   */
+  /** Check whether a note is explicitly pinned for every chat message. */
   private isNoteInContext(notePath: string): boolean {
     if (!this.currentChatView || !this.currentChatView.contextManager) {
       return false;
     }
     
-    const contextFiles = this.currentChatView.contextManager.getContextFiles();
+    const pinnedFiles = this.currentChatView.contextManager.getPinnedFiles();
     
     // Check both the direct path and wiki link format
     const wikiLink = `[[${notePath}]]`;
     const fileName = notePath.split('/').pop() || notePath;
     const fileNameWikiLink = `[[${fileName}]]`;
     
-    return contextFiles.has(notePath) || 
-           contextFiles.has(wikiLink) || 
-           contextFiles.has(fileName) ||
-           contextFiles.has(fileNameWikiLink);
+    return pinnedFiles.has(notePath) ||
+           pinnedFiles.has(wikiLink) ||
+           pinnedFiles.has(fileName) ||
+           pinnedFiles.has(fileNameWikiLink);
   }
 
   private updateContextIndicators(): void {
@@ -630,10 +628,10 @@ export class EmbeddingsView extends ItemView {
     }
 
     try {
-      await chatView.addFileToContext(file);
+      await chatView.pinFile(file);
       this.updateContextIndicators();
     } catch (error) {
-      new Notice(`Could not add note to chat: ${this.errorMessage(error)}`);
+      new Notice(`Could not pin note for every message: ${this.errorMessage(error)}`);
     }
   }
 

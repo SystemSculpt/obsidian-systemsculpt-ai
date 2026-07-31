@@ -36,9 +36,12 @@ export type AgentComposerOptions = Readonly<{
   onMic?: () => void | Promise<void>;
   onRemoveAttachment: (attachment: AgentComposerAttachment) => void | Promise<void>;
   onApprovalModeChange?: (mode: "ask" | "full-access") => void;
+  onHeightChange?: () => void;
 }>;
 
 const DEFAULT_COMPOSER_PLACEHOLDER = "Ask SystemSculpt to work in your vault…";
+const PINNED_FILES_DESCRIPTION =
+  "Pinned files are reread for every message. Files SystemSculpt reads while working remain part of this chat, but are not pinned automatically.";
 
 function createButton(
   parent: HTMLElement,
@@ -81,7 +84,7 @@ export class AgentComposer extends Component {
   private attachmentBusy = false;
   private attachmentGeneration = 0;
   private attachmentLimits: ThinAgentInputLimits | undefined;
-  private contextAttachments: readonly AgentComposerAttachment[] = [];
+  private pinnedAttachments: readonly AgentComposerAttachment[] = [];
   private messageAttachments: ChatMessageAttachmentCollection;
 
   constructor(parent: HTMLElement, private readonly options: AgentComposerOptions) {
@@ -91,7 +94,11 @@ export class AgentComposer extends Component {
     this.element = parent.createDiv({ cls: "systemsculpt-agent-composer" });
     this.attachmentList = this.element.createDiv({
       cls: "systemsculpt-agent-composer-attachments",
-      attr: { role: "list", "aria-label": "Attached files and vault context" },
+      attr: {
+        role: "list",
+        "aria-label": "Message attachments and pinned files",
+        "aria-description": PINNED_FILES_DESCRIPTION,
+      },
     });
 
     const prompt = this.element.createDiv({ cls: "systemsculpt-agent-prompt" });
@@ -110,9 +117,11 @@ export class AgentComposer extends Component {
     this.vaultContextButton = createButton(
       tools,
       "systemsculpt-agent-icon-button",
-      "Add vault context, including images",
+      "Pin files for every message",
       "files",
     );
+    this.vaultContextButton.setAttribute("aria-description", PINNED_FILES_DESCRIPTION);
+    this.vaultContextButton.title = PINNED_FILES_DESCRIPTION;
     this.filePicker = tools.createEl("input", {
       cls: "systemsculpt-agent-file-picker",
       attr: {
@@ -274,7 +283,7 @@ export class AgentComposer extends Component {
   }
 
   public setAttachments(attachments: readonly AgentComposerAttachment[]): void {
-    this.contextAttachments = [...attachments];
+    this.pinnedAttachments = [...attachments];
     this.renderAttachments();
     this.syncControls();
   }
@@ -323,13 +332,15 @@ export class AgentComposer extends Component {
   private renderAttachments(): void {
     this.attachmentList.empty();
     const messageAttachments = this.messageAttachments.displaySnapshot();
-    this.attachmentList.classList.toggle("is-empty", this.contextAttachments.length + messageAttachments.length === 0);
-    for (const attachment of this.contextAttachments) {
+    this.attachmentList.classList.toggle("is-empty", this.pinnedAttachments.length + messageAttachments.length === 0);
+    for (const attachment of this.pinnedAttachments) {
+      const pinnedPath = (attachment.path || attachment.label)
+        .replace(/^\[\[(.*?)\]\]$/, "$1");
       const chip = this.attachmentList.createDiv({
-        cls: "systemsculpt-agent-attachment is-context",
+        cls: "systemsculpt-agent-attachment is-pinned",
         attr: {
           role: "listitem",
-          title: attachment.path || attachment.label,
+          title: `${pinnedPath}. Pinned and reread for every message.`,
         },
       });
       if (attachment.kind === "image" && attachment.previewUrl) {
@@ -338,7 +349,8 @@ export class AgentComposer extends Component {
         this.renderAttachmentIcon(chip, attachment.kind === "image" ? "image" : "file-text");
       }
       chip.createSpan({ cls: "systemsculpt-agent-attachment-label", text: attachment.label });
-      const remove = createButton(chip, "systemsculpt-agent-attachment-remove", `Remove ${attachment.label}`, "x");
+      chip.createSpan({ cls: "systemsculpt-agent-attachment-badge", text: "Pinned" });
+      const remove = createButton(chip, "systemsculpt-agent-attachment-remove", `Unpin ${attachment.label}`, "x");
       remove.disabled = Boolean(this.readOnlyMessage);
       // Attachment chips are replaced wholesale. Keeping their listeners on
       // the component cleanup stack would retain every removed chip until the
@@ -430,9 +442,12 @@ export class AgentComposer extends Component {
   }
 
   private resize(): void {
+    const previousHeight = this.input.style.height;
     this.input.setCssStyles({ height: "auto" });
     const next = Math.min(Math.max(this.input.scrollHeight, 40), 180);
-    this.input.setCssStyles({ height: `${next}px` });
+    const nextHeight = `${next}px`;
+    this.input.setCssStyles({ height: nextHeight });
+    if (previousHeight !== nextHeight) this.options.onHeightChange?.();
   }
 
   private syncControls(): void {

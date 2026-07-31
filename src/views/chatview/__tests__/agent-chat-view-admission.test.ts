@@ -2,19 +2,44 @@
  * @jest-environment jsdom
  */
 
-import { App } from "obsidian";
+import { App, TFile } from "obsidian";
 import { AgentChatView } from "../AgentChatView";
+import { AgentTranscriptRepository } from "../AgentTranscriptRepository";
 import {
   AgentComposer,
   type AgentComposerSubmit,
 } from "../AgentComposer";
 import { AgentWorkspace } from "../AgentWorkspace";
+import { ChatStorageService } from "../ChatStorageService";
 import type { ChatMessageAttachment } from "../attachments/ChatMessageAttachments";
 import type {
-  ThinAgentRunInput,
-  ThinAgentRunResult,
-} from "../thin/ThinAgentBridge";
+  FirstPartyAgentRunInput,
+  FirstPartyAgentRunResult,
+} from "../thin/FirstPartyAgentChatSession";
 import type { ChatMessage } from "../../../types";
+
+jest.mock("obsidian", () => {
+  const actual = jest.requireActual("obsidian");
+  return {
+    ...actual,
+    parseYaml: jest.fn((yaml: string) => Object.fromEntries(
+      yaml
+        .split("\n")
+        .map((line) => line.match(/^(\w+):\s*(.+)$/))
+        .filter((match): match is RegExpMatchArray => Boolean(match))
+        .map((match) => {
+          try {
+            return [match[1], JSON.parse(match[2])];
+          } catch {
+            return [match[1], match[2].trim()];
+          }
+        }),
+    )),
+    stringifyYaml: jest.fn((value: Record<string, unknown>) => Object.entries(value)
+      .map(([key, entry]) => `${key}: ${JSON.stringify(entry)}`)
+      .join("\n") + "\n"),
+  };
+});
 
 const ORIGINAL_ATTACHMENT: ChatMessageAttachment = Object.freeze({
   status: "ready",
@@ -60,7 +85,7 @@ function deferred<T = void>() {
   return { promise, resolve };
 }
 
-function failedRun(code: string, message: string): ThinAgentRunResult {
+function failedRun(code: string, message: string): FirstPartyAgentRunResult {
   return {
     kind: "failed",
     snapshot: {
@@ -79,7 +104,7 @@ function createHarness(failure: "before-start" | "before-commit" | "after-commit
   const parent = document.body.createDiv();
   const builtBodies: Array<Record<string, unknown> | undefined> = [];
   const runGate = deferred();
-  const runStarted = deferred<ThinAgentRunInput>();
+  const runStarted = deferred<FirstPartyAgentRunInput>();
   const runFinished = deferred();
   const durableMessages: ChatMessage[] = [];
   const snapshot = () => ({
@@ -130,7 +155,7 @@ function createHarness(failure: "before-start" | "before-commit" | "after-commit
     resetMessageEditor: jest.fn(),
   };
   const agent = {
-    start: jest.fn((input: ThinAgentRunInput) => {
+    start: jest.fn((input: FirstPartyAgentRunInput) => {
       runStarted.resolve(input);
       return runGate.promise.then(async () => {
         builtBodies.push(await input.buildBody?.(new AbortController().signal));
@@ -143,6 +168,9 @@ function createHarness(failure: "before-start" | "before-commit" | "after-commit
       });
     }),
     disconnect: jest.fn(),
+    stageContext: jest.fn(async () => ({
+      context_ref: "ctx1_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    })),
   };
 
   Object.assign(view, {
@@ -150,18 +178,13 @@ function createHarness(failure: "before-start" | "before-commit" | "after-commit
     transcript,
     agent,
     builtBodies,
-    agentConnection: {
-      stageContext: jest.fn(async () => ({
-        context_ref: "ctx1_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-      })),
-    },
     attachmentStore: {
       hydrateMessage: jest.fn(async (message: ChatMessage) => {
         if (failure === "before-start") throw new Error("attachment hydration failed");
         return message;
       }),
     },
-    contextManager: { getContextFiles: jest.fn(() => []) },
+    contextManager: { getPinnedFiles: jest.fn(() => []) },
     plugin: { settings: { licenseKey: "test-license" } },
     automationApprovalMode: "interactive",
     approvalMode: "ask",
@@ -201,8 +224,10 @@ function createHistoricalResubmitHarness(
   initialMessages: ChatMessage[],
   targetIndex: number,
   failBeforeCommit = false,
+  agentConversationId: string | null =
+    "conversation_11111111111111111111111111111111",
 ) {
-  const oldConversationId = "conversation_11111111111111111111111111111111";
+  const oldConversationId = agentConversationId ?? undefined;
   let durableMessages = initialMessages.map((message) => ({ ...message }));
   let version = 12;
   const operationOrder: string[] = [];
@@ -210,7 +235,7 @@ function createHistoricalResubmitHarness(
     chatId: "2026-07-30 08-02-11",
     title: "Saved chat",
     version,
-    agentConversationId: oldConversationId,
+    ...(oldConversationId ? { agentConversationId: oldConversationId } : {}),
     messages: durableMessages.map((message) => ({ ...message })),
   });
   const transcript = {
@@ -244,6 +269,7 @@ function createHistoricalResubmitHarness(
     setAgentSnapshot: jest.fn(async () => undefined),
     setRunPending: jest.fn(),
     setBanner: jest.fn(),
+    setComposerReadOnly: jest.fn(),
     settleCompletedRun: jest.fn(async () => undefined),
     restoreRejectedSubmission: jest.fn(),
     resetMessageEditor: jest.fn(),
@@ -251,7 +277,8 @@ function createHistoricalResubmitHarness(
   const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
   const agent = {
     disconnect: jest.fn(),
-    start: jest.fn((input: ThinAgentRunInput) => (async (): Promise<ThinAgentRunResult> => {
+    recordLifecycle,
+    start: jest.fn((input: FirstPartyAgentRunInput) => (async (): Promise<FirstPartyAgentRunResult> => {
       const bootstrapPrefix = initialMessages.slice(0, targetIndex);
       await (view as any).reconcileAgentHistory(bootstrapPrefix);
       if (failBeforeCommit) {
@@ -275,11 +302,10 @@ function createHistoricalResubmitHarness(
     workspace,
     transcript,
     agent,
-    agentConnection: { recordLifecycle },
     attachmentStore: {
       hydrateMessage: jest.fn(async (message: ChatMessage) => message),
     },
-    contextManager: { getContextFiles: jest.fn(() => []) },
+    contextManager: { getPinnedFiles: jest.fn(() => []) },
     plugin: {
       settings: { licenseKey: "test-license" },
       getLogger: () => logger,
@@ -294,6 +320,7 @@ function createHistoricalResubmitHarness(
     pendingRetry: null,
     pendingRejectedRetry: null,
     pendingThinConversationId: null,
+    thinBootstrapRequest: null,
     pendingForkHistory: null,
     thinClientId: `client_${"c".repeat(32)}`,
     chatId: "2026-07-30 08-02-11",
@@ -318,7 +345,208 @@ function createHistoricalResubmitHarness(
   };
 }
 
-function createSavedChatLoadHarness(messages: ChatMessage[]) {
+async function createPersistentHistoricalResubmitHarness(
+  options: Readonly<{
+    failBeforeCommit?: boolean;
+    initialMessages?: readonly ChatMessage[];
+  }> = {},
+) {
+  const chatDirectory = "SystemSculpt/Chats";
+  const chatId = "2026-07-30 08-02-11";
+  const oldConversationId = "conversation_11111111111111111111111111111111";
+  const initialMessages: ChatMessage[] = options.initialMessages
+    ? options.initialMessages.map((message) => ({ ...message }))
+    : [
+        { role: "user", content: "Original request", message_id: "user-original" },
+        { role: "assistant", content: "Original answer", message_id: "assistant-original" },
+        { role: "user", content: "Later request", message_id: "user-later" },
+        { role: "assistant", content: "Later answer", message_id: "assistant-later" },
+      ];
+  const files = new Map<string, { file: TFile; content: string }>();
+  let rejectedModifyCount = 0;
+  const vault = {
+    getAbstractFileByPath: jest.fn((path: string) => files.get(path)?.file ?? null),
+    read: jest.fn(async (file: TFile) => files.get(file.path)?.content ?? ""),
+    modify: jest.fn(async (file: TFile, content: string) => {
+      if (rejectedModifyCount > 0) {
+        rejectedModifyCount -= 1;
+        throw new Error("disk unavailable");
+      }
+      const stored = files.get(file.path);
+      if (!stored) throw new Error(`Missing file: ${file.path}`);
+      stored.content = content;
+    }),
+    create: jest.fn(async (path: string, content: string) => {
+      if (files.has(path)) throw new Error(`File already exists: ${path}`);
+      const file = new TFile({ path });
+      files.set(path, { file, content });
+      return file;
+    }),
+    createFolder: jest.fn(async () => undefined),
+    adapter: {
+      exists: jest.fn(async (path: string) => path === chatDirectory || files.has(path)),
+      mkdir: jest.fn(async () => undefined),
+      readBinary: jest.fn(async () => new ArrayBuffer(0)),
+      writeBinary: jest.fn(async () => undefined),
+    },
+  };
+  const app = new App();
+  Object.assign(app, {
+    vault,
+    plugins: { plugins: {} },
+  });
+  const storage = new ChatStorageService(app, chatDirectory);
+  await storage.saveChat(chatId, initialMessages, {
+    title: "Saved chat",
+    agentConversationId: oldConversationId,
+  });
+  const saveChat = jest.spyOn(storage, "saveChat");
+  const transcript = new AgentTranscriptRepository(storage, () => ({
+    title: "Saved chat",
+    contextFiles: new Set<string>(),
+    chatFontSize: "medium" as const,
+    approvalMode: "ask" as const,
+  }));
+  const loaded = await transcript.load(chatId);
+  if (!loaded) throw new Error("Persistent resubmit harness could not load its chat.");
+
+  const logger = { warn: jest.fn(), error: jest.fn() };
+  const workspace = {
+    setHistory: jest.fn(async () => undefined),
+    setAgentSnapshot: jest.fn(async () => undefined),
+    setRunPending: jest.fn(),
+    setBanner: jest.fn(),
+    setTitle: jest.fn(),
+    setComposerReadOnly: jest.fn(),
+    settleCompletedRun: jest.fn(async () => undefined),
+    restoreRejectedSubmission: jest.fn(),
+    resetMessageEditor: jest.fn(),
+    showMessageEditor: jest.fn(async () => undefined),
+    hideMessageEditor: jest.fn(async () => undefined),
+  };
+  const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
+  const replacementAssistant: ChatMessage = {
+    role: "assistant",
+    content: "Replacement answer",
+    message_id: "assistant-replacement",
+  };
+  const agent = {
+    getSnapshot: jest.fn(() => null),
+    disconnect: jest.fn(),
+    recordLifecycle: jest.fn(),
+    stageContext: jest.fn(async () => ({
+      context_ref: "ctx1_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    })),
+    start: jest.fn((input: FirstPartyAgentRunInput) => (async (): Promise<FirstPartyAgentRunResult> => {
+      // This is the exact fork bootstrap that produced the screenshot failure:
+      // editing the first user turn means the validated server prefix is empty.
+      await (view as any).reconcileAgentHistory([]);
+      if (options.failBeforeCommit) {
+        return failedRun(
+          "agent_bootstrap_failed",
+          "The edited response could not be started.",
+        );
+      }
+      try {
+        await input.beforeSend?.();
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "The edited turn could not be saved.";
+        return failedRun("message_save_failed", message);
+      }
+      await (view as any).reconcileAgentHistory(transcript.snapshot().messages);
+      await (view as any).reconcileAgentHistory([
+        ...transcript.snapshot().messages,
+        replacementAssistant,
+      ]);
+      return {
+        kind: "completed",
+        snapshot: {
+          runId: "run-resubmit-persistent",
+          turnId: input.turnId,
+          status: "completed",
+          messages: [],
+          parts: [],
+        },
+        message: replacementAssistant,
+      };
+    })()),
+  };
+  Object.assign(view, {
+    app,
+    workspace,
+    transcript,
+    agent,
+    attachmentStore: {
+      hydrateMessage: jest.fn(async (message: ChatMessage) => message),
+    },
+    contextManager: { getPinnedFiles: jest.fn(() => []) },
+    plugin: {
+      settings: { licenseKey: "test-license" },
+      getLogger: () => logger,
+    },
+    automationApprovalMode: "interactive",
+    approvalMode: "ask",
+    sessionTrustedToolNames: new Set<string>(),
+    activeSubmissionOperation: null,
+    queuedFollowUps: [],
+    queueDrainSuppressionDepth: 0,
+    conversationOriginToken: "origin-resubmit-persistent",
+    runConversationOrigins: new Map<string, string>(),
+    pendingRetry: null,
+    pendingRejectedRetry: null,
+    pendingThinConversationId: oldConversationId,
+    thinBootstrapRequest: null,
+    pendingForkHistory: null,
+    legacyHistoryViewOnly: false,
+    messageEditGeneration: 0,
+    thinClientId: `client_${"c".repeat(32)}`,
+    chatId,
+    chatTitle: "Saved chat",
+    readThinAgentContextSources: jest.fn(async () => []),
+    getLoadedPluginBuildId: jest.fn(async () => `sha256:${"d".repeat(64)}`),
+    prepareSubmission: jest.fn(async (submission: AgentComposerSubmit) => submission),
+    bindQueueToChat: jest.fn(async () => undefined),
+    updateViewState: jest.fn(),
+  });
+
+  return {
+    agent,
+    app,
+    chatId,
+    initialMessages,
+    loaded,
+    oldConversationId,
+    rejectNextModify: () => { rejectedModifyCount += 1; },
+    replacementAssistant,
+    saveChat,
+    storage,
+    transcript,
+    view,
+    workspace,
+  };
+}
+
+async function confirmHistoricalResubmit(
+  view: AgentChatView,
+  messageIdToResubmit: string,
+  text: string,
+): Promise<boolean> {
+  const result = (view as any).resubmitMessage(messageIdToResubmit, text) as Promise<boolean>;
+  await Promise.resolve();
+  const confirm = Array.from(document.querySelectorAll<HTMLButtonElement>("button"))
+    .find((button) => button.textContent === "Resubmit");
+  if (!confirm) throw new Error("Historical resubmit confirmation was not shown.");
+  confirm.click();
+  return result;
+}
+
+function createSavedChatLoadHarness(
+  messages: ChatMessage[],
+  options: Readonly<{
+    agentConversationId?: string;
+    hydrate?: () => Promise<void>;
+  }> = {},
+) {
   const app = new App();
   const loaded = {
     chatId: "legacy-chat",
@@ -327,6 +555,9 @@ function createSavedChatLoadHarness(messages: ChatMessage[]) {
     messages,
     contextFiles: [] as string[],
     approvalMode: "ask" as const,
+    ...(options.agentConversationId
+      ? { agentConversationId: options.agentConversationId }
+      : {}),
   };
   const workspace = {
     setRunPending: jest.fn(),
@@ -341,12 +572,15 @@ function createSavedChatLoadHarness(messages: ChatMessage[]) {
   const agent = {
     cancel: jest.fn(async () => undefined),
     disconnect: jest.fn(),
-    hydrate: jest.fn(async () => undefined),
+    hydrate: jest.fn(options.hydrate ?? (async () => undefined)),
+    getSnapshot: jest.fn(() => ({ status: "idle" })),
   };
   const transcript = {
     load: jest.fn(async () => loaded),
     saveMetadata: jest.fn(async () => loaded),
+    snapshot: jest.fn(() => loaded),
   };
+  const logger = { error: jest.fn() };
   const warmThinConversation = jest.fn(async () => undefined);
   const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
   Object.assign(view, {
@@ -360,6 +594,7 @@ function createSavedChatLoadHarness(messages: ChatMessage[]) {
     queueHydrated: false,
     queuePersistence: Promise.resolve(),
     pendingForkHistory: null,
+    deferredRecoveredCompletion: null,
     pendingThinConversationId: null,
     thinBootstrapRequest: null,
     sessionTrustedToolNames: new Set<string>(),
@@ -370,11 +605,12 @@ function createSavedChatLoadHarness(messages: ChatMessage[]) {
     chatFontSize: "medium",
     approvalMode: "ask",
     isFullyLoaded: true,
+    plugin: { getLogger: () => logger },
     workspace,
     agent,
     transcript,
     contextManager: {
-      setContextFiles: jest.fn(async () => undefined),
+      setPinnedFiles: jest.fn(async () => undefined),
     },
     hydrateQueue: jest.fn(async () => undefined),
     applyFontSize: jest.fn(),
@@ -385,9 +621,44 @@ function createSavedChatLoadHarness(messages: ChatMessage[]) {
     }),
     syncAttachments: jest.fn(),
     updateViewState: jest.fn(),
+    getLoadedPluginBuildId: jest.fn(async () => `sha256:${"d".repeat(64)}`),
     warmThinConversation,
   });
-  return { agent, loaded, transcript, view, warmThinConversation, workspace };
+  return { agent, loaded, logger, transcript, view, warmThinConversation, workspace };
+}
+
+function cachedExecutingToolHistory(): ChatMessage[] {
+  const tool = {
+    id: "call-cached-write",
+    messageId: "assistant-cached-write",
+    request: {
+      id: "call-cached-write",
+      type: "function" as const,
+      function: {
+        name: "write",
+        arguments: JSON.stringify({ path: "Cached.md", content: "Pending" }),
+      },
+    },
+    state: "executing" as const,
+    timestamp: 2,
+    executionStartedAt: 3,
+  };
+  return [{
+    role: "user",
+    content: "Write the cached note",
+    message_id: "user-cached-write",
+  }, {
+    role: "assistant",
+    content: "",
+    message_id: "assistant-cached-write",
+    tool_calls: [tool],
+    messageParts: [{
+      id: "tool:call-cached-write",
+      type: "tool_call",
+      timestamp: 2,
+      data: tool,
+    }],
+  }];
 }
 
 describe("AgentChatView composer admission", () => {
@@ -481,6 +752,91 @@ describe("AgentChatView composer admission", () => {
       context_ref: "ctx1_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
     }]);
     harness.composer.unload();
+  });
+
+  it("rereads the same pinned set on later messages and honors explicit exclusion", async () => {
+    const harness = createHarness("before-commit");
+    const pinnedFiles = new Set(["[[Projects/Plan.md]]", "[[Notes/Brief.md]]"]);
+    const getPinnedFiles = jest.fn(() => pinnedFiles);
+    const capturedPinnedSets: string[][] = [];
+    const readThinAgentContextSources = jest.fn(async (entries: ReadonlySet<string>) => {
+      capturedPinnedSets.push([...entries]);
+      return [];
+    });
+    (harness.view as any).contextManager = { getPinnedFiles };
+    (harness.view as any).readThinAgentContextSources = readThinAgentContextSources;
+    harness.runGate.resolve();
+
+    await (harness.view as any).executeSubmission(
+      { text: "First message", mode: "send" },
+      { expectedConversationOriginToken: "origin-admission" },
+    );
+    await (harness.view as any).executeSubmission(
+      { text: "Later message", mode: "send" },
+      { expectedConversationOriginToken: "origin-admission" },
+    );
+    await (harness.view as any).executeSubmission(
+      { text: "Do not include pinned files", mode: "send" },
+      {
+        expectedConversationOriginToken: "origin-admission",
+        includeContextFiles: false,
+      },
+    );
+
+    expect(capturedPinnedSets).toEqual([
+      ["[[Projects/Plan.md]]", "[[Notes/Brief.md]]"],
+      ["[[Projects/Plan.md]]", "[[Notes/Brief.md]]"],
+      [],
+    ]);
+    expect(getPinnedFiles).toHaveBeenCalledTimes(2);
+    harness.composer.unload();
+  });
+
+  it("does not pin a file merely because the agent read it", async () => {
+    const pinnedFiles = new Set(["[[Projects/Plan.md]]"]);
+    const contextManager = {
+      getPinnedFiles: jest.fn(() => pinnedFiles),
+      pinFile: jest.fn(),
+      unpinFile: jest.fn(),
+    };
+    const workspace = {
+      setAgentSnapshot: jest.fn(async () => undefined),
+    };
+    const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
+    Object.assign(view, {
+      contextManager,
+      workspace,
+      conversationOriginToken: "origin-read",
+      runConversationOrigins: new Map([["user-read", "origin-read"]]),
+    });
+
+    (view as any).renderAgentSnapshot({
+      runId: "run-read",
+      turnId: "user-read",
+      status: "running",
+      messages: [{
+        id: "assistant-read",
+        role: "assistant",
+        partIds: ["tool-read"],
+      }],
+      parts: [{
+        id: "tool-read",
+        kind: "tool",
+        messageId: "assistant-read",
+        callId: "call-read",
+        name: "read",
+        location: "vault",
+        input: { paths: ["Notes/Evidence.md"] },
+        state: "succeeded",
+        order: 0,
+      }],
+    });
+    await Promise.resolve();
+
+    expect(workspace.setAgentSnapshot).toHaveBeenCalledTimes(1);
+    expect(contextManager.pinFile).not.toHaveBeenCalled();
+    expect(contextManager.unpinFile).not.toHaveBeenCalled();
+    expect([...contextManager.getPinnedFiles()]).toEqual(["[[Projects/Plan.md]]"]);
   });
 
   it("retries a pre-commit failure from the inline error without resending the newer draft", async () => {
@@ -585,6 +941,156 @@ describe("AgentChatView composer admission", () => {
     expect(inputText).toBe("");
   });
 
+  it("directly forks and retries the current failed turn without opening the message editor", async () => {
+    const harness = await createPersistentHistoricalResubmitHarness({
+      initialMessages: [{
+        role: "user",
+        content: "Original request",
+        message_id: "user-original",
+      }],
+    });
+    (harness.agent.getSnapshot as jest.Mock).mockReturnValue({
+      runId: "run-capacity-failed",
+      turnId: "user-original",
+      status: "failed",
+      phase: "complete",
+      terminalError: {
+        code: "response_capacity_unavailable",
+        message: "SystemSculpt does not currently have enough service capacity.",
+        retryable: true,
+      },
+      messages: [{
+        id: "assistant-partial",
+        role: "assistant",
+        partIds: ["text:assistant-partial:0"],
+      }],
+      parts: [{
+        id: "text:assistant-partial:0",
+        kind: "text",
+        messageId: "assistant-partial",
+        state: "complete",
+        markdown: "A harmless partial response.",
+        order: 0,
+      }],
+    });
+
+    await (harness.view as any).retryFailedTurn("user-original");
+
+    expect(harness.workspace.showMessageEditor).not.toHaveBeenCalled();
+    expect(harness.agent.disconnect).toHaveBeenCalledTimes(1);
+    expect(harness.agent.start).toHaveBeenCalledTimes(1);
+    expect((harness.view as any).thinBootstrapRequest).toMatchObject({
+      fork: {
+        source_conversation_id: harness.oldConversationId,
+        before_message_id: "user-original",
+      },
+    });
+    const retryInput = (harness.agent.start as jest.Mock).mock.calls[0][0];
+    expect(retryInput.message).toMatchObject({
+      role: "user",
+      parts: [{ type: "text", text: "Original request" }],
+    });
+    expect(harness.transcript.snapshot().messages).toEqual([
+      expect.objectContaining({
+        role: "user",
+        content: "Original request",
+        message_id: expect.not.stringMatching(/^user-original$/),
+      }),
+      harness.replacementAssistant,
+    ]);
+  });
+
+  it("keeps a failed-turn retry explicit when replay could repeat a vault mutation", async () => {
+    const harness = await createPersistentHistoricalResubmitHarness({
+      initialMessages: [{
+        role: "user",
+        content: "Update the project note",
+        message_id: "user-original",
+      }],
+    });
+    (harness.agent.getSnapshot as jest.Mock).mockReturnValue({
+      runId: "run-mutation-failed",
+      turnId: "user-original",
+      status: "failed",
+      phase: "complete",
+      messages: [{
+        id: "assistant-mutation",
+        role: "assistant",
+        partIds: ["tool:write-1"],
+      }],
+      parts: [{
+        id: "tool:write-1",
+        kind: "tool",
+        messageId: "assistant-mutation",
+        callId: "write-1",
+        name: "write",
+        location: "vault",
+        input: { path: "Project.md", content: "Updated" },
+        state: "succeeded",
+        order: 0,
+      }],
+    });
+
+    await (harness.view as any).retryFailedTurn("user-original");
+
+    expect(harness.agent.start).not.toHaveBeenCalled();
+    expect(harness.workspace.showMessageEditor).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messageId: "user-original",
+        text: expect.stringContaining("Update the project note"),
+        requiresReplayConfirmation: true,
+      }),
+    );
+  });
+
+  it("does not silently drop an unavailable attachment during failed-turn retry", async () => {
+    const harness = await createPersistentHistoricalResubmitHarness({
+      initialMessages: [{
+        role: "user",
+        content: [{
+          type: "text",
+          text: "Use the attached plan",
+        }, {
+          type: "text",
+          text: "--- BEGIN ATTACHED FILE: plan.md (text/markdown) ---\nPlan content\n--- END ATTACHED FILE: plan.md ---",
+        }],
+        message_id: "user-original",
+        attachmentMetadata: [{
+          id: "missing-plan",
+          name: "plan.md",
+          mimeType: "text/markdown",
+          byteLength: 12,
+          kind: "text",
+          contentPartIndex: 1,
+          contentRef: {
+            schema: "systemsculpt-chat-attachment-v1",
+            payload: "utf8-content-part",
+            sha256: "e".repeat(64),
+            byteLength: 12,
+          },
+        }],
+      }],
+    });
+    (harness.agent.getSnapshot as jest.Mock).mockReturnValue({
+      runId: "run-attachment-failed",
+      turnId: "user-original",
+      status: "failed",
+      phase: "complete",
+      messages: [],
+      parts: [],
+    });
+
+    await (harness.view as any).retryFailedTurn("user-original");
+
+    expect(harness.agent.start).not.toHaveBeenCalled();
+    expect(harness.workspace.showMessageEditor).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messageId: "user-original",
+        unavailableAttachmentCount: 1,
+      }),
+    );
+  });
+
   it("drops an ordinary composer admission when New chat wins attachment preparation", async () => {
     const preparation = deferred<AgentComposerSubmit>();
     const prepared: AgentComposerSubmit = {
@@ -687,8 +1193,8 @@ describe("AgentChatView composer admission", () => {
   });
 
   it("retires an ordinary run when New chat wins without mutating the replacement chat", async () => {
-    const runStarted = deferred<ThinAgentRunInput>();
-    const runFinished = deferred<ThinAgentRunResult>();
+    const runStarted = deferred<FirstPartyAgentRunInput>();
+    const runFinished = deferred<FirstPartyAgentRunResult>();
     const durableMessages: ChatMessage[] = [];
     const snapshot = () => ({
       chatId: "",
@@ -718,12 +1224,10 @@ describe("AgentChatView composer admission", () => {
       workspace,
       transcript,
       agent: {
-        start: jest.fn((input: ThinAgentRunInput) => {
+        start: jest.fn((input: FirstPartyAgentRunInput) => {
           runStarted.resolve(input);
           return runFinished.promise;
         }),
-      },
-      agentConnection: {
         stageContext: jest.fn(async () => ({
           context_ref: "ctx1_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
         })),
@@ -731,7 +1235,7 @@ describe("AgentChatView composer admission", () => {
       attachmentStore: {
         hydrateMessage: jest.fn(async (message: ChatMessage) => message),
       },
-      contextManager: { getContextFiles: jest.fn(() => []) },
+      contextManager: { getPinnedFiles: jest.fn(() => []) },
       plugin: { settings: { licenseKey: "test-license" } },
       automationApprovalMode: "interactive",
       approvalMode: "ask",
@@ -848,7 +1352,7 @@ describe("AgentChatView composer admission", () => {
       workspace,
       transcript,
       agent: {
-        start: jest.fn(async (input: ThinAgentRunInput): Promise<ThinAgentRunResult> => {
+        start: jest.fn(async (input: FirstPartyAgentRunInput): Promise<FirstPartyAgentRunResult> => {
           await input.beforeSend?.();
           const assistant: ChatMessage = {
             role: "assistant",
@@ -868,8 +1372,6 @@ describe("AgentChatView composer admission", () => {
             message: assistant,
           };
         }),
-      },
-      agentConnection: {
         stageContext: jest.fn(async () => ({
           context_ref: "ctx1_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
         })),
@@ -877,7 +1379,7 @@ describe("AgentChatView composer admission", () => {
       attachmentStore: {
         hydrateMessage: jest.fn(async (message: ChatMessage) => message),
       },
-      contextManager: { getContextFiles: jest.fn(() => []) },
+      contextManager: { getPinnedFiles: jest.fn(() => []) },
       plugin: { settings: { licenseKey: "test-license" } },
       automationApprovalMode: "interactive",
       approvalMode: "ask",
@@ -917,6 +1419,103 @@ describe("AgentChatView composer admission", () => {
     expect(workspace.setRunPending).toHaveBeenLastCalledWith(false);
   });
 
+  it("settles a cache-missed completed assistant as an ephemeral live history row", async () => {
+    const durableMessages: ChatMessage[] = [];
+    const snapshot = () => ({
+      chatId: durableMessages.length > 0 ? "cache-missed-chat" : "",
+      title: "Cache missed settlement",
+      version: durableMessages.length,
+      messages: [...durableMessages],
+      contextFiles: [],
+    });
+    const transcript = {
+      snapshot: jest.fn(snapshot),
+      setTitle: jest.fn(),
+      commitUser: jest.fn(async (input: { message: ChatMessage }) => {
+        durableMessages.push(input.message);
+        return snapshot();
+      }),
+    };
+    const workspace = {
+      setHistory: jest.fn(async () => undefined),
+      setAgentSnapshot: jest.fn(async () => undefined),
+      setRunPending: jest.fn(),
+      setBanner: jest.fn(),
+      settleCompletedRun: jest.fn(async () => undefined),
+      restoreRejectedSubmission: jest.fn(),
+      resetMessageEditor: jest.fn(),
+    };
+    const assistant: ChatMessage = {
+      role: "assistant",
+      content: "The server response remains visible.",
+      message_id: "assistant-cache-missed",
+    };
+    const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
+    Object.assign(view, {
+      workspace,
+      transcript,
+      agent: {
+        start: jest.fn(async (input: FirstPartyAgentRunInput): Promise<FirstPartyAgentRunResult> => {
+          await input.beforeSend?.();
+          return {
+            kind: "completed",
+            snapshot: {
+              runId: "run-cache-missed",
+              turnId: input.turnId,
+              status: "completed",
+              phase: "complete",
+              messages: [],
+              parts: [],
+            },
+            message: assistant,
+          };
+        }),
+        stageContext: jest.fn(async () => ({
+          context_ref: "ctx1_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        })),
+      },
+      attachmentStore: {
+        hydrateMessage: jest.fn(async (message: ChatMessage) => message),
+      },
+      contextManager: { getPinnedFiles: jest.fn(() => []) },
+      plugin: { settings: { licenseKey: "test-license" } },
+      automationApprovalMode: "interactive",
+      approvalMode: "ask",
+      sessionTrustedToolNames: new Set<string>(),
+      queuedFollowUps: [],
+      conversationOriginToken: "origin-cache-missed",
+      runConversationOrigins: new Map<string, string>(),
+      suppressQueueDrain: false,
+      pendingRetry: null,
+      pendingRejectedRetry: null,
+      pendingThinConversationId: null,
+      thinClientId: `client_${"c".repeat(32)}`,
+      chatId: "",
+      chatTitle: "Cache missed settlement",
+      readThinAgentContextSources: jest.fn(async () => []),
+      getLoadedPluginBuildId: jest.fn(async () => `sha256:${"d".repeat(64)}`),
+      applyTranscriptIdentity: jest.fn(),
+      bindQueueToChat: jest.fn(async () => undefined),
+      updateViewState: jest.fn(),
+      logAgentError: jest.fn(),
+    });
+
+    await expect((view as any).executeSubmission(
+      { text: "Keep the successful response visible", mode: "send" },
+      { expectedConversationOriginToken: "origin-cache-missed" },
+    )).resolves.toBeUndefined();
+
+    expect(durableMessages).toHaveLength(1);
+    expect(durableMessages[0].role).toBe("user");
+    expect(workspace.settleCompletedRun).toHaveBeenCalledWith([
+      durableMessages[0],
+      assistant,
+    ]);
+    expect(workspace.restoreRejectedSubmission).not.toHaveBeenCalled();
+    expect((view as any).pendingRejectedRetry).toBeNull();
+    expect((view as any).activeSubmissionOperation).toBeNull();
+  });
+
   it("Stop during hydration retires preflight synchronously and late work cannot start", async () => {
     const harness = createHarness("before-commit");
     const hydrationStarted = deferred<ChatMessage>();
@@ -952,11 +1551,11 @@ describe("AgentChatView composer admission", () => {
     harness.composer.unload();
   });
 
-  it("Stop during bridge bootstrap guards context staging and durable admission", async () => {
+  it("Stop during session preparation guards context staging and durable admission", async () => {
     const harness = createHarness("before-commit");
-    const started = deferred<ThinAgentRunInput>();
-    const terminal = deferred<ThinAgentRunResult>();
-    harness.agent.start.mockImplementation((input: ThinAgentRunInput) => {
+    const started = deferred<FirstPartyAgentRunInput>();
+    const terminal = deferred<FirstPartyAgentRunResult>();
+    harness.agent.start.mockImplementation((input: FirstPartyAgentRunInput) => {
       started.resolve(input);
       return terminal.promise;
     });
@@ -975,7 +1574,7 @@ describe("AgentChatView composer admission", () => {
     await expect(input.beforeSend?.()).rejects.toThrow(
       "This chat changed before the request was admitted.",
     );
-    expect((harness.view as any).agentConnection.stageContext).not.toHaveBeenCalled();
+    expect(harness.agent.stageContext).not.toHaveBeenCalled();
     expect((harness.view as any).transcript.commitUser).not.toHaveBeenCalled();
 
     terminal.resolve({
@@ -1164,14 +1763,18 @@ describe("AgentChatView controls", () => {
     });
     workspace.load();
 
-    const cancel = jest.fn(async () => undefined);
+    const cancel = jest.fn(async () => {
+      expect((view as any).pendingThinConversationId).toBeNull();
+      expect((view as any).thinBootstrapRequest).toBeNull();
+    });
     const disconnect = jest.fn();
-    const clearContext = jest.fn();
+    const recordLifecycle = jest.fn();
+    const clearPinnedFiles = jest.fn();
     const saveQueue = jest.fn(async () => undefined);
     Object.assign(view, {
       app,
       workspace,
-      agent: { cancel, disconnect },
+      agent: { cancel, disconnect, recordLifecycle },
       thinBootstrapRequest: { contract_version: "thin-agent-v1" },
       pendingThinConversationId: "conversation_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       conversationOriginToken: "old-origin",
@@ -1199,8 +1802,8 @@ describe("AgentChatView controls", () => {
       approvalMode: "full-access",
       contextLoading: false,
       contextManager: {
-        clearContext,
-        getContextFiles: jest.fn(() => []),
+        clearPinnedFiles,
+        getPinnedFiles: jest.fn(() => []),
       },
       transcript: {
         reset: jest.fn(() => ({
@@ -1246,13 +1849,18 @@ describe("AgentChatView controls", () => {
     expect(workspace.getInputText()).toBe("");
     expect(workspace.getMessageAttachments()).toEqual([]);
     expect(parent.querySelectorAll(".systemsculpt-agent-attachment.is-message")).toHaveLength(0);
-    expect(parent.querySelectorAll(".systemsculpt-agent-attachment.is-context")).toHaveLength(0);
+    expect(parent.querySelectorAll(".systemsculpt-agent-attachment.is-pinned")).toHaveLength(0);
     expect(parent.querySelectorAll(".systemsculpt-agent-queue-item")).toHaveLength(0);
     expect(parent.querySelector<HTMLSelectElement>('[aria-label="Vault changes"]')?.value).toBe("ask");
     expect(document.activeElement).toBe(parent.querySelector("textarea"));
-    expect(clearContext).toHaveBeenCalledTimes(1);
+    expect(clearPinnedFiles).toHaveBeenCalledTimes(1);
     expect(cancel).toHaveBeenCalledTimes(1);
     expect(disconnect).toHaveBeenCalledTimes(1);
+    expect(recordLifecycle).toHaveBeenCalledWith({
+      code: "conversation_reset",
+      phase: "session",
+      conversationId: (view as any).pendingThinConversationId,
+    });
     expect(saveQueue).toHaveBeenCalledWith(
       "saved-chat",
       expect.arrayContaining([expect.objectContaining({ id: "saved-queue" })]),
@@ -1345,8 +1953,8 @@ describe("AgentChatView controls", () => {
       approvalMode: "ask",
       contextLoading: false,
       contextManager: {
-        clearContext: jest.fn(),
-        getContextFiles: jest.fn(() => []),
+        clearPinnedFiles: jest.fn(),
+        getPinnedFiles: jest.fn(() => []),
       },
       transcript: {
         reset: jest.fn(() => ({
@@ -1605,6 +2213,74 @@ describe("AgentChatView controls", () => {
     workspace.unload();
   });
 
+  it("holds automatic FIFO promotion while Stop and send now takes over a queued item", async () => {
+    const removalSaveStarted = deferred();
+    const releaseRemovalSave = deferred();
+    const persistedQueues: string[][] = [];
+    const selected = {
+      id: "queued-selected",
+      text: "Run selected now",
+      includeContextFiles: false,
+    };
+    const remaining = {
+      id: "queued-remaining",
+      text: "Keep me next",
+      includeContextFiles: true,
+    };
+    const executeSubmission = jest.fn(async () => undefined);
+    const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
+    Object.assign(view, {
+      activeSubmissionOperation: null,
+      conversationOriginToken: "origin-takeover",
+      queuedFollowUps: [selected, remaining],
+      queueHydrated: true,
+      draftKey: "chat-takeover",
+      queuePersistence: Promise.resolve(),
+      queueDrainSuppressionDepth: 0,
+      queueRepository: {
+        save: jest.fn(async (_key: string, items: Array<{ id: string }>) => {
+          persistedQueues.push(items.map((item) => item.id));
+          removalSaveStarted.resolve();
+          await releaseRemovalSave.promise;
+        }),
+      },
+      workspace: {
+        setQueue: jest.fn(),
+        restoreRejectedSubmission: jest.fn(),
+      },
+      stopActiveRun: jest.fn(async () => undefined),
+      executeSubmission,
+      handleError: jest.fn(),
+    });
+
+    const takeover = (view as any).runQueuedFollowUpNow(selected.id);
+    await removalSaveStarted.promise;
+
+    expect((view as any).isQueueDrainSuppressed()).toBe(true);
+    expect((view as any).queuedFollowUps).toEqual([remaining]);
+    // This is the exact completion-side guard used by executeSubmission.
+    const automaticPromotion = !(view as any).isQueueDrainSuppressed()
+      ? (view as any).queuedFollowUps.shift()
+      : null;
+    expect(automaticPromotion).toBeNull();
+    expect((view as any).queuedFollowUps).toEqual([remaining]);
+
+    releaseRemovalSave.resolve();
+    await takeover;
+
+    expect(executeSubmission).toHaveBeenCalledTimes(1);
+    expect(executeSubmission).toHaveBeenCalledWith(
+      { text: selected.text, mode: "send" },
+      {
+        includeContextFiles: false,
+        expectedConversationOriginToken: "origin-takeover",
+      },
+    );
+    expect((view as any).queuedFollowUps).toEqual([remaining]);
+    expect(persistedQueues).toEqual([[remaining.id]]);
+    expect((view as any).queueDrainSuppressionDepth).toBe(0);
+  });
+
   it("restores a queued row when Remove queued follow-up cannot persist", async () => {
     const parent = document.body.createDiv();
     const app = new App();
@@ -1766,6 +2442,217 @@ describe("AgentChatView thin conversation lifecycle", () => {
     expect(harness.workspace.setBanner).not.toHaveBeenCalledWith(
       expect.any(String),
       "error",
+    );
+  });
+
+  it("never replaces a saved thin chat with an empty fork bootstrap when editing its first turn", async () => {
+    const harness = await createPersistentHistoricalResubmitHarness();
+    const pending = {
+      kind: "resend" as const,
+      message: harness.initialMessages[0],
+      targetMessageId: "user-original",
+      expectedIndex: 0,
+      expectedVersion: harness.loaded.version,
+      attachments: [],
+      laterMessageCount: 3,
+      unavailableAttachmentCount: 0,
+      requiresReplayConfirmation: true,
+    };
+    (harness.view as any).pendingRetry = pending;
+
+    await expect(confirmHistoricalResubmit(
+      harness.view,
+      pending.targetMessageId,
+      "Edited original request",
+    )).resolves.toBe(true);
+
+    const writes = harness.saveChat.mock.calls.map(([, messages, options]) => ({
+      ids: messages.map((message) => message.message_id),
+      authoritative:
+        (options as { authoritativeServerHistoryReconciliation?: boolean })
+          .authoritativeServerHistoryReconciliation === true,
+    }));
+    expect(writes).toEqual([
+      {
+        ids: [expect.stringMatching(/^user-/)],
+        authoritative: false,
+      },
+      {
+        ids: [expect.stringMatching(/^user-/), "assistant-replacement"],
+        authoritative: true,
+      },
+    ]);
+    expect(harness.saveChat.mock.calls.some(([, messages]) => messages.length === 0))
+      .toBe(false);
+    expect(harness.transcript.snapshot()).toMatchObject({
+      chatId: harness.chatId,
+      agentConversationId: expect.stringMatching(/^conversation_[a-f0-9]{32}$/),
+      messages: [
+        expect.objectContaining({
+          role: "user",
+          content: "Edited original request",
+        }),
+        harness.replacementAssistant,
+      ],
+    });
+    expect(harness.transcript.snapshot().agentConversationId)
+      .not.toBe(harness.oldConversationId);
+    expect((harness.view as any).pendingForkHistory).toBeNull();
+    expect((harness.view as any).pendingRetry).toBeNull();
+    expect(harness.workspace.resetMessageEditor).toHaveBeenCalledTimes(1);
+    expect(harness.agent.disconnect).toHaveBeenCalledTimes(1);
+    expect((harness.view as any).thinBootstrapRequest).toMatchObject({
+      fork: {
+        source_conversation_id: harness.oldConversationId,
+        before_message_id: "user-original",
+      },
+    });
+  });
+
+  it("rolls back an edited first turn when bootstrap fails without attempting an empty save", async () => {
+    const harness = await createPersistentHistoricalResubmitHarness({
+      failBeforeCommit: true,
+    });
+    const pending = {
+      kind: "resend" as const,
+      message: harness.initialMessages[0],
+      targetMessageId: "user-original",
+      expectedIndex: 0,
+      expectedVersion: harness.loaded.version,
+      attachments: [],
+      laterMessageCount: 3,
+      unavailableAttachmentCount: 0,
+      requiresReplayConfirmation: true,
+    };
+    (harness.view as any).pendingRetry = pending;
+
+    await expect(confirmHistoricalResubmit(
+      harness.view,
+      pending.targetMessageId,
+      "Edited original request",
+    )).resolves.toBe(false);
+
+    expect(harness.saveChat).not.toHaveBeenCalled();
+    expect(harness.transcript.snapshot()).toMatchObject({
+      version: harness.loaded.version,
+      agentConversationId: harness.oldConversationId,
+      messages: harness.loaded.messages,
+    });
+    expect((harness.view as any).pendingRetry).toBe(pending);
+    expect((harness.view as any).pendingForkHistory).toBeNull();
+    expect((harness.view as any).pendingRejectedRetry).toMatchObject({
+      historicalResubmit: pending,
+      submission: expect.objectContaining({
+        text: "Edited original request",
+      }),
+    });
+    expect(harness.workspace.resetMessageEditor).not.toHaveBeenCalled();
+    expect(harness.workspace.restoreRejectedSubmission).not.toHaveBeenCalled();
+    expect(harness.workspace.setBanner).not.toHaveBeenCalledWith(
+      expect.any(String),
+      "error",
+    );
+  });
+
+  it("keeps the historical editor retryable when the replacement branch cannot be saved", async () => {
+    const harness = await createPersistentHistoricalResubmitHarness();
+    const pending = {
+      kind: "resend" as const,
+      message: harness.initialMessages[0],
+      targetMessageId: "user-original",
+      expectedIndex: 0,
+      expectedVersion: harness.loaded.version,
+      attachments: [],
+      laterMessageCount: 3,
+      unavailableAttachmentCount: 0,
+      requiresReplayConfirmation: true,
+    };
+    (harness.view as any).pendingRetry = pending;
+    harness.rejectNextModify();
+
+    await expect(confirmHistoricalResubmit(
+      harness.view,
+      pending.targetMessageId,
+      "Edited original request",
+    )).resolves.toBe(false);
+
+    expect((harness.view as any).pendingRetry).toBe(pending);
+    expect((harness.view as any).pendingForkHistory).toBeNull();
+    expect(harness.workspace.resetMessageEditor).not.toHaveBeenCalled();
+    expect(harness.transcript.snapshot()).toMatchObject({
+      version: harness.loaded.version,
+      agentConversationId: harness.oldConversationId,
+      messages: harness.loaded.messages,
+    });
+    expect(harness.saveChat.mock.calls.some(([, messages]) => messages.length === 0))
+      .toBe(false);
+
+    await expect(confirmHistoricalResubmit(
+      harness.view,
+      pending.targetMessageId,
+      "Edited original request",
+    )).resolves.toBe(true);
+
+    expect((harness.view as any).pendingRetry).toBeNull();
+    expect(harness.workspace.resetMessageEditor).toHaveBeenCalledTimes(1);
+    expect(harness.transcript.snapshot().messages).toEqual([
+      expect.objectContaining({
+        role: "user",
+        content: "Edited original request",
+      }),
+      harness.replacementAssistant,
+    ]);
+    expect(harness.saveChat.mock.calls.some(([, messages]) => messages.length === 0))
+      .toBe(false);
+  });
+
+  it("refuses a pointerless legacy resubmit before allocating a blank server conversation", async () => {
+    const initialMessages: ChatMessage[] = [
+      { role: "user", content: "First", message_id: "user-first" },
+      { role: "assistant", content: "First answer", message_id: "assistant-first" },
+      { role: "user", content: "Later", message_id: "user-later" },
+      { role: "assistant", content: "Later answer", message_id: "assistant-later" },
+    ];
+    const harness = createHistoricalResubmitHarness(
+      initialMessages,
+      2,
+      false,
+      null,
+    );
+    const pending = {
+      kind: "resend" as const,
+      message: initialMessages[2],
+      targetMessageId: "user-later",
+      expectedIndex: 2,
+      expectedVersion: 12,
+      attachments: [],
+      laterMessageCount: 1,
+      unavailableAttachmentCount: 0,
+      requiresReplayConfirmation: false,
+    };
+    (harness.view as any).pendingRetry = pending;
+    const noticeLog = jest.spyOn(console, "log").mockImplementation(() => undefined);
+
+    await (harness.view as any).executeSubmission(
+      { text: "Edited later", mode: "send" },
+      { historicalResubmit: pending, restoreRejectedSubmission: false },
+    );
+
+    expect((harness.view as any).legacyHistoryViewOnly).toBe(true);
+    expect(harness.workspace.setComposerReadOnly).toHaveBeenLastCalledWith(
+      "View-only saved chat. Start a new chat to continue.",
+    );
+    expect(harness.workspace.setBanner).toHaveBeenLastCalledWith(
+      "This older saved chat is view-only. You can read or export it. Start a new chat to continue.",
+    );
+    expect(harness.transcript.commitUser).not.toHaveBeenCalled();
+    expect(harness.agent.start).not.toHaveBeenCalled();
+    expect(harness.agent.disconnect).not.toHaveBeenCalled();
+    expect((harness.view as any).thinBootstrapRequest).toBeNull();
+    expect((harness.view as any).pendingForkHistory).toBeNull();
+    expect(harness.durableMessages).toEqual(initialMessages);
+    expect(noticeLog).toHaveBeenCalledWith(
+      "Notice: This older saved chat is view-only. Start a new chat to continue.",
     );
   });
 
@@ -2053,7 +2940,7 @@ describe("AgentChatView thin conversation lifecycle", () => {
         load: jest.fn(async () => loaded),
       },
       contextManager: {
-        setContextFiles: jest.fn(async () => undefined),
+        setPinnedFiles: jest.fn(async () => undefined),
       },
       hydrateQueue: jest.fn(async () => undefined),
       applyFontSize: jest.fn(),
@@ -2118,6 +3005,29 @@ describe("AgentChatView thin conversation lifecycle", () => {
     expect(harness.loaded.messages).toEqual(messages);
   });
 
+  it("retires a draft warm-up before restoring a saved chat", async () => {
+    const messages: ChatMessage[] = [
+      { role: "user", content: "Saved question", message_id: "saved-user" },
+      { role: "assistant", content: "Saved answer", message_id: "saved-assistant" },
+    ];
+    const harness = createSavedChatLoadHarness(messages);
+    (harness.view as any).pendingThinConversationId =
+      "conversation_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    (harness.view as any).thinBootstrapRequest = {
+      contract_version: "thin-agent-v1",
+    };
+    harness.agent.cancel.mockImplementationOnce(async () => {
+      expect((harness.view as any).pendingThinConversationId).toBeNull();
+      expect((harness.view as any).thinBootstrapRequest).toBeNull();
+    });
+
+    await harness.view.loadChatById("legacy-chat");
+
+    expect(harness.agent.cancel).toHaveBeenCalledTimes(1);
+    expect(harness.agent.disconnect).toHaveBeenCalledTimes(1);
+    expect(harness.warmThinConversation).not.toHaveBeenCalled();
+  });
+
   it("keeps an empty saved chat without a server conversation writable", async () => {
     const harness = createSavedChatLoadHarness([]);
 
@@ -2130,6 +3040,85 @@ describe("AgentChatView thin conversation lifecycle", () => {
     expect(harness.warmThinConversation).toHaveBeenCalledWith(
       expect.stringMatching(/^conversation_[a-f0-9]{32}$/),
     );
+  });
+
+  it("presents a cached executing tool as recovering until authoritative hydration settles", async () => {
+    const conversationId = "conversation_11111111111111111111111111111111";
+    const hydrateStarted = deferred();
+    const releaseHydrate = deferred();
+    const harness = createSavedChatLoadHarness(cachedExecutingToolHistory(), {
+      agentConversationId: conversationId,
+      hydrate: async () => {
+        hydrateStarted.resolve(undefined);
+        await releaseHydrate.promise;
+      },
+    });
+
+    const loading = harness.view.loadChatById("cached-running-chat");
+    await hydrateStarted.promise;
+
+    const presentedHistory = harness.workspace.setHistory.mock.calls.at(-1)?.[0];
+    expect(presentedHistory?.[1]?.tool_calls?.[0]).toMatchObject({
+      state: "executing",
+    });
+    expect(JSON.stringify(presentedHistory))
+      .not.toContain("TOOL_OUTCOME_UNKNOWN_AFTER_RESTART");
+    expect(harness.workspace.setAgentSnapshot).toHaveBeenLastCalledWith({
+      runId: null,
+      turnId: null,
+      status: "running",
+      phase: "retrying",
+      statusLabel: "Recovering",
+      messages: [],
+      parts: [],
+    });
+    expect(harness.workspace.setBanner).toHaveBeenLastCalledWith("Loading chat…");
+
+    releaseHydrate.resolve(undefined);
+    await loading;
+    expect(harness.workspace.setBanner).toHaveBeenLastCalledWith(null);
+  });
+
+  it("shows a session restore error without fabricating or saving cached tool failure", async () => {
+    const conversationId = "conversation_22222222222222222222222222222222";
+    const hydrateError = new Error("PRIVATE_HYDRATE_FAILURE");
+    const harness = createSavedChatLoadHarness(cachedExecutingToolHistory(), {
+      agentConversationId: conversationId,
+      hydrate: async () => { throw hydrateError; },
+    });
+
+    await harness.view.loadChatById("cached-failed-hydrate-chat");
+
+    const presentedHistory = harness.workspace.setHistory.mock.calls.at(-1)?.[0];
+    expect(presentedHistory?.[1]?.tool_calls?.[0]).toMatchObject({
+      state: "executing",
+    });
+    expect(JSON.stringify(presentedHistory))
+      .not.toContain("TOOL_OUTCOME_UNKNOWN_AFTER_RESTART");
+    expect(harness.workspace.setAgentSnapshot.mock.calls.map(([snapshot]) => snapshot))
+      .toEqual([
+        expect.objectContaining({
+          status: "running",
+          phase: "retrying",
+          statusLabel: "Recovering",
+        }),
+        null,
+      ]);
+    expect(harness.workspace.setBanner).toHaveBeenLastCalledWith(
+      "The agent session could not be restored. This cached transcript is shown for reference. Reload the chat to try again.",
+      "error",
+    );
+    expect(harness.logger.error).toHaveBeenCalledWith(
+      "ChatView agent session failed",
+      hydrateError,
+      expect.objectContaining({
+        source: "AgentChatView",
+        method: "loadChatHydration",
+      }),
+    );
+    expect(harness.transcript.saveMetadata).not.toHaveBeenCalled();
+    expect(JSON.stringify(harness.loaded.messages))
+      .not.toContain("TOOL_OUTCOME_UNKNOWN_AFTER_RESTART");
   });
 
   it("releases fork reconciliation after an edited turn fails before its durable commit", async () => {
@@ -2218,6 +3207,141 @@ describe("AgentChatView thin conversation lifecycle", () => {
       targetMessageId: "user-original",
       laterMessageCount: 3,
     });
+  });
+
+  it("drains a persisted FIFO once when terminal server history wins during saved-chat hydration", async () => {
+    const conversationId = "conversation_22222222222222222222222222222222";
+    const messages: ChatMessage[] = [
+      {
+        role: "user",
+        content: "Finish while detached",
+        message_id: "user-terminal-hydrate",
+      },
+      {
+        role: "assistant",
+        content: "Finished on the server",
+        message_id: "assistant-terminal-hydrate",
+      },
+    ];
+    const loaded = {
+      chatId: "chat-terminal-hydrate",
+      title: "Terminal hydrate",
+      version: 4,
+      messages,
+      contextFiles: [] as string[],
+      approvalMode: "ask" as const,
+      agentConversationId: conversationId,
+    };
+    const terminalSnapshot = {
+      runId: "run-terminal-hydrate",
+      turnId: "user-terminal-hydrate",
+      status: "completed" as const,
+      messages: [],
+      parts: [],
+    };
+    const queued = [
+      { id: "queued-first", text: "First queued", includeContextFiles: true },
+      { id: "queued-second", text: "Second queued", includeContextFiles: false },
+    ];
+    const app = new App();
+    const setRunPending = jest.fn();
+    const workspace = {
+      setRunPending,
+      setBanner: jest.fn(),
+      resetMessageEditor: jest.fn(),
+      setApprovalMode: jest.fn(),
+      setTitle: jest.fn(),
+      setHistory: jest.fn(async () => undefined),
+      setAgentSnapshot: jest.fn(async () => undefined),
+      setComposerReadOnly: jest.fn(),
+    };
+    const transcript = {
+      load: jest.fn(async () => loaded),
+      snapshot: jest.fn(() => loaded),
+    };
+    const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
+    const runPromotedQueuedSubmission = jest.fn(async () => undefined);
+    const agent = {
+      getSnapshot: jest.fn(() => terminalSnapshot),
+      cancel: jest.fn(async () => undefined),
+      disconnect: jest.fn(),
+      hydrate: jest.fn(async () => {
+        // Reproduce a terminal event racing the successful hydrate. The
+        // deferred-completion path and post-hydrate path must converge on the
+        // same queue owner instead of promoting the first item twice.
+        (view as any).renderAgentSnapshot(terminalSnapshot);
+      }),
+    };
+    Object.assign(view, {
+      app,
+      activeSubmissionOperation: null,
+      conversationOriginToken: "origin-before-terminal-hydrate",
+      messageEditGeneration: 0,
+      pendingRetry: null,
+      pendingRejectedRetry: null,
+      queuedFollowUps: [],
+      queueHydrated: false,
+      queuePersistence: Promise.resolve(),
+      queueDrainSuppressionDepth: 0,
+      pendingForkHistory: null,
+      pendingThinConversationId: null,
+      thinBootstrapRequest: null,
+      deferredRecoveredCompletion: null,
+      sessionTrustedToolNames: new Set<string>(),
+      runConversationOrigins: new Map<string, string>(),
+      legacyHistoryViewOnly: false,
+      thinClientId: `client_${"c".repeat(32)}`,
+      chatId: "previous-chat",
+      chatTitle: "Previous chat",
+      chatVersion: 3,
+      chatFontSize: "medium",
+      approvalMode: "ask",
+      isFullyLoaded: true,
+      workspace,
+      agent,
+      transcript,
+      contextManager: {
+        setPinnedFiles: jest.fn(async () => undefined),
+      },
+      hydrateQueue: jest.fn(async () => {
+        (view as any).queuedFollowUps = [...queued];
+        (view as any).queueHydrated = true;
+        (view as any).syncQueue();
+      }),
+      syncQueue: jest.fn(),
+      applyFontSize: jest.fn(),
+      applyTranscriptIdentity: jest.fn((snapshot: typeof loaded) => {
+        (view as any).chatId = snapshot.chatId;
+        (view as any).chatTitle = snapshot.title;
+        (view as any).chatVersion = snapshot.version;
+      }),
+      syncAttachments: jest.fn(),
+      updateViewState: jest.fn(),
+      getLoadedPluginBuildId: jest.fn(async () => `sha256:${"d".repeat(64)}`),
+      runPromotedQueuedSubmission,
+    });
+
+    await view.loadChatById(loaded.chatId);
+    await Promise.resolve();
+
+    expect(agent.hydrate).toHaveBeenCalledTimes(1);
+    expect(runPromotedQueuedSubmission).toHaveBeenCalledTimes(1);
+    expect(runPromotedQueuedSubmission).toHaveBeenCalledWith(
+      expect.objectContaining({
+        item: queued[0],
+        submission: expect.objectContaining({ text: "First queued" }),
+      }),
+      expect.stringMatching(/^conversation-origin-/),
+    );
+    expect((view as any).queuedFollowUps).toEqual([queued[1]]);
+    expect((view as any).activeSubmissionOperation).toMatchObject({
+      kind: "submission",
+      originalSubmission: expect.objectContaining({ text: "First queued" }),
+    });
+    expect(setRunPending).toHaveBeenLastCalledWith(
+      true,
+      expect.stringMatching(/^user-/),
+    );
   });
 
   it("promotes recovered-run follow-ups in FIFO order without exposing an idle gap", async () => {
@@ -2405,7 +3529,7 @@ describe("AgentChatView thin conversation lifecycle", () => {
     await Promise.resolve();
 
     expect(logger.error).toHaveBeenCalledWith(
-      "ChatView agent bridge failed",
+      "ChatView agent session failed",
       renderError,
       expect.objectContaining({
         source: "AgentChatView",
@@ -2490,21 +3614,23 @@ describe("AgentChatView thin conversation lifecycle", () => {
       .rejects.toThrow("Current bootstrap failed.");
   });
 
-  it("invalidates a warm bootstrap before closing a transient Obsidian view", async () => {
+  it("detaches a transient Obsidian view without invoking explicit Stop", async () => {
     const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
     const restoreRejectedSubmission = jest.fn();
     const setRunPending = jest.fn();
-    const close = jest.fn(async () => {
+    const detach = jest.fn(async () => {
       expect((view as any).pendingThinConversationId).toBeNull();
       expect((view as any).thinBootstrapRequest).toBeNull();
     });
-    const destroy = jest.fn();
+    const close = jest.fn(async () => undefined);
+    const cancel = jest.fn(async () => undefined);
+    const recordLifecycle = jest.fn();
     Object.assign(view, {
       queueDrainSuppressionDepth: 0,
       queuedFollowUps: [],
       pendingThinConversationId: "conversation_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       thinBootstrapRequest: { contract_version: "thin-agent-v1" },
-      agent: { close },
+      agent: { detach, close, cancel, recordLifecycle },
       chatId: "",
       draftKey: "draft",
       queueHydrated: false,
@@ -2514,7 +3640,6 @@ describe("AgentChatView thin conversation lifecycle", () => {
       transcriptCommitUnsubscribe: null,
       recorderToggleUnsubscribe: null,
       recorderTranscriptUnsubscribe: null,
-      contextManager: { destroy },
       workspace: { setRunPending, restoreRejectedSubmission, setBanner: jest.fn() },
       activeSubmissionOperation: null,
       conversationOriginToken: "origin-close",
@@ -2524,11 +3649,14 @@ describe("AgentChatView thin conversation lifecycle", () => {
       "origin-close",
       { text: "Do not restore after close", mode: "send" },
     );
+    recordLifecycle.mockClear();
 
     await view.onClose();
 
-    expect(close).toHaveBeenCalledTimes(1);
-    expect(destroy).toHaveBeenCalledTimes(1);
+    expect(detach).toHaveBeenCalledTimes(1);
+    expect(close).not.toHaveBeenCalled();
+    expect(cancel).not.toHaveBeenCalled();
+    expect(recordLifecycle).not.toHaveBeenCalled();
     expect((view as any).workspace).toBeNull();
     expect(retiredOperation.controller.signal.aborted).toBe(true);
     expect(retiredOperation.settled).toBe(true);
@@ -2540,5 +3668,76 @@ describe("AgentChatView thin conversation lifecycle", () => {
       }),
     ]);
     expect((view as any).activeSubmissionOperation).toBeNull();
+  });
+
+  it("remembers Allow for chat as trust for every non-trash vault mutation", () => {
+    const sessionTrustedToolNames = new Set<string>();
+    const respondToApproval = jest.fn(() => true);
+    const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
+    Object.assign(view, {
+      sessionTrustedToolNames,
+      agent: {
+        getSnapshot: jest.fn(() => ({
+          parts: [{
+            kind: "tool",
+            approvalId: "approval-create-folders",
+            name: "create_folders",
+            location: "vault",
+          }],
+        })),
+        respondToApproval,
+      },
+    });
+
+    (view as any).respondToToolApproval("approval-create-folders", true, true);
+
+    expect(sessionTrustedToolNames).toEqual(new Set(["*"]));
+    expect(respondToApproval).toHaveBeenCalledWith("approval-create-folders", true);
+  });
+
+  it("rolls back newly remembered chat trust when approval submission fails", () => {
+    const sessionTrustedToolNames = new Set<string>();
+    const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
+    Object.assign(view, {
+      sessionTrustedToolNames,
+      agent: {
+        getSnapshot: jest.fn(() => ({
+          parts: [{
+            kind: "tool",
+            approvalId: "approval-create-folders",
+            name: "create_folders",
+            location: "vault",
+          }],
+        })),
+        respondToApproval: jest.fn(() => false),
+      },
+    });
+
+    (view as any).respondToToolApproval("approval-create-folders", true, true);
+
+    expect(sessionTrustedToolNames).toEqual(new Set());
+  });
+
+  it("preserves pre-existing chat trust when a later approval submission fails", () => {
+    const sessionTrustedToolNames = new Set<string>(["*"]);
+    const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
+    Object.assign(view, {
+      sessionTrustedToolNames,
+      agent: {
+        getSnapshot: jest.fn(() => ({
+          parts: [{
+            kind: "tool",
+            approvalId: "approval-write",
+            name: "write",
+            location: "vault",
+          }],
+        })),
+        respondToApproval: jest.fn(() => false),
+      },
+    });
+
+    (view as any).respondToToolApproval("approval-write", true, true);
+
+    expect(sessionTrustedToolNames).toEqual(new Set(["*"]));
   });
 });

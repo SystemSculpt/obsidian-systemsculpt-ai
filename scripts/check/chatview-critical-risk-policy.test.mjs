@@ -14,12 +14,15 @@ const expectedTests = [
 	"<rootDir>/src/views/chatview/storage/__tests__/ChatPersistenceTypes.test.ts",
 	"<rootDir>/src/views/chatview/__tests__/ChatStorageService.test.ts",
 	"<rootDir>/src/views/chatview/__tests__/agent-chat-view-admission.test.ts",
+	"<rootDir>/src/views/chatview/__tests__/agent-chat-view-fork-retry-integration.test.ts",
 	"<rootDir>/src/views/chatview/__tests__/agent-conversation-presentation.test.ts",
+	"<rootDir>/src/views/chatview/__tests__/agent-conversation-renderer-icons.test.ts",
 	"<rootDir>/src/views/chatview/__tests__/agent-transcript-repository.test.ts",
 	"<rootDir>/src/views/chatview/__tests__/agent-workspace-ui.test.ts",
-	"<rootDir>/src/views/chatview/thin/__tests__/thin-agent-bridge.test.ts",
-	"<rootDir>/src/views/chatview/thin/__tests__/thin-agent-connection.test.ts",
-	"<rootDir>/src/views/chatview/thin/__tests__/thin-agent-lifecycle.test.ts",
+	"<rootDir>/src/views/chatview/__tests__/live-markdown-renderer.test.ts",
+	"<rootDir>/src/views/chatview/thin/__tests__/first-party-agent-chat-session.test.ts",
+	"<rootDir>/src/views/chatview/thin/__tests__/first-party-thin-agent-session.test.ts",
+	"<rootDir>/src/views/chatview/thin/__tests__/first-party-thin-agent-session-transport.test.ts",
 	"<rootDir>/src/views/chatview/thin/__tests__/thin-agent-mutation-journal.test.ts",
 	"<rootDir>/src/views/chatview/thin/__tests__/thin-agent-message-adapter.test.ts",
 ];
@@ -30,16 +33,16 @@ const expectedCoverage = [
 	"src/views/chatview/AgentConversationPresentation.ts",
 	"src/views/chatview/AgentTranscriptRepository.ts",
 	"src/views/chatview/AgentConversationRenderer.ts",
+	"src/views/chatview/LiveMarkdownRenderer.ts",
 	"src/views/chatview/ChatStorageService.ts",
 	"src/views/chatview/storage/ChatFrontmatterIdentity.ts",
 	"src/views/chatview/storage/ChatMarkdownSerializer.ts",
-	"src/views/chatview/thin/ThinAgentBridge.ts",
-	"src/views/chatview/thin/ThinAgentConnection.ts",
-	"src/views/chatview/thin/ThinAgentLifecycle.ts",
+	"src/views/chatview/thin/FirstPartyAgentChatSession.ts",
+	"src/views/chatview/thin/FirstPartyThinAgentProtocol.ts",
+	"src/views/chatview/thin/FirstPartyThinAgentSession.ts",
+	"src/views/chatview/thin/FirstPartyThinAgentSessionTransport.ts",
 	"src/views/chatview/thin/ThinAgentMutationJournal.ts",
-	"src/views/chatview/thin/ThinAgentHeadlessChat.ts",
 	"src/views/chatview/thin/ThinAgentMessageAdapter.ts",
-	"src/views/chatview/thin/ThinAgentProjection.ts",
 ];
 const expectedThresholds = {
 	"./src/services/chat/ManagedToolExecution.ts": {
@@ -72,6 +75,12 @@ const expectedThresholds = {
 		functions: -12,
 		lines: -40,
 	},
+	"./src/views/chatview/LiveMarkdownRenderer.ts": {
+		statements: -54,
+		branches: -94,
+		functions: -1,
+		lines: -34,
+	},
 	"./src/views/chatview/ChatStorageService.ts": {
 		statements: -85,
 		branches: -90,
@@ -90,23 +99,29 @@ const expectedThresholds = {
 		functions: -5,
 		lines: -20,
 	},
-	"./src/views/chatview/thin/ThinAgentBridge.ts": {
-		statements: -210,
-		branches: -300,
-		functions: -30,
-		lines: -180,
+	"./src/views/chatview/thin/FirstPartyAgentChatSession.ts": {
+		statements: -232,
+		branches: -420,
+		functions: -21,
+		lines: -181,
 	},
-	"./src/views/chatview/thin/ThinAgentConnection.ts": {
-		statements: -67,
-		branches: -89,
-		functions: -20,
-		lines: -55,
+	"./src/views/chatview/thin/FirstPartyThinAgentProtocol.ts": {
+		statements: -96,
+		branches: -120,
+		functions: -6,
+		lines: -87,
 	},
-	"./src/views/chatview/thin/ThinAgentLifecycle.ts": {
-		statements: -1,
-		branches: -5,
-		functions: 100,
-		lines: -1,
+	"./src/views/chatview/thin/FirstPartyThinAgentSession.ts": {
+		statements: -55,
+		branches: -67,
+		functions: -2,
+		lines: -42,
+	},
+	"./src/views/chatview/thin/FirstPartyThinAgentSessionTransport.ts": {
+		statements: -52,
+		branches: -62,
+		functions: -7,
+		lines: -39,
 	},
 	"./src/views/chatview/thin/ThinAgentMutationJournal.ts": {
 		statements: -25,
@@ -114,23 +129,11 @@ const expectedThresholds = {
 		functions: -5,
 		lines: -19,
 	},
-	"./src/views/chatview/thin/ThinAgentHeadlessChat.ts": {
-		statements: -10,
-		branches: -5,
-		functions: -3,
-		lines: -10,
-	},
 	"./src/views/chatview/thin/ThinAgentMessageAdapter.ts": {
 		statements: -10,
 		branches: -23,
 		functions: -2,
 		lines: -8,
-	},
-	"./src/views/chatview/thin/ThinAgentProjection.ts": {
-		statements: -30,
-		branches: -75,
-		functions: -5,
-		lines: -26,
 	},
 };
 

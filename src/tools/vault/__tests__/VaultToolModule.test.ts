@@ -115,6 +115,34 @@ describe("VaultToolModule", () => {
         expect(mockReadFiles).toHaveBeenCalledWith(params);
         expect(result).toEqual({ content: "test content" });
       });
+
+      it("returns read evidence without mutating the originating chat pins", async () => {
+        const params = { paths: ["Notes/Evidence.md"] };
+        const contextManager = {
+          pinFile: jest.fn(),
+          unpinFile: jest.fn(),
+        };
+        const chatView = { contextManager } as any;
+        mockReadFiles.mockResolvedValue({
+          files: [{
+            path: "Notes/Evidence.md",
+            content: "# Evidence",
+          }],
+        });
+
+        const result = await server.executeTool("read", params, chatView);
+
+        expect(result).toEqual({
+          files: [{
+            path: "Notes/Evidence.md",
+            content: "# Evidence",
+          }],
+        });
+        expect(mockReadFiles).toHaveBeenCalledWith(params);
+        expect(mockManageContext).not.toHaveBeenCalled();
+        expect(contextManager.pinFile).not.toHaveBeenCalled();
+        expect(contextManager.unpinFile).not.toHaveBeenCalled();
+      });
     });
 
     describe("write tool", () => {

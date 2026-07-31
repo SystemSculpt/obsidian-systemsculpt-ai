@@ -3,10 +3,12 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import {
   countConfiguredTargets,
   createDevelopmentBuildIdentity,
   createBuildSyncController,
+  DEFAULT_OBSIDIAN_RELOAD_TIMEOUT_MS,
   DEVELOPMENT_BUILD_MANIFEST_KEY,
   formatSyncTarget,
   loadConfiguredTargets,
@@ -16,6 +18,7 @@ import {
   syncConfiguredTargets,
 } from "./plugin-sync.mjs";
 import { parseArgs as parseSyncLocalArgs } from "./sync-local-vaults.mjs";
+import { STAGING_API_BASE_URL } from "./plugin-build-options.mjs";
 
 function createTempRoot(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "systemsculpt-plugin-sync-"));
@@ -35,6 +38,14 @@ function writePluginArtifacts(root) {
   fs.writeFileSync(path.join(root, "styles.css"), "body { color: red; }\n");
 }
 
+function writeStagingPluginArtifacts(root) {
+  writePluginArtifacts(root);
+  fs.writeFileSync(
+    path.join(root, "main.js"),
+    `module.exports = { version: 'test', api: ${JSON.stringify(STAGING_API_BASE_URL)} };\n`,
+  );
+}
+
 function writeSyncConfig(root, value) {
   const configPath = path.join(root, "systemsculpt-sync.config.json");
   fs.writeFileSync(configPath, `${JSON.stringify(value, null, 2)}\n`);
@@ -42,6 +53,15 @@ function writeSyncConfig(root, value) {
 }
 
 const silentLogger = { info() {}, warn() {} };
+
+async function waitFor(predicate, timeoutMs = 2_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.fail(`Condition was not met within ${timeoutMs}ms.`);
+}
 
 test("loadConfiguredTargets exposes only configured local plugin folders", (t) => {
   const root = createTempRoot(t);
@@ -86,6 +106,31 @@ test("syncConfiguredTargets copies local artifacts and removes obsolete extras",
   assert.equal(
     fs.readdirSync(pluginDir).some((name) => name.includes(".systemsculpt-replace-")),
     false,
+  );
+});
+
+test("syncConfiguredTargets accepts staging only when the staging target is explicit", (t) => {
+  const root = createTempRoot(t);
+  writeStagingPluginArtifacts(root);
+  const pluginDir = path.join(root, "vault", ".obsidian", "plugins", "systemsculpt-ai");
+  const configPath = writeSyncConfig(root, { pluginTargets: [{ path: pluginDir }] });
+
+  assert.throws(
+    () => syncConfiguredTargets({ root, configPath, logger: silentLogger }),
+    /canonical SystemSculpt API base/,
+  );
+  assert.equal(fs.existsSync(pluginDir), false);
+
+  const result = syncConfiguredTargets({
+    root,
+    configPath,
+    logger: silentLogger,
+    apiBaseUrl: STAGING_API_BASE_URL,
+  });
+  assert.equal(result.succeeded.length, 1);
+  assert.match(
+    fs.readFileSync(path.join(pluginDir, "main.js"), "utf8"),
+    /staging\.systemsculpt\.com\/api\/plugin/,
   );
 });
 
@@ -287,17 +332,52 @@ test("reloadConfiguredTargets uses Obsidian CLI with the configured vault", (t) 
     }],
     env: { SYSTEMSCULPT_AUTO_RELOAD: "1" },
     logger: silentLogger,
-    runCommand(command, args) {
-      calls.push({ command, args });
+    runCommand(command, args, options) {
+      calls.push({ command, args, options });
       return { status: 0, stdout: "Reloaded\n", stderr: "" };
     },
   });
 
-  assert.deepEqual(calls, [{
+  assert.deepEqual(calls.map(({ command, args }) => ({ command, args })), [{
     command: "obsidian",
     args: ["plugin:reload", "id=systemsculpt-ai", "vault=QA Vault"],
   }]);
+  assert.equal(calls[0].options.timeout, DEFAULT_OBSIDIAN_RELOAD_TIMEOUT_MS);
+  assert.equal(calls[0].options.killSignal, "SIGKILL");
   assert.equal(result.reloaded.length, 1);
+});
+
+test("reloadConfiguredTargets kills and logs a hung Obsidian reload without waiting indefinitely", (t) => {
+  const root = createTempRoot(t);
+  writePluginArtifacts(root);
+  const warnings = [];
+  const startedAt = Date.now();
+
+  assert.throws(
+    () => reloadConfiguredTargets({
+      root,
+      targets: [{
+        path: path.join(root, "vault", ".obsidian", "plugins", "systemsculpt-ai"),
+        vault: "QA Vault",
+      }],
+      env: { SYSTEMSCULPT_AUTO_RELOAD: "1" },
+      timeoutMs: 100,
+      logger: { info() {}, warn(value) { warnings.push(value); } },
+      runCommand(_command, _args, options) {
+        return spawnSync(
+          process.execPath,
+          ["-e", "setInterval(() => {}, 1_000)"],
+          options,
+        );
+      },
+    }),
+    /Failed to reload QA Vault/,
+  );
+
+  assert.ok(Date.now() - startedAt < 5_000);
+  assert.deepEqual(warnings, [
+    "[sync] Obsidian reload timed out for QA Vault after 100ms; terminated child with SIGKILL.",
+  ]);
 });
 
 test("reloadConfiguredTargets fails when Obsidian rejects a configured reload", (t) => {
@@ -339,6 +419,15 @@ test("sync-local honors SYSTEMSCULPT_SYNC_CONFIG when no CLI config is passed", 
   }
 });
 
+test("sync CLI exposes only production and staging artifact targets", () => {
+  assert.equal(parseSyncLocalArgs([]).target, "production");
+  assert.equal(parseSyncLocalArgs(["--target", "staging"]).target, "staging");
+  assert.throws(
+    () => parseSyncLocalArgs(["--target", "preview"]),
+    /Unknown plugin sync target: preview/,
+  );
+});
+
 test("createBuildSyncController copies artifacts and reloads the plugin", async (t) => {
   const root = createTempRoot(t);
   writePluginArtifacts(root);
@@ -358,6 +447,37 @@ test("createBuildSyncController copies artifacts and reloads the plugin", async 
   await new Promise((resolve) => setTimeout(resolve, 20));
   assert.equal(fs.existsSync(path.join(pluginDir, "main.js")), true);
   assert.equal(reloadTargets.calls.length, 1);
+});
+
+test("createBuildSyncController accepts later cycles after a reload failure", async (t) => {
+  const root = createTempRoot(t);
+  writePluginArtifacts(root);
+  const pluginDir = path.join(root, "vault", ".obsidian", "plugins", "systemsculpt-ai");
+  const configPath = writeSyncConfig(root, { pluginTargets: [{ path: pluginDir }] });
+  const warnings = [];
+  let reloadAttempts = 0;
+  const controller = createBuildSyncController({
+    root,
+    configPath,
+    env: { SYSTEMSCULPT_AUTO_SYNC: "1" },
+    logger: { info() {}, warn(value) { warnings.push(value); } },
+    reloadTargets() {
+      reloadAttempts += 1;
+      if (reloadAttempts === 1) {
+        throw new Error("Obsidian reload timed out.");
+      }
+      return { reloaded: [] };
+    },
+  });
+
+  controller.schedule();
+  await waitFor(() => reloadAttempts === 1);
+  controller.schedule();
+  await waitFor(() => reloadAttempts === 2);
+
+  assert.equal(reloadAttempts, 2);
+  assert.ok(warnings.some((warning) =>
+    warning.includes("Auto-sync failed: Obsidian reload timed out.")));
 });
 
 function mockFunction() {

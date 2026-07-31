@@ -50,6 +50,7 @@ export class CreditsBalanceModal extends StandardModal {
 
   private statusEl: HTMLElement | null = null;
   private refreshButton: HTMLButtonElement | null = null;
+  private purchaseButton: HTMLButtonElement | null = null;
   private isRefreshingBalance: boolean = false;
   private isRefreshingUsage: boolean = false;
   private isLoadingMoreUsage: boolean = false;
@@ -132,12 +133,12 @@ export class CreditsBalanceModal extends StandardModal {
       "refresh-cw"
     ) as HTMLButtonElement;
 
-    this.addActionButton(
+    this.purchaseButton = this.addActionButton(
       "Buy Credits",
       () => this.openPurchasePage(),
       true,
       "external-link"
-    );
+    ) as HTMLButtonElement;
 
     this.addActionButton(
       "Open Account",
@@ -195,9 +196,14 @@ export class CreditsBalanceModal extends StandardModal {
     this.statsEl.empty();
     this.timelineEl.empty();
     this.hintEl.empty();
+    this.syncPurchaseButton();
 
     if (!this.balance) {
       this.renderNoDataState();
+      return;
+    }
+    if (this.balance.usageClass === "master_auth") {
+      this.renderInternalQaState();
       return;
     }
 
@@ -273,6 +279,37 @@ export class CreditsBalanceModal extends StandardModal {
       this.hintEl.setText("Need more headroom? You can buy additional credits anytime.");
       this.hintEl.removeClass("is-warning");
     }
+  }
+
+  private renderInternalQaState(): void {
+    if (!this.summaryEl || !this.statsEl || !this.hintEl) return;
+    const hero = this.summaryEl.createDiv({
+      cls: "ss-credits-balance__hero is-internal-qa",
+    });
+    const heroIcon = hero.createDiv({ cls: "ss-credits-balance__hero-icon" });
+    setIcon(heroIcon, "shield-check");
+    const heroContent = hero.createDiv({ cls: "ss-credits-balance__hero-content" });
+    heroContent.createDiv({
+      cls: "ss-credits-balance__hero-label",
+      text: "Usage mode",
+    });
+    heroContent.createDiv({
+      cls: "ss-credits-balance__hero-value",
+      text: "Internal QA",
+    });
+    this.createStatCard("Customer credits", "Not used");
+    this.createStatCard("Provider usage", "Tracked internally");
+    this.hintEl.setText(
+      "Provider usage is tracked internally. Customer credits are not used for this test session.",
+    );
+    this.hintEl.removeClass("is-warning");
+  }
+
+  private syncPurchaseButton(): void {
+    if (!this.purchaseButton) return;
+    const internalQa = this.balance?.usageClass === "master_auth";
+    this.purchaseButton.toggleAttribute("hidden", internalQa);
+    this.purchaseButton.disabled = internalQa;
   }
 
   private renderUsage(): void {

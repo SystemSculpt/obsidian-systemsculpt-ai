@@ -403,6 +403,97 @@ describe("AgentTranscriptRepository", () => {
       "tool:call-read",
       "text:assistant-1:2",
     ]);
+    expect(updated.messages[1].messageParts?.map((part) => part.timestamp))
+      .toEqual([100, 101, 102]);
+    expect(updated.messages[1].messageParts?.[1]).toMatchObject({
+      timestamp: 101,
+      data: { timestamp: 101 },
+    });
+    expect(updated.messages[1].tool_calls?.[0].timestamp).toBe(101);
+  });
+
+  it("allocates a collision-free timestamp for a newly appended projected part", async () => {
+    const { repository, storage } = createHarness();
+    await repository.commitUser({
+      kind: "append",
+      message: user("user-1", "Check the plan."),
+    }, conversationId);
+    await repository.reconcileServerHistory(projectedServerHistory(100));
+
+    const expanded = projectedServerHistory(10_000);
+    const response = expanded[1];
+    response.content = `${response.content} One more detail.`;
+    response.messageParts?.push({
+      id: "text:assistant-1:3",
+      type: "content",
+      timestamp: 10_003,
+      data: " One more detail.",
+    });
+
+    const updated = await repository.reconcileServerHistory(expanded);
+    const timestamps = updated.messages[1].messageParts?.map((part) => part.timestamp) ?? [];
+
+    expect(updated.version).toBe(3);
+    expect(storage.saveChat).toHaveBeenCalledTimes(2);
+    expect(timestamps).toEqual([100, 101, 102, 103]);
+    expect(new Set(timestamps).size).toBe(timestamps.length);
+    expect(updated.messages[1].tool_calls?.[0].timestamp).toBe(101);
+  });
+
+  it("accepts incoming chronology when a new projected part is inserted between stable IDs", async () => {
+    const { repository, storage } = createHarness();
+    await repository.commitUser({
+      kind: "append",
+      message: user("user-1", "Check the plan."),
+    }, conversationId);
+    const initial = projectedServerHistory(100);
+    initial[1].messageParts = initial[1].messageParts?.filter((part) => part.type !== "tool_call");
+    initial[1].tool_calls = undefined;
+    await repository.reconcileServerHistory(initial);
+
+    const inserted = await repository.reconcileServerHistory(projectedServerHistory(10_000));
+
+    expect(inserted.version).toBe(3);
+    expect(storage.saveChat).toHaveBeenCalledTimes(2);
+    expect(inserted.messages[1].messageParts?.map((part) => part.id)).toEqual([
+      "reasoning:assistant-1:0",
+      "tool:call-read",
+      "text:assistant-1:2",
+    ]);
+    expect(inserted.messages[1].messageParts?.map((part) => part.timestamp))
+      .toEqual([10_000, 10_001, 10_002]);
+    expect(inserted.messages[1].tool_calls?.[0].timestamp).toBe(10_001);
+  });
+
+  it("accepts incoming chronology when a stable tool part ID changes call identity", async () => {
+    const { repository, storage } = createHarness();
+    await repository.commitUser({
+      kind: "append",
+      message: user("user-1", "Check the plan."),
+    }, conversationId);
+    await repository.reconcileServerHistory(projectedServerHistory(100));
+
+    const changed = projectedServerHistory(10_000);
+    const toolPart = changed[1].messageParts?.find((part) => part.type === "tool_call");
+    if (!toolPart || toolPart.type !== "tool_call") throw new Error("Expected projected tool part.");
+    const changedTool: ToolCall = {
+      ...toolPart.data,
+      id: "call-read-replaced",
+      request: { ...toolPart.data.request, id: "call-read-replaced" },
+    };
+    toolPart.data = changedTool;
+    changed[1].tool_calls = [changedTool];
+
+    const updated = await repository.reconcileServerHistory(changed);
+
+    expect(updated.version).toBe(3);
+    expect(storage.saveChat).toHaveBeenCalledTimes(2);
+    expect(updated.messages[1].messageParts?.map((part) => part.timestamp))
+      .toEqual([10_000, 10_001, 10_002]);
+    expect(updated.messages[1].tool_calls?.[0]).toMatchObject({
+      id: "call-read-replaced",
+      timestamp: 10_001,
+    });
   });
 
   it("persists a real projected part-order change when timestamps are regenerated", async () => {
@@ -416,7 +507,15 @@ describe("AgentTranscriptRepository", () => {
     const reordered = projectedServerHistory(10_000);
     const response = reordered[1];
     const [reasoningPart, toolPart, contentPart] = response.messageParts ?? [];
-    response.messageParts = [toolPart, reasoningPart, contentPart];
+    response.messageParts = [toolPart, reasoningPart, contentPart].map((part, index) =>
+      part.type === "tool_call"
+        ? {
+            ...part,
+            timestamp: 10_000 + index,
+            data: { ...part.data, timestamp: 10_000 + index },
+          }
+        : { ...part, timestamp: 10_000 + index });
+    if (response.tool_calls?.[0]) response.tool_calls[0].timestamp = 10_000;
 
     const updated = await repository.reconcileServerHistory(reordered);
 
@@ -427,6 +526,9 @@ describe("AgentTranscriptRepository", () => {
       "reasoning:assistant-1:0",
       "text:assistant-1:2",
     ]);
+    expect(updated.messages[1].messageParts?.map((part) => part.timestamp))
+      .toEqual([10_000, 10_001, 10_002]);
+    expect(updated.messages[1].tool_calls?.[0].timestamp).toBe(10_000);
   });
 
   it("clears a stale saved cache when confirmed authoritative history is empty", async () => {
@@ -690,8 +792,8 @@ describe("AgentTranscriptRepository", () => {
     });
   });
 
-  it("reconciles a crash-interrupted active tool to an honest unknown outcome", async () => {
-    const { repository, records } = createHarness();
+  it("keeps a cached executing tool presentation-only until authoritative history arrives", async () => {
+    const { repository, records, storage } = createHarness();
     const interrupted = assistant("a1", "Working");
     interrupted.tool_calls = [{
       id: "call-1",
@@ -717,9 +819,22 @@ describe("AgentTranscriptRepository", () => {
 
     const loaded = await repository.load("current");
     expect(loaded?.messages[1].tool_calls?.[0]).toMatchObject({
-      state: "failed",
-      result: { error: { code: "TOOL_OUTCOME_UNKNOWN_AFTER_RESTART" } },
+      state: "executing",
     });
+    expect(loaded?.messages[1].tool_calls?.[0]).not.toHaveProperty("result");
+    expect(loaded?.messages[1].messageParts?.[0]).toMatchObject({
+      type: "tool_call",
+      data: expect.objectContaining({ state: "executing" }),
+    });
+    expect(JSON.stringify(loaded)).not.toContain("TOOL_OUTCOME_UNKNOWN_AFTER_RESTART");
+    expect(storage.saveChat).not.toHaveBeenCalled();
+
+    await repository.saveMetadata();
+    expect(records.get("current").messages[1].tool_calls[0]).toMatchObject({
+      state: "executing",
+    });
+    expect(JSON.stringify(records.get("current")))
+      .not.toContain("TOOL_OUTCOME_UNKNOWN_AFTER_RESTART");
   });
 
   it("returns copies so UI code cannot mutate durable state", async () => {

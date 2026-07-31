@@ -7,12 +7,17 @@ import path from "node:path";
 import {
   assertSafePluginArtifactPathsForBuild,
   assertProductionPluginArtifacts,
+  assertStagingPluginArtifacts,
   buildProductionPlugin,
+  buildStagingPlugin,
   inspectPluginArtifacts,
   THIN_CLIENT_FORBIDDEN_BUNDLE_FRAGMENTS,
 } from "./plugin-artifacts.mjs";
 import { buildCssArtifact } from "./build-css.mjs";
-import { CANONICAL_API_BASE_URL } from "./plugin-build-options.mjs";
+import {
+  CANONICAL_API_BASE_URL,
+  STAGING_API_BASE_URL,
+} from "./plugin-build-options.mjs";
 
 function createTempPluginDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "systemsculpt-plugin-artifacts-"));
@@ -20,6 +25,10 @@ function createTempPluginDir() {
 
 function productionBundle(contents = "") {
   return `const SYSTEMSCULPT_API = ${JSON.stringify(CANONICAL_API_BASE_URL)};\n${contents}`;
+}
+
+function stagingBundle(contents = "") {
+  return `const SYSTEMSCULPT_API = ${JSON.stringify(STAGING_API_BASE_URL)};\n${contents}`;
 }
 
 function writeManifest(root) {
@@ -59,6 +68,24 @@ test("assertProductionPluginArtifacts rejects inline sourcemap bundles", () => {
   );
 });
 
+test("inline sourcemap detection scans beyond the final two megabytes", () => {
+  const root = createTempPluginDir();
+  const sourceMapPayload = "A".repeat((2 * 1024 * 1024) + 1);
+  writeRequiredArtifacts(
+    root,
+    productionBundle(
+      `//# sourceMappingURL=data:application/json;charset=utf-8;base64,${sourceMapPayload}\n`,
+    ),
+  );
+
+  const inspection = inspectPluginArtifacts({ root });
+  assert.equal(inspection.mainBundle.hasInlineSourceMap, true);
+  assert.throws(
+    () => assertProductionPluginArtifacts({ root }),
+    /inline source map/i,
+  );
+});
+
 test("assertProductionPluginArtifacts accepts production-style bundles", () => {
   const root = createTempPluginDir();
   writeRequiredArtifacts(root, productionBundle("console.log('production build');\n"));
@@ -74,6 +101,35 @@ test("assertProductionPluginArtifacts accepts production-style bundles", () => {
   assert.equal(inspection.stylesBundle.hasBuildFailureSentinel, false);
   assert.equal(inspection.stylesBundle.isEffectivelyEmpty, false);
   assert.equal(inspection.manifestMobileCompatible, true);
+});
+
+test("staging artifacts require only the staging API and remain invalid release artifacts", () => {
+  const root = createTempPluginDir();
+  writeRequiredArtifacts(root, stagingBundle("console.log('staging build');\n"));
+
+  const inspection = assertStagingPluginArtifacts({ root });
+  assert.equal(inspection.ok, true);
+  assert.equal(inspection.mainBundle.expectedApiBaseUrl, STAGING_API_BASE_URL);
+  assert.equal(inspection.mainBundle.hasExpectedApiBase, true);
+  assert.equal(inspection.mainBundle.hasCanonicalApiBase, false);
+  assert.deepEqual(inspection.mainBundle.forbiddenApiBases, []);
+  assert.throws(
+    () => assertProductionPluginArtifacts({ root }),
+    /canonical SystemSculpt API base/,
+  );
+});
+
+test("staging artifacts reject a bundle that can still route to production", () => {
+  const root = createTempPluginDir();
+  writeRequiredArtifacts(
+    root,
+    stagingBundle(`const PRODUCTION_API = ${JSON.stringify(CANONICAL_API_BASE_URL)};\n`),
+  );
+
+  assert.throws(
+    () => assertStagingPluginArtifacts({ root }),
+    /API bases forbidden for this build target/,
+  );
 });
 
 test("artifact inspection rejects symlinked required files without trusting their targets", (t) => {
@@ -444,6 +500,38 @@ test("buildProductionPlugin revalidates the post-build artifact set", () => {
   assert.equal(inspection.ok, true);
   assert.equal(inspection.mainBundle.hasInlineSourceMap, false);
   assert.equal(inspection.mainBundle.hasCanonicalApiBase, true);
+});
+
+test("buildStagingPlugin forces the staging URL and revalidates the target artifact", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "systemsculpt staging plugin artifacts-"));
+  writeManifest(root);
+
+  const inspection = buildStagingPlugin({
+    root,
+    stdio: "pipe",
+    env: {
+      SYSTEMSCULPT_API_BASE_URL: CANONICAL_API_BASE_URL,
+      SYSTEMSCULPT_BUILD_STAMP: "release-6.2.7",
+    },
+    spawnSyncImpl(command, args, options) {
+      assert.equal(command, process.execPath);
+      assert.deepEqual(args, [path.join(root, "esbuild.config.mjs"), "production"]);
+      assert.equal(options.cwd, root);
+      assert.equal(options.env.SYSTEMSCULPT_API_BASE_URL, STAGING_API_BASE_URL);
+      assert.equal(options.env.SYSTEMSCULPT_BUILD_STAMP, "staging");
+      assert.equal(options.shell, undefined);
+      writeRequiredArtifacts(root, stagingBundle("console.log('staging bundle');\n"));
+      return {
+        status: 0,
+        stdout: "",
+        stderr: "",
+      };
+    },
+  });
+
+  assert.equal(inspection.ok, true);
+  assert.equal(inspection.mainBundle.hasExpectedApiBase, true);
+  assert.equal(inspection.mainBundle.hasCanonicalApiBase, false);
 });
 
 test("buildProductionPlugin preserves child-process infrastructure failures", () => {

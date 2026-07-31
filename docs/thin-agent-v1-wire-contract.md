@@ -250,9 +250,12 @@ The server owns their exact model-facing descriptions, input schemas, and risk
 classification. The canonical catalog is sorted by tool name, every object
 key is sorted recursively, array order is preserved, and the result is compact
 UTF-8 JSON. Approval requirement and risk classification are fields of that
-catalog rather than a parallel hard-coded name list. The locked catalog is
-12,722 bytes with SHA-256
-`b04234ead8b523cdb4c17977d6f4c747867648bb4561598d523c62cf64b61fb8`.
+catalog rather than a parallel hard-coded name list. The `search` capability
+accepts optional vault-relative `paths`: an exact file scopes to that file, a
+folder includes descendants, multiple paths are combined, and omission keeps
+the whole permitted vault scope. The locked catalog is 13,475 bytes with
+SHA-256
+`d0df90f4939a33ab8b242d18821a2fde7c3f626dbcd6b24948f98987f50d3228`.
 
 An intentional schema or local behavior change publishes a new aggregate
 capability version. It cannot silently change `obsidian.vault@1`.

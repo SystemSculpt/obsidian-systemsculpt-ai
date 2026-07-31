@@ -23,7 +23,7 @@ interface FileItem {
 }
 
 export interface ContextSelectionModalOptions {
-  isFileAlreadyInContext?: (file: TFile) => boolean;
+  isFileAlreadyPinned?: (file: TFile) => boolean;
   initialFilter?: ContextFilter;
   initialSearchQuery?: string;
   initialSelectedPaths?: string[];
@@ -38,7 +38,7 @@ export class ContextSelectionModal extends StandardModal {
   private currentFilter: ContextFilter;
   private searchQuery: string;
   private readonly onSelect: (files: TFile[]) => void | Promise<void>;
-  private readonly isFileAlreadyInContext?: (file: TFile) => boolean;
+  private readonly isFileAlreadyPinned?: (file: TFile) => boolean;
   private readonly initialSearchQuery: string;
   private readonly autoFocusSearch: boolean;
   private readonly maxRenderedFiles = 100;
@@ -60,7 +60,7 @@ export class ContextSelectionModal extends StandardModal {
   ) {
     super(app);
     this.onSelect = onSelect;
-    this.isFileAlreadyInContext = options.isFileAlreadyInContext;
+    this.isFileAlreadyPinned = options.isFileAlreadyPinned;
     this.initialSearchQuery = options.initialSearchQuery?.trim() ?? "";
     this.searchQuery = this.initialSearchQuery.toLowerCase();
     this.autoFocusSearch = options.autoFocusSearch ?? true;
@@ -74,7 +74,11 @@ export class ContextSelectionModal extends StandardModal {
 
   onOpen(): void {
     super.onOpen();
-    this.addTitle("Add context files");
+    this.addTitle("Pin files for every message");
+    this.contentEl.createEl("p", {
+      cls: "ss-context-description",
+      text: "Pinned files are reread for every message. Files SystemSculpt reads while working remain part of this chat, but are not pinned automatically.",
+    });
     this.searchInput = this.addSearchBar("Search files", (query) => {
       this.searchQuery = query.trim().toLowerCase();
       this.applyFilters();
@@ -98,7 +102,7 @@ export class ContextSelectionModal extends StandardModal {
     this.renderFileList();
 
     this.cancelButton = this.addActionButton("Cancel", () => this.close());
-    this.addButton = this.addActionButton("Add files", () => void this.handleSelection(), true);
+    this.addButton = this.addActionButton("Pin files", () => void this.handleSelection(), true);
     this.updateAddButton();
 
     if (this.autoFocusSearch) {
@@ -139,7 +143,7 @@ export class ContextSelectionModal extends StandardModal {
     if (!paths?.length) return;
     const selectedPaths = new Set(paths);
     for (const item of this.files) {
-      if (selectedPaths.has(item.file.path) && !this.isFileAlreadyInContext?.(item.file)) {
+      if (selectedPaths.has(item.file.path) && !this.isFileAlreadyPinned?.(item.file)) {
         this.selectedFiles.add(item.file);
       }
     }
@@ -210,24 +214,24 @@ export class ContextSelectionModal extends StandardModal {
     for (let index = start; index < end; index += 1) {
       const item = this.filteredFiles[index];
       if (!item) continue;
-      const attached = this.isFileAlreadyInContext?.(item.file) ?? false;
+      const pinned = this.isFileAlreadyPinned?.(item.file) ?? false;
       const selected = this.selectedFiles.has(item.file);
       const row = this.listContainer.createEl("li", {
-        cls: `ss-context-file-item${selected ? " is-selected" : ""}${attached ? " is-attached" : ""}`,
+        cls: `ss-context-file-item${selected ? " is-selected" : ""}${pinned ? " is-pinned" : ""}`,
       });
       const label = row.createEl("label", { cls: "ss-context-file-label" });
       const checkbox = label.createEl("input", { attr: { type: "checkbox" } });
-      checkbox.checked = attached || selected;
-      checkbox.disabled = attached || this.processing;
-      checkbox.dataset.attached = String(attached);
-      checkbox.setAttribute("aria-label", attached
-        ? `${item.file.path}, already in context`
-        : `Add ${item.file.path}`);
+      checkbox.checked = pinned || selected;
+      checkbox.disabled = pinned || this.processing;
+      checkbox.dataset.pinned = String(pinned);
+      checkbox.setAttribute("aria-label", pinned
+        ? `${item.file.path}, pinned for every message`
+        : `Pin ${item.file.path}`);
       this.renderFileVisual(label, item);
       const info = label.createSpan({ cls: "ss-context-file-info" });
       info.createSpan({ text: item.file.basename, cls: "ss-context-file-name" });
       info.createSpan({ text: item.file.path, cls: "ss-context-file-path" });
-      if (attached) info.createSpan({ text: "Already in context", cls: "ss-context-file-badge" });
+      if (pinned) info.createSpan({ text: "Pinned", cls: "ss-context-file-badge" });
 
       this.registerDomEvent(checkbox, "change", () => {
         if (checkbox.checked) this.selectedFiles.add(item.file);
@@ -307,7 +311,7 @@ export class ContextSelectionModal extends StandardModal {
   private updateAddButton(): void {
     if (!this.addButton) return;
     const count = this.selectedFiles.size;
-    this.addButton.setText(count === 0 ? "Add files" : `Add ${count} file${count === 1 ? "" : "s"}`);
+    this.addButton.setText(count === 0 ? "Pin files" : `Pin ${count} file${count === 1 ? "" : "s"}`);
     this.addButton.disabled = this.processing || count === 0;
   }
 
@@ -317,11 +321,11 @@ export class ContextSelectionModal extends StandardModal {
     if (this.cancelButton) this.cancelButton.disabled = loading;
     for (const button of this.filterButtons.values()) button.disabled = loading;
     for (const { checkbox } of this.fileItemControlsByPath.values()) {
-      checkbox.disabled = loading || checkbox.dataset.attached === "true";
+      checkbox.disabled = loading || checkbox.dataset.pinned === "true";
     }
     if (this.loadMoreButton) this.loadMoreButton.disabled = loading;
     if (this.addButton && loading) {
-      this.addButton.setText("Adding…");
+      this.addButton.setText("Pinning…");
       this.addButton.disabled = true;
     } else {
       this.updateAddButton();
@@ -336,7 +340,7 @@ export class ContextSelectionModal extends StandardModal {
       this.close();
     } catch (error) {
       const detail = error instanceof Error && error.message.trim() ? ` ${error.message.trim()}` : "";
-      new Notice(`Couldn't add context files.${detail}`, 5000);
+      new Notice(`Couldn't pin files for every message.${detail}`, 5000);
       this.setLoadingState(false);
     }
   }

@@ -20,7 +20,12 @@ describe("ThinAgentLifecycle privacy-safe chronology", () => {
     const second = lifecycle.record({
       code: "local_tool_started",
       phase: "tool_execution",
-      runId: "run_0123456789abcdef",
+      conversationId: "conversation_0123456789abcdef0123456789abcdef",
+      requestId: "request_0123456789abcdef",
+      clientInstanceId: "client_0123456789abcdef0123456789abcdef",
+      pluginBuildId: "07bd9378-dirty-20260731T120000000Z",
+      runId: "run-local-0123456789abcdef",
+      serverRunId: "run_0123456789abcdef0123456789abcdef",
       toolName: "read",
       toolCallId: "call_0123456789abcdef",
       incidentId: "incident_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -41,9 +46,16 @@ describe("ThinAgentLifecycle privacy-safe chronology", () => {
       payload: {
         version: 1,
         severity: "info",
+        sequence: 2,
+        timestamp: 1_001,
         code: "local_tool_started",
         phase: "tool_execution",
-        run_id: "run_0123456789abcdef",
+        conversation_id: "conversation_0123456789abcdef0123456789abcdef",
+        request_id: "request_0123456789abcdef",
+        client_instance_id: "client_0123456789abcdef0123456789abcdef",
+        plugin_build_id: "07bd9378-dirty-20260731T120000000Z",
+        run_id: "run-local-0123456789abcdef",
+        server_run_id: "run_0123456789abcdef0123456789abcdef",
         tool_name: "read",
         tool_call_id: "call_0123456789abcdef",
         incident_id: "incident_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -80,12 +92,20 @@ describe("ThinAgentLifecycle privacy-safe chronology", () => {
       phase: "start",
       status: 503,
       retryable: true,
+      conversationId: "Private.md",
+      requestId: "https:private.example.com",
+      clientInstanceId: "client_not-safe",
+      pluginBuildId: "file:Private.md",
       runId: "contains spaces and /paths",
-      toolName: "read Secret.md",
-      toolCallId: "call with spaces",
+      serverRunId: "run_not-safe",
+      toolName: "web_search",
+      toolCallId: "https:private.example.com",
       prompt: "private prompt",
       content: "private content",
       path: "Private.md",
+      url: "https://private.example.com",
+      arguments: { private: true },
+      rawError: "raw provider failure",
       query: "private query",
       input: { private: true },
       output: { private: true },
@@ -112,6 +132,8 @@ describe("ThinAgentLifecycle privacy-safe chronology", () => {
       "private content",
       "Private.md",
       "private query",
+      "https://private.example.com",
+      "raw provider failure",
       "license-secret",
       "ticket-secret",
       "socket reason",
@@ -125,11 +147,46 @@ describe("ThinAgentLifecycle privacy-safe chronology", () => {
       payload: {
         version: 1,
         severity: "info",
+        sequence: 1,
+        timestamp: 100,
         code: "context_prepare_failed",
         phase: "start",
         status: 503,
         retryable: true,
       },
+    });
+  });
+
+  it.each([
+    "mutation_execute_claimed",
+    "mutation_replay_served",
+    "mutation_outcome_unknown",
+    "mutation_call_conflict",
+    "diagnostics_truncated",
+  ] as const)("accepts the bounded observability code %s", (code) => {
+    const lifecycle = new ThinAgentLifecycle(() => undefined, () => 200);
+
+    expect(lifecycle.record({
+      code,
+      phase: code === "diagnostics_truncated" ? "session" : "mutation_journal",
+    })).toMatchObject({ code });
+  });
+
+  it.each([
+    "request_dispatch_started",
+    "request_dispatch_returned",
+    "request_dispatch_failed",
+  ] as const)("accepts the privacy-safe request boundary code %s", (code) => {
+    const lifecycle = new ThinAgentLifecycle(() => undefined, () => 201);
+
+    expect(lifecycle.record({
+      code,
+      phase: "response",
+    })).toEqual({
+      sequence: 1,
+      timestamp: 201,
+      code,
+      phase: "response",
     });
   });
 

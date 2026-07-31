@@ -54,6 +54,14 @@ describe("first-party tool policy", () => {
     }
   });
 
+  it("trusts every non-trash mutation for a remembered chat without trusting trash", () => {
+    const policy = { trustedToolNames: new Set(["*"]) };
+    for (const name of ["write", "edit", "multi_edit", "create_folders", "move"]) {
+      expect(requiresUserApproval(name, policy)).toBe(false);
+    }
+    expect(requiresUserApproval("trash", policy)).toBe(true);
+  });
+
   it("retains the explicit private automation override", () => {
     expect(requiresUserApproval("trash", { requireDestructiveApproval: false })).toBe(false);
   });

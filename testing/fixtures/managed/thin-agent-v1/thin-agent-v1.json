@@ -112,10 +112,7 @@
       "sha256": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
     },
     "turn_body": {
-      "context_ref": "ctx1_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-      "preferences": {
-        "web_search": true
-      }
+      "context_ref": "ctx1_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
     },
     "semantics": {
       "authentication": "bootstrap_access_token_query_parameter",
@@ -158,6 +155,24 @@
         "incident_id": "incident_44444444444444444444444444444444",
         "retryable": true
       }
+    },
+    {
+      "type": "data-systemsculpt-client-tool-request",
+      "id": "call_fixture_read",
+      "data": {
+        "version": 1,
+        "tool_call_id": "call_fixture_read",
+        "tool_name": "read",
+        "target": {
+          "id": "obsidian.vault",
+          "version": 1
+        },
+        "input": {
+          "paths": [
+            "Notes/project.md"
+          ]
+        }
+      }
     }
   ],
   "bootstrap_semantics": {
@@ -195,7 +210,7 @@
     ]
   },
   "transport_semantics": {
-    "turn_submission": "native_chat_transport_with_context_ref_and_preferences_only",
+    "turn_submission": "native_chat_transport_with_context_ref_only",
     "client_tool_result": "native_chat_transport",
     "tool_approval": "native_chat_transport",
     "turn_cancel": "native_chat_transport",
@@ -218,8 +233,8 @@
     "client_authored_mutation_classification": false,
     "obsidian_vault_v1_maps_to_canonical_local_tool_count": 12,
     "server_tool_catalog_canonicalization": "sort_tools_by_name_then_recursively_sort_object_keys_preserve_array_order_compact_utf8_json",
-    "server_tool_catalog_canonical_bytes": 12722,
-    "server_tool_catalog_sha256": "b04234ead8b523cdb4c17977d6f4c747867648bb4561598d523c62cf64b61fb8",
+    "server_tool_catalog_canonical_bytes": 13475,
+    "server_tool_catalog_sha256": "d0df90f4939a33ab8b242d18821a2fde7c3f626dbcd6b24948f98987f50d3228",
     "unknown_required_capability_version": "reject_before_access_grant"
   },
   "legacy_compatibility": {

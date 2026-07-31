@@ -29,7 +29,7 @@ const fixture = JSON.parse(fixtureBytes.toString("utf8"));
 describe("thin-agent-v1 application contract", () => {
   it("keeps the canonical cross-repository fixture byte-identical", () => {
     expect(createHash("sha256").update(fixtureBytes).digest("hex"))
-      .toBe("7a1a05e7c7896ffbc705d3f734979312819e13e58c99946c36de290931264d47");
+      .toBe("6057f59a1d10583656fd55f6ea5cad1434b51ded3a680e5e4343f9bd0dec78aa");
     expect(fixtureBytes.toString("utf8"))
       .not.toMatch(/\b(?:connection|ticket|websocket)\b/i);
   });
@@ -50,9 +50,9 @@ describe("thin-agent-v1 application contract", () => {
     expect(fixture.capability_semantics).toMatchObject({
       client_authored_model_tool_schema: false,
       obsidian_vault_v1_maps_to_canonical_local_tool_count: 12,
-      server_tool_catalog_canonical_bytes: 12_722,
+      server_tool_catalog_canonical_bytes: 13_475,
       server_tool_catalog_sha256:
-        "b04234ead8b523cdb4c17977d6f4c747867648bb4561598d523c62cf64b61fb8",
+        "d0df90f4939a33ab8b242d18821a2fde7c3f626dbcd6b24948f98987f50d3228",
     });
   });
 
@@ -108,7 +108,6 @@ describe("thin-agent-v1 application contract", () => {
       .toEqual(fixture.context_staging.response);
     expect(fixture.context_staging.turn_body).toEqual({
       context_ref: fixture.context_staging.response.context_ref,
-      preferences: { web_search: true },
     });
     expect(fixture.context_staging.turn_body).not.toHaveProperty("context_sources");
     expect(() => parseThinAgentContextResponse({
@@ -285,6 +284,7 @@ describe("thin-agent-v1 application contract", () => {
   it("distinguishes invalid known payloads from safe unknown additions", () => {
     expect(THIN_AGENT_DATA_PART_TYPES).toEqual([
       "data-systemsculpt-run-terminal",
+      "data-systemsculpt-client-tool-request",
     ]);
     expect(parseThinAgentDataPart({
       type: "data-systemsculpt-run-terminal",
@@ -303,6 +303,102 @@ describe("thin-agent-v1 application contract", () => {
       kind: "unknown",
       type: "data-systemsculpt-attachment-ref",
     });
+  });
+
+  it("parses only complete first-party client-tool requests with canonical JSON input", () => {
+    const canonical = fixture.data_parts[2];
+    const parsed = parseThinAgentDataPart({
+      ...canonical,
+      providerExecuted: false,
+      data: {
+        ...canonical.data,
+        future_field: "ignored",
+        providerExecuted: false,
+        target: {
+          ...canonical.data.target,
+          future_target_field: "ignored",
+        },
+        input: {
+          z: [null, true, 4, "value"],
+          a: { nested: "kept" },
+        },
+      },
+    });
+    expect(parsed).toEqual({
+      kind: "known",
+      type: "data-systemsculpt-client-tool-request",
+      data: {
+        version: 1,
+        tool_call_id: "call_fixture_read",
+        tool_name: "read",
+        target: { id: "obsidian.vault", version: 1 },
+        input: {
+          a: { nested: "kept" },
+          z: [null, true, 4, "value"],
+        },
+      },
+    });
+    expect(parsed).not.toHaveProperty("providerExecuted");
+    expect(parsed).not.toHaveProperty("data.providerExecuted");
+    expect(parsed).not.toHaveProperty("data.future_field");
+    expect(parsed).not.toHaveProperty("data.target.future_target_field");
+    if (parsed?.kind === "known"
+      && parsed.type === "data-systemsculpt-client-tool-request") {
+      expect(Object.keys(parsed.data.input as object)).toEqual(["a", "z"]);
+      expect(Object.isFrozen(parsed.data.input)).toBe(true);
+      expect(Object.isFrozen((parsed.data.input as Record<string, unknown>).a))
+        .toBe(true);
+    }
+    expect(canonical).not.toHaveProperty("toolCallId");
+  });
+
+  it("rejects malformed, non-JSON, cyclic, and over-deep client-tool requests", () => {
+    const valid = fixture.data_parts[2].data;
+    const cycle: Record<string, unknown> = {};
+    cycle.self = cycle;
+    let tooDeep: unknown = "leaf";
+    for (let depth = 0; depth < 66; depth += 1) {
+      tooDeep = { value: tooDeep };
+    }
+    const sparse = new Array(2);
+    sparse[0] = "present";
+    const accessor: Record<string, unknown> = {};
+    Object.defineProperty(accessor, "value", {
+      enumerable: true,
+      get: () => "not JSON data",
+    });
+
+    for (const data of [
+      { ...valid, version: 2 },
+      { ...valid, tool_call_id: undefined },
+      { ...valid, tool_call_id: " invalid " },
+      { ...valid, tool_call_id: "x".repeat(513) },
+      { ...valid, tool_name: undefined },
+      { ...valid, tool_name: "read file" },
+      { ...valid, tool_name: `r${"x".repeat(128)}` },
+      { ...valid, target: undefined },
+      { ...valid, target: { id: "vendor.vault", version: 1 } },
+      { ...valid, target: { id: "obsidian.vault", version: 2 } },
+      { ...valid, input: undefined },
+      { ...valid, input: Number.NaN },
+      { ...valid, input: Number.POSITIVE_INFINITY },
+      { ...valid, input: BigInt(1) },
+      { ...valid, input: Symbol("input") },
+      { ...valid, input: () => ({}) },
+      { ...valid, input: new Date(0) },
+      { ...valid, input: cycle },
+      { ...valid, input: tooDeep },
+      { ...valid, input: sparse },
+      { ...valid, input: accessor },
+    ]) {
+      expect(parseThinAgentDataPart({
+        type: "data-systemsculpt-client-tool-request",
+        data,
+      })).toEqual({
+        kind: "invalid",
+        type: "data-systemsculpt-client-tool-request",
+      });
+    }
   });
 
   it("strictly validates terminal outcome fields", () => {

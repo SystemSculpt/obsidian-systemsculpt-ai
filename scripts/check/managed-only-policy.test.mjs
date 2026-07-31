@@ -34,57 +34,9 @@ const FORBIDDEN_PACKAGES = [
   "@openrouter/sdk",
   "agents",
   "ai",
+  "react",
+  "react-dom",
 ];
-const THIN_CLIENT_IMPORT_ALLOWLIST = new Map([
-  ["src/views/chatview/thin/ThinAgentConnection.ts", new Map([
-    ["agents/client", new Set(["value:AgentClient"])],
-    ["agents/chat", new Set(["value:MessageType"])],
-    ["agents/chat/react", new Set(["value:WebSocketChatTransport"])],
-    ["ai", new Set(["type:UIMessage", "value:safeValidateUIMessages"])],
-  ])],
-  ["src/views/chatview/thin/ThinAgentBridge.ts", new Map([
-    ["agents/chat", new Set(["value:MessageType"])],
-    ["agents/chat/react", new Set([
-      "type:WebSocketChatTransport",
-      "value:getToolApproval",
-      "value:getToolCallId",
-      "value:getToolInput",
-      "value:getToolPartState",
-    ])],
-    ["ai", new Set([
-      "type:UIMessage",
-      "value:getToolName",
-      "value:isToolUIPart",
-    ])],
-  ])],
-  ["src/views/chatview/thin/ThinAgentHeadlessChat.ts", new Map([
-    ["ai", new Set([
-      "type:ChatInit",
-      "type:ChatState",
-      "type:ChatStatus",
-      "type:UIMessage",
-      "value:AbstractChat",
-    ])],
-  ])],
-  ["src/views/chatview/thin/ThinAgentMessageAdapter.ts", new Map([
-    ["ai", new Set(["type:UIMessage"])],
-  ])],
-  ["src/views/chatview/thin/ThinAgentProjection.ts", new Map([
-    ["agents/chat/react", new Set([
-      "value:getToolApproval",
-      "value:getToolCallId",
-      "value:getToolInput",
-      "value:getToolOutput",
-      "value:getToolPartState",
-    ])],
-    ["ai", new Set([
-      "type:UIMessage",
-      "value:getToolName",
-      "value:isToolUIPart",
-    ])],
-  ])],
-]);
-const THIN_CLIENT_DEPENDENCIES = new Set(["@ai-sdk/react", "agents", "ai", "react"]);
 const CHAT_AUTHORITY_ROOTS = [
   "src/services/chat/",
   "src/services/managed/",
@@ -324,13 +276,9 @@ function importedBindings(source, fileName) {
 }
 
 function vendorImportViolations(source, relative) {
-  const allowedModules = THIN_CLIENT_IMPORT_ALLOWLIST.get(relative) ?? new Map();
   return importedBindings(source, relative).flatMap(({ specifier, binding }) => {
     if (!isForbiddenPackageSpecifier(specifier)) return [];
-    const allowedBindings = allowedModules.get(specifier) ?? new Set();
-    return allowedBindings.has(binding)
-      ? []
-      : [`${relative}: vendor import ${specifier} (${binding})`];
+    return [`${relative}: vendor import ${specifier} (${binding})`];
   });
 }
 
@@ -413,24 +361,8 @@ function networkViolations(file) {
   return findings;
 }
 
-test("thin protocol SDK imports match the exact file, entrypoint, symbol, and import kind", () => {
-  for (const [relative, allowedModules] of THIN_CLIENT_IMPORT_ALLOWLIST) {
-    const absolute = path.resolve(relative);
-    assert.equal(fs.existsSync(absolute), true, `${relative} is missing`);
-    const actual = importedBindings(fs.readFileSync(absolute, "utf8"), relative)
-      .filter(({ specifier }) => isForbiddenPackageSpecifier(specifier))
-      .map(({ specifier, binding }) => `${specifier}:${binding}`)
-      .sort();
-    const expected = Array.from(allowedModules.entries())
-      .flatMap(([specifier, bindings]) =>
-        Array.from(bindings, (binding) => `${specifier}:${binding}`))
-      .sort();
-    assert.deepEqual(actual, expected, `${relative} import authority changed`);
-  }
-});
-
-test("thin protocol import policy rejects authority-expanding import mutations", () => {
-  const relative = "src/views/chatview/thin/ThinAgentConnection.ts";
+test("first-party client import policy rejects every vendor SDK import form", () => {
+  const relative = "src/views/chatview/thin/FutureFirstPartyRuntime.ts";
   const mutations = [
     {
       label: "extra named symbol",
@@ -536,8 +468,7 @@ test("managed production modules have only SystemSculpt network ownership", () =
   };
   assert.deepEqual(
     Object.keys(dependencies).filter((specifier) =>
-      !THIN_CLIENT_DEPENDENCIES.has(specifier)
-      && FORBIDDEN_PACKAGES.some((name) => specifier === name || specifier.startsWith(`${name}/`)),
+      FORBIDDEN_PACKAGES.some((name) => specifier === name || specifier.startsWith(`${name}/`)),
     ),
     [],
   );

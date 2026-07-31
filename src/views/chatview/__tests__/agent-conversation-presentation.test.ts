@@ -19,6 +19,12 @@ describe("AgentConversationPresentation product-copy boundary", () => {
       visibleMessage: "Retry this message to continue.",
     },
     {
+      code: "response_interrupted",
+      message: "Stream error",
+      heading: "Response interrupted",
+      visibleMessage: "Retry this message to continue.",
+    },
+    {
       code: "agent_bootstrap_failed",
       message: "The transport failed during bootstrap.",
       heading: "Could not finish",

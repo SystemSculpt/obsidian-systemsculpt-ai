@@ -7,7 +7,7 @@ import type {
 } from "./AgentConversation";
 
 const INTERNAL_UI_WORDING =
-  /\b(?:connection|websocket|web socket|socket|ticket|bootstrap|transport|protocol|provider|cloudflare|openrouter|think|pi|ai sdk|cf_agent)\b/i;
+  /\b(?:connection|websocket|web socket|socket|stream|ticket|bootstrap|transport|protocol|provider|cloudflare|openrouter|think|pi|ai sdk|cf_agent)\b/i;
 const INTERRUPTED_ERROR_CODE =
   /(?:connection|socket|stream|resume|recover|interrupt|transport)/i;
 const INTERRUPTED_UI_WORDING =

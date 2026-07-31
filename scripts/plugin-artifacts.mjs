@@ -5,14 +5,18 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { builtinModules } from "node:module";
 import process from "node:process";
-import { CANONICAL_API_BASE_URL } from "./plugin-build-options.mjs";
+import {
+  CANONICAL_API_BASE_URL,
+  LOCAL_AGENT_API_BASE_URL,
+  STAGING_API_BASE_URL,
+  normalizeApiBaseUrl,
+} from "./plugin-build-options.mjs";
 
 export const REQUIRED_PLUGIN_ARTIFACTS = ["manifest.json", "main.js", "styles.css"];
 
 const INLINE_SOURCE_MAP_PATTERN = /[#@]\s*sourceMappingURL=data:/;
 const CSS_BUILD_FAILURE_PATTERN = /\/\*\s*CSS build failed\s*\*\//i;
 const RETIRED_SYSTEMSCULPT_API_HOST = "https://api.systemsculpt.com";
-const DEFAULT_TAIL_BYTES = 2 * 1024 * 1024;
 function bundleFragmentRules(message, fragments) {
   return fragments.map((fragment) => ({ fragment, message }));
 }
@@ -54,10 +58,15 @@ export const THIN_CLIENT_FORBIDDEN_BUNDLE_FRAGMENTS = [
     ],
   ),
   ...bundleFragmentRules(
-    "main.js still bundles a React UI runtime.",
+    "main.js still bundles a retired client SDK or UI runtime.",
     [
+      "node_modules/agents/",
+      "node_modules/ai/",
+      "node_modules/@ai-sdk/",
       "node_modules/react/",
-      "node_modules/@ai-sdk/react/",
+      "node_modules/react-dom/",
+      "WebSocketChatTransport",
+      "cf_agent_",
       "Invalid hook call",
     ],
   ),
@@ -110,24 +119,6 @@ const DESKTOP_HOST_NODE_REQUIRES = new Set([
 
 function isNodeBuiltin(specifier) {
   return specifier.startsWith("node:") || NODE_BUILTINS.has(specifier.replace(/^node:/, ""));
-}
-
-function readFileTail(filePath, maxBytes = DEFAULT_TAIL_BYTES) {
-  const stats = fs.statSync(filePath);
-  const bytesToRead = Math.min(stats.size, maxBytes);
-  if (bytesToRead <= 0) {
-    return "";
-  }
-
-  const buffer = Buffer.alloc(bytesToRead);
-  const fileHandle = fs.openSync(filePath, "r");
-  try {
-    fs.readSync(fileHandle, buffer, 0, bytesToRead, Math.max(stats.size - bytesToRead, 0));
-  } finally {
-    fs.closeSync(fileHandle);
-  }
-
-  return buffer.toString("utf8");
 }
 
 function formatBytes(sizeBytes) {
@@ -195,8 +186,20 @@ export function assertSafePluginArtifactPathsForBuild({
   return files;
 }
 
-export function inspectPluginArtifacts({ root = process.cwd() } = {}) {
+export function inspectPluginArtifacts({
+  root = process.cwd(),
+  expectedApiBaseUrl = CANONICAL_API_BASE_URL,
+  forbiddenApiBaseUrls = [],
+  allowedLoopbackApiBaseUrls = [],
+} = {}) {
   const resolvedRoot = path.resolve(root);
+  const normalizedExpectedApiBaseUrl = normalizeApiBaseUrl(expectedApiBaseUrl);
+  const normalizedForbiddenApiBaseUrls = Array.from(
+    new Set(forbiddenApiBaseUrls.map((value) => normalizeApiBaseUrl(value))),
+  ).filter((value) => value !== normalizedExpectedApiBaseUrl);
+  const normalizedAllowedLoopbackApiBaseUrls = new Set(
+    allowedLoopbackApiBaseUrls.map((value) => normalizeApiBaseUrl(value)),
+  );
   const files = Object.fromEntries(
     REQUIRED_PLUGIN_ARTIFACTS.map((fileName) => [
       fileName,
@@ -235,6 +238,9 @@ export function inspectPluginArtifacts({ root = process.cwd() } = {}) {
     formattedSize: mainFile.exists ? formatBytes(mainFile.sizeBytes) : "missing",
     hasInlineSourceMap: false,
     hasCanonicalApiBase: false,
+    expectedApiBaseUrl: normalizedExpectedApiBaseUrl,
+    hasExpectedApiBase: false,
+    forbiddenApiBases: [],
     hasRetiredApiHost: false,
     loopbackApiBases: [],
     forbiddenClientFragments: [],
@@ -243,19 +249,30 @@ export function inspectPluginArtifacts({ root = process.cwd() } = {}) {
   };
 
   if (mainFile.isRegularFile) {
-    const tail = readFileTail(mainFile.path);
-    mainBundle.hasInlineSourceMap = INLINE_SOURCE_MAP_PATTERN.test(tail);
+    const bundleText = fs.readFileSync(mainFile.path, "utf8");
+    mainBundle.hasInlineSourceMap = INLINE_SOURCE_MAP_PATTERN.test(bundleText);
     if (mainBundle.hasInlineSourceMap) {
       problems.push(
         `main.js still contains an inline source map (${mainBundle.formattedSize}); plugin sync must use a production build.`
       );
     }
 
-    const bundleText = fs.readFileSync(mainFile.path, "utf8");
     mainBundle.hasCanonicalApiBase = bundleText.includes(CANONICAL_API_BASE_URL);
-    if (!mainBundle.hasCanonicalApiBase) {
+    mainBundle.hasExpectedApiBase = bundleText.includes(normalizedExpectedApiBaseUrl);
+    if (!mainBundle.hasExpectedApiBase) {
+      const qualifier = normalizedExpectedApiBaseUrl === CANONICAL_API_BASE_URL
+        ? "canonical"
+        : "expected";
       problems.push(
-        `main.js does not contain the canonical SystemSculpt API base ${CANONICAL_API_BASE_URL}.`,
+        `main.js does not contain the ${qualifier} SystemSculpt API base ${normalizedExpectedApiBaseUrl}.`,
+      );
+    }
+    mainBundle.forbiddenApiBases = normalizedForbiddenApiBaseUrls.filter((value) =>
+      bundleText.includes(value)
+    );
+    if (mainBundle.forbiddenApiBases.length > 0) {
+      problems.push(
+        `main.js contains API bases forbidden for this build target: ${mainBundle.forbiddenApiBases.join(", ")}.`,
       );
     }
 
@@ -267,9 +284,12 @@ export function inspectPluginArtifacts({ root = process.cwd() } = {}) {
     mainBundle.loopbackApiBases = Array.from(
       new Set(bundleText.match(LOOPBACK_API_BASE_PATTERN) || []),
     );
-    if (mainBundle.loopbackApiBases.length > 0) {
+    const unexpectedLoopbackApiBases = mainBundle.loopbackApiBases.filter(
+      (value) => !normalizedAllowedLoopbackApiBaseUrls.has(normalizeApiBaseUrl(value)),
+    );
+    if (unexpectedLoopbackApiBases.length > 0) {
       problems.push(
-        `main.js contains a loopback QA API base: ${mainBundle.loopbackApiBases.join(", ")}.`,
+        `main.js contains a loopback QA API base: ${unexpectedLoopbackApiBases.join(", ")}.`,
       );
     }
 
@@ -344,7 +364,36 @@ export function formatArtifactProblems(inspection) {
 }
 
 export function assertProductionPluginArtifacts(options = {}) {
-  const inspection = inspectPluginArtifacts(options);
+  const inspection = inspectPluginArtifacts({
+    ...options,
+    expectedApiBaseUrl: CANONICAL_API_BASE_URL,
+    forbiddenApiBaseUrls: [STAGING_API_BASE_URL],
+  });
+  if (!inspection.ok) {
+    throw new Error(formatArtifactProblems(inspection));
+  }
+  return inspection;
+}
+
+export function assertStagingPluginArtifacts(options = {}) {
+  const inspection = inspectPluginArtifacts({
+    ...options,
+    expectedApiBaseUrl: STAGING_API_BASE_URL,
+    forbiddenApiBaseUrls: [CANONICAL_API_BASE_URL],
+  });
+  if (!inspection.ok) {
+    throw new Error(formatArtifactProblems(inspection));
+  }
+  return inspection;
+}
+
+export function assertLocalAgentPluginArtifacts(options = {}) {
+  const inspection = inspectPluginArtifacts({
+    ...options,
+    expectedApiBaseUrl: LOCAL_AGENT_API_BASE_URL,
+    forbiddenApiBaseUrls: [CANONICAL_API_BASE_URL, STAGING_API_BASE_URL],
+    allowedLoopbackApiBaseUrls: [LOCAL_AGENT_API_BASE_URL],
+  });
   if (!inspection.ok) {
     throw new Error(formatArtifactProblems(inspection));
   }
@@ -384,4 +433,76 @@ export function buildProductionPlugin({
   }
 
   return assertProductionPluginArtifacts({ root: resolvedRoot });
+}
+
+export function buildStagingPlugin({
+  root = process.cwd(),
+  stdio = "inherit",
+  env = process.env,
+  spawnSyncImpl = spawnSync,
+} = {}) {
+  const resolvedRoot = path.resolve(root);
+  assertSafePluginArtifactPathsForBuild({ root: resolvedRoot });
+  const stagingEnv = {
+    ...env,
+    SYSTEMSCULPT_API_BASE_URL: STAGING_API_BASE_URL,
+    SYSTEMSCULPT_BUILD_STAMP: "staging",
+  };
+  const result = spawnSyncImpl(
+    process.execPath,
+    [path.join(resolvedRoot, "esbuild.config.mjs"), "production"],
+    {
+      cwd: resolvedRoot,
+      env: stagingEnv,
+      stdio,
+      encoding: "utf8",
+    },
+  );
+
+  if (result?.error) {
+    throw result.error;
+  }
+
+  if ((result?.status ?? 1) !== 0) {
+    const output = [result?.stderr, result?.stdout].filter(Boolean).join("\n").trim();
+    throw new Error(`Staging plugin build failed.${output ? `\n${output}` : ""}`);
+  }
+
+  return assertStagingPluginArtifacts({ root: resolvedRoot });
+}
+
+export function buildLocalAgentPlugin({
+  root = process.cwd(),
+  stdio = "inherit",
+  env = process.env,
+  spawnSyncImpl = spawnSync,
+} = {}) {
+  const resolvedRoot = path.resolve(root);
+  assertSafePluginArtifactPathsForBuild({ root: resolvedRoot });
+  const localEnv = {
+    ...env,
+    SYSTEMSCULPT_API_BASE_URL: LOCAL_AGENT_API_BASE_URL,
+    SYSTEMSCULPT_BUILD_STAMP: "local-agent",
+  };
+  const result = spawnSyncImpl(
+    process.execPath,
+    [path.join(resolvedRoot, "esbuild.config.mjs"), "production"],
+    {
+      cwd: resolvedRoot,
+      env: localEnv,
+      stdio,
+      encoding: "utf8",
+    },
+  );
+
+  if (result?.error) {
+    throw result.error;
+  }
+
+  if ((result?.status ?? 1) !== 0) {
+    const output = [result?.stderr, result?.stdout].filter(Boolean).join("\n").trim();
+    throw new Error(`Local agent plugin build failed.${output ? `\n${output}` : ""}`);
+  }
+
+  return assertLocalAgentPluginArtifacts({ root: resolvedRoot });
 }

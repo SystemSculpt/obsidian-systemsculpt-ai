@@ -16,6 +16,7 @@ export const THIN_AGENT_CAPABILITIES = Object.freeze([
 
 export const THIN_AGENT_DATA_PART_TYPES = Object.freeze([
   "data-systemsculpt-run-terminal",
+  "data-systemsculpt-client-tool-request",
 ] as const);
 
 export type ThinAgentCapability = Readonly<{
@@ -102,12 +103,33 @@ export type ThinAgentRunTerminalData =
       retryable: boolean;
     }>;
 
+export type ThinAgentJsonValue =
+  | null
+  | boolean
+  | number
+  | string
+  | readonly ThinAgentJsonValue[]
+  | Readonly<{ [key: string]: ThinAgentJsonValue }>;
+
+export type ThinAgentClientToolRequestData = Readonly<{
+  version: 1;
+  tool_call_id: string;
+  tool_name: string;
+  target: ThinAgentCapability;
+  input: ThinAgentJsonValue;
+}>;
+
 export type ThinAgentKnownDataPart =
-  Readonly<{
-    kind: "known";
-    type: "data-systemsculpt-run-terminal";
-    data: ThinAgentRunTerminalData;
-  }>;
+  | Readonly<{
+      kind: "known";
+      type: "data-systemsculpt-run-terminal";
+      data: ThinAgentRunTerminalData;
+    }>
+  | Readonly<{
+      kind: "known";
+      type: "data-systemsculpt-client-tool-request";
+      data: ThinAgentClientToolRequestData;
+    }>;
 
 export type ThinAgentParsedDataPart =
   | ThinAgentKnownDataPart
@@ -140,6 +162,7 @@ const RUN_ID = /^run_[a-f0-9]{32}$/;
 const INCIDENT_ID = /^incident_[a-f0-9]{32}$/;
 const SHA256_ID = /^sha256:[a-f0-9]{64}$/;
 const MESSAGE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/;
+const TOOL_NAME = /^[A-Za-z][A-Za-z0-9_-]{0,127}$/;
 const ERROR_CODE = /^[a-z][a-z0-9_]{0,63}$/;
 const ACCESS_TOKEN = /^[A-Za-z0-9._~-]{16,4096}$/;
 const CONTEXT_REF = /^ctx1_[A-Za-z0-9_-]{43}\.[A-Za-z0-9_-]{43}$/;
@@ -149,6 +172,9 @@ const BASE64 =
   /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 const MAX_PATH_CHARS = 1_024;
 const MAX_CONTEXT_ARTIFACT_BYTES = 24 * 1024 * 1024;
+const MAX_CLIENT_TOOL_INPUT_DEPTH = 64;
+const MAX_CLIENT_TOOL_INPUT_NODES = 65_536;
+const MAX_CLIENT_TOOL_INPUT_TEXT_CHARS = 16 * 1024 * 1024;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -198,6 +224,90 @@ function boundedString(value: unknown, max: number): value is string {
     && value.trim() === value
     && value.length > 0
     && value.length <= max;
+}
+
+type ParsedJsonValue =
+  | Readonly<{ ok: true; value: ThinAgentJsonValue }>
+  | Readonly<{ ok: false }>;
+
+function parseClientToolInput(value: unknown): ParsedJsonValue {
+  const seen = new WeakSet<object>();
+  let nodes = 0;
+  let textChars = 0;
+
+  const clone = (candidate: unknown, depth: number): ParsedJsonValue => {
+    nodes += 1;
+    if (nodes > MAX_CLIENT_TOOL_INPUT_NODES
+      || depth > MAX_CLIENT_TOOL_INPUT_DEPTH) return { ok: false };
+    if (candidate === null || typeof candidate === "boolean") {
+      return { ok: true, value: candidate };
+    }
+    if (typeof candidate === "number") {
+      return Number.isFinite(candidate)
+        ? { ok: true, value: Object.is(candidate, -0) ? 0 : candidate }
+        : { ok: false };
+    }
+    if (typeof candidate === "string") {
+      textChars += candidate.length;
+      return textChars <= MAX_CLIENT_TOOL_INPUT_TEXT_CHARS
+        ? { ok: true, value: candidate }
+        : { ok: false };
+    }
+    if (typeof candidate !== "object" || seen.has(candidate)) {
+      return { ok: false };
+    }
+    seen.add(candidate);
+
+    if (Array.isArray(candidate)) {
+      if (candidate.length > MAX_CLIENT_TOOL_INPUT_NODES) return { ok: false };
+      const ownKeys = Reflect.ownKeys(candidate);
+      if (ownKeys.some((key) => typeof key !== "string")
+        || ownKeys.length !== candidate.length + 1) return { ok: false };
+      const output: ThinAgentJsonValue[] = [];
+      for (let index = 0; index < candidate.length; index += 1) {
+        const descriptor = Object.getOwnPropertyDescriptor(candidate, String(index));
+        if (!descriptor?.enumerable || !("value" in descriptor)) return { ok: false };
+        const item = clone(descriptor.value, depth + 1);
+        if (!item.ok) return item;
+        output.push(item.value);
+      }
+      return { ok: true, value: Object.freeze(output) };
+    }
+
+    const prototype = Object.getPrototypeOf(candidate);
+    // Obsidian pop-out windows and hardened protocol clones can supply an
+    // ordinary record whose Object.prototype belongs to another realm. A
+    // plain-object prototype still terminates at null; a class instance does
+    // not, so keep rejecting stateful/exotic inputs without realm identity.
+    if (prototype !== null && Object.getPrototypeOf(prototype) !== null) {
+      return { ok: false };
+    }
+    const ownKeys = Reflect.ownKeys(candidate);
+    if (ownKeys.length > MAX_CLIENT_TOOL_INPUT_NODES
+      || ownKeys.some((key) => typeof key !== "string")) return { ok: false };
+    const output: Record<string, ThinAgentJsonValue> = {};
+    for (const key of (ownKeys as string[]).sort()) {
+      textChars += key.length;
+      if (textChars > MAX_CLIENT_TOOL_INPUT_TEXT_CHARS) return { ok: false };
+      const descriptor = Object.getOwnPropertyDescriptor(candidate, key);
+      if (!descriptor?.enumerable || !("value" in descriptor)) return { ok: false };
+      const item = clone(descriptor.value, depth + 1);
+      if (!item.ok) return item;
+      Object.defineProperty(output, key, {
+        configurable: false,
+        enumerable: true,
+        value: item.value,
+        writable: false,
+      });
+    }
+    return { ok: true, value: Object.freeze(output) };
+  };
+
+  try {
+    return clone(value, 0);
+  } catch {
+    return { ok: false };
+  }
 }
 
 function utf8Bytes(value: string): number {
@@ -632,6 +742,37 @@ function parseRunTerminal(
   });
 }
 
+function parseClientToolRequest(
+  type: "data-systemsculpt-client-tool-request",
+  data: Record<string, unknown>,
+): ThinAgentParsedDataPart {
+  if (data.version !== 1
+    || !boundedString(data.tool_call_id, 512)
+    || typeof data.tool_name !== "string"
+    || !TOOL_NAME.test(data.tool_name)
+    || !isRecord(data.target)
+    || data.target.id !== "obsidian.vault"
+    || data.target.version !== 1) {
+    return { kind: "invalid", type };
+  }
+  const input = parseClientToolInput(data.input);
+  if (!input.ok) return { kind: "invalid", type };
+  return knownDataPart({
+    kind: "known",
+    type,
+    data: Object.freeze({
+      version: 1,
+      tool_call_id: data.tool_call_id,
+      tool_name: data.tool_name,
+      target: Object.freeze({
+        id: "obsidian.vault",
+        version: 1,
+      }),
+      input: input.value,
+    }),
+  });
+}
+
 /**
  * Parse only SystemSculpt application data parts. Unknown data part types and
  * unknown fields on known parts are ignored so server additions do not strand
@@ -652,6 +793,8 @@ export function parseThinAgentDataPart(value: unknown): ThinAgentParsedDataPart 
   switch (value.type) {
     case "data-systemsculpt-run-terminal":
       return parseRunTerminal(value.type, value.data);
+    case "data-systemsculpt-client-tool-request":
+      return parseClientToolRequest(value.type, value.data);
     default:
       return Object.freeze({ kind: "unknown", type: value.type });
   }

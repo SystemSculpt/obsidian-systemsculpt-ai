@@ -19,7 +19,7 @@ const createChatView = () => {
     chatVersion: 2,
     webSearchEnabled: true,
     contextManager: {
-      getContextFiles: jest.fn(() => new Set(["[[Note]]", "[[Image.png]]", "doc:extract.md"])),
+      getPinnedFiles: jest.fn(() => new Set(["[[Note]]", "[[Image.png]]", "doc:extract.md"])),
     },
     messages: [],
   };

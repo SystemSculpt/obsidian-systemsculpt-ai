@@ -128,7 +128,7 @@ export class ChatExportBuilder {
   }
 
   // ────────────────────────────────────────────────────────────────────────────
-  // Context files
+  // Pinned files
   // ────────────────────────────────────────────────────────────────────────────
 
   private renderContextFiles(options: ChatExportOptions): string | null {
@@ -137,7 +137,7 @@ export class ChatExportBuilder {
       return null;
     }
 
-    const lines: string[] = ['## Context Files', ''];
+    const lines: string[] = ['## Pinned Files', ''];
 
     files.forEach((file, index) => {
       lines.push(`- [[${file.path}]]`);

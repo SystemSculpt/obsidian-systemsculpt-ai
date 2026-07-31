@@ -7,6 +7,7 @@ import {
   wouldExceedCharLimit,
   shouldExcludeFromSearch,
   validatePath,
+  normalizeVaultPath,
   isHiddenSystemPath,
   listAdapterFiles,
   statAdapterPath,
@@ -16,6 +17,8 @@ import { extractSearchTerms, calculateScore, sortByScore, formatScoredResults, S
 import SystemSculptPlugin from "../../../main";
 
 type CompiledSearchPattern = Readonly<{ raw: string; source: string }>;
+const MAX_SEARCH_SCOPE_PATHS = 64;
+const MAX_SEARCH_SCOPE_PATH_LENGTH = 1024;
 
 function compileSearchPatterns(
   patterns: string[],
@@ -71,6 +74,57 @@ export class SearchOperations {
       .map((v) => (typeof v === "string" ? v : String(v ?? "")))
       .map((s) => s.trim())
       .filter((s) => s.length > 0);
+  }
+
+  private normalizeSearchPaths(input: unknown): string[] | null {
+    if (input === undefined || input === null) return null;
+    if (!Array.isArray(input) || input.length === 0) {
+      throw new Error(
+        "Search 'paths' must be a non-empty array of vault-relative file or folder paths.",
+      );
+    }
+    if (input.length > MAX_SEARCH_SCOPE_PATHS) {
+      throw new Error(
+        `Search 'paths' supports at most ${MAX_SEARCH_SCOPE_PATHS} entries.`,
+      );
+    }
+
+    const normalized = new Set<string>();
+    for (const value of input) {
+      if (typeof value !== "string") {
+        throw new Error("Every search path must be a string.");
+      }
+      if (value.length > MAX_SEARCH_SCOPE_PATH_LENGTH) {
+        throw new Error(
+          `Search paths must be no longer than ${MAX_SEARCH_SCOPE_PATH_LENGTH} characters.`,
+        );
+      }
+      const trimmed = value.trim();
+      if (trimmed.length === 0 && value.length > 0) {
+        throw new Error("Search paths cannot contain only whitespace.");
+      }
+      const vaultPath = normalizeVaultPath(trimmed);
+      if (vaultPath.split("/").some((segment) => segment === "..")) {
+        throw new Error("Search paths must stay within the vault.");
+      }
+      const canonical = vaultPath === "." || vaultPath.length === 0
+        ? ""
+        : normalizePath(vaultPath).replace(/^\/+|\/+$/g, "");
+      normalized.add(canonical);
+    }
+
+    // A root scope already contains every other requested path.
+    if (normalized.has("")) return [""];
+    return [...normalized].sort();
+  }
+
+  private isWithinSearchPaths(path: string, searchPaths: string[] | null): boolean {
+    if (searchPaths === null) return true;
+    const normalizedPath = normalizePath(normalizeVaultPath(path));
+    return searchPaths.some((scope) =>
+      scope.length === 0
+      || normalizedPath === scope
+      || normalizedPath.startsWith(`${scope}/`));
   }
 
   private getHiddenAllowedPaths(): string[] {
@@ -250,6 +304,7 @@ export class SearchOperations {
    */
   async grepVault(params: GrepVaultParams): Promise<any> {
     const patterns = this.normalizeStringArray((params as any)?.patterns);
+    const searchPaths = this.normalizeSearchPaths((params as any)?.paths);
     const searchIn = (params as any)?.searchIn ?? 'content';
     const requestedPatternMode = (params as any)?.patternMode;
     if (requestedPatternMode != null && requestedPatternMode !== "literal" && requestedPatternMode !== "regex") {
@@ -326,6 +381,7 @@ export class SearchOperations {
     // Exclude chat history and system files
     filesToSearch = filesToSearch.filter((file) => {
       if (!this.isAllowedPath(file.path)) return false;
+      if (!this.isWithinSearchPaths(file.path, searchPaths)) return false;
       if (isAdapterFile(file)) return true;
       return !shouldExcludeFromSearch(file, this.plugin);
     });
@@ -638,9 +694,12 @@ export class SearchOperations {
     // no-result summary so the user understands why nothing useful came
     // back and what they can try next.
     if (fileHits.length === 0) {
+      const scopeDescription = searchPaths === null
+        ? ""
+        : ` within ${searchPaths.map((path) => path || "the vault root").join(", ")}`;
       metaResults.push({
         file: "_no_matches",
-        message: `No matches found for: ${patterns.map(p => `"${p}"`).join(", ")}. Try different words, adjust where you search (text vs. properties), or limit the search to a specific folder for speed.`,
+        message: `No matches found${scopeDescription} for: ${patterns.map(p => `"${p}"`).join(", ")}. Try different words, adjust where you search (text vs. properties), or change the requested paths.`,
         totalMatches: 0,
         contexts: []
       });
@@ -743,7 +802,9 @@ export class SearchOperations {
         return null;
       }
     };
-    const qId = `${searchIn}|${patternMode}|${patterns.join('\u0001')}`;
+    const qId = `${searchIn}|${patternMode}|${patterns.join('\u0001')}${
+      searchPaths === null ? "" : `|paths:${searchPaths.join("\u0001")}`
+    }`;
     const rawCursor = requestedCursor;
     const cursorState = decodeCursor(rawCursor);
     if (rawCursor && (!cursorState || cursorState.q !== qId || !Number.isFinite(cursorState.o))) {
@@ -781,6 +842,9 @@ export class SearchOperations {
       }
       return {
         ...formattedResults,
+        ...(searchPaths === null
+          ? {}
+          : { scope: { paths: searchPaths.map((path) => path || ".") } }),
         page: {
           tokensBudget: requestedPageTokens,
           tokensUsed: usedTokens,

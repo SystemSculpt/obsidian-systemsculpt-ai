@@ -143,8 +143,8 @@ describe("ChatStorageService", () => {
       expect(mockVault.getAbstractFileByPath).toHaveBeenCalled();
     });
 
-    it("includes context files when provided", async () => {
-      const contextFiles = new Set(["path/to/file.md", "path/to/Extractions/doc.md"]);
+    it("serializes the exact pinned-file set through the compatible context_files key", async () => {
+      const contextFiles = new Set(["[[path/to/file.md]]", "[[path/to/Extractions/doc.md]]"]);
 
       await service.saveChat(
         "test-chat",
@@ -152,7 +152,10 @@ describe("ChatStorageService", () => {
         { contextFiles }
       );
 
-      expect(mockVault.create).toHaveBeenCalled();
+      const createdContent = mockVault.create.mock.calls[0][1] as string;
+      expect(createdContent).toContain(
+        'context_files: [{"path":"[[path/to/file.md]]","type":"source"},{"path":"[[path/to/Extractions/doc.md]]","type":"extraction"}]',
+      );
     });
 
     it("writes the current managed chat metadata schema", async () => {
@@ -374,6 +377,34 @@ Hello
 
       expect(result).not.toBeNull();
       expect(result?.id).toBe("test-chat");
+    });
+
+    it("restores the exact pinned-file set from context_files metadata", async () => {
+      const serializer = jest.requireMock("../storage/ChatMarkdownSerializer").ChatMarkdownSerializer;
+      serializer.parseMarkdown.mockReturnValueOnce({
+        metadata: {
+          id: "pinned-chat",
+          title: "Pinned chat",
+          created: "2024-01-01T00:00:00.000Z",
+          lastModified: "2024-01-01T00:00:00.000Z",
+          version: 4,
+          context_files: [
+            { path: "[[Projects/Plan.md]]", type: "source" },
+            { path: "[[Images/Diagram.png]]", type: "source" },
+          ],
+        },
+        messages: [],
+      });
+      const mockFile = new TFile({ path: "SystemSculpt/Chats/pinned-chat.md" });
+      mockVault.getAbstractFileByPath.mockReturnValue(mockFile);
+      mockVault.read.mockResolvedValue("---\nid: pinned-chat\n---");
+
+      const result = await service.loadChat("pinned-chat");
+
+      expect(result?.context_files).toEqual([
+        "[[Projects/Plan.md]]",
+        "[[Images/Diagram.png]]",
+      ]);
     });
 
     it.each([

@@ -77,11 +77,10 @@ describe("DocumentContextManager", () => {
     });
 
   const createMockContextManager = (): ChatContextManager => ({
-    getContextFiles: jest.fn(() => new Set<string>()),
-    hasContextFile: jest.fn(() => false),
-    addToContextFiles: jest.fn(() => true),
+    getPinnedFiles: jest.fn(() => new Set<string>()),
+    hasPinnedFile: jest.fn(() => false),
+    pinFile: jest.fn(() => true),
     triggerContextChange: jest.fn(() => Promise.resolve()),
-    updateProcessingStatus: jest.fn(),
   });
 
   beforeEach(() => {
@@ -148,7 +147,7 @@ describe("DocumentContextManager", () => {
         const saved = data.managedDocumentContextEffectsV1[effect.effectId];
         order.push(saved.notificationAcknowledged ? "ack" : saved.projectionMutated ? "projection-state" : "identity");
       });
-      (mockContextManager.addToContextFiles as jest.Mock).mockImplementation(() => { order.push("project"); return true; });
+      (mockContextManager.pinFile as jest.Mock).mockImplementation(() => { order.push("project"); return true; });
       (mockContextManager.triggerContextChange as jest.Mock).mockImplementation(async () => { order.push("notify"); });
 
       await expect(manager.applyDocumentConversionContextEffect(effect, mockContextManager)).resolves.toBe("applied");
@@ -157,18 +156,18 @@ describe("DocumentContextManager", () => {
 
     it("returns already_applied only after both durable phases and the link are present", async () => {
       mockPlugin.loadData.mockResolvedValue({ managedDocumentContextEffectsV1: { [effect.effectId]: record(true, true) } });
-      (mockContextManager.hasContextFile as jest.Mock).mockReturnValue(true);
+      (mockContextManager.hasPinnedFile as jest.Mock).mockReturnValue(true);
       await expect(manager.applyDocumentConversionContextEffect(effect, mockContextManager)).resolves.toBe("already_applied");
-      expect(mockContextManager.addToContextFiles).not.toHaveBeenCalled();
+      expect(mockContextManager.pinFile).not.toHaveBeenCalled();
       expect(mockContextManager.triggerContextChange).not.toHaveBeenCalled();
       expect(mockPlugin.saveData).not.toHaveBeenCalled();
     });
 
     it("repairs notification after the link exists but triggerContextChange was never acknowledged", async () => {
       mockPlugin.loadData.mockResolvedValue({ managedDocumentContextEffectsV1: { [effect.effectId]: record(true, false) } });
-      (mockContextManager.hasContextFile as jest.Mock).mockReturnValue(true);
+      (mockContextManager.hasPinnedFile as jest.Mock).mockReturnValue(true);
       await expect(manager.applyDocumentConversionContextEffect(effect, mockContextManager)).resolves.toBe("repaired");
-      expect(mockContextManager.addToContextFiles).not.toHaveBeenCalled();
+      expect(mockContextManager.pinFile).not.toHaveBeenCalled();
       expect(mockContextManager.triggerContextChange).toHaveBeenCalledTimes(1);
       expect(mockPlugin.saveData).toHaveBeenLastCalledWith(expect.objectContaining({
         managedDocumentContextEffectsV1: { [effect.effectId]: record(true, true) },
@@ -178,7 +177,7 @@ describe("DocumentContextManager", () => {
     it("repairs a missing link even when earlier state claimed projection", async () => {
       mockPlugin.loadData.mockResolvedValue({ managedDocumentContextEffectsV1: { [effect.effectId]: record(true, false) } });
       await expect(manager.applyDocumentConversionContextEffect(effect, mockContextManager)).resolves.toBe("repaired");
-      expect(mockContextManager.addToContextFiles).toHaveBeenCalledTimes(1);
+      expect(mockContextManager.pinFile).toHaveBeenCalledTimes(1);
       expect(mockContextManager.triggerContextChange).toHaveBeenCalledTimes(1);
     });
 
@@ -196,8 +195,8 @@ describe("DocumentContextManager", () => {
           if (boundary === "identity" && !state.projectionMutated) controller.abort();
           if (boundary === "projection-state" && state.projectionMutated && !state.notificationAcknowledged) controller.abort();
         });
-        (mockContextManager.hasContextFile as jest.Mock).mockImplementation(() => linkPresent);
-        (mockContextManager.addToContextFiles as jest.Mock).mockImplementation(() => {
+        (mockContextManager.hasPinnedFile as jest.Mock).mockImplementation(() => linkPresent);
+        (mockContextManager.pinFile as jest.Mock).mockImplementation(() => {
           linkPresent = true;
           if (boundary === "projection") controller.abort();
           return true;
@@ -208,13 +207,13 @@ describe("DocumentContextManager", () => {
         await expect(manager.applyDocumentConversionContextEffect({ ...effect, signal: controller.signal }, mockContextManager))
           .rejects.toMatchObject({ name: "AbortError" });
 
-        const additionsBeforeReplay = (mockContextManager.addToContextFiles as jest.Mock).mock.calls.length;
+        const additionsBeforeReplay = (mockContextManager.pinFile as jest.Mock).mock.calls.length;
         const notificationsBeforeReplay = (mockContextManager.triggerContextChange as jest.Mock).mock.calls.length;
         const replayContext = createMockContextManager();
-        (replayContext.hasContextFile as jest.Mock).mockImplementation(() => linkPresent);
-        (replayContext.addToContextFiles as jest.Mock).mockImplementation(() => { linkPresent = true; return true; });
+        (replayContext.hasPinnedFile as jest.Mock).mockImplementation(() => linkPresent);
+        (replayContext.pinFile as jest.Mock).mockImplementation(() => { linkPresent = true; return true; });
         await expect(manager.applyDocumentConversionContextEffect(effect, replayContext)).resolves.toBe("repaired");
-        expect((replayContext.addToContextFiles as jest.Mock).mock.calls.length + additionsBeforeReplay).toBe(linkPresent ? 1 : 0);
+        expect((replayContext.pinFile as jest.Mock).mock.calls.length + additionsBeforeReplay).toBe(linkPresent ? 1 : 0);
         expect(replayContext.triggerContextChange).toHaveBeenCalledTimes(boundary === "notification" ? 1 : 1);
         expect(notificationsBeforeReplay).toBe(boundary === "notification" ? 1 : 0);
       }
@@ -223,41 +222,41 @@ describe("DocumentContextManager", () => {
     it("rejects effect ID reuse with different data", async () => {
       mockPlugin.loadData.mockResolvedValue({ managedDocumentContextEffectsV1: { [effect.effectId]: { ...record(true, true), outputPath: "different.md" } } });
       await expect(manager.applyDocumentConversionContextEffect(effect, mockContextManager)).rejects.toThrow("identity conflict");
-      expect(mockContextManager.addToContextFiles).not.toHaveBeenCalled();
+      expect(mockContextManager.pinFile).not.toHaveBeenCalled();
     });
   });
 
-  describe("addFileToContext", () => {
+  describe("pinVaultFile", () => {
     describe("regular files", () => {
       it("adds markdown file to context", async () => {
         const file = createMockFile({ extension: "md" });
 
-        const result = await manager.addFileToContext(file, mockContextManager);
+        const result = await manager.pinVaultFile(file, mockContextManager);
 
         expect(result).toBe(true);
-        expect(mockContextManager.addToContextFiles).toHaveBeenCalledWith("[[test/document.md]]");
+        expect(mockContextManager.pinFile).toHaveBeenCalledWith("[[test/document.md]]");
         expect(mockContextManager.triggerContextChange).toHaveBeenCalled();
-        expect(mockedNotice).toHaveBeenCalledWith("Added document to context", 3000);
+        expect(mockedNotice).toHaveBeenCalledWith("Pinned document for every message", 3000);
       });
 
       it("returns false when file already in context", async () => {
         const file = createMockFile();
-        (mockContextManager.hasContextFile as jest.Mock).mockReturnValue(true);
+        (mockContextManager.hasPinnedFile as jest.Mock).mockReturnValue(true);
 
-        const result = await manager.addFileToContext(file, mockContextManager);
+        const result = await manager.pinVaultFile(file, mockContextManager);
 
         expect(result).toBe(false);
-        expect(mockContextManager.addToContextFiles).not.toHaveBeenCalled();
-        expect(mockedNotice).toHaveBeenCalledWith("document is already added to context", 3000);
+        expect(mockContextManager.pinFile).not.toHaveBeenCalled();
+        expect(mockedNotice).toHaveBeenCalledWith("document is already pinned for every message", 3000);
       });
 
       it("does not save changes when saveChanges is false", async () => {
         const file = createMockFile();
 
-        await manager.addFileToContext(file, mockContextManager, { saveChanges: false });
+        await manager.pinVaultFile(file, mockContextManager, { saveChanges: false });
 
         expect(mockContextManager.triggerContextChange).not.toHaveBeenCalled();
-        expect(mockedNotice).toHaveBeenCalledWith("Added document to context", 3000);
+        expect(mockedNotice).toHaveBeenCalledWith("Pinned document for every message", 3000);
       });
     });
 
@@ -268,32 +267,24 @@ describe("DocumentContextManager", () => {
         (mockApp.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(null);
         (mockApp.vault.getAllLoadedFiles as jest.Mock).mockReturnValue([]);
 
-        const result = await manager.addFileToContext(file, mockContextManager);
+        const result = await manager.pinVaultFile(file, mockContextManager);
 
         expect(result).toBe(true);
         expect(mockProcessDocument).toHaveBeenCalled();
-        expect(mockContextManager.addToContextFiles).toHaveBeenCalledWith("[[Extractions/doc/doc.md]]");
-        expect(mockContextManager.updateProcessingStatus).toHaveBeenCalledWith(
-          file,
-          expect.objectContaining({ stage: "queued" })
-        );
-        expect(mockContextManager.updateProcessingStatus).toHaveBeenCalledWith(
-          file,
-          expect.objectContaining({ stage: "ready" })
-        );
-        expect(mockedNotice).toHaveBeenCalledWith("Added doc to context", 3000);
+        expect(mockContextManager.pinFile).toHaveBeenCalledWith("[[Extractions/doc/doc.md]]");
+        expect(mockedNotice).toHaveBeenCalledWith("Pinned doc for every message", 3000);
       });
 
       it("rejects unsupported Office files without managed processing or context routing", async () => {
         const file = createMockFile({ path: "test/doc.docx", extension: "docx", basename: "doc" });
 
-        const result = await manager.addFileToContext(file, mockContextManager);
+        const result = await manager.pinVaultFile(file, mockContextManager);
 
         expect(result).toBe(false);
         expect(mockProcessDocument).not.toHaveBeenCalled();
-        expect(mockContextManager.addToContextFiles).not.toHaveBeenCalled();
+        expect(mockContextManager.pinFile).not.toHaveBeenCalled();
         expect(mockedNotice).toHaveBeenCalledWith(
-          "This office file type is not supported for chat context.",
+          "This office file type cannot be pinned in chat.",
           4000,
         );
       });
@@ -301,28 +292,21 @@ describe("DocumentContextManager", () => {
       it("keeps images local when adding them to context", async () => {
         const file = createMockFile({ path: "images/diagram.png", extension: "png", basename: "diagram" });
 
-        const result = await manager.addFileToContext(file, mockContextManager);
+        const result = await manager.pinVaultFile(file, mockContextManager);
 
         expect(result).toBe(true);
         expect(mockProcessDocument).not.toHaveBeenCalled();
-        expect(mockContextManager.addToContextFiles).toHaveBeenCalledWith("[[images/diagram.png]]");
-        expect(mockedNotice).toHaveBeenCalledWith("Added diagram to context", 3000);
+        expect(mockContextManager.pinFile).toHaveBeenCalledWith("[[images/diagram.png]]");
+        expect(mockedNotice).toHaveBeenCalledWith("Pinned diagram for every message", 3000);
       });
 
       it("handles document processing error", async () => {
         const file = createMockFile({ path: "test/doc.pdf", extension: "pdf" });
         mockProcessDocument.mockRejectedValueOnce(new Error("Processing failed"));
 
-        const result = await manager.addFileToContext(file, mockContextManager);
+        const result = await manager.pinVaultFile(file, mockContextManager);
 
         expect(result).toBe(false);
-        expect(mockContextManager.updateProcessingStatus).toHaveBeenCalledWith(
-          file,
-          expect.objectContaining({
-            stage: "error",
-            error: "Processing failed",
-          })
-        );
         expect(mockedNotice).toHaveBeenCalledWith("Error processing doc: Processing failed", 5000);
       });
 
@@ -330,11 +314,11 @@ describe("DocumentContextManager", () => {
         const file = createMockFile({ path: "test/doc.pdf", extension: "pdf", basename: "doc" });
         resolveDocument("Extractions/doc/doc.md", ["Extractions/doc/images-123/image1.png"]);
 
-        const result = await manager.addFileToContext(file, mockContextManager);
+        const result = await manager.pinVaultFile(file, mockContextManager);
 
         expect(result).toBe(true);
-        expect(mockContextManager.addToContextFiles).toHaveBeenCalledWith("[[Extractions/doc/images-123/image1.png]]");
-        expect(mockedNotice).toHaveBeenCalledWith("Added doc to context", 3000);
+        expect(mockContextManager.pinFile).toHaveBeenCalledWith("[[Extractions/doc/images-123/image1.png]]");
+        expect(mockedNotice).toHaveBeenCalledWith("Pinned doc for every message", 3000);
       });
     });
 
@@ -344,7 +328,7 @@ describe("DocumentContextManager", () => {
         resolveTranscription("Transcribed text");
         (mockApp.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(null);
 
-        const result = await manager.addFileToContext(file, mockContextManager);
+        const result = await manager.pinVaultFile(file, mockContextManager);
 
         expect(result).toBe(true);
         expect(mockTranscribeFile).toHaveBeenCalledWith(
@@ -358,7 +342,7 @@ describe("DocumentContextManager", () => {
           "Extractions/audio/audio - transcript.md",
           expect.stringContaining("Transcribed text"),
         );
-        expect(mockedNotice).toHaveBeenCalledWith("Added audio to context", 3000);
+        expect(mockedNotice).toHaveBeenCalledWith("Pinned audio for every message", 3000);
       });
 
       it("processes WAV files", async () => {
@@ -366,11 +350,11 @@ describe("DocumentContextManager", () => {
         resolveTranscription("Transcribed text");
         (mockApp.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(null);
 
-        const result = await manager.addFileToContext(file, mockContextManager);
+        const result = await manager.pinVaultFile(file, mockContextManager);
 
         expect(result).toBe(true);
         expect(mockTranscribeFile).toHaveBeenCalled();
-        expect(mockedNotice).toHaveBeenCalledWith("Added audio to context", 3000);
+        expect(mockedNotice).toHaveBeenCalledWith("Pinned audio for every message", 3000);
       });
 
       it("preserves an existing transcription path and creates a unique sibling", async () => {
@@ -382,30 +366,23 @@ describe("DocumentContextManager", () => {
           (path: string) => path === existingPath ? existingFile : null,
         );
 
-        await manager.addFileToContext(file, mockContextManager);
+        await manager.pinVaultFile(file, mockContextManager);
 
         expect(mockApp.vault.modify).not.toHaveBeenCalled();
         expect(mockApp.vault.create).toHaveBeenCalledWith(
           "Extractions/audio/audio - transcript (2).md",
           expect.stringContaining("Transcribed text"),
         );
-        expect(mockedNotice).toHaveBeenCalledWith("Added audio to context", 3000);
+        expect(mockedNotice).toHaveBeenCalledWith("Pinned audio for every message", 3000);
       });
 
       it("handles transcription error", async () => {
         const file = createMockFile({ path: "test/audio.mp3", extension: "mp3" });
         mockTranscribeFile.mockRejectedValueOnce(new Error("Transcription failed"));
 
-        const result = await manager.addFileToContext(file, mockContextManager);
+        const result = await manager.pinVaultFile(file, mockContextManager);
 
         expect(result).toBe(false);
-        expect(mockContextManager.updateProcessingStatus).toHaveBeenCalledWith(
-          file,
-          expect.objectContaining({
-            stage: "error",
-            error: "Transcription failed",
-          })
-        );
         expect(mockedNotice).toHaveBeenCalledWith("Error processing audio: Transcription failed", 5000);
       });
 
@@ -415,13 +392,13 @@ describe("DocumentContextManager", () => {
         resolveTranscription("Just the text");
         (mockApp.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(null);
 
-        await manager.addFileToContext(file, mockContextManager);
+        await manager.pinVaultFile(file, mockContextManager);
 
         expect(mockApp.vault.create).toHaveBeenCalledWith(
           expect.any(String),
           "Just the text"
         );
-        expect(mockedNotice).toHaveBeenCalledWith("Added audio to context", 3000);
+        expect(mockedNotice).toHaveBeenCalledWith("Pinned audio for every message", 3000);
       });
 
       it("reuses an existing committed transcription during local-commit retry", async () => {
@@ -441,43 +418,39 @@ describe("DocumentContextManager", () => {
           (path: string) => path === existing.path ? existing : null,
         );
 
-        const result = await manager.addFileToContext(file, mockContextManager);
+        const result = await manager.pinVaultFile(file, mockContextManager);
 
         expect(result).toBe(true);
         expect(mockApp.vault.create).not.toHaveBeenCalled();
-        expect(mockContextManager.updateProcessingStatus).toHaveBeenCalledWith(
-          file,
-          expect.objectContaining({ details: `[[${existing.path}]]` }),
-        );
-        expect(mockedNotice).toHaveBeenCalledWith("Added audio to context", 3000);
+        expect(mockedNotice).toHaveBeenCalledWith("Pinned audio for every message", 3000);
       });
     });
   });
 
-  describe("addFilesToContext", () => {
+  describe("pinVaultFiles", () => {
     it("adds multiple files to context", async () => {
       const files = [
         createMockFile({ path: "test/doc1.md", basename: "doc1" }),
         createMockFile({ path: "test/doc2.md", basename: "doc2" }),
       ];
 
-      const result = await manager.addFilesToContext(files, mockContextManager);
+      const result = await manager.pinVaultFiles(files, mockContextManager);
 
       expect(result).toBe(2);
-      expect(mockContextManager.addToContextFiles).toHaveBeenCalledTimes(2);
+      expect(mockContextManager.pinFile).toHaveBeenCalledTimes(2);
       expect(mockContextManager.triggerContextChange).toHaveBeenCalledTimes(1);
     });
 
     it("respects maxFiles limit", async () => {
       const contextFiles = new Set(["[[file1.md]]", "[[file2.md]]"]);
-      (mockContextManager.getContextFiles as jest.Mock).mockReturnValue(contextFiles);
+      (mockContextManager.getPinnedFiles as jest.Mock).mockReturnValue(contextFiles);
 
       const files = [
         createMockFile({ path: "test/doc1.md", basename: "doc1" }),
         createMockFile({ path: "test/doc2.md", basename: "doc2" }),
       ];
 
-      const result = await manager.addFilesToContext(files, mockContextManager, { maxFiles: 3 });
+      const result = await manager.pinVaultFiles(files, mockContextManager, { maxFiles: 3 });
 
       expect(result).toBe(1);
     });
@@ -485,95 +458,21 @@ describe("DocumentContextManager", () => {
     it("does not save changes when saveChanges is false", async () => {
       const files = [createMockFile()];
 
-      await manager.addFilesToContext(files, mockContextManager, { saveChanges: false });
+      await manager.pinVaultFiles(files, mockContextManager, { saveChanges: false });
 
       expect(mockContextManager.triggerContextChange).not.toHaveBeenCalled();
     });
 
     it("returns 0 when at max files limit", async () => {
       const contextFiles = new Set(["[[file1.md]]", "[[file2.md]]", "[[file3.md]]"]);
-      (mockContextManager.getContextFiles as jest.Mock).mockReturnValue(contextFiles);
+      (mockContextManager.getPinnedFiles as jest.Mock).mockReturnValue(contextFiles);
 
       const files = [createMockFile()];
 
-      const result = await manager.addFilesToContext(files, mockContextManager, { maxFiles: 3 });
+      const result = await manager.pinVaultFiles(files, mockContextManager, { maxFiles: 3 });
 
       expect(result).toBe(0);
     });
   });
 
-  describe("mapAudioStatusToStage", () => {
-    // Access private method via bracket notation for testing
-    it("maps error status to error stage", () => {
-      const result = (manager as any).mapAudioStatusToStage("Error occurred", 0);
-      expect(result).toBe("error");
-    });
-
-    it("maps upload status to uploading stage", () => {
-      const result = (manager as any).mapAudioStatusToStage("Uploading file", 20);
-      expect(result).toBe("uploading");
-    });
-
-    it("maps complete status to ready stage", () => {
-      const result = (manager as any).mapAudioStatusToStage("Complete", 100);
-      expect(result).toBe("ready");
-    });
-
-    it("maps progress 100 to ready stage", () => {
-      const result = (manager as any).mapAudioStatusToStage("Finalizing", 100);
-      expect(result).toBe("ready");
-    });
-
-    it("maps context status to contextualizing stage", () => {
-      const result = (manager as any).mapAudioStatusToStage("Adding to context", 90);
-      expect(result).toBe("contextualizing");
-    });
-
-    it("maps unknown status to processing stage", () => {
-      const result = (manager as any).mapAudioStatusToStage("Working", 50);
-      expect(result).toBe("processing");
-    });
-  });
-
-  describe("resolveAudioIcon", () => {
-    it("returns x-circle for error status", () => {
-      const result = (manager as any).resolveAudioIcon("Error occurred");
-      expect(result).toBe("x-circle");
-    });
-
-    it("returns upload for upload status", () => {
-      const result = (manager as any).resolveAudioIcon("Uploading");
-      expect(result).toBe("upload");
-    });
-
-    it("returns scissors for chunk status", () => {
-      const result = (manager as any).resolveAudioIcon("Chunking audio");
-      expect(result).toBe("scissors");
-    });
-
-    it("returns file-audio for transcrib status", () => {
-      const result = (manager as any).resolveAudioIcon("Transcribing");
-      expect(result).toBe("file-audio");
-    });
-
-    it("returns cpu for process status", () => {
-      const result = (manager as any).resolveAudioIcon("Processing audio");
-      expect(result).toBe("cpu");
-    });
-
-    it("returns check-circle for complete status", () => {
-      const result = (manager as any).resolveAudioIcon("Complete");
-      expect(result).toBe("check-circle");
-    });
-
-    it("returns fallback for unknown status", () => {
-      const result = (manager as any).resolveAudioIcon("Unknown", "default-icon");
-      expect(result).toBe("default-icon");
-    });
-
-    it("returns file-audio as default fallback", () => {
-      const result = (manager as any).resolveAudioIcon("Unknown");
-      expect(result).toBe("file-audio");
-    });
-  });
 });

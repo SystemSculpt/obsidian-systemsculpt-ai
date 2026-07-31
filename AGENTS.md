@@ -205,8 +205,8 @@ npm run dev:watch:install
 On the normal macOS development machine, install the persistent watcher once.
 It stays running across logins, rebuilds on source changes, atomically replaces
 each artifact before reload, and hot reloads configured vaults.
-Re-running the install from another
-worktree intentionally transfers watcher ownership to that worktree. Synced
+Re-running the install from the canonical checkout transfers watcher ownership
+back to that checkout. Never install or run the watcher from a git worktree. Synced
 development manifests include a visible local-only build identity without
 changing the release version used by server contracts. Use the official
 Obsidian CLI or Computer Use for live reload, errors, DOM inspection, and

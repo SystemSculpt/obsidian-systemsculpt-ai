@@ -13,7 +13,9 @@ import { buildCssArtifact } from "./scripts/build-css.mjs";
 import { assertSafePluginArtifactPathsForBuild } from "./scripts/plugin-artifacts.mjs";
 import { createBuildSyncController } from "./scripts/plugin-sync.mjs";
 
-const prod = (process.argv[2] === "production");
+const productionWatch = process.argv[2] === "production-watch";
+const prod = process.argv[2] === "production" || productionWatch;
+const shouldWatch = !prod || productionWatch;
 const apiBaseUrl = normalizeApiBaseUrl(
 	process.env.SYSTEMSCULPT_API_BASE_URL || CANONICAL_API_BASE_URL,
 );
@@ -95,7 +97,7 @@ const buildOptions = createPluginBuildOptions({
 					if (result.errors.length > 0) {
 						return;
 					}
-					finalizeBuild(buildStart, { watch: !prod && isWatching });
+					finalizeBuild(buildStart, { watch: isWatching });
 				});
 			}
 		}
@@ -112,9 +114,7 @@ const finalizeBuild = (startedAt, { watch } = {}) => {
 	if (watch) {
 		logger.info(`Rebuild updated assets (${formatDuration(duration)})`);
 		logger.info(`Main bundle size: ${formatBytes(mainStats.size)}`);
-		if (!prod) {
-			buildSyncController.schedule();
-		}
+		buildSyncController.schedule();
 		return;
 	}
 
@@ -129,7 +129,7 @@ const finalizeBuild = (startedAt, { watch } = {}) => {
 
 const run = async () => {
 	try {
-		if (prod) {
+		if (!shouldWatch) {
 			await esbuild.build(buildOptions);
 			return;
 		}

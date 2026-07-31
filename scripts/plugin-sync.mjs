@@ -10,12 +10,19 @@ import {
   inspectPluginArtifacts,
   REQUIRED_PLUGIN_ARTIFACTS,
 } from "./plugin-artifacts.mjs";
+import {
+  CANONICAL_API_BASE_URL,
+  LOCAL_AGENT_API_BASE_URL,
+  STAGING_API_BASE_URL,
+  normalizeApiBaseUrl,
+} from "./plugin-build-options.mjs";
 import { replaceFileAtomically } from "./platform-portability.mjs";
 
 export { replaceFileAtomically } from "./platform-portability.mjs";
 
 export const DEFAULT_SYNC_CONFIG_PATH = path.resolve(process.cwd(), "systemsculpt-sync.config.json");
 export const DEVELOPMENT_BUILD_MANIFEST_KEY = "systemsculptDevBuild";
+export const DEFAULT_OBSIDIAN_RELOAD_TIMEOUT_MS = 15_000;
 export const OBSOLETE_PLUGIN_FILES = [
   "README.md",
   "LICENSE",
@@ -29,6 +36,13 @@ export const OBSOLETE_PLUGIN_FILES = [
 function booleanFlag(value, fallback) {
   if (value === undefined || value === null || value === "") return fallback;
   return !/^(?:0|false|no|off)$/i.test(String(value).trim());
+}
+
+function positiveTimeout(value, fallback) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0
+    ? Math.floor(parsed)
+    : fallback;
 }
 
 export function resolveSyncConfigPath(
@@ -183,7 +197,23 @@ export function syncConfiguredTargets(options = {}) {
   const root = path.resolve(String(options.root || process.cwd()));
   const logger = options.logger || console;
   const loaded = loadConfiguredTargets({ root, configPath: options.configPath });
-  const inspection = inspectPluginArtifacts({ root });
+  const expectedApiBaseUrl = normalizeApiBaseUrl(
+    options.apiBaseUrl
+      || process.env.SYSTEMSCULPT_API_BASE_URL
+      || CANONICAL_API_BASE_URL,
+  );
+  const inspection = inspectPluginArtifacts({
+    root,
+    expectedApiBaseUrl,
+    forbiddenApiBaseUrls: expectedApiBaseUrl === STAGING_API_BASE_URL
+      ? [CANONICAL_API_BASE_URL, LOCAL_AGENT_API_BASE_URL]
+      : expectedApiBaseUrl === LOCAL_AGENT_API_BASE_URL
+        ? [CANONICAL_API_BASE_URL, STAGING_API_BASE_URL]
+        : [STAGING_API_BASE_URL, LOCAL_AGENT_API_BASE_URL],
+    allowedLoopbackApiBaseUrls: expectedApiBaseUrl === LOCAL_AGENT_API_BASE_URL
+      ? [LOCAL_AGENT_API_BASE_URL]
+      : [],
+  });
   if (!inspection.ok) {
     throw new Error(`[sync] ${formatArtifactProblems(inspection)}`);
   }
@@ -224,6 +254,10 @@ export function reloadConfiguredTargets(options = {}) {
   const root = path.resolve(String(options.root || process.cwd()));
   const logger = options.logger || console;
   const runCommand = options.runCommand || spawnSync;
+  const timeoutMs = positiveTimeout(
+    options.timeoutMs ?? env.SYSTEMSCULPT_OBSIDIAN_RELOAD_TIMEOUT_MS,
+    DEFAULT_OBSIDIAN_RELOAD_TIMEOUT_MS,
+  );
   const manifest = JSON.parse(fs.readFileSync(path.join(root, "manifest.json"), "utf8"));
   const pluginId = String(manifest?.id || "").trim();
   if (!pluginId) throw new Error("manifest.json is missing the plugin id");
@@ -235,9 +269,20 @@ export function reloadConfiguredTargets(options = {}) {
     const result = runCommand(
       "obsidian",
       ["plugin:reload", `id=${pluginId}`, `vault=${vault}`],
-      { encoding: "utf8", stdio: "pipe" },
+      {
+        encoding: "utf8",
+        stdio: "pipe",
+        timeout: timeoutMs,
+        killSignal: "SIGKILL",
+      },
     );
     if (result?.error || result?.status !== 0) {
+      if (result?.error?.code === "ETIMEDOUT") {
+        const reason = `timed out after ${timeoutMs}ms; terminated child with SIGKILL`;
+        logger.warn?.(`[sync] Obsidian reload timed out for ${vault} after ${timeoutMs}ms; terminated child with SIGKILL.`);
+        failures.push({ vault, reason });
+        continue;
+      }
       const reason = result?.error?.message || result?.stderr || `exit ${result?.status}`;
       logger.warn?.(`[sync] Obsidian reload skipped for ${vault}: ${String(reason).trim()}`);
       failures.push({ vault, reason: String(reason).trim() });
@@ -271,6 +316,7 @@ export function createBuildSyncController(options = {}) {
         configPath,
         failWhenNoTargets: false,
         logger,
+        apiBaseUrl: env.SYSTEMSCULPT_API_BASE_URL,
       });
       reloadTargets({ root, targets: result.succeeded, env, logger });
     } catch (error) {

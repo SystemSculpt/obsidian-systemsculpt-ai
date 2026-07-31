@@ -5,6 +5,10 @@ import { PluginLogger } from "../PluginLogger";
 import { LogLevel } from "../errorHandling";
 import { THIN_AGENT_LIFECYCLE_CODES } from "../../views/chatview/thin/ThinAgentLifecycle";
 
+const FIRST_PARTY_LIFECYCLE_CODES = THIN_AGENT_LIFECYCLE_CODES.filter(
+  (code) => !code.startsWith("response_resume_"),
+);
+
 describe("PluginLogger", () => {
   let logger: PluginLogger;
   let mockPlugin: any;
@@ -160,13 +164,22 @@ describe("PluginLogger", () => {
         timestamp: 123,
         code: "local_tool_started",
         phase: "tool_execution",
-        runId: "run-safe",
+        conversationId: "conversation_0123456789abcdef0123456789abcdef",
+        requestId: "request_0123456789abcdef",
+        clientInstanceId: "client_0123456789abcdef0123456789abcdef",
+        pluginBuildId: "07bd9378-dirty-20260731T120000000Z",
+        runId: "run-local-safe",
+        serverRunId: "run_0123456789abcdef0123456789abcdef",
         toolName: "read",
         toolCallId: "call-safe",
         incidentId: "incident_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         prompt: "private prompt",
         content: "private content",
         path: "Private.md",
+        url: "https://private.example.com",
+        arguments: { private: true },
+        output: { private: true },
+        rawError: "raw provider failure",
         license: "private license",
         ticket: "private ticket",
         provider: "private provider",
@@ -184,7 +197,12 @@ describe("PluginLogger", () => {
               timestamp: 123,
               code: "local_tool_started",
               phase: "tool_execution",
-              runId: "run-safe",
+              conversationId: "conversation_0123456789abcdef0123456789abcdef",
+              requestId: "request_0123456789abcdef",
+              clientInstanceId: "client_0123456789abcdef0123456789abcdef",
+              pluginBuildId: "07bd9378-dirty-20260731T120000000Z",
+              runId: "run-local-safe",
+              serverRunId: "run_0123456789abcdef0123456789abcdef",
               toolName: "read",
               toolCallId: "call-safe",
               incidentId: "incident_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -199,7 +217,7 @@ describe("PluginLogger", () => {
         .map((line: string) => JSON.parse(line));
       expect(persisted).toHaveLength(1);
       expect(JSON.stringify(persisted)).not.toMatch(
-        /prompt|content|path|query|input|output|license|ticket|provider|credential|reason/i,
+        /prompt|content|path|url|query|arguments|input|output|rawError|license|ticket|provider|credential|reason/i,
       );
       expect(consoleSpy.debug).not.toHaveBeenCalled();
     });
@@ -229,12 +247,12 @@ describe("PluginLogger", () => {
     });
 
     it("accepts every code in the strict lifecycle contract", () => {
-      for (const code of THIN_AGENT_LIFECYCLE_CODES) {
+      for (const code of FIRST_PARTY_LIFECYCLE_CODES) {
         logger.lifecycle({ code, phase: "unknown" });
       }
 
       expect(logger.getRecentEntries().map((entry) => entry.context?.metadata?.code))
-        .toEqual(THIN_AGENT_LIFECYCLE_CODES);
+        .toEqual(FIRST_PARTY_LIFECYCLE_CODES);
     });
 
     it.each([
@@ -254,6 +272,10 @@ describe("PluginLogger", () => {
       "provider_temporarily_unavailable",
       "runtime_failed",
       "harness_failed",
+      "response_resume_scheduled",
+      "response_resume_started",
+      "response_resume_completed",
+      "response_resume_failed",
       "syntactically_valid_but_unknown",
     ])("rejects the private lifecycle code %s", (code) => {
       logger.lifecycle({ code, phase: "response" });
@@ -331,7 +353,12 @@ describe("PluginLogger", () => {
         timestamp: 123,
         code: "run_started",
         phase: "response",
-        runId: "run-safe",
+        conversationId: "conversation_0123456789abcdef0123456789abcdef",
+        requestId: "request_0123456789abcdef",
+        clientInstanceId: "client_0123456789abcdef0123456789abcdef",
+        pluginBuildId: "07bd9378-dirty-20260731T120000000Z",
+        runId: "run-local-safe",
+        serverRunId: "run_0123456789abcdef0123456789abcdef",
         toolName: "read",
         toolCallId: "call-safe",
         prompt: hostileCanaries[0],
@@ -339,7 +366,7 @@ describe("PluginLogger", () => {
         canary: hostileCanaries[2],
       });
       logger.error(
-        "ChatView agent bridge failed",
+        "ChatView agent session failed",
         {
           code: "response_save_failed",
           status: 503,
@@ -362,6 +389,14 @@ describe("PluginLogger", () => {
           code: "run_started",
           phase: "response",
           sequence: 7,
+          conversation_id: "conversation_0123456789abcdef0123456789abcdef",
+          request_id: "request_0123456789abcdef",
+          client_instance_id: "client_0123456789abcdef0123456789abcdef",
+          plugin_build_id: "07bd9378-dirty-20260731T120000000Z",
+          run_id: "run-local-safe",
+          server_run_id: "run_0123456789abcdef0123456789abcdef",
+          tool_name: "read",
+          tool_call_id: "call-safe",
         },
         {
           timestamp: expect.any(String),
@@ -397,6 +432,9 @@ describe("PluginLogger", () => {
         code: "provider_runtime_failed",
         phase: "transport",
         prompt: "QA-CANARY-7421",
+        requestId: "https:private.example.com",
+        pluginBuildId: "file:Private.md",
+        toolName: "web_search",
       };
       const projected = logger.getSupportDiagnostics();
       expect(projected.map((entry) => entry.code)).toEqual([
@@ -528,7 +566,7 @@ describe("PluginLogger", () => {
       raw.stack = `Error: ${hostileCanaries[7]}\n at /vault/Private.md:1:1`;
       const context = {
         source: "AgentChatView",
-        method: "agentBridge",
+        method: "agentSession",
         metadata: {
           chatId: hostileCanaries[2],
           prompt: hostileCanaries[0],
@@ -536,8 +574,8 @@ describe("PluginLogger", () => {
         },
       };
 
-      logger.error("ChatView agent bridge failed", raw, context);
-      logger.error("ChatView agent bridge failed", raw, context);
+      logger.error("ChatView agent session failed", raw, context);
+      logger.error("ChatView agent session failed", raw, context);
 
       expect(logger.getRecentEntries()).toEqual([{
         timestamp: expect.any(String),
@@ -615,18 +653,18 @@ describe("PluginLogger", () => {
         stack: hostileCanaries[7],
       };
       logger.error(
-        "ChatView agent bridge failed",
+        "ChatView agent session failed",
         hostile,
         {
           source: "AgentChatView",
-          method: "onTerminalConnectionError",
+          method: "agentSession",
           metadata: { prompt: hostileCanaries[0], path: hostileCanaries[2] },
         },
       );
       logger.error(
-        "ChatView agent bridge failed",
+        "ChatView agent session failed",
         hostile,
-        { source: "AgentChatView", method: "onTerminalConnectionError" },
+        { source: "AgentChatView", method: "agentSession" },
       );
 
       expect(logger.getRecentEntries()).toEqual([expect.objectContaining({
@@ -635,7 +673,9 @@ describe("PluginLogger", () => {
           source: "ThinAgentClient",
           metadata: {
             code: "client_failure",
-            phase: "session",
+            phase: "response",
+            origin: "session_callback",
+            cause: "object_error",
           },
         },
         error: undefined,
@@ -654,7 +694,9 @@ describe("PluginLogger", () => {
           source: "ThinAgentClient",
           metadata: {
             code: "client_failure",
-            phase: "session",
+            phase: "response",
+            origin: "session_callback",
+            cause: "object_error",
           },
         },
       }]);
@@ -668,6 +710,44 @@ describe("PluginLogger", () => {
         expect(surfaces).not.toContain(canary);
       }
       expect(surfaces).not.toContain("request-with-private-correlation");
+    });
+
+    it("classifies a superseded warm bootstrap without retaining its message", async () => {
+      const error = new Error("Conversation preparation was superseded.");
+      error.name = "ConversationPreparationCancelled";
+
+      logger.error(
+        "ChatView agent session failed",
+        error,
+        { source: "AgentChatView", method: "warmThinConversation" },
+      );
+
+      expect(logger.getRecentEntries()).toEqual([expect.objectContaining({
+        message: "thin-agent:failure",
+        context: {
+          source: "ThinAgentClient",
+          metadata: {
+            code: "client_failure",
+            phase: "start",
+            origin: "warm_bootstrap",
+            cause: "preparation_superseded",
+          },
+        },
+        error: undefined,
+      })]);
+      expect(logger.getSupportDiagnostics()).toEqual([{
+        timestamp: expect.any(String),
+        severity: "error",
+        code: "client_failure",
+        phase: "start",
+        origin: "warm_bootstrap",
+        cause: "preparation_superseded",
+      }]);
+
+      await logger.flushNow();
+      const persisted = mockStorage.appendToFile.mock.calls[0][2];
+      expect(persisted).not.toContain(error.message);
+      expect(persisted).not.toContain(error.name);
     });
 
     it.each([
@@ -687,7 +767,6 @@ describe("PluginLogger", () => {
       "response_finished_with_pending_vault_action",
       "response_in_progress",
       "response_interrupted",
-      "response_resume_failed",
       "response_save_failed",
       "response_start_failed",
       "response_start_rate_limited",
@@ -708,9 +787,9 @@ describe("PluginLogger", () => {
       "web_search_unavailable",
     ])("preserves the neutral thin-agent failure code %s", (code) => {
       logger.error(
-        "ChatView agent bridge failed",
+        "ChatView agent session failed",
         { code },
-        { source: "AgentChatView", method: "agentBridge" },
+        { source: "AgentChatView", method: "agentSession" },
       );
 
       expect(logger.getRecentEntries()).toEqual([
@@ -734,6 +813,7 @@ describe("PluginLogger", () => {
       "provider_temporarily_unavailable",
       "runtime_failed",
       "harness_failed",
+      "response_resume_failed",
       "credential_leaked",
       "license_key_invalid",
       "ticket_invalid",
@@ -747,9 +827,9 @@ describe("PluginLogger", () => {
       "made_up_failure",
     ])("rejects the private or retired thin-agent failure code %s", (code) => {
       logger.error(
-        "ChatView agent bridge failed",
+        "ChatView agent session failed",
         { code },
-        { source: "AgentChatView", method: "agentBridge" },
+        { source: "AgentChatView", method: "agentSession" },
       );
 
       const serialized = JSON.stringify(logger.getRecentEntries());
@@ -760,6 +840,8 @@ describe("PluginLogger", () => {
             metadata: {
               code: "client_failure",
               phase: "response",
+              origin: "session_callback",
+              cause: "object_error",
             },
           },
         }),
@@ -768,16 +850,15 @@ describe("PluginLogger", () => {
     });
 
     it.each([
-      ["onTerminalConnectionError", "session"],
       ["loadChatHydration", "start"],
-      ["agentBridge", "response"],
+      ["agentSession", "response"],
       ["reportAgentError", "response"],
       ["completedRunSettlement", "persistence"],
       ["agentSnapshotRender", "render"],
       ["unrecognizedMethod", "unknown"],
     ])("maps AgentChatView method %s to neutral phase %s", (method, phase) => {
       logger.error(
-        "ChatView agent bridge failed",
+        "ChatView agent session failed",
         { code: "response_start_failed" },
         { source: "AgentChatView", method },
       );

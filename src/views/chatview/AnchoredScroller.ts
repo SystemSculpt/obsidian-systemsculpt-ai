@@ -1,16 +1,15 @@
-import { getSurfaceOwnerWindow } from "../../core/ui/surface/SurfaceDomContext";
+import {
+  cancelSurfaceAnimationFrame,
+  getSurfaceOwnerWindow,
+  requestSurfaceAnimationFrame,
+} from "../../core/ui/surface/SurfaceDomContext";
 
-export type AnchoredScrollMode = "end" | "turn" | "manual";
-
-export type AnchoredScrollerRowOptions = Readonly<{
-  turnAnchor?: boolean;
-}>;
+export type AnchoredScrollMode = "end" | "manual";
 
 export type AnchoredScrollerPrependAnchor = Readonly<{
   rowId: string;
   offsetFromViewportTop: number;
   mode: AnchoredScrollMode;
-  turnAnchorRowId: string | null;
 }>;
 
 export type AnchoredScrollerOptions = Readonly<{
@@ -18,7 +17,6 @@ export type AnchoredScrollerOptions = Readonly<{
   content: HTMLElement;
   scrollButton?: HTMLButtonElement;
   endThreshold?: number;
-  previousItemPeek?: number;
   reducedMotion?: boolean | (() => boolean);
   labelledBy?: string;
 }>;
@@ -26,11 +24,9 @@ export type AnchoredScrollerOptions = Readonly<{
 type RegisteredRow = Readonly<{
   id: string;
   element: HTMLElement;
-  turnAnchor: boolean;
 }>;
 
 const DEFAULT_END_THRESHOLD = 24;
-const DEFAULT_PREVIOUS_ITEM_PEEK = 64;
 
 function finite(value: number, fallback = 0): number {
   return Number.isFinite(value) ? value : fallback;
@@ -42,21 +38,20 @@ function clamp(value: number, minimum: number, maximum: number): number {
 
 /**
  * Owns conversation scrolling without owning messages, rendering, transport,
- * persistence, or agent state. Rows are registered by stable id so turn
- * anchoring and history prepends never have to guess from raw pixels alone.
+ * persistence, or agent state. Rows are registered by stable id so history
+ * replacement never has to guess from raw pixels alone.
  */
 export class AnchoredScroller {
   private readonly viewport: HTMLElement;
   private readonly content: HTMLElement;
   private readonly scrollButton?: HTMLButtonElement;
   private readonly endThreshold: number;
-  private readonly previousItemPeek: number;
   private readonly reducedMotion: boolean | (() => boolean);
   private readonly rows = new Map<string, RegisteredRow>();
   private mode: AnchoredScrollMode = "end";
-  private turnAnchorRowId: string | null = null;
   private programmaticTarget: number | null = null;
-  private manualIntentPending = false;
+  private resizeObserver: ResizeObserver | null = null;
+  private geometryFrame: number | null = null;
   private destroyed = false;
 
   constructor(options: AnchoredScrollerOptions) {
@@ -64,7 +59,6 @@ export class AnchoredScroller {
     this.content = options.content;
     this.scrollButton = options.scrollButton;
     this.endThreshold = Math.max(0, finite(options.endThreshold ?? DEFAULT_END_THRESHOLD));
-    this.previousItemPeek = Math.max(0, finite(options.previousItemPeek ?? DEFAULT_PREVIOUS_ITEM_PEEK));
     this.reducedMotion = options.reducedMotion ?? (() => {
       try {
         return getSurfaceOwnerWindow(this.viewport)
@@ -86,18 +80,23 @@ export class AnchoredScroller {
     this.content.setAttribute("aria-relevant", this.content.getAttribute("aria-relevant") || "additions");
 
     this.viewport.addEventListener("scroll", this.handleScroll, { passive: true });
-    this.viewport.addEventListener("wheel", this.handleManualScrollIntent, { passive: true });
-    this.viewport.addEventListener("touchstart", this.handleManualScrollIntent, { passive: true });
+    this.viewport.addEventListener("wheel", this.handleScrollIntent, { passive: true });
+    this.viewport.addEventListener("touchmove", this.handleScrollIntent, { passive: true });
+    this.viewport.addEventListener("pointerdown", this.handlePointerDown, { passive: true });
     this.viewport.addEventListener("keydown", this.handleKeyScrollIntent);
     this.scrollButton?.addEventListener("click", this.handleScrollButtonClick);
+    const ownerWindow = getSurfaceOwnerWindow(this.viewport) as Window & {
+      ResizeObserver?: typeof ResizeObserver;
+    };
+    if (typeof ownerWindow.ResizeObserver === "function") {
+      this.resizeObserver = new ownerWindow.ResizeObserver(this.handleGeometryChange);
+      this.resizeObserver.observe(this.viewport);
+      this.resizeObserver.observe(this.content);
+    }
     this.updateScrollButton();
   }
 
-  public registerRow(
-    rowId: string,
-    element: HTMLElement,
-    options: AnchoredScrollerRowOptions = {},
-  ): void {
+  public registerRow(rowId: string, element: HTMLElement): void {
     this.assertLive();
     const id = rowId.trim();
     if (!id) throw new Error("AnchoredScroller row id must be non-empty.");
@@ -109,7 +108,6 @@ export class AnchoredScroller {
     this.rows.set(id, {
       id,
       element,
-      turnAnchor: options.turnAnchor === true,
     });
     this.updateScrollButton();
   }
@@ -119,34 +117,42 @@ export class AnchoredScroller {
     if (!row) return;
     this.rows.delete(rowId);
     if (row.element.dataset.agentRowId === rowId) delete row.element.dataset.agentRowId;
-    if (this.turnAnchorRowId === rowId) {
-      this.turnAnchorRowId = null;
-      this.mode = this.isNearEnd() ? "end" : "manual";
-    }
     this.updateScrollButton();
   }
 
-  public notifyTurnStarted(rowId: string): void {
+  public notifyTurnStarted(): void {
     this.assertLive();
-    const row = this.requireRow(rowId);
-    if (!row.turnAnchor) {
-      throw new Error(`AnchoredScroller row ${rowId} is not registered as a turn anchor.`);
+    // Starting another turn must not steal the viewport from someone reading
+    // earlier content. End following resumes only after they return to the
+    // bottom themselves or explicitly use the Latest control.
+    if (this.mode === "manual" && !this.isNearEnd()) {
+      this.updateScrollButton();
+      return;
     }
-    this.mode = "turn";
-    this.turnAnchorRowId = row.id;
-    this.setScrollTop(this.rowTop(row) - this.previousItemPeek, "smooth");
+    this.mode = "end";
+    this.setScrollTop(this.maximumScrollTop(), "auto");
   }
 
   public notifyContentChanged(options: { streaming?: boolean } = {}): void {
     this.assertLive();
     this.setStreaming(options.streaming === true);
     if (this.mode === "end") {
-      this.setScrollTop(this.maximumScrollTop(), options.streaming ? "auto" : "smooth");
-    } else if (this.mode === "turn" && this.turnAnchorRowId) {
-      const anchor = this.rows.get(this.turnAnchorRowId);
-      if (anchor) this.setScrollTop(this.rowTop(anchor) - this.previousItemPeek, "auto");
+      this.setScrollTop(this.maximumScrollTop(), "auto");
     }
     this.updateScrollButton();
+  }
+
+  /**
+   * Reconciles an owned layout change, such as the composer growing, before a
+   * browser-generated scroll event can be mistaken for manual reading.
+   */
+  public notifyViewportGeometryChanged(): void {
+    this.assertLive();
+    if (this.mode === "end") {
+      this.setScrollTop(this.maximumScrollTop(), "auto");
+    } else {
+      this.updateScrollButton();
+    }
   }
 
   public setStreaming(streaming: boolean): void {
@@ -166,7 +172,6 @@ export class AnchoredScroller {
       rowId: firstVisible.id,
       offsetFromViewportTop: this.rowTop(firstVisible) - viewportTop,
       mode: this.mode,
-      turnAnchorRowId: this.turnAnchorRowId,
     });
   }
 
@@ -177,9 +182,12 @@ export class AnchoredScroller {
       return;
     }
     const row = this.requireRow(anchor.rowId);
-    this.setScrollTop(this.rowTop(row) - finite(anchor.offsetFromViewportTop), "auto");
     this.mode = anchor.mode;
-    this.turnAnchorRowId = anchor.turnAnchorRowId;
+    if (anchor.mode === "end") {
+      this.setScrollTop(this.maximumScrollTop(), "auto");
+    } else {
+      this.setScrollTop(this.rowTop(row) - finite(anchor.offsetFromViewportTop), "auto");
+    }
     this.updateScrollButton();
   }
 
@@ -199,14 +207,12 @@ export class AnchoredScroller {
     if (options.align === "center") target = rowTop - (viewportHeight - rowHeight) / 2;
     if (options.align === "end") target = rowTop + rowHeight - viewportHeight;
     this.mode = options.followEnd === true ? "end" : "manual";
-    this.turnAnchorRowId = null;
     this.setScrollTop(target, "smooth");
   }
 
   public scrollToEnd(options: { smooth?: boolean } = {}): void {
     this.assertLive();
     this.mode = "end";
-    this.turnAnchorRowId = null;
     this.setScrollTop(this.maximumScrollTop(), options.smooth === false ? "auto" : "smooth");
   }
 
@@ -222,10 +228,17 @@ export class AnchoredScroller {
     if (this.destroyed) return;
     this.destroyed = true;
     this.viewport.removeEventListener("scroll", this.handleScroll);
-    this.viewport.removeEventListener("wheel", this.handleManualScrollIntent);
-    this.viewport.removeEventListener("touchstart", this.handleManualScrollIntent);
+    this.viewport.removeEventListener("wheel", this.handleScrollIntent);
+    this.viewport.removeEventListener("touchmove", this.handleScrollIntent);
+    this.viewport.removeEventListener("pointerdown", this.handlePointerDown);
     this.viewport.removeEventListener("keydown", this.handleKeyScrollIntent);
     this.scrollButton?.removeEventListener("click", this.handleScrollButtonClick);
+    this.resizeObserver?.disconnect();
+    this.resizeObserver = null;
+    if (this.geometryFrame !== null) {
+      cancelSurfaceAnimationFrame(this.viewport, this.geometryFrame);
+      this.geometryFrame = null;
+    }
     this.rows.clear();
     this.programmaticTarget = null;
   }
@@ -233,14 +246,6 @@ export class AnchoredScroller {
   private readonly handleScroll = (): void => {
     if (this.destroyed) return;
     const current = finite(this.viewport.scrollTop);
-    if (this.manualIntentPending) {
-      this.manualIntentPending = false;
-      this.programmaticTarget = null;
-      this.mode = "manual";
-      this.turnAnchorRowId = null;
-      this.updateScrollButton();
-      return;
-    }
     if (this.programmaticTarget !== null) {
       if (Math.abs(current - this.programmaticTarget) <= 1) this.programmaticTarget = null;
       this.updateScrollButton();
@@ -248,21 +253,19 @@ export class AnchoredScroller {
     }
     if (this.isNearEnd()) {
       this.mode = "end";
-      this.turnAnchorRowId = null;
     } else {
       this.mode = "manual";
-      this.turnAnchorRowId = null;
     }
     this.updateScrollButton();
   };
 
-  private readonly handleManualScrollIntent = (): void => {
+  private readonly handleScrollIntent = (): void => {
     if (this.destroyed) return;
-    this.manualIntentPending = true;
     this.programmaticTarget = null;
-    this.mode = "manual";
-    this.turnAnchorRowId = null;
-    this.updateScrollButton();
+  };
+
+  private readonly handlePointerDown = (event: PointerEvent): void => {
+    if (event.target === this.viewport) this.handleScrollIntent();
   };
 
   private readonly handleKeyScrollIntent = (event: KeyboardEvent): void => {
@@ -275,7 +278,21 @@ export class AnchoredScroller {
       "End",
       " ",
     ].includes(event.key)) return;
-    this.handleManualScrollIntent();
+    if (event.defaultPrevented || this.isInteractiveTarget(event.target)) return;
+    this.handleScrollIntent();
+  };
+
+  private readonly handleGeometryChange: ResizeObserverCallback = (): void => {
+    if (this.destroyed || this.geometryFrame !== null) return;
+    this.geometryFrame = requestSurfaceAnimationFrame(this.viewport, () => {
+      this.geometryFrame = null;
+      if (this.destroyed) return;
+      if (this.mode === "end") {
+        this.setScrollTop(this.maximumScrollTop(), "auto");
+      } else {
+        this.updateScrollButton();
+      }
+    });
   };
 
   private readonly handleScrollButtonClick = (event: MouseEvent): void => {
@@ -313,6 +330,11 @@ export class AnchoredScroller {
   private setScrollTop(rawTarget: number, requestedBehavior: ScrollBehavior): void {
     const target = clamp(finite(rawTarget), 0, this.maximumScrollTop());
     const behavior = this.prefersReducedMotion() ? "auto" : requestedBehavior;
+    if (Math.abs(finite(this.viewport.scrollTop) - target) <= 1) {
+      this.programmaticTarget = null;
+      this.updateScrollButton();
+      return;
+    }
     this.programmaticTarget = target;
     if (typeof this.viewport.scrollTo === "function") {
       this.viewport.scrollTo({ top: target, behavior });
@@ -321,6 +343,28 @@ export class AnchoredScroller {
       this.programmaticTarget = null;
     }
     this.updateScrollButton();
+  }
+
+  private isInteractiveTarget(target: EventTarget | null): boolean {
+    const candidate = target as Partial<Element> | null;
+    if (typeof candidate?.closest !== "function") return false;
+    return candidate.closest([
+      "a[href]",
+      "button",
+      "input",
+      "textarea",
+      "select",
+      "option",
+      "summary",
+      "[contenteditable='true']",
+      "[role='button']",
+      "[role='checkbox']",
+      "[role='link']",
+      "[role='menuitem']",
+      "[role='radio']",
+      "[role='switch']",
+      "[role='tab']",
+    ].join(",")) !== null;
   }
 
   private prefersReducedMotion(): boolean {

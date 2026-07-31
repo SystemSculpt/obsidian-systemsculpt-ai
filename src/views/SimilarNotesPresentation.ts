@@ -509,7 +509,7 @@ export class SimilarNotesPresentation extends Component {
     });
 
     if (chatContext) {
-      const contextAction = createIconButton(accessories, `Add ${title} to chat context`, "plus");
+      const contextAction = createIconButton(accessories, `Pin ${title} for every message`, "plus");
       contextAction.addClass("ss-similar-note__context-action");
       contextAction.addEventListener("click", async (event) => {
         event.preventDefault();
@@ -602,8 +602,10 @@ export class SimilarNotesPresentation extends Component {
     );
     updateUiAction(action, {
       disabled: inContext,
-      label: inContext ? `${title} is in chat context` : `Add ${title} to chat context`,
-      title: inContext ? "In chat context" : "Add to chat context",
+      label: inContext
+        ? `${title} is pinned for every message`
+        : `Pin ${title} for every message`,
+      title: inContext ? "Pinned for every message" : "Pin for every message",
       icon: inContext ? "check" : "plus",
     });
   }

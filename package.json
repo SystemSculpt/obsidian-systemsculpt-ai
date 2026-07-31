@@ -1,13 +1,9 @@
 {
   "author": "SystemSculpt",
   "dependencies": {
-    "@ai-sdk/react": "4.0.45",
     "@codemirror/state": "6.5.0",
     "@codemirror/view": "6.38.6",
-    "agents": "0.20.1",
-    "ai": "7.0.42",
     "async-mutex": "^0.5.0",
-    "react": "19.1.2",
     "yaml": "^2.8.1"
   },
   "description": "SystemSculpt AI chat, transcription, semantic search, and Studio workflows inside your vault",
@@ -38,6 +34,8 @@
   "scripts": {
     "prepare": "node scripts/install-git-hooks.mjs",
     "build": "node esbuild.config.mjs production",
+    "build:local-agent": "node scripts/build-local-agent-plugin.mjs",
+    "build:staging": "node scripts/build-staging-plugin.mjs",
     "check": "npm run check:plugin:fast && npm run test:mobile:interactions && npm run test:chatview:critical && npm run test:thin-agent:endurance && npm run test:mobile:bundle",
     "lint:obsidian": "eslint --cache --cache-location .cache/eslint/source.cache -c eslint.config.mjs --max-warnings 0 \"src/**/*.{ts,tsx,mts,cts}\"",
     "lint:obsidian:fix": "npm run lint:obsidian -- --fix",
@@ -56,9 +54,13 @@
     "check:all": "npm run check:full",
     "dev": "node esbuild.config.mjs",
     "dev:watch:install": "node scripts/dev-watcher-service.mjs install",
+    "dev:watch:install:local-agent": "node scripts/dev-watcher-service.mjs install --target local-agent",
+    "dev:watch:install:staging": "node scripts/dev-watcher-service.mjs install --target staging",
     "dev:watch:status": "node scripts/dev-watcher-service.mjs status",
     "dev:watch:uninstall": "node scripts/dev-watcher-service.mjs uninstall",
     "sync:local": "node scripts/sync-local-vaults.mjs",
+    "sync:local:agent": "node scripts/sync-local-vaults.mjs --target local-agent",
+    "sync:local:staging": "node scripts/sync-local-vaults.mjs --target staging",
     "test": "node scripts/jest.mjs --config jest.config.cjs --passWithNoTests",
     "test:strict": "node scripts/jest.mjs --strict-console --config jest.config.cjs --passWithNoTests",
     "test:unit:ci": "node scripts/jest.mjs --strict-console --config jest.unit-ci.config.cjs --runInBand --detectOpenHandles --openHandlesTimeout=1000 --randomize --showSeed",

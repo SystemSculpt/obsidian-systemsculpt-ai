@@ -106,6 +106,7 @@ export type CreditsBalanceSnapshot = {
   addOnRemaining: number;
   totalRemaining: number;
   includedPerMonth: number;
+  usageClass?: "customer" | "master_auth";
   cycleEndsAt: string;
   cycleStartedAt: string;
   cycleAnchorAt: string;
@@ -174,7 +175,7 @@ export const normalizeCreditsCheckoutUrl = (value: unknown): string | null => {
   return parsed.toString();
 };
 
-function decodeCreditsBalance(payload: unknown): CreditsBalanceSnapshot {
+export function decodeCreditsBalance(payload: unknown): CreditsBalanceSnapshot {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
     return invalidCreditsBalance();
   }
@@ -184,6 +185,10 @@ function decodeCreditsBalance(payload: unknown): CreditsBalanceSnapshot {
   const totalRemaining = creditsInteger(value.total_remaining);
   const includedPerMonth = creditsInteger(value.included_per_month);
   if (!Number.isSafeInteger(includedRemaining + addOnRemaining) || totalRemaining !== includedRemaining + addOnRemaining) {
+    return invalidCreditsBalance();
+  }
+  const usageClass = value.usage_class;
+  if (usageClass !== "customer" && usageClass !== "master_auth") {
     return invalidCreditsBalance();
   }
 
@@ -233,6 +238,7 @@ function decodeCreditsBalance(payload: unknown): CreditsBalanceSnapshot {
     addOnRemaining,
     totalRemaining,
     includedPerMonth,
+    usageClass,
     cycleEndsAt,
     cycleStartedAt,
     cycleAnchorAt,

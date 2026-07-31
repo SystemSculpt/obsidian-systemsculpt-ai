@@ -1,9 +1,8 @@
 {
-  "fixture_version": "thin-agent-v1-endurance-1",
+  "fixture_version": "thin-agent-v1-endurance-3",
   "conversation_id": "conversation_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-  "agents_package_version": "0.20.1",
-  "ai_package_version": "7.0.42",
-  "think_package_version": "0.15.1",
+  "request_id": "user_endurance_root",
+  "run_id": "run_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
   "round_count": 40,
   "readonly_cycle": [
     "read",
@@ -31,6 +30,11 @@
       ]
     }
   ],
+  "web_search_rounds": [
+    5,
+    20,
+    35
+  ],
   "approved_mutation": {
     "round": 14,
     "tool_call_id": "tool_round_14_01",
@@ -43,37 +47,27 @@
       "ifExists": "overwrite"
     }
   },
+  "recovery": {
+    "drop_approval_round": 14,
+    "drop_result_round": 23,
+    "expect_fresh_bootstrap_per_connection": true,
+    "expect_snapshot_first_per_connection": true
+  },
   "mutation_replay": {
-    "after_round": 23,
     "tool_call_id": "tool_round_14_01",
     "expected_execution_count": 1,
+    "expected_replayed_result_count": 1,
     "different_input_is_conflict": true
   },
-  "reconnect": {
-    "during_continuation_after_round": 23,
-    "expect_pending_frame": true,
-    "retry_same_probe_id": true
-  },
-  "native_frame_types": {
-    "initial_request": "cf_agent_use_chat_request",
-    "tool_result": "cf_agent_tool_result",
-    "tool_approval": "cf_agent_tool_approval",
-    "resume_request": "cf_agent_stream_resume_request",
-    "resume_pending": "cf_agent_stream_pending",
-    "resume_ready": "cf_agent_stream_resuming",
-    "resume_ack": "cf_agent_stream_resume_ack",
-    "stream_response": "cf_agent_use_chat_response"
-  },
   "expected": {
-    "continuation_rounds": 40,
     "vault_tool_calls": 44,
-    "tool_result_frames": 45,
-    "tool_approval_frames": 1,
-    "unique_resume_probes": 40,
-    "resume_request_frames": 41,
-    "resume_ack_frames": 40,
+    "server_web_search_calls": 3,
+    "successful_tool_result_commands": 44,
+    "tool_result_send_attempts": 45,
+    "successful_tool_approval_commands": 1,
+    "tool_approval_send_attempts": 2,
+    "connection_count": 3,
     "mutation_executions": 1,
-    "hard_client_continuation_limit": null,
-    "server_max_steps": "positive_infinity"
+    "hard_client_continuation_limit": null
   }
 }

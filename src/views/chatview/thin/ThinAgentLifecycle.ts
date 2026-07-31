@@ -1,3 +1,5 @@
+import { isFirstPartyToolName } from "../../../tools/toolNames";
+
 export const THIN_AGENT_LIFECYCLE_CODES = [
   "session_opened",
   "session_closed",
@@ -21,6 +23,9 @@ export const THIN_AGENT_LIFECYCLE_CODES = [
   "historical_resubmit_failed",
   "conversation_reset",
   "run_started",
+  "request_dispatch_started",
+  "request_dispatch_returned",
+  "request_dispatch_failed",
   "phase_submitted",
   "phase_thinking",
   "phase_working",
@@ -29,10 +34,15 @@ export const THIN_AGENT_LIFECYCLE_CODES = [
   "phase_settling",
   "phase_complete",
   "approval_presented",
-  "approval_submitted_approved",
+  "approval_submitted_approved_manual",
+  "approval_submitted_approved_policy",
   "approval_submitted_denied",
   "approval_acknowledged_approved",
   "approval_acknowledged_denied",
+  "mutation_execute_claimed",
+  "mutation_replay_served",
+  "mutation_outcome_unknown",
+  "mutation_call_conflict",
   "local_tool_started",
   "local_tool_completed_succeeded",
   "local_tool_completed_failed",
@@ -54,6 +64,7 @@ export const THIN_AGENT_LIFECYCLE_CODES = [
   "run_finished_completed",
   "run_finished_cancelled",
   "run_finished_failed",
+  "diagnostics_truncated",
 ] as const;
 
 export type ThinAgentLifecycleCode = typeof THIN_AGENT_LIFECYCLE_CODES[number];
@@ -72,7 +83,12 @@ export type ThinAgentLifecyclePhase =
 export type ThinAgentLifecycleInput = Readonly<{
   code: ThinAgentLifecycleCode;
   phase: ThinAgentLifecyclePhase;
+  conversationId?: string;
+  requestId?: string;
+  clientInstanceId?: string;
+  pluginBuildId?: string;
   runId?: string;
+  serverRunId?: string;
   toolName?: string;
   toolCallId?: string;
   status?: number;
@@ -85,7 +101,12 @@ export type ThinAgentLifecycleRecord = Readonly<{
   timestamp: number;
   code: ThinAgentLifecycleCode;
   phase: ThinAgentLifecyclePhase;
+  conversationId?: string;
+  requestId?: string;
+  clientInstanceId?: string;
+  pluginBuildId?: string;
   runId?: string;
+  serverRunId?: string;
   toolName?: string;
   toolCallId?: string;
   status?: number;
@@ -98,9 +119,16 @@ export type ThinAgentLifecycleDiagnosticFrame = Readonly<{
   payload: Readonly<{
     version: 1;
     severity: "info";
+    sequence: number;
+    timestamp: number;
     code: ThinAgentLifecycleCode;
     phase: ThinAgentLifecyclePhase;
+    conversation_id?: string;
+    request_id?: string;
+    client_instance_id?: string;
+    plugin_build_id?: string;
     run_id?: string;
+    server_run_id?: string;
     tool_name?: string;
     tool_call_id?: string;
     status?: number;
@@ -110,7 +138,10 @@ export type ThinAgentLifecycleDiagnosticFrame = Readonly<{
 }>;
 
 const CODE_SET = new Set<string>(THIN_AGENT_LIFECYCLE_CODES);
+const CLIENT_INSTANCE_ID = /^client_[a-f0-9]{32}$/u;
+const CONVERSATION_ID = /^conversation_[a-f0-9]{32}$/u;
 const INCIDENT_ID = /^incident_[a-f0-9]{32}$/u;
+const SERVER_RUN_ID = /^run_[a-f0-9]{32}$/u;
 const PHASE_SET = new Set<string>([
   "start",
   "session",
@@ -124,9 +155,16 @@ const PHASE_SET = new Set<string>([
 ]);
 
 function boundedIdentifier(value: unknown, maximum: number): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const normalized = value.slice(0, maximum);
-  return /^[A-Za-z0-9_.:-]+$/.test(normalized) ? normalized : undefined;
+  if (
+    typeof value !== "string"
+    || value.length === 0
+    || value.length > maximum
+    || /^(?:data|file|https?|obsidian|wss?):/iu.test(value)
+    || /^www\./iu.test(value)
+  ) {
+    return undefined;
+  }
+  return /^[A-Za-z0-9][A-Za-z0-9_.:-]*$/u.test(value) ? value : undefined;
 }
 
 /**
@@ -143,8 +181,24 @@ export class ThinAgentLifecycle {
 
   public record(input: ThinAgentLifecycleInput): ThinAgentLifecycleRecord | null {
     if (!CODE_SET.has(input.code) || !PHASE_SET.has(input.phase)) return null;
+    const conversationId = typeof input.conversationId === "string"
+      && CONVERSATION_ID.test(input.conversationId)
+      ? input.conversationId
+      : undefined;
+    const requestId = boundedIdentifier(input.requestId, 160);
+    const clientInstanceId = typeof input.clientInstanceId === "string"
+      && CLIENT_INSTANCE_ID.test(input.clientInstanceId)
+      ? input.clientInstanceId
+      : undefined;
+    const pluginBuildId = boundedIdentifier(input.pluginBuildId, 160);
     const runId = boundedIdentifier(input.runId, 160);
-    const toolName = boundedIdentifier(input.toolName, 64);
+    const serverRunId = typeof input.serverRunId === "string"
+      && SERVER_RUN_ID.test(input.serverRunId)
+      ? input.serverRunId
+      : undefined;
+    const toolName = isFirstPartyToolName(input.toolName)
+      ? input.toolName
+      : undefined;
     const toolCallId = boundedIdentifier(input.toolCallId, 160);
     const status = Number.isInteger(input.status)
       && input.status! >= 100
@@ -160,7 +214,12 @@ export class ThinAgentLifecycle {
       timestamp: this.now(),
       code: input.code,
       phase: input.phase,
+      ...(conversationId ? { conversationId } : {}),
+      ...(requestId ? { requestId } : {}),
+      ...(clientInstanceId ? { clientInstanceId } : {}),
+      ...(pluginBuildId ? { pluginBuildId } : {}),
       ...(runId ? { runId } : {}),
+      ...(serverRunId ? { serverRunId } : {}),
       ...(toolName ? { toolName } : {}),
       ...(toolCallId ? { toolCallId } : {}),
       ...(status === undefined ? {} : { status }),
@@ -183,9 +242,18 @@ export class ThinAgentLifecycle {
       payload: Object.freeze({
         version: 1,
         severity: "info",
+        sequence: record.sequence,
+        timestamp: record.timestamp,
         code: record.code,
         phase: record.phase,
+        ...(record.conversationId ? { conversation_id: record.conversationId } : {}),
+        ...(record.requestId ? { request_id: record.requestId } : {}),
+        ...(record.clientInstanceId
+          ? { client_instance_id: record.clientInstanceId }
+          : {}),
+        ...(record.pluginBuildId ? { plugin_build_id: record.pluginBuildId } : {}),
         ...(record.runId ? { run_id: record.runId } : {}),
+        ...(record.serverRunId ? { server_run_id: record.serverRunId } : {}),
         ...(record.toolName ? { tool_name: record.toolName } : {}),
         ...(record.toolCallId ? { tool_call_id: record.toolCallId } : {}),
         ...(record.status === undefined ? {} : { status: record.status }),

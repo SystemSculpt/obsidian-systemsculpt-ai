@@ -7,56 +7,31 @@
   min-width: 0;
 }
 
-.systemsculpt-agent-activity {
-  min-width: 0;
-}
-
-.systemsculpt-agent-activity-header {
+.systemsculpt-agent-tail-status {
   display: flex;
   align-items: center;
   gap: var(--ss-space-2);
   min-height: var(--ss-control-height-sm);
   padding: 0 var(--ss-space-1);
   color: var(--ss-ink-faint);
-}
-
-.systemsculpt-agent-activity-header strong {
-  overflow: hidden;
   font-size: var(--ss-text-xs);
-  font-weight: var(--ss-weight-semibold);
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.systemsculpt-agent-activity-icon {
+.systemsculpt-agent-tail-status-icon {
   display: inline-flex;
   flex: 0 0 auto;
   color: var(--ss-ink-faint);
 }
 
-.systemsculpt-agent-activity-icon svg {
+.systemsculpt-agent-tail-status-icon svg {
   width: var(--ss-icon-size-sm);
   height: var(--ss-icon-size-sm);
 }
 
-.systemsculpt-agent-activity-state {
-  flex: 0 0 7rem;
-  margin-left: auto;
+.systemsculpt-agent-tail-status-label {
   overflow: hidden;
-  font-size: var(--ss-text-xs);
-  text-align: right;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.systemsculpt-agent-activity-body {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-  min-width: 0;
-  margin-left: var(--ss-space-2);
-  padding-left: var(--ss-space-2);
-  border-left: 1px solid var(--ss-line);
 }
 
 .systemsculpt-agent-part.is-reasoning {
@@ -138,13 +113,14 @@
   margin-bottom: 0;
 }
 
-.systemsculpt-agent-part.is-text.is-streaming,
-.systemsculpt-agent-part.is-reasoning.is-streaming .systemsculpt-agent-reasoning-body {
+.systemsculpt-agent-part.is-text.is-streaming.is-live-markdown-fallback,
+.systemsculpt-agent-part.is-reasoning.is-streaming
+  .systemsculpt-agent-reasoning-body.is-live-markdown-fallback {
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
 
-.systemsculpt-agent-activity-icon.is-animated svg,
+.systemsculpt-agent-tail-status-icon.is-animated svg,
 .systemsculpt-agent-reasoning-icon.is-animated svg,
 .systemsculpt-agent-tool-icon.is-animated svg {
   animation: ss-spin 0.9s linear infinite;

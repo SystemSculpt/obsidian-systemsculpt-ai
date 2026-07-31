@@ -131,7 +131,7 @@ export class ChatExportService {
     }
 
     const seen = new Set<string>();
-    const rawFiles = Array.from(contextManager.getContextFiles?.() || []);
+    const rawFiles = Array.from(contextManager.getPinnedFiles());
 
     for (const entry of rawFiles) {
       const cleanPath = this.cleanContextFileEntry(entry);
@@ -179,7 +179,7 @@ export class ChatExportService {
       }
       return await this.chatView.app.vault.read(file);
     } catch (error) {
-      errorLogger.warn('Failed to read context file for export', {
+      errorLogger.warn('Failed to read pinned file for export', {
         source: 'ChatExportService',
         method: 'tryReadFileContents',
         metadata: {

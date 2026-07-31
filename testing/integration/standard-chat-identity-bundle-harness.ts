@@ -65,10 +65,11 @@ export async function exerciseBuiltStandardChatIdentity(
   const originalAgentStart = view.agent.start;
   const originalAgentHydrate = view.agent.hydrate;
   const connectionRequests: Array<Record<string, any>> = [];
-  let submittedTransportBody: Record<string, any> | null = null;
+  let submittedCommand: Record<string, any> | null = null;
   const sentAgentFrames: Array<Record<string, any>> = [];
   let createdSocket: Record<string, any> | null = null;
   const createdSockets: Array<Record<string, any>> = [];
+  let activeConversationId = "conversation_0123456789abcdef0123456789abcdef";
   class FakeWebSocket extends EventTarget {
     public static readonly CONNECTING = 0;
     public static readonly OPEN = 1;
@@ -92,9 +93,12 @@ export async function exerciseBuiltStandardChatIdentity(
         this.readyState = FakeWebSocket.OPEN;
         this.dispatchEvent(new Event("open"));
         this.dispatchFrame({
-          type: "cf_agent_identity",
-          name: "default",
-          agent: "system-sculpt-agent",
+          type: "systemsculpt.agent.event.v1",
+          version: 1,
+          kind: "session_snapshot",
+          conversation_id: activeConversationId,
+          messages: [],
+          run_state: { version: 1, cursor: 0, state: "idle" },
         });
       });
     }
@@ -102,46 +106,63 @@ export async function exerciseBuiltStandardChatIdentity(
     public send(serialized: string): void {
       const frame = JSON.parse(serialized) as Record<string, any>;
       sentAgentFrames.push(frame);
-      if (frame.type === "cf_agent_stream_resume_request") {
-        queueMicrotask(() => this.dispatchFrame({
-          type: "cf_agent_stream_resume_none",
-          probeId: frame.probeId,
-        }));
-        return;
-      }
-      if (frame.type !== "cf_agent_use_chat_request") return;
-      submittedTransportBody = JSON.parse(frame.init.body) as Record<string, any>;
-      const userMessage = submittedTransportBody.messages.find(
-        (message: Record<string, unknown>) => message.role === "user",
-      ) as Record<string, any>;
-      const chunks: Array<Record<string, unknown>> = [
-        { type: "start", messageId: "assistant-bundle-proof" },
-        { type: "text-start", id: "text-bundle-proof" },
-        {
-          type: "text-delta",
-          id: "text-bundle-proof",
-          delta: "Managed agent bundle proof",
-        },
-        { type: "text-end", id: "text-bundle-proof" },
-        {
-          type: "data-systemsculpt-run-terminal",
-          data: {
+      if (
+        frame.type !== "systemsculpt.agent.command.v1"
+        || frame.version !== 1
+        || frame.kind !== "submit"
+      ) return;
+      submittedCommand = frame;
+      const userMessage = frame.user_message as Record<string, any>;
+      const runId = "run_0123456789abcdef0123456789abcdef";
+      queueMicrotask(() => {
+        this.dispatchFrame({
+          type: "systemsculpt.agent.event.v1",
+          version: 1,
+          kind: "session_snapshot",
+          conversation_id: activeConversationId,
+          messages: [userMessage],
+          run_state: {
             version: 1,
-            run_id: "run_0123456789abcdef0123456789abcdef",
+            cursor: 1,
+            state: "running",
+            request_id: frame.request_id,
+            run_id: runId,
+            root_message_id: userMessage.id,
+          },
+        });
+        this.dispatchFrame({
+          type: "systemsculpt.agent.event.v1",
+          version: 1,
+          kind: "assistant_snapshot",
+          conversation_id: activeConversationId,
+          request_id: frame.request_id,
+          message: {
+            id: "assistant-bundle-proof",
+            role: "assistant",
+            parts: [{ type: "text", text: "Managed agent bundle proof" }],
+          },
+        });
+        this.dispatchFrame({
+          type: "systemsculpt.agent.event.v1",
+          version: 1,
+          kind: "run_state",
+          conversation_id: activeConversationId,
+          run_state: { version: 1, cursor: 2, state: "idle" },
+        });
+        this.dispatchFrame({
+          type: "systemsculpt.agent.event.v1",
+          version: 1,
+          kind: "terminal",
+          conversation_id: activeConversationId,
+          request_id: frame.request_id,
+          terminal: {
+            version: 1,
+            run_id: runId,
             root_message_id: userMessage.id,
             outcome: "succeeded",
             code: "completed",
           },
-        },
-        { type: "finish", finishReason: "stop" },
-      ];
-      queueMicrotask(() => {
-        chunks.forEach((chunk, index) => this.dispatchFrame({
-          id: frame.id,
-          type: "cf_agent_use_chat_response",
-          body: JSON.stringify(chunk),
-          done: index === chunks.length - 1,
-        }));
+        });
       });
     }
 
@@ -191,11 +212,12 @@ export async function exerciseBuiltStandardChatIdentity(
       ),
     };
   };
-  view.agentConnection.requestClient.request = jest.fn(
+  view.agent.requestClient.request = jest.fn(
     async (request: Record<string, any>) => {
       connectionRequests.push(request);
       const url = new URL(request.url);
       if (url.pathname === "/api/plugin/agent/bootstrap") {
+        activeConversationId = request.body.conversation_id;
         return response({
           contract_version: "thin-agent-v1",
           conversation_id: request.body.conversation_id,
@@ -216,9 +238,6 @@ export async function exerciseBuiltStandardChatIdentity(
           },
           accepted_capabilities: [{ id: "obsidian.vault", version: 1 }],
         }, 200);
-      }
-      if (url.pathname === "/api/plugin/agent/connect/get-messages") {
-        return response("[]", 200);
       }
       if (url.pathname === "/api/plugin/agent/context") {
         return response({
@@ -255,26 +274,19 @@ export async function exerciseBuiltStandardChatIdentity(
   expect(view.agent.hydrate).toBe(originalAgentHydrate);
   expect(jest.isMockFunction(view.agent.start)).toBe(false);
   expect(jest.isMockFunction(view.agent.hydrate)).toBe(false);
-  expect(view.agent.constructor.name).toBe("ThinAgentBridge");
-  expect(view.agentConnection.constructor.name).toBe("ThinAgentConnection");
+  expect(view.agent.constructor.name).toBe("FirstPartyAgentChatSession");
   expect(view.agent.getSnapshot()).toEqual(expect.objectContaining({
     status: "completed",
   }));
   expect(view.agent.getSnapshot()).not.toHaveProperty("terminalError");
-  const transport = view.agentConnection.chatTransport();
-  expect(transport.constructor.name).toBe("WebSocketChatTransport");
-  expect(jest.isMockFunction(transport.sendMessages)).toBe(false);
-  expect(view.agentConnection.options.createAgentClient).toBeUndefined();
-  const agentClient = view.agentConnection.agentClient();
-  expect(agentClient.constructor.name).toBe("AgentClient");
-  expect(jest.isMockFunction(agentClient.send)).toBe(false);
+  expect(view.agent.transport?.constructor.name)
+    .toBe("FirstPartyThinAgentSessionTransport");
+  expect(view.agent.session?.constructor.name).toBe("FirstPartyThinAgentSession");
   expect(createdSocket).not.toBeNull();
   expect(createdSockets).toHaveLength(1);
 
   const bootstrapRequest = connectionRequests.find(({ url }) =>
     new URL(url).pathname === "/api/plugin/agent/bootstrap");
-  const historyRequest = connectionRequests.find(({ url }) =>
-    new URL(url).pathname === "/api/plugin/agent/connect/get-messages");
   const contextRequest = connectionRequests.find(({ url }) =>
     new URL(url).pathname === "/api/plugin/agent/context");
   expect(bootstrapRequest?.body).toEqual(expect.objectContaining({
@@ -286,46 +298,38 @@ export async function exerciseBuiltStandardChatIdentity(
   expect(socketUrl.protocol).toBe(bootstrapUrl.protocol === "http:" ? "ws:" : "wss:");
   expect(socketUrl.host).toBe(bootstrapUrl.host);
   expect(socketUrl.pathname).toBe("/api/plugin/agent/connect");
-  expect([...socketUrl.searchParams.keys()].sort()).toEqual([
-    "_pk",
-    "access_token",
-  ]);
-  expect(socketUrl.searchParams.get("_pk")).toMatch(
-    /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/,
-  );
+  expect([...socketUrl.searchParams.keys()]).toEqual(["access_token"]);
   expect(socketUrl.searchParams.get("access_token")).toBe(
     "fixture.access.signature",
   );
-  expect(historyRequest).toEqual(expect.objectContaining({
-    method: "GET",
-    responseEncoding: "arrayBuffer",
-  }));
   expect(contextRequest?.body).toEqual(expect.objectContaining({
     root_message_id: expect.stringMatching(/^user-[a-f0-9-]{36}$/),
     context_sources: [],
   }));
-  expect(submittedTransportBody).toEqual(expect.objectContaining({
-    messages: expect.arrayContaining([
-      expect.objectContaining({
-        id: contextRequest?.body.root_message_id,
-        role: "user",
-      }),
-    ]),
-    trigger: "submit-message",
+  expect(submittedCommand).toEqual(expect.objectContaining({
+    type: "systemsculpt.agent.command.v1",
+    version: 1,
+    kind: "submit",
+    request_id: expect.stringMatching(/^request_[A-Za-z0-9._:-]+$/),
+    user_message: expect.objectContaining({
+      id: contextRequest?.body.root_message_id,
+      role: "user",
+    }),
     context_ref: "ctx1_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
   }));
-  expect(submittedTransportBody).not.toHaveProperty("preferences");
-  expect(submittedTransportBody).not.toHaveProperty("runtime");
-  expect(submittedTransportBody).not.toHaveProperty("model");
-  expect(submittedTransportBody).not.toHaveProperty("provider");
-  expect(submittedTransportBody).not.toHaveProperty("legacyPreparation");
-  expect(JSON.stringify(submittedTransportBody)).not.toContain("web_search");
-  expect(JSON.stringify(submittedTransportBody)).not.toContain("context_sources");
+  expect(submittedCommand).not.toHaveProperty("messages");
+  expect(submittedCommand).not.toHaveProperty("preferences");
+  expect(submittedCommand).not.toHaveProperty("runtime");
+  expect(submittedCommand).not.toHaveProperty("model");
+  expect(submittedCommand).not.toHaveProperty("provider");
+  expect(submittedCommand).not.toHaveProperty("legacyPreparation");
+  expect(JSON.stringify(submittedCommand)).not.toContain("web_search");
+  expect(JSON.stringify(submittedCommand)).not.toContain("context_sources");
   expect(sentAgentFrames).toEqual(expect.arrayContaining([
-    expect.objectContaining({ type: "cf_agent_stream_resume_request" }),
     expect.objectContaining({
-      type: "cf_agent_use_chat_request",
-      init: expect.objectContaining({ method: "POST" }),
+      type: "systemsculpt.agent.command.v1",
+      version: 1,
+      kind: "submit",
     }),
   ]));
   expect(durableMessages).toEqual(expect.arrayContaining([

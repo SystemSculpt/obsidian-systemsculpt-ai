@@ -41,6 +41,18 @@
   white-space: nowrap;
 }
 
+.systemsculpt-agent-attachment.is-pinned {
+  border-color: var(--ss-line-accent);
+  background: var(--ss-accent-tint);
+}
+
+.systemsculpt-agent-attachment-badge {
+  flex: 0 0 auto;
+  color: var(--ss-ink-accent);
+  font-size: var(--ss-text-xs);
+  font-weight: var(--ss-weight-semibold);
+}
+
 .systemsculpt-agent-attachment-remove {
   flex: 0 0 auto;
   width: var(--ss-icon-size-lg);

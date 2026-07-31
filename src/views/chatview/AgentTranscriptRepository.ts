@@ -88,37 +88,122 @@ function isSameProjectedServerHistory(
     === JSON.stringify(right.map(normalizeProjectedServerTimestamps));
 }
 
-function reconcileInterruptedTools(messages: readonly ChatMessage[]): ChatMessage[] {
-  return cloneMessages(messages).map((message) => {
-    if (message.role !== "assistant" || !message.tool_calls?.some((tool) => tool.state === "executing")) return message;
-    const replacements = new Map(message.tool_calls.map((tool) => {
-      const replacement = tool.state === "executing"
-        ? {
-            ...tool,
-            state: "failed" as const,
-            result: {
-              success: false,
-              error: {
-                code: "TOOL_OUTCOME_UNKNOWN_AFTER_RESTART",
-                message: "SystemSculpt restarted before this action recorded its outcome. Check the vault before retrying.",
-              },
-            },
-          }
-        : tool;
-      return [tool.id, replacement] as const;
-    }));
+function hasUniqueIds(values: readonly string[]): boolean {
+  return new Set(values).size === values.length;
+}
+
+function canPreserveProjectedPartTimestamps(
+  local: NonNullable<ChatMessage["messageParts"]>,
+  incoming: NonNullable<ChatMessage["messageParts"]>,
+): boolean {
+  const localIds = local.map((part) => part.id);
+  const incomingIds = incoming.map((part) => part.id);
+  if (!hasUniqueIds(localIds) || !hasUniqueIds(incomingIds)) return false;
+  const localById = new Map(local.map((part) => [part.id, part]));
+  for (const part of incoming) {
+    const previous = localById.get(part.id);
+    if (!previous) continue;
+    if (previous.type !== part.type) return false;
+    if (previous.type === "tool_call"
+      && part.type === "tool_call"
+      && previous.data.id !== part.data.id) {
+      return false;
+    }
+  }
+  const localSet = new Set(localIds);
+  const incomingSet = new Set(incomingIds);
+  const localSharedIds = localIds.filter((id) => incomingSet.has(id));
+  const incomingSharedIds = incomingIds.filter((id) => localSet.has(id));
+  if (JSON.stringify(localSharedIds) !== JSON.stringify(incomingSharedIds)) return false;
+  if (incomingSharedIds.length === 0) return localIds.length === 0 && incomingIds.length === 0;
+
+  // Preserving old clocks is safe only when every server-only part is a true
+  // suffix. An insertion between stable IDs needs the incoming chronology;
+  // otherwise its fresh timestamp would sort after the preserved suffix.
+  let reachedIncomingSuffix = false;
+  for (const id of incomingIds) {
+    if (!localSet.has(id)) {
+      reachedIncomingSuffix = true;
+    } else if (reachedIncomingSuffix) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function preserveProjectedAssistantTimestamps(
+  incoming: ChatMessage,
+  local: ChatMessage | undefined,
+): ChatMessage {
+  if (incoming.role !== "assistant" || local?.role !== "assistant") return incoming;
+
+  const localParts = local.messageParts ?? [];
+  const incomingParts = incoming.messageParts ?? [];
+  const preserveSharedChronology = canPreserveProjectedPartTimestamps(localParts, incomingParts);
+  if (!preserveSharedChronology) return incoming;
+
+  const localPartsById = new Map(localParts.map((part) => [part.id, part]));
+  const preservedParts = incomingParts.map((part) => {
+    const previous = localPartsById.get(part.id);
+    if (!previous || previous.type !== part.type) return part;
+    if (part.type === "tool_call" && previous.type === "tool_call") {
+      return {
+        ...part,
+        timestamp: previous.timestamp,
+        data: { ...part.data, timestamp: previous.timestamp },
+      };
+    }
+    return { ...part, timestamp: previous.timestamp };
+  });
+
+  // A newly appended server part must follow every preserved historical part,
+  // even when a deterministic test clock or a restored clock would otherwise
+  // reuse an old timestamp. Existing stable identities retain their exact
+  // chronology; only the new suffix receives locally allocated positions.
+  let lastPreservedIndex = -1;
+  for (let index = preservedParts.length - 1; index >= 0; index -= 1) {
+    const part = preservedParts[index];
+    if (localPartsById.get(part.id)?.type === part.type) {
+      lastPreservedIndex = index;
+      break;
+    }
+  }
+  if (lastPreservedIndex >= 0 && lastPreservedIndex < preservedParts.length - 1) {
+    const preservedMax = Math.max(
+      ...preservedParts
+        .slice(0, lastPreservedIndex + 1)
+        .map((part) => part.timestamp),
+    );
+    for (let index = lastPreservedIndex + 1; index < preservedParts.length; index += 1) {
+      const part = preservedParts[index];
+      const timestamp = preservedMax + index - lastPreservedIndex;
+      preservedParts[index] = part.type === "tool_call"
+        ? { ...part, timestamp, data: { ...part.data, timestamp } }
+        : { ...part, timestamp };
+    }
+  }
+
+  const partTimestampByToolId = new Map(
+    preservedParts.flatMap((part) => part.type === "tool_call"
+      ? [[part.data.id, part.timestamp] as const]
+      : []),
+  );
+  const localToolsById = new Map((local.tool_calls ?? []).map((tool) => [tool.id, tool]));
+  const preservedTools = incoming.tool_calls?.map((tool) => {
+    const previous = localToolsById.get(tool.id);
     return {
-      ...message,
-      tool_calls: [...replacements.values()],
-      ...(message.messageParts ? {
-        messageParts: message.messageParts.map((part) => {
-          if (part.type !== "tool_call" || !part.data || typeof part.data !== "object") return part;
-          const replacement = replacements.get((part.data as ToolCall).id);
-          return replacement ? { ...part, data: replacement } : part;
-        }),
-      } : {}),
+      ...tool,
+      timestamp: partTimestampByToolId.get(tool.id)
+        ?? previous?.timestamp
+        ?? tool.timestamp,
     };
   });
+
+  return {
+    ...incoming,
+    ...(incoming.messageParts ? { messageParts: preservedParts } : {}),
+    ...(incoming.tool_calls ? { tool_calls: preservedTools } : {}),
+  };
 }
 
 function mergeToolCalls(previous: readonly ToolCall[] = [], incoming: readonly ToolCall[] = []): ToolCall[] | undefined {
@@ -180,7 +265,10 @@ export class AgentTranscriptRepository {
       this.chatId = loaded.id;
       this.title = loaded.title || "New chat";
       this.version = loaded.version || 0;
-      this.messages = reconcileInterruptedTools(loaded.messages || []);
+      // Saved messages are a presentation cache until the server session has
+      // hydrated. Never invent a terminal tool outcome from cached execution
+      // state because the authoritative session may already have completed it.
+      this.messages = cloneMessages(loaded.messages || []);
       this.agentConversationId = parseAgentConversationId(loaded.agentConversationId);
       this.generation += 1;
       return Object.freeze({
@@ -267,17 +355,18 @@ export class AgentTranscriptRepository {
       const localById = new Map(this.messages.map((message) => [message.message_id, message]));
       const next = incoming.map((message) => {
         const local = localById.get(message.message_id);
-        if (message.role !== "user"
-          || local?.role !== "user"
-          || !local.attachmentMetadata?.length) {
-          return message;
+        if (message.role === "assistant") {
+          return preserveProjectedAssistantTimestamps(message, local);
         }
-        return {
-          ...message,
-          attachmentMetadata: cloneJson(local.attachmentMetadata),
-        };
+        if (local?.role === "user" && local.attachmentMetadata?.length) {
+          return {
+            ...message,
+            attachmentMetadata: cloneJson(local.attachmentMetadata),
+          };
+        }
+        return message;
       });
-      // ThinAgentProjection derives assistant part/tool timestamps from the
+      // The first-party session derives assistant part/tool timestamps from the
       // local observation clock. They preserve ordering but are not a server
       // history revision, so a reconnect must not rewrite an otherwise
       // identical transcript. Array order and every other field remain part

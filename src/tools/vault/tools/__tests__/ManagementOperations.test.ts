@@ -27,8 +27,8 @@ jest.mock("../../../../utils/workspaceUtils", () => ({
 
 // Mock DocumentContextManager
 const mockDocumentContextManager = {
-  addFilesToContext: jest.fn(),
-  addFileToContext: jest.fn(),
+  pinVaultFiles: jest.fn(),
+  pinVaultFile: jest.fn(),
 };
 jest.mock("../../../../services/DocumentContextManager", () => ({
   DocumentContextManager: {
@@ -56,10 +56,10 @@ describe("ManagementOperations", () => {
     jest.clearAllMocks();
 
     mockContextManager = {
-      hasContextFile: jest.fn(() => false),
-      removeFromContextFiles: jest.fn().mockResolvedValue(true),
+      hasPinnedFile: jest.fn(() => false),
+      unpinFile: jest.fn().mockResolvedValue(true),
       triggerContextChange: jest.fn().mockResolvedValue(undefined),
-      getContextFiles: jest.fn(() => new Set(["file1.md", "file2.md"])),
+      getPinnedFiles: jest.fn(() => new Set(["file1.md", "file2.md"])),
     };
 
     mockChatView = {
@@ -90,8 +90,8 @@ describe("ManagementOperations", () => {
       action: "created_split",
     });
 
-    mockDocumentContextManager.addFileToContext.mockResolvedValue(true);
-    mockDocumentContextManager.addFilesToContext.mockResolvedValue(1);
+    mockDocumentContextManager.pinVaultFile.mockResolvedValue(true);
+    mockDocumentContextManager.pinVaultFiles.mockResolvedValue(1);
 
     mgmtOps = new ManagementOperations(app, mockPlugin, mockChatView);
   });
@@ -213,7 +213,7 @@ describe("ManagementOperations", () => {
         expect(result.action).toBe("add");
         expect(result.processed).toBe(1);
         expect(result.results[0].success).toBe(true);
-        expect(mockDocumentContextManager.addFileToContext).toHaveBeenCalled();
+        expect(mockDocumentContextManager.pinVaultFile).toHaveBeenCalled();
       });
 
       it("adds single file to context with leading slash", async () => {
@@ -247,7 +247,7 @@ describe("ManagementOperations", () => {
         });
 
         expect(result.results[0].success).toBe(true);
-        expect(mockDocumentContextManager.addFileToContext).toHaveBeenCalledWith(
+        expect(mockDocumentContextManager.pinVaultFile).toHaveBeenCalledWith(
           folderNote,
           mockContextManager,
           expect.anything()
@@ -269,7 +269,7 @@ describe("ManagementOperations", () => {
       it("handles already added file", async () => {
         const mockFile = new TFile({ path: "test.md" });
         (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(mockFile);
-        mockDocumentContextManager.addFileToContext.mockResolvedValue(false);
+        mockDocumentContextManager.pinVaultFile.mockResolvedValue(false);
 
         const result = await mgmtOps.manageContext({
           action: "add",
@@ -277,7 +277,7 @@ describe("ManagementOperations", () => {
         });
 
         expect(result.results[0].success).toBe(false);
-        expect(result.results[0].reason).toContain("may already be in context");
+        expect(result.results[0].reason).toContain("already be pinned");
       });
 
       it("adds files from directory", async () => {
@@ -290,7 +290,7 @@ describe("ManagementOperations", () => {
 
         const { getFilesFromFolder } = require("../../utils");
         (getFilesFromFolder as jest.Mock).mockReturnValue(mockFiles);
-        mockDocumentContextManager.addFilesToContext.mockResolvedValue(2);
+        mockDocumentContextManager.pinVaultFiles.mockResolvedValue(2);
 
         const result = await mgmtOps.manageContext({
           action: "add",
@@ -299,7 +299,7 @@ describe("ManagementOperations", () => {
 
         expect(result.results[0].success).toBe(true);
         expect(result.processed).toBe(2);
-        expect(mockDocumentContextManager.addFilesToContext).toHaveBeenCalled();
+        expect(mockDocumentContextManager.pinVaultFiles).toHaveBeenCalled();
       });
 
       it("rejects directory with too many files", async () => {
@@ -334,7 +334,7 @@ describe("ManagementOperations", () => {
       it("handles error during add", async () => {
         const mockFile = new TFile({ path: "test.md" });
         (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(mockFile);
-        mockDocumentContextManager.addFileToContext.mockRejectedValue(new Error("Add failed"));
+        mockDocumentContextManager.pinVaultFile.mockRejectedValue(new Error("Add failed"));
 
         const result = await mgmtOps.manageContext({
           action: "add",
@@ -367,8 +367,8 @@ describe("ManagementOperations", () => {
 
     describe("remove action", () => {
       it("removes file from context", async () => {
-        mockContextManager.hasContextFile.mockReturnValue(true);
-        mockContextManager.removeFromContextFiles.mockResolvedValue(true);
+        mockContextManager.hasPinnedFile.mockReturnValue(true);
+        mockContextManager.unpinFile.mockResolvedValue(true);
 
         const result = await mgmtOps.manageContext({
           action: "remove",
@@ -377,11 +377,11 @@ describe("ManagementOperations", () => {
 
         expect(result.action).toBe("remove");
         expect(result.results[0].success).toBe(true);
-        expect(mockContextManager.removeFromContextFiles).toHaveBeenCalledWith("test.md");
+        expect(mockContextManager.unpinFile).toHaveBeenCalledWith("test.md");
       });
 
       it("handles file not in context", async () => {
-        mockContextManager.hasContextFile.mockReturnValue(false);
+        mockContextManager.hasPinnedFile.mockReturnValue(false);
 
         const result = await mgmtOps.manageContext({
           action: "remove",
@@ -389,12 +389,12 @@ describe("ManagementOperations", () => {
         });
 
         expect(result.results[0].success).toBe(false);
-        expect(result.results[0].reason).toContain("not found in current context");
+        expect(result.results[0].reason).toContain("not pinned");
       });
 
       it("handles removal failure", async () => {
-        mockContextManager.hasContextFile.mockReturnValue(true);
-        mockContextManager.removeFromContextFiles.mockResolvedValue(false);
+        mockContextManager.hasPinnedFile.mockReturnValue(true);
+        mockContextManager.unpinFile.mockResolvedValue(false);
 
         const result = await mgmtOps.manageContext({
           action: "remove",
@@ -402,12 +402,12 @@ describe("ManagementOperations", () => {
         });
 
         expect(result.results[0].success).toBe(false);
-        expect(result.results[0].reason).toContain("Failed to remove");
+        expect(result.results[0].reason).toContain("Could not unpin");
       });
 
       it("handles error during remove", async () => {
-        mockContextManager.hasContextFile.mockReturnValue(true);
-        mockContextManager.removeFromContextFiles.mockRejectedValue(new Error("Remove failed"));
+        mockContextManager.hasPinnedFile.mockReturnValue(true);
+        mockContextManager.unpinFile.mockRejectedValue(new Error("Remove failed"));
 
         const result = await mgmtOps.manageContext({
           action: "remove",
@@ -419,18 +419,18 @@ describe("ManagementOperations", () => {
       });
 
       it("checks both path formats for context file", async () => {
-        mockContextManager.hasContextFile
+        mockContextManager.hasPinnedFile
           .mockReturnValueOnce(false)
           .mockReturnValueOnce(true);
-        mockContextManager.removeFromContextFiles.mockResolvedValue(true);
+        mockContextManager.unpinFile.mockResolvedValue(true);
 
         const result = await mgmtOps.manageContext({
           action: "remove",
           paths: ["test.md"],
         });
 
-        expect(mockContextManager.hasContextFile).toHaveBeenCalledWith("[[test.md]]");
-        expect(mockContextManager.hasContextFile).toHaveBeenCalledWith("test.md");
+        expect(mockContextManager.hasPinnedFile).toHaveBeenCalledWith("[[test.md]]");
+        expect(mockContextManager.hasPinnedFile).toHaveBeenCalledWith("test.md");
         expect(result.results[0].success).toBe(true);
       });
     });
@@ -453,22 +453,22 @@ describe("ManagementOperations", () => {
           paths: ["test.md"],
         });
 
-        expect(result.summary).toContain("add operation");
-        expect(result.summary).toContain("1 paths succeeded");
-        expect(result.summary).toContain("Current context: 2 files");
+        expect(result.summary).toContain("Pinned 1 file");
+        expect(result.summary).toContain("1 path succeeded");
+        expect(result.summary).toContain("2 files are pinned for every message");
       });
 
       it("generates correct summary for remove action", async () => {
-        mockContextManager.hasContextFile.mockReturnValue(true);
-        mockContextManager.removeFromContextFiles.mockResolvedValue(true);
+        mockContextManager.hasPinnedFile.mockReturnValue(true);
+        mockContextManager.unpinFile.mockResolvedValue(true);
 
         const result = await mgmtOps.manageContext({
           action: "remove",
           paths: ["test.md"],
         });
 
-        expect(result.summary).toContain("remove operation");
-        expect(result.summary).toContain("1 paths succeeded");
+        expect(result.summary).toContain("Unpinned 1 file");
+        expect(result.summary).toContain("1 path succeeded");
       });
     });
   });
@@ -488,7 +488,7 @@ describe("ManagementOperations", () => {
         paths: ["test.md"],
       }, originatingChatView);
 
-      expect(mockDocumentContextManager.addFileToContext).toHaveBeenCalledWith(
+      expect(mockDocumentContextManager.pinVaultFile).toHaveBeenCalledWith(
         mockFile,
         originatingContextManager,
         expect.anything(),

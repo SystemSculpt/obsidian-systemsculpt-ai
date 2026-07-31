@@ -1,7 +1,6 @@
 import { App, TFile, Notice } from "obsidian";
 import { DocumentProcessingService } from "./DocumentProcessingService";
 import type SystemSculptPlugin from "../main";
-import { DocumentProcessingProgressEvent } from "../types/documentProcessing";
 import {
   isAudioFileExtension,
   isAutoDocumentConversionFileExtension,
@@ -16,11 +15,10 @@ import {
 } from "./transcription/LocalCommitReceipt";
 
 export interface ChatContextManager {
-  getContextFiles: () => Set<string>;
-  hasContextFile: (wikiLink: string) => boolean;
-  addToContextFiles: (wikiLink: string) => boolean;
+  getPinnedFiles: () => ReadonlySet<string>;
+  hasPinnedFile: (fileOrWikiLink: string) => boolean;
+  pinFile: (fileOrWikiLink: string) => boolean;
   triggerContextChange: () => Promise<void>;
-  updateProcessingStatus: (file: TFile, event: DocumentProcessingProgressEvent) => void;
 }
 
 export interface DocumentConversionContextEffect {
@@ -117,14 +115,14 @@ export class DocumentContextManager {
     if (!persisted) await persist();
 
     const wikiLink = `[[${effect.outputPath}]]`;
-    const linkPresent = contextManager.hasContextFile(wikiLink);
+    const linkPresent = contextManager.hasPinnedFile(wikiLink);
     if (record.projectionMutated && record.notificationAcknowledged && linkPresent) {
       return "already_applied";
     }
 
     if (!linkPresent) {
       throwIfAborted(effect.signal);
-      contextManager.addToContextFiles(wikiLink);
+      contextManager.pinFile(wikiLink);
       throwIfAborted(effect.signal);
     }
     if (!record.projectionMutated || !linkPresent) {
@@ -143,13 +141,13 @@ export class DocumentContextManager {
   }
 
   /**
-   * Add a file to context
-   * @param file The file to add to context
+   * Pin a vault file so it is reread for every chat message.
+   * @param file The file to pin
    * @param contextManager The FileContextManager to update
    * @param options Options for adding the file
    * @returns Promise<boolean> indicating success or failure
    */
-  public async addFileToContext(
+  public async pinVaultFile(
     file: TFile,
     contextManager: ChatContextManager,
     options: {
@@ -163,38 +161,22 @@ export class DocumentContextManager {
     try {
       const extension = normalizeFileExtension(file.extension);
       if (isUnsupportedOfficeFileExtension(extension)) {
-        if (showNotices) new Notice("This office file type is not supported for chat context.", 4000);
+        if (showNotices) new Notice("This office file type cannot be pinned in chat.", 4000);
         return false;
       }
       
-      // Determine how to process the file based on its extension
-      let contextPath: string;
       let contextEffectCommitted = false;
       
       if (isAutoDocumentConversionFileExtension(extension)) {
         // Process document file
         try {
-          contextManager.updateProcessingStatus(file, {
-            stage: "queued",
-            progress: 0,
-            label: "Queued for processing",
-            icon: "inbox",
-            flow: "document",
-          });
-
-          const receipt = await this.documentProcessingService.processDocumentWithReceipt(file, {
-            onProgress: (event: DocumentProcessingProgressEvent) => {
-              contextManager.updateProcessingStatus(file, {
-                ...event,
-                flow: event.flow ?? "document",
-              });
-            },
+          await this.documentProcessingService.processDocumentWithReceipt(file, {
             showNotices: false,
             commitContextEffect: async (effect, signal) => {
               for (const imagePath of effect.imagePaths) {
                 throwIfAborted(signal);
                 const imageWikiLink = `[[${imagePath}]]`;
-                if (!contextManager.hasContextFile(imageWikiLink)) contextManager.addToContextFiles(imageWikiLink);
+                if (!contextManager.hasPinnedFile(imageWikiLink)) contextManager.pinFile(imageWikiLink);
               }
               await this.applyDocumentConversionContextEffect({
                 effectId: effect.contextEffectId,
@@ -207,35 +189,8 @@ export class DocumentContextManager {
               contextEffectCommitted = true;
             },
           });
-          const extractionPath = receipt.extractionPath;
-
-          contextManager.updateProcessingStatus(file, {
-            stage: "contextualizing",
-            progress: 94,
-            label: "Adding extracted content to context…",
-            icon: "sparkles",
-            flow: "document",
-          });
-
-          contextPath = extractionPath;
-
-          contextManager.updateProcessingStatus(file, {
-            stage: "ready",
-            progress: 100,
-            label: "Document added to context",
-            icon: "check-circle",
-            flow: "document",
-          });
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
-          contextManager.updateProcessingStatus(file, {
-            stage: "error",
-            progress: 0,
-            label: `Error: ${message}`,
-            icon: "x-circle",
-            flow: "document",
-            error: message,
-          });
           if (showNotices) {
             new Notice(`Error processing ${file.basename}: ${message}`, 5000);
           }
@@ -244,30 +199,13 @@ export class DocumentContextManager {
       } else if (isAudioFileExtension(extension)) {
         // Process audio file
         try {
-          const transcriptionPath = await this.processAudioFile(file, contextManager);
-          contextManager.updateProcessingStatus(file, {
-            stage: "ready",
-            progress: 100,
-            label: "Transcription added to context",
-            icon: "check-circle",
-            flow: "audio",
-          });
+          const transcriptionPath = await this.processAudioFile(file);
           
           // Add the transcription file to context
           const transcriptionWikiLink = `[[${transcriptionPath}]]`;
-          contextManager.addToContextFiles(transcriptionWikiLink);
-          
-          contextPath = transcriptionPath;
+          contextManager.pinFile(transcriptionWikiLink);
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
-          contextManager.updateProcessingStatus(file, {
-            stage: "error",
-            progress: 0,
-            label: `Error: ${message}`,
-            icon: "x-circle",
-            flow: "audio",
-            error: message,
-          });
           if (showNotices) {
             new Notice(`Error processing ${file.basename}: ${message}`, 5000);
           }
@@ -275,19 +213,18 @@ export class DocumentContextManager {
         }
       } else {
         // Regular file, just add it directly
-        contextPath = file.path;
-        const wikiLink = `[[${contextPath}]]`;
+        const wikiLink = `[[${file.path}]]`;
         
         // Check if file is already in context
-        if (contextManager.hasContextFile(wikiLink)) {
+        if (contextManager.hasPinnedFile(wikiLink)) {
           if (showNotices) {
-            new Notice(`${file.basename} is already added to context`, 3000);
+            new Notice(`${file.basename} is already pinned for every message`, 3000);
           }
           return false;
         }
         
         // Add to context
-        contextManager.addToContextFiles(wikiLink);
+        contextManager.pinFile(wikiLink);
       }
       
       // Save changes if requested
@@ -297,27 +234,27 @@ export class DocumentContextManager {
       
       // Show success notice if requested
       if (showNotices) {
-        new Notice(`Added ${file.basename} to context`, 3000);
+        new Notice(`Pinned ${file.basename} for every message`, 3000);
       }
       
       return true;
     } catch (error) {
       if (showNotices) {
         const message = error instanceof Error ? error.message : String(error);
-        new Notice(`Error adding ${file.basename} to context: ${message}`, 5000);
+        new Notice(`Couldn't pin ${file.basename}: ${message}`, 5000);
       }
       return false;
     }
   }
-  
+
   /**
-   * Process multiple files and add them to context
-   * @param files The files to add to context
+   * Process and pin multiple vault files.
+   * @param files The files to pin
    * @param contextManager The FileContextManager to update
    * @param options Options for adding the files
    * @returns Promise<number> The number of files successfully added
    */
-  public async addFilesToContext(
+  public async pinVaultFiles(
     files: TFile[],
     contextManager: ChatContextManager,
     options: {
@@ -330,7 +267,7 @@ export class DocumentContextManager {
     
     
     let successCount = 0;
-    let currentContextSize = contextManager.getContextFiles().size;
+    let currentContextSize = contextManager.getPinnedFiles().size;
     
     for (const file of files) {
       // Check if we've reached the maximum number of files
@@ -341,8 +278,8 @@ export class DocumentContextManager {
         break;
       }
       
-      // Add the file to context
-      const success = await this.addFileToContext(file, contextManager, {
+      // Pin the file
+      const success = await this.pinVaultFile(file, contextManager, {
         showNotices: false, // We'll handle notices ourselves
         saveChanges: false, // We'll save changes after all files are added
       });
@@ -352,7 +289,7 @@ export class DocumentContextManager {
         currentContextSize++;
         
         if (showNotices) {
-          new Notice(`Added ${file.name} to context (${currentContextSize}/${maxFiles})`, 3000);
+          new Notice(`Pinned ${file.name} for every message (${currentContextSize}/${maxFiles})`, 3000);
         }
       }
     }
@@ -365,43 +302,7 @@ export class DocumentContextManager {
     return successCount;
   }
 
-  private mapAudioStatusToStage(status: string, progress: number): DocumentProcessingProgressEvent["stage"] {
-    const normalized = status.toLowerCase();
-    if (normalized.includes("error")) {
-      return "error";
-    }
-    if (normalized.includes("upload")) {
-      return "uploading";
-    }
-    if (normalized.includes("complete") || progress >= 100) {
-      return "ready";
-    }
-    if (normalized.includes("context")) {
-      return "contextualizing";
-    }
-    return "processing";
-  }
-
-  private resolveAudioIcon(status: string, fallback: string = "file-audio"): string {
-    const normalized = status.toLowerCase();
-    if (normalized.includes("error")) return "x-circle";
-    if (normalized.includes("upload")) return "upload";
-    if (normalized.includes("chunk")) return "scissors";
-    if (normalized.includes("transcrib")) return "file-audio";
-    if (normalized.includes("process")) return "cpu";
-    if (normalized.includes("complete")) return "check-circle";
-    return fallback;
-  }
-
-  private async processAudioFile(file: TFile, contextManager: ChatContextManager): Promise<string> {
-    contextManager.updateProcessingStatus(file, {
-      stage: "processing",
-      progress: 0,
-      label: "Preparing audio transcription…",
-      icon: "file-audio",
-      flow: "audio",
-    });
-
+  private async processAudioFile(file: TFile): Promise<string> {
     const transcriptionService = TranscriptionService.getInstance(this.plugin);
     const finalPath = await transcriptionService.transcribeFile<string>(
       file,
@@ -416,26 +317,8 @@ export class DocumentContextManager {
         recoverLocalCommit: async (receipt) => (
           await verifyLocalCommitReceipt(this.app, receipt)
         ).file.path,
-        onProgress: (progress, status) => {
-        const stage = this.mapAudioStatusToStage(status, progress);
-        contextManager.updateProcessingStatus(file, {
-          stage,
-          progress,
-          label: status,
-          icon: this.resolveAudioIcon(status),
-          flow: "audio",
-        });
-        },
       },
       async (text, operationId) => {
-        contextManager.updateProcessingStatus(file, {
-          stage: "contextualizing",
-          progress: 92,
-          label: "Saving transcription…",
-          icon: "hard-drive",
-          flow: "audio",
-        });
-
         const extractionFolder = this.plugin.settings.extractionsDirectory?.trim() || "";
         const baseName = file.basename.replace(/[\\/:*?"<>|]/g, "-").trim();
         const baseParent = extractionFolder || (file.parent?.path ?? "");
@@ -483,15 +366,6 @@ export class DocumentContextManager {
         };
       },
     );
-
-    contextManager.updateProcessingStatus(file, {
-      stage: "ready",
-      progress: 100,
-      label: "Transcription added to context",
-      icon: "check-circle",
-      flow: "audio",
-      details: `[[${finalPath}]]`,
-    });
 
     return finalPath;
   }

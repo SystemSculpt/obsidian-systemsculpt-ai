@@ -11,18 +11,18 @@ import { CHATVIEW_CRITICAL_MUTANTS } from "./chatview-critical-mutants.manifest.
 
 const root = process.cwd();
 const expectedIds = [
-  "message_update_terminalization_removed",
-  "mutation_approval_ack_bypassed",
-  "tool_continuation_not_announced",
+  "authoritative_user_collision_not_failed_closed",
+  "run_state_conflict_not_failed_closed",
+  "command_ack_callback_removed",
   "mutation_receipts_truncated",
   "conversation_scope_removed_from_receipts",
 ];
 const allowedSourceFiles = new Set([
-  "src/views/chatview/thin/ThinAgentBridge.ts",
+  "src/views/chatview/thin/FirstPartyThinAgentSession.ts",
   "src/views/chatview/thin/ThinAgentMutationJournal.ts",
 ]);
 const allowedTestPaths = new Set([
-  "src/views/chatview/thin/__tests__/thin-agent-bridge.test.ts",
+  "src/views/chatview/thin/__tests__/first-party-thin-agent-session.test.ts",
   "src/views/chatview/thin/__tests__/thin-agent-mutation-journal.test.ts",
 ]);
 

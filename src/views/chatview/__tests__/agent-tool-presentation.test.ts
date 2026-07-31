@@ -55,6 +55,31 @@ describe("presentAgentTool", () => {
       .toMatchObject({ canonicalName: "write", label: "Write file", summary: "Note.md" });
   });
 
+  it("names context-tool rows by the actual pinning action", () => {
+    expect(presentAgentTool(part({
+      name: "context",
+      input: { action: "add", paths: ["Project.md"] },
+    }))).toMatchObject({
+      canonicalName: "context",
+      label: "Pin files",
+      summary: "Project.md",
+    });
+    expect(presentAgentTool(part({
+      name: "context",
+      input: { action: "remove", paths: ["Project.md"] },
+    }))).toMatchObject({
+      canonicalName: "context",
+      label: "Unpin files",
+    });
+    expect(presentAgentTool(part({
+      name: "context",
+      input: { paths: ["Project.md"] },
+    }))).toMatchObject({
+      canonicalName: "context",
+      label: "Manage pinned files",
+    });
+  });
+
   it("uses a fixed product label for visible web search activity", () => {
     expect(presentAgentTool(part({
       name: "web_search",

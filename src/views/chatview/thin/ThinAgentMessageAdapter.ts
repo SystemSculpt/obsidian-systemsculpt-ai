@@ -1,9 +1,12 @@
-import type { UIMessage } from "ai";
 import type { ChatMessage } from "../../../types";
 import {
   parseAttachedTextContent,
   parseImageDataUrl,
 } from "../attachments/ChatAttachmentContent";
+import type {
+  FirstPartyThinAgentUserMessage,
+  FirstPartyThinAgentUserMessagePart,
+} from "./FirstPartyThinAgentProtocol";
 
 function imageMediaTypeFromDataUrl(url: string): string {
   const parsed = parseImageDataUrl(url);
@@ -29,11 +32,13 @@ export function thinAgentDataUrl(mimeType: string, bytes: Uint8Array): string {
   return `data:${mimeType};base64,${bytesToBase64(bytes)}`;
 }
 
-export function toThinAgentUserMessage(message: Readonly<ChatMessage>): UIMessage {
+export function toThinAgentUserMessage(
+  message: Readonly<ChatMessage>,
+): FirstPartyThinAgentUserMessage {
   if (message.role !== "user") {
     throw new Error("Only a newly admitted user message can start a response.");
   }
-  const parts: UIMessage["parts"] = [];
+  const parts: FirstPartyThinAgentUserMessagePart[] = [];
   const attachmentsByIndex = new Map(
     (message.attachmentMetadata ?? []).map((attachment) => [
       attachment.contentPartIndex,

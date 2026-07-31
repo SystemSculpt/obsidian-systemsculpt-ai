@@ -1,10 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import path from "node:path";
 import {
-  AGENTS_CHAT_REACT_ENTRYPOINT,
   CANONICAL_API_BASE_URL,
-  createHeadlessAgentChatTreeShakingPlugin,
+  STAGING_API_BASE_URL,
   createPluginBuildOptions,
   normalizeApiBaseUrl,
   resolvePluginBuildStamp,
@@ -16,6 +14,14 @@ test("production API base is the build default", () => {
     options.define.__SYSTEMSCULPT_API_BASE_URL__,
     JSON.stringify(CANONICAL_API_BASE_URL),
   );
+});
+
+test("staging API base is a fixed first-party build target", () => {
+  assert.equal(
+    STAGING_API_BASE_URL,
+    "https://staging.systemsculpt.com/api/plugin",
+  );
+  assert.equal(normalizeApiBaseUrl(STAGING_API_BASE_URL), STAGING_API_BASE_URL);
 });
 
 test("API base is injected at build time without a runtime environment lookup", () => {
@@ -77,65 +83,9 @@ test("build stamp overrides are explicit and development remains stable", () => 
   );
 });
 
-test("headless agent tree shaking affects only React imports from the maintained transport entrypoint", async () => {
-  let onResolve;
-  const resolveCalls = [];
-  const plugin = createHeadlessAgentChatTreeShakingPlugin();
-  plugin.setup({
-    onResolve(options, callback) {
-      assert.match("react", options.filter);
-      assert.match("@ai-sdk/react", options.filter);
-      onResolve = callback;
-    },
-    async resolve(specifier, options) {
-      resolveCalls.push({ specifier, options });
-      return {
-        errors: [],
-        warnings: [],
-        path: path.join(process.cwd(), "node_modules", specifier, "index.js"),
-        external: false,
-        sideEffects: true,
-        namespace: "file",
-        suffix: "",
-      };
-    },
-  });
+test("caller-provided plugins are preserved without hidden runtime shims", () => {
+  const plugin = { name: "caller-owned-plugin", setup() {} };
+  const options = createPluginBuildOptions({ plugins: [plugin] });
 
-  assert.equal(typeof onResolve, "function");
-  const unrelated = await onResolve({
-    path: "react",
-    importer: path.join(process.cwd(), "src", "main.ts"),
-    namespace: "file",
-    resolveDir: path.join(process.cwd(), "src"),
-    kind: "import-statement",
-    pluginData: undefined,
-    with: {},
-  });
-  assert.equal(unrelated, undefined);
-  assert.equal(resolveCalls.length, 0);
-
-  for (const specifier of ["react", "@ai-sdk/react"]) {
-    const resolved = await onResolve({
-      path: specifier,
-      importer: AGENTS_CHAT_REACT_ENTRYPOINT,
-      namespace: "file",
-      resolveDir: path.dirname(AGENTS_CHAT_REACT_ENTRYPOINT),
-      kind: "import-statement",
-      pluginData: undefined,
-      with: {},
-    });
-    assert.equal(resolved.sideEffects, false);
-    assert.equal(resolveCalls.at(-1).specifier, specifier);
-
-    const recursive = await onResolve({
-      path: specifier,
-      importer: AGENTS_CHAT_REACT_ENTRYPOINT,
-      namespace: "file",
-      resolveDir: path.dirname(AGENTS_CHAT_REACT_ENTRYPOINT),
-      kind: "import-statement",
-      pluginData: resolveCalls.at(-1).options.pluginData,
-      with: {},
-    });
-    assert.equal(recursive, undefined);
-  }
+  assert.deepEqual(options.plugins, [plugin]);
 });
