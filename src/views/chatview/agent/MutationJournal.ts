@@ -76,6 +76,34 @@ function parseJournal(value: unknown): JournalFile {
   return { version: 2, records };
 }
 
+type SharedJournalState = {
+  loaded: Promise<void> | null;
+  records: Map<string, JournalRecord>;
+  writes: Promise<void>;
+  unavailable: boolean;
+};
+
+const SHARED_JOURNALS = new WeakMap<object, Map<string, SharedJournalState>>();
+
+function sharedJournalState(adapter: object, path: string): SharedJournalState {
+  let byPath = SHARED_JOURNALS.get(adapter);
+  if (!byPath) {
+    byPath = new Map();
+    SHARED_JOURNALS.set(adapter, byPath);
+  }
+  let state = byPath.get(path);
+  if (!state) {
+    state = {
+      loaded: null,
+      records: new Map(),
+      writes: Promise.resolve(),
+      unavailable: false,
+    };
+    byPath.set(path, state);
+  }
+  return state;
+}
+
 export type ThinAgentMutationClaim =
   | Readonly<{ kind: "execute" }>
   | Readonly<{ kind: "replay"; result: unknown }>
@@ -89,16 +117,15 @@ export type ThinAgentMutationClaim =
  * through deleteConversation() when that conversation is deliberately deleted.
  */
 export class AgentMutationJournal {
-  private loaded: Promise<void> | null = null;
-  private records = new Map<string, JournalRecord>();
-  private writes: Promise<void> = Promise.resolve();
-  private unavailable = false;
+  private readonly state: SharedJournalState;
 
   constructor(
     private readonly adapter: Pick<DataAdapter, "exists" | "read" | "write" | "mkdir">,
     private readonly path: string,
     private readonly now: () => number = Date.now,
-  ) {}
+  ) {
+    this.state = sharedJournalState(adapter, path);
+  }
 
   public async claim(
     conversationId: string,
@@ -107,17 +134,17 @@ export class AgentMutationJournal {
     input: unknown,
   ): Promise<ThinAgentMutationClaim> {
     await this.ensureLoaded();
-    if (this.unavailable) return { kind: "journal-unavailable" };
+    if (this.state.unavailable) return { kind: "journal-unavailable" };
     const inputFingerprint = await fingerprint(name, input);
     const key = recordKey(conversationId, toolCallId);
-    const existing = this.records.get(key);
+    const existing = this.state.records.get(key);
     if (existing) {
       if (existing.fingerprint !== inputFingerprint) return { kind: "conflict" };
       return existing.state === "completed"
         ? { kind: "replay", result: existing.result }
         : { kind: "outcome-unknown" };
     }
-    this.records.set(key, {
+    this.state.records.set(key, {
       conversationId,
       toolCallId,
       fingerprint: inputFingerprint,
@@ -136,14 +163,14 @@ export class AgentMutationJournal {
     result: unknown,
   ): Promise<void> {
     await this.ensureLoaded();
-    if (this.unavailable) throw new Error("Mutation journal is unavailable.");
+    if (this.state.unavailable) throw new Error("Mutation journal is unavailable.");
     const inputFingerprint = await fingerprint(name, input);
     const key = recordKey(conversationId, toolCallId);
-    const existing = this.records.get(key);
+    const existing = this.state.records.get(key);
     if (!existing || existing.fingerprint !== inputFingerprint) {
       throw new Error("Mutation journal identity changed before completion.");
     }
-    this.records.set(key, {
+    this.state.records.set(key, {
       conversationId,
       toolCallId,
       fingerprint: inputFingerprint,
@@ -156,53 +183,53 @@ export class AgentMutationJournal {
 
   public async deleteConversation(conversationId: string): Promise<void> {
     await this.ensureLoaded();
-    if (this.unavailable) throw new Error("Mutation journal is unavailable.");
+    if (this.state.unavailable) throw new Error("Mutation journal is unavailable.");
     let changed = false;
-    for (const [key, record] of this.records) {
+    for (const [key, record] of this.state.records) {
       if (record.conversationId !== conversationId) continue;
-      this.records.delete(key);
+      this.state.records.delete(key);
       changed = true;
     }
     if (changed) await this.persist();
   }
 
   public idle(): Promise<void> {
-    return this.writes;
+    return this.state.writes;
   }
 
   private async ensureLoaded(): Promise<void> {
-    if (!this.loaded) {
-      this.loaded = (async () => {
+    if (!this.state.loaded) {
+      this.state.loaded = (async () => {
         if (!(await this.adapter.exists(this.path))) return;
         try {
           const parsed = parseJournal(JSON.parse(await this.adapter.read(this.path)));
-          this.records = new Map(parsed.records.map((record) => [
+          this.state.records = new Map(parsed.records.map((record) => [
             recordKey(record.conversationId, record.toolCallId),
             record,
           ]));
         } catch {
-          this.records = new Map();
-          this.unavailable = true;
+          this.state.records = new Map();
+          this.state.unavailable = true;
         }
       })();
     }
-    await this.loaded;
+    await this.state.loaded;
   }
 
   private persist(): Promise<void> {
     const parent = this.path.split("/").slice(0, -1).join("/");
     const snapshot: JournalFile = {
       version: 2,
-      records: [...this.records.values()],
+      records: [...this.state.records.values()],
     };
-    const pending = this.writes.then(async () => {
+    const pending = this.state.writes.then(async () => {
       if (parent && !(await this.adapter.exists(parent))) await this.adapter.mkdir(parent);
       await this.adapter.write(this.path, JSON.stringify(snapshot));
     }).catch((error) => {
-      this.unavailable = true;
+      this.state.unavailable = true;
       throw error;
     });
-    this.writes = pending.catch(() => undefined);
+    this.state.writes = pending.catch(() => undefined);
     return pending;
   }
 }

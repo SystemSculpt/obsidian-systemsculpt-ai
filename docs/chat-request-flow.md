@@ -2,102 +2,80 @@
 
 Architecture requirement adopted: **2026-07-29**.
 
-ChatView is a thin UI and Obsidian capability adapter for one authoritative
-server-side agent. A harness, model, provider, prompt, caching, compaction,
-retry, or server-tool change must not require another plugin release.
+ChatView is a thin UI and Obsidian capability adapter. The server owns the agent, history, model execution, and continuation.
 
-## Reused native harness
+## Client structure
 
-The plugin subclasses the official `AbstractChat` class from `ai` with a tiny
-observable non-React state, and uses Cloudflare `AgentClient` and
-`WebSocketChatTransport`.
+Each loaded conversation owns one `AgentChatSession` instance. A view replaces that local instance when it loads another conversation. It does not cancel server work during the replacement.
 
-Cloudflare currently ships `WebSocketChatTransport` from
-`agents/chat/react`, whose module imports React and `@ai-sdk/react` at runtime.
-Those peer dependencies remain explicit for clean mobile installs even though
-ChatView itself does not use React or its hook state.
+The client uses:
 
-Those dependencies own:
+- `StreamingTransport` for bootstrap, snapshot reads, and streaming HTTP commands;
+- `AuthoritativeSession` for ordered server state and idempotent command delivery;
+- `ChatSession` for Obsidian tools, approvals, rendering, and final persistence;
+- `MutationJournal` for crash-safe vault mutation receipts.
 
-- native UI message assembly and streaming;
-- tool input, output, and approval parts;
-- cancellation;
-- stream continuation after a client-tool result;
-- reconnect probes, pending streams, replay, and resume acknowledgement;
-- authoritative message snapshots and message updates.
-
-The plugin does not parse an AI SDK byte stream, reduce a private event
-protocol, count continuation rounds, impose a turn limit, select a provider,
-or decide when the model should stop. There is no client-side harness.
-
-The small headless state exists because Obsidian does not use React. It
-only:
-
-- subscribes to the official headless `Chat` state;
-- maps native UI parts into the existing Obsidian renderer model;
-- applies local approval policy;
-- executes requested Obsidian vault capabilities;
-- returns native tool results and approval responses;
-- resumes the native stream after those client interactions;
-- reconciles native full-message and message-update broadcasts;
-- records local mutation receipts; and
-- persists the final assistant turn in the user’s chat note.
+The plugin does not run a model harness. It does not select a provider, build model context, compact history, or choose continuation limits.
 
 ## Authority boundary
 
 The server owns:
 
-- the agent harness and every model continuation;
-- authoritative conversation history;
+- one durable session for each conversation ID;
+- ordered authoritative conversation history;
 - model and provider selection;
-- provider retry and rate-limit handling;
+- retries and provider rate-limit handling;
 - server tools such as web search;
 - memory, context construction, compaction, and prompt caching;
 - usage, cost, credit reservation, and settlement;
-- incident diagnostics and terminal run outcome.
+- terminal run outcomes and incident diagnostics.
 
 The plugin owns:
 
 - ChatView input and rendering;
-- native message file parts;
-- reading user-selected vault context into source records;
+- file parts from the user message;
+- selected vault context source records;
 - the implementation of `obsidian.vault@1`;
 - local approval UI and policy;
-- crash-safe local mutation receipts;
-- a non-authoritative conversation routing pointer in the chat note.
+- durable local mutation receipts;
+- a non-authoritative conversation routing pointer in each chat note.
 
-The plugin announces only the aggregate `obsidian.vault@1` capability. It does
-not send model-facing tool schemas, prompt text, provider identities, or local
-history as bootstrap authority.
+A blank new chat creates only local state. The first user submission starts server work.
 
 ## Turn flow
 
-1. The plugin bootstraps a conversation with a client ID, conversation ID,
-   exact loaded `main.js` SHA-256, and `obsidian.vault@1`.
-2. It constructs the official Cloudflare client and transport.
-3. It installs native message, open, and close listeners before awaiting the
-   socket’s ready state, so the initial authoritative history cannot race past
-   the headless `Chat`.
-4. After bootstrap, it stages selected vault sources once through the
-   short-lived-access context endpoint and receives one opaque `context_ref`.
-5. It submits the native UI user message. User attachments are native file
-   parts. The Think body contains only `context_ref`.
-6. The server runs for however long and through however many server-tool or
-   model steps are needed.
-7. A vault tool arrives as a native client-tool part.
-8. The plugin obtains local approval when required, executes the one requested
-   operation, and returns its native result.
-9. The official transport resumes the server stream. There is no continuation
-   counter or locally chosen finish condition.
-10. Native message updates reconcile durable server state. Exactly one
-   `data-systemsculpt-run-terminal` part identifies success, cancellation, or
-   correlated failure.
-11. On success, the plugin persists the assistant presentation and refreshes
-    credits from the existing authoritative balance endpoint.
+1. The plugin sends one bootstrap request with the conversation ID, client ID, loaded `main.js` SHA-256, and `obsidian.vault@1`.
+2. The bootstrap returns a durable session ID and short-lived access token.
+3. The plugin reads one authoritative session snapshot before it sends a command.
+4. The plugin stages selected vault sources and receives one opaque `context_ref`.
+5. The plugin sends one idempotent submit command through streaming HTTP.
+6. The server runs all model and server-tool steps.
+7. A vault tool arrives as an authoritative client-tool part.
+8. The plugin obtains approval when required and executes the requested vault operation.
+9. The plugin sends the approval or tool result with the same request and tool-call IDs.
+10. The server continues from durable state and streams authoritative updates.
+11. One `data-systemsculpt-run-terminal` part identifies success, cancellation, or correlated failure.
+12. On success, the plugin persists the assistant presentation and refreshes credits.
+
+The transport reuses a valid bootstrap for identity, context staging, synchronization, and turns. Token expiry causes a new bootstrap. Durable history remains the recovery source. Concurrent server commands keep separate response streams, and each stream receives events for only its request.
+
+## Uncertain HTTP delivery
+
+An HTTP request can fail after the server accepts its command. The plugin must not guess whether delivery succeeded.
+
+When command delivery becomes uncertain, the transport marks the session unsynchronized. The session then:
+
+1. obtains a fresh authoritative snapshot;
+2. reconciles the pending command against server history and run state;
+3. removes work that the server already accepted;
+4. replays only unresolved commands with their original idempotency IDs;
+5. never repeats a local vault mutation to recover delivery.
+
+This rule applies to submits, regenerations, approvals, tool results, and cancellations. The plugin shows `Stopping` until a terminal, snapshot, or durable queued-cancel acknowledgement confirms cancellation. A clean snapshot can also show that a run completed while the view was absent.
 
 ## Context and files
 
-After bootstrap, the plugin stages selected context once:
+The plugin stages selected context after bootstrap:
 
 ```ts
 {
@@ -111,79 +89,55 @@ After bootstrap, the plugin stages selected context once:
 }
 ```
 
-The server returns one opaque, expiring `context_ref`. The lazy native turn
-body is then exactly:
+The server returns one opaque, expiring `context_ref`. The turn command contains that reference, not raw vault context.
 
-```ts
-{
-  context_ref: string;
-}
-```
+Web search is server policy and a server-side tool. It is not a plugin capability.
 
-Raw context is not sent through Think, recorded in client diagnostics, or
-retried by a client staging loop. These are source records, not prompt
-instructions. The server decides how they enter model context. Text and image
-message attachments remain native UI file parts so future supported media
-types do not require a second chat protocol.
+## Resume and historical edit
 
-Web search is server policy and a server-side tool. It is not a client request
-preference, queued-item field, or plugin-owned capability.
+Opening a saved chat reuses its persisted conversation ID. The server snapshot replaces stale local cache state.
 
-## Historical edit
-
-Editing an earlier user turn creates a new conversation ID and bootstraps:
+Editing an earlier user turn creates a new conversation ID and sends:
 
 ```json
 {
   "fork": {
     "source_conversation_id": "conversation_<32 lowercase hex>",
-    "before_message_id": "<native message ID>"
+    "before_message_id": "<message ID>"
   }
 }
 ```
 
-The server copies authoritative history before that boundary. The plugin does
-not reconstruct or replay a local transcript as execution authority.
+The server copies the authoritative prefix before that boundary. The destination session stays isolated. It retains the source cache-affinity lineage so matching provider prefixes can reuse cache entries.
 
 ## Mutation replay safety
 
-Vault mutations are the only operations that require local delivery
-deduplication. Before execution, the plugin durably records the tuple:
+Before a vault mutation runs, the plugin records this tuple:
 
-`conversation_id`, native tool-call ID, tool name, and input fingerprint.
+`conversation_id`, tool-call ID, tool name, and input fingerprint.
 
-A completed receipt returns the recorded result. A started receipt has an
-unknown outcome and is never repeated automatically. A reused call ID with
-different input fails closed. Receipts have no rolling cap and live until that
-server conversation is deliberately deleted.
+Journal instances share one adapter-and-path state. Concurrent views serialize claims and writes to the common receipt file.
 
-If the vault operation returns but its completed receipt cannot be written,
-the plugin reports `TOOL_MUTATION_OUTCOME_UNKNOWN` as a resolved tool result
-and leaves the journal unavailable. It does not retry the mutation.
+A completed receipt returns its recorded result. A started receipt has an unknown outcome and never runs automatically again. A reused call ID with different input fails closed.
+
+If receipt persistence fails after a mutation returns, the plugin reports `TOOL_MUTATION_OUTCOME_UNKNOWN`. It does not repeat the mutation.
 
 ## Diagnostics
 
-Server-side runs already carry a correlated terminal incident. For client-only
-failures, the plugin sends one best-effort extension frame:
-
-`systemsculpt.client_diagnostic.v1`
-
-It contains only a safe code, phase, severity, run ID, optional tool identity,
-HTTP status, and retryability. It never contains prompts, paths, file content,
-arguments, results, credentials, tickets, or stack traces. Diagnostic delivery
-cannot change the user-visible turn and never retries recursively.
+Client lifecycle records stay local. They contain safe identities and status fields. They do not contain prompts, paths, file content, arguments, results, credentials, access tokens, or stack traces.
 
 ## Compatibility proof
 
-The local gate exercises the official packages through a deterministic
-40-continuation scenario with more than 40 vault calls, parallel tool batches,
-approval, mutation replay, and reconnect. It asserts that the client has no
-hard continuation limit. Focused bridge tests additionally cover:
+The deterministic streaming HTTP endurance test runs 40 ordered rounds with 44 vault calls. It covers parallel calls, web search, approval recovery, tool-result recovery, and exactly-once mutation replay.
 
-- more than 30 parallel client-tool calls;
-- initial-history listener ordering;
-- post-stream native message-update terminalization;
-- approval acknowledgement before mutation;
-- corrupt, started, completed, conflicting, and write-failed receipts;
-- receipt retention beyond the removed 256-entry cap; and
-- bounded rate-limit and client-diagnostic behavior.
+Focused tests also cover:
+
+- snapshot-first synchronization;
+- uncertain submit recovery without a duplicate user message;
+- approval and result acknowledgement;
+- repeated synchronization after request failure;
+- completed, started, conflicting, and write-failed receipts;
+- receipt retention beyond the removed 256-entry cap;
+- concurrent journal instances without lost receipts;
+- independent overlapping conversations and historical forks;
+- descendant-fork cache affinity and full-input fallback after cache expiry.

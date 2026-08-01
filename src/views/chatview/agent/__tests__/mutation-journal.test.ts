@@ -77,6 +77,43 @@ describe("AgentMutationJournal", () => {
       .resolves.toEqual({ kind: "journal-unavailable" });
   });
 
+  it("serializes receipts across concurrent journal instances", async () => {
+    const harness = adapterHarness();
+    const first = new AgentMutationJournal(
+      harness.adapter as any,
+      ".systemsculpt/mutations.json",
+    );
+    const second = new AgentMutationJournal(
+      harness.adapter as any,
+      ".systemsculpt/mutations.json",
+    );
+    const sharedInput = { path: "Shared.md", content: "once" };
+
+    const sameAction = await Promise.all([
+      first.claim("conversation-a", "call-shared", "write", sharedInput),
+      second.claim("conversation-a", "call-shared", "write", sharedInput),
+    ]);
+    expect(sameAction.map((claim) => claim.kind).sort())
+      .toEqual(["execute", "outcome-unknown"]);
+
+    await Promise.all([
+      first.claim("conversation-a", "call-first", "write", { value: 1 }),
+      second.claim("conversation-b", "call-second", "write", { value: 2 }),
+    ]);
+    const records = JSON.parse(harness.read() ?? "{}").records;
+    expect(records).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        conversationId: "conversation-a",
+        toolCallId: "call-first",
+      }),
+      expect.objectContaining({
+        conversationId: "conversation-b",
+        toolCallId: "call-second",
+      }),
+    ]));
+    expect(records).toHaveLength(3);
+  });
+
   it("keeps unbounded conversation-scoped receipts until deliberate deletion", async () => {
     const harness = adapterHarness();
     const journal = new AgentMutationJournal(

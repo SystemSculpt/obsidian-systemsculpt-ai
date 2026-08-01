@@ -1,5 +1,5 @@
 import {
-  FIRST_PARTY_THIN_AGENT_COMMAND_TYPE,
+  THIN_AGENT_COMMAND_TYPE,
   parseAgentCommand,
   parseAgentServerEvent,
   type AgentApprovalCommand as ProtocolApprovalCommand,
@@ -8,6 +8,7 @@ import {
   type AgentCommand as ProtocolCommand,
   type AgentJsonValue,
   type AgentKnownRunState,
+  type AgentQueueSnapshotEvent,
   type AgentRegenerateCommand,
   type AgentServerEvent,
   type AgentSubmitCommand as ProtocolSubmitCommand,
@@ -16,10 +17,10 @@ import {
   type AgentUserMessage,
 } from "./Protocol";
 /**
- * The states a connection to the authoritative session can be in.
+ * The synchronization states for the authoritative session.
  *
- * A turn is one request, so there is no connection to lose between turns and
- * therefore no reconnect or resynchronize state to model.
+ * `open` means that the client accepted a current server snapshot. A failed
+ * request returns the state to `closed` until a new snapshot restores it.
  */
 export type AgentConnectionState =
   | "idle"
@@ -137,6 +138,7 @@ export type AgentSessionOptions<
   onProtocolError?: (error: Error) => void;
   onCommandError?: (error: Error) => void;
   onCommandAck?: (ack: AgentCommandAckEvent) => void;
+  onQueueSnapshot?: (snapshot: AgentQueueSnapshotEvent) => void;
 }>;
 
 type PendingSubmit = {
@@ -345,7 +347,7 @@ export class AgentSession<
       );
     }
     const parsed = command({
-      type: FIRST_PARTY_THIN_AGENT_COMMAND_TYPE,
+      type: THIN_AGENT_COMMAND_TYPE,
       version: 1,
       kind: "submit",
       request_id: input.request_id,
@@ -367,7 +369,7 @@ export class AgentSession<
   }>): Promise<void> {
     this.assertIdleCommand(input.request_id);
     await this.options.connection.sendSubmit(command({
-      type: FIRST_PARTY_THIN_AGENT_COMMAND_TYPE,
+      type: THIN_AGENT_COMMAND_TYPE,
       version: 1,
       kind: "regenerate",
       request_id: input.request_id,
@@ -393,7 +395,7 @@ export class AgentSession<
     this.assertWaitingCommand(input.request_id);
     const parsed = input.state === "output-available"
       ? command({
-          type: FIRST_PARTY_THIN_AGENT_COMMAND_TYPE,
+          type: THIN_AGENT_COMMAND_TYPE,
           version: 1,
           kind: "client_tool_result",
           request_id: input.request_id,
@@ -403,7 +405,7 @@ export class AgentSession<
           output: input.output,
         }, "client_tool_result")
       : command({
-          type: FIRST_PARTY_THIN_AGENT_COMMAND_TYPE,
+          type: THIN_AGENT_COMMAND_TYPE,
           version: 1,
           kind: "client_tool_result",
           request_id: input.request_id,
@@ -422,7 +424,7 @@ export class AgentSession<
   }>): Promise<void> {
     this.assertWaitingCommand(input.request_id);
     await this.options.connection.sendApproval(command({
-      type: FIRST_PARTY_THIN_AGENT_COMMAND_TYPE,
+      type: THIN_AGENT_COMMAND_TYPE,
       version: 1,
       kind: "client_tool_approval",
       request_id: input.request_id,
@@ -431,10 +433,23 @@ export class AgentSession<
     }, "client_tool_approval"));
   }
 
-  public async cancel(input: Readonly<{ request_id: string }>): Promise<void> {
-    this.assertActiveCommand(input.request_id);
+  public async cancel(input: Readonly<{
+    request_id: string;
+    queued?: boolean;
+  }>): Promise<void> {
+    if (input.queued) {
+      this.assertAvailable();
+      if (!safeId(input.request_id)) {
+        throw new AgentSessionError(
+          "invalid_command",
+          "The queued cancellation request identity is invalid.",
+        );
+      }
+    } else {
+      this.assertActiveCommand(input.request_id);
+    }
     await this.options.connection.sendCancel(command({
-      type: FIRST_PARTY_THIN_AGENT_COMMAND_TYPE,
+      type: THIN_AGENT_COMMAND_TYPE,
       version: 1,
       kind: "cancel",
       request_id: input.request_id,
@@ -468,6 +483,12 @@ export class AgentSession<
       this.handleRunState(parsed.run_state);
     } else if (parsed.kind === "terminal") {
       this.handleTerminal(parsed);
+    } else if (parsed.kind === "queue_snapshot") {
+      try {
+        this.options.onQueueSnapshot?.(parsed);
+      } catch {
+        // Queue observers cannot mutate session authority.
+      }
     } else if (parsed.kind === "command_ack") {
       try {
         this.options.onCommandAck?.(parsed);

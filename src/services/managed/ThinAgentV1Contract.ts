@@ -7,8 +7,10 @@ export const THIN_AGENT_BOOTSTRAP_PATH =
   "/api/plugin/agent/bootstrap" as const;
 export const THIN_AGENT_CONTEXT_PATH =
   "/api/plugin/agent/context" as const;
-export const THIN_AGENT_CONNECT_PATH =
-  "/api/plugin/agent/connect" as const;
+export const THIN_AGENT_MESSAGES_PATH =
+  "/api/plugin/agent/connect/get-messages" as const;
+export const THIN_AGENT_TURN_PATH =
+  "/api/plugin/agent/turn" as const;
 
 export const THIN_AGENT_CAPABILITIES = Object.freeze([
   Object.freeze({ id: "obsidian.vault", version: 1 as const }),

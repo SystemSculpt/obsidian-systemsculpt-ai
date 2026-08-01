@@ -54,9 +54,22 @@ import {
 } from "./StreamingTransport";
 import type {
   AgentJsonValue,
+  AgentQueueSnapshotEvent,
   AgentUserMessage,
 } from "./Protocol";
 import { AgentMutationJournal } from "./MutationJournal";
+import {
+  AgentLifecycle,
+  type AgentLifecycleInput,
+  type AgentLifecycleRecord,
+} from "./Lifecycle";
+
+export type {
+  AgentLifecycleCode,
+  AgentLifecycleInput,
+  AgentLifecyclePhase,
+  AgentLifecycleRecord,
+} from "./Lifecycle";
 
 type WirePart = Readonly<Record<string, unknown> & { type: string }>;
 
@@ -114,103 +127,6 @@ export type AgentRunInput = Readonly<{
   beforeSend?: () => Promise<void>;
 }>;
 
-export type AgentLifecyclePhase =
-  | "start"
-  | "session"
-  | "response"
-  | "approval"
-  | "tool_execution"
-  | "mutation_journal"
-  | "persistence"
-  | "render"
-  | "unknown";
-
-export type AgentLifecycleCode =
-  | "session_opened"
-  | "session_closed"
-  | "session_interrupted"
-  | "session_failed"
-  | "response_prepare_started"
-  | "response_prepare_completed"
-  | "response_prepare_failed"
-  | "context_prepare_started"
-  | "context_prepare_completed"
-  | "context_prepare_cancelled"
-  | "context_prepare_failed"
-  | "submission_admitted"
-  | "submission_queued"
-  | "queued_submission_removed"
-  | "queued_submission_promoted"
-  | "stop_requested"
-  | "stop_completed"
-  | "historical_resubmit_started"
-  | "historical_resubmit_committed"
-  | "historical_resubmit_failed"
-  | "conversation_reset"
-  | "run_started"
-  | "run_stalled"
-  | "request_dispatch_started"
-  | "request_dispatch_returned"
-  | "request_dispatch_failed"
-  | "phase_submitted"
-  | "phase_thinking"
-  | "phase_working"
-  | "phase_waiting"
-  | "phase_retrying"
-  | "phase_settling"
-  | "phase_complete"
-  | "approval_presented"
-  | "approval_submitted_approved_manual"
-  | "approval_submitted_approved_policy"
-  | "approval_submitted_denied"
-  | "approval_acknowledged_approved"
-  | "approval_acknowledged_denied"
-  | "mutation_execute_claimed"
-  | "mutation_replay_served"
-  | "mutation_outcome_unknown"
-  | "mutation_call_conflict"
-  | "local_tool_started"
-  | "local_tool_completed_succeeded"
-  | "local_tool_completed_failed"
-  | "tool_result_sent_succeeded"
-  | "tool_result_sent_failed"
-  | "tool_result_acknowledged_succeeded"
-  | "tool_result_acknowledged_failed"
-  | "response_result_received_succeeded"
-  | "response_result_received_cancelled"
-  | "response_result_received_failed"
-  | "response_save_started"
-  | "response_save_completed"
-  | "response_save_failed"
-  | "history_sync_started"
-  | "history_sync_completed"
-  | "history_sync_failed"
-  | "run_finished_completed"
-  | "run_finished_cancelled"
-  | "run_finished_failed"
-  | "diagnostics_truncated";
-
-export type AgentLifecycleInput = Readonly<{
-  code: AgentLifecycleCode;
-  phase: AgentLifecyclePhase;
-  conversationId?: string;
-  requestId?: string;
-  clientInstanceId?: string;
-  pluginBuildId?: string;
-  runId?: string;
-  serverRunId?: string;
-  toolName?: string;
-  toolCallId?: string;
-  status?: number;
-  retryable?: boolean;
-  incidentId?: string;
-}>;
-
-export type AgentLifecycleRecord = AgentLifecycleInput & Readonly<{
-  sequence: number;
-  timestamp: number;
-}>;
-
 type RequestClient = Pick<PlatformRequestClient, "request">;
 
 export type AgentChatSessionOptions = Readonly<{
@@ -231,27 +147,22 @@ export type AgentChatSessionOptions = Readonly<{
   onLifecycle?: (record: AgentLifecycleRecord) => void;
   requestClient?: RequestClient;
   runStallGraceMs?: number;
+  resynchronizationDelayMs?: (attempt: number) => number;
   now?: () => number;
 }>;
-
-/**
- * How long a live run may sit on a non-open connection before the soft
- * "Reconnecting" presentation escalates to an honest "Connection interrupted"
- * status. Short blips recover silently; a sustained outage must not keep
- * presenting as routine progress.
- */
 
 /**
  * How long a live run may wait on the server with a healthy connection and no
  * new authoritative content before the presentation stops claiming progress.
  *
  * Connection health is the wrong signal for this: a run can die server-side
- * while the socket keeps reconnecting perfectly, which reads as an eternal
- * "Thinking". Generous on purpose, because a reasoning model legitimately
+ * while snapshot reads still succeed, which reads as an eternal "Thinking".
+ * Generous on purpose, because a reasoning model legitimately
  * goes quiet for a long time; this only replaces a false progress claim with
  * an honest one and never terminates the run, which the server still owns.
  */
 const RUN_STALL_GRACE_MS = 240_000;
+const MAX_RESYNCHRONIZATION_DELAY_MS = 5_000;
 
 type ActiveRun = {
   readonly token: object;
@@ -275,6 +186,15 @@ type ActiveRun = {
   terminal: ThinAgentRunTerminalData | null;
   finalizing: boolean;
   cancelRequested: boolean;
+  serverAdmissionPossible: boolean;
+  serverQueued: boolean;
+};
+
+type PendingRegenerateDelivery = {
+  readonly requestId: string;
+  readonly rootMessageId: string;
+  attemptedOpenEpoch: number | null;
+  inFlight: boolean;
 };
 
 type PendingToolDelivery = {
@@ -303,13 +223,17 @@ const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/u;
 const INTERNAL_SERVICE_WORDING =
   /\b(?:agent connection|connection ticket|websocket|socket|stream|transport|bootstrap|protocol|provider|openrouter|cloudflare|think|pi|ai sdk)\b/iu;
 const INTERNAL_SERVER_TOOL_NAMES = new Set(["set_context"]);
-const MAX_NATIVE_SOURCE_URLS = 16;
-const MAX_NATIVE_SOURCE_URL_LENGTH = 2_048;
-const MAX_NATIVE_SOURCE_TITLE_LENGTH = 160;
+const MAX_SOURCE_URLS = 16;
+const MAX_SOURCE_URL_LENGTH = 2_048;
+const MAX_SOURCE_TITLE_LENGTH = 160;
 const MAX_CONTEXT_RESPONSE_BYTES = 16 * 1024;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function wasDefinitelyRejected(error: unknown): boolean {
+  return isRecord(error) && error.serverAdmissionPossible === false;
 }
 
 function isWirePart(value: unknown): value is WirePart {
@@ -647,10 +571,10 @@ function toolFailure(part: WirePart): ManagedAgentError | undefined {
   return undefined;
 }
 
-function safeNativeSourceUrl(value: unknown): string | null {
+function safeSourceUrl(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const candidate = value.trim();
-  if (!candidate || candidate.length > MAX_NATIVE_SOURCE_URL_LENGTH) return null;
+  if (!candidate || candidate.length > MAX_SOURCE_URL_LENGTH) return null;
   try {
     const parsed = new URL(candidate);
     if (!["http:", "https:"].includes(parsed.protocol)
@@ -667,7 +591,7 @@ function markdownSourceTitle(value: unknown, fallback: string): string {
   return (title.trim() || fallback)
     .replace(/[\u0000-\u001f\u007f]+/g, " ")
     .replace(/\s+/g, " ")
-    .slice(0, MAX_NATIVE_SOURCE_TITLE_LENGTH)
+    .slice(0, MAX_SOURCE_TITLE_LENGTH)
     .trim()
     .replace(/\\/g, "\\\\")
     .replace(/([`*_\[\]<>])/g, "\\$1");
@@ -680,13 +604,13 @@ function nativeSourceMarkdown(messages: readonly WireMessage[]): string {
     if (message.role !== "assistant") continue;
     for (const part of message.parts) {
       if (part.type !== "source-url") continue;
-      const url = safeNativeSourceUrl(part.url);
+      const url = safeSourceUrl(part.url);
       if (!url || seen.has(url)) continue;
       seen.add(url);
       sources.push({ url, title: markdownSourceTitle(part.title, url) });
-      if (sources.length >= MAX_NATIVE_SOURCE_URLS) break;
+      if (sources.length >= MAX_SOURCE_URLS) break;
     }
-    if (sources.length >= MAX_NATIVE_SOURCE_URLS) break;
+    if (sources.length >= MAX_SOURCE_URLS) break;
   }
   return sources.length > 0
     ? `### Sources\n\n${sources.map(({ title, url }) => `- [${title}](<${url}>)`).join("\n")}`
@@ -838,6 +762,9 @@ function projectRun(
   } else if (connectionState !== "open") {
     phase = "retrying";
     label = connectionState === "connecting" ? "Starting" : "Reconnecting";
+  } else if (active.serverQueued) {
+    phase = "submitted";
+    label = "Queued";
   } else if (parts.some((part) =>
     part.kind === "tool" && part.state === "approval-required")) {
     status = "waiting";
@@ -845,9 +772,8 @@ function projectRun(
     label = "Waiting for approval";
     waitingReason = "approval";
   } else if (runStalled) {
-    // The socket is healthy but the server has sent nothing for a long time.
-    // Keep the run open (only the server may end it) and stop implying work
-    // is happening.
+    // Synchronization is healthy, but the server has sent no run progress.
+    // Keep the run open because only the server may end it.
     phase = "retrying";
     label = "Still waiting on the server";
   } else if (active.executingToolIds.size > 0) {
@@ -1243,21 +1169,30 @@ export class AgentChatSession {
   private awaitingClientWork = false;
   private currentSnapshot: AgentConversationSnapshot = initialSnapshot();
   private active: ActiveRun | null = null;
+  private pendingRegenerate: PendingRegenerateDelivery | null = null;
   private pendingCancelRequestId: string | null = null;
+  private pendingCancelInFlight = false;
   private readonly pendingDeliveries = new Map<string, PendingToolDelivery>();
   private readonly pendingApprovalDeliveries = new Map<string, PendingApprovalDelivery>();
   private inputLimits: ThinAgentInputLimits = DEFAULT_THIN_AGENT_INPUT_LIMITS;
-  private lifecycleSequence = 0;
+  private readonly lifecycle: AgentLifecycle;
   private renderTimer: number | null = null;
   private pendingSnapshot: AgentConversationSnapshot | null = null;
   private pendingReconcile: Promise<void> = Promise.resolve();
   private reconciledKey: string | null = null;
   private generation = 0;
   private openEpoch = 0;
+  private resynchronizationTimer: number | null = null;
+  private resynchronizationInFlight = false;
+  private resynchronizationAttempt = 0;
 
   public constructor(private readonly options: AgentChatSessionOptions) {
     this.requestClient = options.requestClient ?? new PlatformRequestClient();
     this.now = options.now ?? Date.now;
+    this.lifecycle = new AgentLifecycle(
+      (record) => this.options.onLifecycle?.(record),
+      this.now,
+    );
   }
 
   public getSnapshot(): AgentConversationSnapshot {
@@ -1270,16 +1205,8 @@ export class AgentChatSession {
   }
 
   public recordLifecycle(input: AgentLifecycleInput): void {
-    const record: AgentLifecycleRecord = Object.freeze({
-      ...input,
-      sequence: ++this.lifecycleSequence,
-      timestamp: this.now(),
-    });
-    // Lifecycle records stay local. Pushing them to the server was a socket
-    // side channel, and the server treated them as non-authoritative log
-    // enrichment that never affected a run.
-    try { this.options.onLifecycle?.(record); }
-    catch { /* Diagnostics never alter product behavior. */ }
+    // Lifecycle records stay local and never affect an authoritative run.
+    this.lifecycle.record(input);
   }
 
   public async hydrate(conversationId: string): Promise<void> {
@@ -1312,6 +1239,8 @@ export class AgentChatSession {
       onProtocolError: (error) => this.reportLocalIssue(error),
       onCommandError: (error) => this.reportLocalIssue(error),
       onCommandAck: (ack) => this.handleCommandAck(ack, generation),
+      onQueueSnapshot: (snapshot) =>
+        this.handleQueueSnapshot(snapshot, generation),
     });
     this.transport = transport;
     this.session = session;
@@ -1415,6 +1344,7 @@ export class AgentChatSession {
       if (active.cancelRequested || active.abort.signal.aborted) {
         return await active.completion;
       }
+      active.serverAdmissionPossible = true;
       this.recordLifecycle({
         code: "request_dispatch_started",
         phase: "response",
@@ -1433,7 +1363,9 @@ export class AgentChatSession {
         requestId: input.turnId,
       });
     } catch (error) {
-      if (!active.terminal && !active.cancelRequested) {
+      if (!active.terminal && active.cancelRequested && wasDefinitelyRejected(error)) {
+        this.finishLocalCancellation(active);
+      } else if (!active.terminal && !active.cancelRequested) {
         const normalized = managedError(
           error,
           "response_start_failed",
@@ -1474,19 +1406,15 @@ export class AgentChatSession {
       approvalPolicy: {},
     });
     this.active = active;
+    this.pendingRegenerate = {
+      requestId: input.requestId,
+      rootMessageId: input.rootMessageId,
+      attemptedOpenEpoch: null,
+      inFlight: false,
+    };
     this.publishActive(active, true);
-    try {
-      await session.regenerate({
-        request_id: input.requestId,
-        root_message_id: input.rootMessageId,
-      });
-    } catch (error) {
-      this.finishLocalFailure(active, managedError(
-        error,
-        "response_start_failed",
-        "SystemSculpt could not retry the response.",
-      ));
-    }
+    active.serverAdmissionPossible = true;
+    await this.trySendPendingRegenerate(active);
     return active.completion;
   }
 
@@ -1523,6 +1451,7 @@ export class AgentChatSession {
         maxResponseBytes: MAX_CONTEXT_RESPONSE_BYTES,
       });
       if (response.status !== 201) {
+        if (response.status === 401) this.transport?.invalidateBootstrap();
         const payload = boundedErrorPayload(await response.text());
         const fallback = response.status === 413
           ? "Selected vault context is too large."
@@ -1616,22 +1545,17 @@ export class AgentChatSession {
     if (!active || active.terminal) return;
     active.cancelRequested = true;
     active.abort.abort();
+    if (!active.serverAdmissionPossible) {
+      this.finishLocalCancellation(active);
+      return;
+    }
     this.pendingCancelRequestId = active.requestId;
     this.publishActive(active, true);
+    // Cancellation is a server-owned state transition. Keep the run open
+    // until a terminal event or snapshot proves that the server stopped it.
+    // An uncertain HTTP result leaves the stable cancel identity pending for
+    // replay after synchronization.
     await this.trySendPendingCancel();
-    const terminal: ThinAgentRunTerminalData = {
-      version: 1,
-      run_id: active.serverRunId ?? `run_${"0".repeat(32)}`,
-      root_message_id: active.turnId,
-      outcome: "cancelled",
-      code: "cancelled",
-    };
-    active.terminal = terminal;
-    this.completeActive(active, { kind: "cancelled", snapshot: projectRun(
-      active,
-      this.authoritativeMessages,
-      this.connectionState,
-    ) });
   }
 
   public async detach(): Promise<void> {
@@ -1661,6 +1585,7 @@ export class AgentChatSession {
   public disconnect(): void {
     this.generation += 1;
     this.clearRunStallTimer();
+    this.clearResynchronization();
     this.runStalled = false;
     this.detachSession?.();
     this.detachConnectionState?.();
@@ -1675,8 +1600,11 @@ export class AgentChatSession {
     this.authoritativeMessages = Object.freeze([]);
     this.presentationMessages = Object.freeze([]);
     this.reconciledKey = null;
+    this.pendingRegenerate = null;
     this.pendingDeliveries.clear();
     this.pendingApprovalDeliveries.clear();
+    this.pendingCancelRequestId = null;
+    this.pendingCancelInFlight = false;
   }
 
   private createActiveRun(input: Readonly<{
@@ -1708,6 +1636,8 @@ export class AgentChatSession {
       terminal: null,
       finalizing: false,
       cancelRequested: false,
+      serverAdmissionPossible: input.origin === "recovered",
+      serverQueued: false,
     };
   }
 
@@ -1775,15 +1705,28 @@ export class AgentChatSession {
         active.requestId !== runState.request_id
         || active.turnId !== runState.root_message_id
       ) {
-        this.finishLocalFailure(active, {
-          code: "response_state_mismatch",
-          message: "SystemSculpt returned a mismatched response state.",
-          retryable: true,
-        });
-        return;
+        if (!active.serverQueued) {
+          this.finishLocalFailure(active, {
+            code: "response_state_mismatch",
+            message: "SystemSculpt returned a mismatched response state.",
+            retryable: true,
+          });
+          return;
+        }
+      } else {
+        active.serverRunId = runState.run_id;
+        active.serverQueued = false;
+        active.phase = runState.state === "waiting_for_client" ? "waiting" : "working";
+        if (this.pendingRegenerate?.requestId === active.requestId) {
+          this.pendingRegenerate = null;
+        }
       }
-      active.serverRunId = runState.run_id;
-      active.phase = runState.state === "waiting_for_client" ? "waiting" : "working";
+    }
+    if (active?.serverQueued) {
+      this.publishActive(active);
+      void this.trySendPendingCancel();
+      this.scheduleResynchronization(active);
+      return;
     }
     if (snapshot.terminal && active
       && snapshot.terminal.request_id === active.requestId) {
@@ -1791,8 +1734,12 @@ export class AgentChatSession {
       return;
     }
     if (active && !active.terminal) {
+      const terminalMessages = active.serverRunId
+        ? snapshot.messages
+        : snapshot.messages.filter((message) =>
+          !active.baseMessageIds.has(message.id));
       const persistedTerminal = terminalFromMessages(
-        snapshot.messages,
+        terminalMessages,
         active.turnId,
         active.serverRunId,
       );
@@ -1810,6 +1757,32 @@ export class AgentChatSession {
     } else if (runState.state === "idle") {
       this.publishHydratedTail(this.presentationMessages);
     }
+    if (active && !active.terminal) {
+      void this.trySendPendingRegenerate(active);
+    }
+    void this.trySendPendingCancel();
+  }
+
+  private handleQueueSnapshot(
+    snapshot: AgentQueueSnapshotEvent,
+    generation: number,
+  ): void {
+    if (
+      generation !== this.generation
+      || this.conversationId !== snapshot.conversation_id
+    ) return;
+    const active = this.active;
+    if (
+      !active
+      || active.terminal
+      || active.serverRunId !== null
+      || !snapshot.queue.items.some((item) =>
+        item.request_id === active.requestId)
+    ) return;
+    active.serverQueued = true;
+    active.phase = "submitted";
+    active.label = "Queued";
+    this.publishActive(active, true);
     void this.trySendPendingCancel();
   }
 
@@ -1825,6 +1798,21 @@ export class AgentChatSession {
     const session = this.session;
     const active = this.active;
     if (!session || !active || active.terminal || active.requestId !== ack.request_id) return;
+    if (ack.command_kind === "cancel") {
+      if (active.serverQueued) {
+        if (this.pendingCancelRequestId === ack.request_id) {
+          this.pendingCancelRequestId = null;
+        }
+        active.serverQueued = false;
+        this.finishLocalCancellation(active);
+        return;
+      }
+      if (this.pendingCancelRequestId === ack.request_id) {
+        this.pendingCancelRequestId = null;
+      }
+      return;
+    }
+
     const runState = session.current.runState;
     if (
       (runState.state !== "running" && runState.state !== "waiting_for_client")
@@ -1871,12 +1859,16 @@ export class AgentChatSession {
   private handleConnectionState(state: AgentConnectionState): void {
     const active = this.active;
     if (state === "open") {
+      // Keep the backoff across a snapshot-only recovery cycle. Authoritative
+      // run progress resets it; repeated command failures must not poll rapidly.
+      this.clearResynchronization(false);
       this.openEpoch += 1;
       this.recordLifecycle({
         code: "session_opened",
         phase: "session",
         ...(this.conversationId ? { conversationId: this.conversationId } : {}),
       });
+      if (active) void this.trySendPendingRegenerate(active);
       void this.trySendPendingCancel();
       if (active) {
         void this.retryPendingDeliveries(active);
@@ -1892,8 +1884,63 @@ export class AgentChatSession {
         phase: "session",
         ...(this.conversationId ? { conversationId: this.conversationId } : {}),
       });
+      if (active && !active.terminal && (
+        !active.cancelRequested
+        || this.pendingCancelRequestId === active.requestId
+      )) {
+        this.scheduleResynchronization(active);
+      }
     }
     if (active && !active.terminal) this.publishActive(active, true);
+  }
+
+  private scheduleResynchronization(active: ActiveRun): void {
+    const transport = this.transport;
+    if (
+      !transport
+      || this.active?.token !== active.token
+      || active.terminal
+      || (active.cancelRequested
+        && this.pendingCancelRequestId !== active.requestId)
+      || this.resynchronizationTimer !== null
+      || this.resynchronizationInFlight
+    ) return;
+
+    const attempt = this.resynchronizationAttempt++;
+    const configuredDelay = this.options.resynchronizationDelayMs?.(attempt)
+      ?? Math.min(250 * (2 ** attempt), MAX_RESYNCHRONIZATION_DELAY_MS);
+    const delay = Number.isFinite(configuredDelay)
+      ? Math.max(0, Math.min(configuredDelay, MAX_RESYNCHRONIZATION_DELAY_MS))
+      : MAX_RESYNCHRONIZATION_DELAY_MS;
+    const generation = this.generation;
+    this.resynchronizationTimer = window.setTimeout(() => {
+      this.resynchronizationTimer = null;
+      if (
+        this.generation !== generation
+        || this.transport !== transport
+        || this.active?.token !== active.token
+        || active.terminal
+        || (active.cancelRequested
+          && this.pendingCancelRequestId !== active.requestId)
+      ) return;
+      this.resynchronizationInFlight = true;
+      void transport.connect()
+        .catch((error) => this.reportLocalIssue(error))
+        .finally(() => {
+          if (this.generation !== generation || this.transport !== transport) return;
+          this.resynchronizationInFlight = false;
+          if (transport.state !== "open") this.scheduleResynchronization(active);
+        });
+    }, delay);
+  }
+
+  private clearResynchronization(resetAttempt = true): void {
+    if (this.resynchronizationTimer !== null) {
+      window.clearTimeout(this.resynchronizationTimer);
+      this.resynchronizationTimer = null;
+    }
+    this.resynchronizationInFlight = false;
+    if (resetAttempt) this.resynchronizationAttempt = 0;
   }
 
   /**
@@ -1947,12 +1994,12 @@ export class AgentChatSession {
   }
 
   /**
-   * Authoritative content moved, so the run is demonstrably alive. Reconnects
-   * alone must not count: during a server-side stall the transport can keep
-   * reconnecting cleanly forever, which would reset the bound and hide exactly
-   * the failure it exists to catch.
+   * Authoritative content moved, so the run is demonstrably alive. A new
+   * synchronization alone must not count. Repeated snapshot reads during a stalled
+   * run must not reset the bound or hide the failure.
    */
   private noteServerProgress(): void {
+    this.resynchronizationAttempt = 0;
     const wasStalled = this.runStalled;
     this.runStalled = false;
     this.clearRunStallTimer();
@@ -2501,10 +2548,13 @@ export class AgentChatSession {
   private completeActive(active: ActiveRun, result: AgentRunResult): void {
     if (this.active?.token !== active.token) return;
     this.clearRunStallTimer();
+    this.clearResynchronization();
     this.runStalled = false;
+    this.pendingRegenerate = null;
     this.pendingDeliveries.clear();
     this.pendingApprovalDeliveries.clear();
     this.pendingCancelRequestId = null;
+    this.pendingCancelInFlight = false;
     this.recordLifecycle({
       code: result.kind === "completed"
         ? "run_finished_completed"
@@ -2519,6 +2569,24 @@ export class AgentChatSession {
     });
     this.active = null;
     active.resolve(result);
+  }
+
+  private finishLocalCancellation(active: ActiveRun): void {
+    if (this.active?.token !== active.token || active.terminal) return;
+    active.terminal = {
+      version: 1,
+      run_id: active.serverRunId ?? `run_${"0".repeat(32)}`,
+      root_message_id: active.turnId,
+      outcome: "cancelled",
+      code: "cancelled",
+    };
+    const snapshot = projectRun(
+      active,
+      this.authoritativeMessages,
+      this.connectionState,
+    );
+    this.commitSnapshot(snapshot);
+    this.completeActive(active, { kind: "cancelled", snapshot });
   }
 
   private finishLocalFailure(active: ActiveRun, error: ManagedAgentError): void {
@@ -2679,24 +2747,106 @@ export class AgentChatSession {
     return task;
   }
 
+  private async trySendPendingRegenerate(active: ActiveRun): Promise<void> {
+    const delivery = this.pendingRegenerate;
+    const session = this.session;
+    if (
+      !delivery
+      || !session
+      || delivery.inFlight
+      || delivery.attemptedOpenEpoch === this.openEpoch
+      || this.active?.token !== active.token
+      || active.terminal
+      || active.requestId !== delivery.requestId
+      || active.turnId !== delivery.rootMessageId
+      || this.connectionState !== "open"
+      || session.current.runState.state !== "idle"
+    ) return;
+    const attemptedEpoch = this.openEpoch;
+    delivery.attemptedOpenEpoch = attemptedEpoch;
+    delivery.inFlight = true;
+    try {
+      await session.regenerate({
+        request_id: delivery.requestId,
+        root_message_id: delivery.rootMessageId,
+      });
+      if (this.pendingRegenerate === delivery) {
+        this.pendingRegenerate = null;
+      }
+    } catch (error) {
+      if (
+        this.active?.token !== active.token
+        || active.terminal
+        || this.pendingRegenerate !== delivery
+      ) return;
+      delivery.attemptedOpenEpoch = null;
+      if (wasDefinitelyRejected(error)) {
+        this.pendingRegenerate = null;
+        if (active.cancelRequested) {
+          active.serverAdmissionPossible = false;
+          this.finishLocalCancellation(active);
+        } else {
+          this.finishLocalFailure(active, managedError(
+            error,
+            "response_start_failed",
+            "SystemSculpt could not retry the response.",
+          ));
+        }
+      } else {
+        this.reportLocalIssue(error);
+        this.scheduleResynchronization(active);
+      }
+    } finally {
+      delivery.inFlight = false;
+      if (
+        this.active?.token === active.token
+        && !active.terminal
+        && this.pendingRegenerate === delivery
+        && this.openEpoch !== attemptedEpoch
+      ) {
+        await this.trySendPendingRegenerate(active);
+      }
+    }
+  }
+
   private async trySendPendingCancel(): Promise<void> {
     const requestId = this.pendingCancelRequestId;
     const session = this.session;
-    if (!requestId || !session) return;
-    if (
-      session.current.runState.state !== "running"
-      && session.current.runState.state !== "waiting_for_client"
-    ) return;
-    if (session.current.runState.request_id !== requestId) return;
+    const active = this.active;
+    if (!requestId || !session || !active || this.pendingCancelInFlight) return;
+    const queued = active.requestId === requestId && active.serverQueued;
+    if (!queued) {
+      if (
+        session.current.runState.state !== "running"
+        && session.current.runState.state !== "waiting_for_client"
+      ) return;
+      if (session.current.runState.request_id !== requestId) return;
+    }
+    this.pendingCancelInFlight = true;
     try {
-      await session.cancel({ request_id: requestId });
-      this.pendingCancelRequestId = null;
+      await session.cancel({ request_id: requestId, queued });
+      if (
+        this.pendingCancelRequestId === requestId
+        && this.active?.requestId === requestId
+        && !this.active.terminal
+      ) {
+        this.scheduleResynchronization(this.active);
+      }
     } catch (error) {
       this.reportLocalIssue(error);
+    } finally {
+      this.pendingCancelInFlight = false;
     }
   }
 
   private async issueBootstrap(): Promise<ThinAgentBootstrapResponse> {
+    if (this.transport) {
+      const bootstrap = await this.transport.bootstrap();
+      this.inputLimits = bootstrap.client_input_limits;
+      this.options.updateInputLimits?.(this.inputLimits);
+      return bootstrap;
+    }
+
     const licenseKey = this.options.licenseKey().trim();
     if (!licenseKey) throw new Error("Add your SystemSculpt license to start a response.");
     const request = parseThinAgentBootstrapRequest(this.options.bootstrapRequest());

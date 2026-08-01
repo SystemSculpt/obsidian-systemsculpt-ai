@@ -5,13 +5,18 @@
       "method": "POST",
       "path": "/api/plugin/agent/bootstrap"
     },
+    "messages": {
+      "method": "GET",
+      "path": "/api/plugin/agent/connect/get-messages"
+    },
     "context": {
       "method": "POST",
       "path": "/api/plugin/agent/context"
     },
-    "connect": {
-      "method": "LIVE_SESSION",
-      "path": "/api/plugin/agent/connect"
+    "turn": {
+      "method": "POST",
+      "path": "/api/plugin/agent/turn",
+      "response_content_type": "text/event-stream"
     }
   },
   "capability_manifest": {
@@ -69,6 +74,11 @@
       "access": {
         "token": "fixture.access.signature",
         "expires_at": "2030-01-01T00:01:00.000Z"
+      },
+      "run_state": {
+        "version": 1,
+        "cursor": 0,
+        "state": "idle"
       },
       "client_input_limits": {
         "image_mime_types": [
@@ -207,14 +217,25 @@
       "resume_cursor",
       "session_id",
       "transcript"
-    ]
+    ],
+    "fork_cache_affinity": "inherit_root_lineage"
   },
   "transport_semantics": {
-    "turn_submission": "native_chat_transport_with_context_ref_only",
-    "client_tool_result": "native_chat_transport",
-    "tool_approval": "native_chat_transport",
-    "turn_cancel": "native_chat_transport",
-    "reconnect_and_stream_resume": "native_chat_transport",
+    "snapshot_first": true,
+    "snapshot": "bounded_http_get",
+    "turn_submission": "streaming_http_post",
+    "client_tool_result": "streaming_http_post",
+    "tool_approval": "streaming_http_post",
+    "turn_cancel": "streaming_http_post",
+    "uncertain_delivery": "fresh_snapshot_then_idempotent_replay",
+    "valid_bootstrap_reused_until": "expiry_or_401",
+    "per_request_response_scope": true,
+    "queued_turn_response_remains_open": true,
+    "queued_cancel_replay": "durable_acknowledgement",
+    "max_bootstrap_response_bytes": 65536,
+    "max_snapshot_bytes": 67108864,
+    "max_turn_frame_bytes": 67108864,
+    "max_event_frame_bytes": 67108864,
     "custom_live_session_commands": false,
     "custom_turn_rpc": false
   },
@@ -225,7 +246,7 @@
     "run_terminal_count_per_accepted_run": 1,
     "run_terminal_root_message_id_is_authoritative": true,
     "failed_terminal_requires_incident_and_retryability": true,
-    "native_stream_finish_is_not_a_substitute_for_run_terminal": true
+    "stream_end_is_not_a_substitute_for_run_terminal": true
   },
   "capability_semantics": {
     "client_authored_model_tool_schema": false,

@@ -20,11 +20,12 @@ const expectedTests = [
 	"<rootDir>/src/views/chatview/__tests__/agent-transcript-repository.test.ts",
 	"<rootDir>/src/views/chatview/__tests__/agent-workspace-ui.test.ts",
 	"<rootDir>/src/views/chatview/__tests__/live-markdown-renderer.test.ts",
-	"<rootDir>/src/views/chatview/agent/__tests__/first-party-agent-chat-session.test.ts",
-	"<rootDir>/src/views/chatview/agent/__tests__/first-party-thin-agent-session.test.ts",
-	"<rootDir>/src/views/chatview/agent/__tests__/first-party-thin-agent-session-transport.test.ts",
-	"<rootDir>/src/views/chatview/agent/__tests__/thin-agent-mutation-journal.test.ts",
-	"<rootDir>/src/views/chatview/agent/__tests__/thin-agent-message-adapter.test.ts",
+	"<rootDir>/src/views/chatview/agent/__tests__/authoritative-session.test.ts",
+	"<rootDir>/src/views/chatview/agent/__tests__/chat-session.test.ts",
+	"<rootDir>/src/views/chatview/agent/__tests__/lifecycle.test.ts",
+	"<rootDir>/src/views/chatview/agent/__tests__/message-adapter.test.ts",
+	"<rootDir>/src/views/chatview/agent/__tests__/mutation-journal.test.ts",
+	"<rootDir>/src/views/chatview/agent/__tests__/streaming-transport.test.ts",
 ];
 
 const expectedCoverage = [
@@ -37,12 +38,13 @@ const expectedCoverage = [
 	"src/views/chatview/ChatStorageService.ts",
 	"src/views/chatview/storage/ChatFrontmatterIdentity.ts",
 	"src/views/chatview/storage/ChatMarkdownSerializer.ts",
-	"src/views/chatview/agent/FirstPartyAgentChatSession.ts",
-	"src/views/chatview/agent/FirstPartyThinAgentProtocol.ts",
-	"src/views/chatview/agent/FirstPartyThinAgentSession.ts",
-	"src/views/chatview/agent/FirstPartyThinAgentSessionTransport.ts",
-	"src/views/chatview/agent/ThinAgentMutationJournal.ts",
-	"src/views/chatview/agent/ThinAgentMessageAdapter.ts",
+	"src/views/chatview/agent/AuthoritativeSession.ts",
+	"src/views/chatview/agent/ChatSession.ts",
+	"src/views/chatview/agent/Lifecycle.ts",
+	"src/views/chatview/agent/MessageAdapter.ts",
+	"src/views/chatview/agent/MutationJournal.ts",
+	"src/views/chatview/agent/Protocol.ts",
+	"src/views/chatview/agent/StreamingTransport.ts",
 ];
 const expectedThresholds = {
 	"./src/services/chat/ManagedToolExecution.ts": {
@@ -99,41 +101,47 @@ const expectedThresholds = {
 		functions: -5,
 		lines: -20,
 	},
-	"./src/views/chatview/agent/FirstPartyAgentChatSession.ts": {
-		statements: -232,
-		branches: -420,
-		functions: -21,
-		lines: -181,
-	},
-	"./src/views/chatview/agent/FirstPartyThinAgentProtocol.ts": {
-		statements: -96,
-		branches: -120,
-		functions: -6,
-		lines: -87,
-	},
-	"./src/views/chatview/agent/FirstPartyThinAgentSession.ts": {
-		statements: -55,
-		branches: -67,
-		functions: -2,
-		lines: -42,
-	},
-	"./src/views/chatview/agent/FirstPartyThinAgentSessionTransport.ts": {
+	"./src/views/chatview/agent/AuthoritativeSession.ts": {
 		statements: -52,
-		branches: -62,
-		functions: -7,
-		lines: -39,
-	},
-	"./src/views/chatview/agent/ThinAgentMutationJournal.ts": {
-		statements: -25,
-		branches: -39,
-		functions: -5,
-		lines: -19,
-	},
-	"./src/views/chatview/agent/ThinAgentMessageAdapter.ts": {
-		statements: -10,
-		branches: -23,
+		branches: -65,
 		functions: -2,
-		lines: -8,
+		lines: -40,
+	},
+	"./src/views/chatview/agent/ChatSession.ts": {
+		statements: -217,
+		branches: -383,
+		functions: -18,
+		lines: -170,
+	},
+	"./src/views/chatview/agent/Lifecycle.ts": {
+		statements: -1,
+		branches: -1,
+		functions: 100,
+		lines: 100,
+	},
+	"./src/views/chatview/agent/MessageAdapter.ts": {
+		statements: -1,
+		branches: -2,
+		functions: 100,
+		lines: -1,
+	},
+	"./src/views/chatview/agent/MutationJournal.ts": {
+		statements: -24,
+		branches: -39,
+		functions: -4,
+		lines: -18,
+	},
+	"./src/views/chatview/agent/Protocol.ts": {
+		statements: -136,
+		branches: -188,
+		functions: -9,
+		lines: -125,
+	},
+	"./src/views/chatview/agent/StreamingTransport.ts": {
+		statements: -23,
+		branches: -29,
+		functions: -1,
+		lines: -15,
 	},
 };
 

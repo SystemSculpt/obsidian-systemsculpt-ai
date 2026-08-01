@@ -579,9 +579,11 @@ function createSavedChatLoadHarness(
   };
   const agent = {
     cancel: jest.fn(async () => undefined),
+    detach: jest.fn(async () => undefined),
     disconnect: jest.fn(),
     hydrate: jest.fn(options.hydrate ?? (async () => undefined)),
     getSnapshot: jest.fn(() => ({ status: "idle" })),
+    subscribe: jest.fn(() => jest.fn()),
   };
   const transcript = {
     load: jest.fn(async () => loaded),
@@ -616,6 +618,7 @@ function createSavedChatLoadHarness(
     plugin: { getLogger: () => logger },
     workspace,
     agent,
+    agentUnsubscribe: null,
     createAgentSession: () => agent,
     transcript,
     contextManager: {
@@ -2894,7 +2897,6 @@ describe("AgentChatView thin conversation lifecycle", () => {
 
   it("loading a saved chat retires deferred local preflight before replacing history", async () => {
     const preparation = deferred<AgentComposerSubmit>();
-    const cancellation = deferred();
     const executeSubmission = jest.fn(async () => undefined);
     const restoreRejectedSubmission = jest.fn();
     const setRunPending = jest.fn();
@@ -2947,10 +2949,13 @@ describe("AgentChatView thin conversation lifecycle", () => {
       },
       agent: {
         getSnapshot: jest.fn(() => ({ status: "idle" })),
-        cancel: jest.fn(() => cancellation.promise),
+        cancel: jest.fn(async () => undefined),
+        detach: jest.fn(async () => undefined),
         disconnect: jest.fn(),
         hydrate: jest.fn(async () => undefined),
+        subscribe: jest.fn(() => jest.fn()),
       },
+      agentUnsubscribe: null,
       transcript: {
         load: jest.fn(async () => loaded),
       },
@@ -2966,6 +2971,9 @@ describe("AgentChatView thin conversation lifecycle", () => {
       }),
       syncAttachments: jest.fn(),
       updateViewState: jest.fn(),
+      createAgentSession: jest.fn(function (this: { agent: unknown }) {
+        return this.agent;
+      }),
       getLoadedPluginBuildId: jest.fn(async () => `sha256:${"d".repeat(64)}`),
     });
 
@@ -2983,7 +2991,6 @@ describe("AgentChatView thin conversation lifecycle", () => {
     expect(executeSubmission).not.toHaveBeenCalled();
     expect(restoreRejectedSubmission).not.toHaveBeenCalled();
 
-    cancellation.resolve();
     await loading;
 
     expect((view as any).activeSubmissionOperation).toBeNull();
@@ -3020,7 +3027,7 @@ describe("AgentChatView thin conversation lifecycle", () => {
     expect(harness.loaded.messages).toEqual(messages);
   });
 
-  it("retires a draft warm-up before restoring a saved chat", async () => {
+  it("retires a draft session before restoring a saved chat", async () => {
     const messages: ChatMessage[] = [
       { role: "user", content: "Saved question", message_id: "saved-user" },
       { role: "assistant", content: "Saved answer", message_id: "saved-assistant" },
@@ -3031,15 +3038,16 @@ describe("AgentChatView thin conversation lifecycle", () => {
     (harness.view as any).thinBootstrapRequest = {
       contract_version: "thin-agent-v1",
     };
-    harness.agent.cancel.mockImplementationOnce(async () => {
+    harness.agent.detach.mockImplementationOnce(async () => {
       expect((harness.view as any).pendingThinConversationId).toBeNull();
       expect((harness.view as any).thinBootstrapRequest).toBeNull();
     });
 
     await harness.view.loadChatById("legacy-chat");
 
-    expect(harness.agent.cancel).toHaveBeenCalledTimes(1);
-    expect(harness.agent.disconnect).toHaveBeenCalledTimes(1);
+    expect(harness.agent.detach).toHaveBeenCalledTimes(1);
+    expect(harness.agent.cancel).not.toHaveBeenCalled();
+    expect(harness.agent.disconnect).not.toHaveBeenCalled();
     expect(harness.prepareThinConversation).not.toHaveBeenCalled();
   });
 
@@ -3279,7 +3287,9 @@ describe("AgentChatView thin conversation lifecycle", () => {
     const agent = {
       getSnapshot: jest.fn(() => terminalSnapshot),
       cancel: jest.fn(async () => undefined),
+      detach: jest.fn(async () => undefined),
       disconnect: jest.fn(),
+      subscribe: jest.fn(() => jest.fn()),
       // A settled saved chat loads entirely from cache: the session must not
       // reconnect, and the persisted FIFO still promotes exactly once.
       hydrate: jest.fn(async () => undefined),
@@ -3311,6 +3321,8 @@ describe("AgentChatView thin conversation lifecycle", () => {
       isFullyLoaded: true,
       workspace,
       agent,
+      agentUnsubscribe: null,
+      createAgentSession: () => agent,
       transcript,
       contextManager: {
         setPinnedFiles: jest.fn(async () => undefined),

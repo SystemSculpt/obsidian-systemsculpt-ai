@@ -9,8 +9,8 @@ import type { PlatformRequestInput } from "../../src/services/PlatformRequestCli
 import type { ThinAgentBootstrapRequest } from "../../src/services/managed/ThinAgentV1Contract";
 import type { ToolCallResult } from "../../src/types/toolCalls";
 import {
-  FIRST_PARTY_THIN_AGENT_COMMAND_TYPE,
-  FIRST_PARTY_THIN_AGENT_EVENT_TYPE,
+  THIN_AGENT_COMMAND_TYPE,
+  THIN_AGENT_EVENT_TYPE,
   type AgentJsonValue,
   type AgentUserMessage,
 } from "../../src/views/chatview/agent/Protocol";
@@ -19,9 +19,6 @@ import {
   type AgentLifecycleRecord,
   type AgentRunResult,
 } from "../../src/views/chatview/agent/ChatSession";
-import type {
-  AgentWebSocket,
-} from "../../src/views/chatview/agent/AgentSessionTransport";
 import { AgentMutationJournal } from "../../src/views/chatview/agent/MutationJournal";
 
 type ToolCall = Readonly<{
@@ -53,8 +50,8 @@ type EnduranceFixture = Readonly<{
   recovery: Readonly<{
     drop_approval_round: number;
     drop_result_round: number;
-    expect_fresh_bootstrap_per_connection: boolean;
-    expect_snapshot_first_per_connection: boolean;
+    expect_reused_bootstrap_during_validity: boolean;
+    expect_snapshot_first_per_synchronization: boolean;
   }>;
   mutation_replay: Readonly<{
     tool_call_id: string;
@@ -69,7 +66,7 @@ type EnduranceFixture = Readonly<{
     tool_result_send_attempts: number;
     successful_tool_approval_commands: number;
     tool_approval_send_attempts: number;
-    connection_count: number;
+    synchronization_count: number;
     mutation_executions: number;
     hard_client_continuation_limit: null;
   }>;
@@ -114,7 +111,7 @@ const FIXTURE_PATH = resolve(
   "testing/fixtures/agent/thin-agent-v1-endurance.json",
 );
 const TEST_PATH = resolve(
-  "testing/native-endurance/thin-agent-v1-endurance.test.ts",
+  "testing/agent-endurance/thin-agent-v1-endurance.test.ts",
 );
 const fixtureBytes = readFileSync(FIXTURE_PATH);
 const fixtureText = fixtureBytes.toString("utf8");
@@ -230,7 +227,7 @@ function event<TFields extends Record<string, unknown>>(
   fields: TFields,
 ): Readonly<Record<string, unknown> & TFields> {
   return {
-    type: FIRST_PARTY_THIN_AGENT_EVENT_TYPE,
+    type: THIN_AGENT_EVENT_TYPE,
     version: 1,
     kind,
     conversation_id: fixture.conversation_id,
@@ -363,7 +360,7 @@ function jsonResponse(value: unknown): Response {
 }
 
 function isCommand(frame: Frame): boolean {
-  return frame.type === FIRST_PARTY_THIN_AGENT_COMMAND_TYPE;
+  return frame.type === THIN_AGENT_COMMAND_TYPE;
 }
 
 function matchesFailure(frame: Frame, failure: CommandFailure): boolean {
@@ -375,71 +372,129 @@ function matchesFailure(frame: Frame, failure: CommandFailure): boolean {
     );
 }
 
-class FakeWebSocket implements AgentWebSocket {
-  public readyState = 0;
+class FakeSynchronization {
+  public readyState: 0 | 1 | 3 = 0;
   public readonly attempted: Frame[] = [];
   public readonly sent: Frame[] = [];
   public readonly serverFrames: unknown[] = [];
-  private readonly listeners = new Map<string, Set<(event: unknown) => void>>();
   private failure: CommandFailure | null = null;
+  private readonly snapshotResponse: Promise<Response>;
+  private resolveSnapshot!: (response: Response) => void;
 
-  public addEventListener(
-    type: string,
-    listener: (event: unknown) => void,
-  ): void {
-    const listeners = this.listeners.get(type) ?? new Set();
-    listeners.add(listener);
-    this.listeners.set(type, listeners);
+  public constructor(
+    private readonly server: FakeStreamingServer,
+    public readonly url: string,
+  ) {
+    this.snapshotResponse = new Promise((resolve) => {
+      this.resolveSnapshot = resolve;
+    });
   }
 
-  public send(data: string): void {
-    if (this.readyState !== 1) throw new Error("Fake socket is not open.");
-    const frame = JSON.parse(data) as Frame;
-    this.attempted.push(frame);
-    if (this.failure && matchesFailure(frame, this.failure)) {
-      this.failure = null;
-      this.serverClose(1006, "Deterministic send-boundary disconnect.");
-      throw new Error("Deterministic send-boundary disconnect.");
+  public response(): Promise<Response> {
+    return this.snapshotResponse;
+  }
+
+  public open(messages: readonly WireMessage[], state: RunState): void {
+    if (this.readyState !== 0) {
+      throw new Error("Fake streaming synchronization opened twice.");
     }
-    this.sent.push(frame);
-  }
-
-  public close(code = 1000, reason = ""): void {
-    if (this.readyState === 3) return;
-    this.readyState = 3;
-    this.emit("close", { code, reason });
-  }
-
-  public open(): void {
-    if (this.readyState !== 0) throw new Error("Fake socket opened twice.");
     this.readyState = 1;
-    this.emit("open", {});
+    const snapshot = sessionSnapshot(messages, state);
+    this.serverFrames.push(snapshot);
+    this.resolveSnapshot(jsonResponse(snapshot));
   }
 
   public serverMessage(value: unknown): void {
     if (this.readyState !== 1) {
-      throw new Error("The fake server cannot message a closed socket.");
+      throw new Error("The fake server cannot stream on a closed synchronization.");
     }
     this.serverFrames.push(value);
-    this.emit("message", { data: JSON.stringify(value) });
-  }
-
-  public serverClose(code = 1006, reason = ""): void {
-    if (this.readyState === 3) return;
-    this.readyState = 3;
-    this.emit("close", { code, reason });
+    this.server.write(value);
   }
 
   public failNextCommand(kind: string, toolCallId?: string): void {
-    if (this.failure) throw new Error("A send failure is already armed.");
+    if (this.failure) throw new Error("A command failure is already armed.");
     this.failure = {
       kind,
       ...(toolCallId === undefined ? {} : { toolCallId }),
     };
   }
 
-  private emit(type: string, eventValue: unknown): void {
-    for (const listener of this.listeners.get(type) ?? []) listener(eventValue);
+  public accept(frame: Frame): boolean {
+    this.attempted.push(frame);
+    if (this.failure && matchesFailure(frame, this.failure)) {
+      this.failure = null;
+      this.readyState = 3;
+      return false;
+    }
+    this.sent.push(frame);
+    return true;
+  }
+}
+
+class FakeStreamingServer {
+  public readonly synchronizations: FakeSynchronization[] = [];
+  public readonly requestUrls: string[] = [];
+  private activeSynchronization: FakeSynchronization | null = null;
+  private controller: ReadableStreamDefaultController<Uint8Array> | null = null;
+  private bootstrapIndex = 0;
+  private readonly encoder = new TextEncoder();
+
+  public readonly request = jest.fn(async (
+    input: PlatformRequestInput,
+  ): Promise<Response> => {
+    const url = String(input.url);
+    this.requestUrls.push(url);
+    if (url.includes("/agent/bootstrap")) {
+      this.bootstrapIndex += 1;
+      return jsonResponse(bootstrapResponse(this.bootstrapIndex));
+    }
+    if (url.includes("/get-messages")) {
+      const synchronization = new FakeSynchronization(this, url);
+      this.synchronizations.push(synchronization);
+      this.activeSynchronization = synchronization;
+      return synchronization.response();
+    }
+    if (url.includes("/agent/turn")) {
+      const synchronization = this.activeSynchronization;
+      if (!synchronization || synchronization.readyState !== 1) {
+        throw new Error("A turn has no synchronized session.");
+      }
+      const frame = (typeof input.body === "string"
+        ? JSON.parse(input.body)
+        : input.body) as Frame;
+      if (!synchronization.accept(frame)) {
+        this.endTurn();
+        throw new Error("Deterministic HTTP command delivery failure.");
+      }
+      return this.openTurn();
+    }
+    throw new Error("Unexpected endurance request URL: " + url);
+  });
+
+  public write(value: unknown): void {
+    if (!this.controller) throw new Error("No streaming turn is open.");
+    this.controller.enqueue(this.encoder.encode(
+      `data: ${JSON.stringify(value)}\n\n`,
+    ));
+    if ((value as Frame).kind === "terminal") this.endTurn();
+  }
+
+  private openTurn(): Response {
+    this.endTurn();
+    const body = new ReadableStream<Uint8Array>({
+      start: (controller) => { this.controller = controller; },
+    });
+    return new Response(body, {
+      status: 200,
+      headers: { "content-type": "text/event-stream" },
+    });
+  }
+
+  private endTurn(): void {
+    const controller = this.controller;
+    this.controller = null;
+    try { controller?.close(); } catch { /* The stream already ended. */ }
   }
 }
 
@@ -480,21 +535,13 @@ function createHarness(options: Readonly<{
   adapter?: MemoryDataAdapter;
   executeLocalTool?: ExecuteLocalTool;
 }> = {}) {
-  const sockets: FakeWebSocket[] = [];
-  const urls: string[] = [];
+  const server = new FakeStreamingServer();
   const adapter = options.adapter ?? new MemoryDataAdapter();
   const journal = new AgentMutationJournal(
     adapter,
     MUTATION_PATH,
     () => 1_000,
   );
-  let bootstrapIndex = 0;
-  const request = jest.fn(async (
-    _input: PlatformRequestInput,
-  ): Promise<Response> => {
-    bootstrapIndex += 1;
-    return jsonResponse(bootstrapResponse(bootstrapIndex));
-  });
   const executeLocalTool = jest.fn(options.executeLocalTool ?? (async (call) => {
     const deterministic = callsForRound(fixture.approved_mutation.round)
       .find((candidate) => candidate.id === call.callId);
@@ -517,51 +564,47 @@ function createHarness(options: Readonly<{
     reconcileHistory,
     reportError,
     onLifecycle: (record) => lifecycle.push(record),
-    requestClient: { request },
-    reconnectDelayMs: () => 0,
-    snapshotTimeoutMs: 5_000,
+    requestClient: { request: server.request },
+    resynchronizationDelayMs: () => 0,
     now: () => 10_000,
-    createWebSocket: (url) => {
-      const socket = new FakeWebSocket();
-      sockets.push(socket);
-      urls.push(url);
-      return socket;
-    },
   });
   trackedSessions.push(agent);
-  let openedSocketCount = 0;
+  let openedSynchronizationCount = 0;
 
   return {
     adapter,
     agent,
-    sockets,
-    urls,
-    request,
+    synchronizations: server.synchronizations,
+    requestUrls: server.requestUrls,
+    request: server.request,
     executeLocalTool,
     persistAssistant,
     reconcileHistory,
     reportError,
     lifecycle,
     successfulCommands(): Frame[] {
-      return sockets.flatMap((socket) => socket.sent).filter(isCommand);
+      return server.synchronizations
+        .flatMap((synchronization) => synchronization.sent)
+        .filter(isCommand);
     },
     attemptedCommands(): Frame[] {
-      return sockets.flatMap((socket) => socket.attempted).filter(isCommand);
+      return server.synchronizations
+        .flatMap((synchronization) => synchronization.attempted)
+        .filter(isCommand);
     },
     async openNext(
       messages: readonly WireMessage[],
       state: RunState,
-    ): Promise<FakeWebSocket> {
-      const index = openedSocketCount;
+    ): Promise<FakeSynchronization> {
+      const index = openedSynchronizationCount;
       await waitFor(
-        () => sockets.length > index,
-        "first-party socket " + String(index + 1),
+        () => server.synchronizations.length > index,
+        "streaming synchronization " + String(index + 1),
       );
-      const socket = sockets[index]!;
-      openedSocketCount += 1;
-      socket.open();
-      socket.serverMessage(sessionSnapshot(messages, state));
-      return socket;
+      const synchronization = server.synchronizations[index]!;
+      openedSynchronizationCount += 1;
+      synchronization.open(messages, state);
+      return synchronization;
     },
   };
 }
@@ -590,11 +633,11 @@ function currentMessages(
 }
 
 async function completeServerRun(
-  socket: FakeWebSocket,
+  synchronization: FakeSynchronization,
   pending: Promise<AgentRunResult>,
 ): Promise<AgentRunResult> {
-  socket.serverMessage(runState(idle(2)));
-  socket.serverMessage(succeededTerminal());
+  synchronization.serverMessage(runState(idle(2)));
+  synchronization.serverMessage(succeededTerminal());
   return pending;
 }
 
@@ -606,11 +649,11 @@ afterEach(async () => {
   jest.restoreAllMocks();
 });
 
-describe("thin-agent-v1 first-party native endurance", () => {
-  it("pins a provider-neutral first-party scenario without legacy runtime dependencies", () => {
+describe("thin-agent-v1 streaming HTTP endurance", () => {
+  it("pins a provider-neutral agent scenario without retired runtime dependencies", () => {
     const source = readFileSync(TEST_PATH, "utf8");
     expect(createHash("sha256").update(fixtureBytes).digest("hex"))
-      .toBe("44281a7859cb5d2403df89d8392e3a577bd44377e338bdda228e6a90ad74321a");
+      .toBe("788613872f80ee292579740210e0b6962ff17c285dfb92be431e7e99d946d257");
     expect(fixture.fixture_version).toBe("thin-agent-v1-endurance-3");
     expect(fixture.round_count).toBeGreaterThan(30);
     expect(fixture.expected.hard_client_continuation_limit).toBeNull();
@@ -620,9 +663,9 @@ describe("thin-agent-v1 first-party native endurance", () => {
     expect(source).not.toContain(["agents", "chat"].join("/"));
     expect(source).not.toContain(["WebSocket", "ChatTransport"].join(""));
     expect(source).not.toContain(["ThinAgent", "Bridge"].join(""));
-    expect(FIRST_PARTY_THIN_AGENT_COMMAND_TYPE)
+    expect(THIN_AGENT_COMMAND_TYPE)
       .toBe("systemsculpt.agent.command.v1");
-    expect(FIRST_PARTY_THIN_AGENT_EVENT_TYPE)
+    expect(THIN_AGENT_EVENT_TYPE)
       .toBe("systemsculpt.agent.event.v1");
   });
 
@@ -648,12 +691,12 @@ describe("thin-agent-v1 first-party native endurance", () => {
       message: userMessage(fixture.request_id, userText),
       approvalPolicy: { requireDestructiveApproval: true },
     });
-    let socket = await harness.openNext([], idle(0));
+    let synchronization = await harness.openNext([], idle(0));
     await waitFor(
       () => commandsFor(harness.successfulCommands(), "submit").length >= 1,
-      "the first-party submit command",
+      "the thin-agent submit command",
     );
-    socket.serverMessage(sessionSnapshot(
+    synchronization.serverMessage(sessionSnapshot(
       [wireUser(fixture.request_id, userText)],
       active(1),
     ));
@@ -669,7 +712,7 @@ describe("thin-agent-v1 first-party native endurance", () => {
         text: "Planning endurance round " + String(round) + ".",
         state: "streaming",
       });
-      socket.serverMessage(assistantSnapshot(parts));
+      synchronization.serverMessage(assistantSnapshot(parts));
       parts[reasoningIndex] = {
         type: "reasoning",
         text: "Planned endurance round " + String(round) + ".",
@@ -689,7 +732,7 @@ describe("thin-agent-v1 first-party native endurance", () => {
           state: "input-available",
           input: { query: "endurance research round " + String(round) },
         });
-        socket.serverMessage(assistantSnapshot(parts));
+        synchronization.serverMessage(assistantSnapshot(parts));
         parts[webIndex] = {
           type: "tool-web_search",
           toolCallId: webCallId,
@@ -728,13 +771,20 @@ describe("thin-agent-v1 first-party native endurance", () => {
         ? calls[0]
         : undefined;
       if (mutation) {
-        socket.failNextCommand("client_tool_approval", mutation.id);
+        synchronization.failNextCommand("client_tool_approval", mutation.id);
       } else if (droppedResult) {
-        socket.failNextCommand("client_tool_result", droppedResult.id);
+        synchronization.failNextCommand("client_tool_result", droppedResult.id);
       }
-      socket.serverMessage(assistantSnapshot(parts));
+      synchronization.serverMessage(assistantSnapshot(parts));
 
       if (mutation) {
+        await waitFor(
+          () => harness.agent.getSnapshot().parts.some((part) =>
+            part.kind === "tool"
+            && part.callId === mutation.id
+            && part.state === "approval-required"),
+          "the mutation approval request",
+        );
         expect(harness.agent.respondToApproval(
           fixture.approved_mutation.approval_id,
           fixture.approved_mutation.approved,
@@ -744,10 +794,10 @@ describe("thin-agent-v1 first-party native endurance", () => {
             harness.attemptedCommands(),
             "client_tool_approval",
             mutation.id,
-          ).length >= 1 && socket.readyState === 3,
+          ).length >= 1 && synchronization.readyState === 3,
           "the interrupted approval attempt",
         );
-        socket = await harness.openNext(
+        synchronization = await harness.openNext(
           currentMessages(userText, parts),
           active(1),
         );
@@ -772,7 +822,7 @@ describe("thin-agent-v1 first-party native endurance", () => {
             approved: true,
           },
         };
-        socket.serverMessage(assistantSnapshot(parts));
+        synchronization.serverMessage(assistantSnapshot(parts));
       }
 
       if (droppedResult) {
@@ -781,10 +831,10 @@ describe("thin-agent-v1 first-party native endurance", () => {
             harness.attemptedCommands(),
             "client_tool_result",
             droppedResult.id,
-          ).length >= 1 && socket.readyState === 3,
+          ).length >= 1 && synchronization.readyState === 3,
           "the interrupted tool result attempt",
         );
-        socket = await harness.openNext(
+        synchronization = await harness.openNext(
           currentMessages(userText, parts),
           active(1),
         );
@@ -801,7 +851,7 @@ describe("thin-agent-v1 first-party native endurance", () => {
         );
         parts[indexes.get(call.id)!] = completedToolPart(call);
       }
-      socket.serverMessage(assistantSnapshot(parts));
+      synchronization.serverMessage(assistantSnapshot(parts));
 
       const textIndex = parts.length;
       parts.push({
@@ -809,19 +859,19 @@ describe("thin-agent-v1 first-party native endurance", () => {
         text: "Round " + String(round),
         state: "streaming",
       });
-      socket.serverMessage(assistantSnapshot(parts));
+      synchronization.serverMessage(assistantSnapshot(parts));
       parts[textIndex] = {
         type: "text",
         text: "Round " + String(round) + " complete.",
         state: "done",
       };
-      socket.serverMessage(assistantSnapshot(parts));
+      synchronization.serverMessage(assistantSnapshot(parts));
       expectedPartIds.push(
         "text:" + ASSISTANT_ID + ":" + String(textIndex),
       );
     }
 
-    const result = await completeServerRun(socket, run);
+    const result = await completeServerRun(synchronization, run);
     expect(result.kind).toBe("completed");
     const finalSnapshot = result.snapshot;
     const finalPartIds = [
@@ -878,20 +928,19 @@ describe("thin-agent-v1 first-party native endurance", () => {
       .toHaveLength(fixture.expected.successful_tool_approval_commands);
     expect(commandsFor(attempted, "client_tool_approval"))
       .toHaveLength(fixture.expected.tool_approval_send_attempts);
-    expect(harness.sockets).toHaveLength(fixture.expected.connection_count);
-    expect(harness.request).toHaveBeenCalledTimes(
-      fixture.expected.connection_count,
-    );
-    expect(harness.sockets.every((candidate) => {
+    expect(harness.synchronizations).toHaveLength(fixture.expected.synchronization_count);
+    expect(harness.requestUrls.filter((url) =>
+      url.includes("/agent/bootstrap"))).toHaveLength(1);
+    expect(harness.synchronizations.every((candidate) => {
       const first = candidate.serverFrames[0] as Frame | undefined;
       return first?.kind === "session_snapshot";
-    })).toBe(fixture.recovery.expect_snapshot_first_per_connection);
-    const accessTokens = harness.urls.map((url) =>
-      new URL(url).searchParams.get("access_token"));
+    })).toBe(fixture.recovery.expect_snapshot_first_per_synchronization);
+    const accessTokens = harness.synchronizations.map((candidate) =>
+      new URL(candidate.url).searchParams.get("access_token"));
     expect(new Set(accessTokens).size).toBe(
-      fixture.recovery.expect_fresh_bootstrap_per_connection
-        ? fixture.expected.connection_count
-        : 1,
+      fixture.recovery.expect_reused_bootstrap_during_validity
+        ? 1
+        : fixture.expected.synchronization_count,
     );
     expect(JSON.stringify([...successful, ...attempted]))
       .not.toMatch(/(?:cf_agent|resume|continuation|use_chat)/iu);
@@ -936,16 +985,23 @@ describe("thin-agent-v1 first-party native endurance", () => {
       message: userMessage(fixture.request_id, userText),
       approvalPolicy: { requireDestructiveApproval: true },
     });
-    const firstSocket = await first.openNext([], idle(0));
+    const firstConnection = await first.openNext([], idle(0));
     await waitFor(
       () => commandsFor(first.successfulCommands(), "submit").length >= 1,
       "the mutation replay setup submit",
     );
-    firstSocket.serverMessage(sessionSnapshot(
+    firstConnection.serverMessage(sessionSnapshot(
       [wireUser(fixture.request_id, userText)],
       active(1),
     ));
-    firstSocket.serverMessage(assistantSnapshot(parts));
+    firstConnection.serverMessage(assistantSnapshot(parts));
+    await waitFor(
+      () => first.agent.getSnapshot().parts.some((part) =>
+        part.kind === "tool"
+        && part.callId === mutation.id
+        && part.state === "approval-required"),
+      "the mutation approval request before replacement",
+    );
     expect(first.agent.respondToApproval(
       fixture.approved_mutation.approval_id,
       true,
@@ -968,7 +1024,7 @@ describe("thin-agent-v1 first-party native endurance", () => {
         approved: true,
       },
     };
-    firstSocket.serverMessage(assistantSnapshot(parts));
+    firstConnection.serverMessage(assistantSnapshot(parts));
     await waitFor(
       () => commandsFor(
         first.successfulCommands(),
@@ -991,7 +1047,7 @@ describe("thin-agent-v1 first-party native endurance", () => {
 
     const replacement = createHarness({ adapter, executeLocalTool: execute });
     const hydrate = replacement.agent.hydrate(fixture.conversation_id);
-    const replacementSocket = await replacement.openNext(
+    const replacementConnection = await replacement.openNext(
       currentMessages(userText, parts),
       active(1),
     );
@@ -1038,9 +1094,9 @@ describe("thin-agent-v1 first-party native endurance", () => {
       text: "The approved mutation completed exactly once.",
       state: "done",
     });
-    replacementSocket.serverMessage(assistantSnapshot(parts));
-    replacementSocket.serverMessage(runState(idle(2)));
-    replacementSocket.serverMessage(succeededTerminal());
+    replacementConnection.serverMessage(assistantSnapshot(parts));
+    replacementConnection.serverMessage(runState(idle(2)));
+    replacementConnection.serverMessage(succeededTerminal());
     await waitFor(
       () => replacement.agent.getSnapshot().status === "completed",
       "the recovered mutation run to complete",
@@ -1075,12 +1131,12 @@ describe("thin-agent-v1 first-party native endurance", () => {
       turnId: fixture.request_id,
       message: userMessage(fixture.request_id, userText),
     });
-    const socket = await harness.openNext([], idle(0));
+    const synchronization = await harness.openNext([], idle(0));
     await waitFor(
       () => commandsFor(harness.successfulCommands(), "submit").length >= 1,
       "the thrown-tool submit",
     );
-    socket.serverMessage(sessionSnapshot(
+    synchronization.serverMessage(sessionSnapshot(
       [wireUser(fixture.request_id, userText)],
       active(1),
     ));
@@ -1088,7 +1144,7 @@ describe("thin-agent-v1 first-party native endurance", () => {
       clientToolRequest(call),
       inputToolPart(call, false),
     ];
-    socket.serverMessage(assistantSnapshot(parts));
+    synchronization.serverMessage(assistantSnapshot(parts));
     await waitFor(
       () => commandsFor(
         harness.successfulCommands(),
@@ -1120,8 +1176,8 @@ describe("thin-agent-v1 first-party native endurance", () => {
       text: "I could not read that file, so I continued safely.",
       state: "done",
     });
-    socket.serverMessage(assistantSnapshot(parts));
-    const result = await completeServerRun(socket, run);
+    synchronization.serverMessage(assistantSnapshot(parts));
+    const result = await completeServerRun(synchronization, run);
     expect(result).toMatchObject({
       kind: "completed",
       message: {

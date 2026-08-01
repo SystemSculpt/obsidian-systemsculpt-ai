@@ -367,8 +367,8 @@ export class AgentChatView extends ItemView {
   private readonly transcript: AgentTranscriptRepository;
   private agent: AgentChatSession;
   private readonly agentBaseUrl: string;
-  // One journal per view, not per conversation: it owns a single file, so a
-  // second instance on the same path would race the first.
+  // Journal instances share one adapter-and-path state. Concurrent views
+  // therefore serialize receipts before they write the common file.
   private readonly agentMutationJournal: AgentMutationJournal;
   private readonly documentAttachmentProcessor: ManagedChatDocumentAttachmentProcessor;
   private readonly attachmentStore: ChatAttachmentVaultStore;
@@ -532,9 +532,9 @@ export class AgentChatView extends ItemView {
 
   /**
    * Hands the next conversation its own session instead of recycling this
-   * one. The outgoing session is detached independently, so a run it still
-   * owns settles on its own timeline and can never report itself as active to
-   * the conversation that replaced it.
+   * one. Detaching stops only the outgoing local renderer and transport. Its
+   * server run remains resumable and cannot report itself as active to the
+   * conversation that replaced it.
    */
   private replaceAgentSession(): void {
     const previous = this.agent;
@@ -655,8 +655,8 @@ export class AgentChatView extends ItemView {
     const transition = this.beginConversationTransition(loadOriginToken);
     let thinConversationHydrated = false;
     try {
-      // Retire the outgoing draft identity before cancelling it. Any stale
-      // preparation belongs to the replaced draft, not this chat.
+      // Retire the outgoing draft identity before replacing its local session.
+      // Any stale preparation belongs to the replaced draft, not this chat.
       this.pendingThinConversationId = null;
       this.thinBootstrapRequest = null;
       this.messageEditGeneration += 1;
@@ -664,8 +664,9 @@ export class AgentChatView extends ItemView {
       this.pendingRejectedRetry = null;
       this.workspace?.resetMessageEditor();
       if (this.queueHydrated) await this.persistQueueState();
-      await this.agent.cancel();
-      this.agent.disconnect();
+      // Each loaded conversation gets its own local session object. Retiring
+      // the old object must not cancel server work that another view can resume.
+      this.replaceAgentSession();
       this.sessionTrustedToolNames.clear();
       this.isFullyLoaded = false;
       this.pendingForkHistory = null;
@@ -727,8 +728,8 @@ export class AgentChatView extends ItemView {
           // Opening a chat is a local act: the cache renders and the composer
           // is ready without any server round trip. The session connects when
           // the user actually sends a message. The one exception is a cached
-          // unfinished run — its owner already sent a message, so the session
-          // reconnects now to resume or settle that run.
+          // unfinished run — its owner already sent a message, so the client
+          // synchronizes now to resume or settle that run.
           if (recoverySnapshot) {
             await this.agent.hydrate(conversationId);
           }
@@ -1393,9 +1394,8 @@ export class AgentChatView extends ItemView {
 
   /**
    * Prepares a draft conversation entirely locally: identity and bootstrap
-   * payload only. A new chat never opens a server connection — the session
-   * connects when the user sends their first message, so an offline or slow
-   * server can never paint a fresh chat with reconnect or phantom-run state.
+   * payload only. A new chat sends no server request until the first message,
+   * so an offline or slow server cannot paint phantom run state in a draft.
    */
   private async prepareThinConversation(conversationId: string): Promise<void> {
     if (!this.plugin.settings.licenseKey?.trim()) return;

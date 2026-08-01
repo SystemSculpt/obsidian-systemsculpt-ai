@@ -11,7 +11,7 @@ function decodeDataUrl(url: string): string {
   return new TextDecoder().decode(bytes);
 }
 
-describe("first-party thin agent message adapter", () => {
+describe("thin-agent message adapter", () => {
   it("maps text files and images while rejecting empty or malformed input", () => {
     expect(() => toThinAgentUserMessage({
       role: "assistant",
@@ -106,8 +106,8 @@ describe("first-party thin agent message adapter", () => {
       }],
     };
 
-    const native = toThinAgentUserMessage(message);
-    const file = native.parts.find((part) => part.type === "file");
+    const wireMessage = toThinAgentUserMessage(message);
+    const file = wireMessage.parts.find((part) => part.type === "file");
     expect(file).toMatchObject({
       type: "file",
       filename: "report.pdf.extracted.md",
@@ -122,6 +122,6 @@ describe("first-party thin agent message adapter", () => {
       body: canary,
       unavailable: false,
     });
-    expect(JSON.parse(JSON.stringify(native))).toEqual(native);
+    expect(JSON.parse(JSON.stringify(wireMessage))).toEqual(wireMessage);
   });
 });

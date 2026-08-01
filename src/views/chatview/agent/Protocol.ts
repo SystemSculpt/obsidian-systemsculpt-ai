@@ -1,16 +1,11 @@
 import type { ThinAgentRunTerminalData } from "../../../services/managed/ThinAgentV1Contract";
 import { DEFAULT_THIN_AGENT_INPUT_LIMITS } from "../../../services/managed/ThinAgentInputLimits";
-import { isFirstPartyToolName } from "../../../tools/toolNames";
 
-export const FIRST_PARTY_THIN_AGENT_COMMAND_TYPE =
+export const THIN_AGENT_COMMAND_TYPE =
   "systemsculpt.agent.command.v1" as const;
-export const FIRST_PARTY_THIN_AGENT_EVENT_TYPE =
+export const THIN_AGENT_EVENT_TYPE =
   "systemsculpt.agent.event.v1" as const;
-export const FIRST_PARTY_THIN_AGENT_DIAGNOSTIC_TYPE =
-  "systemsculpt.client_diagnostic.v1" as const;
-
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/u;
-const CLIENT_INSTANCE_ID = /^client_[a-f0-9]{32}$/u;
 const CONVERSATION_ID = /^conversation_[a-f0-9]{32}$/u;
 const RUN_ID = /^run_[a-f0-9]{32}$/u;
 const INCIDENT_ID = /^incident_[a-f0-9]{32}$/u;
@@ -19,7 +14,6 @@ const TOOL_CALL_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,511}$/u;
 const TOOL_NAME = /^[A-Za-z][A-Za-z0-9_-]{0,127}$/u;
 const MEDIA_TYPE = /^[A-Za-z0-9][A-Za-z0-9!#$&^_.+/-]{0,126}$/u;
 const ERROR_CODE = /^[a-z][a-z0-9_]{0,63}$/u;
-const DIAGNOSTIC_CODE = /^[A-Za-z][A-Za-z0-9_.:-]{0,79}$/u;
 const MESSAGE_PART_TYPE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/u;
 const TEXT_FILE_MIME_TYPES = new Set([
   "application/json",
@@ -39,7 +33,7 @@ const MAX_JSON_DEPTH = 16;
 const MAX_JSON_NODES = 100_000;
 const MAX_JSON_COLLECTION_ENTRIES = 2_048;
 const MAX_SERVER_MESSAGE_PARTS = 2_048;
-const MAX_SESSION_MESSAGES = 256;
+const MAX_QUEUED_TURNS = 256;
 const INVALID_JSON_VALUE = Symbol("invalid-json-value");
 const runStateCanonicals = new WeakMap<object, string>();
 
@@ -70,7 +64,7 @@ export type AgentUserMessage = Readonly<{
 }>;
 
 type CommandBase = Readonly<{
-  type: typeof FIRST_PARTY_THIN_AGENT_COMMAND_TYPE;
+  type: typeof THIN_AGENT_COMMAND_TYPE;
   version: 1;
   request_id: string;
 }>;
@@ -120,40 +114,6 @@ export type AgentCommand =
   | AgentApprovalCommand
   | AgentCancelCommand;
 
-export type AgentDiagnosticPayload = Readonly<{
-  version: 1;
-  severity: "info" | "warn" | "error";
-  code: string;
-  phase:
-    | "start"
-    | "session"
-    | "response"
-    | "approval"
-    | "tool_execution"
-    | "mutation_journal"
-    | "persistence"
-    | "render"
-    | "unknown";
-  sequence?: number;
-  timestamp?: number;
-  conversation_id?: string;
-  request_id?: string;
-  client_instance_id?: string;
-  plugin_build_id?: string;
-  server_run_id?: string;
-  run_id?: string;
-  incident_id?: string;
-  tool_name?: string;
-  tool_call_id?: string;
-  status?: number;
-  retryable?: boolean;
-}>;
-
-export type AgentDiagnosticFrame = Readonly<{
-  type: typeof FIRST_PARTY_THIN_AGENT_DIAGNOSTIC_TYPE;
-  payload: AgentDiagnosticPayload;
-}>;
-
 export type AgentKnownRunState =
   | Readonly<{
       version: 1;
@@ -180,7 +140,7 @@ export type AgentRunState =
   | AgentUnknownRunState;
 
 type ServerEventBase = Readonly<{
-  type: typeof FIRST_PARTY_THIN_AGENT_EVENT_TYPE;
+  type: typeof THIN_AGENT_EVENT_TYPE;
   version: 1;
   conversation_id: string;
 }>;
@@ -206,6 +166,27 @@ export type AgentTerminalEvent = ServerEventBase & Readonly<{
   kind: "terminal";
   request_id: string;
   terminal: ThinAgentRunTerminalData;
+}>;
+
+export type AgentQueuedTurn =
+  | Readonly<{
+      kind: "submit";
+      request_id: string;
+      user_message: AgentUserMessage;
+    }>
+  | Readonly<{
+      kind: "regenerate";
+      request_id: string;
+      root_message_id: string;
+    }>;
+
+export type AgentQueueSnapshotEvent = ServerEventBase & Readonly<{
+  kind: "queue_snapshot";
+  queue: Readonly<{
+    version: 1;
+    cursor: number;
+    items: readonly AgentQueuedTurn[];
+  }>;
 }>;
 
 export type AgentCommandAckEvent = ServerEventBase & (
@@ -235,6 +216,7 @@ export type AgentServerEvent =
   | AgentAssistantSnapshotEvent
   | AgentRunStateEvent
   | AgentTerminalEvent
+  | AgentQueueSnapshotEvent
   | AgentCommandAckEvent
   | AgentUnknownEvent;
 
@@ -268,12 +250,6 @@ function hasExactKeys(
 
 function safeId(value: unknown): value is string {
   return typeof value === "string" && SAFE_ID.test(value);
-}
-
-function boundedDiagnosticIdentifier(value: unknown): value is string {
-  return safeId(value)
-    && !/^(?:data|file|https?|obsidian|wss?):/iu.test(value)
-    && !/^www\./iu.test(value);
 }
 
 function safeInteger(value: unknown): value is number {
@@ -630,7 +606,7 @@ function parseUserMessage(value: unknown): AgentUserMessage {
 
 function commandBase(value: Record<string, unknown>): void {
   if (
-    value.type !== FIRST_PARTY_THIN_AGENT_COMMAND_TYPE
+    value.type !== THIN_AGENT_COMMAND_TYPE
     || value.version !== 1
     || !safeId(value.request_id)
   ) return fail("invalid_command", "The client command identity is invalid.");
@@ -653,7 +629,7 @@ export function parseAgentCommand(
       typeof value.context_ref !== "string" || !CONTEXT_REF.test(value.context_ref)
     )) return fail("invalid_command", "The submit context reference is invalid.");
     return Object.freeze({
-      type: FIRST_PARTY_THIN_AGENT_COMMAND_TYPE,
+      type: THIN_AGENT_COMMAND_TYPE,
       version: 1,
       kind: "submit",
       request_id: value.request_id as string,
@@ -669,7 +645,7 @@ export function parseAgentCommand(
       || !safeId(value.root_message_id)
     ) return fail("invalid_command", "The regenerate command is invalid.");
     return Object.freeze({
-      type: FIRST_PARTY_THIN_AGENT_COMMAND_TYPE,
+      type: THIN_AGENT_COMMAND_TYPE,
       version: 1,
       kind: "regenerate",
       request_id: value.request_id as string,
@@ -691,7 +667,7 @@ export function parseAgentCommand(
         return fail("invalid_command", "A successful client tool result needs only output.");
       }
       return Object.freeze({
-        type: FIRST_PARTY_THIN_AGENT_COMMAND_TYPE,
+        type: THIN_AGENT_COMMAND_TYPE,
         version: 1,
         kind: "client_tool_result",
         request_id: value.request_id as string,
@@ -709,7 +685,7 @@ export function parseAgentCommand(
         || value.error_text.length > MAX_ERROR_TEXT_CHARS
       ) return fail("invalid_command", "A failed client tool result needs one bounded error.");
       return Object.freeze({
-        type: FIRST_PARTY_THIN_AGENT_COMMAND_TYPE,
+        type: THIN_AGENT_COMMAND_TYPE,
         version: 1,
         kind: "client_tool_result",
         request_id: value.request_id as string,
@@ -731,7 +707,7 @@ export function parseAgentCommand(
       || typeof value.approved !== "boolean"
     ) return fail("invalid_command", "The client tool approval is invalid.");
     return Object.freeze({
-      type: FIRST_PARTY_THIN_AGENT_COMMAND_TYPE,
+      type: THIN_AGENT_COMMAND_TYPE,
       version: 1,
       kind: "client_tool_approval",
       request_id: value.request_id as string,
@@ -744,79 +720,13 @@ export function parseAgentCommand(
       return fail("invalid_command", "The cancel command is invalid.");
     }
     return Object.freeze({
-      type: FIRST_PARTY_THIN_AGENT_COMMAND_TYPE,
+      type: THIN_AGENT_COMMAND_TYPE,
       version: 1,
       kind: "cancel",
       request_id: value.request_id as string,
     });
   }
   return fail("unsupported_command", "The client command kind is unsupported.");
-}
-
-export function parseAgentDiagnosticPayload(
-  value: unknown,
-): AgentDiagnosticPayload {
-  const required = ["version", "severity", "code", "phase"] as const;
-  const optional = [
-    "sequence", "timestamp", "conversation_id", "request_id",
-    "client_instance_id", "plugin_build_id", "server_run_id", "run_id",
-    "incident_id", "tool_name", "tool_call_id", "status", "retryable",
-  ] as const;
-  if (!isRecord(value) || !hasExactKeys(value, required, optional)) {
-    return fail("invalid_diagnostic", "The client diagnostic contains unsupported fields.");
-  }
-  const phases = new Set([
-    "start", "session", "response", "approval", "tool_execution",
-    "mutation_journal", "persistence", "render", "unknown",
-  ]);
-  const severities = new Set(["info", "warn", "error"]);
-  if (
-    value.version !== 1
-    || typeof value.severity !== "string"
-    || !severities.has(value.severity)
-    || typeof value.code !== "string"
-    || !DIAGNOSTIC_CODE.test(value.code)
-    || typeof value.phase !== "string"
-    || !phases.has(value.phase)
-    || (value.sequence !== undefined && !safeInteger(value.sequence))
-    || (value.timestamp !== undefined && !safeInteger(value.timestamp))
-    || (value.status !== undefined && (
-      typeof value.status !== "number"
-      || !Number.isInteger(value.status)
-      || value.status < 100
-      || value.status > 599
-    ))
-    || (value.retryable !== undefined && typeof value.retryable !== "boolean")
-    || (value.tool_name !== undefined && (
-      typeof value.tool_name !== "string" || !isFirstPartyToolName(value.tool_name)
-    ))
-  ) return fail("invalid_diagnostic", "The client diagnostic is invalid.");
-  if (
-    (value.conversation_id !== undefined && (
-      typeof value.conversation_id !== "string"
-      || !CONVERSATION_ID.test(value.conversation_id)
-    ))
-    || (value.client_instance_id !== undefined && (
-      typeof value.client_instance_id !== "string"
-      || !CLIENT_INSTANCE_ID.test(value.client_instance_id)
-    ))
-    || (value.server_run_id !== undefined && (
-      typeof value.server_run_id !== "string"
-      || !RUN_ID.test(value.server_run_id)
-    ))
-    || (value.incident_id !== undefined && (
-      typeof value.incident_id !== "string"
-      || !INCIDENT_ID.test(value.incident_id)
-    ))
-  ) return fail("invalid_diagnostic", "The client diagnostic identity is invalid.");
-  for (const field of [
-    "request_id", "plugin_build_id", "run_id", "tool_call_id",
-  ] as const) {
-    if (value[field] !== undefined && !boundedDiagnosticIdentifier(value[field])) {
-      return fail("invalid_diagnostic", "The client diagnostic identity is invalid.");
-    }
-  }
-  return Object.freeze({ ...value }) as AgentDiagnosticPayload;
 }
 
 export function parseAgentRunState(
@@ -878,19 +788,19 @@ function serverBase(
   value: Record<string, unknown>,
   expectedConversationId: string,
 ): Readonly<{
-  type: typeof FIRST_PARTY_THIN_AGENT_EVENT_TYPE;
+  type: typeof THIN_AGENT_EVENT_TYPE;
   version: 1;
   conversation_id: string;
 }> {
   if (
-    value.type !== FIRST_PARTY_THIN_AGENT_EVENT_TYPE
+    value.type !== THIN_AGENT_EVENT_TYPE
     || value.version !== 1
     || typeof value.conversation_id !== "string"
     || !CONVERSATION_ID.test(value.conversation_id)
     || value.conversation_id !== expectedConversationId
   ) return fail("invalid_server_event", "The authoritative server event identity is invalid.");
   return {
-    type: FIRST_PARTY_THIN_AGENT_EVENT_TYPE,
+    type: THIN_AGENT_EVENT_TYPE,
     version: 1,
     conversation_id: value.conversation_id,
   };
@@ -910,10 +820,9 @@ export function parseAgentServerEvent(
   }
   const base = serverBase(value, expectedConversationId);
   if (value.kind === "session_snapshot") {
-    if (
-      !Array.isArray(value.messages)
-      || value.messages.length > MAX_SESSION_MESSAGES
-    ) return fail("invalid_server_event", "The session snapshot is invalid.");
+    if (!Array.isArray(value.messages)) {
+      return fail("invalid_server_event", "The session snapshot is invalid.");
+    }
     return Object.freeze({
       ...base,
       kind: "session_snapshot",
@@ -948,6 +857,60 @@ export function parseAgentServerEvent(
       kind: "terminal",
       request_id: value.request_id,
       terminal: parseTerminal(value.terminal),
+    });
+  }
+  if (value.kind === "queue_snapshot") {
+    if (
+      !hasExactKeys(value, [
+        "type",
+        "version",
+        "kind",
+        "conversation_id",
+        "queue",
+      ])
+      || !isRecord(value.queue)
+      || !hasExactKeys(value.queue, ["version", "cursor", "items"])
+      || value.queue.version !== 1
+      || !safeInteger(value.queue.cursor)
+      || !Array.isArray(value.queue.items)
+      || value.queue.items.length > MAX_QUEUED_TURNS
+    ) return fail("invalid_server_event", "The queue snapshot is invalid.");
+    const items = value.queue.items.map((item): AgentQueuedTurn => {
+      if (!isRecord(item) || !safeId(item.request_id)) {
+        return fail("invalid_server_event", "The queued turn is invalid.");
+      }
+      if (item.kind === "submit" && hasExactKeys(item, [
+        "kind",
+        "request_id",
+        "user_message",
+      ])) {
+        return Object.freeze({
+          kind: "submit",
+          request_id: item.request_id,
+          user_message: parseUserMessage(item.user_message),
+        });
+      }
+      if (
+        item.kind === "regenerate"
+        && safeId(item.root_message_id)
+        && hasExactKeys(item, ["kind", "request_id", "root_message_id"])
+      ) {
+        return Object.freeze({
+          kind: "regenerate",
+          request_id: item.request_id,
+          root_message_id: item.root_message_id,
+        });
+      }
+      return fail("invalid_server_event", "The queued turn is invalid.");
+    });
+    return Object.freeze({
+      ...base,
+      kind: "queue_snapshot",
+      queue: Object.freeze({
+        version: 1,
+        cursor: value.queue.cursor,
+        items: Object.freeze(items),
+      }),
     });
   }
   if (value.kind === "command_ack") {

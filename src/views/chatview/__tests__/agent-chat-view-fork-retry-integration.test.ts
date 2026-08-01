@@ -5,13 +5,10 @@ import {
   AgentChatSession,
 } from "../agent/ChatSession";
 import {
-  FIRST_PARTY_THIN_AGENT_COMMAND_TYPE,
-  FIRST_PARTY_THIN_AGENT_EVENT_TYPE,
+  THIN_AGENT_COMMAND_TYPE,
+  THIN_AGENT_EVENT_TYPE,
   type AgentSubmitCommand,
 } from "../agent/Protocol";
-import type {
-  AgentWebSocket,
-} from "../agent/AgentSessionTransport";
 
 const SOURCE_CONVERSATION_ID = `conversation_${"1".repeat(32)}`;
 const CLIENT_ID = `client_${"2".repeat(32)}`;
@@ -79,7 +76,7 @@ function sessionSnapshot(
   messages: readonly unknown[],
 ) {
   return {
-    type: FIRST_PARTY_THIN_AGENT_EVENT_TYPE,
+    type: THIN_AGENT_EVENT_TYPE,
     version: 1,
     kind: "session_snapshot",
     conversation_id: conversationId,
@@ -108,7 +105,7 @@ async function eventually(assertion: () => void): Promise<void> {
  * Keeps serverMessage so the fork/retry sequences read unchanged, but delivers
  * frames on the turn request that provoked them.
  */
-class FakeWebSocket {
+class FakeStreamingServer {
   public readonly sent: unknown[] = [];
   /** Hydration blocks on the first snapshot the test provides. */
   private resolveSnapshot: ((value: unknown) => void) | null = null;
@@ -174,21 +171,21 @@ class FakeWebSocket {
   }
 }
 
-function submitCommands(socket: FakeWebSocket): AgentSubmitCommand[] {
-  return socket.sent.filter((value): value is AgentSubmitCommand => {
+function submitCommands(server: FakeStreamingServer): AgentSubmitCommand[] {
+  return server.sent.filter((value): value is AgentSubmitCommand => {
     if (value === null || typeof value !== "object") return false;
     const frame = value as Record<string, unknown>;
-    return frame.type === FIRST_PARTY_THIN_AGENT_COMMAND_TYPE
+    return frame.type === THIN_AGENT_COMMAND_TYPE
       && frame.kind === "submit";
   });
 }
 
 describe("AgentChatView historical Retry integration", () => {
-  it("does not reconcile an empty first-party fork before sending exactly one edited replacement", async () => {
+  it("does not reconcile an empty fork before sending exactly one edited replacement", async () => {
     const order: string[] = [];
     const bootstrapRequests: BootstrapRequest[] = [];
     const accessRequests = new Map<string, BootstrapRequest>();
-    const sockets: FakeWebSocket[] = [];
+    const servers: FakeStreamingServer[] = [];
     const reportedErrors: unknown[] = [];
     let durableMessages: ChatMessage[] = [];
     let durableConversationId: string | null = SOURCE_CONVERSATION_ID;
@@ -312,21 +309,21 @@ describe("AgentChatView historical Retry integration", () => {
           const token = url.searchParams.get("access_token") ?? "";
           const bootstrap = accessRequests.get(token);
           if (!bootstrap) throw new Error("Hydration used an unknown access token.");
-          const socket = new FakeWebSocket(
+          const server = new FakeStreamingServer(
             bootstrap.conversation_id as string,
             onCommand,
           );
-          sockets.push(socket);
-          return new Response(JSON.stringify(await socket.snapshot), { status: 200 });
+          servers.push(server);
+          return new Response(JSON.stringify(await server.snapshot), { status: 200 });
         }
         if (url.pathname.endsWith("/agent/turn")) {
           const token = url.searchParams.get("access_token") ?? "";
           const bootstrap = accessRequests.get(token);
-          const socket = sockets.find((candidate) =>
+          const server = servers.find((candidate) =>
             candidate.conversationId === bootstrap?.conversation_id);
-          socket?.observe(request.body);
-          return socket
-            ? socket.openTurn()
+          server?.observe(request.body);
+          return server
+            ? server.openTurn()
             : new Response("", { status: 200 });
         }
         throw new Error(`Unexpected request: ${request.method} ${url.pathname}`);
@@ -408,8 +405,8 @@ describe("AgentChatView historical Retry integration", () => {
 
     try {
       const sourceHydration = agent.hydrate(SOURCE_CONVERSATION_ID);
-      await eventually(() => expect(sockets).toHaveLength(1));
-      sockets[0].serverMessage(sessionSnapshot(
+      await eventually(() => expect(servers).toHaveLength(1));
+      servers[0].serverMessage(sessionSnapshot(
         SOURCE_CONVERSATION_ID,
         1,
         sourceHistory(),
@@ -428,18 +425,18 @@ describe("AgentChatView historical Retry integration", () => {
       const reconciliationsBeforeFork = transcript.reconcileServerHistory.mock.calls.length;
 
       const retry = (view as any).retryFailedTurn(ORIGINAL_USER_ID) as Promise<void>;
-      await eventually(() => expect(sockets).toHaveLength(2));
+      await eventually(() => expect(servers).toHaveLength(2));
 
       expect(transcript.commitUser).not.toHaveBeenCalled();
-      expect(submitCommands(sockets[1])).toHaveLength(0);
+      expect(submitCommands(servers[1])).toHaveLength(0);
       expect(workspace.setAgentSnapshot).toHaveBeenCalledWith(null);
 
       destinationSynchronized = true;
       order.push("fork-snapshot");
-      sockets[1].serverMessage(sessionSnapshot(sockets[1].conversationId, 1, []));
+      servers[1].serverMessage(sessionSnapshot(servers[1].conversationId, 1, []));
 
-      await eventually(() => expect(submitCommands(sockets[1])).toHaveLength(1));
-      const outbound = submitCommands(sockets[1]);
+      await eventually(() => expect(submitCommands(servers[1])).toHaveLength(1));
+      const outbound = submitCommands(servers[1]);
       const replacement = outbound[0];
       expect(replacement).toMatchObject({
         request_id: expect.not.stringMatching(/^user-original$/),
@@ -459,18 +456,18 @@ describe("AgentChatView historical Retry integration", () => {
       );
       expect(replacementProjectionWasCleanAtSend).toBe(true);
 
-      sockets[1].serverMessage({
-        type: FIRST_PARTY_THIN_AGENT_EVENT_TYPE,
+      servers[1].serverMessage({
+        type: THIN_AGENT_EVENT_TYPE,
         version: 1,
         kind: "run_state",
-        conversation_id: sockets[1].conversationId,
+        conversation_id: servers[1].conversationId,
         run_state: runningRunState(2, replacement.request_id, replacementUserId),
       });
-      sockets[1].serverMessage({
-        type: FIRST_PARTY_THIN_AGENT_EVENT_TYPE,
+      servers[1].serverMessage({
+        type: THIN_AGENT_EVENT_TYPE,
         version: 1,
         kind: "assistant_snapshot",
-        conversation_id: sockets[1].conversationId,
+        conversation_id: servers[1].conversationId,
         request_id: replacement.request_id,
         message: {
           id: REPLACEMENT_ASSISTANT_ID,
@@ -478,18 +475,18 @@ describe("AgentChatView historical Retry integration", () => {
           parts: [{ type: "text", text: "stable capacity proof" }],
         },
       });
-      sockets[1].serverMessage({
-        type: FIRST_PARTY_THIN_AGENT_EVENT_TYPE,
+      servers[1].serverMessage({
+        type: THIN_AGENT_EVENT_TYPE,
         version: 1,
         kind: "run_state",
-        conversation_id: sockets[1].conversationId,
+        conversation_id: servers[1].conversationId,
         run_state: idleRunState(3),
       });
-      sockets[1].serverMessage({
-        type: FIRST_PARTY_THIN_AGENT_EVENT_TYPE,
+      servers[1].serverMessage({
+        type: THIN_AGENT_EVENT_TYPE,
         version: 1,
         kind: "terminal",
-        conversation_id: sockets[1].conversationId,
+        conversation_id: servers[1].conversationId,
         request_id: replacement.request_id,
         terminal: {
           version: 1,
@@ -502,7 +499,7 @@ describe("AgentChatView historical Retry integration", () => {
       await retry;
 
       const forkBootstraps = bootstrapRequests.filter((entry) => entry.fork);
-      expect(forkBootstraps).toHaveLength(2);
+      expect(forkBootstraps).toHaveLength(1);
       expect(forkBootstraps[0]).toMatchObject({
         conversation_id: expect.stringMatching(/^conversation_[a-f0-9]{32}$/),
         fork: {
@@ -510,16 +507,12 @@ describe("AgentChatView historical Retry integration", () => {
           before_message_id: ORIGINAL_USER_ID,
         },
       });
-      expect(forkBootstraps[1]).toMatchObject({
-        conversation_id: forkBootstraps[0].conversation_id,
-        fork: forkBootstraps[0].fork,
-      });
       // Hydration is a request now, so the point is that each conversation
       // hydrates once and the fork never re-reads history on top of that.
       expect(requestClient.request.mock.calls.filter(([request]) =>
         new URL(request.url as string).pathname.endsWith("/get-messages")))
         .toHaveLength(2);
-      expect(sockets.flatMap(submitCommands)).toHaveLength(1);
+      expect(servers.flatMap(submitCommands)).toHaveLength(1);
 
       expect(order.indexOf("fork-snapshot")).toBeLessThan(order.indexOf("context"));
       expect(order.indexOf("context")).toBeLessThan(order.indexOf("commit"));

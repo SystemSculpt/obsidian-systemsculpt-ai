@@ -86,7 +86,7 @@ describe("built bundle (main.js)", () => {
     plugin.unload();
   });
 
-  it("ships only the first-party agent protocol without legacy SDK runtimes", () => {
+  it("ships only the thin-agent protocol without legacy SDK runtimes", () => {
     const code = readFileSync(BUNDLE_PATH, "utf8");
 
     expect(code).toContain("systemsculpt.agent.command.v1");

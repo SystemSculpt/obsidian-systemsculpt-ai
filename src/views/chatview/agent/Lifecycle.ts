@@ -23,6 +23,7 @@ export const THIN_AGENT_LIFECYCLE_CODES = [
   "historical_resubmit_failed",
   "conversation_reset",
   "run_started",
+  "run_stalled",
   "request_dispatch_started",
   "request_dispatch_returned",
   "request_dispatch_failed",
@@ -48,10 +49,8 @@ export const THIN_AGENT_LIFECYCLE_CODES = [
   "local_tool_completed_failed",
   "tool_result_sent_succeeded",
   "tool_result_sent_failed",
-  "response_resume_scheduled",
-  "response_resume_started",
-  "response_resume_completed",
-  "response_resume_failed",
+  "tool_result_acknowledged_succeeded",
+  "tool_result_acknowledged_failed",
   "response_result_received_succeeded",
   "response_result_received_cancelled",
   "response_result_received_failed",
@@ -112,29 +111,6 @@ export type AgentLifecycleRecord = Readonly<{
   status?: number;
   retryable?: boolean;
   incidentId?: string;
-}>;
-
-export type AgentLifecycleDiagnosticFrame = Readonly<{
-  type: "systemsculpt.client_diagnostic.v1";
-  payload: Readonly<{
-    version: 1;
-    severity: "info";
-    sequence: number;
-    timestamp: number;
-    code: AgentLifecycleCode;
-    phase: AgentLifecyclePhase;
-    conversation_id?: string;
-    request_id?: string;
-    client_instance_id?: string;
-    plugin_build_id?: string;
-    run_id?: string;
-    server_run_id?: string;
-    tool_name?: string;
-    tool_call_id?: string;
-    status?: number;
-    retryable?: boolean;
-    incident_id?: string;
-  }>;
 }>;
 
 const CODE_SET = new Set<string>(THIN_AGENT_LIFECYCLE_CODES);
@@ -234,32 +210,4 @@ export class AgentLifecycle {
     return record;
   }
 
-  public diagnosticFrame(
-    record: AgentLifecycleRecord,
-  ): AgentLifecycleDiagnosticFrame {
-    return Object.freeze({
-      type: "systemsculpt.client_diagnostic.v1",
-      payload: Object.freeze({
-        version: 1,
-        severity: "info",
-        sequence: record.sequence,
-        timestamp: record.timestamp,
-        code: record.code,
-        phase: record.phase,
-        ...(record.conversationId ? { conversation_id: record.conversationId } : {}),
-        ...(record.requestId ? { request_id: record.requestId } : {}),
-        ...(record.clientInstanceId
-          ? { client_instance_id: record.clientInstanceId }
-          : {}),
-        ...(record.pluginBuildId ? { plugin_build_id: record.pluginBuildId } : {}),
-        ...(record.runId ? { run_id: record.runId } : {}),
-        ...(record.serverRunId ? { server_run_id: record.serverRunId } : {}),
-        ...(record.toolName ? { tool_name: record.toolName } : {}),
-        ...(record.toolCallId ? { tool_call_id: record.toolCallId } : {}),
-        ...(record.status === undefined ? {} : { status: record.status }),
-        ...(record.retryable === undefined ? {} : { retryable: record.retryable }),
-        ...(record.incidentId ? { incident_id: record.incidentId } : {}),
-      }),
-    });
-  }
 }

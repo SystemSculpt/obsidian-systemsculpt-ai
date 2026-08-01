@@ -50,8 +50,8 @@
   "recovery": {
     "drop_approval_round": 14,
     "drop_result_round": 23,
-    "expect_fresh_bootstrap_per_connection": true,
-    "expect_snapshot_first_per_connection": true
+    "expect_reused_bootstrap_during_validity": true,
+    "expect_snapshot_first_per_synchronization": true
   },
   "mutation_replay": {
     "tool_call_id": "tool_round_14_01",
@@ -66,8 +66,8 @@
     "tool_result_send_attempts": 45,
     "successful_tool_approval_commands": 1,
     "tool_approval_send_attempts": 2,
-    "connection_count": 3,
     "mutation_executions": 1,
-    "hard_client_continuation_limit": null
+    "hard_client_continuation_limit": null,
+    "synchronization_count": 3
   }
 }

@@ -29,9 +29,19 @@ const fixture = JSON.parse(fixtureBytes.toString("utf8"));
 describe("thin-agent-v1 application contract", () => {
   it("keeps the canonical cross-repository fixture byte-identical", () => {
     expect(createHash("sha256").update(fixtureBytes).digest("hex"))
-      .toBe("6057f59a1d10583656fd55f6ea5cad1434b51ded3a680e5e4343f9bd0dec78aa");
+      .toBe("d07636678261e6b9012aade13a2d2683c0e0a0dc681141596f88ef7d98ccba22");
     expect(fixtureBytes.toString("utf8"))
-      .not.toMatch(/\b(?:connection|ticket|websocket)\b/i);
+      .not.toMatch(/\b(?:connection|ticket|websocket|native)\b/i);
+    expect(fixture.endpoints).toMatchObject({
+      messages: { method: "GET", path: "/api/plugin/agent/connect/get-messages" },
+      turn: { method: "POST", path: "/api/plugin/agent/turn" },
+    });
+    expect(fixture.transport_semantics).toMatchObject({
+      snapshot_first: true,
+      turn_submission: "streaming_http_post",
+      per_request_response_scope: true,
+      queued_cancel_replay: "durable_acknowledgement",
+    });
   });
 
   it("canonicalizes capability ordering and verifies the fixture hash", () => {

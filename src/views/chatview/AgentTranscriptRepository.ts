@@ -366,7 +366,7 @@ export class AgentTranscriptRepository {
         }
         return message;
       });
-      // The first-party session derives assistant part/tool timestamps from the
+      // The agent session derives assistant part/tool timestamps from the
       // local observation clock. They preserve ordering but are not a server
       // history revision, so a reconnect must not rewrite an otherwise
       // identical transcript. Array order and every other field remain part

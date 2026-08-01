@@ -4,7 +4,7 @@ import {
 } from "../Lifecycle";
 
 describe("AgentLifecycle privacy-safe chronology", () => {
-  it("records one ordered, bounded, exact diagnostic chronology", () => {
+  it("records one ordered and bounded local chronology", () => {
     const persisted: unknown[] = [];
     let now = 1_000;
     const lifecycle = new AgentLifecycle(
@@ -41,25 +41,16 @@ describe("AgentLifecycle privacy-safe chronology", () => {
       expect.objectContaining({ sequence: 2, timestamp: 1_001, code: "local_tool_started" }),
       expect.objectContaining({ sequence: 3, timestamp: 1_002, code: "run_finished_completed" }),
     ]);
-    expect(lifecycle.diagnosticFrame(second!)).toEqual({
-      type: "systemsculpt.client_diagnostic.v1",
-      payload: {
-        version: 1,
-        severity: "info",
-        sequence: 2,
-        timestamp: 1_001,
-        code: "local_tool_started",
-        phase: "tool_execution",
-        conversation_id: "conversation_0123456789abcdef0123456789abcdef",
-        request_id: "request_0123456789abcdef",
-        client_instance_id: "client_0123456789abcdef0123456789abcdef",
-        plugin_build_id: "07bd9378-dirty-20260731T120000000Z",
-        run_id: "run-local-0123456789abcdef",
-        server_run_id: "run_0123456789abcdef0123456789abcdef",
-        tool_name: "read",
-        tool_call_id: "call_0123456789abcdef",
-        incident_id: "incident_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      },
+    expect(second).toMatchObject({
+      sequence: 2,
+      timestamp: 1_001,
+      code: "local_tool_started",
+      phase: "tool_execution",
+      conversationId: "conversation_0123456789abcdef0123456789abcdef",
+      requestId: "request_0123456789abcdef",
+      clientInstanceId: "client_0123456789abcdef0123456789abcdef",
+      toolName: "read",
+      toolCallId: "call_0123456789abcdef",
     });
     expect(first).not.toBeNull();
     expect(third).not.toBeNull();
@@ -111,7 +102,7 @@ describe("AgentLifecycle privacy-safe chronology", () => {
       output: { private: true },
       license: "license-secret",
       ticket: "ticket-secret",
-      reason: "socket reason",
+      reason: "transport reason",
       incidentId: "incident_not-safe",
       nested: { private: true },
     } as unknown as AgentLifecycleInput;
@@ -126,7 +117,6 @@ describe("AgentLifecycle privacy-safe chronology", () => {
       retryable: true,
     });
     const serializedRecord = JSON.stringify(persisted);
-    const serializedFrame = JSON.stringify(lifecycle.diagnosticFrame(record!));
     for (const forbidden of [
       "private prompt",
       "private content",
@@ -136,25 +126,11 @@ describe("AgentLifecycle privacy-safe chronology", () => {
       "raw provider failure",
       "license-secret",
       "ticket-secret",
-      "socket reason",
+      "transport reason",
       "nested",
     ]) {
       expect(serializedRecord).not.toContain(forbidden);
-      expect(serializedFrame).not.toContain(forbidden);
     }
-    expect(lifecycle.diagnosticFrame(record!)).toEqual({
-      type: "systemsculpt.client_diagnostic.v1",
-      payload: {
-        version: 1,
-        severity: "info",
-        sequence: 1,
-        timestamp: 100,
-        code: "context_prepare_failed",
-        phase: "start",
-        status: 503,
-        retryable: true,
-      },
-    });
   });
 
   it.each([
