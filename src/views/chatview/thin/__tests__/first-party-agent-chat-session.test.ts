@@ -647,6 +647,76 @@ describe("FirstPartyAgentChatSession", () => {
     await expect(run).resolves.toMatchObject({ kind: "completed" });
   });
 
+  it("serializes a tool result full of legal-JS-but-not-JSON values instead of failing delivery", async () => {
+    // Local tool implementations return idiomatic JavaScript: optional fields
+    // set to undefined (every folder listing does this), NaN durations, Dates,
+    // even accidental cycles. The delivery boundary must mirror JSON.stringify
+    // semantics instead of erroring the whole tool call.
+    const cyclic: Record<string, unknown> = { name: "cycle" };
+    cyclic.self = cyclic;
+    const harness = trackedHarness({
+      executeLocalTool: async () => ({
+        success: true,
+        data: {
+          modified: undefined,
+          files: [{ path: "A.md", created: undefined }, undefined],
+          duration: Number.NaN,
+          ratio: Number.POSITIVE_INFINITY,
+          when: new Date(1_700_000_000_000),
+          onDone: () => "not serializable",
+          poison: { toJSON() { throw new Error("hostile toJSON"); } },
+          cycle: cyclic,
+          negativeZero: -0,
+        },
+      }),
+    });
+    const socket = await harness.open();
+    const turnId = "user_hostile_result";
+    const run = harness.agent.start({
+      conversationId: CONVERSATION_ID,
+      turnId,
+      message: userMessage(turnId, "List the folder"),
+    });
+    await waitFor(() => harness.commands(socket).some((command) =>
+      command.kind === "submit"));
+    socket.serverMessage(sessionSnapshot(
+      [wireUser(turnId, "List the folder")],
+      active(1, turnId, turnId, "waiting_for_client"),
+    ));
+    socket.serverMessage(assistantSnapshot(turnId, wireAssistant("assistant_hostile_result", [
+      clientToolRequest("call_hostile", "read", { paths: ["QA"] }),
+      {
+        type: "tool-read",
+        toolCallId: "call_hostile",
+        state: "input-available",
+        input: { paths: ["QA"] },
+      },
+    ])));
+
+    await waitFor(() => harness.commands(socket).some((command) =>
+      command.kind === "client_tool_result"));
+    const command = harness.commands(socket).find((candidate) =>
+      candidate.kind === "client_tool_result");
+    expect(command).toMatchObject({
+      tool_call_id: "call_hostile",
+      state: "output-available",
+    });
+    expect(command!.output).toStrictEqual({
+      success: true,
+      data: {
+        files: [{ path: "A.md" }, null],
+        duration: null,
+        ratio: null,
+        when: "2023-11-14T22:13:20.000Z",
+        cycle: { name: "cycle" },
+        negativeZero: 0,
+      },
+    });
+
+    socket.serverMessage(succeededTerminal(turnId, turnId));
+    await expect(run).resolves.toMatchObject({ kind: "completed" });
+  });
+
   it("escalates to an honest connection-interrupted status when reconnection stalls mid-run", async () => {
     let releaseReconnectBootstrap!: (value: Response) => void;
     const request = jest.fn<Promise<Response>, [PlatformRequestInput]>()

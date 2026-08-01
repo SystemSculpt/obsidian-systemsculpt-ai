@@ -861,17 +861,66 @@ function projectRun(
   });
 }
 
+// Must not exceed the protocol codec's MAX_JSON_DEPTH: content beyond the
+// protocol bound drops here so a deep result degrades instead of failing the
+// whole client_tool_result command at encode time.
+const TOOL_JSON_MAX_DEPTH = 16;
+const OMITTED_JSON_VALUE = Symbol("systemsculpt-omitted-json-value");
+
+/**
+ * Tool results are arbitrary JavaScript values produced by local tool
+ * implementations, so this boundary must mirror JSON.stringify semantics
+ * rather than throw: an undefined optional field, a NaN, a Date, a function,
+ * or a cycle anywhere in a result must never fail the whole tool delivery.
+ * Undefined, functions, symbols, bigints, and cyclic references drop from
+ * records and become null in arrays; non-finite numbers become null; toJSON
+ * is honored.
+ */
 function toJsonValue(value: unknown): FirstPartyThinAgentJsonValue {
+  const cloned = jsonSafeClone(value, new WeakSet(), 0, false);
+  return cloned === OMITTED_JSON_VALUE ? null : cloned;
+}
+
+function jsonSafeClone(
+  value: unknown,
+  ancestors: WeakSet<object>,
+  depth: number,
+  skipToJson: boolean,
+): FirstPartyThinAgentJsonValue | typeof OMITTED_JSON_VALUE {
   if (value === null || typeof value === "boolean" || typeof value === "string") return value;
   if (typeof value === "number") {
-    if (!Number.isFinite(value)) throw new TypeError("A tool result contains an invalid number.");
+    if (!Number.isFinite(value)) return null;
     return Object.is(value, -0) ? 0 : value;
   }
-  if (Array.isArray(value)) return Object.freeze(value.map(toJsonValue));
-  if (!isRecord(value)) throw new TypeError("A tool result is not JSON serializable.");
-  return Object.freeze(Object.fromEntries(
-    Object.entries(value).map(([key, entry]) => [key, toJsonValue(entry)]),
-  ));
+  if (typeof value !== "object") return OMITTED_JSON_VALUE;
+  if (ancestors.has(value) || depth >= TOOL_JSON_MAX_DEPTH) return OMITTED_JSON_VALUE;
+  if (!skipToJson) {
+    const toJson = (value as { toJSON?: unknown }).toJSON;
+    if (typeof toJson === "function") {
+      try {
+        return jsonSafeClone(toJson.call(value), ancestors, depth, true);
+      } catch {
+        return OMITTED_JSON_VALUE;
+      }
+    }
+  }
+  ancestors.add(value);
+  try {
+    if (Array.isArray(value)) {
+      return Object.freeze(value.map((entry) => {
+        const cloned = jsonSafeClone(entry, ancestors, depth + 1, false);
+        return cloned === OMITTED_JSON_VALUE ? null : cloned;
+      }));
+    }
+    const output: Record<string, FirstPartyThinAgentJsonValue> = {};
+    for (const [key, entry] of Object.entries(value)) {
+      const cloned = jsonSafeClone(entry, ancestors, depth + 1, false);
+      if (cloned !== OMITTED_JSON_VALUE) output[key] = cloned;
+    }
+    return Object.freeze(output);
+  } finally {
+    ancestors.delete(value);
+  }
 }
 
 function textFromDataUrl(url: string): string {
@@ -2177,7 +2226,9 @@ export class FirstPartyAgentChatSession {
             toolName: call.name,
             toolCallId: call.callId,
           });
-          result = await this.options.executeLocalTool(call, active.abort.signal);
+          result = outputAsToolResult(
+            toJsonValue(await this.options.executeLocalTool(call, active.abort.signal)),
+          );
           try {
             await this.options.mutationJournal.complete(
               active.conversationId,
@@ -2206,7 +2257,9 @@ export class FirstPartyAgentChatSession {
           }
         }
       } else {
-        result = await this.options.executeLocalTool(call, active.abort.signal);
+        result = outputAsToolResult(
+          toJsonValue(await this.options.executeLocalTool(call, active.abort.signal)),
+        );
       }
       this.recordLifecycle({
         code: result.success

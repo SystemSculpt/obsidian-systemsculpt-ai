@@ -592,7 +592,7 @@ export class SystemSculptService {
             ? executionCode
             : "TOOL_EXECUTION_FAILED",
           message: error instanceof Error ? error.message : `Tool execution failed for ${functionName}.`,
-          details: error,
+          details: error instanceof Error ? error.message : String(error),
         },
       };
     }
